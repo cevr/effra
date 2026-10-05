@@ -1,0 +1,33 @@
+effect fn worker() -> () uses {Clock} {
+    run Clock.sleep(10000)
+}
+
+effect fn scopedRead() -> string throws {IoError} uses {Files, Runtime, Console} {
+    scope {
+        let file = run Files.openRead("examples/fixture.txt")
+        let state = run Runtime.inspect()
+        run Console.log(state)
+        run Files.readText(file)
+    }
+}
+
+effect fn program() -> () throws {IoError} uses {Clock, Files, Runtime, Console, Env} {
+    scope {
+        let child = fork worker()
+        run child.interrupt()
+        let text = run scopedRead()
+        run Console.log(text)
+        let outcome = run worker().timeout(1).catch<Timeout>(())
+        let home = run Env.get("EFFRA_DEMO_LABEL")
+        run Console.log("label: " + home)
+    }
+}
+
+effect fn main() -> () throws {IoError} {
+    run program()
+        .provide<Clock>(LiveClock)
+        .provide<Files>(LiveFiles)
+        .provide<Runtime>(RuntimeLive)
+        .provide<Console>(Stdout)
+        .provide<Env>(LiveEnv)
+}

@@ -4,6 +4,7 @@ package effra
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -21,7 +22,17 @@ type Reason struct {
 }
 type Cause []Reason
 
-func (c Cause) Error() string { return fmt.Sprint([]Reason(c)) }
+func (c Cause) Error() string {
+	parts := []string{}
+	for _, r := range c {
+		if r.Failure != nil {
+			parts = append(parts, r.Failure.Tag)
+		} else {
+			parts = append(parts, fmt.Sprintf("%s: %v", r.Kind, r.Err))
+		}
+	}
+	return strings.Join(parts, "; ")
+}
 func (c Cause) OnlyInterrupts() bool {
 	if len(c) == 0 {
 		return false
@@ -106,7 +117,11 @@ func Invoke[A any](f *FiberContext, program Effect[A]) (exit Exit[A]) {
 	if err := f.Checkpoint(); err != nil {
 		return Interrupt[A](err)
 	}
-	return program(f)
+	exit = program(f)
+	if err := f.Checkpoint(); err != nil && !exit.IsFailure() {
+		return Interrupt[A](err)
+	}
+	return exit
 }
 func runScope[A any](scope *Scope, program Effect[A]) Exit[A] {
 	fc := &FiberContext{scope.ctx, scope}
@@ -130,7 +145,7 @@ func Catch[A any](program Effect[A], tag string, fallback func() A) Effect[A] {
 }
 func Sleep(milliseconds int64) Effect[Unit] {
 	return func(fc *FiberContext) Exit[Unit] {
-		if milliseconds < 0 || milliseconds > int64((1<<63-1)/int64(time.Millisecond)) {
+		if milliseconds < 0 || milliseconds > 2147483647 {
 			return Die[Unit](fmt.Errorf("invalid millisecond duration"))
 		}
 		timer := time.NewTimer(time.Duration(milliseconds) * time.Millisecond)
@@ -145,7 +160,7 @@ func Sleep(milliseconds int64) Effect[Unit] {
 }
 func Timeout[A any](program Effect[A], milliseconds int64) Effect[A] {
 	return func(fc *FiberContext) Exit[A] {
-		if milliseconds < 0 || milliseconds > int64((1<<63-1)/int64(time.Millisecond)) {
+		if milliseconds < 0 || milliseconds > 2147483647 {
 			return Die[A](fmt.Errorf("invalid millisecond duration"))
 		}
 		ctx, cancel := context.WithTimeout(fc.ctx, time.Duration(milliseconds)*time.Millisecond)

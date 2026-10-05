@@ -16,6 +16,12 @@ invalid = json.loads(run("check", "examples/missing-service.ef", success=False).
 assert any(d["code"] == "EF108" for d in invalid["diagnostics"])
 assert run("run", "examples/main.ef").stdout == "Hello, Ada\nUnknown user\n"
 assert run("run", "examples/main.ef", "--target", "js").stdout == "Hello, Ada\nUnknown user\n"
+life = run("run", "examples/lifecycle.ef").stdout
+snapshot = json.loads(life.splitlines()[0])
+assert snapshot["state"] == "Open" and snapshot["resourceCount"] == 1
+assert "scoped file read complete" in life and "label: " in life
+js_life = json.loads(run("check", "examples/lifecycle.ef", "--target", "js", success=False).stdout)
+assert any(d["code"] == "EF110" for d in js_life["diagnostics"])
 native_path=run("build", "examples/main.ef").stdout.strip()
 native=subprocess.run([str(root/native_path)], text=True, capture_output=True, cwd="/")
 assert native.returncode==0 and native.stdout=="Hello, Ada\nUnknown user\n", native.stderr

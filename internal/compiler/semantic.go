@@ -115,10 +115,18 @@ func (c *checker) diagnostic(code, message string, span Span) {
 	c.result.Diagnostics = append(c.result.Diagnostics, Diagnostic{code, message, span})
 }
 func (c *checker) check() {
-	console := &Service{Name: "Console", Methods: []*Function{{Name: "log", Params: []Param{{Name: "message", Type: "string"}}, Return: "()", Effect: true}}}
-	c.services["Console"] = console
-	c.providers["Stdout"] = &Provider{Name: "Stdout", Service: "Console"}
-	names := map[string]bool{"Console": true, "Stdout": true}
+	names := map[string]bool{}
+	for _, s := range builtins() {
+		c.services[s.Name] = s
+		names[s.Name] = true
+	}
+	for _, p := range builtinProviders() {
+		c.providers[p.Name] = p
+		names[p.Name] = true
+	}
+	for _, name := range builtinErrors() {
+		names[name] = true
+	}
 	claim := func(name string, span Span) {
 		if names[name] {
 			c.diagnostic("EF101", "duplicate declaration "+name, span)
@@ -132,6 +140,9 @@ func (c *checker) check() {
 	slices.Sort(errors)
 	for _, name := range errors {
 		claim(name, c.program.Errors[name])
+	}
+	for _, name := range builtinErrors() {
+		c.program.Errors[name] = Span{}
 	}
 	for _, s := range c.program.Services {
 		claim(s.Name, s.Span)
@@ -211,8 +222,8 @@ func (c *checker) check() {
 }
 func (c *checker) signature(f *Function) {
 	valid := func(t string, span Span) {
-		if t != "string" && t != "bool" && t != "()" {
-			c.diagnostic("EF102", "unsupported value type "+t+"; prototype supports string, bool, ()", span)
+		if t != "string" && t != "bool" && t != "()" && t != "i64" && t != "File" && t != "bytes" {
+			c.diagnostic("EF102", "unsupported value type "+t+"; prototype supports string, bool, i64, bytes, File, ()", span)
 		}
 	}
 	valid(f.Return, f.Span)
@@ -328,7 +339,7 @@ func executed(e *Expr, errors bool) []string {
 		}
 		return t.Services
 	}
-	if e.Kind == "run" || e.Kind == "if" {
+	if e.Kind == "run" || e.Kind == "if" || e.Kind == "scope" || e.Kind == "fork" {
 		return row(e.Type)
 	}
 	out := union(executed(e.Left, errors), executed(e.Right, errors))
@@ -340,6 +351,8 @@ func executed(e *Expr, errors bool) []string {
 func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueType {
 	t := value("invalid")
 	switch e.Kind {
+	case "integer":
+		t = value("i64")
 	case "string":
 		t = value("string")
 	case "bool":
@@ -352,11 +365,18 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			e.Text = "local"
 		} else if p, exists := c.providers[e.Name]; exists {
 			t = value("provider:" + p.Service)
+			if p.Service == "Files" || p.Service == "Runtime" || p.Service == "Foreign" {
+				c.requireGo(e.Span, "native provider "+p.Service)
+			}
 			e.Text = "provider"
 		} else {
 			c.diagnostic("EF102", "unknown value "+e.Name, e.Span)
 		}
 	case "call":
+		if c.fiberCall(e, env, inEffect) {
+			t = e.Type
+			break
+		}
 		var f *Function
 		if e.Left.Kind == "name" {
 			f = c.functions[e.Left.Name]
@@ -366,6 +386,9 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			}
 		} else if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
 			key := e.Left.Left.Name
+			if key == "Files" || key == "Runtime" {
+				c.requireGo(e.Span, "native service "+key)
+			}
 			if _, shadow := env[key]; shadow {
 				c.diagnostic("EF103", "a local shadows service "+key, e.Span)
 			} else if s := c.services[key]; s != nil {
@@ -397,6 +420,32 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 				c.diagnostic("EF106", "argument must be "+f.Params[i].Type, a.Span)
 			}
 		}
+	case "scope":
+		c.requireGo(e.Span, "scopes")
+		if !inEffect {
+			c.diagnostic("EF105", "scope requires an effect function", e.Span)
+		}
+		t = c.block(e.Then, clone(env), inEffect)
+	case "fork":
+		c.requireGo(e.Span, "owned fibers")
+		inner := c.expr(e.Left, env, inEffect)
+		if !inEffect || !inner.Effect {
+			c.diagnostic("EF105", "fork requires an Effect inside an effect function", e.Span)
+		}
+		t = inner
+		t.Success = "Fiber:" + inner.Success
+		t.Effect = false
+		t.Errors = union(t.Errors, executed(e.Left, true))
+		t.Services = union(t.Services, executed(e.Left, false))
+		c.reasons = append(c.reasons, Contribution{"owned-child", inner.Errors, e.Span})
+	case "timeout":
+		c.requireGo(e.Span, "managed timeout")
+		t = c.expr(e.Left, env, inEffect)
+		duration := c.expr(e.Right, env, inEffect)
+		if !t.Effect || duration.Effect || duration.Success != "i64" {
+			c.diagnostic("EF106", "timeout requires an Effect and an i64 millisecond duration", e.Span)
+		}
+		t.Errors = union(t.Errors, []string{"Timeout"})
 	case "run":
 		inner := c.expr(e.Left, env, inEffect)
 		if !inEffect {
@@ -445,7 +494,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		t.Errors = remove(t.Errors, e.Name)
 	case "binary":
 		left, right := c.expr(e.Left, env, inEffect), c.expr(e.Right, env, inEffect)
-		if left.Effect || right.Effect || left.Success != right.Success || (left.Success != "string" && left.Success != "bool") || (e.Name == "+" && left.Success != "string") {
+		if left.Effect || right.Effect || left.Success != right.Success || (left.Success != "string" && left.Success != "bool" && left.Success != "i64") || (e.Name == "+" && left.Success != "string") {
 			c.diagnostic("EF106", "operator requires matching primitive values; + accepts strings", e.Span)
 		}
 		t = value(left.Success)
@@ -503,4 +552,40 @@ func (r *Result) Entry() error {
 		return fmt.Errorf("main has unprovided services: %s", strings.Join(main.Contract.Services, ", "))
 	}
 	return nil
+}
+
+func (c *checker) fiberCall(e *Expr, env map[string]ValueType, inEffect bool) bool {
+	if e.Left.Kind != "member" || e.Left.Left.Kind != "name" {
+		return false
+	}
+	inner, exists := env[e.Left.Left.Name]
+	if !exists || !strings.HasPrefix(inner.Success, "Fiber:") {
+		return false
+	}
+	if len(e.Args) != 0 {
+		c.diagnostic("EF106", "fiber operations take no arguments", e.Span)
+	}
+	t := value(strings.TrimPrefix(inner.Success, "Fiber:"))
+	t.Effect = true
+	t.Errors = inner.Errors
+	switch e.Left.Name {
+	case "join":
+	case "interrupt":
+		t.Success = "()"
+	case "cancel":
+		t.Success = "()"
+		t.Errors = []string{}
+	default:
+		c.diagnostic("EF102", "unknown fiber operation "+e.Left.Name, e.Span)
+	}
+	e.Text = "fiber"
+	e.Type = t
+	return true
+}
+
+func (c *checker) requireGo(span Span, feature string) {
+	c.program.GoOnly = true
+	if c.result.Target != "go" {
+		c.diagnostic("EF110", feature+" is currently implemented only for Go", span)
+	}
 }

@@ -170,19 +170,36 @@ func AcquireRelease[A any](name string, acquire func(context.Context) (A, error)
 
 // Snapshot describes runtime-owned state, not arbitrary Go goroutines or payloads.
 type Snapshot struct {
-	ID           uint64   `json:"id"`
-	State        string   `json:"state"`
-	Children     int      `json:"children"`
-	Resources    []string `json:"resources"`
-	Acquisitions int      `json:"acquisitions"`
+	ID                    uint64          `json:"id"`
+	State                 string          `json:"state"`
+	Children              int             `json:"children"`
+	Resources             []string        `json:"resources"`
+	Acquisitions          int             `json:"acquisitions"`
+	CancellationRequested bool            `json:"cancellationRequested"`
+	ResourceCount         int             `json:"resourceCount"`
+	ChildStates           []FiberSnapshot `json:"childStates"`
+	Truncated             bool            `json:"truncated"`
 }
 
 func (s *Scope) Snapshot() Snapshot {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	names := []string{}
 	for _, r := range s.resources {
+		if len(names) == 100 {
+			break
+		}
 		names = append(names, r.name)
 	}
-	return Snapshot{s.id, string(s.state), len(s.children), names, s.acquisitions}
+	count := len(s.children)
+	limit := min(count, 100)
+	children := append([]ownedFiber{}, s.children[:limit]...)
+	out := Snapshot{ID: s.id, State: string(s.state), Children: count, Resources: names,
+		Acquisitions: s.acquisitions, CancellationRequested: s.ctx.Err() != nil,
+		ResourceCount: len(s.resources), Truncated: count > 100 || len(s.resources) > 100,
+		ChildStates: []FiberSnapshot{}}
+	s.mu.Unlock()
+	for _, child := range children {
+		out.ChildStates = append(out.ChildStates, child.snapshot())
+	}
+	return out
 }

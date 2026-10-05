@@ -183,6 +183,9 @@ func buildGo(r *compiler.Result, source, output string) (string, error) {
 	if err = writeChanged(filepath.Join("dist", "go", "go.mod"), []byte("module effra.generated\n\ngo 1.27\n")); err != nil {
 		return "", err
 	}
+	if err = compiler.WriteRuntime(filepath.Join("dist", "go")); err != nil {
+		return "", err
+	}
 	generated := filepath.Join(dir, "main.go")
 	if err = writeChanged(generated, []byte(code)); err != nil {
 		return "", err
@@ -198,7 +201,8 @@ func buildGo(r *compiler.Result, source, output string) (string, error) {
 		return "", err
 	}
 	// Generated programs use only the Go standard library; the resulting executable is standalone.
-	child := exec.Command("go", "build", "-trimpath", "-o", absolute, generated)
+	child := exec.Command("go", "build", "-trimpath", "-o", absolute, ".")
+	child.Dir = dir
 	child.Stdout = os.Stderr
 	child.Stderr = os.Stderr
 	if err = child.Run(); err != nil {

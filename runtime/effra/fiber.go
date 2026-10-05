@@ -8,7 +8,30 @@ import (
 type ownedFiber interface {
 	requestCancel()
 	closeResult() Cause
+	snapshot() FiberSnapshot
 }
+
+type FiberSnapshot struct {
+	ScopeID               uint64 `json:"scopeId"`
+	State                 string `json:"state"`
+	CancellationRequested bool   `json:"cancellationRequested"`
+	Observed              bool   `json:"observed"`
+}
+
+func (f *Fiber[A]) snapshot() FiberSnapshot {
+	cancelled := f.scope.ctx.Err() != nil
+	state := "Running"
+	if cancelled {
+		state = "Cancelling"
+	}
+	select {
+	case <-f.done:
+		state = "Done"
+	default:
+	}
+	return FiberSnapshot{f.scope.id, state, cancelled, f.observed.Load()}
+}
+
 type Fiber[A any] struct {
 	owner    *Scope
 	scope    *Scope

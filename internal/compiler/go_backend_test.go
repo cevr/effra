@@ -48,40 +48,50 @@ func TestGoBackendConformance(t *testing.T) {
 		t.Fatal("nondeterministic Go emission")
 	}
 	dir := t.TempDir()
+	if err = WriteRuntime(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	program := filepath.Join(dir, "main.go")
 	probe := filepath.Join(dir, "main_test.go")
 	if err = os.WriteFile(program, []byte(source), 0644); err != nil {
 		t.Fatal(err)
 	}
 	assertions := `package main
-import "testing"
+import("testing";er "effra.generated/runtime")
+
 func TestGeneratedSemantics(t *testing.T) {
+ er.Run(func(fc *er.FiberContext)er.Exit[struct{}]{
  calls:=0
- ctx:=efContext{s_Users:&efService_Users{m_get:func(id string) efEffect[string] {
-  return func(ctx efContext) efExit[string] {calls++; return efExit[string]{value:"Ada"}}
+ ctx:=efContext{Runtime:fc,s_Users:&efService_Users{m_get:func(id string) efEffect[string] {
+  return func(ctx efContext) efExit[string] {calls++; return efExit[string]{Value:"Ada"}}
  }}}
  pending:=efFunction_greeting("42")
  if calls!=0 {t.Fatal("eager construction")}
  first,second:=pending(ctx),pending(ctx)
- if calls!=2 || first.value!="Hi Ada" || second.value!="Hi Ada" {t.Fatal("laziness/replay broken")}
- if efFunction_recovered("missing")(efContext{}).value!="unknown" {t.Fatal("recovery broken")}
- other:=efFunction_recovered("broken")(efContext{})
- if other.failure==nil || other.failure.tag!="Broken" || other.defect!=nil {t.Fatal("selective recovery swallowed a different failure")}
- missing:=pending(efContext{})
- if missing.defect==nil || missing.failure!=nil {t.Fatal("missing provider is not a typed failure")}
+ if calls!=2 || first.Value!="Hi Ada" || second.Value!="Hi Ada" {t.Fatal("laziness/replay broken")}
+ if efFunction_recovered("missing")(efContext{Runtime:fc}).Value!="unknown" {t.Fatal("recovery broken")}
+ other:=efFunction_recovered("broken")(efContext{Runtime:fc})
+ if other.Failure==nil || other.Failure.Tag!="Broken" || other.Defect!=nil {t.Fatal("selective recovery swallowed a different failure")}
+ missing:=pending(efContext{Runtime:fc})
+ if missing.Defect==nil || missing.Failure!=nil {t.Fatal("missing provider is not a typed failure")}
  bound:=efProvide_Users(pending,efProvider_Memory())
- if bound(efContext{}).value!="Hi Ada" {t.Fatal("provision failed")}
- if pending(efContext{}).defect==nil {t.Fatal("provider escaped lexical provision")}
- if efFunction_nested()(efContext{}).failure!=nil {t.Fatal("nested run failed")}
- bottom:=efFunction_bottom()(efContext{})
- if bottom.failure==nil || bottom.failure.tag!="Missing" {t.Fatal("bottom branches lost failure")}
+ if bound(efContext{Runtime:fc}).Value!="Hi Ada" {t.Fatal("provision failed")}
+ if pending(efContext{Runtime:fc}).Defect==nil {t.Fatal("provider escaped lexical provision")}
+ if efFunction_nested()(efContext{Runtime:fc}).Failure!=nil {t.Fatal("nested run failed")}
+ bottom:=efFunction_bottom()(efContext{Runtime:fc})
+ if bottom.Failure==nil || bottom.Failure.Tag!="Missing" {t.Fatal("bottom branches lost failure")}
  efFunction_unused()
+ return er.Succeed(struct{}{})
+ })
 }
 `
 	if err = os.WriteFile(probe, []byte(assertions), 0644); err != nil {
 		t.Fatal(err)
 	}
-	output, err := exec.Command("go", "test", "-race", program, probe).CombinedOutput()
+	output, err := runGoCommand(dir, "test", "-race", ".")
 	if err != nil {
 		t.Fatalf("generated Go conformance: %v\n%s\n%s", err, output, source)
 	}
@@ -89,7 +99,7 @@ func TestGeneratedSemantics(t *testing.T) {
 		t.Fatal("constructed recipe executed")
 	}
 	binary := filepath.Join(dir, "native")
-	output, err = exec.Command("go", "build", "-o", binary, program).CombinedOutput()
+	output, err = runGoCommand(dir, "build", "-o", binary, ".")
 	if err != nil {
 		t.Fatalf("native build: %v\n%s", err, output)
 	}
@@ -116,4 +126,10 @@ func TestGoBackendRefusesInvalidEntry(t *testing.T) {
 	if CompileFor(`effect fn main() -> () {}`, "llvm").Checked {
 		t.Fatal("unsupported target accepted")
 	}
+}
+
+func runGoCommand(dir string, args ...string) ([]byte, error) {
+	command := exec.Command("go", args...)
+	command.Dir = dir
+	return command.CombinedOutput()
 }

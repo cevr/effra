@@ -35,7 +35,10 @@ func TestGuardrails(t *testing.T) {
 		{"declaration collision", `error Users service Users { }`, "EF101"},
 		{"local function shadow", `fn f() -> string { "x" } fn x() -> string { let f = "y" f() }`, "EF103"},
 		{"bad source", `effect fn x() -> string { "unterminated }`, "EF001"},
-		{"unsupported number", `fn x() -> u64 { 42 }`, "EF001"},
+		{"unsupported number", `fn x() -> u64 { 42 }`, "EF102"},
+		{"scope local escaped", `effect fn x() -> string { scope { let hidden = "x"; () }; hidden }`, "EF102"},
+		{"unobserved child failure", `error Bad effect fn child() -> () throws {Bad} { fail Bad } effect fn main() -> () { let child = fork child(); () }`, "EF107"},
+		{"timeout failure", `effect fn child() -> () { () } effect fn main() -> () { run child().timeout(1) }`, "EF107"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

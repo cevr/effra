@@ -3,6 +3,7 @@ package compiler
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -56,6 +57,7 @@ type Provider struct {
 	Span    Span
 }
 type Program struct {
+	GoOnly    bool
 	Errors    map[string]Span
 	Services  []*Service
 	Providers []*Provider
@@ -111,6 +113,15 @@ func lex(source string) ([]token, []Diagnostic) {
 			i++
 			for i < len(source) && ((source[i] >= 'a' && source[i] <= 'z') || (source[i] >= 'A' && source[i] <= 'Z') || (source[i] >= '0' && source[i] <= '9') || source[i] == '_') {
 				i++
+			}
+		} else if ch >= '0' && ch <= '9' {
+			kind = "integer"
+			i++
+			for i < len(source) && source[i] >= '0' && source[i] <= '9' {
+				i++
+			}
+			if _, err := strconv.ParseInt(source[start:i], 10, 64); err != nil {
+				return nil, []Diagnostic{{"EF001", "integer exceeds i64 range", Span{start, i - start, l, c}}}
 			}
 		} else if ch == '"' {
 			kind = "string"
@@ -322,6 +333,15 @@ func (p *parser) expr(min int) *Expr {
 	start := p.take()
 	e := &Expr{Span: start.span}
 	switch {
+	case start.text == "scope":
+		e.Kind = "scope"
+		e.Then = p.block()
+	case start.text == "fork":
+		e.Kind = "fork"
+		e.Left = p.expr(3)
+	case start.kind == "integer":
+		e.Kind = "integer"
+		e.Text = start.text
 	case start.text == "run":
 		e.Kind = "run"
 		e.Left = p.expr(3)
@@ -369,7 +389,12 @@ func (p *parser) expr(min int) *Expr {
 		}
 		if p.accept(".") {
 			method := p.name()
-			if method.text == "provide" || method.text == "catch" {
+			if method.text == "timeout" {
+				p.expect("(")
+				arg := p.expr(0)
+				p.expect(")")
+				e = &Expr{Kind: "timeout", Left: e, Right: arg, Span: method.span}
+			} else if method.text == "provide" || method.text == "catch" {
 				p.expect("<")
 				t := p.name()
 				p.expect(">")
