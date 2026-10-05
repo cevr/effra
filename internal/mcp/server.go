@@ -47,6 +47,7 @@ type arguments struct {
 	File             string `json:"file"`
 	Symbol           string `json:"symbol"`
 	ExpectedRevision string `json:"expectedRevision"`
+	Target           string `json:"target"`
 }
 type callParams struct {
 	Name      string          `json:"name"`
@@ -55,7 +56,7 @@ type callParams struct {
 
 func tools() []tool {
 	schema := func(symbol bool) map[string]any {
-		properties := map[string]any{"file": map[string]string{"type": "string", "description": "Workspace-relative .ef source file"}, "expectedRevision": map[string]string{"type": "string", "description": "Optional source hash; reject a stale snapshot"}}
+		properties := map[string]any{"target": map[string]any{"type": "string", "enum": []string{"go", "js"}, "default": "go"}, "file": map[string]string{"type": "string", "description": "Workspace-relative .ef source file"}, "expectedRevision": map[string]string{"type": "string", "description": "Optional source hash; reject a stale snapshot"}}
 		required := []string{"file"}
 		if symbol {
 			properties["symbol"] = map[string]string{"type": "string"}
@@ -183,13 +184,17 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 }
 func call(root, name string, args arguments) (any, error) {
 	if name == "project.describe" {
-		return map[string]any{"schemaVersion": 1, "compilerVersion": CompilerVersion, "runtime": "effect@4.0.1", "targets": []string{"js"}, "sourceExtension": ".ef", "workspace": root, "operations": []string{"project.describe", "project.check", "code.inspect", "code.explain"}, "scope": "single-file", "guardrails": map[string]string{"failures": "checked closed rows", "requirements": "checked nominal services", "resourceOwnership": "not implemented", "mutableAliases": "not implemented", "openRows": "not implemented", "inspection": "source SHA-256 revision; UTF-8 byte spans"}}, nil
+		return map[string]any{"schemaVersion": 1, "compilerVersion": CompilerVersion, "runtimes": map[string]string{"go": "typed lazy closures, Go standard library", "js": "effect@4.0.1"}, "targets": []string{"go", "js"}, "defaultTarget": "go", "sourceExtension": ".ef", "workspace": root, "operations": []string{"project.describe", "project.check", "code.inspect", "code.explain"}, "scope": "single-file", "guardrails": map[string]string{"failures": "checked closed rows", "requirements": "checked nominal services", "resourceOwnership": "not implemented", "mutableAliases": "not implemented", "openRows": "not implemented", "inspection": "source SHA-256 revision; UTF-8 byte spans"}}, nil
 	}
 	source, err := readSource(root, args.File)
 	if err != nil {
 		return nil, err
 	}
-	r := compiler.Compile(string(source))
+	target := args.Target
+	if target == "" {
+		target = "go"
+	}
+	r := compiler.CompileFor(string(source), target)
 	if args.ExpectedRevision != "" && args.ExpectedRevision != r.Revision {
 		return nil, fmt.Errorf("stale semantic revision; current revision is %s", r.Revision)
 	}
@@ -212,7 +217,7 @@ func call(root, name string, args arguments) (any, error) {
 	if len(diagnostics) > 100 {
 		diagnostics = diagnostics[:100]
 	}
-	return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "checked": r.Checked, "symbol": symbol, "diagnostics": diagnostics, "diagnosticsTruncated": len(r.Diagnostics) > 100}, nil
+	return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "symbol": symbol, "diagnostics": diagnostics, "diagnosticsTruncated": len(r.Diagnostics) > 100}, nil
 }
 func readSource(root, relative string) ([]byte, error) {
 	canonicalRoot, err := filepath.EvalSymlinks(root)
@@ -268,6 +273,11 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 			return args, fmt.Errorf("invalid tool argument %s", key)
 		}
 		switch key {
+		case "target":
+			if text != "go" && text != "js" {
+				return args, fmt.Errorf("unsupported target %s", text)
+			}
+			args.Target = text
 		case "file":
 			args.File = text
 		case "expectedRevision":

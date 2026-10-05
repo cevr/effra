@@ -86,10 +86,15 @@ func difference(a, b []string) []string {
 	}
 	return out
 }
-func Compile(source string) *Result {
+func Compile(source string) *Result { return CompileFor(source, "go") }
+func CompileFor(source, target string) *Result {
 	start := time.Now()
 	hash := sha256.Sum256([]byte(source))
-	r := &Result{SchemaVersion: 1, Revision: hex.EncodeToString(hash[:]), Target: "js", Diagnostics: []Diagnostic{}, Symbols: []Symbol{}}
+	r := &Result{SchemaVersion: 1, Revision: hex.EncodeToString(hash[:]), Target: target, Diagnostics: []Diagnostic{}, Symbols: []Symbol{}}
+	if target != "go" && target != "js" {
+		r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF110", Message: "unsupported target " + target})
+		return r
+	}
 	program, diagnostics := parse(source)
 	r.Timings.ParseMicros = time.Since(start).Microseconds()
 	if len(diagnostics) > 0 {

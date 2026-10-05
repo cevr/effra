@@ -116,12 +116,30 @@ func TestInvalidSourceIsACompilerResult(t *testing.T) {
 
 func TestArgumentSchemas(t *testing.T) {
 	for _, tc := range []struct{ name, raw string }{
-		{"project.describe", "null"}, {"project.describe", "{\"file\":\"\"}"},
+		{"project.describe", "null"},
+		{"project.check", `{"file":"x.ef","target":"llvm"}`}, {"project.describe", "{\"file\":\"\"}"},
 		{"project.check", "{\"file\":null}"}, {"project.check", "{\"file\":\"x.ef\",\"symbol\":\"\"}"},
 		{"code.inspect", "{\"file\":\"x.ef\"}"},
 	} {
 		if _, err := decodeArguments(tc.name, json.RawMessage(tc.raw)); err == nil {
 			t.Fatalf("accepted %s %s", tc.name, tc.raw)
+		}
+	}
+}
+
+func TestTargetInspection(t *testing.T) {
+	root := t.TempDir()
+	source := `effect fn main() -> string { "hello" }`
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"go", "js"} {
+		result, err := call(root, "code.inspect", arguments{File: "main.ef", Symbol: "main", Target: target})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.(map[string]any)["target"] != target {
+			t.Fatal("wrong inspected target")
 		}
 	}
 }

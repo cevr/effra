@@ -15,7 +15,11 @@ assert inspected["symbol"]["contract"]["failures"] == ["NotFound"]
 invalid = json.loads(run("check", "examples/missing-service.ef", success=False).stdout)
 assert any(d["code"] == "EF108" for d in invalid["diagnostics"])
 assert run("run", "examples/main.ef").stdout == "Hello, Ada\nUnknown user\n"
-run("build", "examples/main.ef")
+assert run("run", "examples/main.ef", "--target", "js").stdout == "Hello, Ada\nUnknown user\n"
+native_path=run("build", "examples/main.ef").stdout.strip()
+native=subprocess.run([str(root/native_path)], text=True, capture_output=True, cwd="/")
+assert native.returncode==0 and native.stdout=="Hello, Ada\nUnknown user\n", native.stderr
+run("build", "examples/main.ef", "--target", "js")
 # The emitted library must expose service keys for external provision.
 consumer = """import { Effect } from 'effect';
 import { greeting, Users, MemoryUsers } from './dist/main.mjs';
@@ -42,4 +46,4 @@ assert len(responses[1]["result"]["tools"]) == 4
 mcp = responses[2]["result"]["structuredContent"]
 assert mcp["symbol"] == inspected["symbol"] and mcp["revision"] == inspected["revision"]
 assert responses[3]["result"]["isError"]
-print("public CLI, JS module, and stdio MCP: passed")
+print("native Go executable, JS module, CLI, and stdio MCP: passed")

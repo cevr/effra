@@ -271,7 +271,7 @@ Start with curated fmt/logging, os/filesystem, net/http, context, and database/s
 
 ## JavaScript/Effect and Go targets
 
-Recommendation: design one typed semantic core and target-neutral IR, with separate JavaScript/Effect and Go lowering paths. The JS backend emits ordinary Effect library code, with TypeScript declarations and source maps for consumers. Build the first compiler slice against Effect's existing runtime, then the Go backend for ecosystem interoperability and parallel managed services. Keep scheduling and concrete service implementations backend-specific; both may use managed memory.
+Recommendation: design one typed semantic core and target-neutral IR, with separate JavaScript/Effect and Go lowering paths. The JS backend emits ordinary Effect library code, with TypeScript declarations and proposed source maps for consumers. Native Go executables are the default deliverable. The first slice used Effect's existing runtime; the prototype now also builds native Go executables. Continue the Go backend for ecosystem interoperability and parallel managed services. Keep scheduling and concrete service implementations backend-specific; both may use managed memory.
 
 Gleam demonstrates separate external implementations for different targets and compilation errors when an operation lacks a selected-target implementation. That is a useful precedent for explicit backend boundaries; Gleam targets Erlang/JavaScript, not Go. Source: [Gleam multi-target externals](https://gleam.run/documentation/externals/#multi-target-externals).
 

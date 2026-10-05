@@ -3,13 +3,13 @@
 
 ## Destination
 
-Build a runnable Effra prototype that checks explicit effect contracts, emits JavaScript using Effect, and exposes canonical types through CLI/MCP; use the result to decide the route to a Go-backed server language.
+Build a runnable Effra prototype that checks explicit effect contracts, emits native Go executables and optional JavaScript using Effect, and exposes canonical types through CLI/MCP; use the result to decide the route to a Go-backed server language.
 
 ## Notes
 
 - User explicitly requested repository creation and prototype execution. Execution is carried into this map, overriding Wayfinder's planning-only default; charting may create the first artifact but resolves no HITL ticket.
 - Read wayfinder, grilling, domain-modeling, and prototype skills as relevant. Compiler prototypes are runnable source artifacts, as explicitly requested, rather than UI/HTML demos.
-- Carry forward the conversation: `.ef`, `ef`, managed server scope, Go compiler, JS/Effect first, Go second, explicit exported contracts, agent introspection, fast builds.
+- Carry forward the conversation: `.ef`, `ef`, managed server scope, Go compiler, native Go executables as the default build, optional JS/Effect target, explicit exported contracts, agent introspection, fast builds.
 - Source remains authoritative; one semantic model serves checking, CLI, and MCP. Performance budgets are aspirations until measured.
 - No new external research is needed to chart the initial frontier: the design sketch contains the inspected reference sources. Add research tickets if a subsequent decision needs new evidence.
 
