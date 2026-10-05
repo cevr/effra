@@ -1,6 +1,6 @@
 # Managed Go runtime
 
-The native prototype uses `runtime/effra`, a Go-standard-library runtime with typed lazy closures and managed goroutines. The sequential JS subset emits pinned Effect directly. Scopes, fibers, timeout, Files and Runtime are currently Go-only and checked with EF110; sharing surface syntax alone does not establish backend parity.
+The native prototype uses `runtime/effra`, a Go-standard-library runtime with typed lazy closures and managed goroutines. The JS target emits pinned Effect with a small ownership policy over Effect fibers, scopes and causes. Shared conformance tests establish child-before-parent cleanup, unobserved failure propagation, and timeout cleanup-defect preservation. Go imports, Files, Runtime and Http remain Go-only (EF110). This is a tested common lifecycle subset, not complete provider parity.
 
 ## Lifecycle contract
 
@@ -8,9 +8,9 @@ The native prototype uses `runtime/effra`, a Go-standard-library runtime with ty
 
 `fork recipe()` admits a child before starting its goroutine. Its service context is inherited lexically. `run child.join()` awaits its result, `run child.cancel()` requests cancellation, and `run child.interrupt()` requests cancellation and awaits completed cleanup. Normal interruption is acknowledged by interrupt; real child failures/cleanup defects are preserved. Unobserved child failures propagate at owner closure. The checker conservatively includes child failure rows at fork; joining does not erase them.
 
-`.timeout(ms)` is lazy, adds Timeout, and runs inside an owned deadline scope. It waits for the operation's shutdown and cleanup, so elapsed time can exceed the deadline. It currently uses the native runtime's wall clock. It does **not** add a Clock service requirement or claim injected Clock.sleep controls deadlines; a replaceable deadline/time abstraction remains future work. Durations must be 0–2,147,483,647 milliseconds; invalid runtime durations are defects.
+`.timeout(ms)` is lazy, adds Timeout, and runs inside an owned deadline scope. It waits for the operation's shutdown and cleanup, so elapsed time can exceed the deadline. It uses the Go wall clock or Effect scheduler clock. It does **not** add a Clock service requirement or claim injected Clock.sleep controls deadlines; a replaceable deadline/time abstraction remains future work. Durations must be 0–2,147,483,647 milliseconds; invalid runtime durations are defects.
 
-Cancellation is cooperative. Managed waits and generated effect boundaries observe Go context. Pure CPU work and blocking foreign APIs may delay shutdown. Acquisition/registration and finalizers mask logical cancellation; foreign acquisition must eventually return. An adapter can register an idempotent `Scope.OnCancel` hook before blocking work to unblock an API that needs an explicit close/abort. Hooks must return and must not close or wait on their own owning scope.
+Cancellation is cooperative. Managed waits and generated effect boundaries observe Go context. Pure CPU work and blocking foreign APIs may delay shutdown. Go acquisition/registration and both targets’ scope finalizers mask logical cancellation; foreign acquisition must eventually return. An adapter can register an idempotent `Scope.OnCancel` hook before blocking work to unblock an API that needs an explicit close/abort. Hooks must return and must not close or wait on their own owning scope.
 
 Exits preserve named failures, defects and interruption separately, including additional cleanup/child causes. `.catch<Tag>(value)` handles a lone matching failure; it does not erase accompanying cleanup defects. Managed panics become defects while cleanup runs. Fatal runtime/process termination and unmanaged goroutine panics are outside this protocol.
 
@@ -22,6 +22,7 @@ Exits preserve named failures, defects and interruption separately, including ad
 | Clock / LiveClock | `sleep(i64) -> ()` | Cancellation-aware millisecond wait; JS uses bigint input |
 | Env / LiveEnv | `get(string) -> string` | Empty string for absent values; this is not a presence test |
 | Files / LiveFiles | `openRead(string) -> File`, `readText(File) -> string`, `readFile(string) -> string` | IoError; openRead attaches release to the current scope; readFile opens a narrower scope |
+| Http / GoHttp | `serve(string, handler) -> ()` | IoError; owns listener and waits for request cleanup on shutdown |
 | Runtime / RuntimeLive | `inspect() -> string` | JSON metadata for the current owning scope |
 
 Files use synchronized managed handles; using a handle after its owner closes produces IoError. This is a runtime guard, not region typing or proof against every mutable alias. Native reads are ordinary blocking Go file reads and may delay cancellation. File reading currently buffers the entire content; streaming/bounded I/O remains future work.
@@ -45,4 +46,12 @@ go run ./examples/go-interop
 # cancelled SDK: Timeout
 ```
 
-This proves the Go runtime adapter seam. Automatic host imports from `.ef`, imported fields/methods, module-aware signature caches and supplemental package binding metadata are **not implemented**. The empty Foreign/Host capability is reserved for that future source binding layer; it does not grant an implemented foreign-call syntax. [interop.md](interop.md) remains the broader direction: import native declarations automatically and add behavior contracts without per-symbol signature boilerplate.
+Automatic source imports now consume Go export data for primitive package functions. Foreign/Host is the explicit capability for these deferred calls. See [interop](interop.md) and [imports example](../examples/imports.ef). Imported fields/methods and persistent signature caches remain unsupported.
+
+## HTTP server
+
+Run `./bin/ef run examples/http.ef` from the repository. It prints `listening http://127.0.0.1:PORT`; port zero lets the OS select an available port. Use that URL with `/health`, `/users/42`, `/users/slow`, `/users/missing`, or `/file`.
+
+`Http.serve` accepts a reference to an effect function taking one string path and returning a string. Its declared service requirements flow into the server recipe. Request failures, defects and interruption become a generic HTTP 500 response; the recipe itself admits listener/startup IoError. The restricted handler reference is not a general higher-order type system.
+
+Each request executes inside a fresh managed scope, with cancellation linked to its connection and server lifetime. SIGTERM stops admission, cancels requests, and waits for handlers and their cleanup before returning. A foreign call ignoring cancellation can delay shutdown; there is no detached timeout escape. The Go entry currently reports interruption with exit status 1. Header reading has a five-second timeout; routing, request bodies, streaming and configurable server policies remain future work.

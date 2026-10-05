@@ -4,7 +4,7 @@ An experimental language for servers: explicit, inspectable effect contracts, `.
 
 Project direction is recorded in [NORTH_STAR.md](NORTH_STAR.md), research comparisons in [PRIOR_ARTS.md](PRIOR_ARTS.md), and canonical terms in [GLOSSARY.md](GLOSSARY.md). The [architecture-loop ledger](plans/architecture-loop-2026-10-05.md) separates established direction, draft questions, and pending architecture work.
 
-The runnable prototype is a small Go compiler that checks `.ef` source and produces native Go executables or JavaScript using Effect 4.0.1. It supports lazy effects, closed failure/service rows, nominal services, explicit provision, selective recovery, and canonical JSON inspection through CLI and read-only MCP. Native Go programs also support owning scopes, child fibers, cooperative cancellation, managed files, and timeouts that wait for cleanup.
+The runnable prototype is a small Go compiler that checks `.ef` source and produces native Go executables or JavaScript using Effect 4.0.1. It supports lazy effects, closed failure/service rows, nominal services, explicit provision, selective recovery, and canonical JSON inspection through CLI and read-only MCP. Both targets support owning scopes, child fibers, cooperative cancellation, and timeouts that wait for cleanup. Go additionally supports automatic primitive host imports, managed files, runtime snapshots, and an HTTP server.
 
 ## Try it
 
@@ -27,6 +27,10 @@ go build -o bin/ef ./cmd/ef
 ./bin/ef mcp .                            # newline-delimited JSON-RPC on stdio
 ./bin/ef run examples/lifecycle.ef         # scopes, cancellation, files, runtime snapshot
 go run ./examples/go-interop              # native Go partial results and cancellation
+./bin/ef run examples/imports.ef          # Go declarations, raw errors, context forwarding
+./bin/ef run examples/http.ef             # prints its bound localhost URL
+./bin/ef run examples/concurrency.ef
+./bin/ef run examples/concurrency.ef --target js
 ```
 
 `bun run demo` compiles and runs the native Go executable. Use `--target js` with build/run/check to select JavaScript. `bun run gate` checks formatting, Go vet, compiler and runtime tests, tracker consistency, and the public CLI/MCP process.
@@ -57,7 +61,7 @@ The JavaScript library build exports functions, service keys, and providers for 
 
 ## What is experimental
 
-This is a single-file prototype with primitive values, managed File handles, and payload-free source errors. Lifecycle syntax and Files/Runtime providers currently require Go; the portable sequential subset still targets JS/Effect. Go interop is a runtime adapter API with a runnable example; automatic `.ef` host imports remain future work. There are no ADTs, open rows, Layers, package cache, source maps, or out-of-process runtime inspector yet. See [implemented syntax and limits](docs/prototype.md), [runtime and interop contracts](docs/runtime.md), and [MCP setup](docs/mcp.md). The wider [design sketch](docs/design.md) remains a proposal.
+This is a single-file prototype with primitive values, managed File handles, and payload-free source errors. Lifecycle syntax works on Go and JS/Effect; Files/Runtime/Http and Go imports require Go. Imported package functions currently accept primitive shapes; named host types, methods, generics and arbitrary SDK objects remain unsupported. There are no ADTs, open rows, Layers, package cache, source maps, or out-of-process runtime inspector yet. See [implemented syntax and limits](docs/prototype.md), [runtime and interop contracts](docs/runtime.md), and [MCP setup](docs/mcp.md). The wider [design sketch](docs/design.md) remains a proposal.
 
 A previous synthetic 10,000-line fixture parsed/checked in roughly 3 ms on an Apple M4 Pro. That baseline predates managed-runtime integration; [prototype measurements](docs/prototype.md#baseline) distinguish historical and current receipts. It does not establish end-to-end build performance.
 

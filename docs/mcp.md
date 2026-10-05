@@ -18,7 +18,7 @@ The adapter implements a small read-only tools server using the [2025-11-25 stdi
 | Tool | Arguments | Result |
 | --- | --- | --- |
 | project.describe | `{}` | Compiler/runtime versions, supported targets, default Go target, operations, guardrail limits |
-| project.check | `file`, optional `target` (`go`/`js`), optional `expectedRevision` | Checked status, source revision, bounded diagnostics, timing, symbol count |
+| project.check | `file`, optional `target` (`go`/`js`), optional `expectedRevision` | Checked status, source revision, bounded diagnostics, timing, symbol count, bounded used host bindings |
 | code.inspect | `file`, `symbol`, optional `target`, optional `expectedRevision` | Canonical declaration/body contract, byte span, local contributions |
 | code.explain | Same as inspect | Same initial semantic detail; no transitive explanation engine yet |
 
@@ -36,8 +36,8 @@ Example tool call:
 }
 ```
 
-Results include structuredContent and a matching text representation. Compilation diagnostics are ordinary project.check results with checked=false; tool/path/stale-revision errors return isError=true. Invalid tool arguments are JSON-RPC errors. Source paths are workspace-relative `.ef` files; resolved paths must remain within the root. The adapter accepts 1 MiB message frames, 2 MiB regular source files, and at most 100 diagnostics per result. Oversized symbol detail is rejected explicitly. Source spans use UTF-8 bytes rather than LSP UTF-16 positions.
+Results include structuredContent and a matching text representation. Compilation diagnostics are ordinary project.check results with checked=false; tool/path/stale-revision errors return isError=true. Invalid tool arguments are JSON-RPC errors. Source paths are workspace-relative `.ef` files; resolved paths must remain within the root. The adapter accepts 1 MiB message frames, 2 MiB regular source files, and at most 100 diagnostics and 100 used host bindings per result, with truncation flags. Oversized symbol detail is rejected explicitly. Source spans use UTF-8 bytes rather than LSP UTF-16 positions.
 
-Each query reads and checks its file. Both backends share source contracts; queries default to Go and report the selected target. The revision is a SHA-256 of source bytes; there is no persistent workspace/cache or multi-file snapshot yet. expectedRevision lets a client reject a changed snapshot. The root is a cooperative local workspace boundary, not a security sandbox against concurrent filesystem replacement.
+Each query reads and checks its file. Both backends share source contracts; queries default to Go and report the selected target. The revision hashes source bytes plus imported Go export archives and normalized behavior contracts; there is no persistent workspace/cache or multi-file snapshot yet. expectedRevision lets a client reject a changed snapshot. The root is a cooperative local workspace boundary, not a security sandbox against concurrent filesystem replacement.
 
 Validation covers initialization, listing/calling tools, CLI/MCP semantic equality, stale revisions, malformed requests, unknown tools, invalid arguments, source errors, and path escapes. scripts/smoke.py exercises the actual compiled stdio process. No particular editor's MCP configuration has been installed or validated.

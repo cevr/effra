@@ -88,3 +88,13 @@ Current source count using the Baseline pathspec (after integration):
 | internal/mcp | 316 | 1 |
 | runtime/effra | 637 | 5 |
 | Total | 2,732 | 12 |
+
+## Automatic imports, HTTP and JS lifecycle receipt
+
+- Implemented primitive Go imports through module-resolved export archives, explicit Foreign recipes, raw GoResult partial values and explicit OrFail. Binding inspection separates native signatures from reviewed context/cancellation assertions. Semantic revisions include export bytes and normalized metadata. A dependency return-type edit is detected; replaced transitive module builds execute successfully.
+- Added `examples/imports.ef` with standard-library calls and a compiled local SDK fixture. This is not a complex third-party SDK adoption receipt. Named host types/methods, broader module workspace/build-tag coverage, and TS imports remain open.
+- Added `examples/http.ef` and a managed native HTTP provider. Public process tests check health, SDK route, failure response, scoped file read, deadline and SIGTERM shutdown. Runtime tests prove shutdown waits for request cleanup and releases the listener.
+- JS scopes/fibers/deadlines now use an ownership policy over pinned Effect, with no additional scheduler. Both backends pass shared child-before-parent cleanup, unobserved failure and timeout cleanup-defect probes; the portable concurrency example runs on both. Files/Runtime/Http and Go imports remain Go-only.
+- Verification: full gate and `go test -race ./...` pass. CLI/MCP used-binding metadata and imported revisions agree. Runtime HTTP is an independently gated checkpoint; integrated lowering and documentation are separate commits. No remote or publication is involved.
+- Performance receipt: warm imported checks about 51 ms (46–47 ms loader), cached imported executable builds about 156 ms, no-import 10k-line frontend sample 3.65 ms. See prototype measurements for fixtures and limitations. Normalized import caching and matched edit benchmarks remain priorities.
+- This records implementation progress, not a completed architecture-loop review or closed Wayfinder decisions. Remaining work includes complex host representations, TS declaration bridge, persistent caching, broader lifecycle/HTTP policies, and process-wide runtime inspection.

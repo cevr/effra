@@ -1,12 +1,12 @@
 # Host interop proposal
 
-The user identified binding boilerplate as a central adoption risk, drawing on ReScript and Gleam, and prefers TypeScript's ability to consume an existing ecosystem. This document is an open architecture proposal. The prototype currently has no foreign imports.
+The user identified binding boilerplate as a central adoption risk, drawing on ReScript and Gleam, and prefers TypeScript's ability to consume an existing ecosystem. The wider host representation design remains open. The prototype now imports Go package functions with primitive signatures automatically; TypeScript imports remain a proposal.
 
 ## Proposed default
 
 Import host packages and their existing type declarations automatically. Retain their native values, named identities, methods, and data representations where appropriate. Generated calls and wrappers belong to the compiler. Avoid requiring users to restate every function/type in handwritten Effra declarations.
 
-Illustrative syntax only:
+Go syntax is implemented; TS syntax is illustrative:
 
 ```rust
 import go users "example.com/users"
@@ -19,13 +19,13 @@ This requires host-aware representation and type compatibility to inform the lan
 
 ## Go integration
 
-Load module-aware package types with the Go toolchain and go/types, initially using golang.org/x/tools/go/packages. The official go/importer documentation warns that its older importers are not a reliable module-aware loader. Cache normalized dependency summaries keyed by module/build inputs, Go version, build tags, OS/architecture, and relevant imported type identities. Avoid dependency-source walks on each private edit.
+The prototype resolves modules and compiled export archives with `go list -deps -export -json`, then supplies an explicit archive lookup to `go/importer.ForCompiler` and checks with go/types. It does not use importer.Default or a nil lookup. Generated modules retain requirements/replacements and copy the source module’s go.sum. The CLI builds from that graph; local modules and a replaced transitive dependency have executable tests. Broader workspace/build-tag and remote SDK coverage remain work. The official go/importer documentation warns that its older default importers are not reliable module-aware loaders. Cache normalized dependency summaries keyed by module/build inputs, Go version, build tags, OS/architecture, and relevant imported type identities. Avoid dependency-source walks on each private edit.
 
 Preserve Go named types, pointers, interfaces, methods, slices, maps, callbacks, and multiple returns as host types. Expose nil possibility honestly rather than silently presenting a pointer as guaranteed present. Shared mutation and callback retention need ownership/trust rules; Go's static types do not supply those rules.
 
 Do not automatically discard the value in `(T,error)` or reinterpret `(T,bool)` as Option. A low-level imported call should preserve both values. A package contract or an explicit adapter may choose Result/error-channel semantics where partial successes are immaterial; that choice should not be guessed from the signature alone. Managed effect wrappers defer the actual call. Ordinary Go panics and interruption behavior need their own managed boundary protocol, not an invented typed error inferred from error return values.
 
-Sources: [go/types](https://pkg.go.dev/go/types), [go/importer module-aware guidance](https://pkg.go.dev/go/importer).
+Sources: [go/types](https://pkg.go.dev/go/types), [go/importer module-aware guidance](https://pkg.go.dev/go/importer), [go list export/module fields](https://pkg.go.dev/cmd/go#hdr-List_packages_or_modules).
 
 ## TypeScript integration
 
@@ -58,3 +58,29 @@ Go-only compilation must not start a TypeScript checker. Cache host type summari
 Gleam requires explicit type annotations on external declarations and documents that it cannot verify the foreign implementation's return types or even existence. Its external types are opaque, so manipulation generally needs external functions. That is a concrete precedent for the boilerplate/trust trade-off the user wants Effra to avoid; it does not establish that every Gleam integration is difficult.
 
 Source: [Gleam externals guide](https://gleam.run/documentation/externals/).
+
+## Implemented Go slice
+
+```rust
+import go strconv "strconv"
+
+effect fn parse(text: string) -> bool throws {GoError} uses {Foreign} {
+    run strconv.ParseBool(text).orFail()
+}
+```
+
+Supported package functions are non-generic and non-variadic, with string, bool, int64 and []byte parameters, and no result, one primitive result, error, or `(primitive,error)` results. Go aliases of those types work; named host types, pointers, structs, interfaces, methods and other multi-results receive EF112 when called. These limits are explicit; there is no unchecked any fallback.
+
+All imported calls are lazy and require Foreign, even familiar functions such as strings.ToUpper. A returned error produces `GoResult`: `.value` retains the returned value and `.hasError` exposes whether an error was returned. `.orFail()` explicitly adds GoError and preserves the native partial value in its failure payload. Source failure payload inspection remains unsupported.
+
+The module-root `effra.bindings.json` attaches behavior assertions without restating a signature:
+
+```json
+{"effra.local/prototype/examples/sdk.Lookup":{"context":"fiber","cancellation":"cooperative"}}
+```
+
+`context: fiber` hides an actual first context.Context parameter and forwards the managed context. `cooperative` is allowed only with that forwarding; it is a reviewed assertion, not a type-system proof. Unclassified cancellation is reported as unknown. Metadata rejects unknown fields and invalid enum values. No signature implies purity or resource ownership.
+
+CLI and MCP inspect/check report used binding signatures, forwarding, cancellation and provenance. Imported export bytes and normalized contracts participate in semantic revisions, conservatively including dependency changes; there is no persistent Effra import cache. `importMicros` exposes loader cost separately. Go builds never start a TS checker; JS rejects Go imports before invoking Go tools.
+
+`examples/imports.ef` uses standard-library declarations and a real compiled local SDK fixture. Tests prove partial-value retention, context forwarding, replaced module resolution, and rejection after an imported return type changes. This fixture does not establish adoption of a complex third-party SDK. Full host object representation and TypeScript declaration consumption remain the next interop questions.
