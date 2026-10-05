@@ -20,7 +20,7 @@ Build a runnable Effra prototype that checks explicit effect contracts, emits na
 ## Not yet specified
 
 - The server slice's HTTP/database boundary and startup/shutdown wiring once lifecycle and backend semantics have concrete evidence.
-- The shape of general higher-order row inference and target interoperability once the small compiler reveals its pressure points.
+- The shape of general higher-order row inference once the small compiler reveals its pressure points.
 - The useful runtime snapshot granularity once managed ownership has an implementation.
 
 ## Out of scope
