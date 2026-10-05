@@ -1,0 +1,22 @@
+effect fn search(query: string) -> string uses {Clock} {
+    if query == "old" {
+        run Clock.sleep(10000)
+        "stale result"
+    } else {
+        "result: " + query
+    }
+}
+
+effect fn replacement() -> string uses {Clock} {
+    scope {
+        let previous = fork search("old")
+        run previous.interrupt()
+        let current = fork search("new")
+        run current.join()
+    }
+}
+
+effect fn main() -> () {
+    let result = run replacement().provide<Clock>(LiveClock)
+    run Console.log(result).provide<Console>(Stdout)
+}

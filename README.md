@@ -4,6 +4,8 @@ An experimental language for servers, combining Go's native executable target wi
 
 Effra explores ideas from [Borgo](https://github.com/borgo-lang/borgo) and [Effect](https://github.com/Effect-TS/effect): deferred programs, explicit failures and dependencies, scopes that own children and resources, and host interop without repeating native function signatures. Types and guardrails are inspectable through the same compiler model used by the CLI and MCP.
 
+The direction is **Go-like directness, algebraic data types, and explicit Effect-style contracts**. The [showcase guide](docs/showcases.md) connects these ideas to real application patterns and labels which features remain proposals.
+
 **Status: runnable prototype.** Syntax, APIs and inspection schemas are experimental. Go is the default target; JavaScript emits pinned Effect. This is a server language experiment, with no kernel or hard real-time execution profile.
 
 The runnable prototype is a small Go compiler that checks `.ef` source and produces native Go executables or JavaScript using Effect 4.0.1. It supports lazy effects, closed failure/service rows, nominal services, explicit provision, selective recovery, and canonical JSON inspection through CLI and read-only MCP. Both targets support owning scopes, child fibers, cooperative cancellation, and timeouts that wait for cleanup. Go additionally supports automatic primitive host imports, managed files, runtime snapshots, and an HTTP server.
@@ -62,6 +64,8 @@ The JavaScript library build exports functions, service keys, and providers for 
 | Example | What it demonstrates | Target |
 | --- | --- | --- |
 | [main.ef](examples/main.ef) | Nominal services, explicit provision and typed recovery | Go / JS |
+| [workflow.ef](examples/workflow.ef) | Authorization, lookup and delivery with three service contracts | Go / JS |
+| [latest-task.ef](examples/latest-task.ef) | Replace an owned child after interruption and cleanup finish | Go / JS |
 | [concurrency.ef](examples/concurrency.ef) | Child join/interrupt and deadline recovery | Go / JS |
 | [imports.ef](examples/imports.ef) | Automatic native signatures, partial results and context forwarding | Go |
 | [http.ef](examples/http.ef) | HTTP routes, SDK calls, file scopes and managed shutdown | Go |
@@ -77,6 +81,28 @@ The JavaScript library build exports functions, service keys, and providers for 
 ```
 
 Use the printed server URL with `/health`, `/users/42`, `/users/slow`, `/users/missing`, or `/file`. Each request has an owning scope. Interrupt/SIGTERM stops admission, requests cancellation, and waits for handler cleanup. Cancellation is cooperative: a foreign call that ignores it can delay shutdown. See the [HTTP contract](docs/runtime.md#http-server).
+
+## ADTs and pattern matching
+
+**Proposed syntax; not implemented yet.** Native sums would give state machines a direct representation and compiler-checked exhaustive matching:
+
+```rust
+enum RunState {
+    Idle
+    Running { runId: string }
+    Waiting { runId: string, requestId: string }
+}
+
+fn status(state: RunState) -> string {
+    match state {
+        RunState.Idle => "idle"
+        RunState.Running { runId } => "running " + runId
+        RunState.Waiting { runId, requestId } => "waiting " + requestId
+    }
+}
+```
+
+Each alternative owns its payload. Adding a variant should make incomplete matches fail to check. Decoding external data still needs an explicit codec; a static enum is not runtime validation. The [showcases](docs/showcases.md) cover ADTs, payload errors, decoded events, owned streams, durable commands and infrastructure outputs, with [source comparisons](docs/research/effect-native-showcases.md) from Alchemy, T3 Code and Gent.
 
 ## Go interop
 

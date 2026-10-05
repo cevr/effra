@@ -2,6 +2,8 @@
 
 Research and proposal prepared 2026-10-05. This document describes the wider proposed language. The small runnable subset and its measurements are recorded in [prototype.md](prototype.md); syntax outside that subset remains illustrative.
 
+The [application showcases](showcases.md) apply this direction to ADTs, state transitions, decoding, task replacement, streams, durable commands and infrastructure outputs. Their [source review](research/effect-native-showcases.md) separates proposed simplifications from application policies that must remain explicit.
+
 ## Recommendation
 
 Build a language for servers and applications with Borgo-style algebraic data types and Go interoperability, native lazy Effects, compiler-checked error and service rows, and explicit execution profiles. The JavaScript target lowers to the existing Effect library; the Go target uses managed goroutines and Go GC. Keep the language's semantic and introspection model independent of either backend's runtime.

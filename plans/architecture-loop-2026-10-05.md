@@ -98,3 +98,11 @@ Current source count using the Baseline pathspec (after integration):
 - Verification: full gate and `go test -race ./...` pass. CLI/MCP used-binding metadata and imported revisions agree. Runtime HTTP is an independently gated checkpoint; integrated lowering and documentation are separate commits. No remote or publication is involved.
 - Performance receipt: warm imported checks about 51 ms (46–47 ms loader), cached imported executable builds about 156 ms, no-import 10k-line frontend sample 3.65 ms. See prototype measurements for fixtures and limitations. Normalized import caching and matched edit benchmarks remain priorities.
 - This records implementation progress, not a completed architecture-loop review or closed Wayfinder decisions. Remaining work includes complex host representations, TS declaration bridge, persistent caching, broader lifecycle/HTTP policies, and process-wide runtime inspection.
+
+## Application showcase review
+
+- Refreshed Alchemy and T3 Code source caches; pulled Gent main to `5bc4bafd7` with a clean fast-forward. Read the local private application without changing it. Public source snapshots and focused citations are in `docs/research/effect-native-showcases.md`; generic original examples are in `docs/showcases.md`.
+- Added runnable Go/JS workflows for three-service composition and completed task replacement. The public smoke checks execute both examples and inspect the workflow’s exact failure/requirement contract.
+- Proposed ADTs, exhaustive match, payload errors, codec derivation, stream consumers, durable admission results and phase-aware infrastructure outputs remain clearly separated from implemented syntax. The recommendation is to implement the data-model slice before provider graphs/streams or deployment syntax.
+- Preserved explicit distinctions: decision values versus failures; static sums versus runtime decoding; scope ownership versus durable transactions; effect execution versus deployment Output resolution. No third-party deployments or private application code were published.
+- Full Effra gate passes. This is a source review and showcase receipt, not a completed architecture-loop sweep or a closure of HITL decisions.

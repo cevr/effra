@@ -19,6 +19,12 @@ assert run("run", "examples/main.ef", "--target", "js").stdout == "Hello, Ada\nU
 assert run("run", "examples/imports.ef").stdout == "ADA\npartial result retained\ntimed out\n"
 for target in ("go", "js"):
     assert run("run", "examples/concurrency.ef", "--target", target).stdout == "child joined\ntimed out\nrecovered\n"
+for example, expected in (("workflow", "queued: Welcome, Ada\naccess denied\n"), ("latest-task", "result: new\n")):
+    for target in ("go", "js"):
+        assert run("run", "examples/" + example + ".ef", "--target", target).stdout == expected
+workflow = json.loads(run("inspect", "examples/workflow.ef", "welcome").stdout)["symbol"]["contract"]
+assert workflow["requirements"] == ["Access", "Delivery", "Directory"]
+assert workflow["failures"] == ["DeliveryFailed", "Denied", "UserMissing"]
 life = run("run", "examples/lifecycle.ef").stdout
 snapshot = json.loads(life.splitlines()[0])
 assert snapshot["state"] == "Open" and snapshot["resourceCount"] == 1
