@@ -184,7 +184,22 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 }
 func call(root, name string, args arguments) (any, error) {
 	if name == "project.describe" {
-		return map[string]any{"schemaVersion": 1, "compilerVersion": CompilerVersion, "runtimes": map[string]string{"go": "typed lazy closures, Go standard library", "js": "effect@4.0.1"}, "targets": []string{"go", "js"}, "defaultTarget": "go", "sourceExtension": ".ef", "workspace": root, "operations": []string{"project.describe", "project.check", "code.inspect", "code.explain"}, "scope": "single-file", "guardrails": map[string]string{"failures": "checked closed rows", "requirements": "checked nominal services", "resourceOwnership": "not implemented", "mutableAliases": "not implemented", "openRows": "not implemented", "inspection": "source SHA-256 revision; UTF-8 byte spans"}}, nil
+		return map[string]any{
+			"schemaVersion": 1, "compilerVersion": CompilerVersion,
+			"runtimes": map[string]string{"go": "typed lazy closures; managed scopes and fibers; Go standard library", "js": "effect@4.0.1"},
+			"targets":  []string{"go", "js"}, "defaultTarget": "go", "sourceExtension": ".ef", "workspace": root,
+			"operations": []string{"project.describe", "project.check", "code.inspect", "code.explain"}, "scope": "single-file",
+			"guardrails": map[string]string{
+				"failures": "checked closed rows", "requirements": "checked nominal services",
+				"resourceOwnership":  "Go runtime scopes join owned fibers then release resources; managed File checks closed handles",
+				"cancellation":       "cooperative Go context; timeout waits for shutdown; arbitrary foreign calls may delay it",
+				"targetCapabilities": "scope, fork, timeout, Files and Runtime require Go (EF110)",
+				"foreignInterop":     "Go runtime FromGo/OrFail adapters preserve partial results; source imports not implemented",
+				"runtimeInspection":  "Go Runtime.inspect: current scope metadata, up to 100 resources/child states; no MCP runtime endpoint",
+				"mutableAliases":     "not implemented", "openRows": "not implemented",
+				"inspection": "source SHA-256 revision; UTF-8 byte spans",
+			},
+		}, nil
 	}
 	source, err := readSource(root, args.File)
 	if err != nil {

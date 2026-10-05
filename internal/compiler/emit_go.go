@@ -57,7 +57,7 @@ func goMethodType(f *Function) string {
 }
 func (g *goEmitter) temp() string { g.next++; return fmt.Sprintf("efTemp%d", g.next) }
 
-// EmitGo lowers checked, portable sequential IR to a standalone Go program.
+// EmitGo lowers checked IR to a standalone Go program using the managed runtime.
 // Error and requirement rows are checked in the frontend; success values stay typed in Go.
 func (r *Result) EmitGo() (string, error) {
 	if err := r.Entry(); err != nil {

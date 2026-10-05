@@ -4,6 +4,8 @@ Effra is becoming a language for servers with explicit effect contracts, fast na
 
 Established 2026-10-05 from the owner's conversation, [design sketch](docs/design.md), [interop direction](docs/interop.md), and the checked prototype. Receipts below refer to baseline `4c497ac`; they identify evidence and gaps, not permanent line numbers. Wider language capabilities remain proposals until a runnable example and a guard establish them.
 
+Current implementation receipt (2026-10-05, `5c8c31f`): `runtime/effra` and `examples/lifecycle.ef` establish managed Go ownership, cooperative cancellation, cleanup, and bounded current-scope inspection. `examples/go-interop` establishes the native Go adapter seam, retaining partial results; automatic source imports remain a gap. CLI/MCP inspection still describes a single source file, and JS lifecycle parity remains open. See [runtime contracts](docs/runtime.md).
+
 ## North stars
 
 | North star | It holds when | A candidate breaks it when |
@@ -38,13 +40,13 @@ Established 2026-10-05 from the owner's conversation, [design sketch](docs/desig
 | Sweep | Serves | Scope | Method | Done when |
 | --- | --- | --- | --- | --- |
 | Compile performance | Exceptionally fast compilation | Frontend, imports, generation, backend | Run `go test ./internal/compiler -run '^$' -bench BenchmarkCompile10KLines -benchmem`; for changed build paths compare matched Effra/Go cold, warm, private-edit, public-edit, and dependency-edit fixtures, recording toolchain/hardware/cache regime and stage timings. | Each changed stage has a reproducible receipt; regressions are addressed or explicitly carried. Missing fixtures remain gaps, not passing results. |
-| Lifecycle behavior | Owned lifetimes | Managed tasks, acquisition, cleanup, cancellation | Exercise parent/child shutdown, acquisition-vs-close, LIFO cleanup, panic/failure preservation, and cooperative foreign cancellation through the public runtime interface under `go test -race ./...`. Compare only supported target cases. | Each changed lifecycle ability has a behavior receipt, and every outstanding guarantee has a carried row. At baseline this sweep is pending runtime integration. |
+| Lifecycle behavior | Owned lifetimes | Managed tasks, acquisition, cleanup, cancellation | Exercise parent/child shutdown, acquisition-vs-close, LIFO cleanup, panic/failure preservation, and cooperative foreign cancellation through the public runtime interface under `go test -race ./...`. Compare only supported target cases. | Each changed lifecycle ability has a behavior receipt, and every outstanding guarantee has a carried row. Go runtime evidence exists; JS lifecycle comparison remains open. |
 | Inspection parity | Operability and agent introspection | CLI/MCP and advertised guards | Run `python3 scripts/smoke.py`; compare source contracts, revisions, target restrictions, and rejected stale/path-invalid requests. Check `project.describe` against implemented guards. | Supported queries agree, advertised capabilities match executable behavior, and new guardrails have a checked receipt. |
 
 ## Live check
 
 - Drive: `bun run gate` builds `bin/ef` and exercises native Go, JS library/entry execution, and the real stdio MCP process through `scripts/smoke.py`.
-- State: `./bin/ef inspect examples/main.ef greeting`, `./bin/ef explain examples/main.ef greeting`, and MCP `project.describe`/`project.check`. Runtime state view: none at baseline; it is a candidate in the lifecycle work.
+- State: `./bin/ef inspect examples/main.ef greeting`, `./bin/ef explain examples/main.ef greeting`, and MCP `project.describe`/`project.check`. For Go runtime state, `examples/lifecycle.ef` executes Runtime.inspect; there is no out-of-process runtime endpoint yet.
 - Stop: the smoke harness waits for its processes to exit; manual stdio MCP checks close stdin and wait for exit. Longer-lived server checks must record shutdown and scratch cleanup.
 
 ## Rejected

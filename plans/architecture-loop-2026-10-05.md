@@ -2,7 +2,7 @@
 
 Goal: establish the project's north stars and prior arts as the basis for building its glossary and architecture.
 
-Scope: establishment only. This ledger does not claim a completed architecture sweep or the architecture-loop close rule. Runtime integration is continuing separately in the managed-runtime Rift; it must refresh baseline/gap receipts when merged.
+Scope: establishment and runtime integration receipts. This ledger does not claim a completed architecture sweep or the architecture-loop close rule. Runtime work was developed in the managed-runtime Rift, and current implementation evidence is distinguished from the initial baseline below.
 
 ## Baseline
 
@@ -60,10 +60,31 @@ These are draft interpretations for asynchronous correction, not blockers. No be
 
 | Decision | From | Files | Status |
 | --- | --- | --- | --- |
-| Refresh ownership/type/inspection gap receipts after managed runtime integration | setup | NORTH_STAR.md, PRIOR_ARTS.md, this ledger | open |
+| Refresh ownership/type/inspection gap receipts after managed runtime integration | setup | NORTH_STAR.md, PRIOR_ARTS.md, this ledger | done: runtime receipt below |
 | Run the first full architecture pass over all unswept directories and open prior-art questions | setup | Architecture areas and research in PRIOR_ARTS.md | open |
 | Establish matched end-to-end build fixtures and select evidence-based budgets | setup | Compiler/build performance sweep | open |
 
 ## Close
 
 Establishment complete when both project files, canonical glossary, repository pointers, draft owner questions, and a passing gate exist. The full architecture loop remains open: unswept directories, To survey questions, and carried rows remain.
+
+## Runtime integration receipt
+
+- Runtime ownership: `c125a8f`; compiler/std-library integration and concrete examples: `5c8c31f`.
+- Driven: native `examples/lifecycle.ef`, Go `examples/go-interop`, existing JS sequential examples, actual CLI and stdio MCP smoke harness.
+- Observed: a scoped open file appears in Runtime.inspect; child interrupt and deadline shutdown finish; a real Go partial result survives error-channel adaptation; managed File rejects post-close reads. Source scopes/fibers/timeouts and Files/Runtime are explicitly Go-only.
+- Timeout currently uses the native runtime clock; Clock.sleep remains replaceable. No claim of fake-time deadline control is made. Decided by **Redesign From First Principles**: advertised requirements must correspond to an actual consumed service.
+- Coverage remains unswept; `runtime/effra` is a new unswept area. Runtime tests and a source review are receipts, not a complete architecture-loop pass or independent counsel.
+- Remaining: automatic source-level host imports, real SDK adoption tests, open-row/package inference, process-wide runtime inspection, JS lifecycle conformance, and matched build benchmarks.
+- Validation: `./scripts/gate.sh`, `go test -race ./...`, and `git diff --check` passed. The gate exercised native/JS sequential programs, Go lifecycle source, and the actual stdio MCP process. All check processes exited.
+- Current benchmark: the existing 10k-line parse/check fixture measured 3.30–3.35 ms/op, about 14.05 MB and 16,176 allocations on Apple M4 Pro/Go 1.27.1. It measures neither imports nor end-to-end builds.
+
+Current source count using the Baseline pathspec (after integration):
+
+| Package | Lines | Files |
+| --- | --- | --- |
+| cmd/ef | 242 | 1 |
+| internal/compiler | 1,537 | 5 |
+| internal/mcp | 316 | 1 |
+| runtime/effra | 637 | 5 |
+| Total | 2,732 | 12 |

@@ -4,14 +4,15 @@ This is a single-file compiler experiment, not the full design in design.md. The
 
 ## Supported surface
 
-- Immutable local bindings, string/bool/unit values, string concatenation, equality, and `if` expressions with two branches.
+- Immutable local bindings, string/bool/unit and i64 values, managed File handles, string concatenation, primitive equality, and `if` expressions with two branches. i64 literals are currently nonnegative; JS represents them as bigint.
 - Ordinary `fn` and lazy `effect fn`, with explicit parameter, result, failure, and service contracts.
 - Payload-free nominal errors: `error NotFound`; `fail NotFound` inside effect bodies.
 - Nominal services and self-contained implementations: `impl MemoryUsers for Users`.
 - `run` to execute a deferred effect within an effect body.
 - `.provide<Service>(Provider)` removes that service requirement.
 - `.catch<Failure>(pureFallback)` removes exactly that failure. This prototype deliberately accepts a pure replacement value rather than a lambda or effectful handler.
-- Built-in `Console.log(string) -> ()`, requiring Console, and its explicit Stdout provider.
+- Built-in Console/Stdout, Clock/LiveClock, Env/LiveEnv; Go additionally supplies Files/LiveFiles and Runtime/RuntimeLive. See [runtime.md](runtime.md) for contracts and foreign adapters.
+- Go-only `scope { ... }`, `fork effectCall()`, inferred fiber `join()` / `cancel()` / `interrupt()`, and lazy `.timeout(milliseconds)` adding Timeout. The checker conservatively retains child failure rows even when a child is not joined.
 
 Rows are normalized sets; declarations are upper bounds. Service calls use the service's declared contract even if one provider admits fewer failures. A library may retain requirements; the executable entry is an effect function named `main`, takes no parameters, and requires no remaining services. Its admitted typed failures are reported as runtime failures with nonzero exit status.
 
@@ -31,7 +32,7 @@ The optional JavaScript target lowers to pinned Effect 4.0.1, verified available
 
 ## Limits
 
-No payload-bearing errors, structs/enums, integers, generics/open rows, higher-order effect signatures, Layers, retry, timeout, scopes, fibers, resource ownership, imports, source maps, persistent/package caching, LSP, content mapper, semantic edits, runtime inspection, or an automated consumer TypeScript-check gate yet. Effect itself has lifecycle facilities; Effra does not expose or validate them yet. Service/error identities are local to this single-file experiment, not qualified package identities.
+No payload-bearing source errors, structs/enums, generics/open rows, higher-order effect signatures, Layers, retry, source-level host imports, source maps, persistent/package caching, LSP, content mapper, semantic edits, or automated consumer TypeScript-check gate yet. Go runtime failures can carry native payloads; the source language cannot inspect them yet. Go scope snapshots exist, but there is no process-wide runtime endpoint or instrumented wait-reason tree. JS lifecycle parity is not established; those operations produce EF110 on JS. Service/error identities remain local to this single-file experiment.
 
 Inspection revisions hash source bytes. Compiler/runtime/schema versions are separate metadata; this is not a complete build-cache key. Construction of an unused recipe may retain requirements in the recipe type without adding them to the enclosing executed body. The requirements row tracks managed service access, not a proof of complete purity or race freedom.
 
@@ -41,16 +42,20 @@ Measured 2026-10-05 on Apple M4 Pro, darwin/arm64, Go 1.27.1. `BenchmarkCompile1
 
 Reproduce: `go test ./internal/compiler -run '^$' -bench BenchmarkCompile10KLines -benchmem -count=3`.
 
+After managed-runtime integration, the same command on the same M4 Pro/Go 1.27.1 environment measured 3.30–3.35 ms/op, approximately 14.05 MB and 16,176 allocations. It still excludes imports, generation, Go compilation and linking; it establishes no matched end-to-end ratio.
+
 ## Validation receipt
 
-The gate verifies formatting, Go vet, compiler diagnostics/contracts, both backend runtimes' laziness/replay/recovery, provider isolation, nested execution, bottom branches, emitted library imports, nonzero host failure exits, and MCP initialization/query behavior. The generated Go conformance probe runs with the race detector; that evidence is for sequential code, not a claim of implemented concurrency semantics. A short parser/checker/emitter fuzz run completed over 1.2 million inputs without a crash before the explicit nesting bound was added. This is limited fuzz evidence, not a correctness proof. The compiler rejects parser nesting beyond 256 as unsupported prototype input.
+The gate verifies formatting, Go vet, compiler diagnostics/contracts, both backends' sequential laziness/replay/recovery, provider isolation, nested execution, emitted library imports, nonzero host failure exits, and MCP initialization/query behavior. The generated Go conformance probe uses the race detector. Go runtime tests additionally exercise acquisition-close races, concurrent close, child-before-parent cleanup, LIFO release, composite failure/defect preservation, cancellation hooks, timeout shutdown, native partial results, and closed File handles. The public smoke harness runs `examples/lifecycle.ef` and verifies JS rejects its Go-only capabilities. Use `go test -race ./...` for the full race check.
+
+A prior short parser/checker/emitter fuzz run completed over 1.2 million inputs without a crash before the explicit nesting bound was added. This is limited historical fuzz evidence, not a correctness proof or fresh lifecycle fuzz coverage. The compiler rejects parser nesting beyond 256.
 
 ## Native Go lowering boundaries
 
-Go success values are typed string/bool/unit, not boxed interpreter values. Effects are lazy `func(efContext) efExit[A]` closures; `run` emits ordinary calls and explicit propagation of typed failure/defect fields. Failure/service rows remain frontend checks and are erased in generated Go. Context copies implement lexical provider binding. There is no goroutine per effect, custom scheduler, or panic used for ordinary typed failures.
+Go success values are typed primitives/handles, not boxed interpreter values. Effects are lazy `func(efContext) efExit[A]` closures; `run` emits ordinary calls and explicit Exit propagation. Failure/service rows remain frontend checks and are erased in generated Go. Context copies implement lexical provider binding. Ordinary sequencing stays on the current goroutine; managed fork creates a goroutine with an owning scope.
 
-The generated program includes a small per-module runtime prelude for this experiment. Moving it into a reusable runtime package is a later packaging decision. Host Go panics remain Go panics; managed defects, cancellation, child fibers, acquisition, finalization, and cleanup guarantees are not implemented. This native slice is evidence for the sequential subset only. Native host failure rendering differs from Effect's diagnostics, while the admitted error identity is preserved.
+Generated programs import the reusable managed runtime bundled from `runtime/effra` into `dist/go/runtime`. They use exactly the tested runtime source, not a second handwritten scheduler prelude. Managed effect/finalizer panics become defects; arbitrary unmanaged goroutine panics and fatal process/runtime failures remain outside that guarantee. Native entry points forward interrupt/SIGTERM through context and wait for owned cleanup before reporting failure.
 
 Native builds rely on the installed Go toolchain and its normal compiler/build cache. Generated source is deterministic and unchanged bytes are not rewritten. Effra does not yet cache its own parsing/checking or interface summaries. Backend build/link time must be measured separately from the frontend microbenchmark.
 
-Warm native build sample: on the same Apple M4 Pro/Go 1.27.1 setup, five unchanged `ef build examples/main.ef` invocations took 40.44–42.26 ms, median 42.08 ms after one warm-up. This includes CLI startup, source checking/emission, and the cached `go build` invocation. It is a tiny no-op fixture; no cold-build, private-edit, public-edit, or matched-Go ratio has been established.
+Historical warm native build sample, before managed runtime integration: on the same Apple M4 Pro/Go 1.27.1 setup, five unchanged `ef build examples/main.ef` invocations took 40.44–42.26 ms, median 42.08 ms after one warm-up. This includes CLI startup, source checking/emission, and cached Go compilation. It is a tiny no-op fixture; no cold-build, private-edit, public-edit, or matched-Go ratio has been established.

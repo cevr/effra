@@ -125,6 +125,9 @@ func (s *Scope) Close() Cause {
 	}
 	s.mu.Lock()
 	s.outcome = append(Cause{}, outcome...)
+	s.resources = nil
+	s.hooks = nil
+	s.children = nil
 	s.state = Closed
 	close(s.done)
 	s.mu.Unlock()
@@ -184,18 +187,24 @@ type Snapshot struct {
 func (s *Scope) Snapshot() Snapshot {
 	s.mu.Lock()
 	names := []string{}
+	labelsTruncated := false
 	for _, r := range s.resources {
 		if len(names) == 100 {
 			break
 		}
-		names = append(names, r.name)
+		name := r.name
+		if len(name) > 256 {
+			name = name[:256]
+			labelsTruncated = true
+		}
+		names = append(names, name)
 	}
 	count := len(s.children)
 	limit := min(count, 100)
 	children := append([]ownedFiber{}, s.children[:limit]...)
 	out := Snapshot{ID: s.id, State: string(s.state), Children: count, Resources: names,
 		Acquisitions: s.acquisitions, CancellationRequested: s.ctx.Err() != nil,
-		ResourceCount: len(s.resources), Truncated: count > 100 || len(s.resources) > 100,
+		ResourceCount: len(s.resources), Truncated: labelsTruncated || count > 100 || len(s.resources) > 100,
 		ChildStates: []FiberSnapshot{}}
 	s.mu.Unlock()
 	for _, child := range children {

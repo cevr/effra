@@ -425,7 +425,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		if !inEffect {
 			c.diagnostic("EF105", "scope requires an effect function", e.Span)
 		}
-		t = c.block(e.Then, clone(env), inEffect)
+		t = c.block(e.Then, env, inEffect)
 	case "fork":
 		c.requireGo(e.Span, "owned fibers")
 		inner := c.expr(e.Left, env, inEffect)
