@@ -4,6 +4,8 @@ Effra's direction is **Go-like directness, algebraic data types, and explicit Ef
 
 These examples come from reading real Effect application and infrastructure code. They use generic domains and original examples. The [source review](research/effect-native-showcases.md) records the snapshots, comparisons and boundaries.
 
+The [contender roadmap](contender-roadmap.md) turns those patterns into concrete compiler, interop, runtime and tooling gaps, with acceptance gates for real application ports.
+
 | Showcase | Status |
 | --- | --- |
 | Service workflow and explicit composition | Runnable on Go and JS |

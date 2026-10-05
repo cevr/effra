@@ -106,3 +106,10 @@ Current source count using the Baseline pathspec (after integration):
 - Proposed ADTs, exhaustive match, payload errors, codec derivation, stream consumers, durable admission results and phase-aware infrastructure outputs remain clearly separated from implemented syntax. The recommendation is to implement the data-model slice before provider graphs/streams or deployment syntax.
 - Preserved explicit distinctions: decision values versus failures; static sums versus runtime decoding; scope ownership versus durable transactions; effect execution versus deployment Output resolution. No third-party deployments or private application code were published.
 - Full Effra gate passes. This is a source review and showcase receipt, not a completed architecture-loop sweep or a closure of HITL decisions.
+
+## Contender assessment
+
+- Added `docs/contender-roadmap.md`, grounding the adoption gaps in the same refreshed sources and current checker/importer/runtime seams. The existing primitive-only signatures, self-contained provider guard and pure fallback recovery are concrete port blockers.
+- Proposed five build areas with exit gates: data/package contracts; real host objects and managed adapters; dependent provider construction and recovery; deep server capabilities; fast inspection/development. Measurements and tooling apply throughout, rather than after feature work.
+- Proposed three adoption fixtures: JSON/SQL API, durable agent event bridge and process supervisor. Each must preserve the source protocol under failure and compare costs against an equivalent implementation. This is an assessment, not compiler/runtime implementation or proof of production readiness.
+- Kept transactions, migrations, replay/ACK policies, correlation and deployment graphs with their owning libraries/application services. No HITL decision was closed.

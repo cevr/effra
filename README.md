@@ -6,6 +6,8 @@ Effra explores ideas from [Borgo](https://github.com/borgo-lang/borgo) and [Effe
 
 The direction is **Go-like directness, algebraic data types, and explicit Effect-style contracts**. The [showcase guide](docs/showcases.md) connects these ideas to real application patterns and labels which features remain proposals.
 
+The [contender roadmap](docs/contender-roadmap.md) identifies what real ports still need: application data types, native SDK objects, dependent providers, codecs/streams, incremental tooling and measurable adoption tests.
+
 **Status: runnable prototype.** Syntax, APIs and inspection schemas are experimental. Go is the default target; JavaScript emits pinned Effect. This is a server language experiment, with no kernel or hard real-time execution profile.
 
 The runnable prototype is a small Go compiler that checks `.ef` source and produces native Go executables or JavaScript using Effect 4.0.1. It supports lazy effects, closed failure/service rows, nominal services, explicit provision, selective recovery, and canonical JSON inspection through CLI and read-only MCP. Both targets support owning scopes, child fibers, cooperative cancellation, and timeouts that wait for cleanup. Go additionally supports automatic primitive host imports, managed files, runtime snapshots, and an HTTP server.
