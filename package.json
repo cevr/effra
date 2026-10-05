@@ -1,0 +1,12 @@
+{
+  "name": "effra-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gate": "./scripts/gate.sh",
+    "demo": "go run ./cmd/ef run examples/main.ef"
+  },
+  "dependencies": {
+    "effect": "4.0.1"
+  }
+}

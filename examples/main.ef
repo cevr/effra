@@ -1,0 +1,34 @@
+// Deferred effects, nominal services, and selective recovery.
+error NotFound
+
+service Users {
+    effect fn get(id: string) -> string throws {NotFound}
+}
+
+impl MemoryUsers for Users {
+    effect fn get(id: string) -> string throws {NotFound} {
+        if id == "42" { "Ada" } else { fail NotFound }
+    }
+}
+
+fn welcome(name: string) -> string {
+    "Hello, " + name
+}
+
+effect fn greeting(id: string) -> string
+    throws {NotFound}
+    uses {Users}
+{
+    let user = run Users.get(id)
+    welcome(user)
+}
+
+effect fn main() -> () {
+    let found = run greeting("42").provide<Users>(MemoryUsers)
+        .catch<NotFound>("Unknown user")
+    run Console.log(found).provide<Console>(Stdout)
+
+    let absent = run greeting("missing").provide<Users>(MemoryUsers)
+        .catch<NotFound>("Unknown user")
+    run Console.log(absent).provide<Console>(Stdout)
+}

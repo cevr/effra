@@ -1,0 +1,4 @@
+// Must fail with EF108: Console has not been declared or supplied.
+effect fn main() -> () {
+    run Console.log("missing provider")
+}
