@@ -2,6 +2,8 @@
 
 An experimental language for servers: explicit, inspectable effect contracts, `.ef` source, and the `ef` command.
 
+Project direction is recorded in [NORTH_STAR.md](NORTH_STAR.md), research comparisons in [PRIOR_ARTS.md](PRIOR_ARTS.md), and canonical terms in [GLOSSARY.md](GLOSSARY.md). The [architecture-loop ledger](plans/architecture-loop-2026-10-05.md) separates established direction, draft questions, and pending architecture work.
+
 The runnable prototype is a small Go compiler that checks `.ef` source and produces native Go executables or JavaScript using Effect 4.0.1. It supports lazy effects, closed failure/service rows, nominal services, explicit provision, selective recovery, and canonical JSON inspection. It also serves that semantic model through a read-only MCP server.
 
 ## Try it
