@@ -27,7 +27,7 @@ The frontend is Go with no third-party Go dependencies. Checked IR lowers to pin
 
 ## Limits
 
-No Go backend, payload-bearing errors, structs/enums, integers, generics/open rows, higher-order effect signatures, Layers, retry, timeout, scopes, fibers, resource ownership, imports, source maps, persistent/package caching, LSP, content mapper, semantic edits, runtime inspection, or type checking of generated declarations yet. Effect itself has lifecycle facilities; Effra does not expose or validate them yet. Service/error identities are local to this single-file experiment, not qualified package identities.
+No Go backend, payload-bearing errors, structs/enums, integers, generics/open rows, higher-order effect signatures, Layers, retry, timeout, scopes, fibers, resource ownership, imports, source maps, persistent/package caching, LSP, content mapper, semantic edits, runtime inspection, or an automated consumer TypeScript-check gate yet. Effect itself has lifecycle facilities; Effra does not expose or validate them yet. Service/error identities are local to this single-file experiment, not qualified package identities.
 
 Inspection revisions hash source bytes. Compiler/runtime/schema versions are separate metadata; this is not a complete build-cache key. Construction of an unused recipe may retain requirements in the recipe type without adding them to the enclosing executed body. The requirements row tracks managed service access, not a proof of complete purity or race freedom.
 
@@ -36,3 +36,7 @@ Inspection revisions hash source bytes. Compiler/runtime/schema versions are sep
 Measured 2026-10-05 on Apple M4 Pro, darwin/arm64, Go 1.27.1. `BenchmarkCompile10KLines` checks 2,000 five-line independent effect functions (114,890 bytes): three runs averaged 3.15–3.23 ms/op, approximately 14 MB allocated and 16,144 allocations per compile. This is an in-process parse/check measurement; it excludes CLI startup, JSON output, emission, dependency loading, and backend execution. It contains no imports or adverse row-polymorphism cases. No claimed speed budget has been established.
 
 Reproduce: `go test ./internal/compiler -run '^$' -bench BenchmarkCompile10KLines -benchmem -count=3`.
+
+## Validation receipt
+
+The gate verifies formatting, Go vet, compiler diagnostics/contracts, Effect runtime laziness/replay/recovery, emitted library imports, nonzero host failure exits, and MCP initialization/query behavior. A short parser/checker/emitter fuzz run completed over 1.2 million inputs without a crash before the explicit nesting bound was added. This is limited fuzz evidence, not a correctness proof. The compiler rejects parser nesting beyond 256 as unsupported prototype input.

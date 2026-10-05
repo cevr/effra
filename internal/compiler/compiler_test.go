@@ -157,7 +157,7 @@ if (calls !== 2) throw new Error("program not replayable");
 if (await Effect.runPromise(__ef_function_recovered("missing")) !== "unknown") throw new Error("recovery failed");
 if (await Effect.runPromise(__ef_function_recovered("42")) !== "Hi Ada") throw new Error("success changed");
 const other = await Effect.runPromiseExit(__ef_function_recovered("broken"));
-if (other._tag !== "Failure") throw new Error("unhandled failure disappeared");
+if (other._tag !== "Failure" || !other.cause.reasons.some(reason => reason._tag === "Fail" && reason.error._tag === "Broken")) throw new Error("unhandled typed failure disappeared");
 await Effect.runPromise(__ef_function_nested());
 console.log("conformance: passed");
 `)
@@ -200,4 +200,29 @@ func fmtInt(i int) string {
 		i /= 10
 	}
 	return s
+}
+
+func FuzzCompiler(f *testing.F) {
+	for _, source := range []string{"", "effect fn main() -> string { \"hello\" }", "service S { effect fn get() -> () }", "fn missing() -> string {", "error E effect fn main() -> string throws {E} { fail E }"} {
+		f.Add(source)
+	}
+	f.Fuzz(func(t *testing.T, source string) {
+		if len(source) > 10000 {
+			t.Skip()
+		}
+		r := Compile(source)
+		if r.Checked {
+			if _, _, err := r.Emit(false); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+}
+
+func TestNestingBound(t *testing.T) {
+	source := "fn deeplyNested() -> string { " + strings.Repeat("(", 300) + "\"x\"" + strings.Repeat(")", 300) + " }"
+	r := Compile(source)
+	if r.Checked || !hasCode(r, "EF002") {
+		t.Fatal("excessive nesting was admitted")
+	}
 }

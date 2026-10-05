@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/mcp"
 )
 
 func main() {
@@ -23,6 +24,9 @@ func printJSON(v any) error {
 	return encoder.Encode(v)
 }
 func load(path string) (*compiler.Result, error) {
+	if filepath.Ext(path) != ".ef" {
+		return nil, fmt.Errorf("source file must have .ef extension")
+	}
 	source, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -31,8 +35,18 @@ func load(path string) (*compiler.Result, error) {
 }
 func command(args []string) error {
 	if len(args) == 0 {
-		fmt.Println("Effra prototype\nusage: ef check FILE | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--entry] | run FILE")
+		fmt.Println("Effra prototype\nusage: ef check FILE | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--entry] | run FILE | mcp [ROOT]")
 		return nil
+	}
+	if args[0] == "mcp" {
+		root := "."
+		if len(args) > 2 {
+			return fmt.Errorf("usage: ef mcp [ROOT]")
+		}
+		if len(args) == 2 {
+			root = args[1]
+		}
+		return mcp.Serve(root, os.Stdin, os.Stdout)
 	}
 	if len(args) < 2 {
 		return fmt.Errorf("source file required")
@@ -43,6 +57,9 @@ func command(args []string) error {
 	}
 	switch args[0] {
 	case "check":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: ef check FILE")
+		}
 		if err := printJSON(r); err != nil {
 			return err
 		}
@@ -64,6 +81,9 @@ func command(args []string) error {
 		return printJSON(map[string]any{"schemaVersion": 1, "revision": r.Revision, "checked": r.Checked, "symbol": symbol, "diagnostics": r.Diagnostics})
 	case "build", "run":
 		entry := args[0] == "run"
+		if entry && len(args) != 2 {
+			return fmt.Errorf("usage: ef run FILE")
+		}
 		if args[0] == "build" {
 			if len(args) > 3 || (len(args) == 3 && args[2] != "--entry") {
 				return fmt.Errorf("usage: ef build FILE [--entry]")

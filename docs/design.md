@@ -1,6 +1,6 @@
-# EffectGo: a language design sketch
+# Effra: a language design sketch
 
-Research and proposal prepared 2026-10-05. All EffectGo syntax below is illustrative; no compiler or runtime has been implemented or benchmarked.
+Research and proposal prepared 2026-10-05. This document describes the wider proposed language. The small runnable subset and its measurements are recorded in [prototype.md](prototype.md); syntax outside that subset remains illustrative.
 
 ## Recommendation
 
@@ -8,7 +8,7 @@ Build a language for servers and applications with Borgo-style algebraic data ty
 
 The proposition is: **an explicit, inspectable language for servers and applications where the compiler knows what a program returns, how it can fail, what services it needs, and which targets can execute it.** Operability, agent introspection, clear guardrails, server/OS access, and compile speed are foundational requirements.
 
-Silk already explores Effect as a language. EffectGo's distinguishing choice would be an inspectable server/application model with JavaScript/Effect and Go backends. Servers are the intended systems scope; kernels, bare-metal execution, and hard real-time guarantees are outside the requirements. Managed memory is appropriate for both targets.
+Silk already explores Effect as a language. Effra's distinguishing choice would be an inspectable server/application model with JavaScript/Effect and Go backends. Servers are the intended systems scope; kernels, bare-metal execution, and hard real-time guarantees are outside the requirements. Managed memory is appropriate for both targets.
 
 ## What the sources establish
 
@@ -60,7 +60,7 @@ Use familiar syntax for data: structs, enums, exhaustive `match`, generics, Opti
 
 Track two normalized rows alongside the success type: failures and required service keys. A row is an unordered, duplicate-free set that may have an open tail parameter.
 
-This is a proposed EffectGo design, not a claim that the inputs share this representation. Silk has a requirement-row kind; its failure parameter is an ordinary type that can be a union. See [Silk Effect contracts](https://silklang.org/docs/reference/effect-contracts).
+This is a proposed Effra design, not a claim that the inputs share this representation. Silk has a requirement-row kind; its failure parameter is an ordinary type that can be a union. See [Silk Effect contracts](https://silklang.org/docs/reference/effect-contracts).
 
 | Composition | Success | Failure row | Requirement row |
 | --- | --- | --- | --- |
@@ -86,12 +86,12 @@ Treat the compiler's semantic model as a supported inspection API, shared by the
 Illustrative CLI operations, not implemented commands:
 
 ```text
-efg inspect type --at src/users.efg:42 --json
-efg inspect symbol app.greeting --json
-efg explain requirement app.greeting Users --json
-efg check --target go --json
-efg inspect build --json
-efg inspect runtime --pid 1234 --json
+ef inspect type --at src/users.ef:42 --json
+ef inspect symbol app.greeting --json
+ef explain requirement app.greeting Users --json
+ef check --target go --json
+ef inspect build --json
+ef inspect runtime --pid 1234 --json
 ```
 
 Type/symbol inspection returns success type, named failure alternatives, service/role requirements, generic/row constraints, supported target constraints, referenced declarations, and safety/trust boundaries. An explanation identifies the relevant call or binding that introduced an error or requirement. Providing a service records what was discharged and what remains. Diagnostics carry stable codes, expected/actual contracts, source spans, target, and a short causal path rather than only prose or a generic expansion.
@@ -117,11 +117,11 @@ The aim is a tool-answerable question for each failure: what is happening, who o
 
 ## Compiler-backed MCP and semantic editing
 
-Ship an optional `efg mcp` entry point alongside the CLI and language server. MCP is a protocol adapter over the same semantic workspace service, not a second analyzer or a collection of shell commands that scrape compiler output. That workspace service owns incremental parsing/checking, package summaries, stable symbol handles, revisions, and explanations. It serves CLI, LSP, MCP, and build clients without changing the standalone compiler's availability.
+Ship an optional `ef mcp` entry point alongside the CLI and language server. MCP is a protocol adapter over the same semantic workspace service, not a second analyzer or a collection of shell commands that scrape compiler output. That workspace service owns incremental parsing/checking, package summaries, stable symbol handles, revisions, and explanations. It serves CLI, LSP, MCP, and build clients without changing the standalone compiler's availability.
 
 The useful Zerolang precedent is its compiler-mediated graph query/edit loop: semantic node handles, revision/hash expectations, checked patches, focused inspection, and version-matched agent guidance. Its architecture makes the graph authoritative and source text a projection. Sources: [Zerolang graph architecture](https://zerolang.ai/concepts/graph-architecture), [semantic edits](https://github.com/vercel-labs/zerolang/blob/7e1a64d27cc37671df31c6370890bce86f5135e1/docs/articles/concepts/semantic-vs-text.md), [bundled guidance](https://zerolang.ai/install).
 
-For EffectGo, retain `.efg` text as the authoritative, editor/Git-friendly representation. Build a rebuildable semantic index and give agents compiler-checked semantic operations over that index. Human edits invalidate and rebuild the affected index entries; there is no separately authoritative graph file to import/export. This is a design choice, not a claim that Zerolang's graph-first approach is equivalent.
+For Effra, retain `.ef` text as the authoritative, editor/Git-friendly representation. Build a rebuildable semantic index and give agents compiler-checked semantic operations over that index. Human edits invalidate and rebuild the affected index entries; there is no separately authoritative graph file to import/export. This is a design choice, not a claim that Zerolang's graph-first approach is equivalent.
 
 Proposed initial MCP tools (not implemented):
 
@@ -166,7 +166,7 @@ The compiler checks missing services, ambiguous providers, roles, and statically
 
 Implementations capture their acquired dependencies. A caller requiring Users should not also have to name Database solely because UsersLive uses one internally. Caller-visible failures remain those declared by the Users operations; Layer construction failures remain in the startup path.
 
-In tests, supply UsersMemory, a recording Logger, and a controllable Clock through the same provision mechanism. The compiler checks the resulting requirements. Fake time controls EffectGo timers; it does not make Go goroutine scheduling or arbitrary foreign I/O deterministic.
+In tests, supply UsersMemory, a recording Logger, and a controllable Clock through the same provision mechanism. The compiler checks the resulting requirements. Fake time controls Effra timers; it does not make Go goroutine scheduling or arbitrary foreign I/O deterministic.
 
 ## Concurrency and resources
 
@@ -174,7 +174,7 @@ Use **scopes as the lifetime boundary** for child tasks and acquired resources. 
 
 Scopes form a tree. Application scope owns long-lived services; request scope owns request work; operation scopes own narrower parallel groups and resources. Context may carry the cancellation signal into Go calls, but Scope closure is the operation that establishes completed shutdown.
 
-An EffectGo Fiber is a managed task whose execution uses a Go goroutine. It carries parent ownership, cancellation, completion, service context, and tracing state. Ordinary sequencing stays in the current goroutine; constructing an Effect does not spawn anything.
+An Effra Fiber is a managed task whose execution uses a Go goroutine. It carries parent ownership, cancellation, completion, service context, and tracing state. Ordinary sequencing stays in the current goroutine; constructing an Effect does not spawn anything.
 
 Define different contracts for different operations:
 
@@ -208,7 +208,7 @@ Effect typing and an Effect runtime are different design layers. Error/service r
 The JS/Effect backend deliberately adopts Effect's execution model. The Go backend may lower straight-line effect bodies to ordinary Go control flow with explicit context, result propagation, cancellation safe points, and cleanup. Optimizations may fuse away intermediate descriptions only when laziness, error/cancellation ordering, scope lifetime, and observability contracts remain equivalent. Do not promise zero allocation for arbitrary higher-order or escaping Effects.
 
 ```text
-.efg source
+.ef source
   -> parse and resolve
   -> infer values + failure rows + capability rows
   -> typed effect IR
@@ -223,18 +223,18 @@ A first representation could be a lazy closure: `Effect[A,E]` containing a funct
 
 This representation preserves laziness without requiring a port of Effect's JavaScript interpreter or another scheduler above Go. It still needs measured work on closure allocation and stack-safe deeply composed programs. Growing goroutine stacks are not an unlimited-stack guarantee. Use iterative/trampolined combinator execution or explicit suspension where necessary; optimize only after conformance tests exist.
 
-Generated code should be readable and carry source mappings, so Go tooling remains useful. Go libraries remain Go libraries. Export wrappers translate an EffectGo operation to explicit Go provider/context arguments and `(T,error)` or a richer Exit API when callers need cancellation and defects separately.
+Generated code should be readable and carry source mappings, so Go tooling remains useful. Go libraries remain Go libraries. Export wrappers translate an Effra operation to explicit Go provider/context arguments and `(T,error)` or a richer Exit API when callers need cancellation and defects separately.
 
 ## Compile speed is a language constraint
 
 User requirement: compilation must feel exceptionally fast, comparable to Go. Treat this as a constraint on the language and build architecture from the first prototype, rather than a later optimization. Emitting Go alone does not meet it: the pipeline adds parsing, semantic analysis, and generation before Go compilation and linking.
 
-Go's compiler operates per package and imports compiled export data, including type information and selected generic/inlining bodies, rather than reparsing imported source at every compilation. Its build command caches compilation results. These are relevant foundations, not measured proof about EffectGo. Sources: [Go package compilation](https://go.dev/cmd/compile/), [Go compiler export data](https://go.dev/src/cmd/compile/README), [Go build caching](https://pkg.go.dev/cmd/go#hdr-Build_and_test_caching).
+Go's compiler operates per package and imports compiled export data, including type information and selected generic/inlining bodies, rather than reparsing imported source at every compilation. Its build command caches compilation results. These are relevant foundations, not measured proof about Effra. Sources: [Go package compilation](https://go.dev/cmd/compile/), [Go compiler export data](https://go.dev/src/cmd/compile/README), [Go build caching](https://pkg.go.dev/cmd/go#hdr-Build_and_test_caching).
 
 Recommended constraints:
 
 - Compile and check packages independently. Require explicit exported type/failure/service contracts, including generic row constraints, so clients need interface summaries rather than dependency bodies.
-- Store versioned interface summaries and content-addressed artifacts. Cache keys include source, imported interface hashes, compiler/runtime versions, target, options, and Go binding metadata. An implementation-only edit can preserve the EffectGo interface hash and avoid rechecking clients; Go independently decides which backend compilation/link artifacts remain valid.
+- Store versioned interface summaries and content-addressed artifacts. Cache keys include source, imported interface hashes, compiler/runtime versions, target, options, and Go binding metadata. An implementation-only edit can preserve the Effra interface hash and avoid rechecking clients; Go independently decides which backend compilation/link artifacts remain valid.
 - Cache imported Go type information and binding contracts against package/toolchain/build inputs. Do not walk and reparse the entire Go dependency graph for each edit.
 - Give failure/service rows a dedicated compiler representation with interned nominal IDs, normalized sets, and explicit open-row constraints. Avoid implementing the model through recursive conditional types, implicit instance search, or unrestricted type-level computation. Benchmark higher-order row union/subtraction and pathological cases; ordinary set operations alone do not prove cheap inference.
 - Preserve Go generics where feasible. Avoid a second exhaustive monomorphization pass, whole-program specialization, or generating a copy of the runtime for every program. Put runtime code in reusable Go packages.
@@ -247,8 +247,8 @@ Provisional performance budgets, to be validated on a fixed reference machine an
 
 | Scenario | Proposed acceptance target |
 | --- | --- |
-| Warm no-op build | EffectGo frontend/cache overhead below 20 ms |
-| Implementation edit in a roughly 10k-line package | EffectGo recheck/emission below 100 ms; unrelated packages not rechecked |
+| Warm no-op build | Effra frontend/cache overhead below 20 ms |
+| Implementation edit in a roughly 10k-line package | Effra recheck/emission below 100 ms; unrelated packages not rechecked |
 | Complete build or edit-to-binary | p95 wall time within 1.25x the equivalent Go application in the same cache regime |
 
 These are desired budgets, not existing results. Compare cold builds, warm builds, private implementation edits, public contract edits, and dependency updates separately; include generation, compilation, and linking, and report memory use. Benchmark compiler scaling on packages and dependency graphs, plus adverse row-polymorphism fixtures. No-op cache speed cannot substitute for cold compilation performance. Keep a compiler performance regression gate alongside runtime conformance tests.
@@ -291,13 +291,13 @@ The Go target should expose efficient server facilities: byte buffers, fixed-wid
 
 ## TypeScript content-mapper integration
 
-The user identified [typescript-go PR #4712, Content mappers](https://github.com/microsoft/typescript-go/pull/4712). It merged August 19, 2026. The protocol transforms foreign source into virtual JS/TS with source-span mappings and diagnostics, allowing TypeScript tooling to work across the boundary. Content-mapped inputs do not produce JavaScript through TypeScript emit; EffectGo must emit runnable code itself. Complex transformed syntax still needs language-specific tooling.
+The user identified [typescript-go PR #4712, Content mappers](https://github.com/microsoft/typescript-go/pull/4712). It merged August 19, 2026. The protocol transforms foreign source into virtual JS/TS with source-span mappings and diagnostics, allowing TypeScript tooling to work across the boundary. Content-mapped inputs do not produce JavaScript through TypeScript emit; Effra must emit runnable code itself. Complex transformed syntax still needs language-specific tooling.
 
 The merged [TypeScript follow-up #63936](https://github.com/microsoft/TypeScript/pull/63936) adds declaration maps and multi-projection hover support. [LSP middleware #64583](https://github.com/microsoft/TypeScript/pull/64583), merged October 2, permits VS Code extensions to customize language-service responses. Merge status was verified through GitHub; this research did not validate a particular installed compiler/editor version.
 
-Proposed architecture: the compiler owns EffectGo parsing, checking, canonical types, and diagnostics; a content-mapper adapter exposes a virtual TypeScript/Effect projection for TS ecosystem interop and mapped editor features. Emit runnable JS/Effect and consumer declarations separately. Use the same semantic data for EffectGo's own LSP/agent inspection API, so Go projects do not depend on TypeScript to explain their contracts. Keep TS projection checking optional for the fast standalone build path; validate it in interop/conformance tests and editor workloads.
+Proposed architecture: the compiler owns Effra parsing, checking, canonical types, and diagnostics; a content-mapper adapter exposes a virtual TypeScript/Effect projection for TS ecosystem interop and mapped editor features. Emit runnable JS/Effect and consumer declarations separately. Use the same semantic data for Effra's own LSP/agent inspection API, so Go projects do not depend on TypeScript to explain their contracts. Keep TS projection checking optional for the fast standalone build path; validate it in interop/conformance tests and editor workloads.
 
-Mapped edits need particular care: #4712 permits write-back only through exact verbatim spans. Generated Effect sequencing is transformed syntax, so automatic refactors cannot safely be translated by ordinary position mapping alone. EffectGo owns language-aware edits and formatting; TypeScript supplies the features that the selected projections can map faithfully. The integration makes JS tooling more feasible; it does not supply EffectGo's semantic rules or Go backend.
+Mapped edits need particular care: #4712 permits write-back only through exact verbatim spans. Generated Effect sequencing is transformed syntax, so automatic refactors cannot safely be translated by ordinary position mapping alone. Effra owns language-aware edits and formatting; TypeScript supplies the features that the selected projections can map faithfully. The integration makes JS tooling more feasible; it does not supply Effra's semantic rules or Go backend.
 
 ## Implementation path and decision gates
 
@@ -310,8 +310,4 @@ Use Borgo's existing front end/backend as a prototype substrate if it helps answ
 
 Defer freestanding/no-GC execution, a complete Rust-like ownership checker, general resumable algebraic-effect handlers, a replacement Go scheduler, durable workflows, and the full Effect package ecosystem. Managed task/resource ownership and safe cross-task mutation boundaries remain required. Checked service/failure rows are not the same as arbitrary continuation-capturing effect handlers.
 
-The first proof should be concrete: a compiler rejects a missing Users provider, selective recovery removes NotFound while preserving DbError, retry repeats the deferred operation, and cancelled concurrent work releases its resources before the owner reports completion. Once those hold in a real Go binary, there is a credible foundation for EffectGo.
-
-## Naming update
-
-The language is now Effra; source uses `.ef` and the command is `ef`. Earlier `EffectGo`, `.efg`, and `efg` names above belong to the original proposal. This sketch is not an implementation claim.
+The first proof should be concrete: a compiler rejects a missing Users provider, selective recovery removes NotFound while preserving DbError, retry repeats the deferred operation, and cancelled concurrent work releases its resources before the owner reports completion. Once those hold in a real Go binary, there is a credible foundation for Effra.

@@ -27,11 +27,12 @@ type syntaxFault struct{ diagnostic Diagnostic }
 type parser struct {
 	tokens []token
 	at     int
+	depth  int
 }
 type Param struct {
-	Name string
-	Type string
-	Span Span
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Span Span   `json:"span"`
 }
 type Function struct {
 	Name     string
@@ -285,6 +286,11 @@ func (p *parser) function(body bool) *Function {
 	return f
 }
 func (p *parser) block() *Block {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > 256 {
+		p.fail(p.peek(), "syntax nesting exceeds prototype limit of 256")
+	}
 	p.expect("{")
 	b := &Block{}
 	for !p.accept("}") {
@@ -308,6 +314,11 @@ func (p *parser) block() *Block {
 	return b
 }
 func (p *parser) expr(min int) *Expr {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > 256 {
+		p.fail(p.peek(), "syntax nesting exceeds prototype limit of 256")
+	}
 	start := p.take()
 	e := &Expr{Span: start.span}
 	switch {

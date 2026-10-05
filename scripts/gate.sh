@@ -6,4 +6,6 @@ if [ -f go.mod ]; then
   test -z "$(gofmt -l cmd internal)"
   go vet ./...
   go test ./...
+  go build -o bin/ef ./cmd/ef
+  python3 scripts/smoke.py
 fi
