@@ -1,0 +1,23 @@
+error Bad
+
+effect fn immediate() -> string { "child joined" }
+effect fn pending() -> string uses {Clock} { run Clock.sleep(10000); "late" }
+effect fn bad() -> string throws {Bad} { fail Bad }
+
+effect fn program() -> () throws {Bad} uses {Clock, Console} {
+    scope {
+        let child = fork immediate()
+        let text = run child.join()
+        run Console.log(text)
+        let stopped = fork pending()
+        run stopped.interrupt()
+        let deadline = run pending().timeout(1).catch<Timeout>("timed out")
+        run Console.log(deadline)
+        let failed = fork bad()
+        let recovered = run failed.join().catch<Bad>("recovered")
+        run Console.log(recovered)
+    }
+}
+effect fn main() -> () throws {Bad} {
+    run program().provide<Clock>(LiveClock).provide<Console>(Stdout)
+}

@@ -1,0 +1,22 @@
+import go strings "strings"
+import go sdk "effra.local/prototype/examples/sdk"
+
+effect fn route(path: string) -> string throws {GoError} uses {Foreign, Files} {
+    if path == "/health" { "ok" } else {
+        if path == "/file" {
+            run Files.readFile("examples/fixture.txt").catch<IoError>("file unavailable")
+        } else {
+            let id = run strings.TrimPrefix(path, "/users/")
+            let user = run sdk.Lookup(id).orFail().timeout(100)
+                .catch<Timeout>("timed out")
+            "Hello, " + user
+        }
+    }
+}
+
+effect fn main() -> () throws {IoError} {
+    run Http.serve("127.0.0.1:0", route)
+        .provide<Http>(GoHttp)
+        .provide<Foreign>(Host)
+        .provide<Files>(LiveFiles)
+}

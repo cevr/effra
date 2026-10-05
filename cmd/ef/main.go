@@ -31,7 +31,7 @@ func load(path, target string) (*compiler.Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return compiler.CompileFor(string(source), target), nil
+	return compiler.CompileAt(string(source), target, filepath.Dir(path)), nil
 }
 
 type options struct {
@@ -125,7 +125,7 @@ func command(args []string) error {
 			}
 			return fmt.Errorf("unknown symbol %s", opts.positional[1])
 		}
-		return printJSON(map[string]any{"schemaVersion": 1, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "symbol": symbol, "diagnostics": r.Diagnostics})
+		return printJSON(map[string]any{"schemaVersion": 1, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "symbol": symbol, "bindings": r.Bindings, "diagnostics": r.Diagnostics})
 	case "build", "run":
 		var path string
 		if opts.target == "go" {
@@ -180,7 +180,10 @@ func buildGo(r *compiler.Result, source, output string) (string, error) {
 	if err = os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
-	if err = writeChanged(filepath.Join("dist", "go", "go.mod"), []byte("module effra.generated\n\ngo 1.27\n")); err != nil {
+	if err = writeChanged(filepath.Join("dist", "go", "go.mod"), r.ModuleFile()); err != nil {
+		return "", err
+	}
+	if err = writeChanged(filepath.Join("dist", "go", "go.sum"), r.ModuleSum); err != nil {
 		return "", err
 	}
 	if err = compiler.WriteRuntime(filepath.Join("dist", "go")); err != nil {
@@ -200,7 +203,7 @@ func buildGo(r *compiler.Result, source, output string) (string, error) {
 	if err = os.MkdirAll(filepath.Dir(absolute), 0755); err != nil {
 		return "", err
 	}
-	// Generated programs use only the Go standard library; the resulting executable is standalone.
+	// Imported packages use the resolved module graph; the executable is standalone.
 	child := exec.Command("go", "build", "-trimpath", "-o", absolute, ".")
 	child.Dir = dir
 	child.Stdout = os.Stderr

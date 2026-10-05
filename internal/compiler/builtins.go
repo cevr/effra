@@ -12,9 +12,10 @@ func builtins() []*Service {
 		{Name: "Env", Methods: []*Function{method("get", "string", []Param{p("name", "string")})}},
 		{Name: "Runtime", Methods: []*Function{method("inspect", "string", nil)}},
 		{Name: "Foreign"},
+		{Name: "Http", Methods: []*Function{method("serve", "()", []Param{p("address", "string"), p("handler", "Handler")}, "IoError")}},
 	}
 }
 func builtinProviders() []*Provider {
-	return []*Provider{{Name: "Stdout", Service: "Console"}, {Name: "LiveClock", Service: "Clock"}, {Name: "LiveFiles", Service: "Files"}, {Name: "LiveEnv", Service: "Env"}, {Name: "RuntimeLive", Service: "Runtime"}, {Name: "Host", Service: "Foreign"}}
+	return []*Provider{{Name: "Stdout", Service: "Console"}, {Name: "LiveClock", Service: "Clock"}, {Name: "LiveFiles", Service: "Files"}, {Name: "LiveEnv", Service: "Env"}, {Name: "RuntimeLive", Service: "Runtime"}, {Name: "Host", Service: "Foreign"}, {Name: "GoHttp", Service: "Http"}}
 }
 func builtinErrors() []string { return []string{"IoError", "Timeout", "GoError"} }

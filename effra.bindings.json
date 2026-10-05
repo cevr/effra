@@ -1,0 +1,6 @@
+{
+  "effra.local/prototype/examples/sdk.Lookup": {
+    "context": "fiber",
+    "cancellation": "cooperative"
+  }
+}

@@ -57,11 +57,15 @@ type Provider struct {
 	Span    Span
 }
 type Program struct {
-	GoOnly    bool
-	Errors    map[string]Span
-	Services  []*Service
-	Providers []*Provider
-	Functions []*Function
+	Imports     []GoImport
+	Bindings    map[string]Binding
+	Modules     []*goModule
+	UsedImports map[string]bool
+	GoOnly      bool
+	Errors      map[string]Span
+	Services    []*Service
+	Providers   []*Provider
+	Functions   []*Function
 }
 type Block struct{ Statements []*Statement }
 type Statement struct {
@@ -172,9 +176,21 @@ func parse(source string) (program *Program, diagnostics []Diagnostic) {
 		}
 	}()
 	p := parser{tokens: tokens}
-	program = &Program{Errors: map[string]Span{}}
+	program = &Program{Errors: map[string]Span{}, Bindings: map[string]Binding{}, UsedImports: map[string]bool{}}
 	for p.peek().kind != "eof" {
 		switch p.peek().text {
+		case "import":
+			p.take()
+			p.expect("go")
+			alias := p.name()
+			path := p.take()
+			if path.kind != "string" {
+				p.fail(path, "expected Go package path string")
+			}
+			var decoded string
+			_ = json.Unmarshal([]byte(path.text), &decoded)
+			program.Imports = append(program.Imports, GoImport{alias.text, decoded, alias.span})
+			p.accept(";")
 		case "error":
 			p.take()
 			name := p.name()
@@ -389,7 +405,11 @@ func (p *parser) expr(min int) *Expr {
 		}
 		if p.accept(".") {
 			method := p.name()
-			if method.text == "timeout" {
+			if method.text == "orFail" {
+				p.expect("(")
+				p.expect(")")
+				e = &Expr{Kind: "orFail", Left: e, Span: method.span}
+			} else if method.text == "timeout" {
 				p.expect("(")
 				arg := p.expr(0)
 				p.expect(")")

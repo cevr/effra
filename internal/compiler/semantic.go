@@ -29,11 +29,14 @@ type Symbol struct {
 	Contributions []Contribution `json:"contributions"`
 }
 type Timings struct {
-	ParseMicros int64 `json:"parseMicros"`
-	CheckMicros int64 `json:"checkMicros"`
-	TotalMicros int64 `json:"totalMicros"`
+	ImportMicros int64 `json:"importMicros"`
+	ParseMicros  int64 `json:"parseMicros"`
+	CheckMicros  int64 `json:"checkMicros"`
+	TotalMicros  int64 `json:"totalMicros"`
 }
 type Result struct {
+	ModuleSum     []byte       `json:"-"`
+	Bindings      []Binding    `json:"bindings,omitempty"`
 	SchemaVersion int          `json:"schemaVersion"`
 	Revision      string       `json:"revision"`
 	Target        string       `json:"target"`
@@ -88,6 +91,9 @@ func difference(a, b []string) []string {
 }
 func Compile(source string) *Result { return CompileFor(source, "go") }
 func CompileFor(source, target string) *Result {
+	return CompileAt(source, target, ".")
+}
+func CompileAt(source, target, dir string) *Result {
 	start := time.Now()
 	hash := sha256.Sum256([]byte(source))
 	r := &Result{SchemaVersion: 1, Revision: hex.EncodeToString(hash[:]), Target: target, Diagnostics: []Diagnostic{}, Symbols: []Symbol{}}
@@ -103,6 +109,7 @@ func CompileFor(source, target string) *Result {
 		return r
 	}
 	r.Program = program
+	r.loadImports(dir)
 	c := &checker{program: program, result: r, functions: map[string]*Function{}, services: map[string]*Service{}, providers: map[string]*Provider{}}
 	checkStart := time.Now()
 	c.check()
@@ -132,6 +139,9 @@ func (c *checker) check() {
 			c.diagnostic("EF101", "duplicate declaration "+name, span)
 		}
 		names[name] = true
+	}
+	for _, imp := range c.program.Imports {
+		claim(imp.Alias, imp.Span)
 	}
 	errors := make([]string, 0, len(c.program.Errors))
 	for name := range c.program.Errors {
@@ -365,14 +375,23 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			e.Text = "local"
 		} else if p, exists := c.providers[e.Name]; exists {
 			t = value("provider:" + p.Service)
-			if p.Service == "Files" || p.Service == "Runtime" || p.Service == "Foreign" {
+			if p.Service == "Files" || p.Service == "Runtime" || p.Service == "Foreign" || p.Service == "Http" {
 				c.requireGo(e.Span, "native provider "+p.Service)
 			}
 			e.Text = "provider"
+		} else if f := c.functions[e.Name]; f != nil && f.Effect && f.Return == "string" && len(f.Params) == 1 && f.Params[0].Type == "string" {
+			t = contract(f)
+			t.Success = "Handler"
+			t.Effect = false
+			e.Text = "handler"
 		} else {
 			c.diagnostic("EF102", "unknown value "+e.Name, e.Span)
 		}
 	case "call":
+		if c.foreignCall(e, env, inEffect) {
+			t = e.Type
+			break
+		}
 		if c.fiberCall(e, env, inEffect) {
 			t = e.Type
 			break
@@ -386,7 +405,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			}
 		} else if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
 			key := e.Left.Left.Name
-			if key == "Files" || key == "Runtime" {
+			if key == "Files" || key == "Runtime" || key == "Http" {
 				c.requireGo(e.Span, "native service "+key)
 			}
 			if _, shadow := env[key]; shadow {
@@ -416,18 +435,41 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		}
 		for i, a := range e.Args {
 			arg := c.expr(a, env, inEffect)
+			if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && e.Left.Left.Name == "Http" && i == 1 && arg.Success == "Handler" {
+				t.Services = union(t.Services, arg.Services)
+			}
 			if i < len(f.Params) && (arg.Effect || arg.Success != f.Params[i].Type) {
 				c.diagnostic("EF106", "argument must be "+f.Params[i].Type, a.Span)
 			}
 		}
+	case "member":
+		inner := c.expr(e.Left, env, inEffect)
+		if inner.Effect || !strings.HasPrefix(inner.Success, "GoResult:") {
+			c.diagnostic("EF106", "field access requires an executed GoResult", e.Span)
+			break
+		}
+		switch e.Name {
+		case "value":
+			t = value(strings.TrimPrefix(inner.Success, "GoResult:"))
+		case "hasError":
+			t = value("bool")
+		default:
+			c.diagnostic("EF102", "GoResult exposes value and hasError", e.Span)
+		}
+	case "orFail":
+		t = c.expr(e.Left, env, inEffect)
+		if !t.Effect || !strings.HasPrefix(t.Success, "GoResult:") {
+			c.diagnostic("EF106", "orFail requires an Effect returning GoResult", e.Span)
+			break
+		}
+		t.Success = strings.TrimPrefix(t.Success, "GoResult:")
+		t.Errors = union(t.Errors, []string{"GoError"})
 	case "scope":
-		c.requireGo(e.Span, "scopes")
 		if !inEffect {
 			c.diagnostic("EF105", "scope requires an effect function", e.Span)
 		}
 		t = c.block(e.Then, env, inEffect)
 	case "fork":
-		c.requireGo(e.Span, "owned fibers")
 		inner := c.expr(e.Left, env, inEffect)
 		if !inEffect || !inner.Effect {
 			c.diagnostic("EF105", "fork requires an Effect inside an effect function", e.Span)
@@ -439,7 +481,6 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		t.Services = union(t.Services, executed(e.Left, false))
 		c.reasons = append(c.reasons, Contribution{"owned-child", inner.Errors, e.Span})
 	case "timeout":
-		c.requireGo(e.Span, "managed timeout")
 		t = c.expr(e.Left, env, inEffect)
 		duration := c.expr(e.Right, env, inEffect)
 		if !t.Effect || duration.Effect || duration.Success != "i64" {

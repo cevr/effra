@@ -191,13 +191,13 @@ func call(root, name string, args arguments) (any, error) {
 			"operations": []string{"project.describe", "project.check", "code.inspect", "code.explain"}, "scope": "single-file",
 			"guardrails": map[string]string{
 				"failures": "checked closed rows", "requirements": "checked nominal services",
-				"resourceOwnership":  "Go runtime scopes join owned fibers then release resources; managed File checks closed handles",
+				"resourceOwnership":  "Both targets join owned fibers before releasing scope resources; Go File guards closed handles",
 				"cancellation":       "cooperative Go context; timeout waits for shutdown; arbitrary foreign calls may delay it",
-				"targetCapabilities": "scope, fork, timeout, Files and Runtime require Go (EF110)",
-				"foreignInterop":     "Go runtime FromGo/OrFail adapters preserve partial results; source imports not implemented",
+				"targetCapabilities": "scope, fork and timeout support Go and JS; Go imports, Files, Runtime and Http require Go (EF110)",
+				"foreignInterop":     "Go exports supply primitive function shapes; Foreign required; GoResult preserves partial values; context/cancellation metadata are reviewed assertions",
 				"runtimeInspection":  "Go Runtime.inspect: current scope metadata, up to 100 resources/child states; no MCP runtime endpoint",
 				"mutableAliases":     "not implemented", "openRows": "not implemented",
-				"inspection": "source SHA-256 revision; UTF-8 byte spans",
+				"inspection": "source SHA-256 plus imported Go export data and behavior contracts; UTF-8 byte spans",
 			},
 		}, nil
 	}
@@ -209,9 +209,14 @@ func call(root, name string, args arguments) (any, error) {
 	if target == "" {
 		target = "go"
 	}
-	r := compiler.CompileFor(string(source), target)
+	r := compiler.CompileAt(string(source), target, filepath.Dir(filepath.Join(root, args.File)))
 	if args.ExpectedRevision != "" && args.ExpectedRevision != r.Revision {
 		return nil, fmt.Errorf("stale semantic revision; current revision is %s", r.Revision)
+	}
+	bindings := r.Bindings
+	bindingsTruncated := len(bindings) > 100
+	if bindingsTruncated {
+		bindings = bindings[:100]
 	}
 	if name == "project.check" {
 		diagnostics := r.Diagnostics
@@ -219,7 +224,7 @@ func call(root, name string, args arguments) (any, error) {
 		if truncated {
 			diagnostics = diagnostics[:100]
 		}
-		return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "checked": r.Checked, "target": r.Target, "diagnostics": diagnostics, "diagnosticsTruncated": truncated, "symbolCount": len(r.Symbols), "timings": r.Timings}, nil
+		return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "checked": r.Checked, "target": r.Target, "diagnostics": diagnostics, "diagnosticsTruncated": truncated, "symbolCount": len(r.Symbols), "timings": r.Timings, "bindings": bindings, "bindingsTruncated": bindingsTruncated}, nil
 	}
 	symbol := r.Find(args.Symbol)
 	if symbol == nil {
@@ -232,7 +237,7 @@ func call(root, name string, args arguments) (any, error) {
 	if len(diagnostics) > 100 {
 		diagnostics = diagnostics[:100]
 	}
-	return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "symbol": symbol, "diagnostics": diagnostics, "diagnosticsTruncated": len(r.Diagnostics) > 100}, nil
+	return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "symbol": symbol, "bindings": bindings, "bindingsTruncated": bindingsTruncated, "diagnostics": diagnostics, "diagnosticsTruncated": len(r.Diagnostics) > 100}, nil
 }
 func readSource(root, relative string) ([]byte, error) {
 	canonicalRoot, err := filepath.EvalSymlinks(root)
