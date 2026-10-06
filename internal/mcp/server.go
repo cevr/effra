@@ -83,7 +83,7 @@ const (
 
 var errMCPResponseTooLarge = errors.New("MCP response exceeds the encoded frame limit")
 
-const compactFormatResponseError = "too large"
+const compactFormatResponseError = "too big"
 
 // readMCPFrame admits at most max bytes before a terminal LF. CR in CRLF is
 // part of that bounded frame. An oversized line is drained through its LF
@@ -553,9 +553,10 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 				}
 				err = writeResponse(res)
 				if errors.Is(err, errMCPResponseTooLarge) {
-					// The compact response keeps the validated request ID and
-					// uses a fixed message shorter than the smallest admitted
-					// code.format invocation envelope.
+					// With a six-byte code, the compact error suffix is no larger
+					// than ,"method":"tools/call","params":{"name":"x"}}.
+					// Every bounded tool request has at least that envelope
+					// beside its validated raw ID, so the compact response fits.
 					err = writeResponse(compactFormatError(res.ID))
 				}
 			}

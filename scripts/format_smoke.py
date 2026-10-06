@@ -266,7 +266,7 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     near_limit_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input=(init_line + "\n" + ready_line + "\n" + near_limit_line + "\n" + ping_line + "\n").encode(), capture_output=True, timeout=60)
     near_limit_replies = [json.loads(line) for line in near_limit_server.stdout.splitlines()]
     assert near_limit_server.returncode == 0 and [reply.get("id") for reply in near_limit_replies] == [1, near_limit_id, 3]
-    assert near_limit_replies[1]["error"]["code"] == -32000 and near_limit_replies[1]["error"]["message"] == "too large"
+    assert near_limit_replies[1]["error"]["code"] == -32000 and near_limit_replies[1]["error"]["message"] == "too big"
 
     def exact_scalar_id_line(prefix, suffix, scalar):
         available = frame_limit - len((prefix + suffix).encode())
@@ -285,7 +285,7 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
         separator_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input=(init_line + "\n" + ready_line + "\n" + separator_line + "\n" + ping_line + "\n").encode(), capture_output=True, timeout=60)
         separator_replies = [json.loads(line) for line in separator_server.stdout.splitlines()]
         assert separator_server.returncode == 0 and [reply.get("id") for reply in separator_replies] == [1, separator_id, 3]
-        assert separator_replies[1]["error"]["code"] == -32000 and separator_replies[1]["error"]["message"] == "too large"
+        assert separator_replies[1]["error"]["code"] == -32000 and separator_replies[1]["error"]["message"] == "too big"
         assert all(len(line) <= frame_limit for line in separator_server.stdout.splitlines())
 
     missing_prefix = '{"jsonrpc":"2.0","id":"'
@@ -296,7 +296,7 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
         missing_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input=(init_line + "\n" + ready_line + "\n" + candidate + "\n" + ping_line + "\n").encode(), capture_output=True, timeout=60)
         missing_replies = [json.loads(line) for line in missing_server.stdout.splitlines()]
         assert missing_server.returncode == 0 and [reply.get("id") for reply in missing_replies] == [1, candidate_id, 3]
-        assert missing_replies[1]["error"]["code"] == -32602 and missing_replies[1]["error"]["message"] == "too large"
+        assert missing_replies[1]["error"]["code"] == -32602 and missing_replies[1]["error"]["message"] == "too big"
 
     unknown_prefix = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code.format","arguments":{"source":"","'
     unknown_suffix = '":""}}}'
@@ -307,7 +307,7 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     unknown_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input=(init_line + "\n" + ready_line + "\n" + unknown_line + "\n" + ping_line + "\n").encode(), capture_output=True, timeout=60)
     unknown_replies = [json.loads(line) for line in unknown_server.stdout.splitlines()]
     assert unknown_server.returncode == 0 and [reply.get("id") for reply in unknown_replies] == [1, 2, 3]
-    assert unknown_replies[1]["error"]["code"] == -32602 and unknown_replies[1]["error"]["message"] == "too large"
+    assert unknown_replies[1]["error"]["code"] == -32602 and unknown_replies[1]["error"]["message"] == "too big"
 
     variant_messages = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "format-id-variants", "version": "1"}}},

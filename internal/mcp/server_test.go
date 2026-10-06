@@ -626,6 +626,42 @@ func TestBoundedFormatResponsePreservesIDsAndUsesCompactFallback(t *testing.T) {
 	if err := writeBoundedFormatResponse(&overOutput, compactFormatError(overID)); !errors.Is(err, errMCPResponseTooLarge) || overOutput.Len() != 0 {
 		t.Fatalf("compact fallback +1 boundary was not rejected atomically: err=%v bytes=%d", err, overOutput.Len())
 	}
+
+	t.Run("exact-limit unknown tool keeps its ID and queued ping", func(t *testing.T) {
+		const head = `{"jsonrpc":"2.0","id":`
+		const tail = `,"method":"tools/call","params":{"name":"x"}}`
+		rawID := `"` + strings.Repeat("a", maxMCPFrameBytes-len(head)-len(tail)-2) + `"`
+		frame := head + rawID + tail
+		if len(frame) != maxMCPFrameBytes {
+			t.Fatalf("request fixture is not exact-limit: %d", len(frame))
+		}
+		input := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{}}}` + "\n" +
+			`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n" + frame + "\n" +
+			`{"jsonrpc":"2.0","id":3,"method":"ping"}` + "\n"
+		var output bytes.Buffer
+		if err := Serve(t.TempDir(), strings.NewReader(input), &output); err != nil {
+			t.Fatalf("admitted unknown-tool request terminated server: %v", err)
+		}
+		lines := bytes.Split(bytes.TrimSuffix(output.Bytes(), []byte{'\n'}), []byte{'\n'})
+		if len(lines) != 3 || len(lines[1]) > maxMCPFrameBytes {
+			t.Fatalf("lost queued response or exceeded frame bound: responses=%d", len(lines))
+		}
+		var refused struct {
+			ID    json.RawMessage `json:"id"`
+			Error *rpcError       `json:"error"`
+		}
+		if err := json.Unmarshal(lines[1], &refused); err != nil || string(refused.ID) != rawID || refused.Error == nil || refused.Error.Code != -32602 {
+			t.Fatalf("compact refusal changed request ID or argument-error code: %v", err)
+		}
+		var ping struct {
+			ID     int             `json:"id"`
+			Result json.RawMessage `json:"result"`
+			Error  *rpcError       `json:"error"`
+		}
+		if err := json.Unmarshal(lines[2], &ping); err != nil || ping.ID != 3 || string(ping.Result) != "{}" || ping.Error != nil {
+			t.Fatalf("queued ping was not answered: %v", err)
+		}
+	})
 }
 
 func TestBoundedFormatResponsePreservesValidatedScalarIDRepresentations(t *testing.T) {
