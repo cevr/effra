@@ -29,6 +29,12 @@ type OwnershipFact struct {
 	Status string `json:"status"`
 	Region string `json:"region,omitempty"`
 	Origin string `json:"origin,omitempty"`
+
+	// source is the path relative to a parameter which supplied this fact. It
+	// is kept out of the inspection schema because it is an implementation
+	// detail of function-summary instantiation. Without it, a helper returning
+	// pair.outer would have to conservatively retain pair.inner as well.
+	source string
 }
 
 // TypeRef is the canonical semantic identity used by checking, emission and
@@ -103,34 +109,59 @@ func ownershipForType(success string) []OwnershipFact {
 }
 
 func (c *checker) ownershipPaths(typeName, prefix string, seen map[string]bool) []string {
-	if typeName == "File" || strings.HasPrefix(typeName, "Fiber:") {
-		return []string{prefix}
-	}
-	if seen[typeName] {
-		return nil
-	}
-	seen[typeName] = true
-	defer delete(seen, typeName)
-	paths := []string{}
-	if record := c.records[typeName]; record != nil {
-		for _, field := range record.Fields {
-			fieldPrefix := field.Name
-			if prefix != "" {
-				fieldPrefix = prefix + "." + fieldPrefix
-			}
-			paths = append(paths, c.ownershipPaths(field.Type, fieldPrefix, seen)...)
+	// A shared record graph can have exponentially many leaf paths. The
+	// ownership representation is intentionally bounded, so traversal must be
+	// bounded too; otherwise normalization happens only after the expensive
+	// expansion. The wildcard keeps the fact that a handle exists somewhere in
+	// the shape, which is the evidence needed to preserve an unsafe proof.
+	const maxPaths = 64
+	paths := make([]string, 0, maxPaths)
+	truncated := false
+	var visit func(string, string)
+	visit = func(name, path string) {
+		if len(paths) >= maxPaths {
+			truncated = true
+			return
 		}
-	}
-	if enum := c.enums[typeName]; enum != nil {
-		for _, variant := range enum.Variants {
-			for _, field := range variant.Fields {
-				fieldPrefix := variant.Name + "." + field.Name
-				if prefix != "" {
-					fieldPrefix = prefix + "." + fieldPrefix
+		if name == "File" || strings.HasPrefix(name, "Fiber:") {
+			paths = append(paths, path)
+			return
+		}
+		if seen[name] {
+			return
+		}
+		seen[name] = true
+		defer delete(seen, name)
+		if record := c.records[name]; record != nil {
+			for _, field := range record.Fields {
+				fieldPath := field.Name
+				if path != "" {
+					fieldPath = path + "." + fieldPath
 				}
-				paths = append(paths, c.ownershipPaths(field.Type, fieldPrefix, seen)...)
+				visit(field.Type, fieldPath)
+				if truncated {
+					return
+				}
 			}
 		}
+		if enum := c.enums[name]; enum != nil {
+			for _, variant := range enum.Variants {
+				for _, field := range variant.Fields {
+					fieldPath := variant.Name + "." + field.Name
+					if path != "" {
+						fieldPath = path + "." + fieldPath
+					}
+					visit(field.Type, fieldPath)
+					if truncated {
+						return
+					}
+				}
+			}
+		}
+	}
+	visit(typeName, prefix)
+	if truncated {
+		paths = append(paths, "*")
 	}
 	return paths
 }
@@ -146,7 +177,7 @@ func (c *checker) unknownOwnership(typeName string) []OwnershipFact {
 func (c *checker) borrowedOwnership(typeName, region string) []OwnershipFact {
 	facts := []OwnershipFact{}
 	for _, path := range c.ownershipPaths(typeName, "", map[string]bool{}) {
-		facts = append(facts, OwnershipFact{Path: path, Status: "borrowed", Region: region, Origin: "parameter"})
+		facts = append(facts, OwnershipFact{Path: path, Status: "borrowed", Region: region, Origin: "parameter", source: path})
 	}
 	return normalizeFacts(facts)
 }
@@ -190,6 +221,9 @@ func projectFacts(facts []OwnershipFact, field string) []OwnershipFact {
 		if fact.Path == field {
 			copy := fact
 			copy.Path = ""
+			if copy.source == "" {
+				copy.source = field
+			}
 			out = append(out, copy)
 			continue
 		}
@@ -197,13 +231,16 @@ func projectFacts(facts []OwnershipFact, field string) []OwnershipFact {
 		if strings.HasPrefix(fact.Path, prefix) {
 			copy := fact
 			copy.Path = strings.TrimPrefix(fact.Path, prefix)
+			if copy.source == "" {
+				copy.source = fact.Path
+			}
 			out = append(out, copy)
 		}
 	}
 	return normalizeFacts(out)
 }
 
-func projectVariantFacts(facts []OwnershipFact, variant, field, fieldType string) []OwnershipFact {
+func projectVariantFacts(facts []OwnershipFact, variant, field string) []OwnershipFact {
 	projected := make([]OwnershipFact, 0)
 	for _, fact := range facts {
 		if fact.Path == "*" {
@@ -211,18 +248,22 @@ func projectVariantFacts(facts []OwnershipFact, variant, field, fieldType string
 			continue
 		}
 		path := fact.Path
-		prefix := variant + "."
-		if strings.HasPrefix(path, prefix) {
-			path = strings.TrimPrefix(path, prefix)
-		}
-		if path == field {
+		prefix := variant + "." + field
+		if path == prefix {
 			copy := fact
 			copy.Path = ""
+			if copy.source == "" {
+				copy.source = prefix
+			}
+			projected = append(projected, copy)
+		} else if strings.HasPrefix(path, prefix+".") {
+			copy := fact
+			copy.Path = strings.TrimPrefix(path, prefix+".")
+			if copy.source == "" {
+				copy.source = path
+			}
 			projected = append(projected, copy)
 		}
-	}
-	if len(projected) == 0 {
-		projected = ownershipForType(fieldType)
 	}
 	return normalizeFacts(projected)
 }
@@ -256,14 +297,22 @@ func mergeFacts(a, b []OwnershipFact) []OwnershipFact {
 func rebaseInvocationFacts(facts []OwnershipFact, region string) []OwnershipFact {
 	out := cloneFacts(facts)
 	for i := range out {
-		if out[i].Region == "invocation" {
+		if out[i].Region == "invocation" || out[i].Region == "deferred" {
 			out[i].Region = region
 		}
 	}
 	return normalizeFacts(out)
 }
 
-func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType, region string) []OwnershipFact {
+func ownershipPathMatches(argumentPath, sourcePath string) bool {
+	// A bounded wildcard means that a handle exists somewhere below the
+	// argument. It must remain eligible for a helper's parameter-relative
+	// summary; dropping it would turn a proven owned path into an unsafe
+	// unknown result.
+	return argumentPath == "*" || sourcePath == "*" || argumentPath == sourcePath
+}
+
+func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) []OwnershipFact {
 	if len(facts) == 0 {
 		return nil
 	}
@@ -280,6 +329,9 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType, r
 				continue
 			}
 			for _, argument := range args[i].Ownership {
+				if !ownershipPathMatches(argument.Path, fact.source) {
+					continue
+				}
 				copy := argument
 				// The summary path is relative to the returned value. The
 				// argument contributes status/region, not another path prefix;
@@ -289,12 +341,17 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType, r
 				copy.Origin = "helper"
 				out = append(out, copy)
 			}
+			if !slices.ContainsFunc(args[i].Ownership, func(argument OwnershipFact) bool {
+				return ownershipPathMatches(argument.Path, fact.source)
+			}) {
+				out = append(out, OwnershipFact{Path: fact.Path, Status: "unknown", Origin: "helper"})
+			}
 		}
 		if !matched {
 			copy := fact
-			if copy.Region == "invocation" {
-				copy.Region = region
-			}
+			// Invocation ownership belongs to the eventual execution, rather
+			// than to the scope where a deferred recipe is constructed. Keep
+			// this marker until run/fork materializes the recipe.
 			out = append(out, copy)
 		}
 	}
@@ -316,7 +373,10 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 		if a.Region != b.Region {
 			return strings.Compare(a.Region, b.Region)
 		}
-		return strings.Compare(a.Origin, b.Origin)
+		if a.Origin != b.Origin {
+			return strings.Compare(a.Origin, b.Origin)
+		}
+		return strings.Compare(a.source, b.source)
 	})
 	result := make([]OwnershipFact, 0, len(out))
 	for _, fact := range out {
@@ -661,18 +721,117 @@ func (c *checker) check() {
 
 // prepareFunctionSummaries computes bounded ownership summaries before the
 // diagnostic-producing pass. Calls may refer to a helper declared later in a
-// module; a small fixed-point pass makes those summaries available without
-// inventing a second analyzer or duplicating compiler diagnostics.
+// module. A dependency-ordered pass computes acyclic helpers once; only the
+// residual cyclic portion uses a fixed point. This keeps unrelated functions
+// independent instead of rescanning every function for every declaration.
 func (c *checker) prepareFunctionSummaries() {
 	previous := c.suppressDiagnostics
 	c.suppressDiagnostics = true
-	passes := len(c.program.Functions) + 1
-	for pass := 0; pass < passes; pass++ {
-		for i := len(c.program.Functions) - 1; i >= 0; i-- {
-			c.function(c.program.Functions[i], false)
+
+	functions := c.program.Functions
+	known := make(map[string]*Function, len(functions))
+	for _, f := range functions {
+		known[f.Name] = f
+	}
+	dependents := make(map[*Function][]*Function, len(functions))
+	remaining := make(map[*Function]int, len(functions))
+	for _, caller := range functions {
+		deps := map[*Function]bool{}
+		collectFunctionDependencies(caller.Body, known, deps)
+		delete(deps, caller)
+		remaining[caller] = len(deps)
+		for callee := range deps {
+			dependents[callee] = append(dependents[callee], caller)
+		}
+	}
+
+	processed := map[*Function]bool{}
+	ready := make([]*Function, 0, len(functions))
+	for _, f := range functions {
+		if remaining[f] == 0 {
+			ready = append(ready, f)
+		}
+	}
+	for head := 0; head < len(ready); head++ {
+		f := ready[head]
+		c.function(f, false)
+		processed[f] = true
+		for _, caller := range dependents[f] {
+			remaining[caller]--
+			if remaining[caller] == 0 {
+				ready = append(ready, caller)
+			}
+		}
+	}
+
+	// Recursive groups have no acyclic order. Process the residual graph as a
+	// local worklist and revisit a member only when one of its dependencies
+	// changes. The summaries are bounded, so this remains finite while keeping
+	// proven owned facts rather than replacing them with unknown.
+	cycle := make([]*Function, 0)
+	cycleSet := map[*Function]bool{}
+	for _, f := range functions {
+		if !processed[f] {
+			cycle = append(cycle, f)
+			cycleSet[f] = true
+		}
+	}
+	queued := map[*Function]bool{}
+	for _, f := range cycle {
+		queued[f] = true
+	}
+	for head := 0; head < len(cycle); head++ {
+		f := cycle[head]
+		queued[f] = false
+		beforeOwnership, beforeCaptures := cloneFacts(f.Ownership), cloneFacts(f.Captures)
+		c.function(f, false)
+		changed := !slices.Equal(beforeOwnership, f.Ownership) || !slices.Equal(beforeCaptures, f.Captures)
+		if !changed {
+			continue
+		}
+		for _, caller := range dependents[f] {
+			if !cycleSet[caller] || queued[caller] {
+				continue
+			}
+			cycle = append(cycle, caller)
+			queued[caller] = true
 		}
 	}
 	c.suppressDiagnostics = previous
+}
+
+func collectFunctionDependencies(block *Block, known map[string]*Function, out map[*Function]bool) {
+	if block == nil {
+		return
+	}
+	for _, statement := range block.Statements {
+		collectFunctionDependenciesExpr(statement.Value, known, out)
+		collectFunctionDependenciesExpr(statement.Payload, known, out)
+	}
+}
+
+func collectFunctionDependenciesExpr(e *Expr, known map[string]*Function, out map[*Function]bool) {
+	if e == nil {
+		return
+	}
+	if e.Kind == "call" && e.Left != nil && e.Left.Kind == "name" {
+		if f := known[e.Left.Name]; f != nil {
+			out[f] = true
+		}
+	}
+	collectFunctionDependenciesExpr(e.Left, known, out)
+	collectFunctionDependenciesExpr(e.Right, known, out)
+	for _, arg := range e.Args {
+		collectFunctionDependenciesExpr(arg, known, out)
+	}
+	for _, field := range e.Fields {
+		collectFunctionDependenciesExpr(field.Value, known, out)
+	}
+	for _, arm := range e.Arms {
+		collectFunctionDependencies(arm.Body, known, out)
+	}
+	collectFunctionDependencies(e.Then, known, out)
+	collectFunctionDependencies(e.Else, known, out)
 }
 
 // providerSignature checks the explicit constructor boundary. Constructor
@@ -1052,7 +1211,7 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 			continue
 		}
 		t := c.expr(s.Value, env, effect)
-		if hasOwnedChild(t.Ownership) {
+		if s.Kind != "let" && hasOwnedChild(t.Ownership) {
 			c.diagnostic("EF123", "child-owned value cannot escape its child scope", s.Span)
 		}
 		out.Errors = union(out.Errors, tExecutedErrors(s.Value))
@@ -1215,10 +1374,10 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		t.Services = union(t.Services, services)
 		argumentTypes := make([]ValueType, len(e.Args))
 		if len(f.Ownership) > 0 {
-			t.Ownership = instantiateFacts(f.Ownership, f.Params, argumentTypes, c.region)
+			t.Ownership = instantiateFacts(f.Ownership, f.Params, argumentTypes)
 		}
 		if len(f.Captures) > 0 {
-			t.Captures = instantiateFacts(f.Captures, f.Params, argumentTypes, c.region)
+			t.Captures = instantiateFacts(f.Captures, f.Params, argumentTypes)
 		}
 		if serviceName == "Files" && e.Left.Name == "openRead" {
 			// A service name alone is not an acquisition proof: a custom Files
@@ -1244,10 +1403,10 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			}
 		}
 		if len(f.Ownership) > 0 {
-			t.Ownership = instantiateFacts(f.Ownership, f.Params, argumentTypes, c.region)
+			t.Ownership = instantiateFacts(f.Ownership, f.Params, argumentTypes)
 		}
 		if len(f.Captures) > 0 {
-			t.Captures = instantiateFacts(f.Captures, f.Params, argumentTypes, c.region)
+			t.Captures = instantiateFacts(f.Captures, f.Params, argumentTypes)
 		}
 		if f.Effect {
 			for i, argument := range argumentTypes {
@@ -1324,6 +1483,8 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		t.Services = union(inner.Services, executed(e.Left, false))
 		t.Ownership = []OwnershipFact{{Status: "owned", Region: c.region, Origin: "fork"}}
 		t.Captures = cloneFacts(inner.Captures)
+		// The child executes its recipe under its own owner. This is distinct
+		// from the owner of the Fiber handle returned to the parent.
 		t.Child = rebaseInvocationFacts(inner.Ownership, childRegion)
 		for i := range t.Child {
 			if t.Child[i].Region == childRegion && t.Child[i].Status == "owned" {
@@ -1348,6 +1509,10 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		}
 		t = inner
 		t.Effect = false
+		// Ownership created by a deferred recipe belongs to the owner
+		// which actually executes it. Construction may happen outside a
+		// scope, or in an outer scope before a nested run.
+		t.Ownership = rebaseInvocationFacts(inner.Ownership, c.region)
 		if !strings.HasPrefix(t.Success, "provider:") {
 			t.Captures = nil
 		}
@@ -1374,7 +1539,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		t.Captures = normalizeFacts(append(t.Captures, provider.Captures...))
 		if e.Name == "Files" && e.Right.Kind == "name" && e.Right.Name == "LiveFiles" {
 			if e.Left.Kind == "call" && e.Left.Left != nil && e.Left.Left.Kind == "member" && e.Left.Left.Left.Kind == "name" && e.Left.Left.Left.Name == "Files" && e.Left.Left.Name == "openRead" {
-				t.Ownership = []OwnershipFact{{Status: "owned", Region: c.region, Origin: "acquisition"}}
+				t.Ownership = []OwnershipFact{{Status: "owned", Region: "deferred", Origin: "acquisition"}}
 			}
 		}
 		t.Services = remove(t.Services, e.Name)
@@ -1392,6 +1557,12 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		if fallback.Effect || fallback.Success != t.Success {
 			c.diagnostic("EF106", "prototype catch fallback must be a pure "+t.Success, e.Right.Span)
 		}
+		// Recovery can publish the fallback value on the handled-failure
+		// branch. Preserve both its returned ownership and any provider
+		// captures; dropping either branch turns a closed-owner escape into a
+		// false safe result.
+		t.Ownership = mergeFacts(t.Ownership, fallback.Ownership)
+		t.Captures = mergeFacts(t.Captures, fallback.Captures)
 		t.Errors = remove(t.Errors, e.Name)
 	case "construct":
 		t = c.construct(e, env, inEffect)
@@ -1640,7 +1811,7 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 				continue
 			}
 			bound := value(field.Type)
-			bound.Ownership = projectVariantFacts(scrutinee.Ownership, pattern.VariantName, fieldName, field.Type)
+			bound.Ownership = projectVariantFacts(scrutinee.Ownership, pattern.VariantName, fieldName)
 			if len(bound.Ownership) == 0 {
 				bound.Ownership = c.unknownOwnership(field.Type)
 			}
