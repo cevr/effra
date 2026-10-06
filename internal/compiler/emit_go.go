@@ -57,10 +57,11 @@ func goIdent(name string) string {
 	return name
 }
 func goFieldName(name string) string {
-	if name == "" {
-		return "Field"
-	}
-	return strings.ToUpper(name[:1]) + name[1:]
+	// Prefix every source field with its byte length and a generated namespace.
+	// Initial-capital lowering alone maps names such as `id` and `Id` to the
+	// same Go selector, and `_` would become Go's blank field. Source names are
+	// ASCII lexer identifiers, so the length prefix plus goIdent is injective.
+	return "EfField_" + strconv.Itoa(len(name)) + "_" + goIdent(name)
 }
 func goVariantType(typeName, variantName string) string {
 	// Encode both qualified components with their source lengths. A plain

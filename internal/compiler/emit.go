@@ -104,6 +104,10 @@ func (r *Result) Emit(entry bool) (string, string, error) {
 			decl.WriteString("}\n")
 		case "enum":
 			decl.WriteString("declare const __ef_brand_" + declaration.Name + ": unique symbol;\n")
+			if len(declaration.Variants) == 0 {
+				decl.WriteString("export type " + declaration.Name + " = never;\n")
+				break
+			}
 			decl.WriteString("export type " + declaration.Name + " = ")
 			for i, variant := range declaration.Variants {
 				if i > 0 {
@@ -215,7 +219,7 @@ func jsBlock(b *Block, effect bool) string {
 			if s.Payload != nil {
 				payload = jsPayload(s.Payload, effect)
 			}
-			out.WriteString("return yield* Effect.fail(Object.assign({ _tag: " + quoted(s.Name) + " }, " + payload + "));\n")
+			out.WriteString("return yield* Effect.fail({ _tag: " + quoted(s.Name) + ", ..." + payload + " });\n")
 		default:
 			if i == len(b.Statements)-1 {
 				out.WriteString("return ")
