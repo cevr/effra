@@ -406,15 +406,20 @@ func buildGoSource(r *compiler.Result, source, origin, output, code string, mode
 		return "", err
 	}
 	// Imported packages use the resolved module graph; the executable is standalone.
-	child := exec.Command("go", "build", "-trimpath", "-mod=readonly", "-o", absolute, ".")
-	child.Dir = generation.Directory
-	child.Env = replaceEnv(os.Environ(), "GOWORK", "off")
+	child := nativeGoBuildCommand(generation.Directory, absolute)
 	child.Stdout = os.Stderr
 	child.Stderr = os.Stderr
 	if err = child.Run(); err != nil {
 		return "", fmt.Errorf("Go build failed: %w", err)
 	}
 	return output, nil
+}
+
+func nativeGoBuildCommand(directory, output string) *exec.Cmd {
+	child := exec.Command("go", "build", "-trimpath", "-mod=readonly", "-o", output, ".")
+	child.Dir = directory
+	child.Env = replaceEnv(os.Environ(), "GOWORK", "off")
+	return child
 }
 func buildJS(r *compiler.Result, source, output string, entry bool) (string, error) {
 	js, decl, err := r.Emit(entry)

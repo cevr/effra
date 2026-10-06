@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -111,6 +112,18 @@ effect fn test_generation() -> () raises {AssertionFailed} uses {Assert} {
 	if err := os.WriteFile(filepath.Join(root, "dist", "go", "go.mod"), legacyModule, 0600); err != nil {
 		t.Fatal(err)
 	}
+	conflictingWorkspace := filepath.Join(root, "conflicting")
+	if err := os.MkdirAll(conflictingWorkspace, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(conflictingWorkspace, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.27\n\nuse ./conflicting\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOWORK", "auto")
+	t.Setenv("GOFLAGS", "-mod=mod")
 
 	stdout, stderr, code := runTestCLIDir(t, binary, root, "", "build", sourcePath, "-o", filepath.Join("dist", "one"))
 	if code != 0 || len(stderr) != 0 || !strings.Contains(string(stdout), filepath.Join("dist", "one")) {
@@ -132,7 +145,16 @@ effect fn test_generation() -> () raises {AssertionFailed} uses {Assert} {
 	if len(appDirectories) != 1 {
 		t.Fatalf("expected one ordinary application identity, got %d", len(appDirectories))
 	}
-	ordinaryGeneration := generatedGenerationDirectory(t, appDirectories[0])
+	ordinaryApplication := appDirectories[0]
+	ordinaryGeneration := generatedGenerationDirectory(t, ordinaryApplication)
+	ordinaryFiles := generationFileStates(t, ordinaryGeneration)
+	ordinaryCommitCount := generationCommitCount(t, filepath.Join(ordinaryApplication, "commits"))
+	withoutWorkspaceOverride := exec.Command("go", "build", "-trimpath", "-mod=readonly", "-o", filepath.Join(root, "dist", "without-workspace-override"), ".")
+	withoutWorkspaceOverride.Dir = ordinaryGeneration
+	withoutWorkspaceOverride.Env = os.Environ()
+	if err := withoutWorkspaceOverride.Run(); err == nil {
+		t.Fatal("conflicting inherited go.work did not exercise the GOWORK=off child boundary")
+	}
 	if _, err := os.Stat(filepath.Join(ordinaryGeneration, "runtime", "retired_legacy.go")); !os.IsNotExist(err) {
 		t.Fatalf("retired legacy source remained in the new generation: %v", err)
 	}
@@ -157,6 +179,13 @@ effect fn test_generation() -> () raises {AssertionFailed} uses {Assert} {
 	if got := generatedApplicationDirectories(t, apps); len(got) != 2 {
 		t.Fatalf("unchanged build created another application identity: %d", len(got))
 	}
+	if got := generationCommitCount(t, filepath.Join(ordinaryApplication, "commits")); got != ordinaryCommitCount {
+		t.Fatalf("unchanged build created another commit marker: %d", got)
+	}
+	if got := generatedGenerationDirectory(t, ordinaryApplication); got != ordinaryGeneration {
+		t.Fatalf("unchanged build selected a different generation: got=%q want=%q", got, ordinaryGeneration)
+	}
+	assertGenerationFileStatesUnchanged(t, ordinaryGeneration, ordinaryFiles)
 
 	stdout, stderr, code = runTestCLIDir(t, binary, root, "", "test", sourcePath)
 	if code != 0 || len(stderr) != 0 || !strings.Contains(string(stdout), `"passed": true`) {
@@ -223,4 +252,127 @@ func generatedGenerationDirectory(t *testing.T, application string) string {
 	}
 	t.Fatalf("application has no committed generation: %s", application)
 	return ""
+}
+
+func TestNativeGoBuildRejectsModuleMutationDespiteInheritedFlags(t *testing.T) {
+	root := t.TempDir()
+	dependency := filepath.Join(root, "dependency")
+	if err := os.Mkdir(dependency, 0700); err != nil {
+		t.Fatal(err)
+	}
+	module := []byte("module effra.generated\n\ngo 1.27\n\nreplace example.test/dependency => ./dependency\n")
+	for path, data := range map[string][]byte{
+		"go.mod":                   module,
+		"main.go":                  []byte("package main\nimport \"example.test/dependency\"\nfunc main() { dependency.Value() }\n"),
+		"dependency/go.mod":        []byte("module example.test/dependency\n\ngo 1.27\n"),
+		"dependency/dependency.go": []byte("package dependency\nfunc Value() {}\n"),
+	} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(path)), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("GOFLAGS", "-mod=mod")
+	before := generationFileStates(t, root)
+	output := filepath.Join(t.TempDir(), "program")
+	child := nativeGoBuildCommand(root, output)
+	if data, err := child.CombinedOutput(); err == nil || !strings.Contains(string(data), "replaced but not required") {
+		t.Fatalf("native child admitted a missing module requirement: err=%v output=%s", err, data)
+	}
+	assertGenerationFileStatesUnchanged(t, root, before)
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("refused native build wrote an executable: %v", err)
+	}
+
+	// The same graph is buildable with the inherited flags alone, which adds
+	// the missing requirement. This makes the explicit readonly flag causal.
+	unprotected := exec.Command("go", "build", "-trimpath", "-o", output, ".")
+	unprotected.Dir = root
+	unprotected.Env = replaceEnv(os.Environ(), "GOWORK", "off")
+	if data, err := unprotected.CombinedOutput(); err != nil {
+		t.Fatalf("unprotected control did not build the local dependency: err=%v output=%s", err, data)
+	}
+	after, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(module, after) || !bytes.Contains(after, []byte("require example.test/dependency")) {
+		t.Fatalf("unprotected control did not mutate the module requirement: %s", after)
+	}
+}
+
+func generationCommitCount(t *testing.T, commits string) int {
+	t.Helper()
+	entries, err := os.ReadDir(commits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".commit") {
+			count++
+		}
+	}
+	return count
+}
+
+type generatedFileState struct {
+	bytes   []byte
+	modTime int64
+}
+
+func generationFileStates(t *testing.T, directory string) map[string]generatedFileState {
+	t.Helper()
+	states := map[string]generatedFileState{}
+	var walk func(string, string)
+	walk = func(current, relative string) {
+		entries, err := os.ReadDir(current)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range entries {
+			if entry.Type()&os.ModeSymlink != 0 {
+				t.Fatalf("unexpected generation symlink %s", entry.Name())
+			}
+			path := entry.Name()
+			if relative != "" {
+				path = filepath.ToSlash(filepath.Join(relative, entry.Name()))
+			}
+			fullPath := filepath.Join(current, entry.Name())
+			if entry.IsDir() {
+				walk(fullPath, path)
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !info.Mode().IsRegular() {
+				t.Fatalf("unexpected generation file type %s", fullPath)
+			}
+			data, err := os.ReadFile(fullPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			states[path] = generatedFileState{bytes: data, modTime: info.ModTime().UnixNano()}
+		}
+	}
+	walk(directory, "")
+	return states
+}
+
+func assertGenerationFileStatesUnchanged(t *testing.T, directory string, before map[string]generatedFileState) {
+	t.Helper()
+	after := generationFileStates(t, directory)
+	if len(after) != len(before) {
+		t.Fatalf("generation file count changed: before=%d after=%d", len(before), len(after))
+	}
+	for path, expected := range before {
+		actual, ok := after[path]
+		if !ok {
+			t.Fatalf("generation file disappeared: %s", path)
+		}
+		if !bytes.Equal(actual.bytes, expected.bytes) || actual.modTime != expected.modTime {
+			t.Fatalf("generation file changed: %s", path)
+		}
+	}
 }

@@ -18,14 +18,12 @@ import (
 )
 
 const (
-	goGenerationSchemaVersion                        = 1
-	goGenerationModeBuild           GoGenerationMode = "ordinary"
-	goGenerationModeTest            GoGenerationMode = "test"
-	goGenerationManifestName                         = ".effra-output.json"
-	goGenerationCommitDirectory                      = "commits"
-	goGenerationDataDirectory                        = "generations"
-	goGenerationMaxDirectoryEntries                  = 4096
-	goGenerationMaxMetadataBytes                     = 1 << 20
+	goGenerationSchemaVersion       = 1
+	goGenerationManifestName        = ".effra-output.json"
+	goGenerationCommitDirectory     = "commits"
+	goGenerationDataDirectory       = "generations"
+	goGenerationMaxDirectoryEntries = 4096
+	goGenerationMaxMetadataBytes    = 1 << 20
 )
 
 // GoGenerationMode distinguishes source snapshots that share an origin but
@@ -33,8 +31,8 @@ const (
 type GoGenerationMode string
 
 const (
-	GoGenerationBuild GoGenerationMode = goGenerationModeBuild
-	GoGenerationTest  GoGenerationMode = goGenerationModeTest
+	GoGenerationBuild GoGenerationMode = "ordinary"
+	GoGenerationTest  GoGenerationMode = "test"
 )
 
 // GoSourceSnapshot is the complete input to one generated Go module. Runtime
@@ -86,11 +84,6 @@ type goGenerationCommit struct {
 	ManifestSHA256 string `json:"manifestSha256"`
 }
 
-// goGenerationPublishFault is a narrow test seam for interruption at the
-// publication boundary. It is nil in production and is never used to alter
-// normal generation behavior.
-var goGenerationPublishFault func(string) error
-
 // GoSourceSnapshot builds the complete all-source runtime snapshot used by
 // native builds. Runtime selection can later replace rt.Sources here without
 // changing the ownership boundary.
@@ -125,14 +118,21 @@ func (r *Result) GoSourceSnapshot(origin string, mode GoGenerationMode, main []b
 // tree and manifest exist. This protects process-level publication races; it
 // is not a power-loss durability protocol.
 func PublishGoSourceSnapshot(root string, snapshot GoSourceSnapshot) (GoGeneration, error) {
-	_, expected, manifest, applicationID, generationID, err := normalizeGoSourceSnapshot(snapshot)
+	return publishGoSourceSnapshot(root, snapshot, os.Link)
+}
+
+// linkCommit is per publication so failure controls cannot affect another
+// publisher. The public boundary always uses the exclusive filesystem link.
+func publishGoSourceSnapshot(root string, snapshot GoSourceSnapshot, linkCommit func(string, string) error) (GoGeneration, error) {
+	expected, manifest, applicationID, generationID, err := normalizeGoSourceSnapshot(snapshot)
 	if err != nil {
 		return GoGeneration{}, err
 	}
-	if err := ensureDirectoryTree(root); err != nil {
+	admittedRoot, err := admitGoGenerationRoot(root)
+	if err != nil {
 		return GoGeneration{}, err
 	}
-	applicationDirectory := filepath.Join(root, applicationID)
+	applicationDirectory := filepath.Join(admittedRoot, applicationID)
 	commitsDirectory := filepath.Join(applicationDirectory, goGenerationCommitDirectory)
 	generationsDirectory := filepath.Join(applicationDirectory, goGenerationDataDirectory)
 	for _, directory := range []string{applicationDirectory, commitsDirectory, generationsDirectory} {
@@ -140,13 +140,9 @@ func PublishGoSourceSnapshot(root string, snapshot GoSourceSnapshot) (GoGenerati
 			return GoGeneration{}, err
 		}
 	}
-	if err := validateGenerationContainers(commitsDirectory, generationsDirectory); err != nil {
-		return GoGeneration{}, err
-	}
-
 	commitPath := filepath.Join(commitsDirectory, generationID+".commit")
 	if _, err := os.Lstat(commitPath); err == nil {
-		return validateGoGenerationCommit(root, expected, manifest, applicationID, generationID)
+		return validateGoGenerationCommit(admittedRoot, expected, manifest, applicationID, generationID)
 	} else if !os.IsNotExist(err) {
 		return GoGeneration{}, fmt.Errorf("inspect generation commit: %w", err)
 	}
@@ -164,11 +160,6 @@ func PublishGoSourceSnapshot(root string, snapshot GoSourceSnapshot) (GoGenerati
 
 	if err := writeGenerationTree(stagingDirectory, expected, manifest); err != nil {
 		return GoGeneration{}, err
-	}
-	if goGenerationPublishFault != nil {
-		if err := goGenerationPublishFault("after-generation-tree"); err != nil {
-			return GoGeneration{}, err
-		}
 	}
 	commit := goGenerationCommit{
 		SchemaVersion:  goGenerationSchemaVersion,
@@ -197,13 +188,13 @@ func PublishGoSourceSnapshot(root string, snapshot GoSourceSnapshot) (GoGenerati
 		return GoGeneration{}, fmt.Errorf("close generation commit staging file: %w", err)
 	}
 	commitTemporaryClosed = true
-	if err := os.Link(commitTemporaryPath, commitPath); err != nil {
+	if err := linkCommit(commitTemporaryPath, commitPath); err != nil {
 		if !os.IsExist(err) {
 			return GoGeneration{}, fmt.Errorf("publish generation commit: %w", err)
 		}
 		// Another cooperating publisher won the exclusive link. Its record is
 		// authoritative only after the same complete validation as reuse.
-		return validateGoGenerationCommit(root, expected, manifest, applicationID, generationID)
+		return validateGoGenerationCommit(admittedRoot, expected, manifest, applicationID, generationID)
 	}
 	committed = true
 	return GoGeneration{
@@ -213,18 +204,18 @@ func PublishGoSourceSnapshot(root string, snapshot GoSourceSnapshot) (GoGenerati
 	}, nil
 }
 
-func normalizeGoSourceSnapshot(snapshot GoSourceSnapshot) (GoSourceSnapshot, map[string][]byte, goGenerationManifest, string, string, error) {
+func normalizeGoSourceSnapshot(snapshot GoSourceSnapshot) (map[string][]byte, goGenerationManifest, string, string, error) {
 	if err := validateGenerationMode(snapshot.Mode); err != nil {
-		return GoSourceSnapshot{}, nil, goGenerationManifest{}, "", "", err
+		return nil, goGenerationManifest{}, "", "", err
 	}
 	if snapshot.Target != "go" {
-		return GoSourceSnapshot{}, nil, goGenerationManifest{}, "", "", fmt.Errorf("generated Go target must be go")
+		return nil, goGenerationManifest{}, "", "", fmt.Errorf("generated Go target must be go")
 	}
 	if !filepath.IsAbs(snapshot.Origin) || snapshot.Origin == "" {
-		return GoSourceSnapshot{}, nil, goGenerationManifest{}, "", "", fmt.Errorf("generated Go source origin must be absolute")
+		return nil, goGenerationManifest{}, "", "", fmt.Errorf("generated Go source origin must be absolute")
 	}
 	if len(snapshot.Main) == 0 || len(snapshot.Module) == 0 {
-		return GoSourceSnapshot{}, nil, goGenerationManifest{}, "", "", fmt.Errorf("generated Go snapshot requires main.go and go.mod")
+		return nil, goGenerationManifest{}, "", "", fmt.Errorf("generated Go snapshot requires main.go and go.mod")
 	}
 	runtimeSources := cloneRuntimeSources(snapshot.Runtime)
 	expected := map[string][]byte{
@@ -234,7 +225,7 @@ func normalizeGoSourceSnapshot(snapshot GoSourceSnapshot) (GoSourceSnapshot, map
 	}
 	for name, data := range runtimeSources {
 		if err := validateRuntimeFileName(name); err != nil {
-			return GoSourceSnapshot{}, nil, goGenerationManifest{}, "", "", err
+			return nil, goGenerationManifest{}, "", "", err
 		}
 		path := filepath.ToSlash(filepath.Join("runtime", name))
 		expected[path] = cloneBytes(data)
@@ -272,7 +263,7 @@ func normalizeGoSourceSnapshot(snapshot GoSourceSnapshot) (GoSourceSnapshot, map
 	}{applicationID, snapshot.Revision, files}
 	generationID := digestBytes(mustJSON(generationIdentity))
 	manifest.GenerationID = generationID
-	return snapshot, expected, manifest, applicationID, generationID, nil
+	return expected, manifest, applicationID, generationID, nil
 }
 
 func validateGoGenerationCommit(root string, expected map[string][]byte, manifest goGenerationManifest, applicationID, generationID string) (GoGeneration, error) {
@@ -292,28 +283,29 @@ func validateGoGenerationCommit(root string, expected map[string][]byte, manifes
 		return GoGeneration{}, fmt.Errorf("generation commit identity mismatch")
 	}
 	generationDirectory := filepath.Join(generationsDirectory, commit.Directory)
+	reference := fmt.Sprintf("generation directory %s (commit marker %s)", generationDirectory, commitPath)
 	if filepath.Base(generationDirectory) != commit.Directory || filepath.Dir(generationDirectory) != generationsDirectory {
-		return GoGeneration{}, fmt.Errorf("generation commit directory escapes its owner")
+		return GoGeneration{}, fmt.Errorf("%s: generation commit directory escapes its owner", reference)
 	}
 	if err := requireDirectory(generationDirectory); err != nil {
-		return GoGeneration{}, fmt.Errorf("generation directory: %w", err)
+		return GoGeneration{}, fmt.Errorf("%s: generation directory: %w", reference, err)
 	}
 	manifestData, err := readBoundedFile(filepath.Join(generationDirectory, goGenerationManifestName), goGenerationMaxMetadataBytes)
 	if err != nil {
-		return GoGeneration{}, fmt.Errorf("read generation manifest: %w", err)
+		return GoGeneration{}, fmt.Errorf("%s: read generation manifest: %w", reference, err)
 	}
 	if digestBytes(manifestData) != commit.ManifestSHA256 {
-		return GoGeneration{}, fmt.Errorf("generation manifest digest mismatch")
+		return GoGeneration{}, fmt.Errorf("%s: generation manifest digest mismatch", reference)
 	}
 	var onDisk goGenerationManifest
 	if err := decodeStrictJSON(manifestData, &onDisk); err != nil {
-		return GoGeneration{}, fmt.Errorf("invalid generation manifest: %w", err)
+		return GoGeneration{}, fmt.Errorf("%s: invalid generation manifest: %w", reference, err)
 	}
 	if !reflect.DeepEqual(onDisk, manifest) {
-		return GoGeneration{}, fmt.Errorf("generation manifest does not match the requested snapshot")
+		return GoGeneration{}, fmt.Errorf("%s: generation manifest does not match the requested snapshot", reference)
 	}
-	if err := validateGenerationInventory(generationDirectory, expected, manifest); err != nil {
-		return GoGeneration{}, err
+	if err := validateGenerationInventory(generationDirectory, expected); err != nil {
+		return GoGeneration{}, fmt.Errorf("%s: %w", reference, err)
 	}
 	return GoGeneration{Directory: generationDirectory, ApplicationID: applicationID, GenerationID: generationID}, nil
 }
@@ -341,7 +333,7 @@ func writeGenerationTree(directory string, expected map[string][]byte, manifest 
 	return nil
 }
 
-func validateGenerationInventory(directory string, expected map[string][]byte, manifest goGenerationManifest) error {
+func validateGenerationInventory(directory string, expected map[string][]byte) error {
 	actual, err := inventoryGeneration(directory)
 	if err != nil {
 		return err
@@ -361,13 +353,6 @@ func validateGenerationInventory(directory string, expected map[string][]byte, m
 		if !bytes.Equal(actualData, data) {
 			return fmt.Errorf("generated %s was modified", path)
 		}
-	}
-	manifestData, err := readBoundedFile(filepath.Join(directory, goGenerationManifestName), goGenerationMaxMetadataBytes)
-	if err != nil {
-		return fmt.Errorf("read generated manifest: %w", err)
-	}
-	if !reflect.DeepEqual(digestBytes(manifestData), digestBytes(mustJSON(manifest))) {
-		return fmt.Errorf("generated manifest bytes changed")
 	}
 	return nil
 }
@@ -415,48 +400,121 @@ func inventoryGeneration(directory string) (map[string]struct{}, error) {
 	return actual, nil
 }
 
-func validateGenerationContainers(commitsDirectory, generationsDirectory string) error {
-	commitEntries, err := readDirectoryBounded(commitsDirectory)
+// admitGoGenerationRoot walks the raw root spelling with operating-system
+// path semantics before any generated descendant is joined. Shared parents
+// may be symlinks; the final owned root may not be one. Missing components
+// are created only after the walk has established their physical parent.
+func admitGoGenerationRoot(rawRoot string) (string, error) {
+	if rawRoot == "" {
+		return "", fmt.Errorf("generated output directory is empty")
+	}
+	current, components, err := outputRootWalkStart(rawRoot)
 	if err != nil {
-		return fmt.Errorf("inspect generation commits: %w", err)
+		return "", err
 	}
-	for _, entry := range commitEntries {
-		name := entry.Name()
-		if entry.Type()&os.ModeSymlink != 0 || !strings.HasSuffix(name, ".commit") && !strings.HasPrefix(name, ".commit-") {
-			return fmt.Errorf("unexpected generation commit entry %q", entry.Name())
+	for index, component := range components {
+		switch component {
+		case ".":
+			continue
+		case "..":
+			current = filepath.Dir(current)
+			continue
 		}
-		info, err := entry.Info()
-		if err != nil {
-			if strings.HasPrefix(name, ".commit-") && os.IsNotExist(err) {
-				continue
+		candidate := filepath.Join(current, component)
+		info, err := os.Lstat(candidate)
+		if os.IsNotExist(err) {
+			for _, remaining := range components[index:] {
+				if remaining == ".." {
+					return "", fmt.Errorf("generated output root has a missing component before ..: %s", rawRoot)
+				}
+				if remaining != "." {
+					current = filepath.Join(current, remaining)
+				}
 			}
-			return fmt.Errorf("generation commit %q is not a regular file: %w", name, err)
+			break
 		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("generation commit %q is not a regular file", entry.Name())
-		}
-	}
-	generationEntries, err := readDirectoryBounded(generationsDirectory)
-	if err != nil {
-		return fmt.Errorf("inspect generation data: %w", err)
-	}
-	for _, entry := range generationEntries {
-		name := entry.Name()
-		if entry.Type()&os.ModeSymlink != 0 || !validGenerationDirectoryName(name) {
-			return fmt.Errorf("unexpected generation data entry %q", name)
-		}
-		info, err := entry.Info()
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
+			return "", fmt.Errorf("inspect generated output root %s: %w", rawRoot, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			final := true
+			for _, remaining := range components[index+1:] {
+				if remaining != "." {
+					final = false
+					break
+				}
 			}
-			return fmt.Errorf("generation data entry %q is not a directory: %w", name, err)
+			if final {
+				return "", fmt.Errorf("generated output root is a symlink: %s", rawRoot)
+			}
+			resolved, err := filepath.EvalSymlinks(candidate)
+			if err != nil {
+				return "", fmt.Errorf("resolve generated output root %s: %w", rawRoot, err)
+			}
+			if err := requireDirectory(resolved); err != nil {
+				return "", fmt.Errorf("generated output parent %s: %w", candidate, err)
+			}
+			current = resolved
+			continue
 		}
 		if !info.IsDir() {
-			return fmt.Errorf("generation data entry %q is not a directory", entry.Name())
+			return "", fmt.Errorf("generated output root is not a directory: %s", rawRoot)
+		}
+		current = candidate
+	}
+	info, err := os.Lstat(current)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return "", fmt.Errorf("generated output root is not a directory: %s", rawRoot)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("inspect generated output root %s: %w", rawRoot, err)
+	}
+	parent := filepath.Dir(current)
+	if parent == current {
+		return "", fmt.Errorf("cannot create generated output directory %s", rawRoot)
+	}
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		return "", fmt.Errorf("create generated output parent: %w", err)
+	}
+	if err := ensureDirectoryTree(current); err != nil {
+		return "", err
+	}
+	return current, nil
+}
+
+func outputRootWalkStart(rawRoot string) (string, []string, error) {
+	slashed := filepath.ToSlash(rawRoot)
+	volume := filepath.ToSlash(filepath.VolumeName(rawRoot))
+	if volume != "" {
+		slashed = strings.TrimPrefix(slashed, volume)
+	}
+	absolute := filepath.IsAbs(rawRoot)
+	var current string
+	if absolute {
+		if volume == "" {
+			current = string(filepath.Separator)
+		} else {
+			current = filepath.FromSlash(volume + "/")
+		}
+	} else {
+		var err error
+		current, err = os.Getwd()
+		if err != nil {
+			return "", nil, fmt.Errorf("get generated output working directory: %w", err)
+		}
+		current, err = filepath.EvalSymlinks(current)
+		if err != nil {
+			return "", nil, fmt.Errorf("resolve generated output working directory: %w", err)
 		}
 	}
-	return nil
+	components := make([]string, 0, strings.Count(slashed, "/"))
+	for _, component := range strings.Split(strings.TrimLeft(slashed, "/"), "/") {
+		if component != "" {
+			components = append(components, component)
+		}
+	}
+	return current, components, nil
 }
 
 func ensureDirectoryTree(path string) error {
