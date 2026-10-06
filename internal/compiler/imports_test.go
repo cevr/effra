@@ -26,7 +26,7 @@ func TestGoImportsUseNativeDeclarationsAndDetectDependencyChanges(t *testing.T) 
 	}
 	write("sdk/sdk.go", "package sdk\nimport \"example.test/dependency\"\nfunc Lookup(name string)(string,error){return dependency.Value(name),nil}\n")
 	source := `import go sdk "example.test/app/sdk"
-effect fn main() -> string throws {GoError} {run sdk.Lookup("native").orFail().provide<Foreign>(Host)}`
+effect fn main() -> string raises {GoError} {run sdk.Lookup("native").orFail().provide<Foreign>(Host)}`
 	r := CompileAt(source, "go", workspace)
 	if !r.Checked || len(r.Bindings) != 1 || r.Bindings[0].Signature != "func(name string) (string, error)" {
 		t.Fatalf("foreign declaration: %+v %+v", r.Diagnostics, r.Bindings)
@@ -79,9 +79,9 @@ func TestImportedPartialValuesAndContextForwarding(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := `import go sdk "effra.local/prototype/examples/sdk"
-effect fn main() -> string throws {GoError} {
+effect fn main() -> string raises {GoError} {
  let partial = run sdk.Lookup("missing").provide<Foreign>(Host)
- let timed = run sdk.Lookup("slow").orFail().timeout(1).catch<Timeout>("done").provide<Foreign>(Host)
+ let timed = run sdk.Lookup("slow").orFail().timeout(1).catch<Timeout>("done").provide<Foreign>(Host).provide<Scheduler>(LiveScheduler)
  partial.value + ":" + timed
 }`
 	r := CompileAt(source, "go", root)

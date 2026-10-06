@@ -37,6 +37,7 @@ Use isolated Rifts from the integration branch, no package install without lock 
 
 - Track proven owner provenance through local aliases, conditionals, scopes, data payloads and deferred captures. A value/capture proved owned by a closing inner scope cannot escape it.
 - Borrowed outer handles remain usable; do not reject every File/Fiber return. Unknown foreign/function summaries are kept distinct from checked proof. Runtime guards remain in force.
+- Bounded analysis retains all ownership alternatives for a selected path or explicitly preserves uncertainty. A complete retained leaf is not proof that an enclosing record/enum subtree is complete. Wrapping, successive projections and helper/capture substitution must not discard potential inner ownership merely because another descendant has evidence. Exhausted proof must diagnose an unsafe escape, never become ordinary unknown foreign provenance; independently complete borrowed siblings remain usable.
 - Acceptance: reject direct, aliased and payload-contained inner-owned handle escape; allow borrowing an outer handle through an inner scope; preserve prior lifecycle behavior on both targets. This is deliberately bounded provenance checking, not a complete ownership/type system.
 
 ## Reasoned lint suppression

@@ -7,6 +7,7 @@ if [ -f go.mod ]; then
   go vet ./...
   go test ./...
   go build -o bin/ef ./cmd/ef
+  python3 scripts/diagnostics_smoke.py
   python3 scripts/smoke.py
   python3 scripts/http_smoke.py
 fi

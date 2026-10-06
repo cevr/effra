@@ -37,9 +37,11 @@ const (
 )
 
 // OwnershipFact is the bounded ownership evidence carried by a checked value.
-// A fact is deliberately explicit about uncertainty: the compiler only
-// rejects a value when it can prove that the value belongs to a scope which is
-// closing. Foreign values and summaries outside this model stay unknown.
+// A fact is deliberately explicit about uncertainty: the compiler rejects a
+// value when it proves that the value belongs to a closing scope or when
+// bounded analysis retains potential ownership after exhausting its budget.
+// Foreign values and summaries outside this model stay unknown; unknown can
+// also represent bounded analysis that did not establish a complete proof.
 type OwnershipFact struct {
 	Path   string `json:"path,omitempty"`
 	Status string `json:"status"`
@@ -1714,7 +1716,7 @@ func typeRef(name string) TypeRef {
 		return TypeRef{}
 	case name == "string", name == "bool", name == "i64", name == "bytes", name == "()":
 		return TypeRef{Kind: "primitive", Name: name}
-	case name == "File", name == "Handler":
+	case name == "File", name == "Handler", name == "Latch":
 		return TypeRef{Kind: "opaque", Name: name}
 	case strings.HasPrefix(name, "Fiber:"):
 		return TypeRef{Kind: "fiber", Args: []TypeRef{typeRef(strings.TrimPrefix(name, "Fiber:"))}}
@@ -1827,7 +1829,7 @@ func (c *checker) check() {
 	}
 	claimData := func(name string, span Span) {
 		switch name {
-		case "string", "bool", "i64", "bytes", "File", "Handler", "Fiber", "Context", "Effect", "Scope", "Exit", "Cause", "Option", "never", "invalid":
+		case "string", "bool", "i64", "bytes", "File", "Latch", "Handler", "Fiber", "Context", "Effect", "Scope", "Exit", "Cause", "Option", "never", "invalid":
 			c.diagnostic("EF101", "reserved data declaration "+name, span)
 		}
 		claim(name, span)
@@ -2102,14 +2104,12 @@ func collectFunctionDependenciesExpr(e *Expr, known map[string]*Function, out ma
 			out[f] = true
 		}
 	}
-	collectFunctionDependenciesExpr(e.Left, known, out)
-	collectFunctionDependenciesExpr(e.Right, known, out)
-	for _, arg := range e.Args {
-		collectFunctionDependenciesExpr(arg, known, out)
-	}
-	for _, field := range e.Fields {
-		collectFunctionDependenciesExpr(field.Value, known, out)
-	}
+	// Named call arguments are retained in both Args and Fields for source
+	// inspection, with the same child pointers in each view. Use the shared
+	// traversal seam so summary preparation remains linear in the syntax tree.
+	forEachExprChild(e, func(child *Expr) {
+		collectFunctionDependenciesExpr(child, known, out)
+	})
 	for _, arm := range e.Arms {
 		collectFunctionDependencies(arm.Body, known, out)
 	}
@@ -2239,7 +2239,7 @@ func (c *checker) signature(f *Function) {
 }
 func (c *checker) typeKnown(name string) bool {
 	switch name {
-	case "string", "bool", "()", "i64", "File", "bytes", "Handler":
+	case "string", "bool", "()", "i64", "File", "Latch", "bytes", "Handler":
 		return true
 	}
 	if c.records[name] != nil || c.enums[name] != nil {
@@ -2790,6 +2790,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		t.Ownership = materializeExecutionFacts(t.Ownership, timeoutRegion, ownershipOwnerTimeout)
 		t.Captures = materializeExecutionFacts(t.Captures, timeoutRegion, ownershipOwnerTimeout)
 		t.Errors = union(t.Errors, []string{"Timeout"})
+		t.Services = union(t.Services, []string{"Scheduler"})
 	case "run":
 		inner := c.expr(e.Left, env, inEffect)
 		if !inEffect {

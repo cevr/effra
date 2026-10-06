@@ -53,6 +53,10 @@ const (
 	suppressionRule   = "invalid-suppression"
 )
 
+func isSuppressionComment(text string) bool {
+	return strings.HasPrefix(strings.TrimLeft(text, " \t"), suppressionPrefix)
+}
+
 func LintRules() []LintRule {
 	return []LintRule{
 		{"EFL001", "unused-recipe", "warning", "A local lazy effect is never referenced. Construction does not execute it. Bind to _ to acknowledge deliberate omission."},
@@ -72,7 +76,7 @@ func parseSuppressions(comments []Comment, revision string, rules map[string]Lin
 	for _, comment := range comments {
 		body := comment.Text
 		trimmed := strings.TrimLeft(body, " \t")
-		if !strings.HasPrefix(trimmed, suppressionPrefix) {
+		if !isSuppressionComment(body) {
 			continue
 		}
 		span := comment.Span
@@ -186,14 +190,9 @@ func (r *Result) Lint(strict bool) LintResult {
 		if e.Kind == "provide" && !slices.Contains(e.Left.Type.Services, e.Name) {
 			add(1, "receiver does not require "+e.Name, e.Span)
 		}
-		expr(e.Left, env)
-		expr(e.Right, env)
-		for _, a := range e.Args {
-			expr(a, env)
-		}
-		for _, field := range e.Fields {
-			expr(field.Value, env)
-		}
+		forEachExprChild(e, func(child *Expr) {
+			expr(child, env)
+		})
 		for _, arm := range e.Arms {
 			branch := map[string]*binding{}
 			for name, local := range env {

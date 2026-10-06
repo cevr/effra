@@ -14,6 +14,8 @@ assert inspected["symbol"]["contract"]["requirements"] == ["Users"]
 assert inspected["symbol"]["contract"]["failures"] == ["NotFound"]
 invalid = json.loads(run("check", "examples/missing-service.ef", success=False).stdout)
 assert any(d["code"] == "EF108" for d in invalid["diagnostics"])
+invalid_report = json.loads(run("diagnostics", "examples/missing-service.ef", "--json", success=False).stdout)
+assert not invalid_report["checked"] and not invalid_report["lintAvailable"] and not invalid_report["policyPassed"]
 assert run("run", "examples/main.ef").stdout == "Hello, Ada\nUnknown user\n"
 assert run("run", "examples/main.ef", "--target", "js").stdout == "Hello, Ada\nUnknown user\n"
 for target in ("go", "js"):
@@ -49,7 +51,7 @@ public = subprocess.run(["bun", "--eval", consumer], cwd=root, text=True, captur
 assert public.returncode == 0 and public.stdout == "Hello, Ada\n", (public.stdout, public.stderr)
 with tempfile.TemporaryDirectory(prefix="effra-cli-") as tmp:
     failure = pathlib.Path(tmp) / "failed.ef"
-    failure.write_text("error Bad\neffect fn main() -> string throws {Bad} { fail Bad }\n")
+    failure.write_text("error Bad\neffect fn main() -> string raises {Bad} { fail Bad }\n")
     assert "Bad" in run("run", str(failure), success=False).stderr
 bindings = json.loads(run("inspect", "examples/imports.ef", "main").stdout)
 assert any(b["forwardContext"] and b["cancellation"] == "cooperative" for b in bindings["bindings"])
@@ -68,7 +70,7 @@ server = subprocess.run([ef, "mcp", str(root)], input="\n".join(map(json.dumps, 
 assert server.returncode == 0, server.stderr
 responses = [json.loads(line) for line in server.stdout.splitlines()]
 assert len(responses) == 8
-assert len(responses[1]["result"]["tools"]) == 9
+assert len(responses[1]["result"]["tools"]) == 10
 mcp = responses[2]["result"]["structuredContent"]
 assert mcp["symbol"] == inspected["symbol"] and mcp["revision"] == inspected["revision"]
 data_mcp = responses[3]["result"]["structuredContent"]
@@ -84,7 +86,7 @@ for target in ("go","js"):
     assert suite["passed"] and len(suite["tests"])==3 and not suite["watchdogExpired"]
 with tempfile.TemporaryDirectory(prefix="effra-tests-") as tmp:
     file=pathlib.Path(tmp)/"cases.ef"
-    file.write_text('effect fn test_bad() -> () throws {AssertionFailed} uses {Assert} {run Assert.equalText("actual","expected")} effect fn test_after() -> () throws {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}')
+    file.write_text('effect fn test_bad() -> () raises {AssertionFailed} uses {Assert} {run Assert.equalText("actual","expected")} effect fn test_after() -> () raises {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}')
     for target in ("go","js"):
         suite=json.loads(run("test",str(file),"--target",target,success=False).stdout)
         assert not suite["passed"] and len(suite["tests"])==2
@@ -116,6 +118,7 @@ with tempfile.TemporaryDirectory(prefix="effra-tooling-") as tmp:
         {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"project.graph","arguments":{"file":"main.ef"}}},
         {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"lint.rules","arguments":{}}},
         {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"code.typeAt","arguments":{"file":"main.ef","offset":1.5}}},
+        {"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"project.diagnostics","arguments":{"file":"main.ef","strict":True}}},
     ]
     server=subprocess.run([ef,"mcp",tmp],input="\n".join(map(json.dumps,calls))+"\n",text=True,capture_output=True)
     assert server.returncode==0,server.stderr
@@ -125,6 +128,18 @@ with tempfile.TemporaryDirectory(prefix="effra-tooling-") as tmp:
     assert replies[3]["result"]["structuredContent"]["nodes"]
     assert replies[4]["result"]["structuredContent"]==rules
     assert replies[5]["error"]["code"]==-32602
+    diagnostics_reply=replies[6]["result"]["structuredContent"]
+    assert diagnostics_reply["checked"] and not diagnostics_reply["policyPassed"] and diagnostics_reply["totalCounts"]["warnings"]==1
+
+    many=pathlib.Path(tmp)/"many.ef"
+    many.write_text("effect fn duplicate() -> () { () }\n"*102)
+    over_calls=messages[:2]+[
+        {"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"project.diagnostics","arguments":{"file":"many.ef"}}},
+    ]
+    over_server=subprocess.run([ef,"mcp",tmp],input="\n".join(map(json.dumps,over_calls))+"\n",text=True,capture_output=True)
+    assert over_server.returncode==0,over_server.stderr
+    over_reply=json.loads(over_server.stdout.splitlines()[1])
+    assert over_reply["result"]["isError"] and "exceeds limit" in over_reply["result"]["content"][0]["text"]
 
     source="""effect fn task() -> string { \"ok\" }
 effect fn main() -> () {
@@ -141,4 +156,66 @@ let forgotten = task();
     assert server.returncode==0,server.stderr
     suppression_reply=[json.loads(line) for line in server.stdout.splitlines()]
     assert suppression_reply[1]["result"]["structuredContent"]["lint"]==suppressed
-print("native Go executable, JS module, CLI lint/query/graph and stdio MCP: passed")
+
+
+def nested_data_source(depth, named):
+    records = "\n".join(
+        f"record R{index} {{ value: {'()' if index == 0 else f'R{index - 1}'} }}"
+        for index in range(depth + 1)
+    )
+    calls = "".join(
+        f"R{index}({'value: ' if named else ''}"
+        for index in range(depth, -1, -1)
+    )
+    return records + "\nfn deep() -> R" + str(depth) + " { " + calls + "()" + ")" * (depth + 1) + " }\neffect fn main() -> () { let _ = deep(); () }\n"
+
+
+def type_at_query(file):
+    source = file.read_text()
+    body = source.index("{ ", source.index("fn deep")) + 2
+    offset = source.index("()", body)
+    result = subprocess.run([ef, "query", str(file), str(offset)], cwd=root,
+                            text=True, capture_output=True, timeout=5)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    payload = json.loads(result.stdout)
+    assert payload["checked"] and payload["expression"]["span"]["offset"] == offset, payload
+
+
+with tempfile.TemporaryDirectory(prefix="effra-typeat-") as tmp:
+    directory = pathlib.Path(tmp)
+    named = directory / "nested.ef"
+    positional = directory / "positional.ef"
+    named.write_text(nested_data_source(30, True))
+    positional.write_text(nested_data_source(30, False))
+    type_at_query(named)
+    type_at_query(positional)
+    named_source = named.read_text()
+    named_body = named_source.index("{ ", named_source.index("fn deep")) + 2
+    named_offset = named_source.index("()", named_body)
+
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-11-25", "capabilities": {},
+            "clientInfo": {"name": "type-at-smoke", "version": "1"}}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+            "name": "code.typeAt", "arguments": {"file": "nested.ef", "offset": named_offset}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "ping"},
+    ]
+    process = subprocess.Popen([ef, "mcp", str(directory)], cwd=root,
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+    try:
+        output, error = process.communicate(input="\n".join(map(json.dumps, messages)) + "\n", timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        output, error = process.communicate()
+        raise AssertionError(("deep code.typeAt did not release the queued ping", output, error))
+    assert process.returncode == 0, error
+    replies = [json.loads(line) for line in output.splitlines()]
+    assert [reply.get("id") for reply in replies] == [1, 2, 3], replies
+    assert replies[2]["result"] == {}, replies
+    type_at = replies[1]["result"]["structuredContent"]
+    assert type_at["checked"] and type_at["expression"]["span"]["offset"] == named_offset, type_at
+
+print("native Go executable, JS module, CLI lint/query/graph, stdio MCP and bounded deep TypeAt: passed")

@@ -1,9 +1,9 @@
 # Testing with explicit effects
 
-`ef test FILE [--target go|js] [--live] [--timeout-ms 30000]` discovers top-level `test_` functions in source order. Each must be an effect with no parameters returning `()`. Its only implicit service is `Assert`; other services must be supplied explicitly in source. The test file does not need `main`.
+`ef test FILE [--target go|js] [--live] [--timeout-ms 30000]` discovers top-level `test_` functions in source order. Each must be an effect with no parameters returning `()`. `Assert` is implicit; `Clock`, `Scheduler` and `Sync` are explicit capability rows that receive fresh deterministic fixtures when the test declares them. The test file does not need `main`.
 
 ```rust
-effect fn test_greeting() -> () throws {AssertionFailed, Missing} uses {Assert} {
+effect fn test_greeting() -> () raises {AssertionFailed, Missing} uses {Assert} {
     let actual = run greeting("42").provide<Directory>(FixtureDirectory)
     run Assert.equalText(actual, "Hello, Ada")
 }
@@ -21,12 +21,14 @@ The CLI emits a JSON suite receipt with revision, target, per-case status/causes
 
 ## Host/time boundaries
 
-The default mode conservatively rejects file-level native host features, live clock/environment providers and timeout operators. `--live` opts into them. Custom fixture providers remain ordinary checked provision. This is a capability policy over the whole file, including unused functions, not an OS sandbox or an analysis of only reachable test code. A pure imported Go function also needs live opt-in because the conservative import boundary does not prove purity.
+The default mode conservatively rejects file-level native host features and live clock/scheduler/environment providers. A declared `.timeout(ms)` uses the case's deterministic `TestScheduler` in default mode. `--live` permits explicit `LiveScheduler`, `LiveClock` and other live providers, but does not replace the default fixtures; a test must provision a live provider explicitly to use wall-clock time. Custom fixture providers remain ordinary checked provision. This is a capability policy over the whole file, including unused functions, not an OS sandbox or an analysis of only reachable test code. A pure imported Go function also needs live opt-in because the conservative import boundary does not prove purity.
 
 The runner's real wall-clock watchdog defaults to 30 seconds for the suite process, after compilation. It forcibly stops the runner on expiry and reports `watchdogExpired: true`, `cleanupCompleted: false`. It does not claim to terminate unmanaged descendants or complete finalizers. The watchdog is a harness limit, distinct from a managed language timeout that waits for owned shutdown.
 
-## What DI does not supply
+## Causal and time fixtures
 
-Provider substitution does not by itself provide deterministic scheduling, network denial, scratch-directory isolation, process reaping or crash recovery. There is no virtual test clock yet. A no-op sleep provider would not control deadlines or scheduling and is not offered as one.
+`Sync.latch()` creates an opaque one-shot handle. `Sync.signal(latch)` is idempotent and `Sync.await(latch)` can be cancelled for one waiter without completing the shared latch. Use it for readiness and completion instead of fixed wall-clock waits.
 
-Next standard facilities: causal `Latch`/`Deferred`, a scheduler-backed test clock controlling sleeps and deadlines, scoped temporary directories, per-case console capture, deterministic randomness, and managed process fixtures with kill escalation and exit receipts. Use actual readiness/completion signals when testing concurrency; fixed waits are weak evidence.
+`Clock.sleep(ms)` and `.timeout(ms)` share the case's scheduler-backed virtual time. The timeout driver is the `Scheduler.sleep(ms)` capability; `Scheduler.awaitRegistration()` is a readiness barrier that observes a timer after it has parked, and `Scheduler.advance(ms)` performs the strong adjustment on both targets: it flushes admitted managed work, selects and fires intermediate deadlines, and commits its target only when no runnable managed continuation or reserved wake can register earlier work. Cleanup parked on a registered virtual timer or managed signal may remain pending during a partial adjustment; the next adjustment or signal can finish it. Unmanaged goroutines and foreign blocking calls are not observable by the fixture and may delay completion. A provider that implements only `Clock.sleep` does not control timeout deadlines; timeout's explicit `Scheduler` row is the authority.
+
+The real wall-clock watchdog remains independent of these fixtures. Provider substitution does not by itself provide network denial, scratch-directory isolation, process reaping or crash recovery.

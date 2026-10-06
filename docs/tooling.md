@@ -5,6 +5,7 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 | CLI | MCP | Purpose |
 | --- | --- | --- |
 | `ef check FILE` | `project.check` | Non-disableable source admission diagnostics |
+| `ef diagnostics FILE [--strict] [--json]` | `project.diagnostics` | One shared compiler/lint report with byte spans and UTF-16 ranges |
 | `ef lint FILE [--strict]` | `project.lint` | Checked semantic advice; separate `checked` and `lintPassed` |
 | `ef lint rules` | `lint.rules` | Stable codes, severity, names and rationale |
 | `ef inspect FILE SYMBOL` | `code.inspect` | Declared/body contracts or nominal record, enum and error metadata |
@@ -14,6 +15,22 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 | `ef test FILE` | `project.tests` discovers cases | CLI executes; MCP remains read-only |
 
 File commands accept `--target go|js`, defaulting to Go. Results contain semantic revision hashes. MCP file tools accept `expectedRevision` and reject stale snapshots.
+
+## Diagnostic reports
+
+`ef diagnostics` and `project.diagnostics` use the same compiler-owned report. It identifies the source with a canonical escaped `file:` URI and an `origin` such as `disk`, includes the exact semantic `revision`, selected `target`, `checked` admission state, `strict` policy, `policyPassed`, and deterministic findings. Every finding preserves its UTF-8 byte `span` and reports `code`, `origin`, optional lint `rule`, stable `severity` (`error`, `warning`, `information`, or `hint`), and message. A finding with a source location also has a valid zero-based UTF-16 `lsp.range`; `locationAvailable` is false when the compiler has no source location, such as an unsupported target diagnostic.
+
+Compiler errors always fail policy. Strict mode changes only the policy decision for warnings; it does not change finding severity. Unchecked source has `lintAvailable: false` and an explicit `lintUnavailableReason`, while compiler findings remain available. Reasoned lint suppressions can remove optional advice but cannot hide compiler errors.
+
+Source identity is the escaped, absolute, lexically normalized requested document path, retained with the analyzed bytes. Symlink targets are not substituted into that URI, and imports use the requested document's directory. A changed disk file does not change the returned snapshot's revision. This is document identity, not a physical-inode or hostile-filesystem guarantee. Linux paths and behavior are tested; native Windows drive/UNC behavior has not been runtime-validated.
+
+Diagnostic text uses one-based UTF-16 line/column locations. JSON LSP ranges are zero-based UTF-16; original compiler spans remain UTF-8 bytes. Source supports LF and CRLF line endings. Standalone raw CR outside string literals receives EF001 with an LF/CRLF correction; a raw CR inside a string receives the JSON-escape diagnostic. `\r` inside an escaped string remains valid content. Editor-position conversion recognizes CR as a line boundary even when locating that unsupported source byte.
+
+For unchecked source, the initial diagnostic report omits all lint evaluation, including suppression validation; its unavailable reason is explicit. The legacy `ef lint` surface retains its own suppression-validation behavior. This does not allow any suppression to remove compiler diagnostics.
+
+The CLI prints one finding per line by default and emits the complete report with `--json`. A policy failure exits 1, an invalid invocation exits 2, and file or compiler operation failures remain operational errors. MCP returns source errors as successful structured reports with `policyPassed: false`; source admission, stale-revision, path, and output-limit failures remain tool errors. MCP accepts at most 100 diagnostic findings and reports an explicit limit error above that boundary. The report's `totalCounts` and `returnedCount` are exact for every successful response.
+
+Exit 0 means policy passed. Exit 1 with JSON report stdout means source policy failed; exit 1 without a report means an operational failure, explained on stderr. `ef diagnostics --help` also documents this distinction and exit 2 for invalid invocation.
 
 ## Lint
 
@@ -36,7 +53,7 @@ Offsets and spans are UTF-8 bytes. Queries currently address diagnostic anchors 
 
 Checked values also carry a canonical `type` reference. Nominal records, enums and errors retain declaration identity; `ef inspect FILE TYPE_NAME` returns their source fields or variants with UTF-8 spans. MCP bounds declaration lists, variants and fields and reports truncation explicitly.
 
-Checked values also expose bounded `ownership` and `captures` facts. `owned` facts name the closing scope or child that the compiler can prove owns a `File`/`Fiber`; `borrowed` facts retain the parameter origin; `unknown` facts keep foreign and custom provider behavior honest. `EF123` is a compiler correctness diagnostic for a proven inner-scope or child-owned escape. The same facts are present in `ef inspect`, `ef query`, `project.check`, `code.inspect` and `code.typeAt`; this is provenance evidence, not a complete borrow checker.
+Checked values also expose bounded `ownership` and `captures` facts. `owned` facts name the closing scope or child that the compiler can prove owns a `File`/`Fiber`; `borrowed` facts retain the parameter origin; `unknown` facts keep foreign and custom provider behavior honest and can also represent bounded analysis that did not establish a complete proof. `EF123` is a compiler correctness diagnostic for a proven inner-scope or child-owned escape, or for potential ownership that exhausts the bounded analysis before the value can be proved safe; those cases retain distinct diagnostics. The same facts are present in `ef inspect`, `ef query`, `project.check`, `code.inspect` and `code.typeAt`; this is provenance evidence, not a complete borrow checker.
 
 ```sh
 OFFSET=$(python3 -c 'from pathlib import Path; s=Path("examples/latest-task.ef").read_bytes(); print(s.index(b"run previous"))')
@@ -51,11 +68,11 @@ For `examples/workflow.ef`, `welcome` requires `Directory`; `DemoDirectory` impl
 
 This is a single-file static composition graph, including deferred calls. It does not establish execution order or runtime allocations. Provider construction is explicit and non-memoized: a reused value is one graph identity, while repeated runs of one recipe are distinct values. Fallible acquisition, lifecycle-safe arbitrary capture, general sharing keys and cycle paths will extend this model when implemented. Expression IDs contain offsets and are scoped to the revision.
 
-MCP limits graphs to 1,000 nodes and 2,000 edges; larger graphs fail explicitly. Lint diagnostics are limited to 100 with truncation flags. Full CLI results remain available.
+MCP limits graphs to 1,000 nodes and 2,000 edges; larger graphs fail explicitly. The legacy `project.lint` response keeps its separate bounded diagnostic arrays and truncation flags. Full CLI diagnostic reports remain available.
 
 ## Next capabilities
 
-Canonical comment-preserving formatting, revision-bound checked edit plans, multi-file identities, editor integration and runtime/source correlation remain planned. Compiler errors stay independent of optional style policy. A future test clock must share a scheduler with sleep/deadline primitives.
+Canonical comment-preserving formatting, revision-bound checked edit plans, multi-file identities, editor integration, complete ownership provenance and runtime/source correlation remain planned. The bounded ownership evidence described above is implemented without claiming a complete borrow checker. Compiler errors stay independent of optional style policy. Managed test time already shares scheduling with sleep/deadline primitives; see the [testing contract](testing.md) for its supported causal boundaries and foreign-operation limits.
 
 ## Performance receipt
 

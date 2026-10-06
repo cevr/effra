@@ -4,6 +4,14 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 ## Language
 
+**Record**: A nominal data type with declared fields. Construction checks every required field and its type.
+
+**Closed enum**: A nominal set of alternatives, each with its own declared payload.
+
+**Exhaustive match**: An interpretation that covers each declared alternative exactly once and executes only its selected arm.
+
+**Failure payload**: The declared data carried by a named failure, separate from an ordinary success value.
+
 **Effect contract**: The success value, named failures, and required services of a deferred Effra program.
 
 **Failure row**: The unordered set of nominal failures admitted by an effect contract.
@@ -13,6 +21,10 @@ Effra describes server programs using explicit, inspectable effect contracts.
 **Target provider**: An implementation of a service on a particular execution target.
 
 **Provider construction contract**: The configuration and required services used to create a provider value, distinct from the contract of invoking its service operations.
+
+**Provider recipe**: A deferred constructor with explicit configuration and construction requirements. Each execution materializes a provider value.
+
+**Materialized provider value**: An already constructed service implementation that can be explicitly reused without reexecuting its recipe.
 
 **Captured provider**: A provider value bound to the service values supplied during its construction. Its operations belong to the caller's current owning scope.
 
@@ -25,6 +37,24 @@ Effra describes server programs using explicit, inspectable effect contracts.
 **Owning scope**: The lifetime that owns managed fibers and resource releases. Its closure establishes their completed shutdown and cleanup.
 
 **Host declaration**: A Go or TypeScript declaration supplying the native shape and identity of an imported value or callable.
+
+**Codec** (specified, not yet implemented): A checked witness relating a wire type and a domain type through separately contracted decoding and encoding operations.
+
+**Structural derivation** (specified): Generating a codec's structural rules from canonical checked data declarations and an explicit representation policy.
+
+**Codec transformation** (specified): A checked conversion in a codec's decoding or encoding direction, carrying its own expected failures and required services. The two directions need not be mathematical inverses.
+
+**Machine** (specified): A checked definition of state and event types, transition policies and state-owned behavior.
+
+**Actor** (specified): A running instance of a machine, with its own current state, owning scope and event mailbox.
+
+**Machine step** (specified): An ordinary pure or effectful function that consumes a state and event and returns an explicit transition decision. Effectful evaluation has an actor-owned scope and completes before state commit.
+
+**State entry** (specified): One owned lifetime of an actor's current state, identified separately from that state's tag and payload.
+
+**Re-entry** (specified): Closing a state entry and starting a fresh one, including when the state tag stays the same.
+
+**Entry epoch** (specified): An identity distinguishing a state entry from prior entries so obsolete work cannot update a later entry.
 
 **Binding contract**: Supplemental behavioral facts attached to a host declaration, including its cancellation, failure, resource, and trust policy.
 

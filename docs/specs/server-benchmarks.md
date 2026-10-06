@@ -6,7 +6,7 @@ Status: implementation authorized by the owner on 2026-10-05. This extends the p
 
 How does an Effra native server compare with equivalent TypeScript/Effect, native TypeScript and optimized Go servers? Measure whether Effra approaches or exceeds the strongest measured Go baseline, and identify the cost of its guarantees separately from host runtime differences. Use generic original fixtures; public documentation must not name inspected application projects.
 
-The first receipt covers the server features actually admitted by the compiler: path routing, service-backed application work, explicit failure recovery, response construction and owned request/server shutdown. External databases, JSON codecs and streams need subsequent matched fixtures once supported. A constant response alone cannot establish application-level benefits.
+The path-routing server remains a transport control. The required framework receipt follows the [native server contract](native-server-contracts.md): checked JSON codecs, actual Effect HttpApi HTTP endpoints and RpcServer unary RPC, matched typed failures, limits, cancellation and completed shutdown. External databases and streams remain subsequent workloads. A constant response or transport-only control cannot establish framework-level benefits.
 
 ## Equivalence before performance
 
@@ -25,6 +25,10 @@ Use one load generator and workload for every target. Warm servers before sampli
 Report single-core comparisons separately from multi-core scaling. A Go runtime using several cores cannot be compared to one JS event loop without saying so; a worker configuration needs its own receipt. Include server CPU and memory observations with their collection method and limits. Measure startup-to-readiness and cancellation-to-exit/cleanup separately from steady-state request latency.
 
 Keep build measurements separate: Effra parse/check/import/emission, Go compilation/linking, TS checking/transformation and cache state. A warm Go cache or TypeScript execution without type checking must not masquerade as equal build work. Report raw repeated samples and summary statistics; do not infer a universal benefit or statistically meaningful win from noise.
+
+Include generated-code scaling alongside server builds: many ordinary small functions and one long straight-line effectful function must have separate emitted-source, frontend and backend receipts. The scheduler's 1024-signal regression exposed a generated-Go watchdog that includes compilation; the implementation owner reported a roughly 60-second build followed by millisecond execution, without retaining that diagnostic artifact. Reproduce under admitted host/cache conditions before attributing it to lowering or Go optimization. Preserve generated source, binary identity and raw stage logs. A fast frontend or warm build cannot hide a slow fresh backend, and shortening the regression program or extending its timeout is not a compile-speed improvement.
+
+A subsequent [retained diagnostic](../research/generated-go-build-cost.md) observes 47.754 seconds in the Go build versus 3.894 milliseconds running the resulting test on the shared host. It establishes the stage boundary for that run, not an admitted comparative score or attribution to a specific optimizer.
 
 ## Exit gate
 

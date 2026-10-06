@@ -2,9 +2,9 @@ error Bad
 
 effect fn immediate() -> string { "child joined" }
 effect fn pending() -> string uses {Clock} { run Clock.sleep(10000); "late" }
-effect fn bad() -> string throws {Bad} { fail Bad }
+effect fn bad() -> string raises {Bad} { fail Bad }
 
-effect fn program() -> () throws {Bad} uses {Clock, Console} {
+effect fn program() -> () raises {Bad} uses {Clock, Console, Scheduler} {
     scope {
         let child = fork immediate()
         let text = run child.join()
@@ -18,6 +18,7 @@ effect fn program() -> () throws {Bad} uses {Clock, Console} {
         run Console.log(recovered)
     }
 }
-effect fn main() -> () throws {Bad} {
+effect fn main() -> () raises {Bad} {
     run program().provide<Clock>(LiveClock).provide<Console>(Stdout)
+        .provide<Scheduler>(LiveScheduler)
 }

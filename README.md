@@ -35,7 +35,7 @@ go build -o bin/ef ./cmd/ef
 ./bin/ef mcp .                            # newline-delimited JSON-RPC on stdio
 ```
 
-`bun run demo` compiles and runs the native Go executable. Use `--target js` with build/run/check to select JavaScript. `bun run gate` checks formatting, Go vet, compiler and runtime tests, tracker consistency, and the public CLI/MCP process.
+`bun run demo` compiles and runs the native Go executable. Use `--target js` with build/run/check to select JavaScript. `bun run gate` checks Go formatting, Go vet, compiler and runtime tests, tracker consistency, and the public CLI/MCP process.
 
 ## Example
 
@@ -43,11 +43,11 @@ go build -o bin/ef ./cmd/ef
 error NotFound
 
 service Users {
-    effect fn get(id: string) -> string throws {NotFound}
+    effect fn get(id: string) -> string raises {NotFound}
 }
 
 effect fn greeting(id: string) -> string
-    throws {NotFound}
+    raises {NotFound}
     uses {Users}
 {
     let name = run Users.get(id)
@@ -69,6 +69,7 @@ The JavaScript library build exports functions, service keys, and providers for 
 | [workflow.ef](examples/workflow.ef) | Authorization, lookup and delivery with three service contracts | Go / JS |
 | [latest-task.ef](examples/latest-task.ef) | Replace an owned child after interruption and cleanup finish | Go / JS |
 | [concurrency.ef](examples/concurrency.ef) | Child join/interrupt and deadline recovery | Go / JS |
+| [causal.ef](examples/causal.ef) | Managed virtual time, shared latches and causal cleanup tests | Go / JS |
 | [imports.ef](examples/imports.ef) | Automatic native signatures, partial results and context forwarding | Go |
 | [http.ef](examples/http.ef) | HTTP routes, SDK calls, file scopes and managed shutdown | Go |
 | [lifecycle.ef](examples/lifecycle.ef) | Scoped files, cancellation and runtime snapshots | Go |
@@ -112,7 +113,7 @@ Each alternative owns its payload. Adding a variant should make incomplete match
 ```rust
 import go strconv "strconv"
 
-effect fn parse(text: string) -> bool throws {GoError} uses {Foreign} {
+effect fn parse(text: string) -> bool raises {GoError} uses {Foreign} {
     run strconv.ParseBool(text).orFail()
 }
 ```
@@ -122,6 +123,8 @@ The compiler loads callable shapes from Go export data. Imported calls are defer
 ## Agent inspection
 
 `ef check`, `ef inspect` and `ef explain` expose checked contracts, source spans, used host signatures, behavior provenance and compiler timings as JSON. `ef mcp .` exposes read-only compiler tools over stdio. Revisions include imported Go declarations and behavior contracts so stale queries can be rejected. See [MCP setup and limits](docs/mcp.md).
+
+`ef diagnostics FILE --json` and MCP `project.diagnostics` share compiler errors and lint advice, with explicit severities, UTF-8 byte spans and UTF-16 editor ranges. Reports distinguish checked source, unavailable advice and policy failure. This is the shared diagnostic model; the standalone language server and full type-graph queries are still being built.
 
 ## What is experimental
 
@@ -136,7 +139,7 @@ bun run gate
 go test -race ./...
 ```
 
-The gate checks formatting, vet, compiler/runtime tests, actual Go and JS programs, CLI/MCP inspection, and a live HTTP server. Shared lifecycle tests cover child-before-parent cleanup, unobserved child failures and timeout cleanup defects.
+The gate checks Go formatting, vet, compiler/runtime tests, actual Go and JS programs, CLI/MCP inspection and diagnostic parity, and a live HTTP server. Shared lifecycle tests cover child-before-parent cleanup, unobserved child failures and timeout cleanup defects.
 
 Project direction is recorded in [NORTH_STAR.md](NORTH_STAR.md), source comparisons in [PRIOR_ARTS.md](PRIOR_ARTS.md), and canonical terms in [GLOSSARY.md](GLOSSARY.md). The [architecture ledger](plans/architecture-loop-2026-10-05.md) records implementation evidence and unresolved work. Start with [implemented syntax](docs/prototype.md), [runtime contracts](docs/runtime.md), or the broader [design sketch](docs/design.md).
 
@@ -158,6 +161,7 @@ The CLI and read-only MCP share the checked compiler model:
 ```sh
 ./bin/ef lint examples/workflow.ef --strict
 ./bin/ef lint rules
+./bin/ef diagnostics examples/workflow.ef --strict --json
 ./bin/ef graph examples/workflow.ef
 ./bin/ef query examples/latest-task.ef 64
 ./bin/ef test examples/testing.ef
