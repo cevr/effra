@@ -264,6 +264,14 @@ func call(root, name string, args arguments) (any, error) {
 			},
 		}, nil
 	}
+	var snapshot compiler.SourceSnapshot
+	if name == "project.diagnostics" {
+		uri, err := compiler.FileURI(filepath.Join(root, args.File))
+		if err != nil {
+			return nil, err
+		}
+		snapshot = compiler.SourceSnapshot{URI: uri, Origin: "disk"}
+	}
 	source, err := readSource(root, args.File)
 	if err != nil {
 		return nil, err
@@ -277,11 +285,8 @@ func call(root, name string, args arguments) (any, error) {
 		return nil, fmt.Errorf("stale semantic revision; current revision is %s", r.Revision)
 	}
 	if name == "project.diagnostics" {
-		uri, err := compiler.FileURI(filepath.Join(root, args.File))
-		if err != nil {
-			return nil, err
-		}
-		report := r.DiagnosticReport(compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: string(source)}, args.Strict)
+		snapshot.Text = string(source)
+		report := r.DiagnosticReport(snapshot, args.Strict)
 		return report.Bounded(maxInspectionItems)
 	}
 	if name == "project.tests" {

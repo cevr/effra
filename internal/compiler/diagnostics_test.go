@@ -75,6 +75,16 @@ run task().provide<Console>(Stdout)
 	}
 }
 
+func TestBuiltinDiagnosticSeverityMetadataIsKnown(t *testing.T) {
+	for _, rule := range LintRules() {
+		switch rule.Severity {
+		case "error", "warning", "information", "info", "suggestion", "hint":
+		default:
+			t.Fatalf("rule %s has unknown severity %q", rule.Name, rule.Severity)
+		}
+	}
+}
+
 func TestDiagnosticReportMarksUnavailableLintAndLocations(t *testing.T) {
 	source := `effect fn main() -> () { run Console.log("x") }`
 	r := Compile(source)

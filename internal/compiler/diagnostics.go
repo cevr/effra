@@ -20,19 +20,16 @@ type SourceSnapshot struct {
 	Text   string `json:"-"`
 }
 
-// FileURI returns the canonical escaped URI for a regular source file. File
-// URIs are shared by CLI and MCP so a workspace-relative request and an
-// absolute CLI path identify the same revision in the report.
+// FileURI identifies the requested document, not its current symlink target.
+// URI construction never reads the filesystem: a replacement during checking
+// must not attach the captured source bytes to a different document. Relative
+// and absolute requests for the same logical path share an escaped URI.
 func FileURI(path string) (string, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
 	}
-	resolved, err := filepath.EvalSymlinks(absolute)
-	if err != nil {
-		return "", err
-	}
-	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(resolved)}).String(), nil
+	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(absolute)}).String(), nil
 }
 
 type SourceIdentity struct {
@@ -133,7 +130,7 @@ func newSourcePositionIndex(source string) sourcePositionIndex {
 			index.valid[offset] = true
 			continue
 		}
-		if source[offset] == '\n' {
+		if source[offset] == '\n' || source[offset] == '\r' {
 			offset++
 			line++
 			character = 0
@@ -164,10 +161,13 @@ func newSourcePositionIndex(source string) sourcePositionIndex {
 // range. It returns false when the span is outside the source or lands inside
 // a UTF-8 sequence. A CRLF-internal endpoint is normalized to the line end.
 func UTF16Range(source string, span Span) (DiagnosticRange, bool) {
+	return newSourcePositionIndex(source).rangeFor(source, span)
+}
+
+func (index sourcePositionIndex) rangeFor(source string, span Span) (DiagnosticRange, bool) {
 	if span.Offset < 0 || span.Length < 0 || span.Offset > len(source) || span.Length > len(source)-span.Offset {
 		return DiagnosticRange{}, false
 	}
-	index := newSourcePositionIndex(source)
 	end := span.Offset + span.Length
 	start, startOK := legalDiagnosticPosition(source, index, span.Offset)
 	finish, endOK := legalDiagnosticPosition(source, index, end)
@@ -226,14 +226,9 @@ func (r *Result) DiagnosticReport(snapshot SourceSnapshot, strict bool) Diagnost
 		// diagnostics such as an unsupported target. Real source spans carry
 		// one-based lexer coordinates, including valid zero-length EOF spans.
 		hasSourceSpan := span.Offset != 0 || span.Length != 0 || span.Line != 0 || span.Column != 0
-		if hasSourceSpan && span.Offset >= 0 && span.Length >= 0 && span.Offset <= len(snapshot.Text) && span.Length <= len(snapshot.Text)-span.Offset {
-			end := span.Offset + span.Length
-			if start, startOK := legalDiagnosticPosition(snapshot.Text, positionIndex, span.Offset); startOK {
-				if finish, endOK := legalDiagnosticPosition(snapshot.Text, positionIndex, end); endOK {
-					finding.LocationAvailable = true
-					finding.LSP = &LSPDiagnostic{Range: DiagnosticRange{Start: start, End: finish}, Severity: lspSeverity, Code: code, Source: "effra", Message: message}
-				}
-			}
+		if location, ok := positionIndex.rangeFor(snapshot.Text, span); hasSourceSpan && ok {
+			finding.LocationAvailable = true
+			finding.LSP = &LSPDiagnostic{Range: location, Severity: lspSeverity, Code: code, Source: "effra", Message: message}
 		}
 		report.Diagnostics = append(report.Diagnostics, finding)
 	}

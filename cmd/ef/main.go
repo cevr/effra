@@ -48,15 +48,20 @@ func load(path, target string) (*compiler.Result, error) {
 	return r, err
 }
 
-func loadWithSource(path, target string) (*compiler.Result, string, error) {
+func loadWithSource(path, target string) (*compiler.Result, compiler.SourceSnapshot, error) {
 	if filepath.Ext(path) != ".ef" {
-		return nil, "", fmt.Errorf("source file must have .ef extension")
+		return nil, compiler.SourceSnapshot{}, fmt.Errorf("source file must have .ef extension")
+	}
+	uri, err := compiler.FileURI(path)
+	if err != nil {
+		return nil, compiler.SourceSnapshot{}, err
 	}
 	source, err := sourcefile.ReadRegularFile(path, 0)
 	if err != nil {
-		return nil, "", err
+		return nil, compiler.SourceSnapshot{}, err
 	}
-	return compiler.CompileAt(string(source), target, filepath.Dir(path)), string(source), nil
+	snapshot := compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: string(source)}
+	return compiler.CompileAt(snapshot.Text, target, filepath.Dir(path)), snapshot, nil
 }
 
 type options struct {
@@ -134,6 +139,10 @@ func command(args []string) error {
 		return fmt.Errorf("unknown command %s; use ef --help", args[0])
 	}
 	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+		if args[0] == "diagnostics" {
+			fmt.Println("usage: ef diagnostics FILE [--strict] [--json] [--target go|js]\nLocations: one-based UTF-16 lines/columns in text; zero-based UTF-16 ranges and original UTF-8 byte spans in JSON.\nExit codes: 0 policy passed; 1 failed policy or source/operational failure; 2 invalid invocation.\nWith --json, source findings produce a report on stdout even when policy fails; operational failures produce no report and explain the error on stderr.")
+			return nil
+		}
 		return command([]string{"--help"})
 	}
 	opts, err := parseOptions(args[1:])
@@ -183,9 +192,9 @@ func command(args []string) error {
 		return invalidInvocation(fmt.Errorf("source file must have .ef extension"))
 	}
 	var r *compiler.Result
-	var source string
+	var snapshot compiler.SourceSnapshot
 	if args[0] == "diagnostics" {
-		r, source, err = loadWithSource(opts.positional[0], opts.target)
+		r, snapshot, err = loadWithSource(opts.positional[0], opts.target)
 	} else {
 		r, err = load(opts.positional[0], opts.target)
 	}
@@ -194,11 +203,7 @@ func command(args []string) error {
 	}
 	switch args[0] {
 	case "diagnostics":
-		uri, err := compiler.FileURI(opts.positional[0])
-		if err != nil {
-			return err
-		}
-		report := r.DiagnosticReport(compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: source}, opts.strict)
+		report := r.DiagnosticReport(snapshot, opts.strict)
 		if opts.json {
 			if err := printJSON(report); err != nil {
 				return err
