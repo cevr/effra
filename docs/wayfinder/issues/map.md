@@ -48,6 +48,8 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 
 ## Foundation implementation receipts
 
+- [Causal synchronization and scheduler-backed tests](foundation-testing.md): reviewed native/JS managed scheduling, partial cleanup, continuation ownership and both join orders, plus consistent invalid latch boundaries. Integrated full gates, race checks and portable public cases pass; foreign operations remain outside virtual quiescence guarantees.
+
 - [Reasoned semantic lint suppression](foundation-lint.md): named next-line advice suppression requires a reason; malformed, unknown and unused directives diagnose without disabling compiler checks.
 - [Closed application data and exhaustive interpretation](foundation-data.md): records, payload enums, structured failures and exhaustive matching execute on Go/JS and share inspectable canonical declarations; independent review repairs are integrated.
 

@@ -1,4 +1,4 @@
-<!-- {"id": "foundation-testing", "title": "Causal synchronization and scheduler-backed tests", "status": "open", "labels": ["implementation:task"], "parent": "foundation-spec", "assignee": "scheduler_finish", "blocked_by": []} -->
+<!-- {"id": "foundation-testing", "title": "Causal synchronization and scheduler-backed tests", "status": "closed", "labels": ["implementation:task"], "parent": "foundation-spec", "assignee": "scheduler_finish", "blocked_by": []} -->
 # Causal synchronization and scheduler-backed tests
 
 ## Question
@@ -15,4 +15,4 @@ Claude2 counsel round1 independently confirms both and adds intermediate-timer c
 
 Reviewed repairs through ac8f1e2 and the permanent fast-first join regression f03f340 are integrated at cf3783c. Branch/integration gates and the integrated full Go race suite pass; the public five-case causal example passes Go and JS with the same semantic revision. Independent review covers partial cleanup, both join orders, nested timeouts, already-closing work and composite causes. The final transferred checkout is cleanly retired with all Git refs preserved in a verified local bundle.
 
-One follow-up guardrail batch remains before closure: zero-value native Latch handles currently have inconsistent invalid-handle behavior, and two generated-JS test fixtures assume dist already exists. Fix4a27f3b passes a fresh-output full gate and focused races; it is under independent counsel. These findings do not reopen the reviewed continuation algorithm.
+The follow-up invalid-handle/fresh-fixture batch is integrated at616f0b4: fixes4a27f3b and65a8882 make nil/zero native handles consistently fail, centralize managed validation and create generated-JS scratch parents. Claude2 round1 approves and final fix-only round2 is clear, with guard-removal mutation tests and repeated runtime races. Branch and root full gates pass; root focused runtime race20 and the public causal example on both targets pass. Raw logs `/tmp/effra-latch-{branch-integration-gate,integrated-gate,integrated-live}.log` and `/tmp/effra-latch-causal-{go,js}.json`. This closes the finite scheduler/testing foundation; it does not establish arbitrary foreign-operation quiescence.
