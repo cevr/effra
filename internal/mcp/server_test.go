@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -462,6 +464,8 @@ func TestFormatRejectsStaleAndInvalidOrigins(t *testing.T) {
 		`{"uri":"buffer://main.ef"}`,
 		`{"file":"main.ef","uri":"buffer://main.ef"}`,
 		`{"source":"","expectedDigest":""}`,
+		`{"source":"","target":"go"}`,
+		`{"source":"","target":"js"}`,
 	} {
 		if _, err := decodeArguments("code.format", json.RawMessage(raw)); err == nil {
 			t.Fatalf("accepted invalid code.format arguments %s", raw)
@@ -492,13 +496,35 @@ func TestFormatRejectsStaleAndInvalidOrigins(t *testing.T) {
 	}
 }
 
+func TestFormatRejectsInvalidUTF8ForBufferAndDisk(t *testing.T) {
+	invalid := append([]byte("// invalid "), 0xff)
+	invalid = append(invalid, []byte("\neffect fn main() -> () { () }\n")...)
+	bufferArgs := arguments{Source: string(invalid), SourcePresent: true}
+	if _, err := formatCode(t.TempDir(), bufferArgs); err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+		t.Fatalf("invalid buffer UTF-8 was accepted: %v", err)
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "invalid.ef")
+	if err := os.WriteFile(path, invalid, 0600); err != nil {
+		t.Fatal(err)
+	}
+	diskArgs := arguments{File: "invalid.ef", FilePresent: true}
+	if _, err := formatCode(root, diskArgs); err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+		t.Fatalf("invalid disk UTF-8 was accepted: %v", err)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, invalid) {
+		t.Fatalf("invalid disk source was changed: err=%v bytes=%v", err, got)
+	}
+}
+
 func TestRejectedFormatRequestStillReleasesQueuedPing(t *testing.T) {
 	root := t.TempDir()
 	messages := []string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code.format","arguments":{"source":"effect fn main() -> string { @ }"}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"ping"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code.format","arguments":{"source":"","target":"go"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"code.format","arguments":{"source":"effect fn main() -> string { @ }"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"ping"}`,
 	}
 	var output bytes.Buffer
 	if err := Serve(root, strings.NewReader(strings.Join(messages, "\n")), &output); err != nil {
@@ -513,8 +539,52 @@ func TestRejectedFormatRequestStillReleasesQueuedPing(t *testing.T) {
 		}
 		responses = append(responses, response)
 	}
-	if len(responses) != 3 || responses[1]["result"].(map[string]any)["isError"] != true || !reflect.DeepEqual(responses[2]["result"], map[string]any{}) {
+	if len(responses) != 4 || responses[1]["error"] == nil || responses[2]["result"].(map[string]any)["isError"] != true || !reflect.DeepEqual(responses[3]["result"], map[string]any{}) {
 		t.Fatalf("queued ping was not completed after rejected format: %+v", responses)
+	}
+}
+
+func TestMCPFrameReaderDrainsOversizeAndAcceptsExactLimit(t *testing.T) {
+	exact := strings.Repeat("x", maxMCPFrameBytes)
+	reader := bufio.NewReader(strings.NewReader(exact + "\nnext\n"))
+	frame, status, err := readMCPFrame(reader, maxMCPFrameBytes)
+	if err != nil || status != mcpFrameComplete || len(frame) != maxMCPFrameBytes {
+		t.Fatalf("exact frame was not admitted: status=%v length=%d err=%v", status, len(frame), err)
+	}
+	frame, status, err = readMCPFrame(reader, maxMCPFrameBytes)
+	if err != nil || status != mcpFrameComplete || string(frame) != "next" {
+		t.Fatalf("queued frame was not preserved: status=%v frame=%q err=%v", status, frame, err)
+	}
+
+	over := strings.Repeat("x", maxMCPFrameBytes+1)
+	reader = bufio.NewReader(strings.NewReader(over + "\nnext\n"))
+	frame, status, err = readMCPFrame(reader, maxMCPFrameBytes)
+	if err != nil || status != mcpFrameTooLarge || frame != nil {
+		t.Fatalf("oversized frame was accumulated or misclassified: status=%v frame=%v err=%v", status, frame, err)
+	}
+	frame, status, err = readMCPFrame(reader, maxMCPFrameBytes)
+	if err != nil || status != mcpFrameComplete || string(frame) != "next" {
+		t.Fatalf("oversized frame did not drain to the next request: status=%v frame=%q err=%v", status, frame, err)
+	}
+}
+
+func TestMCPResponseFrameCapIsAllOrError(t *testing.T) {
+	result := map[string]any{"origin": "buffer", "text": "", "uri": strings.Repeat("<", 1024)}
+	res := response{JSONRPC: "2.0", ID: json.RawMessage("1"), Result: toolResult{Content: []map[string]string{{"type": "text", "text": "summary"}}, StructuredContent: result}}
+	encoded, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exact bytes.Buffer
+	if err := writeMCPResponse(&exact, res, len(encoded)); err != nil {
+		t.Fatalf("exact response bound rejected complete frame: %v", err)
+	}
+	if !bytes.HasSuffix(exact.Bytes(), []byte("\n")) || len(exact.Bytes()) != len(encoded)+1 {
+		t.Fatalf("exact response frame was not written whole: %d bytes", exact.Len())
+	}
+	var over bytes.Buffer
+	if err := writeMCPResponse(&over, res, len(encoded)-1); !errors.Is(err, errMCPResponseTooLarge) || over.Len() != 0 {
+		t.Fatalf("oversized response was partially written: err=%v bytes=%d", err, over.Len())
 	}
 }
 

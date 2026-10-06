@@ -57,6 +57,25 @@ func runTestCLIInput(t *testing.T, binary, input string, args ...string) ([]byte
 	return nil, nil, -1
 }
 
+func runTestCLIDir(t *testing.T, binary, directory string, input string, args ...string) ([]byte, []byte, int) {
+	t.Helper()
+	command := exec.Command(binary, args...)
+	command.Dir = directory
+	command.Stdin = strings.NewReader(input)
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	err := command.Run()
+	if err == nil {
+		return stdout.Bytes(), stderr.Bytes(), 0
+	}
+	if exit, ok := err.(*exec.ExitError); ok {
+		return stdout.Bytes(), stderr.Bytes(), exit.ExitCode()
+	}
+	t.Fatal(err)
+	return nil, nil, -1
+}
+
 func TestDiagnosticsCLIProcessFormatsTextJSONAndUsage(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := t.TempDir()
@@ -245,6 +264,14 @@ effect fn main() -> string { "ok" }`
 	if string(unchangedValid) != validSource {
 		t.Fatal("syntax failure partially wrote an earlier file")
 	}
+	humanOutput, humanError, code := runTestCLI(t, binary, "fmt", invalid)
+	if code != 2 || len(humanOutput) != 0 || strings.Contains(string(humanError), "already formatted") || !strings.Contains(string(humanError), "EFMT_SYNTAX") {
+		t.Fatalf("syntax failure was reported as a completed human result: code=%d stdout=%q stderr=%q", code, humanOutput, humanError)
+	}
+	checkHumanOutput, checkHumanError, code := runTestCLI(t, binary, "fmt", "--check", invalid)
+	if code != 2 || len(checkHumanOutput) != 0 || strings.Contains(string(checkHumanError), "already formatted") || !strings.Contains(string(checkHumanError), "EFMT_SYNTAX") {
+		t.Fatalf("check syntax failure was reported as formatted: code=%d stdout=%q stderr=%q", code, checkHumanOutput, checkHumanError)
+	}
 
 	_, stdinJSONError, code := runTestCLIInput(t, binary, source, "fmt", "--stdin", "--json")
 	if code != 2 || len(stdinJSONError) != 0 {
@@ -257,6 +284,138 @@ effect fn main() -> string { "ok" }`
 	_, symlinkError, code := runTestCLI(t, binary, "fmt", symlink)
 	if code != 2 || !strings.Contains(string(symlinkError), "EFMT_SYMLINK") {
 		t.Fatalf("symlink write was not rejected: code=%d stderr=%q", code, symlinkError)
+	}
+	invalidBytesSlice := append([]byte("// invalid "), 0xff)
+	invalidBytesSlice = append(invalidBytesSlice, []byte("\neffect fn main() -> () { () }\n")...)
+	invalidBytes := string(invalidBytesSlice)
+	invalidStdout, invalidStderr, code := runTestCLIInput(t, binary, invalidBytes, "fmt", "--stdin")
+	if code != 2 || len(invalidStdout) != 0 || !strings.Contains(string(invalidStderr), "EFMT_SYNTAX") || !strings.Contains(string(invalidStderr), "not valid UTF-8") {
+		t.Fatalf("invalid stdin UTF-8 was not rejected without replacement: code=%d stdout=%q stderr=%q", code, invalidStdout, invalidStderr)
+	}
+	var expanded strings.Builder
+	expanded.WriteString("effect fn main() -> () { ")
+	for index := 0; index < 64; index++ {
+		expanded.WriteString("scope { ")
+	}
+	expanded.WriteString(strings.Repeat("();\n", 20000))
+	for index := 0; index < 64; index++ {
+		expanded.WriteString(" }")
+	}
+	expanded.WriteString(" }")
+	limitedStdout, limitedStderr, code := runTestCLIInput(t, binary, expanded.String(), "fmt", "--stdin")
+	if code != 2 || len(limitedStdout) != 0 || !strings.Contains(string(limitedStderr), "EFMT_OUTPUT_LIMIT") {
+		t.Fatalf("stdin output bound was not enforced before replacement: code=%d stdout=%d stderr=%q", code, len(limitedStdout), limitedStderr)
+	}
+}
+
+func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "deep", "inner"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "deep", "inner"), filepath.Join(root, "jump")); err != nil {
+		t.Fatal(err)
+	}
+	source := `effect fn main() -> string { "ok" }`
+	deepPath := filepath.Join(root, "deep", "e.ef")
+	rootPath := filepath.Join(root, "e.ef")
+	if err := os.WriteFile(deepPath, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootPath, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output, stderr, code := runTestCLIDir(t, binary, root, "", "fmt", "--json", "jump/../e.ef", "./e.ef")
+	if code != 0 || len(stderr) != 0 {
+		t.Fatalf("OS path resolution failed: code=%d stderr=%q stdout=%q", code, stderr, output)
+	}
+	var report formatReport
+	if err := json.Unmarshal(output, &report); err != nil || len(report.Files) != 2 || !report.Files[0].Written || !report.Files[1].Written {
+		t.Fatalf("distinct OS paths were falsely deduplicated: err=%v report=%+v", err, report)
+	}
+	want, err := compiler.FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{deepPath, rootPath} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want.Text {
+			t.Fatalf("requested OS path was not formatted: path=%s err=%v got=%q", path, err, got)
+		}
+	}
+
+	hardlinkOne := filepath.Join(root, "hard-one.ef")
+	hardlinkTwo := filepath.Join(root, "hard-two.ef")
+	if err := os.WriteFile(hardlinkOne, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(hardlinkOne, hardlinkTwo); err != nil {
+		t.Fatal(err)
+	}
+	output, stderr, code = runTestCLIDir(t, binary, root, "", "fmt", "--json", "hard-one.ef")
+	if code != 0 || len(stderr) != 0 {
+		t.Fatalf("single hardlink formatting failed: code=%d stderr=%q stdout=%q", code, stderr, output)
+	}
+	firstBytes, err := os.ReadFile(hardlinkOne)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondBytes, err := os.ReadFile(hardlinkTwo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(firstBytes) != want.Text || string(secondBytes) != source {
+		t.Fatalf("single hardlink policy changed unexpectedly: first=%q second=%q", firstBytes, secondBytes)
+	}
+	firstInfo, err := os.Stat(hardlinkOne)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondInfo, err := os.Stat(hardlinkTwo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(firstInfo, secondInfo) {
+		t.Fatal("atomic replacement did not split the selected hardlink entry")
+	}
+
+	readOnly := filepath.Join(root, "readonly.ef")
+	if err := os.WriteFile(readOnly, []byte(source), 0444); err != nil {
+		t.Fatal(err)
+	}
+	output, stderr, code = runTestCLIDir(t, binary, root, "", "fmt", "--json", "readonly.ef")
+	if code != 0 || len(stderr) != 0 {
+		t.Fatalf("read-only file in writable directory was not replaceable: code=%d stderr=%q stdout=%q", code, stderr, output)
+	}
+	readOnlyBytes, err := os.ReadFile(readOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readOnlyInfo, err := os.Stat(readOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(readOnlyBytes) != want.Text || readOnlyInfo.Mode().Perm() != 0444 {
+		t.Fatalf("read-only replacement did not preserve bytes/mode: mode=%#o bytes=%q", readOnlyInfo.Mode().Perm(), readOnlyBytes)
+	}
+
+	specialMode := filepath.Join(root, "special-mode.ef")
+	if err := os.WriteFile(specialMode, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(specialMode, 0755|os.ModeSetgid); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, code = runTestCLIDir(t, binary, root, "", "fmt", "special-mode.ef"); code != 0 {
+		t.Fatalf("special mode file formatting failed: code=%d", code)
+	}
+	specialInfo, err := os.Stat(specialMode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if specialInfo.Mode().Perm() != 0755 || specialInfo.Mode()&os.ModeSetgid == 0 {
+		t.Fatalf("special mode bits were not preserved: mode=%#o", specialInfo.Mode())
 	}
 }
 
@@ -283,20 +442,85 @@ func TestFormatApplySeamReportsStaleAndEarlierWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report := formatReport{Files: []formatFileReport{{Path: firstPath}, {Path: secondPath}}}
+	report := formatReport{Success: true, Files: []formatFileReport{{Path: "first.ef", Changed: true, Completed: true}, {Path: "second.ef", Changed: true, Completed: true}}}
 	plans := []formatPlan{
-		{path: firstPath, info: firstInfo, source: []byte(source), result: result, reportAt: 0},
-		{path: secondPath, info: secondInfo, source: []byte(source), result: result, reportAt: 1},
+		{path: firstPath, displayPath: "first.ef", info: firstInfo, source: []byte(source), result: result, reportAt: 0},
+		{path: secondPath, displayPath: "second.ef", info: secondInfo, source: []byte(source), result: result, reportAt: 1},
 	}
 	calls := 0
 	err = applyFormatPlans(plans, &report, func(plan formatPlan) error {
 		calls++
 		if calls == 2 {
-			return &formatAdapterError{code: "EFMT_STALE", path: plan.path, message: "test stale source"}
+			before, err := os.Stat(plan.path)
+			if err != nil {
+				return err
+			}
+			edited := `effect fn main() -> string { "edited" }`
+			if err := os.WriteFile(plan.path, []byte(edited), 0600); err != nil {
+				return err
+			}
+			if err := os.Chtimes(plan.path, before.ModTime(), before.ModTime()); err != nil {
+				return err
+			}
 		}
-		return nil
+		return replaceFormattedFile(plan)
 	})
-	if err == nil || !report.Partial || report.Success || !report.Files[0].Written || report.Files[1].Written || len(report.Failures) != 1 || report.Failures[0].Code != "EFMT_STALE" {
+	if err == nil || !report.Partial || report.Success || !report.Files[0].Written || report.Files[1].Written || len(report.Failures) != 1 || report.Failures[0].Code != "EFMT_STALE" || report.Failures[0].Path != "second.ef" {
 		t.Fatalf("partial apply report lost causal state: err=%v report=%+v", err, report)
+	}
+	firstBytes, err := os.ReadFile(firstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondBytes, err := os.ReadFile(secondPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(firstBytes) != result.Text || string(secondBytes) != `effect fn main() -> string { "edited" }` {
+		t.Fatalf("real partial write did not preserve disk state: first=%q second=%q", firstBytes, secondBytes)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "effra-format-") {
+			t.Fatalf("temporary file leaked: %s", entry.Name())
+		}
+	}
+}
+
+func TestReplaceFormattedFileCleansTempAfterActualFailure(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.ef")
+	source := `effect fn main() -> string { "ok" }`
+	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := compiler.FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := formatPlan{path: path, displayPath: "main.ef", info: info, source: []byte(source), result: result}
+	err = replaceFormattedFileWithHook(plan, func(string) error { return os.ErrPermission })
+	if err == nil || !strings.Contains(err.Error(), "EFMT_WRITE") {
+		t.Fatalf("actual replacement failure was not reported: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != source {
+		t.Fatalf("failed replacement changed source: err=%v bytes=%q", err, got)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "effra-format-") {
+			t.Fatalf("temporary file leaked after failure: %s", entry.Name())
+		}
 	}
 }

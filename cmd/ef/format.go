@@ -34,6 +34,9 @@ const fmtHelp = "usage: ef fmt FILE... [--check] [--json]\n" +
 	"  0  formatting succeeded (or --check found no changes)\n" +
 	"  1  --check found differences\n" +
 	"  2  invalid invocation, syntax, I/O, stale-source, or limit failure\n\n" +
+	"Limits: at most 100 files; 2 MiB per-file and 8 MiB aggregate input;\n" +
+	"4 MiB per-file and 16 MiB aggregate formatted output.\n" +
+	"File errors use EFMT_* codes in stderr, or in the JSON failures array.\n\n" +
 	"Formatting is syntax-only: it does not typecheck, load packages, run lint, or\n" +
 	"build a backend. File mode writes changed files with an atomic replacement.\n"
 
@@ -52,6 +55,7 @@ type formatFileReport struct {
 	OutputDigest   string   `json:"outputDigest,omitempty"`
 	Changed        bool     `json:"changed"`
 	Written        bool     `json:"written"`
+	Completed      bool     `json:"completed"`
 }
 
 type formatFailureReport struct {
@@ -72,11 +76,12 @@ type formatReport struct {
 }
 
 type formatPlan struct {
-	path     string
-	info     os.FileInfo
-	source   []byte
-	result   compiler.FormatResult
-	reportAt int
+	path        string
+	displayPath string
+	info        os.FileInfo
+	source      []byte
+	result      compiler.FormatResult
+	reportAt    int
 }
 
 type formatAdapterError struct {
@@ -248,17 +253,13 @@ func formatStdin() error {
 func formatFiles(opts fmtOptions) (formatReport, error) {
 	report := newFormatReport(opts)
 	plans := make([]formatPlan, 0, len(opts.files))
-	byPath := map[string]int{}
+	byResolvedPath := map[string]int{}
 	var inputTotal, outputTotal int
 
 	for _, displayPath := range opts.files {
 		path, err := normalizeFormatPath(displayPath)
 		if err != nil {
 			return formatPlanFailure(&report, formatPathError(displayPath, err))
-		}
-		if planIndex, ok := byPath[path]; ok {
-			report.Files[plans[planIndex].reportAt].RequestedPaths = append(report.Files[plans[planIndex].reportAt].RequestedPaths, displayPath)
-			continue
 		}
 		if filepath.Ext(path) != ".ef" {
 			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_PATH", path: displayPath, message: "source file must have .ef extension"})
@@ -272,6 +273,14 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 		}
 		if lstat.Mode()&os.ModeSymlink == 0 && !lstat.Mode().IsRegular() {
 			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_SPECIAL_FILE", path: displayPath, message: "source must be a regular file"})
+		}
+		resolvedPath, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_READ", path: displayPath, message: err.Error()})
+		}
+		if planIndex, ok := byResolvedPath[resolvedPath]; ok {
+			report.Files[plans[planIndex].reportAt].RequestedPaths = append(report.Files[plans[planIndex].reportAt].RequestedPaths, displayPath)
+			continue
 		}
 		source, err := sourcefile.ReadRegularFile(path, maxFormatInputBytes)
 		if err != nil {
@@ -297,22 +306,32 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 
 		fileReport := formatFileReport{Path: displayPath, RequestedPaths: []string{displayPath}}
 		remainingOutput := maxFormatTotalOutput - outputTotal
-		if remainingOutput <= 0 {
-			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_OUTPUT_LIMIT", path: displayPath, message: fmt.Sprintf("request exceeds %d-byte aggregate output limit", maxFormatTotalOutput)})
+		aggregateOutputBound := remainingOutput < maxFormatOutputBytes
+		formatOutputBound := remainingOutput
+		if formatOutputBound <= 0 {
+			// FormatSourceBounded treats zero as unbounded for the pure-core API.
+			// A one-byte probe keeps this adapter bounded while allowing a valid
+			// zero-output source to pass an exactly exhausted aggregate budget.
+			formatOutputBound = 1
 		}
-		if remainingOutput > maxFormatOutputBytes {
-			remainingOutput = maxFormatOutputBytes
+		if formatOutputBound > maxFormatOutputBytes {
+			formatOutputBound = maxFormatOutputBytes
 		}
-		result, err := compiler.FormatSourceBounded(string(source), remainingOutput)
+		result, err := compiler.FormatSourceBounded(string(source), formatOutputBound)
 		fileReport.InputDigest = result.InputDigest
 		fileReport.OutputDigest = result.OutputDigest
 		fileReport.Changed = result.Changed
 		report.Files = append(report.Files, fileReport)
 		reportAt := len(report.Files) - 1
-		plans = append(plans, formatPlan{path: path, info: info, source: append([]byte(nil), source...), result: result, reportAt: reportAt})
-		byPath[path] = len(plans) - 1
 		if err != nil {
+			var limit compiler.FormatLimitError
+			if aggregateOutputBound && errors.As(err, &limit) {
+				return formatPlanFailure(&report, aggregateOutputFailure(displayPath))
+			}
 			return formatPlanFailure(&report, formatSourceError(displayPath, err))
+		}
+		if remainingOutput >= 0 && len(result.Text) > remainingOutput {
+			return formatPlanFailure(&report, aggregateOutputFailure(displayPath))
 		}
 		outputTotal += len(result.Text)
 		if len(result.Text) > maxFormatOutputBytes {
@@ -321,6 +340,9 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 		if outputTotal > maxFormatTotalOutput {
 			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_OUTPUT_LIMIT", path: displayPath, message: fmt.Sprintf("request exceeds %d-byte aggregate output limit", maxFormatTotalOutput)})
 		}
+		report.Files[reportAt].Completed = true
+		plans = append(plans, formatPlan{path: path, displayPath: displayPath, info: info, source: append([]byte(nil), source...), result: result, reportAt: reportAt})
+		byResolvedPath[resolvedPath] = len(plans) - 1
 	}
 	for index := range plans {
 		for previous := 0; previous < index; previous++ {
@@ -375,9 +397,13 @@ func formatSourceError(path string, err error) *formatAdapterError {
 	}
 	var limit compiler.FormatLimitError
 	if errors.As(err, &limit) {
-		return &formatAdapterError{code: "EFMT_OUTPUT_LIMIT", path: path, message: limit.Error()}
+		return &formatAdapterError{code: "EFMT_OUTPUT_LIMIT", path: path, message: fmt.Sprintf("formatted source exceeds %d-byte per-file output limit", limit.Limit)}
 	}
 	return &formatAdapterError{code: "EFMT_FORMAT", path: path, message: err.Error()}
+}
+
+func aggregateOutputFailure(path string) *formatAdapterError {
+	return &formatAdapterError{code: "EFMT_OUTPUT_LIMIT", path: path, message: fmt.Sprintf("request exceeds %d-byte aggregate output limit", maxFormatTotalOutput)}
 }
 
 func formatPathError(path string, err error) *formatAdapterError {
@@ -388,11 +414,14 @@ func normalizeFormatPath(path string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("empty source path")
 	}
-	absolute, err := filepath.Abs(filepath.Clean(path))
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+	workingDirectory, err := os.Getwd()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Clean(absolute), nil
+	return workingDirectory + string(filepath.Separator) + path, nil
 }
 
 func formatFailureFromError(err error) formatFailureReport {
@@ -422,6 +451,9 @@ func reportHasWritten(report formatReport) bool {
 
 func printFormatHumanStatus(opts fmtOptions, report formatReport) {
 	for _, file := range report.Files {
+		if !file.Completed {
+			continue
+		}
 		if opts.check {
 			if file.Changed {
 				fmt.Fprintf(os.Stderr, "would reformat %s\n", file.Path)
@@ -439,13 +471,17 @@ func printFormatHumanStatus(opts fmtOptions, report formatReport) {
 }
 
 func replaceFormattedFile(plan formatPlan) error {
+	return replaceFormattedFileWithHook(plan, nil)
+}
+
+func replaceFormattedFileWithHook(plan formatPlan, beforeRename func(string) error) error {
 	if err := validateFormatSnapshot(plan); err != nil {
 		return err
 	}
 	directory := filepath.Dir(plan.path)
 	temp, err := os.CreateTemp(directory, "."+filepath.Base(plan.path)+".effra-format-*")
 	if err != nil {
-		return &formatAdapterError{code: "EFMT_WRITE", path: plan.path, message: err.Error()}
+		return formatWriteError(plan, err)
 	}
 	tempPath := temp.Name()
 	cleanup := true
@@ -454,53 +490,72 @@ func replaceFormattedFile(plan formatPlan) error {
 			_ = os.Remove(tempPath)
 		}
 	}()
-	if err := temp.Chmod(plan.info.Mode().Perm()); err != nil {
-		_ = temp.Close()
-		return &formatAdapterError{code: "EFMT_WRITE", path: plan.path, message: err.Error()}
-	}
 	if _, err := temp.Write([]byte(plan.result.Text)); err != nil {
 		_ = temp.Close()
-		return &formatAdapterError{code: "EFMT_WRITE", path: plan.path, message: err.Error()}
+		return formatWriteError(plan, err)
 	}
 	if err := temp.Sync(); err != nil {
 		_ = temp.Close()
-		return &formatAdapterError{code: "EFMT_WRITE", path: plan.path, message: err.Error()}
+		return formatWriteError(plan, err)
 	}
 	if err := temp.Close(); err != nil {
-		return &formatAdapterError{code: "EFMT_WRITE", path: plan.path, message: err.Error()}
+		return formatWriteError(plan, err)
+	}
+	if err := os.Chmod(tempPath, preservedFormatMode(plan.info.Mode())); err != nil {
+		return formatWriteError(plan, err)
 	}
 	if err := validateFormatSnapshot(plan); err != nil {
 		return err
 	}
+	if beforeRename != nil {
+		if err := beforeRename(tempPath); err != nil {
+			return formatWriteError(plan, err)
+		}
+	}
 	if err := os.Rename(tempPath, plan.path); err != nil {
-		return &formatAdapterError{code: "EFMT_WRITE", path: plan.path, message: err.Error()}
+		return formatWriteError(plan, err)
 	}
 	cleanup = false
 	return nil
 }
 
+func formatWriteError(plan formatPlan, err error) *formatAdapterError {
+	return &formatAdapterError{code: "EFMT_WRITE", path: formatPlanDisplayPath(plan), message: err.Error()}
+}
+
+func formatPlanDisplayPath(plan formatPlan) string {
+	if plan.displayPath != "" {
+		return plan.displayPath
+	}
+	return plan.path
+}
+
+func preservedFormatMode(mode os.FileMode) os.FileMode {
+	return mode.Perm() | mode&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky)
+}
+
 func validateFormatSnapshot(plan formatPlan) error {
 	lstat, err := os.Lstat(plan.path)
 	if err != nil {
-		return &formatAdapterError{code: "EFMT_STALE", path: plan.path, message: "source changed before replacement"}
+		return &formatAdapterError{code: "EFMT_STALE", path: formatPlanDisplayPath(plan), message: "source changed before replacement"}
 	}
 	if lstat.Mode()&os.ModeSymlink != 0 {
-		return &formatAdapterError{code: "EFMT_STALE", path: plan.path, message: "source changed to a symlink before replacement"}
+		return &formatAdapterError{code: "EFMT_STALE", path: formatPlanDisplayPath(plan), message: "source changed to a symlink before replacement"}
 	}
 	if !lstat.Mode().IsRegular() {
-		return &formatAdapterError{code: "EFMT_STALE", path: plan.path, message: "source changed to a non-regular file before replacement"}
+		return &formatAdapterError{code: "EFMT_STALE", path: formatPlanDisplayPath(plan), message: "source changed to a non-regular file before replacement"}
 	}
 	info, err := os.Stat(plan.path)
 	if err != nil || !os.SameFile(plan.info, info) {
-		return &formatAdapterError{code: "EFMT_STALE", path: plan.path, message: "source identity changed before replacement"}
+		return &formatAdapterError{code: "EFMT_STALE", path: formatPlanDisplayPath(plan), message: "source identity changed before replacement"}
 	}
 	current, err := sourcefile.ReadRegularFile(plan.path, maxFormatInputBytes)
 	if err != nil || !bytes.Equal(current, plan.source) {
-		return &formatAdapterError{code: "EFMT_STALE", path: plan.path, message: "source contents changed before replacement"}
+		return &formatAdapterError{code: "EFMT_STALE", path: formatPlanDisplayPath(plan), message: "source contents changed before replacement"}
 	}
 	info, err = os.Stat(plan.path)
 	if err != nil || !os.SameFile(plan.info, info) {
-		return &formatAdapterError{code: "EFMT_STALE", path: plan.path, message: "source identity changed before replacement"}
+		return &formatAdapterError{code: "EFMT_STALE", path: formatPlanDisplayPath(plan), message: "source identity changed before replacement"}
 	}
 	return nil
 }

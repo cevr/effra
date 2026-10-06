@@ -315,6 +315,26 @@ func TestFormatReportsSyntaxFailuresWithoutReplacement(t *testing.T) {
 	}
 }
 
+func TestFormatRejectsInvalidUTF8WithExactLexicalSpan(t *testing.T) {
+	for _, prefix := range []string{"// bad ", `fn main() -> string { "bad `} {
+		source := append([]byte(prefix), 0xff)
+		source = append(source, []byte(" byte\nfn main() -> () { () }\n")...)
+		result, err := FormatSource(string(source))
+		failure, ok := err.(FormatFailure)
+		if !ok || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != "EF001" || result.Text != "" || result.OutputDigest != "" {
+			t.Fatalf("invalid UTF-8 was not rejected without output: result=%+v err=%v", result, err)
+		}
+		diagnostic := failure.Diagnostics[0]
+		if diagnostic.Span.Offset != len(prefix) || diagnostic.Span.Length != 1 || diagnostic.Span.Line != 1 || diagnostic.Span.Column != len(prefix)+1 {
+			t.Fatalf("invalid UTF-8 span drifted: %+v", diagnostic.Span)
+		}
+	}
+	validReplacement := "// valid replacement �\nfn main() -> string { \"�\" }"
+	if result, err := FormatSource(validReplacement); err != nil || !strings.Contains(result.Text, "�") {
+		t.Fatalf("valid U+FFFD source was rejected or rewritten: result=%+v err=%v", result, err)
+	}
+}
+
 func TestFormatBoundedStopsBeforeHighIndentOutput(t *testing.T) {
 	var source strings.Builder
 	source.WriteString("effect fn main() -> () { ")

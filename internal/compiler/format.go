@@ -126,9 +126,6 @@ func formatSyntaxBounded(source string, program *Program, tokens []token, maxOut
 	layout := buildFormatLayout(source, program, tokens)
 	events := buildFormatEvents(program.Comments, tokens)
 	printer := formatPrinter{source: source, tokens: tokens, events: events, layout: layout, maxOutputBytes: maxOutputBytes, lineStart: true, lastToken: -1}
-	if maxOutputBytes > 0 {
-		printer.output.Grow(maxOutputBytes)
-	}
 	for index, event := range events {
 		if event.comment != nil {
 			printer.comment(event)
