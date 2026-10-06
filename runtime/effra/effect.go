@@ -105,6 +105,7 @@ type FiberContext struct {
 	ctx    context.Context
 	scope  *Scope
 	driver timerDriver
+	turn   *TestScheduler
 }
 
 func (f *FiberContext) Context() context.Context { return f.ctx }
@@ -120,6 +121,23 @@ func (f *FiberContext) timerDriver() timerDriver {
 	return liveTimerDriver{}
 }
 
+func (f *FiberContext) turnScheduler() *TestScheduler {
+	if f == nil {
+		return nil
+	}
+	return f.turn
+}
+
+func (f *FiberContext) suspendScheduler() func() {
+	if f == nil || f.turn == nil {
+		return func() {}
+	}
+	if scheduler, ok := f.timerDriver().(*TestScheduler); !ok || scheduler != f.turn {
+		return func() {}
+	}
+	return f.turn.suspend()
+}
+
 // UseTestScheduler installs an explicit virtual timer driver for the current
 // execution boundary and returns a restoration function for the provider
 // boundary that installed it.
@@ -131,6 +149,18 @@ func (f *FiberContext) UseTestScheduler(scheduler *TestScheduler) func() {
 		f.driver = scheduler
 	}
 	return func() { f.driver = previous }
+}
+
+// CurrentTestScheduler returns the virtual driver active at this execution
+// boundary, when one is installed by a test harness or provider.
+func CurrentTestScheduler(f *FiberContext) *TestScheduler {
+	if f == nil {
+		return nil
+	}
+	if scheduler, ok := f.timerDriver().(*TestScheduler); ok {
+		return scheduler
+	}
+	return nil
 }
 func Invoke[A any](f *FiberContext, program Effect[A]) (exit Exit[A]) {
 	defer func() {
@@ -147,9 +177,16 @@ func Invoke[A any](f *FiberContext, program Effect[A]) (exit Exit[A]) {
 	}
 	return exit
 }
-func runScope[A any](scope *Scope, program Effect[A]) Exit[A] {
+func runScope[A any](scope *Scope, program Effect[A], admitted ...bool) Exit[A] {
 	fc := &FiberContext{ctx: scope.ctx, scope: scope, driver: scope.driver}
-	return withCleanup(Invoke(fc, program), scope.Close())
+	var finish func()
+	if scheduler, ok := scope.driver.(*TestScheduler); ok {
+		fc.turn = scheduler
+		alreadyAdmitted := len(admitted) > 0 && admitted[0]
+		finish = scheduler.enter(alreadyAdmitted)
+		defer finish()
+	}
+	return withCleanup(Invoke(fc, program), scope.closeWithContext(fc))
 }
 func Run[A any](program Effect[A]) Exit[A] { return RunContext(context.Background(), program) }
 func RunContext[A any](ctx context.Context, program Effect[A]) Exit[A] {
@@ -167,7 +204,9 @@ func RunContextWithScheduler[A any](ctx context.Context, scheduler *TestSchedule
 }
 func Scoped[A any](program Effect[A]) Effect[A] {
 	return func(fc *FiberContext) Exit[A] {
-		return runScope(newScopeWithDriver(fc.ctx, fc.scope, fc.timerDriver()), program)
+		scope := newScopeWithDriver(fc.ctx, fc.scope, fc.timerDriver())
+		child := &FiberContext{ctx: scope.ctx, scope: scope, driver: scope.driver, turn: fc.turn}
+		return withCleanup(Invoke(child, program), scope.closeWithContext(child))
 	}
 }
 func Catch[A any](program Effect[A], tag string, fallback func() A) Effect[A] {
@@ -186,11 +225,20 @@ func Sleep(milliseconds int64) Effect[Unit] {
 		}
 		timer := fc.timerDriver().newTimer(time.Duration(milliseconds) * time.Millisecond)
 		defer timer.Stop()
+		resume := fc.suspendScheduler()
 		select {
 		case <-timer.C():
+			resume()
+			if scheduler, ok := fc.timerDriver().(*TestScheduler); ok {
+				scheduler.resumeWait(timer.(*virtualTimer))
+			}
 			timer.acknowledge()
 			return Succeed(Unit{})
 		case <-fc.ctx.Done():
+			resume()
+			if scheduler, ok := fc.timerDriver().(*TestScheduler); ok {
+				scheduler.resumeWait(timer.(*virtualTimer))
+			}
 			return Interrupt[Unit](fc.ctx.Err())
 		}
 	}
@@ -207,15 +255,30 @@ func Timeout[A any](program Effect[A], milliseconds int64) Effect[A] {
 		defer cancel()
 		childScope := newScopeWithDriver(ctx, fc.scope, driver)
 		childDone := make(chan Exit[A], 1)
-		go func() { childDone <- runScope(childScope, program) }()
+		scheduler, virtual := driver.(*TestScheduler)
+		if virtual {
+			scheduler.reserve()
+		}
+		go func() { childDone <- runScope(childScope, program, virtual) }()
+		suspend := fc.suspendScheduler()
 		select {
 		case out := <-childDone:
+			suspend()
+			if virtual {
+				scheduler.resumeWait(timer.(*virtualTimer))
+			}
 			return out
 		case <-timer.C():
+			suspend()
+			if virtual {
+				scheduler.resumeWait(timer.(*virtualTimer))
+			}
 			timer.acknowledge()
 			cancel()
 			childScope.cancel()
+			wait := fc.suspendScheduler()
 			out := <-childDone
+			wait()
 			retained := Cause{}
 			for _, reason := range out.Cause() {
 				if reason.Kind != "interrupt" {
@@ -224,9 +287,15 @@ func Timeout[A any](program Effect[A], milliseconds int64) Effect[A] {
 			}
 			return FromCause[A](append(Cause{{Kind: "failure", Failure: &Failure{Tag: "Timeout", Payload: context.DeadlineExceeded}}}, retained...))
 		case <-fc.ctx.Done():
+			suspend()
+			if virtual {
+				scheduler.resumeWait(timer.(*virtualTimer))
+			}
 			cancel()
 			childScope.cancel()
+			wait := fc.suspendScheduler()
 			out := <-childDone
+			wait()
 			retained := Cause{}
 			for _, reason := range out.Cause() {
 				if reason.Kind != "interrupt" {

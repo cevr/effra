@@ -61,11 +61,21 @@ func TestLatchIsOneShotAndCancellablePerWaiter(t *testing.T) {
 			}
 		}()
 	}
-	time.Sleep(time.Millisecond)
 	if !many.Signal() {
 		t.Fatal("multiple waiter signal did not complete")
 	}
 	done := make(chan struct{})
 	go func() { group.Wait(); close(done) }()
 	waitLatchSignal(t, done)
+}
+
+func TestNilLatchReportsInvalidHandle(t *testing.T) {
+	if !errors.Is((*Latch)(nil).Await(context.Background()), errNilLatch) {
+		t.Fatal("nil latch await did not report the invalid handle")
+	}
+	for _, out := range []Exit[Unit]{Run(AwaitLatch(nil)), Run(SignalLatch(nil))} {
+		if out.Defect == nil || !errors.Is(out.Defect, errNilLatch) {
+			t.Fatalf("nil latch runtime boundary: %+v", out)
+		}
+	}
 }

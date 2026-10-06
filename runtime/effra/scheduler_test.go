@@ -66,7 +66,7 @@ func TestTestSchedulerAdvancesSequentialSleepAtIntermediateDeadlines(t *testing.
 	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
 		t.Fatalf("first registration: %v", err)
 	}
-	if err := scheduler.Advance(50); err != nil {
+	if err := scheduler.Adjust(50); err != nil {
 		t.Fatal(err)
 	}
 	for expected, want := range []int64{20, 50} {

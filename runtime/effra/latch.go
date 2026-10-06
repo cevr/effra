@@ -2,8 +2,11 @@ package effra
 
 import (
 	"context"
+	"errors"
 	"sync"
 )
+
+var errNilLatch = errors.New("invalid latch handle: nil")
 
 // Latch is a portable, one-shot synchronization handle. Completion is
 // idempotent and is shared by every waiter; waiting never consumes it.
@@ -46,7 +49,7 @@ func (l *Latch) IsSignaled() bool {
 // the latch itself untouched.
 func (l *Latch) Await(ctx context.Context) error {
 	if l == nil {
-		return context.Canceled
+		return errNilLatch
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -63,9 +66,12 @@ func (l *Latch) Await(ctx context.Context) error {
 func AwaitLatch(latch *Latch) Effect[Unit] {
 	return func(fc *FiberContext) Exit[Unit] {
 		if latch == nil {
-			return Die[Unit](context.Canceled)
+			return Die[Unit](errNilLatch)
 		}
-		if err := latch.Await(fc.Context()); err != nil {
+		resume := fc.suspendScheduler()
+		err := latch.Await(fc.Context())
+		resume()
+		if err != nil {
 			return Interrupt[Unit](err)
 		}
 		return Succeed(Unit{})
@@ -76,7 +82,7 @@ func AwaitLatch(latch *Latch) Effect[Unit] {
 func SignalLatch(latch *Latch) Effect[Unit] {
 	return func(*FiberContext) Exit[Unit] {
 		if latch == nil {
-			return Die[Unit](context.Canceled)
+			return Die[Unit](errNilLatch)
 		}
 		latch.Signal()
 		return Succeed(Unit{})

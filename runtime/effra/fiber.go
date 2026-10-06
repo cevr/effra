@@ -68,7 +68,11 @@ func Fork[A any](program Effect[A]) Effect[*Fiber[A]] {
 		f := &Fiber[A]{owner: owner, scope: newScopeWithDriver(fc.ctx, owner, fc.timerDriver()), done: make(chan struct{})}
 		owner.children = append(owner.children, f)
 		owner.mu.Unlock()
-		go func() { f.exit = runScope(f.scope, program); close(f.done) }()
+		_, virtual := fc.timerDriver().(*TestScheduler)
+		if virtual {
+			fc.timerDriver().(*TestScheduler).reserve()
+		}
+		go func() { f.exit = runScope(f.scope, program, virtual); close(f.done) }()
 		return Succeed(f)
 	}
 }
@@ -77,11 +81,14 @@ func (f *Fiber[A]) Join() Effect[A] {
 		if !f.accessible(fc) {
 			return Die[A](fmt.Errorf("fiber owner is closed or not an ancestor"))
 		}
+		resume := fc.suspendScheduler()
 		select {
 		case <-f.done:
+			resume()
 			f.observed.Store(true)
 			return f.exit
 		case <-fc.ctx.Done():
+			resume()
 			return Interrupt[A](fc.ctx.Err())
 		}
 	}
@@ -94,7 +101,9 @@ func (f *Fiber[A]) Interrupt() Effect[Unit] {
 			return Die[Unit](fmt.Errorf("fiber owner is closed or not an ancestor"))
 		}
 		f.Cancel()
+		resume := fc.suspendScheduler()
 		<-f.done
+		resume()
 		f.observed.Store(true)
 		cause := f.exit.Cause()
 		if cause.OnlyInterrupts() {

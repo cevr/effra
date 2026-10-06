@@ -38,12 +38,13 @@ func (t *liveTimer) Stop() bool          { return t.timer.Stop() }
 func (t *liveTimer) acknowledge()        {}
 
 // TestScheduler is a serialized virtual timer driver. Timers are ordered by
-// deadline and registration sequence. Advance only delivers timers already
-// registered at the start of that operation; continuations register their
-// next timer at the current logical time and are observed by the next
-// registration barrier.
+// deadline and registration sequence. Adjust drains every managed timer at or
+// before its target, including timers registered by continuations awakened at
+// intermediate deadlines. Managed fibers yield the scheduler turn while they
+// wait, so adjustment does not depend on runtime.Gosched or wall-clock sleeps.
 type TestScheduler struct {
 	mu           sync.Mutex
+	adjustMu     sync.Mutex
 	now          int64
 	nextSequence uint64
 	closed       bool
@@ -51,21 +52,31 @@ type TestScheduler struct {
 	registered   uint64
 	observed     uint64
 	registration chan struct{}
+	turn         chan struct{}
+	stateChanged chan struct{}
+	active       int
+	pendingWakes int
 }
 
 type virtualTimer struct {
-	scheduler *TestScheduler
-	deadline  int64
-	sequence  uint64
-	done      chan time.Time
-	ackDone   chan struct{}
-	ackOnce   sync.Once
-	fired     bool
+	scheduler   *TestScheduler
+	deadline    int64
+	sequence    uint64
+	done        chan time.Time
+	fired       bool
+	wakePending bool
 }
 
 // NewTestScheduler creates a fresh scheduler at logical time zero.
 func NewTestScheduler() *TestScheduler {
-	return &TestScheduler{timers: map[*virtualTimer]struct{}{}, registration: make(chan struct{})}
+	turn := make(chan struct{}, 1)
+	turn <- struct{}{}
+	return &TestScheduler{
+		timers:       map[*virtualTimer]struct{}{},
+		registration: make(chan struct{}),
+		turn:         turn,
+		stateChanged: make(chan struct{}),
+	}
 }
 
 // NewTestClock is an alias for callers that describe the virtual driver as a
@@ -88,7 +99,6 @@ func (s *TestScheduler) newTimer(duration time.Duration) timerHandle {
 		deadline:  s.now + milliseconds,
 		sequence:  s.nextSequence,
 		done:      make(chan time.Time),
-		ackDone:   make(chan struct{}),
 	}
 	s.timers[timer] = struct{}{}
 	s.registered++
@@ -108,7 +118,7 @@ func (s *TestScheduler) newTimer(duration time.Duration) timerHandle {
 }
 
 func (t *virtualTimer) C() <-chan time.Time { return t.done }
-func (t *virtualTimer) acknowledge()        { t.ackOnce.Do(func() { close(t.ackDone) }) }
+func (t *virtualTimer) acknowledge()        {}
 func (t *virtualTimer) Stop() bool {
 	if t.scheduler == nil {
 		return false
@@ -123,6 +133,90 @@ func (t *virtualTimer) Stop() bool {
 	delete(s.timers, t)
 	t.acknowledge()
 	return true
+}
+
+// reserve records a fiber admitted by Fork/Timeout before its goroutine starts.
+// Keeping that admission visible prevents an external adjustment from
+// observing a false idle state between admission and execution.
+func (s *TestScheduler) reserve() {
+	s.mu.Lock()
+	s.active++
+	s.signalStateLocked()
+	s.mu.Unlock()
+}
+
+// enter gives a managed fiber the scheduler turn. The turn serializes
+// virtual-time fibers without serializing the external test controller.
+func (s *TestScheduler) enter(admitted bool) func() {
+	<-s.turn
+	s.mu.Lock()
+	if !admitted {
+		s.active++
+	}
+	s.signalStateLocked()
+	s.mu.Unlock()
+	return func() { s.finish() }
+}
+
+func (s *TestScheduler) finish() {
+	s.mu.Lock()
+	if s.active > 0 {
+		s.active--
+	}
+	s.signalStateLocked()
+	s.mu.Unlock()
+	s.turn <- struct{}{}
+}
+
+// suspend releases the scheduler turn while the current managed fiber waits
+// on an external event. The returned function reacquires the turn before the
+// caller continues, keeping adjustment quiescence observable.
+func (s *TestScheduler) suspend() func() {
+	s.mu.Lock()
+	if s.active > 0 {
+		s.active--
+	}
+	s.signalStateLocked()
+	s.mu.Unlock()
+	s.turn <- struct{}{}
+	return func() {
+		<-s.turn
+		s.mu.Lock()
+		s.active++
+		s.signalStateLocked()
+		s.mu.Unlock()
+	}
+}
+
+func (s *TestScheduler) resumeWait(timer *virtualTimer) {
+	s.mu.Lock()
+	if timer != nil && timer.wakePending {
+		timer.wakePending = false
+		if s.pendingWakes > 0 {
+			s.pendingWakes--
+		}
+	}
+	s.signalStateLocked()
+	s.mu.Unlock()
+}
+
+func (s *TestScheduler) signalStateLocked() {
+	previous := s.stateChanged
+	s.stateChanged = make(chan struct{})
+	close(previous)
+}
+
+func (s *TestScheduler) waitQuiescent() {
+	for {
+		s.mu.Lock()
+		if s.active == 0 && s.pendingWakes == 0 {
+			s.mu.Unlock()
+			return
+		}
+		signal := s.stateChanged
+		s.mu.Unlock()
+		<-signal
+	}
 }
 
 // Now returns the current logical time in milliseconds.
@@ -161,11 +255,13 @@ func (s *TestScheduler) AwaitRegistration(ctx context.Context) error {
 	}
 }
 
-// Advance moves logical time forward and delivers timers registered before
-// the operation. It never waits for awakened fibers, so a cleanup fiber can
-// make progress and register or cancel timers without a scheduler lock being
-// held by the controller.
-func (s *TestScheduler) Advance(milliseconds int64) error {
+// Adjust moves logical time forward and drains every timer whose deadline is
+// at or before the target. A timer continuation gets the scheduler turn
+// before the next deadline is selected, so sequential sleeps observe their
+// intermediate logical times during one adjustment.
+func (s *TestScheduler) Adjust(milliseconds int64) error {
+	s.adjustMu.Lock()
+	defer s.adjustMu.Unlock()
 	if milliseconds < 0 {
 		return errors.New("test scheduler duration must be non-negative")
 	}
@@ -179,10 +275,10 @@ func (s *TestScheduler) Advance(milliseconds int64) error {
 		return errors.New("test scheduler time overflow")
 	}
 	target := s.now + milliseconds
-	s.now = target
 	s.observed = s.registered
 	s.mu.Unlock()
 	for {
+		s.waitQuiescent()
 		s.mu.Lock()
 		nextDeadline := target
 		found := false
@@ -203,9 +299,12 @@ func (s *TestScheduler) Advance(milliseconds int64) error {
 			if timer.deadline <= s.now {
 				delete(s.timers, timer)
 				timer.fired = true
+				timer.wakePending = true
 				due = append(due, timer)
 			}
 		}
+		s.pendingWakes += len(due)
+		s.signalStateLocked()
 		s.mu.Unlock()
 		sort.Slice(due, func(i, j int) bool {
 			if due[i].deadline != due[j].deadline {
@@ -215,13 +314,62 @@ func (s *TestScheduler) Advance(milliseconds int64) error {
 		})
 		for _, timer := range due {
 			close(timer.done)
-			// The acknowledgment is emitted by Sleep/Timeout immediately after
-			// selecting this timer, before any cleanup they may await. We wait
-			// without holding the scheduler lock so continuations can register
-			// their next timer and cleanup can cancel stale ones.
-			<-timer.ackDone
 		}
 	}
+}
+
+// Advance is retained as a compatibility alias for Adjust. Both operations
+// have the strong drain semantics; callers should prefer Adjust when the
+// operation's deadline-draining behavior matters.
+func (s *TestScheduler) Advance(milliseconds int64) error {
+	return s.Adjust(milliseconds)
+}
+
+// adjustInFiber suspends the calling managed fiber while the external
+// controller drains virtual time. It is the boundary used by generated
+// Scheduler providers; calling Adjust directly from a test goroutine does not
+// need this wrapper.
+func (s *TestScheduler) adjustInFiber(fc *FiberContext, milliseconds int64) error {
+	if fc == nil || fc.turnScheduler() != s {
+		return errors.New("test scheduler is not active for this fiber")
+	}
+	resume := s.suspend()
+	defer resume()
+	return s.Adjust(milliseconds)
+}
+
+func (s *TestScheduler) awaitRegistrationInFiber(fc *FiberContext) error {
+	if fc == nil || fc.turnScheduler() != s {
+		return errors.New("test scheduler is not active for this fiber")
+	}
+	resume := s.suspend()
+	defer resume()
+	return s.AwaitRegistration(fc.Context())
+}
+
+// AdjustTestScheduler is the managed runtime boundary for the built-in
+// Scheduler provider. It suspends the caller's turn while the controller
+// drains virtual time, then resumes the caller before returning.
+func AdjustTestScheduler(fc *FiberContext, scheduler *TestScheduler, milliseconds int64) Exit[Unit] {
+	if scheduler == nil {
+		return Die[Unit](errors.New("nil test scheduler"))
+	}
+	if err := scheduler.adjustInFiber(fc, milliseconds); err != nil {
+		return Die[Unit](err)
+	}
+	return Succeed(Unit{})
+}
+
+// AwaitTestSchedulerRegistration is the managed registration barrier for the
+// built-in Scheduler provider.
+func AwaitTestSchedulerRegistration(fc *FiberContext, scheduler *TestScheduler) Exit[Unit] {
+	if scheduler == nil {
+		return Die[Unit](errors.New("nil test scheduler"))
+	}
+	if err := scheduler.awaitRegistrationInFiber(fc); err != nil {
+		return Die[Unit](err)
+	}
+	return Succeed(Unit{})
 }
 
 // Close prevents new timers and future advancement. Existing timer channels
@@ -237,6 +385,7 @@ func (s *TestScheduler) Close() error {
 	s.timers = map[*virtualTimer]struct{}{}
 	signal := s.registration
 	s.registration = make(chan struct{})
+	s.signalStateLocked()
 	s.mu.Unlock()
 	close(signal)
 	return nil

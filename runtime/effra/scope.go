@@ -144,6 +144,16 @@ func (s *Scope) Close() Cause {
 	s.mu.Unlock()
 	return append(Cause{}, outcome...)
 }
+
+func (s *Scope) closeWithContext(fc *FiberContext) Cause {
+	if fc == nil || fc.turnScheduler() == nil {
+		return s.Close()
+	}
+	resume := fc.suspendScheduler()
+	defer resume()
+	return s.Close()
+}
+
 func AcquireRelease[A any](name string, acquire func(context.Context) (A, error), release func(A, context.Context) error) Effect[A] {
 	return func(fc *FiberContext) Exit[A] {
 		s := fc.scope
