@@ -1,0 +1,60 @@
+import Outcomes "effra/data"
+
+record Settings {
+    enabled: bool
+}
+record ConfigProblem {
+    message: string
+}
+record Validated<T: type> {
+    value: T;
+    origin: string
+}
+
+fn configuration(input: string) -> Outcomes.Result<Validated<Outcomes.Option<Settings>>, ConfigProblem> {
+    if input == "enabled" {
+        Outcomes.Result<Validated<Outcomes.Option<Settings>>, ConfigProblem>.Ok {
+            value: Validated {
+                value: Outcomes.Option.Some {
+                    value: Settings {
+                        enabled: true
+                    }
+                };
+                origin: "explicit"
+            }
+        }
+    } else {
+        if input == "default" {
+            Outcomes.Result<Validated<Outcomes.Option<Settings>>, ConfigProblem>.Ok {
+                value: Validated {
+                    value: Outcomes.Option<Settings>.None {};
+                    origin: "default"
+                }
+            }
+        } else {
+            Outcomes.Result<Validated<Outcomes.Option<Settings>>, ConfigProblem>.Err {
+                error: ConfigProblem {
+                    message: "invalid"
+                }
+            }
+        }
+    }
+}
+
+fn describe(input: string) -> string {
+    match configuration(input) {
+        Outcomes.Result.Ok { value: validated } => match validated.value {
+            Outcomes.Option.None => validated.origin,
+            Outcomes.Option.Some { value: settings } => if settings.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        },
+        Outcomes.Result.Err { error: problem } => problem.message
+    }
+}
+
+effect fn main() -> string {
+    describe("enabled") + ":" + describe("default") + ":" + describe("bad")
+}

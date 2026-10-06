@@ -6,7 +6,7 @@ Owner requirement, 2026-10-06: do not represent nil in Effra. This contract also
 
 An admitted `T` is an initialized value of that type. Required record/variant fields and function results cannot silently receive target zero values. Optionality is an ordinary closed alternative; bundled `Option<T>` has `None` and `Some(T)`, with exhaustive matching and the same type/ownership rules as other enums. `Some` cannot contain a missing or unchecked native reference. No postfix nullable type, implicit default nil or unchecked unwrap is introduced.
 
-Current source already lacks a nil/null literal and checks required record fields. Nongeneric domain enums can express absence today. Generic Option and the wider host bridge still require implementation; this specification is not evidence those features have shipped. A unit result `()` remains a present unit value, not absence.
+Current source lacks a nil/null literal and checks required record fields. Ordinary generic closed enums now express absence through bundled Option with checked constructors, exhaustive single-subject matches and retained payload ownership. The wider nullable host bridge still requires implementation; generic data admission is not evidence of host adaptation. A unit result `()` remains a present unit value, not absence.
 
 ## Native Go boundary
 

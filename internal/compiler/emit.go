@@ -247,9 +247,10 @@ func jsTemplateDeclaration(r *Record) string {
 		parameter := name
 		if p.Kind == "callable" {
 			parameter += " extends " + canonicalJSDataType(r.owner, p.shapeID, declarations)
-		} else {
-			dataSlots = append(dataSlots, "(value: "+name+") => "+name)
 		}
+		// Every argument belongs to application identity, even when a closed
+		// alternative has no payload or a callable slot is otherwise phantom.
+		dataSlots = append(dataSlots, "(value: "+name+") => "+name)
 		parameters = append(parameters, parameter)
 	}
 	brand := "__ef_brand_template_" + r.EmissionName

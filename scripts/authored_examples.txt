@@ -18,3 +18,7 @@ internal/compiler/bundled/functions/identity.ef
 internal/compiler/bundled/functions/forward-file.ef
 internal/compiler/bundled/conversions/codec.ef
 internal/compiler/bundled/conversions/witness.ef
+internal/compiler/bundled/data/option.ef
+internal/compiler/bundled/data/result.ef
+examples/generic-users.ef
+examples/generic-settings.ef

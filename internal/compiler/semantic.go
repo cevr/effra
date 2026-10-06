@@ -2215,7 +2215,7 @@ func (c *checker) check() {
 	}
 	claimData := func(name string, span Span) {
 		switch name {
-		case "string", "bool", "i64", "bytes", "File", "Latch", "Handler", "Fiber", "Context", "Effect", "Scope", "Exit", "Cause", "Option", "never", "invalid":
+		case "string", "bool", "i64", "bytes", "File", "Latch", "Handler", "Fiber", "Context", "Effect", "Scope", "Exit", "Cause", "never", "invalid":
 			c.diagnostic("EF101", "reserved data declaration "+name, span)
 		}
 		claim(name, span)
@@ -2312,7 +2312,12 @@ func (c *checker) check() {
 	}
 	c.validateDataLayouts()
 	slices.SortStableFunc(c.result.Declarations, func(a, b Declaration) int {
-		return a.Span.Offset - b.Span.Offset
+		if offset := a.Span.Offset - b.Span.Offset; offset != 0 {
+			return offset
+		}
+		// Distributed sources retain independent offsets. Equal local spans
+		// must not expose map/import traversal order across CLI and MCP.
+		return strings.Compare(a.Identity, b.Identity)
 	})
 	for _, s := range c.program.Services {
 		for _, f := range s.Methods {
