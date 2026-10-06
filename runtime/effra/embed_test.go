@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,7 +21,7 @@ import (
 	"time"
 )
 
-func TestRuntimeCatalogCoversEmbeddedSourcesAndDeclaredImports(t *testing.T) {
+func TestRuntimeCatalogCoversEmbeddedAndFilesystemSources(t *testing.T) {
 	entries, err := sources.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
@@ -32,15 +33,13 @@ func TestRuntimeCatalogCoversEmbeddedSourcesAndDeclaredImports(t *testing.T) {
 		}
 		embedded[entry.Name()] = struct{}{}
 	}
-	wantFiles := make(map[string]struct{}, len(runtimeSourceFiles))
-	for _, name := range runtimeSourceFiles {
-		if _, duplicate := wantFiles[name]; duplicate {
-			t.Fatalf("runtime source listed more than once: %s", name)
-		}
-		wantFiles[name] = struct{}{}
-	}
+	wantFiles := stringSet(catalogSourceFiles())
 	if !reflect.DeepEqual(embedded, wantFiles) {
-		t.Fatalf("embed list and authoritative source list differ: embedded=%v listed=%v", sortedKeys(embedded), sortedKeys(wantFiles))
+		t.Fatalf("embed list and catalog source set differ: embedded=%v catalog=%v", sortedKeys(embedded), sortedKeys(wantFiles))
+	}
+	actualFiles := actualRuntimeSourceFiles(t)
+	if !reflect.DeepEqual(actualFiles, wantFiles) {
+		t.Fatalf("runtime Go files are missing catalog classification: actual=%v catalog=%v", sortedKeys(actualFiles), sortedKeys(wantFiles))
 	}
 	all := Sources()
 	if !reflect.DeepEqual(sourceNames(all), sortedKeys(wantFiles)) {
@@ -57,10 +56,6 @@ func TestRuntimeCatalogCoversEmbeddedSourcesAndDeclaredImports(t *testing.T) {
 		for _, name := range spec.files {
 			fileOwners[name] = append(fileOwners[name], module)
 		}
-		actualImports := sourceImports(t, sourcesForFiles(t, all, spec.files))
-		if !reflect.DeepEqual(actualImports, stringSet(spec.imports)) {
-			t.Fatalf("module %q declared imports differ: actual=%v declared=%v", module, sortedKeys(actualImports), sortedKeys(stringSet(spec.imports)))
-		}
 		selected, err := SelectSources(module)
 		if err != nil {
 			t.Fatalf("select %q: %v", module, err)
@@ -69,7 +64,7 @@ func TestRuntimeCatalogCoversEmbeddedSourcesAndDeclaredImports(t *testing.T) {
 			t.Fatalf("typecheck %q closure: %v", module, err)
 		}
 	}
-	for _, name := range runtimeSourceFiles {
+	for name := range wantFiles {
 		owners := fileOwners[name]
 		if len(owners) != 1 {
 			t.Fatalf("runtime file %q belongs to %d modules: %v", name, len(owners), owners)
@@ -126,27 +121,6 @@ func TestRuntimeModuleSelectionIsBoundedAndOrderIndependent(t *testing.T) {
 }
 
 func TestRuntimeModuleImportBoundariesAndSelectedCompileControls(t *testing.T) {
-	for _, module := range []RuntimeModule{
-		RuntimeModuleCore,
-		RuntimeModuleSync,
-		RuntimeModuleHTTP,
-		RuntimeModuleFiles,
-		RuntimeModuleConsole,
-		RuntimeModuleEnv,
-		RuntimeModuleInspect,
-		RuntimeModuleInterop,
-	} {
-		t.Run("compile-"+string(module), func(t *testing.T) {
-			selected, err := SelectSources(module)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if output, err := compileSelectedRuntime(t, selected); err != nil {
-				t.Fatalf("selected runtime did not compile: %v\n%s", err, output)
-			}
-		})
-	}
-
 	cases := []struct {
 		name    string
 		roots   []RuntimeModule
@@ -154,10 +128,13 @@ func TestRuntimeModuleImportBoundariesAndSelectedCompileControls(t *testing.T) {
 		forbid  []string
 	}{
 		{name: "core", roots: []RuntimeModule{RuntimeModuleCore}, forbid: []string{"net/http", "encoding/json", "os", "io"}},
-		{name: "inspect", roots: []RuntimeModule{RuntimeModuleInspect}, require: []string{"encoding/json"}, forbid: []string{"net/http", "os"}},
-		{name: "http", roots: []RuntimeModule{RuntimeModuleHTTP}, require: []string{"net/http"}, forbid: []string{"encoding/json", "os"}},
-		{name: "files-interop", roots: []RuntimeModule{RuntimeModuleFiles, RuntimeModuleInterop}, require: []string{"os", "io"}, forbid: []string{"net/http", "encoding/json"}},
 		{name: "sync", roots: []RuntimeModule{RuntimeModuleSync}, forbid: []string{"net/http", "encoding/json", "os", "io"}},
+		{name: "http", roots: []RuntimeModule{RuntimeModuleHTTP}, require: []string{"net/http"}, forbid: []string{"encoding/json", "os", "io"}},
+		{name: "files", roots: []RuntimeModule{RuntimeModuleFiles}, require: []string{"os", "io"}, forbid: []string{"net/http", "encoding/json"}},
+		{name: "console", roots: []RuntimeModule{RuntimeModuleConsole}, require: []string{"fmt"}, forbid: []string{"net/http", "encoding/json", "os", "io"}},
+		{name: "env", roots: []RuntimeModule{RuntimeModuleEnv}, require: []string{"os"}, forbid: []string{"net/http", "encoding/json", "io"}},
+		{name: "inspect", roots: []RuntimeModule{RuntimeModuleInspect}, require: []string{"encoding/json"}, forbid: []string{"net/http", "os", "io"}},
+		{name: "interop", roots: []RuntimeModule{RuntimeModuleInterop}, require: []string{"context"}, forbid: []string{"net/http", "encoding/json", "os", "io"}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -181,6 +158,29 @@ func TestRuntimeModuleImportBoundariesAndSelectedCompileControls(t *testing.T) {
 			}
 		})
 	}
+	t.Run("files-interop-combined", func(t *testing.T) {
+		selected, err := SelectSources(RuntimeModuleFiles, RuntimeModuleInterop)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := selected["files.go"]; !ok {
+			t.Fatal("combined file/interop selection omitted files.go")
+		}
+		if _, ok := selected["interop.go"]; !ok {
+			t.Fatal("combined file/interop selection omitted interop.go")
+		}
+		imports := sourceImports(t, selected)
+		for _, path := range []string{"os", "io"} {
+			if _, ok := imports[path]; !ok {
+				t.Fatalf("combined file/interop selection omitted %q", path)
+			}
+		}
+		for _, path := range []string{"net/http", "encoding/json"} {
+			if _, ok := imports[path]; ok {
+				t.Fatalf("combined file/interop selection retained unrelated import %q", path)
+			}
+		}
+	})
 }
 
 func TestRuntimeModuleMissingDependencyControlFails(t *testing.T) {
@@ -196,19 +196,6 @@ func TestRuntimeModuleMissingDependencyControlFails(t *testing.T) {
 	if err == nil || !strings.Contains(string(output), "undefined: Effect") {
 		t.Fatalf("missing dependency compile control did not fail at the source seam: err=%v output=%s", err, output)
 	}
-}
-
-func sourcesForFiles(t *testing.T, all map[string][]byte, names []string) map[string][]byte {
-	t.Helper()
-	out := make(map[string][]byte, len(names))
-	for _, name := range names {
-		data, ok := all[name]
-		if !ok {
-			t.Fatalf("module refers to missing source %q", name)
-		}
-		out[name] = data
-	}
-	return out
 }
 
 func sourceNames(sources map[string][]byte) []string {
@@ -235,6 +222,27 @@ func stringSet(values []string) map[string]struct{} {
 		set[value] = struct{}{}
 	}
 	return set
+}
+
+func actualRuntimeSourceFiles(t *testing.T) map[string]struct{} {
+	t.Helper()
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime source location unavailable")
+	}
+	entries, err := os.ReadDir(filepath.Dir(filename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]struct{}{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || filepath.Ext(name) != ".go" || name == "embed.go" || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		files[name] = struct{}{}
+	}
+	return files
 }
 
 func sourceImports(t *testing.T, sources map[string][]byte) map[string]struct{} {
@@ -285,51 +293,15 @@ func compileSelectedRuntime(t *testing.T, sources map[string][]byte) ([]byte, er
 	if err := os.WriteFile(filepath.Join(directory, "go.mod"), []byte("module effra.local/runtime-probe\n\ngo 1.27\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cache := os.Getenv("GOCACHE")
-	if cache == "" {
-		cache = filepath.Join(directory, "cache")
-	}
-	tmp := os.Getenv("TMPDIR")
-	if tmp == "" {
-		tmp = filepath.Join(directory, "tmp")
-	}
-	if err := os.MkdirAll(cache, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(tmp, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	env := replaceEnv(replaceEnv(os.Environ(), "GOCACHE", cache), "TMPDIR", tmp)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "go", "test", "-run", "^$", "./runtime")
 	command.Dir = directory
-	command.Env = env
 	output, err := command.CombinedOutput()
 	if ctx.Err() != nil {
 		return output, fmt.Errorf("selected runtime compile timed out: %w", ctx.Err())
 	}
 	return output, err
-}
-
-func replaceEnv(env []string, key, value string) []string {
-	prefix := key + "="
-	result := make([]string, 0, len(env)+1)
-	found := false
-	for _, entry := range env {
-		if strings.HasPrefix(entry, prefix) {
-			if !found {
-				result = append(result, prefix+value)
-				found = true
-			}
-			continue
-		}
-		result = append(result, entry)
-	}
-	if !found {
-		result = append(result, prefix+value)
-	}
-	return result
 }
 
 func assertSameSources(t *testing.T, first, second map[string][]byte) {

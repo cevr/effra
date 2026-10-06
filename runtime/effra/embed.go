@@ -3,6 +3,7 @@ package effra
 import (
 	"embed"
 	"fmt"
+	"sort"
 )
 
 //go:embed effect.go fiber.go managed.go scheduler.go scope.go latch.go http.go files.go interop.go console.go env.go inspect.go
@@ -25,25 +26,6 @@ const (
 type runtimeModuleSpec struct {
 	files        []string
 	dependencies []RuntimeModule
-	imports      []string
-}
-
-// runtimeSourceFiles is the authoritative list of runtime files admitted to
-// generated applications. The embed directive above mirrors it because Go's
-// embed patterns must be literal; tests verify that the two lists agree.
-var runtimeSourceFiles = [...]string{
-	"effect.go",
-	"fiber.go",
-	"managed.go",
-	"scheduler.go",
-	"scope.go",
-	"latch.go",
-	"http.go",
-	"files.go",
-	"interop.go",
-	"console.go",
-	"env.go",
-	"inspect.go",
 }
 
 // runtimeModuleCatalog is immutable by convention: callers receive only
@@ -51,45 +33,50 @@ var runtimeSourceFiles = [...]string{
 var runtimeModuleCatalog = map[RuntimeModule]runtimeModuleSpec{
 	RuntimeModuleCore: {
 		files: []string{"effect.go", "fiber.go", "managed.go", "scheduler.go", "scope.go"},
-		imports: []string{
-			"context", "errors", "fmt", "math", "sort", "strings", "sync", "sync/atomic", "time",
-		},
 	},
 	RuntimeModuleSync: {
 		files:        []string{"latch.go"},
 		dependencies: []RuntimeModule{RuntimeModuleCore},
-		imports:      []string{"context", "errors"},
 	},
 	RuntimeModuleHTTP: {
 		files:        []string{"http.go"},
 		dependencies: []RuntimeModule{RuntimeModuleCore},
-		imports:      []string{"context", "errors", "net", "net/http", "time"},
 	},
 	RuntimeModuleFiles: {
 		files:        []string{"files.go"},
 		dependencies: []RuntimeModule{RuntimeModuleCore},
-		imports:      []string{"context", "fmt", "io", "os", "sync"},
 	},
 	RuntimeModuleConsole: {
 		files:        []string{"console.go"},
 		dependencies: []RuntimeModule{RuntimeModuleCore},
-		imports:      []string{"fmt"},
 	},
 	RuntimeModuleEnv: {
 		files:        []string{"env.go"},
 		dependencies: []RuntimeModule{RuntimeModuleCore},
-		imports:      []string{"os"},
 	},
 	RuntimeModuleInspect: {
 		files:        []string{"inspect.go"},
 		dependencies: []RuntimeModule{RuntimeModuleCore},
-		imports:      []string{"encoding/json"},
 	},
 	RuntimeModuleInterop: {
 		files:        []string{"interop.go"},
 		dependencies: []RuntimeModule{RuntimeModuleCore},
-		imports:      []string{"context"},
 	},
+}
+
+func catalogSourceFiles() []string {
+	files := map[string]struct{}{}
+	for _, spec := range runtimeModuleCatalog {
+		for _, name := range spec.files {
+			files[name] = struct{}{}
+		}
+	}
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func readRuntimeSource(name string) []byte {
@@ -97,13 +84,14 @@ func readRuntimeSource(name string) []byte {
 	if err != nil {
 		panic(err)
 	}
-	return append([]byte(nil), data...)
+	return data
 }
 
 // Sources bundles the same runtime source for standalone generated modules.
 func Sources() map[string][]byte {
-	out := make(map[string][]byte, len(runtimeSourceFiles))
-	for _, name := range runtimeSourceFiles {
+	names := catalogSourceFiles()
+	out := make(map[string][]byte, len(names))
+	for _, name := range names {
 		out[name] = readRuntimeSource(name)
 	}
 	return out
@@ -146,10 +134,8 @@ func SelectSources(roots ...RuntimeModule) (map[string][]byte, error) {
 		}
 	}
 	out := make(map[string][]byte, len(selectedFiles))
-	for _, name := range runtimeSourceFiles {
-		if _, ok := selectedFiles[name]; ok {
-			out[name] = readRuntimeSource(name)
-		}
+	for name := range selectedFiles {
+		out[name] = readRuntimeSource(name)
 	}
 	return out, nil
 }
