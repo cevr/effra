@@ -36,6 +36,8 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 
 - [Checked machines and owned actors](state-machines.md): owner-requested state-machine primitive over ordinary ADTs, explicit transition policy, owned invocation and shared graph inspection. Pure guards and flat states first; advanced statecharts/durability remain unsupported until specified.
 
+- [Reusable generic data and product matching](generic-data.md), followed by [payload-aware recovery](effect-recovery.md): ordinary Option/Result, finite generic data, exhaustive state/event decisions and typed outcome conversion shared by codecs and machines.
+
 ## Foundation implementation receipts
 
 - [Reasoned semantic lint suppression](foundation-lint.md): named next-line advice suppression requires a reason; malformed, unknown and unused directives diagnose without disabling compiler checks.
