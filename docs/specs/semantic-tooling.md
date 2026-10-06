@@ -24,6 +24,8 @@ Keep existing MCP source-size and regular-file admission guards. Bounded output 
 
 ## Full types
 
+Include a separate compiler/analysis-producer identity in the full semantic snapshot. Source revision, target, schema version and producer identity together qualify reusable facts; rule-pack/configuration identity additionally qualifies custom lint results. Do not treat the current source/import digest alone as a cache key across compiler upgrades. Review evidence: identical owned-sibling source has revision `69c03738135f74cb78264ae5999717e23fab0031d4e861bad456200fd049ddba` under de3ae027 and bfe0862 but different admission/ownership facts. Preserve useful cross-target source identity rather than pretending a compiler repair edited the source. Publish the actual identity strength (release/build/content or explicitly unavailable); a dirty Git tip alone is not an exact build identity. Compute producer identity once per process/build artifact, not through a Git subprocess on every query. Bind revision-scoped type lookups and caches to this qualified snapshot, with cross-build stale-fact tests. This belongs to the canonical full-type snapshot unit, not the already frozen initial diagnostics batch.
+
 Extend inspect/type queries from the canonical type representation established by bundled interfaces. A type graph contains stable identities within the snapshot, roots and one definition per reachable type; references express sharing or recursion. A display string is derived presentation. No independently parsed string grammar or opaque callback erasure is acceptable.
 
 For supported language constructs, expose:
@@ -36,6 +38,10 @@ For supported language constructs, expose:
 - Target availability and imported declaration/binding trust when applicable.
 
 Queries support named declarations, checked expressions and lexical bindings using semantic identities. Local shadowing, match bindings, parameters and provider methods resolve to their actual declarations. Unsupported or unchecked queries explicitly say unavailable; no apparently authoritative guessed type. Declaration lookup and expression lookup remain distinguishable.
+
+Extend the shared syntax seam with full node extents and binding-name spans while retaining diagnostic anchors for existing findings and line-sensitive suppressions. Preserve source order for pattern bindings. Facts describe original syntax, not checker-desugared substitutes; store checked resolutions/types separately where mutation would otherwise erase source facts. The formatter's token/trivia representation remains syntax-only and is not reconstructed from a checked Program. Port graph/lint binding consumers onto the recorded resolution when their fact families land, rather than adding another spelling-based resolver. Acceptance includes querying a let-name offset, navigating a pattern alias to its name token, and unchanged original syntax facts before/after checking.
+
+The same once-computed producer identity qualifies formatter results and custom-lint analyses. Formatter style/schema version is additional metadata, not a substitute for identifying the actual producer. Distinct development builds must not claim an identical exact identity merely because their version string or Git tip matches; explicitly unavailable identity is preferable to fabricated precision.
 
 Expose a focused `ef type FILE` query with an explicit symbol or byte offset, and the equivalent MCP `code.type`; retain existing `code.typeAt` behavior for compatibility. Full inspect output shares these definitions. Allow a named type-definition query by revision-scoped identity, so a consumer can expand a reference without fetching an entire project. Specify finite node/edge/byte budgets and clear exhaustion behavior. Do not cap fields while describing the omitted part as complete. Include deterministic ordering and an additive/versioned wire migration.
 

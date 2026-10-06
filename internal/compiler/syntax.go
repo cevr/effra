@@ -198,6 +198,9 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 			column = 1
 			continue
 		}
+		if ch == '\r' && (i+1 == len(source) || source[i+1] != '\n') {
+			return nil, comments, []Diagnostic{{"EF001", "standalone carriage return is unsupported; use LF or CRLF line endings", Span{i, 1, line, column}}}
+		}
 		if ch == ' ' || ch == '\r' || ch == '\t' {
 			i++
 			column++
