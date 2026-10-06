@@ -67,9 +67,14 @@ type Variant struct {
 	Span          Span    `json:"span"`
 }
 type Record struct {
-	Name   string  `json:"name"`
-	Fields []Field `json:"fields,omitempty"`
-	Span   Span    `json:"span"`
+	Name         string              `json:"name"`
+	Fields       []Field             `json:"fields,omitempty"`
+	Span         Span                `json:"span"`
+	Module       string              `json:"-"`
+	SourceID     string              `json:"-"`
+	Identity     string              `json:"-"`
+	EmissionName string              `json:"-"`
+	Parameters   []TemplateParameter `json:"-"`
 }
 type Enum struct {
 	Name     string    `json:"name"`
@@ -85,25 +90,30 @@ type ErrorDecl struct {
 // Declaration is the stable inspection projection for nominal application
 // data. It deliberately contains no target-specific lowering details.
 type Declaration struct {
-	Kind     string    `json:"kind"`
-	Name     string    `json:"name"`
-	Identity string    `json:"identity,omitempty"`
-	Fields   []Field   `json:"fields,omitempty"`
-	Variants []Variant `json:"variants,omitempty"`
-	Span     Span      `json:"span"`
+	Source             string                  `json:"source,omitempty"`
+	TemplateParameters []TemplateParameterView `json:"templateParameters,omitempty"`
+	Kind               string                  `json:"kind"`
+	Name               string                  `json:"name"`
+	Identity           string                  `json:"identity,omitempty"`
+	Fields             []Field                 `json:"fields,omitempty"`
+	Variants           []Variant               `json:"variants,omitempty"`
+	Span               Span                    `json:"span"`
 }
 type Function struct {
-	Name      string
-	Params    []Param
-	Return    string
-	Effect    bool
-	Errors    []string
-	Services  []string
-	Body      *Block
-	Span      Span
-	DeclSpan  Span `json:"-"`
-	Ownership []OwnershipFact
-	Captures  []OwnershipFact
+	Name         string
+	Module       string `json:"-"`
+	SourceID     string `json:"-"`
+	EmissionName string `json:"-"`
+	Params       []Param
+	Return       string
+	Effect       bool
+	Errors       []string
+	Services     []string
+	Body         *Block
+	Span         Span
+	DeclSpan     Span `json:"-"`
+	Ownership    []OwnershipFact
+	Captures     []OwnershipFact
 	// Identity is assigned by the checker from the canonical callable
 	// contract. The source name remains a projection used by the emitters.
 	Identity               string    `json:"-"`
@@ -113,6 +123,8 @@ type Function struct {
 	returnType             *sourceType
 	returnID               TypeID
 	RowParameters          []RowParameter
+	TypeParameters         []TemplateParameter
+	returnFields           map[string]checkedExpression
 	failureID              RowID
 	serviceID              RowID
 	signatureChecked       bool
@@ -137,21 +149,28 @@ type Provider struct {
 	Contract ValueType `json:"-"`
 }
 type Program struct {
-	typeExpressions map[string]*sourceType
-	Imports         []GoImport
-	Comments        []Comment
-	Items           []*SyntaxItem `json:"-"`
-	Bindings        map[string]Binding
-	Modules         []*goModule
-	UsedImports     map[string]bool
-	GoOnly          bool
-	Errors          map[string]Span
-	ErrorDecls      []*ErrorDecl
-	Records         []*Record
-	Enums           []*Enum
-	Services        []*Service
-	Providers       []*Provider
-	Functions       []*Function
+	interfaceProducer   bool
+	semantic            *checker
+	BundledTemplates    []*Record
+	BundledTypeBindings map[string]map[string]*Record
+	typeExpressions     map[string]*sourceType
+	Imports             []GoImport
+	BundledImports      []BundledImport
+	BundledFunctions    []*Function
+	BundledBindings     map[string]map[string]*Function
+	Comments            []Comment
+	Items               []*SyntaxItem `json:"-"`
+	Bindings            map[string]Binding
+	Modules             []*goModule
+	UsedImports         map[string]bool
+	GoOnly              bool
+	Errors              map[string]Span
+	ErrorDecls          []*ErrorDecl
+	Records             []*Record
+	Enums               []*Enum
+	Services            []*Service
+	Providers           []*Provider
+	Functions           []*Function
 }
 
 // SyntaxItem preserves the lexical declaration order that semantic
@@ -159,15 +178,16 @@ type Program struct {
 // adapters use these nodes as the ordered syntax seam; the grouped Program
 // slices remain the checker-facing representation.
 type SyntaxItem struct {
-	Kind     string
-	Import   *GoImport
-	Error    *ErrorDecl
-	Record   *Record
-	Enum     *Enum
-	Service  *Service
-	Provider *Provider
-	Function *Function
-	Span     Span
+	Kind          string
+	Import        *GoImport
+	BundledImport *BundledImport
+	Error         *ErrorDecl
+	Record        *Record
+	Enum          *Enum
+	Service       *Service
+	Provider      *Provider
+	Function      *Function
+	Span          Span
 }
 type Block struct {
 	Statements []*Statement
@@ -197,19 +217,20 @@ type MatchArm struct {
 	Span    Span
 }
 type Expr struct {
-	Kind    string
-	Name    string
-	Text    string
-	Args    []*Expr
-	Left    *Expr
-	Right   *Expr
-	Then    *Block
-	Else    *Block
-	Fields  []FieldValue
-	Arms    []*MatchArm
-	Span    Span
-	Type    ValueType
-	checked checkedExpression
+	ResolvedTemplate *Record
+	Kind             string
+	Name             string
+	Text             string
+	Args             []*Expr
+	Left             *Expr
+	Right            *Expr
+	Then             *Block
+	Else             *Block
+	Fields           []FieldValue
+	Arms             []*MatchArm
+	Span             Span
+	Type             ValueType
+	checked          checkedExpression
 	// Evaluation is the work incurred while evaluating this expression now.
 	// Deferred effect rows remain on Type. Keeping the two facts beside the
 	// checked node lets callers reuse the result without walking the subtree.
@@ -217,8 +238,9 @@ type Expr struct {
 	// Executed is the row contribution of this expression when it is consumed
 	// by its enclosing computation. It is a cached projection of Type for
 	// run/branch/scope nodes and of Evaluation for ordinary values.
-	Executed EvaluationRows `json:"-"`
-	Identity string         `json:"-"`
+	Executed         EvaluationRows `json:"-"`
+	Identity         string         `json:"-"`
+	ResolvedFunction *Function      `json:"-"`
 }
 
 func lex(source string) ([]token, []Comment, []Diagnostic) {
@@ -362,17 +384,23 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 		case "import":
 			start := p.peek().span
 			p.take()
-			p.expect("go")
+			native := p.accept("go")
 			alias := p.name()
 			path := p.take()
 			if path.kind != "string" {
-				p.fail(path, "expected Go package path string")
+				p.fail(path, "expected package path string")
 			}
 			var decoded string
 			_ = json.Unmarshal([]byte(path.text), &decoded)
-			importDecl := &GoImport{alias.text, decoded, alias.span}
-			program.Imports = append(program.Imports, *importDecl)
-			program.Items = append(program.Items, &SyntaxItem{Kind: "import", Import: importDecl, Span: start})
+			if native {
+				importDecl := &GoImport{alias.text, decoded, alias.span}
+				program.Imports = append(program.Imports, *importDecl)
+				program.Items = append(program.Items, &SyntaxItem{Kind: "import", Import: importDecl, Span: start})
+			} else {
+				importDecl := &BundledImport{Alias: alias.text, Path: decoded, Span: alias.span}
+				program.BundledImports = append(program.BundledImports, *importDecl)
+				program.Items = append(program.Items, &SyntaxItem{Kind: "import", BundledImport: importDecl, Span: start})
+			}
 			p.accept(";")
 		case "error":
 			start := p.peek().span
@@ -393,7 +421,11 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			start := p.peek().span
 			p.take()
 			name := p.name()
-			record := &Record{Name: name.text, Fields: p.fields(), Span: name.span}
+			record := &Record{Name: name.text, Span: name.span}
+			if p.accept("<") {
+				record.Parameters = p.templateParameters()
+			}
+			record.Fields = p.fields()
 			program.Records = append(program.Records, record)
 			program.Items = append(program.Items, &SyntaxItem{Kind: "record", Record: record, Span: start})
 			p.accept(";")
@@ -565,7 +597,58 @@ func (p *parser) typ() string {
 	if name.text == "Effect" && p.peek().text == "<" {
 		p.fail(name, "typed recipes are unsupported; use an explicit effect fn callback contract")
 	}
-	return name.text
+	text := name.text
+	if p.accept(".") {
+		text += "." + p.name().text
+	}
+	if p.accept("<") {
+		t := &sourceType{Application: text, Span: name.span}
+		for {
+			argument := p.typ()
+			t.ApplicationArguments = append(t.ApplicationArguments, argument)
+			t.ApplicationArgumentTypes = append(t.ApplicationArgumentTypes, p.types[argument])
+			if len(t.ApplicationArguments) > 8 {
+				p.fail(name, "at most eight template arguments are supported")
+			}
+			if p.accept(">") {
+				break
+			}
+			p.expect(",")
+		}
+		text = t.display()
+		p.types[text] = t
+	}
+	return text
+}
+
+func (p *parser) templateParameters() []TemplateParameter {
+	parameters := []TemplateParameter{}
+	for {
+		name := p.name()
+		p.expect(":")
+		kind := p.take()
+		parameter := TemplateParameter{Name: name.text, Kind: kind.text, Span: name.span}
+		switch kind.text {
+		case "type":
+		case "callable":
+			constraint := p.typ()
+			parameter.Constraint = p.types[constraint]
+			if parameter.Constraint == nil || parameter.Constraint.Application != "" {
+				p.fail(kind, "callable constraints require a direct callable shape")
+			}
+		default:
+			p.fail(kind, "template parameters require type or callable kind")
+		}
+		parameters = append(parameters, parameter)
+		if len(parameters) > 8 {
+			p.fail(name, "at most eight template parameters are supported")
+		}
+		if p.accept(">") {
+			break
+		}
+		p.expect(",")
+	}
+	return parameters
 }
 func (p *parser) fields() []Field {
 	p.expect("{")
@@ -631,10 +714,16 @@ func (p *parser) function(body bool) *Function {
 			parameter := p.name()
 			p.expect(":")
 			kind := p.take()
-			if kind.text != "raises" && kind.text != "uses" {
-				p.fail(kind, "row parameters require raises or uses kind")
+			if kind.text == "type" {
+				f.TypeParameters = append(f.TypeParameters, TemplateParameter{Name: parameter.text, Kind: "type", Span: parameter.span})
+				if len(f.TypeParameters) > 8 {
+					p.fail(parameter, "at most eight type parameters are supported")
+				}
+			} else if kind.text != "raises" && kind.text != "uses" {
+				p.fail(kind, "function parameters require type, raises or uses kind")
+			} else {
+				f.RowParameters = append(f.RowParameters, RowParameter{Name: parameter.text, Kind: kind.text, Span: parameter.span})
 			}
-			f.RowParameters = append(f.RowParameters, RowParameter{Name: parameter.text, Kind: kind.text, Span: parameter.span})
 			if len(f.RowParameters) > 8 {
 				p.fail(parameter, "at most eight explicit row parameters are supported")
 			}

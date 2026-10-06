@@ -1,0 +1,6 @@
+fn witness<T: type, W: type, DE: raises, DR: uses, EE: raises, ER: uses>(decode: effect fn(W) -> T raises { DE } uses { DR }, encode: effect fn(T) -> W raises { EE } uses { ER }) -> Codec<T, W, effect fn(W) -> T raises { DE } uses { DR }, effect fn(T) -> W raises { EE } uses { ER }> {
+    Codec {
+        decode: decode,
+        encode: encode
+    }
+}

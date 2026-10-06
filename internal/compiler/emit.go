@@ -210,14 +210,47 @@ const __ef_provider_TestSync={latch:()=>Effect.sync(()=>new __ef_latch()),await:
 			decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(p.Methods, declarations, true) + ";\nexport { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
 		}
 	}
-	for _, f := range r.Program.Functions {
-		out.WriteString("const __ef_function_" + f.Name + " = " + jsFunction(f) + ";\nexport { __ef_function_" + f.Name + " as " + f.Name + " };\n")
-		decl.WriteString("declare const __ef_function_" + f.Name + ": " + jsRowFunctionSignature(f, declarations) + ";\nexport { __ef_function_" + f.Name + " as " + f.Name + " };\n")
+	for _, f := range r.Program.checkedFunctions() {
+		out.WriteString("const " + f.jsEmissionName() + " = " + jsFunction(f) + ";\n")
+		if f.Module == currentModuleIdentity {
+			out.WriteString("export { " + f.jsEmissionName() + " as " + f.Name + " };\n")
+			decl.WriteString("declare const " + f.jsEmissionName() + ": " + jsRowFunctionSignature(f, declarations) + ";\nexport { " + f.jsEmissionName() + " as " + f.Name + " };\n")
+		}
+	}
+	for _, r := range r.Program.BundledTemplates {
+		decl.WriteString(jsTemplateDeclaration(r))
 	}
 	if entry {
 		out.WriteString("Effect.runPromise(__ef_function_main()).then(value => { if (value !== undefined) console.log(typeof value === 'bigint' ? value.toString() : value); }, error => { console.error(error); process.exitCode = 1; });\n")
 	}
 	return out.String(), decl.String(), nil
+}
+
+func jsTemplateDeclaration(r *Record) string {
+	var decl strings.Builder
+	parameters := []string{}
+	for _, p := range r.Parameters {
+		parameter := p.Name
+		if p.Kind == "callable" && p.Constraint != nil {
+			t := p.Constraint
+			args := []string{}
+			for i, name := range t.Parameters {
+				args = append(args, "arg"+fmt.Sprint(i)+": "+name)
+			}
+			result := t.Result
+			if t.Effect {
+				result = "Effect.Effect<" + result + ", unknown, unknown>"
+			}
+			parameter += " extends (" + strings.Join(args, ", ") + ") => " + result
+		}
+		parameters = append(parameters, parameter)
+	}
+	decl.WriteString("type __ef_template_" + r.EmissionName + "<" + strings.Join(parameters, ", ") + "> = { ")
+	for _, field := range r.Fields {
+		decl.WriteString("readonly " + quoted(field.Name) + ": " + field.Type + "; ")
+	}
+	decl.WriteString("};\n")
+	return decl.String()
 }
 
 // ProgramDeclarations is a target-independent view used by both emitters.
@@ -322,6 +355,9 @@ func jsBlock(b *Block, effect bool) string {
 func jsExpr(e *Expr, effect bool) string {
 	switch e.Kind {
 	case "member":
+		if e.ResolvedFunction != nil {
+			return e.ResolvedFunction.jsEmissionName()
+		}
 		left := jsExpr(e.Left, effect)
 		if e.Text == "field" {
 			return left + "[" + quoted(e.Name) + "]"
@@ -348,7 +384,7 @@ func jsExpr(e *Expr, effect bool) string {
 		return jsConstruct(e, effect)
 	case "name":
 		if e.Text == "function" {
-			return "__ef_function_" + e.Name
+			return e.ResolvedFunction.jsEmissionName()
 		}
 		if e.Text == "provider" {
 			return "__ef_provider_" + e.Name
@@ -385,6 +421,9 @@ func jsExpr(e *Expr, effect bool) string {
 		args := []string{}
 		for _, a := range e.Args {
 			args = append(args, jsExpr(a, effect))
+		}
+		if e.ResolvedFunction != nil && e.ResolvedFunction.Owner == "module" {
+			return e.ResolvedFunction.jsEmissionName() + "(" + strings.Join(args, ", ") + ")"
 		}
 		if e.Left.Kind == "name" {
 			return "__ef_function_" + e.Left.Name + "(" + strings.Join(args, ", ") + ")"

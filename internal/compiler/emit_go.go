@@ -97,6 +97,18 @@ func canonicalGoType(c *checker, id TypeID, visiting map[TypeID]bool) string {
 		}
 	case "record", "enum", "error":
 		return "efType_" + goIdent(node.Name)
+	case "type-variable":
+		return goIdent(node.Name)
+	case "application":
+		r := c.templates[node.Declaration]
+		if r == nil {
+			return "struct{}"
+		}
+		args := []string{}
+		for _, id := range node.Args {
+			args = append(args, canonicalGoType(c, id, visiting))
+		}
+		return "efTemplate_" + r.EmissionName + "[" + strings.Join(args, ",") + "]"
 	case "fiber":
 		if len(node.Args) == 1 {
 			return "*er.Fiber[" + canonicalGoType(c, node.Args[0], visiting) + "]"
@@ -289,20 +301,8 @@ func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(addres
 		}
 		out.WriteString("} }\n")
 	}
-	for _, f := range r.Program.Functions {
-		ret := goSourceType(f.returnType, f.Return)
-		if f.Effect {
-			ret = "efEffect[" + ret + "]"
-		}
-		out.WriteString("func efFunction_" + f.Name + "(" + goParams(f) + ") " + ret + " {\n")
-		if f.Effect {
-			out.WriteString("return func(ctx efContext) efExit[" + goSourceType(f.returnType, f.Return) + "] {\nif err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + goSourceType(f.returnType, f.Return) + "](err)}\n")
-		}
-		out.WriteString(g.block(f.Body, f.Effect, f.Return))
-		if f.Effect {
-			out.WriteString("}\n")
-		}
-		out.WriteString("}\n")
+	for _, f := range r.Program.checkedFunctions() {
+		out.WriteString(g.functionDeclaration(f))
 	}
 	if tests == nil {
 		mainReturn := "()"
@@ -342,6 +342,42 @@ func (g *goEmitter) function(f *Function) string {
 		close = "}\n}\n"
 	}
 	return open + g.block(f.Body, f.Effect, f.Return) + close
+}
+
+func (g *goEmitter) functionDeclaration(f *Function) string {
+	c := g.program.semantic
+	ret := goSourceType(f.returnType, f.Return)
+	canonical := len(f.TypeParameters) > 0 || (f.returnType != nil && f.returnType.Application != "")
+	if canonical {
+		ret = canonicalGoType(c, f.returnID, map[TypeID]bool{})
+	}
+	params := []string{}
+	for _, p := range f.Params {
+		typ := goSourceType(p.sourceType, p.Type)
+		if len(f.TypeParameters) > 0 || (p.sourceType != nil && p.sourceType.Application != "") {
+			typ = canonicalGoType(c, p.typeID, map[TypeID]bool{})
+		}
+		params = append(params, "efLocal_"+p.Name+" "+typ)
+	}
+	variables := []string{}
+	for _, p := range f.TypeParameters {
+		variables = append(variables, goIdent(p.Name)+" any")
+	}
+	generic := ""
+	if len(variables) > 0 {
+		generic = "[" + strings.Join(variables, ",") + "]"
+	}
+	valueRet := ret
+	if f.Effect {
+		valueRet = "efEffect[" + ret + "]"
+	}
+	open := "func " + f.goEmissionName() + generic + "(" + strings.Join(params, ",") + ") " + valueRet + " {\n"
+	close := "}\n"
+	if f.Effect {
+		open += "return func(ctx efContext) efExit[" + ret + "] {\nif err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + ret + "](err)}\n"
+		close = "}\n" + close
+	}
+	return open + g.blockType(f.Body, f.Effect, ret) + close
 }
 
 // providerConstructed distinguishes an ordinary reusable provider value from
@@ -442,6 +478,9 @@ func (g *goEmitter) blockType(b *Block, effect bool, ret string) string {
 func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder) string {
 	switch e.Kind {
 	case "member":
+		if e.ResolvedFunction != nil {
+			return e.ResolvedFunction.goEmissionName()
+		}
 		left := g.expr(e.Left, effect, ret, out)
 		if e.Text == "field" {
 			return left + "." + goFieldName(e.Name)
@@ -466,7 +505,7 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 		return g.construct(e, effect, ret, out)
 	case "name":
 		if e.Text == "function" {
-			return "efFunction_" + e.Name
+			return e.ResolvedFunction.goEmissionName()
 		}
 		if e.Text == "provider" {
 			if e.Name == "TestClock" {
@@ -535,6 +574,9 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 			out.WriteString(name + " := " + expr + "\n")
 			args = append(args, name)
 		}
+		if e.ResolvedFunction != nil && e.ResolvedFunction.Owner == "module" {
+			return e.ResolvedFunction.goEmissionName() + "(" + strings.Join(args, ", ") + ")"
+		}
 		if e.Left.Kind == "name" {
 			return "efFunction_" + e.Left.Name + "(" + strings.Join(args, ", ") + ")"
 		}
@@ -579,7 +621,24 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 	panic("unchecked expression reached Go emitter")
 }
 
+func goTemplateDeclaration(r *Record) string {
+	var out strings.Builder
+	parameters := []string{}
+	for _, p := range r.Parameters {
+		parameters = append(parameters, goIdent(p.Name)+" any")
+	}
+	out.WriteString("type efTemplate_" + r.EmissionName + "[" + strings.Join(parameters, ",") + "] struct {\n")
+	for _, field := range r.Fields {
+		out.WriteString(goFieldName(field.Name) + " " + goIdent(field.Type) + "\n")
+	}
+	out.WriteString("}\n")
+	return out.String()
+}
+
 func (g *goEmitter) dataTypes(out *strings.Builder) {
+	for _, r := range g.program.BundledTemplates {
+		out.WriteString(goTemplateDeclaration(r))
+	}
 	for _, declaration := range g.programDeclarations() {
 		switch declaration.Kind {
 		case "record", "error":
@@ -655,6 +714,9 @@ func (g *goEmitter) construct(e *Expr, effect bool, ret string, out *strings.Bui
 	parts := []string{}
 	for _, field := range e.Fields {
 		parts = append(parts, goFieldName(field.Name)+":"+g.expr(field.Value, false, ret, out))
+	}
+	if e.ResolvedTemplate != nil {
+		return canonicalGoType(g.program.semantic, e.checked.resultID(), map[TypeID]bool{}) + "{" + strings.Join(parts, ",") + "}"
 	}
 	if variantName != "" {
 		variant := goVariantType(typeName, variantName) + "{" + strings.Join(parts, ",") + "}"

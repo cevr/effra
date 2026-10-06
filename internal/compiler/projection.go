@@ -93,7 +93,11 @@ func (c *checker) canonicalSnapshot() *canonicalSnapshot {
 	}
 	for i := range c.result.Declarations {
 		d := &c.result.Declarations[i]
-		snapshot.declarations[c.declarationQualifier(d.Kind, d.Name)] = d
+		if d.Kind == "template" {
+			snapshot.declarations[d.Identity] = d
+		} else if qualifier := c.declarationQualifier(d.Kind, d.Name); qualifier != "" {
+			snapshot.declarations[qualifier] = d
+		}
 	}
 	// Compute all public identities once at the checker-to-boundary seam. The
 	// identity is memoized by the canonical interner and is never recomputed by
@@ -403,10 +407,14 @@ func (r *Result) ValidateProjectionResponse(projection TypeProjection, envelope 
 		metadata = fields
 	case *DependencyGraph:
 		metadata = struct {
-			Nodes        []GraphNode
-			Edges        []GraphEdge
-			Declarations []Declaration
-		}{value.Nodes, value.Edges, value.Declarations}
+			Nodes             []GraphNode
+			Edges             []GraphEdge
+			Declarations      []Declaration
+			ProducerIdentity  string
+			Sources           []SourceInfo
+			BundledBindings   []BundledBinding
+			BundledInterfaces []BundledInterfaceInfo
+		}{value.Nodes, value.Edges, value.Declarations, value.ProducerIdentity, value.Sources, value.BundledBindings, value.BundledInterfaces}
 	}
 	bytes, err := encodedSize(metadata, projection.Limits.CompatibilityBytes)
 	if projection.Complete || bytes > usage.CompatibilityBytes {
@@ -644,6 +652,16 @@ func (r *Result) projectionRefs(refs []TypeRef, all bool, compatibilityBytes int
 					return refusedProjection(limits, usage, err.Error())
 				}
 			}
+			for _, parameter := range declaration.TemplateParameters {
+				if err := addField(Field{TypeRef: parameter.Variable, typeID: parameter.typeID}); err != nil {
+					return refusedProjection(limits, usage, err.Error())
+				}
+				if parameter.Shape != nil {
+					if err := addField(Field{TypeRef: *parameter.Shape, typeID: parameter.shapeID}); err != nil {
+						return refusedProjection(limits, usage, err.Error())
+					}
+				}
+			}
 			for _, variant := range declaration.Variants {
 				for _, field := range variant.Fields {
 					if err := addField(field); err != nil {
@@ -801,6 +819,12 @@ func appendProjectionValue(refs *[]TypeRef, value ValueType) int {
 	appendProjectionRef(refs, TypeRef{FailureRow: value.FailureRow, ServiceRow: value.ServiceRow})
 	if value.Callable != nil {
 		appendProjectionRef(refs, TypeRef{ID: value.Callable.Signature})
+		for _, parameter := range value.Callable.TypeParameters {
+			appendProjectionRef(refs, parameter.Variable)
+			if parameter.Shape != nil {
+				appendProjectionRef(refs, *parameter.Shape)
+			}
+		}
 		for _, parameter := range value.Callable.Parameters {
 			appendProjectionRef(refs, parameter.TypeRef)
 		}
@@ -869,6 +893,7 @@ func (r *Result) CheckResponse() map[string]any {
 		"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked,
 		"diagnostics": diagnostics, "diagnosticsTruncated": truncated, "symbolCount": len(r.Symbols), "declarationCount": len(r.Declarations),
 		"timings": r.Timings, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionLimits": projection.Limits,
+		"producerIdentity":    r.ProducerIdentity,
 		"typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete,
 	}
 	if projection.Complete {
@@ -877,10 +902,13 @@ func (r *Result) CheckResponse() map[string]any {
 		response["bindings"] = r.Bindings
 		response["types"] = projection.Types
 		response["rows"] = projection.Rows
+		response["sources"] = r.Sources
+		response["bundledBindings"] = r.BundledBindings
+		response["bundledInterfaces"] = r.BundledInterfaces
 		usage, err := r.ValidateProjectionResponse(projection, response)
 		if err != nil {
 			projection = refusedProjection(projection.Limits, usage, err.Error())
-			for _, key := range []string{"symbols", "declarations", "bindings", "types", "rows"} {
+			for _, key := range []string{"symbols", "declarations", "bindings", "types", "rows", "sources", "bundledBindings", "bundledInterfaces"} {
 				delete(response, key)
 			}
 			response["typeProjectionComplete"] = false
@@ -1045,6 +1073,12 @@ func (r *Result) ProjectDeclaration(declaration *Declaration) TypeProjection {
 	for _, field := range declaration.Fields {
 		appendProjectionRef(&refs, field.TypeRef)
 	}
+	for _, parameter := range declaration.TemplateParameters {
+		appendProjectionRef(&refs, parameter.Variable)
+		if parameter.Shape != nil {
+			appendProjectionRef(&refs, *parameter.Shape)
+		}
+	}
 	for _, variant := range declaration.Variants {
 		for _, field := range variant.Fields {
 			appendProjectionRef(&refs, field.TypeRef)
@@ -1105,6 +1139,9 @@ func (r *Result) SymbolBindings(symbol *Symbol) ([]Binding, error) {
 		}
 		if e.checked.application != nil {
 			function(r.projector.functions[e.checked.application.Callee])
+		}
+		if e.ResolvedFunction != nil {
+			function(e.ResolvedFunction)
 		}
 		forEachExprChild(e, expr)
 		block(e.Then)
