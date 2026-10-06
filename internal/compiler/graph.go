@@ -9,6 +9,7 @@ type GraphNode struct {
 	ID       string     `json:"id"`
 	Kind     string     `json:"kind"`
 	Name     string     `json:"name"`
+	Source   string     `json:"source,omitempty"`
 	Span     Span       `json:"span"`
 	Contract *ValueType `json:"contract,omitempty"`
 	Incoming []string   `json:"incoming,omitempty"`
@@ -127,6 +128,9 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	for _, s := range r.Symbols {
 		t := s.Contract
 		add("function:"+s.Name, "function", s.Name, s.Span, &t)
+		if len(g.Nodes) > 0 {
+			g.Nodes[len(g.Nodes)-1].Source = s.Source
+		}
 		for _, req := range s.Contract.Services {
 			edge("function:"+s.Name, "service:"+req, "requires", req, s.Span)
 		}
@@ -198,6 +202,9 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			edge(id, provider, "provides", e.Name, e.Span)
 		}
 		if e.Kind == "call" {
+			if f := e.ResolvedFunction; f != nil && f.Module != "" && f.Module != currentModuleIdentity {
+				edge(id, "function:"+f.Module+"."+f.Name, "calls", "", e.Span)
+			}
 			if e.Left.Kind == "name" && nodes["function:"+e.Left.Name] {
 				edge(id, "function:"+e.Left.Name, "calls", "", e.Span)
 			}

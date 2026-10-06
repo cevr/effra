@@ -226,6 +226,7 @@ type Contribution struct {
 }
 type Symbol struct {
 	Name          string         `json:"name"`
+	Source        string         `json:"source,omitempty"`
 	Identity      string         `json:"identity,omitempty"`
 	Params        []Param        `json:"parameters"`
 	Contract      ValueType      `json:"contract"`
@@ -240,6 +241,9 @@ type Timings struct {
 	TotalMicros  int64 `json:"totalMicros"`
 }
 type Result struct {
+	Sources                []SourceInfo     `json:"sources,omitempty"`
+	BundledBindings        []BundledBinding `json:"bundledBindings,omitempty"`
+	ProducerIdentity       string           `json:"producerIdentity,omitempty"`
 	ModuleSum              []byte           `json:"-"`
 	Bindings               []Binding        `json:"bindings,omitempty"`
 	SchemaVersion          int              `json:"schemaVersion"`
@@ -357,6 +361,7 @@ type checker struct {
 	rowContext              map[string]RowParameter
 	rowDefinitions          map[string]RowParameter
 	callbackRelations       map[string]*callbackResultRelation
+	functionModule          string
 }
 
 const maxTypeProjectionNodes = 4096
@@ -2135,6 +2140,7 @@ func CompileAt(source, target, dir string) *Result {
 	}
 	r.Program = program
 	r.loadImports(dir)
+	r.loadBundledImports(source)
 	c := &checker{
 		program:                 program,
 		result:                  r,
@@ -2212,6 +2218,9 @@ func (c *checker) check() {
 		claim(name, span)
 	}
 	for _, imp := range c.program.Imports {
+		claim(imp.Alias, imp.Span)
+	}
+	for _, imp := range c.program.BundledImports {
 		claim(imp.Alias, imp.Span)
 	}
 	errors := make([]string, 0, len(c.program.Errors))
@@ -2298,10 +2307,15 @@ func (c *checker) check() {
 		c.providers[p.Name] = p
 	}
 	for _, f := range c.program.Functions {
+		f.Module = currentModuleIdentity
+		f.SourceID = "source:user"
 		f.Owner = "module"
 		f.Identity = c.declarationIdentity("function", f.Owner, f.Name)
 		claim(f.Name, f.Span)
 		c.functions[f.Name] = f
+	}
+	for _, f := range c.program.BundledFunctions {
+		f.Owner = "module"
 	}
 	for _, s := range c.program.Services {
 		methods := map[string]bool{}
@@ -2316,7 +2330,7 @@ func (c *checker) check() {
 			}
 		}
 	}
-	for _, f := range c.program.Functions {
+	for _, f := range c.program.checkedFunctions() {
 		c.signature(f)
 	}
 	for _, p := range c.program.Providers {
@@ -2366,10 +2380,10 @@ func (c *checker) check() {
 			}
 		}
 	}
-	if len(c.program.Functions) > 0 {
+	if len(c.program.checkedFunctions()) > 0 {
 		c.prepareFunctionSummaries()
 	}
-	for _, f := range c.program.Functions {
+	for _, f := range c.program.checkedFunctions() {
 		c.function(f, true)
 	}
 	c.validateJSDeclarationNames()
@@ -2384,20 +2398,36 @@ func (c *checker) prepareFunctionSummaries() {
 	previous := c.suppressDiagnostics
 	c.suppressDiagnostics = true
 
-	functions := c.program.Functions
+	functions := c.program.checkedFunctions()
 	known := make(map[string]*Function, len(functions))
 	for _, f := range functions {
-		known[f.Name] = f
+		if f.Module == currentModuleIdentity {
+			known[f.Name] = f
+		}
+	}
+	for alias, bindings := range c.program.BundledBindings {
+		for member, f := range bindings {
+			known[alias+"."+member] = f
+		}
 	}
 	dependents := make(map[*Function][]*Function, len(functions))
 	remaining := make(map[*Function]int, len(functions))
 	for _, caller := range functions {
+		callerKnown := known
+		if caller.Module != currentModuleIdentity {
+			callerKnown = map[string]*Function{}
+			for _, f := range c.program.BundledFunctions {
+				if f.Module == caller.Module {
+					callerKnown[f.Name] = f
+				}
+			}
+		}
 		deps := map[*Function]bool{}
 		locals := map[string]bool{}
 		for _, p := range caller.Params {
 			locals[p.Name] = true
 		}
-		collectFunctionDependencies(caller.Body, known, deps, locals)
+		collectFunctionDependencies(caller.Body, callerKnown, deps, locals)
 		delete(deps, caller)
 		remaining[caller] = len(deps)
 		for callee := range deps {
@@ -2504,6 +2534,11 @@ func collectFunctionDependenciesExpr(e *Expr, known map[string]*Function, out ma
 	}
 	if e.Kind == "name" && !locals[e.Name] {
 		if f := known[e.Name]; f != nil {
+			out[f] = true
+		}
+	}
+	if e.Kind == "member" && e.Left != nil && e.Left.Kind == "name" && !locals[e.Left.Name] {
+		if f := known[e.Left.Name+"."+e.Name]; f != nil {
 			out[f] = true
 		}
 	}
@@ -3546,6 +3581,9 @@ func (c *checker) function(f *Function, record bool) {
 }
 
 func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, allowedServices []string) {
+	previousModule := c.functionModule
+	c.functionModule = f.Module
+	defer func() { c.functionModule = previousModule }()
 	previousRows := c.rowContext
 	c.rowContext = c.functionRows(f)
 	defer func() { c.rowContext = previousRows }()
@@ -3592,12 +3630,16 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 		c.result.checkedSymbols[f.Identity] = checked
 		prototype := Symbol{
 			Name:          f.Name,
+			Source:        f.SourceID,
 			Identity:      f.Identity,
 			Params:        f.Params,
 			Contract:      c.projectCheckedBase(declared),
 			Actual:        c.projectCheckedBase(actual),
 			Span:          f.Span,
 			Contributions: c.reasons,
+		}
+		if f.Module != "" && f.Module != currentModuleIdentity {
+			prototype.Name = f.Module + "." + f.Name
 		}
 		var size int
 		var err error
@@ -3841,12 +3883,13 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 				c.requireGo(e.Span, "native provider "+p.Service)
 			}
 			e.Text = "provider"
-		} else if f := c.functions[e.Name]; f != nil {
+		} else if f := c.namedFunction(e.Name); f != nil {
 			if len(f.RowParameters) > 0 {
 				c.diagnostic("EF125", "row-polymorphic functions require direct application; first-class polymorphic values are unsupported", e.Span)
 			}
 			t = c.checkedFunction(f, true, false)
 			t.setOwnership(nil)
+			e.ResolvedFunction = f
 			e.Text = "function"
 		} else {
 			c.diagnostic("EF102", "unknown value "+e.Name, e.Span)
@@ -3900,7 +3943,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		var f *Function
 		serviceName := ""
 		if e.Left.Kind == "name" {
-			f = c.functions[e.Left.Name]
+			f = c.namedFunction(e.Left.Name)
 			if _, shadow := env[e.Left.Name]; shadow {
 				c.diagnostic("EF103", "calling local values is not supported in this prototype", e.Span)
 				f = nil
@@ -3912,6 +3955,8 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			}
 			if _, shadow := env[key]; shadow {
 				c.diagnostic("EF103", "a local shadows service "+key, e.Span)
+			} else if imported := c.program.bundledFunction(e.Left); imported != nil {
+				f = imported
 			} else if s := c.services[key]; s != nil {
 				for _, m := range s.Methods {
 					if m.Name == e.Left.Name {
@@ -3929,6 +3974,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			}
 			break
 		}
+		e.ResolvedFunction = f
 		argumentTypes := make([]checkedExpression, len(e.Args))
 		t = c.checkedFunction(f, false, true)
 		var callbackPolicies []CallbackPolicy
@@ -4013,7 +4059,9 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			argumentRefs = append(argumentRefs, c.identityRef(argument.valueID()))
 		}
 		callee := e.Left.Name
-		if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
+		if f.Module != "" && f.Module != currentModuleIdentity {
+			callee = f.Identity
+		} else if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
 			callee = e.Left.Left.Name + "." + e.Left.Name
 		}
 		application := newApplicationIdentity(callee, argumentRefs, c.ref(resultID), e.Span)
@@ -4022,6 +4070,20 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		t.application = &application
 		t.identity = application.ID
 	case "member":
+		if e.Left != nil && e.Left.Kind == "name" {
+			if _, shadow := env[e.Left.Name]; !shadow {
+				if f := c.program.bundledFunction(e); f != nil {
+					if len(f.RowParameters) > 0 {
+						c.diagnostic("EF125", "row-polymorphic functions require direct application; first-class polymorphic values are unsupported", e.Span)
+					}
+					t = c.checkedFunction(f, true, false)
+					t.setOwnership(nil)
+					e.ResolvedFunction = f
+					e.Text = "function"
+					break
+				}
+			}
+		}
 		inner := c.expr(e.Left, env, inEffect)
 		if inner.isEffect() {
 			c.diagnostic("EF106", "field access requires an executed value", e.Span)
@@ -4514,8 +4576,14 @@ func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool
 	return result
 }
 func (r *Result) Find(name string) *Symbol {
+	identity := ""
+	if alias, member, ok := strings.Cut(name, "."); ok && r.Program != nil {
+		if f := r.Program.BundledBindings[alias][member]; f != nil {
+			identity = f.Identity
+		}
+	}
 	for i := range r.Symbols {
-		if r.Symbols[i].Name == name {
+		if r.Symbols[i].Name == name || identity != "" && r.Symbols[i].Identity == identity {
 			if r.projector != nil && r.Symbols[i].Contract.ProjectionError != "" {
 				checked := r.checkedSymbols[r.Symbols[i].Identity]
 				if _, err := r.projector.checkedSymbolSize(r.Symbols[i], checked, r.projectionLimits().CompatibilityBytes); err == nil {

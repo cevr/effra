@@ -869,6 +869,7 @@ func (r *Result) CheckResponse() map[string]any {
 		"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked,
 		"diagnostics": diagnostics, "diagnosticsTruncated": truncated, "symbolCount": len(r.Symbols), "declarationCount": len(r.Declarations),
 		"timings": r.Timings, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionLimits": projection.Limits,
+		"producerIdentity":    r.ProducerIdentity,
 		"typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete,
 	}
 	if projection.Complete {
@@ -877,10 +878,12 @@ func (r *Result) CheckResponse() map[string]any {
 		response["bindings"] = r.Bindings
 		response["types"] = projection.Types
 		response["rows"] = projection.Rows
+		response["sources"] = r.Sources
+		response["bundledBindings"] = r.BundledBindings
 		usage, err := r.ValidateProjectionResponse(projection, response)
 		if err != nil {
 			projection = refusedProjection(projection.Limits, usage, err.Error())
-			for _, key := range []string{"symbols", "declarations", "bindings", "types", "rows"} {
+			for _, key := range []string{"symbols", "declarations", "bindings", "types", "rows", "sources", "bundledBindings"} {
 				delete(response, key)
 			}
 			response["typeProjectionComplete"] = false
@@ -1105,6 +1108,9 @@ func (r *Result) SymbolBindings(symbol *Symbol) ([]Binding, error) {
 		}
 		if e.checked.application != nil {
 			function(r.projector.functions[e.checked.application.Callee])
+		}
+		if e.ResolvedFunction != nil {
+			function(e.ResolvedFunction)
 		}
 		forEachExprChild(e, expr)
 		block(e.Then)

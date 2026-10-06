@@ -1,0 +1,3 @@
+effect fn call<E: raises, R: uses>(callback: effect fn(string) -> string raises { E } uses { R }, input: string) -> string raises { E } uses { R } {
+    run callback(input)
+}

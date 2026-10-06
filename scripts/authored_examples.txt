@@ -13,3 +13,5 @@ examples/causal.ef
 examples/callables-service.ef
 examples/callables-state.ef
 examples/callables-factory.ef
+internal/compiler/bundled/functions/call.ef
+internal/compiler/bundled/functions/identity.ef

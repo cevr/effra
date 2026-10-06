@@ -115,6 +115,19 @@ Each alternative owns its payload. Adding a variant should make incomplete match
 
 ## Go interop
 
+Portable compiler-distributed functions use an explicit import:
+
+```rust
+import Fns "effra/functions"
+
+effect fn echo(input: string) -> string { input }
+effect fn forwarded(input: string) -> string { run Fns.call(echo, input) }
+```
+
+The ordinary forwarding helper preserves callback failure and service rows.
+See [bundled modules](docs/bundled-modules.md) for the finite resolver and its
+source/identity boundaries. User package loading remains unsupported.
+
 ```rust
 import go strconv "strconv"
 

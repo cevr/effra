@@ -321,6 +321,7 @@ func command(args []string) error {
 			return fmt.Errorf("type projection unavailable: %s", projection.Error)
 		}
 		response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "expression": info, "types": projection.Types, "rows": projection.Rows, "declarations": r.ProjectionDeclarations(projection), "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete}
+		r.AddSourceInputs(response)
 		usage, err := r.ValidateProjectionResponse(projection, response)
 		if err != nil {
 			return err
@@ -368,6 +369,7 @@ func command(args []string) error {
 			return err
 		}
 		response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "symbol": symbol, "declarations": r.ProjectionDeclarations(projection), "types": projection.Types, "rows": projection.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete, "bindings": bindings}
+		r.AddSourceInputs(response)
 		usage, err := r.ValidateProjectionResponse(projection, response)
 		if err != nil {
 			return err

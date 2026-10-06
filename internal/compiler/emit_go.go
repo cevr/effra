@@ -289,12 +289,12 @@ func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(addres
 		}
 		out.WriteString("} }\n")
 	}
-	for _, f := range r.Program.Functions {
+	for _, f := range r.Program.checkedFunctions() {
 		ret := goSourceType(f.returnType, f.Return)
 		if f.Effect {
 			ret = "efEffect[" + ret + "]"
 		}
-		out.WriteString("func efFunction_" + f.Name + "(" + goParams(f) + ") " + ret + " {\n")
+		out.WriteString("func " + f.goEmissionName() + "(" + goParams(f) + ") " + ret + " {\n")
 		if f.Effect {
 			out.WriteString("return func(ctx efContext) efExit[" + goSourceType(f.returnType, f.Return) + "] {\nif err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + goSourceType(f.returnType, f.Return) + "](err)}\n")
 		}
@@ -442,6 +442,9 @@ func (g *goEmitter) blockType(b *Block, effect bool, ret string) string {
 func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder) string {
 	switch e.Kind {
 	case "member":
+		if e.ResolvedFunction != nil {
+			return e.ResolvedFunction.goEmissionName()
+		}
 		left := g.expr(e.Left, effect, ret, out)
 		if e.Text == "field" {
 			return left + "." + goFieldName(e.Name)
@@ -466,7 +469,7 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 		return g.construct(e, effect, ret, out)
 	case "name":
 		if e.Text == "function" {
-			return "efFunction_" + e.Name
+			return e.ResolvedFunction.goEmissionName()
 		}
 		if e.Text == "provider" {
 			if e.Name == "TestClock" {
@@ -534,6 +537,9 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 			name := g.temp()
 			out.WriteString(name + " := " + expr + "\n")
 			args = append(args, name)
+		}
+		if e.ResolvedFunction != nil && e.ResolvedFunction.Owner == "module" {
+			return e.ResolvedFunction.goEmissionName() + "(" + strings.Join(args, ", ") + ")"
 		}
 		if e.Left.Kind == "name" {
 			return "efFunction_" + e.Left.Name + "(" + strings.Join(args, ", ") + ")"

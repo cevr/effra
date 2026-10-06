@@ -93,17 +93,20 @@ type Declaration struct {
 	Span     Span      `json:"span"`
 }
 type Function struct {
-	Name      string
-	Params    []Param
-	Return    string
-	Effect    bool
-	Errors    []string
-	Services  []string
-	Body      *Block
-	Span      Span
-	DeclSpan  Span `json:"-"`
-	Ownership []OwnershipFact
-	Captures  []OwnershipFact
+	Name         string
+	Module       string `json:"-"`
+	SourceID     string `json:"-"`
+	EmissionName string `json:"-"`
+	Params       []Param
+	Return       string
+	Effect       bool
+	Errors       []string
+	Services     []string
+	Body         *Block
+	Span         Span
+	DeclSpan     Span `json:"-"`
+	Ownership    []OwnershipFact
+	Captures     []OwnershipFact
 	// Identity is assigned by the checker from the canonical callable
 	// contract. The source name remains a projection used by the emitters.
 	Identity               string    `json:"-"`
@@ -137,21 +140,24 @@ type Provider struct {
 	Contract ValueType `json:"-"`
 }
 type Program struct {
-	typeExpressions map[string]*sourceType
-	Imports         []GoImport
-	Comments        []Comment
-	Items           []*SyntaxItem `json:"-"`
-	Bindings        map[string]Binding
-	Modules         []*goModule
-	UsedImports     map[string]bool
-	GoOnly          bool
-	Errors          map[string]Span
-	ErrorDecls      []*ErrorDecl
-	Records         []*Record
-	Enums           []*Enum
-	Services        []*Service
-	Providers       []*Provider
-	Functions       []*Function
+	typeExpressions  map[string]*sourceType
+	Imports          []GoImport
+	BundledImports   []BundledImport
+	BundledFunctions []*Function
+	BundledBindings  map[string]map[string]*Function
+	Comments         []Comment
+	Items            []*SyntaxItem `json:"-"`
+	Bindings         map[string]Binding
+	Modules          []*goModule
+	UsedImports      map[string]bool
+	GoOnly           bool
+	Errors           map[string]Span
+	ErrorDecls       []*ErrorDecl
+	Records          []*Record
+	Enums            []*Enum
+	Services         []*Service
+	Providers        []*Provider
+	Functions        []*Function
 }
 
 // SyntaxItem preserves the lexical declaration order that semantic
@@ -159,15 +165,16 @@ type Program struct {
 // adapters use these nodes as the ordered syntax seam; the grouped Program
 // slices remain the checker-facing representation.
 type SyntaxItem struct {
-	Kind     string
-	Import   *GoImport
-	Error    *ErrorDecl
-	Record   *Record
-	Enum     *Enum
-	Service  *Service
-	Provider *Provider
-	Function *Function
-	Span     Span
+	Kind          string
+	Import        *GoImport
+	BundledImport *BundledImport
+	Error         *ErrorDecl
+	Record        *Record
+	Enum          *Enum
+	Service       *Service
+	Provider      *Provider
+	Function      *Function
+	Span          Span
 }
 type Block struct {
 	Statements []*Statement
@@ -217,8 +224,9 @@ type Expr struct {
 	// Executed is the row contribution of this expression when it is consumed
 	// by its enclosing computation. It is a cached projection of Type for
 	// run/branch/scope nodes and of Evaluation for ordinary values.
-	Executed EvaluationRows `json:"-"`
-	Identity string         `json:"-"`
+	Executed         EvaluationRows `json:"-"`
+	Identity         string         `json:"-"`
+	ResolvedFunction *Function      `json:"-"`
 }
 
 func lex(source string) ([]token, []Comment, []Diagnostic) {
@@ -362,17 +370,23 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 		case "import":
 			start := p.peek().span
 			p.take()
-			p.expect("go")
+			native := p.accept("go")
 			alias := p.name()
 			path := p.take()
 			if path.kind != "string" {
-				p.fail(path, "expected Go package path string")
+				p.fail(path, "expected package path string")
 			}
 			var decoded string
 			_ = json.Unmarshal([]byte(path.text), &decoded)
-			importDecl := &GoImport{alias.text, decoded, alias.span}
-			program.Imports = append(program.Imports, *importDecl)
-			program.Items = append(program.Items, &SyntaxItem{Kind: "import", Import: importDecl, Span: start})
+			if native {
+				importDecl := &GoImport{alias.text, decoded, alias.span}
+				program.Imports = append(program.Imports, *importDecl)
+				program.Items = append(program.Items, &SyntaxItem{Kind: "import", Import: importDecl, Span: start})
+			} else {
+				importDecl := &BundledImport{Alias: alias.text, Path: decoded, Span: alias.span}
+				program.BundledImports = append(program.BundledImports, *importDecl)
+				program.Items = append(program.Items, &SyntaxItem{Kind: "import", BundledImport: importDecl, Span: start})
+			}
 			p.accept(";")
 		case "error":
 			start := p.peek().span
