@@ -212,6 +212,102 @@ func TestProviderGraphShowsConstructionAndProvisionEdges(t *testing.T) {
 	}
 }
 
+func TestProviderGraphPreservesExplicitValueProvenance(t *testing.T) {
+	source := `service Names { effect fn get(id: string) -> string }
+service Greeting { effect fn hello(id: string) -> string }
+impl NamesFixture for Names { effect fn get(id: string) -> string { id } }
+impl Prefixed(prefix: string) for Greeting uses {Names} {
+ effect fn hello(id: string) -> string { let name = run Names.get(id) prefix + name }
+}
+effect fn main() -> string {
+ let shared = run Prefixed("shared:").provide<Names>(NamesFixture)
+ let alias = shared
+ let one = run Greeting.hello("one").provide<Greeting>(shared)
+ let two = run Greeting.hello("two").provide<Greeting>(alias)
+ let fresh = run Prefixed("fresh:").provide<Names>(NamesFixture)
+ let three = run Greeting.hello("three").provide<Greeting>(fresh)
+ one + two + three
+}`
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	graph, err := r.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerValues := map[string]GraphNode{}
+	for _, node := range graph.Nodes {
+		if node.Kind == "provider-value" {
+			providerValues[node.ID] = node
+		}
+	}
+	if len(providerValues) != 2 {
+		t.Fatalf("expected one node per explicit constructor call, got %d: %+v", len(providerValues), providerValues)
+	}
+	counts := map[string]int{}
+	for _, edge := range graph.Edges {
+		if edge.Kind == "provides" && edge.Service == "Greeting" {
+			counts[edge.To]++
+		}
+	}
+	if len(counts) != 2 {
+		t.Fatalf("expected two provider-value identities, got %v", counts)
+	}
+	var sharedID string
+	for id, count := range counts {
+		if count == 2 {
+			sharedID = id
+		}
+	}
+	if sharedID == "" || len(providerValues[sharedID].Incoming) < 3 {
+		t.Fatalf("shared provider value lost incoming dependents: %q %+v", sharedID, providerValues[sharedID])
+	}
+}
+
+func TestProviderConfigurationAcceptsTypedRecordData(t *testing.T) {
+	source := `record PrefixConfig { prefix: string }
+service Names { effect fn get(id: string) -> string }
+service Greeting { effect fn hello(id: string) -> string }
+impl NamesFixture for Names { effect fn get(id: string) -> string { id } }
+impl Configured(config: PrefixConfig) for Greeting uses {Names} {
+ effect fn hello(id: string) -> string { let name = run Names.get(id) config.prefix + name }
+}
+effect fn main() -> string {
+ let config = PrefixConfig { prefix: "cfg: " }
+ let greeting = run Configured(config).provide<Names>(NamesFixture)
+ run Greeting.hello("42").provide<Greeting>(greeting)
+}`
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	if output := runJS(t, source, `if (await Effect.runPromise(__ef_function_main()) !== "cfg: 42") throw new Error("wrong record configuration");`); output != "" {
+		t.Fatalf("unexpected JS output: %s", output)
+	}
+	goSource, err := r.EmitGo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := WriteRuntime(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(r.ModuleFile()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(goSource), 0600); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(dir, "record-config")
+	if output, err := runGoCommand(dir, "build", "-o", binary, "."); err != nil {
+		t.Fatalf("record configuration Go build: %v\n%s\n%s", err, output, goSource)
+	}
+	if output, err := exec.Command(binary).CombinedOutput(); err != nil || string(output) != "cfg: 42\n" {
+		t.Fatalf("record configuration Go run: %v\n%s", err, output)
+	}
+}
+
 func TestProviderConstructionRejectsMissingConfigAndCapture(t *testing.T) {
 	cases := []struct {
 		name   string

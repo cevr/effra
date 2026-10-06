@@ -11,6 +11,7 @@ type GraphNode struct {
 	Name     string     `json:"name"`
 	Span     Span       `json:"span"`
 	Contract *ValueType `json:"contract,omitempty"`
+	Incoming []string   `json:"incoming,omitempty"`
 }
 type GraphEdge struct {
 	From    string `json:"from"`
@@ -39,7 +40,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	add := func(id, kind, name string, span Span, contract *ValueType) {
 		if !nodes[id] {
 			nodes[id] = true
-			g.Nodes = append(g.Nodes, GraphNode{id, kind, name, span, contract})
+			g.Nodes = append(g.Nodes, GraphNode{ID: id, Kind: kind, Name: name, Span: span, Contract: contract})
 		}
 	}
 	edge := func(from, to, kind, service string, span Span) {
@@ -69,9 +70,10 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			edge("function:"+s.Name, "service:"+req, "requires", req, s.Span)
 		}
 	}
-	var block func(*Block, string)
-	var expr func(*Expr, string) string
-	expr = func(e *Expr, owner string) string {
+	providerOrigins := map[*Expr]string{}
+	var block func(*Block, string, map[string]string)
+	var expr func(*Expr, string, map[string]string) string
+	expr = func(e *Expr, owner string, locals map[string]string) string {
 		if e == nil {
 			return ""
 		}
@@ -85,23 +87,35 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 				edge(id, "service:"+req, "requires", req, e.Span)
 			}
 		}
-		left := expr(e.Left, id)
-		expr(e.Right, id)
+		left := expr(e.Left, id, locals)
+		expr(e.Right, id, locals)
 		for _, a := range e.Args {
-			expr(a, id)
+			expr(a, id, locals)
 		}
 		for _, field := range e.Fields {
-			expr(field.Value, id)
+			expr(field.Value, id, locals)
 		}
 		for _, arm := range e.Arms {
-			block(arm.Body, id)
+			block(arm.Body, id, cloneStringMap(locals))
 		}
-		block(e.Then, id)
-		block(e.Else, id)
+		block(e.Then, id, cloneStringMap(locals))
+		block(e.Else, id, cloneStringMap(locals))
+		if e.Kind == "call" && e.Text == "provider-constructor" {
+			provider := fmt.Sprintf("provider-value:%s:%d", owner, e.Span.Offset)
+			t := e.Type
+			// The constructor call is effectful, but the value captured by its
+			// `run` boundary is reusable and has no unresolved row of its own.
+			t.Effect = false
+			t.Errors = nil
+			t.Services = nil
+			add(provider, "provider-value", e.Left.Name, e.Span, &t)
+			providerOrigins[e] = provider
+			edge(id, provider, "constructs", e.Left.Name, e.Span)
+		}
 		if e.Kind == "provide" {
 			edge(id, left, "adapts", "", e.Span)
-			provider := "provider:" + e.Right.Name
-			if !nodes[provider] {
+			provider := providerOrigin(e.Right, locals, providerOrigins, nodes)
+			if provider == "" {
 				provider = fmt.Sprintf("provider-value:%s:%d", owner, e.Right.Span.Offset)
 				t := e.Right.Type
 				add(provider, "provider-value", e.Right.Name, e.Right.Span, &t)
@@ -118,16 +132,23 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		}
 		return id
 	}
-	block = func(b *Block, owner string) {
+	block = func(b *Block, owner string, locals map[string]string) {
 		if b != nil {
 			for _, s := range b.Statements {
-				expr(s.Value, owner)
-				expr(s.Payload, owner)
+				expr(s.Value, owner, locals)
+				expr(s.Payload, owner, locals)
+				if s.Kind == "let" {
+					if origin := providerOrigin(s.Value, locals, providerOrigins, nodes); origin != "" {
+						locals[s.Name] = origin
+					} else {
+						delete(locals, s.Name)
+					}
+				}
 			}
 		}
 	}
 	for _, f := range r.Program.Functions {
-		block(f.Body, "function:"+f.Name)
+		block(f.Body, "function:"+f.Name, map[string]string{})
 	}
 	for _, p := range r.Program.Providers {
 		for _, f := range p.Methods {
@@ -140,7 +161,13 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			}
 			add(id, "provider-method", p.Name+"."+f.Name, f.Span, &t)
 			edge("provider:"+p.Name, id, "contains", "", f.Span)
-			block(f.Body, id)
+			block(f.Body, id, map[string]string{})
+		}
+	}
+	incoming := map[string][]string{}
+	for _, relationship := range g.Edges {
+		if nodes[relationship.To] {
+			incoming[relationship.To] = append(incoming[relationship.To], relationship.From)
 		}
 	}
 	slices.SortFunc(g.Nodes, func(a, b GraphNode) int {
@@ -152,5 +179,39 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		}
 		return 0
 	})
+	for i := range g.Nodes {
+		relationships := incoming[g.Nodes[i].ID]
+		slices.Sort(relationships)
+		g.Nodes[i].Incoming = slices.Compact(relationships)
+	}
 	return g, nil
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	clone := map[string]string{}
+	for key, value := range values {
+		clone[key] = value
+	}
+	return clone
+}
+
+func providerOrigin(e *Expr, locals map[string]string, origins map[*Expr]string, nodes map[string]bool) string {
+	if e == nil {
+		return ""
+	}
+	if origin := origins[e]; origin != "" {
+		return origin
+	}
+	switch e.Kind {
+	case "name":
+		if e.Text == "local" {
+			return locals[e.Name]
+		}
+		if e.Text == "provider" && nodes["provider:"+e.Name] {
+			return "provider:" + e.Name
+		}
+	case "run", "provide", "catch":
+		return providerOrigin(e.Left, locals, origins, nodes)
+	}
+	return ""
 }
