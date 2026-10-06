@@ -1,4 +1,4 @@
-<!-- {"id": "foundation-data", "title": "Closed application data and exhaustive interpretation", "status": "open", "labels": ["implementation:task"], "parent": "foundation-spec", "assignee": "foundation_repairs", "blocked_by": []} -->
+<!-- {"id": "foundation-data", "title": "Closed application data and exhaustive interpretation", "status": "closed", "labels": ["implementation:task"], "parent": "foundation-spec", "assignee": null, "blocked_by": []} -->
 # Closed application data and exhaustive interpretation
 
 ## Question
@@ -12,3 +12,7 @@ Implemented canonical type/declaration metadata, nominal records and payload enu
 ## Review reopened
 
 Independent review found admitted match-row, constructor/payload and Go field-mangling cases that need regression tests and repair before this task resolves. Passing existing gates is preliminary evidence, not completion of those acceptance clauses.
+
+## Final resolution
+
+Integrated review repairs `2613227`, `7040c5e` and `ccfce95` at `163040c`. Independent review verified all original findings, nested nominal identity, empty-enum elimination and multi-field control shorthand. The integrated full gate and Go race suite passed. Both-target data fixtures, declaration inspection and strict TypeScript checks passed. Recursive layouts and unsupported success-channel error values remain explicit diagnostics; this does not supply external codecs or generic collections.
