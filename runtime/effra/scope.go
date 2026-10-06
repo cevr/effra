@@ -99,15 +99,18 @@ func (s *Scope) OnCancel(hook func() error) error {
 	s.hooks = append(s.hooks, run)
 	return nil
 }
-func (s *Scope) bindCleanupContinuation(continuation *schedulerContinuation) {
+func (s *Scope) bindCleanupContinuation(continuation *schedulerContinuation) bool {
 	if continuation == nil {
-		return
+		return false
 	}
 	s.mu.Lock()
+	bound := false
 	if s.state == Open && s.cleanupContinuation == nil {
 		s.cleanupContinuation = continuation
+		bound = true
 	}
 	s.mu.Unlock()
+	return bound
 }
 
 func (s *Scope) closeWithScheduler(scheduler *TestScheduler, continuation *schedulerContinuation) Cause {
@@ -181,11 +184,32 @@ func (s *Scope) closeWithContext(fc *FiberContext) Cause {
 	scheduler := fc.turnScheduler()
 	s.mu.Lock()
 	continuation := s.cleanupContinuation
-	s.mu.Unlock()
-	ownedContinuation := continuation == nil || continuation.scheduler != scheduler
-	if ownedContinuation {
-		continuation = scheduler.reserveContinuation()
+	ownedContinuation := false
+	if s.state == Open {
+		if continuation == nil || continuation.scheduler != scheduler {
+			continuation = fc.continuation
+			if continuation != nil && continuation.scheduler != scheduler {
+				continuation = nil
+			}
+			if continuation == nil {
+				continuation = scheduler.reserveContinuation()
+				ownedContinuation = true
+			}
+			if s.cleanupContinuation == nil {
+				s.cleanupContinuation = continuation
+			}
+		}
+	} else if continuation == nil || continuation.scheduler != scheduler {
+		continuation = fc.continuation
+		if continuation != nil && continuation.scheduler != scheduler {
+			continuation = nil
+		}
+		if continuation == nil {
+			continuation = scheduler.reserveContinuation()
+			ownedContinuation = true
+		}
 	}
+	s.mu.Unlock()
 	resume := fc.suspendSchedulerWithoutContinuation()
 	defer func() {
 		resume()

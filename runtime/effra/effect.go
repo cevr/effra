@@ -230,7 +230,7 @@ func RunContextWithScheduler[A any](ctx context.Context, scheduler *TestSchedule
 func Scoped[A any](program Effect[A]) Effect[A] {
 	return func(fc *FiberContext) Exit[A] {
 		scope := newScopeWithDriver(fc.ctx, fc.scope, fc.timerDriver())
-		child := &FiberContext{ctx: scope.ctx, scope: scope, driver: scope.driver, turn: fc.turn}
+		child := &FiberContext{ctx: scope.ctx, scope: scope, driver: scope.driver, turn: fc.turn, continuation: fc.continuation}
 		return withCleanup(Invoke(child, program), scope.closeWithContext(child))
 	}
 }
@@ -344,53 +344,97 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 			}
 			return retained
 		}
-		var continuation *schedulerContinuation
-		waitForOther := func() (Exit[A], Exit[Unit]) {
-			wait := fc.suspendScheduler()
-			<-childReady
-			<-timerReady
-			wait()
-			childDone.signal.consume(childWaiter)
-			timerDone.signal.consume(timerWaiter)
-			return childDone.get(), timerDone.get()
-		}
-		reserveCleanupContinuation := func() func() {
-			if scheduler == nil {
+		// A timeout caller waits for each producer independently. Each losing
+		// scope gets its own cleanup continuation before cancellation when it is
+		// still open; an already-closing scope keeps the continuation it created.
+		var waitContinuation *schedulerContinuation
+		prepareWait := func() func() {
+			waitContinuation = fc.continuation
+			if scheduler == nil || waitContinuation != nil {
 				return func() {}
 			}
-			continuation = scheduler.reserveContinuation()
-			childScope.bindCleanupContinuation(continuation)
-			timerScope.bindCleanupContinuation(continuation)
-			return func() { scheduler.completeContinuation(continuation) }
+			waitContinuation = scheduler.reserveContinuation()
+			return func() { scheduler.completeContinuation(waitContinuation) }
+		}
+		waitFor := func(ready <-chan struct{}, consume func()) {
+			if scheduler == nil {
+				<-ready
+				consume()
+				return
+			}
+			resume := fc.suspendSchedulerWith(waitContinuation)
+			<-ready
+			resume()
+			consume()
+		}
+		waitForAny := func() bool {
+			if scheduler == nil {
+				select {
+				case <-childReady:
+					childDone.signal.consume(childWaiter)
+					return true
+				case <-timerReady:
+					timerDone.signal.consume(timerWaiter)
+					return false
+				}
+			}
+			resume := fc.suspendSchedulerWith(waitContinuation)
+			childFirst := false
+			select {
+			case <-childReady:
+				childFirst = true
+			case <-timerReady:
+			}
+			resume()
+			if childFirst {
+				childDone.signal.consume(childWaiter)
+			} else {
+				timerDone.signal.consume(timerWaiter)
+			}
+			return childFirst
+		}
+		bindProducer := func(scope *Scope) *schedulerContinuation {
+			if scheduler == nil {
+				return nil
+			}
+			continuation := scheduler.reserveContinuation()
+			if scope.bindCleanupContinuation(continuation) {
+				return continuation
+			}
+			scheduler.completeContinuation(continuation)
+			return nil
+		}
+		completeProducer := func(continuation *schedulerContinuation) {
+			if continuation != nil {
+				scheduler.completeContinuation(continuation)
+			}
 		}
 		select {
 		case <-childReady:
 			suspend()
 			childDone.signal.consume(childWaiter)
-			finishContinuation := reserveCleanupContinuation()
-			defer finishContinuation()
+			finishWait := prepareWait()
+			defer finishWait()
+			producerContinuation := bindProducer(timerScope)
 			cancel()
 			childScope.cancel()
 			timerScope.cancel()
-			wait := fc.suspendScheduler()
-			<-timerReady
-			wait()
-			timerDone.signal.consume(timerWaiter)
+			waitFor(timerReady, func() { timerDone.signal.consume(timerWaiter) })
+			completeProducer(producerContinuation)
 			child := childDone.get()
 			timer := timerDone.get()
 			return withCleanup(child, nonInterrupt(timer.Cause()))
 		case <-timerReady:
 			suspend()
 			timerDone.signal.consume(timerWaiter)
-			finishContinuation := reserveCleanupContinuation()
-			defer finishContinuation()
+			finishWait := prepareWait()
+			defer finishWait()
+			producerContinuation := bindProducer(childScope)
 			cancel()
 			childScope.cancel()
 			timerScope.cancel()
-			wait := fc.suspendScheduler()
-			<-childReady
-			wait()
-			childDone.signal.consume(childWaiter)
+			waitFor(childReady, func() { childDone.signal.consume(childWaiter) })
+			completeProducer(producerContinuation)
 			child := childDone.get()
 			timer := timerDone.get()
 			retained := nonInterrupt(child.Cause())
@@ -404,12 +448,25 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 			return FromCause[A](append(Cause{{Kind: "failure", Failure: &Failure{Tag: "Timeout", Payload: context.DeadlineExceeded}}}, append(retained, timerRetained...)...))
 		case <-fc.ctx.Done():
 			suspend()
-			finishContinuation := reserveCleanupContinuation()
-			defer finishContinuation()
+			finishWait := prepareWait()
+			defer finishWait()
+			childContinuation := bindProducer(childScope)
+			timerContinuation := bindProducer(timerScope)
 			cancel()
 			childScope.cancel()
 			timerScope.cancel()
-			child, timer := waitForOther()
+			childFirst := waitForAny()
+			if childFirst {
+				completeProducer(childContinuation)
+				waitFor(timerReady, func() { timerDone.signal.consume(timerWaiter) })
+				completeProducer(timerContinuation)
+			} else {
+				completeProducer(timerContinuation)
+				waitFor(childReady, func() { childDone.signal.consume(childWaiter) })
+				completeProducer(childContinuation)
+			}
+			child := childDone.get()
+			timer := timerDone.get()
 			retained := append(nonInterrupt(child.Cause()), nonInterrupt(timer.Cause())...)
 			return FromCause[A](append(Cause{{Kind: "interrupt", Err: fc.ctx.Err()}}, retained...))
 		}

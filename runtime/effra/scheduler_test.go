@@ -462,6 +462,94 @@ func TestTestSchedulerPartialScopeCleanupCanAdvanceAndThenDrain(t *testing.T) {
 	}
 }
 
+func TestTestSchedulerNestedResourceCleanupCanAdvanceAndThenDrain(t *testing.T) {
+	scheduler := NewTestScheduler()
+	releaseStarted := make(chan struct{})
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+			return Invoke(fc, AcquireRelease("outer", func(context.Context) (Unit, error) {
+				return Unit{}, nil
+			}, func(_ Unit, cleanup context.Context) error {
+				out := RunContextWithScheduler(cleanup, scheduler, AcquireRelease("inner", func(context.Context) (Unit, error) {
+					return Unit{}, nil
+				}, func(_ Unit, innerCleanup context.Context) error {
+					close(releaseStarted)
+					out := RunContextWithScheduler(innerCleanup, scheduler, Sleep(20))
+					if out.IsFailure() {
+						return out.Cause()
+					}
+					return nil
+				}))
+				if out.IsFailure() {
+					return out.Cause()
+				}
+				return nil
+			}))
+		})
+	}()
+	waitSchedulerSignal(t, releaseStarted)
+	adjustWithin(t, scheduler, 0)
+	adjustWithin(t, scheduler, 10)
+	if scheduler.Now() != 10 {
+		t.Fatalf("nested cleanup adjustment moved time to %d", scheduler.Now())
+	}
+	select {
+	case out := <-done:
+		t.Fatalf("nested cleanup completed before its deadline: %+v", out)
+	default:
+	}
+	adjustWithin(t, scheduler, 10)
+	select {
+	case out := <-done:
+		if out.IsFailure() {
+			t.Fatalf("nested cleanup failed after its deadline: %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("nested cleanup did not complete after its deadline")
+	}
+}
+
+func TestTestSchedulerScopedNestedCleanupCanAdvanceAndThenDrain(t *testing.T) {
+	scheduler := NewTestScheduler()
+	releaseStarted := make(chan struct{})
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+			return Invoke(fc, AcquireRelease("scoped-outer", func(context.Context) (Unit, error) {
+				return Unit{}, nil
+			}, func(_ Unit, cleanup context.Context) error {
+				close(releaseStarted)
+				out := RunContextWithScheduler(cleanup, scheduler, Scoped(Sleep(20)))
+				if out.IsFailure() {
+					return out.Cause()
+				}
+				return nil
+			}))
+		})
+	}()
+	waitSchedulerSignal(t, releaseStarted)
+	adjustWithin(t, scheduler, 0)
+	adjustWithin(t, scheduler, 10)
+	if scheduler.Now() != 10 {
+		t.Fatalf("scoped nested cleanup adjustment moved time to %d", scheduler.Now())
+	}
+	select {
+	case out := <-done:
+		t.Fatalf("scoped nested cleanup completed before its deadline: %+v", out)
+	default:
+	}
+	adjustWithin(t, scheduler, 10)
+	select {
+	case out := <-done:
+		if out.IsFailure() {
+			t.Fatalf("scoped nested cleanup failed after its deadline: %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("scoped nested cleanup did not complete after its deadline")
+	}
+}
+
 func TestTestSchedulerPartialLatchCleanupCanBeSignaled(t *testing.T) {
 	scheduler := NewTestScheduler()
 	latch := NewLatch()
@@ -699,6 +787,207 @@ func TestTestSchedulerPartialWorkWinnerCleanupCanAdvance(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("work winner did not complete after slow cleanup")
+	}
+}
+
+func TestTestSchedulerWorkWinnerWithAlreadyClosingDeadlineCleanupCanAdvance(t *testing.T) {
+	scheduler := NewTestScheduler()
+	deadlineReady := make(chan struct{})
+	releaseStarted := make(chan struct{})
+	done := make(chan Exit[string], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[string] {
+			return Invoke(fc, TimeoutWithEffect(
+				func(child *FiberContext) Exit[string] {
+					out := Invoke(child, Sleep(10))
+					if out.IsFailure() {
+						return Propagate[string](out)
+					}
+					return Succeed("work")
+				},
+				func(deadline *FiberContext) Exit[Unit] {
+					acquired := Invoke(deadline, AcquireRelease("closing-deadline", func(context.Context) (Unit, error) {
+						return Unit{}, nil
+					}, func(_ Unit, cleanup context.Context) error {
+						close(releaseStarted)
+						out := RunContextWithScheduler(cleanup, scheduler, Sleep(20))
+						if out.IsFailure() {
+							return out.Cause()
+						}
+						return nil
+					}))
+					if acquired.IsFailure() {
+						return acquired
+					}
+					close(deadlineReady)
+					return Succeed(Unit{})
+				},
+			))
+		})
+	}()
+	waitSchedulerSignal(t, deadlineReady)
+	waitSchedulerSignal(t, releaseStarted)
+	adjustWithin(t, scheduler, 10)
+	if scheduler.Now() != 10 {
+		t.Fatalf("work winner adjustment moved time to %d", scheduler.Now())
+	}
+	select {
+	case out := <-done:
+		t.Fatalf("work winner completed before deadline cleanup: %+v", out)
+	default:
+	}
+	adjustWithin(t, scheduler, 10)
+	select {
+	case out := <-done:
+		if out.IsFailure() || out.Value != "work" {
+			t.Fatalf("work winner failed after already-closing cleanup: %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("work winner did not complete after already-closing cleanup")
+	}
+}
+
+func TestTestSchedulerParentInterruptConsumesCleanupInCompletionOrder(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		childCleanup  int64
+		timerCleanup  int64
+		firstDeadline int64
+	}{
+		{name: "child first", childCleanup: 20, timerCleanup: 30, firstDeadline: 20},
+		{name: "timer first", childCleanup: 30, timerCleanup: 20, firstDeadline: 20},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			scheduler := NewTestScheduler()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ready := make(chan struct{}, 2)
+			started := make(chan struct{}, 2)
+			done := make(chan Exit[Unit], 1)
+			branch := func(delay int64) Effect[Unit] {
+				return func(fc *FiberContext) Exit[Unit] {
+					acquired := Invoke(fc, AcquireRelease("parent-cleanup", func(context.Context) (Unit, error) {
+						return Unit{}, nil
+					}, func(_ Unit, cleanup context.Context) error {
+						started <- struct{}{}
+						out := RunContextWithScheduler(cleanup, scheduler, Sleep(delay))
+						if out.IsFailure() {
+							return out.Cause()
+						}
+						return nil
+					}))
+					if acquired.IsFailure() {
+						return acquired
+					}
+					ready <- struct{}{}
+					return Invoke(fc, Sleep(100))
+				}
+			}
+			go func() {
+				done <- RunContextWithScheduler(ctx, scheduler, TimeoutWithEffect(
+					branch(test.childCleanup),
+					branch(test.timerCleanup),
+				))
+			}()
+			for i := 0; i < 2; i++ {
+				select {
+				case <-ready:
+				case <-time.After(3 * time.Second):
+					t.Fatal("parent branches did not become ready")
+				}
+			}
+			cancel()
+			for i := 0; i < 2; i++ {
+				select {
+				case <-started:
+				case <-time.After(3 * time.Second):
+					t.Fatal("parent cleanup did not start")
+				}
+			}
+			adjustWithin(t, scheduler, 0)
+			adjustWithin(t, scheduler, 10)
+			if scheduler.Now() != 10 {
+				t.Fatalf("partial parent adjustment moved time to %d", scheduler.Now())
+			}
+			select {
+			case out := <-done:
+				t.Fatalf("parent interruption completed before cleanup deadlines: %+v", out)
+			default:
+			}
+			adjustWithin(t, scheduler, test.firstDeadline-10)
+			if scheduler.Now() != test.firstDeadline {
+				t.Fatalf("first cleanup adjustment moved time to %d", scheduler.Now())
+			}
+			select {
+			case out := <-done:
+				t.Fatalf("parent interruption completed before the remaining cleanup: %+v", out)
+			default:
+			}
+			adjustWithin(t, scheduler, 10)
+			select {
+			case out := <-done:
+				if !out.Interrupted {
+					t.Fatalf("parent interruption lost its interrupt cause: %+v", out)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("parent interruption did not complete after both cleanups")
+			}
+		})
+	}
+}
+
+func TestTestSchedulerManagedLatchSignalerReleasesCleanup(t *testing.T) {
+	scheduler := NewTestScheduler()
+	latch := NewLatch()
+	releaseStarted := make(chan struct{}, 1)
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+			signaler := Invoke(fc, Fork(func(child *FiberContext) Exit[Unit] {
+				if out := Invoke(child, Sleep(20)); out.IsFailure() {
+					return out
+				}
+				return Invoke(child, SignalLatch(latch))
+			}))
+			if signaler.IsFailure() {
+				return Propagate[Unit](signaler)
+			}
+			cleanup := Invoke(fc, Scoped(func(child *FiberContext) Exit[Unit] {
+				return Invoke(child, AcquireRelease("managed-latch-cleanup", func(context.Context) (Unit, error) {
+					return Unit{}, nil
+				}, func(_ Unit, cleanup context.Context) error {
+					close(releaseStarted)
+					out := RunContextWithScheduler(cleanup, scheduler, AwaitLatch(latch))
+					if out.IsFailure() {
+						return out.Cause()
+					}
+					return nil
+				}))
+			}))
+			if cleanup.IsFailure() {
+				return cleanup
+			}
+			return Invoke(fc, signaler.Value.Join())
+		})
+	}()
+	waitSchedulerSignal(t, releaseStarted)
+	adjustWithin(t, scheduler, 10)
+	if scheduler.Now() != 10 {
+		t.Fatalf("managed signaler adjustment moved time to %d", scheduler.Now())
+	}
+	select {
+	case out := <-done:
+		t.Fatalf("latch cleanup completed before its signaler deadline: %+v", out)
+	default:
+	}
+	adjustWithin(t, scheduler, 10)
+	select {
+	case out := <-done:
+		if out.IsFailure() {
+			t.Fatalf("managed latch signaler failed: %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("managed latch signaler did not release cleanup")
 	}
 }
 
