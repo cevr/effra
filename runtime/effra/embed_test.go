@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -226,11 +225,11 @@ func stringSet(values []string) map[string]struct{} {
 
 func actualRuntimeSourceFiles(t *testing.T) map[string]struct{} {
 	t.Helper()
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime source location unavailable")
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("runtime package working directory unavailable: %v", err)
 	}
-	entries, err := os.ReadDir(filepath.Dir(filename))
+	entries, err := os.ReadDir(workingDirectory)
 	if err != nil {
 		t.Fatal(err)
 	}
