@@ -677,6 +677,168 @@ func ownershipConditionalEnumSource(width int, borrowedFirst bool, mode, selecti
 	return source.String()
 }
 
+func ownershipNestedRecordSource(width, layers int, conditional bool, selection string) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "record Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " }")
+	if layers == 0 {
+		fmt.Fprintln(&source, "record Root { wide: Wide }")
+	} else {
+		fmt.Fprintln(&source, "record Level0 { wide: Wide }")
+		for i := 1; i <= layers; i++ {
+			fmt.Fprintf(&source, "record Level%d { child: Level%d }\n", i, i-1)
+		}
+		fmt.Fprintf(&source, "record Root { child: Level%d }\n", layers)
+	}
+	fmt.Fprintf(&source, "effect fn probe(borrowed: File, choose: bool) -> File throws {IoError} {\n scope {\n  let inner = run Files.openRead(\"examples/fixture.txt\").provide<Files>(LiveFiles)\n  let value = Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		value := "inner"
+		if conditional && i == 9 {
+			value = "if choose { inner } else { borrowed }"
+		} else if !conditional && i == width-1 {
+			value = "borrowed"
+		}
+		fmt.Fprintf(&source, " f%d: %s", i, value)
+	}
+	fmt.Fprintln(&source, " }")
+	if layers == 0 {
+		fmt.Fprintln(&source, "  let root = Root { wide: value }")
+		fmt.Fprintf(&source, "  root.wide.%s\n", selection)
+	} else {
+		fmt.Fprintln(&source, "  let node0 = Level0 { wide: value }")
+		for i := 1; i <= layers; i++ {
+			fmt.Fprintf(&source, "  let node%d = Level%d { child: node%d }\n", i, i, i-1)
+		}
+		fmt.Fprintf(&source, "  let root = Root { child: node%d }\n", layers)
+		path := "root.child"
+		for i := 0; i < layers; i++ {
+			path += ".child"
+		}
+		fmt.Fprintf(&source, "  %s.wide.%s\n", path, selection)
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
+func ownershipNestedEnumSource(width, layers int, conditional bool, selection string) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "record Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " }")
+	if layers == 0 {
+		fmt.Fprintln(&source, "enum Root { P { wide: Wide } }")
+	} else {
+		fmt.Fprintln(&source, "record Level0 { wide: Wide }")
+		for i := 1; i <= layers; i++ {
+			fmt.Fprintf(&source, "record Level%d { child: Level%d }\n", i, i-1)
+		}
+		fmt.Fprintf(&source, "enum Root { P { child: Level%d } }\n", layers)
+	}
+	fmt.Fprintf(&source, "effect fn probe(borrowed: File, choose: bool) -> File throws {IoError} {\n scope {\n  let inner = run Files.openRead(\"examples/fixture.txt\").provide<Files>(LiveFiles)\n  let value = Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		value := "inner"
+		if conditional && i == 9 {
+			value = "if choose { inner } else { borrowed }"
+		} else if !conditional && i == width-1 {
+			value = "borrowed"
+		}
+		fmt.Fprintf(&source, " f%d: %s", i, value)
+	}
+	fmt.Fprintln(&source, " }")
+	if layers == 0 {
+		fmt.Fprintln(&source, "  let root = Root.P { wide: value }")
+		fmt.Fprintf(&source, "  match root { Root.P { wide } => wide.%s }\n", selection)
+	} else {
+		fmt.Fprintln(&source, "  let node0 = Level0 { wide: value }")
+		for i := 1; i <= layers; i++ {
+			fmt.Fprintf(&source, "  let node%d = Level%d { child: node%d }\n", i, i, i-1)
+		}
+		fmt.Fprintf(&source, "  let root = Root.P { child: node%d }\n", layers)
+		path := "child"
+		for i := 0; i < layers; i++ {
+			path += ".child"
+		}
+		fmt.Fprintf(&source, "  match root { Root.P { child } => %s.wide.%s }\n", path, selection)
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
+func ownershipNestedSiblingSource(width, layers int, selected string) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "record Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "record Level0 { wide: Wide }")
+	for i := 1; i <= layers; i++ {
+		fmt.Fprintf(&source, "record Level%d { child: Level%d }\n", i, i-1)
+	}
+	fmt.Fprintf(&source, "record Root { unsafe: Level%d, safe: Level%d }\n", layers, layers)
+	fmt.Fprintln(&source, "effect fn probe(borrowed: File) -> File throws {IoError} {")
+	fmt.Fprintln(&source, " scope {")
+	fmt.Fprintln(&source, `  let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`)
+	for _, entry := range []struct {
+		name     string
+		borrowed bool
+	}{
+		{name: "unsafe", borrowed: false},
+		{name: "safe", borrowed: true},
+	} {
+		fmt.Fprintf(&source, "  let %sValue = Wide {", entry.name)
+		for i := 0; i < width; i++ {
+			if i > 0 {
+				fmt.Fprint(&source, ",")
+			}
+			value := "inner"
+			if entry.borrowed && i == width-1 {
+				value = "borrowed"
+			}
+			fmt.Fprintf(&source, " f%d: %s", i, value)
+		}
+		fmt.Fprintln(&source, " }")
+		fmt.Fprintf(&source, "  let %sNode0 = Level0 { wide: %sValue }\n", entry.name, entry.name)
+		for i := 1; i <= layers; i++ {
+			fmt.Fprintf(&source, "  let %sNode%d = Level%d { child: %sNode%d }\n", entry.name, i, i, entry.name, i-1)
+		}
+	}
+	fmt.Fprintf(&source, "  let root = Root { unsafe: unsafeNode%d, safe: safeNode%d }\n", layers, layers)
+	path := "root." + selected
+	for i := 0; i < layers; i++ {
+		path += ".child"
+	}
+	fmt.Fprintf(&source, "  %s.wide.f%d\n", path, width-1)
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
 func TestOwnershipSamePathAlternativesRemainIncompleteAtTheFactCap(t *testing.T) {
 	for _, width := range []int{16, 64, 65, 80} {
 		for _, borrowedFirst := range []bool{false, true} {
@@ -708,6 +870,46 @@ func TestOwnershipSamePathAlternativeKeepsSafeSiblingAdmitted(t *testing.T) {
 		for _, reverseConstructor := range []bool{false, true} {
 			requireOwnershipAccepted(t, ownershipConditionalRecordSource(width, reverseConstructor, false, "direct", fmt.Sprintf("f%d", width-1)))
 		}
+	}
+}
+
+func TestOwnershipNestedProjectionKeepsUncertaintyUntilTheTerminalPath(t *testing.T) {
+	for _, layers := range []int{0, 1, 2, 3} {
+		name := fmt.Sprintf("record-layers-%d", layers)
+		t.Run(name, func(t *testing.T) {
+			requireOwnershipRejected(t, ownershipNestedRecordSource(64, layers, true, "f7"))
+		})
+		name = fmt.Sprintf("enum-layers-%d", layers)
+		t.Run(name, func(t *testing.T) {
+			requireOwnershipRejected(t, ownershipNestedEnumSource(64, layers, true, "f7"))
+		})
+	}
+}
+
+func TestOwnershipNestedProjectionAdmitsCompleteSafeLeaves(t *testing.T) {
+	for _, layers := range []int{0, 1, 2, 3} {
+		name := fmt.Sprintf("record-layers-%d", layers)
+		t.Run(name, func(t *testing.T) {
+			requireOwnershipAccepted(t, ownershipNestedRecordSource(65, layers, false, "f64"))
+		})
+		name = fmt.Sprintf("enum-layers-%d", layers)
+		t.Run(name, func(t *testing.T) {
+			requireOwnershipAccepted(t, ownershipNestedEnumSource(65, layers, false, "f64"))
+		})
+	}
+}
+
+func TestOwnershipNestedSafeSiblingStaysIndependentFromIncompleteSibling(t *testing.T) {
+	for _, selected := range []string{"unsafe", "safe"} {
+		name := "select-" + selected
+		t.Run(name, func(t *testing.T) {
+			source := ownershipNestedSiblingSource(65, 2, selected)
+			if selected == "safe" {
+				requireOwnershipAccepted(t, source)
+			} else {
+				requireOwnershipRejected(t, source)
+			}
+		})
 	}
 }
 

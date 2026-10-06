@@ -275,6 +275,66 @@ func cloneFacts(facts []OwnershipFact) []OwnershipFact {
 	return append([]OwnershipFact{}, facts...)
 }
 
+func wildcardPathPrefix(path string) (string, bool) {
+	if path == "*" {
+		return "", true
+	}
+	if strings.HasSuffix(path, ".*") {
+		return strings.TrimSuffix(path, ".*"), true
+	}
+	return "", false
+}
+
+func isWildcardPath(path string) bool {
+	_, wildcard := wildcardPathPrefix(path)
+	return wildcard
+}
+
+func completeWildcardCovers(wildcard OwnershipFact, path string) bool {
+	if !isWildcardPath(wildcard.Path) || (wildcard.Origin != "bounded-all-owned" && wildcard.Origin != "bounded-all-borrowed") {
+		return false
+	}
+	base, _ := wildcardPathPrefix(wildcard.Path)
+	return base == "" || path == base || strings.HasPrefix(path, base+".")
+}
+
+// projectWildcardPath rebases an uncertain subtree through one member
+// projection. A descendant prefix is kept until the selected terminal path is
+// complete; one retained descendant does not prove the whole subtree.
+func projectWildcardPath(path, selected string, terminal bool) (rebased string, canDrop bool, ok bool) {
+	base, wildcard := wildcardPathPrefix(path)
+	if !wildcard {
+		return "", false, false
+	}
+	if base == "" {
+		return "*", terminal, true
+	}
+	if base == selected {
+		return "*", false, true
+	}
+	if strings.HasPrefix(base, selected+".") {
+		return strings.TrimPrefix(base, selected+".") + ".*", false, true
+	}
+	if strings.HasPrefix(selected, base+".") {
+		return "*", terminal, true
+	}
+	return "", false, false
+}
+
+func normalizeProjectedWildcard(fact OwnershipFact) OwnershipFact {
+	if fact.Status == "owned" && fact.Origin != "bounded-all-owned" {
+		fact.Status = "unknown"
+		fact.Origin = "bounded"
+	}
+	if fact.Status == "borrowed" && fact.Origin != "bounded-all-borrowed" {
+		fact.Status = "unknown"
+		fact.Origin = "bounded"
+	}
+	fact.source = ""
+	fact.sourceSet = false
+	return fact
+}
+
 func prependFacts(prefix string, facts []OwnershipFact) []OwnershipFact {
 	if len(facts) == 0 {
 		return nil
@@ -282,9 +342,15 @@ func prependFacts(prefix string, facts []OwnershipFact) []OwnershipFact {
 	out := make([]OwnershipFact, 0, len(facts))
 	for _, fact := range facts {
 		copy := fact
-		if prefix != "" && copy.Path != "*" {
+		if prefix != "" {
 			if copy.Path == "" {
 				copy.Path = prefix
+			} else if isWildcardPath(copy.Path) {
+				if copy.Path == "*" {
+					copy.Path = prefix + ".*"
+				} else {
+					copy.Path = prefix + "." + copy.Path
+				}
 			} else {
 				copy.Path = prefix + "." + copy.Path
 			}
@@ -299,34 +365,30 @@ func projectFacts(facts []OwnershipFact, field string) []OwnershipFact {
 		return nil
 	}
 	prefix := field + "."
-	concrete := false
+	exact := false
+	inexact := false
+	descendant := false
 	for _, fact := range facts {
-		if (fact.Path == field || strings.HasPrefix(fact.Path, prefix)) && (fact.Status == "owned" || fact.Status == "borrowed") {
-			concrete = true
-			break
+		if fact.Path == field {
+			if fact.Status == "owned" || fact.Status == "borrowed" {
+				exact = true
+			} else {
+				inexact = true
+			}
+		} else if strings.HasPrefix(fact.Path, prefix) {
+			descendant = true
 		}
 	}
+	terminal := exact && !inexact && !descendant
 	out := make([]OwnershipFact, 0, len(facts))
 	for _, fact := range facts {
-		if fact.Path == "*" {
-			if concrete {
+		if rebased, canDrop, ok := projectWildcardPath(fact.Path, field, terminal); ok {
+			if canDrop {
 				continue
 			}
 			copy := fact
-			// A wildcard proves that some descendant has this status, not that
-			// the selected field has it. Keep whole-value owned evidence at the
-			// boundary, but report a projected field as unknown when its path is
-			// ambiguous.
-			if copy.Status == "owned" && copy.Origin != "bounded-all-owned" {
-				copy.Status = "unknown"
-				copy.Origin = "bounded"
-			}
-			if copy.Status == "borrowed" && copy.Origin != "bounded-all-borrowed" {
-				copy.Status = "unknown"
-				copy.Origin = "bounded"
-			}
-			copy.source = ""
-			copy.sourceSet = false
+			copy.Path = rebased
+			copy = normalizeProjectedWildcard(copy)
 			out = append(out, copy)
 			continue
 		}
@@ -355,30 +417,30 @@ func projectFacts(facts []OwnershipFact, field string) []OwnershipFact {
 
 func projectVariantFacts(facts []OwnershipFact, variant, field string) []OwnershipFact {
 	prefix := variant + "." + field
-	concrete := false
+	exact := false
+	inexact := false
+	descendant := false
 	for _, fact := range facts {
-		if (fact.Path == prefix || strings.HasPrefix(fact.Path, prefix+".")) && (fact.Status == "owned" || fact.Status == "borrowed") {
-			concrete = true
-			break
+		if fact.Path == prefix {
+			if fact.Status == "owned" || fact.Status == "borrowed" {
+				exact = true
+			} else {
+				inexact = true
+			}
+		} else if strings.HasPrefix(fact.Path, prefix+".") {
+			descendant = true
 		}
 	}
+	terminal := exact && !inexact && !descendant
 	projected := make([]OwnershipFact, 0)
 	for _, fact := range facts {
-		if fact.Path == "*" {
-			if concrete {
+		if rebased, canDrop, ok := projectWildcardPath(fact.Path, prefix, terminal); ok {
+			if canDrop {
 				continue
 			}
 			copy := fact
-			if copy.Status == "owned" && copy.Origin != "bounded-all-owned" {
-				copy.Status = "unknown"
-				copy.Origin = "bounded"
-			}
-			if copy.Status == "borrowed" && copy.Origin != "bounded-all-borrowed" {
-				copy.Status = "unknown"
-				copy.Origin = "bounded"
-			}
-			copy.source = ""
-			copy.sourceSet = false
+			copy.Path = rebased
+			copy = normalizeProjectedWildcard(copy)
 			projected = append(projected, copy)
 			continue
 		}
@@ -474,7 +536,20 @@ func ownershipPathMatches(argumentPath, sourcePath string) bool {
 	// argument. It must remain eligible for a helper's parameter-relative
 	// summary; dropping it would turn a proven owned path into an unsafe
 	// unknown result.
-	return argumentPath == "*" || sourcePath == "*" || argumentPath == sourcePath
+	if argumentPath == sourcePath || argumentPath == "*" || sourcePath == "*" {
+		return true
+	}
+	if sourcePrefix, sourceWildcard := wildcardPathPrefix(sourcePath); sourceWildcard && sourcePrefix != "" {
+		if argumentPath == sourcePrefix || strings.HasPrefix(argumentPath, sourcePrefix+".") {
+			return true
+		}
+	}
+	if argumentPrefix, argumentWildcard := wildcardPathPrefix(argumentPath); argumentWildcard && argumentPrefix != "" {
+		if sourcePath == argumentPrefix || strings.HasPrefix(sourcePath, argumentPrefix+".") {
+			return true
+		}
+	}
+	return false
 }
 
 func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) []OwnershipFact {
@@ -494,17 +569,17 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 				continue
 			}
 			hasConcreteSource := slices.ContainsFunc(args[i].Ownership, func(argument OwnershipFact) bool {
-				return argument.Path != "*" && argument.Path == fact.source
+				return !isWildcardPath(argument.Path) && argument.Path == fact.source
 			})
 			for _, argument := range args[i].Ownership {
-				if hasConcreteSource && argument.Path == "*" {
+				if hasConcreteSource && isWildcardPath(argument.Path) {
 					continue
 				}
 				if !ownershipPathMatches(argument.Path, fact.source) {
 					continue
 				}
 				copy := argument
-				if fact.source == "*" || argument.Path == "*" {
+				if isWildcardPath(fact.source) || isWildcardPath(argument.Path) {
 					// A wildcard source or argument is evidence about an
 					// unspecified descendant. Preserve a whole-value owned
 					// wildcard, but do not turn an ambiguous projected field into
@@ -603,14 +678,39 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 			}
 		}
 		if allOwned {
-			bounded := append([]OwnershipFact{}, result[:maxFacts-1]...)
-			bounded = append(bounded, OwnershipFact{Path: "*", Status: "owned", Region: "*", Origin: "bounded-all-owned"})
+			// A bounded marker inherited from a wrapped value still describes
+			// that value's subtree. Keep its prefix so an unrelated sibling can
+			// be projected without treating the whole enclosing record as owned.
+			marker := OwnershipFact{Path: "*", Status: "owned", Region: "*", Origin: "bounded-all-owned"}
+			bounded := make([]OwnershipFact, 0, maxFacts)
+			for _, fact := range result {
+				if len(bounded) == maxFacts-1 {
+					break
+				}
+				if isWildcardPath(fact.Path) && fact.Origin == "bounded-all-owned" {
+					marker = fact
+					continue
+				}
+				bounded = append(bounded, fact)
+			}
+			bounded = append(bounded, marker)
 			return bounded
 		}
 		if allBorrowed {
-			bounded := append([]OwnershipFact{}, result[:maxFacts-2]...)
-			bounded = append(bounded, result[len(result)-1])
-			bounded = append(bounded, OwnershipFact{Path: "*", Status: "borrowed", Region: "*", Origin: "bounded-all-borrowed", source: "*", sourceSet: true})
+			// Preserve the same subtree boundary for a complete borrowed marker;
+			// otherwise wrapping would manufacture a global fact for the parent.
+			marker := OwnershipFact{Path: "*", Status: "borrowed", Region: "*", Origin: "bounded-all-borrowed", source: "*", sourceSet: true}
+			concrete := make([]OwnershipFact, 0, len(result))
+			for _, fact := range result {
+				if isWildcardPath(fact.Path) && fact.Origin == "bounded-all-borrowed" {
+					marker = fact
+					continue
+				}
+				concrete = append(concrete, fact)
+			}
+			bounded := append([]OwnershipFact{}, concrete[:maxFacts-2]...)
+			bounded = append(bounded, concrete[len(concrete)-1])
+			bounded = append(bounded, marker)
 			return bounded
 		}
 		// A path with several alternatives is indivisible evidence. Retaining a
@@ -626,7 +726,9 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 			groups[fact.Path] = append(groups[fact.Path], fact)
 		}
 		for path, group := range groups {
-			if len(group) > 1 || slices.ContainsFunc(group, func(fact OwnershipFact) bool { return fact.potentialOwner }) {
+			if len(group) > 1 || slices.ContainsFunc(group, func(fact OwnershipFact) bool {
+				return fact.potentialOwner || (isWildcardPath(fact.Path) && (fact.Origin == "bounded-all-owned" || fact.Origin == "bounded-all-borrowed"))
+			}) {
 				incomplete[path] = true
 				incompleteCount += len(group)
 			}
@@ -654,7 +756,15 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 		// path has only the marker and is rejected conservatively.
 		potentialNeeded := false
 		for _, fact := range result {
-			if incomplete[fact.Path] {
+			if incomplete[fact.Path] || (isWildcardPath(fact.Path) && (fact.Origin == "bounded-all-owned" || fact.Origin == "bounded-all-borrowed")) {
+				continue
+			}
+			if slices.ContainsFunc(result, func(candidate OwnershipFact) bool {
+				// A complete bounded subtree already accounts for every fact
+				// below its prefix, so retaining another global potential marker
+				// would incorrectly poison unrelated sibling projections.
+				return candidate != fact && completeWildcardCovers(candidate, fact.Path)
+			}) {
 				continue
 			}
 			switch {
