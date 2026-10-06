@@ -36,7 +36,7 @@ type lexicalFacts struct {
 func captureOriginalSyntax(program *Program) *lexicalFacts {
 	facts := &lexicalFacts{expressions: map[*Expr]int{}, functions: map[*Function]int{}, parameters: map[int]int{}, statements: map[*Statement]int{}, patterns: map[*MatchPattern]int{}, bindings: map[string]lexicalBinding{}, uses: map[*Expr]string{}, complete: true}
 	add := func(kind, name string, anchor, extent, nameSpan Span) int {
-		if len(facts.syntax) >= maxLexicalFacts {
+		if !facts.complete || len(facts.syntax) >= maxLexicalFacts {
 			facts.complete = false
 			return -1
 		}
@@ -62,18 +62,39 @@ func captureOriginalSyntax(program *Program) *lexicalFacts {
 			nameSpan = e.Span
 		}
 		id := add(e.Kind, e.Name, e.Span, e.Extent, nameSpan)
+		if id < 0 {
+			return -1
+		}
 		facts.expressions[e] = id
-		forEachExprChild(e, func(e *Expr) { child(id, expression(e)) })
+		forEachExprChildUntil(e, func(childExpr *Expr) bool {
+			child(id, expression(childExpr))
+			return facts.complete
+		})
+		if !facts.complete {
+			return id
+		}
 		child(id, block(e.Then))
+		if !facts.complete {
+			return id
+		}
 		child(id, block(e.Else))
 		for _, arm := range e.Arms {
 			if !facts.complete {
 				break
 			}
 			armID := add("matchArm", "", arm.Span, arm.Extent, Span{})
+			if armID < 0 {
+				break
+			}
 			child(id, armID)
 			if p := arm.Pattern; p != nil {
+				if !facts.complete {
+					break
+				}
 				patternID := add("pattern", p.TypeName+"."+p.VariantName, p.Span, p.Extent, Span{})
+				if patternID < 0 {
+					break
+				}
 				facts.patterns[p] = patternID
 				child(armID, patternID)
 				for _, name := range p.Names {
@@ -82,8 +103,15 @@ func captureOriginalSyntax(program *Program) *lexicalFacts {
 					}
 					extent := name.FieldSpan
 					extent.Length = name.NameSpan.Offset + name.NameSpan.Length - extent.Offset
-					child(patternID, add("patternBinding", name.Name, name.FieldSpan, extent, name.NameSpan))
+					nameID := add("patternBinding", name.Name, name.FieldSpan, extent, name.NameSpan)
+					if nameID < 0 {
+						break
+					}
+					child(patternID, nameID)
 				}
+			}
+			if !facts.complete {
+				break
 			}
 			child(armID, block(arm.Body))
 		}
@@ -94,52 +122,107 @@ func captureOriginalSyntax(program *Program) *lexicalFacts {
 			return -1
 		}
 		id := add("block", "", b.Extent, b.Extent, Span{})
+		if id < 0 {
+			return -1
+		}
 		for _, s := range b.Statements {
 			if !facts.complete {
 				break
 			}
 			sid := add(s.Kind, s.Name, s.Span, s.Extent, s.NameSpan)
+			if sid < 0 {
+				break
+			}
 			facts.statements[s] = sid
 			child(id, sid)
 			child(sid, expression(s.Value))
+			if !facts.complete {
+				break
+			}
 			child(sid, expression(s.Payload))
 		}
 		return id
 	}
-	parameter := func(parent int, p Param) {
+	parameter := func(parent int, p Param) bool {
+		if !facts.complete {
+			return false
+		}
 		id := add("parameter", p.Name, p.Span, p.Extent, p.Span)
+		if id < 0 {
+			return false
+		}
 		facts.parameters[p.Span.Offset] = id
 		child(parent, id)
+		return facts.complete
 	}
 	function := func(f *Function) int {
+		if f == nil || !facts.complete {
+			return -1
+		}
 		id := add("function", f.Name, f.Span, f.Extent, f.Span)
+		if id < 0 {
+			return -1
+		}
 		facts.functions[f] = id
 		for _, p := range f.Params {
-			parameter(id, p)
+			if !parameter(id, p) {
+				return id
+			}
 		}
-		child(id, block(f.Body))
+		if facts.complete {
+			child(id, block(f.Body))
+		}
 		return id
 	}
 	for _, item := range program.Items {
+		if !facts.complete {
+			break
+		}
 		id := add("declaration:"+item.Kind, "", item.Span, item.Extent, Span{})
+		if id < 0 {
+			break
+		}
 		if item.Function != nil {
 			child(id, function(item.Function))
 		}
+		if !facts.complete {
+			break
+		}
 		if p := item.Provider; p != nil {
 			for _, param := range p.Params {
-				parameter(id, param)
+				if !parameter(id, param) {
+					break
+				}
+			}
+			if !facts.complete {
+				break
 			}
 			for _, f := range p.Methods {
+				if !facts.complete {
+					break
+				}
 				child(id, function(f))
 			}
+		}
+		if !facts.complete {
+			break
 		}
 		if s := item.Service; s != nil {
 			for _, f := range s.Methods {
+				if !facts.complete {
+					break
+				}
 				child(id, function(f))
 			}
 		}
+		if !facts.complete {
+			break
+		}
 		if layer := item.Layer; layer != nil {
 			for _, entry := range layer.Entries {
+				if !facts.complete {
+					break
+				}
 				child(id, expression(entry.Value))
 			}
 		}

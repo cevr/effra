@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -149,4 +150,101 @@ func TestLexicalObservationDoesNotBroadenShadowingAdmission(t *testing.T) {
 	if !found {
 		t.Fatalf("existing duplicate diagnostic lost: %+v", r.Diagnostics)
 	}
+}
+
+func TestCaptureOriginalSyntaxStopsAtFactCap(t *testing.T) {
+	parseParameters := func(count int) *Program {
+		t.Helper()
+		var source strings.Builder
+		source.Grow(count * 14)
+		source.WriteString("fn cap(")
+		for i := 0; i < count; i++ {
+			if i != 0 {
+				source.WriteString(", ")
+			}
+			source.WriteByte('p')
+			source.WriteString(strconv.Itoa(i))
+			source.WriteString(": string")
+		}
+		source.WriteString(") -> string { p0 }")
+		program, diagnostics := parse(source.String())
+		if len(diagnostics) != 0 {
+			t.Fatalf("boundary source was not admitted by the parser: %v", diagnostics)
+		}
+		if len(program.Functions) != 1 {
+			t.Fatalf("parsed function control: functions=%d", len(program.Functions))
+		}
+		if len(program.Functions[0].Params) != count {
+			t.Fatalf("parsed parameter control: got %d want %d", len(program.Functions[0].Params), count)
+		}
+		return program
+	}
+	assertIndexesAdmitted := func(facts *lexicalFacts) {
+		t.Helper()
+		check := func(owner string, id int) {
+			t.Helper()
+			if id < 0 || id >= len(facts.syntax) {
+				t.Fatalf("%s retained syntax ID %d outside %d admitted facts", owner, id, len(facts.syntax))
+			}
+		}
+		if len(facts.syntax) > maxLexicalFacts {
+			t.Fatalf("syntax facts exceeded cap: %d", len(facts.syntax))
+		}
+		for _, fact := range facts.syntax {
+			for _, child := range fact.Children {
+				check("syntax child", child)
+			}
+		}
+		for _, id := range facts.expressions {
+			check("expression", id)
+		}
+		for _, id := range facts.functions {
+			check("function", id)
+		}
+		for _, id := range facts.parameters {
+			check("parameter", id)
+		}
+		for _, id := range facts.statements {
+			check("statement", id)
+		}
+		for _, id := range facts.patterns {
+			check("pattern", id)
+		}
+	}
+
+	belowCap := captureOriginalSyntax(parseParameters(maxLexicalFacts - 5))
+	if !belowCap.complete || len(belowCap.syntax) != maxLexicalFacts {
+		t.Fatalf("at-cap positive control: complete=%v syntax=%d", belowCap.complete, len(belowCap.syntax))
+	}
+	assertIndexesAdmitted(belowCap)
+
+	overProgram := parseParameters(maxLexicalFacts + 100)
+	overCap := captureOriginalSyntax(overProgram)
+	if overCap.complete || len(overCap.syntax) != maxLexicalFacts {
+		t.Fatalf("over-cap refusal was not bounded and explicit: complete=%v syntax=%d", overCap.complete, len(overCap.syntax))
+	}
+	if got, want := len(overCap.parameters), maxLexicalFacts-2; got != want {
+		t.Fatalf("parameter index kept growing after exhaustion: got %d want %d", got, want)
+	}
+	assertIndexesAdmitted(overCap)
+
+	var wideSource strings.Builder
+	wideSource.Grow((maxLexicalFacts + 100) * 5)
+	wideSource.WriteString("fn target() -> string { \"done\" }\nfn wide() -> string { target(")
+	for i := 0; i < maxLexicalFacts+100; i++ {
+		if i != 0 {
+			wideSource.WriteString(", ")
+		}
+		wideSource.WriteString("\"x\"")
+	}
+	wideSource.WriteString(") }")
+	wideProgram, diagnostics := parse(wideSource.String())
+	if len(diagnostics) != 0 {
+		t.Fatalf("wide source was not admitted by the parser: %v", diagnostics)
+	}
+	wideFacts := captureOriginalSyntax(wideProgram)
+	if wideFacts.complete || len(wideFacts.syntax) != maxLexicalFacts {
+		t.Fatalf("wide-expression refusal was not bounded and explicit: complete=%v syntax=%d", wideFacts.complete, len(wideFacts.syntax))
+	}
+	assertIndexesAdmitted(wideFacts)
 }

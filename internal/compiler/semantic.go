@@ -4805,6 +4805,9 @@ func (c *checker) fiberCall(e *Expr, env map[string]checkedExpression, inEffect 
 	if !exists || !c.isKind(inner, "fiber") {
 		return false
 	}
+	// Resolve the receiver through the ordinary local-read owner so its
+	// checked fact and lexical binding observation match other environment uses.
+	inner = c.expr(e.Left.Left, env, inEffect)
 	if len(e.Args) != 0 {
 		c.diagnostic("EF106", "fiber operations take no arguments", e.Span)
 	}

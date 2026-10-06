@@ -794,7 +794,7 @@ func (p *parser) fieldValues() []FieldValue {
 			value = p.expr(0)
 		} else {
 			// Record construction permits shorthand `{name}` for `{name: name}`.
-			value = &Expr{Kind: "name", Name: name.text, Span: name.span}
+			value = &Expr{Kind: "name", Name: name.text, Span: name.span, Extent: name.span}
 		}
 		fields = append(fields, FieldValue{Name: name.text, Value: value, Span: name.span})
 		if !p.accept(",") && !p.accept(";") {
