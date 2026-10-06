@@ -3,10 +3,11 @@
 
 ## Destination
 
-Build a runnable Effra prototype that checks explicit effect contracts, emits native Go executables and optional JavaScript using Effect, and exposes canonical types through CLI/MCP; use the result to decide the route to a Go-backed server language.
+Advance Effra into a credible Go-backed server language by implementing production-inspired foundation contracts and runnable acceptance fixtures, preserving explicit types, owned lifetimes, fast compilation and shared CLI/MCP inspection. Work proceeds through complete staged implementation specs while unresolved architectural decisions remain visible.
 
 ## Notes
 
+- User explicitly invoked Wayfinder and implement-spec on 2026-10-05 to implement missing production-inspired capabilities. Decision tickets remain distinct from implementation tasks; the [production foundation spec](../../specs/production-foundations.md) has a separate implementation graph under this map.
 - User explicitly requested repository creation and prototype execution. Execution is carried into this map, overriding Wayfinder's planning-only default; charting may create the first artifact but resolves no HITL ticket.
 - Read wayfinder, grilling, domain-modeling, and prototype skills as relevant. Compiler prototypes are runnable source artifacts, as explicitly requested, rather than UI/HTML demos.
 - Carry forward the conversation: `.ef`, `ef`, managed server scope, Go compiler, native Go executables as the default build, optional JS/Effect target, explicit exported contracts, agent introspection, fast builds.
@@ -15,14 +16,17 @@ Build a runnable Effra prototype that checks explicit effect contracts, emits na
 
 ## Decisions so far
 
-<!-- Initial index intentionally empty. Existing conversation constraints are recorded in Notes and docs/design.md. -->
+- [Which production patterns constrain the next foundation contracts?](research-foundations.md): timer scheduling, dependency capture and nested ownership set the foundation acceptance seams.
 
 ## Not yet specified
 
 - The server slice's HTTP/database boundary and startup/shutdown wiring once lifecycle and backend semantics have concrete evidence.
 - The shape of general higher-order row inference once the small compiler reveals its pressure points.
-- The useful runtime snapshot granularity once managed ownership has an implementation.
+- Runtime/source correlation beyond current bounded scope snapshots.
+- Full named host values, methods, callbacks, codecs and wire migration policy after closed data and provider construction are exercised.
+- Bounded streams, replay/ACK accounting, database transactions/outbox delivery and managed subprocess fixtures after portable data, concurrency and interop foundations establish their seams.
+- Incremental package checking, reusable host-import sessions, comment-preserving formatting and verified edit plans after the larger source model is established.
 
 ## Out of scope
 
-Kernels, hard real-time guarantees, freestanding/no-GC execution, a complete ownership checker, TypeScript content-mapper integration, arbitrary FFI, durable workflows, and production completeness are beyond this prototype destination.
+Kernels, hard real-time guarantees, freestanding/no-GC execution and arbitrary unchecked FFI remain outside the server-language destination. No claim of complete ownership checking, universal host compatibility or production completeness follows from a staged foundation receipt.
