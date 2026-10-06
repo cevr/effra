@@ -20,6 +20,8 @@ On 2026-10-06 the owner explicitly set the goal to fully implement the authorize
 
 Use upstream implementation/test evidence, real usage, independent counsel and measured results to add concrete acceptance clauses and task dependencies. Prioritize changes that make the standard library reusable, preserve explicit inspectable contracts and improve measured costs. Record new opportunities with a finite supported scope and executable exit criteria; do not convert an aspiration into an implemented guarantee. Existing HITL decision tickets remain separate and require actual owner feedback before closure. No push is authorized.
 
+Owner update, 2026-10-06: defer benchmark development and measurement until the final phase, and increase independent implementation parallelism. Keep canonical type work, generated output ownership, upstream conformance import/mapping and [LSP diagnostics/document lifecycle](lsp-diagnostics.md) in isolated lanes. Their shared contracts determine integration order; parallel work does not bypass review or dependent feature gates.
+
 ## Decisions so far
 
 - [Which production patterns constrain the next foundation contracts?](research-foundations.md): timer scheduling, dependency capture and nested ownership set the foundation acceptance seams.
@@ -51,6 +53,8 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 - [Reachable runtime modules and small executable receipts](binary-reachability.md): small binaries with unused standard-library facilities excluded, including through fluent APIs; module/import/symbol and raw size evidence accompany implementation. [Runtime source modules](runtime-modules.md) prepare independently testable source selection while checked application reachability waits for native interfaces.
 
 - [Direct native execution and matched build cost](native-execution-lowering.md): the retained long-body compiler profile motivates a general lowering repair after canonical function contracts, preserving laziness and managed execution while measuring backend cost separately.
+
+- [Isolated owned native generated modules](generated-output-ownership.md): completed and integrated at2e23a894 with full gates and independent review. Complete immutable modules preserve legacy/unknown output and validate reuse; this closes the runtime split's output prerequisite, while application reachability remains open.
 
 ## Foundation implementation receipts
 

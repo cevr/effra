@@ -1,0 +1,6 @@
+<!-- {"id": "lsp-diagnostics", "title": "Versioned LSP documents and shared diagnostics", "status": "open", "labels": ["implementation:task"], "parent": "language-server", "assignee": "lsp_diagnostics", "blocked_by": ["semantic-diagnostics"]} -->
+# Versioned LSP documents and shared diagnostics
+
+Implement the independently useful diagnostics subset of the [tooling contract](../../specs/semantic-tooling.md): `ef lsp`, bounded stdio framing, initialization/shutdown, full-document open/change/close, UTF-16 versioned diagnostic publication and exact buffer identity through the existing shared report. Advertise only this supported subset. Full type expansion, hover, definition, completion and formatting remain separate; do not invent a second analyzer or touch canonical types to unblock this lane.
+
+Gate actual framed processes, split/coalesced frames, unsaved source differing from disk, stale versions, close/reopen, URI admission, invalid/oversized messages, error reporting and shutdown. Compare shared diagnostics against CLI/MCP on identical text. Preserve imports' base directory and source origin. Bound document counts, aggregate bytes, input/output and analysis lifecycle; never silently publish stale or incomplete analysis as clean. Full gate and independent review precede integration.

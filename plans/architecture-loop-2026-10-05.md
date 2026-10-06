@@ -58,6 +58,8 @@ These are draft interpretations for asynchronous correction, not blockers. No be
 
 ## Carried
 
+Actor-model comparison added2026-10-06 in response to the owner. Source research and selected immutable source checks are in [actors and durability](../docs/research/actor-model-and-durability.md). Decided by **Redesign From First Principles** and Go-like simplicity: retain the existing ordinary machine/ADT/effect core; propose modular supervision and explicit durability/deployment providers, with workflow replay and VM hot-loading separate. This is a carried design opportunity, not an expanded first machine implementation or a closed HITL decision. Actor-transfer isolation, fresh restart ownership, durable acknowledgement/fencing and crash-side-effect semantics require finite specifications and executable evidence before adoption.
+
 | Decision | From | Files | Status |
 | --- | --- | --- | --- |
 | Refresh ownership/type/inspection gap receipts after managed runtime integration | setup | NORTH_STAR.md, PRIOR_ARTS.md, this ledger | done: runtime receipt below |
@@ -120,3 +122,11 @@ Current source count using the Baseline pathspec (after integration):
 - Added primitive assertions, checked test discovery and Go/JS execution with fresh case scopes, structured causes, bounded captured output and an independent real watchdog. Live host/time use is explicit. Virtual scheduling, causal synchronization, scoped fixtures and static handle escape provenance remain carried gaps.
 - Public docs describe generic application patterns; no application-specific comparisons remain. ADTs, matching, codecs and dependent provider construction remain proposals.
 - Gate receipts include public CLI/MCP parity, fixture substitution, assertion failure followed by a passing case, watchdog expiry and existing runtime lifecycle conformance. Owner decisions remain open.
+
+## Owned generated-module integration
+
+2026-10-06: generated-output batch ff625433..b86ccf22 merged current root40351f9 into its branch at2e23a894, passed the branch gate, then fast-forward integrated the same head and passed the root gate. Both counsel rounds' findings were consolidated; finite Astra source/evidence closure is `~/.cache/architecture-loop/effra/pass1/generated-output-b86-final-closure.md`. No third counsel round. Decided by **Redesign From First Principles**: complete immutable per-application modules replace additive runtime output without deleting or adopting old files.
+
+Live checks passed for actual native CLI reuse, ordinary/test and same-basename identities, real inherited-workspace and module-mutation negative controls, physical symlink/.. roots, failed exclusive publication/retry and cooperating writer cleanup. Root independently captured/verified31 pre-existing output files' type, bytes and mtime across integration; legacy dist/go/runtime/stdlib.go remains unchanged. All root probe processes ended. Raw branch gate SHA256 f9c0561e83a6110d35973b0ae1a13873c15c7920f25b5b83b67ec7e999525ba5 and root gate SHA256 5a2262722fe8982d6c5153bcb25e127635c034f634871d1d84617bc7519b07a6 are retained in `/tmp/effra-generated-output-{branch,root}-integration-gate.log`. Root-owned tracker task closed after this proof.
+
+Carried: integrate the already reviewed runtime source split over preserved legacy output; implement checked application reachability after native interfaces; establish actual size/dependency/symbol receipts in the final measurement phase. Hard-link unsupported filesystems, adversarial same-user path replacement, literal process-kill and power-loss durability remain outside the demonstrated publisher contract. Other feature lanes and benchmarks are not certified by this gate. No push, paid deployment or HITL closure.

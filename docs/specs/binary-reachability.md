@@ -46,6 +46,8 @@ Establish per-fixture budgets from measured baselines rather than inventing a gl
 
 ## Delivery
 
+The source-module split must also work over outputs from the previous compiler. The current additive writer leaves the former `stdlib.go` alongside its replacement declarations: both fresh versions compile, but the upgrade fails. Implement isolated, owned complete generated modules before integrating that split. This output boundary can proceed before canonical application reachability, retaining current all-source emission. Full source origin, target and ordinary/test mode distinguish artifacts; interrupted publication, concurrent builds and unchanged reuse need explicit controls. Do not satisfy this requirement by deleting old output directories in the gate or special-casing a retired filename.
+
 1. Implement module selection through the versioned bundled interface/runtime boundary and preserve both-target behavior.
 2. Add minimal and managed-effect size/dependency fixtures, then codec and HTTP fixtures as those libraries land.
 3. Integrate deterministic reachability checks into the gate and record build-size receipts through CLI/MCP capability inspection. Keep expensive toolchain/bundler matrix runs in an explicit required size-conformance command.
