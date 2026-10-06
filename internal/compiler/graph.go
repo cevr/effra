@@ -93,14 +93,15 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 				edge(id, "service:"+req, "requires", req, e.Span)
 			}
 		}
-		left := expr(e.Left, id, locals)
-		expr(e.Right, id, locals)
-		for _, a := range e.Args {
-			expr(a, id, locals)
-		}
-		for _, field := range e.Fields {
-			expr(field.Value, id, locals)
-		}
+		left := ""
+		leftSet := false
+		forEachExprChild(e, func(child *Expr) {
+			childID := expr(child, id, locals)
+			if child == e.Left && !leftSet {
+				left = childID
+				leftSet = true
+			}
+		})
 		for _, arm := range e.Arms {
 			block(arm.Body, id, cloneStringMap(locals))
 		}

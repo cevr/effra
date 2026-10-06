@@ -169,18 +169,17 @@ func (r *Result) TestMode(live bool) error {
 		if e.Kind == "name" && e.Text == "provider" && (e.Name == "LiveClock" || e.Name == "LiveScheduler" || e.Name == "LiveEnv") {
 			return true
 		}
-		if expr(e.Left) || expr(e.Right) || block(e.Then) || block(e.Else) {
+		found := false
+		forEachExprChild(e, func(child *Expr) {
+			if !found && expr(child) {
+				found = true
+			}
+		})
+		if found {
 			return true
 		}
-		for _, a := range e.Args {
-			if expr(a) {
-				return true
-			}
-		}
-		for _, field := range e.Fields {
-			if expr(field.Value) {
-				return true
-			}
+		if block(e.Then) || block(e.Else) {
+			return true
 		}
 		for _, arm := range e.Arms {
 			if block(arm.Body) {

@@ -94,6 +94,7 @@ type Function struct {
 	Services []string
 	Body     *Block
 	Span     Span
+	DeclSpan Span `json:"-"`
 }
 type Service struct {
 	Name    string
@@ -507,11 +508,12 @@ func (p *parser) row() []string {
 	return names
 }
 func (p *parser) function(body bool) *Function {
+	declSpan := p.peek().span
 	effect := p.accept("effect")
 	p.expect("fn")
 	name := p.name()
 	p.expect("(")
-	f := &Function{Name: name.text, Effect: effect, Span: name.span}
+	f := &Function{Name: name.text, Effect: effect, Span: name.span, DeclSpan: declSpan}
 	for !p.accept(")") {
 		param := p.name()
 		p.expect(":")

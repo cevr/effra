@@ -77,6 +77,7 @@ type formatLayout struct {
 	preserve   map[int]bool
 	itemStarts map[int]bool
 	braces     map[int]braceStyle
+	spaced     map[int]bool
 }
 
 func formatSyntax(source string, program *Program, tokens []token) string {
@@ -114,7 +115,7 @@ func buildFormatEvents(comments []Comment, tokens []token) []formatEvent {
 }
 
 func buildFormatLayout(source string, program *Program, tokens []token) formatLayout {
-	layout := formatLayout{breaks: map[int]bool{}, inline: map[int]bool{}, preserve: formatDirectiveTargetLines(program.Comments), itemStarts: map[int]bool{}, braces: map[int]braceStyle{}}
+	layout := formatLayout{breaks: map[int]bool{}, inline: map[int]bool{}, preserve: formatDirectiveTargetLines(program.Comments), itemStarts: map[int]bool{}, braces: map[int]braceStyle{}, spaced: map[int]bool{}}
 	for _, item := range program.Items {
 		layout.itemStarts[item.Span.Offset] = true
 		layout.breaks[item.Span.Offset] = true
@@ -165,6 +166,10 @@ func buildFormatLayout(source string, program *Program, tokens []token) formatLa
 			if inline {
 				layout.braces[open] = braceInline
 				layout.braces[index] = braceInline
+				if index > open+1 {
+					layout.spaced[open] = true
+					layout.spaced[index] = true
+				}
 			} else {
 				layout.braces[open] = braceBlock
 				layout.braces[index] = braceBlock
@@ -183,9 +188,13 @@ func collectFieldBreaks(layout *formatLayout, fields []Field) {
 }
 
 func collectFunctionBreaks(layout *formatLayout, function *Function) {
-	if function != nil {
-		collectBlockBreaks(layout, function.Body)
+	if function == nil {
+		return
 	}
+	if function.DeclSpan.Length > 0 {
+		layout.breaks[function.DeclSpan.Offset] = true
+	}
+	collectBlockBreaks(layout, function.Body)
 }
 
 func collectBlockBreaks(layout *formatLayout, block *Block) {
@@ -215,8 +224,7 @@ func collectBlockBreaks(layout *formatLayout, block *Block) {
 func formatDirectiveTargetLines(comments []Comment) map[int]bool {
 	lines := map[int]bool{}
 	for _, comment := range comments {
-		body := strings.TrimLeft(comment.Text, " \t")
-		if strings.HasPrefix(body, "effra-lint-disable-next-line") {
+		if isSuppressionComment(comment.Text) {
 			lines[comment.Span.Line+1] = true
 		}
 	}
@@ -237,17 +245,16 @@ func collectExpressionBreaks(layout *formatLayout, expression *Expr) {
 	}
 	collectBlockBreaks(layout, expression.Then)
 	collectBlockBreaks(layout, expression.Else)
-	collectExpressionBreaks(layout, expression.Left)
-	collectExpressionBreaks(layout, expression.Right)
-	for _, argument := range expression.Args {
-		collectExpressionBreaks(layout, argument)
-	}
-	for _, field := range expression.Fields {
-		if expression.Kind != "call" && !layout.preserve[field.Span.Line] {
-			layout.breaks[field.Span.Offset] = true
+	if expression.Kind != "call" {
+		for _, field := range expression.Fields {
+			if !layout.preserve[field.Span.Line] {
+				layout.breaks[field.Span.Offset] = true
+			}
 		}
-		collectExpressionBreaks(layout, field.Value)
 	}
+	forEachExprChild(expression, func(child *Expr) {
+		collectExpressionBreaks(layout, child)
+	})
 	for _, arm := range expression.Arms {
 		if arm.Pattern != nil && !layout.preserve[arm.Pattern.Span.Line] {
 			layout.breaks[arm.Pattern.Span.Offset] = true
@@ -267,12 +274,10 @@ func isInlineBrace(source string, comments []Comment, tokens []token, open, clos
 }
 
 func hasCommentBetween(comments []Comment, start, end int) bool {
-	for _, comment := range comments {
-		if comment.Span.Offset > start && comment.Span.Offset < end {
-			return true
-		}
-	}
-	return false
+	index := sort.Search(len(comments), func(index int) bool {
+		return comments[index].Span.Offset > start
+	})
+	return index < len(comments) && comments[index].Span.Offset < end
 }
 
 type formatDelimiter struct {
@@ -281,18 +286,20 @@ type formatDelimiter struct {
 }
 
 type formatPrinter struct {
-	source     string
-	tokens     []token
-	events     []formatEvent
-	layout     formatLayout
-	output     strings.Builder
-	indent     int
-	lineStart  bool
-	lastByte   byte
-	lastEvent  int
-	hasEvent   bool
-	lastToken  int
-	delimiters []formatDelimiter
+	source           string
+	tokens           []token
+	events           []formatEvent
+	layout           formatLayout
+	output           strings.Builder
+	indent           int
+	lineIndent       int
+	trailingNewlines int
+	lineStart        bool
+	lastByte         byte
+	lastEvent        int
+	hasEvent         bool
+	lastToken        int
+	delimiters       []formatDelimiter
 }
 
 func (p *formatPrinter) comment(event formatEvent) {
@@ -304,6 +311,9 @@ func (p *formatPrinter) comment(event formatEvent) {
 		p.space()
 	} else {
 		p.breaks(newlines)
+	}
+	if p.lineStart {
+		p.prepareCommentLine()
 	}
 	raw := p.source[event.offset:event.end]
 	raw = strings.TrimSuffix(raw, "\r")
@@ -327,6 +337,9 @@ func (p *formatPrinter) token(eventIndex int, event formatEvent) {
 	if p.lastToken >= 0 && p.tokens[p.lastToken].text == "}" && p.layout.braces[p.lastToken] == braceBlock && !formatContinuation(current.text) && !p.layout.preserve[current.span.Line] {
 		p.newline()
 	}
+	if p.lineStart {
+		p.prepareTokenLine(current, event.tokenIndex)
+	}
 	switch current.text {
 	case "{":
 		p.openBrace(eventIndex, event)
@@ -340,6 +353,14 @@ func (p *formatPrinter) token(eventIndex int, event formatEvent) {
 		p.regularSpacing(current.text)
 		p.write(current.text)
 		p.popDelimiter("(")
+	case "<":
+		p.regularSpacing(current.text)
+		p.write(current.text)
+		p.delimiters = append(p.delimiters, formatDelimiter{text: "<"})
+	case ">":
+		p.regularSpacing(current.text)
+		p.write(current.text)
+		p.popDelimiter("<")
 	case ",":
 		p.regularSpacing(current.text)
 		p.write(current.text)
@@ -373,6 +394,8 @@ func (p *formatPrinter) openBrace(eventIndex int, event formatEvent) {
 		} else {
 			p.newline()
 		}
+	} else if p.layout.spaced[event.tokenIndex] && p.nextEventIsSameLine(eventIndex, event) {
+		p.space()
 	}
 }
 
@@ -385,8 +408,12 @@ func (p *formatPrinter) closeBrace(tokenIndex int, current token) {
 		if p.indent > 0 {
 			p.indent--
 		}
+		p.lineIndent = p.indent + p.continuationDepth()
 		p.write(current.text)
 	} else {
+		if p.layout.spaced[tokenIndex] && !p.lineStart {
+			p.space()
+		}
 		p.write(current.text)
 	}
 	p.popDelimiter("{")
@@ -396,35 +423,49 @@ func (p *formatPrinter) regularSpacing(current string) {
 	if p.lineStart || p.lastToken < 0 {
 		return
 	}
-	previous := p.tokens[p.lastToken].text
-	if !formatNeedsSpace(previous, current) {
+	previous := p.tokens[p.lastToken]
+	currentToken := token{text: current}
+	if !formatNeedsSpace(previous, currentToken) {
 		return
 	}
 	p.space()
 }
 
-func formatNeedsSpace(previous, current string) bool {
-	if current == ")" || current == "]" || current == "," || current == ";" || current == "." || current == ":" || current == ">" {
+func formatNeedsSpace(previous, current token) bool {
+	previousText, currentText := previous.text, current.text
+	if currentText == ")" || currentText == "]" || currentText == "," || currentText == ";" || currentText == "." || currentText == ":" || currentText == ">" {
 		return false
 	}
-	if previous == "(" || previous == "." || previous == "<" || previous == "{" {
+	if previousText == "(" || previousText == "." || previousText == "<" || previousText == "{" {
 		return false
 	}
-	if current == "(" {
-		switch previous {
-		case "->", "=", "==", "+", "if", "match", "run", "fork":
-			return true
-		default:
+	if currentText == "(" {
+		switch previousText {
+		case ")", "]", ">", "(":
 			return false
+		default:
+			if previous.kind == "name" && !groupedCallKeyword(previousText) {
+				return false
+			}
+			return true
 		}
 	}
-	if current == "<" {
+	if currentText == "<" {
 		return false
 	}
-	if previous == ":" {
+	if previousText == ":" {
 		return true
 	}
 	return true
+}
+
+func groupedCallKeyword(text string) bool {
+	switch text {
+	case "if", "match", "run", "fork":
+		return true
+	default:
+		return false
+	}
 }
 
 func formatContinuation(current string) bool {
@@ -443,6 +484,41 @@ func (p *formatPrinter) topDelimiterStyle() braceStyle {
 	return p.delimiters[len(p.delimiters)-1].style
 }
 
+func (p *formatPrinter) continuationDepth() int {
+	depth := 0
+	for _, delimiter := range p.delimiters {
+		if delimiter.style != braceBlock {
+			depth++
+		}
+	}
+	return depth
+}
+
+func (p *formatPrinter) prepareCommentLine() {
+	p.lineIndent = p.indent + p.continuationDepth()
+}
+
+func (p *formatPrinter) prepareTokenLine(current token, tokenIndex int) {
+	depth := p.continuationDepth()
+	if (current.text == ")" || current.text == "]" || current.text == ">" || (current.text == "}" && p.layout.braces[tokenIndex] == braceInline)) && depth > 0 {
+		depth--
+	}
+	p.lineIndent = p.indent + depth
+	if current.text == "else" {
+		p.lineIndent = p.indent
+		return
+	}
+	if current.text == ")" || current.text == "]" || current.text == ">" || (current.text == "}" && p.layout.braces[tokenIndex] == braceInline) {
+		return
+	}
+	if p.layout.itemStarts[current.span.Offset] || (p.layout.breaks[current.span.Offset] && !p.layout.inline[current.span.Offset]) {
+		return
+	}
+	if depth == 0 {
+		p.lineIndent++
+	}
+}
+
 func (p *formatPrinter) popDelimiter(text string) {
 	for index := len(p.delimiters) - 1; index >= 0; index-- {
 		if p.delimiters[index].text == text {
@@ -454,6 +530,13 @@ func (p *formatPrinter) popDelimiter(text string) {
 
 func (p *formatPrinter) nextEventIsTrailingComment(eventIndex int, event formatEvent) bool {
 	if eventIndex+1 >= len(p.events) || p.events[eventIndex+1].comment == nil {
+		return false
+	}
+	return formatNewlineCount(p.source[event.end:p.events[eventIndex+1].offset]) == 0
+}
+
+func (p *formatPrinter) nextEventIsSameLine(eventIndex int, event formatEvent) bool {
+	if eventIndex+1 >= len(p.events) {
 		return false
 	}
 	return formatNewlineCount(p.source[event.end:p.events[eventIndex+1].offset]) == 0
@@ -491,31 +574,28 @@ func (p *formatPrinter) rememberEvent(event formatEvent) {
 }
 
 func (p *formatPrinter) breaks(count int) {
-	if count < 1 {
+	if count < 1 || p.output.Len() == 0 {
 		return
 	}
 	if count > 2 {
 		count = 2
 	}
-	if !p.lineStart {
-		p.newline()
-		count--
-	}
-	for count > 1 {
+	for p.trailingNewlines < count {
 		p.output.WriteByte('\n')
 		p.lineStart = true
 		p.lastByte = '\n'
-		count--
+		p.trailingNewlines++
 	}
 }
 
 func (p *formatPrinter) newline() {
-	if p.lineStart {
+	if p.output.Len() == 0 || p.trailingNewlines >= 1 {
 		return
 	}
 	p.output.WriteByte('\n')
 	p.lineStart = true
 	p.lastByte = '\n'
+	p.trailingNewlines = 1
 }
 
 func (p *formatPrinter) space() {
@@ -533,11 +613,12 @@ func (p *formatPrinter) write(text string) {
 		return
 	}
 	if p.lineStart {
-		p.output.WriteString(strings.Repeat("    ", p.indent))
+		p.output.WriteString(strings.Repeat("    ", p.lineIndent))
 		p.lineStart = false
 	}
 	p.output.WriteString(text)
 	p.lastByte = text[len(text)-1]
+	p.trailingNewlines = 0
 }
 
 func (p *formatPrinter) finish() string {

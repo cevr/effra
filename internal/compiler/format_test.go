@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -26,14 +27,14 @@ enum State {
     Done
 }
 service Users {
-    effect fn get(id: string) -> string raises {Bad} uses {Console}
+    effect fn get(id: string) -> string raises { Bad } uses { Console }
 }
 impl Memory for Users {
     effect fn get(id: string) -> string {
         "Ada"
     }
 }
-effect fn main(id: string) -> string raises {Bad} uses {Users} {
+effect fn main(id: string) -> string raises { Bad } uses { Users } {
     let user = User {
         id: id,
         name: "Ada"
@@ -97,13 +98,13 @@ impl Live for Clock {
         ()
     }
 }
-effect fn work(state: State) -> string raises {Bad} uses {Clock} {
+effect fn work(state: State) -> string raises { Bad } uses { Clock } {
     let child = fork work(state).provide<Clock>(Live).timeout(500).catch<Bad>("fallback");
     scope {
         run child
     }
     match state {
-        State.Ready {value} => if value == "ok" {
+        State.Ready { value } => if value == "ok" {
             value
         } else {
             "other"
@@ -119,7 +120,7 @@ effect fn work(state: State) -> string raises {Bad} uses {Clock} {
 }
 
 func TestFormatExamplesAreParseableAndIdempotent(t *testing.T) {
-	for _, name := range []string{"causal", "concurrency", "data", "imports", "latest-task", "lifecycle", "main", "missing-service", "testing", "workflow"} {
+	for _, name := range []string{"causal", "concurrency", "data", "http", "imports", "latest-task", "lifecycle", "main", "missing-service", "testing", "workflow"} {
 		t.Run(name, func(t *testing.T) {
 			source, err := os.ReadFile(filepath.Join("..", "..", "examples", name+".ef"))
 			if err != nil {
@@ -194,7 +195,7 @@ run hello().provide<Console>(Stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(wrappedResult.Text, "run hello().provide<Console>(Stdout)\n    .provide<Console>(Stdout)") {
+	if !strings.Contains(wrappedResult.Text, "run hello().provide<Console>(Stdout)\n        .provide<Console>(Stdout)") {
 		t.Fatalf("source chain line break was not preserved:\n%s", wrappedResult.Text)
 	}
 	assertDirectiveTokenLines(t, wrappedChain, wrappedResult.Text)
@@ -225,7 +226,7 @@ record Data { first: string, second: string }`
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(pinnedConstructResult.Text, `let value = Data {first: "a", second: "b"}; value`) {
+	if !strings.Contains(pinnedConstructResult.Text, `let value = Data { first: "a", second: "b" }; value`) {
 		t.Fatalf("pinned syntax line was split:\n%s", pinnedConstructResult.Text)
 	}
 	assertDirectiveTokenLines(t, pinnedConstruct, pinnedConstructResult.Text)
@@ -233,6 +234,18 @@ record Data { first: string, second: string }`
 	for _, directive := range []string{
 		`// effra-lint-disable-next-line future-rule -- malformed unknown rule`,
 		`// effra-lint-disable-next-line unused-recipe -- unused directive`,
+	} {
+		caseSource := "effect fn main() -> () {\n" + directive + "\n()\n}"
+		formatted, err := FormatSource(caseSource)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertLintMeaning(t, caseSource, formatted.Text)
+	}
+	for _, directive := range []string{
+		`//effra-lint-disable-next-line`,
+		`// effra-lint-disable-next-line unused-recipe`,
+		`// effra-lint-disable-next-line unused-recipe --`,
 	} {
 		caseSource := "effect fn main() -> () {\n" + directive + "\n()\n}"
 		formatted, err := FormatSource(caseSource)
@@ -258,6 +271,16 @@ func TestFormatPreservesUnicodeCRLFEOFAndEmptyFiles(t *testing.T) {
 	empty, err := FormatSource(" \t\r\n")
 	if err != nil || empty.Text != "" || !empty.Changed || empty.OutputDigest == empty.InputDigest {
 		t.Fatalf("whitespace-only file was not normalized to empty: %+v err=%v", empty, err)
+	}
+	for _, source := range []string{"// comment\rfn main() -> () { () }", "fn main() -> () {\r()\n}"} {
+		result, err := FormatSource(source)
+		failure, ok := err.(FormatFailure)
+		if !ok || len(failure.Diagnostics) == 0 || failure.Diagnostics[0].Code != "EF001" || result.Text != "" {
+			t.Fatalf("standalone CR did not produce EF001 without output: result=%+v err=%v", result, err)
+		}
+	}
+	if result, err := FormatSource(`fn main() -> string { "a\rb" }`); err != nil || !strings.Contains(result.Text, `"a\rb"`) {
+		t.Fatalf("escaped carriage return was rejected or rewritten: result=%+v err=%v", result, err)
 	}
 }
 
@@ -317,6 +340,236 @@ func TestFormatRetainsDeclarationOrderAndTokens(t *testing.T) {
 	}
 }
 
+func TestFormatPreservesBlankSeparation(t *testing.T) {
+	source := `import go a "strings";
+
+record R { value: string }
+
+effect fn main() -> string {
+let first = "a";
+
+let second = first
+
+second
+}
+
+fn after() -> () { () }
+`
+	want := `import go a "strings";
+
+record R {
+    value: string
+}
+
+effect fn main() -> string {
+    let first = "a";
+
+    let second = first
+
+    second
+}
+
+fn after() -> () {
+    ()
+}
+`
+	assertFormat(t, source, want)
+}
+
+func TestFormatPreservesServiceMethodBoundaries(t *testing.T) {
+	source := `service S { effect fn one() -> () effect fn two() -> () }
+impl P for S { effect fn one() -> () {} effect fn two() -> () { () } }`
+	want := `service S {
+    effect fn one() -> ()
+    effect fn two() -> ()
+}
+impl P for S {
+    effect fn one() -> () {}
+    effect fn two() -> () {
+        ()
+    }
+}
+`
+	assertFormat(t, source, want)
+
+	pinned := `service S {
+// effra-lint-disable-next-line future-rule -- keep both declarations together
+effect fn one() -> () effect fn two() -> ()
+}`
+	result, err := FormatSource(pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Text, "effect fn one() -> () effect fn two() -> ()") {
+		t.Fatalf("pinned method line was split:\n%s", result.Text)
+	}
+	assertDirectiveTokenLines(t, pinned, result.Text)
+}
+
+func TestFormatContinuationIndentation(t *testing.T) {
+	source := `error Bad {}
+fn take(first: string, second: string) -> string { first }
+fn split(
+first: string,
+second: string
+) -> string { first }
+effect fn main() -> string
+raises {Bad}
+uses {Console} {
+take(
+"one",
+"two"
+)
+1 +
+2 +
+3
+}`
+	want := `error Bad {}
+fn take(first: string, second: string) -> string {
+    first
+}
+fn split(
+    first: string,
+    second: string
+) -> string {
+    first
+}
+effect fn main() -> string
+    raises { Bad }
+    uses { Console } {
+    take(
+        "one",
+        "two"
+    )
+    1 +
+        2 +
+        3
+}
+`
+	assertFormat(t, source, want)
+
+	chain := `effect fn main() -> () {
+run task().provide<Console>(Stdout)
+.provide<Console>(Stdout)
+}`
+	chainWant := `effect fn main() -> () {
+    run task().provide<Console>(Stdout)
+        .provide<Console>(Stdout)
+}
+`
+	assertFormat(t, chain, chainWant)
+
+	pattern := `enum State { Ready { value: string } }
+effect fn main(state: State) -> string {
+match state {
+State.Ready {
+value,
+other
+} => value
+}
+}`
+	patternWant := `enum State {
+    Ready {
+        value: string
+    }
+}
+effect fn main(state: State) -> string {
+    match state {
+        State.Ready {
+            value,
+            other
+        } => value
+    }
+}
+`
+	assertFormat(t, pattern, patternWant)
+
+	pinned := `effect fn main() -> () {
+// effra-lint-disable-next-line future-rule -- keep the opener line together
+let value = scope { run task()
+run task()
+};
+}`
+	pinnedWant := `effect fn main() -> () {
+    // effra-lint-disable-next-line future-rule -- keep the opener line together
+    let value = scope { run task()
+        run task()
+    };
+}
+`
+	assertFormat(t, pinned, pinnedWant)
+	assertDirectiveTokenLines(t, pinned, mustFormat(t, pinned))
+}
+
+func TestFormatSpacingBeforeGroupedExpressions(t *testing.T) {
+	source := `fn take(first: i64, second: i64) -> i64 { first }
+effect fn main() -> () {
+// effra-lint-disable-next-line future-rule -- preserve the grouped spacing case
+take(first:(1), second:(2));(2)
+	match Choice.A { Choice.A => () }
+}`
+	want := `fn take(first: i64, second: i64) -> i64 {
+    first
+}
+effect fn main() -> () {
+    // effra-lint-disable-next-line future-rule -- preserve the grouped spacing case
+    take(first: (1), second: (2)); (2)
+    match Choice.A {
+        Choice.A => ()
+    }
+}
+`
+	assertFormat(t, source, want)
+}
+
+func TestFormatPreservesFullSyntaxTree(t *testing.T) {
+	source := `record Data { first: string, second: string }
+fn take(name: string, count: i64) -> string { name }
+effect fn main() -> string { let value = Data { first: "x", second: "y" }; take(name: "x", count: 1) }`
+	result, err := FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := normalizedSyntaxJSON(t, source)
+	got := normalizedSyntaxJSON(t, result.Text)
+	if got != want {
+		t.Fatalf("full syntax tree changed:\nwant=%s\ngot=%s", want, got)
+	}
+}
+
+func TestFormatNamedCallChildrenAreVisitedOnce(t *testing.T) {
+	source := nestedNamedCallSource(40)
+	result, err := FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := FormatSource(result.Text)
+	if err != nil || again.Text != result.Text {
+		t.Fatalf("nested named calls were not idempotent: %v", err)
+	}
+}
+
+func nestedNamedCallSource(depth int) string {
+	return `fn leaf(value: string) -> string { value } effect fn main() -> string { ` + strings.Repeat("leaf(value: ", depth) + `"ok"` + strings.Repeat(")", depth) + ` }`
+}
+
+func TestForEachExprChildDeduplicatesCheckedCallFields(t *testing.T) {
+	first := &Expr{Kind: "string", Text: "first"}
+	second := &Expr{Kind: "string", Text: "second"}
+	call := &Expr{Kind: "call", Args: []*Expr{first, second}, Fields: []FieldValue{{Name: "first", Value: first}, {Name: "second", Value: second}}}
+	var visited []*Expr
+	forEachExprChild(call, func(child *Expr) { visited = append(visited, child) })
+	if !reflect.DeepEqual(visited, []*Expr{first, second}) {
+		t.Fatalf("call children were not canonicalized: got=%p want=%p", visited, []*Expr{first, second})
+	}
+	construct := &Expr{Kind: "construct", Fields: []FieldValue{{Name: "first", Value: first}, {Name: "second", Value: second}}}
+	visited = nil
+	forEachExprChild(construct, func(child *Expr) { visited = append(visited, child) })
+	if !reflect.DeepEqual(visited, []*Expr{first, second}) {
+		t.Fatalf("constructor children were not visited: got=%p want=%p", visited, []*Expr{first, second})
+	}
+}
+
 func assertFormat(t *testing.T, source, want string) {
 	t.Helper()
 	result, err := FormatSource(source)
@@ -329,6 +582,84 @@ func assertFormat(t *testing.T, source, want string) {
 	again, err := FormatSource(result.Text)
 	if err != nil || again.Text != want {
 		t.Fatalf("canonical output was not idempotent: %v\n%s", err, again.Text)
+	}
+}
+
+func mustFormat(t *testing.T, source string) string {
+	t.Helper()
+	result, err := FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result.Text
+}
+
+type syntaxPointer struct {
+	typeOf reflect.Type
+	value  uintptr
+}
+
+func normalizedSyntaxJSON(t *testing.T, source string) string {
+	t.Helper()
+	program, _, diagnostics := parseSyntax(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("source did not parse: %+v", diagnostics)
+	}
+	program.Comments = nil
+	normalizeSyntaxValue(reflect.ValueOf(program), map[syntaxPointer]bool{})
+	encoded, err := json.Marshal(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
+}
+
+func normalizeSyntaxValue(value reflect.Value, seen map[syntaxPointer]bool) {
+	if !value.IsValid() {
+		return
+	}
+	switch value.Kind() {
+	case reflect.Pointer:
+		if value.IsNil() {
+			return
+		}
+		pointer := syntaxPointer{typeOf: value.Type(), value: value.Pointer()}
+		if seen[pointer] {
+			return
+		}
+		seen[pointer] = true
+		normalizeSyntaxValue(value.Elem(), seen)
+	case reflect.Struct:
+		if value.Type() == reflect.TypeOf(Span{}) {
+			if value.CanSet() {
+				value.Set(reflect.Zero(value.Type()))
+			}
+			return
+		}
+		for index := 0; index < value.NumField(); index++ {
+			field := value.Field(index)
+			if field.CanSet() {
+				normalizeSyntaxValue(field, seen)
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for index := 0; index < value.Len(); index++ {
+			normalizeSyntaxValue(value.Index(index), seen)
+		}
+	case reflect.Map:
+		spanType := reflect.TypeOf(Span{})
+		if value.Type().Elem() == spanType {
+			for _, key := range value.MapKeys() {
+				value.SetMapIndex(key, reflect.Zero(spanType))
+			}
+			return
+		}
+		for _, key := range value.MapKeys() {
+			element := value.MapIndex(key)
+			if element.Kind() == reflect.Pointer {
+				normalizeSyntaxValue(element, seen)
+			}
+		}
 	}
 }
 
@@ -464,6 +795,58 @@ func syntaxShape(t *testing.T, source string) []string {
 func BenchmarkFormatCanonicalFixture(b *testing.B) {
 	source := strings.Repeat("effect fn fixture() -> string { \"ok\" }\n", 2000)
 	b.Logf("source_bytes=%d", len(source))
+	b.SetBytes(int64(len(source)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if _, err := FormatSource(source); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFormatCommentHeavy(b *testing.B) {
+	source := strings.Repeat("// comment attached to a declaration\nrecord R { value: string }\n", 1000)
+	b.Logf("source_bytes=%d", len(source))
+	b.SetBytes(int64(len(source)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if _, err := FormatSource(source); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFormatCommentHeavyEmptyBraces(b *testing.B) {
+	source := strings.Repeat("record R{// comment inside an empty declaration\n}\n", 1000)
+	b.Logf("source_bytes=%d", len(source))
+	b.SetBytes(int64(len(source)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if _, err := FormatSource(source); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFormatDeepNamedCall(b *testing.B) {
+	source := nestedNamedCallSource(100)
+	b.Logf("source_bytes=%d depth=%d", len(source), 100)
+	b.SetBytes(int64(len(source)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if _, err := FormatSource(source); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFormatLongBinary(b *testing.B) {
+	source := `effect fn main() -> i64 { ` + strings.Repeat("1 + ", 10000) + "1 }"
+	b.Logf("source_bytes=%d terms=%d", len(source), 10001)
 	b.SetBytes(int64(len(source)))
 	b.ReportAllocs()
 	b.ResetTimer()
