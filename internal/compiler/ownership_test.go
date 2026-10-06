@@ -235,10 +235,10 @@ effect fn main() -> () { () }
 	requireOwnershipRejected(t, `
 record Pair { outer: File, inner: File }
 fn selectInner(pair: Pair) -> File { pair.inner }
-effect fn bad() -> File throws {IoError} uses {Files} {
+effect fn bad(borrowed: File) -> File throws {IoError} uses {Files} {
  scope {
   let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
-  selectInner(Pair { outer: inner, inner: inner })
+  selectInner(Pair { outer: borrowed, inner: inner })
  }
 }
 effect fn main() -> () { () }
@@ -317,6 +317,95 @@ effect fn main() -> () { () }
 `)
 }
 
+func TestOwnershipConcreteCallerBorrowsStayMaterialized(t *testing.T) {
+	requireOwnershipAccepted(t, `
+effect fn borrow(file: File) -> File { file }
+effect fn good() -> File throws {IoError} uses {Files} {
+ let f = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+ let recipe = borrow(f)
+ scope { run recipe }
+}
+effect fn main() -> () { () }
+`)
+	requireOwnershipAccepted(t, `
+effect fn borrow(file: File) -> File { file }
+effect fn good() -> string throws {IoError} uses {Files} {
+ let f = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+ let child = fork borrow(f)
+ let result = run child.join()
+ run Files.readText(result).provide<Files>(LiveFiles)
+}
+effect fn main() -> () { () }
+`)
+	requireOwnershipAccepted(t, `
+error Missing
+effect fn absent() -> File throws {Missing} { fail Missing }
+effect fn good() -> File throws {IoError} uses {Files} {
+ let f = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+ let recovered = absent().catch<Missing>(f)
+ scope { run recovered }
+}
+effect fn main() -> () { () }
+`)
+}
+
+func TestOwnershipTimeoutSeparatesEagerArgumentsFromDeferredExecution(t *testing.T) {
+	requireOwnershipAccepted(t, `
+effect fn borrow(file: File) -> File { file }
+effect fn good() -> string throws {IoError, Timeout} uses {Files} {
+ let result = run borrow(run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)).timeout(1000)
+ run Files.readText(result).provide<Files>(LiveFiles)
+}
+effect fn main() -> () { () }
+`)
+	requireOwnershipAccepted(t, `
+effect fn borrow(file: File) -> File { file }
+effect fn good() -> string throws {IoError, Timeout} uses {Files} {
+ let f = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+ let result = run borrow(f).timeout(1000)
+ run Files.readText(result).provide<Files>(LiveFiles)
+}
+effect fn main() -> () { () }
+`)
+	requireOwnershipRejected(t, `
+effect fn acquire() -> File throws {IoError} uses {Files} {
+ run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+}
+effect fn bad() -> File throws {IoError, Timeout} uses {Files} {
+ run acquire().timeout(1000)
+}
+effect fn main() -> () { () }
+`)
+	requireOwnershipRejected(t, `
+effect fn bad() -> File throws {IoError, Timeout} uses {Files} {
+ run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles).timeout(1000)
+}
+effect fn main() -> () { () }
+`)
+	requireOwnershipAccepted(t, `
+error Missing
+effect fn absent() -> File throws {Missing} { fail Missing }
+effect fn borrow(file: File) -> File { file }
+effect fn good() -> string throws {IoError, Timeout} uses {Files} {
+ let f = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+ let recovered = run absent().catch<Missing>(f)
+ let result = run borrow(recovered).timeout(1000)
+ run Files.readText(result).provide<Files>(LiveFiles)
+}
+effect fn main() -> () { () }
+`)
+	requireOwnershipRejected(t, `
+effect fn borrow(file: File) -> File { file }
+effect fn bad() -> File throws {IoError, Timeout} uses {Files} {
+ scope {
+  let f = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+  run borrow(f).timeout(1000)
+ }
+}
+effect fn main() -> () { () }
+`)
+}
+
 func TestOwnershipCatchPreservesBothBranchesWithoutRebindingBorrow(t *testing.T) {
 	requireOwnershipRejected(t, `
 error Missing
@@ -380,6 +469,131 @@ func TestOwnershipCappedProjectionDoesNotClaimAnAmbiguousOwnedField(t *testing.T
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source, "effect fn main() -> () { () }")
 	requireOwnershipAccepted(t, source.String())
+}
+
+func ownershipMixedRecordSource(width int, selection string, helper bool) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "record Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " }")
+	if helper {
+		fmt.Fprintf(&source, "fn pick(x: Wide) -> File { x.%s }\n", selection)
+	}
+	fmt.Fprintln(&source, "effect fn probe(borrowed: File) -> File throws {IoError} uses {Files} {")
+	fmt.Fprintln(&source, " scope {")
+	fmt.Fprintln(&source, `  let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`)
+	fmt.Fprint(&source, "  let value = Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		if i == width-1 {
+			fmt.Fprintf(&source, " f%d: borrowed", i)
+		} else {
+			fmt.Fprintf(&source, " f%d: inner", i)
+		}
+	}
+	fmt.Fprintln(&source, " }")
+	if helper {
+		fmt.Fprintln(&source, "  pick(value)")
+	} else {
+		fmt.Fprintf(&source, "  value.%s\n", selection)
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
+func ownershipMixedEnumSource(width int, selection string) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "enum Packet { P {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " } }")
+	fmt.Fprintln(&source, "effect fn probe(borrowed: File) -> File throws {IoError} uses {Files} {")
+	fmt.Fprintln(&source, " scope {")
+	fmt.Fprintln(&source, `  let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`)
+	fmt.Fprint(&source, "  let packet = Packet.P {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		if i == width-1 {
+			fmt.Fprintf(&source, " f%d: borrowed", i)
+		} else {
+			fmt.Fprintf(&source, " f%d: inner", i)
+		}
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintf(&source, "  match packet { Packet.P { %s } => %s }\n", selection, selection)
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
+func ownershipMixedDeepSource(width int, selection string) string {
+	var source strings.Builder
+	fmt.Fprintln(&source, "record Leaf { file: File }")
+	fmt.Fprint(&source, "record Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: Leaf", i)
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "effect fn probe(borrowed: File) -> File throws {IoError} uses {Files} {")
+	fmt.Fprintln(&source, " scope {")
+	fmt.Fprintln(&source, `  let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`)
+	fmt.Fprint(&source, "  let value = Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		if i == width-1 {
+			fmt.Fprintf(&source, " f%d: Leaf { file: borrowed }", i)
+		} else {
+			fmt.Fprintf(&source, " f%d: Leaf { file: inner }", i)
+		}
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintf(&source, "  value.%s.file\n", selection)
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
+func TestOwnershipMixedFactBudgetRetainsKnownPaths(t *testing.T) {
+	for _, width := range []int{64, 65} {
+		width := width
+		t.Run(fmt.Sprintf("record-direct-%d", width), func(t *testing.T) {
+			requireOwnershipRejected(t, ownershipMixedRecordSource(width, "f0", false))
+			requireOwnershipAccepted(t, ownershipMixedRecordSource(width, fmt.Sprintf("f%d", width-1), false))
+		})
+		t.Run(fmt.Sprintf("record-helper-%d", width), func(t *testing.T) {
+			requireOwnershipRejected(t, ownershipMixedRecordSource(width, "f0", true))
+		})
+		t.Run(fmt.Sprintf("enum-%d", width), func(t *testing.T) {
+			requireOwnershipRejected(t, ownershipMixedEnumSource(width, "f0"))
+			requireOwnershipAccepted(t, ownershipMixedEnumSource(width, fmt.Sprintf("f%d", width-1)))
+		})
+		t.Run(fmt.Sprintf("deep-%d", width), func(t *testing.T) {
+			requireOwnershipRejected(t, ownershipMixedDeepSource(width, "f0"))
+			requireOwnershipAccepted(t, ownershipMixedDeepSource(width, fmt.Sprintf("f%d", width-1)))
+		})
+	}
 }
 
 func TestOwnershipOriginalPayloadAndCaptureCasesRemainIndependentlyRejected(t *testing.T) {

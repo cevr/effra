@@ -55,6 +55,11 @@ type OwnershipFact struct {
 	// path) from a fact that has no parameter source.
 	sourceSet bool
 	ownerKind ownershipOwnerKind
+	// potentialOwner marks a bounded wildcard which may contain an owned path
+	// that the representation could not retain. It is internal so the public
+	// contract still reports bounded evidence while escape checks diagnose
+	// exhausted analysis instead of treating it as safe.
+	potentialOwner bool
 }
 
 // TypeRef is the canonical semantic identity used by checking, emission and
@@ -290,9 +295,20 @@ func projectFacts(facts []OwnershipFact, field string) []OwnershipFact {
 	if len(facts) == 0 {
 		return nil
 	}
+	prefix := field + "."
+	concrete := false
+	for _, fact := range facts {
+		if (fact.Path == field || strings.HasPrefix(fact.Path, prefix)) && (fact.Status == "owned" || fact.Status == "borrowed") {
+			concrete = true
+			break
+		}
+	}
 	out := make([]OwnershipFact, 0, len(facts))
 	for _, fact := range facts {
 		if fact.Path == "*" {
+			if concrete {
+				continue
+			}
 			copy := fact
 			// A wildcard proves that some descendant has this status, not that
 			// the selected field has it. Keep whole-value owned evidence at the
@@ -302,7 +318,7 @@ func projectFacts(facts []OwnershipFact, field string) []OwnershipFact {
 				copy.Status = "unknown"
 				copy.Origin = "bounded"
 			}
-			if copy.Status == "borrowed" {
+			if copy.Status == "borrowed" && copy.Origin != "bounded-all-borrowed" {
 				copy.Status = "unknown"
 				copy.Origin = "bounded"
 			}
@@ -321,7 +337,6 @@ func projectFacts(facts []OwnershipFact, field string) []OwnershipFact {
 			out = append(out, copy)
 			continue
 		}
-		prefix := field + "."
 		if strings.HasPrefix(fact.Path, prefix) {
 			copy := fact
 			copy.Path = strings.TrimPrefix(fact.Path, prefix)
@@ -336,15 +351,26 @@ func projectFacts(facts []OwnershipFact, field string) []OwnershipFact {
 }
 
 func projectVariantFacts(facts []OwnershipFact, variant, field string) []OwnershipFact {
+	prefix := variant + "." + field
+	concrete := false
+	for _, fact := range facts {
+		if (fact.Path == prefix || strings.HasPrefix(fact.Path, prefix+".")) && (fact.Status == "owned" || fact.Status == "borrowed") {
+			concrete = true
+			break
+		}
+	}
 	projected := make([]OwnershipFact, 0)
 	for _, fact := range facts {
 		if fact.Path == "*" {
+			if concrete {
+				continue
+			}
 			copy := fact
 			if copy.Status == "owned" && copy.Origin != "bounded-all-owned" {
 				copy.Status = "unknown"
 				copy.Origin = "bounded"
 			}
-			if copy.Status == "borrowed" {
+			if copy.Status == "borrowed" && copy.Origin != "bounded-all-borrowed" {
 				copy.Status = "unknown"
 				copy.Origin = "bounded"
 			}
@@ -354,7 +380,6 @@ func projectVariantFacts(facts []OwnershipFact, variant, field string) []Ownersh
 			continue
 		}
 		path := fact.Path
-		prefix := variant + "." + field
 		if path == prefix {
 			copy := fact
 			copy.Path = ""
@@ -465,7 +490,13 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 				out = append(out, OwnershipFact{Path: fact.Path, Status: "unknown", Origin: "helper"})
 				continue
 			}
+			hasConcreteSource := slices.ContainsFunc(args[i].Ownership, func(argument OwnershipFact) bool {
+				return argument.Path != "*" && argument.Path == fact.source
+			})
 			for _, argument := range args[i].Ownership {
+				if hasConcreteSource && argument.Path == "*" {
+					continue
+				}
 				if !ownershipPathMatches(argument.Path, fact.source) {
 					continue
 				}
@@ -478,6 +509,7 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 					if !(fact.Path == "*" && fact.sourceSet && fact.source == "*" && argument.Path == "*" && argument.Status == "owned" && argument.Origin == "bounded-all-owned") {
 						copy.Status = "unknown"
 						copy.Origin = "bounded"
+						copy.potentialOwner = true
 					}
 				}
 				// The summary path is relative to the returned value. The
@@ -541,6 +573,12 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 		if a.ownerKind > b.ownerKind {
 			return 1
 		}
+		if a.potentialOwner != b.potentialOwner {
+			if !a.potentialOwner {
+				return -1
+			}
+			return 1
+		}
 		return 0
 	})
 	result := make([]OwnershipFact, 0, len(out))
@@ -551,44 +589,90 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 	}
 	const maxFacts = 64
 	if len(result) > maxFacts {
-		bounded := make([]OwnershipFact, 0, maxFacts)
 		allOwned := true
+		allBorrowed := true
 		for _, fact := range result {
 			if fact.Status != "owned" {
 				allOwned = false
-				break
+			}
+			if fact.Status != "borrowed" {
+				allBorrowed = false
 			}
 		}
-		boundedOrigin := "bounded"
 		if allOwned {
-			boundedOrigin = "bounded-all-owned"
+			bounded := append([]OwnershipFact{}, result[:maxFacts-1]...)
+			bounded = append(bounded, OwnershipFact{Path: "*", Status: "owned", Region: "*", Origin: "bounded-all-owned"})
+			return bounded
 		}
-		type ownerKey struct {
-			kind   ownershipOwnerKind
-			region string
+		if allBorrowed {
+			bounded := append([]OwnershipFact{}, result[:maxFacts-2]...)
+			bounded = append(bounded, result[len(result)-1])
+			bounded = append(bounded, OwnershipFact{Path: "*", Status: "borrowed", Region: "*", Origin: "bounded-all-borrowed", source: "*", sourceSet: true})
+			return bounded
 		}
-		seenOwners := map[ownerKey]bool{}
-		for _, fact := range result {
-			key := ownerKey{kind: fact.ownerKind, region: fact.Region}
-			if fact.Status == "owned" && !seenOwners[key] {
-				if len(bounded) >= maxFacts-2 {
-					bounded = append(bounded, OwnershipFact{Path: "*", Status: "owned", Region: "*", Origin: boundedOrigin})
-					break
-				}
-				bounded = append(bounded, OwnershipFact{Path: "*", Status: "owned", Region: fact.Region, Origin: boundedOrigin, ownerKind: fact.ownerKind})
-				seenOwners[key] = true
+		for i := range result {
+			if result[i].Path == "*" && (result[i].Origin == "bounded-all-owned" || result[i].Origin == "bounded-all-borrowed") {
+				result[i].Status = "unknown"
+				result[i].Origin = "bounded"
+				result[i].potentialOwner = true
 			}
 		}
+		owned := make([]OwnershipFact, 0, len(result))
+		borrowed := make([]OwnershipFact, 0, len(result))
+		other := make([]OwnershipFact, 0, len(result))
 		for _, fact := range result {
-			if len(bounded) >= maxFacts-1 {
+			switch fact.Status {
+			case "owned":
+				owned = append(owned, fact)
+			case "borrowed":
+				borrowed = append(borrowed, fact)
+			default:
+				other = append(other, fact)
+			}
+		}
+		potentialNeeded := false
+		for _, fact := range other {
+			if fact.potentialOwner {
+				potentialNeeded = true
 				break
 			}
-			if fact.Status != "owned" {
-				bounded = append(bounded, fact)
+		}
+		if len(owned) > maxFacts || (len(borrowed) > 0 && len(owned)+len(borrowed) > maxFacts) {
+			potentialNeeded = true
+		}
+		ownedLimit := len(owned)
+		if potentialNeeded {
+			// Leave room for a bounded potential-owner marker. Exact owned
+			// evidence is retained before any borrowed or unknown sibling is
+			// summarized away.
+			ownedLimit = maxFacts - 1
+			if len(borrowed) > 0 {
+				ownedLimit = maxFacts - 2
 			}
 		}
-		if len(bounded) < maxFacts && !allOwned {
-			bounded = append(bounded, OwnershipFact{Path: "*", Status: "unknown", Origin: "bounded"})
+		if ownedLimit > len(owned) {
+			ownedLimit = len(owned)
+		}
+		bounded := make([]OwnershipFact, 0, maxFacts)
+		bounded = append(bounded, owned[:ownedLimit]...)
+		reserve := 0
+		if potentialNeeded {
+			reserve = 1
+		}
+		for _, fact := range borrowed {
+			if len(bounded) >= maxFacts-reserve {
+				break
+			}
+			bounded = append(bounded, fact)
+		}
+		for _, fact := range other {
+			if len(bounded) >= maxFacts-reserve {
+				break
+			}
+			bounded = append(bounded, fact)
+		}
+		if potentialNeeded {
+			bounded = append(bounded, OwnershipFact{Path: "*", Status: "unknown", Region: "*", Origin: "bounded", potentialOwner: true})
 		}
 		return bounded
 	}
@@ -613,8 +697,19 @@ func hasOwnedClosed(facts []OwnershipFact) bool {
 	return false
 }
 
+func hasPotentialOwner(facts []OwnershipFact) bool {
+	for _, fact := range facts {
+		if fact.potentialOwner {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *checker) rejectOwnedEscape(facts []OwnershipFact, span Span) {
-	if hasOwnedFact(facts, c.region) || hasOwnedClosed(facts) {
+	if hasPotentialOwner(facts) {
+		c.diagnostic("EF123", "ownership analysis budget exhausted before proving value safe", span)
+	} else if hasOwnedFact(facts, c.region) || hasOwnedClosed(facts) {
 		c.diagnostic("EF123", "value owned by closing scope cannot escape", span)
 	}
 }
@@ -1411,7 +1506,7 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 			continue
 		}
 		t := c.expr(s.Value, env, effect)
-		if s.Kind != "let" && hasOwnedClosed(t.Ownership) {
+		if s.Kind != "let" && (hasPotentialOwner(t.Ownership) || hasOwnedClosed(t.Ownership)) {
 			c.diagnostic("EF123", "value owned by a closing scope cannot escape", s.Span)
 		}
 		out.Errors = union(out.Errors, tExecutedErrors(s.Value))
@@ -1592,7 +1687,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		for i, a := range e.Args {
 			arg := c.expr(a, env, inEffect)
 			argumentTypes[i] = arg
-			if hasOwnedClosed(arg.Ownership) {
+			if hasPotentialOwner(arg.Ownership) || hasOwnedClosed(arg.Ownership) {
 				c.diagnostic("EF123", "value owned by a closing scope cannot be used", a.Span)
 			}
 			if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && e.Left.Left.Name == "Http" && i == 1 && arg.Success == "Handler" {
@@ -1667,7 +1762,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		}
 		scopeRegion := fmt.Sprintf("scope:%d", e.Span.Offset)
 		t = c.withRegion(scopeRegion, func() ValueType { return c.block(e.Then, env, inEffect) })
-		if hasOwnedFact(t.Ownership, scopeRegion) || hasOwnedFact(t.Captures, scopeRegion) {
+		if hasPotentialOwner(t.Ownership) || hasPotentialOwner(t.Captures) || hasOwnedFact(t.Ownership, scopeRegion) || hasOwnedFact(t.Captures, scopeRegion) {
 			c.diagnostic("EF123", "value owned by closing scope cannot escape", e.Span)
 		}
 	case "fork":
@@ -1695,7 +1790,11 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 	case "timeout":
 		duration := c.expr(e.Right, env, inEffect)
 		timeoutRegion := fmt.Sprintf("timeout:%d", e.Span.Offset)
-		inner := c.withRegion(timeoutRegion, func() ValueType { return c.expr(e.Left, env, inEffect) })
+		// Recipe construction and eager arguments execute in the caller. Only
+		// deferred or symbolic invocation results are materialized under the
+		// fresh timeout owner; rebinding an already materialized borrow here
+		// would reject a valid caller-owned value.
+		inner := c.expr(e.Left, env, inEffect)
 		t = inner
 		if !t.Effect || duration.Effect || duration.Success != "i64" {
 			c.diagnostic("EF106", "timeout requires an Effect and an i64 millisecond duration", e.Span)
