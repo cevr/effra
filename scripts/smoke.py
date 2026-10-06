@@ -156,4 +156,66 @@ let forgotten = task();
     assert server.returncode==0,server.stderr
     suppression_reply=[json.loads(line) for line in server.stdout.splitlines()]
     assert suppression_reply[1]["result"]["structuredContent"]["lint"]==suppressed
-print("native Go executable, JS module, CLI lint/query/graph and stdio MCP: passed")
+
+
+def nested_data_source(depth, named):
+    records = "\n".join(
+        f"record R{index} {{ value: {'()' if index == 0 else f'R{index - 1}'} }}"
+        for index in range(depth + 1)
+    )
+    calls = "".join(
+        f"R{index}({'value: ' if named else ''}"
+        for index in range(depth, -1, -1)
+    )
+    return records + "\nfn deep() -> R" + str(depth) + " { " + calls + "()" + ")" * (depth + 1) + " }\neffect fn main() -> () { let _ = deep(); () }\n"
+
+
+def type_at_query(file):
+    source = file.read_text()
+    body = source.index("{ ", source.index("fn deep")) + 2
+    offset = source.index("()", body)
+    result = subprocess.run([ef, "query", str(file), str(offset)], cwd=root,
+                            text=True, capture_output=True, timeout=5)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    payload = json.loads(result.stdout)
+    assert payload["checked"] and payload["expression"]["span"]["offset"] == offset, payload
+
+
+with tempfile.TemporaryDirectory(prefix="effra-typeat-") as tmp:
+    directory = pathlib.Path(tmp)
+    named = directory / "nested.ef"
+    positional = directory / "positional.ef"
+    named.write_text(nested_data_source(30, True))
+    positional.write_text(nested_data_source(30, False))
+    type_at_query(named)
+    type_at_query(positional)
+    named_source = named.read_text()
+    named_body = named_source.index("{ ", named_source.index("fn deep")) + 2
+    named_offset = named_source.index("()", named_body)
+
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-11-25", "capabilities": {},
+            "clientInfo": {"name": "type-at-smoke", "version": "1"}}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+            "name": "code.typeAt", "arguments": {"file": "nested.ef", "offset": named_offset}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "ping"},
+    ]
+    process = subprocess.Popen([ef, "mcp", str(directory)], cwd=root,
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+    try:
+        output, error = process.communicate(input="\n".join(map(json.dumps, messages)) + "\n", timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        output, error = process.communicate()
+        raise AssertionError(("deep code.typeAt did not release the queued ping", output, error))
+    assert process.returncode == 0, error
+    replies = [json.loads(line) for line in output.splitlines()]
+    assert [reply.get("id") for reply in replies] == [1, 2, 3], replies
+    assert replies[2]["result"] == {}, replies
+    type_at = replies[1]["result"]["structuredContent"]
+    assert type_at["checked"] and type_at["expression"]["span"]["offset"] == named_offset, type_at
+
+print("native Go executable, JS module, CLI lint/query/graph, stdio MCP and bounded deep TypeAt: passed")
