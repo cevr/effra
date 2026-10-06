@@ -128,6 +128,20 @@ effect fn main() -> string raises {Broken} { run recovered("42").provide<Users>(
 		})
 	}
 }
+
+func TestThrowsKeywordReportsMigrationDiagnostic(t *testing.T) {
+	r := Compile(`error Bad effect fn main() -> string throws {Bad} { fail Bad }`)
+	if r.Checked || len(r.Diagnostics) != 1 {
+		t.Fatalf("old spelling should be rejected once: %+v", r.Diagnostics)
+	}
+	diagnostic := r.Diagnostics[0]
+	if diagnostic.Code != "EF002" || !strings.Contains(diagnostic.Message, "replaced by `raises`") {
+		t.Fatalf("wrong migration diagnostic: %+v", diagnostic)
+	}
+	if diagnostic.Span.Length != len("throws") || diagnostic.Span.Line != 1 || diagnostic.Span.Column <= 1 {
+		t.Fatalf("diagnostic does not point at old keyword: %+v", diagnostic.Span)
+	}
+}
 func TestDeferredRows(t *testing.T) {
 	r := Compile(`effect fn main() -> () { let pending = Console.log("never executed"); () }`)
 	if !r.Checked || len(r.Find("main").Actual.Services) != 0 {

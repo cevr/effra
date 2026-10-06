@@ -476,11 +476,11 @@ func (p *parser) function(body bool) *Function {
 	}
 	p.expect("->")
 	f.Return = p.typ()
-	// Keep the old spelling temporarily while the authored corpus migrates to
-	// `raises`. The compatibility branch is removed in the final migration
-	// commit, where `throws` receives a source-span diagnostic.
-	if p.accept("raises") || p.accept("throws") {
+	if p.accept("raises") {
 		f.Errors = p.row()
+	} else if p.peek().text == "throws" {
+		old := p.take()
+		p.fail(old, "the Effra failure-row keyword `throws` was replaced by `raises`; use `raises`")
 	}
 	if p.accept("uses") {
 		f.Services = p.row()
