@@ -122,29 +122,29 @@ func TestInspectionBoundsCoverNestedSymbolDetails(t *testing.T) {
 	}
 
 	for _, test := range []struct {
-		name                 string
-		mode                 string
-		checked              bool
-		contractFailures     int
-		bodyFailures         int
-		contractRequirements int
-		bodyRequirements     int
-		contributions        int
-		contributionNames    int
+		name                    string
+		mode                    string
+		checked                 bool
+		contractFailures        int
+		bodyFailures            int
+		contractRequirements    int
+		bodyRequirements        int
+		contributions           int
+		contributionNameLengths []int
 	}{
-		{"body rows", "body", false, 0, 100, 0, 0, 1, 100},
-		{"requirement rows", "requirements", false, 0, 0, 0, 100, 1, 100},
-		{"nested contribution names", "names", false, 0, 0, 0, 0, 1, 100},
+		{"body rows", "body", false, 0, 100, 0, 0, 2, []int{50, 50}},
+		{"requirement rows", "requirements", false, 0, 0, 0, 100, 2, []int{50, 50}},
+		{"nested contribution names", "names", false, 0, 0, 0, 0, 1, []int{100}},
 	} {
 		t.Run(test.name+" preserve independent dimensions", func(t *testing.T) {
 			assertInspectionDimensions(t, inspectionRowsSource(100, test.mode), inspectionDimensions{
-				checked:              test.checked,
-				contractFailures:     test.contractFailures,
-				bodyFailures:         test.bodyFailures,
-				contractRequirements: test.contractRequirements,
-				bodyRequirements:     test.bodyRequirements,
-				contributions:        test.contributions,
-				contributionNames:    test.contributionNames,
+				checked:                 test.checked,
+				contractFailures:        test.contractFailures,
+				bodyFailures:            test.bodyFailures,
+				contractRequirements:    test.contractRequirements,
+				bodyRequirements:        test.bodyRequirements,
+				contributions:           test.contributions,
+				contributionNameLengths: test.contributionNameLengths,
 			})
 		})
 	}
@@ -189,13 +189,13 @@ func assertInspectionBoundary(t *testing.T, source string, wantError bool) {
 }
 
 type inspectionDimensions struct {
-	checked              bool
-	contractFailures     int
-	bodyFailures         int
-	contractRequirements int
-	bodyRequirements     int
-	contributions        int
-	contributionNames    int
+	checked                 bool
+	contractFailures        int
+	bodyFailures            int
+	contractRequirements    int
+	bodyRequirements        int
+	contributions           int
+	contributionNameLengths []int
 }
 
 func assertInspectionDimensions(t *testing.T, source string, expected inspectionDimensions) {
@@ -235,9 +235,12 @@ func assertInspectionDimensions(t *testing.T, source string, expected inspection
 		if len(symbol.Contributions) != expected.contributions {
 			t.Fatalf("%s contributions=%d, want %d", name, len(symbol.Contributions), expected.contributions)
 		}
-		if expected.contributions > 0 {
-			if got := len(symbol.Contributions[0].Names); got != expected.contributionNames {
-				t.Fatalf("%s contribution names=%d, want %d", name, got, expected.contributionNames)
+		for i, want := range expected.contributionNameLengths {
+			if i >= len(symbol.Contributions) {
+				t.Fatalf("%s contribution %d missing; got %d contributions", name, i, len(symbol.Contributions))
+			}
+			if got := len(symbol.Contributions[i].Names); got != want {
+				t.Fatalf("%s contribution %d names=%d, want %d", name, i, got, want)
 			}
 		}
 	}
@@ -257,20 +260,25 @@ func inspectionRowsSource(count int, mode string) string {
 	case "declared":
 		fmt.Fprintf(&builder, "effect fn target() -> () throws {%s} { () }\n", joined)
 	case "body":
-		fmt.Fprintf(&builder, "effect fn many() -> () throws {%s} { () }\n", joined)
-		builder.WriteString("effect fn target() -> () { run many() }\n")
+		first, second := splitInspectionRows(names)
+		fmt.Fprintf(&builder, "effect fn first() -> () throws {%s} { () }\n", strings.Join(first, ","))
+		fmt.Fprintf(&builder, "effect fn second() -> () throws {%s} { () }\n", strings.Join(second, ","))
+		builder.WriteString("effect fn target() -> () { run first(); run second() }\n")
 	case "requirements":
 		services := make([]string, count)
 		for i := range services {
 			services[i] = fmt.Sprintf("S%d", i)
 			fmt.Fprintf(&builder, "service %s { effect fn get() -> () }\n", services[i])
 		}
-		fmt.Fprintf(&builder, "effect fn many() -> () uses {%s} {\n", strings.Join(services, ","))
-		for _, service := range services {
-			fmt.Fprintf(&builder, "run %s.get();\n", service)
+		first, second := splitInspectionRows(services)
+		for i, row := range [][]string{first, second} {
+			fmt.Fprintf(&builder, "effect fn part%d() -> () uses {%s} {\n", i, strings.Join(row, ","))
+			for _, service := range row {
+				fmt.Fprintf(&builder, "run %s.get();\n", service)
+			}
+			builder.WriteString("()}\n")
 		}
-		builder.WriteString("()}\n")
-		builder.WriteString("effect fn target() -> () { run many() }\n")
+		builder.WriteString("effect fn target() -> () { run part0(); run part1() }\n")
 	case "contributions":
 		builder.Reset()
 		builder.WriteString("error E0\neffect fn one() -> () throws {E0} { () }\neffect fn target() -> () throws {E0} {\n")
@@ -284,6 +292,11 @@ func inspectionRowsSource(count int, mode string) string {
 		builder.WriteString("effect fn target() -> Box { Box { value: run many() } }\n")
 	}
 	return builder.String()
+}
+
+func splitInspectionRows(names []string) ([]string, []string) {
+	middle := len(names) / 2
+	return names[:middle], names[middle:]
 }
 func TestInvalidSourceIsACompilerResult(t *testing.T) {
 	root := t.TempDir()
