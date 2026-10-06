@@ -95,6 +95,8 @@ Foundation rereviews: ownership `859f172` repairs original cases but is blocked 
 
 Benchmark `3450286` independent review identifies nine fixture, lifecycle, measurement, admission and provenance findings (`pass1/benchmark-final-review.md`). Root verified the core source paths and bounded harness observations; Claude2 round1 is being consolidated. Preserve no-score status and repair before integration.
 
+Minimal binary baseline at `ff4b487`: public empty Effra entry is5,532,694 bytes versus1,891,532 for a bare Go size control under identical Go1.27.0/linux-amd64/CGO0/trimpath flags. The control does not supply managed guarantees; no full-gap attribution is made. `net/http` and `crypto/tls` initialization symbols remain linked despite no HTTP use. Raw receipt `/tmp/effra-size-baseline-2026-10-06/receipt.json`; tracked interpretation `docs/research/native-runtime-retention.md`. No build-time or runtime-performance claim.
+
 CLI/MCP repair isolation: `workrift list` rejects the transferred unknown registry marker; `df -T` confirms the source lives on ext4. Use architecture-loop's Git worktree fallback at the exact absolute sibling path and copy its verified locked dependencies. No warm source, registry entry or unrelated dotfiles is changed.
 
 Guardrails added: pending implementation receipts. Each missed static guarantee needs its own rejected-source test, and each bounded analysis needs adversarial scaling coverage.
