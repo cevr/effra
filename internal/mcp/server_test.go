@@ -597,7 +597,7 @@ func TestBoundedFormatResponsePreservesIDsAndUsesCompactFallback(t *testing.T) {
 			Content: []map[string]string{{"type": "text", "text": "summary"}},
 		},
 	}
-	encoded, err := marshalMCPResponse(value, false)
+	encoded, err := marshalBoundedFormatResponse(value)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -608,7 +608,7 @@ func TestBoundedFormatResponsePreservesIDsAndUsesCompactFallback(t *testing.T) {
 		t.Fatal("small bounded-format ID did not fit the compact fallback")
 	}
 
-	base, err := marshalMCPResponse(compactFormatError(json.RawMessage("null")), false)
+	base, err := marshalBoundedFormatResponse(compactFormatError(json.RawMessage("null")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +618,7 @@ func TestBoundedFormatResponsePreservesIDsAndUsesCompactFallback(t *testing.T) {
 		t.Fatalf("compact fallback overhead unexpectedly exceeds frame cap: %d", baseWithoutID)
 	}
 	exactID := json.RawMessage(`"` + strings.Repeat("a", exactIDBytes-2) + `"`)
-	if exact, err := marshalMCPResponse(compactFormatError(exactID), false); err != nil || len(exact) != maxMCPFrameBytes {
+	if exact, err := marshalBoundedFormatResponse(compactFormatError(exactID)); err != nil || len(exact) != maxMCPFrameBytes {
 		t.Fatalf("compact fallback exact boundary drifted: length=%d err=%v", len(exact), err)
 	}
 	var exactOutput bytes.Buffer
@@ -629,6 +629,36 @@ func TestBoundedFormatResponsePreservesIDsAndUsesCompactFallback(t *testing.T) {
 	var overOutput bytes.Buffer
 	if err := writeBoundedFormatResponse(&overOutput, compactFormatError(overID)); !errors.Is(err, errMCPResponseTooLarge) || overOutput.Len() != 0 {
 		t.Fatalf("compact fallback +1 boundary was not rejected atomically: err=%v bytes=%d", err, overOutput.Len())
+	}
+}
+
+func TestBoundedFormatResponsePreservesValidatedScalarIDRepresentations(t *testing.T) {
+	for _, raw := range []string{
+		`"<\"\u0001"`,
+		"\"\u2028\u2029\"",
+		`-0.0`,
+		`null`,
+	} {
+		encoded, err := marshalBoundedFormatResponse(response{
+			JSONRPC: "2.0",
+			ID:      json.RawMessage(raw),
+			Error:   &rpcError{-32602, "too large"},
+		})
+		if err != nil {
+			t.Fatalf("ID %q was rejected: %v", raw, err)
+		}
+		if !bytes.Contains(encoded, []byte(`,"id":`+raw+`,`)) && !bytes.Contains(encoded, []byte(`,"id":`+raw+`}`)) {
+			t.Fatalf("bounded response changed scalar ID %q: %q", raw, encoded)
+		}
+	}
+	if validMCPRequestID(json.RawMessage(`"bad`)) {
+		t.Fatal("malformed scalar ID was admitted")
+	}
+	if validMCPRequestID(json.RawMessage("\"\xff\"")) {
+		t.Fatal("invalid UTF-8 scalar ID was admitted")
+	}
+	if !validMCPRequestID(json.RawMessage(`999999999999999999999999999999999999999999999999999999999999999999999999`)) {
+		t.Fatal("large JSON number ID was rejected by float conversion")
 	}
 }
 

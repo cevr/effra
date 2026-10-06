@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"effra.local/prototype/internal/compiler"
 	sourcefile "effra.local/prototype/internal/source"
@@ -82,7 +83,7 @@ const (
 
 var errMCPResponseTooLarge = errors.New("MCP response exceeds the encoded frame limit")
 
-const compactFormatResponseError = "format response too large"
+const compactFormatResponseError = "too large"
 
 // readMCPFrame admits at most max bytes before a terminal LF. CR in CRLF is
 // part of that bounded frame. An oversized line is drained through its LF
@@ -167,23 +168,119 @@ func writeMCPResponse(output io.Writer, value response, maxBytes int) error {
 	return writeMCPResponseWithEscape(output, value, maxBytes, true)
 }
 
-// Formatting responses use JSON's non-HTML-escaping mode so a valid request
-// ID or display URI is not expanded sixfold merely by response encoding. The
-// encoded body is still checked before any bytes are written.
+func marshalMCPValue(value any, escapeHTML bool) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(escapeHTML)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	encoded := buffer.Bytes()
+	if len(encoded) == 0 || encoded[len(encoded)-1] != '\n' {
+		return nil, errors.New("MCP value encoder omitted its line terminator")
+	}
+	return encoded[:len(encoded)-1], nil
+}
+
+func validMCPRequestID(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || !utf8.Valid(trimmed) {
+		return false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.UseNumber()
+	var id any
+	if err := decoder.Decode(&id); err != nil {
+		return false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return false
+	}
+	switch id.(type) {
+	case nil, string, json.Number:
+		return true
+	default:
+		return false
+	}
+}
+
+func validatedFormatResponseID(raw json.RawMessage) ([]byte, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if !validMCPRequestID(trimmed) {
+		return nil, errors.New("code.format response has an invalid request ID")
+	}
+	return trimmed, nil
+}
+
+// marshalBoundedFormatResponse embeds the already validated request ID as
+// JSON. Re-encoding a RawMessage through encoding/json can expand valid raw
+// U+2028/U+2029 or HTML characters, so the bounded format envelope preserves
+// the request representation and only encodes the response fields.
+func marshalBoundedFormatResponse(value response) ([]byte, error) {
+	id, err := validatedFormatResponseID(value.ID)
+	if err != nil {
+		return nil, err
+	}
+	jsonrpc, err := marshalMCPValue(value.JSONRPC, false)
+	if err != nil {
+		return nil, err
+	}
+	var buffer bytes.Buffer
+	buffer.WriteString(`{"jsonrpc":`)
+	buffer.Write(jsonrpc)
+	buffer.WriteString(`,"id":`)
+	buffer.Write(id)
+	if value.Result != nil {
+		result, err := marshalMCPValue(value.Result, false)
+		if err != nil {
+			return nil, err
+		}
+		buffer.WriteString(`,"result":`)
+		buffer.Write(result)
+	}
+	if value.Error != nil {
+		errorValue, err := marshalMCPValue(value.Error, false)
+		if err != nil {
+			return nil, err
+		}
+		buffer.WriteString(`,"error":`)
+		buffer.Write(errorValue)
+	}
+	buffer.WriteByte('}')
+	return buffer.Bytes(), nil
+}
+
+// Formatting responses use a bounded envelope that preserves a validated ID
+// without optional JSON/JavaScript escape expansion. Other response fields
+// remain JSON encoded and the complete body is checked before writing.
 func writeBoundedFormatResponse(output io.Writer, value response) error {
-	return writeMCPResponseWithEscape(output, value, maxMCPFrameBytes, false)
+	encoded, err := marshalBoundedFormatResponse(value)
+	if err != nil {
+		return err
+	}
+	if len(encoded) > maxMCPFrameBytes {
+		return errMCPResponseTooLarge
+	}
+	encoded = append(encoded, '\n')
+	_, err = output.Write(encoded)
+	return err
 }
 
 func boundedFormatResponseFits(value response) bool {
-	encoded, err := marshalMCPResponse(value, false)
+	encoded, err := marshalBoundedFormatResponse(value)
 	return err == nil && len(encoded) <= maxMCPFrameBytes
 }
 
 func compactFormatError(id json.RawMessage) response {
+	return compactFormatErrorWithCode(id, -32000)
+}
+
+func compactFormatErrorWithCode(id json.RawMessage, code int) response {
 	return response{
 		JSONRPC: "2.0",
 		ID:      id,
-		Error:   &rpcError{-32000, compactFormatResponseError},
+		Error:   &rpcError{code, compactFormatResponseError},
 	}
 }
 
@@ -330,11 +427,7 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 		if len(res.ID) == 0 {
 			res.ID = json.RawMessage("null")
 		}
-		var id any
-		_ = json.Unmarshal(req.ID, &id)
-		_, stringID := id.(string)
-		_, numberID := id.(float64)
-		if req.JSONRPC != "2.0" || (!stringID && !numberID) || req.Method == "" {
+		if req.JSONRPC != "2.0" || !validMCPRequestID(req.ID) || req.Method == "" {
 			res.ID = json.RawMessage("null")
 			res.Error = &rpcError{-32600, "Invalid Request"}
 		} else {
@@ -408,21 +501,26 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 			err = writeMCPResponse(output, res, 0)
 		}
 		if errors.Is(err, errMCPResponseTooLarge) && formatCall {
-			res = response{
-				JSONRPC: "2.0",
-				ID:      res.ID,
-				Result: toolResult{
-					Content: []map[string]string{{"type": "text", "text": fmt.Sprintf("code.format response exceeds %d encoded bytes", maxMCPFrameBytes)}},
-					IsError: true,
-				},
-			}
-			err = writeBoundedFormatResponse(output, res)
-			if errors.Is(err, errMCPResponseTooLarge) {
-				// Keep the request ID correlated while reducing an over-limit
-				// formatting result to a compact JSON-RPC error. A code.format
-				// request admitted by readMCPFrame always leaves room for this
-				// shorter envelope.
-				err = writeBoundedFormatResponse(output, compactFormatError(res.ID))
+			if res.Error != nil {
+				// Preserve the JSON-RPC error class and code when its original
+				// message cannot fit beside a near-limit request ID.
+				err = writeBoundedFormatResponse(output, compactFormatErrorWithCode(res.ID, res.Error.Code))
+			} else {
+				res = response{
+					JSONRPC: "2.0",
+					ID:      res.ID,
+					Result: toolResult{
+						Content: []map[string]string{{"type": "text", "text": fmt.Sprintf("code.format response exceeds %d encoded bytes", maxMCPFrameBytes)}},
+						IsError: true,
+					},
+				}
+				err = writeBoundedFormatResponse(output, res)
+				if errors.Is(err, errMCPResponseTooLarge) {
+					// The compact response keeps the validated request ID and
+					// uses a fixed message shorter than the smallest admitted
+					// code.format invocation envelope.
+					err = writeBoundedFormatResponse(output, compactFormatError(res.ID))
+				}
 			}
 		}
 		if err != nil {

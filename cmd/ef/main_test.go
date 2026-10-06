@@ -345,6 +345,37 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 		}
 	}
 
+	resolvedParentTarget := filepath.Join(root, "deep", "parent-target.ef")
+	lexicalParentCounterpart := filepath.Join(root, "parent-target.ef")
+	lexicalBytes := []byte(`effect fn lexical() -> string { "keep" }`)
+	if err := os.WriteFile(resolvedParentTarget, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lexicalParentCounterpart, lexicalBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0555); err != nil {
+		t.Fatal(err)
+	}
+	output, stderr, code = runTestCLIDir(t, binary, root, "", "fmt", "--json", "jump/../parent-target.ef")
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 || len(stderr) != 0 {
+		t.Fatalf("resolved parent replacement failed with a read-only lexical parent: code=%d stderr=%q stdout=%q", code, stderr, output)
+	}
+	var resolvedParentReport formatReport
+	if err := json.Unmarshal(output, &resolvedParentReport); err != nil || len(resolvedParentReport.Files) != 1 || !resolvedParentReport.Files[0].Written || resolvedParentReport.Files[0].Path != "jump/../parent-target.ef" {
+		t.Fatalf("resolved parent replacement lost requested identity: err=%v report=%+v", err, resolvedParentReport)
+	}
+	resolvedBytes, err := os.ReadFile(resolvedParentTarget)
+	if err != nil || string(resolvedBytes) != want.Text {
+		t.Fatalf("resolved parent target was not formatted: err=%v bytes=%q", err, resolvedBytes)
+	}
+	if got, err := os.ReadFile(lexicalParentCounterpart); err != nil || !bytes.Equal(got, lexicalBytes) {
+		t.Fatalf("lexical counterpart was changed: err=%v bytes=%q", err, got)
+	}
+
 	hardlinkOne := filepath.Join(root, "hard-one.ef")
 	hardlinkTwo := filepath.Join(root, "hard-two.ef")
 	if err := os.WriteFile(hardlinkOne, []byte(source), 0600); err != nil {
@@ -507,7 +538,7 @@ func TestReplaceFormattedFileCleansTempAfterActualFailure(t *testing.T) {
 	}
 	plan := formatPlan{path: path, displayPath: "main.ef", info: info, source: []byte(source), result: result}
 	err = replaceFormattedFileWithHook(plan, func(string) error { return os.ErrPermission })
-	if err == nil || !strings.Contains(err.Error(), "EFMT_WRITE") {
+	if err == nil || !strings.Contains(err.Error(), "EFMT_WRITE") || !strings.Contains(err.Error(), "main.ef") {
 		t.Fatalf("actual replacement failure was not reported: %v", err)
 	}
 	got, err := os.ReadFile(path)
@@ -522,5 +553,94 @@ func TestReplaceFormattedFileCleansTempAfterActualFailure(t *testing.T) {
 		if strings.Contains(entry.Name(), "effra-format-") {
 			t.Fatalf("temporary file leaked after failure: %s", entry.Name())
 		}
+	}
+}
+
+func TestReplaceFormattedFileRejectsSameBytesDifferentInode(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.ef")
+	source := `effect fn main() -> string { "ok" }`
+	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := compiler.FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := formatPlan{path: path, parentPath: root, displayPath: "main.ef", info: info, source: []byte(source), result: result}
+	replacement := filepath.Join(root, "replacement.ef")
+	if err := os.WriteFile(replacement, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(replacement, path); err != nil {
+		t.Fatal(err)
+	}
+	err = replaceFormattedFile(plan)
+	if err == nil || !strings.Contains(err.Error(), "EFMT_STALE") || !strings.Contains(err.Error(), "main.ef") {
+		t.Fatalf("same-bytes inode replacement was accepted without the requested identity: %v", err)
+	}
+	if got, readErr := os.ReadFile(path); readErr != nil || string(got) != source {
+		t.Fatalf("same-bytes inode replacement changed disk state: err=%v bytes=%q", readErr, got)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "effra-format-") {
+			t.Fatalf("temporary file leaked after same-bytes inode rejection: %s", entry.Name())
+		}
+	}
+}
+
+func TestReplaceFormattedFileUsesResolvedParentForRawPath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "deep", "inner"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "deep", "inner"), filepath.Join(root, "jump")); err != nil {
+		t.Fatal(err)
+	}
+	source := `effect fn main() -> string { "ok" }`
+	actualPath := filepath.Join(root, "deep", "raw-parent.ef")
+	if err := os.WriteFile(actualPath, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rawPath := root + string(filepath.Separator) + "jump" + string(filepath.Separator) + ".." + string(filepath.Separator) + "raw-parent.ef"
+	info, err := os.Stat(rawPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := compiler.FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(rawPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := formatPlan{path: rawPath, parentPath: filepath.Dir(resolved), displayPath: "jump/../raw-parent.ef", info: info, source: []byte(source), result: result}
+	var temporaryParent string
+	err = replaceFormattedFileWithHook(plan, func(tempPath string) error {
+		temporaryParent = filepath.Dir(tempPath)
+		return os.ErrPermission
+	})
+	if err == nil || !strings.Contains(err.Error(), "EFMT_WRITE") || !strings.Contains(err.Error(), "jump/../raw-parent.ef") {
+		t.Fatalf("resolved-parent hook failure lost write identity: %v", err)
+	}
+	parentInfo, err := os.Stat(filepath.Dir(resolved))
+	if err != nil {
+		t.Fatal(err)
+	}
+	temporaryInfo, err := os.Stat(temporaryParent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(parentInfo, temporaryInfo) {
+		t.Fatalf("temporary was created in lexical rather than resolved parent: temp=%s resolved=%s", temporaryParent, filepath.Dir(resolved))
 	}
 }

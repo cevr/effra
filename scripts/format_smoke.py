@@ -188,6 +188,18 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     assert replies[4]["result"]["isError"] and "stale format source" in replies[4]["result"]["content"][0]["text"]
     assert replies[5]["result"] == {}
 
+    expansion_messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "format-expansion", "version": "1"}}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "code.format", "arguments": {"source": overflow_expansion.decode()}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "ping"},
+    ]
+    expansion_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input="\n".join(json.dumps(message) for message in expansion_messages) + "\n", text=True, capture_output=True, timeout=60)
+    expansion_replies = [json.loads(line) for line in expansion_server.stdout.splitlines()]
+    expansion_result = expansion_replies[1]["result"]
+    assert expansion_server.returncode == 0 and [reply.get("id") for reply in expansion_replies] == [1, 2, 3]
+    assert expansion_result["isError"] and "structuredContent" not in expansion_result and "MCP output limit" in expansion_result["content"][0]["text"]
+
     target_messages = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "format-target", "version": "1"}}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
@@ -254,7 +266,61 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     near_limit_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input=(init_line + "\n" + ready_line + "\n" + near_limit_line + "\n" + ping_line + "\n").encode(), capture_output=True, timeout=60)
     near_limit_replies = [json.loads(line) for line in near_limit_server.stdout.splitlines()]
     assert near_limit_server.returncode == 0 and [reply.get("id") for reply in near_limit_replies] == [1, near_limit_id, 3]
-    assert near_limit_replies[1]["error"]["code"] == -32000 and near_limit_replies[1]["error"]["message"] == "format response too large"
+    assert near_limit_replies[1]["error"]["code"] == -32000 and near_limit_replies[1]["error"]["message"] == "too large"
+
+    def exact_scalar_id_line(prefix, suffix, scalar):
+        available = frame_limit - len((prefix + suffix).encode())
+        scalar_width = len(scalar.encode())
+        repetitions = available // scalar_width
+        remainder = available - repetitions * scalar_width
+        identifier = scalar * repetitions + "a" * remainder
+        line = prefix + identifier + suffix
+        assert len(line.encode()) == frame_limit
+        return line, identifier
+
+    valid_prefix = '{"jsonrpc":"2.0","id":"'
+    valid_suffix = '","method":"tools/call","params":{"name":"code.format","arguments":{"source":""}}}'
+    for separator in ("\u2028", "\u2029"):
+        separator_line, separator_id = exact_scalar_id_line(valid_prefix, valid_suffix, separator)
+        separator_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input=(init_line + "\n" + ready_line + "\n" + separator_line + "\n" + ping_line + "\n").encode(), capture_output=True, timeout=60)
+        separator_replies = [json.loads(line) for line in separator_server.stdout.splitlines()]
+        assert separator_server.returncode == 0 and [reply.get("id") for reply in separator_replies] == [1, separator_id, 3]
+        assert separator_replies[1]["error"]["code"] == -32000 and separator_replies[1]["error"]["message"] == "too large"
+        assert all(len(line) <= frame_limit for line in separator_server.stdout.splitlines())
+
+    missing_prefix = '{"jsonrpc":"2.0","id":"'
+    missing_suffix = '","method":"tools/call","params":{"name":"code.format"}}'
+    missing_line, missing_id = exact_scalar_id_line(missing_prefix, missing_suffix, "a")
+    missing_minus_line = missing_prefix + missing_id[:-1] + missing_suffix
+    for candidate, candidate_id in ((missing_line, missing_id), (missing_minus_line, missing_id[:-1])):
+        missing_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input=(init_line + "\n" + ready_line + "\n" + candidate + "\n" + ping_line + "\n").encode(), capture_output=True, timeout=60)
+        missing_replies = [json.loads(line) for line in missing_server.stdout.splitlines()]
+        assert missing_server.returncode == 0 and [reply.get("id") for reply in missing_replies] == [1, candidate_id, 3]
+        assert missing_replies[1]["error"]["code"] == -32602 and missing_replies[1]["error"]["message"] == "too large"
+
+    unknown_prefix = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code.format","arguments":{"source":"","'
+    unknown_suffix = '":""}}}'
+    unknown_key_bytes = frame_limit - len((unknown_prefix + unknown_suffix).encode())
+    unknown_key = "\u2028" * (unknown_key_bytes // 3) + "a" * (unknown_key_bytes % 3)
+    unknown_line = unknown_prefix + unknown_key + unknown_suffix
+    assert len(unknown_line.encode()) == frame_limit
+    unknown_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input=(init_line + "\n" + ready_line + "\n" + unknown_line + "\n" + ping_line + "\n").encode(), capture_output=True, timeout=60)
+    unknown_replies = [json.loads(line) for line in unknown_server.stdout.splitlines()]
+    assert unknown_server.returncode == 0 and [reply.get("id") for reply in unknown_replies] == [1, 2, 3]
+    assert unknown_replies[1]["error"]["code"] == -32602 and unknown_replies[1]["error"]["message"] == "too large"
+
+    variant_messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "format-id-variants", "version": "1"}}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": -0.0, "method": "tools/call", "params": {"name": "code.format", "arguments": {"source": ""}}},
+        {"jsonrpc": "2.0", "id": None, "method": "tools/call", "params": {"name": "code.format", "arguments": {"source": ""}}},
+        {"jsonrpc": "2.0", "id": 'quote"\u0001', "method": "tools/call", "params": {"name": "code.format", "arguments": {"source": ""}}},
+        {"jsonrpc": "2.0", "id": 3, "method": "ping"},
+    ]
+    variant_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input="\n".join(json.dumps(message) for message in variant_messages) + "\n", text=True, capture_output=True, timeout=10)
+    variant_replies = [json.loads(line) for line in variant_server.stdout.splitlines()]
+    assert variant_server.returncode == 0 and [reply.get("id") for reply in variant_replies] == [1, 0.0, None, 'quote"\u0001', 3]
+    assert all(reply.get("result", {}).get("structuredContent", {}).get("origin") == "buffer" for reply in variant_replies[1:4])
 
     invalid_disk = workspace / "invalid-utf8.ef"
     invalid_disk.write_bytes(b"// invalid \xff\neffect fn main() -> () { () }\n")

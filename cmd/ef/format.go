@@ -77,6 +77,7 @@ type formatReport struct {
 
 type formatPlan struct {
 	path        string
+	parentPath  string
 	displayPath string
 	info        os.FileInfo
 	source      []byte
@@ -341,7 +342,7 @@ func formatFiles(opts fmtOptions) (formatReport, error) {
 			return formatPlanFailure(&report, &formatAdapterError{code: "EFMT_OUTPUT_LIMIT", path: displayPath, message: fmt.Sprintf("request exceeds %d-byte aggregate output limit", maxFormatTotalOutput)})
 		}
 		report.Files[reportAt].Completed = true
-		plans = append(plans, formatPlan{path: path, displayPath: displayPath, info: info, source: append([]byte(nil), source...), result: result, reportAt: reportAt})
+		plans = append(plans, formatPlan{path: path, parentPath: filepath.Dir(resolvedPath), displayPath: displayPath, info: info, source: append([]byte(nil), source...), result: result, reportAt: reportAt})
 		byResolvedPath[resolvedPath] = len(plans) - 1
 	}
 	for index := range plans {
@@ -478,7 +479,14 @@ func replaceFormattedFileWithHook(plan formatPlan, beforeRename func(string) err
 	if err := validateFormatSnapshot(plan); err != nil {
 		return err
 	}
-	directory := filepath.Dir(plan.path)
+	directory := plan.parentPath
+	if directory == "" {
+		resolvedPath, err := filepath.EvalSymlinks(plan.path)
+		if err != nil {
+			return formatWriteError(plan, err)
+		}
+		directory = filepath.Dir(resolvedPath)
+	}
 	temp, err := os.CreateTemp(directory, "."+filepath.Base(plan.path)+".effra-format-*")
 	if err != nil {
 		return formatWriteError(plan, err)
