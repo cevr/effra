@@ -30,6 +30,8 @@ Include a separate compiler/analysis-producer identity in the full semantic snap
 
 Extend inspect/type queries from the canonical type representation established by bundled interfaces. A type graph contains stable identities within the snapshot, roots and one definition per reachable type; references express sharing or recursion. A display string is derived presentation. No independently parsed string grammar or opaque callback erasure is acceptable.
 
+Exact producer content identity must describe the executing artifact, not whichever binary now occupies its installation pathname. Keep release/build declarations separate and informational; expose only bounded, whitelisted settings. On a platform where executing-artifact bytes cannot be identified, report that limitation and limit reuse to an explicitly qualified process scope. Linux may read the executing image through `/proc/self/exe`; opening the pathname returned by `os.Executable` is insufficient after replacement. See the [Linux executable-image contract](https://man7.org/linux/man-pages/man5/proc_pid_exe.5.html). Artifact identity does not authenticate a build or identify arbitrary dynamically loaded dependencies. Keep acquisition lazy and outside semantic compilation, with passive identity facts shared by adapters. Test actual atomic replacement with an old running server and a fresh process, distinct dirty builds, unavailable identity, and lazy single acquisition. Repeated unchanged digests alone do not prove single acquisition. Preserve ordinary build/emit behavior and measure first-report cost separately from subsequent reports.
+
 For supported language constructs, expose:
 
 - Primitive and nominal identities, declaration locations, type arguments and generic parameters.
