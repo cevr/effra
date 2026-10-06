@@ -14,6 +14,8 @@ assert inspected["symbol"]["contract"]["requirements"] == ["Users"]
 assert inspected["symbol"]["contract"]["failures"] == ["NotFound"]
 invalid = json.loads(run("check", "examples/missing-service.ef", success=False).stdout)
 assert any(d["code"] == "EF108" for d in invalid["diagnostics"])
+invalid_report = json.loads(run("diagnostics", "examples/missing-service.ef", "--json", success=False).stdout)
+assert not invalid_report["checked"] and not invalid_report["lintAvailable"] and not invalid_report["policyPassed"]
 assert run("run", "examples/main.ef").stdout == "Hello, Ada\nUnknown user\n"
 assert run("run", "examples/main.ef", "--target", "js").stdout == "Hello, Ada\nUnknown user\n"
 for target in ("go", "js"):
@@ -68,7 +70,7 @@ server = subprocess.run([ef, "mcp", str(root)], input="\n".join(map(json.dumps, 
 assert server.returncode == 0, server.stderr
 responses = [json.loads(line) for line in server.stdout.splitlines()]
 assert len(responses) == 8
-assert len(responses[1]["result"]["tools"]) == 9
+assert len(responses[1]["result"]["tools"]) == 10
 mcp = responses[2]["result"]["structuredContent"]
 assert mcp["symbol"] == inspected["symbol"] and mcp["revision"] == inspected["revision"]
 data_mcp = responses[3]["result"]["structuredContent"]
@@ -116,6 +118,7 @@ with tempfile.TemporaryDirectory(prefix="effra-tooling-") as tmp:
         {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"project.graph","arguments":{"file":"main.ef"}}},
         {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"lint.rules","arguments":{}}},
         {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"code.typeAt","arguments":{"file":"main.ef","offset":1.5}}},
+        {"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"project.diagnostics","arguments":{"file":"main.ef","strict":True}}},
     ]
     server=subprocess.run([ef,"mcp",tmp],input="\n".join(map(json.dumps,calls))+"\n",text=True,capture_output=True)
     assert server.returncode==0,server.stderr
@@ -125,6 +128,18 @@ with tempfile.TemporaryDirectory(prefix="effra-tooling-") as tmp:
     assert replies[3]["result"]["structuredContent"]["nodes"]
     assert replies[4]["result"]["structuredContent"]==rules
     assert replies[5]["error"]["code"]==-32602
+    diagnostics_reply=replies[6]["result"]["structuredContent"]
+    assert diagnostics_reply["checked"] and not diagnostics_reply["policyPassed"] and diagnostics_reply["totalCounts"]["warnings"]==1
+
+    many=pathlib.Path(tmp)/"many.ef"
+    many.write_text("effect fn duplicate() -> () { () }\n"*102)
+    over_calls=messages[:2]+[
+        {"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"project.diagnostics","arguments":{"file":"many.ef"}}},
+    ]
+    over_server=subprocess.run([ef,"mcp",tmp],input="\n".join(map(json.dumps,over_calls))+"\n",text=True,capture_output=True)
+    assert over_server.returncode==0,over_server.stderr
+    over_reply=json.loads(over_server.stdout.splitlines()[1])
+    assert over_reply["result"]["isError"] and "exceeds limit" in over_reply["result"]["content"][0]["text"]
 
     source="""effect fn task() -> string { \"ok\" }
 effect fn main() -> () {

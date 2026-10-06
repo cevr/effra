@@ -2,6 +2,8 @@ package compiler
 
 import (
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -15,7 +17,22 @@ const DiagnosticReportSchemaVersion = 1
 type SourceSnapshot struct {
 	URI    string
 	Origin string
-	Text   string
+	Text   string `json:"-"`
+}
+
+// FileURI returns the canonical escaped URI for a regular source file. File
+// URIs are shared by CLI and MCP so a workspace-relative request and an
+// absolute CLI path identify the same revision in the report.
+func FileURI(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", err
+	}
+	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(resolved)}).String(), nil
 }
 
 type SourceIdentity struct {
@@ -80,6 +97,19 @@ type DiagnosticReport struct {
 	Truncated             bool                `json:"truncated"`
 }
 
+func legalDiagnosticPosition(source string, index sourcePositionIndex, offset int) (DiagnosticPosition, bool) {
+	if index.valid[offset] {
+		return index.positions[offset], true
+	}
+	// A lexer span may end after CR but before LF. LSP has no position at
+	// that byte boundary, so project that endpoint to the line end before CR
+	// while preserving the original UTF-8 byte span in the finding.
+	if offset > 0 && offset < len(source) && source[offset-1] == '\r' && source[offset] == '\n' && index.valid[offset-1] {
+		return index.positions[offset-1], true
+	}
+	return DiagnosticPosition{}, false
+}
+
 type sourcePositionIndex struct {
 	positions []DiagnosticPosition
 	valid     []bool
@@ -131,18 +161,20 @@ func newSourcePositionIndex(source string) sourcePositionIndex {
 }
 
 // UTF16Range maps an existing UTF-8 byte span to a valid, end-exclusive LSP
-// range. It returns false when the span is outside the source, lands inside a
-// UTF-8 sequence, or ends between the two bytes of a CRLF sequence.
+// range. It returns false when the span is outside the source or lands inside
+// a UTF-8 sequence. A CRLF-internal endpoint is normalized to the line end.
 func UTF16Range(source string, span Span) (DiagnosticRange, bool) {
 	if span.Offset < 0 || span.Length < 0 || span.Offset > len(source) || span.Length > len(source)-span.Offset {
 		return DiagnosticRange{}, false
 	}
 	index := newSourcePositionIndex(source)
 	end := span.Offset + span.Length
-	if !index.valid[span.Offset] || !index.valid[end] {
+	start, startOK := legalDiagnosticPosition(source, index, span.Offset)
+	finish, endOK := legalDiagnosticPosition(source, index, end)
+	if !startOK || !endOK {
 		return DiagnosticRange{}, false
 	}
-	return DiagnosticRange{Start: index.positions[span.Offset], End: index.positions[end]}, true
+	return DiagnosticRange{Start: start, End: finish}, true
 }
 
 func diagnosticSeverity(name string) (string, int) {
@@ -196,9 +228,11 @@ func (r *Result) DiagnosticReport(snapshot SourceSnapshot, strict bool) Diagnost
 		hasSourceSpan := span.Offset != 0 || span.Length != 0 || span.Line != 0 || span.Column != 0
 		if hasSourceSpan && span.Offset >= 0 && span.Length >= 0 && span.Offset <= len(snapshot.Text) && span.Length <= len(snapshot.Text)-span.Offset {
 			end := span.Offset + span.Length
-			if positionIndex.valid[span.Offset] && positionIndex.valid[end] {
-				finding.LocationAvailable = true
-				finding.LSP = &LSPDiagnostic{Range: DiagnosticRange{Start: positionIndex.positions[span.Offset], End: positionIndex.positions[end]}, Severity: lspSeverity, Code: code, Source: "effra", Message: message}
+			if start, startOK := legalDiagnosticPosition(snapshot.Text, positionIndex, span.Offset); startOK {
+				if finish, endOK := legalDiagnosticPosition(snapshot.Text, positionIndex, end); endOK {
+					finding.LocationAvailable = true
+					finding.LSP = &LSPDiagnostic{Range: DiagnosticRange{Start: start, End: finish}, Severity: lspSeverity, Code: code, Source: "effra", Message: message}
+				}
 			}
 		}
 		report.Diagnostics = append(report.Diagnostics, finding)
@@ -230,7 +264,16 @@ func (r *Result) DiagnosticReport(snapshot SourceSnapshot, strict bool) Diagnost
 		if left.Code != right.Code {
 			return left.Code < right.Code
 		}
-		return left.Origin < right.Origin
+		if left.Origin != right.Origin {
+			return left.Origin < right.Origin
+		}
+		if left.Rule != right.Rule {
+			return left.Rule < right.Rule
+		}
+		if left.Severity != right.Severity {
+			return left.Severity < right.Severity
+		}
+		return left.Message < right.Message
 	})
 	for _, finding := range report.Diagnostics {
 		switch finding.Severity {
@@ -253,8 +296,7 @@ func (r DiagnosticReport) Bounded(limit int) (DiagnosticReport, error) {
 		return DiagnosticReport{}, fmt.Errorf("diagnostic limit must not be negative")
 	}
 	if len(r.Diagnostics) > limit {
-		r.Diagnostics = append([]DiagnosticFinding(nil), r.Diagnostics[:limit]...)
-		r.Truncated = true
+		return DiagnosticReport{}, fmt.Errorf("diagnostic result exceeds limit of %d findings", limit)
 	}
 	r.ReturnedCount = len(r.Diagnostics)
 	return r, nil

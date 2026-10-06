@@ -5,6 +5,7 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 | CLI | MCP | Purpose |
 | --- | --- | --- |
 | `ef check FILE` | `project.check` | Non-disableable source admission diagnostics |
+| `ef diagnostics FILE [--strict] [--json]` | `project.diagnostics` | One shared compiler/lint report with byte spans and UTF-16 ranges |
 | `ef lint FILE [--strict]` | `project.lint` | Checked semantic advice; separate `checked` and `lintPassed` |
 | `ef lint rules` | `lint.rules` | Stable codes, severity, names and rationale |
 | `ef inspect FILE SYMBOL` | `code.inspect` | Declared/body contracts or nominal record, enum and error metadata |
@@ -14,6 +15,14 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 | `ef test FILE` | `project.tests` discovers cases | CLI executes; MCP remains read-only |
 
 File commands accept `--target go|js`, defaulting to Go. Results contain semantic revision hashes. MCP file tools accept `expectedRevision` and reject stale snapshots.
+
+## Diagnostic reports
+
+`ef diagnostics` and `project.diagnostics` use the same compiler-owned report. It identifies the source with a canonical escaped `file:` URI and an `origin` such as `disk`, includes the exact semantic `revision`, selected `target`, `checked` admission state, `strict` policy, `policyPassed`, and deterministic findings. Every finding preserves its UTF-8 byte `span` and reports `code`, `origin`, optional lint `rule`, stable `severity` (`error`, `warning`, `information`, or `hint`), and message. A finding with a source location also has a valid zero-based UTF-16 `lsp.range`; `locationAvailable` is false when the compiler has no source location, such as an unsupported target diagnostic.
+
+Compiler errors always fail policy. Strict mode changes only the policy decision for warnings; it does not change finding severity. Unchecked source has `lintAvailable: false` and an explicit `lintUnavailableReason`, while compiler findings remain available. Reasoned lint suppressions can remove optional advice but cannot hide compiler errors.
+
+The CLI prints one finding per line by default and emits the complete report with `--json`. A policy failure exits 1, an invalid invocation exits 2, and file or compiler operation failures remain operational errors. MCP returns source errors as successful structured reports with `policyPassed: false`; source admission, stale-revision, path, and output-limit failures remain tool errors. MCP accepts at most 100 diagnostic findings and reports an explicit limit error above that boundary. The report's `totalCounts` and `returnedCount` are exact for every successful response.
 
 ## Lint
 
@@ -49,7 +58,7 @@ For `examples/workflow.ef`, `welcome` requires `Directory`; `DemoDirectory` impl
 
 This is a single-file static composition graph, including deferred calls. It does not establish execution order or runtime allocations. Provider construction is explicit and non-memoized: a reused value is one graph identity, while repeated runs of one recipe are distinct values. Fallible acquisition, lifecycle-safe arbitrary capture, general sharing keys and cycle paths will extend this model when implemented. Expression IDs contain offsets and are scoped to the revision.
 
-MCP limits graphs to 1,000 nodes and 2,000 edges; larger graphs fail explicitly. Lint diagnostics are limited to 100 with truncation flags. Full CLI results remain available.
+MCP limits graphs to 1,000 nodes and 2,000 edges; larger graphs fail explicitly. The legacy `project.lint` response keeps its separate bounded diagnostic arrays and truncation flags. Full CLI diagnostic reports remain available.
 
 ## Next capabilities
 

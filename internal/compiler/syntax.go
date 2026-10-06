@@ -186,7 +186,7 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 			commentStart := i
 			i += 2
 			column += 2
-			for i < len(source) && source[i] != '\n' {
+			for i < len(source) && source[i] != '\n' && source[i] != '\r' {
 				i++
 				column++
 			}
