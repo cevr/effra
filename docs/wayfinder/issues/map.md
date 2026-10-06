@@ -34,6 +34,8 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 
 - [Pinned upstream tests and executable conformance mapping](upstream-conformance.md): licensed reference corpus plus explicit behavior-to-Effra test mapping; copied tests do not count as native passes.
 
+- [Checked machines and owned actors](state-machines.md): owner-requested state-machine primitive over ordinary ADTs, explicit transition policy, owned invocation and shared graph inspection. Pure guards and flat states first; advanced statecharts/durability remain unsupported until specified.
+
 ## Foundation implementation receipts
 
 - [Reasoned semantic lint suppression](foundation-lint.md): named next-line advice suppression requires a reason; malformed, unknown and unused directives diagnose without disabling compiler checks.
