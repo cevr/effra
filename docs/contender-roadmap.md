@@ -12,14 +12,14 @@ Records, closed ADTs and match now cover the first application-data slice. The s
 | --- | --- | --- | --- |
 | Phase states and transition decisions | Explicit function/effect contracts | Codecs, usable collections and control flow beyond the closed data slice | Compiler + libraries |
 | Stored events and interaction records | Failure propagation | Explicit codecs, validation, versioned wire formats, nominal identifiers | Compiler-supported types + codec library + application migrations |
-| Notification providers and service adapters | Nominal services and explicit provision | Provider dependencies, constructor inputs, fallible scoped initialization, sharing and cycles | Checker + runtime/provider library |
+| Notification providers and service adapters | Nominal services and explicit provision | Fallible scoped initialization, acquisition sharing and cycles | Checker + runtime/provider library |
 | Existing Go clients, database pools and processes | Primitive package-function imports, partial-result retention, reviewed context forwarding | Named types, pointers/nil, fields, receiver methods, interfaces, common native numbers and multi-results | Go importer/type compatibility + adapter contracts |
 | Replay/live consumers | Scopes, child joining and cancellation | Bounded queues/streams, subscription acquisition, acknowledgement and overflow protocol | Runtime primitives + stream library + application protocol |
 | Admission and durable receipts | Managed execution | Transactions, identity/correlation, deduplication, outbox delivery and crash recovery | Application/storage services |
 | Application latest-work and process supervision | Owned replacement and native executable entry | Process/pipe/watch adapters, generation-safe publication, restart policy and bounded output | Platform adapters + concurrency library + application policy |
 | Agent-guided maintenance | CLI/MCP contracts, byte-anchor types, lint, static dependency graphs and revisions | Multi-file identities, full expression ranges, imported/native type detail, editor diagnostics and runtime/source correlation | Compiler/workspace tools + runtime instrumentation |
 
-The prototype's actual barriers are concrete: signature checking admits only a few primitive/handle types; providers with requirements receive EF103; imported calls support only restricted free-function shapes; recovery accepts a pure replacement value. See [checker](../internal/compiler/semantic.go), [Go import normalization](../internal/compiler/imports.go), [implemented limits](prototype.md), and [runtime/HTTP contracts](runtime.md).
+The prototype's remaining barriers are concrete: native imported calls support only restricted free-function shapes; provider constructors accept checked configuration and capture explicit service dependencies, but cannot acquire resources fallibly or memoize scoped initialization; recovery accepts a pure replacement value. See [checker](../internal/compiler/semantic.go), [Go import normalization](../internal/compiler/imports.go), [implemented limits](prototype.md), and [runtime/HTTP contracts](runtime.md).
 
 ## Build order
 
@@ -27,7 +27,7 @@ The prototype's actual barriers are concrete: signature checking admits only a f
 
 Add codecs and explicit external-data validation around records and closed ADTs. Add ordinary collections, iteration and the scalar operations needed by the first port. Option and Result should be ordinary reusable sums rather than special cases for every API. Introduce limited generics where the actual container/codec use requires them.
 
-Use a structured canonical type representation as these types arrive; extending string-encoded success kinds indefinitely would make payload checking, native compatibility and inspection fragile. Keep source-visible public contracts explicit. Matching should use declared alternatives and local payload types; whole-program inference is unnecessary for this slice.
+Extend the existing structured canonical type representation as these types arrive; payload checking, native compatibility and inspection must preserve declaration identity. Keep source-visible public contracts explicit. Matching should use declared alternatives and local payload types; whole-program inference is unnecessary for this slice.
 
 Add modules and package-qualified nominal identities so services and types can be shared across files without collisions. Resolve the representation seam with Go interop while designing records/sums: a language-only representation that forces copying every SDK object would repeat the interop adoption problem. Efficient host values and portable wire encodings are separate contracts.
 
@@ -47,7 +47,7 @@ The JS target can remain a clearly defined portable subset during this Go adopti
 
 ### 3. Providers that can run a real application
 
-Allow implementations to depend on other services, accept configuration and initialize resources effectfully. Give construction its own checked failure/requirement contract. Providers need one scoped sharing policy, a defined release order, cycle diagnostics and explicit startup failure behavior. Supplying the same pool to two consumers should not silently create two pools.
+Implementations now accept configuration and capture declared construction dependencies. Extend that construction contract to initialize resources effectfully with explicit failures. Providers need one scoped sharing policy, a defined release order, cycle diagnostics and explicit startup failure behavior. Supplying the same pool to two consumers should not silently create two pools.
 
 Add typed effectful error handlers so callers can inspect payloads, translate failures or make a bounded recovery decision. Add constrained effect-function types and row composition as real library combinators need them. Preserve readable public rows and local checking instead of requiring broad higher-order inference up front.
 
