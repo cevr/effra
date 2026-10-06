@@ -87,15 +87,17 @@ type Declaration struct {
 	Span     Span      `json:"span"`
 }
 type Function struct {
-	Name     string
-	Params   []Param
-	Return   string
-	Effect   bool
-	Errors   []string
-	Services []string
-	Body     *Block
-	Span     Span
-	DeclSpan Span `json:"-"`
+	Name      string
+	Params    []Param
+	Return    string
+	Effect    bool
+	Errors    []string
+	Services  []string
+	Body      *Block
+	Span      Span
+	DeclSpan  Span `json:"-"`
+	Ownership []OwnershipFact
+	Captures  []OwnershipFact
 }
 type Service struct {
 	Name    string

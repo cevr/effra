@@ -19,7 +19,7 @@ Optional lint can detect a never-used local recipe or unnecessary provision. Cor
 
 Resource acquisition must remain lazy and register cleanup atomically with its owner. Future shared memoization needs an independent producer owner: interrupting one waiter must not cancel every consumer's work. A memo wrapper alone cannot establish that policy.
 
-Static handle escape checking is a remaining gap. A File or Fiber whose owner has closed is guarded at runtime; the checker does not yet model owner regions. A future diagnostic must distinguish an inner-owned result from a borrowed outer handle, including function summaries rather than banning all handle returns.
+Static handle escape checking now distinguishes proven inner-owned results from borrowed outer handles, including bounded function summaries, record/enum paths and conservative uncertainty when analysis budgets are exhausted. Runtime checks remain in place. This is bounded evidence, not complete borrow checking; typed callback-result provenance remains part of the first-class function work. The [foundation receipts](../receipts/foundations-2026-10-06/README.md) record the integrated boundary.
 
 ## Testing lessons
 

@@ -1,0 +1,270 @@
+{
+  "head": "8debbc2a19ab0162414d74b8696bc23fdf52c5f8",
+  "host": "bite-cristian",
+  "platform": "Linux-6.12.93-x86_64-with-glibc2.39",
+  "cpuAffinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "toolchain": "go version go1.27.0 linux/amd64",
+  "binarySHA256": "47ad35cf3fa1253b1aea27e795d58bacce26d72a671b559efcb37cf5e55f3948",
+  "binaryBuildMetadata": "/tmp/effra-foundation-integration-8debbc2/ef: go1.27.0\n\tpath\teffra.local/prototype/cmd/ef\n\tmod\teffra.local/prototype\tv0.0.0-20261006084353-8debbc2a19ab\t\n\tbuild\t-buildmode=exe\n\tbuild\t-compiler=gc\n\tbuild\tCGO_ENABLED=1\n\tbuild\tCGO_CFLAGS=\n\tbuild\tCGO_CPPFLAGS=\n\tbuild\tCGO_CXXFLAGS=\n\tbuild\tCGO_LDFLAGS=\n\tbuild\tGOARCH=amd64\n\tbuild\tGOOS=linux\n\tbuild\tGOAMD64=v1\n\tbuild\tvcs=git\n\tbuild\tvcs.revision=8debbc2a19ab0162414d74b8696bc23fdf52c5f8\n\tbuild\tvcs.time=2026-10-06T08:43:53Z\n\tbuild\tvcs.modified=false\n",
+  "compilerBuildWallNs": 147222054,
+  "checkStages": [
+    {
+      "source": "examples/main.ef",
+      "sourceSHA256": "519dd6453c75bca100a0a61285ce635f184f4f68984c9f5aa3a625d3d89729de",
+      "processWallNs": 5043676,
+      "timings": {
+        "importMicros": 0,
+        "parseMicros": 128,
+        "checkMicros": 125,
+        "totalMicros": 258
+      }
+    },
+    {
+      "source": "examples/data.ef",
+      "sourceSHA256": "87f12c1aa362c53361727b3de0ca107eab56b888a44c87f97ae9ebac3c8234e0",
+      "processWallNs": 3969919,
+      "timings": {
+        "importMicros": 0,
+        "parseMicros": 118,
+        "checkMicros": 201,
+        "totalMicros": 323
+      }
+    },
+    {
+      "source": "examples/imports.ef",
+      "sourceSHA256": "6d8013a57ed32fe12de2f8d2bda0f74edc3f7eee374eba5fa3b952fc2509ad74",
+      "processWallNs": 75354755,
+      "timings": {
+        "importMicros": 69104,
+        "parseMicros": 253,
+        "checkMicros": 197,
+        "totalMicros": 69560
+      }
+    },
+    {
+      "source": "examples/ownership.ef",
+      "sourceSHA256": "86e3274e103406f332e3d8e8893e22c1cf9771c92bb04250e87b8d7df0589eaa",
+      "processWallNs": 3597504,
+      "timings": {
+        "importMicros": 0,
+        "parseMicros": 140,
+        "checkMicros": 195,
+        "totalMicros": 339
+      }
+    }
+  ],
+  "cli": {
+    "bindings": null,
+    "checked": true,
+    "declarations": null,
+    "diagnostics": [],
+    "revision": "86e3274e103406f332e3d8e8893e22c1cf9771c92bb04250e87b8d7df0589eaa",
+    "schemaVersion": 3,
+    "symbol": {
+      "name": "borrowOuter",
+      "parameters": [
+        {
+          "name": "file",
+          "type": "File",
+          "typeRef": {
+            "kind": "opaque",
+            "name": "File"
+          },
+          "span": {
+            "offset": 153,
+            "length": 4,
+            "line": 3,
+            "column": 23
+          }
+        }
+      ],
+      "contract": {
+        "success": "File",
+        "type": {
+          "kind": "opaque",
+          "name": "File"
+        },
+        "effect": true,
+        "failures": [],
+        "requirements": [],
+        "ownership": [
+          {
+            "status": "unknown",
+            "origin": "unknown"
+          }
+        ]
+      },
+      "bodyContract": {
+        "success": "File",
+        "type": {
+          "kind": "opaque",
+          "name": "File"
+        },
+        "effect": true,
+        "failures": [],
+        "requirements": [],
+        "ownership": [
+          {
+            "status": "borrowed",
+            "region": "parameter:file",
+            "origin": "parameter"
+          }
+        ]
+      },
+      "span": {
+        "offset": 141,
+        "length": 11,
+        "line": 3,
+        "column": 11
+      },
+      "contributions": []
+    },
+    "target": "go"
+  },
+  "mcp": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "capabilities": {
+          "tools": {
+            "listChanged": false
+          }
+        },
+        "instructions": "Read-only single-file compiler prototype. Use project.describe to inspect limits; code.inspect is authoritative for admitted source contracts.",
+        "protocolVersion": "2025-11-25",
+        "serverInfo": {
+          "name": "effra",
+          "version": "0.0.1-prototype"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "content": [
+          {
+            "text": "{\"bindings\":null,\"bindingsTruncated\":false,\"checked\":true,\"declarations\":null,\"declarationsTruncated\":false,\"diagnostics\":[],\"diagnosticsTruncated\":false,\"file\":\"examples/ownership.ef\",\"revision\":\"86e3274e103406f332e3d8e8893e22c1cf9771c92bb04250e87b8d7df0589eaa\",\"schemaVersion\":3,\"symbol\":{\"name\":\"borrowOuter\",\"parameters\":[{\"name\":\"file\",\"type\":\"File\",\"typeRef\":{\"kind\":\"opaque\",\"name\":\"File\"},\"span\":{\"offset\":153,\"length\":4,\"line\":3,\"column\":23}}],\"contract\":{\"success\":\"File\",\"type\":{\"kind\":\"opaque\",\"name\":\"File\"},\"effect\":true,\"failures\":[],\"requirements\":[],\"ownership\":[{\"status\":\"unknown\",\"origin\":\"unknown\"}]},\"bodyContract\":{\"success\":\"File\",\"type\":{\"kind\":\"opaque\",\"name\":\"File\"},\"effect\":true,\"failures\":[],\"requirements\":[],\"ownership\":[{\"status\":\"borrowed\",\"region\":\"parameter:file\",\"origin\":\"parameter\"}]},\"span\":{\"offset\":141,\"length\":11,\"line\":3,\"column\":11},\"contributions\":[]},\"target\":\"go\"}",
+            "type": "text"
+          }
+        ],
+        "structuredContent": {
+          "bindings": null,
+          "bindingsTruncated": false,
+          "checked": true,
+          "declarations": null,
+          "declarationsTruncated": false,
+          "diagnostics": [],
+          "diagnosticsTruncated": false,
+          "file": "examples/ownership.ef",
+          "revision": "86e3274e103406f332e3d8e8893e22c1cf9771c92bb04250e87b8d7df0589eaa",
+          "schemaVersion": 3,
+          "symbol": {
+            "name": "borrowOuter",
+            "parameters": [
+              {
+                "name": "file",
+                "type": "File",
+                "typeRef": {
+                  "kind": "opaque",
+                  "name": "File"
+                },
+                "span": {
+                  "offset": 153,
+                  "length": 4,
+                  "line": 3,
+                  "column": 23
+                }
+              }
+            ],
+            "contract": {
+              "success": "File",
+              "type": {
+                "kind": "opaque",
+                "name": "File"
+              },
+              "effect": true,
+              "failures": [],
+              "requirements": [],
+              "ownership": [
+                {
+                  "status": "unknown",
+                  "origin": "unknown"
+                }
+              ]
+            },
+            "bodyContract": {
+              "success": "File",
+              "type": {
+                "kind": "opaque",
+                "name": "File"
+              },
+              "effect": true,
+              "failures": [],
+              "requirements": [],
+              "ownership": [
+                {
+                  "status": "borrowed",
+                  "region": "parameter:file",
+                  "origin": "parameter"
+                }
+              ]
+            },
+            "span": {
+              "offset": 141,
+              "length": 11,
+              "line": 3,
+              "column": 11
+            },
+            "contributions": []
+          },
+          "target": "go"
+        },
+        "isError": false
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {}
+    }
+  ],
+  "benchmarkCommand": [
+    "go",
+    "test",
+    "./internal/compiler",
+    "-run",
+    "^$",
+    "-bench",
+    "^Benchmark(Compile10KLines|LintAndGraph10KLines)$",
+    "-benchmem",
+    "-benchtime=5x",
+    "-count=3",
+    "-cpu=1"
+  ],
+  "benchmarkLog": "/tmp/effra-foundation-integration-8debbc2/frontend-tool-bench.log",
+  "limitations": [
+    "Unscored shared-host observations with concurrent agent work.",
+    "Ambient Go caches; cache state was not cleared or admitted.",
+    "Frontend/import/tool measurements do not establish end-to-end language or server performance.",
+    "Three five-iteration warm-process benchmark samples, one Go CPU."
+  ]
+}

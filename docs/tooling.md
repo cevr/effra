@@ -95,6 +95,8 @@ Offsets and spans are UTF-8 bytes. Queries currently address diagnostic anchors 
 
 Checked values also carry a canonical `type` reference. Nominal records, enums and errors retain declaration identity; `ef inspect FILE TYPE_NAME` returns their source fields or variants with UTF-8 spans. MCP bounds declaration lists, variants and fields and reports truncation explicitly.
 
+Checked values also expose bounded `ownership` and `captures` facts. `owned` facts name the closing scope or child that the compiler can prove owns a `File`/`Fiber`; `borrowed` facts retain the parameter origin; `unknown` facts keep foreign and custom provider behavior honest and can also represent bounded analysis that did not establish a complete proof. `EF123` is a compiler correctness diagnostic for a proven inner-scope or child-owned escape, or for potential ownership that exhausts the bounded analysis before the value can be proved safe; those cases retain distinct diagnostics. The same facts are present in `ef inspect`, `ef query`, `project.check`, `code.inspect` and `code.typeAt`; this is provenance evidence, not a complete borrow checker.
+
 ```sh
 OFFSET=$(python3 -c 'from pathlib import Path; s=Path("examples/latest-task.ef").read_bytes(); print(s.index(b"run previous"))')
 ef query examples/latest-task.ef "$OFFSET"
@@ -112,7 +114,7 @@ MCP limits graphs to 1,000 nodes and 2,000 edges; larger graphs fail explicitly.
 
 ## Next capabilities
 
-Revision-bound checked edit plans, multi-file identities, editor integration, ownership provenance and runtime/source correlation remain planned. Canonical comment-preserving formatting is implemented by the compiler core and exposed through `ef fmt` and MCP `code.format`; authored-example adoption remains a separate mechanical change, and LSP formatting remains a future adapter. Compiler errors stay independent of optional style policy. Managed test time already shares scheduling with sleep/deadline primitives; see the [testing contract](testing.md) for its supported causal boundaries and foreign-operation limits.
+Revision-bound checked edit plans, multi-file identities, editor integration, complete ownership provenance and runtime/source correlation remain planned. The bounded ownership evidence described above is implemented without claiming a complete borrow checker. Canonical comment-preserving formatting is implemented by the compiler core and exposed through `ef fmt` and MCP `code.format`; authored-example adoption remains a separate mechanical change, and LSP formatting remains a future adapter. Compiler errors stay independent of optional style policy. Managed test time already shares scheduling with sleep/deadline primitives; see the [testing contract](testing.md) for its supported causal boundaries and foreign-operation limits.
 
 ## Performance receipt
 

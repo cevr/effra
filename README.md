@@ -74,6 +74,7 @@ The JavaScript library build exports functions, service keys, and providers for 
 | [imports.ef](examples/imports.ef) | Automatic native signatures, partial results and context forwarding | Go |
 | [http.ef](examples/http.ef) | HTTP routes, SDK calls, file scopes and managed shutdown | Go |
 | [lifecycle.ef](examples/lifecycle.ef) | Scoped files, cancellation and runtime snapshots | Go |
+| [ownership.ef](examples/ownership.ef) | Borrowed outer handles and checked scoped file ownership | Go |
 | [go-interop](examples/go-interop/main.go) | Calling the managed runtime from Go | Go |
 
 ```sh

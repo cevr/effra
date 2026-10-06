@@ -1,0 +1,19 @@
+// A File acquired in a nested scope is consumed before that scope closes.
+// borrowOuter shows the separate borrowed-handle case.
+effect fn borrowOuter(file: File) -> File {
+    scope {
+        let alias = file
+        alias
+    }
+}
+
+effect fn scopedRead() -> string raises {IoError} uses {Files} {
+    scope {
+        let file = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+        run Files.readText(file)
+    }
+}
+
+effect fn main() -> string raises {IoError} {
+    run scopedRead().provide<Files>(LiveFiles)
+}

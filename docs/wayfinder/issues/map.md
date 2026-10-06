@@ -23,6 +23,7 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 ## Decisions so far
 
 - [Which production patterns constrain the next foundation contracts?](research-foundations.md): timer scheduling, dependency capture and nested ownership set the foundation acceptance seams.
+- [Bundled standard library capability contracts](stdlib-parity.md): resolved the finite inventory/specification question through pinned source/tests, counsel and generic adoption patterns; implementation remains open in five batches.
 
 ## Additional implementation
 
@@ -37,6 +38,7 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 - [Matched server performance against TypeScript and optimized Go](server-benchmarks.md): owner-requested server equivalence, throughput/latency, resource, startup/shutdown and separate build receipts. Performance superiority remains a measured question.
 
 - [Bundled standard library capability and language contracts](stdlib-parity.md): owner-directed Effect-grade library distribution, with compiler-enforced semantics, ordinary inspectable library contracts and staged behavioral parity.
+- Library implementation: [owned core](stdlib-owned-core.md), [services](stdlib-services.md), [bounded flow](stdlib-flow.md), [shared producers/platform clients](stdlib-shared-platform.md), and [telemetry/batching](stdlib-telemetry-batching.md), with finite [contracts and causal gates](../../specs/standard-library-capabilities.md). Existing native server work retains its own graph and priority.
 
 - [Native codecs and typed server contracts](native-server-spec.md): reusable bundled interfaces, typed function values, checked codecs, managed endpoints and compatible unary RPC precede actual framework measurements.
 
@@ -65,7 +67,7 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 - The shape of general higher-order row inference once the small compiler reveals its pressure points.
 - Runtime/source correlation beyond current bounded scope snapshots.
 - Full named host values, methods, callbacks, codecs and wire migration policy after closed data and provider construction are exercised.
-- Bounded streams, replay/ACK accounting, database transactions/outbox delivery and managed subprocess fixtures after portable data, concurrency and interop foundations establish their seams.
+- General transactional-program admission, durable replay/ACK accounting and database transactions/outbox delivery beyond the finite bounded-flow and managed-platform contracts.
 - Incremental package checking, reusable host-import sessions and general verified edit plans after the larger source model is established. Canonical formatting now has the finite implementation contract above.
 
 ## Out of scope
