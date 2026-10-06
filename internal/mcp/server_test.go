@@ -3,11 +3,14 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"effra.local/prototype/internal/compiler"
 )
@@ -99,6 +102,132 @@ func TestWorkspaceBounds(t *testing.T) {
 	if _, err := readSource(root, rel); err == nil {
 		t.Fatal("relative traversal accepted")
 	}
+}
+
+func TestFIFOAdmissionKeepsMCPResponsive(t *testing.T) {
+	root := t.TempDir()
+	fifo := filepath.Join(root, "blocked.ef")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	messages := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"project.check","arguments":{"file":"blocked.ef"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"ping"}`,
+	}, "\n")
+	var output bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- Serve(root, strings.NewReader(messages), &output) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("MCP source admission blocked before opening FIFO")
+	}
+
+	decoder := json.NewDecoder(&output)
+	var initialize, check, ping map[string]any
+	for _, target := range []*map[string]any{&initialize, &check, &ping} {
+		if err := decoder.Decode(target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if initialize["result"] == nil {
+		t.Fatalf("initialize failed: %+v", initialize)
+	}
+	checkResult := check["result"].(map[string]any)
+	if checkResult["isError"] != true || !strings.Contains(checkResult["content"].([]any)[0].(map[string]any)["text"].(string), "source must be a regular file") {
+		t.Fatalf("FIFO was not rejected as a tool error: %+v", check)
+	}
+	if ping["id"] != float64(3) || ping["error"] != nil {
+		t.Fatalf("MCP did not remain responsive after FIFO rejection: %+v", ping)
+	}
+}
+
+func TestInspectionBoundsCoverNestedSymbolDetails(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		mode string
+	}{
+		{"declared rows", "declared"},
+		{"body rows", "body"},
+		{"contribution count", "contributions"},
+	} {
+		t.Run(test.name+" at 100", func(t *testing.T) {
+			assertInspectionBoundary(t, inspectionRowsSource(100, test.mode), false)
+		})
+		t.Run(test.name+" at 101", func(t *testing.T) {
+			assertInspectionBoundary(t, inspectionRowsSource(101, test.mode), true)
+		})
+	}
+
+	unchecked := `effect fn main() -> () { run Console.log("x") }`
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(unchecked), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"code.inspect", "code.explain"} {
+		result, err := call(root, name, arguments{File: "main.ef", Symbol: "main"})
+		if err != nil {
+			t.Fatalf("unchecked %s rejected: %v", name, err)
+		}
+		if result.(map[string]any)["checked"] != false {
+			t.Fatalf("unchecked %s was not preserved: %+v", name, result)
+		}
+	}
+}
+
+func assertInspectionBoundary(t *testing.T, source string, wantError bool) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"code.inspect", "code.explain"} {
+		result, err := call(root, name, arguments{File: "main.ef", Symbol: "target"})
+		if wantError {
+			if err == nil || !strings.Contains(err.Error(), "symbol exceeds prototype inspection limits") {
+				t.Fatalf("%s accepted over-limit symbol: result=%+v err=%v", name, result, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s rejected 100-item symbol: %v", name, err)
+		}
+		if result.(map[string]any)["symbol"] == nil {
+			t.Fatalf("%s omitted bounded symbol: %+v", name, result)
+		}
+	}
+}
+
+func inspectionRowsSource(count int, mode string) string {
+	names := make([]string, count)
+	for i := range names {
+		names[i] = fmt.Sprintf("E%d", i)
+	}
+	var builder strings.Builder
+	for _, name := range names {
+		fmt.Fprintf(&builder, "error %s\n", name)
+	}
+	joined := strings.Join(names, ",")
+	switch mode {
+	case "declared":
+		fmt.Fprintf(&builder, "effect fn target() -> () throws {%s} { () }\n", joined)
+	case "body":
+		fmt.Fprintf(&builder, "effect fn many() -> () throws {%s} { () }\n", joined)
+		fmt.Fprintf(&builder, "effect fn target() -> () throws {%s} { run many() }\n", joined)
+	case "contributions":
+		builder.Reset()
+		builder.WriteString("error E0\neffect fn one() -> () throws {E0} { () }\neffect fn target() -> () throws {E0} {\n")
+		for i := 0; i < count; i++ {
+			builder.WriteString("run one();\n")
+		}
+		builder.WriteString("()}\n")
+	}
+	return builder.String()
 }
 func TestInvalidSourceIsACompilerResult(t *testing.T) {
 	root := t.TempDir()
