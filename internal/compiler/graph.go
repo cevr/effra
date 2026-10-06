@@ -265,6 +265,11 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			contracts = append(contracts, *node.Contract)
 		}
 	}
+	for _, layer := range g.Layers {
+		for _, node := range layer.Nodes {
+			contracts = append(contracts, node.Constructor)
+		}
+	}
 	projection := r.ProjectValues(contracts)
 	if !projection.Complete {
 		return nil, fmt.Errorf("type projection unavailable: %s", projection.Error)

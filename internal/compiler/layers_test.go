@@ -23,7 +23,7 @@ layer TestApp { merge App; replace Database = Fixture }
 `
 
 func TestLayerDiamondVisibilityAndReplacement(t *testing.T) {
-	r := Compile(layerDiamondSource)
+	r := Compile(layerDiamondSource + `layer Builtin { Clock = LiveClock }`)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
@@ -55,8 +55,42 @@ func TestLayerDiamondVisibilityAndReplacement(t *testing.T) {
 		t.Fatalf("inspection incomplete: %s %v", encoded, err)
 	}
 	graph, err := r.Graph()
-	if err != nil || len(graph.Layers) != 5 {
+	if err != nil || len(graph.Layers) != 6 || !graph.TypeProjectionComplete {
 		t.Fatalf("graph parity: %+v %v", graph, err)
+	}
+	types := map[string]TypeNode{}
+	rows := map[string]bool{}
+	for _, node := range graph.Types {
+		types[node.ID] = node
+	}
+	for _, row := range graph.Rows {
+		rows[row.ID] = true
+	}
+	for _, layer := range graph.Layers {
+		for _, node := range layer.Nodes {
+			for _, ref := range []TypeRef{node.Constructor.Type, node.Constructor.Contract} {
+				if ref.ID == "" || types[ref.ID].ID == "" {
+					t.Fatalf("%s/%s constructor reference lacks graph definition: %+v", layer.Name, node.Implementation, ref)
+				}
+			}
+			for _, row := range []string{node.Constructor.FailureRow, node.Constructor.ServiceRow} {
+				if row != "" && !rows[row] {
+					t.Fatalf("%s/%s constructor row lacks graph definition: %s", layer.Name, node.Implementation, row)
+				}
+			}
+		}
+	}
+	for _, node := range graph.Types {
+		for _, ref := range append(append([]string{}, node.Args...), node.Result) {
+			if ref != "" && types[ref].ID == "" {
+				t.Fatalf("graph type %s references missing type %s", node.ID, ref)
+			}
+		}
+		for _, row := range []string{node.FailureRow, node.ServiceRow} {
+			if row != "" && !rows[row] {
+				t.Fatalf("graph type %s references missing row %s", node.ID, row)
+			}
+		}
 	}
 }
 
