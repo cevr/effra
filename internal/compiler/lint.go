@@ -73,6 +73,21 @@ func (r *Result) Lint(strict bool) LintResult {
 		for _, a := range e.Args {
 			expr(a, env)
 		}
+		for _, field := range e.Fields {
+			expr(field.Value, env)
+		}
+		for _, arm := range e.Arms {
+			branch := map[string]*binding{}
+			for name, local := range env {
+				branch[name] = local
+			}
+			for _, name := range arm.Pattern.Bindings {
+				if name != "_" {
+					branch[name] = &binding{used: false}
+				}
+			}
+			block(arm.Body, branch)
+		}
 		block(e.Then, env)
 		block(e.Else, env)
 	}

@@ -16,6 +16,11 @@ invalid = json.loads(run("check", "examples/missing-service.ef", success=False).
 assert any(d["code"] == "EF108" for d in invalid["diagnostics"])
 assert run("run", "examples/main.ef").stdout == "Hello, Ada\nUnknown user\n"
 assert run("run", "examples/main.ef", "--target", "js").stdout == "Hello, Ada\nUnknown user\n"
+for target in ("go", "js"):
+    assert run("run", "examples/data.ef", "--target", target).stdout == "running 42\n"
+data_inspection = json.loads(run("inspect", "examples/data.ef", "State").stdout)
+assert data_inspection["declaration"]["kind"] == "enum"
+assert data_inspection["declaration"]["variants"][1]["fields"][0]["type"] == "string"
 assert run("run", "examples/imports.ef").stdout == "ADA\npartial result retained\ntimed out\n"
 for target in ("go", "js"):
     assert run("run", "examples/concurrency.ef", "--target", target).stdout == "child joined\ntimed out\nrecovered\n"
@@ -53,6 +58,7 @@ messages = [
     {"jsonrpc":"2.0", "method":"notifications/initialized"},
     {"jsonrpc":"2.0", "id":2, "method":"tools/list"},
     {"jsonrpc":"2.0", "id":3, "method":"tools/call", "params":{"name":"code.inspect", "arguments":{"file":"examples/main.ef", "symbol":"greeting"}}},
+    {"jsonrpc":"2.0", "id":8, "method":"tools/call", "params":{"name":"code.inspect", "arguments":{"file":"examples/data.ef", "symbol":"State"}}},
     {"jsonrpc":"2.0", "id":4, "method":"tools/call", "params":{"name":"project.check", "arguments":{"file":"examples/main.ef", "expectedRevision":"old"}}},
     {"jsonrpc":"2.0", "id":5, "method":"tools/call", "params":{"name":"code.inspect", "arguments":{"file":"examples/imports.ef", "symbol":"main"}}},
     {"jsonrpc":"2.0", "id":6, "method":"tools/call", "params":{"name":"project.describe", "arguments":{}}},
@@ -61,15 +67,17 @@ messages = [
 server = subprocess.run([ef, "mcp", str(root)], input="\n".join(map(json.dumps, messages))+"\n", text=True, capture_output=True)
 assert server.returncode == 0, server.stderr
 responses = [json.loads(line) for line in server.stdout.splitlines()]
-assert len(responses) == 7
+assert len(responses) == 8
 assert len(responses[1]["result"]["tools"]) == 9
 mcp = responses[2]["result"]["structuredContent"]
 assert mcp["symbol"] == inspected["symbol"] and mcp["revision"] == inspected["revision"]
-assert responses[3]["result"]["isError"]
-assert responses[4]["result"]["structuredContent"]["bindings"] == bindings["bindings"]
-assert responses[4]["result"]["structuredContent"]["revision"] == bindings["revision"]
-assert "Go imports" in responses[5]["result"]["structuredContent"]["guardrails"]["targetCapabilities"]
-catalog=responses[6]["result"]["structuredContent"]
+data_mcp = responses[3]["result"]["structuredContent"]
+assert data_mcp["declaration"]["name"] == "State" and data_mcp["declaration"]["kind"] == "enum"
+assert responses[4]["result"]["isError"]
+assert responses[5]["result"]["structuredContent"]["bindings"] == bindings["bindings"]
+assert responses[5]["result"]["structuredContent"]["revision"] == bindings["revision"]
+assert "Go imports" in responses[6]["result"]["structuredContent"]["guardrails"]["targetCapabilities"]
+catalog=responses[7]["result"]["structuredContent"]
 assert len(catalog["tests"])==3 and not catalog["liveRequired"]
 for target in ("go","js"):
     suite=json.loads(run("test","examples/testing.ef","--target",target).stdout)

@@ -29,4 +29,4 @@ Temporary directories, console capture and subprocesses should be scoped fixture
 
 ## Current receipt
 
-`examples/workflow.ef`, `examples/latest-task.ef` and `examples/testing.ef` run through public commands on Go and JS. The shared checker powers lint, local type queries, dependency graphs and test discovery. Proposed ADTs, codecs, streams, durable journals and dependent provider initialization remain labeled in [showcases](../showcases.md) and [adoption gates](../contender-roadmap.md).
+`examples/workflow.ef`, `examples/latest-task.ef` and `examples/testing.ef` run through public commands on Go and JS. The shared checker powers lint, local type queries, dependency graphs and test discovery. Codecs, streams, durable journals and dependent provider initialization remain labeled as proposed in [showcases](../showcases.md) and [adoption gates](../contender-roadmap.md); records, closed ADTs, exhaustive match and typed payload errors are implemented and covered by compiler conformance tests.

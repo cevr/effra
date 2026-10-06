@@ -6,7 +6,8 @@ This is a single-file compiler experiment, not the full design in design.md. The
 
 - Immutable local bindings, string/bool/unit and i64 values, managed File handles, string concatenation, primitive equality, and `if` expressions with two branches. i64 literals are currently nonnegative; JS represents them as bigint.
 - Ordinary `fn` and lazy `effect fn`, with explicit parameter, result, failure, and service contracts.
-- Payload-free nominal errors: `error NotFound`; `fail NotFound` inside effect bodies.
+- Nominal records and closed enums with typed fields: `record User { id: string }`, `enum State { Ready Waiting { reason: string } }`, constructors, field access and exhaustive `match` arms. Static data does not decode or validate external wire values.
+- Nominal errors may carry typed fields: `error NotFound { id: string }`; `fail NotFound { id: "missing" }` preserves the payload on both targets.
 - Nominal services and self-contained implementations: `impl MemoryUsers for Users`.
 - `run` to execute a deferred effect within an effect body.
 - `.provide<Service>(Provider)` removes that service requirement.
@@ -27,7 +28,7 @@ The frontend is Go with no third-party Go dependencies. The default Go target lo
 
 The optional JavaScript target lowers to pinned Effect 4.0.1, verified available in the npm registry on 2026-10-05. Effect.gen owns deferred bodies; Context.Service/provideService own providers; a strict lone-failure adapter owns selective recovery and preserves composite causes. A small policy adapter owns child admission/joining over Effect’s existing scheduler and resource scopes. No second JavaScript effect scheduler exists.
 
-`ef check` returns revisioned JSON including diagnostics, contracts, body rows, used host bindings, and separate import/parse/check timings. `ef inspect FILE SYMBOL` and `ef explain FILE SYMBOL` return the same semantic symbol and direct executed-call/failure contributions. Explanations are currently local contributions, not a transitive proof or provision history. JSON schema version 1 is experimental.
+`ef check` returns revisioned JSON including diagnostics, contracts, canonical type references, nominal declarations, used host bindings, and separate import/parse/check timings. `ef inspect FILE SYMBOL` and `ef explain FILE SYMBOL` return the same semantic symbol and direct executed-call/failure contributions; passing a record, enum or error name inspects its declaration fields/variants. Explanations are currently local contributions, not a transitive proof or provision history. JSON schema version 2 is experimental.
 
 `ef build FILE` emits `dist/go/<name>/main.go` and produces the standalone executable `dist/<name>`. `-o PATH` selects its output path. `ef run FILE` builds and executes the native artifact.
 
@@ -35,7 +36,7 @@ The optional JavaScript target lowers to pinned Effect 4.0.1, verified available
 
 ## Limits
 
-No payload-bearing source errors, structs/enums, generics/open rows, higher-order effect signatures, Layers, retry, TypeScript host imports, source maps, persistent/package caching, LSP, content mapper, semantic edits, or automated consumer TypeScript-check gate yet. Go runtime failures can carry native payloads; the source language cannot inspect them yet. Go scope snapshots exist, but there is no process-wide runtime endpoint or instrumented wait-reason tree. Shared Go/JS lifecycle conformance covers owned cleanup, unobserved child failures and deadline cleanup defects. Files/Runtime/Http and Go imports still produce EF110 on JS. Service/error identities remain local to this single-file experiment.
+Generics/open rows, higher-order effect signatures, Layers, retry, TypeScript host imports, source maps, persistent/package caching, LSP, content mapper, semantic edits, codecs, and an automated consumer TypeScript-check gate remain unsupported. Recursive data layouts receive an explicit diagnostic, as do unknown generic type spellings. Go scope snapshots exist, but there is no process-wide runtime endpoint or instrumented wait-reason tree. Shared Go/JS lifecycle conformance covers owned cleanup, unobserved child failures and deadline cleanup defects. Files/Runtime/Http and Go imports still produce EF110 on JS. Service/type identities remain local to this single-file experiment.
 
 Inspection revisions hash source bytes and, when imported, Go export archives and normalized behavior contracts. Compiler/runtime/schema versions are separate metadata; this is not a complete build-cache key. Construction of an unused recipe may retain requirements in the recipe type without adding them to the enclosing executed body. The requirements row tracks managed service access, not a proof of complete purity or race freedom.
 

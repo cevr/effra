@@ -90,6 +90,16 @@ func (r *Result) TestMode(live bool) error {
 				return true
 			}
 		}
+		for _, field := range e.Fields {
+			if expr(field.Value) {
+				return true
+			}
+		}
+		for _, arm := range e.Arms {
+			if block(arm.Body) {
+				return true
+			}
+		}
 		return false
 	}
 	block = func(b *Block) bool {

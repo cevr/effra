@@ -84,9 +84,9 @@ The JavaScript library build exports functions, service keys, and providers for 
 
 Use the printed server URL with `/health`, `/users/42`, `/users/slow`, `/users/missing`, or `/file`. Each request has an owning scope. Interrupt/SIGTERM stops admission, requests cancellation, and waits for handler cleanup. Cancellation is cooperative: a foreign call that ignores it can delay shutdown. See the [HTTP contract](docs/runtime.md#http-server).
 
-## ADTs and pattern matching
+## Records, closed data, and pattern matching
 
-**Proposed syntax; not implemented yet.** Native sums would give state machines a direct representation and compiler-checked exhaustive matching:
+Records and closed enums carry typed payloads. Constructors check field names and values, and `match` must cover each declared variant exactly once:
 
 ```rust
 enum RunState {
@@ -124,7 +124,7 @@ The compiler loads callable shapes from Go export data. Imported calls are defer
 
 ## What is experimental
 
-This is a single-file prototype with primitive values, managed File handles, and payload-free source errors. Lifecycle syntax works on Go and JS/Effect; Files/Runtime/Http and Go imports require Go. Imported package functions currently accept primitive shapes; named host types, methods, generics and arbitrary SDK objects remain unsupported. There are no ADTs, open rows, Layers, package cache, source maps, or out-of-process runtime inspector yet. See [implemented syntax and limits](docs/prototype.md), [runtime and interop contracts](docs/runtime.md), and [MCP setup](docs/mcp.md). The wider [design sketch](docs/design.md) remains a proposal.
+This is a single-file prototype with nominal records, closed enums, typed source failures, managed File handles, and explicit effect rows. Lifecycle syntax works on Go and JS/Effect; Files/Runtime/Http and Go imports require Go. Imported package functions currently accept primitive shapes; named host types, methods, generics and arbitrary SDK objects remain unsupported. Codecs, open rows, Layers, package cache, source maps, and out-of-process runtime inspection remain future work. See [implemented syntax and limits](docs/prototype.md), [runtime and interop contracts](docs/runtime.md), and [MCP setup](docs/mcp.md). The wider [design sketch](docs/design.md) remains a proposal.
 
 Fast compilation is a design constraint, with separate frontend and import measurements. The current synthetic 10,000-line fixture checks in about 3.65 ms on an Apple M4 Pro; warm imported CLI checks take about 51 ms and cached imported executable builds about 156 ms. These are small, distinct fixtures, not a matched comparison with Go. Persistent import summaries and edit benchmarks remain work. See [measurement receipts](docs/prototype.md#baseline).
 
@@ -163,4 +163,4 @@ The CLI and read-only MCP share the checked compiler model:
 ./bin/ef test examples/testing.ef --target js
 ```
 
-[Tooling](docs/tooling.md) describes lint severity, dependency edges and bounded MCP results. [Testing](docs/testing.md) covers assertions, explicit fixture providers, owned test scopes and the real-time watchdog. Records, ADTs and match remain proposed; these tools do not imply those features have shipped.
+[Tooling](docs/tooling.md) describes lint severity, declaration metadata, dependency edges and bounded MCP results. [Testing](docs/testing.md) covers assertions, explicit fixture providers, owned test scopes and the real-time watchdog. Codec derivation, open rows and generic containers remain proposed.

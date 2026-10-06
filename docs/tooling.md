@@ -7,7 +7,7 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 | `ef check FILE` | `project.check` | Non-disableable source admission diagnostics |
 | `ef lint FILE [--strict]` | `project.lint` | Checked semantic advice; separate `checked` and `lintPassed` |
 | `ef lint rules` | `lint.rules` | Stable codes, severity, names and rationale |
-| `ef inspect FILE SYMBOL` | `code.inspect` | Declared and body contracts |
+| `ef inspect FILE SYMBOL` | `code.inspect` | Declared/body contracts or nominal record, enum and error metadata |
 | `ef explain FILE SYMBOL` | `code.explain` | Local contract contributions |
 | `ef query FILE BYTE_OFFSET` | `code.typeAt` | Expression kind, type, and executed failure/requirement rows |
 | `ef graph FILE` | `project.graph` | Dependencies, providers, calls and provision boundaries |
@@ -26,6 +26,8 @@ Warnings do not make checked source untyped. `--strict` makes warnings fail the 
 ## Local types
 
 Offsets and spans are UTF-8 bytes. Queries currently address diagnostic anchors (for example, the `run` keyword, a call name, or `provide`) rather than entire expression ranges. They reject unchecked source and offsets outside checked anchors. Effect types distinguish deferred rows from rows executed while evaluating the expression.
+
+Checked values also carry a canonical `type` reference. Nominal records, enums and errors retain declaration identity; `ef inspect FILE TYPE_NAME` returns their source fields or variants with UTF-8 spans. MCP bounds declaration lists, variants and fields and reports truncation explicitly.
 
 ```sh
 OFFSET=$(python3 -c 'from pathlib import Path; s=Path("examples/latest-task.ef").read_bytes(); print(s.index(b"run previous"))')
