@@ -33,13 +33,13 @@ Application usage is surveyed as generic patterns below. Exact private checkout 
 | Dependent providers | Construction has its own requirements, failures and owner | Configuration and captured dependency values are checked; fallible acquisition, initialization sharing and cycles remain open |
 | Bounded event delivery | Track items, bytes and in-flight acknowledgement | Streams, queues and delivery budgets remain proposed |
 | Durable command admission | Correlation, transactional receipts and outbox recovery | Application/storage obligations, not a syntax guarantee |
-| Owned tests | Fresh case scope, assertions, completed shutdown and preserved causes | `ef test` works on Go/JS; causal latches and virtual time remain open |
+| Owned tests | Fresh case scope, assertions, completed shutdown and preserved causes | `ef test`, causal latches and scheduler-backed virtual time have shared Go/JS receipts; reusable platform fixtures remain open |
 
 See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native-showcases.md), [tooling](docs/tooling.md), [testing](docs/testing.md) and [adoption gates](docs/contender-roadmap.md).
 
 ## Settled
 
-- A canonical shared formatter is required. Inspected Go1.27.0 `go/format` and Gleam `compiler-cli/src/format.rs` at52e735c82d42811dd08d29d5508f564da081fd7d: adopt syntax-only printing and shared check/stdin/write paths, with Effra-specific preservation of line-sensitive lint directives. The [formatting contract](docs/specs/formatting.md) remains pending implementation.
+- A canonical shared formatter is required. Inspected Go1.27.0 `go/format` and Gleam `compiler-cli/src/format.rs` at52e735c82d42811dd08d29d5508f564da081fd7d: adopt syntax-only printing and shared check/stdin/write paths, with Effra-specific preservation of line-sensitive lint directives. The shared syntax printer is integrated; CLI/MCP adapters and editor formatting remain open under the [formatting contract](docs/specs/formatting.md).
 
 - Use LSP's standard severities and UTF-16 range semantics as an adapter over shared compiler snapshots, retaining byte anchors and explicit checked/unknown state. The [tooling contract](docs/specs/semantic-tooling.md) records the pinned 3.18 source inspection; CLI/MCP must expose the same full types and diagnostics without requiring an editor process.
 
@@ -66,8 +66,8 @@ See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native
 - Which provider acquisition/sharing interface makes recipe identity, materialized value identity and allocation ownership obvious at a call site?
 - Which codec/endpoint declarations remove duplicate domain/transport signatures while preserving explicit validation and wire policy?
 - Extend structured nominal types and checked matches with codecs, containers and package-qualified identities without whole-program inference.
-- Track handle ownership provenance so proven inner-scope escapes receive static diagnostics while borrowed outer handles remain valid.
+- Extend integrated bounded handle-ownership summaries to typed callback results while preserving borrowed outer handles and conservative uncertainty.
 - Extend checked provider construction to shared acquisition and cycle explanations; enrich the same dependency graph rather than inventing another analyzer.
 - Build revision-bound fixes on the implemented reasoned named lint suppressions; validate edits before they are offered and preserve comments in formatting.
-- Build scheduler-backed test time, causal synchronization and scoped fixtures; prove they control sleeps and timeout operators together.
+- Extend integrated scheduler-backed time and causal synchronization with reusable scoped platform fixtures; retain shared sleep/timeout behavior tests.
 - Measure native import reuse and matched cold/warm/private-edit build regimes before making speed claims.

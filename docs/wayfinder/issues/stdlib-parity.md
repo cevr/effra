@@ -1,4 +1,4 @@
-<!-- {"id": "stdlib-parity", "title": "Bundled standard library capability and language contracts", "status": "open", "labels": ["research:needed"], "parent": "map", "assignee": null, "blocked_by": ["foundation-spec"]} -->
+<!-- {"id": "stdlib-parity", "title": "Bundled standard library capability and language contracts", "status": "open", "labels": ["research:needed"], "parent": "map", "assignee": "stdlib_capability_research", "blocked_by": ["foundation-spec"]} -->
 # Bundled standard library capability and language contracts
 
 ## Question
