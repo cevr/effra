@@ -28,6 +28,8 @@ Compare pinned [Effect4.0.1](https://github.com/Effect-TS/effect/tree/460272d304
 
 Adopt opt-in structural derivation and ordinary transformations between distinct wire/domain types. Each direction carries its own failures and services. Inspect those contracts and field contribution paths without making a caller spell an implementation tuple of type parameters.
 
+Further pinned source inspection through the repo cache confirms `Schema.ts`'s Codec tracks distinct decoding/encoding services, while `SchemaGetter.ts`'s TransformEffect callback has the fixed SchemaIssue.Issue error channel and `Schema.decodeUnknownEffect` wraps that as SchemaError. Effra's named transformation failures are therefore an additional contract, not upstream parity. Preserve those failures through codec helpers and transport composition: malformed wire input, service failure while decoding and terminal error-response encoding are distinct boundaries. The native server spec supplies finite mappings and a nonrecursive terminal fallback. Upstream getter composition tests are source evidence only; the new typed-failure distinctions need Effra tests.
+
 The independent design counsel proposed several additional policies. Applying **Redesign From First Principles** and the explicit-contract tiebreak gives these decisions:
 
 | Proposal | Decision and reason |
