@@ -12,7 +12,7 @@ func TestInvalidLatchHandlesHaveTheSameBoundaryOnBothDrivers(t *testing.T) {
 			if latch.IsSignaled() || latch.Signal() {
 				t.Fatal("invalid latch reported completion")
 			}
-			if err := latch.Await(context.Background()); !errors.Is(err, errNilLatch) {
+			if err := latch.Await(context.Background()); !errors.Is(err, errInvalidLatch) {
 				t.Fatalf("invalid latch await: %v", err)
 			}
 		})
@@ -29,7 +29,7 @@ func TestInvalidLatchHandlesHaveTheSameBoundaryOnBothDrivers(t *testing.T) {
 					} else {
 						out = Run(effect)
 					}
-					if len(out.Cause()) != 1 || out.Interrupted || !errors.Is(out.Defect, errNilLatch) {
+					if len(out.Cause()) != 1 || out.Interrupted || !errors.Is(out.Defect, errInvalidLatch) {
 						t.Fatalf("invalid handle must be one defect, got %+v", out)
 					}
 				})

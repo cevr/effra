@@ -5,7 +5,7 @@ import (
 	"errors"
 )
 
-var errNilLatch = errors.New("invalid latch handle: construct with NewLatch")
+var errInvalidLatch = errors.New("invalid latch handle: construct with NewLatch")
 
 // Latch is a portable, one-shot synchronization handle. Completion is
 // idempotent and is shared by every waiter; waiting never consumes it.
@@ -37,38 +37,31 @@ func (l *Latch) IsSignaled() bool {
 // the latch itself untouched.
 func (l *Latch) Await(ctx context.Context) error {
 	if l == nil || l.signal == nil {
-		return errNilLatch
+		return errInvalidLatch
 	}
 	return l.signal.await(ctx)
 }
 
 // registerManaged adds a waiter owned by a scheduler-managed fiber. The bool
 // reports an already-signaled latch, in which case no blocking handoff is
-// needed.
+// needed. AwaitLatch validates the handle before using these internal helpers.
 func (l *Latch) registerManaged(scheduler *TestScheduler) (*managedWaiter, bool) {
-	if l == nil || l.signal == nil {
-		return nil, true
-	}
 	return l.signal.register(scheduler)
 }
 
 func (l *Latch) consumeManaged(waiter *managedWaiter) {
-	if l != nil && l.signal != nil {
-		l.signal.consume(waiter)
-	}
+	l.signal.consume(waiter)
 }
 
 func (l *Latch) cancelManaged(waiter *managedWaiter) {
-	if l != nil && l.signal != nil {
-		l.signal.cancel(waiter)
-	}
+	l.signal.cancel(waiter)
 }
 
 // AwaitLatch adapts a latch wait to the managed Effect runtime.
 func AwaitLatch(latch *Latch) Effect[Unit] {
 	return func(fc *FiberContext) Exit[Unit] {
 		if latch == nil || latch.signal == nil {
-			return Die[Unit](errNilLatch)
+			return Die[Unit](errInvalidLatch)
 		}
 		if scheduler := fc.turnScheduler(); scheduler != nil {
 			waiter, complete := latch.registerManaged(scheduler)
@@ -102,7 +95,7 @@ func AwaitLatch(latch *Latch) Effect[Unit] {
 func SignalLatch(latch *Latch) Effect[Unit] {
 	return func(*FiberContext) Exit[Unit] {
 		if latch == nil || latch.signal == nil {
-			return Die[Unit](errNilLatch)
+			return Die[Unit](errInvalidLatch)
 		}
 		latch.Signal()
 		return Succeed(Unit{})
