@@ -1,0 +1,49 @@
+// Portable causal synchronization and scheduler-backed test fixtures.
+
+effect fn waitFor(latch: Latch) -> () uses {Sync} {
+    run Sync.await(latch)
+}
+
+effect fn sequentialSleeps() -> () uses {Clock} {
+    run Clock.sleep(20)
+    run Clock.sleep(30)
+}
+effect fn delayed() -> string uses {Clock} {
+    run Clock.sleep(100)
+    "late"
+}
+
+effect fn test_latch_signal_is_shared() -> () throws {AssertionFailed} uses {Assert, Sync} {
+    let latch = run Sync.latch()
+    run Sync.signal(latch)
+    run Sync.await(latch)
+    run Sync.signal(latch)
+    run Assert.check(true, "a one-shot signal remains complete for every waiter")
+}
+
+effect fn test_latch_waiter_interrupt_is_independent() -> () throws {AssertionFailed} uses {Assert, Sync} {
+    let latch = run Sync.latch()
+    scope {
+        let waiter = fork waitFor(latch)
+        run waiter.interrupt()
+        run Sync.signal(latch)
+    }
+    run Sync.await(latch)
+    run Assert.check(true, "interrupting one waiter does not consume the latch")
+}
+
+effect fn test_scheduler_drains_sequential_deadlines() -> () throws {AssertionFailed} uses {Assert, Clock, Scheduler} {
+    let child = fork sequentialSleeps()
+    run Scheduler.awaitRegistration()
+    run Scheduler.advance(50)
+    run child.join()
+    run Assert.check(true, "one advancement reaches sequential intermediate deadlines")
+}
+
+effect fn test_timeout_uses_the_test_scheduler() -> () throws {AssertionFailed, Timeout} uses {Assert, Clock, Scheduler} {
+    let child = fork delayed().timeout(50)
+    run Scheduler.awaitRegistration()
+    run Scheduler.advance(50)
+    let result = run child.join().catch<Timeout>("timed out")
+    run Assert.equalText(result, "timed out")
+}

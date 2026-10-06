@@ -58,7 +58,7 @@ const __ef_timeout = (program, ms) => Effect.suspend(() => {
   if (ms < 0n || ms > 2147483647n) return Effect.die(new Error("invalid millisecond duration"));
   return __ef_scoped(Effect.uninterruptibleMask(restore => Effect.gen(function* () {
     const work = yield* __ef_fork(program);
-    const timer = yield* __ef_fork(Effect.sleep(Number(ms)));
+    const timer = yield* __ef_fork(__ef_call(__ef_service_Scheduler, "sleep", [ms]));
     const winner = yield* restore(Effect.raceFirst(
       Effect.map(Fiber.await(work.fiber), exit => ({ work: true, exit })),
       Effect.map(Fiber.await(timer.fiber), exit => ({ work: false, exit }))));

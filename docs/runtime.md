@@ -8,7 +8,9 @@ The native prototype uses `runtime/effra`, a Go-standard-library runtime with ty
 
 `fork recipe()` admits a child before starting its goroutine. Its service context is inherited lexically. `run child.join()` awaits its result, `run child.cancel()` requests cancellation, and `run child.interrupt()` requests cancellation and awaits completed cleanup. Normal interruption is acknowledged by interrupt; real child failures/cleanup defects are preserved. Unobserved child failures propagate at owner closure. The checker conservatively includes child failure rows at fork; joining does not erase them.
 
-`.timeout(ms)` is lazy, adds Timeout, and runs inside an owned deadline scope. It waits for the operation's shutdown and cleanup, so elapsed time can exceed the deadline. It uses the Go wall clock or Effect scheduler clock. It does **not** add a Clock service requirement or claim injected Clock.sleep controls deadlines; a replaceable deadline/time abstraction remains future work. Durations must be 0–2,147,483,647 milliseconds; invalid runtime durations are defects.
+`.timeout(ms)` is lazy, adds `Timeout` and `Scheduler`, and runs inside an owned deadline scope. It waits for the operation's shutdown and cleanup, so elapsed time can exceed the deadline. In live Go execution it uses the process timer driver; in tests, the explicit scheduler driver controls both `Clock.sleep` and timeout deadlines. A provider that implements only `Clock.sleep` cannot control a timeout. Durations must be 0–2,147,483,647 milliseconds; invalid runtime durations are defects.
+
+`Sync.latch()` creates an opaque, one-shot `Latch`. `Sync.signal(latch)` is idempotent, and `Sync.await(latch)` scopes cancellation to the waiting fiber. A nil handle is an invalid-latch defect. The Go `TestScheduler` exposes `AwaitRegistration` and strong `Adjust` operations: one adjustment drains intermediate deadlines and waits for awakened managed fibers to park, cancel or finish before selecting the next deadline. `Advance` remains a compatibility alias for `Adjust`.
 
 Cancellation is cooperative. Managed waits and generated effect boundaries observe Go context. Pure CPU work and blocking foreign APIs may delay shutdown. Go acquisition/registration and both targets’ scope finalizers mask logical cancellation; foreign acquisition must eventually return. An adapter can register an idempotent `Scope.OnCancel` hook before blocking work to unblock an API that needs an explicit close/abort. Hooks must return and must not close or wait on their own owning scope.
 
@@ -20,6 +22,8 @@ Exits preserve named failures, defects and interruption separately, including ad
 | --- | --- | --- |
 | Console / Stdout | `log(string) -> ()` | Explicit console capability |
 | Clock / LiveClock | `sleep(i64) -> ()` | Cancellation-aware millisecond wait; JS uses bigint input |
+| Scheduler / LiveScheduler | `sleep(i64) -> ()`, `advance(i64) -> ()`, `awaitRegistration() -> ()` | Explicit deadline authority; `TestScheduler` controls virtual sleeps/adjustment and `LiveScheduler` is only valid for live execution |
+| Sync / TestSync | `latch() -> Latch`, `await(Latch) -> ()`, `signal(Latch) -> ()` | Shared one-shot synchronization; waiter interruption does not consume the handle |
 | Env / LiveEnv | `get(string) -> string` | Empty string for absent values; this is not a presence test |
 | Files / LiveFiles | `openRead(string) -> File`, `readText(File) -> string`, `readFile(string) -> string` | IoError; openRead attaches release to the current scope; readFile opens a narrower scope |
 | Http / GoHttp | `serve(string, handler) -> ()` | IoError; owns listener and waits for request cleanup on shutdown |

@@ -232,8 +232,8 @@ func (c *checker) check() {
 }
 func (c *checker) signature(f *Function) {
 	valid := func(t string, span Span) {
-		if t != "string" && t != "bool" && t != "()" && t != "i64" && t != "File" && t != "bytes" {
-			c.diagnostic("EF102", "unsupported value type "+t+"; prototype supports string, bool, i64, bytes, File, ()", span)
+		if t != "string" && t != "bool" && t != "()" && t != "i64" && t != "File" && t != "Latch" && t != "bytes" {
+			c.diagnostic("EF102", "unsupported value type "+t+"; prototype supports string, bool, i64, bytes, File, Latch, ()", span)
 		}
 	}
 	valid(f.Return, f.Span)
@@ -487,6 +487,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			c.diagnostic("EF106", "timeout requires an Effect and an i64 millisecond duration", e.Span)
 		}
 		t.Errors = union(t.Errors, []string{"Timeout"})
+		t.Services = union(t.Services, []string{"Scheduler"})
 	case "run":
 		inner := c.expr(e.Left, env, inEffect)
 		if !inEffect {
