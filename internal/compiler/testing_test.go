@@ -18,7 +18,7 @@ func TestTestContractsAndLiveCapabilities(t *testing.T) {
 			t.Fatal("admitted invalid test", source)
 		}
 	}
-	source := `effect fn test_ok() -> () throws {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}`
+	source := `effect fn test_ok() -> () raises {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}`
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)

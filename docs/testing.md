@@ -3,7 +3,7 @@
 `ef test FILE [--target go|js] [--live] [--timeout-ms 30000]` discovers top-level `test_` functions in source order. Each must be an effect with no parameters returning `()`. Its only implicit service is `Assert`; other services must be supplied explicitly in source. The test file does not need `main`.
 
 ```rust
-effect fn test_greeting() -> () throws {AssertionFailed, Missing} uses {Assert} {
+effect fn test_greeting() -> () raises {AssertionFailed, Missing} uses {Assert} {
     let actual = run greeting("42").provide<Directory>(FixtureDirectory)
     run Assert.equalText(actual, "Hello, Ada")
 }

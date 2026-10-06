@@ -40,11 +40,11 @@ The same step interface admits effectful decisions without a second machine API.
 error AccessUnavailable
 
 service Access {
-    effect fn mayOpen(key: string) -> bool throws {AccessUnavailable}
+    effect fn mayOpen(key: string) -> bool raises {AccessUnavailable}
 }
 
 effect fn sessionStep(state: SessionState, event: SessionEvent)
-    -> Step<SessionState, ()> throws {AccessUnavailable} uses {Access} {
+    -> Step<SessionState, ()> raises {AccessUnavailable} uses {Access} {
     match state, event {
         SessionState.Idle, SessionEvent.Open { key } =>
             if run Access.mayOpen(key) {

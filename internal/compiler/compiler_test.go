@@ -20,7 +20,7 @@ func hasCode(r *Result, code string) bool {
 func TestGuardrails(t *testing.T) {
 	cases := []struct{ name, source, code string }{
 		{"missing service", `effect fn main() -> () { run Console.log("x") }`, "EF108"},
-		{"unhandled error", `error Bad effect fn bad() -> string throws {Bad} { fail Bad } effect fn main() -> string { run bad() }`, "EF107"},
+		{"unhandled error", `error Bad effect fn bad() -> string raises {Bad} { fail Bad } effect fn main() -> string { run bad() }`, "EF107"},
 		{"pure execution", `fn main() -> () { run Console.log("x") }`, "EF105"},
 		{"unused lazy effect", `effect fn main() -> () { Console.log("x") }`, "EF105"},
 		{"wrong argument", `effect fn main() -> () { run Console.log(true).provide<Console>(Stdout) }`, "EF106"},
@@ -29,15 +29,15 @@ func TestGuardrails(t *testing.T) {
 		{"wrong implementation", `service Users { effect fn get() -> string } impl Broken for Users { effect fn get() -> bool { true } }`, "EF104"},
 		{"unknown failure", `effect fn main() -> string { fail Unknown }`, "EF102"},
 		{"recover absent tag", `error Bad effect fn a() -> string { "x" } effect fn main() -> string { run a().catch<Bad>("y") }`, "EF107"},
-		{"recovery executes effect", `error Bad effect fn a() -> string throws {Bad} { fail Bad } effect fn b() -> string { "y" } effect fn main() -> string { run a().catch<Bad>(run b()) }`, "EF105"},
-		{"nested argument execution", `error Bad effect fn a() -> string throws {Bad} { fail Bad } effect fn b(x: string) -> string { x } effect fn main() -> string { run b(run a()) }`, "EF107"},
+		{"recovery executes effect", `error Bad effect fn a() -> string raises {Bad} { fail Bad } effect fn b() -> string { "y" } effect fn main() -> string { run a().catch<Bad>(run b()) }`, "EF105"},
+		{"nested argument execution", `error Bad effect fn a() -> string raises {Bad} { fail Bad } effect fn b(x: string) -> string { x } effect fn main() -> string { run b(run a()) }`, "EF107"},
 		{"executed conditional", `effect fn x() -> () { let branch = if true { run Console.log("x") } else { () }; () }`, "EF108"},
 		{"declaration collision", `error Users service Users { }`, "EF101"},
 		{"local function shadow", `fn f() -> string { "x" } fn x() -> string { let f = "y" f() }`, "EF103"},
 		{"bad source", `effect fn x() -> string { "unterminated }`, "EF001"},
 		{"unsupported number", `fn x() -> u64 { 42 }`, "EF102"},
 		{"scope local escaped", `effect fn x() -> string { scope { let hidden = "x"; () }; hidden }`, "EF102"},
-		{"unobserved child failure", `error Bad effect fn child() -> () throws {Bad} { fail Bad } effect fn main() -> () { let child = fork child(); () }`, "EF107"},
+		{"unobserved child failure", `error Bad effect fn child() -> () raises {Bad} { fail Bad } effect fn main() -> () { let child = fork child(); () }`, "EF107"},
 		{"timeout failure", `effect fn child() -> () { () } effect fn main() -> () { run child().timeout(1) }`, "EF107"},
 	}
 	for _, tc := range cases {
@@ -54,11 +54,11 @@ func TestGuardrails(t *testing.T) {
 }
 func TestContractsAndEntry(t *testing.T) {
 	source := `error Missing error Broken
- service Users { effect fn get() -> string throws {Missing, Broken} }
+ service Users { effect fn get() -> string raises {Missing, Broken} }
  impl Memory for Users { effect fn get() -> string { "Ada" } }
- effect fn greeting() -> string throws {Broken, Missing} uses {Users} { run Users.get() }
- effect fn recovered() -> string throws {Broken} uses {Users} { run greeting().catch<Missing>("unknown") }
- effect fn main() -> string throws {Broken} { run recovered().provide<Users>(Memory) }`
+ effect fn greeting() -> string raises {Broken, Missing} uses {Users} { run Users.get() }
+ effect fn recovered() -> string raises {Broken} uses {Users} { run greeting().catch<Missing>("unknown") }
+ effect fn main() -> string raises {Broken} { run recovered().provide<Users>(Memory) }`
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatalf("%+v", r.Diagnostics)
@@ -169,14 +169,14 @@ func runJS(t *testing.T, source, assertions string) string {
 }
 func TestBackendLazinessRecoveryAndFailure(t *testing.T) {
 	source := `error Missing error Broken
- service Users { effect fn get(id: string) -> string throws {Missing, Broken} }
+ service Users { effect fn get(id: string) -> string raises {Missing, Broken} }
  impl Memory for Users {
-  effect fn get(id: string) -> string throws {Missing, Broken} {
+  effect fn get(id: string) -> string raises {Missing, Broken} {
    if id == "42" { "Ada" } else { if id == "broken" { fail Broken } else { fail Missing } }
   }
  }
- effect fn greeting(id: string) -> string throws {Missing, Broken} uses {Users} { let user = run Users.get(id) "Hi " + user }
- effect fn recovered(id: string) -> string throws {Broken} { run greeting(id).provide<Users>(Memory).catch<Missing>("unknown") }
+ effect fn greeting(id: string) -> string raises {Missing, Broken} uses {Users} { let user = run Users.get(id) "Hi " + user }
+ effect fn recovered(id: string) -> string raises {Broken} { run greeting(id).provide<Users>(Memory).catch<Missing>("unknown") }
  effect fn nested() -> string { run recovered(run recovered("42").catch<Broken>("bad")).catch<Broken>("bad") }`
 	output := runJS(t, source, `
 let calls = 0;
@@ -211,7 +211,7 @@ func TestExample(t *testing.T) {
 func BenchmarkCompile10KLines(b *testing.B) {
 	var source strings.Builder
 	for i := 0; i < 2000; i++ {
-		source.WriteString("effect fn f" + fmtInt(i) + "() -> string\nthrows {}\nuses {}\n{\n\"value\" }\n")
+		source.WriteString("effect fn f" + fmtInt(i) + "() -> string\nraises {}\nuses {}\n{\n\"value\" }\n")
 	}
 	text := source.String()
 	b.SetBytes(int64(len(text)))
@@ -236,7 +236,7 @@ func fmtInt(i int) string {
 }
 
 func FuzzCompiler(f *testing.F) {
-	for _, source := range []string{"", "effect fn main() -> string { \"hello\" }", "service S { effect fn get() -> () }", "fn missing() -> string {", "error E effect fn main() -> string throws {E} { fail E }"} {
+	for _, source := range []string{"", "effect fn main() -> string { \"hello\" }", "service S { effect fn get() -> () }", "fn missing() -> string {", "error E effect fn main() -> string raises {E} { fail E }"} {
 		f.Add(source)
 	}
 	f.Fuzz(func(t *testing.T, source string) {

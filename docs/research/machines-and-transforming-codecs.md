@@ -32,7 +32,7 @@ The independent design counsel proposed several additional policies. Applying **
 | --- | --- |
 | One global codec witness per domain type | Reject. Multiple named witnesses support API versions and storage representations without artificial wrapper types. |
 | Reuse provider `impl` for codec witnesses | Defer. Ordinary typed functions and explicit codec values already provide the seam; preserve the existing provider meaning. |
-| Fallible pure methods with new `throws` behavior | Do not introduce solely for codecs. Use admitted Result values or effect recipes and the shared recovery rules. |
+| Fallible pure methods with new `raises` behavior | Do not introduce solely for codecs. Use admitted Result values or effect recipes and the shared recovery rules. |
 | Strict unknown-field rejection as the sole JSON default | Reject as a silent comparator change. The matched server profile explicitly ignores excess fields; any stricter profile has a distinct identity and test matrix. |
 | Every derived codec guarantees an inverse round trip | Qualify. Structural derivation inherits any field transformation's law. Normalization, loss and effectful work need explicit tests; no automatic reversibility claim. |
 | Field attributes for every rename, default or migration | Defer. Start with an explicit wire record and ordinary transformation functions; add syntax only when independent callers justify it. |

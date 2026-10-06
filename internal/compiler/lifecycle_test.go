@@ -17,12 +17,12 @@ effect fn owned() -> string uses {Gate} {
   "ok"
  }
 }
-effect fn broken() -> () throws {Bad} uses {Gate} {run Gate.step("announce");fail Bad}
-effect fn unobserved() -> () throws {Bad} uses {Gate} {
+effect fn broken() -> () raises {Bad} uses {Gate} {run Gate.step("announce");fail Bad}
+effect fn unobserved() -> () raises {Bad} uses {Gate} {
  let child = fork broken()
  run Gate.step("announced")
 }
-effect fn timed() -> () throws {Timeout} uses {Gate} {run worker().timeout(20)}
+effect fn timed() -> () raises {Timeout} uses {Gate} {run worker().timeout(20)}
 effect fn recovered() -> () uses {Gate} {run timed().catch<Timeout>(())}
 effect fn main() -> () {()}
 `
