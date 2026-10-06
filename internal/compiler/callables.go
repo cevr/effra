@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -46,7 +47,7 @@ func (c *checker) sourceCallable(t *sourceType) TypeID {
 	if t.Effect {
 		mode = "effect"
 	}
-	return c.internContract("callable", mode, c.canonicalRef(typeRef(t.Result)), args, c.internRow(t.Failures), c.internRow(t.Services))
+	return c.internContract("callable", mode, c.canonicalRef(typeRef(t.Result)), args, c.internRow(c.sourceRow(t.Failures, "raises")), c.internRow(c.sourceRow(t.Services, "uses")))
 }
 
 func (c *checker) sourceCallableKnown(t *sourceType) bool {
@@ -62,11 +63,17 @@ func (c *checker) sourceCallableKnown(t *sourceType) bool {
 		}
 	}
 	for _, name := range t.Failures {
+		if c.rowParameter(name, "raises") {
+			continue
+		}
 		if _, ok := c.program.Errors[name]; !ok {
 			return false
 		}
 	}
 	for _, name := range t.Services {
+		if c.rowParameter(name, "uses") {
+			continue
+		}
 		known := c.services[name] != nil
 		for _, service := range c.program.Services {
 			known = known || service.Name == name
@@ -76,6 +83,171 @@ func (c *checker) sourceCallableKnown(t *sourceType) bool {
 		}
 	}
 	return true
+}
+
+// Row variables are qualified by their declaration, never matched by the
+// source spelling shared by unrelated functions. The finite solver admits one
+// variable per callback row and obtains its least bound from actual arguments.
+func (c *checker) functionRows(f *Function) map[string]RowParameter {
+	context := map[string]RowParameter{}
+	if c.rowDefinitions == nil {
+		c.rowDefinitions = map[string]RowParameter{}
+	}
+	for i := range f.RowParameters {
+		p := &f.RowParameters[i]
+		p.Declaration = f.Identity
+		p.ID = "row-parameter:" + f.Identity + ":" + p.Kind + ":" + p.Name
+		if _, duplicate := context[p.Name]; duplicate {
+			c.diagnostic("EF125", "duplicate row parameter "+p.Name, p.Span)
+		}
+		if f.Owner != "module" && f.Owner != "" {
+			c.diagnostic("EF125", "row parameters are supported on ordinary module functions", p.Span)
+		}
+		context[p.Name] = *p
+		c.rowDefinitions[p.ID] = *p
+	}
+	return context
+}
+
+func (c *checker) rowParameter(name, kind string) bool {
+	p, ok := c.rowContext[name]
+	return ok && p.Kind == kind
+}
+
+func (c *checker) sourceRow(labels []string, kind string) []string {
+	result := make([]string, len(labels))
+	for i, label := range labels {
+		result[i] = label
+		if p, ok := c.rowContext[label]; ok && p.Kind == kind {
+			result[i] = p.ID
+		}
+	}
+	return result
+}
+
+func (c *checker) instantiateRow(id RowID, bindings map[string][]string) RowID {
+	var labels []string
+	for _, label := range c.rowLabels(id) {
+		if bound, ok := bindings[label]; ok {
+			labels = union(labels, bound)
+		} else {
+			labels = union(labels, []string{label})
+		}
+	}
+	return c.internRow(labels)
+}
+
+func (c *checker) abstractRow(id RowID) bool {
+	for _, label := range c.rowLabels(id) {
+		if _, ok := c.rowDefinitions[label]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *checker) instantiateType(id TypeID, bindings map[string][]string, depth int) TypeID {
+	if depth > 64 {
+		return invalidTypeID
+	}
+	n := c.node(id)
+	if n == nil {
+		return invalidTypeID
+	}
+	if n.Kind != "callable" && n.Kind != "recipe" {
+		return id
+	}
+	args := make([]TypeID, len(n.Args))
+	for i, arg := range n.Args {
+		args[i] = c.instantiateType(arg, bindings, depth+1)
+	}
+	return c.internContract(n.Kind, n.Mode, c.instantiateType(n.Result, bindings, depth+1), args, c.instantiateRow(n.FailureRow, bindings), c.instantiateRow(n.ServiceRow, bindings))
+}
+
+func (c *checker) inferRows(f *Function, arguments []checkedExpression, span Span) map[string][]string {
+	bindings := map[string][]string{}
+	formalVariables := map[string]bool{}
+	for _, p := range f.RowParameters {
+		formalVariables[p.ID] = true
+	}
+	for i, p := range f.Params {
+		if i >= len(arguments) {
+			break
+		}
+		formal, actual := c.node(p.typeID), c.node(arguments[i].valueID())
+		if formal == nil || actual == nil || formal.Kind != "callable" || actual.Kind != "callable" {
+			continue
+		}
+		for _, pair := range [][2]RowID{{formal.FailureRow, actual.FailureRow}, {formal.ServiceRow, actual.ServiceRow}} {
+			var variable string
+			var fixed []string
+			for _, label := range c.rowLabels(pair[0]) {
+				if formalVariables[label] {
+					if variable != "" {
+						c.diagnostic("EF125", "one inferred row parameter per callback row is supported", span)
+					}
+					variable = label
+				} else {
+					fixed = append(fixed, label)
+				}
+			}
+			if variable != "" {
+				bound := difference(c.rowLabels(pair[1]), fixed)
+				// Subtracting concrete labels from an abstract row requires a
+				// difference constraint, outside this finite union solver.
+				if len(fixed) > 0 {
+					for _, label := range bound {
+						if _, abstract := c.rowDefinitions[label]; abstract {
+							c.diagnostic("EF125", "abstract row subtraction is unsupported", span)
+						}
+					}
+				}
+				bindings[variable] = union(bindings[variable], bound)
+			}
+		}
+	}
+	for _, p := range f.RowParameters {
+		if _, solved := bindings[p.ID]; !solved {
+			c.diagnostic("EF125", "row parameter "+p.Name+" must be inferred from a direct callback argument", span)
+			bindings[p.ID] = nil
+		}
+	}
+	for i, p := range f.Params {
+		if i < len(arguments) && (arguments[i].isEffect() || !c.assignable(arguments[i].valueID(), c.instantiateType(p.typeID, bindings, 0), 0)) {
+			c.diagnostic("EF106", "argument has incompatible instantiated callback contract", span)
+		}
+	}
+	return bindings
+}
+
+func (c *checker) validateRowInference(f *Function) {
+	if len(f.RowParameters) == 0 {
+		return
+	}
+	bound := map[string]bool{}
+	for _, p := range f.Params {
+		n := c.node(p.typeID)
+		if n == nil || n.Kind != "callable" {
+			continue
+		}
+		for _, row := range []RowID{n.FailureRow, n.ServiceRow} {
+			count := 0
+			for _, label := range c.rowLabels(row) {
+				if parameter, ok := c.rowDefinitions[label]; ok && parameter.Declaration == f.Identity {
+					bound[label] = true
+					count++
+				}
+			}
+			if count > 1 {
+				c.diagnostic("EF125", "one inferred row parameter per callback row is supported", p.Span)
+			}
+		}
+	}
+	for _, p := range f.RowParameters {
+		if !bound[p.ID] {
+			c.diagnostic("EF125", "row parameter "+p.Name+" must occur in a direct callback argument row", p.Span)
+		}
+	}
 }
 
 // assignable is the single directional value relation. Nominal values remain
@@ -195,4 +367,88 @@ func jsSourceType(t *sourceType, fallback string, declarations ...map[string]Dec
 	}
 	f := &Function{Return: t.Result, returnType: t.ResultType, Effect: t.Effect, Errors: t.Failures, Services: t.Services}
 	return "(" + strings.Join(args, ", ") + ") => " + jsContractFor(f, declared)
+}
+
+// Each actual callback gets its own TS inference variable. Reusing a single
+// variable in several parameter positions makes TypeScript pick the first
+// callback's row instead of the source solver's least union. The return view
+// joins these witnesses and excludes the formal row's fixed labels.
+func jsRowFunctionSignature(f *Function, declarations map[string]Declaration) string {
+	copyDeclarations := func() map[string]Declaration {
+		result := map[string]Declaration{}
+		for name, d := range declarations {
+			result[name] = d
+		}
+		return result
+	}
+	resultDeclarations := declarations
+	parameterDeclarations := make([]map[string]Declaration, len(f.Params))
+	variables := []string{}
+	if len(f.RowParameters) > 0 {
+		resultDeclarations = copyDeclarations()
+		for i := range f.Params {
+			parameterDeclarations[i] = copyDeclarations()
+		}
+		for _, row := range f.RowParameters {
+			terms := []string{}
+			for i, p := range f.Params {
+				if p.sourceType == nil {
+					continue
+				}
+				labels := p.sourceType.Failures
+				if row.Kind == "uses" {
+					labels = p.sourceType.Services
+				}
+				if !slices.Contains(labels, row.Name) {
+					continue
+				}
+				variable := "__ef_row_" + strconv.Itoa(i) + "_" + row.Name
+				constraint := variable
+				if row.Kind == "raises" {
+					constraint += " extends { readonly _tag: string }"
+				}
+				variables = append(variables, constraint)
+				parameterDeclarations[i][row.Name] = Declaration{Kind: "row:" + row.Kind, Name: variable}
+				fixed := []string{}
+				for _, label := range labels {
+					if label == row.Name {
+						continue
+					}
+					if row.Kind == "uses" {
+						fixed = append(fixed, label+"Requirement")
+					} else if len(declarations[label].Fields) > 0 {
+						fixed = append(fixed, label+"Error")
+					} else {
+						fixed = append(fixed, "{ readonly _tag: "+quoted(label)+" }")
+					}
+				}
+				term := variable
+				if len(fixed) > 0 {
+					term = "Exclude<" + variable + ", " + strings.Join(fixed, " | ") + ">"
+				}
+				terms = append(terms, term)
+			}
+			resultDeclarations[row.Name] = Declaration{Kind: "row:" + row.Kind, Name: strings.Join(terms, " | ")}
+		}
+		for i := range parameterDeclarations {
+			for _, row := range f.RowParameters {
+				if _, exists := parameterDeclarations[i][row.Name]; !exists {
+					parameterDeclarations[i][row.Name] = resultDeclarations[row.Name]
+				}
+			}
+		}
+	}
+	params := []string{}
+	for i, p := range f.Params {
+		context := declarations
+		if len(f.RowParameters) > 0 {
+			context = parameterDeclarations[i]
+		}
+		params = append(params, "arg_"+p.Name+": "+jsSourceType(p.sourceType, p.Type, context))
+	}
+	generic := ""
+	if len(variables) > 0 {
+		generic = "<" + strings.Join(variables, ", ") + ">"
+	}
+	return generic + "(" + strings.Join(params, ", ") + ") => " + jsContractFor(f, resultDeclarations)
 }

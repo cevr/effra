@@ -105,12 +105,16 @@ type Function struct {
 	Captures  []OwnershipFact
 	// Identity is assigned by the checker from the canonical callable
 	// contract. The source name remains a projection used by the emitters.
-	Identity   string    `json:"-"`
-	Owner      string    `json:"-"`
-	Contract   ValueType `json:"-"`
-	Actual     ValueType `json:"-"`
-	returnType *sourceType
-	returnID   TypeID
+	Identity         string    `json:"-"`
+	Owner            string    `json:"-"`
+	Contract         ValueType `json:"-"`
+	Actual           ValueType `json:"-"`
+	returnType       *sourceType
+	returnID         TypeID
+	RowParameters    []RowParameter
+	failureID        RowID
+	serviceID        RowID
+	signatureChecked bool
 }
 type Service struct {
 	Name    string
@@ -582,8 +586,26 @@ func (p *parser) function(body bool) *Function {
 	effect := p.accept("effect")
 	p.expect("fn")
 	name := p.name()
-	p.expect("(")
 	f := &Function{Name: name.text, Effect: effect, Span: name.span, DeclSpan: declSpan}
+	if p.accept("<") {
+		for {
+			parameter := p.name()
+			p.expect(":")
+			kind := p.take()
+			if kind.text != "raises" && kind.text != "uses" {
+				p.fail(kind, "row parameters require raises or uses kind")
+			}
+			f.RowParameters = append(f.RowParameters, RowParameter{Name: parameter.text, Kind: kind.text, Span: parameter.span})
+			if len(f.RowParameters) > 8 {
+				p.fail(parameter, "at most eight explicit row parameters are supported")
+			}
+			if p.accept(">") {
+				break
+			}
+			p.expect(",")
+		}
+	}
+	p.expect("(")
 	for !p.accept(")") {
 		param := p.name()
 		p.expect(":")

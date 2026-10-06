@@ -55,7 +55,13 @@ func jsContractFor(f *Function, declarations map[string]Declaration) string {
 	}
 	errors := []string{}
 	for _, n := range normalized(f.Errors) {
-		if declaration, ok := declarations[n]; ok && len(declaration.Fields) > 0 {
+		if declarations[n].Kind == "row:raises" {
+			term := declarations[n].Name
+			if term == "" {
+				term = n
+			}
+			errors = append(errors, term)
+		} else if declaration, ok := declarations[n]; ok && len(declaration.Fields) > 0 {
 			errors = append(errors, n+"Error")
 		} else {
 			errors = append(errors, "{ readonly _tag: "+quoted(n)+" }")
@@ -67,7 +73,15 @@ func jsContractFor(f *Function, declarations map[string]Declaration) string {
 	}
 	services := []string{}
 	for _, n := range normalized(f.Services) {
-		services = append(services, n+"Requirement")
+		if declarations[n].Kind == "row:uses" {
+			term := declarations[n].Name
+			if term == "" {
+				term = n
+			}
+			services = append(services, term)
+		} else {
+			services = append(services, n+"Requirement")
+		}
 	}
 	requirements := "never"
 	if len(services) > 0 {
@@ -194,11 +208,7 @@ const __ef_provider_TestSync={latch:()=>Effect.sync(()=>new __ef_latch()),await:
 	}
 	for _, f := range r.Program.Functions {
 		out.WriteString("const __ef_function_" + f.Name + " = " + jsFunction(f) + ";\nexport { __ef_function_" + f.Name + " as " + f.Name + " };\n")
-		params := []string{}
-		for _, p := range f.Params {
-			params = append(params, "arg_"+p.Name+": "+jsSourceType(p.sourceType, p.Type, declarations))
-		}
-		decl.WriteString("declare const __ef_function_" + f.Name + ": (" + strings.Join(params, ", ") + ") => " + jsContractFor(f, declarations) + ";\nexport { __ef_function_" + f.Name + " as " + f.Name + " };\n")
+		decl.WriteString("declare const __ef_function_" + f.Name + ": " + jsRowFunctionSignature(f, declarations) + ";\nexport { __ef_function_" + f.Name + " as " + f.Name + " };\n")
 	}
 	if entry {
 		out.WriteString("Effect.runPromise(__ef_function_main()).then(value => { if (value !== undefined) console.log(typeof value === 'bigint' ? value.toString() : value); }, error => { console.error(error); process.exitCode = 1; });\n")

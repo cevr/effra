@@ -40,15 +40,16 @@ type EvaluationRows struct {
 }
 
 type CallableType struct {
-	ID           string   `json:"id"`
-	Signature    string   `json:"signature"`
-	Kind         string   `json:"kind"`
-	Parameters   []Param  `json:"parameters"`
-	Result       TypeRef  `json:"result"`
-	Failures     []string `json:"failures"`
-	Requirements []string `json:"requirements"`
-	FailureRow   string   `json:"failureRow,omitempty"`
-	ServiceRow   string   `json:"serviceRow,omitempty"`
+	RowParameters []RowParameter `json:"rowParameters,omitempty"`
+	ID            string         `json:"id"`
+	Signature     string         `json:"signature"`
+	Kind          string         `json:"kind"`
+	Parameters    []Param        `json:"parameters"`
+	Result        TypeRef        `json:"result"`
+	Failures      []string       `json:"failures"`
+	Requirements  []string       `json:"requirements"`
+	FailureRow    string         `json:"failureRow,omitempty"`
+	ServiceRow    string         `json:"serviceRow,omitempty"`
 }
 
 // ApplicationIdentity is the checked identity of one function application.
@@ -56,10 +57,11 @@ type CallableType struct {
 // available through source spans and the checked node, rather than being
 // duplicated in every inspection response.
 type ApplicationIdentity struct {
-	ID        string    `json:"id"`
-	Callee    string    `json:"callee"`
-	Arguments []TypeRef `json:"arguments"`
-	Result    TypeRef   `json:"result"`
+	RowArguments []RowArgument `json:"rowArguments,omitempty"`
+	ID           string        `json:"id"`
+	Callee       string        `json:"callee"`
+	Arguments    []TypeRef     `json:"arguments"`
+	Result       TypeRef       `json:"result"`
 }
 
 func newApplicationIdentity(callee string, arguments []TypeRef, result TypeRef, span Span) ApplicationIdentity {
@@ -90,8 +92,22 @@ type TypeNode struct {
 }
 
 type RowNode struct {
-	ID     string   `json:"id"`
-	Labels []string `json:"labels,omitempty"`
+	ID         string         `json:"id"`
+	Labels     []string       `json:"labels,omitempty"`
+	Parameters []RowParameter `json:"parameters,omitempty"`
+}
+
+type RowParameter struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Kind        string `json:"kind"`
+	Declaration string `json:"declaration"`
+	Span        Span   `json:"span"`
+}
+
+type RowArgument struct {
+	Parameter RowParameter `json:"parameter"`
+	Row       string       `json:"row"`
 }
 
 // ownershipOwnerKind separates the origin of an owner from its rendered
@@ -325,6 +341,8 @@ type checker struct {
 	region                  string
 	suppressDiagnostics     bool
 	publicationBytes        int
+	rowContext              map[string]RowParameter
+	rowDefinitions          map[string]RowParameter
 }
 
 const maxTypeProjectionNodes = 4096
@@ -372,8 +390,12 @@ func (c *checker) checkedFunction(f *Function, declaration, recipe bool) checked
 	}
 	failure, service := emptyRowID, emptyRowID
 	if f.Effect {
-		failure = c.internRow(f.Errors)
-		service = c.internRow(f.Services)
+		if f.signatureChecked {
+			failure, service = f.failureID, f.serviceID
+		} else {
+			failure = c.internRow(f.Errors)
+			service = c.internRow(f.Services)
+		}
 	}
 	var checked CheckedValue
 	switch {
@@ -2562,6 +2584,9 @@ func (c *checker) validateJSDeclarationNames() {
 	}
 }
 func (c *checker) signature(f *Function) {
+	previous := c.rowContext
+	c.rowContext = c.functionRows(f)
+	defer func() { c.rowContext = previous }()
 	valid := func(t string, span Span) {
 		if !c.typeKnown(t) {
 			c.diagnostic("EF102", "unknown or unsupported value type "+t, span)
@@ -2581,11 +2606,17 @@ func (c *checker) signature(f *Function) {
 		names[p.Name] = true
 	}
 	for _, name := range normalized(f.Errors) {
+		if c.rowParameter(name, "raises") {
+			continue
+		}
 		if _, exists := c.program.Errors[name]; !exists {
 			c.diagnostic("EF102", "unknown failure "+name, f.Span)
 		}
 	}
 	for _, name := range normalized(f.Services) {
+		if c.rowParameter(name, "uses") {
+			continue
+		}
 		if _, exists := c.services[name]; !exists {
 			c.diagnostic("EF102", "unknown service "+name, f.Span)
 		}
@@ -2593,6 +2624,10 @@ func (c *checker) signature(f *Function) {
 	if !f.Effect && (len(f.Errors) > 0 || len(f.Services) > 0) {
 		c.diagnostic("EF103", "ordinary functions cannot declare effect rows", f.Span)
 	}
+	f.failureID = c.internRow(c.sourceRow(f.Errors, "raises"))
+	f.serviceID = c.internRow(c.sourceRow(f.Services, "uses"))
+	f.signatureChecked = true
+	c.validateRowInference(f)
 }
 func (c *checker) typeKnown(name string) bool {
 	if c.program != nil && c.program.typeExpressions[name] != nil {
@@ -2726,7 +2761,13 @@ func (c *checker) internRow(labels []string) RowID {
 	id := c.nextRowID
 	c.nextRowID++
 	c.rowIntern[key] = id
-	c.rows = append(c.rows, RowNode{ID: rowNodeIDForLabels(labels), Labels: append([]string{}, labels...)})
+	row := RowNode{ID: rowNodeIDForLabels(labels), Labels: append([]string{}, labels...)}
+	for _, label := range labels {
+		if parameter, ok := c.rowDefinitions[label]; ok {
+			row.Parameters = append(row.Parameters, parameter)
+		}
+	}
+	c.rows = append(c.rows, row)
 	return id
 }
 
@@ -3447,6 +3488,9 @@ func (c *checker) function(f *Function, record bool) {
 }
 
 func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, allowedServices []string) {
+	previousRows := c.rowContext
+	c.rowContext = c.functionRows(f)
+	defer func() { c.rowContext = previousRows }()
 	env := map[string]checkedExpression{}
 	for _, p := range locals {
 		parameter := c.checkedData(p.Type)
@@ -3454,7 +3498,7 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 		env[p.Name] = parameter
 	}
 	for _, p := range f.Params {
-		parameter := c.checkedData(p.Type)
+		parameter := c.checkedDataID(p.typeID, nil, nil)
 		parameter.setOwnership(c.borrowedOwnership(p.Type, "parameter:"+p.Name))
 		env[p.Name] = parameter
 	}
@@ -3463,13 +3507,13 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	c.recordFacts = record || previousFacts
 	actual := c.withRegion("invocation", func() checkedExpression { return c.block(f.Body, env, f.Effect) })
 	c.recordFacts = previousFacts
-	if !c.isKind(actual, "never") && (!c.sameType(actual, f.Return) || actual.isEffect()) {
+	if !c.isKind(actual, "never") && (!c.assignable(actual.valueID(), f.returnID, 0) || actual.isEffect()) {
 		c.diagnostic("EF106", fmt.Sprintf("body returns %s; expected %s", c.displayChecked(actual), f.Return), f.Span)
 	}
-	if missing := c.rowDifference(c.rowLabels(actual.evaluation.failureRowID()), f.Errors); len(missing) > 0 {
+	if missing := c.rowDifference(c.rowLabels(actual.evaluation.failureRowID()), c.rowLabels(f.failureID)); len(missing) > 0 {
 		c.diagnostic("EF107", "undeclared failures: "+strings.Join(missing, ", "), f.Span)
 	}
-	if missing := c.rowDifference(c.rowLabels(actual.evaluation.serviceRowID()), allowedServices); len(missing) > 0 {
+	if missing := c.rowDifference(c.rowLabels(actual.evaluation.serviceRowID()), c.sourceRow(allowedServices, "uses")); len(missing) > 0 {
 		c.diagnostic("EF108", "missing service requirements: "+strings.Join(missing, ", "), f.Span)
 	}
 	actual = c.invocationContract(actual, f.Effect)
@@ -3524,8 +3568,9 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 func callableIdentity(c *checker, f *Function) *CallableType {
 	parameters := append([]Param{}, f.Params...)
 	for i := range parameters {
-		parameters[i].TypeRef = c.typeRef(parameters[i].Type)
-		parameters[i].typeID = c.canonicalRef(parameters[i].TypeRef)
+		parameters[i].TypeRef = c.ref(parameters[i].typeID)
+		parameters[i].sourceType = nil
+		parameters[i].typeID = invalidTypeID
 	}
 	kind := "pure"
 	if f.Effect {
@@ -3535,7 +3580,7 @@ func callableIdentity(c *checker, f *Function) *CallableType {
 	if identity == "" {
 		identity = "function:" + f.Name
 	}
-	return &CallableType{ID: identity, Kind: kind, Parameters: parameters, Result: c.typeRef(f.Return), Failures: normalized(f.Errors), Requirements: normalized(f.Services)}
+	return &CallableType{ID: identity, Kind: kind, Parameters: parameters, Result: c.ref(f.returnID), Failures: normalized(f.Errors), Requirements: normalized(f.Services), RowParameters: append([]RowParameter(nil), f.RowParameters...)}
 }
 func (c *checker) displayChecked(t checkedExpression) string {
 	if t.isEffect() {
@@ -3735,6 +3780,9 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			}
 			e.Text = "provider"
 		} else if f := c.functions[e.Name]; f != nil {
+			if len(f.RowParameters) > 0 {
+				c.diagnostic("EF125", "row-polymorphic functions require direct application; first-class polymorphic values are unsupported", e.Span)
+			}
 			t = c.checkedFunction(f, true, false)
 			t.setOwnership(nil)
 			e.Text = "function"
@@ -3821,6 +3869,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		}
 		argumentTypes := make([]checkedExpression, len(e.Args))
 		t = c.checkedFunction(f, false, true)
+		parameterIDs := c.functionParameterTypeIDs(f)
 		failureRow := t.failureRow()
 		serviceLabels := c.rowLabels(t.serviceRow())
 		if serviceName != "" {
@@ -3846,8 +3895,25 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			if handlerArgument {
 				serviceLabels = union(serviceLabels, c.rowLabels(arg.serviceRow()))
 			}
-			if i < len(f.Params) && !handlerArgument && (arg.isEffect() || !c.sameType(arg, f.Params[i].Type)) {
+			if i < len(f.Params) && len(f.RowParameters) == 0 && !handlerArgument && (arg.isEffect() || !c.assignable(arg.valueID(), parameterIDs[i], 0)) {
 				c.diagnostic("EF106", "argument must be "+f.Params[i].Type, a.Span)
+			}
+		}
+		resultID := f.returnID
+		if resultID == invalidTypeID {
+			resultID = t.resultID()
+		}
+		var rowArguments []RowArgument
+		if len(f.RowParameters) > 0 {
+			bindings := c.inferRows(f, argumentTypes, e.Span)
+			for i, id := range parameterIDs {
+				parameterIDs[i] = c.instantiateType(id, bindings, 0)
+			}
+			resultID = c.instantiateType(f.returnID, bindings, 0)
+			failureRow = c.instantiateRow(f.failureID, bindings)
+			serviceLabels = c.rowLabels(c.instantiateRow(f.serviceID, bindings))
+			for _, parameter := range f.RowParameters {
+				rowArguments = append(rowArguments, RowArgument{Parameter: parameter, Row: c.rowNodeID(c.internRow(bindings[parameter.ID]))})
 			}
 		}
 		if len(f.Ownership) > 0 {
@@ -3857,9 +3923,9 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			t.setCaptures(instantiateCheckedFacts(f.Captures, f.Params, argumentTypes))
 		}
 		if f.Effect {
-			t.value = c.values.recipe(t.resultID(), c.functionParameterTypeIDs(f), checkedEffectCallable, failureRow, c.internRow(serviceLabels), t.ownershipFacts(), t.captureFacts())
+			t.value = c.values.recipe(resultID, parameterIDs, checkedEffectCallable, failureRow, c.internRow(serviceLabels), t.ownershipFacts(), t.captureFacts())
 		} else {
-			t.value = c.values.occurrence(f.returnID, t.ownershipFacts(), t.captureFacts())
+			t.value = c.values.occurrence(resultID, t.ownershipFacts(), t.captureFacts())
 		}
 		if f.Effect {
 			for i, argument := range argumentTypes {
@@ -3877,7 +3943,8 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
 			callee = e.Left.Left.Name + "." + e.Left.Name
 		}
-		application := newApplicationIdentity(callee, argumentRefs, c.ref(t.resultID()), e.Span)
+		application := newApplicationIdentity(callee, argumentRefs, c.ref(resultID), e.Span)
+		application.RowArguments = rowArguments
 		t.application = &application
 		t.identity = application.ID
 	case "member":
@@ -4003,6 +4070,9 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		}
 	case "provide":
 		t = c.expr(e.Left, env, inEffect)
+		if c.abstractRow(t.serviceRow()) {
+			c.diagnostic("EF125", "provision of an abstract row requires an unsupported row difference constraint", e.Span)
+		}
 		provider := c.expr(e.Right, env, inEffect)
 		if !t.isEffect() {
 			c.diagnostic("EF105", "provide requires an Effect value", e.Span)
@@ -4024,6 +4094,9 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		t.value = c.recontractRows(t, t.failureRow(), c.internRow(serviceLabels))
 	case "catch":
 		t = c.expr(e.Left, env, inEffect)
+		if c.abstractRow(t.failureRow()) {
+			c.diagnostic("EF125", "recovery of an abstract row requires an unsupported row difference constraint", e.Span)
+		}
 		fallback := c.expr(e.Right, env, false)
 		if !t.isEffect() {
 			c.diagnostic("EF105", "catch requires an Effect value", e.Span)
