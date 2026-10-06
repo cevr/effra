@@ -174,7 +174,7 @@ func encodedSizeMode(value any, limit int, embedded bool) (int, error) {
 	charge := func(n int) error {
 		count += n
 		if count > limit {
-			return fmt.Errorf("encoded response exceeds %d bytes", limit)
+			return fmt.Errorf("encoded response exceeds available byte budget")
 		}
 		return nil
 	}

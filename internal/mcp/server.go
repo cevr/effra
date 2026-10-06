@@ -208,7 +208,7 @@ func validMCPRequestID(raw json.RawMessage) bool {
 func validatedFormatResponseID(raw json.RawMessage) ([]byte, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if !validMCPRequestID(trimmed) {
-		return nil, errors.New("code.format response has an invalid request ID")
+		return nil, errors.New("tool response has an invalid request ID")
 	}
 	return trimmed, nil
 }
@@ -547,7 +547,7 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 					JSONRPC: "2.0",
 					ID:      res.ID,
 					Result: toolResult{
-						Content: []map[string]string{{"type": "text", "text": fmt.Sprintf("code.format response exceeds %d encoded bytes", maxMCPFrameBytes)}},
+						Content: []map[string]string{{"type": "text", "text": fmt.Sprintf("tool response exceeds %d encoded bytes", maxMCPFrameBytes)}},
 						IsError: true,
 					},
 				}
