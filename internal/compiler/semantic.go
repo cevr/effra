@@ -332,6 +332,34 @@ func (c *checker) check() {
 	for _, f := range c.program.Functions {
 		c.function(f, true)
 	}
+	c.validateJSDeclarationNames()
+}
+
+func (c *checker) validateJSDeclarationNames() {
+	if c.result.Target != "js" {
+		return
+	}
+	occupied := map[string]string{}
+	claim := func(name, owner string, span Span) {
+		if previous, exists := occupied[name]; exists {
+			c.diagnostic("EF110", "JavaScript declaration name "+name+" collides between "+previous+" and "+owner, span)
+			return
+		}
+		occupied[name] = owner
+	}
+	for _, declaration := range c.result.Declarations {
+		claim(declaration.Name, "data declaration", declaration.Span)
+	}
+	for _, declaration := range c.result.Declarations {
+		if declaration.Kind == "error" {
+			claim(declaration.Name+"Error", "error payload declaration", declaration.Span)
+		}
+	}
+	services := append(append([]*Service{}, builtins()...), c.program.Services...)
+	for _, service := range services {
+		claim(service.Name+"Requirement", "service requirement declaration", service.Span)
+		claim(service.Name+"Provider", "service provider declaration", service.Span)
+	}
 }
 func (c *checker) signature(f *Function) {
 	valid := func(t string, span Span) {

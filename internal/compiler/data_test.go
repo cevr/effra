@@ -165,6 +165,18 @@ func TestClosedDataRecordTagFieldIsNotReserved(t *testing.T) {
 	}
 }
 
+func TestClosedDataRejectsJavaScriptDeclarationCollisions(t *testing.T) {
+	for _, source := range []string{
+		`service Foo { effect fn get() -> string } record FooRequirement { value: string } effect fn main() -> string { "x" }`,
+		`error Invalid { message: string } record InvalidError { value: string } effect fn main() -> string { "x" }`,
+	} {
+		r := CompileFor(source, "js")
+		if r.Checked || !hasCode(r, "EF110") {
+			t.Fatalf("JavaScript declaration collision was admitted: %+v", r.Diagnostics)
+		}
+	}
+}
+
 func TestClosedDataLoweringIsAvailable(t *testing.T) {
 	r := Compile(closedDataSource)
 	if !r.Checked {
