@@ -28,6 +28,7 @@ go build -o bin/ef ./cmd/ef
 ./bin/ef inspect examples/main.ef greeting
 ./bin/ef explain examples/main.ef greeting
 ./bin/ef check examples/missing-service.ef  # expected failure: EF108
+./bin/ef fmt --check examples/main.ef
 ./bin/ef build examples/main.ef            # standalone executable: dist/main
 ./dist/main
 ./bin/ef build examples/main.ef -o bin/demo
@@ -121,7 +122,7 @@ The compiler loads callable shapes from Go export data. Imported calls are defer
 
 ## Agent inspection
 
-`ef check`, `ef inspect` and `ef explain` expose checked contracts, source spans, used host signatures, behavior provenance and compiler timings as JSON. `ef mcp .` exposes read-only compiler tools over stdio. Revisions include imported Go declarations and behavior contracts so stale queries can be rejected. See [MCP setup and limits](docs/mcp.md).
+`ef check`, `ef inspect` and `ef explain` expose checked contracts, source spans, used host signatures, behavior provenance and compiler timings as JSON. `ef fmt` exposes the canonical syntax-only formatter through stdin, check, write and JSON report modes; it does not typecheck or load packages. `ef mcp .` exposes read-only compiler tools over stdio, including `code.format` for one explicit buffer or guarded disk snapshot. Revisions include imported Go declarations and behavior contracts so stale semantic queries can be rejected; formatter results use a separate source-byte digest and formatter identity. See [MCP setup and limits](docs/mcp.md).
 
 `ef diagnostics FILE --json` and MCP `project.diagnostics` share compiler errors and lint advice, with explicit severities, UTF-8 byte spans and UTF-16 editor ranges. Reports distinguish checked source, unavailable advice and policy failure. This is the shared diagnostic model; the standalone language server and full type-graph queries are still being built.
 
@@ -138,7 +139,7 @@ bun run gate
 go test -race ./...
 ```
 
-The gate checks Go formatting, vet, compiler/runtime tests, actual Go and JS programs, CLI/MCP inspection and diagnostic parity, and a live HTTP server. Shared lifecycle tests cover child-before-parent cleanup, unobserved child failures and timeout cleanup defects.
+The gate checks Go formatting, vet, compiler/runtime tests, actual Go and JS programs, CLI/MCP inspection and diagnostic parity, formatter CLI/MCP process parity, and a live HTTP server. Shared lifecycle tests cover child-before-parent cleanup, unobserved child failures and timeout cleanup defects.
 
 Project direction is recorded in [NORTH_STAR.md](NORTH_STAR.md), source comparisons in [PRIOR_ARTS.md](PRIOR_ARTS.md), and canonical terms in [GLOSSARY.md](GLOSSARY.md). The [architecture ledger](plans/architecture-loop-2026-10-05.md) records implementation evidence and unresolved work. Start with [implemented syntax](docs/prototype.md), [runtime contracts](docs/runtime.md), or the broader [design sketch](docs/design.md).
 

@@ -315,6 +315,41 @@ func TestFormatReportsSyntaxFailuresWithoutReplacement(t *testing.T) {
 	}
 }
 
+func TestFormatBoundedStopsBeforeHighIndentOutput(t *testing.T) {
+	var source strings.Builder
+	source.WriteString("effect fn main() -> () { ")
+	for index := 0; index < 64; index++ {
+		source.WriteString("scope { ")
+	}
+	source.WriteString("()")
+	for index := 0; index < 64; index++ {
+		source.WriteString(" }")
+	}
+	source.WriteString(" }")
+	result, err := FormatSourceBounded(source.String(), 256)
+	if _, ok := err.(FormatLimitError); !ok || result.Text != "" || result.OutputDigest != "" {
+		t.Fatalf("bounded formatter returned partial output: result=%+v err=%v", result, err)
+	}
+}
+
+func TestFormatBoundedHonorsExactOutputBoundary(t *testing.T) {
+	source := `effect fn main() -> () { () }`
+	want, err := FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	exact, err := FormatSourceBounded(source, len(want.Text))
+	if err != nil || exact.Text != want.Text || exact.OutputDigest != want.OutputDigest {
+		t.Fatalf("exact output bound rejected the complete result: result=%+v err=%v want=%+v", exact, err, want)
+	}
+
+	below, err := FormatSourceBounded(source, len(want.Text)-1)
+	if _, ok := err.(FormatLimitError); !ok || below.Text != "" || below.OutputDigest != "" {
+		t.Fatalf("one-byte-short output bound returned replacement text: result=%+v err=%v", below, err)
+	}
+}
+
 func TestFormatRetainsDeclarationOrderAndTokens(t *testing.T) {
 	source := `fn first() -> string { "\\u00e9" } record R { field: string } error E enum Choice { A B } fn second() -> i64 { 001 }`
 	program, _, diagnostics := parseSyntax(source)

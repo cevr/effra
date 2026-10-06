@@ -10,6 +10,10 @@ import (
 
 const FormatterSchemaVersion = 1
 
+// FormatterIdentity names the syntax producer independently from semantic
+// revisions. Adapters must report this identity without querying Git.
+const FormatterIdentity = "effra/formatter-schema-1"
+
 // FormatResult is the pure, syntax-only formatting snapshot. Its digest is
 // intentionally independent from a checked semantic revision: formatting
 // must work for unresolved imports and ill-typed but syntactically valid code.
@@ -34,6 +38,30 @@ func (e FormatFailure) Error() string {
 }
 
 func FormatSource(source string) (FormatResult, error) {
+	return formatSource(source, 0)
+}
+
+// FormatLimitError means that the complete replacement would exceed the
+// caller-provided output bound. It never carries partial replacement text.
+type FormatLimitError struct {
+	Limit int
+}
+
+func (e FormatLimitError) Error() string {
+	return fmt.Sprintf("formatted source exceeds %d-byte limit", e.Limit)
+}
+
+// FormatSourceBounded runs the same syntax-only formatter while bounding the
+// complete formatted document. A non-positive bound preserves the unbounded
+// core behavior; adapters should provide an explicit positive bound.
+func FormatSourceBounded(source string, maxOutputBytes int) (FormatResult, error) {
+	if maxOutputBytes < 0 {
+		return FormatResult{}, fmt.Errorf("formatter output limit must not be negative")
+	}
+	return formatSource(source, maxOutputBytes)
+}
+
+func formatSource(source string, maxOutputBytes int) (FormatResult, error) {
 	inputDigest := formatDigest(source)
 	program, tokens, diagnostics := parseSyntax(source)
 	if len(diagnostics) > 0 {
@@ -42,7 +70,10 @@ func FormatSource(source string) (FormatResult, error) {
 	if len(tokens) == 1 && tokens[0].kind == "eof" && len(program.Comments) == 0 {
 		return FormatResult{SchemaVersion: FormatterSchemaVersion, InputDigest: inputDigest, OutputDigest: formatDigest(""), Changed: source != "", Text: ""}, nil
 	}
-	formatted := formatSyntax(source, program, tokens)
+	formatted, err := formatSyntaxBounded(source, program, tokens, maxOutputBytes)
+	if err != nil {
+		return FormatResult{SchemaVersion: FormatterSchemaVersion, InputDigest: inputDigest}, err
+	}
 	return FormatResult{
 		SchemaVersion: FormatterSchemaVersion,
 		InputDigest:   inputDigest,
@@ -50,6 +81,12 @@ func FormatSource(source string) (FormatResult, error) {
 		Changed:       formatted != source,
 		Text:          formatted,
 	}, nil
+}
+
+// FormatDigest returns the exact source-byte digest used by FormatSource.
+// It lets source-buffer adapters reject stale input before formatting.
+func FormatDigest(source string) string {
+	return formatDigest(source)
 }
 
 func formatDigest(source string) string {
@@ -81,9 +118,17 @@ type formatLayout struct {
 }
 
 func formatSyntax(source string, program *Program, tokens []token) string {
+	formatted, _ := formatSyntaxBounded(source, program, tokens, 0)
+	return formatted
+}
+
+func formatSyntaxBounded(source string, program *Program, tokens []token, maxOutputBytes int) (string, error) {
 	layout := buildFormatLayout(source, program, tokens)
 	events := buildFormatEvents(program.Comments, tokens)
-	printer := formatPrinter{source: source, tokens: tokens, events: events, layout: layout, lineStart: true, lastToken: -1}
+	printer := formatPrinter{source: source, tokens: tokens, events: events, layout: layout, maxOutputBytes: maxOutputBytes, lineStart: true, lastToken: -1}
+	if maxOutputBytes > 0 {
+		printer.output.Grow(maxOutputBytes)
+	}
 	for index, event := range events {
 		if event.comment != nil {
 			printer.comment(event)
@@ -91,7 +136,14 @@ func formatSyntax(source string, program *Program, tokens []token) string {
 			printer.token(index, event)
 		}
 	}
-	return printer.finish()
+	if printer.outputLimitExceeded {
+		return "", FormatLimitError{Limit: maxOutputBytes}
+	}
+	formatted, ok := printer.finish()
+	if !ok {
+		return "", FormatLimitError{Limit: maxOutputBytes}
+	}
+	return formatted, nil
 }
 
 func buildFormatEvents(comments []Comment, tokens []token) []formatEvent {
@@ -287,20 +339,22 @@ type formatDelimiter struct {
 }
 
 type formatPrinter struct {
-	source           string
-	tokens           []token
-	events           []formatEvent
-	layout           formatLayout
-	output           strings.Builder
-	indent           int
-	lineIndent       int
-	trailingNewlines int
-	lineStart        bool
-	lastByte         byte
-	lastEvent        int
-	hasEvent         bool
-	lastToken        int
-	delimiters       []formatDelimiter
+	source              string
+	tokens              []token
+	events              []formatEvent
+	layout              formatLayout
+	output              strings.Builder
+	indent              int
+	lineIndent          int
+	trailingNewlines    int
+	lineStart           bool
+	lastByte            byte
+	lastEvent           int
+	hasEvent            bool
+	lastToken           int
+	delimiters          []formatDelimiter
+	maxOutputBytes      int
+	outputLimitExceeded bool
 }
 
 func (p *formatPrinter) comment(event formatEvent) {
@@ -634,7 +688,9 @@ func (p *formatPrinter) breaks(count int) {
 		count = 2
 	}
 	for p.trailingNewlines < count {
-		p.output.WriteByte('\n')
+		if !p.writeByte('\n') {
+			return
+		}
 		p.lineStart = true
 		p.lastByte = '\n'
 		p.trailingNewlines++
@@ -645,7 +701,9 @@ func (p *formatPrinter) newline() {
 	if p.output.Len() == 0 || p.trailingNewlines >= 1 {
 		return
 	}
-	p.output.WriteByte('\n')
+	if !p.writeByte('\n') {
+		return
+	}
 	p.lineStart = true
 	p.lastByte = '\n'
 	p.trailingNewlines = 1
@@ -656,7 +714,9 @@ func (p *formatPrinter) space() {
 		return
 	}
 	if p.lastByte != ' ' && p.lastByte != '\n' && p.lastByte != '\t' {
-		p.output.WriteByte(' ')
+		if !p.writeByte(' ') {
+			return
+		}
 		p.lastByte = ' '
 	}
 }
@@ -665,21 +725,43 @@ func (p *formatPrinter) write(text string) {
 	if text == "" {
 		return
 	}
+	indentBytes := 0
 	if p.lineStart {
+		indentBytes = p.lineIndent * 4
+		if p.maxOutputBytes > 0 && (indentBytes < 0 || p.output.Len()+indentBytes+len(text) > p.maxOutputBytes) {
+			p.outputLimitExceeded = true
+			return
+		}
 		p.output.WriteString(strings.Repeat("    ", p.lineIndent))
 		p.lineStart = false
+	}
+	if p.maxOutputBytes > 0 && p.output.Len()+len(text) > p.maxOutputBytes {
+		p.outputLimitExceeded = true
+		return
 	}
 	p.output.WriteString(text)
 	p.lastByte = text[len(text)-1]
 	p.trailingNewlines = 0
 }
 
-func (p *formatPrinter) finish() string {
+func (p *formatPrinter) writeByte(value byte) bool {
+	if p.maxOutputBytes > 0 && p.output.Len()+1 > p.maxOutputBytes {
+		p.outputLimitExceeded = true
+		return false
+	}
+	p.output.WriteByte(value)
+	return true
+}
+
+func (p *formatPrinter) finish() (string, bool) {
 	if p.output.Len() == 0 {
-		return ""
+		return "", true
 	}
 	formatted := strings.TrimRight(p.output.String(), "\n")
-	return formatted + "\n"
+	if p.maxOutputBytes > 0 && len(formatted)+1 > p.maxOutputBytes {
+		return "", false
+	}
+	return formatted + "\n", true
 }
 
 func formatNewlineCount(gap string) int {

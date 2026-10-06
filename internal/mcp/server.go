@@ -17,7 +17,13 @@ import (
 
 const ProtocolVersion = "2025-11-25"
 const CompilerVersion = "0.0.1-prototype"
-const maxInspectionItems = 100
+
+const (
+	maxInspectionItems   = 100
+	maxFormatSourceBytes = 2 * 1024 * 1024
+	maxFormatOutputBytes = 4 * 1024 * 1024
+	maxMCPFrameBytes     = 16 * 1024 * 1024
+)
 
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -48,8 +54,14 @@ type toolResult struct {
 }
 type arguments struct {
 	File             string `json:"file"`
+	FilePresent      bool
+	Source           string
+	SourcePresent    bool
+	URI              string
+	URIProvided      bool
 	Symbol           string `json:"symbol"`
 	ExpectedRevision string `json:"expectedRevision"`
+	ExpectedDigest   string
 	Target           string `json:"target"`
 	Strict           bool   `json:"strict"`
 	Offset           int    `json:"offset"`
@@ -74,9 +86,24 @@ func tools() []tool {
 	querySchema := schema(false)
 	querySchema["properties"].(map[string]any)["offset"] = map[string]any{"type": "integer", "minimum": 0, "description": "UTF-8 byte offset in an expression diagnostic anchor"}
 	querySchema["required"] = []string{"file", "offset"}
+	formatSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"file":           map[string]any{"type": "string", "description": "Workspace-relative .ef disk snapshot"},
+			"source":         map[string]any{"type": "string", "description": "Explicit .ef source buffer; empty is valid"},
+			"uri":            map[string]any{"type": "string", "description": "Optional display URI for a source buffer; never read"},
+			"expectedDigest": map[string]any{"type": "string", "description": "Optional exact input-byte SHA-256 digest"},
+		},
+		"oneOf": []map[string]any{
+			{"required": []string{"file"}},
+			{"required": []string{"source"}},
+		},
+		"additionalProperties": false,
+	}
 	annotations := map[string]bool{"readOnlyHint": true, "destructiveHint": false, "openWorldHint": false}
 	return []tool{
 		{"project.describe", "Compiler capabilities, supported target, and guardrail limits", map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}, annotations},
+		{"code.format", "Format one source buffer or guarded workspace file without writing it", formatSchema, annotations},
 		{"project.check", "Check one file; return revision, bounded diagnostics, and timings", schema(false), annotations},
 		{"project.diagnostics", "Return compiler and semantic lint diagnostics with byte spans and UTF-16 ranges", lintSchema, annotations},
 		{"project.tests", "Discover checked test contracts; reports live-host requirement without executing", schema(false), annotations},
@@ -149,7 +176,7 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 		return fmt.Errorf("workspace must be a directory")
 	}
 	scanner := bufio.NewScanner(input)
-	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	scanner.Buffer(make([]byte, 4096), maxMCPFrameBytes)
 	encoder := json.NewEncoder(output)
 	initialized, ready := false, false
 	for scanner.Scan() {
@@ -242,7 +269,91 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 	}
 	return scanner.Err()
 }
+
+func formatCode(root string, args arguments) (any, error) {
+	var (
+		text   string
+		origin = "buffer"
+		uri    string
+	)
+	if args.SourcePresent {
+		text = args.Source
+		if args.URIProvided {
+			uri = args.URI
+		}
+	} else {
+		source, fileURI, err := readFormatSource(root, args.File)
+		if err != nil {
+			return nil, err
+		}
+		text = string(source)
+		origin = "disk"
+		uri = fileURI
+	}
+	if len([]byte(text)) > maxFormatSourceBytes {
+		return nil, fmt.Errorf("format source exceeds %d MiB limit", maxFormatSourceBytes/(1024*1024))
+	}
+	inputDigest := compiler.FormatDigest(text)
+	if args.ExpectedDigest != "" && args.ExpectedDigest != inputDigest {
+		return nil, fmt.Errorf("stale format source; expected digest %s, current digest %s", args.ExpectedDigest, inputDigest)
+	}
+	result, err := compiler.FormatSourceBounded(text, maxFormatOutputBytes)
+	if err != nil {
+		return nil, err
+	}
+	if len([]byte(result.Text)) > maxFormatOutputBytes {
+		return nil, fmt.Errorf("formatted source exceeds %d MiB limit", maxFormatOutputBytes/(1024*1024))
+	}
+	formatted := map[string]any{
+		"schemaVersion":    result.SchemaVersion,
+		"formatterVersion": compiler.FormatterIdentity,
+		"origin":           origin,
+		"inputDigest":      result.InputDigest,
+		"outputDigest":     result.OutputDigest,
+		"changed":          result.Changed,
+		"text":             result.Text,
+	}
+	if uri != "" || args.URIProvided {
+		formatted["uri"] = uri
+	}
+	return formatted, nil
+}
+
+func readFormatSource(root, relative string) ([]byte, string, error) {
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, "", err
+	}
+	if filepath.IsAbs(relative) || relative == "" || filepath.Ext(relative) != ".ef" {
+		return nil, "", fmt.Errorf("file must be a workspace-relative .ef path")
+	}
+	requested := filepath.Clean(filepath.Join(canonicalRoot, relative))
+	resolved, err := filepath.EvalSymlinks(requested)
+	if err != nil {
+		return nil, "", err
+	}
+	rel, err := filepath.Rel(canonicalRoot, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, "", fmt.Errorf("file escapes workspace")
+	}
+	source, err := sourcefile.ReadRegularFile(resolved, maxFormatSourceBytes)
+	if errors.Is(err, sourcefile.ErrTooLarge) {
+		return nil, "", fmt.Errorf("format source exceeds %d MiB limit", maxFormatSourceBytes/(1024*1024))
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	uri, err := compiler.FileURI(requested)
+	if err != nil {
+		return nil, "", err
+	}
+	return source, uri, nil
+}
+
 func call(root, name string, args arguments) (any, error) {
+	if name == "code.format" {
+		return formatCode(root, args)
+	}
 	if name == "lint.rules" {
 		return compiler.LintRules(), nil
 	}
@@ -251,7 +362,7 @@ func call(root, name string, args arguments) (any, error) {
 			"schemaVersion": 1, "compilerVersion": CompilerVersion,
 			"runtimes": map[string]string{"go": "typed lazy closures; managed scopes and fibers; Go standard library", "js": "effect@4.0.1"},
 			"targets":  []string{"go", "js"}, "defaultTarget": "go", "sourceExtension": ".ef", "workspace": root,
-			"operations": []string{"project.describe", "project.check", "project.diagnostics", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "project.graph", "project.tests"}, "scope": "single-file disk snapshots",
+			"operations": []string{"project.describe", "code.format", "project.check", "project.diagnostics", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "project.graph", "project.tests"}, "scope": "single-file disk snapshots or one explicit source buffer for code.format",
 			"guardrails": map[string]string{
 				"failures": "checked closed rows", "requirements": "checked nominal services",
 				"resourceOwnership":  "Both targets join owned fibers before releasing scope resources; Go File guards closed handles",
@@ -261,6 +372,7 @@ func call(root, name string, args arguments) (any, error) {
 				"runtimeInspection":  "Go Runtime.inspect: current scope metadata, up to 100 resources/child states; no MCP runtime endpoint",
 				"mutableAliases":     "not implemented", "openRows": "not implemented",
 				"inspection": "source SHA-256 plus imported Go export data and behavior contracts; UTF-8 byte spans with UTF-16 diagnostic ranges",
+				"formatting": "syntax-only compiler formatter; 2 MiB source and 4 MiB output bounds; code.format never writes",
 			},
 		}, nil
 	}
@@ -422,6 +534,13 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 			return args, fmt.Errorf("offset is required")
 		}
 	}
+	if name == "code.format" {
+		_, filePresent := fields["file"]
+		_, sourcePresent := fields["source"]
+		if filePresent == sourcePresent {
+			return args, fmt.Errorf("exactly one of file or source is required")
+		}
+	}
 	for key, value := range fields {
 		if key == "strict" && (name == "project.lint" || name == "project.diagnostics") {
 			flag, ok := value.(bool)
@@ -439,21 +558,66 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 			args.Offset = int(n)
 			continue
 		}
-		text, ok := value.(string)
-		if !ok || name == "project.describe" || name == "lint.rules" {
-			return args, fmt.Errorf("invalid tool argument %s", key)
-		}
 		switch key {
+		case "file":
+			if name == "project.describe" || name == "lint.rules" {
+				return args, fmt.Errorf("invalid tool argument %s", key)
+			}
+			text, ok := value.(string)
+			if !ok {
+				return args, fmt.Errorf("file must be a string")
+			}
+			args.File = text
+			args.FilePresent = true
+		case "source":
+			if name != "code.format" {
+				return args, fmt.Errorf("unexpected source argument")
+			}
+			text, ok := value.(string)
+			if !ok {
+				return args, fmt.Errorf("source must be a string")
+			}
+			args.Source = text
+			args.SourcePresent = true
+		case "uri":
+			if name != "code.format" {
+				return args, fmt.Errorf("unexpected uri argument")
+			}
+			text, ok := value.(string)
+			if !ok {
+				return args, fmt.Errorf("uri must be a string")
+			}
+			args.URI = text
+			args.URIProvided = true
+		case "expectedDigest":
+			if name != "code.format" {
+				return args, fmt.Errorf("unexpected expectedDigest argument")
+			}
+			text, ok := value.(string)
+			if !ok || text == "" {
+				return args, fmt.Errorf("expectedDigest must be a non-empty string")
+			}
+			args.ExpectedDigest = text
 		case "target":
+			text, ok := value.(string)
+			if !ok || name == "project.describe" || name == "lint.rules" {
+				return args, fmt.Errorf("invalid tool argument %s", key)
+			}
 			if text != "go" && text != "js" {
 				return args, fmt.Errorf("unsupported target %s", text)
 			}
 			args.Target = text
-		case "file":
-			args.File = text
 		case "expectedRevision":
+			text, ok := value.(string)
+			if !ok || name == "code.format" || name == "project.describe" || name == "lint.rules" {
+				return args, fmt.Errorf("invalid tool argument %s", key)
+			}
 			args.ExpectedRevision = text
 		case "symbol":
+			text, ok := value.(string)
+			if !ok {
+				return args, fmt.Errorf("symbol must be a string")
+			}
 			if name != "code.inspect" && name != "code.explain" {
 				return args, fmt.Errorf("unexpected symbol argument")
 			}
@@ -461,6 +625,15 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 		default:
 			return args, fmt.Errorf("unknown tool argument %s", key)
 		}
+	}
+	if name == "code.format" {
+		if args.FilePresent && args.File == "" {
+			return args, fmt.Errorf("file must be a non-empty workspace-relative path")
+		}
+		if args.URIProvided && !args.SourcePresent {
+			return args, fmt.Errorf("uri is only valid with source")
+		}
+		return args, nil
 	}
 	if name != "project.describe" && name != "lint.rules" && args.File == "" {
 		return args, fmt.Errorf("file is required")

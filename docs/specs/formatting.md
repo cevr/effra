@@ -1,6 +1,6 @@
 # Canonical Effra formatting
 
-Status: pure formatter core integrated at45b43d2, 2026-10-06. CLI/MCP adapters and authored-example adoption remain in implementation; `ef fmt` is not an available command yet. Ship it with the compiler, sharing one formatter with MCP and editor adapters. Formatting keeps Go-like predictability: one style per formatter version, no configurable indentation, quote style or plugin-defined layout.
+Status: pure formatter core and CLI/MCP adapters integrated at6327ad1 plus the formatter-adapter batch, 2026-10-06. `ef fmt` and read-only MCP `code.format` share the syntax-only formatter; authored-example adoption remains a separate mechanical change and LSP formatting remains a future adapter. Formatting keeps Go-like predictability: one style per formatter version, no configurable indentation, quote style or plugin-defined layout.
 
 ## Syntax and preservation
 
@@ -18,7 +18,7 @@ Formatting does not width-wrap or join author line breaks. Existing token-bounda
 
 Comments require attachment evidence: leading documentation, trailing comments, comments inside argument/field lists, between closing braces and continuations, and EOF comments survive in order at their associated syntax. In particular, existing next-line lint directives are line-sensitive. Preserve the same suppressed syntax and eligibility, including malformed/unused directive diagnostics; moving or wrapping source must not silently redirect or activate a suppression. Model directive attachment/line constraints explicitly, and return a diagnostic without output for a layout that cannot preserve them. A token-equivalence check alone cannot establish directive preservation.
 
-The pure formatting result identifies formatter/schema version, exact input-content digest, output digest and changed state. This is a syntax snapshot identity, not a fabricated checked semantic revision. A second formatting pass must be byte-identical. Share source-position conversion with semantic tooling where edits need UTF-16 ranges.
+The pure formatting result identifies formatter schema version, exact input-content digest, output digest and changed state; CLI/MCP adapter reports add the core formatter identity `effra/formatter-schema-1`. This is a syntax snapshot identity, not a fabricated checked semantic revision. A second formatting pass must be byte-identical. Share source-position conversion with semantic tooling where edits need UTF-16 ranges.
 
 ## Command and write behavior
 
@@ -35,7 +35,7 @@ Once the [language server](semantic-tooling.md) is implemented, support `textDoc
 ## Acceptance and delivery
 
 1. Shared syntax retention and pure formatter: real-source goldens for every admitted construct and all comment positions; idempotence; parse-tree equivalence ignoring layout spans; exact token/literal/order preservation; unchanged directive targets and suppression outcomes, including multiple expressions on a line and malformed directives. Cover Unicode, CRLF, EOF, empty files, deep/numerous constructs and syntax errors. Format valid syntax with unresolved types/imports while proving no package loader or checker runs. Record isolated formatting time/allocation receipts, with source size and toolchain; no unmeasured speed claim.
-2. CLI and MCP: real-process tests for check/write/stdin/JSON, mixed valid and invalid file sets, duplicate paths, special files, symlinks, permissions, concurrent changes, size/output limits and unchanged-file behavior. Compare shared output and digests across surfaces. Adopt canonical formatting for authored `.ef` examples in a separate reviewable mechanical commit; exclude intentionally malformed and legacy-diagnostic fixtures and pinned upstream bytes. Add an authored-source formatting check to the gate with an explicit fixture selection.
+2. CLI and MCP: real-process tests for check/write/stdin/JSON, mixed valid and invalid file sets, duplicate paths, special files, symlinks, permissions, concurrent changes, size/output limits and unchanged-file behavior. Compare shared output and digests across surfaces. This batch gates the adapters with an explicit process smoke test; adopt canonical formatting for authored `.ef` examples in a separate reviewable mechanical commit, excluding intentionally malformed and legacy-diagnostic fixtures and pinned upstream bytes. Add an authored-source formatting check only with an explicit fixture selection in that later adoption change.
 3. LSP formatting: framed requests over unsaved/versioned buffers, stale computations, Unicode whole-document edit ranges and CLI/MCP parity. No editor-specific printer. Full repository gates and independent review precede closure of each task.
 
 ## Prior art

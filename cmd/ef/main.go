@@ -19,6 +19,12 @@ import (
 
 func main() {
 	if err := command(os.Args[1:]); err != nil {
+		if exit, ok := err.(formatExitError); ok {
+			if !exit.handled && exit.message != "" {
+				fmt.Fprintln(os.Stderr, exit.message)
+			}
+			os.Exit(exit.code)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		if _, usage := err.(usageError); usage {
 			os.Exit(2)
@@ -30,6 +36,14 @@ func main() {
 type usageError struct{ message string }
 
 func (e usageError) Error() string { return e.message }
+
+type formatExitError struct {
+	code    int
+	message string
+	handled bool
+}
+
+func (e formatExitError) Error() string { return e.message }
 
 func invalidInvocation(err error) error {
 	if err == nil {
@@ -121,8 +135,11 @@ func parseOptions(args []string) (options, error) {
 }
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | mcp [ROOT]")
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT]")
 		return nil
+	}
+	if args[0] == "fmt" {
+		return formatCommand(args[1:])
 	}
 	if len(args) == 2 && args[0] == "lint" && args[1] == "rules" {
 		return printJSON(compiler.LintRules())

@@ -57,7 +57,7 @@ func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
 		t.Fatal(result)
 	}
 	listed := responses[2]["result"].(map[string]any)["tools"].([]any)
-	if len(listed) != 10 {
+	if len(listed) != 11 {
 		t.Fatal(listed)
 	}
 	inspected := responses[3]["result"].(map[string]any)["structuredContent"].(map[string]any)
@@ -399,6 +399,122 @@ func TestArgumentSchemas(t *testing.T) {
 		if _, err := decodeArguments(tc.name, json.RawMessage(tc.raw)); err == nil {
 			t.Fatalf("accepted %s %s", tc.name, tc.raw)
 		}
+	}
+}
+
+func TestFormatBufferAndDiskParity(t *testing.T) {
+	source := `import go missing "example.invalid/no-such-package"
+effect fn main() -> string { "ok" }`
+	want, err := compiler.FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := decodeArguments("code.format", json.RawMessage(fmt.Sprintf(`{"source":%q,"uri":"buffer://main.ef","expectedDigest":%q}`, source, compiler.FormatDigest(source))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := formatCode(t.TempDir(), args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := result.(map[string]any)
+	if payload["origin"] != "buffer" || payload["uri"] != "buffer://main.ef" || payload["text"] != want.Text || payload["inputDigest"] != want.InputDigest || payload["outputDigest"] != want.OutputDigest {
+		t.Fatalf("buffer format drifted from core: payload=%+v want=%+v", payload, want)
+	}
+
+	root := t.TempDir()
+	path := filepath.Join(root, "main.ef")
+	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diskArgs, err := decodeArguments("code.format", json.RawMessage(`{"file":"main.ef"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	diskResult, err := formatCode(root, diskArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diskPayload := diskResult.(map[string]any)
+	uri, err := compiler.FileURI(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diskPayload["origin"] != "disk" || diskPayload["uri"] != uri || diskPayload["text"] != want.Text {
+		t.Fatalf("disk format mismatch: payload=%+v want=%+v uri=%s", diskPayload, want, uri)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.ModTime() != after.ModTime() || before.Size() != after.Size() {
+		t.Fatal("MCP formatting mutated the disk snapshot")
+	}
+}
+
+func TestFormatRejectsStaleAndInvalidOrigins(t *testing.T) {
+	for _, raw := range []string{
+		`{"file":"main.ef","source":""}`,
+		`{"uri":"buffer://main.ef"}`,
+		`{"file":"main.ef","uri":"buffer://main.ef"}`,
+		`{"source":"","expectedDigest":""}`,
+	} {
+		if _, err := decodeArguments("code.format", json.RawMessage(raw)); err == nil {
+			t.Fatalf("accepted invalid code.format arguments %s", raw)
+		}
+	}
+	args, err := decodeArguments("code.format", json.RawMessage(fmt.Sprintf(`{"source":%q,"expectedDigest":"stale"}`, `effect fn main() -> string { "ok" }`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := formatCode(t.TempDir(), args); err == nil || !strings.Contains(err.Error(), "stale format source") {
+		t.Fatalf("stale digest was accepted: %v", err)
+	}
+	exact := strings.Repeat(" ", maxFormatSourceBytes)
+	args, err = decodeArguments("code.format", json.RawMessage(fmt.Sprintf(`{"source":%q}`, exact)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := formatCode(t.TempDir(), args); err != nil {
+		t.Fatalf("source at the exact limit was rejected: %v", err)
+	}
+	tooLarge := strings.Repeat(" ", maxFormatSourceBytes+1)
+	args, err = decodeArguments("code.format", json.RawMessage(fmt.Sprintf(`{"source":%q}`, tooLarge)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := formatCode(t.TempDir(), args); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("source limit was not explicit: %v", err)
+	}
+}
+
+func TestRejectedFormatRequestStillReleasesQueuedPing(t *testing.T) {
+	root := t.TempDir()
+	messages := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code.format","arguments":{"source":"effect fn main() -> string { @ }"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"ping"}`,
+	}
+	var output bytes.Buffer
+	if err := Serve(root, strings.NewReader(strings.Join(messages, "\n")), &output); err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(&output)
+	responses := []map[string]any{}
+	for decoder.More() {
+		var response map[string]any
+		if err := decoder.Decode(&response); err != nil {
+			t.Fatal(err)
+		}
+		responses = append(responses, response)
+	}
+	if len(responses) != 3 || responses[1]["result"].(map[string]any)["isError"] != true || !reflect.DeepEqual(responses[2]["result"], map[string]any{}) {
+		t.Fatalf("queued ping was not completed after rejected format: %+v", responses)
 	}
 }
 

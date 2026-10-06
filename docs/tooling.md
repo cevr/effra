@@ -13,6 +13,7 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 | `ef query FILE BYTE_OFFSET` | `code.typeAt` | Expression kind, type, and executed failure/requirement rows |
 | `ef graph FILE` | `project.graph` | Dependencies, providers, calls and provision boundaries |
 | `ef test FILE` | `project.tests` discovers cases | CLI executes; MCP remains read-only |
+| `ef fmt FILE... [--check] [--json]` / `ef fmt --stdin` | `code.format` | Canonical syntax-only formatting; CLI writes atomically, MCP returns a full-text preview and never writes |
 
 File commands accept `--target go|js`, defaulting to Go. Results contain semantic revision hashes. MCP file tools accept `expectedRevision` and reject stale snapshots.
 
@@ -70,7 +71,7 @@ MCP limits graphs to 1,000 nodes and 2,000 edges; larger graphs fail explicitly.
 
 ## Next capabilities
 
-Canonical comment-preserving formatting, revision-bound checked edit plans, multi-file identities, editor integration, ownership provenance and runtime/source correlation remain planned. Compiler errors stay independent of optional style policy. Managed test time already shares scheduling with sleep/deadline primitives; see the [testing contract](testing.md) for its supported causal boundaries and foreign-operation limits.
+Revision-bound checked edit plans, multi-file identities, editor integration, ownership provenance and runtime/source correlation remain planned. Canonical comment-preserving formatting is implemented by the compiler core and exposed through `ef fmt` and MCP `code.format`; authored-example adoption remains a separate mechanical change, and LSP formatting remains a future adapter. Compiler errors stay independent of optional style policy. Managed test time already shares scheduling with sleep/deadline primitives; see the [testing contract](testing.md) for its supported causal boundaries and foreign-operation limits.
 
 ## Performance receipt
 
