@@ -84,6 +84,8 @@ Guardrails added: pending implementation receipts. Each missed static guarantee 
 
 Counsel: requested second Claude instance active in Herdr pane `w1G:p2`, agent `effra-counsel`. Initial language-design counsel is separate from the required review of each completed apply batch.
 
+Design counsel received in `/tmp/effra-claude2-language-counsel.md`. Root independently reproduced the Handler helper erasure: CLI checks the unprovided Users program and reports an empty main requirement row. Adopt the regular canonical type/function/finite-row mechanism in [the abstraction contract](../docs/specs/language-abstractions.md), decided by **Redesign From First Principles**. Keep explicit run. Carry generic outcomes and effectful recovery as finite subsequent contracts. Reject flattening composite Cause into a four-way Exit and defer new acquire/provide keywords or impl renaming until ordinary interfaces and real consumers justify them. Enum representation remains a measurement candidate, not a presumed speedup.
+
 Merges: none in this pass yet. No application changes have been pushed.
 
 Live checks: baseline `./scripts/gate.sh` and `go test -race ./...` pass on Linux; a temporary public provider program executes identically on Go/JS and its CLI graph exactly matches stdio MCP. These checks do not approve the unmerged branches.
