@@ -479,7 +479,7 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 					break
 				}
 				result, err := call(root, params.Name, args)
-				if err == nil {
+				if err == nil && !formatCall {
 					// The frame has two copies of the result, one of them escaped.
 					// Charge both before json.Marshal creates the content text.
 					err = compiler.ValidateMCPProjectionResponse(result, len(req.ID)+128)
