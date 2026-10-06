@@ -21,7 +21,14 @@ File commands accept `--target go|js`, defaulting to Go. Results contain semanti
 
 `EFL002 redundant-provision` suggests reviewing a boundary whose receiver has no requirement for that service. Stable boundaries may be intentional. `EFL003 unused-go-import` suggests removing an import with no admitted calls.
 
-Warnings do not make checked source untyped. `--strict` makes warnings fail the lint command; suggestions remain non-failing. Compiler errors always fail, and optional advice is skipped on unchecked source. Lint suppressions, severity configuration and automatic fixes are not implemented.
+Warnings do not make checked source untyped. `--strict` makes warnings fail the lint command; suggestions remain non-failing. Compiler errors always fail, and optional advice is skipped on unchecked source. A named next-line suppression can acknowledge one optional rule on the following physical source line:
+
+```text
+// effra-lint-disable-next-line unused-recipe -- intentionally deferred hook
+let forgotten = task()
+```
+
+The rule name must be known and the reason must be non-empty. Malformed, unknown, or unused suppressions are `EFL004 invalid-suppression` errors and fail lint in every mode. Suppressions are matched against semantic diagnostic spans in the same source revision; compiler correctness diagnostics cannot be suppressed. Comments remain source text, and no automatic deletion fix is offered.
 
 ## Local types
 

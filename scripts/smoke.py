@@ -89,7 +89,7 @@ with tempfile.TemporaryDirectory(prefix="effra-tests-") as tmp:
         suite=json.loads(run("test",str(file),"--target",target,"--live","--timeout-ms","100",success=False).stdout)
         assert suite["watchdogExpired"] and not suite["cleanupCompleted"]
 rules=json.loads(run("lint","rules").stdout)
-assert {r["name"] for r in rules} == {"unused-recipe","redundant-provision","unused-go-import"}
+assert {r["name"] for r in rules} == {"unused-recipe","redundant-provision","unused-go-import","invalid-suppression"}
 graph=json.loads(run("graph","examples/workflow.ef").stdout)
 assert any(e["kind"]=="requires" and e["from"]=="function:welcome" and e["service"]=="Directory" for e in graph["edges"])
 with tempfile.TemporaryDirectory(prefix="effra-tooling-") as tmp:
@@ -117,4 +117,20 @@ with tempfile.TemporaryDirectory(prefix="effra-tooling-") as tmp:
     assert replies[3]["result"]["structuredContent"]["nodes"]
     assert replies[4]["result"]["structuredContent"]==rules
     assert replies[5]["error"]["code"]==-32602
+
+    source="""effect fn task() -> string { \"ok\" }
+effect fn main() -> () {
+// effra-lint-disable-next-line unused-recipe -- intentional deferred hook
+let forgotten = task();
+()}"""
+    file.write_text(source)
+    suppressed=json.loads(run("lint",str(file),"--strict").stdout)
+    assert suppressed["lintPassed"] and suppressed["errors"]==0 and suppressed["lintDiagnostics"]==[]
+    suppression_calls=messages[:2]+[
+        {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"project.lint","arguments":{"file":"main.ef","strict":True}}},
+    ]
+    server=subprocess.run([ef,"mcp",tmp],input="\n".join(map(json.dumps,suppression_calls))+"\n",text=True,capture_output=True)
+    assert server.returncode==0,server.stderr
+    suppression_reply=[json.loads(line) for line in server.stdout.splitlines()]
+    assert suppression_reply[1]["result"]["structuredContent"]["lint"]==suppressed
 print("native Go executable, JS module, CLI lint/query/graph and stdio MCP: passed")
