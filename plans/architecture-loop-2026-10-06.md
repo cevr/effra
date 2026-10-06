@@ -75,6 +75,10 @@ Verdict: structural work remains. The loop is open.
 | A7 | Bound primitive-only shared type traversal | Exceptionally fast compilation | compiler provenance | High | Rereview of668e5a9 blocked; O10 tiny source still checks in seconds |
 | A8 | Allow partial time advance while cleanup sleeps past the target | Owned lifetimes | runtime scheduler/scope | High | Independent public probe blocks Adjust10 while cleanup waits until20; repair required |
 | A9 | Atomically recheck scheduler quiescence before selecting/finalizing time | Owned lifetimes | runtime scheduler | High | Repeated public join/deadline probes miss intermediate continuation sleeps; repair required |
+| A10 | Reject special source nodes before blocking I/O and bound all nested inspection rows | Operability and agent introspection | cmd/ef, internal/mcp | Medium | CLI/MCP sweep complete; two reproduced P2 findings in pass1/cli-mcp-review.md; repair pending |
+| A11 | Make state machines easy to express and inspect using checked data, transitions and owned work | Algebraic data and useful abstraction; Owned lifetimes | Shared semantic model and bundled machine runtime | High | Owner direction recorded; Effect Machine/XState source-and-test survey active; finite spec next |
+| A12 | Derive structural codecs while retaining typed bidirectional transformations | Go-like simplicity through regular abstractions; Explicit contracts | Canonical types, bundled codecs and native server spec | High | Owner direction recorded; Rust/Serde and pinned Effect transformation survey active |
+| A13 | Learn from Gleam/ReScript/TypeScript host compilation without inheriting tedious bindings | Adoption through host interop; Exceptionally fast compilation | Imports, backend, source mapping and build cache | Medium | Current sources fetched and pinned in PRIOR_ARTS; initial source/test inspection complete, focused comparison remains open |
 
 Guardrails added: pending implementation receipts. Each missed static guarantee needs its own rejected-source test, and each bounded analysis needs adversarial scaling coverage.
 
