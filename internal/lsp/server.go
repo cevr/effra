@@ -239,7 +239,7 @@ func documentPath(uri string) (string, error) {
 	if err != nil || !strings.EqualFold(u.Scheme, "file") || u.Host != "" || u.User != nil || strings.ContainsAny(uri, "?#") || u.Opaque != "" || strings.ContainsRune(u.Path, 0) || !utf8.ValidString(u.Path) || !filepath.IsAbs(u.Path) || filepath.Ext(u.Path) != ".ef" {
 		return "", fmt.Errorf("document URI must be an absolute local file URI ending in .ef")
 	}
-	if strings.Contains(strings.ToLower(u.EscapedPath()), "%2f") {
+	if strings.Contains(strings.ToLower(uri), "%2f") {
 		return "", fmt.Errorf("document URI must not encode path separators")
 	}
 	for _, segment := range strings.Split(u.Path, "/")[1:] {

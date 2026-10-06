@@ -242,7 +242,7 @@ def operational_budget_regression(directory):
                          call("textDocument/didClose", {"textDocument": {"uri": path.as_uri()}}),
                          STOP, EXIT], environment={"GOPROXY": "off", "GOTOOLCHAIN": "local", "GOWORK": "off"})
     logs = [m["params"]["message"] for m in messages if m.get("method") == "window/logMessage"]
-    assert len(logs) == 1 and "EF111" in logs[0] and "19" in logs[0] and path.as_uri() in logs[0], logs
+    assert len(logs) == 1 and "EF111" in logs[0] and "version 19" in logs[0] and path.as_uri() in logs[0], logs
     assert "bytes omitted" in logs[0] and len(logs[0].encode()) < 16 * 1024, logs[0][:100]
     assert next(m for m in messages if m.get("id") == "after-error")["error"]["code"] == -32601
     assert publications(messages) == [{"uri": path.as_uri(), "diagnostics": []}]
@@ -250,7 +250,10 @@ def operational_budget_regression(directory):
 
 def refusal_recovery_regression(directory):
     path = directory / "recover.ef"
-    invalid = ["file:///tmp/a%2Fb.ef", "file:///tmp/a/%2e%2e/b.ef", "file:///tmp//b.ef",
+    invalid = ["file:///tmp/a%2Fb.ef", "file:///tmp/a%2fb.ef",
+               "file:///tmp/a%2Fb c.ef", "file:///tmp/ü%2Fb.ef",
+               'file:///tmp/a%2Fb".ef', "file:///tmp/a%2Fb{.ef",
+               "file:///tmp/a/%2e%2e/b.ef", "file:///tmp//b.ef",
                "file:///tmp/%ff.ef", "file:///tmp/" + "x" * 4096 + ".ef"]
     notifications = [call("textDocument/didOpen", {"textDocument": {
         "uri": uri, "text": "", "languageId": "effra", "version": 1}}) for uri in invalid]
@@ -259,6 +262,21 @@ def refusal_recovery_regression(directory):
     assert sum(m.get("method") == "window/logMessage" for m in messages) == len(invalid)
     assert next(m for m in messages if m.get("id") == "after-refusal")["error"]["code"] == -32601
     assert len(publications(messages)) == 1
+    # Raw editor spellings and one-decode literal escapes remain admitted.
+    for uri in ("file:///tmp/a b.ef", "file:///tmp/ü.ef", "file:///tmp/%252F.ef"):
+        notification = call("textDocument/didOpen", {"textDocument": {
+            "uri": uri, "text": "", "languageId": "effra", "version": 1}})
+        messages = exchange([INIT, READY, notification, STOP, EXIT])
+        assert publications(messages) == [{"uri": uri, "version": 1, "diagnostics": []}], messages
+        assert not any(m.get("method") == "window/logMessage" for m in messages), messages
+    # Reject the encoded separator before decoded-path alias lookup.
+    plain, encoded = "file:///tmp/a/b c.ef", "file:///tmp/a%2Fb c.ef"
+    notifications = [call("textDocument/didOpen", {"textDocument": {
+        "uri": uri, "text": "", "languageId": "effra", "version": 1}}) for uri in (plain, encoded)]
+    messages = exchange([INIT, READY, *notifications, STOP, EXIT])
+    assert publications(messages) == [{"uri": plain, "version": 1, "diagnostics": []}], messages
+    logs = [m["params"]["message"] for m in messages if m.get("method") == "window/logMessage"]
+    assert len(logs) == 1 and "must not encode path separators" in logs[0] and "duplicate" not in logs[0], logs
     # Located findings remain all-or-refuse. Refusing this projection must
     # still permit close and a following request on the same framed session.
     name = "d" * 200
@@ -268,7 +286,7 @@ def refusal_recovery_regression(directory):
                          call("textDocument/didClose", {"textDocument": {"uri": path.as_uri()}}),
                          call("unknown", identifier="after-publication"), STOP, EXIT])
     logs = [m["params"]["message"] for m in messages if m.get("method") == "window/logMessage"]
-    assert len(logs) == 1 and "output" in logs[0] and "23" in logs[0], logs
+    assert len(logs) == 1 and "output" in logs[0] and "version 23" in logs[0], logs
     assert publications(messages) == [{"uri": path.as_uri(), "diagnostics": []}]
     assert next(m for m in messages if m.get("id") == "after-publication")["error"]["code"] == -32601
 

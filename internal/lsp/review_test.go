@@ -104,17 +104,19 @@ func TestNonobjectBodiesAreInvalidRequests(t *testing.T) {
 }
 
 func TestURIProfileLimitsBeforeRetention(t *testing.T) {
-	var out bytes.Buffer
-	s := session{out: &out, target: "go", phase: 2, documents: map[string]document{}}
-	for _, uri := range []string{"file:///tmp/" + strings.Repeat("x", MaxDocumentURIBytes) + ".ef", "file:///tmp/%ff.ef", "file:///tmp/a%2fb.ef", "file:///tmp/a/%2e%2e/b.ef", "file:///tmp//a.ef"} {
-		if err := s.synchronize(syncRequest(t, open(uri, "", 1))); err != nil {
-			t.Fatal(err)
-		}
-		if len(s.documents) != 0 || s.bytes != 0 {
-			t.Fatal("invalid identity retained")
-		}
+	for _, uri := range []string{"file:///tmp/" + strings.Repeat("x", MaxDocumentURIBytes) + ".ef", "file:///tmp/%ff.ef", "file:///tmp/a%2fb.ef", "file:///tmp/a%2Fb.ef", "file:///tmp/a%2Fb c.ef", "file:///tmp/ü%2Fb.ef", "file:///tmp/a%2Fb\".ef", "file:///tmp/a%2Fb{.ef", "file:///tmp/a/%2e%2e/b.ef", "file:///tmp//a.ef"} {
+		t.Run(uri, func(t *testing.T) {
+			var out bytes.Buffer
+			s := session{out: &out, target: "go", phase: 2, documents: map[string]document{}}
+			if err := s.synchronize(syncRequest(t, open(uri, "", 1))); err != nil {
+				t.Fatal(err)
+			}
+			if len(s.documents) != 0 || s.bytes != 0 {
+				t.Fatal("invalid identity retained")
+			}
+		})
 	}
-	for spelling, want := range map[string]string{"file:///tmp/%c3%bc.ef": "/tmp/ü.ef", "file:/tmp/%252F.ef": "/tmp/%2F.ef", "FILE:/tmp/a!b.ef": "/tmp/a!b.ef"} {
+	for spelling, want := range map[string]string{"file:///tmp/%c3%bc.ef": "/tmp/ü.ef", "file:///tmp/ü.ef": "/tmp/ü.ef", "file:///tmp/a b.ef": "/tmp/a b.ef", "file:/tmp/%252F.ef": "/tmp/%2F.ef", "FILE:/tmp/a!b.ef": "/tmp/a!b.ef"} {
 		if path, err := documentPath(spelling); err != nil || path != want {
 			t.Fatal("one-decode profile mismatch", spelling, path, err)
 		}
