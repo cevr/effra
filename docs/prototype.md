@@ -6,7 +6,7 @@ This is a single-file compiler experiment, not the full design in design.md. The
 
 - Immutable local bindings, string/bool/unit and i64 values, managed File handles, string concatenation, primitive equality, and `if` expressions with two branches. i64 literals are currently nonnegative; JS represents them as bigint.
 - Ordinary `fn` and lazy `effect fn`, with explicit parameter, result, failure, and service contracts.
-- Nominal records and closed enums with typed fields: `record User { id: string }`, `enum State { Ready Waiting { reason: string } }`, constructors, field access and exhaustive `match` arms. Static data does not decode or validate external wire values.
+- Nominal records and closed enums with typed fields: `record User { id: string }`, `enum State { Ready Waiting { reason: string } }`, constructors, field access and exhaustive `match` arms. Constructor payloads accept `{ field }` shorthand; in a control position such as `match State.Ready { value } { ... }`, the following arm brace disambiguates that constructor from the control body. Static data does not decode or validate external wire values.
 - Nominal errors may carry typed fields: `error NotFound { id: string }`; `fail NotFound { id: "missing" }` preserves the payload on both targets. Error declarations are failure payload types, not ordinary success values or nested record fields.
 - Nominal services and self-contained implementations: `impl MemoryUsers for Users`.
 - `run` to execute a deferred effect within an effect body.
@@ -32,7 +32,7 @@ The optional JavaScript target lowers to pinned Effect 4.0.1, verified available
 
 `ef build FILE` emits `dist/go/<name>/main.go` and produces the standalone executable `dist/<name>`. `-o PATH` selects its output path. `ef run FILE` builds and executes the native artifact.
 
-`ef build FILE --target js` emits an importable module and consumer declarations in dist; `--entry` adds host execution. `ef run FILE --target js` emits an entry then starts Bun (Node fallback). Generated JS is trusted compiler output and should be regenerated after source edits.
+`ef build FILE --target js` emits an importable module and consumer declarations in dist; `--entry` adds host execution. `ef run FILE --target js` emits an entry then starts Bun (Node fallback). Empty enums are represented as `never` in consumer declarations, and names reserved by TypeScript are diagnosed before emission. Generated JS is trusted compiler output and should be regenerated after source edits.
 
 ## Limits
 

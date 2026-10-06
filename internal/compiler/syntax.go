@@ -691,7 +691,17 @@ func (p *parser) constructorBrace() bool {
 	if p.at+2 >= len(p.tokens) {
 		return false
 	}
-	return p.tokens[p.at+2].text == ":"
+	if p.tokens[p.at+2].text == ":" {
+		return true
+	}
+	// A shorthand payload has the form `Constructor { value }`. During a
+	// control expression, the following arm/body brace disambiguates it from
+	// the control block itself; ordinary expressions remain unambiguous because
+	// constructors are enabled outside that protected parser region.
+	if p.tokens[p.at+1].kind == "name" && p.tokens[p.at+2].text == "}" {
+		return p.noConstruct == 0 || (p.at+3 < len(p.tokens) && p.tokens[p.at+3].text == "{")
+	}
+	return false
 }
 
 func (p *parser) pattern() *MatchPattern {
@@ -703,8 +713,13 @@ func (p *parser) pattern() *MatchPattern {
 		pattern.Span.Length = variant.span.Offset + variant.span.Length - pattern.Span.Offset
 	}
 	if p.accept("{") {
+		seen := map[string]bool{}
 		for !p.accept("}") {
 			field := p.name()
+			if seen[field.text] {
+				p.fail(field, "duplicate pattern field "+field.text)
+			}
+			seen[field.text] = true
 			binding := field.text
 			if p.accept(":") {
 				binding = p.name().text

@@ -383,6 +383,25 @@ func (c *checker) validateJSDeclarationNames() {
 	if c.result.Target != "js" {
 		return
 	}
+	reserved := map[string]bool{
+		"as": true, "asserts": true, "async": true, "await": true, "break": true,
+		"case": true, "catch": true, "class": true, "const": true, "continue": true,
+		"debugger": true, "default": true, "delete": true, "do": true, "else": true,
+		"enum": true, "export": true, "extends": true, "finally": true, "for": true,
+		"false": true, "from": true, "function": true, "get": true, "if": true, "implements": true,
+		"import": true, "in": true, "infer": true, "instanceof": true, "interface": true,
+		"is": true, "keyof": true, "let": true, "module": true, "namespace": true,
+		"new": true, "null": true, "number": true, "object": true, "of": true, "package": true, "private": true, "protected": true,
+		"public": true, "readonly": true, "return": true, "satisfies": true, "set": true,
+		"static": true, "string": true, "super": true, "switch": true, "symbol": true, "throw": true, "this": true, "true": true, "try": true,
+		"type": true, "typeof": true, "undefined": true, "unknown": true, "using": true, "var": true,
+		"any": true, "bigint": true, "boolean": true, "never": true, "void": true, "while": true, "with": true, "yield": true,
+	}
+	validateIdentifier := func(name, owner string, span Span) {
+		if reserved[name] {
+			c.diagnostic("EF110", "JavaScript declaration name "+name+" is reserved by TypeScript for "+owner, span)
+		}
+	}
 	occupied := map[string]string{}
 	claim := func(name, owner string, span Span) {
 		if previous, exists := occupied[name]; exists {
@@ -392,6 +411,11 @@ func (c *checker) validateJSDeclarationNames() {
 		occupied[name] = owner
 	}
 	for _, declaration := range c.result.Declarations {
+		if declaration.Kind == "error" {
+			validateIdentifier(declaration.Name+"Error", "error payload declaration", declaration.Span)
+		} else {
+			validateIdentifier(declaration.Name, "data declaration", declaration.Span)
+		}
 		claim(declaration.Name, "data declaration", declaration.Span)
 	}
 	for _, declaration := range c.result.Declarations {
@@ -401,8 +425,15 @@ func (c *checker) validateJSDeclarationNames() {
 	}
 	services := append(append([]*Service{}, builtins()...), c.program.Services...)
 	for _, service := range services {
+		validateIdentifier(service.Name, "service export", service.Span)
 		claim(service.Name+"Requirement", "service requirement declaration", service.Span)
 		claim(service.Name+"Provider", "service provider declaration", service.Span)
+	}
+	for _, provider := range c.program.Providers {
+		validateIdentifier(provider.Name, "provider export", provider.Span)
+	}
+	for _, function := range c.program.Functions {
+		validateIdentifier(function.Name, "function export", function.Span)
 	}
 }
 func (c *checker) signature(f *Function) {
@@ -447,15 +478,23 @@ func (c *checker) typeKnown(name string) bool {
 	return false
 }
 func (c *checker) typeRef(name string) TypeRef {
-	ref := typeRef(name)
-	if c.records[name] != nil {
-		ref.Kind = "record"
-	} else if c.enums[name] != nil {
-		ref.Kind = "enum"
-	} else if c.errors[name] != nil {
-		ref.Kind = "error"
+	var canonical func(TypeRef) TypeRef
+	canonical = func(ref TypeRef) TypeRef {
+		for i := range ref.Args {
+			ref.Args[i] = canonical(ref.Args[i])
+		}
+		if ref.Kind == "named" {
+			if c.records[ref.Name] != nil {
+				ref.Kind = "record"
+			} else if c.enums[ref.Name] != nil {
+				ref.Kind = "enum"
+			} else if c.errors[ref.Name] != nil {
+				ref.Kind = "error"
+			}
+		}
+		return ref
 	}
-	return ref
+	return canonical(typeRef(name))
 }
 func (c *checker) validateFields(fields []Field, owner string, reserveTag bool) {
 	names := map[string]bool{}
@@ -662,6 +701,10 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 						}
 					}
 				}
+			} else if decl := c.errors[s.Name]; decl != nil {
+				// The shorthand `fail Error` and `fail Error()` still need to
+				// satisfy every declared payload field.
+				c.payload(&Expr{Kind: "payload", Span: s.Span}, decl.Fields, env, s.Span)
 			}
 			out.Errors = union(out.Errors, []string{s.Name})
 			out.Success = "never"
@@ -829,6 +872,10 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		}
 	case "member":
 		inner := c.expr(e.Left, env, inEffect)
+		if inner.Effect {
+			c.diagnostic("EF106", "field access requires an executed value", e.Span)
+			break
+		}
 		if fields, ok := fieldsFor(c, inner.Success, ""); ok {
 			for _, field := range fields {
 				if field.Name == e.Name {
@@ -843,7 +890,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			c.diagnostic("EF114", "unknown field "+e.Name+" on "+inner.Success, e.Span)
 			break
 		}
-		if inner.Effect || !strings.HasPrefix(inner.Success, "GoResult:") {
+		if !strings.HasPrefix(inner.Success, "GoResult:") {
 			c.diagnostic("EF106", "field access requires an executed GoResult", e.Span)
 			break
 		}
@@ -1019,6 +1066,14 @@ func (c *checker) dataCall(e *Expr, env map[string]ValueType, inEffect bool) (Va
 		}
 	}
 	if len(e.Fields) > 0 {
+		if len(e.Fields) != len(e.Args) {
+			c.diagnostic("EF122", "constructor arguments cannot mix named and positional forms", e.Span)
+			for _, arg := range e.Args {
+				c.expr(arg, env, false)
+			}
+			e.Text = "data"
+			return value("invalid"), true
+		}
 		payloadExpr := &Expr{Kind: "payload", Fields: e.Fields, Span: e.Span}
 		c.payload(payloadExpr, fields, env, e.Span)
 		e.Text = "data"
@@ -1095,6 +1150,8 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 	}
 	seen := map[string]bool{}
 	result := value("never")
+	branchErrors := []string{}
+	branchServices := []string{}
 	haveResult := false
 	for _, arm := range e.Arms {
 		pattern := arm.Pattern
@@ -1122,8 +1179,16 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 		seen[pattern.VariantName] = true
 		branchEnv := clone(env)
 		fields := fieldsMap(variant.Fields)
+		aliases := map[string]bool{}
 		for _, fieldName := range sortedBindingNames(pattern.Bindings) {
 			binding := pattern.Bindings[fieldName]
+			if binding != "_" {
+				if aliases[binding] {
+					c.diagnostic("EF121", "duplicate pattern binding "+binding, pattern.Span)
+					continue
+				}
+				aliases[binding] = true
+			}
 			field, ok := fields[fieldName]
 			if !ok {
 				c.diagnostic("EF114", "unknown payload field "+fieldName+" in match arm", pattern.Span)
@@ -1142,8 +1207,8 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 				c.diagnostic("EF106", "match branches must return the same type", arm.Span)
 			}
 		}
-		result.Errors = union(result.Errors, branch.Errors)
-		result.Services = union(result.Services, branch.Services)
+		branchErrors = union(branchErrors, branch.Errors)
+		branchServices = union(branchServices, branch.Services)
 	}
 	for _, variant := range enum.Variants {
 		if !seen[variant.Name] {
@@ -1153,8 +1218,8 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 	if !haveResult {
 		result = value("never")
 	}
-	result.Errors = union(result.Errors, tExecutedErrors(e.Left))
-	result.Services = union(result.Services, tExecutedServices(e.Left))
+	result.Errors = union(branchErrors, tExecutedErrors(e.Left))
+	result.Services = union(branchServices, tExecutedServices(e.Left))
 	result.Effect = false
 	return result
 }
