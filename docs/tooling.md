@@ -36,6 +36,8 @@ Offsets and spans are UTF-8 bytes. Queries currently address diagnostic anchors 
 
 Checked values also carry a canonical `type` reference. Nominal records, enums and errors retain declaration identity; `ef inspect FILE TYPE_NAME` returns their source fields or variants with UTF-8 spans. MCP bounds declaration lists, variants and fields and reports truncation explicitly.
 
+Checked values also expose bounded `ownership` and `captures` facts. `owned` facts name the closing scope or child that the compiler can prove owns a `File`/`Fiber`; `borrowed` facts retain the parameter origin; `unknown` facts keep foreign and custom provider behavior honest. `EF123` is a compiler correctness diagnostic for a proven inner-scope or child-owned escape. The same facts are present in `ef inspect`, `ef query`, `project.check`, `code.inspect` and `code.typeAt`; this is provenance evidence, not a complete borrow checker.
+
 ```sh
 OFFSET=$(python3 -c 'from pathlib import Path; s=Path("examples/latest-task.ef").read_bytes(); print(s.index(b"run previous"))')
 ef query examples/latest-task.ef "$OFFSET"
@@ -53,7 +55,7 @@ MCP limits graphs to 1,000 nodes and 2,000 edges; larger graphs fail explicitly.
 
 ## Next capabilities
 
-Canonical comment-preserving formatting, revision-bound checked edit plans, multi-file identities, editor integration, ownership provenance and runtime/source correlation remain planned. Compiler errors stay independent of optional style policy. A future test clock must share a scheduler with sleep/deadline primitives.
+Canonical comment-preserving formatting, revision-bound checked edit plans, multi-file identities, editor integration and runtime/source correlation remain planned. Compiler errors stay independent of optional style policy. A future test clock must share a scheduler with sleep/deadline primitives.
 
 ## Performance receipt
 
