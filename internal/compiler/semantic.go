@@ -3235,6 +3235,21 @@ func (c *checker) invocationContract(e checkedExpression, effect bool) checkedEx
 	if !effect {
 		return e
 	}
+	// A returned callable carries its own signature and rows. Evaluation of
+	// the factory is a separate contract whose result is that complete value,
+	// not the result of invoking the returned callable.
+	if node := e.node(); node != nil && node.Kind == "callable" {
+		failure, service := e.evaluation.failureRowID(), e.evaluation.serviceRowID()
+		if failure != emptyRowID || service != emptyRowID {
+			e.value = c.values.recipe(e.valueID(), nil, checkedEffectCallable, failure, service, e.ownershipFacts(), e.captureFacts())
+			// Named callable metadata describes the returned value, not this
+			// enclosing invocation. Evidence remains available for substitution.
+			e.callableDecl = nil
+			e.identity = ""
+			e.application = nil
+		}
+		return e
+	}
 	e.value = c.recontractRows(e, e.evaluation.failureRowID(), e.evaluation.serviceRowID())
 	return e
 }
@@ -4174,6 +4189,10 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		// false safe result.
 		t.setOwnership(mergeFacts(t.ownershipFacts(), fallback.ownershipFacts()))
 		t.setCaptures(mergeFacts(t.captureFacts(), fallback.captureFacts()))
+		t.callableEvidence = joinCallableEvidence(t.callableEvidence, fallback.callableEvidence)
+		if t.callableDecl != fallback.callableDecl {
+			t.callableDecl = nil
+		}
 		failureLabels := remove(c.rowLabels(t.failureRow()), e.Name)
 		t.value = c.recontractRows(t, c.internRow(failureLabels), t.serviceRow())
 	case "construct":

@@ -140,6 +140,16 @@ def documents(directory):
     assert publications(exchange([INIT, READY, opened(new, good), STOP, EXIT]))[0]["diagnostics"] == []
     assert not new.exists()
     assert publications(exchange([INIT, READY, opened(new, good), STOP, EXIT], target="js"))[0]["diagnostics"] == []
+    # The compiler used to panic on a valid effect factory carrying a pure
+    # callback. A real document must publish, accept the next edit, and recover.
+    factories = (ROOT / "examples/callables-factory.ef").read_text()
+    for target in ("go", "js"):
+        reports = publications(exchange([
+            INIT, READY, opened(new, factories), changed(new, bad, 2),
+            changed(new, factories, 3), STOP, EXIT], target=target))
+        assert [r["version"] for r in reports] == [1, 2, 3], reports
+        assert reports[0]["diagnostics"] == reports[2]["diagnostics"] == [], reports
+        assert any(d["code"] == "EF106" for d in reports[1]["diagnostics"]), reports
 
 
 def imports(directory):

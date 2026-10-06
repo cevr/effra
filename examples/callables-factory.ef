@@ -1,0 +1,71 @@
+error Missing
+error Broken
+
+service Logger {
+    effect fn log() -> ()
+}
+service Directory {
+    effect fn get(key: string) -> string raises { Broken }
+}
+impl Quiet for Logger {
+    effect fn log() -> () {
+        ()
+    }
+}
+impl Names for Directory {
+    effect fn get(key: string) -> string raises { Broken } {
+        "name:" + key
+    }
+}
+
+fn keep(x: string) -> string {
+    x
+}
+fn nested(x: string) -> (fn(string) -> string) {
+    keep
+}
+effect fn callback(x: string) -> string raises { Broken } uses { Directory } {
+    run Directory.get(x)
+}
+effect fn pureFailure() -> (fn(string) -> string) raises { Missing } {
+    if false {
+        fail Missing
+    } else {
+        keep
+    }
+}
+effect fn pureService() -> (fn(string) -> string) uses { Logger } {
+    run Logger.log()
+    keep
+}
+effect fn pureEmpty() -> (fn(string) -> string) {
+    keep
+}
+effect fn effectEmpty() -> (effect fn(string) -> string raises { Broken } uses { Directory }) {
+    callback
+}
+effect fn factory() -> (effect fn(string) -> string raises { Broken } uses { Directory }) raises { Missing } uses { Logger } {
+    run Logger.log()
+    if false {
+        fail Missing
+    } else {
+        callback
+    }
+}
+effect fn nestedFactory() -> (fn(string) -> (fn(string) -> string)) raises { Missing } {
+    if false {
+        fail Missing
+    } else {
+        nested
+    }
+}
+effect fn main() -> string {
+    let first = run pureFailure().catch<Missing>(keep)
+    let second = run pureService().provide<Logger>(Quiet)
+    let third = run pureEmpty()
+    let operation = run factory().catch<Missing>(callback).provide<Logger>(Quiet)
+    let result = run operation(third(second(first("42")))).catch<Broken>("broken").provide<Directory>(Names)
+    let outer = run nestedFactory().catch<Missing>(nested)
+    let inner = outer("ignored")
+    inner(result)
+}

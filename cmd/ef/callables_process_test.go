@@ -114,3 +114,107 @@ effect fn main()->(){()}
 		}
 	}
 }
+
+func TestCallableFactoriesKeepCLIAndMCPAliveWithCompleteNestedContracts(t *testing.T) {
+	binary := buildTestCLI(t)
+	source, err := os.ReadFile(filepath.Join("..", "..", "examples", "callables-factory.ef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	file := filepath.Join(root, "factories.ef")
+	if err := os.WriteFile(file, source, 0600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runTestCLI(t, binary, "check", file)
+	if code != 0 || readProcessJSON(t, stdout)["checked"] != true {
+		t.Fatalf("valid factory check: exit=%d %s %s", code, stdout, stderr)
+	}
+	stdout, stderr, code = runTestCLI(t, binary, "inspect", file, "factory")
+	if code != 0 {
+		t.Fatalf("factory inspection: %s", stderr)
+	}
+	inspect := readProcessJSON(t, stdout)
+	assertResponseReferences(t, inspect)
+	body := inspect["symbol"].(map[string]any)["bodyContract"].(map[string]any)
+	assertFactoryProcessContract(t, inspect, body)
+	offset := strings.Index(string(source), "factory().catch")
+	stdout, stderr, code = runTestCLI(t, binary, "query", file, strconv.Itoa(offset))
+	if code != 0 {
+		t.Fatalf("factory query: %s", stderr)
+	}
+	query := readProcessJSON(t, stdout)
+	assertResponseReferences(t, query)
+	assertFactoryProcessContract(t, query, query["expression"].(map[string]any)["type"].(map[string]any))
+	messages := []map[string]any{
+		{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "factory-test", "version": "1"}}},
+		{"jsonrpc": "2.0", "method": "notifications/initialized"},
+		{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": "project.check", "arguments": map[string]any{"file": "factories.ef"}}},
+		{"jsonrpc": "2.0", "id": 3, "method": "ping"},
+		{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": map[string]any{"name": "code.inspect", "arguments": map[string]any{"file": "factories.ef", "symbol": "factory"}}},
+		{"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": map[string]any{"name": "code.typeAt", "arguments": map[string]any{"file": "factories.ef", "offset": offset}}},
+	}
+	var input bytes.Buffer
+	for _, message := range messages {
+		if err := json.NewEncoder(&input).Encode(message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	command := exec.Command(binary, "mcp", root)
+	command.Stdin = &input
+	output, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(output), []byte{'\n'})
+	if len(lines) != 5 {
+		t.Fatalf("MCP response count: %d", len(lines))
+	}
+	checked := readProcessJSON(t, lines[1])["result"].(map[string]any)["structuredContent"].(map[string]any)
+	if checked["checked"] != true {
+		t.Fatalf("valid factory MCP check: %v", checked)
+	}
+	if ping := readProcessJSON(t, lines[2]); ping["result"] == nil || ping["error"] != nil {
+		t.Fatalf("queued ping: %v", ping)
+	}
+	for i, pair := range []struct {
+		cli map[string]any
+		key string
+	}{{inspect, "symbol"}, {query, "expression"}} {
+		remote := readProcessJSON(t, lines[3+i])["result"].(map[string]any)["structuredContent"].(map[string]any)
+		assertResponseReferences(t, remote)
+		for _, key := range []string{pair.key, "types", "rows", "revision"} {
+			if !reflect.DeepEqual(pair.cli[key], remote[key]) {
+				t.Fatalf("factory CLI/MCP %s differs", key)
+			}
+		}
+	}
+}
+
+func assertFactoryProcessContract(t *testing.T, response, value map[string]any) {
+	t.Helper()
+	if !reflect.DeepEqual(value["failures"], []any{"Missing"}) || !reflect.DeepEqual(value["requirements"], []any{"Logger"}) || value["callable"] != nil {
+		t.Fatalf("outer factory contract corrupted: %v", value)
+	}
+	nodes := map[string]map[string]any{}
+	for _, raw := range response["types"].([]any) {
+		node := raw.(map[string]any)
+		nodes[node["id"].(string)] = node
+	}
+	outer := nodes[value["contract"].(map[string]any)["ref"].(string)]
+	if outer["kind"] != "recipe" {
+		t.Fatalf("factory invocation not recipe: %v", outer)
+	}
+	inner := nodes[outer["result"].(string)]
+	rows := map[string]any{}
+	for _, raw := range response["rows"].([]any) {
+		row := raw.(map[string]any)
+		rows[row["id"].(string)] = row["labels"]
+	}
+	if inner["kind"] != "callable" || inner["callableKind"] != "effect" || !reflect.DeepEqual(rows[inner["failureRow"].(string)], []any{"Broken"}) || !reflect.DeepEqual(rows[inner["serviceRow"].(string)], []any{"Directory"}) {
+		t.Fatalf("returned callback contract erased: %v", inner)
+	}
+	if len(inner["args"].([]any)) != 1 || nodes[inner["result"].(string)]["name"] != "string" {
+		t.Fatalf("returned callback shape corrupted: %v", inner)
+	}
+}
