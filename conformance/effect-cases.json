@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "460272d30457f4697d8b8c52cad41caccbcace08",
+  "cases": [
+    {
+      "id": "effect.scope.child-interrupted-on-close",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/Effect.test.ts", "line": 2733, "label": "is interrupted when scope is closed"},
+      "behavior": "Closing an owning scope interrupts its child and waits for child cleanup before parent cleanup.",
+      "limits": "The Effra fixture asserts completed child-before-parent release, not upstream Scope internals or the entire forkScoped API.",
+      "evidence": [{"file": "internal/compiler/lifecycle_test.go", "test": "TestLifecycleConformanceAcrossGoAndEffect", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.scope.failure-and-cleanup-cause",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/Effect.test.ts", "line": 2903, "label": "scoped combines usage and finalizer failures"},
+      "behavior": "An expected failure and a cleanup defect both survive scope closure.",
+      "limits": "Effra uses Timeout plus an acquired-resource cleanup defect, including attempted Timeout recovery. This is a behavior comparison, not a port of generic addFinalizer syntax.",
+      "evidence": [{"file": "internal/compiler/lifecycle_test.go", "test": "TestLifecycleConformanceAcrossGoAndEffect", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.test-clock.admitted-fork",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/TestClock.test.ts", "line": 8, "label": "sleep - does not require passage of wall time"},
+      "behavior": "Advancing test program time admits an already-forked sleeper and allows its join without waiting for the requested wall-clock delay.",
+      "limits": "Effra tests explicit TestClock/TestScheduler providers and an admitted but unstarted fork at 20 milliseconds; they do not assert all TestClock adjustment/precision behavior.",
+      "evidence": [{"file": "internal/compiler/causal_test.go", "test": "TestExplicitTestProvidersUseTheHarnessAcrossTargets", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.timeout.typed-error-policy",
+      "status": "difference",
+      "upstream": {"file": "packages/effect/test/Effect.test.ts", "line": 2066, "label": "timeout a long computation"},
+      "behavior": "A deadline reports a typed timeout; a timer defect must retain its Cause rather than being recast as that timeout.",
+      "limits": "Upstream asserts Cause.TimeoutError with a duration message. Effra declares nominal Timeout and an explicit Scheduler capability; its supplemental invalid-duration timer test also checks cleanup defects. This does not claim identical timeout APIs or full upstream case parity.",
+      "evidence": [{"file": "internal/compiler/lifecycle_test.go", "test": "TestLifecycleConformanceAcrossGoAndEffect", "targets": ["go", "js"]}, {"file": "internal/compiler/causal_test.go", "test": "TestSchedulerTimerFailureIsPreservedAcrossTargets", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.acquire-use-release.interrupted-acquisition",
+      "status": "pending",
+      "upstream": {"file": "packages/effect/test/Effect.test.ts", "line": 317, "label": "acquireUseRelease interrupt"},
+      "behavior": "Interrupt during protected acquisition skips use but releases the acquired resource.",
+      "limits": "Generic source-level acquisition callback contracts and causal acquisition-boundary acceptance remain future owned-core work; existing lifecycle providers are not this proof.",
+      "evidence": []
+    },
+    {
+      "id": "effect.deferred.first-completion",
+      "status": "pending",
+      "upstream": {"file": "packages/effect/test/Deferred.test.ts", "line": 10, "label": "succeed - should propagate the value"},
+      "behavior": "The first completion wins; repeated completion returns false and waiters see the first value.",
+      "limits": "An internal latch is not an admitted generic Effra Deferred API. Recipe execution/memoization is separate from single assignment and does not imply concurrent producer single-flight.",
+      "evidence": []
+    },
+    {
+      "id": "effect.ref.read-current-value",
+      "status": "pending",
+      "upstream": {"file": "packages/effect/test/Ref.test.ts", "line": 30, "label": "get returns the current value"},
+      "behavior": "A Ref read returns its current stored value.",
+      "limits": "Generic mutable payload ownership and callback purity admission remain required; native cells alone are not source-level conformance.",
+      "evidence": []
+    },
+    {
+      "id": "effect.semaphore.cancelled-permit",
+      "status": "pending",
+      "upstream": {"file": "packages/effect/test/Semaphore.test.ts", "line": 308, "label": "withPermits interruption does not leak permits"},
+      "behavior": "Interrupting queued permit acquisition does not consume or leak permits.",
+      "limits": "Future fixed-capacity Semaphore must add causal queued/handoff/cancel tests. PartitionedSemaphore and resize/manual release cases do not establish that first profile.",
+      "evidence": []
+    },
+    {
+      "id": "effect.scope.parallel-finalization",
+      "status": "unsupported",
+      "upstream": {"file": "packages/effect/test/Scope.test.ts", "line": 7, "label": "executes finalizers in parallel"},
+      "behavior": "Explicit parallel finalizer execution.",
+      "limits": "Effra's admitted owned cleanup is sequential; no selectable parallel scope-finalization policy is exposed.",
+      "evidence": []
+    },
+    {
+      "id": "effect.fork.detached-lifetime",
+      "status": "unsupported",
+      "upstream": {"file": "packages/effect/test/Effect.test.ts", "line": 2689, "label": "is not interrupted with parent"},
+      "behavior": "A detached child outlives interruption of its parent.",
+      "limits": "Effra's first profile requires an owning scope; detached fibers remain unsupported.",
+      "evidence": []
+    }
+  ]
+}

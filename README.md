@@ -142,6 +142,8 @@ go test -race ./...
 
 The gate checks Go formatting, vet, compiler/runtime tests, actual Go and JS programs, CLI/MCP inspection and diagnostic parity, formatter CLI/MCP process parity, and a live HTTP server. Shared lifecycle tests cover child-before-parent cleanup, unobserved child failures and timeout cleanup defects.
 
+[Upstream behavioral conformance](docs/conformance.md) maps selected pinned Effect cases to existing Go/JS acceptance, with explicit differences, pending and unsupported rows. The imported 746 reference files remain reference-only.
+
 Project direction is recorded in [NORTH_STAR.md](NORTH_STAR.md), source comparisons in [PRIOR_ARTS.md](PRIOR_ARTS.md), and canonical terms in [GLOSSARY.md](GLOSSARY.md). The [architecture ledger](plans/architecture-loop-2026-10-05.md) records implementation evidence and unresolved work. Start with [implemented syntax](docs/prototype.md), [runtime contracts](docs/runtime.md), or the broader [design sketch](docs/design.md).
 
 ## Wayfinder

@@ -44,6 +44,8 @@ README_CONTENT = (
     "Effra's gate and does not claim that Effra passes the upstream suite.\n"
     "The applicable package license for each copied file is recorded in\n"
     "`manifest.json`; all copied license texts are preserved byte-for-byte.\n"
+    "Upstream executable modes are not preserved; these reference fixtures\n"
+    "must not be executed directly as an Effra acceptance suite.\n"
 )
 
 
@@ -310,7 +312,7 @@ def read_manifest(output: Path) -> dict[str, object]:
         raise ImportError(f"manifest is missing: {manifest_path}")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as error:
         raise ImportError(f"manifest is not valid UTF-8 JSON: {manifest_path}") from error
     if not isinstance(manifest, dict):
         raise ImportError("manifest root is not an object")
@@ -408,7 +410,12 @@ def validate_manifest_structure(output: Path, manifest: dict[str, object]) -> di
     if integrity != expected_integrity:
         raise ImportError("manifest canonical identity digest is invalid")
 
-    if output.joinpath(README_NAME).is_symlink() or not output.joinpath(README_NAME).is_file() or output.joinpath(README_NAME).read_text(encoding="utf-8") != README_CONTENT:
+    readme = output / README_NAME
+    try:
+        readme_content = readme.read_text(encoding="utf-8") if not readme.is_symlink() and readme.is_file() else None
+    except (OSError, UnicodeError) as error:
+        raise ImportError("snapshot README is not valid UTF-8") from error
+    if readme_content != README_CONTENT:
         raise ImportError("snapshot README is not the importer-owned README")
     expected_files = set(entries) | expected_extra_files()
     actual_files: set[str] = set()
@@ -530,7 +537,7 @@ def owned_snapshot(output: Path) -> bool:
         return False
     try:
         validate_self_contained(output, allow_custom=True)
-    except (ImportError, OSError, UnicodeError, json.JSONDecodeError):
+    except (ImportError, OSError, UnicodeError, json.JSONDecodeError, RecursionError):
         return False
     return True
 

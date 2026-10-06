@@ -32,12 +32,16 @@ class SnapshotIntegrityTests(unittest.TestCase):
         (self.source / "packages/effect/LICENSE").write_bytes(b"effect-license\n")
         (self.source / "packages/effect/test/one.test.ts").write_bytes(b"export const one = 1\n")
         (self.source / "packages/other/test/two.test.ts").write_bytes(b"export const two = 2\n")
-        subprocess.run(["git", "init", "-q", str(self.source)], check=True)
-        subprocess.run(["git", "-C", str(self.source), "config", "user.email", "test@example.invalid"], check=True)
-        subprocess.run(["git", "-C", str(self.source), "config", "user.name", "Snapshot Test"], check=True)
-        subprocess.run(["git", "-C", str(self.source), "add", "."], check=True)
-        subprocess.run(["git", "-C", str(self.source), "commit", "-qm", "fixture"], check=True)
-        self.commit = subprocess.check_output(["git", "-C", str(self.source), "rev-parse", "HEAD"], text=True).strip()
+        git_env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        git = ["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + os.devnull, "-c", "init.templateDir="]
+        template = self.root / "empty-template"
+        template.mkdir()
+        subprocess.run([*git, "init", "--template=" + str(template), "-q", str(self.source)], check=True, env=git_env)
+        subprocess.run([*git, "-C", str(self.source), "config", "user.email", "test@example.invalid"], check=True, env=git_env)
+        subprocess.run([*git, "-C", str(self.source), "config", "user.name", "Snapshot Test"], check=True, env=git_env)
+        subprocess.run([*git, "-C", str(self.source), "add", "."], check=True, env=git_env)
+        subprocess.run([*git, "-C", str(self.source), "commit", "-qm", "fixture"], check=True, env=git_env)
+        self.commit = subprocess.check_output([*git, "-C", str(self.source), "rev-parse", "HEAD"], text=True, env=git_env).strip()
         self.custom_tag = f"custom:{self.commit}"
         self.output = self.root / "snapshot"
         MODULE.import_snapshot(self.source, self.output, self.commit, self.custom_tag)
@@ -156,6 +160,29 @@ class SnapshotIntegrityTests(unittest.TestCase):
             MODULE.import_snapshot(self.source, output, self.commit, self.custom_tag)
         self.assertEqual((output / "keep.txt").read_text(encoding="utf-8"), "keep")
 
+    def test_invalid_utf8_readme_and_deep_json_are_structured_refusals(self) -> None:
+        for name, filename, contents in (
+            ("invalid-readme", "README.md", b"\xff"),
+            ("deep-manifest", "manifest.json", b"[" * 2000 + b"0" + b"]" * 2000),
+        ):
+            with self.subTest(name=name):
+                output = self.copy_snapshot(name)
+                (output / filename).write_bytes(contents)
+                with self.assertRaises(MODULE.ImportError):
+                    MODULE.validate_self_contained(output, allow_custom=True)
+                self.assertFalse(MODULE.owned_snapshot(output))
+                staged = self.copy_snapshot(name + "-staged")
+                with self.assertRaises(MODULE.ImportError):
+                    MODULE.replace_owned_snapshot(staged, output)
+                self.assertEqual((output / filename).read_bytes(), contents)
+                result = subprocess.run(
+                    ["python3", "-B", str(ROOT / "scripts/import_effect_conformance.py"), "--self-check", "--output", str(output)],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("import_effect_conformance:", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
 
 class ReleaseSnapshotIntegrityTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -182,6 +209,7 @@ class ReleaseSnapshotIntegrityTests(unittest.TestCase):
 
     def test_committed_release_snapshot_is_exactly_pinned(self) -> None:
         manifest = MODULE.validate_self_contained(self.source)
+        self.assertEqual((self.source / "manifest.json").read_text(encoding="utf-8"), json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         self.assertEqual(manifest["selection"]["count"], 746)
         self.assertEqual(len(manifest["licenses"]["paths"]), 26)
         self.assertEqual(manifest["source"]["commit"], MODULE.COMMIT)

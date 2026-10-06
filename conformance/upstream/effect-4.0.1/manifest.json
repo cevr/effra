@@ -5405,6 +5405,13 @@
       "sha256": "c9e7018a0aa7f8c87fce3f868854f2e7a3de1b638d53a0499d4b58f0ad9cc740"
     }
   ],
+  "integrity": {
+    "algorithm": "sha256",
+    "canonicalEncoding": "json-sorted-compact-utf8-v1",
+    "licenseIdentitySha256": "5d9c07de330f6f9de1cdf0306d7c25fde646691edcaba92fd740fdeeb1663b90",
+    "referenceIdentitySha256": "9b9a09038a2b3d5e15256aed9d37401a06e911569d8fcc4ac3f1368fbbe8e001",
+    "rootSha256": "48f6287ce974209b0860671f0e62b0ef0a2f5436836f7e7c2aa935c4eb95c422"
+  },
   "licenses": {
     "mapping": {
       "packages/ai/anthropic/test/AnthropicClient.test.ts": "LICENSE",
@@ -6182,13 +6189,6 @@
       "packages/tools/openapi-generator/LICENSE",
       "packages/vitest/LICENSE"
     ]
-  },
-  "integrity": {
-    "algorithm": "sha256",
-    "canonicalEncoding": "json-sorted-compact-utf8-v1",
-    "licenseIdentitySha256": "5d9c07de330f6f9de1cdf0306d7c25fde646691edcaba92fd740fdeeb1663b90",
-    "referenceIdentitySha256": "9b9a09038a2b3d5e15256aed9d37401a06e911569d8fcc4ac3f1368fbbe8e001",
-    "rootSha256": "48f6287ce974209b0860671f0e62b0ef0a2f5436836f7e7c2aa935c4eb95c422"
   },
   "provenance": {
     "canonicalEncoding": "json-sorted-compact-utf8-v1",
