@@ -2,6 +2,8 @@
 
 Binding boilerplate is a central adoption risk. Effra should consume existing host declarations automatically while making behavioral trust explicit. The wider host representation design remains open. The prototype now imports Go package functions with primitive signatures automatically; TypeScript imports remain a proposal.
 
+The [Gleam, ReScript and TypeScript source comparison](research/host-language-compilation.md) records implementation lessons and acceptance cases for target capabilities, host declarations, source maps and separate compilation. It does not imply these wider facilities are already shipped.
+
 ## Proposed default
 
 Import host packages and their existing type declarations automatically. Retain their native values, named identities, methods, and data representations where appropriate. Generated calls and wrappers belong to the compiler. Avoid requiring users to restate every function/type in handwritten Effra declarations.
