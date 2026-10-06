@@ -5,10 +5,11 @@ import (
 	"errors"
 )
 
-var errNilLatch = errors.New("invalid latch handle: nil")
+var errNilLatch = errors.New("invalid latch handle: construct with NewLatch")
 
 // Latch is a portable, one-shot synchronization handle. Completion is
 // idempotent and is shared by every waiter; waiting never consumes it.
+// Construct handles with NewLatch; the zero value is an invalid handle.
 type Latch struct {
 	signal *managedSignal
 }
@@ -20,7 +21,7 @@ func NewLatch() *Latch {
 
 // Signal completes the latch. It returns true only for the first completion.
 func (l *Latch) Signal() bool {
-	if l == nil {
+	if l == nil || l.signal == nil {
 		return false
 	}
 	return l.signal.signal()
@@ -66,7 +67,7 @@ func (l *Latch) cancelManaged(waiter *managedWaiter) {
 // AwaitLatch adapts a latch wait to the managed Effect runtime.
 func AwaitLatch(latch *Latch) Effect[Unit] {
 	return func(fc *FiberContext) Exit[Unit] {
-		if latch == nil {
+		if latch == nil || latch.signal == nil {
 			return Die[Unit](errNilLatch)
 		}
 		if scheduler := fc.turnScheduler(); scheduler != nil {
@@ -100,7 +101,7 @@ func AwaitLatch(latch *Latch) Effect[Unit] {
 // SignalLatch completes a latch from the managed Effect runtime.
 func SignalLatch(latch *Latch) Effect[Unit] {
 	return func(*FiberContext) Exit[Unit] {
-		if latch == nil {
+		if latch == nil || latch.signal == nil {
 			return Die[Unit](errNilLatch)
 		}
 		latch.Signal()

@@ -64,6 +64,9 @@ effect fn test_advance_admits_unstarted_fork() -> () raises {AssertionFailed} us
 		t.Fatal("Bun is required for generated scheduler tests")
 	}
 	root := filepath.Join("..", "..")
+	if err = os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	jsDir, err := os.MkdirTemp(filepath.Join(root, "dist"), "explicit-scheduler-")
 	if err != nil {
 		t.Fatal(err)
@@ -166,6 +169,9 @@ effect fn test_scheduler_drains_long_continuation() -> () raises {AssertionFaile
 		t.Fatal("Bun is required for generated scheduler tests")
 	}
 	root := filepath.Join("..", "..")
+	if err = os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	jsDir, err := os.MkdirTemp(filepath.Join(root, "dist"), "causal-scheduler-")
 	if err != nil {
 		t.Fatal(err)
