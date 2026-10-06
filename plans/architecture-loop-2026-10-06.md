@@ -22,9 +22,9 @@ This is an active loop ledger, not a completion receipt. The canonical prior-art
 
 | Directory | Files | Mark | Pass |
 | --- | --- | --- | --- |
-| cmd/ef | 1 | unswept | Focused CLI live checks are not a full sweep |
+| cmd/ef | 1 | swept pass1 | Complete source/package review in pass1/cli-mcp-review.md; source-admission fix pending |
 | internal/compiler | 11 | unswept | Focused data/provider/ownership reviews only |
-| internal/mcp | 1 | unswept | Public parity probes only |
+| internal/mcp | 1 | swept pass1 | Complete source/package review in pass1/cli-mcp-review.md; admission/detail-bound fixes pending |
 | runtime/effra | 6 | unswept | Runtime tests and scheduler review only |
 
 ## Prior art
@@ -41,6 +41,7 @@ This is an active loop ledger, not a completion receipt. The canonical prior-art
 | Sweep | Pass | Result | Done when met? |
 | --- | --- | --- | --- |
 | Compile performance | 1 | Ownership review found exponential type-path expansion and quadratic summary passes | No; repair and quiet measurements pending |
+| Application retention | 1 | Owner added small binary requirement; current emission copies every runtime source file | No; reachable-module implementation and size/symbol/dependency receipts pending |
 | Lifecycle behavior | 1 | Linux baseline gate/races pass; scheduler and ownership remain in review | Existing subset only |
 | Inspection parity | 1 | Public configured-provider Go/JS outputs agree; CLI/MCP graphs exactly equal, 45 nodes/58 edges | Existing subset only |
 | Language ergonomics | 1 | Claude2 counsel active through Herdr; shared interface/codec/server specification recorded | No |
@@ -63,6 +64,8 @@ Verdict: structural work remains. The loop is open.
 | Causal scheduler | foundation-testing | Preserve transferred edits; Linux public causal probes, cleanup causes and virtual-time authority |
 | Upstream/framework fixtures | server-benchmarks | Pinned test import, actual Effect HTTP/RPC fixture and measurement admission |
 | Native library contracts | Subsequent isolated units | Bundled interfaces, typed functions, codecs, HTTP and RPC; no endpoint-specific compiler facade |
+| CLI/MCP boundary repair | cli-mcp-admission | Reject FIFO before blocking source open; bound nested body/contribution rows; paired public acceptance |
+| Checked machines | Subsequent isolated units | Flat checked topology, ordinary ADTs/functions, owned actor runtime and target conformance after shared foundations |
 
 | ID | Candidate | North star | Files | Risk | Status |
 | --- | --- | --- | --- | --- | --- |
@@ -80,6 +83,28 @@ Verdict: structural work remains. The loop is open.
 | A12 | Derive structural codecs while retaining typed bidirectional transformations | Go-like simplicity through regular abstractions; Explicit contracts | Canonical types, bundled codecs and native server spec | High | Owner direction recorded; Rust/Serde and pinned Effect transformation survey active |
 | A13 | Learn from Gleam/ReScript/TypeScript host compilation without inheriting tedious bindings | Adoption through host interop; Exceptionally fast compilation | Imports, backend, source mapping and build cache | Medium | Current sources fetched and pinned in PRIOR_ARTS; initial source/test inspection complete, focused comparison remains open |
 | A14 | Prefer Go-like ordinary behavior and use XState v6 as main machine reference | Go-like simplicity through regular abstractions | Machine/codec specs, PRIOR_ARTS | Medium | Owner tiebreak recorded; active PR5543/next pinned2146ae26, Claude2 counsel redirected to v6; earlier v5 conclusions need revalidation |
+| A15 | Make benchmark admission and measurements reflect the declared workload | Measured evidence; Native Go server programs | scripts/server_benchmark.py | High | Root bounded probes at3450286 confirm new connection per request, omitted offered queue latency and flag-only rigorous admission. Full independent review/counsel and fixup required; no scoring |
+| A16 | Admit effectful machine steps and completion functions | Explicit contracts; Go-like local readability; Owned lifetimes | Machine plan/runtime specs and ordinary function rows | High | Owner clarification supersedes pure-only counsel: serialize actor-owned evaluation, preserve rows, commit after successful cleanup, never imply external rollback; acceptance added |
+| A17 | Keep application binaries small through reachable module emission | Small application binaries | Bundled interfaces/runtime, native emission, size fixtures | High | Owner direction recorded; unused stdlib imports/init and fluent API retention have explicit negative checks in binary-reachability spec/task; implementation pending shared interface seam |
+| A18 | Use raises consistently for expected failure rows | Explicit contracts; Go-like local readability | Shared parser, authored source, examples and docs | Low | Done e25c7f1,5185cc6,c78e5a6; integrated4abf034 after clear Astra/Claude2 review, both merge gates and live smoke; clean registered workspace removed |
+
+Go-like direction, transformation codec contract and machine plan/runtime/conformance tasks are recorded in the specs; tracker now contains30 valid issues, including reusable generic data, payload recovery and binary-reachability prerequisites. Gleam/ReScript/TypeScript source/test comparison is in `docs/research/host-language-compilation.md`. XState v6/Effect Machine/Serde/Effect source comparison and independent design counsel are recorded in `docs/research/machines-and-transforming-codecs.md`; implementation remains open. The `@xstate/effect` requirement walker at the pinned branch stops child-machine inference at10 levels; Effra must diagnose an exhausted checking budget rather than silently erase a requirement.
+
+CLI/MCP apply `f6c2f65` passed its gate and independent public probes. Astra review found one test-audit blocker: the new nested-row regression also passes against the old implementation because declared rows mask the intended bound. Replace it with isolated body and nested-name fixtures, asserting their dimensions; obtain second-model counsel before the consolidated fixup and merge. Production admission repairs were independently verified, not yet integrated.
+
+Foundation rereviews: ownership `859f172` repairs original cases but is blocked by mixed65-field proof erasure and misattributed eager timeout arguments (`pass1/ownership-final-review.md`). Scheduler `ce3dbbd` repairs original cases but is blocked by nested cleanup/Scoped caller propagation, already-closing timeout cleanup and two-branch completion wait composition (`pass1/scheduler-final-review.md`). Follow-up repairs remain isolated. Independent scheduler gate also hit a60-second generated-Go watchdog that includes compilation; cause is undiagnosed, distinct from the deterministic managed-wait deadlocks. No merge approval follows from the implementation owners' earlier green gates.
+
+Benchmark `3450286` independent review identifies nine fixture, lifecycle, measurement, admission and provenance findings (`pass1/benchmark-final-review.md`). Root verified the core source paths and bounded harness observations; Claude2 round1 is consolidated in `pass1/apply-benchmark-fixup.md`. Four gated repair units remain pending while the implementation owner completes the requested keyword migration. Preserve no-score status and repair before integration.
+
+Ownership follow-up `4a534f5` is frozen with reported full gate and race checks but fails independent review: a capped same-path conditional loses its owned alternative when a borrowed alternative remains. Public native execution confirms a closed File reaches use. Require complete selected-path evidence, not mere existence of a concrete fact, before dropping bounded uncertainty (`pass1/ownership-followup-review.md`). The timeout eager-argument fix passes. CLI/MCP consolidated fixup accepts the isolated body/name regression and Unix-constrained FIFO tests from Claude2; it rejects speculative path-security expansion and unproven project.tests refactoring. The shared reader remains a cooperative workspace boundary, not a filesystem security sandbox.
+
+Focused effectful-step counsel is triaged in the machine spec and research note: adopt explicit evaluation/entry cleanup order, call-local failure attribution, non-draining stop, reserved completion admission and nonblocking snapshots. Reject the suggested propagated call chain as a general deadlock guarantee, and qualify removal of core scheduling dependencies from actors. These are implementation contracts with direct acceptance cases, not upstream-proven guarantees. Decided by explicit contracts, measured evidence and Go-like local readability.
+
+Pinned Effect4.0.1 source inspection through repo confirms directional codec requirements but fixed schema-issue failures. Effra's requested named transformation failures require separate source tests and explicit HTTP mappings, with a finite terminal error-encoder fallback; a service outage during decoding must not be silently classified as malformed input. Added this distinction to the native server spec and codec research without claiming runtime support or adding work to benchmark cohorts. Decided by explicit contracts and truthful upstream comparison.
+
+Minimal binary baseline at `ff4b487`: public empty Effra entry is5,532,694 bytes versus1,891,532 for a bare Go size control under identical Go1.27.0/linux-amd64/CGO0/trimpath flags. The control does not supply managed guarantees; no full-gap attribution is made. `net/http` and `crypto/tls` initialization symbols remain linked despite no HTTP use. Raw receipt `/tmp/effra-size-baseline-2026-10-06/receipt.json`; tracked interpretation `docs/research/native-runtime-retention.md`. No build-time or runtime-performance claim.
+
+CLI/MCP repair isolation: `workrift list` rejects the transferred unknown registry marker; `df -T` confirms the source lives on ext4. Use architecture-loop's Git worktree fallback at the exact absolute sibling path and copy its verified locked dependencies. No warm source, registry entry or unrelated dotfiles is changed.
 
 Guardrails added: pending implementation receipts. Each missed static guarantee needs its own rejected-source test, and each bounded analysis needs adversarial scaling coverage.
 
@@ -98,9 +123,13 @@ Design counsel received in `/tmp/effra-claude2-language-counsel.md`. Root indepe
 
 Framework fixture evidence records pinned Effect's wrong-method response as404. Adopt that explicit comparator profile in the new native server spec, decided by **Never Block on the Human** and matched-behavior requirements. No existing Effra endpoint wire contract changes: the richer profile is not implemented or published yet. Unknown-field and malformed-envelope policies must likewise be explicit; native conformance cannot claim stronger validation than the matched comparator provides.
 
-Merges: none in this pass yet. No application changes have been pushed.
+Merges: raises migration integrated at4abf034. Independent Astra full gate and six exact-span public probes pass; Claude2 approves with no required findings, verifies all authored examples against both targets and preserves expected unsupported-target diagnostics. Branch merge gate `/tmp/effra-raises-branch-integration-gate.log` and integration gate `/tmp/effra-raises-integrated-gate.log` both exit0, including real Go/JS execution, CLI/MCP and HTTP lifecycle smoke. The registered clean raises worktree was removed after exact-tip/ancestry checks; source branch and review receipts remain. No application changes have been pushed.
+
+Raises counsel optional notes are not scope expansions: retain canonical failure-before-service row ordering and the existing generic parser diagnostic for malformed reversed rows; accepting a second ordering is unnecessary, and valid-order legacy source already has a targeted migration diagnostic. Retain the small permanent token-length/line/actionable-message regression as written; independent exact offset/column probes cover the three declaration positions and Unicode prefix. No observed span defect justifies another implementation round. Historical per-commit gates remain implementer-reported; the exact reviewed head and both integration gates were independently run. Later foundation branch fixtures must migrate their authored failure rows during integration; pinned upstream bytes and historical scratch receipts remain unchanged.
 
 Live checks: baseline `./scripts/gate.sh` and `go test -race ./...` pass on Linux; a temporary public provider program executes identically on Go/JS and its CLI graph exactly matches stdio MCP. These checks do not approve the unmerged branches.
+
+Direction update gate: `./scripts/gate.sh` exited0 on the unchanged integration source while documentation evolved, log `/tmp/effra-architecture-direction-gate.log`; source tests, CLI/MCP smoke and HTTP lifecycle smoke all pass. Current tracker and whitespace checks also pass after the new27-issue graph. This is not a gate for unmerged scheduler/ownership/benchmark implementations.
 
 ## Close
 

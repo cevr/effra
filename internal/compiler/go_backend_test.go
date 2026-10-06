@@ -10,28 +10,28 @@ import (
 )
 
 const goProbe = `error Missing error Broken
-service Users { effect fn get(id: string) -> string throws {Missing, Broken} }
+ service Users { effect fn get(id: string) -> string raises {Missing, Broken} }
 impl Memory for Users {
- effect fn get(id: string) -> string throws {Missing, Broken} {
+ effect fn get(id: string) -> string raises {Missing, Broken} {
   if id == "42" { "Ada" } else { if id == "broken" { fail Broken } else { fail Missing } }
  }
 }
 fn pure(name: string) -> string { if name == "Ada" { "Hi " + name } else { "Other" } }
 fn unused() -> () { let pending = Console.log("must not print"); () }
-effect fn greeting(id: string) -> string throws {Missing, Broken} uses {Users} {
+effect fn greeting(id: string) -> string raises {Missing, Broken} uses {Users} {
  let name = run Users.get(id)
  pure(name)
 }
-effect fn recovered(id: string) -> string throws {Broken} {
+effect fn recovered(id: string) -> string raises {Broken} {
  run greeting(id).provide<Users>(Memory).catch<Missing>(if true { "unknown" } else { "other" })
 }
 effect fn nested() -> string {
  run recovered(run recovered("42").catch<Broken>("bad")).catch<Broken>("bad")
 }
-effect fn bottom() -> string throws {Missing, Broken} {
+effect fn bottom() -> string raises {Missing, Broken} {
  if true { fail Missing } else { fail Broken }
 }
-effect fn main() -> string throws {Broken} { unused() run recovered("42") }
+effect fn main() -> string raises {Broken} { unused() run recovered("42") }
 `
 
 func TestGoBackendConformance(t *testing.T) {

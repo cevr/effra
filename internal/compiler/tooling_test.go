@@ -245,7 +245,7 @@ func TestDependencyGraphTracksProvidersAndConsumers(t *testing.T) {
 func BenchmarkLintAndGraph10KLines(b *testing.B) {
 	var source strings.Builder
 	for i := 0; i < 2000; i++ {
-		source.WriteString("effect fn f" + fmtInt(i) + "() -> string\nthrows {}\nuses {}\n{\n\"value\" }\n")
+		source.WriteString("effect fn f" + fmtInt(i) + "() -> string\nraises {}\nuses {}\n{\n\"value\" }\n")
 	}
 	r := Compile(source.String())
 	if !r.Checked {

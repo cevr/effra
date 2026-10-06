@@ -1,33 +1,33 @@
 error Missing
 
 service Directory {
-    effect fn name(id: string) -> string throws {Missing}
+    effect fn name(id: string) -> string raises {Missing}
 }
 
 impl FixtureDirectory for Directory {
-    effect fn name(id: string) -> string throws {Missing} {
+    effect fn name(id: string) -> string raises {Missing} {
         if id == "42" { "Ada" } else { fail Missing }
     }
 }
 
-effect fn greeting(id: string) -> string throws {Missing} uses {Directory} {
+effect fn greeting(id: string) -> string raises {Missing} uses {Directory} {
     let name = run Directory.name(id)
     "Hello, " + name
 }
 
-effect fn test_greeting() -> () throws {AssertionFailed, Missing} uses {Assert} {
+effect fn test_greeting() -> () raises {AssertionFailed, Missing} uses {Assert} {
     let actual = run greeting("42").provide<Directory>(FixtureDirectory)
     run Assert.equalText(actual, "Hello, Ada")
 }
 
-effect fn test_recovery() -> () throws {AssertionFailed} uses {Assert} {
+effect fn test_recovery() -> () raises {AssertionFailed} uses {Assert} {
     let actual = run greeting("unknown")
         .provide<Directory>(FixtureDirectory)
         .catch<Missing>("Unknown user")
     run Assert.equalText(actual, "Unknown user")
 }
 
-effect fn test_owned_child() -> () throws {AssertionFailed, Missing} uses {Assert} {
+effect fn test_owned_child() -> () raises {AssertionFailed, Missing} uses {Assert} {
     scope {
         let child = fork greeting("42").provide<Directory>(FixtureDirectory)
         let actual = run child.join()

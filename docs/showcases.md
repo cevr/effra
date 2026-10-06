@@ -20,7 +20,7 @@ Code below labeled **proposed** remains design notation; the records, enums and 
 
 | In Effect application code | Effra surface | Obligation that remains |
 | --- | --- | --- |
-| Effect type parameters, generators and yielded calls | `effect fn`, `throws`, `uses`, `run` | Checked contracts and lazy execution |
+| Effect type parameters, generators and yielded calls | `effect fn`, `raises`, `uses`, `run` | Checked contracts and lazy execution |
 | Context.Service and provider composition | `service`, `impl`, explicit provision | Nominal identity, replaceable behavior and initialization lifetime |
 | Tagged declarations, constructors and match helpers | `enum` and `match` | Payload checking and exhaustive coverage |
 | Schema codecs and decode effects | Proposed explicit codec derivation and `Json.decode` | Runtime validation and wire compatibility |
@@ -33,7 +33,7 @@ Code below labeled **proposed** remains design notation; the records, enums and 
 
 ```rust
 effect fn welcome(id: string) -> string
-    throws {Denied, UserMissing, DeliveryFailed}
+    raises {Denied, UserMissing, DeliveryFailed}
     uses {Access, Directory, Delivery}
 {
     run Access.check(id)
@@ -89,7 +89,7 @@ enum Transition {
 
 error SessionRejected { reason: string }
 
-effect fn describe(decision: Transition) -> string throws {SessionRejected} {
+effect fn describe(decision: Transition) -> string raises {SessionRejected} {
     match decision {
         Transition.Reuse => "reuse the session"
         Transition.Restart => "restart the session"
@@ -115,7 +115,7 @@ enum EventV1 {
 
 derive JsonCodec for EventV1
 
-effect fn receive(input: bytes) -> EventV1 throws {DecodeError} {
+effect fn receive(input: bytes) -> EventV1 raises {DecodeError} {
     run Json.decode<EventV1>(input)
 }
 ```
@@ -151,7 +151,7 @@ Cancellation remains cooperative. Child failures and cleanup defects remain obse
 
 ```rust
 effect fn forward(cursor: i64) -> ()
-    throws {FeedUnavailable, DecodeError, SendFailed}
+    raises {FeedUnavailable, DecodeError, SendFailed}
     uses {EventLog, Client}
 {
     scope {
@@ -179,7 +179,7 @@ enum Admission {
 }
 
 effect fn submit(command: Command) -> Admission
-    throws {StorageError, InvalidCommand}
+    raises {StorageError, InvalidCommand}
     uses {Journal}
 {
     run Journal.admit(command)
@@ -216,7 +216,7 @@ An implementation receipt should include both-target examples, rejection of miss
 **Runnable on Go and JS.** [testing.ef](../examples/testing.ef) supplies a fixture `Directory`, exercises success and typed recovery, and joins an owned child. The test runner supplies only `Assert`; fixture provision is ordinary checked language code.
 
 ```rust
-effect fn test_greeting() -> () throws {AssertionFailed, Missing} uses {Assert} {
+effect fn test_greeting() -> () raises {AssertionFailed, Missing} uses {Assert} {
     let actual = run greeting("42").provide<Directory>(FixtureDirectory)
     run Assert.equalText(actual, "Hello, Ada")
 }

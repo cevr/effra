@@ -258,11 +258,11 @@ func inspectionRowsSource(count int, mode string) string {
 	joined := strings.Join(names, ",")
 	switch mode {
 	case "declared":
-		fmt.Fprintf(&builder, "effect fn target() -> () throws {%s} { () }\n", joined)
+		fmt.Fprintf(&builder, "effect fn target() -> () raises {%s} { () }\n", joined)
 	case "body":
 		first, second := splitInspectionRows(names)
-		fmt.Fprintf(&builder, "effect fn first() -> () throws {%s} { () }\n", strings.Join(first, ","))
-		fmt.Fprintf(&builder, "effect fn second() -> () throws {%s} { () }\n", strings.Join(second, ","))
+		fmt.Fprintf(&builder, "effect fn first() -> () raises {%s} { () }\n", strings.Join(first, ","))
+		fmt.Fprintf(&builder, "effect fn second() -> () raises {%s} { () }\n", strings.Join(second, ","))
 		builder.WriteString("effect fn target() -> () { run first(); run second() }\n")
 	case "requirements":
 		services := make([]string, count)
@@ -281,14 +281,14 @@ func inspectionRowsSource(count int, mode string) string {
 		builder.WriteString("effect fn target() -> () { run part0(); run part1() }\n")
 	case "contributions":
 		builder.Reset()
-		builder.WriteString("error E0\neffect fn one() -> () throws {E0} { () }\neffect fn target() -> () throws {E0} {\n")
+		builder.WriteString("error E0\neffect fn one() -> () raises {E0} { () }\neffect fn target() -> () raises {E0} {\n")
 		for i := 0; i < count; i++ {
 			builder.WriteString("run one();\n")
 		}
 		builder.WriteString("()}\n")
 	case "names":
 		builder.WriteString("record Box { value: () }\n")
-		fmt.Fprintf(&builder, "effect fn many() -> () throws {%s} { () }\n", joined)
+		fmt.Fprintf(&builder, "effect fn many() -> () raises {%s} { () }\n", joined)
 		builder.WriteString("effect fn target() -> Box { Box { value: run many() } }\n")
 	}
 	return builder.String()

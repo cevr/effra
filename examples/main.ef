@@ -2,11 +2,11 @@
 error NotFound
 
 service Users {
-    effect fn get(id: string) -> string throws {NotFound}
+    effect fn get(id: string) -> string raises {NotFound}
 }
 
 impl MemoryUsers for Users {
-    effect fn get(id: string) -> string throws {NotFound} {
+    effect fn get(id: string) -> string raises {NotFound} {
         if id == "42" { "Ada" } else { fail NotFound }
     }
 }
@@ -16,7 +16,7 @@ fn welcome(name: string) -> string {
 }
 
 effect fn greeting(id: string) -> string
-    throws {NotFound}
+    raises {NotFound}
     uses {Users}
 {
     let user = run Users.get(id)

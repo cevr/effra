@@ -23,15 +23,15 @@ fn label(state: RunState) -> string {
   RunState.Done { code } => "done"
  }
 }
-effect fn interpret(state: RunState) -> string throws {Invalid} {
+effect fn interpret(state: RunState) -> string raises {Invalid} {
  match state {
   RunState.Idle => "ok"
   RunState.Running { runId } => fail Invalid { message: runId }
   RunState.Done { code } => "done"
  }
 }
-effect fn failWithPayload() -> string throws {Invalid} { fail Invalid { message: "bad" } }
-effect fn main() -> string throws {Invalid} {
+effect fn failWithPayload() -> string raises {Invalid} { fail Invalid { message: "bad" } }
+effect fn main() -> string raises {Invalid} {
  let user = User { id: "u1", name: "Ada" }
  let state = RunState.Running { runId: "42" }
  if user.name == "Ada" { label(state) } else { "wrong user" }
@@ -270,9 +270,9 @@ func TestClosedDataPayload(t *testing.T) { er.Run(func(fc *er.FiberContext) er.E
 
 func TestClosedDataMatchRowsAccumulateAcrossAllBranches(t *testing.T) {
 	for name, source := range map[string]string{
-		"failure first": `error Bad enum State { Ready Done } effect fn main() -> string throws {Bad} { match State.Ready() { State.Ready => fail Bad State.Done => "ok" } }`,
-		"failure last":  `error Bad enum State { Ready Done } effect fn main() -> string throws {Bad} { match State.Ready() { State.Ready => "ok" State.Done => fail Bad } }`,
-		"all failures":  `error Bad error Other enum State { Ready Done } effect fn main() -> string throws {Bad, Other} { match State.Ready() { State.Ready => fail Bad State.Done => fail Other } }`,
+		"failure first": `error Bad enum State { Ready Done } effect fn main() -> string raises {Bad} { match State.Ready() { State.Ready => fail Bad State.Done => "ok" } }`,
+		"failure last":  `error Bad enum State { Ready Done } effect fn main() -> string raises {Bad} { match State.Ready() { State.Ready => "ok" State.Done => fail Bad } }`,
+		"all failures":  `error Bad error Other enum State { Ready Done } effect fn main() -> string raises {Bad, Other} { match State.Ready() { State.Ready => fail Bad State.Done => fail Other } }`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := Compile(source)
@@ -287,7 +287,7 @@ func TestClosedDataMatchRowsAccumulateAcrossAllBranches(t *testing.T) {
 		})
 	}
 
-	withService := `error Bad service Users { effect fn get() -> string } enum State { Ready Done } effect fn main() -> string throws {Bad} uses {Users} { match State.Ready() { State.Ready => { run Users.get() fail Bad } State.Done => "ok" } }`
+	withService := `error Bad service Users { effect fn get() -> string } enum State { Ready Done } effect fn main() -> string raises {Bad} uses {Users} { match State.Ready() { State.Ready => { run Users.get() fail Bad } State.Done => "ok" } }`
 	r := Compile(withService)
 	if !r.Checked {
 		t.Fatalf("failure and service rows should survive a match: %+v", r.Diagnostics)
@@ -311,15 +311,15 @@ func TestClosedDataFieldAccessRequiresExecution(t *testing.T) {
 
 func TestClosedDataRequiredFailurePayloadCannotBeOmitted(t *testing.T) {
 	for _, source := range []string{
-		`error Bad { message: string } effect fn main() -> string throws {Bad} { fail Bad }`,
-		`error Bad { message: string } effect fn main() -> string throws {Bad} { fail Bad() }`,
+		`error Bad { message: string } effect fn main() -> string raises {Bad} { fail Bad }`,
+		`error Bad { message: string } effect fn main() -> string raises {Bad} { fail Bad() }`,
 	} {
 		r := Compile(source)
 		if r.Checked || !hasCode(r, "EF114") {
 			t.Fatalf("missing structured failure payload was admitted: %+v", r.Diagnostics)
 		}
 	}
-	if r := Compile(`error Bad effect fn main() -> string throws {Bad} { fail Bad }`); !r.Checked {
+	if r := Compile(`error Bad effect fn main() -> string raises {Bad} { fail Bad }`); !r.Checked {
 		t.Fatalf("payload-free errors should remain valid: %+v", r.Diagnostics)
 	}
 }
@@ -386,7 +386,7 @@ func TestClosedDataRejectsMixedConstructorArguments(t *testing.T) {
 }
 
 func TestClosedDataFailurePayloadPreservesProto(t *testing.T) {
-	source := `error Bad { __proto__: string } effect fn main() -> string throws {Bad} { fail Bad { __proto__: "safe" } }`
+	source := `error Bad { __proto__: string } effect fn main() -> string raises {Bad} { fail Bad { __proto__: "safe" } }`
 	output := runJS(t, source, `const exit = await Effect.runPromiseExit(__ef_function_main()); const error = exit.cause.reasons[0].error; if (!Object.hasOwn(error, "__proto__") || error.__proto__ !== "safe") throw new Error("structured __proto__ payload was lost");`)
 	if output != "" {
 		t.Fatalf("unexpected output: %s", output)

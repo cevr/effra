@@ -1,85 +1,123 @@
 # Checked state machines
 
-Status: authorized implementation extension from owner direction on 2026-10-06; not current language support. Preserve Go-like simplicity, Effect lifetime guarantees and ordinary ADTs. The first profile is a finite flat machine with explicit transitions and owned invocation. The source/test comparison is recorded in [PRIOR_ARTS](../../PRIOR_ARTS.md); independent design counsel can refine this contract before implementation.
+Status: authorized implementation extension from owner direction on 2026-10-06; not current language support. Preserve Go-like simplicity, Effect lifetime guarantees and ordinary ADTs. Main machine prior art is [XState v6 PR5543](https://github.com/statelyai/xstate/pull/5543), next revision 2146ae26ebfc7e6a624b3a1f237f9e6ddc30b9f5. Effect Machine supplies additional lifetime evidence; v5 is historical only. Independent source/test counsel supports this ordinary-function surface.
 
-Main machine prior art is the active [XState v6 PR5543](https://github.com/statelyai/xstate/pull/5543), `next` revision `2146ae26ebfc7e6a624b3a1f237f9e6ddc30b9f5`, as explicitly requested by the owner. Earlier v5 observations remain historical and must be revalidated. Use v6's ordinary-function direction to reduce ceremony: the construct declares topology/ownership, while ordinary typed functions and statements express behavior. Do not mirror its complete framework surface. The illustrative syntax below is subject to this Go-like readability test before implementation.
+## Ordinary behavior, checked declaration
 
-## Shared semantic model
+States and external events are nominal enums with payloads. Named functions perform step selection and completion handling using ordinary match and if expressions; they may be pure `fn` or `effect fn` with explicit failure and service rows (owner clarification, 2026-10-06). An entry function returns optional deferred work. One declaration binds these names and the initial state, giving the canonical plan a stable identity. One library runtime owns admission, entry, invocation and shutdown. No separate transition/guard/error-handling sub-language is needed.
 
-Use ordinary nominal enums for states and external events, with state-specific payloads. A checked machine declaration binds an initial constructor, transition clauses, named guards/work and terminal output. It elaborates to a canonical plan and ordinary checked functions. One library runtime owns admission, state entry, invocation and shutdown. Do not create another type checker, error channel or effect evaluator for machines.
+General prerequisites are typed function/recipe values, finite rows, reusable generic enums and multi-subject/or-pattern matching. These serve other libraries too. The first profile permits one work recipe per entry and requires expected work failures to be explicitly recovered into a distinct outcome enum. Step and completion functions may declare expected failures directly or recover them into ordinary Step decisions. The union of step, completion and work service requirements is charged at spawn, with contribution paths retained; public spawning functions declare their own requirements. Step/completion failure rows remain part of the actor's terminal contract and the waiting call/observation contract. Immediate send reports admission only; it cannot pretend later execution has succeeded. Defects and interruption retain full Cause rather than becoming expected failures.
 
-The language construct earns its place by checking finite transition policy and exposing source-bound possible edges. A reducer library can consume the same plan/runtime. A helper returning the whole state enum yields conservatively broad possible targets; the compiler must not invent precise reachability through whole-program analysis.
+Illustrative, unimplemented syntax:
 
-Illustrative, unimplemented shape; constructor/pattern syntax will follow ordinary checked ADTs:
+~~~rust
+enum SessionState { Idle  Active { key: string } }
+enum SessionEvent { Open { key: string } Close }
 
-```rust
-enum SearchState {
-    Idle
-    Loading { query: string }
-    Ready { result: SearchResult }
-    Failed { reason: string }
-}
-enum SearchEvent { Start { query: string } Cancel }
-
-machine Search: SearchState receives SearchEvent uses {Catalog} {
-    initial Idle
-    state Idle {
-        on Start { query } => Loading { query }
-        on Cancel => ignore
-    }
-    state Loading { query } {
-        invoke Catalog.search(query) {
-            success result => Ready { result }
-            failure SearchFailed { reason } => Failed { reason }
-        }
-        on Start { query } => reenter Loading { query }
-        on Cancel => Idle
-    }
-    state Ready { result } {
-        on Start { query } => Loading { query }
-        on Cancel => Idle
-    }
-    state Failed { reason } {
-        on Start { query } => Loading { query }
-        on Cancel => Idle
+fn sessionStep(state: SessionState, event: SessionEvent) -> Step<SessionState, ()> {
+    match state, event {
+        SessionState.Idle, SessionEvent.Open { key } => Step.Go(SessionState.Active { key })
+        SessionState.Idle, SessionEvent.Close => Step.Ignore
+        SessionState.Active { key: previous }, SessionEvent.Open { key } =>
+            if key == previous { Step.Ignore } else { Step.Go(SessionState.Active { key }) }
+        SessionState.Active { key }, SessionEvent.Close => Step.Go(SessionState.Idle)
     }
 }
-```
 
-This sketch introduces no implicit execution outside a running actor. Machine definition constructs data; spawning an actor starts managed work in an explicit owner. Internal invocation outcomes are runtime envelopes, not forgeable variants of the external event enum.
+machine Session {
+    initial SessionState.Idle
+    step sessionStep
+    enter sessionEnter
+    complete sessionComplete
+}
+~~~
 
-## Finite transition contract
+The other named functions have ordinary explicit signatures: enter is a pure fn taking State and returning an optional deferred Outcome recipe; complete takes State and Outcome and returns Step<State, Output>. All entry effects execute in that returned recipe under the entry scope. The declaration checks these against step and initial. Definition constructs data; spawning starts managed work. Outcome and Event are different types, so public send cannot forge invocation completion. Constructing a recipe is distinct from executing it.
 
-Every state/external-event pair has an explicit transition, ignore or reject policy; a state's `otherwise reject` covers remaining events. Ordered guards require a final fallback. Detect duplicate unguarded clauses and invalid state/event payloads. Use tag-indexed coverage and bounded plan construction rather than enumerating histories.
+The same step interface admits effectful decisions without a second machine API. For example, an ordinary service call can validate an event before choosing the next state:
 
-The first profile admits pure named guards. Effectful guards diagnose until their separate evaluation/query contract is implemented; no API may execute a hidden effect to answer whether an event is enabled. Expected invocation failures are handled explicitly into declared states/events or propagated through a declared terminal error row. Defects and interruption preserve their full Cause and cannot silently become ordinary failure strings. Requirements and failures survive helpers, aliases and provider capture through the common function/row representation.
+~~~rust
+error AccessUnavailable
 
-Ordinary same-state-tag payload updates retain the current entry, timers and captured invocation input. Explicit re-entry closes that entry and starts a fresh one, even for the same tag. The distinction appears in source and graph output. Changes that require work to restart must use re-entry.
+service Access {
+    effect fn mayOpen(key: string) -> bool raises {AccessUnavailable}
+}
 
-Initial supported behavior: flat states; ordered pure guards; explicit state policy; typed state-owned invocation; explicit re-entry; program-time delays; terminal output. Hierarchy, parallel regions, history, eventless stabilization, automatic supervision, postponed events and durable replay remain unsupported capabilities with clear diagnostics. Their absence cannot silently change source meaning.
+effect fn sessionStep(state: SessionState, event: SessionEvent)
+    -> Step<SessionState, ()> raises {AccessUnavailable} uses {Access} {
+    match state, event {
+        SessionState.Idle, SessionEvent.Open { key } =>
+            if run Access.mayOpen(key) {
+                Step.Go(SessionState.Active { key })
+            } else { Step.Reject }
+        SessionState.Active { key: previous }, SessionEvent.Open { key } =>
+            if run Access.mayOpen(key) {
+                if key == previous { Step.Stay(state) }
+                else { Step.Go(SessionState.Active { key }) }
+            } else { Step.Reject }
+        SessionState.Idle, SessionEvent.Close => Step.Ignore
+        SessionState.Active { key }, SessionEvent.Close => Step.Go(SessionState.Idle)
+    }
+}
+~~~
+
+This alternative replaces the pure sessionStep above; it is not a duplicate declaration in one source file. A pure function retains the normal purity check. An effect function explicitly executes service work with run; the runtime executes that function's returned recipe once for the admitted event.
+
+## Explicit transition outcomes
+
+The reusable bundled enum Step<State, Output> makes lifecycle intent explicit:
+
+- Go(next) always closes the current entry and starts a new one, even for the same tag.
+- Stay(next) updates data while retaining the entry, timers and captured work input. Its tag must stay the same: reject visible violations statically and enforce dynamic values with a defined runtime defect and completed cleanup.
+- Ignore acknowledges without a state change. Reject leaves state unchanged and reports a typed rejection to a waiting caller.
+- Done(output) publishes terminal output only after cleanup.
+
+Every state/event pair has a policy through ordinary exhaustive matching. Named variant or-patterns reduce repetition while preserving missing-pair diagnostics when either enum grows. Alternatives must bind the same names/types. Catch-all arms remain outside the initial closed-data policy. Ordinary unreachable-arm and type diagnostics handle duplicates and bad payloads. Bound product checking and plan construction rather than enumerating histories or exponentially expanding shared paths.
+
+Conditions are ordinary total if/else expressions. A pure step/complete cannot execute effects; an effectful one may perform explicit run calls, including calls used to decide a transition. Requirements and failures survive helpers, aliases and provider capture through the common function/row representation. A capability query does not execute hidden work or rerun an effectful decision to discover whether an event is enabled.
+
+Program-time delays are ordinary Clock/Scheduler work returning an outcome; no machine timer syntax is needed. The first profile is flat states and one work per entry. Hierarchy, parallel regions, history, eventless stabilization, supervision, postponement, multiple simultaneous invocations and durable replay remain unsupported. Unknown syntax diagnoses normally.
 
 ## Ownership and publication
 
-Each actor and each state entry has a distinct runtime identity. Completion, failure and timeout envelopes carry actor generation, entry epoch and invocation identity. Validate these at dequeue, including exit then re-entry into the same state tag. Cancellation does not replace this check: a result may already be queued. A foreign callback uses an epoch-bound admission adapter; fencing stops stale state mutation, not a remote side effect already performed.
+One managed actor fiber owns its mailbox and state-entry scope. Each entry has a distinct epoch. Invocation outcomes carry actor generation, entry epoch and work identity; validate them at dequeue, including exit then re-entry into the same tag. Discard stale outcomes and count them in bounded inspection. Cancellation does not replace this check: a result may already be queued. A foreign completion adapter also carries the epoch; fencing cannot undo an external side effect.
 
-Leaving an entry invalidates its completion admission, requests cancellation and awaits owned children/finalizers before publishing the next stable state and starting its work. Cleanup defects prevent a successful transition acknowledgement and retain full causes. Final output and stop completion follow actor cleanup. Concurrent stop callers observe the same completed result; interrupting one waiter does not abandon the actor's owned cleanup.
+Step and completion evaluations are serialized, including their effects, in a temporary scope directly owned by the actor, never by the current entry. At most one evaluation is in flight. The current entry stays owned while a decision is evaluated; external events and work completions remain bounded and queued. A successful evaluation first closes its own scope, interrupting unjoined children and awaiting finalizers. Go and Done then close the old entry. Only successful completed cleanup permits commit and publication, followed by new entry work when applicable. Expected child interruption at scope close is not a fabricated failure. Work that must outlive the decision belongs in enter's recipe. Failure leaves the last stable state uncommitted, stops the actor after cleanup, and preserves the declared failure plus any cleanup cause. An application that wants to continue after a business failure explicitly recovers to Reject, Stay or another Step. No hidden retries or evaluation for inspection are allowed.
 
-The mailbox serializes external events and self-send. Self-send queues behind the current transition and does not recurse. Waiting for one's own queued acknowledgement must be rejected when statically identifiable and produce a defined runtime failure through aliases. A full mailbox cannot block its own consumer: self-send has explicit nonblocking rejection or another separately bounded policy. Specify item and byte budgets, interruptible external admission, and a bounded control path so queue saturation cannot prevent cancellation or terminal invocation delivery. One invocation may publish at most one terminal completion.
+Stop cancels an in-flight evaluation and waits for its children/finalizers and the entry's cleanup; it prevents a subsequent commit. Stop does not drain: discard and count queued events/completions and complete their pending calls with Stopped. Drain is unsupported in the first profile. Commit and stop admission are serialized: Done committed first remains the single output observed by all waiters; stop admitted first prevents that commit. Stop during protected cleanup waits for cleanup and prevents new entry work. Cancelling a call waiter does not retract an already admitted event or abandon actor-owned work. State/output values cannot carry resources owned by the completed evaluation or a closing entry; Outcome values cannot carry entry-owned resources beyond that entry. Use the common ownership checker. State commit ordering does not roll back external writes performed by an effectful step. Transactions, idempotency and compensation remain explicit application/service contracts.
 
-No clock sleeps or guessed yields establish readiness. Program-time timers use the repaired shared scheduler; the real watchdog remains separate. Unsupported unobservable foreign waits remain explicit limitations of deterministic testing.
+Go invalidates the old entry, requests cancellation and awaits its children/finalizers before publishing the next stable state and starting its work. Stay preserves entry identity. Completion of an invocation does not by itself release resources owned for the whole entry. Cleanup defects fail the pending acknowledgement and stop the actor after cleanup, preserving composite causes. Expected cancellation of replaced work is not a newly fabricated domain failure. Final output and stop completion follow actor cleanup; concurrent stop callers observe one completed exit, and interrupting a waiter does not abandon cleanup.
 
-## Inspection
+Spawn requires explicit mailbox item/byte budgets. First-profile send admits immediately or fails with MailboxFull/Stopped; it never waits for queue capacity. Call uses that admission policy, then interruptibly awaits the committed transition, including completed old-entry cleanup and admission of new work; acknowledgement does not wait for the work's eventual outcome. Reject reports a typed Rejected failure.
 
-CLI/MCP consume the same canonical plan: source revision, nominal state/event identity, initial/final states, possible edges, ignore/reject and re-entry policy, named guard/work references, effect rows and owner relationships. Possible edges are distinct from currently enabled guards and observed completed transitions. Runtime snapshots include identity, entry epoch, status and bounded cause information without dumping secret payloads. A static graph is not an execution trace or liveness proof.
+The handle is Actor<Machine>, with inspectable contracts derived from the named declaration rather than caller-written bookkeeping parameters:
 
-Optional state snapshots use an explicit versioned codec and recovery policy. Do not serialize scopes, fibers, service instances or in-flight host operations. Restoring domain state can restart effects; transactional admission, idempotency, outbox, migrations and crash recovery require their own storage contract. No durable or exactly-once claim follows from this primitive.
+| Operation | Expected failures and requirements |
+| --- | --- |
+| Send | MailboxFull or Stopped; admission carries no later step failures. |
+| Call | MailboxFull, Stopped, Rejected and the step's declared failures. Only the originating event's call receives its step failure; other queued calls receive Stopped with inspectable terminal cause data. |
+| Terminal observation | The union of step/completion failures and Stopped; successful completion returns Output. Completion failures have no originating event call. |
+| Spawn | The union of step/completion/work service requirements; asynchronous step failures are not charged to spawn. |
+
+Defects, interruption and composite causes retain the runtime cause structure through every operation. A channel's expected-failure row must not flatten a cleanup defect or reattribute another event's domain failure.
+
+One work per entry reserves one bounded completion slot at entry start; it and external events use a common arrival sequence. A completion arriving during evaluation waits in the slot: Go/Done invalidates its epoch, while Stay preserves it and arrival order. Stop has a separate control signal. Saturation cannot prevent completion or shutdown. No actor handle is automatically supplied to work, but aliases may still reach it: execution carries actor identity so an aliased self-call, including from a step's child or cleanup, fails with a defined SelfCall defect instead of deadlocking. Self-send through aliases remains nonblocking and never recursively processes a transition. A nonblocking stop request is allowed; awaiting one's own actor exit is the same defined self-wait defect. Cross-actor waits may form cycles and remain outside the first profile's deadlock guarantee. Propagating a call chain alone cannot detect independently initiated mutual waits; do not advertise it as general cycle prevention. Ordinary explicit timeouts and cancellation remain available, with their normal rows and cleanup contract.
+
+Tests use causal signals and repaired program-time scheduling; the independent watchdog remains wall clock. Unobservable foreign blocking remains an explicit deterministic-testing limitation.
+
+## Inspection and boundaries
+
+CLI/MCP project one canonical plan: source revision; State/Event/Outcome identity; initial state; function contracts and owners; possible Go/Stay/Ignore/Reject/Done edges; and terminal output. A bounded local walk identifies literal constructor targets; helper/dynamic results produce a conservative target set labeled as such. Never pretend this graph proves reachability, liveness or current enabledness. General product-match checking must be bounded without expanding all histories or shared type paths.
+
+Runtime snapshots expose actor/entry identity, state tag, queue usage, lifecycle status (including an in-flight step/completion) and bounded causes/counters. They return the last committed state without waiting for application evaluation. The plan labels pure versus effectful functions, terminal-on-failure rows and directional contribution paths. Locally identified edges beneath an effectful condition carry that condition's contribution path; dynamic helper destinations remain conservative. Inspection never executes behavior, including pure steps; there is no enabledness query in the first profile. Payload exposure requires an explicit codec. Static possible edges, active runtime state and observed completed transitions are distinct.
+
+Optional state snapshots use a named versioned codec and explicit restart/recovery policy. Scopes, fibers, service instances and in-flight host work are not serialized domain state. Starting from stored state invokes entry work again; idempotency, transactional admission, outbox and crash recovery remain separate obligations. No durable or exactly-once guarantee is implied.
 
 ## Acceptance and delivery
 
-1. Finish canonical functions/finite rows and reviewed lifetime/test foundations first. No opaque callback shortcut.
-2. Compile a checked plan and pure stepping with two unrelated examples: search/reload and timed lease/session. Reject missing policy, incorrect payload, invalid target, duplicate clause, effect guard, unsupported statechart features, undeclared failure and missing service. Inspect the exact declared graph and bounded conservative helper targets.
-3. Execute the same plans on Go and JS with a shared portable behavioral corpus. Test FIFO and self-send; full-mailbox admission; aliased self-call failure; cancellation and completed release before next entry; same-tag update versus re-entry; already-queued stale completion; late foreign callback; terminal error plus cleanup defect; concurrent stop and interrupted stop waiter; final output after cleanup; and timer re-entry using logical time.
-4. Exercise a request-owned actor through a typed HTTP endpoint and a non-server in-memory actor. Test disconnect/stop completion and honest encode-failure policy. An HTTP fixture is an integration consumer, not a machine-specific compiler operation.
-5. Map pinned Effect Machine/XState test behaviors to passing, deliberately different and unsupported Effra cases; copied reference tests are not parity. Run full gates, native race tests, bounded compile-cost checks and independent review. Only then update capability descriptions and examples to implemented.
+1. Land reviewed lifetime/scheduler foundations and ordinary function/row/generic data mechanisms. No opaque callback shortcut.
+2. Implement product/or-pattern matching and the declaration with two unrelated examples: search/reload and timed lease/session or circuit breaker. Cover both pure and effectful step/completion functions. Isolate missing-pair, duplicate-arm, binding-consistency, invalid signature/payload, outcome/event confusion, invalid Stay, undeclared failure and missing-service diagnostics. Reject effect execution only in functions declared pure; preserve effectful function rows through helpers and actor observations. Compare literal edges and conservative helper targets through CLI/MCP; measure frontend/emission and adversarial checking costs.
+3. Execute shared plans on Go/JS. Test FIFO and aliased self-send/call/self-wait, including children and cleanup; queue/completion saturation; exact evaluation-cleanup then entry-cleanup then publication order; Go versus Stay timing; already-queued stale completion; late foreign callback; full composite causes; concurrent stop; interrupted stop waiter; and terminal output after cleanup. Effectful-step cases must prove one evaluation at a time, at most one invocation per admitted event and exactly one when it is dequeued for evaluation while Running, no state publication before evaluation cleanup, originating-call versus queued-call failure attribution, completion-only terminal failures, explicit recovery versus terminal typed failure, stop during suspended evaluation/protected cleanup, queued-event discard counts, Done/stop linearization, preserved external writes on failure, and no effect execution or evaluation wait by graph/snapshot queries. Reject an effectful enter and escaping entry-owned Outcome values.
+4. Exercise request-owned HTTP cancellation and a non-server actor through the same library. Map pinned v6/Effect Machine behaviors to passing/different/unsupported cases. Run full gates, native race checks, frontend/emission measurements and independent review before advertising support.
 
-Decided by **Redesign From First Principles** and **Never Block on the Human**: use a small checked surface over shared ordinary contracts, pure guards first, explicit bounded actor runtime and explicit lifetime receipts. This reversible design direction does not close historical Wayfinder HITL tickets.
+Decided by **Go-like local readability**, **Redesign From First Principles** and **Never Block on the Human**: one small declaration, ordinary functions for behavior and reusable bundled decisions. This replaces the earlier nested machine syntax sketch and does not close historical Wayfinder HITL tickets.

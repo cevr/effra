@@ -49,7 +49,7 @@ public = subprocess.run(["bun", "--eval", consumer], cwd=root, text=True, captur
 assert public.returncode == 0 and public.stdout == "Hello, Ada\n", (public.stdout, public.stderr)
 with tempfile.TemporaryDirectory(prefix="effra-cli-") as tmp:
     failure = pathlib.Path(tmp) / "failed.ef"
-    failure.write_text("error Bad\neffect fn main() -> string throws {Bad} { fail Bad }\n")
+    failure.write_text("error Bad\neffect fn main() -> string raises {Bad} { fail Bad }\n")
     assert "Bad" in run("run", str(failure), success=False).stderr
 bindings = json.loads(run("inspect", "examples/imports.ef", "main").stdout)
 assert any(b["forwardContext"] and b["cancellation"] == "cooperative" for b in bindings["bindings"])
@@ -84,7 +84,7 @@ for target in ("go","js"):
     assert suite["passed"] and len(suite["tests"])==3 and not suite["watchdogExpired"]
 with tempfile.TemporaryDirectory(prefix="effra-tests-") as tmp:
     file=pathlib.Path(tmp)/"cases.ef"
-    file.write_text('effect fn test_bad() -> () throws {AssertionFailed} uses {Assert} {run Assert.equalText("actual","expected")} effect fn test_after() -> () throws {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}')
+    file.write_text('effect fn test_bad() -> () raises {AssertionFailed} uses {Assert} {run Assert.equalText("actual","expected")} effect fn test_after() -> () raises {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}')
     for target in ("go","js"):
         suite=json.loads(run("test",str(file),"--target",target,success=False).stdout)
         assert not suite["passed"] and len(suite["tests"])==2
