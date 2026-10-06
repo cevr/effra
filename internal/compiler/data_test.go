@@ -427,6 +427,53 @@ func TestClosedDataControlConstructorShorthand(t *testing.T) {
 	}
 }
 
+func TestClosedDataMultiFieldControlConstructorShorthand(t *testing.T) {
+	source := `enum State { Ready { first: string, second: string } } effect fn main() -> string { let first = "a" let second = "b" match State.Ready { first, second } { State.Ready { first, second } => first + second } }`
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatalf("multi-field control constructor shorthand should parse and check: %+v", r.Diagnostics)
+	}
+	output := runJS(t, source, `if (await Effect.runPromise(__ef_function_main()) !== "ab") throw new Error("wrong shorthand result");`)
+	if output != "" {
+		t.Fatalf("unexpected JS output: %s", output)
+	}
+}
+
+func TestClosedDataEmptyEnumEliminationBuildsOnGo(t *testing.T) {
+	source := `enum Empty {}
+fn absurd(value: Empty) -> string { match value {} }
+effect fn effectAbsurd(value: Empty) -> string { match value {} }
+effect fn main() -> string { "ok" }`
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatalf("empty enum elimination should check: %+v", r.Diagnostics)
+	}
+	goSource, err := r.EmitGo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := WriteRuntime(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(r.ModuleFile()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(goSource), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := runGoCommand(dir, "build", "."); err != nil {
+		t.Fatalf("empty enum Go build: %v\n%s\n%s", err, output, goSource)
+	}
+	binary := filepath.Join(dir, "empty-enum")
+	if output, err := runGoCommand(dir, "build", "-o", binary, "."); err != nil {
+		t.Fatalf("empty enum native build: %v\n%s", err, output)
+	}
+	if output, err := exec.Command(binary).CombinedOutput(); err != nil || string(output) != "ok\n" {
+		t.Fatalf("empty enum native run: %v\n%s", err, output)
+	}
+}
+
 func checkStrictTypeScript(t *testing.T, declaration, consumer string) {
 	t.Helper()
 	root := filepath.Join("..", "..")

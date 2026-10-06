@@ -294,7 +294,11 @@ func (g *goEmitter) block(b *Block, effect bool, ret string) string {
 			}
 		} else if i == len(b.Statements)-1 {
 			if s.Value.Type.Success == "never" {
-				out.WriteString("_ = " + expr + "\nreturn efExit[" + goType(ret) + "]{Defect:fmt.Errorf(\"bottom expression unexpectedly succeeded\")}\n")
+				if effect {
+					out.WriteString("_ = " + expr + "\nreturn efExit[" + goType(ret) + "]{Defect:fmt.Errorf(\"bottom expression unexpectedly succeeded\")}\n")
+				} else {
+					out.WriteString("_ = " + expr + "\npanic(\"bottom expression unexpectedly succeeded\")\n")
+				}
 			} else {
 				finish(expr)
 			}
@@ -526,7 +530,11 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 			}
 			body.WriteString(g.block(arm.Body, true, e.Type.Success))
 		}
-		body.WriteString("default: return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable non-exhaustive match\")}\n}\n")
+		if len(e.Arms) == 0 {
+			body.WriteString("default: _ = efMatch; return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable empty match\")}\n}\n")
+		} else {
+			body.WriteString("default: return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable non-exhaustive match\")}\n}\n")
+		}
 		name := g.temp()
 		out.WriteString(name + " := func() efExit[" + resultType + "] {\n" + body.String() + "}()\n" + g.failed(name, ret))
 		return name + ".Value"
@@ -543,7 +551,11 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 		}
 		body.WriteString(g.block(arm.Body, false, e.Type.Success))
 	}
-	body.WriteString("default: panic(\"unreachable non-exhaustive match\")\n}\n")
+	if len(e.Arms) == 0 {
+		body.WriteString("default: _ = efMatch; panic(\"unreachable empty match\")\n}\n")
+	} else {
+		body.WriteString("default: panic(\"unreachable non-exhaustive match\")\n}\n")
+	}
 	return "func() " + resultType + " {\n" + body.String() + "}()"
 }
 

@@ -701,7 +701,29 @@ func (p *parser) constructorBrace() bool {
 	if p.tokens[p.at+1].kind == "name" && p.tokens[p.at+2].text == "}" {
 		return p.noConstruct == 0 || (p.at+3 < len(p.tokens) && p.tokens[p.at+3].text == "{")
 	}
-	return false
+	if p.tokens[p.at+1].kind != "name" || (p.tokens[p.at+2].text != "," && p.tokens[p.at+2].text != ";") {
+		return false
+	}
+	index := p.at + 1
+	for {
+		if index >= len(p.tokens) {
+			return false
+		}
+		if p.tokens[index].kind != "name" {
+			return false
+		}
+		index++
+		if index >= len(p.tokens) {
+			return false
+		}
+		if p.tokens[index].text == "}" {
+			return p.noConstruct == 0 || (index+1 < len(p.tokens) && p.tokens[index+1].text == "{")
+		}
+		if p.tokens[index].text != "," && p.tokens[index].text != ";" {
+			return false
+		}
+		index++
+	}
 }
 
 func (p *parser) pattern() *MatchPattern {
