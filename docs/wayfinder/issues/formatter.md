@@ -5,4 +5,6 @@ Implement units 1–2 of the [formatting contract](../../specs/formatting.md): s
 
 Unit1 has no semantic-diagnostics dependency and is assigned in an isolated workspace now. Unit2 adapters follow reviewed shared diagnostics for source identity/position reuse; do not start the adapter slice before that integration. Editor formatting remains separately blocked on the language server.
 
-Unit1 integrated45b43d2: pure canonical printer, ordered syntax/comments, directive preservation, complete bounded syntax comparison and shared traversal. Independent core reviews are clear; both integration gates pass. CLI/MCP adapters and mechanical authored-example adoption remain open. Shared diagnostics are already integrated, so unit2 can now proceed. No `ef fmt` command or editor capability is advertised yet.
+Unit1 integrated45b43d2: pure canonical printer, ordered syntax/comments, directive preservation, complete bounded syntax comparison and shared traversal. Independent core reviews and both integration gates pass.
+
+Unit2 adapters integrated at e2d6161 after both final reviews and finite residual closure. `ef fmt` and read-only MCP `code.format` share the printer, preserve exact source identity, bound responses while keeping request IDs, and replace files atomically in their resolved parent. The branch integration gate passes; the combined integration gate is being recorded. Mechanical authored-example adoption and its maintained gate selection remain open, so this task remains open. Editor formatting is a separate task.
