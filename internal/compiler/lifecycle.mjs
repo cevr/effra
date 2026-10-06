@@ -79,8 +79,7 @@ const __ef_timeout = (program, ms) => Effect.suspend(() => {
       let cause = Exit.isFailure(winner.exit) ? winner.exit.cause : Cause.empty;
       if (Exit.isFailure(timerExit)) {
         for (const reason of timerExit.cause.reasons) {
-          if (reason._tag === "Fail") cause = Cause.combine(cause, Cause.fail(reason.error));
-          else if (reason._tag === "Die") cause = Cause.combine(cause, Cause.die(reason.defect));
+          if (reason._tag === "Fail" || reason._tag === "Die") cause = Cause.combine(cause, Cause.fromReasons([reason]));
         }
       }
       if (cause.reasons.length > 0) return yield* Effect.failCause(cause);
@@ -90,8 +89,7 @@ const __ef_timeout = (program, ms) => Effect.suspend(() => {
       let cause = winner.exit.cause;
       if (Exit.isFailure(workExit)) {
         for (const reason of workExit.cause.reasons) {
-          if (reason._tag === "Fail") cause = Cause.combine(cause, Cause.fail(reason.error));
-          else if (reason._tag === "Die") cause = Cause.combine(cause, Cause.die(reason.defect));
+          if (reason._tag === "Fail" || reason._tag === "Die") cause = Cause.combine(cause, Cause.fromReasons([reason]));
         }
       }
       return yield* Effect.failCause(cause);
@@ -99,8 +97,7 @@ const __ef_timeout = (program, ms) => Effect.suspend(() => {
     let cause = Cause.fail({ _tag: "Timeout" });
     if (Exit.isFailure(workExit)) {
       for (const reason of workExit.cause.reasons) {
-        if (reason._tag === "Fail") cause = Cause.combine(cause, Cause.fail(reason.error));
-        else if (reason._tag === "Die") cause = Cause.combine(cause, Cause.die(reason.defect));
+        if (reason._tag === "Fail" || reason._tag === "Die") cause = Cause.combine(cause, Cause.fromReasons([reason]));
       }
     }
     return yield* Effect.failCause(cause);

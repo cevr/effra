@@ -1,5 +1,11 @@
 // The compiler supplies a bounded checked graph and explicit aggregate-field
 // adapters. Effect remains the scheduler, interruption and resource authority.
+const __ef_layerCauseOrigin = Context.Service("effra/runtime/LayerCauseOrigin");
+// Effect deduplicates equal reason values when combining Causes. Each observed
+// node/cleanup reason is an occurrence, so retain a private identity through
+// later Effect joins without wrapping its typed payload or replacing tracing.
+const __ef_layerOccurrences = cause => Cause.fromReasons(cause.reasons.map(reason =>
+  reason.annotate(Context.make(__ef_layerCauseOrigin, () => undefined), { overwrite: true })));
 const __ef_provideLayer = (plan, program) => Effect.uninterruptibleMask(restore => Effect.gen(function* () {
   const state = yield* Effect.sync(plan.init);
   const changes = yield* Queue.make({ capacity: Math.max(1, plan.nodes.length) });
@@ -47,6 +53,7 @@ const __ef_provideLayer = (plan, program) => Effect.uninterruptibleMask(restore 
       yield* Effect.sync(() => {
         run.cause = Exit.isFailure(exit) ? exit.cause : Cause.empty;
         if (run.abortCancelled) run.cause = Cause.fromReasons(run.cause.reasons.filter(reason => reason._tag !== "Interrupt"));
+        run.cause = __ef_layerOccurrences(run.cause);
         run.state = Exit.isFailure(exit) ? "failed" : "succeeded";
         completed++;
         if (Exit.isFailure(exit)) abort();
@@ -91,7 +98,7 @@ const __ef_provideLayer = (plan, program) => Effect.uninterruptibleMask(restore 
   for (const index of order.toReversed()) {
     if (!runs[index].owner) continue;
     const cleanup = yield* __ef_closeOwner(runs[index].owner, Exit.succeed(undefined));
-    if (Exit.isFailure(cleanup)) cause = Cause.combine(cause, cleanup.cause);
+    if (Exit.isFailure(cleanup)) cause = Cause.combine(cause, __ef_layerOccurrences(cleanup.cause));
   }
   return yield* cause.reasons.length === 0 ? body : Effect.failCause(cause);
 }));
