@@ -10,10 +10,109 @@ import (
 	"time"
 )
 
+func TestExplicitTestProvidersUseTheHarnessAcrossTargets(t *testing.T) {
+	source := `effect fn explicitSleep() -> () uses {Clock} {
+    run Clock.sleep(20)
+}
+
+effect fn test_explicit_virtual_providers() -> () throws {AssertionFailed} uses {Assert, Scheduler} {
+    let child = fork explicitSleep().provide<Clock>(TestClock).provide<Scheduler>(TestScheduler)
+    run Scheduler.awaitRegistration()
+    run Scheduler.advance(20)
+    run child.join()
+    run Assert.check(true, "explicit test providers share the harness scheduler")
+}
+`
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	goSource, err := r.EmitGoTests()
+	if err != nil {
+		t.Fatal(err)
+	}
+	goDir := t.TempDir()
+	if err = WriteRuntime(goDir); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string][]byte{
+		"go.mod":  []byte(r.ModuleFile()),
+		"main.go": []byte(goSource),
+	} {
+		if err = os.WriteFile(filepath.Join(goDir, name), contents, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	goOutput, err := runWithWatchdog(goDir, 15*time.Second, "go", "run", ".")
+	if err != nil || !strings.Contains(string(goOutput), `"passed":true`) {
+		t.Fatalf("generated Go explicit test providers: %v\n%s", err, goOutput)
+	}
+
+	jsSource, _, err := r.EmitJSTests()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("Bun is required for generated scheduler tests")
+	}
+	root := filepath.Join("..", "..")
+	jsDir, err := os.MkdirTemp(filepath.Join(root, "dist"), "explicit-scheduler-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(jsDir) })
+	jsPath := filepath.Join(jsDir, "scheduler.tests.mjs")
+	if err = os.WriteFile(jsPath, []byte(jsSource), 0600); err != nil {
+		t.Fatal(err)
+	}
+	jsOutput, err := runWithWatchdog(jsDir, 15*time.Second, bun, jsPath)
+	if err != nil || !strings.Contains(string(jsOutput), `"passed":true`) {
+		t.Fatalf("generated JS explicit test providers: %v\n%s", err, jsOutput)
+	}
+}
+
+func TestExplicitTestProvidersRejectLiveExecutionWithoutHarness(t *testing.T) {
+	source := `effect fn main() -> () {
+    run Clock.sleep(1).provide<Clock>(TestClock)
+}
+`
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	goSource, err := r.EmitGo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	goDir := t.TempDir()
+	if err = WriteRuntime(goDir); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string][]byte{
+		"go.mod":  []byte(r.ModuleFile()),
+		"main.go": []byte(goSource),
+	} {
+		if err = os.WriteFile(filepath.Join(goDir, name), contents, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	goOutput, err := runWithWatchdog(goDir, 15*time.Second, "go", "run", ".")
+	if err == nil || !strings.Contains(string(goOutput), "test clock requires an active test scheduler") {
+		t.Fatalf("Go TestClock escaped its harness: %v\n%s", err, goOutput)
+	}
+	jsOutput := runJS(t, source, `const exit=await Effect.runPromiseExit(__ef_function_main());if(exit._tag!=="Failure"||!exit.cause.reasons.some(reason=>reason._tag==="Die"&&String(reason.defect).includes("test clock requires the ef test harness")))throw new Error("JS TestClock escaped its harness "+JSON.stringify(exit));`)
+	if jsOutput != "" {
+		t.Fatalf("JS TestClock escaped its harness: %s", jsOutput)
+	}
+}
+
+// Keep the generated continuation large enough to exercise scheduler handoffs
+// while bounding Go 1.27's compile time for one very large straight-line body.
 func TestSchedulerDrainsLongManagedContinuationAcrossTargets(t *testing.T) {
 	source := `effect fn longContinuation(latch: Latch) -> () uses {Clock, Sync} {
     run Clock.sleep(20)
-` + strings.Repeat("    run Sync.signal(latch)\n", 2050) + `    run Clock.sleep(30)
+` + strings.Repeat("    run Sync.signal(latch)\n", 1024) + `    run Clock.sleep(30)
 }
 
 effect fn test_scheduler_drains_long_continuation() -> () throws {AssertionFailed} uses {Assert, Clock, Scheduler, Sync} {
@@ -160,7 +259,8 @@ effect fn main() -> string {
 	if err == nil || !strings.Contains(string(goOutput), "invalid millisecond duration") || strings.Contains(string(goOutput), "timed out") {
 		t.Fatalf("generated Go scheduler defect was rewritten: %v\n%s", err, goOutput)
 	}
-	jsOutput := runJS(t, source, `const exit=await Effect.runPromiseExit(__ef_function_main());if(exit._tag!=="Failure"||!exit.cause.reasons.some(reason=>reason._tag==="Die")||exit.cause.reasons.some(reason=>reason._tag==="Fail"&&reason.error?._tag==="Timeout"))throw new Error("scheduler defect was rewritten "+JSON.stringify(exit));`)
+	jsOutput := runJS(t, source, `const exit=await Effect.runPromiseExit(__ef_function_main());if(exit._tag!=="Failure"||!exit.cause.reasons.some(reason=>reason._tag==="Die")||exit.cause.reasons.some(reason=>reason._tag==="Fail"&&reason.error?._tag==="Timeout"))throw new Error("scheduler defect was rewritten "+JSON.stringify(exit));
+let timerStarted;const started=new Promise(resolve=>timerStarted=resolve);const cleanupDefect={sleep:()=>Effect.acquireUseRelease(Effect.sync(()=>timerStarted()),()=>Effect.never,()=>Effect.die(new Error("timer cleanup defect"))),advance:()=>Effect.die(new Error("unused")),awaitRegistration:()=>Effect.die(new Error("unused"))};const work=Effect.promise(()=>started.then(()=>"completed"));const workWinner=await Effect.runPromiseExit(Effect.provideService(__ef_timeout(work,500),__ef_service_Scheduler,cleanupDefect));if(workWinner._tag!=="Failure"||!workWinner.cause.reasons.some(reason=>reason._tag==="Die"&&String(reason.defect).includes("timer cleanup defect")))throw new Error("timer cleanup defect was discarded "+JSON.stringify(workWinner));`)
 	if jsOutput != "" {
 		t.Fatalf("generated JS scheduler defect: %s", jsOutput)
 	}

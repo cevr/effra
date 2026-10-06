@@ -58,25 +58,24 @@ const __ef_makeTestHarness=()=>{
   let sequence=0;
   let registrations=0;
   let observed=0;
-  let notify=()=>{};
+  const registrationWaiters=new Set();
   const timers=[];
   const invalidDuration=()=>Effect.die(new Error('invalid millisecond duration'));
   const remove=(timer)=>{const index=timers.indexOf(timer);if(index>=0)timers.splice(index,1);};
-  const register=()=>{registrations++;const wake=notify;notify=()=>{};wake();};
-  const queued=[];
+  const register=()=>{registrations++;const waiters=[...registrationWaiters];registrationWaiters.clear();for(const wake of waiters)wake();};
+  const queued=[];let flushScheduled=false;
   const dispatcher={
-    scheduleTask:(task,priority)=>{let index=queued.length;for(let i=0;i<queued.length;i++){if(queued[i].priority>priority){index=i;break;}}queued.splice(index,0,{task,priority});},
-    flush:()=>{while(queued.length>0){queued.shift().task();}}
+    scheduleTask:(task,priority)=>{let index=queued.length;for(let i=0;i<queued.length;i++){if(queued[i].priority>priority){index=i;break;}}queued.splice(index,0,{task,priority});if(!flushScheduled){flushScheduled=true;queueMicrotask(()=>{flushScheduled=false;dispatcher.flush();});}},
+    flush:()=>{flushScheduled=false;while(queued.length>0){queued.shift().task();}}
   };
   const effectScheduler={executionMode:'sync',shouldYield:fiber=>fiber.currentOpCount>=2048,makeDispatcher:()=>dispatcher};
   const flush=Effect.sync(()=>dispatcher.flush());
   const awaitRegistration=Effect.callback((resume,signal)=>{
     if(registrations>observed){observed=registrations;resume(Effect.succeed(undefined));return;}
-    const previous=notify;
     const wake=()=>{observed=registrations;resume(Effect.succeed(undefined));};
-    notify=wake;
-    signal.addEventListener('abort',()=>{if(notify===wake)notify=previous;},{once:true});
-    return Effect.sync(()=>{if(notify===wake)notify=previous;});
+    registrationWaiters.add(wake);
+    signal.addEventListener('abort',()=>registrationWaiters.delete(wake),{once:true});
+    return Effect.sync(()=>registrationWaiters.delete(wake));
   });
   const awaitReady=Effect.gen(function*(){
     while(true){
@@ -129,7 +128,7 @@ const __ef_makeTestHarness=()=>{
   return{clock:{sleep:ms=>{if(ms<0n||ms>2147483647n)return invalidDuration();return Effect.sleep(Number(ms));}},effectClock,effectScheduler,scheduler:{sleep:ms=>{if(ms<0n||ms>2147483647n)return invalidDuration();return Effect.sleep(Number(ms));},advance:ms=>adjust(Number(ms)),awaitRegistration:()=>awaitReady},sync:__ef_provider_TestSync};
 };
 const __ef_results=[];let __ef_passed=true;
-for(const [name,program] of __ef_tests){const __ef_harness=__ef_makeTestHarness();let __ef_case=Effect.provideService(program(),__ef_service_Assert,__ef_provider_Assertions);__ef_case=Effect.provideService(__ef_case,__ef_service_Clock,__ef_harness.clock);__ef_case=Effect.provideService(__ef_case,__ef_service_Scheduler,__ef_harness.scheduler);__ef_case=Effect.provideService(__ef_case,__ef_service_Sync,__ef_harness.sync);const __ef_clocked=Effect.provideService(__ef_case,Clock.Clock,__ef_harness.effectClock);const __ef_scheduled=Effect.provideService(__ef_clocked,Scheduler.Scheduler,__ef_harness.effectScheduler);const exit=await Effect.runPromiseExit(__ef_scheduled);const passed=Exit.isSuccess(exit);__ef_passed&&=passed;__ef_results.push(passed?{name,passed}:{name,passed,cause:Cause.pretty(exit.cause),reasons:exit.cause.reasons.map(reason=>reason._tag==="Fail"?{kind:"failure",tag:reason.error?._tag??"Unknown",message:reason.error?.message??String(reason.error)}:reason._tag==="Die"?{kind:"defect",message:String(reason.defect)}:{kind:"interrupt",message:String(reason.fiberId??"interrupted")})});}
+for(const [name,program] of __ef_tests){const __ef_harness=__ef_makeTestHarness();__ef_test_harness=__ef_harness;let __ef_case=Effect.provideService(program(),__ef_service_Assert,__ef_provider_Assertions);__ef_case=Effect.provideService(__ef_case,__ef_service_Clock,__ef_harness.clock);__ef_case=Effect.provideService(__ef_case,__ef_service_Scheduler,__ef_harness.scheduler);__ef_case=Effect.provideService(__ef_case,__ef_service_Sync,__ef_harness.sync);const __ef_clocked=Effect.provideService(__ef_case,Clock.Clock,__ef_harness.effectClock);const __ef_scheduled=Effect.provideService(__ef_clocked,Scheduler.Scheduler,__ef_harness.effectScheduler);const exit=await Effect.runPromiseExit(__ef_scheduled);__ef_test_harness=null;const passed=Exit.isSuccess(exit);__ef_passed&&=passed;__ef_results.push(passed?{name,passed}:{name,passed,cause:Cause.pretty(exit.cause),reasons:exit.cause.reasons.map(reason=>reason._tag==="Fail"?{kind:"failure",tag:reason.error?._tag??"Unknown",message:reason.error?.message??String(reason.error)}:reason._tag==="Die"?{kind:"defect",message:String(reason.defect)}:{kind:"interrupt",message:String(reason.fiberId??"interrupted")})});}
 console.log(JSON.stringify({schemaVersion:1,passed:__ef_passed,tests:__ef_results}));if(!__ef_passed)process.exitCode=1;
 `
 	return js, decl, nil

@@ -149,10 +149,11 @@ func (r *Result) Emit(entry bool) (string, string, error) {
 	out.WriteString(`
 const __ef_provider_Assertions={check:(condition,message)=>condition?Effect.succeed(undefined):Effect.fail({_tag:'AssertionFailed',message}),equalText:(actual,expected)=>actual===expected?Effect.succeed(undefined):Effect.fail({_tag:'AssertionFailed',message:'expected '+JSON.stringify(expected)+'; received '+JSON.stringify(actual)})};
 const __ef_provider_LiveClock={sleep:ms=> ms<0n || ms>2147483647n ? Effect.die(new Error('invalid millisecond duration')) : Effect.callback((resume,signal)=>{const timer=setTimeout(()=>resume(Effect.succeed(undefined)),Number(ms));const abort=()=>{clearTimeout(timer);resume(Effect.interrupt);};signal.addEventListener('abort',abort,{once:true});return Effect.sync(()=>{clearTimeout(timer);signal.removeEventListener('abort',abort);});})};
-const __ef_provider_TestClock={sleep:()=>Effect.die(new Error('test clock requires the ef test harness'))};
+let __ef_test_harness=null;
+const __ef_provider_TestClock={sleep:ms=>__ef_test_harness?__ef_test_harness.clock.sleep(ms):Effect.die(new Error('test clock requires the ef test harness'))};
 const __ef_provider_LiveEnv={get:name=>Effect.sync(()=>process.env[name] ?? '')};
 const __ef_provider_LiveScheduler={sleep:ms=>__ef_provider_LiveClock.sleep(ms),advance:()=>Effect.die(new Error('live scheduler cannot advance')),awaitRegistration:()=>Effect.die(new Error('live scheduler has no registration barrier'))};
-const __ef_provider_TestScheduler={sleep:()=>Effect.die(new Error('test scheduler requires the ef test harness')),advance:()=>Effect.die(new Error('test scheduler adjustment is only available in ef test harness')),awaitRegistration:()=>Effect.die(new Error('test scheduler registration barrier is only available in ef test harness'))};
+const __ef_provider_TestScheduler={sleep:ms=>__ef_test_harness?__ef_test_harness.scheduler.sleep(ms):Effect.die(new Error('test scheduler requires the ef test harness')),advance:ms=>__ef_test_harness?__ef_test_harness.scheduler.advance(ms):Effect.die(new Error('test scheduler adjustment is only available in ef test harness')),awaitRegistration:()=>__ef_test_harness?__ef_test_harness.scheduler.awaitRegistration():Effect.die(new Error('test scheduler registration barrier is only available in ef test harness'))};
 class __ef_latch {
   constructor(){this.done=false;this.waiters=new Set();}
   await(){return Effect.callback((resume,signal)=>{if(this.done){resume(Effect.succeed(undefined));return;}const waiter={resume};this.waiters.add(waiter);const abort=()=>this.waiters.delete(waiter);signal.addEventListener('abort',abort,{once:true});return Effect.sync(()=>{this.waiters.delete(waiter);signal.removeEventListener('abort',abort);});});}

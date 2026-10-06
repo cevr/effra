@@ -187,9 +187,6 @@ func TestTestSchedulerWaitsForJoinContinuationBeforeAdvancing(t *testing.T) {
 	select {
 	case point := <-resumed:
 		if point != 20 {
-			scheduler.mu.Lock()
-			t.Logf("join point state now=%d active=%d wakes=%d cont=%d timers=%d", scheduler.now, scheduler.active, scheduler.pendingWakes, scheduler.continuations, len(scheduler.timers))
-			scheduler.mu.Unlock()
 			t.Fatalf("join continuation resumed at %d, want 20", point)
 		}
 	case <-time.After(3 * time.Second):
@@ -201,9 +198,6 @@ func TestTestSchedulerWaitsForJoinContinuationBeforeAdvancing(t *testing.T) {
 			t.Fatalf("join sequence failed: %+v", out)
 		}
 	case <-time.After(3 * time.Second):
-		scheduler.mu.Lock()
-		t.Logf("join state now=%d active=%d wakes=%d cont=%d timers=%d", scheduler.now, scheduler.active, scheduler.pendingWakes, scheduler.continuations, len(scheduler.timers))
-		scheduler.mu.Unlock()
 		t.Fatal("join sequence did not finish")
 	}
 }
@@ -241,9 +235,6 @@ func TestTestSchedulerWaitsForScopeCleanupContinuationBeforeAdvancing(t *testing
 	select {
 	case point := <-resumed:
 		if point != 20 {
-			scheduler.mu.Lock()
-			t.Logf("scope point state now=%d active=%d wakes=%d cont=%d timers=%d", scheduler.now, scheduler.active, scheduler.pendingWakes, scheduler.continuations, len(scheduler.timers))
-			scheduler.mu.Unlock()
 			t.Fatalf("scope continuation resumed at %d, want 20", point)
 		}
 	case <-time.After(3 * time.Second):
@@ -255,9 +246,6 @@ func TestTestSchedulerWaitsForScopeCleanupContinuationBeforeAdvancing(t *testing
 			t.Fatalf("scope sequence failed: %+v", out)
 		}
 	case <-time.After(3 * time.Second):
-		scheduler.mu.Lock()
-		t.Logf("scope state now=%d active=%d wakes=%d cont=%d timers=%d", scheduler.now, scheduler.active, scheduler.pendingWakes, scheduler.continuations, len(scheduler.timers))
-		scheduler.mu.Unlock()
 		t.Fatal("scope sequence did not finish")
 	}
 }
