@@ -30,6 +30,76 @@ func TestProjectionJSONAccountingMatchesActualEncoding(t *testing.T) {
 	}
 }
 
+func TestSelectedTestCatalogKeepsWholeRefusalAndExecutionIndependent(t *testing.T) {
+	var source strings.Builder
+	source.WriteString("effect fn wide(")
+	for i := 0; i < 2048; i++ {
+		if i > 0 {
+			source.WriteByte(',')
+		}
+		fmt.Fprintf(&source, "p%d: string", i)
+	}
+	source.WriteString(") -> string { \"wide\" }\neffect fn test_tiny() -> () { () }")
+	r := Compile(source.String())
+	if !r.Checked || r.TypeProjectionComplete {
+		t.Fatal("fixture must check with whole-source refusal")
+	}
+	before, _ := json.Marshal(r.Symbols)
+	errorBefore := r.TypeProjectionError
+	tests, err := r.Tests()
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, projection := r.ProjectTestCatalog(tests)
+	if !projection.Complete || len(selected) != 1 || selected[0].Name != "test_tiny" {
+		t.Fatalf("selected test unavailable: %+v", projection)
+	}
+	after, _ := json.Marshal(r.Symbols)
+	if string(before) != string(after) || r.TypeProjectionError != errorBefore || r.TypeProjectionComplete {
+		t.Fatal("catalog mutated stored whole-source refusal")
+	}
+	if _, err := r.EmitGoTests(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.EmitJSTests(); err != nil {
+		t.Fatal(err)
+	}
+	// A tiny budget must refuse publication while executable roots stay valid.
+	r.TypeProjectionLimits = defaultProjectionLimits
+	r.TypeProjectionLimits.CompatibilityBytes = 1
+	if catalog, p := r.ProjectTestCatalog(tests); p.Complete || catalog != nil || p.Error == "" {
+		t.Fatal("catalog budget refusal retained partial authority")
+	}
+	if _, err := r.EmitGoTests(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.EmitJSTests(); err != nil {
+		t.Fatal(err)
+	}
+	pair := Compile("effect fn test_one() -> () { () }\neffect fn test_two() -> () { () }")
+	pairTests, err := pair.Tests()
+	if err != nil {
+		t.Fatal(err)
+	}
+	budget := 0
+	for _, test := range pairTests {
+		_, p := pair.ProjectTestCatalog([]*Symbol{test})
+		if !p.Complete {
+			t.Fatal(p.Error)
+		}
+		budget = max(budget, p.Usage.CompatibilityBytes)
+	}
+	pair.TypeProjectionLimits.CompatibilityBytes = budget
+	for _, test := range pairTests {
+		if _, p := pair.ProjectTestCatalog([]*Symbol{test}); !p.Complete {
+			t.Fatal("individual root no longer fits catalog budget", p.Error)
+		}
+	}
+	if catalog, p := pair.ProjectTestCatalog(pairTests); p.Complete || catalog != nil || p.Error == "" {
+		t.Fatal("combined catalog reset its compatibility budget per test")
+	}
+}
+
 func TestCanonicalProjectionExactStructuralAndByteBoundaries(t *testing.T) {
 	r := Compile(`error Bad
 effect fn task(name: string) -> string raises {Bad} { name }

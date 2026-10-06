@@ -944,6 +944,61 @@ func (r *Result) ProjectSymbol(symbol *Symbol) TypeProjection {
 	return r.projectionRefs(refs, false, compatibilityBytes, stringBytes(symbol, r.projectionLimits().NameBytes))
 }
 
+// ProjectTestCatalog admits all selected compatibility roots cumulatively
+// before Find expands any refused whole-source views. Discovery publication
+// never changes stored symbols, whole-source refusal or executable test roots.
+func (r *Result) ProjectTestCatalog(tests []*Symbol) ([]*Symbol, TypeProjection) {
+	limits := r.projectionLimits()
+	refuse := func(bytes int, reason string) ([]*Symbol, TypeProjection) {
+		return nil, refusedProjection(limits, ProjectionUsage{CompatibilityBytes: bytes}, reason)
+	}
+	if !r.Checked || r.projector == nil {
+		return refuse(0, "test catalog requires retained checked source")
+	}
+	compatibilityBytes := 2 // JSON array brackets.
+	refs := []TypeRef{}
+	for i, symbol := range tests {
+		if symbol == nil {
+			return refuse(compatibilityBytes, "test catalog has no checked symbol")
+		}
+		checked, ok := r.checkedSymbols[symbol.Identity]
+		if !ok {
+			return refuse(compatibilityBytes, "test catalog has no retained checked roots")
+		}
+		if i > 0 {
+			compatibilityBytes++
+		}
+		size, err := r.projector.checkedSymbolSize(*symbol, checked, limits.CompatibilityBytes-compatibilityBytes)
+		compatibilityBytes += size
+		if err != nil {
+			return refuse(compatibilityBytes, err.Error())
+		}
+		appendProjectionRef(&refs, r.projector.identityRef(checked.contract.contractID()))
+		appendProjectionRef(&refs, r.projector.identityRef(checked.body.contractID()))
+	}
+	// Admit the union of checked roots and nominal closure before materializing
+	// selected callable metadata. No per-test projection resets this budget.
+	projection := r.projectionRefs(refs, false, compatibilityBytes, 0)
+	if !projection.Complete {
+		return nil, projection
+	}
+	selected := make([]*Symbol, 0, len(tests))
+	for _, symbol := range tests {
+		view := r.Find(symbol.Name)
+		if view == nil || view.Contract.ProjectionError != "" || view.Actual.ProjectionError != "" {
+			return refuse(compatibilityBytes, "selected test compatibility projection is unavailable")
+		}
+		selected = append(selected, view)
+		appendProjectionValue(&refs, view.Contract)
+		appendProjectionValue(&refs, view.Actual)
+	}
+	projection = r.projectionRefs(refs, false, compatibilityBytes, stringBytes(selected, limits.NameBytes))
+	if !projection.Complete {
+		return nil, projection
+	}
+	return selected, projection
+}
+
 func (r *Result) ProjectExpression(info *ExpressionInfo) TypeProjection {
 	if info == nil {
 		return refusedProjection(r.projectionLimits(), ProjectionUsage{}, "expression projection is unavailable")

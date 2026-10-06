@@ -25,7 +25,7 @@ The adapter implements a small read-only tools server using the [2025-11-25 stdi
 | lint.rules | `{}` | Stable rule catalog |
 | code.typeAt | `file`, integer `offset`, optional `target`, `expectedRevision` | Checked expression at a UTF-8 byte diagnostic anchor with response-local reachable type/row definitions |
 | project.graph | `file`, optional `target`, `expectedRevision` | Static service/provider/effect graph, up to 1,000 nodes / 2,000 edges, with response-local reachable type/row definitions |
-| project.tests | `file`, optional `target`, `expectedRevision` | Checked cases, live capability requirement; no execution |
+| project.tests | `file`, optional `target`, `expectedRevision` | Selected checked cases and their complete reachable type/row closure under one cumulative catalog budget, independent of whole-source projection refusal; live capability requirement, no execution |
 | code.inspect | `file`, `symbol`, optional `target`, optional `expectedRevision` | Canonical function contract or nominal record/enum/error declaration, byte span, local contributions |
 | code.explain | Same as inspect | Same initial semantic detail; no transitive explanation engine yet |
 

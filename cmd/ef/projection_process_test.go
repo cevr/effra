@@ -179,6 +179,77 @@ func TestCanonicalSuccessWireAdmission(t *testing.T) {
 	}
 }
 
+func TestSelectedTestCatalogIndependentOfWholePublication(t *testing.T) {
+	binary := buildTestCLI(t)
+	var wide strings.Builder
+	wide.WriteString("effect fn wide(")
+	for i := 0; i < 2048; i++ {
+		if i > 0 {
+			wide.WriteByte(',')
+		}
+		fmt.Fprintf(&wide, "p%d: string", i)
+	}
+	wide.WriteString(`) -> string { "wide" }`)
+	const tiny = `effect fn test_tiny() -> () raises {Bad} { () }`
+	for _, order := range []struct{ name, functions string }{
+		{"wide first", wide.String() + "\n" + tiny},
+		{"test first", tiny + "\n" + wide.String()},
+	} {
+		t.Run(order.name, func(t *testing.T) {
+			root := t.TempDir()
+			source := "record Payload { text: string }\nerror Bad { detail: Payload }\n" + order.functions
+			t.Logf("exact fixture source:\n%s", source)
+			if err := os.WriteFile(filepath.Join(root, "catalog.ef"), []byte(source), 0600); err != nil {
+				t.Fatal(err)
+			}
+			input := strings.Join([]string{
+				`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"catalog-test","version":"1"}}}`,
+				`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+				`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"project.check","arguments":{"file":"catalog.ef"}}}`,
+				`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"project.tests","arguments":{"file":"catalog.ef"}}}`,
+				`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"code.inspect","arguments":{"file":"catalog.ef","symbol":"test_tiny"}}}`,
+				`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"project.check","arguments":{"file":"catalog.ef"}}}`,
+				`{"jsonrpc":"2.0","id":6,"method":"ping"}`,
+			}, "\n") + "\n"
+			command := exec.Command(binary, "mcp", root)
+			command.Stdin = strings.NewReader(input)
+			output, err := command.Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := bytes.Split(bytes.TrimSuffix(output, []byte{'\n'}), []byte{'\n'})
+			if len(lines) != 6 {
+				t.Fatalf("catalog response count %d", len(lines))
+			}
+			before := readProcessJSON(t, lines[1])["result"].(map[string]any)["structuredContent"].(map[string]any)
+			after := readProcessJSON(t, lines[4])["result"].(map[string]any)["structuredContent"].(map[string]any)
+			for _, whole := range []map[string]any{before, after} {
+				if whole["checked"] != true || whole["typeProjectionComplete"] != false || whole["typeProjectionError"] == nil || whole["symbols"] != nil {
+					t.Fatal("whole-source refusal changed", whole)
+				}
+			}
+			if before["typeProjectionError"] != after["typeProjectionError"] {
+				t.Fatal("catalog changed whole-source refusal")
+			}
+			inspection := readProcessJSON(t, lines[3])["result"].(map[string]any)["structuredContent"].(map[string]any)
+			assertResponseReferences(t, inspection)
+			catalogResult := readProcessJSON(t, lines[2])["result"].(map[string]any)
+			if catalogResult["isError"] != false {
+				t.Fatal("selected test catalog inherited unrelated refusal", catalogResult)
+			}
+			catalog := catalogResult["structuredContent"].(map[string]any)
+			assertResponseReferences(t, catalog)
+			tests := catalog["tests"].([]any)
+			if len(tests) != 1 || tests[0].(map[string]any)["name"] != "test_tiny" || !reflect.DeepEqual(tests[0].(map[string]any)["contract"], inspection["symbol"].(map[string]any)["contract"]) {
+				t.Fatal("catalog lost selected checked contract")
+			}
+			if ping := readProcessJSON(t, lines[5]); ping["id"] != float64(6) || ping["result"] == nil || ping["error"] != nil {
+				t.Fatal("catalog lost queued ping", ping)
+			}
+		})
+	}
+}
+
 func TestCanonicalProjectionCLIAndMCPProcessesRemainCompleteAndResponsive(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := t.TempDir()

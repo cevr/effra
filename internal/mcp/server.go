@@ -720,11 +720,7 @@ func call(root, name string, args arguments) (any, error) {
 				return nil, fmt.Errorf("test contract exceeds prototype limits")
 			}
 		}
-		values := make([]compiler.ValueType, 0, len(tests)*2)
-		for _, test := range tests {
-			values = append(values, test.Contract, test.Actual)
-		}
-		projection := r.ProjectValues(values)
+		tests, projection := r.ProjectTestCatalog(tests)
 		if !projection.Complete {
 			return nil, fmt.Errorf("test catalog type projection unavailable: %s", projection.Error)
 		}
