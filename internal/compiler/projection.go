@@ -166,11 +166,99 @@ func encodedSize(value any, limit int) (int, error) {
 	return encodedSizeMode(value, limit, false)
 }
 
+type projectionJSONField struct {
+	name                string
+	index               []int
+	tagged              bool
+	omitEmpty, omitZero bool
+}
+
+// Retained response structs use ordinary JSON fields, including anonymous
+// metadata and zero-value omission. Resolve embedding and name dominance before
+// charging values, as encoding/json does; no encoded buffer is allocated.
+func projectionJSONFields(typ reflect.Type) []projectionJSONField {
+	var fields []projectionJSONField
+	var collect func(reflect.Type, []int, map[reflect.Type]bool)
+	collect = func(typ reflect.Type, prefix []int, ancestors map[reflect.Type]bool) {
+		if ancestors[typ] {
+			return
+		}
+		ancestors[typ] = true
+		defer delete(ancestors, typ)
+		for i := 0; i < typ.NumField(); i++ {
+			field := typ.Field(i)
+			base := field.Type
+			if base.Kind() == reflect.Pointer {
+				base = base.Elem()
+			}
+			if field.PkgPath != "" && (!field.Anonymous || base.Kind() != reflect.Struct) {
+				continue
+			}
+			tag := strings.Split(field.Tag.Get("json"), ",")
+			if tag[0] == "-" {
+				continue
+			}
+			index := append(append([]int(nil), prefix...), i)
+			if field.Anonymous && tag[0] == "" && base.Kind() == reflect.Struct {
+				collect(base, index, ancestors)
+				continue
+			}
+			name := tag[0]
+			if name == "" {
+				name = field.Name
+			}
+			fields = append(fields, projectionJSONField{name, index, tag[0] != "", slices.Contains(tag[1:], "omitempty"), slices.Contains(tag[1:], "omitzero")})
+		}
+	}
+	collect(typ, nil, map[reflect.Type]bool{})
+	slices.SortFunc(fields, func(a, b projectionJSONField) int {
+		if order := strings.Compare(a.name, b.name); order != 0 {
+			return order
+		}
+		if len(a.index) != len(b.index) {
+			return len(a.index) - len(b.index)
+		}
+		if a.tagged != b.tagged {
+			if a.tagged {
+				return -1
+			}
+			return 1
+		}
+		return 0
+	})
+	visible := make([]projectionJSONField, 0, len(fields))
+	for start := 0; start < len(fields); {
+		end := start + 1
+		for end < len(fields) && fields[end].name == fields[start].name {
+			end++
+		}
+		first := fields[start]
+		if end == start+1 || len(first.index) != len(fields[start+1].index) || first.tagged != fields[start+1].tagged {
+			visible = append(visible, first)
+		}
+		start = end
+	}
+	return visible
+}
+
+func projectionEmptyJSONValue(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
+		return v.Len() == 0
+	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64, reflect.Interface, reflect.Pointer:
+		return v.IsZero()
+	}
+	return false
+}
+
 // encodedSizeMode can also count the JSON text embedded as a JSON string,
 // which lets MCP preflight its duplicated text/structured result before
 // allocating either representation.
 func encodedSizeMode(value any, limit int, embedded bool) (int, error) {
 	count := 0
+	fieldsByType := map[reflect.Type][]projectionJSONField{}
 	if embedded {
 		count = 2
 	}
@@ -294,23 +382,25 @@ func encodedSizeMode(value any, limit int, embedded bool) (int, error) {
 				return err
 			}
 			first := true
-			typ := v.Type()
-			for i := 0; i < v.NumField(); i++ {
-				field := typ.Field(i)
-				if field.PkgPath != "" {
-					continue
+			fields, found := fieldsByType[v.Type()]
+			if !found {
+				fields = projectionJSONFields(v.Type())
+				fieldsByType[v.Type()] = fields
+			}
+			for _, field := range fields {
+				f, missing := v, false
+				for _, index := range field.index {
+					if f.Kind() == reflect.Pointer {
+						if f.IsNil() {
+							missing = true
+							break
+						}
+						f = f.Elem()
+					}
+					f = f.Field(index)
 				}
-				tag := strings.Split(field.Tag.Get("json"), ",")
-				if tag[0] == "-" {
+				if missing || (field.omitEmpty && projectionEmptyJSONValue(f)) || (field.omitZero && f.IsZero()) {
 					continue
-				}
-				f := v.Field(i)
-				if slices.Contains(tag[1:], "omitempty") && (f.IsZero() || ((f.Kind() == reflect.Slice || f.Kind() == reflect.Map || f.Kind() == reflect.String) && f.Len() == 0)) {
-					continue
-				}
-				name := tag[0]
-				if name == "" {
-					name = field.Name
 				}
 				if !first {
 					if err := charge(1); err != nil {
@@ -318,7 +408,7 @@ func encodedSizeMode(value any, limit int, embedded bool) (int, error) {
 					}
 				}
 				first = false
-				if err := quoted(name); err != nil {
+				if err := quoted(field.name); err != nil {
 					return err
 				}
 				if err := charge(1); err != nil {
@@ -407,7 +497,7 @@ func (r *Result) ValidateProjectionResponse(projection TypeProjection, envelope 
 		metadata = fields
 	case *DependencyGraph:
 		metadata = struct {
-			ProducerMetadata  ProducerMetadata
+			ProducerMetadata
 			Nodes             []GraphNode
 			Edges             []GraphEdge
 			Declarations      []Declaration

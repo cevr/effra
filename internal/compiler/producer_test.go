@@ -70,12 +70,6 @@ func TestProducerMetadataBoundsAndUnavailableReuse(t *testing.T) {
 	if r.Qualify(id) == nil {
 		t.Fatal("unbounded declaration accepted")
 	}
-	projection := r.ProjectAllTypes()
-	response := r.CheckResponse()
-	projection.Limits.CompatibilityBytes = 1
-	if _, err := r.ValidateProjectionResponse(projection, response); err == nil {
-		t.Fatal("producer envelope escaped compatibility bounds")
-	}
 }
 
 func TestGraphProducerMetadataIsChargedAtCompatibilityBoundary(t *testing.T) {

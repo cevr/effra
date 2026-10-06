@@ -122,8 +122,11 @@ with tempfile.TemporaryDirectory(prefix="effra-producer-") as temporary:
             for command, args in [("check", []), ("inspect", ["main"]),
                                   ("query", [str(source.index('"ok"'))]),
                                   ("graph", []), ("diagnostics", ["--json"]), ("lint", [])]:
-                cli = json.loads(run(str(first), command, str(file), *args, "--target", target))
+                encoded = run(str(first), command, str(file), *args, "--target", target)
+                cli = json.loads(encoded)
                 assert cli["producer"] == original_facts["producer"] and cli["snapshot"]["producer"] == key
+                if command == "graph":
+                    assert cli["typeProjectionUsage"]["responseBytes"] == len(encoded.rstrip("\n").encode("utf-8"))
         profile_source = '''import Fns "effra/functions"
 error MissingProfile
 service Profiles { effect fn name(id: string) -> string raises {MissingProfile} }
