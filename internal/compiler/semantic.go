@@ -218,7 +218,7 @@ type RowID uint32
 const invalidTypeID TypeID = 0
 const emptyRowID RowID = 0
 
-const SemanticSchemaVersion = 5
+const SemanticSchemaVersion = 6
 
 type Contribution struct {
 	Kind  string   `json:"kind"`

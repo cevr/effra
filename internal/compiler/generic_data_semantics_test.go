@@ -4,22 +4,17 @@ import (
 	"testing"
 )
 
-func assertGenericStructureOnly(t *testing.T, source string) *Result {
+func assertGenericChecked(t *testing.T, source string) *Result {
 	t.Helper()
 	r := Compile(source)
-	if r.Checked {
-		t.Fatal("target admission must remain unavailable")
-	}
-	for _, d := range r.Diagnostics {
-		if d.Code != "EF127" || d.Message != "generic data target emission is unavailable" {
-			t.Fatal("unexpected structural diagnostic", d)
-		}
+	if !r.Checked {
+		t.Fatal("generic source rejected", r.Diagnostics)
 	}
 	return r
 }
 
 func TestGenericDataConstructorsAndMatch(t *testing.T) {
-	assertGenericStructureOnly(t, `record User { name: string }
+	assertGenericChecked(t, `record User { name: string }
 record Box<T: type> { value: T; label: string }
 enum Presence<T: type> { None; Some { value: T } }
 fn box() -> Box<User> { Box { value: User { name: "Ada" }; label: "user" } }
@@ -35,7 +30,7 @@ fn choose(flag: bool) -> Presence<User> {
 }
 
 func TestGenericDataCallableVariantEvidence(t *testing.T) {
-	assertGenericStructureOnly(t, `record Callback<F: callable fn(A) -> A, A: type> { invoke: F }
+	assertGenericChecked(t, `record Callback<F: callable fn(A) -> A, A: type> { invoke: F }
 enum Action<F: callable fn(A) -> A, A: type> { None; Some { value: Callback<F,A> } }
 fn identity(value: string) -> string { value }
 fn selected() -> Action<fn(string) -> string,string> {
@@ -63,11 +58,7 @@ enum Presence<T: type> { None; Some { value: T } }
 		`fn bad(value: Presence<User>) -> string { match value { Box.Some {value} => "x"; Presence.None => "y" } }`,
 	} {
 		r := Compile(declarations + source)
-		additional := false
-		for _, d := range r.Diagnostics {
-			additional = additional || d.Message != "generic data target emission is unavailable"
-		}
-		if !additional || r.Checked {
+		if len(r.Diagnostics) == 0 || r.Checked {
 			t.Fatal("invalid generic semantics escaped refusal", source, r.Diagnostics)
 		}
 	}
@@ -105,8 +96,8 @@ record Wrapper<T: type> { value: Ops<effect fn(string)->string raises {Trouble},
 effect fn narrow(value: string)->string {value}
 effect fn wide(value: string)->string raises {Trouble} {value}
 `
-	assertGenericStructureOnly(t, prefix+`fn good()->Wrapper<string>{Wrapper { value: Ops {operation:wide}; anchor:"x" } }`)
-	assertGenericStructureOnly(t, prefix+`fn direct()->Ops<effect fn(string)->string raises {Trouble},string>{
+	assertGenericChecked(t, prefix+`fn good()->Wrapper<string>{Wrapper { value: Ops {operation:wide}; anchor:"x" } }`)
+	assertGenericChecked(t, prefix+`fn direct()->Ops<effect fn(string)->string raises {Trouble},string>{
  Ops<effect fn(string)->string raises {Trouble},string> {operation:narrow}
 }`)
 	r := Compile(prefix + `fn bad()->Wrapper<string>{Wrapper { value: Ops {operation:narrow}; anchor:"x" } }`)
@@ -124,7 +115,7 @@ func TestGenericDataReservedVariantDiscriminator(t *testing.T) {
 	if !hasCode(r, "EF120") {
 		t.Fatal("generic variant payload can replace its discriminator", r.Diagnostics)
 	}
-	assertGenericStructureOnly(t, `record Product<T:type> {_tag:T}`)
+	assertGenericChecked(t, `record Product<T:type> {_tag:T}`)
 }
 
 func TestGenericDataNestedHandleAndCallbackOwnership(t *testing.T) {
@@ -158,7 +149,7 @@ effect fn invoke(action: Action<string>, file: File) -> File raises {IoError} us
 				t.Fatal("generic ownership proof", r.Diagnostics)
 			}
 			for _, d := range r.Diagnostics {
-				if d.Message != "generic data target emission is unavailable" && d.Code != "EF123" {
+				if d.Code != "EF123" {
 					t.Fatal("unexpected diagnostic", d)
 				}
 			}

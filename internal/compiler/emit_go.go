@@ -98,7 +98,7 @@ func canonicalGoType(c *checker, id TypeID, visiting map[TypeID]bool) string {
 	case "record", "enum", "error":
 		return "efType_" + goIdent(node.Name)
 	case "type-variable":
-		return goIdent(node.Name)
+		return emittedTypeVariable(node)
 	case "application":
 		r := c.templates[node.Declaration]
 		if r == nil {
@@ -624,13 +624,31 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 func goTemplateDeclaration(r *Record) string {
 	var out strings.Builder
 	parameters := []string{}
+	arguments := []string{}
 	for _, p := range r.Parameters {
-		parameters = append(parameters, goIdent(p.Name)+" any")
+		name := emittedTypeVariable(r.owner.node(p.typeID))
+		parameters = append(parameters, name+" any")
+		arguments = append(arguments, name)
 	}
-	out.WriteString("type efTemplate_" + r.EmissionName + "[" + strings.Join(parameters, ",") + "] struct {\n")
-	for _, field := range r.Fields {
-		out.WriteString(goFieldName(field.Name) + " " + goIdent(field.Type) + "\n")
+	params, args := "["+strings.Join(parameters, ",")+"]", "["+strings.Join(arguments, ",")+"]"
+	fields := func(fields []Field) {
+		for _, field := range fields {
+			out.WriteString(goFieldName(field.Name) + " " + canonicalGoType(r.owner, field.typeID, map[TypeID]bool{}) + "\n")
+		}
 	}
+	if r.Kind == "enum" {
+		marker := "efVariantTemplate_" + r.EmissionName
+		out.WriteString("type efTemplate_" + r.EmissionName + params + " interface { " + marker + "(" + strings.Join(arguments, ",") + ") }\n")
+		for _, variant := range r.Variants {
+			name := goVariantType("template_"+r.EmissionName, variant.Name)
+			out.WriteString("type " + name + params + " struct {\n")
+			fields(variant.Fields)
+			out.WriteString("}\nfunc (" + name + args + ") " + marker + "(" + strings.Join(arguments, ",") + ") {}\n")
+		}
+		return out.String()
+	}
+	out.WriteString("type efTemplate_" + r.EmissionName + params + " struct {\n")
+	fields(r.Fields)
 	out.WriteString("}\n")
 	return out.String()
 }
@@ -638,6 +656,11 @@ func goTemplateDeclaration(r *Record) string {
 func (g *goEmitter) dataTypes(out *strings.Builder) {
 	for _, r := range g.program.BundledTemplates {
 		out.WriteString(goTemplateDeclaration(r))
+	}
+	for _, r := range append(append([]*DataDeclaration{}, g.program.Records...), g.program.Enums...) {
+		if len(r.Parameters) > 0 {
+			out.WriteString(goTemplateDeclaration(r))
+		}
 	}
 	for _, declaration := range g.programDeclarations() {
 		switch declaration.Kind {
@@ -671,9 +694,15 @@ func (g *goEmitter) programDeclarationProjection() []Declaration {
 		result = append(result, Declaration{Kind: "error", Name: decl.Name, Fields: decl.Fields, Span: decl.Span})
 	}
 	for _, record := range g.program.Records {
+		if len(record.Parameters) > 0 {
+			continue
+		}
 		result = append(result, Declaration{Kind: "record", Name: record.Name, Fields: record.Fields, Span: record.Span})
 	}
 	for _, enum := range g.program.Enums {
+		if len(enum.Parameters) > 0 {
+			continue
+		}
 		result = append(result, Declaration{Kind: "enum", Name: enum.Name, Variants: enum.Variants, Span: enum.Span})
 	}
 	return result
@@ -716,6 +745,9 @@ func (g *goEmitter) construct(e *Expr, effect bool, ret string, out *strings.Bui
 		parts = append(parts, goFieldName(field.Name)+":"+g.expr(field.Value, false, ret, out))
 	}
 	if e.ResolvedTemplate != nil {
+		if e.ResolvedTemplate.Kind == "enum" {
+			return canonicalGoType(g.program.semantic, e.checked.resultID(), map[TypeID]bool{}) + "(" + g.variantType(e.checked.resultID(), e.ResolvedTemplate, e.Left.Name) + "{" + strings.Join(parts, ",") + "})"
+		}
 		return canonicalGoType(g.program.semantic, e.checked.resultID(), map[TypeID]bool{}) + "{" + strings.Join(parts, ",") + "}"
 	}
 	if variantName != "" {
@@ -725,7 +757,18 @@ func (g *goEmitter) construct(e *Expr, effect bool, ret string, out *strings.Bui
 	return "efType_" + goIdent(typeName) + "{" + strings.Join(parts, ",") + "}"
 }
 func (g *goEmitter) constructCall(e *Expr, effect bool, ret string, out *strings.Builder) string {
-	return g.construct(&Expr{Kind: "construct", Left: e.Left, Fields: e.Fields, Type: e.Type}, effect, ret, out)
+	return g.construct(e, effect, ret, out)
+}
+
+func (g *goEmitter) variantType(id TypeID, owner *Enum, variant string) string {
+	if len(owner.Parameters) == 0 {
+		return goVariantType(owner.Name, variant)
+	}
+	args := []string{}
+	for _, argument := range g.program.semantic.node(id).Args {
+		args = append(args, canonicalGoType(g.program.semantic, argument, map[TypeID]bool{}))
+	}
+	return goVariantType("template_"+owner.EmissionName, variant) + "[" + strings.Join(args, ",") + "]"
 }
 func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder) string {
 	value := g.expr(e.Left, effect, ret, out)
@@ -736,7 +779,7 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 	if effect {
 		body.WriteString("switch efMatch := " + variant + ".(type) {\n")
 		for _, arm := range e.Arms {
-			body.WriteString("case " + goVariantType(arm.Pattern.TypeName, arm.Pattern.VariantName) + ":\n")
+			body.WriteString("case " + g.variantType(e.Left.checked.valueID(), arm.Pattern.ResolvedEnum, arm.Pattern.VariantName) + ":\n")
 			body.WriteString("_ = efMatch\n")
 			for _, field := range sortedBindingNames(arm.Pattern.Bindings) {
 				binding := arm.Pattern.Bindings[field]
@@ -757,7 +800,7 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 	}
 	body.WriteString("switch efMatch := " + variant + ".(type) {\n")
 	for _, arm := range e.Arms {
-		body.WriteString("case " + goVariantType(arm.Pattern.TypeName, arm.Pattern.VariantName) + ":\n")
+		body.WriteString("case " + g.variantType(e.Left.checked.valueID(), arm.Pattern.ResolvedEnum, arm.Pattern.VariantName) + ":\n")
 		body.WriteString("_ = efMatch\n")
 		for _, field := range sortedBindingNames(arm.Pattern.Bindings) {
 			binding := arm.Pattern.Bindings[field]

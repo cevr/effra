@@ -14,14 +14,14 @@ record Envelope<T: type> { label: string; presence: Presence<T> }
 effect fn main() -> () { () }`
 	for _, target := range []string{"go", "js"} {
 		r := CompileFor(source, target)
-		if r.Checked || !hasCode(r, "EF127") {
-			t.Fatal("unimplemented target paths must refuse", r.Diagnostics)
+		if !r.Checked {
+			t.Fatal("finite generic layout rejected", r.Diagnostics)
 		}
-		if _, err := r.EmitGo(); err == nil {
-			t.Fatal("unsupported generic source emitted native output")
+		if _, err := r.EmitGo(); err != nil {
+			t.Fatal(err)
 		}
-		if _, _, err := r.Emit(true); err == nil {
-			t.Fatal("unsupported generic source emitted JS output")
+		if _, _, err := r.Emit(true); err != nil {
+			t.Fatal(err)
 		}
 		c := r.projector
 		user := c.canonicalRef(typeRef("User"))
@@ -124,7 +124,7 @@ record Witness<T: type> { codec: Convert.Codec<T, string, effect fn(string) -> T
 			t.Fatal("shared finite layouts or existing Codec owner falsely refused", diagnostic)
 		}
 	}
-	if r.Checked {
-		t.Fatal("target execution remains unavailable in this slice")
+	if !r.Checked {
+		t.Fatal("finite shared layouts rejected", r.Diagnostics)
 	}
 }

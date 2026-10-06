@@ -56,9 +56,6 @@ func (c *checker) checkTemplates() {
 			r.Module, r.SourceID = currentModuleIdentity, "source:user"
 			r.Identity = c.declarationIdentity("template", "module", r.Name)
 			r.EmissionName = r.Name
-			// Registration and finite layouts are shared with Codec. Executable
-			// user data remains unavailable until both target/transport seams land.
-			c.diagnostic("EF127", "generic data target emission is unavailable", r.Span)
 		}
 	}
 	declarations = append(declarations, c.program.BundledTemplates...)
@@ -114,12 +111,13 @@ func (c *checker) checkTemplates() {
 			c.variableOwners[p.Identity] = *p
 		}
 		c.templates[r.Identity] = r
+		r.owner = c
 		c.result.Declarations = append(c.result.Declarations, c.templateDeclaration(r))
 	}
 }
 
 func (c *checker) templateDeclaration(r *Record) Declaration {
-	d := Declaration{Kind: "template", Name: r.Name, Identity: r.Identity, Source: r.SourceID, Span: r.Span, Fields: append([]Field{}, r.Fields...), Variants: append([]Variant{}, r.Variants...), TemplateParameters: []TemplateParameterView{}}
+	d := Declaration{Kind: "template", DataKind: r.Kind, Name: r.Name, Identity: r.Identity, Source: r.SourceID, Span: r.Span, Fields: append([]Field{}, r.Fields...), Variants: append([]Variant{}, r.Variants...), TemplateParameters: []TemplateParameterView{}}
 	for _, p := range r.Parameters {
 		view := TemplateParameterView{Name: p.Name, Kind: p.Kind, Identity: p.Identity, Variable: c.ref(p.typeID), typeID: p.typeID, shapeID: p.shapeID}
 		if p.shapeID != invalidTypeID {
@@ -143,11 +141,14 @@ func (c *checker) templateDeclaration(r *Record) Declaration {
 // occurrence keeps its checked ID; nested applications use the same arena.
 func (c *checker) resolveDataTemplateLayouts() {
 	declarations := append(append([]*DataDeclaration{}, c.program.Records...), c.program.Enums...)
+	declarations = append(declarations, c.program.BundledTemplates...)
 	for _, declaration := range declarations {
 		if len(declaration.Parameters) == 0 {
 			continue
 		}
 		previous := c.typeContext
+		previousModule := c.functionModule
+		c.functionModule = declaration.Module
 		c.typeContext = map[string]TemplateParameter{}
 		for _, parameter := range declaration.Parameters {
 			c.typeContext[parameter.Name] = parameter
@@ -175,6 +176,7 @@ func (c *checker) resolveDataTemplateLayouts() {
 			resolve(declaration.Variants[i].Fields)
 		}
 		c.typeContext = previous
+		c.functionModule = previousModule
 		for i := range c.result.Declarations {
 			if c.result.Declarations[i].Identity == declaration.Identity {
 				c.result.Declarations[i] = c.templateDeclaration(declaration)
@@ -637,6 +639,23 @@ func (c *checker) templateConstruct(e *Expr, env map[string]checkedExpression, i
 	if err != nil {
 		c.diagnostic("EF127", err.Error(), e.Span)
 		return result, true
+	}
+	// The initialized occurrence exposes its declared field contract while
+	// retaining the supplied callee/capture evidence behind that boundary.
+	instantiated, ok := c.instantiateDataFields(r, declared, bindings)
+	if !ok {
+		c.diagnostic("EF127", "constructor field substitution unavailable", e.Span)
+		return result, true
+	}
+	for _, field := range instantiated {
+		if value, exists := fields[field.Name]; exists {
+			if !c.assignable(value.valueID(), field.typeID, 0) {
+				c.diagnostic("EF127", "constructor field contract mismatch", e.Span)
+				return result, true
+			}
+			value.value = c.values.occurrence(field.typeID, value.ownershipFacts(), value.captureFacts())
+			fields[field.Name] = value
+		}
 	}
 	owners, captures := []OwnershipFact{}, []OwnershipFact{}
 	evaluation := c.evaluation(emptyRowID, emptyRowID)

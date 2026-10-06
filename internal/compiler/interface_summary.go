@@ -11,8 +11,8 @@ import (
 	"strings"
 )
 
-const interfaceSummarySchema = 2
-const ownershipSummarySchema = 2
+const interfaceSummarySchema = 3
+const ownershipSummarySchema = 3
 const maxInterfaceSummaryBytes = 1 << 20
 const maxInterfaceClosureBytes = 8 << 20
 const maxInterfaceTableEntries = 4096
@@ -41,6 +41,8 @@ type interfaceSummary struct {
 	TrustedHost     []Binding            `json:"trustedHost"`
 }
 type summaryTemplate struct {
+	Kind       string                     `json:"kind"`
+	Variants   []summaryTemplateVariant   `json:"variants"`
 	Ref        string                     `json:"ref"`
 	Source     string                     `json:"source"`
 	Parameters []summaryTemplateParameter `json:"parameters"`
@@ -54,8 +56,13 @@ type summaryTemplateParameter struct {
 	Shape    string `json:"shape"`
 }
 type summaryTemplateField struct {
-	Name      string `json:"name"`
-	Parameter int    `json:"parameter"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+type summaryTemplateVariant struct {
+	Name   string                 `json:"name"`
+	Fields []summaryTemplateField `json:"fields"`
 }
 
 type summaryDeclaration struct {
@@ -109,15 +116,21 @@ type summaryRows struct {
 	Services string `json:"services"`
 }
 type summaryOccurrence struct {
-	Fields     []summaryFieldOccurrence `json:"fields"`
-	Ref        string                   `json:"ref"`
-	Contract   string                   `json:"contract"`
-	Ownership  []summaryOwner           `json:"ownership"`
-	Captures   []summaryOwner           `json:"captures"`
-	Child      []summaryOwner           `json:"child"`
-	Evidence   string                   `json:"evidence"`
-	Evaluation summaryRows              `json:"evaluation"`
-	Executed   summaryRows              `json:"executed"`
+	Variants   []summaryVariantOccurrence `json:"variants"`
+	Fields     []summaryFieldOccurrence   `json:"fields"`
+	Ref        string                     `json:"ref"`
+	Contract   string                     `json:"contract"`
+	Ownership  []summaryOwner             `json:"ownership"`
+	Captures   []summaryOwner             `json:"captures"`
+	Child      []summaryOwner             `json:"child"`
+	Evidence   string                     `json:"evidence"`
+	Evaluation summaryRows                `json:"evaluation"`
+	Executed   summaryRows                `json:"executed"`
+}
+
+type summaryVariantOccurrence struct {
+	Name   string                   `json:"name"`
+	Fields []summaryFieldOccurrence `json:"fields"`
 }
 type summaryFieldOccurrence struct {
 	Name       string `json:"name"`
@@ -170,7 +183,7 @@ func exportInterfaceSummary(c *checker, module, sourceInput string, functions []
 		if r.Module != module {
 			continue
 		}
-		d := summaryTemplate{Ref: r.Identity, Source: r.SourceID, Parameters: []summaryTemplateParameter{}, Fields: []summaryTemplateField{}}
+		d := summaryTemplate{Kind: r.Kind, Variants: []summaryTemplateVariant{}, Ref: r.Identity, Source: r.SourceID, Parameters: []summaryTemplateParameter{}, Fields: []summaryTemplateField{}}
 		for _, p := range r.Parameters {
 			shape := ""
 			if p.shapeID != invalidTypeID {
@@ -179,8 +192,14 @@ func exportInterfaceSummary(c *checker, module, sourceInput string, functions []
 			d.Parameters = append(d.Parameters, summaryTemplateParameter{Name: p.Name, Kind: p.Kind, Ref: p.Identity, Variable: x.typ(p.typeID), Shape: shape})
 		}
 		for _, field := range r.Fields {
-			ordinal := slices.IndexFunc(r.Parameters, func(p TemplateParameter) bool { return p.Name == field.Type })
-			d.Fields = append(d.Fields, summaryTemplateField{Name: field.Name, Parameter: ordinal})
+			d.Fields = append(d.Fields, summaryTemplateField{Name: field.Name, Type: x.typ(field.typeID)})
+		}
+		for _, variant := range r.Variants {
+			v := summaryTemplateVariant{Name: variant.Name, Fields: []summaryTemplateField{}}
+			for _, field := range variant.Fields {
+				v.Fields = append(v.Fields, summaryTemplateField{Name: field.Name, Type: x.typ(field.typeID)})
+			}
+			d.Variants = append(d.Variants, v)
 		}
 		x.dto.Templates = append(x.dto.Templates, d)
 	}
@@ -363,17 +382,34 @@ func (x *summaryExporter) occurrence(f *Function, value checkedExpression, depth
 	}
 	index := len(x.dto.Occurrences)
 	x.dto.Occurrences = append(x.dto.Occurrences, summaryOccurrence{})
-	d := summaryOccurrence{Fields: []summaryFieldOccurrence{}, Ref: ref, Contract: x.typ(value.contractID()), Ownership: x.facts(f, value.ownershipFacts(), depth), Captures: x.facts(f, value.captureFacts(), depth), Child: x.facts(f, value.child, depth), Evidence: x.callable(value.callableEvidence), Evaluation: summaryRows{Failures: x.row(value.evaluation.failureRowID()), Services: x.row(value.evaluation.serviceRowID())}, Executed: summaryRows{Failures: x.row(value.executed.failureRowID()), Services: x.row(value.executed.serviceRowID())}}
+	d := summaryOccurrence{Variants: []summaryVariantOccurrence{}, Fields: []summaryFieldOccurrence{}, Ref: ref, Contract: x.typ(value.contractID()), Ownership: x.facts(f, value.ownershipFacts(), depth), Captures: x.facts(f, value.captureFacts(), depth), Child: x.facts(f, value.child, depth), Evidence: x.callable(value.callableEvidence), Evaluation: summaryRows{Failures: x.row(value.evaluation.failureRowID()), Services: x.row(value.evaluation.serviceRowID())}, Executed: summaryRows{Failures: x.row(value.executed.failureRowID()), Services: x.row(value.executed.serviceRowID())}}
 	names := []string{}
 	for name := range value.fields {
 		names = append(names, name)
 	}
 	slices.Sort(names)
 	for _, name := range names {
-		d.Fields = append(d.Fields, summaryFieldOccurrence{Name: name, Occurrence: x.occurrence(f, value.fields[name], depth+1)})
+		if _, _, enum := x.c.checkedVariants(value.valueID()); enum {
+			v := summaryVariantOccurrence{Name: name, Fields: []summaryFieldOccurrence{}}
+			for _, field := range sortedOccurrenceFields(value.fields[name].fields) {
+				v.Fields = append(v.Fields, summaryFieldOccurrence{Name: field, Occurrence: x.occurrence(f, value.fields[name].fields[field], depth+1)})
+			}
+			d.Variants = append(d.Variants, v)
+		} else {
+			d.Fields = append(d.Fields, summaryFieldOccurrence{Name: name, Occurrence: x.occurrence(f, value.fields[name], depth+1)})
+		}
 	}
 	x.dto.Occurrences[index] = d
 	return ref
+}
+
+func sortedOccurrenceFields(fields map[string]checkedExpression) []string {
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 func (x *summaryExporter) relation(f *Function, relation *callbackResultRelation, depth int) string {

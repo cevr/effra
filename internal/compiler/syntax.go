@@ -75,6 +75,7 @@ type Variant struct {
 // DataDeclaration owns the common nominal identity and first-order layout for
 // records and closed enums. The checker keeps their distinct declaration kinds.
 type DataDeclaration struct {
+	owner        *checker
 	Kind         string              `json:"-"`
 	Name         string              `json:"name"`
 	Fields       []Field             `json:"fields,omitempty"`
@@ -97,6 +98,7 @@ type ErrorDecl struct {
 // Declaration is the stable inspection projection for nominal application
 // data. It deliberately contains no target-specific lowering details.
 type Declaration struct {
+	DataKind           string                  `json:"dataKind,omitempty"`
 	Source             string                  `json:"source,omitempty"`
 	TemplateParameters []TemplateParameterView `json:"templateParameters,omitempty"`
 	Kind               string                  `json:"kind"`
