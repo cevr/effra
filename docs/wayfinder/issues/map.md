@@ -26,6 +26,8 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 
 ## Additional implementation
 
+- [Versioned custom lint rules and shared rule packs](custom-lint.md): user-authored policies consume canonical facts and report through CLI/MCP/LSP, with options, source-fixture tests and optional bounded execution independent of ordinary compilation.
+
 - [Shared editor-grade diagnostics](semantic-diagnostics.md), [complete canonical types](semantic-types.md), and a [stdio language server](language-server.md): owner-requested warnings/errors and full semantic inspection across CLI, MCP and editor, with one checked snapshot model.
 
 - [Matched server performance against TypeScript and optimized Go](server-benchmarks.md): owner-requested server equivalence, throughput/latency, resource, startup/shutdown and separate build receipts. Performance superiority remains a measured question.
