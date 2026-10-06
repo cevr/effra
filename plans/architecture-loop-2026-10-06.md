@@ -110,6 +110,10 @@ Guardrails added: pending implementation receipts. Each missed static guarantee 
 
 ### Carried
 
+Owner tooling direction adds three finite tasks: shared diagnostics, canonical full-type/binding inspection and a thin stdio LSP adapter. Requirements and pinned protocol evidence are in `docs/specs/semantic-tooling.md`. Diagnostics can proceed independently; full types consume the shared native-interface representation instead of building a competing string-based analyzer. Decided by one inspectable contract and Go-like simplicity. No implemented LSP capability is claimed yet.
+
+CLI/MCP final fix-only counsel clears42503d1; root independently confirms the split-fixture mutation controls. Integrating with raises now. Cosmetic failure-output compression is rejected for this batch: it changes no behavior and retaining the complete failed map aids diagnosis; the guard-specific dimension assertions provide the focused explanation. Ownership de3ae027 has raw full-gate/race receipts and is under independent review. Scheduler620e145 still needs continuation isolation: Claude2 round2 and root reproduce cleanup fork children inheriting their caller's wait token. Repair remains isolated; no third Claude2 round is requested.
+
 | Decision | From | Files | Status |
 | --- | --- | --- | --- |
 | Complete coverage, architecture/package/guardrail sweeps and per-batch second-model counsel | Prior establishment | All source areas | Open; schedule around in-flight implementation |

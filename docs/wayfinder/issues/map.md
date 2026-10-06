@@ -26,6 +26,8 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 
 ## Additional implementation
 
+- [Shared editor-grade diagnostics](semantic-diagnostics.md), [complete canonical types](semantic-types.md), and a [stdio language server](language-server.md): owner-requested warnings/errors and full semantic inspection across CLI, MCP and editor, with one checked snapshot model.
+
 - [Matched server performance against TypeScript and optimized Go](server-benchmarks.md): owner-requested server equivalence, throughput/latency, resource, startup/shutdown and separate build receipts. Performance superiority remains a measured question.
 
 - [Bundled standard library capability and language contracts](stdlib-parity.md): owner-directed Effect-grade library distribution, with compiler-enforced semantics, ordinary inspectable library contracts and staged behavioral parity.

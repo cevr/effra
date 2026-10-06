@@ -39,6 +39,8 @@ See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native
 
 ## Settled
 
+- Use LSP's standard severities and UTF-16 range semantics as an adapter over shared compiler snapshots, retaining byte anchors and explicit checked/unknown state. The [tooling contract](docs/specs/semantic-tooling.md) records the pinned 3.18 source inspection; CLI/MCP must expose the same full types and diagnostics without requiring an editor process.
+
 - Adopt Borgo's direction of direct Go-targeted application code with first-class closed data and patterns; records/enums/match already have Go/JS receipts. Its broader interop and inference claims are comparison inputs, not inherited Effra guarantees.
 - Adopt Effect's behavioral contracts as explicit conformance inputs. Native error/service rows, service identity and ownership are compiler concepts; retry, cache, routing and other runtime policies remain reusable library implementations.
 - Adopt a licensed pinned upstream test snapshot plus executable behavior mapping. Reject counting copied TypeScript reference tests as native parity: it breaks **Explicit contracts and clear guardrails**.
