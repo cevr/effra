@@ -29,7 +29,7 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 
 - [Bound shared syntax traversal](syntax-traversal.md): resolved at45b43d2 with canonical child visits across formatter, lint, diagnostics, graph, type queries and test admission. Permanent deep CLI/MCP queries retain their facts and service a queued ping; integration gates pass.
 
-- [Canonical formatter](formatter.md), followed by [editor formatting](editor-formatting.md): one comment-preserving printer for `ef fmt`, CI checks and revision-bound MCP/LSP previews, independent of typechecking and backend execution.
+- [Canonical formatter](formatter.md): resolved through19a450b with one comment-preserving printer, bounded `ef fmt`/read-only MCP adapters and twelve authored examples checked by the gate. Independent review, exact-output replay and integration gates pass. [Editor formatting](editor-formatting.md) remains separately pending the language server.
 
 - [Versioned custom lint rules and shared rule packs](custom-lint.md): user-authored policies consume canonical facts and report through CLI/MCP/LSP, with options, source-fixture tests and optional bounded execution independent of ordinary compilation.
 

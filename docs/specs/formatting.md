@@ -1,6 +1,6 @@
 # Canonical Effra formatting
 
-Status: pure formatter core integrated at45b43d2 and CLI/MCP adapters at e2d6161, 2026-10-06. `ef fmt` and read-only MCP `code.format` share the syntax-only formatter; authored-example adoption remains a separate mechanical change and LSP formatting remains a future adapter. Formatting keeps Go-like predictability: one style per formatter version, no configurable indentation, quote style or plugin-defined layout.
+Status: pure formatter core integrated at45b43d2 and CLI/MCP adapters at e2d6161, 2026-10-06. `ef fmt` and read-only MCP `code.format` share the syntax-only formatter; twelve authored examples are adopted and checked by the gate at19a450b, while LSP formatting remains a future adapter. Formatting keeps Go-like predictability: one style per formatter version, no configurable indentation, quote style or plugin-defined layout.
 
 ## Syntax and preservation
 

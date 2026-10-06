@@ -114,7 +114,7 @@ MCP limits graphs to 1,000 nodes and 2,000 edges; larger graphs fail explicitly.
 
 ## Next capabilities
 
-Revision-bound checked edit plans, multi-file identities, editor integration, complete ownership provenance and runtime/source correlation remain planned. The bounded ownership evidence described above is implemented without claiming a complete borrow checker. Canonical comment-preserving formatting is implemented by the compiler core and exposed through `ef fmt` and MCP `code.format`; authored-example adoption remains a separate mechanical change, and LSP formatting remains a future adapter. Compiler errors stay independent of optional style policy. Managed test time already shares scheduling with sleep/deadline primitives; see the [testing contract](testing.md) for its supported causal boundaries and foreign-operation limits.
+Revision-bound checked edit plans, multi-file identities, editor integration, complete ownership provenance and runtime/source correlation remain planned. The bounded ownership evidence described above is implemented without claiming a complete borrow checker. Canonical comment-preserving formatting is implemented by the compiler core and exposed through `ef fmt` and MCP `code.format`; the maintained authored-example selection is checked by the gate, and LSP formatting remains a future adapter. Compiler errors stay independent of optional style policy. Managed test time already shares scheduling with sleep/deadline primitives; see the [testing contract](testing.md) for its supported causal boundaries and foreign-operation limits.
 
 ## Performance receipt
 
