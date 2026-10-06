@@ -23,7 +23,7 @@ effect fn timed() -> string raises {Timeout} uses {Scheduler} { run main().timeo
 const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
 const traceKey=Context.Service('test/TimeoutOccurrenceTrace'),trace=Context.make(traceKey,'producer trace'),timerTrace=Context.make(traceKey,'timer trace');
 const mismatches=[];
-for(const kind of ['timer-success','timer-failure','work'])for(const fresh of [false,true])for(const first of [0,1]){
+for(const kind of ['timer-success','timer-failure','work'])for(const fresh of [false,true])for(const first of [0,1])for(const caught of [false,true]){
  const ready=[deferred(),deferred()],evaluations=[deferred(),deferred()],release=[deferred(),deferred()],canceled=[deferred(),deferred()],completed=[deferred(),deferred()];
  const timerReady=deferred(),timerGate=deferred(),timerCanceled=deferred(),timerRelease=deferred();
  const shared={_tag:'ConfigError',detail:'same failure'},errors=fresh?[{...shared},{...shared}]:[shared,shared];
@@ -41,7 +41,8 @@ for(const kind of ['timer-success','timer-failure','work'])for(const fresh of [f
   if(kind==='work'){yield* Effect.promise(()=>timerRelease.promise);return yield* Effect.failCause(Cause.annotate(Cause.die(timerDefect),timerTrace));}
   if(kind==='timer-failure')return yield* Effect.failCause(Cause.annotate(Cause.fail(timerError),timerTrace));
  })),advance:()=>Effect.void,awaitRegistration:()=>Effect.void};
- const result=Effect.runPromiseExit(Effect.provideService(__ef_timeout(recipe,1n),__ef_service_Scheduler,scheduler));
+ const timed=__ef_timeout(recipe,1n);
+ const result=Effect.runPromiseExit(Effect.provideService(caught?__ef_catch(timed,'ConfigError',()=>{throw new Error('composite timeout recovered');}):timed,__ef_service_Scheduler,scheduler));
  let timer;const deadline=new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('timeout occurrence control did not settle')),5000));
  try{
   await Promise.race([Promise.all([...ready.map(d=>d.promise),timerReady.promise]),deadline]);
@@ -76,18 +77,20 @@ func TestLayerJSPreservesEqualProducerAndCleanupOccurrences(t *testing.T) {
 const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
 const mismatches=[];
 const traceKey=Context.Service('test/LayerOccurrenceTrace'),trace=Context.make(traceKey,'retained trace');
-for(const fresh of [false,true])for(const first of [0,1])for(const interrupt of [false,true]){
+for(const fresh of [false,true])for(const first of [0,1])for(const interrupt of [false,true])for(const caught of [0,1,2]){
  const ready=[deferred(),deferred()],evaluations=[deferred(),deferred()],release=[deferred(),deferred()],canceled=[deferred(),deferred()],completed=[deferred(),deferred()];
  const shared={_tag:'ConfigError',detail:'same failure'},errors=fresh?[{...shared},{...shared}]:[shared,shared];
  const cleanup={message:'same cleanup'},defects=fresh?[{...cleanup},{...cleanup}]:[cleanup,cleanup];
- const order=[];let failures=0,programs=0;
+ const order=[];let failures=0,programs=0,recovered=0;
  const nodes=['a','b'].map((id,index)=>({id,dependencies:[],construct:()=>Effect.onExit(Effect.uninterruptibleMask(restore=>Effect.gen(function*(){
   yield* Effect.acquireRelease(Effect.void,()=>Effect.sync(()=>order.push(id)).pipe(Effect.flatMap(()=>Effect.failCause(Cause.annotate(Cause.die(defects[index]),trace)))));
   yield* Effect.exit(restore(Effect.promise(signal=>{signal.addEventListener('abort',()=>canceled[index].resolve(),{once:true});ready[index].resolve();return evaluations[index].promise;})));
   yield* Effect.promise(()=>release[index].promise);failures++;return yield* Effect.failCause(Cause.annotate(Cause.fail(errors[index]),trace));
  })),()=>Effect.sync(()=>completed[index].resolve()))}));
  const recipe=__ef_provideLayer({id:'equal-occurrences',init:()=>({}),nodes,expose:s=>s},()=>Effect.sync(()=>programs++));
- const fiber=Effect.runFork(recipe),result=Effect.runPromise(Fiber.await(fiber));
+ const once=()=>__ef_catch(recipe,'ConfigError',()=>{recovered++;});
+ const program=caught===2?__ef_catch(once(),'ConfigError',()=>{recovered++;}):caught===1?once():recipe;
+ const fiber=Effect.runFork(program),result=Effect.runPromise(Fiber.await(fiber));
  let timer;const deadline=new Promise((_,reject)=>timer=setTimeout(()=>reject(new Error('equal producer control did not settle')),5000));
  try{
   await Promise.race([Promise.all(ready.map(d=>d.promise)),deadline]);
@@ -101,8 +104,8 @@ for(const fresh of [false,true])for(const first of [0,1])for(const interrupt of 
   const exit=await Promise.race([result,deadline]),reasons=Exit.isFailure(exit)?exit.cause.reasons:[];
   const expectedTags=interrupt?['Interrupt','Fail','Fail','Die','Die']:['Fail','Fail','Die','Die'];
   const actualTags=reasons.map(r=>r._tag);
-  if(failures!==2||programs!==0||JSON.stringify(order)!=='["b","a"]'||JSON.stringify(actualTags)!==JSON.stringify(expectedTags)){
-   mismatches.push({fresh,first,interrupt,failures,programs,order,actualTags});continue;
+  if(failures!==2||programs!==0||recovered!==0||JSON.stringify(order)!=='["b","a"]'||JSON.stringify(actualTags)!==JSON.stringify(expectedTags)){
+   mismatches.push({fresh,first,interrupt,caught,failures,programs,recovered,order,actualTags});continue;
   }
   const base=interrupt?1:0;
   if(reasons[base].error!==errors[0]||reasons[base+1].error!==errors[1]||reasons[base+2].defect!==defects[1]||reasons[base+3].defect!==defects[0])throw new Error('original payload identity or canonical occurrence order changed');
@@ -113,6 +116,7 @@ for(const fresh of [false,true])for(const first of [0,1])for(const interrupt of 
   if(recombined.reasons.length!==reasons.length)throw new Error('occurrence identity does not survive recombination');
  }finally{clearTimeout(timer);}
 }
+
 if(mismatches.length)throw new Error('lost producer occurrences '+JSON.stringify(mismatches));
 console.log('equal producer occurrences');
 `)
@@ -121,6 +125,33 @@ console.log('equal producer occurrences');
 	}
 }
 
+func TestLayerJSCatchObservesProtectedExitAndPreservesCancellation(t *testing.T) {
+	output := runJS(t, layerApplicationSource, `
+const traceKey=Context.Service('test/CatchTrace'),trace=Context.make(traceKey,'catch trace');
+const failure={_tag:'ConfigError',detail:'same payload'},defect={message:'fallback defect'};
+let recoveries=0;
+const recover=()=>{recoveries++;return 'recovered';};
+const success=await Effect.runPromiseExit(__ef_catch(Effect.succeed('original'),'ConfigError',recover));
+if(!Exit.isSuccess(success)||success.value!=='original'||recoveries!==0)throw new Error('success incorrectly recovered');
+const matched=await Effect.runPromiseExit(__ef_catch(Effect.fail(failure),'ConfigError',recover));
+if(!Exit.isSuccess(matched)||matched.value!=='recovered'||recoveries!==1)throw new Error('singleton matching failure not recovered');
+const mismatch=await Effect.runPromiseExit(__ef_catch(Effect.failCause(Cause.annotate(Cause.fail(failure),trace)),'Other',recover));
+if(!Exit.isFailure(mismatch)||mismatch.cause.reasons.length!==1||mismatch.cause.reasons[0].error!==failure||mismatch.cause.reasons[0].annotations.get(traceKey.key)!=='catch trace'||recoveries!==1)throw new Error('mismatched failure changed');
+const thrown=await Effect.runPromiseExit(__ef_catch(Effect.fail(failure),'ConfigError',()=>{throw defect;}));
+if(!Exit.isFailure(thrown)||thrown.cause.reasons.length!==1||thrown.cause.reasons[0].defect!==defect)throw new Error('thrown fallback not a retained defect');
+const nested=await Effect.runPromiseExit(__ef_catch(__ef_catch(Effect.fail(failure),'Other',recover),'ConfigError',recover));
+if(!Exit.isSuccess(nested)||nested.value!=='recovered'||recoveries!==2)throw new Error('nested singleton catch changed');
+// Cancellation requested by the fallback itself occurs after protected Exit
+// capture and the singleton decision. Delivery still observes it.
+let recoveredAfterCapture=0;
+const canceled=await Effect.runPromiseExit(Effect.withFiber(fiber=>__ef_catch(Effect.fail(failure),'ConfigError',()=>{recoveredAfterCapture++;fiber.interruptUnsafe();return 'canceled fallback';})));
+if(!Exit.isFailure(canceled)||!Cause.hasInterruptsOnly(canceled.cause)||recoveredAfterCapture!==1)throw new Error('fallback delivery swallowed cancellation');
+console.log('protected catch controls');
+`)
+	if output != "protected catch controls\n" {
+		t.Fatal(output)
+	}
+}
 func TestLayerJSAdmissionSurvivesSchedulerYields(t *testing.T) {
 	output := runJS(t, layerApplicationSource, `
 for(const dependent of [false,true])for(const budget of [8,16,32,64]){
