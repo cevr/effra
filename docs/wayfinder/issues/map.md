@@ -39,6 +39,8 @@ Owner update, 2026-10-06: defer benchmark development and measurement until the 
 
 - [Shared editor-grade diagnostics](semantic-diagnostics.md), [complete canonical types](semantic-types.md), and a [stdio language server](language-server.md): owner-requested warnings/errors and full semantic inspection across CLI, MCP and editor, with one checked snapshot model.
 
+  The independently useful [versioned LSP diagnostics/document child](lsp-diagnostics.md) is integrated and reviewed at `6cbbed0` with real framed-process and full integration gates. Full type/navigation/formatting capabilities remain pending the parent contract.
+
 - [Matched server performance against TypeScript and optimized Go](server-benchmarks.md): owner-requested server equivalence, throughput/latency, resource, startup/shutdown and separate build receipts. Performance superiority remains a measured question.
 
 - [Bundled standard library capability and language contracts](stdlib-parity.md): owner-directed Effect-grade library distribution, with compiler-enforced semantics, ordinary inspectable library contracts and staged behavioral parity.
