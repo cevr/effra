@@ -102,7 +102,10 @@ func withCleanup[A any](exit Exit[A], cleanup Cause) Exit[A] {
 
 type Effect[A any] func(*FiberContext) Exit[A]
 type FiberContext struct {
-	ctx          context.Context
+	ctx context.Context
+	// admission is set only on a layer constructor root. Its direct children
+	// belong to the node, while evaluation may be interrupted during startup.
+	admission    context.Context
 	scope        *Scope
 	driver       timerDriver
 	turn         *TestScheduler
