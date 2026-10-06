@@ -20,3 +20,11 @@ Raw artifacts are in `/tmp/effra-scheduler-build-diagnostic/`: `probe.py`, the `
 This complements the implementation owner's earlier unretained build/run diagnostic; it does not retroactively supply its missing artifact. The measured fixture uses the old branch's `throws` spelling. Future integrated runs use separately identified `raises` source, preserving this receipt unchanged.
 
 Before a compile-speed claim, reproduce with explicit cache/host admission, compare long straight-line bodies with many small functions, and retain frontend/emission/backend stage receipts. Profile the backend before changing lowering. Preserve cancellation checkpoints and source semantics; a smaller test or a longer watchdog is not a performance repair.
+
+## Compiler profile
+
+A second diagnostic build used `go build -trimpath -gcflags=-cpuprofile=/tmp/effra-scheduler-build-diagnostic/compile.pprof -o /tmp/effra-scheduler-build-diagnostic/dist/long.profile.tests .` from the retained generated application directory. It succeeded, and the resulting executable also passed. The CPU profile and `profile-top.txt` remain beside the original receipt; profiling is a separate run with different build flags.
+
+The profile records 44.62 seconds of CPU samples over 42.61 seconds. `cmd/compile/internal/ir.Reassigned` accounts for 34.63 sampled seconds cumulatively, or 77.61%. Its callers include `ir.StaticValue` and the inliner's callee analysis. The installed Go source at `src/cmd/compile/internal/ir/expr.go` confirms that this routine walks the name's entire defining function, including nested closures. Generated source repeatedly calls a recipe factory and immediately invokes its returned function for each explicit run.
+
+This identifies a concrete lowering experiment: separate a lazy recipe constructor from a direct execution entry and lower immediate run through the latter, preserving argument evaluation order, provider capture and pre/post cancellation checks. Stored recipes and function values must retain their ordinary lazy behavior. Compare bounded helper boundaries and other general lowering choices before selecting a change; no benchmark-specific operation or removed checkpoint is justified. The profile establishes a hotspot, not a measured improvement, and does not prove that every proposed direct-call transformation is sound.
