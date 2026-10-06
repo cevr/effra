@@ -1,0 +1,8 @@
+<!-- {"id": "syntax-traversal", "title": "Bound shared syntax traversal across developer tools", "status": "open", "labels": ["implementation:task"], "parent": "map", "assignee": "formatter_implementation", "blocked_by": []} -->
+# Bound shared syntax traversal across developer tools
+
+Follow-up discovered while reviewing the formatter: parser call arguments can also appear as named-field references to the same child. Checked positional data constructors acquire the same aliasing. Independently walking both lists makes nested constructor tooling exponential even when checking is fast.
+
+Root public receipt `/tmp/effra-named-child-public-valid/receipt.json`: a valid 1,217-byte source with31 nested nominal records checks in about9ms, while lint, diagnostics and graph each exceed a4s watchdog. These are bounded responsiveness observations on a shared host, not scored speed comparisons. The first exploratory fixture omitted a required separator; its parser rejection is retained separately and is not a product finding.
+
+Implement one syntax-child traversal contract used by formatter layout, lint, graph and test capability inspection. Visit each actual child once while retaining named-field metadata, source order, lexical scope and every capability/diagnostic/edge. Include named and checked positional constructors, construction/payload fields, mixed syntax-only arguments and branching controls. Real CLI/MCP queries must complete with equivalent facts and service the next request; a timeout or missing output is not success. Retain meaningful semantic controls as well as bounded deep/numerous input tests, full gate and independent review. Coordinate with the active formatter unit; no changes to ownership semantics are required.
