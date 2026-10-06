@@ -55,6 +55,8 @@ This initial adapter is single-file plus the imports already supported by the co
 
 Each unit compiles, passes the full repository gate and receives independent review. Keep the actual supported surface documented; a JSON range shape alone is not an implemented LSP server.
 
+The owner additionally requires [custom lint rules](custom-lint.md). Keep diagnostic origin/rule identity extensible and fact availability explicit; the following rule-pack task reuses these snapshots and adapters. It does not belong inside the initial diagnostics unit.
+
 ## Prior art
 
 Microsoft's [LSP specification](https://microsoft.github.io/language-server-protocol/) is the protocol authority. Inspected source through the repo cache at `microsoft/language-server-protocol` commit `f8c4bc9834703b7317c98c8e8053a28fa4b6b997`: `_specifications/lsp/3.18/types/{position,range,diagnostic}.md` and `language/hover.md`. Positions use negotiated code units with mandatory UTF-16 support; diagnostic severities are 1–4. Diagnostic markup in 3.18 requires a client capability, so the initial implementation uses plain text. Existing Effect tooling, TypeScript content mapping and Go declaration inspection inform capabilities; none replaces the Effra checker.
