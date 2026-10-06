@@ -13,8 +13,8 @@ import (
 var ErrTooLarge = errors.New("source exceeds configured limit")
 
 // ReadRegularFile admits a regular source node before opening it, then checks
-// the opened descriptor again before reading. A non-positive maxBytes means
-// that the caller has no source-size bound.
+// the opened descriptor again before reading. A zero maxBytes means that the
+// caller has no source-size bound.
 func ReadRegularFile(path string, maxBytes int) ([]byte, error) {
 	if maxBytes < 0 {
 		return nil, fmt.Errorf("source size limit must not be negative")

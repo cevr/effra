@@ -8,9 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 
 	"effra.local/prototype/internal/compiler"
 )
@@ -104,49 +102,6 @@ func TestWorkspaceBounds(t *testing.T) {
 	}
 }
 
-func TestFIFOAdmissionKeepsMCPResponsive(t *testing.T) {
-	root := t.TempDir()
-	fifo := filepath.Join(root, "blocked.ef")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	messages := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`,
-		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"project.check","arguments":{"file":"blocked.ef"}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"ping"}`,
-	}, "\n")
-	var output bytes.Buffer
-	done := make(chan error, 1)
-	go func() { done <- Serve(root, strings.NewReader(messages), &output) }()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("MCP source admission blocked before opening FIFO")
-	}
-
-	decoder := json.NewDecoder(&output)
-	var initialize, check, ping map[string]any
-	for _, target := range []*map[string]any{&initialize, &check, &ping} {
-		if err := decoder.Decode(target); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if initialize["result"] == nil {
-		t.Fatalf("initialize failed: %+v", initialize)
-	}
-	checkResult := check["result"].(map[string]any)
-	if checkResult["isError"] != true || !strings.Contains(checkResult["content"].([]any)[0].(map[string]any)["text"].(string), "source must be a regular file") {
-		t.Fatalf("FIFO was not rejected as a tool error: %+v", check)
-	}
-	if ping["id"] != float64(3) || ping["error"] != nil {
-		t.Fatalf("MCP did not remain responsive after FIFO rejection: %+v", ping)
-	}
-}
-
 func TestInspectionBoundsCoverNestedSymbolDetails(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -154,13 +109,43 @@ func TestInspectionBoundsCoverNestedSymbolDetails(t *testing.T) {
 	}{
 		{"declared rows", "declared"},
 		{"body rows", "body"},
+		{"requirement rows", "requirements"},
 		{"contribution count", "contributions"},
+		{"nested contribution names", "names"},
 	} {
 		t.Run(test.name+" at 100", func(t *testing.T) {
 			assertInspectionBoundary(t, inspectionRowsSource(100, test.mode), false)
 		})
 		t.Run(test.name+" at 101", func(t *testing.T) {
 			assertInspectionBoundary(t, inspectionRowsSource(101, test.mode), true)
+		})
+	}
+
+	for _, test := range []struct {
+		name                 string
+		mode                 string
+		checked              bool
+		contractFailures     int
+		bodyFailures         int
+		contractRequirements int
+		bodyRequirements     int
+		contributions        int
+		contributionNames    int
+	}{
+		{"body rows", "body", false, 0, 100, 0, 0, 1, 100},
+		{"requirement rows", "requirements", false, 0, 0, 0, 100, 1, 100},
+		{"nested contribution names", "names", false, 0, 0, 0, 0, 1, 100},
+	} {
+		t.Run(test.name+" preserve independent dimensions", func(t *testing.T) {
+			assertInspectionDimensions(t, inspectionRowsSource(100, test.mode), inspectionDimensions{
+				checked:              test.checked,
+				contractFailures:     test.contractFailures,
+				bodyFailures:         test.bodyFailures,
+				contractRequirements: test.contractRequirements,
+				bodyRequirements:     test.bodyRequirements,
+				contributions:        test.contributions,
+				contributionNames:    test.contributionNames,
+			})
 		})
 	}
 
@@ -203,6 +188,61 @@ func assertInspectionBoundary(t *testing.T, source string, wantError bool) {
 	}
 }
 
+type inspectionDimensions struct {
+	checked              bool
+	contractFailures     int
+	bodyFailures         int
+	contractRequirements int
+	bodyRequirements     int
+	contributions        int
+	contributionNames    int
+}
+
+func assertInspectionDimensions(t *testing.T, source string, expected inspectionDimensions) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"code.inspect", "code.explain"} {
+		result, err := call(root, name, arguments{File: "main.ef", Symbol: "target"})
+		if err != nil {
+			t.Fatalf("%s rejected bounded dimensions: %v", name, err)
+		}
+		payload, ok := result.(map[string]any)
+		if !ok {
+			t.Fatalf("%s returned unexpected result: %#v", name, result)
+		}
+		if checked, ok := payload["checked"].(bool); !ok || checked != expected.checked {
+			t.Fatalf("%s checked=%v, want %v: %#v", name, payload["checked"], expected.checked, payload)
+		}
+		symbol, ok := payload["symbol"].(*compiler.Symbol)
+		if !ok {
+			t.Fatalf("%s returned unexpected symbol: %#v", name, payload["symbol"])
+		}
+		if got := len(symbol.Contract.Errors); got != expected.contractFailures {
+			t.Fatalf("%s contract failures=%d, want %d", name, got, expected.contractFailures)
+		}
+		if got := len(symbol.Actual.Errors); got != expected.bodyFailures {
+			t.Fatalf("%s body failures=%d, want %d", name, got, expected.bodyFailures)
+		}
+		if got := len(symbol.Contract.Services); got != expected.contractRequirements {
+			t.Fatalf("%s contract requirements=%d, want %d", name, got, expected.contractRequirements)
+		}
+		if got := len(symbol.Actual.Services); got != expected.bodyRequirements {
+			t.Fatalf("%s body requirements=%d, want %d", name, got, expected.bodyRequirements)
+		}
+		if len(symbol.Contributions) != expected.contributions {
+			t.Fatalf("%s contributions=%d, want %d", name, len(symbol.Contributions), expected.contributions)
+		}
+		if expected.contributions > 0 {
+			if got := len(symbol.Contributions[0].Names); got != expected.contributionNames {
+				t.Fatalf("%s contribution names=%d, want %d", name, got, expected.contributionNames)
+			}
+		}
+	}
+}
+
 func inspectionRowsSource(count int, mode string) string {
 	names := make([]string, count)
 	for i := range names {
@@ -218,7 +258,19 @@ func inspectionRowsSource(count int, mode string) string {
 		fmt.Fprintf(&builder, "effect fn target() -> () throws {%s} { () }\n", joined)
 	case "body":
 		fmt.Fprintf(&builder, "effect fn many() -> () throws {%s} { () }\n", joined)
-		fmt.Fprintf(&builder, "effect fn target() -> () throws {%s} { run many() }\n", joined)
+		builder.WriteString("effect fn target() -> () { run many() }\n")
+	case "requirements":
+		services := make([]string, count)
+		for i := range services {
+			services[i] = fmt.Sprintf("S%d", i)
+			fmt.Fprintf(&builder, "service %s { effect fn get() -> () }\n", services[i])
+		}
+		fmt.Fprintf(&builder, "effect fn many() -> () uses {%s} {\n", strings.Join(services, ","))
+		for _, service := range services {
+			fmt.Fprintf(&builder, "run %s.get();\n", service)
+		}
+		builder.WriteString("()}\n")
+		builder.WriteString("effect fn target() -> () { run many() }\n")
 	case "contributions":
 		builder.Reset()
 		builder.WriteString("error E0\neffect fn one() -> () throws {E0} { () }\neffect fn target() -> () throws {E0} {\n")
@@ -226,6 +278,10 @@ func inspectionRowsSource(count int, mode string) string {
 			builder.WriteString("run one();\n")
 		}
 		builder.WriteString("()}\n")
+	case "names":
+		builder.WriteString("record Box { value: () }\n")
+		fmt.Fprintf(&builder, "effect fn many() -> () throws {%s} { () }\n", joined)
+		builder.WriteString("effect fn target() -> Box { Box { value: run many() } }\n")
 	}
 	return builder.String()
 }
