@@ -89,6 +89,7 @@ type DiagnosticCounts struct {
 // MCP. TotalCounts always describes the complete finding set, even when an
 // adapter applies a bounded result limit.
 type DiagnosticReport struct {
+	ProducerMetadata
 	SchemaVersion         int                 `json:"schemaVersion"`
 	Source                SourceIdentity      `json:"source"`
 	Revision              string              `json:"revision"`
@@ -210,13 +211,14 @@ func (r *Result) DiagnosticReport(snapshot SourceSnapshot, strict bool) Diagnost
 		snapshot.URI = "<buffer>"
 	}
 	report := DiagnosticReport{
-		SchemaVersion: DiagnosticReportSchemaVersion,
-		Source:        SourceIdentity{URI: snapshot.URI, Origin: snapshot.Origin},
-		Revision:      r.Revision,
-		Target:        r.Target,
-		Checked:       r.Checked,
-		Strict:        strict,
-		Diagnostics:   []DiagnosticFinding{},
+		ProducerMetadata: r.producerMetadata,
+		SchemaVersion:    DiagnosticReportSchemaVersion,
+		Source:           SourceIdentity{URI: snapshot.URI, Origin: snapshot.Origin},
+		Revision:         r.Revision,
+		Target:           r.Target,
+		Checked:          r.Checked,
+		Strict:           strict,
+		Diagnostics:      []DiagnosticFinding{},
 	}
 	if !r.Checked {
 		report.LintUnavailableReason = "source is unchecked; semantic lint advice is unavailable"

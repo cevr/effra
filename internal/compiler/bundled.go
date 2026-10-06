@@ -105,6 +105,7 @@ func (c *checker) namedFunction(name string) *Function {
 // AddSourceInputs supplies the same bounded source provenance to CLI/MCP
 // projections. Their existing complete-response byte checks include it.
 func (r *Result) AddSourceInputs(response map[string]any) {
+	r.AddProducer(response)
 	response["producerIdentity"] = r.ProducerIdentity
 	response["sources"] = append([]SourceInfo{}, r.Sources...)
 	response["bundledBindings"] = append([]BundledBinding{}, r.BundledBindings...)

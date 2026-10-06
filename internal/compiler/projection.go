@@ -407,6 +407,7 @@ func (r *Result) ValidateProjectionResponse(projection TypeProjection, envelope 
 		metadata = fields
 	case *DependencyGraph:
 		metadata = struct {
+			ProducerMetadata  ProducerMetadata
 			Nodes             []GraphNode
 			Edges             []GraphEdge
 			Declarations      []Declaration
@@ -414,7 +415,7 @@ func (r *Result) ValidateProjectionResponse(projection TypeProjection, envelope 
 			Sources           []SourceInfo
 			BundledBindings   []BundledBinding
 			BundledInterfaces []BundledInterfaceInfo
-		}{value.Nodes, value.Edges, value.Declarations, value.ProducerIdentity, value.Sources, value.BundledBindings, value.BundledInterfaces}
+		}{value.ProducerMetadata, value.Nodes, value.Edges, value.Declarations, value.ProducerIdentity, value.Sources, value.BundledBindings, value.BundledInterfaces}
 	}
 	bytes, err := encodedSize(metadata, projection.Limits.CompatibilityBytes)
 	if projection.Complete || bytes > usage.CompatibilityBytes {
@@ -896,6 +897,7 @@ func (r *Result) CheckResponse() map[string]any {
 		"producerIdentity":    r.ProducerIdentity,
 		"typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete,
 	}
+	r.AddProducer(response)
 	if projection.Complete {
 		response["symbols"] = r.Symbols
 		response["layers"] = r.Layers

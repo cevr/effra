@@ -22,6 +22,7 @@ type GraphEdge struct {
 	Span    Span   `json:"span"`
 }
 type DependencyGraph struct {
+	ProducerMetadata
 	ProducerIdentity       string                 `json:"producerIdentity"`
 	Sources                []SourceInfo           `json:"sources"`
 	BundledBindings        []BundledBinding       `json:"bundledBindings"`
@@ -60,6 +61,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	}
 	g := &DependencyGraph{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Nodes: []GraphNode{}, Edges: []GraphEdge{}, Limitations: []string{"single-file static graph; includes deferred recipe construction, not execution order", "provider recipes and explicit value identities are represented without general memoized acquisition; fallible acquisition, lifecycle-safe arbitrary capture and cycle solving are not implemented", "node IDs containing offsets are scoped to the semantic revision"}}
 	g.ProducerIdentity, g.Sources = r.ProducerIdentity, append([]SourceInfo{}, r.Sources...)
+	g.ProducerMetadata = r.producerMetadata
 	g.BundledBindings = append([]BundledBinding{}, r.BundledBindings...)
 	g.BundledInterfaces = append([]BundledInterfaceInfo{}, r.BundledInterfaces...)
 	g.Layers = append([]LayerPlan{}, r.Layers...)
