@@ -34,6 +34,7 @@ go build -o bin/ef ./cmd/ef
 ./bin/ef build examples/main.ef -o bin/demo
 ./bin/ef build examples/main.ef --target js # dist/main.mjs + dist/main.d.mts
 ./bin/ef mcp .                            # newline-delimited JSON-RPC on stdio
+./bin/ef lsp                              # Content-Length framed editor diagnostics
 ```
 
 `bun run demo` compiles and runs the native Go executable. Use `--target js` with build/run/check to select JavaScript. `bun run gate` checks Go formatting, Go vet, compiler and runtime tests, tracker consistency, and the public CLI/MCP process.
@@ -125,7 +126,7 @@ The compiler loads callable shapes from Go export data. Imported calls are defer
 
 `ef check`, `ef inspect` and `ef explain` expose checked contracts, source spans, used host signatures, behavior provenance and compiler timings as JSON. `ef fmt` exposes the canonical syntax-only formatter through stdin, check, write and JSON report modes; it does not typecheck or load packages. `ef mcp .` exposes read-only compiler tools over stdio, including `code.format` for one explicit buffer or guarded disk snapshot. Revisions include imported Go declarations and behavior contracts so stale semantic queries can be rejected; formatter results use a separate source-byte digest and formatter identity. See [MCP setup and limits](docs/mcp.md).
 
-`ef diagnostics FILE --json` and MCP `project.diagnostics` share compiler errors and lint advice, with explicit severities, UTF-8 byte spans and UTF-16 editor ranges. Reports distinguish checked source, unavailable advice and policy failure. This is the shared diagnostic model; the standalone language server and full type-graph queries are still being built.
+`ef diagnostics FILE --json` and MCP `project.diagnostics` share compiler errors and lint advice, with explicit severities, UTF-8 byte spans and UTF-16 editor ranges. Reports distinguish checked source, unavailable advice and policy failure. `ef lsp` adapts this model to versioned editor buffers and full-document synchronization; see [supported capabilities and limits](docs/lsp.md). Full types, hover, navigation and formatting remain separate work.
 
 ## What is experimental
 
