@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/lsp"
 	"effra.local/prototype/internal/mcp"
 	sourcefile "effra.local/prototype/internal/source"
 )
@@ -135,11 +136,27 @@ func parseOptions(args []string) (options, error) {
 }
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT]")
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] | lsp [--target go|js]")
 		return nil
 	}
 	if args[0] == "fmt" {
 		return formatCommand(args[1:])
+	}
+	if args[0] == "lsp" {
+		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+			fmt.Println("usage: ef lsp [--target go|js]\nContent-Length framed JSON-RPC on stdio. Full-document synchronization and UTF-16 diagnostics only.")
+			return nil
+		}
+		target := "go"
+		if len(args) == 3 && args[1] == "--target" {
+			target = args[2]
+		} else if len(args) != 1 {
+			return invalidInvocation(fmt.Errorf("usage: ef lsp [--target go|js]"))
+		}
+		if target != "go" && target != "js" {
+			return invalidInvocation(fmt.Errorf("LSP target must be go or js"))
+		}
+		return lsp.Serve(target, os.Stdin, os.Stdout)
 	}
 	if len(args) == 2 && args[0] == "lint" && args[1] == "rules" {
 		return printJSON(compiler.LintRules())
