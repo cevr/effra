@@ -4,6 +4,7 @@ package mcp
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,10 +12,12 @@ import (
 	"strings"
 
 	"effra.local/prototype/internal/compiler"
+	sourcefile "effra.local/prototype/internal/source"
 )
 
 const ProtocolVersion = "2025-11-25"
 const CompilerVersion = "0.0.1-prototype"
+const maxInspectionItems = 100
 
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -86,11 +89,11 @@ func tools() []tool {
 }
 
 func checkDeclarationMetadata(declaration compiler.Declaration) error {
-	if len(declaration.Fields) > 100 || len(declaration.Variants) > 100 {
+	if len(declaration.Fields) > maxInspectionItems || len(declaration.Variants) > maxInspectionItems {
 		return fmt.Errorf("declaration metadata exceeds prototype limits")
 	}
 	for _, variant := range declaration.Variants {
-		if len(variant.Fields) > 100 {
+		if len(variant.Fields) > maxInspectionItems {
 			return fmt.Errorf("declaration metadata exceeds prototype limits")
 		}
 	}
@@ -99,9 +102,9 @@ func checkDeclarationMetadata(declaration compiler.Declaration) error {
 
 func boundedDeclarations(all []compiler.Declaration) ([]compiler.Declaration, bool, error) {
 	declarations := all
-	truncated := len(declarations) > 100
+	truncated := len(declarations) > maxInspectionItems
 	if truncated {
-		declarations = declarations[:100]
+		declarations = declarations[:maxInspectionItems]
 	}
 	for _, declaration := range declarations {
 		if err := checkDeclarationMetadata(declaration); err != nil {
@@ -109,6 +112,23 @@ func boundedDeclarations(all []compiler.Declaration) ([]compiler.Declaration, bo
 		}
 	}
 	return declarations, truncated, nil
+}
+
+func checkSymbolMetadata(symbol compiler.Symbol) error {
+	if len(symbol.Params) > maxInspectionItems ||
+		len(symbol.Contributions) > maxInspectionItems ||
+		len(symbol.Contract.Errors) > maxInspectionItems ||
+		len(symbol.Contract.Services) > maxInspectionItems ||
+		len(symbol.Actual.Errors) > maxInspectionItems ||
+		len(symbol.Actual.Services) > maxInspectionItems {
+		return fmt.Errorf("symbol exceeds prototype inspection limits")
+	}
+	for _, contribution := range symbol.Contributions {
+		if len(contribution.Names) > maxInspectionItems {
+			return fmt.Errorf("symbol exceeds prototype inspection limits")
+		}
+	}
+	return nil
 }
 
 func Serve(root string, input io.Reader, output io.Writer) error {
@@ -337,8 +357,8 @@ func call(root, name string, args arguments) (any, error) {
 		}
 		return nil, fmt.Errorf("unknown symbol %s; check the file for diagnostics", args.Symbol)
 	}
-	if len(symbol.Params) > 100 || len(symbol.Contributions) > 100 || len(symbol.Contract.Errors) > 100 || len(symbol.Contract.Services) > 100 {
-		return nil, fmt.Errorf("symbol exceeds prototype inspection limits")
+	if err := checkSymbolMetadata(*symbol); err != nil {
+		return nil, err
 	}
 	declarations, declarationsTruncated, err := boundedDeclarations(r.Declarations)
 	if err != nil {
@@ -367,26 +387,11 @@ func readSource(root, relative string) ([]byte, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil, fmt.Errorf("file escapes workspace")
 	}
-	file, err := os.Open(resolved)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("source must be a regular file")
-	}
-	source, err := io.ReadAll(io.LimitReader(file, 2*1024*1024+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(source) > 2*1024*1024 {
+	source, err := sourcefile.ReadRegularFile(resolved, 2*1024*1024)
+	if errors.Is(err, sourcefile.ErrTooLarge) {
 		return nil, fmt.Errorf("source exceeds prototype 2 MiB limit")
 	}
-	return source, nil
+	return source, err
 }
 
 func decodeArguments(name string, raw json.RawMessage) (arguments, error) {

@@ -14,6 +14,7 @@ import (
 
 	"effra.local/prototype/internal/compiler"
 	"effra.local/prototype/internal/mcp"
+	sourcefile "effra.local/prototype/internal/source"
 )
 
 func main() {
@@ -31,7 +32,7 @@ func load(path, target string) (*compiler.Result, error) {
 	if filepath.Ext(path) != ".ef" {
 		return nil, fmt.Errorf("source file must have .ef extension")
 	}
-	source, err := os.ReadFile(path)
+	source, err := sourcefile.ReadRegularFile(path, 0)
 	if err != nil {
 		return nil, err
 	}
