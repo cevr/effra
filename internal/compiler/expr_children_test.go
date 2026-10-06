@@ -7,7 +7,23 @@ import (
 )
 
 func TestCheckedPositionalDataCallsUseOneCanonicalChildPath(t *testing.T) {
-	const deepest = 30
+	source := checkedPositionalSource(30)
+	result := Compile(source)
+	if !result.Checked {
+		t.Fatalf("positional data constructor fixture did not check: %+v", result.Diagnostics)
+	}
+	if lint := result.Lint(true); !lint.LintPassed {
+		t.Fatalf("checked positional fixture changed lint admission: %+v", lint)
+	}
+	if _, err := result.Graph(); err != nil {
+		t.Fatalf("checked positional fixture graph failed: %v", err)
+	}
+	if err := result.TestMode(false); err != nil {
+		t.Fatalf("checked positional fixture test mode failed: %v", err)
+	}
+}
+
+func checkedPositionalSource(deepest int) string {
 	var source strings.Builder
 	for index := 0; index <= deepest; index++ {
 		source.WriteString("record R")
@@ -34,18 +50,5 @@ func TestCheckedPositionalDataCallsUseOneCanonicalChildPath(t *testing.T) {
 		source.WriteString(")")
 	}
 	source.WriteString(" }")
-
-	result := Compile(source.String())
-	if !result.Checked {
-		t.Fatalf("positional data constructor fixture did not check: %+v", result.Diagnostics)
-	}
-	if lint := result.Lint(true); !lint.LintPassed {
-		t.Fatalf("checked positional fixture changed lint admission: %+v", lint)
-	}
-	if _, err := result.Graph(); err != nil {
-		t.Fatalf("checked positional fixture graph failed: %v", err)
-	}
-	if err := result.TestMode(false); err != nil {
-		t.Fatalf("checked positional fixture test mode failed: %v", err)
-	}
+	return source.String()
 }

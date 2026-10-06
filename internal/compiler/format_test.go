@@ -501,6 +501,74 @@ run task()
 	assertDirectiveTokenLines(t, pinned, mustFormat(t, pinned))
 }
 
+func TestFormatContinuationClosersAndOwnLineBlockOpeners(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name:   "multiline raises closer",
+			source: "error E\neffect fn f() -> ()\nraises {\nE\n} { () }",
+			want:   "error E\neffect fn f() -> ()\n    raises {\n        E\n    } {\n    ()\n}\n",
+		},
+		{
+			name:   "fluent call closer",
+			source: "effect fn f() -> string {\nrun task()\n.catch<E>(\n\"fallback\"\n)\n}",
+			want:   "effect fn f() -> string {\n    run task()\n        .catch<E>(\n            \"fallback\"\n        )\n}\n",
+		},
+		{
+			name:   "if and else own line braces",
+			source: "fn f() -> i64 {\nif 1 == 1\n{\n1\n}\nelse\n{\n2\n}\n}",
+			want:   "fn f() -> i64 {\n    if 1 == 1\n    {\n        1\n    }\n    else\n    {\n        2\n    }\n}\n",
+		},
+		{
+			name:   "match own line brace",
+			source: "fn f(x: i64) -> i64 {\nmatch x\n{\n_ => 1\n}\n}",
+			want:   "fn f(x: i64) -> i64 {\n    match x\n    {\n        _ => 1\n    }\n}\n",
+		},
+		{
+			name:   "signature row followed by block",
+			source: "error E\neffect fn main() -> ()\nraises {E}\nuses {Console}\n{\nrun task()\n}",
+			want:   "error E\neffect fn main() -> ()\n    raises { E }\n    uses { Console }\n{\n    run task()\n}\n",
+		},
+		{
+			name:   "comment inside continuation delimiter",
+			source: "error E\neffect fn f() -> ()\nraises {\n// note\nE\n} { () }",
+			want:   "error E\neffect fn f() -> ()\n    raises {\n        // note\n        E\n    } {\n    ()\n}\n",
+		},
+		{
+			name:   "nested continuation",
+			source: "fn f() -> i64 {\ntake(\ntake(\n1,\n2\n),\n3\n)\n}",
+			want:   "fn f() -> i64 {\n    take(\n        take(\n            1,\n            2\n        ),\n        3\n    )\n}\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assertFormat(t, test.source, test.want)
+		})
+	}
+
+	pinned := `fn f() -> i64 {
+match 1
+// effra-lint-disable-next-line future -- keep opener
+{
+_ => 1
+// effra-lint-disable-next-line future -- keep closer
+}
+}`
+	assertFormat(t, pinned, `fn f() -> i64 {
+    match 1
+    // effra-lint-disable-next-line future -- keep opener
+    {
+        _ => 1
+        // effra-lint-disable-next-line future -- keep closer
+    }
+}
+`)
+	assertDirectiveTokenLines(t, pinned, mustFormat(t, pinned))
+}
+
 func TestFormatSpacingBeforeGroupedExpressions(t *testing.T) {
 	source := `fn take(first: i64, second: i64) -> i64 { first }
 effect fn main() -> () {

@@ -29,14 +29,7 @@ func (r *Result) TypeAt(offset int) (*ExpressionInfo, error) {
 		if e.Type.Success != "" && offset >= e.Span.Offset && offset < e.Span.Offset+e.Span.Length && (found == nil || e.Span.Length < found.Span.Length) {
 			found = e
 		}
-		expr(e.Left)
-		expr(e.Right)
-		for _, a := range e.Args {
-			expr(a)
-		}
-		for _, field := range e.Fields {
-			expr(field.Value)
-		}
+		forEachExprChild(e, expr)
 		for _, arm := range e.Arms {
 			block(arm.Body)
 		}

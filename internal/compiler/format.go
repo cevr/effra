@@ -283,6 +283,7 @@ func hasCommentBetween(comments []Comment, start, end int) bool {
 type formatDelimiter struct {
 	text  string
 	style braceStyle
+	base  int
 }
 
 type formatPrinter struct {
@@ -348,7 +349,7 @@ func (p *formatPrinter) token(eventIndex int, event formatEvent) {
 	case "(":
 		p.regularSpacing(current.text)
 		p.write(current.text)
-		p.delimiters = append(p.delimiters, formatDelimiter{text: "("})
+		p.delimiters = append(p.delimiters, formatDelimiter{text: "(", base: p.lineIndent})
 	case ")":
 		p.regularSpacing(current.text)
 		p.write(current.text)
@@ -356,7 +357,7 @@ func (p *formatPrinter) token(eventIndex int, event formatEvent) {
 	case "<":
 		p.regularSpacing(current.text)
 		p.write(current.text)
-		p.delimiters = append(p.delimiters, formatDelimiter{text: "<"})
+		p.delimiters = append(p.delimiters, formatDelimiter{text: "<", base: p.lineIndent})
 	case ">":
 		p.regularSpacing(current.text)
 		p.write(current.text)
@@ -386,7 +387,7 @@ func (p *formatPrinter) openBrace(eventIndex int, event formatEvent) {
 	style := p.layout.braces[event.tokenIndex]
 	p.regularSpacing(current.text)
 	p.write(current.text)
-	p.delimiters = append(p.delimiters, formatDelimiter{text: "{", style: style})
+	p.delimiters = append(p.delimiters, formatDelimiter{text: "{", style: style, base: p.lineIndent})
 	if style == braceBlock {
 		p.indent++
 		if p.nextEventIsTrailingComment(eventIndex, event) {
@@ -495,20 +496,72 @@ func (p *formatPrinter) continuationDepth() int {
 }
 
 func (p *formatPrinter) prepareCommentLine() {
-	p.lineIndent = p.indent + p.continuationDepth()
+	p.lineIndent = p.continuationContentIndent()
+}
+
+func (p *formatPrinter) topContinuationBase() (int, bool) {
+	for index := len(p.delimiters) - 1; index >= 0; index-- {
+		if p.delimiters[index].style != braceBlock {
+			return p.delimiters[index].base, true
+		}
+	}
+	return 0, false
+}
+
+func (p *formatPrinter) continuationContentIndent() int {
+	indent := p.indent + p.continuationDepth()
+	if base, ok := p.topContinuationBase(); ok && indent < base+1 {
+		indent = base + 1
+	}
+	return indent
+}
+
+func (p *formatPrinter) delimiterBase(text string) (int, bool) {
+	switch text {
+	case ")":
+		text = "("
+	case "]":
+		text = "["
+	case ">":
+		text = "<"
+	case "}":
+		text = "{"
+	}
+	for index := len(p.delimiters) - 1; index >= 0; index-- {
+		if p.delimiters[index].text == text {
+			return p.delimiters[index].base, true
+		}
+	}
+	return 0, false
 }
 
 func (p *formatPrinter) prepareTokenLine(current token, tokenIndex int) {
 	depth := p.continuationDepth()
-	if (current.text == ")" || current.text == "]" || current.text == ">" || (current.text == "}" && p.layout.braces[tokenIndex] == braceInline)) && depth > 0 {
-		depth--
+	closing := current.text == ")" || current.text == "]" || current.text == ">" || (current.text == "}" && p.layout.braces[tokenIndex] == braceInline)
+	if closing {
+		if base, ok := p.delimiterBase(current.text); ok {
+			p.lineIndent = base
+		} else {
+			if depth > 0 {
+				depth--
+			}
+			p.lineIndent = p.indent + depth
+		}
+	} else {
+		p.lineIndent = p.indent + depth
+		if base, ok := p.topContinuationBase(); ok && p.lineIndent < base+1 {
+			p.lineIndent = base + 1
+		}
 	}
-	p.lineIndent = p.indent + depth
 	if current.text == "else" {
 		p.lineIndent = p.indent
 		return
 	}
-	if current.text == ")" || current.text == "]" || current.text == ">" || (current.text == "}" && p.layout.braces[tokenIndex] == braceInline) {
+	if current.text == "{" && p.layout.braces[tokenIndex] == braceBlock {
+		p.lineIndent = p.indent + p.continuationDepth()
+		return
+	}
+	if closing {
 		return
 	}
 	if p.layout.itemStarts[current.span.Offset] || (p.layout.breaks[current.span.Offset] && !p.layout.inline[current.span.Offset]) {
