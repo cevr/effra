@@ -676,7 +676,7 @@ func call(root, name string, args arguments) (any, error) {
 				"foreignInterop":     "Go exports supply primitive function shapes; Foreign required; GoResult preserves partial values; context/cancellation metadata are reviewed assertions",
 				"runtimeInspection":  "Go Runtime.inspect: current scope metadata, up to 100 resources/child states; no MCP runtime endpoint",
 				"mutableAliases":     "not implemented", "openRows": "not implemented",
-				"inspection":     "schema 4 response-local canonical type/row tables; references are revision-scoped, empty rows are omitted, and selected projections refuse explicitly when node, edge, row-label, name, compatibility, or response-byte limits are exceeded",
+				"inspection":     fmt.Sprintf("schema %d response-local canonical type/row tables; references are revision-scoped, empty rows are omitted, and selected projections refuse explicitly when node, edge, row-label, name, compatibility, or response-byte limits are exceeded", compiler.SemanticSchemaVersion),
 				"typeProjection": "semantic checking retains the complete private arena; public tables contain every reachable definition or return typeProjectionComplete=false with typeProjectionError",
 				"formatting":     "syntax-only compiler formatter; valid UTF-8; 2 MiB source and 4 MiB output bounds; 16 MiB newline and encoded-response frames; code.format never writes",
 			},

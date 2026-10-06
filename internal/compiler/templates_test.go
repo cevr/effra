@@ -79,6 +79,26 @@ effect fn main() -> string {
  run converter.encode(user)
 }`
 
+const bundledPayloadWitness = `import Convert "effra/conversions"
+record User { name: string }
+record Holder { converter: Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> }
+enum Bundle { Value { converter: Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> } }
+error Broken { converter: Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> }
+effect fn decode(input: string) -> User { User { name: input } }
+effect fn encode(user: User) -> string { user.name }
+fn make() -> Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> { Convert.witness(decode, encode) }
+effect fn broken() -> () raises {Broken} { fail Broken { converter: make() } }
+effect fn main() -> string {
+ let holder = Holder { converter: make() }
+ let boxed = Bundle.Value { converter: holder.converter }
+ match boxed {
+  Bundle.Value { converter } => {
+   let user = run converter.decode("Ada")
+   run converter.encode(user)
+  }
+ }
+}`
+
 func TestBundledWitnessCompleteBoundaryAndShapeDiagnostics(t *testing.T) {
 	for _, target := range []string{"go", "js"} {
 		for _, source := range []string{bundledAnnotatedWitness, strings.Replace(bundledAnnotatedWitness, "Convert.witness(decode, encode)", "Convert.Codec { decode: decode, encode: encode }", 1)} {
@@ -190,6 +210,32 @@ codec.decode(42);
 codec.encode("Ada");`)
 }
 
+func TestBundledWitnessPayloadAnnotationsStrictTypeScript(t *testing.T) {
+	r := CompileFor(bundledPayloadWitness, "js")
+	_, declarations, err := r.Emit(true)
+	if err != nil {
+		t.Fatal(err, r.Diagnostics)
+	}
+	checkStrictTypeScript(t, declarations, `import type { Holder, Bundle, BrokenError, User } from "./generated.d.mts";
+import type { Effect } from "effect";
+declare const holder: Holder;
+declare const bundle: Bundle;
+declare const failure: BrokenError;
+declare const user: User;
+const recordDecode: Effect.Effect<User, never, never> = holder.converter.decode("Ada");
+const variantDecode: Effect.Effect<User, never, never> = bundle.converter.decode("Ada");
+const failureDecode: Effect.Effect<User, never, never> = failure.converter.decode("Ada");
+const recordEncode: Effect.Effect<string, never, never> = holder.converter.encode(user);
+const variantEncode: Effect.Effect<string, never, never> = bundle.converter.encode(user);
+const failureEncode: Effect.Effect<string, never, never> = failure.converter.encode(user);
+void recordDecode; void variantDecode; void failureDecode;
+void recordEncode; void variantEncode; void failureEncode;
+// @ts-expect-error wrong variant wire
+bundle.converter.decode(true);
+// @ts-expect-error wrong failure domain
+failure.converter.encode("Ada");`)
+}
+
 func TestBundledWitnessFieldEvidencePreservesManagedOwnership(t *testing.T) {
 	for _, target := range []string{"go", "js"} {
 		for _, direction := range []string{"decode", "encode"} {
@@ -239,7 +285,7 @@ effect fn main() -> () { () }`
 }
 
 func TestBundledWitnessJSExecution(t *testing.T) {
-	for _, fixture := range []struct{ source, output string }{{bundledAnnotatedWitness, "Ada\n"}, {bundledDirectionalWitness, "label:Ada:42\n"}, {bundledSwitchWitness, "enabled\n"}} {
+	for _, fixture := range []struct{ source, output string }{{bundledAnnotatedWitness, "Ada\n"}, {bundledDirectionalWitness, "label:Ada:42\n"}, {bundledSwitchWitness, "enabled\n"}, {bundledPayloadWitness, "Ada\n"}} {
 		if output := runJS(t, fixture.source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != fixture.output {
 			t.Fatalf("actual witness fields: got %q, want %q", output, fixture.output)
 		}
@@ -247,7 +293,7 @@ func TestBundledWitnessJSExecution(t *testing.T) {
 }
 
 func TestBundledWitnessNativeExecution(t *testing.T) {
-	for _, fixture := range []struct{ source, output string }{{bundledAnnotatedWitness, "Ada\n"}, {bundledDirectionalWitness, "label:Ada:42\n"}, {bundledSwitchWitness, "enabled\n"}} {
+	for _, fixture := range []struct{ source, output string }{{bundledAnnotatedWitness, "Ada\n"}, {bundledDirectionalWitness, "label:Ada:42\n"}, {bundledSwitchWitness, "enabled\n"}, {bundledPayloadWitness, "Ada\n"}} {
 		r := Compile(fixture.source)
 		generated, err := r.EmitGo()
 		if err != nil {

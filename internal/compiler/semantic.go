@@ -2269,6 +2269,7 @@ func (c *checker) check() {
 		for i := range decl.Fields {
 			decl.Fields[i].TypeRef = c.typeRef(decl.Fields[i].Type)
 			decl.Fields[i].typeID = c.canonicalRef(decl.Fields[i].TypeRef)
+			c.bindSourceSyntax(decl.Fields[i].sourceType, decl.Fields[i].typeID)
 		}
 	}
 	for _, record := range c.program.Records {
@@ -2283,6 +2284,7 @@ func (c *checker) check() {
 			for j := range enum.Variants[i].Fields {
 				enum.Variants[i].Fields[j].TypeRef = c.typeRef(enum.Variants[i].Fields[j].Type)
 				enum.Variants[i].Fields[j].typeID = c.canonicalRef(enum.Variants[i].Fields[j].TypeRef)
+				c.bindSourceSyntax(enum.Variants[i].Fields[j].sourceType, enum.Variants[i].Fields[j].typeID)
 			}
 		}
 	}
