@@ -1,4 +1,4 @@
-<!-- {"id": "syntax-traversal", "title": "Bound shared syntax traversal across developer tools", "status": "open", "labels": ["implementation:task"], "parent": "map", "assignee": "formatter_implementation", "blocked_by": []} -->
+<!-- {"id": "syntax-traversal", "title": "Bound shared syntax traversal across developer tools", "status": "closed", "labels": ["implementation:task"], "parent": "map", "assignee": "formatter_implementation", "blocked_by": []} -->
 # Bound shared syntax traversal across developer tools
 
 Follow-up discovered while reviewing the formatter: parser call arguments can also appear as named-field references to the same child. Checked positional data constructors acquire the same aliasing. Independently walking both lists makes nested constructor tooling exponential even when checking is fast.
@@ -8,3 +8,7 @@ Root public receipt `/tmp/effra-named-child-public-valid/receipt.json`: a valid 
 Implement one syntax-child traversal contract used by formatter layout, lint, graph, type queries and test capability inspection. Visit each actual child once while retaining named-field metadata, source order, lexical scope and every capability/diagnostic/edge. Include named and checked positional constructors, construction/payload fields, mixed syntax-only arguments and branching controls. Real CLI/MCP queries must complete with equivalent facts and service the next request; a timeout or missing output is not success. Retain meaningful semantic controls as well as bounded deep/numerous input tests, full gate and independent review. Coordinate with the active formatter unit; no changes to ownership semantics are required.
 
 Final counsel confirmed that the first repair at e6a6300 missed `TypeAt`: CLI query and MCP code.typeAt still time out on this same fixture, preventing a queued ping. Include that actual public path and preserve its selected type/span behavior. Other repaired tooling paths independently pass; the finite task remains open until this omission is repaired and integrated.
+
+## Resolution comments
+
+Integrated45b43d2 after independent Astra review and two Claude2 core rounds. Canonical syntax-child traversal now serves formatter, lint, graph, TypeAt and test admission, preserving separate branch and scope handling. Independent named/checked-positional controls retain capabilities, advice, edges and selected type/span; actual CLI queries and MCP TypeAt with queued ping complete under bounded watchdogs. Permanent process coverage is in scripts/smoke.py. Branch/root gates and integrated focused live checks pass; raw `/tmp/effra-formatter-{branch-integration-gate,integrated-gate,integrated-live}.log`. This closes the finite traversal defect, not full type tooling or formatting adapters.

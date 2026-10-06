@@ -1,6 +1,6 @@
 # Canonical Effra formatting
 
-Status: authorized owner requirement, 2026-10-06. Ship `ef fmt` with the compiler, sharing one formatter with MCP and editor adapters. This is an implementation contract, not an available command yet. Formatting keeps Go-like predictability: one style per formatter version, no configurable indentation, quote style or plugin-defined layout.
+Status: pure formatter core integrated at45b43d2, 2026-10-06. CLI/MCP adapters and authored-example adoption remain in implementation; `ef fmt` is not an available command yet. Ship it with the compiler, sharing one formatter with MCP and editor adapters. Formatting keeps Go-like predictability: one style per formatter version, no configurable indentation, quote style or plugin-defined layout.
 
 ## Syntax and preservation
 

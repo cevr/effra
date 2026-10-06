@@ -26,7 +26,7 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 
 ## Additional implementation
 
-- [Bound shared syntax traversal](syntax-traversal.md): visit aliased argument/field children once so nested data does not stall lint, diagnostics, graph or test admission. This finite follow-up is assigned with the formatter's shared syntax repair.
+- [Bound shared syntax traversal](syntax-traversal.md): resolved at45b43d2 with canonical child visits across formatter, lint, diagnostics, graph, type queries and test admission. Permanent deep CLI/MCP queries retain their facts and service a queued ping; integration gates pass.
 
 - [Canonical formatter](formatter.md), followed by [editor formatting](editor-formatting.md): one comment-preserving printer for `ef fmt`, CI checks and revision-bound MCP/LSP previews, independent of typechecking and backend execution.
 
