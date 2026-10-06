@@ -57,7 +57,7 @@ func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
 		t.Fatal(result)
 	}
 	listed := responses[2]["result"].(map[string]any)["tools"].([]any)
-	if len(listed) != 9 {
+	if len(listed) != 10 {
 		t.Fatal(listed)
 	}
 	inspected := responses[3]["result"].(map[string]any)["structuredContent"].(map[string]any)
@@ -78,6 +78,83 @@ func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
 	}
 	if responses[7]["error"] == nil || responses[8]["error"] == nil || responses[9]["error"] == nil {
 		t.Fatal("invalid protocol input accepted")
+	}
+}
+
+func TestDiagnosticsReportMatchesCompilerAndBoundsResults(t *testing.T) {
+	root := t.TempDir()
+	source := `effect fn task() -> string { "ok" }
+effect fn main() -> string {
+let forgotten = task()
+run task().provide<Console>(Stdout)
+}`
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := call(root, "project.diagnostics", arguments{File: "main.ef"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, ok := result.(compiler.DiagnosticReport)
+	if !ok {
+		t.Fatalf("unexpected diagnostics result: %#v", result)
+	}
+	uri, err := compiler.FileURI(filepath.Join(root, "main.ef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Checked || !report.PolicyPassed || !report.LintAvailable || report.Source.Origin != "disk" || report.Source.URI != uri {
+		t.Fatalf("wrong diagnostics identity/policy: %+v", report)
+	}
+	if report.TotalCounts.Warnings != 1 || report.TotalCounts.Hints != 1 || len(report.Diagnostics) != 2 {
+		t.Fatalf("wrong diagnostics counts: %+v", report)
+	}
+	expected := compiler.Compile(source).DiagnosticReport(compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: source}, false)
+	if report.Revision != expected.Revision || report.Diagnostics[0].LSP == nil || report.Diagnostics[0].LSP.Severity != 2 {
+		t.Fatalf("MCP report drifted from compiler snapshot: %+v", report)
+	}
+	strict, err := call(root, "project.diagnostics", arguments{File: "main.ef", Strict: true})
+	if err != nil || strict.(compiler.DiagnosticReport).PolicyPassed {
+		t.Fatalf("strict policy was not preserved: result=%+v err=%v", strict, err)
+	}
+	if _, err := call(root, "project.diagnostics", arguments{File: "main.ef", ExpectedRevision: "stale"}); err == nil || !strings.Contains(err.Error(), "stale semantic revision") {
+		t.Fatalf("stale diagnostics revision was accepted: %v", err)
+	}
+
+	invalidSource := `effect fn main() -> () { run Console.log("x") }`
+	if err := os.WriteFile(filepath.Join(root, "invalid.ef"), []byte(invalidSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+	invalid, err := call(root, "project.diagnostics", arguments{File: "invalid.ef"})
+	if err != nil || invalid.(compiler.DiagnosticReport).LintAvailable || invalid.(compiler.DiagnosticReport).Checked {
+		t.Fatalf("invalid source was presented as lintable: result=%+v err=%v", invalid, err)
+	}
+
+	var exact strings.Builder
+	for i := 0; i < 101; i++ {
+		exact.WriteString("effect fn duplicate() -> () { () }\n")
+	}
+	if err := os.WriteFile(filepath.Join(root, "exact.ef"), []byte(exact.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+	exactResult, err := call(root, "project.diagnostics", arguments{File: "exact.ef"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exactReport := exactResult.(compiler.DiagnosticReport)
+	if len(exactReport.Diagnostics) != 100 || exactReport.ReturnedCount != 100 || exactReport.Truncated {
+		t.Fatalf("exact diagnostic limit changed result: %+v", exactReport)
+	}
+
+	var many strings.Builder
+	for i := 0; i < 102; i++ {
+		many.WriteString("effect fn duplicate() -> () { () }\n")
+	}
+	if err := os.WriteFile(filepath.Join(root, "many.ef"), []byte(many.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call(root, "project.diagnostics", arguments{File: "many.ef"}); err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("over-limit diagnostics did not remain an explicit tool failure: %v", err)
 	}
 }
 func TestWorkspaceBounds(t *testing.T) {

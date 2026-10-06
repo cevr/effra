@@ -78,8 +78,9 @@ func tools() []tool {
 	return []tool{
 		{"project.describe", "Compiler capabilities, supported target, and guardrail limits", map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}, annotations},
 		{"project.check", "Check one file; return revision, bounded diagnostics, and timings", schema(false), annotations},
+		{"project.diagnostics", "Return compiler and semantic lint diagnostics with byte spans and UTF-16 ranges", lintSchema, annotations},
 		{"project.tests", "Discover checked test contracts; reports live-host requirement without executing", schema(false), annotations},
-		{"project.graph", "Static service, provider and effect dependency graph; no dependent layers yet", schema(false), annotations},
+		{"project.graph", "Static service, provider, constructor and effect dependency graph with incoming dependents", schema(false), annotations},
 		{"project.lint", "Type-aware advice over checked source; strict mode fails on warnings", lintSchema, annotations},
 		{"lint.rules", "Stable lint codes, severity and rationale", map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}, annotations},
 		{"code.typeAt", "Checked local expression type and executed rows at a byte anchor", querySchema, annotations},
@@ -250,7 +251,7 @@ func call(root, name string, args arguments) (any, error) {
 			"schemaVersion": 1, "compilerVersion": CompilerVersion,
 			"runtimes": map[string]string{"go": "typed lazy closures; managed scopes and fibers; Go standard library", "js": "effect@4.0.1"},
 			"targets":  []string{"go", "js"}, "defaultTarget": "go", "sourceExtension": ".ef", "workspace": root,
-			"operations": []string{"project.describe", "project.check", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "project.graph", "project.tests"}, "scope": "single-file",
+			"operations": []string{"project.describe", "project.check", "project.diagnostics", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "project.graph", "project.tests"}, "scope": "single-file disk snapshots",
 			"guardrails": map[string]string{
 				"failures": "checked closed rows", "requirements": "checked nominal services",
 				"resourceOwnership":  "Both targets join owned fibers before releasing scope resources; Go File guards closed handles",
@@ -259,9 +260,17 @@ func call(root, name string, args arguments) (any, error) {
 				"foreignInterop":     "Go exports supply primitive function shapes; Foreign required; GoResult preserves partial values; context/cancellation metadata are reviewed assertions",
 				"runtimeInspection":  "Go Runtime.inspect: current scope metadata, up to 100 resources/child states; no MCP runtime endpoint",
 				"mutableAliases":     "not implemented", "openRows": "not implemented",
-				"inspection": "source SHA-256 plus imported Go export data and behavior contracts; UTF-8 byte spans",
+				"inspection": "source SHA-256 plus imported Go export data and behavior contracts; UTF-8 byte spans with UTF-16 diagnostic ranges",
 			},
 		}, nil
+	}
+	var snapshot compiler.SourceSnapshot
+	if name == "project.diagnostics" {
+		uri, err := compiler.FileURI(filepath.Join(root, args.File))
+		if err != nil {
+			return nil, err
+		}
+		snapshot = compiler.SourceSnapshot{URI: uri, Origin: "disk"}
 	}
 	source, err := readSource(root, args.File)
 	if err != nil {
@@ -274,6 +283,11 @@ func call(root, name string, args arguments) (any, error) {
 	r := compiler.CompileAt(string(source), target, filepath.Dir(filepath.Join(root, args.File)))
 	if args.ExpectedRevision != "" && args.ExpectedRevision != r.Revision {
 		return nil, fmt.Errorf("stale semantic revision; current revision is %s", r.Revision)
+	}
+	if name == "project.diagnostics" {
+		snapshot.Text = string(source)
+		report := r.DiagnosticReport(snapshot, args.Strict)
+		return report.Bounded(maxInspectionItems)
 	}
 	if name == "project.tests" {
 		tests, err := r.Tests()
@@ -409,7 +423,7 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 		}
 	}
 	for key, value := range fields {
-		if key == "strict" && name == "project.lint" {
+		if key == "strict" && (name == "project.lint" || name == "project.diagnostics") {
 			flag, ok := value.(bool)
 			if !ok {
 				return args, fmt.Errorf("strict must be boolean")

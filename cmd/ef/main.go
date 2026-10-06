@@ -20,29 +20,59 @@ import (
 func main() {
 	if err := command(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		if _, usage := err.(usageError); usage {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
 }
+
+type usageError struct{ message string }
+
+func (e usageError) Error() string { return e.message }
+
+func invalidInvocation(err error) error {
+	if err == nil {
+		return usageError{message: "invalid invocation"}
+	}
+	return usageError{message: err.Error()}
+}
+
 func printJSON(v any) error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(v)
 }
 func load(path, target string) (*compiler.Result, error) {
+	r, _, err := loadWithSource(path, target)
+	return r, err
+}
+
+func loadWithSource(path, target string) (*compiler.Result, compiler.SourceSnapshot, error) {
 	if filepath.Ext(path) != ".ef" {
-		return nil, fmt.Errorf("source file must have .ef extension")
+		return nil, compiler.SourceSnapshot{}, fmt.Errorf("source file must have .ef extension")
 	}
-	source, err := sourcefile.ReadRegularFile(path, 0)
+	absolute, err := filepath.Abs(path)
 	if err != nil {
-		return nil, err
+		return nil, compiler.SourceSnapshot{}, err
 	}
-	return compiler.CompileAt(string(source), target, filepath.Dir(path)), nil
+	uri, err := compiler.FileURI(absolute)
+	if err != nil {
+		return nil, compiler.SourceSnapshot{}, err
+	}
+	source, err := sourcefile.ReadRegularFile(absolute, 0)
+	if err != nil {
+		return nil, compiler.SourceSnapshot{}, err
+	}
+	snapshot := compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: string(source)}
+	return compiler.CompileAt(snapshot.Text, target, filepath.Dir(absolute)), snapshot, nil
 }
 
 type options struct {
 	target, output string
 	entry          bool
 	strict         bool
+	json           bool
 	timeoutMillis  int
 	live           bool
 	positional     []string
@@ -75,6 +105,8 @@ func parseOptions(args []string) (options, error) {
 			opts.live = true
 		case "--strict":
 			opts.strict = true
+		case "--json":
+			opts.json = true
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				return opts, fmt.Errorf("unknown option %s", args[i])
@@ -89,7 +121,7 @@ func parseOptions(args []string) (options, error) {
 }
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | mcp [ROOT]")
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | mcp [ROOT]")
 		return nil
 	}
 	if len(args) == 2 && args[0] == "lint" && args[1] == "rules" {
@@ -106,47 +138,87 @@ func command(args []string) error {
 		return mcp.Serve(root, os.Stdin, os.Stdout)
 	}
 	switch args[0] {
-	case "check", "lint", "query", "graph", "inspect", "explain", "build", "run", "test":
+	case "check", "diagnostics", "lint", "query", "graph", "inspect", "explain", "build", "run", "test":
 	default:
 		return fmt.Errorf("unknown command %s; use ef --help", args[0])
 	}
 	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+		if args[0] == "diagnostics" {
+			fmt.Println("usage: ef diagnostics FILE [--strict] [--json] [--target go|js]\nLocations: one-based UTF-16 lines/columns in text; zero-based UTF-16 ranges and original UTF-8 byte spans in JSON.\nExit codes: 0 policy passed; 1 failed policy or source/operational failure; 2 invalid invocation.\nWith --json, source findings produce a report on stdout even when policy fails; operational failures produce no report and explain the error on stderr.")
+			return nil
+		}
 		return command([]string{"--help"})
 	}
 	opts, err := parseOptions(args[1:])
 	if err != nil {
+		if args[0] == "diagnostics" {
+			return invalidInvocation(err)
+		}
+		return err
+	}
+	usage := func(err error) error {
+		if args[0] == "diagnostics" {
+			return invalidInvocation(err)
+		}
 		return err
 	}
 	if len(opts.positional) == 0 {
-		return fmt.Errorf("source file required")
+		return usage(fmt.Errorf("source file required"))
 	}
 	if opts.live && args[0] != "test" {
-		return fmt.Errorf("--live is only supported by test")
+		return usage(fmt.Errorf("--live is only supported by test"))
 	}
 	if opts.timeoutMillis != 0 && args[0] != "test" {
-		return fmt.Errorf("--timeout-ms is only supported by test")
+		return usage(fmt.Errorf("--timeout-ms is only supported by test"))
 	}
 	if opts.strict && args[0] != "lint" {
-		return fmt.Errorf("--strict is only supported by lint")
+		if args[0] != "diagnostics" {
+			return usage(fmt.Errorf("--strict is only supported by lint"))
+		}
+	}
+	if opts.json && args[0] != "diagnostics" {
+		return usage(fmt.Errorf("--json is only supported by diagnostics"))
 	}
 	if opts.output != "" && args[0] != "build" {
-		return fmt.Errorf("-o is only supported by build")
+		return usage(fmt.Errorf("-o is only supported by build"))
 	}
 	if opts.entry && (args[0] != "build" || opts.target != "js") {
-		return fmt.Errorf("--entry is only needed for JavaScript builds")
+		return usage(fmt.Errorf("--entry is only needed for JavaScript builds"))
 	}
 	want := 1
 	if args[0] == "inspect" || args[0] == "explain" || args[0] == "query" {
 		want = 2
 	}
 	if len(opts.positional) != want {
-		return fmt.Errorf("incorrect arguments for %s", args[0])
+		return usage(fmt.Errorf("incorrect arguments for %s", args[0]))
 	}
-	r, err := load(opts.positional[0], opts.target)
+	if args[0] == "diagnostics" && filepath.Ext(opts.positional[0]) != ".ef" {
+		return invalidInvocation(fmt.Errorf("source file must have .ef extension"))
+	}
+	var r *compiler.Result
+	var snapshot compiler.SourceSnapshot
+	if args[0] == "diagnostics" {
+		r, snapshot, err = loadWithSource(opts.positional[0], opts.target)
+	} else {
+		r, err = load(opts.positional[0], opts.target)
+	}
 	if err != nil {
 		return err
 	}
 	switch args[0] {
+	case "diagnostics":
+		report := r.DiagnosticReport(snapshot, opts.strict)
+		if opts.json {
+			if err := printJSON(report); err != nil {
+				return err
+			}
+		} else {
+			printDiagnosticText(report, opts.positional[0])
+		}
+		if !report.PolicyPassed {
+			return fmt.Errorf("diagnostics failed policy")
+		}
+		return nil
 	case "graph":
 		graph, err := r.Graph()
 		if err != nil {
@@ -237,6 +309,20 @@ func command(args []string) error {
 		return child.Run()
 	default:
 		return fmt.Errorf("unknown command %s", args[0])
+	}
+}
+
+func printDiagnosticText(report compiler.DiagnosticReport, source string) {
+	if len(report.Diagnostics) == 0 {
+		fmt.Printf("%s: no diagnostics\n", source)
+		return
+	}
+	for _, diagnostic := range report.Diagnostics {
+		location := "?:?"
+		if diagnostic.LSP != nil {
+			location = fmt.Sprintf("%d:%d", diagnostic.LSP.Range.Start.Line+1, diagnostic.LSP.Range.Start.Character+1)
+		}
+		fmt.Printf("%s:%s: %s %s: %s\n", source, location, diagnostic.Severity, diagnostic.Code, diagnostic.Message)
 	}
 }
 func sourceBase(source string) string {
