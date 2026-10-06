@@ -110,7 +110,8 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     aggregate_extra = workspace / "aggregate-extra.ef"
     aggregate_extra.write_bytes(b" ")
     aggregate_input_over = run("fmt", "--json", *(path.name for path in input_paths), aggregate_extra.name, cwd=workspace, timeout=120)
-    assert aggregate_input_over.returncode == 2 and json.loads(aggregate_input_over.stdout)["failures"][0]["code"] == "EFMT_INPUT_LIMIT"
+    aggregate_input_report = json.loads(aggregate_input_over.stdout)
+    assert aggregate_input_over.returncode == 2 and aggregate_input_report["failures"][0]["code"] == "EFMT_INPUT_LIMIT" and "aggregate input limit" in aggregate_input_report["failures"][0]["message"]
     aggregate_extra.write_bytes(b" " * (input_limit + 1))
     per_file_input_over = run("fmt", "--json", aggregate_extra.name, cwd=workspace, timeout=120)
     assert per_file_input_over.returncode == 2 and json.loads(per_file_input_over.stdout)["failures"][0]["code"] == "EFMT_INPUT_LIMIT"
@@ -145,7 +146,8 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     assert exact_with_empty.returncode == 1 and json.loads(exact_with_empty.stdout)["success"]
     aggregate_extra.write_bytes(b"//extra")
     aggregate_output_over = run("fmt", "--json", *(path.name for path in output_paths), aggregate_extra.name, cwd=workspace, timeout=120)
-    assert aggregate_output_over.returncode == 2 and json.loads(aggregate_output_over.stdout)["failures"][0]["code"] == "EFMT_OUTPUT_LIMIT"
+    aggregate_output_report = json.loads(aggregate_output_over.stdout)
+    assert aggregate_output_over.returncode == 2 and aggregate_output_report["failures"][0]["code"] == "EFMT_OUTPUT_LIMIT" and "aggregate output limit" in aggregate_output_report["failures"][0]["message"]
     assert all(path.read_bytes() == exact_output_source for path in output_paths)
 
     invalid_utf8 = run_bytes("fmt", "--stdin", input_bytes=b"// invalid \xff\neffect fn main() -> () { () }\n")
@@ -218,22 +220,41 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     eof_replies = [json.loads(line) for line in eof_server.stdout.splitlines()]
     assert eof_server.returncode == 0 and eof_replies[-1]["error"]["code"] == -32700
 
-    large_uri = "<" * (frame_limit // 3)
-    response_request = (
-        init_line
-        + "\n"
-        + ready_line
-        + "\n"
-        + '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code.format","arguments":{"source":"","uri":"'
-        + large_uri
-        + '"}}}\n'
-        + ping_line
-        + "\n"
-    )
+    # Quotes remain escaped by JSON even when the bounded response encoder
+    # leaves HTML characters alone. Fill the admitted request close enough to
+    # the frame cap that the response envelope itself crosses the cap.
+    large_uri_length = frame_limit // 2
+    while True:
+        large_uri = '"' * large_uri_length
+        response_message = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "code.format", "arguments": {"source": "", "uri": large_uri}}}
+        response_line = json.dumps(response_message, separators=(",", ":"))
+        if len(response_line.encode()) <= frame_limit:
+            break
+        large_uri_length -= 1
+    response_request = init_line + "\n" + ready_line + "\n" + response_line + "\n" + ping_line + "\n"
     response_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input=response_request.encode(), capture_output=True, timeout=60)
     response_replies = [json.loads(line) for line in response_server.stdout.splitlines()]
     assert response_server.returncode == 0 and response_replies[-1]["result"] == {}
     assert response_replies[1]["result"]["isError"] and "encoded bytes" in response_replies[1]["result"]["content"][0]["text"]
+
+    raw_id = "<" * (3 * 1024 * 1024)
+    raw_id_message = {"jsonrpc": "2.0", "id": raw_id, "method": "tools/call", "params": {"name": "code.format", "arguments": {"source": ""}}}
+    raw_id_line = json.dumps(raw_id_message, separators=(",", ":"))
+    id_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input=(init_line + "\n" + ready_line + "\n" + raw_id_line + "\n" + ping_line + "\n").encode(), capture_output=True, timeout=60)
+    id_replies = [json.loads(line) for line in id_server.stdout.splitlines()]
+    assert id_server.returncode == 0 and id_replies[-1]["result"] == {}
+    assert id_replies[1]["id"] == raw_id and "\\u003c" not in id_server.stdout.decode()
+
+    near_limit_template = {"jsonrpc": "2.0", "id": "", "method": "tools/call", "params": {"name": "code.format", "arguments": {"source": ""}}}
+    near_limit_template_line = json.dumps(near_limit_template, separators=(",", ":"))
+    near_limit_id = "a" * (frame_limit - len(near_limit_template_line.encode()))
+    near_limit_message = {"jsonrpc": "2.0", "id": near_limit_id, "method": "tools/call", "params": {"name": "code.format", "arguments": {"source": ""}}}
+    near_limit_line = json.dumps(near_limit_message, separators=(",", ":"))
+    assert len(near_limit_line.encode()) == frame_limit
+    near_limit_server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root, input=(init_line + "\n" + ready_line + "\n" + near_limit_line + "\n" + ping_line + "\n").encode(), capture_output=True, timeout=60)
+    near_limit_replies = [json.loads(line) for line in near_limit_server.stdout.splitlines()]
+    assert near_limit_server.returncode == 0 and [reply.get("id") for reply in near_limit_replies] == [1, near_limit_id, 3]
+    assert near_limit_replies[1]["error"]["code"] == -32000 and near_limit_replies[1]["error"]["message"] == "format response too large"
 
     invalid_disk = workspace / "invalid-utf8.ef"
     invalid_disk.write_bytes(b"// invalid \xff\neffect fn main() -> () { () }\n")

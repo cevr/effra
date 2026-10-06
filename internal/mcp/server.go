@@ -3,6 +3,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,6 +82,8 @@ const (
 
 var errMCPResponseTooLarge = errors.New("MCP response exceeds the encoded frame limit")
 
+const compactFormatResponseError = "format response too large"
+
 // readMCPFrame admits at most max bytes before a terminal LF. CR in CRLF is
 // part of that bounded frame. An oversized line is drained through its LF
 // without retaining its contents so the next request can still be served.
@@ -133,8 +136,22 @@ func readMCPFrame(reader *bufio.Reader, max int) ([]byte, mcpFrameStatus, error)
 	}
 }
 
-func writeMCPResponse(output io.Writer, response response, maxBytes int) error {
-	encoded, err := json.Marshal(response)
+func marshalMCPResponse(value response, escapeHTML bool) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(escapeHTML)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	encoded := buffer.Bytes()
+	if len(encoded) == 0 || encoded[len(encoded)-1] != '\n' {
+		return nil, errors.New("MCP response encoder omitted its line terminator")
+	}
+	return encoded[:len(encoded)-1], nil
+}
+
+func writeMCPResponseWithEscape(output io.Writer, value response, maxBytes int, escapeHTML bool) error {
+	encoded, err := marshalMCPResponse(value, escapeHTML)
 	if err != nil {
 		return err
 	}
@@ -144,6 +161,30 @@ func writeMCPResponse(output io.Writer, response response, maxBytes int) error {
 	encoded = append(encoded, '\n')
 	_, err = output.Write(encoded)
 	return err
+}
+
+func writeMCPResponse(output io.Writer, value response, maxBytes int) error {
+	return writeMCPResponseWithEscape(output, value, maxBytes, true)
+}
+
+// Formatting responses use JSON's non-HTML-escaping mode so a valid request
+// ID or display URI is not expanded sixfold merely by response encoding. The
+// encoded body is still checked before any bytes are written.
+func writeBoundedFormatResponse(output io.Writer, value response) error {
+	return writeMCPResponseWithEscape(output, value, maxMCPFrameBytes, false)
+}
+
+func boundedFormatResponseFits(value response) bool {
+	encoded, err := marshalMCPResponse(value, false)
+	return err == nil && len(encoded) <= maxMCPFrameBytes
+}
+
+func compactFormatError(id json.RawMessage) response {
+	return response{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error:   &rpcError{-32000, compactFormatResponseError},
+	}
 }
 
 func writeMCPError(output io.Writer, id json.RawMessage, code int, message string) error {
@@ -361,11 +402,11 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 				res.Error = &rpcError{-32601, "Method not found"}
 			}
 		}
-		maxResponseBytes := 0
 		if formatCall {
-			maxResponseBytes = maxMCPFrameBytes
+			err = writeBoundedFormatResponse(output, res)
+		} else {
+			err = writeMCPResponse(output, res, 0)
 		}
-		err = writeMCPResponse(output, res, maxResponseBytes)
 		if errors.Is(err, errMCPResponseTooLarge) && formatCall {
 			res = response{
 				JSONRPC: "2.0",
@@ -375,7 +416,14 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 					IsError: true,
 				},
 			}
-			err = writeMCPResponse(output, res, maxMCPFrameBytes)
+			err = writeBoundedFormatResponse(output, res)
+			if errors.Is(err, errMCPResponseTooLarge) {
+				// Keep the request ID correlated while reducing an over-limit
+				// formatting result to a compact JSON-RPC error. A code.format
+				// request admitted by readMCPFrame always leaves room for this
+				// shorter envelope.
+				err = writeBoundedFormatResponse(output, compactFormatError(res.ID))
+			}
 		}
 		if err != nil {
 			return err

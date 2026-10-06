@@ -56,7 +56,7 @@ Mutating paths retain the requested display spelling while the operating system 
 
 Formatter source must be valid UTF-8. Invalid bytes produce the shared lexical `EF001` span before formatting, with no replacement text or file write. Valid U+FFFD characters and escaped Unicode spellings remain valid source. MCP `source` strings are decoded JSON Unicode text; their `inputDigest` is the SHA-256 digest of those UTF-8 bytes.
 
-MCP `code.format` returns the complete formatted text in `structuredContent` and a short content summary. The adapter buffers the encoded response before writing it and enforces the same 16 MiB frame cap; an encoded response that would exceed it becomes a bounded tool error with no partial replacement text.
+MCP `code.format` returns the complete formatted text in `structuredContent` and a short content summary. The adapter buffers the encoded response before writing it and enforces the same 16 MiB frame cap; an encoded response that would exceed it becomes a bounded tool error with no partial replacement text. Bounded formatting responses use a non-HTML-escaping JSON encoder, preserving valid request IDs and display URI bytes without avoidable expansion. If the verbose tool error itself cannot fit, the adapter emits a compact `-32000` JSON-RPC error with the original request ID, so correlation is preserved and no ID is truncated. Semantic responses retain their existing encoding policy.
 
 ## Diagnostic reports
 

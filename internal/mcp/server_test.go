@@ -588,6 +588,50 @@ func TestMCPResponseFrameCapIsAllOrError(t *testing.T) {
 	}
 }
 
+func TestBoundedFormatResponsePreservesIDsAndUsesCompactFallback(t *testing.T) {
+	id := json.RawMessage(`"` + strings.Repeat("<", 1024) + `"`)
+	value := response{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result: toolResult{
+			Content: []map[string]string{{"type": "text", "text": "summary"}},
+		},
+	}
+	encoded, err := marshalMCPResponse(value, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte(`\\u003c`)) || !bytes.Contains(encoded, []byte(strings.Repeat("<", 1024))) {
+		t.Fatalf("bounded response changed a valid ID: %q", encoded[:min(len(encoded), 128)])
+	}
+	if !boundedFormatResponseFits(compactFormatError(id)) {
+		t.Fatal("small bounded-format ID did not fit the compact fallback")
+	}
+
+	base, err := marshalMCPResponse(compactFormatError(json.RawMessage("null")), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseWithoutID := len(base) - len("null")
+	exactIDBytes := maxMCPFrameBytes - baseWithoutID
+	if exactIDBytes < 2 {
+		t.Fatalf("compact fallback overhead unexpectedly exceeds frame cap: %d", baseWithoutID)
+	}
+	exactID := json.RawMessage(`"` + strings.Repeat("a", exactIDBytes-2) + `"`)
+	if exact, err := marshalMCPResponse(compactFormatError(exactID), false); err != nil || len(exact) != maxMCPFrameBytes {
+		t.Fatalf("compact fallback exact boundary drifted: length=%d err=%v", len(exact), err)
+	}
+	var exactOutput bytes.Buffer
+	if err := writeBoundedFormatResponse(&exactOutput, compactFormatError(exactID)); err != nil {
+		t.Fatalf("compact fallback exact boundary rejected: %v", err)
+	}
+	overID := json.RawMessage(`"` + strings.Repeat("a", exactIDBytes-1) + `"`)
+	var overOutput bytes.Buffer
+	if err := writeBoundedFormatResponse(&overOutput, compactFormatError(overID)); !errors.Is(err, errMCPResponseTooLarge) || overOutput.Len() != 0 {
+		t.Fatalf("compact fallback +1 boundary was not rejected atomically: err=%v bytes=%d", err, overOutput.Len())
+	}
+}
+
 func TestTargetInspection(t *testing.T) {
 	root := t.TempDir()
 	source := `effect fn main() -> string { "hello" }`
