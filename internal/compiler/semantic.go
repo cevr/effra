@@ -254,6 +254,7 @@ type Result struct {
 	Checked                bool                   `json:"checked"`
 	Diagnostics            []Diagnostic           `json:"diagnostics"`
 	Symbols                []Symbol               `json:"symbols"`
+	Layers                 []LayerPlan            `json:"layers,omitempty"`
 	Declarations           []Declaration          `json:"declarations,omitempty"`
 	Types                  []TypeNode             `json:"types,omitempty"`
 	Rows                   []RowNode              `json:"rows,omitempty"`
@@ -344,6 +345,9 @@ type checker struct {
 	functions               map[string]*Function
 	services                map[string]*Service
 	providers               map[string]*Provider
+	layers                  map[string]*LayerPlan
+	layerBudget             *layerAssemblyBudget
+	layerProviders          map[*LayerEntry]*Provider
 	records                 map[string]*Record
 	enums                   map[string]*Enum
 	errors                  map[string]*ErrorDecl
@@ -2202,7 +2206,7 @@ func (c *checker) diagnostic(code, message string, span Span) {
 	if c.suppressDiagnostics {
 		return
 	}
-	c.result.Diagnostics = append(c.result.Diagnostics, Diagnostic{code, message, span})
+	c.result.Diagnostics = append(c.result.Diagnostics, Diagnostic{Code: code, Message: message, Span: span})
 }
 func (c *checker) check() {
 	c.checkTemplates()
@@ -2335,6 +2339,9 @@ func (c *checker) check() {
 	for _, f := range c.program.BundledFunctions {
 		f.Owner = "module"
 	}
+	for _, layer := range c.program.Layers {
+		claim(layer.Name, layer.Span)
+	}
 	for _, s := range c.program.Services {
 		methods := map[string]bool{}
 		for _, f := range s.Methods {
@@ -2404,6 +2411,7 @@ func (c *checker) check() {
 			}
 		}
 	}
+	c.checkLayers()
 	if len(c.program.checkedFunctions()) > 0 {
 		c.prepareFunctionSummaries()
 	}

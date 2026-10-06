@@ -55,7 +55,8 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     write = run("fmt", "--json", str(path))
     assert write.returncode == 0, (write.stdout, write.stderr)
     write_report = json.loads(write.stdout)
-    assert write.stderr == "" and write_report["formatterVersion"]
+    assert write.stderr == "" and write_report["formatterVersion"] == "effra/formatter-2"
+    assert write_report["schemaVersion"] == 1
     assert write_report["files"][0]["written"]
     assert path.stat().st_mode & 0o777 == original_mode
     formatted_bytes = path.read_bytes()
@@ -181,6 +182,8 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     listed = replies[1]["result"]["tools"]
     assert any(tool["name"] == "code.format" for tool in listed)
     buffer_result = replies[2]["result"]["structuredContent"]
+    assert buffer_result["formatterVersion"] == write_report["formatterVersion"]
+    assert buffer_result["schemaVersion"] == write_report["schemaVersion"]
     assert buffer_result["origin"] == "buffer" and buffer_result["uri"] == "buffer://main.ef"
     assert buffer_result["text"] == stdin.stdout
     disk_result = replies[3]["result"]["structuredContent"]

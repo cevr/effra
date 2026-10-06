@@ -123,7 +123,7 @@ func (r *Result) loadBundledImports(source string) {
 	aliases := map[string]string{}
 	for _, imp := range p.BundledImports {
 		if _, exists := bundledIndex[imp.Path]; !exists {
-			r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "unsupported bundled module " + imp.Path + "; user package resolution is unavailable", imp.Span})
+			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "unsupported bundled module " + imp.Path + "; user package resolution is unavailable", Span: imp.Span})
 			continue
 		}
 		aliases[imp.Alias] = imp.Path
@@ -203,7 +203,7 @@ func (r *Result) loadBundledImports(source string) {
 	}
 	loaded := map[string]bool{}
 	if exhausted {
-		r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "bundled reference admission exceeds budget", Span{}})
+		r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "bundled reference admission exceeds budget", Span: Span{}})
 		return
 	}
 	bytes := 0
@@ -215,24 +215,24 @@ func (r *Result) loadBundledImports(source string) {
 		}
 		entry := bundledIndex[req.module][req.member]
 		if entry.Source == "" {
-			r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "unknown bundled declaration " + key, req.span})
+			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "unknown bundled declaration " + key, Span: req.span})
 			continue
 		}
 		data, err := bundledSources.ReadFile(entry.Source)
 		bytes += len(data)
 		if err != nil || bytes > maxBundledSourceBytes || len(loaded) >= maxBundledDeclarations {
-			r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "bundled source admission unavailable or exceeds budget", req.span})
+			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "bundled source admission unavailable or exceeds budget", Span: req.span})
 			return
 		}
 		bundle, diagnostics := parse(string(data))
 		if len(diagnostics) != 0 || bundle == nil || len(bundle.Items) != 1 || (len(bundle.Functions) == 0 && len(bundle.Records) == 0) {
-			r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "invalid distributed function source " + key, req.span})
+			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "invalid distributed function source " + key, Span: req.span})
 			return
 		}
 		loaded[key] = true
 		for _, dependency := range entry.Dependencies {
 			if len(queue) >= maxBundledReferences {
-				r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "bundled declaration closure exceeds budget", req.span})
+				r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "bundled declaration closure exceeds budget", Span: req.span})
 				return
 			}
 			queue = append(queue, request{req.module, dependency, req.span})
@@ -263,11 +263,11 @@ func (r *Result) loadBundledImports(source string) {
 				}
 			}
 		} else {
-			r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "unsupported distributed declaration shape", req.span})
+			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "unsupported distributed declaration shape", Span: req.span})
 			return
 		}
 		if name != req.member {
-			r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "distributed declaration index mismatch", req.span})
+			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "distributed declaration index mismatch", Span: req.span})
 			return
 		}
 		for name, typ := range bundle.typeExpressions {

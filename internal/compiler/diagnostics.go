@@ -50,22 +50,32 @@ type DiagnosticRange struct {
 // LSPDiagnostic is the plain-text LSP projection. Character offsets use
 // UTF-16 code units, the mandatory default encoding in the LSP contract.
 type LSPDiagnostic struct {
-	Range    DiagnosticRange `json:"range"`
-	Severity int             `json:"severity"`
-	Code     string          `json:"code"`
-	Source   string          `json:"source"`
-	Message  string          `json:"message"`
+	Range              DiagnosticRange         `json:"range"`
+	Severity           int                     `json:"severity"`
+	Code               string                  `json:"code"`
+	Source             string                  `json:"source"`
+	Message            string                  `json:"message"`
+	RelatedInformation []LSPRelatedInformation `json:"relatedInformation,omitempty"`
+}
+type LSPRelatedInformation struct {
+	Location LSPDiagnosticLocation `json:"location"`
+	Message  string                `json:"message"`
+}
+type LSPDiagnosticLocation struct {
+	URI   string          `json:"uri"`
+	Range DiagnosticRange `json:"range"`
 }
 
 type DiagnosticFinding struct {
-	Code              string         `json:"code"`
-	Origin            string         `json:"origin"`
-	Rule              string         `json:"rule,omitempty"`
-	Severity          string         `json:"severity"`
-	Message           string         `json:"message"`
-	Span              Span           `json:"span"`
-	LocationAvailable bool           `json:"locationAvailable"`
-	LSP               *LSPDiagnostic `json:"lsp,omitempty"`
+	Code              string            `json:"code"`
+	Origin            string            `json:"origin"`
+	Rule              string            `json:"rule,omitempty"`
+	Severity          string            `json:"severity"`
+	Message           string            `json:"message"`
+	Span              Span              `json:"span"`
+	Related           []RelatedLocation `json:"related,omitempty"`
+	LocationAvailable bool              `json:"locationAvailable"`
+	LSP               *LSPDiagnostic    `json:"lsp,omitempty"`
 }
 
 type DiagnosticCounts struct {
@@ -233,7 +243,19 @@ func (r *Result) DiagnosticReport(snapshot SourceSnapshot, strict bool) Diagnost
 		report.Diagnostics = append(report.Diagnostics, finding)
 	}
 	for _, diagnostic := range r.Diagnostics {
+		before := len(report.Diagnostics)
 		appendFinding(diagnostic.Code, "compiler", "", "error", diagnostic.Message, diagnostic.Span)
+		if len(report.Diagnostics) > before {
+			finding := &report.Diagnostics[len(report.Diagnostics)-1]
+			finding.Related = append([]RelatedLocation{}, diagnostic.Related...)
+			if finding.LSP != nil {
+				for _, related := range diagnostic.Related {
+					if location, ok := positionIndex.rangeFor(snapshot.Text, related.Span); ok {
+						finding.LSP.RelatedInformation = append(finding.LSP.RelatedInformation, LSPRelatedInformation{Location: LSPDiagnosticLocation{URI: snapshot.URI, Range: location}, Message: related.Message})
+					}
+				}
+			}
+		}
 	}
 	var lint LintResult
 	if r.Checked {

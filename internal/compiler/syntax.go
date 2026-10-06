@@ -16,7 +16,12 @@ type Span struct {
 	Column int `json:"column"`
 }
 type Diagnostic struct {
-	Code    string `json:"code"`
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Span    Span              `json:"span"`
+	Related []RelatedLocation `json:"related,omitempty"`
+}
+type RelatedLocation struct {
 	Message string `json:"message"`
 	Span    Span   `json:"span"`
 }
@@ -148,6 +153,22 @@ type Provider struct {
 	Span     Span
 	Contract ValueType `json:"-"`
 }
+
+// Layer declarations select construction recipes without executing them.
+type Layer struct {
+	Name                                               string
+	Provides, Errors, Services                         []string
+	DeclaredProvides, DeclaredErrors, DeclaredServices bool
+	Entries                                            []*LayerEntry
+	Span                                               Span
+}
+type LayerEntry struct {
+	Kind         string
+	Name         string
+	Value        *Expr
+	Span         Span
+	Continuation bool
+}
 type Program struct {
 	interfaceProducer   bool
 	semantic            *checker
@@ -170,6 +191,7 @@ type Program struct {
 	Enums               []*Enum
 	Services            []*Service
 	Providers           []*Provider
+	Layers              []*Layer
 	Functions           []*Function
 }
 
@@ -186,6 +208,7 @@ type SyntaxItem struct {
 	Enum          *Enum
 	Service       *Service
 	Provider      *Provider
+	Layer         *Layer
 	Function      *Function
 	Span          Span
 }
@@ -260,7 +283,7 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 			continue
 		}
 		if ch == '\r' && (i+1 == len(source) || source[i+1] != '\n') {
-			return nil, comments, []Diagnostic{{"EF001", "standalone carriage return is unsupported; use LF or CRLF line endings", Span{i, 1, line, column}}}
+			return nil, comments, []Diagnostic{{Code: "EF001", Message: "standalone carriage return is unsupported; use LF or CRLF line endings", Span: Span{i, 1, line, column}}}
 		}
 		if ch == ' ' || ch == '\r' || ch == '\t' {
 			i++
@@ -292,7 +315,7 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 				i++
 			}
 			if _, err := strconv.ParseInt(source[start:i], 10, 64); err != nil {
-				return nil, comments, []Diagnostic{{"EF001", "integer exceeds i64 range", Span{start, i - start, l, c}}}
+				return nil, comments, []Diagnostic{{Code: "EF001", Message: "integer exceeds i64 range", Span: Span{start, i - start, l, c}}}
 			}
 		} else if ch == '"' {
 			kind = "string"
@@ -307,19 +330,19 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 				i++
 			}
 			if i >= len(source) || source[i] != '"' {
-				return nil, comments, []Diagnostic{{"EF001", "unterminated string", Span{start, i - start, l, c}}}
+				return nil, comments, []Diagnostic{{Code: "EF001", Message: "unterminated string", Span: Span{start, i - start, l, c}}}
 			}
 			i++
 			var decoded string
 			if err := json.Unmarshal([]byte(source[start:i]), &decoded); err != nil {
-				return nil, comments, []Diagnostic{{"EF001", "strings use JSON escapes", Span{start, i - start, l, c}}}
+				return nil, comments, []Diagnostic{{Code: "EF001", Message: "strings use JSON escapes", Span: Span{start, i - start, l, c}}}
 			}
 		} else if i+1 < len(source) && (source[i:i+2] == "->" || source[i:i+2] == "==" || source[i:i+2] == "=>") {
 			i += 2
 		} else if strings.ContainsRune("{}():,;.+<>=", rune(ch)) {
 			i++
 		} else {
-			return nil, comments, []Diagnostic{{"EF001", fmt.Sprintf("unsupported character %q", ch), Span{start, 1, l, c}}}
+			return nil, comments, []Diagnostic{{Code: "EF001", Message: fmt.Sprintf("unsupported character %q", ch), Span: Span{start, 1, l, c}}}
 		}
 		column += i - start
 		out = append(out, token{source[start:i], kind, Span{start, i - start, l, c}})
@@ -512,8 +535,69 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			function := p.function(true)
 			program.Functions = append(program.Functions, function)
 			program.Items = append(program.Items, &SyntaxItem{Kind: "function", Function: function, Span: start})
+		case "layer":
+			start := p.take().span
+			name := p.name()
+			layer := &Layer{Name: name.text, Span: name.span}
+			for p.peek().text != "{" {
+				switch p.take().text {
+				case "provides":
+					if layer.DeclaredProvides {
+						p.fail(p.peek(), "duplicate provides annotation")
+					}
+					layer.DeclaredProvides = true
+					layer.Provides = p.row()
+				case "raises":
+					if layer.DeclaredErrors {
+						p.fail(p.peek(), "duplicate raises annotation")
+					}
+					layer.DeclaredErrors = true
+					layer.Errors = p.row()
+				case "uses":
+					if layer.DeclaredServices {
+						p.fail(p.peek(), "duplicate uses annotation")
+					}
+					layer.DeclaredServices = true
+					layer.Services = p.row()
+				default:
+					p.fail(p.peek(), "static layers admit only provides, raises and uses annotations; parameters are unsupported")
+				}
+			}
+			p.expect("{")
+			for !p.accept("}") {
+				entry := &LayerEntry{Kind: "binding", Span: p.peek().span}
+				if p.accept("merge") {
+					continuation := false
+					for {
+						merged := p.name()
+						span := merged.span
+						if !continuation {
+							span = entry.Span
+						}
+						layer.Entries = append(layer.Entries, &LayerEntry{Kind: "merge", Name: merged.text, Span: span, Continuation: continuation})
+						continuation = true
+						if !p.accept(",") {
+							break
+						}
+					}
+				} else {
+					if p.accept("start") {
+						p.fail(p.peek(), "startup recipes are unsupported in static layers")
+					}
+					if p.accept("replace") {
+						entry.Kind = "replace"
+					}
+					entry.Name = p.name().text
+					p.expect("=")
+					entry.Value = p.expr(0)
+					layer.Entries = append(layer.Entries, entry)
+				}
+				p.accept(";")
+			}
+			program.Layers = append(program.Layers, layer)
+			program.Items = append(program.Items, &SyntaxItem{Kind: "layer", Layer: layer, Span: start})
 		default:
-			p.fail(p.peek(), "expected error, record, enum, service, impl, or function declaration")
+			p.fail(p.peek(), "expected error, record, enum, service, impl, layer, or function declaration")
 		}
 	}
 	return program, tokens, nil
@@ -548,7 +632,7 @@ func (p *parser) name() token {
 	return v
 }
 func (p *parser) fail(v token, message string) {
-	panic(syntaxFault{Diagnostic{"EF002", message, v.span}})
+	panic(syntaxFault{Diagnostic{Code: "EF002", Message: message, Span: v.span}})
 }
 func (p *parser) typ() string {
 	p.depth++
@@ -924,6 +1008,12 @@ func (p *parser) expr(min int) *Expr {
 				p.expect(")")
 				e = &Expr{Kind: "timeout", Left: e, Right: arg, Span: method.span}
 			} else if method.text == "provide" || method.text == "catch" {
+				if method.text == "provide" && p.accept("(") {
+					layer := p.name()
+					p.expect(")")
+					e = &Expr{Kind: "provideLayer", Name: layer.text, Left: e, Span: method.span}
+					continue
+				}
 				p.expect("<")
 				t := p.name()
 				p.expect(">")

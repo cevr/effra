@@ -31,6 +31,7 @@ type DependencyGraph struct {
 	Target                 string                 `json:"target"`
 	Nodes                  []GraphNode            `json:"nodes"`
 	Edges                  []GraphEdge            `json:"edges"`
+	Layers                 []LayerPlan            `json:"layers,omitempty"`
 	Types                  []TypeNode             `json:"types,omitempty"`
 	Rows                   []RowNode              `json:"rows,omitempty"`
 	Declarations           []Declaration          `json:"declarations,omitempty"`
@@ -61,6 +62,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	g.ProducerIdentity, g.Sources = r.ProducerIdentity, append([]SourceInfo{}, r.Sources...)
 	g.BundledBindings = append([]BundledBinding{}, r.BundledBindings...)
 	g.BundledInterfaces = append([]BundledInterfaceInfo{}, r.BundledInterfaces...)
+	g.Layers = append([]LayerPlan{}, r.Layers...)
 	nodes := map[string]bool{}
 	var graphErr error
 	metadataBytes := 0
@@ -298,6 +300,11 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	for _, node := range g.Nodes {
 		if node.Contract != nil {
 			contracts = append(contracts, *node.Contract)
+		}
+	}
+	for _, layer := range g.Layers {
+		for _, node := range layer.Nodes {
+			contracts = append(contracts, node.Constructor)
 		}
 	}
 	projection := r.ProjectValues(contracts)

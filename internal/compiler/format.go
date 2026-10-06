@@ -12,7 +12,7 @@ const FormatterSchemaVersion = 1
 
 // FormatterIdentity names the syntax producer independently from semantic
 // revisions. Adapters must report this identity without querying Git.
-const FormatterIdentity = "effra/formatter-schema-1"
+const FormatterIdentity = "effra/formatter-2"
 
 // FormatResult is the pure, syntax-only formatting snapshot. Its digest is
 // intentionally independent from a checked semantic revision: formatting
@@ -193,6 +193,15 @@ func buildFormatLayout(source string, program *Program, tokens []token) formatLa
 			for _, function := range item.Provider.Methods {
 				collectFunctionBreaks(&layout, function)
 			}
+		case "layer":
+			for _, entry := range item.Layer.Entries {
+				if entry.Continuation {
+					layout.inline[entry.Span.Offset] = true
+				} else if !layout.preserve[entry.Span.Line] {
+					layout.breaks[entry.Span.Offset] = true
+				}
+				collectExpressionBreaks(&layout, entry.Value)
+			}
 		case "function":
 			collectFunctionBreaks(&layout, item.Function)
 		}
@@ -316,7 +325,7 @@ func isInlineBrace(source string, comments []Comment, tokens []token, open, clos
 	if close == open+1 && !hasCommentBetween(comments, tokens[open].span.Offset, tokens[close].span.Offset) {
 		return true
 	}
-	if open > 0 && (tokens[open-1].text == "raises" || tokens[open-1].text == "uses") {
+	if open > 0 && (tokens[open-1].text == "raises" || tokens[open-1].text == "uses" || tokens[open-1].text == "provides") {
 		return true
 	}
 	return close+1 < len(tokens) && tokens[close+1].text == "=>"
@@ -416,7 +425,7 @@ func (p *formatPrinter) token(eventIndex int, event formatEvent) {
 	case ",":
 		p.regularSpacing(current.text)
 		p.write(current.text)
-		if p.topDelimiterStyle() == braceBlock && !p.nextEventIsTrailingComment(eventIndex, event) && !p.nextEventIsPinnedSameLine(eventIndex) {
+		if p.topDelimiterStyle() == braceBlock && !p.nextEventIsInlineStatement(eventIndex) && !p.nextEventIsTrailingComment(eventIndex, event) && !p.nextEventIsPinnedSameLine(eventIndex) {
 			p.newline()
 		}
 	case ";":

@@ -80,6 +80,13 @@ func (f *Fiber[A]) accessible(fc *FiberContext) bool {
 }
 func Fork[A any](program Effect[A]) Effect[*Fiber[A]] {
 	return func(fc *FiberContext) Exit[*Fiber[A]] {
+		admission := fc.ctx
+		if fc.admission != nil {
+			if err := fc.ctx.Err(); err != nil {
+				return Interrupt[*Fiber[A]](err)
+			}
+			admission = fc.admission
+		}
 		owner := fc.scope
 		owner.mu.Lock()
 		if owner.state != Open {
@@ -87,7 +94,7 @@ func Fork[A any](program Effect[A]) Effect[*Fiber[A]] {
 			return Die[*Fiber[A]](fmt.Errorf("scope is closing"))
 		}
 		completed := newManagedSignal()
-		f := &Fiber[A]{owner: owner, scope: newScopeWithDriver(fc.ctx, owner, fc.timerDriver()), completed: completed, done: completed.done}
+		f := &Fiber[A]{owner: owner, scope: newScopeWithDriver(admission, owner, fc.timerDriver()), completed: completed, done: completed.done}
 		owner.children = append(owner.children, f)
 		owner.mu.Unlock()
 		_, virtual := fc.timerDriver().(*TestScheduler)
