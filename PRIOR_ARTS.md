@@ -2,6 +2,18 @@
 
 Effra's public architecture is described through generic patterns. This index records the decisions that source reviews inform, without making an external application's structure part of the language contract. Read [NORTH_STAR.md](NORTH_STAR.md) and [GLOSSARY.md](GLOSSARY.md) alongside it.
 
+## Language and library references
+
+Owner direction refreshed 2026-10-06: preserve Go-like simplicity, Effect-style guarantees and Borgo-like algebraic data/abstractions. This repository keeps the established `PRIOR_ARTS.md` name as its canonical prior-art index.
+
+| Source | Revision / paths | Read it for | Compare with |
+| --- | --- | --- | --- |
+| [Go](https://github.com/golang/go) | Toolchain-matched source; `src/net/http`, `src/context`, `src/cmd/compile` | Ordinary control flow, host declarations, native server costs and separate compile/link work | Native emission, import adapter, managed HTTP and stage measurements |
+| [Borgo](https://github.com/borgo-lang/borgo) | `3b9f01578941fb00ed93756e2fadc009feb50128`; `compiler/src/type_.rs`, `infer.rs`, `exhaustive.rs`, `codegen.rs`, `compiler/test/infer-file.md` | ADTs, exhaustive patterns, functions/generics and Go ecosystem integration with an approachable surface | Canonical types, checker, Go lowering and public data/library examples |
+| [Effect](https://github.com/Effect-TS/effect) | Runtime pin `effect@4.0.1`, commit `460272d30457f4697d8b8c52cad41caccbcace08`; `packages/effect/src`, `packages/effect/test`, `packages/effect/typetest`, platform server tests | Typed effect composition, scopes, cancellation, provider construction, codecs, HTTP/RPC and behavioral/type-test invariants | Bundled interfaces/runtime, portable conformance and [native server contract](docs/specs/native-server-contracts.md) |
+
+Application usage is surveyed as generic patterns below. Exact private checkout pointers stay in local research notes; private source is not copied into this public repository. Upstream reference tests retain their own license and provenance and remain distinct from passing Effra tests.
+
 ## Patterns
 
 | Pattern | Adopted direction | Boundary / receipt |
@@ -21,6 +33,9 @@ See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native
 
 ## Settled
 
+- Adopt Borgo's direction of direct Go-targeted application code with first-class closed data and patterns; records/enums/match already have Go/JS receipts. Its broader interop and inference claims are comparison inputs, not inherited Effra guarantees.
+- Adopt Effect's behavioral contracts as explicit conformance inputs. Native error/service rows, service identity and ownership are compiler concepts; retry, cache, routing and other runtime policies remain reusable library implementations.
+- Adopt a licensed pinned upstream test snapshot plus executable behavior mapping. Reject counting copied TypeScript reference tests as native parity: it breaks **Explicit contracts and clear guardrails**.
 - `.ef` text remains authoritative. Dependency graphs are rebuildable views with revision-scoped expression IDs.
 - Compiler soundness diagnostics cannot be disabled by optional lint. Unchecked files do not receive authoritative expression types or dependency graphs.
 - Lazy construction does not execute an effect. Unused local recipes receive lint advice; bare discarded recipes remain compiler errors.
@@ -31,6 +46,9 @@ See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native
 
 ## To survey
 
+- Which finite row and ordinary type-parameter mechanisms express reusable effect combinators without complex conditional-type inference or a compiler operation per combinator?
+- Which provider acquisition/sharing interface makes recipe identity, materialized value identity and allocation ownership obvious at a call site?
+- Which codec/endpoint declarations remove duplicate domain/transport signatures while preserving explicit validation and wire policy?
 - Extend structured nominal types and checked matches with codecs, containers and package-qualified identities without whole-program inference.
 - Track handle ownership provenance so proven inner-scope escapes receive static diagnostics while borrowed outer handles remain valid.
 - Extend checked provider construction to shared acquisition and cycle explanations; enrich the same dependency graph rather than inventing another analyzer.
