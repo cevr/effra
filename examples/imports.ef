@@ -2,7 +2,7 @@ import go strings "strings"
 import go strconv "strconv"
 import go sdk "effra.local/prototype/examples/sdk"
 
-effect fn program() -> () uses {Foreign, Console} {
+effect fn program() -> () uses {Foreign, Console, Scheduler} {
     let name = run strings.ToUpper("ada")
     run Console.log(name)
     let raw = run strconv.ParseBool("invalid")
@@ -15,4 +15,5 @@ effect fn program() -> () uses {Foreign, Console} {
 
 effect fn main() -> () {
     run program().provide<Foreign>(Host).provide<Console>(Stdout)
+        .provide<Scheduler>(LiveScheduler)
 }
