@@ -92,14 +92,14 @@ Go invalidates the old entry, requests cancellation and awaits its children/fina
 
 Spawn requires explicit mailbox item/byte budgets. First-profile send admits immediately or fails with MailboxFull/Stopped; it never waits for queue capacity. Call uses that admission policy, then interruptibly awaits the committed transition, including completed old-entry cleanup and admission of new work; acknowledgement does not wait for the work's eventual outcome. Reject reports a typed Rejected failure.
 
-The machine adapter produces `Actor<P>`, where `P` is its checked event/request protocol. The canonical type retains the machine declaration, Event/Outcome/Output identities and entry/transition policy as additional behavior evidence, not a requirement on every actor. Inspectable contracts are derived from the named declaration rather than caller-written bookkeeping parameters:
+The machine adapter produces `Actor<Session>` for a named Session machine: the machine declaration contributes its canonical event/request protocol, rather than treating Event as a service. Public send/call/result types and rows follow from that declaration, including through an annotated handle parameter. Event/Outcome/Output identities remain canonical; entry/transition policy and lifetime provenance are additional checked evidence, not requirements on ordinary service actors. The common `awaitExit` observes full Exit/Cause as data; a separate machine result observation returns Output or raises the declaration's terminal row/Stopped. Inspectable contracts are derived from the named declaration rather than caller-written bookkeeping parameters:
 
 | Operation | Expected failures and requirements |
 | --- | --- |
 | Send | MailboxFull or Stopped; admission carries no later step failures. |
 | Call | MailboxFull, Stopped, Rejected and the step's declared failures. Only the originating event's call receives its step failure; other queued calls receive Stopped with inspectable terminal cause data. |
-| Terminal observation | The union of step/completion failures and Stopped; successful completion returns Output. Completion failures have no originating event call. |
-| Spawn | The union of step/completion/work service requirements; asynchronous step failures are not charged to spawn. |
+| Result observation | The union of step/completion failures and Stopped; successful completion returns Output. Completion failures have no originating event call. Common awaitExit instead returns the full completed Exit as data. |
+| Spawn | Constructor and step/completion/work service requirements; constructor/constructor-child failures and step/completion terminal failures are conservatively charged, following the fork rule. Unobserved terminal Cause propagates at owner closure; observing it does not erase the charged row. |
 
 Defects, interruption and composite causes retain the runtime cause structure through every operation. A channel's expected-failure row must not flatten a cleanup defect or reattribute another event's domain failure.
 
