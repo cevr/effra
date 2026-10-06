@@ -338,6 +338,7 @@ type checker struct {
 	services                map[string]*Service
 	providers               map[string]*Provider
 	layers                  map[string]*LayerPlan
+	layerBudget             *layerAssemblyBudget
 	records                 map[string]*Record
 	enums                   map[string]*Enum
 	errors                  map[string]*ErrorDecl

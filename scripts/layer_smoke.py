@@ -37,8 +37,16 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
     workspace = pathlib.Path(directory)
     path = workspace / "app.ef"
     invalid_path = workspace / "invalid.ef"
+    budget_path = workspace / "budget.ef"
     path.write_text(source)
     invalid_path.write_text(source + 'layer Bad { Store = Memory("other"); merge Shared }')
+    budget_source = "\n".join(
+        f'service S{i} {{ effect fn value() -> string }} impl P{i} for S{i} {{ effect fn value() -> string {{ "value" }} }}'
+        for i in range(50)
+    )
+    budget_source += "\nlayer Shared {\n" + "\n".join(f"S{i} = P{i}" for i in range(50)) + "\n}\n"
+    budget_source += "layer App {\n" + "merge Shared\n" * 1000 + "}\n"
+    budget_path.write_text(budget_source)
     formatted = cli("fmt", "--stdin", input_text=source).stdout
     assert cli("fmt", "--stdin", input_text=formatted).stdout == formatted
     path.write_text(formatted)
@@ -58,6 +66,9 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
     assert duplicate["related"] and duplicate["span"]["length"] > 0
     assert cli("inspect", str(invalid_path), "App", success=False).stderr
     assert cli("inspect", str(path), "Absent", success=False).stderr
+    refused = json.loads(cli("check", str(budget_path), success=False).stdout)
+    assert not refused["checked"] and any(d["code"] == "EF133" for d in refused["diagnostics"])
+    assert "layers" not in refused and not refused["typeProjectionComplete"]
     assert json.loads(cli("inspect", str(path), "Fixture").stdout)["layer"] == plan
     requests = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
@@ -66,6 +77,7 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         tool(2, "code.inspect", {"file": "invalid.ef", "symbol": "App"}),
         tool(3, "code.inspect", {"file": "app.ef", "symbol": "Absent"}),
+        tool(8, "code.inspect", {"file": "budget.ef", "symbol": "App"}),
         {"jsonrpc": "2.0", "id": 4, "method": "ping"},
         tool(5, "code.inspect", {"file": "app.ef", "symbol": "Fixture"}),
         tool(6, "project.graph", {"file": "app.ef"}),
@@ -77,6 +89,7 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
     assert server.returncode == 0, server.stderr
     responses = {response["id"]: response for response in map(json.loads, server.stdout.splitlines())}
     assert responses[2]["result"]["isError"] and responses[3]["result"]["isError"]
+    assert responses[8]["result"]["isError"]
     assert responses[4]["result"] == {}
     mcp = responses[5]["result"]["structuredContent"]
     assert mcp["layer"] == plan and mcp["revision"] == inspected["revision"]

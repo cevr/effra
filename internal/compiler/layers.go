@@ -9,6 +9,34 @@ import (
 const maxLayerNodes = 1000
 const maxLayerEdges = 10000
 const maxLayerDeclarations = 256
+const maxLayerAssemblyMetadata = 100000
+const maxLayerRelatedLocations = 64
+
+// One budget accounts for every layer in the checked file. Identity
+// deduplication bounds nodes; this also bounds repeated merge work, copied
+// provenance, rows and diagnostics before they allocate retained metadata.
+type layerAssemblyBudget struct {
+	used    int
+	refused bool
+}
+
+func (c *checker) layerWork(count int, span Span) bool {
+	if c.layerBudget == nil {
+		return true
+	}
+	if c.layerBudget.refused {
+		return false
+	}
+	if count < 0 || count > maxLayerAssemblyMetadata-c.layerBudget.used {
+		if !c.layerBudget.refused {
+			c.layerBudget.refused = true
+			c.diagnostic("EF133", "layer assembly exceeds its 100000 work and metadata budget", span)
+		}
+		return false
+	}
+	c.layerBudget.used += count
+	return true
+}
 
 // LayerPlan is the complete selected graph, including hidden bindings. Output
 // projection never prunes construction. These are static facts, not runtime
@@ -82,6 +110,12 @@ func layerSelectionSite(layer *Layer, entry *LayerEntry) LayerSite {
 
 func (c *checker) layerDiagnostic(code, message string, span Span, related ...RelatedLocation) {
 	if !c.suppressDiagnostics {
+		if len(related) > maxLayerRelatedLocations {
+			related = related[:maxLayerRelatedLocations]
+		}
+		if !c.layerWork(1+len(related), span) {
+			return
+		}
 		c.result.Diagnostics = append(c.result.Diagnostics, Diagnostic{Code: code, Message: message, Span: span, Related: related})
 	}
 }
@@ -91,12 +125,16 @@ func (c *checker) layerDiagnostic(code, message string, span Span, related ...Re
 // expands the declarations of its ancestors.
 func (c *checker) checkLayers() {
 	c.layers = map[string]*LayerPlan{}
+	c.layerBudget = &layerAssemblyBudget{}
 	if len(c.program.Layers) > maxLayerDeclarations {
 		c.layerDiagnostic("EF133", "static layer profile exceeds 256 declarations", c.program.Layers[maxLayerDeclarations].Span)
 		return
 	}
 	declarations := map[string]*Layer{}
 	for _, layer := range c.program.Layers {
+		if !c.layerWork(1+len(layer.Entries), layer.Span) {
+			return
+		}
 		declarations[layer.Name] = layer
 	}
 	remaining := map[string]int{}
@@ -125,6 +163,9 @@ func (c *checker) checkLayers() {
 		}
 	}
 	for head := 0; head < len(ready); head++ {
+		if c.layerBudget.refused {
+			return
+		}
 		name := ready[head]
 		c.layers[name] = c.assembleLayer(declarations[name])
 		for _, dependent := range dependents[name] {
@@ -138,7 +179,7 @@ func (c *checker) checkLayers() {
 		if c.layers[layer.Name] == nil {
 			related := []RelatedLocation{}
 			for _, entry := range layer.Entries {
-				if entry.Kind == "merge" && remaining[entry.Name] > 0 {
+				if entry.Kind == "merge" && remaining[entry.Name] > 0 && len(related) < maxLayerRelatedLocations {
 					related = append(related, RelatedLocation{Message: "unresolved construction merge " + entry.Name, Span: entry.Span})
 				}
 			}
@@ -178,31 +219,56 @@ func (c *checker) assembleLayer(layer *Layer) *LayerPlan {
 			outer[entry.Name] = entry
 		}
 	}
-	add := func(node *layerSelection) {
+	add := func(node *layerSelection, occurrence *LayerSite) bool {
+		occurrences := len(node.occurrences)
+		if occurrence != nil {
+			occurrences = 1
+		}
+		if !c.layerWork(1+occurrences+len(node.replacements), layer.Span) {
+			return false
+		}
 		if variants[node.id] == nil {
 			variants[node.id] = map[*LayerEntry]*layerSelection{}
 		}
 		if existing := variants[node.id][node.effective]; existing != nil {
 			existing.public = existing.public || node.public
-			existing.occurrences = append(existing.occurrences, node.occurrences...)
+			if occurrence != nil {
+				existing.occurrences = append(existing.occurrences, *occurrence)
+			} else {
+				existing.occurrences = append(existing.occurrences, node.occurrences...)
+			}
 		} else {
-			variants[node.id][node.effective] = cloneSelection(node)
+			copy := *node
+			if occurrence != nil {
+				copy.occurrences = []LayerSite{*occurrence}
+			} else {
+				copy.occurrences = append([]LayerSite{}, node.occurrences...)
+			}
+			copy.replacements = append([]LayerSite{}, node.replacements...)
+			variants[node.id][node.effective] = &copy
 		}
+		return true
 	}
 	for _, entry := range layer.Entries {
 		switch entry.Kind {
 		case "binding":
 			provider := c.layerProvider(entry)
 			if provider != nil {
-				add(&layerSelection{id: layerBindingID(layer, entry), service: entry.Name, origin: entry, effective: entry, provider: provider, public: true, occurrences: []LayerSite{layerSelectionSite(layer, entry)}})
+				if !add(&layerSelection{id: layerBindingID(layer, entry), service: entry.Name, origin: entry, effective: entry, provider: provider, public: true, occurrences: []LayerSite{layerSelectionSite(layer, entry)}}, nil) {
+					return plan
+				}
 			}
 		case "merge":
+			if !c.layerWork(1, entry.Span) {
+				return plan
+			}
 			plan.Merges = append(plan.Merges, LayerSite{ID: layerID(entry.Name), Name: entry.Name, Span: entry.Span})
 			if merged := c.layers[entry.Name]; merged != nil {
+				occurrence := layerSelectionSite(layer, entry)
 				for _, id := range merged.order {
-					node := cloneSelection(merged.selected[id])
-					node.occurrences = []LayerSite{layerSelectionSite(layer, entry)}
-					add(node)
+					if !add(merged.selected[id], &occurrence) {
+						return plan
+					}
 				}
 			}
 		}
@@ -219,6 +285,9 @@ func (c *checker) assembleLayer(layer *Layer) *LayerPlan {
 	services := map[string]*layerSelection{}
 	for _, id := range ids {
 		alternatives := variants[id]
+		if !c.layerWork(len(alternatives), layer.Span) {
+			return plan
+		}
 		var node *layerSelection
 		// Order diagnostic paths by source position rather than map iteration.
 		choices := make([]*layerSelection, 0, len(alternatives))
@@ -226,12 +295,21 @@ func (c *checker) assembleLayer(layer *Layer) *LayerPlan {
 			choices = append(choices, choice)
 		}
 		slices.SortFunc(choices, func(a, b *layerSelection) int { return a.effective.Span.Offset - b.effective.Span.Offset })
+		if !c.layerWork(1+len(choices[0].occurrences)+len(choices[0].replacements), layer.Span) {
+			return plan
+		}
 		node = cloneSelection(choices[0])
 		for _, choice := range choices[1:] {
+			if !c.layerWork(len(choice.occurrences), layer.Span) {
+				return plan
+			}
 			node.public = node.public || choice.public
 			node.occurrences = append(node.occurrences, choice.occurrences...)
 		}
 		if replacement := outer[node.service]; replacement != nil {
+			if !c.layerWork(1, replacement.Span) {
+				return plan
+			}
 			if provider := c.layerProvider(replacement); provider != nil {
 				node.provider = provider
 				node.effective = replacement
@@ -239,7 +317,7 @@ func (c *checker) assembleLayer(layer *Layer) *LayerPlan {
 			}
 		} else if len(choices) > 1 {
 			related := []RelatedLocation{}
-			for _, choice := range choices {
+			for _, choice := range choices[:min(len(choices), maxLayerRelatedLocations)] {
 				related = append(related, RelatedLocation{Message: "conflicting effective selection of " + node.service, Span: choice.effective.Span})
 			}
 			c.layerDiagnostic("EF131", "sibling layers select conflicting replacements of "+node.service+"; replace explicitly in "+layer.Name, layer.Span, related...)
@@ -279,6 +357,9 @@ func (c *checker) assembleLayer(layer *Layer) *LayerPlan {
 	edgeCount := 0
 	for _, id := range plan.order {
 		node := plan.selected[id]
+		if !c.layerWork(len(node.provider.Services)*3, node.effective.Span) {
+			return plan
+		}
 		node.public = slices.Contains(plan.Provides, node.service) && node.public
 		for _, required := range normalized(node.provider.Services) {
 			edgeCount++
@@ -337,7 +418,7 @@ func (c *checker) assembleLayer(layer *Layer) *LayerPlan {
 	if len(ready) != len(plan.order) {
 		related := []RelatedLocation{}
 		for _, id := range plan.order {
-			if counts[id] > 0 {
+			if counts[id] > 0 && len(related) < maxLayerRelatedLocations {
 				node := plan.selected[id]
 				related = append(related, RelatedLocation{Message: node.service + " constructed by " + node.provider.Name, Span: node.effective.Span})
 			}
@@ -348,6 +429,9 @@ func (c *checker) assembleLayer(layer *Layer) *LayerPlan {
 	}
 	for _, id := range ids {
 		node := plan.selected[id]
+		if !c.layerWork(1+len(node.replacements)+len(edges[id])+len(incoming[id])+len(node.provider.Services), node.effective.Span) {
+			return plan
+		}
 		constructor := c.projectCheckedBase(c.checkedProvider(node.provider, true))
 		plan.Nodes = append(plan.Nodes, LayerNode{ID: id, Service: node.service, ServiceIdentity: "service:" + currentModuleIdentity + ":" + node.service, Implementation: node.provider.Name, ImplementationIdentity: providerTypeRef(node.provider).Declaration,
 			Span: node.origin.Span, SelectionSpan: node.effective.Span, Public: node.public, Occurrences: node.occurrences, Replacements: append([]LayerSite{}, node.replacements...), Dependencies: normalized(edges[id]), Incoming: normalized(incoming[id]), Requirements: normalized(node.provider.Services), Failures: []string{}, Constructor: constructor, Owner: "provision-build/node:" + id})
