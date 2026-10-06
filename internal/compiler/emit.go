@@ -25,18 +25,33 @@ func jsValueType(t string) string {
 		return "File"
 	case "Handler":
 		return "(path: string) => Effect.Effect<string, unknown, unknown>"
+	case "never":
+		return "never"
 	default:
-		return "string"
+		if strings.HasPrefix(t, "provider:") {
+			return strings.TrimPrefix(t, "provider:") + "Provider"
+		}
+		if strings.ContainsAny(t, ":") {
+			return "unknown"
+		}
+		return t
 	}
 }
 func jsContract(f *Function) string {
+	return jsContractFor(f, nil)
+}
+func jsContractFor(f *Function, declarations map[string]Declaration) string {
 	success := jsValueType(f.Return)
 	if !f.Effect {
 		return success
 	}
 	errors := []string{}
 	for _, n := range normalized(f.Errors) {
-		errors = append(errors, "{ readonly _tag: "+quoted(n)+" }")
+		if declaration, ok := declarations[n]; ok && len(declaration.Fields) > 0 {
+			errors = append(errors, n+"Error")
+		} else {
+			errors = append(errors, "{ readonly _tag: "+quoted(n)+" }")
+		}
 	}
 	err := "never"
 	if len(errors) > 0 {
@@ -71,17 +86,52 @@ func (r *Result) Emit(entry bool) (string, string, error) {
 	out.WriteString(lifecycleJS)
 	out.WriteString("const __ef_service_Console = Context.Service('effra/prototype/Console');\nconst __ef_provider_Stdout = { log: (message) => Effect.sync(() => console.log(message)) };\nconst __ef_call = (service, method, args) => Effect.flatMap(service, provider => provider[method](...args));\n")
 	decl.WriteString("import type { Context, Effect } from 'effect';\nexport interface File {readonly _effraFile: \"File\"}\n")
+	for _, declaration := range r.ProgramDeclarations() {
+		switch declaration.Kind {
+		case "record":
+			decl.WriteString("declare const __ef_brand_" + declaration.Name + ": unique symbol;\n")
+			decl.WriteString("export interface " + declaration.Name + " { ")
+			decl.WriteString("readonly [__ef_brand_" + declaration.Name + "]: \"" + declaration.Name + "\"; ")
+			for _, field := range declaration.Fields {
+				decl.WriteString("readonly " + field.Name + ": " + jsValueType(field.Type) + "; ")
+			}
+			decl.WriteString("}\n")
+		case "enum":
+			decl.WriteString("declare const __ef_brand_" + declaration.Name + ": unique symbol;\n")
+			decl.WriteString("export type " + declaration.Name + " = ")
+			for i, variant := range declaration.Variants {
+				if i > 0 {
+					decl.WriteString(" | ")
+				}
+				decl.WriteString("{ readonly [__ef_brand_" + declaration.Name + "]: \"" + declaration.Name + "\"; readonly _tag: " + quoted(declaration.Name+"."+variant.Name))
+				for _, field := range variant.Fields {
+					decl.WriteString("; readonly " + field.Name + ": " + jsValueType(field.Type))
+				}
+				decl.WriteString(" }")
+			}
+			decl.WriteString(";\n")
+		case "error":
+			decl.WriteString("export interface " + declaration.Name + "Error { readonly _tag: " + quoted(declaration.Name))
+			for _, field := range declaration.Fields {
+				decl.WriteString("; readonly " + field.Name + ": " + jsValueType(field.Type))
+			}
+			decl.WriteString(" }\n")
+		}
+	}
 	allServices := append(builtins(), r.Program.Services...)
 	for _, s := range allServices {
 		decl.WriteString("export interface " + s.Name + "Requirement { readonly _effraService: " + quoted(s.Name) + " }\n")
 		out.WriteString("export { __ef_service_" + s.Name + " as " + s.Name + " };\n")
-		decl.WriteString("declare const __ef_service_" + s.Name + ": Context.Service<" + s.Name + "Requirement, " + jsShape(s.Methods) + ">;\nexport { __ef_service_" + s.Name + " as " + s.Name + " };\n")
+		decl.WriteString("declare const __ef_service_" + s.Name + ": Context.Service<" + s.Name + "Requirement, " + jsShape(s.Methods, declarationMap(r)) + ">;\nexport { __ef_service_" + s.Name + " as " + s.Name + " };\n")
 	}
 	for _, s := range allServices {
 		if s.Name == "Console" {
 			continue
 		}
 		out.WriteString("const __ef_service_" + s.Name + "=Context.Service(" + quoted("effra/prototype/"+s.Name) + ");\n")
+	}
+	for _, s := range allServices {
+		decl.WriteString("export type " + s.Name + "Provider = " + jsShape(s.Methods, declarationMap(r)) + ";\n")
 	}
 	out.WriteString(`
 const __ef_provider_Assertions={check:(condition,message)=>condition?Effect.succeed(undefined):Effect.fail({_tag:'AssertionFailed',message}),equalText:(actual,expected)=>actual===expected?Effect.succeed(undefined):Effect.fail({_tag:'AssertionFailed',message:'expected '+JSON.stringify(expected)+'; received '+JSON.stringify(actual)})};
@@ -102,13 +152,13 @@ const __ef_provider_LiveEnv={get:name=>Effect.sync(()=>process.env[name] ?? '')}
 		out.WriteString("export {__ef_provider_" + p.Name + " as " + p.Name + "};\n")
 		for _, s := range allServices {
 			if s.Name == p.Service {
-				decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(s.Methods) + ";\nexport {__ef_provider_" + p.Name + " as " + p.Name + "};\n")
+				decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(s.Methods, declarationMap(r)) + ";\nexport {__ef_provider_" + p.Name + " as " + p.Name + "};\n")
 			}
 		}
 	}
 	for _, p := range r.Program.Providers {
 		out.WriteString("export { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
-		decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(p.Methods) + ";\nexport { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
+		decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(p.Methods, declarationMap(r)) + ";\nexport { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
 	}
 	for _, f := range r.Program.Functions {
 		out.WriteString("const __ef_function_" + f.Name + " = " + jsFunction(f) + ";\nexport { __ef_function_" + f.Name + " as " + f.Name + " };\n")
@@ -116,12 +166,19 @@ const __ef_provider_LiveEnv={get:name=>Effect.sync(()=>process.env[name] ?? '')}
 		for _, p := range f.Params {
 			params = append(params, "arg_"+p.Name+": "+jsValueType(p.Type))
 		}
-		decl.WriteString("declare const __ef_function_" + f.Name + ": (" + strings.Join(params, ", ") + ") => " + jsContract(f) + ";\nexport { __ef_function_" + f.Name + " as " + f.Name + " };\n")
+		decl.WriteString("declare const __ef_function_" + f.Name + ": (" + strings.Join(params, ", ") + ") => " + jsContractFor(f, declarationMap(r)) + ";\nexport { __ef_function_" + f.Name + " as " + f.Name + " };\n")
 	}
 	if entry {
 		out.WriteString("Effect.runPromise(__ef_function_main()).then(value => { if (value !== undefined) console.log(typeof value === 'bigint' ? value.toString() : value); }, error => { console.error(error); process.exitCode = 1; });\n")
 	}
 	return out.String(), decl.String(), nil
+}
+
+// ProgramDeclarations is a target-independent view used by both emitters.
+// Keep this projection on Result so declaration order and identity remain part
+// of the checked semantic model rather than being rediscovered by a backend.
+func (r *Result) ProgramDeclarations() []Declaration {
+	return append([]Declaration{}, r.Declarations...)
 }
 func jsFunction(f *Function) string {
 	params := []string{}
@@ -148,7 +205,11 @@ func jsBlock(b *Block, effect bool) string {
 				out.WriteString("return undefined;\n")
 			}
 		case "fail":
-			out.WriteString("return yield* Effect.fail({ _tag: " + quoted(s.Name) + " });\n")
+			payload := "{}"
+			if s.Payload != nil {
+				payload = jsPayload(s.Payload, effect)
+			}
+			out.WriteString("return yield* Effect.fail(Object.assign({ _tag: " + quoted(s.Name) + " }, " + payload + "));\n")
 		default:
 			if i == len(b.Statements)-1 {
 				out.WriteString("return ")
@@ -160,6 +221,15 @@ func jsBlock(b *Block, effect bool) string {
 }
 func jsExpr(e *Expr, effect bool) string {
 	switch e.Kind {
+	case "member":
+		left := jsExpr(e.Left, effect)
+		if e.Text == "field" {
+			return left + "[" + quoted(e.Name) + "]"
+		}
+		if e.Name == "hasError" {
+			return "(" + left + ".error != null)"
+		}
+		return left + ".value"
 	case "scope":
 		return "(yield* __ef_scoped(Effect.gen(function*(){" + jsBlock(e.Then, true) + "})))"
 	case "fork":
@@ -174,12 +244,17 @@ func jsExpr(e *Expr, effect bool) string {
 		return e.Text
 	case "unit":
 		return "undefined"
+	case "construct":
+		return jsConstruct(e, effect)
 	case "name":
 		if e.Text == "provider" {
 			return "__ef_provider_" + e.Name
 		}
 		return "__ef_local_" + e.Name
 	case "call":
+		if e.Text == "data" {
+			return jsConstructCall(e, effect)
+		}
 		if e.Text == "fiber" {
 			method := e.Left.Name
 			if method == "interrupt" {
@@ -216,18 +291,80 @@ func jsExpr(e *Expr, effect bool) string {
 			return "(yield* Effect.gen(function* () {\n" + body + "}))"
 		}
 		return "(() => {\n" + body + "})()"
+	case "match":
+		return jsMatch(e, effect)
 	}
 	panic("unchecked expression reached emitter")
 }
 
-func jsShape(methods []*Function) string {
+func jsPayload(e *Expr, effect bool) string {
+	if e.Kind != "payload" {
+		return "{ value: " + jsExpr(e, effect) + " }"
+	}
+	parts := []string{}
+	for _, field := range e.Fields {
+		parts = append(parts, "["+quoted(field.Name)+"]: "+jsExpr(field.Value, false))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+func jsConstruct(e *Expr, effect bool) string {
+	parts := []string{}
+	for _, field := range e.Fields {
+		parts = append(parts, "["+quoted(field.Name)+"]: "+jsExpr(field.Value, false))
+	}
+	if e.Left != nil && e.Left.Kind == "member" {
+		return "({ _tag: " + quoted(e.Left.Left.Name+"."+e.Left.Name) + ", " + strings.Join(parts, ", ") + " })"
+	}
+	return "({ " + strings.Join(parts, ", ") + " })"
+}
+func jsConstructCall(e *Expr, effect bool) string {
+	parts := []string{}
+	for _, field := range e.Fields {
+		parts = append(parts, "["+quoted(field.Name)+"]: "+jsExpr(field.Value, false))
+	}
+	if e.Left != nil && e.Left.Kind == "member" {
+		return "({ _tag: " + quoted(e.Left.Left.Name+"."+e.Left.Name) + ", " + strings.Join(parts, ", ") + " })"
+	}
+	return "({ " + strings.Join(parts, ", ") + " })"
+}
+func jsMatch(e *Expr, effect bool) string {
+	value := jsExpr(e.Left, effect)
+	body := "const __ef_match = " + value + ";\nswitch (__ef_match._tag) {\n"
+	for _, arm := range e.Arms {
+		body += "case " + quoted(arm.Pattern.TypeName+"."+arm.Pattern.VariantName) + ": {\n"
+		for _, field := range sortedBindingNames(arm.Pattern.Bindings) {
+			binding := arm.Pattern.Bindings[field]
+			if binding != "_" {
+				body += "const __ef_local_" + binding + " = __ef_match[" + quoted(field) + "];\n"
+			}
+		}
+		body += jsBlock(arm.Body, effect) + "}\n"
+	}
+	body += "default: throw new Error(\"unreachable non-exhaustive match\");\n}\n"
+	if effect {
+		return "(yield* Effect.gen(function* () {\n" + body + "}))"
+	}
+	return "(() => {\n" + body + "})()"
+}
+
+func declarationMap(r *Result) map[string]Declaration {
+	result := map[string]Declaration{}
+	if r == nil {
+		return result
+	}
+	for _, declaration := range r.Declarations {
+		result[declaration.Name] = declaration
+	}
+	return result
+}
+func jsShape(methods []*Function, declarations map[string]Declaration) string {
 	out := "{ "
 	for _, f := range methods {
 		params := []string{}
 		for _, p := range f.Params {
 			params = append(params, "arg_"+p.Name+": "+jsValueType(p.Type))
 		}
-		out += "readonly " + quoted(f.Name) + ": (" + strings.Join(params, ", ") + ") => " + jsContract(f) + "; "
+		out += "readonly " + quoted(f.Name) + ": (" + strings.Join(params, ", ") + ") => " + jsContractFor(f, declarations) + "; "
 	}
 	return out + "}"
 }

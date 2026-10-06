@@ -1,0 +1,26 @@
+record Request {
+    id: string
+    name: string
+}
+
+enum State {
+    Idle
+    Running { requestId: string }
+    Done { requestId: string }
+}
+
+error Invalid { message: string }
+
+fn describe(state: State) -> string {
+    match state {
+        State.Idle => "idle"
+        State.Running { requestId } => "running " + requestId
+        State.Done { requestId } => "done " + requestId
+    }
+}
+
+effect fn main() -> string {
+    let request = Request { id: "42", name: "Ada" }
+    let state = State.Running { requestId: request.id }
+    describe(state)
+}
