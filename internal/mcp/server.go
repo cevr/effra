@@ -48,6 +48,8 @@ type arguments struct {
 	Symbol           string `json:"symbol"`
 	ExpectedRevision string `json:"expectedRevision"`
 	Target           string `json:"target"`
+	Strict           bool   `json:"strict"`
+	Offset           int    `json:"offset"`
 }
 type callParams struct {
 	Name      string          `json:"name"`
@@ -64,10 +66,19 @@ func tools() []tool {
 		}
 		return map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false}
 	}
+	lintSchema := schema(false)
+	lintSchema["properties"].(map[string]any)["strict"] = map[string]any{"type": "boolean", "default": false}
+	querySchema := schema(false)
+	querySchema["properties"].(map[string]any)["offset"] = map[string]any{"type": "integer", "minimum": 0, "description": "UTF-8 byte offset in an expression diagnostic anchor"}
+	querySchema["required"] = []string{"file", "offset"}
 	annotations := map[string]bool{"readOnlyHint": true, "destructiveHint": false, "openWorldHint": false}
 	return []tool{
 		{"project.describe", "Compiler capabilities, supported target, and guardrail limits", map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}, annotations},
 		{"project.check", "Check one file; return revision, bounded diagnostics, and timings", schema(false), annotations},
+		{"project.graph", "Static service, provider and effect dependency graph; no dependent layers yet", schema(false), annotations},
+		{"project.lint", "Type-aware advice over checked source; strict mode fails on warnings", lintSchema, annotations},
+		{"lint.rules", "Stable lint codes, severity and rationale", map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}, annotations},
+		{"code.typeAt", "Checked local expression type and executed rows at a byte anchor", querySchema, annotations},
 		{"code.inspect", "Canonical declared and body contracts for a function", schema(true), annotations},
 		{"code.explain", "Local executed-call contributions introducing failures and services", schema(true), annotations},
 	}
@@ -183,12 +194,15 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 	return scanner.Err()
 }
 func call(root, name string, args arguments) (any, error) {
+	if name == "lint.rules" {
+		return compiler.LintRules(), nil
+	}
 	if name == "project.describe" {
 		return map[string]any{
 			"schemaVersion": 1, "compilerVersion": CompilerVersion,
 			"runtimes": map[string]string{"go": "typed lazy closures; managed scopes and fibers; Go standard library", "js": "effect@4.0.1"},
 			"targets":  []string{"go", "js"}, "defaultTarget": "go", "sourceExtension": ".ef", "workspace": root,
-			"operations": []string{"project.describe", "project.check", "code.inspect", "code.explain"}, "scope": "single-file",
+			"operations": []string{"project.describe", "project.check", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "project.graph"}, "scope": "single-file",
 			"guardrails": map[string]string{
 				"failures": "checked closed rows", "requirements": "checked nominal services",
 				"resourceOwnership":  "Both targets join owned fibers before releasing scope resources; Go File guards closed handles",
@@ -212,6 +226,37 @@ func call(root, name string, args arguments) (any, error) {
 	r := compiler.CompileAt(string(source), target, filepath.Dir(filepath.Join(root, args.File)))
 	if args.ExpectedRevision != "" && args.ExpectedRevision != r.Revision {
 		return nil, fmt.Errorf("stale semantic revision; current revision is %s", r.Revision)
+	}
+	if name == "project.graph" {
+		graph, err := r.Graph()
+		if err != nil {
+			return nil, err
+		}
+		if len(graph.Nodes) > 1000 || len(graph.Edges) > 2000 {
+			return nil, fmt.Errorf("graph exceeds prototype limits; use symbol inspection")
+		}
+		return graph, nil
+	}
+	if name == "project.lint" {
+		lint := r.Lint(args.Strict)
+		compilerTruncated, lintTruncated := len(lint.Diagnostics) > 100, len(lint.LintDiagnostics) > 100
+		if compilerTruncated {
+			lint.Diagnostics = lint.Diagnostics[:100]
+		}
+		if lintTruncated {
+			lint.LintDiagnostics = lint.LintDiagnostics[:100]
+		}
+		return map[string]any{"lint": lint, "diagnosticsTruncated": compilerTruncated, "lintDiagnosticsTruncated": lintTruncated}, nil
+	}
+	if name == "code.typeAt" {
+		info, err := r.TypeAt(args.Offset)
+		if err != nil {
+			return nil, err
+		}
+		if len(info.Type.Errors) > 100 || len(info.Type.Services) > 100 || len(info.ExecutedFailures) > 100 || len(info.ExecutedRequirements) > 100 {
+			return nil, fmt.Errorf("expression exceeds prototype inspection limits")
+		}
+		return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "expression": info}, nil
 	}
 	bindings := r.Bindings
 	bindingsTruncated := len(bindings) > 100
@@ -287,9 +332,30 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 	if json.Unmarshal(raw, &fields) != nil || fields == nil {
 		return args, fmt.Errorf("tool arguments must be an object")
 	}
+	if name == "code.typeAt" {
+		if _, ok := fields["offset"]; !ok {
+			return args, fmt.Errorf("offset is required")
+		}
+	}
 	for key, value := range fields {
+		if key == "strict" && name == "project.lint" {
+			flag, ok := value.(bool)
+			if !ok {
+				return args, fmt.Errorf("strict must be boolean")
+			}
+			args.Strict = flag
+			continue
+		}
+		if key == "offset" && name == "code.typeAt" {
+			n, ok := value.(float64)
+			if !ok || n < 0 || n > 2*1024*1024 || n != float64(int(n)) {
+				return args, fmt.Errorf("offset must be a non-negative integer within the source limit")
+			}
+			args.Offset = int(n)
+			continue
+		}
 		text, ok := value.(string)
-		if !ok || name == "project.describe" {
+		if !ok || name == "project.describe" || name == "lint.rules" {
 			return args, fmt.Errorf("invalid tool argument %s", key)
 		}
 		switch key {
@@ -303,7 +369,7 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 		case "expectedRevision":
 			args.ExpectedRevision = text
 		case "symbol":
-			if name == "project.check" {
+			if name != "code.inspect" && name != "code.explain" {
 				return args, fmt.Errorf("unexpected symbol argument")
 			}
 			args.Symbol = text
@@ -311,7 +377,7 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 			return args, fmt.Errorf("unknown tool argument %s", key)
 		}
 	}
-	if name != "project.describe" && args.File == "" {
+	if name != "project.describe" && name != "lint.rules" && args.File == "" {
 		return args, fmt.Errorf("file is required")
 	}
 	if (name == "code.inspect" || name == "code.explain") && args.Symbol == "" {

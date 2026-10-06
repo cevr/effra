@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"effra.local/prototype/internal/compiler"
@@ -37,6 +38,7 @@ func load(path, target string) (*compiler.Result, error) {
 type options struct {
 	target, output string
 	entry          bool
+	strict         bool
 	positional     []string
 }
 
@@ -57,6 +59,8 @@ func parseOptions(args []string) (options, error) {
 			}
 		case "--entry":
 			opts.entry = true
+		case "--strict":
+			opts.strict = true
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				return opts, fmt.Errorf("unknown option %s", args[i])
@@ -70,9 +74,12 @@ func parseOptions(args []string) (options, error) {
 	return opts, nil
 }
 func command(args []string) error {
-	if len(args) == 0 {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | mcp [ROOT]")
+	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | mcp [ROOT]")
 		return nil
+	}
+	if len(args) == 2 && args[0] == "lint" && args[1] == "rules" {
+		return printJSON(compiler.LintRules())
 	}
 	if args[0] == "mcp" {
 		root := "."
@@ -91,6 +98,9 @@ func command(args []string) error {
 	if len(opts.positional) == 0 {
 		return fmt.Errorf("source file required")
 	}
+	if opts.strict && args[0] != "lint" {
+		return fmt.Errorf("--strict is only supported by lint")
+	}
 	if opts.output != "" && args[0] != "build" {
 		return fmt.Errorf("-o is only supported by build")
 	}
@@ -98,7 +108,7 @@ func command(args []string) error {
 		return fmt.Errorf("--entry is only needed for JavaScript builds")
 	}
 	want := 1
-	if args[0] == "inspect" || args[0] == "explain" {
+	if args[0] == "inspect" || args[0] == "explain" || args[0] == "query" {
 		want = 2
 	}
 	if len(opts.positional) != want {
@@ -109,6 +119,31 @@ func command(args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "graph":
+		graph, err := r.Graph()
+		if err != nil {
+			return err
+		}
+		return printJSON(graph)
+	case "lint":
+		lint := r.Lint(opts.strict)
+		if err := printJSON(lint); err != nil {
+			return err
+		}
+		if !lint.LintPassed {
+			return fmt.Errorf("lint failed")
+		}
+		return nil
+	case "query":
+		offset, err := strconv.Atoi(opts.positional[1])
+		if err != nil {
+			return fmt.Errorf("byte offset must be an integer")
+		}
+		info, err := r.TypeAt(offset)
+		if err != nil {
+			return err
+		}
+		return printJSON(map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "expression": info})
 	case "check":
 		if err := printJSON(r); err != nil {
 			return err

@@ -61,11 +61,40 @@ server = subprocess.run([ef, "mcp", str(root)], input="\n".join(map(json.dumps, 
 assert server.returncode == 0, server.stderr
 responses = [json.loads(line) for line in server.stdout.splitlines()]
 assert len(responses) == 6
-assert len(responses[1]["result"]["tools"]) == 4
+assert len(responses[1]["result"]["tools"]) == 8
 mcp = responses[2]["result"]["structuredContent"]
 assert mcp["symbol"] == inspected["symbol"] and mcp["revision"] == inspected["revision"]
 assert responses[3]["result"]["isError"]
 assert responses[4]["result"]["structuredContent"]["bindings"] == bindings["bindings"]
 assert responses[4]["result"]["structuredContent"]["revision"] == bindings["revision"]
 assert "Go imports" in responses[5]["result"]["structuredContent"]["guardrails"]["targetCapabilities"]
-print("native Go executable, JS module, CLI, and stdio MCP: passed")
+rules=json.loads(run("lint","rules").stdout)
+assert {r["name"] for r in rules} == {"unused-recipe","redundant-provision","unused-go-import"}
+graph=json.loads(run("graph","examples/workflow.ef").stdout)
+assert any(e["kind"]=="requires" and e["from"]=="function:welcome" and e["service"]=="Directory" for e in graph["edges"])
+with tempfile.TemporaryDirectory(prefix="effra-tooling-") as tmp:
+    source="effect fn task() -> string { \"ok\" } effect fn main() -> () { let forgotten = task(); () }"
+    file=pathlib.Path(tmp)/"main.ef"
+    file.write_text(source)
+    lint=json.loads(run("lint",str(file),"--strict",success=False).stdout)
+    assert lint["checked"] and not lint["lintPassed"] and lint["warnings"]==1
+    assert json.loads(run("lint",str(file)).stdout)["lintPassed"]
+    offset=source.index("task();")
+    query=json.loads(run("query",str(file),str(offset)).stdout)
+    assert query["expression"]["type"]["effect"] and query["expression"]["type"]["success"]=="string"
+    calls=messages[:2]+[
+        {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"project.lint","arguments":{"file":"main.ef","strict":True}}},
+        {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"code.typeAt","arguments":{"file":"main.ef","offset":offset,"expectedRevision":lint["revision"]}}},
+        {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"project.graph","arguments":{"file":"main.ef"}}},
+        {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"lint.rules","arguments":{}}},
+        {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"code.typeAt","arguments":{"file":"main.ef","offset":1.5}}},
+    ]
+    server=subprocess.run([ef,"mcp",tmp],input="\n".join(map(json.dumps,calls))+"\n",text=True,capture_output=True)
+    assert server.returncode==0,server.stderr
+    replies=[json.loads(line) for line in server.stdout.splitlines()]
+    assert replies[1]["result"]["structuredContent"]["lint"]==lint
+    assert replies[2]["result"]["structuredContent"]["expression"]==query["expression"]
+    assert replies[3]["result"]["structuredContent"]["nodes"]
+    assert replies[4]["result"]["structuredContent"]==rules
+    assert replies[5]["error"]["code"]==-32602
+print("native Go executable, JS module, CLI lint/query/graph and stdio MCP: passed")
