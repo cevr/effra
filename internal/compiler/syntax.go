@@ -55,9 +55,10 @@ type Field struct {
 	Span    Span    `json:"span"`
 }
 type Variant struct {
-	Name   string  `json:"name"`
-	Fields []Field `json:"fields,omitempty"`
-	Span   Span    `json:"span"`
+	Name          string  `json:"name"`
+	Fields        []Field `json:"fields,omitempty"`
+	Parenthesized bool    `json:"-"`
+	Span          Span    `json:"span"`
 }
 type Record struct {
 	Name   string  `json:"name"`
@@ -113,6 +114,7 @@ type Provider struct {
 type Program struct {
 	Imports     []GoImport
 	Comments    []Comment
+	Items       []*SyntaxItem `json:"-"`
 	Bindings    map[string]Binding
 	Modules     []*goModule
 	UsedImports map[string]bool
@@ -125,7 +127,26 @@ type Program struct {
 	Providers   []*Provider
 	Functions   []*Function
 }
-type Block struct{ Statements []*Statement }
+
+// SyntaxItem preserves the lexical declaration order that semantic
+// projections intentionally group by kind. Formatter and future source
+// adapters use these nodes as the ordered syntax seam; the grouped Program
+// slices remain the checker-facing representation.
+type SyntaxItem struct {
+	Kind     string
+	Import   *GoImport
+	Error    *ErrorDecl
+	Record   *Record
+	Enum     *Enum
+	Service  *Service
+	Provider *Provider
+	Function *Function
+	Span     Span
+}
+type Block struct {
+	Statements []*Statement
+	Explicit   bool `json:"-"`
+}
 type Statement struct {
 	Kind    string
 	Name    string
@@ -186,7 +207,7 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 			commentStart := i
 			i += 2
 			column += 2
-			for i < len(source) && source[i] != '\n' {
+			for i < len(source) && source[i] != '\n' && source[i] != '\r' {
 				i++
 				column++
 			}
@@ -243,9 +264,14 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 	return out, comments, nil
 }
 func parse(source string) (program *Program, diagnostics []Diagnostic) {
+	program, _, diagnostics = parseSyntax(source)
+	return program, diagnostics
+}
+
+func parseSyntax(source string) (program *Program, tokens []token, diagnostics []Diagnostic) {
 	tokens, comments, diagnostics := lex(source)
 	if len(diagnostics) > 0 {
-		return nil, diagnostics
+		return nil, tokens, diagnostics
 	}
 	defer func() {
 		if value := recover(); value != nil {
@@ -262,6 +288,7 @@ func parse(source string) (program *Program, diagnostics []Diagnostic) {
 	for p.peek().kind != "eof" {
 		switch p.peek().text {
 		case "import":
+			start := p.peek().span
 			p.take()
 			p.expect("go")
 			alias := p.name()
@@ -271,9 +298,12 @@ func parse(source string) (program *Program, diagnostics []Diagnostic) {
 			}
 			var decoded string
 			_ = json.Unmarshal([]byte(path.text), &decoded)
-			program.Imports = append(program.Imports, GoImport{alias.text, decoded, alias.span})
+			importDecl := &GoImport{alias.text, decoded, alias.span}
+			program.Imports = append(program.Imports, *importDecl)
+			program.Items = append(program.Items, &SyntaxItem{Kind: "import", Import: importDecl, Span: start})
 			p.accept(";")
 		case "error":
+			start := p.peek().span
 			p.take()
 			name := p.name()
 			if _, exists := program.Errors[name.text]; exists {
@@ -285,13 +315,18 @@ func parse(source string) (program *Program, diagnostics []Diagnostic) {
 				decl.Fields = p.fields()
 			}
 			program.ErrorDecls = append(program.ErrorDecls, decl)
+			program.Items = append(program.Items, &SyntaxItem{Kind: "error", Error: decl, Span: start})
 			p.accept(";")
 		case "record", "struct":
+			start := p.peek().span
 			p.take()
 			name := p.name()
-			program.Records = append(program.Records, &Record{Name: name.text, Fields: p.fields(), Span: name.span})
+			record := &Record{Name: name.text, Fields: p.fields(), Span: name.span}
+			program.Records = append(program.Records, record)
+			program.Items = append(program.Items, &SyntaxItem{Kind: "record", Record: record, Span: start})
 			p.accept(";")
 		case "enum":
+			start := p.peek().span
 			p.take()
 			name := p.name()
 			p.expect("{")
@@ -304,6 +339,7 @@ func parse(source string) (program *Program, diagnostics []Diagnostic) {
 				if p.peek().text == "{" {
 					variant.Fields = p.fields()
 				} else if p.accept("(") {
+					variant.Parenthesized = true
 					for !p.accept(")") {
 						field := p.name()
 						p.expect(":")
@@ -319,8 +355,10 @@ func parse(source string) (program *Program, diagnostics []Diagnostic) {
 				p.accept(";")
 			}
 			program.Enums = append(program.Enums, e)
+			program.Items = append(program.Items, &SyntaxItem{Kind: "enum", Enum: e, Span: start})
 			p.accept(";")
 		case "service":
+			start := p.peek().span
 			p.take()
 			name := p.name()
 			p.expect("{")
@@ -333,7 +371,9 @@ func parse(source string) (program *Program, diagnostics []Diagnostic) {
 				s.Methods = append(s.Methods, f)
 			}
 			program.Services = append(program.Services, s)
+			program.Items = append(program.Items, &SyntaxItem{Kind: "service", Service: s, Span: start})
 		case "impl":
+			start := p.peek().span
 			p.take()
 			name := p.name()
 			var params []Param
@@ -360,13 +400,17 @@ func parse(source string) (program *Program, diagnostics []Diagnostic) {
 				v.Methods = append(v.Methods, p.function(true))
 			}
 			program.Providers = append(program.Providers, v)
+			program.Items = append(program.Items, &SyntaxItem{Kind: "impl", Provider: v, Span: start})
 		case "effect", "fn":
-			program.Functions = append(program.Functions, p.function(true))
+			start := p.peek().span
+			function := p.function(true)
+			program.Functions = append(program.Functions, function)
+			program.Items = append(program.Items, &SyntaxItem{Kind: "function", Function: function, Span: start})
 		default:
 			p.fail(p.peek(), "expected error, record, enum, service, impl, or function declaration")
 		}
 	}
-	return program, nil
+	return program, tokens, nil
 }
 func (p *parser) peek() token { return p.tokens[p.at] }
 func (p *parser) take() token {
@@ -499,7 +543,7 @@ func (p *parser) block() *Block {
 		p.fail(p.peek(), "syntax nesting exceeds prototype limit of 256")
 	}
 	p.expect("{")
-	b := &Block{}
+	b := &Block{Explicit: true}
 	for !p.accept("}") {
 		start := p.peek()
 		s := &Statement{Span: start.span}
