@@ -21,6 +21,8 @@ Keep language guarantees intact: size optimizations cannot remove cancellation c
 
 The current `runtime/effra.Sources()` copies every runtime source file into generated Go modules. That includes the HTTP file and its imports even when no HTTP operation is called. Linker removal of unreachable functions alone does not establish removal of package initialization. This emission boundary needs implementation and binary evidence.
 
+The preparatory source seam exposes `runtime/effra.SelectSources`, which closes an explicit root set over the `core`, `sync`, `http`, `files`, `console`, `env`, `inspect`, and `interop` modules while keeping `Sources()` as the full admitted runtime set for current emission. `core` conservatively groups effect, scope, fiber, managed-signal, and scheduler sources because their ownership and scheduling types are mutually connected; this grouping is a source boundary, not an application reachability or binary-size claim. Empty roots select no sources, and unknown roots fail explicitly.
+
 ## Acceptance matrix
 
 Use source-controlled public programs with matched toolchains, target, CGO mode, build tags and linker flags:
@@ -43,6 +45,8 @@ A machine declaration available only to checking/inspection does not root the ac
 Establish per-fixture budgets from measured baselines rather than inventing a global target. Keep raw before/after bytes and losing results. Build-stage timings belong to the separate compile-performance suite; contention-independent byte counts do not justify compile-speed claims.
 
 ## Delivery
+
+The source-module split must also work over outputs from the previous compiler. The current additive writer leaves the former `stdlib.go` alongside its replacement declarations: both fresh versions compile, but the upgrade fails. Implement isolated, owned complete generated modules before integrating that split. This output boundary can proceed before canonical application reachability, retaining current all-source emission. Full source origin, target and ordinary/test mode distinguish artifacts; interrupted publication, concurrent builds and unchanged reuse need explicit controls. Do not satisfy this requirement by deleting old output directories in the gate or special-casing a retired filename.
 
 1. Implement module selection through the versioned bundled interface/runtime boundary and preserve both-target behavior.
 2. Add minimal and managed-effect size/dependency fixtures, then codec and HTTP fixtures as those libraries land.

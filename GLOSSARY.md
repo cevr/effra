@@ -8,6 +8,10 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Closed enum**: A nominal set of alternatives, each with its own declared payload.
 
+**Absence**: An explicitly selected closed alternative describing a missing value, distinct from an uninitialized field or a bare nil/null value.
+
+**Option** (specified): A generic closed enum with `None` and `Some(T)` alternatives. `Some` contains an admitted value of `T`, never an unchecked nil host reference.
+
 **Exhaustive match**: An interpretation that covers each declared alternative exactly once and executes only its selected arm.
 
 **Failure payload**: The declared data carried by a named failure, separate from an ordinary success value.
@@ -44,6 +48,14 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Host declaration**: A Go or TypeScript declaration supplying the native shape and identity of an imported value or callable.
 
+**Native Go protocol** (specified): An imported Go interface and its method set, interpreted by Go's assignment rules. Its behavioral obligations remain distinct from type compatibility.
+
+**Host borrow** (specified): Use of a native value under an existing owner's lifetime without acquiring release authority; retention and aliasing constraints remain explicit.
+
+**Host adoption** (specified): Establishing managed release authority for an admitted native resource and its tracked aliases under an owning scope.
+
+**Native descriptor** (specified): An OS-specific handle whose validity follows a native resource lifetime; it is distinct from the resource object and its interfaces.
+
 **Codec** (specified, not yet implemented): A checked witness relating a wire type and a domain type through separately contracted decoding and encoding operations.
 
 **Structural derivation** (specified): Generating a codec's structural rules from canonical checked data declarations and an explicit representation policy.
@@ -53,6 +65,16 @@ Effra describes server programs using explicit, inspectable effect contracts.
 **Machine** (specified): A checked definition of state and event types, transition policies and state-owned behavior.
 
 **Actor** (specified): A running instance of a machine, with its own current state, owning scope and event mailbox.
+
+**Supervisor** (proposed): An owner that observes completed child exits and applies an explicit restart, stop or escalation policy using fresh child factories and bounded restart attempts.
+
+**Actor address** (proposed): A typed identity used to route to an actor independently of its current running instance; an address alone promises neither persistence nor delivery.
+
+**Actor incarnation** (proposed): One running instance associated with an address, distinguished from its predecessors and from its individual state entries.
+
+**Durable entity** (proposed): An addressable actor whose provider contract preserves declared domain data and acknowledged progress across process failure, with explicit storage, codec and ownership policies.
+
+**Workflow replay** (proposed): Reconstructing execution from versioned recorded steps and outcomes under an explicit replay contract; ordinary effect recipes do not imply replay safety.
 
 **Machine step** (specified): An ordinary pure or effectful function that consumes a state and event and returns an explicit transition decision. Effectful evaluation has an actor-owned scope and completes before state commit.
 

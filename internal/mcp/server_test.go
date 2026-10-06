@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -57,7 +59,7 @@ func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
 		t.Fatal(result)
 	}
 	listed := responses[2]["result"].(map[string]any)["tools"].([]any)
-	if len(listed) != 10 {
+	if len(listed) != 11 {
 		t.Fatal(listed)
 	}
 	inspected := responses[3]["result"].(map[string]any)["structuredContent"].(map[string]any)
@@ -395,6 +397,264 @@ func TestArgumentSchemas(t *testing.T) {
 		if _, err := decodeArguments(tc.name, json.RawMessage(tc.raw)); err == nil {
 			t.Fatalf("accepted %s %s", tc.name, tc.raw)
 		}
+	}
+}
+
+func TestFormatBufferAndDiskParity(t *testing.T) {
+	source := `import go missing "example.invalid/no-such-package"
+effect fn main() -> string { "ok" }`
+	want, err := compiler.FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := decodeArguments("code.format", json.RawMessage(fmt.Sprintf(`{"source":%q,"uri":"buffer://main.ef","expectedDigest":%q}`, source, compiler.FormatDigest(source))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := formatCode(t.TempDir(), args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := result.(map[string]any)
+	if payload["origin"] != "buffer" || payload["uri"] != "buffer://main.ef" || payload["text"] != want.Text || payload["inputDigest"] != want.InputDigest || payload["outputDigest"] != want.OutputDigest {
+		t.Fatalf("buffer format drifted from core: payload=%+v want=%+v", payload, want)
+	}
+
+	root := t.TempDir()
+	path := filepath.Join(root, "main.ef")
+	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diskArgs, err := decodeArguments("code.format", json.RawMessage(`{"file":"main.ef"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	diskResult, err := formatCode(root, diskArgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diskPayload := diskResult.(map[string]any)
+	uri, err := compiler.FileURI(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diskPayload["origin"] != "disk" || diskPayload["uri"] != uri || diskPayload["text"] != want.Text {
+		t.Fatalf("disk format mismatch: payload=%+v want=%+v uri=%s", diskPayload, want, uri)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.ModTime() != after.ModTime() || before.Size() != after.Size() {
+		t.Fatal("MCP formatting mutated the disk snapshot")
+	}
+}
+
+func TestFormatRejectsStaleAndInvalidOrigins(t *testing.T) {
+	for _, raw := range []string{
+		`{"file":"main.ef","source":""}`,
+		`{"uri":"buffer://main.ef"}`,
+		`{"file":"main.ef","uri":"buffer://main.ef"}`,
+		`{"source":"","expectedDigest":""}`,
+		`{"source":"","target":"go"}`,
+		`{"source":"","target":"js"}`,
+	} {
+		if _, err := decodeArguments("code.format", json.RawMessage(raw)); err == nil {
+			t.Fatalf("accepted invalid code.format arguments %s", raw)
+		}
+	}
+	args, err := decodeArguments("code.format", json.RawMessage(fmt.Sprintf(`{"source":%q,"expectedDigest":"stale"}`, `effect fn main() -> string { "ok" }`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := formatCode(t.TempDir(), args); err == nil || !strings.Contains(err.Error(), "stale format source") {
+		t.Fatalf("stale digest was accepted: %v", err)
+	}
+	exact := strings.Repeat(" ", maxFormatSourceBytes)
+	args, err = decodeArguments("code.format", json.RawMessage(fmt.Sprintf(`{"source":%q}`, exact)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := formatCode(t.TempDir(), args); err != nil {
+		t.Fatalf("source at the exact limit was rejected: %v", err)
+	}
+	tooLarge := strings.Repeat(" ", maxFormatSourceBytes+1)
+	args, err = decodeArguments("code.format", json.RawMessage(fmt.Sprintf(`{"source":%q}`, tooLarge)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := formatCode(t.TempDir(), args); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("source limit was not explicit: %v", err)
+	}
+}
+
+func TestFormatRejectsInvalidUTF8ForBufferAndDisk(t *testing.T) {
+	invalid := append([]byte("// invalid "), 0xff)
+	invalid = append(invalid, []byte("\neffect fn main() -> () { () }\n")...)
+	bufferArgs := arguments{Source: string(invalid), SourcePresent: true}
+	if _, err := formatCode(t.TempDir(), bufferArgs); err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+		t.Fatalf("invalid buffer UTF-8 was accepted: %v", err)
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "invalid.ef")
+	if err := os.WriteFile(path, invalid, 0600); err != nil {
+		t.Fatal(err)
+	}
+	diskArgs := arguments{File: "invalid.ef", FilePresent: true}
+	if _, err := formatCode(root, diskArgs); err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+		t.Fatalf("invalid disk UTF-8 was accepted: %v", err)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, invalid) {
+		t.Fatalf("invalid disk source was changed: err=%v bytes=%v", err, got)
+	}
+}
+
+func TestRejectedFormatRequestStillReleasesQueuedPing(t *testing.T) {
+	root := t.TempDir()
+	messages := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code.format","arguments":{"source":"","target":"go"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"code.format","arguments":{"source":"effect fn main() -> string { @ }"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"ping"}`,
+	}
+	var output bytes.Buffer
+	if err := Serve(root, strings.NewReader(strings.Join(messages, "\n")), &output); err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(&output)
+	responses := []map[string]any{}
+	for decoder.More() {
+		var response map[string]any
+		if err := decoder.Decode(&response); err != nil {
+			t.Fatal(err)
+		}
+		responses = append(responses, response)
+	}
+	if len(responses) != 4 || responses[1]["error"] == nil || responses[2]["result"].(map[string]any)["isError"] != true || !reflect.DeepEqual(responses[3]["result"], map[string]any{}) {
+		t.Fatalf("queued ping was not completed after rejected format: %+v", responses)
+	}
+}
+
+func TestMCPFrameReaderDrainsOversizeAndAcceptsExactLimit(t *testing.T) {
+	exact := strings.Repeat("x", maxMCPFrameBytes)
+	reader := bufio.NewReader(strings.NewReader(exact + "\nnext\n"))
+	frame, status, err := readMCPFrame(reader, maxMCPFrameBytes)
+	if err != nil || status != mcpFrameComplete || len(frame) != maxMCPFrameBytes {
+		t.Fatalf("exact frame was not admitted: status=%v length=%d err=%v", status, len(frame), err)
+	}
+	frame, status, err = readMCPFrame(reader, maxMCPFrameBytes)
+	if err != nil || status != mcpFrameComplete || string(frame) != "next" {
+		t.Fatalf("queued frame was not preserved: status=%v frame=%q err=%v", status, frame, err)
+	}
+
+	over := strings.Repeat("x", maxMCPFrameBytes+1)
+	reader = bufio.NewReader(strings.NewReader(over + "\nnext\n"))
+	frame, status, err = readMCPFrame(reader, maxMCPFrameBytes)
+	if err != nil || status != mcpFrameTooLarge || frame != nil {
+		t.Fatalf("oversized frame was accumulated or misclassified: status=%v frame=%v err=%v", status, frame, err)
+	}
+	frame, status, err = readMCPFrame(reader, maxMCPFrameBytes)
+	if err != nil || status != mcpFrameComplete || string(frame) != "next" {
+		t.Fatalf("oversized frame did not drain to the next request: status=%v frame=%q err=%v", status, frame, err)
+	}
+}
+
+func TestMCPResponseFrameCapIsAllOrError(t *testing.T) {
+	result := map[string]any{"origin": "buffer", "text": "", "uri": strings.Repeat("<", 1024)}
+	res := response{JSONRPC: "2.0", ID: json.RawMessage("1"), Result: toolResult{Content: []map[string]string{{"type": "text", "text": "summary"}}, StructuredContent: result}}
+	encoded, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exact bytes.Buffer
+	if err := writeMCPResponse(&exact, res, len(encoded)); err != nil {
+		t.Fatalf("exact response bound rejected complete frame: %v", err)
+	}
+	if !bytes.HasSuffix(exact.Bytes(), []byte("\n")) || len(exact.Bytes()) != len(encoded)+1 {
+		t.Fatalf("exact response frame was not written whole: %d bytes", exact.Len())
+	}
+	var over bytes.Buffer
+	if err := writeMCPResponse(&over, res, len(encoded)-1); !errors.Is(err, errMCPResponseTooLarge) || over.Len() != 0 {
+		t.Fatalf("oversized response was partially written: err=%v bytes=%d", err, over.Len())
+	}
+}
+
+func TestBoundedFormatResponsePreservesIDsAndUsesCompactFallback(t *testing.T) {
+	id := json.RawMessage(`"` + strings.Repeat("<", 1024) + `"`)
+	value := response{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result: toolResult{
+			Content: []map[string]string{{"type": "text", "text": "summary"}},
+		},
+	}
+	encoded, err := marshalBoundedFormatResponse(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte(`\\u003c`)) || !bytes.Contains(encoded, []byte(strings.Repeat("<", 1024))) {
+		t.Fatalf("bounded response changed a valid ID: %q", encoded[:min(len(encoded), 128)])
+	}
+	if !boundedFormatResponseFits(compactFormatError(id)) {
+		t.Fatal("small bounded-format ID did not fit the compact fallback")
+	}
+
+	base, err := marshalBoundedFormatResponse(compactFormatError(json.RawMessage("null")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseWithoutID := len(base) - len("null")
+	exactIDBytes := maxMCPFrameBytes - baseWithoutID
+	if exactIDBytes < 2 {
+		t.Fatalf("compact fallback overhead unexpectedly exceeds frame cap: %d", baseWithoutID)
+	}
+	exactID := json.RawMessage(`"` + strings.Repeat("a", exactIDBytes-2) + `"`)
+	if exact, err := marshalBoundedFormatResponse(compactFormatError(exactID)); err != nil || len(exact) != maxMCPFrameBytes {
+		t.Fatalf("compact fallback exact boundary drifted: length=%d err=%v", len(exact), err)
+	}
+	var exactOutput bytes.Buffer
+	if err := writeBoundedFormatResponse(&exactOutput, compactFormatError(exactID)); err != nil {
+		t.Fatalf("compact fallback exact boundary rejected: %v", err)
+	}
+	overID := json.RawMessage(`"` + strings.Repeat("a", exactIDBytes-1) + `"`)
+	var overOutput bytes.Buffer
+	if err := writeBoundedFormatResponse(&overOutput, compactFormatError(overID)); !errors.Is(err, errMCPResponseTooLarge) || overOutput.Len() != 0 {
+		t.Fatalf("compact fallback +1 boundary was not rejected atomically: err=%v bytes=%d", err, overOutput.Len())
+	}
+}
+
+func TestBoundedFormatResponsePreservesValidatedScalarIDRepresentations(t *testing.T) {
+	for _, raw := range []string{
+		`"<\"\u0001"`,
+		"\"\u2028\u2029\"",
+		`-0.0`,
+		`null`,
+	} {
+		encoded, err := marshalBoundedFormatResponse(response{
+			JSONRPC: "2.0",
+			ID:      json.RawMessage(raw),
+			Error:   &rpcError{-32602, "too large"},
+		})
+		if err != nil {
+			t.Fatalf("ID %q was rejected: %v", raw, err)
+		}
+		if !bytes.Contains(encoded, []byte(`,"id":`+raw+`,`)) && !bytes.Contains(encoded, []byte(`,"id":`+raw+`}`)) {
+			t.Fatalf("bounded response changed scalar ID %q: %q", raw, encoded)
+		}
+	}
+	if validMCPRequestID(json.RawMessage(`"bad`)) {
+		t.Fatal("malformed scalar ID was admitted")
+	}
+	if validMCPRequestID(json.RawMessage("\"\xff\"")) {
+		t.Fatal("invalid UTF-8 scalar ID was admitted")
+	}
+	if !validMCPRequestID(json.RawMessage(`999999999999999999999999999999999999999999999999999999999999999999999999`)) {
+		t.Fatal("large JSON number ID was rejected by float conversion")
 	}
 }
 

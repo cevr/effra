@@ -1,6 +1,6 @@
 # Production foundation contracts
 
-Status: implementation authorized by the owner on 2026-10-05 through Wayfinder + implement-spec. Integration branch: `integration/production-foundations`. The [implementation graph](../wayfinder/issues/foundation-spec.md) is separate from existing HITL decision tickets; completing code does not close those decisions.
+Status: finite foundation stage implemented and reviewed through `a9da03a`, with combined race/tool receipts at `8debbc2`, 2026-10-06. See [retained evidence and limits](../receipts/foundations-2026-10-06/README.md). Implementation was authorized by the owner on 2026-10-05 through Wayfinder + implement-spec. Integration branch: `integration/production-foundations`. The [implementation graph](../wayfinder/issues/foundation-spec.md) is separate from existing HITL decision tickets; completing code does not close those decisions.
 
 This first complete foundation spec addresses the load-bearing gaps surfaced by generic service, orchestration, lifecycle, lint and testing patterns. Broader host-object, wire-codec, bounded-stream, database and deployment facilities remain subsequent stages in the [map](../wayfinder/issues/map.md), rather than fabricated guarantees of this stage.
 

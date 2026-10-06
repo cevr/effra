@@ -20,35 +20,45 @@ On 2026-10-06 the owner explicitly set the goal to fully implement the authorize
 
 Use upstream implementation/test evidence, real usage, independent counsel and measured results to add concrete acceptance clauses and task dependencies. Prioritize changes that make the standard library reusable, preserve explicit inspectable contracts and improve measured costs. Record new opportunities with a finite supported scope and executable exit criteria; do not convert an aspiration into an implemented guarantee. Existing HITL decision tickets remain separate and require actual owner feedback before closure. No push is authorized.
 
+Owner update, 2026-10-06: defer benchmark development and measurement until the final phase, and increase independent implementation parallelism. Keep canonical type work, generated output ownership, upstream conformance import/mapping and [LSP diagnostics/document lifecycle](lsp-diagnostics.md) in isolated lanes. Their shared contracts determine integration order; parallel work does not bypass review or dependent feature gates.
+
 ## Decisions so far
 
 - [Which production patterns constrain the next foundation contracts?](research-foundations.md): timer scheduling, dependency capture and nested ownership set the foundation acceptance seams.
+- [Bundled standard library capability contracts](stdlib-parity.md): resolved the finite inventory/specification question through pinned source/tests, counsel and generic adoption patterns; implementation remains open in five batches.
 
 ## Additional implementation
 
+- [Automatic Go host values and standard protocols](host-interop.md): owner-required native declaration reuse, complete results, direct method/interface compatibility and explicit managed borrowing/callback boundaries. Four finite units and source-grounded acceptance are specified; primitive-only imports do not establish these guarantees.
+
 - [Bound shared syntax traversal](syntax-traversal.md): resolved at45b43d2 with canonical child visits across formatter, lint, diagnostics, graph, type queries and test admission. Permanent deep CLI/MCP queries retain their facts and service a queued ping; integration gates pass.
 
-- [Canonical formatter](formatter.md), followed by [editor formatting](editor-formatting.md): one comment-preserving printer for `ef fmt`, CI checks and revision-bound MCP/LSP previews, independent of typechecking and backend execution.
+- [Canonical formatter](formatter.md): resolved through19a450b with one comment-preserving printer, bounded `ef fmt`/read-only MCP adapters and twelve authored examples checked by the gate. Independent review, exact-output replay and integration gates pass. [Editor formatting](editor-formatting.md) remains separately pending the language server.
 
 - [Versioned custom lint rules and shared rule packs](custom-lint.md): user-authored policies consume canonical facts and report through CLI/MCP/LSP, with options, source-fixture tests and optional bounded execution independent of ordinary compilation.
 
 - [Shared editor-grade diagnostics](semantic-diagnostics.md), [complete canonical types](semantic-types.md), and a [stdio language server](language-server.md): owner-requested warnings/errors and full semantic inspection across CLI, MCP and editor, with one checked snapshot model.
 
+  The independently useful [versioned LSP diagnostics/document child](lsp-diagnostics.md) is integrated and reviewed at `6cbbed0` with real framed-process and full integration gates. Full type/navigation/formatting capabilities remain pending the parent contract.
+
 - [Matched server performance against TypeScript and optimized Go](server-benchmarks.md): owner-requested server equivalence, throughput/latency, resource, startup/shutdown and separate build receipts. Performance superiority remains a measured question.
 
 - [Bundled standard library capability and language contracts](stdlib-parity.md): owner-directed Effect-grade library distribution, with compiler-enforced semantics, ordinary inspectable library contracts and staged behavioral parity.
+- Library implementation: [owned core](stdlib-owned-core.md), [services](stdlib-services.md), [bounded flow](stdlib-flow.md), [shared producers/platform clients](stdlib-shared-platform.md), and [telemetry/batching](stdlib-telemetry-batching.md), with finite [contracts and causal gates](../../specs/standard-library-capabilities.md). Existing native server work retains its own graph and priority.
 
 - [Native codecs and typed server contracts](native-server-spec.md): reusable bundled interfaces, typed function values, checked codecs, managed endpoints and compatible unary RPC precede actual framework measurements.
 
-- [Pinned upstream tests and executable conformance mapping](upstream-conformance.md): licensed reference corpus plus explicit behavior-to-Effra test mapping; copied tests do not count as native passes.
+- [Pinned upstream tests and executable conformance mapping](upstream-conformance.md): integrated and reviewed at62baa74 with licensed immutable corpus, ten qualified behavior mappings and actual selected Go/JS acceptance. Full integration gates pass; copied tests do not count as native passes. Later library/server tasks extend the same mapping.
 
 - [Checked machines and owned actors](state-machines.md): owner-requested state-machine primitive over ordinary ADTs, explicit pure or effectful steps, owned invocation and shared graph inspection. Flat states first; advanced statecharts/durability remain unsupported until specified.
 
 - [Reusable generic data and product matching](generic-data.md), followed by [payload-aware recovery](effect-recovery.md): ordinary Option/Result, finite generic data, exhaustive state/event decisions and typed outcome conversion shared by codecs and machines.
 
-- [Reachable runtime modules and small executable receipts](binary-reachability.md): small binaries with unused standard-library facilities excluded, including through fluent APIs; module/import/symbol and raw size evidence accompany implementation.
+- [Reachable runtime modules and small executable receipts](binary-reachability.md): small binaries with unused standard-library facilities excluded, including through fluent APIs; module/import/symbol and raw size evidence accompany implementation. [Runtime source modules](runtime-modules.md) completed and integrated at637313b after the owned-output prerequisite; checked application reachability and size proof remain open.
 
 - [Direct native execution and matched build cost](native-execution-lowering.md): the retained long-body compiler profile motivates a general lowering repair after canonical function contracts, preserving laziness and managed execution while measuring backend cost separately.
+
+- [Isolated owned native generated modules](generated-output-ownership.md): completed and integrated at2e23a894 with full gates and independent review. Complete immutable modules preserve legacy/unknown output and validate reuse; this closes the runtime split's output prerequisite, while application reachability remains open.
 
 ## Foundation implementation receipts
 
@@ -64,8 +74,8 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 - The server slice's HTTP/database boundary and startup/shutdown wiring once lifecycle and backend semantics have concrete evidence.
 - The shape of general higher-order row inference once the small compiler reveals its pressure points.
 - Runtime/source correlation beyond current bounded scope snapshots.
-- Full named host values, methods, callbacks, codecs and wire migration policy after closed data and provider construction are exercised.
-- Bounded streams, replay/ACK accounting, database transactions/outbox delivery and managed subprocess fixtures after portable data, concurrency and interop foundations establish their seams.
+- TypeScript host values/declaration consumption, broader foreign generic support and wire migration policy beyond the finite Go protocol and codec contracts.
+- General transactional-program admission, durable replay/ACK accounting and database transactions/outbox delivery beyond the finite bounded-flow and managed-platform contracts.
 - Incremental package checking, reusable host-import sessions and general verified edit plans after the larger source model is established. Canonical formatting now has the finite implementation contract above.
 
 ## Out of scope

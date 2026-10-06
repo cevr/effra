@@ -3,6 +3,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"effra.local/prototype/internal/compiler"
 	sourcefile "effra.local/prototype/internal/source"
@@ -17,7 +19,13 @@ import (
 
 const ProtocolVersion = "2025-11-25"
 const CompilerVersion = "0.0.1-prototype"
-const maxInspectionItems = 100
+
+const (
+	maxInspectionItems   = 100
+	maxFormatSourceBytes = 2 * 1024 * 1024
+	maxFormatOutputBytes = 4 * 1024 * 1024
+	maxMCPFrameBytes     = 16 * 1024 * 1024
+)
 
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -48,8 +56,14 @@ type toolResult struct {
 }
 type arguments struct {
 	File             string `json:"file"`
+	FilePresent      bool
+	Source           string
+	SourcePresent    bool
+	URI              string
+	URIProvided      bool
 	Symbol           string `json:"symbol"`
 	ExpectedRevision string `json:"expectedRevision"`
+	ExpectedDigest   string
 	Target           string `json:"target"`
 	Strict           bool   `json:"strict"`
 	Offset           int    `json:"offset"`
@@ -57,6 +71,242 @@ type arguments struct {
 type callParams struct {
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
+}
+
+type mcpFrameStatus uint8
+
+const (
+	mcpFrameComplete mcpFrameStatus = iota + 1
+	mcpFrameEOF
+	mcpFrameTooLarge
+)
+
+var errMCPResponseTooLarge = errors.New("MCP response exceeds the encoded frame limit")
+
+const compactFormatResponseError = "too large"
+
+// readMCPFrame admits at most max bytes before a terminal LF. CR in CRLF is
+// part of that bounded frame. An oversized line is drained through its LF
+// without retaining its contents so the next request can still be served.
+func readMCPFrame(reader *bufio.Reader, max int) ([]byte, mcpFrameStatus, error) {
+	if max <= 0 {
+		return nil, 0, fmt.Errorf("MCP frame limit must be positive")
+	}
+	frame := make([]byte, 0, 4096)
+	frameBytes := 0
+	sawBytes := false
+	overSized := false
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		if len(chunk) > 0 {
+			sawBytes = true
+			content := chunk
+			terminated := chunk[len(chunk)-1] == '\n'
+			if terminated {
+				content = content[:len(content)-1]
+			}
+			if !overSized {
+				if frameBytes+len(content) > max {
+					overSized = true
+					frame = nil
+				} else {
+					frame = append(frame, content...)
+					frameBytes += len(content)
+				}
+			}
+			if terminated {
+				if overSized {
+					return nil, mcpFrameTooLarge, nil
+				}
+				return frame, mcpFrameComplete, nil
+			}
+		}
+		if err == nil || errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			if !sawBytes {
+				return nil, mcpFrameEOF, nil
+			}
+			if overSized {
+				return nil, mcpFrameTooLarge, nil
+			}
+			return frame, mcpFrameComplete, nil
+		}
+		return nil, 0, err
+	}
+}
+
+func marshalMCPResponse(value response, escapeHTML bool) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(escapeHTML)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	encoded := buffer.Bytes()
+	if len(encoded) == 0 || encoded[len(encoded)-1] != '\n' {
+		return nil, errors.New("MCP response encoder omitted its line terminator")
+	}
+	return encoded[:len(encoded)-1], nil
+}
+
+func writeMCPResponseWithEscape(output io.Writer, value response, maxBytes int, escapeHTML bool) error {
+	encoded, err := marshalMCPResponse(value, escapeHTML)
+	if err != nil {
+		return err
+	}
+	if maxBytes > 0 && len(encoded) > maxBytes {
+		return errMCPResponseTooLarge
+	}
+	encoded = append(encoded, '\n')
+	_, err = output.Write(encoded)
+	return err
+}
+
+func writeMCPResponse(output io.Writer, value response, maxBytes int) error {
+	return writeMCPResponseWithEscape(output, value, maxBytes, true)
+}
+
+func marshalMCPValue(value any, escapeHTML bool) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(escapeHTML)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	encoded := buffer.Bytes()
+	if len(encoded) == 0 || encoded[len(encoded)-1] != '\n' {
+		return nil, errors.New("MCP value encoder omitted its line terminator")
+	}
+	return encoded[:len(encoded)-1], nil
+}
+
+func validMCPRequestID(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || !utf8.Valid(trimmed) {
+		return false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.UseNumber()
+	var id any
+	if err := decoder.Decode(&id); err != nil {
+		return false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return false
+	}
+	switch id.(type) {
+	case nil, string, json.Number:
+		return true
+	default:
+		return false
+	}
+}
+
+func validatedFormatResponseID(raw json.RawMessage) ([]byte, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if !validMCPRequestID(trimmed) {
+		return nil, errors.New("code.format response has an invalid request ID")
+	}
+	return trimmed, nil
+}
+
+// marshalBoundedFormatResponse embeds the already validated request ID as
+// JSON. Re-encoding a RawMessage through encoding/json can expand valid raw
+// U+2028/U+2029 or HTML characters, so the bounded format envelope preserves
+// the request representation and only encodes the response fields.
+func marshalBoundedFormatResponse(value response) ([]byte, error) {
+	return marshalBoundedResponse(value, false)
+}
+
+// Both bounded tool profiles preserve scalar IDs. Semantic fields keep the
+// HTML escaping counted by the canonical projection preflight.
+func marshalBoundedResponse(value response, escapeHTML bool) ([]byte, error) {
+	id, err := validatedFormatResponseID(value.ID)
+	if err != nil {
+		return nil, err
+	}
+	jsonrpc, err := marshalMCPValue(value.JSONRPC, escapeHTML)
+	if err != nil {
+		return nil, err
+	}
+	var buffer bytes.Buffer
+	buffer.WriteString(`{"jsonrpc":`)
+	buffer.Write(jsonrpc)
+	buffer.WriteString(`,"id":`)
+	buffer.Write(id)
+	if value.Result != nil {
+		result, err := marshalMCPValue(value.Result, escapeHTML)
+		if err != nil {
+			return nil, err
+		}
+		buffer.WriteString(`,"result":`)
+		buffer.Write(result)
+	}
+	if value.Error != nil {
+		errorValue, err := marshalMCPValue(value.Error, escapeHTML)
+		if err != nil {
+			return nil, err
+		}
+		buffer.WriteString(`,"error":`)
+		buffer.Write(errorValue)
+	}
+	buffer.WriteByte('}')
+	return buffer.Bytes(), nil
+}
+
+// Formatting responses use a bounded envelope that preserves a validated ID
+// without optional JSON/JavaScript escape expansion. Other response fields
+// remain JSON encoded and the complete body is checked before writing.
+func writeBoundedFormatResponse(output io.Writer, value response) error {
+	return writeBoundedResponse(output, value, false)
+}
+
+func writeBoundedResponse(output io.Writer, value response, escapeHTML bool) error {
+	encoded, err := marshalBoundedResponse(value, escapeHTML)
+	if err != nil {
+		return err
+	}
+	if len(encoded) > maxMCPFrameBytes {
+		return errMCPResponseTooLarge
+	}
+	encoded = append(encoded, '\n')
+	_, err = output.Write(encoded)
+	return err
+}
+
+// Measure the fixed tool envelope using its owning serializer, replacing only
+// the two placeholders separately counted by the compiler and the raw ID.
+func projectionFrameOverhead(id json.RawMessage) (int, error) {
+	raw, err := validatedFormatResponseID(id)
+	if err != nil {
+		return 0, err
+	}
+	skeleton, err := marshalBoundedResponse(response{JSONRPC: "2.0", ID: json.RawMessage("null"), Result: toolResult{Content: []map[string]string{{"type": "text", "text": ""}}, StructuredContent: false}}, true)
+	return len(skeleton) - len("null") - len(`""`) - len("false") + len(raw), err
+}
+
+func boundedFormatResponseFits(value response) bool {
+	encoded, err := marshalBoundedFormatResponse(value)
+	return err == nil && len(encoded) <= maxMCPFrameBytes
+}
+
+func compactFormatError(id json.RawMessage) response {
+	return compactFormatErrorWithCode(id, -32000)
+}
+
+func compactFormatErrorWithCode(id json.RawMessage, code int) response {
+	return response{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error:   &rpcError{code, compactFormatResponseError},
+	}
+}
+
+func writeMCPError(output io.Writer, id json.RawMessage, code int, message string) error {
+	return writeMCPResponse(output, response{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: message}}, 0)
 }
 
 func tools() []tool {
@@ -74,9 +324,24 @@ func tools() []tool {
 	querySchema := schema(false)
 	querySchema["properties"].(map[string]any)["offset"] = map[string]any{"type": "integer", "minimum": 0, "description": "UTF-8 byte offset in an expression diagnostic anchor"}
 	querySchema["required"] = []string{"file", "offset"}
+	formatSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"file":           map[string]any{"type": "string", "description": "Workspace-relative .ef disk snapshot"},
+			"source":         map[string]any{"type": "string", "description": "Explicit .ef source buffer; empty is valid"},
+			"uri":            map[string]any{"type": "string", "description": "Optional display URI for a source buffer; never read"},
+			"expectedDigest": map[string]any{"type": "string", "description": "Optional exact input-byte SHA-256 digest"},
+		},
+		"oneOf": []map[string]any{
+			{"required": []string{"file"}},
+			{"required": []string{"source"}},
+		},
+		"additionalProperties": false,
+	}
 	annotations := map[string]bool{"readOnlyHint": true, "destructiveHint": false, "openWorldHint": false}
 	return []tool{
 		{"project.describe", "Compiler capabilities, supported target, and guardrail limits", map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}, annotations},
+		{"code.format", "Format one source buffer or guarded workspace file without writing it", formatSchema, annotations},
 		{"project.check", "Check one file; return revision, bounded diagnostics, and timings", schema(false), annotations},
 		{"project.diagnostics", "Return compiler and semantic lint diagnostics with byte spans and UTF-16 ranges", lintSchema, annotations},
 		{"project.tests", "Discover checked test contracts; reports live-host requirement without executing", schema(false), annotations},
@@ -148,14 +413,25 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 	if !info.IsDir() {
 		return fmt.Errorf("workspace must be a directory")
 	}
-	scanner := bufio.NewScanner(input)
-	scanner.Buffer(make([]byte, 4096), 1024*1024)
-	encoder := json.NewEncoder(output)
+	reader := bufio.NewReader(input)
 	initialized, ready := false, false
-	for scanner.Scan() {
+	for {
+		frame, status, err := readMCPFrame(reader, maxMCPFrameBytes)
+		if err != nil {
+			return err
+		}
+		switch status {
+		case mcpFrameEOF:
+			return nil
+		case mcpFrameTooLarge:
+			if err := writeMCPError(output, json.RawMessage("null"), -32700, fmt.Sprintf("Request frame exceeds %d bytes before LF", maxMCPFrameBytes)); err != nil {
+				return err
+			}
+			continue
+		}
 		var req request
-		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
-			if err = encoder.Encode(response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{-32700, "Parse error"}}); err != nil {
+		if err := json.Unmarshal(frame, &req); err != nil {
+			if err = writeMCPError(output, json.RawMessage("null"), -32700, "Parse error"); err != nil {
 				return err
 			}
 			continue
@@ -168,14 +444,12 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 			continue
 		}
 		res := response{JSONRPC: "2.0", ID: req.ID}
+		formatCall := false
+		semanticCall := false
 		if len(res.ID) == 0 {
 			res.ID = json.RawMessage("null")
 		}
-		var id any
-		_ = json.Unmarshal(req.ID, &id)
-		_, stringID := id.(string)
-		_, numberID := id.(float64)
-		if req.JSONRPC != "2.0" || (!stringID && !numberID) || req.Method == "" {
+		if req.JSONRPC != "2.0" || !validMCPRequestID(req.ID) || req.Method == "" {
 			res.ID = json.RawMessage("null")
 			res.Error = &rpcError{-32600, "Invalid Request"}
 		} else {
@@ -212,6 +486,8 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 					res.Error = &rpcError{-32602, "Invalid tool call"}
 					break
 				}
+				formatCall = params.Name == "code.format"
+				semanticCall = !formatCall
 				known := false
 				for _, t := range tools() {
 					known = known || t.Name == params.Name
@@ -226,28 +502,163 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 					break
 				}
 				result, err := call(root, params.Name, args)
-				if err == nil {
+				if err == nil && !formatCall {
 					// The frame has two copies of the result, one of them escaped.
 					// Charge both before json.Marshal creates the content text.
-					err = compiler.ValidateMCPProjectionResponse(result, len(req.ID)+128)
+					var overhead int
+					overhead, err = projectionFrameOverhead(req.ID)
+					if err == nil {
+						err = compiler.ValidateMCPProjectionResponse(result, overhead)
+					}
 				}
 				if err != nil {
 					res.Result = toolResult{Content: []map[string]string{{"type": "text", "text": err.Error()}}, IsError: true}
 				} else {
-					data, _ := json.Marshal(result)
-					res.Result = toolResult{Content: []map[string]string{{"type": "text", "text": string(data)}}, StructuredContent: result}
+					content := ""
+					if formatCall {
+						content = "code.format result is available in structuredContent"
+					} else {
+						data, _ := json.Marshal(result)
+						content = string(data)
+					}
+					res.Result = toolResult{Content: []map[string]string{{"type": "text", "text": content}}, StructuredContent: result}
 				}
 			default:
 				res.Error = &rpcError{-32601, "Method not found"}
 			}
 		}
-		if err := encoder.Encode(res); err != nil {
+		writeResponse := func(value response) error {
+			if formatCall {
+				return writeBoundedFormatResponse(output, value)
+			}
+			if semanticCall {
+				return writeBoundedResponse(output, value, true)
+			}
+			return writeMCPResponse(output, value, 0)
+		}
+		err = writeResponse(res)
+		if errors.Is(err, errMCPResponseTooLarge) && (formatCall || semanticCall) {
+			if res.Error != nil {
+				// Preserve the JSON-RPC error class and code when its original
+				// message cannot fit beside a near-limit request ID.
+				err = writeResponse(compactFormatErrorWithCode(res.ID, res.Error.Code))
+			} else {
+				res = response{
+					JSONRPC: "2.0",
+					ID:      res.ID,
+					Result: toolResult{
+						Content: []map[string]string{{"type": "text", "text": fmt.Sprintf("code.format response exceeds %d encoded bytes", maxMCPFrameBytes)}},
+						IsError: true,
+					},
+				}
+				err = writeResponse(res)
+				if errors.Is(err, errMCPResponseTooLarge) {
+					// The compact response keeps the validated request ID and
+					// uses a fixed message shorter than the smallest admitted
+					// code.format invocation envelope.
+					err = writeResponse(compactFormatError(res.ID))
+				}
+			}
+		}
+		if err != nil {
 			return err
 		}
 	}
-	return scanner.Err()
 }
+
+func formatCode(root string, args arguments) (any, error) {
+	var (
+		text   string
+		origin = "buffer"
+		uri    string
+	)
+	if args.SourcePresent {
+		text = args.Source
+		if args.URIProvided {
+			uri = args.URI
+		}
+	} else {
+		source, fileURI, err := readFormatSource(root, args.File)
+		if err != nil {
+			return nil, err
+		}
+		text = string(source)
+		origin = "disk"
+		uri = fileURI
+	}
+	if len([]byte(text)) > maxFormatSourceBytes {
+		return nil, fmt.Errorf("format source exceeds %d MiB limit", maxFormatSourceBytes/(1024*1024))
+	}
+	inputDigest := compiler.FormatDigest(text)
+	if args.ExpectedDigest != "" && args.ExpectedDigest != inputDigest {
+		return nil, fmt.Errorf("stale format source; expected digest %s, current digest %s", args.ExpectedDigest, inputDigest)
+	}
+	result, err := compiler.FormatSourceBounded(text, maxFormatOutputBytes)
+	if err != nil {
+		var limit compiler.FormatLimitError
+		if errors.As(err, &limit) {
+			return nil, fmt.Errorf("formatted source exceeds %d-byte MCP output limit", limit.Limit)
+		}
+		return nil, err
+	}
+	if len([]byte(result.Text)) > maxFormatOutputBytes {
+		return nil, fmt.Errorf("formatted source exceeds %d MiB limit", maxFormatOutputBytes/(1024*1024))
+	}
+	formatted := map[string]any{
+		"schemaVersion":    result.SchemaVersion,
+		"formatterVersion": compiler.FormatterIdentity,
+		"origin":           origin,
+		"inputDigest":      result.InputDigest,
+		"outputDigest":     result.OutputDigest,
+		"changed":          result.Changed,
+		"text":             result.Text,
+	}
+	if uri != "" || args.URIProvided {
+		formatted["uri"] = uri
+	}
+	return formatted, nil
+}
+
+func readFormatSource(root, relative string) ([]byte, string, error) {
+	source, requested, err := readWorkspaceSource(root, relative, maxFormatSourceBytes)
+	if errors.Is(err, sourcefile.ErrTooLarge) {
+		return nil, "", fmt.Errorf("format source exceeds %d MiB limit", maxFormatSourceBytes/(1024*1024))
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	uri, err := compiler.FileURI(requested)
+	if err != nil {
+		return nil, "", err
+	}
+	return source, uri, nil
+}
+
+func readWorkspaceSource(root, relative string, maxBytes int) ([]byte, string, error) {
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, "", err
+	}
+	if filepath.IsAbs(relative) || relative == "" || filepath.Ext(relative) != ".ef" {
+		return nil, "", fmt.Errorf("file must be a workspace-relative .ef path")
+	}
+	requested := filepath.Clean(filepath.Join(canonicalRoot, relative))
+	resolved, err := filepath.EvalSymlinks(requested)
+	if err != nil {
+		return nil, "", err
+	}
+	rel, err := filepath.Rel(canonicalRoot, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, "", fmt.Errorf("file escapes workspace")
+	}
+	source, err := sourcefile.ReadRegularFile(resolved, maxBytes)
+	return source, requested, err
+}
+
 func call(root, name string, args arguments) (any, error) {
+	if name == "code.format" {
+		return formatCode(root, args)
+	}
 	if name == "lint.rules" {
 		return compiler.LintRules(), nil
 	}
@@ -256,7 +667,7 @@ func call(root, name string, args arguments) (any, error) {
 			"schemaVersion": compiler.SemanticSchemaVersion, "compilerVersion": CompilerVersion,
 			"runtimes": map[string]string{"go": "typed lazy closures; managed scopes and fibers; Go standard library", "js": "effect@4.0.1"},
 			"targets":  []string{"go", "js"}, "defaultTarget": "go", "sourceExtension": ".ef", "workspace": root,
-			"operations": []string{"project.describe", "project.check", "project.diagnostics", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "project.graph", "project.tests"}, "scope": "single-file disk snapshots",
+			"operations": []string{"project.describe", "code.format", "project.check", "project.diagnostics", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "project.graph", "project.tests"}, "scope": "single-file disk snapshots or one explicit source buffer for code.format",
 			"guardrails": map[string]string{
 				"failures": "checked closed rows", "requirements": "checked nominal services",
 				"resourceOwnership":  "Both targets join owned fibers before releasing scope resources; Go File guards closed handles",
@@ -267,6 +678,7 @@ func call(root, name string, args arguments) (any, error) {
 				"mutableAliases":     "not implemented", "openRows": "not implemented",
 				"inspection":     "schema 4 response-local canonical type/row tables; references are revision-scoped, empty rows are omitted, and selected projections refuse explicitly when node, edge, row-label, name, compatibility, or response-byte limits are exceeded",
 				"typeProjection": "semantic checking retains the complete private arena; public tables contain every reachable definition or return typeProjectionComplete=false with typeProjectionError",
+				"formatting":     "syntax-only compiler formatter; valid UTF-8; 2 MiB source and 4 MiB output bounds; 16 MiB newline and encoded-response frames; code.format never writes",
 			},
 		}, nil
 	}
@@ -308,11 +720,7 @@ func call(root, name string, args arguments) (any, error) {
 				return nil, fmt.Errorf("test contract exceeds prototype limits")
 			}
 		}
-		values := make([]compiler.ValueType, 0, len(tests)*2)
-		for _, test := range tests {
-			values = append(values, test.Contract, test.Actual)
-		}
-		projection := r.ProjectValues(values)
+		tests, projection := r.ProjectTestCatalog(tests)
 		if !projection.Complete {
 			return nil, fmt.Errorf("test catalog type projection unavailable: %s", projection.Error)
 		}
@@ -406,23 +814,7 @@ func call(root, name string, args arguments) (any, error) {
 	return response, nil
 }
 func readSource(root, relative string) ([]byte, error) {
-	canonicalRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return nil, err
-	}
-	root = canonicalRoot
-	if filepath.IsAbs(relative) || filepath.Ext(relative) != ".ef" {
-		return nil, fmt.Errorf("file must be a workspace-relative .ef path")
-	}
-	resolved, err := filepath.EvalSymlinks(filepath.Join(root, relative))
-	if err != nil {
-		return nil, err
-	}
-	rel, err := filepath.Rel(root, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return nil, fmt.Errorf("file escapes workspace")
-	}
-	source, err := sourcefile.ReadRegularFile(resolved, 2*1024*1024)
+	source, _, err := readWorkspaceSource(root, relative, 2*1024*1024)
 	if errors.Is(err, sourcefile.ErrTooLarge) {
 		return nil, fmt.Errorf("source exceeds prototype 2 MiB limit")
 	}
@@ -443,6 +835,13 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 			return args, fmt.Errorf("offset is required")
 		}
 	}
+	if name == "code.format" {
+		_, filePresent := fields["file"]
+		_, sourcePresent := fields["source"]
+		if filePresent == sourcePresent {
+			return args, fmt.Errorf("exactly one of file or source is required")
+		}
+	}
 	for key, value := range fields {
 		if key == "strict" && (name == "project.lint" || name == "project.diagnostics") {
 			flag, ok := value.(bool)
@@ -460,21 +859,66 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 			args.Offset = int(n)
 			continue
 		}
-		text, ok := value.(string)
-		if !ok || name == "project.describe" || name == "lint.rules" {
-			return args, fmt.Errorf("invalid tool argument %s", key)
-		}
 		switch key {
+		case "file":
+			if name == "project.describe" || name == "lint.rules" {
+				return args, fmt.Errorf("invalid tool argument %s", key)
+			}
+			text, ok := value.(string)
+			if !ok {
+				return args, fmt.Errorf("file must be a string")
+			}
+			args.File = text
+			args.FilePresent = true
+		case "source":
+			if name != "code.format" {
+				return args, fmt.Errorf("unexpected source argument")
+			}
+			text, ok := value.(string)
+			if !ok {
+				return args, fmt.Errorf("source must be a string")
+			}
+			args.Source = text
+			args.SourcePresent = true
+		case "uri":
+			if name != "code.format" {
+				return args, fmt.Errorf("unexpected uri argument")
+			}
+			text, ok := value.(string)
+			if !ok {
+				return args, fmt.Errorf("uri must be a string")
+			}
+			args.URI = text
+			args.URIProvided = true
+		case "expectedDigest":
+			if name != "code.format" {
+				return args, fmt.Errorf("unexpected expectedDigest argument")
+			}
+			text, ok := value.(string)
+			if !ok || text == "" {
+				return args, fmt.Errorf("expectedDigest must be a non-empty string")
+			}
+			args.ExpectedDigest = text
 		case "target":
+			text, ok := value.(string)
+			if !ok || name == "project.describe" || name == "lint.rules" || name == "code.format" {
+				return args, fmt.Errorf("invalid tool argument %s", key)
+			}
 			if text != "go" && text != "js" {
 				return args, fmt.Errorf("unsupported target %s", text)
 			}
 			args.Target = text
-		case "file":
-			args.File = text
 		case "expectedRevision":
+			text, ok := value.(string)
+			if !ok || name == "code.format" || name == "project.describe" || name == "lint.rules" {
+				return args, fmt.Errorf("invalid tool argument %s", key)
+			}
 			args.ExpectedRevision = text
 		case "symbol":
+			text, ok := value.(string)
+			if !ok {
+				return args, fmt.Errorf("symbol must be a string")
+			}
 			if name != "code.inspect" && name != "code.explain" {
 				return args, fmt.Errorf("unexpected symbol argument")
 			}
@@ -482,6 +926,15 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 		default:
 			return args, fmt.Errorf("unknown tool argument %s", key)
 		}
+	}
+	if name == "code.format" {
+		if args.FilePresent && args.File == "" {
+			return args, fmt.Errorf("file must be a non-empty workspace-relative path")
+		}
+		if args.URIProvided && !args.SourcePresent {
+			return args, fmt.Errorf("uri is only valid with source")
+		}
+		return args, nil
 	}
 	if name != "project.describe" && name != "lint.rules" && args.File == "" {
 		return args, fmt.Errorf("file is required")

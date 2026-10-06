@@ -1,22 +1,22 @@
 // Portable causal synchronization and scheduler-backed test fixtures.
 
-effect fn waitFor(latch: Latch) -> () uses {Sync} {
+effect fn waitFor(latch: Latch) -> () uses { Sync } {
     run Sync.await(latch)
 }
 
-effect fn sequentialSleeps() -> () uses {Clock} {
+effect fn sequentialSleeps() -> () uses { Clock } {
     run Clock.sleep(20)
     run Clock.sleep(30)
 }
-effect fn explicitVirtualSleep() -> () uses {Clock} {
+effect fn explicitVirtualSleep() -> () uses { Clock } {
     run Clock.sleep(20)
 }
-effect fn delayed() -> string uses {Clock} {
+effect fn delayed() -> string uses { Clock } {
     run Clock.sleep(100)
     "late"
 }
 
-effect fn test_latch_signal_is_shared() -> () raises {AssertionFailed} uses {Assert, Sync} {
+effect fn test_latch_signal_is_shared() -> () raises { AssertionFailed } uses { Assert, Sync } {
     let latch = run Sync.latch()
     run Sync.signal(latch)
     run Sync.await(latch)
@@ -24,7 +24,7 @@ effect fn test_latch_signal_is_shared() -> () raises {AssertionFailed} uses {Ass
     run Assert.check(true, "a one-shot signal remains complete for every waiter")
 }
 
-effect fn test_latch_waiter_interrupt_is_independent() -> () raises {AssertionFailed} uses {Assert, Sync} {
+effect fn test_latch_waiter_interrupt_is_independent() -> () raises { AssertionFailed } uses { Assert, Sync } {
     let latch = run Sync.latch()
     scope {
         let waiter = fork waitFor(latch)
@@ -35,7 +35,7 @@ effect fn test_latch_waiter_interrupt_is_independent() -> () raises {AssertionFa
     run Assert.check(true, "interrupting one waiter does not consume the latch")
 }
 
-effect fn test_scheduler_drains_sequential_deadlines() -> () raises {AssertionFailed} uses {Assert, Clock, Scheduler} {
+effect fn test_scheduler_drains_sequential_deadlines() -> () raises { AssertionFailed } uses { Assert, Clock, Scheduler } {
     let child = fork sequentialSleeps()
     run Scheduler.awaitRegistration()
     run Scheduler.advance(50)
@@ -43,7 +43,7 @@ effect fn test_scheduler_drains_sequential_deadlines() -> () raises {AssertionFa
     run Assert.check(true, "one advancement reaches sequential intermediate deadlines")
 }
 
-effect fn test_explicit_test_providers_share_harness() -> () raises {AssertionFailed} uses {Assert, Scheduler} {
+effect fn test_explicit_test_providers_share_harness() -> () raises { AssertionFailed } uses { Assert, Scheduler } {
     let child = fork explicitVirtualSleep().provide<Clock>(TestClock).provide<Scheduler>(TestScheduler)
     run Scheduler.awaitRegistration()
     run Scheduler.advance(20)
@@ -51,7 +51,7 @@ effect fn test_explicit_test_providers_share_harness() -> () raises {AssertionFa
     run Assert.check(true, "explicit test providers share the harness scheduler")
 }
 
-effect fn test_timeout_uses_the_test_scheduler() -> () raises {AssertionFailed, Timeout} uses {Assert, Clock, Scheduler} {
+effect fn test_timeout_uses_the_test_scheduler() -> () raises { AssertionFailed, Timeout } uses { Assert, Clock, Scheduler } {
     let child = fork delayed().timeout(50)
     run Scheduler.awaitRegistration()
     run Scheduler.advance(50)

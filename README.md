@@ -28,11 +28,13 @@ go build -o bin/ef ./cmd/ef
 ./bin/ef inspect examples/main.ef greeting
 ./bin/ef explain examples/main.ef greeting
 ./bin/ef check examples/missing-service.ef  # expected failure: EF108
+./bin/ef fmt --check examples/main.ef
 ./bin/ef build examples/main.ef            # standalone executable: dist/main
 ./dist/main
 ./bin/ef build examples/main.ef -o bin/demo
 ./bin/ef build examples/main.ef --target js # dist/main.mjs + dist/main.d.mts
 ./bin/ef mcp .                            # newline-delimited JSON-RPC on stdio
+./bin/ef lsp                              # Content-Length framed editor diagnostics
 ```
 
 `bun run demo` compiles and runs the native Go executable. Use `--target js` with build/run/check to select JavaScript. `bun run gate` checks Go formatting, Go vet, compiler and runtime tests, tracker consistency, and the public CLI/MCP process.
@@ -57,7 +59,7 @@ effect fn greeting(id: string) -> string
 
 Calling `greeting("42")` constructs a deferred program. `run` executes it within another effect. Inspection reports success `string`, failure `{NotFound}`, and requirement `{Users}`. The [complete runnable example](examples/main.ef) implements and provides Users, recovers NotFound, and supplies Console explicitly.
 
-Go builds lower checked source into typed Go closures and call `go build`; the executable needs no Effra, Bun, Node, or Effect installation to run. Generated source remains in `dist/go/<name>/main.go`.
+Go builds lower checked source into typed Go closures and call `go build`; the executable needs no Effra, Bun, Node, or Effect installation to run. Generated native modules are complete immutable snapshots under `dist/go/apps/<application-id>/generations/`; their commit records preserve source ownership and reuse.
 
 The JavaScript library build exports functions, service keys, and providers for consumers. `--target js --entry` adds host execution; native builds and both run targets require an effect main with no parameters or remaining service requirements.
 
@@ -124,9 +126,9 @@ The compiler loads callable shapes from Go export data. Imported calls are defer
 
 ## Agent inspection
 
-`ef check`, `ef inspect` and `ef explain` expose checked contracts, source spans, used host signatures, behavior provenance and compiler timings as JSON. `ef mcp .` exposes read-only compiler tools over stdio. Revisions include imported Go declarations and behavior contracts so stale queries can be rejected. See [MCP setup and limits](docs/mcp.md).
+`ef check`, `ef inspect` and `ef explain` expose checked contracts, source spans, used host signatures, behavior provenance and compiler timings as JSON. `ef fmt` exposes the canonical syntax-only formatter through stdin, check, write and JSON report modes; it does not typecheck or load packages. `ef mcp .` exposes read-only compiler tools over stdio, including `code.format` for one explicit buffer or guarded disk snapshot. Revisions include imported Go declarations and behavior contracts so stale semantic queries can be rejected; formatter results use a separate source-byte digest and formatter identity. See [MCP setup and limits](docs/mcp.md).
 
-`ef diagnostics FILE --json` and MCP `project.diagnostics` share compiler errors and lint advice, with explicit severities, UTF-8 byte spans and UTF-16 editor ranges. Reports distinguish checked source, unavailable advice and policy failure. This is the shared diagnostic model; the standalone language server and full type-graph queries are still being built.
+`ef diagnostics FILE --json` and MCP `project.diagnostics` share compiler errors and lint advice, with explicit severities, UTF-8 byte spans and UTF-16 editor ranges. Reports distinguish checked source, unavailable advice and policy failure. `ef lsp` adapts this model to versioned editor buffers and full-document synchronization; see [supported capabilities and limits](docs/lsp.md). Full types, hover, navigation and formatting remain separate work.
 
 ## What is experimental
 
@@ -141,7 +143,9 @@ bun run gate
 go test -race ./...
 ```
 
-The gate checks Go formatting, vet, compiler/runtime tests, actual Go and JS programs, CLI/MCP inspection and diagnostic parity, and a live HTTP server. Shared lifecycle tests cover child-before-parent cleanup, unobserved child failures and timeout cleanup defects.
+The gate checks Go formatting, vet, compiler/runtime tests, actual Go and JS programs, CLI/MCP inspection and diagnostic parity, formatter CLI/MCP process parity, and a live HTTP server. Shared lifecycle tests cover child-before-parent cleanup, unobserved child failures and timeout cleanup defects.
+
+[Upstream behavioral conformance](docs/conformance.md) maps selected pinned Effect cases to existing Go/JS acceptance, with explicit differences, pending and unsupported rows. The imported 746 reference files remain reference-only.
 
 Project direction is recorded in [NORTH_STAR.md](NORTH_STAR.md), source comparisons in [PRIOR_ARTS.md](PRIOR_ARTS.md), and canonical terms in [GLOSSARY.md](GLOSSARY.md). The [architecture ledger](plans/architecture-loop-2026-10-05.md) records implementation evidence and unresolved work. Start with [implemented syntax](docs/prototype.md), [runtime contracts](docs/runtime.md), or the broader [design sketch](docs/design.md).
 
