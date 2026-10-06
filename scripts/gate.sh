@@ -34,6 +34,7 @@ if [ -f go.mod ]; then
   python3 scripts/lsp_smoke.py
   python3 scripts/smoke.py
   python3 scripts/bundled_smoke.py
+  python3 scripts/producer_smoke.py
   python3 scripts/format_smoke.py
   python3 scripts/layer_smoke.py
   python3 scripts/http_smoke.py

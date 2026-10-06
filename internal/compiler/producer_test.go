@@ -77,3 +77,25 @@ func TestProducerMetadataBoundsAndUnavailableReuse(t *testing.T) {
 		t.Fatal("producer envelope escaped compatibility bounds")
 	}
 }
+
+func TestGraphProducerMetadataIsChargedAtCompatibilityBoundary(t *testing.T) {
+	source := `effect fn main() -> string { "ok" }`
+	plain := Compile(source)
+	graph, err := plain.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := plain.projectionLimits()
+	limits.CompatibilityBytes = graph.TypeProjectionUsage.CompatibilityBytes
+	plain.TypeProjectionLimits = limits
+	if _, err := plain.Graph(); err != nil {
+		t.Fatal("unqualified control refused", err)
+	}
+	id := producer.Identity{Strength: "unavailable", ReuseScope: "process", Qualifier: "process:control", Reason: "image unavailable"}
+	if err := plain.Qualify(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := plain.Graph(); err == nil || !strings.Contains(err.Error(), "compatibility") {
+		t.Fatal("graph producer escaped compatibility budget", err)
+	}
+}

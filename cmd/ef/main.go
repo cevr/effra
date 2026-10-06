@@ -15,6 +15,7 @@ import (
 	"effra.local/prototype/internal/compiler"
 	"effra.local/prototype/internal/lsp"
 	"effra.local/prototype/internal/mcp"
+	"effra.local/prototype/internal/producer"
 	sourcefile "effra.local/prototype/internal/source"
 )
 
@@ -277,6 +278,12 @@ func command(args []string) error {
 	}
 	if err != nil {
 		return err
+	}
+	// Executable production does not acquire inspection identity.
+	if args[0] != "build" && args[0] != "run" && args[0] != "test" {
+		if err := r.Qualify(producer.Current()); err != nil {
+			return err
+		}
 	}
 	switch args[0] {
 	case "diagnostics":

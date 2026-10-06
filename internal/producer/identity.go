@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"runtime"
@@ -39,13 +40,22 @@ var current = acquireOnce(func() (io.ReadCloser, error) { return openImage(runti
 
 func processNonce() (string, error) {
 	var bytes [32]byte
-	_, err := rand.Read(bytes[:])
+	_, err := io.ReadFull(rand.Reader, bytes[:])
 	return hex.EncodeToString(bytes[:]), err
 }
 
 // Current acquires exactly once, including failure. It never follows an
 // installation pathname, executes Git, or publishes arbitrary build settings.
 func Current() Identity { return current() }
+
+// Require rejects reuse qualified by another producer. An empty expectation
+// requests fresh facts; it is not evidence that a cached fact remains current.
+func (identity Identity) Require(expected string) error {
+	if expected != "" && (identity.Qualifier == "" || expected != identity.Qualifier) {
+		return fmt.Errorf("stale producer qualification")
+	}
+	return nil
+}
 
 func openImage(goos string) (io.ReadCloser, error) {
 	if goos != "linux" {

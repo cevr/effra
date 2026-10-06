@@ -64,8 +64,5 @@ func (r *Result) AddProducer(response map[string]any) {
 // RequireProducer is opt-in for clients reusing facts. Revision equality alone
 // does not qualify cross-build reuse; an unavailable nonreusable identity fails.
 func (r *Result) RequireProducer(expected string) error {
-	if expected != "" && (r.producerMetadata.Producer.Qualifier == "" || expected != r.producerMetadata.Producer.Qualifier) {
-		return fmt.Errorf("stale producer qualification")
-	}
-	return nil
+	return r.producerMetadata.Producer.Require(expected)
 }

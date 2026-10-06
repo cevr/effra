@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/producer"
 	sourcefile "effra.local/prototype/internal/source"
 )
 
@@ -66,6 +67,7 @@ type formatFailureReport struct {
 }
 
 type formatReport struct {
+	Producer         producer.Identity     `json:"producer"`
 	SchemaVersion    int                   `json:"schemaVersion"`
 	FormatterVersion string                `json:"formatterVersion"`
 	Mode             string                `json:"mode"`
@@ -221,6 +223,7 @@ func newFormatReport(opts fmtOptions) formatReport {
 		mode = "check"
 	}
 	return formatReport{
+		Producer:         producer.Current(),
 		SchemaVersion:    compiler.FormatterSchemaVersion,
 		FormatterVersion: compiler.FormatterIdentity,
 		Mode:             mode,
