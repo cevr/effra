@@ -28,12 +28,15 @@ Use source-controlled public programs with matched toolchains, target, CGO mode,
 | --- | --- |
 | Pure minimal entry | No unused HTTP/RPC/codec/platform implementation or initialization; compare with an equivalent minimal Go entry. |
 | Managed effect without platform I/O | Only the required core ownership/cancellation runtime and its dependencies; all guarantees still pass. |
+| Managed actor without platform I/O | Retain the shared actor loop and required core ownership/scheduling dependencies, with no unused HTTP/RPC/codec/platform adapters. A second machine adds its functions, data and adapter rather than a duplicate actor runtime. |
 | Codec-only consumer | Required codec plans retained once; HTTP/RPC/server initialization absent. |
 | HTTP application | Required transport/codec/domain behavior retained; unrelated RPC, SQL, streams and other modules absent when available. |
 | Equivalent direct and fluent calls | Same semantic roots and comparable artifact size; fluent spelling does not retain other operations. Run this case when fluent syntax is admitted. |
 | Unused library growth | Adding an unused module, operation or witness does not add it to application imports/symbols or materially grow the executable. |
 
 Record generated module selection, transitive build dependencies and native symbol evidence alongside exact byte sizes. For stripped release builds, retain an identically configured unstripped companion for symbol inspection. Record compiler/runtime/library source identities, Go/JS versions, architecture, build flags and size measurement method. Do not use debug stripping, compression or externalizing a runtime as a substitute for proving unused-code elimination.
+
+A machine declaration available only to checking/inspection does not root the actor runtime. Actual spawning roots its implementation and necessary core dependencies. Retain snapshot tables and explicitly named payload codecs only through their real consumers; avoid global actor registries and blanket initialization. The actor runtime may require core scheduling for owned progress: do not promise removal of a necessary dependency merely because application steps contain no explicit delay.
 
 Establish per-fixture budgets from measured baselines rather than inventing a global target. Keep raw before/after bytes and losing results. Build-stage timings belong to the separate compile-performance suite; contention-independent byte counts do not justify compile-speed claims.
 
