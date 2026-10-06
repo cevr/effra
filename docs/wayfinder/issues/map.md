@@ -26,6 +26,8 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 
 ## Additional implementation
 
+- [Canonical formatter](formatter.md), followed by [editor formatting](editor-formatting.md): one comment-preserving printer for `ef fmt`, CI checks and revision-bound MCP/LSP previews, independent of typechecking and backend execution.
+
 - [Versioned custom lint rules and shared rule packs](custom-lint.md): user-authored policies consume canonical facts and report through CLI/MCP/LSP, with options, source-fixture tests and optional bounded execution independent of ordinary compilation.
 
 - [Shared editor-grade diagnostics](semantic-diagnostics.md), [complete canonical types](semantic-types.md), and a [stdio language server](language-server.md): owner-requested warnings/errors and full semantic inspection across CLI, MCP and editor, with one checked snapshot model.
@@ -58,7 +60,7 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 - Runtime/source correlation beyond current bounded scope snapshots.
 - Full named host values, methods, callbacks, codecs and wire migration policy after closed data and provider construction are exercised.
 - Bounded streams, replay/ACK accounting, database transactions/outbox delivery and managed subprocess fixtures after portable data, concurrency and interop foundations establish their seams.
-- Incremental package checking, reusable host-import sessions, comment-preserving formatting and verified edit plans after the larger source model is established.
+- Incremental package checking, reusable host-import sessions and general verified edit plans after the larger source model is established. Canonical formatting now has the finite implementation contract above.
 
 ## Out of scope
 

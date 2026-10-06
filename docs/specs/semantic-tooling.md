@@ -45,7 +45,7 @@ Ship `ef lsp` over stdio after shared diagnostics and types. Implement initializ
 
 Buffers are versioned and bounded. Reject invalid/out-of-order changes; closing a document clears its diagnostics and releases the buffer. Never publish older analysis over a newer document revision. Framing handles split/coalesced Content-Length messages, bounded bodies, protocol errors and EOF without log output on protocol stdout. Unsupported methods receive protocol errors, not fabricated results. Definition navigation follows semantic bindings, not text search.
 
-This initial adapter is single-file plus the imports already supported by the compiler. It does not advertise workspace indexing, completion, rename, formatting or edit plans. Those require separate finite contracts. Hover/navigation may report no result for an unsupported location; diagnostics remain available for incomplete source.
+This initial adapter is single-file plus the imports already supported by the compiler. It does not advertise workspace indexing, completion, rename, formatting or edit plans. Formatting has a [separate finite contract](formatting.md) and follow-up task; enable its capability only after that adapter is tested. Other edits require their own contracts. Hover/navigation may report no result for an unsupported location; diagnostics remain available for incomplete source.
 
 ## Acceptance and delivery
 
