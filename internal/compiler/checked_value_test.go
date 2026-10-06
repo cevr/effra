@@ -132,6 +132,23 @@ func TestCheckedValueRejectsInvalidCallableRowsBeforeInterning(t *testing.T) {
 	})
 }
 
+func TestCheckedValueFiberUsesTheSameStructuralNodeAsTheTypeArena(t *testing.T) {
+	c := newCheckedValueTestChecker()
+	result := c.internType("primitive", "string", nil)
+	failure := c.internRow([]string{"Failure"})
+	value := c.values.fiber(result, failure, nil, nil)
+	typeNode := c.internTypeWithRows("fiber", "", []TypeID{result}, failure, emptyRowID)
+	if value.contractID() != typeNode {
+		t.Fatalf("fiber constructor created an overlay node: value=%d type=%d", value.contractID(), typeNode)
+	}
+	if c.typeNodeID(value.contractID()) != c.typeNodeID(typeNode) {
+		t.Fatalf("equivalent fiber contracts have different public IDs: %q != %q", c.typeNodeID(value.contractID()), c.typeNodeID(typeNode))
+	}
+	if got := c.canonicalRef(TypeRef{Kind: "record", Name: "Phantom"}); got != invalidTypeID {
+		t.Fatalf("unknown nominal declaration was admitted: %d", got)
+	}
+}
+
 func TestCheckedValueSnapshotsOccurrenceFacts(t *testing.T) {
 	c := newCheckedValueTestChecker()
 	result := c.internType("primitive", "string", nil)

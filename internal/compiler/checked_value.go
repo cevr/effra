@@ -62,6 +62,11 @@ type CheckedValue struct {
 
 func (v CheckedValue) contractID() TypeID { return v.contract }
 
+// valueID is the complete value contract. It is intentionally distinct from
+// resultID: a Fiber carries a result type, but a Fiber handle is not that
+// result and must remain incompatible with an ordinary result parameter.
+func (v CheckedValue) valueID() TypeID { return v.contract }
+
 func (v CheckedValue) node() *semanticTypeNode {
 	if v.arena == nil || v.arena.checker == nil {
 		return nil

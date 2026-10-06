@@ -1,0 +1,206 @@
+package compiler
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestFiberHandleIsNotAnOrdinaryResultArgument(t *testing.T) {
+	source := `effect fn task() -> string { "hello" }
+fn identity(text: string) -> string { text }
+effect fn main() -> string { let child = fork task() identity(child) }`
+	r := Compile(source)
+	if r.Checked || !hasCode(r, "EF106") {
+		t.Fatalf("fiber handle was admitted as string argument: %+v", r.Diagnostics)
+	}
+}
+
+func TestFiberOperationsConsumeOnlyTheirCanonicalCarriedRows(t *testing.T) {
+	source := `error A
+effect fn task() -> string raises {A} uses {Console} { "ok" }
+effect fn main() -> () raises {A} uses {Console} {
+ let a = fork task()
+ let joined = run a.join()
+ run a.interrupt()
+ run a.cancel()
+}`
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatalf("fiber operation fixture did not check: %+v", r.Diagnostics)
+	}
+	for _, tc := range []struct {
+		marker      string
+		failures    []string
+		requirement []string
+	}{
+		{marker: "fork task", failures: []string{"A"}, requirement: []string{"Console"}},
+		{marker: "run a.join", failures: []string{"A"}, requirement: nil},
+		{marker: "run a.interrupt", failures: []string{"A"}, requirement: nil},
+		{marker: "run a.cancel", failures: nil, requirement: nil},
+	} {
+		offset := strings.Index(source, tc.marker)
+		if offset < 0 {
+			t.Fatalf("missing fixture marker %q", tc.marker)
+		}
+		info, err := r.TypeAt(offset)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.marker, err)
+		}
+		if !slices.Equal(info.ExecutedFailures, tc.failures) || !slices.Equal(info.ExecutedRequirements, tc.requirement) {
+			t.Fatalf("%s consumed the wrong rows: failures=%v requirements=%v", tc.marker, info.ExecutedFailures, info.ExecutedRequirements)
+		}
+	}
+}
+
+func TestFiberBranchAndMatchEmitAndRunWithFiberShape(t *testing.T) {
+	sources := []string{
+		`effect fn task() -> string { "hello" }
+effect fn main() -> string {
+ let child = fork task()
+ let selected = if true { child } else { child }
+ run selected.join()
+}`,
+		`error A error B enum Choice { Left Right }
+effect fn taskA() -> string raises {A} { "hello" }
+effect fn taskB() -> string raises {B} { "world" }
+effect fn main() -> string raises {A, B} {
+	 let choice = Choice.Left()
+	 let selected = match choice { Choice.Left => fork taskA() Choice.Right => fork taskB() }
+	 run selected.join()
+}`,
+	}
+	for i, source := range sources {
+		t.Run(fmtInt(i), func(t *testing.T) {
+			goResult := CompileFor(source, "go")
+			if !goResult.Checked {
+				t.Fatalf("Go fiber branch did not check: %+v", goResult.Diagnostics)
+			}
+			info, err := goResult.TypeAt(strings.Index(source, "fork"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Type.Success != "Fiber:string" || info.Type.Type.Kind != "fiber" {
+				t.Fatalf("fiber projection lost the handle shape: %+v", info.Type)
+			}
+			goSource, err := goResult.EmitGo()
+			if err != nil {
+				t.Fatal(err)
+			}
+			goDir := t.TempDir()
+			if err := WriteRuntime(goDir); err != nil {
+				t.Fatal(err)
+			}
+			for name, contents := range map[string][]byte{
+				"go.mod":  []byte(goResult.ModuleFile()),
+				"main.go": []byte(goSource),
+			} {
+				if err := os.WriteFile(filepath.Join(goDir, name), contents, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			goOutput, err := runWithWatchdog(goDir, 15*time.Second, "go", "run", ".")
+			if err != nil || string(goOutput) != "hello\n" {
+				t.Fatalf("generated Go fiber branch: %v\n%s", err, goOutput)
+			}
+
+			jsResult := CompileFor(source, "js")
+			if !jsResult.Checked {
+				t.Fatalf("JS fiber branch did not check: %+v", jsResult.Diagnostics)
+			}
+			jsSource, _, err := jsResult.Emit(true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bun, err := exec.LookPath("bun")
+			if err != nil {
+				t.Fatal("Bun is required for generated fiber tests")
+			}
+			root := filepath.Join("..", "..")
+			if err := os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			jsDir, err := os.MkdirTemp(filepath.Join(root, "dist"), "fiber-shape-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.RemoveAll(jsDir) })
+			jsPath := filepath.Join(jsDir, "fiber.mjs")
+			if err := os.WriteFile(jsPath, []byte(jsSource), 0600); err != nil {
+				t.Fatal(err)
+			}
+			jsOutput, err := exec.Command(bun, jsPath).CombinedOutput()
+			if err != nil || string(jsOutput) != "hello\n" {
+				t.Fatalf("generated JS fiber branch: %v\n%s", err, jsOutput)
+			}
+		})
+	}
+}
+
+func TestHandlerBoundaryKeepsCallableRowsAndUsesNarrowCompatibility(t *testing.T) {
+	base := `error NotFound
+service Users { effect fn get(id: string) -> string raises {NotFound} }
+impl TestUsers for Users { effect fn get(id: string) -> string { id } }
+effect fn route(path: string) -> string raises {NotFound} uses {Users} { run Users.get(path) }
+`
+	for _, tc := range []struct {
+		name        string
+		suffix      string
+		wantOK      bool
+		wantEF108   bool
+		wantEF107   bool
+		wantMessage string
+	}{
+		{name: "direct missing all services", suffix: `effect fn main() -> () raises {IoError} { run Http.serve("127.0.0.1:0", route) }`, wantEF108: true, wantMessage: "missing service requirements: Http, Users"},
+		{name: "local missing all services", suffix: `effect fn main() -> () raises {IoError} { let h = route run Http.serve("127.0.0.1:0", h) }`, wantEF108: true, wantMessage: "missing service requirements: Http, Users"},
+		{name: "provided direct", suffix: `effect fn main() -> () raises {IoError} { run Http.serve("127.0.0.1:0", route).provide<Http>(GoHttp).provide<Users>(TestUsers) }`, wantOK: true},
+		{name: "missing handler failure", suffix: `effect fn main() -> string { run route("/").provide<Users>(TestUsers) }`, wantEF107: true, wantMessage: "undeclared failures: NotFound"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := Compile(base + tc.suffix)
+			if r.Checked != tc.wantOK {
+				t.Fatalf("checked=%t want=%t diagnostics=%+v", r.Checked, tc.wantOK, r.Diagnostics)
+			}
+			if tc.wantEF108 && !hasCode(r, "EF108") {
+				t.Fatalf("missing Users/Http requirement was not diagnosed: %+v", r.Diagnostics)
+			}
+			if tc.wantEF107 && !hasCode(r, "EF107") {
+				t.Fatalf("missing handler failure was not diagnosed: %+v", r.Diagnostics)
+			}
+			if tc.wantMessage != "" && !hasDiagnosticMessage(r, tc.wantMessage) {
+				t.Fatalf("diagnostics did not retain %q: %+v", tc.wantMessage, r.Diagnostics)
+			}
+			if !tc.wantOK {
+				return
+			}
+			route := r.Find("route")
+			if route == nil || route.Contract.Callable == nil || route.Contract.Callable.Result.Name != "string" {
+				t.Fatalf("handler declaration was projected as an opaque result: %+v", route)
+			}
+			offset := strings.Index(base+tc.suffix, "route).provide")
+			info, err := r.TypeAt(offset)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Type.Callable == nil || info.Type.Callable.Result.Name != "string" {
+				t.Fatalf("handler expression lost its source return type: %+v", info.Type)
+			}
+			if info.Type.Contract.ID != route.Contract.Contract.ID {
+				t.Fatalf("handler alias did not retain the declaration contract: expression=%q declaration=%q", info.Type.Contract.ID, route.Contract.Contract.ID)
+			}
+		})
+	}
+}
+
+func hasDiagnosticMessage(r *Result, message string) bool {
+	for _, diagnostic := range r.Diagnostics {
+		if diagnostic.Message == message {
+			return true
+		}
+	}
+	return false
+}

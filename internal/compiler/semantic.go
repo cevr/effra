@@ -252,6 +252,7 @@ type checkedExpression struct {
 }
 
 func (e checkedExpression) contractID() TypeID      { return e.value.contractID() }
+func (e checkedExpression) valueID() TypeID         { return e.value.valueID() }
 func (e checkedExpression) resultID() TypeID        { return e.value.resultID() }
 func (e checkedExpression) node() *semanticTypeNode { return e.value.node() }
 func (e checkedExpression) kind() checkedValueKind  { return e.value.kind() }
@@ -383,7 +384,14 @@ func (c *checker) functionParameterTypeIDs(f *Function) []TypeID {
 }
 
 func (c *checker) checkedHandler(f *Function) checkedExpression {
-	result := c.canonicalRef(typeRef("Handler"))
+	// Handler is a source-level callable compatibility relation at Http.serve.
+	// The handler value itself keeps the function's actual result and rows so
+	// declaration, alias, and direct application all share one canonical
+	// callable contract.
+	result := c.canonicalRef(typeRef(f.Return))
+	if result == invalidTypeID {
+		result = c.canonicalRef(typeRef("invalid"))
+	}
 	parameters := c.functionParameterTypeIDs(f)
 	checked := c.values.callable(result, parameters, checkedEffectCallable, c.internRow(f.Errors), c.internRow(f.Services), f.Ownership, f.Captures)
 	return checkedExpression{value: checked, callableDecl: f, identity: f.Identity}
@@ -2753,6 +2761,45 @@ func (c *checker) canonicalRef(ref TypeRef) TypeID {
 			ref.Kind = "error"
 		}
 	}
+	// A nominal reference is meaningful only when its declaration is admitted
+	// by this checker. Reconstructing an unknown record/error/enum/provider from
+	// its display fields would create a phantom type which happens to look like
+	// a source declaration but has no declaration authority.
+	switch ref.Kind {
+	case "record":
+		if c.records[ref.Name] == nil {
+			return invalidTypeID
+		}
+	case "enum":
+		if c.enums[ref.Name] == nil {
+			return invalidTypeID
+		}
+	case "error":
+		if c.errors[ref.Name] == nil {
+			return invalidTypeID
+		}
+	case "provider":
+		known := false
+		for _, provider := range c.providers {
+			if provider != nil && provider.Service == ref.Name {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return invalidTypeID
+		}
+	case "primitive":
+		if !slices.Contains([]string{"string", "bool", "i64", "bytes", "()"}, ref.Name) {
+			return invalidTypeID
+		}
+	case "opaque":
+		if !slices.Contains([]string{"File", "Handler", "Latch"}, ref.Name) {
+			return invalidTypeID
+		}
+	case "named":
+		return invalidTypeID
+	}
 	args := argIDs
 	if len(args) == 0 && len(ref.Args) > 0 {
 		args = make([]TypeID, len(ref.Args))
@@ -2845,20 +2892,56 @@ func (c *checker) declarationFingerprint(kind, name string) string {
 	return fingerprint
 }
 
-func (c *checker) internTypeWithDeclaration(kind, name string, args []TypeID, declaration string) TypeID {
-	key := kind + "\x00" + name + "\x00" + declaration
-	for _, arg := range args {
-		key += fmt.Sprintf("\x00%d", arg)
+func semanticNodeKey(kind, name, declaration, mode string, args []TypeID, result TypeID, failure, service RowID) string {
+	var key strings.Builder
+	writeString := func(label, value string) {
+		fmt.Fprintf(&key, "%s%d:%s;", label, len(value), value)
 	}
+	writeString("kind", kind)
+	writeString("name", name)
+	writeString("decl", declaration)
+	writeString("mode", mode)
+	fmt.Fprintf(&key, "args%d:", len(args))
+	for _, arg := range args {
+		fmt.Fprintf(&key, "%d,", arg)
+	}
+	fmt.Fprintf(&key, ";result%d;failure%d;service%d;", result, failure, service)
+	return key.String()
+}
+
+// internSemanticNode is the sole structural interner for data types, value
+// contracts, and row-carrying contracts. Constructors may choose different
+// semantic fields, but they cannot create a duplicate node for the same full
+// structure through a second key namespace.
+func (c *checker) internSemanticNode(kind, name, declaration, mode string, args []TypeID, result TypeID, failure, service RowID) TypeID {
+	key := semanticNodeKey(kind, name, declaration, mode, args, result, failure, service)
+	return c.internSemanticNodeWithKey(key, kind, name, declaration, mode, args, result, failure, service)
+}
+
+func (c *checker) internSemanticNodeWithKey(key, kind, name, declaration, mode string, args []TypeID, result TypeID, failure, service RowID) TypeID {
 	if node, ok := c.typeIntern[key]; ok {
 		return node.ID
 	}
 	id := c.nextTypeID
 	c.nextTypeID++
-	node := &semanticTypeNode{ID: id, Kind: kind, Name: name, Declaration: declaration, Args: append([]TypeID{}, args...)}
+	node := &semanticTypeNode{
+		ID:          id,
+		Kind:        kind,
+		Name:        name,
+		Declaration: declaration,
+		Mode:        mode,
+		Args:        append([]TypeID{}, args...),
+		Result:      result,
+		FailureRow:  failure,
+		ServiceRow:  service,
+	}
 	c.typeIntern[key] = node
 	c.typeNodes = append(c.typeNodes, node)
 	return id
+}
+
+func (c *checker) internTypeWithDeclaration(kind, name string, args []TypeID, declaration string) TypeID {
+	return c.internSemanticNode(kind, name, declaration, "", args, invalidTypeID, emptyRowID, emptyRowID)
 }
 
 // refForID preserves the legacy one-hop Args shape for existing tooling. ArgIDs
@@ -2954,8 +3037,12 @@ func (c *checker) projectChecked(e checkedExpression) ValueType {
 	if e.kind() == checkedFiberValue {
 		shapeID = contractID
 	}
+	successID := resultID
+	if e.kind() == checkedFiberValue {
+		successID = contractID
+	}
 	v := ValueType{
-		Success: c.displayTypeID(resultID),
+		Success: c.displayTypeID(successID),
 		// Type is the value shape used by compatibility clients. A Fiber keeps
 		// its wrapper shape; recipes expose their eventual result shape while
 		// Contract carries the complete deferred contract.
@@ -3032,7 +3119,22 @@ func (c *checker) typeRef(name string) TypeRef {
 
 func (c *checker) sameType(actual checkedExpression, expected string) bool {
 	expectedID := c.canonicalRef(typeRef(expected))
-	return actual.resultID() == expectedID || actual.resultID() == c.canonicalRef(typeRef("never"))
+	return actual.valueID() == expectedID || c.isNeverValue(actual)
+}
+
+// handlerCompatible is the one narrow source compatibility relation for the
+// legacy Handler parameter of Http.serve. It accepts an effectful callable
+// whose actual source signature is string -> string; it does not turn Handler
+// into a general function type or erase the callable's own rows.
+func (c *checker) handlerCompatible(actual checkedExpression, expected string) bool {
+	if expected != "Handler" {
+		return false
+	}
+	node := actual.node()
+	if node == nil || node.Kind != "callable" || node.Mode != "effect" || len(node.Args) != 1 {
+		return false
+	}
+	return node.Args[0] == c.canonicalRef(typeRef("string")) && node.Result == c.canonicalRef(typeRef("string"))
 }
 
 func (c *checker) sameValues(actual, expected checkedExpression) bool {
@@ -3040,17 +3142,34 @@ func (c *checker) sameValues(actual, expected checkedExpression) bool {
 }
 
 func (c *checker) sameResultType(actual, expected checkedExpression) bool {
-	return actual.resultID() == expected.resultID() || actual.resultID() == c.canonicalRef(typeRef("never"))
+	return actual.valueID() == expected.resultID() || c.isNeverValue(actual)
+}
+
+func (c *checker) isNeverValue(value checkedExpression) bool {
+	node := value.node()
+	return node != nil && node.Kind == "never"
+}
+
+func (c *checker) isNeverResult(value checkedExpression) bool {
+	node := value.node()
+	if node == nil {
+		return false
+	}
+	if node.Kind == "callable" || node.Kind == "recipe" || node.Kind == "providerRecipe" {
+		result := c.node(node.Result)
+		return result != nil && result.Kind == "never"
+	}
+	return node.Kind == "never"
 }
 
 // sameContract compares complete checked values. Result compatibility is a
 // separate relation because a recipe and its eventual result can share a
 // success type while carrying entirely different rows and execution state.
 func (c *checker) sameContract(actual, expected checkedExpression) bool {
-	if actual.resultID() == c.canonicalRef(typeRef("never")) || expected.resultID() == c.canonicalRef(typeRef("never")) {
+	if c.isNeverResult(actual) || c.isNeverResult(expected) {
 		return true
 	}
-	if actual.contractID() == expected.contractID() {
+	if actual.valueID() == expected.valueID() {
 		return true
 	}
 	left, right := actual.node(), expected.node()
@@ -3063,6 +3182,11 @@ func (c *checker) sameContract(actual, expected checkedExpression) bool {
 	switch left.Kind {
 	case "recipe", "providerRecipe", "callable":
 		return left.Mode == right.Mode && left.Result == right.Result && slices.Equal(left.Args, right.Args)
+	case "fiber":
+		// Failure rows are carried by a Fiber handle and can be joined at a
+		// branch boundary. Its result shape must remain identical; a Fiber is
+		// never admitted as the result value itself.
+		return slices.Equal(left.Args, right.Args) && left.ServiceRow == right.ServiceRow
 	default:
 		return false
 	}
@@ -3073,7 +3197,7 @@ func (c *checker) joinContractRows(base, other checkedExpression) checkedExpress
 		return base
 	}
 	node := base.node()
-	if node == nil || (node.Kind != "recipe" && node.Kind != "providerRecipe" && node.Kind != "callable") {
+	if node == nil || (node.Kind != "recipe" && node.Kind != "providerRecipe" && node.Kind != "callable" && node.Kind != "fiber") {
 		return base
 	}
 	failure := c.internRow(union(c.rowLabels(base.failureRow()), c.rowLabels(other.failureRow())))
@@ -3087,12 +3211,25 @@ func (c *checker) isKind(t checkedExpression, kind string) bool {
 	if node != nil && node.Kind == kind {
 		return true
 	}
-	// A deferred recipe's canonical node describes execution, while its result
-	// node carries the data shape used by result-sensitive checks such as
-	// GoResult.orFail. Keep this relation explicit instead of projecting a
-	// mutable public type back into the checker.
-	result := c.node(t.resultID())
+	result := c.resultNode(t)
 	return result != nil && result.Kind == kind
+}
+
+// resultNode is the explicit result relation for deferred callable values.
+// Fibers intentionally do not participate: their result type is available
+// only through join/run, while the handle remains a distinct value contract.
+func (c *checker) resultNode(t checkedExpression) *semanticTypeNode {
+	node := t.node()
+	if node == nil {
+		return nil
+	}
+	if node.Kind != "callable" && node.Kind != "recipe" && node.Kind != "providerRecipe" {
+		return node
+	}
+	if node.Result == invalidTypeID {
+		return nil
+	}
+	return c.node(node.Result)
 }
 
 func (c *checker) namedType(t checkedExpression) string {
@@ -3125,14 +3262,11 @@ func (c *checker) rowDifference(actual, allowed []string) []string {
 }
 
 func (c *checker) internContract(kind, mode string, result TypeID, args []TypeID, failure, service RowID) TypeID {
-	key := "value\x00" + kind + "\x00" + mode + fmt.Sprintf("\x00%d\x00%d\x00%d", result, failure, service)
-	for _, arg := range args {
-		key += fmt.Sprintf("\x00%d", arg)
-	}
+	name := kind
+	key := semanticNodeKey(kind, "", "", mode, args, result, failure, service)
 	if node, ok := c.typeIntern[key]; ok {
 		return node.ID
 	}
-	name := kind
 	if kind == "callable" {
 		publicKey := "callable\x00" + mode + "\x00" + c.typeNodeID(result)
 		for _, arg := range args {
@@ -3142,28 +3276,11 @@ func (c *checker) internContract(kind, mode string, result TypeID, args []TypeID
 		sum := sha256.Sum256([]byte(publicKey))
 		name = "signature:" + hex.EncodeToString(sum[:8])
 	}
-	id := c.nextTypeID
-	c.nextTypeID++
-	node := &semanticTypeNode{ID: id, Kind: kind, Name: name, Mode: mode, Args: append([]TypeID{}, args...), Result: result, FailureRow: failure, ServiceRow: service}
-	c.typeIntern[key] = node
-	c.typeNodes = append(c.typeNodes, node)
-	return id
+	return c.internSemanticNodeWithKey(key, kind, name, "", mode, args, result, failure, service)
 }
 
 func (c *checker) internTypeWithRows(kind, name string, args []TypeID, failure, service RowID) TypeID {
-	key := "type\x00" + kind + "\x00" + name + fmt.Sprintf("\x00%d\x00%d", failure, service)
-	for _, arg := range args {
-		key += fmt.Sprintf("\x00%d", arg)
-	}
-	if node, ok := c.typeIntern[key]; ok {
-		return node.ID
-	}
-	id := c.nextTypeID
-	c.nextTypeID++
-	node := &semanticTypeNode{ID: id, Kind: kind, Name: name, Args: append([]TypeID{}, args...), FailureRow: failure, ServiceRow: service}
-	c.typeIntern[key] = node
-	c.typeNodes = append(c.typeNodes, node)
-	return id
+	return c.internSemanticNode(kind, name, "", "", args, invalidTypeID, failure, service)
 }
 
 // publicValue defensively copies a boundary projection. Semantic relations
@@ -3652,11 +3769,11 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			if hasPotentialOwner(arg.ownershipFacts()) || hasOwnedClosed(arg.ownershipFacts()) {
 				c.diagnostic("EF123", "value owned by a closing scope cannot be used", a.Span)
 			}
-			argNode := c.node(arg.resultID())
-			if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && e.Left.Left.Name == "Http" && i == 1 && argNode != nil && argNode.Kind == "opaque" && argNode.Name == "Handler" {
+			handlerArgument := i < len(f.Params) && e.Left.Kind == "member" && e.Left.Left.Kind == "name" && e.Left.Left.Name == "Http" && i == 1 && c.handlerCompatible(arg, f.Params[i].Type)
+			if handlerArgument {
 				serviceLabels = union(serviceLabels, c.rowLabels(arg.serviceRow()))
 			}
-			if i < len(f.Params) && (arg.isEffect() || !c.sameType(arg, f.Params[i].Type)) {
+			if i < len(f.Params) && !handlerArgument && (arg.isEffect() || !c.sameType(arg, f.Params[i].Type)) {
 				c.diagnostic("EF106", "argument must be "+f.Params[i].Type, a.Span)
 			}
 		}
@@ -3681,7 +3798,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		}
 		argumentRefs := make([]TypeRef, 0, len(argumentTypes))
 		for _, argument := range argumentTypes {
-			argumentRefs = append(argumentRefs, c.ref(argument.resultID()))
+			argumentRefs = append(argumentRefs, c.ref(argument.valueID()))
 		}
 		callee := e.Left.Name
 		if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
@@ -3719,7 +3836,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		}
 		switch e.Name {
 		case "value":
-			node := c.node(inner.resultID())
+			node := c.resultNode(inner)
 			if node != nil && len(node.Args) == 1 {
 				t = c.checkedDataID(node.Args[0], nil, nil)
 			}
@@ -3734,7 +3851,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			c.diagnostic("EF106", "orFail requires an Effect returning GoResult", e.Span)
 			break
 		}
-		if node := c.node(t.resultID()); node != nil && len(node.Args) == 1 {
+		if node := c.resultNode(t); node != nil && len(node.Args) == 1 {
 			failure := c.internRow(union(c.rowLabels(t.failureRow()), []string{"GoError"}))
 			result := checkedExpression{value: c.values.recipe(node.Args[0], nil, checkedEffectCallable, failure, t.serviceRow(), t.ownershipFacts(), t.captureFacts())}
 			result.evaluation = t.evaluation
@@ -3861,10 +3978,15 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 	case "binary":
 		left, right := c.expr(e.Left, env, inEffect), c.expr(e.Right, env, inEffect)
 		leftNode, rightNode := left.node(), right.node()
-		if left.isEffect() || right.isEffect() || !c.sameValues(left, right) || leftNode == nil || rightNode == nil || leftNode.Kind != "primitive" || (leftNode.Name != "string" && leftNode.Name != "bool" && leftNode.Name != "i64") || (e.Name == "+" && leftNode.Name != "string") {
+		valid := !left.isEffect() && !right.isEffect() && c.sameValues(left, right) && leftNode != nil && rightNode != nil && leftNode.Kind == "primitive" && (leftNode.Name == "string" || leftNode.Name == "bool" || leftNode.Name == "i64") && (e.Name != "+" || leftNode.Name == "string")
+		if !valid {
 			c.diagnostic("EF106", "operator requires matching primitive values; + accepts strings", e.Span)
 		}
-		t = c.checkedDataID(left.resultID(), nil, nil)
+		if valid {
+			t = c.checkedDataID(left.valueID(), nil, nil)
+		} else {
+			t = c.checkedData("invalid")
+		}
 		if e.Name == "==" {
 			t = c.checkedData("bool")
 		}
