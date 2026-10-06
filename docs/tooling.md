@@ -43,11 +43,11 @@ ef query examples/latest-task.ef "$OFFSET"
 
 ## Dependencies and dependents
 
-Graph nodes represent functions, nominal services, providers, provider methods and lexical effect expressions. Edges include `requires`, `implements`, `calls`, `contains`, `adapts` and `provides`. Incoming edges identify dependents. Canonical contracts appear on function/expression nodes.
+Graph nodes represent functions, nominal services, providers, provider methods, provider recipes, materialized provider values and lexical effect expressions. Edges include `requires`, `implements`, `calls`, `contains`, `adapts`, `materializes` and `provides`. Incoming edges identify dependents. Canonical contracts appear on function/expression nodes.
 
-For `examples/workflow.ef`, `welcome` requires `Directory`; `DemoDirectory` implements it; a provision expression adapts the receiver and supplies that provider. The receiver keeps its original contract while the provision node shows the remaining requirements. Provider aliases are represented as provider values when their declaration identity is not resolved.
+For `examples/workflow.ef`, `welcome` requires `Directory`; `DemoDirectory` implements it; a provision expression adapts the receiver and supplies that provider. The receiver keeps its original contract while the provision node shows the remaining requirements. Explicit configured or dependency-capturing provider constructors appear as lazy recipes; each `run` materializes a provider value, while aliases of a materialized value retain its identity.
 
-This is a single-file static composition graph, including deferred calls. It does not establish execution order, runtime allocations or sharing. Providers are currently self-contained. Dependent layers, fallible acquisition, sharing keys and cycle paths will extend this same model when implemented. Expression IDs contain offsets and are scoped to the revision.
+This is a single-file static composition graph, including deferred calls. It does not establish execution order or runtime allocations. Provider construction is explicit and non-memoized: a reused value is one graph identity, while repeated runs of one recipe are distinct values. Fallible acquisition, lifecycle-safe arbitrary capture, general sharing keys and cycle paths will extend this model when implemented. Expression IDs contain offsets and are scoped to the revision.
 
 MCP limits graphs to 1,000 nodes and 2,000 edges; larger graphs fail explicitly. Lint diagnostics are limited to 100 with truncation flags. Full CLI results remain available.
 

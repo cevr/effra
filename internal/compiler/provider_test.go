@@ -265,6 +265,67 @@ effect fn main() -> string {
 	}
 }
 
+func TestProviderGraphDistinguishesRecipeRunsFromReusedValues(t *testing.T) {
+	source := `service Names { effect fn get(id: string) -> string }
+service Greeting { effect fn hello(id: string) -> string }
+impl NamesFixture for Names { effect fn get(id: string) -> string { id } }
+impl Prefixed(prefix: string) for Greeting uses {Names} {
+ effect fn hello(id: string) -> string { let name = run Names.get(id) prefix + name }
+}
+effect fn main() -> string {
+ let recipe = Prefixed("recipe: ").provide<Names>(NamesFixture)
+ let first = run recipe
+ let second = run recipe
+ let one = run Greeting.hello("one").provide<Greeting>(first)
+ let two = run Greeting.hello("two").provide<Greeting>(first)
+ let three = run Greeting.hello("three").provide<Greeting>(second)
+ one + two + three
+}`
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	graph, err := r.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipes, values := 0, map[string]GraphNode{}
+	for _, node := range graph.Nodes {
+		switch node.Kind {
+		case "provider-recipe":
+			recipes++
+		case "provider-value":
+			values[node.ID] = node
+		}
+	}
+	if recipes != 1 || len(values) != 2 {
+		t.Fatalf("expected one lazy recipe and two run values, got recipes=%d values=%+v", recipes, values)
+	}
+	counts := map[string]int{}
+	for _, edge := range graph.Edges {
+		if edge.Kind == "provides" && edge.Service == "Greeting" {
+			counts[edge.To]++
+		}
+	}
+	if len(counts) != 2 {
+		t.Fatalf("expected two materialized provider identities, got %v", counts)
+	}
+	for _, count := range counts {
+		if count != 1 && count != 2 {
+			t.Fatalf("unexpected provision count: %v", counts)
+		}
+	}
+	var reused string
+	for id, count := range counts {
+		if count == 2 {
+			reused = id
+		}
+	}
+	if reused == "" || len(values[reused].Incoming) < 3 {
+		t.Fatalf("reused provider value lost run/provision incoming edges: %q %+v", reused, values[reused])
+	}
+}
+
 func TestProviderConfigurationAcceptsTypedRecordData(t *testing.T) {
 	source := `record PrefixConfig { prefix: string }
 service Names { effect fn get(id: string) -> string }
