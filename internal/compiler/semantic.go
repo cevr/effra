@@ -40,15 +40,17 @@ type EvaluationRows struct {
 }
 
 type CallableType struct {
-	ID           string   `json:"id"`
-	Signature    string   `json:"signature"`
-	Kind         string   `json:"kind"`
-	Parameters   []Param  `json:"parameters"`
-	Result       TypeRef  `json:"result"`
-	Failures     []string `json:"failures"`
-	Requirements []string `json:"requirements"`
-	FailureRow   string   `json:"failureRow,omitempty"`
-	ServiceRow   string   `json:"serviceRow,omitempty"`
+	CallbackPolicies []CallbackPolicy `json:"callbackPolicies,omitempty"`
+	RowParameters    []RowParameter   `json:"rowParameters,omitempty"`
+	ID               string           `json:"id"`
+	Signature        string           `json:"signature"`
+	Kind             string           `json:"kind"`
+	Parameters       []Param          `json:"parameters"`
+	Result           TypeRef          `json:"result"`
+	Failures         []string         `json:"failures"`
+	Requirements     []string         `json:"requirements"`
+	FailureRow       string           `json:"failureRow,omitempty"`
+	ServiceRow       string           `json:"serviceRow,omitempty"`
 }
 
 // ApplicationIdentity is the checked identity of one function application.
@@ -56,10 +58,20 @@ type CallableType struct {
 // available through source spans and the checked node, rather than being
 // duplicated in every inspection response.
 type ApplicationIdentity struct {
-	ID        string    `json:"id"`
-	Callee    string    `json:"callee"`
-	Arguments []TypeRef `json:"arguments"`
-	Result    TypeRef   `json:"result"`
+	CallbackPolicies []CallbackPolicy `json:"callbackPolicies,omitempty"`
+	RowArguments     []RowArgument    `json:"rowArguments,omitempty"`
+	ID               string           `json:"id"`
+	Callee           string           `json:"callee"`
+	Arguments        []TypeRef        `json:"arguments"`
+	Result           TypeRef          `json:"result"`
+}
+
+type CallbackPolicy struct {
+	Parameter             int      `json:"parameter"`
+	Kind                  string   `json:"kind"`
+	PropagateRequirements bool     `json:"propagateRequirements"`
+	AbsorbedFailures      []string `json:"absorbedFailures,omitempty"`
+	FailureRow            string   `json:"failureRow,omitempty"`
 }
 
 func newApplicationIdentity(callee string, arguments []TypeRef, result TypeRef, span Span) ApplicationIdentity {
@@ -90,8 +102,22 @@ type TypeNode struct {
 }
 
 type RowNode struct {
-	ID     string   `json:"id"`
-	Labels []string `json:"labels,omitempty"`
+	ID         string         `json:"id"`
+	Labels     []string       `json:"labels,omitempty"`
+	Parameters []RowParameter `json:"parameters,omitempty"`
+}
+
+type RowParameter struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Kind        string `json:"kind"`
+	Declaration string `json:"declaration"`
+	Span        Span   `json:"span"`
+}
+
+type RowArgument struct {
+	Parameter RowParameter `json:"parameter"`
+	Row       string       `json:"row"`
 }
 
 // ownershipOwnerKind separates the origin of an owner from its rendered
@@ -108,6 +134,7 @@ const (
 	ownershipOwnerLexical
 	ownershipOwnerChild
 	ownershipOwnerTimeout
+	ownershipOwnerCallbackResult
 )
 
 // OwnershipFact is the bounded ownership evidence carried by a checked value.
@@ -147,6 +174,7 @@ type OwnershipFact struct {
 	// alternative. A remainder covers every other path, so a join cannot use a
 	// sibling fact from another alternative to discharge it.
 	remainderExclusions string
+	callbackRelation    *callbackResultRelation
 }
 
 // TypeRef is the canonical semantic identity used by checking, emission and
@@ -266,9 +294,10 @@ type checkedExpression struct {
 	child      []OwnershipFact
 	// callableDecl is projection metadata only. Its type and row facts are
 	// never read for checking; those facts come from value's canonical node.
-	callableDecl *Function
-	application  *ApplicationIdentity
-	identity     string
+	callableDecl     *Function
+	application      *ApplicationIdentity
+	identity         string
+	callableEvidence callableEvidence
 }
 
 func (e checkedExpression) contractID() TypeID      { return e.value.contractID() }
@@ -325,6 +354,9 @@ type checker struct {
 	region                  string
 	suppressDiagnostics     bool
 	publicationBytes        int
+	rowContext              map[string]RowParameter
+	rowDefinitions          map[string]RowParameter
+	callbackRelations       map[string]*callbackResultRelation
 }
 
 const maxTypeProjectionNodes = 4096
@@ -341,6 +373,9 @@ func (c *checker) checkedDataID(id TypeID, ownership, captures []OwnershipFact) 
 	if node != nil && node.Kind == "provider" {
 		return checkedExpression{value: c.values.provider(id, ownership, captures)}
 	}
+	if node != nil && (node.Kind == "callable" || node.Kind == "recipe" || node.Kind == "providerRecipe" || node.Kind == "fiber") {
+		return checkedExpression{value: c.values.occurrence(id, ownership, captures)}
+	}
 	return checkedExpression{value: c.values.data(id, ownership, captures)}
 }
 
@@ -355,7 +390,10 @@ func (c *checker) checkedProvider(p *Provider, recipe bool) checkedExpression {
 }
 
 func (c *checker) checkedFunction(f *Function, declaration, recipe bool) checkedExpression {
-	result := c.canonicalRef(typeRef(f.Return))
+	result := f.returnID
+	if result == invalidTypeID {
+		result = c.canonicalRef(typeRef(f.Return))
+	}
 	if result == invalidTypeID {
 		result = c.canonicalRef(typeRef("invalid"))
 	}
@@ -366,8 +404,12 @@ func (c *checker) checkedFunction(f *Function, declaration, recipe bool) checked
 	}
 	failure, service := emptyRowID, emptyRowID
 	if f.Effect {
-		failure = c.internRow(f.Errors)
-		service = c.internRow(f.Services)
+		if f.signatureChecked {
+			failure, service = f.failureID, f.serviceID
+		} else {
+			failure = c.internRow(f.Errors)
+			service = c.internRow(f.Services)
+		}
 	}
 	var checked CheckedValue
 	switch {
@@ -376,11 +418,12 @@ func (c *checker) checkedFunction(f *Function, declaration, recipe bool) checked
 	case recipe && f.Effect:
 		checked = c.values.recipe(result, parameters, kind, failure, service, f.Ownership, f.Captures)
 	default:
-		checked = c.values.data(result, f.Ownership, f.Captures)
+		checked = c.values.occurrence(result, f.Ownership, f.Captures)
 	}
 	resultExpression := checkedExpression{value: checked, identity: f.Identity}
-	if declaration || (recipe == false && checked.kind() == checkedCallableValue) {
+	if declaration {
 		resultExpression.callableDecl = f
+		resultExpression.callableEvidence = namedCallableEvidence(f)
 	}
 	return resultExpression
 }
@@ -402,20 +445,6 @@ func (c *checker) functionParameterTypeIDs(f *Function) []TypeID {
 		parameters = append(parameters, id)
 	}
 	return parameters
-}
-
-func (c *checker) checkedHandler(f *Function) checkedExpression {
-	// Handler is a source-level callable compatibility relation at Http.serve.
-	// The handler value itself keeps the function's actual result and rows so
-	// declaration, alias, and direct application all share one canonical
-	// callable contract.
-	result := c.canonicalRef(typeRef(f.Return))
-	if result == invalidTypeID {
-		result = c.canonicalRef(typeRef("invalid"))
-	}
-	parameters := c.functionParameterTypeIDs(f)
-	checked := c.values.callable(result, parameters, checkedEffectCallable, c.internRow(f.Errors), c.internRow(f.Services), f.Ownership, f.Captures)
-	return checkedExpression{value: checked, callableDecl: f, identity: f.Identity}
 }
 
 func (c *checker) ownershipPaths(typeName, prefix string, seen map[string]bool) []string {
@@ -1040,7 +1069,7 @@ func mergeFacts(a, b []OwnershipFact) []OwnershipFact {
 func materializeExecutionFacts(facts []OwnershipFact, region string, ownerKind ownershipOwnerKind) []OwnershipFact {
 	out := cloneFacts(facts)
 	for i := range out {
-		if out[i].ownerKind == ownershipOwnerInvocationResult || out[i].ownerKind == ownershipOwnerDeferred {
+		if out[i].ownerKind == ownershipOwnerInvocationResult || out[i].ownerKind == ownershipOwnerDeferred || out[i].ownerKind == ownershipOwnerCallbackResult {
 			out[i].Region = region
 			out[i].ownerKind = ownerKind
 		}
@@ -1215,6 +1244,11 @@ func canSkipWildcardForSource(fact OwnershipFact, source string) bool {
 }
 
 func mergeSamePathAlternatives(facts []OwnershipFact) (OwnershipFact, bool) {
+	for _, fact := range facts[1:] {
+		if fact.callbackRelation != facts[0].callbackRelation {
+			return OwnershipFact{}, false
+		}
+	}
 	if len(facts) < 2 {
 		return OwnershipFact{}, false
 	}
@@ -1660,6 +1694,9 @@ func incompleteWildcard(fact OwnershipFact) bool {
 
 func mergePotentialWildcard(a, b OwnershipFact) OwnershipFact {
 	merged := a
+	if a.callbackRelation != b.callbackRelation {
+		merged.callbackRelation = nil
+	}
 	merged.Status = "unknown"
 	merged.Origin = "bounded"
 	merged.potentialOwner = true
@@ -1732,6 +1769,17 @@ func retainIncompleteWildcards(facts []OwnershipFact) []OwnershipFact {
 }
 
 func compareOwnershipFacts(a, b OwnershipFact) int {
+	if a.callbackRelation != b.callbackRelation {
+		if a.callbackRelation == nil {
+			return -1
+		}
+		if b.callbackRelation == nil {
+			return 1
+		}
+		if order := strings.Compare(a.callbackRelation.key, b.callbackRelation.key); order != 0 {
+			return order
+		}
+	}
 	if a.Path != b.Path {
 		return strings.Compare(a.Path, b.Path)
 	}
@@ -2345,7 +2393,11 @@ func (c *checker) prepareFunctionSummaries() {
 	remaining := make(map[*Function]int, len(functions))
 	for _, caller := range functions {
 		deps := map[*Function]bool{}
-		collectFunctionDependencies(caller.Body, known, deps)
+		locals := map[string]bool{}
+		for _, p := range caller.Params {
+			locals[p.Name] = true
+		}
+		collectFunctionDependencies(caller.Body, known, deps, locals)
 		delete(deps, caller)
 		remaining[caller] = len(deps)
 		for callee := range deps {
@@ -2402,11 +2454,12 @@ func (c *checker) prepareFunctionSummaries() {
 		f := queue[head]
 		queued[f] = false
 		beforeOwnership, beforeCaptures := cloneFacts(f.Ownership), cloneFacts(f.Captures)
+		beforeCallable := f.returnCallableEvidence
 		c.function(f, false)
 		observedOwnership[f] = append(observedOwnership[f], beforeOwnership, cloneFacts(f.Ownership))
 		observedCaptures[f] = append(observedCaptures[f], beforeCaptures, cloneFacts(f.Captures))
 		iterations++
-		changed := !slices.Equal(beforeOwnership, f.Ownership) || !slices.Equal(beforeCaptures, f.Captures)
+		changed := !slices.Equal(beforeOwnership, f.Ownership) || !slices.Equal(beforeCaptures, f.Captures) || beforeCallable != f.returnCallableEvidence
 		if !changed {
 			continue
 		}
@@ -2422,27 +2475,35 @@ func (c *checker) prepareFunctionSummaries() {
 		for _, f := range cycle {
 			f.Ownership = conservativeCycleFacts(observedOwnership[f]...)
 			f.Captures = conservativeCycleFacts(observedCaptures[f]...)
+			f.returnCallableEvidence = callableEvidence{unresolved: true}
 		}
 	}
 	c.suppressDiagnostics = previous
 }
 
-func collectFunctionDependencies(block *Block, known map[string]*Function, out map[*Function]bool) {
+func collectFunctionDependencies(block *Block, known map[string]*Function, out map[*Function]bool, locals map[string]bool) {
 	if block == nil {
 		return
 	}
+	bound := map[string]bool{}
+	for name, value := range locals {
+		bound[name] = value
+	}
 	for _, statement := range block.Statements {
-		collectFunctionDependenciesExpr(statement.Value, known, out)
-		collectFunctionDependenciesExpr(statement.Payload, known, out)
+		collectFunctionDependenciesExpr(statement.Value, known, out, bound)
+		collectFunctionDependenciesExpr(statement.Payload, known, out, bound)
+		if statement.Kind == "let" {
+			bound[statement.Name] = true
+		}
 	}
 }
 
-func collectFunctionDependenciesExpr(e *Expr, known map[string]*Function, out map[*Function]bool) {
+func collectFunctionDependenciesExpr(e *Expr, known map[string]*Function, out map[*Function]bool, locals map[string]bool) {
 	if e == nil {
 		return
 	}
-	if e.Kind == "call" && e.Left != nil && e.Left.Kind == "name" {
-		if f := known[e.Left.Name]; f != nil {
+	if e.Kind == "name" && !locals[e.Name] {
+		if f := known[e.Name]; f != nil {
 			out[f] = true
 		}
 	}
@@ -2450,13 +2511,22 @@ func collectFunctionDependenciesExpr(e *Expr, known map[string]*Function, out ma
 	// inspection, with the same child pointers in each view. Use the shared
 	// traversal seam so summary preparation remains linear in the syntax tree.
 	forEachExprChild(e, func(child *Expr) {
-		collectFunctionDependenciesExpr(child, known, out)
+		collectFunctionDependenciesExpr(child, known, out, locals)
 	})
 	for _, arm := range e.Arms {
-		collectFunctionDependencies(arm.Body, known, out)
+		bound := map[string]bool{}
+		for name, value := range locals {
+			bound[name] = value
+		}
+		if arm.Pattern != nil {
+			for _, name := range arm.Pattern.Bindings {
+				bound[name] = true
+			}
+		}
+		collectFunctionDependencies(arm.Body, known, out, bound)
 	}
-	collectFunctionDependencies(e.Then, known, out)
-	collectFunctionDependencies(e.Else, known, out)
+	collectFunctionDependencies(e.Then, known, out, locals)
+	collectFunctionDependencies(e.Else, known, out, locals)
 }
 
 // providerSignature checks the explicit constructor boundary. Constructor
@@ -2556,12 +2626,16 @@ func (c *checker) validateJSDeclarationNames() {
 	}
 }
 func (c *checker) signature(f *Function) {
+	previous := c.rowContext
+	c.rowContext = c.functionRows(f)
+	defer func() { c.rowContext = previous }()
 	valid := func(t string, span Span) {
 		if !c.typeKnown(t) {
 			c.diagnostic("EF102", "unknown or unsupported value type "+t, span)
 		}
 	}
 	valid(f.Return, f.Span)
+	f.returnID = c.canonicalRef(typeRef(f.Return))
 	names := map[string]bool{}
 	for i := range f.Params {
 		p := &f.Params[i]
@@ -2574,11 +2648,17 @@ func (c *checker) signature(f *Function) {
 		names[p.Name] = true
 	}
 	for _, name := range normalized(f.Errors) {
+		if c.rowParameter(name, "raises") {
+			continue
+		}
 		if _, exists := c.program.Errors[name]; !exists {
 			c.diagnostic("EF102", "unknown failure "+name, f.Span)
 		}
 	}
 	for _, name := range normalized(f.Services) {
+		if c.rowParameter(name, "uses") {
+			continue
+		}
 		if _, exists := c.services[name]; !exists {
 			c.diagnostic("EF102", "unknown service "+name, f.Span)
 		}
@@ -2586,8 +2666,15 @@ func (c *checker) signature(f *Function) {
 	if !f.Effect && (len(f.Errors) > 0 || len(f.Services) > 0) {
 		c.diagnostic("EF103", "ordinary functions cannot declare effect rows", f.Span)
 	}
+	f.failureID = c.internRow(c.sourceRow(f.Errors, "raises"))
+	f.serviceID = c.internRow(c.sourceRow(f.Services, "uses"))
+	f.signatureChecked = true
+	c.validateRowInference(f)
 }
 func (c *checker) typeKnown(name string) bool {
+	if c.program != nil && c.program.typeExpressions[name] != nil {
+		return c.sourceCallableKnown(c.program.typeExpressions[name])
+	}
 	switch name {
 	case "string", "bool", "()", "i64", "File", "Latch", "bytes", "Handler":
 		return true
@@ -2716,7 +2803,13 @@ func (c *checker) internRow(labels []string) RowID {
 	id := c.nextRowID
 	c.nextRowID++
 	c.rowIntern[key] = id
-	c.rows = append(c.rows, RowNode{ID: rowNodeIDForLabels(labels), Labels: append([]string{}, labels...)})
+	row := RowNode{ID: rowNodeIDForLabels(labels), Labels: append([]string{}, labels...)}
+	for _, label := range labels {
+		if parameter, ok := c.rowDefinitions[label]; ok {
+			row.Parameters = append(row.Parameters, parameter)
+		}
+	}
+	c.rows = append(c.rows, row)
 	return id
 }
 
@@ -2733,6 +2826,13 @@ func (c *checker) canonicalRef(ref TypeRef) TypeID {
 			return id
 		}
 		return invalidTypeID
+	}
+	if c.program != nil && c.program.typeExpressions[ref.Name] != nil {
+		return c.sourceCallable(c.program.typeExpressions[ref.Name])
+	}
+	if ref.Name == "Handler" {
+		stringID := c.canonicalRef(typeRef("string"))
+		return c.internContract("callable", "effect", stringID, []TypeID{stringID}, emptyRowID, emptyRowID)
 	}
 	argIDs := []TypeID(nil)
 	if !strings.HasPrefix(ref.ID, "legacy:") {
@@ -3080,10 +3180,10 @@ func (c *checker) projectCheckedBase(e checkedExpression) ValueType {
 		Type:     c.identityRef(shapeID),
 		Contract: contract,
 		Identity: e.identity,
-		// Callable declarations expose their declared callable mode for the
-		// compatibility projection. Expression values derive execution category
-		// solely from the canonical recipe/provider-recipe node above.
-		Effect:     e.isEffect() || (e.callableDecl != nil && e.callableDecl.Effect),
+		// Compatibility clients see an effect callable's mode even when it is
+		// carried through a parameter or field. Execution still requires the
+		// separate canonical recipe category used by isEffect.
+		Effect:     e.isEffect() || (e.node() != nil && e.node().Kind == "callable" && e.node().Mode == "effect"),
 		Errors:     c.retainedRowLabels(e.failureRow()),
 		Services:   c.retainedRowLabels(e.serviceRow()),
 		FailureRow: c.rowNodeID(e.failureRow()),
@@ -3135,6 +3235,21 @@ func (c *checker) invocationContract(e checkedExpression, effect bool) checkedEx
 	if !effect {
 		return e
 	}
+	// A returned callable carries its own signature and rows. Evaluation of
+	// the factory is a separate contract whose result is that complete value,
+	// not the result of invoking the returned callable.
+	if node := e.node(); node != nil && node.Kind == "callable" {
+		failure, service := e.evaluation.failureRowID(), e.evaluation.serviceRowID()
+		if failure != emptyRowID || service != emptyRowID {
+			e.value = c.values.recipe(e.valueID(), nil, checkedEffectCallable, failure, service, e.ownershipFacts(), e.captureFacts())
+			// Named callable metadata describes the returned value, not this
+			// enclosing invocation. Evidence remains available for substitution.
+			e.callableDecl = nil
+			e.identity = ""
+			e.application = nil
+		}
+		return e
+	}
 	e.value = c.recontractRows(e, e.evaluation.failureRowID(), e.evaluation.serviceRowID())
 	return e
 }
@@ -3147,7 +3262,7 @@ func (c *checker) typeRef(name string) TypeRef {
 
 func (c *checker) sameType(actual checkedExpression, expected string) bool {
 	expectedID := c.canonicalRef(typeRef(expected))
-	return actual.valueID() == expectedID || c.isNeverValue(actual)
+	return c.assignable(actual.valueID(), expectedID, 0)
 }
 
 // handlerCompatible is the one narrow source compatibility relation for the
@@ -3221,6 +3336,10 @@ func (c *checker) sameContract(actual, expected checkedExpression) bool {
 }
 
 func (c *checker) joinContractRows(base, other checkedExpression) checkedExpression {
+	base.callableEvidence = joinCallableEvidence(base.callableEvidence, other.callableEvidence)
+	if base.callableDecl != other.callableDecl {
+		base.callableDecl = nil
+	}
 	if !c.sameContract(base, other) {
 		return base
 	}
@@ -3349,6 +3468,7 @@ func publicParams(params []Param) []Param {
 	params = append([]Param{}, params...)
 	for i := range params {
 		params[i].typeID = invalidTypeID
+		params[i].sourceType = nil
 	}
 	return params
 }
@@ -3426,6 +3546,9 @@ func (c *checker) function(f *Function, record bool) {
 }
 
 func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, allowedServices []string) {
+	previousRows := c.rowContext
+	c.rowContext = c.functionRows(f)
+	defer func() { c.rowContext = previousRows }()
 	env := map[string]checkedExpression{}
 	for _, p := range locals {
 		parameter := c.checkedData(p.Type)
@@ -3433,7 +3556,10 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 		env[p.Name] = parameter
 	}
 	for _, p := range f.Params {
-		parameter := c.checkedData(p.Type)
+		parameter := c.checkedDataID(p.typeID, nil, nil)
+		if node := parameter.node(); node != nil && node.Kind == "callable" {
+			parameter.callableEvidence = callableEvidence{parameter: f, parameterName: p.Name}
+		}
 		parameter.setOwnership(c.borrowedOwnership(p.Type, "parameter:"+p.Name))
 		env[p.Name] = parameter
 	}
@@ -3442,13 +3568,13 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	c.recordFacts = record || previousFacts
 	actual := c.withRegion("invocation", func() checkedExpression { return c.block(f.Body, env, f.Effect) })
 	c.recordFacts = previousFacts
-	if !c.isKind(actual, "never") && (!c.sameType(actual, f.Return) || actual.isEffect()) {
+	if !c.isKind(actual, "never") && (!c.assignable(actual.valueID(), f.returnID, 0) || actual.isEffect()) {
 		c.diagnostic("EF106", fmt.Sprintf("body returns %s; expected %s", c.displayChecked(actual), f.Return), f.Span)
 	}
-	if missing := c.rowDifference(c.rowLabels(actual.evaluation.failureRowID()), f.Errors); len(missing) > 0 {
+	if missing := c.rowDifference(c.rowLabels(actual.evaluation.failureRowID()), c.rowLabels(f.failureID)); len(missing) > 0 {
 		c.diagnostic("EF107", "undeclared failures: "+strings.Join(missing, ", "), f.Span)
 	}
-	if missing := c.rowDifference(c.rowLabels(actual.evaluation.serviceRowID()), allowedServices); len(missing) > 0 {
+	if missing := c.rowDifference(c.rowLabels(actual.evaluation.serviceRowID()), c.sourceRow(allowedServices, "uses")); len(missing) > 0 {
 		c.diagnostic("EF108", "missing service requirements: "+strings.Join(missing, ", "), f.Span)
 	}
 	actual = c.invocationContract(actual, f.Effect)
@@ -3457,6 +3583,7 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	}
 	f.Ownership = summarizeInvocationFacts(actual.ownershipFacts())
 	f.Captures = summarizeInvocationFacts(actual.captureFacts())
+	f.returnCallableEvidence = actual.callableEvidence
 	declared := c.checkedFunction(f, true, false)
 	declared.identity = f.Identity
 	c.result.checkedFunctions[f] = checkedSymbol{contract: declared, body: actual, declaration: f}
@@ -3503,8 +3630,9 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 func callableIdentity(c *checker, f *Function) *CallableType {
 	parameters := append([]Param{}, f.Params...)
 	for i := range parameters {
-		parameters[i].TypeRef = c.typeRef(parameters[i].Type)
-		parameters[i].typeID = c.canonicalRef(parameters[i].TypeRef)
+		parameters[i].TypeRef = c.ref(parameters[i].typeID)
+		parameters[i].sourceType = nil
+		parameters[i].typeID = invalidTypeID
 	}
 	kind := "pure"
 	if f.Effect {
@@ -3514,7 +3642,7 @@ func callableIdentity(c *checker, f *Function) *CallableType {
 	if identity == "" {
 		identity = "function:" + f.Name
 	}
-	return &CallableType{ID: identity, Kind: kind, Parameters: parameters, Result: c.typeRef(f.Return), Failures: normalized(f.Errors), Requirements: normalized(f.Services)}
+	return &CallableType{ID: identity, Kind: kind, Parameters: parameters, Result: c.ref(f.returnID), Failures: normalized(f.Errors), Requirements: normalized(f.Services), RowParameters: append([]RowParameter(nil), f.RowParameters...), CallbackPolicies: append([]CallbackPolicy(nil), f.CallbackPolicies...)}
 }
 func (c *checker) displayChecked(t checkedExpression) string {
 	if t.isEffect() {
@@ -3655,7 +3783,7 @@ func (c *checker) block(b *Block, env map[string]checkedExpression, effect bool)
 			continue
 		}
 		t := c.expr(s.Value, env, effect)
-		if s.Kind != "let" && (hasPotentialOwner(t.ownershipFacts()) || hasOwnedClosed(t.ownershipFacts())) {
+		if s.Kind != "let" && (c.unsafePotentialOwner(t.ownershipFacts()) || hasOwnedClosed(t.ownershipFacts())) {
 			c.diagnostic("EF123", "value owned by a closing scope cannot escape", s.Span)
 		}
 		out.evaluation = c.unionEvaluationFacts(out.evaluation, t.executed)
@@ -3713,13 +3841,13 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 				c.requireGo(e.Span, "native provider "+p.Service)
 			}
 			e.Text = "provider"
-		} else if f := c.functions[e.Name]; f != nil && f.Effect && f.Return == "string" && len(f.Params) == 1 && f.Params[0].Type == "string" {
-			// The legacy Handler spelling is a source-level compatibility boundary.
-			// Its canonical value remains the complete callable contract, including
-			// carried failures and services; the opaque Handler result only keeps the
-			// old HTTP parameter shape readable.
-			t = c.checkedHandler(f)
-			e.Text = "handler"
+		} else if f := c.functions[e.Name]; f != nil {
+			if len(f.RowParameters) > 0 {
+				c.diagnostic("EF125", "row-polymorphic functions require direct application; first-class polymorphic values are unsupported", e.Span)
+			}
+			t = c.checkedFunction(f, true, false)
+			t.setOwnership(nil)
+			e.Text = "function"
 		} else {
 			c.diagnostic("EF102", "unknown value "+e.Name, e.Span)
 		}
@@ -3734,6 +3862,10 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		}
 		if c.fiberCall(e, env, inEffect) {
 			t = e.checked
+			break
+		}
+		if callback, ok := c.callableCall(e, env, inEffect); ok {
+			t = callback
 			break
 		}
 		if e.Left.Kind == "name" {
@@ -3799,6 +3931,8 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		}
 		argumentTypes := make([]checkedExpression, len(e.Args))
 		t = c.checkedFunction(f, false, true)
+		var callbackPolicies []CallbackPolicy
+		parameterIDs := c.functionParameterTypeIDs(f)
 		failureRow := t.failureRow()
 		serviceLabels := c.rowLabels(t.serviceRow())
 		if serviceName != "" {
@@ -3817,28 +3951,55 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		for i, a := range e.Args {
 			arg := c.expr(a, env, inEffect)
 			argumentTypes[i] = arg
-			if hasPotentialOwner(arg.ownershipFacts()) || hasOwnedClosed(arg.ownershipFacts()) {
+			if c.unsafePotentialOwner(arg.ownershipFacts()) || hasOwnedClosed(arg.ownershipFacts()) {
 				c.diagnostic("EF123", "value owned by a closing scope cannot be used", a.Span)
 			}
-			handlerArgument := i < len(f.Params) && e.Left.Kind == "member" && e.Left.Left.Kind == "name" && e.Left.Left.Name == "Http" && i == 1 && c.handlerCompatible(arg, f.Params[i].Type)
-			if handlerArgument {
-				serviceLabels = union(serviceLabels, c.rowLabels(arg.serviceRow()))
+			handlerArgument := false
+			for _, policy := range f.CallbackPolicies {
+				if policy.Parameter != i || i >= len(f.Params) || !c.handlerCompatible(arg, f.Params[i].Type) {
+					continue
+				}
+				handlerArgument = true
+				if policy.PropagateRequirements {
+					serviceLabels = union(serviceLabels, c.rowLabels(arg.serviceRow()))
+				}
+				policy.AbsorbedFailures = c.rowLabels(arg.failureRow())
+				policy.FailureRow = c.rowNodeID(arg.failureRow())
+				callbackPolicies = append(callbackPolicies, policy)
 			}
-			if i < len(f.Params) && !handlerArgument && (arg.isEffect() || !c.sameType(arg, f.Params[i].Type)) {
+			if i < len(f.Params) && len(f.RowParameters) == 0 && !handlerArgument && (arg.isEffect() || !c.assignable(arg.valueID(), parameterIDs[i], 0)) {
 				c.diagnostic("EF106", "argument must be "+f.Params[i].Type, a.Span)
 			}
 		}
+		resultID := f.returnID
+		if resultID == invalidTypeID {
+			resultID = t.resultID()
+		}
+		var rowArguments []RowArgument
+		if len(f.RowParameters) > 0 {
+			bindings := c.inferRows(f, argumentTypes, e.Span)
+			for i, id := range parameterIDs {
+				parameterIDs[i] = c.instantiateType(id, bindings, 0)
+			}
+			resultID = c.instantiateType(f.returnID, bindings, 0)
+			failureRow = c.instantiateRow(f.failureID, bindings)
+			serviceLabels = c.rowLabels(c.instantiateRow(f.serviceID, bindings))
+			for _, parameter := range f.RowParameters {
+				rowArguments = append(rowArguments, RowArgument{Parameter: parameter, Row: c.rowNodeID(c.internRow(bindings[parameter.ID]))})
+			}
+		}
 		if len(f.Ownership) > 0 {
-			t.setOwnership(instantiateCheckedFacts(f.Ownership, f.Params, argumentTypes))
+			t.setOwnership(c.instantiateCallbackFacts(f.Ownership, f, argumentTypes, 0))
 		}
 		if len(f.Captures) > 0 {
-			t.setCaptures(instantiateCheckedFacts(f.Captures, f.Params, argumentTypes))
+			t.setCaptures(c.instantiateCallbackFacts(f.Captures, f, argumentTypes, 0))
 		}
 		if f.Effect {
-			t.value = c.values.recipe(t.resultID(), c.functionParameterTypeIDs(f), checkedEffectCallable, failureRow, c.internRow(serviceLabels), t.ownershipFacts(), t.captureFacts())
+			t.value = c.values.recipe(resultID, parameterIDs, checkedEffectCallable, failureRow, c.internRow(serviceLabels), t.ownershipFacts(), t.captureFacts())
 		} else {
-			t.value = c.values.data(t.resultID(), t.ownershipFacts(), t.captureFacts())
+			t.value = c.values.occurrence(resultID, t.ownershipFacts(), t.captureFacts())
 		}
+		t.callableEvidence = substituteCallableEvidence(f.returnCallableEvidence, f, argumentTypes)
 		if f.Effect {
 			for i, argument := range argumentTypes {
 				if i < len(f.Params) {
@@ -3855,7 +4016,9 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
 			callee = e.Left.Left.Name + "." + e.Left.Name
 		}
-		application := newApplicationIdentity(callee, argumentRefs, c.ref(t.resultID()), e.Span)
+		application := newApplicationIdentity(callee, argumentRefs, c.ref(resultID), e.Span)
+		application.CallbackPolicies = callbackPolicies
+		application.RowArguments = rowArguments
 		t.application = &application
 		t.identity = application.ID
 	case "member":
@@ -3948,6 +4111,9 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		t = inner
 		if !t.isEffect() || duration.isEffect() || !c.sameType(duration, "i64") {
 			c.diagnostic("EF106", "timeout requires an Effect and an i64 millisecond duration", e.Span)
+			// Invalid operands retain their value contract and caller evaluation;
+			// only an admitted recipe can acquire timeout-owned facts and rows.
+			break
 		}
 		t.setOwnership(materializeExecutionFacts(t.ownershipFacts(), timeoutRegion, ownershipOwnerTimeout))
 		t.setCaptures(materializeExecutionFacts(t.captureFacts(), timeoutRegion, ownershipOwnerTimeout))
@@ -3981,6 +4147,9 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		}
 	case "provide":
 		t = c.expr(e.Left, env, inEffect)
+		if c.abstractRow(t.serviceRow()) {
+			c.diagnostic("EF125", "provision of an abstract row requires an unsupported row difference constraint", e.Span)
+		}
 		provider := c.expr(e.Right, env, inEffect)
 		if !t.isEffect() {
 			c.diagnostic("EF105", "provide requires an Effect value", e.Span)
@@ -4002,6 +4171,9 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		t.value = c.recontractRows(t, t.failureRow(), c.internRow(serviceLabels))
 	case "catch":
 		t = c.expr(e.Left, env, inEffect)
+		if c.abstractRow(t.failureRow()) {
+			c.diagnostic("EF125", "recovery of an abstract row requires an unsupported row difference constraint", e.Span)
+		}
 		fallback := c.expr(e.Right, env, false)
 		if !t.isEffect() {
 			c.diagnostic("EF105", "catch requires an Effect value", e.Span)
@@ -4020,6 +4192,10 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		// false safe result.
 		t.setOwnership(mergeFacts(t.ownershipFacts(), fallback.ownershipFacts()))
 		t.setCaptures(mergeFacts(t.captureFacts(), fallback.captureFacts()))
+		t.callableEvidence = joinCallableEvidence(t.callableEvidence, fallback.callableEvidence)
+		if t.callableDecl != fallback.callableDecl {
+			t.callableDecl = nil
+		}
 		failureLabels := remove(c.rowLabels(t.failureRow()), e.Name)
 		t.value = c.recontractRows(t, c.internRow(failureLabels), t.serviceRow())
 	case "construct":
@@ -4061,6 +4237,9 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			}
 			t.setOwnership(mergeFacts(a.ownershipFacts(), b.ownershipFacts()))
 			t.setCaptures(mergeFacts(a.captureFacts(), b.captureFacts()))
+			if a.callableDecl != b.callableDecl {
+				t.callableDecl = nil
+			}
 		}
 		if a.isEffect() || b.isEffect() {
 			c.diagnostic("EF103", "returning Effect values from branches is not supported in this prototype", e.Span)

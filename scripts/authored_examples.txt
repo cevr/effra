@@ -10,3 +10,6 @@ examples/imports.ef
 examples/concurrency.ef
 examples/missing-service.ef
 examples/causal.ef
+examples/callables-service.ef
+examples/callables-state.ef
+examples/callables-factory.ef

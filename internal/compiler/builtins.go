@@ -5,6 +5,8 @@ func builtins() []*Service {
 		return &Function{Name: name, Return: ret, Params: params, Effect: true, Errors: failures}
 	}
 	p := func(name, typ string) Param { return Param{Name: name, Type: typ} }
+	serve := method("serve", "()", []Param{p("address", "string"), p("handler", "Handler")}, "IoError")
+	serve.CallbackPolicies = []CallbackPolicy{{Parameter: 1, Kind: "typed-failure-response", PropagateRequirements: true}}
 	return []*Service{
 		{Name: "Assert", Methods: []*Function{method("check", "()", []Param{p("condition", "bool"), p("message", "string")}, "AssertionFailed"), method("equalText", "()", []Param{p("actual", "string"), p("expected", "string")}, "AssertionFailed")}},
 		{Name: "Console", Methods: []*Function{method("log", "()", []Param{p("message", "string")})}},
@@ -15,7 +17,7 @@ func builtins() []*Service {
 		{Name: "Env", Methods: []*Function{method("get", "string", []Param{p("name", "string")})}},
 		{Name: "Runtime", Methods: []*Function{method("inspect", "string", nil)}},
 		{Name: "Foreign"},
-		{Name: "Http", Methods: []*Function{method("serve", "()", []Param{p("address", "string"), p("handler", "Handler")}, "IoError")}},
+		{Name: "Http", Methods: []*Function{serve}},
 	}
 }
 func builtinProviders() []*Provider {

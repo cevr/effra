@@ -1,0 +1,6 @@
+<!-- {"id": "language-layers", "title": "First-class declarative layers and owned acquisition", "status": "open", "labels": ["implementation:task"], "parent": "map", "assignee": null, "blocked_by": []} -->
+# First-class declarative layers and owned acquisition
+
+Implement the owner-selected [layer contract](../../specs/layers.md). Service operations, implementation construction and layer assembly have distinct inspectable contracts. Infer exposed provides, startup raises and unsatisfied uses; merge by identity, replace deliberately before acquisition, provide once at an owner.
+
+Five gated children deliver static plans, managed acquisition, fallible/startup construction, plan instances/inherited inputs and tooling/adoption. Runtime sharing includes concurrent waiters; startup rollback and dependent-first cleanup complete before publication. Public examples remain generic. Two unrelated executable callers must show clearer declarative source with the same explicit contracts. Fresh source research is input, not completion. Close only after every child, full gates and independent review; no benchmark or push during these units.

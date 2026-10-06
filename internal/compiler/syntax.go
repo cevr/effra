@@ -38,24 +38,27 @@ type parser struct {
 	at          int
 	depth       int
 	noConstruct int
+	types       map[string]*sourceType
 }
 type Param struct {
-	Name    string  `json:"name"`
-	Type    string  `json:"type"`
-	TypeRef TypeRef `json:"typeRef"`
-	Span    Span    `json:"span"`
-	typeID  TypeID
+	Name       string  `json:"name"`
+	Type       string  `json:"type"`
+	TypeRef    TypeRef `json:"typeRef"`
+	Span       Span    `json:"span"`
+	typeID     TypeID
+	sourceType *sourceType
 }
 
 // Field is a nominal declaration field. Type is kept as source text for
 // compatibility with the original prototype; the checker resolves it to a
 // canonical TypeRef before admitting the declaration.
 type Field struct {
-	Name    string  `json:"name"`
-	Type    string  `json:"type"`
-	TypeRef TypeRef `json:"typeRef"`
-	Span    Span    `json:"span"`
-	typeID  TypeID
+	Name       string `json:"name"`
+	sourceType *sourceType
+	Type       string  `json:"type"`
+	TypeRef    TypeRef `json:"typeRef"`
+	Span       Span    `json:"span"`
+	typeID     TypeID
 }
 type Variant struct {
 	Name          string  `json:"name"`
@@ -103,10 +106,18 @@ type Function struct {
 	Captures  []OwnershipFact
 	// Identity is assigned by the checker from the canonical callable
 	// contract. The source name remains a projection used by the emitters.
-	Identity string    `json:"-"`
-	Owner    string    `json:"-"`
-	Contract ValueType `json:"-"`
-	Actual   ValueType `json:"-"`
+	Identity               string    `json:"-"`
+	Owner                  string    `json:"-"`
+	Contract               ValueType `json:"-"`
+	Actual                 ValueType `json:"-"`
+	returnType             *sourceType
+	returnID               TypeID
+	RowParameters          []RowParameter
+	failureID              RowID
+	serviceID              RowID
+	signatureChecked       bool
+	returnCallableEvidence callableEvidence
+	CallbackPolicies       []CallbackPolicy
 }
 type Service struct {
 	Name    string
@@ -126,20 +137,21 @@ type Provider struct {
 	Contract ValueType `json:"-"`
 }
 type Program struct {
-	Imports     []GoImport
-	Comments    []Comment
-	Items       []*SyntaxItem `json:"-"`
-	Bindings    map[string]Binding
-	Modules     []*goModule
-	UsedImports map[string]bool
-	GoOnly      bool
-	Errors      map[string]Span
-	ErrorDecls  []*ErrorDecl
-	Records     []*Record
-	Enums       []*Enum
-	Services    []*Service
-	Providers   []*Provider
-	Functions   []*Function
+	typeExpressions map[string]*sourceType
+	Imports         []GoImport
+	Comments        []Comment
+	Items           []*SyntaxItem `json:"-"`
+	Bindings        map[string]Binding
+	Modules         []*goModule
+	UsedImports     map[string]bool
+	GoOnly          bool
+	Errors          map[string]Span
+	ErrorDecls      []*ErrorDecl
+	Records         []*Record
+	Enums           []*Enum
+	Services        []*Service
+	Providers       []*Provider
+	Functions       []*Function
 }
 
 // SyntaxItem preserves the lexical declaration order that semantic
@@ -342,8 +354,9 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			}
 		}
 	}()
-	p := parser{tokens: tokens}
+	p := parser{tokens: tokens, types: map[string]*sourceType{}}
 	program = &Program{Comments: comments, Errors: map[string]Span{}, Bindings: map[string]Binding{}, UsedImports: map[string]bool{}}
+	program.typeExpressions = p.types
 	for p.peek().kind != "eof" {
 		switch p.peek().text {
 		case "import":
@@ -402,7 +415,8 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 					for !p.accept(")") {
 						field := p.name()
 						p.expect(":")
-						variant.Fields = append(variant.Fields, Field{Name: field.text, Type: p.typ(), Span: field.span})
+						typ := p.typ()
+						variant.Fields = append(variant.Fields, Field{Name: field.text, Type: typ, sourceType: p.types[typ], Span: field.span})
 						if !p.accept(",") {
 							p.expect(")")
 							break
@@ -440,7 +454,8 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 				for !p.accept(")") {
 					param := p.name()
 					p.expect(":")
-					params = append(params, Param{Name: param.text, Type: p.typ(), Span: param.span})
+					typ := p.typ()
+					params = append(params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span})
 					if !p.accept(",") {
 						p.expect(")")
 						break
@@ -504,11 +519,53 @@ func (p *parser) fail(v token, message string) {
 	panic(syntaxFault{Diagnostic{"EF002", message, v.span}})
 }
 func (p *parser) typ() string {
-	if p.accept("(") {
-		p.expect(")")
-		return "()"
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > 64 {
+		p.fail(p.peek(), "type nesting exceeds limit of 64")
 	}
-	return p.name().text
+	if p.accept("(") {
+		if p.accept(")") {
+			return "()"
+		}
+		inner := p.typ()
+		p.expect(")")
+		return inner
+	}
+	if p.peek().text == "fn" || p.peek().text == "effect" {
+		typ := &sourceType{Effect: p.accept("effect")}
+		p.expect("fn")
+		p.expect("(")
+		for !p.accept(")") {
+			parameter := p.typ()
+			typ.Parameters = append(typ.Parameters, parameter)
+			typ.ParameterTypes = append(typ.ParameterTypes, p.types[parameter])
+			if len(typ.Parameters) > 256 {
+				p.fail(p.peek(), "callable type exceeds 256 parameters")
+			}
+			if !p.accept(",") {
+				p.expect(")")
+				break
+			}
+		}
+		p.expect("->")
+		typ.Result = p.typ()
+		typ.ResultType = p.types[typ.Result]
+		if p.accept("raises") {
+			typ.Failures = p.row()
+		}
+		if p.accept("uses") {
+			typ.Services = p.row()
+		}
+		name := typ.display()
+		p.types[name] = typ
+		return name
+	}
+	name := p.name()
+	if name.text == "Effect" && p.peek().text == "<" {
+		p.fail(name, "typed recipes are unsupported; use an explicit effect fn callback contract")
+	}
+	return name.text
 }
 func (p *parser) fields() []Field {
 	p.expect("{")
@@ -516,7 +573,8 @@ func (p *parser) fields() []Field {
 	for !p.accept("}") {
 		name := p.name()
 		p.expect(":")
-		fields = append(fields, Field{Name: name.text, Type: p.typ(), Span: name.span})
+		typ := p.typ()
+		fields = append(fields, Field{Name: name.text, Type: typ, sourceType: p.types[typ], Span: name.span})
 		if !p.accept(",") && !p.accept(";") {
 			if p.peek().text != "}" {
 				continue
@@ -567,12 +625,31 @@ func (p *parser) function(body bool) *Function {
 	effect := p.accept("effect")
 	p.expect("fn")
 	name := p.name()
-	p.expect("(")
 	f := &Function{Name: name.text, Effect: effect, Span: name.span, DeclSpan: declSpan}
+	if p.accept("<") {
+		for {
+			parameter := p.name()
+			p.expect(":")
+			kind := p.take()
+			if kind.text != "raises" && kind.text != "uses" {
+				p.fail(kind, "row parameters require raises or uses kind")
+			}
+			f.RowParameters = append(f.RowParameters, RowParameter{Name: parameter.text, Kind: kind.text, Span: parameter.span})
+			if len(f.RowParameters) > 8 {
+				p.fail(parameter, "at most eight explicit row parameters are supported")
+			}
+			if p.accept(">") {
+				break
+			}
+			p.expect(",")
+		}
+	}
+	p.expect("(")
 	for !p.accept(")") {
 		param := p.name()
 		p.expect(":")
-		f.Params = append(f.Params, Param{Name: param.text, Type: p.typ(), Span: param.span})
+		typ := p.typ()
+		f.Params = append(f.Params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span})
 		if !p.accept(",") {
 			p.expect(")")
 			break
@@ -580,6 +657,7 @@ func (p *parser) function(body bool) *Function {
 	}
 	p.expect("->")
 	f.Return = p.typ()
+	f.returnType = p.types[f.Return]
 	if p.accept("raises") {
 		f.Errors = p.row()
 	} else if p.peek().text == "throws" {
@@ -642,6 +720,8 @@ func (p *parser) expr(min int) *Expr {
 	start := p.take()
 	e := &Expr{Span: start.span}
 	switch {
+	case (start.text == "fn" && p.anonymousCallableHead()) || (start.text == "effect" && p.peek().text == "fn"):
+		p.fail(start, "anonymous functions and closure captures are unsupported; declare a named module function")
 	case start.text == "scope":
 		e.Kind = "scope"
 		e.Then = p.block()
@@ -781,6 +861,27 @@ func (p *parser) expr(min int) *Expr {
 		e = &Expr{Kind: "binary", Name: op.text, Left: e, Right: p.expr(precedence + 1), Span: op.span}
 	}
 	return e
+}
+
+// An existing identifier named fn remains callable. The unsupported literal
+// form is distinguished by its result arrow after the parameter parentheses.
+func (p *parser) anonymousCallableHead() bool {
+	if p.peek().text != "(" {
+		return false
+	}
+	depth := 0
+	for at := p.at; at < len(p.tokens); at++ {
+		switch p.tokens[at].text {
+		case "(":
+			depth++
+		case ")":
+			depth--
+			if depth == 0 {
+				return at+1 < len(p.tokens) && p.tokens[at+1].text == "->"
+			}
+		}
+	}
+	return false
 }
 
 func (p *parser) constructorBrace() bool {

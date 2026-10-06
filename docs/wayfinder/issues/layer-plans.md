@@ -1,0 +1,4 @@
+<!-- {"id": "layer-plans", "title": "Checked static layer plans and construction graphs", "status": "open", "labels": ["implementation:task"], "parent": "language-layers", "assignee": null, "blocked_by": ["foundation-providers"]} -->
+# Checked static layer plans and construction graphs
+
+Unit1 of [layers](../../specs/layers.md): declarations, formatter, merge/fresh/replace, inferred and checked contracts, binding-identity diamonds, source-grounded missing/duplicate/cycle diagnostics and canonical graph inspection. Pure providers execute Go/JS; unimplemented fallible/startup forms diagnose. Unannotated outputs are exposed bindings, not leaves; hiding output retains selected nodes. Construction edges remain distinct from operation edges. Bounded graph algorithms, actual CLI/MCP continuity and full gate precede review.

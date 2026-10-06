@@ -553,7 +553,10 @@ func (r *Result) projectionRefs(refs []TypeRef, all bool, compatibilityBytes int
 		if found {
 			row := r.canonical.rows[id-1]
 			if !rows[id] {
-				usage.RowLabels += len(row.Labels)
+				usage.RowLabels += len(row.Labels) + len(row.Parameters)
+				for _, p := range row.Parameters {
+					usage.NameBytes += len(p.ID) + len(p.Name) + len(p.Kind) + len(p.Declaration)
+				}
 				usage.NameBytes += len(row.ID)
 				for _, label := range row.Labels {
 					usage.NameBytes += len(label)
@@ -683,7 +686,10 @@ func (r *Result) projectionRefs(refs []TypeRef, all bool, compatibilityBytes int
 				continue
 			}
 			rows[rowID] = true
-			usage.RowLabels += len(row.Labels)
+			usage.RowLabels += len(row.Labels) + len(row.Parameters)
+			for _, p := range row.Parameters {
+				usage.NameBytes += len(p.ID) + len(p.Name) + len(p.Kind) + len(p.Declaration)
+			}
 			usage.NameBytes += len(row.ID)
 			for _, label := range row.Labels {
 				usage.NameBytes += len(label)
@@ -768,7 +774,7 @@ func (r *Result) projectionRefs(refs []TypeRef, all bool, compatibilityBytes int
 	projectedRows := make([]RowNode, 0, len(orderedRows))
 	for _, id := range orderedRows {
 		row := r.canonical.rows[id-1]
-		projectedRows = append(projectedRows, RowNode{ID: row.ID, Labels: append([]string{}, row.Labels...)})
+		projectedRows = append(projectedRows, RowNode{ID: row.ID, Labels: append([]string{}, row.Labels...), Parameters: append([]RowParameter(nil), row.Parameters...)})
 	}
 	size, err := encodedSize(struct {
 		Types []TypeNode `json:"types"`
@@ -807,6 +813,14 @@ func appendProjectionValue(refs *[]TypeRef, value ValueType) int {
 		}
 	}
 	if value.Application != nil {
+		for _, policy := range value.Application.CallbackPolicies {
+			appendProjectionRef(refs, TypeRef{FailureRow: policy.FailureRow})
+		}
+		for _, argument := range value.Application.RowArguments {
+			if argument.Row != "" {
+				appendProjectionRef(refs, TypeRef{FailureRow: argument.Row})
+			}
+		}
 		for _, argument := range value.Application.Arguments {
 			appendProjectionRef(refs, argument)
 		}
@@ -1184,7 +1198,7 @@ func (c *checker) checkedCompatibilitySize(e checkedExpression, base ValueType, 
 		if f.Effect {
 			kind = "effect"
 		}
-		callable := CallableType{ID: f.Identity, Signature: c.typeNodeID(e.contractID()), Kind: kind, Result: c.identityRef(e.resultID()), Failures: c.retainedRowLabels(e.failureRow()), Requirements: c.retainedRowLabels(e.serviceRow())}
+		callable := CallableType{ID: f.Identity, Signature: c.typeNodeID(e.contractID()), Kind: kind, Result: c.identityRef(e.resultID()), Failures: c.retainedRowLabels(e.failureRow()), Requirements: c.retainedRowLabels(e.serviceRow()), RowParameters: f.RowParameters, CallbackPolicies: f.CallbackPolicies}
 		n, err := encodedSize(callable, limit-size)
 		size += len(`,"callable":`) + n
 		if err != nil {

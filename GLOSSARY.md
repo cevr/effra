@@ -22,6 +22,12 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Requirement row**: The unordered set of nominal services needed to execute an effect.
 
+**Callable value**: A named function carried as a value with explicit parameter, result, failure and requirement contracts. Pure functions and functions constructing deferred effects have distinct callable kinds.
+
+**Row parameter**: A declaration-qualified variable representing a finite failure or requirement row. Ordinary function application obtains its least bound from direct callback argument rows.
+
+**Callback-result relation**: Retained evidence relating a callback invocation's returned handles to its resolved named callee and input ownership. It is separate from ownership of the callable value; an unresolved relation remains potential ownership.
+
 **Target provider**: An implementation of a service on a particular execution target.
 
 **Provider construction contract**: The configuration and required services used to create a provider value, distinct from the contract of invoking its service operations.
@@ -31,6 +37,18 @@ Effra describes server programs using explicit, inspectable effect contracts.
 **Materialized provider value**: An already constructed service implementation that can be explicitly reused without reexecuting its recipe.
 
 **Captured provider**: A provider value bound to the service values supplied during its construction. Its operations belong to the caller's current owning scope.
+
+**Layer** (specified): A lazy checked acquisition plan selecting implementations and composing their construction dependencies. Its contract records exposed services, construction failures and unsatisfied inputs.
+
+**Layer binding** (specified): A nominal service selection at a declaration site, distinct from its implementation's type and from an acquired provider instance.
+
+**Shared acquisition node** (specified): One identified construction selection reused within a graph build under compatible input identities; concurrent consumers await the same acquisition.
+
+**Graph build** (specified): One scope-owned execution of a layer plan, with its own acquisition table and completed startup or rollback outcome. Separate builds are independent.
+
+**Layer replacement** (specified): A checked pre-acquisition substitution of one binding throughout a composed graph, followed by reconstruction of its effective construction edges and contract.
+
+**Fresh layer occurrence** (specified): An explicitly distinct instance of a selected plan subtree, retaining borrowed external inputs while assigning fresh identities to its internal nodes.
 
 **Ownership provenance**: The relationship between a retained value and the lifetime that owns it. Borrowed, newly owned and unknown relationships carry different evidence.
 
@@ -89,6 +107,8 @@ Effra describes server programs using explicit, inspectable effect contracts.
 **Expression anchor**: A source location identifying the expression described by a diagnostic or local type query.
 
 **Dependency graph**: A revision-scoped view of program contracts and the relationships between functions, services and providers. Incoming relationships identify dependents.
+
+**Layer construction path** (specified): A source-grounded sequence of acquisition dependencies explaining a selected node, remaining input or startup failure, separate from service-operation call edges.
 
 **Owning test case**: A checked effect whose normal completion includes shutdown of its children and release of its resources.
 
