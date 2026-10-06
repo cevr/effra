@@ -231,10 +231,11 @@ type FieldValue struct {
 	Span  Span
 }
 type MatchPattern struct {
-	TypeName    string
-	VariantName string
-	Bindings    map[string]string
-	Span        Span
+	TypeName     string
+	VariantName  string
+	Bindings     map[string]string
+	Span         Span
+	ResolvedEnum *Enum `json:"-"`
 }
 type MatchArm struct {
 	Pattern *MatchPattern
@@ -242,6 +243,7 @@ type MatchArm struct {
 	Span    Span
 }
 type Expr struct {
+	constructorType  *sourceType
 	ResolvedTemplate *Record
 	Kind             string
 	Name             string
@@ -977,6 +979,29 @@ func (p *parser) expr(min int) *Expr {
 			e = &Expr{Kind: "construct", Left: e, Fields: p.fieldValues(), Span: e.Span}
 			continue
 		}
+		if p.peek().text == "<" && (e.Kind == "name" || e.Kind == "member") {
+			if e.constructorType != nil {
+				p.fail(p.peek(), "constructor application arguments may be supplied only once")
+			}
+			name := expressionName(e)
+			p.take()
+			t := &sourceType{Application: name, Span: e.Span}
+			for {
+				argument := p.typ()
+				t.ApplicationArguments = append(t.ApplicationArguments, argument)
+				t.ApplicationArgumentTypes = append(t.ApplicationArgumentTypes, p.types[argument])
+				if len(t.ApplicationArguments) > 8 {
+					p.fail(p.peek(), "at most eight template arguments are supported")
+				}
+				if p.accept(">") {
+					break
+				}
+				p.expect(",")
+			}
+			e.constructorType = t
+			p.types[t.display()] = t
+			continue
+		}
 		if p.peek().text == "(" {
 			if e.Kind != "name" && e.Kind != "member" {
 				p.fail(p.peek(), "only named functions and service methods are callable")
@@ -1125,6 +1150,12 @@ func (p *parser) pattern() *MatchPattern {
 		variant := p.name()
 		pattern.VariantName = variant.text
 		pattern.Span.Length = variant.span.Offset + variant.span.Length - pattern.Span.Offset
+		if p.accept(".") {
+			pattern.TypeName += "." + variant.text
+			variant = p.name()
+			pattern.VariantName = variant.text
+			pattern.Span.Length = variant.span.Offset + variant.span.Length - pattern.Span.Offset
+		}
 	}
 	if p.accept("{") {
 		seen := map[string]bool{}
@@ -1146,4 +1177,19 @@ func (p *parser) pattern() *MatchPattern {
 		}
 	}
 	return pattern
+}
+
+func expressionName(e *Expr) string {
+	if e == nil {
+		return ""
+	}
+	if e.Kind == "name" {
+		return e.Name
+	}
+	if e.Kind == "member" {
+		if parent := expressionName(e.Left); parent != "" {
+			return parent + "." + e.Name
+		}
+	}
+	return ""
 }

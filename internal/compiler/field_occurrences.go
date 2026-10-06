@@ -48,11 +48,10 @@ func (c *checker) callableFieldLayout(id TypeID, memo map[TypeID]bool, visiting 
 	}
 	visiting[id] = true
 	defer delete(visiting, id)
-	fields, _ := c.checkedFields(id)
 	value := false
-	for _, field := range fields {
+	c.walkDataFields(id, func(_ string, field Field) {
 		value = c.callableFieldLayout(field.typeID, memo, visiting, depth+1) || value
-	}
+	})
 	memo[id] = value
 	return value
 }
@@ -72,15 +71,48 @@ func (c *checker) checkedFields(id TypeID) ([]Field, bool) {
 	return r.Fields, true
 }
 
+func (c *checker) checkedVariants(id TypeID) (*Enum, []Variant, bool) {
+	n := c.node(id)
+	if n == nil {
+		return nil, nil, false
+	}
+	if n.Kind == "application" {
+		owner := c.templates[n.Declaration]
+		variants, ok := c.applicationVariants(id)
+		return owner, variants, ok
+	}
+	if n.Kind != "enum" {
+		return nil, nil, false
+	}
+	owner := c.enums[n.Name]
+	if owner == nil || n.Declaration != c.declarationQualifier("enum", owner.Name) {
+		return nil, nil, false
+	}
+	return owner, owner.Variants, true
+}
+
+// The canonical data layout is shared by evidence and ownership traversal.
+// Enum paths include the variant, distinguishing absent from present payloads.
+func (c *checker) walkDataFields(id TypeID, visit func(string, Field)) bool {
+	if fields, ok := c.checkedFields(id); ok {
+		for _, field := range fields {
+			visit(field.Name, field)
+		}
+		return true
+	}
+	if _, variants, ok := c.checkedVariants(id); ok {
+		for _, variant := range variants {
+			for _, field := range variant.Fields {
+				visit(variant.Name+"."+field.Name, field)
+			}
+		}
+		return true
+	}
+	return false
+}
+
 func (c *checker) parameterFieldOccurrences(f *Function, parameter, path string, id TypeID, visiting map[TypeID]bool, depth int, nodes *int, layouts map[TypeID]bool) map[string]checkedExpression {
 	if !layouts[id] {
-		return nil
-	}
-	fields, ok := c.checkedFields(id)
-	if !ok {
-		if n := c.node(id); n != nil && n.Kind == "type-variable" {
-			c.diagnostic("EF127", "field layout of an unresolved type parameter is unavailable", f.Span)
-		}
 		return nil
 	}
 	if depth > 32 || visiting[id] {
@@ -89,6 +121,35 @@ func (c *checker) parameterFieldOccurrences(f *Function, parameter, path string,
 	}
 	visiting[id] = true
 	defer delete(visiting, id)
+	if _, variants, ok := c.checkedVariants(id); ok {
+		values := map[string]checkedExpression{}
+		for _, variant := range variants {
+			*nodes++
+			if *nodes > 4096 {
+				c.diagnostic("EF127", "field occurrence layout exceeds budget", f.Span)
+				return nil
+			}
+			variantPath := variant.Name
+			if path != "" {
+				variantPath = path + "." + variantPath
+			}
+			payload := c.checkedData("()")
+			payload.fields = c.parameterPayloadFields(f, parameter, variantPath, variant.Fields, visiting, depth, nodes, layouts)
+			values[variant.Name] = payload
+		}
+		return values
+	}
+	fields, ok := c.checkedFields(id)
+	if !ok {
+		if n := c.node(id); n != nil && n.Kind == "type-variable" {
+			c.diagnostic("EF127", "field layout of an unresolved type parameter is unavailable", f.Span)
+		}
+		return nil
+	}
+	return c.parameterPayloadFields(f, parameter, path, fields, visiting, depth, nodes, layouts)
+}
+
+func (c *checker) parameterPayloadFields(f *Function, parameter, path string, fields []Field, visiting map[TypeID]bool, depth int, nodes *int, layouts map[TypeID]bool) map[string]checkedExpression {
 	values := map[string]checkedExpression{}
 	for _, field := range fields {
 		*nodes++
@@ -108,6 +169,39 @@ func (c *checker) parameterFieldOccurrences(f *Function, parameter, path string,
 		values[field.Name] = value
 	}
 	return values
+}
+
+func (c *checker) joinExpressionFields(a, b checkedExpression, span Span, depth int, nodes *int) map[string]checkedExpression {
+	if _, _, enum := c.checkedVariants(a.valueID()); !enum {
+		return c.joinFieldOccurrences(a.fields, b.fields, span, depth, nodes)
+	}
+	if depth > 32 {
+		c.diagnostic("EF127", "excessive variant occurrence join", span)
+		return nil
+	}
+	// Missing enum evidence can denote any alternative. It must not be
+	// replaced by the narrower initialized alternatives from the other branch.
+	if a.fields == nil || b.fields == nil {
+		return nil
+	}
+	joined := cloneFieldOccurrences(a.fields)
+	if joined == nil {
+		joined = map[string]checkedExpression{}
+	}
+	for name, right := range b.fields {
+		*nodes++
+		if *nodes > 4096 {
+			c.diagnostic("EF127", "variant occurrence join exceeds budget", span)
+			return nil
+		}
+		if left, exists := joined[name]; exists {
+			left.fields = c.joinFieldOccurrences(left.fields, right.fields, span, depth+1, nodes)
+			joined[name] = left
+		} else {
+			joined[name] = right
+		}
+	}
+	return joined
 }
 
 func (c *checker) projectFieldOccurrence(inner checkedExpression, field Field) checkedExpression {
@@ -204,7 +298,7 @@ func (c *checker) joinFieldOccurrences(a, b map[string]checkedExpression, span S
 		value.child = mergeFacts(left.child, right.child)
 		value.evaluation = c.unionEvaluationFacts(left.evaluation, right.evaluation)
 		value.executed = c.unionEvaluationFacts(left.executed, right.executed)
-		value.fields = c.joinFieldOccurrences(left.fields, right.fields, span, depth+1, nodes)
+		value.fields = c.joinExpressionFields(left, right, span, depth+1, nodes)
 		joined[name] = value
 	}
 	return joined
@@ -232,8 +326,21 @@ func (c *checker) fieldContract(id TypeID, path string) TypeID {
 	if len(parts) > 32 {
 		return invalidTypeID
 	}
-	for _, name := range parts {
+	for i := 0; i < len(parts); i++ {
+		name := parts[i]
 		fields, ok := c.checkedFields(id)
+		if !ok {
+			if _, variants, enum := c.checkedVariants(id); enum && i+1 < len(parts) {
+				for _, variant := range variants {
+					if variant.Name == name {
+						fields, ok = variant.Fields, true
+						break
+					}
+				}
+				i++
+				name = parts[i]
+			}
+		}
 		if !ok {
 			return invalidTypeID
 		}
@@ -261,4 +368,17 @@ func initializedFieldOccurrences(fields []FieldValue) (map[string]checkedExpress
 		captures = append(captures, prependFacts(field.Name, value.captureFacts())...)
 	}
 	return values, normalizeFacts(captures)
+}
+
+func (c *checker) retainDataPayload(result *checkedExpression, fields []FieldValue, variant string) {
+	values, captures := initializedFieldOccurrences(fields)
+	if variant != "" {
+		payload := c.checkedData("()")
+		payload.fields = values
+		result.fields = map[string]checkedExpression{variant: payload}
+		result.setCaptures(prependFacts(variant, captures))
+	} else {
+		result.fields = values
+		result.setCaptures(captures)
+	}
 }

@@ -465,6 +465,10 @@ func (c *checker) functionParameterTypeIDs(f *Function) []TypeID {
 }
 
 func (c *checker) ownershipPaths(typeName, prefix string, seen map[string]bool) []string {
+	return c.ownershipPathsID(c.canonicalRef(typeRef(typeName)), prefix)
+}
+
+func (c *checker) ownershipPathsID(root TypeID, prefix string) []string {
 	// A shared record graph can have exponentially many leaf paths. First memoize
 	// whether each structural type can contain a managed handle; then enumerate
 	// only handle-bearing branches under a total structural visit budget. The
@@ -473,12 +477,13 @@ func (c *checker) ownershipPaths(typeName, prefix string, seen map[string]bool) 
 	const maxPaths = 64
 	const maxVisits = 256
 	const maxContainsVisits = 256
-	containsMemo := map[string]bool{}
-	containsVisiting := map[string]bool{}
+	containsMemo := map[TypeID]bool{}
+	containsVisiting := map[TypeID]bool{}
 	containsVisits := 0
-	var containsHandle func(string) bool
-	containsHandle = func(name string) bool {
-		if name == "File" || strings.HasPrefix(name, "Fiber:") {
+	var containsHandle func(TypeID) bool
+	containsHandle = func(name TypeID) bool {
+		n := c.node(name)
+		if n == nil || n.Kind == "type-variable" || n.Name == "File" || n.Kind == "fiber" {
 			return true
 		}
 		if known, ok := containsMemo[name]; ok {
@@ -497,47 +502,35 @@ func (c *checker) ownershipPaths(typeName, prefix string, seen map[string]bool) 
 		}
 		containsVisiting[name] = true
 		found := false
-		if record := c.records[name]; record != nil {
-			for _, field := range record.Fields {
-				if containsHandle(field.Type) {
-					found = true
-					break
-				}
+		c.walkDataFields(name, func(_ string, field Field) {
+			if !found {
+				found = containsHandle(field.typeID)
 			}
-		}
-		if !found {
-			if enum := c.enums[name]; enum != nil {
-				for _, variant := range enum.Variants {
-					for _, field := range variant.Fields {
-						if containsHandle(field.Type) {
-							found = true
-							break
-						}
-					}
-					if found {
-						break
-					}
-				}
-			}
-		}
+		})
 		delete(containsVisiting, name)
 		containsMemo[name] = found
 		return found
 	}
-	if !containsHandle(typeName) {
+	if !containsHandle(root) {
 		return nil
 	}
 	paths := make([]string, 0, maxPaths)
 	truncated := false
 	visits := 0
-	var visit func(string, string)
-	visit = func(name, path string) {
+	seen := map[TypeID]bool{}
+	var visit func(TypeID, string)
+	visit = func(name TypeID, path string) {
 		if len(paths) >= maxPaths || visits >= maxVisits {
 			truncated = true
 			return
 		}
 		visits++
-		if name == "File" || strings.HasPrefix(name, "Fiber:") {
+		n := c.node(name)
+		if n == nil || n.Kind == "type-variable" {
+			truncated = true
+			return
+		}
+		if n.Name == "File" || n.Kind == "fiber" {
 			paths = append(paths, path)
 			return
 		}
@@ -546,34 +539,17 @@ func (c *checker) ownershipPaths(typeName, prefix string, seen map[string]bool) 
 		}
 		seen[name] = true
 		defer delete(seen, name)
-		if record := c.records[name]; record != nil {
-			for _, field := range record.Fields {
-				fieldPath := field.Name
-				if path != "" {
-					fieldPath = path + "." + fieldPath
-				}
-				visit(field.Type, fieldPath)
-				if truncated {
-					return
-				}
+		c.walkDataFields(name, func(fieldPath string, field Field) {
+			if truncated {
+				return
 			}
-		}
-		if enum := c.enums[name]; enum != nil {
-			for _, variant := range enum.Variants {
-				for _, field := range variant.Fields {
-					fieldPath := variant.Name + "." + field.Name
-					if path != "" {
-						fieldPath = path + "." + fieldPath
-					}
-					visit(field.Type, fieldPath)
-					if truncated {
-						return
-					}
-				}
+			if path != "" {
+				fieldPath = path + "." + fieldPath
 			}
-		}
+			visit(field.typeID, fieldPath)
+		})
 	}
-	visit(typeName, prefix)
+	visit(root, prefix)
 	if truncated {
 		paths = append(paths, "*")
 	}
@@ -581,8 +557,12 @@ func (c *checker) ownershipPaths(typeName, prefix string, seen map[string]bool) 
 }
 
 func (c *checker) unknownOwnership(typeName string) []OwnershipFact {
+	return c.unknownOwnershipID(c.canonicalRef(typeRef(typeName)))
+}
+
+func (c *checker) unknownOwnershipID(id TypeID) []OwnershipFact {
 	facts := []OwnershipFact{}
-	for _, path := range c.ownershipPaths(typeName, "", map[string]bool{}) {
+	for _, path := range c.ownershipPathsID(id, "") {
 		fact := OwnershipFact{Path: path, Status: "unknown", Origin: "unknown"}
 		if isWildcardPath(path) {
 			fact.Origin = "bounded"
@@ -600,8 +580,12 @@ func (c *checker) unknownOwnership(typeName string) []OwnershipFact {
 }
 
 func (c *checker) borrowedOwnership(typeName, region string) []OwnershipFact {
+	return c.borrowedOwnershipID(c.canonicalRef(typeRef(typeName)), region)
+}
+
+func (c *checker) borrowedOwnershipID(id TypeID, region string) []OwnershipFact {
 	facts := []OwnershipFact{}
-	for _, path := range c.ownershipPaths(typeName, "", map[string]bool{}) {
+	for _, path := range c.ownershipPathsID(id, "") {
 		fact := OwnershipFact{Path: path, Status: "borrowed", Region: region, Origin: "parameter", source: path, sourceSet: true, ownerKind: ownershipOwnerParameter}
 		if isWildcardPath(path) {
 			fact.Origin = "bounded"
@@ -2315,16 +2299,15 @@ func (c *checker) check() {
 		c.validateFields(record.Fields, record.Name, false)
 	}
 	for _, enum := range c.program.Enums {
-		if len(enum.Parameters) > 0 {
-			continue
-		}
 		variants := map[string]bool{}
 		for _, variant := range enum.Variants {
 			if variants[variant.Name] {
 				c.diagnostic("EF101", "duplicate variant "+variant.Name+" in "+enum.Name, variant.Span)
 			}
 			variants[variant.Name] = true
-			c.validateFields(variant.Fields, enum.Name+"."+variant.Name, true)
+			if len(enum.Parameters) == 0 {
+				c.validateFields(variant.Fields, enum.Name+"."+variant.Name, true)
+			}
 		}
 	}
 	c.validateDataLayouts()
@@ -3676,7 +3659,7 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	env := map[string]checkedExpression{}
 	for _, p := range locals {
 		parameter := c.checkedData(p.Type)
-		parameter.setOwnership(c.borrowedOwnership(p.Type, "parameter:"+p.Name))
+		parameter.setOwnership(c.borrowedOwnershipID(parameter.valueID(), "parameter:"+p.Name))
 		env[p.Name] = parameter
 	}
 	for _, p := range f.Params {
@@ -3685,7 +3668,7 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 		if node := parameter.node(); node != nil && node.Kind == "callable" {
 			parameter.callableEvidence = callableEvidence{parameter: f, parameterName: p.Name}
 		}
-		parameter.setOwnership(c.borrowedOwnership(p.Type, "parameter:"+p.Name))
+		parameter.setOwnership(c.borrowedOwnershipID(p.typeID, "parameter:"+p.Name))
 		env[p.Name] = parameter
 	}
 	c.reasons = []Contribution{}
@@ -3947,6 +3930,9 @@ func (c *checker) block(b *Block, env map[string]checkedExpression, effect bool)
 // projection rather than a second subtree walk.
 func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool) checkedExpression {
 	t := c.checkedData("invalid")
+	if e.constructorType != nil {
+		c.diagnostic("EF127", "explicit application syntax requires a data constructor", e.Span)
+	}
 	switch e.Kind {
 	case "integer":
 		t = c.checkedData("i64")
@@ -4140,6 +4126,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		}
 		if resultID == invalidTypeID {
 			c.diagnostic("EF127", "template substitution unavailable or exceeds budget", e.Span)
+			break
 		}
 		if len(f.Ownership) > 0 {
 			t.setOwnership(c.instantiateCallbackFacts(f.Ownership, f, argumentTypes, 0))
@@ -4224,7 +4211,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 				if field.Name == e.Name {
 					t = c.projectFieldOccurrence(inner, field)
 					if len(t.ownershipFacts()) == 0 {
-						t.setOwnership(c.unknownOwnership(field.Type))
+						t.setOwnership(c.unknownOwnershipID(field.typeID))
 					}
 					e.Text = "field"
 					break
@@ -4422,7 +4409,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			t = a
 		} else {
 			t = a.clone()
-			t.fields = c.joinFieldOccurrences(a.fields, b.fields, e.Span, 0)
+			t.fields = c.joinExpressionFields(a, b, e.Span, 0, new(int))
 			if !c.sameValues(a, b) || a.isEffect() != b.isEffect() {
 				c.diagnostic("EF106", "if branches must return the same type", e.Span)
 			} else {
@@ -4477,6 +4464,13 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 func (c *checker) dataCall(e *Expr, env map[string]checkedExpression, inEffect bool) (checkedExpression, bool) {
 	if e.Left == nil {
 		return checkedExpression{}, false
+	}
+	if value, ok := c.templateConstruct(e, env, inEffect); ok {
+		return value, true
+	}
+	if e.Left.constructorType != nil {
+		c.diagnostic("EF127", "explicit application syntax requires a data constructor", e.Span)
+		return c.checkedData("invalid"), true
 	}
 	typeName, variantName := "", ""
 	switch e.Left.Kind {
@@ -4534,9 +4528,8 @@ func (c *checker) dataCall(e *Expr, env map[string]checkedExpression, inEffect b
 			result.setOwnership(prependFacts(variantName, ownership))
 		} else {
 			result.setOwnership(ownership)
-			result.fields, ownership = initializedFieldOccurrences(e.Fields)
-			result.setCaptures(ownership)
 		}
+		c.retainDataPayload(&result, e.Fields, variantName)
 		return result, true
 	}
 	if len(e.Args) != len(fields) {
@@ -4568,9 +4561,8 @@ func (c *checker) dataCall(e *Expr, env map[string]checkedExpression, inEffect b
 		result.setOwnership(prependFacts(variantName, ownership))
 	} else {
 		result.setOwnership(normalizeFacts(ownership))
-		result.fields, ownership = initializedFieldOccurrences(e.Fields)
-		result.setCaptures(ownership)
 	}
+	c.retainDataPayload(&result, e.Fields, variantName)
 	return result, true
 }
 
@@ -4615,9 +4607,8 @@ func (c *checker) construct(e *Expr, env map[string]checkedExpression, inEffect 
 		result.setOwnership(prependFacts(variantName, ownership))
 	} else {
 		result.setOwnership(ownership)
-		result.fields, ownership = initializedFieldOccurrences(e.Fields)
-		result.setCaptures(ownership)
 	}
+	c.retainDataPayload(&result, e.Fields, variantName)
 	return result
 }
 
@@ -4626,13 +4617,13 @@ func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool
 	if scrutinee.isEffect() {
 		c.diagnostic("EF106", "match scrutinee must be a value; execute an Effect with run", e.Left.Span)
 	}
-	enum := c.enums[c.namedType(scrutinee)]
-	if enum == nil {
+	enum, variants, isEnum := c.checkedVariants(scrutinee.valueID())
+	if !isEnum {
 		c.diagnostic("EF116", "match requires a closed enum value", e.Left.Span)
 		return c.checkedData("invalid")
 	}
 	declared := map[string]Variant{}
-	for _, variant := range enum.Variants {
+	for _, variant := range variants {
 		declared[variant.Name] = variant
 	}
 	seen := map[string]bool{}
@@ -4645,10 +4636,12 @@ func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool
 			c.diagnostic("EF118", "catch-all match arms cannot claim exhaustive closed interpretation", pattern.Span)
 			continue
 		}
-		if pattern.TypeName != enum.Name {
+		patternOwner := c.templateByName(pattern.TypeName)
+		if patternOwner != enum && !(len(enum.Parameters) == 0 && pattern.TypeName == enum.Name) {
 			c.diagnostic("EF116", "match pattern belongs to "+pattern.TypeName+", expected "+enum.Name, pattern.Span)
 			continue
 		}
+		pattern.ResolvedEnum = enum
 		if pattern.VariantName == "" {
 			c.diagnostic("EF118", "match arm must name a declared variant", pattern.Span)
 			continue
@@ -4684,9 +4677,15 @@ func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool
 				continue
 			}
 			bound := c.checkedDataID(field.typeID, nil, nil)
+			if payload, exists := scrutinee.fields[pattern.VariantName]; exists {
+				bound = c.projectFieldOccurrence(payload, field)
+			} else if c.node(field.typeID) != nil && c.node(field.typeID).Kind == "callable" {
+				bound.callableEvidence = callableEvidence{unresolved: true}
+			}
 			bound.setOwnership(projectVariantFacts(scrutinee.ownershipFacts(), pattern.VariantName, fieldName))
+			bound.setCaptures(projectVariantFacts(scrutinee.captureFacts(), pattern.VariantName, fieldName))
 			if len(bound.ownershipFacts()) == 0 {
-				bound.setOwnership(c.unknownOwnership(field.Type))
+				bound.setOwnership(c.unknownOwnershipID(field.typeID))
 			}
 			branchEnv[binding] = bound
 		}
@@ -4698,14 +4697,14 @@ func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool
 				c.diagnostic("EF106", "match branches must return the same type", arm.Span)
 			} else {
 				result = c.joinContractRows(result, branch)
-				result.fields = c.joinFieldOccurrences(result.fields, branch.fields, arm.Span, 0)
+				result.fields = c.joinExpressionFields(result, branch, arm.Span, 0, new(int))
 				result.setOwnership(mergeFacts(result.ownershipFacts(), branch.ownershipFacts()))
 				result.setCaptures(mergeFacts(result.captureFacts(), branch.captureFacts()))
 			}
 		}
 		branchEvaluation = c.unionEvaluationFacts(branchEvaluation, branch.evaluation)
 	}
-	for _, variant := range enum.Variants {
+	for _, variant := range variants {
 		if !seen[variant.Name] {
 			c.diagnostic("EF117", "missing match arm for "+enum.Name+"."+variant.Name, e.Span)
 		}

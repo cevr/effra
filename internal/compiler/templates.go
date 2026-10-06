@@ -57,8 +57,8 @@ func (c *checker) checkTemplates() {
 			r.Identity = c.declarationIdentity("template", "module", r.Name)
 			r.EmissionName = r.Name
 			// Registration and finite layouts are shared with Codec. Executable
-			// user data remains unavailable until its constructor/target seams land.
-			c.diagnostic("EF127", "generic data construction and target emission are unavailable", r.Span)
+			// user data remains unavailable until both target/transport seams land.
+			c.diagnostic("EF127", "generic data target emission is unavailable", r.Span)
 		}
 	}
 	declarations = append(declarations, c.program.BundledTemplates...)
@@ -111,6 +111,7 @@ func (c *checker) checkTemplates() {
 				mode = "effect"
 			}
 			p.shapeID = c.internSemanticNode("callable-shape", "", p.Identity, mode, args, context[p.Constraint.Result].typeID, emptyRowID, emptyRowID)
+			c.variableOwners[p.Identity] = *p
 		}
 		c.templates[r.Identity] = r
 		c.result.Declarations = append(c.result.Declarations, c.templateDeclaration(r))
@@ -154,6 +155,9 @@ func (c *checker) resolveDataTemplateLayouts() {
 		resolve := func(fields []Field) {
 			seen := map[string]bool{}
 			for i := range fields {
+				if declaration.Kind == "enum" && fields[i].Name == "_tag" {
+					c.diagnostic("EF120", "_tag is reserved for closed variant/error discriminators", fields[i].Span)
+				}
 				if seen[fields[i].Name] {
 					c.diagnostic("EF127", "duplicate generic data field "+fields[i].Name, fields[i].Span)
 				}
@@ -364,11 +368,18 @@ func (c *checker) matchTemplateConstraint(r *Record, p TemplateParameter, actual
 		return nil
 	}
 	t := p.Constraint
+	if n.Kind == "type-variable" {
+		owner, known := c.variableOwners[n.Declaration]
+		if !known || owner.Kind != "callable" || owner.shapeID == invalidTypeID {
+			return fmt.Errorf("incompatible callable shape")
+		}
+		n = c.node(owner.shapeID)
+	}
 	mode := "pure"
 	if t != nil && t.Effect {
 		mode = "effect"
 	}
-	if p.Kind != "callable" || t == nil || n.Kind != "callable" || n.Mode != mode || len(n.Args) != len(t.Parameters) {
+	if p.Kind != "callable" || t == nil || n == nil || (n.Kind != "callable" && n.Kind != "callable-shape") || n.Mode != mode || len(n.Args) != len(t.Parameters) {
 		return fmt.Errorf("incompatible callable shape")
 	}
 	bind := func(name string, id TypeID) error {
@@ -510,30 +521,74 @@ func (c *checker) instantiateDataFields(r *DataDeclaration, declared []Field, ar
 }
 
 func (c *checker) templateConstruct(e *Expr, env map[string]checkedExpression, inEffect bool) (checkedExpression, bool) {
-	name := ""
-	if e.Left.Kind == "name" {
-		name = e.Left.Name
-	} else if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
-		name = e.Left.Left.Name + "." + e.Left.Name
-	}
+	head := e.Left
+	name := expressionName(head)
 	r := c.templateByName(name)
+	variant := ""
+	if r == nil && head != nil && head.Kind == "member" {
+		r = c.templateByName(expressionName(head.Left))
+		if r != nil {
+			variant, head = head.Name, head.Left
+		}
+	}
 	if r == nil {
 		return checkedExpression{}, false
 	}
-	if r.Kind == "enum" {
-		c.diagnostic("EF127", "generic enum construction is unavailable", e.Span)
+	if variant != "" && e.Left.constructorType != nil {
+		c.diagnostic("EF127", "constructor arguments belong to the data declaration before its variant", e.Span)
 		return c.checkedData("invalid"), true
 	}
 	result := c.checkedData("invalid")
-	if len(e.Fields) != len(r.Fields) || len(e.Args) != 0 {
-		c.diagnostic("EF127", "template construction requires every named field", e.Span)
+	declared := r.Fields
+	if r.Kind == "enum" {
+		index := slices.IndexFunc(r.Variants, func(v Variant) bool { return v.Name == variant })
+		if index < 0 {
+			c.diagnostic("EF116", "generic constructor must name a declared closed variant", e.Span)
+			return result, true
+		}
+		declared = r.Variants[index].Fields
+	} else if variant != "" {
+		c.diagnostic("EF116", "record construction cannot select an enum variant", e.Span)
 		return result, true
 	}
 	bindings := make([]TypeID, len(r.Parameters))
+	variables := map[TypeID]bool{}
+	types := map[TypeID]TypeID{}
+	for _, p := range r.Parameters {
+		variables[p.typeID] = true
+	}
+	if head.constructorType != nil {
+		id := c.canonicalRef(typeRef(head.constructorType.display()))
+		n := c.node(id)
+		if n == nil || n.Kind != "application" || n.Declaration != r.Identity {
+			c.diagnostic("EF127", "invalid explicit constructor application", e.Span)
+			return result, true
+		}
+		c.bindSourceSyntax(head.constructorType, id)
+		for i, p := range r.Parameters {
+			types[p.typeID] = n.Args[i]
+		}
+	}
+	if e.Kind == "call" {
+		if len(e.Fields) > 0 && len(e.Fields) != len(e.Args) {
+			c.diagnostic("EF122", "constructor arguments cannot mix named and positional forms", e.Span)
+			return result, true
+		}
+		if len(e.Fields) == 0 {
+			if len(e.Args) != len(declared) {
+				c.diagnostic("EF115", "generic constructor requires every payload field", e.Span)
+				return result, true
+			}
+			for i, arg := range e.Args {
+				e.Fields = append(e.Fields, FieldValue{Name: declared[i].Name, Value: arg, Span: arg.Span})
+			}
+		}
+		e.Text = "data"
+	}
 	fields := map[string]checkedExpression{}
 	for _, field := range e.Fields {
-		declared := slices.IndexFunc(r.Fields, func(f Field) bool { return f.Name == field.Name })
-		if declared < 0 {
+		index := slices.IndexFunc(declared, func(f Field) bool { return f.Name == field.Name })
+		if index < 0 {
 			c.diagnostic("EF127", "unknown template field "+field.Name, e.Span)
 			continue
 		}
@@ -543,13 +598,38 @@ func (c *checker) templateConstruct(e *Expr, env map[string]checkedExpression, i
 		}
 		value := c.expr(field.Value, env, inEffect)
 		fields[field.Name] = value.clone()
-		index := slices.IndexFunc(r.Parameters, func(p TemplateParameter) bool { return p.Name == r.Fields[declared].Type })
-		if index < 0 || value.isEffect() {
+		formal := declared[index].typeID
+		if formal == invalidTypeID {
+			if p := slices.IndexFunc(r.Parameters, func(p TemplateParameter) bool { return p.Name == declared[index].Type }); p >= 0 {
+				formal = r.Parameters[p].typeID
+			}
+		}
+		if value.isEffect() || !c.unifyTemplateTypes(formal, value.valueID(), variables, types) {
 			c.diagnostic("EF127", "template fields require initialized values", e.Span)
 			continue
 		}
-		bindings[index] = value.valueID()
-		if err := c.matchTemplateConstraint(r, r.Parameters[index], value.valueID(), bindings); err != nil {
+	}
+	for i, p := range r.Parameters {
+		bindings[i] = types[p.typeID]
+	}
+	// Existing Codec constructors infer data slots from retained callable shape
+	// evidence. Complete that shared constraint inference before requiring all
+	// arguments, including phantom data slots with no such evidence.
+	for i, p := range r.Parameters {
+		if p.Kind == "callable" && bindings[i] != invalidTypeID {
+			if err := c.matchTemplateConstraint(r, p, bindings[i], bindings); err != nil {
+				c.diagnostic("EF127", err.Error(), e.Span)
+			}
+		}
+	}
+	for i, p := range r.Parameters {
+		if bindings[i] == invalidTypeID {
+			c.diagnostic("EF127", "type parameter "+p.Name+" requires a complete explicit constructor argument or payload evidence", e.Span)
+			return result, true
+		}
+	}
+	for i, p := range r.Parameters {
+		if err := c.matchTemplateConstraint(r, p, bindings[i], bindings); err != nil {
 			c.diagnostic("EF127", err.Error(), e.Span)
 		}
 	}
@@ -560,7 +640,7 @@ func (c *checker) templateConstruct(e *Expr, env map[string]checkedExpression, i
 	}
 	owners, captures := []OwnershipFact{}, []OwnershipFact{}
 	evaluation := c.evaluation(emptyRowID, emptyRowID)
-	for _, field := range r.Fields {
+	for _, field := range declared {
 		value, ok := fields[field.Name]
 		if !ok {
 			c.diagnostic("EF127", "missing initialized template field "+field.Name, e.Span)
@@ -572,9 +652,82 @@ func (c *checker) templateConstruct(e *Expr, env map[string]checkedExpression, i
 	}
 	result = c.checkedDataID(id, normalizeFacts(owners), normalizeFacts(captures))
 	result.fields = fields
+	if variant != "" {
+		result.setOwnership(prependFacts(variant, result.ownershipFacts()))
+		result.setCaptures(prependFacts(variant, result.captureFacts()))
+		payload := c.checkedData("()")
+		payload.fields = fields
+		result.fields = map[string]checkedExpression{variant: payload}
+	}
 	result.evaluation = evaluation
 	e.ResolvedTemplate = r
 	return result, true
+}
+
+// The same finite canonical relation serves data construction and generic
+// callback inference. Application owners and their arguments are invariant.
+func (c *checker) unifyTemplateTypes(formal, actual TypeID, variables map[TypeID]bool, bindings map[TypeID]TypeID, inferRows ...bool) bool {
+	type pair struct {
+		formal, actual TypeID
+		invariant      bool
+	}
+	seen := map[pair]bool{}
+	visits := 0
+	var unify func(TypeID, TypeID, int, bool) bool
+	unify = func(formal, actual TypeID, depth int, invariant bool) bool {
+		visits++
+		if depth > 64 || visits > 4096 {
+			return false
+		}
+		if variables[formal] {
+			if prior, ok := bindings[formal]; ok {
+				if n := c.node(formal); n != nil {
+					if p := c.variableOwners[n.Declaration]; p.Kind == "callable" && !invariant {
+						return c.assignable(actual, prior, 0)
+					}
+				}
+				return prior == actual
+			}
+			if c.node(actual) == nil {
+				return false
+			}
+			bindings[formal] = actual
+			return true
+		}
+		if formal == actual {
+			return true
+		}
+		key := pair{formal, actual, invariant}
+		if seen[key] {
+			return true
+		}
+		seen[key] = true
+		a, b := c.node(formal), c.node(actual)
+		if a == nil || b == nil || a.Kind != b.Kind || len(a.Args) != len(b.Args) {
+			return false
+		}
+		if a.Kind == "application" {
+			if a.Declaration != b.Declaration {
+				return false
+			}
+		} else if a.Kind == "callable" {
+			if !invariant && c.assignable(actual, formal, 0) {
+				return true
+			}
+			if a.Mode != b.Mode || (invariant || !(len(inferRows) > 0 && inferRows[0])) && (a.FailureRow != b.FailureRow || a.ServiceRow != b.ServiceRow) {
+				return false
+			}
+		} else {
+			return false
+		}
+		for i := range a.Args {
+			if !unify(a.Args[i], b.Args[i], depth+1, invariant || a.Kind == "application") {
+				return false
+			}
+		}
+		return a.Result == b.Result || unify(a.Result, b.Result, depth+1, invariant)
+	}
+	return unify(formal, actual, 0, false)
 }
 
 // substituteCanonical is shared by row-polymorphic calls and first-order
@@ -641,43 +794,17 @@ func (c *checker) inferTypeArguments(f *Function, arguments []checkedExpression,
 	for _, p := range f.TypeParameters {
 		variables[p.typeID] = true
 	}
-	var unify func(TypeID, TypeID, int) bool
-	unify = func(formal, actual TypeID, depth int) bool {
-		if depth > 32 {
-			return false
-		}
-		if variables[formal] {
-			if !c.templateDataArgument(actual) {
-				return false
-			}
-			if prior, ok := bindings[formal]; ok {
-				return prior == actual
-			}
-			bindings[formal] = actual
-			return true
-		}
-		a, b := c.node(formal), c.node(actual)
-		if a == nil || b == nil {
-			return false
-		}
-		if a.Kind == "callable" && b.Kind == "callable" && a.Mode == b.Mode && len(a.Args) == len(b.Args) {
-			for i := range a.Args {
-				if !unify(a.Args[i], b.Args[i], depth+1) {
-					return false
-				}
-			}
-			return unify(a.Result, b.Result, depth+1)
-		}
-		return formal == actual
-	}
 	for i, p := range f.Params {
-		if i < len(arguments) && !unify(p.typeID, arguments[i].valueID(), 0) {
+		if i < len(arguments) && !c.unifyTemplateTypes(p.typeID, arguments[i].valueID(), variables, bindings, true) {
 			c.diagnostic("EF127", "incompatible first-order template argument", span)
 		}
 	}
 	for _, p := range f.TypeParameters {
-		if _, bound := bindings[p.typeID]; !bound {
+		if bound, found := bindings[p.typeID]; !found {
 			c.diagnostic("EF127", "type parameter "+p.Name+" requires a direct checked callback argument", span)
+		} else if !c.templateDataArgument(bound) {
+			c.diagnostic("EF127", "unsupported template data layout", span)
+			delete(bindings, p.typeID)
 		}
 	}
 	return bindings
