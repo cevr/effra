@@ -63,6 +63,14 @@ type OwnershipFact struct {
 	// bounded evidence while escape checks diagnose exhausted analysis instead
 	// of treating it as safe.
 	potentialOwner bool
+	// remainder marks uncertainty outside retained exact paths. Projection may
+	// discharge this marker at an independently complete selected terminal;
+	// wildcard alternatives which may include that terminal remain live.
+	remainder bool
+	// remainderExclusions records exact paths retained in the same abstract
+	// alternative. A remainder covers every other path, so a join cannot use a
+	// sibling fact from another alternative to discharge it.
+	remainderExclusions string
 }
 
 // TypeRef is the canonical semantic identity used by checking, emission and
@@ -255,7 +263,18 @@ func (c *checker) ownershipPaths(typeName, prefix string, seen map[string]bool) 
 func (c *checker) unknownOwnership(typeName string) []OwnershipFact {
 	facts := []OwnershipFact{}
 	for _, path := range c.ownershipPaths(typeName, "", map[string]bool{}) {
-		facts = append(facts, OwnershipFact{Path: path, Status: "unknown", Origin: "unknown"})
+		fact := OwnershipFact{Path: path, Status: "unknown", Origin: "unknown"}
+		if isWildcardPath(path) {
+			fact.Origin = "bounded"
+			fact.potentialOwner = true
+			fact.remainder = true
+		}
+		facts = append(facts, fact)
+	}
+	for i := range facts {
+		if isWildcardPath(facts[i].Path) {
+			facts[i].remainderExclusions = remainderExclusionsForFacts(facts)
+		}
 	}
 	return normalizeFacts(facts)
 }
@@ -263,7 +282,18 @@ func (c *checker) unknownOwnership(typeName string) []OwnershipFact {
 func (c *checker) borrowedOwnership(typeName, region string) []OwnershipFact {
 	facts := []OwnershipFact{}
 	for _, path := range c.ownershipPaths(typeName, "", map[string]bool{}) {
-		facts = append(facts, OwnershipFact{Path: path, Status: "borrowed", Region: region, Origin: "parameter", source: path, sourceSet: true, ownerKind: ownershipOwnerParameter})
+		fact := OwnershipFact{Path: path, Status: "borrowed", Region: region, Origin: "parameter", source: path, sourceSet: true, ownerKind: ownershipOwnerParameter}
+		if isWildcardPath(path) {
+			fact.Origin = "bounded"
+			fact.potentialOwner = true
+			fact.remainder = true
+		}
+		facts = append(facts, fact)
+	}
+	for i := range facts {
+		if isWildcardPath(facts[i].Path) {
+			facts[i].remainderExclusions = remainderExclusionsForFacts(facts)
+		}
 	}
 	return normalizeFacts(facts)
 }
@@ -290,6 +320,122 @@ func isWildcardPath(path string) bool {
 	return wildcard
 }
 
+const ownershipRemainderSeparator = "\x00"
+
+func prependOwnershipPath(prefix, path string) string {
+	if prefix == "" {
+		return path
+	}
+	if path == "" {
+		return prefix
+	}
+	if path == "*" {
+		return prefix + ".*"
+	}
+	return prefix + "." + path
+}
+
+func encodeRemainderExclusions(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	paths = append([]string{}, paths...)
+	slices.Sort(paths)
+	unique := paths[:0]
+	for _, path := range paths {
+		if len(unique) == 0 || unique[len(unique)-1] != path {
+			unique = append(unique, path)
+		}
+	}
+	return strings.Join(unique, ownershipRemainderSeparator)
+}
+
+func decodeRemainderExclusions(encoded string) []string {
+	if encoded == "" {
+		return nil
+	}
+	return strings.Split(encoded, ownershipRemainderSeparator)
+}
+
+func remainderExcludes(fact OwnershipFact, path string) bool {
+	for _, excluded := range decodeRemainderExclusions(fact.remainderExclusions) {
+		if excluded == path {
+			return true
+		}
+		base, wildcard := wildcardPathPrefix(excluded)
+		if wildcard && (base == "" || pathWithinPrefix(path, base)) {
+			return true
+		}
+	}
+	return false
+}
+
+func projectRemainderExclusions(encoded, selected string) string {
+	paths := decodeRemainderExclusions(encoded)
+	if len(paths) == 0 {
+		return ""
+	}
+	rebased := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if path == selected {
+			rebased = append(rebased, "")
+			continue
+		}
+		if strings.HasPrefix(path, selected+".") {
+			rebased = append(rebased, strings.TrimPrefix(path, selected+"."))
+			continue
+		}
+		base, wildcard := wildcardPathPrefix(path)
+		if !wildcard {
+			continue
+		}
+		if base == "" || base == selected || strings.HasPrefix(selected, base+".") {
+			if base == selected {
+				rebased = append(rebased, "*")
+			} else if base == "" {
+				rebased = append(rebased, "*")
+			} else {
+				rebased = append(rebased, "*")
+			}
+			continue
+		}
+		if strings.HasPrefix(base, selected+".") {
+			rebased = append(rebased, strings.TrimPrefix(base, selected+".")+".*")
+		}
+	}
+	return encodeRemainderExclusions(rebased)
+}
+
+func intersectRemainderExclusions(a, b string) string {
+	if a == "" || b == "" {
+		return ""
+	}
+	left := decodeRemainderExclusions(a)
+	right := decodeRemainderExclusions(b)
+	seen := make(map[string]bool, len(right))
+	for _, path := range right {
+		seen[path] = true
+	}
+	common := make([]string, 0, min(len(left), len(right)))
+	for _, path := range left {
+		if seen[path] {
+			common = append(common, path)
+		}
+	}
+	return encodeRemainderExclusions(common)
+}
+
+func remainderExclusionsForFacts(facts []OwnershipFact) string {
+	paths := make([]string, 0, len(facts))
+	for _, fact := range facts {
+		if fact.Status != "borrowed" || fact.potentialOwner || fact.remainder {
+			continue
+		}
+		paths = append(paths, fact.Path)
+	}
+	return encodeRemainderExclusions(paths)
+}
+
 func completeWildcardCovers(wildcard OwnershipFact, path string) bool {
 	if !isWildcardPath(wildcard.Path) || (wildcard.Origin != "bounded-all-owned" && wildcard.Origin != "bounded-all-borrowed") {
 		return false
@@ -301,41 +447,37 @@ func completeWildcardCovers(wildcard OwnershipFact, path string) bool {
 // projectWildcardPath rebases an uncertain subtree through one member
 // projection. A descendant prefix is kept until the selected terminal path is
 // complete; one retained descendant does not prove the whole subtree.
-func projectWildcardPath(path, selected string, terminal bool) (rebased string, canDrop bool, ok bool) {
-	base, wildcard := wildcardPathPrefix(path)
+func projectWildcardPath(fact OwnershipFact, selected string, terminal bool) (rebased string, canDrop bool, ok bool) {
+	base, wildcard := wildcardPathPrefix(fact.Path)
 	if !wildcard {
 		return "", false, false
 	}
 	if base == "" {
-		return "*", terminal, true
+		return "*", fact.remainder && terminal && remainderExcludes(fact, selected), true
 	}
 	if base == selected {
-		return "*", false, true
+		return "*", fact.remainder && terminal && remainderExcludes(fact, selected), true
 	}
 	if strings.HasPrefix(base, selected+".") {
 		return strings.TrimPrefix(base, selected+".") + ".*", false, true
 	}
 	if strings.HasPrefix(selected, base+".") {
-		return "*", terminal, true
+		return "*", fact.remainder && terminal && remainderExcludes(fact, selected), true
 	}
 	return "", false, false
 }
 
 func normalizeProjectedWildcard(fact OwnershipFact) OwnershipFact {
-	preserveSource := fact.Status == "borrowed" && fact.Origin == "bounded-all-borrowed"
-	if fact.Status == "owned" && fact.Origin != "bounded-all-owned" {
+	completeOwned := fact.Status == "owned" && fact.Origin == "bounded-all-owned"
+	completeBorrowed := fact.Status == "borrowed" && fact.Origin == "bounded-all-borrowed"
+	if !completeOwned && !completeBorrowed {
+		// A projected wildcard is an incomplete subtree unless its constructor
+		// explicitly proved that every descendant had the same provenance. Keep
+		// the parameter-relative source while converting it to scoped potential;
+		// substitution must not turn an omitted owner into ordinary unknown.
 		fact.Status = "unknown"
 		fact.Origin = "bounded"
-	}
-	if fact.Status == "borrowed" && fact.Origin != "bounded-all-borrowed" {
-		fact.Status = "unknown"
-		fact.Origin = "bounded"
-		fact.source = ""
-		fact.sourceSet = false
-	}
-	if !preserveSource {
-		fact.source = ""
-		fact.sourceSet = false
+		fact.potentialOwner = true
 	}
 	return fact
 }
@@ -348,17 +490,12 @@ func prependFacts(prefix string, facts []OwnershipFact) []OwnershipFact {
 	for _, fact := range facts {
 		copy := fact
 		if prefix != "" {
-			if copy.Path == "" {
-				copy.Path = prefix
-			} else if isWildcardPath(copy.Path) {
-				if copy.Path == "*" {
-					copy.Path = prefix + ".*"
-				} else {
-					copy.Path = prefix + "." + copy.Path
-				}
-			} else {
-				copy.Path = prefix + "." + copy.Path
+			copy.Path = prependOwnershipPath(prefix, copy.Path)
+			paths := decodeRemainderExclusions(copy.remainderExclusions)
+			for i, path := range paths {
+				paths[i] = prependOwnershipPath(prefix, path)
 			}
+			copy.remainderExclusions = encodeRemainderExclusions(paths)
 		}
 		out = append(out, copy)
 	}
@@ -387,12 +524,13 @@ func projectFacts(facts []OwnershipFact, field string) []OwnershipFact {
 	terminal := exact && !inexact && !descendant
 	out := make([]OwnershipFact, 0, len(facts))
 	for _, fact := range facts {
-		if rebased, canDrop, ok := projectWildcardPath(fact.Path, field, terminal); ok {
+		if rebased, canDrop, ok := projectWildcardPath(fact, field, terminal); ok {
 			if canDrop {
 				continue
 			}
 			copy := fact
 			copy.Path = rebased
+			copy.remainderExclusions = projectRemainderExclusions(fact.remainderExclusions, field)
 			copy = normalizeProjectedWildcard(copy)
 			out = append(out, copy)
 			continue
@@ -439,12 +577,13 @@ func projectVariantFacts(facts []OwnershipFact, variant, field string) []Ownersh
 	terminal := exact && !inexact && !descendant
 	projected := make([]OwnershipFact, 0)
 	for _, fact := range facts {
-		if rebased, canDrop, ok := projectWildcardPath(fact.Path, prefix, terminal); ok {
+		if rebased, canDrop, ok := projectWildcardPath(fact, prefix, terminal); ok {
 			if canDrop {
 				continue
 			}
 			copy := fact
 			copy.Path = rebased
+			copy.remainderExclusions = projectRemainderExclusions(fact.remainderExclusions, prefix)
 			copy = normalizeProjectedWildcard(copy)
 			projected = append(projected, copy)
 			continue
@@ -527,11 +666,12 @@ func conservativeCycleFacts(observed ...[]OwnershipFact) []OwnershipFact {
 			}
 			fact.Path = "*"
 			fact.Origin = "bounded"
+			fact.potentialOwner = true
 			owned = append(owned, fact)
 		}
 	}
 	if len(owned) == 0 {
-		return []OwnershipFact{{Path: "*", Status: "unknown", Origin: "bounded"}}
+		return []OwnershipFact{{Path: "*", Status: "unknown", Origin: "bounded", potentialOwner: true}}
 	}
 	return normalizeFacts(owned)
 }
@@ -565,7 +705,7 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 	for _, fact := range facts {
 		matched := false
 		for i, param := range params {
-			if fact.Region != "parameter:"+param.Name {
+			if fact.Region != "parameter:"+param.Name && fact.Region != "parameter:*" {
 				continue
 			}
 			matched = true
@@ -577,22 +717,31 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 				return !isWildcardPath(argument.Path) && argument.Path == fact.source
 			})
 			for _, argument := range args[i].Ownership {
-				if hasConcreteSource && isWildcardPath(argument.Path) {
+				if hasConcreteSource && isWildcardPath(argument.Path) && canSkipWildcardForSource(argument, fact.source) {
 					continue
 				}
 				if !ownershipPathMatches(argument.Path, fact.source) {
 					continue
 				}
 				copy := argument
+				copy.potentialOwner = copy.potentialOwner || fact.potentialOwner
+				copy.remainder = fact.remainder
+				copy.remainderExclusions = fact.remainderExclusions
 				if isWildcardPath(fact.source) || isWildcardPath(argument.Path) {
 					// A wildcard source or argument is evidence about an
 					// unspecified descendant. Preserve a whole-value owned
 					// wildcard, but do not turn an ambiguous projected field into
 					// a certain owned fact.
-					if !(fact.Path == "*" && fact.sourceSet && fact.source == "*" && argument.Path == "*" && argument.Status == "owned" && argument.Origin == "bounded-all-owned") {
+					if parameterSourceTop(fact) {
+						copy.Origin = "conditional"
+					} else if !(fact.Path == "*" && fact.sourceSet && fact.source == "*" && argument.Path == "*" && argument.Status == "owned" && argument.Origin == "bounded-all-owned") {
 						copy.Status = "unknown"
 						copy.Origin = "bounded"
 						copy.potentialOwner = true
+						if !fact.remainder {
+							copy.remainder = false
+							copy.remainderExclusions = ""
+						}
 					}
 				}
 				// The summary path is relative to the returned value. The
@@ -621,6 +770,78 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 		}
 	}
 	return normalizeFacts(out)
+}
+
+func canSkipWildcardForSource(fact OwnershipFact, source string) bool {
+	if !isWildcardPath(fact.Path) {
+		return false
+	}
+	if fact.remainder {
+		return remainderExcludes(fact, source)
+	}
+	return fact.Status == "borrowed" && !fact.potentialOwner && fact.Origin == "bounded-all-borrowed"
+}
+
+func mergeSamePathAlternatives(facts []OwnershipFact) (OwnershipFact, bool) {
+	if len(facts) < 2 {
+		return OwnershipFact{}, false
+	}
+	status := facts[0].Status
+	for _, fact := range facts[1:] {
+		if fact.Status != status {
+			return OwnershipFact{}, false
+		}
+	}
+	if isWildcardPath(facts[0].Path) {
+		if status != "unknown" {
+			return OwnershipFact{}, false
+		}
+		merged := facts[0]
+		for _, fact := range facts[1:] {
+			merged = mergePotentialWildcard(merged, fact)
+		}
+		return merged, true
+	}
+	merged := facts[0]
+	allParameterRegions := strings.HasPrefix(merged.Region, "parameter:")
+	sourceTop := false
+	for _, fact := range facts[1:] {
+		if fact.Region != merged.Region {
+			if !strings.HasPrefix(fact.Region, "parameter:") {
+				allParameterRegions = false
+			}
+			merged.Region = "*"
+		}
+		merged.potentialOwner = merged.potentialOwner || fact.potentialOwner
+		if merged.ownerKind != fact.ownerKind {
+			merged.ownerKind = ownershipOwnerUnknown
+		}
+		if merged.sourceSet != fact.sourceSet || (merged.sourceSet && merged.source != fact.source) {
+			sourceTop = true
+			merged.sourceSet = false
+			merged.source = ""
+		}
+	}
+	if allParameterRegions && sourceTop {
+		if merged.Region == "*" {
+			merged.Region = "parameter:*"
+		}
+		merged.source = "*"
+		merged.sourceSet = true
+		merged.Origin = "conditional"
+	} else if allParameterRegions && merged.Region == "*" {
+		merged.Region = "parameter:*"
+	}
+	if merged.Origin != facts[len(facts)-1].Origin {
+		merged.Origin = "conditional"
+	}
+	merged.remainder = false
+	merged.remainderExclusions = ""
+	return merged, true
+}
+
+func parameterSourceTop(fact OwnershipFact) bool {
+	return fact.sourceSet && fact.source == "*" && fact.Origin == "conditional" && strings.HasPrefix(fact.Region, "parameter:")
 }
 
 type ownershipProvenanceKey struct {
@@ -809,6 +1030,7 @@ func compactOwnedFacts(facts []OwnershipFact, maxFacts int) ([]OwnershipFact, bo
 			region = "*"
 		}
 		if fact.ownerKind != ownerKind {
+			region = "*"
 			ownerKind = ownershipOwnerUnknown
 		}
 	}
@@ -932,7 +1154,26 @@ func ownershipPathDepth(path string) int {
 	return strings.Count(path, ".") + 1
 }
 
+func ownershipPathCoveredByIncomplete(path string, incomplete map[string]bool) bool {
+	for prefix := range incomplete {
+		base, wildcard := wildcardPathPrefix(prefix)
+		if wildcard && (base == "" || pathWithinPrefix(path, base)) {
+			return true
+		}
+	}
+	return false
+}
+
 func boundedBorrowedWithPotential(facts []OwnershipFact, incomplete map[string]bool, maxFacts int) []OwnershipFact {
+	ownedCoverage := make([]OwnershipFact, 0)
+	for _, fact := range facts {
+		if fact.Status == "owned" && fact.Origin == "bounded-all-owned" && !fact.potentialOwner {
+			ownedCoverage = append(ownedCoverage, fact)
+		}
+	}
+	if len(ownedCoverage) >= maxFacts {
+		return []OwnershipFact{{Path: "*", Status: "unknown", Origin: "bounded", potentialOwner: true}}
+	}
 	candidates := make([]OwnershipFact, 0, len(facts))
 	for _, fact := range facts {
 		if fact.Status != "borrowed" || fact.potentialOwner || incomplete[fact.Path] {
@@ -946,11 +1187,150 @@ func boundedBorrowedWithPotential(facts []OwnershipFact, incomplete map[string]b
 		}
 		return strings.Compare(a.Path, b.Path)
 	})
-	if len(candidates) > maxFacts-1 {
-		candidates = candidates[:maxFacts-1]
+	available := maxFacts - len(ownedCoverage) - 1
+	if available < 0 {
+		available = 0
 	}
-	candidates = append(candidates, OwnershipFact{Path: "*", Status: "unknown", Region: "*", Origin: "bounded", potentialOwner: true})
-	return normalizeFacts(candidates)
+	if len(candidates) > available {
+		candidates = candidates[:available]
+	}
+	bounded := append(append([]OwnershipFact{}, ownedCoverage...), candidates...)
+	bounded = append(bounded, OwnershipFact{
+		Path:                "*",
+		Status:              "unknown",
+		Region:              "*",
+		Origin:              "bounded",
+		potentialOwner:      true,
+		remainder:           true,
+		remainderExclusions: remainderExclusionsForFacts(bounded),
+	})
+	return normalizeFacts(bounded)
+}
+
+func incompleteWildcard(fact OwnershipFact) bool {
+	if !isWildcardPath(fact.Path) {
+		return false
+	}
+	return fact.potentialOwner || (fact.Origin != "bounded-all-owned" && fact.Origin != "bounded-all-borrowed")
+}
+
+func mergePotentialWildcard(a, b OwnershipFact) OwnershipFact {
+	merged := a
+	merged.Status = "unknown"
+	merged.Origin = "bounded"
+	merged.potentialOwner = true
+	if merged.remainder && b.remainder {
+		merged.remainderExclusions = intersectRemainderExclusions(merged.remainderExclusions, b.remainderExclusions)
+	} else {
+		merged.remainder = false
+		merged.remainderExclusions = ""
+	}
+	if merged.Region != b.Region {
+		merged.Region = "*"
+	}
+	if merged.ownerKind != b.ownerKind {
+		merged.ownerKind = ownershipOwnerUnknown
+	}
+	if merged.sourceSet != b.sourceSet || (merged.sourceSet && merged.source != b.source) {
+		merged.source = ""
+		merged.sourceSet = false
+	}
+	return merged
+}
+
+// retainIncompleteWildcards turns every non-complete wildcard into an
+// explicit scoped potential marker. The marker covers only its own prefix;
+// unrelated sibling facts remain available for the bounded representation.
+// This is the widening boundary for path truncation and projected uncertainty.
+func retainIncompleteWildcards(facts []OwnershipFact) []OwnershipFact {
+	markers := map[string]OwnershipFact{}
+	for _, fact := range facts {
+		if !incompleteWildcard(fact) {
+			continue
+		}
+		if previous, ok := markers[fact.Path]; ok {
+			markers[fact.Path] = mergePotentialWildcard(previous, fact)
+			continue
+		}
+		fact.Status = "unknown"
+		fact.Origin = "bounded"
+		fact.potentialOwner = true
+		markers[fact.Path] = fact
+	}
+	if len(markers) == 0 {
+		return facts
+	}
+	out := make([]OwnershipFact, 0, len(facts))
+	for _, fact := range facts {
+		if incompleteWildcard(fact) {
+			continue
+		}
+		covered := false
+		for _, marker := range markers {
+			if marker.remainder {
+				continue
+			}
+			base, _ := wildcardPathPrefix(marker.Path)
+			if base == "" || pathWithinPrefix(fact.Path, base) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			out = append(out, fact)
+		}
+	}
+	for _, marker := range markers {
+		out = append(out, marker)
+	}
+	slices.SortStableFunc(out, compareOwnershipFacts)
+	return out
+}
+
+func compareOwnershipFacts(a, b OwnershipFact) int {
+	if a.Path != b.Path {
+		return strings.Compare(a.Path, b.Path)
+	}
+	if a.Status != b.Status {
+		return strings.Compare(a.Status, b.Status)
+	}
+	if a.Region != b.Region {
+		return strings.Compare(a.Region, b.Region)
+	}
+	if a.Origin != b.Origin {
+		return strings.Compare(a.Origin, b.Origin)
+	}
+	if a.sourceSet != b.sourceSet {
+		if !a.sourceSet {
+			return -1
+		}
+		return 1
+	}
+	if a.source != b.source {
+		return strings.Compare(a.source, b.source)
+	}
+	if a.ownerKind < b.ownerKind {
+		return -1
+	}
+	if a.ownerKind > b.ownerKind {
+		return 1
+	}
+	if a.potentialOwner != b.potentialOwner {
+		if !a.potentialOwner {
+			return -1
+		}
+		return 1
+	}
+	if a.remainder != b.remainder {
+		if !a.remainder {
+			return -1
+		}
+		return 1
+	}
+	if a.remainderExclusions != b.remainderExclusions {
+		return strings.Compare(a.remainderExclusions, b.remainderExclusions)
+	}
+	return 0
 }
 
 func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
@@ -958,49 +1338,30 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 		return nil
 	}
 	out := append([]OwnershipFact{}, facts...)
-	slices.SortStableFunc(out, func(a, b OwnershipFact) int {
-		if a.Path != b.Path {
-			return strings.Compare(a.Path, b.Path)
-		}
-		if a.Status != b.Status {
-			return strings.Compare(a.Status, b.Status)
-		}
-		if a.Region != b.Region {
-			return strings.Compare(a.Region, b.Region)
-		}
-		if a.Origin != b.Origin {
-			return strings.Compare(a.Origin, b.Origin)
-		}
-		if a.sourceSet != b.sourceSet {
-			if !a.sourceSet {
-				return -1
-			}
-			return 1
-		}
-		if a.source != b.source {
-			return strings.Compare(a.source, b.source)
-		}
-		if a.ownerKind < b.ownerKind {
-			return -1
-		}
-		if a.ownerKind > b.ownerKind {
-			return 1
-		}
-		if a.potentialOwner != b.potentialOwner {
-			if !a.potentialOwner {
-				return -1
-			}
-			return 1
-		}
-		return 0
-	})
+	slices.SortStableFunc(out, compareOwnershipFacts)
 	result := make([]OwnershipFact, 0, len(out))
-	for _, fact := range out {
-		if len(result) == 0 || result[len(result)-1] != fact {
-			result = append(result, fact)
+	for i := 0; i < len(out); {
+		j := i + 1
+		for j < len(out) && out[j].Path == out[i].Path && out[j].Status == out[i].Status {
+			j++
 		}
+		group := out[i:j]
+		if len(group) > 1 {
+			if merged, ok := mergeSamePathAlternatives(group); ok {
+				result = append(result, merged)
+				i = j
+				continue
+			}
+		}
+		for _, fact := range group {
+			if len(result) == 0 || result[len(result)-1] != fact {
+				result = append(result, fact)
+			}
+		}
+		i = j
 	}
 	result = coalesceOwnedWildcards(result)
+	result = retainIncompleteWildcards(result)
 	const maxFacts = 64
 	if len(result) > maxFacts {
 		allOwned := true
@@ -1065,6 +1426,7 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 		// still discharge the marker during projection; a discarded selected
 		// path has only the marker and is rejected conservatively.
 		potentialNeeded := false
+		candidateCount := 0
 		for _, fact := range result {
 			if incomplete[fact.Path] || (isWildcardPath(fact.Path) && (fact.Origin == "bounded-all-owned" || fact.Origin == "bounded-all-borrowed")) {
 				continue
@@ -1077,12 +1439,16 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 			}) {
 				continue
 			}
+			candidateCount++
 			switch {
 			case fact.Status == "owned", fact.Status == "unknown", fact.potentialOwner, allBorrowed && fact.Status == "borrowed":
 				potentialNeeded = true
 			}
 		}
 		available := maxFacts - len(bounded)
+		if candidateCount > available {
+			potentialNeeded = true
+		}
 		if potentialNeeded {
 			available--
 		}
@@ -1102,6 +1468,14 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 				candidates = append(candidates, fact)
 			}
 			slices.SortStableFunc(candidates, func(a, b OwnershipFact) int {
+				aCovered := ownershipPathCoveredByIncomplete(a.Path, incomplete)
+				bCovered := ownershipPathCoveredByIncomplete(b.Path, incomplete)
+				if aCovered != bCovered {
+					if !aCovered {
+						return -1
+					}
+					return 1
+				}
 				if depth := ownershipPathDepth(a.Path) - ownershipPathDepth(b.Path); depth != 0 {
 					return depth
 				}
@@ -1116,7 +1490,15 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 			}
 		}
 		if potentialNeeded {
-			bounded = append(bounded, OwnershipFact{Path: "*", Status: "unknown", Region: "*", Origin: "bounded", potentialOwner: true})
+			bounded = append(bounded, OwnershipFact{
+				Path:                "*",
+				Status:              "unknown",
+				Region:              "*",
+				Origin:              "bounded",
+				potentialOwner:      true,
+				remainder:           true,
+				remainderExclusions: remainderExclusionsForFacts(bounded),
+			})
 		}
 		return normalizeFacts(bounded)
 	}
@@ -1125,7 +1507,7 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 
 func hasOwnedFact(facts []OwnershipFact, region string) bool {
 	for _, fact := range facts {
-		if fact.Status == "owned" && (fact.Region == "*" || (fact.ownerKind == ownershipOwnerLexical && fact.Region == region)) {
+		if fact.Status == "owned" && (fact.Region == "*" || fact.ownerKind == ownershipOwnerUnknown || (fact.ownerKind == ownershipOwnerLexical && fact.Region == region)) {
 			return true
 		}
 	}

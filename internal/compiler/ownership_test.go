@@ -3,6 +3,7 @@ package compiler
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -970,6 +971,198 @@ func ownershipCoverageBorrowedSummarySource(width int, enum, reverse bool) strin
 	return source.String()
 }
 
+func ownershipJoinSiblingSource(width int, enum, reverse, bothBorrowed bool) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "record Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " }")
+	if enum {
+		if reverse {
+			fmt.Fprintln(&source, "enum Root { P { z: File, a: Wide } }")
+		} else {
+			fmt.Fprintln(&source, "enum Root { P { a: Wide, z: File } }")
+		}
+	} else if reverse {
+		fmt.Fprintln(&source, "record Root { z: File, a: Wide }")
+	} else {
+		fmt.Fprintln(&source, "record Root { a: Wide, z: File }")
+	}
+	writeRoot := func(name, wideOwner, zOwner string) {
+		if enum {
+			if reverse {
+				fmt.Fprintf(&source, "  let %s = Root.P { z: %s, a: Wide {", name, zOwner)
+			} else {
+				fmt.Fprintf(&source, "  let %s = Root.P { a: Wide {", name)
+			}
+		} else if reverse {
+			fmt.Fprintf(&source, "  let %s = Root { z: %s, a: Wide {", name, zOwner)
+		} else {
+			fmt.Fprintf(&source, "  let %s = Root { a: Wide {", name)
+		}
+		for i := 0; i < width; i++ {
+			if i > 0 {
+				fmt.Fprint(&source, ",")
+			}
+			fmt.Fprintf(&source, " f%d: %s", i, wideOwner)
+		}
+		if reverse {
+			fmt.Fprintln(&source, " } }")
+		} else {
+			fmt.Fprintf(&source, " }, z: %s }\n", zOwner)
+		}
+	}
+	fmt.Fprintln(&source, "effect fn probe(borrowed: File, second: File, choose: bool) -> File throws {IoError} {")
+	fmt.Fprintln(&source, " scope {")
+	fmt.Fprintln(&source, `  let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`)
+	firstOwner, firstZ := "inner", "inner"
+	if bothBorrowed {
+		firstOwner, firstZ = "borrowed", "borrowed"
+	}
+	writeRoot("first", firstOwner, firstZ)
+	writeRoot("secondRoot", "borrowed", "second")
+	if enum {
+		fmt.Fprintln(&source, "  match if choose { first } else { secondRoot } { Root.P { z } => z }")
+	} else {
+		fmt.Fprintln(&source, "  let selected = if choose { first } else { secondRoot }")
+		fmt.Fprintln(&source, "  selected.z")
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
+func ownershipHelperBoxSource(width int, innerFile bool) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "record Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "record Box { f: File }")
+	fmt.Fprintln(&source, "record Pair { x: Wide, z: Box }")
+	fmt.Fprintln(&source, "fn pick(x: Wide, file: File) -> File {")
+	fmt.Fprintln(&source, " let pair = Pair { x: x, z: Box { f: file } }")
+	fmt.Fprintln(&source, " pair.z.f")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn probe(borrowed: File) -> File throws {IoError} {")
+	fmt.Fprintln(&source, " scope {")
+	fmt.Fprintln(&source, `  let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`)
+	fmt.Fprint(&source, "  let wide = Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: borrowed", i)
+	}
+	fmt.Fprintln(&source, " }")
+	file := "borrowed"
+	if innerFile {
+		file = "inner"
+	}
+	fmt.Fprintf(&source, "  pick(wide, %s)\n", file)
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
+func ownershipJoinHelperSource(width int, bothBorrowed bool) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "record Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "record Root { a: Wide, z: File }")
+	fmt.Fprintln(&source, "fn pick(root: Root) -> File { root.z }")
+	fmt.Fprintln(&source, "effect fn probe(borrowed: File, choose: bool) -> File throws {IoError} {")
+	fmt.Fprintln(&source, " scope {")
+	fmt.Fprintln(&source, `  let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`)
+	firstWide, firstZ := "inner", "inner"
+	if bothBorrowed {
+		firstWide, firstZ = "borrowed", "borrowed"
+	}
+	writeRoot := func(name, wideOwner, zOwner string) {
+		fmt.Fprintf(&source, "  let %s = Root { a: Wide {", name)
+		for i := 0; i < width; i++ {
+			if i > 0 {
+				fmt.Fprint(&source, ",")
+			}
+			fmt.Fprintf(&source, " f%d: %s", i, wideOwner)
+		}
+		fmt.Fprintf(&source, " }, z: %s }\n", zOwner)
+	}
+	writeRoot("first", firstWide, firstZ)
+	writeRoot("second", "borrowed", "borrowed")
+	fmt.Fprintln(&source, "  let selected = if choose { first } else { second }")
+	fmt.Fprintln(&source, "  pick(selected)")
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
+func ownershipSameParameterJoinSource(nested, reverse, bothBorrowed bool) string {
+	var source strings.Builder
+	if nested {
+		fmt.Fprintln(&source, "record Box { value: File }")
+	}
+	if nested {
+		if reverse {
+			fmt.Fprintln(&source, "record Pair { b: Box, a: Box }")
+		} else {
+			fmt.Fprintln(&source, "record Pair { a: Box, b: Box }")
+		}
+	} else if reverse {
+		fmt.Fprintln(&source, "record Pair { b: File, a: File }")
+	} else {
+		fmt.Fprintln(&source, "record Pair { a: File, b: File }")
+	}
+	fmt.Fprintln(&source, "fn select(pair: Pair, choose: bool) -> File {")
+	left, right := "pair.a", "pair.b"
+	if nested {
+		left += ".value"
+		right += ".value"
+	}
+	fmt.Fprintf(&source, " if choose { %s } else { %s }\n", left, right)
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn probe(borrowed: File, choose: bool) -> File throws {IoError} {")
+	fmt.Fprintln(&source, " scope {")
+	fmt.Fprintln(&source, `  let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`)
+	a, b := "inner", "borrowed"
+	if bothBorrowed {
+		a, b = "borrowed", "borrowed"
+	}
+	wrap := func(value string) string {
+		if nested {
+			return "Box { value: " + value + " }"
+		}
+		return value
+	}
+	if reverse {
+		fmt.Fprintf(&source, "  let pair = Pair { b: %s, a: %s }\n", wrap(b), wrap(a))
+	} else {
+		fmt.Fprintf(&source, "  let pair = Pair { a: %s, b: %s }\n", wrap(a), wrap(b))
+	}
+	fmt.Fprintln(&source, "  select(pair, choose)")
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
 func ownershipCoverageTerminalSource(width, layers int, enum bool, borrowedIndex, selection int) string {
 	var source strings.Builder
 	fmt.Fprint(&source, "record Wide {")
@@ -1138,6 +1331,195 @@ func TestOwnershipCoverageRetainsParameterProvenance(t *testing.T) {
 				requireOwnershipRejectedWithoutArgumentUse(t, source)
 			})
 		}
+	}
+}
+
+func TestOwnershipJoinRetainsEveryBranchOwnerAtTheFactCap(t *testing.T) {
+	for _, width := range []int{63, 64, 65, 66} {
+		for _, enum := range []bool{false, true} {
+			for _, reverse := range []bool{false, true} {
+				name := fmt.Sprintf("width-%d-enum-%t-reverse-%t", width, enum, reverse)
+				t.Run(name, func(t *testing.T) {
+					requireOwnershipRejected(t, ownershipJoinSiblingSource(width, enum, reverse, false))
+					requireOwnershipAccepted(t, ownershipJoinSiblingSource(width, enum, reverse, true))
+				})
+			}
+		}
+	}
+}
+
+func TestOwnershipJoinThenHelperRetainsWildcardAlternatives(t *testing.T) {
+	for _, width := range []int{63, 64} {
+		width := width
+		t.Run(fmt.Sprintf("width-%d", width), func(t *testing.T) {
+			requireOwnershipRejected(t, ownershipJoinHelperSource(width, false))
+			if width == 63 {
+				requireOwnershipAccepted(t, ownershipJoinHelperSource(width, true))
+			}
+		})
+	}
+}
+
+func TestOwnershipSameParameterJoinKeepsAlternativeSources(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		for _, reverse := range []bool{false, true} {
+			name := fmt.Sprintf("nested-%t-reverse-%t", nested, reverse)
+			t.Run(name, func(t *testing.T) {
+				requireOwnershipRejected(t, ownershipSameParameterJoinSource(nested, reverse, false))
+				requireOwnershipAccepted(t, ownershipSameParameterJoinSource(nested, reverse, true))
+			})
+		}
+	}
+}
+
+func TestOwnershipHelperRetainsEvictedParameterProvenance(t *testing.T) {
+	for _, width := range []int{63, 64, 65, 66} {
+		width := width
+		t.Run(fmt.Sprintf("width-%d", width), func(t *testing.T) {
+			unsafe := requireOwnershipRejectedWithoutArgumentUse(t, ownershipHelperBoxSource(width, true))
+			pick := unsafe.Find("pick")
+			if pick == nil || len(pick.Actual.Ownership) != 1 {
+				t.Fatalf("helper lost its returned ownership fact at width %d: %+v", width, pick)
+			}
+			fact := pick.Actual.Ownership[0]
+			if fact.Status != "borrowed" || fact.Region != "parameter:file" {
+				t.Fatalf("helper lost file parameter provenance at width %d: %+v", width, fact)
+			}
+			if width != 64 {
+				requireOwnershipAccepted(t, ownershipHelperBoxSource(width, false))
+			}
+		})
+	}
+}
+
+func TestOwnershipRemainderJoinProjectionLaws(t *testing.T) {
+	borrowed := func(path string) OwnershipFact {
+		return OwnershipFact{Path: path, Status: "borrowed", Region: "parameter:file", Origin: "parameter", sourceSet: true}
+	}
+	marker := func(exclusions ...string) OwnershipFact {
+		return OwnershipFact{
+			Path:                "*",
+			Status:              "unknown",
+			Origin:              "bounded",
+			potentialOwner:      true,
+			remainder:           true,
+			remainderExclusions: encodeRemainderExclusions(exclusions),
+		}
+	}
+	branchA := normalizeFacts([]OwnershipFact{marker("z"), borrowed("z")})
+	branchB := normalizeFacts([]OwnershipFact{marker("a"), borrowed("z")})
+	if projected := projectFacts(branchA, "z"); hasPotentialOwner(projected) {
+		t.Fatalf("same-alternative exact override did not discharge its remainder: %+v", projected)
+	}
+	if projected := projectFacts(branchB, "z"); !hasPotentialOwner(projected) {
+		t.Fatalf("remainder without a same-alternative override was discharged: %+v", projected)
+	}
+
+	joinedAB := mergeFacts(branchA, branchB)
+	joinedBA := mergeFacts(branchB, branchA)
+	if !slices.Equal(joinedAB, joinedBA) {
+		t.Fatalf("join is not commutative:\nAB=%+v\nBA=%+v", joinedAB, joinedBA)
+	}
+	if !hasPotentialOwner(projectFacts(joinedAB, "z")) {
+		t.Fatalf("join lost an alternative remainder at the selected terminal: %+v", joinedAB)
+	}
+	if !slices.Equal(joinedAB, mergeFacts(joinedAB, joinedAB)) {
+		t.Fatalf("join is not idempotent: first=%+v twice=%+v", joinedAB, mergeFacts(joinedAB, joinedAB))
+	}
+	if !slices.Equal(branchA, normalizeFacts(normalizeFacts(branchA))) {
+		t.Fatalf("normalization is not idempotent: first=%+v twice=%+v", branchA, normalizeFacts(normalizeFacts(branchA)))
+	}
+
+	branchC := normalizeFacts([]OwnershipFact{marker("z"), borrowed("z")})
+	joinedAC := mergeFacts(branchA, branchC)
+	if hasPotentialOwner(projectFacts(joinedAC, "z")) {
+		t.Fatalf("identical remainder exclusions did not survive a join: %+v", joinedAC)
+	}
+
+	rebased := prependFacts("outer", branchA)
+	if hasPotentialOwner(projectFacts(projectFacts(rebased, "outer"), "z")) {
+		t.Fatalf("remainder exclusions were not rebased through nested projection: %+v", rebased)
+	}
+}
+
+func TestOwnershipNormalizationCanonicalWithMultipleRemainders(t *testing.T) {
+	facts := make([]OwnershipFact, 0, 8)
+	for i := 0; i < 8; i++ {
+		path := fmt.Sprintf("x%d.*", i)
+		facts = append(facts, OwnershipFact{
+			Path:                path,
+			Status:              "unknown",
+			Origin:              "bounded",
+			potentialOwner:      true,
+			remainder:           true,
+			remainderExclusions: encodeRemainderExclusions([]string{fmt.Sprintf("x%d.z", i)}),
+		})
+	}
+	first := normalizeFacts(facts)
+	second := normalizeFacts(first)
+	if !slices.Equal(first, second) {
+		t.Fatalf("normalization changed canonical order or meaning:\nfirst=%+v\nsecond=%+v", first, second)
+	}
+}
+
+func TestOwnershipBudgetWideningRetainsOverlappingOwnedWildcard(t *testing.T) {
+	owned := []OwnershipFact{{Path: "*", Status: "owned", Region: "scope:inner", Origin: "bounded-all-owned", ownerKind: ownershipOwnerLexical}}
+	borrowed := []OwnershipFact{{Path: "z", Status: "borrowed", Region: "parameter:file", Origin: "parameter", sourceSet: true}}
+	for i := 0; i < 63; i++ {
+		path := fmt.Sprintf("x%d.*", i)
+		borrowed = append(borrowed, OwnershipFact{
+			Path:                path,
+			Status:              "unknown",
+			Origin:              "bounded",
+			potentialOwner:      true,
+			remainder:           true,
+			remainderExclusions: encodeRemainderExclusions([]string{fmt.Sprintf("x%d.z", i)}),
+		})
+	}
+	borrowed = normalizeFacts(borrowed)
+	joins := [][]OwnershipFact{
+		mergeFacts(owned, borrowed),
+		mergeFacts(borrowed, owned),
+		mergeFacts(mergeFacts(owned, borrowed[:32]), borrowed[32:]),
+	}
+	for i, joined := range joins {
+		projected := projectFacts(joined, "z")
+		if !slices.ContainsFunc(projected, func(fact OwnershipFact) bool {
+			return fact.Status == "owned"
+		}) {
+			t.Fatalf("join %d dropped an owned wildcard covering z: joined=%+v projected=%+v", i, joined, projected)
+		}
+	}
+}
+
+func TestOwnershipInstantiationKeepsRemainderRelativeToTheReturnedShape(t *testing.T) {
+	argument := ValueType{Ownership: []OwnershipFact{{
+		Path:                "*",
+		Status:              "unknown",
+		Origin:              "bounded",
+		potentialOwner:      true,
+		remainder:           true,
+		remainderExclusions: encodeRemainderExclusions([]string{"wide.f"}),
+	}}}
+	summary := []OwnershipFact{{
+		Path:                "box.f",
+		Status:              "borrowed",
+		Region:              "parameter:wide",
+		Origin:              "parameter",
+		source:              "wide.f",
+		sourceSet:           true,
+		remainder:           true,
+		remainderExclusions: encodeRemainderExclusions([]string{"box.f"}),
+	}}
+	got := instantiateFacts(summary, []Param{{Name: "wide"}}, []ValueType{argument})
+	if len(got) != 1 || !got[0].potentialOwner {
+		t.Fatalf("wildcard argument uncertainty was lost during helper substitution: %+v", got)
+	}
+	if got[0].remainderExclusions != encodeRemainderExclusions([]string{"box.f"}) {
+		t.Fatalf("returned-shape exclusions were not retained: %+v", got)
+	}
+	if strings.Contains(got[0].remainderExclusions, "wide.f") {
+		t.Fatalf("argument-relative exclusion leaked into returned shape: %+v", got)
 	}
 }
 
