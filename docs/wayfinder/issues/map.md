@@ -48,6 +48,8 @@ Owner update, 2026-10-06: defer benchmark development and measurement until the 
 
 - [Native codecs and typed server contracts](native-server-spec.md): reusable bundled interfaces, typed function values, checked codecs, managed endpoints and compatible unary RPC precede actual framework measurements.
 
+- [Bundled interfaces and typed function values](native-interfaces.md): canonical Unit 1 and callable/row/ownership Unit 2 are reviewed and integrated; explicit bundled contracts and shared template applications remain Unit 3. Closed ordinary callbacks and returned-callback factories have runnable portable examples; this parent stays open.
+
 - [Pinned upstream tests and executable conformance mapping](upstream-conformance.md): integrated and reviewed at62baa74 with licensed immutable corpus, ten qualified behavior mappings and actual selected Go/JS acceptance. Full integration gates pass; copied tests do not count as native passes. Later library/server tasks extend the same mapping.
 
 - [Checked machines and owned actors](state-machines.md): owner-requested state-machine primitive over ordinary ADTs, explicit pure or effectful steps, owned invocation and shared graph inspection. Flat states first; advanced statecharts/durability remain unsupported until specified.
