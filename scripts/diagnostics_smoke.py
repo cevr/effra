@@ -150,6 +150,18 @@ def bounds(binary, directory):
 
 
 def identity(binary, directory):
+    # Lexical normalization must govern both the document identity and its bytes.
+    dots = directory / "dots"
+    (dots / "real" / "inner").mkdir(parents=True)
+    (dots / "link").symlink_to("real/inner", target_is_directory=True)
+    lexical = write(dots, "b.ef", 'effect fn main() -> () { () }')
+    write(dots / "real", "b.ef", 'effect fn main() -> () { run Console.log("x") }')
+    expected = cli(binary, lexical)
+    requested = dots / "link" / ".." / "b.ef"
+    reports = (cli(binary, requested), mcp(binary, directory, [{"file": "dots/link/../b.ef"}])[0]["result"]["structuredContent"])
+    for report in reports:
+        assert report == expected, "lexical document identity and analyzed bytes disagree"
+
     original = write(directory, "one.ef", 'import go fmt "fmt"\neffect fn main() -> () { () }')
     replacement = write(directory, "two.ef", 'effect fn main() -> () { run Console.log("x") }')
     link = directory / "selected.ef"
@@ -172,8 +184,16 @@ def identity(binary, directory):
                     process.stdin.write(requests([{"file": changing.name}]))
                     process.stdin.flush()
                 deadline = time.monotonic() + 15
-                children = pathlib.Path(f"/proc/{process.pid}/task/{process.pid}/children")
-                while not children.read_text().strip():
+                def has_children():
+                    for children in pathlib.Path(f"/proc/{process.pid}/task").glob("*/children"):
+                        try:
+                            if children.read_text().strip():
+                                return True
+                        except FileNotFoundError:
+                            pass  # An OS thread may finish while inspecting its child list.
+                    return False
+
+                while not has_children():
                     assert process.poll() is None and time.monotonic() < deadline, "Go import never started"
                     time.sleep(0.001)  # Poll a causal child-start condition, not a correctness delay.
                 new_link = directory / f"replacement-{surface}.ef"

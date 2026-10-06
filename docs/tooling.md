@@ -24,7 +24,7 @@ Compiler errors always fail policy. Strict mode changes only the policy decision
 
 Source identity is the escaped, absolute, lexically normalized requested document path, retained with the analyzed bytes. Symlink targets are not substituted into that URI, and imports use the requested document's directory. A changed disk file does not change the returned snapshot's revision. This is document identity, not a physical-inode or hostile-filesystem guarantee. Linux paths and behavior are tested; native Windows drive/UNC behavior has not been runtime-validated.
 
-Diagnostic text uses one-based UTF-16 line/column locations. JSON LSP ranges are zero-based UTF-16; original compiler spans remain UTF-8 bytes. Source supports LF and CRLF line endings. Standalone raw CR receives EF001 with an LF/CRLF correction; `\r` inside an escaped string remains valid content. Editor-position conversion recognizes CR as a line boundary even when locating that unsupported source byte.
+Diagnostic text uses one-based UTF-16 line/column locations. JSON LSP ranges are zero-based UTF-16; original compiler spans remain UTF-8 bytes. Source supports LF and CRLF line endings. Standalone raw CR outside string literals receives EF001 with an LF/CRLF correction; a raw CR inside a string receives the JSON-escape diagnostic. `\r` inside an escaped string remains valid content. Editor-position conversion recognizes CR as a line boundary even when locating that unsupported source byte.
 
 For unchecked source, the initial diagnostic report omits all lint evaluation, including suppression validation; its unavailable reason is explicit. The legacy `ef lint` surface retains its own suppression-validation behavior. This does not allow any suppression to remove compiler diagnostics.
 

@@ -52,16 +52,20 @@ func loadWithSource(path, target string) (*compiler.Result, compiler.SourceSnaps
 	if filepath.Ext(path) != ".ef" {
 		return nil, compiler.SourceSnapshot{}, fmt.Errorf("source file must have .ef extension")
 	}
-	uri, err := compiler.FileURI(path)
+	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return nil, compiler.SourceSnapshot{}, err
 	}
-	source, err := sourcefile.ReadRegularFile(path, 0)
+	uri, err := compiler.FileURI(absolute)
+	if err != nil {
+		return nil, compiler.SourceSnapshot{}, err
+	}
+	source, err := sourcefile.ReadRegularFile(absolute, 0)
 	if err != nil {
 		return nil, compiler.SourceSnapshot{}, err
 	}
 	snapshot := compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: string(source)}
-	return compiler.CompileAt(snapshot.Text, target, filepath.Dir(path)), snapshot, nil
+	return compiler.CompileAt(snapshot.Text, target, filepath.Dir(absolute)), snapshot, nil
 }
 
 type options struct {
