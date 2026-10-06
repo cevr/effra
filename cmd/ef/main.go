@@ -128,13 +128,14 @@ type options struct {
 	timeoutMillis  int
 	live           bool
 	positional     []string
+	typeSelection  compiler.TypeSelection
 }
 
 func parseOptions(args []string) (options, error) {
 	opts := options{target: "go"}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--target", "-o", "--timeout-ms":
+		case "--target", "-o", "--timeout-ms", "--symbol", "--offset", "--definition", "--revision":
 			if i+1 == len(args) {
 				return opts, fmt.Errorf("%s requires a value", args[i])
 			}
@@ -142,6 +143,18 @@ func parseOptions(args []string) (options, error) {
 			i++
 			if flag == "--target" {
 				opts.target = args[i]
+			} else if flag == "--symbol" {
+				opts.typeSelection.Symbol = args[i]
+			} else if flag == "--definition" {
+				opts.typeSelection.Definition = args[i]
+			} else if flag == "--revision" {
+				opts.typeSelection.ExpectedRevision = args[i]
+			} else if flag == "--offset" {
+				n, err := strconv.Atoi(args[i])
+				if err != nil || n < 0 {
+					return opts, fmt.Errorf("--offset requires a non-negative byte offset")
+				}
+				opts.typeSelection.Offset = &n
 			} else if flag == "--timeout-ms" {
 				n, err := strconv.Atoi(args[i])
 				if err != nil || n <= 0 || n > 3600000 {
@@ -174,6 +187,7 @@ func parseOptions(args []string) (options, error) {
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
 		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] | lsp [--target go|js]")
+		fmt.Println("type: ef type FILE (--symbol NAME | --offset BYTE | --definition TYPE_ID --revision REVISION) [--target go|js] [--json]")
 		return nil
 	}
 	if args[0] == "fmt" {
@@ -209,7 +223,7 @@ func command(args []string) error {
 		return mcp.Serve(root, os.Stdin, os.Stdout)
 	}
 	switch args[0] {
-	case "check", "diagnostics", "lint", "query", "graph", "inspect", "explain", "build", "run", "test":
+	case "check", "diagnostics", "lint", "query", "type", "graph", "inspect", "explain", "build", "run", "test":
 	default:
 		return fmt.Errorf("unknown command %s; use ef --help", args[0])
 	}
@@ -247,8 +261,11 @@ func command(args []string) error {
 			return usage(fmt.Errorf("--strict is only supported by lint"))
 		}
 	}
-	if opts.json && args[0] != "diagnostics" {
+	if opts.json && args[0] != "diagnostics" && args[0] != "type" {
 		return usage(fmt.Errorf("--json is only supported by diagnostics"))
+	}
+	if args[0] != "type" && (opts.typeSelection.Symbol != "" || opts.typeSelection.Offset != nil || opts.typeSelection.Definition != "" || opts.typeSelection.ExpectedRevision != "") {
+		return usage(fmt.Errorf("type selection flags are only supported by type"))
 	}
 	if opts.output != "" && args[0] != "build" {
 		return usage(fmt.Errorf("-o is only supported by build"))
@@ -286,6 +303,12 @@ func command(args []string) error {
 		}
 	}
 	switch args[0] {
+	case "type":
+		response, err := r.SelectType(opts.typeSelection)
+		if err != nil {
+			return err
+		}
+		return printProjectionJSON(response)
 	case "diagnostics":
 		report := r.DiagnosticReport(snapshot, opts.strict)
 		if opts.json {

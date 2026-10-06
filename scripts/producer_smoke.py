@@ -8,6 +8,7 @@ import selectors
 import shutil
 import subprocess
 import tempfile
+import time
 
 root = Path(__file__).resolve().parents[1]
 
@@ -27,27 +28,39 @@ class Server:
     def __init__(self, binary, workspace):
         self.process = subprocess.Popen([str(binary), "mcp", str(workspace)], cwd=root,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE, text=True)
+                                        stderr=subprocess.PIPE, bufsize=0)
         self.index = 0
+        self.stdout_buffer = bytearray()
         self.request("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                                     "clientInfo": {"name": "producer-control", "version": "1"}})
         self.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
     def send(self, message):
-        self.process.stdin.write(json.dumps(message) + "\n")
+        self.process.stdin.write((json.dumps(message) + "\n").encode("utf-8"))
         self.process.stdin.flush()
 
     def request(self, method, params=None):
         self.index += 1
         self.send({"jsonrpc": "2.0", "id": self.index, "method": method, "params": params or {}})
-        with selectors.DefaultSelector() as selector:
-            selector.register(self.process.stdout, selectors.EVENT_READ)
-            assert selector.select(15), "producer control response deadline"
-        line = self.process.stdout.readline()
-        assert line, "server ended before producer response"
-        response = json.loads(line)
+        response = self.receive()
         assert response["id"] == self.index and "error" not in response, response
         return response["result"]
+
+    def receive(self):
+        deadline = time.monotonic() + 15
+        while True:
+            newline = self.stdout_buffer.find(b"\n")
+            if newline >= 0:
+                line = bytes(self.stdout_buffer[:newline])
+                del self.stdout_buffer[:newline + 1]
+                return json.loads(line)
+            with selectors.DefaultSelector() as selector:
+                selector.register(self.process.stdout, selectors.EVENT_READ)
+                remaining = deadline - time.monotonic()
+                assert remaining > 0 and selector.select(remaining), "producer control response deadline"
+            chunk = os.read(self.process.stdout.fileno(), 65536)
+            assert chunk, "server ended before producer response"
+            self.stdout_buffer.extend(chunk)
 
     def tool(self, name, **arguments):
         return self.request("tools/call", {"name": name, "arguments": arguments})
@@ -106,6 +119,12 @@ with tempfile.TemporaryDirectory(prefix="effra-producer-") as temporary:
         assert original_facts["producer"]["strength"] == "executing-artifact"
         key, revision = original_facts["producer"]["qualifier"], original_facts["revision"]
         for target in ("go", "js"):
+            selected = facts(old, "code.type", target=target, symbol="main",
+                             expectedRevision=revision, expectedProducer=key)
+            assert selected["producer"] == original_facts["producer"]
+            assert selected["snapshot"] == {"schemaVersion": selected["schemaVersion"],
+                                              "revision": revision, "target": target,
+                                              "producer": key, "reuseScope": "artifact"}
             for name, args in [("project.check", {}), ("code.inspect", {"symbol": "main"}),
                                ("code.typeAt", {"offset": source.index('"ok"')}),
                                ("project.graph", {}), ("project.diagnostics", {}), ("project.lint", {})]:
@@ -121,12 +140,16 @@ with tempfile.TemporaryDirectory(prefix="effra-producer-") as temporary:
             # adapter parity must follow content identity, not process ID.
             for command, args in [("check", []), ("inspect", ["main"]),
                                   ("query", [str(source.index('"ok"'))]),
+                                  ("type", ["--symbol", "main"]),
                                   ("graph", []), ("diagnostics", ["--json"]), ("lint", [])]:
                 encoded = run(str(first), command, str(file), *args, "--target", target)
                 cli = json.loads(encoded)
                 assert cli["producer"] == original_facts["producer"] and cli["snapshot"]["producer"] == key
                 if command == "graph":
                     assert cli["typeProjectionUsage"]["responseBytes"] == len(encoded.rstrip("\n").encode("utf-8"))
+                if command == "type":
+                    assert cli["snapshot"] == selected["snapshot"]
+                    assert cli["querySchemaVersion"] == selected["querySchemaVersion"] == 1
         profile_source = '''import Fns "effra/functions"
 error MissingProfile
 service Profiles { effect fn name(id: string) -> string raises {MissingProfile} }
@@ -154,6 +177,22 @@ effect fn greeting(id: string) -> string raises {MissingProfile} uses {Profiles}
             assert current["revision"] == revision
             assert current["producer"]["declaration"] == original_facts["producer"]["declaration"]
             assert current["producerIdentity"] == original_facts["producerIdentity"]
+            queued = []
+            for target in ("go", "js"):
+                stale_id, ping_id = fresh.index + 1, fresh.index + 2
+                fresh.index = ping_id
+                fresh.send({"jsonrpc": "2.0", "id": stale_id, "method": "tools/call",
+                            "params": {"name": "code.type", "arguments": {
+                                "file": "main.ef", "target": target, "symbol": "main",
+                                "expectedRevision": current["revision"], "expectedProducer": key}}})
+                fresh.send({"jsonrpc": "2.0", "id": ping_id, "method": "ping"})
+                queued.extend((stale_id, ping_id))
+            responses = {response["id"]: response for response in
+                         (fresh.receive(), fresh.receive(), fresh.receive(), fresh.receive())}
+            for stale_id, ping_id in zip(queued[::2], queued[1::2]):
+                refusal = responses[stale_id]["result"]
+                assert refusal["isError"] and "stale producer" in refusal["content"][0]["text"]
+                assert responses[ping_id]["result"] == {}
             rejected = fresh.tool("code.typeAt", file="main.ef", offset=source.index('"ok"'),
                                   expectedRevision=revision, expectedProducer=key)
             assert rejected["isError"] and "stale producer" in rejected["content"][0]["text"]

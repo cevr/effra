@@ -50,7 +50,7 @@ The same once-computed producer identity qualifies formatter results and custom-
 
 Expose a focused `ef type FILE` query with an explicit symbol or byte offset, and the equivalent MCP `code.type`; retain existing `code.typeAt` behavior for compatibility. Full inspect output shares these definitions. Allow a named type-definition query by revision-scoped identity, so a consumer can expand a reference without fetching an entire project. Specify finite node/edge/byte budgets and clear exhaustion behavior. Do not cap fields while describing the omitted part as complete. Include deterministic ordering and an additive/versioned wire migration.
 
-### Implemented producer qualification checkpoint
+### Implemented producer-qualified semantic and selected-type queries
 
 Semantic CLI/MCP reports add `producer` and `snapshot` metadata without changing
 source/import `revision` or canonical reference IDs. `producerIdentity` remains
@@ -84,12 +84,38 @@ references or new navigation capabilities.
 
 The digest identifies the statically linked executing host, not authenticated
 build provenance, arbitrary dynamic dependencies or in-place executable writes.
-This checkpoint does not implement lexical declaration/type-definition queries,
-custom rule packs or full LSP. Real atomic replacement/fresh-process controls,
-different dirty hosts with identical informative declarations, explicit failure
-fallback and a separate controlled-opener single-acquisition test are required.
+Real atomic replacement/fresh-process controls, different dirty hosts with
+identical informative declarations, explicit failure fallback, and a separate
+controlled-opener single-acquisition test are retained producer controls.
 Producer hashing cost measurement remains deferred; no performance claim follows
-from these correctness controls.
+from these correctness checks.
+
+The selected-type adapters add `ef type FILE --symbol NAME`, `--offset BYTE`,
+or `--definition TYPE_ID --revision REVISION`; `--target go|js` is supported.
+MCP `code.type` accepts exactly one `symbol`, `offset`, or `definition`; a
+definition requires `expectedRevision`. `expectedProducer` is an independent
+optional guard, including when `expectedRevision` is supplied. Named selection
+returns the existing function or nominal declaration contract. Byte offsets
+select original declaration/name tokens, actual checked lexical uses, or
+retained checked expression extents. Local shadowing and provider receivers
+resolve through checker binding identities. Shorthand fields retain their name
+token extent, and Fiber operation receivers use the same observed local-read
+owner as other checked uses. The query adds `querySchemaVersion: 1` beside the
+shared semantic schema and producer-qualified snapshot; the existing
+`ef query`/`code.typeAt` diagnostic-anchor behavior remains unchanged.
+
+Selected responses contain only the reachable canonical type/row closure and
+refuse incomplete publication under the existing node, edge, row, string,
+compatibility and encoded-response budgets. `locationAvailable` distinguishes
+retained current-file syntax from imported or otherwise unavailable locations.
+Original syntax facts are captured before checker lowering, retain separate
+diagnostic anchors and ordered pattern aliases, and stop at their bounded
+100,000-fact cap without retaining refused IDs. Revision-bound definition
+selection expands a canonical reference without fetching a whole project. The
+response's producer metadata qualifies this lookup by the actual executing
+artifact (or explicit process fallback), independently of private ABI identity.
+Custom rule packs, full LSP navigation and comprehensive binding-consumer
+migration remain separate unfinished units.
 
 ## LSP adapter
 
