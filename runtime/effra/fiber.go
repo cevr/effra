@@ -65,7 +65,7 @@ func Fork[A any](program Effect[A]) Effect[*Fiber[A]] {
 			owner.mu.Unlock()
 			return Die[*Fiber[A]](fmt.Errorf("scope is closing"))
 		}
-		f := &Fiber[A]{owner: owner, scope: newScope(fc.ctx, owner), done: make(chan struct{})}
+		f := &Fiber[A]{owner: owner, scope: newScopeWithDriver(fc.ctx, owner, fc.timerDriver()), done: make(chan struct{})}
 		owner.children = append(owner.children, f)
 		owner.mu.Unlock()
 		go func() { f.exit = runScope(f.scope, program); close(f.done) }()

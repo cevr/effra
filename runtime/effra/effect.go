@@ -3,6 +3,7 @@ package effra
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -101,13 +102,36 @@ func withCleanup[A any](exit Exit[A], cleanup Cause) Exit[A] {
 
 type Effect[A any] func(*FiberContext) Exit[A]
 type FiberContext struct {
-	ctx   context.Context
-	scope *Scope
+	ctx    context.Context
+	scope  *Scope
+	driver timerDriver
 }
 
 func (f *FiberContext) Context() context.Context { return f.ctx }
 func (f *FiberContext) Scope() *Scope            { return f.scope }
 func (f *FiberContext) Checkpoint() error        { return f.ctx.Err() }
+func (f *FiberContext) timerDriver() timerDriver {
+	if f.driver != nil {
+		return f.driver
+	}
+	if f.scope != nil && f.scope.driver != nil {
+		return f.scope.driver
+	}
+	return liveTimerDriver{}
+}
+
+// UseTestScheduler installs an explicit virtual timer driver for the current
+// execution boundary and returns a restoration function for the provider
+// boundary that installed it.
+func (f *FiberContext) UseTestScheduler(scheduler *TestScheduler) func() {
+	previous := f.driver
+	if scheduler == nil {
+		f.driver = liveTimerDriver{}
+	} else {
+		f.driver = scheduler
+	}
+	return func() { f.driver = previous }
+}
 func Invoke[A any](f *FiberContext, program Effect[A]) (exit Exit[A]) {
 	defer func() {
 		if panicValue := recover(); panicValue != nil {
@@ -124,15 +148,27 @@ func Invoke[A any](f *FiberContext, program Effect[A]) (exit Exit[A]) {
 	return exit
 }
 func runScope[A any](scope *Scope, program Effect[A]) Exit[A] {
-	fc := &FiberContext{scope.ctx, scope}
+	fc := &FiberContext{ctx: scope.ctx, scope: scope, driver: scope.driver}
 	return withCleanup(Invoke(fc, program), scope.Close())
 }
 func Run[A any](program Effect[A]) Exit[A] { return RunContext(context.Background(), program) }
 func RunContext[A any](ctx context.Context, program Effect[A]) Exit[A] {
 	return runScope(newScope(ctx, nil), program)
 }
+
+// RunContextWithScheduler executes a program with a fresh owner using the
+// supplied virtual timer driver. The driver is inherited by nested scopes and
+// owned fibers, so Sleep and Timeout share the same logical time.
+func RunContextWithScheduler[A any](ctx context.Context, scheduler *TestScheduler, program Effect[A]) Exit[A] {
+	if scheduler == nil {
+		return Die[A](errors.New("nil test scheduler"))
+	}
+	return runScope(newScopeWithDriver(ctx, nil, scheduler), program)
+}
 func Scoped[A any](program Effect[A]) Effect[A] {
-	return func(fc *FiberContext) Exit[A] { return runScope(newScope(fc.ctx, fc.scope), program) }
+	return func(fc *FiberContext) Exit[A] {
+		return runScope(newScopeWithDriver(fc.ctx, fc.scope, fc.timerDriver()), program)
+	}
 }
 func Catch[A any](program Effect[A], tag string, fallback func() A) Effect[A] {
 	return func(fc *FiberContext) Exit[A] {
@@ -145,13 +181,14 @@ func Catch[A any](program Effect[A], tag string, fallback func() A) Effect[A] {
 }
 func Sleep(milliseconds int64) Effect[Unit] {
 	return func(fc *FiberContext) Exit[Unit] {
-		if milliseconds < 0 || milliseconds > 2147483647 {
+		if milliseconds < 0 || milliseconds > maxMilliseconds {
 			return Die[Unit](fmt.Errorf("invalid millisecond duration"))
 		}
-		timer := time.NewTimer(time.Duration(milliseconds) * time.Millisecond)
+		timer := fc.timerDriver().newTimer(time.Duration(milliseconds) * time.Millisecond)
 		defer timer.Stop()
 		select {
-		case <-timer.C:
+		case <-timer.C():
+			timer.acknowledge()
 			return Succeed(Unit{})
 		case <-fc.ctx.Done():
 			return Interrupt[Unit](fc.ctx.Err())
@@ -160,21 +197,43 @@ func Sleep(milliseconds int64) Effect[Unit] {
 }
 func Timeout[A any](program Effect[A], milliseconds int64) Effect[A] {
 	return func(fc *FiberContext) Exit[A] {
-		if milliseconds < 0 || milliseconds > 2147483647 {
+		if milliseconds < 0 || milliseconds > maxMilliseconds {
 			return Die[A](fmt.Errorf("invalid millisecond duration"))
 		}
-		ctx, cancel := context.WithTimeout(fc.ctx, time.Duration(milliseconds)*time.Millisecond)
+		driver := fc.timerDriver()
+		timer := driver.newTimer(time.Duration(milliseconds) * time.Millisecond)
+		defer timer.Stop()
+		ctx, cancel := context.WithCancel(fc.ctx)
 		defer cancel()
-		out := runScope(newScope(ctx, fc.scope), program)
-		if ctx.Err() == context.DeadlineExceeded {
+		childScope := newScopeWithDriver(ctx, fc.scope, driver)
+		childDone := make(chan Exit[A], 1)
+		go func() { childDone <- runScope(childScope, program) }()
+		select {
+		case out := <-childDone:
+			return out
+		case <-timer.C():
+			timer.acknowledge()
+			cancel()
+			childScope.cancel()
+			out := <-childDone
 			retained := Cause{}
 			for _, reason := range out.Cause() {
 				if reason.Kind != "interrupt" {
 					retained = append(retained, reason)
 				}
 			}
-			return FromCause[A](append(Cause{{Kind: "failure", Failure: &Failure{Tag: "Timeout", Payload: ctx.Err()}}}, retained...))
+			return FromCause[A](append(Cause{{Kind: "failure", Failure: &Failure{Tag: "Timeout", Payload: context.DeadlineExceeded}}}, retained...))
+		case <-fc.ctx.Done():
+			cancel()
+			childScope.cancel()
+			out := <-childDone
+			retained := Cause{}
+			for _, reason := range out.Cause() {
+				if reason.Kind != "interrupt" {
+					retained = append(retained, reason)
+				}
+			}
+			return FromCause[A](append(Cause{{Kind: "interrupt", Err: fc.ctx.Err()}}, retained...))
 		}
-		return out
 	}
 }

@@ -33,6 +33,7 @@ type Scope struct {
 	done         chan struct{}
 	hooksDone    chan struct{}
 	outcome      Cause
+	driver       timerDriver
 }
 type resource struct {
 	name    string
@@ -40,8 +41,18 @@ type resource struct {
 }
 
 func newScope(ctx context.Context, parent *Scope) *Scope {
+	driver := timerDriver(liveTimerDriver{})
+	if parent != nil && parent.driver != nil {
+		driver = parent.driver
+	}
+	return newScopeWithDriver(ctx, parent, driver)
+}
+func newScopeWithDriver(ctx context.Context, parent *Scope, driver timerDriver) *Scope {
+	if driver == nil {
+		driver = liveTimerDriver{}
+	}
 	ctx, cancel := context.WithCancel(ctx)
-	s := &Scope{id: scopeIDs.Add(1), state: Open, ctx: ctx, cancel: cancel, parent: parent, done: make(chan struct{}), hooksDone: make(chan struct{})}
+	s := &Scope{id: scopeIDs.Add(1), state: Open, ctx: ctx, cancel: cancel, parent: parent, driver: driver, done: make(chan struct{}), hooksDone: make(chan struct{})}
 	context.AfterFunc(ctx, func() {
 		s.mu.Lock()
 		hooks := append([]func() error{}, s.hooks...)
