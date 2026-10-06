@@ -437,9 +437,25 @@ func remainderExclusionsForFacts(facts []OwnershipFact) string {
 }
 
 // ownershipFactMayOwnPath reports whether one fact can still account for an
-// owned value at path. A complete borrowed fact is proof that the path is
-// foreign; every other status remains possible evidence unless a remainder
-// explicitly excludes that path.
+// owned value at path. A complete borrowed fact from a parameter is still a
+// deferred source relation: the caller may instantiate that parameter with an
+// owned value. Only a complete borrowed fact whose owner is already resolved
+// outside a parameter can prove that the path is foreign; every other status
+// remains possible evidence unless a remainder explicitly excludes that path.
+func borrowedFactHasDeferredSource(fact OwnershipFact) bool {
+	return fact.Status == "borrowed" && !fact.potentialOwner && !fact.remainder && strings.HasPrefix(fact.Region, "parameter:")
+}
+
+func completeBorrowedCoverage(fact OwnershipFact) bool {
+	// A wildcard is complete only when its constructor proved that every
+	// descendant shares the same borrowed provenance. An arbitrary wildcard is
+	// already bounded uncertainty and must remain possible ownership.
+	if fact.Status != "borrowed" || fact.potentialOwner || fact.remainder {
+		return false
+	}
+	return !isWildcardPath(fact.Path) || fact.Origin == "bounded-all-borrowed"
+}
+
 func ownershipFactMayOwnPath(fact OwnershipFact, path string) bool {
 	if isWildcardPath(fact.Path) {
 		base, _ := wildcardPathPrefix(fact.Path)
@@ -452,7 +468,7 @@ func ownershipFactMayOwnPath(fact OwnershipFact, path string) bool {
 	if fact.remainder && remainderExcludes(fact, path) {
 		return false
 	}
-	if fact.Status == "borrowed" && !fact.potentialOwner && !fact.remainder {
+	if completeBorrowedCoverage(fact) && !borrowedFactHasDeferredSource(fact) {
 		return false
 	}
 	return true
@@ -510,7 +526,7 @@ func ownershipFactMayOwnTarget(fact OwnershipFact, target string) bool {
 	if fact.remainder && remainderExcludesWildcardIntersection(fact, target) {
 		return false
 	}
-	if fact.Status == "borrowed" && !fact.potentialOwner && !fact.remainder {
+	if completeBorrowedCoverage(fact) && !borrowedFactHasDeferredSource(fact) {
 		return false
 	}
 	return true
@@ -808,6 +824,20 @@ func ownershipPathMatches(argumentPath, sourcePath string) bool {
 	return false
 }
 
+func preservesCompleteWildcardArgument(summary, argument OwnershipFact) bool {
+	// A parameter-relative wildcard can preserve its complete argument evidence
+	// through a helper boundary. The returned path may be nested, so only the
+	// source and both complete wildcard proofs determine whether this is safe.
+	if !isWildcardPath(summary.Path) || summary.potentialOwner || summary.remainder ||
+		summary.remainderExclusions != "" || !summary.sourceSet || summary.source != "*" ||
+		argument.Path != "*" || argument.potentialOwner || argument.remainder ||
+		argument.remainderExclusions != "" {
+		return false
+	}
+	return (argument.Status == "owned" && argument.Origin == "bounded-all-owned") ||
+		(argument.Status == "borrowed" && argument.Origin == "bounded-all-borrowed")
+}
+
 func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) []OwnershipFact {
 	if len(facts) == 0 {
 		return nil
@@ -838,14 +868,15 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 				copy.potentialOwner = copy.potentialOwner || fact.potentialOwner
 				copy.remainder = fact.remainder
 				copy.remainderExclusions = fact.remainderExclusions
+				preserveWildcard := preservesCompleteWildcardArgument(fact, argument)
 				if isWildcardPath(fact.source) || isWildcardPath(argument.Path) {
 					// A wildcard source or argument is evidence about an
-					// unspecified descendant. Preserve a whole-value owned
-					// wildcard, but do not turn an ambiguous projected field into
-					// a certain owned fact.
+					// unspecified descendant. Preserve complete whole-value
+					// wildcard evidence, but do not turn an ambiguous projected
+					// field into a certain owned fact.
 					if parameterSourceTop(fact) {
 						copy.Origin = "conditional"
-					} else if !(fact.Path == "*" && fact.sourceSet && fact.source == "*" && argument.Path == "*" && argument.Status == "owned" && argument.Origin == "bounded-all-owned") {
+					} else if !preserveWildcard {
 						copy.Status = "unknown"
 						copy.Origin = "bounded"
 						copy.potentialOwner = true
@@ -861,8 +892,8 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 				// returned shape before this call boundary.
 				copy.Path = fact.Path
 				copy.Origin = "helper"
-				if argument.Path == "*" && argument.Status == "owned" && argument.Origin == "bounded-all-owned" {
-					copy.Origin = "bounded-all-owned"
+				if preserveWildcard {
+					copy.Origin = argument.Origin
 				}
 				out = append(out, copy)
 			}
@@ -1282,12 +1313,24 @@ func boundedBorrowedWithPotential(facts []OwnershipFact, incomplete map[string]b
 			ownedCoverage = append(ownedCoverage, fact)
 		}
 	}
-	if len(ownedCoverage) >= maxFacts {
+	// Parameter-relative borrowed facts are deferred source relations, not
+	// proof of foreign ownership. Keep complete relations in the bounded
+	// representation before ordinary borrowed terminals so substitution can
+	// still inspect the caller's ownership evidence.
+	deferredCoverage := make([]OwnershipFact, 0)
+	for _, fact := range facts {
+		if !borrowedFactHasDeferredSource(fact) || !completeBorrowedCoverage(fact) {
+			continue
+		}
+		deferredCoverage = append(deferredCoverage, fact)
+	}
+	retained := append(append([]OwnershipFact{}, ownedCoverage...), deferredCoverage...)
+	if len(retained) >= maxFacts {
 		return []OwnershipFact{{Path: "*", Status: "unknown", Origin: "bounded", potentialOwner: true}}
 	}
 	candidates := make([]OwnershipFact, 0, len(facts))
 	for _, fact := range facts {
-		if fact.Status != "borrowed" || fact.potentialOwner || incomplete[fact.Path] {
+		if fact.Status != "borrowed" || fact.potentialOwner || incomplete[fact.Path] || slices.Contains(retained, fact) {
 			continue
 		}
 		candidates = append(candidates, fact)
@@ -1298,14 +1341,14 @@ func boundedBorrowedWithPotential(facts []OwnershipFact, incomplete map[string]b
 		}
 		return strings.Compare(a.Path, b.Path)
 	})
-	available := maxFacts - len(ownedCoverage) - 1
+	available := maxFacts - len(retained) - 1
 	if available < 0 {
 		available = 0
 	}
 	if len(candidates) > available {
 		candidates = candidates[:available]
 	}
-	bounded := append(append([]OwnershipFact{}, ownedCoverage...), candidates...)
+	bounded := append(append([]OwnershipFact{}, retained...), candidates...)
 	bounded = append(bounded, OwnershipFact{
 		Path:                "*",
 		Status:              "unknown",
@@ -1579,6 +1622,14 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 				candidates = append(candidates, fact)
 			}
 			slices.SortStableFunc(candidates, func(a, b OwnershipFact) int {
+				aDeferred := borrowedFactHasDeferredSource(a)
+				bDeferred := borrowedFactHasDeferredSource(b)
+				if aDeferred != bDeferred {
+					if aDeferred {
+						return -1
+					}
+					return 1
+				}
 				aCovered := ownershipPathCoveredByIncomplete(a.Path, incomplete)
 				bCovered := ownershipPathCoveredByIncomplete(b.Path, incomplete)
 				if aCovered != bCovered {
