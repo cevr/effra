@@ -26,14 +26,54 @@ type token struct {
 }
 type syntaxFault struct{ diagnostic Diagnostic }
 type parser struct {
-	tokens []token
-	at     int
-	depth  int
+	tokens      []token
+	at          int
+	depth       int
+	noConstruct int
 }
 type Param struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
 	Span Span   `json:"span"`
+}
+
+// Field is a nominal declaration field. Type is kept as source text for
+// compatibility with the original prototype; the checker resolves it to a
+// canonical TypeRef before admitting the declaration.
+type Field struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Span Span   `json:"span"`
+}
+type Variant struct {
+	Name   string  `json:"name"`
+	Fields []Field `json:"fields,omitempty"`
+	Span   Span    `json:"span"`
+}
+type Record struct {
+	Name   string  `json:"name"`
+	Fields []Field `json:"fields,omitempty"`
+	Span   Span    `json:"span"`
+}
+type Enum struct {
+	Name     string    `json:"name"`
+	Variants []Variant `json:"variants"`
+	Span     Span      `json:"span"`
+}
+type ErrorDecl struct {
+	Name   string  `json:"name"`
+	Fields []Field `json:"fields,omitempty"`
+	Span   Span    `json:"span"`
+}
+
+// Declaration is the stable inspection projection for nominal application
+// data. It deliberately contains no target-specific lowering details.
+type Declaration struct {
+	Kind     string    `json:"kind"`
+	Name     string    `json:"name"`
+	Fields   []Field   `json:"fields,omitempty"`
+	Variants []Variant `json:"variants,omitempty"`
+	Span     Span      `json:"span"`
 }
 type Function struct {
 	Name     string
@@ -63,28 +103,50 @@ type Program struct {
 	UsedImports map[string]bool
 	GoOnly      bool
 	Errors      map[string]Span
+	ErrorDecls  []*ErrorDecl
+	Records     []*Record
+	Enums       []*Enum
 	Services    []*Service
 	Providers   []*Provider
 	Functions   []*Function
 }
 type Block struct{ Statements []*Statement }
 type Statement struct {
-	Kind  string
+	Kind    string
+	Name    string
+	Value   *Expr
+	Payload *Expr
+	Span    Span
+}
+type FieldValue struct {
 	Name  string
 	Value *Expr
 	Span  Span
 }
+type MatchPattern struct {
+	TypeName    string
+	VariantName string
+	Bindings    map[string]string
+	Span        Span
+}
+type MatchArm struct {
+	Pattern *MatchPattern
+	Body    *Block
+	Span    Span
+}
 type Expr struct {
-	Kind  string
-	Name  string
-	Text  string
-	Args  []*Expr
-	Left  *Expr
-	Right *Expr
-	Then  *Block
-	Else  *Block
-	Span  Span
-	Type  ValueType
+	Kind   string
+	Name   string
+	Text   string
+	Args   []*Expr
+	Left   *Expr
+	Right  *Expr
+	Then   *Block
+	Else   *Block
+	Fields []FieldValue
+	Arms   []*MatchArm
+	Span   Span
+	Type   ValueType
 }
 
 func lex(source string) ([]token, []Diagnostic) {
@@ -147,7 +209,7 @@ func lex(source string) ([]token, []Diagnostic) {
 			if err := json.Unmarshal([]byte(source[start:i]), &decoded); err != nil {
 				return nil, []Diagnostic{{"EF001", "strings use JSON escapes", Span{start, i - start, l, c}}}
 			}
-		} else if i+1 < len(source) && (source[i:i+2] == "->" || source[i:i+2] == "==") {
+		} else if i+1 < len(source) && (source[i:i+2] == "->" || source[i:i+2] == "==" || source[i:i+2] == "=>") {
 			i += 2
 		} else if strings.ContainsRune("{}():,;.+<>=", rune(ch)) {
 			i++
@@ -198,6 +260,45 @@ func parse(source string) (program *Program, diagnostics []Diagnostic) {
 				p.fail(name, "duplicate error "+name.text)
 			}
 			program.Errors[name.text] = name.span
+			decl := &ErrorDecl{Name: name.text, Span: name.span}
+			if p.peek().text == "{" {
+				decl.Fields = p.fields()
+			}
+			program.ErrorDecls = append(program.ErrorDecls, decl)
+			p.accept(";")
+		case "record", "struct":
+			p.take()
+			name := p.name()
+			program.Records = append(program.Records, &Record{Name: name.text, Fields: p.fields(), Span: name.span})
+			p.accept(";")
+		case "enum":
+			p.take()
+			name := p.name()
+			p.expect("{")
+			e := &Enum{Name: name.text, Span: name.span}
+			for !p.accept("}") {
+				variantName := p.name()
+				variant := Variant{Name: variantName.text, Span: variantName.span}
+				// A payload may be written with named fields in braces. Parenthesized
+				// fields are accepted as a compact spelling for the same declaration.
+				if p.peek().text == "{" {
+					variant.Fields = p.fields()
+				} else if p.accept("(") {
+					for !p.accept(")") {
+						field := p.name()
+						p.expect(":")
+						variant.Fields = append(variant.Fields, Field{Name: field.text, Type: p.typ(), Span: field.span})
+						if !p.accept(",") {
+							p.expect(")")
+							break
+						}
+					}
+				}
+				e.Variants = append(e.Variants, variant)
+				p.accept(",")
+				p.accept(";")
+			}
+			program.Enums = append(program.Enums, e)
 			p.accept(";")
 		case "service":
 			p.take()
@@ -226,7 +327,7 @@ func parse(source string) (program *Program, diagnostics []Diagnostic) {
 		case "effect", "fn":
 			program.Functions = append(program.Functions, p.function(true))
 		default:
-			p.fail(p.peek(), "expected error, service, impl, or function declaration")
+			p.fail(p.peek(), "expected error, record, enum, service, impl, or function declaration")
 		}
 	}
 	return program, nil
@@ -269,6 +370,46 @@ func (p *parser) typ() string {
 		return "()"
 	}
 	return p.name().text
+}
+func (p *parser) fields() []Field {
+	p.expect("{")
+	var fields []Field
+	for !p.accept("}") {
+		name := p.name()
+		p.expect(":")
+		fields = append(fields, Field{Name: name.text, Type: p.typ(), Span: name.span})
+		if !p.accept(",") && !p.accept(";") {
+			if p.peek().text != "}" {
+				continue
+			}
+			p.expect("}")
+			break
+		}
+	}
+	return fields
+}
+func (p *parser) fieldValues() []FieldValue {
+	p.expect("{")
+	var fields []FieldValue
+	for !p.accept("}") {
+		name := p.name()
+		var value *Expr
+		if p.accept(":") {
+			value = p.expr(0)
+		} else {
+			// Record construction permits shorthand `{name}` for `{name: name}`.
+			value = &Expr{Kind: "name", Name: name.text, Span: name.span}
+		}
+		fields = append(fields, FieldValue{Name: name.text, Value: value, Span: name.span})
+		if !p.accept(",") && !p.accept(";") {
+			if p.peek().text != "}" {
+				continue
+			}
+			p.expect("}")
+			break
+		}
+	}
+	return fields
 }
 func (p *parser) row() []string {
 	p.expect("{")
@@ -331,6 +472,15 @@ func (p *parser) block() *Block {
 		} else if p.accept("fail") {
 			s.Kind = "fail"
 			s.Name = p.name().text
+			if p.peek().text == "(" {
+				p.take()
+				if !p.accept(")") {
+					s.Payload = p.expr(0)
+					p.expect(")")
+				}
+			} else if p.peek().text == "{" {
+				s.Payload = &Expr{Kind: "payload", Fields: p.fieldValues(), Span: start.span}
+			}
 		} else {
 			s.Kind = "expr"
 			s.Value = p.expr(0)
@@ -363,10 +513,45 @@ func (p *parser) expr(min int) *Expr {
 		e.Left = p.expr(3)
 	case start.text == "if":
 		e.Kind = "if"
+		p.noConstruct++
 		e.Left = p.expr(0)
+		p.noConstruct--
 		e.Then = p.block()
 		p.expect("else")
 		e.Else = p.block()
+	case start.text == "match":
+		e.Kind = "match"
+		p.noConstruct++
+		e.Left = p.expr(0)
+		p.noConstruct--
+		p.expect("{")
+		for !p.accept("}") {
+			pattern := p.pattern()
+			p.expect("=>")
+			var body *Block
+			if p.peek().text == "fail" {
+				start := p.take()
+				statement := &Statement{Kind: "fail", Name: p.name().text, Span: start.span}
+				if p.peek().text == "(" {
+					p.take()
+					if !p.accept(")") {
+						statement.Payload = p.expr(0)
+						p.expect(")")
+					}
+				} else if p.peek().text == "{" {
+					statement.Payload = &Expr{Kind: "payload", Fields: p.fieldValues(), Span: start.span}
+				}
+				body = &Block{Statements: []*Statement{statement}}
+			} else if p.peek().text == "{" {
+				body = p.block()
+			} else {
+				value := p.expr(0)
+				body = &Block{Statements: []*Statement{{Kind: "expr", Value: value, Span: value.Span}}}
+			}
+			e.Arms = append(e.Arms, &MatchArm{Pattern: pattern, Body: body, Span: pattern.Span})
+			p.accept(",")
+			p.accept(";")
+		}
 	case start.kind == "string":
 		e.Kind = "string"
 		_ = json.Unmarshal([]byte(start.text), &e.Text)
@@ -387,6 +572,10 @@ func (p *parser) expr(min int) *Expr {
 		p.fail(start, "expected expression")
 	}
 	for {
+		if p.noConstruct == 0 && p.peek().text == "{" && (e.Kind == "name" || e.Kind == "member") {
+			e = &Expr{Kind: "construct", Left: e, Fields: p.fieldValues(), Span: e.Span}
+			continue
+		}
 		if p.peek().text == "(" {
 			if e.Kind != "name" && e.Kind != "member" {
 				p.fail(p.peek(), "only named functions and service methods are callable")
@@ -394,7 +583,15 @@ func (p *parser) expr(min int) *Expr {
 			p.take()
 			call := &Expr{Kind: "call", Left: e, Span: e.Span}
 			for !p.accept(")") {
-				call.Args = append(call.Args, p.expr(0))
+				if p.peek().kind == "name" && p.at+1 < len(p.tokens) && p.tokens[p.at+1].text == ":" {
+					field := p.name()
+					p.expect(":")
+					value := p.expr(0)
+					call.Fields = append(call.Fields, FieldValue{Name: field.text, Value: value, Span: field.span})
+					call.Args = append(call.Args, value)
+				} else {
+					call.Args = append(call.Args, p.expr(0))
+				}
 				if !p.accept(",") {
 					p.expect(")")
 					break
@@ -441,4 +638,29 @@ func (p *parser) expr(min int) *Expr {
 		e = &Expr{Kind: "binary", Name: op.text, Left: e, Right: p.expr(precedence + 1), Span: op.span}
 	}
 	return e
+}
+
+func (p *parser) pattern() *MatchPattern {
+	first := p.name()
+	pattern := &MatchPattern{TypeName: first.text, Bindings: map[string]string{}, Span: first.span}
+	if p.accept(".") {
+		variant := p.name()
+		pattern.VariantName = variant.text
+		pattern.Span.Length = variant.span.Offset + variant.span.Length - pattern.Span.Offset
+	}
+	if p.accept("{") {
+		for !p.accept("}") {
+			field := p.name()
+			binding := field.text
+			if p.accept(":") {
+				binding = p.name().text
+			}
+			pattern.Bindings[field.text] = binding
+			if !p.accept(",") && !p.accept(";") {
+				p.expect("}")
+				break
+			}
+		}
+	}
+	return pattern
 }
