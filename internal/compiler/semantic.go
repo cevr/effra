@@ -107,6 +107,15 @@ func contract(f *Function) ValueType {
 	v.Services = normalized(f.Services)
 	return v
 }
+func providerContract(p *Provider) ValueType {
+	return ValueType{
+		Success:  "provider:" + p.Service,
+		Type:     typeRef("provider:" + p.Service),
+		Effect:   true,
+		Errors:   []string{},
+		Services: normalized(p.Services),
+	}
+}
 func normalized(names []string) []string {
 	out := append([]string{}, names...)
 	slices.Sort(out)
@@ -291,6 +300,7 @@ func (c *checker) check() {
 			c.diagnostic("EF102", "unknown service "+p.Service, p.Span)
 			continue
 		}
+		c.providerSignature(p)
 		methods := map[string]*Function{}
 		for _, f := range p.Methods {
 			if methods[f.Name] != nil {
@@ -298,10 +308,12 @@ func (c *checker) check() {
 			}
 			methods[f.Name] = f
 			c.signature(f)
-			c.function(f, false)
-			if len(f.Services) > 0 {
-				c.diagnostic("EF103", "providers must be self-contained in this prototype", f.Span)
+			for _, required := range normalized(f.Services) {
+				if !slices.Contains(normalized(p.Services), required) {
+					c.diagnostic("EF103", "provider method "+p.Name+"."+f.Name+" captures undeclared service "+required, f.Span)
+				}
 			}
+			c.providerFunction(p, f)
 		}
 		for _, want := range s.Methods {
 			got := methods[want.Name]
@@ -333,6 +345,38 @@ func (c *checker) check() {
 		c.function(f, true)
 	}
 	c.validateJSDeclarationNames()
+}
+
+// providerSignature checks the explicit constructor boundary. Constructor
+// parameters are ordinary values; captured services are checked as a distinct
+// requirement row and never inferred from an ambient context.
+func (c *checker) providerSignature(p *Provider) {
+	names := map[string]bool{}
+	for i := range p.Params {
+		param := &p.Params[i]
+		if !c.typeKnown(param.Type) {
+			c.diagnostic("EF102", "unknown or unsupported provider configuration type "+param.Type, param.Span)
+		}
+		param.TypeRef = c.typeRef(param.Type)
+		if names[param.Name] {
+			c.diagnostic("EF101", "duplicate provider configuration parameter "+param.Name, param.Span)
+		}
+		names[param.Name] = true
+	}
+	for _, name := range normalized(p.Services) {
+		if _, exists := c.services[name]; !exists {
+			c.diagnostic("EF102", "unknown service "+name, p.Span)
+		}
+	}
+}
+
+// providerFunction checks a method with the constructor's captured
+// requirements in scope. A method may repeat a captured requirement with
+// `uses { ... }` for local clarity, but it can never widen the constructor's
+// row. The service operation contract remains the service declaration's
+// contract, which has no captured construction row.
+func (c *checker) providerFunction(p *Provider, f *Function) {
+	c.functionWithLocals(f, false, p.Params, p.Services)
 }
 
 func (c *checker) validateJSDeclarationNames() {
@@ -521,7 +565,14 @@ func (c *checker) validateDataLayouts() {
 	}
 }
 func (c *checker) function(f *Function, record bool) {
+	c.functionWithLocals(f, record, nil, f.Services)
+}
+
+func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, allowedServices []string) {
 	env := map[string]ValueType{}
+	for _, p := range locals {
+		env[p.Name] = value(p.Type)
+	}
 	for _, p := range f.Params {
 		env[p.Name] = value(p.Type)
 	}
@@ -533,7 +584,7 @@ func (c *checker) function(f *Function, record bool) {
 	if missing := difference(actual.Errors, f.Errors); len(missing) > 0 {
 		c.diagnostic("EF107", "undeclared failures: "+strings.Join(missing, ", "), f.Span)
 	}
-	if missing := difference(actual.Services, f.Services); len(missing) > 0 {
+	if missing := difference(actual.Services, allowedServices); len(missing) > 0 {
 		c.diagnostic("EF108", "missing service requirements: "+strings.Join(missing, ", "), f.Span)
 	}
 	actual.Effect = f.Effect
@@ -721,6 +772,11 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			t = v
 			e.Text = "local"
 		} else if p, exists := c.providers[e.Name]; exists {
+			if len(p.Params) > 0 || len(p.Services) > 0 {
+				c.diagnostic("EF104", "provider "+p.Name+" requires explicit construction", e.Span)
+				t = value("invalid")
+				break
+			}
 			t = value("provider:" + p.Service)
 			if p.Service == "Files" || p.Service == "Runtime" || p.Service == "Foreign" || p.Service == "Http" {
 				c.requireGo(e.Span, "native provider "+p.Service)
@@ -746,6 +802,27 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		if c.fiberCall(e, env, inEffect) {
 			t = e.Type
 			break
+		}
+		if e.Left.Kind == "name" {
+			if provider := c.providers[e.Left.Name]; provider != nil {
+				if len(provider.Params) == 0 && len(provider.Services) == 0 {
+					c.diagnostic("EF105", "provider "+provider.Name+" is a value and cannot be called", e.Span)
+					t = value("invalid")
+					break
+				}
+				if len(e.Args) != len(provider.Params) {
+					c.diagnostic("EF106", "provider "+provider.Name+" expects "+fmt.Sprint(len(provider.Params))+" configuration arguments", e.Span)
+				}
+				for i, arg := range e.Args {
+					got := c.expr(arg, env, false)
+					if i < len(provider.Params) && (got.Effect || got.Success != provider.Params[i].Type) {
+						c.diagnostic("EF106", "provider configuration argument must be "+provider.Params[i].Type, arg.Span)
+					}
+				}
+				t = providerContract(provider)
+				e.Text = "provider-constructor"
+				break
+			}
 		}
 		var f *Function
 		if e.Left.Kind == "name" {

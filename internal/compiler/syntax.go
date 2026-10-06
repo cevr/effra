@@ -102,8 +102,13 @@ type Service struct {
 type Provider struct {
 	Name    string
 	Service string
-	Methods []*Function
-	Span    Span
+	Params  []Param
+	// Services are the dependency values captured by the constructor. They
+	// are requirements of construction, not requirements of the service
+	// methods exposed by the resulting provider value.
+	Services []string
+	Methods  []*Function
+	Span     Span
 }
 type Program struct {
 	Imports     []GoImport
@@ -331,10 +336,26 @@ func parse(source string) (program *Program, diagnostics []Diagnostic) {
 		case "impl":
 			p.take()
 			name := p.name()
+			var params []Param
+			if p.accept("(") {
+				for !p.accept(")") {
+					param := p.name()
+					p.expect(":")
+					params = append(params, Param{Name: param.text, Type: p.typ(), Span: param.span})
+					if !p.accept(",") {
+						p.expect(")")
+						break
+					}
+				}
+			}
 			p.expect("for")
 			service := p.name()
+			var services []string
+			if p.accept("uses") {
+				services = p.row()
+			}
 			p.expect("{")
-			v := &Provider{Name: name.text, Service: service.text, Span: name.span}
+			v := &Provider{Name: name.text, Service: service.text, Params: params, Services: services, Span: name.span}
 			for !p.accept("}") {
 				v.Methods = append(v.Methods, p.function(true))
 			}
@@ -680,7 +701,29 @@ func (p *parser) constructorBrace() bool {
 	if p.tokens[p.at+1].kind == "name" && p.tokens[p.at+2].text == "}" {
 		return p.noConstruct == 0 || (p.at+3 < len(p.tokens) && p.tokens[p.at+3].text == "{")
 	}
-	return false
+	if p.tokens[p.at+1].kind != "name" || (p.tokens[p.at+2].text != "," && p.tokens[p.at+2].text != ";") {
+		return false
+	}
+	index := p.at + 1
+	for {
+		if index >= len(p.tokens) {
+			return false
+		}
+		if p.tokens[index].kind != "name" {
+			return false
+		}
+		index++
+		if index >= len(p.tokens) {
+			return false
+		}
+		if p.tokens[index].text == "}" {
+			return p.noConstruct == 0 || (index+1 < len(p.tokens) && p.tokens[index+1].text == "{")
+		}
+		if p.tokens[index].text != "," && p.tokens[index].text != ";" {
+			return false
+		}
+		index++
+	}
 }
 
 func (p *parser) pattern() *MatchPattern {

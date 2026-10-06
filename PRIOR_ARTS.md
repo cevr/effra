@@ -12,7 +12,7 @@ Effra's public architecture is described through generic patterns. This index re
 | Focused compiler tooling | CLI/MCP share checked contracts, revisions, lint and graphs | Single-file model; no persistent semantic workspace or checked editing yet |
 | Closed application states | Payload-owning alternatives and exhaustive interpretation | Records, closed ADTs and matching are implemented; external decoding remains proposed |
 | Explicit wire decoding | Static types do not validate stored or incoming data | Codec and migration library remains proposed |
-| Dependent providers | Construction has its own requirements, failures and owner | Current providers are self-contained; sharing/cycles/acquisition remain open |
+| Dependent providers | Construction has its own requirements, failures and owner | Configuration and captured dependency values are checked; fallible acquisition, initialization sharing and cycles remain open |
 | Bounded event delivery | Track items, bytes and in-flight acknowledgement | Streams, queues and delivery budgets remain proposed |
 | Durable command admission | Correlation, transactional receipts and outbox recovery | Application/storage obligations, not a syntax guarantee |
 | Owned tests | Fresh case scope, assertions, completed shutdown and preserved causes | `ef test` works on Go/JS; causal latches and virtual time remain open |
@@ -31,9 +31,9 @@ See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native
 
 ## To survey
 
-- Introduce structured type identities, records, closed sums and checked matches without whole-program inference.
+- Extend structured nominal types and checked matches with codecs, containers and package-qualified identities without whole-program inference.
 - Track handle ownership provenance so proven inner-scope escapes receive static diagnostics while borrowed outer handles remain valid.
-- Add provider construction contracts, shared acquisition and cycle explanations; enrich the same dependency graph rather than inventing another analyzer.
-- Add reasoned named lint suppressions with stale/unused checks, and revision-bound fixes validated before they are offered. Preserve comments in formatting.
+- Extend checked provider construction to shared acquisition and cycle explanations; enrich the same dependency graph rather than inventing another analyzer.
+- Build revision-bound fixes on the implemented reasoned named lint suppressions; validate edits before they are offered and preserve comments in formatting.
 - Build scheduler-backed test time, causal synchronization and scoped fixtures; prove they control sleeps and timeout operators together.
 - Measure native import reuse and matched cold/warm/private-edit build regimes before making speed claims.

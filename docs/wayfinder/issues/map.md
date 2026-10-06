@@ -14,9 +14,32 @@ Advance Effra into a credible Go-backed server language by implementing producti
 - Source remains authoritative; one semantic model serves checking, CLI, and MCP. Performance budgets are aspirations until measured.
 - No new external research is needed to chart the initial frontier: the design sketch contains the inspected reference sources. Add research tickets if a subsequent decision needs new evidence.
 
+## Autonomous implementation goal
+
+On 2026-10-06 the owner explicitly set the goal to fully implement the authorized Wayfinder specifications and extend them as evidence reveals ergonomic improvements, stronger guarantees and performance opportunities. Continue across review and implementation units without waiting for routine human confirmation. Read the standing principles before any genuine question.
+
+Use upstream implementation/test evidence, real usage, independent counsel and measured results to add concrete acceptance clauses and task dependencies. Prioritize changes that make the standard library reusable, preserve explicit inspectable contracts and improve measured costs. Record new opportunities with a finite supported scope and executable exit criteria; do not convert an aspiration into an implemented guarantee. Existing HITL decision tickets remain separate and require actual owner feedback before closure. No push is authorized.
+
 ## Decisions so far
 
 - [Which production patterns constrain the next foundation contracts?](research-foundations.md): timer scheduling, dependency capture and nested ownership set the foundation acceptance seams.
+
+## Additional implementation
+
+- [Matched server performance against TypeScript and optimized Go](server-benchmarks.md): owner-requested server equivalence, throughput/latency, resource, startup/shutdown and separate build receipts. Performance superiority remains a measured question.
+
+- [Bundled standard library capability and language contracts](stdlib-parity.md): owner-directed Effect-grade library distribution, with compiler-enforced semantics, ordinary inspectable library contracts and staged behavioral parity.
+
+- [Native codecs and typed server contracts](native-server-spec.md): reusable bundled interfaces, typed function values, checked codecs, managed endpoints and compatible unary RPC precede actual framework measurements.
+
+- [Pinned upstream tests and executable conformance mapping](upstream-conformance.md): licensed reference corpus plus explicit behavior-to-Effra test mapping; copied tests do not count as native passes.
+
+## Foundation implementation receipts
+
+- [Reasoned semantic lint suppression](foundation-lint.md): named next-line advice suppression requires a reason; malformed, unknown and unused directives diagnose without disabling compiler checks.
+- [Closed application data and exhaustive interpretation](foundation-data.md): records, payload enums, structured failures and exhaustive matching execute on Go/JS and share inspectable canonical declarations; independent review repairs are integrated.
+
+- [Dependency-capturing provider composition](foundation-providers.md): checked configuration and lexical dependency capture retain the invocation owner; recipes, materialized values and constructor origins are inspectable in the shared graph.
 
 ## Not yet specified
 

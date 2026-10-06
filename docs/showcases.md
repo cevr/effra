@@ -54,7 +54,7 @@ The full example supplies three demo providers at the entry point, handles each 
 # access denied
 ```
 
-Parameterized providers with dependencies and shared scoped initialization would replace more `Layer` construction boilerplate. Those are future work: current user providers are self-contained.
+Parameterized providers can capture declared service values at construction, so a provider value can be configured once and explicitly reused by several consumers. Fallible acquisition, shared scoped initialization and general `Layer`-style memoization remain future work.
 
 ## 2. ADTs make state and decisions explicit
 
@@ -226,4 +226,4 @@ Run `ef test examples/testing.ef`, or add `--target js`. Each case gets a fresh 
 
 ## 9. Explain a composition without reading generated code
 
-**Implemented.** `ef graph examples/workflow.ef` exposes requirements, provider implementations, call dependencies and provision boundaries. The same JSON comes from MCP `project.graph`. Recipe nodes include their canonical contracts, so a client can render dependencies or follow incoming edges to find dependents. The graph describes static composition, including deferred calls. Dependent provider acquisition and sharing remain future work.
+**Implemented.** `ef graph examples/workflow.ef` exposes requirements, provider implementations, call dependencies and provision boundaries. The same JSON comes from MCP `project.graph`. Recipe nodes include their canonical contracts, so a client can render dependencies or follow incoming edges to find dependents. Configured/dependent provider recipes and their materialized values are represented explicitly; fallible acquisition, lifecycle-safe capture and general memoized sharing remain future work.

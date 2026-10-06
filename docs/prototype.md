@@ -8,7 +8,7 @@ This is a single-file compiler experiment, not the full design in design.md. The
 - Ordinary `fn` and lazy `effect fn`, with explicit parameter, result, failure, and service contracts.
 - Nominal records and closed enums with typed fields: `record User { id: string }`, `enum State { Ready Waiting { reason: string } }`, constructors, field access and exhaustive `match` arms. Constructor payloads accept `{ field }` shorthand; in a control position such as `match State.Ready { value } { ... }`, the following arm brace disambiguates that constructor from the control body. Static data does not decode or validate external wire values.
 - Nominal errors may carry typed fields: `error NotFound { id: string }`; `fail NotFound { id: "missing" }` preserves the payload on both targets. Error declarations are failure payload types, not ordinary success values or nested record fields.
-- Nominal services and self-contained implementations: `impl MemoryUsers for Users`.
+- Nominal services and implementations, including configured providers that capture declared services: `impl MemoryUsers for Users` and `impl Prefixed(prefix: string) for Greeting uses {Names}`. Construction is effectful and explicit; fallible acquisition and general memoized sharing are unsupported.
 - `run` to execute a deferred effect within an effect body.
 - `.provide<Service>(Provider)` removes that service requirement.
 - `.catch<Failure>(pureFallback)` removes exactly that failure. This prototype deliberately accepts a pure replacement value rather than a lambda or effectful handler.
@@ -74,6 +74,6 @@ Reproduce by timing `./bin/ef check examples/imports.ef` and `./bin/ef build exa
 
 ## Default tooling and tests
 
-`lint`, `lint rules`, `query` and `graph` use the same checked model as symbol inspection. MCP adds `project.lint`, `lint.rules`, `code.typeAt`, `project.graph` and `project.tests`; all tools remain read-only. Queries use expression diagnostic anchors, not full source ranges. Graphs describe current self-contained providers, not dependent layer acquisition.
+`lint`, `lint rules`, `query` and `graph` use the same checked model as symbol inspection. MCP adds `project.lint`, `lint.rules`, `code.typeAt`, `project.graph` and `project.tests`; all tools remain read-only. Queries use expression diagnostic anchors, not full source ranges. Graphs describe provider recipes, materialized values and declared provision edges; fallible acquisition and general dependent-layer sharing remain unsupported.
 
 `ef test` discovers checked `test_` effects and supplies `Assert`. Each case owns a fresh scope on both targets, with captured suite output and structured failure reasons. Live host/time capabilities require `--live`; the real process watchdog reports unconfirmed cleanup on forced termination. See [tooling](tooling.md), [testing](testing.md) and [runnable testing example](../examples/testing.ef).

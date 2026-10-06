@@ -4,6 +4,14 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 ## Language
 
+**Record**: A nominal data type with declared fields. Construction checks every required field and its type.
+
+**Closed enum**: A nominal set of alternatives, each with its own declared payload.
+
+**Exhaustive match**: An interpretation that covers each declared alternative exactly once and executes only its selected arm.
+
+**Failure payload**: The declared data carried by a named failure, separate from an ordinary success value.
+
 **Effect contract**: The success value, named failures, and required services of a deferred Effra program.
 
 **Failure row**: The unordered set of nominal failures admitted by an effect contract.
@@ -13,6 +21,10 @@ Effra describes server programs using explicit, inspectable effect contracts.
 **Target provider**: An implementation of a service on a particular execution target.
 
 **Provider construction contract**: The configuration and required services used to create a provider value, distinct from the contract of invoking its service operations.
+
+**Provider recipe**: A deferred constructor with explicit configuration and construction requirements. Each execution materializes a provider value.
+
+**Materialized provider value**: An already constructed service implementation that can be explicitly reused without reexecuting its recipe.
 
 **Captured provider**: A provider value bound to the service values supplied during its construction. Its operations belong to the caller's current owning scope.
 

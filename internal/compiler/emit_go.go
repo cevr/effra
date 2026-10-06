@@ -73,8 +73,11 @@ func goVariantType(typeName, variantName string) string {
 	return "efTypeV_" + strconv.Itoa(len(typeName)) + "_" + goIdent(typeName) + "_" + strconv.Itoa(len(variantName)) + "_" + goIdent(variantName)
 }
 func goParams(f *Function) string {
+	return goParamsList(f.Params)
+}
+func goParamsList(params []Param) string {
 	parts := []string{}
-	for _, p := range f.Params {
+	for _, p := range params {
 		parts = append(parts, "efLocal_"+p.Name+" "+goType(p.Type))
 	}
 	return strings.Join(parts, ", ")
@@ -169,6 +172,10 @@ func efProvider_Host()efService_Foreign{return efService_Foreign{}}
 func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(address string,handler func(string)efEffect[string])efEffect[struct{}]{return func(ctx efContext)efExit[struct{}]{return er.Invoke(ctx.Runtime,er.ServeHTTP(address,func(path string)er.Effect[string]{return efToRuntime(ctx,handler(path))},func(bound string){fmt.Println("listening http://"+bound)}))}}}}
 `)
 	for _, p := range r.Program.Providers {
+		if providerConstructed(p) {
+			out.WriteString(g.providerConstructor(p))
+			continue
+		}
 		out.WriteString("func efProvider_" + p.Name + "() efService_" + p.Service + " { return efService_" + p.Service + "{\n")
 		for _, m := range p.Methods {
 			out.WriteString("m_" + m.Name + ": " + strings.TrimSpace(g.function(m)) + ",\n")
@@ -222,6 +229,51 @@ func (g *goEmitter) function(f *Function) string {
 	}
 	return open + g.block(f.Body, f.Effect, f.Return) + close
 }
+
+// providerConstructed distinguishes an ordinary reusable provider value from
+// a constructor recipe. A configured or dependent provider is always built at
+// effect execution so its service values are captured at that boundary.
+func providerConstructed(p *Provider) bool {
+	return len(p.Params) > 0 || len(p.Services) > 0
+}
+
+func (g *goEmitter) providerConstructor(p *Provider) string {
+	ret := goType("provider:" + p.Service)
+	var out strings.Builder
+	out.WriteString("func efProvider_" + p.Name + "(" + goParamsList(p.Params) + ") efEffect[" + ret + "] {\n")
+	out.WriteString("return func(ctx efContext) efExit[" + ret + "] {\n")
+	out.WriteString("if err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + ret + "](err)}\n")
+	for _, service := range normalized(p.Services) {
+		out.WriteString("if ctx.s_" + service + " == nil { return efExit[" + ret + "]{Defect:fmt.Errorf(" + strconv.Quote("missing provider "+service+" for constructor "+p.Name) + ")} }\n")
+		out.WriteString("efCaptured_" + service + " := ctx.s_" + service + "\n")
+	}
+	out.WriteString("return efExit[" + ret + "]{Value:efService_" + p.Service + "{\n")
+	for _, method := range p.Methods {
+		implementation := g.function(method)
+		if len(p.Services) > 0 {
+			implementation = g.providerMethod(method, p.Services)
+		}
+		out.WriteString("m_" + method.Name + ":" + strings.TrimSpace(implementation) + ",\n")
+	}
+	out.WriteString("}}\n}\n}\n")
+	return out.String()
+}
+
+// providerMethod overlays only the captured dependency pointers onto the
+// invocation context. The Runtime pointer (and therefore cancellation,
+// scope, owner and fiber state) is copied from the current invocation.
+func (g *goEmitter) providerMethod(f *Function, captures []string) string {
+	ret := goType(f.Return)
+	var out strings.Builder
+	out.WriteString("func(" + goParams(f) + ") efEffect[" + ret + "] {\nreturn func(ctx efContext) efExit[" + ret + "] {\n")
+	for _, service := range normalized(captures) {
+		out.WriteString("ctx.s_" + service + " = efCaptured_" + service + "\n")
+	}
+	out.WriteString("if err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + ret + "](err)}\n")
+	out.WriteString(g.block(f.Body, true, f.Return))
+	out.WriteString("}\n}")
+	return out.String()
+}
 func (g *goEmitter) failed(name, ret string) string {
 	return "if " + name + ".IsFailure(){return er.Propagate[" + goType(ret) + "](" + name + ")}\n"
 }
@@ -252,7 +304,11 @@ func (g *goEmitter) block(b *Block, effect bool, ret string) string {
 			}
 		} else if i == len(b.Statements)-1 {
 			if s.Value.Type.Success == "never" {
-				out.WriteString("_ = " + expr + "\nreturn efExit[" + goType(ret) + "]{Defect:fmt.Errorf(\"bottom expression unexpectedly succeeded\")}\n")
+				if effect {
+					out.WriteString("_ = " + expr + "\nreturn efExit[" + goType(ret) + "]{Defect:fmt.Errorf(\"bottom expression unexpectedly succeeded\")}\n")
+				} else {
+					out.WriteString("_ = " + expr + "\npanic(\"bottom expression unexpectedly succeeded\")\n")
+				}
 			} else {
 				finish(expr)
 			}
@@ -325,6 +381,16 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 		if e.Text == "fiber" {
 			method := map[string]string{"join": "efJoin", "interrupt": "efInterrupt", "cancel": "efCancel"}[e.Left.Name]
 			return method + "(efLocal_" + e.Left.Left.Name + ")"
+		}
+		if e.Text == "provider-constructor" {
+			args := []string{}
+			for _, a := range e.Args {
+				expr := g.expr(a, effect, ret, out)
+				name := g.temp()
+				out.WriteString(name + " := " + expr + "\n")
+				args = append(args, name)
+			}
+			return "efProvider_" + e.Left.Name + "(" + strings.Join(args, ", ") + ")"
 		}
 		args := []string{}
 		for _, a := range e.Args {
@@ -480,7 +546,11 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 			}
 			body.WriteString(g.block(arm.Body, true, e.Type.Success))
 		}
-		body.WriteString("default: return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable non-exhaustive match\")}\n}\n")
+		if len(e.Arms) == 0 {
+			body.WriteString("default: _ = efMatch; return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable empty match\")}\n}\n")
+		} else {
+			body.WriteString("default: return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable non-exhaustive match\")}\n}\n")
+		}
 		name := g.temp()
 		out.WriteString(name + " := func() efExit[" + resultType + "] {\n" + body.String() + "}()\n" + g.failed(name, ret))
 		return name + ".Value"
@@ -497,7 +567,11 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 		}
 		body.WriteString(g.block(arm.Body, false, e.Type.Success))
 	}
-	body.WriteString("default: panic(\"unreachable non-exhaustive match\")\n}\n")
+	if len(e.Arms) == 0 {
+		body.WriteString("default: _ = efMatch; panic(\"unreachable empty match\")\n}\n")
+	} else {
+		body.WriteString("default: panic(\"unreachable non-exhaustive match\")\n}\n")
+	}
 	return "func() " + resultType + " {\n" + body.String() + "}()"
 }
 

@@ -1,4 +1,4 @@
-<!-- {"id": "foundation-testing", "title": "Causal synchronization and scheduler-backed tests", "status": "open", "labels": ["implementation:task"], "parent": "foundation-spec", "assignee": "causal_latch", "blocked_by": []} -->
+<!-- {"id": "foundation-testing", "title": "Causal synchronization and scheduler-backed tests", "status": "open", "labels": ["implementation:task"], "parent": "foundation-spec", "assignee": "scheduler_finish", "blocked_by": []} -->
 # Causal synchronization and scheduler-backed tests
 
 ## Question
