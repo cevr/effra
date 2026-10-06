@@ -436,6 +436,117 @@ func remainderExclusionsForFacts(facts []OwnershipFact) string {
 	return encodeRemainderExclusions(paths)
 }
 
+// ownershipFactMayOwnPath reports whether one fact can still account for an
+// owned value at path. A complete borrowed fact is proof that the path is
+// foreign; every other status remains possible evidence unless a remainder
+// explicitly excludes that path.
+func ownershipFactMayOwnPath(fact OwnershipFact, path string) bool {
+	if isWildcardPath(fact.Path) {
+		base, _ := wildcardPathPrefix(fact.Path)
+		if base != "" && !pathWithinPrefix(path, base) {
+			return false
+		}
+	} else if fact.Path != path {
+		return false
+	}
+	if fact.remainder && remainderExcludes(fact, path) {
+		return false
+	}
+	if fact.Status == "borrowed" && !fact.potentialOwner && !fact.remainder {
+		return false
+	}
+	return true
+}
+
+func wildcardIntersectionBase(left, right string) (string, bool) {
+	leftBase, leftWildcard := wildcardPathPrefix(left)
+	rightBase, rightWildcard := wildcardPathPrefix(right)
+	if !leftWildcard || !rightWildcard {
+		return "", false
+	}
+	if leftBase == "" {
+		return rightBase, true
+	}
+	if rightBase == "" {
+		return leftBase, true
+	}
+	if pathWithinPrefix(leftBase, rightBase) {
+		return leftBase, true
+	}
+	if pathWithinPrefix(rightBase, leftBase) {
+		return rightBase, true
+	}
+	return "", false
+}
+
+func remainderExcludesWildcardIntersection(fact OwnershipFact, target string) bool {
+	intersection, ok := wildcardIntersectionBase(fact.Path, target)
+	if !ok {
+		return false
+	}
+	for _, exclusion := range decodeRemainderExclusions(fact.remainderExclusions) {
+		base, wildcard := wildcardPathPrefix(exclusion)
+		if wildcard && (base == "" || pathWithinPrefix(intersection, base)) {
+			return true
+		}
+	}
+	return false
+}
+
+func ownershipFactMayOwnTarget(fact OwnershipFact, target string) bool {
+	if !isWildcardPath(target) {
+		return ownershipFactMayOwnPath(fact, target)
+	}
+	if !isWildcardPath(fact.Path) {
+		base, _ := wildcardPathPrefix(target)
+		if base != "" && !pathWithinPrefix(fact.Path, base) {
+			return false
+		}
+		return ownershipFactMayOwnPath(fact, fact.Path)
+	}
+	if _, ok := wildcardIntersectionBase(fact.Path, target); !ok {
+		return false
+	}
+	if fact.remainder && remainderExcludesWildcardIntersection(fact, target) {
+		return false
+	}
+	if fact.Status == "borrowed" && !fact.potentialOwner && !fact.remainder {
+		return false
+	}
+	return true
+}
+
+func omittedOwnershipMayOwnTarget(allFacts, retained []OwnershipFact, target string) bool {
+	for _, fact := range allFacts {
+		if slices.Contains(retained, fact) {
+			continue
+		}
+		if ownershipFactMayOwnTarget(fact, target) {
+			return true
+		}
+	}
+	return false
+}
+
+// remainderExclusionsForRetainedFacts only discharges a generated remainder
+// at a retained borrowed terminal when every omitted alternative is outside
+// that terminal. In particular, a potential wildcard which overlaps the
+// terminal keeps the generated remainder live; a disjoint wildcard or a
+// remainder which explicitly excludes the terminal does not.
+func remainderExclusionsForRetainedFacts(retained, allFacts []OwnershipFact) string {
+	paths := make([]string, 0, len(retained))
+	for _, fact := range retained {
+		if fact.Status != "borrowed" || fact.potentialOwner || fact.remainder {
+			continue
+		}
+		if omittedOwnershipMayOwnTarget(allFacts, retained, fact.Path) {
+			continue
+		}
+		paths = append(paths, fact.Path)
+	}
+	return encodeRemainderExclusions(paths)
+}
+
 func completeWildcardCovers(wildcard OwnershipFact, path string) bool {
 	if !isWildcardPath(wildcard.Path) || (wildcard.Origin != "bounded-all-owned" && wildcard.Origin != "bounded-all-borrowed") {
 		return false
@@ -1202,7 +1313,7 @@ func boundedBorrowedWithPotential(facts []OwnershipFact, incomplete map[string]b
 		Origin:              "bounded",
 		potentialOwner:      true,
 		remainder:           true,
-		remainderExclusions: remainderExclusionsForFacts(bounded),
+		remainderExclusions: remainderExclusionsForRetainedFacts(bounded, facts),
 	})
 	return normalizeFacts(bounded)
 }
@@ -1497,7 +1608,7 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 				Origin:              "bounded",
 				potentialOwner:      true,
 				remainder:           true,
-				remainderExclusions: remainderExclusionsForFacts(bounded),
+				remainderExclusions: remainderExclusionsForRetainedFacts(bounded, result),
 			})
 		}
 		return normalizeFacts(bounded)

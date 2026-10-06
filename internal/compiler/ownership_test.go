@@ -1492,6 +1492,64 @@ func TestOwnershipBudgetWideningRetainsOverlappingOwnedWildcard(t *testing.T) {
 	}
 }
 
+func TestOwnershipBudgetWideningRetainsOverlappingPotentialWildcard(t *testing.T) {
+	borrowed := func(path string) OwnershipFact {
+		return OwnershipFact{Path: path, Status: "borrowed", Region: "parameter:file", Origin: "parameter", sourceSet: true}
+	}
+	potential := func(path string, exclusions ...string) OwnershipFact {
+		return OwnershipFact{
+			Path:                path,
+			Status:              "unknown",
+			Origin:              "bounded",
+			potentialOwner:      true,
+			remainder:           true,
+			remainderExclusions: encodeRemainderExclusions(exclusions),
+		}
+	}
+	wide := []OwnershipFact{borrowed("z")}
+	for i := 0; i < 63; i++ {
+		wide = append(wide, potential(fmt.Sprintf("x%d.*", i)))
+	}
+	wide = normalizeFacts(wide)
+	if len(wide) != 64 {
+		t.Fatalf("control branch did not reach the fact cap: got %d facts", len(wide))
+	}
+
+	assertPotentialAtZ := func(t *testing.T, name string, facts []OwnershipFact, want bool) {
+		t.Helper()
+		projected := projectFacts(facts, "z")
+		got := hasPotentialOwner(projected)
+		if got != want {
+			t.Fatalf("%s projected potential=%t want %t: joined=%+v projected=%+v", name, got, want, facts, projected)
+		}
+	}
+
+	covering := []OwnershipFact{potential("*")}
+	assertPotentialAtZ(t, "covering-remainder", covering, true)
+	assertPotentialAtZ(t, "borrowed-control", wide, false)
+	joins := [][]OwnershipFact{
+		mergeFacts(covering, wide),
+		mergeFacts(wide, covering),
+		mergeFacts(mergeFacts(covering, wide[:32]), wide[32:]),
+		mergeFacts(mergeFacts(wide[:32], covering), wide[32:]),
+	}
+	for i, joined := range joins {
+		assertPotentialAtZ(t, fmt.Sprintf("covering-join-%d", i), joined, true)
+	}
+
+	disjoint := []OwnershipFact{potential("other.*")}
+	disjoint = append(disjoint, wide...)
+	assertPotentialAtZ(t, "disjoint-prefix", mergeFacts(disjoint[:1], disjoint[1:]), false)
+
+	overlapping := []OwnershipFact{potential("z.*")}
+	overlapping = append(overlapping, wide...)
+	assertPotentialAtZ(t, "overlapping-prefix", mergeFacts(overlapping[:1], overlapping[1:]), true)
+
+	excluded := []OwnershipFact{potential("*", "z")}
+	excluded = append(excluded, wide...)
+	assertPotentialAtZ(t, "excluded-remainder", mergeFacts(excluded[:1], excluded[1:]), false)
+}
+
 func TestOwnershipInstantiationKeepsRemainderRelativeToTheReturnedShape(t *testing.T) {
 	argument := ValueType{Ownership: []OwnershipFact{{
 		Path:                "*",
