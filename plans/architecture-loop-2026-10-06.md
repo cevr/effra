@@ -22,9 +22,9 @@ This is an active loop ledger, not a completion receipt. The canonical prior-art
 
 | Directory | Files | Mark | Pass |
 | --- | --- | --- | --- |
-| cmd/ef | 1 | unswept | Focused CLI live checks are not a full sweep |
+| cmd/ef | 1 | swept pass1 | Complete source/package review in pass1/cli-mcp-review.md; source-admission fix pending |
 | internal/compiler | 11 | unswept | Focused data/provider/ownership reviews only |
-| internal/mcp | 1 | unswept | Public parity probes only |
+| internal/mcp | 1 | swept pass1 | Complete source/package review in pass1/cli-mcp-review.md; admission/detail-bound fixes pending |
 | runtime/effra | 6 | unswept | Runtime tests and scheduler review only |
 
 ## Prior art
@@ -63,6 +63,8 @@ Verdict: structural work remains. The loop is open.
 | Causal scheduler | foundation-testing | Preserve transferred edits; Linux public causal probes, cleanup causes and virtual-time authority |
 | Upstream/framework fixtures | server-benchmarks | Pinned test import, actual Effect HTTP/RPC fixture and measurement admission |
 | Native library contracts | Subsequent isolated units | Bundled interfaces, typed functions, codecs, HTTP and RPC; no endpoint-specific compiler facade |
+| CLI/MCP boundary repair | cli-mcp-admission | Reject FIFO before blocking source open; bound nested body/contribution rows; paired public acceptance |
+| Checked machines | Subsequent isolated units | Flat checked topology, ordinary ADTs/functions, owned actor runtime and target conformance after shared foundations |
 
 | ID | Candidate | North star | Files | Risk | Status |
 | --- | --- | --- | --- | --- | --- |
@@ -80,6 +82,10 @@ Verdict: structural work remains. The loop is open.
 | A12 | Derive structural codecs while retaining typed bidirectional transformations | Go-like simplicity through regular abstractions; Explicit contracts | Canonical types, bundled codecs and native server spec | High | Owner direction recorded; Rust/Serde and pinned Effect transformation survey active |
 | A13 | Learn from Gleam/ReScript/TypeScript host compilation without inheriting tedious bindings | Adoption through host interop; Exceptionally fast compilation | Imports, backend, source mapping and build cache | Medium | Current sources fetched and pinned in PRIOR_ARTS; initial source/test inspection complete, focused comparison remains open |
 | A14 | Prefer Go-like ordinary behavior and use XState v6 as main machine reference | Go-like simplicity through regular abstractions | Machine/codec specs, PRIOR_ARTS | Medium | Owner tiebreak recorded; active PR5543/next pinned2146ae26, Claude2 counsel redirected to v6; earlier v5 conclusions need revalidation |
+
+Go-like direction, transformation codec contract and machine plan/runtime/conformance tasks are recorded in the specs; tracker now contains27 valid issues. Gleam/ReScript/TypeScript source/test comparison is in `docs/research/host-language-compilation.md`. The XState v6 comparison and independent design counsel remain active. The `@xstate/effect` requirement walker at the pinned branch stops child-machine inference at10 levels; Effra must diagnose an exhausted checking budget rather than silently erase a requirement.
+
+CLI/MCP repair isolation: `workrift list` rejects the transferred unknown registry marker; `df -T` confirms the source lives on ext4. Use architecture-loop's Git worktree fallback at the exact absolute sibling path and copy its verified locked dependencies. No warm source, registry entry or unrelated dotfiles is changed.
 
 Guardrails added: pending implementation receipts. Each missed static guarantee needs its own rejected-source test, and each bounded analysis needs adversarial scaling coverage.
 
@@ -101,6 +107,8 @@ Framework fixture evidence records pinned Effect's wrong-method response as404. 
 Merges: none in this pass yet. No application changes have been pushed.
 
 Live checks: baseline `./scripts/gate.sh` and `go test -race ./...` pass on Linux; a temporary public provider program executes identically on Go/JS and its CLI graph exactly matches stdio MCP. These checks do not approve the unmerged branches.
+
+Direction update gate: `./scripts/gate.sh` exited0 on the unchanged integration source while documentation evolved, log `/tmp/effra-architecture-direction-gate.log`; source tests, CLI/MCP smoke and HTTP lifecycle smoke all pass. Current tracker and whitespace checks also pass after the new27-issue graph. This is not a gate for unmerged scheduler/ownership/benchmark implementations.
 
 ## Close
 
