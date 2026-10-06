@@ -18,7 +18,7 @@ Tooling must expose editor-grade diagnostics and full types through the CLI and 
 
 The owner also requires user-defined lint rules (2026-10-06). Ship a versioned, inspectable extension API over the same compiler facts, with configurable rule packs, meaningful source-based tests and shared CLI/MCP/LSP reporting. Project policy may add advice or fail a lint gate; it cannot suppress compiler correctness diagnostics or alter checked types. Optional rule execution must not enlarge application binaries or become a mandatory build dependency. See [custom lint rules](docs/specs/custom-lint.md).
 
-The owner requires a built-in formatter (2026-10-06). One canonical `.ef` style and shared printer serve `ef fmt`, CI checks, MCP previews and editor formatting. Preserve comments and directive meaning; formatting needs syntax, not successful typechecking or backend execution. See the [formatting contract](docs/specs/formatting.md); implementation remains pending.
+The owner requires a built-in formatter (2026-10-06). One canonical `.ef` style and shared printer serve `ef fmt`, CI checks, MCP previews and editor formatting. Preserve comments and directive meaning; formatting needs syntax, not successful typechecking or backend execution. See the [formatting contract](docs/specs/formatting.md). The pure formatter and shared traversal are integrated at `45b43d2`; CLI/MCP adapters are under independent review, and editor integration remains pending.
 
 Established 2026-10-05 from the owner's conversation, [design sketch](docs/design.md), [interop direction](docs/interop.md), and the checked prototype. Receipts below refer to baseline `4c497ac`; they identify evidence and gaps, not permanent line numbers. Wider language capabilities remain proposals until a runnable example and a guard establish them.
 
@@ -27,6 +27,8 @@ Current implementation receipt (2026-10-05; managed runtime foundation `5c8c31f`
 Production foundation receipt (2026-10-05; reviewed integration `e5777f7`): records, payload enums, exhaustive interpretation, typed failure payloads and canonical declaration inspection execute on Go/JS. Reasoned lint suppression cannot disable compiler diagnostics. Provider construction checks configuration and captures dependency values while preserving the invocation owner; recipe/materialization origins and incoming dependents share the compiler graph. Full gate and Go race checks passed. Causal scheduling and bounded ownership checking remain under implementation review, and matched server performance remains unmeasured.
 
 ## North stars
+
+Foundation integration update (2026-10-06; `a9da03a`): bounded File/Fiber provenance, causal scheduler/testing and shared diagnostic surfaces have passed their reviewed integration gates. Ownership follows deferred results and captures through supported data/helper operations and conservatively refuses unresolved potential escape. Ordinary callback contracts, complete type snapshots and matched native framework benchmarks remain following work.
 
 | North star | It holds when | A candidate breaks it when |
 | --- | --- | --- |
