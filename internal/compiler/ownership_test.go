@@ -575,6 +575,142 @@ func ownershipMixedDeepSource(width int, selection string) string {
 	return source.String()
 }
 
+func ownershipConditionalRecordSource(width int, reverseConstructor, borrowedFirst bool, mode, selection string) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "record Wide {")
+	for position := 0; position < width; position++ {
+		i := position
+		if reverseConstructor {
+			i = width - position - 1
+		}
+		if position > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " }")
+	if mode == "helper" {
+		fmt.Fprintf(&source, "fn pick(x: Wide) -> File { x.%s }\n", selection)
+	} else if mode == "recipe" {
+		fmt.Fprintf(&source, "effect fn pickLater(x: Wide) -> File throws {IoError} { x.%s }\n", selection)
+	}
+	fmt.Fprintf(&source, "effect fn probe(borrowed: File, choose: bool) -> File throws {IoError} {\n scope {\n  let inner = run Files.openRead(\"examples/fixture.txt\").provide<Files>(LiveFiles)\n  let value = Wide {")
+	for position := 0; position < width; position++ {
+		i := position
+		if reverseConstructor {
+			i = width - position - 1
+		}
+		if position > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		value := "inner"
+		if i == 9 {
+			if borrowedFirst {
+				value = "if choose { borrowed } else { inner }"
+			} else {
+				value = "if choose { inner } else { borrowed }"
+			}
+		} else if i == width-1 && selection != "f9" {
+			value = "borrowed"
+		}
+		fmt.Fprintf(&source, " f%d: %s", i, value)
+	}
+	fmt.Fprintln(&source, " }")
+	switch mode {
+	case "helper":
+		fmt.Fprintln(&source, "  pick(value)")
+	case "recipe":
+		fmt.Fprintln(&source, "  let recipe = pickLater(value)")
+		fmt.Fprintln(&source, "  run recipe")
+	default:
+		fmt.Fprintf(&source, "  value.%s\n", selection)
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
+func ownershipConditionalEnumSource(width int, borrowedFirst bool, mode, selection string) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "enum Wide { P {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " } }")
+	if mode == "helper" {
+		fmt.Fprintf(&source, "fn pick(x: Wide) -> File { match x { Wide.P { %s } => %s } }\n", selection, selection)
+	} else if mode == "recipe" {
+		fmt.Fprintf(&source, "effect fn pickLater(x: Wide) -> File throws {IoError} { match x { Wide.P { %s } => %s } }\n", selection, selection)
+	}
+	fmt.Fprintf(&source, "effect fn probe(borrowed: File, choose: bool) -> File throws {IoError} {\n scope {\n  let inner = run Files.openRead(\"examples/fixture.txt\").provide<Files>(LiveFiles)\n  let value = Wide.P {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		value := "inner"
+		if i == 9 {
+			if borrowedFirst {
+				value = "if choose { borrowed } else { inner }"
+			} else {
+				value = "if choose { inner } else { borrowed }"
+			}
+		}
+		fmt.Fprintf(&source, " f%d: %s", i, value)
+	}
+	fmt.Fprintln(&source, " }")
+	switch mode {
+	case "helper":
+		fmt.Fprintf(&source, "  match value { Wide.P { %s } => pick(value) }\n", selection)
+	case "recipe":
+		fmt.Fprintln(&source, "  let recipe = pickLater(value)")
+		fmt.Fprintln(&source, "  run recipe")
+	default:
+		fmt.Fprintf(&source, "  match value { Wide.P { %s } => %s }\n", selection, selection)
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
+func TestOwnershipSamePathAlternativesRemainIncompleteAtTheFactCap(t *testing.T) {
+	for _, width := range []int{16, 64, 65, 80} {
+		for _, borrowedFirst := range []bool{false, true} {
+			for _, reverseConstructor := range []bool{false, true} {
+				name := fmt.Sprintf("record-%d-borrowed-first-%t-reverse-%t", width, borrowedFirst, reverseConstructor)
+				t.Run(name, func(t *testing.T) {
+					requireOwnershipRejected(t, ownershipConditionalRecordSource(width, reverseConstructor, borrowedFirst, "direct", "f9"))
+				})
+			}
+			name := fmt.Sprintf("enum-%d-borrowed-first-%t", width, borrowedFirst)
+			t.Run(name, func(t *testing.T) {
+				requireOwnershipRejected(t, ownershipConditionalEnumSource(width, borrowedFirst, "direct", "f9"))
+			})
+		}
+	}
+
+	for _, mode := range []string{"helper", "recipe"} {
+		for _, source := range []string{
+			ownershipConditionalRecordSource(65, false, false, mode, "f9"),
+			ownershipConditionalEnumSource(65, false, mode, "f9"),
+		} {
+			requireOwnershipRejected(t, source)
+		}
+	}
+}
+
+func TestOwnershipSamePathAlternativeKeepsSafeSiblingAdmitted(t *testing.T) {
+	for _, width := range []int{64, 65, 80} {
+		for _, reverseConstructor := range []bool{false, true} {
+			requireOwnershipAccepted(t, ownershipConditionalRecordSource(width, reverseConstructor, false, "direct", fmt.Sprintf("f%d", width-1)))
+		}
+	}
+}
+
 func TestOwnershipMixedFactBudgetRetainsKnownPaths(t *testing.T) {
 	for _, width := range []int{64, 65} {
 		width := width

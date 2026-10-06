@@ -55,10 +55,13 @@ type OwnershipFact struct {
 	// path) from a fact that has no parameter source.
 	sourceSet bool
 	ownerKind ownershipOwnerKind
-	// potentialOwner marks a bounded wildcard which may contain an owned path
-	// that the representation could not retain. It is internal so the public
-	// contract still reports bounded evidence while escape checks diagnose
-	// exhausted analysis instead of treating it as safe.
+	// potentialOwner marks bounded evidence which may contain an owned path that
+	// the representation could not retain. It may be attached to a wildcard or
+	// to a concrete path: the latter records that the selected path itself is
+	// incomplete, while a wildcard records an incompleteness outside the paths
+	// retained explicitly. It is internal so the public contract still reports
+	// bounded evidence while escape checks diagnose exhausted analysis instead
+	// of treating it as safe.
 	potentialOwner bool
 }
 
@@ -610,71 +613,82 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 			bounded = append(bounded, OwnershipFact{Path: "*", Status: "borrowed", Region: "*", Origin: "bounded-all-borrowed", source: "*", sourceSet: true})
 			return bounded
 		}
-		for i := range result {
-			if result[i].Path == "*" && (result[i].Origin == "bounded-all-owned" || result[i].Origin == "bounded-all-borrowed") {
-				result[i].Status = "unknown"
-				result[i].Origin = "bounded"
-				result[i].potentialOwner = true
-			}
-		}
-		owned := make([]OwnershipFact, 0, len(result))
-		borrowed := make([]OwnershipFact, 0, len(result))
-		other := make([]OwnershipFact, 0, len(result))
+		// A path with several alternatives is indivisible evidence. Retaining a
+		// borrowed fact for a selected path while dropping its owned sibling
+		// would let projection mistake an incomplete path for a complete one.
+		// Keep every fact in such a group before spending the remaining budget on
+		// independent paths. This keeps the bounded representation useful for
+		// safe siblings without turning truncation into a fabricated proof.
+		groups := make(map[string][]OwnershipFact)
+		incomplete := make(map[string]bool)
+		incompleteCount := 0
 		for _, fact := range result {
-			switch fact.Status {
-			case "owned":
-				owned = append(owned, fact)
-			case "borrowed":
-				borrowed = append(borrowed, fact)
-			default:
-				other = append(other, fact)
+			groups[fact.Path] = append(groups[fact.Path], fact)
+		}
+		for path, group := range groups {
+			if len(group) > 1 || slices.ContainsFunc(group, func(fact OwnershipFact) bool { return fact.potentialOwner }) {
+				incomplete[path] = true
+				incompleteCount += len(group)
 			}
 		}
-		potentialNeeded := false
-		for _, fact := range other {
-			if fact.potentialOwner {
-				potentialNeeded = true
-				break
-			}
+		if incompleteCount >= maxFacts {
+			// No bounded representation can retain every alternative for the
+			// selected path. The wildcard forces a conservative diagnostic at
+			// every projection boundary instead of admitting an unsafe value.
+			return []OwnershipFact{{Path: "*", Status: "unknown", Region: "*", Origin: "bounded", potentialOwner: true}}
 		}
-		if len(owned) > maxFacts || (len(borrowed) > 0 && len(owned)+len(borrowed) > maxFacts) {
-			potentialNeeded = true
-		}
-		ownedLimit := len(owned)
-		if potentialNeeded {
-			// Leave room for a bounded potential-owner marker. Exact owned
-			// evidence is retained before any borrowed or unknown sibling is
-			// summarized away.
-			ownedLimit = maxFacts - 1
-			if len(borrowed) > 0 {
-				ownedLimit = maxFacts - 2
-			}
-		}
-		if ownedLimit > len(owned) {
-			ownedLimit = len(owned)
-		}
+
 		bounded := make([]OwnershipFact, 0, maxFacts)
-		bounded = append(bounded, owned[:ownedLimit]...)
-		reserve := 0
+		for _, fact := range result {
+			if incomplete[fact.Path] {
+				bounded = append(bounded, fact)
+			}
+		}
+		if len(bounded) >= maxFacts {
+			return []OwnershipFact{{Path: "*", Status: "unknown", Region: "*", Origin: "bounded", potentialOwner: true}}
+		}
+
+		// Reserve a marker when a discarded fact could itself be owned or could
+		// carry unresolved ownership. A retained concrete borrowed sibling may
+		// still discharge the marker during projection; a discarded selected
+		// path has only the marker and is rejected conservatively.
+		potentialNeeded := false
+		for _, fact := range result {
+			if incomplete[fact.Path] {
+				continue
+			}
+			switch {
+			case fact.Status == "owned", fact.Status == "unknown", fact.potentialOwner:
+				potentialNeeded = true
+			}
+		}
+		available := maxFacts - len(bounded)
 		if potentialNeeded {
-			reserve = 1
+			available--
 		}
-		for _, fact := range borrowed {
-			if len(bounded) >= maxFacts-reserve {
-				break
-			}
-			bounded = append(bounded, fact)
+		if available < 0 {
+			return []OwnershipFact{{Path: "*", Status: "unknown", Region: "*", Origin: "bounded", potentialOwner: true}}
 		}
-		for _, fact := range other {
-			if len(bounded) >= maxFacts-reserve {
-				break
+
+		// Keep known borrowed paths first so an independently safe sibling stays
+		// observable even when owned siblings consume most of the budget. The
+		// retained incomplete groups above always win over these priorities.
+		for _, status := range []string{"borrowed", "owned", "unknown"} {
+			for _, fact := range result {
+				if available == 0 {
+					break
+				}
+				if incomplete[fact.Path] || fact.Status != status {
+					continue
+				}
+				bounded = append(bounded, fact)
+				available--
 			}
-			bounded = append(bounded, fact)
 		}
 		if potentialNeeded {
 			bounded = append(bounded, OwnershipFact{Path: "*", Status: "unknown", Region: "*", Origin: "bounded", potentialOwner: true})
 		}
-		return bounded
+		return normalizeFacts(bounded)
 	}
 	return result
 }
