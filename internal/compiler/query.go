@@ -58,5 +58,13 @@ func (r *Result) TypeAt(offset int) (*ExpressionInfo, error) {
 		return nil, fmt.Errorf("no checked expression at byte offset %d; use an expression's diagnostic anchor", offset)
 	}
 	facts := r.facts[found]
-	return &ExpressionInfo{Kind: found.Kind, Span: found.Span, Type: facts.Type, ExecutedFailures: append([]string{}, facts.Executed.Failures...), ExecutedRequirements: append([]string{}, facts.Executed.Requirements...), Evaluation: facts.Evaluation}, nil
+	projection := r.ProjectValue(facts.Type)
+	if !projection.Complete {
+		return nil, fmt.Errorf("type projection unavailable: %s", projection.Error)
+	}
+	typeOf := r.projector.projectChecked(facts.Checked)
+	if typeOf.ProjectionError != "" {
+		return nil, fmt.Errorf("type projection unavailable: %s", typeOf.ProjectionError)
+	}
+	return &ExpressionInfo{Kind: found.Kind, Span: found.Span, Type: typeOf, ExecutedFailures: append([]string{}, facts.Executed.Failures...), ExecutedRequirements: append([]string{}, facts.Executed.Requirements...), Evaluation: facts.Evaluation}, nil
 }

@@ -209,9 +209,9 @@ func TestInspectionBoundsCoverNestedSymbolDetails(t *testing.T) {
 		contributions           int
 		contributionNameLengths []int
 	}{
-		{"body rows", "body", false, 0, 100, 0, 0, 2, []int{50, 50}},
-		{"requirement rows", "requirements", false, 0, 0, 0, 100, 2, []int{50, 50}},
-		{"nested contribution names", "names", false, 0, 0, 0, 0, 1, []int{100}},
+		{"body rows", "body", true, 100, 100, 0, 0, 2, []int{50, 50}},
+		{"requirement rows", "requirements", true, 0, 0, 100, 100, 2, []int{50, 50}},
+		{"nested contribution names", "names", true, 100, 100, 0, 0, 1, []int{100}},
 	} {
 		t.Run(test.name+" preserve independent dimensions", func(t *testing.T) {
 			assertInspectionDimensions(t, inspectionRowsSource(100, test.mode), inspectionDimensions{
@@ -233,11 +233,8 @@ func TestInspectionBoundsCoverNestedSymbolDetails(t *testing.T) {
 	}
 	for _, name := range []string{"code.inspect", "code.explain"} {
 		result, err := call(root, name, arguments{File: "main.ef", Symbol: "main"})
-		if err != nil {
-			t.Fatalf("unchecked %s rejected: %v", name, err)
-		}
-		if result.(map[string]any)["checked"] != false {
-			t.Fatalf("unchecked %s was not preserved: %+v", name, result)
+		if err == nil || result != nil || !strings.Contains(err.Error(), "requires checked source") {
+			t.Fatalf("unchecked %s exposed facts: result=%+v err=%v", name, result, err)
 		}
 	}
 }
@@ -340,7 +337,7 @@ func inspectionRowsSource(count int, mode string) string {
 		first, second := splitInspectionRows(names)
 		fmt.Fprintf(&builder, "effect fn first() -> () raises {%s} { () }\n", strings.Join(first, ","))
 		fmt.Fprintf(&builder, "effect fn second() -> () raises {%s} { () }\n", strings.Join(second, ","))
-		builder.WriteString("effect fn target() -> () { run first(); run second() }\n")
+		fmt.Fprintf(&builder, "effect fn target() -> () raises {%s} { run first(); run second() }\n", joined)
 	case "requirements":
 		services := make([]string, count)
 		for i := range services {
@@ -355,7 +352,7 @@ func inspectionRowsSource(count int, mode string) string {
 			}
 			builder.WriteString("()}\n")
 		}
-		builder.WriteString("effect fn target() -> () { run part0(); run part1() }\n")
+		fmt.Fprintf(&builder, "effect fn target() -> () uses {%s} { run part0(); run part1() }\n", strings.Join(services, ","))
 	case "contributions":
 		builder.Reset()
 		builder.WriteString("error E0\neffect fn one() -> () raises {E0} { () }\neffect fn target() -> () raises {E0} {\n")
@@ -364,9 +361,8 @@ func inspectionRowsSource(count int, mode string) string {
 		}
 		builder.WriteString("()}\n")
 	case "names":
-		builder.WriteString("record Box { value: () }\n")
 		fmt.Fprintf(&builder, "effect fn many() -> () raises {%s} { () }\n", joined)
-		builder.WriteString("effect fn target() -> Box { Box { value: run many() } }\n")
+		fmt.Fprintf(&builder, "effect fn target() -> () raises {%s} { run many() }\n", joined)
 	}
 	return builder.String()
 }

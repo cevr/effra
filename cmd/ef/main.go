@@ -243,9 +243,19 @@ func command(args []string) error {
 		if err != nil {
 			return err
 		}
-		return printJSON(map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "expression": info})
+		projection := r.ProjectExpression(info)
+		if !projection.Complete {
+			return fmt.Errorf("type projection unavailable: %s", projection.Error)
+		}
+		response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "expression": info, "types": projection.Types, "rows": projection.Rows, "declarations": r.ProjectionDeclarations(projection), "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete}
+		usage, err := r.ValidateProjectionResponse(projection, response)
+		if err != nil {
+			return err
+		}
+		response["typeProjectionUsage"] = usage
+		return printJSON(response)
 	case "check":
-		if err := printJSON(r); err != nil {
+		if err := printJSON(r.CheckResponse()); err != nil {
 			return err
 		}
 		if !r.Checked {
@@ -253,17 +263,44 @@ func command(args []string) error {
 		}
 		return nil
 	case "inspect", "explain":
+		if !r.Checked {
+			return fmt.Errorf("inspection requires checked source")
+		}
 		symbol := r.Find(opts.positional[1])
 		if symbol == nil {
 			if declaration := r.FindDeclaration(opts.positional[1]); declaration != nil {
-				return printJSON(map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "declaration": declaration, "declarations": r.Declarations, "types": r.Types, "rows": r.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionError": r.TypeProjectionError, "diagnostics": r.Diagnostics})
+				projection := r.ProjectDeclaration(declaration)
+				if !projection.Complete {
+					return fmt.Errorf("type projection unavailable: %s", projection.Error)
+				}
+				response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "declaration": declaration, "declarations": r.ProjectionDeclarations(projection), "types": projection.Types, "rows": projection.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete}
+				usage, err := r.ValidateProjectionResponse(projection, response)
+				if err != nil {
+					return err
+				}
+				response["typeProjectionUsage"] = usage
+				return printJSON(response)
 			}
 			if !r.Checked {
 				_ = printJSON(r)
 			}
 			return fmt.Errorf("unknown symbol %s", opts.positional[1])
 		}
-		return printJSON(map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "symbol": symbol, "declarations": r.Declarations, "types": r.Types, "rows": r.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionError": r.TypeProjectionError, "bindings": r.Bindings, "diagnostics": r.Diagnostics})
+		projection := r.ProjectSymbol(symbol)
+		if !projection.Complete {
+			return fmt.Errorf("type projection unavailable: %s", projection.Error)
+		}
+		bindings, err := r.SymbolBindings(symbol)
+		if err != nil {
+			return err
+		}
+		response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "symbol": symbol, "declarations": r.ProjectionDeclarations(projection), "types": projection.Types, "rows": projection.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete, "bindings": bindings}
+		usage, err := r.ValidateProjectionResponse(projection, response)
+		if err != nil {
+			return err
+		}
+		response["typeProjectionUsage"] = usage
+		return printJSON(response)
 	case "test":
 		if err := r.TestMode(opts.live); err != nil {
 			return err

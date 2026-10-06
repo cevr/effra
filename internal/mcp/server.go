@@ -226,6 +226,11 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 					break
 				}
 				result, err := call(root, params.Name, args)
+				if err == nil {
+					// The frame has two copies of the result, one of them escaped.
+					// Charge both before json.Marshal creates the content text.
+					err = compiler.ValidateMCPProjectionResponse(result, len(req.ID)+128)
+				}
 				if err != nil {
 					res.Result = toolResult{Content: []map[string]string{{"type": "text", "text": err.Error()}}, IsError: true}
 				} else {
@@ -248,7 +253,7 @@ func call(root, name string, args arguments) (any, error) {
 	}
 	if name == "project.describe" {
 		return map[string]any{
-			"schemaVersion": 1, "compilerVersion": CompilerVersion,
+			"schemaVersion": compiler.SemanticSchemaVersion, "compilerVersion": CompilerVersion,
 			"runtimes": map[string]string{"go": "typed lazy closures; managed scopes and fibers; Go standard library", "js": "effect@4.0.1"},
 			"targets":  []string{"go", "js"}, "defaultTarget": "go", "sourceExtension": ".ef", "workspace": root,
 			"operations": []string{"project.describe", "project.check", "project.diagnostics", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "project.graph", "project.tests"}, "scope": "single-file disk snapshots",
@@ -260,7 +265,8 @@ func call(root, name string, args arguments) (any, error) {
 				"foreignInterop":     "Go exports supply primitive function shapes; Foreign required; GoResult preserves partial values; context/cancellation metadata are reviewed assertions",
 				"runtimeInspection":  "Go Runtime.inspect: current scope metadata, up to 100 resources/child states; no MCP runtime endpoint",
 				"mutableAliases":     "not implemented", "openRows": "not implemented",
-				"inspection": "source SHA-256 plus imported Go export data and behavior contracts; UTF-8 byte spans with UTF-16 diagnostic ranges",
+				"inspection":     "schema 4 response-local canonical type/row tables; references are revision-scoped, empty rows are omitted, and selected projections refuse explicitly when node, edge, row-label, name, compatibility, or response-byte limits are exceeded",
+				"typeProjection": "semantic checking retains the complete private arena; public tables contain every reachable definition or return typeProjectionComplete=false with typeProjectionError",
 			},
 		}, nil
 	}
@@ -302,7 +308,19 @@ func call(root, name string, args arguments) (any, error) {
 				return nil, fmt.Errorf("test contract exceeds prototype limits")
 			}
 		}
-		return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "tests": tests, "liveRequired": r.TestMode(false) != nil, "execution": "ef test; MCP does not execute tests"}, nil
+		values := make([]compiler.ValueType, 0, len(tests)*2)
+		for _, test := range tests {
+			values = append(values, test.Contract, test.Actual)
+		}
+		projection := r.ProjectValues(values)
+		if !projection.Complete {
+			return nil, fmt.Errorf("test catalog type projection unavailable: %s", projection.Error)
+		}
+		response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "tests": tests, "liveRequired": r.TestMode(false) != nil, "execution": "ef test; MCP does not execute tests", "types": projection.Types, "rows": projection.Rows, "declarations": r.ProjectionDeclarations(projection), "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": true}
+		if _, err := r.ValidateProjectionResponse(projection, response); err != nil {
+			return nil, err
+		}
+		return response, nil
 	}
 	if name == "project.graph" {
 		graph, err := r.Graph()
@@ -330,27 +348,23 @@ func call(root, name string, args arguments) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if len(info.Type.Errors) > 100 || len(info.Type.Services) > 100 || len(info.ExecutedFailures) > 100 || len(info.ExecutedRequirements) > 100 {
-			return nil, fmt.Errorf("expression exceeds prototype inspection limits")
+		projection := r.ProjectExpression(info)
+		if !projection.Complete {
+			return nil, fmt.Errorf("type projection unavailable: %s", projection.Error)
 		}
-		return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "expression": info}, nil
-	}
-	bindings := r.Bindings
-	bindingsTruncated := len(bindings) > 100
-	if bindingsTruncated {
-		bindings = bindings[:100]
-	}
-	if name == "project.check" {
-		declarations, declarationsTruncated, err := boundedDeclarations(r.Declarations)
+		response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "expression": info, "types": projection.Types, "rows": projection.Rows, "declarations": r.ProjectionDeclarations(projection), "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete}
+		usage, err := r.ValidateProjectionResponse(projection, response)
 		if err != nil {
 			return nil, err
 		}
-		diagnostics := r.Diagnostics
-		truncated := len(diagnostics) > 100
-		if truncated {
-			diagnostics = diagnostics[:100]
-		}
-		return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "checked": r.Checked, "target": r.Target, "diagnostics": diagnostics, "diagnosticsTruncated": truncated, "symbolCount": len(r.Symbols), "declarationCount": len(r.Declarations), "declarations": declarations, "declarationsTruncated": declarationsTruncated, "types": r.Types, "rows": r.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionError": r.TypeProjectionError, "timings": r.Timings, "bindings": bindings, "bindingsTruncated": bindingsTruncated}, nil
+		response["typeProjectionUsage"] = usage
+		return response, nil
+	}
+	if name == "project.check" {
+		return r.CheckResponse(), nil
+	}
+	if !r.Checked {
+		return nil, fmt.Errorf("inspection requires checked source")
 	}
 	symbol := r.Find(args.Symbol)
 	if symbol == nil {
@@ -358,31 +372,38 @@ func call(root, name string, args arguments) (any, error) {
 			if err := checkDeclarationMetadata(*declaration); err != nil {
 				return nil, err
 			}
-			declarations, declarationsTruncated, err := boundedDeclarations(r.Declarations)
+			projection := r.ProjectDeclaration(declaration)
+			if !projection.Complete {
+				return nil, fmt.Errorf("type projection unavailable: %s", projection.Error)
+			}
+			response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "declaration": declaration, "declarations": r.ProjectionDeclarations(projection), "types": projection.Types, "rows": projection.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete}
+			usage, err := r.ValidateProjectionResponse(projection, response)
 			if err != nil {
 				return nil, err
 			}
-			diagnostics := r.Diagnostics
-			diagnosticsTruncated := len(diagnostics) > 100
-			if diagnosticsTruncated {
-				diagnostics = diagnostics[:100]
-			}
-			return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "declaration": declaration, "declarations": declarations, "declarationsTruncated": declarationsTruncated, "types": r.Types, "rows": r.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionError": r.TypeProjectionError, "bindings": bindings, "bindingsTruncated": bindingsTruncated, "diagnostics": diagnostics, "diagnosticsTruncated": diagnosticsTruncated}, nil
+			response["typeProjectionUsage"] = usage
+			return response, nil
 		}
 		return nil, fmt.Errorf("unknown symbol %s; check the file for diagnostics", args.Symbol)
 	}
 	if err := checkSymbolMetadata(*symbol); err != nil {
 		return nil, err
 	}
-	declarations, declarationsTruncated, err := boundedDeclarations(r.Declarations)
+	projection := r.ProjectSymbol(symbol)
+	if !projection.Complete {
+		return nil, fmt.Errorf("type projection unavailable: %s", projection.Error)
+	}
+	bindings, err := r.SymbolBindings(symbol)
 	if err != nil {
 		return nil, err
 	}
-	diagnostics := r.Diagnostics
-	if len(diagnostics) > 100 {
-		diagnostics = diagnostics[:100]
+	response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "symbol": symbol, "declarations": r.ProjectionDeclarations(projection), "types": projection.Types, "rows": projection.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete, "bindings": bindings}
+	usage, err := r.ValidateProjectionResponse(projection, response)
+	if err != nil {
+		return nil, err
 	}
-	return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "symbol": symbol, "declarations": declarations, "declarationsTruncated": declarationsTruncated, "types": r.Types, "rows": r.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionError": r.TypeProjectionError, "bindings": bindings, "bindingsTruncated": bindingsTruncated, "diagnostics": diagnostics, "diagnosticsTruncated": len(r.Diagnostics) > 100}, nil
+	response["typeProjectionUsage"] = usage
+	return response, nil
 }
 func readSource(root, relative string) ([]byte, error) {
 	canonicalRoot, err := filepath.EvalSymlinks(root)

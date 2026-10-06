@@ -21,12 +21,19 @@ type GraphEdge struct {
 	Span    Span   `json:"span"`
 }
 type DependencyGraph struct {
-	SchemaVersion int         `json:"schemaVersion"`
-	Revision      string      `json:"revision"`
-	Target        string      `json:"target"`
-	Nodes         []GraphNode `json:"nodes"`
-	Edges         []GraphEdge `json:"edges"`
-	Limitations   []string    `json:"limitations"`
+	SchemaVersion          int              `json:"schemaVersion"`
+	Revision               string           `json:"revision"`
+	Target                 string           `json:"target"`
+	Nodes                  []GraphNode      `json:"nodes"`
+	Edges                  []GraphEdge      `json:"edges"`
+	Types                  []TypeNode       `json:"types,omitempty"`
+	Rows                   []RowNode        `json:"rows,omitempty"`
+	Declarations           []Declaration    `json:"declarations,omitempty"`
+	TypeProjectionLimits   ProjectionLimits `json:"typeProjectionLimits"`
+	TypeProjectionUsage    ProjectionUsage  `json:"typeProjectionUsage"`
+	TypeProjectionComplete bool             `json:"typeProjectionComplete"`
+	TypeProjectionError    string           `json:"typeProjectionError,omitempty"`
+	Limitations            []string         `json:"limitations"`
 }
 
 type providerBinding struct {
@@ -40,26 +47,75 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	if !r.Checked {
 		return nil, fmt.Errorf("dependency graphs require checked source")
 	}
+	const maxGraphNodes = 1000
+	const maxGraphEdges = 2000
+	if len(r.checkedServices)+len(r.checkedProviders)+len(r.Symbols) > maxGraphNodes {
+		return nil, fmt.Errorf("dependency graph exceeds %d nodes; use selected inspection", maxGraphNodes)
+	}
 	g := &DependencyGraph{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Nodes: []GraphNode{}, Edges: []GraphEdge{}, Limitations: []string{"single-file static graph; includes deferred recipe construction, not execution order", "provider recipes and explicit value identities are represented without general memoized acquisition; fallible acquisition, lifecycle-safe arbitrary capture and cycle solving are not implemented", "node IDs containing offsets are scoped to the semantic revision"}}
 	nodes := map[string]bool{}
+	var graphErr error
+	metadataBytes := 0
+	project := func(checked checkedExpression) ValueType {
+		base := r.projector.projectCheckedBase(checked)
+		if graphErr != nil {
+			return base
+		}
+		if _, err := r.projector.checkedCompatibilitySize(checked, base, r.projectionLimits().CompatibilityBytes-metadataBytes); err != nil {
+			graphErr = err
+			return base
+		}
+		return r.projector.projectChecked(checked)
+	}
 	add := func(id, kind, name string, span Span, contract *ValueType) {
+		if graphErr != nil {
+			return
+		}
 		if !nodes[id] {
+			if len(g.Nodes) >= maxGraphNodes {
+				graphErr = fmt.Errorf("dependency graph exceeds %d nodes", maxGraphNodes)
+				return
+			}
+			wire := GraphNode{ID: id, Kind: kind, Name: name, Span: span, Contract: contract}
+			size, err := encodedSize(wire, r.projectionLimits().CompatibilityBytes-metadataBytes)
+			metadataBytes += size
+			if err != nil {
+				graphErr = err
+				return
+			}
 			nodes[id] = true
 			g.Nodes = append(g.Nodes, GraphNode{ID: id, Kind: kind, Name: name, Span: span, Contract: contract})
 		}
 	}
 	edge := func(from, to, kind, service string, span Span) {
+		if graphErr != nil {
+			return
+		}
+		if len(g.Edges) >= maxGraphEdges {
+			graphErr = fmt.Errorf("dependency graph exceeds %d edges", maxGraphEdges)
+			return
+		}
 		g.Edges = append(g.Edges, GraphEdge{from, to, kind, service, span})
 	}
-	services := append(append([]*Service{}, builtins()...), r.Program.Services...)
-	for _, s := range services {
+	serviceNames := make([]string, 0, len(r.checkedServices))
+	for name := range r.checkedServices {
+		serviceNames = append(serviceNames, name)
+	}
+	slices.Sort(serviceNames)
+	for _, name := range serviceNames {
+		s := r.checkedServices[name]
 		add("service:"+s.Name, "service", s.Name, s.Span, nil)
 	}
-	providers := append(append([]*Provider{}, builtinProviders()...), r.Program.Providers...)
-	for _, p := range providers {
+	providerNames := make([]string, 0, len(r.checkedProviders))
+	for name := range r.checkedProviders {
+		providerNames = append(providerNames, name)
+	}
+	slices.Sort(providerNames)
+	for _, name := range providerNames {
+		p := r.checkedProviders[name]
 		var constructor *ValueType
 		if providerConstructed(p) {
-			contract := providerContract(p)
+			contract := project(r.checkedProviderRoots[p])
 			constructor = &contract
 		}
 		add("provider:"+p.Name, "provider", p.Name, p.Span, constructor)
@@ -79,13 +135,13 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	var block func(*Block, string, map[string]providerBinding)
 	var expr func(*Expr, string, map[string]providerBinding) string
 	expr = func(e *Expr, owner string, locals map[string]providerBinding) string {
-		if e == nil {
+		if e == nil || graphErr != nil {
 			return ""
 		}
 		id := owner
 		if e.Type.Effect || e.Kind == "run" || e.Kind == "scope" || e.Kind == "fork" {
 			id = fmt.Sprintf("expression:%s:%d:%s", owner, e.Span.Offset, e.Kind)
-			t := e.Type
+			t := project(e.checked)
 			add(id, e.Kind, e.Name, e.Span, &t)
 			edge(owner, id, "contains", "", e.Span)
 			for _, req := range e.Type.Services {
@@ -108,7 +164,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		block(e.Else, id, cloneStringMap(locals))
 		if e.Kind == "call" && e.Text == "provider-constructor" {
 			recipe := fmt.Sprintf("provider-recipe:%s:%d", owner, e.Span.Offset)
-			t := e.Type
+			t := project(e.checked)
 			add(recipe, "provider-recipe", e.Left.Name, e.Span, &t)
 			providerOrigins[e] = providerBinding{id: recipe, recipe: true}
 			edge(id, recipe, "constructs", e.Left.Name, e.Span)
@@ -117,7 +173,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		if e.Kind == "run" && e.Type.Type.Kind == "provider" {
 			if recipe, ok := providerOrigin(e.Left, locals, providerOrigins, nodes); ok && recipe.recipe {
 				provider := "provider-value:" + id
-				t := e.Type
+				t := project(e.checked)
 				// The value materialized by `run` is reusable and has no
 				// unresolved row of its own. Each run gets its own identity,
 				// even when it executes the same lazy constructor recipe.
@@ -136,7 +192,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			provider := binding.id
 			if !ok {
 				provider = fmt.Sprintf("provider-value:%s:%d", owner, e.Right.Span.Offset)
-				t := e.Right.Type
+				t := project(e.Right.checked)
 				add(provider, "provider-value", e.Right.Name, e.Right.Span, &t)
 			}
 			edge(id, provider, "provides", e.Name, e.Span)
@@ -172,16 +228,14 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	for _, p := range r.Program.Providers {
 		for _, f := range p.Methods {
 			id := "provider-method:" + p.Name + "." + f.Name
-			t := contract(f)
-			if providerConstructed(p) {
-				// Captured constructor requirements are overlaid at invocation;
-				// they are not part of the service method's public row.
-				t.Services = nil
-			}
+			t := project(r.checkedFunctions[f].contract)
 			add(id, "provider-method", p.Name+"."+f.Name, f.Span, &t)
 			edge("provider:"+p.Name, id, "contains", "", f.Span)
 			block(f.Body, id, map[string]providerBinding{})
 		}
+	}
+	if graphErr != nil {
+		return nil, graphErr
 	}
 	incoming := map[string][]string{}
 	for _, relationship := range g.Edges {
@@ -202,6 +256,30 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		relationships := incoming[g.Nodes[i].ID]
 		slices.Sort(relationships)
 		g.Nodes[i].Incoming = slices.Compact(relationships)
+	}
+	contracts := make([]ValueType, 0, len(g.Nodes))
+	for _, node := range g.Nodes {
+		if node.Contract != nil {
+			contracts = append(contracts, *node.Contract)
+		}
+	}
+	projection := r.ProjectValues(contracts)
+	if !projection.Complete {
+		return nil, fmt.Errorf("type projection unavailable: %s", projection.Error)
+	}
+	g.Types = projection.Types
+	g.Rows = projection.Rows
+	g.Declarations = r.ProjectionDeclarations(projection)
+	g.TypeProjectionLimits = projection.Limits
+	g.TypeProjectionUsage = projection.Usage
+	g.TypeProjectionComplete = projection.Complete
+	g.TypeProjectionError = projection.Error
+	if projection.Complete {
+		if usage, err := r.ValidateProjectionResponse(projection, g); err != nil {
+			return nil, err
+		} else {
+			g.TypeProjectionUsage = usage
+		}
 	}
 	return g, nil
 }

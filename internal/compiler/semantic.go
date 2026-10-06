@@ -14,19 +14,20 @@ type ValueType struct {
 	Type    TypeRef `json:"type"`    // canonical identity projection
 	// Contract is the complete checked value identity. Type remains the
 	// success/result accessor used by compatibility clients.
-	Contract    TypeRef              `json:"contract,omitempty"`
-	Identity    string               `json:"identity,omitempty"`
-	Effect      bool                 `json:"effect"`
-	Errors      []string             `json:"failures"`
-	Services    []string             `json:"requirements"`
-	FailureRow  string               `json:"failureRow,omitempty"`
-	ServiceRow  string               `json:"serviceRow,omitempty"`
-	Callable    *CallableType        `json:"callable,omitempty"`
-	Application *ApplicationIdentity `json:"application,omitempty"`
-	Evaluation  EvaluationRows       `json:"-"`
-	Ownership   []OwnershipFact      `json:"ownership,omitempty"`
-	Captures    []OwnershipFact      `json:"captures,omitempty"`
-	Child       []OwnershipFact      `json:"childOwnership,omitempty"`
+	Contract        TypeRef              `json:"contract,omitempty"`
+	Identity        string               `json:"identity,omitempty"`
+	Effect          bool                 `json:"effect"`
+	Errors          []string             `json:"failures"`
+	Services        []string             `json:"requirements"`
+	FailureRow      string               `json:"failureRow,omitempty"`
+	ServiceRow      string               `json:"serviceRow,omitempty"`
+	Callable        *CallableType        `json:"callable,omitempty"`
+	Application     *ApplicationIdentity `json:"application,omitempty"`
+	Evaluation      EvaluationRows       `json:"-"`
+	Ownership       []OwnershipFact      `json:"ownership,omitempty"`
+	Captures        []OwnershipFact      `json:"captures,omitempty"`
+	Child           []OwnershipFact      `json:"childOwnership,omitempty"`
+	ProjectionError string               `json:"projectionError,omitempty"`
 }
 
 // EvaluationRows describe requirements incurred while evaluating an
@@ -211,22 +212,41 @@ type Timings struct {
 	TotalMicros  int64 `json:"totalMicros"`
 }
 type Result struct {
-	ModuleSum            []byte        `json:"-"`
-	Bindings             []Binding     `json:"bindings,omitempty"`
-	SchemaVersion        int           `json:"schemaVersion"`
-	Revision             string        `json:"revision"`
-	Target               string        `json:"target"`
-	Checked              bool          `json:"checked"`
-	Diagnostics          []Diagnostic  `json:"diagnostics"`
-	Symbols              []Symbol      `json:"symbols"`
-	Declarations         []Declaration `json:"declarations,omitempty"`
-	Types                []TypeNode    `json:"types,omitempty"`
-	Rows                 []RowNode     `json:"rows,omitempty"`
-	TypeProjectionBudget int           `json:"typeProjectionBudget"`
-	TypeProjectionError  string        `json:"typeProjectionError,omitempty"`
-	Timings              Timings       `json:"timings"`
-	Program              *Program      `json:"-"`
-	facts                map[*Expr]ExpressionFacts
+	ModuleSum              []byte           `json:"-"`
+	Bindings               []Binding        `json:"bindings,omitempty"`
+	SchemaVersion          int              `json:"schemaVersion"`
+	Revision               string           `json:"revision"`
+	Target                 string           `json:"target"`
+	Checked                bool             `json:"checked"`
+	Diagnostics            []Diagnostic     `json:"diagnostics"`
+	Symbols                []Symbol         `json:"symbols"`
+	Declarations           []Declaration    `json:"declarations,omitempty"`
+	Types                  []TypeNode       `json:"types,omitempty"`
+	Rows                   []RowNode        `json:"rows,omitempty"`
+	TypeProjectionBudget   int              `json:"typeProjectionBudget"`
+	TypeProjectionLimits   ProjectionLimits `json:"typeProjectionLimits"`
+	TypeProjectionUsage    ProjectionUsage  `json:"typeProjectionUsage,omitempty"`
+	TypeProjectionComplete bool             `json:"typeProjectionComplete"`
+	TypeProjectionError    string           `json:"typeProjectionError,omitempty"`
+	Timings                Timings          `json:"timings"`
+	Program                *Program         `json:"-"`
+	facts                  map[*Expr]ExpressionFacts
+	canonical              *canonicalSnapshot
+	checkedProviders       map[string]*Provider
+	checkedServices        map[string]*Service
+	projector              *checker
+	checkedSymbols         map[string]checkedSymbol
+	checkedFunctions       map[*Function]checkedSymbol
+	checkedProviderRoots   map[*Provider]checkedExpression
+	publicationRefused     bool
+	publicationUsage       ProjectionUsage
+}
+
+type checkedSymbol struct {
+	contract      checkedExpression
+	body          checkedExpression
+	declaration   *Function
+	contributions []Contribution
 }
 
 type ExpressionFacts struct {
@@ -304,6 +324,7 @@ type checker struct {
 	reasons                 []Contribution
 	region                  string
 	suppressDiagnostics     bool
+	publicationBytes        int
 }
 
 const maxTypeProjectionNodes = 4096
@@ -2010,13 +2031,6 @@ func typeRef(name string) TypeRef {
 	}
 	return ref
 }
-func contract(f *Function) ValueType {
-	// Graph construction is a public/query boundary. The checked declaration
-	// projection is already canonical; this helper remains for compatibility
-	// with graph callers and older package tests.
-	return publicValue(f.Contract)
-}
-
 func providerTypeRef(p *Provider) TypeRef {
 	ref := typeRef("provider:" + p.Service)
 	ref.Declaration = "provider:" + currentModuleIdentity + ":" + p.Name
@@ -2024,9 +2038,8 @@ func providerTypeRef(p *Provider) TypeRef {
 }
 
 func providerContract(p *Provider) ValueType {
-	// Provider contracts are populated from the canonical provider-recipe
-	// projection during checking. Keep this as a projection shim for graph and
-	// compatibility callers; it never reconstructs a semantic contract.
+	// This compatibility shim preserves the compact checked provider view.
+	// Graph publication projects the retained numeric recipe roots directly.
 	return publicValue(p.Contract)
 }
 func normalized(names []string) []string {
@@ -2060,7 +2073,7 @@ func CompileFor(source, target string) *Result {
 func CompileAt(source, target, dir string) *Result {
 	start := time.Now()
 	hash := sha256.Sum256([]byte(source))
-	r := &Result{SchemaVersion: SemanticSchemaVersion, Revision: hex.EncodeToString(hash[:]), Target: target, Diagnostics: []Diagnostic{}, Symbols: []Symbol{}, TypeProjectionBudget: maxTypeProjectionNodes, facts: map[*Expr]ExpressionFacts{}}
+	r := &Result{SchemaVersion: SemanticSchemaVersion, Revision: hex.EncodeToString(hash[:]), Target: target, Diagnostics: []Diagnostic{}, Symbols: []Symbol{}, TypeProjectionBudget: maxTypeProjectionNodes, TypeProjectionLimits: defaultProjectionLimits, facts: map[*Expr]ExpressionFacts{}}
 	if target != "go" && target != "js" {
 		r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF110", Message: "unsupported target " + target})
 		return r
@@ -2093,6 +2106,9 @@ func CompileAt(source, target, dir string) *Result {
 		region:                  "invocation",
 	}
 	c.values = newCheckedValueArena(c)
+	r.checkedSymbols = map[string]checkedSymbol{}
+	r.checkedFunctions = map[*Function]checkedSymbol{}
+	r.checkedProviderRoots = map[*Provider]checkedExpression{}
 	checkStart := time.Now()
 	c.check()
 	c.publishTypeNodes()
@@ -2103,38 +2119,16 @@ func CompileAt(source, target, dir string) *Result {
 }
 
 func (c *checker) publishTypeNodes() {
-	if len(c.typeNodes) > maxTypeProjectionNodes {
-		c.result.TypeProjectionError = fmt.Sprintf("canonical type projection exceeds %d nodes", maxTypeProjectionNodes)
-		return
-	}
-	nodes := append([]*semanticTypeNode{}, c.typeNodes...)
-	slices.SortFunc(nodes, func(a, b *semanticTypeNode) int {
-		return strings.Compare(c.typeNodeID(a.ID), c.typeNodeID(b.ID))
-	})
-	for _, node := range nodes {
-		if node == nil {
-			continue
-		}
-		args := make([]string, 0, len(node.Args))
-		for _, arg := range node.Args {
-			args = append(args, c.typeNodeID(arg))
-		}
-		rowFailure, rowService := "", ""
-		if node.FailureRow != emptyRowID {
-			rowFailure = c.rowNodeID(node.FailureRow)
-		}
-		if node.ServiceRow != emptyRowID {
-			rowService = c.rowNodeID(node.ServiceRow)
-		}
-		result := ""
-		if node.Result != invalidTypeID {
-			result = c.typeNodeID(node.Result)
-		}
-		c.result.Types = append(c.result.Types, TypeNode{ID: c.typeNodeID(node.ID), Kind: node.Kind, Name: node.Name, Declaration: node.Declaration, Mode: node.Mode, Args: args, Result: result, FailureRow: rowFailure, ServiceRow: rowService})
-	}
-	rows := append([]RowNode{}, c.rows...)
-	slices.SortFunc(rows, func(a, b RowNode) int { return strings.Compare(a.ID, b.ID) })
-	c.result.Rows = append(c.result.Rows, rows...)
+	c.result.projector = c
+	c.result.checkedProviders = c.providers
+	c.result.checkedServices = c.services
+	c.result.canonical = c.canonicalSnapshot()
+	projection := c.result.ProjectAllTypes()
+	c.result.Types = projection.Types
+	c.result.Rows = projection.Rows
+	c.result.TypeProjectionUsage = projection.Usage
+	c.result.TypeProjectionComplete = projection.Complete
+	c.result.TypeProjectionError = projection.Error
 }
 func (c *checker) diagnostic(code, message string, span Span) {
 	if c.suppressDiagnostics {
@@ -2487,7 +2481,9 @@ func (c *checker) providerSignature(p *Provider) {
 			c.diagnostic("EF102", "unknown service "+name, p.Span)
 		}
 	}
-	p.Contract = publicValue(c.projectChecked(c.checkedProvider(p, true)))
+	checked := c.checkedProvider(p, true)
+	c.result.checkedProviderRoots[p] = checked
+	p.Contract = c.projectCheckedBase(checked)
 }
 
 // providerFunction checks a method with the constructor's captured
@@ -2694,10 +2690,14 @@ func (c *checker) node(id TypeID) *semanticTypeNode {
 }
 
 func (c *checker) rowLabels(id RowID) []string {
+	return append([]string(nil), c.retainedRowLabels(id)...)
+}
+
+func (c *checker) retainedRowLabels(id RowID) []string {
 	if id == emptyRowID || int(id) > len(c.rows) {
 		return nil
 	}
-	return append([]string{}, c.rows[id-1].Labels...)
+	return c.rows[id-1].Labels
 }
 
 func rowIdentityKey(labels []string) string {
@@ -2989,9 +2989,6 @@ func (c *checker) shallowRefForID(id TypeID) TypeRef {
 	if c.result != nil {
 		ref.Scope = c.result.Revision
 	}
-	for _, arg := range node.Args {
-		ref.ArgIDs = append(ref.ArgIDs, c.typeNodeID(arg))
-	}
 	return ref
 }
 
@@ -3022,17 +3019,51 @@ func (c *checker) displayTypeID(id TypeID) string {
 }
 
 func (c *checker) projectEvaluation(e ExpressionEvaluation) EvaluationRows {
-	return EvaluationRows{Failures: c.rowLabels(e.failureRowID()), Requirements: c.rowLabels(e.serviceRowID())}
+	return EvaluationRows{Failures: c.retainedRowLabels(e.failureRowID()), Requirements: c.retainedRowLabels(e.serviceRowID())}
 }
 
 func (c *checker) projectChecked(e checkedExpression) ValueType {
+	v := c.projectCheckedBase(e)
+	if _, err := c.checkedCompatibilitySize(e, v, defaultProjectionLimits.CompatibilityBytes); err != nil {
+		v.ProjectionError = err.Error()
+		return v
+	}
+	if e.callableDecl != nil {
+		callable := callableIdentity(c, e.callableDecl)
+		callable.Failures = c.rowLabels(e.failureRow())
+		callable.Requirements = c.rowLabels(e.serviceRow())
+		callable.Result = c.ref(e.resultID())
+		callable.Signature = c.typeNodeID(e.contractID())
+		v.Callable = callable
+	}
+	if e.application != nil {
+		application := *e.application
+		application.Arguments = append([]TypeRef{}, e.application.Arguments...)
+		v.Application = &application
+	}
+	shapeID := e.resultID()
+	if e.kind() == checkedFiberValue {
+		shapeID = e.contractID()
+	}
+	v.Type = c.ref(shapeID)
+	v.Contract = c.ref(e.contractID())
+	v.Errors = c.rowLabels(e.failureRow())
+	v.Services = c.rowLabels(e.serviceRow())
+	v.Evaluation = EvaluationRows{Failures: c.rowLabels(e.evaluation.failureRowID()), Requirements: c.rowLabels(e.evaluation.serviceRowID())}
+	v.Child = cloneFacts(e.child)
+	return v
+}
+
+// projectCheckedBase is the compact compatibility view used by internal lint,
+// graph classification and ownership consumers. Complete expanded metadata is
+// materialized only for bounded selected queries or declaration publication.
+func (c *checker) projectCheckedBase(e checkedExpression) ValueType {
 	resultID := e.resultID()
 	contractID := e.contractID()
 	if resultID == invalidTypeID || contractID == invalidTypeID {
-		return c.projectChecked(c.checkedData("invalid"))
+		return c.projectCheckedBase(c.checkedData("invalid"))
 	}
-	result := c.ref(resultID)
-	contract := c.ref(contractID)
+	contract := c.identityRef(contractID)
 	shapeID := resultID
 	if e.kind() == checkedFiberValue {
 		shapeID = contractID
@@ -3046,39 +3077,34 @@ func (c *checker) projectChecked(e checkedExpression) ValueType {
 		// Type is the value shape used by compatibility clients. A Fiber keeps
 		// its wrapper shape; recipes expose their eventual result shape while
 		// Contract carries the complete deferred contract.
-		Type:     c.ref(shapeID),
+		Type:     c.identityRef(shapeID),
 		Contract: contract,
 		Identity: e.identity,
 		// Callable declarations expose their declared callable mode for the
 		// compatibility projection. Expression values derive execution category
 		// solely from the canonical recipe/provider-recipe node above.
 		Effect:     e.isEffect() || (e.callableDecl != nil && e.callableDecl.Effect),
-		Errors:     c.rowLabels(e.failureRow()),
-		Services:   c.rowLabels(e.serviceRow()),
+		Errors:     c.retainedRowLabels(e.failureRow()),
+		Services:   c.retainedRowLabels(e.serviceRow()),
 		FailureRow: c.rowNodeID(e.failureRow()),
 		ServiceRow: c.rowNodeID(e.serviceRow()),
 		Evaluation: c.projectEvaluation(e.evaluation),
 		Ownership:  e.ownershipFacts(),
 		Captures:   e.captureFacts(),
-		Child:      cloneFacts(e.child),
+		Child:      e.child,
 	}
 	if v.Identity == "" {
 		v.Identity = c.typeNodeID(contractID)
 	}
-	if e.callableDecl != nil {
-		callable := callableIdentity(c, e.callableDecl)
-		callable.Failures = c.rowLabels(e.failureRow())
-		callable.Requirements = c.rowLabels(e.serviceRow())
-		callable.Result = result
-		callable.Signature = c.typeNodeID(contractID)
-		v.Callable = callable
-	}
-	if e.application != nil {
-		application := *e.application
-		application.Arguments = append([]TypeRef{}, e.application.Arguments...)
-		v.Application = &application
-	}
 	return v
+}
+
+func (c *checker) identityRef(id TypeID) TypeRef {
+	n := c.node(id)
+	if n == nil {
+		return TypeRef{Kind: "invalid"}
+	}
+	return TypeRef{ID: c.typeNodeID(id), Kind: n.Kind, Name: n.Name, Declaration: n.Declaration, Scope: c.result.Revision}
 }
 
 func (c *checker) recontractRows(e checkedExpression, failure, service RowID) CheckedValue {
@@ -3114,7 +3140,9 @@ func (c *checker) invocationContract(e checkedExpression, effect bool) checkedEx
 }
 
 func (c *checker) typeRef(name string) TypeRef {
-	return c.ref(c.canonicalRef(typeRef(name)))
+	// Source declarations retain identity references. Structural argument
+	// arrays belong to an admitted public projection, not to signature checks.
+	return c.identityRef(c.canonicalRef(typeRef(name)))
 }
 
 func (c *checker) sameType(actual checkedExpression, expected string) bool {
@@ -3431,21 +3459,44 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	f.Captures = summarizeInvocationFacts(actual.captureFacts())
 	declared := c.checkedFunction(f, true, false)
 	declared.identity = f.Identity
+	c.result.checkedFunctions[f] = checkedSymbol{contract: declared, body: actual, declaration: f}
 	if record {
-		f.Contract = publicValue(c.projectChecked(declared))
-		f.Actual = publicValue(c.projectChecked(actual))
-		c.result.Symbols = append(c.result.Symbols, Symbol{
+		checked := checkedSymbol{contract: declared, body: actual, declaration: f, contributions: c.reasons}
+		c.result.checkedSymbols[f.Identity] = checked
+		prototype := Symbol{
 			Name:          f.Name,
 			Identity:      f.Identity,
-			Params:        publicParams(f.Params),
-			Contract:      publicValue(c.projectChecked(declared)),
-			Actual:        publicValue(c.projectChecked(actual)),
+			Params:        f.Params,
+			Contract:      c.projectCheckedBase(declared),
+			Actual:        c.projectCheckedBase(actual),
 			Span:          f.Span,
-			Contributions: append([]Contribution{}, c.reasons...),
-		})
+			Contributions: c.reasons,
+		}
+		var size int
+		var err error
+		if !c.result.publicationRefused {
+			size, err = c.checkedSymbolSize(prototype, checked, defaultProjectionLimits.CompatibilityBytes-c.publicationBytes)
+		}
+		if err != nil || c.result.publicationRefused {
+			if !c.result.publicationRefused {
+				c.result.publicationUsage.CompatibilityBytes = c.publicationBytes + size
+			}
+			c.result.publicationRefused = true
+			prototype.Contract.ProjectionError = "whole-source compatibility projection exceeds limits"
+			prototype.Actual.ProjectionError = prototype.Contract.ProjectionError
+		} else {
+			c.publicationBytes += size
+			prototype.Contract = c.projectChecked(declared)
+			prototype.Actual = c.projectChecked(actual)
+			prototype.Params = publicParams(f.Params)
+		}
+		// The declaration and public symbol share this immutable boundary view.
+		// Checking and emission continue to use the retained numeric facts.
+		f.Contract, f.Actual = prototype.Contract, prototype.Actual
+		c.result.Symbols = append(c.result.Symbols, prototype)
 	} else {
-		f.Contract = publicValue(c.projectChecked(declared))
-		f.Actual = publicValue(c.projectChecked(actual))
+		f.Contract = c.projectCheckedBase(declared)
+		f.Actual = c.projectCheckedBase(actual)
 	}
 }
 
@@ -3798,7 +3849,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		}
 		argumentRefs := make([]TypeRef, 0, len(argumentTypes))
 		for _, argument := range argumentTypes {
-			argumentRefs = append(argumentRefs, c.ref(argument.valueID()))
+			argumentRefs = append(argumentRefs, c.identityRef(argument.valueID()))
 		}
 		callee := e.Left.Name
 		if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
@@ -4035,7 +4086,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		t.executed = t.evaluation
 	}
 	e.checked = t.clone()
-	e.Type = c.projectChecked(t)
+	e.Type = c.projectCheckedBase(t)
 	e.Evaluation = c.projectEvaluation(t.evaluation)
 	e.Identity = t.identity
 	if e.Kind == "run" || e.Kind == "if" || e.Kind == "match" || e.Kind == "scope" || e.Kind == "fork" {
@@ -4286,6 +4337,16 @@ func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool
 func (r *Result) Find(name string) *Symbol {
 	for i := range r.Symbols {
 		if r.Symbols[i].Name == name {
+			if r.projector != nil && r.Symbols[i].Contract.ProjectionError != "" {
+				checked := r.checkedSymbols[r.Symbols[i].Identity]
+				if _, err := r.projector.checkedSymbolSize(r.Symbols[i], checked, r.projectionLimits().CompatibilityBytes); err == nil {
+					selected := r.Symbols[i]
+					selected.Contract = r.projector.projectChecked(checked.contract)
+					selected.Actual = r.projector.projectChecked(checked.body)
+					selected.Params = publicParams(checked.declaration.Params)
+					return &selected
+				}
+			}
 			return &r.Symbols[i]
 		}
 	}
