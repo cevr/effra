@@ -367,7 +367,11 @@ func (c *checker) validateJSDeclarationNames() {
 		occupied[name] = owner
 	}
 	for _, declaration := range c.result.Declarations {
-		validateIdentifier(declaration.Name, "data declaration", declaration.Span)
+		if declaration.Kind == "error" {
+			validateIdentifier(declaration.Name+"Error", "error payload declaration", declaration.Span)
+		} else {
+			validateIdentifier(declaration.Name, "data declaration", declaration.Span)
+		}
 		claim(declaration.Name, "data declaration", declaration.Span)
 	}
 	for _, declaration := range c.result.Declarations {
