@@ -38,6 +38,12 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Host declaration**: A Go or TypeScript declaration supplying the native shape and identity of an imported value or callable.
 
+**Codec** (specified, not yet implemented): A checked witness relating a wire type and a domain type through separately contracted decoding and encoding operations.
+
+**Structural derivation** (specified): Generating a codec's structural rules from canonical checked data declarations and an explicit representation policy.
+
+**Codec transformation** (specified): A checked conversion in a codec's decoding or encoding direction, carrying its own expected failures and required services. The two directions need not be mathematical inverses.
+
 **Binding contract**: Supplemental behavioral facts attached to a host declaration, including its cancellation, failure, resource, and trust policy.
 
 **Request scope**: A fresh owning scope for one HTTP request, linked to connection and server cancellation. Completed shutdown includes its handler cleanup.

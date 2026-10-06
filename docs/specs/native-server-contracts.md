@@ -18,7 +18,13 @@ The existing path-to-string `Http.serve` remains a transport control. Framework 
 
 ## Codec contract
 
-A codec is a typed encode/decode witness derived from canonical primitive and nominal data declarations. Compiler-generated adapters connect source identity to reusable JSON parsing, validation and encoding modules. The compiler does not embed whole runtime algorithms in emitted strings.
+A codec is a typed decode/encode witness with distinct wire and domain types. Rust-style structural derivation from canonical primitive and nominal data declarations is its starting point; Effect-style transformations are part of the required model, not a later substitute for it (owner clarification, 2026-10-06). Compiler-generated adapters connect source identity to reusable parsing, validation and encoding modules. The compiler does not embed whole runtime algorithms in emitted strings.
+
+Keep three composable concerns: derive structural representation, validate/refine values, and transform between representations. A codec can decode a wire string into a nominal identifier or a transport record into a richer ADT; encoding has its own transformation and validation. Pure functions and checked effect functions use the same function/row model. Canonical inspection exposes domain type, wire type, decode failures/services and encode failures/services separately, including their contribution paths. A convenient public spelling must not erase any of these contracts. Structural derivation itself introduces no service requirements.
+
+Composition combines the selected direction's failures and requirements. A decode-only service does not become an encoding requirement merely because both directions share one witness. Transformations remain lazy until the boundary executes them, run in its owning scope, and preserve interruption/defects distinctly from expected validation errors. Decode cancellation and failed encode cleanup must never publish a success response. User transformations are checked source functions, not arbitrary compile-time procedural macros.
+
+Do not assume every codec is a bijection. Specify identity round trips only for representations that support them; normalizing or lossy transformations need explicit canonicalization/equivalence laws and encode rejection where appropriate. Defaults, field renames and version migrations are explicit policy. Derivation cannot silently make a persisted wire-format change safe.
 
 The first profile admits strings, booleans, unit where explicitly represented, full-range i64 via decimal strings, nested records, closed payload enums and declared payload failures. File, Fiber, providers, functions and effect recipes cannot cross this boundary. Recursive layouts remain unsupported. Plans must share canonical type DAG nodes; repeated substructure must not enumerate exponentially many paths.
 
@@ -27,6 +33,8 @@ Before accepting a codec implementation, record executable policy vectors for re
 Decode failure includes bounded field-path and reason information without dumping arbitrary input. Encoding has an honest failure contract. Parsing occurs once per boundary. Stable field/discriminator order establishes the canonical output bytes used by benchmarks.
 
 Acceptance: two unrelated nominal records, a nested payload enum and a payload failure all round-trip or reject through public source programs; negative cases reject malformed or unsupported values. A payload codec specific to the benchmark does not meet this contract.
+
+Transformation acceptance adds a pure string-to-nominal conversion, an explicit normalizing codec, and an effectful conversion with different decode/encode requirements. Test nested composition paths, encode-side rejection, missing service and undeclared failure diagnostics, cancellation with completed cleanup, direction-specific inspection and Go/JS parity. Exercise the same derived/transformed witness through an HTTP boundary and a non-server configuration or stored-data example. Do not add unrelated external work to a benchmark cohort; matched codecs must perform equivalent validation and conversion.
 
 ## HTTP contract
 
