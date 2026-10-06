@@ -8,3 +8,7 @@ Track ownership provenance and reject proven inner-owned File/Fiber escapes, inc
 ## Implementation underway
 
 Implementation starts from integrated data/provider tip `163040c`; predecessor receipts remain under independent review. Bounded provenance follows recipe captures separately from invocation-owned acquisitions and preserves borrowed outer handles. Unknown summaries stay explicit.
+
+## Remote independent review
+
+The independent review of `d2a5a6a` on 2026-10-06 blocks integration. Repairs must cover nested enum projection, execution-owned deferred results and fork results, recovery fallback provenance, field-sensitive helper summaries, bounded structural traversal and dependency-sensitive summary computation. Public source probes demonstrated missed closed-owner errors; existing aggregate tests did not isolate each acceptance case. Keep the task open until repaired source probes and independent review pass.

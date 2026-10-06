@@ -6,7 +6,7 @@ Status: implementation authorized by the owner on 2026-10-05. This extends the p
 
 How does an Effra native server compare with equivalent TypeScript/Effect, native TypeScript and optimized Go servers? Measure whether Effra approaches or exceeds the strongest measured Go baseline, and identify the cost of its guarantees separately from host runtime differences. Use generic original fixtures; public documentation must not name inspected application projects.
 
-The first receipt covers the server features actually admitted by the compiler: path routing, service-backed application work, explicit failure recovery, response construction and owned request/server shutdown. External databases, JSON codecs and streams need subsequent matched fixtures once supported. A constant response alone cannot establish application-level benefits.
+The path-routing server remains a transport control. The required framework receipt follows the [native server contract](native-server-contracts.md): checked JSON codecs, actual Effect HttpApi HTTP endpoints and RpcServer unary RPC, matched typed failures, limits, cancellation and completed shutdown. External databases and streams remain subsequent workloads. A constant response or transport-only control cannot establish framework-level benefits.
 
 ## Equivalence before performance
 

@@ -24,6 +24,8 @@ Advance Effra into a credible Go-backed server language by implementing producti
 
 - [Bundled standard library capability and language contracts](stdlib-parity.md): owner-directed Effect-grade library distribution, with compiler-enforced semantics, ordinary inspectable library contracts and staged behavioral parity.
 
+- [Native codecs and typed server contracts](native-server-spec.md): reusable bundled interfaces, typed function values, checked codecs, managed endpoints and compatible unary RPC precede actual framework measurements.
+
 ## Foundation implementation receipts
 
 - [Reasoned semantic lint suppression](foundation-lint.md): named next-line advice suppression requires a reason; malformed, unknown and unused directives diagnose without disabling compiler checks.

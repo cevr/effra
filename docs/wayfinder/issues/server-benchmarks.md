@@ -1,4 +1,4 @@
-<!-- {"id": "server-benchmarks", "title": "Matched server performance against TypeScript and optimized Go", "status": "open", "labels": ["implementation:spec"], "parent": "map", "assignee": "server_benchmarks", "blocked_by": ["foundation-conformance"]} -->
+<!-- {"id": "server-benchmarks", "title": "Matched server performance against TypeScript and optimized Go", "status": "open", "labels": ["implementation:spec"], "parent": "map", "assignee": "framework_benchmarks", "blocked_by": ["native-server-conformance"]} -->
 # Matched server performance against TypeScript and optimized Go
 
 ## Question
