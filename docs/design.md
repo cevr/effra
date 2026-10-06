@@ -6,23 +6,15 @@ The [application showcases](showcases.md) apply this direction to ADTs, state tr
 
 ## Recommendation
 
-Build a language for servers and applications with Borgo-style algebraic data types and Go interoperability, native lazy Effects, compiler-checked error and service rows, and explicit execution profiles. The JavaScript target lowers to the existing Effect library; the Go target uses managed goroutines and Go GC. Keep the language's semantic and introspection model independent of either backend's runtime.
+Build a language for servers and applications with algebraic data types and Go interoperability, native lazy Effects, compiler-checked error and service rows, and explicit execution profiles. The JavaScript target lowers to the existing Effect library; the Go target uses managed goroutines and Go GC. Keep the language's semantic and introspection model independent of either backend's runtime.
 
 The proposition is: **an explicit, inspectable language for servers and applications where the compiler knows what a program returns, how it can fail, what services it needs, and which targets can execute it.** Operability, agent introspection, clear guardrails, server/OS access, and compile speed are foundational requirements.
 
-Silk already explores Effect as a language. Effra's distinguishing choice would be an inspectable server/application model with JavaScript/Effect and Go backends. Servers are the intended systems scope; kernels, bare-metal execution, and hard real-time guarantees are outside the requirements. Managed memory is appropriate for both targets.
+Servers are the intended systems scope; kernels, bare-metal execution, and hard real-time guarantees are outside the requirements. Managed memory is appropriate for both targets.
 
-## What the sources establish
+## Design constraints
 
-| Source | Verified contribution | Boundary |
-| --- | --- | --- |
-| Borgo | Rust-like syntax, ADTs, matching, inference, Option/Result, Go code generation and imported package declarations | Existing function types have arguments, generic bounds, and a return type; no dedicated effect row. Its concurrency snapshot emits ordinary Go goroutines. |
-| Effect | Lazy `Effect<A,E,R>`, typed failures, service provision, Layers, structured child fibers, scope finalization | These semantics are delivered by a TypeScript library and runtime. They do not automatically arise from syntax or from Go's scheduler. |
-| Silk | Native lazy effects, explicit execution, typed failures, lexical service provision, ownership-aware requirements | Current alpha emits through LLVM; fibers are cooperative and single-threaded. It is not a Go-targeting language. |
-
-Evidence: [Borgo overview](https://github.com/borgo-lang/borgo), [Borgo function types](https://github.com/borgo-lang/borgo/blob/3b9f01578941fb00ed93756e2fadc009feb50128/compiler/src/type_.rs), [Borgo concurrency lowering](https://github.com/borgo-lang/borgo/blob/3b9f01578941fb00ed93756e2fadc009feb50128/compiler/test/snapshot/codegen-emit/concurrency.exp), [Effect core contract](https://github.com/Effect-TS/effect/blob/bd00773b252970e576ffe0cce17b84c10ce3c81f/packages/effect/src/Effect.ts), [Effect Layers](https://github.com/Effect-TS/effect/blob/bd00773b252970e576ffe0cce17b84c10ce3c81f/packages/effect/src/Layer.ts), [Silk effects](https://silklang.org/docs/language/effects), [Silk alpha boundaries](https://silklang.org/docs/language/alpha-status).
-
-Local source snapshots inspected: Borgo `3b9f01578941fb00ed93756e2fadc009feb50128`; Effect `bd00773b252970e576ffe0cce17b84c10ce3c81f` (package manifest 4.0.1). The research agent also inspected Silk `4986f56e7c7f14d87b07473ab7ecdc00b038eb98`, including its target definitions and standard-library Effects. None of these projects' examples were executed for this research.
+Deferred effects need explicit execution and checked failure/service rows. Host declarations should supply routine signatures automatically, while behavior and resource ownership remain explicit contracts. Scoped concurrency must be established by the runtime, rather than assumed from the target scheduler. Application data needs closed sums and exhaustive interpretation; external data still needs runtime decoding.
 
 ## Surface language
 
@@ -62,7 +54,7 @@ Use familiar syntax for data: structs, enums, exhaustive `match`, generics, Opti
 
 Track two normalized rows alongside the success type: failures and required service keys. A row is an unordered, duplicate-free set that may have an open tail parameter.
 
-This is a proposed Effra design, not a claim that the inputs share this representation. Silk has a requirement-row kind; its failure parameter is an ordinary type that can be a union. See [Silk Effect contracts](https://silklang.org/docs/reference/effect-contracts).
+This is a proposed Effra design. Failure and requirement rows have distinct roles; the current checker admits closed named rows.
 
 | Composition | Success | Failure row | Requirement row |
 | --- | --- | --- | --- |
@@ -121,9 +113,7 @@ The aim is a tool-answerable question for each failure: what is happening, who o
 
 Ship an optional `ef mcp` entry point alongside the CLI and language server. MCP is a protocol adapter over the same semantic workspace service, not a second analyzer or a collection of shell commands that scrape compiler output. That workspace service owns incremental parsing/checking, package summaries, stable symbol handles, revisions, and explanations. It serves CLI, LSP, MCP, and build clients without changing the standalone compiler's availability.
 
-The useful Zerolang precedent is its compiler-mediated graph query/edit loop: semantic node handles, revision/hash expectations, checked patches, focused inspection, and version-matched agent guidance. Its architecture makes the graph authoritative and source text a projection. Sources: [Zerolang graph architecture](https://zerolang.ai/concepts/graph-architecture), [semantic edits](https://github.com/vercel-labs/zerolang/blob/7e1a64d27cc37671df31c6370890bce86f5135e1/docs/articles/concepts/semantic-vs-text.md), [bundled guidance](https://zerolang.ai/install).
-
-For Effra, retain `.ef` text as the authoritative, editor/Git-friendly representation. Build a rebuildable semantic index and give agents compiler-checked semantic operations over that index. Human edits invalidate and rebuild the affected index entries; there is no separately authoritative graph file to import/export. This is a design choice, not a claim that Zerolang's graph-first approach is equivalent.
+Keep `.ef` text as the authoritative, editor/Git-friendly representation. Build a rebuildable semantic index with focused queries, revision expectations, checked edit plans and compiler-version-matched guidance. Human edits invalidate affected index entries; no separately authoritative graph file is required.
 
 Proposed initial MCP tools (not implemented):
 
@@ -149,7 +139,7 @@ Semantic edits support deliberate operations such as rename, add a declared prov
 
 Do not store the whole program graph in the agent context. A typical loop is inspect the relevant symbol, explain the missing contract, plan a checked edit, apply it against the expected revision, then run focused checks/tests. Every step returns a compact receipt. MCP read queries reuse the existing incremental index and do not implicitly invoke the backend or rebuild the project. Heavy checks/builds are explicit operations with separate timings and result handles.
 
-Expose compiler-version-matched language rules, diagnostics, examples, supported semantic edits, and target/foreign-binding contracts as searchable MCP resources and CLI documentation. Derive these from compiler-owned metadata where possible. This borrows Zerolang's bundled guidance idea and prevents an agent from inventing syntax accepted by a different compiler version.
+Expose compiler-version-matched language rules, diagnostics, examples, supported semantic edits, and target/foreign-binding contracts as searchable MCP resources and CLI documentation. Derive these from compiler-owned metadata where possible. This prevents an agent from inventing syntax accepted by a different compiler version.
 
 Runtime inspection initially stays observational. It connects to explicit managed runtime endpoints; it cannot infer a complete task graph from arbitrary Go goroutines or unmanaged JS promises. The JS backend instruments Effect execution/supervision; the Go backend instruments its own managed tasks. Both project their observable facts into a common inspection schema with backend-specific fields where necessary. Mutating runtime controls, if added, are distinct operations with explicit scope and policy.
 
@@ -201,7 +191,7 @@ Goroutines introduce parallel access to captured values. Adopt immutable shared 
 
 The runtime result should distinguish `Success(A)` from failure causes containing typed failures E, defects, or interruption. Ordinary recovery handles E. An explicit supervision/sandbox operation may inspect the full cause. Preserve multiple concurrent failures and cleanup failures instead of silently keeping only the first.
 
-Recoverable Go panics can be captured at managed task boundaries as defects and trigger cleanup. Fatal runtime failures, process termination, and arbitrary unmanaged goroutine panics cannot receive the same guarantee. This deliberately differs from Silk's fatal-trap model, where traps may bypass finalization. See [Effect Cause](https://github.com/Effect-TS/effect/blob/bd00773b252970e576ffe0cce17b84c10ce3c81f/packages/effect/src/Cause.ts) and [Silk failure boundaries](https://silklang.org/docs/language/effects).
+Recoverable Go panics can be captured at managed task boundaries as defects and trigger cleanup. Fatal runtime failures, process termination, and arbitrary unmanaged goroutine panics cannot receive the same guarantee.
 
 ## Compiler and Go runtime
 
@@ -257,7 +247,7 @@ These are desired budgets, not existing results. Compare cold builds, warm build
 
 ## Go interoperability is a semantic boundary
 
-Borgo's importer recognizes `(T,error)` and `(T,bool)` return patterns, but those signatures alone do not tell you whether a call performs I/O, returns nullable pointers, retains callbacks, mutates shared state, or honors cancellation. Its importer also has unsupported cases. See [Borgo importer](https://github.com/borgo-lang/borgo/blob/3b9f01578941fb00ed93756e2fadc009feb50128/importer/importer.go).
+A `(T,error)` or `(T,bool)` signature alone does not establish I/O behavior, nullability, callback retention, shared mutation or cancellation. Unsupported signatures need focused diagnostics; behavioral assertions remain separate from native declaration import.
 
 Generate package declarations and direct Go wrappers from Go's type information, then attach explicit binding metadata for:
 
@@ -275,7 +265,7 @@ Start with curated fmt/logging, os/filesystem, net/http, context, and database/s
 
 Recommendation: design one typed semantic core and target-neutral IR, with separate JavaScript/Effect and Go lowering paths. The JS backend emits ordinary Effect library code, with TypeScript declarations and proposed source maps for consumers. Native Go executables are the default deliverable. The first slice used Effect's existing runtime; the prototype now also builds native Go executables. Continue the Go backend for ecosystem interoperability and parallel managed services. Keep scheduling and concrete service implementations backend-specific; both may use managed memory.
 
-Gleam demonstrates separate external implementations for different targets and compilation errors when an operation lacks a selected-target implementation. That is a useful precedent for explicit backend boundaries; Gleam targets Erlang/JavaScript, not Go. Source: [Gleam multi-target externals](https://gleam.run/documentation/externals/#multi-target-externals).
+An operation must have an implementation for the selected backend. Foreign signature compatibility does not prove runtime behavior, and target restrictions must remain explicit.
 
 Keep three layers explicit:
 
@@ -308,7 +298,7 @@ Mapped edits need particular care: #4712 permits write-back only through exact v
 3. **One real server.** Run an HTTP/database application with Layer-managed startup/shutdown, concurrency, bounded queues, selective retry, and replacement services in tests. Verify JS and Go artifacts, the Go race detector, and agent-visible type/ownership/wait explanations.
 4. **Interop and operability.** Add the content-mapper adapter, language-aware LSP/MCP edits, stale-plan/crash-recovery checks, runtime task/scope inspection, typed JS exports, and Go-facing exports. Grow curated foreign bindings and streams after lifecycle semantics are stable.
 
-Use Borgo's existing front end/backend as a prototype substrate if it helps answer these questions. Its current type representation has no dedicated error/service rows, so a fork requires deep inference and IR changes. Choose long-term reuse after the vertical slice reveals whether extending that architecture remains coherent. Silk is a reference for native Effects; its LLVM and ownership design is not a ready-made Go backend.
+An operation must have an implementation for the selected backend. Foreign signature compatibility does not prove runtime behavior, and target restrictions must remain explicit.
 
 Defer freestanding/no-GC execution, a complete Rust-like ownership checker, general resumable algebraic-effect handlers, a replacement Go scheduler, durable workflows, and the full Effect package ecosystem. Managed task/resource ownership and safe cross-task mutation boundaries remain required. Checked service/failure rows are not the same as arbitrary continuation-capturing effect handlers.
 

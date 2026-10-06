@@ -58,7 +58,7 @@ Parameterized providers with dependencies and shared scoped initialization would
 
 ## 2. ADTs make state and decisions explicit
 
-**Proposed.** Gent uses schema-backed phase states and an exhaustive runtime projection. T3 Code uses tagged transition decisions that a later service interprets. Both are good candidates for native sums and matching.
+**Proposed.** Phase states own distinct payloads; transition policies return decisions that a later service interprets. Native sums and exhaustive matching should make these obligations explicit.
 
 ```rust
 enum RunState {
@@ -104,7 +104,7 @@ This representation prevents malformed state combinations. It does not prove tha
 
 ## 3. Boundary types still need decoding
 
-**Proposed.** T3 Code validates stored event payloads, metadata and envelopes; Gent validates interaction records and decisions. Removing their schema imports must not remove those checks.
+**Proposed.** Stored event payloads, metadata, envelopes and interaction decisions require validation. Native data declarations must preserve runtime decoding at those boundaries.
 
 ```rust
 enum EventV1 {
@@ -147,7 +147,7 @@ Cancellation remains cooperative. Child failures and cleanup defects remain obse
 
 ## 5. A readable consumer of an owned event stream
 
-**Proposed.** T3 Code's replay/live stream implementation handles subscription ordering, buffering, duplicate filtering, acknowledgements and overflow. Effra could simplify its consumer:
+**Proposed.** A replay/live stream needs subscription ordering, buffering, duplicate filtering, acknowledgements and overflow handling. Effra could simplify its consumer:
 
 ```rust
 effect fn forward(cursor: i64) -> ()
@@ -192,7 +192,7 @@ Scopes manage running work and cleanup. They do not supply durable transactions,
 
 ## 7. Infrastructure has a different kind of laziness
 
-**Design exploration.** Alchemy's Output.map constructs a dependency expression. Its resource graph and bindings connect deployment-time resources to runtime capabilities.
+**Design exploration.** A deferred infrastructure output constructs a dependency expression. Resource graphs and bindings connect deployment-time resources to runtime capabilities.
 
 ```rust
 let api = Infra.service("api", ApiProgram)
@@ -210,3 +210,20 @@ This is deliberately separate from ordinary `run`: running an effect inside a se
 The strongest next language slice is records, closed ADTs, payload errors and exhaustive match, followed by explicit codec derivation. It makes state machines and boundary handling clearer without requiring higher-order row inference or a new scheduler. Match checking should use declared variants and local payload types; Go lowering should use tagged data and switches, with JS lowering preserving the same discriminator and coverage.
 
 An implementation receipt should include both-target examples, rejection of missing branches and wrong payloads, imported/public type inspection, and a decode test rejecting malformed external data. Keep compile-stage measurements separate and measure representative ADT/match fixtures before adding inference complexity. Scoped provider graphs and streams can then build on that data model. Infrastructure phase syntax needs a separate design decision.
+
+## 8. Testing through the same service contract
+
+**Runnable on Go and JS.** [testing.ef](../examples/testing.ef) supplies a fixture `Directory`, exercises success and typed recovery, and joins an owned child. The test runner supplies only `Assert`; fixture provision is ordinary checked language code.
+
+```rust
+effect fn test_greeting() -> () throws {AssertionFailed, Missing} uses {Assert} {
+    let actual = run greeting("42").provide<Directory>(FixtureDirectory)
+    run Assert.equalText(actual, "Hello, Ada")
+}
+```
+
+Run `ef test examples/testing.ef`, or add `--target js`. Each case gets a fresh scope and completes child shutdown and cleanup before its result is reported. Assertions report actual/expected values; a failed case does not prevent the next case from running. See [testing contracts](testing.md) for the watchdog and current limits.
+
+## 9. Explain a composition without reading generated code
+
+**Implemented.** `ef graph examples/workflow.ef` exposes requirements, provider implementations, call dependencies and provision boundaries. The same JSON comes from MCP `project.graph`. Recipe nodes include their canonical contracts, so a client can render dependencies or follow incoming edges to find dependents. The graph describes static composition, including deferred calls. Dependent provider acquisition and sharing remain future work.

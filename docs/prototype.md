@@ -70,3 +70,9 @@ On the same Apple M4 Pro / Go 1.27.1 setup, the 10k-line no-import fixture measu
 Four warm public CLI checks of `examples/main.ef` took 4.01–5.33 ms, with no import work. Four checks of `examples/imports.ef` took 50.66–51.81 ms; reported import loading took 45.67–47.08 ms. Four unchanged native builds of the imported example, after one warm-up, took 154.90–157.46 ms. These are distinct tiny fixtures, not matched Go/Effra comparisons. Go toolchain process/export loading dominates the imported check; persistent normalized import summaries remain a priority. Cold builds, edit invalidation regimes and linking attribution remain unmeasured.
 
 Reproduce by timing `./bin/ef check examples/imports.ef` and `./bin/ef build examples/imports.ef` after warm-up; inspect the JSON `timings.importMicros` separately from wall time.
+
+## Default tooling and tests
+
+`lint`, `lint rules`, `query` and `graph` use the same checked model as symbol inspection. MCP adds `project.lint`, `lint.rules`, `code.typeAt`, `project.graph` and `project.tests`; all tools remain read-only. Queries use expression diagnostic anchors, not full source ranges. Graphs describe current self-contained providers, not dependent layer acquisition.
+
+`ef test` discovers checked `test_` effects and supplies `Assert`. Each case owns a fresh scope on both targets, with captured suite output and structured failure reasons. Live host/time capabilities require `--live`; the real process watchdog reports unconfirmed cleanup on forced termination. See [tooling](tooling.md), [testing](testing.md) and [runnable testing example](../examples/testing.ef).

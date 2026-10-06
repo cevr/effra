@@ -23,3 +23,17 @@ Effra describes server programs using explicit, inspectable effect contracts.
 **Binding contract**: Supplemental behavioral facts attached to a host declaration, including its cancellation, failure, resource, and trust policy.
 
 **Request scope**: A fresh owning scope for one HTTP request, linked to connection and server cancellation. Completed shutdown includes its handler cleanup.
+
+## Tooling and testing
+
+**Lint advice**: Optional guidance about an admitted program, distinct from diagnostics that determine whether its contracts are valid.
+
+**Expression anchor**: A source location identifying the expression described by a diagnostic or local type query.
+
+**Dependency graph**: A revision-scoped view of program contracts and the relationships between functions, services and providers. Incoming relationships identify dependents.
+
+**Owning test case**: A checked effect whose normal completion includes shutdown of its children and release of its resources.
+
+**Live test mode**: Explicit permission for a test program to use host capabilities or real program time, distinct from fixture substitution.
+
+**Test watchdog**: A harness deadline independent of program time. Forced termination leaves managed cleanup unconfirmed.

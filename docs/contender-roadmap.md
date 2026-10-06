@@ -10,14 +10,14 @@ ADTs and match are an important next step. The source review shows why they are 
 
 | Real pattern | What Effra already supplies | What blocks a faithful port | Owner |
 | --- | --- | --- | --- |
-| Gent phase state and T3 transition decisions | Explicit function/effect contracts | Records, closed ADTs, payload errors, exhaustive match, usable collections and control flow | Compiler |
-| T3 stored events and Gent interaction records | Failure propagation | Explicit codecs, validation, versioned wire formats, nominal identifiers | Compiler-supported types + codec library + application migrations |
-| Alchemy notification provider and application service adapters | Nominal services and explicit provision | Provider dependencies, constructor inputs, fallible scoped initialization, sharing and cycles | Checker + runtime/provider library |
+| Phase states and transition decisions | Explicit function/effect contracts | Records, closed ADTs, payload errors, exhaustive match, usable collections and control flow | Compiler |
+| Stored events and interaction records | Failure propagation | Explicit codecs, validation, versioned wire formats, nominal identifiers | Compiler-supported types + codec library + application migrations |
+| Notification providers and service adapters | Nominal services and explicit provision | Provider dependencies, constructor inputs, fallible scoped initialization, sharing and cycles | Checker + runtime/provider library |
 | Existing Go clients, database pools and processes | Primitive package-function imports, partial-result retention, reviewed context forwarding | Named types, pointers/nil, fields, receiver methods, interfaces, common native numbers and multi-results | Go importer/type compatibility + adapter contracts |
-| T3 replay/live consumer | Scopes, child joining and cancellation | Bounded queues/streams, subscription acquisition, acknowledgement and overflow protocol | Runtime primitives + stream library + application protocol |
-| Gent admission and T3 durable receipts | Managed execution | Transactions, identity/correlation, deduplication, outbox delivery and crash recovery | Application/storage services |
+| Replay/live consumers | Scopes, child joining and cancellation | Bounded queues/streams, subscription acquisition, acknowledgement and overflow protocol | Runtime primitives + stream library + application protocol |
+| Admission and durable receipts | Managed execution | Transactions, identity/correlation, deduplication, outbox delivery and crash recovery | Application/storage services |
 | Application latest-work and process supervision | Owned replacement and native executable entry | Process/pipe/watch adapters, generation-safe publication, restart policy and bounded output | Platform adapters + concurrency library + application policy |
-| Agent-guided maintenance | CLI/MCP contracts, spans and revisions | Multi-file identities, type-at-position, imported/native type detail, editor diagnostics and runtime/source correlation | Compiler/workspace tools + runtime instrumentation |
+| Agent-guided maintenance | CLI/MCP contracts, byte-anchor types, lint, static dependency graphs and revisions | Multi-file identities, full expression ranges, imported/native type detail, editor diagnostics and runtime/source correlation | Compiler/workspace tools + runtime instrumentation |
 
 The prototype's actual barriers are concrete: signature checking admits only a few primitive/handle types; providers with requirements receive EF103; imported calls support only restricted free-function shapes; recovery accepts a pure replacement value. See [checker](../internal/compiler/semantic.go), [Go import normalization](../internal/compiler/imports.go), [implemented limits](prototype.md), and [runtime/HTTP contracts](runtime.md).
 
@@ -51,7 +51,7 @@ Allow implementations to depend on other services, accept configuration and init
 
 Add typed effectful error handlers so callers can inspect payloads, translate failures or make a bounded recovery decision. Add constrained effect-function types and row composition as real library combinators need them. Preserve readable public rows and local checking instead of requiring broad higher-order inference up front.
 
-**Exit gate:** construct a database-backed service and a notification service from explicit configuration; share their dependencies; substitute in-memory providers for tests; fail startup honestly; and close children before shared resources. Missing dependencies and provider cycles should explain the construction path. The Alchemy-inspired example should consume a bound capability without exposing deployment plumbing to the domain function.
+**Exit gate:** construct a database-backed service and a notification service from explicit configuration; share their dependencies; substitute in-memory providers for tests; fail startup honestly; and close children before shared resources. Missing dependencies and provider cycles should explain the construction path. The notification example should consume a bound capability without exposing deployment plumbing to the domain function.
 
 ### 4. A small server library with deep capabilities
 
@@ -77,8 +77,8 @@ Add a language server, source maps and a multi-file semantic workspace shared by
 
 | Adoption fixture | Must prove | Where the comparison comes from |
 | --- | --- | --- |
-| JSON/SQL API with a background delivery worker | Validated input, payload errors, native SQL pool/transaction use, shared providers, honest auth policy, bounded concurrency, typed HTTP responses and completed SIGTERM shutdown | Service adapters and Alchemy-style capability composition |
-| Agent event bridge with persisted commands | Versioned decoding, correlated decisions, transactional receipts/outbox, subscribe-before-replay ordering, bounded ACK retention, disconnect cleanup and restart recovery | T3 Code and Gent |
+| JSON/SQL API with a background delivery worker | Validated input, payload errors, native SQL pool/transaction use, shared providers, honest auth policy, bounded concurrency, typed HTTP responses and completed SIGTERM shutdown | Service adapters and scoped capability composition |
+| Agent event bridge with persisted commands | Versioned decoding, correlated decisions, transactional receipts/outbox, subscribe-before-replay ordering, bounded ACK retention, disconnect cleanup and restart recovery | Durable orchestration patterns |
 | Build/process supervisor | Named host handles, pipe/watch acquisition, bounded output, failure classification, cancellation-to-exit completion and generation-safe replacement | Generic application process/latest-work patterns |
 
 Implement each with a real external adapter and an interchangeable local provider. Compare it with an equivalent Go or Effect implementation using the same protocol, storage and workload. Record signature/wrapper duplication, conversions, readable contracts, debugging steps, compile/edit latency, runtime costs and recovery behavior. A smaller happy-path snippet with weaker semantics is not a passing port.
@@ -91,6 +91,12 @@ These fixtures are acceptance criteria, not claims that the corresponding compil
 
 SQL transactions, migrations, command receipts, correlation and outbox protocols can use existing databases and libraries behind explicit services. Effra needs to express and inspect their contracts; it does not need a new database or a universal durable workflow engine.
 
-Alchemy's deployment state and Output graph remain framework responsibilities. Native `output` syntax is an optional experiment after the application gates pass; a library interface can first preserve its phase semantics. The Go server path should not require a TypeScript checker, a deployment framework or complete JS host parity.
+Deployment state and deferred output graphs remain framework responsibilities. Native `output` syntax is an optional experiment after the application gates pass; a library interface can first preserve its phase semantics. The Go server path should not require a TypeScript checker, a deployment framework or complete JS host parity.
 
 The next concrete compiler unit is records/closed ADTs/payload errors/exhaustive match, designed together with native representation. In parallel as a development discipline, establish the package/import measurements that prevent this richer type system from sacrificing the Go-like iteration speed that motivated the project.
+
+## Implemented first tooling and testing slice
+
+Native lint, a rule catalog, byte-anchor type queries, static dependency graphs and checked test discovery now share the compiler model through CLI/MCP. `ef test` supplies assertions and executes each case with a fresh owning scope on both targets. The process watchdog reports unconfirmed cleanup honestly. See [tooling](tooling.md) and [testing](testing.md).
+
+The next testing slice needs causal latches, scheduler-backed virtual time and scoped scratch fixtures. The next ownership slice needs source-level provenance for handles: runtime rejection of a closed File/Fiber is currently stronger than static escape checking. Neither is replaced by more lint rules.

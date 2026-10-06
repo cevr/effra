@@ -27,7 +27,7 @@ Scope: establishment and runtime integration receipts. This ledger does not clai
 
 ## Prior art
 
-`PRIOR_ARTS.md` is the authoritative comparison index. Its Settled section carries adopted/rejected verdicts with implementation status; its To survey section carries open research. Establishment reused the inspected sources in `docs/design.md` and `docs/interop.md` and refreshed focused Borgo, Effect and Zerolang source reads. It did not run their examples or resolve their remaining questions.
+`PRIOR_ARTS.md` is the authoritative comparison index. Its Settled section carries adopted/rejected verdicts with implementation status; its To survey section carries open research. Establishment reused the inspected sources in `docs/design.md` and `docs/interop.md` and refreshed focused compiler, runtime and semantic-tooling source reads. It did not execute external application examples or resolve their remaining questions.
 
 ## Project sweeps
 
@@ -101,7 +101,7 @@ Current source count using the Baseline pathspec (after integration):
 
 ## Application showcase review
 
-- Refreshed Alchemy and T3 Code source caches; pulled Gent main to `5bc4bafd7` with a clean fast-forward. Read the local private application without changing it. Public source snapshots and focused citations are in `docs/research/effect-native-showcases.md`; generic original examples are in `docs/showcases.md`.
+- Refreshed public source caches and the requested local source checkout. Read application implementations without changing unrelated work. Generic pattern findings are in `docs/research/effect-native-showcases.md`; original examples are in `docs/showcases.md`.
 - Added runnable Go/JS workflows for three-service composition and completed task replacement. The public smoke checks execute both examples and inspect the workflow’s exact failure/requirement contract.
 - Proposed ADTs, exhaustive match, payload errors, codec derivation, stream consumers, durable admission results and phase-aware infrastructure outputs remain clearly separated from implemented syntax. The recommendation is to implement the data-model slice before provider graphs/streams or deployment syntax.
 - Preserved explicit distinctions: decision values versus failures; static sums versus runtime decoding; scope ownership versus durable transactions; effect execution versus deployment Output resolution. No third-party deployments or private application code were published.
@@ -113,3 +113,10 @@ Current source count using the Baseline pathspec (after integration):
 - Proposed five build areas with exit gates: data/package contracts; real host objects and managed adapters; dependent provider construction and recovery; deep server capabilities; fast inspection/development. Measurements and tooling apply throughout, rather than after feature work.
 - Proposed three adoption fixtures: JSON/SQL API, durable agent event bridge and process supervisor. Each must preserve the source protocol under failure and compare costs against an equivalent implementation. This is an assessment, not compiler/runtime implementation or proof of production readiness.
 - Kept transactions, migrations, replay/ACK policies, correlation and deployment graphs with their owning libraries/application services. No HITL decision was closed.
+
+## Native tooling and testing slice
+
+- Shared compiler model now supplies lint/rules, byte-anchor type queries and a static function/service/provider graph through CLI/MCP. Compiler soundness errors remain mandatory; lint never reports unchecked types as authoritative.
+- Added primitive assertions, checked test discovery and Go/JS execution with fresh case scopes, structured causes, bounded captured output and an independent real watchdog. Live host/time use is explicit. Virtual scheduling, causal synchronization, scoped fixtures and static handle escape provenance remain carried gaps.
+- Public docs describe generic application patterns; no application-specific comparisons remain. ADTs, matching, codecs and dependent provider construction remain proposals.
+- Gate receipts include public CLI/MCP parity, fixture substitution, assertion failure followed by a passing case, watchdog expiry and existing runtime lifecycle conformance. Owner decisions remain open.

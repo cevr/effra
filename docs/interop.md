@@ -1,6 +1,6 @@
 # Host interop proposal
 
-The user identified binding boilerplate as a central adoption risk, drawing on ReScript and Gleam, and prefers TypeScript's ability to consume an existing ecosystem. The wider host representation design remains open. The prototype now imports Go package functions with primitive signatures automatically; TypeScript imports remain a proposal.
+Binding boilerplate is a central adoption risk. Effra should consume existing host declarations automatically while making behavioral trust explicit. The wider host representation design remains open. The prototype now imports Go package functions with primitive signatures automatically; TypeScript imports remain a proposal.
 
 ## Proposed default
 
@@ -53,11 +53,9 @@ Foreign inspection should report source package/version, host signature, the ada
 
 Go-only compilation must not start a TypeScript checker. Cache host type summaries and reuse checker sessions for JS interop; editor projections should not force whole-project work on each build. Import/type-query cost belongs in compiler performance measurements.
 
-## Why the Gleam comparison matters
+## Declaration trust
 
-Gleam requires explicit type annotations on external declarations and documents that it cannot verify the foreign implementation's return types or even existence. Its external types are opaque, so manipulation generally needs external functions. That is a concrete precedent for the boilerplate/trust trade-off the user wants Effra to avoid; it does not establish that every Gleam integration is difficult.
-
-Source: [Gleam externals guide](https://gleam.run/documentation/externals/).
+Handwritten externals repeat signatures without proving implementation behavior. Routine APIs should import native declarations; exceptional unsupported interfaces can require an explicit trusted adapter. Opaque types need a usable field/method story or they merely relocate the wrapper burden.
 
 ## Implemented Go slice
 

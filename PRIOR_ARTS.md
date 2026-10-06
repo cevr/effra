@@ -1,45 +1,39 @@
-# Prior arts
+# Pattern and guardrail index
 
-Established 2026-10-05. These are focused comparisons against Effra's north stars, not feature checklists. Read Settled first; survey only remaining questions. Source snapshots below were inspected during the initial research; their examples were not executed. A borrowed idea marked **direction** is not an implemented ability.
+Effra's public architecture is described through generic patterns. This index records the decisions that source reviews inform, without making an external application's structure part of the language contract. Read [NORTH_STAR.md](NORTH_STAR.md) and [GLOSSARY.md](GLOSSARY.md) alongside it.
 
-## Repos
+## Patterns
 
-| Slug | Snapshot | Sweep | Read it for | Compare with |
-| --- | --- | --- | --- | --- |
-| [borgo-lang/borgo](https://github.com/borgo-lang/borgo) | `3b9f01578941fb00ed93756e2fadc009feb50128` | architecture, guardrails | Go emission, native data, import translation: `README.md`, `compiler/src/type_.rs`, `compiler/src/codegen.rs`, `importer/importer.go`; concurrency fixture `compiler/test/snapshot/codegen-emit/concurrency.exp` | `internal/compiler/syntax.go`, `semantic.go`, `emit_go.go`; `docs/interop.md` |
-| [Effect-TS/effect](https://github.com/Effect-TS/effect) | `bd00773b252970e576ffe0cce17b84c10ce3c81f` (4.0.1) | architecture, Lifecycle behavior, guardrails | Deferred execution, provision, child ownership, scopes, composite causes: `packages/effect/src/Effect.ts`, `Scope.ts`, `Fiber.ts`, `Cause.ts`, `Layer.ts`, and the relevant implementation in `internal/effect.ts` | `internal/compiler/semantic.go`, `emit.go`, `emit_go.go`; `docs/design.md` lifecycle/Layer sections; managed runtime as it lands |
-| [vercel-labs/zerolang](https://github.com/vercel-labs/zerolang) | `7e1a64d27cc37671df31c6370890bce86f5135e1` | architecture, Inspection parity | Focused compiler queries, revisions, semantic edits, bundled guidance: `README.md`, `docs/articles/concepts/graph-architecture.md`, `semantic-vs-text.md`, `native/zero-c/src/program_graph_query.c`, `program_graph_patch.c` | `internal/mcp/server.go`, `internal/compiler/semantic.go`; `docs/mcp.md`, `docs/design.md` semantic-edit proposal |
-| [alchemy-run/alchemy](https://github.com/alchemy-run/alchemy) | `1431ef2e1f9e09dfa9fb2c5e221821e51b727327` | architecture, guardrails | Service/binding construction and unresolved deployment Outputs | [showcases](docs/showcases.md), [source review](docs/research/effect-native-showcases.md) |
-| [pingdotgg/t3code](https://github.com/pingdotgg/t3code) | `cfa4f765ec05950a032b6c1cf9cdfff0c2391545` | architecture, Lifecycle behavior | Decisions, decoded events, replay/live budgets and durable receipts | [showcases](docs/showcases.md), [source review](docs/research/effect-native-showcases.md) |
-| [cevr/gent](https://github.com/cevr/gent) | `5bc4bafd7b5a5374dbb0b9893c6d9f2d94c50fb7` | architecture, Inspection parity | Schema-backed phase state, exhaustive projection and owned turn admission | [showcases](docs/showcases.md), [source review](docs/research/effect-native-showcases.md) |
-
-## Other sources
-
-| Source | Sweep | Read it for |
+| Pattern | Adopted direction | Boundary / receipt |
 | --- | --- | --- |
-| [Silk effects](https://silklang.org/docs/language/effects), [contracts](https://silklang.org/docs/reference/effect-contracts), [alpha status](https://silklang.org/docs/language/alpha-status); initial research snapshot `4986f56e7c7f14d87b07473ab7ecdc00b038eb98` | architecture, Lifecycle behavior | Native lazy effects, requirement rows versus failure types, explicit execution, fiber/foreign ownership, and fatal-trap cleanup limits. Compare `docs/design.md` and Effra's checker/runtime contracts. |
-| [Go compiler](https://go.dev/src/cmd/compile/README), [build cache](https://pkg.go.dev/cmd/go#hdr-Build_and_test_caching), [go/types](https://pkg.go.dev/go/types), [go/importer](https://pkg.go.dev/go/importer), [context](https://go.dev/blog/context) | Compile performance, architecture, Lifecycle behavior | Package export data, cache inputs, module-aware type loading, native signatures, cancellation versus completion. Compare `cmd/ef/main.go`, compiler timing/interop seams, and scope ownership. |
-| [TypeScript compatibility](https://www.typescriptlang.org/docs/handbook/type-compatibility.html), [content mapper PR #4712](https://github.com/microsoft/typescript-go/pull/4712), [declaration maps #63936](https://github.com/microsoft/TypeScript/pull/63936), [mapper middleware #64583](https://github.com/microsoft/TypeScript/pull/64583) | architecture, Inspection parity, guardrails | Automatic structural interop and its trust limits; projected editor/diagnostic integration. Compare `docs/interop.md` and `docs/design.md#typescript-content-mapper-integration`; no mapper integration is implemented here. |
-| [Gleam externals](https://gleam.run/documentation/externals/) | architecture, guardrails | Explicit foreign annotations, opaque external values, target adapters, and unverified implementation types/existence. Compare Effra's proposed automatic declaration import and explicit behavior metadata. |
+| Lazy effect values | Explicit execution, checked failures and nominal requirements | Shared checker and both emitters; portable conformance tests |
+| Native declaration import | Consume host signatures automatically | Primitive Go free functions work; behavior metadata is a reviewed assertion |
+| Owned concurrency | A scope shuts down children before releasing resources | Go runtime and JS ownership adapter; cancellation is a request |
+| Focused compiler tooling | CLI/MCP share checked contracts, revisions, lint and graphs | Single-file model; no persistent semantic workspace or checked editing yet |
+| Closed application states | Payload-owning alternatives and exhaustive interpretation | Records, ADTs and matching remain proposed |
+| Explicit wire decoding | Static types do not validate stored or incoming data | Codec and migration library remains proposed |
+| Dependent providers | Construction has its own requirements, failures and owner | Current providers are self-contained; sharing/cycles/acquisition remain open |
+| Bounded event delivery | Track items, bytes and in-flight acknowledgement | Streams, queues and delivery budgets remain proposed |
+| Durable command admission | Correlation, transactional receipts and outbox recovery | Application/storage obligations, not a syntax guarantee |
+| Owned tests | Fresh case scope, assertions, completed shutdown and preserved causes | `ef test` works on Go/JS; causal latches and virtual time remain open |
+
+See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native-showcases.md), [tooling](docs/tooling.md), [testing](docs/testing.md) and [adoption gates](docs/contender-roadmap.md).
 
 ## Settled
 
-- **Adopted:** deferred Effects with named failure and service contracts, and explicit provision/recovery. Implemented in `internal/compiler/semantic.go`, JS lowering in `emit.go`, Go lowering in `emit_go.go`; the shared corpus is in `go_backend_test.go`. This borrows Effect's model without claiming its entire library is implemented.
-- **Adopted direction:** Borgo demonstrates Go emission and host declaration import; retain native host identities where supported. Reject guessed `(T,error)`/`(T,bool)` reinterpretation on **Adoption through host interop**: partial values must survive until an explicit adaptation. Primitive host imports now work; named host representations remain pending ([interop proposal](docs/interop.md#go-integration)).
-- **Adopted:** scopes own child/resource lifetimes; Go context forwards cancellation but does not establish completed shutdown. The Go protocol lives in `runtime/effra`, with acquisition-close, child-cleanup, timeout and cause tests in `runtime_test.go`; `examples/lifecycle.ef` exercises emitted programs. The JS policy adapter now uses pinned Effect scheduling/scopes; shared tests cover child-before-parent cleanup, unobserved failures and timeout cleanup defects. Detailed full-provider comparison remains open.
-- **Rejected:** Silk's fatal-trap cleanup limits as Effra's ordinary managed-failure policy, on **Owned lifetimes**. Proposed managed panic containment preserves cleanup and separate failure/defect/interruption causes; fatal runtime/process termination remains outside that guarantee.
-- **Adopted:** focused compiler inspection and stale-revision rejection, inspired by Zerolang. CLI/MCP share source contracts through `internal/compiler/semantic.go` and `internal/mcp/server.go`. **Rejected direction:** graph-authoritative storage under the source-authority rule; semantic editing remains future work. No complete patch atomicity claim or Zerolang MCP implementation was verified.
-- **Adopted direction:** TypeScript-style consumption of host declarations with explicit provenance, rather than per-symbol handwritten wrappers. **Rejected:** treating structural compatibility as behavioral soundness, on **Explicit contracts and clear guardrails** ([interop proposal](docs/interop.md#typescript-integration)).
-- **Adopted direction:** a TypeScript content mapper can support projected editor queries/diagnostics. **Rejected:** using it as the Effra semantic checker or assuming it supplies runtime JS emission or a structured type-query bridge, on **Operability and agent introspection**. Actual integration is pending.
-- **Rejected direction:** Gleam-style external signatures as the default for routine host APIs, on **Adoption through host interop**. Explicit declarations remain appropriate for exceptional unsupported/trusted interfaces; automatic imports still need honest behavioral limits.
-- **Adopted direction:** Go package summaries and deterministic changed-byte emission for fast builds. Changed-byte writes exist in `cmd/ef/main.go`; Effra multi-package summaries, import caches, and matched build-performance evidence do not yet exist.
-- **Adopted:** explicit Go runtime adaptation via FromGo/OrFail preserves native partial results and forwards context, tested with real `io.ReadFull` in `runtime/effra/stdlib_test.go` and `examples/go-interop`. Primitive `.ef` imports now consume Go export archives with binding provenance; a compiled local SDK fixture exercises context forwarding. Complex third-party SDK adoption remains open.
+- `.ef` text remains authoritative. Dependency graphs are rebuildable views with revision-scoped expression IDs.
+- Compiler soundness diagnostics cannot be disabled by optional lint. Unchecked files do not receive authoritative expression types or dependency graphs.
+- Lazy construction does not execute an effect. Unused local recipes receive lint advice; bare discarded recipes remain compiler errors.
+- A managed timeout waits for shutdown. A process watchdog may force termination and must report cleanup as unconfirmed.
+- Host signatures do not prove purity, cancellation, retained-reference safety or resource ownership. Partial native results survive explicit adaptation.
+- Tests supply only assertions implicitly. Fixture services stay explicit, and live host/time capabilities require opt-in. This is a capability check, not an OS sandbox.
+- Application-specific state machines, identity, transaction and overflow policies remain explicit even when syntax becomes shorter.
 
 ## To survey
 
-- **Explicit contracts and clear guardrails:** how do Silk and Effect preserve higher-order failure/requirement composition without allowing exported contracts to drift? Compare proposed open rows with the current closed-row checker.
-- **Operability and agent introspection:** which Zerolang query/patch invariants should Effra preserve with authoritative text, and how should revision checks include imported contracts and crash recovery? Audit implementation, not only its documentation.
-- **Exceptionally fast compilation / Native Go server programs:** which Go export-data and cache inputs are sufficient for module-aware host imports and private-edit reuse? Establish matched build fixtures before selecting numeric budgets.
-- **Adoption through host interop:** test one real Go SDK import without redeclared signatures, including native values, partial results, cancellation metadata, and dependency changes. Separately validate the TypeScript resolved-type bridge; content mapping alone does not answer it.
-- **Owned lifetimes:** compare Effect's child/scope/cause behavior against Go acquisition-close races, unjoined child failure, timeout cleanup, and cooperative foreign calls. Record deliberate differences and runnable receipts.
-- **Honest target capabilities:** which lifecycle operations have equivalent observable contracts on Go and pinned Effect? Validate a shared corpus before advertising parity; target-specific features may remain explicit.
+- Introduce structured type identities, records, closed sums and checked matches without whole-program inference.
+- Track handle ownership provenance so proven inner-scope escapes receive static diagnostics while borrowed outer handles remain valid.
+- Add provider construction contracts, shared acquisition and cycle explanations; enrich the same dependency graph rather than inventing another analyzer.
+- Add reasoned named lint suppressions with stale/unused checks, and revision-bound fixes validated before they are offered. Preserve comments in formatting.
+- Build scheduler-backed test time, causal synchronization and scoped fixtures; prove they control sleeps and timeout operators together.
+- Measure native import reuse and matched cold/warm/private-edit build regimes before making speed claims.

@@ -2,7 +2,7 @@
 
 An experimental language for servers, combining Go's native executable target with explicit effect contracts and owned lifetimes. Write `.ef` files and build them with `ef`.
 
-Effra explores ideas from [Borgo](https://github.com/borgo-lang/borgo) and [Effect](https://github.com/Effect-TS/effect): deferred programs, explicit failures and dependencies, scopes that own children and resources, and host interop without repeating native function signatures. Types and guardrails are inspectable through the same compiler model used by the CLI and MCP.
+Effra combines a small explicit language with deferred programs, explicit failures and dependencies, scopes that own children and resources, and host interop without repeating native function signatures. Types and guardrails are inspectable through the same compiler model used by the CLI and MCP.
 
 The direction is **Go-like directness, algebraic data types, and explicit Effect-style contracts**. The [showcase guide](docs/showcases.md) connects these ideas to real application patterns and labels which features remain proposals.
 
@@ -104,7 +104,7 @@ fn status(state: RunState) -> string {
 }
 ```
 
-Each alternative owns its payload. Adding a variant should make incomplete matches fail to check. Decoding external data still needs an explicit codec; a static enum is not runtime validation. The [showcases](docs/showcases.md) cover ADTs, payload errors, decoded events, owned streams, durable commands and infrastructure outputs, with [source comparisons](docs/research/effect-native-showcases.md) from Alchemy, T3 Code and Gent.
+Each alternative owns its payload. Adding a variant should make incomplete matches fail to check. Decoding external data still needs an explicit codec; a static enum is not runtime validation. The [showcases](docs/showcases.md) cover ADTs, payload errors, decoded events, owned streams, durable commands and infrastructure outputs, with a [pattern review](docs/research/effect-native-showcases.md) of the policies each example must preserve.
 
 ## Go interop
 
@@ -149,3 +149,18 @@ python3 scripts/wayfinder.py frontier
 ```
 
 The local Markdown tracker has [documented claims and dependency conventions](docs/wayfinder/README.md).
+
+## Default development tools
+
+The CLI and read-only MCP share the checked compiler model:
+
+```sh
+./bin/ef lint examples/workflow.ef --strict
+./bin/ef lint rules
+./bin/ef graph examples/workflow.ef
+./bin/ef query examples/latest-task.ef 64
+./bin/ef test examples/testing.ef
+./bin/ef test examples/testing.ef --target js
+```
+
+[Tooling](docs/tooling.md) describes lint severity, dependency edges and bounded MCP results. [Testing](docs/testing.md) covers assertions, explicit fixture providers, owned test scopes and the real-time watchdog. Records, ADTs and match remain proposed; these tools do not imply those features have shipped.
