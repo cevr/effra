@@ -538,6 +538,9 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 		}
 		err = writeResponse(res)
 		if errors.Is(err, errMCPResponseTooLarge) && (formatCall || semanticCall) {
+			// Bounded tool calls have a nonempty name and use six-byte error codes.
+			// The compact suffix fits ,"method":"tools/call","params":{"name":"x"}}
+			// beside the validated raw ID in every admitted bounded request.
 			if res.Error != nil {
 				// Preserve the JSON-RPC error class and code when its original
 				// message cannot fit beside a near-limit request ID.
@@ -553,10 +556,6 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 				}
 				err = writeResponse(res)
 				if errors.Is(err, errMCPResponseTooLarge) {
-					// With a six-byte code, the compact error suffix is no larger
-					// than ,"method":"tools/call","params":{"name":"x"}}.
-					// Every bounded tool request has at least that envelope
-					// beside its validated raw ID, so the compact response fits.
 					err = writeResponse(compactFormatError(res.ID))
 				}
 			}
