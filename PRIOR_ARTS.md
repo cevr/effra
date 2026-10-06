@@ -10,7 +10,7 @@ Effra's public architecture is described through generic patterns. This index re
 | Native declaration import | Consume host signatures automatically | Primitive Go free functions work; behavior metadata is a reviewed assertion |
 | Owned concurrency | A scope shuts down children before releasing resources | Go runtime and JS ownership adapter; cancellation is a request |
 | Focused compiler tooling | CLI/MCP share checked contracts, revisions, lint and graphs | Single-file model; no persistent semantic workspace or checked editing yet |
-| Closed application states | Payload-owning alternatives and exhaustive interpretation | Records, ADTs and matching remain proposed |
+| Closed application states | Payload-owning alternatives and exhaustive interpretation | Records, closed ADTs and matching are implemented; external decoding remains proposed |
 | Explicit wire decoding | Static types do not validate stored or incoming data | Codec and migration library remains proposed |
 | Dependent providers | Construction has its own requirements, failures and owner | Current providers are self-contained; sharing/cycles/acquisition remain open |
 | Bounded event delivery | Track items, bytes and in-flight acknowledgement | Streams, queues and delivery budgets remain proposed |

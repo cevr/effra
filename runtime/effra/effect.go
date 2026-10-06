@@ -132,9 +132,6 @@ func (f *FiberContext) suspendScheduler() func() {
 	if f == nil || f.turn == nil {
 		return func() {}
 	}
-	if scheduler, ok := f.timerDriver().(*TestScheduler); !ok || scheduler != f.turn {
-		return func() {}
-	}
 	return f.turn.suspend()
 }
 
@@ -218,90 +215,133 @@ func Catch[A any](program Effect[A], tag string, fallback func() A) Effect[A] {
 		return out
 	}
 }
+func normalizeTimerDriver(driver timerDriver) timerDriver {
+	if driver == nil {
+		return liveTimerDriver{}
+	}
+	if scheduler, ok := driver.(*TestScheduler); ok && scheduler == nil {
+		return liveTimerDriver{}
+	}
+	return driver
+}
+
 func Sleep(milliseconds int64) Effect[Unit] {
+	return sleepWithDriver(func(fc *FiberContext) timerDriver { return fc.timerDriver() }, milliseconds)
+}
+
+// SleepWithDriver is the explicit provider boundary used by generated Clock
+// implementations. A nil driver means the live process timer; a test
+// scheduler is scoped to this operation and does not retarget other services.
+func SleepWithDriver(driver timerDriver, milliseconds int64) Effect[Unit] {
+	return sleepWithDriver(func(*FiberContext) timerDriver { return normalizeTimerDriver(driver) }, milliseconds)
+}
+
+func sleepWithDriver(resolve func(*FiberContext) timerDriver, milliseconds int64) Effect[Unit] {
 	return func(fc *FiberContext) Exit[Unit] {
 		if milliseconds < 0 || milliseconds > maxMilliseconds {
 			return Die[Unit](fmt.Errorf("invalid millisecond duration"))
 		}
-		timer := fc.timerDriver().newTimer(time.Duration(milliseconds) * time.Millisecond)
+		driver := normalizeTimerDriver(resolve(fc))
+		timer := driver.newTimer(time.Duration(milliseconds) * time.Millisecond)
 		defer timer.Stop()
 		resume := fc.suspendScheduler()
 		select {
 		case <-timer.C():
 			resume()
-			if scheduler, ok := fc.timerDriver().(*TestScheduler); ok {
+			if scheduler, ok := driver.(*TestScheduler); ok {
 				scheduler.resumeWait(timer.(*virtualTimer))
 			}
 			timer.acknowledge()
 			return Succeed(Unit{})
 		case <-fc.ctx.Done():
 			resume()
-			if scheduler, ok := fc.timerDriver().(*TestScheduler); ok {
+			if scheduler, ok := driver.(*TestScheduler); ok {
 				scheduler.resumeWait(timer.(*virtualTimer))
 			}
 			return Interrupt[Unit](fc.ctx.Err())
 		}
 	}
 }
+
 func Timeout[A any](program Effect[A], milliseconds int64) Effect[A] {
 	return func(fc *FiberContext) Exit[A] {
 		if milliseconds < 0 || milliseconds > maxMilliseconds {
 			return Die[A](fmt.Errorf("invalid millisecond duration"))
 		}
-		driver := fc.timerDriver()
-		timer := driver.newTimer(time.Duration(milliseconds) * time.Millisecond)
-		defer timer.Stop()
+		return TimeoutWithEffect(program, Sleep(milliseconds))(fc)
+	}
+}
+
+// TimeoutWithEffect races managed work against an explicit Scheduler effect.
+// This keeps timeout authority at the Scheduler service boundary: custom
+// schedulers either control the deadline through their effect or return their
+// own failure, while Clock providers remain independent.
+func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A] {
+	return func(fc *FiberContext) Exit[A] {
 		ctx, cancel := context.WithCancel(fc.ctx)
 		defer cancel()
+		driver := fc.timerDriver()
 		childScope := newScopeWithDriver(ctx, fc.scope, driver)
+		timerScope := newScopeWithDriver(ctx, fc.scope, driver)
 		childDone := make(chan Exit[A], 1)
+		timerDone := make(chan Exit[Unit], 1)
 		scheduler, virtual := driver.(*TestScheduler)
 		if virtual {
 			scheduler.reserve()
+			scheduler.reserve()
 		}
 		go func() { childDone <- runScope(childScope, program, virtual) }()
+		go func() { timerDone <- runScope(timerScope, deadline, virtual) }()
 		suspend := fc.suspendScheduler()
-		select {
-		case out := <-childDone:
-			suspend()
-			if virtual {
-				scheduler.resumeWait(timer.(*virtualTimer))
-			}
-			return out
-		case <-timer.C():
-			suspend()
-			if virtual {
-				scheduler.resumeWait(timer.(*virtualTimer))
-			}
-			timer.acknowledge()
-			cancel()
-			childScope.cancel()
-			wait := fc.suspendScheduler()
-			out := <-childDone
-			wait()
+		nonInterrupt := func(c Cause) Cause {
 			retained := Cause{}
-			for _, reason := range out.Cause() {
+			for _, reason := range c {
 				if reason.Kind != "interrupt" {
 					retained = append(retained, reason)
 				}
+			}
+			return retained
+		}
+		waitForOther := func() (Exit[A], Exit[Unit]) {
+			wait := fc.suspendScheduler()
+			child := <-childDone
+			timer := <-timerDone
+			wait()
+			return child, timer
+		}
+		select {
+		case child := <-childDone:
+			suspend()
+			cancel()
+			childScope.cancel()
+			timerScope.cancel()
+			wait := fc.suspendScheduler()
+			timer := <-timerDone
+			wait()
+			return withCleanup(child, nonInterrupt(timer.Cause()))
+		case timer := <-timerDone:
+			suspend()
+			cancel()
+			childScope.cancel()
+			timerScope.cancel()
+			wait := fc.suspendScheduler()
+			child := <-childDone
+			wait()
+			retained := nonInterrupt(child.Cause())
+			if err := fc.ctx.Err(); err != nil {
+				return FromCause[A](append(Cause{{Kind: "interrupt", Err: err}}, retained...))
+			}
+			if timer.IsFailure() {
+				return FromCause[A](append(timer.Cause(), retained...))
 			}
 			return FromCause[A](append(Cause{{Kind: "failure", Failure: &Failure{Tag: "Timeout", Payload: context.DeadlineExceeded}}}, retained...))
 		case <-fc.ctx.Done():
 			suspend()
-			if virtual {
-				scheduler.resumeWait(timer.(*virtualTimer))
-			}
 			cancel()
 			childScope.cancel()
-			wait := fc.suspendScheduler()
-			out := <-childDone
-			wait()
-			retained := Cause{}
-			for _, reason := range out.Cause() {
-				if reason.Kind != "interrupt" {
-					retained = append(retained, reason)
-				}
-			}
+			timerScope.cancel()
+			child, timer := waitForOther()
+			retained := append(nonInterrupt(child.Cause()), nonInterrupt(timer.Cause())...)
 			return FromCause[A](append(Cause{{Kind: "interrupt", Err: fc.ctx.Err()}}, retained...))
 		}
 	}

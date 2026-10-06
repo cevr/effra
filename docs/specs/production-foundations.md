@@ -30,6 +30,7 @@ Use isolated Rifts from the integration branch, no package install without lock 
 - Supply a portable one-shot signal/latch with idempotent completion and cancellable waiting. Tests establish readiness/completion through signals, not fixed sleeps.
 - Introduce an explicit test scheduler/clock seam shared by sleep and timeout/deadline operators. Advancing test time controls owned child sleeps and deadlines. Virtual time cannot stand in for real OS timers.
 - The existing real process watchdog stays independent and reports cleanup as unconfirmed after forced termination. Default fixture mode cannot silently grant foreign host access.
+- A scheduler adjustment crossing sequential sleeps must observe their intermediate registration deadlines; registration-only timer delivery can be exposed separately but is not that adjustment contract.
 - Acceptance: waiter interruption does not complete/cancel an independent signal; scope close releases a waiting child; time advancement wakes the appropriate sleeper, triggers managed timeout and waits for cleanup; advancing a closed test scheduler cannot restart work. No successful result is published before owned cleanup completes.
 
 ## Ownership provenance

@@ -182,12 +182,15 @@ func command(args []string) error {
 	case "inspect", "explain":
 		symbol := r.Find(opts.positional[1])
 		if symbol == nil {
+			if declaration := r.FindDeclaration(opts.positional[1]); declaration != nil {
+				return printJSON(map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "declaration": declaration, "declarations": r.Declarations, "diagnostics": r.Diagnostics})
+			}
 			if !r.Checked {
 				_ = printJSON(r)
 			}
 			return fmt.Errorf("unknown symbol %s", opts.positional[1])
 		}
-		return printJSON(map[string]any{"schemaVersion": 1, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "symbol": symbol, "bindings": r.Bindings, "diagnostics": r.Diagnostics})
+		return printJSON(map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "symbol": symbol, "declarations": r.Declarations, "bindings": r.Bindings, "diagnostics": r.Diagnostics})
 	case "test":
 		if err := r.TestMode(opts.live); err != nil {
 			return err

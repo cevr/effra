@@ -46,6 +46,15 @@ func TestTestSchedulerControlsSleepAndRegistration(t *testing.T) {
 	}
 }
 
+func TestTestSchedulerRejectsInvalidAdjustment(t *testing.T) {
+	scheduler := NewTestScheduler()
+	for _, duration := range []int64{-1, maxMilliseconds + 1} {
+		if err := scheduler.Adjust(duration); err == nil {
+			t.Fatalf("adjust accepted invalid duration %d", duration)
+		}
+	}
+}
+
 func TestTestSchedulerAdvancesSequentialSleepAtIntermediateDeadlines(t *testing.T) {
 	scheduler := NewTestScheduler()
 	points := make(chan int64, 2)
@@ -129,6 +138,17 @@ func TestTimeoutUsesSchedulerAndWaitsForCancelledCleanup(t *testing.T) {
 	out := <-done
 	if out.Failure == nil || out.Failure.Tag != "Timeout" || len(out.Cause()) != 1 {
 		t.Fatalf("wrong timeout result: %+v", out)
+	}
+}
+
+func TestTimeoutWithExplicitDeadlinePreservesChildValue(t *testing.T) {
+	scheduler := NewTestScheduler()
+	out := RunContextWithScheduler(context.Background(), scheduler, TimeoutWithEffect(
+		func(*FiberContext) Exit[string] { return Succeed("completed") },
+		Sleep(100),
+	))
+	if out.IsFailure() || out.Value != "completed" {
+		t.Fatalf("child result was lost: %+v", out)
 	}
 }
 

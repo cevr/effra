@@ -67,6 +67,16 @@ const __ef_timeout = (program, ms) => Effect.suspend(() => {
     const workExit = yield* Fiber.await(work.fiber);
     yield* Fiber.await(timer.fiber);
     if (winner.work) return yield* winner.exit;
+    if (Exit.isFailure(winner.exit)) {
+      let cause = winner.exit.cause;
+      if (Exit.isFailure(workExit)) {
+        for (const reason of workExit.cause.reasons) {
+          if (reason._tag === "Fail") cause = Cause.combine(cause, Cause.fail(reason.error));
+          else if (reason._tag === "Die") cause = Cause.combine(cause, Cause.die(reason.defect));
+        }
+      }
+      return yield* Effect.failCause(cause);
+    }
     let cause = Cause.fail({ _tag: "Timeout" });
     if (Exit.isFailure(workExit)) {
       for (const reason of workExit.cause.reasons) {

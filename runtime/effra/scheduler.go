@@ -262,8 +262,8 @@ func (s *TestScheduler) AwaitRegistration(ctx context.Context) error {
 func (s *TestScheduler) Adjust(milliseconds int64) error {
 	s.adjustMu.Lock()
 	defer s.adjustMu.Unlock()
-	if milliseconds < 0 {
-		return errors.New("test scheduler duration must be non-negative")
+	if milliseconds < 0 || milliseconds > maxMilliseconds {
+		return errors.New("invalid millisecond duration")
 	}
 	s.mu.Lock()
 	if s.closed {

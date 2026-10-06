@@ -75,6 +75,97 @@ effect fn test_scheduler_drains_long_continuation() -> () throws {AssertionFaile
 	}
 }
 
+func TestSchedulerAuthorityIsProviderDrivenAcrossTargets(t *testing.T) {
+	source := `impl Immediate for Scheduler {
+    effect fn sleep(milliseconds: i64) -> () { () }
+    effect fn advance(milliseconds: i64) -> () { () }
+    effect fn awaitRegistration() -> () { () }
+}
+effect fn work() -> string uses {Clock} {
+    run Clock.sleep(20)
+    "completed"
+}
+effect fn main() -> string {
+    run work().timeout(500).catch<Timeout>("timed out")
+        .provide<Clock>(LiveClock).provide<Scheduler>(Immediate)
+}
+	`
+	for name, variant := range map[string]string{
+		"scheduler-after-clock":  source,
+		"scheduler-before-clock": strings.Replace(source, ".provide<Clock>(LiveClock).provide<Scheduler>(Immediate)", ".provide<Scheduler>(Immediate).provide<Clock>(LiveClock)", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := CompileFor(variant, "go")
+			if !r.Checked {
+				t.Fatal(r.Diagnostics)
+			}
+			goSource, err := r.EmitGo()
+			if err != nil {
+				t.Fatal(err)
+			}
+			goDir := t.TempDir()
+			if err = WriteRuntime(goDir); err != nil {
+				t.Fatal(err)
+			}
+			for fileName, contents := range map[string][]byte{"go.mod": []byte(r.ModuleFile()), "main.go": []byte(goSource)} {
+				if err = os.WriteFile(filepath.Join(goDir, fileName), contents, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			goOutput, err := runWithWatchdog(goDir, 10*time.Second, "go", "run", ".")
+			if err != nil || string(goOutput) != "timed out\n" {
+				t.Fatalf("generated Go custom scheduler: %v\n%s", err, goOutput)
+			}
+			jsOutput := runJS(t, variant, `if (await Effect.runPromise(__ef_function_main()) !== "timed out") throw new Error("custom scheduler was ignored");`)
+			if jsOutput != "" {
+				t.Fatalf("generated JS custom scheduler: %s", jsOutput)
+			}
+		})
+	}
+}
+
+func TestSchedulerTimerFailureIsPreservedAcrossTargets(t *testing.T) {
+	source := `impl Broken for Scheduler {
+    effect fn sleep(milliseconds: i64) -> () { run Clock.sleep(2147483648).provide<Clock>(LiveClock) }
+    effect fn advance(milliseconds: i64) -> () { () }
+    effect fn awaitRegistration() -> () { () }
+}
+effect fn work() -> string uses {Clock} {
+    run Clock.sleep(20)
+    "completed"
+}
+effect fn main() -> string {
+    run work().timeout(500).catch<Timeout>("timed out")
+        .provide<Clock>(LiveClock).provide<Scheduler>(Broken)
+}
+`
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	goSource, err := r.EmitGo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	goDir := t.TempDir()
+	if err = WriteRuntime(goDir); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string][]byte{"go.mod": []byte(r.ModuleFile()), "main.go": []byte(goSource)} {
+		if err = os.WriteFile(filepath.Join(goDir, name), contents, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	goOutput, err := runWithWatchdog(goDir, 10*time.Second, "go", "run", ".")
+	if err == nil || !strings.Contains(string(goOutput), "invalid millisecond duration") || strings.Contains(string(goOutput), "timed out") {
+		t.Fatalf("generated Go scheduler defect was rewritten: %v\n%s", err, goOutput)
+	}
+	jsOutput := runJS(t, source, `const exit=await Effect.runPromiseExit(__ef_function_main());if(exit._tag!=="Failure"||!exit.cause.reasons.some(reason=>reason._tag==="Die")||exit.cause.reasons.some(reason=>reason._tag==="Fail"&&reason.error?._tag==="Timeout"))throw new Error("scheduler defect was rewritten "+JSON.stringify(exit));`)
+	if jsOutput != "" {
+		t.Fatalf("generated JS scheduler defect: %s", jsOutput)
+	}
+}
+
 func runWithWatchdog(dir string, timeout time.Duration, command string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

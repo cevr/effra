@@ -10,19 +10,19 @@ The [contender roadmap](contender-roadmap.md) turns those patterns into concrete
 | --- | --- |
 | Service workflow and explicit composition | Runnable on Go and JS |
 | Replacing an owned task | Runnable on Go and JS |
-| ADTs, exhaustive matching and payload errors | Proposed; parser/checker/lowering work remains |
+| Records, closed ADTs, exhaustive matching and payload errors | Runnable on Go and JS; external decoding remains explicit |
 | Decoded event types and codecs | Proposed; runtime validation remains essential |
 | Owned replay/live streams | Proposed library and stream support |
 | Durable command processing | Proposed application services, not an automatic language guarantee |
 | Infrastructure outputs and provider graphs | Design exploration; no Effra deployment framework exists |
 
-All code below labeled **proposed** is design notation, not accepted prototype syntax. Proposed service names describe application ports, not an existing standard library.
+Code below labeled **proposed** remains design notation; the records, enums and match examples in the data section use accepted prototype syntax. Proposed service names describe application ports, not an existing standard library.
 
 | In Effect application code | Effra surface | Obligation that remains |
 | --- | --- | --- |
 | Effect type parameters, generators and yielded calls | `effect fn`, `throws`, `uses`, `run` | Checked contracts and lazy execution |
 | Context.Service and provider composition | `service`, `impl`, explicit provision | Nominal identity, replaceable behavior and initialization lifetime |
-| Tagged declarations, constructors and match helpers | Proposed `enum` and `match` | Payload checking and exhaustive coverage |
+| Tagged declarations, constructors and match helpers | `enum` and `match` | Payload checking and exhaustive coverage |
 | Schema codecs and decode effects | Proposed explicit codec derivation and `Json.decode` | Runtime validation and wire compatibility |
 | Fibers, scopes and interruption combinators | `scope`, `fork`, `join`, `interrupt` | Owned completion and preserved cleanup causes |
 | Output mapping and resource references | Explored `output` expression block | A deployment graph and distinct evaluation phase |
@@ -58,7 +58,7 @@ Parameterized providers with dependencies and shared scoped initialization would
 
 ## 2. ADTs make state and decisions explicit
 
-**Proposed.** Phase states own distinct payloads; transition policies return decisions that a later service interprets. Native sums and exhaustive matching should make these obligations explicit.
+Phase states own distinct payloads; transition policies return decisions that a later service interprets. Native sums and exhaustive matching make these obligations explicit.
 
 ```rust
 enum RunState {
@@ -76,7 +76,7 @@ fn status(state: RunState) -> string {
 }
 ```
 
-The proposed checker knows each alternative and its payload. A Running value cannot omit its run ID; an Idle value cannot carry a stray pending request. Adding a fourth variant makes this complete match incomplete. Exhaustiveness is a compiler obligation, not a default branch that silently accepts every new case.
+The checker knows each alternative and its payload. A Running value cannot omit its run ID; an Idle value cannot carry a stray pending request. Adding a fourth variant makes this complete match incomplete. Exhaustiveness is a compiler obligation, not a default branch that silently accepts every new case.
 
 A decision value and an effect failure have separate jobs:
 
@@ -98,7 +98,7 @@ effect fn describe(decision: Transition) -> string throws {SessionRejected} {
 }
 ```
 
-`Reject` is ordinary policy data until this interpreter chooses to fail. Matching a value does not catch the failure channel. Payload errors, records and matches all require new compiler support; the prototype currently has payload-free errors and primitive values.
+`Reject` is ordinary policy data until this interpreter chooses to fail. Matching a value does not catch the failure channel. Payload errors preserve their declared fields; external data still needs an explicit decoder before it enters a static record or enum.
 
 This representation prevents malformed state combinations. It does not prove that a transition is legal, that a request belongs to the current run, or that the state was committed atomically. Those rules belong to the domain service.
 
@@ -207,7 +207,7 @@ This is deliberately separate from ordinary `run`: running an effect inside a se
 
 ## What to build next
 
-The strongest next language slice is records, closed ADTs, payload errors and exhaustive match, followed by explicit codec derivation. It makes state machines and boundary handling clearer without requiring higher-order row inference or a new scheduler. Match checking should use declared variants and local payload types; Go lowering should use tagged data and switches, with JS lowering preserving the same discriminator and coverage.
+The strongest next language slice is explicit codec derivation for records and closed ADTs. It makes boundary validation clear without requiring higher-order row inference or a new scheduler. Match checking uses declared variants and local payload types; Go lowering uses tagged data and switches, with JS lowering preserving the same discriminator and coverage.
 
 An implementation receipt should include both-target examples, rejection of missing branches and wrong payloads, imported/public type inspection, and a decode test rejecting malformed external data. Keep compile-stage measurements separate and measure representative ADT/match fixtures before adding inference complexity. Scoped provider graphs and streams can then build on that data model. Infrastructure phase syntax needs a separate design decision.
 

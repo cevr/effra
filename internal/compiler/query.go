@@ -34,6 +34,12 @@ func (r *Result) TypeAt(offset int) (*ExpressionInfo, error) {
 		for _, a := range e.Args {
 			expr(a)
 		}
+		for _, field := range e.Fields {
+			expr(field.Value)
+		}
+		for _, arm := range e.Arms {
+			block(arm.Body)
+		}
 		block(e.Then)
 		block(e.Else)
 	}
@@ -41,6 +47,7 @@ func (r *Result) TypeAt(offset int) (*ExpressionInfo, error) {
 		if b != nil {
 			for _, s := range b.Statements {
 				expr(s.Value)
+				expr(s.Payload)
 			}
 		}
 	}

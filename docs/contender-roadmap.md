@@ -4,13 +4,13 @@ Assessment prepared 2026-10-05 against the checked prototype and the [real-world
 
 Effra has a credible semantic core: lazy execution, explicit failure/service contracts, native Go artifacts, owned child/resource cleanup, a shared Go/JS lifecycle corpus and compiler-backed inspection. Practical adoption now depends on representing real application data, using real host libraries, constructing real providers and preserving the operational policies those applications need.
 
-ADTs and match are an important next step. The source review shows why they are insufficient by themselves: notification providers need dependent initialization; SDKs return named objects; event consumers need decoding and bounded replay; command services need transactions and stable identity.
+Records, closed ADTs and match now cover the first application-data slice. The source review shows why they are insufficient by themselves: notification providers need dependent initialization; SDKs return named objects; event consumers need decoding and bounded replay; command services need transactions and stable identity.
 
 ## Gaps exposed by the inspected applications
 
 | Real pattern | What Effra already supplies | What blocks a faithful port | Owner |
 | --- | --- | --- | --- |
-| Phase states and transition decisions | Explicit function/effect contracts | Records, closed ADTs, payload errors, exhaustive match, usable collections and control flow | Compiler |
+| Phase states and transition decisions | Explicit function/effect contracts | Codecs, usable collections and control flow beyond the closed data slice | Compiler + libraries |
 | Stored events and interaction records | Failure propagation | Explicit codecs, validation, versioned wire formats, nominal identifiers | Compiler-supported types + codec library + application migrations |
 | Notification providers and service adapters | Nominal services and explicit provision | Provider dependencies, constructor inputs, fallible scoped initialization, sharing and cycles | Checker + runtime/provider library |
 | Existing Go clients, database pools and processes | Primitive package-function imports, partial-result retention, reviewed context forwarding | Named types, pointers/nil, fields, receiver methods, interfaces, common native numbers and multi-results | Go importer/type compatibility + adapter contracts |
@@ -25,13 +25,13 @@ The prototype's actual barriers are concrete: signature checking admits only a f
 
 ### 1. Application data and package contracts
 
-Add records, closed ADTs, payload errors and exhaustive match. Add ordinary collections, iteration and the scalar operations needed by the first port. Option and Result should be ordinary reusable sums rather than special cases for every API. Introduce limited generics where the actual container/codec use requires them.
+Add codecs and explicit external-data validation around records and closed ADTs. Add ordinary collections, iteration and the scalar operations needed by the first port. Option and Result should be ordinary reusable sums rather than special cases for every API. Introduce limited generics where the actual container/codec use requires them.
 
 Use a structured canonical type representation as these types arrive; extending string-encoded success kinds indefinitely would make payload checking, native compatibility and inspection fragile. Keep source-visible public contracts explicit. Matching should use declared alternatives and local payload types; whole-program inference is unnecessary for this slice.
 
 Add modules and package-qualified nominal identities so services and types can be shared across files without collisions. Resolve the representation seam with Go interop while designing records/sums: a language-only representation that forces copying every SDK object would repeat the interop adoption problem. Efficient host values and portable wire encodings are separate contracts.
 
-**Exit gate:** a multi-file state/decision example runs on Go and JS. Missing match branches, invalid payloads, incompatible identifiers and undeclared failures produce focused diagnostics. CLI/MCP can inspect variant payloads and point to their declarations. A representative ADT/match fixture has measured frontend time and memory.
+**Exit gate:** a multi-file state/decision example runs on Go and JS. Codec rejection, incompatible identifiers and undeclared failures produce focused diagnostics. CLI/MCP inspect variant payloads and point to their declarations. A representative codec fixture has measured frontend time and memory.
 
 ### 2. Real host objects and managed adapters
 
@@ -93,7 +93,7 @@ SQL transactions, migrations, command receipts, correlation and outbox protocols
 
 Deployment state and deferred output graphs remain framework responsibilities. Native `output` syntax is an optional experiment after the application gates pass; a library interface can first preserve its phase semantics. The Go server path should not require a TypeScript checker, a deployment framework or complete JS host parity.
 
-The next concrete compiler unit is records/closed ADTs/payload errors/exhaustive match, designed together with native representation. In parallel as a development discipline, establish the package/import measurements that prevent this richer type system from sacrificing the Go-like iteration speed that motivated the project.
+The next concrete compiler unit is external codec support for records/closed ADTs, designed together with native representation. In parallel as a development discipline, establish the package/import measurements that prevent this richer type system from sacrificing the Go-like iteration speed that motivated the project.
 
 ## Implemented first tooling and testing slice
 

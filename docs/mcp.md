@@ -18,13 +18,13 @@ The adapter implements a small read-only tools server using the [2025-11-25 stdi
 | Tool | Arguments | Result |
 | --- | --- | --- |
 | project.describe | `{}` | Compiler/runtime versions, supported targets, default Go target, operations, guardrail limits |
-| project.check | `file`, optional `target` (`go`/`js`), optional `expectedRevision` | Checked status, source revision, bounded diagnostics, timing, symbol count, bounded used host bindings |
-| project.lint | `file`, optional `target`, `expectedRevision`, boolean `strict` | Checked lint result, severity counts and truncation flags |
+| project.check | `file`, optional `target` (`go`/`js`), optional `expectedRevision` | Checked status, source revision, bounded diagnostics, timing, symbol and nominal declaration metadata, bounded used host bindings |
+| project.lint | `file`, optional `target`, `expectedRevision`, boolean `strict` | Checked lint result, error/warning/suggestion counts and truncation flags |
 | lint.rules | `{}` | Stable rule catalog |
 | code.typeAt | `file`, integer `offset`, optional `target`, `expectedRevision` | Checked expression at a UTF-8 byte diagnostic anchor |
 | project.graph | `file`, optional `target`, `expectedRevision` | Static service/provider/effect graph, up to 1,000 nodes / 2,000 edges |
 | project.tests | `file`, optional `target`, `expectedRevision` | Checked cases, live capability requirement; no execution |
-| code.inspect | `file`, `symbol`, optional `target`, optional `expectedRevision` | Canonical declaration/body contract, byte span, local contributions |
+| code.inspect | `file`, `symbol`, optional `target`, optional `expectedRevision` | Canonical function contract or nominal record/enum/error declaration, byte span, local contributions |
 | code.explain | Same as inspect | Same initial semantic detail; no transitive explanation engine yet |
 
 Example tool call:

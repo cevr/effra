@@ -143,3 +143,47 @@ func TestTargetInspection(t *testing.T) {
 		}
 	}
 }
+
+func TestLintSuppressionSemanticParity(t *testing.T) {
+	root := t.TempDir()
+	source := `effect fn task() -> string { "ok" }
+effect fn main() -> () {
+// effra-lint-disable-next-line unused-recipe -- intentional deferred hook
+let forgotten = task();
+()}`
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+	expected := compiler.Compile(source).Lint(true)
+	result, err := call(root, "project.lint", arguments{File: "main.ef", Strict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := result.(map[string]any)
+	raw, err := json.Marshal(payload["lint"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got compiler.LintResult
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, expected) || !got.LintPassed || len(got.LintDiagnostics) != 0 {
+		t.Fatalf("CLI/MCP lint mismatch: got=%+v expected=%+v", got, expected)
+	}
+
+	source = `effect fn main() -> () {
+// effra-lint-disable-next-line future-rule -- deliberate invalid example
+()}`
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+	invalid, err := call(root, "project.lint", arguments{File: "main.ef"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidPayload := invalid.(map[string]any)["lint"].(compiler.LintResult)
+	if invalidPayload.LintPassed || invalidPayload.Errors != 1 || invalidPayload.LintDiagnostics[0].Span.Line != 2 {
+		t.Fatalf("MCP accepted invalid suppression: %+v", invalidPayload)
+	}
+}

@@ -82,6 +82,12 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		for _, a := range e.Args {
 			expr(a, id)
 		}
+		for _, field := range e.Fields {
+			expr(field.Value, id)
+		}
+		for _, arm := range e.Arms {
+			block(arm.Body, id)
+		}
 		block(e.Then, id)
 		block(e.Else, id)
 		if e.Kind == "provide" {
@@ -108,6 +114,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		if b != nil {
 			for _, s := range b.Statements {
 				expr(s.Value, owner)
+				expr(s.Payload, owner)
 			}
 		}
 	}
