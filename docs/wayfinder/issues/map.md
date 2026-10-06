@@ -34,9 +34,11 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 
 - [Pinned upstream tests and executable conformance mapping](upstream-conformance.md): licensed reference corpus plus explicit behavior-to-Effra test mapping; copied tests do not count as native passes.
 
-- [Checked machines and owned actors](state-machines.md): owner-requested state-machine primitive over ordinary ADTs, explicit transition policy, owned invocation and shared graph inspection. Pure guards and flat states first; advanced statecharts/durability remain unsupported until specified.
+- [Checked machines and owned actors](state-machines.md): owner-requested state-machine primitive over ordinary ADTs, explicit pure or effectful steps, owned invocation and shared graph inspection. Flat states first; advanced statecharts/durability remain unsupported until specified.
 
 - [Reusable generic data and product matching](generic-data.md), followed by [payload-aware recovery](effect-recovery.md): ordinary Option/Result, finite generic data, exhaustive state/event decisions and typed outcome conversion shared by codecs and machines.
+
+- [Reachable runtime modules and small executable receipts](binary-reachability.md): small binaries with unused standard-library facilities excluded, including through fluent APIs; module/import/symbol and raw size evidence accompany implementation.
 
 ## Foundation implementation receipts
 
