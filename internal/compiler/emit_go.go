@@ -551,7 +551,7 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 	case "if":
 		var body strings.Builder
 		valueType := g.valueType(e)
-		condition := g.expr(e.Left, effect, ret, &body)
+		condition := g.expr(e.Left, effect, valueType, &body)
 		body.WriteString("if " + condition + " {\n" + g.blockType(e.Then, effect, valueType) + "} else {\n" + g.blockType(e.Else, effect, valueType) + "}\n")
 		if effect {
 			name := g.temp()

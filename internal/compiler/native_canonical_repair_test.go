@@ -261,6 +261,81 @@ effect fn main() -> () raises {IoError} {
 	}
 }
 
+func TestIfConditionUsesInnerValueTypeForNativePropagation(t *testing.T) {
+	source := `error A
+effect fn condition() -> bool raises {A} { true }
+effect fn main() -> string raises {A} {
+ let number = if run condition() { 1 } else { 2 }
+ "ok"
+}`
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("typed if condition fixture did not check: %+v", r.Diagnostics)
+	}
+	goSource, err := r.EmitGo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(goSource, "er.Propagate[int64]") {
+		t.Fatalf("condition failure was not lowered with the inner if value type:\n%s", goSource)
+	}
+	goDir := t.TempDir()
+	if err := WriteRuntime(goDir); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string][]byte{
+		"go.mod":  []byte(r.ModuleFile()),
+		"main.go": []byte(goSource),
+	} {
+		if err := os.WriteFile(filepath.Join(goDir, name), contents, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	output, err := runWithWatchdog(goDir, 15*time.Second, "go", "run", ".")
+	if err != nil || string(output) != "ok\n" {
+		t.Fatalf("generated Go if condition: %v\n%s", err, output)
+	}
+}
+
+func TestIfConditionFailureRecoversAfterTypedNativePropagation(t *testing.T) {
+	source := `error A
+effect fn condition() -> bool raises {A} { fail A }
+effect fn program() -> string raises {A} {
+ let number = if run condition() { 1 } else { 2 }
+ "unreached"
+}
+effect fn main() -> string {
+ run program().catch<A>("caught")
+}`
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("typed if condition failure fixture did not check: %+v", r.Diagnostics)
+	}
+	goSource, err := r.EmitGo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(goSource, "er.Propagate[int64]") || !strings.Contains(goSource, "er.Propagate[string]") {
+		t.Fatalf("native condition and enclosing expression did not keep distinct propagation types:\n%s", goSource)
+	}
+	goDir := t.TempDir()
+	if err := WriteRuntime(goDir); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string][]byte{
+		"go.mod":  []byte(r.ModuleFile()),
+		"main.go": []byte(goSource),
+	} {
+		if err := os.WriteFile(filepath.Join(goDir, name), contents, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	output, err := runWithWatchdog(goDir, 15*time.Second, "go", "run", ".")
+	if err != nil || string(output) != "caught\n" {
+		t.Fatalf("generated Go typed if recovery: %v\n%s", err, output)
+	}
+}
+
 func hasDiagnosticMessage(r *Result, message string) bool {
 	for _, diagnostic := range r.Diagnostics {
 		if diagnostic.Message == message {
