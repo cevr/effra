@@ -12,6 +12,12 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Target provider**: An implementation of a service on a particular execution target.
 
+**Provider construction contract**: The configuration and required services used to create a provider value, distinct from the contract of invoking its service operations.
+
+**Captured provider**: A provider value bound to the service values supplied during its construction. Its operations belong to the caller's current owning scope.
+
+**Ownership provenance**: The relationship between a retained value and the lifetime that owns it. Borrowed, newly owned and unknown relationships carry different evidence.
+
 **Semantic revision**: The identity of the checked snapshot described by inspection or diagnostics, including imported declaration data and behavior contracts when present.
 
 **Managed fiber**: An execution of an Effra effect with an owner and a completion result. Its cancellation request and completed shutdown are distinct states.
@@ -37,3 +43,5 @@ Effra describes server programs using explicit, inspectable effect contracts.
 **Live test mode**: Explicit permission for a test program to use host capabilities or real program time, distinct from fixture substitution.
 
 **Test watchdog**: A harness deadline independent of program time. Forced termination leaves managed cleanup unconfirmed.
+
+**Program time**: The time authority under which managed sleeps and deadlines execute. Test program time can advance independently of the watchdog's wall clock.
