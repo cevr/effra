@@ -1,0 +1,48 @@
+error Denied
+error DeliveryFailed
+record Settings {
+    prefix: string
+}
+enum Mode {
+    Live
+    Fixture
+}
+service Access {
+    effect fn check(id: string) -> () raises { Denied }
+}
+service Delivery {
+    effect fn send(message: string) -> string raises { DeliveryFailed }
+}
+impl Policy for Access {
+    effect fn check(id: string) -> () raises { Denied } {
+        if id == "blocked" {
+            fail Denied
+        } else {
+            ()
+        }
+    }
+}
+impl Mail(settings: Settings, mode: Mode) for Delivery {
+    effect fn send(message: string) -> string raises { DeliveryFailed } {
+        if message == "" {
+            fail DeliveryFailed
+        } else {
+            settings.prefix + message
+        }
+    }
+}
+layer Workflow {
+    Access = Policy;
+    Delivery = Mail(Settings {
+            prefix: "queued:"
+        }, Mode.Fixture())
+}
+effect fn deliver(id: string) -> string raises { Denied, DeliveryFailed } uses { Access, Delivery } {
+    run Access.check(id)
+    run Delivery.send(id)
+}
+effect fn main() -> string {
+    let accepted = run deliver("Ada").provide(Workflow).catch<Denied>("denied").catch<DeliveryFailed>("failed")
+    let rejected = run deliver("blocked").provide(Workflow).catch<Denied>("denied").catch<DeliveryFailed>("failed")
+    accepted + "|" + rejected
+}

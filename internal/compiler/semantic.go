@@ -2327,12 +2327,17 @@ func (c *checker) check() {
 		c.signature(f)
 	}
 	for _, p := range c.program.Providers {
+		if c.services[p.Service] != nil {
+			c.providerSignature(p)
+		}
+	}
+	c.checkLayers()
+	for _, p := range c.program.Providers {
 		s, exists := c.services[p.Service]
 		if !exists {
 			c.diagnostic("EF102", "unknown service "+p.Service, p.Span)
 			continue
 		}
-		c.providerSignature(p)
 		methods := map[string]*Function{}
 		for _, f := range p.Methods {
 			if methods[f.Name] != nil {
@@ -2373,7 +2378,6 @@ func (c *checker) check() {
 			}
 		}
 	}
-	c.checkLayers()
 	if len(c.program.Functions) > 0 {
 		c.prepareFunctionSummaries()
 	}
@@ -3584,6 +3588,14 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	}
 	if missing := c.rowDifference(c.rowLabels(actual.evaluation.serviceRowID()), c.sourceRow(allowedServices, "uses")); len(missing) > 0 {
 		c.diagnostic("EF108", "missing service requirements: "+strings.Join(missing, ", "), f.Span)
+		if !c.suppressDiagnostics {
+			diagnostic := &c.result.Diagnostics[len(c.result.Diagnostics)-1]
+			for _, contribution := range c.reasons {
+				if contribution.Kind == "layer-construction-input" && len(contribution.Names) == 1 && slices.Contains(missing, contribution.Names[0]) && len(diagnostic.Related) < maxLayerRelatedLocations {
+					diagnostic.Related = append(diagnostic.Related, RelatedLocation{Message: "layer construction requires " + contribution.Names[0], Span: contribution.Span})
+				}
+			}
+		}
 	}
 	actual = c.invocationContract(actual, f.Effect)
 	if f.Identity == "" {
@@ -4153,6 +4165,8 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		if len(c.rowLabels(inner.serviceRow())) > 0 {
 			c.reasons = append(c.reasons, Contribution{"requirement", c.rowLabels(inner.serviceRow()), e.Span})
 		}
+	case "provideLayer":
+		t = c.provideLayer(e, env, inEffect)
 	case "provide":
 		t = c.expr(e.Left, env, inEffect)
 		if c.abstractRow(t.serviceRow()) {

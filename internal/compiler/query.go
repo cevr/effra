@@ -54,6 +54,15 @@ func (r *Result) TypeAt(offset int) (*ExpressionInfo, error) {
 			block(f.Body)
 		}
 	}
+	for _, layer := range r.Program.Layers {
+		for _, entry := range layer.Entries {
+			if entry.Value != nil {
+				for _, argument := range entry.Value.Args {
+					expr(argument)
+				}
+			}
+		}
+	}
 	if found == nil {
 		return nil, fmt.Errorf("no checked expression at byte offset %d; use an expression's diagnostic anchor", offset)
 	}

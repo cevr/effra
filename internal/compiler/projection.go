@@ -406,7 +406,8 @@ func (r *Result) ValidateProjectionResponse(projection TypeProjection, envelope 
 			Nodes        []GraphNode
 			Edges        []GraphEdge
 			Declarations []Declaration
-		}{value.Nodes, value.Edges, value.Declarations}
+			Layers       []LayerPlan
+		}{value.Nodes, value.Edges, value.Declarations, value.Layers}
 	}
 	bytes, err := encodedSize(metadata, projection.Limits.CompatibilityBytes)
 	if projection.Complete || bytes > usage.CompatibilityBytes {

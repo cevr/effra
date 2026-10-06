@@ -67,22 +67,28 @@ type LayerSite struct {
 	Span Span   `json:"span"`
 }
 type LayerNode struct {
-	ID                     string      `json:"id"`
-	Service                string      `json:"service"`
-	ServiceIdentity        string      `json:"serviceIdentity"`
-	Implementation         string      `json:"implementation"`
-	ImplementationIdentity string      `json:"implementationIdentity"`
-	Span                   Span        `json:"span"`
-	SelectionSpan          Span        `json:"selectionSpan"`
-	Public                 bool        `json:"public"`
-	Occurrences            []LayerSite `json:"occurrences"`
-	Replacements           []LayerSite `json:"replacements"`
-	Dependencies           []string    `json:"dependencies"`
-	Incoming               []string    `json:"incoming"`
-	Requirements           []string    `json:"constructionRequirements"`
-	Failures               []string    `json:"constructionFailures"`
-	Constructor            ValueType   `json:"constructor"`
-	Owner                  string      `json:"plannedOwner"`
+	ID                     string          `json:"id"`
+	Service                string          `json:"service"`
+	ServiceIdentity        string          `json:"serviceIdentity"`
+	Implementation         string          `json:"implementation"`
+	ImplementationIdentity string          `json:"implementationIdentity"`
+	Span                   Span            `json:"span"`
+	SelectionSpan          Span            `json:"selectionSpan"`
+	Public                 bool            `json:"public"`
+	Occurrences            []LayerSite     `json:"occurrences"`
+	Replacements           []LayerSite     `json:"replacements"`
+	Dependencies           []string        `json:"dependencies"`
+	Incoming               []string        `json:"incoming"`
+	Requirements           []string        `json:"constructionRequirements"`
+	Failures               []string        `json:"constructionFailures"`
+	Constructor            ValueType       `json:"constructor"`
+	Parameters             []Param         `json:"configurationParameters,omitempty"`
+	Arguments              []LayerArgument `json:"configurationArguments,omitempty"`
+	Owner                  string          `json:"plannedOwner"`
+}
+type LayerArgument struct {
+	Span Span      `json:"span"`
+	Type ValueType `json:"type"`
 }
 type LayerPath struct {
 	Nodes []string `json:"nodes"`
@@ -206,6 +212,11 @@ func (c *checker) assembleLayer(layer *Layer) *LayerPlan {
 	plan := &LayerPlan{ID: layerID(layer.Name), Name: layer.Name, Span: layer.Span,
 		Provides: []string{}, InferredProvides: []string{}, Failures: []string{}, Requirements: []string{}, Nodes: []LayerNode{}, Merges: []LayerSite{}, ConstructionPaths: []LayerPath{},
 		Owner: "provision-build", Evidence: "checked-static-plan; acquisition and cleanup require runtime execution", ChildFailurePolicy: "observed at node owner closure", selected: map[string]*layerSelection{}}
+	// Retained identity bytes share the existing cumulative work/metadata
+	// budget. This also bounds every emitted NewPlan, including empty graphs.
+	if !c.layerWork(len(plan.ID), layer.Span) {
+		return plan
+	}
 	if len(layer.Entries) > maxLayerEdges {
 		c.layerDiagnostic("EF133", "layer exceeds 10000 composition entries", layer.Span)
 		return plan
@@ -430,12 +441,23 @@ func (c *checker) assembleLayer(layer *Layer) *LayerPlan {
 	}
 	for _, id := range ids {
 		node := plan.selected[id]
-		if !c.layerWork(1+len(node.replacements)+len(edges[id])+len(incoming[id])+len(node.provider.Services), node.effective.Span) {
+		if !c.layerWork(1+len(id)+len(node.replacements)+len(edges[id])+len(incoming[id])+len(node.provider.Services), node.effective.Span) {
 			return plan
 		}
+		// The node/dependency unit charges above cover NewPlan's per-entry
+		// counts; emitted NodeSource.Module is empty in this static profile.
+		for _, dependency := range edges[id] {
+			if !c.layerWork(len(dependency), node.effective.Span) {
+				return plan
+			}
+		}
 		constructor := c.projectCheckedBase(c.checkedProvider(node.provider, true))
+		arguments := []LayerArgument{}
+		for _, arg := range node.effective.Value.Args {
+			arguments = append(arguments, LayerArgument{Span: arg.Span, Type: arg.Type})
+		}
 		plan.Nodes = append(plan.Nodes, LayerNode{ID: id, Service: node.service, ServiceIdentity: "service:" + currentModuleIdentity + ":" + node.service, Implementation: node.provider.Name, ImplementationIdentity: providerTypeRef(node.provider).Declaration,
-			Span: node.origin.Span, SelectionSpan: node.effective.Span, Public: node.public, Occurrences: node.occurrences, Replacements: append([]LayerSite{}, node.replacements...), Dependencies: normalized(edges[id]), Incoming: normalized(incoming[id]), Requirements: normalized(node.provider.Services), Failures: []string{}, Constructor: constructor, Owner: "provision-build/node:" + id})
+			Span: node.origin.Span, SelectionSpan: node.effective.Span, Public: node.public, Occurrences: node.occurrences, Replacements: append([]LayerSite{}, node.replacements...), Dependencies: normalized(edges[id]), Incoming: normalized(incoming[id]), Requirements: normalized(node.provider.Services), Failures: []string{}, Constructor: constructor, Parameters: publicParams(node.provider.Params), Arguments: arguments, Owner: "provision-build/node:" + id})
 	}
 	return plan
 }
@@ -477,6 +499,9 @@ func (c *checker) checkLayerProvider(entry *LayerEntry) *Provider {
 	}
 	if len(args) != len(provider.Params) {
 		c.layerDiagnostic("EF106", "incorrect layer constructor argument count for "+name, expr.Span)
+	}
+	if len(expr.Fields) > 0 {
+		c.layerDiagnostic("EF135", "named implementation configuration arguments are unsupported; use positional arguments", expr.Span)
 	}
 	for i, arg := range args {
 		if !c.staticLayerArgument(arg) {
@@ -566,4 +591,49 @@ func (r *Result) LayerInspection(name string) (map[string]any, error) {
 	}
 	response["typeProjectionUsage"] = usage
 	return response, nil
+}
+
+func (c *checker) provideLayer(e *Expr, env map[string]checkedExpression, inEffect bool) checkedExpression {
+	program := c.expr(e.Left, env, inEffect)
+	if !program.isEffect() {
+		c.layerDiagnostic("EF105", "layer provision requires an Effect value", e.Span)
+		return program
+	}
+	if _, shadowed := env[e.Name]; shadowed {
+		c.layerDiagnostic("EF135", "static layer provision requires an unshadowed layer declaration", e.Span)
+		return program
+	}
+	plan := c.layers[e.Name]
+	if plan == nil {
+		c.layerDiagnostic("EF102", "unknown or unchecked layer "+e.Name, e.Span)
+		return program
+	}
+	e.layerPlan = plan
+	if c.abstractRow(program.serviceRow()) {
+		c.layerDiagnostic("EF125", "layer provision of an abstract row requires an unsupported row difference constraint", e.Span)
+	}
+	// This profile admits pure constructors only, so preserve the complete
+	// program failure row, including any ordinary row parameter identity.
+	remaining := difference(c.rowLabels(program.serviceRow()), plan.Provides)
+	program.value = c.recontractRows(program, program.failureRow(), c.internRow(union(remaining, plan.Requirements)))
+	region := fmt.Sprintf("provision:%d", e.Span.Offset)
+	if len(program.ownershipFacts()) == 0 {
+		program.setOwnership(c.unknownOwnership(c.displayTypeID(program.resultID())))
+	}
+	program.setOwnership(materializeExecutionFacts(program.ownershipFacts(), region, ownershipOwnerLexical))
+	program.setCaptures(materializeExecutionFacts(program.captureFacts(), region, ownershipOwnerLexical))
+	for _, facts := range [][]OwnershipFact{program.ownershipFacts(), program.captureFacts()} {
+		uncertain := false
+		for _, fact := range facts {
+			uncertain = uncertain || fact.Status == "unknown"
+		}
+		if uncertain || hasPotentialOwner(facts) || hasOwnedFact(facts, region) || hasOwnedClosed(facts) {
+			c.layerDiagnostic("EF123", "value owned by the closing layer provision or with unresolved ownership cannot escape", e.Span)
+		}
+	}
+	for _, path := range plan.ConstructionPaths {
+		c.reasons = append(c.reasons, Contribution{Kind: "layer-construction-input", Names: []string{path.Input}, Span: path.Span})
+	}
+	c.reasons = append(c.reasons, Contribution{Kind: "layer-provision", Names: plan.Provides, Span: e.Span})
+	return program
 }

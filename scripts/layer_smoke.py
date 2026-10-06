@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise static layer inspection through the actual CLI and MCP processes."""
+"""Exercise checked layer provision through the actual CLI and MCP processes."""
 import json
 import pathlib
 import subprocess
@@ -18,6 +18,12 @@ layer Accounts { merge Shared; Account = AccountLive }
 layer Invoices { merge Shared; Invoice = InvoiceLive }
 layer App provides {Account, Invoice} { merge Accounts, Invoices }
 layer Fixture { merge App; replace Store = Memory("fixture") }
+effect fn labels() -> string uses {Account,Invoice} {
+ let account=run Account.label()
+ let invoice=run Invoice.label()
+ account+":"+invoice
+}
+effect fn main() -> string { run labels().provide(Fixture) }
 '''
 
 
@@ -38,8 +44,17 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
     path = workspace / "app.ef"
     invalid_path = workspace / "invalid.ef"
     budget_path = workspace / "budget.ef"
+    open_path = workspace / "open.ef"
+    workflow_path = workspace / "workflow.ef"
+    identity_path = workspace / "identity.ef"
     path.write_text(source)
     invalid_path.write_text(source + 'layer Bad { Store = Memory("other"); merge Shared }')
+    open_path.write_text('service Store { effect fn label() -> string } service Account { effect fn label() -> string } impl AccountLive for Account uses {Store} { effect fn label() -> string { run Store.label() } } layer Open { Account=AccountLive } effect fn main() -> string { run Account.label().provide(Open) }')
+    workflow_path.write_text((root / "examples/layers-workflow.ef").read_text())
+    long_name = "App" + "x" * 5000
+    identity_source = "\n".join(f'service S{i} {{ effect fn value() -> string }} impl P{i} for S{i} {{ effect fn value() -> string {{ "ok" }} }}' for i in range(20))
+    identity_source += f"\nlayer {long_name} {{\n" + "\n".join(f"S{i}=P{i}" for i in range(20)) + f"\n}}\neffect fn main() -> string {{ run S0.value().provide({long_name}) }}\n"
+    identity_path.write_text(identity_source)
     budget_source = "\n".join(
         f'service S{i} {{ effect fn value() -> string }} impl P{i} for S{i} {{ effect fn value() -> string {{ "value" }} }}'
         for i in range(50)
@@ -59,9 +74,27 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
     assert plan["provides"] == ["Account", "Invoice"] and not plan["requirements"]
     store = next(node for node in plan["nodes"] if node["service"] == "Store")
     assert not store["public"] and len(store["incoming"]) == 2 and len(store["replacements"]) == 1
+    assert len(store["configurationParameters"]) == len(store["configurationArguments"]) == 1
+    workflow = json.loads(cli("inspect", str(workflow_path), "Workflow").stdout)
+    delivery = next(node for node in workflow["layer"]["nodes"] if node["service"] == "Delivery")
+    assert [argument["type"]["type"]["kind"] for argument in delivery["configurationArguments"]] == ["record", "enum"]
     graph = json.loads(cli("graph", str(path)).stdout)
     assert next(layer for layer in graph["layers"] if layer["name"] == "Fixture") == plan
+    assert any(edge["kind"] == "provides-layer" and edge["to"] == plan["id"] for edge in graph["edges"])
+    offset = formatted.index("labels().provide") + len("labels().")
+    queried = json.loads(cli("query", str(path), str(offset)).stdout)
+    assert queried["expression"]["type"]["effect"]
+    for target in ("go", "js"):
+        assert cli("run", str(path), "--target", target).stdout == "fixture:fixture\n"
+        assert cli("run", "examples/layers-workflow.ef", "--target", target).stdout == "queued:Ada|denied\n"
     invalid = json.loads(cli("check", str(invalid_path), success=False).stdout)
+    missing = json.loads(cli("check", str(open_path), success=False).stdout)
+    assert any(d["code"] == "EF108" and d["related"] for d in missing["diagnostics"])
+    for target in ("go", "js"):
+        identity = json.loads(cli("check", str(identity_path), "--target", target, success=False).stdout)
+        assert not identity["checked"] and any(d["code"] == "EF133" for d in identity["diagnostics"])
+        refused_run = cli("run", str(identity_path), "--target", target, success=False)
+        assert "EF133" in refused_run.stdout and "defect: invalid layer plan" not in refused_run.stderr
     duplicate = next(d for d in invalid["diagnostics"] if d["code"] == "EF130")
     assert duplicate["related"] and duplicate["span"]["length"] > 0
     assert cli("inspect", str(invalid_path), "App", success=False).stderr
@@ -82,6 +115,10 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
         tool(5, "code.inspect", {"file": "app.ef", "symbol": "Fixture"}),
         tool(6, "project.graph", {"file": "app.ef"}),
         tool(7, "code.format", {"source": formatted}),
+        tool(9, "code.typeAt", {"file": "app.ef", "offset": offset, "expectedRevision": checked["revision"]}),
+        tool(10, "code.inspect", {"file": "workflow.ef", "symbol": "Workflow"}),
+        tool(11, "project.check", {"file": "open.ef"}),
+        tool(12, "project.check", {"file": "identity.ef"}),
     ]
     server = subprocess.run([str(ef), "mcp", str(workspace)], cwd=root,
                             input="\n".join(map(json.dumps, requests)) + "\n",
@@ -96,5 +133,10 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
     assert mcp["types"] == inspected["types"] and mcp["rows"] == inspected["rows"]
     assert responses[6]["result"]["structuredContent"]["layers"] == graph["layers"]
     assert not responses[7]["result"].get("isError"), responses[7]
+    assert responses[9]["result"]["structuredContent"]["expression"] == queried["expression"]
+    assert responses[10]["result"]["structuredContent"]["layer"] == workflow["layer"]
+    assert responses[11]["result"]["structuredContent"]["diagnostics"] == missing["diagnostics"]
+    assert not responses[12]["result"]["structuredContent"]["checked"]
+    assert any(d["code"] == "EF133" for d in responses[12]["result"]["structuredContent"]["diagnostics"])
 
-print("static layer CLI/MCP and formatter controls passed")
+print("layer provision Go/JS, CLI/MCP metadata and formatter controls passed")

@@ -220,19 +220,20 @@ type MatchArm struct {
 	Span    Span
 }
 type Expr struct {
-	Kind    string
-	Name    string
-	Text    string
-	Args    []*Expr
-	Left    *Expr
-	Right   *Expr
-	Then    *Block
-	Else    *Block
-	Fields  []FieldValue
-	Arms    []*MatchArm
-	Span    Span
-	Type    ValueType
-	checked checkedExpression
+	Kind      string
+	Name      string
+	Text      string
+	Args      []*Expr
+	Left      *Expr
+	Right     *Expr
+	Then      *Block
+	Else      *Block
+	Fields    []FieldValue
+	Arms      []*MatchArm
+	Span      Span
+	Type      ValueType
+	checked   checkedExpression
+	layerPlan *LayerPlan
 	// Evaluation is the work incurred while evaluating this expression now.
 	// Deferred effect rows remain on Type. Keeping the two facts beside the
 	// checked node lets callers reuse the result without walking the subtree.
