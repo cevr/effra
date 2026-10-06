@@ -81,11 +81,21 @@ type schedulerContinuation struct {
 
 type schedulerContinuationContextKey struct{}
 
+// schedulerContinuationMask marks a context boundary that must not inherit a
+// cleanup continuation from its caller. A context value cannot be deleted,
+// so the sentinel is deliberately a different dynamic type from
+// *schedulerContinuation.
+type schedulerContinuationMask struct{}
+
 func withSchedulerContinuation(ctx context.Context, continuation *schedulerContinuation) context.Context {
 	if continuation == nil {
 		return ctx
 	}
 	return context.WithValue(ctx, schedulerContinuationContextKey{}, continuation)
+}
+
+func withoutSchedulerContinuation(ctx context.Context) context.Context {
+	return context.WithValue(ctx, schedulerContinuationContextKey{}, schedulerContinuationMask{})
 }
 
 func schedulerContinuationFromContext(ctx context.Context) *schedulerContinuation {

@@ -200,7 +200,15 @@ func runScope[A any](scope *Scope, program Effect[A], admitted ...bool) Exit[A] 
 }
 
 func runScopeWithCompletion[A any](scope *Scope, program Effect[A], admitted bool, complete func(Exit[A])) Exit[A] {
-	fc := &FiberContext{ctx: scope.ctx, scope: scope, driver: scope.driver, continuation: schedulerContinuationFromContext(scope.ctx)}
+	return runScopeWithContinuation(scope, program, admitted, complete, nil)
+}
+
+func runScopeWithContinuation[A any](scope *Scope, program Effect[A], admitted bool, complete func(Exit[A]), rootContinuation *schedulerContinuation) Exit[A] {
+	continuation := schedulerContinuationFromContext(scope.ctx)
+	if rootContinuation != nil {
+		continuation = rootContinuation
+	}
+	fc := &FiberContext{ctx: scope.ctx, scope: scope, driver: scope.driver, continuation: continuation}
 	var finish func()
 	if scheduler, ok := scope.driver.(*TestScheduler); ok {
 		fc.turn = scheduler
@@ -225,7 +233,13 @@ func RunContextWithScheduler[A any](ctx context.Context, scheduler *TestSchedule
 	if scheduler == nil {
 		return Die[A](errors.New("nil test scheduler"))
 	}
-	return runScope(newScopeWithDriver(ctx, nil, scheduler), program)
+	continuation := schedulerContinuationFromContext(ctx)
+	if continuation != nil && continuation.scheduler != scheduler {
+		continuation = nil
+	}
+	maskedContext := withoutSchedulerContinuation(ctx)
+	scope := newScopeWithDriver(maskedContext, nil, scheduler)
+	return runScopeWithContinuation(scope, program, false, nil, continuation)
 }
 func Scoped[A any](program Effect[A]) Effect[A] {
 	return func(fc *FiberContext) Exit[A] {

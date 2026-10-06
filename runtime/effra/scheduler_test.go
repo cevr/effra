@@ -730,6 +730,135 @@ func TestTestSchedulerPartialTimeoutCleanupCanAdvance(t *testing.T) {
 	}
 }
 
+func TestTestSchedulerForkedCleanupUsesIndependentContinuations(t *testing.T) {
+	tests := []struct {
+		name string
+		body Effect[Unit]
+	}{
+		{
+			name: "join slow child first",
+			body: func(fc *FiberContext) Exit[Unit] {
+				first := Invoke(fc, Fork(Sleep(10)))
+				if first.IsFailure() {
+					return Propagate[Unit](first)
+				}
+				second := Invoke(fc, Fork(Sleep(30)))
+				if second.IsFailure() {
+					return Propagate[Unit](second)
+				}
+				if out := Invoke(fc, second.Value.Join()); out.IsFailure() {
+					return out
+				}
+				return Invoke(fc, first.Value.Join())
+			},
+		},
+		{
+			name: "caller sleeps while child completes",
+			body: func(fc *FiberContext) Exit[Unit] {
+				child := Invoke(fc, Fork(Sleep(10)))
+				if child.IsFailure() {
+					return Propagate[Unit](child)
+				}
+				if out := Invoke(fc, Sleep(30)); out.IsFailure() {
+					return out
+				}
+				return Invoke(fc, child.Value.Join())
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			scheduler := NewTestScheduler()
+			releaseStarted := make(chan struct{})
+			done := make(chan Exit[Unit], 1)
+			go func() {
+				done <- RunContextWithScheduler(context.Background(), scheduler, AcquireRelease(
+					"forked-cleanup",
+					func(context.Context) (Unit, error) { return Unit{}, nil },
+					func(_ Unit, cleanup context.Context) error {
+						close(releaseStarted)
+						out := RunContextWithScheduler(cleanup, scheduler, test.body)
+						if out.IsFailure() {
+							return out.Cause()
+						}
+						return nil
+					},
+				))
+			}()
+
+			waitSchedulerSignal(t, releaseStarted)
+			if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+				t.Fatalf("forked cleanup registration: %v", err)
+			}
+			adjustWithin(t, scheduler, 10)
+			if scheduler.Now() != 10 {
+				t.Fatalf("forked cleanup first adjustment moved time to %d", scheduler.Now())
+			}
+			select {
+			case out := <-done:
+				t.Fatalf("forked cleanup completed before slow work: %+v", out)
+			default:
+			}
+			adjustWithin(t, scheduler, 20)
+			select {
+			case out := <-done:
+				if out.IsFailure() {
+					t.Fatalf("forked cleanup failed after both deadlines: %+v", out)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("forked cleanup did not complete after both deadlines")
+			}
+		})
+	}
+}
+
+func TestTestSchedulerTimeoutInsideCleanupCanAdvanceToDeadline(t *testing.T) {
+	scheduler := NewTestScheduler()
+	releaseStarted := make(chan struct{})
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, AcquireRelease(
+			"timeout-cleanup",
+			func(context.Context) (Unit, error) { return Unit{}, nil },
+			func(_ Unit, cleanup context.Context) error {
+				close(releaseStarted)
+				out := RunContextWithScheduler(cleanup, scheduler, Timeout(Sleep(30), 10))
+				if out.Failure == nil || out.Failure.Tag != "Timeout" || len(out.Cause()) != 1 {
+					return errors.New("nested cleanup timeout did not win")
+				}
+				return nil
+			},
+		))
+	}()
+
+	waitSchedulerSignal(t, releaseStarted)
+	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		t.Fatalf("nested timeout registration: %v", err)
+	}
+	adjustWithin(t, scheduler, 5)
+	if scheduler.Now() != 5 {
+		t.Fatalf("nested timeout partial adjustment moved time to %d", scheduler.Now())
+	}
+	select {
+	case out := <-done:
+		t.Fatalf("nested timeout completed before its deadline: %+v", out)
+	default:
+	}
+	adjustWithin(t, scheduler, 5)
+	if scheduler.Now() != 10 {
+		t.Fatalf("nested timeout deadline adjustment moved time to %d", scheduler.Now())
+	}
+	select {
+	case out := <-done:
+		if out.IsFailure() {
+			t.Fatalf("outer cleanup failed after nested timeout: %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("outer cleanup did not complete after nested timeout")
+	}
+}
+
 func TestTestSchedulerPartialWorkWinnerCleanupCanAdvance(t *testing.T) {
 	scheduler := NewTestScheduler()
 	deadlineReady := make(chan struct{})
@@ -844,6 +973,52 @@ func TestTestSchedulerWorkWinnerWithAlreadyClosingDeadlineCleanupCanAdvance(t *t
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("work winner did not complete after already-closing cleanup")
+	}
+}
+
+func TestTestSchedulerDeadlineWinnerWithAlreadyClosingWorkCleanupCanAdvance(t *testing.T) {
+	scheduler := NewTestScheduler()
+	releaseStarted := make(chan struct{})
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, Timeout(
+			AcquireRelease(
+				"closing-work",
+				func(context.Context) (Unit, error) { return Unit{}, nil },
+				func(_ Unit, cleanup context.Context) error {
+					close(releaseStarted)
+					out := RunContextWithScheduler(cleanup, scheduler, Sleep(20))
+					if out.IsFailure() {
+						return out.Cause()
+					}
+					return nil
+				},
+			),
+			10,
+		))
+	}()
+
+	waitSchedulerSignal(t, releaseStarted)
+	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		t.Fatalf("deadline/cleanup registration: %v", err)
+	}
+	adjustWithin(t, scheduler, 10)
+	if scheduler.Now() != 10 {
+		t.Fatalf("deadline adjustment moved time to %d", scheduler.Now())
+	}
+	select {
+	case out := <-done:
+		t.Fatalf("deadline winner completed before closing work cleanup: %+v", out)
+	default:
+	}
+	adjustWithin(t, scheduler, 10)
+	select {
+	case out := <-done:
+		if out.Failure == nil || out.Failure.Tag != "Timeout" || len(out.Cause()) != 1 {
+			t.Fatalf("wrong deadline-winner result after cleanup: %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("deadline winner did not complete after closing work cleanup")
 	}
 }
 
