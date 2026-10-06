@@ -43,3 +43,7 @@ Reference families were inspected in the installed pinned Effect source, includi
 Develop tooling and measurements throughout. Library signatures should be shipped as reusable checked interfaces; importing one facility must not require parsing or checking the whole standard library on every edit. Generate/link only required native modules, avoid hidden initialization work, and report import/check/emission/build/runtime costs separately. Full library availability must preserve the fast iteration north star.
 
 The current [foundation spec](specs/production-foundations.md) establishes data, provider, lifetime, lint and test seams. The [server benchmarks](specs/server-benchmarks.md) measure current server costs honestly; they are a baseline for later library and runtime changes, not proof of complete parity.
+
+## Upstream conformance inputs
+
+Use pinned Effect implementations and their tests as direct inputs to each library family. Retain a licensed, hash-verified upstream test snapshot and map its behavior cases to executable Effra tests. Distinguish reference-only, ported/passing, deliberately different and not-yet-supported cases; unsupported families cannot disappear from a parity report. Real application usage should constrain composition and operational fixtures, while public examples stay generic. The [native server contract](specs/native-server-contracts.md) applies this requirement to the first codec and HTTP/RPC slice.
