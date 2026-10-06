@@ -2,6 +2,8 @@
 
 Direction recorded from the owner on 2026-10-05. Effra's distribution should include the capabilities needed to build an Effect-style server application on Go. This is the target parity map, not a claim that the current prototype already supplies the full library.
 
+The [finite capability contracts](specs/standard-library-capabilities.md) turn this direction into five open implementation batches, causal acceptance cases and visible exclusions. They incorporate pinned Effect4.0.1 source/tests and generic sharing, batching and worker patterns from application-source review.
+
 ## Distribution and compiler boundary
 
 Ship the standard library with the compiler and managed runtime, under one compatible release. A Go application should not need a second language toolchain or handwritten wrappers for the basic concurrency, configuration, observability and platform facilities. JS can implement portable contracts using pinned Effect, while Go has native implementations.
@@ -35,6 +37,8 @@ Reference families were inspected in the installed pinned Effect source, includi
 "Complete" means each required family has explicit accepted behavior, supported-target receipts and visible exclusions. It does not mean importing browser-specific APIs into a Go server or inheriting application-specific transaction, authorization and durability guarantees from a library name.
 
 ## Build order and gates
+
+The detailed dependency graph is now [owned core → services/flow → shared/platform → telemetry/batching](specs/standard-library-capabilities.md#five-implementation-batches). Time primitives precede expiry/retry; bounded flow precedes streamed platform adapters. The stages below remain the broad destination; the finite contract controls implementation order and closure.
 
 1. Establish modules, package-qualified identity, constrained generics, collections and typed effect-function/handler contracts. Gate: reusable data and recovery helpers compile without per-type compiler special cases, preserve explicit rows and remain fast to inspect.
 2. Build scoped provider acquisition, synchronization and bounded concurrency primitives. Gate: producer/waiter cancellation, sharing, shutdown and cleanup failures have public causal tests, and missing dependencies explain their construction path.
