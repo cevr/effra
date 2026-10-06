@@ -91,6 +91,8 @@ Counsel: requested second Claude instance active in Herdr pane `w1G:p2`, agent `
 
 Design counsel received in `/tmp/effra-claude2-language-counsel.md`. Root independently reproduced the Handler helper erasure: CLI checks the unprovided Users program and reports an empty main requirement row. Adopt the regular canonical type/function/finite-row mechanism in [the abstraction contract](../docs/specs/language-abstractions.md), decided by **Redesign From First Principles**. Keep explicit run. Carry generic outcomes and effectful recovery as finite subsequent contracts. Reject flattening composite Cause into a four-way Exit and defer new acquire/provide keywords or impl renaming until ordinary interfaces and real consumers justify them. Enum representation remains a measurement candidate, not a presumed speedup.
 
+Framework fixture evidence records pinned Effect's wrong-method response as404. Adopt that explicit comparator profile in the new native server spec, decided by **Never Block on the Human** and matched-behavior requirements. No existing Effra endpoint wire contract changes: the richer profile is not implemented or published yet. Unknown-field and malformed-envelope policies must likewise be explicit; native conformance cannot claim stronger validation than the matched comparator provides.
+
 Merges: none in this pass yet. No application changes have been pushed.
 
 Live checks: baseline `./scripts/gate.sh` and `go test -race ./...` pass on Linux; a temporary public provider program executes identically on Go/JS and its CLI graph exactly matches stdio MCP. These checks do not approve the unmerged branches.
