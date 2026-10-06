@@ -52,6 +52,8 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 
 - [Direct native execution and matched build cost](native-execution-lowering.md): the retained long-body compiler profile motivates a general lowering repair after canonical function contracts, preserving laziness and managed execution while measuring backend cost separately.
 
+- [Isolated owned native generated modules](generated-output-ownership.md): the runtime split exposed a stale-source rebuild failure. Complete per-application generations must precede that integration; unknown files and older outputs remain preserved.
+
 ## Foundation implementation receipts
 
 - [Causal synchronization and scheduler-backed tests](foundation-testing.md): reviewed native/JS managed scheduling, partial cleanup, continuation ownership and both join orders, plus consistent invalid latch boundaries. Integrated full gates, race checks and portable public cases pass; foreign operations remain outside virtual quiescence guarantees.
