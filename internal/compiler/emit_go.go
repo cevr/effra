@@ -51,6 +51,112 @@ func goType(t string) string {
 		return "efType_" + goIdent(t)
 	}
 }
+
+// canonicalGoType renders the actual emitted Go value represented by one
+// checked semantic node. It is deliberately separate from goType: goType
+// accepts legacy source/display names, while this renderer consumes the
+// checker's canonical node and never feeds an already-rendered type back
+// through the legacy grammar.
+func canonicalGoType(c *checker, id TypeID, visiting map[TypeID]bool) string {
+	if c == nil || id == invalidTypeID {
+		return "struct{}"
+	}
+	if visiting[id] {
+		// Recursive nominal data is represented by its declaration name and does
+		// not recurse here. This guard is for malformed or future wrapper cycles.
+		return "struct{}{}"
+	}
+	node := c.node(id)
+	if node == nil {
+		return "struct{}"
+	}
+	visiting[id] = true
+	defer delete(visiting, id)
+	switch node.Kind {
+	case "primitive":
+		switch node.Name {
+		case "string":
+			return "string"
+		case "bool":
+			return "bool"
+		case "i64":
+			return "int64"
+		case "bytes":
+			return "[]byte"
+		case "()", "never", "invalid":
+			return "struct{}"
+		}
+	case "opaque":
+		switch node.Name {
+		case "Handler":
+			return "func(string) efEffect[string]"
+		case "File":
+			return "*er.File"
+		case "Latch":
+			return "*er.Latch"
+		}
+	case "record", "enum", "error":
+		return "efType_" + goIdent(node.Name)
+	case "fiber":
+		if len(node.Args) == 1 {
+			return "*er.Fiber[" + canonicalGoType(c, node.Args[0], visiting) + "]"
+		}
+	case "goResult":
+		if len(node.Args) == 1 {
+			return "er.GoResult[" + canonicalGoType(c, node.Args[0], visiting) + "]"
+		}
+	case "provider":
+		return "efService_" + goIdent(node.Name)
+	case "callable":
+		return canonicalGoCallableType(c, node, visiting)
+	case "recipe", "providerRecipe":
+		return "efEffect[" + canonicalGoType(c, node.Result, visiting) + "]"
+	case "never", "invalid":
+		return "struct{}"
+	}
+	return "struct{}"
+}
+
+func canonicalGoCallableType(c *checker, node *semanticTypeNode, visiting map[TypeID]bool) string {
+	if node == nil {
+		return "func() struct{}"
+	}
+	parameters := make([]string, 0, len(node.Args))
+	for _, parameter := range node.Args {
+		parameters = append(parameters, canonicalGoType(c, parameter, visiting))
+	}
+	result := canonicalGoType(c, node.Result, visiting)
+	if node.Mode == "effect" {
+		result = "efEffect[" + result + "]"
+	}
+	return "func(" + strings.Join(parameters, ", ") + ") " + result
+}
+
+// canonicalValueType renders the value held by an expression. A callable is
+// therefore rendered as a function value, a recipe as an efEffect, and a
+// Fiber as a Fiber handle. Its resultType counterpart is used only at an
+// explicit elimination boundary such as run, join, or a foreign invocation.
+func (g *goEmitter) canonicalValueType(e checkedExpression) string {
+	if e.value.arena == nil {
+		return "struct{}"
+	}
+	return canonicalGoType(e.value.arena.checker, e.value.valueID(), map[TypeID]bool{})
+}
+
+func (g *goEmitter) canonicalResultType(e checkedExpression) string {
+	if e.value.arena == nil {
+		return "struct{}"
+	}
+	return canonicalGoType(e.value.arena.checker, e.resultID(), map[TypeID]bool{})
+}
+
+func (g *goEmitter) valueType(e *Expr) string {
+	return g.canonicalValueType(e.checked)
+}
+
+func (g *goEmitter) resultType(e *Expr) string {
+	return g.canonicalResultType(e.checked)
+}
 func goIdent(name string) string {
 	name = strings.ReplaceAll(strings.ReplaceAll(name, ".", "_"), ":", "_")
 	if name == "" {
@@ -198,8 +304,15 @@ func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(addres
 		out.WriteString("}\n")
 	}
 	if tests == nil {
-		out.WriteString("func main() { base,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop();exit:=er.RunContext(base,func(fc *er.FiberContext) er.Exit[" + goType(r.Find("main").Contract.Success) + "]{return efFunction_main()(efContext{Runtime:fc})});if exit.IsFailure(){fmt.Fprintln(os.Stderr,exit.Cause());os.Exit(1)}\n")
-		if r.Find("main").Contract.Success != "()" {
+		mainReturn := "()"
+		for _, function := range r.Program.Functions {
+			if function.Name == "main" {
+				mainReturn = function.Return
+				break
+			}
+		}
+		out.WriteString("func main() { base,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop();exit:=er.RunContext(base,func(fc *er.FiberContext) er.Exit[" + goType(mainReturn) + "]{return efFunction_main()(efContext{Runtime:fc})});if exit.IsFailure(){fmt.Fprintln(os.Stderr,exit.Cause());os.Exit(1)}\n")
+		if mainReturn != "()" {
 			out.WriteString("fmt.Println(exit.Value)\n")
 		}
 		out.WriteString("}\n")
@@ -275,13 +388,19 @@ func (g *goEmitter) providerMethod(f *Function, captures []string) string {
 	return out.String()
 }
 func (g *goEmitter) failed(name, ret string) string {
-	return "if " + name + ".IsFailure(){return er.Propagate[" + goType(ret) + "](" + name + ")}\n"
+	return g.failedType(name, ret)
+}
+func (g *goEmitter) failedType(name, ret string) string {
+	return "if " + name + ".IsFailure(){return er.Propagate[" + ret + "](" + name + ")}\n"
 }
 func (g *goEmitter) block(b *Block, effect bool, ret string) string {
+	return g.blockType(b, effect, goType(ret))
+}
+func (g *goEmitter) blockType(b *Block, effect bool, ret string) string {
 	var out strings.Builder
 	finish := func(expr string) {
 		if effect {
-			out.WriteString("return efExit[" + goType(ret) + "]{Value:" + expr + "}\n")
+			out.WriteString("return efExit[" + ret + "]{Value:" + expr + "}\n")
 		} else {
 			out.WriteString("return " + expr + "\n")
 		}
@@ -293,7 +412,7 @@ func (g *goEmitter) block(b *Block, effect bool, ret string) string {
 	for i, s := range b.Statements {
 		if s.Kind == "fail" {
 			payload := g.failurePayload(s.Name, s.Payload, effect, ret, &out)
-			out.WriteString("return efExit[" + goType(ret) + "]{Failure:&er.Failure{Tag:" + strconv.Quote(s.Name) + ",Payload:" + payload + "}}\n")
+			out.WriteString("return efExit[" + ret + "]{Failure:&er.Failure{Tag:" + strconv.Quote(s.Name) + ",Payload:" + payload + "}}\n")
 			continue
 		}
 		expr := g.expr(s.Value, effect, ret, &out)
@@ -303,9 +422,10 @@ func (g *goEmitter) block(b *Block, effect bool, ret string) string {
 				finish("struct{}{}")
 			}
 		} else if i == len(b.Statements)-1 {
-			if s.Value.Type.Success == "never" {
+			isNever := s.Value != nil && s.Value.checked.node() != nil && s.Value.checked.node().Kind == "never"
+			if isNever {
 				if effect {
-					out.WriteString("_ = " + expr + "\nreturn efExit[" + goType(ret) + "]{Defect:fmt.Errorf(\"bottom expression unexpectedly succeeded\")}\n")
+					out.WriteString("_ = " + expr + "\nreturn efExit[" + ret + "]{Defect:fmt.Errorf(\"bottom expression unexpectedly succeeded\")}\n")
 				} else {
 					out.WriteString("_ = " + expr + "\npanic(\"bottom expression unexpectedly succeeded\")\n")
 				}
@@ -331,7 +451,8 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 		return left + ".Value"
 	case "orFail":
 		left := g.expr(e.Left, effect, ret, out)
-		return "func(ctx efContext)efExit[" + goType(e.Type.Success) + "]{return er.Invoke(ctx.Runtime,er.OrFail(efToRuntime(ctx," + left + ")))}"
+		resultType := g.resultType(e)
+		return "func(ctx efContext)efExit[" + resultType + "]{return er.Invoke(ctx.Runtime,er.OrFail(efToRuntime(ctx," + left + ")))}"
 	case "integer":
 		return "int64(" + e.Text + ")"
 	case "string":
@@ -358,7 +479,8 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 		return "efLocal_" + e.Name
 	case "scope":
 		name := g.temp()
-		out.WriteString(name + " := efScoped(func(ctx efContext)efExit[" + goType(e.Type.Success) + "]{\n" + g.block(e.Then, true, e.Type.Success) + "})(ctx)\n" + g.failed(name, ret))
+		valueType := g.valueType(e)
+		out.WriteString(name + " := efScoped(func(ctx efContext)efExit[" + valueType + "]{\n" + g.blockType(e.Then, true, valueType) + "})(ctx)\n" + g.failed(name, ret))
 		return name + ".Value"
 	case "fork":
 		expr := g.expr(e.Left, effect, ret, out)
@@ -417,8 +539,9 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 	case "catch":
 		left := g.expr(e.Left, effect, ret, out)
 		var fallback strings.Builder
-		right := g.expr(e.Right, false, e.Type.Success, &fallback)
-		return "efCatch(" + left + ", " + strconv.Quote(e.Name) + ", func() " + goType(e.Type.Success) + " {\n" + fallback.String() + "return " + right + "\n})"
+		valueType := g.resultType(e)
+		right := g.expr(e.Right, false, ret, &fallback)
+		return "efCatch(" + left + ", " + strconv.Quote(e.Name) + ", func() " + valueType + " {\n" + fallback.String() + "return " + right + "\n})"
 	case "binary":
 		left := g.expr(e.Left, effect, ret, out)
 		name := g.temp()
@@ -427,14 +550,15 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 		return "(" + name + " " + e.Name + " " + right + ")"
 	case "if":
 		var body strings.Builder
-		condition := g.expr(e.Left, effect, e.Type.Success, &body)
-		body.WriteString("if " + condition + " {\n" + g.block(e.Then, effect, e.Type.Success) + "} else {\n" + g.block(e.Else, effect, e.Type.Success) + "}\n")
+		valueType := g.valueType(e)
+		condition := g.expr(e.Left, effect, ret, &body)
+		body.WriteString("if " + condition + " {\n" + g.blockType(e.Then, effect, valueType) + "} else {\n" + g.blockType(e.Else, effect, valueType) + "}\n")
 		if effect {
 			name := g.temp()
-			out.WriteString(name + " := func() efExit[" + goType(e.Type.Success) + "] {\n" + body.String() + "}()\n" + g.failed(name, ret))
+			out.WriteString(name + " := func() efExit[" + valueType + "] {\n" + body.String() + "}()\n" + g.failed(name, ret))
 			return name + ".Value"
 		}
-		return "func() " + goType(e.Type.Success) + " {\n" + body.String() + "}()"
+		return "func() " + valueType + " {\n" + body.String() + "}()"
 	case "match":
 		return g.match(e, effect, ret, out)
 	}
@@ -529,7 +653,7 @@ func (g *goEmitter) constructCall(e *Expr, effect bool, ret string, out *strings
 }
 func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder) string {
 	value := g.expr(e.Left, effect, ret, out)
-	resultType := goType(e.Type.Success)
+	resultType := g.valueType(e)
 	variant := g.temp()
 	var body strings.Builder
 	body.WriteString(variant + " := " + value + "\n")
@@ -544,7 +668,7 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 					body.WriteString("efLocal_" + binding + " := efMatch." + goFieldName(field) + "\n_ = efLocal_" + binding + "\n")
 				}
 			}
-			body.WriteString(g.block(arm.Body, true, e.Type.Success))
+			body.WriteString(g.blockType(arm.Body, true, resultType))
 		}
 		if len(e.Arms) == 0 {
 			body.WriteString("default: _ = efMatch; return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable empty match\")}\n}\n")
@@ -565,7 +689,7 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 				body.WriteString("efLocal_" + binding + " := efMatch." + goFieldName(field) + "\n_ = efLocal_" + binding + "\n")
 			}
 		}
-		body.WriteString(g.block(arm.Body, false, e.Type.Success))
+		body.WriteString(g.blockType(arm.Body, false, resultType))
 	}
 	if len(e.Arms) == 0 {
 		body.WriteString("default: _ = efMatch; panic(\"unreachable empty match\")\n}\n")
@@ -607,7 +731,7 @@ func (g *goEmitter) foreign(e *Expr, effect bool, ret string, out *strings.Build
 		args = append(args, temp)
 	}
 	call := "efGo_" + e.Name + "(" + strings.Join(args, ",") + ")"
-	result := goType(e.Type.Success)
+	result := g.resultType(e)
 	body := "return er.Succeed(" + call + ")"
 	if b.Return == "()" {
 		body = call + ";return er.Succeed(struct{}{})"

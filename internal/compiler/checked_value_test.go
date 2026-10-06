@@ -135,6 +135,11 @@ func TestCheckedValueRejectsInvalidCallableRowsBeforeInterning(t *testing.T) {
 func TestCheckedValueFiberUsesTheSameStructuralNodeAsTheTypeArena(t *testing.T) {
 	c := newCheckedValueTestChecker()
 	result := c.internType("primitive", "string", nil)
+	rowlessType := c.internType("fiber", "", []TypeID{result})
+	rowlessValue := c.values.fiber(result, emptyRowID, nil, nil)
+	if rowlessValue.contractID() != rowlessType {
+		t.Fatalf("rowless fiber constructor created a duplicate node: value=%d type=%d", rowlessValue.contractID(), rowlessType)
+	}
 	failure := c.internRow([]string{"Failure"})
 	value := c.values.fiber(result, failure, nil, nil)
 	typeNode := c.internTypeWithRows("fiber", "", []TypeID{result}, failure, emptyRowID)

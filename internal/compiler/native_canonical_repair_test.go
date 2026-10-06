@@ -190,7 +190,72 @@ effect fn route(path: string) -> string raises {NotFound} uses {Users} { run Use
 				t.Fatalf("handler expression lost its source return type: %+v", info.Type)
 			}
 			if info.Type.Contract.ID != route.Contract.Contract.ID {
-				t.Fatalf("handler alias did not retain the declaration contract: expression=%q declaration=%q", info.Type.Contract.ID, route.Contract.Contract.ID)
+				t.Fatalf("handler value did not retain the declaration contract: expression=%q declaration=%q", info.Type.Contract.ID, route.Contract.Contract.ID)
+			}
+		})
+	}
+}
+
+func TestHandlerValueControlFlowUsesCanonicalGoValueTypes(t *testing.T) {
+	base := `effect fn route(path: string) -> string { path }
+`
+	for _, tc := range []struct {
+		name   string
+		body   string
+		needle string
+	}{
+		{
+			name: "if",
+			body: `effect fn main() -> () raises {IoError} {
+ let selected = if true { route } else { route }
+ run Http.serve("127.0.0.1:0", selected).provide<Http>(GoHttp)
+}`,
+			needle: "efExit[func(string) efEffect[string]]",
+		},
+		{
+			name: "scope",
+			body: `effect fn main() -> () raises {IoError} {
+ let selected = scope { route }
+ run Http.serve("127.0.0.1:0", selected).provide<Http>(GoHttp)
+}`,
+			needle: "efScoped(func(ctx efContext) efExit[func(string) efEffect[string]]",
+		},
+		{
+			name: "match",
+			body: `enum Choice { Left Right }
+effect fn main() -> () raises {IoError} {
+ let selected = match Choice.Left() { Choice.Left => route Choice.Right => route }
+ run Http.serve("127.0.0.1:0", selected).provide<Http>(GoHttp)
+}`,
+			needle: "efExit[func(string) efEffect[string]]",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := Compile(base + tc.body)
+			if !r.Checked {
+				t.Fatalf("Handler %s control flow did not check: %+v", tc.name, r.Diagnostics)
+			}
+			goSource, err := r.EmitGo()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(goSource, tc.needle) {
+				t.Fatalf("%s lowering did not render the canonical Handler value type %q:\n%s", tc.name, tc.needle, goSource)
+			}
+			goDir := t.TempDir()
+			if err := WriteRuntime(goDir); err != nil {
+				t.Fatal(err)
+			}
+			for name, contents := range map[string][]byte{
+				"go.mod":  []byte(r.ModuleFile()),
+				"main.go": []byte(goSource),
+			} {
+				if err := os.WriteFile(filepath.Join(goDir, name), contents, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if output, err := runWithWatchdog(goDir, 15*time.Second, "go", "build", "."); err != nil {
+				t.Fatalf("generated Go Handler %s build: %v\n%s", tc.name, err, output)
 			}
 		})
 	}
