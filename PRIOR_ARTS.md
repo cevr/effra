@@ -43,6 +43,8 @@ See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native
 - Adopt Effect's behavioral contracts as explicit conformance inputs. Native error/service rows, service identity and ownership are compiler concepts; retry, cache, routing and other runtime policies remain reusable library implementations.
 - Adopt a licensed pinned upstream test snapshot plus executable behavior mapping. Reject counting copied TypeScript reference tests as native parity: it breaks **Explicit contracts and clear guardrails**.
 - Adopt typed-AST host declaration projection, explicit target capabilities, source-location preservation and independently versioned interface/build artifacts from the [host compilation comparison](docs/research/host-language-compilation.md). Keep automatic declaration ingestion as the adoption goal; reject requiring handwritten bindings for every ordinary import. A content mapper complements Effra tooling but does not own its guarantees.
+- Adopt ordinary transition functions and a declaration-only machine binding from the [XState v6 and Effect Machine comparison](docs/research/machines-and-transforming-codecs.md). Keep conservative graph edges explicit; require completed entry cleanup and bounded admission as separately tested Effra policies.
+- Adopt opt-in structural codec derivation plus named transforming witnesses with independent directional contracts. Preserve multiple representations, versioned wire policies and transformation-specific laws; reject global witness uniqueness and automatic reversibility claims.
 - `.ef` text remains authoritative. Dependency graphs are rebuildable views with revision-scoped expression IDs.
 - Compiler soundness diagnostics cannot be disabled by optional lint. Unchecked files do not receive authoritative expression types or dependency graphs.
 - Lazy construction does not execute an effect. Unused local recipes receive lint advice; bare discarded recipes remain compiler errors.
@@ -53,8 +55,8 @@ See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native
 
 ## To survey
 
-- State machines as a checked language construct: make active XState v6 PR5543/next the main comparison, with Effect Machine's lifetime tests alongside it. Revalidate earlier v5 observations against v6 source/tests: ordinary transitions, state/event ADTs, invocation identity, bounded admission, deterministic testing, Effect integration and graph inspection. Distinguish finite machine semantics from persistence and workflow guarantees.
-- Rust/Serde-style structural derivation plus Effect-style codecs: separate wire/domain types; composable decode and encode transformations with independent error/service rows, refinements, normalization laws and explicit wire evolution. Derivation is not limited to JSON serialization.
+- Validate the adopted XState v6/Effect Machine profile through pure plan tests and owned Go/JS actors. Include stale identity, conservative graph edges, saturation, re-entry and completed shutdown; source comparison is complete, implementation receipts remain open.
+- Validate the adopted Serde/Effect codec design with multiple named wire representations, directional rows, normalization, cancellation and bounded derivation. Source comparison is complete, implementation receipts remain open.
 - Validate adopted Gleam/ReScript/TypeScript compilation patterns with Effra consumer, diagnostic-map and cache-invalidation fixtures; source comparison is complete, implementation and cost receipts remain open.
 - Which finite row and ordinary type-parameter mechanisms express reusable effect combinators without complex conditional-type inference or a compiler operation per combinator?
 - Which provider acquisition/sharing interface makes recipe identity, materialized value identity and allocation ownership obvious at a call site?
