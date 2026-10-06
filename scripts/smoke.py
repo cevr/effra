@@ -70,7 +70,8 @@ server = subprocess.run([ef, "mcp", str(root)], input="\n".join(map(json.dumps, 
 assert server.returncode == 0, server.stderr
 responses = [json.loads(line) for line in server.stdout.splitlines()]
 assert len(responses) == 8
-assert len(responses[1]["result"]["tools"]) == 11
+assert len(responses[1]["result"]["tools"]) == 12
+assert "code.type" in {tool["name"] for tool in responses[1]["result"]["tools"]}
 mcp = responses[2]["result"]["structuredContent"]
 assert mcp["symbol"] == inspected["symbol"] and mcp["revision"] == inspected["revision"]
 data_mcp = responses[3]["result"]["structuredContent"]

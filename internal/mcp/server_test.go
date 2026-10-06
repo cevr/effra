@@ -59,8 +59,17 @@ func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
 		t.Fatal(result)
 	}
 	listed := responses[2]["result"].(map[string]any)["tools"].([]any)
-	if len(listed) != 11 {
+	if len(listed) != 12 {
 		t.Fatal(listed)
+	}
+	foundType := false
+	for _, item := range listed {
+		if item.(map[string]any)["name"] == "code.type" {
+			foundType = true
+		}
+	}
+	if !foundType {
+		t.Fatal("selected type tool was not advertised")
 	}
 	inspected := responses[3]["result"].(map[string]any)["structuredContent"].(map[string]any)
 	expected := compiler.Compile(source)

@@ -11,11 +11,14 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 | `ef inspect FILE SYMBOL` | `code.inspect` | Declared/body contracts or nominal record, enum and error metadata |
 | `ef explain FILE SYMBOL` | `code.explain` | Local contract contributions |
 | `ef query FILE BYTE_OFFSET` | `code.typeAt` | Expression kind, type, and executed failure/requirement rows |
+| `ef type FILE --symbol NAME / --offset BYTE / --definition ID` | `code.type` | Selected declaration, lexical binding/use, expression, or canonical definition |
 | `ef graph FILE` | `project.graph` | Dependencies, providers, calls and provision boundaries |
 | `ef test FILE` | `project.tests` discovers cases | CLI executes; MCP remains read-only |
 | `ef fmt FILE... [--check] [--json]` / `ef fmt --stdin` | `code.format` | Canonical syntax-only formatting; CLI writes atomically, MCP returns a full-text preview and never writes |
 
 File commands accept `--target go|js`, defaulting to Go. Results contain semantic revision hashes. MCP file tools accept `expectedRevision` and reject stale snapshots.
+
+`ef type` requires exactly one selector. `--definition` also requires `--revision`; MCP uses `definition` with `expectedRevision`. Offset queries use original syntax extents and checked lexical bindings. Selected imported declarations can have `locationAvailable: false`; their original source extent is not inferred from the current file. Results retain the existing semantic ABI identity and source revision; executing-artifact qualification is a separate integration dependency.
 
 Formatter adapters are the exception to semantic target and revision flags: `ef fmt` is syntax-only, and MCP `code.format` accepts `expectedDigest` for exact source bytes but no `target` or `expectedRevision`.
 

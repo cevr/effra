@@ -67,6 +67,8 @@ type arguments struct {
 	Target           string `json:"target"`
 	Strict           bool   `json:"strict"`
 	Offset           int    `json:"offset"`
+	OffsetPresent    bool
+	Definition       string
 }
 type callParams struct {
 	Name      string          `json:"name"`
@@ -324,6 +326,11 @@ func tools() []tool {
 	querySchema := schema(false)
 	querySchema["properties"].(map[string]any)["offset"] = map[string]any{"type": "integer", "minimum": 0, "description": "UTF-8 byte offset in an expression diagnostic anchor"}
 	querySchema["required"] = []string{"file", "offset"}
+	typeSchema := schema(false)
+	typeSchema["properties"].(map[string]any)["offset"] = map[string]any{"type": "integer", "minimum": 0, "description": "Original UTF-8 byte offset for a declaration or expression"}
+	typeSchema["properties"].(map[string]any)["symbol"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 256}
+	typeSchema["properties"].(map[string]any)["definition"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 256, "description": "Canonical type ID; requires expectedRevision"}
+	typeSchema["oneOf"] = []map[string]any{{"required": []string{"symbol"}}, {"required": []string{"offset"}}, {"required": []string{"definition", "expectedRevision"}}}
 	formatSchema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -349,6 +356,7 @@ func tools() []tool {
 		{"project.lint", "Type-aware advice over checked source; strict mode fails on warnings", lintSchema, annotations},
 		{"lint.rules", "Stable lint codes, severity and rationale", map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}, annotations},
 		{"code.typeAt", "Checked local expression type and executed rows at a byte anchor", querySchema, annotations},
+		{"code.type", "Selected original declaration, lexical binding, expression or revision-bound canonical definition", typeSchema, annotations},
 		{"code.inspect", "Canonical declared and body contracts for a function", schema(true), annotations},
 		{"code.explain", "Local executed-call contributions introducing failures and services", schema(true), annotations},
 	}
@@ -667,7 +675,7 @@ func call(root, name string, args arguments) (any, error) {
 			"schemaVersion": compiler.SemanticSchemaVersion, "compilerVersion": CompilerVersion,
 			"runtimes": map[string]string{"go": "typed lazy closures; managed scopes and fibers; Go standard library", "js": "effect@4.0.1"},
 			"targets":  []string{"go", "js"}, "defaultTarget": "go", "sourceExtension": ".ef", "workspace": root,
-			"operations": []string{"project.describe", "code.format", "project.check", "project.diagnostics", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "project.graph", "project.tests"}, "scope": "single-file disk snapshots or one explicit source buffer for code.format",
+			"operations": []string{"project.describe", "code.format", "project.check", "project.diagnostics", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "code.type", "project.graph", "project.tests"}, "scope": "single-file disk snapshots or one explicit source buffer for code.format",
 			"guardrails": map[string]string{
 				"failures": "checked closed rows", "requirements": "checked nominal services",
 				"resourceOwnership":  "Both targets join owned fibers before releasing scope resources; Go File guards closed handles",
@@ -750,6 +758,13 @@ func call(root, name string, args arguments) (any, error) {
 			lint.LintDiagnostics = lint.LintDiagnostics[:100]
 		}
 		return map[string]any{"lint": lint, "diagnosticsTruncated": compilerTruncated, "lintDiagnosticsTruncated": lintTruncated}, nil
+	}
+	if name == "code.type" {
+		selection := compiler.TypeSelection{Symbol: args.Symbol, Definition: args.Definition, ExpectedRevision: args.ExpectedRevision}
+		if args.OffsetPresent {
+			selection.Offset = &args.Offset
+		}
+		return r.SelectType(selection)
 	}
 	if name == "code.typeAt" {
 		info, err := r.TypeAt(args.Offset)
@@ -862,15 +877,22 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 			args.Strict = flag
 			continue
 		}
-		if key == "offset" && name == "code.typeAt" {
+		if key == "offset" && (name == "code.typeAt" || name == "code.type") {
 			n, ok := value.(float64)
 			if !ok || n < 0 || n > 2*1024*1024 || n != float64(int(n)) {
 				return args, fmt.Errorf("offset must be a non-negative integer within the source limit")
 			}
 			args.Offset = int(n)
+			args.OffsetPresent = true
 			continue
 		}
 		switch key {
+		case "definition":
+			text, ok := value.(string)
+			if name != "code.type" || !ok || text == "" || len(text) > 256 {
+				return args, fmt.Errorf("invalid type definition argument")
+			}
+			args.Definition = text
 		case "file":
 			if name == "project.describe" || name == "lint.rules" {
 				return args, fmt.Errorf("invalid tool argument %s", key)
@@ -930,10 +952,13 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 			if !ok {
 				return args, fmt.Errorf("symbol must be a string")
 			}
-			if name != "code.inspect" && name != "code.explain" {
+			if name != "code.inspect" && name != "code.explain" && name != "code.type" {
 				return args, fmt.Errorf("unexpected symbol argument")
 			}
 			args.Symbol = text
+			if name == "code.type" && (text == "" || len(text) > 256) {
+				return args, fmt.Errorf("invalid type symbol argument")
+			}
 		default:
 			return args, fmt.Errorf("unknown tool argument %s", key)
 		}
@@ -952,6 +977,24 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 	}
 	if (name == "code.inspect" || name == "code.explain") && args.Symbol == "" {
 		return args, fmt.Errorf("symbol is required")
+	}
+	if name == "code.type" {
+		selectors := 0
+		if args.Symbol != "" {
+			selectors++
+		}
+		if args.OffsetPresent {
+			selectors++
+		}
+		if args.Definition != "" {
+			selectors++
+		}
+		if selectors != 1 {
+			return args, fmt.Errorf("select exactly one symbol, offset or definition")
+		}
+		if args.Definition != "" && args.ExpectedRevision == "" {
+			return args, fmt.Errorf("definition requires expectedRevision")
+		}
 	}
 	return args, nil
 }
