@@ -266,6 +266,7 @@ type Result struct {
 	Timings                Timings                `json:"timings"`
 	Program                *Program               `json:"-"`
 	facts                  map[*Expr]ExpressionFacts
+	lexical                *lexicalFacts
 	canonical              *canonicalSnapshot
 	checkedProviders       map[string]*Provider
 	checkedServices        map[string]*Service
@@ -306,6 +307,7 @@ type checkedExpression struct {
 	application      *ApplicationIdentity
 	identity         string
 	callableEvidence callableEvidence
+	lexicalBinding   string
 }
 
 func (e checkedExpression) contractID() TypeID      { return e.value.contractID() }
@@ -374,6 +376,7 @@ type checker struct {
 	templates               map[string]*Record
 	typeContext             map[string]TemplateParameter
 	variableOwners          map[string]TemplateParameter
+	lexicalOwner            *Function
 }
 
 const maxTypeProjectionNodes = 4096
@@ -2151,6 +2154,7 @@ func CompileAt(source, target, dir string) *Result {
 		return r
 	}
 	r.Program = program
+	r.lexical = captureOriginalSyntax(program)
 	r.loadImports(dir)
 	r.loadBundledImports(source)
 	c := newChecker(program, r)
@@ -3649,6 +3653,14 @@ func (c *checker) function(f *Function, record bool) {
 }
 
 func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, allowedServices []string) {
+	previousLexicalOwner := c.lexicalOwner
+	c.lexicalOwner = nil
+	if c.result.lexical != nil {
+		if _, original := c.result.lexical.functions[f]; original {
+			c.lexicalOwner = f
+		}
+	}
+	defer func() { c.lexicalOwner = previousLexicalOwner }()
 	previousTypes := c.typeContext
 	c.typeContext = c.templateContext(f.TypeParameters, f.Identity)
 	defer func() { c.typeContext = previousTypes }()
@@ -3662,6 +3674,9 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	for _, p := range locals {
 		parameter := c.checkedData(p.Type)
 		parameter.setOwnership(c.borrowedOwnership(p.Type, "parameter:"+p.Name))
+		if c.lexicalOwner != nil {
+			parameter = c.bindLocal("configuration", p.Name, p.Span, p.Extent, c.result.lexical.parameters[p.Span.Offset], parameter)
+		}
 		env[p.Name] = parameter
 	}
 	for _, p := range f.Params {
@@ -3671,6 +3686,9 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 			parameter.callableEvidence = callableEvidence{parameter: f, parameterName: p.Name}
 		}
 		parameter.setOwnership(c.borrowedOwnership(p.Type, "parameter:"+p.Name))
+		if c.lexicalOwner != nil {
+			parameter = c.bindLocal("parameter", p.Name, p.Span, p.Extent, c.result.lexical.parameters[p.Span.Offset], parameter)
+		}
 		env[p.Name] = parameter
 	}
 	c.reasons = []Contribution{}
@@ -3918,7 +3936,11 @@ func (c *checker) block(b *Block, env map[string]checkedExpression, effect bool)
 			if _, exists := env[s.Name]; exists {
 				c.diagnostic("EF101", "duplicate local "+s.Name, s.Span)
 			}
-			env[s.Name] = t.clone()
+			bound := t.clone()
+			if c.lexicalOwner != nil {
+				bound = c.bindLocal("let", s.Name, s.NameSpan, s.Extent, c.result.lexical.statements[s], bound)
+			}
+			env[s.Name] = bound
 			previousEvaluation := out.evaluation
 			out = c.checkedData("()")
 			out.evaluation = previousEvaluation
@@ -3951,6 +3973,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		t = c.checkedData("()")
 	case "name":
 		if v, exists := env[e.Name]; exists {
+			c.observeLocalUse(e, v)
 			t = v.clone()
 			// A local read observes a carried value contract; it does not replay
 			// evaluation work performed by the initializer.
@@ -4682,6 +4705,9 @@ func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool
 			bound.setOwnership(projectVariantFacts(scrutinee.ownershipFacts(), pattern.VariantName, fieldName))
 			if len(bound.ownershipFacts()) == 0 {
 				bound.setOwnership(c.unknownOwnership(field.Type))
+			}
+			if c.lexicalOwner != nil {
+				bound = c.bindLocal("pattern", binding, pattern.bindingSpan(fieldName), pattern.Extent, c.result.lexical.patterns[pattern], bound)
 			}
 			branchEnv[binding] = bound
 		}

@@ -50,6 +50,7 @@ type Param struct {
 	Type       string  `json:"type"`
 	TypeRef    TypeRef `json:"typeRef"`
 	Span       Span    `json:"span"`
+	Extent     Span    `json:"-"`
 	typeID     TypeID
 	sourceType *sourceType
 }
@@ -117,6 +118,7 @@ type Function struct {
 	Body         *Block
 	Span         Span
 	DeclSpan     Span `json:"-"`
+	Extent       Span `json:"-"`
 	Ownership    []OwnershipFact
 	Captures     []OwnershipFact
 	// Identity is assigned by the checker from the canonical callable
@@ -211,17 +213,21 @@ type SyntaxItem struct {
 	Layer         *Layer
 	Function      *Function
 	Span          Span
+	Extent        Span `json:"-"`
 }
 type Block struct {
 	Statements []*Statement
 	Explicit   bool `json:"-"`
+	Extent     Span `json:"-"`
 }
 type Statement struct {
-	Kind    string
-	Name    string
-	Value   *Expr
-	Payload *Expr
-	Span    Span
+	Kind     string
+	Name     string
+	Value    *Expr
+	Payload  *Expr
+	Span     Span
+	NameSpan Span `json:"-"`
+	Extent   Span `json:"-"`
 }
 type FieldValue struct {
 	Name  string
@@ -233,11 +239,23 @@ type MatchPattern struct {
 	VariantName string
 	Bindings    map[string]string
 	Span        Span
+	Extent      Span          `json:"-"`
+	Names       []PatternName `json:"-"`
+}
+
+// PatternName retains source order and the alias token independently of the
+// checker-facing field map. Span remains the existing diagnostic anchor.
+type PatternName struct {
+	Field     string
+	Name      string
+	FieldSpan Span
+	NameSpan  Span
 }
 type MatchArm struct {
 	Pattern *MatchPattern
 	Body    *Block
 	Span    Span
+	Extent  Span `json:"-"`
 }
 type Expr struct {
 	ResolvedTemplate *Record
@@ -252,6 +270,7 @@ type Expr struct {
 	Fields           []FieldValue
 	Arms             []*MatchArm
 	Span             Span
+	Extent           Span `json:"-"`
 	Type             ValueType
 	checked          checkedExpression
 	layerPlan        *LayerPlan
@@ -511,7 +530,7 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 					param := p.name()
 					p.expect(":")
 					typ := p.typ()
-					params = append(params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span})
+					params = append(params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span)})
 					if !p.accept(",") {
 						p.expect(")")
 						break
@@ -600,10 +619,22 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 		default:
 			p.fail(p.peek(), "expected error, record, enum, service, impl, layer, or function declaration")
 		}
+		item := program.Items[len(program.Items)-1]
+		item.Extent = p.extent(item.Span)
 	}
 	return program, tokens, nil
 }
 func (p *parser) peek() token { return p.tokens[p.at] }
+
+// extent includes all consumed tokens while retaining the original anchor's
+// byte-based line and column. Trivia after the final token is not a node.
+func (p *parser) extent(start Span) Span {
+	if p.at > 0 {
+		last := p.tokens[p.at-1].span
+		start.Length = last.Offset + last.Length - start.Offset
+	}
+	return start
+}
 func (p *parser) take() token {
 	v := p.peek()
 	if v.kind != "eof" {
@@ -823,7 +854,7 @@ func (p *parser) function(body bool) *Function {
 		param := p.name()
 		p.expect(":")
 		typ := p.typ()
-		f.Params = append(f.Params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span})
+		f.Params = append(f.Params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span)})
 		if !p.accept(",") {
 			p.expect(")")
 			break
@@ -846,6 +877,7 @@ func (p *parser) function(body bool) *Function {
 	} else {
 		p.accept(";")
 	}
+	f.Extent = p.extent(declSpan)
 	return f
 }
 func (p *parser) block() *Block {
@@ -854,19 +886,21 @@ func (p *parser) block() *Block {
 	if p.depth > 256 {
 		p.fail(p.peek(), "syntax nesting exceeds prototype limit of 256")
 	}
-	p.expect("{")
+	open := p.expect("{")
 	b := &Block{Explicit: true}
 	for !p.accept("}") {
 		start := p.peek()
 		s := &Statement{Span: start.span}
 		if p.accept("let") {
 			s.Kind = "let"
-			s.Name = p.name().text
+			name := p.name()
+			s.Name, s.NameSpan = name.text, name.span
 			p.expect("=")
 			s.Value = p.expr(0)
 		} else if p.accept("fail") {
 			s.Kind = "fail"
-			s.Name = p.name().text
+			name := p.name()
+			s.Name, s.NameSpan = name.text, name.span
 			if p.peek().text == "(" {
 				p.take()
 				if !p.accept(")") {
@@ -874,15 +908,18 @@ func (p *parser) block() *Block {
 					p.expect(")")
 				}
 			} else if p.peek().text == "{" {
-				s.Payload = &Expr{Kind: "payload", Fields: p.fieldValues(), Span: start.span}
+				payloadStart := p.peek().span
+				s.Payload = &Expr{Kind: "payload", Fields: p.fieldValues(), Span: start.span, Extent: p.extent(payloadStart)}
 			}
 		} else {
 			s.Kind = "expr"
 			s.Value = p.expr(0)
 		}
+		s.Extent = p.extent(start.span)
 		b.Statements = append(b.Statements, s)
 		p.accept(";")
 	}
+	b.Extent = p.extent(open.span)
 	return b
 }
 func (p *parser) expr(min int) *Expr {
@@ -928,7 +965,8 @@ func (p *parser) expr(min int) *Expr {
 			var body *Block
 			if p.peek().text == "fail" {
 				start := p.take()
-				statement := &Statement{Kind: "fail", Name: p.name().text, Span: start.span}
+				name := p.name()
+				statement := &Statement{Kind: "fail", Name: name.text, NameSpan: name.span, Span: start.span}
 				if p.peek().text == "(" {
 					p.take()
 					if !p.accept(")") {
@@ -936,16 +974,18 @@ func (p *parser) expr(min int) *Expr {
 						p.expect(")")
 					}
 				} else if p.peek().text == "{" {
-					statement.Payload = &Expr{Kind: "payload", Fields: p.fieldValues(), Span: start.span}
+					payloadStart := p.peek().span
+					statement.Payload = &Expr{Kind: "payload", Fields: p.fieldValues(), Span: start.span, Extent: p.extent(payloadStart)}
 				}
-				body = &Block{Statements: []*Statement{statement}}
+				statement.Extent = p.extent(start.span)
+				body = &Block{Statements: []*Statement{statement}, Extent: statement.Extent}
 			} else if p.peek().text == "{" {
 				body = p.block()
 			} else {
 				value := p.expr(0)
-				body = &Block{Statements: []*Statement{{Kind: "expr", Value: value, Span: value.Span}}}
+				body = &Block{Statements: []*Statement{{Kind: "expr", Value: value, Span: value.Span, Extent: value.Extent}}, Extent: value.Extent}
 			}
-			e.Arms = append(e.Arms, &MatchArm{Pattern: pattern, Body: body, Span: pattern.Span})
+			e.Arms = append(e.Arms, &MatchArm{Pattern: pattern, Body: body, Span: pattern.Span, Extent: p.extent(pattern.Span)})
 			p.accept(",")
 			p.accept(";")
 		}
@@ -969,6 +1009,7 @@ func (p *parser) expr(min int) *Expr {
 		p.fail(start, "expected expression")
 	}
 	for {
+		e.Extent = p.extent(start.span)
 		if (p.noConstruct == 0 || p.constructorBrace()) && p.peek().text == "{" && (e.Kind == "name" || e.Kind == "member") {
 			e = &Expr{Kind: "construct", Left: e, Fields: p.fieldValues(), Span: e.Span}
 			continue
@@ -1040,6 +1081,7 @@ func (p *parser) expr(min int) *Expr {
 		op := p.take()
 		e = &Expr{Kind: "binary", Name: op.text, Left: e, Right: p.expr(precedence + 1), Span: op.span}
 	}
+	e.Extent = p.extent(start.span)
 	return e
 }
 
@@ -1130,16 +1172,18 @@ func (p *parser) pattern() *MatchPattern {
 				p.fail(field, "duplicate pattern field "+field.text)
 			}
 			seen[field.text] = true
-			binding := field.text
+			binding := field
 			if p.accept(":") {
-				binding = p.name().text
+				binding = p.name()
 			}
-			pattern.Bindings[field.text] = binding
+			pattern.Bindings[field.text] = binding.text
+			pattern.Names = append(pattern.Names, PatternName{Field: field.text, Name: binding.text, FieldSpan: field.span, NameSpan: binding.span})
 			if !p.accept(",") && !p.accept(";") {
 				p.expect("}")
 				break
 			}
 		}
 	}
+	pattern.Extent = p.extent(first.span)
 	return pattern
 }
