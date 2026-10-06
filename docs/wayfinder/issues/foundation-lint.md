@@ -1,4 +1,4 @@
-<!-- {"id": "foundation-lint", "title": "Reasoned semantic lint suppression", "status": "open", "labels": ["implementation:task"], "parent": "foundation-spec", "assignee": null, "blocked_by": []} -->
+<!-- {"id": "foundation-lint", "title": "Reasoned semantic lint suppression", "status": "open", "labels": ["implementation:task"], "parent": "foundation-spec", "assignee": "reasoned_lint", "blocked_by": []} -->
 # Reasoned semantic lint suppression
 
 ## Question
