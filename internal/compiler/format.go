@@ -125,14 +125,14 @@ func buildFormatLayout(source string, program *Program, tokens []token) formatLa
 		}
 		switch item.Kind {
 		case "error":
-			collectFieldBreaks(layout.breaks, item.Error.Fields)
+			collectFieldBreaks(&layout, item.Error.Fields)
 		case "record":
-			collectFieldBreaks(layout.breaks, item.Record.Fields)
+			collectFieldBreaks(&layout, item.Record.Fields)
 		case "enum":
 			for _, variant := range item.Enum.Variants {
 				layout.breaks[variant.Span.Offset] = true
 				if !variant.Parenthesized {
-					collectFieldBreaks(layout.breaks, variant.Fields)
+					collectFieldBreaks(&layout, variant.Fields)
 				}
 			}
 		case "service":
@@ -158,7 +158,11 @@ func buildFormatLayout(source string, program *Program, tokens []token) formatLa
 			}
 			open := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
-			if isInlineBrace(source, program.Comments, tokens, open, index) {
+			inline := isInlineBrace(source, program.Comments, tokens, open, index)
+			if layout.preserve[tokens[open].span.Line] && open+1 < len(tokens) && tokens[open+1].span.Line == tokens[open].span.Line {
+				inline = true
+			}
+			if inline {
 				layout.braces[open] = braceInline
 				layout.braces[index] = braceInline
 			} else {
@@ -170,9 +174,11 @@ func buildFormatLayout(source string, program *Program, tokens []token) formatLa
 	return layout
 }
 
-func collectFieldBreaks(breaks map[int]bool, fields []Field) {
+func collectFieldBreaks(layout *formatLayout, fields []Field) {
 	for _, field := range fields {
-		breaks[field.Span.Offset] = true
+		if !layout.preserve[field.Span.Line] {
+			layout.breaks[field.Span.Offset] = true
+		}
 	}
 }
 
@@ -237,13 +243,13 @@ func collectExpressionBreaks(layout *formatLayout, expression *Expr) {
 		collectExpressionBreaks(layout, argument)
 	}
 	for _, field := range expression.Fields {
-		if expression.Kind != "call" {
+		if expression.Kind != "call" && !layout.preserve[field.Span.Line] {
 			layout.breaks[field.Span.Offset] = true
 		}
 		collectExpressionBreaks(layout, field.Value)
 	}
 	for _, arm := range expression.Arms {
-		if arm.Pattern != nil {
+		if arm.Pattern != nil && !layout.preserve[arm.Pattern.Span.Line] {
 			layout.breaks[arm.Pattern.Span.Offset] = true
 		}
 		collectBlockBreaks(layout, arm.Body)
@@ -309,14 +315,16 @@ func (p *formatPrinter) comment(event formatEvent) {
 func (p *formatPrinter) token(eventIndex int, event formatEvent) {
 	current := p.tokens[event.tokenIndex]
 	gap := p.eventGap(event)
-	if (p.layout.itemStarts[current.span.Offset] || p.layout.breaks[current.span.Offset]) && !p.layout.inline[current.span.Offset] {
-		newlines := formatNewlineCount(gap)
-		if newlines == 0 {
-			newlines = 1
-		}
-		p.breaks(newlines)
+	physicalBreak := formatNewlineCount(gap) > 0
+	if physicalBreak {
+		p.breaks(formatNewlineCount(gap))
 	}
-	if p.lastToken >= 0 && p.tokens[p.lastToken].text == "}" && p.layout.braces[p.lastToken] == braceBlock && !formatContinuation(current.text) {
+	if (p.layout.itemStarts[current.span.Offset] || p.layout.breaks[current.span.Offset]) && !p.layout.inline[current.span.Offset] {
+		if !physicalBreak && !p.layout.preserve[current.span.Line] {
+			p.breaks(1)
+		}
+	}
+	if p.lastToken >= 0 && p.tokens[p.lastToken].text == "}" && p.layout.braces[p.lastToken] == braceBlock && !formatContinuation(current.text) && !p.layout.preserve[current.span.Line] {
 		p.newline()
 	}
 	switch current.text {
@@ -335,13 +343,13 @@ func (p *formatPrinter) token(eventIndex int, event formatEvent) {
 	case ",":
 		p.regularSpacing(current.text)
 		p.write(current.text)
-		if p.topDelimiterStyle() == braceBlock && !p.nextEventIsTrailingComment(eventIndex, event) {
+		if p.topDelimiterStyle() == braceBlock && !p.nextEventIsTrailingComment(eventIndex, event) && !p.nextEventIsPinnedSameLine(eventIndex) {
 			p.newline()
 		}
 	case ";":
 		p.regularSpacing(current.text)
 		p.write(current.text)
-		if !p.nextEventIsTrailingComment(eventIndex, event) && !p.nextEventIsInlineStatement(eventIndex) {
+		if !p.nextEventIsTrailingComment(eventIndex, event) && !p.nextEventIsInlineStatement(eventIndex) && !p.nextEventIsPinnedSameLine(eventIndex) {
 			p.newline()
 		}
 	default:
@@ -371,7 +379,9 @@ func (p *formatPrinter) openBrace(eventIndex int, event formatEvent) {
 func (p *formatPrinter) closeBrace(tokenIndex int, current token) {
 	style := p.layout.braces[tokenIndex]
 	if style == braceBlock {
-		p.breaks(1)
+		if !p.layout.preserve[current.span.Line] {
+			p.breaks(1)
+		}
 		if p.indent > 0 {
 			p.indent--
 		}
@@ -455,6 +465,17 @@ func (p *formatPrinter) nextEventIsInlineStatement(eventIndex int) bool {
 	}
 	next := p.tokens[p.events[eventIndex+1].tokenIndex]
 	return p.layout.inline[next.span.Offset]
+}
+
+func (p *formatPrinter) nextEventIsPinnedSameLine(eventIndex int) bool {
+	if eventIndex+1 >= len(p.events) || p.events[eventIndex+1].comment != nil {
+		return false
+	}
+	next := p.tokens[p.events[eventIndex+1].tokenIndex]
+	if !p.layout.preserve[next.span.Line] {
+		return false
+	}
+	return p.tokens[p.events[eventIndex].tokenIndex].span.Line == next.span.Line
 }
 
 func (p *formatPrinter) eventGap(event formatEvent) string {

@@ -185,6 +185,51 @@ else { "no" }
 	}
 	assertLintMeaning(t, source, result.Text)
 
+	wrappedChain := `effect fn main() -> () {
+// effra-lint-disable-next-line redundant-provision -- keep the chain target line
+run hello().provide<Console>(Stdout)
+    .provide<Console>(Stdout)
+}`
+	wrappedResult, err := FormatSource(wrappedChain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(wrappedResult.Text, "run hello().provide<Console>(Stdout)\n    .provide<Console>(Stdout)") {
+		t.Fatalf("source chain line break was not preserved:\n%s", wrappedResult.Text)
+	}
+	assertDirectiveTokenLines(t, wrappedChain, wrappedResult.Text)
+	if again, err := FormatSource(wrappedResult.Text); err != nil || again.Text != wrappedResult.Text {
+		t.Fatalf("wrapped directive target was not idempotent: %v\n%s", err, again.Text)
+	}
+
+	blankTarget := `effect fn main() -> () {
+// effra-lint-disable-next-line future-rule -- blank target remains blank
+
+()
+}`
+	blankResult, err := FormatSource(blankTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(blankResult.Text, "future-rule -- blank target remains blank\n\n    ()") {
+		t.Fatalf("blank directive target was moved:\n%s", blankResult.Text)
+	}
+	assertDirectiveTokenLines(t, blankTarget, blankResult.Text)
+
+	pinnedConstruct := `effect fn main() -> string {
+// effra-lint-disable-next-line future-rule -- preserve this whole syntax line
+let value = Data { first: "a", second: "b" }; value
+}
+record Data { first: string, second: string }`
+	pinnedConstructResult, err := FormatSource(pinnedConstruct)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pinnedConstructResult.Text, `let value = Data {first: "a", second: "b"}; value`) {
+		t.Fatalf("pinned syntax line was split:\n%s", pinnedConstructResult.Text)
+	}
+	assertDirectiveTokenLines(t, pinnedConstruct, pinnedConstructResult.Text)
+
 	for _, directive := range []string{
 		`// effra-lint-disable-next-line future-rule -- malformed unknown rule`,
 		`// effra-lint-disable-next-line unused-recipe -- unused directive`,
@@ -326,6 +371,47 @@ func tokenTexts(t *testing.T, source string) []string {
 		texts = append(texts, token.text)
 	}
 	return texts
+}
+
+func assertDirectiveTokenLines(t *testing.T, before, after string) {
+	t.Helper()
+	beforeTokens, beforeComments, beforeDiagnostics := lex(before)
+	afterTokens, afterComments, afterDiagnostics := lex(after)
+	if len(beforeDiagnostics) != 0 || len(afterDiagnostics) != 0 {
+		t.Fatalf("directive line oracle could not lex source: before=%+v after=%+v", beforeDiagnostics, afterDiagnostics)
+	}
+	afterCommentLines := map[string][]int{}
+	for _, comment := range afterComments {
+		afterCommentLines[comment.Text] = append(afterCommentLines[comment.Text], comment.Span.Line)
+	}
+	seen := map[string]int{}
+	for _, comment := range beforeComments {
+		body := strings.TrimLeft(comment.Text, " \t")
+		if !strings.HasPrefix(body, "effra-lint-disable-next-line") {
+			continue
+		}
+		lines := afterCommentLines[comment.Text]
+		occurrence := seen[comment.Text]
+		if occurrence >= len(lines) {
+			t.Fatalf("directive comment was lost: %q", comment.Text)
+		}
+		seen[comment.Text] = occurrence + 1
+		beforeLine := tokenLineText(beforeTokens, comment.Span.Line+1)
+		afterLine := tokenLineText(afterTokens, lines[occurrence]+1)
+		if beforeLine != afterLine {
+			t.Fatalf("directive target token line changed: before=%q after=%q comment=%q", beforeLine, afterLine, comment.Text)
+		}
+	}
+}
+
+func tokenLineText(tokens []token, line int) string {
+	texts := []string{}
+	for _, current := range tokens {
+		if current.kind != "eof" && current.span.Line == line {
+			texts = append(texts, current.text)
+		}
+	}
+	return strings.Join(texts, "\x00")
 }
 
 func syntaxShape(t *testing.T, source string) []string {
