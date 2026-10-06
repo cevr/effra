@@ -81,7 +81,7 @@ func TestImportedPartialValuesAndContextForwarding(t *testing.T) {
 	source := `import go sdk "effra.local/prototype/examples/sdk"
 effect fn main() -> string raises {GoError} {
  let partial = run sdk.Lookup("missing").provide<Foreign>(Host)
- let timed = run sdk.Lookup("slow").orFail().timeout(1).catch<Timeout>("done").provide<Foreign>(Host)
+ let timed = run sdk.Lookup("slow").orFail().timeout(1).catch<Timeout>("done").provide<Foreign>(Host).provide<Scheduler>(LiveScheduler)
  partial.value + ":" + timed
 }`
 	r := CompileAt(source, "go", root)

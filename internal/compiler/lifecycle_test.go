@@ -22,8 +22,8 @@ effect fn unobserved() -> () raises {Bad} uses {Gate} {
  let child = fork broken()
  run Gate.step("announced")
 }
-effect fn timed() -> () raises {Timeout} uses {Gate} {run worker().timeout(20)}
-effect fn recovered() -> () uses {Gate} {run timed().catch<Timeout>(())}
+effect fn timed() -> () raises {Timeout} uses {Gate, Scheduler} {run worker().timeout(20)}
+effect fn recovered() -> () uses {Gate} {run timed().provide<Scheduler>(LiveScheduler).catch<Timeout>(())}
 effect fn main() -> () {()}
 `
 

@@ -11,7 +11,7 @@ effect fn scopedRead() -> string raises {IoError} uses {Files, Runtime, Console}
     }
 }
 
-effect fn program() -> () raises {IoError} uses {Clock, Files, Runtime, Console, Env} {
+effect fn program() -> () raises {IoError} uses {Clock, Files, Runtime, Console, Env, Scheduler} {
     scope {
         let child = fork worker()
         run child.interrupt()
@@ -30,4 +30,5 @@ effect fn main() -> () raises {IoError} {
         .provide<Runtime>(RuntimeLive)
         .provide<Console>(Stdout)
         .provide<Env>(LiveEnv)
+        .provide<Scheduler>(LiveScheduler)
 }

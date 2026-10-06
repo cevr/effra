@@ -71,7 +71,7 @@ func TestCancellationWaitsForChildrenBeforeReleasingParentResources(t *testing.T
 }
 func TestLateAcquisitionIsReleasedBeforeConcurrentCloseCompletes(t *testing.T) {
 	scope := newScope(context.Background(), nil)
-	fc := &FiberContext{scope.ctx, scope}
+	fc := &FiberContext{ctx: scope.ctx, scope: scope, driver: scope.driver}
 	started, finishAcquire, releaseStarted, finishRelease := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var released atomic.Int32
 	result := make(chan Exit[Unit], 1)
@@ -177,7 +177,7 @@ func TestOwnedFailuresPanicDefectsAndObservedJoin(t *testing.T) {
 func TestConcurrentAdmissionAndClosure(t *testing.T) {
 	for range 30 {
 		scope := newScope(context.Background(), nil)
-		fc := &FiberContext{scope.ctx, scope}
+		fc := &FiberContext{ctx: scope.ctx, scope: scope, driver: scope.driver}
 		var opened, released atomic.Int64
 		var workers sync.WaitGroup
 		for range 12 {

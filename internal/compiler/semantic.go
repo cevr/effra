@@ -84,7 +84,7 @@ func typeRef(name string) TypeRef {
 		return TypeRef{}
 	case name == "string", name == "bool", name == "i64", name == "bytes", name == "()":
 		return TypeRef{Kind: "primitive", Name: name}
-	case name == "File", name == "Handler":
+	case name == "File", name == "Handler", name == "Latch":
 		return TypeRef{Kind: "opaque", Name: name}
 	case strings.HasPrefix(name, "Fiber:"):
 		return TypeRef{Kind: "fiber", Args: []TypeRef{typeRef(strings.TrimPrefix(name, "Fiber:"))}}
@@ -194,7 +194,7 @@ func (c *checker) check() {
 	}
 	claimData := func(name string, span Span) {
 		switch name {
-		case "string", "bool", "i64", "bytes", "File", "Handler", "Fiber", "Context", "Effect", "Scope", "Exit", "Cause", "Option", "never", "invalid":
+		case "string", "bool", "i64", "bytes", "File", "Latch", "Handler", "Fiber", "Context", "Effect", "Scope", "Exit", "Cause", "Option", "never", "invalid":
 			c.diagnostic("EF101", "reserved data declaration "+name, span)
 		}
 		claim(name, span)
@@ -469,7 +469,7 @@ func (c *checker) signature(f *Function) {
 }
 func (c *checker) typeKnown(name string) bool {
 	switch name {
-	case "string", "bool", "()", "i64", "File", "bytes", "Handler":
+	case "string", "bool", "()", "i64", "File", "Latch", "bytes", "Handler":
 		return true
 	}
 	if c.records[name] != nil || c.enums[name] != nil {
@@ -933,6 +933,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			c.diagnostic("EF106", "timeout requires an Effect and an i64 millisecond duration", e.Span)
 		}
 		t.Errors = union(t.Errors, []string{"Timeout"})
+		t.Services = union(t.Services, []string{"Scheduler"})
 	case "run":
 		inner := c.expr(e.Left, env, inEffect)
 		if !inEffect {

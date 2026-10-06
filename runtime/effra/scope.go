@@ -19,20 +19,23 @@ var scopeIDs atomic.Uint64
 
 // Scope serializes admission with shutdown. Acquisitions remain tracked through release.
 type Scope struct {
-	mu           sync.Mutex
-	id           uint64
-	state        scopeState
-	ctx          context.Context
-	cancel       context.CancelFunc
-	parent       *Scope
-	children     []ownedFiber
-	resources    []resource
-	hooks        []func() error
-	acquiring    sync.WaitGroup
-	acquisitions int
-	done         chan struct{}
-	hooksDone    chan struct{}
-	outcome      Cause
+	mu                  sync.Mutex
+	id                  uint64
+	state               scopeState
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	parent              *Scope
+	children            []ownedFiber
+	resources           []resource
+	hooks               []func() error
+	acquiring           sync.WaitGroup
+	acquisitions        int
+	done                chan struct{}
+	completed           *managedSignal
+	hooksDone           chan struct{}
+	outcome             Cause
+	driver              timerDriver
+	cleanupContinuation *schedulerContinuation
 }
 type resource struct {
 	name    string
@@ -40,8 +43,18 @@ type resource struct {
 }
 
 func newScope(ctx context.Context, parent *Scope) *Scope {
+	driver := timerDriver(liveTimerDriver{})
+	if parent != nil && parent.driver != nil {
+		driver = parent.driver
+	}
+	return newScopeWithDriver(ctx, parent, driver)
+}
+func newScopeWithDriver(ctx context.Context, parent *Scope, driver timerDriver) *Scope {
+	if driver == nil {
+		driver = liveTimerDriver{}
+	}
 	ctx, cancel := context.WithCancel(ctx)
-	s := &Scope{id: scopeIDs.Add(1), state: Open, ctx: ctx, cancel: cancel, parent: parent, done: make(chan struct{}), hooksDone: make(chan struct{})}
+	s := &Scope{id: scopeIDs.Add(1), state: Open, ctx: ctx, cancel: cancel, parent: parent, driver: driver, done: make(chan struct{}), completed: newManagedSignal(), hooksDone: make(chan struct{})}
 	context.AfterFunc(ctx, func() {
 		s.mu.Lock()
 		hooks := append([]func() error{}, s.hooks...)
@@ -86,12 +99,38 @@ func (s *Scope) OnCancel(hook func() error) error {
 	s.hooks = append(s.hooks, run)
 	return nil
 }
-func (s *Scope) Close() Cause {
+func (s *Scope) bindCleanupContinuation(continuation *schedulerContinuation) bool {
+	if continuation == nil {
+		return false
+	}
+	s.mu.Lock()
+	bound := false
+	if s.state == Open && s.cleanupContinuation == nil {
+		s.cleanupContinuation = continuation
+		bound = true
+	}
+	s.mu.Unlock()
+	return bound
+}
+
+func (s *Scope) closeWithScheduler(scheduler *TestScheduler, continuation *schedulerContinuation) Cause {
 	s.mu.Lock()
 	if s.state != Open {
 		done := s.done
 		s.mu.Unlock()
-		<-done
+		waiter, _ := s.completed.register(scheduler)
+		if waiter != nil {
+			if scheduler != nil {
+				scheduler.parkContinuation(continuation)
+			}
+			<-waiter.done
+			if scheduler != nil {
+				scheduler.unparkContinuation(continuation)
+			}
+			s.completed.consume(waiter)
+		} else {
+			<-done
+		}
 		s.mu.Lock()
 		out := append(Cause{}, s.outcome...)
 		s.mu.Unlock()
@@ -109,7 +148,7 @@ func (s *Scope) Close() Cause {
 	// No new Add is possible after Closing. Successful late acquisitions finish release before Done.
 	s.acquiring.Wait()
 	for _, child := range children {
-		cause := child.closeResult()
+		cause := child.closeResultManaged(scheduler, continuation)
 		if !cause.OnlyInterrupts() {
 			outcome = append(outcome, cause...)
 		}
@@ -119,6 +158,7 @@ func (s *Scope) Close() Cause {
 	outcome = append(outcome, s.outcome...)
 	s.mu.Unlock()
 	cleanupContext := context.WithoutCancel(s.ctx)
+	cleanupContext = withSchedulerContinuation(cleanupContext, continuation)
 	for i := len(resources) - 1; i >= 0; i-- {
 		r := resources[i]
 		outcome = append(outcome, defectReason(protected(func() error { return r.release(cleanupContext) }))...)
@@ -131,8 +171,55 @@ func (s *Scope) Close() Cause {
 	s.state = Closed
 	close(s.done)
 	s.mu.Unlock()
+	s.completed.signal()
 	return append(Cause{}, outcome...)
 }
+
+func (s *Scope) Close() Cause { return s.closeWithScheduler(nil, nil) }
+
+func (s *Scope) closeWithContext(fc *FiberContext) Cause {
+	if fc == nil || fc.turnScheduler() == nil {
+		return s.Close()
+	}
+	scheduler := fc.turnScheduler()
+	s.mu.Lock()
+	continuation := s.cleanupContinuation
+	ownedContinuation := false
+	if s.state == Open {
+		if continuation == nil || continuation.scheduler != scheduler {
+			continuation = fc.continuation
+			if continuation != nil && continuation.scheduler != scheduler {
+				continuation = nil
+			}
+			if continuation == nil {
+				continuation = scheduler.reserveContinuation()
+				ownedContinuation = true
+			}
+			if s.cleanupContinuation == nil {
+				s.cleanupContinuation = continuation
+			}
+		}
+	} else if continuation == nil || continuation.scheduler != scheduler {
+		continuation = fc.continuation
+		if continuation != nil && continuation.scheduler != scheduler {
+			continuation = nil
+		}
+		if continuation == nil {
+			continuation = scheduler.reserveContinuation()
+			ownedContinuation = true
+		}
+	}
+	s.mu.Unlock()
+	resume := fc.suspendSchedulerWithoutContinuation()
+	defer func() {
+		resume()
+		if ownedContinuation {
+			scheduler.completeContinuation(continuation)
+		}
+	}()
+	return s.closeWithScheduler(scheduler, continuation)
+}
+
 func AcquireRelease[A any](name string, acquire func(context.Context) (A, error), release func(A, context.Context) error) Effect[A] {
 	return func(fc *FiberContext) Exit[A] {
 		s := fc.scope

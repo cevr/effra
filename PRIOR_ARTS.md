@@ -39,6 +39,8 @@ See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native
 
 ## Settled
 
+- A canonical shared formatter is required. Inspected Go1.27.0 `go/format` and Gleam `compiler-cli/src/format.rs` at52e735c82d42811dd08d29d5508f564da081fd7d: adopt syntax-only printing and shared check/stdin/write paths, with Effra-specific preservation of line-sensitive lint directives. The [formatting contract](docs/specs/formatting.md) remains pending implementation.
+
 - Use LSP's standard severities and UTF-16 range semantics as an adapter over shared compiler snapshots, retaining byte anchors and explicit checked/unknown state. The [tooling contract](docs/specs/semantic-tooling.md) records the pinned 3.18 source inspection; CLI/MCP must expose the same full types and diagnostics without requiring an editor process.
 
 - Adopt Borgo's direction of direct Go-targeted application code with first-class closed data and patterns; records/enums/match already have Go/JS receipts. Its broader interop and inference claims are comparison inputs, not inherited Effra guarantees.
