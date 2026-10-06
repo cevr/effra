@@ -50,7 +50,7 @@ Owner update, 2026-10-06: defer benchmark development and measurement until the 
 
 - [Reusable generic data and product matching](generic-data.md), followed by [payload-aware recovery](effect-recovery.md): ordinary Option/Result, finite generic data, exhaustive state/event decisions and typed outcome conversion shared by codecs and machines.
 
-- [Reachable runtime modules and small executable receipts](binary-reachability.md): small binaries with unused standard-library facilities excluded, including through fluent APIs; module/import/symbol and raw size evidence accompany implementation. [Runtime source modules](runtime-modules.md) prepare independently testable source selection while checked application reachability waits for native interfaces.
+- [Reachable runtime modules and small executable receipts](binary-reachability.md): small binaries with unused standard-library facilities excluded, including through fluent APIs; module/import/symbol and raw size evidence accompany implementation. [Runtime source modules](runtime-modules.md) completed and integrated at637313b after the owned-output prerequisite; checked application reachability and size proof remain open.
 
 - [Direct native execution and matched build cost](native-execution-lowering.md): the retained long-body compiler profile motivates a general lowering repair after canonical function contracts, preserving laziness and managed execution while measuring backend cost separately.
 
