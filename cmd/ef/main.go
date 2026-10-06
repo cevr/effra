@@ -58,6 +58,11 @@ func printJSON(v any) error {
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(v)
 }
+
+// Canonical projection accounting describes compact JSON before terminal LF.
+func printProjectionJSON(v any) error {
+	return json.NewEncoder(os.Stdout).Encode(v)
+}
 func load(path, target string) (*compiler.Result, error) {
 	r, _, err := loadWithSource(path, target)
 	return r, err
@@ -292,7 +297,7 @@ func command(args []string) error {
 		if err != nil {
 			return err
 		}
-		return printJSON(graph)
+		return printProjectionJSON(graph)
 	case "lint":
 		lint := r.Lint(opts.strict)
 		if err := printJSON(lint); err != nil {
@@ -321,9 +326,9 @@ func command(args []string) error {
 			return err
 		}
 		response["typeProjectionUsage"] = usage
-		return printJSON(response)
+		return printProjectionJSON(response)
 	case "check":
-		if err := printJSON(r.CheckResponse()); err != nil {
+		if err := printProjectionJSON(r.CheckResponse()); err != nil {
 			return err
 		}
 		if !r.Checked {
@@ -347,7 +352,7 @@ func command(args []string) error {
 					return err
 				}
 				response["typeProjectionUsage"] = usage
-				return printJSON(response)
+				return printProjectionJSON(response)
 			}
 			if !r.Checked {
 				_ = printJSON(r)
@@ -368,7 +373,7 @@ func command(args []string) error {
 			return err
 		}
 		response["typeProjectionUsage"] = usage
-		return printJSON(response)
+		return printProjectionJSON(response)
 	case "test":
 		if err := r.TestMode(opts.live); err != nil {
 			return err

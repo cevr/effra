@@ -218,11 +218,17 @@ func validatedFormatResponseID(raw json.RawMessage) ([]byte, error) {
 // U+2028/U+2029 or HTML characters, so the bounded format envelope preserves
 // the request representation and only encodes the response fields.
 func marshalBoundedFormatResponse(value response) ([]byte, error) {
+	return marshalBoundedResponse(value, false)
+}
+
+// Both bounded tool profiles preserve scalar IDs. Semantic fields keep the
+// HTML escaping counted by the canonical projection preflight.
+func marshalBoundedResponse(value response, escapeHTML bool) ([]byte, error) {
 	id, err := validatedFormatResponseID(value.ID)
 	if err != nil {
 		return nil, err
 	}
-	jsonrpc, err := marshalMCPValue(value.JSONRPC, false)
+	jsonrpc, err := marshalMCPValue(value.JSONRPC, escapeHTML)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +238,7 @@ func marshalBoundedFormatResponse(value response) ([]byte, error) {
 	buffer.WriteString(`,"id":`)
 	buffer.Write(id)
 	if value.Result != nil {
-		result, err := marshalMCPValue(value.Result, false)
+		result, err := marshalMCPValue(value.Result, escapeHTML)
 		if err != nil {
 			return nil, err
 		}
@@ -240,7 +246,7 @@ func marshalBoundedFormatResponse(value response) ([]byte, error) {
 		buffer.Write(result)
 	}
 	if value.Error != nil {
-		errorValue, err := marshalMCPValue(value.Error, false)
+		errorValue, err := marshalMCPValue(value.Error, escapeHTML)
 		if err != nil {
 			return nil, err
 		}
@@ -255,7 +261,11 @@ func marshalBoundedFormatResponse(value response) ([]byte, error) {
 // without optional JSON/JavaScript escape expansion. Other response fields
 // remain JSON encoded and the complete body is checked before writing.
 func writeBoundedFormatResponse(output io.Writer, value response) error {
-	encoded, err := marshalBoundedFormatResponse(value)
+	return writeBoundedResponse(output, value, false)
+}
+
+func writeBoundedResponse(output io.Writer, value response, escapeHTML bool) error {
+	encoded, err := marshalBoundedResponse(value, escapeHTML)
 	if err != nil {
 		return err
 	}
@@ -265,6 +275,17 @@ func writeBoundedFormatResponse(output io.Writer, value response) error {
 	encoded = append(encoded, '\n')
 	_, err = output.Write(encoded)
 	return err
+}
+
+// Measure the fixed tool envelope using its owning serializer, replacing only
+// the two placeholders separately counted by the compiler and the raw ID.
+func projectionFrameOverhead(id json.RawMessage) (int, error) {
+	raw, err := validatedFormatResponseID(id)
+	if err != nil {
+		return 0, err
+	}
+	skeleton, err := marshalBoundedResponse(response{JSONRPC: "2.0", ID: json.RawMessage("null"), Result: toolResult{Content: []map[string]string{{"type": "text", "text": ""}}, StructuredContent: false}}, true)
+	return len(skeleton) - len("null") - len(`""`) - len("false") + len(raw), err
 }
 
 func boundedFormatResponseFits(value response) bool {
@@ -424,6 +445,7 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 		}
 		res := response{JSONRPC: "2.0", ID: req.ID}
 		formatCall := false
+		semanticCall := false
 		if len(res.ID) == 0 {
 			res.ID = json.RawMessage("null")
 		}
@@ -465,6 +487,7 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 					break
 				}
 				formatCall = params.Name == "code.format"
+				semanticCall = !formatCall
 				known := false
 				for _, t := range tools() {
 					known = known || t.Name == params.Name
@@ -482,7 +505,11 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 				if err == nil && !formatCall {
 					// The frame has two copies of the result, one of them escaped.
 					// Charge both before json.Marshal creates the content text.
-					err = compiler.ValidateMCPProjectionResponse(result, len(req.ID)+128)
+					var overhead int
+					overhead, err = projectionFrameOverhead(req.ID)
+					if err == nil {
+						err = compiler.ValidateMCPProjectionResponse(result, overhead)
+					}
 				}
 				if err != nil {
 					res.Result = toolResult{Content: []map[string]string{{"type": "text", "text": err.Error()}}, IsError: true}
@@ -500,16 +527,21 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 				res.Error = &rpcError{-32601, "Method not found"}
 			}
 		}
-		if formatCall {
-			err = writeBoundedFormatResponse(output, res)
-		} else {
-			err = writeMCPResponse(output, res, 0)
+		writeResponse := func(value response) error {
+			if formatCall {
+				return writeBoundedFormatResponse(output, value)
+			}
+			if semanticCall {
+				return writeBoundedResponse(output, value, true)
+			}
+			return writeMCPResponse(output, value, 0)
 		}
-		if errors.Is(err, errMCPResponseTooLarge) && formatCall {
+		err = writeResponse(res)
+		if errors.Is(err, errMCPResponseTooLarge) && (formatCall || semanticCall) {
 			if res.Error != nil {
 				// Preserve the JSON-RPC error class and code when its original
 				// message cannot fit beside a near-limit request ID.
-				err = writeBoundedFormatResponse(output, compactFormatErrorWithCode(res.ID, res.Error.Code))
+				err = writeResponse(compactFormatErrorWithCode(res.ID, res.Error.Code))
 			} else {
 				res = response{
 					JSONRPC: "2.0",
@@ -519,12 +551,12 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 						IsError: true,
 					},
 				}
-				err = writeBoundedFormatResponse(output, res)
+				err = writeResponse(res)
 				if errors.Is(err, errMCPResponseTooLarge) {
 					// The compact response keeps the validated request ID and
 					// uses a fixed message shorter than the smallest admitted
 					// code.format invocation envelope.
-					err = writeBoundedFormatResponse(output, compactFormatError(res.ID))
+					err = writeResponse(compactFormatError(res.ID))
 				}
 			}
 		}

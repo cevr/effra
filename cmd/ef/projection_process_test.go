@@ -85,6 +85,100 @@ func readProcessJSON(t *testing.T, output []byte) map[string]any {
 	return value
 }
 
+func TestCanonicalSuccessWireAdmission(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := t.TempDir()
+	var source strings.Builder
+	for i := 0; i < 230; i++ {
+		fmt.Fprintf(&source, "enum R%d { A { a: string, b: string, c: string, d: string } B { a: string, b: string, c: string, d: string } }\n", i)
+	}
+	source.WriteString(`effect fn main() -> string { "ok" }`)
+	file := filepath.Join(root, "nested.ef")
+	if err := os.WriteFile(file, []byte(source.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("CLI nested declarations", func(t *testing.T) {
+		stdout, stderr, code := runTestCLI(t, binary, "check", file)
+		if code != 0 {
+			t.Fatalf("semantic check failed: %s", stderr)
+		}
+		response := readProcessJSON(t, stdout)
+		if response["checked"] != true || response["typeProjectionComplete"] != true {
+			t.Fatal("nested valid source lost its admitted compact projection")
+		}
+		limit := int(response["typeProjectionLimits"].(map[string]any)["responseBytes"].(float64))
+		accounted := int(response["typeProjectionUsage"].(map[string]any)["responseBytes"].(float64))
+		if len(stdout)-1 > limit || accounted != len(stdout)-1 || stdout[len(stdout)-1] != '\n' {
+			t.Fatalf("CLI wire accounting: actual=%d accounted=%d limit=%d", len(stdout)-1, accounted, limit)
+		}
+	})
+	if err := os.WriteFile(filepath.Join(root, "tiny.ef"), []byte(`effect fn main() -> string { "ok" }`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	const limit = 1024 * 1024
+	ids := []struct {
+		name   string
+		raw    string
+		refuse bool
+	}{
+		{"HTML", `"` + strings.Repeat("<", 200000) + `"`, false},
+		{"raw U2028", `"` + strings.Repeat("\u2028", 200000) + `"`, false},
+		{"raw U2029", `"` + strings.Repeat("\u2029", 200000) + `"`, false},
+		{"quotes", `"` + strings.Repeat(`\"`, 200000) + `"`, false},
+		{"controls", `"` + strings.Repeat(`\n`, 200000) + `"`, false},
+		{"number", `1e+09`, false},
+		{"escaped string", `"\u0061"`, false},
+		{"null", `null`, false},
+		{"near bound", `"` + strings.Repeat("a", limit-8192) + `"`, false},
+		{"ID exceeds success bound", `"` + strings.Repeat("a", limit+256) + `"`, true},
+	}
+	for _, test := range ids {
+		t.Run(test.name, func(t *testing.T) {
+			input := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"wire-test","version":"1"}}}` + "\n" +
+				`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n" +
+				`{"jsonrpc":"2.0","id":` + test.raw + `,"method":"tools/call","params":{"name":"project.check","arguments":{"file":"tiny.ef"}}}` + "\n" +
+				`{"jsonrpc":"2.0","id":3,"method":"ping"}` + "\n"
+			command := exec.Command(binary, "mcp", root)
+			command.Stdin = strings.NewReader(input)
+			output, err := command.Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := bytes.Split(bytes.TrimSuffix(output, []byte{'\n'}), []byte{'\n'})
+			if len(lines) != 3 {
+				t.Fatalf("response count %d", len(lines))
+			}
+			if !test.refuse && len(lines[1]) > limit {
+				t.Fatalf("successful canonical frame exceeds limit: %d", len(lines[1]))
+			}
+			var envelope struct {
+				ID json.RawMessage `json:"id"`
+			}
+			if err := json.Unmarshal(lines[1], &envelope); err != nil || string(envelope.ID) != test.raw {
+				t.Fatal("known scalar ID representation changed", err)
+			}
+			result := readProcessJSON(t, lines[1])["result"].(map[string]any)
+			if result["isError"] != test.refuse {
+				t.Fatalf("unexpected success admission: bytes=%d isError=%v", len(lines[1]), result["isError"])
+			}
+			if !test.refuse {
+				semantic := result["structuredContent"].(map[string]any)
+				assertResponseReferences(t, semantic)
+				encoded, err := json.Marshal(semantic)
+				accounted := int(semantic["typeProjectionUsage"].(map[string]any)["responseBytes"].(float64))
+				if err != nil || len(encoded) != accounted {
+					t.Fatalf("MCP semantic accounting: actual=%d accounted=%d error=%v", len(encoded), accounted, err)
+				}
+			} else if result["structuredContent"] != nil || len(lines[1]) > 16*limit {
+				t.Fatal("refusal retained partial authority or exceeded protocol budget")
+			}
+			if ping := readProcessJSON(t, lines[2]); ping["id"] != float64(3) || ping["error"] != nil || ping["result"] == nil {
+				t.Fatal("queued ping lost", ping)
+			}
+		})
+	}
+}
+
 func TestCanonicalProjectionCLIAndMCPProcessesRemainCompleteAndResponsive(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := t.TempDir()
