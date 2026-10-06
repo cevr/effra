@@ -51,6 +51,58 @@ effect fn main() -> string {
 	}
 }
 
+func TestCallableTimeoutRequiresARecipeAndValidDuration(t *testing.T) {
+	prefix := `fn keep(x:string)->string{x}
+fn apply(cb:fn(string)->string)->string{cb("ok")}
+effect fn callback(x:string)->string{x}
+effect fn pureEmpty()->(fn(string)->string){keep}
+`
+	for _, test := range []struct{ name, body string }{
+		{"pure name", `effect fn main()->(){keep.timeout(10);()}`},
+		{"pure alias", `effect fn main()->(){let f=keep;f.timeout(10);()}`},
+		{"pure parameter", `fn misuse(f:fn(string)->string)->(){f.timeout(10);()} effect fn main()->(){()}`},
+		{"pure argument", `effect fn main()->(){apply(keep.timeout(10));()}`},
+		{"effect callback", `effect fn main()->(){callback.timeout(10);()}`},
+		{"pure invalid duration", `effect fn main()->(){keep.timeout("wrong");()}`},
+		{"recipe invalid duration", `effect fn main()->(){pureEmpty().timeout("wrong");()}`},
+		{"recipe deferred duration", `effect fn main()->(){pureEmpty().timeout(pureEmpty());()}`},
+	} {
+		for _, target := range []string{"go", "js"} {
+			t.Run(test.name+"/"+target, func(t *testing.T) {
+				r := CompileFor(prefix+test.body, target)
+				if r.Checked || !hasCode(r, "EF106") {
+					t.Fatalf("invalid timeout admitted: %+v", r.Diagnostics)
+				}
+			})
+		}
+	}
+	// A validity refusal must still account for eager child evaluation. The
+	// duration is the wrong value type, but its failures/services still execute.
+	invalidDuration := prefix + `error Missing
+effect fn duration()->string raises {Missing} uses {Clock}{run Clock.sleep(1);if true {fail Missing} else {"wrong"}}
+effect fn main()->(){pureEmpty().timeout(run duration());()}`
+	for _, target := range []string{"go", "js"} {
+		r := CompileFor(invalidDuration, target)
+		if r.Checked || !hasCode(r, "EF106") || !hasCode(r, "EF107") || !hasCode(r, "EF108") {
+			t.Fatalf("invalid duration evaluation erased: %+v", r.Diagnostics)
+		}
+	}
+	source := prefix + `effect fn main()->string{let f=run pureEmpty().timeout(1000).catch<Timeout>(keep).provide<Scheduler>(LiveScheduler);f("ok")}`
+	for _, target := range []string{"go", "js"} {
+		r := CompileFor(source, target)
+		if !r.Checked {
+			t.Fatalf("valid callable recipe: %+v", r.Diagnostics)
+		}
+		info, err := r.TypeAt(strings.Index(source, "pureEmpty().timeout"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Type.Contract.Kind != "recipe" || info.Type.Type.Kind != "callable" {
+			t.Fatalf("timeout stripped callable result: %+v", info.Type)
+		}
+	}
+}
+
 func TestFiniteCallbackRowsAreInstantiatedFromArguments(t *testing.T) {
 	source := `error Missing error Broken
 service Directory { effect fn get(key: string) -> string raises {Missing} }

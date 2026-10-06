@@ -126,7 +126,20 @@ func TestCallableFactoriesKeepCLIAndMCPAliveWithCompleteNestedContracts(t *testi
 	if err := os.WriteFile(file, source, 0600); err != nil {
 		t.Fatal(err)
 	}
-	stdout, stderr, code := runTestCLI(t, binary, "check", file)
+	invalid := strings.Replace(string(source), "let first = run pureFailure().catch<Missing>(keep)", "let first = keep.timeout(10)", 1)
+	if invalid == string(source) {
+		t.Fatal("invalid timeout mutation did not match fixture")
+	}
+	invalidFile := filepath.Join(root, "invalid-timeout.ef")
+	if err := os.WriteFile(invalidFile, []byte(invalid), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runTestCLI(t, binary, "check", invalidFile)
+	if code != 1 {
+		t.Fatalf("invalid timeout must diagnose, exit=%d %s %s", code, stdout, stderr)
+	}
+	assertInvalidTimeoutReport(t, readProcessJSON(t, stdout))
+	stdout, stderr, code = runTestCLI(t, binary, "check", file)
 	if code != 0 || readProcessJSON(t, stdout)["checked"] != true {
 		t.Fatalf("valid factory check: exit=%d %s %s", code, stdout, stderr)
 	}
@@ -149,6 +162,8 @@ func TestCallableFactoriesKeepCLIAndMCPAliveWithCompleteNestedContracts(t *testi
 	messages := []map[string]any{
 		{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "factory-test", "version": "1"}}},
 		{"jsonrpc": "2.0", "method": "notifications/initialized"},
+		{"jsonrpc": "2.0", "id": "invalid", "method": "tools/call", "params": map[string]any{"name": "project.check", "arguments": map[string]any{"file": "invalid-timeout.ef"}}},
+		{"jsonrpc": "2.0", "id": "after-invalid", "method": "ping"},
 		{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": "project.check", "arguments": map[string]any{"file": "factories.ef"}}},
 		{"jsonrpc": "2.0", "id": 3, "method": "ping"},
 		{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": map[string]any{"name": "code.inspect", "arguments": map[string]any{"file": "factories.ef", "symbol": "factory"}}},
@@ -167,21 +182,25 @@ func TestCallableFactoriesKeepCLIAndMCPAliveWithCompleteNestedContracts(t *testi
 		t.Fatal(err)
 	}
 	lines := bytes.Split(bytes.TrimSpace(output), []byte{'\n'})
-	if len(lines) != 5 {
+	if len(lines) != 7 {
 		t.Fatalf("MCP response count: %d", len(lines))
 	}
-	checked := readProcessJSON(t, lines[1])["result"].(map[string]any)["structuredContent"].(map[string]any)
+	assertInvalidTimeoutReport(t, readProcessJSON(t, lines[1])["result"].(map[string]any)["structuredContent"].(map[string]any))
+	if ping := readProcessJSON(t, lines[2]); ping["result"] == nil || ping["error"] != nil {
+		t.Fatalf("ping after invalid timeout: %v", ping)
+	}
+	checked := readProcessJSON(t, lines[3])["result"].(map[string]any)["structuredContent"].(map[string]any)
 	if checked["checked"] != true {
 		t.Fatalf("valid factory MCP check: %v", checked)
 	}
-	if ping := readProcessJSON(t, lines[2]); ping["result"] == nil || ping["error"] != nil {
+	if ping := readProcessJSON(t, lines[4]); ping["result"] == nil || ping["error"] != nil {
 		t.Fatalf("queued ping: %v", ping)
 	}
 	for i, pair := range []struct {
 		cli map[string]any
 		key string
 	}{{inspect, "symbol"}, {query, "expression"}} {
-		remote := readProcessJSON(t, lines[3+i])["result"].(map[string]any)["structuredContent"].(map[string]any)
+		remote := readProcessJSON(t, lines[5+i])["result"].(map[string]any)["structuredContent"].(map[string]any)
 		assertResponseReferences(t, remote)
 		for _, key := range []string{pair.key, "types", "rows", "revision"} {
 			if !reflect.DeepEqual(pair.cli[key], remote[key]) {
@@ -189,6 +208,19 @@ func TestCallableFactoriesKeepCLIAndMCPAliveWithCompleteNestedContracts(t *testi
 			}
 		}
 	}
+}
+
+func assertInvalidTimeoutReport(t *testing.T, report map[string]any) {
+	t.Helper()
+	if report["checked"] != false {
+		t.Fatalf("invalid timeout admitted: %v", report)
+	}
+	for _, raw := range report["diagnostics"].([]any) {
+		if raw.(map[string]any)["code"] == "EF106" {
+			return
+		}
+	}
+	t.Fatalf("invalid timeout lost EF106: %v", report)
 }
 
 func assertFactoryProcessContract(t *testing.T, response, value map[string]any) {

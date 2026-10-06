@@ -143,9 +143,12 @@ def documents(directory):
     # The compiler used to panic on a valid effect factory carrying a pure
     # callback. A real document must publish, accept the next edit, and recover.
     factories = (ROOT / "examples/callables-factory.ef").read_text()
+    invalid_timeout = factories.replace('let first = run pureFailure().catch<Missing>(keep)',
+                                        'let first = keep.timeout(10)')
+    assert invalid_timeout != factories
     for target in ("go", "js"):
         reports = publications(exchange([
-            INIT, READY, opened(new, factories), changed(new, bad, 2),
+            INIT, READY, opened(new, factories), changed(new, invalid_timeout, 2),
             changed(new, factories, 3), STOP, EXIT], target=target))
         assert [r["version"] for r in reports] == [1, 2, 3], reports
         assert reports[0]["diagnostics"] == reports[2]["diagnostics"] == [], reports

@@ -4111,6 +4111,9 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		t = inner
 		if !t.isEffect() || duration.isEffect() || !c.sameType(duration, "i64") {
 			c.diagnostic("EF106", "timeout requires an Effect and an i64 millisecond duration", e.Span)
+			// Invalid operands retain their value contract and caller evaluation;
+			// only an admitted recipe can acquire timeout-owned facts and rows.
+			break
 		}
 		t.setOwnership(materializeExecutionFacts(t.ownershipFacts(), timeoutRegion, ownershipOwnerTimeout))
 		t.setCaptures(materializeExecutionFacts(t.captureFacts(), timeoutRegion, ownershipOwnerTimeout))
