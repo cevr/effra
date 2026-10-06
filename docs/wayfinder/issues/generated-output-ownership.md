@@ -1,7 +1,7 @@
 <!-- {"id": "generated-output-ownership", "title": "Isolated owned native generated modules", "status": "open", "labels": ["implementation:task"], "parent": "binary-reachability", "assignee": "generated_output", "blocked_by": ["foundation-spec"]} -->
 # Isolated owned native generated modules
 
-Prepare the output boundary independently of canonical application reachability. Current native builds share `dist/go/go.mod`, runtime sources and basename-derived application directories. The runtime source split exposes a concrete upgrade failure: the additive writer leaves the former `stdlib.go` beside its replacement files, producing duplicate declarations. Fresh builds alone do not cover this transition.
+Prepare the output boundary independently of canonical application reachability. Native builds now publish complete immutable modules under `dist/go/apps/<application-id>/generations/`, while legacy shared `dist/go` files remain untouched. The runtime source split exposed a concrete upgrade failure: the additive writer left the former `stdlib.go` beside its replacement files, producing duplicate declarations. Fresh builds alone do not cover this transition.
 
 Give generated modules a full source-origin, target and build/test mode identity and an isolated, complete source snapshot. Publish only completed generations; validate any reused generated files against their ownership/content record. Preserve unknown or modified files and legacy generated directories. Do not add a filename-specific cleanup or delete unrecognized files to make the gate pass. A failed or interrupted generation must not damage a previous usable module or admit stale sources into the next build.
 
