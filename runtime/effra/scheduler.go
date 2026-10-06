@@ -43,19 +43,20 @@ func (t *liveTimer) acknowledge()        {}
 // intermediate deadlines. Managed fibers yield the scheduler turn while they
 // wait, so adjustment does not depend on runtime.Gosched or wall-clock sleeps.
 type TestScheduler struct {
-	mu           sync.Mutex
-	adjustMu     sync.Mutex
-	now          int64
-	nextSequence uint64
-	closed       bool
-	timers       map[*virtualTimer]struct{}
-	registered   uint64
-	observed     uint64
-	registration chan struct{}
-	turn         chan struct{}
-	stateChanged chan struct{}
-	active       int
-	pendingWakes int
+	mu            sync.Mutex
+	adjustMu      sync.Mutex
+	now           int64
+	nextSequence  uint64
+	closed        bool
+	timers        map[*virtualTimer]struct{}
+	registered    uint64
+	observed      uint64
+	registration  chan struct{}
+	turn          chan struct{}
+	stateChanged  chan struct{}
+	active        int
+	pendingWakes  int
+	continuations int
 }
 
 type virtualTimer struct {
@@ -192,9 +193,52 @@ func (s *TestScheduler) resumeWait(timer *virtualTimer) {
 	s.mu.Lock()
 	if timer != nil && timer.wakePending {
 		timer.wakePending = false
-		if s.pendingWakes > 0 {
-			s.pendingWakes--
-		}
+		s.completeWakeLocked()
+	}
+	s.mu.Unlock()
+}
+
+// reserveWake records a managed continuation before its producer releases a
+// wake channel. This is shared by timer and causal synchronization handoffs.
+func (s *TestScheduler) reserveWake() {
+	s.mu.Lock()
+	s.pendingWakes++
+	s.signalStateLocked()
+	s.mu.Unlock()
+}
+
+// completeWake consumes one managed continuation reservation. Callers invoke
+// it only after the continuation has either reacquired its turn or been
+// canceled and removed, so adjustment cannot advance past an unregistered
+// next wait.
+func (s *TestScheduler) completeWake() {
+	s.mu.Lock()
+	s.completeWakeLocked()
+	s.mu.Unlock()
+}
+
+func (s *TestScheduler) completeWakeLocked() {
+	if s.pendingWakes > 0 {
+		s.pendingWakes--
+	}
+	s.signalStateLocked()
+}
+
+// reserveContinuation keeps a managed synchronous boundary visible while it
+// performs owned cleanup. Unlike a wake reservation, it does not prevent the
+// controller from advancing an already-registered timer needed by that
+// cleanup; it only prevents Adjust from publishing its final target early.
+func (s *TestScheduler) reserveContinuation() {
+	s.mu.Lock()
+	s.continuations++
+	s.signalStateLocked()
+	s.mu.Unlock()
+}
+
+func (s *TestScheduler) completeContinuation() {
+	s.mu.Lock()
+	if s.continuations > 0 {
+		s.continuations--
 	}
 	s.signalStateLocked()
 	s.mu.Unlock()
@@ -289,6 +333,12 @@ func (s *TestScheduler) Adjust(milliseconds int64) error {
 			}
 		}
 		if !found {
+			if s.continuations > 0 {
+				signal := s.stateChanged
+				s.mu.Unlock()
+				<-signal
+				continue
+			}
 			s.now = target
 			s.mu.Unlock()
 			return nil

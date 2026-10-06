@@ -31,6 +31,7 @@ type Scope struct {
 	acquiring    sync.WaitGroup
 	acquisitions int
 	done         chan struct{}
+	completed    *managedSignal
 	hooksDone    chan struct{}
 	outcome      Cause
 	driver       timerDriver
@@ -52,7 +53,7 @@ func newScopeWithDriver(ctx context.Context, parent *Scope, driver timerDriver) 
 		driver = liveTimerDriver{}
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	s := &Scope{id: scopeIDs.Add(1), state: Open, ctx: ctx, cancel: cancel, parent: parent, driver: driver, done: make(chan struct{}), hooksDone: make(chan struct{})}
+	s := &Scope{id: scopeIDs.Add(1), state: Open, ctx: ctx, cancel: cancel, parent: parent, driver: driver, done: make(chan struct{}), completed: newManagedSignal(), hooksDone: make(chan struct{})}
 	context.AfterFunc(ctx, func() {
 		s.mu.Lock()
 		hooks := append([]func() error{}, s.hooks...)
@@ -97,12 +98,18 @@ func (s *Scope) OnCancel(hook func() error) error {
 	s.hooks = append(s.hooks, run)
 	return nil
 }
-func (s *Scope) Close() Cause {
+func (s *Scope) closeWithScheduler(scheduler *TestScheduler) Cause {
 	s.mu.Lock()
 	if s.state != Open {
 		done := s.done
 		s.mu.Unlock()
-		<-done
+		waiter, _ := s.completed.register(scheduler)
+		if waiter != nil {
+			<-waiter.done
+			s.completed.consume(waiter)
+		} else {
+			<-done
+		}
 		s.mu.Lock()
 		out := append(Cause{}, s.outcome...)
 		s.mu.Unlock()
@@ -120,7 +127,7 @@ func (s *Scope) Close() Cause {
 	// No new Add is possible after Closing. Successful late acquisitions finish release before Done.
 	s.acquiring.Wait()
 	for _, child := range children {
-		cause := child.closeResult()
+		cause := child.closeResultManaged(scheduler)
 		if !cause.OnlyInterrupts() {
 			outcome = append(outcome, cause...)
 		}
@@ -142,16 +149,24 @@ func (s *Scope) Close() Cause {
 	s.state = Closed
 	close(s.done)
 	s.mu.Unlock()
+	s.completed.signal()
 	return append(Cause{}, outcome...)
 }
+
+func (s *Scope) Close() Cause { return s.closeWithScheduler(nil) }
 
 func (s *Scope) closeWithContext(fc *FiberContext) Cause {
 	if fc == nil || fc.turnScheduler() == nil {
 		return s.Close()
 	}
+	scheduler := fc.turnScheduler()
+	scheduler.reserveContinuation()
 	resume := fc.suspendScheduler()
-	defer resume()
-	return s.Close()
+	defer func() {
+		resume()
+		scheduler.completeContinuation()
+	}()
+	return s.closeWithScheduler(scheduler)
 }
 
 func AcquireRelease[A any](name string, acquire func(context.Context) (A, error), release func(A, context.Context) error) Effect[A] {

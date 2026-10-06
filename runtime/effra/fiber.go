@@ -8,6 +8,7 @@ import (
 type ownedFiber interface {
 	requestCancel()
 	closeResult() Cause
+	closeResultManaged(*TestScheduler) Cause
 	snapshot() FiberSnapshot
 }
 
@@ -33,17 +34,31 @@ func (f *Fiber[A]) snapshot() FiberSnapshot {
 }
 
 type Fiber[A any] struct {
-	owner    *Scope
-	scope    *Scope
-	done     chan struct{}
-	exit     Exit[A]
-	observed atomic.Bool
+	owner     *Scope
+	scope     *Scope
+	done      chan struct{}
+	completed *managedSignal
+	exit      Exit[A]
+	observed  atomic.Bool
 }
 
 func (f *Fiber[A]) requestCancel() { f.scope.cancel() }
 func (f *Fiber[A]) Cancel()        { f.requestCancel() }
 func (f *Fiber[A]) closeResult() Cause {
 	<-f.done
+	if f.observed.Load() {
+		return nil
+	}
+	return f.exit.Cause()
+}
+func (f *Fiber[A]) closeResultManaged(scheduler *TestScheduler) Cause {
+	waiter, complete := f.completed.register(scheduler)
+	if !complete {
+		<-waiter.done
+		f.completed.consume(waiter)
+	} else {
+		f.completed.consume(waiter)
+	}
 	if f.observed.Load() {
 		return nil
 	}
@@ -65,14 +80,20 @@ func Fork[A any](program Effect[A]) Effect[*Fiber[A]] {
 			owner.mu.Unlock()
 			return Die[*Fiber[A]](fmt.Errorf("scope is closing"))
 		}
-		f := &Fiber[A]{owner: owner, scope: newScopeWithDriver(fc.ctx, owner, fc.timerDriver()), done: make(chan struct{})}
+		completed := newManagedSignal()
+		f := &Fiber[A]{owner: owner, scope: newScopeWithDriver(fc.ctx, owner, fc.timerDriver()), completed: completed, done: completed.done}
 		owner.children = append(owner.children, f)
 		owner.mu.Unlock()
 		_, virtual := fc.timerDriver().(*TestScheduler)
 		if virtual {
 			fc.timerDriver().(*TestScheduler).reserve()
 		}
-		go func() { f.exit = runScope(f.scope, program, virtual); close(f.done) }()
+		go func() {
+			runScopeWithCompletion(f.scope, program, virtual, func(exit Exit[A]) {
+				f.exit = exit
+				f.completed.signal()
+			})
+		}()
 		return Succeed(f)
 	}
 }
@@ -81,14 +102,33 @@ func (f *Fiber[A]) Join() Effect[A] {
 		if !f.accessible(fc) {
 			return Die[A](fmt.Errorf("fiber owner is closed or not an ancestor"))
 		}
+		scheduler := fc.turnScheduler()
+		waiter, complete := f.completed.register(scheduler)
+		if complete {
+			f.completed.consume(waiter)
+			f.observed.Store(true)
+			return f.exit
+		}
+		if scheduler == nil {
+			select {
+			case <-waiter.done:
+				f.observed.Store(true)
+				return f.exit
+			case <-fc.ctx.Done():
+				f.completed.cancel(waiter)
+				return Interrupt[A](fc.ctx.Err())
+			}
+		}
 		resume := fc.suspendScheduler()
 		select {
-		case <-f.done:
+		case <-waiter.done:
 			resume()
+			f.completed.consume(waiter)
 			f.observed.Store(true)
 			return f.exit
 		case <-fc.ctx.Done():
 			resume()
+			f.completed.cancel(waiter)
 			return Interrupt[A](fc.ctx.Err())
 		}
 	}
@@ -101,9 +141,20 @@ func (f *Fiber[A]) Interrupt() Effect[Unit] {
 			return Die[Unit](fmt.Errorf("fiber owner is closed or not an ancestor"))
 		}
 		f.Cancel()
-		resume := fc.suspendScheduler()
-		<-f.done
-		resume()
+		scheduler := fc.turnScheduler()
+		waiter, complete := f.completed.register(scheduler)
+		if !complete {
+			if scheduler == nil {
+				<-waiter.done
+			} else {
+				resume := fc.suspendScheduler()
+				<-waiter.done
+				resume()
+			}
+			f.completed.consume(waiter)
+		} else {
+			f.completed.consume(waiter)
+		}
 		f.observed.Store(true)
 		cause := f.exit.Cause()
 		if cause.OnlyInterrupts() {

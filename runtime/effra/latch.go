@@ -3,7 +3,6 @@ package effra
 import (
 	"context"
 	"errors"
-	"sync"
 )
 
 var errNilLatch = errors.New("invalid latch handle: nil")
@@ -11,54 +10,56 @@ var errNilLatch = errors.New("invalid latch handle: nil")
 // Latch is a portable, one-shot synchronization handle. Completion is
 // idempotent and is shared by every waiter; waiting never consumes it.
 type Latch struct {
-	mu       sync.Mutex
-	done     chan struct{}
-	complete bool
+	signal *managedSignal
 }
 
 // NewLatch creates an incomplete one-shot latch.
-func NewLatch() *Latch { return &Latch{done: make(chan struct{})} }
+func NewLatch() *Latch {
+	return &Latch{signal: newManagedSignal()}
+}
 
 // Signal completes the latch. It returns true only for the first completion.
 func (l *Latch) Signal() bool {
 	if l == nil {
 		return false
 	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.complete {
-		return false
-	}
-	l.complete = true
-	close(l.done)
-	return true
+	return l.signal.signal()
 }
 
 // IsSignaled reports whether the latch has completed.
 func (l *Latch) IsSignaled() bool {
-	if l == nil {
-		return false
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.complete
+	return l != nil && l.signal != nil && l.signal.isComplete()
 }
 
 // Await waits for completion without changing the latch. The caller's
 // context controls only this waiter; cancellation leaves other waiters and
 // the latch itself untouched.
 func (l *Latch) Await(ctx context.Context) error {
-	if l == nil {
+	if l == nil || l.signal == nil {
 		return errNilLatch
 	}
-	if ctx == nil {
-		ctx = context.Background()
+	return l.signal.await(ctx)
+}
+
+// registerManaged adds a waiter owned by a scheduler-managed fiber. The bool
+// reports an already-signaled latch, in which case no blocking handoff is
+// needed.
+func (l *Latch) registerManaged(scheduler *TestScheduler) (*managedWaiter, bool) {
+	if l == nil || l.signal == nil {
+		return nil, true
 	}
-	select {
-	case <-l.done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	return l.signal.register(scheduler)
+}
+
+func (l *Latch) consumeManaged(waiter *managedWaiter) {
+	if l != nil && l.signal != nil {
+		l.signal.consume(waiter)
+	}
+}
+
+func (l *Latch) cancelManaged(waiter *managedWaiter) {
+	if l != nil && l.signal != nil {
+		l.signal.cancel(waiter)
 	}
 }
 
@@ -67,6 +68,24 @@ func AwaitLatch(latch *Latch) Effect[Unit] {
 	return func(fc *FiberContext) Exit[Unit] {
 		if latch == nil {
 			return Die[Unit](errNilLatch)
+		}
+		if scheduler := fc.turnScheduler(); scheduler != nil {
+			waiter, complete := latch.registerManaged(scheduler)
+			if complete {
+				latch.consumeManaged(waiter)
+				return Succeed(Unit{})
+			}
+			resume := fc.suspendScheduler()
+			select {
+			case <-waiter.done:
+				resume()
+				latch.consumeManaged(waiter)
+				return Succeed(Unit{})
+			case <-fc.Context().Done():
+				resume()
+				latch.cancelManaged(waiter)
+				return Interrupt[Unit](fc.Context().Err())
+			}
 		}
 		resume := fc.suspendScheduler()
 		err := latch.Await(fc.Context())

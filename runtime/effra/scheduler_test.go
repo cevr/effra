@@ -93,6 +93,213 @@ func TestTestSchedulerAdvancesSequentialSleepAtIntermediateDeadlines(t *testing.
 	}
 }
 
+func TestTestSchedulerWaitsForLatchContinuationBeforeAdvancing(t *testing.T) {
+	scheduler := NewTestScheduler()
+	latch := NewLatch()
+	points := make(chan int64, 2)
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+			first := Invoke(fc, Fork(func(child *FiberContext) Exit[Unit] {
+				if out := Invoke(child, Sleep(20)); out.IsFailure() {
+					return out
+				}
+				return Invoke(child, SignalLatch(latch))
+			}))
+			if first.IsFailure() {
+				return Propagate[Unit](first)
+			}
+			second := Invoke(fc, Fork(func(child *FiberContext) Exit[Unit] {
+				if out := Invoke(child, AwaitLatch(latch)); out.IsFailure() {
+					return out
+				}
+				points <- scheduler.Now()
+				if out := Invoke(child, Sleep(30)); out.IsFailure() {
+					return out
+				}
+				points <- scheduler.Now()
+				return Succeed(Unit{})
+			}))
+			if second.IsFailure() {
+				return Propagate[Unit](second)
+			}
+			if out := Invoke(fc, first.Value.Join()); out.IsFailure() {
+				return Propagate[Unit](out)
+			}
+			return Invoke(fc, second.Value.Join())
+		})
+	}()
+	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		t.Fatalf("first registration: %v", err)
+	}
+	if err := scheduler.Adjust(50); err != nil {
+		t.Fatal(err)
+	}
+	for expected, want := range []int64{20, 50} {
+		select {
+		case point := <-points:
+			if point != want {
+				t.Fatalf("latch continuation %d resumed at %d, want %d", expected+1, point, want)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("latch continuation %d did not resume", expected+1)
+		}
+	}
+	select {
+	case out := <-done:
+		if out.IsFailure() {
+			t.Fatalf("latch sequence failed: %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("latch sequence did not finish")
+	}
+}
+
+func TestTestSchedulerWaitsForJoinContinuationBeforeAdvancing(t *testing.T) {
+	scheduler := NewTestScheduler()
+	resumed := make(chan int64, 1)
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+			first := Invoke(fc, Fork(Sleep(20)))
+			if first.IsFailure() {
+				return Propagate[Unit](first)
+			}
+			second := Invoke(fc, Fork(func(child *FiberContext) Exit[Unit] {
+				if out := Invoke(child, first.Value.Join()); out.IsFailure() {
+					return out
+				}
+				resumed <- scheduler.Now()
+				return Invoke(child, Sleep(30))
+			}))
+			if second.IsFailure() {
+				return Propagate[Unit](second)
+			}
+			return Invoke(fc, second.Value.Join())
+		})
+	}()
+	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		t.Fatalf("first registration: %v", err)
+	}
+	if err := scheduler.Adjust(50); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case point := <-resumed:
+		if point != 20 {
+			scheduler.mu.Lock()
+			t.Logf("join point state now=%d active=%d wakes=%d cont=%d timers=%d", scheduler.now, scheduler.active, scheduler.pendingWakes, scheduler.continuations, len(scheduler.timers))
+			scheduler.mu.Unlock()
+			t.Fatalf("join continuation resumed at %d, want 20", point)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("join continuation did not resume")
+	}
+	select {
+	case out := <-done:
+		if out.IsFailure() {
+			t.Fatalf("join sequence failed: %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		scheduler.mu.Lock()
+		t.Logf("join state now=%d active=%d wakes=%d cont=%d timers=%d", scheduler.now, scheduler.active, scheduler.pendingWakes, scheduler.continuations, len(scheduler.timers))
+		scheduler.mu.Unlock()
+		t.Fatal("join sequence did not finish")
+	}
+}
+
+func TestTestSchedulerWaitsForScopeCleanupContinuationBeforeAdvancing(t *testing.T) {
+	scheduler := NewTestScheduler()
+	resumed := make(chan int64, 1)
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+			out := Invoke(fc, Scoped(func(child *FiberContext) Exit[Unit] {
+				return Invoke(child, AcquireRelease("cleanup", func(context.Context) (Unit, error) {
+					return Unit{}, nil
+				}, func(_ Unit, cleanup context.Context) error {
+					result := RunContextWithScheduler(cleanup, scheduler, Sleep(20))
+					if result.IsFailure() {
+						return result.Cause()
+					}
+					return nil
+				}))
+			}))
+			if out.IsFailure() {
+				return out
+			}
+			resumed <- scheduler.Now()
+			return Invoke(fc, Sleep(30))
+		})
+	}()
+	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		t.Fatalf("cleanup registration: %v", err)
+	}
+	if err := scheduler.Adjust(50); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case point := <-resumed:
+		if point != 20 {
+			scheduler.mu.Lock()
+			t.Logf("scope point state now=%d active=%d wakes=%d cont=%d timers=%d", scheduler.now, scheduler.active, scheduler.pendingWakes, scheduler.continuations, len(scheduler.timers))
+			scheduler.mu.Unlock()
+			t.Fatalf("scope continuation resumed at %d, want 20", point)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("scope continuation did not resume")
+	}
+	select {
+	case out := <-done:
+		if out.IsFailure() {
+			t.Fatalf("scope sequence failed: %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		scheduler.mu.Lock()
+		t.Logf("scope state now=%d active=%d wakes=%d cont=%d timers=%d", scheduler.now, scheduler.active, scheduler.pendingWakes, scheduler.continuations, len(scheduler.timers))
+		scheduler.mu.Unlock()
+		t.Fatal("scope sequence did not finish")
+	}
+}
+
+func TestTestSchedulerWaitsForTimeoutContinuationBeforeAdvancing(t *testing.T) {
+	scheduler := NewTestScheduler()
+	resumed := make(chan int64, 1)
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+			out := Invoke(fc, Timeout(Sleep(20), 100))
+			if out.IsFailure() && (out.Failure == nil || out.Failure.Tag != "Timeout") {
+				return out
+			}
+			resumed <- scheduler.Now()
+			return Invoke(fc, Sleep(30))
+		})
+	}()
+	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		t.Fatalf("timeout registration: %v", err)
+	}
+	if err := scheduler.Adjust(50); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case point := <-resumed:
+		if point != 20 {
+			t.Fatalf("timeout continuation resumed at %d, want 20", point)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout continuation did not resume")
+	}
+	select {
+	case out := <-done:
+		if out.IsFailure() {
+			t.Fatalf("timeout sequence failed: %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout sequence did not finish")
+	}
+}
+
 func TestTimeoutUsesSchedulerAndWaitsForCancelledCleanup(t *testing.T) {
 	scheduler := NewTestScheduler()
 	cleanup := make(chan struct{})
@@ -149,6 +356,28 @@ func TestTimeoutWithExplicitDeadlinePreservesChildValue(t *testing.T) {
 	))
 	if out.IsFailure() || out.Value != "completed" {
 		t.Fatalf("child result was lost: %+v", out)
+	}
+}
+
+func TestTimeoutWithWorkWinnerRetainsTimerCleanupDefect(t *testing.T) {
+	timerStarted := make(chan struct{})
+	timerDefect := errors.New("timer cleanup defect")
+	out := Run(TimeoutWithEffect(
+		func(*FiberContext) Exit[string] {
+			<-timerStarted
+			return Succeed("completed")
+		},
+		func(fc *FiberContext) Exit[Unit] {
+			close(timerStarted)
+			<-fc.Context().Done()
+			return withCleanup(Interrupt[Unit](fc.Context().Err()), Cause{{Kind: "defect", Err: timerDefect}})
+		},
+	))
+	if !out.IsFailure() || out.Defect == nil || !errors.Is(out.Defect, timerDefect) {
+		t.Fatalf("timer cleanup defect was discarded after work won: %+v", out)
+	}
+	if out.Failure != nil || out.Interrupted {
+		t.Fatalf("work winner was rewritten as timeout or interruption: %+v", out)
 	}
 }
 
