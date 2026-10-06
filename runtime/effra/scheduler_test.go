@@ -753,6 +753,23 @@ func TestTestSchedulerForkedCleanupUsesIndependentContinuations(t *testing.T) {
 			},
 		},
 		{
+			name: "join fast child first",
+			body: func(fc *FiberContext) Exit[Unit] {
+				first := Invoke(fc, Fork(Sleep(10)))
+				if first.IsFailure() {
+					return Propagate[Unit](first)
+				}
+				second := Invoke(fc, Fork(Sleep(30)))
+				if second.IsFailure() {
+					return Propagate[Unit](second)
+				}
+				if out := Invoke(fc, first.Value.Join()); out.IsFailure() {
+					return out
+				}
+				return Invoke(fc, second.Value.Join())
+			},
+		},
+		{
 			name: "caller sleeps while child completes",
 			body: func(fc *FiberContext) Exit[Unit] {
 				child := Invoke(fc, Fork(Sleep(10)))
