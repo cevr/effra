@@ -70,6 +70,11 @@ Verdict: structural work remains. The loop is open.
 | A2 | Repair proven ownership escapes and false borrow rejection | Owned lifetimes | compiler provenance/checker | High | Open implementation; independently reproduced |
 | A3 | Bound ownership traversal and summary propagation | Exceptionally fast compilation | compiler provenance/checker | High | Open implementation; small source causes multi-second checking before repair |
 | A4 | Use reusable typed library interfaces | Algebraic data and useful abstraction | compiler, bundled runtime | High | Spec/task graph established; implementation pending foundations |
+| A5 | Preserve callback rows through helper parameters | Explicit contracts and clear guardrails | compiler function types, HTTP | High | Root confirmed missing Users still checks; required regression in native-interfaces |
+| A6 | Preserve root parameter projections and already materialized borrowed owners | Owned lifetimes | compiler provenance | High | Rereview of668e5a9 blocked; O8/O9 in remote-ownership-rereview.md |
+| A7 | Bound primitive-only shared type traversal | Exceptionally fast compilation | compiler provenance | High | Rereview of668e5a9 blocked; O10 tiny source still checks in seconds |
+| A8 | Allow partial time advance while cleanup sleeps past the target | Owned lifetimes | runtime scheduler/scope | High | Independent public probe blocks Adjust10 while cleanup waits until20; repair required |
+| A9 | Atomically recheck scheduler quiescence before selecting/finalizing time | Owned lifetimes | runtime scheduler | High | Repeated public join/deadline probes miss intermediate continuation sleeps; repair required |
 
 Guardrails added: pending implementation receipts. Each missed static guarantee needs its own rejected-source test, and each bounded analysis needs adversarial scaling coverage.
 
