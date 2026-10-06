@@ -3,11 +3,12 @@ package compiler
 import "fmt"
 
 type ExpressionInfo struct {
-	Kind                 string    `json:"kind"`
-	Span                 Span      `json:"span"`
-	Type                 ValueType `json:"type"`
-	ExecutedFailures     []string  `json:"executedFailures"`
-	ExecutedRequirements []string  `json:"executedRequirements"`
+	Kind                 string         `json:"kind"`
+	Span                 Span           `json:"span"`
+	Type                 ValueType      `json:"type"`
+	ExecutedFailures     []string       `json:"executedFailures"`
+	ExecutedRequirements []string       `json:"executedRequirements"`
+	Evaluation           EvaluationRows `json:"evaluation"`
 }
 
 // TypeAt addresses an expression's diagnostic anchor, not a full source range.
@@ -26,7 +27,8 @@ func (r *Result) TypeAt(offset int) (*ExpressionInfo, error) {
 		if e == nil {
 			return
 		}
-		if e.Type.Success != "" && offset >= e.Span.Offset && offset < e.Span.Offset+e.Span.Length && (found == nil || e.Span.Length < found.Span.Length) {
+		facts, hasFacts := r.facts[e]
+		if hasFacts && facts.Type.Success != "" && offset >= e.Span.Offset && offset < e.Span.Offset+e.Span.Length && (found == nil || e.Span.Length < found.Span.Length) {
 			found = e
 		}
 		forEachExprChild(e, expr)
@@ -55,5 +57,6 @@ func (r *Result) TypeAt(offset int) (*ExpressionInfo, error) {
 	if found == nil {
 		return nil, fmt.Errorf("no checked expression at byte offset %d; use an expression's diagnostic anchor", offset)
 	}
-	return &ExpressionInfo{found.Kind, found.Span, found.Type, tExecutedErrors(found), tExecutedServices(found)}, nil
+	facts := r.facts[found]
+	return &ExpressionInfo{Kind: found.Kind, Span: found.Span, Type: facts.Type, ExecutedFailures: append([]string{}, facts.Executed.Failures...), ExecutedRequirements: append([]string{}, facts.Executed.Requirements...), Evaluation: facts.Evaluation}, nil
 }

@@ -350,7 +350,7 @@ func call(root, name string, args arguments) (any, error) {
 		if truncated {
 			diagnostics = diagnostics[:100]
 		}
-		return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "checked": r.Checked, "target": r.Target, "diagnostics": diagnostics, "diagnosticsTruncated": truncated, "symbolCount": len(r.Symbols), "declarationCount": len(r.Declarations), "declarations": declarations, "declarationsTruncated": declarationsTruncated, "timings": r.Timings, "bindings": bindings, "bindingsTruncated": bindingsTruncated}, nil
+		return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "checked": r.Checked, "target": r.Target, "diagnostics": diagnostics, "diagnosticsTruncated": truncated, "symbolCount": len(r.Symbols), "declarationCount": len(r.Declarations), "declarations": declarations, "declarationsTruncated": declarationsTruncated, "types": r.Types, "rows": r.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionError": r.TypeProjectionError, "timings": r.Timings, "bindings": bindings, "bindingsTruncated": bindingsTruncated}, nil
 	}
 	symbol := r.Find(args.Symbol)
 	if symbol == nil {
@@ -367,7 +367,7 @@ func call(root, name string, args arguments) (any, error) {
 			if diagnosticsTruncated {
 				diagnostics = diagnostics[:100]
 			}
-			return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "declaration": declaration, "declarations": declarations, "declarationsTruncated": declarationsTruncated, "bindings": bindings, "bindingsTruncated": bindingsTruncated, "diagnostics": diagnostics, "diagnosticsTruncated": diagnosticsTruncated}, nil
+			return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "declaration": declaration, "declarations": declarations, "declarationsTruncated": declarationsTruncated, "types": r.Types, "rows": r.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionError": r.TypeProjectionError, "bindings": bindings, "bindingsTruncated": bindingsTruncated, "diagnostics": diagnostics, "diagnosticsTruncated": diagnosticsTruncated}, nil
 		}
 		return nil, fmt.Errorf("unknown symbol %s; check the file for diagnostics", args.Symbol)
 	}
@@ -382,7 +382,7 @@ func call(root, name string, args arguments) (any, error) {
 	if len(diagnostics) > 100 {
 		diagnostics = diagnostics[:100]
 	}
-	return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "symbol": symbol, "declarations": declarations, "declarationsTruncated": declarationsTruncated, "bindings": bindings, "bindingsTruncated": bindingsTruncated, "diagnostics": diagnostics, "diagnosticsTruncated": len(r.Diagnostics) > 100}, nil
+	return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "symbol": symbol, "declarations": declarations, "declarationsTruncated": declarationsTruncated, "types": r.Types, "rows": r.Rows, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionError": r.TypeProjectionError, "bindings": bindings, "bindingsTruncated": bindingsTruncated, "diagnostics": diagnostics, "diagnosticsTruncated": len(r.Diagnostics) > 100}, nil
 }
 func readSource(root, relative string) ([]byte, error) {
 	canonicalRoot, err := filepath.EvalSymlinks(root)

@@ -3,7 +3,6 @@ package compiler
 import (
 	"fmt"
 	"slices"
-	"strings"
 )
 
 type GraphNode struct {
@@ -115,7 +114,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			edge(id, recipe, "constructs", e.Left.Name, e.Span)
 			edge(recipe, "provider:"+e.Left.Name, "originates", "", e.Span)
 		}
-		if e.Kind == "run" && strings.HasPrefix(e.Type.Success, "provider:") {
+		if e.Kind == "run" && e.Type.Type.Kind == "provider" {
 			if recipe, ok := providerOrigin(e.Left, locals, providerOrigins, nodes); ok && recipe.recipe {
 				provider := "provider-value:" + id
 				t := e.Type
@@ -125,9 +124,9 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 				t.Effect = false
 				t.Errors = nil
 				t.Services = nil
-				add(provider, "provider-value", strings.TrimPrefix(e.Type.Success, "provider:"), e.Span, &t)
+				add(provider, "provider-value", e.Type.Type.Name, e.Span, &t)
 				providerOrigins[e] = providerBinding{id: provider}
-				edge(id, provider, "materializes", strings.TrimPrefix(e.Type.Success, "provider:"), e.Span)
+				edge(id, provider, "materializes", e.Type.Type.Name, e.Span)
 				edge(provider, recipe.id, "originates", "", e.Span)
 			}
 		}

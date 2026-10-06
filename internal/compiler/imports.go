@@ -288,13 +288,14 @@ func (c *checker) foreignCall(e *Expr, env map[string]ValueType, inEffect bool) 
 		}
 		for i, arg := range e.Args {
 			actual := c.expr(arg, env, inEffect)
-			if i < len(b.Params) && (actual.Effect || actual.Success != b.Params[i]) {
+			if i < len(b.Params) && (actual.Effect || !c.sameType(actual, b.Params[i])) {
 				c.diagnostic("EF106", "Go argument must be "+b.Params[i], arg.Span)
 			}
 		}
-		t := value(b.Return)
+		returnID := c.canonicalRef(typeRef(b.Return))
+		t := c.valueForTypeID(returnID)
 		if b.HasError {
-			t.Success = "GoResult:" + b.Return
+			t = c.valueForTypeID(c.internType("goResult", "", []TypeID{returnID}))
 		}
 		t.Effect = true
 		t.Services = []string{"Foreign"}

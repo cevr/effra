@@ -10,14 +10,86 @@ import (
 )
 
 type ValueType struct {
-	Success   string          `json:"success"`
-	Type      TypeRef         `json:"type"`
-	Effect    bool            `json:"effect"`
-	Errors    []string        `json:"failures"`
-	Services  []string        `json:"requirements"`
-	Ownership []OwnershipFact `json:"ownership,omitempty"`
-	Captures  []OwnershipFact `json:"captures,omitempty"`
-	Child     []OwnershipFact `json:"childOwnership,omitempty"`
+	Success     string               `json:"success"` // compatibility projection of Type
+	Type        TypeRef              `json:"type"`    // canonical identity projection
+	Identity    string               `json:"identity,omitempty"`
+	Effect      bool                 `json:"effect"`
+	Errors      []string             `json:"failures"`
+	Services    []string             `json:"requirements"`
+	FailureRow  string               `json:"failureRow,omitempty"`
+	ServiceRow  string               `json:"serviceRow,omitempty"`
+	Callable    *CallableType        `json:"callable,omitempty"`
+	Application *ApplicationIdentity `json:"application,omitempty"`
+	Evaluation  EvaluationRows       `json:"-"`
+	Ownership   []OwnershipFact      `json:"ownership,omitempty"`
+	Captures    []OwnershipFact      `json:"captures,omitempty"`
+	Child       []OwnershipFact      `json:"childOwnership,omitempty"`
+	typeID      TypeID
+	valueID     TypeID
+	failureID   RowID
+	serviceID   RowID
+}
+
+// EvaluationRows describe requirements incurred while evaluating an
+// expression. They are intentionally separate from the deferred rows on
+// ValueType: constructing a recipe is pure with respect to its recipe rows,
+// while run/argument evaluation contributes to the enclosing computation.
+type EvaluationRows struct {
+	Failures     []string `json:"failures,omitempty"`
+	Requirements []string `json:"requirements,omitempty"`
+}
+
+type CallableType struct {
+	ID           string   `json:"id"`
+	Signature    string   `json:"signature"`
+	Kind         string   `json:"kind"`
+	Parameters   []Param  `json:"parameters"`
+	Result       TypeRef  `json:"result"`
+	Failures     []string `json:"failures"`
+	Requirements []string `json:"requirements"`
+	FailureRow   string   `json:"failureRow,omitempty"`
+	ServiceRow   string   `json:"serviceRow,omitempty"`
+}
+
+// ApplicationIdentity is the checked identity of one function application.
+// Arguments are canonical type identities; the full expression tree remains
+// available through source spans and the checked node, rather than being
+// duplicated in every inspection response.
+type ApplicationIdentity struct {
+	ID        string    `json:"id"`
+	Callee    string    `json:"callee"`
+	Arguments []TypeRef `json:"arguments"`
+	Result    TypeRef   `json:"result"`
+}
+
+func newApplicationIdentity(callee string, arguments []TypeRef, result TypeRef, span Span) ApplicationIdentity {
+	var key strings.Builder
+	key.WriteString(callee)
+	key.WriteByte('(')
+	for _, argument := range arguments {
+		key.WriteString(argument.ID)
+		key.WriteByte(',')
+	}
+	key.WriteByte(')')
+	key.WriteByte('@')
+	key.WriteString(fmt.Sprint(span.Offset))
+	sum := sha256.Sum256([]byte(key.String()))
+	return ApplicationIdentity{ID: "application:" + hex.EncodeToString(sum[:8]), Callee: callee, Arguments: append([]TypeRef{}, arguments...), Result: result}
+}
+
+type TypeNode struct {
+	ID         string   `json:"id"`
+	Kind       string   `json:"kind"`
+	Name       string   `json:"name,omitempty"`
+	Args       []string `json:"args,omitempty"`
+	Result     string   `json:"result,omitempty"`
+	FailureRow string   `json:"failureRow,omitempty"`
+	ServiceRow string   `json:"serviceRow,omitempty"`
+}
+
+type RowNode struct {
+	ID     string   `json:"id"`
+	Labels []string `json:"labels,omitempty"`
 }
 
 // ownershipOwnerKind separates the origin of an owner from its rendered
@@ -82,12 +154,33 @@ type OwnershipFact struct {
 // provider, opaque-handle and ownership wrappers can be added without
 // changing the public contract shape, with Args carrying nested identities.
 type TypeRef struct {
-	Kind string    `json:"kind"`
-	Name string    `json:"name,omitempty"`
-	Args []TypeRef `json:"args,omitempty"`
+	ID   string `json:"ref,omitempty"`
+	Kind string `json:"kind"`
+	Name string `json:"name,omitempty"`
+	// Args is a one-hop in-process compatibility view. The serialized `args`
+	// field and Result.Types table carry the complete shared graph by reference,
+	// so repeated children never trigger recursive DAG expansion at a boundary.
+	Args   []TypeRef `json:"-"`
+	ArgIDs []string  `json:"args,omitempty"`
 }
 
-const SemanticSchemaVersion = 3
+type semanticTypeNode struct {
+	ID         TypeID
+	Kind       string
+	Name       string
+	Args       []TypeID
+	Result     TypeID
+	FailureRow RowID
+	ServiceRow RowID
+}
+
+type TypeID uint32
+type RowID uint32
+
+const invalidTypeID TypeID = 0
+const emptyRowID RowID = 0
+
+const SemanticSchemaVersion = 4
 
 type Contribution struct {
 	Kind  string   `json:"kind"`
@@ -96,6 +189,7 @@ type Contribution struct {
 }
 type Symbol struct {
 	Name          string         `json:"name"`
+	Identity      string         `json:"identity,omitempty"`
 	Params        []Param        `json:"parameters"`
 	Contract      ValueType      `json:"contract"`
 	Actual        ValueType      `json:"bodyContract"`
@@ -109,17 +203,28 @@ type Timings struct {
 	TotalMicros  int64 `json:"totalMicros"`
 }
 type Result struct {
-	ModuleSum     []byte        `json:"-"`
-	Bindings      []Binding     `json:"bindings,omitempty"`
-	SchemaVersion int           `json:"schemaVersion"`
-	Revision      string        `json:"revision"`
-	Target        string        `json:"target"`
-	Checked       bool          `json:"checked"`
-	Diagnostics   []Diagnostic  `json:"diagnostics"`
-	Symbols       []Symbol      `json:"symbols"`
-	Declarations  []Declaration `json:"declarations,omitempty"`
-	Timings       Timings       `json:"timings"`
-	Program       *Program      `json:"-"`
+	ModuleSum            []byte        `json:"-"`
+	Bindings             []Binding     `json:"bindings,omitempty"`
+	SchemaVersion        int           `json:"schemaVersion"`
+	Revision             string        `json:"revision"`
+	Target               string        `json:"target"`
+	Checked              bool          `json:"checked"`
+	Diagnostics          []Diagnostic  `json:"diagnostics"`
+	Symbols              []Symbol      `json:"symbols"`
+	Declarations         []Declaration `json:"declarations,omitempty"`
+	Types                []TypeNode    `json:"types,omitempty"`
+	Rows                 []RowNode     `json:"rows,omitempty"`
+	TypeProjectionBudget int           `json:"typeProjectionBudget"`
+	TypeProjectionError  string        `json:"typeProjectionError,omitempty"`
+	Timings              Timings       `json:"timings"`
+	Program              *Program      `json:"-"`
+	facts                map[*Expr]ExpressionFacts
+}
+
+type ExpressionFacts struct {
+	Type       ValueType
+	Evaluation EvaluationRows
+	Executed   EvaluationRows
 }
 type checker struct {
 	program             *Program
@@ -130,13 +235,25 @@ type checker struct {
 	records             map[string]*Record
 	enums               map[string]*Enum
 	errors              map[string]*ErrorDecl
+	typeIntern          map[string]*semanticTypeNode
+	typeNodes           []*semanticTypeNode
+	rowIntern           map[string]RowID
+	rows                []RowNode
+	nextTypeID          TypeID
+	nextRowID           RowID
+	recordFacts         bool
+	typePublicIDs       map[TypeID]string
+	typePublicToID      map[string]TypeID
 	reasons             []Contribution
 	region              string
 	suppressDiagnostics bool
 }
 
+const maxTypeProjectionNodes = 4096
+
 func value(success string) ValueType {
-	return ValueType{Success: success, Type: typeRef(success), Errors: []string{}, Services: []string{}, Ownership: ownershipForType(success)}
+	ref := typeRef(success)
+	return ValueType{Success: success, Type: ref, Identity: ref.ID, Errors: []string{}, Services: []string{}, Ownership: ownershipForType(success)}
 }
 
 func ownershipForType(success string) []OwnershipFact {
@@ -1710,33 +1827,51 @@ func (c *checker) withRegion(region string, fn func() ValueType) ValueType {
 	defer func() { c.region = previous }()
 	return fn()
 }
+
+// typeRef is the legacy source/display parser used only at compatibility
+// boundaries. The checker immediately resolves its kind/name/children into
+// numeric canonical nodes; these legacy IDs never participate in checking.
 func typeRef(name string) TypeRef {
+	var ref TypeRef
 	switch {
 	case name == "":
-		return TypeRef{}
+		return ref
 	case name == "string", name == "bool", name == "i64", name == "bytes", name == "()":
-		return TypeRef{Kind: "primitive", Name: name}
+		ref = TypeRef{Kind: "primitive", Name: name}
 	case name == "File", name == "Handler", name == "Latch":
-		return TypeRef{Kind: "opaque", Name: name}
+		ref = TypeRef{Kind: "opaque", Name: name}
 	case strings.HasPrefix(name, "Fiber:"):
-		return TypeRef{Kind: "fiber", Args: []TypeRef{typeRef(strings.TrimPrefix(name, "Fiber:"))}}
+		ref = TypeRef{Kind: "fiber", Args: []TypeRef{typeRef(strings.TrimPrefix(name, "Fiber:"))}}
 	case strings.HasPrefix(name, "GoResult:"):
-		return TypeRef{Kind: "goResult", Args: []TypeRef{typeRef(strings.TrimPrefix(name, "GoResult:"))}}
+		ref = TypeRef{Kind: "goResult", Args: []TypeRef{typeRef(strings.TrimPrefix(name, "GoResult:"))}}
 	case strings.HasPrefix(name, "provider:"):
-		return TypeRef{Kind: "provider", Name: strings.TrimPrefix(name, "provider:")}
+		ref = TypeRef{Kind: "provider", Name: strings.TrimPrefix(name, "provider:")}
 	case name == "never":
-		return TypeRef{Kind: "never"}
+		ref = TypeRef{Kind: "never"}
 	case name == "invalid":
-		return TypeRef{Kind: "invalid"}
+		ref = TypeRef{Kind: "invalid"}
 	default:
-		return TypeRef{Kind: "named", Name: name}
+		ref = TypeRef{Kind: "named", Name: name}
 	}
+	sum := sha256.Sum256([]byte(name))
+	ref.ID = "legacy:" + hex.EncodeToString(sum[:8])
+	for _, arg := range ref.Args {
+		ref.ArgIDs = append(ref.ArgIDs, arg.ID)
+	}
+	return ref
 }
 func contract(f *Function) ValueType {
 	v := value(f.Return)
 	v.Effect = f.Effect
 	v.Errors = normalized(f.Errors)
 	v.Services = normalized(f.Services)
+	kind := "pure"
+	if f.Effect {
+		kind = "effect"
+	}
+	callable := &CallableType{ID: "function:" + f.Name, Kind: kind, Parameters: append([]Param{}, f.Params...), Result: v.Type, Failures: append([]string{}, v.Errors...), Requirements: append([]string{}, v.Services...)}
+	v.Callable = callable
+	v.Identity = callable.ID
 	return v
 }
 func providerContract(p *Provider) ValueType {
@@ -1779,7 +1914,7 @@ func CompileFor(source, target string) *Result {
 func CompileAt(source, target, dir string) *Result {
 	start := time.Now()
 	hash := sha256.Sum256([]byte(source))
-	r := &Result{SchemaVersion: SemanticSchemaVersion, Revision: hex.EncodeToString(hash[:]), Target: target, Diagnostics: []Diagnostic{}, Symbols: []Symbol{}}
+	r := &Result{SchemaVersion: SemanticSchemaVersion, Revision: hex.EncodeToString(hash[:]), Target: target, Diagnostics: []Diagnostic{}, Symbols: []Symbol{}, TypeProjectionBudget: maxTypeProjectionNodes, facts: map[*Expr]ExpressionFacts{}}
 	if target != "go" && target != "js" {
 		r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF110", Message: "unsupported target " + target})
 		return r
@@ -1793,13 +1928,66 @@ func CompileAt(source, target, dir string) *Result {
 	}
 	r.Program = program
 	r.loadImports(dir)
-	c := &checker{program: program, result: r, functions: map[string]*Function{}, services: map[string]*Service{}, providers: map[string]*Provider{}, records: map[string]*Record{}, enums: map[string]*Enum{}, errors: map[string]*ErrorDecl{}, region: "invocation"}
+	c := &checker{
+		program:        program,
+		result:         r,
+		functions:      map[string]*Function{},
+		services:       map[string]*Service{},
+		providers:      map[string]*Provider{},
+		records:        map[string]*Record{},
+		enums:          map[string]*Enum{},
+		errors:         map[string]*ErrorDecl{},
+		typeIntern:     map[string]*semanticTypeNode{},
+		rowIntern:      map[string]RowID{},
+		nextTypeID:     1,
+		nextRowID:      1,
+		typePublicIDs:  map[TypeID]string{},
+		typePublicToID: map[string]TypeID{},
+		region:         "invocation",
+	}
 	checkStart := time.Now()
 	c.check()
+	c.publishTypeNodes()
 	r.Timings.CheckMicros = time.Since(checkStart).Microseconds()
 	r.Timings.TotalMicros = time.Since(start).Microseconds()
 	r.Checked = len(r.Diagnostics) == 0
 	return r
+}
+
+func (c *checker) publishTypeNodes() {
+	if len(c.typeNodes) > maxTypeProjectionNodes {
+		c.result.TypeProjectionError = fmt.Sprintf("canonical type projection exceeds %d nodes", maxTypeProjectionNodes)
+		c.diagnostic("EF130", c.result.TypeProjectionError, Span{})
+		return
+	}
+	nodes := append([]*semanticTypeNode{}, c.typeNodes...)
+	slices.SortFunc(nodes, func(a, b *semanticTypeNode) int {
+		return strings.Compare(c.typeNodeID(a.ID), c.typeNodeID(b.ID))
+	})
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		args := make([]string, 0, len(node.Args))
+		for _, arg := range node.Args {
+			args = append(args, c.typeNodeID(arg))
+		}
+		rowFailure, rowService := "", ""
+		if node.FailureRow != emptyRowID {
+			rowFailure = c.rowNodeID(node.FailureRow)
+		}
+		if node.ServiceRow != emptyRowID {
+			rowService = c.rowNodeID(node.ServiceRow)
+		}
+		result := ""
+		if node.Result != invalidTypeID {
+			result = c.typeNodeID(node.Result)
+		}
+		c.result.Types = append(c.result.Types, TypeNode{ID: c.typeNodeID(node.ID), Kind: node.Kind, Name: node.Name, Args: args, Result: result, FailureRow: rowFailure, ServiceRow: rowService})
+	}
+	rows := append([]RowNode{}, c.rows...)
+	slices.SortFunc(rows, func(a, b RowNode) int { return strings.Compare(a.ID, b.ID) })
+	c.result.Rows = append(c.result.Rows, rows...)
 }
 func (c *checker) diagnostic(code, message string, span Span) {
 	if c.suppressDiagnostics {
@@ -1867,17 +2055,20 @@ func (c *checker) check() {
 	for _, decl := range c.program.ErrorDecls {
 		for i := range decl.Fields {
 			decl.Fields[i].TypeRef = c.typeRef(decl.Fields[i].Type)
+			decl.Fields[i].typeID = c.canonicalRef(decl.Fields[i].TypeRef)
 		}
 	}
 	for _, record := range c.program.Records {
 		for i := range record.Fields {
 			record.Fields[i].TypeRef = c.typeRef(record.Fields[i].Type)
+			record.Fields[i].typeID = c.canonicalRef(record.Fields[i].TypeRef)
 		}
 	}
 	for _, enum := range c.program.Enums {
 		for i := range enum.Variants {
 			for j := range enum.Variants[i].Fields {
 				enum.Variants[i].Fields[j].TypeRef = c.typeRef(enum.Variants[i].Fields[j].Type)
+				enum.Variants[i].Fields[j].typeID = c.canonicalRef(enum.Variants[i].Fields[j].TypeRef)
 			}
 		}
 	}
@@ -1956,10 +2147,10 @@ func (c *checker) check() {
 				c.diagnostic("EF104", "provider "+p.Name+" is missing method "+want.Name, p.Span)
 				continue
 			}
-			equal := got.Effect && got.Return == want.Return && len(got.Params) == len(want.Params)
+			equal := got.Effect && c.canonicalRef(typeRef(got.Return)) == c.canonicalRef(typeRef(want.Return)) && len(got.Params) == len(want.Params)
 			if equal {
 				for i := range got.Params {
-					equal = equal && got.Params[i].Type == want.Params[i].Type
+					equal = equal && c.canonicalRef(typeRef(got.Params[i].Type)) == c.canonicalRef(typeRef(want.Params[i].Type))
 				}
 			}
 			if !equal || len(difference(got.Errors, want.Errors)) > 0 {
@@ -2128,6 +2319,7 @@ func (c *checker) providerSignature(p *Provider) {
 			c.diagnostic("EF102", "unknown or unsupported provider configuration type "+param.Type, param.Span)
 		}
 		param.TypeRef = c.typeRef(param.Type)
+		param.typeID = c.canonicalRef(param.TypeRef)
 		if names[param.Name] {
 			c.diagnostic("EF101", "duplicate provider configuration parameter "+param.Name, param.Span)
 		}
@@ -2146,7 +2338,10 @@ func (c *checker) providerSignature(p *Provider) {
 // row. The service operation contract remains the service declaration's
 // contract, which has no captured construction row.
 func (c *checker) providerFunction(p *Provider, f *Function) {
+	previousFacts := c.recordFacts
+	c.recordFacts = true
 	c.functionWithLocals(f, false, p.Params, p.Services)
+	c.recordFacts = previousFacts
 }
 
 func (c *checker) validateJSDeclarationNames() {
@@ -2218,6 +2413,7 @@ func (c *checker) signature(f *Function) {
 		p := &f.Params[i]
 		valid(p.Type, p.Span)
 		p.TypeRef = c.typeRef(p.Type)
+		p.typeID = c.canonicalRef(p.TypeRef)
 		if names[p.Name] {
 			c.diagnostic("EF101", "duplicate parameter "+p.Name, p.Span)
 		}
@@ -2247,25 +2443,430 @@ func (c *checker) typeKnown(name string) bool {
 	}
 	return false
 }
-func (c *checker) typeRef(name string) TypeRef {
-	var canonical func(TypeRef) TypeRef
-	canonical = func(ref TypeRef) TypeRef {
-		for i := range ref.Args {
-			ref.Args[i] = canonical(ref.Args[i])
+func (c *checker) typeNodeID(id TypeID) string {
+	if id == invalidTypeID {
+		return ""
+	}
+	if c.typePublicIDs == nil {
+		c.typePublicIDs = map[TypeID]string{}
+	}
+	if c.typePublicToID == nil {
+		c.typePublicToID = map[string]TypeID{}
+	}
+	if publicID, ok := c.typePublicIDs[id]; ok {
+		return publicID
+	}
+	node := c.node(id)
+	if node == nil {
+		return ""
+	}
+	var publicID func(TypeID, map[TypeID]bool) string
+	publicID = func(current TypeID, visiting map[TypeID]bool) string {
+		if cached, ok := c.typePublicIDs[current]; ok {
+			return cached
 		}
-		if ref.Kind == "named" {
-			if c.records[ref.Name] != nil {
-				ref.Kind = "record"
-			} else if c.enums[ref.Name] != nil {
-				ref.Kind = "enum"
-			} else if c.errors[ref.Name] != nil {
-				ref.Kind = "error"
+		if visiting[current] {
+			return "cycle"
+		}
+		currentNode := c.node(current)
+		if currentNode == nil {
+			return "invalid"
+		}
+		visiting[current] = true
+		var key strings.Builder
+		key.WriteString(currentNode.Kind)
+		key.WriteByte(':')
+		key.WriteString(currentNode.Name)
+		for _, arg := range currentNode.Args {
+			key.WriteByte('[')
+			key.WriteString(publicID(arg, visiting))
+			key.WriteByte(']')
+		}
+		if currentNode.Result != invalidTypeID {
+			key.WriteString("->")
+			key.WriteString(publicID(currentNode.Result, visiting))
+		}
+		if currentNode.FailureRow != emptyRowID {
+			key.WriteString("!")
+			key.WriteString(rowIdentityKey(c.rowLabels(currentNode.FailureRow)))
+		}
+		if currentNode.ServiceRow != emptyRowID {
+			key.WriteString("?")
+			key.WriteString(rowIdentityKey(c.rowLabels(currentNode.ServiceRow)))
+		}
+		delete(visiting, current)
+		sum := sha256.Sum256([]byte(key.String()))
+		prefix := "t:"
+		if currentNode.Kind == "callable" {
+			prefix = "v:"
+		}
+		result := prefix + hex.EncodeToString(sum[:8])
+		c.typePublicIDs[current] = result
+		c.typePublicToID[result] = current
+		return result
+	}
+	return publicID(id, map[TypeID]bool{})
+}
+
+func rowNodeIDForLabels(labels []string) string {
+	sum := sha256.Sum256([]byte(rowIdentityKey(labels)))
+	return "r:" + hex.EncodeToString(sum[:8])
+}
+
+func (c *checker) rowNodeID(id RowID) string {
+	if id == emptyRowID {
+		return ""
+	}
+	return rowNodeIDForLabels(c.rowLabels(id))
+}
+
+func (c *checker) node(id TypeID) *semanticTypeNode {
+	if id == invalidTypeID || int(id) > len(c.typeNodes) {
+		return nil
+	}
+	return c.typeNodes[id-1]
+}
+
+func (c *checker) rowLabels(id RowID) []string {
+	if id == emptyRowID || int(id) > len(c.rows) {
+		return nil
+	}
+	return append([]string{}, c.rows[id-1].Labels...)
+}
+
+func rowIdentityKey(labels []string) string {
+	return strings.Join(normalized(labels), "\x00")
+}
+
+func (c *checker) internRow(labels []string) RowID {
+	labels = normalized(labels)
+	if len(labels) == 0 {
+		return emptyRowID
+	}
+	key := rowIdentityKey(labels)
+	if id, ok := c.rowIntern[key]; ok {
+		return id
+	}
+	id := c.nextRowID
+	c.nextRowID++
+	c.rowIntern[key] = id
+	c.rows = append(c.rows, RowNode{ID: rowNodeIDForLabels(labels), Labels: append([]string{}, labels...)})
+	return id
+}
+
+func (c *checker) canonicalRef(ref TypeRef) TypeID {
+	// Canonical projections are admitted by their same-arena public ID. The
+	// visible kind/name and one-hop Args are inspection projections only; using
+	// them to rebuild a nested reference would silently truncate a shared DAG.
+	// Legacy source/display refs are the sole compatibility exception.
+	if ref.ID != "" && !strings.HasPrefix(ref.ID, "legacy:") {
+		if id, ok := c.typePublicToID[ref.ID]; ok {
+			return id
+		}
+		return invalidTypeID
+	}
+	argIDs := []TypeID(nil)
+	if !strings.HasPrefix(ref.ID, "legacy:") {
+		argIDs = make([]TypeID, len(ref.ArgIDs))
+		for i, argID := range ref.ArgIDs {
+			id, ok := c.typePublicToID[argID]
+			if !ok {
+				return invalidTypeID
+			}
+			argIDs[i] = id
+		}
+	}
+	if ref.Kind == "" {
+		if ref.Name == "" {
+			return invalidTypeID
+		}
+		ref = typeRef(ref.Name)
+	}
+	if ref.Kind == "named" {
+		switch {
+		case c.records[ref.Name] != nil:
+			ref.Kind = "record"
+		case c.enums[ref.Name] != nil:
+			ref.Kind = "enum"
+		case c.errors[ref.Name] != nil:
+			ref.Kind = "error"
+		}
+	}
+	args := argIDs
+	if len(args) == 0 && len(ref.Args) > 0 {
+		args = make([]TypeID, len(ref.Args))
+		for i := range ref.Args {
+			args[i] = c.canonicalRef(ref.Args[i])
+			if args[i] == invalidTypeID {
+				return invalidTypeID
 			}
 		}
-		return ref
 	}
-	return canonical(typeRef(name))
+	return c.internType(ref.Kind, ref.Name, args)
 }
+
+func (c *checker) internType(kind, name string, args []TypeID) TypeID {
+	key := kind + "\x00" + name
+	for _, arg := range args {
+		key += fmt.Sprintf("\x00%d", arg)
+	}
+	if node, ok := c.typeIntern[key]; ok {
+		return node.ID
+	}
+	id := c.nextTypeID
+	c.nextTypeID++
+	node := &semanticTypeNode{ID: id, Kind: kind, Name: name, Args: append([]TypeID{}, args...)}
+	c.typeIntern[key] = node
+	c.typeNodes = append(c.typeNodes, node)
+	return id
+}
+
+// refForID preserves the legacy one-hop Args shape for existing tooling. ArgIDs
+// and Result.Types remain the authoritative complete graph, so this function
+// does not recursively clone grandchildren or repeated DAG branches.
+func (c *checker) refForID(id TypeID, depth int) TypeRef {
+	if id == invalidTypeID {
+		return TypeRef{Kind: "invalid"}
+	}
+	node := c.node(id)
+	if node == nil {
+		return TypeRef{Kind: "invalid"}
+	}
+	ref := TypeRef{ID: c.typeNodeID(id), Kind: node.Kind, Name: node.Name}
+	for _, arg := range node.Args {
+		ref.ArgIDs = append(ref.ArgIDs, c.typeNodeID(arg))
+		if depth == 0 {
+			ref.Args = append(ref.Args, c.shallowRefForID(arg))
+		}
+	}
+	return ref
+}
+
+func (c *checker) shallowRefForID(id TypeID) TypeRef {
+	if id == invalidTypeID {
+		return TypeRef{Kind: "invalid"}
+	}
+	node := c.node(id)
+	if node == nil {
+		return TypeRef{Kind: "invalid"}
+	}
+	ref := TypeRef{ID: c.typeNodeID(id), Kind: node.Kind, Name: node.Name}
+	for _, arg := range node.Args {
+		ref.ArgIDs = append(ref.ArgIDs, c.typeNodeID(arg))
+	}
+	return ref
+}
+
+func (c *checker) ref(id TypeID) TypeRef { return c.refForID(id, 0) }
+
+func (c *checker) displayTypeID(id TypeID) string {
+	node := c.node(id)
+	if node == nil {
+		return "invalid"
+	}
+	switch node.Kind {
+	case "never":
+		return "never"
+	case "invalid":
+		return "invalid"
+	case "fiber":
+		if len(node.Args) == 1 {
+			return "Fiber:" + c.displayTypeID(node.Args[0])
+		}
+	case "goResult":
+		if len(node.Args) == 1 {
+			return "GoResult:" + c.displayTypeID(node.Args[0])
+		}
+	case "provider":
+		return "provider:" + node.Name
+	}
+	return node.Name
+}
+
+func (c *checker) valueForTypeID(id TypeID) ValueType {
+	ref := c.ref(id)
+	success := c.displayTypeID(id)
+	return ValueType{Success: success, Type: ref, typeID: id, Identity: c.typeNodeID(id), Errors: []string{}, Services: []string{}, Ownership: ownershipForType(success)}
+}
+
+func (c *checker) typeRef(name string) TypeRef {
+	return c.ref(c.canonicalRef(typeRef(name)))
+}
+
+func (c *checker) sameType(actual ValueType, expected string) bool {
+	if actual.typeID == invalidTypeID {
+		actual = c.canonicalValue(actual)
+	}
+	expectedID := c.canonicalRef(typeRef(expected))
+	return actual.typeID == expectedID || actual.typeID == c.canonicalRef(typeRef("never"))
+}
+
+func (c *checker) sameValues(actual, expected ValueType) bool {
+	if actual.typeID == invalidTypeID {
+		actual = c.canonicalValue(actual)
+	}
+	if expected.typeID == invalidTypeID {
+		expected = c.canonicalValue(expected)
+	}
+	return actual.typeID == expected.typeID || actual.typeID == c.canonicalRef(typeRef("never"))
+}
+
+func (c *checker) isKind(t ValueType, kind string) bool {
+	if t.typeID == invalidTypeID {
+		t = c.canonicalValue(t)
+	}
+	node := c.node(t.typeID)
+	return node != nil && node.Kind == kind
+}
+
+func (c *checker) namedType(t ValueType) string {
+	if t.typeID == invalidTypeID {
+		t = c.canonicalValue(t)
+	}
+	node := c.node(t.typeID)
+	if node == nil {
+		return ""
+	}
+	if node.Kind == "record" || node.Kind == "enum" || node.Kind == "named" {
+		return node.Name
+	}
+	return ""
+}
+
+func (c *checker) hasRow(t ValueType, failure bool, label string) bool {
+	if t.failureID == emptyRowID && t.serviceID == emptyRowID {
+		t = c.canonicalValue(t)
+	}
+	id := t.serviceID
+	if failure {
+		id = t.failureID
+	}
+	return slices.Contains(c.rowLabels(id), label)
+}
+
+func (c *checker) rowDifference(actual, allowed []string) []string {
+	actualID := c.internRow(actual)
+	allowedID := c.internRow(allowed)
+	return difference(c.rowLabels(actualID), c.rowLabels(allowedID))
+}
+
+// canonicalValue is the only checker-side authority for a value's result
+// type. Success is updated from the canonical node solely for compatibility
+// with the original inspection/emission surface.
+func (c *checker) canonicalValue(t ValueType) ValueType {
+	id := t.typeID
+	if id == invalidTypeID {
+		if t.Type.Kind != "" {
+			id = c.canonicalRef(t.Type)
+		} else {
+			// This fallback is the source compatibility boundary for values made by
+			// older helpers. All values admitted to the checker leave this function
+			// with a canonical node ID.
+			id = c.canonicalRef(typeRef(t.Success))
+		}
+	}
+	t.typeID = id
+	t.Type = c.ref(id)
+	t.Success = c.displayTypeID(id)
+	t.Errors = normalized(t.Errors)
+	t.Services = normalized(t.Services)
+	t.failureID = c.internRow(t.Errors)
+	t.serviceID = c.internRow(t.Services)
+	t.FailureRow = c.rowNodeID(t.failureID)
+	t.ServiceRow = c.rowNodeID(t.serviceID)
+	if t.Callable != nil {
+		for i := range t.Callable.Parameters {
+			paramID := t.Callable.Parameters[i].typeID
+			if paramID == invalidTypeID {
+				paramID = c.canonicalRef(t.Callable.Parameters[i].TypeRef)
+				if paramID == invalidTypeID {
+					paramID = c.canonicalRef(typeRef(t.Callable.Parameters[i].Type))
+				}
+			}
+			t.Callable.Parameters[i].typeID = paramID
+			t.Callable.Parameters[i].TypeRef = c.ref(paramID)
+		}
+		resultID := c.canonicalRef(t.Callable.Result)
+		if resultID == invalidTypeID {
+			resultID = id
+		}
+		t.Callable.Result = c.ref(resultID)
+		t.Callable.Failures = normalized(t.Callable.Failures)
+		t.Callable.Requirements = normalized(t.Callable.Requirements)
+		t.Callable.FailureRow = c.rowNodeID(c.internRow(t.Callable.Failures))
+		t.Callable.ServiceRow = c.rowNodeID(c.internRow(t.Callable.Requirements))
+		args := make([]TypeID, 0, len(t.Callable.Parameters))
+		for _, param := range t.Callable.Parameters {
+			args = append(args, param.typeID)
+		}
+		kind := t.Callable.Kind
+		if kind == "" {
+			kind = "pure"
+		}
+		key := "callable\x00" + kind + fmt.Sprintf("\x00%d", resultID)
+		for _, arg := range args {
+			key += fmt.Sprintf("\x00%d", arg)
+		}
+		key += fmt.Sprintf("\x00%t\x00%d\x00%d", t.Effect, c.internRow(t.Callable.Failures), c.internRow(t.Callable.Requirements))
+		if node, ok := c.typeIntern[key]; ok {
+			t.valueID = node.ID
+		} else {
+			valueID := c.nextTypeID
+			c.nextTypeID++
+			publicKey := "callable\x00" + kind + "\x00" + c.typeNodeID(resultID)
+			for _, arg := range args {
+				publicKey += "\x00" + c.typeNodeID(arg)
+			}
+			publicKey += "\x00!" + rowIdentityKey(t.Callable.Failures) + "\x00?" + rowIdentityKey(t.Callable.Requirements)
+			signatureSum := sha256.Sum256([]byte(publicKey))
+			node := &semanticTypeNode{ID: valueID, Kind: "callable", Name: "signature:" + hex.EncodeToString(signatureSum[:8]), Args: args, Result: resultID, FailureRow: c.internRow(t.Callable.Failures), ServiceRow: c.internRow(t.Callable.Requirements)}
+			c.typeIntern[key] = node
+			c.typeNodes = append(c.typeNodes, node)
+			t.valueID = valueID
+		}
+		t.Callable.Signature = c.typeNodeID(t.valueID)
+		if t.Identity == "" || t.Identity == c.typeNodeID(t.typeID) || strings.HasPrefix(t.Identity, "type:") || strings.HasPrefix(t.Identity, "legacy:") {
+			t.Identity = c.typeNodeID(t.valueID)
+		}
+	} else if t.Application == nil {
+		t.valueID = id
+		if t.Identity == "" || strings.HasPrefix(t.Identity, "type:") || strings.HasPrefix(t.Identity, "legacy:") {
+			t.Identity = c.typeNodeID(id)
+		}
+	}
+	return t
+}
+
+// publicValue is the projection stored in Result.Symbols. The checked syntax
+// tree retains internal IDs for the checker and query engine, while the public
+// symbol snapshot carries the already-resolved TypeRef/row projections. This
+// keeps JSON round trips and CLI/MCP semantic parity independent of private
+// interner bookkeeping.
+func publicValue(t ValueType) ValueType {
+	t.typeID = invalidTypeID
+	t.valueID = invalidTypeID
+	t.failureID = emptyRowID
+	t.serviceID = emptyRowID
+	t.Evaluation = EvaluationRows{}
+	if t.Callable != nil {
+		callable := *t.Callable
+		callable.Parameters = append([]Param{}, callable.Parameters...)
+		for i := range callable.Parameters {
+			callable.Parameters[i].typeID = invalidTypeID
+		}
+		t.Callable = &callable
+	}
+	return t
+}
+
+func publicParams(params []Param) []Param {
+	params = append([]Param{}, params...)
+	for i := range params {
+		params[i].typeID = invalidTypeID
+	}
+	return params
+}
+
 func (c *checker) validateFields(fields []Field, owner string, reserveTag bool) {
 	names := map[string]bool{}
 	for _, field := range fields {
@@ -2341,35 +2942,66 @@ func (c *checker) function(f *Function, record bool) {
 func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, allowedServices []string) {
 	env := map[string]ValueType{}
 	for _, p := range locals {
-		parameter := value(p.Type)
+		parameter := c.canonicalValue(value(p.Type))
 		parameter.Ownership = c.borrowedOwnership(p.Type, "parameter:"+p.Name)
 		env[p.Name] = parameter
 	}
 	for _, p := range f.Params {
-		parameter := value(p.Type)
+		parameter := c.canonicalValue(value(p.Type))
 		parameter.Ownership = c.borrowedOwnership(p.Type, "parameter:"+p.Name)
 		env[p.Name] = parameter
 	}
 	c.reasons = []Contribution{}
+	previousFacts := c.recordFacts
+	c.recordFacts = record || previousFacts
 	actual := c.withRegion("invocation", func() ValueType { return c.block(f.Body, env, f.Effect) })
-	if actual.Success != "never" && (actual.Success != f.Return || actual.Effect) {
+	c.recordFacts = previousFacts
+	actual = c.canonicalValue(actual)
+	if !c.isKind(actual, "never") && (!c.sameType(actual, f.Return) || actual.Effect) {
 		c.diagnostic("EF106", fmt.Sprintf("body returns %s; expected %s", display(actual), f.Return), f.Span)
 	}
-	if missing := difference(actual.Errors, f.Errors); len(missing) > 0 {
+	if missing := c.rowDifference(actual.Errors, f.Errors); len(missing) > 0 {
 		c.diagnostic("EF107", "undeclared failures: "+strings.Join(missing, ", "), f.Span)
 	}
-	if missing := difference(actual.Services, allowedServices); len(missing) > 0 {
+	if missing := c.rowDifference(actual.Services, allowedServices); len(missing) > 0 {
 		c.diagnostic("EF108", "missing service requirements: "+strings.Join(missing, ", "), f.Span)
 	}
 	actual.Effect = f.Effect
-	actual.Type = c.typeRef(actual.Success)
+	actual = c.canonicalValue(actual)
+	if f.Identity == "" {
+		f.Identity = "function:" + f.Name
+	}
 	f.Ownership = summarizeInvocationFacts(actual.Ownership)
 	f.Captures = summarizeInvocationFacts(actual.Captures)
 	if record {
 		declared := contract(f)
-		declared.Type = c.typeRef(f.Return)
-		c.result.Symbols = append(c.result.Symbols, Symbol{f.Name, f.Params, declared, actual, f.Span, append([]Contribution{}, c.reasons...)})
+		declared = c.canonicalValue(declared)
+		declared.Identity = f.Identity
+		declared.Callable = callableIdentity(c, f)
+		declared = c.canonicalValue(declared)
+		c.result.Symbols = append(c.result.Symbols, Symbol{
+			Name:          f.Name,
+			Identity:      f.Identity,
+			Params:        publicParams(f.Params),
+			Contract:      publicValue(declared),
+			Actual:        publicValue(actual),
+			Span:          f.Span,
+			Contributions: append([]Contribution{}, c.reasons...),
+		})
 	}
+}
+
+func callableIdentity(c *checker, f *Function) *CallableType {
+	parameters := append([]Param{}, f.Params...)
+	for i := range parameters {
+		parameters[i].TypeRef = c.typeRef(parameters[i].Type)
+		parameters[i].typeID = c.canonicalRef(parameters[i].TypeRef)
+	}
+	kind := "pure"
+	if f.Effect {
+		kind = "effect"
+	}
+	return &CallableType{ID: "function:" + f.Name, Kind: kind, Parameters: parameters, Result: c.typeRef(f.Return), Failures: normalized(f.Errors), Requirements: normalized(f.Services)}
 }
 func display(t ValueType) string {
 	if t.Effect {
@@ -2383,9 +3015,6 @@ func clone(env map[string]ValueType) map[string]ValueType {
 		copy[n] = t
 	}
 	return copy
-}
-func sameType(actual, expected string) bool {
-	return actual == expected || actual == "never"
 }
 func fieldsFor(c *checker, typeName, variantName string) ([]Field, bool) {
 	if variantName == "" {
@@ -2433,7 +3062,7 @@ func (c *checker) payload(e *Expr, fields []Field, env map[string]ValueType, spa
 		}
 		seen[field.Name] = true
 		got := c.expr(field.Value, env, false)
-		if got.Effect || !sameType(got.Success, want.Type) {
+		if got.Effect || !c.sameType(got, want.Type) {
 			c.diagnostic("EF115", "payload field "+field.Name+" must be "+want.Type, field.Span)
 		}
 		ownership = append(ownership, prependFacts(field.Name, got.Ownership)...)
@@ -2445,6 +3074,25 @@ func (c *checker) payload(e *Expr, fields []Field, env map[string]ValueType, spa
 	}
 	return normalizeFacts(ownership)
 }
+
+func unionEvaluation(a, b EvaluationRows) EvaluationRows {
+	return EvaluationRows{Failures: union(a.Failures, b.Failures), Requirements: union(a.Requirements, b.Requirements)}
+}
+
+func (c *checker) childEvaluation(e *Expr) EvaluationRows {
+	result := EvaluationRows{}
+	forEachExprChild(e, func(child *Expr) {
+		if child != nil {
+			result = unionEvaluation(result, child.Evaluation)
+		}
+	})
+	return result
+}
+
+func addDeferredEvaluation(e EvaluationRows, t ValueType) EvaluationRows {
+	return unionEvaluation(e, EvaluationRows{Failures: t.Errors, Requirements: t.Services})
+}
+
 func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueType {
 	out := value("()")
 	env = clone(env)
@@ -2474,7 +3122,7 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 						c.diagnostic("EF105", "failure payload must be pure", s.Payload.Span)
 					}
 					if decl := c.errors[s.Name]; decl != nil {
-						if len(decl.Fields) != 1 || !sameType(payload.Success, decl.Fields[0].Type) {
+						if len(decl.Fields) != 1 || !c.sameType(payload, decl.Fields[0].Type) {
 							c.diagnostic("EF115", "failure payload for "+s.Name+" must match its declared fields", s.Payload.Span)
 						} else {
 							s.Payload = &Expr{Kind: "payload", Fields: []FieldValue{{Name: decl.Fields[0].Name, Value: s.Payload, Span: s.Payload.Span}}, Span: s.Payload.Span}
@@ -2487,7 +3135,9 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 				c.rejectOwnedEscape(c.payload(&Expr{Kind: "payload", Span: s.Span}, decl.Fields, env, s.Span), s.Span)
 			}
 			out.Errors = union(out.Errors, []string{s.Name})
-			out.Success = "never"
+			out.typeID = c.canonicalRef(typeRef("never"))
+			out.Type = c.ref(out.typeID)
+			out.Success = c.displayTypeID(out.typeID)
 			out.Effect = false
 			terminated = true
 			c.reasons = append(c.reasons, Contribution{"failure", []string{s.Name}, s.Span})
@@ -2499,12 +3149,15 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 		}
 		out.Errors = union(out.Errors, tExecutedErrors(s.Value))
 		out.Services = union(out.Services, tExecutedServices(s.Value))
+		out.Evaluation = unionEvaluation(out.Evaluation, t.Evaluation)
 		if s.Kind == "let" {
 			if _, exists := env[s.Name]; exists {
 				c.diagnostic("EF101", "duplicate local "+s.Name, s.Span)
 			}
 			env[s.Name] = t
-			out.Success = "()"
+			out.typeID = c.canonicalRef(typeRef("()"))
+			out.Type = c.ref(out.typeID)
+			out.Success = c.displayTypeID(out.typeID)
 			out.Effect = false
 			out.Ownership = nil
 			out.Captures = nil
@@ -2512,36 +3165,32 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 			if t.Effect {
 				c.diagnostic("EF105", "unused lazy effect; execute with run or bind it with let", s.Span)
 			}
+			out.typeID = t.typeID
+			out.Type = t.Type
 			out.Success = t.Success
 			out.Effect = t.Effect
 			out.Ownership = cloneFacts(t.Ownership)
 			out.Captures = cloneFacts(t.Captures)
 		}
 	}
-	return out
+	return c.canonicalValue(out)
 }
 
-// Effect values carry deferred rows. Only run (and executed branch bodies) contribute to the enclosing computation.
-func tExecutedErrors(e *Expr) []string   { return executed(e, true) }
-func tExecutedServices(e *Expr) []string { return executed(e, false) }
-func executed(e *Expr, errors bool) []string {
+// Effect values carry deferred rows. Only run (and executed branch bodies)
+// contribute to the enclosing computation. The rows are computed once by
+// expr and retained on the checked node; this accessor is deliberately a
+// projection rather than a second subtree walk.
+func tExecutedErrors(e *Expr) []string {
 	if e == nil {
-		return []string{}
+		return nil
 	}
-	row := func(t ValueType) []string {
-		if errors {
-			return t.Errors
-		}
-		return t.Services
+	return append([]string{}, e.Executed.Failures...)
+}
+func tExecutedServices(e *Expr) []string {
+	if e == nil {
+		return nil
 	}
-	if e.Kind == "run" || e.Kind == "if" || e.Kind == "match" || e.Kind == "scope" || e.Kind == "fork" {
-		return row(e.Type)
-	}
-	out := union(executed(e.Left, errors), executed(e.Right, errors))
-	for _, a := range e.Args {
-		out = union(out, executed(a, errors))
-	}
-	return out
+	return append([]string{}, e.Executed.Requirements...)
 }
 func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueType {
 	t := value("invalid")
@@ -2571,7 +3220,9 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			e.Text = "provider"
 		} else if f := c.functions[e.Name]; f != nil && f.Effect && f.Return == "string" && len(f.Params) == 1 && f.Params[0].Type == "string" {
 			t = contract(f)
-			t.Success = "Handler"
+			callable := t.Callable
+			t = c.valueForTypeID(c.canonicalRef(typeRef("Handler")))
+			t.Callable = callable
 			t.Effect = false
 			e.Text = "handler"
 		} else {
@@ -2604,7 +3255,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 				for i, arg := range e.Args {
 					got := c.expr(arg, env, false)
 					argumentTypes[i] = got
-					if i < len(provider.Params) && (got.Effect || got.Success != provider.Params[i].Type) {
+					if i < len(provider.Params) && (got.Effect || !c.sameType(got, provider.Params[i].Type)) {
 						c.diagnostic("EF106", "provider configuration argument must be "+provider.Params[i].Type, arg.Span)
 					}
 				}
@@ -2678,10 +3329,10 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			if hasPotentialOwner(arg.Ownership) || hasOwnedClosed(arg.Ownership) {
 				c.diagnostic("EF123", "value owned by a closing scope cannot be used", a.Span)
 			}
-			if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && e.Left.Left.Name == "Http" && i == 1 && arg.Success == "Handler" {
+			if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && e.Left.Left.Name == "Http" && i == 1 && c.isKind(arg, "opaque") && arg.Type.Name == "Handler" {
 				t.Services = union(t.Services, arg.Services)
 			}
-			if i < len(f.Params) && (arg.Effect || arg.Success != f.Params[i].Type) {
+			if i < len(f.Params) && (arg.Effect || !c.sameType(arg, f.Params[i].Type)) {
 				c.diagnostic("EF106", "argument must be "+f.Params[i].Type, a.Span)
 			}
 		}
@@ -2699,16 +3350,27 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			}
 			t.Captures = normalizeFacts(t.Captures)
 		}
+		argumentRefs := make([]TypeRef, 0, len(argumentTypes))
+		for _, argument := range argumentTypes {
+			argumentRefs = append(argumentRefs, argument.Type)
+		}
+		callee := e.Left.Name
+		if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
+			callee = e.Left.Left.Name + "." + e.Left.Name
+		}
+		application := newApplicationIdentity(callee, argumentRefs, c.ref(c.canonicalRef(t.Type)), e.Span)
+		t.Application = &application
+		e.Identity = application.ID
 	case "member":
 		inner := c.expr(e.Left, env, inEffect)
 		if inner.Effect {
 			c.diagnostic("EF106", "field access requires an executed value", e.Span)
 			break
 		}
-		if fields, ok := fieldsFor(c, inner.Success, ""); ok {
+		if fields, ok := fieldsFor(c, c.namedType(inner), ""); ok {
 			for _, field := range fields {
 				if field.Name == e.Name {
-					t = value(field.Type)
+					t = c.valueForTypeID(field.typeID)
 					t.Ownership = projectFacts(inner.Ownership, e.Name)
 					t.Captures = projectFacts(inner.Captures, e.Name)
 					if len(t.Ownership) == 0 {
@@ -2718,19 +3380,22 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 					break
 				}
 			}
-			if t.Success != "invalid" {
+			if !c.isKind(t, "invalid") {
 				break
 			}
 			c.diagnostic("EF114", "unknown field "+e.Name+" on "+inner.Success, e.Span)
 			break
 		}
-		if !strings.HasPrefix(inner.Success, "GoResult:") {
+		if !c.isKind(inner, "goResult") {
 			c.diagnostic("EF106", "field access requires an executed GoResult", e.Span)
 			break
 		}
 		switch e.Name {
 		case "value":
-			t = value(strings.TrimPrefix(inner.Success, "GoResult:"))
+			node := c.node(inner.typeID)
+			if node != nil && len(node.Args) == 1 {
+				t = c.valueForTypeID(node.Args[0])
+			}
 		case "hasError":
 			t = value("bool")
 		default:
@@ -2738,11 +3403,19 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		}
 	case "orFail":
 		t = c.expr(e.Left, env, inEffect)
-		if !t.Effect || !strings.HasPrefix(t.Success, "GoResult:") {
+		if !t.Effect || !c.isKind(t, "goResult") {
 			c.diagnostic("EF106", "orFail requires an Effect returning GoResult", e.Span)
 			break
 		}
-		t.Success = strings.TrimPrefix(t.Success, "GoResult:")
+		if node := c.node(t.typeID); node != nil && len(node.Args) == 1 {
+			result := c.valueForTypeID(node.Args[0])
+			result.Effect = t.Effect
+			result.Errors = append([]string{}, t.Errors...)
+			result.Services = append([]string{}, t.Services...)
+			result.Ownership = cloneFacts(t.Ownership)
+			result.Captures = cloneFacts(t.Captures)
+			t = result
+		}
 		t.Errors = union(t.Errors, []string{"GoError"})
 	case "scope":
 		if !inEffect {
@@ -2759,16 +3432,16 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			c.diagnostic("EF105", "fork requires an Effect inside an effect function", e.Span)
 		}
 		childRegion := fmt.Sprintf("child:%d", e.Span.Offset)
-		t = value("Fiber:" + inner.Success)
-		t.Success = "Fiber:" + inner.Success
+		t = c.valueForTypeID(c.internType("fiber", "", []TypeID{inner.typeID}))
 		t.Effect = false
-		t.Errors = union(inner.Errors, executed(e.Left, true))
-		t.Services = union(inner.Services, executed(e.Left, false))
+		t.Errors = union(inner.Errors, tExecutedErrors(e.Left))
+		t.Services = union(inner.Services, tExecutedServices(e.Left))
 		t.Ownership = []OwnershipFact{{Status: "owned", Region: c.region, Origin: "fork", ownerKind: ownershipOwnerLexical}}
 		t.Captures = cloneFacts(inner.Captures)
 		// The child executes its recipe under its own owner. This is distinct
 		// from the owner of the Fiber handle returned to the parent.
 		t.Child = materializeExecutionFacts(inner.Ownership, childRegion, ownershipOwnerChild)
+		t.Evaluation = addDeferredEvaluation(inner.Evaluation, inner)
 		for i := range t.Child {
 			if t.Child[i].Region == childRegion && t.Child[i].Status == "owned" {
 				t.Child[i].Origin = "child-acquisition"
@@ -2784,7 +3457,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		// would reject a valid caller-owned value.
 		inner := c.expr(e.Left, env, inEffect)
 		t = inner
-		if !t.Effect || duration.Effect || duration.Success != "i64" {
+		if !t.Effect || duration.Effect || !c.sameType(duration, "i64") {
 			c.diagnostic("EF106", "timeout requires an Effect and an i64 millisecond duration", e.Span)
 		}
 		t.Ownership = materializeExecutionFacts(t.Ownership, timeoutRegion, ownershipOwnerTimeout)
@@ -2806,11 +3479,12 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		// scope, or in an outer scope before a nested run.
 		t.Ownership = materializeExecutionFacts(inner.Ownership, c.region, ownershipOwnerLexical)
 		t.Captures = materializeExecutionFacts(inner.Captures, c.region, ownershipOwnerLexical)
-		if !strings.HasPrefix(t.Success, "provider:") {
+		if !c.isKind(t, "provider") {
 			t.Captures = nil
 		}
-		t.Errors = union(t.Errors, executed(e.Left, true))
-		t.Services = union(t.Services, executed(e.Left, false))
+		t.Errors = union(t.Errors, tExecutedErrors(e.Left))
+		t.Services = union(t.Services, tExecutedServices(e.Left))
+		t.Evaluation = addDeferredEvaluation(inner.Evaluation, inner)
 		if len(t.Errors) > 0 {
 			c.reasons = append(c.reasons, Contribution{"failure", t.Errors, e.Span})
 		}
@@ -2826,7 +3500,8 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		if c.services[e.Name] == nil {
 			c.diagnostic("EF102", "unknown service "+e.Name, e.Span)
 		}
-		if provider.Success != "provider:"+e.Name || provider.Effect {
+		providerNode := c.node(provider.typeID)
+		if providerNode == nil || providerNode.Kind != "provider" || providerNode.Name != e.Name || provider.Effect {
 			c.diagnostic("EF104", "provider must implement "+e.Name, e.Right.Span)
 		}
 		t.Captures = normalizeFacts(append(t.Captures, provider.Captures...))
@@ -2844,10 +3519,10 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		}
 		if _, exists := c.program.Errors[e.Name]; !exists {
 			c.diagnostic("EF102", "unknown failure "+e.Name, e.Span)
-		} else if !slices.Contains(t.Errors, e.Name) {
+		} else if !c.hasRow(t, true, e.Name) {
 			c.diagnostic("EF107", "effect does not admit failure "+e.Name, e.Span)
 		}
-		if fallback.Effect || fallback.Success != t.Success {
+		if fallback.Effect || !c.sameValues(fallback, t) {
 			c.diagnostic("EF106", "prototype catch fallback must be a pure "+t.Success, e.Right.Span)
 		}
 		// Recovery can publish the fallback value on the handled-failure
@@ -2863,26 +3538,26 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		t = c.match(e, env, inEffect)
 	case "binary":
 		left, right := c.expr(e.Left, env, inEffect), c.expr(e.Right, env, inEffect)
-		if left.Effect || right.Effect || left.Success != right.Success || (left.Success != "string" && left.Success != "bool" && left.Success != "i64") || (e.Name == "+" && left.Success != "string") {
+		if left.Effect || right.Effect || !c.sameValues(left, right) || (!c.isKind(left, "primitive") || (left.Type.Name != "string" && left.Type.Name != "bool" && left.Type.Name != "i64")) || (e.Name == "+" && left.Type.Name != "string") {
 			c.diagnostic("EF106", "operator requires matching primitive values; + accepts strings", e.Span)
 		}
-		t = value(left.Success)
+		t = c.valueForTypeID(left.typeID)
 		if e.Name == "==" {
-			t.Success = "bool"
+			t = c.valueForTypeID(c.canonicalRef(typeRef("bool")))
 		}
 	case "if":
 		condition := c.expr(e.Left, env, inEffect)
-		if condition.Effect || condition.Success != "bool" {
+		if condition.Effect || !c.isKind(condition, "primitive") || condition.Type.Name != "bool" {
 			c.diagnostic("EF106", "if condition must be bool", e.Left.Span)
 		}
 		a, b := c.block(e.Then, env, inEffect), c.block(e.Else, env, inEffect)
-		if a.Success == "never" {
+		if c.isKind(a, "never") {
 			t = b
-		} else if b.Success == "never" {
+		} else if c.isKind(b, "never") {
 			t = a
 		} else {
 			t = a
-			if a.Success != b.Success || a.Effect != b.Effect {
+			if !c.sameValues(a, b) || a.Effect != b.Effect {
 				c.diagnostic("EF106", "if branches must return the same type", e.Span)
 			}
 			t.Ownership = mergeFacts(a.Ownership, b.Ownership)
@@ -2891,14 +3566,35 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		if a.Effect || b.Effect {
 			c.diagnostic("EF103", "returning Effect values from branches is not supported in this prototype", e.Span)
 		}
-		t.Errors = union(union(a.Errors, b.Errors), executed(e.Left, true))
-		t.Services = union(union(a.Services, b.Services), executed(e.Left, false))
+		t.Errors = union(union(a.Errors, b.Errors), tExecutedErrors(e.Left))
+		t.Services = union(union(a.Services, b.Services), tExecutedServices(e.Left))
+		t.Evaluation = unionEvaluation(condition.Evaluation, unionEvaluation(a.Evaluation, b.Evaluation))
 		t.Effect = false
 	default:
 		c.diagnostic("EF103", "unsupported expression "+e.Kind, e.Span)
 	}
-	t.Type = c.typeRef(t.Success)
+	// Every checked expression owns one evaluation summary. Child summaries are
+	// shared through this node instead of being recomputed by each consumer.
+	t.Evaluation = unionEvaluation(t.Evaluation, c.childEvaluation(e))
+	t = c.canonicalValue(t)
+	if t.Callable == nil && t.Application == nil {
+		t.Identity = t.Type.ID
+	}
 	e.Type = t
+	e.Evaluation = t.Evaluation
+	if e.Kind == "run" || e.Kind == "if" || e.Kind == "match" || e.Kind == "scope" || e.Kind == "fork" {
+		e.Executed = EvaluationRows{Failures: append([]string{}, t.Errors...), Requirements: append([]string{}, t.Services...)}
+	} else if e.Kind == "construct" || e.Kind == "payload" {
+		// Constructor payloads are required to be pure. Keep their invalid
+		// child evaluation facts available for tooling without admitting those
+		// rows into the enclosing body contract after the purity diagnostic.
+		e.Executed = EvaluationRows{}
+	} else {
+		e.Executed = e.Evaluation
+	}
+	if c.recordFacts {
+		c.result.facts[e] = ExpressionFacts{Type: t, Evaluation: e.Evaluation, Executed: e.Executed}
+	}
 	return t
 }
 
@@ -2957,7 +3653,7 @@ func (c *checker) dataCall(e *Expr, env map[string]ValueType, inEffect bool) (Va
 		payloadExpr := &Expr{Kind: "payload", Fields: e.Fields, Span: e.Span}
 		ownership := c.payload(payloadExpr, fields, env, e.Span)
 		e.Text = "data"
-		result := value(typeName)
+		result := c.valueForTypeID(c.canonicalRef(typeRef(typeName)))
 		if variantName != "" {
 			result.Ownership = prependFacts(variantName, ownership)
 		} else {
@@ -2972,7 +3668,7 @@ func (c *checker) dataCall(e *Expr, env map[string]ValueType, inEffect bool) (Va
 	for i, arg := range e.Args {
 		got := c.expr(arg, env, false)
 		argumentTypes[i] = got
-		if i < len(fields) && (got.Effect || !sameType(got.Success, fields[i].Type)) {
+		if i < len(fields) && (got.Effect || !c.sameType(got, fields[i].Type)) {
 			c.diagnostic("EF115", "payload field "+fields[i].Name+" must be "+fields[i].Type, arg.Span)
 		}
 	}
@@ -2983,7 +3679,7 @@ func (c *checker) dataCall(e *Expr, env map[string]ValueType, inEffect bool) (Va
 			e.Fields = append(e.Fields, FieldValue{Name: fields[i].Name, Value: arg, Span: arg.Span})
 		}
 	}
-	result := value(typeName)
+	result := c.valueForTypeID(c.canonicalRef(typeRef(typeName)))
 	ownership := []OwnershipFact{}
 	for i, got := range argumentTypes {
 		if i < len(fields) {
@@ -3045,7 +3741,7 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 	if scrutinee.Effect {
 		c.diagnostic("EF106", "match scrutinee must be a value; execute an Effect with run", e.Left.Span)
 	}
-	enum := c.enums[scrutinee.Success]
+	enum := c.enums[c.namedType(scrutinee)]
 	if enum == nil {
 		c.diagnostic("EF116", "match requires a closed enum value", e.Left.Span)
 		return value("invalid")
@@ -3058,6 +3754,7 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 	result := value("never")
 	branchErrors := []string{}
 	branchServices := []string{}
+	branchEvaluation := EvaluationRows{}
 	haveResult := false
 	for _, arm := range e.Arms {
 		pattern := arm.Pattern
@@ -3103,7 +3800,7 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 			if binding == "_" {
 				continue
 			}
-			bound := value(field.Type)
+			bound := c.valueForTypeID(field.typeID)
 			bound.Ownership = projectVariantFacts(scrutinee.Ownership, pattern.VariantName, fieldName)
 			if len(bound.Ownership) == 0 {
 				bound.Ownership = c.unknownOwnership(field.Type)
@@ -3111,10 +3808,10 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 			branchEnv[binding] = bound
 		}
 		branch := c.block(arm.Body, branchEnv, inEffect)
-		if branch.Success != "never" {
+		if !c.isKind(branch, "never") {
 			if !haveResult {
 				result, haveResult = branch, true
-			} else if !sameType(result.Success, branch.Success) || result.Effect != branch.Effect {
+			} else if !c.sameValues(result, branch) || result.Effect != branch.Effect {
 				c.diagnostic("EF106", "match branches must return the same type", arm.Span)
 			} else {
 				result.Ownership = mergeFacts(result.Ownership, branch.Ownership)
@@ -3123,6 +3820,7 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 		}
 		branchErrors = union(branchErrors, branch.Errors)
 		branchServices = union(branchServices, branch.Services)
+		branchEvaluation = unionEvaluation(branchEvaluation, branch.Evaluation)
 	}
 	for _, variant := range enum.Variants {
 		if !seen[variant.Name] {
@@ -3134,6 +3832,7 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 	}
 	result.Errors = union(branchErrors, tExecutedErrors(e.Left))
 	result.Services = union(branchServices, tExecutedServices(e.Left))
+	result.Evaluation = unionEvaluation(scrutinee.Evaluation, branchEvaluation)
 	result.Effect = false
 	return result
 }
@@ -3175,25 +3874,36 @@ func (c *checker) fiberCall(e *Expr, env map[string]ValueType, inEffect bool) bo
 		return false
 	}
 	inner, exists := env[e.Left.Left.Name]
-	if !exists || !strings.HasPrefix(inner.Success, "Fiber:") {
+	if !exists || !c.isKind(inner, "fiber") {
 		return false
 	}
 	if len(e.Args) != 0 {
 		c.diagnostic("EF106", "fiber operations take no arguments", e.Span)
 	}
-	t := value(strings.TrimPrefix(inner.Success, "Fiber:"))
+	node := c.node(inner.typeID)
+	if node == nil || len(node.Args) != 1 {
+		return false
+	}
+	t := c.valueForTypeID(node.Args[0])
 	t.Effect = true
 	t.Errors = inner.Errors
+	t.Services = inner.Services
 	switch e.Left.Name {
 	case "join":
 		t.Ownership = cloneFacts(inner.Child)
 		t.Captures = nil
 	case "interrupt":
-		t.Success = "()"
+		t = c.valueForTypeID(c.canonicalRef(typeRef("()")))
+		t.Effect = true
+		t.Errors = append([]string{}, inner.Errors...)
+		t.Services = append([]string{}, inner.Services...)
 		t.Ownership = nil
 		t.Captures = nil
 	case "cancel":
-		t.Success = "()"
+		t = c.valueForTypeID(c.canonicalRef(typeRef("()")))
+		t.Effect = true
+		t.Errors = append([]string{}, inner.Errors...)
+		t.Services = append([]string{}, inner.Services...)
 		t.Errors = []string{}
 		t.Ownership = nil
 		t.Captures = nil

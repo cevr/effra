@@ -43,6 +43,7 @@ type Param struct {
 	Type    string  `json:"type"`
 	TypeRef TypeRef `json:"typeRef"`
 	Span    Span    `json:"span"`
+	typeID  TypeID
 }
 
 // Field is a nominal declaration field. Type is kept as source text for
@@ -53,6 +54,7 @@ type Field struct {
 	Type    string  `json:"type"`
 	TypeRef TypeRef `json:"typeRef"`
 	Span    Span    `json:"span"`
+	typeID  TypeID
 }
 type Variant struct {
 	Name          string  `json:"name"`
@@ -97,6 +99,9 @@ type Function struct {
 	DeclSpan  Span `json:"-"`
 	Ownership []OwnershipFact
 	Captures  []OwnershipFact
+	// Identity is assigned by the checker from the canonical callable
+	// contract. The source name remains a projection used by the emitters.
+	Identity string `json:"-"`
 }
 type Service struct {
 	Name    string
@@ -186,6 +191,15 @@ type Expr struct {
 	Arms   []*MatchArm
 	Span   Span
 	Type   ValueType
+	// Evaluation is the work incurred while evaluating this expression now.
+	// Deferred effect rows remain on Type. Keeping the two facts beside the
+	// checked node lets callers reuse the result without walking the subtree.
+	Evaluation EvaluationRows `json:"-"`
+	// Executed is the row contribution of this expression when it is consumed
+	// by its enclosing computation. It is a cached projection of Type for
+	// run/branch/scope nodes and of Evaluation for ordinary values.
+	Executed EvaluationRows `json:"-"`
+	Identity string         `json:"-"`
 }
 
 func lex(source string) ([]token, []Comment, []Diagnostic) {
