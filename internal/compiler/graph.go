@@ -26,6 +26,7 @@ type DependencyGraph struct {
 	Target                 string           `json:"target"`
 	Nodes                  []GraphNode      `json:"nodes"`
 	Edges                  []GraphEdge      `json:"edges"`
+	Layers                 []LayerPlan      `json:"layers,omitempty"`
 	Types                  []TypeNode       `json:"types,omitempty"`
 	Rows                   []RowNode        `json:"rows,omitempty"`
 	Declarations           []Declaration    `json:"declarations,omitempty"`
@@ -53,6 +54,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		return nil, fmt.Errorf("dependency graph exceeds %d nodes; use selected inspection", maxGraphNodes)
 	}
 	g := &DependencyGraph{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Nodes: []GraphNode{}, Edges: []GraphEdge{}, Limitations: []string{"single-file static graph; includes deferred recipe construction, not execution order", "provider recipes and explicit value identities are represented without general memoized acquisition; fallible acquisition, lifecycle-safe arbitrary capture and cycle solving are not implemented", "node IDs containing offsets are scoped to the semantic revision"}}
+	g.Layers = append([]LayerPlan{}, r.Layers...)
 	nodes := map[string]bool{}
 	var graphErr error
 	metadataBytes := 0

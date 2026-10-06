@@ -873,6 +873,7 @@ func (r *Result) CheckResponse() map[string]any {
 	}
 	if projection.Complete {
 		response["symbols"] = r.Symbols
+		response["layers"] = r.Layers
 		response["declarations"] = r.Declarations
 		response["bindings"] = r.Bindings
 		response["types"] = projection.Types
@@ -880,7 +881,7 @@ func (r *Result) CheckResponse() map[string]any {
 		usage, err := r.ValidateProjectionResponse(projection, response)
 		if err != nil {
 			projection = refusedProjection(projection.Limits, usage, err.Error())
-			for _, key := range []string{"symbols", "declarations", "bindings", "types", "rows"} {
+			for _, key := range []string{"symbols", "layers", "declarations", "bindings", "types", "rows"} {
 				delete(response, key)
 			}
 			response["typeProjectionComplete"] = false

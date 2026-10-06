@@ -341,6 +341,13 @@ func command(args []string) error {
 		}
 		symbol := r.Find(opts.positional[1])
 		if symbol == nil {
+			if r.FindLayer(opts.positional[1]) != nil {
+				response, err := r.LayerInspection(opts.positional[1])
+				if err != nil {
+					return err
+				}
+				return printProjectionJSON(response)
+			}
 			if declaration := r.FindDeclaration(opts.positional[1]); declaration != nil {
 				projection := r.ProjectDeclaration(declaration)
 				if !projection.Complete {
