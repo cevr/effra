@@ -198,7 +198,7 @@ run Console.log("x")
 		t.Fatalf("compiler diagnostic was suppressed: %+v", r.Diagnostics)
 	}
 	lint := r.Lint(false)
-	if lint.Checked || lint.LintPassed || len(lint.Diagnostics) == 0 || len(lint.LintDiagnostics) != 0 {
+	if lint.Checked || lint.LintPassed || len(lint.Diagnostics) == 0 || lint.Errors != 1 || len(lint.LintDiagnostics) != 1 {
 		t.Fatalf("unchecked source received suppressible lint semantics: %+v", lint)
 	}
 }

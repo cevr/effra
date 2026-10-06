@@ -126,7 +126,7 @@ func suppressionFor(suppressions map[suppressionKey][]*lintSuppression, revision
 }
 func (r *Result) Lint(strict bool) LintResult {
 	out := LintResult{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Checked: r.Checked, LintPassed: r.Checked, Strict: strict, Diagnostics: r.Diagnostics, LintDiagnostics: []LintDiagnostic{}}
-	if !r.Checked {
+	if r.Program == nil {
 		return out
 	}
 	rules := LintRules()
@@ -143,6 +143,19 @@ func (r *Result) Lint(strict bool) LintResult {
 	for _, suppression := range suppressions {
 		key := suppressionKey{revision: suppression.revision, rule: suppression.rule, line: suppression.targetLine}
 		suppressionIndex[key] = append(suppressionIndex[key], suppression)
+	}
+	appendUnused := func() {
+		for _, suppression := range suppressions {
+			if !suppression.used {
+				out.LintDiagnostics = append(out.LintDiagnostics, suppressionDiagnostic("unused lint suppression for "+suppression.rule, suppression.span))
+				out.Errors++
+			}
+		}
+	}
+	if !r.Checked {
+		appendUnused()
+		slices.SortStableFunc(out.LintDiagnostics, func(a, b LintDiagnostic) int { return a.Span.Offset - b.Span.Offset })
+		return out
 	}
 	add := func(index int, message string, span Span) {
 		rule := rules[index]
@@ -218,12 +231,7 @@ func (r *Result) Lint(strict bool) LintResult {
 			add(2, "unused Go import "+imp.Alias, imp.Span)
 		}
 	}
-	for _, suppression := range suppressions {
-		if !suppression.used {
-			out.LintDiagnostics = append(out.LintDiagnostics, suppressionDiagnostic("unused lint suppression for "+suppression.rule, suppression.span))
-			out.Errors++
-		}
-	}
+	appendUnused()
 	slices.SortStableFunc(out.LintDiagnostics, func(a, b LintDiagnostic) int { return a.Span.Offset - b.Span.Offset })
 	if out.Errors > 0 || strict && out.Warnings > 0 {
 		out.LintPassed = false
