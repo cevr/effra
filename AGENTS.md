@@ -1,6 +1,6 @@
 # Effra
 
-Implementation agents use the highest Luna version exposed by the active model catalog, currently `gpt-6-luna`, with max reasoning. Pass the model and reasoning settings explicitly and use a scoped handoff when replacing an agent. Earlier Effra handoffs naming `gpt-5.6-luna` are superseded by the user's 2026-10-06 instruction. Keep `gpt-6-astra` for orchestration and review, and use the separate Herdr `claude2` instance for independent counsel. Parallel implementation subagents are explicitly authorized; give each an isolated lane and one writer.
+Implementation subagents use `gpt-6.1-sol` with medium reasoning, explicitly selected by the user on 2026-10-06. Pass the model and reasoning settings explicitly and use a scoped handoff when replacing an agent. Earlier Effra handoffs naming Luna models are superseded. Keep `gpt-6-astra` for orchestration and root review, and use the separate Herdr `claude2` instance for independent counsel. Parallel native subagents are explicitly authorized; give each an isolated lane and one writer. Use native subagents for implementation rather than separate Codex panes.
 
 Read README.md, docs/design.md, and docs/wayfinder/README.md before changing the language.
 
