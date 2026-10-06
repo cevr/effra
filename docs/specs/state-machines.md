@@ -2,6 +2,8 @@
 
 Status: authorized implementation extension from owner direction on 2026-10-06; not current language support. Preserve Go-like simplicity, Effect lifetime guarantees and ordinary ADTs. The first profile is a finite flat machine with explicit transitions and owned invocation. The source/test comparison is recorded in [PRIOR_ARTS](../../PRIOR_ARTS.md); independent design counsel can refine this contract before implementation.
 
+Main machine prior art is the active [XState v6 PR5543](https://github.com/statelyai/xstate/pull/5543), `next` revision `2146ae26ebfc7e6a624b3a1f237f9e6ddc30b9f5`, as explicitly requested by the owner. Earlier v5 observations remain historical and must be revalidated. Use v6's ordinary-function direction to reduce ceremony: the construct declares topology/ownership, while ordinary typed functions and statements express behavior. Do not mirror its complete framework surface. The illustrative syntax below is subject to this Go-like readability test before implementation.
+
 ## Shared semantic model
 
 Use ordinary nominal enums for states and external events, with state-specific payloads. A checked machine declaration binds an initial constructor, transition clauses, named guards/work and terminal output. It elaborates to a canonical plan and ordinary checked functions. One library runtime owns admission, state entry, invocation and shutdown. Do not create another type checker, error channel or effect evaluator for machines.
