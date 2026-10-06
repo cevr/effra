@@ -126,6 +126,7 @@ func (c *checker) layerDiagnostic(code, message string, span Span, related ...Re
 func (c *checker) checkLayers() {
 	c.layers = map[string]*LayerPlan{}
 	c.layerBudget = &layerAssemblyBudget{}
+	c.layerProviders = map[*LayerEntry]*Provider{}
 	if len(c.program.Layers) > maxLayerDeclarations {
 		c.layerDiagnostic("EF133", "static layer profile exceeds 256 declarations", c.program.Layers[maxLayerDeclarations].Span)
 		return
@@ -440,6 +441,15 @@ func (c *checker) assembleLayer(layer *Layer) *LayerPlan {
 }
 
 func (c *checker) layerProvider(entry *LayerEntry) *Provider {
+	if provider, checked := c.layerProviders[entry]; checked {
+		return provider
+	}
+	provider := c.checkLayerProvider(entry)
+	c.layerProviders[entry] = provider
+	return provider
+}
+
+func (c *checker) checkLayerProvider(entry *LayerEntry) *Provider {
 	if c.services[entry.Name] == nil {
 		c.layerDiagnostic("EF102", "unknown service "+entry.Name, entry.Span)
 		return nil
@@ -491,6 +501,9 @@ func (c *checker) layerProvider(entry *LayerEntry) *Provider {
 }
 
 func (c *checker) staticLayerArgument(expr *Expr) bool {
+	if !c.layerWork(1, expr.Span) {
+		return false
+	}
 	switch expr.Kind {
 	case "string", "integer", "bool", "unit":
 		return true
