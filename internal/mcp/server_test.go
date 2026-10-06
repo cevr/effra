@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -99,6 +100,203 @@ func TestWorkspaceBounds(t *testing.T) {
 	if _, err := readSource(root, rel); err == nil {
 		t.Fatal("relative traversal accepted")
 	}
+}
+
+func TestInspectionBoundsCoverNestedSymbolDetails(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		mode string
+	}{
+		{"declared rows", "declared"},
+		{"body rows", "body"},
+		{"requirement rows", "requirements"},
+		{"contribution count", "contributions"},
+		{"nested contribution names", "names"},
+	} {
+		t.Run(test.name+" at 100", func(t *testing.T) {
+			assertInspectionBoundary(t, inspectionRowsSource(100, test.mode), false)
+		})
+		t.Run(test.name+" at 101", func(t *testing.T) {
+			assertInspectionBoundary(t, inspectionRowsSource(101, test.mode), true)
+		})
+	}
+
+	for _, test := range []struct {
+		name                    string
+		mode                    string
+		checked                 bool
+		contractFailures        int
+		bodyFailures            int
+		contractRequirements    int
+		bodyRequirements        int
+		contributions           int
+		contributionNameLengths []int
+	}{
+		{"body rows", "body", false, 0, 100, 0, 0, 2, []int{50, 50}},
+		{"requirement rows", "requirements", false, 0, 0, 0, 100, 2, []int{50, 50}},
+		{"nested contribution names", "names", false, 0, 0, 0, 0, 1, []int{100}},
+	} {
+		t.Run(test.name+" preserve independent dimensions", func(t *testing.T) {
+			assertInspectionDimensions(t, inspectionRowsSource(100, test.mode), inspectionDimensions{
+				checked:                 test.checked,
+				contractFailures:        test.contractFailures,
+				bodyFailures:            test.bodyFailures,
+				contractRequirements:    test.contractRequirements,
+				bodyRequirements:        test.bodyRequirements,
+				contributions:           test.contributions,
+				contributionNameLengths: test.contributionNameLengths,
+			})
+		})
+	}
+
+	unchecked := `effect fn main() -> () { run Console.log("x") }`
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(unchecked), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"code.inspect", "code.explain"} {
+		result, err := call(root, name, arguments{File: "main.ef", Symbol: "main"})
+		if err != nil {
+			t.Fatalf("unchecked %s rejected: %v", name, err)
+		}
+		if result.(map[string]any)["checked"] != false {
+			t.Fatalf("unchecked %s was not preserved: %+v", name, result)
+		}
+	}
+}
+
+func assertInspectionBoundary(t *testing.T, source string, wantError bool) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"code.inspect", "code.explain"} {
+		result, err := call(root, name, arguments{File: "main.ef", Symbol: "target"})
+		if wantError {
+			if err == nil || !strings.Contains(err.Error(), "symbol exceeds prototype inspection limits") {
+				t.Fatalf("%s accepted over-limit symbol: result=%+v err=%v", name, result, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s rejected 100-item symbol: %v", name, err)
+		}
+		if result.(map[string]any)["symbol"] == nil {
+			t.Fatalf("%s omitted bounded symbol: %+v", name, result)
+		}
+	}
+}
+
+type inspectionDimensions struct {
+	checked                 bool
+	contractFailures        int
+	bodyFailures            int
+	contractRequirements    int
+	bodyRequirements        int
+	contributions           int
+	contributionNameLengths []int
+}
+
+func assertInspectionDimensions(t *testing.T, source string, expected inspectionDimensions) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"code.inspect", "code.explain"} {
+		result, err := call(root, name, arguments{File: "main.ef", Symbol: "target"})
+		if err != nil {
+			t.Fatalf("%s rejected bounded dimensions: %v", name, err)
+		}
+		payload, ok := result.(map[string]any)
+		if !ok {
+			t.Fatalf("%s returned unexpected result: %#v", name, result)
+		}
+		if checked, ok := payload["checked"].(bool); !ok || checked != expected.checked {
+			t.Fatalf("%s checked=%v, want %v: %#v", name, payload["checked"], expected.checked, payload)
+		}
+		symbol, ok := payload["symbol"].(*compiler.Symbol)
+		if !ok {
+			t.Fatalf("%s returned unexpected symbol: %#v", name, payload["symbol"])
+		}
+		if got := len(symbol.Contract.Errors); got != expected.contractFailures {
+			t.Fatalf("%s contract failures=%d, want %d", name, got, expected.contractFailures)
+		}
+		if got := len(symbol.Actual.Errors); got != expected.bodyFailures {
+			t.Fatalf("%s body failures=%d, want %d", name, got, expected.bodyFailures)
+		}
+		if got := len(symbol.Contract.Services); got != expected.contractRequirements {
+			t.Fatalf("%s contract requirements=%d, want %d", name, got, expected.contractRequirements)
+		}
+		if got := len(symbol.Actual.Services); got != expected.bodyRequirements {
+			t.Fatalf("%s body requirements=%d, want %d", name, got, expected.bodyRequirements)
+		}
+		if len(symbol.Contributions) != expected.contributions {
+			t.Fatalf("%s contributions=%d, want %d", name, len(symbol.Contributions), expected.contributions)
+		}
+		for i, want := range expected.contributionNameLengths {
+			if i >= len(symbol.Contributions) {
+				t.Fatalf("%s contribution %d missing; got %d contributions", name, i, len(symbol.Contributions))
+			}
+			if got := len(symbol.Contributions[i].Names); got != want {
+				t.Fatalf("%s contribution %d names=%d, want %d", name, i, got, want)
+			}
+		}
+	}
+}
+
+func inspectionRowsSource(count int, mode string) string {
+	names := make([]string, count)
+	for i := range names {
+		names[i] = fmt.Sprintf("E%d", i)
+	}
+	var builder strings.Builder
+	for _, name := range names {
+		fmt.Fprintf(&builder, "error %s\n", name)
+	}
+	joined := strings.Join(names, ",")
+	switch mode {
+	case "declared":
+		fmt.Fprintf(&builder, "effect fn target() -> () raises {%s} { () }\n", joined)
+	case "body":
+		first, second := splitInspectionRows(names)
+		fmt.Fprintf(&builder, "effect fn first() -> () raises {%s} { () }\n", strings.Join(first, ","))
+		fmt.Fprintf(&builder, "effect fn second() -> () raises {%s} { () }\n", strings.Join(second, ","))
+		builder.WriteString("effect fn target() -> () { run first(); run second() }\n")
+	case "requirements":
+		services := make([]string, count)
+		for i := range services {
+			services[i] = fmt.Sprintf("S%d", i)
+			fmt.Fprintf(&builder, "service %s { effect fn get() -> () }\n", services[i])
+		}
+		first, second := splitInspectionRows(services)
+		for i, row := range [][]string{first, second} {
+			fmt.Fprintf(&builder, "effect fn part%d() -> () uses {%s} {\n", i, strings.Join(row, ","))
+			for _, service := range row {
+				fmt.Fprintf(&builder, "run %s.get();\n", service)
+			}
+			builder.WriteString("()}\n")
+		}
+		builder.WriteString("effect fn target() -> () { run part0(); run part1() }\n")
+	case "contributions":
+		builder.Reset()
+		builder.WriteString("error E0\neffect fn one() -> () raises {E0} { () }\neffect fn target() -> () raises {E0} {\n")
+		for i := 0; i < count; i++ {
+			builder.WriteString("run one();\n")
+		}
+		builder.WriteString("()}\n")
+	case "names":
+		builder.WriteString("record Box { value: () }\n")
+		fmt.Fprintf(&builder, "effect fn many() -> () raises {%s} { () }\n", joined)
+		builder.WriteString("effect fn target() -> Box { Box { value: run many() } }\n")
+	}
+	return builder.String()
+}
+
+func splitInspectionRows(names []string) ([]string, []string) {
+	middle := len(names) / 2
+	return names[:middle], names[middle:]
 }
 func TestInvalidSourceIsACompilerResult(t *testing.T) {
 	root := t.TempDir()

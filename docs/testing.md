@@ -3,7 +3,7 @@
 `ef test FILE [--target go|js] [--live] [--timeout-ms 30000]` discovers top-level `test_` functions in source order. Each must be an effect with no parameters returning `()`. `Assert` is implicit; `Clock`, `Scheduler` and `Sync` are explicit capability rows that receive fresh deterministic fixtures when the test declares them. The test file does not need `main`.
 
 ```rust
-effect fn test_greeting() -> () throws {AssertionFailed, Missing} uses {Assert} {
+effect fn test_greeting() -> () raises {AssertionFailed, Missing} uses {Assert} {
     let actual = run greeting("42").provide<Directory>(FixtureDirectory)
     run Assert.equalText(actual, "Hello, Ada")
 }

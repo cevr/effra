@@ -38,6 +38,24 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Host declaration**: A Go or TypeScript declaration supplying the native shape and identity of an imported value or callable.
 
+**Codec** (specified, not yet implemented): A checked witness relating a wire type and a domain type through separately contracted decoding and encoding operations.
+
+**Structural derivation** (specified): Generating a codec's structural rules from canonical checked data declarations and an explicit representation policy.
+
+**Codec transformation** (specified): A checked conversion in a codec's decoding or encoding direction, carrying its own expected failures and required services. The two directions need not be mathematical inverses.
+
+**Machine** (specified): A checked definition of state and event types, transition policies and state-owned behavior.
+
+**Actor** (specified): A running instance of a machine, with its own current state, owning scope and event mailbox.
+
+**Machine step** (specified): An ordinary pure or effectful function that consumes a state and event and returns an explicit transition decision. Effectful evaluation has an actor-owned scope and completes before state commit.
+
+**State entry** (specified): One owned lifetime of an actor's current state, identified separately from that state's tag and payload.
+
+**Re-entry** (specified): Closing a state entry and starting a fresh one, including when the state tag stays the same.
+
+**Entry epoch** (specified): An identity distinguishing a state entry from prior entries so obsolete work cannot update a later entry.
+
 **Binding contract**: Supplemental behavioral facts attached to a host declaration, including its cancellation, failure, resource, and trust policy.
 
 **Request scope**: A fresh owning scope for one HTTP request, linked to connection and server cancellation. Completed shutdown includes its handler cleanup.

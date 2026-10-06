@@ -1,7 +1,7 @@
 import go strings "strings"
 import go sdk "effra.local/prototype/examples/sdk"
 
-effect fn route(path: string) -> string throws {GoError} uses {Foreign, Files, Scheduler} {
+effect fn route(path: string) -> string raises {GoError} uses {Foreign, Files, Scheduler} {
     if path == "/health" { "ok" } else {
         if path == "/file" {
             run Files.readFile("examples/fixture.txt").catch<IoError>("file unavailable")
@@ -14,7 +14,7 @@ effect fn route(path: string) -> string throws {GoError} uses {Foreign, Files, S
     }
 }
 
-effect fn main() -> () throws {IoError} {
+effect fn main() -> () raises {IoError} {
     run Http.serve("127.0.0.1:0", route)
         .provide<Http>(GoHttp)
         .provide<Foreign>(Host)

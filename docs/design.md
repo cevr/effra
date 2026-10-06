@@ -24,7 +24,7 @@ error DbError { message: string }
 
 service Users {
     effect fn find(id: UserId) -> User
-        throws {NotFound, DbError}
+        raises {NotFound, DbError}
 }
 
 service Logger {
@@ -32,7 +32,7 @@ service Logger {
 }
 
 effect fn greeting(id: UserId) -> string
-    throws {NotFound, DbError}
+    raises {NotFound, DbError}
     uses {Users, Logger}
 {
     let user = run Users.find(id)

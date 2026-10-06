@@ -43,11 +43,11 @@ go build -o bin/ef ./cmd/ef
 error NotFound
 
 service Users {
-    effect fn get(id: string) -> string throws {NotFound}
+    effect fn get(id: string) -> string raises {NotFound}
 }
 
 effect fn greeting(id: string) -> string
-    throws {NotFound}
+    raises {NotFound}
     uses {Users}
 {
     let name = run Users.get(id)
@@ -111,7 +111,7 @@ Each alternative owns its payload. Adding a variant should make incomplete match
 ```rust
 import go strconv "strconv"
 
-effect fn parse(text: string) -> bool throws {GoError} uses {Foreign} {
+effect fn parse(text: string) -> bool raises {GoError} uses {Foreign} {
     run strconv.ParseBool(text).orFail()
 }
 ```

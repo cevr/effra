@@ -10,6 +10,8 @@ The compiler owns effect rows, nominal type identity, checked provision, target 
 
 Versioned library contracts participate in semantic revisions. Describe target support and limitations alongside signatures. Unsupported capabilities must diagnose or remain unavailable; a familiar API name cannot imply unverified Effect parity. Public Go/JS facilities need shared behavior tests for cancellation, cleanup, causes and boundary cases.
 
+Small application binaries are an explicit north star. Bundled availability does not imply retention: select only reachable runtime modules, keep unused initialization and registration out, and lower any fluent calls as ordinary statically resolved operations. The [binary reachability contract](specs/binary-reachability.md) requires minimal/core/codec/HTTP receipts and separates compiler distribution size from application and external runtime costs.
+
 ## Capability parity map
 
 Reference families were inspected in the installed pinned Effect source, including its core, concurrency, data, scheduling and service modules. This map tracks behavioral families rather than reproducing every TypeScript overload.

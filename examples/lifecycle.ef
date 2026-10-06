@@ -2,7 +2,7 @@ effect fn worker() -> () uses {Clock} {
     run Clock.sleep(10000)
 }
 
-effect fn scopedRead() -> string throws {IoError} uses {Files, Runtime, Console} {
+effect fn scopedRead() -> string raises {IoError} uses {Files, Runtime, Console} {
     scope {
         let file = run Files.openRead("examples/fixture.txt")
         let state = run Runtime.inspect()
@@ -11,7 +11,7 @@ effect fn scopedRead() -> string throws {IoError} uses {Files, Runtime, Console}
     }
 }
 
-effect fn program() -> () throws {IoError} uses {Clock, Files, Runtime, Console, Env, Scheduler} {
+effect fn program() -> () raises {IoError} uses {Clock, Files, Runtime, Console, Env, Scheduler} {
     scope {
         let child = fork worker()
         run child.interrupt()
@@ -23,7 +23,7 @@ effect fn program() -> () throws {IoError} uses {Clock, Files, Runtime, Console,
     }
 }
 
-effect fn main() -> () throws {IoError} {
+effect fn main() -> () raises {IoError} {
     run program()
         .provide<Clock>(LiveClock)
         .provide<Files>(LiveFiles)

@@ -476,8 +476,11 @@ func (p *parser) function(body bool) *Function {
 	}
 	p.expect("->")
 	f.Return = p.typ()
-	if p.accept("throws") {
+	if p.accept("raises") {
 		f.Errors = p.row()
+	} else if p.peek().text == "throws" {
+		old := p.take()
+		p.fail(old, "the Effra failure-row keyword `throws` was replaced by `raises`; use `raises`")
 	}
 	if p.accept("uses") {
 		f.Services = p.row()

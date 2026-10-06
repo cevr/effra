@@ -15,7 +15,7 @@ func TestExplicitTestProvidersUseTheHarnessAcrossTargets(t *testing.T) {
     run Clock.sleep(20)
 }
 
-effect fn test_explicit_virtual_providers() -> () throws {AssertionFailed} uses {Assert, Scheduler} {
+effect fn test_explicit_virtual_providers() -> () raises {AssertionFailed} uses {Assert, Scheduler} {
     let child = fork explicitSleep().provide<Clock>(TestClock).provide<Scheduler>(TestScheduler)
     run Scheduler.awaitRegistration()
     run Scheduler.advance(20)
@@ -23,7 +23,7 @@ effect fn test_explicit_virtual_providers() -> () throws {AssertionFailed} uses 
     run Assert.check(true, "explicit test providers share the harness scheduler")
 }
 
-effect fn test_advance_admits_unstarted_fork() -> () throws {AssertionFailed} uses {Assert, Scheduler} {
+effect fn test_advance_admits_unstarted_fork() -> () raises {AssertionFailed} uses {Assert, Scheduler} {
     let child = fork explicitSleep().provide<Clock>(TestClock).provide<Scheduler>(TestScheduler)
     run Scheduler.advance(20)
     run child.join()
@@ -122,7 +122,7 @@ func TestSchedulerDrainsLongManagedContinuationAcrossTargets(t *testing.T) {
 ` + strings.Repeat("    run Sync.signal(latch)\n", 1024) + `    run Clock.sleep(30)
 }
 
-effect fn test_scheduler_drains_long_continuation() -> () throws {AssertionFailed} uses {Assert, Clock, Scheduler, Sync} {
+effect fn test_scheduler_drains_long_continuation() -> () raises {AssertionFailed} uses {Assert, Clock, Scheduler, Sync} {
     let latch = run Sync.latch()
     let child = fork longContinuation(latch)
     run Scheduler.awaitRegistration()
