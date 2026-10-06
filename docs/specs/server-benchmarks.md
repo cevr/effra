@@ -28,6 +28,8 @@ Keep build measurements separate: Effra parse/check/import/emission, Go compilat
 
 Include generated-code scaling alongside server builds: many ordinary small functions and one long straight-line effectful function must have separate emitted-source, frontend and backend receipts. The scheduler's 1024-signal regression exposed a generated-Go watchdog that includes compilation; the implementation owner reported a roughly 60-second build followed by millisecond execution, without retaining that diagnostic artifact. Reproduce under admitted host/cache conditions before attributing it to lowering or Go optimization. Preserve generated source, binary identity and raw stage logs. A fast frontend or warm build cannot hide a slow fresh backend, and shortening the regression program or extending its timeout is not a compile-speed improvement.
 
+A subsequent [retained diagnostic](../research/generated-go-build-cost.md) observes 47.754 seconds in the Go build versus 3.894 milliseconds running the resulting test on the shared host. It establishes the stage boundary for that run, not an admitted comparative score or attribution to a specific optimizer.
+
 ## Exit gate
 
 - Runnable versioned fixtures and a reproducible local benchmark command produce machine-readable raw samples and a concise report.
