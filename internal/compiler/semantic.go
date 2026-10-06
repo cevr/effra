@@ -20,6 +20,22 @@ type ValueType struct {
 	Child     []OwnershipFact `json:"childOwnership,omitempty"`
 }
 
+// ownershipOwnerKind separates the origin of an owner from its rendered
+// region. The region string remains part of the inspection contract, while
+// this internal kind prevents a deferred recipe result from being confused
+// with a value already owned by the caller's lexical scope.
+type ownershipOwnerKind uint8
+
+const (
+	ownershipOwnerUnknown ownershipOwnerKind = iota
+	ownershipOwnerParameter
+	ownershipOwnerDeferred
+	ownershipOwnerInvocationResult
+	ownershipOwnerLexical
+	ownershipOwnerChild
+	ownershipOwnerTimeout
+)
+
 // OwnershipFact is the bounded ownership evidence carried by a checked value.
 // A fact is deliberately explicit about uncertainty: the compiler only
 // rejects a value when it can prove that the value belongs to a scope which is
@@ -35,6 +51,10 @@ type OwnershipFact struct {
 	// detail of function-summary instantiation. Without it, a helper returning
 	// pair.outer would have to conservatively retain pair.inner as well.
 	source string
+	// sourceSet distinguishes a parameter-relative root path (the valid empty
+	// path) from a fact that has no parameter source.
+	sourceSet bool
+	ownerKind ownershipOwnerKind
 }
 
 // TypeRef is the canonical semantic identity used by checking, emission and
@@ -109,25 +129,83 @@ func ownershipForType(success string) []OwnershipFact {
 }
 
 func (c *checker) ownershipPaths(typeName, prefix string, seen map[string]bool) []string {
-	// A shared record graph can have exponentially many leaf paths. The
-	// ownership representation is intentionally bounded, so traversal must be
-	// bounded too; otherwise normalization happens only after the expensive
-	// expansion. The wildcard keeps the fact that a handle exists somewhere in
-	// the shape, which is the evidence needed to preserve an unsafe proof.
+	// A shared record graph can have exponentially many leaf paths. First memoize
+	// whether each structural type can contain a managed handle; then enumerate
+	// only handle-bearing branches under a total structural visit budget. The
+	// wildcard keeps the fact that a handle exists somewhere in the shape when
+	// the bounded representation cannot retain every path.
 	const maxPaths = 64
+	const maxVisits = 256
+	const maxContainsVisits = 256
+	containsMemo := map[string]bool{}
+	containsVisiting := map[string]bool{}
+	containsVisits := 0
+	var containsHandle func(string) bool
+	containsHandle = func(name string) bool {
+		if name == "File" || strings.HasPrefix(name, "Fiber:") {
+			return true
+		}
+		if known, ok := containsMemo[name]; ok {
+			return known
+		}
+		if containsVisits >= maxContainsVisits {
+			// A budget overflow means the checker cannot prove that this shape is
+			// handle-free. Treat it as handle-bearing and let the path walk add a
+			// bounded wildcard instead of spending unbounded time on structure.
+			containsMemo[name] = true
+			return true
+		}
+		containsVisits++
+		if containsVisiting[name] {
+			return false
+		}
+		containsVisiting[name] = true
+		found := false
+		if record := c.records[name]; record != nil {
+			for _, field := range record.Fields {
+				if containsHandle(field.Type) {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			if enum := c.enums[name]; enum != nil {
+				for _, variant := range enum.Variants {
+					for _, field := range variant.Fields {
+						if containsHandle(field.Type) {
+							found = true
+							break
+						}
+					}
+					if found {
+						break
+					}
+				}
+			}
+		}
+		delete(containsVisiting, name)
+		containsMemo[name] = found
+		return found
+	}
+	if !containsHandle(typeName) {
+		return nil
+	}
 	paths := make([]string, 0, maxPaths)
 	truncated := false
+	visits := 0
 	var visit func(string, string)
 	visit = func(name, path string) {
-		if len(paths) >= maxPaths {
+		if len(paths) >= maxPaths || visits >= maxVisits {
 			truncated = true
 			return
 		}
+		visits++
 		if name == "File" || strings.HasPrefix(name, "Fiber:") {
 			paths = append(paths, path)
 			return
 		}
-		if seen[name] {
+		if !containsHandle(name) || seen[name] {
 			return
 		}
 		seen[name] = true
@@ -177,7 +255,7 @@ func (c *checker) unknownOwnership(typeName string) []OwnershipFact {
 func (c *checker) borrowedOwnership(typeName, region string) []OwnershipFact {
 	facts := []OwnershipFact{}
 	for _, path := range c.ownershipPaths(typeName, "", map[string]bool{}) {
-		facts = append(facts, OwnershipFact{Path: path, Status: "borrowed", Region: region, Origin: "parameter", source: path})
+		facts = append(facts, OwnershipFact{Path: path, Status: "borrowed", Region: region, Origin: "parameter", source: path, sourceSet: true, ownerKind: ownershipOwnerParameter})
 	}
 	return normalizeFacts(facts)
 }
@@ -215,14 +293,30 @@ func projectFacts(facts []OwnershipFact, field string) []OwnershipFact {
 	out := make([]OwnershipFact, 0, len(facts))
 	for _, fact := range facts {
 		if fact.Path == "*" {
-			out = append(out, fact)
+			copy := fact
+			// A wildcard proves that some descendant has this status, not that
+			// the selected field has it. Keep whole-value owned evidence at the
+			// boundary, but report a projected field as unknown when its path is
+			// ambiguous.
+			if copy.Status == "owned" && copy.Origin != "bounded-all-owned" {
+				copy.Status = "unknown"
+				copy.Origin = "bounded"
+			}
+			if copy.Status == "borrowed" {
+				copy.Status = "unknown"
+				copy.Origin = "bounded"
+			}
+			copy.source = ""
+			copy.sourceSet = false
+			out = append(out, copy)
 			continue
 		}
 		if fact.Path == field {
 			copy := fact
 			copy.Path = ""
-			if copy.source == "" {
+			if !copy.sourceSet {
 				copy.source = field
+				copy.sourceSet = true
 			}
 			out = append(out, copy)
 			continue
@@ -231,8 +325,9 @@ func projectFacts(facts []OwnershipFact, field string) []OwnershipFact {
 		if strings.HasPrefix(fact.Path, prefix) {
 			copy := fact
 			copy.Path = strings.TrimPrefix(fact.Path, prefix)
-			if copy.source == "" {
+			if !copy.sourceSet {
 				copy.source = fact.Path
+				copy.sourceSet = true
 			}
 			out = append(out, copy)
 		}
@@ -244,7 +339,18 @@ func projectVariantFacts(facts []OwnershipFact, variant, field string) []Ownersh
 	projected := make([]OwnershipFact, 0)
 	for _, fact := range facts {
 		if fact.Path == "*" {
-			projected = append(projected, fact)
+			copy := fact
+			if copy.Status == "owned" && copy.Origin != "bounded-all-owned" {
+				copy.Status = "unknown"
+				copy.Origin = "bounded"
+			}
+			if copy.Status == "borrowed" {
+				copy.Status = "unknown"
+				copy.Origin = "bounded"
+			}
+			copy.source = ""
+			copy.sourceSet = false
+			projected = append(projected, copy)
 			continue
 		}
 		path := fact.Path
@@ -252,15 +358,17 @@ func projectVariantFacts(facts []OwnershipFact, variant, field string) []Ownersh
 		if path == prefix {
 			copy := fact
 			copy.Path = ""
-			if copy.source == "" {
+			if !copy.sourceSet {
 				copy.source = prefix
+				copy.sourceSet = true
 			}
 			projected = append(projected, copy)
 		} else if strings.HasPrefix(path, prefix+".") {
 			copy := fact
 			copy.Path = strings.TrimPrefix(path, prefix+".")
-			if copy.source == "" {
+			if !copy.sourceSet {
 				copy.source = path
+				copy.sourceSet = true
 			}
 			projected = append(projected, copy)
 		}
@@ -294,14 +402,43 @@ func mergeFacts(a, b []OwnershipFact) []OwnershipFact {
 	return normalizeFacts(out)
 }
 
-func rebaseInvocationFacts(facts []OwnershipFact, region string) []OwnershipFact {
+func materializeExecutionFacts(facts []OwnershipFact, region string, ownerKind ownershipOwnerKind) []OwnershipFact {
 	out := cloneFacts(facts)
 	for i := range out {
-		if out[i].Region == "invocation" || out[i].Region == "deferred" {
+		if out[i].ownerKind == ownershipOwnerInvocationResult || out[i].ownerKind == ownershipOwnerDeferred {
 			out[i].Region = region
+			out[i].ownerKind = ownerKind
 		}
 	}
 	return normalizeFacts(out)
+}
+
+func summarizeInvocationFacts(facts []OwnershipFact) []OwnershipFact {
+	out := cloneFacts(facts)
+	for i := range out {
+		if out[i].ownerKind == ownershipOwnerLexical && out[i].Region == "invocation" {
+			out[i].ownerKind = ownershipOwnerInvocationResult
+		}
+	}
+	return normalizeFacts(out)
+}
+
+func conservativeCycleFacts(observed ...[]OwnershipFact) []OwnershipFact {
+	owned := make([]OwnershipFact, 0)
+	for _, facts := range observed {
+		for _, fact := range facts {
+			if fact.Status != "owned" {
+				continue
+			}
+			fact.Path = "*"
+			fact.Origin = "bounded"
+			owned = append(owned, fact)
+		}
+	}
+	if len(owned) == 0 {
+		return []OwnershipFact{{Path: "*", Status: "unknown", Origin: "bounded"}}
+	}
+	return normalizeFacts(owned)
 }
 
 func ownershipPathMatches(argumentPath, sourcePath string) bool {
@@ -333,12 +470,25 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 					continue
 				}
 				copy := argument
+				if fact.source == "*" || argument.Path == "*" {
+					// A wildcard source or argument is evidence about an
+					// unspecified descendant. Preserve a whole-value owned
+					// wildcard, but do not turn an ambiguous projected field into
+					// a certain owned fact.
+					if !(fact.Path == "*" && fact.sourceSet && fact.source == "*" && argument.Path == "*" && argument.Status == "owned" && argument.Origin == "bounded-all-owned") {
+						copy.Status = "unknown"
+						copy.Origin = "bounded"
+					}
+				}
 				// The summary path is relative to the returned value. The
 				// argument contributes status/region, not another path prefix;
 				// projection and payload construction already recorded the
 				// returned shape before this call boundary.
 				copy.Path = fact.Path
 				copy.Origin = "helper"
+				if argument.Path == "*" && argument.Status == "owned" && argument.Origin == "bounded-all-owned" {
+					copy.Origin = "bounded-all-owned"
+				}
 				out = append(out, copy)
 			}
 			if !slices.ContainsFunc(args[i].Ownership, func(argument OwnershipFact) bool {
@@ -376,7 +526,22 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 		if a.Origin != b.Origin {
 			return strings.Compare(a.Origin, b.Origin)
 		}
-		return strings.Compare(a.source, b.source)
+		if a.sourceSet != b.sourceSet {
+			if !a.sourceSet {
+				return -1
+			}
+			return 1
+		}
+		if a.source != b.source {
+			return strings.Compare(a.source, b.source)
+		}
+		if a.ownerKind < b.ownerKind {
+			return -1
+		}
+		if a.ownerKind > b.ownerKind {
+			return 1
+		}
+		return 0
 	})
 	result := make([]OwnershipFact, 0, len(out))
 	for _, fact := range out {
@@ -387,15 +552,31 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 	const maxFacts = 64
 	if len(result) > maxFacts {
 		bounded := make([]OwnershipFact, 0, maxFacts)
-		seenRegions := map[string]bool{}
+		allOwned := true
 		for _, fact := range result {
-			if fact.Status == "owned" && !seenRegions[fact.Region] {
+			if fact.Status != "owned" {
+				allOwned = false
+				break
+			}
+		}
+		boundedOrigin := "bounded"
+		if allOwned {
+			boundedOrigin = "bounded-all-owned"
+		}
+		type ownerKey struct {
+			kind   ownershipOwnerKind
+			region string
+		}
+		seenOwners := map[ownerKey]bool{}
+		for _, fact := range result {
+			key := ownerKey{kind: fact.ownerKind, region: fact.Region}
+			if fact.Status == "owned" && !seenOwners[key] {
 				if len(bounded) >= maxFacts-2 {
-					bounded = append(bounded, OwnershipFact{Path: "*", Status: "owned", Region: "*", Origin: "bounded"})
+					bounded = append(bounded, OwnershipFact{Path: "*", Status: "owned", Region: "*", Origin: boundedOrigin})
 					break
 				}
-				bounded = append(bounded, OwnershipFact{Path: "*", Status: "owned", Region: fact.Region, Origin: "bounded"})
-				seenRegions[fact.Region] = true
+				bounded = append(bounded, OwnershipFact{Path: "*", Status: "owned", Region: fact.Region, Origin: boundedOrigin, ownerKind: fact.ownerKind})
+				seenOwners[key] = true
 			}
 		}
 		for _, fact := range result {
@@ -406,7 +587,7 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 				bounded = append(bounded, fact)
 			}
 		}
-		if len(bounded) < maxFacts {
+		if len(bounded) < maxFacts && !allOwned {
 			bounded = append(bounded, OwnershipFact{Path: "*", Status: "unknown", Origin: "bounded"})
 		}
 		return bounded
@@ -416,16 +597,16 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 
 func hasOwnedFact(facts []OwnershipFact, region string) bool {
 	for _, fact := range facts {
-		if fact.Status == "owned" && (fact.Region == region || fact.Region == "*") {
+		if fact.Status == "owned" && (fact.Region == "*" || (fact.ownerKind == ownershipOwnerLexical && fact.Region == region)) {
 			return true
 		}
 	}
 	return false
 }
 
-func hasOwnedChild(facts []OwnershipFact) bool {
+func hasOwnedClosed(facts []OwnershipFact) bool {
 	for _, fact := range facts {
-		if fact.Status == "owned" && (fact.Region == "*" || strings.HasPrefix(fact.Region, "child:")) {
+		if fact.Status == "owned" && (fact.ownerKind == ownershipOwnerChild || fact.ownerKind == ownershipOwnerTimeout || strings.HasPrefix(fact.Region, "child:") || strings.HasPrefix(fact.Region, "timeout:")) {
 			return true
 		}
 	}
@@ -433,7 +614,7 @@ func hasOwnedChild(facts []OwnershipFact) bool {
 }
 
 func (c *checker) rejectOwnedEscape(facts []OwnershipFact, span Span) {
-	if hasOwnedFact(facts, c.region) || hasOwnedChild(facts) {
+	if hasOwnedFact(facts, c.region) || hasOwnedClosed(facts) {
 		c.diagnostic("EF123", "value owned by closing scope cannot escape", span)
 	}
 }
@@ -766,8 +947,10 @@ func (c *checker) prepareFunctionSummaries() {
 
 	// Recursive groups have no acyclic order. Process the residual graph as a
 	// local worklist and revisit a member only when one of its dependencies
-	// changes. The summaries are bounded, so this remains finite while keeping
-	// proven owned facts rather than replacing them with unknown.
+	// changes. The summaries are bounded, and the iteration cap keeps a
+	// non-monotone summary from monopolizing checking. Facts observed before a
+	// cap are retained conservatively so a proven owned result cannot become
+	// unknown merely because convergence was inconclusive.
 	cycle := make([]*Function, 0)
 	cycleSet := map[*Function]bool{}
 	for _, f := range functions {
@@ -776,15 +959,26 @@ func (c *checker) prepareFunctionSummaries() {
 			cycleSet[f] = true
 		}
 	}
+	queue := append([]*Function{}, cycle...)
 	queued := map[*Function]bool{}
-	for _, f := range cycle {
+	for _, f := range queue {
 		queued[f] = true
 	}
-	for head := 0; head < len(cycle); head++ {
-		f := cycle[head]
+	observedOwnership := map[*Function][][]OwnershipFact{}
+	observedCaptures := map[*Function][][]OwnershipFact{}
+	maxIterations := len(cycle) * 8
+	if maxIterations < 32 {
+		maxIterations = 32
+	}
+	iterations := 0
+	for head := 0; head < len(queue) && iterations < maxIterations; head++ {
+		f := queue[head]
 		queued[f] = false
 		beforeOwnership, beforeCaptures := cloneFacts(f.Ownership), cloneFacts(f.Captures)
 		c.function(f, false)
+		observedOwnership[f] = append(observedOwnership[f], beforeOwnership, cloneFacts(f.Ownership))
+		observedCaptures[f] = append(observedCaptures[f], beforeCaptures, cloneFacts(f.Captures))
+		iterations++
 		changed := !slices.Equal(beforeOwnership, f.Ownership) || !slices.Equal(beforeCaptures, f.Captures)
 		if !changed {
 			continue
@@ -793,8 +987,14 @@ func (c *checker) prepareFunctionSummaries() {
 			if !cycleSet[caller] || queued[caller] {
 				continue
 			}
-			cycle = append(cycle, caller)
+			queue = append(queue, caller)
 			queued[caller] = true
+		}
+	}
+	if iterations >= maxIterations && len(queue) > iterations {
+		for _, f := range cycle {
+			f.Ownership = conservativeCycleFacts(observedOwnership[f]...)
+			f.Captures = conservativeCycleFacts(observedCaptures[f]...)
 		}
 	}
 	c.suppressDiagnostics = previous
@@ -1080,8 +1280,8 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	}
 	actual.Effect = f.Effect
 	actual.Type = c.typeRef(actual.Success)
-	f.Ownership = normalizeFacts(actual.Ownership)
-	f.Captures = normalizeFacts(actual.Captures)
+	f.Ownership = summarizeInvocationFacts(actual.Ownership)
+	f.Captures = summarizeInvocationFacts(actual.Captures)
 	if record {
 		declared := contract(f)
 		declared.Type = c.typeRef(f.Return)
@@ -1211,8 +1411,8 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 			continue
 		}
 		t := c.expr(s.Value, env, effect)
-		if s.Kind != "let" && hasOwnedChild(t.Ownership) {
-			c.diagnostic("EF123", "child-owned value cannot escape its child scope", s.Span)
+		if s.Kind != "let" && hasOwnedClosed(t.Ownership) {
+			c.diagnostic("EF123", "value owned by a closing scope cannot escape", s.Span)
 		}
 		out.Errors = union(out.Errors, tExecutedErrors(s.Value))
 		out.Services = union(out.Services, tExecutedServices(s.Value))
@@ -1392,8 +1592,8 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		for i, a := range e.Args {
 			arg := c.expr(a, env, inEffect)
 			argumentTypes[i] = arg
-			if hasOwnedChild(arg.Ownership) {
-				c.diagnostic("EF123", "child-owned value cannot be used after join", a.Span)
+			if hasOwnedClosed(arg.Ownership) {
+				c.diagnostic("EF123", "value owned by a closing scope cannot be used", a.Span)
 			}
 			if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && e.Left.Left.Name == "Http" && i == 1 && arg.Success == "Handler" {
 				t.Services = union(t.Services, arg.Services)
@@ -1481,11 +1681,11 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		t.Effect = false
 		t.Errors = union(inner.Errors, executed(e.Left, true))
 		t.Services = union(inner.Services, executed(e.Left, false))
-		t.Ownership = []OwnershipFact{{Status: "owned", Region: c.region, Origin: "fork"}}
+		t.Ownership = []OwnershipFact{{Status: "owned", Region: c.region, Origin: "fork", ownerKind: ownershipOwnerLexical}}
 		t.Captures = cloneFacts(inner.Captures)
 		// The child executes its recipe under its own owner. This is distinct
 		// from the owner of the Fiber handle returned to the parent.
-		t.Child = rebaseInvocationFacts(inner.Ownership, childRegion)
+		t.Child = materializeExecutionFacts(inner.Ownership, childRegion, ownershipOwnerChild)
 		for i := range t.Child {
 			if t.Child[i].Region == childRegion && t.Child[i].Status == "owned" {
 				t.Child[i].Origin = "child-acquisition"
@@ -1493,11 +1693,15 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		}
 		c.reasons = append(c.reasons, Contribution{"owned-child", inner.Errors, e.Span})
 	case "timeout":
-		t = c.expr(e.Left, env, inEffect)
 		duration := c.expr(e.Right, env, inEffect)
+		timeoutRegion := fmt.Sprintf("timeout:%d", e.Span.Offset)
+		inner := c.withRegion(timeoutRegion, func() ValueType { return c.expr(e.Left, env, inEffect) })
+		t = inner
 		if !t.Effect || duration.Effect || duration.Success != "i64" {
 			c.diagnostic("EF106", "timeout requires an Effect and an i64 millisecond duration", e.Span)
 		}
+		t.Ownership = materializeExecutionFacts(t.Ownership, timeoutRegion, ownershipOwnerTimeout)
+		t.Captures = materializeExecutionFacts(t.Captures, timeoutRegion, ownershipOwnerTimeout)
 		t.Errors = union(t.Errors, []string{"Timeout"})
 	case "run":
 		inner := c.expr(e.Left, env, inEffect)
@@ -1512,7 +1716,8 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		// Ownership created by a deferred recipe belongs to the owner
 		// which actually executes it. Construction may happen outside a
 		// scope, or in an outer scope before a nested run.
-		t.Ownership = rebaseInvocationFacts(inner.Ownership, c.region)
+		t.Ownership = materializeExecutionFacts(inner.Ownership, c.region, ownershipOwnerLexical)
+		t.Captures = materializeExecutionFacts(inner.Captures, c.region, ownershipOwnerLexical)
 		if !strings.HasPrefix(t.Success, "provider:") {
 			t.Captures = nil
 		}
@@ -1539,7 +1744,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		t.Captures = normalizeFacts(append(t.Captures, provider.Captures...))
 		if e.Name == "Files" && e.Right.Kind == "name" && e.Right.Name == "LiveFiles" {
 			if e.Left.Kind == "call" && e.Left.Left != nil && e.Left.Left.Kind == "member" && e.Left.Left.Left.Kind == "name" && e.Left.Left.Left.Name == "Files" && e.Left.Left.Name == "openRead" {
-				t.Ownership = []OwnershipFact{{Status: "owned", Region: "deferred", Origin: "acquisition"}}
+				t.Ownership = []OwnershipFact{{Status: "owned", Region: "deferred", Origin: "acquisition", ownerKind: ownershipOwnerDeferred}}
 			}
 		}
 		t.Services = remove(t.Services, e.Name)
