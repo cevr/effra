@@ -50,12 +50,22 @@ func (c *checker) templateContext(parameters []TemplateParameter, declaration st
 
 func (c *checker) checkTemplates() {
 	c.templates = map[string]*Record{}
-	for _, r := range c.program.Records {
+	declarations := append(append([]*DataDeclaration{}, c.program.Records...), c.program.Enums...)
+	for _, r := range declarations {
 		if len(r.Parameters) > 0 {
-			c.diagnostic("EF127", "user template declarations are unavailable; apply an explicit compiler-distributed template", r.Span)
+			r.Module, r.SourceID = currentModuleIdentity, "source:user"
+			r.Identity = c.declarationIdentity("template", "module", r.Name)
+			r.EmissionName = r.Name
+			// Registration and finite layouts are shared with Codec. Executable
+			// user data remains unavailable until its constructor/target seams land.
+			c.diagnostic("EF127", "generic data construction and target emission are unavailable", r.Span)
 		}
 	}
-	for _, r := range c.program.BundledTemplates {
+	declarations = append(declarations, c.program.BundledTemplates...)
+	for _, r := range declarations {
+		if len(r.Parameters) == 0 {
+			continue
+		}
 		if r.Module == "" || r.Identity == "" || len(r.Parameters) == 0 || len(r.Parameters) > 8 {
 			c.diagnostic("EF127", "invalid distributed template declaration", r.Span)
 			continue
@@ -67,7 +77,7 @@ func (c *checker) checkTemplates() {
 				c.diagnostic("EF127", "duplicate template field "+field.Name, field.Span)
 			}
 			fields[field.Name] = true
-			if _, known := context[field.Type]; !known || field.sourceType != nil {
+			if _, known := context[field.Type]; r.SourceID != "source:user" && (!known || field.sourceType != nil) {
 				c.diagnostic("EF127", "template fields require a declared first-order parameter", field.Span)
 			}
 		}
@@ -108,7 +118,7 @@ func (c *checker) checkTemplates() {
 }
 
 func (c *checker) templateDeclaration(r *Record) Declaration {
-	d := Declaration{Kind: "template", Name: r.Name, Identity: r.Identity, Source: r.SourceID, Span: r.Span, Fields: append([]Field{}, r.Fields...), TemplateParameters: []TemplateParameterView{}}
+	d := Declaration{Kind: "template", Name: r.Name, Identity: r.Identity, Source: r.SourceID, Span: r.Span, Fields: append([]Field{}, r.Fields...), Variants: append([]Variant{}, r.Variants...), TemplateParameters: []TemplateParameterView{}}
 	for _, p := range r.Parameters {
 		view := TemplateParameterView{Name: p.Name, Kind: p.Kind, Identity: p.Identity, Variable: c.ref(p.typeID), typeID: p.typeID, shapeID: p.shapeID}
 		if p.shapeID != invalidTypeID {
@@ -128,9 +138,161 @@ func (c *checker) templateDeclaration(r *Record) Declaration {
 	return d
 }
 
+// Layouts resolve after all local nominal owners are registered. Each field
+// occurrence keeps its checked ID; nested applications use the same arena.
+func (c *checker) resolveDataTemplateLayouts() {
+	declarations := append(append([]*DataDeclaration{}, c.program.Records...), c.program.Enums...)
+	for _, declaration := range declarations {
+		if len(declaration.Parameters) == 0 {
+			continue
+		}
+		previous := c.typeContext
+		c.typeContext = map[string]TemplateParameter{}
+		for _, parameter := range declaration.Parameters {
+			c.typeContext[parameter.Name] = parameter
+		}
+		resolve := func(fields []Field) {
+			seen := map[string]bool{}
+			for i := range fields {
+				if seen[fields[i].Name] {
+					c.diagnostic("EF127", "duplicate generic data field "+fields[i].Name, fields[i].Span)
+				}
+				seen[fields[i].Name] = true
+				id := c.canonicalRef(typeRef(fields[i].Type))
+				if id == invalidTypeID || c.node(id).Kind == "opaque" && !c.directTemplateDataArgument(id) {
+					c.diagnostic("EF127", "unsupported generic field layout", fields[i].Span)
+				}
+				fields[i].typeID, fields[i].TypeRef = id, c.ref(id)
+				c.bindSourceSyntax(fields[i].sourceType, id)
+			}
+		}
+		resolve(declaration.Fields)
+		for i := range declaration.Variants {
+			resolve(declaration.Variants[i].Fields)
+		}
+		c.typeContext = previous
+		for i := range c.result.Declarations {
+			if c.result.Declarations[i].Identity == declaration.Identity {
+				c.result.Declarations[i] = c.templateDeclaration(declaration)
+			}
+		}
+	}
+	c.validateTemplateLayoutCycles(declarations)
+}
+
+func (c *checker) validateTemplateLayoutCycles(declarations []*DataDeclaration) {
+	finished := map[string]bool{}
+	active := map[string]bool{}
+	visits := 0
+	nodes := map[TypeID]bool{}
+	budgetRefused := false
+	workSpan := Span{}
+	var owner func(*DataDeclaration, int) bool
+	var node func(TypeID, int) bool
+	node = func(id TypeID, depth int) bool {
+		// Charge every retained edge before deduplication. Shared canonical nodes
+		// are traversed once, but thousands of repeated payload fields still cost.
+		visits++
+		if depth > 64 || visits > 4096 {
+			if visits > 4096 && !budgetRefused {
+				budgetRefused = true
+				c.diagnostic("EF127", "generic data layout exceeds 4096 work budget", workSpan)
+			}
+			return false
+		}
+		if nodes[id] {
+			return true
+		}
+		n := c.node(id)
+		if n == nil {
+			return false
+		}
+		for _, argument := range n.Args {
+			if !node(argument, depth+1) {
+				return false
+			}
+		}
+		if n.Result != invalidTypeID && !node(n.Result, depth+1) {
+			return false
+		}
+		if n.Kind == "application" {
+			if !owner(c.templates[n.Declaration], depth+1) {
+				return false
+			}
+		} else if n.Kind == "record" || n.Kind == "enum" {
+			declaration := c.records[n.Name]
+			if n.Kind == "enum" {
+				declaration = c.enums[n.Name]
+			}
+			if declaration == nil || n.Declaration != c.declarationQualifier(n.Kind, declaration.Name) || !owner(declaration, depth+1) {
+				return false
+			}
+		}
+		nodes[id] = true
+		return true
+	}
+	owner = func(declaration *DataDeclaration, depth int) bool {
+		if declaration == nil {
+			return false
+		}
+		identity := declaration.Identity
+		if identity == "" {
+			identity = c.declarationQualifier(declaration.Kind, declaration.Name)
+		}
+		if active[identity] {
+			return false
+		}
+		if finished[identity] {
+			return true
+		}
+		active[identity] = true
+		defer delete(active, identity)
+		fields := func(fields []Field) bool {
+			for _, field := range fields {
+				workSpan = field.Span
+				id := field.typeID
+				if id == invalidTypeID {
+					for _, parameter := range declaration.Parameters {
+						if parameter.Name == field.Type {
+							id = parameter.typeID
+							break
+						}
+					}
+				}
+				if !node(id, depth+1) {
+					return false
+				}
+			}
+			return true
+		}
+		if !fields(declaration.Fields) {
+			return false
+		}
+		for _, variant := range declaration.Variants {
+			if !fields(variant.Fields) {
+				return false
+			}
+		}
+		finished[identity] = true
+		return true
+	}
+	for _, declaration := range declarations {
+		if len(declaration.Parameters) > 0 && !owner(declaration, 0) {
+			c.diagnostic("EF127", "recursive or excessive generic data layout", declaration.Span)
+		}
+	}
+}
+
 func (c *checker) templateByName(name string) *Record {
 	if alias, member, qualified := strings.Cut(name, "."); qualified {
 		return c.program.BundledTypeBindings[alias][member]
+	}
+	if c.functionModule == "" || c.functionModule == currentModuleIdentity {
+		for _, r := range append(append([]*DataDeclaration{}, c.program.Records...), c.program.Enums...) {
+			if len(r.Parameters) > 0 && r.Name == name {
+				return r
+			}
+		}
 	}
 	for _, r := range c.program.BundledTemplates {
 		if r.Module == c.functionModule && r.Name == name {
@@ -141,6 +303,37 @@ func (c *checker) templateByName(name string) *Record {
 }
 
 func (c *checker) templateDataArgument(id TypeID) bool {
+	memo := map[TypeID]bool{}
+	var visit func(TypeID, int) bool
+	visit = func(id TypeID, depth int) bool {
+		if valid, known := memo[id]; known {
+			return valid
+		}
+		if depth > 64 || len(memo) > 4096 {
+			return false
+		}
+		memo[id] = false
+		n := c.node(id)
+		if n != nil && n.Kind == "application" {
+			owner := c.templates[n.Declaration]
+			if owner == nil || len(n.Args) != len(owner.Parameters) {
+				return false
+			}
+			for i, parameter := range owner.Parameters {
+				if parameter.Kind != "type" || !visit(n.Args[i], depth+1) {
+					return false
+				}
+			}
+			memo[id] = true
+			return true
+		}
+		memo[id] = c.directTemplateDataArgument(id)
+		return memo[id]
+	}
+	return visit(id, 0)
+}
+
+func (c *checker) directTemplateDataArgument(id TypeID) bool {
 	n := c.node(id)
 	if n == nil {
 		return false
@@ -266,17 +459,52 @@ func (c *checker) applicationFields(id TypeID) ([]Field, bool) {
 		return nil, false
 	}
 	r := c.templates[n.Declaration]
-	if r == nil || len(n.Args) != len(r.Parameters) {
+	if r == nil || r.Kind == "enum" || len(n.Args) != len(r.Parameters) {
 		return nil, false
 	}
-	fields := append([]Field{}, r.Fields...)
-	for i := range fields {
-		index := slices.IndexFunc(r.Parameters, func(p TemplateParameter) bool { return p.Name == fields[i].Type })
-		if index < 0 {
+	return c.instantiateDataFields(r, r.Fields, n.Args)
+}
+
+func (c *checker) applicationVariants(id TypeID) ([]Variant, bool) {
+	n := c.node(id)
+	if n == nil || n.Kind != "application" {
+		return nil, false
+	}
+	owner := c.templates[n.Declaration]
+	if owner == nil || owner.Kind != "enum" || len(owner.Parameters) != len(n.Args) {
+		return nil, false
+	}
+	variants := append([]Variant{}, owner.Variants...)
+	for i := range variants {
+		fields, ok := c.instantiateDataFields(owner, variants[i].Fields, n.Args)
+		if !ok {
 			return nil, false
 		}
-		fields[i].typeID = n.Args[index]
-		fields[i].TypeRef = c.ref(n.Args[index])
+		variants[i].Fields = fields
+	}
+	return variants, true
+}
+
+func (c *checker) instantiateDataFields(r *DataDeclaration, declared []Field, arguments []TypeID) ([]Field, bool) {
+	fields := append([]Field{}, declared...)
+	bindings := map[TypeID]TypeID{}
+	for i, parameter := range r.Parameters {
+		bindings[parameter.typeID] = arguments[i]
+	}
+	for i := range fields {
+		id := fields[i].typeID
+		if id == invalidTypeID {
+			index := slices.IndexFunc(r.Parameters, func(p TemplateParameter) bool { return p.Name == fields[i].Type })
+			if index < 0 {
+				return nil, false
+			}
+			id = r.Parameters[index].typeID
+		}
+		fields[i].typeID = c.substituteCanonical(id, bindings, nil)
+		if fields[i].typeID == invalidTypeID {
+			return nil, false
+		}
+		fields[i].TypeRef = c.ref(fields[i].typeID)
 	}
 	return fields, true
 }
@@ -291,6 +519,10 @@ func (c *checker) templateConstruct(e *Expr, env map[string]checkedExpression, i
 	r := c.templateByName(name)
 	if r == nil {
 		return checkedExpression{}, false
+	}
+	if r.Kind == "enum" {
+		c.diagnostic("EF127", "generic enum construction is unavailable", e.Span)
+		return c.checkedData("invalid"), true
 	}
 	result := c.checkedData("invalid")
 	if len(e.Fields) != len(r.Fields) || len(e.Args) != 0 {

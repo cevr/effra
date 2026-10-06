@@ -2262,11 +2262,17 @@ func (c *checker) check() {
 	for _, record := range c.program.Records {
 		claimData(record.Name, record.Span)
 		c.records[record.Name] = record
+		if len(record.Parameters) > 0 {
+			continue
+		}
 		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "record", Name: record.Name, Identity: c.declarationIdentity("record", "module", record.Name), Fields: record.Fields, Span: record.Span})
 	}
 	for _, enum := range c.program.Enums {
 		claimData(enum.Name, enum.Span)
 		c.enums[enum.Name] = enum
+		if len(enum.Parameters) > 0 {
+			continue
+		}
 		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "enum", Name: enum.Name, Identity: c.declarationIdentity("enum", "module", enum.Name), Variants: enum.Variants, Span: enum.Span})
 	}
 	for _, decl := range c.program.ErrorDecls {
@@ -2277,6 +2283,9 @@ func (c *checker) check() {
 		}
 	}
 	for _, record := range c.program.Records {
+		if len(record.Parameters) > 0 {
+			continue
+		}
 		for i := range record.Fields {
 			record.Fields[i].TypeRef = c.typeRef(record.Fields[i].Type)
 			record.Fields[i].typeID = c.canonicalRef(record.Fields[i].TypeRef)
@@ -2284,6 +2293,9 @@ func (c *checker) check() {
 		}
 	}
 	for _, enum := range c.program.Enums {
+		if len(enum.Parameters) > 0 {
+			continue
+		}
 		for i := range enum.Variants {
 			for j := range enum.Variants[i].Fields {
 				enum.Variants[i].Fields[j].TypeRef = c.typeRef(enum.Variants[i].Fields[j].Type)
@@ -2292,13 +2304,20 @@ func (c *checker) check() {
 			}
 		}
 	}
+	c.resolveDataTemplateLayouts()
 	for _, decl := range c.program.ErrorDecls {
 		c.validateFields(decl.Fields, decl.Name+"Error", true)
 	}
 	for _, record := range c.program.Records {
+		if len(record.Parameters) > 0 {
+			continue
+		}
 		c.validateFields(record.Fields, record.Name, false)
 	}
 	for _, enum := range c.program.Enums {
+		if len(enum.Parameters) > 0 {
+			continue
+		}
 		variants := map[string]bool{}
 		for _, variant := range enum.Variants {
 			if variants[variant.Name] {

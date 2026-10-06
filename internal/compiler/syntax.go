@@ -71,9 +71,14 @@ type Variant struct {
 	Parenthesized bool    `json:"-"`
 	Span          Span    `json:"span"`
 }
-type Record struct {
+
+// DataDeclaration owns the common nominal identity and first-order layout for
+// records and closed enums. The checker keeps their distinct declaration kinds.
+type DataDeclaration struct {
+	Kind         string              `json:"-"`
 	Name         string              `json:"name"`
 	Fields       []Field             `json:"fields,omitempty"`
+	Variants     []Variant           `json:"variants,omitempty"`
 	Span         Span                `json:"span"`
 	Module       string              `json:"-"`
 	SourceID     string              `json:"-"`
@@ -81,11 +86,8 @@ type Record struct {
 	EmissionName string              `json:"-"`
 	Parameters   []TemplateParameter `json:"-"`
 }
-type Enum struct {
-	Name     string    `json:"name"`
-	Variants []Variant `json:"variants"`
-	Span     Span      `json:"span"`
-}
+type Record = DataDeclaration
+type Enum = DataDeclaration
 type ErrorDecl struct {
 	Name   string  `json:"name"`
 	Fields []Field `json:"fields,omitempty"`
@@ -444,7 +446,7 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			start := p.peek().span
 			p.take()
 			name := p.name()
-			record := &Record{Name: name.text, Span: name.span}
+			record := &Record{Kind: "record", Name: name.text, Span: name.span}
 			if p.accept("<") {
 				record.Parameters = p.templateParameters()
 			}
@@ -456,8 +458,11 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			start := p.peek().span
 			p.take()
 			name := p.name()
+			e := &Enum{Kind: "enum", Name: name.text, Span: name.span}
+			if p.accept("<") {
+				e.Parameters = p.templateParameters()
+			}
 			p.expect("{")
-			e := &Enum{Name: name.text, Span: name.span}
 			for !p.accept("}") {
 				variantName := p.name()
 				variant := Variant{Name: variantName.text, Span: variantName.span}
