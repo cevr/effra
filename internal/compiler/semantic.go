@@ -10,8 +10,11 @@ import (
 )
 
 type ValueType struct {
-	Success     string               `json:"success"` // compatibility projection of Type
-	Type        TypeRef              `json:"type"`    // canonical identity projection
+	Success string  `json:"success"` // compatibility projection of Type
+	Type    TypeRef `json:"type"`    // canonical identity projection
+	// Contract is the complete checked value identity. Type remains the
+	// success/result accessor used by compatibility clients.
+	Contract    TypeRef              `json:"contract,omitempty"`
 	Identity    string               `json:"identity,omitempty"`
 	Effect      bool                 `json:"effect"`
 	Errors      []string             `json:"failures"`
@@ -24,10 +27,6 @@ type ValueType struct {
 	Ownership   []OwnershipFact      `json:"ownership,omitempty"`
 	Captures    []OwnershipFact      `json:"captures,omitempty"`
 	Child       []OwnershipFact      `json:"childOwnership,omitempty"`
-	typeID      TypeID
-	valueID     TypeID
-	failureID   RowID
-	serviceID   RowID
 }
 
 // EvaluationRows describe requirements incurred while evaluating an
@@ -78,13 +77,15 @@ func newApplicationIdentity(callee string, arguments []TypeRef, result TypeRef, 
 }
 
 type TypeNode struct {
-	ID         string   `json:"id"`
-	Kind       string   `json:"kind"`
-	Name       string   `json:"name,omitempty"`
-	Args       []string `json:"args,omitempty"`
-	Result     string   `json:"result,omitempty"`
-	FailureRow string   `json:"failureRow,omitempty"`
-	ServiceRow string   `json:"serviceRow,omitempty"`
+	ID          string   `json:"id"`
+	Kind        string   `json:"kind"`
+	Name        string   `json:"name,omitempty"`
+	Declaration string   `json:"declaration,omitempty"`
+	Mode        string   `json:"callableKind,omitempty"`
+	Args        []string `json:"args,omitempty"`
+	Result      string   `json:"result,omitempty"`
+	FailureRow  string   `json:"failureRow,omitempty"`
+	ServiceRow  string   `json:"serviceRow,omitempty"`
 }
 
 type RowNode struct {
@@ -154,24 +155,31 @@ type OwnershipFact struct {
 // provider, opaque-handle and ownership wrappers can be added without
 // changing the public contract shape, with Args carrying nested identities.
 type TypeRef struct {
-	ID   string `json:"ref,omitempty"`
-	Kind string `json:"kind"`
-	Name string `json:"name,omitempty"`
+	ID          string `json:"ref,omitempty"`
+	Kind        string `json:"kind"`
+	Name        string `json:"name,omitempty"`
+	Scope       string `json:"scope,omitempty"`
+	Declaration string `json:"declaration,omitempty"`
 	// Args is a one-hop in-process compatibility view. The serialized `args`
 	// field and Result.Types table carry the complete shared graph by reference,
 	// so repeated children never trigger recursive DAG expansion at a boundary.
-	Args   []TypeRef `json:"-"`
-	ArgIDs []string  `json:"args,omitempty"`
+	Args       []TypeRef `json:"-"`
+	ArgIDs     []string  `json:"args,omitempty"`
+	Result     string    `json:"result,omitempty"`
+	FailureRow string    `json:"failureRow,omitempty"`
+	ServiceRow string    `json:"serviceRow,omitempty"`
 }
 
 type semanticTypeNode struct {
-	ID         TypeID
-	Kind       string
-	Name       string
-	Args       []TypeID
-	Result     TypeID
-	FailureRow RowID
-	ServiceRow RowID
+	ID          TypeID
+	Kind        string
+	Name        string
+	Declaration string
+	Mode        string
+	Args        []TypeID
+	Result      TypeID
+	FailureRow  RowID
+	ServiceRow  RowID
 }
 
 type TypeID uint32
@@ -222,45 +230,163 @@ type Result struct {
 }
 
 type ExpressionFacts struct {
+	Checked    checkedExpression
 	Type       ValueType
 	Evaluation EvaluationRows
 	Executed   EvaluationRows
 }
+
+// checkedExpression is the checker-owned expression fact. ValueType is only
+// produced from this record at public/query boundaries; expression checking
+// never mutates compatibility fields to establish semantic relations.
+type checkedExpression struct {
+	value      CheckedValue
+	evaluation ExpressionEvaluation
+	executed   ExpressionEvaluation
+	child      []OwnershipFact
+	// callableDecl is projection metadata only. Its type and row facts are
+	// never read for checking; those facts come from value's canonical node.
+	callableDecl *Function
+	application  *ApplicationIdentity
+	identity     string
+}
+
+func (e checkedExpression) contractID() TypeID      { return e.value.contractID() }
+func (e checkedExpression) resultID() TypeID        { return e.value.resultID() }
+func (e checkedExpression) node() *semanticTypeNode { return e.value.node() }
+func (e checkedExpression) kind() checkedValueKind  { return e.value.kind() }
+func (e checkedExpression) failureRow() RowID       { return e.value.failureRow() }
+func (e checkedExpression) serviceRow() RowID       { return e.value.serviceRow() }
+func (e checkedExpression) isEffect() bool {
+	return e.kind() == checkedRecipeValue || e.kind() == checkedProviderRecipeValue
+}
+func (e checkedExpression) ownershipFacts() []OwnershipFact { return e.value.ownershipFacts() }
+func (e checkedExpression) captureFacts() []OwnershipFact   { return e.value.captureFacts() }
+func (e *checkedExpression) setOwnership(facts []OwnershipFact) {
+	e.value = e.value.withOccurrenceFacts(facts, e.captureFacts())
+}
+func (e *checkedExpression) setCaptures(facts []OwnershipFact) {
+	e.value = e.value.withOccurrenceFacts(e.ownershipFacts(), facts)
+}
+
+func (e checkedExpression) clone() checkedExpression {
+	copy := e
+	copy.child = cloneFacts(e.child)
+	if e.application != nil {
+		application := *e.application
+		application.Arguments = append([]TypeRef{}, e.application.Arguments...)
+		copy.application = &application
+	}
+	return copy
+}
+
 type checker struct {
-	program             *Program
-	result              *Result
-	functions           map[string]*Function
-	services            map[string]*Service
-	providers           map[string]*Provider
-	records             map[string]*Record
-	enums               map[string]*Enum
-	errors              map[string]*ErrorDecl
-	typeIntern          map[string]*semanticTypeNode
-	typeNodes           []*semanticTypeNode
-	rowIntern           map[string]RowID
-	rows                []RowNode
-	nextTypeID          TypeID
-	nextRowID           RowID
-	recordFacts         bool
-	typePublicIDs       map[TypeID]string
-	typePublicToID      map[string]TypeID
-	reasons             []Contribution
-	region              string
-	suppressDiagnostics bool
+	program                 *Program
+	result                  *Result
+	functions               map[string]*Function
+	services                map[string]*Service
+	providers               map[string]*Provider
+	records                 map[string]*Record
+	enums                   map[string]*Enum
+	errors                  map[string]*ErrorDecl
+	typeIntern              map[string]*semanticTypeNode
+	typeNodes               []*semanticTypeNode
+	rowIntern               map[string]RowID
+	rows                    []RowNode
+	values                  *checkedValueArena
+	nextTypeID              TypeID
+	nextRowID               RowID
+	recordFacts             bool
+	typePublicIDs           map[TypeID]string
+	typePublicToID          map[string]TypeID
+	declarationFingerprints map[string]string
+	reasons                 []Contribution
+	region                  string
+	suppressDiagnostics     bool
 }
 
 const maxTypeProjectionNodes = 4096
 
-func value(success string) ValueType {
-	ref := typeRef(success)
-	return ValueType{Success: success, Type: ref, Identity: ref.ID, Errors: []string{}, Services: []string{}, Ownership: ownershipForType(success)}
+func (c *checker) checkedData(name string) checkedExpression {
+	return c.checkedDataID(c.canonicalRef(typeRef(name)), nil, nil)
 }
 
-func ownershipForType(success string) []OwnershipFact {
-	if success == "File" || strings.HasPrefix(success, "Fiber:") {
-		return []OwnershipFact{{Status: "unknown", Origin: "unknown"}}
+func (c *checker) checkedDataID(id TypeID, ownership, captures []OwnershipFact) checkedExpression {
+	if id == invalidTypeID {
+		id = c.canonicalRef(typeRef("invalid"))
 	}
-	return nil
+	node := c.node(id)
+	if node != nil && node.Kind == "provider" {
+		return checkedExpression{value: c.values.provider(id, ownership, captures)}
+	}
+	return checkedExpression{value: c.values.data(id, ownership, captures)}
+}
+
+func (c *checker) checkedProvider(p *Provider, recipe bool) checkedExpression {
+	providerID := c.canonicalRef(providerTypeRef(p))
+	if recipe {
+		failure := c.internRow(nil)
+		service := c.internRow(p.Services)
+		return checkedExpression{value: c.values.providerRecipe(providerID, failure, service, nil, nil)}
+	}
+	return checkedExpression{value: c.values.provider(providerID, nil, nil)}
+}
+
+func (c *checker) checkedFunction(f *Function, declaration, recipe bool) checkedExpression {
+	result := c.canonicalRef(typeRef(f.Return))
+	if result == invalidTypeID {
+		result = c.canonicalRef(typeRef("invalid"))
+	}
+	parameters := c.functionParameterTypeIDs(f)
+	kind := checkedPureCallable
+	if f.Effect {
+		kind = checkedEffectCallable
+	}
+	failure, service := emptyRowID, emptyRowID
+	if f.Effect {
+		failure = c.internRow(f.Errors)
+		service = c.internRow(f.Services)
+	}
+	var checked CheckedValue
+	switch {
+	case declaration:
+		checked = c.values.callable(result, parameters, kind, failure, service, f.Ownership, f.Captures)
+	case recipe && f.Effect:
+		checked = c.values.recipe(result, parameters, kind, failure, service, f.Ownership, f.Captures)
+	default:
+		checked = c.values.data(result, f.Ownership, f.Captures)
+	}
+	resultExpression := checkedExpression{value: checked, identity: f.Identity}
+	if declaration || (recipe == false && checked.kind() == checkedCallableValue) {
+		resultExpression.callableDecl = f
+	}
+	return resultExpression
+}
+
+func (c *checker) functionParameterTypeIDs(f *Function) []TypeID {
+	parameters := make([]TypeID, 0, len(f.Params))
+	for i := range f.Params {
+		id := f.Params[i].typeID
+		if id == invalidTypeID {
+			ref := f.Params[i].TypeRef
+			if ref.Kind == "" {
+				ref = typeRef(f.Params[i].Type)
+			}
+			id = c.canonicalRef(ref)
+		}
+		if id == invalidTypeID {
+			id = c.canonicalRef(typeRef("invalid"))
+		}
+		parameters = append(parameters, id)
+	}
+	return parameters
+}
+
+func (c *checker) checkedHandler(f *Function) checkedExpression {
+	result := c.canonicalRef(typeRef("Handler"))
+	parameters := c.functionParameterTypeIDs(f)
+	checked := c.values.callable(result, parameters, checkedEffectCallable, c.internRow(f.Errors), c.internRow(f.Services), f.Ownership, f.Captures)
+	return checkedExpression{value: checked, callableDecl: f, identity: f.Identity}
 }
 
 func (c *checker) ownershipPaths(typeName, prefix string, seen map[string]bool) []string {
@@ -958,6 +1084,22 @@ func preservesCompleteWildcardArgument(summary, argument OwnershipFact) bool {
 }
 
 func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) []OwnershipFact {
+	ownership := make([][]OwnershipFact, len(args))
+	for i := range args {
+		ownership[i] = args[i].Ownership
+	}
+	return instantiateOwnershipFacts(facts, params, ownership)
+}
+
+func instantiateCheckedFacts(facts []OwnershipFact, params []Param, args []checkedExpression) []OwnershipFact {
+	ownership := make([][]OwnershipFact, len(args))
+	for i := range args {
+		ownership[i] = args[i].ownershipFacts()
+	}
+	return instantiateOwnershipFacts(facts, params, ownership)
+}
+
+func instantiateOwnershipFacts(facts []OwnershipFact, params []Param, args [][]OwnershipFact) []OwnershipFact {
 	if len(facts) == 0 {
 		return nil
 	}
@@ -969,14 +1111,14 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 				continue
 			}
 			matched = true
-			if i >= len(args) || len(args[i].Ownership) == 0 {
+			if i >= len(args) || len(args[i]) == 0 {
 				out = append(out, OwnershipFact{Path: fact.Path, Status: "unknown", Origin: "helper"})
 				continue
 			}
-			hasConcreteSource := slices.ContainsFunc(args[i].Ownership, func(argument OwnershipFact) bool {
+			hasConcreteSource := slices.ContainsFunc(args[i], func(argument OwnershipFact) bool {
 				return !isWildcardPath(argument.Path) && argument.Path == fact.source
 			})
-			for _, argument := range args[i].Ownership {
+			for _, argument := range args[i] {
 				if hasConcreteSource && isWildcardPath(argument.Path) && canSkipWildcardForSource(argument, fact.source) {
 					continue
 				}
@@ -1016,7 +1158,7 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 				}
 				out = append(out, copy)
 			}
-			if !slices.ContainsFunc(args[i].Ownership, func(argument OwnershipFact) bool {
+			if !slices.ContainsFunc(args[i], func(argument OwnershipFact) bool {
 				return ownershipPathMatches(argument.Path, fact.source)
 			}) {
 				out = append(out, OwnershipFact{Path: fact.Path, Status: "unknown", Origin: "helper"})
@@ -1821,7 +1963,7 @@ func (c *checker) rejectOwnedEscape(facts []OwnershipFact, span Span) {
 	}
 }
 
-func (c *checker) withRegion(region string, fn func() ValueType) ValueType {
+func (c *checker) withRegion(region string, fn func() checkedExpression) checkedExpression {
 	previous := c.region
 	c.region = region
 	defer func() { c.region = previous }()
@@ -1861,27 +2003,23 @@ func typeRef(name string) TypeRef {
 	return ref
 }
 func contract(f *Function) ValueType {
-	v := value(f.Return)
-	v.Effect = f.Effect
-	v.Errors = normalized(f.Errors)
-	v.Services = normalized(f.Services)
-	kind := "pure"
-	if f.Effect {
-		kind = "effect"
-	}
-	callable := &CallableType{ID: "function:" + f.Name, Kind: kind, Parameters: append([]Param{}, f.Params...), Result: v.Type, Failures: append([]string{}, v.Errors...), Requirements: append([]string{}, v.Services...)}
-	v.Callable = callable
-	v.Identity = callable.ID
-	return v
+	// Graph construction is a public/query boundary. The checked declaration
+	// projection is already canonical; this helper remains for compatibility
+	// with graph callers and older package tests.
+	return publicValue(f.Contract)
 }
+
+func providerTypeRef(p *Provider) TypeRef {
+	ref := typeRef("provider:" + p.Service)
+	ref.Declaration = "provider:" + currentModuleIdentity + ":" + p.Name
+	return ref
+}
+
 func providerContract(p *Provider) ValueType {
-	return ValueType{
-		Success:  "provider:" + p.Service,
-		Type:     typeRef("provider:" + p.Service),
-		Effect:   true,
-		Errors:   []string{},
-		Services: normalized(p.Services),
-	}
+	// Provider contracts are populated from the canonical provider-recipe
+	// projection during checking. Keep this as a projection shim for graph and
+	// compatibility callers; it never reconstructs a semantic contract.
+	return publicValue(p.Contract)
 }
 func normalized(names []string) []string {
 	out := append([]string{}, names...)
@@ -1929,22 +2067,24 @@ func CompileAt(source, target, dir string) *Result {
 	r.Program = program
 	r.loadImports(dir)
 	c := &checker{
-		program:        program,
-		result:         r,
-		functions:      map[string]*Function{},
-		services:       map[string]*Service{},
-		providers:      map[string]*Provider{},
-		records:        map[string]*Record{},
-		enums:          map[string]*Enum{},
-		errors:         map[string]*ErrorDecl{},
-		typeIntern:     map[string]*semanticTypeNode{},
-		rowIntern:      map[string]RowID{},
-		nextTypeID:     1,
-		nextRowID:      1,
-		typePublicIDs:  map[TypeID]string{},
-		typePublicToID: map[string]TypeID{},
-		region:         "invocation",
+		program:                 program,
+		result:                  r,
+		functions:               map[string]*Function{},
+		services:                map[string]*Service{},
+		providers:               map[string]*Provider{},
+		records:                 map[string]*Record{},
+		enums:                   map[string]*Enum{},
+		errors:                  map[string]*ErrorDecl{},
+		typeIntern:              map[string]*semanticTypeNode{},
+		rowIntern:               map[string]RowID{},
+		nextTypeID:              1,
+		nextRowID:               1,
+		typePublicIDs:           map[TypeID]string{},
+		typePublicToID:          map[string]TypeID{},
+		declarationFingerprints: map[string]string{},
+		region:                  "invocation",
 	}
+	c.values = newCheckedValueArena(c)
 	checkStart := time.Now()
 	c.check()
 	c.publishTypeNodes()
@@ -1957,7 +2097,6 @@ func CompileAt(source, target, dir string) *Result {
 func (c *checker) publishTypeNodes() {
 	if len(c.typeNodes) > maxTypeProjectionNodes {
 		c.result.TypeProjectionError = fmt.Sprintf("canonical type projection exceeds %d nodes", maxTypeProjectionNodes)
-		c.diagnostic("EF130", c.result.TypeProjectionError, Span{})
 		return
 	}
 	nodes := append([]*semanticTypeNode{}, c.typeNodes...)
@@ -1983,7 +2122,7 @@ func (c *checker) publishTypeNodes() {
 		if node.Result != invalidTypeID {
 			result = c.typeNodeID(node.Result)
 		}
-		c.result.Types = append(c.result.Types, TypeNode{ID: c.typeNodeID(node.ID), Kind: node.Kind, Name: node.Name, Args: args, Result: result, FailureRow: rowFailure, ServiceRow: rowService})
+		c.result.Types = append(c.result.Types, TypeNode{ID: c.typeNodeID(node.ID), Kind: node.Kind, Name: node.Name, Declaration: node.Declaration, Mode: node.Mode, Args: args, Result: result, FailureRow: rowFailure, ServiceRow: rowService})
 	}
 	rows := append([]RowNode{}, c.rows...)
 	slices.SortFunc(rows, func(a, b RowNode) int { return strings.Compare(a.ID, b.ID) })
@@ -2040,17 +2179,17 @@ func (c *checker) check() {
 		if c.errors[decl.Name] == nil {
 			c.errors[decl.Name] = decl
 		}
-		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "error", Name: decl.Name, Fields: decl.Fields, Span: decl.Span})
+		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "error", Name: decl.Name, Identity: c.declarationIdentity("error", "module", decl.Name), Fields: decl.Fields, Span: decl.Span})
 	}
 	for _, record := range c.program.Records {
 		claimData(record.Name, record.Span)
 		c.records[record.Name] = record
-		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "record", Name: record.Name, Fields: record.Fields, Span: record.Span})
+		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "record", Name: record.Name, Identity: c.declarationIdentity("record", "module", record.Name), Fields: record.Fields, Span: record.Span})
 	}
 	for _, enum := range c.program.Enums {
 		claimData(enum.Name, enum.Span)
 		c.enums[enum.Name] = enum
-		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "enum", Name: enum.Name, Variants: enum.Variants, Span: enum.Span})
+		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "enum", Name: enum.Name, Identity: c.declarationIdentity("enum", "module", enum.Name), Variants: enum.Variants, Span: enum.Span})
 	}
 	for _, decl := range c.program.ErrorDecls {
 		for i := range decl.Fields {
@@ -2093,14 +2232,24 @@ func (c *checker) check() {
 		return a.Span.Offset - b.Span.Offset
 	})
 	for _, s := range c.program.Services {
+		for _, f := range s.Methods {
+			f.Owner = "service:" + s.Name
+			f.Identity = c.declarationIdentity("function", f.Owner, f.Name)
+		}
 		claim(s.Name, s.Span)
 		c.services[s.Name] = s
 	}
 	for _, p := range c.program.Providers {
+		for _, f := range p.Methods {
+			f.Owner = "provider:" + p.Name
+			f.Identity = c.declarationIdentity("function", f.Owner, f.Name)
+		}
 		claim(p.Name, p.Span)
 		c.providers[p.Name] = p
 	}
 	for _, f := range c.program.Functions {
+		f.Owner = "module"
+		f.Identity = c.declarationIdentity("function", f.Owner, f.Name)
 		claim(f.Name, f.Span)
 		c.functions[f.Name] = f
 	}
@@ -2330,6 +2479,7 @@ func (c *checker) providerSignature(p *Provider) {
 			c.diagnostic("EF102", "unknown service "+name, p.Span)
 		}
 	}
+	p.Contract = publicValue(c.projectChecked(c.checkedProvider(p, true)))
 }
 
 // providerFunction checks a method with the constructor's captured
@@ -2477,6 +2627,14 @@ func (c *checker) typeNodeID(id TypeID) string {
 		key.WriteString(currentNode.Kind)
 		key.WriteByte(':')
 		key.WriteString(currentNode.Name)
+		if currentNode.Declaration != "" {
+			key.WriteString("#")
+			key.WriteString(currentNode.Declaration)
+		}
+		if currentNode.Mode != "" {
+			key.WriteString("~")
+			key.WriteString(currentNode.Mode)
+		}
 		for _, arg := range currentNode.Args {
 			key.WriteByte('[')
 			key.WriteString(publicID(arg, visiting))
@@ -2497,7 +2655,7 @@ func (c *checker) typeNodeID(id TypeID) string {
 		delete(visiting, current)
 		sum := sha256.Sum256([]byte(key.String()))
 		prefix := "t:"
-		if currentNode.Kind == "callable" {
+		if currentNode.Kind == "callable" || currentNode.Kind == "recipe" || currentNode.Kind == "providerRecipe" {
 			prefix = "v:"
 		}
 		result := prefix + hex.EncodeToString(sum[:8])
@@ -2555,6 +2713,9 @@ func (c *checker) internRow(labels []string) RowID {
 }
 
 func (c *checker) canonicalRef(ref TypeRef) TypeID {
+	if ref.Scope != "" && c.result != nil && ref.Scope != c.result.Revision {
+		return invalidTypeID
+	}
 	// Canonical projections are admitted by their same-arena public ID. The
 	// visible kind/name and one-hop Args are inspection projections only; using
 	// them to rebuild a nested reference would silently truncate a shared DAG.
@@ -2602,11 +2763,90 @@ func (c *checker) canonicalRef(ref TypeRef) TypeID {
 			}
 		}
 	}
-	return c.internType(ref.Kind, ref.Name, args)
+	declaration := ref.Declaration
+	if declaration == "" {
+		declaration = c.declarationQualifier(ref.Kind, ref.Name)
+	}
+	return c.internTypeWithDeclaration(ref.Kind, ref.Name, args, declaration)
 }
 
 func (c *checker) internType(kind, name string, args []TypeID) TypeID {
+	return c.internTypeWithDeclaration(kind, name, args, c.declarationQualifier(kind, name))
+}
+
+const currentModuleIdentity = "module:file"
+
+// declarationQualifier is intentionally bounded: nominal identity uses the
+// current file sentinel, declaration owner/name, and a shallow declaration
+// fingerprint. It never recursively expands a type graph or uses the mutable
+// semantic revision as an identity component.
+func (c *checker) declarationQualifier(kind, name string) string {
+	if kind != "record" && kind != "enum" && kind != "error" && kind != "provider" {
+		return ""
+	}
+	fingerprint := c.declarationFingerprint(kind, name)
+	return kind + ":" + currentModuleIdentity + ":" + name + ":" + fingerprint
+}
+
+func (c *checker) declarationIdentity(kind, owner, name string) string {
+	return kind + ":" + currentModuleIdentity + ":" + owner + ":" + name
+}
+
+func (c *checker) declarationFingerprint(kind, name string) string {
 	key := kind + "\x00" + name
+	if c.declarationFingerprints == nil {
+		c.declarationFingerprints = map[string]string{}
+	}
+	if fingerprint, ok := c.declarationFingerprints[key]; ok {
+		return fingerprint
+	}
+	var b strings.Builder
+	b.WriteString(kind)
+	b.WriteByte(':')
+	b.WriteString(name)
+	appendField := func(field Field) {
+		b.WriteByte('|')
+		b.WriteString(field.Name)
+		b.WriteByte(':')
+		b.WriteString(field.Type)
+	}
+	switch kind {
+	case "record":
+		if declaration := c.records[name]; declaration != nil {
+			for _, field := range declaration.Fields {
+				appendField(field)
+			}
+		}
+	case "enum":
+		if declaration := c.enums[name]; declaration != nil {
+			for _, variant := range declaration.Variants {
+				b.WriteByte('|')
+				b.WriteString(variant.Name)
+				for _, field := range variant.Fields {
+					appendField(field)
+				}
+			}
+		}
+	case "error":
+		if declaration := c.errors[name]; declaration != nil {
+			for _, field := range declaration.Fields {
+				appendField(field)
+			}
+		}
+	case "provider":
+		if declaration := c.providers[name]; declaration != nil {
+			b.WriteByte('|')
+			b.WriteString(declaration.Service)
+		}
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	fingerprint := hex.EncodeToString(sum[:8])
+	c.declarationFingerprints[key] = fingerprint
+	return fingerprint
+}
+
+func (c *checker) internTypeWithDeclaration(kind, name string, args []TypeID, declaration string) TypeID {
+	key := kind + "\x00" + name + "\x00" + declaration
 	for _, arg := range args {
 		key += fmt.Sprintf("\x00%d", arg)
 	}
@@ -2615,7 +2855,7 @@ func (c *checker) internType(kind, name string, args []TypeID) TypeID {
 	}
 	id := c.nextTypeID
 	c.nextTypeID++
-	node := &semanticTypeNode{ID: id, Kind: kind, Name: name, Args: append([]TypeID{}, args...)}
+	node := &semanticTypeNode{ID: id, Kind: kind, Name: name, Declaration: declaration, Args: append([]TypeID{}, args...)}
 	c.typeIntern[key] = node
 	c.typeNodes = append(c.typeNodes, node)
 	return id
@@ -2632,12 +2872,24 @@ func (c *checker) refForID(id TypeID, depth int) TypeRef {
 	if node == nil {
 		return TypeRef{Kind: "invalid"}
 	}
-	ref := TypeRef{ID: c.typeNodeID(id), Kind: node.Kind, Name: node.Name}
+	ref := TypeRef{ID: c.typeNodeID(id), Kind: node.Kind, Name: node.Name, Declaration: node.Declaration}
+	if c.result != nil {
+		ref.Scope = c.result.Revision
+	}
 	for _, arg := range node.Args {
 		ref.ArgIDs = append(ref.ArgIDs, c.typeNodeID(arg))
 		if depth == 0 {
 			ref.Args = append(ref.Args, c.shallowRefForID(arg))
 		}
+	}
+	if node.Result != invalidTypeID {
+		ref.Result = c.typeNodeID(node.Result)
+	}
+	if node.FailureRow != emptyRowID {
+		ref.FailureRow = c.rowNodeID(node.FailureRow)
+	}
+	if node.ServiceRow != emptyRowID {
+		ref.ServiceRow = c.rowNodeID(node.ServiceRow)
 	}
 	return ref
 }
@@ -2650,7 +2902,10 @@ func (c *checker) shallowRefForID(id TypeID) TypeRef {
 	if node == nil {
 		return TypeRef{Kind: "invalid"}
 	}
-	ref := TypeRef{ID: c.typeNodeID(id), Kind: node.Kind, Name: node.Name}
+	ref := TypeRef{ID: c.typeNodeID(id), Kind: node.Kind, Name: node.Name, Declaration: node.Declaration}
+	if c.result != nil {
+		ref.Scope = c.result.Revision
+	}
 	for _, arg := range node.Args {
 		ref.ArgIDs = append(ref.ArgIDs, c.typeNodeID(arg))
 	}
@@ -2683,47 +2938,165 @@ func (c *checker) displayTypeID(id TypeID) string {
 	return node.Name
 }
 
-func (c *checker) valueForTypeID(id TypeID) ValueType {
-	ref := c.ref(id)
-	success := c.displayTypeID(id)
-	return ValueType{Success: success, Type: ref, typeID: id, Identity: c.typeNodeID(id), Errors: []string{}, Services: []string{}, Ownership: ownershipForType(success)}
+func (c *checker) projectEvaluation(e ExpressionEvaluation) EvaluationRows {
+	return EvaluationRows{Failures: c.rowLabels(e.failureRowID()), Requirements: c.rowLabels(e.serviceRowID())}
+}
+
+func (c *checker) projectChecked(e checkedExpression) ValueType {
+	resultID := e.resultID()
+	contractID := e.contractID()
+	if resultID == invalidTypeID || contractID == invalidTypeID {
+		return c.projectChecked(c.checkedData("invalid"))
+	}
+	result := c.ref(resultID)
+	contract := c.ref(contractID)
+	shapeID := resultID
+	if e.kind() == checkedFiberValue {
+		shapeID = contractID
+	}
+	v := ValueType{
+		Success: c.displayTypeID(resultID),
+		// Type is the value shape used by compatibility clients. A Fiber keeps
+		// its wrapper shape; recipes expose their eventual result shape while
+		// Contract carries the complete deferred contract.
+		Type:     c.ref(shapeID),
+		Contract: contract,
+		Identity: e.identity,
+		// Callable declarations expose their declared callable mode for the
+		// compatibility projection. Expression values derive execution category
+		// solely from the canonical recipe/provider-recipe node above.
+		Effect:     e.isEffect() || (e.callableDecl != nil && e.callableDecl.Effect),
+		Errors:     c.rowLabels(e.failureRow()),
+		Services:   c.rowLabels(e.serviceRow()),
+		FailureRow: c.rowNodeID(e.failureRow()),
+		ServiceRow: c.rowNodeID(e.serviceRow()),
+		Evaluation: c.projectEvaluation(e.evaluation),
+		Ownership:  e.ownershipFacts(),
+		Captures:   e.captureFacts(),
+		Child:      cloneFacts(e.child),
+	}
+	if v.Identity == "" {
+		v.Identity = c.typeNodeID(contractID)
+	}
+	if e.callableDecl != nil {
+		callable := callableIdentity(c, e.callableDecl)
+		callable.Failures = c.rowLabels(e.failureRow())
+		callable.Requirements = c.rowLabels(e.serviceRow())
+		callable.Result = result
+		callable.Signature = c.typeNodeID(contractID)
+		v.Callable = callable
+	}
+	if e.application != nil {
+		application := *e.application
+		application.Arguments = append([]TypeRef{}, e.application.Arguments...)
+		v.Application = &application
+	}
+	return v
+}
+
+func (c *checker) recontractRows(e checkedExpression, failure, service RowID) CheckedValue {
+	node := e.node()
+	if node == nil {
+		return e.value
+	}
+	switch node.Kind {
+	case "recipe":
+		return c.values.recipe(node.Result, append([]TypeID{}, node.Args...), e.value.callableKind(), failure, service, e.ownershipFacts(), e.captureFacts())
+	case "providerRecipe":
+		return c.values.providerRecipe(node.Result, failure, service, e.ownershipFacts(), e.captureFacts())
+	case "callable":
+		return c.values.callable(node.Result, append([]TypeID{}, node.Args...), e.value.callableKind(), failure, service, e.ownershipFacts(), e.captureFacts())
+	case "fiber":
+		return c.values.fiber(e.resultID(), failure, e.ownershipFacts(), e.captureFacts())
+	case "provider":
+		return c.values.provider(e.contractID(), e.ownershipFacts(), e.captureFacts())
+	default:
+		if failure == emptyRowID && service == emptyRowID {
+			return c.values.data(e.resultID(), e.ownershipFacts(), e.captureFacts())
+		}
+		return c.values.recipe(e.resultID(), nil, checkedEffectCallable, failure, service, e.ownershipFacts(), e.captureFacts())
+	}
+}
+
+func (c *checker) invocationContract(e checkedExpression, effect bool) checkedExpression {
+	if !effect {
+		return e
+	}
+	e.value = c.recontractRows(e, e.evaluation.failureRowID(), e.evaluation.serviceRowID())
+	return e
 }
 
 func (c *checker) typeRef(name string) TypeRef {
 	return c.ref(c.canonicalRef(typeRef(name)))
 }
 
-func (c *checker) sameType(actual ValueType, expected string) bool {
-	if actual.typeID == invalidTypeID {
-		actual = c.canonicalValue(actual)
-	}
+func (c *checker) sameType(actual checkedExpression, expected string) bool {
 	expectedID := c.canonicalRef(typeRef(expected))
-	return actual.typeID == expectedID || actual.typeID == c.canonicalRef(typeRef("never"))
+	return actual.resultID() == expectedID || actual.resultID() == c.canonicalRef(typeRef("never"))
 }
 
-func (c *checker) sameValues(actual, expected ValueType) bool {
-	if actual.typeID == invalidTypeID {
-		actual = c.canonicalValue(actual)
-	}
-	if expected.typeID == invalidTypeID {
-		expected = c.canonicalValue(expected)
-	}
-	return actual.typeID == expected.typeID || actual.typeID == c.canonicalRef(typeRef("never"))
+func (c *checker) sameValues(actual, expected checkedExpression) bool {
+	return c.sameContract(actual, expected)
 }
 
-func (c *checker) isKind(t ValueType, kind string) bool {
-	if t.typeID == invalidTypeID {
-		t = c.canonicalValue(t)
-	}
-	node := c.node(t.typeID)
-	return node != nil && node.Kind == kind
+func (c *checker) sameResultType(actual, expected checkedExpression) bool {
+	return actual.resultID() == expected.resultID() || actual.resultID() == c.canonicalRef(typeRef("never"))
 }
 
-func (c *checker) namedType(t ValueType) string {
-	if t.typeID == invalidTypeID {
-		t = c.canonicalValue(t)
+// sameContract compares complete checked values. Result compatibility is a
+// separate relation because a recipe and its eventual result can share a
+// success type while carrying entirely different rows and execution state.
+func (c *checker) sameContract(actual, expected checkedExpression) bool {
+	if actual.resultID() == c.canonicalRef(typeRef("never")) || expected.resultID() == c.canonicalRef(typeRef("never")) {
+		return true
 	}
-	node := c.node(t.typeID)
+	if actual.contractID() == expected.contractID() {
+		return true
+	}
+	left, right := actual.node(), expected.node()
+	if left == nil || right == nil || left.Kind != right.Kind {
+		return false
+	}
+	// Deferred recipes carry rows that are joined at control-flow boundaries.
+	// Their result and callable shape must agree; row differences are retained
+	// by joinContractRows instead of rejecting an already admitted branch.
+	switch left.Kind {
+	case "recipe", "providerRecipe", "callable":
+		return left.Mode == right.Mode && left.Result == right.Result && slices.Equal(left.Args, right.Args)
+	default:
+		return false
+	}
+}
+
+func (c *checker) joinContractRows(base, other checkedExpression) checkedExpression {
+	if !c.sameContract(base, other) {
+		return base
+	}
+	node := base.node()
+	if node == nil || (node.Kind != "recipe" && node.Kind != "providerRecipe" && node.Kind != "callable") {
+		return base
+	}
+	failure := c.internRow(union(c.rowLabels(base.failureRow()), c.rowLabels(other.failureRow())))
+	service := c.internRow(union(c.rowLabels(base.serviceRow()), c.rowLabels(other.serviceRow())))
+	base.value = c.recontractRows(base, failure, service)
+	return base
+}
+
+func (c *checker) isKind(t checkedExpression, kind string) bool {
+	node := t.node()
+	if node != nil && node.Kind == kind {
+		return true
+	}
+	// A deferred recipe's canonical node describes execution, while its result
+	// node carries the data shape used by result-sensitive checks such as
+	// GoResult.orFail. Keep this relation explicit instead of projecting a
+	// mutable public type back into the checker.
+	result := c.node(t.resultID())
+	return result != nil && result.Kind == kind
+}
+
+func (c *checker) namedType(t checkedExpression) string {
+	node := t.node()
 	if node == nil {
 		return ""
 	}
@@ -2733,15 +3106,16 @@ func (c *checker) namedType(t ValueType) string {
 	return ""
 }
 
-func (c *checker) hasRow(t ValueType, failure bool, label string) bool {
-	if t.failureID == emptyRowID && t.serviceID == emptyRowID {
-		t = c.canonicalValue(t)
-	}
-	id := t.serviceID
-	if failure {
-		id = t.failureID
-	}
+func (c *checker) hasRow(t checkedExpression, failure bool, label string) bool {
+	id := c.carriedRowID(t, failure)
 	return slices.Contains(c.rowLabels(id), label)
+}
+
+func (c *checker) carriedRowID(t checkedExpression, failure bool) RowID {
+	if failure {
+		return t.failureRow()
+	}
+	return t.serviceRow()
 }
 
 func (c *checker) rowDifference(actual, allowed []string) []string {
@@ -2750,111 +3124,78 @@ func (c *checker) rowDifference(actual, allowed []string) []string {
 	return difference(c.rowLabels(actualID), c.rowLabels(allowedID))
 }
 
-// canonicalValue is the only checker-side authority for a value's result
-// type. Success is updated from the canonical node solely for compatibility
-// with the original inspection/emission surface.
-func (c *checker) canonicalValue(t ValueType) ValueType {
-	id := t.typeID
-	if id == invalidTypeID {
-		if t.Type.Kind != "" {
-			id = c.canonicalRef(t.Type)
-		} else {
-			// This fallback is the source compatibility boundary for values made by
-			// older helpers. All values admitted to the checker leave this function
-			// with a canonical node ID.
-			id = c.canonicalRef(typeRef(t.Success))
-		}
+func (c *checker) internContract(kind, mode string, result TypeID, args []TypeID, failure, service RowID) TypeID {
+	key := "value\x00" + kind + "\x00" + mode + fmt.Sprintf("\x00%d\x00%d\x00%d", result, failure, service)
+	for _, arg := range args {
+		key += fmt.Sprintf("\x00%d", arg)
 	}
-	t.typeID = id
-	t.Type = c.ref(id)
-	t.Success = c.displayTypeID(id)
-	t.Errors = normalized(t.Errors)
-	t.Services = normalized(t.Services)
-	t.failureID = c.internRow(t.Errors)
-	t.serviceID = c.internRow(t.Services)
-	t.FailureRow = c.rowNodeID(t.failureID)
-	t.ServiceRow = c.rowNodeID(t.serviceID)
-	if t.Callable != nil {
-		for i := range t.Callable.Parameters {
-			paramID := t.Callable.Parameters[i].typeID
-			if paramID == invalidTypeID {
-				paramID = c.canonicalRef(t.Callable.Parameters[i].TypeRef)
-				if paramID == invalidTypeID {
-					paramID = c.canonicalRef(typeRef(t.Callable.Parameters[i].Type))
-				}
-			}
-			t.Callable.Parameters[i].typeID = paramID
-			t.Callable.Parameters[i].TypeRef = c.ref(paramID)
-		}
-		resultID := c.canonicalRef(t.Callable.Result)
-		if resultID == invalidTypeID {
-			resultID = id
-		}
-		t.Callable.Result = c.ref(resultID)
-		t.Callable.Failures = normalized(t.Callable.Failures)
-		t.Callable.Requirements = normalized(t.Callable.Requirements)
-		t.Callable.FailureRow = c.rowNodeID(c.internRow(t.Callable.Failures))
-		t.Callable.ServiceRow = c.rowNodeID(c.internRow(t.Callable.Requirements))
-		args := make([]TypeID, 0, len(t.Callable.Parameters))
-		for _, param := range t.Callable.Parameters {
-			args = append(args, param.typeID)
-		}
-		kind := t.Callable.Kind
-		if kind == "" {
-			kind = "pure"
-		}
-		key := "callable\x00" + kind + fmt.Sprintf("\x00%d", resultID)
+	if node, ok := c.typeIntern[key]; ok {
+		return node.ID
+	}
+	name := kind
+	if kind == "callable" {
+		publicKey := "callable\x00" + mode + "\x00" + c.typeNodeID(result)
 		for _, arg := range args {
-			key += fmt.Sprintf("\x00%d", arg)
+			publicKey += "\x00" + c.typeNodeID(arg)
 		}
-		key += fmt.Sprintf("\x00%t\x00%d\x00%d", t.Effect, c.internRow(t.Callable.Failures), c.internRow(t.Callable.Requirements))
-		if node, ok := c.typeIntern[key]; ok {
-			t.valueID = node.ID
-		} else {
-			valueID := c.nextTypeID
-			c.nextTypeID++
-			publicKey := "callable\x00" + kind + "\x00" + c.typeNodeID(resultID)
-			for _, arg := range args {
-				publicKey += "\x00" + c.typeNodeID(arg)
-			}
-			publicKey += "\x00!" + rowIdentityKey(t.Callable.Failures) + "\x00?" + rowIdentityKey(t.Callable.Requirements)
-			signatureSum := sha256.Sum256([]byte(publicKey))
-			node := &semanticTypeNode{ID: valueID, Kind: "callable", Name: "signature:" + hex.EncodeToString(signatureSum[:8]), Args: args, Result: resultID, FailureRow: c.internRow(t.Callable.Failures), ServiceRow: c.internRow(t.Callable.Requirements)}
-			c.typeIntern[key] = node
-			c.typeNodes = append(c.typeNodes, node)
-			t.valueID = valueID
-		}
-		t.Callable.Signature = c.typeNodeID(t.valueID)
-		if t.Identity == "" || t.Identity == c.typeNodeID(t.typeID) || strings.HasPrefix(t.Identity, "type:") || strings.HasPrefix(t.Identity, "legacy:") {
-			t.Identity = c.typeNodeID(t.valueID)
-		}
-	} else if t.Application == nil {
-		t.valueID = id
-		if t.Identity == "" || strings.HasPrefix(t.Identity, "type:") || strings.HasPrefix(t.Identity, "legacy:") {
-			t.Identity = c.typeNodeID(id)
-		}
+		publicKey += "\x00!" + rowIdentityKey(c.rowLabels(failure)) + "\x00?" + rowIdentityKey(c.rowLabels(service))
+		sum := sha256.Sum256([]byte(publicKey))
+		name = "signature:" + hex.EncodeToString(sum[:8])
 	}
-	return t
+	id := c.nextTypeID
+	c.nextTypeID++
+	node := &semanticTypeNode{ID: id, Kind: kind, Name: name, Mode: mode, Args: append([]TypeID{}, args...), Result: result, FailureRow: failure, ServiceRow: service}
+	c.typeIntern[key] = node
+	c.typeNodes = append(c.typeNodes, node)
+	return id
 }
 
-// publicValue is the projection stored in Result.Symbols. The checked syntax
-// tree retains internal IDs for the checker and query engine, while the public
-// symbol snapshot carries the already-resolved TypeRef/row projections. This
-// keeps JSON round trips and CLI/MCP semantic parity independent of private
-// interner bookkeeping.
+func (c *checker) internTypeWithRows(kind, name string, args []TypeID, failure, service RowID) TypeID {
+	key := "type\x00" + kind + "\x00" + name + fmt.Sprintf("\x00%d\x00%d", failure, service)
+	for _, arg := range args {
+		key += fmt.Sprintf("\x00%d", arg)
+	}
+	if node, ok := c.typeIntern[key]; ok {
+		return node.ID
+	}
+	id := c.nextTypeID
+	c.nextTypeID++
+	node := &semanticTypeNode{ID: id, Kind: kind, Name: name, Args: append([]TypeID{}, args...), FailureRow: failure, ServiceRow: service}
+	c.typeIntern[key] = node
+	c.typeNodes = append(c.typeNodes, node)
+	return id
+}
+
+// publicValue defensively copies a boundary projection. Semantic relations
+// never consume this value; they operate on CheckedValue/ExpressionEvaluation
+// and project only once the query or public declaration crosses the boundary.
 func publicValue(t ValueType) ValueType {
-	t.typeID = invalidTypeID
-	t.valueID = invalidTypeID
-	t.failureID = emptyRowID
-	t.serviceID = emptyRowID
-	t.Evaluation = EvaluationRows{}
+	cloneStrings := func(values []string) []string {
+		if values == nil {
+			return nil
+		}
+		return append([]string{}, values...)
+	}
+	t.Errors = cloneStrings(t.Errors)
+	t.Services = cloneStrings(t.Services)
+	t.Ownership = cloneFacts(t.Ownership)
+	t.Captures = cloneFacts(t.Captures)
+	t.Child = cloneFacts(t.Child)
+	t.Evaluation = EvaluationRows{
+		Failures:     cloneStrings(t.Evaluation.Failures),
+		Requirements: cloneStrings(t.Evaluation.Requirements),
+	}
 	if t.Callable != nil {
 		callable := *t.Callable
-		callable.Parameters = append([]Param{}, callable.Parameters...)
-		for i := range callable.Parameters {
-			callable.Parameters[i].typeID = invalidTypeID
-		}
+		callable.Parameters = publicParams(callable.Parameters)
+		callable.Failures = cloneStrings(callable.Failures)
+		callable.Requirements = cloneStrings(callable.Requirements)
 		t.Callable = &callable
+	}
+	if t.Application != nil {
+		application := *t.Application
+		application.Arguments = append([]TypeRef{}, application.Arguments...)
+		t.Application = &application
 	}
 	return t
 }
@@ -2940,54 +3281,54 @@ func (c *checker) function(f *Function, record bool) {
 }
 
 func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, allowedServices []string) {
-	env := map[string]ValueType{}
+	env := map[string]checkedExpression{}
 	for _, p := range locals {
-		parameter := c.canonicalValue(value(p.Type))
-		parameter.Ownership = c.borrowedOwnership(p.Type, "parameter:"+p.Name)
+		parameter := c.checkedData(p.Type)
+		parameter.setOwnership(c.borrowedOwnership(p.Type, "parameter:"+p.Name))
 		env[p.Name] = parameter
 	}
 	for _, p := range f.Params {
-		parameter := c.canonicalValue(value(p.Type))
-		parameter.Ownership = c.borrowedOwnership(p.Type, "parameter:"+p.Name)
+		parameter := c.checkedData(p.Type)
+		parameter.setOwnership(c.borrowedOwnership(p.Type, "parameter:"+p.Name))
 		env[p.Name] = parameter
 	}
 	c.reasons = []Contribution{}
 	previousFacts := c.recordFacts
 	c.recordFacts = record || previousFacts
-	actual := c.withRegion("invocation", func() ValueType { return c.block(f.Body, env, f.Effect) })
+	actual := c.withRegion("invocation", func() checkedExpression { return c.block(f.Body, env, f.Effect) })
 	c.recordFacts = previousFacts
-	actual = c.canonicalValue(actual)
-	if !c.isKind(actual, "never") && (!c.sameType(actual, f.Return) || actual.Effect) {
-		c.diagnostic("EF106", fmt.Sprintf("body returns %s; expected %s", display(actual), f.Return), f.Span)
+	if !c.isKind(actual, "never") && (!c.sameType(actual, f.Return) || actual.isEffect()) {
+		c.diagnostic("EF106", fmt.Sprintf("body returns %s; expected %s", c.displayChecked(actual), f.Return), f.Span)
 	}
-	if missing := c.rowDifference(actual.Errors, f.Errors); len(missing) > 0 {
+	if missing := c.rowDifference(c.rowLabels(actual.evaluation.failureRowID()), f.Errors); len(missing) > 0 {
 		c.diagnostic("EF107", "undeclared failures: "+strings.Join(missing, ", "), f.Span)
 	}
-	if missing := c.rowDifference(actual.Services, allowedServices); len(missing) > 0 {
+	if missing := c.rowDifference(c.rowLabels(actual.evaluation.serviceRowID()), allowedServices); len(missing) > 0 {
 		c.diagnostic("EF108", "missing service requirements: "+strings.Join(missing, ", "), f.Span)
 	}
-	actual.Effect = f.Effect
-	actual = c.canonicalValue(actual)
+	actual = c.invocationContract(actual, f.Effect)
 	if f.Identity == "" {
 		f.Identity = "function:" + f.Name
 	}
-	f.Ownership = summarizeInvocationFacts(actual.Ownership)
-	f.Captures = summarizeInvocationFacts(actual.Captures)
+	f.Ownership = summarizeInvocationFacts(actual.ownershipFacts())
+	f.Captures = summarizeInvocationFacts(actual.captureFacts())
+	declared := c.checkedFunction(f, true, false)
+	declared.identity = f.Identity
 	if record {
-		declared := contract(f)
-		declared = c.canonicalValue(declared)
-		declared.Identity = f.Identity
-		declared.Callable = callableIdentity(c, f)
-		declared = c.canonicalValue(declared)
+		f.Contract = publicValue(c.projectChecked(declared))
+		f.Actual = publicValue(c.projectChecked(actual))
 		c.result.Symbols = append(c.result.Symbols, Symbol{
 			Name:          f.Name,
 			Identity:      f.Identity,
 			Params:        publicParams(f.Params),
-			Contract:      publicValue(declared),
-			Actual:        publicValue(actual),
+			Contract:      publicValue(c.projectChecked(declared)),
+			Actual:        publicValue(c.projectChecked(actual)),
 			Span:          f.Span,
 			Contributions: append([]Contribution{}, c.reasons...),
 		})
+	} else {
+		f.Contract = publicValue(c.projectChecked(declared))
+		f.Actual = publicValue(c.projectChecked(actual))
 	}
 }
 
@@ -3001,18 +3342,22 @@ func callableIdentity(c *checker, f *Function) *CallableType {
 	if f.Effect {
 		kind = "effect"
 	}
-	return &CallableType{ID: "function:" + f.Name, Kind: kind, Parameters: parameters, Result: c.typeRef(f.Return), Failures: normalized(f.Errors), Requirements: normalized(f.Services)}
-}
-func display(t ValueType) string {
-	if t.Effect {
-		return "Effect<" + t.Success + ", {" + strings.Join(t.Errors, ", ") + "}, {" + strings.Join(t.Services, ", ") + "}>"
+	identity := f.Identity
+	if identity == "" {
+		identity = "function:" + f.Name
 	}
-	return t.Success
+	return &CallableType{ID: identity, Kind: kind, Parameters: parameters, Result: c.typeRef(f.Return), Failures: normalized(f.Errors), Requirements: normalized(f.Services)}
 }
-func clone(env map[string]ValueType) map[string]ValueType {
-	copy := map[string]ValueType{}
+func (c *checker) displayChecked(t checkedExpression) string {
+	if t.isEffect() {
+		return "Effect<" + c.displayTypeID(t.resultID()) + ", {" + strings.Join(c.rowLabels(t.failureRow()), ", ") + "}, {" + strings.Join(c.rowLabels(t.serviceRow()), ", ") + "}>"
+	}
+	return c.displayTypeID(t.resultID())
+}
+func clone(env map[string]checkedExpression) map[string]checkedExpression {
+	copy := map[string]checkedExpression{}
 	for n, t := range env {
-		copy[n] = t
+		copy[n] = t.clone()
 	}
 	return copy
 }
@@ -3047,7 +3392,7 @@ func sortedBindingNames(bindings map[string]string) []string {
 	slices.Sort(names)
 	return names
 }
-func (c *checker) payload(e *Expr, fields []Field, env map[string]ValueType, span Span) []OwnershipFact {
+func (c *checker) payload(e *Expr, fields []Field, env map[string]checkedExpression, span Span) []OwnershipFact {
 	declared := fieldsMap(fields)
 	seen := map[string]bool{}
 	ownership := []OwnershipFact{}
@@ -3062,10 +3407,10 @@ func (c *checker) payload(e *Expr, fields []Field, env map[string]ValueType, spa
 		}
 		seen[field.Name] = true
 		got := c.expr(field.Value, env, false)
-		if got.Effect || !c.sameType(got, want.Type) {
+		if got.isEffect() || !c.sameType(got, want.Type) {
 			c.diagnostic("EF115", "payload field "+field.Name+" must be "+want.Type, field.Span)
 		}
-		ownership = append(ownership, prependFacts(field.Name, got.Ownership)...)
+		ownership = append(ownership, prependFacts(field.Name, got.ownershipFacts())...)
 	}
 	for _, field := range fields {
 		if !seen[field.Name] {
@@ -3079,22 +3424,22 @@ func unionEvaluation(a, b EvaluationRows) EvaluationRows {
 	return EvaluationRows{Failures: union(a.Failures, b.Failures), Requirements: union(a.Requirements, b.Requirements)}
 }
 
-func (c *checker) childEvaluation(e *Expr) EvaluationRows {
-	result := EvaluationRows{}
+func (c *checker) childEvaluation(e *Expr) ExpressionEvaluation {
+	result := c.evaluation(emptyRowID, emptyRowID)
 	forEachExprChild(e, func(child *Expr) {
 		if child != nil {
-			result = unionEvaluation(result, child.Evaluation)
+			result = c.unionEvaluationFacts(result, child.checked.evaluation)
 		}
 	})
 	return result
 }
 
-func addDeferredEvaluation(e EvaluationRows, t ValueType) EvaluationRows {
-	return unionEvaluation(e, EvaluationRows{Failures: t.Errors, Requirements: t.Services})
+func (c *checker) addDeferredEvaluation(e ExpressionEvaluation, t checkedExpression) ExpressionEvaluation {
+	return c.unionEvaluationFacts(e, c.evaluation(t.failureRow(), t.serviceRow()))
 }
 
-func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueType {
-	out := value("()")
+func (c *checker) block(b *Block, env map[string]checkedExpression, effect bool) checkedExpression {
+	out := c.checkedData("()")
 	env = clone(env)
 	terminated := false
 	for _, s := range b.Statements {
@@ -3117,8 +3462,8 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 					c.rejectOwnedEscape(c.payload(s.Payload, fields, env, s.Payload.Span), s.Payload.Span)
 				} else {
 					payload := c.expr(s.Payload, env, false)
-					c.rejectOwnedEscape(payload.Ownership, s.Payload.Span)
-					if payload.Effect {
+					c.rejectOwnedEscape(payload.ownershipFacts(), s.Payload.Span)
+					if payload.isEffect() {
 						c.diagnostic("EF105", "failure payload must be pure", s.Payload.Span)
 					}
 					if decl := c.errors[s.Name]; decl != nil {
@@ -3134,96 +3479,78 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 				// satisfy every declared payload field.
 				c.rejectOwnedEscape(c.payload(&Expr{Kind: "payload", Span: s.Span}, decl.Fields, env, s.Span), s.Span)
 			}
-			out.Errors = union(out.Errors, []string{s.Name})
-			out.typeID = c.canonicalRef(typeRef("never"))
-			out.Type = c.ref(out.typeID)
-			out.Success = c.displayTypeID(out.typeID)
-			out.Effect = false
+			previousEvaluation := out.evaluation
+			out = c.checkedData("never")
+			out.evaluation = c.unionEvaluationFacts(previousEvaluation, c.evaluation(c.internRow([]string{s.Name}), emptyRowID))
 			terminated = true
 			c.reasons = append(c.reasons, Contribution{"failure", []string{s.Name}, s.Span})
 			continue
 		}
 		t := c.expr(s.Value, env, effect)
-		if s.Kind != "let" && (hasPotentialOwner(t.Ownership) || hasOwnedClosed(t.Ownership)) {
+		if s.Kind != "let" && (hasPotentialOwner(t.ownershipFacts()) || hasOwnedClosed(t.ownershipFacts())) {
 			c.diagnostic("EF123", "value owned by a closing scope cannot escape", s.Span)
 		}
-		out.Errors = union(out.Errors, tExecutedErrors(s.Value))
-		out.Services = union(out.Services, tExecutedServices(s.Value))
-		out.Evaluation = unionEvaluation(out.Evaluation, t.Evaluation)
+		out.evaluation = c.unionEvaluationFacts(out.evaluation, t.executed)
 		if s.Kind == "let" {
 			if _, exists := env[s.Name]; exists {
 				c.diagnostic("EF101", "duplicate local "+s.Name, s.Span)
 			}
-			env[s.Name] = t
-			out.typeID = c.canonicalRef(typeRef("()"))
-			out.Type = c.ref(out.typeID)
-			out.Success = c.displayTypeID(out.typeID)
-			out.Effect = false
-			out.Ownership = nil
-			out.Captures = nil
+			env[s.Name] = t.clone()
+			previousEvaluation := out.evaluation
+			out = c.checkedData("()")
+			out.evaluation = previousEvaluation
 		} else {
-			if t.Effect {
+			if t.isEffect() {
 				c.diagnostic("EF105", "unused lazy effect; execute with run or bind it with let", s.Span)
 			}
-			out.typeID = t.typeID
-			out.Type = t.Type
-			out.Success = t.Success
-			out.Effect = t.Effect
-			out.Ownership = cloneFacts(t.Ownership)
-			out.Captures = cloneFacts(t.Captures)
+			previousEvaluation := out.evaluation
+			out = t.clone()
+			out.evaluation = c.unionEvaluationFacts(previousEvaluation, t.executed)
 		}
 	}
-	return c.canonicalValue(out)
+	return out
 }
 
 // Effect values carry deferred rows. Only run (and executed branch bodies)
 // contribute to the enclosing computation. The rows are computed once by
 // expr and retained on the checked node; this accessor is deliberately a
 // projection rather than a second subtree walk.
-func tExecutedErrors(e *Expr) []string {
-	if e == nil {
-		return nil
-	}
-	return append([]string{}, e.Executed.Failures...)
-}
-func tExecutedServices(e *Expr) []string {
-	if e == nil {
-		return nil
-	}
-	return append([]string{}, e.Executed.Requirements...)
-}
-func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueType {
-	t := value("invalid")
+func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool) checkedExpression {
+	t := c.checkedData("invalid")
 	switch e.Kind {
 	case "integer":
-		t = value("i64")
+		t = c.checkedData("i64")
 	case "string":
-		t = value("string")
+		t = c.checkedData("string")
 	case "bool":
-		t = value("bool")
+		t = c.checkedData("bool")
 	case "unit":
-		t = value("()")
+		t = c.checkedData("()")
 	case "name":
 		if v, exists := env[e.Name]; exists {
-			t = v
+			t = v.clone()
+			// A local read observes a carried value contract; it does not replay
+			// evaluation work performed by the initializer.
+			t.evaluation = c.evaluation(emptyRowID, emptyRowID)
+			t.executed = t.evaluation
 			e.Text = "local"
 		} else if p, exists := c.providers[e.Name]; exists {
 			if len(p.Params) > 0 || len(p.Services) > 0 {
 				c.diagnostic("EF104", "provider "+p.Name+" requires explicit construction", e.Span)
-				t = value("invalid")
+				t = c.checkedData("invalid")
 				break
 			}
-			t = value("provider:" + p.Service)
+			t = c.checkedProvider(p, false)
 			if p.Service == "Files" || p.Service == "Runtime" || p.Service == "Foreign" || p.Service == "Http" {
 				c.requireGo(e.Span, "native provider "+p.Service)
 			}
 			e.Text = "provider"
 		} else if f := c.functions[e.Name]; f != nil && f.Effect && f.Return == "string" && len(f.Params) == 1 && f.Params[0].Type == "string" {
-			t = contract(f)
-			callable := t.Callable
-			t = c.valueForTypeID(c.canonicalRef(typeRef("Handler")))
-			t.Callable = callable
-			t.Effect = false
+			// The legacy Handler spelling is a source-level compatibility boundary.
+			// Its canonical value remains the complete callable contract, including
+			// carried failures and services; the opaque Handler result only keeps the
+			// old HTTP parameter shape readable.
+			t = c.checkedHandler(f)
 			e.Text = "handler"
 		} else {
 			c.diagnostic("EF102", "unknown value "+e.Name, e.Span)
@@ -3234,38 +3561,38 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			break
 		}
 		if c.foreignCall(e, env, inEffect) {
-			t = e.Type
+			t = e.checked
 			break
 		}
 		if c.fiberCall(e, env, inEffect) {
-			t = e.Type
+			t = e.checked
 			break
 		}
 		if e.Left.Kind == "name" {
 			if provider := c.providers[e.Left.Name]; provider != nil {
 				if len(provider.Params) == 0 && len(provider.Services) == 0 {
 					c.diagnostic("EF105", "provider "+provider.Name+" is a value and cannot be called", e.Span)
-					t = value("invalid")
+					t = c.checkedData("invalid")
 					break
 				}
 				if len(e.Args) != len(provider.Params) {
 					c.diagnostic("EF106", "provider "+provider.Name+" expects "+fmt.Sprint(len(provider.Params))+" configuration arguments", e.Span)
 				}
-				argumentTypes := make([]ValueType, len(e.Args))
+				argumentTypes := make([]checkedExpression, len(e.Args))
 				for i, arg := range e.Args {
 					got := c.expr(arg, env, false)
 					argumentTypes[i] = got
-					if i < len(provider.Params) && (got.Effect || !c.sameType(got, provider.Params[i].Type)) {
+					if i < len(provider.Params) && (got.isEffect() || !c.sameType(got, provider.Params[i].Type)) {
 						c.diagnostic("EF106", "provider configuration argument must be "+provider.Params[i].Type, arg.Span)
 					}
 				}
-				t = providerContract(provider)
+				t = c.checkedProvider(provider, true)
 				for i, param := range provider.Params {
 					if i < len(argumentTypes) {
-						t.Captures = append(t.Captures, prependFacts("capture:"+param.Name, argumentTypes[i].Ownership)...)
+						t.setCaptures(append(t.captureFacts(), prependFacts("capture:"+param.Name, argumentTypes[i].ownershipFacts())...))
 					}
 				}
-				t.Captures = normalizeFacts(t.Captures)
+				t.setCaptures(normalizeFacts(t.captureFacts()))
 				e.Text = "provider-constructor"
 				break
 			}
@@ -3289,7 +3616,6 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 				for _, m := range s.Methods {
 					if m.Name == e.Left.Name {
 						f = m
-						t.Services = []string{key}
 						serviceName = key
 						break
 					}
@@ -3303,22 +3629,19 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			}
 			break
 		}
-		services := t.Services
-		t = contract(f)
-		t.Services = union(t.Services, services)
-		argumentTypes := make([]ValueType, len(e.Args))
-		if len(f.Ownership) > 0 {
-			t.Ownership = instantiateFacts(f.Ownership, f.Params, argumentTypes)
-		}
-		if len(f.Captures) > 0 {
-			t.Captures = instantiateFacts(f.Captures, f.Params, argumentTypes)
+		argumentTypes := make([]checkedExpression, len(e.Args))
+		t = c.checkedFunction(f, false, true)
+		failureRow := t.failureRow()
+		serviceLabels := c.rowLabels(t.serviceRow())
+		if serviceName != "" {
+			serviceLabels = union(serviceLabels, []string{serviceName})
 		}
 		if serviceName == "Files" && e.Left.Name == "openRead" {
 			// A service name alone is not an acquisition proof: a custom Files
 			// provider may borrow a File. The default service operation is
 			// therefore explicit unknown until a known LiveFiles provision
 			// discharges it below.
-			t.Ownership = []OwnershipFact{{Status: "unknown", Origin: "service"}}
+			t.setOwnership([]OwnershipFact{{Status: "unknown", Origin: "service"}})
 		}
 		if len(e.Args) != len(f.Params) {
 			c.diagnostic("EF106", "incorrect argument count", e.Span)
@@ -3326,55 +3649,59 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		for i, a := range e.Args {
 			arg := c.expr(a, env, inEffect)
 			argumentTypes[i] = arg
-			if hasPotentialOwner(arg.Ownership) || hasOwnedClosed(arg.Ownership) {
+			if hasPotentialOwner(arg.ownershipFacts()) || hasOwnedClosed(arg.ownershipFacts()) {
 				c.diagnostic("EF123", "value owned by a closing scope cannot be used", a.Span)
 			}
-			if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && e.Left.Left.Name == "Http" && i == 1 && c.isKind(arg, "opaque") && arg.Type.Name == "Handler" {
-				t.Services = union(t.Services, arg.Services)
+			argNode := c.node(arg.resultID())
+			if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && e.Left.Left.Name == "Http" && i == 1 && argNode != nil && argNode.Kind == "opaque" && argNode.Name == "Handler" {
+				serviceLabels = union(serviceLabels, c.rowLabels(arg.serviceRow()))
 			}
-			if i < len(f.Params) && (arg.Effect || !c.sameType(arg, f.Params[i].Type)) {
+			if i < len(f.Params) && (arg.isEffect() || !c.sameType(arg, f.Params[i].Type)) {
 				c.diagnostic("EF106", "argument must be "+f.Params[i].Type, a.Span)
 			}
 		}
 		if len(f.Ownership) > 0 {
-			t.Ownership = instantiateFacts(f.Ownership, f.Params, argumentTypes)
+			t.setOwnership(instantiateCheckedFacts(f.Ownership, f.Params, argumentTypes))
 		}
 		if len(f.Captures) > 0 {
-			t.Captures = instantiateFacts(f.Captures, f.Params, argumentTypes)
+			t.setCaptures(instantiateCheckedFacts(f.Captures, f.Params, argumentTypes))
+		}
+		if f.Effect {
+			t.value = c.values.recipe(t.resultID(), c.functionParameterTypeIDs(f), checkedEffectCallable, failureRow, c.internRow(serviceLabels), t.ownershipFacts(), t.captureFacts())
+		} else {
+			t.value = c.values.data(t.resultID(), t.ownershipFacts(), t.captureFacts())
 		}
 		if f.Effect {
 			for i, argument := range argumentTypes {
 				if i < len(f.Params) {
-					t.Captures = append(t.Captures, prependFacts("capture:"+f.Params[i].Name, argument.Ownership)...)
+					t.setCaptures(append(t.captureFacts(), prependFacts("capture:"+f.Params[i].Name, argument.ownershipFacts())...))
 				}
 			}
-			t.Captures = normalizeFacts(t.Captures)
+			t.setCaptures(normalizeFacts(t.captureFacts()))
 		}
 		argumentRefs := make([]TypeRef, 0, len(argumentTypes))
 		for _, argument := range argumentTypes {
-			argumentRefs = append(argumentRefs, argument.Type)
+			argumentRefs = append(argumentRefs, c.ref(argument.resultID()))
 		}
 		callee := e.Left.Name
 		if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
 			callee = e.Left.Left.Name + "." + e.Left.Name
 		}
-		application := newApplicationIdentity(callee, argumentRefs, c.ref(c.canonicalRef(t.Type)), e.Span)
-		t.Application = &application
-		e.Identity = application.ID
+		application := newApplicationIdentity(callee, argumentRefs, c.ref(t.resultID()), e.Span)
+		t.application = &application
+		t.identity = application.ID
 	case "member":
 		inner := c.expr(e.Left, env, inEffect)
-		if inner.Effect {
+		if inner.isEffect() {
 			c.diagnostic("EF106", "field access requires an executed value", e.Span)
 			break
 		}
 		if fields, ok := fieldsFor(c, c.namedType(inner), ""); ok {
 			for _, field := range fields {
 				if field.Name == e.Name {
-					t = c.valueForTypeID(field.typeID)
-					t.Ownership = projectFacts(inner.Ownership, e.Name)
-					t.Captures = projectFacts(inner.Captures, e.Name)
-					if len(t.Ownership) == 0 {
-						t.Ownership = c.unknownOwnership(field.Type)
+					t = c.checkedDataID(field.typeID, projectFacts(inner.ownershipFacts(), e.Name), projectFacts(inner.captureFacts(), e.Name))
+					if len(t.ownershipFacts()) == 0 {
+						t.setOwnership(c.unknownOwnership(field.Type))
 					}
 					e.Text = "field"
 					break
@@ -3383,7 +3710,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			if !c.isKind(t, "invalid") {
 				break
 			}
-			c.diagnostic("EF114", "unknown field "+e.Name+" on "+inner.Success, e.Span)
+			c.diagnostic("EF114", "unknown field "+e.Name+" on "+c.displayTypeID(inner.resultID()), e.Span)
 			break
 		}
 		if !c.isKind(inner, "goResult") {
@@ -3392,62 +3719,56 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		}
 		switch e.Name {
 		case "value":
-			node := c.node(inner.typeID)
+			node := c.node(inner.resultID())
 			if node != nil && len(node.Args) == 1 {
-				t = c.valueForTypeID(node.Args[0])
+				t = c.checkedDataID(node.Args[0], nil, nil)
 			}
 		case "hasError":
-			t = value("bool")
+			t = c.checkedData("bool")
 		default:
 			c.diagnostic("EF102", "GoResult exposes value and hasError", e.Span)
 		}
 	case "orFail":
 		t = c.expr(e.Left, env, inEffect)
-		if !t.Effect || !c.isKind(t, "goResult") {
+		if !t.isEffect() || !c.isKind(t, "goResult") {
 			c.diagnostic("EF106", "orFail requires an Effect returning GoResult", e.Span)
 			break
 		}
-		if node := c.node(t.typeID); node != nil && len(node.Args) == 1 {
-			result := c.valueForTypeID(node.Args[0])
-			result.Effect = t.Effect
-			result.Errors = append([]string{}, t.Errors...)
-			result.Services = append([]string{}, t.Services...)
-			result.Ownership = cloneFacts(t.Ownership)
-			result.Captures = cloneFacts(t.Captures)
+		if node := c.node(t.resultID()); node != nil && len(node.Args) == 1 {
+			failure := c.internRow(union(c.rowLabels(t.failureRow()), []string{"GoError"}))
+			result := checkedExpression{value: c.values.recipe(node.Args[0], nil, checkedEffectCallable, failure, t.serviceRow(), t.ownershipFacts(), t.captureFacts())}
+			result.evaluation = t.evaluation
+			result.executed = t.executed
 			t = result
 		}
-		t.Errors = union(t.Errors, []string{"GoError"})
 	case "scope":
 		if !inEffect {
 			c.diagnostic("EF105", "scope requires an effect function", e.Span)
 		}
 		scopeRegion := fmt.Sprintf("scope:%d", e.Span.Offset)
-		t = c.withRegion(scopeRegion, func() ValueType { return c.block(e.Then, env, inEffect) })
-		if hasPotentialOwner(t.Ownership) || hasPotentialOwner(t.Captures) || hasOwnedFact(t.Ownership, scopeRegion) || hasOwnedFact(t.Captures, scopeRegion) {
+		t = c.withRegion(scopeRegion, func() checkedExpression { return c.block(e.Then, env, inEffect) })
+		if hasPotentialOwner(t.ownershipFacts()) || hasPotentialOwner(t.captureFacts()) || hasOwnedFact(t.ownershipFacts(), scopeRegion) || hasOwnedFact(t.captureFacts(), scopeRegion) {
 			c.diagnostic("EF123", "value owned by closing scope cannot escape", e.Span)
 		}
 	case "fork":
 		inner := c.expr(e.Left, env, inEffect)
-		if !inEffect || !inner.Effect {
+		if !inEffect || !inner.isEffect() {
 			c.diagnostic("EF105", "fork requires an Effect inside an effect function", e.Span)
 		}
 		childRegion := fmt.Sprintf("child:%d", e.Span.Offset)
-		t = c.valueForTypeID(c.internType("fiber", "", []TypeID{inner.typeID}))
-		t.Effect = false
-		t.Errors = union(inner.Errors, tExecutedErrors(e.Left))
-		t.Services = union(inner.Services, tExecutedServices(e.Left))
-		t.Ownership = []OwnershipFact{{Status: "owned", Region: c.region, Origin: "fork", ownerKind: ownershipOwnerLexical}}
-		t.Captures = cloneFacts(inner.Captures)
+		fiberFailure := inner.failureRow()
+		t = checkedExpression{value: c.values.fiber(inner.resultID(), fiberFailure, []OwnershipFact{{Status: "owned", Region: c.region, Origin: "fork", ownerKind: ownershipOwnerLexical}}, inner.captureFacts())}
+		t.setOwnership([]OwnershipFact{{Status: "owned", Region: c.region, Origin: "fork", ownerKind: ownershipOwnerLexical}})
 		// The child executes its recipe under its own owner. This is distinct
 		// from the owner of the Fiber handle returned to the parent.
-		t.Child = materializeExecutionFacts(inner.Ownership, childRegion, ownershipOwnerChild)
-		t.Evaluation = addDeferredEvaluation(inner.Evaluation, inner)
-		for i := range t.Child {
-			if t.Child[i].Region == childRegion && t.Child[i].Status == "owned" {
-				t.Child[i].Origin = "child-acquisition"
+		t.child = materializeExecutionFacts(inner.ownershipFacts(), childRegion, ownershipOwnerChild)
+		t.evaluation = c.addDeferredEvaluation(inner.evaluation, inner)
+		for i := range t.child {
+			if t.child[i].Region == childRegion && t.child[i].Status == "owned" {
+				t.child[i].Origin = "child-acquisition"
 			}
 		}
-		c.reasons = append(c.reasons, Contribution{"owned-child", inner.Errors, e.Span})
+		c.reasons = append(c.reasons, Contribution{"owned-child", c.rowLabels(inner.failureRow()), e.Span})
 	case "timeout":
 		duration := c.expr(e.Right, env, inEffect)
 		timeoutRegion := fmt.Sprintf("timeout:%d", e.Span.Offset)
@@ -3457,64 +3778,64 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		// would reject a valid caller-owned value.
 		inner := c.expr(e.Left, env, inEffect)
 		t = inner
-		if !t.Effect || duration.Effect || !c.sameType(duration, "i64") {
+		if !t.isEffect() || duration.isEffect() || !c.sameType(duration, "i64") {
 			c.diagnostic("EF106", "timeout requires an Effect and an i64 millisecond duration", e.Span)
 		}
-		t.Ownership = materializeExecutionFacts(t.Ownership, timeoutRegion, ownershipOwnerTimeout)
-		t.Captures = materializeExecutionFacts(t.Captures, timeoutRegion, ownershipOwnerTimeout)
-		t.Errors = union(t.Errors, []string{"Timeout"})
-		t.Services = union(t.Services, []string{"Scheduler"})
+		t.setOwnership(materializeExecutionFacts(t.ownershipFacts(), timeoutRegion, ownershipOwnerTimeout))
+		t.setCaptures(materializeExecutionFacts(t.captureFacts(), timeoutRegion, ownershipOwnerTimeout))
+		t.value = c.recontractRows(t, c.internRow(union(c.rowLabels(t.failureRow()), []string{"Timeout"})), c.internRow(union(c.rowLabels(t.serviceRow()), []string{"Scheduler"})))
 	case "run":
 		inner := c.expr(e.Left, env, inEffect)
 		if !inEffect {
 			c.diagnostic("EF105", "run is only valid inside effect functions", e.Span)
 		}
-		if !inner.Effect {
+		if !inner.isEffect() {
 			c.diagnostic("EF105", "run requires an Effect value", e.Span)
 		}
-		t = inner
-		t.Effect = false
+		t = inner.clone()
+		t.value = c.checkedDataID(inner.resultID(), nil, nil).value
+		t.application = nil
+		t.identity = ""
 		// Ownership created by a deferred recipe belongs to the owner
 		// which actually executes it. Construction may happen outside a
 		// scope, or in an outer scope before a nested run.
-		t.Ownership = materializeExecutionFacts(inner.Ownership, c.region, ownershipOwnerLexical)
-		t.Captures = materializeExecutionFacts(inner.Captures, c.region, ownershipOwnerLexical)
+		t.setOwnership(materializeExecutionFacts(inner.ownershipFacts(), c.region, ownershipOwnerLexical))
+		t.setCaptures(materializeExecutionFacts(inner.captureFacts(), c.region, ownershipOwnerLexical))
 		if !c.isKind(t, "provider") {
-			t.Captures = nil
+			t.setCaptures(nil)
 		}
-		t.Errors = union(t.Errors, tExecutedErrors(e.Left))
-		t.Services = union(t.Services, tExecutedServices(e.Left))
-		t.Evaluation = addDeferredEvaluation(inner.Evaluation, inner)
-		if len(t.Errors) > 0 {
-			c.reasons = append(c.reasons, Contribution{"failure", t.Errors, e.Span})
+		t.evaluation = c.addDeferredEvaluation(inner.evaluation, inner)
+		if len(c.rowLabels(inner.failureRow())) > 0 {
+			c.reasons = append(c.reasons, Contribution{"failure", c.rowLabels(inner.failureRow()), e.Span})
 		}
-		if len(t.Services) > 0 {
-			c.reasons = append(c.reasons, Contribution{"requirement", t.Services, e.Span})
+		if len(c.rowLabels(inner.serviceRow())) > 0 {
+			c.reasons = append(c.reasons, Contribution{"requirement", c.rowLabels(inner.serviceRow()), e.Span})
 		}
 	case "provide":
 		t = c.expr(e.Left, env, inEffect)
 		provider := c.expr(e.Right, env, inEffect)
-		if !t.Effect {
+		if !t.isEffect() {
 			c.diagnostic("EF105", "provide requires an Effect value", e.Span)
 		}
 		if c.services[e.Name] == nil {
 			c.diagnostic("EF102", "unknown service "+e.Name, e.Span)
 		}
-		providerNode := c.node(provider.typeID)
-		if providerNode == nil || providerNode.Kind != "provider" || providerNode.Name != e.Name || provider.Effect {
+		providerNode := provider.node()
+		if providerNode == nil || providerNode.Kind != "provider" || providerNode.Name != e.Name || provider.isEffect() {
 			c.diagnostic("EF104", "provider must implement "+e.Name, e.Right.Span)
 		}
-		t.Captures = normalizeFacts(append(t.Captures, provider.Captures...))
+		t.setCaptures(normalizeFacts(append(t.captureFacts(), provider.captureFacts()...)))
 		if e.Name == "Files" && e.Right.Kind == "name" && e.Right.Name == "LiveFiles" {
 			if e.Left.Kind == "call" && e.Left.Left != nil && e.Left.Left.Kind == "member" && e.Left.Left.Left.Kind == "name" && e.Left.Left.Left.Name == "Files" && e.Left.Left.Name == "openRead" {
-				t.Ownership = []OwnershipFact{{Status: "owned", Region: "deferred", Origin: "acquisition", ownerKind: ownershipOwnerDeferred}}
+				t.setOwnership([]OwnershipFact{{Status: "owned", Region: "deferred", Origin: "acquisition", ownerKind: ownershipOwnerDeferred}})
 			}
 		}
-		t.Services = remove(t.Services, e.Name)
+		serviceLabels := remove(c.rowLabels(t.serviceRow()), e.Name)
+		t.value = c.recontractRows(t, t.failureRow(), c.internRow(serviceLabels))
 	case "catch":
 		t = c.expr(e.Left, env, inEffect)
 		fallback := c.expr(e.Right, env, false)
-		if !t.Effect {
+		if !t.isEffect() {
 			c.diagnostic("EF105", "catch requires an Effect value", e.Span)
 		}
 		if _, exists := c.program.Errors[e.Name]; !exists {
@@ -3522,32 +3843,35 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		} else if !c.hasRow(t, true, e.Name) {
 			c.diagnostic("EF107", "effect does not admit failure "+e.Name, e.Span)
 		}
-		if fallback.Effect || !c.sameValues(fallback, t) {
-			c.diagnostic("EF106", "prototype catch fallback must be a pure "+t.Success, e.Right.Span)
+		if fallback.isEffect() || !c.sameResultType(fallback, t) {
+			c.diagnostic("EF106", "prototype catch fallback must be a pure "+c.displayTypeID(t.resultID()), e.Right.Span)
 		}
 		// Recovery can publish the fallback value on the handled-failure
 		// branch. Preserve both its returned ownership and any provider
 		// captures; dropping either branch turns a closed-owner escape into a
 		// false safe result.
-		t.Ownership = mergeFacts(t.Ownership, fallback.Ownership)
-		t.Captures = mergeFacts(t.Captures, fallback.Captures)
-		t.Errors = remove(t.Errors, e.Name)
+		t.setOwnership(mergeFacts(t.ownershipFacts(), fallback.ownershipFacts()))
+		t.setCaptures(mergeFacts(t.captureFacts(), fallback.captureFacts()))
+		failureLabels := remove(c.rowLabels(t.failureRow()), e.Name)
+		t.value = c.recontractRows(t, c.internRow(failureLabels), t.serviceRow())
 	case "construct":
 		t = c.construct(e, env, inEffect)
 	case "match":
 		t = c.match(e, env, inEffect)
 	case "binary":
 		left, right := c.expr(e.Left, env, inEffect), c.expr(e.Right, env, inEffect)
-		if left.Effect || right.Effect || !c.sameValues(left, right) || (!c.isKind(left, "primitive") || (left.Type.Name != "string" && left.Type.Name != "bool" && left.Type.Name != "i64")) || (e.Name == "+" && left.Type.Name != "string") {
+		leftNode, rightNode := left.node(), right.node()
+		if left.isEffect() || right.isEffect() || !c.sameValues(left, right) || leftNode == nil || rightNode == nil || leftNode.Kind != "primitive" || (leftNode.Name != "string" && leftNode.Name != "bool" && leftNode.Name != "i64") || (e.Name == "+" && leftNode.Name != "string") {
 			c.diagnostic("EF106", "operator requires matching primitive values; + accepts strings", e.Span)
 		}
-		t = c.valueForTypeID(left.typeID)
+		t = c.checkedDataID(left.resultID(), nil, nil)
 		if e.Name == "==" {
-			t = c.valueForTypeID(c.canonicalRef(typeRef("bool")))
+			t = c.checkedData("bool")
 		}
 	case "if":
 		condition := c.expr(e.Left, env, inEffect)
-		if condition.Effect || !c.isKind(condition, "primitive") || condition.Type.Name != "bool" {
+		conditionNode := condition.node()
+		if condition.isEffect() || conditionNode == nil || conditionNode.Kind != "primitive" || conditionNode.Name != "bool" {
 			c.diagnostic("EF106", "if condition must be bool", e.Left.Span)
 		}
 		a, b := c.block(e.Then, env, inEffect), c.block(e.Else, env, inEffect)
@@ -3556,51 +3880,58 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		} else if c.isKind(b, "never") {
 			t = a
 		} else {
-			t = a
-			if !c.sameValues(a, b) || a.Effect != b.Effect {
+			t = a.clone()
+			if !c.sameValues(a, b) || a.isEffect() != b.isEffect() {
 				c.diagnostic("EF106", "if branches must return the same type", e.Span)
+			} else {
+				t = c.joinContractRows(t, b)
 			}
-			t.Ownership = mergeFacts(a.Ownership, b.Ownership)
-			t.Captures = mergeFacts(a.Captures, b.Captures)
+			t.setOwnership(mergeFacts(a.ownershipFacts(), b.ownershipFacts()))
+			t.setCaptures(mergeFacts(a.captureFacts(), b.captureFacts()))
 		}
-		if a.Effect || b.Effect {
+		if a.isEffect() || b.isEffect() {
 			c.diagnostic("EF103", "returning Effect values from branches is not supported in this prototype", e.Span)
 		}
-		t.Errors = union(union(a.Errors, b.Errors), tExecutedErrors(e.Left))
-		t.Services = union(union(a.Services, b.Services), tExecutedServices(e.Left))
-		t.Evaluation = unionEvaluation(condition.Evaluation, unionEvaluation(a.Evaluation, b.Evaluation))
-		t.Effect = false
+		t.evaluation = c.unionEvaluationFacts(condition.evaluation, c.unionEvaluationFacts(a.evaluation, b.evaluation))
 	default:
 		c.diagnostic("EF103", "unsupported expression "+e.Kind, e.Span)
 	}
 	// Every checked expression owns one evaluation summary. Child summaries are
 	// shared through this node instead of being recomputed by each consumer.
-	t.Evaluation = unionEvaluation(t.Evaluation, c.childEvaluation(e))
-	t = c.canonicalValue(t)
-	if t.Callable == nil && t.Application == nil {
-		t.Identity = t.Type.ID
+	t.evaluation = c.unionEvaluationFacts(t.evaluation, c.childEvaluation(e))
+	if t.callableDecl == nil && t.application == nil {
+		t.identity = c.typeNodeID(t.contractID())
 	}
-	e.Type = t
-	e.Evaluation = t.Evaluation
 	if e.Kind == "run" || e.Kind == "if" || e.Kind == "match" || e.Kind == "scope" || e.Kind == "fork" {
-		e.Executed = EvaluationRows{Failures: append([]string{}, t.Errors...), Requirements: append([]string{}, t.Services...)}
+		t.executed = t.evaluation
 	} else if e.Kind == "construct" || e.Kind == "payload" {
-		// Constructor payloads are required to be pure. Keep their invalid
-		// child evaluation facts available for tooling without admitting those
-		// rows into the enclosing body contract after the purity diagnostic.
+		// Constructor payloads are required to be pure. Keep their invalid child
+		// evaluation facts available for tooling without admitting those rows
+		// into the enclosing body contract after the purity diagnostic.
+		t.executed = c.evaluation(emptyRowID, emptyRowID)
+	} else {
+		t.executed = t.evaluation
+	}
+	e.checked = t.clone()
+	e.Type = c.projectChecked(t)
+	e.Evaluation = c.projectEvaluation(t.evaluation)
+	e.Identity = t.identity
+	if e.Kind == "run" || e.Kind == "if" || e.Kind == "match" || e.Kind == "scope" || e.Kind == "fork" {
+		e.Executed = c.projectEvaluation(t.executed)
+	} else if e.Kind == "construct" || e.Kind == "payload" {
 		e.Executed = EvaluationRows{}
 	} else {
 		e.Executed = e.Evaluation
 	}
 	if c.recordFacts {
-		c.result.facts[e] = ExpressionFacts{Type: t, Evaluation: e.Evaluation, Executed: e.Executed}
+		c.result.facts[e] = ExpressionFacts{Checked: t.clone(), Type: e.Type, Evaluation: e.Evaluation, Executed: e.Executed}
 	}
 	return t
 }
 
-func (c *checker) dataCall(e *Expr, env map[string]ValueType, inEffect bool) (ValueType, bool) {
+func (c *checker) dataCall(e *Expr, env map[string]checkedExpression, inEffect bool) (checkedExpression, bool) {
 	if e.Left == nil {
-		return ValueType{}, false
+		return checkedExpression{}, false
 	}
 	typeName, variantName := "", ""
 	switch e.Left.Kind {
@@ -3608,29 +3939,29 @@ func (c *checker) dataCall(e *Expr, env map[string]ValueType, inEffect bool) (Va
 		typeName = e.Left.Name
 	case "member":
 		if e.Left.Left.Kind != "name" {
-			return ValueType{}, false
+			return checkedExpression{}, false
 		}
 		typeName, variantName = e.Left.Left.Name, e.Left.Name
 	default:
-		return ValueType{}, false
+		return checkedExpression{}, false
 	}
 	if variantName == "" && c.errors[typeName] != nil {
 		c.diagnostic("EF102", "error declarations are failure payloads, not success values", e.Span)
-		return value("invalid"), true
+		return c.checkedData("invalid"), true
 	}
 	fields, ok := fieldsFor(c, typeName, variantName)
 	if !ok || (variantName == "" && c.enums[typeName] != nil) {
 		if variantName != "" && c.enums[typeName] == nil {
-			return ValueType{}, false
+			return checkedExpression{}, false
 		}
 		if variantName == "" && c.records[typeName] == nil {
-			return ValueType{}, false
+			return checkedExpression{}, false
 		}
 	}
 	if variantName != "" {
 		enum := c.enums[typeName]
 		if enum == nil {
-			return ValueType{}, false
+			return checkedExpression{}, false
 		}
 		found := false
 		for _, variant := range enum.Variants {
@@ -3638,7 +3969,7 @@ func (c *checker) dataCall(e *Expr, env map[string]ValueType, inEffect bool) (Va
 		}
 		if !found {
 			c.diagnostic("EF116", "unknown variant "+typeName+"."+variantName, e.Span)
-			return value("invalid"), true
+			return c.checkedData("invalid"), true
 		}
 	}
 	if len(e.Fields) > 0 {
@@ -3648,27 +3979,27 @@ func (c *checker) dataCall(e *Expr, env map[string]ValueType, inEffect bool) (Va
 				c.expr(arg, env, false)
 			}
 			e.Text = "data"
-			return value("invalid"), true
+			return c.checkedData("invalid"), true
 		}
 		payloadExpr := &Expr{Kind: "payload", Fields: e.Fields, Span: e.Span}
 		ownership := c.payload(payloadExpr, fields, env, e.Span)
 		e.Text = "data"
-		result := c.valueForTypeID(c.canonicalRef(typeRef(typeName)))
+		result := c.checkedDataID(c.canonicalRef(typeRef(typeName)), nil, nil)
 		if variantName != "" {
-			result.Ownership = prependFacts(variantName, ownership)
+			result.setOwnership(prependFacts(variantName, ownership))
 		} else {
-			result.Ownership = ownership
+			result.setOwnership(ownership)
 		}
 		return result, true
 	}
 	if len(e.Args) != len(fields) {
 		c.diagnostic("EF115", "constructor "+typeName+" expects "+fmt.Sprint(len(fields))+" payload fields", e.Span)
 	}
-	argumentTypes := make([]ValueType, len(e.Args))
+	argumentTypes := make([]checkedExpression, len(e.Args))
 	for i, arg := range e.Args {
 		got := c.expr(arg, env, false)
 		argumentTypes[i] = got
-		if i < len(fields) && (got.Effect || !c.sameType(got, fields[i].Type)) {
+		if i < len(fields) && (got.isEffect() || !c.sameType(got, fields[i].Type)) {
 			c.diagnostic("EF115", "payload field "+fields[i].Name+" must be "+fields[i].Type, arg.Span)
 		}
 	}
@@ -3679,24 +4010,24 @@ func (c *checker) dataCall(e *Expr, env map[string]ValueType, inEffect bool) (Va
 			e.Fields = append(e.Fields, FieldValue{Name: fields[i].Name, Value: arg, Span: arg.Span})
 		}
 	}
-	result := c.valueForTypeID(c.canonicalRef(typeRef(typeName)))
+	result := c.checkedDataID(c.canonicalRef(typeRef(typeName)), nil, nil)
 	ownership := []OwnershipFact{}
 	for i, got := range argumentTypes {
 		if i < len(fields) {
-			ownership = append(ownership, prependFacts(fields[i].Name, got.Ownership)...)
+			ownership = append(ownership, prependFacts(fields[i].Name, got.ownershipFacts())...)
 		}
 	}
 	if variantName != "" {
-		result.Ownership = prependFacts(variantName, ownership)
+		result.setOwnership(prependFacts(variantName, ownership))
 	} else {
-		result.Ownership = normalizeFacts(ownership)
+		result.setOwnership(normalizeFacts(ownership))
 	}
 	return result, true
 }
 
-func (c *checker) construct(e *Expr, env map[string]ValueType, inEffect bool) ValueType {
+func (c *checker) construct(e *Expr, env map[string]checkedExpression, inEffect bool) checkedExpression {
 	if e.Left == nil {
-		return value("invalid")
+		return c.checkedData("invalid")
 	}
 	typeName, variantName := "", ""
 	if e.Left.Kind == "name" {
@@ -3705,11 +4036,11 @@ func (c *checker) construct(e *Expr, env map[string]ValueType, inEffect bool) Va
 		typeName, variantName = e.Left.Left.Name, e.Left.Name
 	} else {
 		c.diagnostic("EF114", "invalid data constructor", e.Span)
-		return value("invalid")
+		return c.checkedData("invalid")
 	}
 	if variantName == "" && c.errors[typeName] != nil {
 		c.diagnostic("EF102", "error declarations are failure payloads, not success values", e.Span)
-		return value("invalid")
+		return c.checkedData("invalid")
 	}
 	fields, ok := fieldsFor(c, typeName, variantName)
 	if !ok {
@@ -3718,43 +4049,41 @@ func (c *checker) construct(e *Expr, env map[string]ValueType, inEffect bool) Va
 		} else {
 			c.diagnostic("EF102", "unknown data declaration "+typeName, e.Span)
 		}
-		return value("invalid")
+		return c.checkedData("invalid")
 	}
 	if variantName != "" {
 		if c.enums[typeName] == nil {
 			c.diagnostic("EF116", typeName+" is not a closed enum", e.Span)
-			return value("invalid")
+			return c.checkedData("invalid")
 		}
 	}
 	ownership := c.payload(e, fields, env, e.Span)
-	result := value(typeName)
+	result := c.checkedData(typeName)
 	if variantName != "" {
-		result.Ownership = prependFacts(variantName, ownership)
+		result.setOwnership(prependFacts(variantName, ownership))
 	} else {
-		result.Ownership = ownership
+		result.setOwnership(ownership)
 	}
 	return result
 }
 
-func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueType {
+func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool) checkedExpression {
 	scrutinee := c.expr(e.Left, env, inEffect)
-	if scrutinee.Effect {
+	if scrutinee.isEffect() {
 		c.diagnostic("EF106", "match scrutinee must be a value; execute an Effect with run", e.Left.Span)
 	}
 	enum := c.enums[c.namedType(scrutinee)]
 	if enum == nil {
 		c.diagnostic("EF116", "match requires a closed enum value", e.Left.Span)
-		return value("invalid")
+		return c.checkedData("invalid")
 	}
 	declared := map[string]Variant{}
 	for _, variant := range enum.Variants {
 		declared[variant.Name] = variant
 	}
 	seen := map[string]bool{}
-	result := value("never")
-	branchErrors := []string{}
-	branchServices := []string{}
-	branchEvaluation := EvaluationRows{}
+	result := c.checkedData("never")
+	branchEvaluation := c.evaluation(emptyRowID, emptyRowID)
 	haveResult := false
 	for _, arm := range e.Arms {
 		pattern := arm.Pattern
@@ -3800,10 +4129,10 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 			if binding == "_" {
 				continue
 			}
-			bound := c.valueForTypeID(field.typeID)
-			bound.Ownership = projectVariantFacts(scrutinee.Ownership, pattern.VariantName, fieldName)
-			if len(bound.Ownership) == 0 {
-				bound.Ownership = c.unknownOwnership(field.Type)
+			bound := c.checkedDataID(field.typeID, nil, nil)
+			bound.setOwnership(projectVariantFacts(scrutinee.ownershipFacts(), pattern.VariantName, fieldName))
+			if len(bound.ownershipFacts()) == 0 {
+				bound.setOwnership(c.unknownOwnership(field.Type))
 			}
 			branchEnv[binding] = bound
 		}
@@ -3811,16 +4140,15 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 		if !c.isKind(branch, "never") {
 			if !haveResult {
 				result, haveResult = branch, true
-			} else if !c.sameValues(result, branch) || result.Effect != branch.Effect {
+			} else if !c.sameValues(result, branch) || result.isEffect() != branch.isEffect() {
 				c.diagnostic("EF106", "match branches must return the same type", arm.Span)
 			} else {
-				result.Ownership = mergeFacts(result.Ownership, branch.Ownership)
-				result.Captures = mergeFacts(result.Captures, branch.Captures)
+				result = c.joinContractRows(result, branch)
+				result.setOwnership(mergeFacts(result.ownershipFacts(), branch.ownershipFacts()))
+				result.setCaptures(mergeFacts(result.captureFacts(), branch.captureFacts()))
 			}
 		}
-		branchErrors = union(branchErrors, branch.Errors)
-		branchServices = union(branchServices, branch.Services)
-		branchEvaluation = unionEvaluation(branchEvaluation, branch.Evaluation)
+		branchEvaluation = c.unionEvaluationFacts(branchEvaluation, branch.evaluation)
 	}
 	for _, variant := range enum.Variants {
 		if !seen[variant.Name] {
@@ -3828,12 +4156,9 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 		}
 	}
 	if !haveResult {
-		result = value("never")
+		result = c.checkedData("never")
 	}
-	result.Errors = union(branchErrors, tExecutedErrors(e.Left))
-	result.Services = union(branchServices, tExecutedServices(e.Left))
-	result.Evaluation = unionEvaluation(scrutinee.Evaluation, branchEvaluation)
-	result.Effect = false
+	result.evaluation = c.unionEvaluationFacts(scrutinee.evaluation, branchEvaluation)
 	return result
 }
 func (r *Result) Find(name string) *Symbol {
@@ -3869,7 +4194,7 @@ func (r *Result) Entry() error {
 	return nil
 }
 
-func (c *checker) fiberCall(e *Expr, env map[string]ValueType, inEffect bool) bool {
+func (c *checker) fiberCall(e *Expr, env map[string]checkedExpression, inEffect bool) bool {
 	if e.Left.Kind != "member" || e.Left.Left.Kind != "name" {
 		return false
 	}
@@ -3880,38 +4205,26 @@ func (c *checker) fiberCall(e *Expr, env map[string]ValueType, inEffect bool) bo
 	if len(e.Args) != 0 {
 		c.diagnostic("EF106", "fiber operations take no arguments", e.Span)
 	}
-	node := c.node(inner.typeID)
+	node := inner.node()
 	if node == nil || len(node.Args) != 1 {
 		return false
 	}
-	t := c.valueForTypeID(node.Args[0])
-	t.Effect = true
-	t.Errors = inner.Errors
-	t.Services = inner.Services
+	resultID := node.Args[0]
+	failureRow := inner.failureRow()
+	t := checkedExpression{value: c.values.recipe(resultID, nil, checkedEffectCallable, failureRow, emptyRowID, nil, nil)}
 	switch e.Left.Name {
 	case "join":
-		t.Ownership = cloneFacts(inner.Child)
-		t.Captures = nil
+		t.setOwnership(cloneFacts(inner.child))
 	case "interrupt":
-		t = c.valueForTypeID(c.canonicalRef(typeRef("()")))
-		t.Effect = true
-		t.Errors = append([]string{}, inner.Errors...)
-		t.Services = append([]string{}, inner.Services...)
-		t.Ownership = nil
-		t.Captures = nil
+		t = checkedExpression{value: c.values.recipe(c.canonicalRef(typeRef("()")), nil, checkedEffectCallable, failureRow, emptyRowID, nil, nil)}
 	case "cancel":
-		t = c.valueForTypeID(c.canonicalRef(typeRef("()")))
-		t.Effect = true
-		t.Errors = append([]string{}, inner.Errors...)
-		t.Services = append([]string{}, inner.Services...)
-		t.Errors = []string{}
-		t.Ownership = nil
-		t.Captures = nil
+		t = checkedExpression{value: c.values.recipe(c.canonicalRef(typeRef("()")), nil, checkedEffectCallable, emptyRowID, emptyRowID, nil, nil)}
 	default:
 		c.diagnostic("EF102", "unknown fiber operation "+e.Left.Name, e.Span)
 	}
 	e.Text = "fiber"
-	e.Type = t
+	e.checked = t.clone()
+	e.Type = c.projectChecked(t)
 	return true
 }
 

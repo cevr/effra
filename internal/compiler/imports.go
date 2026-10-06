@@ -263,7 +263,7 @@ func hostType(t types.Type) string {
 	return ""
 }
 
-func (c *checker) foreignCall(e *Expr, env map[string]ValueType, inEffect bool) bool {
+func (c *checker) foreignCall(e *Expr, env map[string]checkedExpression, inEffect bool) bool {
 	if e.Left.Kind != "member" || e.Left.Left.Kind != "name" {
 		return false
 	}
@@ -280,7 +280,8 @@ func (c *checker) foreignCall(e *Expr, env map[string]ValueType, inEffect bool) 
 		b, ok := c.program.Bindings[key]
 		if !ok {
 			c.diagnostic("EF112", "unknown or unsupported Go symbol "+key+"; supports non-generic primitive functions and optional error returns", e.Span)
-			e.Type = value("invalid")
+			e.checked = c.checkedData("invalid")
+			e.Type = c.projectChecked(e.checked)
 			return true
 		}
 		if len(e.Args) != len(b.Params) {
@@ -288,18 +289,18 @@ func (c *checker) foreignCall(e *Expr, env map[string]ValueType, inEffect bool) 
 		}
 		for i, arg := range e.Args {
 			actual := c.expr(arg, env, inEffect)
-			if i < len(b.Params) && (actual.Effect || !c.sameType(actual, b.Params[i])) {
+			if i < len(b.Params) && (actual.isEffect() || !c.sameType(actual, b.Params[i])) {
 				c.diagnostic("EF106", "Go argument must be "+b.Params[i], arg.Span)
 			}
 		}
 		returnID := c.canonicalRef(typeRef(b.Return))
-		t := c.valueForTypeID(returnID)
+		resultID := returnID
 		if b.HasError {
-			t = c.valueForTypeID(c.internType("goResult", "", []TypeID{returnID}))
+			resultID = c.internType("goResult", "", []TypeID{returnID})
 		}
-		t.Effect = true
-		t.Services = []string{"Foreign"}
-		e.Type = t
+		t := checkedExpression{value: c.values.recipe(resultID, nil, checkedEffectCallable, emptyRowID, c.internRow([]string{"Foreign"}), nil, nil)}
+		e.checked = t.clone()
+		e.Type = c.projectChecked(t)
 		e.Text = "foreign"
 		e.Name = key
 		c.program.UsedImports[alias] = true

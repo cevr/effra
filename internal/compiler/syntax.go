@@ -83,6 +83,7 @@ type ErrorDecl struct {
 type Declaration struct {
 	Kind     string    `json:"kind"`
 	Name     string    `json:"name"`
+	Identity string    `json:"identity,omitempty"`
 	Fields   []Field   `json:"fields,omitempty"`
 	Variants []Variant `json:"variants,omitempty"`
 	Span     Span      `json:"span"`
@@ -101,7 +102,10 @@ type Function struct {
 	Captures  []OwnershipFact
 	// Identity is assigned by the checker from the canonical callable
 	// contract. The source name remains a projection used by the emitters.
-	Identity string `json:"-"`
+	Identity string    `json:"-"`
+	Owner    string    `json:"-"`
+	Contract ValueType `json:"-"`
+	Actual   ValueType `json:"-"`
 }
 type Service struct {
 	Name    string
@@ -118,6 +122,7 @@ type Provider struct {
 	Services []string
 	Methods  []*Function
 	Span     Span
+	Contract ValueType `json:"-"`
 }
 type Program struct {
 	Imports     []GoImport
@@ -179,18 +184,19 @@ type MatchArm struct {
 	Span    Span
 }
 type Expr struct {
-	Kind   string
-	Name   string
-	Text   string
-	Args   []*Expr
-	Left   *Expr
-	Right  *Expr
-	Then   *Block
-	Else   *Block
-	Fields []FieldValue
-	Arms   []*MatchArm
-	Span   Span
-	Type   ValueType
+	Kind    string
+	Name    string
+	Text    string
+	Args    []*Expr
+	Left    *Expr
+	Right   *Expr
+	Then    *Block
+	Else    *Block
+	Fields  []FieldValue
+	Arms    []*MatchArm
+	Span    Span
+	Type    ValueType
+	checked checkedExpression
 	// Evaluation is the work incurred while evaluating this expression now.
 	// Deferred effect rows remain on Type. Keeping the two facts beside the
 	// checked node lets callers reuse the result without walking the subtree.
