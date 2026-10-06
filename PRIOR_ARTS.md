@@ -17,6 +17,7 @@ Owner direction refreshed 2026-10-06: preserve Go-like simplicity, Effect-style 
 | [XState v6](https://github.com/statelyai/xstate/pull/5543) — main machine reference | Active `next` branch pinned `2146ae26ebfc7e6a624b3a1f237f9e6ddc30b9f5` (`6.0.0-alpha.64`), superseding original PR5257; `docs/xstate-v5-to-v6.md`, `packages/core/src`, `packages/core/test`, `packages/xstate-effect` | Ordinary function transitions, state-specific contracts/input, schema metadata, internal lifecycle identity, pure stepping, Effect integration and inspection | Checked machine plan, ordinary ADT payload construction, owned actor runtime, test generation and explicit codec boundaries; do not infer v6 behavior from v5 |
 | [Effect Machine](https://github.com/cevr/effect-machine) | `176697cf20006f5f539bf04ff2e609bfe1563e22`; `src/internal/{runtime,transition}.ts`, `test/{stop-completion,reenter,state-timeout,type-constraints}.test.ts` | State/actor-owned scopes, exact shutdown outcomes, re-entry, typed requirements and causal tests | Managed actor execution and upstream behavioral mapping |
 | [Serde](https://github.com/serde-rs/serde) | `6693a89cca77e0151437da1c7f890090b9ebf04c`; `serde_derive/src/{ser,de}.rs`, `internals/check.rs`, `test_suite/tests/test_annotations.rs` | Structural derivation, explicit adapters and fallible conversions, conflicting-attribute diagnostics | Finite derived codec witnesses plus ordinary typed transformation functions; no required procedural macro system |
+| [Ghosts of Departed Proofs for TypeScript](https://github.com/rauchg/gdp-ts) | `ebd0af9cae423997a43a024dc6d6738b0895bbec`; `src/index.ts`, `src/lint/shared.ts`, `test/types.ts`, documented limits | Scoped subject identities, evidence construction authority, wrong-subject rejection and the limits of stale evidence | [Opaque values and checked evidence](docs/research/opaque-values-and-evidence.md); candidate Go-like authorized values before exposing generative proof parameters |
 
 Application usage is surveyed as generic patterns below. Exact private checkout pointers stay in local research notes; private source is not copied into this public repository. Upstream reference tests retain their own license and provenance and remain distinct from passing Effra tests.
 
@@ -58,6 +59,8 @@ See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native
 - Application-specific state machines, identity, transaction and overflow policies remain explicit even when syntax becomes shorter.
 
 ## To survey
+
+- Validate the proposed opaque-construction boundary for identifiers, codec-validated values and authorized resources before adding general value-indexed evidence. The [comparison](docs/research/opaque-values-and-evidence.md) records compiler, foreign, mutability, freshness and cost obligations; source review is complete, language support is not implemented.
 
 - Validate the adopted XState v6/Effect Machine profile through pure plan tests and owned Go/JS actors. Include stale identity, conservative graph edges, saturation, re-entry and completed shutdown; source comparison is complete, implementation receipts remain open.
 - Validate the adopted Serde/Effect codec design with multiple named wire representations, directional rows, normalization, cancellation and bounded derivation. Source comparison is complete, implementation receipts remain open.
