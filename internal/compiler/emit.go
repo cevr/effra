@@ -84,6 +84,7 @@ func (r *Result) Emit(entry bool) (string, string, error) {
 		out.WriteString("const __ef_service_" + s.Name + "=Context.Service(" + quoted("effra/prototype/"+s.Name) + ");\n")
 	}
 	out.WriteString(`
+const __ef_provider_Assertions={check:(condition,message)=>condition?Effect.succeed(undefined):Effect.fail({_tag:'AssertionFailed',message}),equalText:(actual,expected)=>actual===expected?Effect.succeed(undefined):Effect.fail({_tag:'AssertionFailed',message:'expected '+JSON.stringify(expected)+'; received '+JSON.stringify(actual)})};
 const __ef_provider_LiveClock={sleep:ms=> ms<0n || ms>2147483647n ? Effect.die(new Error('invalid millisecond duration')) : Effect.sleep(Number(ms))};
 const __ef_provider_LiveEnv={get:name=>Effect.sync(()=>process.env[name] ?? '')};
 `)
@@ -95,7 +96,7 @@ const __ef_provider_LiveEnv={get:name=>Effect.sync(()=>process.env[name] ?? '')}
 		out.WriteString("};\n")
 	}
 	for _, p := range builtinProviders() {
-		if p.Service != "Console" && p.Service != "Clock" && p.Service != "Env" {
+		if p.Service != "Console" && p.Service != "Clock" && p.Service != "Env" && p.Service != "Assert" {
 			continue
 		}
 		out.WriteString("export {__ef_provider_" + p.Name + " as " + p.Name + "};\n")

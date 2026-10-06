@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"effra.local/prototype/internal/compiler"
 	"effra.local/prototype/internal/mcp"
@@ -39,6 +42,8 @@ type options struct {
 	target, output string
 	entry          bool
 	strict         bool
+	timeoutMillis  int
+	live           bool
 	positional     []string
 }
 
@@ -46,7 +51,7 @@ func parseOptions(args []string) (options, error) {
 	opts := options{target: "go"}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--target", "-o":
+		case "--target", "-o", "--timeout-ms":
 			if i+1 == len(args) {
 				return opts, fmt.Errorf("%s requires a value", args[i])
 			}
@@ -54,11 +59,19 @@ func parseOptions(args []string) (options, error) {
 			i++
 			if flag == "--target" {
 				opts.target = args[i]
+			} else if flag == "--timeout-ms" {
+				n, err := strconv.Atoi(args[i])
+				if err != nil || n <= 0 || n > 3600000 {
+					return opts, fmt.Errorf("--timeout-ms requires 1..3600000")
+				}
+				opts.timeoutMillis = n
 			} else {
 				opts.output = args[i]
 			}
 		case "--entry":
 			opts.entry = true
+		case "--live":
+			opts.live = true
 		case "--strict":
 			opts.strict = true
 		default:
@@ -75,7 +88,7 @@ func parseOptions(args []string) (options, error) {
 }
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | mcp [ROOT]")
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | mcp [ROOT]")
 		return nil
 	}
 	if len(args) == 2 && args[0] == "lint" && args[1] == "rules" {
@@ -91,12 +104,26 @@ func command(args []string) error {
 		}
 		return mcp.Serve(root, os.Stdin, os.Stdout)
 	}
+	switch args[0] {
+	case "check", "lint", "query", "graph", "inspect", "explain", "build", "run", "test":
+	default:
+		return fmt.Errorf("unknown command %s; use ef --help", args[0])
+	}
+	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+		return command([]string{"--help"})
+	}
 	opts, err := parseOptions(args[1:])
 	if err != nil {
 		return err
 	}
 	if len(opts.positional) == 0 {
 		return fmt.Errorf("source file required")
+	}
+	if opts.live && args[0] != "test" {
+		return fmt.Errorf("--live is only supported by test")
+	}
+	if opts.timeoutMillis != 0 && args[0] != "test" {
+		return fmt.Errorf("--timeout-ms is only supported by test")
 	}
 	if opts.strict && args[0] != "lint" {
 		return fmt.Errorf("--strict is only supported by lint")
@@ -161,6 +188,11 @@ func command(args []string) error {
 			return fmt.Errorf("unknown symbol %s", opts.positional[1])
 		}
 		return printJSON(map[string]any{"schemaVersion": 1, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "symbol": symbol, "bindings": r.Bindings, "diagnostics": r.Diagnostics})
+	case "test":
+		if err := r.TestMode(opts.live); err != nil {
+			return err
+		}
+		return runTests(r, opts.positional[0], opts.timeoutMillis)
 	case "build", "run":
 		var path string
 		if opts.target == "go" {
@@ -211,6 +243,10 @@ func buildGo(r *compiler.Result, source, output string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return buildGoSource(r, source, output, code)
+}
+func buildGoSource(r *compiler.Result, source, output, code string) (string, error) {
+	var err error
 	dir := filepath.Join("dist", "go", sourceBase(source))
 	if err = os.MkdirAll(dir, 0755); err != nil {
 		return "", err
@@ -277,4 +313,111 @@ func writeChanged(path string, content []byte) error {
 		return nil
 	}
 	return os.WriteFile(path, content, 0644)
+}
+
+func runTests(r *compiler.Result, source string, timeoutMillis int) error {
+	var path string
+	if timeoutMillis == 0 {
+		timeoutMillis = 30000
+	}
+	if r.Target == "go" {
+		code, err := r.EmitGoTests()
+		if err != nil {
+			return err
+		}
+		path, err = buildGoSource(r, source, filepath.Join("dist", sourceBase(source)+".tests"), code)
+		if err != nil {
+			return err
+		}
+	} else {
+		js, decl, err := r.EmitJSTests()
+		if err != nil {
+			return err
+		}
+		path = filepath.Join("dist", sourceBase(source)+".tests.mjs")
+		if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return err
+		}
+		if err = writeChanged(path, []byte(js)); err != nil {
+			return err
+		}
+		if err = writeChanged(strings.TrimSuffix(path, ".mjs")+".d.mts", []byte(decl)); err != nil {
+			return err
+		}
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	runtime, args := absolute, []string{}
+	if r.Target == "js" {
+		runtime, err = exec.LookPath("bun")
+		if err != nil {
+			runtime, err = exec.LookPath("node")
+		}
+		if err != nil {
+			return fmt.Errorf("JavaScript tests require Bun or Node")
+		}
+		args = []string{absolute}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMillis)*time.Millisecond)
+	defer cancel()
+	child := exec.CommandContext(ctx, runtime, args...)
+	var stdout, stderr testOutput
+	child.Stdout = &stdout
+	child.Stderr = &stderr
+	child.WaitDelay = time.Second
+	runErr := child.Run()
+	if ctx.Err() != nil {
+		_ = printJSON(map[string]any{"schemaVersion": 1, "revision": r.Revision, "target": r.Target, "passed": false, "watchdogExpired": true, "cleanupCompleted": false, "output": stdout.String(), "stderr": stderr.String(), "outputTruncated": stdout.truncated || stderr.truncated})
+		return fmt.Errorf("test process exceeded real-time watchdog; managed cleanup is not confirmed")
+	}
+	output := strings.TrimSuffix(stdout.String(), "\n")
+	last := strings.LastIndex(output, "\n")
+	report := map[string]any{}
+	if err = json.Unmarshal([]byte(output[last+1:]), &report); err != nil {
+		_ = printJSON(map[string]any{"schemaVersion": 1, "revision": r.Revision, "target": r.Target, "passed": false, "watchdogExpired": false, "cleanupCompleted": false, "reportMissing": true, "output": stdout.String(), "stderr": stderr.String(), "outputTruncated": stdout.truncated || stderr.truncated})
+		return fmt.Errorf("test process did not produce a report: %v", runErr)
+	}
+	report["revision"] = r.Revision
+	report["target"] = r.Target
+	report["watchdogExpired"] = false
+	report["outputTruncated"] = stdout.truncated || stderr.truncated
+	if last >= 0 {
+		report["output"] = output[:last+1]
+	}
+	if stderr.Len() > 0 {
+		report["stderr"] = stderr.String()
+	}
+	if err = printJSON(report); err != nil {
+		return err
+	}
+	if runErr != nil {
+		return fmt.Errorf("tests failed")
+	}
+	return nil
+}
+
+// Retain the tail (including the terminal JSON report) without allowing test
+// logging to grow the runner's memory without bound.
+type testOutput struct {
+	bytes.Buffer
+	truncated bool
+}
+
+func (b *testOutput) Write(p []byte) (int, error) {
+	const limit = 1024 * 1024
+	n := len(p)
+	if n >= limit {
+		b.Reset()
+		p = p[n-limit:]
+		b.truncated = true
+	} else if b.Len()+n > limit {
+		remaining := append([]byte(nil), b.Bytes()[b.Len()+n-limit:]...)
+		b.Reset()
+		_, _ = b.Buffer.Write(remaining)
+		b.truncated = true
+	}
+	_, err := b.Buffer.Write(p)
+	return n, err
 }

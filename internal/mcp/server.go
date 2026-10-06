@@ -75,6 +75,7 @@ func tools() []tool {
 	return []tool{
 		{"project.describe", "Compiler capabilities, supported target, and guardrail limits", map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}, annotations},
 		{"project.check", "Check one file; return revision, bounded diagnostics, and timings", schema(false), annotations},
+		{"project.tests", "Discover checked test contracts; reports live-host requirement without executing", schema(false), annotations},
 		{"project.graph", "Static service, provider and effect dependency graph; no dependent layers yet", schema(false), annotations},
 		{"project.lint", "Type-aware advice over checked source; strict mode fails on warnings", lintSchema, annotations},
 		{"lint.rules", "Stable lint codes, severity and rationale", map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}, annotations},
@@ -202,7 +203,7 @@ func call(root, name string, args arguments) (any, error) {
 			"schemaVersion": 1, "compilerVersion": CompilerVersion,
 			"runtimes": map[string]string{"go": "typed lazy closures; managed scopes and fibers; Go standard library", "js": "effect@4.0.1"},
 			"targets":  []string{"go", "js"}, "defaultTarget": "go", "sourceExtension": ".ef", "workspace": root,
-			"operations": []string{"project.describe", "project.check", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "project.graph"}, "scope": "single-file",
+			"operations": []string{"project.describe", "project.check", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "project.graph", "project.tests"}, "scope": "single-file",
 			"guardrails": map[string]string{
 				"failures": "checked closed rows", "requirements": "checked nominal services",
 				"resourceOwnership":  "Both targets join owned fibers before releasing scope resources; Go File guards closed handles",
@@ -226,6 +227,21 @@ func call(root, name string, args arguments) (any, error) {
 	r := compiler.CompileAt(string(source), target, filepath.Dir(filepath.Join(root, args.File)))
 	if args.ExpectedRevision != "" && args.ExpectedRevision != r.Revision {
 		return nil, fmt.Errorf("stale semantic revision; current revision is %s", r.Revision)
+	}
+	if name == "project.tests" {
+		tests, err := r.Tests()
+		if err != nil {
+			return nil, err
+		}
+		if len(tests) > 100 {
+			return nil, fmt.Errorf("test catalog exceeds prototype limits")
+		}
+		for _, test := range tests {
+			if len(test.Contract.Errors) > 100 || len(test.Contributions) > 100 {
+				return nil, fmt.Errorf("test contract exceeds prototype limits")
+			}
+		}
+		return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "tests": tests, "liveRequired": r.TestMode(false) != nil, "execution": "ef test; MCP does not execute tests"}, nil
 	}
 	if name == "project.graph" {
 		graph, err := r.Graph()

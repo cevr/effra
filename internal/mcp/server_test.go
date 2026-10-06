@@ -56,7 +56,7 @@ func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
 		t.Fatal(result)
 	}
 	listed := responses[2]["result"].(map[string]any)["tools"].([]any)
-	if len(listed) != 8 {
+	if len(listed) != 9 {
 		t.Fatal(listed)
 	}
 	inspected := responses[3]["result"].(map[string]any)["structuredContent"].(map[string]any)

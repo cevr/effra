@@ -97,3 +97,22 @@ func TestDependencyGraphTracksProvidersAndConsumers(t *testing.T) {
 		t.Fatal("unchecked graph")
 	}
 }
+
+func BenchmarkLintAndGraph10KLines(b *testing.B) {
+	var source strings.Builder
+	for i := 0; i < 2000; i++ {
+		source.WriteString("effect fn f" + fmtInt(i) + "() -> string\nthrows {}\nuses {}\n{\n\"value\" }\n")
+	}
+	r := Compile(source.String())
+	if !r.Checked {
+		b.Fatal(r.Diagnostics)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r.Lint(false)
+		if _, err := r.Graph(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

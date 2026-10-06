@@ -6,6 +6,7 @@ func builtins() []*Service {
 	}
 	p := func(name, typ string) Param { return Param{Name: name, Type: typ} }
 	return []*Service{
+		{Name: "Assert", Methods: []*Function{method("check", "()", []Param{p("condition", "bool"), p("message", "string")}, "AssertionFailed"), method("equalText", "()", []Param{p("actual", "string"), p("expected", "string")}, "AssertionFailed")}},
 		{Name: "Console", Methods: []*Function{method("log", "()", []Param{p("message", "string")})}},
 		{Name: "Clock", Methods: []*Function{method("sleep", "()", []Param{p("milliseconds", "i64")})}},
 		{Name: "Files", Methods: []*Function{method("openRead", "File", []Param{p("path", "string")}, "IoError"), method("readText", "string", []Param{p("file", "File")}, "IoError"), method("readFile", "string", []Param{p("path", "string")}, "IoError")}},
@@ -16,6 +17,6 @@ func builtins() []*Service {
 	}
 }
 func builtinProviders() []*Provider {
-	return []*Provider{{Name: "Stdout", Service: "Console"}, {Name: "LiveClock", Service: "Clock"}, {Name: "LiveFiles", Service: "Files"}, {Name: "LiveEnv", Service: "Env"}, {Name: "RuntimeLive", Service: "Runtime"}, {Name: "Host", Service: "Foreign"}, {Name: "GoHttp", Service: "Http"}}
+	return []*Provider{{Name: "Assertions", Service: "Assert"}, {Name: "Stdout", Service: "Console"}, {Name: "LiveClock", Service: "Clock"}, {Name: "LiveFiles", Service: "Files"}, {Name: "LiveEnv", Service: "Env"}, {Name: "RuntimeLive", Service: "Runtime"}, {Name: "Host", Service: "Foreign"}, {Name: "GoHttp", Service: "Http"}}
 }
-func builtinErrors() []string { return []string{"IoError", "Timeout", "GoError"} }
+func builtinErrors() []string { return []string{"IoError", "Timeout", "GoError", "AssertionFailed"} }

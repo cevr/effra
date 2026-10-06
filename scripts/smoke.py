@@ -56,18 +56,38 @@ messages = [
     {"jsonrpc":"2.0", "id":4, "method":"tools/call", "params":{"name":"project.check", "arguments":{"file":"examples/main.ef", "expectedRevision":"old"}}},
     {"jsonrpc":"2.0", "id":5, "method":"tools/call", "params":{"name":"code.inspect", "arguments":{"file":"examples/imports.ef", "symbol":"main"}}},
     {"jsonrpc":"2.0", "id":6, "method":"tools/call", "params":{"name":"project.describe", "arguments":{}}},
+    {"jsonrpc":"2.0", "id":7, "method":"tools/call", "params":{"name":"project.tests", "arguments":{"file":"examples/testing.ef"}}},
 ]
 server = subprocess.run([ef, "mcp", str(root)], input="\n".join(map(json.dumps, messages))+"\n", text=True, capture_output=True)
 assert server.returncode == 0, server.stderr
 responses = [json.loads(line) for line in server.stdout.splitlines()]
-assert len(responses) == 6
-assert len(responses[1]["result"]["tools"]) == 8
+assert len(responses) == 7
+assert len(responses[1]["result"]["tools"]) == 9
 mcp = responses[2]["result"]["structuredContent"]
 assert mcp["symbol"] == inspected["symbol"] and mcp["revision"] == inspected["revision"]
 assert responses[3]["result"]["isError"]
 assert responses[4]["result"]["structuredContent"]["bindings"] == bindings["bindings"]
 assert responses[4]["result"]["structuredContent"]["revision"] == bindings["revision"]
 assert "Go imports" in responses[5]["result"]["structuredContent"]["guardrails"]["targetCapabilities"]
+catalog=responses[6]["result"]["structuredContent"]
+assert len(catalog["tests"])==3 and not catalog["liveRequired"]
+for target in ("go","js"):
+    suite=json.loads(run("test","examples/testing.ef","--target",target).stdout)
+    assert suite["passed"] and len(suite["tests"])==3 and not suite["watchdogExpired"]
+with tempfile.TemporaryDirectory(prefix="effra-tests-") as tmp:
+    file=pathlib.Path(tmp)/"cases.ef"
+    file.write_text('effect fn test_bad() -> () throws {AssertionFailed} uses {Assert} {run Assert.equalText("actual","expected")} effect fn test_after() -> () throws {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}')
+    for target in ("go","js"):
+        suite=json.loads(run("test",str(file),"--target",target,success=False).stdout)
+        assert not suite["passed"] and len(suite["tests"])==2
+        assert suite["tests"][0]["reasons"][0]["tag"]=="AssertionFailed" and suite["tests"][1]["passed"]
+        assert 'expected "expected"; received "actual"' in suite["tests"][0]["reasons"][0]["message"]
+    # A real watchdog is separate from program time and must disclaim cleanup.
+    file.write_text('effect fn test_slow() -> () {run Clock.sleep(10000).provide<Clock>(LiveClock)}')
+    for target in ("go","js"):
+        assert "--live" in run("test",str(file),"--target",target,success=False).stderr
+        suite=json.loads(run("test",str(file),"--target",target,"--live","--timeout-ms","100",success=False).stdout)
+        assert suite["watchdogExpired"] and not suite["cleanupCompleted"]
 rules=json.loads(run("lint","rules").stdout)
 assert {r["name"] for r in rules} == {"unused-recipe","redundant-provision","unused-go-import"}
 graph=json.loads(run("graph","examples/workflow.ef").stdout)
