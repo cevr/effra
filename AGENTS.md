@@ -1,5 +1,7 @@
 # Effra
 
+Implementation subagents use `gpt-6.1-sol` with medium reasoning, explicitly selected by the user on 2026-10-06. Pass the model and reasoning settings explicitly and use a scoped handoff when replacing an agent. Earlier Effra handoffs naming Luna models are superseded. Keep `gpt-6-astra` for orchestration and root review, and use the separate Herdr `claude2` instance for independent counsel. Parallel native subagents are explicitly authorized; give each an isolated lane and one writer. Use native subagents for implementation rather than separate Codex panes.
+
 Read README.md, docs/design.md, and docs/wayfinder/README.md before changing the language.
 
 For language architecture, runtime/interop contracts, or terminology changes, read NORTH_STAR.md, PRIOR_ARTS.md, and GLOSSARY.md first. Direction and tiebreaks live in NORTH_STAR.md; source comparisons and open research live in PRIOR_ARTS.md; domain definitions live only in GLOSSARY.md. Architecture-loop setup and drafted owner questions are recorded in plans/architecture-loop-2026-10-05.md.

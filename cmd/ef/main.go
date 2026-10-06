@@ -13,12 +13,19 @@ import (
 	"time"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/lsp"
 	"effra.local/prototype/internal/mcp"
 	sourcefile "effra.local/prototype/internal/source"
 )
 
 func main() {
 	if err := command(os.Args[1:]); err != nil {
+		if exit, ok := err.(formatExitError); ok {
+			if !exit.handled && exit.message != "" {
+				fmt.Fprintln(os.Stderr, exit.message)
+			}
+			os.Exit(exit.code)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		if _, usage := err.(usageError); usage {
 			os.Exit(2)
@@ -30,6 +37,14 @@ func main() {
 type usageError struct{ message string }
 
 func (e usageError) Error() string { return e.message }
+
+type formatExitError struct {
+	code    int
+	message string
+	handled bool
+}
+
+func (e formatExitError) Error() string { return e.message }
 
 func invalidInvocation(err error) error {
 	if err == nil {
@@ -66,6 +81,37 @@ func loadWithSource(path, target string) (*compiler.Result, compiler.SourceSnaps
 	}
 	snapshot := compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: string(source)}
 	return compiler.CompileAt(snapshot.Text, target, filepath.Dir(absolute)), snapshot, nil
+}
+
+// loadWithOrigin keeps the established source admission and semantic module
+// resolution path, while returning the physical origin for generated output.
+// The origin is derived from the same absolute path that loadWithSource read;
+// it never describes a different file selected from the raw caller spelling.
+func loadWithOrigin(path, target string) (*compiler.Result, string, error) {
+	r, _, err := loadWithSource(path, target)
+	if err != nil {
+		return nil, "", err
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, "", err
+	}
+	origin, err := resolveSourceOrigin(absolute)
+	if err != nil {
+		return nil, "", err
+	}
+	return r, origin, nil
+}
+
+// resolveSourceOrigin follows the operating system's path walk for the
+// already-admitted absolute source path. Diagnostics retain the established
+// lexical URI and source admission policy above.
+func resolveSourceOrigin(absolutePath string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(absolutePath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(resolved)
 }
 
 type options struct {
@@ -121,8 +167,27 @@ func parseOptions(args []string) (options, error) {
 }
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | mcp [ROOT]")
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] | lsp [--target go|js]")
 		return nil
+	}
+	if args[0] == "fmt" {
+		return formatCommand(args[1:])
+	}
+	if args[0] == "lsp" {
+		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
+			fmt.Println("usage: ef lsp [--target go|js]\nContent-Length framed JSON-RPC on stdio. Full-document synchronization and UTF-16 diagnostics only.")
+			return nil
+		}
+		target := "go"
+		if len(args) == 3 && args[1] == "--target" {
+			target = args[2]
+		} else if len(args) != 1 {
+			return invalidInvocation(fmt.Errorf("usage: ef lsp [--target go|js]"))
+		}
+		if target != "go" && target != "js" {
+			return invalidInvocation(fmt.Errorf("LSP target must be go or js"))
+		}
+		return lsp.Serve(target, os.Stdin, os.Stdout)
 	}
 	if len(args) == 2 && args[0] == "lint" && args[1] == "rules" {
 		return printJSON(compiler.LintRules())
@@ -197,8 +262,11 @@ func command(args []string) error {
 	}
 	var r *compiler.Result
 	var snapshot compiler.SourceSnapshot
+	var sourceOrigin string
 	if args[0] == "diagnostics" {
 		r, snapshot, err = loadWithSource(opts.positional[0], opts.target)
+	} else if opts.target == "go" && (args[0] == "build" || args[0] == "run" || args[0] == "test") {
+		r, sourceOrigin, err = loadWithOrigin(opts.positional[0], opts.target)
 	} else {
 		r, err = load(opts.positional[0], opts.target)
 	}
@@ -305,11 +373,11 @@ func command(args []string) error {
 		if err := r.TestMode(opts.live); err != nil {
 			return err
 		}
-		return runTests(r, opts.positional[0], opts.timeoutMillis)
+		return runTests(r, opts.positional[0], sourceOrigin, opts.timeoutMillis)
 	case "build", "run":
 		var path string
 		if opts.target == "go" {
-			path, err = buildGo(r, opts.positional[0], opts.output)
+			path, err = buildGo(r, opts.positional[0], sourceOrigin, opts.output)
 		} else {
 			path, err = buildJS(r, opts.positional[0], opts.output, opts.entry || args[0] == "run")
 		}
@@ -365,30 +433,20 @@ func printDiagnosticText(report compiler.DiagnosticReport, source string) {
 func sourceBase(source string) string {
 	return strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
 }
-func buildGo(r *compiler.Result, source, output string) (string, error) {
+func buildGo(r *compiler.Result, source, origin, output string) (string, error) {
 	code, err := r.EmitGo()
 	if err != nil {
 		return "", err
 	}
-	return buildGoSource(r, source, output, code)
+	return buildGoSource(r, source, origin, output, code, compiler.GoGenerationBuild)
 }
-func buildGoSource(r *compiler.Result, source, output, code string) (string, error) {
-	var err error
-	dir := filepath.Join("dist", "go", sourceBase(source))
-	if err = os.MkdirAll(dir, 0755); err != nil {
+func buildGoSource(r *compiler.Result, source, origin, output, code string, mode compiler.GoGenerationMode) (string, error) {
+	snapshot, err := r.GoSourceSnapshot(origin, mode, []byte(code))
+	if err != nil {
 		return "", err
 	}
-	if err = writeChanged(filepath.Join("dist", "go", "go.mod"), r.ModuleFile()); err != nil {
-		return "", err
-	}
-	if err = writeChanged(filepath.Join("dist", "go", "go.sum"), r.ModuleSum); err != nil {
-		return "", err
-	}
-	if err = compiler.WriteRuntime(filepath.Join("dist", "go")); err != nil {
-		return "", err
-	}
-	generated := filepath.Join(dir, "main.go")
-	if err = writeChanged(generated, []byte(code)); err != nil {
+	generation, err := compiler.PublishGoSourceSnapshot(filepath.Join("dist", "go", "apps"), snapshot)
+	if err != nil {
 		return "", err
 	}
 	if output == "" {
@@ -402,14 +460,20 @@ func buildGoSource(r *compiler.Result, source, output, code string) (string, err
 		return "", err
 	}
 	// Imported packages use the resolved module graph; the executable is standalone.
-	child := exec.Command("go", "build", "-trimpath", "-o", absolute, ".")
-	child.Dir = dir
+	child := nativeGoBuildCommand(generation.Directory, absolute)
 	child.Stdout = os.Stderr
 	child.Stderr = os.Stderr
 	if err = child.Run(); err != nil {
 		return "", fmt.Errorf("Go build failed: %w", err)
 	}
 	return output, nil
+}
+
+func nativeGoBuildCommand(directory, output string) *exec.Cmd {
+	child := exec.Command("go", "build", "-trimpath", "-mod=readonly", "-o", output, ".")
+	child.Dir = directory
+	child.Env = replaceEnv(os.Environ(), "GOWORK", "off")
+	return child
 }
 func buildJS(r *compiler.Result, source, output string, entry bool) (string, error) {
 	js, decl, err := r.Emit(entry)
@@ -442,7 +506,27 @@ func writeChanged(path string, content []byte) error {
 	return os.WriteFile(path, content, 0644)
 }
 
-func runTests(r *compiler.Result, source string, timeoutMillis int) error {
+func replaceEnv(environment []string, key, value string) []string {
+	prefix := key + "="
+	result := make([]string, 0, len(environment)+1)
+	found := false
+	for _, entry := range environment {
+		if strings.HasPrefix(entry, prefix) {
+			if !found {
+				result = append(result, prefix+value)
+				found = true
+			}
+			continue
+		}
+		result = append(result, entry)
+	}
+	if !found {
+		result = append(result, prefix+value)
+	}
+	return result
+}
+
+func runTests(r *compiler.Result, source, origin string, timeoutMillis int) error {
 	var path string
 	if timeoutMillis == 0 {
 		timeoutMillis = 30000
@@ -452,7 +536,7 @@ func runTests(r *compiler.Result, source string, timeoutMillis int) error {
 		if err != nil {
 			return err
 		}
-		path, err = buildGoSource(r, source, filepath.Join("dist", sourceBase(source)+".tests"), code)
+		path, err = buildGoSource(r, source, origin, filepath.Join("dist", sourceBase(source)+".tests"), code, compiler.GoGenerationTest)
 		if err != nil {
 			return err
 		}

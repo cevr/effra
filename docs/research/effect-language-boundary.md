@@ -1,0 +1,49 @@
+# Effect capabilities and the language boundary
+
+Owner direction, 2026-10-06: identify which Effect capabilities belong in ordinary language constructs and preserve Go ecosystem interoperability. This is an architectural partition and implementation acceptance guide, not a claim that every row below is implemented. Read it with [language abstractions](../specs/language-abstractions.md), [library capabilities](../specs/standard-library-capabilities.md) and [host interop](../interop.md).
+
+The reference is Effect4.0.1, commit `460272d30457f4697d8b8c52cad41caccbcace08`. The source cache may track a newer development head; comparisons here use immutable objects at this pin. Effra should make checked sequencing, contracts and ownership ordinary language concepts. Algorithms and configurable policies remain ordinary modules. A runtime primitive does not require a new keyword, and a library implemented in the bundled runtime is still a library contract.
+
+## Partition
+
+| Capability | Language responsibility | Runtime or library responsibility |
+| --- | --- | --- |
+| Lazy Effect values and sequencing | `effect fn`, explicit `run`, separate carried and evaluation rows, ordinary locals/branches/loops, typed function values | Represent captures and execute recipes; fuse direct calls only while preserving laziness, cancellation, cleanup and inspection |
+| Expected failures and recovery | Nominal payload failures, explicit `raises`, checked selective handling, preserve handler rows | `Cause`/`Exit` representation, defects, interruption and composite cleanup failures; recovery cannot erase those distinctions |
+| Services and provision | Nominal service identities, explicit `uses`, checked provision, inspectable dependency paths | Context values, scoped construction, sharing, rollback and release; reuse identity and cache policy remain explicit |
+| ADTs and interpretation | Ordinary records/enums, exhaustive matching, constrained generic data, package-qualified identities | Collections, Option/Result helpers and traversal algorithms; no separate compiler opcode for each container |
+| Scope and child ownership | Checked owner relations, lexical scope boundary, escape diagnostics where proven, supported callback obligations | Child cancellation/join, acquisition-registration atomicity, finalizer ordering, full terminal cause and completed close |
+| Fibers, race and bounded parallelism | Callable rows and owner propagation, forbid unadmitted detached/escaping work | Scheduling, admission, waiter wakeup and loser cleanup; combinators consume ordinary checked functions |
+| Codecs and transformations | Derive structural plans from canonical data, retain distinct wire/domain types and directional contracts | Parse/validate/encode, normalization, effectful conversion, error paths and versioned wire policies |
+| State machines and actors | ADT state/event types, checked transition functions and inspectable declaration plans | Mailbox admission, serialized effectful steps, state commit after successful cleanup, lifecycle and supervision policies |
+| Ref, Deferred, queues and semaphores | Generic payload/callback types, variance, transfer/ownership admission | Atomic updates, completion, backpressure, permit accounting and cancelled-waiter cleanup |
+| Retry, schedules, caches, streams and pools | Preserve callback rows, target capabilities and owner relations through generic composition | Algorithms, capacity, expiry, jitter, retry selection, sharing and failure-retention policies |
+| HTTP, RPC, files and processes | Imported host type identities, checked interfaces, endpoint/codec callable contracts and target restrictions | Transport, framing, routing, platform I/O, cancellation adapters and external compatibility |
+| Logs, traces, metrics and tests | Compiler source/type/owner metadata, capability admission, common diagnostics | Providers, buffering, cardinality, export, virtual clocks, assertions and watchdogs |
+| Cluster, durable actors and workflows | Ordinary typed addresses/messages/contracts; explicit target/provider requirements | Placement, storage transactions, fencing, replay, acknowledgement, deployment and upgrade protocols |
+
+These responsibilities compose. A library may need a small runtime primitive for synchronization or acquisition without requiring library-specific syntax or a new type checker branch. General callable/type/row mechanisms must carry its contract. The existing opaque `Handler` erasure is precisely the kind of special facility the common representation must replace.
+
+## Boilerplate the language can remove
+
+Effect's [Effect interface and generator protocol](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/Effect.ts#L116) carry success, failure and service types through TypeScript interfaces, variance markers, iterator support and conditional helpers. Its [generator implementation surface](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/Effect.ts#L1431) sequences yielded recipes. Effra can express that contract directly in function types and ordinary control flow; user code does not need generator wrappers, `yield*`, phantom unification fields or conditional extraction aliases to describe the same operation.
+
+Effect's [service keys](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/Context.ts#L98) combine a nominal identifier with a structural service shape. Effra's service declarations can generate that identity and operation contract once. The compiler checks provision and derives graphs; runtime context values still have to exist. Similarly, nominal payload enums replace repeated tagged-object construction conventions, and derivation can avoid restating every record field in a codec. Derivation supplies structure, not an implicit universal wire format or a proof that a transformation is invertible.
+
+Effect's [Layer contract](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/Layer.ts#L54) distinguishes provided services, constructor failures and required services, while its build receives a memo map and scope. Effra can check those distinctions and explain construction paths. Scoped memoization, fresh acquisition and rollback are runtime behavior; shrinking their surface syntax does not remove those obligations.
+
+Effect's [acquire/release implementation](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/internal/effect.ts#L4134) masks interruption around acquisition and finalizer registration and captures the release context. A lexical scope alone cannot implement that atomic transition or guarantee foreign I/O stops. Effra needs an owned acquisition primitive and executable cancellation-race evidence, even if the public surface is a normal library call.
+
+## Guarantees syntax cannot supply
+
+Static rows can check declared services and expected failures. They cannot prove a foreign library honors context cancellation, a shared pointer is race-free, a network write was rolled back, or a process survived termination. A Go `error` result is returned data until an explicit adaptation; it is not evidence that every failure is represented by that result. Interface implementation proves a method set, not a method's ownership, blocking or concurrency behavior.
+
+Likewise, a codec cannot establish an arbitrary callback's honesty, a scope cannot kill an uncooperative goroutine, and a typed durable address cannot establish exactly-once external effects. Runtime policies, reviewed foreign assertions and storage/transport guarantees must retain separate provenance in inspection. Unsupported behavior diagnoses rather than becoming an unchecked host passthrough.
+
+## Implementation acceptance
+
+Use the smallest regular language mechanism that carries the contract. Before adding syntax or an intrinsic, show two unrelated public callers and the invariant ordinary typed functions cannot express. Each library family needs pinned behavior mappings, negative cases and Go/JS receipts; matching a familiar API name is insufficient.
+
+Automatic host interop must preserve Go's standard protocols and native objects. Import declarations and receiver method sets; use Go's own assignability for host interfaces. Avoid mandatory wrapper types that hide `io.Reader`, `io.Writer`, `io.Closer`, `fs.FS`, `net.Conn` or optional optimized methods. Resource ownership, cancellation and partial-result adaptation stay explicit. Detailed finite host-value acceptance follows the [interop proposal](../interop.md); current primitive-only imports do not meet this wider requirement.
+
+Compiler availability, runtime support and application retention remain separate. A fluent spelling should lower to the same checked operation as a direct call. Importing a codec type must not initialize telemetry, actors or clustering. Go-only builds must not launch a TypeScript checker; library additions cannot require checking every implementation on every edit. Measure compile/import cost and retained binary modules in the final measurement phase before making speed or size claims.

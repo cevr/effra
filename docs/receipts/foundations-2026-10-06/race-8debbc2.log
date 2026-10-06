@@ -1,0 +1,7 @@
+ok  	effra.local/prototype/cmd/ef	1.789s
+?   	effra.local/prototype/examples/go-interop	[no test files]
+?   	effra.local/prototype/examples/sdk	[no test files]
+ok  	effra.local/prototype/internal/compiler	91.460s
+ok  	effra.local/prototype/internal/mcp	1.126s
+ok  	effra.local/prototype/internal/source	(cached)
+ok  	effra.local/prototype/runtime/effra	1.336s

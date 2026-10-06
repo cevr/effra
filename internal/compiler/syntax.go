@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Span offsets and columns are UTF-8 byte based, scoped to a semantic revision.
@@ -209,6 +210,9 @@ type Expr struct {
 }
 
 func lex(source string) ([]token, []Comment, []Diagnostic) {
+	if diagnostic, ok := firstInvalidUTF8Diagnostic(source); ok {
+		return nil, nil, []Diagnostic{diagnostic}
+	}
 	var out []token
 	var comments []Comment
 	line, column := 1, 1
@@ -289,6 +293,35 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 	out = append(out, token{"<eof>", "eof", Span{len(source), 0, line, column}})
 	return out, comments, nil
 }
+
+func firstInvalidUTF8Diagnostic(source string) (Diagnostic, bool) {
+	line, column := 1, 1
+	for offset := 0; offset < len(source); {
+		if source[offset] == '\n' {
+			offset++
+			line++
+			column = 1
+			continue
+		}
+		if source[offset] == '\r' {
+			offset++
+			column++
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(source[offset:])
+		if size == 1 && source[offset] >= utf8.RuneSelf {
+			return Diagnostic{
+				Code:    "EF001",
+				Message: "source is not valid UTF-8",
+				Span:    Span{Offset: offset, Length: 1, Line: line, Column: column},
+			}, true
+		}
+		offset += size
+		column += size
+	}
+	return Diagnostic{}, false
+}
+
 func parse(source string) (program *Program, diagnostics []Diagnostic) {
 	program, _, diagnostics = parseSyntax(source)
 	return program, diagnostics

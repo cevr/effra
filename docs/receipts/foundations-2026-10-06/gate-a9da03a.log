@@ -1,0 +1,13 @@
+tracker: 38 valid issues
+ok  	effra.local/prototype/cmd/ef	0.698s
+?   	effra.local/prototype/examples/go-interop	[no test files]
+?   	effra.local/prototype/examples/sdk	[no test files]
+ok  	effra.local/prototype/internal/compiler	61.036s
+ok  	effra.local/prototype/internal/mcp	0.025s
+ok  	effra.local/prototype/internal/source	(cached)
+ok  	effra.local/prototype/runtime/effra	(cached)
+diagnostics positions: passed
+diagnostics bounds: passed
+diagnostics identity: passed
+native Go executable, JS module, CLI lint/query/graph, stdio MCP and bounded deep TypeAt: passed
+HTTP routes, failure boundary, file scope, timeout and SIGTERM shutdown: passed

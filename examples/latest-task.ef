@@ -1,4 +1,4 @@
-effect fn search(query: string) -> string uses {Clock} {
+effect fn search(query: string) -> string uses { Clock } {
     if query == "old" {
         run Clock.sleep(10000)
         "stale result"
@@ -7,7 +7,7 @@ effect fn search(query: string) -> string uses {Clock} {
     }
 }
 
-effect fn replacement() -> string uses {Clock} {
+effect fn replacement() -> string uses { Clock } {
     scope {
         let previous = fork search("old")
         run previous.interrupt()

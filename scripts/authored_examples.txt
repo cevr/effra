@@ -1,0 +1,12 @@
+examples/main.ef
+examples/data.ef
+examples/workflow.ef
+examples/http.ef
+examples/ownership.ef
+examples/testing.ef
+examples/lifecycle.ef
+examples/latest-task.ef
+examples/imports.ef
+examples/concurrency.ef
+examples/missing-service.ef
+examples/causal.ef

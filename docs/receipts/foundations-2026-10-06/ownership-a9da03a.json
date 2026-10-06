@@ -1,0 +1,29 @@
+{
+  "head": "a9da03a8b2a979d82dceeb161699f301ac09ebbb",
+  "binarySHA256": "686123ec4c99c039f83d3c42235ee19668f5f09854961f3672b830274d8fa83b",
+  "build": "/home/exedev/Developer/personal/.rifts/effra/production-foundations/bin/ef: go1.27.0\n\tpath\teffra.local/prototype/cmd/ef\n\tmod\teffra.local/prototype\tv0.0.0-20261006081922-a9da03a8b2a9\t\n\tbuild\t-buildmode=exe\n\tbuild\t-compiler=gc\n\tbuild\tCGO_ENABLED=1\n\tbuild\tCGO_CFLAGS=\n\tbuild\tCGO_CPPFLAGS=\n\tbuild\tCGO_CXXFLAGS=\n\tbuild\tCGO_LDFLAGS=\n\tbuild\tGOARCH=amd64\n\tbuild\tGOOS=linux\n\tbuild\tGOAMD64=v1\n\tbuild\tvcs=git\n\tbuild\tvcs.revision=a9da03a8b2a979d82dceeb161699f301ac09ebbb\n\tbuild\tvcs.time=2026-10-06T08:19:22Z\n\tbuild\tvcs.modified=false\n",
+  "checks": [
+    {
+      "kind": "unsafe",
+      "source": "/tmp/effra-ownership-integrated-unsafe.ef",
+      "sourceSHA256": "be3f5989e07f2170732e18c34294d44224e3402946b76ef53c22b2be3f614cf6",
+      "exit": 1,
+      "stdout": "{\n  \"schemaVersion\": 1,\n  \"source\": {\n    \"uri\": \"file:///tmp/effra-ownership-integrated-unsafe.ef\",\n    \"origin\": \"disk\"\n  },\n  \"revision\": \"be3f5989e07f2170732e18c34294d44224e3402946b76ef53c22b2be3f614cf6\",\n  \"target\": \"go\",\n  \"checked\": false,\n  \"strict\": false,\n  \"policyPassed\": false,\n  \"lintAvailable\": false,\n  \"lintUnavailableReason\": \"source is unchecked; semantic lint advice is unavailable\",\n  \"totalCounts\": {\n    \"errors\": 1,\n    \"warnings\": 0,\n    \"information\": 0,\n    \"hints\": 0\n  },\n  \"diagnostics\": [\n    {\n      \"code\": \"EF123\",\n      \"origin\": \"compiler\",\n      \"severity\": \"error\",\n      \"message\": \"value owned by closing scope cannot escape\",\n      \"span\": {\n        \"offset\": 199,\n        \"length\": 5,\n        \"line\": 6,\n        \"column\": 5\n      },\n      \"locationAvailable\": true,\n      \"lsp\": {\n        \"range\": {\n          \"start\": {\n            \"line\": 5,\n            \"character\": 4\n          },\n          \"end\": {\n            \"line\": 5,\n            \"character\": 9\n          }\n        },\n        \"severity\": 1,\n        \"code\": \"EF123\",\n        \"source\": \"effra\",\n        \"message\": \"value owned by closing scope cannot escape\"\n      }\n    }\n  ],\n  \"returnedCount\": 1,\n  \"truncated\": false\n}\n",
+      "stderr": "diagnostics failed policy\n"
+    },
+    {
+      "kind": "safe",
+      "source": "/tmp/effra-ownership-integrated-safe.ef",
+      "sourceSHA256": "39d9935f9acb735750de31993ceaafa66a54060fb510ab39da984a4c60daf50e",
+      "exit": 0,
+      "stdout": "{\n  \"schemaVersion\": 1,\n  \"source\": {\n    \"uri\": \"file:///tmp/effra-ownership-integrated-safe.ef\",\n    \"origin\": \"disk\"\n  },\n  \"revision\": \"39d9935f9acb735750de31993ceaafa66a54060fb510ab39da984a4c60daf50e\",\n  \"target\": \"go\",\n  \"checked\": true,\n  \"strict\": false,\n  \"policyPassed\": true,\n  \"lintAvailable\": true,\n  \"totalCounts\": {\n    \"errors\": 0,\n    \"warnings\": 0,\n    \"information\": 0,\n    \"hints\": 0\n  },\n  \"diagnostics\": [],\n  \"returnedCount\": 0,\n  \"truncated\": false\n}\n",
+      "stderr": ""
+    },
+    {
+      "kind": "public-example",
+      "exit": 0,
+      "stdout": "scoped file read complete\n\n",
+      "stderr": ""
+    }
+  ]
+}

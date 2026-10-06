@@ -13,8 +13,50 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 | `ef query FILE BYTE_OFFSET` | `code.typeAt` | Expression kind, type, and executed failure/requirement rows |
 | `ef graph FILE` | `project.graph` | Dependencies, providers, calls and provision boundaries |
 | `ef test FILE` | `project.tests` discovers cases | CLI executes; MCP remains read-only |
+| `ef fmt FILE... [--check] [--json]` / `ef fmt --stdin` | `code.format` | Canonical syntax-only formatting; CLI writes atomically, MCP returns a full-text preview and never writes |
 
 File commands accept `--target go|js`, defaulting to Go. Results contain semantic revision hashes. MCP file tools accept `expectedRevision` and reject stale snapshots.
+
+Formatter adapters are the exception to semantic target and revision flags: `ef fmt` is syntax-only, and MCP `code.format` accepts `expectedDigest` for exact source bytes but no `target` or `expectedRevision`.
+
+## Formatter limits and filesystem policy
+
+Both formatter adapters apply these finite budgets before producing or replacing a document:
+
+| Boundary | Limit |
+| --- | ---: |
+| CLI file count | 100 files |
+| CLI input per file | 2 MiB |
+| CLI input per request | 8 MiB |
+| CLI formatted output per file | 4 MiB |
+| CLI formatted output per request | 16 MiB |
+| MCP `code.format` source | 2 MiB |
+| MCP `code.format` formatted output | 4 MiB |
+| MCP newline frame before its terminal LF | 16 MiB |
+
+The MCP frame budget excludes the terminal LF; the CR in a CRLF delimiter counts as frame content. Exact-limit frames are admitted. An oversized line is drained through its next LF without retaining the over-limit contents, returns a JSON-RPC parse error with a null ID, and leaves following requests available. A malformed partial line at EOF returns one parse error and then closes; a valid final request without LF is processed once. No peer deadline or hostile transport guarantee is implied.
+
+`ef fmt --stdin` writes only formatted source to stdout. Human file statuses and operational errors go to stderr. File `--json` and `--check --json` reports use stdout and keep stderr empty; stdin JSON is an invocation error. Exit 0 means formatting completed (or check found no differences), exit 1 means check differences, and exit 2 means invocation, syntax, I/O, stale-source, or limit failure. Completed file entries include `path`, `requestedPaths`, digests, `changed`, `written`, and `completed`; failed entries never receive a successful human status. The stable operational codes are:
+
+| Code | Meaning |
+| --- | --- |
+| `EFMT_INVOCATION` | incompatible options, missing input, or file-count admission failure |
+| `EFMT_PATH` | empty, non-`.ef`, or otherwise invalid path |
+| `EFMT_READ` | source could not be admitted or read |
+| `EFMT_SYMLINK` | mutating request named a symlink leaf |
+| `EFMT_SPECIAL_FILE` | directory, FIFO, or other non-regular source |
+| `EFMT_INPUT_LIMIT` | per-file or aggregate input budget exceeded |
+| `EFMT_OUTPUT_LIMIT` | per-file or aggregate formatted-output budget exceeded |
+| `EFMT_SYNTAX` | unsupported or invalid syntax, including invalid UTF-8 |
+| `EFMT_ALIAS` | multiple requested names resolve to one underlying inode |
+| `EFMT_STALE` | source identity or exact bytes changed before replacement |
+| `EFMT_WRITE` | temporary-file, permission, rename, or other replacement failure |
+
+Mutating paths retain the requested display spelling while the operating system resolves ancestor symlinks and `..` components. The leaf must remain regular and non-symlink at each replacement check. Lexical spellings that resolve to the same intended path are deduplicated; distinct hardlink or inode aliases in one request are rejected. A single requested hardlink is replaced through an atomic same-directory rename, so that selected directory entry splits from unlisted hardlinks; this is documented behavior. A read-only regular file may be replaced when its containing directory is writable, and its permission, setuid, setgid, and sticky bits are preserved. Directories, FIFOs, and other special nodes are rejected before a potentially blocking read. These cooperative checks do not claim hostile-filesystem race protection or directory-fsync durability.
+
+Formatter source must be valid UTF-8. Invalid bytes produce the shared lexical `EF001` span before formatting, with no replacement text or file write. Valid U+FFFD characters and escaped Unicode spellings remain valid source. MCP `source` strings are decoded JSON Unicode text; their `inputDigest` is the SHA-256 digest of those UTF-8 bytes.
+
+MCP `code.format` returns the complete formatted text in `structuredContent` and a short content summary. The adapter buffers the encoded response before writing it and enforces the same 16 MiB frame cap; an encoded response that would exceed it becomes a bounded tool error with no partial replacement text. Bounded formatting responses preserve validated scalar request IDs (string, number, or null) without re-encoding their raw representation; other response fields use bounded JSON encoding. If a successful or tool-error body cannot fit, the adapter emits a compact `-32000` JSON-RPC error with the original request ID; if an argument/protocol error cannot fit, it keeps that error code with the same compact message. Correlation is preserved and no ID is truncated. Semantic responses retain their existing encoding policy.
 
 ## Diagnostic reports
 
@@ -74,7 +116,7 @@ CLI and MCP limit graphs to 1,000 nodes and 2,000 edges; larger graphs fail expl
 
 ## Next capabilities
 
-Canonical comment-preserving formatting, revision-bound checked edit plans, multi-file identities, editor integration, complete ownership provenance and runtime/source correlation remain planned. The bounded ownership evidence described above is implemented without claiming a complete borrow checker. Compiler errors stay independent of optional style policy. Managed test time already shares scheduling with sleep/deadline primitives; see the [testing contract](testing.md) for its supported causal boundaries and foreign-operation limits.
+Revision-bound checked edit plans, multi-file identities, editor integration, complete ownership provenance and runtime/source correlation remain planned. The bounded ownership evidence described above is implemented without claiming a complete borrow checker. Canonical comment-preserving formatting is implemented by the compiler core and exposed through `ef fmt` and MCP `code.format`; the maintained authored-example selection is checked by the gate, and LSP formatting remains a future adapter. Compiler errors stay independent of optional style policy. Managed test time already shares scheduling with sleep/deadline primitives; see the [testing contract](testing.md) for its supported causal boundaries and foreign-operation limits.
 
 ## Performance receipt
 

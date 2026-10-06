@@ -5,11 +5,17 @@ record Request {
 
 enum State {
     Idle
-    Running { requestId: string }
-    Done { requestId: string }
+    Running {
+        requestId: string
+    }
+    Done {
+        requestId: string
+    }
 }
 
-error Invalid { message: string }
+error Invalid {
+    message: string
+}
 
 fn describe(state: State) -> string {
     match state {
@@ -20,7 +26,12 @@ fn describe(state: State) -> string {
 }
 
 effect fn main() -> string {
-    let request = Request { id: "42", name: "Ada" }
-    let state = State.Running { requestId: request.id }
+    let request = Request {
+        id: "42",
+        name: "Ada"
+    }
+    let state = State.Running {
+        requestId: request.id
+    }
     describe(state)
 }

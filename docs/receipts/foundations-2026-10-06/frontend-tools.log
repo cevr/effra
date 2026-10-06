@@ -1,0 +1,12 @@
+goos: linux
+goarch: amd64
+pkg: effra.local/prototype/internal/compiler
+cpu: AMD EPYC 9554P 64-Core Processor               
+BenchmarkCompile10KLines      	       5	  20068050 ns/op	   5.73 MB/s	17160944 B/op	   18287 allocs/op
+BenchmarkCompile10KLines      	       5	  13545612 ns/op	   8.48 MB/s	17161790 B/op	   18284 allocs/op
+BenchmarkCompile10KLines      	       5	  12145712 ns/op	   9.46 MB/s	17161787 B/op	   18284 allocs/op
+BenchmarkLintAndGraph10KLines 	       5	   2320049 ns/op	 1629464 B/op	    6180 allocs/op
+BenchmarkLintAndGraph10KLines 	       5	   3121888 ns/op	 1629464 B/op	    6180 allocs/op
+BenchmarkLintAndGraph10KLines 	       5	   1339937 ns/op	 1629464 B/op	    6180 allocs/op
+PASS
+ok  	effra.local/prototype/internal/compiler	0.430s
