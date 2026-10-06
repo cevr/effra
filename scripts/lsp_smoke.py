@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Actual Content-Length framed ef processes and shared diagnostic parity."""
+import argparse
 import json
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -43,10 +45,11 @@ STOP = call("shutdown", identifier="stop")
 EXIT = call("exit")
 
 
-def exchange(calls, target="go", fragmented=False, expected=0, raw_prefix=b""):
+def exchange(calls, target="go", fragmented=False, expected=0, raw_prefix=b"", environment=None):
     payload = raw_prefix + b"".join(map(frame, calls))
     process = subprocess.Popen([BINARY, "lsp", "--target", target], stdin=subprocess.PIPE,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               env=None if environment is None else {**os.environ, **environment})
     try:
         if fragmented:
             # Split both header and Unicode body bytes. The suffix coalesces
@@ -200,13 +203,106 @@ def bounds_and_protocol(directory):
         assert run.returncode == 2 and not run.stdout and run.stderr
 
 
+def uri_alias_regression(directory):
+    path = directory / "c++" / "@scope" / "counter:one,x=y;z.ef"
+    original = path.as_uri()
+    alias = "FILE:" + str(path)
+    good = 'fn good() -> string { "good" }'
+    duplicate = opened(path, "bad", 2)
+    duplicate["params"]["textDocument"]["uri"] = alias
+    change = changed(path, good, 2)
+    change["params"]["textDocument"]["uri"] = alias
+    messages = exchange([INIT, READY, opened(path, 'fn bad() -> string { true }'),
+                         duplicate, change,
+                         call("textDocument/didClose", {"textDocument": {"uri": alias}}),
+                         duplicate, STOP, EXIT])
+    published = publications(messages)
+    assert [p["uri"] for p in published] == [original, original, original, alias], messages
+    assert [p.get("version") for p in published] == [1, 2, None, 2]
+    assert published[0]["diagnostics"] and published[1]["diagnostics"] == []
+    assert len([m for m in messages if m.get("method") == "window/logMessage"]) == 1
+    # Existing encoders need not agree on reserved/unreserved bytes or hex case.
+    for spelling in (original.replace("%2B", "%2b"), original.replace("counter", "%63ounter")):
+        notification = opened(path, good)
+        notification["params"]["textDocument"]["uri"] = spelling
+        assert publications(exchange([INIT, READY, notification, STOP, EXIT]))[0]["uri"] == spelling
+
+
+def operational_budget_regression(directory):
+    project = directory / "large-errors"
+    project.mkdir()
+    (project / "go.mod").write_text("module example.local/lsp-errors\n\ngo 1.26\n")
+    path = project / "unsaved.ef"
+    # A real go-list operational failure has detail exceeding the old output
+    # budget, while this captured source stays below the document text limit.
+    text = "".join(f'import go absent{i} "example.invalid/absent{i:04d}"\n' for i in range(4000))
+    assert len(text.encode()) < 256 * 1024
+    messages = exchange([INIT, READY, opened(path, text, 19),
+                         call("unknown", identifier="after-error"),
+                         call("textDocument/didClose", {"textDocument": {"uri": path.as_uri()}}),
+                         STOP, EXIT], environment={"GOPROXY": "off", "GOTOOLCHAIN": "local", "GOWORK": "off"})
+    logs = [m["params"]["message"] for m in messages if m.get("method") == "window/logMessage"]
+    assert len(logs) == 1 and "EF111" in logs[0] and "19" in logs[0] and path.as_uri() in logs[0], logs
+    assert "bytes omitted" in logs[0] and len(logs[0].encode()) < 16 * 1024, logs[0][:100]
+    assert next(m for m in messages if m.get("id") == "after-error")["error"]["code"] == -32601
+    assert publications(messages) == [{"uri": path.as_uri(), "diagnostics": []}]
+
+
+def refusal_recovery_regression(directory):
+    path = directory / "recover.ef"
+    invalid = ["file:///tmp/a%2Fb.ef", "file:///tmp/a/%2e%2e/b.ef", "file:///tmp//b.ef",
+               "file:///tmp/%ff.ef", "file:///tmp/" + "x" * 4096 + ".ef"]
+    notifications = [call("textDocument/didOpen", {"textDocument": {
+        "uri": uri, "text": "", "languageId": "effra", "version": 1}}) for uri in invalid]
+    messages = exchange([INIT, READY, *notifications, call("unknown", identifier="after-refusal"),
+                         opened(path, ""), STOP, EXIT])
+    assert sum(m.get("method") == "window/logMessage" for m in messages) == len(invalid)
+    assert next(m for m in messages if m.get("id") == "after-refusal")["error"]["code"] == -32601
+    assert len(publications(messages)) == 1
+    # Located findings remain all-or-refuse. Refusing this projection must
+    # still permit close and a following request on the same framed session.
+    name = "d" * 200
+    text = f'fn {name}() -> () {{ () }}\n' * 1001
+    assert len(text.encode()) < 256 * 1024
+    messages = exchange([INIT, READY, opened(path, text, 23),
+                         call("textDocument/didClose", {"textDocument": {"uri": path.as_uri()}}),
+                         call("unknown", identifier="after-publication"), STOP, EXIT])
+    logs = [m["params"]["message"] for m in messages if m.get("method") == "window/logMessage"]
+    assert len(logs) == 1 and "output" in logs[0] and "23" in logs[0], logs
+    assert publications(messages) == [{"uri": path.as_uri(), "diagnostics": []}]
+    assert next(m for m in messages if m.get("id") == "after-publication")["error"]["code"] == -32601
+
+
+def oversized_uri_regression(directory):
+    uri = "file:///nonexistent/loop-probe-x/" + "x" * 361837 + ".ef"
+    messages = exchange([INIT, READY, call("textDocument/didOpen", {"textDocument": {
+        "uri": uri, "text": "", "languageId": "effra", "version": 1}}),
+        call("textDocument/didClose", {"textDocument": {"uri": uri}}),
+        call("unknown", identifier="after-huge-uri"), opened(directory / "ordinary.ef", ""), STOP, EXIT])
+    assert sum(m.get("method") == "window/logMessage" for m in messages) == 2
+    assert len(publications(messages)) == 1
+    assert next(m for m in messages if m.get("id") == "after-huge-uri")["error"]["code"] == -32601
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--review-case", choices=["uri", "operational", "recovery", "oversized"])
+    arguments = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="effra-lsp-smoke-") as temporary:
         directory = pathlib.Path(temporary)
-        parity(directory)
-        documents(directory)
-        imports(directory)
-        bounds_and_protocol(directory)
+        if arguments.review_case:
+            {"uri": uri_alias_regression, "operational": operational_budget_regression,
+             "recovery": refusal_recovery_regression,
+             "oversized": oversized_uri_regression}[arguments.review_case](directory)
+        else:
+            parity(directory)
+            documents(directory)
+            imports(directory)
+            bounds_and_protocol(directory)
+            uri_alias_regression(directory)
+            operational_budget_regression(directory)
+            refusal_recovery_regression(directory)
+            oversized_uri_regression(directory)
     print("LSP framed-process diagnostics, documents, imports and protocol checks passed")
 
 

@@ -39,7 +39,7 @@ func TestAggregateBytesAndCountAreReleased(t *testing.T) {
 	if err := s.synchronize(syncRequest(t, open("file:///tmp/excess.ef", "x", 1))); err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := s.documents["file:///tmp/excess.ef"]; exists || !strings.Contains(out.String(), "window/logMessage") {
+	if _, exists := s.documents["/tmp/excess.ef"]; exists || !strings.Contains(out.String(), "window/logMessage") {
 		t.Fatal("aggregate admission bypassed")
 	}
 	if err := s.synchronize(syncRequest(t, closeDoc("file:///tmp/aggregate0.ef"))); err != nil {
@@ -51,11 +51,11 @@ func TestAggregateBytesAndCountAreReleased(t *testing.T) {
 	if err := s.synchronize(syncRequest(t, open("file:///tmp/excess.ef", text, 1))); err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := s.documents["file:///tmp/excess.ef"]; !exists {
+	if _, exists := s.documents["/tmp/excess.ef"]; !exists {
 		t.Fatal("released bytes not reusable")
 	}
-	for uri := range s.documents {
-		if err := s.synchronize(syncRequest(t, closeDoc(uri))); err != nil {
+	for _, doc := range s.documents {
+		if err := s.synchronize(syncRequest(t, closeDoc(doc.snapshot.URI))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -95,7 +95,7 @@ func TestRejectedChangesKeepAcceptedTextAndVersion(t *testing.T) {
 		if err := s.synchronize(syncRequest(t, value)); err != nil {
 			t.Fatal(err)
 		}
-		doc := s.documents[uri]
+		doc := s.documents["/tmp/version.ef"]
 		if doc.version != 10 || doc.snapshot.Text != good || doc.snapshot.Origin != "buffer" || doc.snapshot.URI != uri {
 			t.Fatal("rejected input changed identity", doc)
 		}

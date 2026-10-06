@@ -158,16 +158,29 @@ func TestAdmissionLimitsReleaseAndOperationalFailure(t *testing.T) {
 			t.Fatal("operational failure published clean facts")
 		}
 	}
+	found := false
+	for _, m := range messages {
+		if m["method"] == "window/logMessage" {
+			message := m["params"].(map[string]any)["message"].(string)
+			found = strings.Contains(message, "EF111") && strings.Contains(message, "file:///tmp/failure.ef version 1")
+		}
+	}
+	if !found {
+		t.Fatal("operational refusal lacks code and exact snapshot identity", messages)
+	}
 }
 
 func TestURIsAndEscapes(t *testing.T) {
-	for _, uri := range []string{"file://remote/tmp/a.ef", "file:///tmp/a.ef?x", "file:///tmp/a/../b.ef", "untitled:thing.ef", "file:///tmp/a%00.ef", "file:///tmp/%61.ef", "file:///tmp/a.txt"} {
+	for _, uri := range []string{"file://remote/tmp/a.ef", "file:///tmp/a.ef?x", "file:///tmp/a/../b.ef", "untitled:thing.ef", "file:///tmp/a%00.ef", "file:///tmp/a%2fb.ef", "file:///tmp/%ff.ef", "file:///tmp/a.txt"} {
 		if _, err := documentPath(uri); err == nil {
 			t.Errorf("accepted %s", uri)
 		}
 	}
 	if _, err := documentPath("file:///tmp/a%20b.ef"); err != nil {
 		t.Fatal(err)
+	}
+	if path, err := documentPath("FILE:/tmp/%61.ef"); err != nil || path != "/tmp/a.ef" {
+		t.Fatal("valid alias refused", path, err)
 	}
 	if validEscapes([]byte(`"\ud800"`)) || validEscapes([]byte(`"\udc00"`)) || !validEscapes([]byte(`"\ud83d\ude00"`)) || !validEscapes([]byte(`"\\ud800"`)) {
 		t.Fatal("lossy JSON escapes")

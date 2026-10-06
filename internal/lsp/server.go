@@ -21,6 +21,8 @@ const MaxDocuments = 32
 const MaxDocumentBytes = 256 << 10
 const MaxDocumentTotalBytes = 2 << 20
 const MaxDiagnostics = 1000
+const MaxDocumentURIBytes = 4096
+const MaxLogDetailBytes = 8 << 10
 
 type document struct {
 	snapshot compiler.SourceSnapshot
@@ -60,8 +62,14 @@ func Serve(target string, in io.Reader, out io.Writer) error {
 			return err
 		}
 		var req request
-		if !utf8.Valid(body) || !validEscapes(body) || json.Unmarshal(body, &req) != nil {
+		if !utf8.Valid(body) || !validEscapes(body) || !json.Valid(body) {
 			if err := s.failure(nil, -32700, "invalid JSON-RPC body"); err != nil {
+				return err
+			}
+			continue
+		}
+		if bytes.TrimSpace(body)[0] != '{' || json.Unmarshal(body, &req) != nil {
+			if err := s.failure(nil, -32600, "invalid JSON-RPC request"); err != nil {
 				return err
 			}
 			continue
@@ -106,13 +114,50 @@ func (s *session) send(v any) error {
 	return writeFrame(s.out, frame)
 }
 func (s *session) failure(id json.RawMessage, code int, message string) error {
-	return s.send(map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": code, "message": message}})
+	return s.send(map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": code, "message": boundedDetail(message)}})
 }
 func (s *session) reject(req request, code int, message string) error {
 	if req.ID != nil {
 		return s.failure(req.ID, code, message)
 	}
+	return s.logError(code, "", message)
+}
+
+// Log detail is not a semantic report. Explicit omission keeps operational
+// failures recoverable while located findings remain all-or-refuse. This
+// bounded message fits the output precharge even with a maximum admitted URI.
+func boundedDetail(message string) string {
+	if len(message) <= MaxLogDetailBytes && utf8.ValidString(message) {
+		return message
+	}
+	var prefix strings.Builder
+	prefix.Grow(MaxLogDetailBytes)
+	offset := 0
+	for offset < len(message) {
+		r, width := utf8.DecodeRuneInString(message[offset:])
+		if prefix.Len()+utf8.RuneLen(r) > MaxLogDetailBytes {
+			break
+		}
+		prefix.WriteRune(r)
+		offset += width
+	}
+	if offset < len(message) {
+		fmt.Fprintf(&prefix, " [ %d bytes omitted ]", len(message)-offset)
+	}
+	return prefix.String()
+}
+func (s *session) logError(code int, context, detail string) error {
+	message := fmt.Sprintf("LSP error %d: %s%s", code, boundedDetail(context), boundedDetail(detail))
 	return s.send(map[string]any{"jsonrpc": "2.0", "method": "window/logMessage", "params": map[string]any{"type": 1, "message": message}})
+}
+func (s *session) rejectDocument(req request, code int, doc document, detail string) error {
+	if req.ID != nil {
+		return s.failure(req.ID, code, detail)
+	}
+	return s.logError(code, documentContext(doc), detail)
+}
+func documentContext(doc document) string {
+	return fmt.Sprintf("document %s version %d: ", doc.snapshot.URI, doc.version)
 }
 func (s *session) result(id json.RawMessage, result any) error {
 	return s.send(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
@@ -187,16 +232,22 @@ func (s *session) handle(req request) error {
 }
 
 func documentPath(uri string) (string, error) {
+	if len(uri) > MaxDocumentURIBytes {
+		return "", fmt.Errorf("document URI exceeds %d encoded bytes", MaxDocumentURIBytes)
+	}
 	u, err := url.Parse(uri)
-	if err != nil || u.Scheme != "file" || u.Host != "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" || strings.ContainsRune(u.Path, 0) || !filepath.IsAbs(u.Path) || filepath.Ext(u.Path) != ".ef" {
+	if err != nil || !strings.EqualFold(u.Scheme, "file") || u.Host != "" || u.User != nil || strings.ContainsAny(uri, "?#") || u.Opaque != "" || strings.ContainsRune(u.Path, 0) || !utf8.ValidString(u.Path) || !filepath.IsAbs(u.Path) || filepath.Ext(u.Path) != ".ef" {
 		return "", fmt.Errorf("document URI must be an absolute local file URI ending in .ef")
 	}
-	path := filepath.Clean(filepath.FromSlash(u.Path))
-	canonical, err := compiler.FileURI(path)
-	if err != nil || canonical != uri {
-		return "", fmt.Errorf("document URI must use canonical escaped file identity")
+	if strings.Contains(strings.ToLower(u.EscapedPath()), "%2f") {
+		return "", fmt.Errorf("document URI must not encode path separators")
 	}
-	return path, nil
+	for _, segment := range strings.Split(u.Path, "/")[1:] {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", fmt.Errorf("document URI must not contain empty or dot path segments")
+		}
+	}
+	return filepath.FromSlash(u.Path), nil
 }
 
 func (s *session) synchronize(req request) error {
@@ -221,59 +272,71 @@ func (s *session) synchronize(req request) error {
 		return s.reject(req, -32602, err.Error())
 	}
 	uri := p.TextDocument.URI
-	old, exists := s.documents[uri]
+	old, exists := s.documents[path]
+	reject := func(code int, detail string) error {
+		if exists {
+			return s.rejectDocument(req, code, old, detail)
+		}
+		if p.TextDocument.Version != nil {
+			return s.rejectDocument(req, code, document{snapshot: compiler.SourceSnapshot{URI: uri}, version: *p.TextDocument.Version}, detail)
+		}
+		return s.reject(req, code, detail)
+	}
 	if req.Method == "textDocument/didClose" {
 		if !exists {
-			return s.reject(req, -32602, "document is not open")
+			return reject(-32602, "document is not open")
 		}
-		delete(s.documents, uri)
+		delete(s.documents, path)
 		s.bytes -= len(old.snapshot.Text)
-		return s.publish(uri, nil, []compiler.LSPDiagnostic{})
+		return s.publish(old.snapshot.URI, nil, []compiler.LSPDiagnostic{})
 	}
 	if p.TextDocument.Version == nil {
-		return s.reject(req, -32602, "document version must be an LSP integer")
+		return reject(-32602, "document version must be an LSP integer")
 	}
 	var text string
 	if req.Method == "textDocument/didOpen" {
 		if exists || len(s.documents) >= MaxDocuments || p.TextDocument.LanguageID != "effra" || p.TextDocument.Text == nil {
-			return s.reject(req, -32602, "invalid, duplicate or over-limit document open")
+			return reject(-32602, "invalid, duplicate or over-limit document open")
 		}
 		text = *p.TextDocument.Text
 	} else {
 		if !exists || *p.TextDocument.Version <= old.version || len(p.Changes) == 0 {
-			return s.reject(req, -32602, "unknown document, stale version or empty change")
+			return reject(-32602, "unknown document, stale version or empty change")
 		}
 		for _, c := range p.Changes {
 			if c.Text == nil || c.Range != nil || c.RangeLength != nil {
-				return s.reject(req, -32602, "only full-document content changes are supported")
+				return reject(-32602, "only full-document content changes are supported")
 			}
 			if len(*c.Text) > MaxDocumentBytes {
-				return s.reject(req, -32602, "document change exceeds byte limit")
+				return reject(-32602, "document change exceeds byte limit")
 			}
 			text = *c.Text // Full replacements apply sequentially; only the final snapshot is analyzed.
 		}
 	}
 	if !utf8.ValidString(text) || len(text) > MaxDocumentBytes || s.bytes-len(old.snapshot.Text)+len(text) > MaxDocumentTotalBytes {
-		return s.reject(req, -32602, "document text exceeds UTF-8 or byte limits")
+		return reject(-32602, "document text exceeds UTF-8 or byte limits")
+	}
+	if exists {
+		uri = old.snapshot.URI
 	}
 	doc := document{snapshot: compiler.SourceSnapshot{URI: uri, Origin: "buffer", Text: text}, path: path, version: *p.TextDocument.Version}
-	s.documents[uri] = doc
+	s.documents[path] = doc
 	s.bytes += len(text) - len(old.snapshot.Text)
 	report := compiler.CompileAt(text, s.target, filepath.Dir(path)).DiagnosticReport(doc.snapshot, false)
 	if _, err := report.Bounded(MaxDiagnostics); err != nil {
-		return s.reject(req, -32603, err.Error())
+		return s.rejectDocument(req, -32603, doc, err.Error())
 	}
 	diagnostics := make([]compiler.LSPDiagnostic, 0, len(report.Diagnostics))
 	for _, finding := range report.Diagnostics {
 		if finding.LSP == nil {
-			return s.reject(req, -32603, "analysis unavailable for "+uri+": "+finding.Code+": "+finding.Message)
+			return s.logError(-32603, documentContext(doc)+"analysis unavailable: "+finding.Code+": ", finding.Message)
 		}
 		diagnostics = append(diagnostics, *finding.LSP)
 	}
 	// Prepare the complete bounded publication before writing any protocol bytes.
 	frame, err := encodeFrame(publication(uri, &doc.version, diagnostics))
 	if err != nil {
-		return s.reject(req, -32603, err.Error())
+		return s.rejectDocument(req, -32603, doc, err.Error())
 	}
 	return writeFrame(s.out, frame)
 }
