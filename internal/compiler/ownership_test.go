@@ -320,3 +320,132 @@ func hasDiagnosticAt(r *Result, code string, span Span) bool {
 	}
 	return false
 }
+
+func diagnosticCount(r *Result, code string) int {
+	count := 0
+	for _, diagnostic := range r.Diagnostics {
+		if diagnostic.Code == code {
+			count++
+		}
+	}
+	return count
+}
+
+func TestOwnershipRejectsNestedEnumProjectionEscape(t *testing.T) {
+	source := `
+record Box { file: File }
+enum Packet { Full { box: Box } }
+effect fn bad() -> File throws {IoError} uses {Files} {
+ scope {
+  let f = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+  let p = Packet.Full { box: Box { file: f } }
+  match p { Packet.Full { box } => box.file }
+ }
+}
+effect fn main() -> () { () }
+`
+	r := Compile(source)
+	if r.Checked || diagnosticCount(r, "EF123") == 0 {
+		t.Fatalf("nested enum projection must retain the inner ownership proof: %+v", r.Diagnostics)
+	}
+}
+
+func TestOwnershipRebasesDeferredAcquisitionToActualRunScope(t *testing.T) {
+	source := `
+effect fn bad() -> File throws {IoError} {
+ let recipe = Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+ scope { run recipe }
+}
+effect fn main() -> () { () }
+`
+	r := Compile(source)
+	if r.Checked || diagnosticCount(r, "EF123") == 0 {
+		t.Fatalf("deferred acquisition must be owned by its execution scope: %+v", r.Diagnostics)
+	}
+}
+
+func TestOwnershipRebasesDeferredAcquisitionToForkChild(t *testing.T) {
+	source := `
+effect fn acquire() -> File throws {IoError} {
+ run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+}
+effect fn bad() -> string throws {IoError} {
+ scope {
+  let child = fork acquire()
+  let file = run child.join()
+  run Files.readText(file).provide<Files>(LiveFiles)
+ }
+}
+effect fn main() -> () { () }
+`
+	r := Compile(source)
+	if r.Checked || diagnosticCount(r, "EF123") == 0 {
+		t.Fatalf("fork child execution must retain child-owned result provenance: %+v", r.Diagnostics)
+	}
+}
+
+func TestOwnershipCarriesCatchFallbackProvenance(t *testing.T) {
+	source := `
+error Missing
+effect fn absent() -> File throws {Missing} { fail Missing }
+effect fn bad() -> File throws {IoError} {
+ scope {
+  let f = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+  run absent().catch<Missing>(f)
+ }
+}
+effect fn main() -> () { () }
+`
+	r := Compile(source)
+	if r.Checked || diagnosticCount(r, "EF123") == 0 {
+		t.Fatalf("catch fallback must carry its ownership proof: %+v", r.Diagnostics)
+	}
+}
+
+const ownershipFieldSensitiveHelper = `
+record Pair { outer: File, inner: File }
+fn selectOuter(pair: Pair) -> File { pair.outer }
+fn selectInner(pair: Pair) -> File { pair.inner }
+effect fn safe(borrowed: File) -> File throws {IoError} uses {Files} {
+ scope {
+  let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+  selectOuter(Pair { outer: borrowed, inner: inner })
+ }
+}
+effect fn unsafe() -> File throws {IoError} uses {Files} {
+ scope {
+  let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+  selectInner(Pair { outer: inner, inner: inner })
+ }
+}
+effect fn main() -> () { () }
+`
+
+func TestOwnershipHelperProjectionIsParameterRelative(t *testing.T) {
+	r := Compile(ownershipFieldSensitiveHelper)
+	if diagnosticCount(r, "EF123") == 0 {
+		t.Fatalf("field-sensitive helper fixture lost the unsafe proof: %+v", r.Diagnostics)
+	}
+	unsafeStart := strings.Index(ownershipFieldSensitiveHelper, "effect fn unsafe")
+	for _, diagnostic := range r.Diagnostics {
+		if diagnostic.Code == "EF123" && diagnostic.Span.Offset < unsafeStart {
+			t.Fatalf("helper returning the borrowed field should remain valid: %+v", r.Diagnostics)
+		}
+	}
+}
+
+func TestOwnershipSummariesFollowFunctionDependencies(t *testing.T) {
+	source := `
+effect fn leaf() -> File throws {IoError} {
+ run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+}
+effect fn middle() -> File throws {IoError} { run leaf() }
+effect fn outer() -> File throws {IoError} { run middle() }
+effect fn bad() -> File throws {IoError} { scope { run outer() } }
+effect fn main() -> () { () }
+`
+	r := Compile(source)
+	if r.Checked || diagnosticCount(r, "EF123") == 0 {
+		t.Fatalf("dependency-ordered summaries must carry ownership through helper calls: %+v", r.Diagnostics)
+	}
+}
