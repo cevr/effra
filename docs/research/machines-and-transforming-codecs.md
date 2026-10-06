@@ -8,13 +8,15 @@ The main reference is [XState v6 PR5543](https://github.com/statelyai/xstate/pul
 
 | Evidence at the pinned revisions | Effra decision |
 | --- | --- |
-| XState v6 `docs/guards.md` and `docs/transitions.md` use ordinary functions and local control flow. | Transitions are ordinary pure functions over state/event ADTs. A small machine declaration binds the initial value and named `step`, `enter` and `complete` functions. |
+| XState v6 `docs/guards.md` and `docs/transitions.md` use ordinary functions and local control flow. | Transitions are ordinary functions over state/event ADTs. A small machine declaration binds the initial value and named `step`, `enter` and `complete` functions. Following the owner's clarification, step/completion may also be effectful; their execution and commit contract requires separate Effra tests. |
 | `packages/core/src/utils.ts` converts function transitions to a `to` function; `src/graph/graph.ts` projects the static `target` field, falling back to the source state. This source path does not establish all dynamic destinations. | Project locally visible constructors; label unknown helper destinations conservatively. Never present the graph as a proof of exact reachability. |
 | `packages/xstate-effect/src/requirements.types.test.ts` explicitly records that logic spawned inside a transition body is invisible to the machine's requirement type. Its requirement walker also has a finite recursion budget. | Check ordinary function bodies and preserve recipe rows. A checker budget exhaustion diagnoses; it cannot erase a service requirement. |
 | XState actor/session and timer-occurrence identities reject obsolete work. Effect Machine tests cover re-entry and completed stop cleanup. | Each entry has an epoch; stale completions are discarded and counted. `Go` always re-enters, while `Stay` retains work and requires the same variant. Cleanup completes before the next entry is published. |
 | XState's mailbox and its Effect adapter's queue are unbounded; Effect Machine's actor queues are also unbounded. | Bounded mailbox admission is an additional Effra policy requiring its own tests. One completion slot per entry and a separate stop path keep lifecycle progress possible under saturation. |
 
 Keep timers as ordinary Clock work. Keep expected work failures as explicit outcome ADTs in the first profile; defects, interruption and composite cleanup causes retain their runtime meaning. Do not add nested transition syntax, a second guard language, or a separate schema for each state. Generic data, product/or-pattern matching and payload recovery are reusable prerequisites, with their own acceptance tests.
+
+The original counsel proposed pure-only step/completion. The owner explicitly superseded that restriction: effectful decisions are supported, with serialized owned evaluation and explicit rows. Failed evaluation does not commit state; it still cannot undo external effects. Pure stepping remains available. Neither graph construction nor runtime inspection evaluates an effectful condition.
 
 The [machine specification](../specs/state-machines.md) owns the exact supported profile. Hierarchy, parallel regions and durable execution are outside its first slice. A serializable state value does not establish durable workflow semantics.
 

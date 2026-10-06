@@ -48,6 +48,8 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Actor** (specified): A running instance of a machine, with its own current state, owning scope and event mailbox.
 
+**Machine step** (specified): An ordinary pure or effectful function that consumes a state and event and returns an explicit transition decision. Effectful evaluation has an actor-owned scope and completes before state commit.
+
 **State entry** (specified): One owned lifetime of an actor's current state, identified separately from that state's tag and payload.
 
 **Re-entry** (specified): Closing a state entry and starting a fresh one, including when the state tag stays the same.
