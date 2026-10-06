@@ -4,7 +4,7 @@ Status: authorized extension of the Wayfinder implementation goal, 2026-10-06. T
 
 ## Design decisions
 
-Keep `run` as the visible execution of a lazy effect recipe. A fiber is already running; a recipe is reusable program data. Preserve ordinary control flow and explicit public success/failure/service contracts. Local inference may remove redundant spelling, but it cannot silently widen a public row.
+Keep `run` as the visible execution of a lazy effect recipe. A fiber is already running; a recipe is reusable program data. Preserve ordinary control flow and explicit public function success/failure/service contracts. Local function inference may remove redundant spelling, but it cannot silently widen a public row. Owner-directed [layer inference](layers.md) is a separate explicit rule: optional annotations bound inferred construction contracts.
 
 Use one canonical type representation for nominal identity, applications, function parameters/results and effect rows. String display forms are derived output, not a second semantic authority. Share repeated type structure and keep provenance/evaluation analyses bounded independently; interning types alone does not bound an analysis that enumerates paths through them.
 

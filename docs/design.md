@@ -67,7 +67,7 @@ This is a proposed Effra design. Failure and requirement rows have distinct role
 
 Higher-order functions must preserve open rows. In mathematical notation, `retry: Effect<A,E,R> -> Policy -> Effect<A,E,R union {Clock}>` for a pure policy, and `flatMap` unions both programs' rows. A compiler that only tracks a fixed list of services in straight-line functions cannot express the intended library.
 
-Infer private function contracts. Require exported contracts as upper bounds, so changing an implementation does not silently enlarge every downstream API. Errors have nominal identities and ordinary payloads. Internally represent an error union as a compiler-generated tagged sum, rather than collapsing it to Go's `error` interface.
+Infer private function contracts. Require exported function contracts as upper bounds, so changing an implementation does not silently enlarge every downstream API. Owner-directed [layer contracts](specs/layers.md) are a deliberate exception: infer their contracts by default and check optional bounds. Errors have nominal identities and ordinary payloads. Internally represent an error union as a compiler-generated tagged sum, rather than collapsing it to Go's `error` interface.
 
 Service identity is nominal and may include a role: `Database at Primary` differs from `Database at Analytics`. A service requirement identifies replaceable behavior; it is not a global variable or merely a structural interface shape.
 
@@ -75,7 +75,7 @@ The `R` row tracks capabilities, not every side effect or all mutation. A strong
 
 ## Operability and agent introspection
 
-Treat the compiler's semantic model as a supported inspection API, shared by the CLI, language server, and agent tools. Exported contracts remain explicit in source. Local inference must still produce a concise canonical type with stable nominal identities and source locations; no tool should require reverse-engineering generated Go, generated JS, or a large expanded generic expression.
+Treat the compiler's semantic model as a supported inspection API, shared by the CLI, language server, and agent tools. Exported function contracts remain explicit in source; layer inference and checked annotations follow their declared exception. Local inference must still produce a concise canonical type with stable nominal identities and source locations; no tool should require reverse-engineering generated Go, generated JS, or a large expanded generic expression.
 
 Illustrative CLI operations, not implemented commands:
 
@@ -154,7 +154,7 @@ Config -> DatabaseLive -> UsersLive -> request program
 LoggerLive -------------------------> request program
 ```
 
-The compiler checks missing services, ambiguous providers, roles, and statically visible construction cycles. The runtime memoizes shared Layer nodes within a graph build, rolls back partial construction, and releases services in dependency order. Memoization uses Layer node identity and provision context, not just a service name; explicitly fresh nodes produce independent instances.
+The compiler checks missing services, ambiguous providers, roles, and statically visible construction cycles. The runtime memoizes shared Layer nodes within a graph build, rolls back partial construction, and releases services in dependency order. Memoization uses Layer node identity with one checked input context per static node, not just a service name. Explicit separate provision/build boundaries produce fresh instances; flat graphs do not gain duplicate bindings through subtree copies.
 
 Implementations capture their acquired dependencies. A caller requiring Users should not also have to name Database solely because UsersLive uses one internally. Caller-visible failures remain those declared by the Users operations; Layer construction failures remain in the startup path.
 

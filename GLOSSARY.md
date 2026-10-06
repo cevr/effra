@@ -48,7 +48,7 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Layer replacement** (specified): A checked pre-acquisition substitution of one binding throughout a composed graph, followed by reconstruction of its effective construction edges and contract.
 
-**Fresh layer occurrence** (specified): An explicitly distinct instance of a selected plan subtree, retaining borrowed external inputs while assigning fresh identities to its internal nodes.
+**Fresh layer build** (specified): An explicitly separate provision/build boundary with independent acquisition. A flat graph does not admit a second binding of one nominal service by copying its subtree.
 
 **Ownership provenance**: The relationship between a retained value and the lifetime that owns it. Borrowed, newly owned and unknown relationships carry different evidence.
 
