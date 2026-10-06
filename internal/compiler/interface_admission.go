@@ -22,6 +22,11 @@ func (c *checker) admitBundledSummaries() error {
 	for _, f := range c.program.BundledFunctions {
 		modules[f.Module] = append(modules[f.Module], f)
 	}
+	for _, r := range c.program.BundledTemplates {
+		if _, present := modules[r.Module]; !present {
+			modules[r.Module] = []*Function{}
+		}
+	}
 	for module, functions := range modules {
 		slices.SortFunc(functions, func(a, b *Function) int { return strings.Compare(a.Identity, b.Identity) })
 		input := fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d\x00%s", module, c.result.Target, SemanticProducerIdentity, interfaceSummarySchema, ownershipSummarySchema, bundledInterfaceVersion)
@@ -32,13 +37,18 @@ func (c *checker) admitBundledSummaries() error {
 			}
 			input += "\x00" + f.Identity + "\x00" + formatDigest(string(data))
 		}
+		for _, source := range c.result.Sources {
+			if source.Module == module {
+				input += "\x00" + source.ID + "\x00" + source.Digest
+			}
+		}
 		key := formatDigest(input)
 		bundledSummaryCache.Lock()
 		dto, ok := bundledSummaryCache.entries[key]
 		bundledSummaryCache.Unlock()
 		if !ok {
 			var err error
-			dto, err = produceBundledSummary(c.result.Target, module, key, functions)
+			dto, err = produceBundledSummary(c, module, key, functions)
 			if err != nil {
 				return err
 			}
@@ -71,14 +81,36 @@ func (c *checker) admitBundledSummaries() error {
 	return nil
 }
 
-func produceBundledSummary(target, module, key string, functions []*Function) (interfaceSummary, error) {
+func produceBundledSummary(receiver *checker, module, key string, functions []*Function) (interfaceSummary, error) {
+	target := receiver.result.Target
 	p, diagnostics := parse("")
 	if len(diagnostics) != 0 {
 		return interfaceSummary{}, fmt.Errorf("interface producer parse failed")
 	}
 	p.interfaceProducer = true
 	p.BundledBindings = map[string]map[string]*Function{}
+	p.BundledTypeBindings = map[string]map[string]*Record{}
 	r := &Result{Program: p, Target: target, Revision: key, Diagnostics: []Diagnostic{}, Symbols: []Symbol{}, facts: map[*Expr]ExpressionFacts{}, Sources: []SourceInfo{}}
+	for _, original := range receiver.program.BundledTemplates {
+		if original.Module != module {
+			continue
+		}
+		data, err := bundledSources.ReadFile(bundledIndex[module][original.Name].Source)
+		if err != nil {
+			return interfaceSummary{}, err
+		}
+		parsed, diagnostics := parse(string(data))
+		if len(diagnostics) != 0 || len(parsed.Records) != 1 {
+			return interfaceSummary{}, fmt.Errorf("invalid template producer source")
+		}
+		rd := parsed.Records[0]
+		rd.Module, rd.SourceID, rd.Identity, rd.EmissionName = module, original.SourceID, original.Identity, original.EmissionName
+		p.BundledTemplates = append(p.BundledTemplates, rd)
+		for name, typ := range parsed.typeExpressions {
+			p.typeExpressions[name] = typ
+		}
+		r.Sources = append(r.Sources, SourceInfo{ID: rd.SourceID, Module: module, Digest: formatDigest(string(data)), Version: bundledInterfaceVersion})
+	}
 	for _, original := range functions {
 		data, err := bundledSources.ReadFile(bundledIndex[module][original.Name].Source)
 		if err != nil {
@@ -96,6 +128,7 @@ func produceBundledSummary(target, module, key string, functions []*Function) (i
 		}
 		r.Sources = append(r.Sources, SourceInfo{ID: f.SourceID, Module: module, Digest: formatDigest(string(data)), Version: bundledInterfaceVersion})
 	}
+	slices.SortFunc(r.Sources, func(a, b SourceInfo) int { return strings.Compare(a.ID, b.ID) })
 	c := newChecker(p, r)
 	c.check()
 	if len(r.Diagnostics) != 0 {
@@ -105,20 +138,21 @@ func produceBundledSummary(target, module, key string, functions []*Function) (i
 }
 
 type summaryAdmission struct {
-	c           *checker
-	functions   map[string]*Function
-	types       map[string]TypeID
-	rows        map[string]RowID
-	evidence    map[string]callableEvidence
-	occurrences map[string]summaryOccurrence
-	relations   map[string]summaryRelation
-	resolved    map[string]*callbackResultRelation
-	visiting    map[string]bool
-	err         error
+	c                  *checker
+	functions          map[string]*Function
+	types              map[string]TypeID
+	rows               map[string]RowID
+	evidence           map[string]callableEvidence
+	occurrences        map[string]summaryOccurrence
+	relations          map[string]summaryRelation
+	resolved           map[string]*callbackResultRelation
+	visiting           map[string]bool
+	occurrenceVisiting map[string]bool
+	err                error
 }
 
 func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Function) error {
-	a := summaryAdmission{c: c, functions: map[string]*Function{}, types: map[string]TypeID{}, rows: map[string]RowID{"": emptyRowID}, evidence: map[string]callableEvidence{}, occurrences: map[string]summaryOccurrence{}, relations: map[string]summaryRelation{}, resolved: map[string]*callbackResultRelation{}, visiting: map[string]bool{}}
+	a := summaryAdmission{occurrenceVisiting: map[string]bool{}, c: c, functions: map[string]*Function{}, types: map[string]TypeID{}, rows: map[string]RowID{"": emptyRowID}, evidence: map[string]callableEvidence{}, occurrences: map[string]summaryOccurrence{}, relations: map[string]summaryRelation{}, resolved: map[string]*callbackResultRelation{}, visiting: map[string]bool{}}
 	if len(dto.Declarations) != len(functions) {
 		return fmt.Errorf("declaration closure mismatch")
 	}
@@ -160,6 +194,42 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 	}
 	for _, f := range functions {
 		admitType(c.checkedFunction(f, true, false).contractID())
+	}
+	for _, r := range c.program.BundledTemplates {
+		if r.Module == dto.Module {
+			for _, p := range r.Parameters {
+				admitType(p.typeID)
+				admitType(p.shapeID)
+			}
+		}
+	}
+	seenTemplates := map[string]bool{}
+	for _, template := range dto.Templates {
+		r := c.templates[template.Ref]
+		if r == nil || r.Module != dto.Module || seenTemplates[template.Ref] || r.SourceID != template.Source || len(template.Parameters) != len(r.Parameters) || len(template.Fields) != len(r.Fields) {
+			return fmt.Errorf("template declaration owner mismatch")
+		}
+		seenTemplates[template.Ref] = true
+		for i, p := range template.Parameters {
+			owner := r.Parameters[i]
+			shape := ""
+			if owner.shapeID != invalidTypeID {
+				shape = c.typeNodeID(owner.shapeID)
+			}
+			if p.Name != owner.Name || p.Kind != owner.Kind || p.Ref != owner.Identity || p.Variable != c.typeNodeID(owner.typeID) || p.Shape != shape {
+				return fmt.Errorf("template variable/constraint owner mismatch")
+			}
+		}
+		for i, field := range template.Fields {
+			if field.Name != r.Fields[i].Name || field.Parameter < 0 || field.Parameter >= len(r.Parameters) || r.Parameters[field.Parameter].Name != r.Fields[i].Type {
+				return fmt.Errorf("template field owner mismatch")
+			}
+		}
+	}
+	for _, r := range c.program.BundledTemplates {
+		if r.Module == dto.Module && !seenTemplates[r.Identity] {
+			return fmt.Errorf("template closure incomplete")
+		}
 	}
 	for _, row := range dto.Rows {
 		if len(a.rows) > maxInterfaceTableEntries || row.Ref == "" || len(row.Labels) == 0 {
@@ -279,15 +349,20 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 		binding := item.Parameter
 		switch binding.Kind {
 		case "absent":
-			if binding.Declaration != "" || binding.Ordinal != -1 {
+			if binding.Declaration != "" || binding.Ordinal != -1 || binding.Path != "" {
 				return fmt.Errorf("invalid absent evidence")
 			}
 		case "parameter":
 			f := a.functions[binding.Declaration]
-			if f == nil || binding.Ordinal < 0 || binding.Ordinal >= len(f.Params) || c.node(f.Params[binding.Ordinal].typeID).Kind != "callable" {
+			if f == nil || binding.Ordinal < 0 || binding.Ordinal >= len(f.Params) {
 				return fmt.Errorf("invalid callable parameter owner")
 			}
+			id := c.fieldContract(f.Params[binding.Ordinal].typeID, binding.Path)
+			if id == invalidTypeID || c.node(id).Kind != "callable" {
+				return fmt.Errorf("invalid callable field parameter owner")
+			}
 			e.parameter, e.parameterName = f, f.Params[binding.Ordinal].Name
+			e.parameterPath = binding.Path
 		default:
 			return fmt.Errorf("unsupported evidence discriminant")
 		}
@@ -352,6 +427,12 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 	}
 	for _, v := range values {
 		v.f.Ownership, v.f.Captures, v.f.returnCallableEvidence = v.ownership, v.captures, v.evidence
+		for _, d := range dto.Declarations {
+			if d.Ref == v.f.Identity {
+				v.f.returnFields = cloneFieldOccurrences(a.occurrence(d.Body, 0).fields)
+				break
+			}
+		}
 	}
 	return nil
 }
@@ -417,10 +498,12 @@ func (a *summaryAdmission) facts(items []summaryOwner, depth int) []OwnershipFac
 
 func (a *summaryAdmission) occurrence(ref string, depth int) checkedExpression {
 	item, ok := a.occurrences[ref]
-	if !ok || depth > 32 {
+	if !ok || depth > 32 || a.occurrenceVisiting[ref] {
 		a.err = fmt.Errorf("dangling or excessive occurrence graph")
 		return checkedExpression{}
 	}
+	a.occurrenceVisiting[ref] = true
+	defer delete(a.occurrenceVisiting, ref)
 	id, tok := a.types[item.Contract]
 	evidence, eok := a.evidence[item.Evidence]
 	ef, fok := a.rows[item.Evaluation.Failures]
@@ -431,7 +514,29 @@ func (a *summaryAdmission) occurrence(ref string, depth int) checkedExpression {
 		a.err = fmt.Errorf("dangling occurrence reference")
 		return checkedExpression{}
 	}
-	return checkedExpression{value: a.c.values.occurrence(id, a.facts(item.Ownership, depth), a.facts(item.Captures, depth)), child: a.facts(item.Child, depth), callableEvidence: evidence, evaluation: a.c.evaluation(ef, es), executed: a.c.evaluation(xf, xs)}
+	fields := map[string]checkedExpression{}
+	shape, hasShape := a.c.checkedFields(id)
+	for _, field := range item.Fields {
+		if _, duplicate := fields[field.Name]; duplicate || !hasShape {
+			a.err = fmt.Errorf("invalid field occurrence shape")
+			return checkedExpression{}
+		}
+		value := a.occurrence(field.Occurrence, depth+1)
+		index := slices.IndexFunc(shape, func(f Field) bool { return f.Name == field.Name })
+		if index < 0 || shape[index].typeID != value.contractID() {
+			a.err = fmt.Errorf("field occurrence contract mismatch")
+			return checkedExpression{}
+		}
+		fields[field.Name] = value
+	}
+	if hasShape && a.c.callableFieldLayout(id, map[TypeID]bool{}, map[TypeID]bool{}, 0) && len(fields) != len(shape) {
+		a.err = fmt.Errorf("incomplete field occurrence shape")
+		return checkedExpression{}
+	}
+	if len(fields) == 0 {
+		fields = nil
+	}
+	return checkedExpression{fields: fields, value: a.c.values.occurrence(id, a.facts(item.Ownership, depth), a.facts(item.Captures, depth)), child: a.facts(item.Child, depth), callableEvidence: evidence, evaluation: a.c.evaluation(ef, es), executed: a.c.evaluation(xf, xs)}
 }
 
 func (a *summaryAdmission) relation(ref string, depth int) *callbackResultRelation {
@@ -463,11 +568,11 @@ func (a *summaryAdmission) relation(ref string, depth int) *callbackResultRelati
 		a.err = fmt.Errorf("callback relation arena budget exceeded")
 		return nil
 	}
-	// The owning relation interner currently keys ownership and evidence. Refuse
-	// transport if that key would collapse distinct execution/capture facts.
+	// A receiving authority still verifies that interning preserves every
+	// operational field; future changes cannot silently regress the owning key.
 	for i, arg := range args {
 		actual := relation.arguments[i]
-		if !reflect.DeepEqual(actual.captureFacts(), arg.captureFacts()) || !reflect.DeepEqual(actual.child, arg.child) || actual.evaluation != arg.evaluation || actual.executed != arg.executed {
+		if !reflect.DeepEqual(actual.fields, arg.fields) || !reflect.DeepEqual(actual.captureFacts(), arg.captureFacts()) || !reflect.DeepEqual(actual.child, arg.child) || actual.evaluation != arg.evaluation || actual.executed != arg.executed {
 			a.err = fmt.Errorf("callback interner would lose operational facts")
 			return nil
 		}

@@ -217,10 +217,40 @@ const __ef_provider_TestSync={latch:()=>Effect.sync(()=>new __ef_latch()),await:
 			decl.WriteString("declare const " + f.jsEmissionName() + ": " + jsRowFunctionSignature(f, declarations) + ";\nexport { " + f.jsEmissionName() + " as " + f.Name + " };\n")
 		}
 	}
+	for _, r := range r.Program.BundledTemplates {
+		decl.WriteString(jsTemplateDeclaration(r))
+	}
 	if entry {
 		out.WriteString("Effect.runPromise(__ef_function_main()).then(value => { if (value !== undefined) console.log(typeof value === 'bigint' ? value.toString() : value); }, error => { console.error(error); process.exitCode = 1; });\n")
 	}
 	return out.String(), decl.String(), nil
+}
+
+func jsTemplateDeclaration(r *Record) string {
+	var decl strings.Builder
+	parameters := []string{}
+	for _, p := range r.Parameters {
+		parameter := p.Name
+		if p.Kind == "callable" && p.Constraint != nil {
+			t := p.Constraint
+			args := []string{}
+			for i, name := range t.Parameters {
+				args = append(args, "arg"+fmt.Sprint(i)+": "+name)
+			}
+			result := t.Result
+			if t.Effect {
+				result = "Effect.Effect<" + result + ", unknown, unknown>"
+			}
+			parameter += " extends (" + strings.Join(args, ", ") + ") => " + result
+		}
+		parameters = append(parameters, parameter)
+	}
+	decl.WriteString("type __ef_template_" + r.EmissionName + "<" + strings.Join(parameters, ", ") + "> = { ")
+	for _, field := range r.Fields {
+		decl.WriteString("readonly " + quoted(field.Name) + ": " + field.Type + "; ")
+	}
+	decl.WriteString("};\n")
+	return decl.String()
 }
 
 // ProgramDeclarations is a target-independent view used by both emitters.

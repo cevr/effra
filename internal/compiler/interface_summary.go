@@ -11,8 +11,8 @@ import (
 	"strings"
 )
 
-const interfaceSummarySchema = 1
-const ownershipSummarySchema = 1
+const interfaceSummarySchema = 2
+const ownershipSummarySchema = 2
 const maxInterfaceSummaryBytes = 1 << 20
 const maxInterfaceClosureBytes = 8 << 20
 const maxInterfaceTableEntries = 4096
@@ -21,6 +21,7 @@ const maxInterfaceTableEntries = 4096
 // deliberately independent from the bounded explanatory projection schema.
 // Every field is required, including false, empty and absent alternatives.
 type interfaceSummary struct {
+	Templates       []summaryTemplate    `json:"templates"`
 	InterfaceSchema int                  `json:"interfaceSchema"`
 	OwnershipSchema int                  `json:"ownershipSchema"`
 	SemanticABI     string               `json:"semanticABI"`
@@ -38,6 +39,23 @@ type interfaceSummary struct {
 	Occurrences     []summaryOccurrence  `json:"occurrences"`
 	Relations       []summaryRelation    `json:"relations"`
 	TrustedHost     []Binding            `json:"trustedHost"`
+}
+type summaryTemplate struct {
+	Ref        string                     `json:"ref"`
+	Source     string                     `json:"source"`
+	Parameters []summaryTemplateParameter `json:"parameters"`
+	Fields     []summaryTemplateField     `json:"fields"`
+}
+type summaryTemplateParameter struct {
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+	Ref      string `json:"ref"`
+	Variable string `json:"variable"`
+	Shape    string `json:"shape"`
+}
+type summaryTemplateField struct {
+	Name      string `json:"name"`
+	Parameter int    `json:"parameter"`
 }
 
 type summaryDeclaration struct {
@@ -74,6 +92,7 @@ type summaryParameterBinding struct {
 	Kind        string `json:"kind"`
 	Declaration string `json:"declaration"`
 	Ordinal     int    `json:"ordinal"`
+	Path        string `json:"path"`
 }
 type summaryReference struct {
 	Kind string `json:"kind"`
@@ -90,14 +109,19 @@ type summaryRows struct {
 	Services string `json:"services"`
 }
 type summaryOccurrence struct {
-	Ref        string         `json:"ref"`
-	Contract   string         `json:"contract"`
-	Ownership  []summaryOwner `json:"ownership"`
-	Captures   []summaryOwner `json:"captures"`
-	Child      []summaryOwner `json:"child"`
-	Evidence   string         `json:"evidence"`
-	Evaluation summaryRows    `json:"evaluation"`
-	Executed   summaryRows    `json:"executed"`
+	Fields     []summaryFieldOccurrence `json:"fields"`
+	Ref        string                   `json:"ref"`
+	Contract   string                   `json:"contract"`
+	Ownership  []summaryOwner           `json:"ownership"`
+	Captures   []summaryOwner           `json:"captures"`
+	Child      []summaryOwner           `json:"child"`
+	Evidence   string                   `json:"evidence"`
+	Evaluation summaryRows              `json:"evaluation"`
+	Executed   summaryRows              `json:"executed"`
+}
+type summaryFieldOccurrence struct {
+	Name       string `json:"name"`
+	Occurrence string `json:"occurrence"`
 }
 type summaryRelation struct {
 	Ref       string   `json:"ref"`
@@ -141,7 +165,26 @@ type summaryExporter struct {
 
 func exportInterfaceSummary(c *checker, module, sourceInput string, functions []*Function) (interfaceSummary, error) {
 	x := summaryExporter{c: c, types: map[TypeID]bool{}, rows: map[RowID]bool{}, evidence: map[callableEvidence]string{}, relations: map[*callbackResultRelation]string{}, visiting: map[*callbackResultRelation]bool{}, declarations: map[string]*Function{}}
-	x.dto = interfaceSummary{InterfaceSchema: interfaceSummarySchema, OwnershipSchema: ownershipSummarySchema, SemanticABI: SemanticProducerIdentity, Module: module, Version: bundledInterfaceVersion, SourceInput: sourceInput, Producer: SemanticProducerIdentity, Implementation: sourceInput, Sources: []SourceInfo{}, Declarations: []summaryDeclaration{}, Types: []summaryType{}, Rows: []summaryRow{}, Evidence: []summaryEvidence{}, Occurrences: []summaryOccurrence{}, Relations: []summaryRelation{}, TrustedHost: []Binding{}}
+	x.dto = interfaceSummary{Templates: []summaryTemplate{}, InterfaceSchema: interfaceSummarySchema, OwnershipSchema: ownershipSummarySchema, SemanticABI: SemanticProducerIdentity, Module: module, Version: bundledInterfaceVersion, SourceInput: sourceInput, Producer: SemanticProducerIdentity, Implementation: sourceInput, Sources: []SourceInfo{}, Declarations: []summaryDeclaration{}, Types: []summaryType{}, Rows: []summaryRow{}, Evidence: []summaryEvidence{}, Occurrences: []summaryOccurrence{}, Relations: []summaryRelation{}, TrustedHost: []Binding{}}
+	for _, r := range c.program.BundledTemplates {
+		if r.Module != module {
+			continue
+		}
+		d := summaryTemplate{Ref: r.Identity, Source: r.SourceID, Parameters: []summaryTemplateParameter{}, Fields: []summaryTemplateField{}}
+		for _, p := range r.Parameters {
+			shape := ""
+			if p.shapeID != invalidTypeID {
+				shape = x.typ(p.shapeID)
+			}
+			d.Parameters = append(d.Parameters, summaryTemplateParameter{Name: p.Name, Kind: p.Kind, Ref: p.Identity, Variable: x.typ(p.typeID), Shape: shape})
+		}
+		for _, field := range r.Fields {
+			ordinal := slices.IndexFunc(r.Parameters, func(p TemplateParameter) bool { return p.Name == field.Type })
+			d.Fields = append(d.Fields, summaryTemplateField{Name: field.Name, Parameter: ordinal})
+		}
+		x.dto.Templates = append(x.dto.Templates, d)
+	}
+	slices.SortFunc(x.dto.Templates, func(a, b summaryTemplate) int { return strings.Compare(a.Ref, b.Ref) })
 	for _, f := range functions {
 		x.declarations[f.Identity] = f
 	}
@@ -154,6 +197,15 @@ func exportInterfaceSummary(c *checker, module, sourceInput string, functions []
 	slices.SortFunc(ordered, func(a, b *Function) int { return strings.Compare(a.Identity, b.Identity) })
 	var implementation strings.Builder
 	implementation.WriteString(c.result.Target)
+	for _, d := range x.dto.Templates {
+		r := c.templates[d.Ref]
+		implementation.WriteString("\x00" + r.Identity + "\x00")
+		if c.result.Target == "go" {
+			implementation.WriteString(goTemplateDeclaration(r))
+		} else {
+			implementation.WriteString(jsTemplateDeclaration(r))
+		}
+	}
 	g := &goEmitter{program: c.program}
 	for _, f := range ordered {
 		checked, ok := c.result.checkedFunctions[f]
@@ -167,7 +219,7 @@ func exportInterfaceSummary(c *checker, module, sourceInput string, functions []
 		x.dto.Declarations = append(x.dto.Declarations, d)
 		implementation.WriteString("\x00" + f.Identity + "\x00")
 		if c.result.Target == "go" {
-			implementation.WriteString(g.function(f))
+			implementation.WriteString(g.functionDeclaration(f))
 		} else {
 			implementation.WriteString(jsFunction(f))
 		}
@@ -255,7 +307,7 @@ func (x *summaryExporter) callable(e callableEvidence) string {
 			x.err = fmt.Errorf("invalid callable parameter binding")
 			return ""
 		}
-		d.Parameter = summaryParameterBinding{Kind: "parameter", Declaration: e.parameter.Identity, Ordinal: ordinal}
+		d.Parameter = summaryParameterBinding{Kind: "parameter", Declaration: e.parameter.Identity, Ordinal: ordinal, Path: e.parameterPath}
 	}
 	x.dto.Evidence = append(x.dto.Evidence, d)
 	return ref
@@ -311,7 +363,15 @@ func (x *summaryExporter) occurrence(f *Function, value checkedExpression, depth
 	}
 	index := len(x.dto.Occurrences)
 	x.dto.Occurrences = append(x.dto.Occurrences, summaryOccurrence{})
-	d := summaryOccurrence{Ref: ref, Contract: x.typ(value.contractID()), Ownership: x.facts(f, value.ownershipFacts(), depth), Captures: x.facts(f, value.captureFacts(), depth), Child: x.facts(f, value.child, depth), Evidence: x.callable(value.callableEvidence), Evaluation: summaryRows{Failures: x.row(value.evaluation.failureRowID()), Services: x.row(value.evaluation.serviceRowID())}, Executed: summaryRows{Failures: x.row(value.executed.failureRowID()), Services: x.row(value.executed.serviceRowID())}}
+	d := summaryOccurrence{Fields: []summaryFieldOccurrence{}, Ref: ref, Contract: x.typ(value.contractID()), Ownership: x.facts(f, value.ownershipFacts(), depth), Captures: x.facts(f, value.captureFacts(), depth), Child: x.facts(f, value.child, depth), Evidence: x.callable(value.callableEvidence), Evaluation: summaryRows{Failures: x.row(value.evaluation.failureRowID()), Services: x.row(value.evaluation.serviceRowID())}, Executed: summaryRows{Failures: x.row(value.executed.failureRowID()), Services: x.row(value.executed.serviceRowID())}}
+	names := []string{}
+	for name := range value.fields {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		d.Fields = append(d.Fields, summaryFieldOccurrence{Name: name, Occurrence: x.occurrence(f, value.fields[name], depth+1)})
+	}
 	x.dto.Occurrences[index] = d
 	return ref
 }

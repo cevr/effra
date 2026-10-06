@@ -6,12 +6,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // This index is compiler-distributed. It never resolves paths through the
 // filesystem, Go importer, network or an untrusted user interface file.
 //
-//go:embed bundled/functions/*.ef
+//go:embed bundled/functions/*.ef bundled/conversions/*.ef
 var bundledSources embed.FS
 
 type bundledDeclaration struct {
@@ -20,11 +21,12 @@ type bundledDeclaration struct {
 }
 
 var bundledIndex = map[string]map[string]bundledDeclaration{
-	"effra/functions": {"call": {Source: "bundled/functions/call.ef"}, "identity": {Source: "bundled/functions/identity.ef"}, "forwardFile": {Source: "bundled/functions/forward-file.ef"}},
+	"effra/functions":   {"call": {Source: "bundled/functions/call.ef"}, "identity": {Source: "bundled/functions/identity.ef"}, "forwardFile": {Source: "bundled/functions/forward-file.ef"}},
+	"effra/conversions": {"Codec": {Source: "bundled/conversions/codec.ef"}, "witness": {Source: "bundled/conversions/witness.ef", Dependencies: []string{"Codec"}}},
 }
 
 const bundledInterfaceVersion = "1"
-const SemanticProducerIdentity = "effra/checker-abi-5/bundled-source-1"
+const SemanticProducerIdentity = "effra/checker-abi-6/bundled-interface-2"
 const maxBundledDeclarations = 256
 const maxBundledReferences = 4096
 const maxBundledSourceBytes = 1 << 20
@@ -115,6 +117,7 @@ func (r *Result) AddSourceInputs(response map[string]any) {
 func (r *Result) loadBundledImports(source string) {
 	p := r.Program
 	p.BundledBindings = map[string]map[string]*Function{}
+	p.BundledTypeBindings = map[string]map[string]*Record{}
 	r.Sources = []SourceInfo{{ID: "source:user", Module: currentModuleIdentity, Digest: formatDigest(source)}}
 	r.ProducerIdentity = SemanticProducerIdentity
 	aliases := map[string]string{}
@@ -125,6 +128,7 @@ func (r *Result) loadBundledImports(source string) {
 		}
 		aliases[imp.Alias] = imp.Path
 		p.BundledBindings[imp.Alias] = map[string]*Function{}
+		p.BundledTypeBindings[imp.Alias] = map[string]*Record{}
 	}
 	type request struct {
 		module, member string
@@ -132,6 +136,15 @@ func (r *Result) loadBundledImports(source string) {
 	}
 	queue := []request{}
 	exhausted := false
+	for _, typ := range p.typeExpressions {
+		if alias, member, qualified := strings.Cut(typ.Application, "."); qualified && aliases[alias] != "" {
+			if len(queue) >= maxBundledReferences {
+				exhausted = true
+			} else {
+				queue = append(queue, request{module: aliases[alias], member: member})
+			}
+		}
+	}
 	var visit func(*Expr, map[string]bool)
 	var block func(*Block, map[string]bool)
 	visit = func(e *Expr, locals map[string]bool) {
@@ -188,7 +201,7 @@ func (r *Result) loadBundledImports(source string) {
 			root(f, provider.Params)
 		}
 	}
-	loaded := map[string]*Function{}
+	loaded := map[string]bool{}
 	if exhausted {
 		r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "bundled reference admission exceeds budget", Span{}})
 		return
@@ -197,7 +210,7 @@ func (r *Result) loadBundledImports(source string) {
 	for head := 0; head < len(queue); head++ {
 		req := queue[head]
 		key := req.module + "/" + req.member
-		if loaded[key] != nil {
+		if loaded[key] {
 			continue
 		}
 		entry := bundledIndex[req.module][req.member]
@@ -212,17 +225,11 @@ func (r *Result) loadBundledImports(source string) {
 			return
 		}
 		bundle, diagnostics := parse(string(data))
-		if len(diagnostics) != 0 || bundle == nil || len(bundle.Functions) != 1 || len(bundle.Items) != 1 || bundle.Functions[0].Name != req.member {
+		if len(diagnostics) != 0 || bundle == nil || len(bundle.Items) != 1 || (len(bundle.Functions) == 0 && len(bundle.Records) == 0) {
 			r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "invalid distributed function source " + key, req.span})
 			return
 		}
-		f := bundle.Functions[0]
-		f.Module = req.module
-		f.SourceID = "source:" + key
-		f.Identity = "function:" + req.module + ":module:" + f.Name
-		sum := sha256.Sum256([]byte(f.Identity))
-		f.EmissionName = "bundle_" + hex.EncodeToString(sum[:8])
-		loaded[key] = f
+		loaded[key] = true
 		for _, dependency := range entry.Dependencies {
 			if len(queue) >= maxBundledReferences {
 				r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "bundled declaration closure exceeds budget", req.span})
@@ -230,21 +237,48 @@ func (r *Result) loadBundledImports(source string) {
 			}
 			queue = append(queue, request{req.module, dependency, req.span})
 		}
-		p.BundledFunctions = append(p.BundledFunctions, f)
+		name, identity, source, span := "", "", "source:"+key, Span{}
+		if len(bundle.Functions) == 1 {
+			f := bundle.Functions[0]
+			name, identity, span = f.Name, "function:"+req.module+":module:"+f.Name, f.DeclSpan
+			f.Module, f.SourceID, f.Identity = req.module, source, identity
+			sum := sha256.Sum256([]byte(identity))
+			f.EmissionName = "bundle_" + hex.EncodeToString(sum[:8])
+			p.BundledFunctions = append(p.BundledFunctions, f)
+			for alias, module := range aliases {
+				if module == req.module {
+					p.BundledBindings[alias][name] = f
+				}
+			}
+		} else if len(bundle.Records) == 1 {
+			r := bundle.Records[0]
+			name, identity, span = r.Name, "template:"+req.module+":module:"+r.Name, r.Span
+			r.Module, r.SourceID, r.Identity = req.module, source, identity
+			sum := sha256.Sum256([]byte(identity))
+			r.EmissionName = "bundle_" + hex.EncodeToString(sum[:8])
+			p.BundledTemplates = append(p.BundledTemplates, r)
+			for alias, module := range aliases {
+				if module == req.module {
+					p.BundledTypeBindings[alias][name] = r
+				}
+			}
+		} else {
+			r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "unsupported distributed declaration shape", req.span})
+			return
+		}
+		if name != req.member {
+			r.Diagnostics = append(r.Diagnostics, Diagnostic{"EF126", "distributed declaration index mismatch", req.span})
+			return
+		}
 		for name, typ := range bundle.typeExpressions {
 			p.typeExpressions[name] = typ
 		}
 		content := formatDigest(string(data))
-		r.Sources = append(r.Sources, SourceInfo{ID: f.SourceID, Module: req.module, Digest: content, Version: bundledInterfaceVersion})
-		r.BundledBindings = append(r.BundledBindings, BundledBinding{Module: req.module, Name: f.Name, Declaration: f.Identity, Source: f.SourceID, Span: f.DeclSpan, Content: content})
+		r.Sources = append(r.Sources, SourceInfo{ID: source, Module: req.module, Digest: content, Version: bundledInterfaceVersion})
+		r.BundledBindings = append(r.BundledBindings, BundledBinding{Module: req.module, Name: name, Declaration: identity, Source: source, Span: span, Content: content})
 		// Dependencies use checked module members, rather than arbitrary source
 		// lookup. The first distribution has self-contained ordinary helpers;
 		// unsupported names are diagnosed by the common checker below.
-		for alias, module := range aliases {
-			if module == req.module {
-				p.BundledBindings[alias][f.Name] = f
-			}
-		}
 	}
 	slices.SortFunc(r.BundledBindings, func(a, b BundledBinding) int { return compareStrings(a.Declaration, b.Declaration) })
 	slices.SortFunc(r.Sources, func(a, b SourceInfo) int { return compareStrings(a.ID, b.ID) })

@@ -93,7 +93,11 @@ func (c *checker) canonicalSnapshot() *canonicalSnapshot {
 	}
 	for i := range c.result.Declarations {
 		d := &c.result.Declarations[i]
-		snapshot.declarations[c.declarationQualifier(d.Kind, d.Name)] = d
+		if d.Kind == "template" {
+			snapshot.declarations[d.Identity] = d
+		} else if qualifier := c.declarationQualifier(d.Kind, d.Name); qualifier != "" {
+			snapshot.declarations[qualifier] = d
+		}
 	}
 	// Compute all public identities once at the checker-to-boundary seam. The
 	// identity is memoized by the canonical interner and is never recomputed by
@@ -644,6 +648,16 @@ func (r *Result) projectionRefs(refs []TypeRef, all bool, compatibilityBytes int
 					return refusedProjection(limits, usage, err.Error())
 				}
 			}
+			for _, parameter := range declaration.TemplateParameters {
+				if err := addField(Field{TypeRef: parameter.Variable, typeID: parameter.typeID}); err != nil {
+					return refusedProjection(limits, usage, err.Error())
+				}
+				if parameter.Shape != nil {
+					if err := addField(Field{TypeRef: *parameter.Shape, typeID: parameter.shapeID}); err != nil {
+						return refusedProjection(limits, usage, err.Error())
+					}
+				}
+			}
 			for _, variant := range declaration.Variants {
 				for _, field := range variant.Fields {
 					if err := addField(field); err != nil {
@@ -801,6 +815,12 @@ func appendProjectionValue(refs *[]TypeRef, value ValueType) int {
 	appendProjectionRef(refs, TypeRef{FailureRow: value.FailureRow, ServiceRow: value.ServiceRow})
 	if value.Callable != nil {
 		appendProjectionRef(refs, TypeRef{ID: value.Callable.Signature})
+		for _, parameter := range value.Callable.TypeParameters {
+			appendProjectionRef(refs, parameter.Variable)
+			if parameter.Shape != nil {
+				appendProjectionRef(refs, *parameter.Shape)
+			}
+		}
 		for _, parameter := range value.Callable.Parameters {
 			appendProjectionRef(refs, parameter.TypeRef)
 		}
@@ -1048,6 +1068,12 @@ func (r *Result) ProjectDeclaration(declaration *Declaration) TypeProjection {
 	}
 	for _, field := range declaration.Fields {
 		appendProjectionRef(&refs, field.TypeRef)
+	}
+	for _, parameter := range declaration.TemplateParameters {
+		appendProjectionRef(&refs, parameter.Variable)
+		if parameter.Shape != nil {
+			appendProjectionRef(&refs, *parameter.Shape)
+		}
 	}
 	for _, variant := range declaration.Variants {
 		for _, field := range variant.Fields {

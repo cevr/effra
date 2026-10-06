@@ -14,6 +14,7 @@ type callableEvidence struct {
 	count         int
 	parameter     *Function
 	parameterName string
+	parameterPath string
 	unresolved    bool
 }
 
@@ -60,7 +61,10 @@ func substituteCallableEvidence(evidence callableEvidence, f *Function, argument
 	}
 	for i, p := range f.Params {
 		if p.Name == evidence.parameterName && i < len(arguments) {
-			return arguments[i].callableEvidence
+			if value, known := fieldOccurrence(arguments[i], evidence.parameterPath); known {
+				return value.callableEvidence
+			}
+			return callableEvidence{unresolved: true}
 		}
 	}
 	return callableEvidence{unresolved: true}
@@ -75,6 +79,8 @@ func (c *checker) callbackRelation(callee callableEvidence, arguments []checkedE
 			key.WriteString(e.parameter.Identity)
 			key.WriteByte(':')
 			key.WriteString(e.parameterName)
+			key.WriteByte(':')
+			key.WriteString(e.parameterPath)
 		}
 		for _, f := range e.callees[:e.count] {
 			key.WriteString(f.Identity)
@@ -84,14 +90,45 @@ func (c *checker) callbackRelation(callee callableEvidence, arguments []checkedE
 	}
 	writeEvidence(callee)
 	fmt.Fprintf(&key, "%d:%s;", result, path)
-	for _, argument := range arguments {
-		fmt.Fprintf(&key, "%d;", argument.valueID())
-		writeEvidence(argument.callableEvidence)
-		for _, fact := range argument.ownershipFacts() {
+	writeFacts := func(facts []OwnershipFact) {
+		fmt.Fprintf(&key, "facts:%d;", len(facts))
+		for _, fact := range facts {
 			fmt.Fprintf(&key, "%q:%q:%q:%q:%q:%t:%d:%t:%t:%q;", fact.Path, fact.Status, fact.Region, fact.Origin, fact.source, fact.sourceSet, fact.ownerKind, fact.potentialOwner, fact.remainder, fact.remainderExclusions)
 			if fact.callbackRelation != nil {
 				key.WriteString(fact.callbackRelation.key)
 			}
+		}
+	}
+	visits := 0
+	var writeOccurrence func(checkedExpression, int) bool
+	writeOccurrence = func(argument checkedExpression, depth int) bool {
+		visits++
+		if depth > 32 || visits > 4096 || key.Len() > 1<<20 {
+			return false
+		}
+		fmt.Fprintf(&key, "%d;", argument.valueID())
+		writeEvidence(argument.callableEvidence)
+		writeFacts(argument.ownershipFacts())
+		writeFacts(argument.captureFacts())
+		writeFacts(argument.child)
+		fmt.Fprintf(&key, "rows:%d:%d:%d:%d;", argument.evaluation.failureRowID(), argument.evaluation.serviceRowID(), argument.executed.failureRowID(), argument.executed.serviceRowID())
+		names := []string{}
+		for name := range argument.fields {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		fmt.Fprintf(&key, "fields:%d;", len(names))
+		for _, name := range names {
+			fmt.Fprintf(&key, "%q;", name)
+			if !writeOccurrence(argument.fields[name], depth+1) {
+				return false
+			}
+		}
+		return key.Len() <= 1<<20
+	}
+	for _, argument := range arguments {
+		if !writeOccurrence(argument, 0) {
+			return nil
 		}
 	}
 	sum := sha256.Sum256([]byte(key.String()))

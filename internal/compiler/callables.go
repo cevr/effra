@@ -10,16 +10,26 @@ import (
 // strings reference other parsed source types or ordinary nominal names.
 // Checking resolves the tree into the common numeric type and row arena.
 type sourceType struct {
-	Effect         bool
-	Parameters     []string
-	ParameterTypes []*sourceType
-	Result         string
-	ResultType     *sourceType
-	Failures       []string
-	Services       []string
+	owner                    *checker
+	applicationID            TypeID
+	Span                     Span
+	Template                 *Record
+	ApplicationArgumentTypes []*sourceType
+	Application              string
+	ApplicationArguments     []string
+	Effect                   bool
+	Parameters               []string
+	ParameterTypes           []*sourceType
+	Result                   string
+	ResultType               *sourceType
+	Failures                 []string
+	Services                 []string
 }
 
 func (t *sourceType) display() string {
+	if t.Application != "" {
+		return t.Application + "<" + strings.Join(t.ApplicationArguments, ", ") + ">"
+	}
 	kind := "fn"
 	if t.Effect {
 		kind = "effect fn"
@@ -39,6 +49,9 @@ func (t *sourceType) display() string {
 }
 
 func (c *checker) sourceCallable(t *sourceType) TypeID {
+	if t.Application != "" {
+		return c.sourceApplication(t)
+	}
 	args := make([]TypeID, 0, len(t.Parameters))
 	for _, name := range t.Parameters {
 		args = append(args, c.canonicalRef(typeRef(name)))
@@ -51,6 +64,9 @@ func (c *checker) sourceCallable(t *sourceType) TypeID {
 }
 
 func (c *checker) sourceCallableKnown(t *sourceType) bool {
+	if t.Application != "" {
+		return c.sourceApplication(t) != invalidTypeID
+	}
 	if !t.Effect && (len(t.Failures) > 0 || len(t.Services) > 0) {
 		return false
 	}
@@ -150,21 +166,14 @@ func (c *checker) instantiateType(id TypeID, bindings map[string][]string, depth
 	if depth > 64 {
 		return invalidTypeID
 	}
-	n := c.node(id)
-	if n == nil {
-		return invalidTypeID
-	}
-	if n.Kind != "callable" && n.Kind != "recipe" {
-		return id
-	}
-	args := make([]TypeID, len(n.Args))
-	for i, arg := range n.Args {
-		args[i] = c.instantiateType(arg, bindings, depth+1)
-	}
-	return c.internContract(n.Kind, n.Mode, c.instantiateType(n.Result, bindings, depth+1), args, c.instantiateRow(n.FailureRow, bindings), c.instantiateRow(n.ServiceRow, bindings))
+	return c.substituteCanonical(id, nil, bindings)
 }
 
-func (c *checker) inferRows(f *Function, arguments []checkedExpression, span Span) map[string][]string {
+func (c *checker) inferRows(f *Function, arguments []checkedExpression, span Span, typeArguments ...map[TypeID]TypeID) map[string][]string {
+	types := map[TypeID]TypeID{}
+	if len(typeArguments) > 0 {
+		types = typeArguments[0]
+	}
 	bindings := map[string][]string{}
 	formalVariables := map[string]bool{}
 	for _, p := range f.RowParameters {
@@ -213,7 +222,7 @@ func (c *checker) inferRows(f *Function, arguments []checkedExpression, span Spa
 		}
 	}
 	for i, p := range f.Params {
-		if i < len(arguments) && (arguments[i].isEffect() || !c.assignable(arguments[i].valueID(), c.instantiateType(p.typeID, bindings, 0), 0)) {
+		if i < len(arguments) && (arguments[i].isEffect() || !c.assignable(arguments[i].valueID(), c.substituteCanonical(p.typeID, types, bindings), 0)) {
 			c.diagnostic("EF106", "argument has incompatible instantiated callback contract", span)
 		}
 	}
@@ -265,6 +274,21 @@ func (c *checker) assignable(actual, expected TypeID, depth int) bool {
 		return false
 	}
 	if a.Kind == "never" {
+		return true
+	}
+	if a.Kind == "application" && b.Kind == "application" && a.Declaration == b.Declaration && len(a.Args) == len(b.Args) {
+		template := c.templates[a.Declaration]
+		if template == nil || len(template.Parameters) != len(a.Args) {
+			return false
+		}
+		for i, parameter := range template.Parameters {
+			if parameter.Kind == "type" && a.Args[i] != b.Args[i] {
+				return false
+			}
+			if parameter.Kind == "callable" && !c.assignable(a.Args[i], b.Args[i], depth+1) {
+				return false
+			}
+		}
 		return true
 	}
 	if a.Kind != "callable" || b.Kind != "callable" || a.Mode != b.Mode || len(a.Args) != len(b.Args) {
@@ -339,6 +363,9 @@ func goSourceType(t *sourceType, fallback string) string {
 	if t == nil {
 		return goType(fallback)
 	}
+	if t.Application != "" {
+		return canonicalGoType(t.owner, t.applicationID, map[TypeID]bool{})
+	}
 	// Nested children are rendered from the canonical parsed syntax retained
 	// on each occurrence in the source type graph by source rendering below.
 	args := make([]string, len(t.Parameters))
@@ -355,6 +382,16 @@ func goSourceType(t *sourceType, fallback string) string {
 func jsSourceType(t *sourceType, fallback string, declarations ...map[string]Declaration) string {
 	if t == nil {
 		return jsValueType(fallback)
+	}
+	if t.Application != "" {
+		if t.Template == nil {
+			return "never"
+		}
+		args := []string{}
+		for i, name := range t.ApplicationArguments {
+			args = append(args, jsSourceType(t.ApplicationArgumentTypes[i], name, declarations...))
+		}
+		return "__ef_template_" + t.Template.EmissionName + "<" + strings.Join(args, ", ") + ">"
 	}
 	args := make([]string, len(t.Parameters))
 	var declared map[string]Declaration
@@ -377,6 +414,25 @@ func jsSourceType(t *sourceType, fallback string, declarations ...map[string]Dec
 // callback's row instead of the source solver's least union. The return view
 // joins these witnesses and excludes the formal row's fixed labels.
 func jsRowFunctionSignature(f *Function, declarations map[string]Declaration) string {
+	if len(f.TypeParameters) > 0 {
+		declared := map[string]Declaration{}
+		for name, d := range declarations {
+			declared[name] = d
+		}
+		variables := []string{}
+		for _, p := range f.TypeParameters {
+			variables = append(variables, p.Name)
+		}
+		for _, p := range f.RowParameters {
+			variables = append(variables, p.Name)
+			declared[p.Name] = Declaration{Kind: "row:" + p.Kind, Name: p.Name}
+		}
+		params := []string{}
+		for i, p := range f.Params {
+			params = append(params, "arg"+strconv.Itoa(i)+": "+jsSourceType(p.sourceType, p.Type, declared))
+		}
+		return "<" + strings.Join(variables, ", ") + ">(" + strings.Join(params, ", ") + ") => " + jsContractFor(f, declared)
+	}
 	if len(f.CallbackPolicies) > 0 {
 		copy := *f
 		copy.Params = append([]Param{}, f.Params...)

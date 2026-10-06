@@ -123,7 +123,7 @@ func TestBundledTransportRejectsMalformedAndStaleData(t *testing.T) {
 	}
 	for name, wire := range map[string][]byte{
 		"trailing":      append(append([]byte{}, data...), []byte(` {}`)...),
-		"duplicate":     []byte(strings.Replace(string(data), `"interfaceSchema":1`, `"interfaceSchema":1,"interfaceSchema":1`, 1)),
+		"duplicate":     []byte(strings.Replace(string(data), fmt.Sprintf(`"interfaceSchema":%d`, interfaceSummarySchema), fmt.Sprintf(`"interfaceSchema":%d,"interfaceSchema":%d`, interfaceSummarySchema, interfaceSummarySchema), 1)),
 		"missing false": []byte(strings.Replace(string(data), `,"unresolved":false`, ``, 1)),
 		"null":          []byte(strings.Replace(string(data), `"trustedHost":[]`, `"trustedHost":null`, 1)),
 		"unknown":       []byte(strings.Replace(string(data), `"trustedHost":[]`, `"trustedHost":[],"extra":false`, 1)),
