@@ -12,20 +12,20 @@ import (
 
 func TestExplicitTestProvidersUseTheHarnessAcrossTargets(t *testing.T) {
 	source := `effect fn explicitSleep() -> () uses {Clock} {
-    run Clock.sleep(20)
+    run Clock.sleep(36000000)
 }
 
 effect fn test_explicit_virtual_providers() -> () raises {AssertionFailed} uses {Assert, Scheduler} {
     let child = fork explicitSleep().provide<Clock>(TestClock).provide<Scheduler>(TestScheduler)
     run Scheduler.awaitRegistration()
-    run Scheduler.advance(20)
+    run Scheduler.advance(36000000)
     run child.join()
     run Assert.check(true, "explicit test providers share the harness scheduler")
 }
 
 effect fn test_advance_admits_unstarted_fork() -> () raises {AssertionFailed} uses {Assert, Scheduler} {
     let child = fork explicitSleep().provide<Clock>(TestClock).provide<Scheduler>(TestScheduler)
-    run Scheduler.advance(20)
+    run Scheduler.advance(36000000)
     run child.join()
     run Assert.check(true, "adjust waits for an admitted fork to register its timer")
 }

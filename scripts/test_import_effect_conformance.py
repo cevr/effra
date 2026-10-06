@@ -163,13 +163,15 @@ class SnapshotIntegrityTests(unittest.TestCase):
     def test_invalid_utf8_readme_and_deep_json_are_structured_refusals(self) -> None:
         for name, filename, contents in (
             ("invalid-readme", "README.md", b"\xff"),
-            ("deep-manifest", "manifest.json", b"[" * 2000 + b"0" + b"]" * 2000),
+            ("deep-manifest", "manifest.json", b"[" * 100000 + b"0" + b"]" * 100000),
         ):
             with self.subTest(name=name):
                 output = self.copy_snapshot(name)
                 (output / filename).write_bytes(contents)
-                with self.assertRaises(MODULE.ImportError):
+                with self.assertRaises(MODULE.ImportError) as refusal:
                     MODULE.validate_self_contained(output, allow_custom=True)
+                if name == "deep-manifest":
+                    self.assertIn("not valid UTF-8 JSON", str(refusal.exception))
                 self.assertFalse(MODULE.owned_snapshot(output))
                 staged = self.copy_snapshot(name + "-staged")
                 with self.assertRaises(MODULE.ImportError):
@@ -181,6 +183,8 @@ class SnapshotIntegrityTests(unittest.TestCase):
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("import_effect_conformance:", result.stderr)
+                if name == "deep-manifest":
+                    self.assertIn("not valid UTF-8 JSON", result.stderr)
                 self.assertNotIn("Traceback", result.stderr)
 
 

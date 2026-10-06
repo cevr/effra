@@ -23,7 +23,7 @@
       "status": "covered",
       "upstream": {"file": "packages/effect/test/TestClock.test.ts", "line": 8, "label": "sleep - does not require passage of wall time"},
       "behavior": "Advancing test program time admits an already-forked sleeper and allows its join without waiting for the requested wall-clock delay.",
-      "limits": "Effra tests explicit TestClock/TestScheduler providers and an admitted but unstarted fork at 20 milliseconds; they do not assert all TestClock adjustment/precision behavior.",
+      "limits": "Effra tests explicit TestClock/TestScheduler providers and an admitted but unstarted fork at 36000000 milliseconds (10 hours), under a 15-second watchdog per target; they do not assert all TestClock adjustment/precision behavior.",
       "evidence": [{"file": "internal/compiler/causal_test.go", "test": "TestExplicitTestProvidersUseTheHarnessAcrossTargets", "targets": ["go", "js"]}]
     },
     {

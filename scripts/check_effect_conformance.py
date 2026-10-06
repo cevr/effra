@@ -28,7 +28,7 @@ def read_mapping(path: Path) -> dict:
 
 def validate_mapping(mapping: dict, root: Path = ROOT) -> list[str]:
     manifest = corpus.validate_self_contained(root / corpus.OUTPUT_RELATIVE)
-    if set(mapping) != {"schemaVersion", "sourceCommit", "cases"} or mapping["schemaVersion"] != 1 or mapping["sourceCommit"] != corpus.COMMIT:
+    if set(mapping) != {"schemaVersion", "sourceCommit", "cases"} or type(mapping["schemaVersion"]) is not int or mapping["schemaVersion"] != 1 or mapping["sourceCommit"] != corpus.COMMIT:
         raise corpus.ImportError("mapping schema or upstream pin is invalid")
     cases = mapping["cases"]
     if not isinstance(cases, list) or not cases:
@@ -90,10 +90,13 @@ def main() -> int:
     mapping = read_mapping(args.mapping)
     tests = validate_mapping(mapping)
     if args.run:
-        result = subprocess.run(["go", "test", "./internal/compiler", "-run", "^(" + "|".join(tests) + ")$", "-count=1"], cwd=ROOT, check=False)
+        try:
+            result = subprocess.run(["go", "test", "./internal/compiler", "-run", "^(" + "|".join(tests) + ")$", "-count=1"], cwd=ROOT, check=False)
+        except OSError as error:
+            raise corpus.ImportError(f"cannot execute Go evidence runner: {error}") from error
         if result.returncode:
             return result.returncode
-    print(f"effect mapping: {len(mapping['cases'])} selected behaviors; {len(tests)} shared Go/JS evidence tests; 746 files remain reference-only")
+    print(f"effect mapping: {len(mapping['cases'])} selected behaviors; {len(tests)} shared Go/JS evidence tests; {corpus.RELEASE_REFERENCE_COUNT} files remain reference-only")
     return 0
 
 
