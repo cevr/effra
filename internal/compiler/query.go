@@ -47,6 +47,7 @@ func (r *Result) TypeAt(offset int) (*ExpressionInfo, error) {
 		if b != nil {
 			for _, s := range b.Statements {
 				expr(s.Value)
+				expr(s.Payload)
 			}
 		}
 	}

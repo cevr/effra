@@ -20,7 +20,9 @@ type ValueType struct {
 // TypeRef is the canonical semantic identity used by checking, emission and
 // inspection. Success remains a stable rendered string for existing clients;
 // TypeRef prevents the compiler from growing another string-encoded type
-// grammar as nominal application data is added.
+// grammar as nominal application data is added. Kind is intentionally open:
+// provider, opaque-handle and ownership wrappers can be added without
+// changing the public contract shape, with Args carrying nested identities.
 type TypeRef struct {
 	Kind string    `json:"kind"`
 	Name string    `json:"name,omitempty"`
@@ -92,6 +94,8 @@ func typeRef(name string) TypeRef {
 		return TypeRef{Kind: "provider", Name: strings.TrimPrefix(name, "provider:")}
 	case name == "never":
 		return TypeRef{Kind: "never"}
+	case name == "invalid":
+		return TypeRef{Kind: "invalid"}
 	default:
 		return TypeRef{Kind: "named", Name: name}
 	}
@@ -179,6 +183,13 @@ func (c *checker) check() {
 		}
 		names[name] = true
 	}
+	claimData := func(name string, span Span) {
+		switch name {
+		case "string", "bool", "i64", "bytes", "File", "Handler", "Fiber", "Context", "Effect", "Scope", "Exit", "Cause", "Option", "never", "invalid":
+			c.diagnostic("EF101", "reserved data declaration "+name, span)
+		}
+		claim(name, span)
+	}
 	for _, imp := range c.program.Imports {
 		claim(imp.Alias, imp.Span)
 	}
@@ -188,7 +199,7 @@ func (c *checker) check() {
 	}
 	slices.Sort(errors)
 	for _, name := range errors {
-		claim(name, c.program.Errors[name])
+		claimData(name, c.program.Errors[name])
 	}
 	for _, name := range builtinErrors() {
 		c.program.Errors[name] = Span{}
@@ -200,20 +211,37 @@ func (c *checker) check() {
 		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "error", Name: decl.Name, Fields: decl.Fields, Span: decl.Span})
 	}
 	for _, record := range c.program.Records {
-		claim(record.Name, record.Span)
+		claimData(record.Name, record.Span)
 		c.records[record.Name] = record
 		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "record", Name: record.Name, Fields: record.Fields, Span: record.Span})
 	}
 	for _, enum := range c.program.Enums {
-		claim(enum.Name, enum.Span)
+		claimData(enum.Name, enum.Span)
 		c.enums[enum.Name] = enum
 		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "enum", Name: enum.Name, Variants: enum.Variants, Span: enum.Span})
 	}
 	for _, decl := range c.program.ErrorDecls {
-		c.validateFields(decl.Fields, decl.Name+"Error")
+		for i := range decl.Fields {
+			decl.Fields[i].TypeRef = c.typeRef(decl.Fields[i].Type)
+		}
 	}
 	for _, record := range c.program.Records {
-		c.validateFields(record.Fields, record.Name)
+		for i := range record.Fields {
+			record.Fields[i].TypeRef = c.typeRef(record.Fields[i].Type)
+		}
+	}
+	for _, enum := range c.program.Enums {
+		for i := range enum.Variants {
+			for j := range enum.Variants[i].Fields {
+				enum.Variants[i].Fields[j].TypeRef = c.typeRef(enum.Variants[i].Fields[j].Type)
+			}
+		}
+	}
+	for _, decl := range c.program.ErrorDecls {
+		c.validateFields(decl.Fields, decl.Name+"Error", true)
+	}
+	for _, record := range c.program.Records {
+		c.validateFields(record.Fields, record.Name, false)
 	}
 	for _, enum := range c.program.Enums {
 		variants := map[string]bool{}
@@ -222,7 +250,7 @@ func (c *checker) check() {
 				c.diagnostic("EF101", "duplicate variant "+variant.Name+" in "+enum.Name, variant.Span)
 			}
 			variants[variant.Name] = true
-			c.validateFields(variant.Fields, enum.Name+"."+variant.Name)
+			c.validateFields(variant.Fields, enum.Name+"."+variant.Name, true)
 		}
 	}
 	c.validateDataLayouts()
@@ -313,8 +341,10 @@ func (c *checker) signature(f *Function) {
 	}
 	valid(f.Return, f.Span)
 	names := map[string]bool{}
-	for _, p := range f.Params {
+	for i := range f.Params {
+		p := &f.Params[i]
 		valid(p.Type, p.Span)
+		p.TypeRef = c.typeRef(p.Type)
 		if names[p.Name] {
 			c.diagnostic("EF101", "duplicate parameter "+p.Name, p.Span)
 		}
@@ -339,7 +369,7 @@ func (c *checker) typeKnown(name string) bool {
 	case "string", "bool", "()", "i64", "File", "bytes", "Handler":
 		return true
 	}
-	if c.records[name] != nil || c.enums[name] != nil || c.errors[name] != nil {
+	if c.records[name] != nil || c.enums[name] != nil {
 		return true
 	}
 	return false
@@ -355,14 +385,14 @@ func (c *checker) typeRef(name string) TypeRef {
 	}
 	return ref
 }
-func (c *checker) validateFields(fields []Field, owner string) {
+func (c *checker) validateFields(fields []Field, owner string, reserveTag bool) {
 	names := map[string]bool{}
 	for _, field := range fields {
 		if names[field.Name] {
 			c.diagnostic("EF101", "duplicate field "+field.Name+" in "+owner, field.Span)
 		}
 		names[field.Name] = true
-		if field.Name == "_tag" && (strings.Contains(owner, ".") || strings.Contains(owner, "Error")) {
+		if field.Name == "_tag" && reserveTag {
 			c.diagnostic("EF120", "_tag is reserved for closed variant/error discriminators", field.Span)
 		}
 		if !c.typeKnown(field.Type) {
@@ -413,14 +443,14 @@ func (c *checker) validateDataLayouts() {
 		}
 		state[name] = 2
 	}
-	for name := range c.records {
-		visit(name, nil)
+	for _, record := range c.program.Records {
+		visit(record.Name, nil)
 	}
-	for name := range c.enums {
-		visit(name, nil)
+	for _, enum := range c.program.Enums {
+		visit(enum.Name, nil)
 	}
-	for name := range c.errors {
-		visit(name, nil)
+	for _, failure := range c.program.ErrorDecls {
+		visit(failure.Name, nil)
 	}
 }
 func (c *checker) function(f *Function, record bool) {
@@ -467,9 +497,6 @@ func fieldsFor(c *checker, typeName, variantName string) ([]Field, bool) {
 	if variantName == "" {
 		if record := c.records[typeName]; record != nil {
 			return record.Fields, true
-		}
-		if failure := c.errors[typeName]; failure != nil {
-			return failure.Fields, true
 		}
 		return nil, false
 	}
@@ -598,7 +625,7 @@ func executed(e *Expr, errors bool) []string {
 		}
 		return t.Services
 	}
-	if e.Kind == "run" || e.Kind == "if" || e.Kind == "scope" || e.Kind == "fork" {
+	if e.Kind == "run" || e.Kind == "if" || e.Kind == "match" || e.Kind == "scope" || e.Kind == "fork" {
 		return row(e.Type)
 	}
 	out := union(executed(e.Left, errors), executed(e.Right, errors))
@@ -859,6 +886,10 @@ func (c *checker) dataCall(e *Expr, env map[string]ValueType, inEffect bool) (Va
 	default:
 		return ValueType{}, false
 	}
+	if variantName == "" && c.errors[typeName] != nil {
+		c.diagnostic("EF102", "error declarations are failure payloads, not success values", e.Span)
+		return value("invalid"), true
+	}
 	fields, ok := fieldsFor(c, typeName, variantName)
 	if !ok || (variantName == "" && c.enums[typeName] != nil) {
 		if variantName != "" && c.enums[typeName] == nil {
@@ -918,6 +949,10 @@ func (c *checker) construct(e *Expr, env map[string]ValueType, inEffect bool) Va
 		typeName, variantName = e.Left.Left.Name, e.Left.Name
 	} else {
 		c.diagnostic("EF114", "invalid data constructor", e.Span)
+		return value("invalid")
+	}
+	if variantName == "" && c.errors[typeName] != nil {
+		c.diagnostic("EF102", "error declarations are failure payloads, not success values", e.Span)
 		return value("invalid")
 	}
 	fields, ok := fieldsFor(c, typeName, variantName)

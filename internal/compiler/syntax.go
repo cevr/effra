@@ -32,18 +32,20 @@ type parser struct {
 	noConstruct int
 }
 type Param struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Span Span   `json:"span"`
+	Name    string  `json:"name"`
+	Type    string  `json:"type"`
+	TypeRef TypeRef `json:"typeRef"`
+	Span    Span    `json:"span"`
 }
 
 // Field is a nominal declaration field. Type is kept as source text for
 // compatibility with the original prototype; the checker resolves it to a
 // canonical TypeRef before admitting the declaration.
 type Field struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	Span Span   `json:"span"`
+	Name    string  `json:"name"`
+	Type    string  `json:"type"`
+	TypeRef TypeRef `json:"typeRef"`
+	Span    Span    `json:"span"`
 }
 type Variant struct {
 	Name   string  `json:"name"`
@@ -432,7 +434,7 @@ func (p *parser) function(body bool) *Function {
 	for !p.accept(")") {
 		param := p.name()
 		p.expect(":")
-		f.Params = append(f.Params, Param{param.text, p.typ(), param.span})
+		f.Params = append(f.Params, Param{Name: param.text, Type: p.typ(), Span: param.span})
 		if !p.accept(",") {
 			p.expect(")")
 			break
@@ -572,7 +574,7 @@ func (p *parser) expr(min int) *Expr {
 		p.fail(start, "expected expression")
 	}
 	for {
-		if p.noConstruct == 0 && p.peek().text == "{" && (e.Kind == "name" || e.Kind == "member") {
+		if (p.noConstruct == 0 || p.constructorBrace()) && p.peek().text == "{" && (e.Kind == "name" || e.Kind == "member") {
 			e = &Expr{Kind: "construct", Left: e, Fields: p.fieldValues(), Span: e.Span}
 			continue
 		}
@@ -638,6 +640,24 @@ func (p *parser) expr(min int) *Expr {
 		e = &Expr{Kind: "binary", Name: op.text, Left: e, Right: p.expr(precedence + 1), Span: op.span}
 	}
 	return e
+}
+
+func (p *parser) constructorBrace() bool {
+	if p.peek().text != "{" || p.at+1 >= len(p.tokens) {
+		return false
+	}
+	// A match/if body starts with a pattern or statement. A named payload
+	// constructor has a field colon immediately after its first identifier.
+	if p.tokens[p.at+1].text == "}" {
+		// Empty constructors need one token of context: a control-body brace
+		// follows the constructor, while an empty if/match body is followed by
+		// `else` or the enclosing delimiter.
+		return p.at+2 < len(p.tokens) && p.tokens[p.at+2].text == "{"
+	}
+	if p.at+2 >= len(p.tokens) {
+		return false
+	}
+	return p.tokens[p.at+2].text == ":"
 }
 
 func (p *parser) pattern() *MatchPattern {

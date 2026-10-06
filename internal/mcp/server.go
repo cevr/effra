@@ -84,6 +84,33 @@ func tools() []tool {
 		{"code.explain", "Local executed-call contributions introducing failures and services", schema(true), annotations},
 	}
 }
+
+func checkDeclarationMetadata(declaration compiler.Declaration) error {
+	if len(declaration.Fields) > 100 || len(declaration.Variants) > 100 {
+		return fmt.Errorf("declaration metadata exceeds prototype limits")
+	}
+	for _, variant := range declaration.Variants {
+		if len(variant.Fields) > 100 {
+			return fmt.Errorf("declaration metadata exceeds prototype limits")
+		}
+	}
+	return nil
+}
+
+func boundedDeclarations(all []compiler.Declaration) ([]compiler.Declaration, bool, error) {
+	declarations := all
+	truncated := len(declarations) > 100
+	if truncated {
+		declarations = declarations[:100]
+	}
+	for _, declaration := range declarations {
+		if err := checkDeclarationMetadata(declaration); err != nil {
+			return nil, false, err
+		}
+	}
+	return declarations, truncated, nil
+}
+
 func Serve(root string, input io.Reader, output io.Writer) error {
 	absolute, err := filepath.Abs(root)
 	if err != nil {
@@ -280,20 +307,9 @@ func call(root, name string, args arguments) (any, error) {
 		bindings = bindings[:100]
 	}
 	if name == "project.check" {
-		declarations := r.Declarations
-		declarationsTruncated := len(declarations) > 100
-		if declarationsTruncated {
-			declarations = declarations[:100]
-		}
-		for _, declaration := range declarations {
-			if len(declaration.Fields) > 100 || len(declaration.Variants) > 100 {
-				return nil, fmt.Errorf("declaration metadata exceeds prototype limits")
-			}
-			for _, variant := range declaration.Variants {
-				if len(variant.Fields) > 100 {
-					return nil, fmt.Errorf("declaration metadata exceeds prototype limits")
-				}
-			}
+		declarations, declarationsTruncated, err := boundedDeclarations(r.Declarations)
+		if err != nil {
+			return nil, err
 		}
 		diagnostics := r.Diagnostics
 		truncated := len(diagnostics) > 100
@@ -305,25 +321,28 @@ func call(root, name string, args arguments) (any, error) {
 	symbol := r.Find(args.Symbol)
 	if symbol == nil {
 		if declaration := r.FindDeclaration(args.Symbol); declaration != nil {
-			if len(declaration.Fields) > 100 || len(declaration.Variants) > 100 {
-				return nil, fmt.Errorf("declaration metadata exceeds prototype limits")
+			if err := checkDeclarationMetadata(*declaration); err != nil {
+				return nil, err
 			}
-			for _, variant := range declaration.Variants {
-				if len(variant.Fields) > 100 {
-					return nil, fmt.Errorf("declaration metadata exceeds prototype limits")
-				}
+			declarations, declarationsTruncated, err := boundedDeclarations(r.Declarations)
+			if err != nil {
+				return nil, err
 			}
-			return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "declaration": declaration, "declarations": r.Declarations, "bindings": bindings, "bindingsTruncated": bindingsTruncated, "diagnostics": r.Diagnostics, "diagnosticsTruncated": len(r.Diagnostics) > 100}, nil
+			diagnostics := r.Diagnostics
+			diagnosticsTruncated := len(diagnostics) > 100
+			if diagnosticsTruncated {
+				diagnostics = diagnostics[:100]
+			}
+			return map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": args.File, "target": r.Target, "checked": r.Checked, "declaration": declaration, "declarations": declarations, "declarationsTruncated": declarationsTruncated, "bindings": bindings, "bindingsTruncated": bindingsTruncated, "diagnostics": diagnostics, "diagnosticsTruncated": diagnosticsTruncated}, nil
 		}
 		return nil, fmt.Errorf("unknown symbol %s; check the file for diagnostics", args.Symbol)
 	}
 	if len(symbol.Params) > 100 || len(symbol.Contributions) > 100 || len(symbol.Contract.Errors) > 100 || len(symbol.Contract.Services) > 100 {
 		return nil, fmt.Errorf("symbol exceeds prototype inspection limits")
 	}
-	declarations := r.Declarations
-	declarationsTruncated := len(declarations) > 100
-	if declarationsTruncated {
-		declarations = declarations[:100]
+	declarations, declarationsTruncated, err := boundedDeclarations(r.Declarations)
+	if err != nil {
+		return nil, err
 	}
 	diagnostics := r.Diagnostics
 	if len(diagnostics) > 100 {

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -48,13 +49,17 @@ func TestClosedDataContractsAndExhaustiveness(t *testing.T) {
 	if state == nil || state.Contract.Success != "string" || state.Contract.Type.Kind != "primitive" {
 		t.Fatalf("label contract: %+v", state)
 	}
+	interpret := r.Find("interpret")
+	if interpret == nil || !slices.Contains(interpret.Actual.Errors, "Invalid") {
+		t.Fatalf("match branch failure row lost: %+v", interpret)
+	}
 	var enumDecl *Declaration
 	for i := range r.Declarations {
 		if r.Declarations[i].Kind == "enum" {
 			enumDecl = &r.Declarations[i]
 		}
 	}
-	if enumDecl == nil || len(enumDecl.Variants) != 3 || len(enumDecl.Variants[1].Fields) != 1 {
+	if enumDecl == nil || len(enumDecl.Variants) != 3 || len(enumDecl.Variants[1].Fields) != 1 || enumDecl.Variants[1].Fields[0].TypeRef.Kind != "primitive" {
 		t.Fatalf("enum declaration: %+v", r.Declarations)
 	}
 	info, err := r.TypeAt(strings.Index(closedDataSource, `"running "`))
@@ -84,6 +89,11 @@ func TestClosedDataDiagnostics(t *testing.T) {
 		{"other variant field", `enum State { Idle Running { runId: string } } fn main(state: State) -> string { match state { State.Idle { runId } => "x" State.Running { runId } => runId } }`, "EF114"},
 		{"catch all", `enum State { Idle } fn main(state: State) -> string { match state { _ => "x" } }`, "EF118"},
 		{"nominal identity", `record A { id: string } record B { id: string } fn take(value: A) -> string { value.id } fn main() -> string { take(B { id: "x" }) }`, "EF106"},
+		{"recursive layout", `record Node { next: Node } fn main() -> string { "x" }`, "EF119"},
+		{"reserved variant discriminator", `enum State { Ready { _tag: string } } fn main() -> string { "x" }`, "EF120"},
+		{"reserved error discriminator", `error Invalid { _tag: string } fn main() -> string { "x" }`, "EF120"},
+		{"reserved data name", `record File { path: string } fn main() -> string { "x" }`, "EF101"},
+		{"error is not a success value", `error Invalid { message: string } record Envelope { failure: Invalid } fn main() -> string { "x" }`, "EF102"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := Compile(tc.source)
@@ -91,6 +101,67 @@ func TestClosedDataDiagnostics(t *testing.T) {
 				t.Fatalf("expected %s: %+v", tc.code, r.Diagnostics)
 			}
 		})
+	}
+}
+
+func TestClosedDataParserDisambiguatesControlBraces(t *testing.T) {
+	source := `enum State { Idle Running { id: string } }
+effect fn main() -> string {
+ let State = State.Idle()
+ if true { "if-ok" } else { "if-bad" }
+}
+effect fn localIf() -> string {
+ let State = true
+ if State { "if-ok" } else { "if-bad" }
+}
+effect fn localMatch() -> string {
+ let State = State.Idle()
+ match State {
+  State.Idle => "idle"
+  State.Running { id } => id
+ }
+}
+effect fn fromConstructor() -> string {
+ match State.Running { id: "x" } {
+  State.Idle => "idle"
+  State.Running { id } => id
+ }
+}
+effect fn fromEmptyConstructor() -> string {
+ match State.Idle {} {
+  State.Idle => "idle"
+  State.Running { id } => id
+ }
+}`
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatalf("control and match braces should parse: %+v", r.Diagnostics)
+	}
+	if _, _, err := r.Emit(false); err != nil {
+		t.Fatalf("JS lowering rejected disambiguated braces: %v", err)
+	}
+	if _, err := r.EmitGo(); err != nil {
+		t.Fatalf("Go lowering rejected disambiguated braces: %v", err)
+	}
+}
+
+func TestClosedDataComputedKeysPreserveProtoFields(t *testing.T) {
+	source := `record Data { __proto__: string }
+effect fn main() -> string { let value = Data { __proto__: "safe" } value.__proto__ }`
+	output := runJS(t, source, `if (await Effect.runPromise(__ef_function_main()) !== "safe") throw new Error("computed __proto__ field was lost");`)
+	if output != "" {
+		t.Fatalf("unexpected output: %s", output)
+	}
+	r := Compile(source)
+	if _, err := r.EmitGo(); err != nil {
+		t.Fatalf("Go lowering rejected computed field: %v", err)
+	}
+}
+
+func TestClosedDataRecordTagFieldIsNotReserved(t *testing.T) {
+	r := Compile(`record ErrorDetails { _tag: string } effect fn main() -> string { let details = ErrorDetails { _tag: "data" } details._tag }`)
+	if !r.Checked {
+		t.Fatalf("record _tag should remain ordinary data: %+v", r.Diagnostics)
 	}
 }
 
@@ -108,6 +179,36 @@ func TestClosedDataLoweringIsAvailable(t *testing.T) {
 	}
 	if _, err := r.EmitGo(); err != nil {
 		t.Fatalf("Go lowering rejected closed data: %v", err)
+	}
+}
+
+func TestClosedDataGoVariantNamesDoNotCollide(t *testing.T) {
+	source := `enum AB { C }
+enum A { BC }
+effect fn main() -> string { match A.BC() { A.BC => "ok" } }`
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatalf("collision fixture should check: %+v", r.Diagnostics)
+	}
+	goSource, err := r.EmitGo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(goSource, "type efTypeV_2_AB_1_C struct") || !strings.Contains(goSource, "type efTypeV_1_A_2_BC struct") {
+		t.Fatalf("qualified enum types missing: %s", goSource)
+	}
+	dir := t.TempDir()
+	if err := WriteRuntime(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(goSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := runGoCommand(dir, "build", "."); err != nil {
+		t.Fatalf("generated Go enum names collided: %v\n%s", err, output)
 	}
 }
 
@@ -136,7 +237,7 @@ func TestClosedDataRunsOnBothBackends(t *testing.T) {
 	}
 	goAssertions := `package main
 import("testing"; er "effra.generated/runtime")
-func TestClosedDataPayload(t *testing.T) { er.Run(func(fc *er.FiberContext) er.Exit[struct{}] { failed := efFunction_failWithPayload()(efContext{Runtime: fc}); interpreted := efFunction_interpret(efType_RunState_Running{RunId:"branch"})(efContext{Runtime: fc}); for _, exit := range []er.Exit[string]{failed, interpreted} { if exit.Failure == nil { t.Fatal("failure missing") }; payload, ok := exit.Failure.Payload.(efType_Invalid); if !ok || (payload.Message != "bad" && payload.Message != "branch") { t.Fatalf("payload lost: %#v", exit.Failure.Payload) } }; return er.Succeed(struct{}{}) }) }
+func TestClosedDataPayload(t *testing.T) { er.Run(func(fc *er.FiberContext) er.Exit[struct{}] { failed := efFunction_failWithPayload()(efContext{Runtime: fc}); interpreted := efFunction_interpret(efTypeV_8_RunState_7_Running{RunId:"branch"})(efContext{Runtime: fc}); for _, exit := range []er.Exit[string]{failed, interpreted} { if exit.Failure == nil { t.Fatal("failure missing") }; payload, ok := exit.Failure.Payload.(efType_Invalid); if !ok || (payload.Message != "bad" && payload.Message != "branch") { t.Fatalf("payload lost: %#v", exit.Failure.Payload) } }; return er.Succeed(struct{}{}) }) }
 `
 	if err := os.WriteFile(filepath.Join(dir, "main_test.go"), []byte(goAssertions), 0644); err != nil {
 		t.Fatal(err)

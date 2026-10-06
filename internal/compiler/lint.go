@@ -101,6 +101,7 @@ func (r *Result) Lint(strict bool) LintResult {
 		}
 		for _, s := range b.Statements {
 			expr(s.Value, env)
+			expr(s.Payload, env)
 			if s.Kind == "let" {
 				local := &binding{statement: s}
 				env[s.Name] = local

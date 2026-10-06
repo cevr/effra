@@ -108,6 +108,9 @@ func (r *Result) TestMode(live bool) error {
 				if expr(s.Value) {
 					return true
 				}
+				if expr(s.Payload) {
+					return true
+				}
 			}
 		}
 		return false

@@ -114,6 +114,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		if b != nil {
 			for _, s := range b.Statements {
 				expr(s.Value, owner)
+				expr(s.Payload, owner)
 			}
 		}
 	}

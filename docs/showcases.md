@@ -76,7 +76,7 @@ fn status(state: RunState) -> string {
 }
 ```
 
-The proposed checker knows each alternative and its payload. A Running value cannot omit its run ID; an Idle value cannot carry a stray pending request. Adding a fourth variant makes this complete match incomplete. Exhaustiveness is a compiler obligation, not a default branch that silently accepts every new case.
+The checker knows each alternative and its payload. A Running value cannot omit its run ID; an Idle value cannot carry a stray pending request. Adding a fourth variant makes this complete match incomplete. Exhaustiveness is a compiler obligation, not a default branch that silently accepts every new case.
 
 A decision value and an effect failure have separate jobs:
 

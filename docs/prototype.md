@@ -7,7 +7,7 @@ This is a single-file compiler experiment, not the full design in design.md. The
 - Immutable local bindings, string/bool/unit and i64 values, managed File handles, string concatenation, primitive equality, and `if` expressions with two branches. i64 literals are currently nonnegative; JS represents them as bigint.
 - Ordinary `fn` and lazy `effect fn`, with explicit parameter, result, failure, and service contracts.
 - Nominal records and closed enums with typed fields: `record User { id: string }`, `enum State { Ready Waiting { reason: string } }`, constructors, field access and exhaustive `match` arms. Static data does not decode or validate external wire values.
-- Nominal errors may carry typed fields: `error NotFound { id: string }`; `fail NotFound { id: "missing" }` preserves the payload on both targets.
+- Nominal errors may carry typed fields: `error NotFound { id: string }`; `fail NotFound { id: "missing" }` preserves the payload on both targets. Error declarations are failure payload types, not ordinary success values or nested record fields.
 - Nominal services and self-contained implementations: `impl MemoryUsers for Users`.
 - `run` to execute a deferred effect within an effect body.
 - `.provide<Service>(Provider)` removes that service requirement.

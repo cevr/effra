@@ -63,7 +63,11 @@ func goFieldName(name string) string {
 	return strings.ToUpper(name[:1]) + name[1:]
 }
 func goVariantType(typeName, variantName string) string {
-	return "efType_" + goIdent(typeName) + "_" + goIdent(variantName)
+	// Encode both qualified components with their source lengths. A plain
+	// concatenation makes enum AB.C collide with enum A.BC (and names that
+	// contain underscores), which would make otherwise checked programs fail
+	// during Go compilation.
+	return "efTypeV_" + strconv.Itoa(len(typeName)) + "_" + goIdent(typeName) + "_" + strconv.Itoa(len(variantName)) + "_" + goIdent(variantName)
 }
 func goParams(f *Function) string {
 	parts := []string{}
@@ -432,7 +436,8 @@ func (g *goEmitter) construct(e *Expr, effect bool, ret string, out *strings.Bui
 		parts = append(parts, goFieldName(field.Name)+":"+g.expr(field.Value, false, ret, out))
 	}
 	if variantName != "" {
-		return goVariantType(typeName, variantName) + "{" + strings.Join(parts, ",") + "}"
+		variant := goVariantType(typeName, variantName) + "{" + strings.Join(parts, ",") + "}"
+		return "efType_" + goIdent(typeName) + "(" + variant + ")"
 	}
 	return "efType_" + goIdent(typeName) + "{" + strings.Join(parts, ",") + "}"
 }
@@ -449,6 +454,7 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 		body.WriteString("switch efMatch := " + variant + ".(type) {\n")
 		for _, arm := range e.Arms {
 			body.WriteString("case " + goVariantType(arm.Pattern.TypeName, arm.Pattern.VariantName) + ":\n")
+			body.WriteString("_ = efMatch\n")
 			for _, field := range sortedBindingNames(arm.Pattern.Bindings) {
 				binding := arm.Pattern.Bindings[field]
 				if binding != "_" {
@@ -465,6 +471,7 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 	body.WriteString("switch efMatch := " + variant + ".(type) {\n")
 	for _, arm := range e.Arms {
 		body.WriteString("case " + goVariantType(arm.Pattern.TypeName, arm.Pattern.VariantName) + ":\n")
+		body.WriteString("_ = efMatch\n")
 		for _, field := range sortedBindingNames(arm.Pattern.Bindings) {
 			binding := arm.Pattern.Bindings[field]
 			if binding != "_" {
