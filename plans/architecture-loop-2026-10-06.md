@@ -137,4 +137,8 @@ Direction update gate: `./scripts/gate.sh` exited0 on the unchanged integration 
 
 ## Close
 
+CLI/MCP admission and nested inspection guards are integrated at30cda4f (reviewed42503d1, branch integration1ba50d5). All new authored fixtures use raises. Branch and integration full gates exit0 (`/tmp/effra-cli-mcp-{branch-integration,integrated}-gate.log`); real Go/JS, MCP and HTTP smoke pass. Re-ran the complete original plus four isolated single-guard mutation table after migration: each fails exactly its intended101 case(s), while the unchanged implementation passes. Raw `/tmp/effra-cli-mcp-migrated-*.log`; focused integrated FIFO/inspection live checks also pass. Exact registered clean worktree removed with ancestry guard; branch and review receipts retained. No push.
+
+Generated backend diagnostic is retained at `/tmp/effra-scheduler-build-diagnostic/`: exact1024-signal source, emitted Go, executable, commands, hashes, stage receipt and compiler profile. Public compile/run passed; backend build47.754s and direct execution3.894ms on the shared host are diagnostic observations, not scored comparisons. `docs/research/generated-go-build-cost.md` records77.61% cumulative sampled compiler CPU in ir.Reassigned and a direct-execution lowering candidate. Implement only after matched semantic/cost evidence.
+
 Unswept directories, structural findings, unfinished library contracts, To survey and Carried rows remain. No full architecture-loop completion is claimed.
