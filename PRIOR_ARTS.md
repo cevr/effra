@@ -27,6 +27,20 @@ Owner direction refreshed 2026-10-06: preserve Go-like simplicity, Effect-style 
 
 Application usage is surveyed as generic patterns below. Exact private checkout pointers stay in local research notes; private source is not copied into this public repository. Upstream reference tests retain their own license and provenance and remain distinct from passing Effra tests.
 
+### Refreshed layer usage, 2026-10-06
+
+Source-only comparison; no application tests were executed. Generic findings and adopted differences are in [layer composition](docs/research/layer-composition.md). Versions differ from the Effra runtime pin and do not establish inherited parity.
+
+| Primary source | Immutable pin / inspected paths | Contract pressure |
+| --- | --- | --- |
+| [Server composition](https://github.com/pingdotgg/t3code/blob/17c0878941ab8ab19108fb639c5138d92a89e919/apps/server/src/orchestration-v2/runtimeLayer.ts) | `17c0878941ab8ab19108fb639c5138d92a89e919`, Effect4.0.1 with repository patch; `server.ts`, `persistence/Sqlite.ts`, `ws.ts`, test roots | Repeated provide chains, hidden startup workers/migrations, fresh fixtures and reinjection of application services into connection scopes |
+| Private resource host | `191b9c4c55d4a8b485f74119d7e136e01aaf3af7`, Effect4.0.0 with repository patch; exact source/test pointers retained locally | Bottom-up construction, root acquisition counters, plugin child-scope rollback, compatible-input leases and explicit dynamic precedence |
+| [Contextual infrastructure providers](https://github.com/alchemy-run/alchemy/blob/6d5e6f6001848778dc0f3ab7dcfffc770b8b4a13/packages/alchemy/src/Local/ProviderLayer.ts) | `6d5e6f6001848778dc0f3ab7dcfffc770b8b4a13`, Effect4.0.0; `Stack.ts`, `Util/ConfigProvider.ts`, `Test/Core.ts`, managed HTTP shutdown | Lazy variants, fresh recipes under different captured configuration, explicit shared process owners and request-before-dependency shutdown |
+| [Explicit application graph](https://github.com/anomalyco/opencode/blob/3f393d78bfc3f0826b2c7080e57964c235704695/packages/core/src/effect/layer-node.ts) | `3f393d78bfc3f0826b2c7080e57964c235704695`, Effect4.0.0-beta.83; layer-node tests, location-services and application runtime | Replacement-before-traversal, dependency/cycle checking, parameterized fresh location graphs; reject roots-only outputs and branch-local duplicate-provider policy |
+| [Plugin executor and platform roots](https://github.com/UsefulSoftwareCo/executor/blob/27dccb896fbaf9d1790496d1a8f131b790c89c68/apps/local/src/executor.ts) | Newly added source `27dccb896fbaf9d1790496d1a8f131b790c89c68`, Effect4.0.0-beta.59; SDK/testing and self-host serve roots | Owned versus borrowed database handles, fallible construction after release registration, zero-output finalizers, scoped fresh HTTP test fixtures and honest dynamic plugin contracts |
+
+The infrastructure repository's historical alternate URL resolves to the same commit/tree, not independent corroboration. The explicit graph repository redirects from its older owner. Private local notes retain cache/patch provenance; public examples remain generic.
+
 ## Patterns
 
 | Pattern | Adopted direction | Boundary / receipt |
@@ -38,6 +52,7 @@ Application usage is surveyed as generic patterns below. Exact private checkout 
 | Closed application states | Payload-owning alternatives and exhaustive interpretation | Records, closed ADTs and matching are implemented; external decoding remains proposed |
 | Explicit wire decoding | Static types do not validate stored or incoming data | Codec and migration library remains proposed |
 | Dependent providers | Construction has its own requirements, failures and owner | Configuration and captured dependency values are checked; fallible acquisition, initialization sharing and cycles remain open |
+| Declarative layers | Checked bindings/merges/replacements assemble a lazy graph; provide once at an owner | Owner contract and refreshed source audit adopted; [five-unit implementation](docs/specs/layers.md) remains open |
 | Bounded event delivery | Track items, bytes and in-flight acknowledgement | Streams, queues and delivery budgets remain proposed |
 | Durable command admission | Correlation, transactional receipts and outbox recovery | Application/storage obligations, not a syntax guarantee |
 | Owned tests | Fresh case scope, assertions, completed shutdown and preserved causes | `ef test`, causal latches and scheduler-backed virtual time have shared Go/JS receipts; reusable platform fixtures remain open |
@@ -45,6 +60,8 @@ Application usage is surveyed as generic patterns below. Exact private checkout 
 See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native-showcases.md), [tooling](docs/tooling.md), [testing](docs/testing.md) and [adoption gates](docs/contender-roadmap.md).
 
 ## Settled
+
+- Adopt first-class layer graph assembly from the owner contract and production composition audit. Node identity determines sharing; binding visibility is independent of graph leaves and selected acquisition effects. Replace deliberately before solving effective construction edges. Reject last-writer precedence, roots-only output inference, type/config-equality memoization and constructor-failure erasure: they break **Explicit contracts and clear guardrails** and **Owned lifetimes**. Runtime concurrency/rollback/cleanup remains executable implementation work.
 
 - A canonical shared formatter is required. Inspected Go1.27.0 `go/format` and Gleam `compiler-cli/src/format.rs` at52e735c82d42811dd08d29d5508f564da081fd7d: adopt syntax-only printing and shared check/stdin/write paths, with Effra-specific preservation of line-sensitive lint directives. The shared syntax printer is integrated; CLI/MCP adapters and editor formatting remain open under the [formatting contract](docs/specs/formatting.md).
 
@@ -76,7 +93,7 @@ See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native
 - Validate the adopted Serde/Effect codec design with multiple named wire representations, directional rows, normalization, cancellation and bounded derivation. Source comparison is complete, implementation receipts remain open.
 - Validate adopted Gleam/ReScript/TypeScript compilation patterns with Effra consumer, diagnostic-map and cache-invalidation fixtures; source comparison is complete, implementation and cost receipts remain open.
 - Which finite row and ordinary type-parameter mechanisms express reusable effect combinators without complex conditional-type inference or a compiler operation per combinator?
-- Which provider acquisition/sharing interface makes recipe identity, materialized value identity and allocation ownership obvious at a call site?
+- Validate the adopted [layer contract](docs/specs/layers.md) with causal shared acquisition, compatible input identities, fresh occurrences, replacement changes to rows/cycles, inherited application services, selected hidden startup effects and completed rollback/shutdown. Static source comparisons do not prove runtime behavior.
 - Which codec/endpoint declarations remove duplicate domain/transport signatures while preserving explicit validation and wire policy?
 - Extend structured nominal types and checked matches with codecs, containers and package-qualified identities without whole-program inference.
 - Extend integrated bounded handle-ownership summaries to typed callback results while preserving borrowed outer handles and conservative uncertainty.

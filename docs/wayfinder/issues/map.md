@@ -22,12 +22,16 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 
 Owner update, 2026-10-06: defer benchmark development and measurement until the final phase, and increase independent implementation parallelism. Keep canonical type work, generated output ownership, upstream conformance import/mapping and [LSP diagnostics/document lifecycle](lsp-diagnostics.md) in isolated lanes. Their shared contracts determine integration order; parallel work does not bypass review or dependent feature gates.
 
+Owner update, 2026-10-06: architecture loops must seek useful primitives making Effects explicit, declarative and delightful. Record production ceremony, compare regular alternatives and prove improvements with two unrelated runnable callers, visible contracts and negative controls. First-class layers are the next adopted case; source-only research informs acceptance without certifying runtime behavior.
+
 ## Decisions so far
 
 - [Which production patterns constrain the next foundation contracts?](research-foundations.md): timer scheduling, dependency capture and nested ownership set the foundation acceptance seams.
 - [Bundled standard library capability contracts](stdlib-parity.md): resolved the finite inventory/specification question through pinned source/tests, counsel and generic adoption patterns; implementation remains open in five batches.
 
 ## Additional implementation
+
+- [First-class declarative layers](language-layers.md): owner-directed `service`/`impl`/`layer` composition, inferred provides/raises/uses, checked merges and replacement, identity sharing and owned acquisition. Five gated children cover [static plans](layer-plans.md), [managed acquisition](layer-runtime.md), [fallible/startup construction](layer-construction.md), [plan instances and inherited inputs](layer-instances.md), and [tooling/adoption](layer-tooling.md). Refreshed production source audit adds replacement topology, borrowed services and retained hidden startup nodes; none is claimed implemented yet.
 
 - [Automatic Go host values and standard protocols](host-interop.md): owner-required native declaration reuse, complete results, direct method/interface compatibility and explicit managed borrowing/callback boundaries. Four finite units and source-grounded acceptance are specified; primitive-only imports do not establish these guarantees.
 

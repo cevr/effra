@@ -1,0 +1,4 @@
+<!-- {"id": "layer-runtime", "title": "Scope-owned concurrent layer acquisition and rollback", "status": "open", "labels": ["implementation:task"], "parent": "language-layers", "assignee": null, "blocked_by": ["foundation-testing"]} -->
+# Scope-owned concurrent layer acquisition and rollback
+
+Unit2 of [layers](../../specs/layers.md): independent runtime plan/build seam, pending waiter sharing, build-owned producers, compatible input identities, node scopes, late-success release, full rollback and dependent-first shutdown. Runtime preparation may proceed beside compiler plans with explicit shared interface ownership; integration requires both. Port pinned selected Layer behavior and causal Go/JS tests, with native race checks. Failed builds retain one outcome and retry only through a new build; borrowed resources are not closed. Full gates and review precede closure.

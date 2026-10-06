@@ -1,0 +1,4 @@
+<!-- {"id": "layer-construction", "title": "Fallible provider factories and retained startup effects", "status": "open", "labels": ["implementation:task"], "parent": "language-layers", "assignee": null, "blocked_by": ["layer-plans", "layer-runtime", "native-interfaces"]} -->
+# Fallible provider factories and retained startup effects
+
+Unit3 of [layers](../../specs/layers.md): ordinary checked provider-returning effect factories and startup-only recipe selections. Preserve initialized captures, explicit construction versus operation rows, replacement topology/failure recomputation and selected hidden resource effects. Exercise construction failure plus cleanup defects, cancellation/rollback and ownership escape through returned providers. Extend common canonical interfaces/private summaries instead of public JSON proof or per-provider opcodes. Both-target controls, full gate and review precede closure.

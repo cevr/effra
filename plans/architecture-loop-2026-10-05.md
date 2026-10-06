@@ -2,6 +2,16 @@
 
 Goal: establish the project's north stars and prior arts as the basis for building its glossary and architecture.
 
+## Owner update: useful primitives and first-class layers, 2026-10-06
+
+Every architecture pass now seeks recurring production Effect ceremony that a small regular primitive can express explicitly, declaratively and delightfully. Compare an ordinary library solution, preserve visible execution/failure/service/ownership facts, and prove adoption with two unrelated runnable before/after callers and negative controls. Recorded in NORTH_STAR's new ergonomics sweep; no source sketch counts as implementation.
+
+Refreshed five production application sources through the repository-cache workflow; exact public pins and generic comparisons are in PRIOR_ARTS and [layer research](../docs/research/layer-composition.md), with private pointers retained outside the repo. Source-only audits found explicit application graph/replacement machinery, manual bottom-up wiring, startup nodes without outputs, application-service reinjection, context-sensitive fresh instances and owned/borrowed resource distinctions. No application tests were run. Decided by **Redesign From First Principles**: adopt the owner's first-class graph assembly, not a second hidden provider framework. Reject upstream roots-only exposure, duplicate-provider precedence and failure erasure against explicit-contract/ownership north stars.
+
+Added the [five-unit layer contract](../docs/specs/layers.md) and six open implementation tickets. Runtime and static-plan preparation may proceed independently through one agreed seam; fallible construction then consumes both plus canonical bundled interfaces. Replacements recompute edges/rows before acquisition/cycle checks, explicitly selected hidden startup effects remain, inherited application services are borrowed, and compatible context follows instance identity rather than structural equality. These are specified acceptance cases, not delivered guarantees. Existing HITL decisions remain open; benchmark work remains last; no push.
+
+Integrated callable Unit2 is ce45a63/tree03ed0ab. First exact root gate hit the unchanged60-second generated-Go continuation watchdog; unchanged isolated control also failed, a subsequent trace control passed54.64s and the full exact root retry passed. Retained logs/receipts live at `/tmp/effra-callables-unit2-root-integration-gate.log`, `/tmp/effra-root-long-continuation-stage-trace.log` and `/tmp/effra-callables-unit2-root-integration-gate-recheck.log` (successful SHA58c38df7b3611862e983dfa9bb5a82c212973d87ac490d93a969325b2e9a2570). Host pressure observations do not prove a sole cause or performance improvement; watchdog/source unchanged. All31legacy output nodes verified unchanged. Unit3 compiler-distributed interfaces now execute in an isolated Sol6.1medium lane from that exact gated root; it has not integrated or completed yet.
+
 Scope: establishment and runtime integration receipts. This ledger does not claim a completed architecture sweep or the architecture-loop close rule. Runtime work was developed in the managed-runtime Rift, and current implementation evidence is distinguished from the initial baseline below.
 
 ## Baseline
