@@ -54,7 +54,7 @@ Owner update, 2026-10-06: defer benchmark development and measurement until the 
 
 - [Direct native execution and matched build cost](native-execution-lowering.md): the retained long-body compiler profile motivates a general lowering repair after canonical function contracts, preserving laziness and managed execution while measuring backend cost separately.
 
-- [Isolated owned native generated modules](generated-output-ownership.md): the runtime split exposed a stale-source rebuild failure. Complete per-application generations must precede that integration; unknown files and older outputs remain preserved.
+- [Isolated owned native generated modules](generated-output-ownership.md): completed and integrated at2e23a894 with full gates and independent review. Complete immutable modules preserve legacy/unknown output and validate reuse; this closes the runtime split's output prerequisite, while application reachability remains open.
 
 ## Foundation implementation receipts
 

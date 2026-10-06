@@ -1,4 +1,4 @@
-<!-- {"id": "generated-output-ownership", "title": "Isolated owned native generated modules", "status": "open", "labels": ["implementation:task"], "parent": "binary-reachability", "assignee": "generated_output", "blocked_by": ["foundation-spec"]} -->
+<!-- {"id": "generated-output-ownership", "title": "Isolated owned native generated modules", "status": "closed", "labels": ["implementation:task"], "parent": "binary-reachability", "assignee": "generated_output", "blocked_by": ["foundation-spec"]} -->
 # Isolated owned native generated modules
 
 Prepare the output boundary independently of canonical application reachability. Native builds now publish complete immutable modules under `dist/go/apps/<application-id>/generations/`, while legacy shared `dist/go` files remain untouched. The runtime source split exposed a concrete upgrade failure: the additive writer left the former `stdlib.go` beside its replacement files, producing duplicate declarations. Fresh builds alone do not cover this transition.
@@ -8,3 +8,9 @@ Give generated modules a full source-origin, target and build/test mode identity
 Keep executable output flags and application semantics stable. Preserve import module graphs, warm unchanged builds and Go/JS conformance. Runtime source selection remains all-source until the parent task supplies checked roots; this task does not establish smaller binaries.
 
 Require public old-to-new rebuild, same-basename origins, ordinary/test isolation, unchanged reuse, shrinking source sets, unknown/modified file refusal, interrupted publication and concurrent publication controls. Retain exact generated source sets and raw gate/review receipts. Integrate this boundary before the runtime source split; that split's clean-build gate alone cannot close its upgrade obligation.
+
+## Resolution comments
+
+2026-10-06: implemented in ff625433 and repaired in b86ccf22, independently reviewed through two claude2 rounds and finite Astra closure (`pass1/generated-output-b86-final-closure.md`). Integrated at 2e23a8943215f4e28f07943f8ad1a63616035f94. Complete content-addressed modules have exclusive regular-file commit markers; reuse validates exact ownership, inventory and bytes. Raw output roots follow physical OS path semantics while source admission retains the shared lexical loader policy. Generated native builds disable inherited workspaces and enforce readonly module graphs. Tests cover failed exclusive publication with completed inventory, cleanup/retry, retained orphans/history, concurrent winners and exact unchanged bytes/mtime; no literal SIGKILL or power-loss durability is claimed.
+
+Branch and root full gates passed: `/tmp/effra-generated-output-branch-integration-gate.log` SHA256 f9c0561e83a6110d35973b0ae1a13873c15c7920f25b5b83b67ec7e999525ba5 and `/tmp/effra-generated-output-root-integration-gate.log` SHA256 5a2262722fe8982d6c5153bcb25e127635c034f634871d1d84617bc7519b07a6. Independent preservation check verifies all31 pre-existing native output nodes unchanged, including the retired stdlib source. The runtime split may now integrate; application reachability and size evidence remain open in the parent task.
