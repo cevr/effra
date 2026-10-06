@@ -341,6 +341,9 @@ func (c *checker) checkedDataID(id TypeID, ownership, captures []OwnershipFact) 
 	if node != nil && node.Kind == "provider" {
 		return checkedExpression{value: c.values.provider(id, ownership, captures)}
 	}
+	if node != nil && (node.Kind == "callable" || node.Kind == "recipe" || node.Kind == "providerRecipe" || node.Kind == "fiber") {
+		return checkedExpression{value: c.values.occurrence(id, ownership, captures)}
+	}
 	return checkedExpression{value: c.values.data(id, ownership, captures)}
 }
 
@@ -355,7 +358,10 @@ func (c *checker) checkedProvider(p *Provider, recipe bool) checkedExpression {
 }
 
 func (c *checker) checkedFunction(f *Function, declaration, recipe bool) checkedExpression {
-	result := c.canonicalRef(typeRef(f.Return))
+	result := f.returnID
+	if result == invalidTypeID {
+		result = c.canonicalRef(typeRef(f.Return))
+	}
 	if result == invalidTypeID {
 		result = c.canonicalRef(typeRef("invalid"))
 	}
@@ -376,10 +382,10 @@ func (c *checker) checkedFunction(f *Function, declaration, recipe bool) checked
 	case recipe && f.Effect:
 		checked = c.values.recipe(result, parameters, kind, failure, service, f.Ownership, f.Captures)
 	default:
-		checked = c.values.data(result, f.Ownership, f.Captures)
+		checked = c.values.occurrence(result, f.Ownership, f.Captures)
 	}
 	resultExpression := checkedExpression{value: checked, identity: f.Identity}
-	if declaration || (recipe == false && checked.kind() == checkedCallableValue) {
+	if declaration {
 		resultExpression.callableDecl = f
 	}
 	return resultExpression
@@ -2562,6 +2568,7 @@ func (c *checker) signature(f *Function) {
 		}
 	}
 	valid(f.Return, f.Span)
+	f.returnID = c.canonicalRef(typeRef(f.Return))
 	names := map[string]bool{}
 	for i := range f.Params {
 		p := &f.Params[i]
@@ -2588,6 +2595,9 @@ func (c *checker) signature(f *Function) {
 	}
 }
 func (c *checker) typeKnown(name string) bool {
+	if c.program != nil && c.program.typeExpressions[name] != nil {
+		return c.sourceCallableKnown(c.program.typeExpressions[name])
+	}
 	switch name {
 	case "string", "bool", "()", "i64", "File", "Latch", "bytes", "Handler":
 		return true
@@ -2733,6 +2743,13 @@ func (c *checker) canonicalRef(ref TypeRef) TypeID {
 			return id
 		}
 		return invalidTypeID
+	}
+	if c.program != nil && c.program.typeExpressions[ref.Name] != nil {
+		return c.sourceCallable(c.program.typeExpressions[ref.Name])
+	}
+	if ref.Name == "Handler" {
+		stringID := c.canonicalRef(typeRef("string"))
+		return c.internContract("callable", "effect", stringID, []TypeID{stringID}, emptyRowID, emptyRowID)
 	}
 	argIDs := []TypeID(nil)
 	if !strings.HasPrefix(ref.ID, "legacy:") {
@@ -3147,7 +3164,7 @@ func (c *checker) typeRef(name string) TypeRef {
 
 func (c *checker) sameType(actual checkedExpression, expected string) bool {
 	expectedID := c.canonicalRef(typeRef(expected))
-	return actual.valueID() == expectedID || c.isNeverValue(actual)
+	return c.assignable(actual.valueID(), expectedID, 0)
 }
 
 // handlerCompatible is the one narrow source compatibility relation for the
@@ -3221,6 +3238,9 @@ func (c *checker) sameContract(actual, expected checkedExpression) bool {
 }
 
 func (c *checker) joinContractRows(base, other checkedExpression) checkedExpression {
+	if base.callableDecl != other.callableDecl {
+		base.callableDecl = nil
+	}
 	if !c.sameContract(base, other) {
 		return base
 	}
@@ -3349,6 +3369,7 @@ func publicParams(params []Param) []Param {
 	params = append([]Param{}, params...)
 	for i := range params {
 		params[i].typeID = invalidTypeID
+		params[i].sourceType = nil
 	}
 	return params
 }
@@ -3713,13 +3734,10 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 				c.requireGo(e.Span, "native provider "+p.Service)
 			}
 			e.Text = "provider"
-		} else if f := c.functions[e.Name]; f != nil && f.Effect && f.Return == "string" && len(f.Params) == 1 && f.Params[0].Type == "string" {
-			// The legacy Handler spelling is a source-level compatibility boundary.
-			// Its canonical value remains the complete callable contract, including
-			// carried failures and services; the opaque Handler result only keeps the
-			// old HTTP parameter shape readable.
-			t = c.checkedHandler(f)
-			e.Text = "handler"
+		} else if f := c.functions[e.Name]; f != nil {
+			t = c.checkedFunction(f, true, false)
+			t.setOwnership(nil)
+			e.Text = "function"
 		} else {
 			c.diagnostic("EF102", "unknown value "+e.Name, e.Span)
 		}
@@ -3734,6 +3752,10 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		}
 		if c.fiberCall(e, env, inEffect) {
 			t = e.checked
+			break
+		}
+		if callback, ok := c.callableCall(e, env, inEffect); ok {
+			t = callback
 			break
 		}
 		if e.Left.Kind == "name" {
@@ -3837,7 +3859,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		if f.Effect {
 			t.value = c.values.recipe(t.resultID(), c.functionParameterTypeIDs(f), checkedEffectCallable, failureRow, c.internRow(serviceLabels), t.ownershipFacts(), t.captureFacts())
 		} else {
-			t.value = c.values.data(t.resultID(), t.ownershipFacts(), t.captureFacts())
+			t.value = c.values.occurrence(f.returnID, t.ownershipFacts(), t.captureFacts())
 		}
 		if f.Effect {
 			for i, argument := range argumentTypes {
@@ -4061,6 +4083,9 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			}
 			t.setOwnership(mergeFacts(a.ownershipFacts(), b.ownershipFacts()))
 			t.setCaptures(mergeFacts(a.captureFacts(), b.captureFacts()))
+			if a.callableDecl != b.callableDecl {
+				t.callableDecl = nil
+			}
 		}
 		if a.isEffect() || b.isEffect() {
 			c.diagnostic("EF103", "returning Effect values from branches is not supported in this prototype", e.Span)

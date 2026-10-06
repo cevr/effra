@@ -184,7 +184,7 @@ func goParams(f *Function) string {
 func goParamsList(params []Param) string {
 	parts := []string{}
 	for _, p := range params {
-		parts = append(parts, "efLocal_"+p.Name+" "+goType(p.Type))
+		parts = append(parts, "efLocal_"+p.Name+" "+goSourceType(p.sourceType, p.Type))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -198,9 +198,9 @@ func goArgs(f *Function) string {
 func goMethodType(f *Function) string {
 	types := []string{}
 	for _, p := range f.Params {
-		types = append(types, goType(p.Type))
+		types = append(types, goSourceType(p.sourceType, p.Type))
 	}
-	return "func(" + strings.Join(types, ", ") + ") efEffect[" + goType(f.Return) + "]"
+	return "func(" + strings.Join(types, ", ") + ") efEffect[" + goSourceType(f.returnType, f.Return) + "]"
 }
 func (g *goEmitter) temp() string { g.next++; return fmt.Sprintf("efTemp%d", g.next) }
 
@@ -258,8 +258,9 @@ func efCancel[A any](fiber *er.Fiber[A])efEffect[struct{}]{return efFromRuntime(
 		out.WriteString("func efProvide_" + s.Name + "[A any](program efEffect[A], provider efService_" + s.Name + ") efEffect[A] { return func(ctx efContext) efExit[A] {")
 		out.WriteString("ctx.s_" + s.Name + " = &provider; return program(ctx) } }\n")
 		for _, m := range s.Methods {
-			out.WriteString("func efCall_" + s.Name + "_" + m.Name + "(" + goParams(m) + ") efEffect[" + goType(m.Return) + "] { return func(ctx efContext) efExit[" + goType(m.Return) + "] {\n")
-			out.WriteString("if ctx.s_" + s.Name + " == nil || ctx.s_" + s.Name + ".m_" + m.Name + " == nil { return efExit[" + goType(m.Return) + "]{Defect:fmt.Errorf(" + strconv.Quote("missing provider "+s.Name+"."+m.Name) + ")} }\n")
+			result := goSourceType(m.returnType, m.Return)
+			out.WriteString("func efCall_" + s.Name + "_" + m.Name + "(" + goParams(m) + ") efEffect[" + result + "] { return func(ctx efContext) efExit[" + result + "] {\n")
+			out.WriteString("if ctx.s_" + s.Name + " == nil || ctx.s_" + s.Name + ".m_" + m.Name + " == nil { return efExit[" + result + "]{Defect:fmt.Errorf(" + strconv.Quote("missing provider "+s.Name+"."+m.Name) + ")} }\n")
 			out.WriteString("return ctx.s_" + s.Name + ".m_" + m.Name + "(" + goArgs(m) + ")(ctx)\n} }\n")
 		}
 	}
@@ -289,13 +290,13 @@ func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(addres
 		out.WriteString("} }\n")
 	}
 	for _, f := range r.Program.Functions {
-		ret := goType(f.Return)
+		ret := goSourceType(f.returnType, f.Return)
 		if f.Effect {
 			ret = "efEffect[" + ret + "]"
 		}
 		out.WriteString("func efFunction_" + f.Name + "(" + goParams(f) + ") " + ret + " {\n")
 		if f.Effect {
-			out.WriteString("return func(ctx efContext) efExit[" + goType(f.Return) + "] {\nif err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + goType(f.Return) + "](err)}\n")
+			out.WriteString("return func(ctx efContext) efExit[" + goSourceType(f.returnType, f.Return) + "] {\nif err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + goSourceType(f.returnType, f.Return) + "](err)}\n")
 		}
 		out.WriteString(g.block(f.Body, f.Effect, f.Return))
 		if f.Effect {
@@ -311,7 +312,7 @@ func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(addres
 				break
 			}
 		}
-		out.WriteString("func main() { base,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop();exit:=er.RunContext(base,func(fc *er.FiberContext) er.Exit[" + goType(mainReturn) + "]{return efFunction_main()(efContext{Runtime:fc})});if exit.IsFailure(){fmt.Fprintln(os.Stderr,exit.Cause());os.Exit(1)}\n")
+		out.WriteString("func main() { base,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop();exit:=er.RunContext(base,func(fc *er.FiberContext) er.Exit[" + goSourceType(r.Program.typeExpressions[mainReturn], mainReturn) + "]{return efFunction_main()(efContext{Runtime:fc})});if exit.IsFailure(){fmt.Fprintln(os.Stderr,exit.Cause());os.Exit(1)}\n")
 		if mainReturn != "()" {
 			out.WriteString("fmt.Println(exit.Value)\n")
 		}
@@ -330,14 +331,14 @@ func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(addres
 	return string(formatted), nil
 }
 func (g *goEmitter) function(f *Function) string {
-	ret := goType(f.Return)
+	ret := goSourceType(f.returnType, f.Return)
 	if f.Effect {
 		ret = "efEffect[" + ret + "]"
 	}
 	open := "func(" + goParams(f) + ") " + ret + " {\n"
 	close := "}\n"
 	if f.Effect {
-		open += "return func(ctx efContext) efExit[" + goType(f.Return) + "] {\nif err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + goType(f.Return) + "](err)}\n"
+		open += "return func(ctx efContext) efExit[" + goSourceType(f.returnType, f.Return) + "] {\nif err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + goSourceType(f.returnType, f.Return) + "](err)}\n"
 		close = "}\n}\n"
 	}
 	return open + g.block(f.Body, f.Effect, f.Return) + close
@@ -376,7 +377,7 @@ func (g *goEmitter) providerConstructor(p *Provider) string {
 // invocation context. The Runtime pointer (and therefore cancellation,
 // scope, owner and fiber state) is copied from the current invocation.
 func (g *goEmitter) providerMethod(f *Function, captures []string) string {
-	ret := goType(f.Return)
+	ret := goSourceType(f.returnType, f.Return)
 	var out strings.Builder
 	out.WriteString("func(" + goParams(f) + ") efEffect[" + ret + "] {\nreturn func(ctx efContext) efExit[" + ret + "] {\n")
 	for _, service := range normalized(captures) {
@@ -394,7 +395,7 @@ func (g *goEmitter) failedType(name, ret string) string {
 	return "if " + name + ".IsFailure(){return er.Propagate[" + ret + "](" + name + ")}\n"
 }
 func (g *goEmitter) block(b *Block, effect bool, ret string) string {
-	return g.blockType(b, effect, goType(ret))
+	return g.blockType(b, effect, goSourceType(g.program.typeExpressions[ret], ret))
 }
 func (g *goEmitter) blockType(b *Block, effect bool, ret string) string {
 	var out strings.Builder
@@ -464,7 +465,7 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 	case "construct":
 		return g.construct(e, effect, ret, out)
 	case "name":
-		if e.Text == "handler" {
+		if e.Text == "function" {
 			return "efFunction_" + e.Name
 		}
 		if e.Text == "provider" {
@@ -494,6 +495,19 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 		right := g.expr(e.Right, effect, ret, out)
 		return "efTimeout(" + name + ", " + right + ")"
 	case "call":
+		if e.Text == "callable" {
+			callee := g.expr(e.Left, effect, ret, out)
+			name := g.temp()
+			out.WriteString(name + " := " + callee + "\n")
+			args := []string{}
+			for _, arg := range e.Args {
+				value := g.expr(arg, effect, ret, out)
+				local := g.temp()
+				out.WriteString(local + " := " + value + "\n")
+				args = append(args, local)
+			}
+			return name + "(" + strings.Join(args, ", ") + ")"
+		}
 		if e.Text == "data" {
 			return g.constructCall(e, effect, ret, out)
 		}
@@ -571,7 +585,7 @@ func (g *goEmitter) dataTypes(out *strings.Builder) {
 		case "record", "error":
 			out.WriteString("type efType_" + goIdent(declaration.Name) + " struct {\n")
 			for _, field := range declaration.Fields {
-				out.WriteString(goFieldName(field.Name) + " " + goType(field.Type) + "\n")
+				out.WriteString(goFieldName(field.Name) + " " + goSourceType(field.sourceType, field.Type) + "\n")
 			}
 			out.WriteString("}\n")
 		case "enum":
@@ -579,7 +593,7 @@ func (g *goEmitter) dataTypes(out *strings.Builder) {
 			for _, variant := range declaration.Variants {
 				out.WriteString("type " + goVariantType(declaration.Name, variant.Name) + " struct {\n")
 				for _, field := range variant.Fields {
-					out.WriteString(goFieldName(field.Name) + " " + goType(field.Type) + "\n")
+					out.WriteString(goFieldName(field.Name) + " " + goSourceType(field.sourceType, field.Type) + "\n")
 				}
 				out.WriteString("}\nfunc (" + goVariantType(declaration.Name, variant.Name) + ") efVariant_" + goIdent(declaration.Name) + "() {}\n")
 			}
