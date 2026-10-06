@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -598,10 +597,42 @@ effect fn main() -> string { let value = Data { first: "x", second: "y" }; take(
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := normalizedSyntaxJSON(t, source)
-	got := normalizedSyntaxJSON(t, result.Text)
-	if got != want {
-		t.Fatalf("full syntax tree changed:\nwant=%s\ngot=%s", want, got)
+	want := parsedSyntaxTree(t, source)
+	got := parsedSyntaxTree(t, result.Text)
+	if !equalSyntaxTrees(got, want) {
+		t.Fatal("full syntax tree changed")
+	}
+}
+
+func TestFormatFullSyntaxComparisonPreservesHiddenFieldsAndAliases(t *testing.T) {
+	source := `enum State { Idle() }
+effect fn main() -> () { () }`
+	for _, field := range []string{"Parenthesized", "Explicit"} {
+		t.Run(field, func(t *testing.T) {
+			original := parsedSyntaxTree(t, source)
+			changed := parsedSyntaxTree(t, source)
+			if !equalSyntaxTrees(original, changed) {
+				t.Fatal("identical parsed trees compare unequal")
+			}
+			if field == "Parenthesized" {
+				variant := &changed.Enums[0].Variants[0]
+				variant.Parenthesized = !variant.Parenthesized
+			} else {
+				body := changed.Functions[0].Body
+				body.Explicit = !body.Explicit
+			}
+			if equalSyntaxTrees(original, changed) {
+				t.Fatalf("comparison lost %s", field)
+			}
+		})
+	}
+
+	// Named arguments are shared through Args and Fields. Compare the complete
+	// parsed graph without expanding that sharing into an exponential JSON tree.
+	deep := nestedNamedCallSource(40)
+	formatted := mustFormat(t, deep)
+	if !equalSyntaxTrees(parsedSyntaxTree(t, deep), parsedSyntaxTree(t, formatted)) {
+		t.Fatal("formatting changed the aliased syntax graph")
 	}
 }
 
@@ -667,19 +698,23 @@ type syntaxPointer struct {
 	value  uintptr
 }
 
-func normalizedSyntaxJSON(t *testing.T, source string) string {
+func parsedSyntaxTree(t *testing.T, source string) *Program {
 	t.Helper()
 	program, _, diagnostics := parseSyntax(source)
 	if len(diagnostics) != 0 {
 		t.Fatalf("source did not parse: %+v", diagnostics)
 	}
-	program.Comments = nil
-	normalizeSyntaxValue(reflect.ValueOf(program), map[syntaxPointer]bool{})
-	encoded, err := json.Marshal(program)
-	if err != nil {
-		t.Fatal(err)
+	return program
+}
+
+func equalSyntaxTrees(left, right *Program) bool {
+	for _, program := range []*Program{left, right} {
+		program.Comments = nil
+		normalizeSyntaxValue(reflect.ValueOf(program), map[syntaxPointer]bool{})
 	}
-	return string(encoded)
+	// DeepEqual memoizes compared pointer pairs, retaining all structural fields
+	// and shared aliases. Comments have their own ordered preservation oracle.
+	return reflect.DeepEqual(left, right)
 }
 
 func normalizeSyntaxValue(value reflect.Value, seen map[syntaxPointer]bool) {
@@ -915,6 +950,20 @@ func BenchmarkFormatDeepNamedCall(b *testing.B) {
 func BenchmarkFormatLongBinary(b *testing.B) {
 	source := `effect fn main() -> i64 { ` + strings.Repeat("1 + ", 10000) + "1 }"
 	b.Logf("source_bytes=%d terms=%d", len(source), 10001)
+	b.SetBytes(int64(len(source)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		if _, err := FormatSource(source); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkFormatLongFluentChain(b *testing.B) {
+	const calls = 10000
+	source := "effect fn main() -> () {\nrun task()\n" + strings.Repeat(".provide<Console>(Stdout)\n", calls) + "}\n"
+	b.Logf("source_bytes=%d fluent_calls=%d", len(source), calls)
 	b.SetBytes(int64(len(source)))
 	b.ReportAllocs()
 	b.ResetTimer()
