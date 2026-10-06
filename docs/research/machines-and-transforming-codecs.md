@@ -18,6 +18,8 @@ Keep timers as ordinary Clock work. Keep expected work failures as explicit outc
 
 The original counsel proposed pure-only step/completion. The owner explicitly superseded that restriction: effectful decisions are supported, with serialized owned evaluation and explicit rows. Failed evaluation does not commit state; it still cannot undo external effects. Pure stepping remains available. Neither graph construction nor runtime inspection evaluates an effectful condition.
 
+Focused effectful-step counsel clarifies evaluation cleanup before entry cleanup and commit, pure enter construction, call-local failure attribution, non-draining stop and nonblocking snapshots. These are Effra contracts requiring direct tests; XState v6's synchronous transitions and Effect Machine's recovered handler error channel do not establish them. Adopt the actor size fixture and shared runtime loop. Reject a bounded propagated call chain as a general deadlock guarantee: independently initiated mutual waits need more than causal ancestry. Retain alias-aware self-wait detection in the first profile and expose cross-actor cycle limits. Also qualify the proposed removal of Clock/Scheduler: necessary core scheduling remains a legitimate runtime dependency, while unused platform adapters stay absent. Decided by explicit contracts, measured evidence and Go-like local readability.
+
 The [machine specification](../specs/state-machines.md) owns the exact supported profile. Hierarchy, parallel regions and durable execution are outside its first slice. A serializable state value does not establish durable workflow semantics.
 
 ## Codecs
