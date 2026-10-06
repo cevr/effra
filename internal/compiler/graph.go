@@ -22,19 +22,23 @@ type GraphEdge struct {
 	Span    Span   `json:"span"`
 }
 type DependencyGraph struct {
-	SchemaVersion          int              `json:"schemaVersion"`
-	Revision               string           `json:"revision"`
-	Target                 string           `json:"target"`
-	Nodes                  []GraphNode      `json:"nodes"`
-	Edges                  []GraphEdge      `json:"edges"`
-	Types                  []TypeNode       `json:"types,omitempty"`
-	Rows                   []RowNode        `json:"rows,omitempty"`
-	Declarations           []Declaration    `json:"declarations,omitempty"`
-	TypeProjectionLimits   ProjectionLimits `json:"typeProjectionLimits"`
-	TypeProjectionUsage    ProjectionUsage  `json:"typeProjectionUsage"`
-	TypeProjectionComplete bool             `json:"typeProjectionComplete"`
-	TypeProjectionError    string           `json:"typeProjectionError,omitempty"`
-	Limitations            []string         `json:"limitations"`
+	ProducerIdentity       string                 `json:"producerIdentity"`
+	Sources                []SourceInfo           `json:"sources"`
+	BundledBindings        []BundledBinding       `json:"bundledBindings"`
+	BundledInterfaces      []BundledInterfaceInfo `json:"bundledInterfaces"`
+	SchemaVersion          int                    `json:"schemaVersion"`
+	Revision               string                 `json:"revision"`
+	Target                 string                 `json:"target"`
+	Nodes                  []GraphNode            `json:"nodes"`
+	Edges                  []GraphEdge            `json:"edges"`
+	Types                  []TypeNode             `json:"types,omitempty"`
+	Rows                   []RowNode              `json:"rows,omitempty"`
+	Declarations           []Declaration          `json:"declarations,omitempty"`
+	TypeProjectionLimits   ProjectionLimits       `json:"typeProjectionLimits"`
+	TypeProjectionUsage    ProjectionUsage        `json:"typeProjectionUsage"`
+	TypeProjectionComplete bool                   `json:"typeProjectionComplete"`
+	TypeProjectionError    string                 `json:"typeProjectionError,omitempty"`
+	Limitations            []string               `json:"limitations"`
 }
 
 type providerBinding struct {
@@ -54,6 +58,9 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		return nil, fmt.Errorf("dependency graph exceeds %d nodes; use selected inspection", maxGraphNodes)
 	}
 	g := &DependencyGraph{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Nodes: []GraphNode{}, Edges: []GraphEdge{}, Limitations: []string{"single-file static graph; includes deferred recipe construction, not execution order", "provider recipes and explicit value identities are represented without general memoized acquisition; fallible acquisition, lifecycle-safe arbitrary capture and cycle solving are not implemented", "node IDs containing offsets are scoped to the semantic revision"}}
+	g.ProducerIdentity, g.Sources = r.ProducerIdentity, append([]SourceInfo{}, r.Sources...)
+	g.BundledBindings = append([]BundledBinding{}, r.BundledBindings...)
+	g.BundledInterfaces = append([]BundledInterfaceInfo{}, r.BundledInterfaces...)
 	nodes := map[string]bool{}
 	var graphErr error
 	metadataBytes := 0
@@ -132,7 +139,18 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			g.Nodes[len(g.Nodes)-1].Source = s.Source
 		}
 		for _, req := range s.Contract.Services {
-			edge("function:"+s.Name, "service:"+req, "requires", req, s.Span)
+			if parameter, abstract := r.projector.rowDefinitions[req]; abstract {
+				add(req, "row-parameter", parameter.Name, parameter.Span, nil)
+				for i := range g.Nodes {
+					if g.Nodes[i].ID == req {
+						g.Nodes[i].Source = s.Source
+						break
+					}
+				}
+				edge("function:"+s.Name, req, "requires", "", s.Span)
+			} else {
+				edge("function:"+s.Name, "service:"+req, "requires", req, s.Span)
+			}
 		}
 	}
 	providerOrigins := map[*Expr]providerBinding{}
@@ -210,6 +228,15 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			}
 			if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && nodes["service:"+e.Left.Left.Name] {
 				edge(id, "service:"+e.Left.Left.Name, "calls", e.Left.Left.Name, e.Span)
+			}
+		}
+		if f := e.ResolvedFunction; f != nil && e.Kind != "call" {
+			name := f.Name
+			if f.Module != "" && f.Module != currentModuleIdentity {
+				name = f.Module + "." + f.Name
+			}
+			if nodes["function:"+name] {
+				edge(id, "function:"+name, "references", "", e.Span)
 			}
 		}
 		return id

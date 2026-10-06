@@ -407,10 +407,14 @@ func (r *Result) ValidateProjectionResponse(projection TypeProjection, envelope 
 		metadata = fields
 	case *DependencyGraph:
 		metadata = struct {
-			Nodes        []GraphNode
-			Edges        []GraphEdge
-			Declarations []Declaration
-		}{value.Nodes, value.Edges, value.Declarations}
+			Nodes             []GraphNode
+			Edges             []GraphEdge
+			Declarations      []Declaration
+			ProducerIdentity  string
+			Sources           []SourceInfo
+			BundledBindings   []BundledBinding
+			BundledInterfaces []BundledInterfaceInfo
+		}{value.Nodes, value.Edges, value.Declarations, value.ProducerIdentity, value.Sources, value.BundledBindings, value.BundledInterfaces}
 	}
 	bytes, err := encodedSize(metadata, projection.Limits.CompatibilityBytes)
 	if projection.Complete || bytes > usage.CompatibilityBytes {

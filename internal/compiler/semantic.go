@@ -4712,8 +4712,19 @@ func (r *Result) Find(name string) *Symbol {
 	return nil
 }
 func (r *Result) FindDeclaration(name string) *Declaration {
+	identity := name
+	if alias, member, qualified := strings.Cut(name, "."); qualified && r.Program != nil {
+		if template := r.Program.BundledTypeBindings[alias][member]; template != nil {
+			identity = template.Identity
+		}
+	}
 	for i := range r.Declarations {
-		if r.Declarations[i].Name == name {
+		if r.Declarations[i].Identity == identity {
+			return &r.Declarations[i]
+		}
+	}
+	for i := range r.Declarations {
+		if r.Declarations[i].Name == name && r.Declarations[i].Source == "" {
 			return &r.Declarations[i]
 		}
 	}

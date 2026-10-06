@@ -163,13 +163,25 @@ func TestBundledEmissionNamespaceCannotCollideWithUserNames(t *testing.T) {
 }
 
 func TestBundledNativeExecution(t *testing.T) {
-	for _, fixture := range []struct{ source, output string }{{bundledGreeting, "Hello, Ada\n"}, {bundledConfiguration, "configured:port\n"}, {`import Fns "effra/functions" effect fn keep(file:File)->File{file} effect fn outer(file:File)->File{scope {run Fns.forwardFile(keep,file)}} effect fn main()->string{"managed ready"}`, "managed ready\n"}} {
+	for _, fixture := range []struct{ source, output string }{{bundledGreeting, "Hello, Ada\n"}, {bundledConfiguration, "configured:port\n"}, {`import Fns "effra/functions"
+effect fn keep(file: File) -> File { file }
+effect fn outer(file: File) -> File { scope { run Fns.forwardFile(keep, file) } }
+effect fn main() -> string raises {IoError} {
+ scope {
+  let file = run Files.openRead("fixture.txt").provide<Files>(LiveFiles)
+  let borrowed = run outer(file)
+  run Files.readText(borrowed).provide<Files>(LiveFiles)
+ }
+}`, "live forwarded file\n"}} {
 		r := Compile(fixture.source)
 		source, err := r.EmitGo()
 		if err != nil {
 			t.Fatal(err, r.Diagnostics)
 		}
 		dir := t.TempDir()
+		if err = os.WriteFile(filepath.Join(dir, "fixture.txt"), []byte("live forwarded file"), 0644); err != nil {
+			t.Fatal(err)
+		}
 		if err = WriteRuntime(dir); err != nil {
 			t.Fatal(err)
 		}
@@ -183,7 +195,9 @@ func TestBundledNativeExecution(t *testing.T) {
 		if output, err := runGoCommand(dir, "build", "-o", binary, "."); err != nil {
 			t.Fatalf("%v\n%s", err, output)
 		}
-		if output, err := exec.Command(binary).CombinedOutput(); err != nil || string(output) != fixture.output {
+		command := exec.Command(binary)
+		command.Dir = dir
+		if output, err := command.CombinedOutput(); err != nil || string(output) != fixture.output {
 			t.Fatalf("%v\n%s", err, output)
 		}
 	}
