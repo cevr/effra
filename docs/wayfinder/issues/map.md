@@ -26,6 +26,8 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 
 ## Additional implementation
 
+- [Bound shared syntax traversal](syntax-traversal.md): visit aliased argument/field children once so nested data does not stall lint, diagnostics, graph or test admission. This finite follow-up is assigned with the formatter's shared syntax repair.
+
 - [Canonical formatter](formatter.md), followed by [editor formatting](editor-formatting.md): one comment-preserving printer for `ef fmt`, CI checks and revision-bound MCP/LSP previews, independent of typechecking and backend execution.
 
 - [Versioned custom lint rules and shared rule packs](custom-lint.md): user-authored policies consume canonical facts and report through CLI/MCP/LSP, with options, source-fixture tests and optional bounded execution independent of ordinary compilation.
@@ -45,6 +47,8 @@ Use upstream implementation/test evidence, real usage, independent counsel and m
 - [Reusable generic data and product matching](generic-data.md), followed by [payload-aware recovery](effect-recovery.md): ordinary Option/Result, finite generic data, exhaustive state/event decisions and typed outcome conversion shared by codecs and machines.
 
 - [Reachable runtime modules and small executable receipts](binary-reachability.md): small binaries with unused standard-library facilities excluded, including through fluent APIs; module/import/symbol and raw size evidence accompany implementation.
+
+- [Direct native execution and matched build cost](native-execution-lowering.md): the retained long-body compiler profile motivates a general lowering repair after canonical function contracts, preserving laziness and managed execution while measuring backend cost separately.
 
 ## Foundation implementation receipts
 

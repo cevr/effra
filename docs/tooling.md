@@ -70,7 +70,7 @@ MCP limits graphs to 1,000 nodes and 2,000 edges; larger graphs fail explicitly.
 
 ## Next capabilities
 
-Canonical comment-preserving formatting, revision-bound checked edit plans, multi-file identities, editor integration, ownership provenance and runtime/source correlation remain planned. Compiler errors stay independent of optional style policy. A future test clock must share a scheduler with sleep/deadline primitives.
+Canonical comment-preserving formatting, revision-bound checked edit plans, multi-file identities, editor integration, ownership provenance and runtime/source correlation remain planned. Compiler errors stay independent of optional style policy. Managed test time already shares scheduling with sleep/deadline primitives; see the [testing contract](testing.md) for its supported causal boundaries and foreign-operation limits.
 
 ## Performance receipt
 

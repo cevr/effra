@@ -10,6 +10,8 @@ CLI/MCP disk queries report the disk snapshot. The LSP adapter checks its explic
 
 Analysis produces reusable facts; adapters do not reimplement checking, infer rows from display strings, or invoke another adapter's process. Standalone builds do not pay for a persistent language server, full type expansion or editor indexing.
 
+Shared syntax traversal visits structural children once, even when named arguments or checked constructor fields reference the same expression. Scope-sensitive consumers retain their own lexical handling; deduplication must not skip real capabilities or findings. A small valid nested-data source must not trigger exponential work in lint, diagnostics, graph or test admission. Exercise real CLI/MCP completion and queued-request responsiveness, not just frontend timing or a source-byte limit.
+
 ## Diagnostics
 
 Add `ef diagnostics FILE [--target go|js] [--strict] [--json]` and MCP `project.diagnostics`. Both use one report that combines compiler diagnostics and semantic lint advice without duplicates. Preserve existing check/lint APIs and their admission semantics.
