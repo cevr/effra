@@ -240,7 +240,10 @@ func jsProviderConstructor(p *Provider) string {
 		}
 		methods = append(methods, "["+quoted(method.Name)+"]: "+implementation)
 	}
-	body := "Effect.succeed({" + strings.Join(methods, ", ") + "})"
+	// Allocate the provider object at execution time. A constructor call is a
+	// lazy recipe, so replaying one recipe must materialize a fresh value each
+	// time it runs, even when it captures no service context.
+	body := "Effect.sync(() => ({" + strings.Join(methods, ", ") + "}))"
 	for i := len(normalized(p.Services)) - 1; i >= 0; i-- {
 		service := normalized(p.Services)[i]
 		body = "Effect.flatMap(__ef_service_" + service + ", __ef_capture_" + service + " => " + body + ")"

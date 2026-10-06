@@ -93,6 +93,7 @@ func TestProviderInvocationUsesCurrentOwnerAndCancellation(t *testing.T) {
   })
   if out.IsFailure() { t.Fatal(out.Cause()) }
 }
+
 `),
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
@@ -139,6 +140,29 @@ console.log(value);
 `)
 	if outputJS != "A: A\n" {
 		t.Fatalf("JS provider capture: %q", outputJS)
+	}
+}
+
+func TestConfigOnlyProviderRecipeMaterializesFreshJSValues(t *testing.T) {
+	source := `service Greeting { effect fn hello(id: string) -> string }
+impl Configured(prefix: string) for Greeting {
+ effect fn hello(id: string) -> string { prefix + id }
+}
+effect fn main() -> string {
+ let recipe = Configured("cfg: ")
+ let greeting = run recipe
+ run Greeting.hello("42").provide<Greeting>(greeting)
+}`
+	output := runJS(t, source, `
+const recipe = __ef_provider_Configured("cfg: ");
+const first = await Effect.runPromise(recipe);
+const second = await Effect.runPromise(recipe);
+if (first === second) throw new Error("replaying a provider recipe reused its materialized object");
+const result = await Effect.runPromise(Effect.provideService(__ef_call(__ef_service_Greeting, "hello", ["42"]), __ef_service_Greeting, first));
+if (result !== "cfg: 42") throw new Error("config-only provider invocation failed: " + result);
+`)
+	if output != "" {
+		t.Fatalf("config-only provider identity: %q", output)
 	}
 }
 
@@ -209,6 +233,69 @@ func TestProviderGraphShowsConstructionAndProvisionEdges(t *testing.T) {
 	}
 	if !provision {
 		t.Fatal("missing provider value provision edge")
+	}
+	var recipeID, valueID string
+	for _, node := range graph.Nodes {
+		switch node.Kind {
+		case "provider-recipe":
+			if node.Name == "Prefixed" {
+				recipeID = node.ID
+			}
+		case "provider-value":
+			if node.Name == "Greeting" {
+				valueID = node.ID
+			}
+		}
+	}
+	if recipeID == "" || valueID == "" {
+		t.Fatalf("missing provider origin nodes: recipe=%q value=%q", recipeID, valueID)
+	}
+	originEdges := map[string]bool{
+		recipeID + "->provider:Prefixed:originates": false,
+		valueID + "->" + recipeID + ":originates":   false,
+	}
+	for _, edge := range graph.Edges {
+		key := edge.From + "->" + edge.To + ":" + edge.Kind
+		if _, ok := originEdges[key]; ok {
+			originEdges[key] = true
+		}
+	}
+	for edge, present := range originEdges {
+		if !present {
+			t.Fatalf("missing provider origin edge %s", edge)
+		}
+	}
+}
+
+func TestConfigOnlyProviderGraphExposesIncomingDependents(t *testing.T) {
+	source := `service Greeting { effect fn hello(id: string) -> string }
+impl Configured(prefix: string) for Greeting {
+ effect fn hello(id: string) -> string { prefix + id }
+}
+effect fn main() -> string {
+ let recipe = Configured("cfg: ")
+ let greeting = run recipe
+ run Greeting.hello("42").provide<Greeting>(greeting)
+}`
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	graph, err := r.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var configured GraphNode
+	for _, node := range graph.Nodes {
+		if node.ID == "provider:Configured" {
+			configured = node
+		}
+	}
+	if configured.ID == "" || len(configured.Incoming) == 0 {
+		t.Fatalf("configured provider lost constructor dependents: %+v", configured)
+	}
+	if len(configured.Incoming) != 1 || !strings.HasPrefix(configured.Incoming[0], "provider-recipe:") {
+		t.Fatalf("configured provider incoming should identify its constructor recipe: %+v", configured.Incoming)
 	}
 }
 

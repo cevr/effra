@@ -112,6 +112,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			add(recipe, "provider-recipe", e.Left.Name, e.Span, &t)
 			providerOrigins[e] = providerBinding{id: recipe, recipe: true}
 			edge(id, recipe, "constructs", e.Left.Name, e.Span)
+			edge(recipe, "provider:"+e.Left.Name, "originates", "", e.Span)
 		}
 		if e.Kind == "run" && strings.HasPrefix(e.Type.Success, "provider:") {
 			if recipe, ok := providerOrigin(e.Left, locals, providerOrigins, nodes); ok && recipe.recipe {
@@ -126,6 +127,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 				add(provider, "provider-value", strings.TrimPrefix(e.Type.Success, "provider:"), e.Span, &t)
 				providerOrigins[e] = providerBinding{id: provider}
 				edge(id, provider, "materializes", strings.TrimPrefix(e.Type.Success, "provider:"), e.Span)
+				edge(provider, recipe.id, "originates", "", e.Span)
 			}
 		}
 		if e.Kind == "provide" {

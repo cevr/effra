@@ -43,7 +43,7 @@ ef query examples/latest-task.ef "$OFFSET"
 
 ## Dependencies and dependents
 
-Graph nodes represent functions, nominal services, providers, provider methods, provider recipes, materialized provider values and lexical effect expressions. Edges include `requires`, `implements`, `calls`, `contains`, `adapts`, `materializes` and `provides`. Incoming edges identify dependents. Canonical contracts appear on function/expression nodes.
+Graph nodes represent functions, nominal services, providers, provider methods, provider recipes, materialized provider values and lexical effect expressions. Edges include `requires`, `implements`, `calls`, `contains`, `adapts`, `materializes`, `originates` and `provides`. Incoming edges identify dependents. Canonical contracts appear on function/expression nodes.
 
 For `examples/workflow.ef`, `welcome` requires `Directory`; `DemoDirectory` implements it; a provision expression adapts the receiver and supplies that provider. The receiver keeps its original contract while the provision node shows the remaining requirements. Explicit configured or dependency-capturing provider constructors appear as lazy recipes; each `run` materializes a provider value, while aliases of a materialized value retain its identity.
 
