@@ -113,10 +113,25 @@ const __ef_makeTestHarness=()=>{
     if(now>Number.MAX_SAFE_INTEGER-ms)return Effect.die(new Error('test scheduler time overflow'));
     const target=now+ms;
     return Effect.gen(function*(){
+      // Admit queued managed fibers before observing the first deadline. The
+      // dispatcher is the JS equivalent of the Go scheduler's admission
+      // reservation; without this flush an unstarted fork can register its
+      // timer after the controller has committed the target.
+      yield* flush;
       observed=registrations;
       while(true){
+        // Each selection is made only after queued managed continuations have
+        // had a turn to register their next wait.
+        yield* flush;
         const next=timers[0];
-        if(next===undefined||next.deadline>target){now=target;return;}
+        if(next===undefined||next.deadline>target){
+          // A flush can itself enqueue a timer. Recheck before committing the
+          // target so a managed continuation cannot miss an in-range wake.
+          yield* flush;
+          const afterFlush=timers[0];
+          if(afterFlush!==undefined&&afterFlush.deadline<=target)continue;
+          now=target;return;
+        }
         now=next.deadline;
         const due=[];
         while(timers[0]!==undefined&&timers[0].deadline<=now)due.push(timers.shift());

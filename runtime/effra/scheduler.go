@@ -43,20 +43,57 @@ func (t *liveTimer) acknowledge()        {}
 // intermediate deadlines. Managed fibers yield the scheduler turn while they
 // wait, so adjustment does not depend on runtime.Gosched or wall-clock sleeps.
 type TestScheduler struct {
-	mu            sync.Mutex
-	adjustMu      sync.Mutex
-	now           int64
-	nextSequence  uint64
-	closed        bool
-	timers        map[*virtualTimer]struct{}
-	registered    uint64
-	observed      uint64
-	registration  chan struct{}
-	turn          chan struct{}
-	stateChanged  chan struct{}
-	active        int
-	pendingWakes  int
+	mu           sync.Mutex
+	adjustMu     sync.Mutex
+	now          int64
+	nextSequence uint64
+	closed       bool
+	timers       map[*virtualTimer]struct{}
+	registered   uint64
+	observed     uint64
+	registration chan struct{}
+	turn         chan struct{}
+	stateChanged chan struct{}
+	active       int
+	pendingWakes int
+	// continuations counts only runnable cleanup/publication boundaries. A
+	// boundary parked on a registered managed wait is represented by the same
+	// token but is omitted from this count, so partial adjustment can reach the
+	// wait's deadline.
 	continuations int
+}
+
+type continuationState uint8
+
+const (
+	continuationRunnable continuationState = iota
+	continuationParked
+	continuationComplete
+)
+
+// schedulerContinuation identifies a managed cleanup/publication boundary
+// across a nested RunContextWithScheduler call. Its state is read and changed
+// under the owning TestScheduler's mutex.
+type schedulerContinuation struct {
+	scheduler *TestScheduler
+	state     continuationState
+}
+
+type schedulerContinuationContextKey struct{}
+
+func withSchedulerContinuation(ctx context.Context, continuation *schedulerContinuation) context.Context {
+	if continuation == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, schedulerContinuationContextKey{}, continuation)
+}
+
+func schedulerContinuationFromContext(ctx context.Context) *schedulerContinuation {
+	if ctx == nil {
+		return nil
+	}
+	continuation, _ := ctx.Value(schedulerContinuationContextKey{}).(*schedulerContinuation)
+	return continuation
 }
 
 type virtualTimer struct {
@@ -149,11 +186,14 @@ func (s *TestScheduler) reserve() {
 // enter gives a managed fiber the scheduler turn. The turn serializes
 // virtual-time fibers without serializing the external test controller.
 func (s *TestScheduler) enter(admitted bool) func() {
+	if !admitted {
+		// Admission must be visible before waiting for the serialized turn. This
+		// closes the gap where an external adjustment could commit while a new
+		// managed root was waiting to start and had not registered its timer.
+		s.reserve()
+	}
 	<-s.turn
 	s.mu.Lock()
-	if !admitted {
-		s.active++
-	}
 	s.signalStateLocked()
 	s.mu.Unlock()
 	return func() { s.finish() }
@@ -225,21 +265,55 @@ func (s *TestScheduler) completeWakeLocked() {
 }
 
 // reserveContinuation keeps a managed synchronous boundary visible while it
-// performs owned cleanup. Unlike a wake reservation, it does not prevent the
-// controller from advancing an already-registered timer needed by that
-// cleanup; it only prevents Adjust from publishing its final target early.
-func (s *TestScheduler) reserveContinuation() {
+// performs owned cleanup. The boundary starts runnable. If its cleanup parks
+// on a registered managed wait, parkContinuation removes it from the runnable
+// count until that wait wakes.
+func (s *TestScheduler) reserveContinuation() *schedulerContinuation {
+	continuation := &schedulerContinuation{scheduler: s, state: continuationRunnable}
 	s.mu.Lock()
 	s.continuations++
 	s.signalStateLocked()
 	s.mu.Unlock()
+	return continuation
 }
 
-func (s *TestScheduler) completeContinuation() {
+func (s *TestScheduler) parkContinuation(continuation *schedulerContinuation) {
+	if continuation == nil || continuation.scheduler != s {
+		return
+	}
 	s.mu.Lock()
-	if s.continuations > 0 {
+	if continuation.state == continuationRunnable {
+		continuation.state = continuationParked
+		if s.continuations > 0 {
+			s.continuations--
+		}
+		s.signalStateLocked()
+	}
+	s.mu.Unlock()
+}
+
+func (s *TestScheduler) unparkContinuation(continuation *schedulerContinuation) {
+	if continuation == nil || continuation.scheduler != s {
+		return
+	}
+	s.mu.Lock()
+	if continuation.state == continuationParked {
+		continuation.state = continuationRunnable
+		s.continuations++
+		s.signalStateLocked()
+	}
+	s.mu.Unlock()
+}
+
+func (s *TestScheduler) completeContinuation(continuation *schedulerContinuation) {
+	if continuation == nil || continuation.scheduler != s {
+		return
+	}
+	s.mu.Lock()
+	if continuation.state == continuationRunnable && s.continuations > 0 {
 		s.continuations--
 	}
+	continuation.state = continuationComplete
 	s.signalStateLocked()
 	s.mu.Unlock()
 }
@@ -248,19 +322,6 @@ func (s *TestScheduler) signalStateLocked() {
 	previous := s.stateChanged
 	s.stateChanged = make(chan struct{})
 	close(previous)
-}
-
-func (s *TestScheduler) waitQuiescent() {
-	for {
-		s.mu.Lock()
-		if s.active == 0 && s.pendingWakes == 0 {
-			s.mu.Unlock()
-			return
-		}
-		signal := s.stateChanged
-		s.mu.Unlock()
-		<-signal
-	}
 }
 
 // Now returns the current logical time in milliseconds.
@@ -322,8 +383,16 @@ func (s *TestScheduler) Adjust(milliseconds int64) error {
 	s.observed = s.registered
 	s.mu.Unlock()
 	for {
-		s.waitQuiescent()
 		s.mu.Lock()
+		// Quiescence, deadline selection, and target publication are one
+		// synchronized decision. A continuation may be absent from this count
+		// only while parked on a registered managed wait.
+		if s.active != 0 || s.pendingWakes != 0 || s.continuations != 0 {
+			signal := s.stateChanged
+			s.mu.Unlock()
+			<-signal
+			continue
+		}
 		nextDeadline := target
 		found := false
 		for timer := range s.timers {
@@ -333,12 +402,6 @@ func (s *TestScheduler) Adjust(milliseconds int64) error {
 			}
 		}
 		if !found {
-			if s.continuations > 0 {
-				signal := s.stateChanged
-				s.mu.Unlock()
-				<-signal
-				continue
-			}
 			s.now = target
 			s.mu.Unlock()
 			return nil

@@ -19,22 +19,23 @@ var scopeIDs atomic.Uint64
 
 // Scope serializes admission with shutdown. Acquisitions remain tracked through release.
 type Scope struct {
-	mu           sync.Mutex
-	id           uint64
-	state        scopeState
-	ctx          context.Context
-	cancel       context.CancelFunc
-	parent       *Scope
-	children     []ownedFiber
-	resources    []resource
-	hooks        []func() error
-	acquiring    sync.WaitGroup
-	acquisitions int
-	done         chan struct{}
-	completed    *managedSignal
-	hooksDone    chan struct{}
-	outcome      Cause
-	driver       timerDriver
+	mu                  sync.Mutex
+	id                  uint64
+	state               scopeState
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	parent              *Scope
+	children            []ownedFiber
+	resources           []resource
+	hooks               []func() error
+	acquiring           sync.WaitGroup
+	acquisitions        int
+	done                chan struct{}
+	completed           *managedSignal
+	hooksDone           chan struct{}
+	outcome             Cause
+	driver              timerDriver
+	cleanupContinuation *schedulerContinuation
 }
 type resource struct {
 	name    string
@@ -98,14 +99,31 @@ func (s *Scope) OnCancel(hook func() error) error {
 	s.hooks = append(s.hooks, run)
 	return nil
 }
-func (s *Scope) closeWithScheduler(scheduler *TestScheduler) Cause {
+func (s *Scope) bindCleanupContinuation(continuation *schedulerContinuation) {
+	if continuation == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.state == Open && s.cleanupContinuation == nil {
+		s.cleanupContinuation = continuation
+	}
+	s.mu.Unlock()
+}
+
+func (s *Scope) closeWithScheduler(scheduler *TestScheduler, continuation *schedulerContinuation) Cause {
 	s.mu.Lock()
 	if s.state != Open {
 		done := s.done
 		s.mu.Unlock()
 		waiter, _ := s.completed.register(scheduler)
 		if waiter != nil {
+			if scheduler != nil {
+				scheduler.parkContinuation(continuation)
+			}
 			<-waiter.done
+			if scheduler != nil {
+				scheduler.unparkContinuation(continuation)
+			}
 			s.completed.consume(waiter)
 		} else {
 			<-done
@@ -127,7 +145,7 @@ func (s *Scope) closeWithScheduler(scheduler *TestScheduler) Cause {
 	// No new Add is possible after Closing. Successful late acquisitions finish release before Done.
 	s.acquiring.Wait()
 	for _, child := range children {
-		cause := child.closeResultManaged(scheduler)
+		cause := child.closeResultManaged(scheduler, continuation)
 		if !cause.OnlyInterrupts() {
 			outcome = append(outcome, cause...)
 		}
@@ -137,6 +155,7 @@ func (s *Scope) closeWithScheduler(scheduler *TestScheduler) Cause {
 	outcome = append(outcome, s.outcome...)
 	s.mu.Unlock()
 	cleanupContext := context.WithoutCancel(s.ctx)
+	cleanupContext = withSchedulerContinuation(cleanupContext, continuation)
 	for i := len(resources) - 1; i >= 0; i-- {
 		r := resources[i]
 		outcome = append(outcome, defectReason(protected(func() error { return r.release(cleanupContext) }))...)
@@ -153,20 +172,28 @@ func (s *Scope) closeWithScheduler(scheduler *TestScheduler) Cause {
 	return append(Cause{}, outcome...)
 }
 
-func (s *Scope) Close() Cause { return s.closeWithScheduler(nil) }
+func (s *Scope) Close() Cause { return s.closeWithScheduler(nil, nil) }
 
 func (s *Scope) closeWithContext(fc *FiberContext) Cause {
 	if fc == nil || fc.turnScheduler() == nil {
 		return s.Close()
 	}
 	scheduler := fc.turnScheduler()
-	scheduler.reserveContinuation()
-	resume := fc.suspendScheduler()
+	s.mu.Lock()
+	continuation := s.cleanupContinuation
+	s.mu.Unlock()
+	ownedContinuation := continuation == nil || continuation.scheduler != scheduler
+	if ownedContinuation {
+		continuation = scheduler.reserveContinuation()
+	}
+	resume := fc.suspendSchedulerWithoutContinuation()
 	defer func() {
 		resume()
-		scheduler.completeContinuation()
+		if ownedContinuation {
+			scheduler.completeContinuation(continuation)
+		}
 	}()
-	return s.closeWithScheduler(scheduler)
+	return s.closeWithScheduler(scheduler, continuation)
 }
 
 func AcquireRelease[A any](name string, acquire func(context.Context) (A, error), release func(A, context.Context) error) Effect[A] {

@@ -22,6 +22,13 @@ effect fn test_explicit_virtual_providers() -> () throws {AssertionFailed} uses 
     run child.join()
     run Assert.check(true, "explicit test providers share the harness scheduler")
 }
+
+effect fn test_advance_admits_unstarted_fork() -> () throws {AssertionFailed} uses {Assert, Scheduler} {
+    let child = fork explicitSleep().provide<Clock>(TestClock).provide<Scheduler>(TestScheduler)
+    run Scheduler.advance(20)
+    run child.join()
+    run Assert.check(true, "adjust waits for an admitted fork to register its timer")
+}
 `
 	r := CompileFor(source, "go")
 	if !r.Checked {

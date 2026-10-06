@@ -8,7 +8,7 @@ import (
 type ownedFiber interface {
 	requestCancel()
 	closeResult() Cause
-	closeResultManaged(*TestScheduler) Cause
+	closeResultManaged(*TestScheduler, *schedulerContinuation) Cause
 	snapshot() FiberSnapshot
 }
 
@@ -51,10 +51,16 @@ func (f *Fiber[A]) closeResult() Cause {
 	}
 	return f.exit.Cause()
 }
-func (f *Fiber[A]) closeResultManaged(scheduler *TestScheduler) Cause {
+func (f *Fiber[A]) closeResultManaged(scheduler *TestScheduler, continuation *schedulerContinuation) Cause {
 	waiter, complete := f.completed.register(scheduler)
 	if !complete {
+		if scheduler != nil {
+			scheduler.parkContinuation(continuation)
+		}
 		<-waiter.done
+		if scheduler != nil {
+			scheduler.unparkContinuation(continuation)
+		}
 		f.completed.consume(waiter)
 	} else {
 		f.completed.consume(waiter)

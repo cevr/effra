@@ -102,10 +102,11 @@ func withCleanup[A any](exit Exit[A], cleanup Cause) Exit[A] {
 
 type Effect[A any] func(*FiberContext) Exit[A]
 type FiberContext struct {
-	ctx    context.Context
-	scope  *Scope
-	driver timerDriver
-	turn   *TestScheduler
+	ctx          context.Context
+	scope        *Scope
+	driver       timerDriver
+	turn         *TestScheduler
+	continuation *schedulerContinuation
 }
 
 func (f *FiberContext) Context() context.Context { return f.ctx }
@@ -129,10 +130,29 @@ func (f *FiberContext) turnScheduler() *TestScheduler {
 }
 
 func (f *FiberContext) suspendScheduler() func() {
+	if f == nil {
+		return func() {}
+	}
+	return f.suspendSchedulerWith(f.continuation)
+}
+
+// suspendSchedulerWithoutContinuation hands off the serialized turn while a
+// scope begins its protected close. The close boundary stays runnable until a
+// nested managed operation explicitly parks it on an observed wait.
+func (f *FiberContext) suspendSchedulerWithoutContinuation() func() {
+	return f.suspendSchedulerWith(nil)
+}
+
+func (f *FiberContext) suspendSchedulerWith(continuation *schedulerContinuation) func() {
 	if f == nil || f.turn == nil {
 		return func() {}
 	}
-	return f.turn.suspend()
+	f.turn.parkContinuation(continuation)
+	resume := f.turn.suspend()
+	return func() {
+		resume()
+		f.turn.unparkContinuation(continuation)
+	}
 }
 
 // UseTestScheduler installs an explicit virtual timer driver for the current
@@ -180,7 +200,7 @@ func runScope[A any](scope *Scope, program Effect[A], admitted ...bool) Exit[A] 
 }
 
 func runScopeWithCompletion[A any](scope *Scope, program Effect[A], admitted bool, complete func(Exit[A])) Exit[A] {
-	fc := &FiberContext{ctx: scope.ctx, scope: scope, driver: scope.driver}
+	fc := &FiberContext{ctx: scope.ctx, scope: scope, driver: scope.driver, continuation: schedulerContinuationFromContext(scope.ctx)}
 	var finish func()
 	if scheduler, ok := scope.driver.(*TestScheduler); ok {
 		fc.turn = scheduler
@@ -324,6 +344,7 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 			}
 			return retained
 		}
+		var continuation *schedulerContinuation
 		waitForOther := func() (Exit[A], Exit[Unit]) {
 			wait := fc.suspendScheduler()
 			<-childReady
@@ -333,15 +354,20 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 			timerDone.signal.consume(timerWaiter)
 			return childDone.get(), timerDone.get()
 		}
+		reserveCleanupContinuation := func() func() {
+			if scheduler == nil {
+				return func() {}
+			}
+			continuation = scheduler.reserveContinuation()
+			childScope.bindCleanupContinuation(continuation)
+			timerScope.bindCleanupContinuation(continuation)
+			return func() { scheduler.completeContinuation(continuation) }
+		}
 		select {
 		case <-childReady:
 			suspend()
 			childDone.signal.consume(childWaiter)
-			finishContinuation := func() {}
-			if scheduler != nil {
-				scheduler.reserveContinuation()
-				finishContinuation = scheduler.completeContinuation
-			}
+			finishContinuation := reserveCleanupContinuation()
 			defer finishContinuation()
 			cancel()
 			childScope.cancel()
@@ -356,11 +382,7 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 		case <-timerReady:
 			suspend()
 			timerDone.signal.consume(timerWaiter)
-			finishContinuation := func() {}
-			if scheduler != nil {
-				scheduler.reserveContinuation()
-				finishContinuation = scheduler.completeContinuation
-			}
+			finishContinuation := reserveCleanupContinuation()
 			defer finishContinuation()
 			cancel()
 			childScope.cancel()
@@ -382,11 +404,7 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 			return FromCause[A](append(Cause{{Kind: "failure", Failure: &Failure{Tag: "Timeout", Payload: context.DeadlineExceeded}}}, append(retained, timerRetained...)...))
 		case <-fc.ctx.Done():
 			suspend()
-			finishContinuation := func() {}
-			if scheduler != nil {
-				scheduler.reserveContinuation()
-				finishContinuation = scheduler.completeContinuation
-			}
+			finishContinuation := reserveCleanupContinuation()
 			defer finishContinuation()
 			cancel()
 			childScope.cancel()
