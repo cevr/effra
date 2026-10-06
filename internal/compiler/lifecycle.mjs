@@ -3,12 +3,15 @@ const __ef_owner = Context.Service("effra/runtime/Owner");
 const __ef_autoScope = program => Effect.flatMap(Effect.serviceOption(__ef_owner), owner =>
   Option.isSome(owner) ? program : __ef_scoped(program));
 
-const __ef_scoped = program => Effect.uninterruptibleMask(restore => Effect.gen(function* () {
+const __ef_openOwner = Effect.gen(function* () {
   const parent = yield* Effect.serviceOption(__ef_owner);
   const resources = yield* Scope.make("sequential");
-  const owner = { open: true, parent: Option.getOrNull(parent), children: [] };
-  const body = yield* Effect.exit(restore(Effect.provideService(
-    Effect.provideService(program, Scope.Scope, resources), __ef_owner, owner)));
+  return { open: true, parent: Option.getOrNull(parent), children: [], resources };
+});
+const __ef_useOwner = (owner, program) => Effect.provideService(
+  Effect.provideService(program, Scope.Scope, owner.resources), __ef_owner, owner);
+
+const __ef_closeOwner = (owner, body) => Effect.uninterruptible(Effect.gen(function* () {
   owner.open = false;
   // Request every cancellation before awaiting any child. Effect owns scheduling.
   yield* Effect.sync(() => { for (const child of owner.children) child.fiber.interruptUnsafe(); });
@@ -19,10 +22,16 @@ const __ef_scoped = program => Effect.uninterruptibleMask(restore => Effect.gen(
       cause = Cause.combine(cause, exit.cause);
     }
   }
-  const cleanup = yield* Effect.exit(Scope.close(resources, body));
+  const cleanup = yield* Effect.exit(Scope.close(owner.resources, body));
   if (Exit.isFailure(cleanup)) cause = Cause.combine(cause, cleanup.cause);
   owner.children.length = 0;
-  return yield* cause.reasons.length === 0 ? body : Effect.failCause(cause);
+  return cause.reasons.length === 0 ? body : Exit.failCause(cause);
+}));
+
+const __ef_scoped = program => Effect.uninterruptibleMask(restore => Effect.gen(function* () {
+  const owner = yield* __ef_openOwner;
+  const body = yield* Effect.exit(restore(__ef_useOwner(owner, program)));
+  return yield* (yield* __ef_closeOwner(owner, body));
 }));
 
 const __ef_fork = program => Effect.uninterruptibleMask(() => Effect.gen(function* () {

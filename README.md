@@ -69,6 +69,8 @@ The JavaScript library build exports functions, service keys, and providers for 
 | --- | --- | --- |
 | [main.ef](examples/main.ef) | Nominal services, explicit provision and typed recovery | Go / JS |
 | [workflow.ef](examples/workflow.ef) | Authorization, lookup and delivery with three service contracts | Go / JS |
+| [layers.ef](examples/layers.ef) | Shared construction, hidden dependencies and whole-graph fixture replacement | Go / JS |
+| [layers-workflow.ef](examples/layers-workflow.ef) | Configured layer provision and retained operation failures | Go / JS |
 | [latest-task.ef](examples/latest-task.ef) | Replace an owned child after interruption and cleanup finish | Go / JS |
 | [callables-service.ef](examples/callables-service.ef) | Ordinary callback composition with argument-driven failure and service rows | Go / JS |
 | [callables-state.ef](examples/callables-state.ef) | Pure transition callbacks stored in records and configured providers | Go / JS |
@@ -90,6 +92,8 @@ The JavaScript library build exports functions, service keys, and providers for 
 ```
 
 Use the printed server URL with `/health`, `/users/42`, `/users/slow`, `/users/missing`, or `/file`. Each request has an owning scope. Interrupt/SIGTERM stops admission, requests cancellation, and waits for handler cleanup. Cancellation is cooperative: a foreign call that ignores it can delay shutdown. See the [HTTP contract](docs/runtime.md#http-server).
+
+Static `layer` declarations select pure implementations, merge shared nodes, hide outputs with `provides`, and replace bindings before construction. `.provide(App)` creates a fresh owning build when the deferred program runs; construction uses selected dependencies, while the program receives only public outputs. Remaining construction inputs stay in the program's service contract. Unused declarations remain lazy. Configuration supports checked literal, record and enum values; effect factories, startup effects, layer parameters and dynamic plans remain unsupported diagnostics. CLI/MCP inspection reports the selected graph and configuration types. See the [layer contract](docs/specs/layers.md) for the full intended contract and later units.
 
 ## Records, closed data, and pattern matching
 

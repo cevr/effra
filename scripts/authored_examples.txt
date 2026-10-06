@@ -18,3 +18,5 @@ internal/compiler/bundled/functions/identity.ef
 internal/compiler/bundled/functions/forward-file.ef
 internal/compiler/bundled/conversions/codec.ef
 internal/compiler/bundled/conversions/witness.ef
+examples/layers.ef
+examples/layers-workflow.ef

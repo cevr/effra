@@ -58,7 +58,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	if len(r.checkedServices)+len(r.checkedProviders)+len(r.Symbols) > maxGraphNodes {
 		return nil, fmt.Errorf("dependency graph exceeds %d nodes; use selected inspection", maxGraphNodes)
 	}
-	g := &DependencyGraph{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Nodes: []GraphNode{}, Edges: []GraphEdge{}, Limitations: []string{"single-file static graph; includes deferred recipe construction, not execution order", "provider recipes and explicit value identities are represented without general memoized acquisition; fallible acquisition, lifecycle-safe arbitrary capture and cycle solving are not implemented", "node IDs containing offsets are scoped to the semantic revision"}}
+	g := &DependencyGraph{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Nodes: []GraphNode{}, Edges: []GraphEdge{}, Limitations: []string{"single-file static graph; includes deferred recipe construction, not execution order", "checked static layers share selected nodes within each provision; ordinary provider recipes have explicit value identities without general memoized acquisition", "source layer effect factories, startup effects and dynamic plans are unsupported", "node IDs containing offsets are scoped to the semantic revision"}}
 	g.ProducerIdentity, g.Sources = r.ProducerIdentity, append([]SourceInfo{}, r.Sources...)
 	g.BundledBindings = append([]BundledBinding{}, r.BundledBindings...)
 	g.BundledInterfaces = append([]BundledInterfaceInfo{}, r.BundledInterfaces...)
@@ -158,6 +158,9 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			requires("function:"+s.Name, req, s.Span, s.Source)
 		}
 	}
+	for _, plan := range r.Layers {
+		add(plan.ID, "layer-plan", plan.Name, plan.Span, nil)
+	}
 	providerOrigins := map[*Expr]providerBinding{}
 	var block func(*Block, string, map[string]providerBinding)
 	var expr func(*Expr, string, map[string]providerBinding) string
@@ -223,6 +226,10 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 				add(provider, "provider-value", e.Right.Name, e.Right.Span, &t)
 			}
 			edge(id, provider, "provides", e.Name, e.Span)
+		}
+		if e.Kind == "provideLayer" && e.layerPlan != nil {
+			edge(id, left, "adapts", "", e.Span)
+			edge(id, e.layerPlan.ID, "provides-layer", e.Name, e.Span)
 		}
 		if e.Kind == "call" {
 			if f := e.ResolvedFunction; f != nil && f.Module != "" && f.Module != currentModuleIdentity {
@@ -305,6 +312,12 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	for _, layer := range g.Layers {
 		for _, node := range layer.Nodes {
 			contracts = append(contracts, node.Constructor)
+			for _, parameter := range node.Parameters {
+				contracts = append(contracts, ValueType{Type: parameter.TypeRef})
+			}
+			for _, argument := range node.Arguments {
+				contracts = append(contracts, argument.Type)
+			}
 		}
 	}
 	projection := r.ProjectValues(contracts)

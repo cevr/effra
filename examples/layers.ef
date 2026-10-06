@@ -1,0 +1,50 @@
+service Store {
+    effect fn label() -> string
+}
+service Account {
+    effect fn label() -> string
+}
+service Invoice {
+    effect fn label() -> string
+}
+impl Memory(label: string) for Store {
+    effect fn label() -> string {
+        label
+    }
+}
+impl AccountLive for Account uses { Store } {
+    effect fn label() -> string {
+        run Store.label()
+    }
+}
+impl InvoiceLive for Invoice uses { Store } {
+    effect fn label() -> string {
+        run Store.label()
+    }
+}
+layer Shared {
+    Store = Memory("live")
+}
+layer Accounts {
+    merge Shared;
+    Account = AccountLive
+}
+layer Invoices {
+    merge Shared;
+    Invoice = InvoiceLive
+}
+layer App provides { Account, Invoice } {
+    merge Accounts, Invoices
+}
+layer Fixture {
+    merge App;
+    replace Store = Memory("fixture")
+}
+effect fn labels() -> string uses { Account, Invoice } {
+    let account = run Account.label()
+    let invoice = run Invoice.label()
+    account + ":" + invoice
+}
+effect fn main() -> string {
+    run labels().provide(Fixture)
+}

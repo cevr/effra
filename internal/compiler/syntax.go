@@ -254,6 +254,7 @@ type Expr struct {
 	Span             Span
 	Type             ValueType
 	checked          checkedExpression
+	layerPlan        *LayerPlan
 	// Evaluation is the work incurred while evaluating this expression now.
 	// Deferred effect rows remain on Type. Keeping the two facts beside the
 	// checked node lets callers reuse the result without walking the subtree.

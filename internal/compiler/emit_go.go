@@ -301,6 +301,9 @@ func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(addres
 		}
 		out.WriteString("} }\n")
 	}
+	for _, plan := range r.Layers {
+		out.WriteString(g.layer(plan))
+	}
 	for _, f := range r.Program.checkedFunctions() {
 		out.WriteString(g.functionDeclaration(f))
 	}
@@ -592,6 +595,9 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 		out.WriteString(name + " := " + left + "\n")
 		right := g.expr(e.Right, effect, ret, out)
 		return "efProvide_" + e.Name + "(" + name + ", " + right + ")"
+	case "provideLayer":
+		left := g.expr(e.Left, effect, ret, out)
+		return "efLayer_" + e.Name + "(" + left + ")"
 	case "catch":
 		left := g.expr(e.Left, effect, ret, out)
 		var fallback strings.Builder

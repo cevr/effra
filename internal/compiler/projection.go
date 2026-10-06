@@ -414,7 +414,8 @@ func (r *Result) ValidateProjectionResponse(projection TypeProjection, envelope 
 			Sources           []SourceInfo
 			BundledBindings   []BundledBinding
 			BundledInterfaces []BundledInterfaceInfo
-		}{value.Nodes, value.Edges, value.Declarations, value.ProducerIdentity, value.Sources, value.BundledBindings, value.BundledInterfaces}
+			Layers            []LayerPlan
+		}{value.Nodes, value.Edges, value.Declarations, value.ProducerIdentity, value.Sources, value.BundledBindings, value.BundledInterfaces, value.Layers}
 	}
 	bytes, err := encodedSize(metadata, projection.Limits.CompatibilityBytes)
 	if projection.Complete || bytes > usage.CompatibilityBytes {
