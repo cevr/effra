@@ -1,0 +1,103 @@
+# Owned actors through ordinary protocols
+
+Status: owner-directed design, 2026-10-06; not implemented language or library support. Actor execution is primarily a runtime/standard-library capability. Read [the source comparison](../research/actor-model-and-durability.md), [ordinary abstractions](language-abstractions.md), [owned library contracts](standard-library-capabilities.md), [Go boundaries](go-protocol-interop.md) and the [machine specialization](state-machines.md).
+
+An actor is an owned, addressable instance of behavior with typed messages/replies and explicit admission/concurrency policy. It need not be a state machine. Reuse ordinary `service`, `impl`, effect functions, `uses`, `raises` and scope ownership. An owned effect without a message interface remains a fiber. A machine adds checked transitions and state-entry lifetimes to one form of actor behavior.
+
+Supervision, durable addressing and persistence are separately selected capabilities for either behavior form. Local actor identity promises neither durable storage nor delivery after a process failure. No actor DSL is adopted: a new construct must demonstrate a guarantee the common type/row/ownership model cannot express, through two unrelated executable consumers and a missed negative diagnostic.
+
+## Protocol and behavior
+
+One nominal service declares a protocol. Each operation retains its arguments, reply type and expected failure row. An ordinary implementation/factory supplies behavior and explicit construction inputs/failures. The proposed `Actor<P>` handle names the service protocol, not a machine or a caller-written tuple of message/error/service/owner parameters. Its canonical checked representation also retains behavior, owner, terminal contract and policy evidence. Printed shorthand must not erase those facts.
+
+The finite initial profile is local sequential dispatch. Each message executes its ordinary handler in a fresh actor-owned invocation scope; its effects and cleanup finish before the next message evaluates. Handler requirements are captured/provisioned at actor construction and charged to spawn, without inheriting arbitrary services from each calling request. Construction ownership and invocation ownership remain distinct. An implementation must not capture its constructor's running FiberContext for later method execution.
+
+Typed domain failure belongs to the originating request and, after successful invocation cleanup, ordinary handler actors continue. A handler defect or cleanup failure stops the actor with full Cause. Machine step/completion failures retain their separately specified terminal-on-failure policy. A receive loop's declared terminal failures are also separate from per-message failures. Inspection exposes these policies; `raises` alone does not choose supervision or rollback. Unobserved background child failures follow the existing observation-at-owner-closure policy until an explicit monitor/supervisor capability is supplied; a successful spawn is not a health guarantee.
+
+## Proposed library surface
+
+Names and projections below are illustrative, not currently admitted compiler interfaces. Implement them through the common nominal service/type/row model. Unsupported protocol-associated projections or ownership relations diagnose; no unchecked payload casts, per-protocol analyzer or actor-specific compiler opcode may stand in for them.
+
+Effectful library operations, including stop requests and exit observations, construct lazy recipes and execute through ordinary `run`. Options and behavior declarations are pure plans. Ordinary loop syntax beyond the current checker is a general control-flow prerequisite for the receive sketches, never actor-only passthrough.
+
+| Operation | Contract |
+| --- | --- |
+| `actors.spawn(factory, options)` | Run a checked behavior factory once in a new child owner; acquire/capture its services, roll back failed construction, return owned `Actor<P>`. Charge constructor and captured handler requirements/failures honestly. Merely declaring behavior starts nothing. |
+| `actor.client.operation(args)` | Construct a deferred request/reply effect with that operation's domain failures plus admission failures. `run` remains the execution boundary. Heterogeneous methods preserve their distinct argument, reply and failure identities. |
+| `actors.post(actor, operationRef, args)` | Typed nonblocking admission only. Its nominal operation reference preserves argument shape; no handler failures or reply success is implied. A unit-returning method still uses ordinary request/reply unless post is explicit. |
+| `actor.requestStop()` | Nonblocking shutdown control outside mailbox capacity. Stop new admission, cancel active work and discard queued work. |
+| `actor.awaitExit()` | Observe completed shutdown and full terminal Cause after all owned children/finalizers. Concurrent observers share one exit; cancelling an observer never abandons cleanup. |
+| Later `actors.receive(factory, loop, options)` | An ordinary effect function controls a restricted `Inbox<P>`; `handleNext` owns dequeue, typed dispatch, reply correlation and invocation cleanup. Raw escaping reply tokens, split completion, multiple consumers, batching and selective receive remain unsupported until their general ownership/correlation contract exists. |
+| `machine.behavior()` | An adapter to this actor capability, retaining the machine's own state/event/outcome/output contracts, entry epochs, checked transitions and failure policy. It does not make all actors machines. |
+
+Options explicitly select sequential dispatch, positive finite item/retained-byte budgets, a finite reply-byte limit and stop/discard behavior. No hidden unbounded policy or ignored parallel-concurrency setting. Admission adds `MailboxFull`/`Stopped`; an oversized payload has a typed `MessageTooLarge` refusal. Snapshot/copy and capacity reservation are atomic with admission, with bounded traversal and retained-byte accounting. A queue byte budget includes admitted storage and correlation metadata; it does not bound arbitrary allocations by an executing handler. Reply/domain-failure snapshots have their separate finite byte limit: after completed cleanup, an oversized result reports `MessageTooLarge` with its phase, not success or implied rollback. A detached caller's result is discarded rather than retained in a hidden history. Rejected admission executes no handler and retains no pending reply. Reserved runtime controls cannot be blocked by saturation. Machine work-completion capacity is an additional machine policy.
+
+## Two unrelated adoption cases
+
+Illustrative source, pending the general interfaces and library implementation:
+
+```ef
+service Roster {
+    effect fn join(member: Member) -> Count raises { RoomFull }
+    effect fn leave(member: Member) -> Count
+}
+effect fn roomExample() -> Count
+    raises { RoomFull, MailboxFull, MessageTooLarge, Stopped }
+{
+    let room = run actors.spawn(RosterLive,
+        ActorOptions { items: 128, bytes: 65536, replyBytes: 4096, policy: Sequential, stop: Discard })
+    run room.client.join(Member { name: "Ada" })
+}
+
+service Spooler {
+    effect fn print(job: PrintJob) -> Receipt raises { DeviceError }
+}
+effect fn printExample() -> Receipt
+    raises { OpenError, DeviceError, MailboxFull, MessageTooLarge, Stopped }
+    uses { DeviceFactory }
+{
+    let spool = run actors.spawn(DeviceSpooler,
+        ActorOptions { items: 16, bytes: 1048576, replyBytes: 4096, policy: Sequential, stop: Discard })
+    run spool.client.print(PrintJob { text: "dispatch note" })
+}
+```
+
+A room roster replaces repeated lookup/envelope/deferred/lifecycle plumbing with its ordinary protocol and implementation. A device spooler owns the native connection behind its implementation; clients send portable print data rather than a writer alias. Neither requires state transitions or persistence. Before/after executable callers are still acceptance work, not proof supplied by these sketches. A device can produce physical output before failure; no local actor promises rollback or exactly-once printing.
+
+## Message ownership and Go interoperability
+
+Initially admit resource-free, closed portable data transitively: primitives, checked records/enums and explicitly admitted immutable containers. Messages, replies and domain failure payloads must meet this profile. No resources hidden in nested data, scopes, fibers, callbacks, service implementations or mutable host references. Stable snapshots must prevent sender-side mutation from changing admitted data; immutable values may share representation only when that immutability is proved. Actual retained bytes, not a source type's nominal size, determine admission.
+
+Go pointers, slice headers, maps, interfaces and structs containing them do not become isolated by copying their outer value. Reject their transfer in this profile. A reviewed copier/codec can produce ordinary resource-free domain data; direct exclusive transfer requires real alias/consumption evidence and remains later work. Do not infer transfer or race freedom from a type helper, channel send, readonly declaration or native interface method set.
+
+Mutable native resources remain actor-owned behind behavior. Borrowed dependencies must outlive the actor; per-message resources cannot escape through a reply or retained behavior state. Preserve Go descriptor/interface identities for local calls behind the boundary. Unknown retention, mutability or concurrency remains inspectably unknown, with explicit trusted adaptations where admitted. Sequential dispatch serializes handlers, not arbitrary forked background children, shared DI services or unmanaged goroutines accessing the same value; those require explicit synchronization. No BEAM heap isolation or arbitrary host race-freedom claim.
+
+## Acknowledgement, cancellation and shutdown
+
+| Boundary | Local guarantee | Separate durable capability |
+| --- | --- | --- |
+| Admission | Validate/snapshot payload, reserve capacity and assign correlation/arrival identity atomically. Post acknowledges this alone. | A qualified provider may acknowledge committed inbox storage; local post does not. |
+| Processing | Evaluate each dequeued request once within this incarnation under the selected concurrency policy. | Redelivery/replay across crashes needs declared deduplication/history policy. |
+| Handler result | Compute success or expected failure; external writes may already exist. | Handler return is not automatically a persistence commit. |
+| Reply publication | Validate/snapshot the resource-free result before its invocation owner closes; complete cleanup before resolving the originating call. | A durable provider can require an inbox/state/reply/outbox transaction before acknowledgement, naming its boundary. |
+| Caller cancellation | Before admitted work, no later admission; after admission, detach the waiting caller and retain actor-owned execution. | Timeout/lost reply can leave an unknown committed result. Cancellation is not rollback. |
+| Actor stop | Stop admission; discard queued calls with `Stopped`; cancel/join active work, children and releases before exit. | Crash/kill may run no finalizers; recovery reconstructs domain data and reacquires behavior. |
+
+Stop and reply publication are serialized. A reply published first remains observed; stop admitted first prevents later success publication and retains any already performed external effects. Cleanup defects remain full Cause, not flattened expected failures. Attempts to synchronously await one's own reply/exit through aliases, children or cleanup produce a defined self-wait defect; self-post remains nonblocking. Cross-actor cycles are outside the deadlock guarantee. Ordinary explicit timeouts retain their usual cleanup contract.
+
+Local address, incarnation and request correlation are separate identities. A stable durable address may survive replacement, while a running handle belongs to one owned incarnation. Stale replies cannot complete a new incarnation's call. Supervision observes completed exits and uses explicit fresh factories, restart classification, budgets and backoff; it does not retry business commands automatically. Persistence and workflow replay need versioned codecs, storage qualification, fencing, crash tests and external idempotency separately.
+
+## Canonical inspection
+
+CLI/MCP/LSP share the compiler's full type snapshot. Report protocol identity and every operation's argument/reply/error types; admission versus domain rows; construction and captured operation `uses`/`raises`; terminal policy/rows; lifetime/capture provenance; behavior/factory source identity; admission/concurrency/stop/ack policy; target restrictions and checked/runtime/trusted/unknown evidence. Unknown indirect behavior remains explicit. The machine reference/transition graph is optional, not a mandatory actor type field. Inspection requires no new syntax and never executes handlers, loops or machine steps.
+
+Runtime snapshots separately show address/incarnation, lifecycle, in-flight correlation/method, item/byte usage, discarded counts and bounded Cause. State tags, entry epochs and possible transitions appear only for machine-backed behavior. Supervision/address/storage providers add their own facts, revisions and freshness. Payload/history exposure requires explicit redacted codecs, authorization and bounds; it is not a default dump of service internals.
+
+## Gated delivery and decision controls
+
+1. **Protocol and ownership:** faithful finite ordinary service/client/operation projections and Actor evidence, transitive portable payload admission, constructor versus invocation captures, and shared inspection. Reject wrong method/payload/reply, missing services, undeclared errors, nested files/captured callbacks, native slice/interface aliases and shorter-owner escape. No public JSON executable proof.
+2. **Owned handler runtime:** causal bounded admission/FIFO, serialization across suspension, expected-failure continuation, defect/cleanup terminal behavior, caller cancellation, reply-after-cleanup, shutdown linearization and partial-constructor rollback on Go/JS. Native race checks apply to the managed admitted runtime, not trusted arbitrary hosts. Machine adapters reuse this ownership/control core with additional machine policies.
+3. **Restricted receive behavior:** two ordinary effect-loop consumers using correlated `handleNext`; terminal loop rows and ownership inspection; refuse raw responder escape, split completion and multiple consumers. A raw dequeue/replier design requires a separate affine/correlation guarantee before adoption; inventing `receive` syntax would not supply it.
+4. **Tooling and adoption:** two unrelated runnable before/after domain programs, actual CLI/MCP/LSP facts and invalid-request continuity, non-execution inspection controls, device/HTTP lifetime cases, machine specialization regressions and unused-module retention controls. Compare pins with explicit different/unsupported rows; benchmark measurements remain last.
+
+Every unit compiles and passes the full gate with raw receipts and independent review. General mechanisms should serve RPC, queues, layers and ordinary higher-order libraries too. Revisit syntax only after executable usage demonstrates a concrete guarantee missing from those mechanisms. Supervision, distributed persistence/addressing, replay, hibernation, parallel handlers and hot code loading remain separately specified capabilities, not implicit local actor support.

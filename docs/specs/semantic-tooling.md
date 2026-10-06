@@ -38,6 +38,7 @@ For supported language constructs, expose:
 - Record fields, all enum variants and payload fields, and named failure payloads.
 - Pure/effect callable parameters and result, declared failure/service rows, finite row parameters, and separate evaluation contributions. Distinguish a lazy recipe from its executed result and a running fiber.
 - Service operations, provider construction dependencies/configuration, captured provider origins and invocation contracts. Reuse graph edges for dependents.
+- Ordinary actor protocol/method argument, reply and failure types; admission versus domain rows; constructor/captured requirements, owner and terminal policy evidence. Optional machine transition/entry facts specialize the behavior; inspection never requires actor syntax or executes a handler. Supervision/durable providers carry separate qualified facts under [actor contracts](actors.md).
 - Ownership provenance and its evidence status where the compiler records it; distinguish borrowed, owned, conservative unknown, trusted foreign behavior and runtime policy. Never infer a proof from an empty serialized list.
 - Target availability and imported declaration/binding trust when applicable.
 

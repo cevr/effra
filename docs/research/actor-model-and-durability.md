@@ -1,12 +1,12 @@
 # Actors, supervision and durability
 
-Research dated 2026-10-06. Recommendation and design inference, **not implemented Effra support**. The [machine profile](../specs/state-machines.md) already defines a checked local actor with ordinary pure/effectful steps, owned entries and bounded admission; it explicitly excludes supervision and durable replay. This note proposes a sequence of extensions without expanding that first implementation batch. It follows [NORTH_STAR](../../NORTH_STAR.md), [library capability contracts](../specs/standard-library-capabilities.md) and the standing first-principles/asynchronous-supervision principles. Canonical terminology remains in [GLOSSARY](../../GLOSSARY.md).
+Research dated 2026-10-06, extended after the owner clarified ordinary actors. Recommendation and design inference, **not implemented Effra support**. The [actor contract](../specs/actors.md) treats handlers and receive loops as ordinary runtime/library behavior. The [machine profile](../specs/state-machines.md) specializes it with pure/effectful steps, owned entries and bounded admission; it explicitly excludes supervision and durable replay. This note proposes separable capabilities without claiming their implementation. It follows [NORTH_STAR](../../NORTH_STAR.md), [library capability contracts](../specs/standard-library-capabilities.md) and the standing first-principles/asynchronous-supervision principles. Canonical terminology remains in [GLOSSARY](../../GLOSSARY.md).
 
 ## Recommendation
 
 Make actors first-class in the **checked semantic model**: typed handles, messages, replies, terminal failures, service requirements, owners and inspection. Implement their local behavior with a small native owned runtime and modular libraries. Add explicit supervision as a library over actor factories and full terminal causes. Durable addressing, storage and deployment are separate opt-in providers. Keep durable workflow replay a distinct contract. Do not make a BEAM-like VM, distributed registry or storage engine a prerequisite for ordinary Effra programs.
 
-This fits Go-like local control flow, the native Go default and the pinned JS/Effect target. It gives rooms, sessions, agents and jobs useful state/lifetime ownership without claiming Go goroutines have BEAM process isolation. First-class need not mean a second actor DSL: extend the existing machine/ADT/function contracts and inspect them through the same compiler model.
+This fits Go-like local control flow, the native Go default and the pinned JS/Effect target. It gives rooms, sessions, agents and jobs useful state/lifetime ownership without claiming Go goroutines have BEAM process isolation. Ordinary service/impl/effect contracts express behavior without requiring a machine or a second actor DSL. A machine adds checked transitions and entry lifetimes; an owned effect without a message interface remains a fiber. Inspect all through the same compiler model.
 
 | Need | Smallest appropriate mechanism | Additional obligation |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ These are separable capabilities. A stable key does not imply durable messages; 
 | Owner | Responsibility |
 | --- | --- |
 | Language/checker | Message/reply identities, failure/service rows, transfer/owner admission, checked machine plan and diagnostics |
-| Native owned runtime / JS Effect adapter | Serialized admitted evaluations, scopes, cancellation, mailbox limits, causes and incarnation checks |
+| Native owned runtime / JS Effect adapter | Explicit dispatch/concurrency policy, scopes, cancellation, mailbox limits, causes and incarnation checks; machine entry policy only when selected |
 | Modular standard library | Actor factories, supervisor policies, monitors, addressing interfaces and explicit workflow combinators |
 | Storage provider | Enforced transaction/fence, durable acknowledgement, inbox/reply/outbox records and codec/history migration |
 | Deployment provider | Routing, process restart, lease qualification and versioned handover |
@@ -35,7 +35,7 @@ Evidence labels below distinguish documentation claims, inspected source and Eff
 
 **Effect Cluster — pinned source verified.** At `460272d30457f4697d8b8c52cad41caccbcace08`, Entity exposes typed RPC clients and explicit concurrency, mailbox capacity and defect-retry options. Persisted and WithTransaction both default false; transactional handling depends on MessageStorage. No-op storage performs no persistence and uses the identity transaction. Sharding refuses persisted messages when storage is unavailable. Therefore Cluster is useful prior art for schema/address/storage boundaries, not proof that every request is durable or every handler is strictly serialized. [Entity.ts:123–163](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/cluster/Entity.ts#L123), [ClusterSchema.ts:35–77](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/cluster/ClusterSchema.ts#L35), [MessageStorage.ts:873–896](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/cluster/MessageStorage.ts#L873), [Sharding.ts:1137–1180](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/cluster/Sharding.ts#L1137). These were read with `git show` at the pin, not the cache's newer working tree.
 
-**celld — current documentation claim, no engine source audit.** Its ownership/data guarantees require conditional object-store writes, read-after-write consistency and ranged reads; epoch GC additionally depends on list-after-write consistency. Ownership epochs isolate stale writes into old storage prefixes. Acknowledgement waits for a durability proof and ownership evidence; deployment must provide a process supervisor. This is a concrete example of why actor durability includes storage and operational protocols. Its storage fence does not by itself authorize or fence writes to unrelated external services. [Guarantees and assumptions](https://celld.dev/docs/guarantees/). The documentation also describes conservative handling of ambiguous requests; application retry/idempotency still matters.
+**celld — current documentation and selected ordinary-handler example source, no engine audit.** Its ownership/data guarantees require conditional object-store writes, read-after-write consistency and ranged reads; epoch GC additionally depends on list-after-write consistency. Ownership epochs isolate stale writes into old storage prefixes. Acknowledgement waits for a durability proof and ownership evidence; deployment must provide a process supervisor. This is a concrete example of why actor durability includes storage and operational protocols. Its storage fence does not by itself authorize or fence writes to unrelated external services. [Guarantees and assumptions](https://celld.dev/docs/guarantees/). The documentation also describes conservative handling of ambiguous requests; application retry/idempotency still matters. At source pin `f2bf648663a610eefde71f3547ad61e9b896b1f0` (v0.6.1), [counter HTTP behavior](https://github.com/denoland/celld/blob/f2bf648663a610eefde71f3547ad61e9b896b1f0/examples/counter/index.js) is an ordinary class handler with storage and a named-object client, without a machine declaration. Example source does not prove engine crash semantics.
 
 **Rivet Actors — documentation verified; selected persistence source inspected.** Actions run in parallel by default; queues provide concurrency control. Thus an async action can yield while another changes shared state: a single actor identity is not whole-action serialization. State mutations schedule throttled saves (default one second), independently of action boundaries. Immediate save waits for completion; ordinary save schedules and returns. Persisted state and ephemeral runtime objects are distinct. [Actions](https://rivet.dev/actors/docs/actions/), [state](https://rivet.dev/actors/docs/state/), [lifecycle](https://rivet.dev/actors/docs/lifecycle/).
 
@@ -68,26 +68,43 @@ For native deployment, prefer versioned **process handover**: deploy compatible 
 
 ## Ordinary source surface
 
-Illustrative only: all factory/supervision APIs below are unimplemented proposals. `Session` refers to the existing proposed machine declaration; no new supervision DSL is implied.
+The ergonomics spike compared actual handler and receive-loop use. [Pinned typed handler behavior](https://github.com/rivet-dev/actors/blob/0247751bdafc82e72f3e4f52082fc2c1694a5c81/examples/hello-world-effect/src/actors/counter/live.ts) uses an ordinary wake factory returning protocol handlers, with construction capture and service requirements. [A queue-consumer loop](https://github.com/rivet-dev/actors/blob/0247751bdafc82e72f3e4f52082fc2c1694a5c81/examples/docs/actors-lifecycle/run-queue-consumer.ts) pulls messages and updates state through ordinary control flow. The [Effect-backed room example](https://github.com/rivet-dev/actors/blob/0247751bdafc82e72f3e4f52082fc2c1694a5c81/examples/chat-room-effect/src/actors/chat-room/live.ts#L94) explicitly comments out unimplemented message processing; that is not running receive-loop evidence. Pinned Effect Cluster [typed handlers and queue/replier construction](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/cluster/Entity.ts#L174) likewise offer distinct ordinary behaviors. Its queue adapter uses internal casts and separately correlated repliers; Effra must retain operation/reply identities through common checked interfaces rather than copy their erasure.
+
+Cloudflare's [ordinary public-method RPC](https://developers.cloudflare.com/durable-objects/best-practices/create-durable-object-stubs-and-send-requests/) reinforces that addressable behavior does not need transitions. Current [Rivet queue documentation](https://rivet.dev/actors/docs/queues/) separates durable enqueue, receive-time removal and completion: completing resolves a waiting sender but does not make failed processing redeliverable. Effra must name admission, processing, reply cleanup and durable commit separately. These are inspected source/documentation claims, not executed upstream tests.
+
+Illustrative only: generic actor APIs, protocol projections, immutable containers and ordinary loops below are unimplemented proposals. `RosterLive` is an ordinary implementation, not a machine. The initial sequential profile belongs to [the actor contract](../specs/actors.md).
 
 ```rust
-effect fn newSession() -> Actor<Session> uses {Clock, SessionStore} {
-    // Fresh factory execution acquires this incarnation's providers.
-    run Session.spawn(Mailbox { items: 128, bytes: 65536 })
+service Roster {
+    effect fn join(member: Member) -> Count raises { RoomFull }
 }
-
-effect fn serve() -> () uses {Clock, SessionStore} {
-    let sessions = run supervise(newSession,
-        RestartPolicy { attempts: 3, window: Duration.seconds(30) })
-    run sessions.wait()
+effect fn roomExample() -> Count
+    raises { RoomFull, MailboxFull, MessageTooLarge, Stopped }
+{
+    let room = run actors.spawn(RosterLive,
+        ActorOptions { items: 128, bytes: 65536, replyBytes: 4096, policy: Sequential, stop: Discard })
+    run room.client.join(Member { name: "Ada" })
 }
 ```
 
-A final API must derive actor contracts rather than make callers repeat failure/service bookkeeping, require explicit failure classification and budget exhaustion behavior, and ensure factory-captured services belong to an owner that outlives all incarnations. Durable entities would wrap the same checked behavior in explicit addressing/storage providers, with wire codecs and policy chosen separately. The source fragment omits unresolved factory/supervisor result and failure shapes; it is an ergonomics sketch, not a typechecked example.
+An ordinary receive loop can choose when to handle the next request while the restricted inbox retains heterogeneous reply correlation:
+
+```ef
+effect fn spoolLoop(inbox: Inbox<Spooler>) -> () uses { Clock } {
+    while true {
+        run inbox.handleNext()
+        run Clock.sleep(5)
+    }
+}
+```
+
+This illustrates a later ordinary loop, not current `.ef` loop support or a new actor keyword. `handleNext` owns dispatch to the constructed Spooler behavior and completes each message's cleanup/reply; domain failures go to that request. Actor shutdown interrupts the owned wait/loop. A raw responder cannot escape or be completed twice in this slice. General selective receive, batching and split completion remain unsupported until their ownership/correlation guarantees exist.
+
+The two unrelated acceptance callers are a room roster and a native device spooler. They remove repeated envelopes/deferreds/owner plumbing with a protocol and explicit actor options; no machine state is fabricated. Initial messages/replies/domain failures are resource-free portable data; native pointers/slices/interfaces require a reviewed snapshot into domain data rather than shallow copying. Actor-owned host resources stay behind behavior; shared mutable DI remains a possible race. A final API derives full constructor, method, terminal and owner contracts without caller-written bookkeeping tuples. Supervision, durable entities and machine adapters wrap the same checked behavior through separate explicit capabilities. Examples are design sketches, not checked programs or completed API support.
 
 ## When it earns its cost
 
-Use local actors when a room, session, agent or job has a meaningful identity, sequential state transitions, owned background work and lifecycle inspection. Add supervision when rebuilding that activity from a fresh factory is safe and useful. Add durable entities when the identity/progress must survive a process and routing to one authority simplifies correctness. Add workflows when long-lived multi-step progress, approval or timed recovery needs replayable history.
+Use local actors when a room, session, agent or job has a meaningful identity, typed interaction, explicit concurrency, owned work and lifecycle inspection. Choose machine behavior when transitions and entry lifetimes add useful guarantees. Add supervision when rebuilding that activity from a fresh factory is safe and useful. Add durable entities when the identity/progress must survive a process and routing to one authority simplifies correctness. Add workflows when long-lived multi-step progress, approval or timed recovery needs replayable history.
 
 Keep stateless HTTP handlers ordinary when each request already has an independent scope and a database transaction expresses its state change. An actor for every request adds routing/lifetime machinery without an owner that persists beyond it. High contention across many keys, global invariants and unbounded hot mailboxes can make actor partitioning the wrong boundary. Require two unrelated consumers and explicit operational tradeoffs before generalizing.
 
@@ -95,7 +112,8 @@ Keep stateless HTTP handlers ordinary when each request already has an independe
 
 | Phase | Deliverable | Evidence required before claiming support |
 | --- | --- | --- |
-| Existing first profile | Checked local machine/actor on Go and JS | Its existing FIFO, stale-entry, self-wait, saturation, cleanup, failure-row and inspection acceptance corpus |
+| Ordinary local actor profile | Service/impl handlers and restricted receive behavior on Go and JS | Portable payload/capture negatives, reply correlation, explicit admission versus reply, serialized effects/cleanup, cancel/stop/lifecycle and full inspection controls |
+| Machine specialization | Checked local machine behavior on the shared actor core | Its FIFO, stale-entry, self-wait, saturation, entry cleanup, terminal failure-row and transition inspection acceptance corpus |
 | Local supervision | Modular supervisor over fresh factories | Causal defect/expected-failure classification; full composite Cause; fresh acquisitions; cleanup-before-restart; stop/backoff races; budget escalation; dependency restart ordering; no implicit detached work |
 | Durable single-host provider | Typed address, versioned codec and transactional inbox/state/reply/outbox | Kill between admission/state/reply/outbox stages; duplicate deliveries; ack-after-durable-commit; crash without finalizers; interrupted callers; restart/migration refusal; external idempotency controls |
 | Addressed multi-host provider | Leases/routing/fencing behind explicit deployment/storage interfaces | Paused old owner, takeover and late writes; same-address new incarnation; partition/ambiguous acknowledgements; enforced external fence where claimed; restart supervisor; provider contract qualification |
@@ -105,7 +123,7 @@ Do not build the distributed framework in the current batch. Before each phase, 
 
 ## Inspection and action capabilities
 
-Design inference: expose one canonical graph of supervisors, child factories, dependents and failure/service contracts. Runtime snapshots add stable address, incarnation/entry epochs, lifecycle/restart status, mailbox item/byte/in-flight usage, stale-event counts and bounded Cause/restart history. Durable providers add storage version, pending intents and acknowledged progress with freshness limits. Payloads and history inputs/outputs require opt-in redacted codecs, cardinality/byte budgets and authorization; never expose service internals by default.
+Design inference: expose one canonical graph of protocols, behavior/factories, owners, optional supervisors, dependents and complete failure/service contracts. Runtime snapshots add address/incarnation, lifecycle/restart status, mailbox item/byte/in-flight usage and bounded Cause/restart history. Entry epochs/state/transition/stale-completion facts occur only for machine behavior. Durable providers add storage version, pending intents and acknowledged progress with freshness limits. Payloads and history inputs/outputs require opt-in redacted codecs, cardinality/byte budgets and authorization; never expose service internals by default.
 
 Inspection is read-only and cannot invoke a step, restart an actor, modify state or replay an effect. Separate typed actor-action capabilities authorize those mutations explicitly and record their actor/revision identity. Static possible transitions, observed transitions and current committed state remain distinct; none proves liveness or universal deadlock freedom.
 

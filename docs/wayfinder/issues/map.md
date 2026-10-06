@@ -56,7 +56,8 @@ Owner update, 2026-10-06: architecture loops must seek useful primitives making 
 
 - [Pinned upstream tests and executable conformance mapping](upstream-conformance.md): integrated and reviewed at62baa74 with licensed immutable corpus, ten qualified behavior mappings and actual selected Go/JS acceptance. Full integration gates pass; copied tests do not count as native passes. Later library/server tasks extend the same mapping.
 
-- [Checked machines and owned actors](state-machines.md): owner-requested state-machine primitive over ordinary ADTs, explicit pure or effectful steps, owned invocation and shared graph inspection. Flat states first; advanced statecharts/durability remain unsupported until specified.
+- [Ordinary owned actors](ordinary-actors.md): owner-refined runtime/stdlib capability through service/impl/effect protocols, typed replies, portable ownership and explicit admission/concurrency. Handler and receive-loop usage does not require a machine or a new DSL. [Protocol](actor-protocol.md), [runtime](actor-runtime.md), [receive](actor-receive.md) and [conformance](actor-conformance.md) remain open; supervision/addressing/persistence are separate capabilities.
+- [Checked machines and machine-backed actors](state-machines.md): owner-requested state-machine primitive over ordinary ADTs, explicit pure or effectful steps, owned invocation and shared graph inspection, adapted to the ordinary actor core. Flat states first; advanced statecharts/durability remain unsupported until specified.
 
 - [Reusable generic data and product matching](generic-data.md), followed by [payload-aware recovery](effect-recovery.md): ordinary Option/Result, finite generic data, exhaustive state/event decisions and typed outcome conversion shared by codecs and machines.
 

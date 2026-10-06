@@ -1,0 +1,4 @@
+<!-- {"id": "actor-receive", "title": "Restricted ordinary actor receive loops", "status": "open", "labels": ["implementation:task"], "parent": "ordinary-actors", "assignee": null, "blocked_by": ["actor-protocol", "actor-runtime"]} -->
+# Restricted ordinary actor receive loops
+
+Unit3 of [actors](../../specs/actors.md): ordinary effect-loop behavior with a restricted Inbox and correlated handleNext dispatch. Terminal loop rows and capture ownership stay in the common type model. Ordinary loops beyond current source support require a general checked control-flow interface, never actor-only passthrough. Two unrelated consumers prove reply typing and cleanup; raw responder escape/double completion, split completion, multiple consumers, batching and selective receive remain unsupported until general affine/correlation evidence is specified. No new receive keyword justified by a library wrapper. Both-target controls, full gate and independent review precede closure.

@@ -31,7 +31,8 @@ Use source-controlled public programs with matched toolchains, target, CGO mode,
 | --- | --- |
 | Pure minimal entry | No unused HTTP/RPC/codec/platform implementation or initialization; compare with an equivalent minimal Go entry. |
 | Managed effect without platform I/O | Only the required core ownership/cancellation runtime and its dependencies; all guarantees still pass. |
-| Managed actor without platform I/O | Retain the shared actor loop and required core ownership/scheduling dependencies, with no unused HTTP/RPC/codec/platform adapters. A second machine adds its functions, data and adapter rather than a duplicate actor runtime. |
+| Ordinary handler actor without platform I/O | Retain selected protocol/dispatch and shared ownership/control dependencies, with no mandatory machine tables, durable storage, HTTP/RPC/codec or platform adapters. |
+| Machine-backed actor without platform I/O | Retain the same shared actor ownership/control core plus selected machine functions, data and entry/completion adapter. A second machine does not duplicate the actor runtime; unused persistence/deployment modules remain absent. |
 | Codec-only consumer | Required codec plans retained once; HTTP/RPC/server initialization absent. |
 | HTTP application | Required transport/codec/domain behavior retained; unrelated RPC, SQL, streams and other modules absent when available. |
 | Equivalent direct and fluent calls | Same semantic roots and comparable artifact size; fluent spelling does not retain other operations. Run this case when fluent syntax is admitted. |

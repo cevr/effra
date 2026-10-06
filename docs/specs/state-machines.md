@@ -1,5 +1,7 @@
 # Checked state machines
 
+A machine supplies one form of [ordinary actor behavior](actors.md). Actors also support service handlers and receive loops without machine transitions. Reuse the shared owned mailbox/control/runtime core; this spec adds checked state/event decisions, entry lifetimes and work-completion identity. Supervision, durable addressing and persistence apply separately to either behavior.
+
 Status: authorized implementation extension from owner direction on 2026-10-06; not current language support. Preserve Go-like simplicity, Effect lifetime guarantees and ordinary ADTs. Main machine prior art is [XState v6 PR5543](https://github.com/statelyai/xstate/pull/5543), next revision 2146ae26ebfc7e6a624b3a1f237f9e6ddc30b9f5. Effect Machine supplies additional lifetime evidence; v5 is historical only. Independent source/test counsel supports this ordinary-function surface.
 
 ## Ordinary behavior, checked declaration
@@ -90,7 +92,7 @@ Go invalidates the old entry, requests cancellation and awaits its children/fina
 
 Spawn requires explicit mailbox item/byte budgets. First-profile send admits immediately or fails with MailboxFull/Stopped; it never waits for queue capacity. Call uses that admission policy, then interruptibly awaits the committed transition, including completed old-entry cleanup and admission of new work; acknowledgement does not wait for the work's eventual outcome. Reject reports a typed Rejected failure.
 
-The handle is Actor<Machine>, with inspectable contracts derived from the named declaration rather than caller-written bookkeeping parameters:
+The machine adapter produces `Actor<P>`, where `P` is its checked event/request protocol. The canonical type retains the machine declaration, Event/Outcome/Output identities and entry/transition policy as additional behavior evidence, not a requirement on every actor. Inspectable contracts are derived from the named declaration rather than caller-written bookkeeping parameters:
 
 | Operation | Expected failures and requirements |
 | --- | --- |

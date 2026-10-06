@@ -76,7 +76,9 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Machine** (specified): A checked definition of state and event types, transition policies and state-owned behavior.
 
-**Actor** (specified): A running instance of a machine, with its own current state, owning scope and event mailbox.
+**Actor** (specified): An owned, addressable instance of behavior with typed messages/replies and explicit admission/concurrency policy. Ordinary handlers or receive loops can supply behavior; an effect without a message interface remains a fiber.
+
+**Machine-backed actor** (specified): An actor whose behavior follows a checked machine plan, adding transitions and state-entry lifetimes to ordinary actor ownership and messaging.
 
 **Supervisor** (proposed): An owner that observes completed child exits and applies an explicit restart, stop or escalation policy using fresh child factories and bounded restart attempts.
 
@@ -88,9 +90,9 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Workflow replay** (proposed): Reconstructing execution from versioned recorded steps and outcomes under an explicit replay contract; ordinary effect recipes do not imply replay safety.
 
-**Machine step** (specified): An ordinary pure or effectful function that consumes a state and event and returns an explicit transition decision. Effectful evaluation has an actor-owned scope and completes before state commit.
+**Machine step** (specified): An ordinary pure or effectful function that consumes a state and event and returns an explicit transition decision. Effectful evaluation has a machine-backed actor-owned scope and completes before state commit.
 
-**State entry** (specified): One owned lifetime of an actor's current state, identified separately from that state's tag and payload.
+**State entry** (specified): One owned lifetime of a machine-backed actor's current state, identified separately from that state's tag and payload.
 
 **Re-entry** (specified): Closing a state entry and starting a fresh one, including when the state tag stays the same.
 

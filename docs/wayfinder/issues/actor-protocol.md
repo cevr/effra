@@ -1,0 +1,4 @@
+<!-- {"id": "actor-protocol", "title": "Checked ordinary actor protocols and portable ownership", "status": "open", "labels": ["implementation:task"], "parent": "ordinary-actors", "assignee": null, "blocked_by": ["native-interfaces", "generic-data", "stdlib-owned-core"]} -->
+# Checked ordinary actor protocols and portable ownership
+
+Unit1 of [actors](../../specs/actors.md): common nominal service/client/operation projections, Actor behavior/owner/terminal evidence, transitive portable messages/replies/domain errors, constructor versus invocation captures and full shared inspection. No actor-specific analyzer or caller-written bookkeeping tuple. Wrong method/payload/reply, missing uses/raises, nested borrowed resources, native pointer/slice/interface aliases and shorter-owner escape diagnose. General type/row/ownership mechanisms must also serve RPC/queues/layers. Both-target controls, bounded projection, full gate and review precede closure.

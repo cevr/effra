@@ -67,7 +67,9 @@ Each batch is delivered in compiling, gated commits with independent review. Its
 | Shared/platform | Memo/Cache/shared lease/Pool; then files, process and HTTP client adapters | Flow and services. Generic sharing fixtures plus actual host resource cleanup; target exclusions remain visible |
 | Telemetry/batching | Bounded provider-owned metrics/spans and context-partitioned batching | Services, flow and shared/platform. Per-key completion, missing-output defects, no cross-credential batching, scope shutdown and unused-module receipts |
 
-Machine mailboxes and flow queues should reuse sound runtime mechanisms and causal tests where appropriate. Actor reserved-completion capacity and stale-entry policies remain actor contracts; they are not erased to force every queue into one API.
+Ordinary [actors](actors.md) use service/impl protocols, typed handler or restricted receive behavior, explicit sequential admission and owning scopes. Actor execution is a runtime/library capability; no actor declaration is required. Message/reply/error data and host aliases follow checked portable ownership admission, and admission, completed reply and durable commit are separate contracts. Supervision, durable addressing and persistence compose with either ordinary or machine-backed behavior independently.
+
+Actor mailboxes and flow queues should reuse sound runtime mechanisms and causal tests where appropriate. Reserved machine-completion capacity and state-entry epochs are machine-specific additional contracts; ordinary actors need no fictitious transition state. They are not erased to force every queue into one API. Full CLI/MCP types include protocol, method rows, construction/capture, terminal policy, admission and ownership facts through the shared semantic model.
 
 ## Transactions and remaining exclusions
 
