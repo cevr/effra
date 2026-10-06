@@ -1,4 +1,4 @@
-<!-- {"id": "foundation-providers", "title": "Dependency-capturing provider composition", "status": "open", "labels": ["implementation:task"], "parent": "foundation-spec", "assignee": null, "blocked_by": ["foundation-data"]} -->
+<!-- {"id": "foundation-providers", "title": "Dependency-capturing provider composition", "status": "open", "labels": ["implementation:task"], "parent": "foundation-spec", "assignee": "provider_capture", "blocked_by": ["foundation-data"]} -->
 # Dependency-capturing provider composition
 
 ## Question
