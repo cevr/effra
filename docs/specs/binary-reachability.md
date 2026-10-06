@@ -12,6 +12,7 @@ Keep language guarantees intact: size optimizations cannot remove cancellation c
 
 - Start from the executable entry point and genuinely exported host entry points. Account for callbacks, function values, provider methods, error/codec plans and target-specific adapters through the common checked type/interface model.
 - Emit only required native runtime modules. An unused facility must not retain its imports, package initialization, global registry entries, reflection metadata or generated codec tables. Importing an interface for checking does not make its implementation a runtime root.
+- Reconcile previously emitted files when a program's reachable modules shrink. A stale generated HTTP file must not reintroduce imports after an HTTP-to-minimal rebuild. Use artifact-owned output identities/manifests or equivalent isolated emission; do not delete unknown user files or let one generated application silently replace another application's selected runtime.
 - Bundle runtime source and checked interfaces with the compiler distribution, but select application emission separately. The compiler CLI's distribution size and the built application's size are distinct measurements.
 - Lower statically resolved fluent calls to ordinary functions. Do not create a universal runtime object, method registry, reflective dispatch table or blanket init solely to support fluent syntax. This requirement does not introduce fluent syntax by itself.
 - Keep conservative roots explicit when dynamic/foreign behavior needs them. Never drop callable behavior merely because a closed-world walk cannot see a call. Diagnose unsupported behavior or retain the documented finite implementation set; do not quietly retain the whole library as a default fallback.
@@ -33,6 +34,7 @@ Use source-controlled public programs with matched toolchains, target, CGO mode,
 | HTTP application | Required transport/codec/domain behavior retained; unrelated RPC, SQL, streams and other modules absent when available. |
 | Equivalent direct and fluent calls | Same semantic roots and comparable artifact size; fluent spelling does not retain other operations. Run this case when fluent syntax is admitted. |
 | Unused library growth | Adding an unused module, operation or witness does not add it to application imports/symbols or materially grow the executable. |
+| Rebuild after removing a facility | Build HTTP then minimal into the same managed application output; selected modules, dependencies and symbols match a fresh minimal build. A separately generated application keeps a coherent runtime. |
 
 Record generated module selection, transitive build dependencies and native symbol evidence alongside exact byte sizes. For stripped release builds, retain an identically configured unstripped companion for symbol inspection. Record compiler/runtime/library source identities, Go/JS versions, architecture, build flags and size measurement method. Do not use debug stripping, compression or externalizing a runtime as a substitute for proving unused-code elimination.
 

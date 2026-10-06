@@ -26,6 +26,8 @@ Report single-core comparisons separately from multi-core scaling. A Go runtime 
 
 Keep build measurements separate: Effra parse/check/import/emission, Go compilation/linking, TS checking/transformation and cache state. A warm Go cache or TypeScript execution without type checking must not masquerade as equal build work. Report raw repeated samples and summary statistics; do not infer a universal benefit or statistically meaningful win from noise.
 
+Include generated-code scaling alongside server builds: many ordinary small functions and one long straight-line effectful function must have separate emitted-source, frontend and backend receipts. The scheduler's 1024-signal regression exposed a generated-Go watchdog that includes compilation; the implementation owner reported a roughly 60-second build followed by millisecond execution, without retaining that diagnostic artifact. Reproduce under admitted host/cache conditions before attributing it to lowering or Go optimization. Preserve generated source, binary identity and raw stage logs. A fast frontend or warm build cannot hide a slow fresh backend, and shortening the regression program or extending its timeout is not a compile-speed improvement.
+
 ## Exit gate
 
 - Runnable versioned fixtures and a reproducible local benchmark command produce machine-readable raw samples and a concise report.
