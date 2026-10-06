@@ -2,11 +2,15 @@ import go strings "strings"
 import go strconv "strconv"
 import go sdk "effra.local/prototype/examples/sdk"
 
-effect fn program() -> () uses {Foreign, Console, Scheduler} {
+effect fn program() -> () uses { Foreign, Console, Scheduler } {
     let name = run strings.ToUpper("ada")
     run Console.log(name)
     let raw = run strconv.ParseBool("invalid")
-    if raw.hasError { run Console.log("partial result retained") } else { () }
+    if raw.hasError {
+        run Console.log("partial result retained")
+    } else {
+        ()
+    }
     let fallback = run strconv.ParseBool("invalid").orFail().catch<GoError>(false)
     let slow = run sdk.Lookup("slow").orFail().timeout(1)
         .catch<Timeout>("timed out").catch<GoError>("failed")

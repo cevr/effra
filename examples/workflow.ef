@@ -3,38 +3,50 @@ error UserMissing
 error DeliveryFailed
 
 service Access {
-    effect fn check(id: string) -> () raises {Denied}
+    effect fn check(id: string) -> () raises { Denied }
 }
 
 service Directory {
-    effect fn name(id: string) -> string raises {UserMissing}
+    effect fn name(id: string) -> string raises { UserMissing }
 }
 
 service Delivery {
-    effect fn send(message: string) -> string raises {DeliveryFailed}
+    effect fn send(message: string) -> string raises { DeliveryFailed }
 }
 
 impl DemoAccess for Access {
-    effect fn check(id: string) -> () raises {Denied} {
-        if id == "blocked" { fail Denied } else { () }
+    effect fn check(id: string) -> () raises { Denied } {
+        if id == "blocked" {
+            fail Denied
+        } else {
+            ()
+        }
     }
 }
 
 impl DemoDirectory for Directory {
-    effect fn name(id: string) -> string raises {UserMissing} {
-        if id == "42" { "Ada" } else { fail UserMissing }
+    effect fn name(id: string) -> string raises { UserMissing } {
+        if id == "42" {
+            "Ada"
+        } else {
+            fail UserMissing
+        }
     }
 }
 
 impl DemoDelivery for Delivery {
-    effect fn send(message: string) -> string raises {DeliveryFailed} {
-        if message == "" { fail DeliveryFailed } else { "queued: " + message }
+    effect fn send(message: string) -> string raises { DeliveryFailed } {
+        if message == "" {
+            fail DeliveryFailed
+        } else {
+            "queued: " + message
+        }
     }
 }
 
 effect fn welcome(id: string) -> string
-    raises {Denied, UserMissing, DeliveryFailed}
-    uses {Access, Directory, Delivery}
+    raises { Denied, UserMissing, DeliveryFailed }
+    uses { Access, Directory, Delivery }
 {
     run Access.check(id)
     let name = run Directory.name(id)

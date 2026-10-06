@@ -7,13 +7,13 @@ effect fn borrowOuter(file: File) -> File {
     }
 }
 
-effect fn scopedRead() -> string raises {IoError} uses {Files} {
+effect fn scopedRead() -> string raises { IoError } uses { Files } {
     scope {
         let file = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
         run Files.readText(file)
     }
 }
 
-effect fn main() -> string raises {IoError} {
+effect fn main() -> string raises { IoError } {
     run scopedRead().provide<Files>(LiveFiles)
 }
