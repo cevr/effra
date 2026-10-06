@@ -322,6 +322,7 @@ func projectWildcardPath(path, selected string, terminal bool) (rebased string, 
 }
 
 func normalizeProjectedWildcard(fact OwnershipFact) OwnershipFact {
+	preserveSource := fact.Status == "borrowed" && fact.Origin == "bounded-all-borrowed"
 	if fact.Status == "owned" && fact.Origin != "bounded-all-owned" {
 		fact.Status = "unknown"
 		fact.Origin = "bounded"
@@ -329,9 +330,13 @@ func normalizeProjectedWildcard(fact OwnershipFact) OwnershipFact {
 	if fact.Status == "borrowed" && fact.Origin != "bounded-all-borrowed" {
 		fact.Status = "unknown"
 		fact.Origin = "bounded"
+		fact.source = ""
+		fact.sourceSet = false
 	}
-	fact.source = ""
-	fact.sourceSet = false
+	if !preserveSource {
+		fact.source = ""
+		fact.sourceSet = false
+	}
 	return fact
 }
 
@@ -618,6 +623,336 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 	return normalizeFacts(out)
 }
 
+type ownershipProvenanceKey struct {
+	region    string
+	sourceSet bool
+	ownerKind ownershipOwnerKind
+}
+
+type ownershipFrontierNode struct {
+	exact    []OwnershipFact
+	wildcard []OwnershipFact
+	children map[string]*ownershipFrontierNode
+}
+
+func ownershipProvenance(fact OwnershipFact) ownershipProvenanceKey {
+	return ownershipProvenanceKey{
+		region:    fact.Region,
+		sourceSet: fact.sourceSet,
+		ownerKind: fact.ownerKind,
+	}
+}
+
+func ownershipFrontierMarker(key ownershipProvenanceKey, prefix string) OwnershipFact {
+	marker := OwnershipFact{
+		Path:      "*",
+		Status:    "borrowed",
+		Region:    key.region,
+		Origin:    "bounded-all-borrowed",
+		sourceSet: key.sourceSet,
+		ownerKind: key.ownerKind,
+	}
+	if prefix != "" {
+		marker.Path = prefix + ".*"
+	}
+	if key.sourceSet {
+		marker.source = "*"
+	}
+	return marker
+}
+
+func addOwnershipFrontierFact(root *ownershipFrontierNode, fact OwnershipFact) {
+	base, wildcard := wildcardPathPrefix(fact.Path)
+	if wildcard {
+		fact.Path = base
+	} else {
+		base = fact.Path
+	}
+	segments := []string{}
+	if base != "" {
+		segments = strings.Split(base, ".")
+	}
+	node := root
+	for _, segment := range segments {
+		if node.children == nil {
+			node.children = map[string]*ownershipFrontierNode{}
+		}
+		child := node.children[segment]
+		if child == nil {
+			child = &ownershipFrontierNode{}
+			node.children[segment] = child
+		}
+		node = child
+	}
+	if wildcard {
+		node.wildcard = append(node.wildcard, fact)
+	} else {
+		node.exact = append(node.exact, fact)
+	}
+}
+
+func ownershipFrontierKeys(node *ownershipFrontierNode) map[ownershipProvenanceKey]bool {
+	keys := map[ownershipProvenanceKey]bool{}
+	for _, fact := range append(append([]OwnershipFact{}, node.exact...), node.wildcard...) {
+		keys[ownershipProvenance(fact)] = true
+	}
+	for _, child := range node.children {
+		for key := range ownershipFrontierKeys(child) {
+			keys[key] = true
+		}
+	}
+	return keys
+}
+
+func ownershipFrontierSingleKey(node *ownershipFrontierNode) (ownershipProvenanceKey, bool) {
+	keys := ownershipFrontierKeys(node)
+	if len(keys) != 1 {
+		return ownershipProvenanceKey{}, false
+	}
+	for key := range keys {
+		return key, true
+	}
+	return ownershipProvenanceKey{}, false
+}
+
+func ownershipFrontierCanCollapse(node *ownershipFrontierNode) bool {
+	if len(node.wildcard) > 0 || len(node.children) <= 1 {
+		return true
+	}
+	for _, child := range node.children {
+		if len(child.children) > 0 || len(child.wildcard) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func collectOwnershipFrontier(node *ownershipFrontierNode, prefix string) ([]OwnershipFact, bool) {
+	if key, ok := ownershipFrontierSingleKey(node); ok {
+		if prefix == "" {
+			if ownershipFrontierCanCollapse(node) && (len(node.children) > 0 || len(node.wildcard) > 0) {
+				return []OwnershipFact{ownershipFrontierMarker(key, "")}, true
+			}
+			if len(node.exact) == 1 {
+				return cloneFacts(node.exact), true
+			}
+		} else if ownershipFrontierCanCollapse(node) && (len(node.children) > 0 || len(node.wildcard) > 0) {
+			return []OwnershipFact{ownershipFrontierMarker(key, prefix)}, true
+		} else if len(node.exact) > 0 {
+			return cloneFacts(node.exact), true
+		}
+	}
+
+	if len(node.wildcard) > 0 {
+		// A wildcard already covers every descendant. Keeping it beside a
+		// different provenance key would make one source stand in for another.
+		return nil, false
+	}
+	out := cloneFacts(node.exact)
+	children := make([]string, 0, len(node.children))
+	for name := range node.children {
+		children = append(children, name)
+	}
+	slices.Sort(children)
+	for _, name := range children {
+		childPrefix := name
+		if prefix != "" {
+			childPrefix = prefix + "." + name
+		}
+		child, ok := collectOwnershipFrontier(node.children[name], childPrefix)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, child...)
+	}
+	return out, true
+}
+
+// compactBorrowedFacts retains complete terminal facts and replaces a
+// homogeneous descendant set with a provenance-preserving prefix frontier.
+// A wildcard source means any descendant of the same parameter, rather than
+// an arbitrary borrowed value from another parameter.
+func compactBorrowedFacts(facts []OwnershipFact, maxFacts int) ([]OwnershipFact, bool) {
+	root := &ownershipFrontierNode{}
+	for _, fact := range facts {
+		if fact.Status != "borrowed" || fact.potentialOwner {
+			return nil, false
+		}
+		if isWildcardPath(fact.Path) && fact.Origin != "bounded-all-borrowed" {
+			return nil, false
+		}
+		addOwnershipFrontierFact(root, fact)
+	}
+	frontier, ok := collectOwnershipFrontier(root, "")
+	if !ok || len(frontier) > maxFacts {
+		return nil, false
+	}
+	return normalizeFacts(frontier), true
+}
+
+func compactOwnedFacts(facts []OwnershipFact, maxFacts int) ([]OwnershipFact, bool) {
+	if len(facts) <= maxFacts {
+		return nil, false
+	}
+	region := ""
+	ownerKind := ownershipOwnerUnknown
+	for i, fact := range facts {
+		if fact.Status != "owned" || fact.potentialOwner {
+			return nil, false
+		}
+		if i == 0 {
+			region = fact.Region
+			ownerKind = fact.ownerKind
+			continue
+		}
+		if fact.Region != region {
+			region = "*"
+		}
+		if fact.ownerKind != ownerKind {
+			ownerKind = ownershipOwnerUnknown
+		}
+	}
+	return []OwnershipFact{{Path: "*", Status: "owned", Region: region, Origin: "bounded-all-owned", ownerKind: ownerKind}}, true
+}
+
+func wildcardBaseSegments(path string) ([]string, bool) {
+	base, wildcard := wildcardPathPrefix(path)
+	if !wildcard {
+		return nil, false
+	}
+	if base == "" {
+		return nil, true
+	}
+	return strings.Split(base, "."), true
+}
+
+func commonWildcardPrefix(paths [][]string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	common := append([]string{}, paths[0]...)
+	for _, path := range paths[1:] {
+		limit := min(len(common), len(path))
+		for i := 0; i < limit; i++ {
+			if common[i] != path[i] {
+				limit = i
+				break
+			}
+		}
+		common = common[:limit]
+		if len(common) == 0 {
+			return nil
+		}
+	}
+	return common
+}
+
+func pathWithinPrefix(path, prefix string) bool {
+	return path == prefix || strings.HasPrefix(path, prefix+".")
+}
+
+func coalesceOwnedWildcards(facts []OwnershipFact) []OwnershipFact {
+	groups := map[string][]int{}
+	for i, fact := range facts {
+		if fact.Status != "owned" || fact.Origin != "bounded-all-owned" || fact.potentialOwner {
+			continue
+		}
+		base, wildcard := wildcardPathPrefix(fact.Path)
+		if !wildcard || base == "" {
+			continue
+		}
+		key := fmt.Sprintf("%s\x00%d", fact.Region, fact.ownerKind)
+		groups[key] = append(groups[key], i)
+	}
+	if len(groups) == 0 {
+		return facts
+	}
+	removed := make(map[int]bool)
+	added := []OwnershipFact{}
+	for _, indexes := range groups {
+		if len(indexes) < 2 {
+			continue
+		}
+		bases := make([][]string, 0, len(indexes))
+		for _, index := range indexes {
+			base, _ := wildcardBaseSegments(facts[index].Path)
+			bases = append(bases, base)
+		}
+		common := commonWildcardPrefix(bases)
+		if len(common) == 0 {
+			continue
+		}
+		prefix := strings.Join(common, ".")
+		conflict := false
+		for i, fact := range facts {
+			if slices.Contains(indexes, i) {
+				continue
+			}
+			if pathWithinPrefix(fact.Path, prefix) {
+				conflict = true
+				break
+			}
+		}
+		if conflict {
+			continue
+		}
+		marker := facts[indexes[0]]
+		marker.Path = prefix + ".*"
+		added = append(added, marker)
+		for _, index := range indexes {
+			removed[index] = true
+		}
+	}
+	if len(removed) == 0 {
+		return facts
+	}
+	result := make([]OwnershipFact, 0, len(facts)-len(removed)+len(added))
+	for i, fact := range facts {
+		if !removed[i] {
+			result = append(result, fact)
+		}
+	}
+	result = append(result, added...)
+	slices.SortStableFunc(result, func(a, b OwnershipFact) int {
+		if a.Path != b.Path {
+			return strings.Compare(a.Path, b.Path)
+		}
+		return strings.Compare(a.Region, b.Region)
+	})
+	return result
+}
+
+func ownershipPathDepth(path string) int {
+	if isWildcardPath(path) {
+		return 1 << 30
+	}
+	if path == "" {
+		return 0
+	}
+	return strings.Count(path, ".") + 1
+}
+
+func boundedBorrowedWithPotential(facts []OwnershipFact, incomplete map[string]bool, maxFacts int) []OwnershipFact {
+	candidates := make([]OwnershipFact, 0, len(facts))
+	for _, fact := range facts {
+		if fact.Status != "borrowed" || fact.potentialOwner || incomplete[fact.Path] {
+			continue
+		}
+		candidates = append(candidates, fact)
+	}
+	slices.SortStableFunc(candidates, func(a, b OwnershipFact) int {
+		if depth := ownershipPathDepth(a.Path) - ownershipPathDepth(b.Path); depth != 0 {
+			return depth
+		}
+		return strings.Compare(a.Path, b.Path)
+	})
+	if len(candidates) > maxFacts-1 {
+		candidates = candidates[:maxFacts-1]
+	}
+	candidates = append(candidates, OwnershipFact{Path: "*", Status: "unknown", Region: "*", Origin: "bounded", potentialOwner: true})
+	return normalizeFacts(candidates)
+}
+
 func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 	if len(facts) == 0 {
 		return nil
@@ -665,6 +1000,7 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 			result = append(result, fact)
 		}
 	}
+	result = coalesceOwnedWildcards(result)
 	const maxFacts = 64
 	if len(result) > maxFacts {
 		allOwned := true
@@ -678,40 +1014,14 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 			}
 		}
 		if allOwned {
-			// A bounded marker inherited from a wrapped value still describes
-			// that value's subtree. Keep its prefix so an unrelated sibling can
-			// be projected without treating the whole enclosing record as owned.
-			marker := OwnershipFact{Path: "*", Status: "owned", Region: "*", Origin: "bounded-all-owned"}
-			bounded := make([]OwnershipFact, 0, maxFacts)
-			for _, fact := range result {
-				if len(bounded) == maxFacts-1 {
-					break
-				}
-				if isWildcardPath(fact.Path) && fact.Origin == "bounded-all-owned" {
-					marker = fact
-					continue
-				}
-				bounded = append(bounded, fact)
+			if bounded, ok := compactOwnedFacts(result, maxFacts); ok {
+				return bounded
 			}
-			bounded = append(bounded, marker)
-			return bounded
 		}
 		if allBorrowed {
-			// Preserve the same subtree boundary for a complete borrowed marker;
-			// otherwise wrapping would manufacture a global fact for the parent.
-			marker := OwnershipFact{Path: "*", Status: "borrowed", Region: "*", Origin: "bounded-all-borrowed", source: "*", sourceSet: true}
-			concrete := make([]OwnershipFact, 0, len(result))
-			for _, fact := range result {
-				if isWildcardPath(fact.Path) && fact.Origin == "bounded-all-borrowed" {
-					marker = fact
-					continue
-				}
-				concrete = append(concrete, fact)
+			if bounded, ok := compactBorrowedFacts(result, maxFacts); ok {
+				return bounded
 			}
-			bounded := append([]OwnershipFact{}, concrete[:maxFacts-2]...)
-			bounded = append(bounded, concrete[len(concrete)-1])
-			bounded = append(bounded, marker)
-			return bounded
 		}
 		// A path with several alternatives is indivisible evidence. Retaining a
 		// borrowed fact for a selected path while dropping its owned sibling
@@ -735,9 +1045,9 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 		}
 		if incompleteCount >= maxFacts {
 			// No bounded representation can retain every alternative for the
-			// selected path. The wildcard forces a conservative diagnostic at
-			// every projection boundary instead of admitting an unsafe value.
-			return []OwnershipFact{{Path: "*", Status: "unknown", Region: "*", Origin: "bounded", potentialOwner: true}}
+			// selected path. Preserve independently complete borrowed terminals
+			// when there is room; the top marker still rejects every omitted path.
+			return boundedBorrowedWithPotential(result, incomplete, maxFacts)
 		}
 
 		bounded := make([]OwnershipFact, 0, maxFacts)
@@ -747,7 +1057,7 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 			}
 		}
 		if len(bounded) >= maxFacts {
-			return []OwnershipFact{{Path: "*", Status: "unknown", Region: "*", Origin: "bounded", potentialOwner: true}}
+			return boundedBorrowedWithPotential(result, incomplete, maxFacts)
 		}
 
 		// Reserve a marker when a discarded fact could itself be owned or could
@@ -768,7 +1078,7 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 				continue
 			}
 			switch {
-			case fact.Status == "owned", fact.Status == "unknown", fact.potentialOwner:
+			case fact.Status == "owned", fact.Status == "unknown", fact.potentialOwner, allBorrowed && fact.Status == "borrowed":
 				potentialNeeded = true
 			}
 		}
@@ -777,19 +1087,29 @@ func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 			available--
 		}
 		if available < 0 {
-			return []OwnershipFact{{Path: "*", Status: "unknown", Region: "*", Origin: "bounded", potentialOwner: true}}
+			return boundedBorrowedWithPotential(result, incomplete, maxFacts)
 		}
 
 		// Keep known borrowed paths first so an independently safe sibling stays
 		// observable even when owned siblings consume most of the budget. The
 		// retained incomplete groups above always win over these priorities.
 		for _, status := range []string{"borrowed", "owned", "unknown"} {
+			candidates := make([]OwnershipFact, 0, len(result))
 			for _, fact := range result {
-				if available == 0 {
-					break
-				}
 				if incomplete[fact.Path] || fact.Status != status {
 					continue
+				}
+				candidates = append(candidates, fact)
+			}
+			slices.SortStableFunc(candidates, func(a, b OwnershipFact) int {
+				if depth := ownershipPathDepth(a.Path) - ownershipPathDepth(b.Path); depth != 0 {
+					return depth
+				}
+				return strings.Compare(a.Path, b.Path)
+			})
+			for _, fact := range candidates {
+				if available == 0 {
+					break
 				}
 				bounded = append(bounded, fact)
 				available--

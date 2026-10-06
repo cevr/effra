@@ -205,6 +205,17 @@ func requireOwnershipAccepted(t *testing.T, source string) *Result {
 	return r
 }
 
+func requireOwnershipRejectedWithoutArgumentUse(t *testing.T, source string) *Result {
+	t.Helper()
+	r := requireOwnershipRejected(t, source)
+	for _, diagnostic := range r.Diagnostics {
+		if diagnostic.Code == "EF123" && strings.Contains(diagnostic.Message, "cannot be used") {
+			t.Fatalf("expected result provenance to reject the value, got argument rejection: %+v", r.Diagnostics)
+		}
+	}
+	return r
+}
+
 func TestOwnershipWrapperProjectionPreservesRootParameter(t *testing.T) {
 	requireOwnershipRejected(t, `
 record Box { file: File }
@@ -839,6 +850,198 @@ func ownershipNestedSiblingSource(width, layers int, selected string) string {
 	return source.String()
 }
 
+func ownershipCoverageSiblingSource(width int, enum, reverse, independentOwner, safe bool) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "record Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " }")
+	if enum {
+		if reverse {
+			fmt.Fprintln(&source, "enum Root { P { z: File, a: Wide } }")
+		} else {
+			fmt.Fprintln(&source, "enum Root { P { a: Wide, z: File } }")
+		}
+	} else if reverse {
+		fmt.Fprintln(&source, "record Root { z: File, a: Wide }")
+	} else {
+		fmt.Fprintln(&source, "record Root { a: Wide, z: File }")
+	}
+	fmt.Fprintln(&source, "effect fn probe(borrowed: File) -> File throws {IoError} {")
+	if independentOwner {
+		fmt.Fprintln(&source, ` let outer = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`)
+	}
+	fmt.Fprintln(&source, " scope {")
+	fmt.Fprintln(&source, `  let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`)
+	fmt.Fprint(&source, "  let wide = Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		owner := "inner"
+		if independentOwner {
+			owner = "outer"
+		}
+		fmt.Fprintf(&source, " f%d: %s", i, owner)
+	}
+	fmt.Fprintln(&source, " }")
+	zOwner := "inner"
+	if safe {
+		zOwner = "borrowed"
+	}
+	if enum {
+		if reverse {
+			fmt.Fprintf(&source, "  let root = Root.P { z: %s, a: wide }\n", zOwner)
+		} else {
+			fmt.Fprintf(&source, "  let root = Root.P { a: wide, z: %s }\n", zOwner)
+		}
+		fmt.Fprintln(&source, "  match root { Root.P { z } => z }")
+	} else {
+		if reverse {
+			fmt.Fprintf(&source, "  let root = Root { z: %s, a: wide }\n", zOwner)
+		} else {
+			fmt.Fprintf(&source, "  let root = Root { a: wide, z: %s }\n", zOwner)
+		}
+		fmt.Fprintln(&source, "  root.z")
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
+func ownershipCoverageBorrowedSummarySource(width int, enum, reverse bool) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "record Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " }")
+	if enum {
+		if reverse {
+			fmt.Fprintln(&source, "enum Root { P { z: Wide, middle: File, a: Wide } }")
+		} else {
+			fmt.Fprintln(&source, "enum Root { P { a: Wide, middle: File, z: Wide } }")
+		}
+	} else if reverse {
+		fmt.Fprintln(&source, "record Root { z: Wide, middle: File, a: Wide }")
+	} else {
+		fmt.Fprintln(&source, "record Root { a: Wide, middle: File, z: Wide }")
+	}
+	fmt.Fprintln(&source, "fn pick(wide: Wide, file: File) -> File {")
+	if enum {
+		if reverse {
+			fmt.Fprintln(&source, " let root = Root.P { z: wide, middle: file, a: wide }")
+		} else {
+			fmt.Fprintln(&source, " let root = Root.P { a: wide, middle: file, z: wide }")
+		}
+		fmt.Fprintln(&source, " match root { Root.P { middle } => middle }")
+	} else {
+		if reverse {
+			fmt.Fprintln(&source, " let root = Root { z: wide, middle: file, a: wide }")
+		} else {
+			fmt.Fprintln(&source, " let root = Root { a: wide, middle: file, z: wide }")
+		}
+		fmt.Fprintln(&source, " root.middle")
+	}
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn probe(borrowed: File) -> File throws {IoError} {")
+	fmt.Fprintln(&source, " scope {")
+	fmt.Fprintln(&source, `  let inner = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`)
+	fmt.Fprint(&source, "  let wide = Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: borrowed", i)
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "  pick(wide, inner)")
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
+func ownershipCoverageTerminalSource(width, layers int, enum bool, borrowedIndex, selection int) string {
+	var source strings.Builder
+	fmt.Fprint(&source, "record Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		fmt.Fprintf(&source, " f%d: File", i)
+	}
+	fmt.Fprintln(&source, " }")
+	if layers == 0 {
+		if enum {
+			fmt.Fprintln(&source, "enum Root { P { wide: Wide } }")
+		} else {
+			fmt.Fprintln(&source, "record Root { wide: Wide }")
+		}
+	} else {
+		fmt.Fprintln(&source, "record Level0 { wide: Wide }")
+		for i := 1; i <= layers; i++ {
+			fmt.Fprintf(&source, "record Level%d { child: Level%d }\n", i, i-1)
+		}
+		if enum {
+			fmt.Fprintf(&source, "enum Root { P { child: Level%d } }\n", layers)
+		} else {
+			fmt.Fprintf(&source, "record Root { child: Level%d }\n", layers)
+		}
+	}
+	fmt.Fprintf(&source, "effect fn probe(borrowed: File) -> File throws {IoError} {\n scope {\n  let inner = run Files.openRead(\"examples/fixture.txt\").provide<Files>(LiveFiles)\n  let value = Wide {")
+	for i := 0; i < width; i++ {
+		if i > 0 {
+			fmt.Fprint(&source, ",")
+		}
+		value := "inner"
+		if i == borrowedIndex {
+			value = "borrowed"
+		}
+		fmt.Fprintf(&source, " f%d: %s", i, value)
+	}
+	fmt.Fprintln(&source, " }")
+	if layers == 0 {
+		if enum {
+			fmt.Fprintf(&source, "  let root = Root.P { wide: value }\n  match root { Root.P { wide } => wide.f%d }\n", selection)
+		} else {
+			fmt.Fprintf(&source, "  let root = Root { wide: value }\n  root.wide.f%d\n", selection)
+		}
+	} else {
+		fmt.Fprintln(&source, "  let node0 = Level0 { wide: value }")
+		for i := 1; i <= layers; i++ {
+			fmt.Fprintf(&source, "  let node%d = Level%d { child: node%d }\n", i, i, i-1)
+		}
+		if enum {
+			fmt.Fprintf(&source, "  let root = Root.P { child: node%d }\n", layers)
+			path := "child"
+			for i := 0; i < layers; i++ {
+				path += ".child"
+			}
+			fmt.Fprintf(&source, "  match root { Root.P { child } => %s.wide.f%d }\n", path, selection)
+		} else {
+			fmt.Fprintf(&source, "  let root = Root { child: node%d }\n", layers)
+			path := "root.child"
+			for i := 0; i < layers; i++ {
+				path += ".child"
+			}
+			fmt.Fprintf(&source, "  %s.wide.f%d\n", path, selection)
+		}
+	}
+	fmt.Fprintln(&source, " }")
+	fmt.Fprintln(&source, "}")
+	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	return source.String()
+}
+
 func TestOwnershipSamePathAlternativesRemainIncompleteAtTheFactCap(t *testing.T) {
 	for _, width := range []int{16, 64, 65, 80} {
 		for _, borrowedFirst := range []bool{false, true} {
@@ -910,6 +1113,58 @@ func TestOwnershipNestedSafeSiblingStaysIndependentFromIncompleteSibling(t *test
 				requireOwnershipRejected(t, source)
 			}
 		})
+	}
+}
+
+func TestOwnershipCoverageRetainsOmittedSiblingUncertainty(t *testing.T) {
+	for _, enum := range []bool{false, true} {
+		for _, reverse := range []bool{false, true} {
+			name := fmt.Sprintf("enum-%t-reverse-%t", enum, reverse)
+			t.Run(name, func(t *testing.T) {
+				requireOwnershipRejected(t, ownershipCoverageSiblingSource(65, enum, reverse, false, false))
+				requireOwnershipRejected(t, ownershipCoverageSiblingSource(65, enum, reverse, true, false))
+				requireOwnershipAccepted(t, ownershipCoverageSiblingSource(65, enum, reverse, false, true))
+			})
+		}
+	}
+}
+
+func TestOwnershipCoverageRetainsParameterProvenance(t *testing.T) {
+	for _, enum := range []bool{false, true} {
+		for _, reverse := range []bool{false, true} {
+			name := fmt.Sprintf("enum-%t-reverse-%t", enum, reverse)
+			t.Run(name, func(t *testing.T) {
+				source := ownershipCoverageBorrowedSummarySource(65, enum, reverse)
+				requireOwnershipRejectedWithoutArgumentUse(t, source)
+			})
+		}
+	}
+}
+
+func TestOwnershipCoverageRetainsEveryTerminalAroundTheFactCap(t *testing.T) {
+	for _, width := range []int{63, 64, 65, 66} {
+		width := width
+		for _, layers := range []int{0, 1, 2} {
+			layers := layers
+			for _, enum := range []bool{false, true} {
+				enum := enum
+				name := fmt.Sprintf("width-%d-layers-%d-enum-%t", width, layers, enum)
+				t.Run(name, func(t *testing.T) {
+					for position := 0; position < width; position++ {
+						position := position
+						t.Run(fmt.Sprintf("position-%d-safe", position), func(t *testing.T) {
+							requireOwnershipAccepted(t, ownershipCoverageTerminalSource(width, layers, enum, position, position))
+						})
+						if position == 0 {
+							continue
+						}
+						t.Run(fmt.Sprintf("position-%d-unsafe", position), func(t *testing.T) {
+							requireOwnershipRejected(t, ownershipCoverageTerminalSource(width, layers, enum, position, 0))
+						})
+					}
+				})
+			}
+		}
 	}
 }
 
