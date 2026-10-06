@@ -72,6 +72,38 @@ def complete_references(value):
         assert all(edge["from"] in nodes and edge["to"] in nodes for edge in value["edges"])
 
 
+def layer_constructor_references_resolve(graph):
+    types = {item["id"] for item in graph["types"]}
+    rows = {item["id"] for item in graph["rows"]}
+
+    def type_ref_resolves(ref):
+        identity = ref.get("ref")
+        assert identity and identity in types, ("missing constructor type", ref)
+        for child in [*ref.get("args", []), ref.get("result")]:
+            if child:
+                assert child in types, ("missing constructor type child", child)
+        for row in (ref.get("failureRow"), ref.get("serviceRow")):
+            if row:
+                assert row in rows, ("missing constructor row", row)
+
+    assert graph["layers"]
+    for layer in graph["layers"]:
+        for node in layer["nodes"]:
+            constructor = node["constructor"]
+            type_ref_resolves(constructor["type"])
+            type_ref_resolves(constructor["contract"])
+            for parameter in node.get("configurationParameters", []):
+                type_ref_resolves(parameter["typeRef"])
+            for argument in node.get("configurationArguments", []):
+                value = argument["type"]
+                type_ref_resolves(value["type"])
+                if value.get("contract"):
+                    type_ref_resolves(value["contract"])
+                for row in (value.get("failureRow"), value.get("serviceRow")):
+                    if row:
+                        assert row in rows, ("missing constructor argument row", row)
+
+
 with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
     workspace = pathlib.Path(directory)
     path = workspace / "app.ef"
@@ -117,9 +149,15 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
         complete_references(workflow)
         delivery = next(node for node in workflow["layer"]["nodes"] if node["service"] == "Delivery")
         assert [argument["type"]["type"]["kind"] for argument in delivery["configurationArguments"]] == ["record", "enum"]
-        graph = json.loads(cli("graph", str(path), "--target", target).stdout)
+        graph_output = cli("graph", str(path), "--target", target).stdout
+        graph = json.loads(graph_output)
         assert next(layer for layer in graph["layers"] if layer["name"] == "Fixture") == plan
         assert any(edge["kind"] == "provides-layer" and edge["to"] == plan["id"] for edge in graph["edges"])
+        assert graph["producer"] and graph["snapshot"]
+        assert graph["producer"]["qualifier"] == graph["snapshot"]["producer"]
+        assert graph["snapshot"]["revision"] == graph["revision"] and graph["snapshot"]["target"] == target
+        assert graph["typeProjectionUsage"]["responseBytes"] == len(graph_output.rstrip("\n").encode("utf-8"))
+        layer_constructor_references_resolve(graph)
         queried = json.loads(cli("query", str(path), str(offset), "--target", target).stdout)
         helper = json.loads(cli("query", str(path), str(helper_offset), "--target", target).stdout)
         caller = json.loads(cli("inspect", str(path), "main", "--target", target).stdout)
@@ -127,7 +165,10 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
         for view in (checked, inspected, graph, queried, helper, caller):
             assert view["producerIdentity"] and view["sources"]
             assert view["bundledBindings"] and view["bundledInterfaces"]
+            assert view["producer"] and view["snapshot"]
+            assert view["snapshot"]["producer"] == view["producer"]["qualifier"]
             assert view["revision"] == checked["revision"] and view["target"] == target
+            assert view["snapshot"]["revision"] == view["revision"] and view["snapshot"]["target"] == target
             assert view["typeProjectionComplete"]
             complete_references(view)
         assert cli("run", str(path), "--target", target).stdout == "fixture:fixture\n"

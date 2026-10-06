@@ -242,6 +242,7 @@ type Timings struct {
 	TotalMicros  int64 `json:"totalMicros"`
 }
 type Result struct {
+	producerMetadata       ProducerMetadata
 	BundledInterfaces      []BundledInterfaceInfo `json:"bundledInterfaces,omitempty"`
 	Sources                []SourceInfo           `json:"sources,omitempty"`
 	BundledBindings        []BundledBinding       `json:"bundledBindings,omitempty"`

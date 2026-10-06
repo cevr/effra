@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/producer"
 	sourcefile "effra.local/prototype/internal/source"
 )
 
@@ -63,6 +64,7 @@ type arguments struct {
 	URIProvided      bool
 	Symbol           string `json:"symbol"`
 	ExpectedRevision string `json:"expectedRevision"`
+	ExpectedProducer string `json:"expectedProducer"`
 	ExpectedDigest   string
 	Target           string `json:"target"`
 	Strict           bool   `json:"strict"`
@@ -312,6 +314,7 @@ func writeMCPError(output io.Writer, id json.RawMessage, code int, message strin
 func tools() []tool {
 	schema := func(symbol bool) map[string]any {
 		properties := map[string]any{"target": map[string]any{"type": "string", "enum": []string{"go", "js"}, "default": "go"}, "file": map[string]string{"type": "string", "description": "Workspace-relative .ef source file"}, "expectedRevision": map[string]string{"type": "string", "description": "Optional source hash; reject a stale snapshot"}}
+		properties["expectedProducer"] = map[string]any{"type": "string", "maxLength": 256, "description": "Optional snapshot producer qualifier; reject stale cross-build or cross-process facts"}
 		required := []string{"file"}
 		if symbol {
 			properties["symbol"] = map[string]string{"type": "string"}
@@ -327,10 +330,11 @@ func tools() []tool {
 	formatSchema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"file":           map[string]any{"type": "string", "description": "Workspace-relative .ef disk snapshot"},
-			"source":         map[string]any{"type": "string", "description": "Explicit .ef source buffer; empty is valid"},
-			"uri":            map[string]any{"type": "string", "description": "Optional display URI for a source buffer; never read"},
-			"expectedDigest": map[string]any{"type": "string", "description": "Optional exact input-byte SHA-256 digest"},
+			"file":             map[string]any{"type": "string", "description": "Workspace-relative .ef disk snapshot"},
+			"source":           map[string]any{"type": "string", "description": "Explicit .ef source buffer; empty is valid"},
+			"uri":              map[string]any{"type": "string", "description": "Optional display URI for a source buffer; never read"},
+			"expectedDigest":   map[string]any{"type": "string", "description": "Optional exact input-byte SHA-256 digest"},
+			"expectedProducer": map[string]any{"type": "string", "maxLength": 256, "description": "Optional formatter producer qualifier"},
 		},
 		"oneOf": []map[string]any{
 			{"required": []string{"file"}},
@@ -605,6 +609,7 @@ func formatCode(root string, args arguments) (any, error) {
 		return nil, fmt.Errorf("formatted source exceeds %d MiB limit", maxFormatOutputBytes/(1024*1024))
 	}
 	formatted := map[string]any{
+		"producer":         producer.Current(),
 		"schemaVersion":    result.SchemaVersion,
 		"formatterVersion": compiler.FormatterIdentity,
 		"origin":           origin,
@@ -657,6 +662,9 @@ func readWorkspaceSource(root, relative string, maxBytes int) ([]byte, string, e
 
 func call(root, name string, args arguments) (any, error) {
 	if name == "code.format" {
+		if err := producer.Current().Require(args.ExpectedProducer); err != nil {
+			return nil, err
+		}
 		return formatCode(root, args)
 	}
 	if name == "lint.rules" {
@@ -699,6 +707,12 @@ func call(root, name string, args arguments) (any, error) {
 		target = "go"
 	}
 	r := compiler.CompileAt(string(source), target, filepath.Dir(filepath.Join(root, args.File)))
+	if err := r.Qualify(producer.Current()); err != nil {
+		return nil, err
+	}
+	if err := r.RequireProducer(args.ExpectedProducer); err != nil {
+		return nil, err
+	}
 	if args.ExpectedRevision != "" && args.ExpectedRevision != r.Revision {
 		return nil, fmt.Errorf("stale semantic revision; current revision is %s", r.Revision)
 	}
@@ -725,6 +739,7 @@ func call(root, name string, args arguments) (any, error) {
 			return nil, fmt.Errorf("test catalog type projection unavailable: %s", projection.Error)
 		}
 		response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "tests": tests, "liveRequired": r.TestMode(false) != nil, "execution": "ef test; MCP does not execute tests", "types": projection.Types, "rows": projection.Rows, "declarations": r.ProjectionDeclarations(projection), "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": true}
+		r.AddSourceInputs(response)
 		if _, err := r.ValidateProjectionResponse(projection, response); err != nil {
 			return nil, err
 		}
@@ -925,6 +940,12 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 				return args, fmt.Errorf("invalid tool argument %s", key)
 			}
 			args.ExpectedRevision = text
+		case "expectedProducer":
+			text, ok := value.(string)
+			if !ok || text == "" || len(text) > 256 || name == "project.describe" || name == "lint.rules" {
+				return args, fmt.Errorf("invalid expectedProducer argument")
+			}
+			args.ExpectedProducer = text
 		case "symbol":
 			text, ok := value.(string)
 			if !ok {

@@ -21,6 +21,7 @@ type LintDiagnostic struct {
 	Span     Span   `json:"span"`
 }
 type LintResult struct {
+	ProducerMetadata
 	SchemaVersion   int              `json:"schemaVersion"`
 	Revision        string           `json:"revision"`
 	Target          string           `json:"target"`
@@ -130,6 +131,7 @@ func suppressionFor(suppressions map[suppressionKey][]*lintSuppression, revision
 }
 func (r *Result) Lint(strict bool) LintResult {
 	out := LintResult{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Checked: r.Checked, LintPassed: r.Checked, Strict: strict, Diagnostics: r.Diagnostics, LintDiagnostics: []LintDiagnostic{}}
+	out.ProducerMetadata = r.producerMetadata
 	if r.Program == nil {
 		return out
 	}

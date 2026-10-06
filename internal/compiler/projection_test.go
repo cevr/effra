@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"effra.local/prototype/internal/producer"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -10,10 +11,59 @@ import (
 
 func TestProjectionJSONAccountingMatchesActualEncoding(t *testing.T) {
 	values := []any{nil, true, 42, []string{}, []string(nil), map[string]any{"escaped": "\"\\\n<>&\u2028é", "nested": []any{false, 17, "ok"}}, TypeRef{ID: "t:one", ArgIDs: []string{"t:two"}}, Compile(`effect fn main() -> string { "ok" }`).CheckResponse()}
+	for _, qualified := range []bool{false, true} {
+		for _, declared := range []bool{false, true} {
+			r := Compile(`effect fn main() -> string { "ok" }`)
+			if qualified {
+				identity := producer.Identity{Strength: "unavailable", ReuseScope: "process", Qualifier: "process:oracle", Reason: "unavailable"}
+				if declared {
+					identity.Declaration = producer.Declaration{GoVersion: "go1.27.0", Module: "effra.local/prototype", VCSModified: "true"}
+				}
+				if err := r.Qualify(identity); err != nil {
+					t.Fatal(err)
+				}
+			}
+			graph, err := r.Graph()
+			if err != nil {
+				t.Fatal(err)
+			}
+			values = append(values, graph, r.DiagnosticReport(SourceSnapshot{Text: `effect fn main() -> string { "ok" }`, Origin: "buffer"}, false), r.Lint(false), r.CheckResponse())
+		}
+	}
+	values = append(values, struct {
+		ProducerMetadata `json:"named"`
+		Empty            Span `json:"empty,omitempty"`
+	}{})
+	values = append(values, struct{ *ProducerMetadata }{}, struct{ *ProducerMetadata }{&ProducerMetadata{}})
+	type left struct {
+		Name string `json:"same"`
+	}
+	type right struct {
+		Name string `json:"same"`
+	}
+	// Build intentional JSON-name collisions reflectively: go vet correctly
+	// rejects these shapes as production declarations, while encoding/json's
+	// field-dominance rule still provides an independent accounting oracle.
+	ambiguous := reflect.New(reflect.StructOf([]reflect.StructField{
+		{Name: "Left", Type: reflect.TypeOf(left{}), Anonymous: true},
+		{Name: "Right", Type: reflect.TypeOf(right{}), Anonymous: true},
+	})).Elem()
+	ambiguous.Field(0).Set(reflect.ValueOf(left{"hidden"}))
+	ambiguous.Field(1).Set(reflect.ValueOf(right{"also hidden"}))
+	direct := reflect.New(reflect.StructOf([]reflect.StructField{
+		{Name: "Left", Type: reflect.TypeOf(left{}), Anonymous: true},
+		{Name: "Name", Type: reflect.TypeOf(""), Tag: `json:"same"`},
+	})).Elem()
+	direct.Field(0).Set(reflect.ValueOf(left{"hidden"}))
+	direct.Field(1).SetString("visible")
+	values = append(values, ambiguous.Interface(), direct.Interface())
 	for _, value := range values {
 		actual, err := json.Marshal(value)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if graph, ok := value.(*DependencyGraph); ok && graph.TypeProjectionUsage.ResponseBytes != len(actual) {
+			t.Fatalf("graph published incorrect receipt: %d vs %d", graph.TypeProjectionUsage.ResponseBytes, len(actual))
 		}
 		size, err := encodedSize(value, len(actual))
 		if err != nil || size != len(actual) {

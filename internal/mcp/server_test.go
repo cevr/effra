@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/producer"
 )
 
 func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
@@ -721,7 +722,11 @@ let forgotten = task();
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
 		t.Fatal(err)
 	}
-	expected := compiler.Compile(source).Lint(true)
+	checked := compiler.Compile(source)
+	if err := checked.Qualify(producer.Current()); err != nil {
+		t.Fatal(err)
+	}
+	expected := checked.Lint(true)
 	result, err := call(root, "project.lint", arguments{File: "main.ef", Strict: true})
 	if err != nil {
 		t.Fatal(err)

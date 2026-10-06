@@ -585,8 +585,7 @@ func (r *Result) LayerInspection(name string) (map[string]any, error) {
 		return nil, fmt.Errorf("type projection unavailable: %s", projection.Error)
 	}
 	response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "layer": plan, "types": projection.Types, "rows": projection.Rows, "declarations": r.ProjectionDeclarations(projection), "typeProjectionComplete": true}
-	response["producerIdentity"], response["sources"] = r.ProducerIdentity, r.Sources
-	response["bundledBindings"], response["bundledInterfaces"] = r.BundledBindings, r.BundledInterfaces
+	r.AddSourceInputs(response)
 	usage, err := r.ValidateProjectionResponse(projection, response)
 	if err != nil {
 		return nil, err

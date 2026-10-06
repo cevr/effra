@@ -50,6 +50,47 @@ The same once-computed producer identity qualifies formatter results and custom-
 
 Expose a focused `ef type FILE` query with an explicit symbol or byte offset, and the equivalent MCP `code.type`; retain existing `code.typeAt` behavior for compatibility. Full inspect output shares these definitions. Allow a named type-definition query by revision-scoped identity, so a consumer can expand a reference without fetching an entire project. Specify finite node/edge/byte budgets and clear exhaustion behavior. Do not cap fields while describing the omitted part as complete. Include deterministic ordering and an additive/versioned wire migration.
 
+### Implemented producer qualification checkpoint
+
+Semantic CLI/MCP reports add `producer` and `snapshot` metadata without changing
+source/import `revision` or canonical reference IDs. `producerIdentity` remains
+the declared private checker/interface ABI; it is not an artifact fingerprint.
+The snapshot tuple contains semantic schema version, revision, target, producer
+qualifier and reuse scope. A consumer reusing facts must retain the entire tuple.
+MCP semantic tools accept optional `expectedProducer` alongside `expectedRevision`;
+an unequal qualifier is an explicit stale-producer refusal. Omitting it requests
+fresh facts and does not validate cached facts from another compiler.
+
+The shared lazy producer owner identifies the executing Go host on Linux by
+streaming `/proc/self/exe` once, including when the installation pathname has
+been atomically replaced. SHA-256 content identity has `executing-artifact`
+strength and `artifact` reuse scope. Unreadable, unsupported or over-256-MiB
+images report `unavailable`, with a random stable process qualifier and `process`
+reuse scope; if that qualifier cannot be generated, scope is `none` and facts
+cannot be reused. Other platforms do not claim executing-image identification.
+Informative whitelisted Go/module/VCS/platform declarations are bounded and
+separate from the content key. No Git subprocess runs during acquisition or
+queries. Private distributed interface compatibility continues to use its ABI
+and admitted content hashes, rather than this host-image digest.
+
+Formatter reports carry the same producer identity while retaining their
+independent style/schema version and input/output byte digests. `code.format`
+also accepts `expectedProducer`. Built-in lint and shared diagnostic reports
+carry the qualified semantic snapshot; external rule-pack analysis identities
+remain part of the unfinished custom-lint unit. Compilation, emission, build,
+run and raw `fmt --stdin` do not acquire inspection identity. LSP diagnostics
+still publish the finite diagnostics-only protocol and expose no reusable type
+references or new navigation capabilities.
+
+The digest identifies the statically linked executing host, not authenticated
+build provenance, arbitrary dynamic dependencies or in-place executable writes.
+This checkpoint does not implement lexical declaration/type-definition queries,
+custom rule packs or full LSP. Real atomic replacement/fresh-process controls,
+different dirty hosts with identical informative declarations, explicit failure
+fallback and a separate controlled-opener single-acquisition test are required.
+Producer hashing cost measurement remains deferred; no performance claim follows
+from these correctness controls.
+
 ## LSP adapter
 
 Ship `ef lsp` over stdio after shared diagnostics and types. Implement initialization, shutdown/exit, full-document open/change/close synchronization, versioned publishDiagnostics, hover and definition using the shared model. Advertise only implemented capabilities. Select UTF-16 positions initially; do not claim negotiated UTF-8/UTF-32 support without conversion tests. Plain messages and plaintext hover remain compatible without optional markup capabilities.
