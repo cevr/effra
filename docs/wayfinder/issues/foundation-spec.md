@@ -1,4 +1,4 @@
-<!-- {"id": "foundation-spec", "title": "Production foundation implementation", "status": "open", "labels": ["implementation:spec"], "parent": "map", "assignee": null, "blocked_by": []} -->
+<!-- {"id": "foundation-spec", "title": "Production foundation implementation", "status": "open", "labels": ["implementation:spec"], "parent": "map", "assignee": "cevr", "blocked_by": []} -->
 # Production foundation implementation
 
 ## Question

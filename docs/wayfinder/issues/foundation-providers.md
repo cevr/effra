@@ -4,3 +4,7 @@
 ## Question
 
 Implement checked provider dependencies/configuration, lexical capture and truthful dependency graph relationships per [the foundation spec](../../specs/production-foundations.md). Caller runtime ownership remains current; provider captures do not retain a closed construction fiber.
+
+## Implementation asset
+
+[Construction and lexical capture seam](../../specs/provider-construction.md).
