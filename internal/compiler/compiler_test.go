@@ -98,6 +98,36 @@ func TestContractsAndEntry(t *testing.T) {
 		t.Fatal("pure entry accepted")
 	}
 }
+
+func TestRaisesSyntaxPreservesRowsAcrossTargets(t *testing.T) {
+	source := `error Missing error Broken
+service Users { effect fn get(id: string) -> string raises {Missing, Broken} }
+impl Memory for Users { effect fn get(id: string) -> string raises {Missing, Broken} { "Ada" } }
+effect fn greeting(id: string) -> string raises {Missing, Broken} uses {Users} { run Users.get(id) }
+effect fn recovered(id: string) -> string raises {Broken} uses {Users} { run greeting(id).catch<Missing>("unknown") }
+effect fn main() -> string raises {Broken} { run recovered("42").provide<Users>(Memory) }`
+	for _, target := range []string{"go", "js"} {
+		t.Run(target, func(t *testing.T) {
+			r := CompileFor(source, target)
+			if !r.Checked {
+				t.Fatalf("raises source did not check: %+v", r.Diagnostics)
+			}
+			if symbol := r.Find("recovered"); symbol == nil || !slices.Equal(symbol.Contract.Errors, []string{"Broken"}) || !slices.Equal(symbol.Actual.Services, []string{"Users"}) {
+				t.Fatalf("raises rows changed: %+v", r.Find("recovered"))
+			}
+			if err := r.Entry(); err != nil {
+				t.Fatal(err)
+			}
+			if target == "go" {
+				if _, err := r.EmitGo(); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, _, err := r.Emit(false); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 func TestDeferredRows(t *testing.T) {
 	r := Compile(`effect fn main() -> () { let pending = Console.log("never executed"); () }`)
 	if !r.Checked || len(r.Find("main").Actual.Services) != 0 {

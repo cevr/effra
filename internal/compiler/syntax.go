@@ -476,7 +476,10 @@ func (p *parser) function(body bool) *Function {
 	}
 	p.expect("->")
 	f.Return = p.typ()
-	if p.accept("throws") {
+	// Keep the old spelling temporarily while the authored corpus migrates to
+	// `raises`. The compatibility branch is removed in the final migration
+	// commit, where `throws` receives a source-span diagnostic.
+	if p.accept("raises") || p.accept("throws") {
 		f.Errors = p.row()
 	}
 	if p.accept("uses") {
