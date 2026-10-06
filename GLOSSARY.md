@@ -8,6 +8,10 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Closed enum**: A nominal set of alternatives, each with its own declared payload.
 
+**Absence**: An explicitly selected closed alternative describing a missing value, distinct from an uninitialized field or a bare nil/null value.
+
+**Option** (specified): A generic closed enum with `None` and `Some(T)` alternatives. `Some` contains an admitted value of `T`, never an unchecked nil host reference.
+
 **Exhaustive match**: An interpretation that covers each declared alternative exactly once and executes only its selected arm.
 
 **Failure payload**: The declared data carried by a named failure, separate from an ordinary success value.
