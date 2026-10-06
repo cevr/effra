@@ -6,6 +6,8 @@ Effra has a credible semantic core: lazy execution, explicit failure/service con
 
 Records, closed ADTs and match now cover the first application-data slice. The source review shows why they are insufficient by themselves: notification providers need dependent initialization; SDKs return named objects; event consumers need decoding and bounded replay; command services need transactions and stable identity.
 
+The owner-directed [bundled standard library parity map](standard-library.md) defines the larger distribution: core contracts stay compiler-enforced, while native facilities ship as inspectable libraries under the same release. Modules, reusable types and effectful handler/combinator seams precede broad library expansion.
+
 ## Gaps exposed by the inspected applications
 
 | Real pattern | What Effra already supplies | What blocks a faithful port | Owner |
