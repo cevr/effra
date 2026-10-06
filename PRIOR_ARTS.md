@@ -66,7 +66,7 @@ See [showcases](docs/showcases.md), [pattern review](docs/research/effect-native
 
 ## To survey
 
-- Make the [Effect language/library partition](docs/research/effect-language-boundary.md) executable through common typed functions, rows and ownership rather than library-specific compiler branches. Preserve automatic Go standard-protocol interoperability: method-set assignability, native values, partial results and explicit lifetime/cancellation contracts. Current primitive imports establish none of the wider host-object guarantees.
+- Make the [Effect language/library partition](docs/research/effect-language-boundary.md) executable through common typed functions, rows and ownership rather than library-specific compiler branches. Preserve automatic Go standard-protocol interoperability through the [finite four-unit contract](docs/specs/go-protocol-interop.md): method-set assignability, native values, partial results and explicit lifetime/cancellation contracts. Installed Go1.27.0 `src/io`, `src/io/fs`, `src/os`, `src/net`, `src/context` and `src/go/types` ground the acceptance cases. Current primitive imports establish none of the wider host-object guarantees.
 
 - Define the finite optional local-supervision contract after the first machine profile: fresh factories/acquisitions, full causes, cleanup-before-restart, restart budgets and graph inspection. Separately qualify durable addressing, transactional acknowledgement, deduplication/fencing, hibernation and workflow replay before implementing their providers. The [actor comparison](docs/research/actor-model-and-durability.md) is source research, not implementation or production fault-tolerance evidence.
 

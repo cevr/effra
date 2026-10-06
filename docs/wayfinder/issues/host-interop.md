@@ -1,0 +1,4 @@
+<!-- {"id": "host-interop", "title": "Automatic Go host values and standard protocols", "status": "open", "labels": ["implementation:spec"], "parent": "map", "assignee": null, "blocked_by": ["native-interfaces"]} -->
+# Automatic Go host values and standard protocols
+
+Implement the owner-required [Go protocol contract](../../specs/go-protocol-interop.md) in four gated units. Native declaration/method reuse preserves Go interface assignment, concrete values, optional methods and complete returns. Resource ownership, retention, cancellation and callback execution remain explicit independent contracts. Current primitive imports are the regression baseline, not completion evidence. Preserve Go-only build independence and unused-module exclusion. Source research is complete; public executable acceptance, native lifecycle race checks and independent review precede closure.

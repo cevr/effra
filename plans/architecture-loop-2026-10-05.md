@@ -131,7 +131,17 @@ Live checks passed for actual native CLI reuse, ordinary/test and same-basename 
 
 Carried: integrate the already reviewed runtime source split over preserved legacy output; implement checked application reachability after native interfaces; establish actual size/dependency/symbol receipts in the final measurement phase. Hard-link unsupported filesystems, adversarial same-user path replacement, literal process-kill and power-loss durability remain outside the demonstrated publisher contract. Other feature lanes and benchmarks are not certified by this gate. No push, paid deployment or HITL closure.
 
-## Runtime source-module integration
+## Language/library and Go protocol constraint
+
+Owner steering2026-10-06: distinguish Effect concepts that become regular language mechanisms from runtime primitives and library policies, and automatically preserve Go's standard native protocols/descriptors. [Partition](../docs/research/effect-language-boundary.md) uses immutable Effect4.0.1 source, not the moving cache head. [Go protocol contract](../docs/specs/go-protocol-interop.md) follows inspected Go1.27 source, current importer/runtime owners, Borgo interface inference and generic external SDK retention patterns. It defines four gated units under host-interop: complete native identities/results, methods/interface assignment, owned resource borrowing/cancellation, and explicit callbacks/inverse bridges. Source comparison is complete; implementation and executable acceptance remain open. No application-specific source was copied to public docs.
+
+Decided by **Redesign From First Principles**: one canonical host graph with Go assignment authority preserves concrete identity and optional native methods; ownership/trust facts remain separate. A Reader method set cannot prove cooperative cancellation, a Close name cannot prove release authority, and a descriptor cannot become a portable owned File by numeric coercion. Regular typed functions/rows should carry library contracts; a runtime primitive need not create a keyword. Go-only builds remain independent of TypeScript; unused library modules remain excluded by the separate reachability contract.
+
+## Upstream corpus and behavior-map integration details
+
+2026-10-06: first corpus53d7c939 and mapping3ecc248, with final causal proof repaira395674, merged current root7a6ebf3 into the independent branch at62baa74. Branch and root full gates pass, SHA25660e183866005494c16ab575d0ac542e1c712835d01699bcd8c5d7e87f47e22ba and0714e37576f0495039c9a93534510a079cf8a9b15365835d438c8b9c47ed0952 in `/tmp/effra-upstream-{branch,root}-integration-gate.log`. Licensed746 reference files and26 license files are unchanged source inputs, never counted as746 native passes. Ten selected anchored behavior IDs distinguish covered/different/pending/unsupported semantics; selected generated Go/JS acceptance executes. Both independent Claude rounds consumed; finite Astra closure verifies the deep-JSON causal refusal and ten-hour virtual-time control. All31 legacy output nodes preserved; no performance claim or push. Further library/server behavioral ports extend this authority.
+
+## Runtime source-module integration details
 
 2026-10-06: completed the preceding source-split carried item. Reviewed0e4f5be's source/catalog/cache/inventory repair merged current root802737d into runtime-modules at637313b, passed that branch gate, then integrated the same tree and passed the root gate. Independent exact move proof preserves11 declarations/comments and7 unchanged lifecycle/scheduler files; selected module closures compile with inherited caches and trimpath controls. The original additive-upgrade failure remains recorded; no legacy output was deleted to bypass it.
 

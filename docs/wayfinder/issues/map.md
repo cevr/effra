@@ -29,6 +29,8 @@ Owner update, 2026-10-06: defer benchmark development and measurement until the 
 
 ## Additional implementation
 
+- [Automatic Go host values and standard protocols](host-interop.md): owner-required native declaration reuse, complete results, direct method/interface compatibility and explicit managed borrowing/callback boundaries. Four finite units and source-grounded acceptance are specified; primitive-only imports do not establish these guarantees.
+
 - [Bound shared syntax traversal](syntax-traversal.md): resolved at45b43d2 with canonical child visits across formatter, lint, diagnostics, graph, type queries and test admission. Permanent deep CLI/MCP queries retain their facts and service a queued ping; integration gates pass.
 
 - [Canonical formatter](formatter.md): resolved through19a450b with one comment-preserving printer, bounded `ef fmt`/read-only MCP adapters and twelve authored examples checked by the gate. Independent review, exact-output replay and integration gates pass. [Editor formatting](editor-formatting.md) remains separately pending the language server.
@@ -44,7 +46,7 @@ Owner update, 2026-10-06: defer benchmark development and measurement until the 
 
 - [Native codecs and typed server contracts](native-server-spec.md): reusable bundled interfaces, typed function values, checked codecs, managed endpoints and compatible unary RPC precede actual framework measurements.
 
-- [Pinned upstream tests and executable conformance mapping](upstream-conformance.md): licensed reference corpus plus explicit behavior-to-Effra test mapping; copied tests do not count as native passes.
+- [Pinned upstream tests and executable conformance mapping](upstream-conformance.md): integrated and reviewed at62baa74 with licensed immutable corpus, ten qualified behavior mappings and actual selected Go/JS acceptance. Full integration gates pass; copied tests do not count as native passes. Later library/server tasks extend the same mapping.
 
 - [Checked machines and owned actors](state-machines.md): owner-requested state-machine primitive over ordinary ADTs, explicit pure or effectful steps, owned invocation and shared graph inspection. Flat states first; advanced statecharts/durability remain unsupported until specified.
 
@@ -70,7 +72,7 @@ Owner update, 2026-10-06: defer benchmark development and measurement until the 
 - The server slice's HTTP/database boundary and startup/shutdown wiring once lifecycle and backend semantics have concrete evidence.
 - The shape of general higher-order row inference once the small compiler reveals its pressure points.
 - Runtime/source correlation beyond current bounded scope snapshots.
-- Full named host values, methods, callbacks, codecs and wire migration policy after closed data and provider construction are exercised.
+- TypeScript host values/declaration consumption, broader foreign generic support and wire migration policy beyond the finite Go protocol and codec contracts.
 - General transactional-program admission, durable replay/ACK accounting and database transactions/outbox delivery beyond the finite bounded-flow and managed-platform contracts.
 - Incremental package checking, reusable host-import sessions and general verified edit plans after the larger source model is established. Canonical formatting now has the finite implementation contract above.
 

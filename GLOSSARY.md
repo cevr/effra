@@ -38,6 +38,14 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Host declaration**: A Go or TypeScript declaration supplying the native shape and identity of an imported value or callable.
 
+**Native Go protocol** (specified): An imported Go interface and its method set, interpreted by Go's assignment rules. Its behavioral obligations remain distinct from type compatibility.
+
+**Host borrow** (specified): Use of a native value under an existing owner's lifetime without acquiring release authority; retention and aliasing constraints remain explicit.
+
+**Host adoption** (specified): Establishing managed release authority for an admitted native resource and its tracked aliases under an owning scope.
+
+**Native descriptor** (specified): An OS-specific handle whose validity follows a native resource lifetime; it is distinct from the resource object and its interfaces.
+
 **Codec** (specified, not yet implemented): A checked witness relating a wire type and a domain type through separately contracted decoding and encoding operations.
 
 **Structural derivation** (specified): Generating a codec's structural rules from canonical checked data declarations and an explicit representation policy.
