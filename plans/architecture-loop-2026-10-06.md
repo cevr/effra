@@ -122,6 +122,8 @@ Guardrails added: pending implementation receipts. Each missed static guarantee 
 
 ### Carried
 
+Promoted the existing measured generated-Go hotspot into finite native-execution-lowering work after native-interfaces. The 47.754-second build and separate ir.Reassigned profile justify testing general direct execution entries, not a speedup claim. Acceptance preserves lazy recipes/evaluation/ownership and requires identical runtime controls, stage/cache/host receipts, a repeatable improvement and full conformance. Decided by the owner's fast-compilation north star and evidence-backed goal extension; no new syntax or HITL closure.
+
 Owner requests an Effra formatter. Added finite pure-printer/CLI/MCP and subsequent LSP formatting tasks, decided by Go-like regularity and source authority. Current syntax groups declarations and retains comments separately, so ordered comment-aware syntax is a prerequisite; printing grouped semantic data would reorder source. Preserve line-sensitive lint-directive meaning as well as tokens. Formatting runs without typechecking/import loading, with one versioned style, bounded previews and stale-write guards. Go/Gleam source comparison is recorded in PRIOR_ARTS. No formatter command is claimed implemented.
 
 Started independent formatter syntax unit in registered ext4-fallback worktree canonical-formatter fromd399b29, with locked dependencies copied. Its pure printer does not depend on semantic diagnostics; subsequent CLI/MCP adapters wait for reviewed diagnostic identity/position helpers. This parallel unit preserves frozen diagnostics and ownership branches, decided by Never Block on the Human. No command/example migration or editor capability is claimed yet.
