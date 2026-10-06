@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -538,7 +539,8 @@ func TestReplaceFormattedFileCleansTempAfterActualFailure(t *testing.T) {
 	}
 	plan := formatPlan{path: path, displayPath: "main.ef", info: info, source: []byte(source), result: result}
 	err = replaceFormattedFileWithHook(plan, func(string) error { return os.ErrPermission })
-	if err == nil || !strings.Contains(err.Error(), "EFMT_WRITE") || !strings.Contains(err.Error(), "main.ef") {
+	var failure *formatAdapterError
+	if err == nil || !errors.As(err, &failure) || failure.code != "EFMT_WRITE" || failure.path != plan.displayPath {
 		t.Fatalf("actual replacement failure was not reported: %v", err)
 	}
 	got, err := os.ReadFile(path)
@@ -580,7 +582,8 @@ func TestReplaceFormattedFileRejectsSameBytesDifferentInode(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = replaceFormattedFile(plan)
-	if err == nil || !strings.Contains(err.Error(), "EFMT_STALE") || !strings.Contains(err.Error(), "main.ef") {
+	var failure *formatAdapterError
+	if err == nil || !errors.As(err, &failure) || failure.code != "EFMT_STALE" || failure.path != plan.displayPath {
 		t.Fatalf("same-bytes inode replacement was accepted without the requested identity: %v", err)
 	}
 	if got, readErr := os.ReadFile(path); readErr != nil || string(got) != source {
@@ -629,7 +632,8 @@ func TestReplaceFormattedFileUsesResolvedParentForRawPath(t *testing.T) {
 		temporaryParent = filepath.Dir(tempPath)
 		return os.ErrPermission
 	})
-	if err == nil || !strings.Contains(err.Error(), "EFMT_WRITE") || !strings.Contains(err.Error(), "jump/../raw-parent.ef") {
+	var failure *formatAdapterError
+	if err == nil || !errors.As(err, &failure) || failure.code != "EFMT_WRITE" || failure.path != plan.displayPath {
 		t.Fatalf("resolved-parent hook failure lost write identity: %v", err)
 	}
 	parentInfo, err := os.Stat(filepath.Dir(resolved))
