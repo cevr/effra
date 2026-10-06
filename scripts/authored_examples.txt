@@ -15,3 +15,4 @@ examples/callables-state.ef
 examples/callables-factory.ef
 internal/compiler/bundled/functions/call.ef
 internal/compiler/bundled/functions/identity.ef
+internal/compiler/bundled/functions/forward-file.ef

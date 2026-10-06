@@ -20,7 +20,7 @@ type bundledDeclaration struct {
 }
 
 var bundledIndex = map[string]map[string]bundledDeclaration{
-	"effra/functions": {"call": {Source: "bundled/functions/call.ef"}, "identity": {Source: "bundled/functions/identity.ef"}},
+	"effra/functions": {"call": {Source: "bundled/functions/call.ef"}, "identity": {Source: "bundled/functions/identity.ef"}, "forwardFile": {Source: "bundled/functions/forward-file.ef"}},
 }
 
 const bundledInterfaceVersion = "1"
@@ -51,6 +51,16 @@ type BundledBinding struct {
 	Source      string `json:"source"`
 	Span        Span   `json:"span"`
 	Content     string `json:"content"`
+}
+
+type BundledInterfaceInfo struct {
+	Module             string `json:"module"`
+	InterfaceSchema    int    `json:"interfaceSchema"`
+	OwnershipSchema    int    `json:"ownershipSchema"`
+	InterfaceHash      string `json:"interfaceHash"`
+	SourceInput        string `json:"sourceInput"`
+	Producer           string `json:"producer"`
+	ImplementationHash string `json:"implementationHash"`
 }
 
 func (f *Function) goEmissionName() string {
@@ -96,6 +106,7 @@ func (r *Result) AddSourceInputs(response map[string]any) {
 	response["producerIdentity"] = r.ProducerIdentity
 	response["sources"] = append([]SourceInfo{}, r.Sources...)
 	response["bundledBindings"] = append([]BundledBinding{}, r.BundledBindings...)
+	response["bundledInterfaces"] = append([]BundledInterfaceInfo{}, r.BundledInterfaces...)
 }
 
 // loadBundledImports uses a bounded declaration queue, with aliases as lookup

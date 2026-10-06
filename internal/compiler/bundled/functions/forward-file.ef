@@ -1,0 +1,3 @@
+effect fn forwardFile<E: raises, R: uses>(callback: effect fn(File) -> File raises { E } uses { R }, input: File) -> File raises { E } uses { R } {
+    run callback(input)
+}

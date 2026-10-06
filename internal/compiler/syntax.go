@@ -140,24 +140,25 @@ type Provider struct {
 	Contract ValueType `json:"-"`
 }
 type Program struct {
-	typeExpressions  map[string]*sourceType
-	Imports          []GoImport
-	BundledImports   []BundledImport
-	BundledFunctions []*Function
-	BundledBindings  map[string]map[string]*Function
-	Comments         []Comment
-	Items            []*SyntaxItem `json:"-"`
-	Bindings         map[string]Binding
-	Modules          []*goModule
-	UsedImports      map[string]bool
-	GoOnly           bool
-	Errors           map[string]Span
-	ErrorDecls       []*ErrorDecl
-	Records          []*Record
-	Enums            []*Enum
-	Services         []*Service
-	Providers        []*Provider
-	Functions        []*Function
+	interfaceProducer bool
+	typeExpressions   map[string]*sourceType
+	Imports           []GoImport
+	BundledImports    []BundledImport
+	BundledFunctions  []*Function
+	BundledBindings   map[string]map[string]*Function
+	Comments          []Comment
+	Items             []*SyntaxItem `json:"-"`
+	Bindings          map[string]Binding
+	Modules           []*goModule
+	UsedImports       map[string]bool
+	GoOnly            bool
+	Errors            map[string]Span
+	ErrorDecls        []*ErrorDecl
+	Records           []*Record
+	Enums             []*Enum
+	Services          []*Service
+	Providers         []*Provider
+	Functions         []*Function
 }
 
 // SyntaxItem preserves the lexical declaration order that semantic

@@ -241,27 +241,28 @@ type Timings struct {
 	TotalMicros  int64 `json:"totalMicros"`
 }
 type Result struct {
-	Sources                []SourceInfo     `json:"sources,omitempty"`
-	BundledBindings        []BundledBinding `json:"bundledBindings,omitempty"`
-	ProducerIdentity       string           `json:"producerIdentity,omitempty"`
-	ModuleSum              []byte           `json:"-"`
-	Bindings               []Binding        `json:"bindings,omitempty"`
-	SchemaVersion          int              `json:"schemaVersion"`
-	Revision               string           `json:"revision"`
-	Target                 string           `json:"target"`
-	Checked                bool             `json:"checked"`
-	Diagnostics            []Diagnostic     `json:"diagnostics"`
-	Symbols                []Symbol         `json:"symbols"`
-	Declarations           []Declaration    `json:"declarations,omitempty"`
-	Types                  []TypeNode       `json:"types,omitempty"`
-	Rows                   []RowNode        `json:"rows,omitempty"`
-	TypeProjectionBudget   int              `json:"typeProjectionBudget"`
-	TypeProjectionLimits   ProjectionLimits `json:"typeProjectionLimits"`
-	TypeProjectionUsage    ProjectionUsage  `json:"typeProjectionUsage,omitempty"`
-	TypeProjectionComplete bool             `json:"typeProjectionComplete"`
-	TypeProjectionError    string           `json:"typeProjectionError,omitempty"`
-	Timings                Timings          `json:"timings"`
-	Program                *Program         `json:"-"`
+	BundledInterfaces      []BundledInterfaceInfo `json:"bundledInterfaces,omitempty"`
+	Sources                []SourceInfo           `json:"sources,omitempty"`
+	BundledBindings        []BundledBinding       `json:"bundledBindings,omitempty"`
+	ProducerIdentity       string                 `json:"producerIdentity,omitempty"`
+	ModuleSum              []byte                 `json:"-"`
+	Bindings               []Binding              `json:"bindings,omitempty"`
+	SchemaVersion          int                    `json:"schemaVersion"`
+	Revision               string                 `json:"revision"`
+	Target                 string                 `json:"target"`
+	Checked                bool                   `json:"checked"`
+	Diagnostics            []Diagnostic           `json:"diagnostics"`
+	Symbols                []Symbol               `json:"symbols"`
+	Declarations           []Declaration          `json:"declarations,omitempty"`
+	Types                  []TypeNode             `json:"types,omitempty"`
+	Rows                   []RowNode              `json:"rows,omitempty"`
+	TypeProjectionBudget   int                    `json:"typeProjectionBudget"`
+	TypeProjectionLimits   ProjectionLimits       `json:"typeProjectionLimits"`
+	TypeProjectionUsage    ProjectionUsage        `json:"typeProjectionUsage,omitempty"`
+	TypeProjectionComplete bool                   `json:"typeProjectionComplete"`
+	TypeProjectionError    string                 `json:"typeProjectionError,omitempty"`
+	Timings                Timings                `json:"timings"`
+	Program                *Program               `json:"-"`
 	facts                  map[*Expr]ExpressionFacts
 	canonical              *canonicalSnapshot
 	checkedProviders       map[string]*Provider
@@ -362,6 +363,7 @@ type checker struct {
 	rowDefinitions          map[string]RowParameter
 	callbackRelations       map[string]*callbackResultRelation
 	functionModule          string
+	admittedSummaries       map[string]interfaceSummary
 }
 
 const maxTypeProjectionNodes = 4096
@@ -2141,6 +2143,17 @@ func CompileAt(source, target, dir string) *Result {
 	r.Program = program
 	r.loadImports(dir)
 	r.loadBundledImports(source)
+	c := newChecker(program, r)
+	checkStart := time.Now()
+	c.check()
+	c.publishTypeNodes()
+	r.Timings.CheckMicros = time.Since(checkStart).Microseconds()
+	r.Timings.TotalMicros = time.Since(start).Microseconds()
+	r.Checked = len(r.Diagnostics) == 0
+	return r
+}
+
+func newChecker(program *Program, r *Result) *checker {
 	c := &checker{
 		program:                 program,
 		result:                  r,
@@ -2163,13 +2176,7 @@ func CompileAt(source, target, dir string) *Result {
 	r.checkedSymbols = map[string]checkedSymbol{}
 	r.checkedFunctions = map[*Function]checkedSymbol{}
 	r.checkedProviderRoots = map[*Provider]checkedExpression{}
-	checkStart := time.Now()
-	c.check()
-	c.publishTypeNodes()
-	r.Timings.CheckMicros = time.Since(checkStart).Microseconds()
-	r.Timings.TotalMicros = time.Since(start).Microseconds()
-	r.Checked = len(r.Diagnostics) == 0
-	return r
+	return c
 }
 
 func (c *checker) publishTypeNodes() {
@@ -2333,6 +2340,12 @@ func (c *checker) check() {
 	for _, f := range c.program.checkedFunctions() {
 		c.signature(f)
 	}
+	if !c.program.interfaceProducer && len(c.program.BundledFunctions) > 0 {
+		if err := c.admitBundledSummaries(); err != nil {
+			c.diagnostic("EF126", "bundled interface refused: "+err.Error(), Span{})
+			return
+		}
+	}
 	for _, p := range c.program.Providers {
 		s, exists := c.services[p.Service]
 		if !exists {
@@ -2386,6 +2399,21 @@ func (c *checker) check() {
 	for _, f := range c.program.checkedFunctions() {
 		c.function(f, true)
 	}
+	for module, admitted := range c.admittedSummaries {
+		functions := []*Function{}
+		for _, f := range c.program.BundledFunctions {
+			if f.Module == module {
+				functions = append(functions, f)
+			}
+		}
+		actual, err := exportInterfaceSummary(c, module, admitted.SourceInput, functions)
+		if err != nil || actual.ContentHash != admitted.ContentHash {
+			c.diagnostic("EF126", "distributed implementation disagrees with admitted interface summary", Span{})
+		} else {
+			c.result.BundledInterfaces = append(c.result.BundledInterfaces, BundledInterfaceInfo{Module: module, InterfaceSchema: admitted.InterfaceSchema, OwnershipSchema: admitted.OwnershipSchema, InterfaceHash: admitted.ContentHash, SourceInput: admitted.SourceInput, Producer: admitted.Producer, ImplementationHash: actual.Implementation})
+		}
+	}
+	slices.SortFunc(c.result.BundledInterfaces, func(a, b BundledInterfaceInfo) int { return strings.Compare(a.Module, b.Module) })
 	c.validateJSDeclarationNames()
 }
 
@@ -3577,6 +3605,9 @@ func (c *checker) validateDataLayouts() {
 	}
 }
 func (c *checker) function(f *Function, record bool) {
+	if !record && !c.program.interfaceProducer && c.admittedSummaries[f.Module].Module != "" {
+		return
+	}
 	c.functionWithLocals(f, record, nil, f.Services)
 }
 

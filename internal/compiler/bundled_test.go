@@ -163,7 +163,7 @@ func TestBundledEmissionNamespaceCannotCollideWithUserNames(t *testing.T) {
 }
 
 func TestBundledNativeExecution(t *testing.T) {
-	for _, fixture := range []struct{ source, output string }{{bundledGreeting, "Hello, Ada\n"}, {bundledConfiguration, "configured:port\n"}} {
+	for _, fixture := range []struct{ source, output string }{{bundledGreeting, "Hello, Ada\n"}, {bundledConfiguration, "configured:port\n"}, {`import Fns "effra/functions" effect fn keep(file:File)->File{file} effect fn outer(file:File)->File{scope {run Fns.forwardFile(keep,file)}} effect fn main()->string{"managed ready"}`, "managed ready\n"}} {
 		r := Compile(fixture.source)
 		source, err := r.EmitGo()
 		if err != nil {
