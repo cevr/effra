@@ -68,6 +68,8 @@ The JavaScript library build exports functions, service keys, and providers for 
 | [main.ef](examples/main.ef) | Nominal services, explicit provision and typed recovery | Go / JS |
 | [workflow.ef](examples/workflow.ef) | Authorization, lookup and delivery with three service contracts | Go / JS |
 | [latest-task.ef](examples/latest-task.ef) | Replace an owned child after interruption and cleanup finish | Go / JS |
+| [callables-service.ef](examples/callables-service.ef) | Ordinary callback composition with argument-driven failure and service rows | Go / JS |
+| [callables-state.ef](examples/callables-state.ef) | Pure transition callbacks stored in records and configured providers | Go / JS |
 | [concurrency.ef](examples/concurrency.ef) | Child join/interrupt and deadline recovery | Go / JS |
 | [causal.ef](examples/causal.ef) | Managed virtual time, shared latches and causal cleanup tests | Go / JS |
 | [imports.ef](examples/imports.ef) | Automatic native signatures, partial results and context forwarding | Go |

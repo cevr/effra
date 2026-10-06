@@ -105,16 +105,18 @@ type Function struct {
 	Captures  []OwnershipFact
 	// Identity is assigned by the checker from the canonical callable
 	// contract. The source name remains a projection used by the emitters.
-	Identity         string    `json:"-"`
-	Owner            string    `json:"-"`
-	Contract         ValueType `json:"-"`
-	Actual           ValueType `json:"-"`
-	returnType       *sourceType
-	returnID         TypeID
-	RowParameters    []RowParameter
-	failureID        RowID
-	serviceID        RowID
-	signatureChecked bool
+	Identity               string    `json:"-"`
+	Owner                  string    `json:"-"`
+	Contract               ValueType `json:"-"`
+	Actual                 ValueType `json:"-"`
+	returnType             *sourceType
+	returnID               TypeID
+	RowParameters          []RowParameter
+	failureID              RowID
+	serviceID              RowID
+	signatureChecked       bool
+	returnCallableEvidence callableEvidence
+	CallbackPolicies       []CallbackPolicy
 }
 type Service struct {
 	Name    string
@@ -505,12 +507,12 @@ func (p *parser) typ() string {
 			parameter := p.typ()
 			typ.Parameters = append(typ.Parameters, parameter)
 			typ.ParameterTypes = append(typ.ParameterTypes, p.types[parameter])
+			if len(typ.Parameters) > 256 {
+				p.fail(p.peek(), "callable type exceeds 256 parameters")
+			}
 			if !p.accept(",") {
 				p.expect(")")
 				break
-			}
-			if len(typ.Parameters) > 256 {
-				p.fail(p.peek(), "callable type exceeds 256 parameters")
 			}
 		}
 		p.expect("->")
@@ -526,7 +528,11 @@ func (p *parser) typ() string {
 		p.types[name] = typ
 		return name
 	}
-	return p.name().text
+	name := p.name()
+	if name.text == "Effect" && p.peek().text == "<" {
+		p.fail(name, "typed recipes are unsupported; use an explicit effect fn callback contract")
+	}
+	return name.text
 }
 func (p *parser) fields() []Field {
 	p.expect("{")
@@ -681,6 +687,8 @@ func (p *parser) expr(min int) *Expr {
 	start := p.take()
 	e := &Expr{Span: start.span}
 	switch {
+	case (start.text == "fn" && p.anonymousCallableHead()) || (start.text == "effect" && p.peek().text == "fn"):
+		p.fail(start, "anonymous functions and closure captures are unsupported; declare a named module function")
 	case start.text == "scope":
 		e.Kind = "scope"
 		e.Then = p.block()
@@ -820,6 +828,27 @@ func (p *parser) expr(min int) *Expr {
 		e = &Expr{Kind: "binary", Name: op.text, Left: e, Right: p.expr(precedence + 1), Span: op.span}
 	}
 	return e
+}
+
+// An existing identifier named fn remains callable. The unsupported literal
+// form is distinguished by its result arrow after the parameter parentheses.
+func (p *parser) anonymousCallableHead() bool {
+	if p.peek().text != "(" {
+		return false
+	}
+	depth := 0
+	for at := p.at; at < len(p.tokens); at++ {
+		switch p.tokens[at].text {
+		case "(":
+			depth++
+		case ")":
+			depth--
+			if depth == 0 {
+				return at+1 < len(p.tokens) && p.tokens[at+1].text == "->"
+			}
+		}
+	}
+	return false
 }
 
 func (p *parser) constructorBrace() bool {

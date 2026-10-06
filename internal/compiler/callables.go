@@ -311,24 +311,23 @@ func (c *checker) callableCall(e *Expr, env map[string]checkedExpression, inEffe
 	arguments := make([]checkedExpression, len(e.Args))
 	for i, arg := range e.Args {
 		arguments[i] = c.expr(arg, env, inEffect)
-		if hasPotentialOwner(arguments[i].ownershipFacts()) || hasOwnedClosed(arguments[i].ownershipFacts()) {
+		if c.unsafePotentialOwner(arguments[i].ownershipFacts()) || hasOwnedClosed(arguments[i].ownershipFacts()) {
 			c.diagnostic("EF123", "value owned by a closing scope cannot be used", arg.Span)
 		}
 		if i < len(node.Args) && !c.assignable(arguments[i].valueID(), node.Args[i], 0) {
 			c.diagnostic("EF106", "callback argument has incompatible type", arg.Span)
 		}
 	}
-	ownership := c.unknownOwnership(c.displayTypeID(node.Result))
-	for i := range ownership {
-		ownership[i].potentialOwner = true
-		ownership[i].Origin = "callback-result"
-	}
-	if callee.callableDecl != nil {
-		ownership = instantiateCheckedFacts(callee.callableDecl.Ownership, callee.callableDecl.Params, arguments)
+	ownership := c.callbackResultOwnership(callee.callableEvidence, arguments, node.Result, 0)
+	captures := cloneFacts(callee.captureFacts())
+	if node.Mode == "effect" {
+		for i, argument := range arguments {
+			captures = append(captures, prependFacts("capture:arg"+strconv.Itoa(i), argument.ownershipFacts())...)
+		}
 	}
 	var value CheckedValue
 	if node.Mode == "effect" {
-		value = c.values.recipe(node.Result, node.Args, checkedEffectCallable, node.FailureRow, node.ServiceRow, ownership, nil)
+		value = c.values.recipe(node.Result, node.Args, checkedEffectCallable, node.FailureRow, node.ServiceRow, ownership, normalizeFacts(captures))
 	} else {
 		value = c.values.occurrence(node.Result, ownership, nil)
 	}
@@ -362,11 +361,15 @@ func jsSourceType(t *sourceType, fallback string, declarations ...map[string]Dec
 	if len(declarations) > 0 {
 		declared = declarations[0]
 	}
+	nested := declared
+	if len(declarations) > 1 {
+		nested = declarations[1]
+	}
 	for i, name := range t.Parameters {
-		args[i] = "arg" + strconv.Itoa(i) + ": " + jsSourceType(t.ParameterTypes[i], name, declared)
+		args[i] = "arg" + strconv.Itoa(i) + ": " + jsSourceType(t.ParameterTypes[i], name, nested)
 	}
 	f := &Function{Return: t.Result, returnType: t.ResultType, Effect: t.Effect, Errors: t.Failures, Services: t.Services}
-	return "(" + strings.Join(args, ", ") + ") => " + jsContractFor(f, declared)
+	return "(" + strings.Join(args, ", ") + ") => " + jsContractFor(f, declared, nested)
 }
 
 // Each actual callback gets its own TS inference variable. Reusing a single
@@ -374,6 +377,22 @@ func jsSourceType(t *sourceType, fallback string, declarations ...map[string]Dec
 // callback's row instead of the source solver's least union. The return view
 // joins these witnesses and excludes the formal row's fixed labels.
 func jsRowFunctionSignature(f *Function, declarations map[string]Declaration) string {
+	if len(f.CallbackPolicies) > 0 {
+		copy := *f
+		copy.Params = append([]Param{}, f.Params...)
+		copy.CallbackPolicies = nil
+		for _, policy := range f.CallbackPolicies {
+			if policy.Kind != "typed-failure-response" {
+				continue
+			}
+			copy.Params[policy.Parameter].sourceType = &sourceType{Effect: true, Parameters: []string{"string"}, ParameterTypes: []*sourceType{nil}, Result: "string", Failures: []string{"__ef_transport_E"}, Services: []string{"__ef_transport_R"}}
+			copy.RowParameters = append(copy.RowParameters, RowParameter{Name: "__ef_transport_E", Kind: "raises"}, RowParameter{Name: "__ef_transport_R", Kind: "uses"})
+			if policy.PropagateRequirements {
+				copy.Services = append(append([]string{}, f.Services...), "__ef_transport_R")
+			}
+		}
+		return jsRowFunctionSignature(&copy, declarations)
+	}
 	copyDeclarations := func() map[string]Declaration {
 		result := map[string]Declaration{}
 		for name, d := range declarations {
@@ -439,12 +458,21 @@ func jsRowFunctionSignature(f *Function, declarations map[string]Declaration) st
 		}
 	}
 	params := []string{}
+	nestedDeclarations := resultDeclarations
+	if len(f.RowParameters) > 0 {
+		nestedDeclarations = copyDeclarations()
+		for _, row := range f.RowParameters {
+			marker := resultDeclarations[row.Name]
+			marker.Name = "NoInfer<" + marker.Name + ">"
+			nestedDeclarations[row.Name] = marker
+		}
+	}
 	for i, p := range f.Params {
 		context := declarations
 		if len(f.RowParameters) > 0 {
 			context = parameterDeclarations[i]
 		}
-		params = append(params, "arg_"+p.Name+": "+jsSourceType(p.sourceType, p.Type, context))
+		params = append(params, "arg_"+p.Name+": "+jsSourceType(p.sourceType, p.Type, context, nestedDeclarations))
 	}
 	generic := ""
 	if len(variables) > 0 {

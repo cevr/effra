@@ -18,6 +18,12 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Requirement row**: The unordered set of nominal services needed to execute an effect.
 
+**Callable value**: A named function carried as a value with explicit parameter, result, failure and requirement contracts. Pure functions and functions constructing deferred effects have distinct callable kinds.
+
+**Row parameter**: A declaration-qualified variable representing a finite failure or requirement row. Ordinary function application obtains its least bound from direct callback argument rows.
+
+**Callback-result relation**: Retained evidence relating a callback invocation's returned handles to its resolved named callee and input ownership. It is separate from ownership of the callable value; an unresolved relation remains potential ownership.
+
 **Target provider**: An implementation of a service on a particular execution target.
 
 **Provider construction contract**: The configuration and required services used to create a provider value, distinct from the contract of invoking its service operations.

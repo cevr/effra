@@ -1,0 +1,21 @@
+record State { name: string }
+record Operations { step: fn(State, string) -> State }
+
+fn renamed(state: State, event: string) -> State { State { name: event } }
+fn advance(operations: Operations, state: State, event: string) -> State {
+    operations.step(state, event)
+}
+
+service Transition { effect fn apply(state: State, event: string) -> State }
+impl Configured(step: fn(State, string) -> State) for Transition {
+    effect fn apply(state: State, event: string) -> State { step(state, event) }
+}
+
+effect fn main() -> string {
+    let operations = Operations { step: renamed }
+    let state = advance(operations, State { name: "old" }, "record")
+    let provider = run Configured(renamed)
+    let next = run Transition.apply(state, state.name + ":provider")
+        .provide<Transition>(provider)
+    next.name
+}

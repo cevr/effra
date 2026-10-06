@@ -813,6 +813,9 @@ func appendProjectionValue(refs *[]TypeRef, value ValueType) int {
 		}
 	}
 	if value.Application != nil {
+		for _, policy := range value.Application.CallbackPolicies {
+			appendProjectionRef(refs, TypeRef{FailureRow: policy.FailureRow})
+		}
 		for _, argument := range value.Application.RowArguments {
 			if argument.Row != "" {
 				appendProjectionRef(refs, TypeRef{FailureRow: argument.Row})
@@ -1140,7 +1143,7 @@ func (c *checker) checkedCompatibilitySize(e checkedExpression, base ValueType, 
 		if f.Effect {
 			kind = "effect"
 		}
-		callable := CallableType{ID: f.Identity, Signature: c.typeNodeID(e.contractID()), Kind: kind, Result: c.identityRef(e.resultID()), Failures: c.retainedRowLabels(e.failureRow()), Requirements: c.retainedRowLabels(e.serviceRow()), RowParameters: f.RowParameters}
+		callable := CallableType{ID: f.Identity, Signature: c.typeNodeID(e.contractID()), Kind: kind, Result: c.identityRef(e.resultID()), Failures: c.retainedRowLabels(e.failureRow()), Requirements: c.retainedRowLabels(e.serviceRow()), RowParameters: f.RowParameters, CallbackPolicies: f.CallbackPolicies}
 		n, err := encodedSize(callable, limit-size)
 		size += len(`,"callable":`) + n
 		if err != nil {

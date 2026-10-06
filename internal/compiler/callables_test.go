@@ -214,16 +214,11 @@ func TestFiniteRowSolverDiagnosesUnsupportedConstraints(t *testing.T) {
 }
 
 func TestRowForwardingRecoveryAndProvisionAcrossTargets(t *testing.T) {
-	source := `error Missing error Broken
-service Directory {effect fn get(key:string)->string raises {Missing}}
-service Audit {effect fn note(key:string)->string raises {Broken}}
-impl Names for Directory {effect fn get(key:string)->string raises {Missing}{"name:"+key}}
-impl Notes for Audit {effect fn note(key:string)->string raises {Broken}{key+":logged"}}
-effect fn first(key:string)->string raises {Missing} uses {Directory}{run Directory.get(key)}
-effect fn second(key:string)->string raises {Broken} uses {Audit}{run Audit.note(key)}
-effect fn chain<E: raises,R: uses>(a:effect fn(string)->string raises {E} uses {R},b:effect fn(string)->string raises {E} uses {R},key:string)->string raises {E} uses {R}{let next=run a(key);run b(next)}
-effect fn forward<X: raises,Y: uses>(a:effect fn(string)->string raises {X} uses {Y},b:effect fn(string)->string raises {X} uses {Y},key:string)->string raises {X} uses {Y}{run chain(a,b,key)}
-effect fn main()->string{run forward(first,second,"42").catch<Missing>("missing").catch<Broken>("broken").provide<Directory>(Names).provide<Audit>(Notes)}`
+	fixture, err := os.ReadFile(filepath.Join("..", "..", "examples", "callables-service.ef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(fixture)
 	for _, target := range []string{"go", "js"} {
 		r := CompileFor(source, target)
 		if !r.Checked {
@@ -249,5 +244,39 @@ effect fn main()->string{run forward(first,second,"42").catch<Missing>("missing"
 	}
 	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != "name:42:logged\n" {
 		t.Fatalf("JS row forwarding: %s", output)
+	}
+}
+
+func TestCallableContractsInRecordsAndProvidersAcrossTargets(t *testing.T) {
+	fixture, err := os.ReadFile(filepath.Join("..", "..", "examples", "callables-state.ef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(fixture)
+	for _, target := range []string{"go", "js"} {
+		r := CompileFor(source, target)
+		if !r.Checked {
+			t.Fatalf("%s placement: %+v", target, r.Diagnostics)
+		}
+	}
+	r := Compile(source)
+	generated, err := r.EmitGo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := WriteRuntime(dir); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"go.mod": string(r.ModuleFile()), "main.go": generated} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if output, err := runGoCommand(dir, "run", "."); err != nil || string(output) != "record:provider\n" {
+		t.Fatalf("native callback placement: %v %s", err, output)
+	}
+	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != "record:provider\n" {
+		t.Fatalf("JS callback placement: %s", output)
 	}
 }

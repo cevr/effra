@@ -22,6 +22,7 @@ func assertResponseReferences(t *testing.T, response map[string]any) {
 	}
 	types := map[string]bool{}
 	rows := map[string]bool{}
+	parameters := map[string]map[string]any{}
 	for _, table := range []struct {
 		key string
 		ids map[string]bool
@@ -33,6 +34,29 @@ func assertResponseReferences(t *testing.T, response map[string]any) {
 				t.Fatalf("duplicate/empty %s definition %q", table.key, id)
 			}
 			table.ids[id] = true
+			if table.key == "rows" {
+				definitions, _ := value.(map[string]any)["parameters"].([]any)
+				for _, definition := range definitions {
+					p := definition.(map[string]any)
+					id, _ := p["id"].(string)
+					if id == "" || p["name"] == "" || p["declaration"] == "" || (p["kind"] != "raises" && p["kind"] != "uses") {
+						t.Fatalf("incomplete row parameter definition: %v", p)
+					}
+					if previous, ok := parameters[id]; ok && !reflect.DeepEqual(previous, p) {
+						t.Fatalf("conflicting row parameter definition: %v", p)
+					}
+					parameters[id] = p
+				}
+			}
+		}
+	}
+	rowDefinitions, _ := response["rows"].([]any)
+	for _, value := range rowDefinitions {
+		labels, _ := value.(map[string]any)["labels"].([]any)
+		for _, label := range labels {
+			if id, ok := label.(string); ok && strings.HasPrefix(id, "row-parameter:") && parameters[id] == nil {
+				t.Fatalf("undefined row parameter label %q", id)
+			}
 		}
 	}
 	var walk func(any)
@@ -50,7 +74,7 @@ func assertResponseReferences(t *testing.T, response map[string]any) {
 						if !types[id] {
 							t.Fatalf("undefined type reference %s=%q", key, id)
 						}
-					case "failureRow", "serviceRow":
+					case "failureRow", "serviceRow", "row":
 						if !rows[id] {
 							t.Fatalf("undefined row reference %s=%q", key, id)
 						}

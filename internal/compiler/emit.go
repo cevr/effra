@@ -48,8 +48,12 @@ func jsValueType(t string) string {
 func jsContract(f *Function) string {
 	return jsContractFor(f, nil)
 }
-func jsContractFor(f *Function, declarations map[string]Declaration) string {
-	success := jsSourceType(f.returnType, f.Return, declarations)
+func jsContractFor(f *Function, declarations map[string]Declaration, nestedDeclarations ...map[string]Declaration) string {
+	resultDeclarations := declarations
+	if len(nestedDeclarations) > 0 {
+		resultDeclarations = nestedDeclarations[0]
+	}
+	success := jsSourceType(f.returnType, f.Return, resultDeclarations)
 	if !f.Effect {
 		return success
 	}
@@ -473,17 +477,13 @@ func declarationMap(r *Result) map[string]Declaration {
 func jsShape(methods []*Function, declarations map[string]Declaration, hideServices bool) string {
 	out := "{ "
 	for _, f := range methods {
-		params := []string{}
-		for _, p := range f.Params {
-			params = append(params, "arg_"+p.Name+": "+jsSourceType(p.sourceType, p.Type, declarations))
-		}
 		contract := f
 		if hideServices {
 			copy := *f
 			copy.Services = nil
 			contract = &copy
 		}
-		out += "readonly " + quoted(f.Name) + ": (" + strings.Join(params, ", ") + ") => " + jsContractFor(contract, declarations) + "; "
+		out += "readonly " + quoted(f.Name) + ": " + jsRowFunctionSignature(contract, declarations) + "; "
 	}
 	return out + "}"
 }

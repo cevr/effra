@@ -1,0 +1,44 @@
+error Missing
+error Broken
+
+service Directory { effect fn get(key: string) -> string raises {Missing} }
+service Audit { effect fn note(key: string) -> string raises {Broken} }
+
+impl Names for Directory {
+    effect fn get(key: string) -> string raises {Missing} { "name:" + key }
+}
+impl Notes for Audit {
+    effect fn note(key: string) -> string raises {Broken} { key + ":logged" }
+}
+
+effect fn first(key: string) -> string raises {Missing} uses {Directory} {
+    run Directory.get(key)
+}
+effect fn second(key: string) -> string raises {Broken} uses {Audit} {
+    run Audit.note(key)
+}
+
+effect fn chain<E: raises, R: uses>(
+    a: effect fn(string) -> string raises {E} uses {R},
+    b: effect fn(string) -> string raises {E} uses {R},
+    key: string
+) -> string raises {E} uses {R} {
+    let next = run a(key)
+    run b(next)
+}
+
+effect fn forward<X: raises, Y: uses>(
+    a: effect fn(string) -> string raises {X} uses {Y},
+    b: effect fn(string) -> string raises {X} uses {Y},
+    key: string
+) -> string raises {X} uses {Y} {
+    run chain(a, b, key)
+}
+
+effect fn main() -> string {
+    run forward(first, second, "42")
+        .catch<Missing>("missing")
+        .catch<Broken>("broken")
+        .provide<Directory>(Names)
+        .provide<Audit>(Notes)
+}
