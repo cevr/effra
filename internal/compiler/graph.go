@@ -34,7 +34,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	if !r.Checked {
 		return nil, fmt.Errorf("dependency graphs require checked source")
 	}
-	g := &DependencyGraph{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Nodes: []GraphNode{}, Edges: []GraphEdge{}, Limitations: []string{"single-file static graph; includes deferred recipe construction, not execution order", "providers are self-contained; dependent layers, sharing and acquisition graphs are not implemented", "node IDs containing offsets are scoped to the semantic revision"}}
+	g := &DependencyGraph{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Nodes: []GraphNode{}, Edges: []GraphEdge{}, Limitations: []string{"single-file static graph; includes deferred recipe construction, not execution order", "provider construction is pure and non-memoized; fallible acquisition, sharing, lifecycle-safe capture and cycle solving are not implemented", "node IDs containing offsets are scoped to the semantic revision"}}
 	nodes := map[string]bool{}
 	add := func(id, kind, name string, span Span, contract *ValueType) {
 		if !nodes[id] {
@@ -51,8 +51,16 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	}
 	providers := append(append([]*Provider{}, builtinProviders()...), r.Program.Providers...)
 	for _, p := range providers {
-		add("provider:"+p.Name, "provider", p.Name, p.Span, nil)
+		var constructor *ValueType
+		if providerConstructed(p) {
+			contract := providerContract(p)
+			constructor = &contract
+		}
+		add("provider:"+p.Name, "provider", p.Name, p.Span, constructor)
 		edge("provider:"+p.Name, "service:"+p.Service, "implements", p.Service, p.Span)
+		for _, requirement := range normalized(p.Services) {
+			edge("provider:"+p.Name, "service:"+requirement, "requires", requirement, p.Span)
+		}
 	}
 	for _, s := range r.Symbols {
 		t := s.Contract
@@ -125,6 +133,11 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		for _, f := range p.Methods {
 			id := "provider-method:" + p.Name + "." + f.Name
 			t := contract(f)
+			if providerConstructed(p) {
+				// Captured constructor requirements are overlaid at invocation;
+				// they are not part of the service method's public row.
+				t.Services = nil
+			}
 			add(id, "provider-method", p.Name+"."+f.Name, f.Span, &t)
 			edge("provider:"+p.Name, id, "contains", "", f.Span)
 			block(f.Body, id)

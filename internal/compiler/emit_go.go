@@ -70,8 +70,11 @@ func goVariantType(typeName, variantName string) string {
 	return "efTypeV_" + strconv.Itoa(len(typeName)) + "_" + goIdent(typeName) + "_" + strconv.Itoa(len(variantName)) + "_" + goIdent(variantName)
 }
 func goParams(f *Function) string {
+	return goParamsList(f.Params)
+}
+func goParamsList(params []Param) string {
 	parts := []string{}
-	for _, p := range f.Params {
+	for _, p := range params {
 		parts = append(parts, "efLocal_"+p.Name+" "+goType(p.Type))
 	}
 	return strings.Join(parts, ", ")
@@ -158,6 +161,10 @@ func efProvider_Host()efService_Foreign{return efService_Foreign{}}
 func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(address string,handler func(string)efEffect[string])efEffect[struct{}]{return func(ctx efContext)efExit[struct{}]{return er.Invoke(ctx.Runtime,er.ServeHTTP(address,func(path string)er.Effect[string]{return efToRuntime(ctx,handler(path))},func(bound string){fmt.Println("listening http://"+bound)}))}}}}
 `)
 	for _, p := range r.Program.Providers {
+		if providerConstructed(p) {
+			out.WriteString(g.providerConstructor(p))
+			continue
+		}
 		out.WriteString("func efProvider_" + p.Name + "() efService_" + p.Service + " { return efService_" + p.Service + "{\n")
 		for _, m := range p.Methods {
 			out.WriteString("m_" + m.Name + ": " + strings.TrimSpace(g.function(m)) + ",\n")
@@ -210,6 +217,51 @@ func (g *goEmitter) function(f *Function) string {
 		close = "}\n}\n"
 	}
 	return open + g.block(f.Body, f.Effect, f.Return) + close
+}
+
+// providerConstructed distinguishes an ordinary reusable provider value from
+// a constructor recipe. A configured or dependent provider is always built at
+// effect execution so its service values are captured at that boundary.
+func providerConstructed(p *Provider) bool {
+	return len(p.Params) > 0 || len(p.Services) > 0
+}
+
+func (g *goEmitter) providerConstructor(p *Provider) string {
+	ret := goType("provider:" + p.Service)
+	var out strings.Builder
+	out.WriteString("func efProvider_" + p.Name + "(" + goParamsList(p.Params) + ") efEffect[" + ret + "] {\n")
+	out.WriteString("return func(ctx efContext) efExit[" + ret + "] {\n")
+	out.WriteString("if err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + ret + "](err)}\n")
+	for _, service := range normalized(p.Services) {
+		out.WriteString("if ctx.s_" + service + " == nil { return efExit[" + ret + "]{Defect:fmt.Errorf(" + strconv.Quote("missing provider "+service+" for constructor "+p.Name) + ")} }\n")
+		out.WriteString("efCaptured_" + service + " := ctx.s_" + service + "\n")
+	}
+	out.WriteString("return efExit[" + ret + "]{Value:efService_" + p.Service + "{\n")
+	for _, method := range p.Methods {
+		implementation := g.function(method)
+		if len(p.Services) > 0 {
+			implementation = g.providerMethod(method, p.Services)
+		}
+		out.WriteString("m_" + method.Name + ":" + strings.TrimSpace(implementation) + ",\n")
+	}
+	out.WriteString("}}\n}\n}\n")
+	return out.String()
+}
+
+// providerMethod overlays only the captured dependency pointers onto the
+// invocation context. The Runtime pointer (and therefore cancellation,
+// scope, owner and fiber state) is copied from the current invocation.
+func (g *goEmitter) providerMethod(f *Function, captures []string) string {
+	ret := goType(f.Return)
+	var out strings.Builder
+	out.WriteString("func(" + goParams(f) + ") efEffect[" + ret + "] {\nreturn func(ctx efContext) efExit[" + ret + "] {\n")
+	for _, service := range normalized(captures) {
+		out.WriteString("ctx.s_" + service + " = efCaptured_" + service + "\n")
+	}
+	out.WriteString("if err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + ret + "](err)}\n")
+	out.WriteString(g.block(f.Body, true, f.Return))
+	out.WriteString("}\n}")
+	return out.String()
 }
 func (g *goEmitter) failed(name, ret string) string {
 	return "if " + name + ".IsFailure(){return er.Propagate[" + goType(ret) + "](" + name + ")}\n"
@@ -308,6 +360,16 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 		if e.Text == "fiber" {
 			method := map[string]string{"join": "efJoin", "interrupt": "efInterrupt", "cancel": "efCancel"}[e.Left.Name]
 			return method + "(efLocal_" + e.Left.Left.Name + ")"
+		}
+		if e.Text == "provider-constructor" {
+			args := []string{}
+			for _, a := range e.Args {
+				expr := g.expr(a, effect, ret, out)
+				name := g.temp()
+				out.WriteString(name + " := " + expr + "\n")
+				args = append(args, name)
+			}
+			return "efProvider_" + e.Left.Name + "(" + strings.Join(args, ", ") + ")"
 		}
 		args := []string{}
 		for _, a := range e.Args {

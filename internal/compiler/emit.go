@@ -128,7 +128,7 @@ func (r *Result) Emit(entry bool) (string, string, error) {
 	for _, s := range allServices {
 		decl.WriteString("export interface " + s.Name + "Requirement { readonly _effraService: " + quoted(s.Name) + " }\n")
 		out.WriteString("export { __ef_service_" + s.Name + " as " + s.Name + " };\n")
-		decl.WriteString("declare const __ef_service_" + s.Name + ": Context.Service<" + s.Name + "Requirement, " + jsShape(s.Methods, declarationMap(r)) + ">;\nexport { __ef_service_" + s.Name + " as " + s.Name + " };\n")
+		decl.WriteString("declare const __ef_service_" + s.Name + ": Context.Service<" + s.Name + "Requirement, " + jsShape(s.Methods, declarationMap(r), false) + ">;\nexport { __ef_service_" + s.Name + " as " + s.Name + " };\n")
 	}
 	for _, s := range allServices {
 		if s.Name == "Console" {
@@ -137,7 +137,7 @@ func (r *Result) Emit(entry bool) (string, string, error) {
 		out.WriteString("const __ef_service_" + s.Name + "=Context.Service(" + quoted("effra/prototype/"+s.Name) + ");\n")
 	}
 	for _, s := range allServices {
-		decl.WriteString("export type " + s.Name + "Provider = " + jsShape(s.Methods, declarationMap(r)) + ";\n")
+		decl.WriteString("export type " + s.Name + "Provider = " + jsShape(s.Methods, declarationMap(r), false) + ";\n")
 	}
 	out.WriteString(`
 const __ef_provider_Assertions={check:(condition,message)=>condition?Effect.succeed(undefined):Effect.fail({_tag:'AssertionFailed',message}),equalText:(actual,expected)=>actual===expected?Effect.succeed(undefined):Effect.fail({_tag:'AssertionFailed',message:'expected '+JSON.stringify(expected)+'; received '+JSON.stringify(actual)})};
@@ -145,6 +145,10 @@ const __ef_provider_LiveClock={sleep:ms=> ms<0n || ms>2147483647n ? Effect.die(n
 const __ef_provider_LiveEnv={get:name=>Effect.sync(()=>process.env[name] ?? '')};
 `)
 	for _, p := range r.Program.Providers {
+		if providerConstructed(p) {
+			out.WriteString(jsProviderConstructor(p))
+			continue
+		}
 		out.WriteString("const __ef_provider_" + p.Name + " = {\n")
 		for _, f := range p.Methods {
 			out.WriteString("[" + quoted(f.Name) + "]: " + jsFunction(f) + ",\n")
@@ -158,13 +162,17 @@ const __ef_provider_LiveEnv={get:name=>Effect.sync(()=>process.env[name] ?? '')}
 		out.WriteString("export {__ef_provider_" + p.Name + " as " + p.Name + "};\n")
 		for _, s := range allServices {
 			if s.Name == p.Service {
-				decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(s.Methods, declarationMap(r)) + ";\nexport {__ef_provider_" + p.Name + " as " + p.Name + "};\n")
+				decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(s.Methods, declarationMap(r), false) + ";\nexport {__ef_provider_" + p.Name + " as " + p.Name + "};\n")
 			}
 		}
 	}
 	for _, p := range r.Program.Providers {
 		out.WriteString("export { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
-		decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(p.Methods, declarationMap(r)) + ";\nexport { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
+		if providerConstructed(p) {
+			decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsConstructorType(p, declarationMap(r)) + ";\nexport { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
+		} else {
+			decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(p.Methods, declarationMap(r), true) + ";\nexport { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
+		}
 	}
 	for _, f := range r.Program.Functions {
 		out.WriteString("const __ef_function_" + f.Name + " = " + jsFunction(f) + ";\nexport { __ef_function_" + f.Name + " as " + f.Name + " };\n")
@@ -191,13 +199,64 @@ func jsFunction(f *Function) string {
 	for _, p := range f.Params {
 		params = append(params, "__ef_local_"+p.Name)
 	}
+	return "(" + strings.Join(params, ", ") + ") => " + jsEffectBody(f)
+}
+func jsEffectBody(f *Function) string {
 	open, close := "{", "}"
 	if f.Effect {
 		open = "__ef_autoScope(Effect.gen(function* () {"
 		close = "}))"
 	}
-	return "(" + strings.Join(params, ", ") + ") => " + open + "\n" + jsBlock(f.Body, f.Effect) + close
+	return open + "\n" + jsBlock(f.Body, f.Effect) + close
 }
+
+func jsProviderMethod(f *Function, captures []string) string {
+	params := []string{}
+	for _, p := range f.Params {
+		params = append(params, "__ef_local_"+p.Name)
+	}
+	effect := jsEffectBody(f)
+	for i := len(normalized(captures)) - 1; i >= 0; i-- {
+		service := normalized(captures)[i]
+		effect = "Effect.provideService(" + effect + ", __ef_service_" + service + ", __ef_capture_" + service + ")"
+	}
+	return "(" + strings.Join(params, ", ") + ") => " + effect
+}
+
+func jsProviderConstructor(p *Provider) string {
+	params := []string{}
+	for _, param := range p.Params {
+		params = append(params, "__ef_local_"+param.Name)
+	}
+	methods := []string{}
+	for _, method := range p.Methods {
+		implementation := jsFunction(method)
+		if len(p.Services) > 0 {
+			implementation = jsProviderMethod(method, p.Services)
+		}
+		methods = append(methods, "["+quoted(method.Name)+"]: "+implementation)
+	}
+	body := "Effect.succeed({" + strings.Join(methods, ", ") + "})"
+	for i := len(normalized(p.Services)) - 1; i >= 0; i-- {
+		service := normalized(p.Services)[i]
+		body = "Effect.flatMap(__ef_service_" + service + ", __ef_capture_" + service + " => " + body + ")"
+	}
+	return "const __ef_provider_" + p.Name + " = (" + strings.Join(params, ", ") + ") => " + body + ";\n"
+}
+
+func jsConstructorType(p *Provider, declarations map[string]Declaration) string {
+	constructor := &Function{Name: p.Name, Params: p.Params, Return: "provider:" + p.Service, Effect: true, Services: normalized(p.Services)}
+	return "(" + jsFunctionParams(p.Params) + ") => " + jsContractFor(constructor, declarations)
+}
+
+func jsFunctionParams(params []Param) string {
+	parts := []string{}
+	for _, p := range params {
+		parts = append(parts, "arg_"+p.Name+": "+jsValueType(p.Type))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func jsBlock(b *Block, effect bool) string {
 	var out strings.Builder
 	if len(b.Statements) == 0 {
@@ -270,6 +329,13 @@ func jsExpr(e *Expr, effect bool) string {
 				return "__ef_cancel(" + jsExpr(e.Left.Left, effect) + ")"
 			}
 			return "__ef_join(" + jsExpr(e.Left.Left, effect) + ")"
+		}
+		if e.Text == "provider-constructor" {
+			args := []string{}
+			for _, a := range e.Args {
+				args = append(args, jsExpr(a, effect))
+			}
+			return "__ef_provider_" + e.Left.Name + "(" + strings.Join(args, ", ") + ")"
 		}
 		args := []string{}
 		for _, a := range e.Args {
@@ -363,14 +429,20 @@ func declarationMap(r *Result) map[string]Declaration {
 	}
 	return result
 }
-func jsShape(methods []*Function, declarations map[string]Declaration) string {
+func jsShape(methods []*Function, declarations map[string]Declaration, hideServices bool) string {
 	out := "{ "
 	for _, f := range methods {
 		params := []string{}
 		for _, p := range f.Params {
 			params = append(params, "arg_"+p.Name+": "+jsValueType(p.Type))
 		}
-		out += "readonly " + quoted(f.Name) + ": (" + strings.Join(params, ", ") + ") => " + jsContractFor(f, declarations) + "; "
+		contract := f
+		if hideServices {
+			copy := *f
+			copy.Services = nil
+			contract = &copy
+		}
+		out += "readonly " + quoted(f.Name) + ": (" + strings.Join(params, ", ") + ") => " + jsContractFor(contract, declarations) + "; "
 	}
 	return out + "}"
 }
