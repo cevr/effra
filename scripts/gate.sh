@@ -2,6 +2,8 @@
 set -eu
 cd "$(dirname "$0")/.."
 python3 scripts/wayfinder.py check
+python3 -B scripts/import_effect_conformance.py --self-check
+python3 -B scripts/test_import_effect_conformance.py
 if [ -f go.mod ]; then
   test -z "$(gofmt -l cmd internal runtime examples/go-interop examples/sdk)"
   go vet ./...
