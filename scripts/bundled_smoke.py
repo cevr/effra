@@ -23,14 +23,23 @@ effect fn configuration(key: string) -> string raises {MissingSetting} uses {Set
     ('''import Convert "effra/conversions"
 record LocalCodec { local: string }
 record User { name: string }
+record Holder { converter: Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> }
+enum Bundle { Value { converter: Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> } }
+error Broken { converter: Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> }
 effect fn decode(input: string) -> User { User { name: input } }
 effect fn encode(user: User) -> string { user.name }
+fn make() -> Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> { Convert.witness(decode, encode) }
 effect fn main() -> string {
- let converter = Convert.witness(decode, encode)
+ let converter = make()
  let user = run converter.decode("Ada")
  run converter.encode(user)
 }
-''', "Convert.Codec", "Convert.witness", None, None),
+''', "make", "Convert.witness", None, None),
+    ('''import Fns "effra/functions"
+effect fn echo(input: string) -> string { Fns.identity(input) }
+effect fn local<E: raises, R: uses>(callback: effect fn(string) -> string raises {E} uses {R}, input: string) -> string raises {E} uses {R} { run callback(input) }
+effect fn main() -> string { run local(echo, "ok") }
+''', "local", "local(echo", None, None),
 ]
 
 
@@ -56,7 +65,7 @@ with tempfile.TemporaryDirectory(prefix="effra-bundled-parity-") as tmp:
     for source, symbol, anchor, failure, service in fixtures:
         file.write_text(source)
         for target in ("go", "js"):
-            offset = source.index(anchor) + len(anchor.split(".")[0]) + 1
+            offset = source.index(anchor) + (len(anchor.split(".")[0]) + 1 if "." in anchor else 0)
             operations = [("check", "project.check", {}, []),
                           ("inspect", "code.inspect", {"symbol": symbol}, [symbol]),
                           ("query", "code.typeAt", {"offset": offset}, [str(offset)]),
@@ -92,6 +101,17 @@ with tempfile.TemporaryDirectory(prefix="effra-bundled-parity-") as tmp:
                 assert actual["bundledInterfaces"] and actual["bundledBindings"]
                 assert actual["revision"] == revision and actual["target"] == target
                 assert actual["typeProjectionComplete"]
+                declarations = {item["identity"]: item for item in actual.get("declarations") or []}
+                for node in actual.get("types", []):
+                    if node["kind"] == "application":
+                        owner = declarations.get(node["declaration"])
+                        assert owner and owner["kind"] == "template", (node, declarations)
+                        assert len(owner["fields"]) == 2 and len(owner["templateParameters"]) == 4
+                        assert owner["source"] == "source:effra/conversions/Codec"
+                if "edges" in actual:
+                    nodes = {item["id"] for item in actual["nodes"]}
+                    assert all(edge["from"] in nodes and edge["to"] in nodes
+                               for edge in actual["edges"]), actual["edges"]
             assert replies[5]["result"]["isError"]
             if failure:
                 # The public caller's missing rows must fail identically on both surfaces.

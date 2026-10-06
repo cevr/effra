@@ -1093,14 +1093,16 @@ func (r *Result) ProjectionDeclarations(projection TypeProjection) []Declaration
 	if !projection.Complete {
 		return nil
 	}
-	selected := map[string]bool{}
+	selected := map[*Declaration]bool{}
 	for _, node := range projection.Types {
-		selected[node.Kind+":"+node.Name] = true
+		if declaration := r.canonical.declarations[node.Declaration]; declaration != nil {
+			selected[declaration] = true
+		}
 	}
 	declarations := []Declaration{}
-	for _, declaration := range r.Declarations {
-		if selected[declaration.Kind+":"+declaration.Name] {
-			declarations = append(declarations, declaration)
+	for i := range r.Declarations {
+		if selected[&r.Declarations[i]] {
+			declarations = append(declarations, r.Declarations[i])
 		}
 	}
 	return declarations

@@ -38,7 +38,9 @@ func TestBundledCallersMissingRowsAndLocalHelperEquivalence(t *testing.T) {
 
 func TestBundledGraphUsesQualifiedReferencesAndFullProvenance(t *testing.T) {
 	for _, target := range []string{"go", "js"} {
-		for _, source := range []string{bundledGreeting, bundledConfiguration, `import Fns "effra/functions"
+		localGreeting := strings.Replace(bundledGreeting, `import Fns "effra/functions"`, `effect fn call<E: raises, R: uses>(callback: effect fn(string) -> string raises {E} uses {R}, input: string) -> string raises {E} uses {R} { run callback(input) }`, 1)
+		localGreeting = strings.ReplaceAll(localGreeting, "Fns.call", "call")
+		for _, source := range []string{bundledGreeting, bundledConfiguration, localGreeting, `import Fns "effra/functions"
 fn apply(callback: fn(string) -> string, input: string) -> string { callback(input) }
 effect fn main() -> string { apply(Fns.identity, "passed") }`} {
 			r := CompileFor(source, target)
@@ -46,7 +48,7 @@ effect fn main() -> string { apply(Fns.identity, "passed") }`} {
 				t.Fatal(r.Diagnostics)
 			}
 			graph, err := r.Graph()
-			if err != nil || !graph.TypeProjectionComplete || !reflect.DeepEqual(graph.Sources, r.Sources) || !reflect.DeepEqual(graph.BundledInterfaces, r.BundledInterfaces) || graph.ProducerIdentity != SemanticProducerIdentity {
+			if err != nil || !graph.TypeProjectionComplete || !reflect.DeepEqual(graph.Sources, r.Sources) || !reflect.DeepEqual(graph.BundledInterfaces, append([]BundledInterfaceInfo{}, r.BundledInterfaces...)) || graph.ProducerIdentity != SemanticProducerIdentity {
 				t.Fatal(err, graph)
 			}
 			nodes := map[string]GraphNode{}
@@ -68,6 +70,58 @@ effect fn main() -> string { apply(Fns.identity, "passed") }`} {
 				}
 				if !found {
 					t.Fatal("passed imported function missing from dependencies", graph.Edges)
+				}
+			}
+		}
+	}
+}
+
+func TestBundledSelectedTemplateDefinitions(t *testing.T) {
+	for _, target := range []string{"go", "js"} {
+		name := "LocalCodec"
+		if target == "go" {
+			name = "Codec" // Go admits a distinct same-name local declaration.
+		}
+		source := strings.Replace(bundledAnnotatedWitness, "record User", "record "+name+" { local: string } record User", 1)
+		r := CompileFor(source, target)
+		if !r.Checked {
+			t.Fatal(r.Diagnostics)
+		}
+		info, err := r.TypeAt(strings.Index(source, "Convert.witness") + len("Convert."))
+		if err != nil {
+			t.Fatal(err)
+		}
+		graph, err := r.Graph()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, projection := range []TypeProjection{r.ProjectSymbol(r.Find("make")), r.ProjectExpression(info), {Types: graph.Types, Complete: graph.TypeProjectionComplete}} {
+			if !projection.Complete {
+				t.Fatal(projection.Error)
+			}
+			declarations := r.ProjectionDeclarations(projection)
+			found := false
+			for _, node := range projection.Types {
+				if node.Kind != "application" {
+					continue
+				}
+				resolved := false
+				for _, declaration := range declarations {
+					if declaration.Identity == node.Declaration {
+						resolved = declaration.Kind == "template" && len(declaration.Fields) == 2 && len(declaration.TemplateParameters) == 4 && declaration.Source == "source:effra/conversions/Codec"
+					}
+				}
+				if !resolved {
+					t.Fatalf("%s application lacks qualified template definition: %+v %+v", target, node, declarations)
+				}
+				found = true
+			}
+			if !found {
+				t.Fatal("fixture did not select an application")
+			}
+			for _, declaration := range declarations {
+				if declaration.Kind == "record" && declaration.Name == name {
+					t.Fatal("unused local same-name declaration entered selected closure", declaration)
 				}
 			}
 		}

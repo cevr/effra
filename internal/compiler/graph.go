@@ -105,6 +105,20 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		}
 		g.Edges = append(g.Edges, GraphEdge{from, to, kind, service, span})
 	}
+	requires := func(from, requirement string, span Span, source string) {
+		if parameter, abstract := r.projector.rowDefinitions[requirement]; abstract {
+			add(requirement, "row-parameter", parameter.Name, parameter.Span, nil)
+			for i := range g.Nodes {
+				if g.Nodes[i].ID == requirement {
+					g.Nodes[i].Source = source
+					break
+				}
+			}
+			edge(from, requirement, "requires", "", span)
+		} else {
+			edge(from, "service:"+requirement, "requires", requirement, span)
+		}
+	}
 	serviceNames := make([]string, 0, len(r.checkedServices))
 	for name := range r.checkedServices {
 		serviceNames = append(serviceNames, name)
@@ -139,18 +153,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			g.Nodes[len(g.Nodes)-1].Source = s.Source
 		}
 		for _, req := range s.Contract.Services {
-			if parameter, abstract := r.projector.rowDefinitions[req]; abstract {
-				add(req, "row-parameter", parameter.Name, parameter.Span, nil)
-				for i := range g.Nodes {
-					if g.Nodes[i].ID == req {
-						g.Nodes[i].Source = s.Source
-						break
-					}
-				}
-				edge("function:"+s.Name, req, "requires", "", s.Span)
-			} else {
-				edge("function:"+s.Name, "service:"+req, "requires", req, s.Span)
-			}
+			requires("function:"+s.Name, req, s.Span, s.Source)
 		}
 	}
 	providerOrigins := map[*Expr]providerBinding{}
@@ -167,7 +170,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			add(id, e.Kind, e.Name, e.Span, &t)
 			edge(owner, id, "contains", "", e.Span)
 			for _, req := range e.Type.Services {
-				edge(id, "service:"+req, "requires", req, e.Span)
+				requires(id, req, e.Span, "source:user")
 			}
 		}
 		left := ""
