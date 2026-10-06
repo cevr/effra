@@ -1,4 +1,4 @@
-<!-- {"id": "foundation-ownership", "title": "Reject proven closed-owner handle escape", "status": "open", "labels": ["implementation:task"], "parent": "foundation-spec", "assignee": null, "blocked_by": ["foundation-data"]} -->
+<!-- {"id": "foundation-ownership", "title": "Reject proven closed-owner handle escape", "status": "open", "labels": ["implementation:task"], "parent": "foundation-spec", "assignee": null, "blocked_by": ["foundation-data", "foundation-providers"]} -->
 # Reject proven closed-owner handle escape
 
 ## Question

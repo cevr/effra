@@ -19,6 +19,13 @@ type Diagnostic struct {
 	Message string `json:"message"`
 	Span    Span   `json:"span"`
 }
+
+// Comment preserves the source text and byte location of a line comment for
+// comment-aware semantic tooling. Text excludes the leading // marker.
+type Comment struct {
+	Text string
+	Span Span
+}
 type token struct {
 	text string
 	kind string
@@ -100,6 +107,7 @@ type Provider struct {
 }
 type Program struct {
 	Imports     []GoImport
+	Comments    []Comment
 	Bindings    map[string]Binding
 	Modules     []*goModule
 	UsedImports map[string]bool
@@ -151,8 +159,9 @@ type Expr struct {
 	Type   ValueType
 }
 
-func lex(source string) ([]token, []Diagnostic) {
+func lex(source string) ([]token, []Comment, []Diagnostic) {
 	var out []token
+	var comments []Comment
 	line, column := 1, 1
 	for i := 0; i < len(source); {
 		start, l, c := i, line, column
@@ -169,10 +178,14 @@ func lex(source string) ([]token, []Diagnostic) {
 			continue
 		}
 		if ch == '/' && i+1 < len(source) && source[i+1] == '/' {
+			commentStart := i
+			i += 2
+			column += 2
 			for i < len(source) && source[i] != '\n' {
 				i++
 				column++
 			}
+			comments = append(comments, Comment{source[commentStart+2 : i], Span{commentStart, i - commentStart, l, c}})
 			continue
 		}
 		kind := "symbol"
@@ -189,7 +202,7 @@ func lex(source string) ([]token, []Diagnostic) {
 				i++
 			}
 			if _, err := strconv.ParseInt(source[start:i], 10, 64); err != nil {
-				return nil, []Diagnostic{{"EF001", "integer exceeds i64 range", Span{start, i - start, l, c}}}
+				return nil, comments, []Diagnostic{{"EF001", "integer exceeds i64 range", Span{start, i - start, l, c}}}
 			}
 		} else if ch == '"' {
 			kind = "string"
@@ -204,28 +217,28 @@ func lex(source string) ([]token, []Diagnostic) {
 				i++
 			}
 			if i >= len(source) || source[i] != '"' {
-				return nil, []Diagnostic{{"EF001", "unterminated string", Span{start, i - start, l, c}}}
+				return nil, comments, []Diagnostic{{"EF001", "unterminated string", Span{start, i - start, l, c}}}
 			}
 			i++
 			var decoded string
 			if err := json.Unmarshal([]byte(source[start:i]), &decoded); err != nil {
-				return nil, []Diagnostic{{"EF001", "strings use JSON escapes", Span{start, i - start, l, c}}}
+				return nil, comments, []Diagnostic{{"EF001", "strings use JSON escapes", Span{start, i - start, l, c}}}
 			}
 		} else if i+1 < len(source) && (source[i:i+2] == "->" || source[i:i+2] == "==" || source[i:i+2] == "=>") {
 			i += 2
 		} else if strings.ContainsRune("{}():,;.+<>=", rune(ch)) {
 			i++
 		} else {
-			return nil, []Diagnostic{{"EF001", fmt.Sprintf("unsupported character %q", ch), Span{start, 1, l, c}}}
+			return nil, comments, []Diagnostic{{"EF001", fmt.Sprintf("unsupported character %q", ch), Span{start, 1, l, c}}}
 		}
 		column += i - start
 		out = append(out, token{source[start:i], kind, Span{start, i - start, l, c}})
 	}
 	out = append(out, token{"<eof>", "eof", Span{len(source), 0, line, column}})
-	return out, nil
+	return out, comments, nil
 }
 func parse(source string) (program *Program, diagnostics []Diagnostic) {
-	tokens, diagnostics := lex(source)
+	tokens, comments, diagnostics := lex(source)
 	if len(diagnostics) > 0 {
 		return nil, diagnostics
 	}
@@ -240,7 +253,7 @@ func parse(source string) (program *Program, diagnostics []Diagnostic) {
 		}
 	}()
 	p := parser{tokens: tokens}
-	program = &Program{Errors: map[string]Span{}, Bindings: map[string]Binding{}, UsedImports: map[string]bool{}}
+	program = &Program{Comments: comments, Errors: map[string]Span{}, Bindings: map[string]Binding{}, UsedImports: map[string]bool{}}
 	for p.peek().kind != "eof" {
 		switch p.peek().text {
 		case "import":
