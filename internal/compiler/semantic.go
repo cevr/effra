@@ -10,11 +10,25 @@ import (
 )
 
 type ValueType struct {
-	Success  string   `json:"success"`
-	Type     TypeRef  `json:"type"`
-	Effect   bool     `json:"effect"`
-	Errors   []string `json:"failures"`
-	Services []string `json:"requirements"`
+	Success   string          `json:"success"`
+	Type      TypeRef         `json:"type"`
+	Effect    bool            `json:"effect"`
+	Errors    []string        `json:"failures"`
+	Services  []string        `json:"requirements"`
+	Ownership []OwnershipFact `json:"ownership,omitempty"`
+	Captures  []OwnershipFact `json:"captures,omitempty"`
+	Child     []OwnershipFact `json:"childOwnership,omitempty"`
+}
+
+// OwnershipFact is the bounded ownership evidence carried by a checked value.
+// A fact is deliberately explicit about uncertainty: the compiler only
+// rejects a value when it can prove that the value belongs to a scope which is
+// closing. Foreign values and summaries outside this model stay unknown.
+type OwnershipFact struct {
+	Path   string `json:"path,omitempty"`
+	Status string `json:"status"`
+	Region string `json:"region,omitempty"`
+	Origin string `json:"origin,omitempty"`
 }
 
 // TypeRef is the canonical semantic identity used by checking, emission and
@@ -29,7 +43,7 @@ type TypeRef struct {
 	Args []TypeRef `json:"args,omitempty"`
 }
 
-const SemanticSchemaVersion = 2
+const SemanticSchemaVersion = 3
 
 type Contribution struct {
 	Kind  string   `json:"kind"`
@@ -64,19 +78,311 @@ type Result struct {
 	Program       *Program      `json:"-"`
 }
 type checker struct {
-	program   *Program
-	result    *Result
-	functions map[string]*Function
-	services  map[string]*Service
-	providers map[string]*Provider
-	records   map[string]*Record
-	enums     map[string]*Enum
-	errors    map[string]*ErrorDecl
-	reasons   []Contribution
+	program             *Program
+	result              *Result
+	functions           map[string]*Function
+	services            map[string]*Service
+	providers           map[string]*Provider
+	records             map[string]*Record
+	enums               map[string]*Enum
+	errors              map[string]*ErrorDecl
+	reasons             []Contribution
+	region              string
+	suppressDiagnostics bool
 }
 
 func value(success string) ValueType {
-	return ValueType{Success: success, Type: typeRef(success), Errors: []string{}, Services: []string{}}
+	return ValueType{Success: success, Type: typeRef(success), Errors: []string{}, Services: []string{}, Ownership: ownershipForType(success)}
+}
+
+func ownershipForType(success string) []OwnershipFact {
+	if success == "File" || strings.HasPrefix(success, "Fiber:") {
+		return []OwnershipFact{{Status: "unknown", Origin: "unknown"}}
+	}
+	return nil
+}
+
+func (c *checker) ownershipPaths(typeName, prefix string, seen map[string]bool) []string {
+	if typeName == "File" || strings.HasPrefix(typeName, "Fiber:") {
+		return []string{prefix}
+	}
+	if seen[typeName] {
+		return nil
+	}
+	seen[typeName] = true
+	defer delete(seen, typeName)
+	paths := []string{}
+	if record := c.records[typeName]; record != nil {
+		for _, field := range record.Fields {
+			fieldPrefix := field.Name
+			if prefix != "" {
+				fieldPrefix = prefix + "." + fieldPrefix
+			}
+			paths = append(paths, c.ownershipPaths(field.Type, fieldPrefix, seen)...)
+		}
+	}
+	if enum := c.enums[typeName]; enum != nil {
+		for _, variant := range enum.Variants {
+			for _, field := range variant.Fields {
+				fieldPrefix := variant.Name + "." + field.Name
+				if prefix != "" {
+					fieldPrefix = prefix + "." + fieldPrefix
+				}
+				paths = append(paths, c.ownershipPaths(field.Type, fieldPrefix, seen)...)
+			}
+		}
+	}
+	return paths
+}
+
+func (c *checker) unknownOwnership(typeName string) []OwnershipFact {
+	facts := []OwnershipFact{}
+	for _, path := range c.ownershipPaths(typeName, "", map[string]bool{}) {
+		facts = append(facts, OwnershipFact{Path: path, Status: "unknown", Origin: "unknown"})
+	}
+	return normalizeFacts(facts)
+}
+
+func (c *checker) borrowedOwnership(typeName, region string) []OwnershipFact {
+	facts := []OwnershipFact{}
+	for _, path := range c.ownershipPaths(typeName, "", map[string]bool{}) {
+		facts = append(facts, OwnershipFact{Path: path, Status: "borrowed", Region: region, Origin: "parameter"})
+	}
+	return normalizeFacts(facts)
+}
+
+func cloneFacts(facts []OwnershipFact) []OwnershipFact {
+	if len(facts) == 0 {
+		return nil
+	}
+	return append([]OwnershipFact{}, facts...)
+}
+
+func prependFacts(prefix string, facts []OwnershipFact) []OwnershipFact {
+	if len(facts) == 0 {
+		return nil
+	}
+	out := make([]OwnershipFact, 0, len(facts))
+	for _, fact := range facts {
+		copy := fact
+		if prefix != "" && copy.Path != "*" {
+			if copy.Path == "" {
+				copy.Path = prefix
+			} else {
+				copy.Path = prefix + "." + copy.Path
+			}
+		}
+		out = append(out, copy)
+	}
+	return normalizeFacts(out)
+}
+
+func projectFacts(facts []OwnershipFact, field string) []OwnershipFact {
+	if len(facts) == 0 {
+		return nil
+	}
+	out := make([]OwnershipFact, 0, len(facts))
+	for _, fact := range facts {
+		if fact.Path == "*" {
+			out = append(out, fact)
+			continue
+		}
+		if fact.Path == field {
+			copy := fact
+			copy.Path = ""
+			out = append(out, copy)
+			continue
+		}
+		prefix := field + "."
+		if strings.HasPrefix(fact.Path, prefix) {
+			copy := fact
+			copy.Path = strings.TrimPrefix(fact.Path, prefix)
+			out = append(out, copy)
+		}
+	}
+	return normalizeFacts(out)
+}
+
+func projectVariantFacts(facts []OwnershipFact, variant, field, fieldType string) []OwnershipFact {
+	projected := make([]OwnershipFact, 0)
+	for _, fact := range facts {
+		if fact.Path == "*" {
+			projected = append(projected, fact)
+			continue
+		}
+		path := fact.Path
+		prefix := variant + "."
+		if strings.HasPrefix(path, prefix) {
+			path = strings.TrimPrefix(path, prefix)
+		}
+		if path == field {
+			copy := fact
+			copy.Path = ""
+			projected = append(projected, copy)
+		}
+	}
+	if len(projected) == 0 {
+		projected = ownershipForType(fieldType)
+	}
+	return normalizeFacts(projected)
+}
+
+func mergeFacts(a, b []OwnershipFact) []OwnershipFact {
+	if len(a) == 0 {
+		return cloneFacts(b)
+	}
+	if len(b) == 0 {
+		return cloneFacts(a)
+	}
+	paths := map[string][]OwnershipFact{}
+	for _, fact := range append(append([]OwnershipFact{}, a...), b...) {
+		paths[fact.Path] = append(paths[fact.Path], fact)
+	}
+	out := make([]OwnershipFact, 0, len(paths))
+	for path, facts := range paths {
+		normalized := normalizeFacts(facts)
+		if len(normalized) == 1 {
+			out = append(out, normalized[0])
+			continue
+		}
+		// Keep every proven owned alternative. Collapsing an owned branch into
+		// unknown would make a conditional escape look safe at a scope edge.
+		out = append(out, normalized...)
+		out = append(out, OwnershipFact{Path: path, Status: "unknown", Origin: "conditional"})
+	}
+	return normalizeFacts(out)
+}
+
+func rebaseInvocationFacts(facts []OwnershipFact, region string) []OwnershipFact {
+	out := cloneFacts(facts)
+	for i := range out {
+		if out[i].Region == "invocation" {
+			out[i].Region = region
+		}
+	}
+	return normalizeFacts(out)
+}
+
+func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType, region string) []OwnershipFact {
+	if len(facts) == 0 {
+		return nil
+	}
+	out := make([]OwnershipFact, 0, len(facts))
+	for _, fact := range facts {
+		matched := false
+		for i, param := range params {
+			if fact.Region != "parameter:"+param.Name {
+				continue
+			}
+			matched = true
+			if i >= len(args) || len(args[i].Ownership) == 0 {
+				out = append(out, OwnershipFact{Path: fact.Path, Status: "unknown", Origin: "helper"})
+				continue
+			}
+			for _, argument := range args[i].Ownership {
+				copy := argument
+				// The summary path is relative to the returned value. The
+				// argument contributes status/region, not another path prefix;
+				// projection and payload construction already recorded the
+				// returned shape before this call boundary.
+				copy.Path = fact.Path
+				copy.Origin = "helper"
+				out = append(out, copy)
+			}
+		}
+		if !matched {
+			copy := fact
+			if copy.Region == "invocation" {
+				copy.Region = region
+			}
+			out = append(out, copy)
+		}
+	}
+	return normalizeFacts(out)
+}
+
+func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
+	if len(facts) == 0 {
+		return nil
+	}
+	out := append([]OwnershipFact{}, facts...)
+	slices.SortStableFunc(out, func(a, b OwnershipFact) int {
+		if a.Path != b.Path {
+			return strings.Compare(a.Path, b.Path)
+		}
+		if a.Status != b.Status {
+			return strings.Compare(a.Status, b.Status)
+		}
+		if a.Region != b.Region {
+			return strings.Compare(a.Region, b.Region)
+		}
+		return strings.Compare(a.Origin, b.Origin)
+	})
+	result := make([]OwnershipFact, 0, len(out))
+	for _, fact := range out {
+		if len(result) == 0 || result[len(result)-1] != fact {
+			result = append(result, fact)
+		}
+	}
+	const maxFacts = 64
+	if len(result) > maxFacts {
+		bounded := make([]OwnershipFact, 0, maxFacts)
+		seenRegions := map[string]bool{}
+		for _, fact := range result {
+			if fact.Status == "owned" && !seenRegions[fact.Region] {
+				if len(bounded) >= maxFacts-2 {
+					bounded = append(bounded, OwnershipFact{Path: "*", Status: "owned", Region: "*", Origin: "bounded"})
+					break
+				}
+				bounded = append(bounded, OwnershipFact{Path: "*", Status: "owned", Region: fact.Region, Origin: "bounded"})
+				seenRegions[fact.Region] = true
+			}
+		}
+		for _, fact := range result {
+			if len(bounded) >= maxFacts-1 {
+				break
+			}
+			if fact.Status != "owned" {
+				bounded = append(bounded, fact)
+			}
+		}
+		if len(bounded) < maxFacts {
+			bounded = append(bounded, OwnershipFact{Path: "*", Status: "unknown", Origin: "bounded"})
+		}
+		return bounded
+	}
+	return result
+}
+
+func hasOwnedFact(facts []OwnershipFact, region string) bool {
+	for _, fact := range facts {
+		if fact.Status == "owned" && (fact.Region == region || fact.Region == "*") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasOwnedChild(facts []OwnershipFact) bool {
+	for _, fact := range facts {
+		if fact.Status == "owned" && (fact.Region == "*" || strings.HasPrefix(fact.Region, "child:")) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *checker) rejectOwnedEscape(facts []OwnershipFact, span Span) {
+	if hasOwnedFact(facts, c.region) || hasOwnedChild(facts) {
+		c.diagnostic("EF123", "value owned by closing scope cannot escape", span)
+	}
+}
+
+func (c *checker) withRegion(region string, fn func() ValueType) ValueType {
+	previous := c.region
+	c.region = region
+	defer func() { c.region = previous }()
+	return fn()
 }
 func typeRef(name string) TypeRef {
 	switch {
@@ -161,7 +467,7 @@ func CompileAt(source, target, dir string) *Result {
 	}
 	r.Program = program
 	r.loadImports(dir)
-	c := &checker{program: program, result: r, functions: map[string]*Function{}, services: map[string]*Service{}, providers: map[string]*Provider{}, records: map[string]*Record{}, enums: map[string]*Enum{}, errors: map[string]*ErrorDecl{}}
+	c := &checker{program: program, result: r, functions: map[string]*Function{}, services: map[string]*Service{}, providers: map[string]*Provider{}, records: map[string]*Record{}, enums: map[string]*Enum{}, errors: map[string]*ErrorDecl{}, region: "invocation"}
 	checkStart := time.Now()
 	c.check()
 	r.Timings.CheckMicros = time.Since(checkStart).Microseconds()
@@ -170,6 +476,9 @@ func CompileAt(source, target, dir string) *Result {
 	return r
 }
 func (c *checker) diagnostic(code, message string, span Span) {
+	if c.suppressDiagnostics {
+		return
+	}
 	c.result.Diagnostics = append(c.result.Diagnostics, Diagnostic{code, message, span})
 }
 func (c *checker) check() {
@@ -341,10 +650,29 @@ func (c *checker) check() {
 			}
 		}
 	}
+	if len(c.program.Functions) > 0 {
+		c.prepareFunctionSummaries()
+	}
 	for _, f := range c.program.Functions {
 		c.function(f, true)
 	}
 	c.validateJSDeclarationNames()
+}
+
+// prepareFunctionSummaries computes bounded ownership summaries before the
+// diagnostic-producing pass. Calls may refer to a helper declared later in a
+// module; a small fixed-point pass makes those summaries available without
+// inventing a second analyzer or duplicating compiler diagnostics.
+func (c *checker) prepareFunctionSummaries() {
+	previous := c.suppressDiagnostics
+	c.suppressDiagnostics = true
+	passes := len(c.program.Functions) + 1
+	for pass := 0; pass < passes; pass++ {
+		for i := len(c.program.Functions) - 1; i >= 0; i-- {
+			c.function(c.program.Functions[i], false)
+		}
+	}
+	c.suppressDiagnostics = previous
 }
 
 // providerSignature checks the explicit constructor boundary. Constructor
@@ -571,13 +899,17 @@ func (c *checker) function(f *Function, record bool) {
 func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, allowedServices []string) {
 	env := map[string]ValueType{}
 	for _, p := range locals {
-		env[p.Name] = value(p.Type)
+		parameter := value(p.Type)
+		parameter.Ownership = c.borrowedOwnership(p.Type, "parameter:"+p.Name)
+		env[p.Name] = parameter
 	}
 	for _, p := range f.Params {
-		env[p.Name] = value(p.Type)
+		parameter := value(p.Type)
+		parameter.Ownership = c.borrowedOwnership(p.Type, "parameter:"+p.Name)
+		env[p.Name] = parameter
 	}
 	c.reasons = []Contribution{}
-	actual := c.block(f.Body, env, f.Effect)
+	actual := c.withRegion("invocation", func() ValueType { return c.block(f.Body, env, f.Effect) })
 	if actual.Success != "never" && (actual.Success != f.Return || actual.Effect) {
 		c.diagnostic("EF106", fmt.Sprintf("body returns %s; expected %s", display(actual), f.Return), f.Span)
 	}
@@ -589,6 +921,8 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	}
 	actual.Effect = f.Effect
 	actual.Type = c.typeRef(actual.Success)
+	f.Ownership = normalizeFacts(actual.Ownership)
+	f.Captures = normalizeFacts(actual.Captures)
 	if record {
 		declared := contract(f)
 		declared.Type = c.typeRef(f.Return)
@@ -642,9 +976,10 @@ func sortedBindingNames(bindings map[string]string) []string {
 	slices.Sort(names)
 	return names
 }
-func (c *checker) payload(e *Expr, fields []Field, env map[string]ValueType, span Span) {
+func (c *checker) payload(e *Expr, fields []Field, env map[string]ValueType, span Span) []OwnershipFact {
 	declared := fieldsMap(fields)
 	seen := map[string]bool{}
+	ownership := []OwnershipFact{}
 	for _, field := range e.Fields {
 		want, exists := declared[field.Name]
 		if !exists {
@@ -659,12 +994,14 @@ func (c *checker) payload(e *Expr, fields []Field, env map[string]ValueType, spa
 		if got.Effect || !sameType(got.Success, want.Type) {
 			c.diagnostic("EF115", "payload field "+field.Name+" must be "+want.Type, field.Span)
 		}
+		ownership = append(ownership, prependFacts(field.Name, got.Ownership)...)
 	}
 	for _, field := range fields {
 		if !seen[field.Name] {
 			c.diagnostic("EF114", "missing payload field "+field.Name, span)
 		}
 	}
+	return normalizeFacts(ownership)
 }
 func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueType {
 	out := value("()")
@@ -687,9 +1024,10 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 					if decl := c.errors[s.Name]; decl != nil {
 						fields = decl.Fields
 					}
-					c.payload(s.Payload, fields, env, s.Payload.Span)
+					c.rejectOwnedEscape(c.payload(s.Payload, fields, env, s.Payload.Span), s.Payload.Span)
 				} else {
 					payload := c.expr(s.Payload, env, false)
+					c.rejectOwnedEscape(payload.Ownership, s.Payload.Span)
 					if payload.Effect {
 						c.diagnostic("EF105", "failure payload must be pure", s.Payload.Span)
 					}
@@ -704,7 +1042,7 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 			} else if decl := c.errors[s.Name]; decl != nil {
 				// The shorthand `fail Error` and `fail Error()` still need to
 				// satisfy every declared payload field.
-				c.payload(&Expr{Kind: "payload", Span: s.Span}, decl.Fields, env, s.Span)
+				c.rejectOwnedEscape(c.payload(&Expr{Kind: "payload", Span: s.Span}, decl.Fields, env, s.Span), s.Span)
 			}
 			out.Errors = union(out.Errors, []string{s.Name})
 			out.Success = "never"
@@ -714,6 +1052,9 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 			continue
 		}
 		t := c.expr(s.Value, env, effect)
+		if hasOwnedChild(t.Ownership) {
+			c.diagnostic("EF123", "child-owned value cannot escape its child scope", s.Span)
+		}
 		out.Errors = union(out.Errors, tExecutedErrors(s.Value))
 		out.Services = union(out.Services, tExecutedServices(s.Value))
 		if s.Kind == "let" {
@@ -723,12 +1064,16 @@ func (c *checker) block(b *Block, env map[string]ValueType, effect bool) ValueTy
 			env[s.Name] = t
 			out.Success = "()"
 			out.Effect = false
+			out.Ownership = nil
+			out.Captures = nil
 		} else {
 			if t.Effect {
 				c.diagnostic("EF105", "unused lazy effect; execute with run or bind it with let", s.Span)
 			}
 			out.Success = t.Success
 			out.Effect = t.Effect
+			out.Ownership = cloneFacts(t.Ownership)
+			out.Captures = cloneFacts(t.Captures)
 		}
 	}
 	return out
@@ -813,18 +1158,27 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 				if len(e.Args) != len(provider.Params) {
 					c.diagnostic("EF106", "provider "+provider.Name+" expects "+fmt.Sprint(len(provider.Params))+" configuration arguments", e.Span)
 				}
+				argumentTypes := make([]ValueType, len(e.Args))
 				for i, arg := range e.Args {
 					got := c.expr(arg, env, false)
+					argumentTypes[i] = got
 					if i < len(provider.Params) && (got.Effect || got.Success != provider.Params[i].Type) {
 						c.diagnostic("EF106", "provider configuration argument must be "+provider.Params[i].Type, arg.Span)
 					}
 				}
 				t = providerContract(provider)
+				for i, param := range provider.Params {
+					if i < len(argumentTypes) {
+						t.Captures = append(t.Captures, prependFacts("capture:"+param.Name, argumentTypes[i].Ownership)...)
+					}
+				}
+				t.Captures = normalizeFacts(t.Captures)
 				e.Text = "provider-constructor"
 				break
 			}
 		}
 		var f *Function
+		serviceName := ""
 		if e.Left.Kind == "name" {
 			f = c.functions[e.Left.Name]
 			if _, shadow := env[e.Left.Name]; shadow {
@@ -843,6 +1197,7 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 					if m.Name == e.Left.Name {
 						f = m
 						t.Services = []string{key}
+						serviceName = key
 						break
 					}
 				}
@@ -858,17 +1213,49 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		services := t.Services
 		t = contract(f)
 		t.Services = union(t.Services, services)
+		argumentTypes := make([]ValueType, len(e.Args))
+		if len(f.Ownership) > 0 {
+			t.Ownership = instantiateFacts(f.Ownership, f.Params, argumentTypes, c.region)
+		}
+		if len(f.Captures) > 0 {
+			t.Captures = instantiateFacts(f.Captures, f.Params, argumentTypes, c.region)
+		}
+		if serviceName == "Files" && e.Left.Name == "openRead" {
+			// A service name alone is not an acquisition proof: a custom Files
+			// provider may borrow a File. The default service operation is
+			// therefore explicit unknown until a known LiveFiles provision
+			// discharges it below.
+			t.Ownership = []OwnershipFact{{Status: "unknown", Origin: "service"}}
+		}
 		if len(e.Args) != len(f.Params) {
 			c.diagnostic("EF106", "incorrect argument count", e.Span)
 		}
 		for i, a := range e.Args {
 			arg := c.expr(a, env, inEffect)
+			argumentTypes[i] = arg
+			if hasOwnedChild(arg.Ownership) {
+				c.diagnostic("EF123", "child-owned value cannot be used after join", a.Span)
+			}
 			if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && e.Left.Left.Name == "Http" && i == 1 && arg.Success == "Handler" {
 				t.Services = union(t.Services, arg.Services)
 			}
 			if i < len(f.Params) && (arg.Effect || arg.Success != f.Params[i].Type) {
 				c.diagnostic("EF106", "argument must be "+f.Params[i].Type, a.Span)
 			}
+		}
+		if len(f.Ownership) > 0 {
+			t.Ownership = instantiateFacts(f.Ownership, f.Params, argumentTypes, c.region)
+		}
+		if len(f.Captures) > 0 {
+			t.Captures = instantiateFacts(f.Captures, f.Params, argumentTypes, c.region)
+		}
+		if f.Effect {
+			for i, argument := range argumentTypes {
+				if i < len(f.Params) {
+					t.Captures = append(t.Captures, prependFacts("capture:"+f.Params[i].Name, argument.Ownership)...)
+				}
+			}
+			t.Captures = normalizeFacts(t.Captures)
 		}
 	case "member":
 		inner := c.expr(e.Left, env, inEffect)
@@ -880,6 +1267,11 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			for _, field := range fields {
 				if field.Name == e.Name {
 					t = value(field.Type)
+					t.Ownership = projectFacts(inner.Ownership, e.Name)
+					t.Captures = projectFacts(inner.Captures, e.Name)
+					if len(t.Ownership) == 0 {
+						t.Ownership = c.unknownOwnership(field.Type)
+					}
 					e.Text = "field"
 					break
 				}
@@ -914,17 +1306,30 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		if !inEffect {
 			c.diagnostic("EF105", "scope requires an effect function", e.Span)
 		}
-		t = c.block(e.Then, env, inEffect)
+		scopeRegion := fmt.Sprintf("scope:%d", e.Span.Offset)
+		t = c.withRegion(scopeRegion, func() ValueType { return c.block(e.Then, env, inEffect) })
+		if hasOwnedFact(t.Ownership, scopeRegion) || hasOwnedFact(t.Captures, scopeRegion) {
+			c.diagnostic("EF123", "value owned by closing scope cannot escape", e.Span)
+		}
 	case "fork":
 		inner := c.expr(e.Left, env, inEffect)
 		if !inEffect || !inner.Effect {
 			c.diagnostic("EF105", "fork requires an Effect inside an effect function", e.Span)
 		}
-		t = inner
+		childRegion := fmt.Sprintf("child:%d", e.Span.Offset)
+		t = value("Fiber:" + inner.Success)
 		t.Success = "Fiber:" + inner.Success
 		t.Effect = false
-		t.Errors = union(t.Errors, executed(e.Left, true))
-		t.Services = union(t.Services, executed(e.Left, false))
+		t.Errors = union(inner.Errors, executed(e.Left, true))
+		t.Services = union(inner.Services, executed(e.Left, false))
+		t.Ownership = []OwnershipFact{{Status: "owned", Region: c.region, Origin: "fork"}}
+		t.Captures = cloneFacts(inner.Captures)
+		t.Child = rebaseInvocationFacts(inner.Ownership, childRegion)
+		for i := range t.Child {
+			if t.Child[i].Region == childRegion && t.Child[i].Status == "owned" {
+				t.Child[i].Origin = "child-acquisition"
+			}
+		}
 		c.reasons = append(c.reasons, Contribution{"owned-child", inner.Errors, e.Span})
 	case "timeout":
 		t = c.expr(e.Left, env, inEffect)
@@ -943,6 +1348,9 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		}
 		t = inner
 		t.Effect = false
+		if !strings.HasPrefix(t.Success, "provider:") {
+			t.Captures = nil
+		}
 		t.Errors = union(t.Errors, executed(e.Left, true))
 		t.Services = union(t.Services, executed(e.Left, false))
 		if len(t.Errors) > 0 {
@@ -962,6 +1370,12 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 		}
 		if provider.Success != "provider:"+e.Name || provider.Effect {
 			c.diagnostic("EF104", "provider must implement "+e.Name, e.Right.Span)
+		}
+		t.Captures = normalizeFacts(append(t.Captures, provider.Captures...))
+		if e.Name == "Files" && e.Right.Kind == "name" && e.Right.Name == "LiveFiles" {
+			if e.Left.Kind == "call" && e.Left.Left != nil && e.Left.Left.Kind == "member" && e.Left.Left.Left.Kind == "name" && e.Left.Left.Left.Name == "Files" && e.Left.Left.Name == "openRead" {
+				t.Ownership = []OwnershipFact{{Status: "owned", Region: c.region, Origin: "acquisition"}}
+			}
 		}
 		t.Services = remove(t.Services, e.Name)
 	case "catch":
@@ -1007,6 +1421,8 @@ func (c *checker) expr(e *Expr, env map[string]ValueType, inEffect bool) ValueTy
 			if a.Success != b.Success || a.Effect != b.Effect {
 				c.diagnostic("EF106", "if branches must return the same type", e.Span)
 			}
+			t.Ownership = mergeFacts(a.Ownership, b.Ownership)
+			t.Captures = mergeFacts(a.Captures, b.Captures)
 		}
 		if a.Effect || b.Effect {
 			c.diagnostic("EF103", "returning Effect values from branches is not supported in this prototype", e.Span)
@@ -1075,15 +1491,23 @@ func (c *checker) dataCall(e *Expr, env map[string]ValueType, inEffect bool) (Va
 			return value("invalid"), true
 		}
 		payloadExpr := &Expr{Kind: "payload", Fields: e.Fields, Span: e.Span}
-		c.payload(payloadExpr, fields, env, e.Span)
+		ownership := c.payload(payloadExpr, fields, env, e.Span)
 		e.Text = "data"
-		return value(typeName), true
+		result := value(typeName)
+		if variantName != "" {
+			result.Ownership = prependFacts(variantName, ownership)
+		} else {
+			result.Ownership = ownership
+		}
+		return result, true
 	}
 	if len(e.Args) != len(fields) {
 		c.diagnostic("EF115", "constructor "+typeName+" expects "+fmt.Sprint(len(fields))+" payload fields", e.Span)
 	}
+	argumentTypes := make([]ValueType, len(e.Args))
 	for i, arg := range e.Args {
 		got := c.expr(arg, env, false)
+		argumentTypes[i] = got
 		if i < len(fields) && (got.Effect || !sameType(got.Success, fields[i].Type)) {
 			c.diagnostic("EF115", "payload field "+fields[i].Name+" must be "+fields[i].Type, arg.Span)
 		}
@@ -1095,7 +1519,19 @@ func (c *checker) dataCall(e *Expr, env map[string]ValueType, inEffect bool) (Va
 			e.Fields = append(e.Fields, FieldValue{Name: fields[i].Name, Value: arg, Span: arg.Span})
 		}
 	}
-	return value(typeName), true
+	result := value(typeName)
+	ownership := []OwnershipFact{}
+	for i, got := range argumentTypes {
+		if i < len(fields) {
+			ownership = append(ownership, prependFacts(fields[i].Name, got.Ownership)...)
+		}
+	}
+	if variantName != "" {
+		result.Ownership = prependFacts(variantName, ownership)
+	} else {
+		result.Ownership = normalizeFacts(ownership)
+	}
+	return result, true
 }
 
 func (c *checker) construct(e *Expr, env map[string]ValueType, inEffect bool) ValueType {
@@ -1130,8 +1566,14 @@ func (c *checker) construct(e *Expr, env map[string]ValueType, inEffect bool) Va
 			return value("invalid")
 		}
 	}
-	c.payload(e, fields, env, e.Span)
-	return value(typeName)
+	ownership := c.payload(e, fields, env, e.Span)
+	result := value(typeName)
+	if variantName != "" {
+		result.Ownership = prependFacts(variantName, ownership)
+	} else {
+		result.Ownership = ownership
+	}
+	return result
 }
 
 func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueType {
@@ -1197,7 +1639,12 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 			if binding == "_" {
 				continue
 			}
-			branchEnv[binding] = value(field.Type)
+			bound := value(field.Type)
+			bound.Ownership = projectVariantFacts(scrutinee.Ownership, pattern.VariantName, fieldName, field.Type)
+			if len(bound.Ownership) == 0 {
+				bound.Ownership = c.unknownOwnership(field.Type)
+			}
+			branchEnv[binding] = bound
 		}
 		branch := c.block(arm.Body, branchEnv, inEffect)
 		if branch.Success != "never" {
@@ -1205,6 +1652,9 @@ func (c *checker) match(e *Expr, env map[string]ValueType, inEffect bool) ValueT
 				result, haveResult = branch, true
 			} else if !sameType(result.Success, branch.Success) || result.Effect != branch.Effect {
 				c.diagnostic("EF106", "match branches must return the same type", arm.Span)
+			} else {
+				result.Ownership = mergeFacts(result.Ownership, branch.Ownership)
+				result.Captures = mergeFacts(result.Captures, branch.Captures)
 			}
 		}
 		branchErrors = union(branchErrors, branch.Errors)
@@ -1272,11 +1722,17 @@ func (c *checker) fiberCall(e *Expr, env map[string]ValueType, inEffect bool) bo
 	t.Errors = inner.Errors
 	switch e.Left.Name {
 	case "join":
+		t.Ownership = cloneFacts(inner.Child)
+		t.Captures = nil
 	case "interrupt":
 		t.Success = "()"
+		t.Ownership = nil
+		t.Captures = nil
 	case "cancel":
 		t.Success = "()"
 		t.Errors = []string{}
+		t.Ownership = nil
+		t.Captures = nil
 	default:
 		c.diagnostic("EF102", "unknown fiber operation "+e.Left.Name, e.Span)
 	}
