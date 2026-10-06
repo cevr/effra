@@ -48,6 +48,16 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Actor** (specified): A running instance of a machine, with its own current state, owning scope and event mailbox.
 
+**Supervisor** (proposed): An owner that observes completed child exits and applies an explicit restart, stop or escalation policy using fresh child factories and bounded restart attempts.
+
+**Actor address** (proposed): A typed identity used to route to an actor independently of its current running instance; an address alone promises neither persistence nor delivery.
+
+**Actor incarnation** (proposed): One running instance associated with an address, distinguished from its predecessors and from its individual state entries.
+
+**Durable entity** (proposed): An addressable actor whose provider contract preserves declared domain data and acknowledged progress across process failure, with explicit storage, codec and ownership policies.
+
+**Workflow replay** (proposed): Reconstructing execution from versioned recorded steps and outcomes under an explicit replay contract; ordinary effect recipes do not imply replay safety.
+
 **Machine step** (specified): An ordinary pure or effectful function that consumes a state and event and returns an explicit transition decision. Effectful evaluation has an actor-owned scope and completes before state commit.
 
 **State entry** (specified): One owned lifetime of an actor's current state, identified separately from that state's tag and payload.

@@ -58,6 +58,8 @@ These are draft interpretations for asynchronous correction, not blockers. No be
 
 ## Carried
 
+Actor-model comparison added2026-10-06 in response to the owner. Source research and selected immutable source checks are in [actors and durability](../docs/research/actor-model-and-durability.md). Decided by **Redesign From First Principles** and Go-like simplicity: retain the existing ordinary machine/ADT/effect core; propose modular supervision and explicit durability/deployment providers, with workflow replay and VM hot-loading separate. This is a carried design opportunity, not an expanded first machine implementation or a closed HITL decision. Actor-transfer isolation, fresh restart ownership, durable acknowledgement/fencing and crash-side-effect semantics require finite specifications and executable evidence before adoption.
+
 | Decision | From | Files | Status |
 | --- | --- | --- | --- |
 | Refresh ownership/type/inspection gap receipts after managed runtime integration | setup | NORTH_STAR.md, PRIOR_ARTS.md, this ledger | done: runtime receipt below |
