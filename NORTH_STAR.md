@@ -6,6 +6,8 @@ Established 2026-10-05 from the owner's conversation, [design sketch](docs/desig
 
 Current implementation receipt (2026-10-05; managed runtime foundation `5c8c31f`, import/lifecycle update `8b092fc`): `runtime/effra` and `examples/lifecycle.ef` establish managed Go ownership, cooperative cancellation, cleanup, and bounded current-scope inspection. `examples/go-interop` establishes the native Go adapter seam, retaining partial results; primitive Go package functions now import automatically with explicit Foreign capability and reviewed behavior metadata. CLI/MCP inspection still describes a single source file, and shared Go/JS lifecycle conformance covers ownership, unobserved failures and timeout cleanup defects; complete provider parity remains open. See [runtime contracts](docs/runtime.md).
 
+Production foundation receipt (2026-10-05; reviewed integration `e5777f7`): records, payload enums, exhaustive interpretation, typed failure payloads and canonical declaration inspection execute on Go/JS. Reasoned lint suppression cannot disable compiler diagnostics. Provider construction checks configuration and captures dependency values while preserving the invocation owner; recipe/materialization origins and incoming dependents share the compiler graph. Full gate and Go race checks passed. Causal scheduling and bounded ownership checking remain under implementation review, and matched server performance remains unmeasured.
+
 ## North stars
 
 | North star | It holds when | A candidate breaks it when |
