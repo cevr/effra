@@ -21,7 +21,7 @@ Keep language guarantees intact: size optimizations cannot remove cancellation c
 
 The current `runtime/effra.Sources()` copies every runtime source file into generated Go modules. That includes the HTTP file and its imports even when no HTTP operation is called. Linker removal of unreachable functions alone does not establish removal of package initialization. This emission boundary needs implementation and binary evidence.
 
-The preparatory source seam exposes `runtime/effra.SelectSources`, which closes an explicit root set over the `core`, `sync`, `http`, `files`, `console`, `env`, `inspect`, and `interop` modules while keeping `Sources()` as the full admitted runtime set for current emission. `core` conservatively groups effect, scope, fiber, managed-signal, and scheduler sources because their ownership and scheduling types are mutually connected; this grouping is a source boundary, not an application reachability or binary-size claim. Empty roots select no sources, and unknown roots fail explicitly.
+The preparatory source seam exposes `runtime/effra.SelectSources`, which closes an explicit root set over the `core`, `layers`, `sync`, `http`, `files`, `console`, `env`, `inspect`, and `interop` modules while keeping `Sources()` as the full admitted runtime set for current emission. `layers` depends on `core`. `core` conservatively groups effect, scope, fiber, managed-signal, and scheduler sources because their ownership and scheduling types are mutually connected; this grouping is a source boundary, not an application reachability or binary-size claim. Empty roots select no sources, and unknown roots fail explicitly.
 
 ## Acceptance matrix
 

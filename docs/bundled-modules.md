@@ -44,6 +44,10 @@ summaries must match the admitted transport. Borrowing and acquisition remain
 distinct through `Fns.forwardFile`; callback forwarding does not grant an escape
 from a closing scope. This boundary makes no cache-performance claim.
 
-Imported template data and initialized conversion witnesses are subsequent
-implementation units. Public inspection JSON is explanatory output and is never
-admitted as executable ownership proof.
+The finite distributed `effra/conversions` module also provides first-order
+record-template `Codec` data and the source-backed `witness` factory described
+in [the bundled-interface contract](specs/bundled-interfaces.md). Witness
+construction is checked ordinary data construction; it does not implement
+serialization, decoding, or round-trip laws. User generic declarations and
+nested template data arguments remain unsupported. Public inspection JSON is
+explanatory output and is never admitted as executable ownership proof.
