@@ -28,7 +28,7 @@ func TestHostTypeInspectionCLIAndMCPParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	offset := strings.Index(string(source), "match found") + len("match ")
-	inspectOut, inspectErr, code := runTestCLI(t, binary, "inspect", file, "counter")
+	inspectOut, inspectErr, code := runTestCLI(t, binary, "inspect", file, "program")
 	if code != 0 {
 		t.Fatalf("CLI inspect: %s", inspectErr)
 	}
@@ -40,17 +40,25 @@ func TestHostTypeInspectionCLIAndMCPParity(t *testing.T) {
 	}
 	selected := readProcessJSON(t, typeOut)
 
-	found := false
+	components := map[string]map[string]any{}
 	for _, binding := range inspect["bindings"].([]any) {
 		b := binding.(map[string]any)
-		if b["symbol"] != "host.Find" {
-			continue
+		for _, side := range []string{"hostParameters", "hostResults"} {
+			if listed, ok := b[side].([]any); ok && len(listed) > 0 {
+				components[b["symbol"].(string)+" "+side] = listed[0].(map[string]any)
+			}
 		}
-		result := b["hostResults"].([]any)[0].(map[string]any)
-		found = result["adaptation"] == "option" && result["native"] == "*effra.local/prototype/examples/hosttypes.Counter"
 	}
-	if !found {
-		t.Fatalf("binding lacks nullable host result: %v", inspect["bindings"])
+	for key, want := range map[string][3]string{
+		"host.Find hostResults":          {"*effra.local/prototype/examples/hosttypes.Counter", "Option<*host.Counter>", "option"},
+		"host.Bytes hostResults":         {"[]uint8", "Option<bytes>", "option"},
+		"host.RawText hostResults":       {"[]uint8", "Option<bytes>", "option"},
+		"host.BytesClass hostParameters": {"[]uint8", "bytes", "present"},
+	} {
+		got := components[key]
+		if got["native"] != want[0] || got["type"] != want[1] || got["adaptation"] != want[2] {
+			t.Fatalf("%s adaptation %v, want %v", key, got, want)
+		}
 	}
 	expression := selected["selection"].(map[string]any)["expression"].(map[string]any)["type"].(map[string]any)["type"].(map[string]any)
 	definitions := map[string]map[string]any{}
@@ -66,7 +74,7 @@ func TestHostTypeInspectionCLIAndMCPParity(t *testing.T) {
 	messages := []map[string]any{
 		{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "host-types-test", "version": "1"}}},
 		{"jsonrpc": "2.0", "method": "notifications/initialized"},
-		{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": "code.inspect", "arguments": map[string]any{"file": relative, "symbol": "counter"}}},
+		{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": "code.inspect", "arguments": map[string]any{"file": relative, "symbol": "program"}}},
 		{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": map[string]any{"name": "code.type", "arguments": map[string]any{"file": relative, "offset": offset}}},
 	}
 	var input bytes.Buffer

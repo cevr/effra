@@ -75,6 +75,20 @@ effect fn names(present: bool) -> string uses { Foreign } {
     }
 }
 
+effect fn raw(present: bool) -> string uses { Foreign } {
+    match run host.Bytes(present) {
+        Data.Option.None => "nil bytes",
+        Data.Option.Some { value: data } => run host.BytesClass(data)
+    }
+}
+
+effect fn rawText(text: string) -> string uses { Foreign } {
+    match run host.RawText(text) {
+        Data.Option.None => "nil bytes",
+        Data.Option.Some { value: data } => run host.BytesClass(data)
+    }
+}
+
 effect fn buffered(text: string) -> string uses { Foreign } {
     match run host.NewBuffer(text) {
         Data.Option.None => "no buffer",
@@ -91,6 +105,7 @@ effect fn program() -> void uses { Foreign, Console } {
     run Console.log(run wrapped() + "; " + run strict().catch<GoError>("typed-nil error failed"))
     run Console.log(run split("ab:cde") + "; " + run split("abc"))
     run Console.log(run names(false) + "; " + run names(true))
+    run Console.log(run raw(false) + "; " + run raw(true) + "; " + run rawText("alias"))
     run Console.log(run buffered("native buffer"))
     run Console.log(run strconv.Itoa(42))
 }

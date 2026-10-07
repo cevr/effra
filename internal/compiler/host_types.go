@@ -118,7 +118,9 @@ func admitHostType(t types.Type) (hostType, error) {
 		return hostType{native: types.NewPointer(element.native), nullable: true}, nil
 	case *types.Slice:
 		if basic, ok := types.Unalias(t.Elem()).(*types.Basic); ok && basic.Kind() == types.Uint8 {
-			return hostType{native: types.NewSlice(types.Typ[types.Uint8]), primitive: "bytes"}, nil
+			// A present byte slice is exactly an Effra bytes value, but the
+			// native slice can still be nil: it adapts like every other slice.
+			return hostType{native: types.NewSlice(types.Typ[types.Uint8]), primitive: "bytes", nullable: true}, nil
 		}
 		element, err := admitHostType(t.Elem())
 		if err != nil {
@@ -175,13 +177,14 @@ func (h *hostImports) display(t types.Type) string {
 }
 
 func (h *hostImports) adaptedDisplay(t hostType, result bool) string {
-	if t.primitive != "" {
-		return t.primitive
+	display := t.primitive
+	if display == "" {
+		display = h.display(t.native)
 	}
 	if result && t.nullable {
-		return hostOptionMember + "<" + h.display(t.native) + ">"
+		return hostOptionMember + "<" + display + ">"
 	}
-	return h.display(t.native)
+	return display
 }
 
 func (h *hostImports) component(t hostType, result bool) HostComponent {

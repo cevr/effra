@@ -28,12 +28,19 @@ func runGeneratedGo(t *testing.T, r *Result) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return runGoModule(t, r, application, map[string][]byte{"main.go": []byte(code)})
+}
+
+// runGoModule runs generated sources as one native module beside the runtime.
+func runGoModule(t *testing.T, r *Result, application *GoApplication, files map[string][]byte) string {
+	t.Helper()
 	dir := t.TempDir()
-	if err = application.WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
-	for name, contents := range map[string][]byte{"main.go": []byte(code), "go.mod": r.ModuleFile()} {
-		if err = os.WriteFile(filepath.Join(dir, name), contents, 0600); err != nil {
+	files["go.mod"] = r.ModuleFile()
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), contents, 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -65,6 +72,7 @@ func TestHostTypesExampleExecutesNatively(t *testing.T) {
 		"is missing; typed-nil error failed",
 		"ab 3 found; abc 3 missing",
 		"nil slice; 0",
+		"nil bytes; empty; alias",
 		"native buffer",
 		"42",
 	}, "\n") + "\n"
@@ -130,6 +138,43 @@ effect fn program() -> void uses { Console, Foreign } {
 	if split.Return != "(string, int, bool)" || !split.HasError || len(split.HostResults) != 4 || split.HostResults[3].Adaptation != hostAdaptError {
 		t.Fatalf("complete tuple inspection: %+v", split)
 	}
+	// Source cannot inspect a failure payload, so a native entry point runs the
+	// compiled strict function and reads GoError directly: the partial value is
+	// the complete tuple and the error is Go's original sentinel.
+	code, application, err := emitGoApplication(r, GoGenerationBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(code, "\nfunc main() {") {
+		t.Fatal("generated program has no main entry")
+	}
+	code = strings.Replace(code, "\nfunc main() {", "\nfunc efGeneratedMain() {", 1)
+	output := runGoModule(t, r, application, map[string][]byte{"main.go": []byte(code), "harness.go": []byte(`package main
+
+import (
+	"context"
+	"fmt"
+
+	er "effra.generated/runtime"
+	host "effra.local/prototype/examples/hosttypes"
+)
+
+func main() {
+	exit := er.RunContext(context.Background(), func(fc *er.FiberContext) er.Exit[string] {
+		return efProvide_Foreign(efFunction_strict("bare"), efProvider_Host())(efContext{Runtime: fc})
+	})
+	payload := exit.Failure.Payload.(er.GoError)
+	partial := payload.Partial.(struct {
+		V0 string
+		V1 int
+		V2 bool
+	})
+	fmt.Printf("%s %s|%d|%t %t\n", exit.Failure.Tag, partial.V0, partial.V1, partial.V2, payload.Err == host.ErrNoSeparator)
+}
+`)})
+	if output != "GoError bare|4|false true\n" {
+		t.Fatalf("GoError partial payload: %q", output)
+	}
 }
 
 // Nullable native values adapt to Option in both directions of presence; a
@@ -162,6 +207,57 @@ effect fn program() -> void uses { Console, Foreign } {
 	}
 	if pointer == nil || pointer.Name != "*host.Counter" || len(pointer.Args) != 1 || option == nil || len(option.Args) != 1 || option.Args[0] != pointer.ID {
 		t.Fatalf("canonical host facts: pointer=%+v option=%+v", pointer, option)
+	}
+}
+
+// A native byte slice is a bytes payload only when present: nil is None and a
+// present empty slice reaches Go again as empty, also through an alias. The
+// adapted result cannot stand in for bytes, so nil never hides inside Some.
+func TestNativeByteSliceAdaptsThroughOption(t *testing.T) {
+	r := compileHostTypes(t, `effect fn raw(present: bool) -> string uses { Foreign } {
+    match run host.Bytes(present) {
+        Data.Option.None => "none",
+        Data.Option.Some { value: data } => run host.BytesClass(data)
+    }
+}
+effect fn program() -> void uses { Console, Foreign } {
+    let aliased = match run host.RawText("") {
+        Data.Option.None => "none",
+        Data.Option.Some { value: data } => run host.BytesClass(data)
+    }
+    run Console.log(run raw(false) + "/" + run raw(true) + "/" + aliased)
+}`)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	if output := runGeneratedGo(t, r); output != "none/empty/empty\n" {
+		t.Fatalf("native bytes: %q", output)
+	}
+	results := map[string]HostComponent{}
+	for _, binding := range r.Bindings {
+		if len(binding.HostResults) > 0 {
+			results[binding.Symbol] = binding.HostResults[0]
+		}
+		if binding.Symbol == "host.BytesClass" && (binding.HostParameters[0].Type != "bytes" || binding.HostParameters[0].Adaptation != hostAdaptPresent) {
+			t.Fatalf("bytes parameter: %+v", binding.HostParameters)
+		}
+	}
+	for _, symbol := range []string{"host.Bytes", "host.RawText"} {
+		if got := results[symbol]; got != (HostComponent{Native: "[]uint8", Type: "Option<bytes>", Adaptation: hostAdaptOption}) {
+			t.Fatalf("%s result: %+v", symbol, got)
+		}
+	}
+	for _, body := range []string{
+		`run host.BytesClass(run host.Bytes(false))`,
+		`run host.BytesClass(match Data.Option.Some { value: run host.Bytes(false) } {
+        Data.Option.None => run host.Bytes(true),
+        Data.Option.Some { value } => value
+    })`,
+	} {
+		r := compileHostTypes(t, "effect fn program() -> void uses { Console, Foreign } {\n    run Console.log("+body+")\n}")
+		if r.Checked || !hasCode(r, "EF106") {
+			t.Fatalf("absent bytes reached a bytes parameter: %s\n%v", body, r.Diagnostics)
+		}
 	}
 }
 

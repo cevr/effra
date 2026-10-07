@@ -113,13 +113,41 @@ func DescribeError(err error) string {
 	return "other: " + err.Error()
 }
 
+// ErrNoSeparator is the sentinel Split returns with its partial values.
+var ErrNoSeparator = errors.New("no separator")
+
 // Split returns three values and an error; the values are retained on error.
 func Split(text string) (string, int, bool, error) {
 	head, tail, found := strings.Cut(text, ":")
 	if !found {
-		return head, len(head), false, errors.New("no separator")
+		return head, len(head), false, ErrNoSeparator
 	}
 	return head, len(tail), true, nil
+}
+
+// Raw is an alias of the native byte slice.
+type Raw = []byte
+
+// Bytes distinguishes a nil byte slice from a present empty one.
+func Bytes(present bool) []byte {
+	if !present {
+		return nil
+	}
+	return []byte{}
+}
+
+// RawText returns its text as a byte slice through the alias.
+func RawText(text string) Raw { return Raw(text) }
+
+// BytesClass reports what Go received: nil, empty or the text.
+func BytesClass(value []byte) string {
+	switch {
+	case value == nil:
+		return "nil"
+	case len(value) == 0:
+		return "empty"
+	}
+	return string(value)
 }
 
 // Names distinguishes a nil slice from a present empty one.
