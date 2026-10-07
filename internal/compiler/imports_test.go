@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -210,6 +212,111 @@ effect fn main() -> string {
 	for i, diagnostic := range r.Diagnostics {
 		if diagnostic.Code != "EF111" || !strings.HasPrefix(diagnostic.Message, want[i]) || (!strings.HasSuffix(want[i], ": ") && diagnostic.Message != want[i]) {
 			t.Fatalf("diagnostic %d: %+v, want %q", i, diagnostic, want[i])
+		}
+	}
+}
+
+// When go list fails to list the packages that keys name outside the import
+// closure, whether the command fails or its output does not decode, each such
+// key is refused with that failure, every other key is still checked, and no
+// refused key reaches a binding: Lookup keeps its explicit context parameter.
+func TestBindingMetadataChecksEveryKeyWhenListingFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake go command is a shell script")
+	}
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, bin := t.TempDir(), t.TempDir()
+	write := func(name, contents string, mode os.FileMode) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(name, []byte(contents), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The fake go fails only the listing of key packages; every other command
+	// runs the real toolchain.
+	write(filepath.Join(bin, "go"), `#!/bin/sh
+printf '%s\n' "$*" >> "$EFFRA_FAKE_GO_LOG"
+if [ "$1" = list ] && [ "$2" = -e ]; then
+	case "$EFFRA_FAKE_GO_LIST" in
+	fail) echo "simulated go list failure" >&2; exit 1 ;;
+	garbage) echo '{"ImportPath":'; exit 0 ;;
+	esac
+fi
+exec "$EFFRA_REAL_GO" "$@"
+`, 0o700)
+	write(filepath.Join(dir, "go.mod"), "module example.test/listing\n\ngo 1.27\n", 0o600)
+	write(filepath.Join(dir, "listing.go"), `package listing
+
+import "context"
+
+type value struct{}
+
+func (value) Lookup(context.Context, string) (string, error) { return "value", nil }
+
+func First() interface {
+	Lookup(context.Context, string) (string, error)
+} {
+	return value{}
+}
+`, 0o600)
+	write(filepath.Join(dir, "other", "other.go"), "package other\n\nfunc F() string { return \"other\" }\n", 0o600)
+	write(filepath.Join(dir, "effra.bindings.json"), `{"(interface).Lookup":{"context":"fiber","cancellation":"cooperative"},
+ "example.test/listing.Fecth":{"cancellation":"unknown"},
+ "example.test/listing/other.F":{"cancellation":"unknown"}}`, 0o600)
+	log := filepath.Join(bin, "go.log")
+	t.Setenv("EFFRA_REAL_GO", realGo)
+	t.Setenv("EFFRA_FAKE_GO_LOG", log)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, tc := range []struct{ mode, failure string }{
+		{"fail", "go list: exit status 1: simulated go list failure"},
+		{"garbage", "go list: unexpected EOF"},
+	} {
+		t.Setenv("EFFRA_FAKE_GO_LIST", tc.mode)
+		if err := os.WriteFile(log, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		r := CompileAt(`import go l "example.test/listing"
+import Data "effra/data"
+effect fn main() -> string {
+    match run l.First().provide<Foreign>(Host) {
+        Data.Option.None => "none",
+        Data.Option.Some { value: first } => {
+            let looked = run first.Lookup("one").provide<Foreign>(Host)
+            "looked"
+        }
+    }
+}`, "go", dir)
+		calls, err := os.ReadFile(log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(strings.Split(string(calls), "\n"), "list -e -deps -export -json -- example.test/listing/other") {
+			t.Fatalf("%s: key packages were not listed: %q", tc.mode, calls)
+		}
+		want := []string{
+			`EF111 effra.bindings.json key "(interface).Lookup" names a method of an unnamed interface`,
+			`EF111 effra.bindings.json key "example.test/listing.Fecth" matches no Go function or method`,
+			`EF111 effra.bindings.json key "example.test/listing/other.F" names package example.test/listing/other, which does not load: ` + tc.failure,
+			`EF106 incorrect Go argument count`,
+		}
+		if r.Checked || len(r.Diagnostics) < len(want) {
+			t.Fatalf("%s: %+v", tc.mode, r.Diagnostics)
+		}
+		for i, prefix := range want {
+			if got := r.Diagnostics[i].Code + " " + r.Diagnostics[i].Message; !strings.HasPrefix(got, prefix) {
+				t.Fatalf("%s: diagnostic %d is %q, want prefix %q", tc.mode, i, got, prefix)
+			}
+		}
+		for _, binding := range r.Bindings {
+			if binding.Context || binding.Cancellation == "cooperative" {
+				t.Fatalf("%s: refused key applied to %s", tc.mode, binding.Symbol)
+			}
 		}
 	}
 }

@@ -326,27 +326,11 @@ func checkContractKeys(dir string, contracts map[string]behavior, exports map[st
 	}
 	failed := map[string]string{}
 	if len(missing) > 0 {
-		data, err := goCommand(dir, append([]string{"list", "-e", "-deps", "-export", "-json", "--"}, slices.Sorted(maps.Keys(missing))...)...)
-		if err != nil {
-			for key, path := range packages {
-				if missing[path] {
-					delete(contracts, key)
-				}
-			}
-			return []Diagnostic{{Code: "EF111", Message: err.Error()}}
-		}
-		decoder := json.NewDecoder(bytes.NewReader(data))
-		for {
-			var pkg listedPackage
-			if err = decoder.Decode(&pkg); err == io.EOF {
-				break
-			} else if err != nil {
-				return []Diagnostic{{Code: "EF111", Message: err.Error()}}
-			}
-			if pkg.Error != nil {
-				failed[pkg.ImportPath] = strings.TrimSpace(pkg.Error.Err)
-			} else if exports[pkg.ImportPath] == "" {
-				exports[pkg.ImportPath] = pkg.Export
+		// A listing that fails as a whole fails every package it was to list;
+		// each key is still checked, and refused, below.
+		if err := listContractPackages(dir, slices.Sorted(maps.Keys(missing)), exports, failed); err != nil {
+			for path := range missing {
+				failed[path] = err.Error()
 			}
 		}
 	}
@@ -401,6 +385,30 @@ func checkContractKeys(dir string, contracts map[string]behavior, exports map[st
 		refuse(key, message)
 	}
 	return diagnostics
+}
+
+// listContractPackages lists packages that keys name outside the import
+// closure, adding each listed package's export data to exports, or its error
+// to failed. An error means the listing itself failed.
+func listContractPackages(dir string, paths []string, exports, failed map[string]string) error {
+	data, err := goCommand(dir, append([]string{"list", "-e", "-deps", "-export", "-json", "--"}, paths...)...)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	for {
+		var pkg listedPackage
+		if err = decoder.Decode(&pkg); err == io.EOF {
+			return nil
+		} else if err != nil {
+			return fmt.Errorf("go list: %w", err)
+		}
+		if pkg.Error != nil {
+			failed[pkg.ImportPath] = strings.TrimSpace(pkg.Error.Err)
+		} else if exports[pkg.ImportPath] == "" {
+			exports[pkg.ImportPath] = pkg.Export
+		}
+	}
 }
 
 // contractKeyPackage returns the package a full name belongs to: the text
