@@ -155,7 +155,13 @@ effect fn test_scheduler_drains_long_continuation() -> void raises {AssertionFai
 			t.Fatal(err)
 		}
 	}
-	goOutput, err := runWithWatchdog(goDir, 60*time.Second, "go", "run", ".")
+	// Compiling this deliberately long body is slow and load-dependent; bound
+	// it separately so the watchdog below measures only the managed run.
+	binary := filepath.Join(goDir, "scheduler-probe")
+	if output, err := runWithWatchdog(goDir, 5*time.Minute, "go", "build", "-o", binary, "."); err != nil {
+		t.Fatalf("generated Go scheduler test did not build: %v\n%s", err, output)
+	}
+	goOutput, err := runWithWatchdog(goDir, 60*time.Second, binary)
 	if err != nil || !strings.Contains(string(goOutput), `"passed":true`) {
 		t.Fatalf("generated Go scheduler test: %v\n%s", err, goOutput)
 	}
