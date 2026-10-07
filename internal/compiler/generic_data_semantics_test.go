@@ -74,7 +74,7 @@ fn empty() -> Remote.Presence<string> { Remote.Presence<string>.None {} }`
 		t.Fatal(err)
 	}
 	second, err := FormatSource(formatted.Text)
-	if err != nil || second.Text != formatted.Text || FormatterIdentity != "effra/formatter-5" {
+	if err != nil || second.Text != formatted.Text || FormatterIdentity != "effra/formatter-6" {
 		t.Fatal(formatted, second, err)
 	}
 	for _, source := range []string{

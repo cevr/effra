@@ -12,7 +12,7 @@ const FormatterSchemaVersion = 1
 
 // FormatterIdentity names the syntax producer independently from semantic
 // revisions. Adapters must report this identity without querying Git.
-const FormatterIdentity = "effra/formatter-5"
+const FormatterIdentity = "effra/formatter-6"
 
 // FormatResult is the pure, syntax-only formatting snapshot. Its digest is
 // intentionally independent from a checked semantic revision: formatting
@@ -128,7 +128,7 @@ func formatSyntaxBounded(source string, program *Program, tokens []token, maxOut
 	printer := formatPrinter{source: source, tokens: tokens, events: events, layout: layout, maxOutputBytes: maxOutputBytes, lineStart: true, lastToken: -1}
 	for index, event := range events {
 		if event.comment != nil {
-			printer.comment(event)
+			printer.comment(index, event)
 		} else {
 			printer.token(index, event)
 		}
@@ -358,12 +358,18 @@ type formatPrinter struct {
 	lastEvent           int
 	hasEvent            bool
 	lastToken           int
+	afterComment        bool
 	delimiters          []formatDelimiter
 	maxOutputBytes      int
 	outputLimitExceeded bool
 }
 
-func (p *formatPrinter) comment(event formatEvent) {
+// comment prints a comment at its source-relative line position. A line
+// comment ends its line. A block comment followed by more source on the same
+// physical line leaves the line open, so the following token's own layout
+// decides whether it breaks: a pinned directive target keeps its inline block
+// comments and remaining tokens together.
+func (p *formatPrinter) comment(eventIndex int, event formatEvent) {
 	gap := p.eventGap(event)
 	newlines := formatNewlineCount(gap)
 	if !p.hasEvent {
@@ -379,7 +385,10 @@ func (p *formatPrinter) comment(event formatEvent) {
 	raw := p.source[event.offset:event.end]
 	raw = strings.TrimSuffix(raw, "\r")
 	p.write(raw)
-	p.newline()
+	p.afterComment = event.comment.Block && p.nextEventIsSameLine(eventIndex, event)
+	if !p.afterComment {
+		p.newline()
+	}
 	p.rememberEvent(event)
 }
 
@@ -400,7 +409,10 @@ func (p *formatPrinter) token(eventIndex int, event formatEvent) {
 	}
 	if p.lineStart {
 		p.prepareTokenLine(current, event.tokenIndex)
+	} else if p.afterComment {
+		p.space()
 	}
+	p.afterComment = false
 	switch current.text {
 	case "{":
 		p.openBrace(eventIndex, event)

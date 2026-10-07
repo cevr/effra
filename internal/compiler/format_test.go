@@ -273,6 +273,45 @@ record Data { first: string, second: string }`
 			}
 		}
 	}
+
+	// An ordinary block comment inside a legitimate directive's target line
+	// stays on that line together with the line's remaining tokens.
+	for _, target := range []struct{ source, line string }{
+		{"effect fn task() -> void { void }\neffect fn main() -> void {\n// effra-lint-disable-next-line unused-recipe -- both are intentional\nlet first = task(); /* ordinary text */ let second = task(); void\n}",
+			"\n    let first = task(); /* ordinary text */ let second = task(); void\n"},
+		{"effect fn task() -> void { void }\neffect fn main() -> void {\n// effra-lint-disable-next-line unused-recipe -- intentional\n/* ordinary text */ let pending = task(); void\n}",
+			"\n    /* ordinary text */ let pending = task(); void\n"},
+	} {
+		formatted, err := FormatSource(target.source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(formatted.Text, target.line) {
+			t.Fatalf("block comment split a directive target line:\n%s", formatted.Text)
+		}
+		assertLintMeaning(t, target.source, formatted.Text)
+		assertDirectiveTokenLines(t, target.source, formatted.Text)
+		if lint := Compile(formatted.Text).Lint(true); len(lint.LintDiagnostics) != 0 {
+			t.Fatalf("formatted directive target lost its suppression: %+v\n%s", lint.LintDiagnostics, formatted.Text)
+		}
+		if again, err := FormatSource(formatted.Text); err != nil || again.Text != formatted.Text {
+			t.Fatalf("directive target with a block comment was not idempotent: %v\n%s", err, again.Text)
+		}
+	}
+}
+
+func TestFormatKeepsSourceAfterSameLineBlockComments(t *testing.T) {
+	source := "effect fn main() -> void {\nlet a = 1; /* settled */\nlet b = echo(/* first */ 1, /* second */ 2); void\n}"
+	formatted, err := FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(formatted.Text, "\n    let a = 1; /* settled */\n    let b = echo( /* first */ 1, /* second */ 2);\n") {
+		t.Fatalf("block comment ended its source line:\n%s", formatted.Text)
+	}
+	if again, err := FormatSource(formatted.Text); err != nil || again.Text != formatted.Text {
+		t.Fatalf("same-line block comments were not idempotent: %v\n%s", err, again.Text)
+	}
 }
 
 func TestFormatPreservesUnicodeCRLFEOFAndEmptyFiles(t *testing.T) {

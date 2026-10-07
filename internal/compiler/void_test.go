@@ -105,7 +105,7 @@ func TestFormatterRejectsLegacyNoValueWithoutReplacement(t *testing.T) {
 	if !ok || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != "EF002" || result.Text != "" || result.OutputDigest != "" {
 		t.Fatalf("formatter accepted or rewrote legacy no-value syntax: result=%+v err=%v", result, err)
 	}
-	if FormatterIdentity != "effra/formatter-5" {
+	if FormatterIdentity != "effra/formatter-6" {
 		t.Fatalf("formatter identity did not advance with syntax admission: %s", FormatterIdentity)
 	}
 }

@@ -55,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     write = run("fmt", "--json", str(path))
     assert write.returncode == 0, (write.stdout, write.stderr)
     write_report = json.loads(write.stdout)
-    assert write.stderr == "" and write_report["formatterVersion"] == "effra/formatter-5"
+    assert write.stderr == "" and write_report["formatterVersion"] == "effra/formatter-6"
     assert write_report["schemaVersion"] == 1
     assert write_report["files"][0]["written"]
     assert path.stat().st_mode & 0o777 == original_mode
