@@ -841,21 +841,28 @@ func (p *applicationPlanner) foreign(e *Expr, owner string) {
 		p.err = fmt.Errorf("application foreign call at offset %d has no checked binding", e.Span.Offset)
 		return
 	}
-	imported, ok := p.goImports[binding.alias]
-	if !ok {
-		p.err = fmt.Errorf("application foreign binding %s has no import declaration", binding.Symbol)
-		return
-	}
-	identity := "go:" + binding.Package + "." + binding.member
+	identity := "go:" + binding.native
 	p.require(RequiresForeign, identity, owner, "foreign-call")
-	p.require(RequiresGoImport, imported.Path, identity, "foreign-call")
-	p.namedGoImport(imported)
+	if binding.receiver == nil {
+		imported, ok := p.goImports[binding.alias]
+		if !ok {
+			p.err = fmt.Errorf("application foreign binding %s has no import declaration", binding.Symbol)
+			return
+		}
+		p.require(RequiresGoImport, imported.Path, identity, "foreign-call")
+		p.namedGoImport(imported)
+	}
 	p.helper("foreign", owner)
 	p.service(p.c.services["Foreign"], owner, "foreign-call")
 	// Native parameter types are not otherwise reached when an argument is a
 	// checked integer literal of a native-width scalar.
 	if p.c.host != nil {
 		host := p.c.host.bindings[binding.Symbol]
+		// A method's receiver type retains the package declaring its method
+		// set even when no source import names that package.
+		if binding.receiver != nil {
+			p.typeID(host.receiver, identity)
+		}
 		for _, param := range host.params {
 			p.typeID(param, identity)
 		}

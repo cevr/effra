@@ -50,10 +50,12 @@ func TestHostTypeInspectionCLIAndMCPParity(t *testing.T) {
 		}
 	}
 	for key, want := range map[string][3]string{
-		"host.Find hostResults":          {"*effra.local/prototype/examples/hosttypes.Counter", "Option<*host.Counter>", "option"},
-		"host.Bytes hostResults":         {"[]uint8", "Option<bytes>", "option"},
-		"host.RawText hostResults":       {"[]uint8", "Option<bytes>", "option"},
-		"host.BytesClass hostParameters": {"[]uint8", "bytes", "present"},
+		"host.Find hostResults":                    {"*effra.local/prototype/examples/hosttypes.Counter", "Option<*host.Counter>", "option"},
+		"host.Bytes hostResults":                   {"[]uint8", "Option<bytes>", "option"},
+		"host.RawText hostResults":                 {"[]uint8", "Option<bytes>", "option"},
+		"host.BytesClass hostParameters":           {"[]uint8", "bytes", "present"},
+		"(*host.Counter).Increment hostParameters": {"*effra.local/prototype/examples/hosttypes.Counter", "*host.Counter", "receiver"},
+		"io.Copy hostParameters":                   {"io.Writer", "io.Writer", "present"},
 	} {
 		got := components[key]
 		if got["native"] != want[0] || got["type"] != want[1] || got["adaptation"] != want[2] {

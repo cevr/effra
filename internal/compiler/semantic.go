@@ -4122,7 +4122,15 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			t = data
 			break
 		}
+		if converted, ok := c.hostConversion(e, env, inEffect); ok {
+			t = converted
+			break
+		}
 		if c.foreignCall(e, env, inEffect) {
+			t = e.checked
+			break
+		}
+		if c.hostMethodCall(e, env, inEffect) {
 			t = e.checked
 			break
 		}
@@ -4426,6 +4434,8 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			}
 		}
 		c.reasons = append(c.reasons, Contribution{"owned-child", c.rowLabels(inner.failureRow()), e.Span})
+	case "hostAssert":
+		t = c.hostAssert(e, env, inEffect)
 	case "timeout":
 		duration := c.expr(e.Right, env, inEffect)
 		timeoutRegion := fmt.Sprintf("timeout:%d", e.Span.Offset)

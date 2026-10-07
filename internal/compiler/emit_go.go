@@ -873,6 +873,8 @@ func (g *goEmitter) lower(e *Expr, effect bool, ret string, out *strings.Builder
 		name := g.temp()
 		out.WriteString(name + " := efFork(" + expr + ")(ctx)\n" + g.failed(name, ret))
 		return name + ".Value"
+	case "hostAssert":
+		return g.hostAssert(e, g.expr(e.Left, effect, ret, out))
 	case "timeout":
 		left := g.expr(e.Left, effect, ret, out)
 		name := g.temp()
@@ -885,6 +887,9 @@ func (g *goEmitter) lower(e *Expr, effect bool, ret string, out *strings.Builder
 		}
 		if e.Text == "foreign" {
 			return g.foreign(e, effect, ret, out)
+		}
+		if e.Text == "hostConvert" {
+			return g.hostConversion(e, g.expr(e.Args[0], effect, ret, out))
 		}
 		if e.Text == "fiber" {
 			method := map[string]string{"join": "efJoin", "interrupt": "efInterrupt", "cancel": "efCancel"}[e.Left.Name]

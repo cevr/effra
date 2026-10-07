@@ -25,11 +25,12 @@ const (
 
 // Native component adaptations reported by inspection.
 const (
-	hostAdaptDirect  = "direct"  // exact representation, never nil
-	hostAdaptPresent = "present" // nullable native parameter; source supplies a present value
-	hostAdaptOption  = "option"  // nullable native result; nil is None, any other value is Some
-	hostAdaptError   = "error"   // trailing native error retained by GoResult
-	hostAdaptContext = "context" // first context.Context forwarded from the managed fiber
+	hostAdaptDirect   = "direct"   // exact representation, never nil
+	hostAdaptPresent  = "present"  // nullable native parameter; source supplies a present value
+	hostAdaptOption   = "option"   // nullable native result; nil is None, any other value is Some
+	hostAdaptError    = "error"    // trailing native error retained by GoResult
+	hostAdaptContext  = "context"  // first context.Context forwarded from the managed fiber
+	hostAdaptReceiver = "receiver" // method receiver, passed as the original native value
 )
 
 // HostComponent is one native parameter or result of a binding with its
@@ -281,6 +282,7 @@ type hostState struct {
 // hostBindingTypes are the canonical types of one used binding. value is the
 // complete non-error result: void, one component, or a goValues tuple.
 type hostBindingTypes struct {
+	receiver    TypeID
 	params      []TypeID
 	value       TypeID
 	result      TypeID
@@ -354,6 +356,10 @@ func (c *checker) hostBinding(b Binding) (hostBindingTypes, bool) {
 	}
 	var result hostBindingTypes
 	valid := true
+	if b.receiver != nil {
+		result.receiver = c.hostTypeID(*b.receiver)
+		valid = result.receiver != invalidTypeID
+	}
 	for _, param := range b.params {
 		id := c.hostTypeID(param)
 		valid = valid && id != invalidTypeID
@@ -393,6 +399,163 @@ var hostUniverseAnnotations = map[string]types.Type{
 	"any":     types.Universe.Lookup("any").Type(),
 	"int":     types.Typ[types.Int],
 	"uintptr": types.Typ[types.Uintptr],
+}
+
+// hostAssignable applies Go's assignment rule at a native call boundary. An
+// Effra value keeps its own identity rules everywhere else; only a value
+// passed to Go may be assigned to a native interface its method set
+// satisfies, which Go then converts implicitly without a wrapper.
+func (c *checker) hostAssignable(actual, expected TypeID) bool {
+	if c.assignable(actual, expected, 0) {
+		return true
+	}
+	from, ok := c.hostNative(actual)
+	if !ok {
+		return false
+	}
+	to, ok := c.hostNative(expected)
+	return ok && types.AssignableTo(from, to)
+}
+
+// hostMethodCall checks a native method call on a local host value. Go's
+// method set is the authority. Effra values are not addressable, so a
+// pointer-receiver method needs a pointer value: no copy is made to take an
+// address, and a value-receiver method on a pointer is Go's own selection.
+func (c *checker) hostMethodCall(e *Expr, env localEnv, inEffect bool) bool {
+	if c.host == nil || e.Left.Kind != "member" || e.Left.Left.Kind != "name" {
+		return false
+	}
+	local, ok := env[e.Left.Left.binding]
+	if !ok || local.isEffect() {
+		return false
+	}
+	native, ok := c.host.native[local.valueID()]
+	if !ok {
+		return false
+	}
+	c.expr(e.Left.Left, env, inEffect)
+	b, reason := c.hostMethodBinding(native, e.Left.Name)
+	var host hostBindingTypes
+	if reason == "" {
+		if host, ok = c.hostBinding(b); !ok {
+			reason = "its signature requires bundled " + hostOptionModule + " " + hostOptionMember + " for absence adaptation"
+		}
+	}
+	if reason != "" {
+		c.diagnostic("EF112", "unsupported Go method "+e.Left.Name+": "+reason, e.Span)
+		for _, arg := range e.Args {
+			c.expr(arg, env, inEffect)
+		}
+		e.checked = c.checkedData("invalid")
+		e.Type = c.projectChecked(e.checked)
+		return true
+	}
+	c.checkForeignCall(e, b, host, env, inEffect)
+	return true
+}
+
+// hostMethodBinding admits one method in a native receiver's method set. The
+// binding is keyed by the receiver's displayed type, so CLI/MCP inspection
+// report it beside package functions.
+func (c *checker) hostMethodBinding(receiver types.Type, name string) (Binding, string) {
+	display := c.program.host.display(receiver)
+	symbol := "(" + display + ")." + name
+	if b, ok := c.program.Bindings[symbol]; ok {
+		return b, ""
+	}
+	selection := types.NewMethodSet(receiver).Lookup(nil, name)
+	if selection == nil {
+		if !types.IsInterface(receiver) && types.NewMethodSet(types.NewPointer(receiver)).Lookup(nil, name) != nil {
+			return Binding{}, "it has a pointer receiver and a " + display + " value is not addressable; call it on *" + display
+		}
+		return Binding{}, display + " has no method " + name
+	}
+	fn := selection.Obj().(*types.Func)
+	if !fn.Exported() {
+		return Binding{}, "unexported method " + name
+	}
+	admitted, err := admitHostType(receiver)
+	if err != nil {
+		return Binding{}, err.Error()
+	}
+	b := Binding{Symbol: symbol, Package: fn.Pkg().Path(), receiver: &admitted}
+	reason, err := admitCallable(&b, fn, behavior{}, c.program.host)
+	if err != nil {
+		reason = err.Error()
+	}
+	if reason != "" {
+		return Binding{}, reason
+	}
+	receiverComponent := HostComponent{Native: types.TypeString(admitted.native, hostPathQualifier), Type: display, Adaptation: hostAdaptReceiver}
+	b.HostParameters = append([]HostComponent{receiverComponent}, b.HostParameters...)
+	c.program.Bindings[symbol] = b
+	return b, ""
+}
+
+// hostAssert checks value.as<T>() on a native interface value. The result is
+// Go's complete assertion outcome as a tuple: v0 is Option<T> and v1 the match
+// status, so a matched typed-nil pointer (None, true) stays distinct from a
+// failed match (None, false). An impossible assertion is refused, as in Go.
+func (c *checker) hostAssert(e *Expr, env localEnv, inEffect bool) checkedExpression {
+	left := c.expr(e.Left, env, inEffect)
+	invalid := c.checkedData("invalid")
+	var from types.Type
+	if c.host != nil && !left.isEffect() {
+		from = c.host.native[left.valueID()]
+	}
+	if from == nil || !types.IsInterface(from) {
+		c.diagnostic("EF106", "as<"+e.Name+"> requires a native interface value", e.Span)
+		return invalid
+	}
+	target := c.canonicalRef(typeRef(e.Name))
+	to, ok := c.hostNative(target)
+	if !ok {
+		c.diagnostic("EF106", "as<"+e.Name+"> requires a native Go type", e.Span)
+		return invalid
+	}
+	if !types.IsInterface(to) && !types.Implements(to, from.Underlying().(*types.Interface)) {
+		c.diagnostic("EF106", "impossible assertion: "+e.Name+" does not implement "+c.displayTypeID(left.valueID()), e.Span)
+		return invalid
+	}
+	option := c.hostOption(target)
+	if option == invalidTypeID {
+		c.diagnostic("EF112", "native assertion requires bundled "+hostOptionModule+" "+hostOptionMember, e.Span)
+		return invalid
+	}
+	return c.checkedDataID(c.internType("goValues", "", []TypeID{option, c.canonicalRef(typeRef("bool"))}), nil, nil)
+}
+
+// hostConversion checks the explicit native integer conversions of a
+// Go-importing program. i64(n) widens a native int and is total. int(x)
+// narrows an i64 to Option<int>: None when the value does not fit the
+// platform's int, since a failed narrowing has no partial value to keep.
+func (c *checker) hostConversion(e *Expr, env localEnv, inEffect bool) (checkedExpression, bool) {
+	if c.program == nil || c.program.host == nil || e.Left.Kind != "name" || (e.Left.Name != "i64" && e.Left.Name != "int") {
+		return checkedExpression{}, false
+	}
+	if e.Left.binding != nil || c.namedFunction(e.Left.Name) != nil {
+		return checkedExpression{}, false
+	}
+	e.Text = "hostConvert"
+	nativeInt := c.hostAnnotation("int")
+	if len(e.Args) != 1 {
+		c.diagnostic("EF106", e.Left.Name+" conversion takes one argument", e.Span)
+		for _, arg := range e.Args {
+			c.expr(arg, env, inEffect)
+		}
+		return c.checkedData("invalid"), true
+	}
+	arg := c.expr(e.Args[0], env, inEffect)
+	if e.Left.Name == "i64" {
+		if arg.isEffect() || arg.valueID() != nativeInt {
+			c.diagnostic("EF106", "i64 conversion requires a native int", e.Args[0].Span)
+		}
+		return c.checkedData("i64"), true
+	}
+	if arg.isEffect() || !c.sameType(arg, "i64") {
+		c.diagnostic("EF106", "int conversion requires an i64", e.Args[0].Span)
+	}
+	return c.checkedDataID(c.hostOption(nativeInt), nil, nil), true
 }
 
 // hostAnnotation resolves an alias-qualified source annotation to an exported
@@ -647,6 +810,14 @@ func (g *goEmitter) foreign(e *Expr, effect bool, ret string, out *strings.Build
 	c := g.program.semantic
 	b := g.bindings[e.Name]
 	host := c.hostState().bindings[b.Symbol]
+	callee := "efGo_" + e.Name
+	if b.receiver != nil {
+		// The receiver is captured once with the arguments; the native method
+		// runs on that original value when the recipe executes.
+		receiver := g.temp()
+		out.WriteString(receiver + " := " + g.expr(e.Left.Left, effect, ret, out) + "\n")
+		callee = receiver + "." + b.member
+	}
 	args := []string{}
 	if b.Context {
 		args = append(args, "fc.Context()")
@@ -664,7 +835,7 @@ func (g *goEmitter) foreign(e *Expr, effect bool, ret string, out *strings.Build
 		out.WriteString(temp + " := " + expr + "\n")
 		args = append(args, temp)
 	}
-	call := "efGo_" + e.Name + "(" + strings.Join(args, ",") + ")"
+	call := callee + "(" + strings.Join(args, ",") + ")"
 	components := []TypeID{}
 	if node := c.node(host.value); node != nil && node.Kind == "goValues" {
 		components = node.Args
@@ -717,13 +888,47 @@ func (g *goEmitter) hostAdapt(id TypeID, value string) string {
 // value, including an interface holding a nil dynamic pointer, is Some with
 // the original native value.
 func (g *goEmitter) hostOptional(optionID TypeID, value string) string {
+	return g.hostOptionWhen(optionID, value, "efHostValue==nil")
+}
+
+// hostOptionWhen adapts value, bound as efHostValue, to None when the Go
+// condition absent holds and to Some otherwise.
+func (g *goEmitter) hostOptionWhen(optionID TypeID, value, absent string) string {
 	c := g.program.semantic
 	template := c.templates[hostOptionTemplate]
 	option := canonicalGoType(c, optionID, map[TypeID]bool{})
 	element := canonicalGoType(c, c.node(optionID).Args[0], map[TypeID]bool{})
 	none := option + "(" + g.variantType(optionID, template, "None") + "{})"
 	some := option + "(" + g.variantType(optionID, template, "Some") + "{" + goFieldName("value") + ":efHostValue})"
-	return "func(efHostValue " + element + ") " + option + "{if efHostValue==nil{return " + none + "};return " + some + "}(" + value + ")"
+	return "func(efHostValue " + element + ") " + option + "{if " + absent + "{return " + none + "};return " + some + "}(" + value + ")"
+}
+
+// hostAssert lowers value.as<T>() to Go's comma-ok assertion. A nullable
+// target is absent when the asserted value is nil, so a matched typed-nil
+// pointer is (None, true); any other target is absent only on a failed match.
+func (g *goEmitter) hostAssert(e *Expr, value string) string {
+	c := g.program.semantic
+	tupleID := e.checked.resultID()
+	optionID := c.node(tupleID).Args[0]
+	target := c.node(optionID).Args[0]
+	native, _ := c.hostNative(target)
+	absent := "!efHostOk"
+	if hostNullable(native.Underlying()) {
+		absent = "efHostValue==nil"
+	}
+	tuple := canonicalGoType(c, tupleID, map[TypeID]bool{})
+	return "func() " + tuple + "{efHostAsserted, efHostOk := " + value + ".(" + canonicalGoType(c, target, map[TypeID]bool{}) + ");return " + tuple + "{V0:" + g.hostOptionWhen(optionID, "efHostAsserted", absent) + ",V1:efHostOk}}()"
+}
+
+// hostConversion lowers a checked native integer conversion. Narrowing
+// round-trips through the platform int and is None when the value changed.
+func (g *goEmitter) hostConversion(e *Expr, value string) string {
+	if e.Left.Name == "i64" {
+		return "int64(" + value + ")"
+	}
+	optionID := e.checked.resultID()
+	option := canonicalGoType(g.program.semantic, optionID, map[TypeID]bool{})
+	return "func(efHostWide int64) " + option + "{return " + g.hostOptionWhen(optionID, "int(efHostWide)", "int64(efHostValue)!=efHostWide") + "}(" + value + ")"
 }
 
 // goResultField lowers a checked native result field.

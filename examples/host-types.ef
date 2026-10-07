@@ -1,4 +1,5 @@
 import go host "effra.local/prototype/examples/hosttypes"
+import go io "io"
 import go strconv "strconv"
 import Data "effra/data"
 
@@ -92,7 +93,48 @@ effect fn rawText(text: string) -> string uses { Foreign } {
 effect fn buffered(text: string) -> string uses { Foreign } {
     match run host.NewBuffer(text) {
         Data.Option.None => "no buffer",
-        Data.Option.Some { value: buffer } => run host.BufferText(buffer)
+        Data.Option.Some { value: buffer } => run buffer.String()
+    }
+}
+
+effect fn incremented(name: string) -> string uses { Foreign } {
+    match run host.Find(name) {
+        Data.Option.None => "absent",
+        Data.Option.Some { value: found } => run strconv.Itoa(run found.Increment())
+    }
+}
+
+effect fn copied(text: string) -> string uses { Foreign } {
+    match run host.NewSource(text) {
+        Data.Option.None => "no source",
+        Data.Option.Some { value: source } => match run host.NewSink() {
+            Data.Option.None => "no sink",
+            Data.Option.Some { value: sink } => {
+                let result = run io.Copy(sink, source)
+                run strconv.FormatInt(result.value, 10) + " " + run source.Report() + " " + run sink.Report()
+            }
+        }
+    }
+}
+
+fn problem(err: error) -> string {
+    let asserted = err.as<*host.Problem>()
+    let payload = match asserted.v0 {
+        Data.Option.None => "nil",
+        Data.Option.Some { value } => "present"
+    }
+    if asserted.v1 {
+        "*Problem " + payload
+    } else {
+        "not *Problem"
+    }
+}
+
+effect fn asserted() -> string uses { Foreign } {
+    let result = run host.Typed()
+    match result.error {
+        Data.Option.None => "no error",
+        Data.Option.Some { value: native } => problem(native)
     }
 }
 
@@ -107,6 +149,7 @@ effect fn program() -> void uses { Foreign, Console } {
     run Console.log(run names(false) + "; " + run names(true))
     run Console.log(run raw(false) + "; " + run raw(true) + "; " + run rawText("alias"))
     run Console.log(run buffered("native buffer"))
+    run Console.log(run incremented("known") + "; " + run copied("abc") + "; " + run asserted())
     run Console.log(run strconv.Itoa(42))
 }
 

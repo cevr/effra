@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -179,6 +180,76 @@ func Boxed() any { return "text" }
 
 // DynamicType reports a value's native dynamic type.
 func DynamicType(value any) string { return fmt.Sprintf("%T", value) }
+
+// Sum has a value receiver: both Point and *Point method sets contain it.
+func (p Point) Sum() int64 { return p.X + p.Y }
+
+// Grow has a pointer receiver: a Point value is not addressable from Effra.
+func (p *Point) Grow() { p.X++ }
+
+// Increment has a pointer receiver: only *Counter can call it, and it
+// mutates the counter it is called on.
+func (c *Counter) Increment() int {
+	c.count++
+	return c.count
+}
+
+// Source reads text and also implements io.WriterTo, counting which path
+// io.Copy used.
+type Source struct {
+	reader          *bytes.Reader
+	reads, writesTo int
+}
+
+// NewSource returns a counting source over text.
+func NewSource(text string) *Source { return &Source{reader: bytes.NewReader([]byte(text))} }
+
+func (s *Source) Read(p []byte) (int, error) {
+	s.reads++
+	return s.reader.Read(p)
+}
+
+// WriteTo is the fast path io.Copy checks first.
+func (s *Source) WriteTo(w io.Writer) (int64, error) {
+	s.writesTo++
+	return s.reader.WriteTo(w)
+}
+
+// Report lists how the source was used.
+func (s *Source) Report() string { return fmt.Sprintf("read=%d writeTo=%d", s.reads, s.writesTo) }
+
+// Plain is a reader with no optional methods.
+type Plain struct{ reader io.Reader }
+
+// NewPlain returns a plain reader over text.
+func NewPlain(text string) *Plain { return &Plain{reader: bytes.NewReader([]byte(text))} }
+
+func (p *Plain) Read(b []byte) (int, error) { return p.reader.Read(b) }
+
+// Sink buffers writes and also implements io.ReaderFrom.
+type Sink struct {
+	buffer            bytes.Buffer
+	writes, readsFrom int
+}
+
+// NewSink returns an empty counting sink.
+func NewSink() *Sink { return &Sink{} }
+
+func (s *Sink) Write(p []byte) (int, error) {
+	s.writes++
+	return s.buffer.Write(p)
+}
+
+// ReadFrom is the fast path io.Copy checks when the source has no WriteTo.
+func (s *Sink) ReadFrom(r io.Reader) (int64, error) {
+	s.readsFrom++
+	return s.buffer.ReadFrom(r)
+}
+
+// Report lists how the sink was used and what it holds.
+func (s *Sink) Report() string {
+	return fmt.Sprintf("write=%d readFrom=%d %q", s.writes, s.readsFrom, s.buffer.String())
+}
 
 // Join is variadic.
 func Join(parts ...string) string { return strings.Join(parts, "") }

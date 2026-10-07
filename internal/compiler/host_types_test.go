@@ -74,6 +74,7 @@ func TestHostTypesExampleExecutesNatively(t *testing.T) {
 		"nil slice; 0",
 		"nil bytes; empty; alias",
 		"native buffer",
+		`4; 3 read=0 writeTo=1 write=1 readFrom=0 "abc"; *Problem nil`,
 		"42",
 	}, "\n") + "\n"
 	if output := runGeneratedGo(t, r); output != want {
@@ -367,7 +368,8 @@ func TestApplicationPlanRetainsHostTypePackages(t *testing.T) {
 	// bytes is never imported by source; only a reachable native type names it.
 	requireProvenance(t, plan, RequiresGoImport, "bytes", "go:bytes.Buffer", "host-type")
 	requirePlanned(t, plan, RequiresDeclaration, hostOptionTemplate)
-	requirePlanned(t, plan, RequiresForeign, "go:strconv.Itoa")
+	requirePlanned(t, plan, RequiresForeign, "go:strconv.Itoa", "go:io.Copy", "go:(*effra.local/prototype/examples/hosttypes.Counter).Increment", "go:(*bytes.Buffer).String")
+	requirePlanned(t, plan, RequiresHostType, "go:*effra.local/prototype/examples/hosttypes.Source", "go:*effra.local/prototype/examples/hosttypes.Problem")
 	requireUnplanned(t, plan, RequiresForeign, "go:effra.local/prototype/examples/hosttypes.Narrow")
 	requireUnplanned(t, plan, RequiresHostType, "go:effra.local/prototype/examples/hosttypes.Square")
 	if !strings.Contains(plan.Revision, r.Revision) {

@@ -45,6 +45,10 @@ type Binding struct {
 	// name separately from the alias-qualified Symbol lookup key.
 	alias  string
 	member string
+	// native is the go/types full name of the function or method; receiver is
+	// the admitted receiver type of a method binding.
+	native   string
+	receiver *hostType
 	// params and results are the admitted native types, excluding a forwarded
 	// context and the trailing error.
 	params  []hostType
@@ -279,24 +283,31 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 // normalizeBinding admits one exported function from its native signature. A
 // refused function returns the reason, reported when source calls it.
 func normalizeBinding(imp GoImport, fn *types.Func, contracts map[string]behavior, host *hostImports) (Binding, string, error) {
+	b := Binding{Symbol: imp.Alias + "." + fn.Name(), Package: imp.Path, alias: imp.Alias}
+	unsupported, err := admitCallable(&b, fn, contracts[imp.Path+"."+fn.Name()], host)
+	return b, unsupported, err
+}
+
+// admitCallable admits the native signature of an exported function or
+// method into b: its parameters, complete results and behavior contract.
+func admitCallable(b *Binding, fn *types.Func, meta behavior, host *hostImports) (string, error) {
 	sig := fn.Type().(*types.Signature)
-	b := Binding{Symbol: imp.Alias + "." + fn.Name(), Package: imp.Path, Signature: sig.String(), Cancellation: "unknown", Provenance: "Go export data; behavior unclassified", alias: imp.Alias, member: fn.Name()}
-	meta := contracts[imp.Path+"."+fn.Name()]
+	b.Signature, b.Cancellation, b.Provenance, b.member, b.native = sig.String(), "unknown", "Go export data; behavior unclassified", fn.Name(), fn.FullName()
 	if meta.Context != "" && meta.Context != "fiber" {
-		return b, "", fmt.Errorf("unsupported context contract for %s", b.Symbol)
+		return "", fmt.Errorf("unsupported context contract for %s", b.Symbol)
 	}
 	if meta.Cancellation != "" && meta.Cancellation != "cooperative" && meta.Cancellation != "unknown" {
-		return b, "", fmt.Errorf("unsupported cancellation contract for %s", b.Symbol)
+		return "", fmt.Errorf("unsupported cancellation contract for %s", b.Symbol)
 	}
 	if meta.Cancellation != "" {
 		b.Cancellation = meta.Cancellation
 		b.Provenance = "Go export data; reviewed effra.bindings.json assertion"
 	}
 	if sig.TypeParams().Len() > 0 {
-		return b, "generic Go functions are unsupported", nil
+		return "generic Go functions are unsupported", nil
 	}
 	if sig.Variadic() {
-		return b, "variadic Go functions are unsupported", nil
+		return "variadic Go functions are unsupported", nil
 	}
 	b.Params, b.HostParameters, b.HostResults = []string{}, []HostComponent{}, []HostComponent{}
 	for i := 0; i < sig.Params().Len(); i++ {
@@ -309,7 +320,7 @@ func normalizeBinding(imp GoImport, fn *types.Func, contracts map[string]behavio
 		}
 		admitted, err := admitHostType(typ)
 		if err != nil {
-			return b, fmt.Sprintf("parameter %d: %v", i+1, err), nil
+			return fmt.Sprintf("parameter %d: %v", i+1, err), nil
 		}
 		b.params = append(b.params, admitted)
 		b.Params = append(b.Params, host.adaptedDisplay(admitted, false))
@@ -327,7 +338,7 @@ func normalizeBinding(imp GoImport, fn *types.Func, contracts map[string]behavio
 	for i := 0; i < count; i++ {
 		admitted, err := admitHostType(results.At(i).Type())
 		if err != nil {
-			return b, fmt.Sprintf("result %d: %v", i+1, err), nil
+			return fmt.Sprintf("result %d: %v", i+1, err), nil
 		}
 		b.results = append(b.results, admitted)
 		component := host.component(admitted, true)
@@ -346,12 +357,12 @@ func normalizeBinding(imp GoImport, fn *types.Func, contracts map[string]behavio
 		b.Return = "(" + strings.Join(displays, ", ") + ")"
 	}
 	if meta.Context == "fiber" && !b.Context {
-		return b, "the context contract requires a first context.Context parameter", nil
+		return "the context contract requires a first context.Context parameter", nil
 	}
 	if meta.Cancellation == "cooperative" && !b.Context {
-		return b, "cooperative cancellation requires context forwarding", nil
+		return "cooperative cancellation requires context forwarding", nil
 	}
-	return b, "", nil
+	return "", nil
 }
 
 func isContext(t types.Type) bool {
@@ -390,36 +401,40 @@ func (c *checker) foreignCall(e *Expr, env localEnv, inEffect bool) bool {
 			e.Type = c.projectChecked(e.checked)
 			return true
 		}
-		if len(e.Args) != len(host.params) {
-			c.diagnostic("EF106", "incorrect Go argument count for "+key, e.Span)
-		}
-		for i, arg := range e.Args {
-			actual := c.expr(arg, env, inEffect)
-			if i >= len(host.params) || c.hostIntegerLiteral(arg, host.params[i]) {
-				continue
-			}
-			if actual.isEffect() || !c.assignable(actual.valueID(), host.params[i], 0) {
-				c.diagnostic("EF106", "Go argument must be "+c.displayTypeID(host.params[i]), arg.Span)
-			}
-		}
-		t := checkedExpression{value: c.values.recipe(host.result, nil, checkedEffectCallable, emptyRowID, c.internRow([]string{"Foreign"}), nil, nil)}
-		e.checked = t.clone()
-		e.Type = c.projectChecked(t)
-		e.Text = "foreign"
-		e.Name = key
 		c.program.UsedImports[alias] = true
-		found := false
-		for _, existing := range c.result.Bindings {
-			if existing.Symbol == key {
-				found = true
-			}
-		}
-		if !found {
-			c.result.Bindings = append(c.result.Bindings, b)
-		}
+		c.checkForeignCall(e, b, host, env, inEffect)
 		return true
 	}
 	return false
+}
+
+// checkForeignCall types one admitted native call as a lazy Foreign recipe.
+// Arguments are checked against the native parameters with Go's assignment
+// rule, so a concrete host value reaches a native interface directly.
+func (c *checker) checkForeignCall(e *Expr, b Binding, host hostBindingTypes, env localEnv, inEffect bool) {
+	if len(e.Args) != len(host.params) {
+		c.diagnostic("EF106", "incorrect Go argument count for "+b.Symbol, e.Span)
+	}
+	for i, arg := range e.Args {
+		actual := c.expr(arg, env, inEffect)
+		if i >= len(host.params) || c.hostIntegerLiteral(arg, host.params[i]) {
+			continue
+		}
+		if actual.isEffect() || !c.hostAssignable(actual.valueID(), host.params[i]) {
+			c.diagnostic("EF106", "Go argument must be "+c.displayTypeID(host.params[i]), arg.Span)
+		}
+	}
+	t := checkedExpression{value: c.values.recipe(host.result, nil, checkedEffectCallable, emptyRowID, c.internRow([]string{"Foreign"}), nil, nil)}
+	e.checked = t.clone()
+	e.Type = c.projectChecked(t)
+	e.Text = "foreign"
+	e.Name = b.Symbol
+	for _, existing := range c.result.Bindings {
+		if existing.Symbol == b.Symbol {
+			return
+		}
+	}
+	c.result.Bindings = append(c.result.Bindings, b)
 }
 
 // ModuleFile preserves the source workspace's module graph for generated code.

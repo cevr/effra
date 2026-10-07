@@ -1273,6 +1273,15 @@ func (p *parser) expr(min int) *Expr {
 				arg := p.expr(0)
 				p.expect(")")
 				e = &Expr{Kind: "timeout", Left: e, Right: arg, Span: method.span}
+			} else if method.text == "as" && p.peek().text == "<" {
+				// A native type assertion: value.as<T>() keeps Go's match
+				// status beside the adapted value, like v, ok := value.(T).
+				p.expect("<")
+				t := p.typ()
+				p.expect(">")
+				p.expect("(")
+				p.expect(")")
+				e = &Expr{Kind: "hostAssert", Name: t, Left: e, Span: method.span}
 			} else if method.text == "provide" || method.text == "catch" {
 				if method.text == "provide" && p.accept("(") {
 					layer := p.name()
