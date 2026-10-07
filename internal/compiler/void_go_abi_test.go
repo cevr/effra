@@ -607,6 +607,41 @@ effect fn main() -> void {
     void
 }`
 
+// voidProductMatchValueSource uses void product matches as values: bound by
+// let and passed as an argument, with literal and pure-call arm tails.
+const voidProductMatchValueSource = `enum Light { Red; Green }
+enum Signal { Stop; Go { note: string } }
+fn finish() -> void { void }
+fn keep(value: void) -> i64 { 1 }
+fn bound(light: Light, signal: Signal) -> void {
+    let settled = match light, signal {
+        Light.Red, Signal.Stop | Signal.Go => void
+        Light.Green, Signal.Stop | Signal.Go => finish()
+    }
+    settled
+}
+fn passed(light: Light, signal: Signal) -> i64 {
+    keep(match light, signal {
+        Light.Red, Signal.Stop | Signal.Go => finish()
+        Light.Green, Signal.Stop | Signal.Go => void
+    })
+}
+effect fn main() -> void {
+    bound(Light.Red {}, Signal.Stop {});
+    bound(Light.Green {}, Signal.Go { note: "g" });
+    let first = if passed(Light.Red {}, Signal.Go { note: "r" }) == 1 { "kept" } else { "lost" };
+    let second = if passed(Light.Green {}, Signal.Stop {}) == 1 { "kept" } else { "lost" };
+    run Console.log(first + " " + second).provide<Console>(Stdout)
+}`
+
+func TestVoidProductMatchValuesExecuteOnBothTargets(t *testing.T) {
+	const output = "kept kept\n"
+	runGenericDataNative(t, voidProductMatchValueSource, output)
+	if got := runJSForTarget(t, "js", voidProductMatchValueSource, `await Effect.runPromise(__ef_function_main());`); got != output {
+		t.Fatalf("JavaScript void product match values: %q", got)
+	}
+}
+
 func TestVoidProductMatchTailsExecuteOnBothTargets(t *testing.T) {
 	const output = "red stop\ngo\nwait\n"
 	runGenericDataNative(t, voidProductMatchSource, output)

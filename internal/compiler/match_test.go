@@ -369,6 +369,16 @@ effect fn main() -> void { void }
 	if first.Expression.Type.Success != "File" || later.Expression.Type.Success != "File" {
 		t.Fatalf("binder token types: %+v %+v", first.Expression.Type, later.Expression.Type)
 	}
+	// Editors read the same selection: every binder token and the use name
+	// the first binder as the definition and present the joined binding.
+	for label, selected := range map[string]SelectedType{"first": first, "later": later, "use": use} {
+		if selected.Target == nil || !selected.Target.LocationAvailable || selected.Target.Span.Offset != firstToken || selected.Target.Span.Length != len("file") || selected.Target.Identity != first.Binding.ID {
+			t.Fatalf("%s binder token target %+v, want the first binder at %d", label, selected.Target, firstToken)
+		}
+		if selected.Presentation != "pattern file: File" {
+			t.Fatalf("%s binder token presentation %q", label, selected.Presentation)
+		}
+	}
 }
 
 // alternativeCallableSource binds f from two alternatives whose callable payload

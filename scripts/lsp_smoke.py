@@ -184,6 +184,8 @@ NAVIGATION = "\r\n".join([
     '    if id == "" { fail Missing { id: id } } else { run Users.get(id) }',
     '}',
     'effect fn fixed(id: string) -> string raises {Missing} { run load(id).provide<Users>(Fixed) }',
+    'enum Reading { Cold { level: i64 }, Hot { level: i64 } }',
+    'fn warmth(reading: Reading) -> i64 { match reading { Reading.Cold { level: degrees } | Reading.Hot { level: degrees } => degrees } }',
     ''])
 
 # (context, name): every byte offset below is the UTF-8 offset of name inside
@@ -201,7 +203,8 @@ NAMED = [("import Fns", "Fns"), ("Fns.identity", "Fns"), ("Fns.identity", "ident
          ("Fixed for Users { effect fn get", "get"), ("run load(id)", "load"),
          ("fn helper()", "helper"), ("fn shadow(helper", "helper"), ("mark + helper", "helper"),
          ("let mark", "mark"), ("; mark +", "mark"), ("+ helper()", "helper"), ("fn boxed(value", "value"),
-         ("{ value: value }", "value }")]
+         ("{ value: value }", "value }"), ("Cold { level: degrees }", "degrees"),
+         ("Hot { level: degrees }", "degrees"), ("=> degrees", "degrees")]
 UNNAMED = [("// 𐐀 helper", "helper"), ("fn helper()", "fn"), ("{ let mark", " "),
            ('"𐐀é"', "é"), ("run load(id)", "run"), ("raises {Missing} uses", "raises")]
 
@@ -299,6 +302,13 @@ def navigation(directory):
         bundled = [replies[f"definition-{NAMED.index(key)}"]["result"]
                    for key in [("Fns.identity", "identity"), ("Data.Option.Some { value: v }", "Some")]]
         assert bundled == [None, None], bundled
+        # Every or-pattern binder token is the one joined binding, declared
+        # by the first alternative's token.
+        first_binder = editor_range(text, {"offset": offset_of(text, "Cold { level: degrees }", "degrees"), "length": 7})
+        for key in [("Cold { level: degrees }", "degrees"), ("Hot { level: degrees }", "degrees"), ("=> degrees", "degrees")]:
+            index = NAMED.index(key)
+            assert replies[f"definition-{index}"]["result"]["range"] == first_binder, (key, replies[f"definition-{index}"])
+            assert replies[f"hover-{index}"]["result"]["contents"]["value"] == "pattern degrees: i64", replies[f"hover-{index}"]
         shadowed = replies[f"definition-{NAMED.index(('mark + helper', 'helper'))}"]["result"]["range"]
         assert shadowed == editor_range(text, {"offset": offset_of(text, "fn shadow(helper", "helper"), "length": 6})
     # The buffer, not the disk file, is navigated: a rename in an unsaved
