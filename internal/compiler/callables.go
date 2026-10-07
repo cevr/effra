@@ -413,6 +413,7 @@ func (c *checker) callableCall(e *Expr, env localEnv, inEffect bool) (checkedExp
 		c.diagnostic("EF103", "local value is not callable", e.Span)
 		return c.checkedData("invalid"), true
 	}
+	c.rejectArgumentLabels(e, "callable values")
 	if len(e.Args) != len(node.Args) {
 		c.diagnostic("EF106", "incorrect callback argument count", e.Span)
 	}

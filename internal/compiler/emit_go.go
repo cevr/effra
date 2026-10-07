@@ -895,28 +895,31 @@ func (g *goEmitter) lower(e *Expr, effect bool, ret string, out *strings.Builder
 			method := map[string]string{"join": "efJoin", "interrupt": "efInterrupt", "cancel": "efCancel"}[e.Left.Name]
 			return method + "(efLocal_" + e.Left.Left.Name + ")"
 		}
+		// Arguments are evaluated into temporaries in source order and passed
+		// in the order of the parameters their labels bind.
 		if e.Text == "provider-constructor" {
-			args := []string{}
-			for _, a := range e.Args {
+			args := make([]string, len(e.Args))
+			for index, a := range e.Args {
 				expr := g.expr(a, effect, ret, out)
 				name := g.temp()
 				out.WriteString(name + " := " + expr + "\n")
-				args = append(args, name)
+				args[e.argumentParameter(index)] = name
 			}
 			return "efProvider_" + e.Left.Name + "(" + strings.Join(args, ", ") + ")"
 		}
-		args := []string{}
-		bindings := g.inferredTypeBindings(e.ResolvedFunction, e.Args)
+		args := make([]string, len(e.Args))
+		bindings := g.inferredTypeBindings(e.ResolvedFunction, e.parameterArguments())
 		for index, a := range e.Args {
 			expr := ""
-			if e.ResolvedFunction != nil && index < len(e.ResolvedFunction.Params) {
-				expr = g.exprAt(a, goLayout{id: e.ResolvedFunction.Params[index].typeID, bindings: bindings}, effect, ret, out)
+			parameter := e.argumentParameter(index)
+			if e.ResolvedFunction != nil && parameter < len(e.ResolvedFunction.Params) {
+				expr = g.exprAt(a, goLayout{id: e.ResolvedFunction.Params[parameter].typeID, bindings: bindings}, effect, ret, out)
 			} else {
 				expr = g.expr(a, effect, ret, out)
 			}
 			name := g.temp()
 			out.WriteString(name + " := " + expr + "\n")
-			args = append(args, name)
+			args[parameter] = name
 		}
 		if e.ResolvedFunction != nil && e.ResolvedFunction.Owner == "module" {
 			return g.callValue(e, e.ResolvedFunction.goEmissionName()+"("+strings.Join(args, ", ")+")", wantValue)

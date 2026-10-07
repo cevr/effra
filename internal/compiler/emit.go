@@ -511,23 +511,23 @@ func jsExpr(e *Expr, effect bool) string {
 			return "__ef_join(" + jsExpr(e.Left.Left, effect) + ")"
 		}
 		if e.Text == "provider-constructor" {
-			args := []string{}
-			for _, a := range e.Args {
-				args = append(args, jsExpr(a, effect))
-			}
-			return "__ef_provider_" + e.Left.Name + "(" + strings.Join(args, ", ") + ")"
-		}
-		args := []string{}
-		for _, a := range e.Args {
-			args = append(args, jsExpr(a, effect))
+			return jsBoundCall(e, effect, func(args string) string {
+				return "__ef_provider_" + e.Left.Name + "(" + args + ")"
+			})
 		}
 		if e.ResolvedFunction != nil && e.ResolvedFunction.Owner == "module" {
-			return e.ResolvedFunction.jsEmissionName() + "(" + strings.Join(args, ", ") + ")"
+			return jsBoundCall(e, effect, func(args string) string {
+				return e.ResolvedFunction.jsEmissionName() + "(" + args + ")"
+			})
 		}
 		if e.Left.Kind == "name" {
-			return "__ef_function_" + e.Left.Name + "(" + strings.Join(args, ", ") + ")"
+			return jsBoundCall(e, effect, func(args string) string {
+				return "__ef_function_" + e.Left.Name + "(" + args + ")"
+			})
 		}
-		return "__ef_call(__ef_service_" + e.Left.Left.Name + ", " + quoted(e.Left.Name) + ", [" + strings.Join(args, ", ") + "])"
+		return jsBoundCall(e, effect, func(args string) string {
+			return "__ef_call(__ef_service_" + e.Left.Left.Name + ", " + quoted(e.Left.Name) + ", [" + args + "])"
+		})
 	case "run":
 		return "(yield* " + jsExpr(e.Left, effect) + ")"
 	case "provide":
@@ -552,6 +552,28 @@ func jsExpr(e *Expr, effect bool) string {
 		return jsMatch(e, effect)
 	}
 	panic("unchecked expression reached emitter")
+}
+
+// jsBoundCall emits a checked call whose arguments bind parameters. A call
+// whose labels reorder its arguments evaluates them, in source order, as the
+// arguments of an adapter that passes them on in parameter order; the adapter
+// body only reads its own parameters, so a yield in an argument stays in the
+// enclosing generator.
+func jsBoundCall(e *Expr, effect bool, call func(args string) string) string {
+	args := make([]string, len(e.Args))
+	for i, a := range e.Args {
+		args[i] = jsExpr(a, effect)
+	}
+	if e.ArgumentParameters == nil {
+		return call(strings.Join(args, ", "))
+	}
+	names := make([]string, len(e.Args))
+	bound := make([]string, len(e.Args))
+	for i, parameter := range e.ArgumentParameters {
+		names[i] = "__ef_argument_" + strconv.Itoa(i)
+		bound[parameter] = names[i]
+	}
+	return "((" + strings.Join(names, ", ") + ") => " + call(strings.Join(bound, ", ")) + ")(" + strings.Join(args, ", ") + ")"
 }
 
 func jsPayload(e *Expr, effect bool) string {

@@ -666,6 +666,7 @@ func (c *checker) foreignCall(e *Expr, env localEnv, inEffect bool) bool {
 			return true
 		}
 		c.program.UsedImports[alias] = true
+		c.rejectArgumentLabels(e, "Go functions")
 		c.checkForeignCall(e, b, host, env, inEffect)
 		return true
 	}

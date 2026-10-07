@@ -345,6 +345,11 @@ type Expr struct {
 	// binding is the local binder a name or static layer provision resolves
 	// to; nil when it resolves globally.
 	binding *localBinding
+	// ArgumentParameters is a checked call's label binding:
+	// ArgumentParameters[i] is the parameter that Args[i] binds. It is nil
+	// when every argument binds by position. Args stay in source order, which
+	// is also evaluation order.
+	ArgumentParameters []int `json:"-"`
 }
 
 func lex(source string) ([]token, []Comment, []Diagnostic) {

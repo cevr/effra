@@ -4157,12 +4157,25 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 					t = c.checkedData("invalid")
 					break
 				}
-				if len(e.Args) != len(provider.Params) {
-					c.diagnostic("EF106", "provider "+provider.Name+" expects "+fmt.Sprint(len(provider.Params))+" configuration arguments", e.Span)
-				}
+				order, bound := c.bindCallArguments(e, provider.Params, "provider "+provider.Name+" expects "+fmt.Sprint(len(provider.Params))+" configuration arguments")
 				argumentTypes := make([]checkedExpression, len(e.Args))
-				for i, arg := range e.Args {
+				if !bound {
+					// A rejected binding keeps the provider's declared contract:
+					// each parameter starts at its declared type.
+					argumentTypes = make([]checkedExpression, len(provider.Params))
+					for i, param := range provider.Params {
+						argumentTypes[i] = c.checkedDataID(param.typeID, nil, nil)
+					}
+				}
+				for source, arg := range e.Args {
 					got := c.expr(arg, env, false)
+					i := order[source]
+					if i < 0 && !bound {
+						continue
+					}
+					if i < 0 {
+						i = source
+					}
 					argumentTypes[i] = got
 					if i < len(provider.Params) && (got.isEffect() || !c.sameType(got, provider.Params[i].Type)) {
 						c.diagnostic("EF106", "provider configuration argument must be "+provider.Params[i].Type, arg.Span)
@@ -4225,10 +4238,21 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		default:
 			c.observeReference(e.Left, e.Left.Span, lexicalTarget{kind: "function", function: f})
 		}
+		// Arguments are checked in source order and recorded by parameter.
+		order, bound := c.bindCallArguments(e, f.Params, "incorrect argument count")
 		argumentTypes := make([]checkedExpression, len(e.Args))
 		t = c.checkedFunction(f, false, true)
 		var callbackPolicies []CallbackPolicy
 		parameterIDs := c.functionParameterTypeIDs(f)
+		if !bound {
+			// A rejected binding keeps the callee's declared contract: each
+			// parameter starts at its declared type, so a parameter left
+			// without an argument cascades no further diagnostics.
+			argumentTypes = make([]checkedExpression, len(f.Params))
+			for i, id := range parameterIDs {
+				argumentTypes[i] = c.checkedDataID(id, nil, nil)
+			}
+		}
 		failureRow := t.failureRow()
 		serviceLabels := c.rowLabels(t.serviceRow())
 		if serviceName != "" {
@@ -4241,11 +4265,16 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			// discharges it below.
 			t.setOwnership([]OwnershipFact{{Status: "unknown", Origin: "service"}})
 		}
-		if len(e.Args) != len(f.Params) {
-			c.diagnostic("EF106", "incorrect argument count", e.Span)
-		}
-		for i, a := range e.Args {
+		for source, a := range e.Args {
 			arg := c.expr(a, env, inEffect)
+			i := order[source]
+			if i < 0 && !bound {
+				// The rejected binding already diagnosed this argument.
+				continue
+			}
+			if i < 0 {
+				i = source
+			}
 			argumentTypes[i] = arg
 			if c.unsafePotentialOwner(arg.ownershipFacts()) || hasOwnedClosed(arg.ownershipFacts()) {
 				c.diagnostic("EF123", "value owned by a closing scope cannot be used", a.Span)
@@ -4267,6 +4296,9 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 				c.diagnostic("EF106", "argument must be "+f.Params[i].Type, a.Span)
 			}
 		}
+		// The application identity lists handler policies by parameter, however
+		// the call spells its labels.
+		slices.SortStableFunc(callbackPolicies, func(a, b CallbackPolicy) int { return a.Parameter - b.Parameter })
 		resultID := f.returnID
 		if resultID == invalidTypeID {
 			resultID = t.resultID()
