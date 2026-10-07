@@ -16,6 +16,18 @@ Servers are the intended systems scope; kernels, bare-metal execution, and hard 
 
 Deferred effects need explicit execution and checked failure/service rows. Host declarations should supply routine signatures automatically, while behavior and resource ownership remain explicit contracts. Scoped concurrency must be established by the runtime, rather than assumed from the target scheduler. Application data needs closed sums and exhaustive interpretation; external data still needs runtime decoding.
 
+## Language design principles
+
+Two owner rules govern every language and library proposal. Both were set on 2026-10-07.
+
+**Construct admission (owner rule, 2026-10-07).** A language construct, meaning syntax or a checker rule, exists only to make bad code unrepresentable where a library cannot. Anything userland expresses just as well is a library API, a compiler diagnostic or a lint rule. Prefer a minimal checker rule over new syntax.
+
+How to apply: every construct proposal, brief and review answers one question first: "Could a library express this just as well? If yes, it is not a construct." A proposal names the bad program it makes unrepresentable and shows that a bundled library version would accept that program. When a narrow checker rule on a library API closes the gap, adopt the rule and keep the API a library. Graph or inspection needs alone do not admit syntax: a library value at a stable declaration can carry the same identity. The current verdict for each built and specified construct is the [construct status](specs/language-abstractions.md#construct-status). Finite-profile limits, such as the user-generic and recursive-layout refusals (EF127, EF119), are current support limits, not admitted prohibitions.
+
+**Justify, don't ban (owner rule, 2026-10-07).** Budgets and bounds are explicit, required choices with no silent default. `unbounded` is a legal value. A justifier lint rule in the default preset flags it until a suppression with a reason records why; a suppression without a reason is `EFL004 invalid-suppression`.
+
+How to apply: a budget-taking API makes the budget a required argument, so omitting it is a type error and every call site shows its choice. A finite value keeps its refusal behavior. Choosing `unbounded` is reviewed at the call site through the family's justifier rule and a next-line `effra-lint-disable-next-line <rule> -- <reason>` suppression ([lint](tooling.md#lint)). Failure rows follow from the operation's type, not the chosen value: `unbounded` never removes a protocol failure from a row. Each budget family names its justifier rule in the [library capability contracts](specs/standard-library-capabilities.md). The rule covers budgets only. Compiler analysis budgets (match coverage, layer graph and template work), the catch-all arm refusal (EF118) and presence contracts such as the refusal of unchecked `Option` extraction are closed-interpretation or soundness contracts, and stay fixed.
+
 ## Surface language
 
 ```rust
@@ -48,7 +60,7 @@ Calling an `effect fn` constructs a deferred program. Its body runs only when th
 
 Ordinary `fn` functions cannot secretly execute I/O. They may construct Effects as data. Host entry points are the execution boundary and require all service requirements to be supplied; unhandled typed errors become reported process failures. Unsafe foreign code is an explicit escape hatch.
 
-Use familiar syntax for data: structs, enums, exhaustive `match`, generics, Option, Result, and local mutation. Keep `?` for ordinary Result propagation; `run` handles Effect sequencing. Retry, timeout, tracing, provision, and parallel combinators transform Effect values rather than introducing special control-flow syntax for every feature.
+Use familiar syntax for data: structs, enums, exhaustive `match`, generics, Option, Result, and local mutation. `run` handles Effect sequencing. A `?` operator for Result propagation is an unadmitted proposal: it is ergonomics rather than an invariant, so it must pass [construct admission](#language-design-principles) before it ships (Gleam has no such operator). Retry, timeout, tracing, provision, and parallel combinators transform Effect values rather than introducing special control-flow syntax for every feature.
 
 ## The type system is the main feature
 
@@ -69,7 +81,7 @@ Higher-order functions must preserve open rows. In mathematical notation, `retry
 
 Infer private function contracts. Require exported function contracts as upper bounds, so changing an implementation does not silently enlarge every downstream API. Owner-directed [layer contracts](specs/layers.md) are a deliberate exception: infer their contracts by default and check optional bounds. Errors have nominal identities and ordinary payloads. Internally represent an error union as a compiler-generated tagged sum, rather than collapsing it to Go's `error` interface.
 
-Service identity is nominal and may include a role: `Database at Primary` differs from `Database at Analytics`. A service requirement identifies replaceable behavior; it is not a global variable or merely a structural interface shape.
+Service identity is nominal. A role qualifier such as `Database at Primary` versus `Database at Analytics` is an unadmitted proposal: distinct nominal services may express the same distinction, so roles must pass [construct admission](#language-design-principles) first. A service requirement identifies replaceable behavior; it is not a global variable or merely a structural interface shape.
 
 The `R` row tracks capabilities, not every side effect or all mutation. A stronger purity claim needs additional rules for mutation, captured state, trusted intrinsics, and foreign code. Define that boundary explicitly.
 

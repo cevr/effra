@@ -113,14 +113,14 @@ enum EventV1 {
     Finished { runId: string, result: string }
 }
 
-derive JsonCodec for EventV1
+fn eventV1Json() -> Json.Codec<EventV1> { Json.codec<EventV1>() }
 
 effect fn receive(input: bytes) -> EventV1 raises {DecodeError} {
-    run Json.decode<EventV1>(input)
+    run Json.decode(eventV1Json(), input)
 }
 ```
 
-This proposes one declaration for a static sum and an explicitly requested codec. The codec must validate the discriminator and every payload field before returning EventV1. A cast or a tag check cannot substitute for decoding. Refined identifiers, limits and cross-field validation need explicit validators beyond the string fields shown here.
+This proposes one declaration for a static sum and a codec requested through an ordinary bundled generic call, with no `derive` declaration. The compiler fulfils the call's structural plan from the checked declaration; that fulfilment is the part that stays a [construct](specs/language-abstractions.md#construct-status). The codec must validate the discriminator and every payload field before returning EventV1. A cast or a tag check cannot substitute for decoding. Refined identifiers, limits and cross-field validation need explicit validators beyond the string fields shown here.
 
 The wire format also needs a defined discriminator, field names and compatibility policy. V1 is a versioned boundary; changing an enum is not permission to reinterpret stored history. Migration/upcasting remains explicit. No blanket automatic JSON support or TypeScript structural soundness claim follows from having an ADT.
 
