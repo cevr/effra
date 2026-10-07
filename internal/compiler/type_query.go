@@ -345,6 +345,30 @@ func (r *Result) declarationTarget(t lexicalTarget) (*DeclarationTarget, *Declar
 	}
 	var declaration *Declaration
 	switch {
+	case t.kind == "parameter":
+		// A call's argument label denotes the declared parameter it binds.
+		params, original, source, module := []Param(nil), false, "", ""
+		if f := t.function; f != nil {
+			params, target.Owner, source, module = f.Params, f.Name, f.SourceID, f.Module
+			if t.service != nil {
+				target.Owner = t.service.Name + "." + f.Name
+			}
+			_, original = facts.functions[f]
+		} else if p := t.provider; p != nil {
+			params, target.Owner, original = p.Params, p.Name, facts.items[p] != nil
+		}
+		index := slices.IndexFunc(params, func(p Param) bool { return p.Name == t.parameter })
+		if index < 0 {
+			return nil, nil
+		}
+		parameter := params[index]
+		target.Name = parameter.Name
+		ref := c.identityRef(parameter.typeID)
+		target.Type = &ref
+		if original {
+			target.Identity = fmt.Sprintf("binding:parameter:%d", parameter.Span.Offset)
+		}
+		located(original, source, module, parameter.Span, parameter.Extent)
 	case t.function != nil:
 		f := t.function
 		target.Name, target.Identity, target.Callable = f.Name, f.Identity, c.declaredSignature(f)

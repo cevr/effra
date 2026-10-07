@@ -18,8 +18,9 @@ import (
 // and whether the binding is complete. A positional-only call keeps the
 // caller's arity diagnostic and continues checking by position. A complete
 // labelled binding that is not the identity is retained on the call for
-// emission; see ArgumentParameters.
-func (c *checker) bindCallArguments(e *Expr, params []Param, arity string) ([]int, bool) {
+// emission; see ArgumentParameters. Each label naming a declared parameter
+// is recorded as a reference to that parameter of owner.
+func (c *checker) bindCallArguments(e *Expr, params []Param, arity string, owner lexicalTarget) ([]int, bool) {
 	e.ArgumentParameters = nil
 	order := make([]int, len(e.Args))
 	if len(e.Fields) == 0 {
@@ -60,6 +61,10 @@ func (c *checker) bindCallArguments(e *Expr, params []Param, arity string) ([]in
 		}
 		labelled = true
 		index := slices.IndexFunc(params, func(p Param) bool { return p.Name == field.Name })
+		if index >= 0 {
+			owner.kind, owner.parameter = "parameter", field.Name
+			c.observeReference(e, field.Label, owner)
+		}
 		switch {
 		case index < 0:
 			c.diagnostic("EF106", "unknown argument label "+field.Name, field.Label)

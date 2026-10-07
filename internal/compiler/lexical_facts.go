@@ -29,18 +29,20 @@ const maxLexicalFacts = 100000
 
 // lexicalTarget is the declaration denoted by one source name token. It keeps
 // the checker's own declaration pointers; nothing is re-resolved by name.
-// Variant and field narrow an owning data or error declaration.
+// Variant and field narrow an owning data or error declaration; parameter
+// narrows a function, operation or provider to one declared parameter.
 type lexicalTarget struct {
-	kind     string
-	function *Function
-	service  *Service
-	provider *Provider
-	data     *DataDeclaration
-	failure  *ErrorDecl
-	layer    *Layer
-	module   *SyntaxItem
-	variant  string
-	field    string
+	kind      string
+	function  *Function
+	service   *Service
+	provider  *Provider
+	data      *DataDeclaration
+	failure   *ErrorDecl
+	layer     *Layer
+	module    *SyntaxItem
+	variant   string
+	field     string
+	parameter string
 }
 
 // lexicalName pairs one original token with the declaration it denotes.

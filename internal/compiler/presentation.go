@@ -67,6 +67,9 @@ func (p *presenter) selection(s *SelectedType) {
 		p.write(t.Kind + " " + t.Name + ": ")
 		if s.Expression != nil {
 			p.value(s.Expression.Type)
+		} else if t.Type != nil {
+			// An argument label selects the declared parameter it binds.
+			p.typ(t.Type.ID, 0)
 		}
 	case "record", "enum":
 		p.write(t.Kind + " " + t.Name)

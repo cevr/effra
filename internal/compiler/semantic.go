@@ -4157,7 +4157,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 					t = c.checkedData("invalid")
 					break
 				}
-				order, bound := c.bindCallArguments(e, provider.Params, "provider "+provider.Name+" expects "+fmt.Sprint(len(provider.Params))+" configuration arguments")
+				order, bound := c.bindCallArguments(e, provider.Params, "provider "+provider.Name+" expects "+fmt.Sprint(len(provider.Params))+" configuration arguments", lexicalTarget{provider: provider})
 				argumentTypes := make([]checkedExpression, len(e.Args))
 				if !bound {
 					// A rejected binding keeps the provider's declared contract:
@@ -4239,7 +4239,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			c.observeReference(e.Left, e.Left.Span, lexicalTarget{kind: "function", function: f})
 		}
 		// Arguments are checked in source order and recorded by parameter.
-		order, bound := c.bindCallArguments(e, f.Params, "incorrect argument count")
+		order, bound := c.bindCallArguments(e, f.Params, "incorrect argument count", lexicalTarget{function: f, service: service})
 		argumentTypes := make([]checkedExpression, len(e.Args))
 		t = c.checkedFunction(f, false, true)
 		var callbackPolicies []CallbackPolicy
