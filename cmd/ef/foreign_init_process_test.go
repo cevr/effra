@@ -71,8 +71,9 @@ func TestCLIInitializesDeclaredForeignImportsWithoutReachableCallers(t *testing.
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		path, source, lowering string
-		foreign                int
+		path, source string
+		lowering     compiler.GoImportLowering
+		foreign      int
 	}{{source, initProbeApplication, "blank", 0}, {live, liveSource, "named", 1}} {
 		stdout, stderr, code := runTestCLIDir(t, binary, root, "", "check", tc.path)
 		var report struct {

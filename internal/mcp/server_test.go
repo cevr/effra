@@ -934,11 +934,14 @@ effect fn test_noop() -> void {
 }
 
 func TestProjectCheckReportsGoInitializationLowering(t *testing.T) {
-	for _, tc := range []struct{ entry, lowering string }{
+	for _, tc := range []struct {
+		entry    string
+		lowering compiler.GoImportLowering
+	}{
 		{"effect fn main() -> void {\n    void\n}\n", "blank"},
 		{"effect fn main() -> string {\n    run unused(\" x \").provide<Foreign>(Host)\n}\n", "named"},
 	} {
-		t.Run(tc.lowering, func(t *testing.T) {
+		t.Run(string(tc.lowering), func(t *testing.T) {
 			root := t.TempDir()
 			source := "import go strings \"strings\"\neffect fn unused(text: string) -> string uses { Foreign } {\n    run strings.TrimSpace(text)\n}\n" + tc.entry
 			for name, content := range map[string]string{"go.mod": "module example.com/initonly\n\ngo 1.27\n", "main.ef": source} {

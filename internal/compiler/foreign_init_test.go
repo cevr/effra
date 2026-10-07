@@ -310,17 +310,6 @@ effect fn test_runs() -> void raises { AssertionFailed } uses { Assert } {
 	}
 }
 
-func TestDeclaredForeignImportRefusesJavaScriptBeforeHostLoading(t *testing.T) {
-	module := writeInitProbeModule(t)
-	r := CompileAt("import go registry \"effra.fixture/initprobe/registry\"\neffect fn main() -> void {\n    void\n}\n", "js", module)
-	if r.Checked || !hasCode(r, "EF110") || r.Timings.ImportMicros != 0 {
-		t.Fatalf("JavaScript must refuse an uncalled Go import before host loading: checked=%v micros=%d %v", r.Checked, r.Timings.ImportMicros, r.Diagnostics)
-	}
-	if _, _, err := r.Emit(true); err == nil {
-		t.Fatal("JavaScript emitted a program with a Go import")
-	}
-}
-
 func TestUnresolvedUncalledForeignImportIsRefused(t *testing.T) {
 	module := writeInitProbeModule(t)
 	r := CompileAt("import go missing \"effra.fixture/initprobe/missing\"\neffect fn main() -> void {\n    void\n}\n", "go", module)

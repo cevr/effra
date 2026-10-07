@@ -70,8 +70,24 @@ type ApplicationPlan struct {
 	Requirements []ApplicationRequirement `json:"requirements"`
 	Work         int                      `json:"work"`
 	WorkLimit    int                      `json:"workLimit"`
-	goImports    map[string]bool
+	// goImports holds the import aliases retained code qualifies, and
+	// namedGoPackages their packages; see goImportLowering.
+	goImports       map[string]bool
+	namedGoPackages map[string]bool
 }
+
+// GoImportLowering is the import form that retains one declared foreign Go
+// package in generated code.
+type GoImportLowering string
+
+const (
+	// GoImportNamed: retained code qualifies the package through an alias,
+	// and that named import also initializes the package.
+	GoImportNamed GoImportLowering = "named"
+	// GoImportBlank: no retained code names the package, so one blank import
+	// keeps its initialization.
+	GoImportBlank GoImportLowering = "blank"
+)
 
 // ApplicationPlanError is an explicit refusal with a stable diagnostic code.
 type ApplicationPlanError struct {
@@ -135,9 +151,19 @@ func (p *ApplicationPlan) RuntimeSources() (map[string][]byte, error) {
 	return rt.SelectSources(p.RuntimeModules()...)
 }
 
-// includesGoImport reports whether a reachable foreign call uses the import
-// declared with alias.
+// includesGoImport reports whether retained code qualifies a package through
+// the import declared with alias, so emission writes that named import.
 func (p *ApplicationPlan) includesGoImport(alias string) bool { return p.goImports[alias] }
+
+// goImportLowering is the plan's import form for the package of one
+// initialization root. Emission and inspection both read it, so a reference
+// that names a package also suppresses its blank import.
+func (p *ApplicationPlan) goImportLowering(path string) GoImportLowering {
+	if p.namedGoPackages[path] {
+		return GoImportNamed
+	}
+	return GoImportBlank
+}
 
 func (p *ApplicationPlan) find(kind ApplicationRequirementKind, identity string) (int, bool) {
 	return slices.BinarySearchFunc(p.Requirements, ApplicationRequirement{Kind: kind, Identity: identity}, compareApplicationRequirements)
@@ -169,28 +195,23 @@ type ApplicationInspection struct {
 }
 
 // GoInitializationInspection is one declared foreign Go package the
-// application initializes: the import declarations that root it and whether
-// generated code names the package ("named") or only initializes it
-// ("blank").
+// application initializes: the import declarations that root it and the
+// plan's import lowering for it.
 type GoInitializationInspection struct {
-	Package      string     `json:"package"`
-	Declarations []GoImport `json:"declarations"`
-	Lowering     string     `json:"lowering"`
+	Package      string           `json:"package"`
+	Declarations []GoImport       `json:"declarations"`
+	Lowering     GoImportLowering `json:"lowering"`
 }
 
 // goInitialization projects the plan's initialization roots with the
-// declarations that root them, matching the import lowering.
+// declarations that root them and their planned lowering.
 func (r *Result) goInitialization(plan *ApplicationPlan) []GoInitializationInspection {
 	packages := []GoInitializationInspection{}
 	for _, path := range plan.Identities(RequiresGoInitialization) {
-		entry := GoInitializationInspection{Package: path, Declarations: []GoImport{}, Lowering: "blank"}
+		entry := GoInitializationInspection{Package: path, Declarations: []GoImport{}, Lowering: plan.goImportLowering(path)}
 		for _, imported := range r.Program.Imports {
-			if imported.Path != path {
-				continue
-			}
-			entry.Declarations = append(entry.Declarations, imported)
-			if plan.includesGoImport(imported.Alias) {
-				entry.Lowering = "named"
+			if imported.Path == path {
+				entry.Declarations = append(entry.Declarations, imported)
 			}
 		}
 		packages = append(packages, entry)
@@ -350,7 +371,7 @@ func newApplicationPlanner(r *Result, mode GoGenerationMode, limit int) *applica
 	planner := &applicationPlanner{
 		r:                    r,
 		c:                    c,
-		plan:                 &ApplicationPlan{Mode: mode, Target: r.Target, Revision: r.Revision, Requirements: []ApplicationRequirement{}, WorkLimit: limit, goImports: map[string]bool{}},
+		plan:                 &ApplicationPlan{Mode: mode, Target: r.Target, Revision: r.Revision, Requirements: []ApplicationRequirement{}, WorkLimit: limit, goImports: map[string]bool{}, namedGoPackages: map[string]bool{}},
 		admitted:             map[applicationRequirementKey]bool{},
 		types:                map[TypeID]bool{},
 		providerDeclarations: map[string]*Provider{},
@@ -795,6 +816,14 @@ func (p *applicationPlanner) goInitialization() {
 	}
 }
 
+// namedGoImport records that retained code qualifies imported's package
+// through its alias: emission writes that named import, and the package
+// needs no blank import for its initialization.
+func (p *applicationPlanner) namedGoImport(imported GoImport) {
+	p.plan.goImports[imported.Alias] = true
+	p.plan.namedGoPackages[imported.Path] = true
+}
+
 // foreign retains one checked host binding, its import declaration and the
 // Foreign capability the lowering reads from the effect context.
 func (p *applicationPlanner) foreign(e *Expr, owner string) {
@@ -811,7 +840,7 @@ func (p *applicationPlanner) foreign(e *Expr, owner string) {
 	identity := "go:" + binding.Package + "." + binding.member
 	p.require(RequiresForeign, identity, owner, "foreign-call")
 	p.require(RequiresGoImport, imported.Path, identity, "foreign-call")
-	p.plan.goImports[imported.Alias] = true
+	p.namedGoImport(imported)
 	p.helper("foreign", owner)
 	p.service(p.c.services["Foreign"], owner, "foreign-call")
 }

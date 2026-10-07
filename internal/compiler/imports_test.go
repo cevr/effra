@@ -67,9 +67,14 @@ func TestGoImportGuardrails(t *testing.T) {
 			t.Fatalf("expected %s: %+v", tc.code, r.Diagnostics)
 		}
 	}
+	// JavaScript refuses even an uncalled Go import before host loading,
+	// and emits nothing for the refused result.
 	js := CompileFor(`import go strings "strings" effect fn main() -> void {void}`, "js")
 	if js.Checked || !hasCode(js, "EF110") || js.Timings.ImportMicros != 0 {
 		t.Fatal("JS check attempted a Go import")
+	}
+	if _, _, err := js.Emit(true); err == nil {
+		t.Fatal("JavaScript emitted a program with a Go import")
 	}
 }
 
