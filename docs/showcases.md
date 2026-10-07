@@ -113,14 +113,17 @@ enum EventV1 {
     Finished { runId: string, result: string }
 }
 
-fn eventV1Json() -> Json.Codec<EventV1> { Json.codec<EventV1>() }
+// Illustrative until the bundled `Json.codec` call surface lands.
+fn eventV1Json() -> Json.Codec<EventV1> {
+    Json.codec<EventV1>(maxBodyBytes: 4096, maxDepth: 1)
+}
 
-effect fn receive(input: bytes) -> EventV1 raises {DecodeError} {
-    run Json.decode(eventV1Json(), input)
+effect fn receive(body: string) -> EventV1 raises {JsonDecodeFailure} {
+    run eventV1Json().decode(body)
 }
 ```
 
-This proposes one declaration for a static sum and a codec requested through an ordinary bundled generic call, with no `derive` declaration. The compiler fulfils the call's structural plan from the checked declaration; that fulfilment is the part that stays a [construct](specs/language-abstractions.md#construct-status). The codec must validate the discriminator and every payload field before returning EventV1. A cast or a tag check cannot substitute for decoding. Refined identifiers, limits and cross-field validation need explicit validators beyond the string fields shown here.
+This proposes one declaration for a static sum and a codec requested through an ordinary bundled generic call, with no `derive` declaration. A named function is the witness's stable name, and decode and encode are ordinary effect operations with `JsonDecodeFailure` and `JsonEncodeFailure` rows. The byte and depth bounds are required arguments with no defaults: `maxBodyBytes` is a budget, finite in the first profile, and `maxDepth` is a parser safety cap (see [budget choices](specs/standard-library-capabilities.md#budget-choices)). The compiler fulfils the call's structural plan from the checked declaration; that fulfilment is the part that stays a [construct](specs/language-abstractions.md#construct-status). The codec must validate the discriminator and every payload field before returning EventV1. A cast or a tag check cannot substitute for decoding. Refined identifiers, limits and cross-field validation need explicit validators beyond the string fields shown here.
 
 The wire format also needs a defined discriminator, field names and compatibility policy. V1 is a versioned boundary; changing an enum is not permission to reinterpret stored history. Migration/upcasting remains explicit. No blanket automatic JSON support or TypeScript structural soundness claim follows from having an ADT.
 
