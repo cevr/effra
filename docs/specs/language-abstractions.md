@@ -16,13 +16,13 @@ Canonical type positions serialize as bounded references to shared definitions, 
 
 Add ordinary typed function values and explicit finite row parameters together. A reusable helper must preserve its argument's failure/service requirements without a checker branch named after that helper. Instantiate row parameters from argument contracts, support finite union and concrete-label elimination, and reject unsupported ambiguous inference. General conditional type computation and whole-program inference are outside this design.
 
-## Immediate soundness regression
+## Handler soundness regression (historical)
 
-The existing opaque `Handler` accepts a function requiring a service and loses that requirement when passed through a helper parameter. A public program with `route uses {Users}`, `serveIt(h: Handler) uses {Http}` and `main = run serveIt(route).provide<Http>(LiveHttp)` currently checks despite missing Users. Independent counsel executed the resulting server and observed a missing-service defect; root independently verified the unchecked requirement in CLI inspection.
+This section records the regression that motivated the function contract; it is resolved. The opaque `Handler` accepted a function requiring a service and lost that requirement when passed through a helper parameter. A public program with `route uses {Users}`, `serveIt(h: Handler) uses {Http}` and `main = run serveIt(route).provide<Http>(LiveHttp)` checked despite missing Users. Independent counsel executed the resulting server and observed a missing-service defect; root independently verified the unchecked requirement in CLI inspection.
 
-Further independent source probes at `4f6aed8` admit the same missing requirement through `if` selection of a handler and through a record's Handler field, while a direct local alias preserves the requirement. These are distinct acceptance cases for the common representation; a special repair to Http.serve's helper parameter alone is insufficient.
+Further independent source probes at `4f6aed8` admitted the same missing requirement through `if` selection of a handler and through a record's Handler field, while a direct local alias preserved the requirement. These were distinct acceptance cases for the common representation; a special repair to Http.serve's helper parameter alone was insufficient.
 
-Replace that erasure with the common function contract. Re-express the current HTTP handler through it and diagnose missing services through the value-flow chain. Preserve existing correctly provisioned HTTP examples. A legacy Handler spelling may remain only as a sound explicit contract; it cannot erase arbitrary rows. (Status 2026-10-07: `Handler` was removed with `Http.serve`.)
+The repair replaced that erasure with the common function contract and diagnoses missing services through the value-flow chain. HTTP handlers are now ordinary `HttpHandler` function values passed to `Http.listen`; `Handler` was removed with `Http.serve` on 2026-10-07. The acceptance list below remains the contract for function values.
 
 Acceptance:
 
