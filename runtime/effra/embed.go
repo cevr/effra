@@ -102,15 +102,15 @@ func Sources() map[string][]byte {
 	return out
 }
 
-// SelectSources returns a fresh source snapshot for the transitive closure of
-// roots. An empty root set selects no files; it never means all runtime files.
-func SelectSources(roots ...RuntimeModule) (map[string][]byte, error) {
-	selectedModules := map[RuntimeModule]struct{}{}
-	selectedFiles := map[string]struct{}{}
+// SelectModules closes roots over the catalog's declared dependencies and
+// returns the selected modules in identity order. The catalog is the only
+// dependency authority: callers name roots, never a module's dependencies.
+func SelectModules(roots ...RuntimeModule) ([]RuntimeModule, error) {
+	selected := map[RuntimeModule]struct{}{}
 	visiting := map[RuntimeModule]struct{}{}
 	var visit func(RuntimeModule) error
 	visit = func(module RuntimeModule) error {
-		if _, ok := selectedModules[module]; ok {
+		if _, ok := selected[module]; ok {
 			return nil
 		}
 		spec, ok := runtimeModuleCatalog[module]
@@ -127,10 +127,7 @@ func SelectSources(roots ...RuntimeModule) (map[string][]byte, error) {
 			}
 		}
 		delete(visiting, module)
-		selectedModules[module] = struct{}{}
-		for _, name := range spec.files {
-			selectedFiles[name] = struct{}{}
-		}
+		selected[module] = struct{}{}
 		return nil
 	}
 	for _, root := range roots {
@@ -138,9 +135,26 @@ func SelectSources(roots ...RuntimeModule) (map[string][]byte, error) {
 			return nil, err
 		}
 	}
-	out := make(map[string][]byte, len(selectedFiles))
-	for name := range selectedFiles {
-		out[name] = readRuntimeSource(name)
+	modules := make([]RuntimeModule, 0, len(selected))
+	for module := range selected {
+		modules = append(modules, module)
+	}
+	sort.Slice(modules, func(i, j int) bool { return modules[i] < modules[j] })
+	return modules, nil
+}
+
+// SelectSources returns a fresh source snapshot for the transitive closure of
+// roots. An empty root set selects no files; it never means all runtime files.
+func SelectSources(roots ...RuntimeModule) (map[string][]byte, error) {
+	modules, err := SelectModules(roots...)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]byte{}
+	for _, module := range modules {
+		for _, name := range runtimeModuleCatalog[module].files {
+			out[name] = readRuntimeSource(name)
+		}
 	}
 	return out, nil
 }

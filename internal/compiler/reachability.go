@@ -76,6 +76,12 @@ type ApplicationPlanError struct {
 
 func (e *ApplicationPlanError) Error() string { return e.Code + ": " + e.Message }
 
+// Diagnostic projects the refusal into the compiler diagnostic shape. The
+// closure has no single source location, so it carries the zero span.
+func (e *ApplicationPlanError) Diagnostic() Diagnostic {
+	return Diagnostic{Code: e.Code, Message: e.Message}
+}
+
 // Requires reports whether the plan retains identity as kind.
 func (p *ApplicationPlan) Requires(kind ApplicationRequirementKind, identity string) bool {
 	_, found := p.find(kind, identity)
@@ -113,6 +119,12 @@ func (p *ApplicationPlan) RuntimeModules() []rt.RuntimeModule {
 	return modules
 }
 
+// RuntimeModuleClosure lists the roots closed over the runtime catalog's
+// declared dependencies, in identity order.
+func (p *ApplicationPlan) RuntimeModuleClosure() ([]rt.RuntimeModule, error) {
+	return rt.SelectModules(p.RuntimeModules()...)
+}
+
 // RuntimeSources selects the native runtime source closure of the plan.
 func (p *ApplicationPlan) RuntimeSources() (map[string][]byte, error) {
 	return rt.SelectSources(p.RuntimeModules()...)
@@ -142,7 +154,15 @@ func (r *Result) ApplicationPlan(mode GoGenerationMode) (*ApplicationPlan, error
 	return r.applicationPlan(mode, maxApplicationPlanWork)
 }
 
-func (r *Result) applicationPlan(mode GoGenerationMode, limit int) (*ApplicationPlan, error) {
+// applicationHostRoot names one checked declaration that Go host code calls
+// directly, outside the generated entry. There is no native host export
+// surface yet, so only in-package probes of generated code declare them.
+type applicationHostRoot struct {
+	kind ApplicationRequirementKind
+	name string
+}
+
+func (r *Result) applicationPlan(mode GoGenerationMode, limit int, hostRoots ...applicationHostRoot) (*ApplicationPlan, error) {
 	if r == nil || !r.Checked || r.Program == nil || r.Program.semantic == nil {
 		return nil, fmt.Errorf("application plans require checked source")
 	}
@@ -167,6 +187,9 @@ func (r *Result) applicationPlan(mode GoGenerationMode, limit int) (*Application
 		for _, name := range testHarnessProviders {
 			planner.provider(r.checkedProviders[name], "", "test-harness")
 		}
+	}
+	for _, root := range hostRoots {
+		planner.hostRoot(root)
 	}
 	planner.runtimeModule(rt.RuntimeModuleCore, "", "native-entry")
 	planner.drain()
@@ -281,6 +304,17 @@ func (p *applicationPlanner) root(symbol *Symbol, reason string) {
 		return
 	}
 	p.function(checked.declaration, "", reason)
+}
+
+func (p *applicationPlanner) hostRoot(root applicationHostRoot) {
+	switch root.kind {
+	case RequiresFunction:
+		p.root(p.r.Find(root.name), "host")
+	case RequiresHelper:
+		p.helper(root.name, "")
+	default:
+		p.err = fmt.Errorf("application host root kind %s is unsupported", root.kind)
+	}
 }
 
 func (p *applicationPlanner) drain() {

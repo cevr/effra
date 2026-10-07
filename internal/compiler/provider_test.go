@@ -54,12 +54,13 @@ func TestProviderCaptureAgreesAcrossGoAndJS(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	goSource, err := r.EmitGo()
+	// The Go probe forks and interrupts the provided program itself.
+	goSource, application, err := emitGoApplication(r, GoGenerationBuild, hostHelper("fork"), hostHelper("fiber.interrupt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	for name, data := range map[string][]byte{
@@ -433,12 +434,12 @@ effect fn main() -> string {
 	if output := runJS(t, source, `if (await Effect.runPromise(__ef_function_main()) !== "cfg: 42") throw new Error("wrong record configuration");`); output != "" {
 		t.Fatalf("unexpected JS output: %s", output)
 	}
-	goSource, err := r.EmitGo()
+	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(r.ModuleFile()), 0600); err != nil {

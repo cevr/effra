@@ -47,7 +47,7 @@ func TestConcreteVoidGoDeclarationsAndGenericCarrierBridge(t *testing.T) {
 	if !r.Checked {
 		t.Fatalf("void ABI source rejected: %+v", r.Diagnostics)
 	}
-	generated, err := r.EmitGo()
+	generated, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestConcreteVoidGoDeclarationsAndGenericCarrierBridge(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
@@ -359,7 +359,8 @@ func TestVoidGoCallableLayoutAdaptersCaptureOnceAndInvokeLazily(t *testing.T) {
 	if !r.Checked {
 		t.Fatalf("adapter source rejected: %+v", r.Diagnostics)
 	}
-	generated, err := r.EmitGo()
+	// The Go probe calls these functions directly; main does not reach them.
+	generated, application, err := emitGoApplication(r, GoGenerationBuild, hostFunction("hold"), hostFunction("rehold"), hostFunction("release"), hostFunction("hook"), hostFunction("unhook"), hostFunction("runner"), hostFunction("runWith"), hostFunction("factory"), hostFunction("produce"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +382,7 @@ func TestVoidGoCallableLayoutAdaptersCaptureOnceAndInvokeLazily(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{"go.mod": "module effra.generated\n\ngo 1.27\n", "main.go": generated, "main_test.go": voidGoAdapterProbe} {
@@ -453,7 +454,8 @@ func TestVoidGoNestedApplicationAdaptersPreserveIdentityAndCounts(t *testing.T) 
 	if !r.Checked {
 		t.Fatalf("nested application source rejected: %+v", r.Diagnostics)
 	}
-	generated, err := r.EmitGo()
+	// The Go probe calls these functions directly; main does not reach them.
+	generated, application, err := emitGoApplication(r, GoGenerationBuild, hostFunction("envelop"), hostFunction("reenvelop"), hostFunction("call"), hostFunction("action"), hostFunction("perform"), hostFunction("fire"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +476,7 @@ func TestVoidGoNestedApplicationAdaptersPreserveIdentityAndCounts(t *testing.T) 
 	}
 
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{"go.mod": "module effra.generated\n\ngo 1.27\n", "main.go": generated, "main_test.go": voidGoNestedApplicationProbe} {

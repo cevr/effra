@@ -294,12 +294,12 @@ func TestBundledWitnessJSExecution(t *testing.T) {
 func TestBundledWitnessNativeExecution(t *testing.T) {
 	for _, fixture := range []struct{ source, output string }{{bundledAnnotatedWitness, "Ada\n"}, {bundledDirectionalWitness, "label:Ada:42\n"}, {bundledSwitchWitness, "enabled\n"}, {bundledPayloadWitness, "Ada\n"}} {
 		r := Compile(fixture.source)
-		generated, err := r.EmitGo()
+		generated, application, err := emitGoApplication(r, GoGenerationBuild)
 		if err != nil {
 			t.Fatal(err, r.Diagnostics)
 		}
 		dir := t.TempDir()
-		if err := WriteRuntime(dir); err != nil {
+		if err := application.WriteRuntime(dir); err != nil {
 			t.Fatal(err)
 		}
 		for name, content := range map[string]string{"go.mod": "module effra.generated\n\ngo 1.27\n", "main.go": generated} {

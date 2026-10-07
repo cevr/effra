@@ -32,12 +32,12 @@ func TestLifecycleConformanceAcrossGoAndEffect(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	code, err := r.EmitGo()
+	code, application, err := emitGoApplication(r, GoGenerationBuild, hostFunction("owned"), hostFunction("unobserved"), hostFunction("recovered"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	if err = WriteRuntime(dir); err != nil {
+	if err = application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	probe := `package main

@@ -13,8 +13,6 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-
-	rt "effra.local/prototype/runtime/effra"
 )
 
 const (
@@ -84,31 +82,40 @@ type goGenerationCommit struct {
 	ManifestSHA256 string `json:"manifestSha256"`
 }
 
-// GoSourceSnapshot builds the complete all-source runtime snapshot used by
-// native builds. Runtime selection can later replace rt.Sources here without
-// changing the ownership boundary.
-func (r *Result) GoSourceSnapshot(origin string, mode GoGenerationMode, main []byte) (GoSourceSnapshot, error) {
+// GoSourceSnapshot builds the complete generated module of one planned
+// application: its generated main plus exactly the runtime sources its plan
+// selects. The mode comes from the plan, so the snapshot identity, generated
+// entry and runtime selection cannot disagree.
+func (r *Result) GoSourceSnapshot(origin string, application *GoApplication) (GoSourceSnapshot, error) {
 	if r == nil {
 		return GoSourceSnapshot{}, fmt.Errorf("Go source snapshot requires a compiler result")
 	}
 	if r.Target != "go" {
 		return GoSourceSnapshot{}, fmt.Errorf("Go source snapshot requires the Go target")
 	}
+	if application == nil || application.result != r || application.Plan == nil {
+		return GoSourceSnapshot{}, fmt.Errorf("Go source snapshot requires an application planned from this result")
+	}
+	mode := application.Plan.Mode
 	if err := validateGenerationMode(mode); err != nil {
 		return GoSourceSnapshot{}, err
 	}
 	if !filepath.IsAbs(origin) {
 		return GoSourceSnapshot{}, fmt.Errorf("Go source origin must be absolute")
 	}
+	runtime, err := application.RuntimeSources()
+	if err != nil {
+		return GoSourceSnapshot{}, err
+	}
 	return GoSourceSnapshot{
 		Origin:    origin,
 		Target:    r.Target,
 		Mode:      mode,
 		Revision:  r.Revision,
-		Main:      cloneBytes(main),
+		Main:      cloneBytes(application.Main),
 		Module:    cloneBytes(r.ModuleFile()),
 		ModuleSum: cloneBytes(r.ModuleSum),
-		Runtime:   cloneRuntimeSources(rt.Sources()),
+		Runtime:   runtime,
 	}, nil
 }
 

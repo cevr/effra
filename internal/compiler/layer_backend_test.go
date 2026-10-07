@@ -23,12 +23,12 @@ func TestLayerSourceProvisionExecutesSharedReplacementAndBorrowedInputAcrossTarg
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	source, err := r.EmitGo()
+	source, application, err := emitGoApplication(r, GoGenerationBuild, hostFunction("borrowed"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	directory := t.TempDir()
-	if err = WriteRuntime(directory); err != nil {
+	if err = application.WriteRuntime(directory); err != nil {
 		t.Fatal(err)
 	}
 	probe := `package main

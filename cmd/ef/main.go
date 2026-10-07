@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -479,14 +480,26 @@ func sourceBase(source string) string {
 	return strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
 }
 func buildGo(r *compiler.Result, source, origin, output string) (string, error) {
-	code, err := r.EmitGo()
+	application, err := goApplication(r, compiler.GoGenerationBuild)
 	if err != nil {
 		return "", err
 	}
-	return buildGoSource(r, source, origin, output, code, compiler.GoGenerationBuild)
+	return buildGoApplication(r, source, origin, output, application)
 }
-func buildGoSource(r *compiler.Result, source, origin, output, code string, mode compiler.GoGenerationMode) (string, error) {
-	snapshot, err := r.GoSourceSnapshot(origin, mode, []byte(code))
+
+// goApplication plans and lowers one native entry mode. A plan refusal is a
+// compiler diagnostic: it is reported as JSON on stdout like a failed check.
+func goApplication(r *compiler.Result, mode compiler.GoGenerationMode) (*compiler.GoApplication, error) {
+	application, err := r.GoApplication(mode)
+	var refusal *compiler.ApplicationPlanError
+	if errors.As(err, &refusal) {
+		_ = printJSON(map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "mode": mode, "diagnostics": []compiler.Diagnostic{refusal.Diagnostic()}})
+	}
+	return application, err
+}
+
+func buildGoApplication(r *compiler.Result, source, origin, output string, application *compiler.GoApplication) (string, error) {
+	snapshot, err := r.GoSourceSnapshot(origin, application)
 	if err != nil {
 		return "", err
 	}
@@ -577,11 +590,11 @@ func runTests(r *compiler.Result, source, origin string, timeoutMillis int) erro
 		timeoutMillis = 30000
 	}
 	if r.Target == "go" {
-		code, err := r.EmitGoTests()
+		application, err := goApplication(r, compiler.GoGenerationTest)
 		if err != nil {
 			return err
 		}
-		path, err = buildGoSource(r, source, origin, filepath.Join("dist", sourceBase(source)+".tests"), code, compiler.GoGenerationTest)
+		path, err = buildGoApplication(r, source, origin, filepath.Join("dist", sourceBase(source)+".tests"), application)
 		if err != nil {
 			return err
 		}

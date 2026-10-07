@@ -152,8 +152,8 @@ func TestBundledEmissionNamespaceCannotCollideWithUserNames(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	goSource, err := r.EmitGo()
-	if err != nil || strings.Count(goSource, "func efFunction_"+name+"(") != 1 {
+	goSource, _, err := emitGoApplication(r, GoGenerationBuild, hostFunction(name))
+	if err != nil || strings.Count(goSource, "func efFunction_"+name+"(") != 1 || !strings.Contains(goSource, "func "+baseline.Program.BundledFunctions[0].goEmissionName()) {
 		t.Fatalf("user/bundle native names collided: %v", err)
 	}
 	js, _, err := CompileFor(source, "js").Emit(false)
@@ -174,7 +174,7 @@ effect fn main() -> string raises {IoError} {
  }
 }`, "live forwarded file\n"}} {
 		r := Compile(fixture.source)
-		source, err := r.EmitGo()
+		source, application, err := emitGoApplication(r, GoGenerationBuild)
 		if err != nil {
 			t.Fatal(err, r.Diagnostics)
 		}
@@ -182,7 +182,7 @@ effect fn main() -> string raises {IoError} {
 		if err = os.WriteFile(filepath.Join(dir, "fixture.txt"), []byte("live forwarded file"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		if err = WriteRuntime(dir); err != nil {
+		if err = application.WriteRuntime(dir); err != nil {
 			t.Fatal(err)
 		}
 		if err = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {

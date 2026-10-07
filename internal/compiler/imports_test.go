@@ -31,12 +31,12 @@ effect fn main() -> string raises {GoError} {run sdk.Lookup("native").orFail().p
 	if !r.Checked || len(r.Bindings) != 1 || r.Bindings[0].Signature != "func(name string) (string, error)" {
 		t.Fatalf("foreign declaration: %+v %+v", r.Diagnostics, r.Bindings)
 	}
-	code, err := r.EmitGo()
+	code, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
 	generated := t.TempDir()
-	if err = WriteRuntime(generated); err != nil {
+	if err = application.WriteRuntime(generated); err != nil {
 		t.Fatal(err)
 	}
 	if err = os.WriteFile(filepath.Join(generated, "go.mod"), r.ModuleFile(), 0600); err != nil {
@@ -88,12 +88,12 @@ effect fn main() -> string raises {GoError} {
 	if !r.Checked || len(r.Bindings) != 1 || !r.Bindings[0].Context || r.Bindings[0].Cancellation != "cooperative" {
 		t.Fatalf("context binding: %+v %+v", r.Diagnostics, r.Bindings)
 	}
-	code, err := r.EmitGo()
+	code, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	if err = WriteRuntime(dir); err != nil {
+	if err = application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	for name, contents := range map[string][]byte{"main.go": []byte(code), "go.mod": r.ModuleFile()} {

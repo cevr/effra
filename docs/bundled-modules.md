@@ -22,8 +22,8 @@ User byte-offset queries continue to address the user's source only.
 Referenced bodies have distinct target emission names and pass through the same
 function, row and ownership checker as local helpers. Merely importing a module
 does not select every implementation. The existing finite builtin prelude is
-unchanged. Current native snapshots still contain all admitted runtime sources;
-this module boundary makes no binary-size or compilation-performance claim.
+unchanged, and native applications emit only the bundled members their checked
+entry reaches. This module boundary makes no binary-size or compilation-performance claim.
 
 Each selected closure has a compiler-private versioned summary. Its strict
 decoder requires all operational fields, including false, empty and absent

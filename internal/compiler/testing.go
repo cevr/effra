@@ -47,11 +47,11 @@ func (r *Result) Tests() ([]*Symbol, error) {
 	return tests, nil
 }
 func (r *Result) EmitGoTests() (string, error) {
-	tests, err := r.Tests()
+	application, err := r.GoApplication(GoGenerationTest)
 	if err != nil {
 		return "", err
 	}
-	return r.emitGo(tests)
+	return string(application.Main), nil
 }
 func (r *Result) EmitJSTests() (string, string, error) {
 	tests, err := r.Tests()

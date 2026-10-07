@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	rt "effra.local/prototype/runtime/effra"
 	"fmt"
 	"go/format"
 	"os"
@@ -14,6 +13,7 @@ type goEmitter struct {
 	next     int
 	bindings map[string]Binding
 	program  *Program
+	plan     *ApplicationPlan
 	// locals holds the declared Go layout of each local in scope that was
 	// bound from generic data; other locals have their canonical layout.
 	locals map[string]goLayout
@@ -237,23 +237,132 @@ func goMethodType(f *Function) string {
 }
 func (g *goEmitter) temp() string { g.next++; return fmt.Sprintf("efTemp%d", g.next) }
 
+// GoApplication is one concrete native entry mode lowered against its
+// application plan. The generated main and the runtime source selection come
+// from the same plan, so every emitted declaration resolves within the
+// selected runtime and nothing outside the plan is emitted.
+type GoApplication struct {
+	Plan   *ApplicationPlan
+	Main   []byte
+	result *Result
+}
+
+// GoApplication plans and lowers one native entry mode. Plan refusals,
+// including EF136 exhaustion, are returned unchanged and nothing is emitted.
+func (r *Result) GoApplication(mode GoGenerationMode) (*GoApplication, error) {
+	return r.goApplication(mode)
+}
+
+func (r *Result) goApplication(mode GoGenerationMode, hostRoots ...applicationHostRoot) (*GoApplication, error) {
+	plan, err := r.applicationPlan(mode, maxApplicationPlanWork, hostRoots...)
+	if err != nil {
+		return nil, err
+	}
+	main, err := r.emitGo(plan)
+	if err != nil {
+		return nil, err
+	}
+	return &GoApplication{Plan: plan, Main: []byte(main), result: r}, nil
+}
+
+// RuntimeSources returns a fresh copy of the runtime sources the plan selects.
+func (a *GoApplication) RuntimeSources() (map[string][]byte, error) {
+	if a == nil || a.Plan == nil {
+		return nil, fmt.Errorf("Go application has no plan")
+	}
+	return a.Plan.RuntimeSources()
+}
+
 // EmitGo lowers checked IR to a standalone Go program using the managed runtime.
 // Error and requirement rows are checked in the frontend; success values stay typed in Go.
-func (r *Result) EmitGo() (string, error) { return r.emitGo(nil) }
-func (r *Result) emitGo(tests []*Symbol) (string, error) {
-	if tests == nil {
-		if err := r.Entry(); err != nil {
+func (r *Result) EmitGo() (string, error) {
+	application, err := r.GoApplication(GoGenerationBuild)
+	if err != nil {
+		return "", err
+	}
+	return string(application.Main), nil
+}
+
+// goEmissionHelpers are the lowering helpers emitted only when the plan
+// retains the expression kind that calls them.
+var goEmissionHelpers = []struct{ name, source string }{
+	{"catch", "func efCatch[A any](program efEffect[A],tag string,fallback func()A)efEffect[A]{return func(ctx efContext)efExit[A]{return er.Invoke(ctx.Runtime,er.Catch(efToRuntime(ctx,program),tag,fallback))}}\n"},
+	{"scope", "func efScoped[A any](program efEffect[A])efEffect[A]{return func(ctx efContext)efExit[A]{return er.Invoke(ctx.Runtime,er.Scoped(efToRuntime(ctx,program)))}}\n"},
+	{"timeout", "func efTimeout[A any](program efEffect[A],duration int64)efEffect[A]{return func(ctx efContext)efExit[A]{if ctx.s_Scheduler==nil||ctx.s_Scheduler.m_sleep==nil{return er.Die[A](fmt.Errorf(\"missing provider Scheduler.sleep\"))};deadline:=ctx.s_Scheduler.m_sleep(duration);return er.Invoke(ctx.Runtime,er.TimeoutWithEffect(efToRuntime(ctx,program),efToRuntime(ctx,deadline)))}}\n"},
+	{"fork", "func efFork[A any](program efEffect[A])efEffect[*er.Fiber[A]]{return func(ctx efContext)efExit[*er.Fiber[A]]{return er.Invoke(ctx.Runtime,er.Fork(efToRuntime(ctx,program)))}}\n"},
+	{"fiber.join", "func efJoin[A any](fiber *er.Fiber[A])efEffect[A]{return efFromRuntime(fiber.Join())}\n"},
+	{"fiber.interrupt", "func efInterrupt[A any](fiber *er.Fiber[A])efEffect[struct{}]{return efFromRuntime(fiber.Interrupt())}\n"},
+	{"fiber.cancel", "func efCancel[A any](fiber *er.Fiber[A])efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{fiber.Cancel();return er.Succeed(struct{}{})})}\n"},
+}
+
+// builtinGoProviders are the native implementations of builtin providers.
+// Each is emitted only when the plan retains that provider, and each names
+// the runtime modules it references in builtinProviders.
+var builtinGoProviders = map[string]string{
+	"Assertions":    "func efProvider_Assertions()efService_Assert{return efService_Assert{m_check:func(condition bool,message string)efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{if !condition{return er.Fail[struct{}](\"AssertionFailed\",message)};return er.Succeed(struct{}{})})},m_equalText:func(actual,expected string)efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{if actual!=expected{return er.Fail[struct{}](\"AssertionFailed\",fmt.Sprintf(\"expected %q; received %q\",expected,actual))};return er.Succeed(struct{}{})})}}}\n",
+	"Stdout":        "func efProvider_Stdout()efService_Console{return efService_Console{m_log:func(message string)efEffect[struct{}]{return efFromRuntime(er.Println(message))}}}\n",
+	"LiveClock":     "func efProvider_LiveClock()efService_Clock{return efService_Clock{m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(er.SleepWithDriver(nil,ms))}}}\n",
+	"TestClock":     "func efProvider_TestClock(scheduler *er.TestScheduler)efService_Clock{return efService_Clock{driver:scheduler,m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{if scheduler==nil{return er.Die[struct{}](fmt.Errorf(\"test clock requires an active test scheduler\"))};return er.Invoke(fc,er.SleepWithDriver(scheduler,ms))})}}}\n",
+	"LiveScheduler": "func efProvider_LiveScheduler()efService_Scheduler{return efService_Scheduler{m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(er.SleepWithDriver(nil,ms))},m_advance:func(int64)efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{return er.Die[struct{}](fmt.Errorf(\"live scheduler cannot advance\"))})},m_awaitRegistration:func()efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{return er.Die[struct{}](fmt.Errorf(\"live scheduler has no registration barrier\"))})}}}\n",
+	"TestScheduler": "func efProvider_TestScheduler(scheduler *er.TestScheduler)efService_Scheduler{return efService_Scheduler{driver:scheduler,m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{if scheduler==nil{return er.Die[struct{}](fmt.Errorf(\"test scheduler requires an active test scheduler\"))};return er.Invoke(fc,er.SleepWithDriver(scheduler,ms))})},m_advance:func(ms int64)efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{return er.AdjustTestScheduler(fc,scheduler,ms)})},m_awaitRegistration:func()efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{return er.AwaitTestSchedulerRegistration(fc,scheduler)})}}}\n",
+	"TestSync":      "func efProvider_TestSync()efService_Sync{return efService_Sync{m_latch:func()efEffect[*er.Latch]{return efFromRuntime(func(*er.FiberContext)er.Exit[*er.Latch]{return er.Succeed(er.NewLatch())})},m_await:func(latch *er.Latch)efEffect[struct{}]{return efFromRuntime(er.AwaitLatch(latch))},m_signal:func(latch *er.Latch)efEffect[struct{}]{return efFromRuntime(er.SignalLatch(latch))}}}\n",
+	"LiveFiles":     "func efProvider_LiveFiles()efService_Files{return efService_Files{m_openRead:func(path string)efEffect[*er.File]{return efFromRuntime(er.OpenRead(path))},m_readText:func(file *er.File)efEffect[string]{return efFromRuntime(er.ReadText(file))},m_readFile:func(path string)efEffect[string]{return efFromRuntime(er.ReadFile(path))}}}\n",
+	"LiveEnv":       "func efProvider_LiveEnv()efService_Env{return efService_Env{m_get:func(name string)efEffect[string]{return efFromRuntime(er.Env(name))}}}\n",
+	"RuntimeLive":   "func efProvider_RuntimeLive()efService_Runtime{return efService_Runtime{m_inspect:func()efEffect[string]{return efFromRuntime(er.InspectScope())}}}\n",
+	"Host":          "func efProvider_Host()efService_Foreign{return efService_Foreign{}}\n",
+	"GoHttp":        "func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(address string,handler func(string)efEffect[string])efEffect[struct{}]{return func(ctx efContext)efExit[struct{}]{return er.Invoke(ctx.Runtime,er.ServeHTTP(address,func(path string)er.Effect[string]{return efToRuntime(ctx,handler(path))},func(bound string){fmt.Println(\"listening http://\"+bound)}))}}}}\n",
+}
+
+// schedulerDrivenProvider reports whether a builtin provider is constructed
+// from the active test scheduler rather than with no arguments.
+func schedulerDrivenProvider(name string) bool {
+	return name == "TestClock" || name == "TestScheduler"
+}
+
+// goServiceDeclaration emits one service's struct, provision wrapper and
+// operation call wrappers.
+func goServiceDeclaration(s *Service) string {
+	var out strings.Builder
+	out.WriteString("type efService_" + s.Name + " struct {\n")
+	if s.Name == "Clock" || s.Name == "Scheduler" {
+		out.WriteString("driver *er.TestScheduler\n")
+	}
+	for _, m := range s.Methods {
+		out.WriteString("m_" + m.Name + " " + goMethodType(m) + "\n")
+	}
+	out.WriteString("}\n")
+	out.WriteString("func efProvide_" + s.Name + "[A any](program efEffect[A], provider efService_" + s.Name + ") efEffect[A] { return func(ctx efContext) efExit[A] {")
+	out.WriteString("ctx.s_" + s.Name + " = &provider; return program(ctx) } }\n")
+	for _, m := range s.Methods {
+		result := goSourceType(m.returnType, m.Return)
+		out.WriteString("func efCall_" + s.Name + "_" + m.Name + "(" + goParams(m) + ") efEffect[" + result + "] { return func(ctx efContext) efExit[" + result + "] {\n")
+		out.WriteString("if ctx.s_" + s.Name + " == nil || ctx.s_" + s.Name + ".m_" + m.Name + " == nil { return efExit[" + result + "]{Defect:fmt.Errorf(" + strconv.Quote("missing provider "+s.Name+"."+m.Name) + ")} }\n")
+		out.WriteString("return ctx.s_" + s.Name + ".m_" + m.Name + "(" + goArgs(m) + ")(ctx)\n} }\n")
+	}
+	return out.String()
+}
+
+// emitGo lowers exactly the declarations plan retains. Selection is by
+// checked identity: the emitter never decides reachability itself.
+func (r *Result) emitGo(plan *ApplicationPlan) (string, error) {
+	if plan == nil || plan.Revision != r.Revision || plan.Target != r.Target {
+		return "", fmt.Errorf("Go emission requires this result's application plan")
+	}
+	var tests []*Symbol
+	if plan.Mode == GoGenerationTest {
+		var err error
+		if tests, err = r.Tests(); err != nil {
 			return "", err
 		}
 	}
-	g := &goEmitter{program: r.Program}
+	g := &goEmitter{program: r.Program, plan: plan}
 	var out strings.Builder
 	out.WriteString("// Generated by the Effra prototype. Source revision: " + r.Revision + "\npackage main\nimport (\"fmt\"; \"os\"; \"context\"; \"os/signal\"; \"syscall\"; er \"effra.generated/runtime\"\n")
 	if tests != nil {
 		out.WriteString("\"encoding/json\"\n")
 	}
 	for _, imp := range r.Program.Imports {
-		if r.Program.UsedImports[imp.Alias] {
+		if plan.includesGoImport(imp.Alias) {
 			out.WriteString("efGo_" + imp.Alias + " " + strconv.Quote(imp.Path) + "\n")
 		}
 	}
@@ -264,54 +373,36 @@ type efExit[A any] = er.Exit[A]
 type efEffect[A any] func(efContext) efExit[A]
 func efToRuntime[A any](ctx efContext,program efEffect[A]) er.Effect[A] {return func(fc *er.FiberContext) er.Exit[A] {ctx.Runtime=fc;return program(ctx)}}
 func efFromRuntime[A any](program er.Effect[A]) efEffect[A] {return func(ctx efContext)efExit[A]{return er.Invoke(ctx.Runtime,program)}}
-func efCatch[A any](program efEffect[A],tag string,fallback func()A)efEffect[A]{return func(ctx efContext)efExit[A]{return er.Invoke(ctx.Runtime,er.Catch(efToRuntime(ctx,program),tag,fallback))}}
-func efScoped[A any](program efEffect[A])efEffect[A]{return func(ctx efContext)efExit[A]{return er.Invoke(ctx.Runtime,er.Scoped(efToRuntime(ctx,program)))}}
-func efTimeout[A any](program efEffect[A],duration int64)efEffect[A]{return func(ctx efContext)efExit[A]{if ctx.s_Scheduler==nil||ctx.s_Scheduler.m_sleep==nil{return er.Die[A](fmt.Errorf("missing provider Scheduler.sleep"))};deadline:=ctx.s_Scheduler.m_sleep(duration);return er.Invoke(ctx.Runtime,er.TimeoutWithEffect(efToRuntime(ctx,program),efToRuntime(ctx,deadline)))}}
-func efFork[A any](program efEffect[A])efEffect[*er.Fiber[A]]{return func(ctx efContext)efExit[*er.Fiber[A]]{return er.Invoke(ctx.Runtime,er.Fork(efToRuntime(ctx,program)))}}
-func efJoin[A any](fiber *er.Fiber[A])efEffect[A]{return efFromRuntime(fiber.Join())}
-func efInterrupt[A any](fiber *er.Fiber[A])efEffect[struct{}]{return efFromRuntime(fiber.Interrupt())}
-func efCancel[A any](fiber *er.Fiber[A])efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{fiber.Cancel();return er.Succeed(struct{}{})})}
 `)
+	for _, helper := range goEmissionHelpers {
+		if plan.Requires(RequiresHelper, helper.name) {
+			out.WriteString(helper.source)
+		}
+	}
 	g.dataTypes(&out)
-	services := append(builtins(), r.Program.Services...)
+	services := []*Service{}
+	for _, s := range append(builtins(), r.Program.Services...) {
+		if plan.Requires(RequiresService, serviceIdentity(s.Name)) {
+			services = append(services, s)
+		}
+	}
 	out.WriteString("type efContext struct {\nRuntime *er.FiberContext\n")
 	for _, s := range services {
 		out.WriteString("s_" + s.Name + " *efService_" + s.Name + "\n")
 	}
 	out.WriteString("}\n")
 	for _, s := range services {
-		out.WriteString("type efService_" + s.Name + " struct {\n")
-		if s.Name == "Clock" || s.Name == "Scheduler" {
-			out.WriteString("driver *er.TestScheduler\n")
-		}
-		for _, m := range s.Methods {
-			out.WriteString("m_" + m.Name + " " + goMethodType(m) + "\n")
-		}
-		out.WriteString("}\n")
-		out.WriteString("func efProvide_" + s.Name + "[A any](program efEffect[A], provider efService_" + s.Name + ") efEffect[A] { return func(ctx efContext) efExit[A] {")
-		out.WriteString("ctx.s_" + s.Name + " = &provider; return program(ctx) } }\n")
-		for _, m := range s.Methods {
-			result := goSourceType(m.returnType, m.Return)
-			out.WriteString("func efCall_" + s.Name + "_" + m.Name + "(" + goParams(m) + ") efEffect[" + result + "] { return func(ctx efContext) efExit[" + result + "] {\n")
-			out.WriteString("if ctx.s_" + s.Name + " == nil || ctx.s_" + s.Name + ".m_" + m.Name + " == nil { return efExit[" + result + "]{Defect:fmt.Errorf(" + strconv.Quote("missing provider "+s.Name+"."+m.Name) + ")} }\n")
-			out.WriteString("return ctx.s_" + s.Name + ".m_" + m.Name + "(" + goArgs(m) + ")(ctx)\n} }\n")
+		out.WriteString(goServiceDeclaration(s))
+	}
+	for _, p := range builtinProviders() {
+		if plan.Requires(RequiresProvider, providerTypeRef(p).Declaration) {
+			out.WriteString(builtinGoProviders[p.Name])
 		}
 	}
-	out.WriteString(`
-func efProvider_Assertions()efService_Assert{return efService_Assert{m_check:func(condition bool,message string)efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{if !condition{return er.Fail[struct{}]("AssertionFailed",message)};return er.Succeed(struct{}{})})},m_equalText:func(actual,expected string)efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{if actual!=expected{return er.Fail[struct{}]("AssertionFailed",fmt.Sprintf("expected %q; received %q",expected,actual))};return er.Succeed(struct{}{})})}}}
-func efProvider_Stdout()efService_Console{return efService_Console{m_log:func(message string)efEffect[struct{}]{return efFromRuntime(er.Println(message))}}}
-func efProvider_LiveClock()efService_Clock{return efService_Clock{m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(er.SleepWithDriver(nil,ms))}}}
-func efProvider_TestClock(scheduler *er.TestScheduler)efService_Clock{return efService_Clock{driver:scheduler,m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{if scheduler==nil{return er.Die[struct{}](fmt.Errorf("test clock requires an active test scheduler"))};return er.Invoke(fc,er.SleepWithDriver(scheduler,ms))})}}}
-func efProvider_LiveScheduler()efService_Scheduler{return efService_Scheduler{m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(er.SleepWithDriver(nil,ms))},m_advance:func(int64)efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{return er.Die[struct{}](fmt.Errorf("live scheduler cannot advance"))})},m_awaitRegistration:func()efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{return er.Die[struct{}](fmt.Errorf("live scheduler has no registration barrier"))})}}}
-func efProvider_TestScheduler(scheduler *er.TestScheduler)efService_Scheduler{return efService_Scheduler{driver:scheduler,m_sleep:func(ms int64)efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{if scheduler==nil{return er.Die[struct{}](fmt.Errorf("test scheduler requires an active test scheduler"))};return er.Invoke(fc,er.SleepWithDriver(scheduler,ms))})},m_advance:func(ms int64)efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{return er.AdjustTestScheduler(fc,scheduler,ms)})},m_awaitRegistration:func()efEffect[struct{}]{return efFromRuntime(func(fc *er.FiberContext)er.Exit[struct{}]{return er.AwaitTestSchedulerRegistration(fc,scheduler)})}}}
-func efProvider_TestSync()efService_Sync{return efService_Sync{m_latch:func()efEffect[*er.Latch]{return efFromRuntime(func(*er.FiberContext)er.Exit[*er.Latch]{return er.Succeed(er.NewLatch())})},m_await:func(latch *er.Latch)efEffect[struct{}]{return efFromRuntime(er.AwaitLatch(latch))},m_signal:func(latch *er.Latch)efEffect[struct{}]{return efFromRuntime(er.SignalLatch(latch))}}}
-func efProvider_LiveFiles()efService_Files{return efService_Files{m_openRead:func(path string)efEffect[*er.File]{return efFromRuntime(er.OpenRead(path))},m_readText:func(file *er.File)efEffect[string]{return efFromRuntime(er.ReadText(file))},m_readFile:func(path string)efEffect[string]{return efFromRuntime(er.ReadFile(path))}}}
-func efProvider_LiveEnv()efService_Env{return efService_Env{m_get:func(name string)efEffect[string]{return efFromRuntime(er.Env(name))}}}
-func efProvider_RuntimeLive()efService_Runtime{return efService_Runtime{m_inspect:func()efEffect[string]{return efFromRuntime(er.InspectScope())}}}
-func efProvider_Host()efService_Foreign{return efService_Foreign{}}
-func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(address string,handler func(string)efEffect[string])efEffect[struct{}]{return func(ctx efContext)efExit[struct{}]{return er.Invoke(ctx.Runtime,er.ServeHTTP(address,func(path string)er.Effect[string]{return efToRuntime(ctx,handler(path))},func(bound string){fmt.Println("listening http://"+bound)}))}}}}
-`)
 	for _, p := range r.Program.Providers {
+		if !plan.Requires(RequiresProvider, providerTypeRef(p).Declaration) {
+			continue
+		}
 		if providerConstructed(p) {
 			out.WriteString(g.providerConstructor(p))
 			continue
@@ -322,11 +413,15 @@ func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(addres
 		}
 		out.WriteString("} }\n")
 	}
-	for _, plan := range r.Layers {
-		out.WriteString(g.layer(plan))
+	for _, layer := range r.Layers {
+		if plan.Requires(RequiresLayer, layer.ID) {
+			out.WriteString(g.layer(layer))
+		}
 	}
 	for _, f := range r.Program.checkedFunctions() {
-		out.WriteString(g.functionDeclaration(f))
+		if plan.Requires(RequiresFunction, f.Identity) {
+			out.WriteString(g.functionDeclaration(f))
+		}
 	}
 	if tests == nil {
 		mainReturn := voidTypeName
@@ -342,17 +437,37 @@ func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(addres
 		}
 		out.WriteString("}\n")
 	} else {
-		out.WriteString("func main(){base,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop();type testResult struct{Name string " + "`json:\"name\"`" + ";Passed bool " + "`json:\"passed\"`" + ";Cause string " + "`json:\"cause,omitempty\"`" + ";Reasons []map[string]string " + "`json:\"reasons,omitempty\"`" + "};results:=[]testResult{};passed:=true;assertions:=efProvider_Assertions();")
-		for _, test := range tests {
-			out.WriteString("{scheduler:=er.NewTestScheduler();clock:=efProvider_TestClock(scheduler);testScheduler:=efProvider_TestScheduler(scheduler);syncProvider:=efProvider_TestSync();exit:=er.RunContextWithScheduler(base,scheduler,func(fc *er.FiberContext)er.Exit[struct{}]{return efFunction_" + test.Name + "()(efContext{Runtime:fc,s_Assert:&assertions,s_Clock:&clock,s_Scheduler:&testScheduler,s_Sync:&syncProvider})});item:=testResult{Name:" + strconv.Quote(test.Name) + ",Passed:!exit.IsFailure()};if exit.IsFailure(){item.Cause=fmt.Sprint(exit.Cause());for _,reason:=range exit.Cause(){detail:=map[string]string{\"kind\":reason.Kind};if reason.Failure!=nil{detail[\"tag\"]=reason.Failure.Tag;if reason.Failure.Payload!=nil{detail[\"message\"]=fmt.Sprint(reason.Failure.Payload)}}else if reason.Err!=nil{detail[\"message\"]=reason.Err.Error()};item.Reasons=append(item.Reasons,detail)};passed=false};results=append(results,item)}\n")
-		}
-		out.WriteString(`json.NewEncoder(os.Stdout).Encode(map[string]any{"schemaVersion":1,"passed":passed,"tests":results});if !passed{os.Exit(1)}}`)
+		out.WriteString(r.goTestHarness(tests))
 	}
 	formatted, err := format.Source([]byte(out.String()))
 	if err != nil {
 		return "", fmt.Errorf("Go lowering generated invalid syntax: %w", err)
 	}
 	return string(formatted), nil
+}
+
+// goTestHarness binds every testHarnessProviders fixture into each case's
+// context: the same fixtures the test plan roots. Each case gets a fresh
+// test scheduler, and scheduler-driven fixtures are constructed from it.
+func (r *Result) goTestHarness(tests []*Symbol) string {
+	var fixtures, bindings strings.Builder
+	for index, name := range testHarnessProviders {
+		provider := r.checkedProviders[name]
+		local := "efFixture" + strconv.Itoa(index)
+		argument := ""
+		if schedulerDrivenProvider(name) {
+			argument = "scheduler"
+		}
+		fixtures.WriteString(local + ":=efProvider_" + name + "(" + argument + ");")
+		bindings.WriteString(",s_" + provider.Service + ":&" + local)
+	}
+	var out strings.Builder
+	out.WriteString("func main(){base,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop();type testResult struct{Name string " + "`json:\"name\"`" + ";Passed bool " + "`json:\"passed\"`" + ";Cause string " + "`json:\"cause,omitempty\"`" + ";Reasons []map[string]string " + "`json:\"reasons,omitempty\"`" + "};results:=[]testResult{};passed:=true;")
+	for _, test := range tests {
+		out.WriteString("{scheduler:=er.NewTestScheduler();" + fixtures.String() + "exit:=er.RunContextWithScheduler(base,scheduler,func(fc *er.FiberContext)er.Exit[struct{}]{return efFunction_" + test.Name + "()(efContext{Runtime:fc" + bindings.String() + "})});item:=testResult{Name:" + strconv.Quote(test.Name) + ",Passed:!exit.IsFailure()};if exit.IsFailure(){item.Cause=fmt.Sprint(exit.Cause());for _,reason:=range exit.Cause(){detail:=map[string]string{\"kind\":reason.Kind};if reason.Failure!=nil{detail[\"tag\"]=reason.Failure.Tag;if reason.Failure.Payload!=nil{detail[\"message\"]=fmt.Sprint(reason.Failure.Payload)}}else if reason.Err!=nil{detail[\"message\"]=reason.Err.Error()};item.Reasons=append(item.Reasons,detail)};passed=false};results=append(results,item)}\n")
+	}
+	out.WriteString(`json.NewEncoder(os.Stdout).Encode(map[string]any{"schemaVersion":1,"passed":passed,"tests":results});if !passed{os.Exit(1)}}`)
+	return out.String()
 }
 func (g *goEmitter) function(f *Function) string {
 	bodyRet, noResult := g.functionReturn(f)
@@ -863,16 +978,23 @@ func goTemplateDeclaration(r *Record) string {
 	return out.String()
 }
 
+// dataTypes emits the data, error and template declarations the plan
+// retains through canonical type nodes or reachable fail statements.
 func (g *goEmitter) dataTypes(out *strings.Builder) {
 	for _, r := range g.program.BundledTemplates {
-		out.WriteString(goTemplateDeclaration(r))
+		if g.plan.Requires(RequiresDeclaration, r.Identity) {
+			out.WriteString(goTemplateDeclaration(r))
+		}
 	}
 	for _, r := range append(append([]*DataDeclaration{}, g.program.Records...), g.program.Enums...) {
-		if len(r.Parameters) > 0 {
+		if len(r.Parameters) > 0 && g.plan.Requires(RequiresDeclaration, r.Identity) {
 			out.WriteString(goTemplateDeclaration(r))
 		}
 	}
 	for _, declaration := range g.programDeclarations() {
+		if !g.plan.Requires(RequiresDeclaration, g.program.semantic.declarationIdentity(declaration.Kind, "module", declaration.Name)) {
+			continue
+		}
 		switch declaration.Kind {
 		case "record", "error":
 			out.WriteString("type efType_" + goIdent(declaration.Name) + " struct {\n")
@@ -1048,13 +1170,31 @@ func (g *goEmitter) matchArm(scrutinee TypeID, arm *MatchArm, effect bool, resul
 	body.WriteString(g.blockType(arm.Body, effect, resultType, false))
 }
 
-// WriteRuntime writes only changed source bytes so Go's own build cache remains useful.
-func WriteRuntime(directory string) error {
+// WriteRuntime writes the application's selected runtime sources below
+// directory/runtime, rewriting only changed bytes so Go's own build cache
+// remains useful. It never deletes files: a runtime directory holding a file
+// outside the selection is refused, because a stale source would reintroduce
+// a module the application no longer selects. Published builds use the
+// immutable GoSourceSnapshot boundary instead.
+func (a *GoApplication) WriteRuntime(directory string) error {
+	sources, err := a.RuntimeSources()
+	if err != nil {
+		return err
+	}
 	path := filepath.Join(directory, "runtime")
 	if err := os.MkdirAll(path, 0755); err != nil {
 		return err
 	}
-	for name, data := range rt.Sources() {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if _, selected := sources[entry.Name()]; !selected {
+			return fmt.Errorf("runtime directory %s contains unselected %s; write into a fresh directory", path, entry.Name())
+		}
+	}
+	for name, data := range sources {
 		file := filepath.Join(path, name)
 		old, _ := os.ReadFile(file)
 		if string(old) == string(data) {

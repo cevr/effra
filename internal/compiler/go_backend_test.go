@@ -39,16 +39,18 @@ func TestGoBackendConformance(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	source, err := r.EmitGo()
+	// The Go probe below calls nested and bottom directly.
+	probeRoots := []applicationHostRoot{hostFunction("nested"), hostFunction("bottom")}
+	source, application, err := emitGoApplication(r, GoGenerationBuild, probeRoots...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, _ := r.EmitGo()
+	again, _, _ := emitGoApplication(r, GoGenerationBuild, probeRoots...)
 	if source != again {
 		t.Fatal("nondeterministic Go emission")
 	}
 	dir := t.TempDir()
-	if err = WriteRuntime(dir); err != nil {
+	if err = application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	if err = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {

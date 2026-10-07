@@ -87,12 +87,12 @@ effect fn main() -> string raises {A, B} {
 			if info.Type.Success != "Fiber:string" || info.Type.Type.Kind != "fiber" {
 				t.Fatalf("fiber projection lost the handle shape: %+v", info.Type)
 			}
-			goSource, err := goResult.EmitGo()
+			goSource, application, err := emitGoApplication(goResult, GoGenerationBuild)
 			if err != nil {
 				t.Fatal(err)
 			}
 			goDir := t.TempDir()
-			if err := WriteRuntime(goDir); err != nil {
+			if err := application.WriteRuntime(goDir); err != nil {
 				t.Fatal(err)
 			}
 			for name, contents := range map[string][]byte{
@@ -235,7 +235,7 @@ effect fn main() -> void raises {IoError} {
 			if !r.Checked {
 				t.Fatalf("Handler %s control flow did not check: %+v", tc.name, r.Diagnostics)
 			}
-			goSource, err := r.EmitGo()
+			goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -243,7 +243,7 @@ effect fn main() -> void raises {IoError} {
 				t.Fatalf("%s lowering did not render the canonical Handler value type %q:\n%s", tc.name, tc.needle, goSource)
 			}
 			goDir := t.TempDir()
-			if err := WriteRuntime(goDir); err != nil {
+			if err := application.WriteRuntime(goDir); err != nil {
 				t.Fatal(err)
 			}
 			for name, contents := range map[string][]byte{
@@ -272,7 +272,7 @@ effect fn main() -> string raises {A} {
 	if !r.Checked {
 		t.Fatalf("typed if condition fixture did not check: %+v", r.Diagnostics)
 	}
-	goSource, err := r.EmitGo()
+	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ effect fn main() -> string raises {A} {
 		t.Fatalf("condition failure was not lowered with the inner if value type:\n%s", goSource)
 	}
 	goDir := t.TempDir()
-	if err := WriteRuntime(goDir); err != nil {
+	if err := application.WriteRuntime(goDir); err != nil {
 		t.Fatal(err)
 	}
 	for name, contents := range map[string][]byte{
@@ -311,7 +311,7 @@ effect fn main() -> string {
 	if !r.Checked {
 		t.Fatalf("typed if condition failure fixture did not check: %+v", r.Diagnostics)
 	}
-	goSource, err := r.EmitGo()
+	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ effect fn main() -> string {
 		t.Fatalf("native condition and enclosing expression did not keep distinct propagation types:\n%s", goSource)
 	}
 	goDir := t.TempDir()
-	if err := WriteRuntime(goDir); err != nil {
+	if err := application.WriteRuntime(goDir); err != nil {
 		t.Fatal(err)
 	}
 	for name, contents := range map[string][]byte{

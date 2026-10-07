@@ -225,12 +225,12 @@ void item; void mismatch;
 func runGenericDataNative(t *testing.T, source, expected string) {
 	t.Helper()
 	r := CompileFor(source, "go")
-	generated, err := r.EmitGo()
+	generated, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err, r.Diagnostics)
 	}
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{"go.mod": "module effra.generated\n\ngo 1.27\n", "main.go": generated} {

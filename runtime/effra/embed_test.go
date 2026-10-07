@@ -315,3 +315,39 @@ func assertSameSources(t *testing.T, first, second map[string][]byte) {
 		}
 	}
 }
+
+func TestRuntimeModuleClosureFollowsCatalogDependencies(t *testing.T) {
+	empty, err := SelectModules()
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("empty roots must select no modules: %v %v", empty, err)
+	}
+	if _, err := SelectModules(RuntimeModule("unknown")); err == nil || !strings.Contains(err.Error(), "unknown runtime module") {
+		t.Fatalf("unknown module was not rejected usefully: %v", err)
+	}
+	modules, err := SelectModules(RuntimeModuleHTTP, RuntimeModuleLayers, RuntimeModuleHTTP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []RuntimeModule{RuntimeModuleCore, RuntimeModuleHTTP, RuntimeModuleLayers}; !reflect.DeepEqual(modules, want) {
+		t.Fatalf("closure = %v, want %v", modules, want)
+	}
+	for module := range runtimeModuleCatalog {
+		closure, err := SelectModules(module)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources, err := SelectSources(module)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files := map[string]struct{}{}
+		for _, selected := range closure {
+			for _, name := range runtimeModuleCatalog[selected].files {
+				files[name] = struct{}{}
+			}
+		}
+		if !reflect.DeepEqual(sourceNames(sources), sortedKeys(files)) {
+			t.Fatalf("%s sources %v disagree with its module closure %v", module, sourceNames(sources), closure)
+		}
+	}
+}

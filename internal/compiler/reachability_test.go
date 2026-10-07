@@ -964,15 +964,24 @@ func nonCoreModules(modules ...rt.RuntimeModule) map[rt.RuntimeModule]bool {
 // builtin implementations, so it must name exactly the non-core runtime
 // modules the emitted declarations reference.
 func TestBuiltinNativeModulesMatchEmittedRuntimeReferences(t *testing.T) {
-	r := Compile(`effect fn main() -> string {
-    "ok"
-}
-`)
-	code, err := r.EmitGo()
-	if err != nil {
-		t.Fatal(err)
+	// Each builtin is emitted only when retained, so parse every builtin's own
+	// emitted declaration rather than one program's selection.
+	var generated strings.Builder
+	generated.WriteString("package main\n")
+	for _, service := range builtins() {
+		generated.WriteString(goServiceDeclaration(service))
 	}
-	file, err := goparser.ParseFile(gotoken.NewFileSet(), "main.go", code, goparser.SkipObjectResolution)
+	for _, provider := range builtinProviders() {
+		implementation, found := builtinGoProviders[provider.Name]
+		if !found {
+			t.Fatalf("builtin provider %s has no native implementation", provider.Name)
+		}
+		generated.WriteString(implementation)
+	}
+	if len(builtinGoProviders) != len(builtinProviders()) {
+		t.Fatalf("native implementations %d do not match builtin providers %d", len(builtinGoProviders), len(builtinProviders()))
+	}
+	file, err := goparser.ParseFile(gotoken.NewFileSet(), "main.go", generated.String(), goparser.SkipObjectResolution)
 	if err != nil {
 		t.Fatal(err)
 	}

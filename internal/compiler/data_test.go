@@ -199,12 +199,15 @@ func TestClosedDataLoweringIsAvailable(t *testing.T) {
 func TestClosedDataGoVariantNamesDoNotCollide(t *testing.T) {
 	source := `enum AB { C }
 enum A { BC }
-effect fn main() -> string { match A.BC() { A.BC => "ok" } }`
+effect fn main() -> string {
+    let other = AB.C()
+    match A.BC() { A.BC => "ok" }
+}`
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatalf("collision fixture should check: %+v", r.Diagnostics)
 	}
-	goSource, err := r.EmitGo()
+	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +215,7 @@ effect fn main() -> string { match A.BC() { A.BC => "ok" } }`
 		t.Fatalf("qualified enum types missing: %s", goSource)
 	}
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
@@ -235,12 +238,12 @@ func TestClosedDataRunsOnBothBackends(t *testing.T) {
 	if !strings.Contains(output, "closed-data: passed") {
 		t.Fatal(output)
 	}
-	goSource, err := r.EmitGo()
+	goSource, application, err := emitGoApplication(r, GoGenerationBuild, hostFunction("failWithPayload"), hostFunction("interpret"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
@@ -331,12 +334,12 @@ func TestClosedDataGoFieldNamesAreInjective(t *testing.T) {
 	if !r.Checked {
 		t.Fatalf("case-distinct fields should check: %+v", r.Diagnostics)
 	}
-	goSource, err := r.EmitGo()
+	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module effra.generated\n\ngo 1.27\n"), 0644); err != nil {
@@ -449,12 +452,12 @@ effect fn main() -> string { "ok" }`
 	if !r.Checked {
 		t.Fatalf("empty enum elimination should check: %+v", r.Diagnostics)
 	}
-	goSource, err := r.EmitGo()
+	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(r.ModuleFile()), 0600); err != nil {

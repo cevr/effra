@@ -59,7 +59,7 @@ effect fn greeting(id: string) -> string
 
 Calling `greeting("42")` constructs a deferred program. `run` executes it within another effect. Inspection reports success `string`, failure `{NotFound}`, and requirement `{Users}`. The [complete runnable example](examples/main.ef) implements and provides Users, recovers NotFound, and supplies Console explicitly.
 
-Go builds lower checked source into typed Go closures and call `go build`; the executable needs no Effra, Bun, Node, or Effect installation to run. Generated native modules are complete immutable snapshots under `dist/go/apps/<application-id>/generations/`; their commit records preserve source ownership and reuse.
+Go builds lower checked source into typed Go closures and call `go build`; the executable needs no Effra, Bun, Node, or Effect installation to run. Generated native modules are complete immutable snapshots under `dist/go/apps/<application-id>/generations/`; their commit records preserve source ownership and reuse. Each snapshot contains only the declarations and runtime modules its checked entry reaches.
 
 The JavaScript library build exports functions, service keys, and providers for consumers. `--target js --entry` adds host execution; native builds and both run targets require an effect main with no parameters or remaining service requirements.
 

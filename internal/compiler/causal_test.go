@@ -34,12 +34,12 @@ effect fn test_advance_admits_unstarted_fork() -> void raises {AssertionFailed} 
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	goSource, err := r.EmitGoTests()
+	goSource, application, err := emitGoApplication(r, GoGenerationTest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	goDir := t.TempDir()
-	if err = WriteRuntime(goDir); err != nil {
+	if err = application.WriteRuntime(goDir); err != nil {
 		t.Fatal(err)
 	}
 	for name, contents := range map[string][]byte{
@@ -91,12 +91,12 @@ func TestExplicitTestProvidersRejectLiveExecutionWithoutHarness(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	goSource, err := r.EmitGo()
+	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
 	goDir := t.TempDir()
-	if err = WriteRuntime(goDir); err != nil {
+	if err = application.WriteRuntime(goDir); err != nil {
 		t.Fatal(err)
 	}
 	for name, contents := range map[string][]byte{
@@ -139,12 +139,12 @@ effect fn test_scheduler_drains_long_continuation() -> void raises {AssertionFai
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	goSource, err := r.EmitGoTests()
+	goSource, application, err := emitGoApplication(r, GoGenerationTest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	goDir := t.TempDir()
-	if err = WriteRuntime(goDir); err != nil {
+	if err = application.WriteRuntime(goDir); err != nil {
 		t.Fatal(err)
 	}
 	for name, contents := range map[string][]byte{
@@ -217,12 +217,12 @@ effect fn main() -> string {
 			if !r.Checked {
 				t.Fatal(r.Diagnostics)
 			}
-			goSource, err := r.EmitGo()
+			goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 			if err != nil {
 				t.Fatal(err)
 			}
 			goDir := t.TempDir()
-			if err = WriteRuntime(goDir); err != nil {
+			if err = application.WriteRuntime(goDir); err != nil {
 				t.Fatal(err)
 			}
 			for fileName, contents := range map[string][]byte{"go.mod": []byte(r.ModuleFile()), "main.go": []byte(goSource)} {
@@ -261,12 +261,12 @@ effect fn main() -> string {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	goSource, err := r.EmitGo()
+	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
 	goDir := t.TempDir()
-	if err = WriteRuntime(goDir); err != nil {
+	if err = application.WriteRuntime(goDir); err != nil {
 		t.Fatal(err)
 	}
 	for name, contents := range map[string][]byte{"go.mod": []byte(r.ModuleFile()), "main.go": []byte(goSource)} {

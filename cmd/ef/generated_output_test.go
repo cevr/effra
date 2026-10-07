@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -158,10 +160,13 @@ effect fn test_generation() -> void raises {AssertionFailed} uses {Assert} {
 	if _, err := os.Stat(filepath.Join(ordinaryGeneration, "runtime", "retired_legacy.go")); !os.IsNotExist(err) {
 		t.Fatalf("retired legacy source remained in the new generation: %v", err)
 	}
-	for name := range rt.Sources() {
-		if _, err := os.Stat(filepath.Join(ordinaryGeneration, "runtime", name)); err != nil {
-			t.Fatalf("new runtime source set omitted %s: %v", name, err)
-		}
+	// A main with no runtime facility selects only the core module.
+	core, err := rt.SelectSources(rt.RuntimeModuleCore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := generationRuntimeFiles(t, ordinaryGeneration), sortedSourceNames(core); !slices.Equal(got, want) {
+		t.Fatalf("new generation runtime = %v, want the core selection %v", got, want)
 	}
 
 	stdout, stderr, code = runTestCLIDir(t, binary, root, "", "build", secondSourcePath, "-o", filepath.Join("dist", "two"))
@@ -206,6 +211,25 @@ effect fn test_generation() -> void raises {AssertionFailed} uses {Assert} {
 	if got, err := os.ReadFile(modified); err != nil || string(got) != "modified generated source" {
 		t.Fatalf("modified generation was overwritten after refusal: err=%v bytes=%q", err, got)
 	}
+}
+
+func generationRuntimeFiles(t *testing.T, generation string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(generation, "runtime"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{}
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
+}
+
+func sortedSourceNames(sources map[string][]byte) []string {
+	names := slices.Collect(maps.Keys(sources))
+	slices.Sort(names)
+	return names
 }
 
 func revisionForSource(source string) string {

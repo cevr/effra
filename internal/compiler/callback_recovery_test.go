@@ -136,12 +136,12 @@ const service:Effect.Effect<(x:string)=>string,never,LoggerRequirement>=pureServ
 const empty:Effect.Effect<(x:string)=>string,never,never>=pureEmpty();
 const nested:Effect.Effect<(x:string)=>(y:string)=>string,{readonly _tag:"Missing"},never>=nestedFactory();
 void exact;void reciprocal;void erased;void failure;void service;void empty;void nested;`)
-	generated, err := r.EmitGo()
+	generated, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{"go.mod": string(r.ModuleFile()), "main.go": generated} {

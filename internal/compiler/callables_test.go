@@ -30,12 +30,12 @@ effect fn main() -> string {
 		}
 	}
 	r := Compile(source)
-	generated, err := r.EmitGo()
+	generated, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{"go.mod": "module effra.generated\n\ngo 1.27\n", "main.go": generated} {
@@ -278,12 +278,12 @@ func TestRowForwardingRecoveryAndProvisionAcrossTargets(t *testing.T) {
 		}
 	}
 	r := Compile(source)
-	generated, err := r.EmitGo()
+	generated, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{"go.mod": string(r.ModuleFile()), "main.go": generated} {
@@ -312,12 +312,12 @@ func TestCallableContractsInRecordsAndProvidersAcrossTargets(t *testing.T) {
 		}
 	}
 	r := Compile(source)
-	generated, err := r.EmitGo()
+	generated, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	if err := WriteRuntime(dir); err != nil {
+	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range map[string]string{"go.mod": string(r.ModuleFile()), "main.go": generated} {
