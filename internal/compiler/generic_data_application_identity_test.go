@@ -88,6 +88,24 @@ effect fn main()->string{let pipe=widened();run pipe.run("Ada").provide<Audit>(M
 		if err != nil || factoryCall.Type.Contract.Kind != "application" || factoryCall.Type.Application == nil || factoryCall.Type.Application.ProducedResult == nil || factoryCall.Type.Application.Result.ID != factoryCall.Type.Contract.ID || factoryCall.Type.Application.ProducedResult.ID == factoryCall.Type.Application.Result.ID {
 			t.Fatalf("%s factory boundary did not publish its checked result and produced identity: info=%+v err=%v", target, factoryCall, err)
 		}
+		projection := good.ProjectExpression(factoryCall)
+		if !projection.Complete {
+			t.Fatalf("%s factory expression projection was refused: %+v", target, projection)
+		}
+		projected := map[string]TypeNode{}
+		for _, node := range projection.Types {
+			projected[node.ID] = node
+		}
+		producedPublicID := factoryCall.Type.Application.ProducedResult.ID
+		if _, ok := projected[producedPublicID]; !ok {
+			t.Fatalf("%s selected expression projection omitted produced result %s", target, producedPublicID)
+		}
+		projectedProduced := projected[producedPublicID]
+		for _, childID := range projectedProduced.Args {
+			if _, ok := projected[childID]; !ok {
+				t.Fatalf("%s produced result projection omitted argument %s", target, childID)
+			}
+		}
 		producedID := good.projector.typePublicToID[factoryCall.Type.Application.ProducedResult.ID]
 		resultID := good.projector.typePublicToID[factoryCall.Type.Application.Result.ID]
 		producedNode, resultNode := good.projector.node(producedID), good.projector.node(resultID)
