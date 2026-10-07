@@ -23,7 +23,7 @@ effect fn main() -> string { let child = fork task() identity(child) }`
 func TestFiberOperationsConsumeOnlyTheirCanonicalCarriedRows(t *testing.T) {
 	source := `error A
 effect fn task() -> string raises {A} uses {Console} { "ok" }
-effect fn main() -> () raises {A} uses {Console} {
+effect fn main() -> void raises {A} uses {Console} {
  let a = fork task()
  let joined = run a.join()
  run a.interrupt()
@@ -155,9 +155,9 @@ effect fn route(path: string) -> string raises {NotFound} uses {Users} { run Use
 		wantEF107   bool
 		wantMessage string
 	}{
-		{name: "direct missing all services", suffix: `effect fn main() -> () raises {IoError} { run Http.serve("127.0.0.1:0", route) }`, wantEF108: true, wantMessage: "missing service requirements: Http, Users"},
-		{name: "local missing all services", suffix: `effect fn main() -> () raises {IoError} { let h = route run Http.serve("127.0.0.1:0", h) }`, wantEF108: true, wantMessage: "missing service requirements: Http, Users"},
-		{name: "provided direct", suffix: `effect fn main() -> () raises {IoError} { run Http.serve("127.0.0.1:0", route).provide<Http>(GoHttp).provide<Users>(TestUsers) }`, wantOK: true},
+		{name: "direct missing all services", suffix: `effect fn main() -> void raises {IoError} { run Http.serve("127.0.0.1:0", route) }`, wantEF108: true, wantMessage: "missing service requirements: Http, Users"},
+		{name: "local missing all services", suffix: `effect fn main() -> void raises {IoError} { let h = route run Http.serve("127.0.0.1:0", h) }`, wantEF108: true, wantMessage: "missing service requirements: Http, Users"},
+		{name: "provided direct", suffix: `effect fn main() -> void raises {IoError} { run Http.serve("127.0.0.1:0", route).provide<Http>(GoHttp).provide<Users>(TestUsers) }`, wantOK: true},
 		{name: "missing handler failure", suffix: `effect fn main() -> string { run route("/").provide<Users>(TestUsers) }`, wantEF107: true, wantMessage: "undeclared failures: NotFound"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -206,7 +206,7 @@ func TestHandlerValueControlFlowUsesCanonicalGoValueTypes(t *testing.T) {
 	}{
 		{
 			name: "if",
-			body: `effect fn main() -> () raises {IoError} {
+			body: `effect fn main() -> void raises {IoError} {
  let selected = if true { route } else { route }
  run Http.serve("127.0.0.1:0", selected).provide<Http>(GoHttp)
 }`,
@@ -214,7 +214,7 @@ func TestHandlerValueControlFlowUsesCanonicalGoValueTypes(t *testing.T) {
 		},
 		{
 			name: "scope",
-			body: `effect fn main() -> () raises {IoError} {
+			body: `effect fn main() -> void raises {IoError} {
  let selected = scope { route }
  run Http.serve("127.0.0.1:0", selected).provide<Http>(GoHttp)
 }`,
@@ -223,7 +223,7 @@ func TestHandlerValueControlFlowUsesCanonicalGoValueTypes(t *testing.T) {
 		{
 			name: "match",
 			body: `enum Choice { Left Right }
-effect fn main() -> () raises {IoError} {
+effect fn main() -> void raises {IoError} {
  let selected = match Choice.Left() { Choice.Left => route Choice.Right => route }
  run Http.serve("127.0.0.1:0", selected).provide<Http>(GoHttp)
 }`,

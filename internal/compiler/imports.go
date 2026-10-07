@@ -218,7 +218,7 @@ func normalizeBinding(imp GoImport, fn *types.Func, contracts map[string]behavio
 		b.Params = append(b.Params, mapped)
 	}
 	results := sig.Results()
-	b.Return = "()"
+	b.Return = voidTypeName
 	if results.Len() == 1 && types.Identical(results.At(0).Type(), types.Universe.Lookup("error").Type()) {
 		b.HasError = true
 	}

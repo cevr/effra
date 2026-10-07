@@ -788,7 +788,7 @@ func (c *checker) templateConstruct(e *Expr, env map[string]checkedExpression, i
 	if variant != "" {
 		result.setOwnership(prependFacts(variant, result.ownershipFacts()))
 		result.setCaptures(prependFacts(variant, result.captureFacts()))
-		payload := c.checkedData("()")
+		payload := c.checkedData(voidTypeName)
 		payload.fields = fields
 		result.fields = map[string]checkedExpression{variant: payload}
 	}

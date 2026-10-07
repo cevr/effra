@@ -89,7 +89,7 @@ func TestSelectedTestCatalogKeepsWholeRefusalAndExecutionIndependent(t *testing.
 		}
 		fmt.Fprintf(&source, "p%d: string", i)
 	}
-	source.WriteString(") -> string { \"wide\" }\neffect fn test_tiny() -> () { () }")
+	source.WriteString(") -> string { \"wide\" }\neffect fn test_tiny() -> void { void }")
 	r := Compile(source.String())
 	if !r.Checked || r.TypeProjectionComplete {
 		t.Fatal("fixture must check with whole-source refusal")
@@ -126,7 +126,7 @@ func TestSelectedTestCatalogKeepsWholeRefusalAndExecutionIndependent(t *testing.
 	if _, _, err := r.EmitJSTests(); err != nil {
 		t.Fatal(err)
 	}
-	pair := Compile("effect fn test_one() -> () { () }\neffect fn test_two() -> () { () }")
+	pair := Compile("effect fn test_one() -> void { void }\neffect fn test_two() -> void { void }")
 	pairTests, err := pair.Tests()
 	if err != nil {
 		t.Fatal(err)

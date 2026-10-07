@@ -3,7 +3,7 @@ package compiler
 import "testing"
 
 func TestLayerNodeOwnerRetainsScopeSignalAfterProducerAndThroughDependentClose(t *testing.T) {
-	output := runJS(t, `effect fn main() -> () { () }`, `
+	output := runJS(t, `effect fn main() -> void { void }`, `
 const order=[];
 let scopeSignal, operationSignal, ownReleaseSawScopeAlive=false;
 const exit=await Effect.runPromise(Effect.exit(__ef_scoped(Effect.gen(function*(){
@@ -40,7 +40,7 @@ console.log('node owner signals');
 }
 
 func TestLayerPendingPromiseSignalAbortsBeforeNodeOwnerClose(t *testing.T) {
-	output := runJS(t, `effect fn main() -> () { () }`, `
+	output := runJS(t, `effect fn main() -> void { void }`, `
 let scopeSignal, operationSignal, entered;
 const ready=new Promise(resolve=>entered=resolve);
 const exit=await Effect.runPromise(Effect.exit(__ef_scoped(Effect.gen(function*(){

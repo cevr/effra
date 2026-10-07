@@ -214,7 +214,7 @@ func TestSelectedTestCatalogIndependentOfWholePublication(t *testing.T) {
 		fmt.Fprintf(&wide, "p%d: string", i)
 	}
 	wide.WriteString(`) -> string { "wide" }`)
-	const tiny = `effect fn test_tiny() -> () raises {Bad} { () }`
+	const tiny = `effect fn test_tiny() -> void raises {Bad} { void }`
 	for _, order := range []struct{ name, functions string }{
 		{"wide first", wide.String() + "\n" + tiny},
 		{"test first", tiny + "\n" + wide.String()},

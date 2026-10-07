@@ -31,7 +31,7 @@ func (g *goEmitter) layer(plan LayerPlan) string {
 	for i, node := range plan.Nodes {
 		selection := plan.selected[node.ID]
 		for j, argument := range selection.effective.Value.Args {
-			value := g.expr(argument, false, "()", &out)
+			value := g.expr(argument, false, voidTypeName, &out)
 			name := fmt.Sprintf("efLayerArgument%d_%d", i, j)
 			out.WriteString(name + " := " + value + "\n")
 			arguments[node.ID] = append(arguments[node.ID], name)

@@ -3,7 +3,7 @@ error UserMissing
 error DeliveryFailed
 
 service Access {
-    effect fn check(id: string) -> () raises { Denied }
+    effect fn check(id: string) -> void raises { Denied }
 }
 
 service Directory {
@@ -15,11 +15,11 @@ service Delivery {
 }
 
 impl DemoAccess for Access {
-    effect fn check(id: string) -> () raises { Denied } {
+    effect fn check(id: string) -> void raises { Denied } {
         if id == "blocked" {
             fail Denied
         } else {
-            ()
+            void
         }
     }
 }
@@ -53,7 +53,7 @@ effect fn welcome(id: string) -> string
     run Delivery.send("Welcome, " + name)
 }
 
-effect fn main() -> () {
+effect fn main() -> void {
     let accepted = run welcome("42")
         .provide<Access>(DemoAccess)
         .provide<Directory>(DemoDirectory)

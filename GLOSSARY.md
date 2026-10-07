@@ -10,6 +10,8 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Absence**: An explicitly selected closed alternative describing a missing value, distinct from an uninitialized field or a bare nil/null value.
 
+**Void**: The no-value type, spelled `void`, describing successful completion without an information-bearing result. Its explicit expression is `void`. It is distinct from absence and from a computation that does not complete successfully.
+
 **Option** (specified): A generic closed enum with `None` and `Some(T)` alternatives. `Some` contains an admitted value of `T`, never an unchecked nil host reference.
 
 **Exhaustive match**: An interpretation that covers each declared alternative exactly once and executes only its selected arm.

@@ -33,7 +33,7 @@ func TestRecoveredCallableOwnershipJoinsEveryAlternative(t *testing.T) {
 					declarations = append(declarations, `effect fn recover(fallback:effect fn(File)->File raises {IoError})->(effect fn(File)->File raises {IoError}){run choose().catch<Missing>(fallback)}`)
 					chosen = `run recover(` + test.fallback + `)`
 				}
-				declarations = append(declarations, `effect fn outer(file:File)->File raises {IoError}{let operation=`+chosen+`;scope {run operation(file)}}`, `effect fn main()->(){()}`)
+				declarations = append(declarations, `effect fn outer(file:File)->File raises {IoError}{let operation=`+chosen+`;scope {run operation(file)}}`, `effect fn main()->void{void}`)
 				if reverse {
 					slices.Reverse(declarations)
 				}

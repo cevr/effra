@@ -87,7 +87,7 @@ error Broken { converter: Convert.Codec<User, string, effect fn(string) -> User,
 effect fn decode(input: string) -> User { User { name: input } }
 effect fn encode(user: User) -> string { user.name }
 fn make() -> Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> { Convert.witness(decode, encode) }
-effect fn broken() -> () raises {Broken} { fail Broken { converter: make() } }
+effect fn broken() -> void raises {Broken} { fail Broken { converter: make() } }
 effect fn main() -> string {
  let holder = Holder { converter: make() }
  let boxed = Bundle.Value { converter: holder.converter }
@@ -130,8 +130,8 @@ func TestBundledWitnessUnavailableGenericLayoutsDiagnose(t *testing.T) {
 fn keep(input: string) -> string { input }
 effect fn decode(input: string) -> (fn(string) -> string) { keep }
 effect fn encode(value: fn(string) -> string) -> string { value("x") }
-effect fn main() -> () { let converter = Convert.witness(decode, encode); () }`,
-		`fn keep<T: type>(value: T) -> T { value } effect fn main() -> () { () }`,
+effect fn main() -> void { let converter = Convert.witness(decode, encode); void }`,
+		`fn keep<T: type>(value: T) -> T { value } effect fn main() -> void { void }`,
 	} {
 		for _, target := range []string{"go", "js"} {
 			r := CompileFor(source, target)
@@ -259,7 +259,7 @@ effect fn outer(file: File) -> File raises {IoError} {
 				}
 				source += `)); run converter.` + direction + `(file) }
 }
-effect fn main() -> () { () }`
+effect fn main() -> void { void }`
 				r := CompileFor(source, target)
 				if r.Checked == acquired || (acquired && !hasCode(r, "EF123")) {
 					t.Fatalf("%s %s acquire=%v: %v", target, direction, acquired, r.Diagnostics)
@@ -377,7 +377,7 @@ func TestBundledWitnessClassOnlyClosure(t *testing.T) {
 	source := `import Convert "effra/conversions"
 record User { name: string }
 fn pass(value: Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string>) -> Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> { value }
-effect fn main() -> () { () }`
+effect fn main() -> void { void }`
 	for _, target := range []string{"go", "js"} {
 		r := CompileFor(source, target)
 		if !r.Checked || len(r.Program.BundledFunctions) != 0 || len(r.Program.BundledTemplates) != 1 || len(r.BundledInterfaces) != 1 {

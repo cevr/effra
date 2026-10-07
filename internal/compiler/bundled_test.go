@@ -112,7 +112,7 @@ func TestBundledRefusesMissingRowsAndUnsupportedImports(t *testing.T) {
 		{`"effra/functions"`, `"./functions"`, "EF126"},
 		{`"effra/functions"`, `"effra/functions@2"`, "EF126"},
 		{`Fns.call(loadName, id)`, `Fns.missing(loadName, id)`, "EF126"},
-		{`import Fns "effra/functions"`, `import Fns "effra/functions" fn Fns() -> () { () }`, "EF101"},
+		{`import Fns "effra/functions"`, `import Fns "effra/functions" fn Fns() -> void { void }`, "EF101"},
 	} {
 		for _, target := range []string{"go", "js"} {
 			r := CompileFor(strings.Replace(bundledGreeting, mutation.before, mutation.after, 1), target)

@@ -7,8 +7,8 @@ import (
 )
 
 const lifecycleProbe = `error Bad
-service Gate { effect fn step(name: string) -> () }
-effect fn worker() -> () uses {Gate} {run Gate.step("child")}
+service Gate { effect fn step(name: string) -> void }
+effect fn worker() -> void uses {Gate} {run Gate.step("child")}
 effect fn owned() -> string uses {Gate} {
  scope {
   run Gate.step("parent")
@@ -17,14 +17,14 @@ effect fn owned() -> string uses {Gate} {
   "ok"
  }
 }
-effect fn broken() -> () raises {Bad} uses {Gate} {run Gate.step("announce");fail Bad}
-effect fn unobserved() -> () raises {Bad} uses {Gate} {
+effect fn broken() -> void raises {Bad} uses {Gate} {run Gate.step("announce");fail Bad}
+effect fn unobserved() -> void raises {Bad} uses {Gate} {
  let child = fork broken()
  run Gate.step("announced")
 }
-effect fn timed() -> () raises {Timeout} uses {Gate, Scheduler} {run worker().timeout(20)}
-effect fn recovered() -> () uses {Gate} {run timed().provide<Scheduler>(LiveScheduler).catch<Timeout>(())}
-effect fn main() -> () {()}
+effect fn timed() -> void raises {Timeout} uses {Gate, Scheduler} {run worker().timeout(20)}
+effect fn recovered() -> void uses {Gate} {run timed().provide<Scheduler>(LiveScheduler).catch<Timeout>(void)}
+effect fn main() -> void {void}
 `
 
 func TestLifecycleConformanceAcrossGoAndEffect(t *testing.T) {

@@ -11,11 +11,11 @@ import (
 )
 
 func TestExplicitTestProvidersUseTheHarnessAcrossTargets(t *testing.T) {
-	source := `effect fn explicitSleep() -> () uses {Clock} {
+	source := `effect fn explicitSleep() -> void uses {Clock} {
     run Clock.sleep(36000000)
 }
 
-effect fn test_explicit_virtual_providers() -> () raises {AssertionFailed} uses {Assert, Scheduler} {
+effect fn test_explicit_virtual_providers() -> void raises {AssertionFailed} uses {Assert, Scheduler} {
     let child = fork explicitSleep().provide<Clock>(TestClock).provide<Scheduler>(TestScheduler)
     run Scheduler.awaitRegistration()
     run Scheduler.advance(36000000)
@@ -23,7 +23,7 @@ effect fn test_explicit_virtual_providers() -> () raises {AssertionFailed} uses 
     run Assert.check(true, "explicit test providers share the harness scheduler")
 }
 
-effect fn test_advance_admits_unstarted_fork() -> () raises {AssertionFailed} uses {Assert, Scheduler} {
+effect fn test_advance_admits_unstarted_fork() -> void raises {AssertionFailed} uses {Assert, Scheduler} {
     let child = fork explicitSleep().provide<Clock>(TestClock).provide<Scheduler>(TestScheduler)
     run Scheduler.advance(36000000)
     run child.join()
@@ -83,7 +83,7 @@ effect fn test_advance_admits_unstarted_fork() -> () raises {AssertionFailed} us
 }
 
 func TestExplicitTestProvidersRejectLiveExecutionWithoutHarness(t *testing.T) {
-	source := `effect fn main() -> () {
+	source := `effect fn main() -> void {
     run Clock.sleep(1).provide<Clock>(TestClock)
 }
 `
@@ -120,12 +120,12 @@ func TestExplicitTestProvidersRejectLiveExecutionWithoutHarness(t *testing.T) {
 // Keep the generated continuation large enough to exercise scheduler handoffs
 // while bounding Go 1.27's compile time for one very large straight-line body.
 func TestSchedulerDrainsLongManagedContinuationAcrossTargets(t *testing.T) {
-	source := `effect fn longContinuation(latch: Latch) -> () uses {Clock, Sync} {
+	source := `effect fn longContinuation(latch: Latch) -> void uses {Clock, Sync} {
     run Clock.sleep(20)
 ` + strings.Repeat("    run Sync.signal(latch)\n", 1024) + `    run Clock.sleep(30)
 }
 
-effect fn test_scheduler_drains_long_continuation() -> () raises {AssertionFailed} uses {Assert, Clock, Scheduler, Sync} {
+effect fn test_scheduler_drains_long_continuation() -> void raises {AssertionFailed} uses {Assert, Clock, Scheduler, Sync} {
     let latch = run Sync.latch()
     let child = fork longContinuation(latch)
     run Scheduler.awaitRegistration()
@@ -189,9 +189,9 @@ effect fn test_scheduler_drains_long_continuation() -> () raises {AssertionFaile
 
 func TestSchedulerAuthorityIsProviderDrivenAcrossTargets(t *testing.T) {
 	source := `impl Immediate for Scheduler {
-    effect fn sleep(milliseconds: i64) -> () { () }
-    effect fn advance(milliseconds: i64) -> () { () }
-    effect fn awaitRegistration() -> () { () }
+    effect fn sleep(milliseconds: i64) -> void { void }
+    effect fn advance(milliseconds: i64) -> void { void }
+    effect fn awaitRegistration() -> void { void }
 }
 effect fn work() -> string uses {Clock} {
     run Clock.sleep(20)
@@ -238,9 +238,9 @@ effect fn main() -> string {
 
 func TestSchedulerTimerFailureIsPreservedAcrossTargets(t *testing.T) {
 	source := `impl Broken for Scheduler {
-    effect fn sleep(milliseconds: i64) -> () { run Clock.sleep(2147483648).provide<Clock>(LiveClock) }
-    effect fn advance(milliseconds: i64) -> () { () }
-    effect fn awaitRegistration() -> () { () }
+    effect fn sleep(milliseconds: i64) -> void { run Clock.sleep(2147483648).provide<Clock>(LiveClock) }
+    effect fn advance(milliseconds: i64) -> void { void }
+    effect fn awaitRegistration() -> void { void }
 }
 effect fn work() -> string uses {Clock} {
     run Clock.sleep(20)

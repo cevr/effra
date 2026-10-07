@@ -530,7 +530,7 @@ func (c *checker) staticLayerArgument(expr *Expr) bool {
 		return false
 	}
 	switch expr.Kind {
-	case "string", "integer", "bool", "unit":
+	case "string", "integer", "bool", "void":
 		return true
 	case "construct":
 		for _, field := range expr.Fields {

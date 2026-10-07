@@ -34,7 +34,7 @@ func TestUTF16RangeUsesSharedSourceIndex(t *testing.T) {
 
 func TestFileURIUsesCanonicalEscapedIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "space é.ef")
-	if err := os.WriteFile(path, []byte("effect fn main() -> () { () }"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("effect fn main() -> void { void }"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	uri, err := FileURI(path)
@@ -86,7 +86,7 @@ func TestBuiltinDiagnosticSeverityMetadataIsKnown(t *testing.T) {
 }
 
 func TestDiagnosticReportMarksUnavailableLintAndLocations(t *testing.T) {
-	source := `effect fn main() -> () { run Console.log("x") }`
+	source := `effect fn main() -> void { run Console.log("x") }`
 	r := Compile(source)
 	if r.Checked {
 		t.Fatal("invalid source was checked")
@@ -99,8 +99,8 @@ func TestDiagnosticReportMarksUnavailableLintAndLocations(t *testing.T) {
 		t.Fatalf("compiler diagnostic was not preserved: %+v", report.Diagnostics)
 	}
 
-	unsupported := CompileFor(`effect fn main() -> () { () }`, "llvm")
-	unsupportedReport := unsupported.DiagnosticReport(SourceSnapshot{URI: "main.ef", Origin: "disk", Text: `effect fn main() -> () { () }`}, false)
+	unsupported := CompileFor(`effect fn main() -> void { void }`, "llvm")
+	unsupportedReport := unsupported.DiagnosticReport(SourceSnapshot{URI: "main.ef", Origin: "disk", Text: `effect fn main() -> void { void }`}, false)
 	if unsupportedReport.Target != "llvm" || len(unsupportedReport.Diagnostics) != 1 || unsupportedReport.Diagnostics[0].LocationAvailable || unsupportedReport.Diagnostics[0].LSP != nil {
 		t.Fatalf("unsupported target fabricated a location: %+v", unsupportedReport)
 	}
@@ -108,7 +108,7 @@ func TestDiagnosticReportMarksUnavailableLintAndLocations(t *testing.T) {
 
 func TestDiagnosticReportProjectsCRLFCommentSpans(t *testing.T) {
 	source := "// effra-lint-disable-next-line unknown -- explain\r\n" +
-		"effect fn main() -> () { () }\r\n"
+		"effect fn main() -> void { void }\r\n"
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatalf("source unexpectedly failed admission: %+v", r.Diagnostics)

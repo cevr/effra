@@ -11,11 +11,11 @@ func TestLintUsesCheckedLexicalBindings(t *testing.T) {
 		name, source string
 		warnings     int
 	}{
-		{"unused", `effect fn task() -> string { "ok" } effect fn main() -> () { let forgotten = task(); () }`, 1},
+		{"unused", `effect fn task() -> string { "ok" } effect fn main() -> void { let forgotten = task(); void }`, 1},
 		{"branch use", `effect fn task() -> string { "ok" } effect fn main() -> string { let recipe = task(); if true {run recipe} else {""} }`, 0},
 		{"scope use", `effect fn task() -> string { "ok" } effect fn main() -> string { let recipe = task(); scope {run recipe} }`, 0},
-		{"independent bindings", `effect fn task() -> string { "ok" } effect fn a() -> string { let recipe = task(); run recipe } effect fn main() -> () {let recipe = task(); ()}`, 1},
-		{"acknowledged", `effect fn task() -> string { "ok" } effect fn main() -> () { let _ = task(); () }`, 0},
+		{"independent bindings", `effect fn task() -> string { "ok" } effect fn a() -> string { let recipe = task(); run recipe } effect fn main() -> void {let recipe = task(); void}`, 1},
+		{"acknowledged", `effect fn task() -> string { "ok" } effect fn main() -> void { let _ = task(); void }`, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -29,7 +29,7 @@ func TestLintUsesCheckedLexicalBindings(t *testing.T) {
 			}
 		})
 	}
-	invalid := Compile(`effect fn task() -> () { () } effect fn main() -> () {task()}`)
+	invalid := Compile(`effect fn task() -> void { void } effect fn main() -> void {task()}`)
 	lint := invalid.Lint(false)
 	if lint.Checked || lint.LintPassed || len(lint.LintDiagnostics) != 0 || len(lint.Diagnostics) == 0 {
 		t.Fatal(lint)
@@ -62,11 +62,11 @@ func TestLintProvisionAndTypeAt(t *testing.T) {
 
 func TestLintReasonedNextLineSuppressions(t *testing.T) {
 	source := `effect fn task() -> string { "ok" }
-effect fn main() -> () {
+effect fn main() -> void {
 // effra-lint-disable-next-line unused-recipe -- intentionally deferred hook
 let forgotten = task()
 let alsoForgotten = task();
-()}`
+void}`
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
@@ -88,10 +88,10 @@ let alsoForgotten = task();
 	}
 
 	stringDirective := `effect fn task() -> string { "ok" }
-effect fn main() -> () {
+effect fn main() -> void {
 let text = "// effra-lint-disable-next-line unused-recipe -- this is data"
 let forgotten = task();
-()}`
+void}`
 	stringResult := Compile(stringDirective)
 	if !stringResult.Checked {
 		t.Fatal(stringResult.Diagnostics)
@@ -101,7 +101,7 @@ let forgotten = task();
 		t.Fatalf("directive text in a string changed lint behavior: %+v", stringLint)
 	}
 
-	sameLine := `effect fn main() -> () {
+	sameLine := `effect fn main() -> void {
 // effra-lint-disable-next-line redundant-provision -- both nested boundaries are deliberate
 run Console.log("x").provide<Console>(Stdout).provide<Console>(Stdout)
 }`
@@ -123,35 +123,35 @@ func TestLintSuppressionValidation(t *testing.T) {
 	}{
 		{
 			"unknown rule",
-			`effect fn main() -> () {
+			`effect fn main() -> void {
 // effra-lint-disable-next-line future-rule -- waiting for a future rule
-()}`,
+void}`,
 			"unknown lint rule future-rule",
 			2,
 		},
 		{
 			"missing reason",
 			`effect fn task() -> string { "ok" }
-effect fn main() -> () {
+effect fn main() -> void {
 // effra-lint-disable-next-line unused-recipe
 let forgotten = task();
-()}`,
+void}`,
 			"must include a non-empty reason",
 			3,
 		},
 		{
 			"multiple rules",
-			`effect fn main() -> () {
+			`effect fn main() -> void {
 // effra-lint-disable-next-line unused-recipe redundant-provision -- one target is required
-()}`,
+void}`,
 			"must name exactly one lint rule",
 			2,
 		},
 		{
 			"unused",
-			`effect fn main() -> () {
+			`effect fn main() -> void {
 // effra-lint-disable-next-line unused-recipe -- no advice is on the next line
-()}`,
+void}`,
 			"unused lint suppression",
 			2,
 		},
@@ -189,7 +189,7 @@ let forgotten = task();
 }
 
 func TestLintSuppressionCannotHideCompilerDiagnostics(t *testing.T) {
-	source := `effect fn main() -> () {
+	source := `effect fn main() -> void {
 // effra-lint-disable-next-line unused-recipe -- this must never hide a compiler error
 run Console.log("x")
 }`
@@ -252,7 +252,7 @@ fn invoke(target: fn() -> string) -> string { target() }
 fn invokeRecord(Logger: Callbacks) -> string { Logger.log("callback") }
 fn direct() -> string { target() }
 effect fn serviceCall() -> string uses {Logger} { run Logger.log("service") }
-effect fn builtinCall() -> () uses {Console} { run Console.log("builtin") }
+effect fn builtinCall() -> void uses {Console} { run Console.log("builtin") }
 `
 	for _, target := range []string{"go", "js"} {
 		r := CompileFor(source, target)

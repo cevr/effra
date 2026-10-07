@@ -16,7 +16,7 @@ def adapter_semantic(value):
     return result
 
 
-def producer_snapshot(value, target=None, snapshot_schema=6):
+def producer_snapshot(value, target=None, snapshot_schema=7):
     """Validate one decorated response and return its producer identity."""
     assert isinstance(value, dict)
     for key in ("schemaVersion", "revision", "target", "producer", "snapshot"):
@@ -65,7 +65,7 @@ def _project(value, ignored, project):
 
 
 def assert_report_parity(actual, expected, target=None, ignored=(), project=None,
-                         report_schema=6, snapshot_schema=6):
+                         report_schema=7, snapshot_schema=7):
     """Compare decorated reports without erasing their producer contract.
 
     Artifact-scoped reports are equal after only explicitly named adapter

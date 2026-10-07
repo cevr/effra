@@ -16,7 +16,7 @@ var layersJS string
 func quoted(s string) string { b, _ := json.Marshal(s); return string(b) }
 func jsValueType(t string) string {
 	switch t {
-	case "()":
+	case "void":
 		return "void"
 	case "bool":
 		return "boolean"
@@ -420,7 +420,7 @@ func jsExpr(e *Expr, effect bool) string {
 		return quoted(e.Text)
 	case "bool":
 		return e.Text
-	case "unit":
+	case "void":
 		return "undefined"
 	case "construct":
 		return jsConstruct(e, effect)

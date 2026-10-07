@@ -92,17 +92,17 @@ def parity(directory):
     warning = ('effect fn task() -> string { "ok" }\r\n'
                'effect fn main() -> string { let s = "𐐀é"; '
                'let forgotten = task(); run task().provide<Console>(Stdout) }\r\n')
-    fixtures = [('unicode.ef', 'effect fn main() -> () { "𐐀é" @ }'),
-                ('crlf.ef', '// comment\r\neffect fn main() -> () { () }\r\n@'),
-                ('eof.ef', 'effect fn main() -> () {\r\n'), ('warning.ef', warning),
+    fixtures = [('unicode.ef', 'effect fn main() -> void { "𐐀é" @ }'),
+                ('crlf.ef', '// comment\r\neffect fn main() -> void { void }\r\n@'),
+                ('eof.ef', 'effect fn main() -> void {\r\n'), ('warning.ef', warning),
                 ('lint-error.ef', '// effra-lint-disable-next-line bogus -- reason\r\n'
-                 'effect fn main() -> () { () }')]
+                 'effect fn main() -> void { void }')]
     for name, text in fixtures:
         path = directory / name
         path.write_bytes(text.encode())
         report = cli(BINARY, path)
         remote = mcp(BINARY, directory, [{"file": name}])[0]["result"]["structuredContent"]
-        assert_report_parity(report, remote, report_schema=1, snapshot_schema=6)
+        assert_report_parity(report, remote, report_schema=1, snapshot_schema=7)
         messages = exchange([INIT, READY, opened(path, text, 4), STOP, EXIT], fragmented=True)
         capabilities = messages[0]["result"]["capabilities"]
         assert capabilities == {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": True, "change": 1}}
@@ -184,7 +184,7 @@ def bounds_and_protocol(directory):
                          changed(path, "", 2), STOP, EXIT])
     assert [p["version"] for p in publications(messages)] == [1, 2]
     assert sum(m.get("method") == "window/logMessage" for m in messages) == 1
-    messages = exchange([INIT, READY, opened(path, 'fn duplicate() -> () { () }\n' * 1002),
+    messages = exchange([INIT, READY, opened(path, 'fn duplicate() -> void { void }\n' * 1002),
                          changed(path, "", 2), STOP, EXIT])
     assert [p["version"] for p in publications(messages)] == [2], messages
     assert any("limit" in m.get("params", {}).get("message", "") for m in messages)
@@ -294,7 +294,7 @@ def refusal_recovery_regression(directory):
     # Located findings remain all-or-refuse. Refusing this projection must
     # still permit close and a following request on the same framed session.
     name = "d" * 200
-    text = f'fn {name}() -> () {{ () }}\n' * 1001
+    text = f'fn {name}() -> void {{ void }}\n' * 1001
     assert len(text.encode()) < 256 * 1024
     messages = exchange([INIT, READY, opened(path, text, 23),
                          call("textDocument/didClose", {"textDocument": {"uri": path.as_uri()}}),

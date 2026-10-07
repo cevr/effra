@@ -221,7 +221,9 @@ type RowID uint32
 const invalidTypeID TypeID = 0
 const emptyRowID RowID = 0
 
-const SemanticSchemaVersion = 6
+const SemanticSchemaVersion = 7
+
+const voidTypeName = "void"
 
 type Contribution struct {
 	Kind  string   `json:"kind"`
@@ -2071,7 +2073,7 @@ func typeRef(name string) TypeRef {
 	switch {
 	case name == "":
 		return ref
-	case name == "string", name == "bool", name == "i64", name == "bytes", name == "()":
+	case name == "string", name == "bool", name == "i64", name == "bytes", name == voidTypeName:
 		ref = TypeRef{Kind: "primitive", Name: name}
 	case name == "File", name == "Handler", name == "Latch":
 		ref = TypeRef{Kind: "opaque", Name: name}
@@ -2755,7 +2757,11 @@ func (c *checker) signature(f *Function) {
 		if c.requiresTemplateArguments(t) {
 			c.diagnostic("EF127", "generic type "+t+" requires complete application arguments", span)
 		} else if !c.typeKnown(t) {
-			c.diagnostic("EF102", "unknown or unsupported value type "+t, span)
+			message := "unknown or unsupported value type " + t
+			if t == "unit" {
+				message += "; use void for no-value results"
+			}
+			c.diagnostic("EF102", message, span)
 		}
 	}
 	valid(f.Return, f.Span)
@@ -2808,7 +2814,7 @@ func (c *checker) typeKnown(name string) bool {
 		return false
 	}
 	switch name {
-	case "string", "bool", "()", "i64", "File", "Latch", "bytes", "Handler":
+	case "string", "bool", voidTypeName, "i64", "File", "Latch", "bytes", "Handler":
 		return true
 	}
 	if c.records[name] != nil || c.enums[name] != nil {
@@ -3030,7 +3036,7 @@ func (c *checker) canonicalRef(ref TypeRef) TypeID {
 			return invalidTypeID
 		}
 	case "primitive":
-		if !slices.Contains([]string{"string", "bool", "i64", "bytes", "()"}, ref.Name) {
+		if !slices.Contains([]string{"string", "bool", "i64", "bytes", voidTypeName}, ref.Name) {
 			return invalidTypeID
 		}
 	case "opaque":
@@ -3965,7 +3971,7 @@ func (c *checker) addDeferredEvaluation(e ExpressionEvaluation, t checkedExpress
 }
 
 func (c *checker) block(b *Block, env map[string]checkedExpression, effect bool) checkedExpression {
-	out := c.checkedData("()")
+	out := c.checkedData(voidTypeName)
 	env = clone(env)
 	terminated := false
 	for _, s := range b.Statements {
@@ -4027,7 +4033,7 @@ func (c *checker) block(b *Block, env map[string]checkedExpression, effect bool)
 			}
 			env[s.Name] = bound
 			previousEvaluation := out.evaluation
-			out = c.checkedData("()")
+			out = c.checkedData(voidTypeName)
 			out.evaluation = previousEvaluation
 		} else {
 			if t.isEffect() {
@@ -4057,8 +4063,8 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		t = c.checkedData("string")
 	case "bool":
 		t = c.checkedData("bool")
-	case "unit":
-		t = c.checkedData("()")
+	case "void":
+		t = c.checkedData(voidTypeName)
 	case "name":
 		if v, exists := env[e.Name]; exists {
 			c.observeLocalUse(e, v)
@@ -4923,9 +4929,9 @@ func (c *checker) fiberCall(e *Expr, env map[string]checkedExpression, inEffect 
 	case "join":
 		t.setOwnership(cloneFacts(inner.child))
 	case "interrupt":
-		t = checkedExpression{value: c.values.recipe(c.canonicalRef(typeRef("()")), nil, checkedEffectCallable, failureRow, emptyRowID, nil, nil)}
+		t = checkedExpression{value: c.values.recipe(c.canonicalRef(typeRef(voidTypeName)), nil, checkedEffectCallable, failureRow, emptyRowID, nil, nil)}
 	case "cancel":
-		t = checkedExpression{value: c.values.recipe(c.canonicalRef(typeRef("()")), nil, checkedEffectCallable, emptyRowID, emptyRowID, nil, nil)}
+		t = checkedExpression{value: c.values.recipe(c.canonicalRef(typeRef(voidTypeName)), nil, checkedEffectCallable, emptyRowID, emptyRowID, nil, nil)}
 	default:
 		c.diagnostic("EF102", "unknown fiber operation "+e.Left.Name, e.Span)
 	}

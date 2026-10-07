@@ -4,7 +4,7 @@ This is a single-file compiler experiment, not the full design in design.md. The
 
 ## Supported surface
 
-- Immutable local bindings, string/bool/unit and i64 values, managed File handles, string concatenation, primitive equality, and `if` expressions with two branches. i64 literals are currently nonnegative; JS represents them as bigint.
+- Immutable local bindings, string/bool/void and i64 values, managed File handles, string concatenation, primitive equality, and `if` expressions with two branches. i64 literals are currently nonnegative; JS represents them as bigint.
 - Ordinary `fn` and lazy `effect fn`, with explicit parameter, result, failure, and service contracts.
 - Nominal records and closed enums with typed fields: `record User { id: string }`, `enum State { Ready Waiting { reason: string } }`, constructors, field access and exhaustive `match` arms. Constructor payloads accept `{ field }` shorthand; in a control position such as `match State.Ready { value } { ... }`, the following arm brace disambiguates that constructor from the control body. Static data does not decode or validate external wire values.
 - Nominal errors may carry typed fields: `error NotFound { id: string }`; `fail NotFound { id: "missing" }` preserves the payload on both targets. Error declarations are failure payload types, not ordinary success values or nested record fields.
@@ -20,7 +20,7 @@ This is a single-file compiler experiment, not the full design in design.md. The
 
 Rows are normalized sets; declarations are upper bounds. Service calls use the service's declared contract even if one provider admits fewer failures. A library may retain requirements; the executable entry is an effect function named `main`, takes no parameters, and requires no remaining services. Its admitted typed failures are reported as runtime failures with nonzero exit status.
 
-The last expression is a block's value. Use semicolons where adjacent expressions could parse as one call; newlines are whitespace. Strings use JSON escapes. Identifiers are ASCII; source offsets and columns are UTF-8 bytes. Empty blocks produce unit.
+The last expression is a block's value. Use semicolons where adjacent expressions could parse as one call; newlines are whitespace. Strings use JSON escapes. Identifiers are ASCII; source offsets and columns are UTF-8 bytes. Empty blocks and blocks ending in a `let` produce `void`. The explicit no-value expression is bare `void`; `()` remains the required spelling for empty parameter and argument lists, and is rejected in type and expression positions.
 
 ## Execution and inspection
 

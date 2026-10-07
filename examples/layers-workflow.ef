@@ -8,17 +8,17 @@ enum Mode {
     Fixture
 }
 service Access {
-    effect fn check(id: string) -> () raises { Denied }
+    effect fn check(id: string) -> void raises { Denied }
 }
 service Delivery {
     effect fn send(message: string) -> string raises { DeliveryFailed }
 }
 impl Policy for Access {
-    effect fn check(id: string) -> () raises { Denied } {
+    effect fn check(id: string) -> void raises { Denied } {
         if id == "blocked" {
             fail Denied
         } else {
-            ()
+            void
         }
     }
 }

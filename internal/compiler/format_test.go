@@ -80,7 +80,7 @@ effect fn main() -> string {
 }
 
 func TestFormatCanonicalExpressionsAndMatchGolden(t *testing.T) {
-	source := `enum State { Ready(value: string) Idle Empty {} } error Bad { message: string } service Clock { effect fn sleep(ms: i64) -> () } impl Live for Clock { effect fn sleep(ms: i64) -> () { () } } effect fn work(state: State) -> string raises {Bad} uses {Clock} { let child = fork work(state).provide<Clock>(Live).timeout(500).catch<Bad>("fallback"); scope { run child } match state { State.Ready { value } => if value == "ok" { value } else { "other" } State.Idle => "idle" State.Empty => fail Bad { message: "empty" } } }`
+	source := `enum State { Ready(value: string) Idle Empty {} } error Bad { message: string } service Clock { effect fn sleep(ms: i64) -> void } impl Live for Clock { effect fn sleep(ms: i64) -> void { void } } effect fn work(state: State) -> string raises {Bad} uses {Clock} { let child = fork work(state).provide<Clock>(Live).timeout(500).catch<Bad>("fallback"); scope { run child } match state { State.Ready { value } => if value == "ok" { value } else { "other" } State.Idle => "idle" State.Empty => fail Bad { message: "empty" } } }`
 	want := `enum State {
     Ready(value: string)
     Idle
@@ -90,11 +90,11 @@ error Bad {
     message: string
 }
 service Clock {
-    effect fn sleep(ms: i64) -> ()
+    effect fn sleep(ms: i64) -> void
 }
 impl Live for Clock {
-    effect fn sleep(ms: i64) -> () {
-        ()
+    effect fn sleep(ms: i64) -> void {
+        void
     }
 }
 effect fn work(state: State) -> string raises { Bad } uses { Clock } {
@@ -185,7 +185,7 @@ else { "no" }
 	}
 	assertLintMeaning(t, source, result.Text)
 
-	wrappedChain := `effect fn main() -> () {
+	wrappedChain := `effect fn main() -> void {
 // effra-lint-disable-next-line redundant-provision -- keep the chain target line
 run hello().provide<Console>(Stdout)
     .provide<Console>(Stdout)
@@ -202,16 +202,16 @@ run hello().provide<Console>(Stdout)
 		t.Fatalf("wrapped directive target was not idempotent: %v\n%s", err, again.Text)
 	}
 
-	blankTarget := `effect fn main() -> () {
+	blankTarget := `effect fn main() -> void {
 // effra-lint-disable-next-line future-rule -- blank target remains blank
 
-()
+void
 }`
 	blankResult, err := FormatSource(blankTarget)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(blankResult.Text, "future-rule -- blank target remains blank\n\n    ()") {
+	if !strings.Contains(blankResult.Text, "future-rule -- blank target remains blank\n\n    void") {
 		t.Fatalf("blank directive target was moved:\n%s", blankResult.Text)
 	}
 	assertDirectiveTokenLines(t, blankTarget, blankResult.Text)
@@ -234,7 +234,7 @@ record Data { first: string, second: string }`
 		`// effra-lint-disable-next-line future-rule -- malformed unknown rule`,
 		`// effra-lint-disable-next-line unused-recipe -- unused directive`,
 	} {
-		caseSource := "effect fn main() -> () {\n" + directive + "\n()\n}"
+		caseSource := "effect fn main() -> void {\n" + directive + "\nvoid\n}"
 		formatted, err := FormatSource(caseSource)
 		if err != nil {
 			t.Fatal(err)
@@ -246,7 +246,7 @@ record Data { first: string, second: string }`
 		`// effra-lint-disable-next-line unused-recipe`,
 		`// effra-lint-disable-next-line unused-recipe --`,
 	} {
-		caseSource := "effect fn main() -> () {\n" + directive + "\n()\n}"
+		caseSource := "effect fn main() -> void {\n" + directive + "\nvoid\n}"
 		formatted, err := FormatSource(caseSource)
 		if err != nil {
 			t.Fatal(err)
@@ -271,7 +271,7 @@ func TestFormatPreservesUnicodeCRLFEOFAndEmptyFiles(t *testing.T) {
 	if err != nil || empty.Text != "" || !empty.Changed || empty.OutputDigest == empty.InputDigest {
 		t.Fatalf("whitespace-only file was not normalized to empty: %+v err=%v", empty, err)
 	}
-	for _, source := range []string{"// comment\rfn main() -> () { () }", "fn main() -> () {\r()\n}"} {
+	for _, source := range []string{"// comment\rfn main() -> void { void }", "fn main() -> void {\rvoid\n}"} {
 		result, err := FormatSource(source)
 		failure, ok := err.(FormatFailure)
 		if !ok || len(failure.Diagnostics) == 0 || failure.Diagnostics[0].Code != "EF001" || result.Text != "" {
@@ -318,7 +318,7 @@ func TestFormatReportsSyntaxFailuresWithoutReplacement(t *testing.T) {
 func TestFormatRejectsInvalidUTF8WithExactLexicalSpan(t *testing.T) {
 	for _, prefix := range []string{"// bad ", `fn main() -> string { "bad `} {
 		source := append([]byte(prefix), 0xff)
-		source = append(source, []byte(" byte\nfn main() -> () { () }\n")...)
+		source = append(source, []byte(" byte\nfn main() -> void { void }\n")...)
 		result, err := FormatSource(string(source))
 		failure, ok := err.(FormatFailure)
 		if !ok || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != "EF001" || result.Text != "" || result.OutputDigest != "" {
@@ -337,11 +337,11 @@ func TestFormatRejectsInvalidUTF8WithExactLexicalSpan(t *testing.T) {
 
 func TestFormatBoundedStopsBeforeHighIndentOutput(t *testing.T) {
 	var source strings.Builder
-	source.WriteString("effect fn main() -> () { ")
+	source.WriteString("effect fn main() -> void { ")
 	for index := 0; index < 64; index++ {
 		source.WriteString("scope { ")
 	}
-	source.WriteString("()")
+	source.WriteString("void")
 	for index := 0; index < 64; index++ {
 		source.WriteString(" }")
 	}
@@ -353,7 +353,7 @@ func TestFormatBoundedStopsBeforeHighIndentOutput(t *testing.T) {
 }
 
 func TestFormatBoundedHonorsExactOutputBoundary(t *testing.T) {
-	source := `effect fn main() -> () { () }`
+	source := `effect fn main() -> void { void }`
 	want, err := FormatSource(source)
 	if err != nil {
 		t.Fatal(err)
@@ -407,7 +407,7 @@ let second = first
 second
 }
 
-fn after() -> () { () }
+fn after() -> void { void }
 `
 	want := `import go a "strings";
 
@@ -423,24 +423,24 @@ effect fn main() -> string {
     second
 }
 
-fn after() -> () {
-    ()
+fn after() -> void {
+    void
 }
 `
 	assertFormat(t, source, want)
 }
 
 func TestFormatPreservesServiceMethodBoundaries(t *testing.T) {
-	source := `service S { effect fn one() -> () effect fn two() -> () }
-impl P for S { effect fn one() -> () {} effect fn two() -> () { () } }`
+	source := `service S { effect fn one() -> void effect fn two() -> void }
+impl P for S { effect fn one() -> void {} effect fn two() -> void { void } }`
 	want := `service S {
-    effect fn one() -> ()
-    effect fn two() -> ()
+    effect fn one() -> void
+    effect fn two() -> void
 }
 impl P for S {
-    effect fn one() -> () {}
-    effect fn two() -> () {
-        ()
+    effect fn one() -> void {}
+    effect fn two() -> void {
+        void
     }
 }
 `
@@ -448,13 +448,13 @@ impl P for S {
 
 	pinned := `service S {
 // effra-lint-disable-next-line future-rule -- keep both declarations together
-effect fn one() -> () effect fn two() -> ()
+effect fn one() -> void effect fn two() -> void
 }`
 	result, err := FormatSource(pinned)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Text, "effect fn one() -> () effect fn two() -> ()") {
+	if !strings.Contains(result.Text, "effect fn one() -> void effect fn two() -> void") {
 		t.Fatalf("pinned method line was split:\n%s", result.Text)
 	}
 	assertDirectiveTokenLines(t, pinned, result.Text)
@@ -502,11 +502,11 @@ effect fn main() -> string
 `
 	assertFormat(t, source, want)
 
-	chain := `effect fn main() -> () {
+	chain := `effect fn main() -> void {
 run task().provide<Console>(Stdout)
 .provide<Console>(Stdout)
 }`
-	chainWant := `effect fn main() -> () {
+	chainWant := `effect fn main() -> void {
     run task().provide<Console>(Stdout)
         .provide<Console>(Stdout)
 }
@@ -538,13 +538,13 @@ effect fn main(state: State) -> string {
 `
 	assertFormat(t, pattern, patternWant)
 
-	pinned := `effect fn main() -> () {
+	pinned := `effect fn main() -> void {
 // effra-lint-disable-next-line future-rule -- keep the opener line together
 let value = scope { run task()
 run task()
 };
 }`
-	pinnedWant := `effect fn main() -> () {
+	pinnedWant := `effect fn main() -> void {
     // effra-lint-disable-next-line future-rule -- keep the opener line together
     let value = scope { run task()
         run task()
@@ -563,8 +563,8 @@ func TestFormatContinuationClosersAndOwnLineBlockOpeners(t *testing.T) {
 	}{
 		{
 			name:   "multiline raises closer",
-			source: "error E\neffect fn f() -> ()\nraises {\nE\n} { () }",
-			want:   "error E\neffect fn f() -> ()\n    raises {\n        E\n    } {\n    ()\n}\n",
+			source: "error E\neffect fn f() -> void\nraises {\nE\n} { void }",
+			want:   "error E\neffect fn f() -> void\n    raises {\n        E\n    } {\n    void\n}\n",
 		},
 		{
 			name:   "fluent call closer",
@@ -583,13 +583,13 @@ func TestFormatContinuationClosersAndOwnLineBlockOpeners(t *testing.T) {
 		},
 		{
 			name:   "signature row followed by block",
-			source: "error E\neffect fn main() -> ()\nraises {E}\nuses {Console}\n{\nrun task()\n}",
-			want:   "error E\neffect fn main() -> ()\n    raises { E }\n    uses { Console }\n{\n    run task()\n}\n",
+			source: "error E\neffect fn main() -> void\nraises {E}\nuses {Console}\n{\nrun task()\n}",
+			want:   "error E\neffect fn main() -> void\n    raises { E }\n    uses { Console }\n{\n    run task()\n}\n",
 		},
 		{
 			name:   "comment inside continuation delimiter",
-			source: "error E\neffect fn f() -> ()\nraises {\n// note\nE\n} { () }",
-			want:   "error E\neffect fn f() -> ()\n    raises {\n        // note\n        E\n    } {\n    ()\n}\n",
+			source: "error E\neffect fn f() -> void\nraises {\n// note\nE\n} { void }",
+			want:   "error E\neffect fn f() -> void\n    raises {\n        // note\n        E\n    } {\n    void\n}\n",
 		},
 		{
 			name:   "nested continuation",
@@ -625,19 +625,19 @@ _ => 1
 
 func TestFormatSpacingBeforeGroupedExpressions(t *testing.T) {
 	source := `fn take(first: i64, second: i64) -> i64 { first }
-effect fn main() -> () {
+effect fn main() -> void {
 // effra-lint-disable-next-line future-rule -- preserve the grouped spacing case
 take(first:(1), second:(2));(2)
-	match Choice.A { Choice.A => () }
+	match Choice.A { Choice.A => void }
 }`
 	want := `fn take(first: i64, second: i64) -> i64 {
     first
 }
-effect fn main() -> () {
+effect fn main() -> void {
     // effra-lint-disable-next-line future-rule -- preserve the grouped spacing case
     take(first: (1), second: (2)); (2)
     match Choice.A {
-        Choice.A => ()
+        Choice.A => void
     }
 }
 `
@@ -661,7 +661,7 @@ effect fn main() -> string { let value = Data { first: "x", second: "y" }; take(
 
 func TestFormatFullSyntaxComparisonPreservesHiddenFieldsAndAliases(t *testing.T) {
 	source := `enum State { Idle() }
-effect fn main() -> () { () }`
+effect fn main() -> void { void }`
 	for _, field := range []string{"Parenthesized", "Explicit"} {
 		t.Run(field, func(t *testing.T) {
 			original := parsedSyntaxTree(t, source)
@@ -1017,7 +1017,7 @@ func BenchmarkFormatLongBinary(b *testing.B) {
 
 func BenchmarkFormatLongFluentChain(b *testing.B) {
 	const calls = 10000
-	source := "effect fn main() -> () {\nrun task()\n" + strings.Repeat(".provide<Console>(Stdout)\n", calls) + "}\n"
+	source := "effect fn main() -> void {\nrun task()\n" + strings.Repeat(".provide<Console>(Stdout)\n", calls) + "}\n"
 	b.Logf("source_bytes=%d fluent_calls=%d", len(source), calls)
 	b.SetBytes(int64(len(source)))
 	b.ReportAllocs()

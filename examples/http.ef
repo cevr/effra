@@ -16,7 +16,7 @@ effect fn route(path: string) -> string raises { GoError } uses { Foreign, Files
     }
 }
 
-effect fn main() -> () raises { IoError } {
+effect fn main() -> void raises { IoError } {
     run Http.serve("127.0.0.1:0", route)
         .provide<Http>(GoHttp)
         .provide<Foreign>(Host)

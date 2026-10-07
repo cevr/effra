@@ -242,7 +242,7 @@ run task().provide<Console>(Stdout)
 		t.Fatalf("stale diagnostics revision was accepted: %v", err)
 	}
 
-	invalidSource := `effect fn main() -> () { run Console.log("x") }`
+	invalidSource := `effect fn main() -> void { run Console.log("x") }`
 	if err := os.WriteFile(filepath.Join(root, "invalid.ef"), []byte(invalidSource), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ run task().provide<Console>(Stdout)
 
 	var exact strings.Builder
 	for i := 0; i < 101; i++ {
-		exact.WriteString("effect fn duplicate() -> () { () }\n")
+		exact.WriteString("effect fn duplicate() -> void { void }\n")
 	}
 	if err := os.WriteFile(filepath.Join(root, "exact.ef"), []byte(exact.String()), 0644); err != nil {
 		t.Fatal(err)
@@ -269,7 +269,7 @@ run task().provide<Console>(Stdout)
 
 	var many strings.Builder
 	for i := 0; i < 102; i++ {
-		many.WriteString("effect fn duplicate() -> () { () }\n")
+		many.WriteString("effect fn duplicate() -> void { void }\n")
 	}
 	if err := os.WriteFile(filepath.Join(root, "many.ef"), []byte(many.String()), 0644); err != nil {
 		t.Fatal(err)
@@ -347,7 +347,7 @@ func TestInspectionBoundsCoverNestedSymbolDetails(t *testing.T) {
 		})
 	}
 
-	unchecked := `effect fn main() -> () { run Console.log("x") }`
+	unchecked := `effect fn main() -> void { run Console.log("x") }`
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(unchecked), 0o600); err != nil {
 		t.Fatal(err)
@@ -453,37 +453,37 @@ func inspectionRowsSource(count int, mode string) string {
 	joined := strings.Join(names, ",")
 	switch mode {
 	case "declared":
-		fmt.Fprintf(&builder, "effect fn target() -> () raises {%s} { () }\n", joined)
+		fmt.Fprintf(&builder, "effect fn target() -> void raises {%s} { void }\n", joined)
 	case "body":
 		first, second := splitInspectionRows(names)
-		fmt.Fprintf(&builder, "effect fn first() -> () raises {%s} { () }\n", strings.Join(first, ","))
-		fmt.Fprintf(&builder, "effect fn second() -> () raises {%s} { () }\n", strings.Join(second, ","))
-		fmt.Fprintf(&builder, "effect fn target() -> () raises {%s} { run first(); run second() }\n", joined)
+		fmt.Fprintf(&builder, "effect fn first() -> void raises {%s} { void }\n", strings.Join(first, ","))
+		fmt.Fprintf(&builder, "effect fn second() -> void raises {%s} { void }\n", strings.Join(second, ","))
+		fmt.Fprintf(&builder, "effect fn target() -> void raises {%s} { run first(); run second() }\n", joined)
 	case "requirements":
 		services := make([]string, count)
 		for i := range services {
 			services[i] = fmt.Sprintf("S%d", i)
-			fmt.Fprintf(&builder, "service %s { effect fn get() -> () }\n", services[i])
+			fmt.Fprintf(&builder, "service %s { effect fn get() -> void }\n", services[i])
 		}
 		first, second := splitInspectionRows(services)
 		for i, row := range [][]string{first, second} {
-			fmt.Fprintf(&builder, "effect fn part%d() -> () uses {%s} {\n", i, strings.Join(row, ","))
+			fmt.Fprintf(&builder, "effect fn part%d() -> void uses {%s} {\n", i, strings.Join(row, ","))
 			for _, service := range row {
 				fmt.Fprintf(&builder, "run %s.get();\n", service)
 			}
-			builder.WriteString("()}\n")
+			builder.WriteString("void}\n")
 		}
-		fmt.Fprintf(&builder, "effect fn target() -> () uses {%s} { run part0(); run part1() }\n", strings.Join(services, ","))
+		fmt.Fprintf(&builder, "effect fn target() -> void uses {%s} { run part0(); run part1() }\n", strings.Join(services, ","))
 	case "contributions":
 		builder.Reset()
-		builder.WriteString("error E0\neffect fn one() -> () raises {E0} { () }\neffect fn target() -> () raises {E0} {\n")
+		builder.WriteString("error E0\neffect fn one() -> void raises {E0} { void }\neffect fn target() -> void raises {E0} {\n")
 		for i := 0; i < count; i++ {
 			builder.WriteString("run one();\n")
 		}
-		builder.WriteString("()}\n")
+		builder.WriteString("void}\n")
 	case "names":
-		fmt.Fprintf(&builder, "effect fn many() -> () raises {%s} { () }\n", joined)
-		fmt.Fprintf(&builder, "effect fn target() -> () raises {%s} { run many() }\n", joined)
+		fmt.Fprintf(&builder, "effect fn many() -> void raises {%s} { void }\n", joined)
+		fmt.Fprintf(&builder, "effect fn target() -> void raises {%s} { run many() }\n", joined)
 	}
 	return builder.String()
 }
@@ -494,7 +494,7 @@ func splitInspectionRows(names []string) ([]string, []string) {
 }
 func TestInvalidSourceIsACompilerResult(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(`effect fn main() -> () { run Console.log("x") }`), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(`effect fn main() -> void { run Console.log("x") }`), 0644); err != nil {
 		t.Fatal(err)
 	}
 	result, err := call(root, "project.check", arguments{File: "main.ef"})
@@ -509,7 +509,7 @@ func TestInvalidSourceIsACompilerResult(t *testing.T) {
 func TestProjectTestsReportsLiveLayerSelection(t *testing.T) {
 	root := t.TempDir()
 	source := `layer LiveClockLayer { Clock = LiveClock }
-effect fn test_live_layer() -> () { () }`
+effect fn test_live_layer() -> void { void }`
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -632,7 +632,7 @@ func TestFormatRejectsStaleAndInvalidOrigins(t *testing.T) {
 
 func TestFormatRejectsInvalidUTF8ForBufferAndDisk(t *testing.T) {
 	invalid := append([]byte("// invalid "), 0xff)
-	invalid = append(invalid, []byte("\neffect fn main() -> () { () }\n")...)
+	invalid = append(invalid, []byte("\neffect fn main() -> void { void }\n")...)
 	bufferArgs := arguments{Source: string(invalid), SourcePresent: true}
 	if _, err := formatCode(t.TempDir(), bufferArgs); err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
 		t.Fatalf("invalid buffer UTF-8 was accepted: %v", err)
@@ -852,10 +852,10 @@ func TestTargetInspection(t *testing.T) {
 func TestLintSuppressionSemanticParity(t *testing.T) {
 	root := t.TempDir()
 	source := `effect fn task() -> string { "ok" }
-effect fn main() -> () {
+effect fn main() -> void {
 // effra-lint-disable-next-line unused-recipe -- intentional deferred hook
 let forgotten = task();
-()}`
+void}`
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -881,9 +881,9 @@ let forgotten = task();
 		t.Fatalf("CLI/MCP lint mismatch: got=%+v expected=%+v", got, expected)
 	}
 
-	source = `effect fn main() -> () {
+	source = `effect fn main() -> void {
 // effra-lint-disable-next-line future-rule -- deliberate invalid example
-()}`
+void}`
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
 		t.Fatal(err)
 	}

@@ -575,7 +575,7 @@ func (a *summaryAdmission) occurrence(ref string, depth int) checkedExpression {
 				a.err = fmt.Errorf("invalid variant occurrence owner")
 				return checkedExpression{}
 			}
-			payload := a.c.checkedData("()")
+			payload := a.c.checkedData(voidTypeName)
 			payload.fields = a.payloadOccurrences(variant.Fields, variants[index].Fields, depth, true)
 			if a.err != nil {
 				return checkedExpression{}

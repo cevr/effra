@@ -27,7 +27,7 @@ effect fn greeting(id: string) -> string
     welcome(user)
 }
 
-effect fn main() -> () {
+effect fn main() -> void {
     let found = run greeting("42").provide<Users>(MemoryUsers)
         .catch<NotFound>("Unknown user")
     run Console.log(found).provide<Console>(Stdout)

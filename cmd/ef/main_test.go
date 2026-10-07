@@ -287,18 +287,18 @@ effect fn main() -> string { "ok" }`
 		t.Fatalf("symlink write was not rejected: code=%d stderr=%q", code, symlinkError)
 	}
 	invalidBytesSlice := append([]byte("// invalid "), 0xff)
-	invalidBytesSlice = append(invalidBytesSlice, []byte("\neffect fn main() -> () { () }\n")...)
+	invalidBytesSlice = append(invalidBytesSlice, []byte("\neffect fn main() -> void { void }\n")...)
 	invalidBytes := string(invalidBytesSlice)
 	invalidStdout, invalidStderr, code := runTestCLIInput(t, binary, invalidBytes, "fmt", "--stdin")
 	if code != 2 || len(invalidStdout) != 0 || !strings.Contains(string(invalidStderr), "EFMT_SYNTAX") || !strings.Contains(string(invalidStderr), "not valid UTF-8") {
 		t.Fatalf("invalid stdin UTF-8 was not rejected without replacement: code=%d stdout=%q stderr=%q", code, invalidStdout, invalidStderr)
 	}
 	var expanded strings.Builder
-	expanded.WriteString("effect fn main() -> () { ")
+	expanded.WriteString("effect fn main() -> void { ")
 	for index := 0; index < 64; index++ {
 		expanded.WriteString("scope { ")
 	}
-	expanded.WriteString(strings.Repeat("();\n", 20000))
+	expanded.WriteString(strings.Repeat("void;\n", 20000))
 	for index := 0; index < 64; index++ {
 		expanded.WriteString(" }")
 	}

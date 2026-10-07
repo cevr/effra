@@ -2,14 +2,14 @@ error Missing
 error Broken
 
 service Logger {
-    effect fn log() -> ()
+    effect fn log() -> void
 }
 service Directory {
     effect fn get(key: string) -> string raises { Broken }
 }
 impl Quiet for Logger {
-    effect fn log() -> () {
-        ()
+    effect fn log() -> void {
+        void
     }
 }
 impl Names for Directory {

@@ -45,7 +45,7 @@ func goType(t string) string {
 		if strings.HasPrefix(t, "GoResult:") {
 			return "er.GoResult[" + goType(strings.TrimPrefix(t, "GoResult:")) + "]"
 		}
-		if t == "()" || t == "never" || t == "invalid" || t == "" {
+		if t == "void" || t == "never" || t == "invalid" || t == "" {
 			return "struct{}"
 		}
 		return "efType_" + goIdent(t)
@@ -83,7 +83,7 @@ func canonicalGoType(c *checker, id TypeID, visiting map[TypeID]bool) string {
 			return "int64"
 		case "bytes":
 			return "[]byte"
-		case "()", "never", "invalid":
+		case "void", "never", "invalid":
 			return "struct{}"
 		}
 	case "opaque":
@@ -308,7 +308,7 @@ func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(addres
 		out.WriteString(g.functionDeclaration(f))
 	}
 	if tests == nil {
-		mainReturn := "()"
+		mainReturn := voidTypeName
 		for _, function := range r.Program.Functions {
 			if function.Name == "main" {
 				mainReturn = function.Return
@@ -316,7 +316,7 @@ func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(addres
 			}
 		}
 		out.WriteString("func main() { base,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop();exit:=er.RunContext(base,func(fc *er.FiberContext) er.Exit[" + goSourceType(r.Program.typeExpressions[mainReturn], mainReturn) + "]{return efFunction_main()(efContext{Runtime:fc})});if exit.IsFailure(){fmt.Fprintln(os.Stderr,exit.Cause());os.Exit(1)}\n")
-		if mainReturn != "()" {
+		if mainReturn != voidTypeName {
 			out.WriteString("fmt.Println(exit.Value)\n")
 		}
 		out.WriteString("}\n")
@@ -502,7 +502,7 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 		return strconv.Quote(e.Text)
 	case "bool":
 		return e.Text
-	case "unit":
+	case "void":
 		return "struct{}{}"
 	case "construct":
 		return g.construct(e, effect, ret, out)
@@ -858,11 +858,11 @@ func (g *goEmitter) foreign(e *Expr, effect bool, ret string, out *strings.Build
 	call := "efGo_" + e.Name + "(" + strings.Join(args, ",") + ")"
 	result := g.resultType(e)
 	body := "return er.Succeed(" + call + ")"
-	if b.Return == "()" {
+	if b.Return == voidTypeName {
 		body = call + ";return er.Succeed(struct{}{})"
 	}
 	if b.HasError {
-		if b.Return == "()" {
+		if b.Return == voidTypeName {
 			body = "nativeErr := " + call + ";return er.Succeed(er.GoResult[struct{}]{Value:struct{}{},Err:nativeErr})"
 		} else {
 			body = "nativeValue,nativeErr := " + call + ";return er.Succeed(er.GoResult[" + goType(b.Return) + "]{Value:nativeValue,Err:nativeErr})"

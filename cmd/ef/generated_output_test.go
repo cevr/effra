@@ -82,7 +82,7 @@ func TestGoBuildOwnsCompleteGenerationAndPreservesLegacyOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := `effect fn main() -> string { "owned generation" }
-effect fn test_generation() -> () raises {AssertionFailed} uses {Assert} {
+effect fn test_generation() -> void raises {AssertionFailed} uses {Assert} {
     run Assert.check(true, "generation")
 }
 `

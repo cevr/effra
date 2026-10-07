@@ -58,14 +58,14 @@ effect fn callback(x:string)->string{x}
 effect fn pureEmpty()->(fn(string)->string){keep}
 `
 	for _, test := range []struct{ name, body string }{
-		{"pure name", `effect fn main()->(){keep.timeout(10);()}`},
-		{"pure alias", `effect fn main()->(){let f=keep;f.timeout(10);()}`},
-		{"pure parameter", `fn misuse(f:fn(string)->string)->(){f.timeout(10);()} effect fn main()->(){()}`},
-		{"pure argument", `effect fn main()->(){apply(keep.timeout(10));()}`},
-		{"effect callback", `effect fn main()->(){callback.timeout(10);()}`},
-		{"pure invalid duration", `effect fn main()->(){keep.timeout("wrong");()}`},
-		{"recipe invalid duration", `effect fn main()->(){pureEmpty().timeout("wrong");()}`},
-		{"recipe deferred duration", `effect fn main()->(){pureEmpty().timeout(pureEmpty());()}`},
+		{"pure name", `effect fn main()->void{keep.timeout(10);void}`},
+		{"pure alias", `effect fn main()->void{let f=keep;f.timeout(10);void}`},
+		{"pure parameter", `fn misuse(f:fn(string)->string)->void{f.timeout(10);void} effect fn main()->void{void}`},
+		{"pure argument", `effect fn main()->void{apply(keep.timeout(10));void}`},
+		{"effect callback", `effect fn main()->void{callback.timeout(10);void}`},
+		{"pure invalid duration", `effect fn main()->void{keep.timeout("wrong");void}`},
+		{"recipe invalid duration", `effect fn main()->void{pureEmpty().timeout("wrong");void}`},
+		{"recipe deferred duration", `effect fn main()->void{pureEmpty().timeout(pureEmpty());void}`},
 	} {
 		for _, target := range []string{"go", "js"} {
 			t.Run(test.name+"/"+target, func(t *testing.T) {
@@ -80,7 +80,7 @@ effect fn pureEmpty()->(fn(string)->string){keep}
 	// duration is the wrong value type, but its failures/services still execute.
 	invalidDuration := prefix + `error Missing
 effect fn duration()->string raises {Missing} uses {Clock}{run Clock.sleep(1);if true {fail Missing} else {"wrong"}}
-effect fn main()->(){pureEmpty().timeout(run duration());()}`
+effect fn main()->void{pureEmpty().timeout(run duration());void}`
 	for _, target := range []string{"go", "js"} {
 		r := CompileFor(invalidDuration, target)
 		if r.Checked || !hasCode(r, "EF106") || !hasCode(r, "EF107") || !hasCode(r, "EF108") {
@@ -114,7 +114,7 @@ effect fn chain<E: raises, R: uses>(
     b: effect fn(string) -> string raises {E} uses {R}, key: string
 ) -> string raises {E} uses {R} { let next = run a(key); run b(next) }
 effect fn request() -> string raises {Missing, Broken} uses {Directory, Audit} { run chain(first, second, "42") }
-effect fn main() -> () { () }`
+effect fn main() -> void { void }`
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
@@ -229,7 +229,7 @@ func TestClosedCallbackRowsAndVariance(t *testing.T) {
 		{"pure is distinct", `fn operation(x: string) -> string { x }`, `effect fn(string) -> string`, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			source := `error A service Users { effect fn get(x: string) -> string } ` + test.callback + ` fn store(cb: ` + test.expected + `) -> () { () } effect fn main() -> () { store(operation) }`
+			source := `error A service Users { effect fn get(x: string) -> string } ` + test.callback + ` fn store(cb: ` + test.expected + `) -> void { void } effect fn main() -> void { store(operation) }`
 			r := Compile(source)
 			if r.Checked != test.checked {
 				t.Fatalf("checked=%v, diagnostics=%+v", r.Checked, r.Diagnostics)
@@ -249,10 +249,10 @@ func TestClosedCallbackRowsAndVariance(t *testing.T) {
 
 func TestFiniteRowSolverDiagnosesUnsupportedConstraints(t *testing.T) {
 	for _, source := range []string{
-		`effect fn invoke<E: raises, F: raises>(cb: effect fn(string) -> string raises {E,F}) -> string raises {E,F} {run cb("x")} effect fn main()->(){()}`,
-		`effect fn invoke<E: raises>(cb: effect fn(string) -> string) -> string raises {E} {run cb("x")} effect fn value(x:string)->string{x} effect fn main()->(){let pending=invoke(value);()}`,
-		`error Missing effect fn invoke<E: raises>(cb: effect fn(string)->string raises {E}) -> string raises {E} {run cb("x").catch<Missing>("fallback")} effect fn main()->(){()}`,
-		`service Users {effect fn get()->string} impl Memory for Users {effect fn get()->string{"x"}} effect fn invoke<R: uses>(cb: effect fn(string)->string uses {R}) -> string uses {R} {run cb("x").provide<Users>(Memory)} effect fn main()->(){()}`,
+		`effect fn invoke<E: raises, F: raises>(cb: effect fn(string) -> string raises {E,F}) -> string raises {E,F} {run cb("x")} effect fn main()->void{void}`,
+		`effect fn invoke<E: raises>(cb: effect fn(string) -> string) -> string raises {E} {run cb("x")} effect fn value(x:string)->string{x} effect fn main()->void{let pending=invoke(value);void}`,
+		`error Missing effect fn invoke<E: raises>(cb: effect fn(string)->string raises {E}) -> string raises {E} {run cb("x").catch<Missing>("fallback")} effect fn main()->void{void}`,
+		`service Users {effect fn get()->string} impl Memory for Users {effect fn get()->string{"x"}} effect fn invoke<R: uses>(cb: effect fn(string)->string uses {R}) -> string uses {R} {run cb("x").provide<Users>(Memory)} effect fn main()->void{void}`,
 	} {
 		r := Compile(source)
 		found := false

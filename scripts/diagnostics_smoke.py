@@ -71,21 +71,21 @@ def positions(binary, directory):
                'effect fn main() -> string { let s = "𐐀é"; '
                'let forgotten = task(); run task().provide<Console>(Stdout) }\r\n')
     fixtures = [
-        ("unicode.ef", 'effect fn main() -> () { "𐐀é" @ }', [("EF001", "@", 1, "error", 1)]),
-        ("crlf.ef", '// comment\r\neffect fn main() -> () { () }\r\n@', [("EF001", "@", 1, "error", 1)]),
-        ("eof.ef", 'effect fn main() -> () {\r\n', [("EF002", None, 0, "error", 1)]),
+        ("unicode.ef", 'effect fn main() -> void { "𐐀é" @ }', [("EF001", "@", 1, "error", 1)]),
+        ("crlf.ef", '// comment\r\neffect fn main() -> void { void }\r\n@', [("EF001", "@", 1, "error", 1)]),
+        ("eof.ef", 'effect fn main() -> void {\r\n', [("EF002", None, 0, "error", 1)]),
         ("warning.ef", warning, [("EFL001", "let forgotten", 3, "warning", 2),
                                 ("EFL002", "provide", 7, "hint", 4)]),
         ("suppression.ef", '// effra-lint-disable-next-line bogus -- reason\r\n'
-         'effect fn main() -> () { () }', [("EFL004", "//", None, "error", 1)]),
-        ("cr-code.ef", 'effect fn main() -> () { () }\r@', [("EF001", "\r", 1, "error", 1)]),
-        ("cr-comment.ef", '// comment\r@ effect fn main() -> () { () }\n', [("EF001", "\r", 1, "error", 1)]),
+         'effect fn main() -> void { void }', [("EFL004", "//", None, "error", 1)]),
+        ("cr-code.ef", 'effect fn main() -> void { void }\r@', [("EF001", "\r", 1, "error", 1)]),
+        ("cr-comment.ef", '// comment\r@ effect fn main() -> void { void }\n', [("EF001", "\r", 1, "error", 1)]),
     ]
     for name, source, expected in fixtures:
         path = write(directory, name, source)
         report = cli(binary, path)
         remote = mcp(binary, directory, [{"file": name}])[0]["result"]["structuredContent"]
-        assert_report_parity(report, remote, report_schema=1, snapshot_schema=6)
+        assert_report_parity(report, remote, report_schema=1, snapshot_schema=7)
         assert report["revision"] == hashlib.sha256(source.encode()).hexdigest(), name
         assert report["source"] == {"uri": path.as_uri(), "origin": "disk"}, report
         findings = report["diagnostics"]
@@ -108,12 +108,12 @@ def positions(binary, directory):
             assert report["policyPassed"] and not strict["policyPassed"], strict
             assert report["diagnostics"] == strict["diagnostics"], strict
             strict_remote = mcp(binary, directory, [{"file": name, "strict": True}])[0]["result"]["structuredContent"]
-            assert_report_parity(strict_remote, strict, report_schema=1, snapshot_schema=6)
+            assert_report_parity(strict_remote, strict, report_schema=1, snapshot_schema=7)
 
     for name, source, checked in [
         ("escaped-cr.ef", 'effect fn main() -> string { "\\r" }', True),
         ("hidden-error.ef", '// effra-lint-disable-next-line bogus -- reason\n'
-         'effect fn main() -> () { run Console.log("x") }', False),
+         'effect fn main() -> void { run Console.log("x") }', False),
         ("suppressed.ef", 'effect fn task() -> string { "ok" }\n'
          'effect fn main() -> string {\n'
          '// effra-lint-disable-next-line unused-recipe -- intentional\n'
@@ -121,7 +121,7 @@ def positions(binary, directory):
     ]:
         report = cli(binary, write(directory, name, source), strict=True)
         remote = mcp(binary, directory, [{"file": name, "strict": True}])[0]["result"]["structuredContent"]
-        assert_report_parity(report, remote, report_schema=1, snapshot_schema=6)
+        assert_report_parity(report, remote, report_schema=1, snapshot_schema=7)
         assert report["checked"] == checked, report
         if checked:
             assert report["policyPassed"] and report["diagnostics"] == [], report
@@ -133,7 +133,7 @@ def positions(binary, directory):
 
 def bounds(binary, directory):
     for count in (100, 101):
-        write(directory, f"findings-{count}.ef", 'fn duplicate() -> () { () }\n' * (count + 1))
+        write(directory, f"findings-{count}.ef", 'fn duplicate() -> void { void }\n' * (count + 1))
     limit = 2 * 1024 * 1024
     for size in (limit, limit + 1):
         write(directory, f"size-{size}.ef", "//" + "x" * (size - 2))
@@ -158,16 +158,16 @@ def identity(binary, directory):
     dots = directory / "dots"
     (dots / "real" / "inner").mkdir(parents=True)
     (dots / "link").symlink_to("real/inner", target_is_directory=True)
-    lexical = write(dots, "b.ef", 'effect fn main() -> () { () }')
-    write(dots / "real", "b.ef", 'effect fn main() -> () { run Console.log("x") }')
+    lexical = write(dots, "b.ef", 'effect fn main() -> void { void }')
+    write(dots / "real", "b.ef", 'effect fn main() -> void { run Console.log("x") }')
     expected = cli(binary, lexical)
     requested = dots / "link" / ".." / "b.ef"
     reports = (cli(binary, requested), mcp(binary, directory, [{"file": "dots/link/../b.ef"}])[0]["result"]["structuredContent"])
     for report in reports:
-        assert_report_parity(report, expected, target="go", report_schema=1, snapshot_schema=6)
+        assert_report_parity(report, expected, target="go", report_schema=1, snapshot_schema=7)
 
-    original = write(directory, "one.ef", 'import go fmt "fmt"\neffect fn main() -> () { () }')
-    replacement = write(directory, "two.ef", 'effect fn main() -> () { run Console.log("x") }')
+    original = write(directory, "one.ef", 'import go fmt "fmt"\neffect fn main() -> void { void }')
+    replacement = write(directory, "two.ef", 'effect fn main() -> void { run Console.log("x") }')
     link = directory / "selected.ef"
     link.symlink_to(original.name)
     baseline = cli(binary, original)

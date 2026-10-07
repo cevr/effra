@@ -16,11 +16,11 @@ effect fn route(path:string)->string raises {Missing} uses {Users}{run Users.get
 
 func TestHandlerErasureBoundariesRetainFailuresAndServices(t *testing.T) {
 	for _, test := range []struct{ name, body, code string }{
-		{"alias", `effect fn main()->() raises {IoError}{let chosen=route;run Http.serve("127.0.0.1:0",chosen).provide<Http>(GoHttp)}`, "EF108"},
-		{"helper", `fn identity(h:Handler)->Handler{h} effect fn main()->() raises {IoError}{let chosen=identity(route);run Http.serve("127.0.0.1:0",chosen).provide<Http>(GoHttp)}`, "EF106"},
-		{"conditional", `effect fn main()->() raises {IoError}{let chosen=if true {route}else{route};run Http.serve("127.0.0.1:0",chosen).provide<Http>(GoHttp)}`, "EF108"},
-		{"record empty alias", `record Routes {handler:Handler} effect fn main()->(){let routes=Routes{handler:route};()}`, "EF115"},
-		{"record complete callback", `record Routes {handler:effect fn(string)->string raises {Missing} uses {Users}} effect fn main()->() raises {IoError}{let routes=Routes{handler:route};run Http.serve("127.0.0.1:0",routes.handler).provide<Http>(GoHttp)}`, "EF108"},
+		{"alias", `effect fn main()->void raises {IoError}{let chosen=route;run Http.serve("127.0.0.1:0",chosen).provide<Http>(GoHttp)}`, "EF108"},
+		{"helper", `fn identity(h:Handler)->Handler{h} effect fn main()->void raises {IoError}{let chosen=identity(route);run Http.serve("127.0.0.1:0",chosen).provide<Http>(GoHttp)}`, "EF106"},
+		{"conditional", `effect fn main()->void raises {IoError}{let chosen=if true {route}else{route};run Http.serve("127.0.0.1:0",chosen).provide<Http>(GoHttp)}`, "EF108"},
+		{"record empty alias", `record Routes {handler:Handler} effect fn main()->void{let routes=Routes{handler:route};void}`, "EF115"},
+		{"record complete callback", `record Routes {handler:effect fn(string)->string raises {Missing} uses {Users}} effect fn main()->void raises {IoError}{let routes=Routes{handler:route};run Http.serve("127.0.0.1:0",routes.handler).provide<Http>(GoHttp)}`, "EF108"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			r := Compile(callbackRouteSource + test.body)
@@ -32,7 +32,7 @@ func TestHandlerErasureBoundariesRetainFailuresAndServices(t *testing.T) {
 }
 
 func TestHTTPTransportPolicyIsVisibleInCheckedApplication(t *testing.T) {
-	source := callbackRouteSource + `effect fn main()->(){let pending=Http.serve("127.0.0.1:0",route).provide<Users>(Memory).provide<Http>(GoHttp);()}`
+	source := callbackRouteSource + `effect fn main()->void{let pending=Http.serve("127.0.0.1:0",route).provide<Users>(Memory).provide<Http>(GoHttp);void}`
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
@@ -58,7 +58,7 @@ func TestHTTPTransportPolicyIsVisibleInCheckedApplication(t *testing.T) {
 	if p := r.ProjectValues([]ValueType{info.Type}); !p.Complete {
 		t.Fatal(p.Error)
 	}
-	portable := Compile(callbackRouteSource + `effect fn main()->(){()}`)
+	portable := Compile(callbackRouteSource + `effect fn main()->void{void}`)
 	_, declaration, err := portable.Emit(false)
 	if err != nil {
 		t.Fatal(err)
@@ -81,9 +81,9 @@ void checked;void reciprocal;void erased;`)
 
 func TestUnsupportedCallableFormsDiagnoseAtTheirSourceBoundary(t *testing.T) {
 	for _, test := range []struct{ source, message string }{
-		{`effect fn main()->(){let callback=fn(x:string)->string{x};()}`, "anonymous functions and closure captures"},
-		{`fn store(recipe:Effect<string>)->(){()} effect fn main()->(){()}`, "typed recipes are unsupported"},
-		{`effect fn generic<E: raises>(cb:effect fn(string)->string raises {E})->string raises {E}{run cb("x")} effect fn main()->(){let callback=generic;()}`, "first-class polymorphic values are unsupported"},
+		{`effect fn main()->void{let callback=fn(x:string)->string{x};void}`, "anonymous functions and closure captures"},
+		{`fn store(recipe:Effect<string>)->void{void} effect fn main()->void{void}`, "typed recipes are unsupported"},
+		{`effect fn generic<E: raises>(cb:effect fn(string)->string raises {E})->string raises {E}{run cb("x")} effect fn main()->void{let callback=generic;void}`, "first-class polymorphic values are unsupported"},
 	} {
 		t.Run(test.message, func(t *testing.T) {
 			r := Compile(test.source)
@@ -117,13 +117,13 @@ effect fn wider(cb:effect fn()->string raises {A,B})->string raises {A}{run cb()
 effect fn failsB()->string raises {B}{"B"}
 effect fn apply<E: raises>(a:effect fn(effect fn()->string raises {E})->string raises {E},b:effect fn()->string raises {E})->string raises {E}{run a(b)}
 `
-	if r := Compile(prefix + `effect fn main()->(){let pending=apply(onlyA,failsB);()}`); r.Checked || !hasCode(r, "EF106") {
+	if r := Compile(prefix + `effect fn main()->void{let pending=apply(onlyA,failsB);void}`); r.Checked || !hasCode(r, "EF106") {
 		t.Fatalf("nested contravariance source control: %+v", r.Diagnostics)
 	}
-	if r := Compile(prefix + `effect fn main()->(){let pending=apply(wider,failsB);()}`); !r.Checked {
+	if r := Compile(prefix + `effect fn main()->void{let pending=apply(wider,failsB);void}`); !r.Checked {
 		t.Fatalf("wider input source control: %+v", r.Diagnostics)
 	}
-	r := Compile(prefix + `effect fn main()->(){()}`)
+	r := Compile(prefix + `effect fn main()->void{void}`)
 	_, declaration, err := r.Emit(false)
 	if err != nil {
 		t.Fatal(err)
@@ -147,13 +147,13 @@ effect fn wider(cb:effect fn()->string uses {A,B})->string uses {A}{run cb().pro
 effect fn needsB()->string uses {B}{"B"}
 effect fn apply<R: uses>(a:effect fn(effect fn()->string uses {R})->string uses {R},b:effect fn()->string uses {R})->string uses {R}{run a(b)}
 `
-	if r := Compile(prefix + `effect fn main()->(){let pending=apply(onlyA,needsB);()}`); r.Checked || !hasCode(r, "EF106") {
+	if r := Compile(prefix + `effect fn main()->void{let pending=apply(onlyA,needsB);void}`); r.Checked || !hasCode(r, "EF106") {
 		t.Fatalf("nested service source control: %+v", r.Diagnostics)
 	}
-	if r := Compile(prefix + `effect fn main()->(){let pending=apply(wider,needsB);()}`); !r.Checked {
+	if r := Compile(prefix + `effect fn main()->void{let pending=apply(wider,needsB);void}`); !r.Checked {
 		t.Fatalf("wider service input source control: %+v", r.Diagnostics)
 	}
-	r := Compile(prefix + `effect fn main()->(){()}`)
+	r := Compile(prefix + `effect fn main()->void{void}`)
 	_, declaration, err := r.Emit(false)
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +175,7 @@ effect fn resultB()->string raises {B}{"B"}
 effect fn makeA()->(effect fn()->string raises {A}) raises {A}{resultA}
 effect fn factory<E: raises>(make:effect fn()->(effect fn()->string raises {E}) raises {E},other:effect fn()->string raises {E})->(effect fn()->string raises {E}) raises {E}{run make()}
 `
-	r := Compile(prefix + `effect fn main()->(){let pending=factory(makeA,resultB);()}`)
+	r := Compile(prefix + `effect fn main()->void{let pending=factory(makeA,resultB);void}`)
 	if !r.Checked {
 		t.Fatalf("nested result covariance source control: %+v", r.Diagnostics)
 	}
@@ -198,7 +198,7 @@ void checked;void checkedExplicit;void reciprocal;`)
 func TestCallableSyntaxLimitsPreserveTheirExactBoundary(t *testing.T) {
 	for _, count := range []int{256, 257} {
 		parameters := strings.TrimSuffix(strings.Repeat("string,", count), ",")
-		r := Compile("fn store(cb:fn(" + parameters + ")->string)->(){()} effect fn main()->(){()}")
+		r := Compile("fn store(cb:fn(" + parameters + ")->string)->void{void} effect fn main()->void{void}")
 		if count == 256 && !r.Checked {
 			t.Fatalf("admitted callable width refused: %+v", r.Diagnostics)
 		}
@@ -212,7 +212,7 @@ func TestCallableSyntaxLimitsPreserveTheirExactBoundary(t *testing.T) {
 			rows = append(rows, fmt.Sprintf("E%d: raises", i))
 			params = append(params, fmt.Sprintf("cb%d:effect fn()->string raises {E%d}", i, i))
 		}
-		r := Compile("fn store<" + strings.Join(rows, ",") + ">(" + strings.Join(params, ",") + ")->(){()} effect fn main()->(){()}")
+		r := Compile("fn store<" + strings.Join(rows, ",") + ">(" + strings.Join(params, ",") + ")->void{void} effect fn main()->void{void}")
 		if count == 8 && !r.Checked {
 			t.Fatalf("admitted row parameter count refused: %+v", r.Diagnostics)
 		}

@@ -115,16 +115,16 @@ fn box(value: string) -> Box { Box { value: value } }`
 func TestSelectedFiberOperationReceiversRetainTheirOwnedBinding(t *testing.T) {
 	source := `effect fn task() -> string { "done" }
 effect fn joinControl() -> string { scope { let child = fork task(); let alias = child; run child.join() } }
-effect fn interruptControl() -> () { scope { let child = fork task(); let alias = child; run child.interrupt() } }
-effect fn cancelControl() -> () { scope { let child = fork task(); let alias = child; run child.cancel() } }`
+effect fn interruptControl() -> void { scope { let child = fork task(); let alias = child; run child.interrupt() } }
+effect fn cancelControl() -> void { scope { let child = fork task(); let alias = child; run child.cancel() } }`
 	operations := []struct {
 		function string
 		method   string
 		result   string
 	}{
 		{function: "joinControl", method: "join", result: "string"},
-		{function: "interruptControl", method: "interrupt", result: "()"},
-		{function: "cancelControl", method: "cancel", result: "()"},
+		{function: "interruptControl", method: "interrupt", result: "void"},
+		{function: "cancelControl", method: "cancel", result: "void"},
 	}
 	for _, target := range []string{"go", "js"} {
 		t.Run(target, func(t *testing.T) {

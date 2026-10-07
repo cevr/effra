@@ -55,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     write = run("fmt", "--json", str(path))
     assert write.returncode == 0, (write.stdout, write.stderr)
     write_report = json.loads(write.stdout)
-    assert write.stderr == "" and write_report["formatterVersion"] == "effra/formatter-4"
+    assert write.stderr == "" and write_report["formatterVersion"] == "effra/formatter-5"
     assert write_report["schemaVersion"] == 1
     assert write_report["files"][0]["written"]
     assert path.stat().st_mode & 0o777 == original_mode
@@ -117,11 +117,11 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     per_file_input_over = run("fmt", "--json", aggregate_extra.name, cwd=workspace, timeout=120)
     assert per_file_input_over.returncode == 2 and json.loads(per_file_input_over.stdout)["failures"][0]["code"] == "EFMT_INPUT_LIMIT"
 
-    expansion = b"effect fn main() -> () { " + b"scope { " * 64 + b"();\n" * 15000 + b" }" * 64 + b" }"
+    expansion = b"effect fn main() -> void { " + b"scope { " * 64 + b"void;\n" * 15000 + b" }" * 64 + b" }"
     formatted_expansion = run_bytes("fmt", "--stdin", input_bytes=expansion)
     assert formatted_expansion.returncode == 0
 
-    overflow_expansion = b"effect fn main() -> () { " + b"scope { " * 64 + b"();\n" * 20000 + b" }" * 64 + b" }"
+    overflow_expansion = b"effect fn main() -> void { " + b"scope { " * 64 + b"void;\n" * 20000 + b" }" * 64 + b" }"
     expanded_output = run_bytes("fmt", "--stdin", input_bytes=overflow_expansion)
     assert expanded_output.returncode == 2 and expanded_output.stdout == b"" and b"EFMT_OUTPUT_LIMIT" in expanded_output.stderr
 
@@ -151,7 +151,7 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     assert aggregate_output_over.returncode == 2 and aggregate_output_report["failures"][0]["code"] == "EFMT_OUTPUT_LIMIT" and "aggregate output limit" in aggregate_output_report["failures"][0]["message"]
     assert all(path.read_bytes() == exact_output_source for path in output_paths)
 
-    invalid_utf8 = run_bytes("fmt", "--stdin", input_bytes=b"// invalid \xff\neffect fn main() -> () { () }\n")
+    invalid_utf8 = run_bytes("fmt", "--stdin", input_bytes=b"// invalid \xff\neffect fn main() -> void { void }\n")
     assert invalid_utf8.returncode == 2 and invalid_utf8.stdout == b"" and b"not valid UTF-8" in invalid_utf8.stderr
 
     incompatible = run("fmt", "--stdin", "--json", input_text=source)
@@ -326,7 +326,7 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     assert all(reply.get("result", {}).get("structuredContent", {}).get("origin") == "buffer" for reply in variant_replies[1:4])
 
     invalid_disk = workspace / "invalid-utf8.ef"
-    invalid_disk.write_bytes(b"// invalid \xff\neffect fn main() -> () { () }\n")
+    invalid_disk.write_bytes(b"// invalid \xff\neffect fn main() -> void { void }\n")
     invalid_messages = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "format-utf8", "version": "1"}}},
         {"jsonrpc": "2.0", "method": "notifications/initialized"},

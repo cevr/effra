@@ -84,7 +84,7 @@ func TestOriginalSyntaxFactsSurviveCheckingAndRetainExtents(t *testing.T) {
 	source := lexicalFixture + `error Broken { message: string }
 record Box { value: string }
 fn make() -> Box { Box("value") }
-effect fn broken() -> () raises { Broken } { fail Broken("bad") }
+effect fn broken() -> void raises { Broken } { fail Broken("bad") }
 `
 	program, diagnostics := parse(source)
 	if len(diagnostics) != 0 {

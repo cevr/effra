@@ -17,8 +17,8 @@ func (r *Result) Tests() ([]*Symbol, error) {
 		if !strings.HasPrefix(s.Name, "test_") {
 			continue
 		}
-		if !s.Contract.Effect || s.Contract.Success != "()" || len(s.Params) != 0 {
-			return nil, fmt.Errorf("%s must be an effect function with no parameters returning ()", s.Name)
+		if !s.Contract.Effect || s.Contract.Success != voidTypeName || len(s.Params) != 0 {
+			return nil, fmt.Errorf("%s must be an effect function with no parameters returning void", s.Name)
 		}
 		for _, req := range s.Contract.Services {
 			if req != "Assert" && req != "Clock" && req != "Scheduler" && req != "Sync" {

@@ -93,7 +93,7 @@ func TestClosedDataDiagnostics(t *testing.T) {
 		{"reserved variant discriminator", `enum State { Ready { _tag: string } } fn main() -> string { "x" }`, "EF120"},
 		{"reserved error discriminator", `error Invalid { _tag: string } fn main() -> string { "x" }`, "EF120"},
 		{"reserved data name", `record File { path: string } fn main() -> string { "x" }`, "EF101"},
-		{"reserved latch handle", `record Latch { state: string } effect fn wait(latch: Latch) -> () uses {Sync} { run Sync.await(latch) } effect fn main() -> () { () }`, "EF101"},
+		{"reserved latch handle", `record Latch { state: string } effect fn wait(latch: Latch) -> void uses {Sync} { run Sync.await(latch) } effect fn main() -> void { void }`, "EF101"},
 		{"error is not a success value", `error Invalid { message: string } record Envelope { failure: Invalid } fn main() -> string { "x" }`, "EF102"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

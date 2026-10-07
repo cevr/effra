@@ -60,14 +60,14 @@ func TestGoImportGuardrails(t *testing.T) {
 	for _, tc := range []struct{ source, code string }{
 		{`import go strings "strings" effect fn main() -> string {run strings.ToUpper("x")}`, "EF108"},
 		{`import go strconv "strconv" effect fn main() -> bool {run strconv.ParseBool("x").orFail().provide<Foreign>(Host)}`, "EF107"},
-		{`import go strings "strings" effect fn main() -> () {let pending = strings.NewReplacer("x","y"); ()}`, "EF112"},
+		{`import go strings "strings" effect fn main() -> void {let pending = strings.NewReplacer("x","y"); void}`, "EF112"},
 	} {
 		r := Compile(tc.source)
 		if r.Checked || !hasCode(r, tc.code) {
 			t.Fatalf("expected %s: %+v", tc.code, r.Diagnostics)
 		}
 	}
-	js := CompileFor(`import go strings "strings" effect fn main() -> () {()}`, "js")
+	js := CompileFor(`import go strings "strings" effect fn main() -> void {void}`, "js")
 	if js.Checked || !hasCode(js, "EF110") || js.Timings.ImportMicros != 0 {
 		t.Fatal("JS check attempted a Go import")
 	}

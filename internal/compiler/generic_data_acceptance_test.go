@@ -25,10 +25,10 @@ effect fn main()->string raises {IoError} {
 }
 
 const genericUnitPresence = `import Data "effra/data"
-fn describe(value:Data.Option<()>)->string {
+fn describe(value:Data.Option<void>)->string {
  match value {Data.Option.None => "absent"; Data.Option.Some {value:unit} => { let present = unit; "present" }}
 }
-effect fn main()->string{describe(Data.Option.Some {value:()})+":"+describe(Data.Option<()>.None {})}`
+effect fn main()->string{describe(Data.Option.Some {value:void})+":"+describe(Data.Option<void>.None {})}`
 
 const genericAliasShadow = `import Data "effra/data"
 record Local {Option:fn()->string}

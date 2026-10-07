@@ -17,7 +17,7 @@ impl Memory for Users {
  }
 }
 fn pure(name: string) -> string { if name == "Ada" { "Hi " + name } else { "Other" } }
-fn unused() -> () { let pending = Console.log("must not print"); () }
+fn unused() -> void { let pending = Console.log("must not print"); void }
 effect fn greeting(id: string) -> string raises {Missing, Broken} uses {Users} {
  let name = run Users.get(id)
  pure(name)
@@ -118,12 +118,12 @@ func TestGeneratedSemantics(t *testing.T) {
 	}
 }
 func TestGoBackendRefusesInvalidEntry(t *testing.T) {
-	for _, source := range []string{`effect fn main() -> () uses {Console} { run Console.log("x") }`, `fn main() -> string { "x" }`, `effect fn library() -> string { "x" }`} {
+	for _, source := range []string{`effect fn main() -> void uses {Console} { run Console.log("x") }`, `fn main() -> string { "x" }`, `effect fn library() -> string { "x" }`} {
 		if _, err := Compile(source).EmitGo(); err == nil {
 			t.Fatal("invalid executable entry emitted")
 		}
 	}
-	if CompileFor(`effect fn main() -> () {}`, "llvm").Checked {
+	if CompileFor(`effect fn main() -> void {}`, "llvm").Checked {
 		t.Fatal("unsupported target accepted")
 	}
 }

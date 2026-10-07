@@ -30,7 +30,7 @@ func checkedPositionalSource(deepest int) string {
 		source.WriteString(strconv.Itoa(index))
 		source.WriteString(" { value: ")
 		if index == 0 {
-			source.WriteString("()")
+			source.WriteString("void")
 		} else {
 			source.WriteString("R")
 			source.WriteString(strconv.Itoa(index - 1))
@@ -45,7 +45,7 @@ func checkedPositionalSource(deepest int) string {
 		source.WriteString(strconv.Itoa(index))
 		source.WriteString("(")
 	}
-	source.WriteString("()")
+	source.WriteString("void")
 	for index := 0; index <= deepest; index++ {
 		source.WriteString(")")
 	}

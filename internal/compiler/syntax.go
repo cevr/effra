@@ -26,11 +26,12 @@ type RelatedLocation struct {
 	Span    Span   `json:"span"`
 }
 
-// Comment preserves the source text and byte location of a line comment for
-// comment-aware semantic tooling. Text excludes the leading // marker.
+// Comment preserves source comment text and byte location for comment-aware
+// semantic tooling. Text excludes the line-comment marker or block delimiters.
 type Comment struct {
-	Text string
-	Span Span
+	Text  string
+	Span  Span
+	Block bool
 }
 type token struct {
 	text string
@@ -324,7 +325,43 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 				i++
 				column++
 			}
-			comments = append(comments, Comment{source[commentStart+2 : i], Span{commentStart, i - commentStart, l, c}})
+			comments = append(comments, Comment{Text: source[commentStart+2 : i], Span: Span{commentStart, i - commentStart, l, c}})
+			continue
+		}
+		if ch == '/' && i+1 < len(source) && source[i+1] == '*' {
+			commentStart := i
+			i += 2
+			column += 2
+			closed := false
+			for i < len(source) {
+				if source[i] == '*' && i+1 < len(source) && source[i+1] == '/' {
+					i += 2
+					column += 2
+					closed = true
+					break
+				}
+				if source[i] == '\n' {
+					i++
+					line++
+					column = 1
+					continue
+				}
+				if source[i] == '\r' {
+					if i+1 == len(source) || source[i+1] != '\n' {
+						return nil, comments, []Diagnostic{{Code: "EF001", Message: "standalone carriage return is unsupported; use LF or CRLF line endings", Span: Span{i, 1, line, column}}}
+					}
+					i += 2
+					line++
+					column = 1
+					continue
+				}
+				i++
+				column++
+			}
+			if !closed {
+				return nil, comments, []Diagnostic{{Code: "EF001", Message: "unterminated block comment", Span: Span{commentStart, i - commentStart, l, c}}}
+			}
+			comments = append(comments, Comment{Text: source[commentStart+2 : i-2], Span: Span{commentStart, i - commentStart, l, c}, Block: true})
 			continue
 		}
 		kind := "symbol"
@@ -670,7 +707,26 @@ func (p *parser) name() token {
 	if v.kind != "name" {
 		p.fail(v, "expected identifier")
 	}
+	if v.text == "void" {
+		p.fail(v, "void is reserved for the no-value type and expression")
+	}
 	return v
+}
+
+// memberName admits a qualified host member without making the source
+// keyword available as a local/declaration name. Host interop keeps its
+// existing qualified-name rules; `sdk.void` is therefore parsed as a member
+// and is rejected or admitted by the normal import checker.
+func (p *parser) memberName() token {
+	v := p.take()
+	if v.kind != "name" {
+		p.fail(v, "expected identifier")
+	}
+	return v
+}
+
+func (p *parser) failSpan(span Span, message string) {
+	panic(syntaxFault{Diagnostic{Code: "EF002", Message: message, Span: span}})
 }
 func (p *parser) fail(v token, message string) {
 	panic(syntaxFault{Diagnostic{Code: "EF002", Message: message, Span: v.span}})
@@ -682,8 +738,10 @@ func (p *parser) typ() string {
 		p.fail(p.peek(), "type nesting exceeds limit of 64")
 	}
 	if p.accept("(") {
+		open := p.tokens[p.at-1]
 		if p.accept(")") {
-			return "()"
+			close := p.tokens[p.at-1]
+			p.failSpan(Span{Offset: open.span.Offset, Length: close.span.Offset + close.span.Length - open.span.Offset, Line: open.span.Line, Column: open.span.Column}, "use void instead of () for the no-value type")
 		}
 		inner := p.typ()
 		p.expect(")")
@@ -718,13 +776,17 @@ func (p *parser) typ() string {
 		p.types[name] = typ
 		return name
 	}
+	if p.peek().text == "void" {
+		p.take()
+		return voidTypeName
+	}
 	name := p.name()
 	if name.text == "Effect" && p.peek().text == "<" {
 		p.fail(name, "typed recipes are unsupported; use an explicit effect fn callback contract")
 	}
 	text := name.text
 	if p.accept(".") {
-		text += "." + p.name().text
+		text += "." + p.memberName().text
 	}
 	if p.accept("<") {
 		t := &sourceType{Application: text, Span: name.span}
@@ -1004,9 +1066,12 @@ func (p *parser) expr(min int) *Expr {
 	case start.text == "true" || start.text == "false":
 		e.Kind = "bool"
 		e.Text = start.text
+	case start.text == "void":
+		e.Kind = "void"
 	case start.text == "(":
 		if p.accept(")") {
-			e.Kind = "unit"
+			close := p.tokens[p.at-1]
+			p.failSpan(Span{Offset: start.span.Offset, Length: close.span.Offset + close.span.Length - start.span.Offset, Line: start.span.Line, Column: start.span.Column}, "use void instead of () for a no-value expression")
 		} else {
 			e = p.expr(0)
 			p.expect(")")
@@ -1047,7 +1112,7 @@ func (p *parser) expr(min int) *Expr {
 			continue
 		}
 		if p.peek().text == "(" {
-			if e.Kind != "name" && e.Kind != "member" {
+			if e.Kind != "name" && e.Kind != "member" && e.Kind != "void" {
 				p.fail(p.peek(), "only named functions and service methods are callable")
 			}
 			p.take()
@@ -1071,7 +1136,7 @@ func (p *parser) expr(min int) *Expr {
 			continue
 		}
 		if p.accept(".") {
-			method := p.name()
+			method := p.memberName()
 			if method.text == "orFail" {
 				p.expect("(")
 				p.expect(")")

@@ -151,7 +151,7 @@ func (c *checker) parameterFieldOccurrences(f *Function, parameter, path string,
 			if path != "" {
 				variantPath = path + "." + variantPath
 			}
-			payload := c.checkedData("()")
+			payload := c.checkedData(voidTypeName)
 			payload.fields = c.parameterPayloadFields(f, parameter, variantPath, variant.Fields, visiting, depth, nodes, layouts)
 			values[variant.Name] = payload
 		}
@@ -391,7 +391,7 @@ func initializedFieldOccurrences(fields []FieldValue) (map[string]checkedExpress
 func (c *checker) retainDataPayload(result *checkedExpression, fields []FieldValue, variant string) {
 	values, captures := initializedFieldOccurrences(fields)
 	if variant != "" {
-		payload := c.checkedData("()")
+		payload := c.checkedData(voidTypeName)
 		payload.fields = values
 		result.fields = map[string]checkedExpression{variant: payload}
 		result.setCaptures(prependFacts(variant, captures))

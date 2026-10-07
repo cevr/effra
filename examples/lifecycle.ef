@@ -1,4 +1,4 @@
-effect fn worker() -> () uses { Clock } {
+effect fn worker() -> void uses { Clock } {
     run Clock.sleep(10000)
 }
 
@@ -11,19 +11,19 @@ effect fn scopedRead() -> string raises { IoError } uses { Files, Runtime, Conso
     }
 }
 
-effect fn program() -> () raises { IoError } uses { Clock, Files, Runtime, Console, Env, Scheduler } {
+effect fn program() -> void raises { IoError } uses { Clock, Files, Runtime, Console, Env, Scheduler } {
     scope {
         let child = fork worker()
         run child.interrupt()
         let text = run scopedRead()
         run Console.log(text)
-        let outcome = run worker().timeout(1).catch<Timeout>(())
+        let outcome = run worker().timeout(1).catch<Timeout>(void)
         let home = run Env.get("EFFRA_DEMO_LABEL")
         run Console.log("label: " + home)
     }
 }
 
-effect fn main() -> () raises { IoError } {
+effect fn main() -> void raises { IoError } {
     run program()
         .provide<Clock>(LiveClock)
         .provide<Files>(LiveFiles)

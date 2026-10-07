@@ -29,7 +29,7 @@ func TestCallbackResultOwnershipAcrossHelpersAndOrders(t *testing.T) {
 			{"conditional acquired", "if true {keep} else {acquire}", false},
 		} {
 			t.Run(test.name+"/"+declarations[order[0]][10:17], func(t *testing.T) {
-				source := prefix + `effect fn outer(file:File)->File raises {IoError} uses {Files}{let chosen=` + test.callee + `;scope {run forward(chosen,file)}} effect fn main()->(){()}`
+				source := prefix + `effect fn outer(file:File)->File raises {IoError} uses {Files}{let chosen=` + test.callee + `;scope {run forward(chosen,file)}} effect fn main()->void{void}`
 				r := Compile(source)
 				if r.Checked != test.valid || (!test.valid && !hasCode(r, "EF123")) {
 					t.Fatalf("callback result ownership: %+v", r.Diagnostics)
@@ -51,7 +51,7 @@ func TestCallbackResultOwnershipAcrossHelpersAndOrders(t *testing.T) {
 func TestUnresolvedCallbackResultsStayPotential(t *testing.T) {
 	source := `record Operations { operation: effect fn(File)->File }
 effect fn outer(operations:Operations,file:File)->File {scope {run operations.operation(file)}}
-effect fn main()->(){()}`
+effect fn main()->void{void}`
 	r := Compile(source)
 	if r.Checked || !hasCode(r, "EF123") {
 		t.Fatalf("unresolved record callback escaped: %+v", r.Diagnostics)
@@ -62,7 +62,7 @@ func TestNamedCallbackAcquisitionDependencyUsesValueReferences(t *testing.T) {
 	source := `effect fn outer(file:File)->File raises {IoError} {scope {run reopen(file)}}
 effect fn reopen(file:File)->File raises {IoError} {let operation=acquire;run operation(file)}
 effect fn acquire(file:File)->File raises {IoError} {run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)}
-effect fn main()->(){()}`
+effect fn main()->void{void}`
 	r := Compile(source)
 	if r.Checked || !hasCode(r, "EF123") {
 		t.Fatalf("forward value reference lost acquisition: %+v", r.Diagnostics)
@@ -81,7 +81,7 @@ func TestCallbackResultOwnershipSurvivesFunctionReturningHelpers(t *testing.T) {
 			source := `fn identity(cb:effect fn(File)->File raises {IoError})->(effect fn(File)->File raises {IoError}){cb}
 effect fn outer(file:File)->File raises {IoError}{let operation=identity(chosen);scope {run operation(file)}}
 effect fn chosen(file:File)->File raises {IoError}{` + test.body + `}
-effect fn main()->(){()}`
+effect fn main()->void{void}`
 			r := Compile(source)
 			if r.Checked != test.valid || (!test.valid && !hasCode(r, "EF123")) {
 				t.Fatalf("function-valued return lost ownership relation: %+v", r.Diagnostics)
@@ -91,7 +91,7 @@ effect fn main()->(){()}`
 }
 
 func TestGenericCallbackCannotPromiseSafeResultFromInnerScope(t *testing.T) {
-	r := Compile(`effect fn scoped(cb:effect fn(File)->File,file:File)->File{scope {run cb(file)}} effect fn main()->(){()}`)
+	r := Compile(`effect fn scoped(cb:effect fn(File)->File,file:File)->File{scope {run cb(file)}} effect fn main()->void{void}`)
 	if r.Checked || !hasCode(r, "EF123") {
 		t.Fatalf("unresolved callback obligation discharged by closing scope: %+v", r.Diagnostics)
 	}
@@ -99,7 +99,7 @@ func TestGenericCallbackCannotPromiseSafeResultFromInnerScope(t *testing.T) {
 
 func TestUnresolvedCallbackResultsRetainChildAndTimeoutOwners(t *testing.T) {
 	for _, body := range []string{`run cb(file).timeout(1000)`, `let child=fork cb(file);run child.join()`} {
-		r := Compile(`effect fn bounded(cb:effect fn(File)->File,file:File)->File raises {Timeout} uses {Scheduler}{` + body + `} effect fn main()->(){()}`)
+		r := Compile(`effect fn bounded(cb:effect fn(File)->File,file:File)->File raises {Timeout} uses {Scheduler}{` + body + `} effect fn main()->void{void}`)
 		if r.Checked || !hasCode(r, "EF123") {
 			t.Fatalf("managed callback result lost closing owner: %+v", r.Diagnostics)
 		}
@@ -116,7 +116,7 @@ func TestNamedCallbackEvidenceLimitFailsConservatively(t *testing.T) {
 		for i := count - 2; i >= 0; i-- {
 			branch = fmt.Sprintf("if true {callback%d} else {%s}", i, branch)
 		}
-		fmt.Fprintf(&source, "effect fn outer(file:File)->File{let callback=%s;scope {run callback(file)}} effect fn main()->(){()}", branch)
+		fmt.Fprintf(&source, "effect fn outer(file:File)->File{let callback=%s;scope {run callback(file)}} effect fn main()->void{void}", branch)
 		r := Compile(source.String())
 		if count == 8 && !r.Checked {
 			t.Fatalf("finite known borrowed set refused: %+v", r.Diagnostics)

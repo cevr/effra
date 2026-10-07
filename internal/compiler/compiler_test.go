@@ -19,11 +19,11 @@ func hasCode(r *Result, code string) bool {
 }
 func TestGuardrails(t *testing.T) {
 	cases := []struct{ name, source, code string }{
-		{"missing service", `effect fn main() -> () { run Console.log("x") }`, "EF108"},
+		{"missing service", `effect fn main() -> void { run Console.log("x") }`, "EF108"},
 		{"unhandled error", `error Bad effect fn bad() -> string raises {Bad} { fail Bad } effect fn main() -> string { run bad() }`, "EF107"},
-		{"pure execution", `fn main() -> () { run Console.log("x") }`, "EF105"},
-		{"unused lazy effect", `effect fn main() -> () { Console.log("x") }`, "EF105"},
-		{"wrong argument", `effect fn main() -> () { run Console.log(true).provide<Console>(Stdout) }`, "EF106"},
+		{"pure execution", `fn main() -> void { run Console.log("x") }`, "EF105"},
+		{"unused lazy effect", `effect fn main() -> void { Console.log("x") }`, "EF105"},
+		{"wrong argument", `effect fn main() -> void { run Console.log(true).provide<Console>(Stdout) }`, "EF106"},
 		{"wrong provider", `service Users { effect fn get() -> string } effect fn x() -> string { run Users.get().provide<Users>(Stdout) }`, "EF104"},
 		{"incomplete provider", `service Users { effect fn get() -> string } impl Empty for Users { }`, "EF104"},
 		{"wrong implementation", `service Users { effect fn get() -> string } impl Broken for Users { effect fn get() -> bool { true } }`, "EF104"},
@@ -31,14 +31,14 @@ func TestGuardrails(t *testing.T) {
 		{"recover absent tag", `error Bad effect fn a() -> string { "x" } effect fn main() -> string { run a().catch<Bad>("y") }`, "EF107"},
 		{"recovery executes effect", `error Bad effect fn a() -> string raises {Bad} { fail Bad } effect fn b() -> string { "y" } effect fn main() -> string { run a().catch<Bad>(run b()) }`, "EF105"},
 		{"nested argument execution", `error Bad effect fn a() -> string raises {Bad} { fail Bad } effect fn b(x: string) -> string { x } effect fn main() -> string { run b(run a()) }`, "EF107"},
-		{"executed conditional", `effect fn x() -> () { let branch = if true { run Console.log("x") } else { () }; () }`, "EF108"},
+		{"executed conditional", `effect fn x() -> void { let branch = if true { run Console.log("x") } else { void }; void }`, "EF108"},
 		{"declaration collision", `error Users service Users { }`, "EF101"},
 		{"local function shadow", `fn f() -> string { "x" } fn x() -> string { let f = "y" f() }`, "EF103"},
 		{"bad source", `effect fn x() -> string { "unterminated }`, "EF001"},
 		{"unsupported number", `fn x() -> u64 { 42 }`, "EF102"},
-		{"scope local escaped", `effect fn x() -> string { scope { let hidden = "x"; () }; hidden }`, "EF102"},
-		{"unobserved child failure", `error Bad effect fn child() -> () raises {Bad} { fail Bad } effect fn main() -> () { let child = fork child(); () }`, "EF107"},
-		{"timeout failure", `effect fn child() -> () { () } effect fn main() -> () { run child().timeout(1) }`, "EF107"},
+		{"scope local escaped", `effect fn x() -> string { scope { let hidden = "x"; void }; hidden }`, "EF102"},
+		{"unobserved child failure", `error Bad effect fn child() -> void raises {Bad} { fail Bad } effect fn main() -> void { let child = fork child(); void }`, "EF107"},
+		{"timeout failure", `effect fn child() -> void { void } effect fn main() -> void { run child().timeout(1) }`, "EF107"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,7 +89,7 @@ func TestContractsAndEntry(t *testing.T) {
 	if !strings.Contains(decl, `Effect.Effect<string, { readonly _tag: "Broken" }, UsersRequirement>`) {
 		t.Fatal(decl)
 	}
-	missing := Compile(`effect fn main() -> () uses {Console} { run Console.log("x") }`)
+	missing := Compile(`effect fn main() -> void uses {Console} { run Console.log("x") }`)
 	if !missing.Checked || missing.Entry() == nil {
 		t.Fatal("entry accepted an unprovided service")
 	}
@@ -143,7 +143,7 @@ func TestThrowsKeywordReportsMigrationDiagnostic(t *testing.T) {
 	}
 }
 func TestDeferredRows(t *testing.T) {
-	r := Compile(`effect fn main() -> () { let pending = Console.log("never executed"); () }`)
+	r := Compile(`effect fn main() -> void { let pending = Console.log("never executed"); void }`)
 	if !r.Checked || len(r.Find("main").Actual.Services) != 0 {
 		t.Fatalf("constructing a recipe must not require execution: %+v", r.Diagnostics)
 	}
@@ -254,7 +254,7 @@ func fmtInt(i int) string {
 }
 
 func FuzzCompiler(f *testing.F) {
-	for _, source := range []string{"", "effect fn main() -> string { \"hello\" }", "service S { effect fn get() -> () }", "fn missing() -> string {", "error E effect fn main() -> string raises {E} { fail E }"} {
+	for _, source := range []string{"", "effect fn main() -> string { \"hello\" }", "service S { effect fn get() -> void }", "fn missing() -> string {", "error E effect fn main() -> string raises {E} { fail E }"} {
 		f.Add(source)
 	}
 	f.Fuzz(func(t *testing.T, source string) {

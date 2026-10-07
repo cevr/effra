@@ -90,14 +90,14 @@ for target in ("go","js"):
     assert suite["passed"] and len(suite["tests"])==3 and not suite["watchdogExpired"]
 with tempfile.TemporaryDirectory(prefix="effra-tests-") as tmp:
     file=pathlib.Path(tmp)/"cases.ef"
-    file.write_text('effect fn test_bad() -> () raises {AssertionFailed} uses {Assert} {run Assert.equalText("actual","expected")} effect fn test_after() -> () raises {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}')
+    file.write_text('effect fn test_bad() -> void raises {AssertionFailed} uses {Assert} {run Assert.equalText("actual","expected")} effect fn test_after() -> void raises {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}')
     for target in ("go","js"):
         suite=json.loads(run("test",str(file),"--target",target,success=False).stdout)
         assert not suite["passed"] and len(suite["tests"])==2
         assert suite["tests"][0]["reasons"][0]["tag"]=="AssertionFailed" and suite["tests"][1]["passed"]
         assert 'expected "expected"; received "actual"' in suite["tests"][0]["reasons"][0]["message"]
     # A real watchdog is separate from program time and must disclaim cleanup.
-    file.write_text('effect fn test_slow() -> () {run Clock.sleep(10000).provide<Clock>(LiveClock)}')
+    file.write_text('effect fn test_slow() -> void {run Clock.sleep(10000).provide<Clock>(LiveClock)}')
     for target in ("go","js"):
         assert "--live" in run("test",str(file),"--target",target,success=False).stderr
         suite=json.loads(run("test",str(file),"--target",target,"--live","--timeout-ms","100",success=False).stdout)
@@ -107,7 +107,7 @@ assert {r["name"] for r in rules} == {"unused-recipe","redundant-provision","unu
 graph=json.loads(run("graph","examples/workflow.ef").stdout)
 assert any(e["kind"]=="requires" and e["from"]=="function:welcome" and e["service"]=="Directory" for e in graph["edges"])
 with tempfile.TemporaryDirectory(prefix="effra-tooling-") as tmp:
-    source="effect fn task() -> string { \"ok\" } effect fn main() -> () { let forgotten = task(); () }"
+    source="effect fn task() -> string { \"ok\" } effect fn main() -> void { let forgotten = task(); void }"
     file=pathlib.Path(tmp)/"main.ef"
     file.write_text(source)
     lint=json.loads(run("lint",str(file),"--strict",success=False).stdout)
@@ -136,7 +136,7 @@ with tempfile.TemporaryDirectory(prefix="effra-tooling-") as tmp:
     assert diagnostics_reply["checked"] and not diagnostics_reply["policyPassed"] and diagnostics_reply["totalCounts"]["warnings"]==1
 
     many=pathlib.Path(tmp)/"many.ef"
-    many.write_text("effect fn duplicate() -> () { () }\n"*102)
+    many.write_text("effect fn duplicate() -> void { void }\n"*102)
     over_calls=messages[:2]+[
         {"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"project.diagnostics","arguments":{"file":"many.ef"}}},
     ]
@@ -146,10 +146,10 @@ with tempfile.TemporaryDirectory(prefix="effra-tooling-") as tmp:
     assert over_reply["result"]["isError"] and "exceeds limit" in over_reply["result"]["content"][0]["text"]
 
     source="""effect fn task() -> string { \"ok\" }
-effect fn main() -> () {
+effect fn main() -> void {
 // effra-lint-disable-next-line unused-recipe -- intentional deferred hook
 let forgotten = task();
-()}"""
+void}"""
     file.write_text(source)
     suppressed=json.loads(run("lint",str(file),"--strict").stdout)
     assert suppressed["lintPassed"] and suppressed["errors"]==0 and suppressed["lintDiagnostics"]==[]
@@ -164,20 +164,20 @@ let forgotten = task();
 
 def nested_data_source(depth, named):
     records = "\n".join(
-        f"record R{index} {{ value: {'()' if index == 0 else f'R{index - 1}'} }}"
+        f"record R{index} {{ value: {'void' if index == 0 else f'R{index - 1}'} }}"
         for index in range(depth + 1)
     )
     calls = "".join(
         f"R{index}({'value: ' if named else ''}"
         for index in range(depth, -1, -1)
     )
-    return records + "\nfn deep() -> R" + str(depth) + " { " + calls + "()" + ")" * (depth + 1) + " }\neffect fn main() -> () { let _ = deep(); () }\n"
+    return records + "\nfn deep() -> R" + str(depth) + " { " + calls + "void" + ")" * (depth + 1) + " }\neffect fn main() -> void { let _ = deep(); void }\n"
 
 
 def type_at_query(file):
     source = file.read_text()
     body = source.index("{ ", source.index("fn deep")) + 2
-    offset = source.index("()", body)
+    offset = source.index("void", body)
     result = subprocess.run([ef, "query", str(file), str(offset)], cwd=root,
                             text=True, capture_output=True, timeout=5)
     assert result.returncode == 0, (result.stdout, result.stderr)
@@ -195,7 +195,7 @@ with tempfile.TemporaryDirectory(prefix="effra-typeat-") as tmp:
     type_at_query(positional)
     named_source = named.read_text()
     named_body = named_source.index("{ ", named_source.index("fn deep")) + 2
-    named_offset = named_source.index("()", named_body)
+    named_offset = named_source.index("void", named_body)
 
     messages = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {

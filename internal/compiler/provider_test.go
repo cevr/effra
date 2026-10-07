@@ -474,7 +474,7 @@ func TestProviderConstructionRejectsMissingConfigAndCapture(t *testing.T) {
 		},
 		{
 			"undeclared captured service",
-			`service Names { effect fn get(id: string) -> string } service Other { effect fn get(id: string) -> string } service Greeting { effect fn hello(id: string) -> string } impl Prefixed(prefix: string) for Greeting uses {Names} { effect fn hello(id: string) -> string uses {Other} { let name = run Other.get(id) prefix + name } } effect fn main() -> string { () }`,
+			`service Names { effect fn get(id: string) -> string } service Other { effect fn get(id: string) -> string } service Greeting { effect fn hello(id: string) -> string } impl Prefixed(prefix: string) for Greeting uses {Names} { effect fn hello(id: string) -> string uses {Other} { let name = run Other.get(id) prefix + name } } effect fn main() -> string { void }`,
 			"EF103",
 		},
 	}

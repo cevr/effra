@@ -16,7 +16,7 @@ effect fn bad() -> File raises {IoError} uses {Files} {
   alias
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `
 
 func TestOwnershipRejectsInnerOwnedAliasEscape(t *testing.T) {
@@ -33,7 +33,7 @@ effect fn borrow(file: File) -> File {
   alias
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `
 
 func TestOwnershipAllowsBorrowedOuterAlias(t *testing.T) {
@@ -87,7 +87,7 @@ effect fn readLater(file: File) -> string raises {IoError} uses {Files} {
 effect fn executed(file: File) -> string raises {IoError} uses {Files} {
  run readLater(file)
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `
 	r := Compile(source)
 	if !r.Checked {
@@ -122,7 +122,7 @@ func TestOwnershipFactsStayBoundedForSharedNestedPayloads(t *testing.T) {
 	fmt.Fprintln(&source, `  value20`)
 	fmt.Fprintln(&source, ` }`)
 	fmt.Fprintln(&source, `}`)
-	fmt.Fprintln(&source, `effect fn main() -> () { () }`)
+	fmt.Fprintln(&source, `effect fn main() -> void { void }`)
 	r := Compile(source.String())
 	if !hasCode(r, "EF123") {
 		t.Fatalf("shared nested payload should retain an ownership escape proof: %+v", r.Diagnostics)
@@ -139,10 +139,10 @@ service Store { effect fn get() -> File }
 impl Captured(file: File) for Store {
  effect fn get() -> File { file }
 }
-effect fn use(file: File) -> () {
- let provider = run Captured(file); ()
+effect fn use(file: File) -> void {
+ let provider = run Captured(file); void
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `
 	r := Compile(source)
 	if !r.Checked {
@@ -164,7 +164,7 @@ effect fn borrow(file: File) -> File raises {IoError} uses {Files} {
  let provider = run Borrowing(file)
  run Files.openRead("fixture").provide<Files>(provider)
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `
 
 func TestOwnershipKeepsCustomFilesAcquisitionUnknown(t *testing.T) {
@@ -228,7 +228,7 @@ effect fn bad() -> File raises {IoError} uses {Files} {
   unwrap(file)
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 }
 
@@ -242,7 +242,7 @@ effect fn good(borrowed: File) -> File raises {IoError} uses {Files} {
   selectOuter(Pair { outer: borrowed, inner: inner })
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipRejected(t, `
 record Pair { outer: File, inner: File }
@@ -253,7 +253,7 @@ effect fn bad(borrowed: File) -> File raises {IoError} uses {Files} {
   selectInner(Pair { outer: borrowed, inner: inner })
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 }
 
@@ -267,7 +267,7 @@ effect fn good(borrowed: File) -> File raises {IoError} uses {Files} {
   match packet { Packet.A { file } => borrowed Packet.B { file } => file }
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipRejected(t, `
 record Box { file: File }
@@ -279,7 +279,7 @@ effect fn bad() -> File raises {IoError} uses {Files} {
   match packet { Packet.Full { box } => box.file }
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 }
 
@@ -289,13 +289,13 @@ effect fn bad() -> File raises {IoError} uses {Files} { scope { run outer() } }
 effect fn outer() -> File raises {IoError} uses {Files} { run middle() }
 effect fn middle() -> File raises {IoError} uses {Files} { run leaf() }
 effect fn leaf() -> File raises {IoError} uses {Files} { run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles) }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipRejected(t, `
 effect fn bad() -> File raises {IoError} uses {Files} { scope { run first(true) } }
 effect fn first(stop: bool) -> File raises {IoError} uses {Files} { if stop { run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles) } else { run second(true) } }
 effect fn second(stop: bool) -> File raises {IoError} uses {Files} { run first(stop) }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 }
 
@@ -304,7 +304,7 @@ func TestOwnershipScopeForkAndTimeoutOwnersRemainDistinct(t *testing.T) {
 effect fn bad() -> File raises {IoError} uses {Files} {
  scope { run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles) }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipAccepted(t, `
 effect fn borrow(file: File) -> File { file }
@@ -312,20 +312,20 @@ effect fn good(file: File) -> File raises {IoError} {
  let child = fork borrow(file)
  run child.join()
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipRejected(t, `
 effect fn bad() -> File raises {IoError, Timeout} uses {Files, Scheduler} {
  run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles).timeout(1000)
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipAccepted(t, `
 effect fn borrow(file: File) -> File { file }
 effect fn good(file: File) -> File raises {IoError, Timeout} uses {Scheduler} {
  run borrow(file).timeout(1000)
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 }
 
@@ -337,7 +337,7 @@ effect fn good() -> File raises {IoError} uses {Files} {
  let recipe = borrow(f)
  scope { run recipe }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipAccepted(t, `
 effect fn borrow(file: File) -> File { file }
@@ -347,7 +347,7 @@ effect fn good() -> string raises {IoError} uses {Files} {
  let result = run child.join()
  run Files.readText(result).provide<Files>(LiveFiles)
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipAccepted(t, `
 error Missing
@@ -357,7 +357,7 @@ effect fn good() -> File raises {IoError} uses {Files} {
  let recovered = absent().catch<Missing>(f)
  scope { run recovered }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 }
 
@@ -368,7 +368,7 @@ effect fn good() -> string raises {IoError, Timeout} uses {Files, Scheduler} {
  let result = run borrow(run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)).timeout(1000)
  run Files.readText(result).provide<Files>(LiveFiles)
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipAccepted(t, `
 effect fn borrow(file: File) -> File { file }
@@ -377,7 +377,7 @@ effect fn good() -> string raises {IoError, Timeout} uses {Files, Scheduler} {
  let result = run borrow(f).timeout(1000)
  run Files.readText(result).provide<Files>(LiveFiles)
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipRejected(t, `
 effect fn acquire() -> File raises {IoError} uses {Files} {
@@ -386,13 +386,13 @@ effect fn acquire() -> File raises {IoError} uses {Files} {
 effect fn bad() -> File raises {IoError, Timeout} uses {Files, Scheduler} {
  run acquire().timeout(1000)
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipRejected(t, `
 effect fn bad() -> File raises {IoError, Timeout} uses {Files, Scheduler} {
  run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles).timeout(1000)
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipAccepted(t, `
 error Missing
@@ -404,7 +404,7 @@ effect fn good() -> string raises {IoError, Timeout} uses {Files, Scheduler} {
  let result = run borrow(recovered).timeout(1000)
  run Files.readText(result).provide<Files>(LiveFiles)
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipRejected(t, `
 effect fn borrow(file: File) -> File { file }
@@ -414,7 +414,7 @@ effect fn bad() -> File raises {IoError, Timeout} uses {Files, Scheduler} {
   run borrow(f).timeout(1000)
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 }
 
@@ -428,7 +428,7 @@ effect fn bad() -> File raises {IoError} uses {Files} {
   run absent().catch<Missing>(file)
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 	requireOwnershipAccepted(t, `
 error Missing
@@ -437,7 +437,7 @@ effect fn good(file: File) -> File raises {IoError} {
  let recovered = absent().catch<Missing>(file)
  scope { run recovered }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `)
 }
 
@@ -451,7 +451,7 @@ func TestOwnershipHandleFreeSharedDAGIsStructurallyBounded(t *testing.T) {
 		}
 	}
 	fmt.Fprintln(&source, "fn identity(value: R20) -> R20 { value }")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	r := requireOwnershipAccepted(t, source.String())
 	if r.Timings.CheckMicros > 500_000 {
 		t.Fatalf("handle-free shared DAG traversal exceeded bound: %dµs", r.Timings.CheckMicros)
@@ -479,7 +479,7 @@ func TestOwnershipCappedProjectionDoesNotClaimAnAmbiguousOwnedField(t *testing.T
 	fmt.Fprintln(&source, "  selectOuter(Root { outer: borrowed, nested: value20 })")
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	requireOwnershipAccepted(t, source.String())
 }
 
@@ -518,7 +518,7 @@ func ownershipMixedRecordSource(width int, selection string, helper bool) string
 	}
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -550,7 +550,7 @@ func ownershipMixedEnumSource(width int, selection string) string {
 	fmt.Fprintf(&source, "  match packet { Packet.P { %s } => %s }\n", selection, selection)
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -583,7 +583,7 @@ func ownershipMixedDeepSource(width int, selection string) string {
 	fmt.Fprintf(&source, "  value.%s.file\n", selection)
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -639,7 +639,7 @@ func ownershipConditionalRecordSource(width int, reverseConstructor, borrowedFir
 	}
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -685,7 +685,7 @@ func ownershipConditionalEnumSource(width int, borrowedFirst bool, mode, selecti
 	}
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -739,7 +739,7 @@ func ownershipNestedRecordSource(width, layers int, conditional bool, selection 
 	}
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -793,7 +793,7 @@ func ownershipNestedEnumSource(width, layers int, conditional bool, selection st
 	}
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -847,7 +847,7 @@ func ownershipNestedSiblingSource(width, layers int, selected string) string {
 	fmt.Fprintf(&source, "  %s.wide.f%d\n", path, width-1)
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -911,7 +911,7 @@ func ownershipCoverageSiblingSource(width int, enum, reverse, independentOwner, 
 	}
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -967,7 +967,7 @@ func ownershipCoverageBorrowedSummarySource(width int, enum, reverse bool) strin
 	fmt.Fprintln(&source, "  pick(wide, inner)")
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -1033,7 +1033,7 @@ func ownershipJoinSiblingSource(width int, enum, reverse, bothBorrowed bool) str
 	}
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -1071,7 +1071,7 @@ func ownershipHelperBoxSource(width int, innerFile bool) string {
 	fmt.Fprintf(&source, "  pick(wide, %s)\n", file)
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -1110,7 +1110,7 @@ func ownershipJoinHelperSource(width int, bothBorrowed bool) string {
 	fmt.Fprintln(&source, "  pick(selected)")
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -1159,7 +1159,7 @@ func ownershipSameParameterJoinSource(nested, reverse, bothBorrowed bool) string
 	fmt.Fprintln(&source, "  select(pair, choose)")
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -1231,7 +1231,7 @@ func ownershipCoverageTerminalSource(width, layers int, enum bool, borrowedIndex
 	}
 	fmt.Fprintln(&source, " }")
 	fmt.Fprintln(&source, "}")
-	fmt.Fprintln(&source, "effect fn main() -> () { () }")
+	fmt.Fprintln(&source, "effect fn main() -> void { void }")
 	return source.String()
 }
 
@@ -1644,7 +1644,7 @@ effect fn bad() -> Envelope raises {IoError} uses {Files} {
   Envelope { file: file, label: "inner" }
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `,
 		},
 		{
@@ -1657,7 +1657,7 @@ effect fn bad() -> string raises {WithFile, IoError} uses {Files} {
   fail WithFile { file: file }
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `,
 		},
 		{
@@ -1669,7 +1669,7 @@ effect fn bad(file: File, choose: bool) -> File raises {IoError} uses {Files} {
   if choose { inner } else { file }
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `,
 		},
 		{
@@ -1684,7 +1684,7 @@ effect fn bad() -> string raises {IoError} uses {Files} {
   readLater(file)
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `,
 		},
 		{
@@ -1702,7 +1702,7 @@ effect fn bad() -> string raises {IoError} uses {Files} {
   Files.readText(file).provide<Files>(provider)
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `,
 		},
 		{
@@ -1715,7 +1715,7 @@ effect fn bad() -> File raises {IoError} uses {Files} {
  let child = fork childFile()
  run child.join()
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `,
 		},
 		{
@@ -1729,7 +1729,7 @@ effect fn bad() -> string raises {IoError} uses {Files} {
  let file = run child.join()
  run Files.readText(file).provide<Files>(LiveFiles)
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `,
 		},
 		{
@@ -1738,13 +1738,13 @@ effect fn main() -> () { () }
 effect fn childFile() -> File raises {IoError} uses {Files} {
  run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
 }
-effect fn bad() -> () raises {IoError} uses {Files} {
+effect fn bad() -> void raises {IoError} uses {Files} {
  scope {
   let child = fork childFile()
   child
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `,
 		},
 	}
@@ -1766,7 +1766,7 @@ effect fn bad() -> File raises {IoError} uses {Files} {
   match p { Packet.Full { box } => box.file }
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `
 	r := Compile(source)
 	if r.Checked || diagnosticCount(r, "EF123") == 0 {
@@ -1780,7 +1780,7 @@ effect fn bad() -> File raises {IoError} {
  let recipe = Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
  scope { run recipe }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `
 	r := Compile(source)
 	if r.Checked || diagnosticCount(r, "EF123") == 0 {
@@ -1800,7 +1800,7 @@ effect fn bad() -> string raises {IoError} {
   run Files.readText(file).provide<Files>(LiveFiles)
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `
 	r := Compile(source)
 	if r.Checked || diagnosticCount(r, "EF123") == 0 {
@@ -1818,7 +1818,7 @@ effect fn bad() -> File raises {IoError} {
   run absent().catch<Missing>(f)
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `
 	r := Compile(source)
 	if r.Checked || diagnosticCount(r, "EF123") == 0 {
@@ -1842,7 +1842,7 @@ effect fn unsafe() -> File raises {IoError} uses {Files} {
   selectInner(Pair { outer: inner, inner: inner })
  }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `
 
 func TestOwnershipHelperProjectionIsParameterRelative(t *testing.T) {
@@ -1866,7 +1866,7 @@ effect fn leaf() -> File raises {IoError} {
 effect fn middle() -> File raises {IoError} { run leaf() }
 effect fn outer() -> File raises {IoError} { run middle() }
 effect fn bad() -> File raises {IoError} { scope { run outer() } }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `
 	r := Compile(source)
 	if r.Checked || diagnosticCount(r, "EF123") == 0 {
@@ -1956,7 +1956,7 @@ impl Borrowing(file: File) for Store {
  effect fn get() -> File raises {IoError} { scope { run pass(file) } }
 }
 effect fn pass(file: File) -> File raises {IoError} { file }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `,
 			owned: false,
 		},
@@ -2036,7 +2036,7 @@ effect fn escape(outer: File) -> File raises {IoError} {
 effect fn again(file: File, stop: bool) -> File raises {IoError} {
  if stop { file } else { run again(file, true) }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `,
 			owned: false,
 		},
@@ -2052,7 +2052,7 @@ effect fn first(file: File, stop: bool) -> File raises {IoError} {
 effect fn second(file: File, stop: bool) -> File raises {IoError} {
  if stop { file } else { run first(file, true) }
 }
-effect fn main() -> () { () }
+effect fn main() -> void { void }
 `,
 			owned: false,
 		},

@@ -2,14 +2,14 @@ import go strings "strings"
 import go strconv "strconv"
 import go sdk "effra.local/prototype/examples/sdk"
 
-effect fn program() -> () uses { Foreign, Console, Scheduler } {
+effect fn program() -> void uses { Foreign, Console, Scheduler } {
     let name = run strings.ToUpper("ada")
     run Console.log(name)
     let raw = run strconv.ParseBool("invalid")
     if raw.hasError {
         run Console.log("partial result retained")
     } else {
-        ()
+        void
     }
     let fallback = run strconv.ParseBool("invalid").orFail().catch<GoError>(false)
     let slow = run sdk.Lookup("slow").orFail().timeout(1)
@@ -17,7 +17,7 @@ effect fn program() -> () uses { Foreign, Console, Scheduler } {
     run Console.log(slow)
 }
 
-effect fn main() -> () {
+effect fn main() -> void {
     run program().provide<Foreign>(Host).provide<Console>(Stdout)
         .provide<Scheduler>(LiveScheduler)
 }

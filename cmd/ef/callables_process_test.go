@@ -22,7 +22,7 @@ effect fn first(x:string)->string raises {A}{x}
 effect fn second(x:string)->string raises {B}{x}
 effect fn chain<E: raises>(a:effect fn(string)->string raises {E},b:effect fn(string)->string raises {E},x:string)->string raises {E}{let next=run a(x);run b(next)}
 effect fn selected()->string raises {A,B}{run chain(first,second,"42")}
-effect fn main()->(){()}
+effect fn main()->void{void}
 `)
 	// Individually small declarations exhaust aggregate publication, rather
 	// than source admission or the selected callable's finite closure.

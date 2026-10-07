@@ -11,7 +11,7 @@ func TestGenericDataLayoutRegistrationAndSubstitution(t *testing.T) {
 record Box<T: type> { value: T }
 enum Presence<T: type> { None; Some { value: Box<T> } }
 record Envelope<T: type> { label: string; presence: Presence<T> }
-effect fn main() -> () { () }`
+effect fn main() -> void { void }`
 	for _, target := range []string{"go", "js"} {
 		r := CompileFor(source, target)
 		if !r.Checked {
@@ -58,7 +58,7 @@ func TestGenericDataRecursiveLayoutRefusal(t *testing.T) {
 		`record Link<T: type> { next: Holder } record Holder { value: Link<string> }`,
 		`record Link<T: type> { factory: fn() -> Link<T> }`,
 	} {
-		r := Compile(source + ` effect fn main() -> () { () }`)
+		r := Compile(source + ` effect fn main() -> void { void }`)
 		found := false
 		for _, diagnostic := range r.Diagnostics {
 			found = found || strings.Contains(diagnostic.Message, "recursive or excessive generic data layout")
@@ -101,7 +101,7 @@ func TestGenericEnumFormattingAdmissionIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := FormatSource(formatted.Text)
-	if err != nil || second.Text != formatted.Text || FormatterIdentity != "effra/formatter-4" || FormatterSchemaVersion != 1 {
+	if err != nil || second.Text != formatted.Text || FormatterIdentity != "effra/formatter-5" || FormatterSchemaVersion != 1 {
 		t.Fatal("generic syntax formatting identity/idempotence", formatted, second, err)
 	}
 }

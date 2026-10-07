@@ -4,11 +4,11 @@ import "testing"
 
 func TestTestContractsAndLiveCapabilities(t *testing.T) {
 	for _, source := range []string{
-		`fn test_wrong() -> () {()}`,
-		`effect fn test_wrong(x:string) -> () {()}`,
+		`fn test_wrong() -> void {void}`,
+		`effect fn test_wrong(x:string) -> void {void}`,
 		`effect fn test_wrong() -> string {"wrong"}`,
-		`effect fn test_wrong() -> () uses {Console} {run Console.log("wrong")}`,
-		`effect fn helper() -> () {()}`,
+		`effect fn test_wrong() -> void uses {Console} {run Console.log("wrong")}`,
+		`effect fn helper() -> void {void}`,
 	} {
 		r := Compile(source)
 		if !r.Checked {
@@ -18,7 +18,7 @@ func TestTestContractsAndLiveCapabilities(t *testing.T) {
 			t.Fatal("admitted invalid test", source)
 		}
 	}
-	source := `effect fn test_ok() -> () raises {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}`
+	source := `effect fn test_ok() -> void raises {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}`
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
@@ -29,7 +29,7 @@ func TestTestContractsAndLiveCapabilities(t *testing.T) {
 	if err := r.TestMode(false); err != nil {
 		t.Fatal(err)
 	}
-	live := Compile(`effect fn test_live() -> () {run Clock.sleep(1).provide<Clock>(LiveClock)}`)
+	live := Compile(`effect fn test_live() -> void {run Clock.sleep(1).provide<Clock>(LiveClock)}`)
 	if !live.Checked {
 		t.Fatal(live.Diagnostics)
 	}
@@ -42,15 +42,15 @@ func TestTestContractsAndLiveCapabilities(t *testing.T) {
 	}{
 		{
 			name:   "clock layer",
-			source: `layer LiveClockLayer { Clock = LiveClock } effect fn test_layer() -> () { () }`,
+			source: `layer LiveClockLayer { Clock = LiveClock } effect fn test_layer() -> void { void }`,
 		},
 		{
 			name:   "scheduler layer",
-			source: `layer LiveSchedulerLayer { Scheduler = LiveScheduler } effect fn test_layer() -> () { () }`,
+			source: `layer LiveSchedulerLayer { Scheduler = LiveScheduler } effect fn test_layer() -> void { void }`,
 		},
 		{
 			name:   "environment layer",
-			source: `layer LiveEnvLayer { Env = LiveEnv } effect fn test_layer() -> () { () }`,
+			source: `layer LiveEnvLayer { Env = LiveEnv } effect fn test_layer() -> void { void }`,
 		},
 		{
 			name: "retained layer selections",
@@ -60,11 +60,11 @@ layer Merged { merge Hidden }
 layer Fixture { Clock = TestClock }
 layer Replaced { merge Fixture; replace Clock = LiveClock }
 layer Unused { Scheduler = LiveScheduler; Env = LiveEnv }
-effect fn test_layer() -> () { () }`,
+effect fn test_layer() -> void { void }`,
 		},
 		{
 			name:   "test providers",
-			source: `layer Fixtures { Clock = TestClock; Scheduler = TestScheduler } effect fn test_layer() -> () { () }`,
+			source: `layer Fixtures { Clock = TestClock; Scheduler = TestScheduler } effect fn test_layer() -> void { void }`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -16,7 +16,7 @@ effect fn replacement() -> string uses { Clock } {
     }
 }
 
-effect fn main() -> () {
+effect fn main() -> void {
     let result = run replacement().provide<Clock>(LiveClock)
     run Console.log(result).provide<Console>(Stdout)
 }

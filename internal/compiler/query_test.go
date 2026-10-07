@@ -25,10 +25,10 @@ func TestTypeAtUsesCanonicalAliasedChildren(t *testing.T) {
 		{
 			name:   "checked positional constructor",
 			source: checkedPositionalSource(30),
-			needle: "()",
-			typeOf: "()",
-			kind:   "unit",
-			length: 1,
+			needle: "void",
+			typeOf: "void",
+			kind:   "void",
+			length: 4,
 		},
 	}
 	for _, test := range tests {

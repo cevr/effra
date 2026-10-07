@@ -31,7 +31,7 @@ func TestBundledTransportUsesFreshArenasAndCompleteOperationalFacts(t *testing.T
 	source := `import Fns "effra/functions"
 effect fn keep(file: File) -> File { file }
 effect fn outer(file: File) -> File { scope { run Fns.forwardFile(keep, file) } }
-effect fn main() -> () { () }`
+effect fn main() -> void { void }`
 	first := Compile(source)
 	second := Compile(`record Unrelated { value: i64 } ` + strings.ReplaceAll(source, "Fns", "Other"))
 	if !first.Checked || !second.Checked {
@@ -95,7 +95,7 @@ effect fn outer(file:File)->File raises {IoError}{scope {run relay(file)}}`
 					if reverse {
 						source = `import ` + alias + ` "effra/functions" ` + caller + callback
 					}
-					source += ` effect fn main()->(){()}`
+					source += ` effect fn main()->void{void}`
 					r := CompileFor(source, target)
 					// Files is a native-only builtin. The borrowed case is portable;
 					// the acquired case is an ownership control on the native target.
@@ -144,7 +144,7 @@ func TestBundledTransportRejectsMalformedAndStaleData(t *testing.T) {
 }
 
 func TestBundledTransportRejectsOwnerAndGraphCorruption(t *testing.T) {
-	source := `import Fns "effra/functions" effect fn keep(file:File)->File{file} effect fn outer(file:File)->File{run Fns.forwardFile(keep,file)} effect fn main()->(){()}`
+	source := `import Fns "effra/functions" effect fn keep(file:File)->File{file} effect fn outer(file:File)->File{run Fns.forwardFile(keep,file)} effect fn main()->void{void}`
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
