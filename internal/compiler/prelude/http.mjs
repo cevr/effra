@@ -126,13 +126,20 @@ const __ef_http_serve = (address, timeouts, onRequest) => Effect.gen(function* (
   // reading and keeps its exchange, and so its admission, until the error
   // response, queued behind any earlier response, has been handed to the OS
   // or the connection closed (the end callback runs either way); its own
-  // response is never published, so only this write retires it. A header
-  // timeout closes silently.
+  // response is never published, so only this write retires it. The
+  // transport then destroys the connection itself, as node:http's default
+  // parser-error path does: ending only half-closes it, and a client that
+  // keeps its side open would otherwise hold shutdown open on hosts whose
+  // closeAllConnections leaves such a socket alone (Bun). A header timeout
+  // closes silently.
   server.on('clientError', (error, socket) => {
     const reading = transport.reading.get(socket);
     reading?.stop();
     if (error?.code === 'ERR_HTTP_REQUEST_TIMEOUT' || !socket.writable) socket.destroy();
-    else socket.end('HTTP/1.1 ' + (error?.code === 'HPE_HEADER_OVERFLOW' ? '431 Request Header Fields Too Large' : '400 Bad Request') + '\r\nContent-Length: 0\r\nConnection: close\r\n\r\n', () => reading?.exchange.retire());
+    else socket.end('HTTP/1.1 ' + (error?.code === 'HPE_HEADER_OVERFLOW' ? '431 Request Header Fields Too Large' : '400 Bad Request') + '\r\nContent-Length: 0\r\nConnection: close\r\n\r\n', () => {
+      reading?.exchange.retire();
+      socket.destroy();
+    });
   });
   server.headersTimeout = timeouts.readHeaderMillis;
   server.requestTimeout = 0;

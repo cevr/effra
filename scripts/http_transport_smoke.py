@@ -172,14 +172,24 @@ def check(target, scratch):
         slow = hold_slot(address)
         slow.close()
         poll_health(address, 200)
+        # A client that keeps its connection open after a malformed body's
+        # 400 does not hold shutdown open: the transport closes that
+        # connection itself once the 400 has been written.
+        held = connect(address)
+        held.sendall(malformed)
+        expect(read_response(held), 400, close=True)
         # Shutdown with active work: the in-flight request receives 503 after
-        # its scope closed, then the server completes with interruption.
+        # its scope closed, then the server completes with interruption
+        # within its idleMillis drain grace.
         slow = hold_slot(address)
+        signalled = time.monotonic()
         process.send_signal(signal.SIGTERM)
         expect(read_response(slow), 503, close=True)
         slow.close()
         _, stderr = process.communicate(timeout=10)
+        assert time.monotonic() - signalled < 5, f"shutdown took {time.monotonic() - signalled:.2f}s"
         assert process.returncode == 1 and "interrupt" in stderr.lower(), (process.returncode, stderr)
+        held.close()
         with socket.socket() as listener:
             # Client connections may linger in TIME_WAIT; a live listener would
             # still refuse this bind.

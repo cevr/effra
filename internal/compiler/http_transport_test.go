@@ -380,6 +380,22 @@ if (backpressure) { // shutdown joins the request scope, then aborts a response 
   server.fiber.interruptUnsafe();
   await server.done;
 }
+{ // a client that holds its connection open after a malformed body's 400 cannot hold shutdown open
+  const server = await listen(() => Effect.succeed(ok('fine')));
+  // allowHalfOpen: the client keeps its side open after the server's FIN.
+  const socket = net.connect({ port: server.port, host: server.host, allowHalfOpen: true });
+  let answer = '';
+  socket.on('data', chunk => { answer += chunk; });
+  const answered = new Promise(resolve => socket.on('end', resolve));
+  socket.on('error', () => {});
+  socket.write('POST /bad HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nab\r\n0\r\n\r\n');
+  await answered;
+  check(answer.startsWith('HTTP/1.1 400'), 'held malformed body response: ' + answer);
+  server.fiber.interruptUnsafe();
+  check(!(await pending(server.done, Number(limits.idleMillis) + 1000)), 'a client holding its connection after a malformed body held shutdown open');
+  socket.destroy();
+  await server.done;
+}
 if (backpressure) { // a malformed pipelined body keeps its admission until its 400 has drained
   const cleaned = deferred();
   const big = cleanedLarge(cleaned);
