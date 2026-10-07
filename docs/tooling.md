@@ -91,9 +91,9 @@ Codes are stable and grouped by the seam that owns them: `EF001` lexical errors,
 | type assertion | `as` | absent | explicit conversion, `Convert.Codec` | [checked codecs](specs/bundled-interfaces.md) |
 | top type | `unknown`, `any` | absent | concrete type or closed enum with `match` | [host interop](../NORTH_STAR.md) forbids an unchecked `any` |
 | async | `async`, `await` | absent | `effect fn` with `run` | [surface language](design.md#surface-language) |
-| module binding | module-level `let` | absent | a service a layer provides; a function for a fixed value | [layers](specs/layers.md) |
+| module binding | module-level `let` | planned | a zero-argument function for a fixed value; a service a layer provides for shared state | [surface language](design.md#surface-language) shows a module-level `let`; [layers](specs/layers.md) own shared state |
 | dynamic import | `import(...)` | absent | top-level `import` declaration | [interop](interop.md) |
-| conditional operator | `?` | absent | `if c { a } else { b }`; `match` on Data.Result | `if` is an expression; Result-propagation `?` is planned ([design](design.md#surface-language)) and also not yet supported |
+| question operator | `?` | planned | `if c { a } else { b }` for a conditional; `match` on Data.Result until propagation lands | [surface language](design.md#surface-language) keeps `?` for Result propagation; a conditional is an `if` expression |
 | negation, inequality, logical and | `!`, `!=`, `&&` | absent | `if`/`else` forms | the specifications are silent, so absent |
 | `if` without `else` | `if c { ... }` | absent | `else { void }` | [prototype](prototype.md#supported-surface) admits two-branch `if` |
 | closure | `fn(...) -> T { ... }`, `effect fn(...)` | planned | a named module function passed by name | [language abstractions](specs/language-abstractions.md) admits closures after capture checking |
