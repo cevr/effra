@@ -933,34 +933,35 @@ effect fn test_noop() -> void {
 	}
 }
 
-func TestProjectCheckReportsInitializationOnlyGoImports(t *testing.T) {
-	root := t.TempDir()
-	source := `import go strings "strings"
-effect fn unused(text: string) -> string uses { Foreign } {
-    run strings.TrimSpace(text)
-}
-effect fn main() -> void {
-    void
-}
-`
-	for name, content := range map[string]string{"go.mod": "module example.com/initonly\n\ngo 1.27\n", "main.ef": source} {
-		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	result, err := call(root, "project.check", arguments{File: "main.ef"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	applications, ok := result.(map[string]any)["applications"].([]compiler.ApplicationInspection)
-	if !ok || len(applications) != 1 {
-		t.Fatalf("project.check applications = %#v", result.(map[string]any)["applications"])
-	}
-	initialization := applications[0].GoInitialization
-	if len(initialization) != 1 || initialization[0].Package != "strings" || initialization[0].Lowering != "blank" || applications[0].Requirements[compiler.RequiresForeign] != 0 {
-		t.Fatalf("initialization-only import = %+v", applications[0])
-	}
-	if !reflect.DeepEqual(applications, compiler.CompileAt(source, "go", root).ApplicationInspections()) {
-		t.Fatal("MCP initialization inspection drifted from the compiler")
+func TestProjectCheckReportsGoInitializationLowering(t *testing.T) {
+	for _, tc := range []struct{ entry, lowering string }{
+		{"effect fn main() -> void {\n    void\n}\n", "blank"},
+		{"effect fn main() -> string {\n    run unused(\" x \").provide<Foreign>(Host)\n}\n", "named"},
+	} {
+		t.Run(tc.lowering, func(t *testing.T) {
+			root := t.TempDir()
+			source := "import go strings \"strings\"\neffect fn unused(text: string) -> string uses { Foreign } {\n    run strings.TrimSpace(text)\n}\n" + tc.entry
+			for name, content := range map[string]string{"go.mod": "module example.com/initonly\n\ngo 1.27\n", "main.ef": source} {
+				if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := call(root, "project.check", arguments{File: "main.ef"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			applications, ok := result.(map[string]any)["applications"].([]compiler.ApplicationInspection)
+			if !ok || len(applications) != 1 {
+				t.Fatalf("project.check applications = %#v", result.(map[string]any)["applications"])
+			}
+			initialization := applications[0].GoInitialization
+			if len(initialization) != 1 || initialization[0].Package != "strings" || initialization[0].Lowering != tc.lowering ||
+				len(initialization[0].Declarations) != 1 || initialization[0].Declarations[0].Alias != "strings" {
+				t.Fatalf("initialization = %+v, want %s lowering", applications[0], tc.lowering)
+			}
+			if !reflect.DeepEqual(applications, compiler.CompileAt(source, "go", root).ApplicationInspections()) {
+				t.Fatal("MCP initialization inspection drifted from the compiler")
+			}
+		})
 	}
 }

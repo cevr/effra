@@ -63,28 +63,39 @@ func TestCLIInitializesDeclaredForeignImportsWithoutReachableCallers(t *testing.
 	root := writeInitProbeRoot(t)
 	source := filepath.Join(root, "app", "main.ef")
 
-	// Inspection reports the initialization-only package and no binding.
-	stdout, stderr, code := runTestCLIDir(t, binary, root, "", "check", source)
-	var report struct {
-		Checked      bool                             `json:"checked"`
-		Applications []compiler.ApplicationInspection `json:"applications"`
+	// Inspection reports the initialization-only package with no binding,
+	// and a package a reachable call names as its named import.
+	live := filepath.Join(root, "app", "live.ef")
+	liveSource := strings.Replace(initProbeApplication, "effect fn main() -> void {\n    void\n}", "effect fn main() -> i64 {\n    run unused().provide<Foreign>(Host)\n}", 1)
+	if err := os.WriteFile(live, []byte(liveSource), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if err := json.Unmarshal(stdout, &report); err != nil || code != 0 || !report.Checked {
-		t.Fatalf("check: code=%d err=%v stdout=%q stderr=%q", code, err, stdout, stderr)
-	}
-	if len(report.Applications) != 1 {
-		t.Fatalf("applications = %+v", report.Applications)
-	}
-	inspection := report.Applications[0]
-	if len(inspection.GoInitialization) != 1 || inspection.GoInitialization[0].Package != initProbeRegistry || inspection.GoInitialization[0].Lowering != "blank" ||
-		len(inspection.GoInitialization[0].Declarations) != 1 || inspection.GoInitialization[0].Declarations[0].Alias != "registry" {
-		t.Fatalf("initialization inspection = %+v", inspection.GoInitialization)
-	}
-	if inspection.Requirements[compiler.RequiresGoInitialization] != 1 || inspection.Requirements[compiler.RequiresForeign] != 0 || inspection.Requirements[compiler.RequiresGoImport] != 0 {
-		t.Fatalf("initialization-only requirements = %v", inspection.Requirements)
-	}
-	if want := compiler.CompileAt(initProbeApplication, "go", filepath.Dir(source)).ApplicationInspections(); !reflect.DeepEqual(report.Applications, want) {
-		t.Fatalf("CLI inspection differs from the compiler's:\n%+v\n%+v", report.Applications, want)
+	for _, tc := range []struct {
+		path, source, lowering string
+		foreign                int
+	}{{source, initProbeApplication, "blank", 0}, {live, liveSource, "named", 1}} {
+		stdout, stderr, code := runTestCLIDir(t, binary, root, "", "check", tc.path)
+		var report struct {
+			Checked      bool                             `json:"checked"`
+			Applications []compiler.ApplicationInspection `json:"applications"`
+		}
+		if err := json.Unmarshal(stdout, &report); err != nil || code != 0 || !report.Checked {
+			t.Fatalf("check: code=%d err=%v stdout=%q stderr=%q", code, err, stdout, stderr)
+		}
+		if len(report.Applications) != 1 {
+			t.Fatalf("applications = %+v", report.Applications)
+		}
+		inspection := report.Applications[0]
+		if len(inspection.GoInitialization) != 1 || inspection.GoInitialization[0].Package != initProbeRegistry || inspection.GoInitialization[0].Lowering != tc.lowering ||
+			len(inspection.GoInitialization[0].Declarations) != 1 || inspection.GoInitialization[0].Declarations[0].Alias != "registry" {
+			t.Fatalf("initialization inspection = %+v, want %s lowering", inspection.GoInitialization, tc.lowering)
+		}
+		if inspection.Requirements[compiler.RequiresGoInitialization] != 1 || inspection.Requirements[compiler.RequiresForeign] != tc.foreign || inspection.Requirements[compiler.RequiresGoImport] != tc.foreign {
+			t.Fatalf("initialization requirements = %v", inspection.Requirements)
+		}
+		if want := compiler.CompileAt(tc.source, "go", filepath.Dir(tc.path)).ApplicationInspections(); !reflect.DeepEqual(report.Applications, want) {
+			t.Fatalf("CLI inspection differs from the compiler's:\n%+v\n%+v", report.Applications, want)
+		}
 	}
 
 	build := func(directory, output string) string {

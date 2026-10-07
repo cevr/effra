@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -212,6 +213,17 @@ func TestReachableForeignCallKeepsOneNamedImport(t *testing.T) {
 	// and the reachable call requires the named import.
 	requireProvenance(t, plan, RequiresGoInitialization, initProbePackage, "", "declared-foreign-import")
 	requireProvenance(t, plan, RequiresGoImport, initProbePackage, "go:"+initProbePackage+".Value", "foreign-call")
+	requireGoInitialization(t, r, GoInitializationInspection{Package: initProbePackage, Declarations: []GoImport{{Alias: "registry", Path: initProbePackage, Span: r.Program.Imports[0].Span}}, Lowering: "named"})
+}
+
+// requireGoInitialization asserts the build inspection's complete
+// initialization report.
+func requireGoInitialization(t *testing.T, r *Result, want ...GoInitializationInspection) {
+	t.Helper()
+	inspections := r.ApplicationInspections()
+	if len(inspections) != 1 || !reflect.DeepEqual(inspections[0].GoInitialization, want) {
+		t.Fatalf("initialization inspection = %+v, want %+v", inspections, want)
+	}
 }
 
 func TestAliasedForeignImportsInitializeTheirPackageOnce(t *testing.T) {
@@ -225,25 +237,29 @@ effect fn main() -> void {
     void
 }
 `
-	_, application, output := buildAndRunInitProbe(t, module, twoAliases, GoGenerationBuild)
+	r, application, output := buildAndRunInitProbe(t, module, twoAliases, GoGenerationBuild)
 	if output != "dependency-init\nregistry-init\n" {
 		t.Fatalf("aliased imports initialization = %q", output)
 	}
 	if names := importsOf(emittedImportSpecs(t, application.Main), initProbePackage); len(names) != 1 || names[0] != "_" {
 		t.Fatalf("aliases of one package need one blank import: %v", names)
 	}
+	declarations := []GoImport{{Alias: "first", Path: initProbePackage, Span: r.Program.Imports[0].Span}, {Alias: "second", Path: initProbePackage, Span: r.Program.Imports[1].Span}}
+	requireGoInitialization(t, r, GoInitializationInspection{Package: initProbePackage, Declarations: declarations, Lowering: "blank"})
 	used := strings.Replace(twoAliases, `effect fn main() -> void {
     void
 }`, `effect fn main() -> i64 {
     run viaSecond().provide<Foreign>(Host)
 }`, 1)
-	_, application, output = buildAndRunInitProbe(t, module, used, GoGenerationBuild)
+	r, application, output = buildAndRunInitProbe(t, module, used, GoGenerationBuild)
 	if output != "dependency-init\nregistry-init\nforeign-call\n7\n" {
 		t.Fatalf("aliased imports with one use = %q", output)
 	}
 	if names := importsOf(emittedImportSpecs(t, application.Main), initProbePackage); len(names) != 1 || names[0] != "efGo_second" {
 		t.Fatalf("only the referenced alias is emitted, without a blank duplicate: %v", names)
 	}
+	// Both declarations root the package; the used alias names it.
+	requireGoInitialization(t, r, GoInitializationInspection{Package: initProbePackage, Declarations: declarations, Lowering: "named"})
 }
 
 func TestRemovedForeignImportLosesItsInitializationRoot(t *testing.T) {
@@ -372,22 +388,48 @@ func TestDeclaredForeignImportsMustBeImportableByTheGeneratedProgram(t *testing.
 	}
 }
 
+// TestInitializationRootsAreChargedToThePlanBudget compares entry-only
+// programs that differ only in their declared imports: each distinct package
+// costs one unit of plan work, and another alias of a package costs none.
 func TestInitializationRootsAreChargedToThePlanBudget(t *testing.T) {
 	module := writeInitProbeModule(t)
-	r := CompileAt(unreachableForeignCaller, "go", module)
-	if !r.Checked {
-		t.Fatal(r.Diagnostics)
+	const registry = "import go registry \"effra.fixture/initprobe/registry\"\n"
+	plan := func(imports string) (*Result, int) {
+		t.Helper()
+		r := CompileAt(imports+"effect fn main() -> void {\n    void\n}\n", "go", module)
+		if !r.Checked {
+			t.Fatal(r.Diagnostics)
+		}
+		plan, err := r.ApplicationPlan(GoGenerationBuild)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r, plan.Work
 	}
-	plan, err := r.ApplicationPlan(GoGenerationBuild)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.applicationPlan(GoGenerationBuild, plan.Work); err != nil {
-		t.Fatalf("exact budget refused: %v", err)
-	}
-	refused, err := r.applicationPlan(GoGenerationBuild, plan.Work-1)
-	var refusal *ApplicationPlanError
-	if refused != nil || err == nil || !errors.As(err, &refusal) || refusal.Code != applicationPlanExhaustedCode {
-		t.Fatalf("one unit short must refuse without a partial plan: %v %v", refused, err)
+	_, base := plan("")
+	for name, tc := range map[string]struct {
+		imports string
+		delta   int
+	}{
+		"one package":                {registry, 1},
+		"two aliases of one package": {registry + "import go again \"effra.fixture/initprobe/registry\"\n", 1},
+		"two packages":               {registry + "import go dependency \"effra.fixture/initprobe/dependency\"\n", 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, work := plan(tc.imports)
+			if work-base != tc.delta {
+				t.Fatalf("initialization roots cost %d units, want %d", work-base, tc.delta)
+			}
+			if _, err := r.applicationPlan(GoGenerationBuild, work); err != nil {
+				t.Fatalf("exact budget refused: %v", err)
+			}
+			// The budget of the same entry without imports cannot pay for the
+			// roots, and refusal returns no partial plan.
+			refused, err := r.applicationPlan(GoGenerationBuild, base)
+			var refusal *ApplicationPlanError
+			if refused != nil || err == nil || !errors.As(err, &refusal) || refusal.Code != applicationPlanExhaustedCode {
+				t.Fatalf("uncharged initialization roots: %v %v", refused, err)
+			}
+		})
 	}
 }
