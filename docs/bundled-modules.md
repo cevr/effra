@@ -80,15 +80,22 @@ order. Both bounds are required and are plan data; there is no default.
 (1 to 512) bounds input nesting and must cover the type's own nesting. A
 declaration that omits either bound is refused with EF138.
 Functions, effect recipes, host and runtime types, bytes, generic
-applications, failure declarations and empty enums are refused with EF138 and
-the field path at which representation fails; plans are limited to 4096
-nodes and 65536 fields and variants.
+applications and empty enums are refused with EF138 and the field path at
+which representation fails. A failure (`error`) declaration is not a value
+type, so naming one as the derived type is refused earlier with EF102, like
+an unknown type. Plans are limited to 4096 nodes and 65536 fields and
+variants.
 
 `ef check` and MCP `project.check` report each witness under `codecs`, with
 its domain and wire types and each direction's function, failures and
 requirements, and its plan under `codecPlans` with stable node identities. A
 native application retains a plan, its adapters and the runtime `codec`
-module only through an executed direction. A generated JS module exports each
-witness as a frozen `{ decode, encode }` object and includes the shared
-engine once. Transformations, arrays, payload-failure codecs, error
-accumulation and stricter excess-property profiles are not yet supported.
+module only through an executed direction. A generated JS entry follows the
+same selection: it compiles one codec per plan an executed direction reaches
+and includes the shared engine once, only when such a plan exists, so an idle
+entry has no witness and no engine and an encode-only entry omits the decode
+witness. A library surface roots every direction of every witness: it exports
+each witness as a frozen `{ decode, encode }` object and carries the engine
+once whenever it derives any codec. Transformations, arrays, payload-failure
+codecs, error accumulation and stricter excess-property profiles are not yet
+supported.
