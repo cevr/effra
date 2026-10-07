@@ -30,7 +30,7 @@ python3 -B scripts/check_effect_conformance.py --run
 ./scripts/gate.sh
 ```
 
-A missing checkout, a checkout at another commit or a modified tracked file fails with one message naming `scripts/init_upstream.sh`; `scripts/init_upstream.sh --force` restores modified files. Git status cannot see an edit behind an index flag, so the verifier also refuses a checkout that enables `core.ignoreStat` and any selected file marked assume-unchanged or skip-worktree. Each refusal prints its repair; `git -C conformance/upstream/effect read-tree HEAD` clears the flags before `--force` can restore the files. Every hash and every mapped anchor is read from the pinned commit's git objects, never from the checkout's working files, so a local edit or line-ending conversion cannot change what is verified.
+A missing checkout, a checkout at another commit or a modified tracked file fails with one message naming `scripts/init_upstream.sh`; `scripts/init_upstream.sh --force` restores modified files. Git status cannot see an edit behind an index flag, so the verifier also refuses a checkout that enables `core.ignoreStat` and any selected file marked assume-unchanged or skip-worktree. Git cannot open the checkout at all while any `core.ignoreStat` entry is not a boolean, so that refusal names each configuration file that sets it instead of initialization. Each refusal prints its repair with absolute paths, so it also runs from outside the repository when the verifier was given `--root`; `git -C conformance/upstream/effect read-tree HEAD` clears the flags before `--force` can restore the files. Every hash and every mapped anchor is read from the pinned commit's git objects, never from the checkout's working files, so a local edit or line-ending conversion cannot change what is verified.
 
 To move the pin:
 
@@ -38,6 +38,7 @@ To move the pin:
 2. Update `COMMIT` and `TAG` in `scripts/import_effect_conformance.py`, and `sourceCommit` in `conformance/effect-cases.json`.
 3. Run `python3 -B scripts/import_effect_conformance.py --refresh`. Review the printed integrity identities and the new counts before copying them into the script's independently pinned `RELEASE_*` constants.
 4. Review every mapped anchor.
+5. Update the prose that states the pin and counts: the first paragraph of this page, the pin and the manifest row's counts in `conformance/README.md`, and the Effect and Effect Cluster rows of `PRIOR_ARTS.md`. Other citations of the old commit, such as the source comparison below and those in `docs/research` and `docs/specs`, record what was read at that commit; change one only when its source is re-read at the new pin.
 
 The first selection covers child interruption and completed child-before-parent cleanup, preservation of an expected failure plus cleanup defect, and virtual-time admission of an unstarted fork. Timeout has an explicit difference row: Effra's nominal `Timeout` and required `Scheduler` differ from upstream `Cause.TimeoutError`; a supplemental timer-defect test ensures defects are not rewritten as timeouts. Existing lifecycle acceptance also checks unobserved child failure, but that assertion has no selected upstream case mapping yet and is not counted as another port.
 

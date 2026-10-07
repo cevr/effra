@@ -45,7 +45,7 @@ class SubmoduleReferenceTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="effect-upstream-test-")
-        self.root = pathlib.Path(self.temporary.name)
+        self.root = pathlib.Path(self.temporary.name).resolve()
         self.upstream = self.root / "upstream"
         write(self.upstream, {
             "LICENSE": b"root-license\n",
@@ -84,11 +84,18 @@ class SubmoduleReferenceTests(unittest.TestCase):
     def verify(self) -> dict[str, object]:
         return MODULE.verify(self.effra, self.commit, self.tag).manifest
 
-    def assert_refused(self, *fragments: str) -> None:
+    def assert_refused(self, *fragments: str) -> str:
         with self.assertRaises(MODULE.ImportError) as refusal:
             MODULE.verify(self.effra, self.commit, self.tag)
         for fragment in fragments:
             self.assertIn(fragment, str(refusal.exception))
+        return str(refusal.exception)
+
+    def run_printed_repair(self, message: str, mirror: pathlib.Path | None = None) -> None:
+        """Run each printed repair command from outside the Effra checkout, as a user passing --root would."""
+        env = dict(GIT_ENV, EFFRA_UPSTREAM_MIRROR=str(mirror) if mirror else "")
+        for command in message.rpartition("; run ")[2].split(", then "):
+            subprocess.run(["sh", "-c", command], cwd=self.root, check=True, capture_output=True, env=env)
 
     def edit_hidden_from_status(self, target: str) -> None:
         """Edit a selected file that index flags hide; git status alone would call the checkout clean."""
@@ -96,15 +103,14 @@ class SubmoduleReferenceTests(unittest.TestCase):
         self.assertEqual(git(self.checkout, "status", "--porcelain", "--untracked-files=no"), "")
 
     def assert_flag_refusal_then_repair(self, target: str) -> None:
-        self.assert_refused(
+        message = self.assert_refused(
             f"hides selected tracked files from git status with assume-unchanged or skip-worktree (1, first {target})",
-            f"run git -C {MODULE.CHECKOUT_RELATIVE} read-tree HEAD, then scripts/init_upstream.sh --force",
+            f"run git -C {self.checkout} read-tree HEAD, then {self.effra}/scripts/init_upstream.sh --force",
         )
         # Every integrity-bearing read comes from the pinned objects, never the edited file.
         self.assertEqual(MODULE.read_pinned(self.checkout, self.commit, self.tag).text(target), "export const one = 1\n")
         # The printed repair clears the flags; only then can a forced checkout restore the file.
-        git(self.effra, "-C", str(MODULE.CHECKOUT_RELATIVE), "read-tree", "HEAD")
-        self.init_upstream("--force")
+        self.run_printed_repair(message)
         self.assertEqual((self.checkout / target).read_bytes(), b"export const one = 1\n")
         self.verify()
 
@@ -128,16 +134,30 @@ class SubmoduleReferenceTests(unittest.TestCase):
         git(self.checkout, "checkout", "--", target)
         self.assertEqual(git(self.checkout, "ls-files", "-v", "--", target), f"h {target}")
         self.edit_hidden_from_status(target)
-        self.assert_refused(
+        message = self.assert_refused(
             f"Effect upstream checkout {MODULE.CHECKOUT_RELATIVE} enables core.ignoreStat, which hides edits from git status",
-            f"git -C {MODULE.CHECKOUT_RELATIVE} config core.ignoreStat false",
+            f"run git -C {self.checkout} config core.ignoreStat false",
         )
-        git(self.checkout, "config", "core.ignoreStat", "false")
+        self.run_printed_repair(message)
         self.assert_flag_refusal_then_repair(target)
 
-    def init_upstream(self, *args: str, mirror: pathlib.Path | None = None) -> None:
-        env = dict(GIT_ENV, EFFRA_UPSTREAM_MIRROR=str(mirror) if mirror else "")
-        subprocess.run(["sh", str(self.effra / "scripts" / "init_upstream.sh"), *args], check=True, capture_output=True, env=env)
+    def test_unparseable_ignore_stat_names_every_origin_and_the_printed_repair_restores_it(self) -> None:
+        # git refuses to open the checkout while any core.ignoreStat entry is not a boolean; initializing cannot help.
+        settings = self.root / "global.gitconfig"
+        settings.write_text("[core]\n\tignoreStat = maybe\n", encoding="utf-8")
+        git(self.checkout, "config", "core.ignoreStat", "sometimes")
+        local = self.effra / ".git" / "modules" / MODULE.CHECKOUT_RELATIVE / "config"
+        with mock.patch.dict(os.environ, GIT_CONFIG_GLOBAL=str(settings)):
+            message = self.assert_refused(
+                f"Effect upstream checkout {MODULE.CHECKOUT_RELATIVE} cannot be opened because git rejects its core.ignoreStat setting "
+                "(fatal: bad boolean config value 'maybe' for 'core.ignorestat')",
+                f"run git config --file {settings} --replace-all core.ignoreStat false, then git config --file {local} --replace-all core.ignoreStat false",
+            )
+            self.assertNotIn("not initialized", message)
+            self.run_printed_repair(message)
+            self.verify()
+            with mock.patch.dict(os.environ, GIT_CONFIG_PARAMETERS="'core.ignorestat'='maybe'"):
+                self.assert_refused("; remove core.ignoreStat from the command line configuration")
 
     def test_refresh_records_selection_and_nearest_licenses(self) -> None:
         manifest = self.verify()
@@ -156,25 +176,26 @@ class SubmoduleReferenceTests(unittest.TestCase):
     def test_uninitialized_checkout_names_init_and_offline_mirror_restores_it(self) -> None:
         git(self.effra, "submodule", "deinit", "-q", "-f", str(MODULE.CHECKOUT_RELATIVE))
         shutil.rmtree(self.effra / ".git" / "modules")
-        self.assert_refused("is not initialized; run scripts/init_upstream.sh")
+        self.assert_refused(f"is not initialized; run {self.effra}/scripts/init_upstream.sh")
+        # Run from outside the repository: the printed repair must not depend on the current directory.
         result = subprocess.run(
             [sys.executable, "-B", str(ROOT / "scripts" / "import_effect_conformance.py"), "--root", str(self.effra)],
-            capture_output=True, text=True, check=False, env=GIT_ENV,
+            cwd=self.root, capture_output=True, text=True, check=False, env=GIT_ENV,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stderr.splitlines(), [
-            f"import_effect_conformance: Effect upstream checkout {MODULE.CHECKOUT_RELATIVE} is not initialized; run scripts/init_upstream.sh",
+            f"import_effect_conformance: Effect upstream checkout {MODULE.CHECKOUT_RELATIVE} is not initialized; run {self.effra}/scripts/init_upstream.sh",
         ])
 
-        self.init_upstream(mirror=self.upstream)
+        self.run_printed_repair(result.stderr.strip(), mirror=self.upstream)
         self.verify()
         self.assertEqual(git(self.checkout, "rev-parse", "--is-shallow-repository"), "true")
         self.assertEqual(git(self.effra, "status", "--porcelain"), "")
 
     def test_checkout_at_another_commit_names_init_which_restores_the_pin(self) -> None:
         git(self.checkout, "checkout", "-q", "--detach", self.later)
-        self.assert_refused(f"is at {self.later}, not the pinned commit {self.commit}; run scripts/init_upstream.sh")
-        self.init_upstream()
+        message = self.assert_refused(f"is at {self.later}, not the pinned commit {self.commit}; run {self.effra}/scripts/init_upstream.sh")
+        self.run_printed_repair(message)
         self.verify()
 
     def test_modified_tracked_file_is_refused_even_with_a_rehashed_manifest(self) -> None:
@@ -187,8 +208,8 @@ class SubmoduleReferenceTests(unittest.TestCase):
         entry["sha256"] = MODULE.sha256_bytes(target.read_bytes())
         manifest["integrity"] = MODULE.integrity_for_manifest(manifest)
         manifest_path.write_text(MODULE.render_manifest(manifest), encoding="utf-8")
-        self.assert_refused("has modified tracked files", "run scripts/init_upstream.sh --force")
-        self.init_upstream("--force")
+        message = self.assert_refused("has modified tracked files", f"run {self.effra}/scripts/init_upstream.sh --force")
+        self.run_printed_repair(message)
         # The checkout is restored; hashes still come from the pinned objects.
         self.assert_refused("manifest differs from the pinned checkout at /files[packages/effect/test/one.test.ts]/sha256")
 

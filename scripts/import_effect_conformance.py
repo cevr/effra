@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import re
+import shlex
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -38,7 +39,7 @@ LICENSE_NAMES = ("LICENSE", "LICENCE", "COPYING", "LICENSE.md", "LICENCE.md", "C
 REGULAR_FILE_MODES = frozenset({"100644", "100755"})
 CHECKOUT_RELATIVE = Path("conformance/upstream/effect")
 MANIFEST_RELATIVE = Path("conformance/effect-upstream.manifest.json")
-INIT_COMMAND = "scripts/init_upstream.sh"
+INIT_SCRIPT = Path("scripts/init_upstream.sh")
 
 
 class ImportError(RuntimeError):
@@ -298,35 +299,68 @@ def first_difference(actual: object, expected: object, location: str = "") -> st
     return None
 
 
+def init_command(root: Path, *args: str) -> str:
+    """Name the init script by absolute path, so a repair printed for --root runs from any directory."""
+    return shlex.join([str((root / INIT_SCRIPT).resolve()), *args])
+
+
+def checkout_git_command(root: Path, *args: str) -> str:
+    """Name a git command on the checkout by absolute path, so it runs from any directory."""
+    return shlex.join(["git", "-C", str((root / CHECKOUT_RELATIVE).resolve()), *args])
+
+
+def unopenable_checkout(root: Path, checkout: Path, failure: subprocess.CompletedProcess) -> ImportError:
+    """Explain why git cannot open an existing checkout directory, naming the repair that applies."""
+    detail = failure.stderr.strip()
+    # git refuses to open a repository while any core.ignoreStat entry, in any scope, is not a boolean.
+    if git_process(checkout, "config", "--type=bool", "core.ignoreStat").returncode not in (0, 1):
+        listing = git_process(checkout, "config", "--show-origin", "-z", "--get-all", "core.ignoreStat")
+        fields = listing.stdout.split("\x00")[:-1] if listing.returncode == 0 else []
+        commands, others = [], []
+        for origin in dict.fromkeys(fields[0::2]):
+            kind, _, location = origin.partition(":")
+            if kind == "file":
+                commands.append(shlex.join(["git", "config", "--file", str((checkout / location).resolve()), "--replace-all", "core.ignoreStat", "false"]))
+            else:
+                others.append(kind)
+        repairs = [f"run {', then '.join(commands)}"] if commands else []
+        repairs += [f"remove core.ignoreStat from the {kind} configuration" for kind in others]
+        if repairs:
+            return ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} cannot be opened because git rejects its core.ignoreStat setting ({detail}); {'; '.join(repairs)}")
+    return ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} is not initialized ({detail}); run {init_command(root)}")
+
+
 def pinned_checkout(root: Path, commit: str) -> Path:
     """Return the submodule checkout, failing closed unless it is exactly the pinned commit."""
     checkout = root / CHECKOUT_RELATIVE
     toplevel = git_process(checkout, "rev-parse", "--show-toplevel") if checkout.is_dir() else None
-    if toplevel is None or toplevel.returncode != 0 or Path(toplevel.stdout.strip()) != checkout.resolve():
-        raise ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} is not initialized; run {INIT_COMMAND}")
+    if toplevel is not None and toplevel.returncode != 0:
+        raise unopenable_checkout(root, checkout, toplevel)
+    if toplevel is None or Path(toplevel.stdout.strip()) != checkout.resolve():
+        raise ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} is not initialized; run {init_command(root)}")
     entry = str(run_git(root, "ls-files", "--stage", "--", str(CHECKOUT_RELATIVE))).split()
     if entry[:2] != ["160000", commit]:
         recorded = entry[1] if entry[:1] == ["160000"] else "no gitlink"
         raise ImportError(f"{CHECKOUT_RELATIVE} records {recorded}, not the pinned commit {commit}")
     head = str(run_git(checkout, "rev-parse", "HEAD")).strip()
     if head != commit:
-        raise ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} is at {head}, not the pinned commit {commit}; run {INIT_COMMAND}")
+        raise ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} is at {head}, not the pinned commit {commit}; run {init_command(root)}")
     # core.ignoreStat marks every file git writes assume-unchanged, so the flag refusal below would recur after each repair.
     ignore_stat = git_process(checkout, "config", "--type=bool", "core.ignoreStat")
     if ignore_stat.returncode not in (0, 1):
         raise ImportError(f"git config core.ignoreStat failed: {ignore_stat.stderr.strip()}")
     if ignore_stat.stdout.strip() == "true":
-        raise ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} enables core.ignoreStat, which hides edits from git status; run git -C {CHECKOUT_RELATIVE} config core.ignoreStat false")
+        raise ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} enables core.ignoreStat, which hides edits from git status; run {checkout_git_command(root, 'config', 'core.ignoreStat', 'false')}")
     modified = str(run_git(checkout, "status", "--porcelain=v1", "--untracked-files=no", "--ignore-submodules=all")).splitlines()
     if modified:
-        raise ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} has modified tracked files ({modified[0].strip()}); run {INIT_COMMAND} --force")
+        raise ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} has modified tracked files ({modified[0].strip()}); run {init_command(root, '--force')}")
     return checkout
 
 
-def refuse_hidden_paths(checkout: Path, selected: Mapping[str, bytes]) -> None:
+def refuse_hidden_paths(root: Path, selected: Mapping[str, bytes]) -> None:
     """Refuse selected paths whose assume-unchanged or skip-worktree flag hides edits from git status."""
     hidden = []
-    for entry in str(run_git(checkout, "ls-files", "-v", "-z")).split("\x00"):
+    for entry in str(run_git(root / CHECKOUT_RELATIVE, "ls-files", "-v", "-z")).split("\x00"):
         tag, _, path = entry.partition(" ")
         # ls-files -v writes S for skip-worktree and a lowercase tag for assume-unchanged.
         if path in selected and (tag.islower() or tag.upper() == "S"):
@@ -335,7 +369,7 @@ def refuse_hidden_paths(checkout: Path, selected: Mapping[str, bytes]) -> None:
         # Rebuilding the index from HEAD drops every flag at once; update-index applies only one flag option per run.
         raise ImportError(
             f"Effect upstream checkout {CHECKOUT_RELATIVE} hides selected tracked files from git status with assume-unchanged or skip-worktree "
-            f"({len(hidden)}, first {hidden[0]}); run git -C {CHECKOUT_RELATIVE} read-tree HEAD, then {INIT_COMMAND} --force"
+            f"({len(hidden)}, first {hidden[0]}); run {checkout_git_command(root, 'read-tree', 'HEAD')}, then {init_command(root, '--force')}"
         )
 
 
@@ -343,7 +377,7 @@ def checked_out(root: Path, commit: str, tag: str) -> PinnedCorpus:
     """Read the pinned corpus from git objects once the checkout passes every fail-closed check."""
     checkout = pinned_checkout(root, commit)
     corpus = read_pinned(checkout, commit, tag)
-    refuse_hidden_paths(checkout, corpus.contents)
+    refuse_hidden_paths(root, corpus.contents)
     return corpus
 
 
