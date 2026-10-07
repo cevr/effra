@@ -62,7 +62,7 @@ Each request executes inside a fresh managed scope, with cancellation linked to 
 
 ### Managed transport
 
-`Http.listen(address, limits, handler)` is the bounded buffered HTTP/1.1 transport; [examples/http-transport.ef](../examples/http-transport.ef) is the public program. Referencing `Http` or `LiveHttp` admits these builtin records:
+`Http.listen(address, limits, handler)` is the bounded buffered HTTP/1.1 transport; [examples/http-transport.ef](../examples/http-transport.ef) is the public program. A reference to the global `Http` or `LiveHttp` (a service row, `provide<Http>`, an operation call or the provider value; a local binding of either name is not one) admits these builtin records, and only checked uses of `LiveHttp` emit the transport implementation:
 
 ```effra
 record HttpRequest { method: string, path: string, contentType: string, body: bytes }

@@ -507,7 +507,6 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 	p := parser{tokens: tokens, types: map[string]*sourceType{}}
 	program = &Program{Comments: comments, Errors: map[string]Span{}, Bindings: map[string]Binding{}, UsedImports: map[string]bool{}}
 	program.typeExpressions = p.types
-	program.httpContract = referencesHTTPContract(tokens)
 	for p.peek().kind != "eof" {
 		switch p.peek().text {
 		case "import":
@@ -711,6 +710,7 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 		item := program.Items[len(program.Items)-1]
 		item.Extent = p.extent(item.Span)
 	}
+	program.httpContract = referencesGlobal(program, "Http", "LiveHttp")
 	return program, tokens, nil
 }
 func (p *parser) peek() token { return p.tokens[p.at] }

@@ -65,8 +65,9 @@ var builtinCallbacks = map[string]struct{ Parameter, Result string }{
 
 // builtinServicesFor and builtinProvidersFor select the prelude one program
 // admits. The Http service, its provider and its data form one contract that
-// is admitted only when the program names Http or LiveHttp, so other programs
-// neither reserve its data names nor inspect or emit any of it. Callback type
+// is admitted only when the program refers to the global Http or LiveHttp
+// (referencesGlobal: a local binding of either name is not a reference), so
+// other programs neither reserve its data names nor inspect it. Callback type
 // names stay reserved like other builtin type names.
 func builtinServicesFor(program *Program) []*Service {
 	services := builtins()
@@ -124,14 +125,12 @@ func addBuiltinData(program *Program) {
 	program.Enums = append(builtin.Enums, program.Enums...)
 }
 
-// referencesHTTPContract reports whether any name token refers to the Http
-// service or its provider. Builtin names are global, so a name token is the
-// complete reference set; strings and comments are not name tokens.
-func referencesHTTPContract(tokens []token) bool {
-	for _, t := range tokens {
-		if t.kind == "name" && (t.text == "Http" || t.text == "LiveHttp") {
-			return true
-		}
-	}
-	return false
+// referencesBuiltinProvider reports whether checked code holds a value of
+// the named builtin provider: a provider reference, construction or layer
+// selection. Builtin providers have no declaration root, so this is exactly
+// the set of checked references. Their implementations are emitted only for
+// such references, never for an admitted contract alone.
+func (r *Result) referencesBuiltinProvider(name string) bool {
+	provider := r.checkedProviders[name]
+	return provider != nil && r.checkedProviderValues[provider]
 }

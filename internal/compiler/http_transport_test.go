@@ -52,6 +52,9 @@ func TestHTTPListenRejectsHandlerShapesAndShadowedContracts(t *testing.T) {
 		{"pure", `fn route(request:HttpRequest)->HttpReply{HttpReply.NotFound {}} effect fn main()->void raises {IoError}{run Http.listen("127.0.0.1:0",HttpLimits{maxBodyBytes:1,readHeaderMillis:1,readBodyMillis:1,idleMillis:1,maxActive:1},route).provide<Http>(LiveHttp)}`, "EF106"},
 		{"limits", `effect fn route(request:HttpRequest)->HttpReply{HttpReply.NotFound {}} effect fn main()->void raises {IoError}{run Http.listen("127.0.0.1:0",16,route).provide<Http>(LiveHttp)}`, "EF106"},
 		{"shadowed record", `record HttpRequest {path:string} effect fn main()->void{let pending=Http.text("x"); void}`, "EF101"},
+		{"shadowed record by row", `record HttpRequest {path:string} effect fn label()->bytes uses {Http} {run Http.text("x")} effect fn main()->void{void}`, "EF101"},
+		{"shadowed record by provider", `record HttpResponse {path:string} effect fn main()->void{let provider=LiveHttp; void}`, "EF101"},
+		{"shadowed record by outer use", `record HttpRequest {path:string} effect fn main()->void{let pending=Http.text("x"); let Http="local"; void}`, "EF101"},
 		{"shadowed callback", `record HttpHandler {path:string} effect fn main()->void{void}`, "EF101"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -63,26 +66,82 @@ func TestHTTPListenRejectsHandlerShapesAndShadowedContracts(t *testing.T) {
 	}
 }
 
+// Admission follows lexically resolved references: a local binding named Http
+// or LiveHttp is not a reference, so it neither reserves the builtin data
+// names nor emits any transport.
 func TestHTTPContractIsAdmittedOnlyWhenReferenced(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(`record HttpRequest {path:string} effect fn main()->string{let label="Http"; label}`, target)
-		if !r.Checked || len(r.Declarations) != 1 || r.Declarations[0].Source != "" {
-			t.Fatalf("%s: unreferenced Http contract was admitted: %+v %+v", target, r.Diagnostics, r.Declarations)
+	for _, source := range []string{
+		`record HttpRequest {path:string} effect fn main()->string{let label="Http"; label}`,
+		`record HttpRequest { path: string }
+effect fn main() -> string {
+    let Http = "local"
+    Http
+}`,
+		`record HttpRequest {path:string} fn echo(LiveHttp:string)->string{LiveHttp} effect fn main()->string{echo("x")}`,
+		`record HttpRequest {path:string} enum Box {Item {Http: string}} fn open(box:Box)->string{match box {Box.Item {Http} => Http}} effect fn main()->string{open(Box.Item {Http: "x"})}`,
+	} {
+		for _, target := range []string{"go", "js"} {
+			r := CompileFor(source, target)
+			if !r.Checked {
+				t.Fatalf("%s: %+v\n%s", target, r.Diagnostics, source)
+			}
+			for _, declaration := range r.Declarations {
+				if declaration.Source == builtinDataSourceID {
+					t.Fatalf("%s: unreferenced Http contract was admitted: %+v\n%s", target, r.Declarations, source)
+				}
+			}
+			code := emitHTTPProgram(t, r, target)
+			if strings.Contains(code, "efProvider_LiveHttp") || strings.Contains(code, "__ef_provider_LiveHttp") || strings.Contains(code, "efService_Http") || strings.Contains(code, "__ef_service_Http") || strings.Contains(code, "node:http") {
+				t.Fatalf("%s: unreferenced Http contract was emitted\n%s", target, source)
+			}
 		}
-		var code string
-		var err error
-		if target == "go" {
-			code, err = r.EmitGo()
-		} else {
-			code, _, err = r.Emit(true)
+	}
+}
+
+// The contract is admitted for its interface alone; the transport
+// implementation is emitted only where checked code holds LiveHttp.
+func TestHTTPImplementationIsEmittedOnlyForCheckedProviderReferences(t *testing.T) {
+	library := `effect fn greeting()->bytes uses {Http} {run Http.text("hi")} `
+	for _, test := range []struct {
+		main        string
+		implemented bool
+	}{
+		{`effect fn main()->void{void}`, false},
+		{`effect fn main()->void raises {IoError}{let body=run greeting().provide<Http>(LiveHttp); void}`, true},
+	} {
+		for _, target := range []string{"go", "js"} {
+			r := CompileFor(library+test.main, target)
+			if !r.Checked {
+				t.Fatalf("%s: %+v", target, r.Diagnostics)
+			}
+			code := emitHTTPProgram(t, r, target)
+			implemented := strings.Contains(code, "efProvider_LiveHttp") || strings.Contains(code, "__ef_provider_LiveHttp")
+			// The plan prunes the unreachable service, so only the implemented case
+			// must name Http at all.
+			if implemented != test.implemented || test.implemented && !strings.Contains(code, "Http") {
+				t.Fatalf("%s: implementation emitted %v, want %v\n%s", target, implemented, test.implemented, test.main)
+			}
+			if target == "go" {
+				buildGeneratedGo(t, r, GoGenerationBuild)
+			}
 		}
+	}
+}
+
+func emitHTTPProgram(t *testing.T, r *Result, target string) string {
+	t.Helper()
+	if target == "go" {
+		code, err := r.EmitGo()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(code, "LiveHttp") || strings.Contains(code, "efService_Http") || strings.Contains(code, "node:http") {
-			t.Fatalf("%s: unreferenced Http contract was emitted", target)
-		}
+		return code
 	}
+	code, _, err := r.Emit(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code
 }
 
 func TestHTTPDataPreludeHasNoSourceSpans(t *testing.T) {
@@ -256,7 +315,7 @@ console.log('ok');
 `
 
 func TestHTTPTransportJSPublishesAfterCleanupAndCancelsOnDisconnectAndShutdown(t *testing.T) {
-	for host, output := range runJSOnHTTPHosts(t, `effect fn main()->void{let pending=Http.text("x"); void}`, httpTransportJSHarness) {
+	for host, output := range runJSOnHTTPHosts(t, `effect fn main()->void{let pending=Http.text("x").provide<Http>(LiveHttp); void}`, httpTransportJSHarness) {
 		if strings.TrimSpace(output) != "ok" {
 			t.Fatalf("%s: JS transport lifecycle: %s", host, output)
 		}
