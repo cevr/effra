@@ -48,7 +48,7 @@ Transformation acceptance adds a pure string-to-nominal conversion, an explicit 
 
 ## HTTP contract
 
-Separate managed HTTP transport from typed endpoint composition. Transport exposes method/path, bounded buffered request bodies, response status/headers/body, and explicit server limits. Endpoints declare method/path, input codec, success codec/status and each typed failure codec/status, and bind a typed effect handler. Route matching and response policy belong to reusable library code.
+Separate managed HTTP transport from typed endpoint composition. Transport exposes method/path, buffered request bodies with a required byte budget, response status/headers/body, and explicit server limits. The body budget is finite today; `unbounded` is pending a runtime change and its justifier rule ([budget choices](standard-library-capabilities.md#budget-choices)). Endpoints declare method/path, input codec, success codec/status and each typed failure codec/status, and bind a typed effect handler. Route matching and response policy belong to reusable library code.
 
 The first profile is HTTP/1.1 buffered JSON with exact static routes. It specifies success and failure responses plus 400 malformed input, 404 unknown route, 413 excessive body, 415 unsupported content type and 500 defect behavior. Wrong-method handling is an explicit endpoint profile choice: the pinned Effect framework comparator returns404, so its matched native cohort uses404 rather than silently comparing it with405. The shared wire corpus records exact status/body/content-type behavior. Match limits for Content-Length and chunked bodies. Explicit read-header/body/idle limits and admission bounds must be recorded with fixtures.
 
