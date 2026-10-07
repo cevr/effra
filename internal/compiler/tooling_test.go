@@ -316,3 +316,30 @@ func BenchmarkLintAndGraph10KLines(b *testing.B) {
 		}
 	}
 }
+
+func TestUnusedGoImportAdviceKeepsInitialization(t *testing.T) {
+	source := "import go strings \"strings\"\neffect fn main() -> void {\n    void\n}\n"
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	for _, strict := range []bool{false, true} {
+		lint := r.Lint(strict)
+		if !lint.LintPassed || len(lint.LintDiagnostics) != 1 {
+			t.Fatalf("strict=%v: %+v", strict, lint)
+		}
+		advice := lint.LintDiagnostics[0]
+		if advice.Code != "EFL003" || advice.Severity != "suggestion" || !strings.Contains(advice.Message, "still initializes its Go package") || !strings.Contains(advice.Message, "only if that initialization is unneeded") {
+			t.Fatalf("EFL003 must not present deletion as behavior-preserving: %+v", advice)
+		}
+	}
+	for _, rule := range LintRules() {
+		if rule.Code == "EFL003" && !strings.Contains(rule.Description, "still initializes") {
+			t.Fatalf("EFL003 rule description: %+v", rule)
+		}
+	}
+	suppressed := Compile("// effra-lint-disable-next-line unused-go-import -- the package registers a driver\n" + source)
+	if lint := suppressed.Lint(true); !lint.LintPassed || len(lint.LintDiagnostics) != 0 {
+		t.Fatalf("suppressed EFL003: %+v", lint)
+	}
+}

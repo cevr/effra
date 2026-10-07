@@ -932,3 +932,35 @@ effect fn test_noop() -> void {
 		t.Fatal("MCP application inspection drifted from the compiler")
 	}
 }
+
+func TestProjectCheckReportsInitializationOnlyGoImports(t *testing.T) {
+	root := t.TempDir()
+	source := `import go strings "strings"
+effect fn unused(text: string) -> string uses { Foreign } {
+    run strings.TrimSpace(text)
+}
+effect fn main() -> void {
+    void
+}
+`
+	for name, content := range map[string]string{"go.mod": "module example.com/initonly\n\ngo 1.27\n", "main.ef": source} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := call(root, "project.check", arguments{File: "main.ef"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applications, ok := result.(map[string]any)["applications"].([]compiler.ApplicationInspection)
+	if !ok || len(applications) != 1 {
+		t.Fatalf("project.check applications = %#v", result.(map[string]any)["applications"])
+	}
+	initialization := applications[0].GoInitialization
+	if len(initialization) != 1 || initialization[0].Package != "strings" || initialization[0].Lowering != "blank" || applications[0].Requirements[compiler.RequiresForeign] != 0 {
+		t.Fatalf("initialization-only import = %+v", applications[0])
+	}
+	if !reflect.DeepEqual(applications, compiler.CompileAt(source, "go", root).ApplicationInspections()) {
+		t.Fatal("MCP initialization inspection drifted from the compiler")
+	}
+}

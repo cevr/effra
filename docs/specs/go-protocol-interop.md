@@ -35,7 +35,7 @@ Pure callbacks with an exact supported native signature may cross directly. An e
 
 Every unit compiles and passes the full gate; native lifecycle changes add race checks. Actual CLI/MCP and native executable acceptance must agree on target, revision, host type, adaptation, ownership and trust provenance. Keep the primitive importer regression corpus. Native-only source must diagnose on JS before launching Go tools; Go-only builds never start TypeScript.
 
-Project only selected declarations and reachable member/type graphs. Library/type availability must not retain unused runtime implementations or startup registration. Version importer facts with toolchain, target/build settings, module/export identity, behavior metadata and compiler schema. Import/cache/reachability and binary-size measurements belong to the final measurement phase, with raw receipts before any speed or size claim.
+Project only selected declarations and reachable member/type graphs. Library/type availability must not retain unused runtime implementations or startup registration. This differs from a user-declared foreign import, which is itself a package-initialization dependency retained independently of reachable calls ([foreign package initialization](binary-reachability.md#foreign-go-package-initialization)); module availability, export-data discovery and metadata lookup alone are never initialization roots. Version importer facts with toolchain, target/build settings, module/export identity, behavior metadata and compiler schema. Import/cache/reachability and binary-size measurements belong to the final measurement phase, with raw receipts before any speed or size claim.
 
 ## Source grounding
 

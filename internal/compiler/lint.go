@@ -66,7 +66,7 @@ func LintRules() []LintRule {
 	return []LintRule{
 		{"EFL001", "unused-recipe", "warning", "A local lazy effect is never referenced. Construction does not execute it. Bind to _ to acknowledge deliberate omission."},
 		{"EFL002", "redundant-provision", "suggestion", "The receiver does not require the provided service. A stable provision boundary may be intentional."},
-		{"EFL003", "unused-go-import", "suggestion", "No admitted foreign call uses this package."},
+		{"EFL003", "unused-go-import", "suggestion", "No imported function is referenced. The import still initializes its Go package; remove it only if that initialization is unneeded."},
 		{"EFL004", suppressionRule, "error", "A next-line lint suppression must name a known rule, explain the exception, and suppress advice on the following source line."},
 	}
 }
@@ -251,7 +251,7 @@ func (r *Result) Lint(strict bool) LintResult {
 	}
 	for _, imp := range r.Program.Imports {
 		if !r.Program.UsedImports[imp.Alias] {
-			add(2, "unused Go import "+imp.Alias, imp.Span)
+			add(2, "no function of Go import "+imp.Alias+" is referenced; the import still initializes its Go package, so remove it only if that initialization is unneeded", imp.Span)
 		}
 	}
 	appendUnused()

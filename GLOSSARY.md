@@ -62,6 +62,8 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Host declaration**: A Go or TypeScript declaration supplying the native shape and identity of an imported value or callable.
 
+**Initialization root**: A declared foreign Go import's package initialization, retained in a native application independently of reachable calls and lowered as a named or blank Go import. Module availability, export-data discovery and metadata lookup are not initialization roots.
+
 **Native Go protocol** (specified): An imported Go interface and its method set, interpreted by Go's assignment rules. Its behavioral obligations remain distinct from type compatibility.
 
 **Host borrow** (specified): Use of a native value under an existing owner's lifetime without acquiring release authority; retention and aliasing constraints remain explicit.

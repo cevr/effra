@@ -81,7 +81,7 @@ Exit 0 means policy passed. Exit 1 with JSON report stdout means source policy f
 
 `EFL001 unused-recipe` warns when a local lazy effect binding is never referenced. Uses inside branches and nested scopes count; bindings in separate functions remain distinct. `let _ = recipe()` acknowledges intentional omission. No deletion fix is offered: constructing arguments may itself execute nested effects.
 
-`EFL002 redundant-provision` suggests reviewing a boundary whose receiver has no requirement for that service. Stable boundaries may be intentional. `EFL003 unused-go-import` suggests removing an import with no admitted calls.
+`EFL002 redundant-provision` suggests reviewing a boundary whose receiver has no requirement for that service. Stable boundaries may be intentional. `EFL003 unused-go-import` reports an import whose functions are never referenced. The import still initializes its Go package (see [binary reachability](specs/binary-reachability.md)), so the advice is to remove it only when that initialization is unneeded; deleting it is not behavior-preserving in general.
 
 Warnings do not make checked source untyped. `--strict` makes warnings fail the lint command; suggestions remain non-failing. Compiler errors always fail, and optional advice is skipped on unchecked source. A named next-line suppression can acknowledge one optional rule on the following physical source line:
 

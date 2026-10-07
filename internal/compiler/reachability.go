@@ -158,10 +158,44 @@ type ApplicationInspection struct {
 	Complete       bool                               `json:"complete"`
 	RuntimeModules []rt.RuntimeModule                 `json:"runtimeModules,omitempty"`
 	Requirements   map[ApplicationRequirementKind]int `json:"requirements,omitempty"`
-	Work           int                                `json:"work"`
-	WorkLimit      int                                `json:"workLimit"`
-	Diagnostics    []Diagnostic                       `json:"diagnostics,omitempty"`
-	Error          string                             `json:"error,omitempty"`
+	// GoInitialization lists the declared foreign Go packages the application
+	// initializes, in package order. It reports no binding a retained call
+	// does not use.
+	GoInitialization []GoInitializationInspection `json:"goInitialization,omitempty"`
+	Work             int                          `json:"work"`
+	WorkLimit        int                          `json:"workLimit"`
+	Diagnostics      []Diagnostic                 `json:"diagnostics,omitempty"`
+	Error            string                       `json:"error,omitempty"`
+}
+
+// GoInitializationInspection is one declared foreign Go package the
+// application initializes: the import declarations that root it and whether
+// generated code names the package ("named") or only initializes it
+// ("blank").
+type GoInitializationInspection struct {
+	Package      string     `json:"package"`
+	Declarations []GoImport `json:"declarations"`
+	Lowering     string     `json:"lowering"`
+}
+
+// goInitialization projects the plan's initialization roots with the
+// declarations that root them, matching the import lowering.
+func (r *Result) goInitialization(plan *ApplicationPlan) []GoInitializationInspection {
+	packages := []GoInitializationInspection{}
+	for _, path := range plan.Identities(RequiresGoInitialization) {
+		entry := GoInitializationInspection{Package: path, Declarations: []GoImport{}, Lowering: "blank"}
+		for _, imported := range r.Program.Imports {
+			if imported.Path != path {
+				continue
+			}
+			entry.Declarations = append(entry.Declarations, imported)
+			if plan.includesGoImport(imported.Alias) {
+				entry.Lowering = "named"
+			}
+		}
+		packages = append(packages, entry)
+	}
+	return packages
 }
 
 // ApplicationInspections plans every native entry mode the checked source
@@ -203,6 +237,7 @@ func (r *Result) inspectApplication(mode GoGenerationMode, limit int) Applicatio
 	for _, requirement := range plan.Requirements {
 		inspection.Requirements[requirement.Kind]++
 	}
+	inspection.GoInitialization = r.goInitialization(plan)
 	return inspection
 }
 
