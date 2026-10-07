@@ -309,9 +309,9 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 // source need not import, so packages outside the import closure are listed
 // separately; their export data joins the semantic revision. A method of an
 // unnamed interface is spelled (interface).M whatever its package or
-// signature, so such a key is refused as ambiguous. Diagnostics are sorted by
-// key and name near misses from the same package; every refused key is
-// removed from contracts.
+// signature, so such a key is refused: it names no single declaration.
+// Diagnostics are sorted by key and name near misses from the same package;
+// every refused key is removed from contracts.
 func checkContractKeys(dir string, contracts map[string]behavior, exports map[string]string, loader types.Importer, revision hash.Hash) []Diagnostic {
 	keys := slices.Sorted(maps.Keys(contracts))
 	packages := map[string]string{}
@@ -373,7 +373,7 @@ func checkContractKeys(dir string, contracts map[string]behavior, exports map[st
 	}
 	for _, key := range keys {
 		if strings.HasPrefix(key, "(interface).") {
-			refuse(key, fmt.Sprintf("effra.bindings.json key %q is ambiguous: Go spells the method of every unnamed interface this way, so it names no single declaration; key a named type's method instead", key))
+			refuse(key, fmt.Sprintf("effra.bindings.json key %q names a method of an unnamed interface, which Go spells this way whatever its package or signature, so it names no single declaration and carries no contract; pass an explicit context.Context argument, or declare a named Go interface with the method in the module and key that method", key))
 			continue
 		}
 		path, ok := packages[key]

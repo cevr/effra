@@ -1,7 +1,9 @@
 package compiler
 
 import (
+	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -515,12 +517,102 @@ effect fn main() -> void {
         }
     }
 }`, "go", root)
-	want := `effra.bindings.json key "(interface).Lookup" is ambiguous: Go spells the method of every unnamed interface this way, so it names no single declaration; key a named type's method instead`
+	want := `effra.bindings.json key "(interface).Lookup" names a method of an unnamed interface, which Go spells this way whatever its package or signature, so it names no single declaration and carries no contract; pass an explicit context.Context argument, or declare a named Go interface with the method in the module and key that method`
 	if r.Checked || len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "EF111" || r.Diagnostics[0].Message != want {
 		t.Fatalf("ambiguous key: %+v", r.Diagnostics)
 	}
 	if !hasDiagnosticContaining(r, "incorrect Go argument count") {
 		t.Fatalf("refused key still forwarded context: %+v", r.Diagnostics)
+	}
+}
+
+// A method of an unnamed interface carries no contract, so the refusal names
+// the two paths that remain. Passing a context.Context explicitly checks and
+// runs with cancellation unknown. A named interface declared in the module,
+// to which Go converts the value, is keyed by its own method and forwards the
+// managed context.
+func TestHostUnnamedInterfaceMethodRemedies(t *testing.T) {
+	root := t.TempDir()
+	for name, contents := range map[string]string{
+		"go.mod": "module example.test/remedies\n\ngo 1.27\n",
+		"remedies.go": `package remedies
+
+import "context"
+
+type value struct{}
+
+func (value) Lookup(ctx context.Context, id string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return "v:" + id, nil
+}
+
+func First() interface {
+	Lookup(context.Context, string) (string, error)
+} {
+	return value{}
+}
+
+type Lookuper interface {
+	Lookup(context.Context, string) (string, error)
+}
+
+func Named(v interface {
+	Lookup(context.Context, string) (string, error)
+}) Lookuper {
+	return v
+}
+`,
+		"effra.bindings.json": `{"(example.test/remedies.Lookuper).Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := CompileAt(`import go r "example.test/remedies"
+import go gctx "context"
+import Data "effra/data"
+effect fn explicit() -> string raises {GoError} {
+    let background = run gctx.Background().provide<Foreign>(Host)
+    match run r.First().provide<Foreign>(Host) {
+        Data.Option.None => "no value",
+        Data.Option.Some { value: first } => match background {
+            Data.Option.None => "no context",
+            Data.Option.Some { value: ctx } => run first.Lookup(ctx, "explicit").orFail().provide<Foreign>(Host)
+        }
+    }
+}
+effect fn named() -> string raises {GoError} {
+    match run r.First().provide<Foreign>(Host) {
+        Data.Option.None => "no value",
+        Data.Option.Some { value: first } => match run r.Named(first).provide<Foreign>(Host) {
+            Data.Option.None => "no named value",
+            Data.Option.Some { value: lookuper } => run lookuper.Lookup("named").orFail().provide<Foreign>(Host)
+        }
+    }
+}
+effect fn main() -> string raises {GoError} {
+    run explicit() + " " + run named()
+}`, "go", root)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	if output := runGeneratedGo(t, r); output != "v:explicit v:named\n" {
+		t.Fatalf("remedies: %q", output)
+	}
+	behaviors := map[string]string{}
+	for _, binding := range r.Bindings {
+		if strings.HasSuffix(binding.Symbol, ".Lookup") {
+			behaviors[binding.Identity] = fmt.Sprintf("context=%v cancellation=%s", binding.Context, binding.Cancellation)
+		}
+	}
+	want := map[string]string{
+		"go:(interface{Lookup(context.Context, string) (string, error)}).Lookup": "context=false cancellation=unknown",
+		"go:(example.test/remedies.Lookuper).Lookup":                             "context=true cancellation=cooperative",
+	}
+	if !maps.Equal(behaviors, want) {
+		t.Fatalf("remedy bindings: %v", behaviors)
 	}
 }
 
