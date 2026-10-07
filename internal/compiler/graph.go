@@ -234,14 +234,16 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			edge(id, e.layerPlan.ID, "provides-layer", e.Name, e.Span)
 		}
 		if e.Kind == "call" {
-			if f := e.ResolvedFunction; f != nil && f.Module != "" && f.Module != currentModuleIdentity {
-				edge(id, "function:"+f.Module+"."+f.Name, "calls", "", e.Span)
-			}
-			if e.Left.Kind == "name" && nodes["function:"+e.Left.Name] {
-				edge(id, "function:"+e.Left.Name, "calls", "", e.Span)
-			}
-			if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && nodes["service:"+e.Left.Left.Name] {
-				edge(id, "service:"+e.Left.Left.Name, "calls", e.Left.Left.Name, e.Span)
+			if f := e.ResolvedFunction; f != nil {
+				if f.Module != "" && f.Module != currentModuleIdentity {
+					edge(id, "function:"+f.Module+"."+f.Name, "calls", "", e.Span)
+				}
+				if f.Owner == "module" && e.Left.Kind == "name" && nodes["function:"+f.Name] {
+					edge(id, "function:"+f.Name, "calls", "", e.Span)
+				}
+				if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && f.Owner == "service:"+e.Left.Left.Name && nodes["service:"+e.Left.Left.Name] {
+					edge(id, "service:"+e.Left.Left.Name, "calls", e.Left.Left.Name, e.Span)
+				}
 			}
 		}
 		if f := e.ResolvedFunction; f != nil && e.Kind != "call" {

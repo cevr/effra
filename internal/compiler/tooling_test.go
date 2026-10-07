@@ -242,6 +242,54 @@ func TestDependencyGraphTracksProvidersAndConsumers(t *testing.T) {
 	}
 }
 
+func TestDependencyGraphUsesCheckedCallableIdentity(t *testing.T) {
+	source := `
+service Logger { effect fn log(message: string) -> string }
+record Callbacks { log: fn(string) -> string }
+fn target() -> string { "global target" }
+fn alias() -> string { "global alias" }
+fn invoke(target: fn() -> string) -> string { target() }
+fn invokeRecord(Logger: Callbacks) -> string { Logger.log("callback") }
+fn direct() -> string { target() }
+effect fn serviceCall() -> string uses {Logger} { run Logger.log("service") }
+`
+	for _, target := range []string{"go", "js"} {
+		r := CompileFor(source, target)
+		if !r.Checked {
+			t.Fatalf("%s target: %+v", target, r.Diagnostics)
+		}
+		graph, err := r.Graph()
+		if err != nil {
+			t.Fatalf("%s target: %v", target, err)
+		}
+		checkedDirect := false
+		checkedService := false
+		for _, edge := range graph.Edges {
+			if edge.Kind != "calls" {
+				continue
+			}
+			if edge.From == "function:invoke" && (edge.To == "function:target" || edge.To == "function:alias") {
+				t.Fatalf("%s target: shadowed callback fabricated callable edge: %+v", target, edge)
+			}
+			if edge.From == "function:invokeRecord" && edge.To == "service:Logger" {
+				t.Fatalf("%s target: record callback fabricated service edge: %+v", target, edge)
+			}
+			if edge.From == "function:direct" && edge.To == "function:target" {
+				checkedDirect = true
+			}
+			if edge.To == "service:Logger" {
+				checkedService = true
+			}
+		}
+		if !checkedDirect {
+			t.Fatalf("%s target: checked direct function call edge missing", target)
+		}
+		if !checkedService {
+			t.Fatalf("%s target: checked service call edge missing", target)
+		}
+	}
+}
+
 func BenchmarkLintAndGraph10KLines(b *testing.B) {
 	var source strings.Builder
 	for i := 0; i < 2000; i++ {
