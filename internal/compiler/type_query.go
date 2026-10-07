@@ -187,7 +187,9 @@ func (r *Result) selectDeclaration(declaration *Declaration, selected *SelectedT
 	if r.lexical == nil {
 		return
 	}
-	if declaration.Source != "" {
+	// Local generic data carries the user source ID; only another source is
+	// a bundled declaration without a location in this snapshot.
+	if declaration.Source != "" && declaration.Source != userSourceID {
 		for _, template := range r.Program.BundledTemplates {
 			if template.Identity == declaration.Identity {
 				selected.Target, _ = r.declarationTarget(lexicalTarget{kind: template.Kind, data: template})

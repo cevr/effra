@@ -210,3 +210,51 @@ func TestPresentationBoundsSharedTypeGraphs(t *testing.T) {
 		t.Fatalf("unbounded presentation: %d bytes", len(got))
 	}
 }
+
+// Selecting a declaration by its published identity answers exactly as
+// selecting its declaration name token does: a local generic declaration is
+// original source with a location, and a bundled one keeps its identity
+// without a location in this snapshot.
+func TestIdentitySelectionMatchesDeclarationTokenSelection(t *testing.T) {
+	const source = `import Data "effra/data"
+record Box<T: type> { value: T }
+enum Choice<T: type> { Left { value: T }, Right }
+fn pick(o: Data.Option<string>) -> string { match o { Data.Option.Some { value: v } => v, Data.Option.None => "none" } }
+`
+	for _, target := range []string{"go", "js"} {
+		r := CompileFor(source, target)
+		if !r.Checked {
+			t.Fatalf("%s fixture: %+v", target, r.Diagnostics)
+		}
+		for _, probe := range []struct {
+			context, name, presentation string
+			local                       bool
+		}{
+			{"record Box", "Box", "record Box<T: type> { value: T }", true},
+			{"enum Choice", "Choice", "enum Choice<T: type> { Left { value: T }, Right }", true},
+			{"Data.Option.Some { value: v }", "Option", "enum Option<T: type> { None, Some { value: T } }", false},
+		} {
+			label := fmt.Sprintf("%s %s", target, probe.name)
+			offset := at(t, source, probe.context, probe.name)
+			token, err := r.QueryType(TypeSelection{Offset: &offset})
+			if err != nil || token.Selection.Target == nil || token.Selection.Declaration == nil {
+				t.Fatalf("%s: token selection %+v: %v", label, token.Selection, err)
+			}
+			identity := token.Selection.Declaration.Identity
+			byIdentity, err := r.QueryType(TypeSelection{Symbol: identity})
+			if err != nil {
+				t.Fatalf("%s: identity %q: %v", label, identity, err)
+			}
+			got, want := byIdentity.Selection, token.Selection
+			if got.Presentation != probe.presentation || want.Presentation != probe.presentation {
+				t.Fatalf("%s: identity presentation %q, token presentation %q, want %q", label, got.Presentation, want.Presentation, probe.presentation)
+			}
+			if got.Target == nil || *got.Target != *want.Target {
+				t.Fatalf("%s: identity target %+v, token target %+v", label, got.Target, want.Target)
+			}
+			if got.Target.LocationAvailable != probe.local || (got.Target.Source == userSourceID) != probe.local {
+				t.Fatalf("%s: target location %+v", label, got.Target)
+			}
+		}
+	}
+}
