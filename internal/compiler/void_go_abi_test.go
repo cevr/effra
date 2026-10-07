@@ -138,9 +138,9 @@ func TestConcreteVoidExecution(t *testing.T) {
 	}
 }
 
-// voidGoBoundaryPrograms are admitted programs whose void completions meet
-// distinct Go lowering boundaries. Each one must build and execute natively,
-// and execute identically on JavaScript.
+// voidGoBoundaryPrograms are admitted programs whose void completions and
+// declared callable layouts meet at distinct Go lowering boundaries. Each one
+// must build and execute natively, and execute identically on JavaScript.
 var voidGoBoundaryPrograms = []struct{ name, source string }{
 	{"empty-body", `fn empty() -> void {}
 effect fn main() -> void { empty(); void }`},
@@ -164,6 +164,44 @@ fn use(make: fn() -> fn() -> void) -> void {
     done()
 }
 effect fn main() -> void { use(factory); void }`},
+	{"record-field-extraction", `record Holder<T: type> { callback: fn() -> T }
+fn finish() -> void { void }
+fn selected() -> Holder<void> { Holder<void> { callback: finish } }
+fn extract(h: Holder<void>) -> fn() -> void { h.callback }
+effect fn main() -> void {
+    let done = extract(selected());
+    done();
+    void
+}`},
+	{"enum-match-extraction", `enum Hooks<T: type> { Some { callback: fn() -> T }; Empty }
+fn skip() -> void {}
+fn pick(hooks: Hooks<void>) -> fn() -> void { match hooks { Hooks.Some { callback } => callback; Hooks.Empty => skip } }
+effect fn main() -> void { let done = pick(Hooks<void>.Empty {}); done(); void }`},
+	{"enum-payload-construction", `enum Hooks<T: type> { Some { callback: fn() -> T } }
+fn finish() -> void { void }
+fn selected() -> Hooks<void> {
+    Hooks<void>.Some { callback: finish }
+}
+effect fn main() -> void { let h = selected(); void }`},
+	{"nested-callback-parameter", `record Runner<T: type> { run: fn(fn() -> T) -> void }
+fn invoke(cb: fn() -> void) -> void { cb() }
+fn selected() -> Runner<void> { Runner<void> { run: invoke } }
+effect fn main() -> void { let r = selected(); void }`},
+	{"nested-returned-callable", `record Factory<T: type> { make: fn() -> fn() -> T }
+fn finish() -> void { void }
+fn factory() -> fn() -> void { finish }
+fn selected() -> Factory<void> { Factory<void> { make: factory } }
+effect fn main() -> void { let x = selected(); void }`},
+	{"recipe-returned-callable", `record Deferred<T: type> { make: effect fn() -> fn() -> T }
+fn finish() -> void { void }
+effect fn make() -> fn() -> void { finish }
+fn selected() -> Deferred<void> { Deferred<void> { make: make } }
+effect fn main() -> void {
+    let deferred = selected();
+    let done = run deferred.make();
+    done();
+    void
+}`},
 }
 
 func TestVoidGoBoundaryProgramsExecuteOnBothTargets(t *testing.T) {
@@ -175,5 +213,151 @@ func TestVoidGoBoundaryProgramsExecuteOnBothTargets(t *testing.T) {
 				t.Fatalf("void JavaScript program was not silent: %q", output)
 			}
 		})
+	}
+}
+
+// voidGoAdapterSource moves instrumented concrete callbacks into and out of
+// generic declared callable layouts. The native probe counts invocations to
+// prove each adapter captures its callable once and invokes it lazily.
+const voidGoAdapterSource = `record Holder<T: type> { callback: fn() -> T }
+enum Hooks<T: type> { Some { callback: fn() -> T }; Empty }
+record Runner<T: type> { run: fn(fn() -> T) -> void }
+record Factory<T: type> { make: fn() -> fn() -> T }
+fn skip() -> void {}
+fn hold(callback: fn() -> void) -> Holder<void> { Holder<void> { callback: callback } }
+fn rehold(holder: Holder<void>) -> Holder<void> { Holder<void> { callback: holder.callback } }
+fn release(holder: Holder<void>) -> fn() -> void { holder.callback }
+fn hook(callback: fn() -> void) -> Hooks<void> { Hooks<void>.Some { callback: callback } }
+fn unhook(hooks: Hooks<void>) -> fn() -> void { match hooks { Hooks.Some { callback } => callback; Hooks.Empty => skip } }
+fn runner(execute: fn(fn() -> void) -> void) -> Runner<void> { Runner<void> { run: execute } }
+fn runWith(selected: Runner<void>, callback: fn() -> void) -> void { selected.run(callback) }
+fn factory(make: fn() -> fn() -> void) -> Factory<void> { Factory<void> { make: make } }
+fn produce(selected: Factory<void>) -> fn() -> void { selected.make() }
+effect fn main() -> void { void }
+`
+
+const voidGoAdapterProbe = `package main
+
+import "testing"
+
+func TestVoidLayoutAdapterCounts(t *testing.T) {
+	calls := 0
+	count := func() { calls++ }
+	holder := efFunction_hold(count)
+	recaptured := efFunction_rehold(holder)
+	released := efFunction_release(recaptured)
+	if calls != 0 {
+		t.Fatalf("record adapters invoked the callback while capturing it: %d", calls)
+	}
+	recaptured.EfField_8_callback()
+	released()
+	if calls != 2 {
+		t.Fatalf("record adapters did not invoke the callback exactly once per call: %d", calls)
+	}
+
+	calls = 0
+	unhooked := efFunction_unhook(efFunction_hook(count))
+	if calls != 0 {
+		t.Fatalf("enum adapters invoked the callback while capturing it: %d", calls)
+	}
+	unhooked()
+	unhooked()
+	if calls != 2 {
+		t.Fatalf("enum adapters did not invoke the callback exactly once per call: %d", calls)
+	}
+
+	runs, callbacks := 0, 0
+	selected := efFunction_runner(func(callback func()) { runs++; callback() })
+	if runs != 0 {
+		t.Fatalf("nested parameter adapter invoked its runner while capturing it: %d", runs)
+	}
+	efFunction_runWith(selected, func() { callbacks++ })
+	if runs != 1 || callbacks != 1 {
+		t.Fatalf("nested parameter adapter changed invocation counts: runs=%d callbacks=%d", runs, callbacks)
+	}
+
+	makes, finishes := 0, 0
+	made := efFunction_factory(func() func() { makes++; return func() { finishes++ } })
+	if makes != 0 {
+		t.Fatalf("returned-callable adapter invoked its factory while capturing it: %d", makes)
+	}
+	produced := efFunction_produce(made)
+	if makes != 1 || finishes != 0 {
+		t.Fatalf("returned-callable adapter changed factory counts: makes=%d finishes=%d", makes, finishes)
+	}
+	produced()
+	produced()
+	if makes != 1 || finishes != 2 {
+		t.Fatalf("returned-callable adapter changed result counts: makes=%d finishes=%d", makes, finishes)
+	}
+}
+`
+
+const voidJSAdapterProbe = `
+let calls = 0;
+const count = () => { calls++; };
+const recaptured = __ef_function_rehold(__ef_function_hold(count));
+const released = __ef_function_release(recaptured);
+if (calls !== 0) throw new Error("record capture invoked " + calls);
+recaptured.callback();
+released();
+if (calls !== 2) throw new Error("record calls " + calls);
+calls = 0;
+const unhooked = __ef_function_unhook(__ef_function_hook(count));
+if (calls !== 0) throw new Error("enum capture invoked " + calls);
+unhooked();
+unhooked();
+if (calls !== 2) throw new Error("enum calls " + calls);
+let runs = 0, callbacks = 0;
+__ef_function_runWith(__ef_function_runner((callback) => { runs++; callback(); }), () => { callbacks++; });
+if (runs !== 1 || callbacks !== 1) throw new Error("runner " + runs + "/" + callbacks);
+let makes = 0, finishes = 0;
+const produced = __ef_function_produce(__ef_function_factory(() => { makes++; return () => { finishes++; }; }));
+produced();
+produced();
+if (makes !== 1 || finishes !== 2) throw new Error("factory " + makes + "/" + finishes);
+console.log("counted");
+`
+
+func TestVoidGoCallableLayoutAdaptersCaptureOnceAndInvokeLazily(t *testing.T) {
+	r := CompileFor(voidGoAdapterSource, "go")
+	if !r.Checked {
+		t.Fatalf("adapter source rejected: %+v", r.Diagnostics)
+	}
+	generated, err := r.EmitGo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := goparser.ParseFile(gotoken.NewFileSet(), "generated.go", generated, 0)
+	if err != nil {
+		t.Fatalf("generated Go did not parse: %v\n%s", err, generated)
+	}
+	// A callable returning a no-result callable keeps its own result.
+	factory := generatedGoFunction(t, file, "efFunction_factory")
+	if factory.Type.Params == nil || len(factory.Type.Params.List) != 1 {
+		t.Fatalf("factory parameter list changed: %s", formatGoNode(t, factory.Type))
+	}
+	maker, ok := factory.Type.Params.List[0].Type.(*ast.FuncType)
+	if !ok || maker.Results == nil || len(maker.Results.List) != 1 {
+		t.Fatalf("nested void callable erased its enclosing result: %s", formatGoNode(t, factory.Type.Params.List[0].Type))
+	}
+	if produced, ok := maker.Results.List[0].Type.(*ast.FuncType); !ok || produced.Results != nil {
+		t.Fatalf("returned void callable retained a result carrier: %s", formatGoNode(t, maker))
+	}
+
+	dir := t.TempDir()
+	if err := WriteRuntime(dir); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"go.mod": "module effra.generated\n\ngo 1.27\n", "main.go": generated, "main_test.go": voidGoAdapterProbe} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if output, err := runGoCommand(dir, "test", "."); err != nil {
+		t.Fatalf("generated callable layout adapters failed: %v\n%s\n%s", err, output, generated)
+	}
+	if output := runJSForTarget(t, "js", voidGoAdapterSource, voidJSAdapterProbe); output != "counted\n" {
+		t.Fatalf("JavaScript callback counts changed: %q", output)
 	}
 }

@@ -14,6 +14,9 @@ type goEmitter struct {
 	next     int
 	bindings map[string]Binding
 	program  *Program
+	// locals holds the declared Go layout of each local in scope that was
+	// bound from generic data; other locals have their canonical layout.
+	locals map[string]goLayout
 }
 
 func goType(t string) string {
@@ -58,6 +61,14 @@ func goType(t string) string {
 // checker's canonical node and never feeds an already-rendered type back
 // through the legacy grammar.
 func canonicalGoType(c *checker, id TypeID, visiting map[TypeID]bool) string {
+	return layoutGoType(c, id, nil, visiting)
+}
+
+// layoutGoType renders id as Go instantiates a generic declaration: each type
+// variable bound in bindings is replaced by the canonical rendering of its
+// binding. A void substituted for a declared callable result T therefore
+// keeps its struct{} carrier, while a concrete void result is erased.
+func layoutGoType(c *checker, id TypeID, bindings map[TypeID]TypeID, visiting map[TypeID]bool) string {
 	if c == nil || id == invalidTypeID {
 		return "struct{}"
 	}
@@ -98,6 +109,9 @@ func canonicalGoType(c *checker, id TypeID, visiting map[TypeID]bool) string {
 	case "record", "enum", "error":
 		return "efType_" + goIdent(node.Name)
 	case "type-variable":
+		if bound, ok := bindings[id]; ok {
+			return canonicalGoType(c, bound, map[TypeID]bool{})
+		}
 		return emittedTypeVariable(node)
 	case "application":
 		r := c.templates[node.Declaration]
@@ -106,45 +120,41 @@ func canonicalGoType(c *checker, id TypeID, visiting map[TypeID]bool) string {
 		}
 		args := []string{}
 		for _, id := range node.Args {
-			args = append(args, canonicalGoType(c, id, visiting))
+			args = append(args, layoutGoType(c, id, bindings, visiting))
 		}
 		return "efTemplate_" + r.EmissionName + "[" + strings.Join(args, ",") + "]"
 	case "fiber":
 		if len(node.Args) == 1 {
-			return "*er.Fiber[" + canonicalGoType(c, node.Args[0], visiting) + "]"
+			return "*er.Fiber[" + layoutGoType(c, node.Args[0], bindings, visiting) + "]"
 		}
 	case "goResult":
 		if len(node.Args) == 1 {
-			return "er.GoResult[" + canonicalGoType(c, node.Args[0], visiting) + "]"
+			return "er.GoResult[" + layoutGoType(c, node.Args[0], bindings, visiting) + "]"
 		}
 	case "provider":
 		return "efService_" + goIdent(node.Name)
 	case "callable", "callable-shape":
-		return canonicalGoCallableType(c, node, visiting)
+		return layoutGoCallableType(c, node, bindings, visiting)
 	case "recipe", "providerRecipe":
-		return "efEffect[" + canonicalGoType(c, node.Result, visiting) + "]"
+		return "efEffect[" + layoutGoType(c, node.Result, bindings, visiting) + "]"
 	case "never", "invalid":
 		return "struct{}"
 	}
 	return "struct{}"
 }
 
-func canonicalGoCallableType(c *checker, node *semanticTypeNode, visiting map[TypeID]bool) string {
-	return canonicalGoCallableTypeWithVoidCarrier(c, node, visiting, false)
-}
-
-func canonicalGoCallableTypeWithVoidCarrier(c *checker, node *semanticTypeNode, visiting map[TypeID]bool, forceVoidCarrier bool) string {
+func layoutGoCallableType(c *checker, node *semanticTypeNode, bindings map[TypeID]TypeID, visiting map[TypeID]bool) string {
 	if node == nil {
 		return "func() struct{}"
 	}
 	parameters := make([]string, 0, len(node.Args))
 	for _, parameter := range node.Args {
-		parameters = append(parameters, canonicalGoType(c, parameter, visiting))
+		parameters = append(parameters, layoutGoType(c, parameter, bindings, visiting))
 	}
-	result := canonicalGoType(c, node.Result, visiting)
+	result := layoutGoType(c, node.Result, bindings, visiting)
 	if node.Mode == "effect" {
 		result = "efEffect[" + result + "]"
-	} else if !forceVoidCarrier && canonicalVoidType(c, node.Result) {
+	} else if canonicalVoidType(c, node.Result) {
 		return "func(" + strings.Join(parameters, ", ") + ")"
 	}
 	return "func(" + strings.Join(parameters, ", ") + ") " + result
@@ -153,30 +163,6 @@ func canonicalGoCallableTypeWithVoidCarrier(c *checker, node *semanticTypeNode, 
 func canonicalVoidType(c *checker, id TypeID) bool {
 	node := c.node(id)
 	return node != nil && node.Kind == "primitive" && node.Name == voidTypeName
-}
-
-func containsCanonicalTypeVariable(c *checker, id TypeID, visiting map[TypeID]bool) bool {
-	if c == nil || id == invalidTypeID || visiting[id] {
-		return false
-	}
-	node := c.node(id)
-	if node == nil {
-		return false
-	}
-	if node.Kind == "type-variable" {
-		return true
-	}
-	visiting[id] = true
-	defer delete(visiting, id)
-	if containsCanonicalTypeVariable(c, node.Result, visiting) {
-		return true
-	}
-	for _, argument := range node.Args {
-		if containsCanonicalTypeVariable(c, argument, visiting) {
-			return true
-		}
-	}
-	return false
 }
 
 // canonicalValueType renders the value held by an expression. A callable is
@@ -500,6 +486,7 @@ func (g *goEmitter) block(b *Block, effect bool, ret string) string {
 // with void, and a void tail is evaluated once for its effects before the
 // block completes with void in whatever form its result mode requires.
 func (g *goEmitter) blockType(b *Block, effect bool, ret string, noResult bool) string {
+	defer g.enterScope()()
 	var out strings.Builder
 	completeVoid := func() {
 		switch {
@@ -521,7 +508,8 @@ func (g *goEmitter) blockType(b *Block, effect bool, ret string, noResult bool) 
 			continue
 		}
 		if s.Kind == "let" {
-			expr := g.expr(s.Value, effect, ret, &out)
+			expr, layout := g.exprLayout(s.Value, effect, ret, &out)
+			g.bindLocal(s.Name, layout)
 			out.WriteString("efLocal_" + s.Name + " := " + expr + "\n_ = efLocal_" + s.Name + "\n")
 			if last {
 				completeVoid()
@@ -559,6 +547,96 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 	return g.exprWithValue(e, effect, ret, out, true)
 }
 
+// exprAt lowers e into a destination with the required Go layout.
+func (g *goEmitter) exprAt(e *Expr, required goLayout, effect bool, ret string, out *strings.Builder) string {
+	value, layout := g.exprLayout(e, effect, ret, out)
+	return g.adaptGoLayout(value, layout, required, out)
+}
+
+// exprLayout lowers e without adapting it, reporting the layout it keeps.
+func (g *goEmitter) exprLayout(e *Expr, effect bool, ret string, out *strings.Builder) (string, goLayout) {
+	return g.exprLayoutWithValue(e, effect, ret, out, true)
+}
+
+// exprWithValue lowers e in the canonical layout of its checked type.
+func (g *goEmitter) exprWithValue(e *Expr, effect bool, ret string, out *strings.Builder, wantValue bool) string {
+	value, layout := g.exprLayoutWithValue(e, effect, ret, out, wantValue)
+	return g.adaptGoLayout(value, layout, canonicalLayout(e.checked.valueID()), out)
+}
+
+func (g *goEmitter) exprLayoutWithValue(e *Expr, effect bool, ret string, out *strings.Builder, wantValue bool) (string, goLayout) {
+	if value, layout, ok := g.declaredLayoutValue(e, effect, ret, out, wantValue); ok {
+		return value, layout
+	}
+	return g.lower(e, effect, ret, out, wantValue), canonicalLayout(e.checked.valueID())
+}
+
+// declaredLayoutValue lowers the expressions whose value may keep a declared
+// layout: generic data fields, locals bound from them, and pure calls through
+// such callables, whose arguments and result follow the callee's layout. An
+// effect call's recipe is adapted to its canonical layout immediately. ok is
+// false for every other expression, which lower emits in its canonical layout.
+func (g *goEmitter) declaredLayoutValue(e *Expr, effect bool, ret string, out *strings.Builder, wantValue bool) (string, goLayout, bool) {
+	switch {
+	case e.Kind == "name" && e.Text != "function" && e.Text != "provider":
+		layout, ok := g.locals[e.Name]
+		return "efLocal_" + e.Name, layout, ok
+	case e.Kind == "member" && e.ResolvedFunction == nil && e.Text == "field":
+		left := g.expr(e.Left, effect, ret, out)
+		layout, ok := g.templateFieldLayout(e.Left.checked.valueID(), "", e.Name)
+		if !ok {
+			layout = canonicalLayout(e.checked.valueID())
+		}
+		return left + "." + goFieldName(e.Name), layout, true
+	case e.Kind == "call" && e.Text == "callable":
+		callee, calleeLayout := g.exprLayout(e.Left, effect, ret, out)
+		name := g.temp()
+		out.WriteString(name + " := " + callee + "\n")
+		node, frame := calleeLayout.resolve(g.program.semantic)
+		args := []string{}
+		for index, arg := range e.Args {
+			value := ""
+			if node != nil && index < len(node.Args) {
+				value = g.exprAt(arg, frame.child(node.Args[index]), effect, ret, out)
+			} else {
+				value = g.expr(arg, effect, ret, out)
+			}
+			local := g.temp()
+			out.WriteString(local + " := " + value + "\n")
+			args = append(args, local)
+		}
+		call := g.callValue(e, name+"("+strings.Join(args, ", ")+")", wantValue)
+		switch {
+		case node == nil:
+			return call, canonicalLayout(e.checked.valueID()), true
+		case node.Mode == "effect":
+			return g.adaptRecipe(call, frame.child(node.Result), canonicalLayout(e.checked.resultID()), out), canonicalLayout(e.checked.valueID()), true
+		}
+		return call, frame.child(node.Result), true
+	}
+	return "", goLayout{}, false
+}
+
+// enterScope opens a lexical scope for local layouts and returns its closer.
+func (g *goEmitter) enterScope() func() {
+	saved := g.locals
+	g.locals = make(map[string]goLayout, len(saved))
+	for name, layout := range saved {
+		g.locals[name] = layout
+	}
+	return func() { g.locals = saved }
+}
+
+// bindLocal records the layout of a newly bound local, shadowing any outer
+// local of the same name.
+func (g *goEmitter) bindLocal(name string, layout goLayout) {
+	if len(layout.bindings) == 0 {
+		delete(g.locals, name)
+		return
+	}
+	g.locals[name] = layout
+}
+
 // exprStatement evaluates e exactly once for its effects and discards its
 // value. A pure void call is emitted as a bare Go call statement because its
 // Go callee may have no result; the void literal has nothing to evaluate; any
@@ -570,7 +648,8 @@ func (g *goEmitter) exprStatement(e *Expr, effect bool, ret string, out *strings
 		call := g.exprWithValue(e, effect, ret, out, false)
 		out.WriteString(call + "\n")
 	default:
-		out.WriteString("_ = " + g.expr(e, effect, ret, out) + "\n")
+		value, _ := g.exprLayout(e, effect, ret, out)
+		out.WriteString("_ = " + value + "\n")
 	}
 }
 
@@ -608,47 +687,14 @@ func (g *goEmitter) inferredTypeBindings(f *Function, arguments []*Expr) map[Typ
 	return bindings
 }
 
-func (g *goEmitter) bridgeCallableArgument(argument *Expr, expression string, formal TypeID, bindings map[TypeID]TypeID, out *strings.Builder) string {
-	c := g.program.semantic
-	if c == nil || formal == invalidTypeID || argument == nil || argument.checked.value.arena == nil {
-		return expression
-	}
-	formalNode := c.node(formal)
-	if formalNode == nil || formalNode.Kind != "callable" || formalNode.Mode != "pure" {
-		return expression
-	}
-	bound := formal
-	if len(bindings) > 0 {
-		bound = c.substituteCanonical(formal, bindings, nil)
-	}
-	boundNode := c.node(bound)
-	actualNode := c.node(argument.checked.valueID())
-	if boundNode == nil || actualNode == nil || boundNode.Kind != "callable" || actualNode.Kind != "callable" || actualNode.Mode != "pure" || !canonicalVoidType(c, boundNode.Result) || !canonicalVoidType(c, actualNode.Result) || !containsCanonicalTypeVariable(c, formalNode.Result, map[TypeID]bool{}) {
-		return expression
-	}
-	captured := g.temp()
-	out.WriteString(captured + " := " + expression + "\n")
-	parameters := make([]string, len(boundNode.Args))
-	arguments := make([]string, len(boundNode.Args))
-	for index, parameter := range boundNode.Args {
-		name := "efBridge" + strconv.Itoa(index)
-		parameters[index] = name + " " + canonicalGoType(c, parameter, map[TypeID]bool{})
-		arguments[index] = name
-	}
-	result := canonicalGoType(c, boundNode.Result, map[TypeID]bool{})
-	return "func(" + strings.Join(parameters, ", ") + ") " + result + " {\n" + captured + "(" + strings.Join(arguments, ", ") + ")\nreturn struct{}{}\n}"
-}
-
-func (g *goEmitter) exprWithValue(e *Expr, effect bool, ret string, out *strings.Builder, wantValue bool) string {
+// lower emits an expression in the canonical layout of its checked type.
+func (g *goEmitter) lower(e *Expr, effect bool, ret string, out *strings.Builder, wantValue bool) string {
 	switch e.Kind {
 	case "member":
 		if e.ResolvedFunction != nil {
 			return e.ResolvedFunction.goEmissionName()
 		}
 		left := g.expr(e.Left, effect, ret, out)
-		if e.Text == "field" {
-			return left + "." + goFieldName(e.Name)
-		}
 		if e.Name == "hasError" {
 			return "(" + left + ".Err != nil)"
 		}
@@ -698,23 +744,6 @@ func (g *goEmitter) exprWithValue(e *Expr, effect bool, ret string, out *strings
 		right := g.expr(e.Right, effect, ret, out)
 		return "efTimeout(" + name + ", " + right + ")"
 	case "call":
-		if e.Text == "callable" {
-			callee := g.expr(e.Left, effect, ret, out)
-			name := g.temp()
-			out.WriteString(name + " := " + callee + "\n")
-			args := []string{}
-			callableNode := e.Left.checked.node()
-			for index, arg := range e.Args {
-				value := g.expr(arg, effect, ret, out)
-				if callableNode != nil && index < len(callableNode.Args) {
-					value = g.bridgeCallableArgument(arg, value, callableNode.Args[index], nil, out)
-				}
-				local := g.temp()
-				out.WriteString(local + " := " + value + "\n")
-				args = append(args, local)
-			}
-			return g.callValue(e, name+"("+strings.Join(args, ", ")+")", wantValue)
-		}
 		if e.Text == "data" {
 			return g.constructCall(e, effect, ret, out)
 		}
@@ -738,9 +767,11 @@ func (g *goEmitter) exprWithValue(e *Expr, effect bool, ret string, out *strings
 		args := []string{}
 		bindings := g.inferredTypeBindings(e.ResolvedFunction, e.Args)
 		for index, a := range e.Args {
-			expr := g.expr(a, effect, ret, out)
+			expr := ""
 			if e.ResolvedFunction != nil && index < len(e.ResolvedFunction.Params) {
-				expr = g.bridgeCallableArgument(a, expr, e.ResolvedFunction.Params[index].typeID, bindings, out)
+				expr = g.exprAt(a, goLayout{id: e.ResolvedFunction.Params[index].typeID, bindings: bindings}, effect, ret, out)
+			} else {
+				expr = g.expr(a, effect, ret, out)
 			}
 			name := g.temp()
 			out.WriteString(name + " := " + expr + "\n")
@@ -916,25 +947,12 @@ func (g *goEmitter) construct(e *Expr, effect bool, ret string, out *strings.Bui
 		typeName, variantName = e.Left.Left.Name, e.Left.Name
 	}
 	parts := []string{}
-	bindings := map[TypeID]TypeID{}
-	if e.ResolvedTemplate != nil && g.program.semantic != nil {
-		if application := g.program.semantic.node(e.checked.resultID()); application != nil && application.Kind == "application" {
-			for index, parameter := range e.ResolvedTemplate.Parameters {
-				if index < len(application.Args) {
-					bindings[parameter.typeID] = application.Args[index]
-				}
-			}
-		}
-	}
 	for _, field := range e.Fields {
-		value := g.expr(field.Value, false, ret, out)
-		if e.ResolvedTemplate != nil {
-			for _, declared := range e.ResolvedTemplate.Fields {
-				if declared.Name == field.Name {
-					value = g.bridgeCallableArgument(field.Value, value, declared.typeID, bindings, out)
-					break
-				}
-			}
+		value := ""
+		if declared, ok := g.constructedFieldLayout(e, field.Name); ok {
+			value = g.exprAt(field.Value, declared, false, ret, out)
+		} else {
+			value = g.expr(field.Value, false, ret, out)
 		}
 		parts = append(parts, goFieldName(field.Name)+":"+value)
 	}
@@ -949,6 +967,16 @@ func (g *goEmitter) construct(e *Expr, effect bool, ret string, out *strings.Bui
 		return "efType_" + goIdent(typeName) + "(" + variant + ")"
 	}
 	return "efType_" + goIdent(typeName) + "{" + strings.Join(parts, ",") + "}"
+}
+
+// constructedFieldLayout returns the declared layout of a field initialized
+// by a generic constructor: a record template's field or the selected enum
+// variant's payload under the constructed application.
+func (g *goEmitter) constructedFieldLayout(e *Expr, field string) (goLayout, bool) {
+	if e.ResolvedTemplate == nil {
+		return goLayout{}, false
+	}
+	return g.templateFieldLayout(e.checked.resultID(), e.Left.Name, field)
 }
 func (g *goEmitter) constructCall(e *Expr, effect bool, ret string, out *strings.Builder) string {
 	return g.construct(e, effect, ret, out)
@@ -975,13 +1003,7 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 		for _, arm := range e.Arms {
 			body.WriteString("case " + g.variantType(e.Left.checked.valueID(), arm.Pattern.ResolvedEnum, arm.Pattern.VariantName) + ":\n")
 			body.WriteString("_ = efMatch\n")
-			for _, field := range sortedBindingNames(arm.Pattern.Bindings) {
-				binding := arm.Pattern.Bindings[field]
-				if binding != "_" {
-					body.WriteString("efLocal_" + binding + " := efMatch." + goFieldName(field) + "\n_ = efLocal_" + binding + "\n")
-				}
-			}
-			body.WriteString(g.blockType(arm.Body, true, resultType, false))
+			g.matchArm(e.Left.checked.valueID(), arm, true, resultType, &body)
 		}
 		if len(e.Arms) == 0 {
 			body.WriteString("default: _ = efMatch; return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable empty match\")}\n}\n")
@@ -996,13 +1018,7 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 	for _, arm := range e.Arms {
 		body.WriteString("case " + g.variantType(e.Left.checked.valueID(), arm.Pattern.ResolvedEnum, arm.Pattern.VariantName) + ":\n")
 		body.WriteString("_ = efMatch\n")
-		for _, field := range sortedBindingNames(arm.Pattern.Bindings) {
-			binding := arm.Pattern.Bindings[field]
-			if binding != "_" {
-				body.WriteString("efLocal_" + binding + " := efMatch." + goFieldName(field) + "\n_ = efLocal_" + binding + "\n")
-			}
-		}
-		body.WriteString(g.blockType(arm.Body, false, resultType, false))
+		g.matchArm(e.Left.checked.valueID(), arm, false, resultType, &body)
 	}
 	if len(e.Arms) == 0 {
 		body.WriteString("default: _ = efMatch; panic(\"unreachable empty match\")\n}\n")
@@ -1010,6 +1026,22 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 		body.WriteString("default: panic(\"unreachable non-exhaustive match\")\n}\n")
 	}
 	return "func() " + resultType + " {\n" + body.String() + "}()"
+}
+
+// matchArm binds an arm's payload fields and lowers its body in one scope. A
+// generic enum payload binding keeps the layout its variant declares.
+func (g *goEmitter) matchArm(scrutinee TypeID, arm *MatchArm, effect bool, resultType string, body *strings.Builder) {
+	defer g.enterScope()()
+	for _, field := range sortedBindingNames(arm.Pattern.Bindings) {
+		binding := arm.Pattern.Bindings[field]
+		if binding == "_" {
+			continue
+		}
+		layout, _ := g.templateFieldLayout(scrutinee, arm.Pattern.VariantName, field)
+		g.bindLocal(binding, layout)
+		body.WriteString("efLocal_" + binding + " := efMatch." + goFieldName(field) + "\n_ = efLocal_" + binding + "\n")
+	}
+	body.WriteString(g.blockType(arm.Body, effect, resultType, false))
 }
 
 // WriteRuntime writes only changed source bytes so Go's own build cache remains useful.
