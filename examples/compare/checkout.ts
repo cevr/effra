@@ -1,6 +1,7 @@
 // The checkout example in TypeScript with Effect 4.0.1, for the README comparison.
-// Typechecked with TypeScript 5.9 (strict, exactOptionalPropertyTypes) and run with Bun;
-// the gate does not check it because the repository has no TypeScript dependency.
+// scripts/readme_smoke.py runs it with Bun and compares its output with the Effra and Go
+// versions. When tsc is on PATH, as in the gate, it also typechecks this file strictly
+// (with exactOptionalPropertyTypes); the repository itself has no TypeScript dependency.
 import { Cause, Context, Data, Effect, Layer } from "effect"
 
 class OrderNotFound extends Data.TaggedError("OrderNotFound")<{ readonly id: string }> {}

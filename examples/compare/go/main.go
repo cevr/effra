@@ -1,5 +1,6 @@
 // Command checkout is the checkout example in plain Go, for the README comparison.
-// The gate vets and builds it with the rest of the module.
+// The gate vets it with the rest of the module, and scripts/readme_smoke.py runs it and
+// compares its output with the Effra and TypeScript versions.
 package main
 
 import (

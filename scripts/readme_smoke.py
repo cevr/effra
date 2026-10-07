@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """Keep README.md truthful: every code block it shows compiles, is a verbatim excerpt
-of a gated file, or is labelled as a sketch. The comparison table quotes real diagnostics."""
-import json, pathlib, re, subprocess, tempfile
+of a gated file, or is labelled as a sketch. The three checkout programs print the same
+thing, and the comparison table quotes real diagnostics."""
+import json, pathlib, re, shutil, subprocess, tempfile
 
 root = pathlib.Path(__file__).resolve().parents[1]
 ef = str(root / "bin/ef")
 readme = (root / "README.md").read_text()
 
 
-def run(*args, success=True, cwd=root):
-    result = subprocess.run([ef, *args], cwd=cwd, text=True, capture_output=True)
-    assert (result.returncode == 0) == success, (args, result.stdout, result.stderr)
+def process(*command, success=True):
+    result = subprocess.run(command, cwd=root, text=True, capture_output=True)
+    assert (result.returncode == 0) == success, (command, result.stdout, result.stderr)
     return result
+
+
+def run(*args, success=True):
+    return process(ef, *args, success=success)
 
 
 blocks = re.findall(r"^```(rust|ts|go)\n(.*?)^```$", readme, flags=re.S | re.M)
@@ -36,8 +41,20 @@ with tempfile.TemporaryDirectory() as scratch:
         counts["checked"] += 1
 assert counts["checked"] >= 3 and counts["excerpt"] >= 6 and counts["sketch"] >= 1, counts
 
-for target in ("go", "js"):
-    assert run("run", "examples/checkout.ef", "--target", target).stdout == "paid auth-7\nno such order\n"
+# README: "All three versions are checked in and print the same thing." Run all three.
+outputs = {f"ef run --target {target}": run("run", "examples/checkout.ef", "--target", target).stdout
+           for target in ("go", "js")}
+outputs["go run"] = process("go", "run", "./examples/compare/go").stdout
+outputs["bun run"] = process("bun", "run", "--no-install", "examples/compare/checkout.ts").stdout
+assert set(outputs.values()) == {"paid auth-7\nno such order\n"}, outputs
+# checkout.ts claims its Effect type is inferred; a strict typecheck keeps that claim honest.
+# The repository has no TypeScript dependency; the gate environment supplies tsc on PATH.
+tsc = shutil.which("tsc")
+if tsc:
+    process(tsc, "--noEmit", "--strict", "--exactOptionalPropertyTypes", "--module", "nodenext",
+            "--moduleResolution", "nodenext", "--target", "es2022", "--lib", "es2022,dom,esnext.disposable",
+            "examples/compare/checkout.ts")
+counts["typescript"] = "strict" if tsc else "unchecked: no tsc on PATH"
 contract = json.loads(run("inspect", "examples/checkout.ef", "checkout").stdout)["symbol"]["contract"]
 assert contract["failures"] == ["GatewayDown", "OrderNotFound", "Timeout"]
 assert contract["requirements"] == ["Gateway", "Orders", "Scheduler"]
