@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory() as scratch:
         report = json.loads(run("check", str(snippet)).stdout)
         assert report["checked"], (index, report["diagnostics"])
         counts["checked"] += 1
-assert counts["checked"] >= 3 and counts["excerpt"] >= 6 and counts["sketch"] >= 2, counts
+assert counts["checked"] >= 3 and counts["excerpt"] >= 6 and counts["sketch"] >= 1, counts
 
 for target in ("go", "js"):
     assert run("run", "examples/checkout.ef", "--target", target).stdout == "paid auth-7\nno such order\n"

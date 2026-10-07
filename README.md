@@ -348,7 +348,7 @@ effect fn test_recovery() -> void raises { AssertionFailed } uses { Assert } {
 
 ### One compiler model for people, editors and agents
 
-`ef check`, `inspect`, `explain`, `graph`, `diagnostics`, `lint`, `fmt`, `lsp` and `mcp` all read the same checked model. Ask why `checkout` needs what it needs:
+`ef check`, `inspect`, `explain`, `graph`, `diagnostics`, `lint`, `lsp` and `mcp` all read the same checked model. `ef fmt` works from syntax alone, so it also formats code that does not type-check yet. Ask why `checkout` needs what it needs:
 
 ```sh
 $ ef explain examples/checkout.ef checkout | jq -c '.symbol.contributions[] | {line: .span.line, kind, names}'
@@ -358,7 +358,7 @@ $ ef explain examples/checkout.ef checkout | jq -c '.symbol.contributions[] | {l
 {"line":34,"kind":"requirement","names":["Gateway","Scheduler"]}
 ```
 
-Line 33 is `run Orders.find(id)`; line 34 is the gateway call with its timeout. The MCP server exposes the same facts to coding agents. Requests are guarded by revision, so an agent can't act on a stale view of the code. Editors get the same model through `ef lsp`: diagnostics, hover and go-to-definition answer from the query behind `ef type --offset`, and document formatting is the `ef fmt` formatter. Range formatting, references and rename are not implemented yet.
+Line 33 is `run Orders.find(id)`; line 34 is the gateway call with its timeout. The MCP server exposes the same facts to coding agents. Its semantic answers carry the source revision they were computed from, and a request that passes `expectedRevision` is refused if the source has changed since. Without it, the server answers from the current source. Editors get the same model through `ef lsp`: diagnostics, hover and go-to-definition answer from the query behind `ef type --offset`, and document formatting is the `ef fmt` formatter. Range formatting, references and rename are not implemented yet.
 
 ## Where it's going
 
@@ -373,8 +373,8 @@ These items are being built now. Each one ships only when it runs on its adverti
 | HTTP server with bounded, owned shutdown (`Http.listen`) | In progress |
 | Rich Go interop: host types, methods, `io.Reader`/`io.Writer`, `context` | In progress |
 | Library modules: `pub` exports and module-qualified identity | Designed |
-| State machines as a first-class declaration | [Specified](docs/specs/state-machines.md) |
-| Actors with bounded mailboxes and owned behavior | [Specified](docs/specs/actors.md) |
+| State machines: ordinary step functions run by an owned runtime | [Specified](docs/specs/state-machines.md); not built |
+| Actors with explicit mailbox budgets and owned behavior | [Specified](docs/specs/actors.md); not built |
 | Evidence and proofs: values that carry what was checked | [Designed](docs/research/opaque-values-and-evidence.md) |
 
 ### Proofs you can't forget to check
@@ -403,17 +403,9 @@ Service laws, such as "decode after encode returns the input", become obligation
 
 ### State machines from ordinary functions
 
-The transition table in [the tour](#matching-several-values-at-once) already compiles: a multi-subject match whose every state and event pair is checked. What is missing is the declaration that runs it as a machine:
+The transition table in [the tour](#matching-several-values-at-once) already compiles: a multi-subject match whose every state and event pair is checked. Running it as a machine is specified but not built. In [the machine spec](docs/specs/state-machines.md), an owned runtime admits events, runs each step and owns the work each state starts, as one form of [actor](docs/specs/actors.md) behavior. A step can be a pure function or an effect with its own failures and services.
 
-```rust
-// Sketch: not implemented; syntax will change.
-machine Sessions {
-    initial Session.Idle {}
-    step step
-}
-```
-
-A step can be a pure function or an effect with its own failures and services. The same checked plan drives the runtime, the tests and an `ef graph` state diagram.
+How a machine is written is not settled. Whether it needs a declaration form, or ships as a library over ordinary functions, waits on construct admission: a new construct must make bad code unrepresentable in a way a library cannot.
 
 ## Try it
 
