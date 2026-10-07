@@ -141,6 +141,85 @@ func readMCPFrame(reader *bufio.Reader, max int) ([]byte, mcpFrameStatus, error)
 	}
 }
 
+// validateMCPTextAdmission checks the transport bytes before encoding/json can
+// normalize invalid UTF-8 or unpaired UTF-16 escapes into replacement runes.
+// A paired surrogate escape is one scalar value and remains valid JSON text;
+// a literal backslash escape (\\uXXXX) is ordinary source text and is not a
+// surrogate escape in the admitted JSON string.
+func validateMCPTextAdmission(frame []byte) bool {
+	if !utf8.Valid(frame) {
+		return false
+	}
+	inString := false
+	for i := 0; i < len(frame); {
+		if !inString {
+			if frame[i] == '"' {
+				inString = true
+			}
+			i++
+			continue
+		}
+		switch frame[i] {
+		case '"':
+			inString = false
+			i++
+		case '\\':
+			if i+1 >= len(frame) {
+				i++
+				continue
+			}
+			if frame[i+1] != 'u' || i+6 > len(frame) {
+				i += 2
+				continue
+			}
+			code, ok := mcpHex4(frame[i+2 : i+6])
+			if !ok {
+				i += 2
+				continue
+			}
+			switch {
+			case code >= 0xd800 && code <= 0xdbff:
+				if i+12 > len(frame) || frame[i+6] != '\\' || frame[i+7] != 'u' {
+					return false
+				}
+				low, ok := mcpHex4(frame[i+8 : i+12])
+				if !ok || low < 0xdc00 || low > 0xdfff {
+					return false
+				}
+				i += 12
+			case code >= 0xdc00 && code <= 0xdfff:
+				return false
+			default:
+				i += 6
+			}
+		default:
+			i++
+		}
+	}
+	return true
+}
+
+func mcpHex4(raw []byte) (int, bool) {
+	if len(raw) != 4 {
+		return 0, false
+	}
+	value := 0
+	for _, digit := range raw {
+		value <<= 4
+		switch {
+		case digit >= '0' && digit <= '9':
+			value += int(digit - '0')
+		case digit >= 'a' && digit <= 'f':
+			value += int(digit-'a') + 10
+		case digit >= 'A' && digit <= 'F':
+			value += int(digit-'A') + 10
+		default:
+			return 0, false
+		}
+	}
+	return value, true
+}
+
 func marshalMCPResponse(value response, escapeHTML bool) ([]byte, error) {
 	var buffer bytes.Buffer
 	encoder := json.NewEncoder(&buffer)
@@ -437,6 +516,12 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 			return nil
 		case mcpFrameTooLarge:
 			if err := writeMCPError(output, json.RawMessage("null"), -32700, fmt.Sprintf("Request frame exceeds %d bytes before LF", maxMCPFrameBytes)); err != nil {
+				return err
+			}
+			continue
+		}
+		if !validateMCPTextAdmission(frame) {
+			if err := writeMCPError(output, json.RawMessage("null"), -32700, "Parse error"); err != nil {
 				return err
 			}
 			continue

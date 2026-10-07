@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -91,6 +92,79 @@ func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
 	if responses[7]["error"] == nil || responses[8]["error"] == nil || responses[9]["error"] == nil {
 		t.Fatal("invalid protocol input accepted")
 	}
+}
+
+func TestServeRejectsInvalidTextBeforeJSONNormalization(t *testing.T) {
+	invalidUTF8 := append([]byte{'"', '/', '/', ' '}, 0xff)
+	invalidUTF8 = append(invalidUTF8, '"')
+	replacement, err := json.Marshal("// \uFFFD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name       string
+		sourceJSON []byte
+		malformed  bool
+	}{
+		{name: "invalid UTF-8", sourceJSON: invalidUTF8, malformed: true},
+		{name: "unpaired high surrogate", sourceJSON: []byte("\"// \\ud800\""), malformed: true},
+		{name: "unpaired low surrogate", sourceJSON: []byte("\"// \\udc00\""), malformed: true},
+		{name: "literal replacement character", sourceJSON: replacement},
+		{name: "astral surrogate pair", sourceJSON: []byte("\"// \\ud83d\\ude00\"")},
+		{name: "literal backslash escape", sourceJSON: mustMarshalMCPTestString("// \\ud800")},
+		{name: "empty", sourceJSON: []byte(`""`)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			input := append([]byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`+"\n"), []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`+"\n")...)
+			input = append(input, []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code.format","arguments":{"source":`)...)
+			input = append(input, test.sourceJSON...)
+			input = append(input, []byte("}}}\n")...)
+			input = append(input, []byte(`{"jsonrpc":"2.0","id":3,"method":"ping"}`+"\n")...)
+
+			var output bytes.Buffer
+			if err := Serve(t.TempDir(), bytes.NewReader(input), &output); err != nil {
+				t.Fatal(err)
+			}
+			decoder := json.NewDecoder(&output)
+			var responses []map[string]any
+			for {
+				var response map[string]any
+				if err := decoder.Decode(&response); err != nil {
+					if errors.Is(err, io.EOF) {
+						break
+					}
+					t.Fatal(err)
+				}
+				responses = append(responses, response)
+			}
+			if len(responses) != 3 {
+				t.Fatalf("malformed or valid format request desynchronized ping: %d responses: %s", len(responses), output.String())
+			}
+			if test.malformed {
+				errorValue, ok := responses[1]["error"].(map[string]any)
+				if !ok || errorValue["code"] != float64(-32700) {
+					t.Fatalf("invalid text was not refused as a parse error: %#v", responses[1])
+				}
+			} else {
+				result, ok := responses[1]["result"].(map[string]any)
+				if !ok || result["isError"] == true {
+					t.Fatalf("valid text was refused: %#v", responses[1])
+				}
+			}
+			if !reflect.DeepEqual(responses[2]["result"], map[string]any{}) {
+				t.Fatalf("ping after text admission control was not served: %#v", responses[2])
+			}
+		})
+	}
+}
+
+func mustMarshalMCPTestString(value string) []byte {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return encoded
 }
 
 func TestDiagnosticsReportMatchesCompilerAndBoundsResults(t *testing.T) {
