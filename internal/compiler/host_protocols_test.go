@@ -396,3 +396,45 @@ effect fn main() -> void {
 		t.Fatalf("invalid method cancellation value accepted: %+v", invalid.Diagnostics)
 	}
 }
+
+// error.Error belongs to Go's universe, not a package. Calling it on a native
+// error runs the original value's method: a typed-nil *Problem inside a
+// non-nil error answers through its nil-tolerant receiver. The binding names
+// no package and adds no import.
+func TestHostUniverseErrorMethod(t *testing.T) {
+	r := compileHostTypes(t, `effect fn show(err: error) -> string uses { Foreign } {
+    run err.Error()
+}
+effect fn program() -> void uses { Console, Foreign } {
+    let typed = run host.Typed()
+    match typed.error {
+        Data.Option.None => void,
+        Data.Option.Some { value } => run Console.log(run show(value))
+    }
+    let wrapped = run host.Missing()
+    match wrapped.error {
+        Data.Option.None => void,
+        Data.Option.Some { value } => run Console.log(run show(value))
+    }
+}`)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	if output := runGeneratedGo(t, r); output != "nil problem\nwrapped: missing\n" {
+		t.Fatalf("error.Error: %q", output)
+	}
+	var method Binding
+	for _, binding := range r.Bindings {
+		if binding.Symbol == "(error).Error" {
+			method = binding
+		}
+	}
+	if method.Package != "" || method.Return != "string" || len(method.HostParameters) != 1 || method.HostParameters[0].Adaptation != hostAdaptReceiver {
+		t.Fatalf("universe method binding: %+v", method)
+	}
+	plan, err := r.ApplicationPlan(GoGenerationBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirePlanned(t, plan, RequiresForeign, "go:(error).Error")
+}

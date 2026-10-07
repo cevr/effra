@@ -497,7 +497,12 @@ func (c *checker) hostMethodBinding(receiver types.Type, name string) (Binding, 
 	if err != nil {
 		return Binding{}, err.Error()
 	}
-	b := Binding{Symbol: symbol, Package: fn.Pkg().Path(), receiver: &admitted}
+	// A universe method such as error.Error has no package: its binding names
+	// none and needs no import.
+	b := Binding{Symbol: symbol, receiver: &admitted}
+	if fn.Pkg() != nil {
+		b.Package = fn.Pkg().Path()
+	}
 	if reason := admitCallable(&b, fn, c.program.host); reason != "" {
 		return Binding{}, reason
 	}
