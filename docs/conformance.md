@@ -30,7 +30,14 @@ python3 -B scripts/check_effect_conformance.py --run
 ./scripts/gate.sh
 ```
 
-A missing checkout, a checkout at another commit or a modified tracked file fails with one message naming `scripts/init_upstream.sh`; `scripts/init_upstream.sh --force` restores modified files. To move the pin, fetch and check out the new commit in the submodule, update `COMMIT`, `TAG` and `sourceCommit` in `effect-cases.json`, run `python3 -B scripts/import_effect_conformance.py --refresh`, and review the printed integrity identities before copying them into the script's independently pinned release constants. Then review every mapped anchor.
+A missing checkout, a checkout at another commit or a modified tracked file fails with one message naming `scripts/init_upstream.sh`; `scripts/init_upstream.sh --force` restores modified files. Git status cannot see an edit behind an index flag, so the verifier also refuses a checkout that enables `core.ignoreStat` and any selected file marked assume-unchanged or skip-worktree. Each refusal prints its repair; `git -C conformance/upstream/effect read-tree HEAD` clears the flags before `--force` can restore the files. Every hash and every mapped anchor is read from the pinned commit's git objects, never from the checkout's working files, so a local edit or line-ending conversion cannot change what is verified.
+
+To move the pin:
+
+1. Fetch and check out the new commit in the submodule, then stage it with `git add conformance/upstream/effect`. The verifier compares the checkout with the gitlink in the index, so `--refresh` refuses a pin that is not staged.
+2. Update `COMMIT` and `TAG` in `scripts/import_effect_conformance.py`, and `sourceCommit` in `conformance/effect-cases.json`.
+3. Run `python3 -B scripts/import_effect_conformance.py --refresh`. Review the printed integrity identities and the new counts before copying them into the script's independently pinned `RELEASE_*` constants.
+4. Review every mapped anchor.
 
 The first selection covers child interruption and completed child-before-parent cleanup, preservation of an expected failure plus cleanup defect, and virtual-time admission of an unstarted fork. Timeout has an explicit difference row: Effra's nominal `Timeout` and required `Scheduler` differ from upstream `Cause.TimeoutError`; a supplemental timer-defect test ensures defects are not rewritten as timeouts. Existing lifecycle acceptance also checks unobserved child failure, but that assertion has no selected upstream case mapping yet and is not counted as another port.
 
