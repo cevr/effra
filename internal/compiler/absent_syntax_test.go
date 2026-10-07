@@ -107,20 +107,39 @@ func TestAbsentSyntaxKeepsParseableProbesFormattable(t *testing.T) {
 	}
 }
 
-// A genuine diagnostic raised inside a braced absent construct is kept when it
-// is itself an absent construct, and parse faults outside any absent head are
-// unchanged.
-func TestAbsentSyntaxRecoveryKeepsUnrelatedSyntaxFaults(t *testing.T) {
-	for _, test := range []struct{ source, code, message string }{
-		{"fn f() -> string { let x = = \"a\"; x }", "EF002", "expected expression"},
-		{"fn f() -> string { = \"a\" }", "EF002", "expected expression"},
-		{"fn f() -> string { { \"a\" } }", "EF002", "expected expression"},
-		{"fn f(b: bool) -> string { while b { \"a\" }; if b { \"a\" } }", "EF003", "`while` loops are not yet supported"},
-		{"record R { x: string } fn f() -> string { R { x: & } }", "EF001", "unsupported character '&'"},
+// Recovery covers only the recognized construct: its keyword, header and
+// braced body. An EF003 raised inside that body is kept, and every fault
+// outside it, including faults after a bound name such as `record try` or
+// `fn while`, keeps its own f4c16b0 diagnostic and span.
+func TestAbsentSyntaxRecoveryIsBoundedToTheConstruct(t *testing.T) {
+	for _, test := range []struct{ name, source, code, message, marker, token string }{
+		{"no-head", "fn f() -> string { let x = = \"a\"; x }", "EF002", "expected expression", "= \"a\"", "="},
+		{"leading-assignment", "fn f() -> string { = \"a\" }", "EF002", "expected expression", "= \"a\"", "="},
+		{"bare-block", "fn f() -> string { { \"a\" } }", "EF002", "expected expression", "{ \"a\"", "{"},
+		{"lexical", "record R { x: string } fn f() -> string { R { x: & } }", "EF001", "unsupported character '&'", "&", "&"},
+		{"body-fault", "fn f(b: bool) -> string { while b { \"a\" }; \"a\" }", "EF003", "`while` loops are not yet supported", "while", "while"},
+		{"body-keeps-ef003", "fn f(b: bool) -> string {\n    while b { x: if b { \"a\" } }\n}", "EF003", "Effra has no `if` without `else`", "if b", "if"},
+		{"c-family-header", "fn f(n: string) -> string { while (i < n) { i++ }; \"a\" }", "EF003", "`while` loops are not yet supported", "while", "while"},
+		{"go-range", "fn f(xs: string) -> string { for _, x := range xs { x }; \"a\" }", "EF003", "`for` loops are not yet supported", "for", "for"},
+		{"go-for-clause", "fn f(n: string) -> string { for i := 0; i < n; i++ { x }; \"a\" }", "EF003", "`for` loops are not yet supported", "for", "for"},
+		{"catch-clause", "effect fn main() -> void { try { } catch (e) { void } }", "EF003", "Effra has no `try`/`catch` blocks", "catch", "catch"},
+		{"after-body", "fn f(b: bool) -> string { while b { x }; let c = = \"d\"; \"a\" }", "EF002", "expected expression", "= \"d\"", "="},
+		{"bound-try", "record try { x: string }\nfn f() -> string {\n    try { x: \"a\" }\n    let b = = \"c\"\n    \"b\"\n}", "EF002", "expected expression", "= \"c\"", "="},
+		{"bound-while", "fn while(x: string) -> string { x }\nfn f() -> string {\n    while(\"a\")\n    let b = = \"c\"\n    \"b\"\n}", "EF002", "expected expression", "= \"c\"", "="},
+		{"far-fault", "fn helper() -> string { \"a\" }\nfn f() -> string {\n    for x in y { x }\n    let a = helper()\n    let c = helper(,)\n    \"b\"\n}", "EF002", "expected expression", ",)", ","},
+		{"headless", "record R { x: string }\nfn f() -> string {\n    while\n    let r = R { x: \"a\" }\n    let b = = \"c\"\n    \"b\"\n}", "EF002", "expected expression", "= \"c\"", "="},
+		{"headless-later-brace", "record R { x: string }\nfn f() -> string {\n    while\n    let r = R { x: = }\n    \"b\"\n}", "EF002", "expected expression", "= }", "="},
 	} {
-		r := Compile(test.source)
-		if r.Checked || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != test.code || r.Diagnostics[0].Message != test.message {
-			t.Fatalf("%q: got %+v, want %s %q", test.source, r.Diagnostics, test.code, test.message)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			r := Compile(test.source)
+			span := Span{Offset: strings.Index(test.source, test.marker) + strings.Index(test.marker, test.token), Length: len(test.token)}
+			if r.Checked || len(r.Diagnostics) != 1 {
+				t.Fatalf("got %+v, want one %s %q", r.Diagnostics, test.code, test.message)
+			}
+			got := r.Diagnostics[0]
+			if got.Code != test.code || got.Message != test.message || got.Span.Offset != span.Offset || got.Span.Length != span.Length {
+				t.Fatalf("got %s %q at %d+%d, want %s %q at %d+%d", got.Code, got.Message, got.Span.Offset, got.Span.Length, test.code, test.message, span.Offset, span.Length)
+			}
+		})
 	}
 }

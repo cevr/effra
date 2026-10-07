@@ -1091,26 +1091,18 @@ func (p *parser) block() *Block {
 	protected, subjectList := p.noConstruct, p.subjectList
 	p.noConstruct, p.subjectList = 0, false
 	defer func() { p.noConstruct, p.subjectList = protected, subjectList }()
-	// absentHead is the latest statement in this block that began with an
-	// absent braced construct such as `try` or `while`. Its body is no Effra
-	// syntax, so the first syntax fault after it reports that construct at its
-	// keyword rather than at whichever token the misparse reached.
-	var absentHead token
-	defer func() {
-		if absentHead.kind == "" {
-			return
-		}
-		if value := recover(); value != nil {
-			if fault, ok := value.(syntaxFault); ok && fault.diagnostic.Code != absentSyntaxCode {
-				p.failAbsent(absentInBlock, absentHead.text, absentHead.span)
-			}
-			panic(value)
-		}
-	}()
+	// construct is the latest statement in this block recognized as an
+	// absent braced construct such as `while c { ... }`. Its tokens are no
+	// Effra syntax, so a syntax fault inside them reports that construct at
+	// its keyword rather than at whichever token the misparse reached.
+	var construct absentConstruct
+	defer p.recoverAbsentConstruct(&construct)
 	for !p.accept("}") {
 		start := p.peek()
 		if _, absent := absentSyntaxAt(absentInBlock, start.text); absent && start.kind == "name" {
-			absentHead = start
+			if recognized, ok := p.absentConstructAt(); ok {
+				construct = recognized
+			}
 		}
 		s := &Statement{Span: start.span}
 		if p.accept("let") {

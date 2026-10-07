@@ -1,6 +1,10 @@
 package compiler
 
-import "strings"
+import (
+	"maps"
+	"slices"
+	"strings"
+)
 
 // absentSyntaxCode is the one stable code for source written in a construct
 // Effra does not have. Each catalog entry contributes the construct-specific
@@ -29,8 +33,9 @@ const (
 	absentInOperator = "operator"
 	// absentInDeclaration is a token where a module declaration must start.
 	absentInDeclaration = "declaration"
-	// absentInBlock is a statement head whose braced body the parser refuses,
-	// or a payload naming no data declaration.
+	// absentInBlock is the keyword of a recognized braced construct whose
+	// header or body the parser refuses, or a payload naming no data
+	// declaration.
 	absentInBlock = "block"
 	// absentInStatement is a token whose statement form the parser refuses:
 	// `=` after a statement, `if` without `else`, an anonymous `fn`.
@@ -136,6 +141,140 @@ func (p *parser) failAbsent(position, spelling string, span Span) {
 		panic("unclassified absent syntax " + position + " " + spelling)
 	}
 	panic(syntaxFault{entry.diagnostic(span)})
+}
+
+// absentConstruct is a statement recognized as an absent braced construct:
+// its keyword, and the offset just past its body's closing brace.
+type absentConstruct struct {
+	head token
+	end  int
+}
+
+func (c absentConstruct) covers(span Span) bool {
+	return c.head.kind != "" && span.Offset >= c.head.span.Offset && span.Offset < c.end
+}
+
+// absentConstructAt recognizes, without consuming tokens, the braced construct
+// a statement head spells in the languages Effra authors arrive from:
+//
+//	try { ... }
+//	catch [( ... )] { ... }
+//	while ( ... ) { ... }  or  while condition { ... }
+//	for ( ... ) { ... }    or  for x in xs { ... }  or  for k, v := range m { ... }
+//	for init; condition; post { ... }  or  for condition { ... }  or  for { ... }
+//
+// A condition is whatever an `if` header admits. A head without that shape,
+// such as `while` bound as a function and called, or a bare `while` followed
+// by an ordinary statement, is no construct, so faults after it keep their
+// own diagnostic.
+func (p *parser) absentConstructAt() (construct absentConstruct, ok bool) {
+	// Recognition only moves through tokens; conditions parse in a separate
+	// parser, so restoring the position restores the parser.
+	at := p.at
+	defer func() {
+		if value := recover(); value != nil {
+			if _, fault := value.(syntaxFault); !fault {
+				panic(value)
+			}
+			construct, ok = absentConstruct{}, false
+		}
+		p.at = at
+	}()
+	head := p.take()
+	switch head.text {
+	case "catch":
+		if p.peek().text == "(" {
+			p.tokenGroup("(", ")")
+		}
+	case "while":
+		p.loopHeader(false)
+	case "for":
+		if p.peek().text != "(" && p.peek().text != "{" {
+			binding := p.at
+			if p.peek().kind == "name" {
+				p.take()
+				for p.accept(",") {
+					p.name()
+				}
+			}
+			if !p.accept("in") && !(p.accept(":") && p.accept("=") && p.accept("range")) {
+				p.at = binding
+			}
+		}
+		if p.peek().text != "{" {
+			p.loopHeader(true)
+		}
+	}
+	p.tokenGroup("{", "}")
+	last := p.tokens[p.at-1].span
+	return absentConstruct{head, last.Offset + last.Length}, true
+}
+
+// loopHeader is the tokens before the first brace outside parentheses, which
+// opens the body: a parenthesized C-family header, a Go for clause when
+// clauses are admitted, or a condition that parses as one Effra expression.
+// As in Rust, a loop condition holds no payload braces, so a body such as
+// `{ x: y }` is never read as a constructor.
+func (p *parser) loopHeader(clauses bool) {
+	start, separators := p.at, 0
+	for depth := 0; depth > 0 || p.peek().text != "{"; {
+		switch v := p.take(); {
+		case v.kind == "eof" || v.text == "}" && depth == 0:
+			p.fail(v, "expected {")
+		case v.text == "(":
+			depth++
+		case v.text == ")":
+			depth--
+		case v.text == ";" && depth == 0:
+			separators++
+		}
+	}
+	if clauses && separators == 2 {
+		return
+	}
+	header := append(slices.Clone(p.tokens[start:p.at]), token{"<eof>", "eof", p.peek().span})
+	if header[0].text == "(" {
+		grouped := &parser{tokens: header}
+		grouped.tokenGroup("(", ")")
+		if grouped.peek().kind == "eof" {
+			return
+		}
+	}
+	condition := &parser{tokens: header, types: maps.Clone(p.types)}
+	condition.expr(0)
+	if end := condition.peek(); end.kind != "eof" {
+		condition.fail(end, "expected {")
+	}
+}
+
+// tokenGroup consumes a balanced group of foreign tokens.
+func (p *parser) tokenGroup(open, close string) {
+	p.expect(open)
+	for depth := 1; depth > 0; {
+		switch v := p.take(); {
+		case v.kind == "eof":
+			p.fail(v, "expected "+close)
+		case v.text == open:
+			depth++
+		case v.text == close:
+			depth--
+		}
+	}
+}
+
+// recoverAbsentConstruct reports a syntax fault inside the recognized
+// construct as that construct at its keyword. An EF003 raised there, and every
+// fault outside it, keeps its own diagnostic.
+func (p *parser) recoverAbsentConstruct(construct *absentConstruct) {
+	if construct.head.kind == "" {
+		return
+	}
+	if value := recover(); value != nil {
+		if fault, ok := value.(syntaxFault); ok && fault.diagnostic.Code != absentSyntaxCode && construct.covers(fault.diagnostic.Span) {
+			p.failAbsent(absentInBlock, construct.head.text, construct.head.span)
+		}
+		panic(value)
+	}
 }
 
 // absentName reports an unresolved name as the construct it spells, if any.
