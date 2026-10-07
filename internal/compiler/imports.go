@@ -208,6 +208,9 @@ func (r *Result) loadImports(dir string) {
 	hash.Write([]byte(r.Revision))
 	contractData, _ := json.Marshal(contracts)
 	hash.Write(contractData)
+	// Refused keys are removed before any binding is admitted, so no binding
+	// or inspection carries a contract its metadata failed to name.
+	r.Diagnostics = append(r.Diagnostics, checkContractKeys(dir, contracts, exports, loader, hash)...)
 	host := &hostImports{aliases: map[string]string{}, types: map[string]*types.TypeName{}, unsupported: map[string]string{}, contracts: contracts}
 	r.Program.host = host
 	for _, imp := range r.Program.Imports {
@@ -252,7 +255,6 @@ func (r *Result) loadImports(dir string) {
 			}
 		}
 	}
-	r.Diagnostics = append(r.Diagnostics, checkContractKeys(dir, contracts, exports, loader, hash)...)
 	r.Revision = hex.EncodeToString(hash.Sum(nil))
 	for _, path := range slices.Sorted(maps.Keys(modules)) {
 		r.Program.Modules = append(r.Program.Modules, modules[path])
@@ -302,8 +304,11 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 // go/types full name of an exported function or method, as metadata loading
 // refuses an unknown field. A key resolves in the package it names, which
 // source need not import, so packages outside the import closure are listed
-// separately; their export data joins the semantic revision. Diagnostics are
-// sorted by key and name near misses from the same package.
+// separately; their export data joins the semantic revision. A method of an
+// unnamed interface is spelled (interface).M whatever its package or
+// signature, so such a key is refused as ambiguous. Diagnostics are sorted by
+// key and name near misses from the same package; every refused key is
+// removed from contracts.
 func checkContractKeys(dir string, contracts map[string]behavior, exports map[string]string, loader types.Importer, revision hash.Hash) []Diagnostic {
 	keys := slices.Sorted(maps.Keys(contracts))
 	packages := map[string]string{}
@@ -320,6 +325,11 @@ func checkContractKeys(dir string, contracts map[string]behavior, exports map[st
 	if len(missing) > 0 {
 		data, err := goCommand(dir, append([]string{"list", "-e", "-deps", "-export", "-json", "--"}, slices.Sorted(maps.Keys(missing))...)...)
 		if err != nil {
+			for key, path := range packages {
+				if missing[path] {
+					delete(contracts, key)
+				}
+			}
 			return []Diagnostic{{Code: "EF111", Message: err.Error()}}
 		}
 		decoder := json.NewDecoder(bytes.NewReader(data))
@@ -354,15 +364,23 @@ func checkContractKeys(dir string, contracts map[string]behavior, exports map[st
 		}
 	}
 	var diagnostics []Diagnostic
+	refuse := func(key, message string) {
+		delete(contracts, key)
+		diagnostics = append(diagnostics, Diagnostic{Code: "EF111", Message: message})
+	}
 	for _, key := range keys {
+		if strings.HasPrefix(key, "(interface).") {
+			refuse(key, fmt.Sprintf("effra.bindings.json key %q is ambiguous: Go spells the method of every unnamed interface this way, so it names no single declaration; key a named type's method instead", key))
+			continue
+		}
 		path, ok := packages[key]
 		if !ok {
-			diagnostics = append(diagnostics, Diagnostic{Code: "EF111", Message: fmt.Sprintf("effra.bindings.json key %q is not a go/types full name such as %q or %q", key, "path.Func", "(*path.Type).Method")})
+			refuse(key, fmt.Sprintf("effra.bindings.json key %q is not a go/types full name such as %q or %q", key, "path.Func", "(*path.Type).Method"))
 			continue
 		}
 		scope := scopes[path]
 		if scope == nil {
-			diagnostics = append(diagnostics, Diagnostic{Code: "EF111", Message: fmt.Sprintf("effra.bindings.json key %q names package %s, which does not load: %s", key, path, failed[path])})
+			refuse(key, fmt.Sprintf("effra.bindings.json key %q names package %s, which does not load: %s", key, path, failed[path]))
 			continue
 		}
 		declared := contractDeclarations(scope)
@@ -377,7 +395,7 @@ func checkContractKeys(dir string, contracts map[string]behavior, exports map[st
 			}
 			message += "; near: " + strings.Join(quoted, ", ")
 		}
-		diagnostics = append(diagnostics, Diagnostic{Code: "EF111", Message: message})
+		refuse(key, message)
 	}
 	return diagnostics
 }

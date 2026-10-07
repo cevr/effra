@@ -412,6 +412,67 @@ effect fn main() -> void {
 	}
 }
 
+// Go spells a method of every unnamed interface as (interface).M, so such a
+// key cannot name one declaration. It is refused when metadata loads and
+// applies to no binding, so Lookup keeps its explicit context parameter.
+func TestHostAmbiguousInterfaceContractKeyIsRefused(t *testing.T) {
+	root := t.TempDir()
+	for name, contents := range map[string]string{
+		"go.mod": "module example.test/anonymous\n\ngo 1.27\n",
+		"anonymous.go": `package anonymous
+
+import "context"
+
+type FirstValue struct{}
+
+func (FirstValue) Lookup(context.Context, string) (string, error) { return "first", nil }
+func (FirstValue) FirstOnly()                                     {}
+
+type SecondValue struct{}
+
+func (SecondValue) Lookup(context.Context, string) (int64, error) { return 2, nil }
+func (SecondValue) SecondOnly()                                    {}
+
+func First() interface {
+	FirstOnly()
+	Lookup(context.Context, string) (string, error)
+} {
+	return FirstValue{}
+}
+
+func Second() interface {
+	SecondOnly()
+	Lookup(context.Context, string) (int64, error)
+} {
+	return SecondValue{}
+}
+`,
+		"effra.bindings.json": `{"(interface).Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := CompileAt(`import go a "example.test/anonymous"
+import Data "effra/data"
+effect fn main() -> void {
+    match run a.First().provide<Foreign>(Host) {
+        Data.Option.None => void,
+        Data.Option.Some { value: first } => {
+            let one = run first.Lookup("one").provide<Foreign>(Host)
+            void
+        }
+    }
+}`, "go", root)
+	want := `effra.bindings.json key "(interface).Lookup" is ambiguous: Go spells the method of every unnamed interface this way, so it names no single declaration; key a named type's method instead`
+	if r.Checked || len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "EF111" || r.Diagnostics[0].Message != want {
+		t.Fatalf("ambiguous key: %+v", r.Diagnostics)
+	}
+	if !hasDiagnosticContaining(r, "incorrect Go argument count") {
+		t.Fatalf("refused key still forwarded context: %+v", r.Diagnostics)
+	}
+}
+
 // error.Error belongs to Go's universe, not a package. Calling it on a native
 // error runs the original value's method: a typed-nil *Problem inside a
 // non-nil error answers through its nil-tolerant receiver. The binding names
