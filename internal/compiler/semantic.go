@@ -2659,6 +2659,7 @@ func (c *checker) providerSignature(p *Provider) {
 		}
 		param.TypeRef = c.typeRef(param.Type)
 		param.typeID = c.canonicalRef(param.TypeRef)
+		c.bindSourceSyntax(param.sourceType, param.typeID)
 		if names[param.Name] {
 			c.diagnostic("EF101", "duplicate provider configuration parameter "+param.Name, param.Span)
 		}

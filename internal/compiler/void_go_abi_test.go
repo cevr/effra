@@ -489,3 +489,58 @@ func TestVoidGoNestedApplicationAdaptersPreserveIdentityAndCounts(t *testing.T) 
 		t.Fatalf("JavaScript nested application counts changed: %q", output)
 	}
 }
+
+// providerConfigurationPrograms capture generic configuration values whose
+// Go representation comes from their checked application, including one
+// nested inside another application's type argument.
+var providerConfigurationPrograms = []struct{ name, source, output string }{
+	{"void-holder", `record Holder<T: type> { callback: fn() -> T }
+service Task { effect fn execute() -> void }
+fn finish() -> void { void }
+impl Configured(holder: Holder<void>) for Task {
+    effect fn execute() -> void { holder.callback() }
+}
+effect fn main() -> void {
+    let task = run Configured(Holder<void> { callback: finish });
+    run Task.execute().provide<Task>(task);
+    void
+}`, ""},
+	{"string-holder", `record Holder<T: type> { callback: fn() -> T }
+service Task { effect fn execute() -> string }
+fn label() -> string { "configured" }
+impl Configured(holder: Holder<string>) for Task {
+    effect fn execute() -> string { holder.callback() }
+}
+effect fn main() -> string {
+    let task = run Configured(Holder<string> { callback: label });
+    run Task.execute().provide<Task>(task)
+}`, "configured"},
+	{"nested-application", `enum Action<F: callable fn() -> A, A: type> { Some { operation: F } }
+record Envelope<T: type> { action: Action<fn() -> T, T> }
+service Task { effect fn execute() -> void }
+fn finish() -> void { void }
+impl Configured(envelope: Envelope<void>) for Task {
+    effect fn execute() -> void { match envelope.action { Action.Some { operation } => operation() } }
+}
+effect fn main() -> void {
+    let task = run Configured(Envelope<void> { action: Action<fn() -> void, void>.Some { operation: finish } });
+    run Task.execute().provide<Task>(task);
+    void
+}`, ""},
+}
+
+func TestProviderConfigurationKeepsCheckedGenericTypeAcrossTargets(t *testing.T) {
+	for _, program := range providerConfigurationPrograms {
+		t.Run(program.name, func(t *testing.T) {
+			t.Parallel()
+			expected := ""
+			if program.output != "" {
+				expected = program.output + "\n"
+			}
+			runGenericDataNative(t, program.source, expected)
+			if output := runJSForTarget(t, "js", program.source, `const value = await Effect.runPromise(__ef_function_main()); if (value !== undefined) console.log(value);`); output != expected {
+				t.Fatalf("JavaScript provider configuration output changed: %q", output)
+			}
+		})
+	}
+}
