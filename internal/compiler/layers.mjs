@@ -1,11 +1,9 @@
 // The compiler supplies a bounded checked graph and explicit aggregate-field
 // adapters. Effect remains the scheduler, interruption and resource authority.
-const __ef_layerCauseOrigin = Context.Service("effra/runtime/LayerCauseOrigin");
 // Effect deduplicates equal reason values when combining Causes. Each observed
 // node/cleanup reason is an occurrence, so retain a private identity through
 // later Effect joins without wrapping its typed payload or replacing tracing.
-const __ef_layerOccurrences = cause => Cause.fromReasons(cause.reasons.map(reason =>
-  reason.annotate(Context.make(__ef_layerCauseOrigin, () => undefined), { overwrite: true })));
+const __ef_layerOccurrences = cause => __ef_causeOccurrences(cause);
 const __ef_provideLayer = (plan, program) => Effect.uninterruptibleMask(restore => Effect.gen(function* () {
   const state = yield* Effect.sync(plan.init);
   const changes = yield* Queue.make({ capacity: Math.max(1, plan.nodes.length) });
@@ -87,9 +85,9 @@ const __ef_provideLayer = (plan, program) => Effect.uninterruptibleMask(restore 
       if (primary >= 0) break;
     }
   }
-  let cause = callerCause;
-  if (primary >= 0) cause = Cause.combine(cause, Cause.fromReasons([reasons[primary]]));
-  cause = Cause.combine(cause, Cause.fromReasons(reasons.filter((_, index) => index !== primary)));
+  let cause = __ef_causeOccurrences(callerCause);
+  if (primary >= 0) cause = Cause.combine(cause, __ef_causeOccurrences(Cause.fromReasons([reasons[primary]])));
+  cause = Cause.combine(cause, __ef_causeOccurrences(Cause.fromReasons(reasons.filter((_, index) => index !== primary))));
   let body;
   if (cause.reasons.length > 0) body = Exit.failCause(cause);
   else if (aborted) body = yield* Effect.exit(Effect.interrupt);

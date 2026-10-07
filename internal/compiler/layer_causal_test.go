@@ -2,6 +2,33 @@ package compiler
 
 import "testing"
 
+func TestLayerJSPreservesEqualUnobservedChildOccurrences(t *testing.T) {
+	output := runJS(t, layerApplicationSource, `
+const plan={id:'empty',init:()=>({}),nodes:[],expose:state=>state};
+const runCase=async(fresh,layered)=>{
+ const shared={_tag:'ConfigError',detail:'same failure'},errors=fresh?[{...shared},{...shared}]:[shared,shared];
+ const body=__ef_scoped(Effect.gen(function*(){
+  const first=yield* __ef_fork(Effect.fail(errors[0])),second=yield* __ef_fork(Effect.fail(errors[1]));
+  const firstExit=yield* Fiber.await(first.fiber),secondExit=yield* Fiber.await(second.fiber);
+  if(!Exit.isFailure(firstExit)||!Exit.isFailure(secondExit))throw new Error('child did not fail');
+  return 'body';
+ }));
+ const program=layered?__ef_provideLayer(plan,()=>body):body;
+ let recovered=0;
+ const exit=await Effect.runPromiseExit(__ef_catch(program,'ConfigError',()=>{recovered++;return 'recovered';}));
+ const reasons=Exit.isFailure(exit)?exit.cause.reasons:[];
+ if(!Exit.isFailure(exit)||recovered!==0||reasons.length!==2)throw new Error('equal child failures collapsed or recovered '+JSON.stringify({fresh,layered,recovered,reasons:reasons.length}));
+ if(exit.cause.reasons[0].error!==errors[0]||exit.cause.reasons[1].error!==errors[1])throw new Error('child failure payload identity changed');
+ if(Cause.combine(exit.cause,exit.cause).reasons.length!==2)throw new Error('child occurrence identity does not survive recombination');
+};
+for(const fresh of [false,true])for(const layered of [false,true])await runCase(fresh,layered);
+console.log('equal unobserved child occurrences');
+`)
+	if output != "equal unobserved child occurrences\n" {
+		t.Fatal(output)
+	}
+}
+
 func TestLayerJSRetainsEqualReasonsWithinOneProducer(t *testing.T) {
 	output := runJS(t, layerApplicationSource, `
 const error={_tag:'ConfigError'},original=Cause.fromReasons([Cause.fail(error).reasons[0],Cause.fail(error).reasons[0]]);

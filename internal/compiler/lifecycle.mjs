@@ -1,5 +1,16 @@
 // Effra ownership policy over Effect's scheduler, fibers, scopes and causes.
 const __ef_owner = Context.Service("effra/runtime/Owner");
+const __ef_causeOccurrence = Context.Service("effra/runtime/CauseOccurrence");
+// Effect deduplicates equal reason values when combining Causes. A reason's
+// occurrence is lifecycle identity, not public failure identity, so publish a
+// private marker before the first coordinator merge and retain it thereafter.
+const __ef_causeOccurrences = cause => Cause.fromReasons(cause.reasons.map(reason => {
+  // Interrupt is cancellation control, not an independent typed failure
+  // occurrence; retain Effect's structural interruption normalization.
+  if (reason._tag === "Interrupt") return reason;
+  if (reason.annotations.has(__ef_causeOccurrence.key)) return reason;
+  return reason.annotate(Context.make(__ef_causeOccurrence, () => undefined), { overwrite: true });
+}));
 const __ef_autoScope = program => Effect.flatMap(Effect.serviceOption(__ef_owner), owner =>
   Option.isSome(owner) ? program : __ef_scoped(program));
 
@@ -15,15 +26,15 @@ const __ef_closeOwner = (owner, body) => Effect.uninterruptible(Effect.gen(funct
   owner.open = false;
   // Request every cancellation before awaiting any child. Effect owns scheduling.
   yield* Effect.sync(() => { for (const child of owner.children) child.fiber.interruptUnsafe(); });
-  let cause = Exit.isFailure(body) ? body.cause : Cause.empty;
+  let cause = Exit.isFailure(body) ? __ef_causeOccurrences(body.cause) : Cause.empty;
   for (const child of owner.children) {
     const exit = yield* Fiber.await(child.fiber);
     if (!child.observed && Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
-      cause = Cause.combine(cause, exit.cause);
+      cause = Cause.combine(cause, __ef_causeOccurrences(exit.cause));
     }
   }
   const cleanup = yield* Effect.exit(Scope.close(owner.resources, body));
-  if (Exit.isFailure(cleanup)) cause = Cause.combine(cause, cleanup.cause);
+  if (Exit.isFailure(cleanup)) cause = Cause.combine(cause, __ef_causeOccurrences(cleanup.cause));
   owner.children.length = 0;
   return cause.reasons.length === 0 ? body : Exit.failCause(cause);
 }));
@@ -76,28 +87,28 @@ const __ef_timeout = (program, ms) => Effect.suspend(() => {
     const workExit = yield* Fiber.await(work.fiber);
     const timerExit = yield* Fiber.await(timer.fiber);
     if (winner.work) {
-      let cause = Exit.isFailure(winner.exit) ? winner.exit.cause : Cause.empty;
+      let cause = Exit.isFailure(winner.exit) ? __ef_causeOccurrences(winner.exit.cause) : Cause.empty;
       if (Exit.isFailure(timerExit)) {
         for (const reason of timerExit.cause.reasons) {
-          if (reason._tag === "Fail" || reason._tag === "Die") cause = Cause.combine(cause, Cause.fromReasons([reason]));
+          if (reason._tag === "Fail" || reason._tag === "Die") cause = Cause.combine(cause, __ef_causeOccurrences(Cause.fromReasons([reason])));
         }
       }
       if (cause.reasons.length > 0) return yield* Effect.failCause(cause);
       return yield* winner.exit;
     }
     if (Exit.isFailure(winner.exit)) {
-      let cause = winner.exit.cause;
+      let cause = __ef_causeOccurrences(winner.exit.cause);
       if (Exit.isFailure(workExit)) {
         for (const reason of workExit.cause.reasons) {
-          if (reason._tag === "Fail" || reason._tag === "Die") cause = Cause.combine(cause, Cause.fromReasons([reason]));
+          if (reason._tag === "Fail" || reason._tag === "Die") cause = Cause.combine(cause, __ef_causeOccurrences(Cause.fromReasons([reason])));
         }
       }
       return yield* Effect.failCause(cause);
     }
-    let cause = Cause.fail({ _tag: "Timeout" });
+    let cause = __ef_causeOccurrences(Cause.fail({ _tag: "Timeout" }));
     if (Exit.isFailure(workExit)) {
       for (const reason of workExit.cause.reasons) {
-        if (reason._tag === "Fail" || reason._tag === "Die") cause = Cause.combine(cause, Cause.fromReasons([reason]));
+        if (reason._tag === "Fail" || reason._tag === "Die") cause = Cause.combine(cause, __ef_causeOccurrences(Cause.fromReasons([reason])));
       }
     }
     return yield* Effect.failCause(cause);
