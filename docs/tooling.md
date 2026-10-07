@@ -63,7 +63,7 @@ MCP `code.format` returns the complete formatted text in `structuredContent` and
 
 ## Diagnostic reports
 
-`ef diagnostics` and `project.diagnostics` use the same compiler-owned report. It identifies the source with a canonical escaped `file:` URI and an `origin` such as `disk`, includes the exact semantic `revision`, selected `target`, `checked` admission state, `strict` policy, `policyPassed`, and deterministic findings. Every finding preserves its UTF-8 byte `span` and reports `code`, `origin`, optional lint `rule`, stable `severity` (`error`, `warning`, `information`, or `hint`), and message. A finding with a source location also has a valid zero-based UTF-16 `lsp.range`; `locationAvailable` is false when the compiler has no source location, such as an unsupported target diagnostic.
+`ef diagnostics` and `project.diagnostics` use the same compiler-owned report. It identifies the source with a canonical escaped `file:` URI and an `origin` such as `disk`, includes the exact semantic `revision`, selected `target`, `checked` admission state, `strict` policy, `policyPassed`, and deterministic findings. Every finding preserves its UTF-8 byte `span` and reports `code`, `origin`, optional lint `rule`, stable `severity` (`error`, `warning`, `information`, or `hint`), message, and an optional plain-text `help` naming what to write instead. A finding with a source location also has a valid zero-based UTF-16 `lsp.range`; its `lsp.message` appends any help as a `help:` line, because the message is the one field every LSP client renders, so CLI, MCP and LSP carry the same text; `locationAvailable` is false when the compiler has no source location, such as an unsupported target diagnostic.
 
 Compiler errors always fail policy. Strict mode changes only the policy decision for warnings; it does not change finding severity. Unchecked source has `lintAvailable: false` and an explicit `lintUnavailableReason`, while compiler findings remain available. Reasoned lint suppressions can remove optional advice but cannot hide compiler errors.
 
@@ -76,6 +76,31 @@ For unchecked source, the initial diagnostic report omits all lint evaluation, i
 The CLI prints one finding per line by default and emits the complete report with `--json`. A policy failure exits 1, an invalid invocation exits 2, and file or compiler operation failures remain operational errors. MCP returns source errors as successful structured reports with `policyPassed: false`; source admission, stale-revision, path, and output-limit failures remain tool errors. MCP accepts at most 100 diagnostic findings and reports an explicit limit error above that boundary. The report's `totalCounts` and `returnedCount` are exact for every successful response.
 
 Exit 0 means policy passed. Exit 1 with JSON report stdout means source policy failed; exit 1 without a report means an operational failure, explained on stderr. `ef diagnostics --help` also documents this distinction and exit 2 for invalid invocation.
+
+### Diagnostic codes and absent constructs
+
+Codes are stable and grouped by the seam that owns them: `EF001` lexical errors, `EF002` parse errors, `EF003` constructs Effra does not have, `EF1xx` checker errors and `EFLxxx` lint advice. A code names a family, not each spelling; the message and help carry the specifics.
+
+`EF003` replaces the accidental error a familiar TypeScript, Go or Effect construct used to produce (`unknown value null`, `unsupported character '?'`, `expected expression`). It is reported where that spelling already failed (an unresolved name or type, a refused character, a refused statement form), with the span of the keyword or operator token alone. It is a diagnostic only: no program that was refused is admitted, admitted programs and the formatter are unchanged, and identifiers such as `nullable`, `asValue` or a local bound as `null` keep their meaning. A parse failure inside the braced body of `try`, `catch`, `for` or `while` reports that construct at its keyword. A construct the specifications plan says "not yet supported"; one they never plan says "Effra has no".
+
+| Construct | Spellings | Status | Help names | Basis |
+| --- | --- | --- | --- | --- |
+| null | `null`, `nil`, `undefined` | absent | `Data.Option<T>` | [NORTH_STAR](../NORTH_STAR.md) owner data constraint; [absence](specs/absence-and-host-boundaries.md) |
+| throw | `throw` | absent | `fail E` with `raises { E }`, `.catch<E>` | [typed failures](design.md#failure-is-more-than-a-result) |
+| try/catch | `try`, `catch` | absent | `.catch<E>(fallback)`, `scope { ... }` | [typed failures](design.md#failure-is-more-than-a-result) |
+| type assertion | `as` | absent | explicit conversion, `Convert.Codec` | [checked codecs](specs/bundled-interfaces.md) |
+| top type | `unknown`, `any` | absent | concrete type or closed enum with `match` | [host interop](../NORTH_STAR.md) forbids an unchecked `any` |
+| async | `async`, `await` | absent | `effect fn` with `run` | [surface language](design.md#surface-language) |
+| module binding | module-level `let` | absent | a service a layer provides; a function for a fixed value | [layers](specs/layers.md) |
+| dynamic import | `import(...)` | absent | top-level `import` declaration | [interop](interop.md) |
+| conditional operator | `?` | absent | `if c { a } else { b }`; `match` on Data.Result | `if` is an expression; Result-propagation `?` is planned ([design](design.md#surface-language)) and also not yet supported |
+| negation, inequality, logical and | `!`, `!=`, `&&` | absent | `if`/`else` forms | the specifications are silent, so absent |
+| `if` without `else` | `if c { ... }` | absent | `else { void }` | [prototype](prototype.md#supported-surface) admits two-branch `if` |
+| closure | `fn(...) -> T { ... }`, `effect fn(...)` | planned | a named module function passed by name | [language abstractions](specs/language-abstractions.md) admits closures after capture checking |
+| loop | `for`, `while` | planned | a recursive named function | [design](design.md#concurrency-and-resources) loop backedges; [actors](specs/actors.md) |
+| assignment | `x = value` after a statement | planned | a new `let` name | [surface language](design.md#surface-language) plans local mutation |
+
+Each help is cross-checked by a checked replacement program in `cmd/ef/absent_syntax_process_test.go`. The `unit` type and `throws` row keyword keep their own retired-spelling messages under `EF102` and `EF002`.
 
 ## Lint
 
