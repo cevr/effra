@@ -466,13 +466,11 @@ effect fn main() -> void {
 }
 
 // Go spells a method of every unnamed interface as (interface).M, so such a
-// key cannot name one declaration. It is refused when metadata loads and
-// applies to no binding, so Lookup keeps its explicit context parameter.
-func TestHostAmbiguousInterfaceContractKeyIsRefused(t *testing.T) {
-	root := t.TempDir()
-	for name, contents := range map[string]string{
-		"go.mod": "module example.test/anonymous\n\ngo 1.27\n",
-		"anonymous.go": `package anonymous
+// key cannot name one declaration, even when only one declaration matches it
+// today. It is refused when metadata loads and applies to no binding, so
+// Lookup keeps its explicit context parameter.
+func TestHostUnnamedInterfaceContractKeyIsRefused(t *testing.T) {
+	first := `package anonymous
 
 import "context"
 
@@ -481,17 +479,21 @@ type FirstValue struct{}
 func (FirstValue) Lookup(context.Context, string) (string, error) { return "first", nil }
 func (FirstValue) FirstOnly()                                     {}
 
-type SecondValue struct{}
-
-func (SecondValue) Lookup(context.Context, string) (int64, error) { return 2, nil }
-func (SecondValue) SecondOnly()                                    {}
-
 func First() interface {
 	FirstOnly()
 	Lookup(context.Context, string) (string, error)
 } {
 	return FirstValue{}
 }
+`
+	second := `package anonymous
+
+import "context"
+
+type SecondValue struct{}
+
+func (SecondValue) Lookup(context.Context, string) (int64, error) { return 2, nil }
+func (SecondValue) SecondOnly()                                    {}
 
 func Second() interface {
 	SecondOnly()
@@ -499,14 +501,26 @@ func Second() interface {
 } {
 	return SecondValue{}
 }
-`,
-		"effra.bindings.json": `{"(interface).Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
+`
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+	}{
+		{"one declaration", map[string]string{"first.go": first}},
+		{"two declarations", map[string]string{"first.go": first, "second.go": second}},
 	} {
-		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
-			t.Fatal(err)
+		root := t.TempDir()
+		files := map[string]string{
+			"go.mod":              "module example.test/anonymous\n\ngo 1.27\n",
+			"effra.bindings.json": `{"(interface).Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
 		}
-	}
-	r := CompileAt(`import go a "example.test/anonymous"
+		maps.Copy(files, tc.files)
+		for name, contents := range files {
+			if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		r := CompileAt(`import go a "example.test/anonymous"
 import Data "effra/data"
 effect fn main() -> void {
     match run a.First().provide<Foreign>(Host) {
@@ -517,12 +531,13 @@ effect fn main() -> void {
         }
     }
 }`, "go", root)
-	want := `effra.bindings.json key "(interface).Lookup" names a method of an unnamed interface, which Go spells this way whatever its package or signature, so it names no single declaration and carries no contract; pass an explicit context.Context argument, or declare a named Go interface with the method in the module and key that method`
-	if r.Checked || len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "EF111" || r.Diagnostics[0].Message != want {
-		t.Fatalf("ambiguous key: %+v", r.Diagnostics)
-	}
-	if !hasDiagnosticContaining(r, "incorrect Go argument count") {
-		t.Fatalf("refused key still forwarded context: %+v", r.Diagnostics)
+		want := `effra.bindings.json key "(interface).Lookup" names a method of an unnamed interface, which Go spells this way whatever its package or signature, so it names no single declaration and carries no contract; pass an explicit context.Context argument, or declare a named Go interface with the method in the module and key that method`
+		if r.Checked || len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "EF111" || r.Diagnostics[0].Message != want {
+			t.Fatalf("%s: unnamed-interface key: %+v", tc.name, r.Diagnostics)
+		}
+		if !hasDiagnosticContaining(r, "incorrect Go argument count") {
+			t.Fatalf("%s: refused key still forwarded context: %+v", tc.name, r.Diagnostics)
+		}
 	}
 }
 

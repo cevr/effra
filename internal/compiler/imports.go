@@ -307,8 +307,9 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 // go/types full name of an exported function or method, as metadata loading
 // refuses an unknown field. A key resolves in the package it names, which
 // source need not import, so packages outside the import closure are listed
-// separately; their export data joins the semantic revision. A method of an
-// unnamed interface is spelled (interface).M whatever its package or
+// separately; their export data joins the semantic revision. A package that
+// is a go list pattern, such as std or ./..., is refused without listing it.
+// A method of an unnamed interface is spelled (interface).M whatever its package or
 // signature, so such a key is refused: it names no single declaration.
 // Diagnostics are sorted by key and name near misses from the same package;
 // every refused key is removed from contracts.
@@ -316,15 +317,17 @@ func checkContractKeys(dir string, contracts map[string]behavior, exports map[st
 	keys := slices.Sorted(maps.Keys(contracts))
 	packages := map[string]string{}
 	missing := map[string]bool{}
+	failed := map[string]string{}
 	for _, key := range keys {
 		if path, ok := contractKeyPackage(key); ok {
 			packages[key] = path
-			if path != "" && exports[path] == "" {
+			if goListPattern(path) {
+				failed[path] = path + " is a go list pattern, not an import path"
+			} else if path != "" && exports[path] == "" {
 				missing[path] = true
 			}
 		}
 	}
-	failed := map[string]string{}
 	if len(missing) > 0 {
 		// A listing that fails as a whole fails every package it was to list;
 		// each key is still checked, and refused, below.
@@ -334,21 +337,27 @@ func checkContractKeys(dir string, contracts map[string]behavior, exports map[st
 			}
 		}
 	}
-	scopes := map[string]*types.Scope{"": types.Universe}
+	scopes := map[string]*types.Scope{}
+	declarations := map[string]map[string]bool{}
 	for _, path := range slices.Sorted(maps.Values(packages)) {
 		if _, loaded := scopes[path]; loaded || failed[path] != "" {
 			continue
 		}
-		pkg, err := loader.Import(path)
-		if err != nil {
-			failed[path] = err.Error()
-			continue
+		scope := types.Universe
+		if path != "" {
+			pkg, err := loader.Import(path)
+			if err != nil {
+				failed[path] = err.Error()
+				continue
+			}
+			scope = pkg.Scope()
+			if archive, err := os.ReadFile(exports[path]); err == nil {
+				revision.Write([]byte(path))
+				revision.Write(archive)
+			}
 		}
-		scopes[path] = pkg.Scope()
-		if archive, err := os.ReadFile(exports[path]); err == nil {
-			revision.Write([]byte(path))
-			revision.Write(archive)
-		}
+		scopes[path] = scope
+		declarations[path] = contractDeclarations(scope)
 	}
 	var diagnostics []Diagnostic
 	refuse := func(key, message string) {
@@ -370,7 +379,7 @@ func checkContractKeys(dir string, contracts map[string]behavior, exports map[st
 			refuse(key, fmt.Sprintf("effra.bindings.json key %q names package %s, which does not load: %s", key, path, failed[path]))
 			continue
 		}
-		declared := contractDeclarations(scope)
+		declared := declarations[path]
 		if declared[key] {
 			continue
 		}
@@ -409,6 +418,19 @@ func listContractPackages(dir string, paths []string, exports, failed map[string
 			exports[pkg.ImportPath] = pkg.Export
 		}
 	}
+}
+
+// goListPattern reports whether a key's package is something go list expands
+// or resolves other than as an import path: a reserved name (go help
+// packages), a ... wildcard, a relative or absolute directory, a version
+// query or a Go file.
+func goListPattern(path string) bool {
+	switch path {
+	case "all", "cmd", "std", "tool", "work":
+		return true
+	}
+	return strings.Contains(path, "...") || strings.HasPrefix(path, ".") || strings.HasPrefix(path, "/") ||
+		strings.Contains(path, "@") || strings.HasSuffix(path, ".go")
 }
 
 // contractKeyPackage returns the package a full name belongs to: the text

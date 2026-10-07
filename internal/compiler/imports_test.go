@@ -137,7 +137,8 @@ func TestBindingMetadataRejectsUnknownFields(t *testing.T) {
 // Every effra.bindings.json key must name a declaration: a function or a
 // method's go/types full name, resolved in the package the key names, which
 // source need not import. An unknown key is refused when metadata loads, one
-// sorted diagnostic per key, with near misses from the same package.
+// sorted diagnostic per key, with near misses from the same package. A key
+// whose package is a go list pattern is refused without listing it.
 func TestBindingMetadataRejectsUnknownKeys(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, contents string) {
@@ -193,7 +194,7 @@ effect fn main() -> string {
 	write("effra.bindings.json", contract([]string{
 		"example.test/keys.Fecth", "(example.test/keys.Client).Lookup", "example.test/keys.Client",
 		"example.test/missing.Fetch", "Fetch", "(example.test/keys.Wrapped).Shared", "(*example.test/keys.Boxed).Get",
-		"(*example.test/keys.Box[int64]).Get",
+		"(*example.test/keys.Box[int64]).Get", "std.F", "example.test/keys/....Fetch",
 	}))
 	r := CompileAt(source, "go", dir)
 	want := []string{
@@ -204,7 +205,9 @@ effect fn main() -> string {
 		`effra.bindings.json key "Fetch" is not a go/types full name such as "path.Func" or "(*path.Type).Method"`,
 		`effra.bindings.json key "example.test/keys.Client" matches no Go function or method`,
 		`effra.bindings.json key "example.test/keys.Fecth" matches no Go function or method; near: "example.test/keys.Fetch"`,
+		`effra.bindings.json key "example.test/keys/....Fetch" names package example.test/keys/..., which does not load: example.test/keys/... is a go list pattern, not an import path`,
 		`effra.bindings.json key "example.test/missing.Fetch" names package example.test/missing, which does not load: `,
+		`effra.bindings.json key "std.F" names package std, which does not load: std is a go list pattern, not an import path`,
 	}
 	if r.Checked || len(r.Diagnostics) != len(want) {
 		t.Fatalf("unknown keys: %+v", r.Diagnostics)
@@ -220,6 +223,7 @@ effect fn main() -> string {
 // closure, whether the command fails or its output does not decode, each such
 // key is refused with that failure, every other key is still checked, and no
 // refused key reaches a binding: Lookup keeps its explicit context parameter.
+// A pattern key such as std.F never reaches go list.
 func TestBindingMetadataChecksEveryKeyWhenListingFails(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake go command is a shell script")
@@ -268,7 +272,8 @@ func First() interface {
 	write(filepath.Join(dir, "other", "other.go"), "package other\n\nfunc F() string { return \"other\" }\n", 0o600)
 	write(filepath.Join(dir, "effra.bindings.json"), `{"(interface).Lookup":{"context":"fiber","cancellation":"cooperative"},
  "example.test/listing.Fecth":{"cancellation":"unknown"},
- "example.test/listing/other.F":{"cancellation":"unknown"}}`, 0o600)
+ "example.test/listing/other.F":{"cancellation":"unknown"},
+ "std.F":{"cancellation":"unknown"}}`, 0o600)
 	log := filepath.Join(bin, "go.log")
 	t.Setenv("EFFRA_REAL_GO", realGo)
 	t.Setenv("EFFRA_FAKE_GO_LOG", log)
@@ -297,12 +302,13 @@ effect fn main() -> string {
 			t.Fatal(err)
 		}
 		if !slices.Contains(strings.Split(string(calls), "\n"), "list -e -deps -export -json -- example.test/listing/other") {
-			t.Fatalf("%s: key packages were not listed: %q", tc.mode, calls)
+			t.Fatalf("%s: go calls %q, want one listing of exactly the missing key package", tc.mode, calls)
 		}
 		want := []string{
 			`EF111 effra.bindings.json key "(interface).Lookup" names a method of an unnamed interface`,
 			`EF111 effra.bindings.json key "example.test/listing.Fecth" matches no Go function or method`,
 			`EF111 effra.bindings.json key "example.test/listing/other.F" names package example.test/listing/other, which does not load: ` + tc.failure,
+			`EF111 effra.bindings.json key "std.F" names package std, which does not load: std is a go list pattern, not an import path`,
 			`EF106 incorrect Go argument count`,
 		}
 		if r.Checked || len(r.Diagnostics) < len(want) {
