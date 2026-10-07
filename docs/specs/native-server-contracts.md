@@ -34,7 +34,7 @@ Derivation and format policy are separate. A profile chooses structural JSON rul
 
 Do not assume every codec is a bijection. Specify identity round trips only for representations that support them; normalizing or lossy transformations need explicit canonicalization/equivalence laws and encode rejection where appropriate. Defaults, field renames and version migrations are explicit policy. Derivation cannot silently make a persisted wire-format change safe.
 
-The first profile admits strings, booleans, unit where explicitly represented, full-range i64 via decimal strings, nested records, closed payload enums and declared payload failures. File, Fiber, providers, functions and effect recipes cannot cross this boundary. Recursive layouts remain unsupported. Plans must share canonical type DAG nodes; repeated substructure must not enumerate exponentially many paths.
+The first profile admits strings, booleans, `void` where explicitly represented, full-range i64 via decimal strings, nested records, closed payload enums and declared payload failures. File, Fiber, providers, functions and effect recipes cannot cross this boundary. Recursive layouts remain unsupported. Plans must share canonical type DAG nodes; repeated substructure must not enumerate exponentially many paths.
 
 Before accepting a codec implementation, record executable policy vectors for required and excess fields, null, duplicate keys, invalid UTF-8, unknown discriminators, integer range and spelling, escaping, body size and nesting limits. Go and the pinned Effect Schema comparator must apply the same profile. Strictness that the host parser cannot prove must be supplied by a shared admission layer or excluded explicitly from the accepted contract; do not silently label it validated.
 

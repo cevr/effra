@@ -17,7 +17,7 @@ impl Prefixed(prefix: string) for Greeting uses {Names} {
     }
 }
 
-effect fn main() -> () {
+effect fn main() -> void {
     let greeting = run Prefixed("Hello, ").provide<Names>(FixtureNames)
     let text = run Greeting.hello("42").provide<Greeting>(greeting)
     run Console.log(text).provide<Console>(Stdout)

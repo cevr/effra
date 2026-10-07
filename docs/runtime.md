@@ -20,13 +20,13 @@ Exits preserve named failures, defects and interruption separately, including ad
 
 | Service / provider | Operations | Contract |
 | --- | --- | --- |
-| Console / Stdout | `log(string) -> ()` | Explicit console capability |
-| Clock / LiveClock | `sleep(i64) -> ()` | Cancellation-aware millisecond wait; JS uses bigint input |
-| Scheduler / LiveScheduler | `sleep(i64) -> ()`, `advance(i64) -> ()`, `awaitRegistration() -> ()` | Explicit deadline authority; `TestScheduler` controls virtual sleeps/adjustment and `LiveScheduler` is only valid for live execution |
-| Sync / TestSync | `latch() -> Latch`, `await(Latch) -> ()`, `signal(Latch) -> ()` | Shared one-shot synchronization; waiter interruption does not consume the handle |
+| Console / Stdout | `log(string) -> void` | Explicit console capability |
+| Clock / LiveClock | `sleep(i64) -> void` | Cancellation-aware millisecond wait; JS uses bigint input |
+| Scheduler / LiveScheduler | `sleep(i64) -> void`, `advance(i64) -> void`, `awaitRegistration() -> void` | Explicit deadline authority; `TestScheduler` controls virtual sleeps/adjustment and `LiveScheduler` is only valid for live execution |
+| Sync / TestSync | `latch() -> Latch`, `await(Latch) -> void`, `signal(Latch) -> void` | Shared one-shot synchronization; waiter interruption does not consume the handle |
 | Env / LiveEnv | `get(string) -> string` | Empty string for absent values; this is not a presence test |
 | Files / LiveFiles | `openRead(string) -> File`, `readText(File) -> string`, `readFile(string) -> string` | IoError; openRead attaches release to the current scope; readFile opens a narrower scope |
-| Http / GoHttp | `serve(string, handler) -> ()` | IoError; owns listener and waits for request cleanup on shutdown |
+| Http / GoHttp | `serve(string, handler) -> void` | IoError; owns listener and waits for request cleanup on shutdown |
 | Runtime / RuntimeLive | `inspect() -> string` | JSON metadata for the current owning scope |
 
 Files use synchronized managed handles; using a handle after its owner closes produces IoError. This is a runtime guard, not region typing or proof against every mutable alias. Native reads are ordinary blocking Go file reads and may delay cancellation. File reading currently buffers the entire content; streaming/bounded I/O remains future work.

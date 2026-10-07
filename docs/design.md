@@ -28,7 +28,7 @@ service Users {
 }
 
 service Logger {
-    effect fn info(message: string) -> ()
+    effect fn info(message: string) -> void
 }
 
 effect fn greeting(id: UserId) -> string

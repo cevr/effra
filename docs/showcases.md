@@ -150,7 +150,7 @@ Cancellation remains cooperative. Child failures and cleanup defects remain obse
 **Proposed.** A replay/live stream needs subscription ordering, buffering, duplicate filtering, acknowledgements and overflow handling. Effra could simplify its consumer:
 
 ```rust
-effect fn forward(cursor: i64) -> ()
+effect fn forward(cursor: i64) -> void
     raises {FeedUnavailable, DecodeError, SendFailed}
     uses {EventLog, Client}
 {
@@ -216,7 +216,7 @@ An implementation receipt should include both-target examples, rejection of miss
 **Runnable on Go and JS.** [testing.ef](../examples/testing.ef) supplies a fixture `Directory`, exercises success and typed recovery, and joins an owned child. The test runner supplies only `Assert`; fixture provision is ordinary checked language code.
 
 ```rust
-effect fn test_greeting() -> () raises {AssertionFailed, Missing} uses {Assert} {
+effect fn test_greeting() -> void raises {AssertionFailed, Missing} uses {Assert} {
     let actual = run greeting("42").provide<Directory>(FixtureDirectory)
     run Assert.equalText(actual, "Hello, Ada")
 }

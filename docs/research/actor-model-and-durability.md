@@ -90,7 +90,7 @@ effect fn roomExample() -> Count
 The following deferred sketch illustrates pacing while a restricted inbox retains heterogeneous reply correlation. It does not by itself justify a receive API:
 
 ```ef
-effect fn spoolLoop(inbox: Inbox<Spooler>) -> () uses { Clock } {
+effect fn spoolLoop(inbox: Inbox<Spooler>) -> void uses { Clock } {
     while true {
         run inbox.handleNext()
         run Clock.sleep(5)

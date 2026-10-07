@@ -80,7 +80,7 @@ Fresh acquisition is an explicit separate provision/build boundary. There is no 
 ## Managed builds and input compatibility
 
 ```ef
-effect fn main() -> ()
+effect fn main() -> void
     raises { ConfigError, DbError, ServerError }
 {
     run serve().provide(App)

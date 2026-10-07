@@ -30,7 +30,7 @@ Future TS/JS interop must adapt null/undefined/optional properties into checked 
 
 ## Causal acceptance
 
-- Separate source cases reject bare nil, bare null, nullable annotations, missing required fields/results and unchecked Option extraction on both targets. A present unit and explicit domain Missing/Found alternatives remain valid.
+- Separate source cases reject bare nil, bare null, nullable annotations, missing required fields/results and unchecked Option extraction on both targets. A present `void` value and explicit domain Missing/Found alternatives remain valid.
 - Generic Option preserves exact payload types, exhaustive matching and owner provenance. Some of a shorter-lived acquired resource cannot escape its owner; a borrowed present value remains admitted where proven.
 - Actual native calls distinguish nil pointer from nonnil pointer, nil/empty slice and map, nil interface from typed-nil dynamic payload, nil error from typed-nil error with partial results, and successful typed-nil matches from failed matches. CLI/MCP show the same boundary/presence facts without publishing a nullable source type.
 - Native error identity tests exercise the real Go helper boundary. Native reference tests alone establish zero Effra passes. Unknown/unsupported adaptation diagnoses rather than producing an opaque unusable value.
