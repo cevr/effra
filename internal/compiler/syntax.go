@@ -1091,7 +1091,12 @@ func (p *parser) expr(min int) *Expr {
 			close := p.tokens[p.at-1]
 			p.failSpan(Span{Offset: start.span.Offset, Length: close.span.Offset + close.span.Length - start.span.Offset, Line: start.span.Line, Column: start.span.Column}, "use void instead of () for a no-value expression")
 		} else {
+			// Parentheses delimit their contents, so constructor braces inside
+			// an if/match header are unambiguous again.
+			protected := p.noConstruct
+			p.noConstruct = 0
 			e = p.expr(0)
+			p.noConstruct = protected
 			p.expect(")")
 		}
 	case start.kind == "name":
@@ -1135,6 +1140,8 @@ func (p *parser) expr(min int) *Expr {
 			}
 			p.take()
 			call := &Expr{Kind: "call", Left: e, Span: e.Span}
+			protected := p.noConstruct
+			p.noConstruct = 0
 			for !p.accept(")") {
 				if p.peek().kind == "name" && p.at+1 < len(p.tokens) && p.tokens[p.at+1].text == ":" {
 					field := p.name()
@@ -1150,6 +1157,7 @@ func (p *parser) expr(min int) *Expr {
 					break
 				}
 			}
+			p.noConstruct = protected
 			e = call
 			continue
 		}

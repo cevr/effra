@@ -525,3 +525,15 @@ func checkStrictTypeScript(t *testing.T, declaration, consumer string) {
 		t.Fatalf("strict TypeScript consumer rejected generated declarations: %v\n%s\n%s", err, output, declaration)
 	}
 }
+
+func TestDelimitedConstructorsInControlHeaders(t *testing.T) {
+	// Parentheses and call arguments delimit their contents, so a payload-free
+	// constructor needs no following body brace to be recognized there.
+	r := Compile(`enum Light { Red; Green }
+fn same(a: Light, b: Light) -> bool { true }
+fn f(light: Light) -> string { if same(Light.Red {}, light) { "a" } else { "b" } }
+fn g() -> string { match (Light.Red {}) { Light.Red => "r"; Light.Green => "g" } }`)
+	if !r.Checked {
+		t.Fatal("delimited constructor in a control header refused", r.Diagnostics)
+	}
+}
