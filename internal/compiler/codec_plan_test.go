@@ -175,6 +175,67 @@ func TestCodecPlanRefusesStructuralBudgets(t *testing.T) {
 	if _, refusal := derivePlanOf(t, edges.String(), "All", testCodecBounds); !strings.Contains(refusal, "plan exceeds 65536 fields and variants") {
 		t.Fatalf("edge budget: %q", refusal)
 	}
+	// Variants are edges under the same ceiling as fields, so a plan the
+	// compiler admits is one the runtime engine admits, and one variant more
+	// is refused at that variant. The mixed record holds the enum last, so
+	// its variants are the edges that cross the ceiling.
+	wide := func(variants int) string {
+		var source strings.Builder
+		source.WriteString("enum Wide {")
+		for v := 0; v < variants; v++ {
+			fmt.Fprintf(&source, " V%d,", v)
+		}
+		source.WriteString(" }\n")
+		return source.String()
+	}
+	mixed := func(variants int) string {
+		var source strings.Builder
+		source.WriteString(wide(variants) + "record Mixed {")
+		for f := 0; f < maxCodecPlanEdges-1-3; f++ {
+			fmt.Fprintf(&source, " f%d: string,", f)
+		}
+		source.WriteString(" wide: Wide }\n")
+		return source.String()
+	}
+	boundaries := []struct {
+		name, root      string
+		source          func(int) string
+		admitted        int
+		refusalLocation string
+	}{
+		{"variants alone", "Wide", wide, maxCodecPlanEdges, "Wide.V65536"},
+		{"record fields and variants", "Mixed", mixed, 3, "Mixed.wide.V3"},
+	}
+	for _, tc := range boundaries {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, refusal := derivePlanOf(t, tc.source(tc.admitted), tc.root, testCodecBounds)
+			if refusal != "" {
+				t.Fatalf("exactly %d edges must be admitted: %q", maxCodecPlanEdges, refusal)
+			}
+			runtimePlan := runtimeCodecPlanOf(plan)
+			if _, err := rt.CompileCodec(runtimePlan); err != nil {
+				t.Fatalf("runtime refused a plan at the edge ceiling: %v", err)
+			}
+			if _, refusal := derivePlanOf(t, tc.source(tc.admitted+1), tc.root, testCodecBounds); refusal != "plan exceeds 65536 fields and variants at "+tc.refusalLocation {
+				t.Fatalf("one variant past the ceiling: %q", refusal)
+			}
+			// The runtime engine refuses the same plan with one more variant,
+			// so both ceilings are the same edge.
+			union := &runtimePlan.Nodes[slices.IndexFunc(runtimePlan.Nodes, func(node rt.CodecNode) bool { return node.Kind == rt.CodecUnion })]
+			union.Variants = append(union.Variants, rt.CodecVariant{Tag: "Extra"})
+			if _, err := rt.CompileCodec(runtimePlan); err == nil || !strings.Contains(err.Error(), "more than 65536 fields and variants") {
+				t.Fatalf("runtime admitted a plan past the edge ceiling: %v", err)
+			}
+		})
+	}
+	// A derive declaration reports the refusal as EF138 at its type.
+	source := "import Json \"effra/json\"\n" + wide(maxCodecPlanEdges+1) + "derive wideJson = Json.codec<Wide>\n"
+	r := Compile(source)
+	at := strings.LastIndex(source, "Wide>")
+	if r.Checked || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != codecDerivationCode || r.Diagnostics[0].Span.Offset != at || r.Diagnostics[0].Span.Length != len("Wide") ||
+		r.Diagnostics[0].Message != "codec wideJson cannot derive effra/json-structural-1 for Wide: plan exceeds 65536 fields and variants at Wide.V65536" {
+		t.Fatalf("derive past the edge ceiling: %+v", r.Diagnostics)
+	}
 }
 
 // A derived plan is admitted by the runtime engine's own validator, which
@@ -184,6 +245,14 @@ func TestDerivedCodecPlansAreAdmittedByTheRuntimeEngine(t *testing.T) {
 	if refusal != "" {
 		t.Fatal(refusal)
 	}
+	if _, err := rt.CompileCodec(runtimeCodecPlanOf(plan)); err != nil {
+		t.Fatalf("runtime refused a derived plan: %v", err)
+	}
+}
+
+// runtimeCodecPlanOf converts a derived plan into the runtime engine's plan
+// with inert adapters, so the engine's validator checks the derived structure.
+func runtimeCodecPlanOf(plan *CodecPlan) rt.CodecPlan {
 	runtimePlan := rt.CodecPlan{Profile: plan.Profile, Bounds: rt.CodecBounds{MaxBodyBytes: plan.Bounds.MaxBodyBytes, MaxDepth: plan.Bounds.MaxDepth}, Root: plan.Root}
 	fields := func(declared []CodecPlanField) []rt.CodecField {
 		out := []rt.CodecField{}
@@ -208,7 +277,5 @@ func TestDerivedCodecPlansAreAdmittedByTheRuntimeEngine(t *testing.T) {
 		}
 		runtimePlan.Nodes = append(runtimePlan.Nodes, converted)
 	}
-	if _, err := rt.CompileCodec(runtimePlan); err != nil {
-		t.Fatalf("runtime refused a derived plan: %v", err)
-	}
+	return runtimePlan
 }

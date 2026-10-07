@@ -100,7 +100,16 @@ func (c *checker) deriveCodecPlan(profile string, root TypeID, display string, b
 	indices := map[TypeID]int{}
 	active := map[TypeID]bool{}
 	depths := map[TypeID]int{}
+	// Fields and variants are both edges under one ceiling, as the runtime
+	// engines count them; edge refuses the edge at path past the ceiling.
 	edges := 0
+	edge := func(path *codecPlanPath) string {
+		edges++
+		if edges > maxCodecPlanEdges {
+			return "plan exceeds " + strconv.Itoa(maxCodecPlanEdges) + " fields and variants at " + path.String()
+		}
+		return ""
+	}
 	// display is the source spelling of the type at path, which names
 	// callable and generic types readably in a refusal.
 	var visit func(id TypeID, path *codecPlanPath, display string) (int, string)
@@ -171,9 +180,8 @@ func (c *checker) deriveCodecPlan(profile string, root TypeID, display string, b
 		fields := func(declared []Field, owner *codecPlanPath) ([]CodecPlanField, string) {
 			out := make([]CodecPlanField, 0, len(declared))
 			for _, field := range declared {
-				edges++
-				if edges > maxCodecPlanEdges {
-					return nil, "plan exceeds " + strconv.Itoa(maxCodecPlanEdges) + " fields and variants at " + owner.String()
+				if refusal := edge(owner); refusal != "" {
+					return nil, refusal
 				}
 				if kind == rt.CodecUnion && field.Name == rt.CodecTagKey {
 					return nil, "variant field " + owner.child(field.Name).String() + " collides with the " + rt.CodecTagKey + " discriminator"
@@ -196,7 +204,9 @@ func (c *checker) deriveCodecPlan(profile string, root TypeID, display string, b
 		} else {
 			variants := make([]CodecPlanVariant, 0, len(data.Variants))
 			for _, variant := range data.Variants {
-				edges++
+				if refusal := edge(path.child(variant.Name)); refusal != "" {
+					return 0, refusal
+				}
 				declared, refusal := fields(variant.Fields, path.child(variant.Name))
 				if refusal != "" {
 					return 0, refusal
