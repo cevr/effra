@@ -2,6 +2,7 @@ package effra
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -264,8 +265,7 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 	link := func(fields []CodecField) []codecField {
 		out := make([]codecField, len(fields))
 		for i, field := range fields {
-			key := codecAppendString(nil, field.Name)
-			out[i] = codecField{name: field.Name, key: append(key, ':'), node: &compiled[field.Node]}
+			out[i] = codecField{name: field.Name, key: codecSpell("", field.Name, ":"), node: &compiled[field.Node]}
 		}
 		return out
 	}
@@ -276,8 +276,8 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 		case CodecUnion:
 			compiled[index].variants = make([]codecVariant, len(node.Variants))
 			for variant, alternative := range node.Variants {
-				open := append(codecAppendString([]byte{'{'}, CodecTagKey), ':')
-				compiled[index].variants[variant] = codecVariant{open: codecAppendString(open, alternative.Tag), fields: link(alternative.Fields)}
+				open := codecSpell(string(codecSpell("{", CodecTagKey, ":")), alternative.Tag, "")
+				compiled[index].variants[variant] = codecVariant{open: open, fields: link(alternative.Fields)}
 			}
 		}
 	}
@@ -357,7 +357,11 @@ func (c *Codec) Decode(body []byte) (any, error) {
 }
 
 // Encode writes compact JSON in declared field order, with each union's
-// discriminator first. Output larger than MaxBodyBytes is a typed failure.
+// discriminator first. Output larger than MaxBodyBytes is a typed failure,
+// detected before any byte beyond the bound is constructed. Failures surface
+// in encode order; a string's Unicode is validated before any of its bytes
+// are written, so ill-formed text reports invalid-unicode even when its
+// encoding would also exceed the remaining allowance.
 func (c *Codec) Encode(value any) ([]byte, error) {
 	encoder := codecEncoder{limit: c.bounds.MaxBodyBytes}
 	if failure := c.root.encode(&encoder, value, nil); failure != nil {
@@ -453,17 +457,11 @@ func decodeCodecFields(fields []codecField, object *codecJSON, path *codecPath) 
 	return values, nil
 }
 
+// codecEncoder accumulates output; every write checks the remaining
+// allowance before appending, so out never grows past limit.
 type codecEncoder struct {
 	out   []byte
 	limit int
-}
-
-// grow reports whether the output is still within its bound after a write.
-func (e *codecEncoder) grow() *CodecError {
-	if len(e.out) > e.limit {
-		return codecFailure(CodecEncode, CodecBodyTooLarge, nil)
-	}
-	return nil
 }
 
 func (e *codecEncoder) write(bytes ...byte) *CodecError {
@@ -472,6 +470,15 @@ func (e *codecEncoder) write(bytes ...byte) *CodecError {
 	}
 	e.out = append(e.out, bytes...)
 	return nil
+}
+
+// codecSpell renders compiler-owned plan text (a key or tag) as a JSON
+// string between prefix and suffix. Plan text is not body output, so it is
+// not bounded by MaxBodyBytes.
+func codecSpell(prefix, text, suffix string) []byte {
+	e := codecEncoder{out: []byte(prefix), limit: math.MaxInt}
+	_ = e.writeString(text)
+	return append(e.out, suffix...)
 }
 
 func (n *codecNode) encode(e *codecEncoder, value any, path *codecPath) *CodecError {
@@ -484,28 +491,27 @@ func (n *codecNode) encode(e *codecEncoder, value any, path *codecPath) *CodecEr
 		if !utf8.ValidString(text) {
 			return codecFailure(CodecEncode, CodecInvalidUnicode, path)
 		}
-		e.out = codecAppendString(e.out, text)
-		return e.grow()
+		return e.writeString(text)
 	case CodecBool:
 		boolean, ok := value.(bool)
 		if !ok {
 			panic(fmt.Sprintf("effra codec: bool node received %T", value))
 		}
-		e.out = strconv.AppendBool(e.out, boolean)
-		return e.grow()
+		var scratch [5]byte
+		return e.write(strconv.AppendBool(scratch[:0], boolean)...)
 	case CodecVoid:
 		if _, ok := value.(struct{}); !ok {
 			panic(fmt.Sprintf("effra codec: void node received %T", value))
 		}
-		e.out = append(e.out, "null"...)
-		return e.grow()
+		return e.write('n', 'u', 'l', 'l')
 	case CodecI64:
 		number, ok := value.(int64)
 		if !ok {
 			panic(fmt.Sprintf("effra codec: i64 node received %T", value))
 		}
-		e.out = append(strconv.AppendInt(append(e.out, '"'), number, 10), '"')
-		return e.grow()
+		var scratch [22]byte
+		quoted := append(strconv.AppendInt(append(scratch[:0], '"'), number, 10), '"')
+		return e.write(quoted...)
 	case CodecRecord:
 		_, fields := n.project(value)
 		if failure := e.write('{'); failure != nil {

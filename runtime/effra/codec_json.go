@@ -383,37 +383,48 @@ func (p *codecParser) unicodeEscape(offset int) (uint16, bool) {
 	return unit, true
 }
 
-// codecAppendString writes valid UTF-8 text with the escaping of ECMAScript
-// JSON.stringify: quote, backslash and C0 controls only, short escapes where
-// defined and lowercase \u00XX otherwise.
-func codecAppendString(out []byte, text string) []byte {
+// writeString writes valid UTF-8 text as a JSON string with the escaping of
+// ECMAScript JSON.stringify: quote, backslash and C0 controls only, short
+// escapes where defined and lowercase \u00XX otherwise. The remaining
+// allowance is checked before every append, so a string whose encoding does
+// not fit fails without constructing any output beyond the bound.
+func (e *codecEncoder) writeString(text string) *CodecError {
 	const hex = "0123456789abcdef"
-	out = append(out, '"')
+	if failure := e.write('"'); failure != nil {
+		return failure
+	}
 	start := 0
 	for i := 0; i < len(text); i++ {
 		c := text[i]
 		if c >= 0x20 && c != '"' && c != '\\' {
+			if len(e.out)+i+1-start > e.limit {
+				return codecFailure(CodecEncode, CodecBodyTooLarge, nil)
+			}
 			continue
 		}
-		out = append(out, text[start:i]...)
+		e.out = append(e.out, text[start:i]...)
+		start = i + 1
+		var failure *CodecError
 		switch c {
 		case '"', '\\':
-			out = append(out, '\\', c)
+			failure = e.write('\\', c)
 		case '\b':
-			out = append(out, '\\', 'b')
+			failure = e.write('\\', 'b')
 		case '\f':
-			out = append(out, '\\', 'f')
+			failure = e.write('\\', 'f')
 		case '\n':
-			out = append(out, '\\', 'n')
+			failure = e.write('\\', 'n')
 		case '\r':
-			out = append(out, '\\', 'r')
+			failure = e.write('\\', 'r')
 		case '\t':
-			out = append(out, '\\', 't')
+			failure = e.write('\\', 't')
 		default:
-			out = append(out, '\\', 'u', '0', '0', hex[c>>4], hex[c&0xf])
+			failure = e.write('\\', 'u', '0', '0', hex[c>>4], hex[c&0xf])
 		}
-		start = i + 1
+		if failure != nil {
+			return failure
+		}
 	}
-	out = append(out, text[start:]...)
-	return append(out, '"')
+	e.out = append(e.out, text[start:]...)
+	return e.write('"')
 }

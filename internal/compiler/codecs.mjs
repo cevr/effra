@@ -18,6 +18,19 @@ const __ef_codecPath = path => {
   for (let at = path; at !== null; at = at.parent) names.push(at.name);
   return names.reverse();
 };
+// JSON.stringify's escape for a quote, backslash or C0 control unit.
+const __ef_codecEscape = unit => {
+  switch (unit) {
+    case 0x22: return "\\\"";
+    case 0x5c: return "\\\\";
+    case 0x08: return "\\b";
+    case 0x0c: return "\\f";
+    case 0x0a: return "\\n";
+    case 0x0d: return "\\r";
+    case 0x09: return "\\t";
+    default: return "\\u00" + unit.toString(16).padStart(2, "0");
+  }
+};
 const __ef_codecUTF8Length = text => {
   let size = 0;
   for (let i = 0; i < text.length; i++) {
@@ -343,12 +356,38 @@ const __ef_codecCompile = plan => {
     });
   };
   const encode = value => settle("encode", () => {
+    // Every byte is reserved against the allowance before the piece holding
+    // it is built, so no piece or output beyond maxBodyBytes is constructed.
+    // Failures surface in encode order; a string's Unicode is validated
+    // before any of its bytes are written, as in the Go engine.
     const out = [];
     let size = 0;
-    const write = piece => {
-      size += __ef_codecUTF8Length(piece);
+    const reserve = count => {
+      size += count;
       if (size > maxBodyBytes) fail("body-too-large", null);
+    };
+    const write = piece => {
+      reserve(__ef_codecUTF8Length(piece));
       out.push(piece);
+    };
+    // Writes well-formed text with JSON.stringify's escaping. Unescaped runs
+    // are sliced from the input only after each unit's UTF-8 size is reserved.
+    const writeString = text => {
+      write("\"");
+      let start = 0;
+      for (let i = 0; i < text.length; i++) {
+        const unit = text.charCodeAt(i);
+        if (unit < 0x20 || unit === 0x22 || unit === 0x5c) {
+          if (start < i) out.push(text.slice(start, i));
+          start = i + 1;
+          write(__ef_codecEscape(unit));
+        } else if (unit < 0x80) reserve(1);
+        else if (unit < 0x800) reserve(2);
+        else if (unit >= 0xd800 && unit <= 0xdbff) { reserve(4); i++; }
+        else reserve(3);
+      }
+      if (start < text.length) out.push(text.slice(start));
+      write("\"");
     };
     const defect = message => { throw new Error("effra codec: " + message); };
     const encodeFields = (fields, object, path, separated) => {
@@ -365,7 +404,7 @@ const __ef_codecCompile = plan => {
         case "string":
           if (typeof value !== "string") defect(`string node received ${typeof value}`);
           if (!value.isWellFormed()) fail("invalid-unicode", path);
-          return write(JSON.stringify(value));
+          return writeString(value);
         case "bool":
           if (typeof value !== "boolean") defect(`bool node received ${typeof value}`);
           return write(value ? "true" : "false");

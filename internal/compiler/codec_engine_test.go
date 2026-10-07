@@ -588,3 +588,39 @@ console.log("carriers: passed");
 		t.Fatalf("JS carrier contract: %s", output)
 	}
 }
+
+// TestCodecJSEncodeConstructsNoOutputBeyondTheBound encodes megabyte strings,
+// including ones whose escaped form is six times longer, under small bounds.
+// It observes every string the host string, array and JSON builtins produce
+// or receive during encode: none may be longer than MaxBodyBytes, so the
+// refusal comes from the allowance check while escaping, not after building
+// the whole representation.
+func TestCodecJSEncodeConstructsNoOutputBeyondTheBound(t *testing.T) {
+	_, root := readCodecVectors(t)
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("Bun is required for codec conformance vectors")
+	}
+	output := runCodecJS(t, bun, root, `
+const inputs = { control: "\u0001".repeat(1 << 20), quote: "\"".repeat(1 << 20), plain: "a".repeat(1 << 20), scalar: "é".repeat(1 << 19) };
+let largest = 0;
+const observe = value => { if (typeof value === "string" && value.length > largest) largest = value.length; return value; };
+const builtins = [[JSON, "stringify"], [String.prototype, "slice"], [String.prototype, "substring"], [String.prototype, "concat"], [String.prototype, "padStart"], [String.prototype, "replace"], [String.prototype, "replaceAll"], [Array.prototype, "push"], [Array.prototype, "join"], [TextEncoder.prototype, "encode"]];
+for (const maxBodyBytes of [32, 4096]) {
+  const codec = __ef_codecCompile({ profile: "effra/json-structural-1", bounds: { maxBodyBytes, maxDepth: 1 }, root: 0, nodes: [{ kind: "string" }] });
+  for (const [name, input] of Object.entries(inputs)) {
+    largest = 0;
+    const originals = builtins.map(([owner, method]) => owner[method]);
+    builtins.forEach(([owner, method], i) => { owner[method] = function (...args) { args.forEach(observe); return observe(originals[i].apply(this, args)); }; });
+    let result;
+    try { result = codec.encode(input); } finally { builtins.forEach(([owner, method], i) => { owner[method] = originals[i]; }); }
+    if (result.ok || result.issue.reason !== "body-too-large") throw new Error(name + " under " + maxBodyBytes + " bytes: " + JSON.stringify(result.issue));
+    if (largest > maxBodyBytes) console.log(name + " under " + maxBodyBytes + " bytes built a " + largest + "-unit string");
+  }
+}
+console.log("bounded: done");
+`)
+	if strings.TrimSpace(string(output)) != "bounded: done" {
+		t.Fatalf("JS encode constructed output beyond the bound:\n%s", output)
+	}
+}

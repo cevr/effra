@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -246,6 +247,39 @@ func TestCodecEncodeFailuresAreTyped(t *testing.T) {
 	}
 	if _, err := mustCompileCodec(t, short).Decode(full); !errors.As(err, &failure) || failure.Reason != CodecBodyTooLarge {
 		t.Fatalf("over-limit decode: %#v", err)
+	}
+}
+
+// TestCodecEncodeConstructsNoOutputBeyondTheBound encodes megabyte strings,
+// including ones whose escaped form is six times longer, under small bounds.
+// The refusal must come from the allowance check while escaping, so the bytes
+// Encode allocates stay a small multiple of MaxBodyBytes, not of the input.
+func TestCodecEncodeConstructsNoOutputBeyondTheBound(t *testing.T) {
+	inputs := map[string]string{
+		"control": strings.Repeat("\x01", 1<<20),
+		"quote":   strings.Repeat(`"`, 1<<20),
+		"plain":   strings.Repeat("a", 1<<20),
+		"scalar":  strings.Repeat("\u00e9", 1<<19),
+	}
+	for _, limit := range []int{32, 4096} {
+		codec := mustCompileCodec(t, CodecPlan{Profile: CodecProfileJSON, Bounds: CodecBounds{MaxBodyBytes: limit, MaxDepth: 1}, Nodes: []CodecNode{{Kind: CodecString}}})
+		for name, text := range inputs {
+			var failure *CodecError
+			if _, err := codec.Encode(text); !errors.As(err, &failure) || failure.Reason != CodecBodyTooLarge {
+				t.Fatalf("%s under %d bytes: %#v", name, limit, err)
+			}
+			const runs = 8
+			var before, after runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&before)
+			for range runs {
+				_, _ = codec.Encode(text)
+			}
+			runtime.ReadMemStats(&after)
+			if perRun := (after.TotalAlloc - before.TotalAlloc) / runs; perRun > uint64(4*limit+1024) {
+				t.Errorf("%s under %d bytes allocated %d bytes per Encode", name, limit, perRun)
+			}
+		}
 	}
 }
 
