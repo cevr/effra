@@ -61,7 +61,7 @@ func TestLayerAssemblyBudgetRejectsRepeatedMetadataBeforeExpansion(t *testing.T)
 	if response["typeProjectionComplete"] != false || response["layers"] != nil {
 		t.Fatal("refused graph published authoritative metadata", response)
 	}
-	if _, err := over.LayerInspection("Shared"); err == nil {
+	if _, err := over.LayerInspection("Shared", "test.ef"); err == nil {
 		t.Fatal("refused program allowed inspection")
 	}
 	t.Logf("50-node graph: %d repeated references accepted; %d refused; metadata units before refusal %d", low, high, over.projector.layerBudget.used)

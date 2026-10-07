@@ -46,7 +46,7 @@ func TestLayerDiamondVisibilityAndReplacement(t *testing.T) {
 			t.Fatalf("replacement: %+v", node)
 		}
 	}
-	response, err := r.LayerInspection("TestApp")
+	response, err := r.LayerInspection("TestApp", "test.ef")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestLayerDiagnosticControls(t *testing.T) {
 			if r.Checked || !found {
 				t.Fatalf("wanted %s, got %+v", control.code, r.Diagnostics)
 			}
-			if _, err := r.LayerInspection("App"); err == nil {
+			if _, err := r.LayerInspection("App", "test.ef"); err == nil {
 				t.Fatal("invalid source published inspection")
 			}
 		})

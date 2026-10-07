@@ -167,6 +167,41 @@ func mustMarshalMCPTestString(value string) []byte {
 	return encoded
 }
 
+func TestLayerInspectionIncludesFileBeforeProjectionReceipt(t *testing.T) {
+	source := `service Store { effect fn label() -> string }
+impl Live for Store { effect fn label() -> string { "live" } }
+layer App { Store = Live }
+effect fn main() -> string { run Store.label().provide(App) }`
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"go", "js"} {
+		result, err := call(root, "code.inspect", arguments{File: "main.ef", Symbol: "App", Target: target})
+		if err != nil {
+			t.Fatalf("%s layer inspection failed: %v", target, err)
+		}
+		response, ok := result.(map[string]any)
+		if !ok {
+			t.Fatalf("%s returned unexpected layer response: %#v", target, result)
+		}
+		if response["file"] != "main.ef" {
+			t.Fatalf("%s layer response lost file metadata: %#v", target, response["file"])
+		}
+		usage, ok := response["typeProjectionUsage"].(compiler.ProjectionUsage)
+		if !ok {
+			t.Fatalf("%s layer response lost projection usage: %#v", target, response["typeProjectionUsage"])
+		}
+		encoded, err := json.Marshal(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if usage.ResponseBytes != len(encoded) {
+			t.Errorf("%s layer receipt omitted final file metadata: receipt=%d actual=%d", target, usage.ResponseBytes, len(encoded))
+		}
+	}
+}
+
 func TestDiagnosticsReportMatchesCompilerAndBoundsResults(t *testing.T) {
 	root := t.TempDir()
 	source := `effect fn task() -> string { "ok" }

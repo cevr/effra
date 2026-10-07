@@ -893,11 +893,10 @@ func call(root, name string, args arguments) (any, error) {
 	symbol := r.Find(args.Symbol)
 	if symbol == nil {
 		if r.FindLayer(args.Symbol) != nil {
-			response, err := r.LayerInspection(args.Symbol)
+			response, err := r.LayerInspection(args.Symbol, args.File)
 			if err != nil {
 				return nil, err
 			}
-			response["file"] = args.File
 			return response, nil
 		}
 		if declaration := r.FindDeclaration(args.Symbol); declaration != nil {

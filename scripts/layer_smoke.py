@@ -131,8 +131,13 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
     for target in ("go", "js"):
         checked = json.loads(cli("check", str(path), "--target", target).stdout)
         assert checked["checked"] and len(checked["layers"]) == 5
-        inspected = json.loads(cli("inspect", str(path), "Fixture", "--target", target).stdout)
-        explained = json.loads(cli("explain", str(path), "Fixture", "--target", target).stdout)
+        inspected_output = cli("inspect", str(path), "Fixture", "--target", target).stdout
+        explained_output = cli("explain", str(path), "Fixture", "--target", target).stdout
+        inspected = json.loads(inspected_output)
+        explained = json.loads(explained_output)
+        for output, response in ((inspected_output, inspected), (explained_output, explained)):
+            assert response["file"] == str(path)
+            assert response["typeProjectionUsage"]["responseBytes"] == len(output.rstrip("\n").encode("utf-8"))
         assert_report_parity(inspected, explained, target=target,
                              ignored=("file", "timings"), project=adapter_semantic)
         plan = inspected["layer"]
@@ -205,7 +210,8 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
                        (9, "code.typeAt", {"offset": offset}, queried),
                        (15, "code.typeAt", {"offset": helper_offset}, helper),
                        (16, "code.inspect", {"symbol": "main"}, caller),
-                       (17, "project.check", {}, checked)]
+                       (17, "project.check", {}, checked),
+                       (18, "code.explain", {"symbol": "Fixture"}, explained)]
         for identifier, name, arguments, expected in comparisons:
             requests.append(tool(identifier, name, {"file": "app.ef", "target": target,
                                 "expectedRevision": checked["revision"], **arguments}))
@@ -222,6 +228,8 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
             assert_report_parity(actual, expected, target=target,
                                  ignored=("file", "timings"), project=adapter_semantic)
             complete_references(actual)
+        for identifier in (5, 18):
+            assert responses[identifier]["result"]["structuredContent"]["file"] == "app.ef"
         assert_report_parity(responses[10]["result"]["structuredContent"], workflow,
                              target=target, ignored=("file", "timings"), project=adapter_semantic)
         complete_references(responses[10]["result"]["structuredContent"])

@@ -150,7 +150,7 @@ func TestLayerConfigurationQueriesAndProvisionGraph(t *testing.T) {
 	if !found {
 		t.Fatal("provision missing from canonical graph", graph)
 	}
-	inspection, err := r.LayerInspection("App")
+	inspection, err := r.LayerInspection("App", "test.ef")
 	if err != nil {
 		t.Fatal(err)
 	}

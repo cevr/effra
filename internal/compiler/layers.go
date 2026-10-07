@@ -572,7 +572,7 @@ func (r *Result) FindLayer(name string) *LayerPlan {
 	return nil
 }
 
-func (r *Result) LayerInspection(name string) (map[string]any, error) {
+func (r *Result) LayerInspection(name, file string) (map[string]any, error) {
 	if !r.Checked {
 		return nil, fmt.Errorf("layer inspection requires checked source")
 	}
@@ -584,7 +584,7 @@ func (r *Result) LayerInspection(name string) (map[string]any, error) {
 	if !projection.Complete {
 		return nil, fmt.Errorf("type projection unavailable: %s", projection.Error)
 	}
-	response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "layer": plan, "types": projection.Types, "rows": projection.Rows, "declarations": r.ProjectionDeclarations(projection), "typeProjectionComplete": true}
+	response := map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "file": file, "target": r.Target, "checked": r.Checked, "layer": plan, "types": projection.Types, "rows": projection.Rows, "declarations": r.ProjectionDeclarations(projection), "typeProjectionComplete": true}
 	r.AddSourceInputs(response)
 	usage, err := r.ValidateProjectionResponse(projection, response)
 	if err != nil {

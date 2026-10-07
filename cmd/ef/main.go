@@ -373,7 +373,7 @@ func command(args []string) error {
 		symbol := r.Find(opts.positional[1])
 		if symbol == nil {
 			if r.FindLayer(opts.positional[1]) != nil {
-				response, err := r.LayerInspection(opts.positional[1])
+				response, err := r.LayerInspection(opts.positional[1], opts.positional[0])
 				if err != nil {
 					return err
 				}
