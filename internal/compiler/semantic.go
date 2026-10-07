@@ -2414,6 +2414,7 @@ func (c *checker) check() {
 			c.diagnostic("EF102", "unknown service "+p.Service, p.Span)
 			continue
 		}
+		c.observeReference(p, p.ServiceSpan, lexicalTarget{kind: "service", service: s})
 		methods := map[string]*Function{}
 		for _, f := range p.Methods {
 			if methods[f.Name] != nil {
@@ -3987,12 +3988,15 @@ func (c *checker) block(b *Block, env map[string]checkedExpression, effect bool)
 			}
 			if _, exists := c.program.Errors[s.Name]; !exists {
 				c.diagnostic("EF102", "unknown failure "+s.Name, s.Span)
+			} else if decl := c.errors[s.Name]; decl != nil {
+				c.observeReference(s, s.NameSpan, lexicalTarget{kind: "error", failure: decl})
 			}
 			if s.Payload != nil {
 				if s.Payload.Kind == "payload" {
 					fields := []Field(nil)
 					if decl := c.errors[s.Name]; decl != nil {
 						fields = decl.Fields
+						c.observeFieldLabels(s.Payload, s.Payload.Fields, fields, lexicalTarget{failure: decl})
 					}
 					c.rejectOwnedEscape(c.payload(s.Payload, fields, env, s.Payload.Span), s.Payload.Span)
 				} else {
@@ -4078,6 +4082,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			t.executed = t.evaluation
 			e.Text = "local"
 		} else if p, exists := c.providers[e.Name]; exists {
+			c.observeReference(e, e.Span, lexicalTarget{kind: "provider", provider: p})
 			if len(p.Params) > 0 || len(p.Services) > 0 {
 				c.diagnostic("EF104", "provider "+p.Name+" requires explicit construction", e.Span)
 				t = c.checkedData("invalid")
@@ -4096,6 +4101,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			t.setOwnership(nil)
 			e.ResolvedFunction = f
 			e.Text = "function"
+			c.observeReference(e, e.Span, lexicalTarget{kind: "function", function: f})
 		} else {
 			c.diagnostic("EF102", "unknown value "+e.Name, e.Span)
 		}
@@ -4118,6 +4124,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		}
 		if e.Left.Kind == "name" {
 			if provider := c.providers[e.Left.Name]; provider != nil {
+				c.observeReference(e.Left, e.Left.Span, lexicalTarget{kind: "provider", provider: provider})
 				if len(provider.Params) == 0 && len(provider.Services) == 0 {
 					c.diagnostic("EF105", "provider "+provider.Name+" is a value and cannot be called", e.Span)
 					t = c.checkedData("invalid")
@@ -4146,6 +4153,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			}
 		}
 		var f *Function
+		var service *Service
 		serviceName := ""
 		if e.Left.Kind == "name" {
 			f = c.namedFunction(e.Left.Name)
@@ -4166,7 +4174,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 				for _, m := range s.Methods {
 					if m.Name == e.Left.Name {
 						f = m
-						serviceName = key
+						service, serviceName = s, key
 						break
 					}
 				}
@@ -4180,6 +4188,16 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			break
 		}
 		e.ResolvedFunction = f
+		switch {
+		case service != nil:
+			c.observeReference(e.Left, e.Left.Span, lexicalTarget{kind: "operation", function: f, service: service})
+			c.observeReference(e.Left.Left, e.Left.Left.Span, lexicalTarget{kind: "service", service: service})
+		case e.Left.Kind == "member":
+			c.observeReference(e.Left, e.Left.Span, lexicalTarget{kind: "function", function: f})
+			c.observeModuleAlias(e.Left.Left, e.Left.Left)
+		default:
+			c.observeReference(e.Left, e.Left.Span, lexicalTarget{kind: "function", function: f})
+		}
 		argumentTypes := make([]checkedExpression, len(e.Args))
 		t = c.checkedFunction(f, false, true)
 		var callbackPolicies []CallbackPolicy
@@ -4311,6 +4329,8 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 					t.setOwnership(nil)
 					e.ResolvedFunction = f
 					e.Text = "function"
+					c.observeReference(e, e.Span, lexicalTarget{kind: "function", function: f})
+					c.observeModuleAlias(e.Left, e.Left)
 					break
 				}
 			}
@@ -4325,6 +4345,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 				if field.Name == e.Name {
 					t = c.projectFieldOccurrence(inner, field)
 					e.Text = "field"
+					c.observeReference(e, e.Span, lexicalTarget{kind: "field", data: c.templates[c.node(inner.resultID()).Declaration], field: field.Name})
 					break
 				}
 			}
@@ -4341,6 +4362,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 						t.setOwnership(c.unknownOwnershipID(field.typeID))
 					}
 					e.Text = "field"
+					c.observeReference(e, e.Span, lexicalTarget{kind: "field", data: c.records[c.namedType(inner)], field: field.Name})
 					break
 				}
 			}
@@ -4462,8 +4484,10 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		if !t.isEffect() {
 			c.diagnostic("EF105", "provide requires an Effect value", e.Span)
 		}
-		if c.services[e.Name] == nil {
+		if service := c.services[e.Name]; service == nil {
 			c.diagnostic("EF102", "unknown service "+e.Name, e.Span)
+		} else {
+			c.observeReference(e, e.NameSpan, lexicalTarget{kind: "service", service: service})
 		}
 		providerNode := provider.node()
 		if providerNode == nil || providerNode.Kind != "provider" || providerNode.Name != e.Name || provider.isEffect() {
@@ -4488,8 +4512,11 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		}
 		if _, exists := c.program.Errors[e.Name]; !exists {
 			c.diagnostic("EF102", "unknown failure "+e.Name, e.Span)
-		} else if !c.hasRow(t, true, e.Name) {
-			c.diagnostic("EF107", "effect does not admit failure "+e.Name, e.Span)
+		} else {
+			c.observeReference(e, e.NameSpan, lexicalTarget{kind: "error", failure: c.errors[e.Name]})
+			if !c.hasRow(t, true, e.Name) {
+				c.diagnostic("EF107", "effect does not admit failure "+e.Name, e.Span)
+			}
 		}
 		if fallback.isEffect() || !c.sameResultType(fallback, t) {
 			c.diagnostic("EF106", "prototype catch fallback must be a pure "+c.displayTypeID(t.resultID()), e.Right.Span)
@@ -4640,6 +4667,7 @@ func (c *checker) dataCall(e *Expr, env map[string]checkedExpression, inEffect b
 			return c.checkedData("invalid"), true
 		}
 	}
+	owner := c.observeDataHead(e.Left, typeName, variantName)
 	if len(e.Fields) > 0 {
 		if len(e.Fields) != len(e.Args) {
 			c.diagnostic("EF122", "constructor arguments cannot mix named and positional forms", e.Span)
@@ -4649,6 +4677,7 @@ func (c *checker) dataCall(e *Expr, env map[string]checkedExpression, inEffect b
 			e.Text = "data"
 			return c.checkedData("invalid"), true
 		}
+		c.observeFieldLabels(e, e.Fields, fields, owner)
 		payloadExpr := &Expr{Kind: "payload", Fields: e.Fields, Span: e.Span}
 		ownership := c.payload(payloadExpr, fields, env, e.Span)
 		e.Text = "data"
@@ -4730,6 +4759,7 @@ func (c *checker) construct(e *Expr, env map[string]checkedExpression, inEffect 
 			return c.checkedData("invalid")
 		}
 	}
+	c.observeFieldLabels(e, e.Fields, fields, c.observeDataHead(e.Left, typeName, variantName))
 	ownership := c.payload(e, fields, env, e.Span)
 	result := c.checkedData(typeName)
 	if variantName != "" {
@@ -4739,6 +4769,47 @@ func (c *checker) construct(e *Expr, env map[string]checkedExpression, inEffect 
 	}
 	c.retainDataPayload(&result, e.Fields, variantName)
 	return result
+}
+
+// observeDataHead records the record, enum and variant tokens of an admitted
+// non-generic constructor head and returns the owner of its payload fields.
+func (c *checker) observeDataHead(head *Expr, typeName, variantName string) lexicalTarget {
+	if variantName == "" {
+		record := c.records[typeName]
+		c.observeReference(head, head.Span, lexicalTarget{kind: "record", data: record})
+		return lexicalTarget{data: record}
+	}
+	enum := c.enums[typeName]
+	c.observeReference(head.Left, head.Left.Span, lexicalTarget{kind: "enum", data: enum})
+	c.observeReference(head, head.Span, lexicalTarget{kind: "variant", data: enum, variant: variantName})
+	return lexicalTarget{data: enum, variant: variantName}
+}
+
+// observePattern records the enum and variant segments of a pattern the
+// checker admitted against enum. A three-segment pattern is alias-qualified.
+func (c *checker) observePattern(pattern *MatchPattern, enum *Enum) {
+	segments := pattern.Segments
+	if len(segments) == 3 && c.result.lexical != nil {
+		// templateByName resolved the same alias-qualified owner name.
+		alias, _, _ := strings.Cut(pattern.TypeName, ".")
+		if item := c.result.lexical.aliases[alias]; item != nil {
+			c.observeReference(pattern, segments[0], lexicalTarget{kind: "module", module: item})
+		}
+		segments = segments[1:]
+	}
+	if len(segments) == 0 {
+		return
+	}
+	c.observeReference(pattern, segments[0], lexicalTarget{kind: enum.Kind, data: enum})
+	if len(segments) == 2 && slices.ContainsFunc(enum.Variants, func(v Variant) bool { return v.Name == pattern.VariantName }) {
+		c.observeReference(pattern, segments[1], lexicalTarget{kind: "variant", data: enum, variant: pattern.VariantName})
+		for _, name := range pattern.Names {
+			// An unaliased field token is the binding's own declaration.
+			if name.FieldSpan != name.NameSpan {
+				c.observeReference(pattern, name.FieldSpan, lexicalTarget{kind: "field", data: enum, variant: pattern.VariantName, field: name.Field})
+			}
+		}
+	}
 }
 
 func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool) checkedExpression {
@@ -4771,6 +4842,7 @@ func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool
 			continue
 		}
 		pattern.ResolvedEnum = enum
+		c.observePattern(pattern, enum)
 		if pattern.VariantName == "" {
 			c.diagnostic("EF118", "match arm must name a declared variant", pattern.Span)
 			continue

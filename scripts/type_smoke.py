@@ -26,6 +26,7 @@ effect fn main() -> string raises {Child} {
  let child = fork task()
  run child.join()
 }
+effect fn fetch(item: string) -> string uses {Labels} { run Labels.read(item) }
 '''
 
 
@@ -186,12 +187,18 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
         ("config-use", source.index("{ prefix +") + len("{ ")),
         ("method-use", source.index("prefix + item") + len("prefix + ")),
         ("fiber", source.index("run child.join") + len("run ")),
+        ("callee", source.index("fork task") + len("fork ")),
+        ("operation", source.index("Labels.read(item)") + len("Labels.")),
+        ("service", source.index("Labels.read(item)")),
+        ("bundled", source.index("Fns.identity") + len("Fns.")),
+        ("module-alias", source.index("Fns.identity")),
+        ("variant", source.index("Notice.Named {") + len("Notice.")),
     ]
     for target in ("go", "js"):
         views = {name: cli(path, target, "--offset", str(offset)) for name, offset in selectors}
         artifact = producer_snapshot(views["use"], target)
         for view in views.values():
-            assert view["checked"] and view["typeProjectionComplete"] and view["querySchemaVersion"] == 1
+            assert view["checked"] and view["typeProjectionComplete"] and view["querySchemaVersion"] == 2
             assert view["producerIdentity"] and view["sources"] and view["bundledInterfaces"]
             assert view["selection"]["locationAvailable"]
             current = producer_snapshot(view, target)
@@ -205,6 +212,32 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
         assert binding("alias")["declarationSpan"]["offset"] == selectors[2][1]
         assert binding("config")["id"] == binding("config-use")["id"]
         assert binding("method-use")["kind"] == "parameter"
+        # Hover/definition facts: the selected token's declaration target and
+        # the one presentation rendered from this response's own tables.
+        declared = lambda name: views[name]["selection"]["target"]
+        presentation = lambda name: views[name]["selection"]["presentation"]
+        assert declared("let")["kind"] == "let" and presentation("let") == "let label: string"
+        assert declared("use")["span"] == binding("use")["declarationSpan"]
+        assert views["callee"]["selection"]["kind"] == "expression"
+        assert declared("callee")["kind"] == "function" and declared("callee")["locationAvailable"]
+        assert declared("callee")["span"]["offset"] == source.index("fn task") + len("fn ")
+        assert presentation("callee") == "effect fn task() -> string raises {Child}"
+        assert declared("operation")["kind"] == "operation" and declared("operation")["owner"] == "Labels"
+        assert declared("operation")["span"]["offset"] == source.index("fn read") + len("fn ")
+        assert presentation("operation") == "effect fn Labels.read(item: string) -> string"
+        assert views["service"]["selection"]["kind"] == "reference"
+        assert declared("service")["span"]["offset"] == source.index("service Labels") + len("service ")
+        assert presentation("service") == "service Labels"
+        bundled = declared("bundled")
+        assert bundled["kind"] == "function" and not bundled["locationAvailable"]
+        assert bundled["module"] == "effra/functions" and bundled["source"].startswith("source:effra/functions")
+        assert declared("module-alias")["kind"] == "module" and declared("module-alias")["locationAvailable"]
+        assert declared("module-alias")["span"]["offset"] == source.index('Fns "effra')
+        assert presentation("module-alias") == 'import Fns "effra/functions"'
+        assert views["variant"]["selection"]["kind"] == "reference"
+        assert declared("variant")["kind"] == "variant" and declared("variant")["owner"] == "Notice"
+        assert declared("variant")["span"]["offset"] == source.index("Named {")
+        assert presentation("variant") == "variant Notice.Named { value: string }"
         unrelated = cli(path, target, "--symbol", "unrelated")
         nominal = cli(path, target, "--symbol", "Notice")
         assert unrelated["selection"]["kind"] == nominal["selection"]["kind"] == "declaration"
@@ -225,7 +258,8 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
         assert fiber_definition["selection"] == {"kind": "typeDefinition", "locationAvailable": False,
                                                    "span": {"offset": 0, "length": 0, "line": 0, "column": 0},
                                                    "extent": {"offset": 0, "length": 0, "line": 0, "column": 0},
-                                                   "definition": fiber_id}
+                                                   "definition": fiber_id,
+                                                   "presentation": "Fiber<string, {Child}>"}
         assert any(node["id"] == fiber_id and node["kind"] == "fiber"
                    and node["args"] and node["failureRow"] for node in fiber_definition["types"])
         assert_causal_wire_rejections(fiber_definition, "Fiber definition")

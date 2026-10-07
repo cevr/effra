@@ -32,7 +32,7 @@ The adapter implements a small read-only tools server using the [2025-11-25 stdi
 
 Example inspection tool call:
 
-`code.type` returns `locationAvailable: false` when selected metadata has no original location in the current file. Binding identities come from the checker environment; offsets use retained original syntax extents. Its result adds `querySchemaVersion: 1` beside the shared semantic schema and carries the same producer-qualified snapshot tuple as other semantic file tools. `expectedRevision` guards source/import facts and is required to expand a canonical definition; `expectedProducer` independently guards the executing producer. Omitting `expectedProducer` requests fresh facts and does not authorize cross-producer reuse. `code.typeAt` remains the diagnostic-anchor query.
+`code.type` returns `locationAvailable: false` when selected metadata has no original location in the current file. Binding identities come from the checker environment; offsets use retained original syntax extents. Its result adds `querySchemaVersion: 2` beside the shared semantic schema, with the selected declaration `target` and shared plaintext `presentation` described in [semantic tooling](specs/semantic-tooling.md#implemented-producer-qualified-semantic-and-selected-type-queries), and carries the same producer-qualified snapshot tuple as other semantic file tools. `expectedRevision` guards source/import facts and is required to expand a canonical definition; `expectedProducer` independently guards the executing producer. Omitting `expectedProducer` requests fresh facts and does not authorize cross-producer reuse. `code.typeAt` remains the diagnostic-anchor query.
 
 ```json
 {

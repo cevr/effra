@@ -100,9 +100,38 @@ select original declaration/name tokens, actual checked lexical uses, or
 retained checked expression extents. Local shadowing and provider receivers
 resolve through checker binding identities. Shorthand fields retain their name
 token extent, and Fiber operation receivers use the same observed local-read
-owner as other checked uses. The query adds `querySchemaVersion: 1` beside the
+owner as other checked uses. The query adds `querySchemaVersion: 2` beside the
 shared semantic schema and producer-qualified snapshot; the existing
 `ef query`/`code.typeAt` diagnostic-anchor behavior remains unchanged.
+
+Query schema 2 adds a selection `target` and a `presentation`. The target is
+the declaration a selected name token denotes: its kind (binding kinds `let`,
+`parameter`, `configuration` and `pattern`; `function`, `operation`, `method`,
+`provider`, `service`, `record`, `enum`, `variant`, `field`, `error`, `module`,
+`hostModule` or `layer`), name, owner, identity, module and source, and its
+declaration-name span and extent in that source. `locationAvailable` is true
+only when the source is the selected snapshot's own text; bundled declarations
+keep their source ID and span in that source, and builtins carry no location.
+Function-like targets carry their declared signature by canonical references,
+and fields their declared type. The checker records each target at the point
+it resolves a name, from original syntax only: callees, service qualifiers and
+operations, provider values and constructors, constructor heads, explicit
+field labels, field accesses, match pattern segments and aliased pattern
+fields, `fail`/`catch<E>` errors, `provide<S>` and `impl ... for S` services,
+and bundled module aliases and members. Declaration name tokens are captured
+from the parsed items. Nothing is resolved by name search. A token with no
+checked expression anchored at it selects kind `reference`; otherwise the
+anchored expression keeps its existing selection kind and gains the target.
+Type annotations, row labels, layer entries and provisions, Go host members
+and Fiber operation names do not yet select targets.
+
+`presentation` is the one plaintext rendering of a selection, shared by CLI,
+MCP and LSP hover. It is rendered after projection from the response's own
+type and row tables and declaration views, for example
+`effect fn Users.get(id: string) -> string raises {Missing}`,
+`record Box { value: string }`, `let tag: Tag` or
+`Effect<string, {Missing}, {Users}>`. A 4096-byte budget bounds its expansion
+of shared type graphs, with explicit `…` elision.
 
 Selected responses contain only the reachable canonical type/row closure and
 refuse incomplete publication under the existing node, edge, row, string,

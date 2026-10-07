@@ -1064,24 +1064,36 @@ func (r *Result) ProjectSymbol(symbol *Symbol) TypeProjection {
 	if err != nil {
 		return refusedProjection(r.projectionLimits(), ProjectionUsage{CompatibilityBytes: compatibilityBytes}, err.Error())
 	}
+	if err := r.appendSymbolRefs(&refs, symbol); err != nil {
+		return refusedProjection(r.projectionLimits(), ProjectionUsage{}, err.Error())
+	}
+	return r.projectionRefs(refs, false, compatibilityBytes, stringBytes(symbol, r.projectionLimits().NameBytes))
+}
+
+// appendSymbolRefs admits a symbol's retained checked roots and every
+// compatibility reference that crosses the boundary beside them.
+func (r *Result) appendSymbolRefs(refs *[]TypeRef, symbol *Symbol) error {
+	if symbol.Contract.ProjectionError != "" || symbol.Actual.ProjectionError != "" {
+		return fmt.Errorf("symbol compatibility projection exceeds limits")
+	}
 	checked, ok := r.checkedSymbols[symbol.Identity]
 	if !ok || r.projector == nil {
-		return refusedProjection(r.projectionLimits(), ProjectionUsage{}, "symbol has no retained checked roots")
+		return fmt.Errorf("symbol has no retained checked roots")
 	}
-	appendProjectionRef(&refs, r.projector.identityRef(checked.contract.contractID()))
-	appendProjectionRef(&refs, r.projector.identityRef(checked.body.contractID()))
+	appendProjectionRef(refs, r.projector.identityRef(checked.contract.contractID()))
+	appendProjectionRef(refs, r.projector.identityRef(checked.body.contractID()))
 	for _, parameter := range checked.declaration.Params {
-		appendProjectionRef(&refs, r.projector.identityRef(parameter.typeID))
+		appendProjectionRef(refs, r.projector.identityRef(parameter.typeID))
 	}
 	// The retained IDs choose authority; validate every compatibility reference
 	// that will also cross the boundary, so an internal projection mismatch
 	// cannot turn a complete canonical table into a dangling response.
 	for _, parameter := range symbol.Params {
-		appendProjectionRef(&refs, parameter.TypeRef)
+		appendProjectionRef(refs, parameter.TypeRef)
 	}
-	appendProjectionValue(&refs, symbol.Contract)
-	appendProjectionValue(&refs, symbol.Actual)
-	return r.projectionRefs(refs, false, compatibilityBytes, stringBytes(symbol, r.projectionLimits().NameBytes))
+	appendProjectionValue(refs, symbol.Contract)
+	appendProjectionValue(refs, symbol.Actual)
+	return nil
 }
 
 // ProjectTestCatalog admits all selected compatibility roots cumulatively
@@ -1148,15 +1160,19 @@ func (r *Result) ProjectExpression(info *ExpressionInfo) TypeProjection {
 	}
 	refs := []TypeRef{}
 	compatibilityBytes, _ := encodedSize(info, r.projectionLimits().CompatibilityBytes)
-	appendProjectionValue(&refs, info.Type)
+	appendExpressionRefs(&refs, info)
+	return r.projectionRefs(refs, false, compatibilityBytes, stringBytes(info, r.projectionLimits().NameBytes))
+}
+
+func appendExpressionRefs(refs *[]TypeRef, info *ExpressionInfo) {
+	appendProjectionValue(refs, info.Type)
 	for _, labels := range [][]string{info.Evaluation.Failures, info.Evaluation.Requirements, info.ExecutedFailures, info.ExecutedRequirements, info.Type.Evaluation.Failures, info.Type.Evaluation.Requirements} {
 		if len(labels) == 0 {
 			continue
 		}
 		rowID := rowNodeIDForLabels(labels)
-		refs = append(refs, TypeRef{FailureRow: rowID})
+		*refs = append(*refs, TypeRef{FailureRow: rowID})
 	}
-	return r.projectionRefs(refs, false, compatibilityBytes, stringBytes(info, r.projectionLimits().NameBytes))
 }
 
 func (r *Result) ProjectDeclaration(declaration *Declaration) TypeProjection {
@@ -1168,21 +1184,25 @@ func (r *Result) ProjectDeclaration(declaration *Declaration) TypeProjection {
 	if err != nil {
 		return refusedProjection(r.projectionLimits(), ProjectionUsage{CompatibilityBytes: compatibilityBytes}, err.Error())
 	}
+	appendDeclarationRefs(&refs, declaration)
+	return r.projectionRefs(refs, false, compatibilityBytes, stringBytes(declaration, r.projectionLimits().NameBytes))
+}
+
+func appendDeclarationRefs(refs *[]TypeRef, declaration *Declaration) {
 	for _, field := range declaration.Fields {
-		appendProjectionRef(&refs, field.TypeRef)
+		appendProjectionRef(refs, field.TypeRef)
 	}
 	for _, parameter := range declaration.TemplateParameters {
-		appendProjectionRef(&refs, parameter.Variable)
+		appendProjectionRef(refs, parameter.Variable)
 		if parameter.Shape != nil {
-			appendProjectionRef(&refs, *parameter.Shape)
+			appendProjectionRef(refs, *parameter.Shape)
 		}
 	}
 	for _, variant := range declaration.Variants {
 		for _, field := range variant.Fields {
-			appendProjectionRef(&refs, field.TypeRef)
+			appendProjectionRef(refs, field.TypeRef)
 		}
 	}
-	return r.projectionRefs(refs, false, compatibilityBytes, stringBytes(declaration, r.projectionLimits().NameBytes))
 }
 
 // ProjectionDeclarations returns only nominal definitions in this complete

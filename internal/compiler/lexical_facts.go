@@ -1,6 +1,9 @@
 package compiler
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // These facts describe original parser nodes, independently of checker
 // lowering. Diagnostic anchors and full extents are deliberately separate.
@@ -17,7 +20,31 @@ type lexicalBinding struct {
 	Checked          checkedExpression
 }
 
+// maxLexicalFacts bounds original syntax facts and, separately, the name
+// facts (declaration and reference tokens) that point into them.
 const maxLexicalFacts = 100000
+
+// lexicalTarget is the declaration denoted by one source name token. It keeps
+// the checker's own declaration pointers; nothing is re-resolved by name.
+// Variant and field narrow an owning data or error declaration.
+type lexicalTarget struct {
+	kind     string
+	function *Function
+	service  *Service
+	provider *Provider
+	data     *DataDeclaration
+	failure  *ErrorDecl
+	layer    *Layer
+	module   *SyntaxItem
+	variant  string
+	field    string
+}
+
+// lexicalName pairs one original token with the declaration it denotes.
+type lexicalName struct {
+	Span   Span
+	Target lexicalTarget
+}
 
 type lexicalFacts struct {
 	syntax      []sourceSyntaxFact
@@ -28,13 +55,23 @@ type lexicalFacts struct {
 	patterns    map[*MatchPattern]int
 	bindings    map[string]lexicalBinding
 	uses        map[*Expr]string
-	complete    bool
+	// items maps each original top-level declaration to its syntax item.
+	// Declarations absent here (builtins, bundled modules) have no location
+	// in this snapshot's text.
+	items map[any]*SyntaxItem
+	// aliases are the original import declarations, keyed by their alias.
+	aliases map[string]*SyntaxItem
+	// declarations are original declaration name tokens; references are the
+	// tokens whose resolution the checker performed, keyed by token offset.
+	declarations []lexicalName
+	references   map[int]lexicalName
+	complete     bool
 }
 
 // captureOriginalSyntax runs before imports/checking can rewrite source
 // children. A refusal affects only tooling; it never changes source admission.
 func captureOriginalSyntax(program *Program) *lexicalFacts {
-	facts := &lexicalFacts{expressions: map[*Expr]int{}, functions: map[*Function]int{}, parameters: map[int]int{}, statements: map[*Statement]int{}, patterns: map[*MatchPattern]int{}, bindings: map[string]lexicalBinding{}, uses: map[*Expr]string{}, complete: true}
+	facts := &lexicalFacts{expressions: map[*Expr]int{}, functions: map[*Function]int{}, parameters: map[int]int{}, statements: map[*Statement]int{}, patterns: map[*MatchPattern]int{}, bindings: map[string]lexicalBinding{}, uses: map[*Expr]string{}, items: map[any]*SyntaxItem{}, aliases: map[string]*SyntaxItem{}, references: map[int]lexicalName{}, complete: true}
 	add := func(kind, name string, anchor, extent, nameSpan Span) int {
 		if !facts.complete || len(facts.syntax) >= maxLexicalFacts {
 			facts.complete = false
@@ -229,8 +266,71 @@ func captureOriginalSyntax(program *Program) *lexicalFacts {
 		if !facts.complete {
 			break
 		}
+		facts.declare(item)
 	}
 	return facts
+}
+
+// declare records the name tokens an original item introduces. The item
+// pointers are the parser's own nodes, which the checker registers unchanged.
+func (facts *lexicalFacts) declare(item *SyntaxItem) {
+	name := func(span Span, target lexicalTarget) {
+		if !facts.complete || len(facts.declarations)+len(facts.references) >= maxLexicalFacts {
+			facts.complete = false
+			return
+		}
+		facts.declarations = append(facts.declarations, lexicalName{Span: span, Target: target})
+	}
+	fields := func(declared []Field, target lexicalTarget) {
+		for _, field := range declared {
+			target.field = field.Name
+			name(field.Span, target)
+		}
+	}
+	functions := func(owner lexicalTarget, methods []*Function) {
+		for _, f := range methods {
+			owner.function = f
+			name(f.Span, owner)
+		}
+	}
+	switch {
+	case item.BundledImport != nil:
+		facts.aliases[item.BundledImport.Alias] = item
+		name(item.BundledImport.Span, lexicalTarget{kind: "module", module: item})
+	case item.Import != nil:
+		facts.aliases[item.Import.Alias] = item
+		name(item.Import.Span, lexicalTarget{kind: "hostModule", module: item})
+	case item.Error != nil:
+		facts.items[item.Error] = item
+		name(item.Error.Span, lexicalTarget{kind: "error", failure: item.Error})
+		fields(item.Error.Fields, lexicalTarget{kind: "field", failure: item.Error})
+	case item.Record != nil || item.Enum != nil:
+		data := item.Record
+		if data == nil {
+			data = item.Enum
+		}
+		facts.items[data] = item
+		name(data.Span, lexicalTarget{kind: data.Kind, data: data})
+		fields(data.Fields, lexicalTarget{kind: "field", data: data})
+		for _, variant := range data.Variants {
+			name(variant.Span, lexicalTarget{kind: "variant", data: data, variant: variant.Name})
+			fields(variant.Fields, lexicalTarget{kind: "field", data: data, variant: variant.Name})
+		}
+	case item.Service != nil:
+		facts.items[item.Service] = item
+		name(item.Service.Span, lexicalTarget{kind: "service", service: item.Service})
+		functions(lexicalTarget{kind: "operation", service: item.Service}, item.Service.Methods)
+	case item.Provider != nil:
+		facts.items[item.Provider] = item
+		name(item.Provider.Span, lexicalTarget{kind: "provider", provider: item.Provider})
+		functions(lexicalTarget{kind: "method", provider: item.Provider}, item.Provider.Methods)
+	case item.Function != nil:
+		facts.items[item.Function] = item
+		functions(lexicalTarget{kind: "function"}, []*Function{item.Function})
+	case item.Layer != nil:
+		facts.items[item.Layer] = item
+		name(item.Layer.Span, lexicalTarget{kind: "layer", layer: item.Layer})
+	}
 }
 
 // bindLocal records the very entry inserted into the checker's environment.
@@ -253,6 +353,63 @@ func (c *checker) observeLocalUse(e *Expr, value checkedExpression) {
 	}
 	if _, original := c.result.lexical.expressions[e]; original {
 		c.result.lexical.uses[e] = value.lexicalBinding
+	}
+}
+
+// observeReference records the declaration one checker resolution selected
+// for an original token. Bundled bodies and checker-synthesized nodes are not
+// original syntax, so they never publish references into this snapshot.
+func (c *checker) observeReference(node any, span Span, target lexicalTarget) {
+	facts := c.result.lexical
+	if facts == nil || !facts.complete || span.Length == 0 {
+		return
+	}
+	// Bodies may be checked more than once; only the recording pass, which
+	// also publishes expression facts, publishes their references.
+	original := false
+	switch n := node.(type) {
+	case *Expr:
+		_, original = facts.expressions[n]
+		original = original && c.recordFacts
+	case *Statement:
+		_, original = facts.statements[n]
+		original = original && c.recordFacts
+	case *MatchPattern:
+		_, original = facts.patterns[n]
+		original = original && c.recordFacts
+	case *Provider:
+		original = facts.items[n] != nil
+	}
+	if !original {
+		return
+	}
+	if _, exists := facts.references[span.Offset]; !exists && len(facts.declarations)+len(facts.references) >= maxLexicalFacts {
+		facts.complete = false
+		return
+	}
+	facts.references[span.Offset] = lexicalName{Span: span, Target: target}
+}
+
+// observeFieldLabels records explicit `name:` labels against the declared
+// fields of the owner the checker selected for this payload.
+func (c *checker) observeFieldLabels(node any, values []FieldValue, declared []Field, owner lexicalTarget) {
+	owner.kind = "field"
+	for _, value := range values {
+		if value.Label.Length == 0 || !slices.ContainsFunc(declared, func(f Field) bool { return f.Name == value.Name }) {
+			continue
+		}
+		owner.field = value.Name
+		c.observeReference(node, value.Label, owner)
+	}
+}
+
+// observeModuleAlias records an import alias qualifier resolved by the checker.
+func (c *checker) observeModuleAlias(node any, qualifier *Expr) {
+	if qualifier == nil || qualifier.Kind != "name" || c.result.lexical == nil {
+		return
+	}
+	if item := c.result.lexical.aliases[qualifier.Name]; item != nil {
+		c.observeReference(node, qualifier.Span, lexicalTarget{kind: "module", module: item})
 	}
 }
 

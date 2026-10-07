@@ -794,6 +794,15 @@ func (c *checker) templateConstruct(e *Expr, env map[string]checkedExpression, i
 	}
 	result.evaluation = evaluation
 	e.ResolvedTemplate = r
+	if head.Kind == "member" {
+		c.observeModuleAlias(head.Left, head.Left)
+	}
+	c.observeReference(head, head.Span, lexicalTarget{kind: r.Kind, data: r})
+	owner := lexicalTarget{data: r, variant: variant}
+	if variant != "" {
+		c.observeReference(e.Left, e.Left.Span, lexicalTarget{kind: "variant", data: r, variant: variant})
+	}
+	c.observeFieldLabels(e, e.Fields, declared, owner)
 	return result, true
 }
 

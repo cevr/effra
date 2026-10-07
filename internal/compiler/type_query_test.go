@@ -18,7 +18,7 @@ func TestSelectedTypeUsesOriginalNamesAndActualLexicalResolution(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if response["querySchemaVersion"] != 1 || response["revision"] != r.Revision || response["target"] != target || response["typeProjectionComplete"] != true {
+			if response["querySchemaVersion"] != TypeQuerySchemaVersion || response["revision"] != r.Revision || response["target"] != target || response["typeProjectionComplete"] != true {
 				t.Fatalf("envelope: %+v", response)
 			}
 			selection := response["selection"].(SelectedType)

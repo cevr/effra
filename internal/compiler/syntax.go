@@ -154,9 +154,10 @@ type Service struct {
 	native []rt.RuntimeModule
 }
 type Provider struct {
-	Name    string
-	Service string
-	Params  []Param
+	Name        string
+	Service     string
+	ServiceSpan Span `json:"-"`
+	Params      []Param
 	// Services are the dependency values captured by the constructor. They
 	// are requirements of construction, not requirements of the service
 	// methods exposed by the resulting provider value.
@@ -242,17 +243,23 @@ type Statement struct {
 	NameSpan Span `json:"-"`
 	Extent   Span `json:"-"`
 }
+
+// FieldValue.Label is the explicit `name:` token. Shorthand fields and
+// checker-normalized positional arguments have no label token of their own.
 type FieldValue struct {
 	Name  string
 	Value *Expr
 	Span  Span
+	Label Span `json:"-"`
 }
 type MatchPattern struct {
-	TypeName     string
-	VariantName  string
-	Bindings     map[string]string
-	Span         Span
-	Extent       Span          `json:"-"`
+	TypeName    string
+	VariantName string
+	Bindings    map[string]string
+	Span        Span
+	Extent      Span `json:"-"`
+	// Segments are the dotted name tokens in source order; Span covers them.
+	Segments     []Span        `json:"-"`
 	Names        []PatternName `json:"-"`
 	ResolvedEnum *Enum         `json:"-"`
 }
@@ -286,9 +293,12 @@ type Expr struct {
 	Arms             []*MatchArm
 	Span             Span
 	Extent           Span `json:"-"`
-	Type             ValueType
-	checked          checkedExpression
-	layerPlan        *LayerPlan
+	// NameSpan is the declaration-name token written inside provide<S>,
+	// catch<E> and provide(Layer); Span remains their method anchor.
+	NameSpan  Span `json:"-"`
+	Type      ValueType
+	checked   checkedExpression
+	layerPlan *LayerPlan
 	// Evaluation is the work incurred while evaluating this expression now.
 	// Deferred effect rows remain on Type. Keeping the two facts beside the
 	// checked node lets callers reuse the result without walking the subtree.
@@ -598,7 +608,7 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 				services = p.row()
 			}
 			p.expect("{")
-			v := &Provider{Name: name.text, Service: service.text, Params: params, Services: services, Span: name.span}
+			v := &Provider{Name: name.text, Service: service.text, ServiceSpan: service.span, Params: params, Services: services, Span: name.span}
 			for !p.accept("}") {
 				v.Methods = append(v.Methods, p.function(true))
 			}
@@ -868,14 +878,14 @@ func (p *parser) fieldValues() []FieldValue {
 	var fields []FieldValue
 	for !p.accept("}") {
 		name := p.name()
-		var value *Expr
+		field := FieldValue{Name: name.text, Span: name.span}
 		if p.accept(":") {
-			value = p.expr(0)
+			field.Value, field.Label = p.expr(0), name.span
 		} else {
 			// Record construction permits shorthand `{name}` for `{name: name}`.
-			value = &Expr{Kind: "name", Name: name.text, Span: name.span, Extent: name.span}
+			field.Value = &Expr{Kind: "name", Name: name.text, Span: name.span, Extent: name.span}
 		}
-		fields = append(fields, FieldValue{Name: name.text, Value: value, Span: name.span})
+		fields = append(fields, field)
 		if !p.accept(",") && !p.accept(";") {
 			if p.peek().text != "}" {
 				continue
@@ -1130,7 +1140,7 @@ func (p *parser) expr(min int) *Expr {
 					field := p.name()
 					p.expect(":")
 					value := p.expr(0)
-					call.Fields = append(call.Fields, FieldValue{Name: field.text, Value: value, Span: field.span})
+					call.Fields = append(call.Fields, FieldValue{Name: field.text, Value: value, Span: field.span, Label: field.span})
 					call.Args = append(call.Args, value)
 				} else {
 					call.Args = append(call.Args, p.expr(0))
@@ -1158,7 +1168,7 @@ func (p *parser) expr(min int) *Expr {
 				if method.text == "provide" && p.accept("(") {
 					layer := p.name()
 					p.expect(")")
-					e = &Expr{Kind: "provideLayer", Name: layer.text, Left: e, Span: method.span}
+					e = &Expr{Kind: "provideLayer", Name: layer.text, NameSpan: layer.span, Left: e, Span: method.span}
 					continue
 				}
 				p.expect("<")
@@ -1167,7 +1177,7 @@ func (p *parser) expr(min int) *Expr {
 				p.expect("(")
 				arg := p.expr(0)
 				p.expect(")")
-				e = &Expr{Kind: method.text, Name: t.text, Left: e, Right: arg, Span: method.span}
+				e = &Expr{Kind: method.text, Name: t.text, NameSpan: t.span, Left: e, Right: arg, Span: method.span}
 			} else {
 				e = &Expr{Kind: "member", Name: method.text, Left: e, Span: method.span}
 			}
@@ -1263,16 +1273,18 @@ func (p *parser) constructorBrace() bool {
 
 func (p *parser) pattern() *MatchPattern {
 	first := p.name()
-	pattern := &MatchPattern{TypeName: first.text, Bindings: map[string]string{}, Span: first.span}
+	pattern := &MatchPattern{TypeName: first.text, Bindings: map[string]string{}, Span: first.span, Segments: []Span{first.span}}
 	if p.accept(".") {
 		variant := p.name()
 		pattern.VariantName = variant.text
 		pattern.Span.Length = variant.span.Offset + variant.span.Length - pattern.Span.Offset
+		pattern.Segments = append(pattern.Segments, variant.span)
 		if p.accept(".") {
 			pattern.TypeName += "." + variant.text
 			variant = p.name()
 			pattern.VariantName = variant.text
 			pattern.Span.Length = variant.span.Offset + variant.span.Length - pattern.Span.Offset
+			pattern.Segments = append(pattern.Segments, variant.span)
 		}
 	}
 	if p.accept("{") {
