@@ -107,6 +107,8 @@ This representation prevents malformed state combinations. It does not prove tha
 **Proposed.** Stored event payloads, metadata, envelopes and interaction decisions require validation. Native data declarations must preserve runtime decoding at those boundaries.
 
 ```rust
+import Json "effra/json"
+
 enum EventV1 {
     Started { runId: string }
     Text { runId: string, text: string }
