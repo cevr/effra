@@ -546,3 +546,54 @@ func TestProviderConfigurationKeepsCheckedGenericTypeAcrossTargets(t *testing.T)
 		})
 	}
 }
+
+// voidProductMatchSource drives void arm tails through the product-match plan:
+// pure and effect tails, a nested match tail, or-pattern binders, and an
+// or-pattern binder whose alternatives declare different generic callable
+// layouts for the same canonical void callable.
+const voidProductMatchSource = `enum Light { Red; Green }
+enum Signal { Stop; Go { note: string }; Wait { note: string } }
+enum Pick<F: callable fn() -> A, A: type> { Left { act: F }; Right { act: fn() -> A }; Idle }
+fn finish() -> void { void }
+fn settle(light: Light, signal: Signal) -> void {
+    match light, signal {
+        Light.Red, Signal.Stop => void
+        Light.Red, Signal.Go { note } | Signal.Wait { note } => finish()
+        Light.Green, Signal.Stop => match signal { Signal.Stop => void; Signal.Go { note } => finish(); Signal.Wait { note } => void }
+        Light.Green, Signal.Go { note } | Signal.Wait { note } => { let kept = note; void }
+    }
+}
+fn fire(pick: Pick<fn() -> void, void>) -> void {
+    match pick { Pick.Left { act } | Pick.Right { act } => act(); Pick.Idle => void }
+}
+effect fn trace(label: string) -> void { run Console.log(label).provide<Console>(Stdout) }
+effect fn route(light: Light, signal: Signal) -> void {
+    match light, signal {
+        Light.Red, Signal.Stop => run trace("red stop")
+        Light.Red, Signal.Go { note } | Signal.Wait { note } => run trace(note)
+        Light.Green, Signal.Stop => void
+        Light.Green, Signal.Go { note } | Signal.Wait { note } => match light { Light.Red => void; Light.Green => run trace(note) }
+    }
+}
+effect fn main() -> void {
+    settle(Light.Red {}, Signal.Stop {});
+    settle(Light.Red {}, Signal.Wait { note: "w" });
+    settle(Light.Green {}, Signal.Stop {});
+    settle(Light.Green {}, Signal.Go { note: "g" });
+    fire(Pick<fn() -> void, void>.Left { act: finish });
+    fire(Pick<fn() -> void, void>.Right { act: finish });
+    fire(Pick<fn() -> void, void>.Idle {});
+    run route(Light.Red {}, Signal.Stop {});
+    run route(Light.Red {}, Signal.Go { note: "go" });
+    run route(Light.Green {}, Signal.Wait { note: "wait" });
+    run route(Light.Green {}, Signal.Stop {});
+    void
+}`
+
+func TestVoidProductMatchTailsExecuteOnBothTargets(t *testing.T) {
+	const output = "red stop\ngo\nwait\n"
+	runGenericDataNative(t, voidProductMatchSource, output)
+	if got := runJSForTarget(t, "js", voidProductMatchSource, `await Effect.runPromise(__ef_function_main());`); got != output {
+		t.Fatalf("JavaScript void product match: %q", got)
+	}
+}

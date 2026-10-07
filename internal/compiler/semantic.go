@@ -2640,11 +2640,11 @@ func collectFunctionDependenciesExpr(e *Expr, known map[string]*Function, out ma
 		for name, value := range locals {
 			bound[name] = value
 		}
-		if arm.Pattern != nil {
-			for _, name := range arm.Pattern.Bindings {
+		arm.EachPattern(func(_ int, pattern *MatchPattern) {
+			for _, name := range pattern.Bindings {
 				bound[name] = true
 			}
-		}
+		})
 		collectFunctionDependencies(arm.Body, known, out, bound)
 	}
 	collectFunctionDependencies(e.Then, known, out, locals)
@@ -4811,114 +4811,6 @@ func (c *checker) observePattern(pattern *MatchPattern, enum *Enum) {
 			}
 		}
 	}
-}
-
-func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool) checkedExpression {
-	scrutinee := c.expr(e.Left, env, inEffect)
-	if scrutinee.isEffect() {
-		c.diagnostic("EF106", "match scrutinee must be a value; execute an Effect with run", e.Left.Span)
-	}
-	enum, variants, isEnum := c.checkedVariants(scrutinee.valueID())
-	if !isEnum {
-		c.diagnostic("EF116", "match requires a closed enum value", e.Left.Span)
-		return c.checkedData("invalid")
-	}
-	declared := map[string]Variant{}
-	for _, variant := range variants {
-		declared[variant.Name] = variant
-	}
-	seen := map[string]bool{}
-	result := c.checkedData("never")
-	branchEvaluation := c.evaluation(emptyRowID, emptyRowID)
-	haveResult := false
-	for _, arm := range e.Arms {
-		pattern := arm.Pattern
-		if pattern.TypeName == "_" {
-			c.diagnostic("EF118", "catch-all match arms cannot claim exhaustive closed interpretation", pattern.Span)
-			continue
-		}
-		patternOwner := c.templateByName(pattern.TypeName)
-		if patternOwner != enum && !(len(enum.Parameters) == 0 && pattern.TypeName == enum.Name) {
-			c.diagnostic("EF116", "match pattern belongs to "+pattern.TypeName+", expected "+enum.Name, pattern.Span)
-			continue
-		}
-		pattern.ResolvedEnum = enum
-		c.observePattern(pattern, enum)
-		if pattern.VariantName == "" {
-			c.diagnostic("EF118", "match arm must name a declared variant", pattern.Span)
-			continue
-		}
-		variant, exists := declared[pattern.VariantName]
-		if !exists {
-			c.diagnostic("EF116", "unknown variant "+enum.Name+"."+pattern.VariantName, pattern.Span)
-			continue
-		}
-		if seen[pattern.VariantName] {
-			c.diagnostic("EF117", "duplicate match arm for "+enum.Name+"."+pattern.VariantName, pattern.Span)
-			continue
-		}
-		seen[pattern.VariantName] = true
-		branchEnv := clone(env)
-		fields := fieldsMap(variant.Fields)
-		aliases := map[string]bool{}
-		for _, fieldName := range sortedBindingNames(pattern.Bindings) {
-			binding := pattern.Bindings[fieldName]
-			if binding != "_" {
-				if aliases[binding] {
-					c.diagnostic("EF121", "duplicate pattern binding "+binding, pattern.Span)
-					continue
-				}
-				aliases[binding] = true
-			}
-			field, ok := fields[fieldName]
-			if !ok {
-				c.diagnostic("EF114", "unknown payload field "+fieldName+" in match arm", pattern.Span)
-				continue
-			}
-			if binding == "_" {
-				continue
-			}
-			bound := c.checkedDataID(field.typeID, nil, nil)
-			if payload, exists := scrutinee.fields[pattern.VariantName]; exists {
-				bound = c.projectFieldOccurrence(payload, field)
-			} else if c.node(field.typeID) != nil && c.node(field.typeID).Kind == "callable" {
-				bound.callableEvidence = callableEvidence{unresolved: true}
-			}
-			bound.setOwnership(projectVariantFacts(scrutinee.ownershipFacts(), pattern.VariantName, fieldName))
-			bound.setCaptures(projectVariantFacts(scrutinee.captureFacts(), pattern.VariantName, fieldName))
-			if len(bound.ownershipFacts()) == 0 {
-				bound.setOwnership(c.unknownOwnershipID(field.typeID))
-			}
-			if c.lexicalOwner != nil {
-				bound = c.bindLocal("pattern", binding, pattern.bindingSpan(fieldName), pattern.Extent, c.result.lexical.patterns[pattern], bound)
-			}
-			branchEnv[binding] = bound
-		}
-		branch := c.block(arm.Body, branchEnv, inEffect)
-		if !c.isKind(branch, "never") {
-			if !haveResult {
-				result, haveResult = branch, true
-			} else if !c.sameValues(result, branch) || result.isEffect() != branch.isEffect() {
-				c.diagnostic("EF106", "match branches must return the same type", arm.Span)
-			} else {
-				result = c.joinContractRows(result, branch)
-				result.fields = c.joinExpressionFields(result, branch, arm.Span, 0, new(int))
-				result.setOwnership(mergeFacts(result.ownershipFacts(), branch.ownershipFacts()))
-				result.setCaptures(mergeFacts(result.captureFacts(), branch.captureFacts()))
-			}
-		}
-		branchEvaluation = c.unionEvaluationFacts(branchEvaluation, branch.evaluation)
-	}
-	for _, variant := range variants {
-		if !seen[variant.Name] {
-			c.diagnostic("EF117", "missing match arm for "+enum.Name+"."+variant.Name, e.Span)
-		}
-	}
-	if !haveResult {
-		result = c.checkedData("never")
-	}
-	result.evaluation = c.unionEvaluationFacts(scrutinee.evaluation, branchEvaluation)
-	return result
 }
 func (r *Result) Find(name string) *Symbol {
 	identity := ""

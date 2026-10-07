@@ -257,11 +257,14 @@ type MatchPattern struct {
 	VariantName string
 	Bindings    map[string]string
 	Span        Span
-	Extent      Span `json:"-"`
+	Extent      Span          `json:"-"`
+	Names       []PatternName `json:"-"`
 	// Segments are the dotted name tokens in source order; Span covers them.
-	Segments     []Span        `json:"-"`
-	Names        []PatternName `json:"-"`
-	ResolvedEnum *Enum         `json:"-"`
+	Segments []Span `json:"-"`
+	// Payload covers the binding braces when present, so syntax consumers can
+	// recognize pattern punctuation without re-deriving it from tokens.
+	Payload      Span  `json:"-"`
+	ResolvedEnum *Enum `json:"-"`
 }
 
 // PatternName retains source order and the alias token independently of the
@@ -272,12 +275,25 @@ type PatternName struct {
 	FieldSpan Span
 	NameSpan  Span
 }
+
+// MatchArm holds one pattern cell per match subject, in subject order. Each
+// cell lists its named-variant alternatives (`A | B`) in source order.
 type MatchArm struct {
-	Pattern *MatchPattern
-	Body    *Block
-	Span    Span
-	Extent  Span `json:"-"`
+	Patterns [][]*MatchPattern
+	Body     *Block
+	Span     Span
+	Extent   Span `json:"-"`
 }
+
+// EachPattern visits every alternative of every cell in source order.
+func (a *MatchArm) EachPattern(visit func(subject int, pattern *MatchPattern)) {
+	for subject, cell := range a.Patterns {
+		for _, pattern := range cell {
+			visit(subject, pattern)
+		}
+	}
+}
+
 type Expr struct {
 	constructorType  *sourceType
 	ResolvedTemplate *Record
@@ -299,6 +315,7 @@ type Expr struct {
 	Type      ValueType
 	checked   checkedExpression
 	layerPlan *LayerPlan
+	matchPlan *matchPlan
 	// Evaluation is the work incurred while evaluating this expression now.
 	// Deferred effect rows remain on Type. Keeping the two facts beside the
 	// checked node lets callers reuse the result without walking the subtree.
@@ -420,7 +437,7 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 			}
 		} else if i+1 < len(source) && (source[i:i+2] == "->" || source[i:i+2] == "==" || source[i:i+2] == "=>") {
 			i += 2
-		} else if strings.ContainsRune("{}():,;.+<>=", rune(ch)) {
+		} else if strings.ContainsRune("{}():,;.+<>=|", rune(ch)) {
 			i++
 		} else {
 			return nil, comments, []Diagnostic{{Code: "EF001", Message: fmt.Sprintf("unsupported character %q", ch), Span: Span{start, 1, l, c}}}
@@ -1044,12 +1061,21 @@ func (p *parser) expr(min int) *Expr {
 		e.Else = p.block()
 	case start.text == "match":
 		e.Kind = "match"
+		// Subjects are the ordered Args of the match, so every shared child
+		// traversal observes them once and in evaluation order.
 		p.noConstruct++
-		e.Left = p.expr(0)
+		e.Args = append(e.Args, p.expr(0))
+		for p.accept(",") {
+			e.Args = append(e.Args, p.expr(0))
+		}
 		p.noConstruct--
 		p.expect("{")
 		for !p.accept("}") {
-			pattern := p.pattern()
+			cells := [][]*MatchPattern{p.patternCell()}
+			for p.accept(",") {
+				cells = append(cells, p.patternCell())
+			}
+			pattern := cells[0][0]
 			p.expect("=>")
 			var body *Block
 			if p.peek().text == "fail" {
@@ -1074,7 +1100,7 @@ func (p *parser) expr(min int) *Expr {
 				value := p.expr(0)
 				body = &Block{Statements: []*Statement{{Kind: "expr", Value: value, Span: value.Span, Extent: value.Extent}}, Extent: value.Extent}
 			}
-			e.Arms = append(e.Arms, &MatchArm{Pattern: pattern, Body: body, Span: pattern.Span, Extent: p.extent(pattern.Span)})
+			e.Arms = append(e.Arms, &MatchArm{Patterns: cells, Body: body, Span: pattern.Span, Extent: p.extent(pattern.Span)})
 			p.accept(",")
 			p.accept(";")
 		}
@@ -1279,6 +1305,15 @@ func (p *parser) constructorBrace() bool {
 	}
 }
 
+// patternCell parses one subject's alternatives: `A.X { x } | A.Y { x }`.
+func (p *parser) patternCell() []*MatchPattern {
+	cell := []*MatchPattern{p.pattern()}
+	for p.accept("|") {
+		cell = append(cell, p.pattern())
+	}
+	return cell
+}
+
 func (p *parser) pattern() *MatchPattern {
 	first := p.name()
 	pattern := &MatchPattern{TypeName: first.text, Bindings: map[string]string{}, Span: first.span, Segments: []Span{first.span}}
@@ -1295,7 +1330,8 @@ func (p *parser) pattern() *MatchPattern {
 			pattern.Segments = append(pattern.Segments, variant.span)
 		}
 	}
-	if p.accept("{") {
+	if p.peek().text == "{" {
+		payloadStart := p.take().span
 		seen := map[string]bool{}
 		for !p.accept("}") {
 			field := p.name()
@@ -1314,6 +1350,7 @@ func (p *parser) pattern() *MatchPattern {
 				break
 			}
 		}
+		pattern.Payload = p.extent(payloadStart)
 	}
 	pattern.Extent = p.extent(first.span)
 	return pattern

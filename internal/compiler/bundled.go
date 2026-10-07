@@ -167,11 +167,11 @@ func (r *Result) loadBundledImports(source string) {
 		block(e.Else, locals)
 		for _, arm := range e.Arms {
 			bound := cloneBoundNames(locals)
-			if arm.Pattern != nil {
-				for _, name := range arm.Pattern.Bindings {
+			arm.EachPattern(func(_ int, pattern *MatchPattern) {
+				for _, name := range pattern.Bindings {
 					bound[name] = true
 				}
-			}
+			})
 			block(arm.Body, bound)
 		}
 	}

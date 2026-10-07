@@ -204,11 +204,13 @@ func (r *Result) Lint(strict bool) LintResult {
 			for name, local := range env {
 				branch[name] = local
 			}
-			for _, name := range arm.Pattern.Bindings {
-				if name != "_" {
-					branch[name] = &binding{used: false}
+			arm.EachPattern(func(_ int, pattern *MatchPattern) {
+				for _, name := range pattern.Bindings {
+					if name != "_" {
+						branch[name] = &binding{used: false}
+					}
 				}
-			}
+			})
 			block(arm.Body, branch)
 		}
 		block(e.Then, env)

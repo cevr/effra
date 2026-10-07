@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -526,28 +527,57 @@ func jsConstruct(e *Expr, effect bool) string {
 func jsConstructCall(e *Expr, effect bool) string {
 	return jsConstruct(e, effect)
 }
+
+// jsMatch lowers the checked match plan with the same first-match order as
+// Go: subjects are evaluated once, in order, and each body is emitted once.
 func jsMatch(e *Expr, effect bool) string {
-	value := jsExpr(e.Left, effect)
-	body := "const __ef_match = " + value + ";\nswitch (__ef_match._tag) {\n"
-	for _, arm := range e.Arms {
-		owner := arm.Pattern.TypeName
-		if enum := arm.Pattern.ResolvedEnum; enum != nil && len(enum.Parameters) > 0 {
-			owner = enum.Identity
-		}
-		body += "case " + quoted(owner+"."+arm.Pattern.VariantName) + ": {\n"
-		for _, field := range sortedBindingNames(arm.Pattern.Bindings) {
-			binding := arm.Pattern.Bindings[field]
-			if binding != "_" {
-				body += "const __ef_local_" + binding + " = __ef_match[" + quoted(field) + "];\n"
-			}
-		}
-		body += jsBlock(arm.Body, effect) + "}\n"
+	plan := e.matchPlan
+	body := ""
+	subjects := make([]string, len(e.Args))
+	for index, subject := range e.Args {
+		subjects[index] = "__ef_match_" + strconv.Itoa(index)
+		body += "const " + subjects[index] + " = " + jsExpr(subject, effect) + ";\n"
 	}
-	body += "default: throw new Error(\"unreachable non-exhaustive match\");\n}\n"
+	for _, arm := range plan.arms {
+		conditions := []string{}
+		for index, cell := range arm.cells {
+			if cell.total {
+				continue
+			}
+			alternatives := []string{}
+			for _, pattern := range cell.alternatives {
+				alternatives = append(alternatives, subjects[index]+"._tag === "+quoted(jsVariantTag(pattern)))
+			}
+			conditions = append(conditions, "("+strings.Join(alternatives, " || ")+")")
+		}
+		if len(conditions) == 0 {
+			conditions = append(conditions, "true")
+		}
+		body += "if (" + strings.Join(conditions, " && ") + ") {\n"
+		for _, binding := range arm.bindings {
+			subject := subjects[binding.subject]
+			alternatives := arm.cells[binding.subject].alternatives
+			value := subject + "[" + quoted(binding.fields[len(alternatives)-1]) + "]"
+			for alternative := len(alternatives) - 2; alternative >= 0; alternative-- {
+				value = subject + "._tag === " + quoted(jsVariantTag(alternatives[alternative])) + " ? " + subject + "[" + quoted(binding.fields[alternative]) + "] : " + value
+			}
+			body += "const __ef_local_" + binding.name + " = " + value + ";\n"
+		}
+		body += jsBlock(arm.body, effect) + "}\n"
+	}
+	body += "throw new Error(\"unreachable non-exhaustive match\");\n"
 	if effect {
 		return "(yield* Effect.gen(function* () {\n" + body + "}))"
 	}
 	return "(() => {\n" + body + "})()"
+}
+
+func jsVariantTag(pattern *MatchPattern) string {
+	owner := pattern.TypeName
+	if enum := pattern.ResolvedEnum; enum != nil && len(enum.Parameters) > 0 {
+		owner = enum.Identity
+	}
+	return owner + "." + pattern.VariantName
 }
 
 func declarationMap(r *Result) map[string]Declaration {

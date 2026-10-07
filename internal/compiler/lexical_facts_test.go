@@ -119,7 +119,7 @@ effect fn broken() -> void raises { Broken } { fail Broken("bad") }
 			}
 		}
 	}
-	pattern := r.Program.Functions[1].Body.Statements[0].Value.Arms[0].Pattern
+	pattern := r.Program.Functions[1].Body.Statements[0].Value.Arms[0].Patterns[0][0]
 	if len(pattern.Names) != 2 || pattern.Names[0].Field != "suffix" || pattern.Names[1].Field != "value" {
 		t.Fatalf("pattern order lost: %+v", pattern.Names)
 	}

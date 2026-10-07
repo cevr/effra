@@ -1118,56 +1118,94 @@ func (g *goEmitter) variantType(id TypeID, owner *Enum, variant string) string {
 	}
 	return goVariantType("template_"+owner.EmissionName, variant) + "[" + strings.Join(args, ",") + "]"
 }
+
+// match lowers the checked match plan. Subjects are evaluated once, in order,
+// into temporaries; each tested subject's variant is decoded once; arms then
+// test those tags in source order and each body is emitted once.
 func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder) string {
-	value := g.expr(e.Left, effect, ret, out)
+	plan := e.matchPlan
+	subjects := make([]string, len(e.Args))
+	for index, subject := range e.Args {
+		value := g.expr(subject, effect, ret, out)
+		subjects[index] = g.temp()
+		out.WriteString(subjects[index] + " := " + value + "\n_ = " + subjects[index] + "\n")
+	}
 	resultType := g.valueType(e)
-	variant := g.temp()
 	var body strings.Builder
-	body.WriteString(variant + " := " + value + "\n")
+	tags := make([]string, len(subjects))
+	for index, subject := range plan.subjects {
+		if !subject.tested {
+			continue
+		}
+		tags[index] = g.temp()
+		body.WriteString("var " + tags[index] + " int\nswitch " + subjects[index] + ".(type) {\n")
+		for variant, name := range subject.variants {
+			body.WriteString("case " + g.variantType(subject.value.valueID(), subject.enum, name) + ": " + tags[index] + " = " + strconv.Itoa(variant) + "\n")
+		}
+		body.WriteString("}\n")
+	}
+	body.WriteString("switch {\n")
+	for _, arm := range plan.arms {
+		conditions := []string{}
+		for index, cell := range arm.cells {
+			if cell.total {
+				continue
+			}
+			alternatives := []string{}
+			for _, pattern := range cell.alternatives {
+				alternatives = append(alternatives, tags[index]+" == "+strconv.Itoa(plan.subjects[index].index(pattern.VariantName)))
+			}
+			conditions = append(conditions, "("+strings.Join(alternatives, " || ")+")")
+		}
+		if len(conditions) == 0 {
+			conditions = append(conditions, "true")
+		}
+		body.WriteString("case " + strings.Join(conditions, " && ") + ":\n")
+		g.matchArm(plan, arm, subjects, effect, resultType, &body)
+	}
 	if effect {
-		body.WriteString("switch efMatch := " + variant + ".(type) {\n")
-		for _, arm := range e.Arms {
-			body.WriteString("case " + g.variantType(e.Left.checked.valueID(), arm.Pattern.ResolvedEnum, arm.Pattern.VariantName) + ":\n")
-			body.WriteString("_ = efMatch\n")
-			g.matchArm(e.Left.checked.valueID(), arm, true, resultType, &body)
-		}
-		if len(e.Arms) == 0 {
-			body.WriteString("default: _ = efMatch; return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable empty match\")}\n}\n")
-		} else {
-			body.WriteString("default: return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable non-exhaustive match\")}\n}\n")
-		}
+		body.WriteString("default: return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable non-exhaustive match\")}\n}\n")
 		name := g.temp()
 		out.WriteString(name + " := func() efExit[" + resultType + "] {\n" + body.String() + "}()\n" + g.failed(name, ret))
 		return name + ".Value"
 	}
-	body.WriteString("switch efMatch := " + variant + ".(type) {\n")
-	for _, arm := range e.Arms {
-		body.WriteString("case " + g.variantType(e.Left.checked.valueID(), arm.Pattern.ResolvedEnum, arm.Pattern.VariantName) + ":\n")
-		body.WriteString("_ = efMatch\n")
-		g.matchArm(e.Left.checked.valueID(), arm, false, resultType, &body)
-	}
-	if len(e.Arms) == 0 {
-		body.WriteString("default: _ = efMatch; panic(\"unreachable empty match\")\n}\n")
-	} else {
-		body.WriteString("default: panic(\"unreachable non-exhaustive match\")\n}\n")
-	}
+	body.WriteString("default: panic(\"unreachable non-exhaustive match\")\n}\n")
 	return "func() " + resultType + " {\n" + body.String() + "}()"
 }
 
-// matchArm binds an arm's payload fields and lowers its body in one scope. A
-// generic enum payload binding keeps the layout its variant declares.
-func (g *goEmitter) matchArm(scrutinee TypeID, arm *MatchArm, effect bool, resultType string, body *strings.Builder) {
+// matchArm binds an arm's payload binders and lowers its body in one scope.
+// A binder taken from a single alternative keeps the layout its generic
+// variant declares. A binder joined across alternatives has one Go local, so
+// each alternative's declared layout is adapted to the binder's canonical
+// layout before the assignment.
+func (g *goEmitter) matchArm(plan *matchPlan, arm matchPlanArm, subjects []string, effect bool, resultType string, body *strings.Builder) {
 	defer g.enterScope()()
-	for _, field := range sortedBindingNames(arm.Pattern.Bindings) {
-		binding := arm.Pattern.Bindings[field]
-		if binding == "_" {
-			continue
+	for _, binding := range arm.bindings {
+		subject := plan.subjects[binding.subject]
+		scrutinee := canonicalLayout(subject.value.valueID())
+		alternatives := arm.cells[binding.subject].alternatives
+		local := "efLocal_" + binding.name
+		if len(alternatives) == 1 {
+			layout, _ := g.templateFieldLayout(scrutinee, alternatives[0].VariantName, binding.fields[0])
+			body.WriteString(local + " := " + subjects[binding.subject] + ".(" + g.variantType(subject.value.valueID(), subject.enum, alternatives[0].VariantName) + ")." + goFieldName(binding.fields[0]) + "\n")
+			g.bindLocal(binding.name, layout)
+		} else {
+			canonical := canonicalLayout(binding.value.valueID())
+			body.WriteString("var " + local + " " + g.canonicalValueType(binding.value) + "\nswitch efMatch := " + subjects[binding.subject] + ".(type) {\n")
+			for alternative, pattern := range alternatives {
+				value := "efMatch." + goFieldName(binding.fields[alternative])
+				var adapted strings.Builder
+				if layout, ok := g.templateFieldLayout(scrutinee, pattern.VariantName, binding.fields[alternative]); ok {
+					value = g.adaptGoLayout(value, layout, canonical, &adapted)
+				}
+				body.WriteString("case " + g.variantType(subject.value.valueID(), subject.enum, pattern.VariantName) + ":\n" + adapted.String() + local + " = " + value + "\n")
+			}
+			body.WriteString("}\n")
+			g.bindLocal(binding.name, canonical)
 		}
-		layout, _ := g.templateFieldLayout(canonicalLayout(scrutinee), arm.Pattern.VariantName, field)
-		g.bindLocal(binding, layout)
-		body.WriteString("efLocal_" + binding + " := efMatch." + goFieldName(field) + "\n_ = efLocal_" + binding + "\n")
+		body.WriteString("_ = " + local + "\n")
 	}
-	body.WriteString(g.blockType(arm.Body, effect, resultType, false))
+	body.WriteString(g.blockType(arm.body, effect, resultType, false))
 }
 
 // WriteRuntime writes the application's selected runtime sources below

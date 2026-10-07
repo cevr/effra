@@ -115,6 +115,12 @@ type formatLayout struct {
 	itemStarts map[int]bool
 	braces     map[int]braceStyle
 	spaced     map[int]bool
+	// patternBraces holds the opening offsets of match pattern payloads.
+	patternBraces map[int]bool
+	// listGaps are source ranges between match subjects or pattern cells;
+	// commas inside them separate list items rather than statements.
+	listGaps     []Span
+	inlineCommas map[int]bool
 }
 
 func formatSyntax(source string, program *Program, tokens []token) string {
@@ -164,7 +170,7 @@ func buildFormatEvents(comments []Comment, tokens []token) []formatEvent {
 }
 
 func buildFormatLayout(source string, program *Program, tokens []token) formatLayout {
-	layout := formatLayout{breaks: map[int]bool{}, inline: map[int]bool{}, preserve: formatDirectiveTargetLines(program.Comments), itemStarts: map[int]bool{}, braces: map[int]braceStyle{}, spaced: map[int]bool{}}
+	layout := formatLayout{breaks: map[int]bool{}, inline: map[int]bool{}, preserve: formatDirectiveTargetLines(program.Comments), itemStarts: map[int]bool{}, braces: map[int]braceStyle{}, spaced: map[int]bool{}, patternBraces: map[int]bool{}, inlineCommas: map[int]bool{}}
 	for _, item := range program.Items {
 		layout.itemStarts[item.Span.Offset] = true
 		layout.breaks[item.Span.Offset] = true
@@ -206,6 +212,14 @@ func buildFormatLayout(source string, program *Program, tokens []token) formatLa
 			collectFunctionBreaks(&layout, item.Function)
 		}
 	}
+	for _, gap := range layout.listGaps {
+		index := sort.Search(len(tokens), func(index int) bool { return tokens[index].span.Offset >= gap.Offset })
+		for ; index < len(tokens) && tokens[index].span.Offset < gap.Offset+gap.Length; index++ {
+			if tokens[index].text == "," {
+				layout.inlineCommas[tokens[index].span.Offset] = true
+			}
+		}
+	}
 	stack := []int{}
 	for index, current := range tokens {
 		switch current.text {
@@ -217,7 +231,7 @@ func buildFormatLayout(source string, program *Program, tokens []token) formatLa
 			}
 			open := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
-			inline := isInlineBrace(source, program.Comments, tokens, open, index)
+			inline := layout.patternBraces[tokens[open].span.Offset] || isInlineBrace(source, program.Comments, tokens, open, index)
 			if layout.preserve[tokens[open].span.Line] && open+1 < len(tokens) && tokens[open+1].span.Line == tokens[open].span.Line {
 				inline = true
 			}
@@ -313,12 +327,34 @@ func collectExpressionBreaks(layout *formatLayout, expression *Expr) {
 	forEachExprChild(expression, func(child *Expr) {
 		collectExpressionBreaks(layout, child)
 	})
-	for _, arm := range expression.Arms {
-		if arm.Pattern != nil && !layout.preserve[arm.Pattern.Span.Line] {
-			layout.breaks[arm.Pattern.Span.Offset] = true
+	if expression.Kind == "match" {
+		for index := 1; index < len(expression.Args); index++ {
+			layout.listGaps = append(layout.listGaps, syntaxGap(expression.Args[index-1].Extent, expression.Args[index].Extent))
 		}
+	}
+	for _, arm := range expression.Arms {
+		for index := 1; index < len(arm.Patterns); index++ {
+			previous := arm.Patterns[index-1]
+			layout.listGaps = append(layout.listGaps, syntaxGap(previous[len(previous)-1].Extent, arm.Patterns[index][0].Extent))
+		}
+		if !layout.preserve[arm.Span.Line] {
+			layout.breaks[arm.Span.Offset] = true
+		}
+		// Pattern payload braces are binding lists, never blocks, wherever the
+		// pattern sits among subjects and alternatives.
+		arm.EachPattern(func(_ int, pattern *MatchPattern) {
+			if pattern.Payload.Length > 0 {
+				layout.patternBraces[pattern.Payload.Offset] = true
+			}
+		})
 		collectBlockBreaks(layout, arm.Body)
 	}
+}
+
+// syntaxGap is the source range after one node's extent and before the next.
+func syntaxGap(previous, next Span) Span {
+	end := previous.Offset + previous.Length
+	return Span{Offset: end, Length: next.Offset - end}
 }
 
 func isInlineBrace(source string, comments []Comment, tokens []token, open, close int) bool {
@@ -437,7 +473,7 @@ func (p *formatPrinter) token(eventIndex int, event formatEvent) {
 	case ",":
 		p.regularSpacing(current.text)
 		p.write(current.text)
-		if p.topDelimiterStyle() == braceBlock && !p.nextEventIsInlineStatement(eventIndex) && !p.nextEventIsTrailingComment(eventIndex, event) && !p.nextEventIsPinnedSameLine(eventIndex) {
+		if p.topDelimiterStyle() == braceBlock && !p.layout.inlineCommas[current.span.Offset] && !p.nextEventIsInlineStatement(eventIndex) && !p.nextEventIsTrailingComment(eventIndex, event) && !p.nextEventIsPinnedSameLine(eventIndex) {
 			p.newline()
 		}
 	case ";":

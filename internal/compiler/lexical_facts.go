@@ -124,27 +124,29 @@ func captureOriginalSyntax(program *Program) *lexicalFacts {
 				break
 			}
 			child(id, armID)
-			if p := arm.Pattern; p != nil {
-				if !facts.complete {
-					break
-				}
-				patternID := add("pattern", p.TypeName+"."+p.VariantName, p.Span, p.Extent, Span{})
-				if patternID < 0 {
-					break
-				}
-				facts.patterns[p] = patternID
-				child(armID, patternID)
-				for _, name := range p.Names {
+			for _, cell := range arm.Patterns {
+				for _, p := range cell {
 					if !facts.complete {
 						break
 					}
-					extent := name.FieldSpan
-					extent.Length = name.NameSpan.Offset + name.NameSpan.Length - extent.Offset
-					nameID := add("patternBinding", name.Name, name.FieldSpan, extent, name.NameSpan)
-					if nameID < 0 {
+					patternID := add("pattern", p.TypeName+"."+p.VariantName, p.Span, p.Extent, Span{})
+					if patternID < 0 {
 						break
 					}
-					child(patternID, nameID)
+					facts.patterns[p] = patternID
+					child(armID, patternID)
+					for _, name := range p.Names {
+						if !facts.complete {
+							break
+						}
+						extent := name.FieldSpan
+						extent.Length = name.NameSpan.Offset + name.NameSpan.Length - extent.Offset
+						nameID := add("patternBinding", name.Name, name.FieldSpan, extent, name.NameSpan)
+						if nameID < 0 {
+							break
+						}
+						child(patternID, nameID)
+					}
 				}
 			}
 			if !facts.complete {
