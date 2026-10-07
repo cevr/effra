@@ -6,6 +6,7 @@ import (
 	"fmt"
 	gotoken "go/token"
 	"go/types"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -838,17 +839,16 @@ func (c *checker) hostGoDeclarations() ([]string, string) {
 		return nil, ""
 	}
 	paths := map[string]bool{}
-	named := []TypeID{}
-	for id, native := range c.host.native {
-		if declared, ok := native.(*types.Named); ok && declared.Obj().Pkg() != nil {
-			paths[declared.Obj().Pkg().Path()] = true
-			named = append(named, id)
-		}
+	named := map[string]*types.Named{}
+	for _, native := range c.host.native {
+		hostSpelledNamed(native, map[types.Type]bool{}, func(declared *types.Named) {
+			named[types.TypeString(declared, hostPathQualifier)] = declared
+		})
 	}
-	slices.SortFunc(named, func(a, b TypeID) int { return strings.Compare(c.node(a).Declaration, c.node(b).Declaration) })
 	var out strings.Builder
-	for _, id := range named {
-		out.WriteString("var _ *" + c.hostGoType(id) + "\n")
+	for _, key := range slices.Sorted(maps.Keys(named)) {
+		paths[named[key].Obj().Pkg().Path()] = true
+		out.WriteString("var _ *" + types.TypeString(named[key], func(p *types.Package) string { return hostPackageAlias(p.Path()) }) + "\n")
 	}
 	// A checked write reports a short write with io.ErrShortWrite.
 	if slices.ContainsFunc(c.result.Bindings, func(b Binding) bool { protocol, ok := b.ioProtocol(); return ok && !protocol.reader }) {
@@ -871,16 +871,68 @@ func (c *checker) hostGoDeclarations() ([]string, string) {
 	return imports, out.String()
 }
 
-// hostPackages lists the packages declaring a host node's own native type.
-// Composite element types are separate nodes reached through Args.
+// hostPackages lists the packages generated code imports to spell a host
+// node's own native type: a named type's declaring package, or every package
+// an unnamed interface's method signatures and embedded types mention. Pointer,
+// slice and map elements are separate nodes reached through Args.
 func (c *checker) hostPackages(id TypeID) []string {
 	if c.host == nil {
 		return nil
 	}
-	if declared, ok := c.host.native[id].(*types.Named); ok && declared.Obj().Pkg() != nil {
-		return []string{declared.Obj().Pkg().Path()}
+	native := c.host.native[id]
+	switch native.(type) {
+	case nil, *types.Pointer, *types.Slice, *types.Map:
+		return nil
 	}
-	return nil
+	paths := map[string]bool{}
+	hostSpelledNamed(native, map[types.Type]bool{}, func(declared *types.Named) { paths[declared.Obj().Pkg().Path()] = true })
+	return slices.Sorted(maps.Keys(paths))
+}
+
+// hostSpelledNamed visits every package-declared named type that spelling the
+// native type t names. A named type is spelled by its own name; unnamed
+// interfaces, signatures, structs and element types are spelled through their
+// parts, so their packages are needed even when source never imports them.
+func hostSpelledNamed(t types.Type, visiting map[types.Type]bool, visit func(*types.Named)) {
+	t = types.Unalias(t)
+	if visiting[t] {
+		return
+	}
+	visiting[t] = true
+	switch t := t.(type) {
+	case *types.Named:
+		if t.Obj().Pkg() != nil {
+			visit(t)
+		}
+	case *types.Pointer:
+		hostSpelledNamed(t.Elem(), visiting, visit)
+	case *types.Slice:
+		hostSpelledNamed(t.Elem(), visiting, visit)
+	case *types.Array:
+		hostSpelledNamed(t.Elem(), visiting, visit)
+	case *types.Chan:
+		hostSpelledNamed(t.Elem(), visiting, visit)
+	case *types.Map:
+		hostSpelledNamed(t.Key(), visiting, visit)
+		hostSpelledNamed(t.Elem(), visiting, visit)
+	case *types.Signature:
+		for _, tuple := range []*types.Tuple{t.Params(), t.Results()} {
+			for i := 0; i < tuple.Len(); i++ {
+				hostSpelledNamed(tuple.At(i).Type(), visiting, visit)
+			}
+		}
+	case *types.Struct:
+		for i := 0; i < t.NumFields(); i++ {
+			hostSpelledNamed(t.Field(i).Type(), visiting, visit)
+		}
+	case *types.Interface:
+		for i := 0; i < t.NumExplicitMethods(); i++ {
+			hostSpelledNamed(t.ExplicitMethod(i).Type(), visiting, visit)
+		}
+		for i := 0; i < t.NumEmbeddeds(); i++ {
+			hostSpelledNamed(t.EmbeddedType(i), visiting, visit)
+		}
+	}
 }
 
 func canonicalGoValuesType(c *checker, node *semanticTypeNode, visiting map[TypeID]bool) string {

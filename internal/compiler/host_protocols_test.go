@@ -438,3 +438,32 @@ effect fn program() -> void uses { Console, Foreign } {
 	}
 	requirePlanned(t, plan, RequiresForeign, "go:(error).Error")
 }
+
+// An unnamed interface is spelled through its method signatures and embedded
+// types, so generated code imports every package they name although source
+// never imports io and never calls the methods. The plan retains the same
+// packages.
+func TestHostUnnamedInterfaceClosesOverSignaturePackages(t *testing.T) {
+	r := compileHostTypes(t, `effect fn program() -> void uses { Console, Foreign } {
+    match run host.ProbeAnonymous() {
+        Data.Option.None => void,
+        Data.Option.Some { value } => run Console.log(run host.DynamicType(value))
+    }
+    match run host.ProbeEmbedded() {
+        Data.Option.None => void,
+        Data.Option.Some { value } => run Console.log(run host.DynamicType(value))
+    }
+}`)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	plan, err := r.ApplicationPlan(GoGenerationBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireProvenance(t, plan, RequiresGoImport, "io", "go:interface{WriteTo(io.Writer) (int64, error)}", "host-type")
+	requirePlanned(t, plan, RequiresHostType, "go:interface{Report() string; io.Reader}")
+	if output := runGeneratedGo(t, r); output != "*hosttypes.Source\n*hosttypes.Source\n" {
+		t.Fatalf("unnamed interfaces: %q", output)
+	}
+}

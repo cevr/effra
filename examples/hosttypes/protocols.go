@@ -104,3 +104,19 @@ func (Overcount) Write(p []byte) (int, error) { return len(p) + 1, nil }
 
 // Negate returns -n, a native int no source literal can spell.
 func Negate(n int) int { return -n }
+
+// ProbeAnonymous returns an unnamed interface whose method signature names
+// io.Writer.
+func ProbeAnonymous() interface {
+	WriteTo(io.Writer) (int64, error)
+} {
+	return NewSource("x")
+}
+
+// ProbeEmbedded returns an unnamed interface embedding io.Reader.
+func ProbeEmbedded() interface {
+	io.Reader
+	Report() string
+} {
+	return NewSource("y")
+}
