@@ -52,13 +52,6 @@ type session struct {
 	phase     int
 	documents map[string]document
 	bytes     int
-	// format is the shared syntax-only formatter of `ef fmt` and MCP
-	// code.format. Tests substitute it to interleave an edit with a computation.
-	format func(source string) (compiler.FormatResult, error)
-}
-
-func formatSource(source string) (compiler.FormatResult, error) {
-	return compiler.FormatSourceBounded(source, MaxFormattedBytes)
 }
 
 // Serve owns the session until exit or EOF. EOF after shutdown is clean;
@@ -68,7 +61,7 @@ func Serve(target string, in io.Reader, out io.Writer) error {
 	if target != "go" && target != "js" {
 		return fmt.Errorf("LSP target must be go or js")
 	}
-	s := session{out: out, target: target, documents: make(map[string]document), format: formatSource}
+	s := session{out: out, target: target, documents: make(map[string]document)}
 	defer func() { clear(s.documents); s.bytes = 0 }()
 	r := bufio.NewReaderSize(in, 4096)
 	for {
@@ -445,10 +438,9 @@ func (s *session) navigate(req request) error {
 	return s.result(req.ID, map[string]any{"contents": map[string]any{"kind": "plaintext", "value": selected.Presentation}, "range": selection})
 }
 
-// formatDocument answers whole-document formatting of the current accepted
-// snapshot with the shared syntax-only formatter. Editor options are ignored:
-// the style is canonical. The result is refused when the document changed
-// while it was computed, so an edit never applies to text it was not made for.
+// formatDocument formats the current accepted snapshot with the syntax-only
+// formatter of `ef fmt` and MCP code.format. Editor options are ignored: the
+// style is canonical.
 func (s *session) formatDocument(req request) error {
 	var p struct {
 		TextDocument struct {
@@ -466,29 +458,37 @@ func (s *session) formatDocument(req request) error {
 	if !exists {
 		return s.failure(req.ID, -32602, "document is not open")
 	}
-	result, err := s.format(captured.snapshot.Text)
+	result, err := compiler.FormatSourceBounded(captured.snapshot.Text, MaxFormattedBytes)
+	return s.completeFormatting(req.ID, path, captured, result, err)
+}
+
+// completeFormatting answers a formatting result computed for the captured
+// snapshot. The result is refused unless that same version and text are still
+// open, so an edit never applies to text it was not made for; text is
+// compared because a reopen restarts the version sequence.
+func (s *session) completeFormatting(id json.RawMessage, path string, captured document, result compiler.FormatResult, err error) error {
 	current, exists := s.documents[path]
 	if !exists || current.version != captured.version || current.snapshot.Text != captured.snapshot.Text {
-		return s.failure(req.ID, -32801, documentContext(captured)+"document changed while formatting")
+		return s.failure(id, -32801, documentContext(captured)+"document changed while formatting")
 	}
 	var failure compiler.FormatFailure
 	if errors.As(err, &failure) && len(failure.Diagnostics) > 0 {
 		first := failure.Diagnostics[0]
-		return s.failure(req.ID, -32803, fmt.Sprintf("%scannot format: %s: %s", documentContext(captured), first.Code, first.Message))
+		return s.failure(id, -32803, fmt.Sprintf("%scannot format: %s: %s", documentContext(captured), first.Code, first.Message))
 	}
 	if err != nil {
-		return s.failure(req.ID, -32803, documentContext(captured)+"cannot format: "+err.Error())
+		return s.failure(id, -32803, documentContext(captured)+"cannot format: "+err.Error())
 	}
 	if !result.Changed {
-		return s.result(req.ID, []any{})
+		return s.result(id, []any{})
 	}
 	whole, ok := compiler.NewSourcePositions(captured.snapshot.Text).Range(compiler.Span{Length: len(captured.snapshot.Text)})
 	if !ok {
-		return s.failure(req.ID, -32803, documentContext(captured)+"document has no LSP range")
+		return s.failure(id, -32803, documentContext(captured)+"document has no LSP range")
 	}
-	frame, err := encodeFrame(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": []any{map[string]any{"range": whole, "newText": result.Text}}})
+	frame, err := encodeFrame(map[string]any{"jsonrpc": "2.0", "id": id, "result": []any{map[string]any{"range": whole, "newText": result.Text}}})
 	if err != nil {
-		return s.failure(req.ID, -32803, documentContext(captured)+err.Error())
+		return s.failure(id, -32803, documentContext(captured)+err.Error())
 	}
 	return writeFrame(s.out, frame)
 }

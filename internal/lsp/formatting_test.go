@@ -149,45 +149,46 @@ func readMessages(t *testing.T, out *bytes.Buffer) []map[string]any {
 	}
 }
 
-// The session is synchronous, so only a formatter that re-enters the session
-// can interleave an edit; the guard must refuse any result computed for text
-// that is no longer the accepted version.
-func TestFormattingRefusesAResultInvalidatedDuringComputation(t *testing.T) {
+// A result is completed only for the snapshot it was computed from. Each case
+// captures the accepted snapshot, formats it with the shared formatter, applies
+// a real document change and then completes the result.
+func TestFormattingRefusesAResultForAChangedSnapshot(t *testing.T) {
 	uri := "file:///tmp/effra-formatting-stale.ef"
-	source := "fn a() -> string {   \"a\" }"
-	reopen := func(text string) func(s *session) {
-		return func(s *session) {
-			s.synchronize(syncRequest(t, closeDoc(uri)))
-			s.synchronize(syncRequest(t, open(uri, text, 1)))
-		}
+	path, err := documentPath(uri)
+	if err != nil {
+		t.Fatal(err)
 	}
+	source := "fn a() -> string {   \"a\" }"
+	other := "fn b() -> string {   \"b\" }"
 	cases := []struct {
-		label string
-		edit  func(s *session)
-		stale bool
+		label   string
+		changes []any
+		stale   bool
 	}{
-		{"no interleaved edit", nil, false},
-		{"newer version", func(s *session) { s.synchronize(syncRequest(t, change(uri, "fn b() -> string { \"b\" }", 2))) }, true},
-		{"newer version, same text", func(s *session) { s.synchronize(syncRequest(t, change(uri, source, 2))) }, true},
-		{"closed", func(s *session) { s.synchronize(syncRequest(t, closeDoc(uri))) }, true},
+		{"unchanged", nil, false},
+		{"newer version", []any{change(uri, other, 2)}, true},
+		{"newer version, same text", []any{change(uri, source, 2)}, true},
+		{"closed", []any{closeDoc(uri)}, true},
 		// A reopen restarts the version sequence, so the version alone cannot
 		// identify the captured text.
-		{"reopened, same version, other text", reopen("fn b() -> string {   \"b\" }"), true},
-		{"reopened, same version and text", reopen(source), false},
+		{"reopened, same version, other text", []any{closeDoc(uri), open(uri, other, 1)}, true},
+		{"reopened, same version and text", []any{closeDoc(uri), open(uri, source, 1)}, false},
 	}
 	for _, c := range cases {
 		var out bytes.Buffer
 		s := session{out: &out, target: "go", phase: 2, documents: map[string]document{}}
-		s.format = func(text string) (compiler.FormatResult, error) {
-			if c.edit != nil {
-				c.edit(&s)
-			}
-			return formatSource(text)
-		}
 		if err := s.synchronize(syncRequest(t, open(uri, source, 1))); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.handle(syncRequest(t, formatting(uri, "format", nil))); err != nil {
+		captured := s.documents[path]
+		result, formatErr := compiler.FormatSourceBounded(captured.snapshot.Text, MaxFormattedBytes)
+		for _, change := range c.changes {
+			if err := s.synchronize(syncRequest(t, change)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		out.Reset()
+		if err := s.completeFormatting(json.RawMessage(`"format"`), path, captured, result, formatErr); err != nil {
 			t.Fatal(err)
 		}
 		reply := responses(t, readMessages(t, &out))["format"]
