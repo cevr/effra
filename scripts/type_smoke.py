@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Actual selected lexical/type CLI and MCP workflows over shared snapshots."""
+import copy
 import json
 import pathlib
 import subprocess
 import tempfile
+
+from smoke_support import assert_report_parity, producer_snapshot
 
 root = pathlib.Path(__file__).resolve().parents[1]
 ef = root / "bin" / "ef"
@@ -17,6 +20,12 @@ fn describe(label: string, notice: Notice) -> string {
 service Labels { effect fn read(item: string) -> string }
 impl Prefix(prefix: string) for Labels { effect fn read(item: string) -> string { prefix + item } }
 fn unrelated(input: string) -> string { Fns.identity(input) }
+error Child
+effect fn task() -> string raises {Child} { "ok" }
+effect fn main() -> string raises {Child} {
+ let child = fork task()
+ run child.join()
+}
 '''
 
 
@@ -35,14 +44,22 @@ def tool(identifier, arguments):
 
 
 def closure(value):
-    types = {node["id"] for node in value["types"]}
-    rows = {node["id"] for node in value["rows"]}
+    type_ids = [node["id"] for node in value["types"]]
+    row_ids = [node["id"] for node in value["rows"]]
+    assert len(type_ids) == len(set(type_ids)), "duplicate canonical type ID"
+    assert len(row_ids) == len(set(row_ids)), "duplicate canonical row ID"
+    types = set(type_ids)
+    rows = set(row_ids)
     def visit(item):
         if isinstance(item, list):
             for child in item:
                 visit(child)
         elif isinstance(item, dict):
             for key, child in item.items():
+                if key == "args":
+                    assert isinstance(child, list), (key, child)
+                    for ref in child:
+                        assert isinstance(ref, str) and ref in types, (key, ref)
                 if key in ("ref", "result") and isinstance(child, str) and child:
                     assert child in types, (key, child)
                 if key in ("failureRow", "serviceRow") and child:
@@ -51,36 +68,42 @@ def closure(value):
     visit(value)
 
 
-def producer_snapshot(value, target):
-    producer = value["producer"]
-    snapshot = value["snapshot"]
-    assert producer["reuseScope"] in ("artifact", "process", "none")
-    if producer["reuseScope"] == "none":
-        assert not producer["qualifier"]
+def assert_causal_wire_rejections(value, label):
+    closure(value)
+    fiber = next(node for node in value["types"] if node.get("kind") == "fiber")
+    child_type = fiber["args"][0]
+    missing_argument = copy.deepcopy(value)
+    missing_argument["types"] = [node for node in missing_argument["types"] if node["id"] != child_type]
+    try:
+        closure(missing_argument)
+    except AssertionError:
+        pass
     else:
-        assert producer["qualifier"]
-    assert snapshot == {"schemaVersion": value["schemaVersion"], "revision": value["revision"],
-                       "target": target, "producer": producer["qualifier"],
-                       "reuseScope": producer["reuseScope"]}
-    return producer
-
-
-def assert_process_parity(actual, expected, reuse_scope):
-    if reuse_scope == "artifact":
-        assert actual == expected
-        return
-    # An explicitly process-scoped fallback cannot be reused across adapters.
-    # Compare semantic facts while retaining the source, target and schema guard.
-    actual = dict(actual)
-    expected = dict(expected)
-    actual.pop("producer", None)
-    expected.pop("producer", None)
-    for value in (actual, expected):
-        snapshot = dict(value["snapshot"])
-        snapshot.pop("producer", None)
-        snapshot.pop("reuseScope", None)
-        value["snapshot"] = snapshot
-    assert actual == expected
+        raise AssertionError(f"{label}: missing args child was accepted")
+    duplicate_type = copy.deepcopy(value)
+    duplicate_type["types"].append(copy.deepcopy(duplicate_type["types"][0]))
+    try:
+        closure(duplicate_type)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError(f"{label}: duplicate type was accepted")
+    duplicate_row = copy.deepcopy(value)
+    duplicate_row["rows"].append(copy.deepcopy(duplicate_row["rows"][0]))
+    try:
+        closure(duplicate_row)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError(f"{label}: duplicate row was accepted")
+    missing_rows = copy.deepcopy(value)
+    missing_rows["rows"] = []
+    try:
+        closure(missing_rows)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError(f"{label}: missing row was accepted")
 
 
 with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
@@ -98,6 +121,7 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
         ("config", source.index("Prefix(prefix") + len("Prefix(")),
         ("config-use", source.index("{ prefix +") + len("{ ")),
         ("method-use", source.index("prefix + item") + len("prefix + ")),
+        ("fiber", source.index("run child.join") + len("run ")),
     ]
     for target in ("go", "js"):
         views = {name: cli(path, target, "--offset", str(offset)) for name, offset in selectors}
@@ -128,6 +152,18 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
             assert definition_producer == artifact
         assert not definition["selection"]["locationAvailable"]
         closure(definition)
+        fiber_id = views["fiber"]["selection"]["expression"]["type"]["type"]["ref"]
+        fiber_definition = cli(path, target, "--definition", fiber_id, "--revision", revision)
+        assert views["fiber"]["selection"]["expression"]["type"]["type"]["kind"] == "fiber"
+        assert views["fiber"]["selection"]["expression"]["type"]["failureRow"]
+        assert_causal_wire_rejections(views["fiber"], "selected Fiber")
+        assert fiber_definition["selection"] == {"kind": "typeDefinition", "locationAvailable": False,
+                                                   "span": {"offset": 0, "length": 0, "line": 0, "column": 0},
+                                                   "extent": {"offset": 0, "length": 0, "line": 0, "column": 0},
+                                                   "definition": fiber_id}
+        assert any(node["id"] == fiber_id and node["kind"] == "fiber"
+                   and node["args"] and node["failureRow"] for node in fiber_definition["types"])
+        assert_causal_wire_rejections(fiber_definition, "Fiber definition")
         cli(path, target, "--definition", type_id, success=False)
         cli(path, target, "--definition", type_id, "--revision", "stale", success=False)
         cli(path, target, "--offset", str(len(source)), success=False)
@@ -148,6 +184,8 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
                       "expectedRevision": "stale", **producer_guard}),
             tool(23, {"file": invalid.name, "target": target, "symbol": "invalid"}),
             tool(24, {"file": path.name, "target": target, "offset": selectors[0][1], "symbol": "local"}),
+            tool(27, {"file": path.name, "target": target, "definition": fiber_id,
+                      "expectedRevision": revision, **producer_guard}),
         ])
         if artifact["reuseScope"] == "artifact":
             stale_qualifier = "sha256:" + "0" * 64
@@ -162,11 +200,21 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
                                  input="".join(json.dumps(request)+"\n" for request in requests), timeout=60)
         assert process.returncode == 0, process.stderr
         replies = {reply["id"]: reply for reply in map(json.loads, process.stdout.splitlines())}
+        mcp_fiber = None
         for index, (name, _) in enumerate(selectors, 2):
             assert "result" in replies[index], replies[index]
-            assert_process_parity(replies[index]["result"]["structuredContent"], views[name], artifact["reuseScope"])
-        assert_process_parity(replies[20]["result"]["structuredContent"], unrelated, artifact["reuseScope"])
-        assert_process_parity(replies[21]["result"]["structuredContent"], definition, artifact["reuseScope"])
+            actual = replies[index]["result"]["structuredContent"]
+            assert_report_parity(actual, views[name], target=target)
+            closure(actual)
+            if name == "fiber":
+                mcp_fiber = actual
+        assert_report_parity(replies[20]["result"]["structuredContent"], unrelated, target=target)
+        assert_report_parity(replies[21]["result"]["structuredContent"], definition, target=target)
+        actual_fiber_definition = replies[27]["result"]["structuredContent"]
+        assert_report_parity(actual_fiber_definition, fiber_definition, target=target)
+        assert mcp_fiber is not None
+        assert_causal_wire_rejections(mcp_fiber, "MCP selected Fiber")
+        assert_causal_wire_rejections(actual_fiber_definition, "MCP Fiber definition")
         assert replies[22]["result"]["isError"] and replies[23]["result"]["isError"]
         assert replies[24]["error"]["code"] == -32602
         if artifact["reuseScope"] == "artifact":

@@ -11,6 +11,8 @@ import sys
 import tempfile
 import time
 
+from smoke_support import assert_report_parity
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
@@ -83,7 +85,7 @@ def positions(binary, directory):
         path = write(directory, name, source)
         report = cli(binary, path)
         remote = mcp(binary, directory, [{"file": name}])[0]["result"]["structuredContent"]
-        assert report == remote, name
+        assert_report_parity(report, remote)
         assert report["revision"] == hashlib.sha256(source.encode()).hexdigest(), name
         assert report["source"] == {"uri": path.as_uri(), "origin": "disk"}, report
         findings = report["diagnostics"]
@@ -105,7 +107,8 @@ def positions(binary, directory):
             strict = cli(binary, path, strict=True)
             assert report["policyPassed"] and not strict["policyPassed"], strict
             assert report["diagnostics"] == strict["diagnostics"], strict
-            assert mcp(binary, directory, [{"file": name, "strict": True}])[0]["result"]["structuredContent"] == strict
+            strict_remote = mcp(binary, directory, [{"file": name, "strict": True}])[0]["result"]["structuredContent"]
+            assert_report_parity(strict_remote, strict)
 
     for name, source, checked in [
         ("escaped-cr.ef", 'effect fn main() -> string { "\\r" }', True),
@@ -117,7 +120,8 @@ def positions(binary, directory):
          'let forgotten = task()\n"ok"\n}', True),
     ]:
         report = cli(binary, write(directory, name, source), strict=True)
-        assert report == mcp(binary, directory, [{"file": name, "strict": True}])[0]["result"]["structuredContent"]
+        remote = mcp(binary, directory, [{"file": name, "strict": True}])[0]["result"]["structuredContent"]
+        assert_report_parity(report, remote)
         assert report["checked"] == checked, report
         if checked:
             assert report["policyPassed"] and report["diagnostics"] == [], report

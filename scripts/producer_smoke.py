@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 import time
 
+from smoke_support import adapter_semantic, assert_report_parity
+
 root = Path(__file__).resolve().parents[1]
 
 
@@ -162,8 +164,9 @@ effect fn greeting(id: string) -> string raises {MissingProfile} uses {Profiles}
             remote = old.tool("code.inspect", file="profile.ef", symbol="greeting", target=target,
                               expectedProducer=key)["structuredContent"]
             cli = json.loads(run(str(first), "inspect", str(profile), "greeting", "--target", target))
-            assert remote["producer"] == cli["producer"] == original_facts["producer"]
-            assert remote["snapshot"] == cli["snapshot"] and remote["revision"] != revision
+            assert_report_parity(remote, cli, target=target,
+                                 ignored=("file", "timings"), project=adapter_semantic)
+            assert remote["revision"] != revision
             assert remote["bundledInterfaces"] and remote["symbol"]["contract"]["requirements"] == ["Profiles"]
         formatted = old.tool("code.format", source=source, expectedProducer=key)["structuredContent"]
         assert formatted["producer"] == original_facts["producer"] and formatted["formatterVersion"]
@@ -242,11 +245,23 @@ func main(){json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"pr
     fallback = build_overlay(directory, "unavailable", owner, unavailable)
     processes = [Server(fallback, directory), Server(fallback, directory)]
     try:
-        before, other = [facts(server) for server in processes]
+        before, other = [facts(server, target="go") for server in processes]
+        assert_report_parity(before, other, target="go", ignored=("file", "timings"),
+                             project=adapter_semantic)
         id_before, id_other = before["producer"], other["producer"]
         assert id_before["strength"] == "unavailable" and id_before["reuseScope"] == "process"
         assert "digest" not in id_before and id_before["qualifier"] != id_other["qualifier"]
-        assert facts(processes[0], expectedProducer=id_before["qualifier"])["producer"] == id_before
+        same = facts(processes[0], target="go", expectedProducer=id_before["qualifier"])
+        assert_report_parity(same, before, target="go", ignored=("file", "timings"),
+                             project=adapter_semantic)
+        for target in ("go", "js"):
+            first_report = facts(processes[0], target=target)
+            second_report = facts(processes[1], target=target)
+            assert_report_parity(first_report, second_report, target=target,
+                                 ignored=("file", "timings"), project=adapter_semantic)
+            cli_report = json.loads(run(str(fallback), "check", str(file), "--target", target))
+            assert_report_parity(cli_report, first_report, target=target,
+                                 ignored=("file", "timings"), project=adapter_semantic)
         refused = processes[1].tool("project.check", file="main.ef", expectedProducer=id_before["qualifier"])
         assert refused["isError"] and processes[1].request("ping") == {}
     finally:

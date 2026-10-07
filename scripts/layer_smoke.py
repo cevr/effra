@@ -5,6 +5,8 @@ import pathlib
 import subprocess
 import tempfile
 
+from smoke_support import adapter_semantic, assert_report_parity
+
 root = pathlib.Path(__file__).resolve().parents[1]
 ef = root / "bin" / "ef"
 source = '''import Fns "effra/functions"
@@ -38,14 +40,6 @@ def cli(*args, success=True, input_text=None):
 def tool(identifier, name, arguments):
     return {"jsonrpc": "2.0", "id": identifier, "method": "tools/call",
             "params": {"name": name, "arguments": arguments}}
-
-
-def semantic(value):
-    result = {key: item for key, item in value.items() if key not in ("file", "timings")}
-    if "typeProjectionUsage" in result:
-        result["typeProjectionUsage"] = {key: item for key, item in result["typeProjectionUsage"].items()
-                                         if key not in ("compatibilityBytes", "nameBytes", "responseBytes")}
-    return result
 
 
 def complete_references(value):
@@ -139,7 +133,8 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
         assert checked["checked"] and len(checked["layers"]) == 5
         inspected = json.loads(cli("inspect", str(path), "Fixture", "--target", target).stdout)
         explained = json.loads(cli("explain", str(path), "Fixture", "--target", target).stdout)
-        assert inspected == explained
+        assert_report_parity(inspected, explained, target=target,
+                             ignored=("file", "timings"), project=adapter_semantic)
         plan = inspected["layer"]
         assert plan["provides"] == ["Account", "Invoice"] and not plan["requirements"]
         store = next(node for node in plan["nodes"] if node["service"] == "Store")
@@ -224,10 +219,13 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
         assert not responses[7]["result"].get("isError"), responses[7]
         for identifier, name, arguments, expected in comparisons:
             actual = responses[identifier]["result"]["structuredContent"]
-            assert semantic(actual) == semantic(expected), (target, name, actual, expected)
+            assert_report_parity(actual, expected, target=target,
+                                 ignored=("file", "timings"), project=adapter_semantic)
             complete_references(actual)
-        assert semantic(responses[10]["result"]["structuredContent"]) == semantic(workflow)
+        assert_report_parity(responses[10]["result"]["structuredContent"], workflow,
+                             target=target, ignored=("file", "timings"), project=adapter_semantic)
         complete_references(responses[10]["result"]["structuredContent"])
         for identifier, expected in ((11, missing), (12, identity), (13, unprovided)):
-            assert semantic(responses[identifier]["result"]["structuredContent"]) == semantic(expected)
+            assert_report_parity(responses[identifier]["result"]["structuredContent"], expected,
+                                 target=target, ignored=("file", "timings"), project=adapter_semantic)
 print("layer provision Go/JS, CLI/MCP metadata and formatter controls passed")

@@ -5,6 +5,8 @@ import pathlib
 import subprocess
 import tempfile
 
+from smoke_support import adapter_semantic, assert_report_parity
+
 root = pathlib.Path(__file__).resolve().parents[1]
 ef = str(root / "bin/ef")
 fixtures = [
@@ -50,16 +52,6 @@ def cli(command, file, target, *args, success=True):
     return json.loads(result.stdout)
 
 
-def semantic(value):
-    # The MCP file field changes envelope byte/name charges, not checked facts.
-    result = {key: item for key, item in value.items() if key not in ("file", "timings")}
-    if "typeProjectionUsage" in result:
-        result["typeProjectionUsage"] = {
-            key: item for key, item in result["typeProjectionUsage"].items()
-            if key not in ("compatibilityBytes", "nameBytes", "responseBytes")}
-    return result
-
-
 with tempfile.TemporaryDirectory(prefix="effra-bundled-parity-") as tmp:
     file = pathlib.Path(tmp) / "main.ef"
     for source, symbol, anchor, failure, service in fixtures:
@@ -96,7 +88,8 @@ with tempfile.TemporaryDirectory(prefix="effra-bundled-parity-") as tmp:
                 result = response["result"]
                 assert not result.get("isError"), result
                 actual = result["structuredContent"]
-                assert semantic(actual) == semantic(want), (target, symbol, actual, want)
+                assert_report_parity(actual, want, target=target,
+                                     ignored=("file", "timings"), project=adapter_semantic)
                 assert actual["producerIdentity"] and actual["sources"]
                 assert actual["bundledInterfaces"] and actual["bundledBindings"]
                 assert actual["revision"] == revision and actual["target"] == target
@@ -130,7 +123,8 @@ with tempfile.TemporaryDirectory(prefix="effra-bundled-parity-") as tmp:
                                              text=True, capture_output=True, cwd=root)
                     assert invalid.returncode == 0, invalid.stderr
                     result = json.loads(invalid.stdout.splitlines()[1])["result"]["structuredContent"]
-                    assert semantic(result) == semantic(rejected), (result, rejected)
+                    assert_report_parity(result, rejected, target=target,
+                                         ignored=("file", "timings"), project=adapter_semantic)
                 file.write_text(source)
 
 print("bundled CLI/MCP check, inspect, query, graph and stale revision parity: passed")

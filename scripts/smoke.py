@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Exercise the public binary and stdio MCP, not a second compiler model."""
 import json, pathlib, subprocess, tempfile
+
+from smoke_support import assert_report_parity
+
 root = pathlib.Path(__file__).resolve().parents[1]
 ef = str(root / "bin/ef")
 def run(*args, success=True):
@@ -124,7 +127,7 @@ with tempfile.TemporaryDirectory(prefix="effra-tooling-") as tmp:
     server=subprocess.run([ef,"mcp",tmp],input="\n".join(map(json.dumps,calls))+"\n",text=True,capture_output=True)
     assert server.returncode==0,server.stderr
     replies=[json.loads(line) for line in server.stdout.splitlines()]
-    assert replies[1]["result"]["structuredContent"]["lint"]==lint
+    assert_report_parity(replies[1]["result"]["structuredContent"]["lint"], lint)
     assert replies[2]["result"]["structuredContent"]["expression"]==query["expression"]
     assert replies[3]["result"]["structuredContent"]["nodes"]
     assert replies[4]["result"]["structuredContent"]==rules
@@ -156,7 +159,7 @@ let forgotten = task();
     server=subprocess.run([ef,"mcp",tmp],input="\n".join(map(json.dumps,suppression_calls))+"\n",text=True,capture_output=True)
     assert server.returncode==0,server.stderr
     suppression_reply=[json.loads(line) for line in server.stdout.splitlines()]
-    assert suppression_reply[1]["result"]["structuredContent"]["lint"]==suppressed
+    assert_report_parity(suppression_reply[1]["result"]["structuredContent"]["lint"], suppressed)
 
 
 def nested_data_source(depth, named):

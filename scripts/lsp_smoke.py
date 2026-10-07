@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 
 from diagnostics_smoke import cli, editor_position, mcp
+from smoke_support import assert_report_parity
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BINARY = str(ROOT / "bin/ef")
@@ -101,7 +102,7 @@ def parity(directory):
         path.write_bytes(text.encode())
         report = cli(BINARY, path)
         remote = mcp(BINARY, directory, [{"file": name}])[0]["result"]["structuredContent"]
-        assert report == remote
+        assert_report_parity(report, remote)
         messages = exchange([INIT, READY, opened(path, text, 4), STOP, EXIT], fragmented=True)
         capabilities = messages[0]["result"]["capabilities"]
         assert capabilities == {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": True, "change": 1}}
