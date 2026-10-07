@@ -444,8 +444,9 @@ func contractDeclarations(scope *types.Scope) map[string]bool {
 }
 
 // contractNearMisses lists at most three declarations a mistyped key likely
-// meant: the declaring method Go selects for the key's receiver and method
-// (a promoted method, or the other receiver form), then full names within
+// meant: the declaration of the method Go selects for the key's receiver and
+// method (a promoted method, an instance of a generic declaration, or the
+// other receiver form), then full names within
 // edit distance two.
 func contractNearMisses(key string, scope *types.Scope, declared map[string]bool) []string {
 	near := map[string]bool{}
@@ -457,7 +458,7 @@ func contractNearMisses(key string, scope *types.Scope, declared map[string]bool
 		if object, ok := scope.Lookup(receiver[strings.LastIndex(receiver, ".")+1:]).(*types.TypeName); ok {
 			for _, t := range []types.Type{object.Type(), types.NewPointer(object.Type())} {
 				if selection := types.NewMethodSet(t).Lookup(nil, key[end+2:]); selection != nil {
-					if name := selection.Obj().(*types.Func).FullName(); declared[name] && name != key {
+					if name := selection.Obj().(*types.Func).Origin().FullName(); declared[name] && name != key {
 						near[name] = true
 					}
 				}
@@ -506,8 +507,12 @@ func normalizeBinding(imp GoImport, fn *types.Func, host *hostImports) (Binding,
 // contract is keyed by the go/types full name of the declaration, so a
 // promoted method carries the contract of the method it promotes.
 func admitCallable(b *Binding, fn *types.Func, host *hostImports) string {
+	// Behavior belongs to the declaration: a method promoted from an embedded
+	// instance of a generic type is a synthetic Func whose full name spells
+	// the instance, so its contract is the origin's, while the signature
+	// stays the instantiated one.
 	sig := fn.Type().(*types.Signature)
-	meta := host.contracts[fn.FullName()]
+	meta := host.contracts[fn.Origin().FullName()]
 	b.Signature, b.Cancellation, b.Provenance, b.member, b.native = sig.String(), "unknown", "Go export data; behavior unclassified", fn.Name(), fn.FullName()
 	if meta.Cancellation != "" {
 		b.Cancellation = meta.Cancellation

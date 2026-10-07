@@ -334,8 +334,17 @@ func (c *Client) Name() string { return "client" }
 type Wrapped struct{ *Client }
 
 func Wrap(c *Client) Wrapped { return Wrapped{c} }
+
+type Generic[T any] struct{}
+
+func (Generic[T]) Lookup(ctx context.Context, id string) (string, error) { return id, ctx.Err() }
+
+type Instance struct{ Generic[int64] }
+
+func NewInstance() Instance { return Instance{} }
 `,
-		"effra.bindings.json": `{"(*example.test/methods.Client).Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
+		"effra.bindings.json": `{"(*example.test/methods.Client).Lookup":{"context":"fiber","cancellation":"cooperative"},
+			"(example.test/methods.Generic[T]).Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
 			t.Fatal(err)
@@ -349,7 +358,8 @@ effect fn main() -> string raises {GoError} {
         Data.Option.Some { value: client } => {
             let timed = run client.Lookup("slow").orFail().timeout(1).catch<Timeout>("done").provide<Foreign>(Host).provide<Scheduler>(LiveScheduler)
             let promoted = run (run m.Wrap(client).provide<Foreign>(Host)).Lookup("fast").orFail().provide<Foreign>(Host)
-            timed + ":" + promoted + ":" + run client.Name().provide<Foreign>(Host)
+            let generic = run (run m.NewInstance().provide<Foreign>(Host)).Lookup("generic").orFail().provide<Foreign>(Host)
+            timed + ":" + promoted + ":" + generic + ":" + run client.Name().provide<Foreign>(Host)
         }
     }
 }`, "go", root)
@@ -360,7 +370,12 @@ effect fn main() -> string raises {GoError} {
 	for _, binding := range r.Bindings {
 		bindings[binding.Symbol] = binding
 	}
-	for _, symbol := range []string{"(*m.Client).Lookup", "(m.Wrapped).Lookup"} {
+	// An instance of a generic declaration takes the declaration's contract,
+	// keeps its instantiated signature and its own receiver identity.
+	if generic := bindings["(m.Instance).Lookup"]; generic.Identity != "go:(example.test/methods.Instance).Lookup" || generic.Signature != "func(ctx context.Context, id string) (string, error)" {
+		t.Fatalf("generic instance binding: %+v", generic)
+	}
+	for _, symbol := range []string{"(*m.Client).Lookup", "(m.Wrapped).Lookup", "(m.Instance).Lookup"} {
 		b := bindings[symbol]
 		if !b.Context || b.Cancellation != "cooperative" || len(b.HostParameters) != 3 || b.HostParameters[1].Adaptation != hostAdaptContext {
 			t.Fatalf("%s contract: %+v", symbol, b)
@@ -369,7 +384,7 @@ effect fn main() -> string raises {GoError} {
 	if name := bindings["(*m.Client).Name"]; name.Context || name.Cancellation != "unknown" {
 		t.Fatalf("unclassified method acquired a contract: %+v", name)
 	}
-	if output := runGeneratedGo(t, r); output != "done:Ada:client\n" {
+	if output := runGeneratedGo(t, r); output != "done:Ada:generic:client\n" {
 		t.Fatalf("method contracts: %q", output)
 	}
 	if err := os.WriteFile(filepath.Join(root, "effra.bindings.json"), []byte(`{"(*example.test/methods.Client).Name":{"context":"fiber"}}`), 0600); err != nil {

@@ -165,6 +165,8 @@ type Reader interface{ Read() string }
 type Box[T any] struct{}
 
 func (*Box[T]) Get() string { return "get" }
+
+type Boxed struct{ Box[int64] }
 `)
 	source := `import go keys "example.test/keys"
 effect fn main() -> string {
@@ -188,10 +190,13 @@ effect fn main() -> string {
 	}
 	write("effra.bindings.json", contract([]string{
 		"example.test/keys.Fecth", "(example.test/keys.Client).Lookup", "example.test/keys.Client",
-		"example.test/missing.Fetch", "Fetch", "(example.test/keys.Wrapped).Shared",
+		"example.test/missing.Fetch", "Fetch", "(example.test/keys.Wrapped).Shared", "(*example.test/keys.Boxed).Get",
+		"(*example.test/keys.Box[int64]).Get",
 	}))
 	r := CompileAt(source, "go", dir)
 	want := []string{
+		`effra.bindings.json key "(*example.test/keys.Box[int64]).Get" matches no Go function or method; near: "(*example.test/keys.Box[T]).Get"`,
+		`effra.bindings.json key "(*example.test/keys.Boxed).Get" matches no Go function or method; near: "(*example.test/keys.Box[T]).Get"`,
 		`effra.bindings.json key "(example.test/keys.Client).Lookup" matches no Go function or method; near: "(*example.test/keys.Client).Lookup"`,
 		`effra.bindings.json key "(example.test/keys.Wrapped).Shared" matches no Go function or method; near: "(example.test/keys.shared).Shared"`,
 		`effra.bindings.json key "Fetch" is not a go/types full name such as "path.Func" or "(*path.Type).Method"`,

@@ -95,7 +95,7 @@ The module-root `effra.bindings.json` attaches behavior assertions without resta
  "(*example.com/sdk.Client).Lookup":{"context":"fiber","cancellation":"cooperative"}}
 ```
 
-A promoted method carries the contract of the method it promotes; an interface method such as `(io.Reader).Read` is a separate declaration.
+A promoted method carries the contract of the method it promotes; an interface method such as `(io.Reader).Read` is a separate declaration. A method promoted from an embedded instance of a generic type, such as `Generic[int64]` in `struct{ Generic[int64] }`, carries the contract of its generic declaration `(example.com/sdk.Generic[T]).Lookup`; one entry covers every instance, and the call keeps the instance's signature.
 
 `context: fiber` hides an actual first context.Context parameter and forwards the managed context. `cooperative` is allowed only with that forwarding; it is a reviewed assertion, not a type-system proof. Unclassified cancellation is reported as unknown. Metadata rejects unknown fields, invalid enum values and unknown keys when it loads (EF111). Every key must be the full name of an exported function or method in the package it names; that package is loaded for the check even when source does not import it, and the diagnostic lists near misses such as the other receiver form or the declaring method of a promoted one. A key for a declaration the program does not call has no effect. No signature implies purity or resource ownership.
 
