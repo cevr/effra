@@ -149,6 +149,15 @@ console.log(JSON.stringify({schemaVersion:1,passed:__ef_passed,tests:__ef_result
 	return js, decl, nil
 }
 
+func isLiveTestProvider(name string) bool {
+	switch name {
+	case "LiveClock", "LiveScheduler", "LiveEnv":
+		return true
+	default:
+		return false
+	}
+}
+
 // This is a conservative file-level capability check, not an OS sandbox.
 func (r *Result) TestMode(live bool) error {
 	if !r.Checked {
@@ -166,7 +175,7 @@ func (r *Result) TestMode(live bool) error {
 		if e == nil {
 			return false
 		}
-		if e.Kind == "name" && e.Text == "provider" && (e.Name == "LiveClock" || e.Name == "LiveScheduler" || e.Name == "LiveEnv") {
+		if e.Kind == "name" && e.Text == "provider" && isLiveTestProvider(e.Name) {
 			return true
 		}
 		found := false
@@ -209,6 +218,13 @@ func (r *Result) TestMode(live bool) error {
 	for _, p := range r.Program.Providers {
 		for _, f := range p.Methods {
 			if block(f.Body) {
+				return fmt.Errorf("live clock/scheduler/environment requires test --live")
+			}
+		}
+	}
+	for _, plan := range r.Layers {
+		for _, node := range plan.Nodes {
+			if isLiveTestProvider(node.Implementation) {
 				return fmt.Errorf("live clock/scheduler/environment requires test --live")
 			}
 		}

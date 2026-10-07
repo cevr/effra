@@ -506,6 +506,25 @@ func TestInvalidSourceIsACompilerResult(t *testing.T) {
 	}
 }
 
+func TestProjectTestsReportsLiveLayerSelection(t *testing.T) {
+	root := t.TempDir()
+	source := `layer LiveClockLayer { Clock = LiveClock }
+effect fn test_live_layer() -> () { () }`
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"go", "js"} {
+		result, err := call(root, "project.tests", arguments{File: "main.ef", Target: target})
+		if err != nil {
+			t.Fatalf("%s target: %v", target, err)
+		}
+		payload := result.(map[string]any)
+		if payload["liveRequired"] != true {
+			t.Fatalf("%s target did not report live layer selection: %#v", target, payload)
+		}
+	}
+}
+
 func TestArgumentSchemas(t *testing.T) {
 	for _, tc := range []struct{ name, raw string }{
 		{"project.describe", "null"},

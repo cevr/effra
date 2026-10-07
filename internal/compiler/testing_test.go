@@ -36,4 +36,51 @@ func TestTestContractsAndLiveCapabilities(t *testing.T) {
 	if live.TestMode(false) == nil || live.TestMode(true) != nil {
 		t.Fatal("live host check")
 	}
+	for _, test := range []struct {
+		name   string
+		source string
+	}{
+		{
+			name:   "clock layer",
+			source: `layer LiveClockLayer { Clock = LiveClock } effect fn test_layer() -> () { () }`,
+		},
+		{
+			name:   "scheduler layer",
+			source: `layer LiveSchedulerLayer { Scheduler = LiveScheduler } effect fn test_layer() -> () { () }`,
+		},
+		{
+			name:   "environment layer",
+			source: `layer LiveEnvLayer { Env = LiveEnv } effect fn test_layer() -> () { () }`,
+		},
+		{
+			name: "retained layer selections",
+			source: `
+layer Hidden { Clock = LiveClock }
+layer Merged { merge Hidden }
+layer Fixture { Clock = TestClock }
+layer Replaced { merge Fixture; replace Clock = LiveClock }
+layer Unused { Scheduler = LiveScheduler; Env = LiveEnv }
+effect fn test_layer() -> () { () }`,
+		},
+		{
+			name:   "test providers",
+			source: `layer Fixtures { Clock = TestClock; Scheduler = TestScheduler } effect fn test_layer() -> () { () }`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			for _, target := range []string{"go", "js"} {
+				r := CompileFor(test.source, target)
+				if !r.Checked {
+					t.Fatalf("%s target: %+v", target, r.Diagnostics)
+				}
+				wantLive := test.name != "test providers"
+				if gotLive := r.TestMode(false) != nil; gotLive != wantLive {
+					t.Fatalf("%s target: TestMode(false) live=%v, want %v", target, gotLive, wantLive)
+				}
+				if err := r.TestMode(true); err != nil {
+					t.Fatalf("%s target explicit live mode: %v", target, err)
+				}
+			}
+		})
+	}
 }
