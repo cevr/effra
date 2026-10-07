@@ -1953,12 +1953,9 @@ effect fn main() -> string raises {IoError} {
 			source: `
 service Store { effect fn get() -> File raises {IoError} }
 impl Borrowing(file: File) for Store {
-effect fn get() -> File raises {IoError} { file }
+ effect fn get() -> File raises {IoError} { scope { run pass(file) } }
 }
-effect fn borrow(file: File) -> File raises {IoError} {
- let provider = run Borrowing(file)
- scope { run Store.get().provide<Store>(provider) }
-}
+effect fn pass(file: File) -> File raises {IoError} { file }
 effect fn main() -> () { () }
 `,
 			owned: false,
