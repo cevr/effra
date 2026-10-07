@@ -1873,3 +1873,201 @@ effect fn main() -> () { () }
 		t.Fatalf("dependency-ordered summaries must carry ownership through helper calls: %+v", r.Diagnostics)
 	}
 }
+
+func TestOwnershipSummaryPreparationCoversProviderHelpers(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		owned  bool
+	}{
+		{
+			name: "provider direct acquisition",
+			source: `
+service Store { effect fn get() -> File raises {IoError} }
+impl Live for Store {
+ effect fn get() -> File raises {IoError} {
+  scope { run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles) }
+ }
+}
+effect fn main() -> string raises {IoError} {
+ let file = run Store.get().provide<Store>(Live)
+ run Files.readText(file).provide<Files>(LiveFiles)
+}
+`,
+			owned: true,
+		},
+		{
+			name: "provider helper declared after provider",
+			source: `
+service Store { effect fn get() -> File raises {IoError} }
+impl Live for Store {
+ effect fn get() -> File raises {IoError} { scope { run acquire() } }
+}
+effect fn acquire() -> File raises {IoError} {
+ run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+}
+effect fn main() -> string raises {IoError} {
+ let file = run Store.get().provide<Store>(Live)
+ run Files.readText(file).provide<Files>(LiveFiles)
+}
+`,
+			owned: true,
+		},
+		{
+			name: "provider helper declared before provider",
+			source: `
+effect fn acquire() -> File raises {IoError} {
+ run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+}
+service Store { effect fn get() -> File raises {IoError} }
+impl Live for Store {
+ effect fn get() -> File raises {IoError} { scope { run acquire() } }
+}
+effect fn main() -> string raises {IoError} {
+ let file = run Store.get().provide<Store>(Live)
+ run Files.readText(file).provide<Files>(LiveFiles)
+}
+`,
+			owned: true,
+		},
+		{
+			name: "provider helper chain",
+			source: `
+service Store { effect fn get() -> File raises {IoError} }
+impl Live for Store {
+ effect fn get() -> File raises {IoError} { scope { run acquire() } }
+}
+effect fn acquire() -> File raises {IoError} { run leaf() }
+effect fn leaf() -> File raises {IoError} {
+ run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+}
+effect fn main() -> string raises {IoError} {
+ let file = run Store.get().provide<Store>(Live)
+ run Files.readText(file).provide<Files>(LiveFiles)
+}
+`,
+			owned: true,
+		},
+		{
+			name: "provider borrowed outer value",
+			source: `
+service Store { effect fn get() -> File raises {IoError} }
+impl Borrowing(file: File) for Store {
+effect fn get() -> File raises {IoError} { file }
+}
+effect fn borrow(file: File) -> File raises {IoError} {
+ let provider = run Borrowing(file)
+ scope { run Store.get().provide<Store>(provider) }
+}
+effect fn main() -> () { () }
+`,
+			owned: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.owned {
+				requireOwnershipRejectedWithoutArgumentUse(t, test.source)
+			} else {
+				requireOwnershipAccepted(t, test.source)
+			}
+		})
+	}
+}
+
+func TestOwnershipSummaryPreparationPreservesSelfAndMutualRecursion(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		owned  bool
+	}{
+		{
+			name: "self recursive acquisition with caller first",
+			source: `
+effect fn escape(outer: File) -> File raises {IoError} {
+ scope { run again(outer, false) }
+}
+effect fn again(file: File, stop: bool) -> File raises {IoError} {
+ if stop {
+  file
+ } else {
+  run again(
+   run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles),
+   true
+  )
+ }
+}
+effect fn main() -> string raises {IoError} {
+ let outer = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+ let returned = run escape(outer)
+ run Files.readText(returned).provide<Files>(LiveFiles)
+}
+`,
+			owned: true,
+		},
+		{
+			name: "self recursive acquisition with callee first",
+			source: `
+effect fn again(file: File, stop: bool) -> File raises {IoError} {
+ if stop {
+  file
+ } else {
+  run again(
+   run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles),
+   true
+  )
+ }
+}
+effect fn escape(outer: File) -> File raises {IoError} {
+ scope { run again(outer, false) }
+}
+effect fn main() -> string raises {IoError} {
+ let outer = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+ let returned = run escape(outer)
+ run Files.readText(returned).provide<Files>(LiveFiles)
+}
+`,
+			owned: true,
+		},
+		{
+			name: "self recursive borrowed result",
+			source: `
+effect fn escape(outer: File) -> File raises {IoError} {
+ scope { run again(outer, false) }
+}
+effect fn again(file: File, stop: bool) -> File raises {IoError} {
+ if stop { file } else { run again(file, true) }
+}
+effect fn main() -> () { () }
+`,
+			owned: false,
+		},
+		{
+			name: "mutual recursive borrowed result",
+			source: `
+effect fn escape(outer: File) -> File raises {IoError} {
+ scope { run first(outer, false) }
+}
+effect fn first(file: File, stop: bool) -> File raises {IoError} {
+ if stop { file } else { run second(file, true) }
+}
+effect fn second(file: File, stop: bool) -> File raises {IoError} {
+ if stop { file } else { run first(file, true) }
+}
+effect fn main() -> () { () }
+`,
+			owned: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.owned {
+				requireOwnershipRejectedWithoutArgumentUse(t, test.source)
+			} else {
+				requireOwnershipAccepted(t, test.source)
+			}
+		})
+	}
+}

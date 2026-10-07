@@ -2375,6 +2375,9 @@ func (c *checker) check() {
 		}
 	}
 	c.checkLayers()
+	if len(c.program.checkedFunctions()) > 0 {
+		c.prepareFunctionSummaries()
+	}
 	for _, p := range c.program.Providers {
 		s, exists := c.services[p.Service]
 		if !exists {
@@ -2420,9 +2423,6 @@ func (c *checker) check() {
 				c.diagnostic("EF104", "unexpected implementation method "+f.Name, f.Span)
 			}
 		}
-	}
-	if len(c.program.checkedFunctions()) > 0 {
-		c.prepareFunctionSummaries()
 	}
 	for _, f := range c.program.checkedFunctions() {
 		c.function(f, true)
@@ -2484,7 +2484,6 @@ func (c *checker) prepareFunctionSummaries() {
 			locals[p.Name] = true
 		}
 		collectFunctionDependencies(caller.Body, callerKnown, deps, locals)
-		delete(deps, caller)
 		remaining[caller] = len(deps)
 		for callee := range deps {
 			dependents[callee] = append(dependents[callee], caller)
