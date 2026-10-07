@@ -64,6 +64,7 @@ type Param struct {
 	TypeRef    TypeRef `json:"typeRef"`
 	Span       Span    `json:"span"`
 	Extent     Span    `json:"-"`
+	TypeSpan   Span    `json:"-"` // the annotation's tokens, for type-position diagnostics
 	typeID     TypeID
 	sourceType *sourceType
 	binding    *localBinding
@@ -78,6 +79,7 @@ type Field struct {
 	Type       string  `json:"type"`
 	TypeRef    TypeRef `json:"typeRef"`
 	Span       Span    `json:"span"`
+	TypeSpan   Span    `json:"-"`
 	typeID     TypeID
 }
 type Variant struct {
@@ -137,6 +139,7 @@ type Function struct {
 	Span         Span
 	DeclSpan     Span `json:"-"`
 	Extent       Span `json:"-"`
+	ReturnSpan   Span `json:"-"`
 	Ownership    []OwnershipFact
 	Captures     []OwnershipFact
 	// Identity is assigned by the checker from the canonical callable
@@ -472,6 +475,9 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 		} else if strings.ContainsRune("{}():,;.+<>=|*[]", rune(ch)) {
 			i++
 		} else {
+			if operator, ok := absentOperatorAt(source[i:]); ok {
+				return nil, comments, []Diagnostic{operator.diagnostic(Span{start, len(operator.Spelling), l, c})}
+			}
 			return nil, comments, []Diagnostic{{Code: "EF001", Message: fmt.Sprintf("unsupported character %q", ch), Span: Span{start, 1, l, c}}}
 		}
 		column += i - start
@@ -538,6 +544,9 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			start := p.peek().span
 			p.take()
 			native := p.accept("go")
+			if !native && p.peek().text == "(" {
+				p.failAbsent(absentInValue, "import", start)
+			}
 			alias := p.name()
 			path := p.take()
 			if path.kind != "string" {
@@ -603,8 +612,9 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 					for !p.accept(")") {
 						field := p.name()
 						p.expect(":")
+						typeStart := p.peek().span
 						typ := p.typ()
-						variant.Fields = append(variant.Fields, Field{Name: field.text, Type: typ, sourceType: p.types[typ], Span: field.span})
+						variant.Fields = append(variant.Fields, Field{Name: field.text, Type: typ, sourceType: p.types[typ], Span: field.span, TypeSpan: p.extent(typeStart)})
 						if !p.accept(",") {
 							p.expect(")")
 							break
@@ -642,8 +652,9 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 				for !p.accept(")") {
 					param := p.name()
 					p.expect(":")
+					typeStart := p.peek().span
 					typ := p.typ()
-					params = append(params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span)})
+					params = append(params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span), TypeSpan: p.extent(typeStart)})
 					if !p.accept(",") {
 						p.expect(")")
 						break
@@ -730,6 +741,11 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			program.Layers = append(program.Layers, layer)
 			program.Items = append(program.Items, &SyntaxItem{Kind: "layer", Layer: layer, Span: start})
 		default:
+			if head := p.peek(); head.kind == "name" {
+				if _, absent := absentSyntaxAt(absentInDeclaration, head.text); absent {
+					p.failAbsent(absentInDeclaration, head.text, head.span)
+				}
+			}
 			p.fail(p.peek(), "expected error, record, enum, service, impl, layer, or function declaration")
 		}
 		item := program.Items[len(program.Items)-1]
@@ -945,8 +961,9 @@ func (p *parser) fields() []Field {
 	for !p.accept("}") {
 		name := p.name()
 		p.expect(":")
+		typeStart := p.peek().span
 		typ := p.typ()
-		fields = append(fields, Field{Name: name.text, Type: typ, sourceType: p.types[typ], Span: name.span})
+		fields = append(fields, Field{Name: name.text, Type: typ, sourceType: p.types[typ], Span: name.span, TypeSpan: p.extent(typeStart)})
 		if !p.accept(",") && !p.accept(";") {
 			if p.peek().text != "}" {
 				continue
@@ -1031,15 +1048,18 @@ func (p *parser) function(body bool) *Function {
 	for !p.accept(")") {
 		param := p.name()
 		p.expect(":")
+		typeStart := p.peek().span
 		typ := p.typ()
-		f.Params = append(f.Params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span)})
+		f.Params = append(f.Params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span), TypeSpan: p.extent(typeStart)})
 		if !p.accept(",") {
 			p.expect(")")
 			break
 		}
 	}
 	p.expect("->")
+	returnStart := p.peek().span
 	f.Return = p.typ()
+	f.ReturnSpan = p.extent(returnStart)
 	f.returnType = p.types[f.Return]
 	if p.accept("raises") {
 		f.Errors = p.row()
@@ -1071,8 +1091,27 @@ func (p *parser) block() *Block {
 	protected, subjectList := p.noConstruct, p.subjectList
 	p.noConstruct, p.subjectList = 0, false
 	defer func() { p.noConstruct, p.subjectList = protected, subjectList }()
+	// absentHead is the latest statement in this block that began with an
+	// absent braced construct such as `try` or `while`. Its body is no Effra
+	// syntax, so the first syntax fault after it reports that construct at its
+	// keyword rather than at whichever token the misparse reached.
+	var absentHead token
+	defer func() {
+		if absentHead.kind == "" {
+			return
+		}
+		if value := recover(); value != nil {
+			if fault, ok := value.(syntaxFault); ok && fault.diagnostic.Code != absentSyntaxCode {
+				p.failAbsent(absentInBlock, absentHead.text, absentHead.span)
+			}
+			panic(value)
+		}
+	}()
 	for !p.accept("}") {
 		start := p.peek()
+		if _, absent := absentSyntaxAt(absentInBlock, start.text); absent && start.kind == "name" {
+			absentHead = start
+		}
 		s := &Statement{Span: start.span}
 		if p.accept("let") {
 			s.Kind = "let"
@@ -1095,6 +1134,9 @@ func (p *parser) block() *Block {
 				s.Payload = &Expr{Kind: "payload", Fields: p.fieldValues(), Span: start.span, Extent: p.extent(payloadStart)}
 			}
 		} else {
+			if start.text == "=" && len(b.Statements) > 0 {
+				p.failAbsent(absentInStatement, "=", start.span)
+			}
 			s.Kind = "expr"
 			s.Value = p.expr(0)
 		}
@@ -1119,7 +1161,7 @@ func (p *parser) expr(min int) *Expr {
 	var chainPipe Span
 	switch {
 	case (start.text == "fn" && p.anonymousCallableHead()) || (start.text == "effect" && p.peek().text == "fn"):
-		p.fail(start, "anonymous functions and closure captures are unsupported; declare a named module function")
+		p.failAbsent(absentInStatement, start.text, start.span)
 	case start.text == "scope":
 		e.Kind = "scope"
 		e.Then = p.block()
@@ -1143,7 +1185,9 @@ func (p *parser) expr(min int) *Expr {
 		p.subjectList = subjectList
 		p.noConstruct--
 		e.Then = p.block()
-		p.expect("else")
+		if !p.accept("else") {
+			p.failAbsent(absentInStatement, "if", start.span)
+		}
 		e.Else = p.block()
 	case start.text == "match":
 		e.Kind = "match"

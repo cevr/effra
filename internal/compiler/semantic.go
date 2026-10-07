@@ -2694,7 +2694,7 @@ func (c *checker) providerSignature(p *Provider) {
 	names := map[string]bool{}
 	for i := range p.Params {
 		param := &p.Params[i]
-		if !c.typeKnown(param.Type) {
+		if !c.typeKnown(param.Type) && !c.absentName(absentInType, param.Type, param.TypeSpan) {
 			c.diagnostic("EF102", "unknown or unsupported provider configuration type "+param.Type, param.Span)
 		}
 		param.TypeRef = c.typeRef(param.Type)
@@ -2794,10 +2794,10 @@ func (c *checker) signature(f *Function) {
 	previous := c.rowContext
 	c.rowContext = c.functionRows(f)
 	defer func() { c.rowContext = previous }()
-	valid := func(t string, span Span) {
+	valid := func(t string, span, typeSpan Span) {
 		if c.requiresTemplateArguments(t) {
 			c.diagnostic("EF127", "generic type "+t+" requires complete application arguments", span)
-		} else if !c.typeKnown(t) {
+		} else if !c.typeKnown(t) && !c.absentName(absentInType, t, typeSpan) {
 			message := "unknown or unsupported value type " + t
 			if t == "unit" {
 				message += "; use void for no-value results"
@@ -2805,13 +2805,13 @@ func (c *checker) signature(f *Function) {
 			c.diagnostic("EF102", message, span)
 		}
 	}
-	valid(f.Return, f.Span)
+	valid(f.Return, f.Span, f.ReturnSpan)
 	f.returnID = c.canonicalRef(typeRef(f.Return))
 	c.bindSourceSyntax(f.returnType, f.returnID)
 	names := map[string]bool{}
 	for i := range f.Params {
 		p := &f.Params[i]
-		valid(p.Type, p.Span)
+		valid(p.Type, p.Span, p.TypeSpan)
 		p.TypeRef = c.typeRef(p.Type)
 		p.typeID = c.canonicalRef(p.TypeRef)
 		c.bindSourceSyntax(p.sourceType, p.typeID)
@@ -3701,7 +3701,7 @@ func (c *checker) validateFields(fields []Field, owner string, reserveTag bool) 
 		}
 		if c.requiresTemplateArguments(field.Type) {
 			c.diagnostic("EF127", "generic type "+field.Type+" requires complete application arguments", field.Span)
-		} else if !c.typeKnown(field.Type) {
+		} else if !c.typeKnown(field.Type) && !c.absentName(absentInType, field.Type, field.TypeSpan) {
 			c.diagnostic("EF102", "unknown or unsupported field type "+field.Type, field.Span)
 		}
 	}
@@ -4165,7 +4165,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			e.ResolvedFunction = f
 			e.Text = "function"
 			c.observeReference(e, e.Span, lexicalTarget{kind: "function", function: f})
-		} else {
+		} else if !c.absentName(absentInValue, e.Name, e.Span) {
 			c.diagnostic("EF102", "unknown value "+e.Name, e.Span)
 		}
 	case "call":
@@ -4235,12 +4235,15 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		var f *Function
 		var service *Service
 		serviceName := ""
+		unresolvedName := false
 		if e.Left.Kind == "name" {
 			f = c.namedFunction(e.Left.Name)
-			if e.Left.binding != nil {
+			shadow := e.Left.binding != nil
+			if shadow {
 				c.diagnostic("EF103", "calling local values is not supported in this prototype", e.Span)
 				f = nil
 			}
+			unresolvedName = f == nil && !shadow
 		} else if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
 			key := e.Left.Left.Name
 			if key == "Files" || key == "Runtime" {
@@ -4261,7 +4264,9 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			}
 		}
 		if f == nil {
-			c.diagnostic("EF102", "unknown function or service method", e.Span)
+			if !unresolvedName || !c.absentName(absentInValue, e.Left.Name, e.Left.Span) {
+				c.diagnostic("EF102", "unknown function or service method", e.Span)
+			}
 			for _, a := range e.Args {
 				c.expr(a, env, inEffect)
 			}
@@ -4843,7 +4848,7 @@ func (c *checker) construct(e *Expr, env localEnv, inEffect bool) checkedExpress
 	if !ok {
 		if variantName != "" && c.enums[typeName] != nil {
 			c.diagnostic("EF116", "unknown variant "+typeName+"."+variantName, e.Span)
-		} else {
+		} else if variantName != "" || !c.absentName(absentInBlock, typeName, e.Left.Span) {
 			c.diagnostic("EF102", "unknown data declaration "+typeName, e.Span)
 		}
 		return c.checkedData("invalid")
