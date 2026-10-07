@@ -3,6 +3,7 @@ package compiler
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -27,7 +28,10 @@ func (c *checker) admitBundledSummaries() error {
 			modules[r.Module] = []*Function{}
 		}
 	}
-	for module, functions := range modules {
+	// Admission interns each module's callable contracts into the receiving
+	// arena, so modules are admitted in identity order rather than map order.
+	for _, module := range slices.Sorted(maps.Keys(modules)) {
+		functions := modules[module]
 		slices.SortFunc(functions, func(a, b *Function) int { return strings.Compare(a.Identity, b.Identity) })
 		input := fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d\x00%s", module, c.result.Target, SemanticProducerIdentity, interfaceSummarySchema, ownershipSummarySchema, bundledInterfaceVersion)
 		for _, f := range functions {
@@ -430,10 +434,10 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 		a.relations[item.Ref] = item
 	}
 	// Validate every retained node, including nodes not reached by one declaration.
-	for ref := range a.occurrences {
+	for _, ref := range slices.Sorted(maps.Keys(a.occurrences)) {
 		a.occurrence(ref, 0)
 	}
-	for ref := range a.relations {
+	for _, ref := range slices.Sorted(maps.Keys(a.relations)) {
 		a.relation(ref, 0)
 	}
 	seenDeclarations := map[string]bool{}

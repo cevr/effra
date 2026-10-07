@@ -1,6 +1,10 @@
 package compiler
 
-import "strings"
+import (
+	"maps"
+	"slices"
+	"strings"
+)
 
 func cloneFieldOccurrences(fields map[string]checkedExpression) map[string]checkedExpression {
 	if fields == nil {
@@ -206,7 +210,10 @@ func (c *checker) joinExpressionFields(a, b checkedExpression, span Span, depth 
 	if joined == nil {
 		joined = map[string]checkedExpression{}
 	}
-	for name, right := range b.fields {
+	// Joins and substitutions intern contracts and rows, so field tables are
+	// walked in name order rather than map order.
+	for _, name := range slices.Sorted(maps.Keys(b.fields)) {
+		right := b.fields[name]
 		*nodes++
 		if *nodes > 4096 {
 			c.diagnostic("EF127", "variant occurrence join exceeds budget", span)
@@ -255,7 +262,8 @@ func (c *checker) instantiateFieldOccurrences(fields map[string]checkedExpressio
 	if len(budgets) > 0 {
 		nodes = budgets[0]
 	}
-	for name, value := range fields {
+	for _, name := range slices.Sorted(maps.Keys(fields)) {
+		value := fields[name]
 		*nodes++
 		if *nodes > 4096 {
 			c.diagnostic("EF127", "field occurrence substitution exceeds budget", f.Span)
@@ -302,7 +310,8 @@ func (c *checker) joinFieldOccurrences(a, b map[string]checkedExpression, span S
 		return nil
 	}
 	joined := map[string]checkedExpression{}
-	for name, left := range a {
+	for _, name := range slices.Sorted(maps.Keys(a)) {
+		left := a[name]
 		*nodes++
 		right, exists := b[name]
 		if !exists || *nodes > 4096 {

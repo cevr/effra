@@ -11,9 +11,11 @@ import (
 	gotoken "go/token"
 	"go/types"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -159,8 +161,8 @@ func (r *Result) loadImports(dir string) {
 		}
 	}
 	r.Revision = hex.EncodeToString(hash.Sum(nil))
-	for _, module := range modules {
-		r.Program.Modules = append(r.Program.Modules, module)
+	for _, path := range slices.Sorted(maps.Keys(modules)) {
+		r.Program.Modules = append(r.Program.Modules, modules[path])
 	}
 }
 func loadContracts(dir string) (map[string]behavior, *goModule, error) {

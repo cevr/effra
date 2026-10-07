@@ -100,3 +100,54 @@ func TestGenericNativeGenerationIsDeterministic(t *testing.T) {
 		t.Fatalf("100 compiles produced %d canonical snapshots, %d generated mains and %d generations", len(facts), len(mains), len(generations))
 	}
 }
+
+// mixedBundledConsumer uses two bundled modules whose declarations carry
+// distinct callable contracts, so their summaries both intern callables into
+// the receiving arena.
+const mixedBundledConsumer = `import Convert "effra/conversions"
+import Fns "effra/functions"
+record User { name: string }
+effect fn decode(input: string) -> User { User { name: input } }
+effect fn encode(user: User) -> string { user.name }
+effect fn main() -> string {
+    let converter = Convert.witness(decode, encode)
+    let user = run converter.decode("Ada")
+    Fns.identity(run converter.encode(user))
+}
+`
+
+func resetBundledSummaryCache() {
+	bundledSummaryCache.Lock()
+	defer bundledSummaryCache.Unlock()
+	bundledSummaryCache.entries = map[string]interfaceSummary{}
+	bundledSummaryCache.bytes = 0
+}
+
+// Bundled summary modules are admitted in module identity order, so a
+// consumer of several callable-bearing modules allocates one canonical arena
+// whether each summary is produced cold or admitted from the warm cache, on
+// either target.
+func TestMixedBundledSummaryAdmissionIsDeterministic(t *testing.T) {
+	t.Cleanup(resetBundledSummaryCache)
+	for _, target := range []string{"go", "js"} {
+		var first string
+		for i := 0; i < 40; i++ {
+			if i%2 == 0 {
+				resetBundledSummaryCache()
+			}
+			r := CompileFor(mixedBundledConsumer, target)
+			if !r.Checked {
+				t.Fatal(target, r.Diagnostics)
+			}
+			if len(r.Program.semantic.admittedSummaries) < 2 {
+				t.Fatalf("%s: fixture must admit two bundled summaries", target)
+			}
+			facts := checkedFacts(r)
+			if i == 0 {
+				first = facts
+			} else if facts != first {
+				t.Fatalf("%s: compile %d (%s summaries) allocated a different canonical arena", target, i+1, map[bool]string{true: "cold", false: "warm"}[i%2 == 0])
+			}
+		}
+	}
+}
