@@ -5,6 +5,20 @@ import (
 	"strings"
 )
 
+// testHarnessProviders are the deterministic fixtures the generated harness
+// binds for every case. Their services are the only implicit test
+// requirements, and they are the harness roots of a test application plan.
+var testHarnessProviders = []string{"Assertions", "TestClock", "TestScheduler", "TestSync"}
+
+func (r *Result) testHarnessService(name string) bool {
+	for _, providerName := range testHarnessProviders {
+		if provider := r.checkedProviders[providerName]; provider != nil && provider.Service == name {
+			return true
+		}
+	}
+	return false
+}
+
 // Tests are ordinary checked effects. Only assertions are supplied implicitly;
 // fixture services are explicit so host access cannot appear through a preset.
 func (r *Result) Tests() ([]*Symbol, error) {
@@ -21,7 +35,7 @@ func (r *Result) Tests() ([]*Symbol, error) {
 			return nil, fmt.Errorf("%s must be an effect function with no parameters returning void", s.Name)
 		}
 		for _, req := range s.Contract.Services {
-			if req != "Assert" && req != "Clock" && req != "Scheduler" && req != "Sync" {
+			if !r.testHarnessService(req) {
 				return nil, fmt.Errorf("%s requires %s; provide fixture services explicitly", s.Name, req)
 			}
 		}

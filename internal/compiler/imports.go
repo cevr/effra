@@ -35,6 +35,10 @@ type Binding struct {
 	Context      bool     `json:"forwardContext"`
 	Cancellation string   `json:"cancellation"`
 	Provenance   string   `json:"provenance"`
+	// alias and member keep the checked import declaration and exported Go
+	// name separately from the alias-qualified Symbol lookup key.
+	alias  string
+	member string
 }
 type behavior struct {
 	Context      string `json:"context"`
@@ -193,7 +197,7 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 
 func normalizeBinding(imp GoImport, fn *types.Func, contracts map[string]behavior) (Binding, bool, error) {
 	sig := fn.Type().(*types.Signature)
-	b := Binding{Symbol: imp.Alias + "." + fn.Name(), Package: imp.Path, Signature: sig.String(), Cancellation: "unknown", Provenance: "Go export data; behavior unclassified"}
+	b := Binding{Symbol: imp.Alias + "." + fn.Name(), Package: imp.Path, Signature: sig.String(), Cancellation: "unknown", Provenance: "Go export data; behavior unclassified", alias: imp.Alias, member: fn.Name()}
 	meta := contracts[imp.Path+"."+fn.Name()]
 	if meta.Context != "" && meta.Context != "fiber" {
 		return b, false, fmt.Errorf("unsupported context contract for %s", b.Symbol)

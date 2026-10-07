@@ -456,7 +456,7 @@ func (c *checker) assembleLayer(layer *Layer) *LayerPlan {
 		for _, arg := range node.effective.Value.Args {
 			arguments = append(arguments, LayerArgument{Span: arg.Span, Type: arg.Type})
 		}
-		plan.Nodes = append(plan.Nodes, LayerNode{ID: id, Service: node.service, ServiceIdentity: "service:" + currentModuleIdentity + ":" + node.service, Implementation: node.provider.Name, ImplementationIdentity: providerTypeRef(node.provider).Declaration,
+		plan.Nodes = append(plan.Nodes, LayerNode{ID: id, Service: node.service, ServiceIdentity: serviceIdentity(node.service), Implementation: node.provider.Name, ImplementationIdentity: providerTypeRef(node.provider).Declaration,
 			Span: node.origin.Span, SelectionSpan: node.effective.Span, Public: node.public, Occurrences: node.occurrences, Replacements: append([]LayerSite{}, node.replacements...), Dependencies: normalized(edges[id]), Incoming: normalized(incoming[id]), Requirements: normalized(node.provider.Services), Failures: []string{}, Constructor: constructor, Parameters: publicParams(node.provider.Params), Arguments: arguments, Owner: "provision-build/node:" + id})
 	}
 	return plan

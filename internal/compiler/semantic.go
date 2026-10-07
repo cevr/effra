@@ -2103,6 +2103,8 @@ func providerTypeRef(p *Provider) TypeRef {
 	return ref
 }
 
+func serviceIdentity(name string) string { return "service:" + currentModuleIdentity + ":" + name }
+
 func providerContract(p *Provider) ValueType {
 	// This compatibility shim preserves the compact checked provider view.
 	// Graph publication projects the retained numeric recipe roots directly.

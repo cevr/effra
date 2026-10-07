@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	rt "effra.local/prototype/runtime/effra"
 )
 
 // Span offsets and columns are UTF-8 byte based, scoped to a semantic revision.
@@ -147,6 +149,9 @@ type Service struct {
 	Name    string
 	Methods []*Function
 	Span    Span
+	// native lists builtin runtime modules referenced by the service's
+	// operation signatures. Source services leave it empty.
+	native []rt.RuntimeModule
 }
 type Provider struct {
 	Name    string
@@ -159,6 +164,9 @@ type Provider struct {
 	Methods  []*Function
 	Span     Span
 	Contract ValueType `json:"-"`
+	// native lists builtin runtime modules referenced by the provider's
+	// implementation. Source providers leave it empty.
+	native []rt.RuntimeModule
 }
 
 // Layer declarations select construction recipes without executing them.
