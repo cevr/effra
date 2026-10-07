@@ -332,6 +332,8 @@ func TestDeclaredForeignImportsMustBeImportableByTheGeneratedProgram(t *testing.
 		"go.mod":                    "module internal/initprobe\n\ngo 1.27\n",
 		"registry/registry.go":      "package registry\n\nimport \"fmt\"\n\nfunc init() { fmt.Println(\"visible-init\") }\n\nfunc Value() int64 { fmt.Println(\"foreign-call\"); return 7 }\n",
 		"internal/hidden/hidden.go": "package hidden\n\nfunc Value() int64 { return 1 }\n",
+		"sub/vendor/vendor.go":      "package vendor\n\nimport \"fmt\"\n\nfunc init() { fmt.Println(\"vendor-init\") }\n\nfunc Value() int64 { fmt.Println(\"vendor-call\"); return 3 }\n",
+		"sub/vendor/inner/inner.go": "package inner\n\nfunc Value() int64 { return 1 }\n",
 	})
 	callers := map[string]string{
 		"no caller":        "effect fn main() -> void {\n    void\n}\n",
@@ -342,6 +344,7 @@ func TestDeclaredForeignImportsMustBeImportableByTheGeneratedProgram(t *testing.
 		{"program package", module, "effra.fixture/initprobe/cmd/tool"},
 		{"internal package of the source module", module, "effra.fixture/initprobe/internal/hidden"},
 		{"final internal element", visible, "internal/initprobe/internal/hidden"},
+		{"vendored module package", visible, "internal/initprobe/sub/vendor/inner"},
 	} {
 		for caller, body := range callers {
 			t.Run(refused.name+"/"+caller, func(t *testing.T) {
@@ -372,6 +375,17 @@ func TestDeclaredForeignImportsMustBeImportableByTheGeneratedProgram(t *testing.
 			_, _, output := buildAndRunInitProbe(t, visible, "import go probe \"internal/initprobe/registry\"\n"+callers[caller], GoGenerationBuild)
 			if output != want {
 				t.Fatalf("visible internal package output = %q", output)
+			}
+		})
+	}
+	// Positive control: a path that ends in vendor is an ordinary package
+	// (cmd/go's FindVendor exception); only a vendor element followed by
+	// more path is refused.
+	for caller, want := range map[string]string{"no caller": "vendor-init\n", "reachable caller": "vendor-init\nvendor-call\n3\n"} {
+		t.Run("terminal vendor package/"+caller, func(t *testing.T) {
+			_, _, output := buildAndRunInitProbe(t, visible, "import go probe \"internal/initprobe/sub/vendor\"\n"+callers[caller], GoGenerationBuild)
+			if output != want {
+				t.Fatalf("terminal vendor package output = %q", output)
 			}
 		})
 	}
