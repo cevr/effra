@@ -373,7 +373,6 @@ func (g *goEmitter) function(f *Function) string {
 	ret := bodyRet
 	if f.Effect {
 		ret = "efEffect[" + ret + "]"
-		noResult = false
 	}
 	open := "func(" + goParams(f) + ")"
 	if !noResult {
@@ -385,7 +384,7 @@ func (g *goEmitter) function(f *Function) string {
 		open += "return func(ctx efContext) efExit[" + goSourceType(f.returnType, f.Return) + "] {\nif err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + goSourceType(f.returnType, f.Return) + "](err)}\n"
 		close = "}\n}\n"
 	}
-	return open + g.blockType(f.Body, f.Effect, bodyRet, f.Effect == false && noResult) + close
+	return open + g.blockType(f.Body, f.Effect, bodyRet, noResult) + close
 }
 
 func (g *goEmitter) functionDeclaration(f *Function) string {
@@ -429,12 +428,15 @@ func (g *goEmitter) functionDeclaration(f *Function) string {
 	return open + g.blockType(f.Body, f.Effect, ret, noResult) + close
 }
 
+// functionReturn renders a function's success type and reports whether its Go
+// signature has no result: only a pure function whose result is concretely
+// void. An effect function always returns its recipe.
 func (g *goEmitter) functionReturn(f *Function) (string, bool) {
-	ret, noResult := goSourceTypeMode(f.returnType, f.Return)
+	ret, voidResult := goSourceTypeMode(f.returnType, f.Return)
 	if f.returnID != invalidTypeID && g.program.semantic != nil {
-		noResult = !f.Effect && canonicalVoidType(g.program.semantic, f.returnID)
+		voidResult = canonicalVoidType(g.program.semantic, f.returnID)
 	}
-	return ret, noResult
+	return ret, !f.Effect && voidResult
 }
 
 // providerConstructed distinguishes an ordinary reusable provider value from
@@ -490,62 +492,65 @@ func (g *goEmitter) failedType(name, ret string) string {
 func (g *goEmitter) block(b *Block, effect bool, ret string) string {
 	return g.blockType(b, effect, goSourceType(g.program.typeExpressions[ret], ret), false)
 }
+
+// blockType lowers a block whose successful completion either returns an
+// Exit (effect), returns a Go value, or, for a concrete pure void body
+// (noResult), falls through a Go function without a result. Completion is
+// separate from expression evaluation: an empty or let-final block completes
+// with void, and a void tail is evaluated once for its effects before the
+// block completes with void in whatever form its result mode requires.
 func (g *goEmitter) blockType(b *Block, effect bool, ret string, noResult bool) string {
 	var out strings.Builder
-	finish := func(expr string) {
-		if noResult {
-			if expr != "" {
-				out.WriteString(expr + "\n")
-			}
-			return
-		}
-		if effect {
-			out.WriteString("return efExit[" + ret + "]{Value:" + expr + "}\n")
-		} else {
-			out.WriteString("return " + expr + "\n")
+	completeVoid := func() {
+		switch {
+		case effect:
+			out.WriteString("return efExit[" + ret + "]{Value:struct{}{}}\n")
+		case !noResult:
+			out.WriteString("return struct{}{}\n")
 		}
 	}
 	if len(b.Statements) == 0 {
-		finish("struct{}{}")
+		completeVoid()
 		return out.String()
 	}
 	for i, s := range b.Statements {
+		last := i == len(b.Statements)-1
 		if s.Kind == "fail" {
 			payload := g.failurePayload(s.Name, s.Payload, effect, ret, &out)
 			out.WriteString("return efExit[" + ret + "]{Failure:&er.Failure{Tag:" + strconv.Quote(s.Name) + ",Payload:" + payload + "}}\n")
 			continue
 		}
-		voidStatement := s.Kind != "let" && !effect && g.isPureVoidExpression(s.Value)
-		expr := ""
-		if voidStatement {
-			expr = g.exprStatement(s.Value, effect, ret, &out)
-		} else {
-			expr = g.expr(s.Value, effect, ret, &out)
-		}
 		if s.Kind == "let" {
+			expr := g.expr(s.Value, effect, ret, &out)
 			out.WriteString("efLocal_" + s.Name + " := " + expr + "\n_ = efLocal_" + s.Name + "\n")
-			if i == len(b.Statements)-1 {
-				finish("struct{}{}")
+			if last {
+				completeVoid()
 			}
-		} else if i == len(b.Statements)-1 {
-			isNever := s.Value != nil && s.Value.checked.node() != nil && s.Value.checked.node().Kind == "never"
-			if isNever {
-				if effect {
-					out.WriteString("_ = " + expr + "\nreturn efExit[" + ret + "]{Defect:fmt.Errorf(\"bottom expression unexpectedly succeeded\")}\n")
-				} else {
-					out.WriteString("_ = " + expr + "\npanic(\"bottom expression unexpectedly succeeded\")\n")
-				}
+			continue
+		}
+		if !last {
+			g.exprStatement(s.Value, effect, ret, &out)
+			continue
+		}
+		if s.Value != nil && s.Value.checked.node() != nil && s.Value.checked.node().Kind == "never" {
+			expr := g.expr(s.Value, effect, ret, &out)
+			if effect {
+				out.WriteString("_ = " + expr + "\nreturn efExit[" + ret + "]{Defect:fmt.Errorf(\"bottom expression unexpectedly succeeded\")}\n")
 			} else {
-				finish(expr)
+				out.WriteString("_ = " + expr + "\npanic(\"bottom expression unexpectedly succeeded\")\n")
 			}
+			continue
+		}
+		if noResult || g.isPureVoidExpression(s.Value) {
+			g.exprStatement(s.Value, effect, ret, &out)
+			completeVoid()
+			continue
+		}
+		expr := g.expr(s.Value, effect, ret, &out)
+		if effect {
+			out.WriteString("return efExit[" + ret + "]{Value:" + expr + "}\n")
 		} else {
-			if voidStatement {
-				if expr != "" {
-					out.WriteString(expr + "\n")
-				}
-			} else {
-				out.WriteString("_ = " + expr + "\n")
-			}
+			out.WriteString("return " + expr + "\n")
 		}
 	}
 	return out.String()
@@ -554,8 +559,19 @@ func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder)
 	return g.exprWithValue(e, effect, ret, out, true)
 }
 
-func (g *goEmitter) exprStatement(e *Expr, effect bool, ret string, out *strings.Builder) string {
-	return g.exprWithValue(e, effect, ret, out, false)
+// exprStatement evaluates e exactly once for its effects and discards its
+// value. A pure void call is emitted as a bare Go call statement because its
+// Go callee may have no result; the void literal has nothing to evaluate; any
+// other value is assigned to the blank identifier.
+func (g *goEmitter) exprStatement(e *Expr, effect bool, ret string, out *strings.Builder) {
+	switch {
+	case e.Kind == "void":
+	case e.Kind == "call" && g.isPureVoidExpression(e):
+		call := g.exprWithValue(e, effect, ret, out, false)
+		out.WriteString(call + "\n")
+	default:
+		out.WriteString("_ = " + g.expr(e, effect, ret, out) + "\n")
+	}
 }
 
 func (g *goEmitter) isPureVoidExpression(e *Expr) bool {
@@ -648,9 +664,6 @@ func (g *goEmitter) exprWithValue(e *Expr, effect bool, ret string, out *strings
 	case "bool":
 		return e.Text
 	case "void":
-		if !wantValue {
-			return ""
-		}
 		return "struct{}{}"
 	case "construct":
 		return g.construct(e, effect, ret, out)

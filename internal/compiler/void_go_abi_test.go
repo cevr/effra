@@ -137,3 +137,43 @@ func TestConcreteVoidExecution(t *testing.T) {
 		t.Fatalf("generated concrete void executable failed: %v\n%s", err, output)
 	}
 }
+
+// voidGoBoundaryPrograms are admitted programs whose void completions meet
+// distinct Go lowering boundaries. Each one must build and execute natively,
+// and execute identically on JavaScript.
+var voidGoBoundaryPrograms = []struct{ name, source string }{
+	{"empty-body", `fn empty() -> void {}
+effect fn main() -> void { empty(); void }`},
+	{"let-final-body", `fn lastLet() -> void { let x = 1 }
+effect fn main() -> void { lastLet(); void }`},
+	{"stored-void-tail", `fn stored(value: void) -> void { value }
+effect fn main() -> void { stored(void); void }`},
+	{"if-call-arm", `fn finish() -> void { void }
+fn choose(flag: bool) -> void { if flag { finish() } else { void } }
+effect fn main() -> void { choose(true); choose(false); void }`},
+	{"if-literal-arms", `fn choose(flag: bool) -> void { if flag { void } else { void } }
+effect fn main() -> void { choose(true); choose(false); void }`},
+	{"exhaustive-match-arms", `enum Mode { Run; Skip }
+fn finish() -> void { void }
+fn choose(mode: Mode) -> void { match mode { Mode.Run => finish(); Mode.Skip => void } }
+effect fn main() -> void { choose(Mode.Run()); choose(Mode.Skip()); void }`},
+	{"nested-callable-result", `fn finish() -> void { void }
+fn factory() -> fn() -> void { finish }
+fn use(make: fn() -> fn() -> void) -> void {
+    let done = make();
+    done()
+}
+effect fn main() -> void { use(factory); void }`},
+}
+
+func TestVoidGoBoundaryProgramsExecuteOnBothTargets(t *testing.T) {
+	for _, program := range voidGoBoundaryPrograms {
+		t.Run(program.name, func(t *testing.T) {
+			t.Parallel()
+			runGenericDataNative(t, program.source, "")
+			if output := runJSForTarget(t, "js", program.source, `await Effect.runPromise(__ef_function_main());`); output != "" {
+				t.Fatalf("void JavaScript program was not silent: %q", output)
+			}
+		})
+	}
+}

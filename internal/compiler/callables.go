@@ -418,10 +418,10 @@ func goSourceType(t *sourceType, fallback string) string {
 	return result
 }
 
-// goSourceTypeMode keeps the distinction between a concrete pure void
-// callable (which has no Go result) and a value carrier (which is still
-// struct{}). The caller chooses whether that distinction is part of a
-// declaration or merely a nested value type.
+// goSourceTypeMode renders a source type and reports whether it is the
+// primitive void. Only a concrete void result is erased from a pure Go
+// signature; void in any value position, including the result of an enclosing
+// callable that returns a no-result callable, keeps a Go type.
 func goSourceTypeMode(t *sourceType, fallback string) (string, bool) {
 	if t == nil {
 		return goType(fallback), fallback == voidTypeName
@@ -435,12 +435,12 @@ func goSourceTypeMode(t *sourceType, fallback string) (string, bool) {
 	for i, name := range t.Parameters {
 		args[i] = goSourceType(t.ParameterTypes[i], name)
 	}
-	result, noResult := goSourceTypeMode(t.ResultType, t.Result)
+	result, voidResult := goSourceTypeMode(t.ResultType, t.Result)
 	if t.Effect {
 		return "func(" + strings.Join(args, ", ") + ") efEffect[" + result + "]", false
 	}
-	if noResult {
-		return "func(" + strings.Join(args, ", ") + ")", true
+	if voidResult {
+		return "func(" + strings.Join(args, ", ") + ")", false
 	}
 	return "func(" + strings.Join(args, ", ") + ") " + result, false
 }
