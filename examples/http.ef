@@ -1,7 +1,7 @@
 import go strings "strings"
 import go sdk "effra.local/prototype/examples/sdk"
 
-effect fn route(path: string) -> string raises { GoError } uses { Foreign, Files, Scheduler } {
+effect fn page(path: string) -> string raises { GoError } uses { Foreign, Files, Scheduler } {
     if path == "/health" {
         "ok"
     } else {
@@ -16,8 +16,28 @@ effect fn route(path: string) -> string raises { GoError } uses { Foreign, Files
     }
 }
 
+effect fn route(request: HttpRequest) -> HttpReply raises { GoError } uses { Http, Foreign, Files, Scheduler } {
+    let message = run page(request.path)
+    let body = run Http.text(message)
+    HttpReply.Respond {
+        response: HttpResponse {
+            status: 200,
+            contentType: "text/plain; charset=utf-8",
+            body: body
+        }
+    }
+}
+
 effect fn main() -> void raises { IoError } {
-    run Http.serve("127.0.0.1:0", route)
+    // Routes take no request body; SDK lookups time out after 100 ms.
+    let limits = HttpLimits {
+        maxBodyBytes: 0,
+        readHeaderMillis: 5000,
+        readBodyMillis: 5000,
+        idleMillis: 5000,
+        maxActive: 64
+    }
+    run Http.listen("127.0.0.1:0", limits, route)
         .provide<Http>(LiveHttp)
         .provide<Foreign>(Host)
         .provide<Files>(LiveFiles)

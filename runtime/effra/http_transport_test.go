@@ -44,6 +44,20 @@ func startTransport(t *testing.T, limits HTTPLimits, handler func(*FiberContext,
 	return server
 }
 
+func TestHTTPTransportStartupFailureIsTyped(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	out := Run(ServeHTTPRequests(listener.Addr().String(), testLimits, func(HTTPRequest) Effect[HTTPResponse] {
+		return func(*FiberContext) Exit[HTTPResponse] { return respond(200, "text/plain", "unreachable") }
+	}, nil))
+	if out.Failure == nil || out.Failure.Tag != "IoError" {
+		t.Fatalf("startup failure: %+v", out)
+	}
+}
+
 // exchange writes raw request bytes and reads one response, or reports that
 // the server closed the connection without any response bytes.
 func exchange(t *testing.T, address, raw string) (*http.Response, []byte) {

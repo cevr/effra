@@ -11,16 +11,17 @@ import (
 const callbackRouteSource = `error Missing
 service Users {effect fn get(path:string)->string raises {Missing}}
 impl Memory for Users {effect fn get(path:string)->string raises {Missing}{path}}
-effect fn route(path:string)->string raises {Missing} uses {Users}{run Users.get(path)}
+effect fn route(request:HttpRequest)->HttpReply raises {Missing} uses {Users}{let name=run Users.get(request.path);HttpReply.NotFound {}}
+fn limits()->HttpLimits{HttpLimits{maxBodyBytes:16,readHeaderMillis:1000,readBodyMillis:1000,idleMillis:1000,maxActive:4}}
 `
 
 func TestHandlerErasureBoundariesRetainFailuresAndServices(t *testing.T) {
 	for _, test := range []struct{ name, body, code string }{
-		{"alias", `effect fn main()->void raises {IoError}{let chosen=route;run Http.serve("127.0.0.1:0",chosen).provide<Http>(LiveHttp)}`, "EF108"},
-		{"helper", `fn identity(h:Handler)->Handler{h} effect fn main()->void raises {IoError}{let chosen=identity(route);run Http.serve("127.0.0.1:0",chosen).provide<Http>(LiveHttp)}`, "EF106"},
-		{"conditional", `effect fn main()->void raises {IoError}{let chosen=if true {route}else{route};run Http.serve("127.0.0.1:0",chosen).provide<Http>(LiveHttp)}`, "EF108"},
-		{"record empty alias", `record Routes {handler:Handler} effect fn main()->void{let routes=Routes{handler:route};void}`, "EF115"},
-		{"record complete callback", `record Routes {handler:effect fn(string)->string raises {Missing} uses {Users}} effect fn main()->void raises {IoError}{let routes=Routes{handler:route};run Http.serve("127.0.0.1:0",routes.handler).provide<Http>(LiveHttp)}`, "EF108"},
+		{"alias", `effect fn main()->void raises {IoError}{let chosen=route;run Http.listen("127.0.0.1:0",limits(),chosen).provide<Http>(LiveHttp)}`, "EF108"},
+		{"helper", `fn identity(h:HttpHandler)->HttpHandler{h} effect fn main()->void raises {IoError}{let chosen=identity(route);run Http.listen("127.0.0.1:0",limits(),chosen).provide<Http>(LiveHttp)}`, "EF106"},
+		{"conditional", `effect fn main()->void raises {IoError}{let chosen=if true {route}else{route};run Http.listen("127.0.0.1:0",limits(),chosen).provide<Http>(LiveHttp)}`, "EF108"},
+		{"record empty alias", `record Routes {handler:HttpHandler} effect fn main()->void raises {IoError}{let routes=Routes{handler:route};run Http.listen("127.0.0.1:0",limits(),routes.handler).provide<Http>(LiveHttp).provide<Users>(Memory)}`, "EF115"},
+		{"record complete callback", `record Routes {handler:effect fn(HttpRequest)->HttpReply raises {Missing} uses {Users}} effect fn main()->void raises {IoError}{let routes=Routes{handler:route};run Http.listen("127.0.0.1:0",limits(),routes.handler).provide<Http>(LiveHttp)}`, "EF108"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			r := Compile(callbackRouteSource + test.body)
@@ -32,12 +33,12 @@ func TestHandlerErasureBoundariesRetainFailuresAndServices(t *testing.T) {
 }
 
 func TestHTTPTransportPolicyIsVisibleInCheckedApplication(t *testing.T) {
-	source := callbackRouteSource + `effect fn main()->void{let pending=Http.serve("127.0.0.1:0",route).provide<Users>(Memory).provide<Http>(LiveHttp);void}`
+	source := callbackRouteSource + `effect fn main()->void{let pending=Http.listen("127.0.0.1:0",limits(),route).provide<Users>(Memory).provide<Http>(LiveHttp);void}`
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	info, err := r.TypeAt(strings.Index(source, "serve("))
+	info, err := r.TypeAt(strings.Index(source, "listen("))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestHTTPTransportPolicyIsVisibleInCheckedApplication(t *testing.T) {
 		t.Fatalf("transport typed-failure policy missing: %s", encoded)
 	}
 	policy := info.Type.Application.CallbackPolicies
-	if len(policy) != 1 || policy[0].Kind != "typed-failure-response" || !policy[0].PropagateRequirements || !slices.Equal(policy[0].AbsorbedFailures, []string{"Missing"}) {
+	if len(policy) != 1 || policy[0].Parameter != 2 || policy[0].Kind != "typed-failure-response" || !policy[0].PropagateRequirements || !slices.Equal(policy[0].AbsorbedFailures, []string{"Missing"}) {
 		t.Fatalf("wrong transport policy: %+v", policy)
 	}
 	if !slices.Equal(info.Type.Errors, []string{"IoError"}) || !slices.Equal(info.Type.Services, []string{"Http", "Users"}) {
@@ -67,7 +68,8 @@ func TestHTTPTransportPolicyIsVisibleInCheckedApplication(t *testing.T) {
 import type { UsersRequirement } from "./generated.mjs";
 import type { Context, Effect } from "effect";
 declare const operations: Context.Service.Shape<typeof Http>;
-const pending=operations.serve("127.0.0.1:0",route);
+declare const limits: Parameters<typeof operations.listen>[1];
+const pending=operations.listen("127.0.0.1:0",limits,route);
 type Expected=Effect.Effect<void,{readonly _tag:"IoError"},UsersRequirement>;
 const checked: Expected=pending;
 declare const expected: Expected;

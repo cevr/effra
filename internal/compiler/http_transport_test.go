@@ -196,11 +196,11 @@ const limits = { maxBodyBytes: 16n, readHeaderMillis: 1000n, readBodyMillis: 100
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const pending = (promise, ms = 100) => Promise.race([promise.then(() => false), new Promise(r => setTimeout(() => r(true), ms))]);
 const ok = body => ({ _tag: 'HttpReply.Respond', response: { status: 200n, contentType: 'text/plain', body: new TextEncoder().encode(body) } });
-const listen = async (handler, path, bounds = limits) => {
+const listen = async (handler, bounds = limits) => {
   const bound = deferred();
   const log = console.log;
   console.log = line => { console.log = log; bound.resolve(String(line).replace('listening http://', '')); };
-  const fiber = Effect.runFork(path ? __ef_provider_LiveHttp.serve('127.0.0.1:0', path) : __ef_provider_LiveHttp.listen('127.0.0.1:0', bounds, handler));
+  const fiber = Effect.runFork(__ef_provider_LiveHttp.listen('127.0.0.1:0', bounds, handler));
   const [host, port] = (await bound.promise).split(':');
   return { fiber, host, port: Number(port), done: new Promise(resolve => fiber.addObserver(resolve)) };
 };
@@ -290,7 +290,7 @@ const check = (condition, message) => { if (!condition) failures.push(message); 
 if (backpressure) { // a queued response keeps its admission until the client received it or left
   const cleaned = deferred();
   const big = cleanedLarge(cleaned);
-  const server = await listen(request => request.path === '/big' ? big() : Effect.succeed(ok('small')), null, { ...limits, maxActive: 1n });
+  const server = await listen(request => request.path === '/big' ? big() : Effect.succeed(ok('small')), { ...limits, maxActive: 1n });
   const stalled = stall(server, '/big');
   await cleaned.promise;
   await stalled.receiving;
@@ -309,7 +309,7 @@ if (backpressure) { // shutdown joins the request scope, then aborts a response 
   const started = deferred(), cleaned = deferred();
   const server = await listen(request => request.path === '/big'
     ? Effect.succeed(reply('application/octet-stream', large))
-    : Effect.flatMap(Effect.acquireRelease(Effect.sync(() => started.resolve()), () => Effect.sync(() => cleaned.resolve())), () => Effect.never), null, { ...limits, idleMillis: 200n });
+    : Effect.flatMap(Effect.acquireRelease(Effect.sync(() => started.resolve()), () => Effect.sync(() => cleaned.resolve())), () => Effect.never), { ...limits, idleMillis: 200n });
   // The pipelined request's post-cleanup 503 queues behind the large
   // response, which the client stops reading.
   const stalled = stall(server, '/big', '/held');
@@ -322,7 +322,7 @@ if (backpressure) { // shutdown joins the request scope, then aborts a response 
   await server.done;
 }
 { // a malformed body's admission ends when its 400 has been sent and the connection closed
-  const server = await listen(() => Effect.succeed(ok('fine')), null, { ...limits, maxActive: 1n });
+  const server = await listen(() => Effect.succeed(ok('fine')), { ...limits, maxActive: 1n });
   const socket = net.connect(server.port, server.host);
   let answer = '';
   socket.on('data', chunk => { answer += chunk; });
@@ -343,7 +343,7 @@ if (backpressure) { // shutdown joins the request scope, then aborts a response 
 if (backpressure) { // a malformed pipelined body keeps its admission until its 400 has drained
   const cleaned = deferred();
   const big = cleanedLarge(cleaned);
-  const server = await listen(request => request.path === '/big' ? big() : Effect.succeed(ok('small')), null, { ...limits, maxActive: 2n });
+  const server = await listen(request => request.path === '/big' ? big() : Effect.succeed(ok('small')), { ...limits, maxActive: 2n });
   const stalled = stall(server, '/big');
   await cleaned.promise;
   await stalled.receiving;
@@ -374,12 +374,12 @@ if (backpressure) { // a malformed pipelined body keeps its admission until its 
   server.fiber.interruptUnsafe();
   await server.done;
 }
-{ // the raw path-to-text control keeps its decoded path and text responses
-  const server = await listen(null, path => path === '/fail' ? Effect.fail({ _tag: 'Missing' }) : Effect.succeed('hi ' + path));
+{ // the request path keeps its percent-encoding and a typed failure is an empty 500
+  const server = await listen(request => request.path === '/fail' ? Effect.fail({ _tag: 'Missing' }) : Effect.succeed(ok('hi ' + request.path)));
   const text = await send(server, '/a%20b').response;
-  check(text.startsWith('HTTP/1.1 200') && /content-type: text\/plain; charset=utf-8/i.test(text) && text.endsWith('hi /a b'), 'raw path response: ' + text);
+  check(text.startsWith('HTTP/1.1 200') && text.endsWith('hi /a%20b'), 'encoded path response: ' + text);
   const failed = await send(server, '/fail').response;
-  check(failed.startsWith('HTTP/1.1 500') && failed.endsWith('Internal Server Error\n'), 'raw path failure: ' + failed);
+  check(failed.startsWith('HTTP/1.1 500') && failed.endsWith('\r\n\r\n') && !/content-type/i.test(failed), 'typed failure response: ' + failed);
   server.fiber.interruptUnsafe();
   await server.done;
 }

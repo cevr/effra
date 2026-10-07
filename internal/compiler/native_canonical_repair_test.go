@@ -144,7 +144,11 @@ func TestHandlerBoundaryKeepsCallableRowsAndUsesNarrowCompatibility(t *testing.T
 	base := `error NotFound
 service Users { effect fn get(id: string) -> string raises {NotFound} }
 impl TestUsers for Users { effect fn get(id: string) -> string { id } }
-effect fn route(path: string) -> string raises {NotFound} uses {Users} { run Users.get(path) }
+effect fn route(request: HttpRequest) -> HttpReply raises {NotFound} uses {Users} {
+ let name = run Users.get(request.path)
+ HttpReply.NotFound {}
+}
+fn limits() -> HttpLimits { HttpLimits { maxBodyBytes: 0, readHeaderMillis: 1000, readBodyMillis: 1000, idleMillis: 1000, maxActive: 1 } }
 `
 	for _, tc := range []struct {
 		name        string
@@ -154,10 +158,13 @@ effect fn route(path: string) -> string raises {NotFound} uses {Users} { run Use
 		wantEF107   bool
 		wantMessage string
 	}{
-		{name: "direct missing all services", suffix: `effect fn main() -> void raises {IoError} { run Http.serve("127.0.0.1:0", route) }`, wantEF108: true, wantMessage: "missing service requirements: Http, Users"},
-		{name: "local missing all services", suffix: `effect fn main() -> void raises {IoError} { let h = route run Http.serve("127.0.0.1:0", h) }`, wantEF108: true, wantMessage: "missing service requirements: Http, Users"},
-		{name: "provided direct", suffix: `effect fn main() -> void raises {IoError} { run Http.serve("127.0.0.1:0", route).provide<Http>(LiveHttp).provide<Users>(TestUsers) }`, wantOK: true},
-		{name: "missing handler failure", suffix: `effect fn main() -> string { run route("/").provide<Users>(TestUsers) }`, wantEF107: true, wantMessage: "undeclared failures: NotFound"},
+		{name: "direct missing all services", suffix: `effect fn main() -> void raises {IoError} { run Http.listen("127.0.0.1:0", limits(), route) }`, wantEF108: true, wantMessage: "missing service requirements: Http, Users"},
+		{name: "local missing all services", suffix: `effect fn main() -> void raises {IoError} { let h = route run Http.listen("127.0.0.1:0", limits(), h) }`, wantEF108: true, wantMessage: "missing service requirements: Http, Users"},
+		{name: "provided direct", suffix: `effect fn main() -> void raises {IoError} { run Http.listen("127.0.0.1:0", limits(), route).provide<Http>(LiveHttp).provide<Users>(TestUsers) }`, wantOK: true},
+		{name: "missing handler failure", suffix: `effect fn main() -> HttpReply {
+ let body = run Http.text("").provide<Http>(LiveHttp)
+ run route(HttpRequest { method: "GET", path: "/", contentType: "", body: body }).provide<Users>(TestUsers)
+}`, wantEF107: true, wantMessage: "undeclared failures: NotFound"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := Compile(base + tc.suffix)
@@ -177,7 +184,7 @@ effect fn route(path: string) -> string raises {NotFound} uses {Users} { run Use
 				return
 			}
 			route := r.Find("route")
-			if route == nil || route.Contract.Callable == nil || route.Contract.Callable.Result.Name != "string" {
+			if route == nil || route.Contract.Callable == nil || route.Contract.Callable.Result.Name != "HttpReply" {
 				t.Fatalf("handler declaration was projected as an opaque result: %+v", route)
 			}
 			offset := strings.Index(base+tc.suffix, "route).provide")
@@ -185,7 +192,7 @@ effect fn route(path: string) -> string raises {NotFound} uses {Users} { run Use
 			if err != nil {
 				t.Fatal(err)
 			}
-			if info.Type.Callable == nil || info.Type.Callable.Result.Name != "string" {
+			if info.Type.Callable == nil || info.Type.Callable.Result.Name != "HttpReply" {
 				t.Fatalf("handler expression lost its source return type: %+v", info.Type)
 			}
 			if info.Type.Contract.ID != route.Contract.Contract.ID {
@@ -195,8 +202,9 @@ effect fn route(path: string) -> string raises {NotFound} uses {Users} { run Use
 	}
 }
 
-func TestHandlerValueControlFlowUsesCanonicalGoValueTypes(t *testing.T) {
+func TestCallableValueControlFlowUsesCanonicalGoValueTypes(t *testing.T) {
 	base := `effect fn route(path: string) -> string { path }
+effect fn consume(handler: effect fn(string) -> string) -> string { run handler("/") }
 `
 	for _, tc := range []struct {
 		name   string
@@ -205,26 +213,26 @@ func TestHandlerValueControlFlowUsesCanonicalGoValueTypes(t *testing.T) {
 	}{
 		{
 			name: "if",
-			body: `effect fn main() -> void raises {IoError} {
+			body: `effect fn main() -> string {
  let selected = if true { route } else { route }
- run Http.serve("127.0.0.1:0", selected).provide<Http>(LiveHttp)
+ run consume(selected)
 }`,
 			needle: "efExit[func(string) efEffect[string]]",
 		},
 		{
 			name: "scope",
-			body: `effect fn main() -> void raises {IoError} {
+			body: `effect fn main() -> string {
  let selected = scope { route }
- run Http.serve("127.0.0.1:0", selected).provide<Http>(LiveHttp)
+ run consume(selected)
 }`,
 			needle: "efScoped(func(ctx efContext) efExit[func(string) efEffect[string]]",
 		},
 		{
 			name: "match",
 			body: `enum Choice { Left Right }
-effect fn main() -> void raises {IoError} {
+effect fn main() -> string {
  let selected = match Choice.Left() { Choice.Left => route Choice.Right => route }
- run Http.serve("127.0.0.1:0", selected).provide<Http>(LiveHttp)
+ run consume(selected)
 }`,
 			needle: "efExit[func(string) efEffect[string]]",
 		},
@@ -232,14 +240,14 @@ effect fn main() -> void raises {IoError} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := Compile(base + tc.body)
 			if !r.Checked {
-				t.Fatalf("Handler %s control flow did not check: %+v", tc.name, r.Diagnostics)
+				t.Fatalf("callable %s control flow did not check: %+v", tc.name, r.Diagnostics)
 			}
 			goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(goSource, tc.needle) {
-				t.Fatalf("%s lowering did not render the canonical Handler value type %q:\n%s", tc.name, tc.needle, goSource)
+				t.Fatalf("%s lowering did not render the canonical callable value type %q:\n%s", tc.name, tc.needle, goSource)
 			}
 			goDir := t.TempDir()
 			if err := application.WriteRuntime(goDir); err != nil {
