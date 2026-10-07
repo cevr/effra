@@ -3,6 +3,7 @@ package compiler
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -49,7 +50,9 @@ type parser struct {
 	// subjectList is true when the innermost protected control header is a
 	// match subject list, whose commas delimit constructor subjects.
 	subjectList bool
-	types       map[string]*sourceType
+	// payloadBraces memoizes constructorBrace by brace token index.
+	payloadBraces map[int]bool
+	types         map[string]*sourceType
 }
 type Param struct {
 	Name       string  `json:"name"`
@@ -900,7 +903,12 @@ func (p *parser) fieldValues() []FieldValue {
 		name := p.name()
 		field := FieldValue{Name: name.text, Span: name.span}
 		if p.accept(":") {
+			// Payload braces delimit their values, so constructor braces
+			// inside an if/match header are unambiguous again.
+			protected := p.noConstruct
+			p.noConstruct = 0
 			field.Value, field.Label = p.expr(0), name.span
+			p.noConstruct = protected
 		} else {
 			// Record construction permits shorthand `{name}` for `{name: name}`.
 			field.Value = &Expr{Kind: "name", Name: name.text, Span: name.span, Extent: name.span}
@@ -997,6 +1005,11 @@ func (p *parser) block() *Block {
 	}
 	open := p.expect("{")
 	b := &Block{Explicit: true}
+	// Block braces delimit their statements, so constructor braces inside a
+	// block nested in an if/match header are unambiguous again.
+	protected, subjectList := p.noConstruct, p.subjectList
+	p.noConstruct, p.subjectList = 0, false
+	defer func() { p.noConstruct, p.subjectList = protected, subjectList }()
 	for !p.accept("}") {
 		start := p.peek()
 		s := &Statement{Span: start.span}
@@ -1079,6 +1092,10 @@ func (p *parser) expr(min int) *Expr {
 		p.subjectList = subjectList
 		p.noConstruct--
 		p.expect("{")
+		// The arm list is delimited by the match braces, so arm bodies of a
+		// match nested in another header parse constructors unprotected.
+		protected := p.noConstruct
+		p.noConstruct, p.subjectList = 0, false
 		for !p.accept("}") {
 			cells := [][]*MatchPattern{p.patternCell()}
 			for p.accept(",") {
@@ -1113,6 +1130,7 @@ func (p *parser) expr(min int) *Expr {
 			p.accept(",")
 			p.accept(";")
 		}
+		p.noConstruct, p.subjectList = protected, subjectList
 	case start.kind == "string":
 		e.Kind = "string"
 		_ = json.Unmarshal([]byte(start.text), &e.Text)
@@ -1270,49 +1288,43 @@ func (p *parser) constructorBrace() bool {
 	}
 	// A match/if body starts with a pattern or statement. A named payload
 	// constructor has a field colon immediately after its first identifier.
-	if p.tokens[p.at+1].text == "}" {
-		// Empty constructors need one token of context: a control-body brace
-		// or subject comma follows the constructor, while an empty if/match
-		// body is followed by `else` or the enclosing delimiter.
-		return p.constructorFollows(p.at + 2)
-	}
-	if p.at+2 >= len(p.tokens) {
-		return false
-	}
-	if p.tokens[p.at+2].text == ":" {
+	if p.at+2 < len(p.tokens) && p.tokens[p.at+2].text == ":" {
 		return true
 	}
-	// A shorthand payload has the form `Constructor { value }`. During a
-	// control expression, the following arm/body brace or subject comma
-	// disambiguates it from the control block itself; ordinary expressions
-	// remain unambiguous because constructors are enabled outside that
-	// protected parser region.
-	if p.tokens[p.at+1].kind == "name" && p.tokens[p.at+2].text == "}" {
-		return p.noConstruct == 0 || p.constructorFollows(p.at+3)
+	// An empty or shorthand-first payload can look like a control body. It is
+	// a payload exactly when the payload grammar itself accepts the braces and
+	// the token after them can only follow a constructor. The decision depends
+	// only on the brace position and the protected header context, so each
+	// brace is decided once even when an enclosing payload is decided first.
+	if decided, ok := p.payloadBraces[p.at]; ok {
+		return decided
 	}
-	if p.tokens[p.at+1].kind != "name" || (p.tokens[p.at+2].text != "," && p.tokens[p.at+2].text != ";") {
-		return false
+	start := p.at
+	end, ok := p.speculatePayload()
+	decided := ok && p.constructorFollows(end)
+	if p.payloadBraces == nil {
+		p.payloadBraces = map[int]bool{}
 	}
-	index := p.at + 1
-	for {
-		if index >= len(p.tokens) {
-			return false
+	p.payloadBraces[start] = decided
+	return decided
+}
+
+// speculatePayload parses a payload with fieldValues, then restores the
+// parser, and reports the token index after its closing brace.
+func (p *parser) speculatePayload() (end int, ok bool) {
+	at, depth, noConstruct, subjectList, types := p.at, p.depth, p.noConstruct, p.subjectList, p.types
+	p.types = maps.Clone(types)
+	defer func() {
+		if value := recover(); value != nil {
+			if _, fault := value.(syntaxFault); !fault {
+				panic(value)
+			}
+			end, ok = 0, false
 		}
-		if p.tokens[index].kind != "name" {
-			return false
-		}
-		index++
-		if index >= len(p.tokens) {
-			return false
-		}
-		if p.tokens[index].text == "}" {
-			return p.noConstruct == 0 || p.constructorFollows(index+1)
-		}
-		if p.tokens[index].text != "," && p.tokens[index].text != ";" {
-			return false
-		}
-		index++
-	}
+		p.at, p.depth, p.noConstruct, p.subjectList, p.types = at, depth, noConstruct, subjectList, types
+	}()
+	p.fieldValues()
+	return p.at, true
 }
 
 // constructorFollows reports whether the token after a candidate payload's

@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -579,5 +580,81 @@ effect fn main() -> string { pick() + ";" + single(1) + ";" + pair(2, 3) + ";" +
 	}
 	if r := Compile(first.Text); !r.Checked {
 		t.Fatalf("formatted constructor subjects no longer check: %+v\n%s", r.Diagnostics, first.Text)
+	}
+}
+
+func TestConstructorPayloadFormsBeforeSubjectComma(t *testing.T) {
+	// Every payload spelling fieldValues admits keeps its constructor reading
+	// before a subject comma, bare or parenthesized.
+	const declarations = `enum Bit { Zero; One }
+enum Item { Value { x: i64 } }
+enum Pair { Both { x: i64, y: i64 } }
+enum Wrap { Item { inner: i64, other: Pair } }
+`
+	forms := []struct{ subject, arm string }{
+		{"Bit.Zero {}", "Bit.Zero | Bit.One"},
+		{"Item.Value { x }", "Item.Value { x: a }"},
+		{"Item.Value { x, }", "Item.Value { x: a }"},
+		{"Item.Value { x; }", "Item.Value { x: a }"},
+		{"Pair.Both { x, y }", "Pair.Both { y: a }"},
+		{"Pair.Both { x; y }", "Pair.Both { y: a }"},
+		{"Pair.Both { x, y, }", "Pair.Both { y: a }"},
+		{"Pair.Both { x; y; }", "Pair.Both { y: a }"},
+		{"Pair.Both { x, y: y }", "Pair.Both { y: a }"},
+		{"Pair.Both { x y }", "Pair.Both { y: a }"},
+		{"Pair.Both { x y: y }", "Pair.Both { y: a }"},
+		{"Pair.Both { x: x, y }", "Pair.Both { y: a }"},
+		{"Wrap.Item { inner: x, other: Pair.Both { x, y, } }", "Wrap.Item { inner: a }"},
+	}
+	var source, calls strings.Builder
+	source.WriteString(declarations)
+	for index, form := range forms {
+		for parenthesized, subject := range []string{form.subject, "(" + form.subject + ")"} {
+			name := fmt.Sprintf("f%d_%d", index, parenthesized)
+			result := `"ok"`
+			if strings.Contains(form.arm, "a }") {
+				result = `if a == 0 { "bad" } else { "ok" }`
+			}
+			function := fmt.Sprintf("fn %s(x: i64, y: i64) -> string {\n match %s, Bit.One {} {\n  %s, Bit.Zero | Bit.One => %s\n }\n}\n", name, subject, form.arm, result)
+			for _, target := range []string{"go", "js"} {
+				if r := CompileFor(declarations+function, target); !r.Checked {
+					t.Errorf("%s: %s refused: %+v", target, subject, r.Diagnostics)
+				}
+			}
+			source.WriteString(function)
+			if calls.Len() > 0 {
+				calls.WriteString(` + ";" + `)
+			}
+			fmt.Fprintf(&calls, "%s(1, 2)", name)
+		}
+	}
+	// Body protection: an if body and a nested match body before a subject
+	// comma, and a shorthand look-alike body after an if header, stay bodies.
+	source.WriteString(`fn bodies(flag: bool, x: Bit, y: Bit) -> string {
+ match if flag { x } else { y }, match x { Bit.Zero => Bit.One {}; Bit.One => Bit.Zero {} } {
+  Bit.Zero | Bit.One, Bit.Zero => if flag { "flag" } else { "plain" }
+  Bit.Zero | Bit.One, Bit.One => "one"
+ }
+}
+`)
+	fmt.Fprintf(&source, "effect fn main() -> string { %s + \";\" + bodies(true, Bit.One {}, Bit.Zero {}) }", calls.String())
+	if t.Failed() {
+		return
+	}
+	want := strings.Repeat("ok;", 2*len(forms)) + "flag\n"
+	runGenericDataNative(t, source.String(), want)
+	if output := runJS(t, source.String(), `console.log(await Effect.runPromise(__ef_function_main()));`); output != want {
+		t.Fatalf("JS constructor payload forms: %q", output)
+	}
+	first, err := FormatSource(source.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := FormatSource(first.Text)
+	if err != nil || second.Changed || second.Text != first.Text {
+		t.Fatalf("formatting is not idempotent: %v\n%s\n---\n%s", err, first.Text, second.Text)
+	}
+	if r := Compile(first.Text); !r.Checked {
+		t.Fatalf("formatted payload forms no longer check: %+v\n%s", r.Diagnostics, first.Text)
 	}
 }
