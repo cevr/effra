@@ -474,6 +474,9 @@ func printDiagnosticText(report compiler.DiagnosticReport, source string) {
 			location = fmt.Sprintf("%d:%d", diagnostic.LSP.Range.Start.Line+1, diagnostic.LSP.Range.Start.Character+1)
 		}
 		fmt.Printf("%s:%s: %s %s: %s\n", source, location, diagnostic.Severity, diagnostic.Code, diagnostic.Message)
+		if diagnostic.Help != "" {
+			fmt.Printf("  help: %s\n", diagnostic.Help)
+		}
 	}
 }
 func sourceBase(source string) string {

@@ -21,6 +21,7 @@ type Span struct {
 type Diagnostic struct {
 	Code    string            `json:"code"`
 	Message string            `json:"message"`
+	Help    string            `json:"help,omitempty"` // what to write instead, when known
 	Span    Span              `json:"span"`
 	Related []RelatedLocation `json:"related,omitempty"`
 }

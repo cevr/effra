@@ -72,6 +72,7 @@ type DiagnosticFinding struct {
 	Rule              string            `json:"rule,omitempty"`
 	Severity          string            `json:"severity"`
 	Message           string            `json:"message"`
+	Help              string            `json:"help,omitempty"`
 	Span              Span              `json:"span"`
 	Related           []RelatedLocation `json:"related,omitempty"`
 	LocationAvailable bool              `json:"locationAvailable"`
@@ -252,6 +253,15 @@ func diagnosticSeverity(name string) (string, int) {
 	}
 }
 
+// lspMessage keeps help in the plain-text message, the one field every LSP
+// client renders; the finding's own message and help stay separate.
+func lspMessage(message, help string) string {
+	if help == "" {
+		return message
+	}
+	return message + "\nhelp: " + help
+}
+
 func (r *Result) DiagnosticReport(snapshot SourceSnapshot, strict bool) DiagnosticReport {
 	if snapshot.Origin == "" {
 		snapshot.Origin = "disk"
@@ -275,27 +285,27 @@ func (r *Result) DiagnosticReport(snapshot SourceSnapshot, strict bool) Diagnost
 	report.LintAvailable = r.Checked
 	positionIndex := newSourcePositionIndex(snapshot.Text)
 	seen := map[string]bool{}
-	appendFinding := func(code, origin, rule, severity, message string, span Span) {
+	appendFinding := func(code, origin, rule, severity, message, help string, span Span) {
 		severity, lspSeverity := diagnosticSeverity(severity)
 		key := strings.Join([]string{code, origin, rule, message, fmt.Sprintf("%d:%d", span.Offset, span.Length)}, "\x00")
 		if seen[key] {
 			return
 		}
 		seen[key] = true
-		finding := DiagnosticFinding{Code: code, Origin: origin, Rule: rule, Severity: severity, Message: message, Span: span}
+		finding := DiagnosticFinding{Code: code, Origin: origin, Rule: rule, Severity: severity, Message: message, Help: help, Span: span}
 		// A zero Span is the compiler's explicit no-location value for
 		// diagnostics such as an unsupported target. Real source spans carry
 		// one-based lexer coordinates, including valid zero-length EOF spans.
 		hasSourceSpan := span.Offset != 0 || span.Length != 0 || span.Line != 0 || span.Column != 0
 		if location, ok := positionIndex.rangeFor(snapshot.Text, span); hasSourceSpan && ok {
 			finding.LocationAvailable = true
-			finding.LSP = &LSPDiagnostic{Range: location, Severity: lspSeverity, Code: code, Source: "effra", Message: message}
+			finding.LSP = &LSPDiagnostic{Range: location, Severity: lspSeverity, Code: code, Source: "effra", Message: lspMessage(message, help)}
 		}
 		report.Diagnostics = append(report.Diagnostics, finding)
 	}
 	for _, diagnostic := range r.Diagnostics {
 		before := len(report.Diagnostics)
-		appendFinding(diagnostic.Code, "compiler", "", "error", diagnostic.Message, diagnostic.Span)
+		appendFinding(diagnostic.Code, "compiler", "", "error", diagnostic.Message, diagnostic.Help, diagnostic.Span)
 		if len(report.Diagnostics) > before {
 			finding := &report.Diagnostics[len(report.Diagnostics)-1]
 			finding.Related = append([]RelatedLocation{}, diagnostic.Related...)
@@ -312,7 +322,7 @@ func (r *Result) DiagnosticReport(snapshot SourceSnapshot, strict bool) Diagnost
 	if r.Checked {
 		lint = r.Lint(strict)
 		for _, diagnostic := range lint.LintDiagnostics {
-			appendFinding(diagnostic.Code, "lint", diagnostic.Rule, diagnostic.Severity, diagnostic.Message, diagnostic.Span)
+			appendFinding(diagnostic.Code, "lint", diagnostic.Rule, diagnostic.Severity, diagnostic.Message, "", diagnostic.Span)
 		}
 		report.PolicyPassed = lint.LintPassed
 	} else {
