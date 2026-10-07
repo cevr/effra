@@ -18,11 +18,17 @@ Deferred effects need explicit execution and checked failure/service rows. Host 
 
 ## Language design principles
 
-Two owner rules govern every language and library proposal. Both were set on 2026-10-07.
+These owner rules govern every language and library proposal. All were set on 2026-10-07.
 
 **Construct admission (owner rule, 2026-10-07).** A language construct, meaning syntax or a checker rule, exists only to make bad code unrepresentable where a library cannot. Anything userland expresses just as well is a library API, a compiler diagnostic or a lint rule. Prefer a minimal checker rule over new syntax.
 
-How to apply: every construct proposal, brief and review answers one question first: "Could a library express this just as well? If yes, it is not a construct." A proposal names the bad program it makes unrepresentable and shows that a bundled library version would accept that program. When a narrow checker rule on a library API closes the gap, adopt the rule and keep the API a library. Graph or inspection needs alone do not admit syntax: a library value at a stable declaration can carry the same identity. The [construct status](specs/language-abstractions.md#construct-status) summarizes the current verdicts. Finite-profile limits, such as the user-generic and recursive-layout refusals (EF127, EF119), are current support limits, not admitted prohibitions.
+How to apply: every construct proposal, brief and review answers one question first: "Could a library express this just as well? If yes, it is not a construct." A proposal names the bad program it makes unrepresentable and shows that a bundled library version would accept that program. Prefer the narrowest construct that closes the gap. Graph or inspection needs alone do not admit syntax: a library value at a stable declaration can carry the same identity. The [construct status](specs/language-abstractions.md#construct-status) summarizes the current verdicts. Finite-profile limits, such as the user-generic and recursive-layout refusals (EF127, EF119), are current support limits, not admitted prohibitions.
+
+**Compiler-special behavior is a visible construct (owner refinement, 2026-10-07).** Compiler-special behavior is spelled as a construct; a library API never carries hidden compiler checks or fulfilment. When the compiler must know something about a form, whether a check such as the machine `Stay` rule or a structural fulfilment such as codec derivation, that form is syntax. A general checker rule over ordinary language forms, such as ownership checking, needs no new syntax; a check or fulfilment tied to one library API does. The construct still has to justify itself under construct admission by making bad code unrepresentable.
+
+**Notation exception (1:1 sugar, no semantics; owner decision, 2026-10-07).** A syntax form may be admitted without an unrepresentability argument only when it desugars one-to-one, at parse time, into ordinary calls to a bundled library API. It must add no checking, typing, evaluation order or runtime behavior beyond those calls, and the formatter and tooling must show the desugared form on request. Each member is recorded by name. The first member is JSX view notation (decided 2026-10-07; specified by the views/JSX spike). A notation that gains any semantics leaves this class and must pass the ordinary admission rule.
+
+Together these cover every syntax proposal: a construct for semantics the compiler must know, and the notation exception for pure sugar. Anything else is a library API, a diagnostic or a lint rule.
 
 **Justify, don't ban (owner rule, 2026-10-07).** Budgets and bounds are explicit, required choices with no silent default. `unbounded` is a legal value. A justifier lint rule in the default preset flags it until a suppression with a reason records why; a suppression without a reason is `EFL004 invalid-suppression`.
 
