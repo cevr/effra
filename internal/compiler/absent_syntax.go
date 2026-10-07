@@ -1,8 +1,8 @@
 package compiler
 
 import (
-	"maps"
 	"slices"
+	"sort"
 	"strings"
 )
 
@@ -143,6 +143,17 @@ func (p *parser) failAbsent(position, spelling string, span Span) {
 	panic(syntaxFault{entry.diagnostic(span)})
 }
 
+// absentScan is absent-construct recognition state for one token stream. A
+// condition parser has none, so constructs are recognized only at statement
+// heads of the parse itself, never again inside a condition being recognized.
+type absentScan struct {
+	// headerEnds is computed once, on the first candidate; see headerEnd.
+	headerEnds []int
+	// work counts the tokens recognition examines: the header scan once, and
+	// the span of every construct it tries.
+	work int
+}
+
 // absentConstruct is a statement recognized as an absent braced construct:
 // its keyword, and the offset just past its body's closing brace.
 type absentConstruct struct {
@@ -163,15 +174,22 @@ func (c absentConstruct) covers(span Span) bool {
 //	for ( ... ) { ... }    or  for x in xs { ... }  or  for k, v := range m { ... }
 //	for init; condition; post { ... }  or  for condition { ... }  or  for { ... }
 //
-// A condition is whatever an `if` header admits. A head without that shape,
-// such as `while` bound as a function and called, or a bare `while` followed
-// by an ordinary statement, is no construct, so faults after it keep their
-// own diagnostic.
+// A loop header is the tokens before the first `{` outside parentheses, and a
+// condition is such a header that parses as one Effra expression; so
+// `while match x { ... } { ... }`, whose condition holds braces outside
+// parentheses, is no construct. Recognition reads tokens alone: a name bound
+// as `while` or `try` and followed by a braced record literal has the same
+// shape and is treated as the construct. A head without the shape, such as
+// `while` bound as a function and called, or a bare `while` followed by an
+// ordinary statement, is no construct, so faults after it keep their own
+// diagnostic.
 func (p *parser) absentConstructAt() (construct absentConstruct, ok bool) {
-	// Recognition only moves through tokens; conditions parse in a separate
-	// parser, so restoring the position restores the parser.
+	if p.absent == nil {
+		return absentConstruct{}, false
+	}
 	at := p.at
 	defer func() {
+		p.absent.work += p.at - at
 		if value := recover(); value != nil {
 			if _, fault := value.(syntaxFault); !fault {
 				panic(value)
@@ -210,29 +228,35 @@ func (p *parser) absentConstructAt() (construct absentConstruct, ok bool) {
 	return absentConstruct{head, last.Offset + last.Length}, true
 }
 
-// loopHeader is the tokens before the first brace outside parentheses, which
-// opens the body: a parenthesized C-family header, a Go for clause when
+// loopHeader consumes the tokens before the first brace outside parentheses,
+// which opens the body: a parenthesized C-family header, a Go for clause when
 // clauses are admitted, or a condition that parses as one Effra expression.
 // As in Rust, a loop condition holds no payload braces, so a body such as
-// `{ x: y }` is never read as a constructor.
+// `{ x: y }` is never read as a constructor. The condition parses at this
+// statement's depth, so the nesting limit bounds it.
 func (p *parser) loopHeader(clauses bool) {
-	start, separators := p.at, 0
-	for depth := 0; depth > 0 || p.peek().text != "{"; {
-		switch v := p.take(); {
-		case v.kind == "eof" || v.text == "}" && depth == 0:
-			p.fail(v, "expected {")
-		case v.text == "(":
+	end := p.headerEnd(p.at)
+	if end < 0 || p.tokens[end].text != "{" {
+		p.fail(p.peek(), "expected {")
+	}
+	header := append(slices.Clone(p.tokens[p.at:end]), token{"<eof>", "eof", p.tokens[end].span})
+	p.at = end
+	separators, depth := 0, 0
+	for _, v := range header {
+		switch v.text {
+		case "(":
 			depth++
-		case v.text == ")":
+		case ")":
 			depth--
-		case v.text == ";" && depth == 0:
-			separators++
+		case ";":
+			if depth == 0 {
+				separators++
+			}
 		}
 	}
 	if clauses && separators == 2 {
 		return
 	}
-	header := append(slices.Clone(p.tokens[start:p.at]), token{"<eof>", "eof", p.peek().span})
 	if header[0].text == "(" {
 		grouped := &parser{tokens: header}
 		grouped.tokenGroup("(", ")")
@@ -240,11 +264,56 @@ func (p *parser) loopHeader(clauses bool) {
 			return
 		}
 	}
-	condition := &parser{tokens: header, types: maps.Clone(p.types)}
+	condition := &parser{tokens: header, types: map[string]*sourceType{}, depth: p.depth}
 	condition.expr(0)
 	if end := condition.peek(); end.kind != "eof" {
 		condition.fail(end, "expected {")
 	}
+}
+
+// headerEnd is the index of the first `{`, `}` or end of input at or after
+// start that lies outside every parenthesis opened at or after start, or -1.
+// The first call answers every index in one right-to-left pass, so a run of
+// candidates never rescans the rest of the block.
+func (p *parser) headerEnd(start int) int {
+	if p.absent.headerEnds == nil {
+		p.absent.headerEnds = headerEnds(p.tokens)
+		p.absent.work += len(p.tokens)
+	}
+	return p.absent.headerEnds[start]
+}
+
+func headerEnds(tokens []token) []int {
+	// open[i] is the parentheses open before token i; a stop at j is outside
+	// those opened at or after i exactly when open[j] <= open[i].
+	open := make([]int, len(tokens))
+	for i, depth := 0, 0; i < len(tokens); i++ {
+		open[i] = depth
+		switch tokens[i].text {
+		case "(":
+			depth++
+		case ")":
+			depth--
+		}
+	}
+	// stops holds the nearest stops that no nearer stop dominates: open
+	// strictly increases from bottom to top, and the top is the nearest.
+	ends := make([]int, len(tokens))
+	var stops []int
+	for i := len(tokens) - 1; i >= 0; i-- {
+		if t := tokens[i]; t.kind == "eof" || t.text == "{" || t.text == "}" {
+			for len(stops) > 0 && open[stops[len(stops)-1]] >= open[i] {
+				stops = stops[:len(stops)-1]
+			}
+			stops = append(stops, i)
+		}
+		k := sort.Search(len(stops), func(k int) bool { return open[stops[k]] > open[i] }) - 1
+		ends[i] = -1
+		if k >= 0 {
+			ends[i] = stops[k]
+		}
+	}
+	return ends
 }
 
 // tokenGroup consumes a balanced group of foreign tokens.

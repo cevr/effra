@@ -27,6 +27,73 @@ func TestAbsentSyntaxCatalogWording(t *testing.T) {
 	}
 }
 
+// nestedLoopHeaders nests loops through their conditions:
+// `while 0 + (if a { <inner> } else { 0 }) { }`.
+func nestedLoopHeaders(depth int) string {
+	inner := "0"
+	for range depth {
+		inner = "while 0 + (if a { " + inner + " } else { 0 }) { }"
+	}
+	return inner
+}
+
+// Recognition examines each token a bounded number of times: once in the
+// header scan, and once for each enclosing recognized construct whose
+// condition or body holds it. Loops nested through their conditions and long
+// runs of a bound loop name stay within that bound instead of doubling per
+// level or rescanning the rest of the block for every statement.
+func TestAbsentSyntaxRecognitionWorkIsBounded(t *testing.T) {
+	for _, test := range []struct {
+		name, body string
+		depth      int
+	}{
+		{"nested-headers", "{ " + nestedLoopHeaders(12) + " }", 12},
+		{"bound-loop-names", "{ " + strings.Repeat("while ", 2000) + "}", 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tokens, _, diagnostics := lex(test.body)
+			if len(diagnostics) != 0 {
+				t.Fatal(diagnostics)
+			}
+			p := &parser{tokens: tokens, types: map[string]*sourceType{}, absent: &absentScan{}}
+			func() {
+				// The nested loop bodies are refused syntax; only the work matters.
+				defer func() {
+					if value := recover(); value != nil {
+						if _, fault := value.(syntaxFault); !fault {
+							panic(value)
+						}
+					}
+				}()
+				p.block()
+			}()
+			if bound := len(tokens) * (test.depth + 2); p.absent.work > bound {
+				t.Fatalf("recognition examined %d tokens, bound %d for %d tokens", p.absent.work, bound, len(tokens))
+			}
+		})
+	}
+}
+
+// Forty loops nested through their conditions compile at once: a condition's
+// blocks recognize no constructs of their own.
+func TestAbsentSyntaxDeepLoopHeadersComplete(t *testing.T) {
+	deep := "fn f(a: bool) -> string { " + nestedLoopHeaders(40) + " }"
+	if r := Compile(deep); r.Checked || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != absentSyntaxCode {
+		t.Fatalf("nested loop headers: got %+v", r.Diagnostics)
+	}
+}
+
+// A condition parses at the depth of the statement it belongs to, so a
+// condition past the nesting limit is no construct and keeps the f4c16b0
+// nesting diagnostic.
+func TestAbsentSyntaxRecognitionKeepsTheNestingLimit(t *testing.T) {
+	limit := "fn f(a: bool) -> string { " + strings.Repeat("0 + (", 100) + "if a { while 0 + " + strings.Repeat("(", 200) + "0" + strings.Repeat(")", 200) + " { } } else { 0 }" + strings.Repeat(")", 100) + " }"
+	r := Compile(limit)
+	if r.Checked || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "EF002" || r.Diagnostics[0].Message != "syntax nesting exceeds prototype limit of 256" {
+		t.Fatalf("a condition past the nesting limit: got %+v", r.Diagnostics)
+	}
+}
+
 // The EF003 table in docs/tooling.md publishes the catalog: each row's
 // construct, backticked spellings and status must match it, so retiring or
 // reclassifying an entry fails until the table follows.

@@ -57,6 +57,9 @@ type parser struct {
 	// lastPipe is the |> that ends the unparenthesised chain the most recent
 	// expr call returned, zero when that chain held no pipe.
 	lastPipe Span
+	// absent is absent-construct recognition state; a condition parser has
+	// none and recognizes nothing.
+	absent *absentScan
 }
 type Param struct {
 	Name       string  `json:"name"`
@@ -535,7 +538,7 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			}
 		}
 	}()
-	p := parser{tokens: tokens, types: map[string]*sourceType{}}
+	p := parser{tokens: tokens, types: map[string]*sourceType{}, absent: &absentScan{}}
 	program = &Program{Comments: comments, Errors: map[string]Span{}, Bindings: map[string]Binding{}, UsedImports: map[string]bool{}}
 	program.typeExpressions = p.types
 	for p.peek().kind != "eof" {
