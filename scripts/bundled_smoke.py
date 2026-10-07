@@ -205,6 +205,7 @@ with tempfile.TemporaryDirectory(prefix="effra-bundled-parity-") as tmp:
                                       text=True, capture_output=True, cwd=root)
             assert response.returncode == 0, response.stderr
             actual = json.loads(response.stdout.splitlines()[1])["result"]["structuredContent"]
-            assert adapter_semantic(actual) == adapter_semantic(rejected), (actual, rejected)
+            assert_report_parity(actual, rejected, target=target,
+                                 ignored=("file", "timings"), project=adapter_semantic)
 
 print("bundled/generic CLI/MCP check, inspect, query, graph, absence/row refusals and stale revision parity: passed")
