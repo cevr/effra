@@ -73,6 +73,9 @@ type BundledInterfaceInfo struct {
 }
 
 func (f *Function) goEmissionName() string {
+	if f.codec != nil {
+		return "efCodecFunction_" + f.EmissionName
+	}
 	if f.EmissionName != "" {
 		return "efBundledFunction_" + f.EmissionName
 	}
@@ -80,6 +83,9 @@ func (f *Function) goEmissionName() string {
 }
 
 func (f *Function) jsEmissionName() string {
+	if f.codec != nil {
+		return "__ef_codec_function_" + f.EmissionName
+	}
 	if f.EmissionName != "" {
 		return "__ef_bundled_function_" + f.EmissionName
 	}

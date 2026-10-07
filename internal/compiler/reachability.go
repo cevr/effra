@@ -42,6 +42,7 @@ const (
 	RequiresHostType         ApplicationRequirementKind = "host-type"
 	RequiresHelper           ApplicationRequirementKind = "helper"
 	RequiresRuntimeModule    ApplicationRequirementKind = "runtime-module"
+	RequiresCodecPlan        ApplicationRequirementKind = "codec-plan"
 )
 
 // ApplicationRequirement is one retained identity. Via names the identity
@@ -785,6 +786,8 @@ func (p *applicationPlanner) expr(e *Expr, owner string) {
 				}
 			}
 		}
+	case "codec":
+		p.codecOperation(e, owner)
 	case "scope", "fork", "catch", "orFail":
 		p.helper(e.Kind, owner)
 	case "timeout":

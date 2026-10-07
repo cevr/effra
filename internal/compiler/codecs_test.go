@@ -155,19 +155,3 @@ func TestCodecDeriveDeclarationsFormat(t *testing.T) {
 		t.Fatalf("formatted derive declarations: %+v %+v", r.Diagnostics, r.CodecPlans)
 	}
 }
-
-// Until the application plan selects codec plans, a checked program with a
-// derive declaration is refused by both emitters instead of lowering a
-// partial codec.
-func TestCodecEmissionIsRefusedUntilPlanned(t *testing.T) {
-	r := Compile("import Json \"effra/json\"\nrecord User { name: string }\nderive userJson = Json.codec<User>\neffect fn main() -> string { \"ok\" }\n")
-	if !r.Checked {
-		t.Fatal(r.Diagnostics)
-	}
-	if _, _, err := r.Emit(true); err == nil || err.Error() != "derived codec emission is not available yet" {
-		t.Fatalf("JS emission: %v", err)
-	}
-	if _, err := r.GoApplication(GoGenerationBuild); err == nil || err.Error() != "derived codec emission is not available yet" {
-		t.Fatalf("Go emission: %v", err)
-	}
-}

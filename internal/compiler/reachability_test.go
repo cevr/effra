@@ -719,7 +719,7 @@ effect fn main() -> string {
 	if !slices.Equal(slices.Sorted(maps.Keys(sources)), slices.Sorted(maps.Keys(core))) {
 		t.Fatalf("minimal runtime sources = %v", slices.Sorted(maps.Keys(sources)))
 	}
-	for _, unused := range []string{"layers.go", "latch.go", "http.go", "files.go", "interop.go", "console.go", "env.go", "inspect.go"} {
+	for _, unused := range []string{"layers.go", "latch.go", "http.go", "files.go", "interop.go", "console.go", "env.go", "inspect.go", "codec.go", "codec_json.go"} {
 		if _, found := sources[unused]; found {
 			t.Fatalf("minimal application selected %s", unused)
 		}

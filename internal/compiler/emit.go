@@ -137,9 +137,6 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 	if r.Program.GoOnly {
 		return "", "", fmt.Errorf("program uses features currently implemented only for Go")
 	}
-	if err := r.codecEmissionAvailable(); err != nil {
-		return "", "", err
-	}
 	var plan *ApplicationPlan
 	var err error
 	switch surface {
@@ -273,6 +270,7 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 			out.WriteString(jsLayer(layer))
 		}
 	}
+	out.WriteString(r.jsCodecSupport())
 	for _, f := range r.Program.checkedFunctions() {
 		if !plan.Requires(RequiresFunction, f.Identity) {
 			continue
@@ -283,11 +281,12 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 			}
 		}
 		out.WriteString("const " + f.jsEmissionName() + " = " + jsFunction(f) + ";\n")
-		if f.Module == currentModuleIdentity {
+		if f.Module == currentModuleIdentity && f.codec == nil {
 			out.WriteString("export { " + f.jsEmissionName() + " as " + f.Name + " };\n")
 			decl.WriteString("declare const " + f.jsEmissionName() + ": " + jsRowFunctionSignature(r.Program, f, declarations) + ";\nexport { " + f.jsEmissionName() + " as " + f.Name + " };\n")
 		}
 	}
+	r.jsCodecExports(plan, &out, &decl, declarations)
 	for _, r := range r.Program.BundledTemplates {
 		decl.WriteString(jsTemplateDeclaration(r))
 	}
@@ -456,6 +455,8 @@ func jsBlock(b *Block, effect bool) string {
 }
 func jsExpr(e *Expr, effect bool) string {
 	switch e.Kind {
+	case "codec":
+		return jsCodecOperation(e)
 	case "member":
 		if e.ResolvedFunction != nil {
 			return e.ResolvedFunction.jsEmissionName()

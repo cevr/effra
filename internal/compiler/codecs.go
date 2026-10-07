@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"fmt"
 	"strconv"
 
 	rt "effra.local/prototype/runtime/effra"
@@ -312,13 +311,4 @@ func (c *checker) publishCodecs() {
 		}
 		c.result.Codecs = append(c.result.Codecs, inspection)
 	}
-}
-
-// codecEmissionAvailable refuses to lower derived codecs until their plans
-// are selected through the application plan on both targets.
-func (r *Result) codecEmissionAvailable() error {
-	if r.Program != nil && len(r.Program.Codecs) > 0 {
-		return fmt.Errorf("derived codec emission is not available yet")
-	}
-	return nil
 }

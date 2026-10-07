@@ -1,0 +1,69 @@
+import Json "effra/json"
+
+record Customer {
+    id: i64
+    name: string
+}
+
+record Shipment {
+    carrier: string
+    tracked: bool
+}
+
+enum OrderState {
+    Pending
+    Shipped {
+        shipment: Shipment
+    }
+    Cancelled {
+        reason: string
+    }
+}
+
+record Order {
+    customer: Customer
+    state: OrderState
+}
+
+derive customerJson = Json.codec<Customer>(maxBodyBytes: 1024, maxDepth: 1)
+derive orderJson = Json.codec<Order>(maxBodyBytes: 4096, maxDepth: 3)
+
+effect fn reencode(body: string) -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
+    let order = run orderJson.decode(body)
+    run orderJson.encode(order)
+}
+
+effect fn test_order_round_trip() -> void raises { AssertionFailed, JsonDecodeFailure, JsonEncodeFailure } uses { Assert } {
+    let encoded = run reencode("{\"state\":{\"_tag\":\"Shipped\",\"shipment\":{\"tracked\":true,\"carrier\":\"post\"}},\"customer\":{\"name\":\"Ada\",\"id\":\"0042\",\"note\":\"ignored\"}}")
+    run Assert.equalText(encoded, "{\"customer\":{\"id\":\"42\",\"name\":\"Ada\"},\"state\":{\"_tag\":\"Shipped\",\"shipment\":{\"carrier\":\"post\",\"tracked\":true}}}")
+}
+
+effect fn test_unknown_variant_is_rejected() -> void raises { AssertionFailed, JsonEncodeFailure } uses { Assert } {
+    let result = run reencode("{\"customer\":{\"id\":\"1\",\"name\":\"Ada\"},\"state\":{\"_tag\":\"Lost\"}}")
+        .catch<JsonDecodeFailure>("rejected")
+    run Assert.equalText(result, "rejected")
+}
+
+effect fn test_out_of_range_id_is_rejected() -> void raises { AssertionFailed, JsonEncodeFailure } uses { Assert } {
+    let result = run customerJson.decode("{\"id\":\"9223372036854775808\",\"name\":\"Ada\"}")
+        .catch<JsonDecodeFailure>(Customer {
+            id: 0,
+            name: "rejected"
+        })
+    run Assert.equalText(result.name, "rejected")
+}
+
+effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
+    let customer = Customer {
+        id: 7,
+        name: "Ada"
+    }
+    let cancelled = OrderState.Cancelled {
+        reason: "duplicate"
+    }
+    let order = Order {
+        customer: customer,
+        state: cancelled
+    }
+    run orderJson.encode(order)
+}

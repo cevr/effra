@@ -72,9 +72,11 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Native descriptor** (specified): An OS-specific handle whose validity follows a native resource lifetime; it is distinct from the resource object and its interfaces.
 
-**Codec** (specified, not yet implemented): A checked witness relating a wire type and a domain type through separately contracted decoding and encoding operations.
+**Codec** (implemented for structural JSON): A checked witness relating a wire type and a domain type through separately contracted decoding and encoding operations.
 
-**Structural derivation** (specified): Generating a codec's structural rules from canonical checked data declarations and an explicit representation policy.
+**Structural derivation** (implemented for the first JSON profile): Generating a codec's structural rules from canonical checked data declarations and an explicit representation policy.
+
+**Codec plan** (implemented): The bounded, shared structural DAG one derivation checks for a domain type under a profile. Both targets' engines execute the same plan; an application retains it only through an executed direction.
 
 **Codec transformation** (specified): A checked conversion in a codec's decoding or encoding direction, carrying its own expected failures and required services. The two directions need not be mathematical inverses.
 

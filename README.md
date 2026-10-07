@@ -368,7 +368,7 @@ Each row states what has landed on this branch, what is in flight and what is on
 | --- | --- |
 | Payload-aware recovery: `.recover<E>(handler)` passes the error's fields to an effectful handler | In review |
 | Layer runtime: concurrent shared acquisition, rollback and cleanup in reverse order | Shared build-owned acquisition with individually cancellable waiters landed on Go and JS; the remaining units are in progress |
-| Codecs derived from records and enums, with explicit wire ↔ domain transformations | Runtime engine landed; compiler plans in progress |
+| Codecs derived from records and enums, with explicit wire ↔ domain transformations | Structural JSON derivation through [`effra/json`](docs/bundled-modules.md) runs on Go and JS; transformations in progress |
 | Graph views: `ef graph --kind layers --format mermaid\|dot`, plus MCP and editor views | In progress |
 | HTTP server with bounded, owned shutdown (`Http.listen`) | Landed on Go and JS ([`http-transport.ef`](examples/http-transport.ef)); typed endpoints, streaming bodies and codecs are not built |
 | Rich Go interop: host types, methods, `io.Reader`/`io.Writer`, `context` | Host types, methods, interface assignment, checked I/O and `context` forwarding landed; owned resources and callbacks in progress |

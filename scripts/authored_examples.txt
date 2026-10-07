@@ -28,3 +28,4 @@ internal/compiler/bundled/data/result.ef
 examples/generic-users.ef
 examples/generic-settings.ef
 examples/pipe.ef
+examples/codecs.ef

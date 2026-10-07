@@ -51,3 +51,43 @@ construction is checked ordinary data construction; it does not implement
 serialization, decoding, or round-trip laws. User generic declarations and
 nested template data arguments remain unsupported. Public inspection JSON is
 explanatory output and is never admitted as executable ownership proof.
+
+## Structural JSON codecs
+
+The distributed `effra/json` module provides the `codec` derivation and the
+`JsonDecodeFailure` and `JsonEncodeFailure` failures. A derive declaration
+names an explicit witness:
+
+```
+import Json "effra/json"
+
+derive customerJson = Json.codec<Customer>(maxBodyBytes: 1024, maxDepth: 1)
+```
+
+The checker synthesizes two ordinary effect functions, `customerJson.decode`
+(`string` to `Customer`, raising `JsonDecodeFailure`) and
+`customerJson.encode` (`Customer` to `string`, raising `JsonEncodeFailure`).
+They are called, passed and inspected like any other function; structural
+derivation adds no service requirement. Several witnesses may derive one
+type, and witnesses with the same type and bounds share one plan.
+
+Derivation follows the `effra/json-structural-1` profile: strings, booleans,
+`void` as `null`, full-range `i64` as a decimal string, first-order records
+and closed payload enums discriminated by `_tag`. Excess properties are
+ignored, the first issue stops decoding, and output follows declared field
+order. Both bounds are explicit plan data: `maxBodyBytes` (default 1 MiB,
+at most 1 GiB) bounds input and output bytes, and `maxDepth` (default and
+ceiling 512) bounds input nesting and must cover the type's own nesting.
+Functions, effect recipes, host and runtime types, bytes, generic
+applications, failure declarations and empty enums are refused with EF138 and
+the field path at which representation fails; plans are limited to 4096
+nodes and 65536 fields and variants.
+
+`ef check` and MCP `project.check` report each witness under `codecs`, with
+its domain and wire types and each direction's function, failures and
+requirements, and its plan under `codecPlans` with stable node identities. A
+native application retains a plan, its adapters and the runtime `codec`
+module only through an executed direction. A generated JS module exports each
+witness as a frozen `{ decode, encode }` object and includes the shared
+engine once. Transformations, arrays, payload-failure codecs, error
+accumulation and stricter excess-property profiles are not yet supported.

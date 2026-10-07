@@ -259,9 +259,6 @@ type GoApplication struct {
 // GoApplication plans and lowers one native entry mode. Plan refusals,
 // including EF136 exhaustion, are returned unchanged and nothing is emitted.
 func (r *Result) GoApplication(mode GoGenerationMode) (*GoApplication, error) {
-	if err := r.codecEmissionAvailable(); err != nil {
-		return nil, err
-	}
 	plan, err := r.ApplicationPlan(mode)
 	if err != nil {
 		return nil, err
@@ -300,6 +297,7 @@ var goEmissionHelpers = []struct{ name, source string }{
 	{"fork", "func efFork[A any](program efEffect[A])efEffect[*er.Fiber[A]]{return func(ctx efContext)efExit[*er.Fiber[A]]{return er.Invoke(ctx.Runtime,er.Fork(efToRuntime(ctx,program)))}}\n"},
 	{"fiber.join", "func efJoin[A any](fiber *er.Fiber[A])efEffect[A]{return efFromRuntime(fiber.Join())}\n"},
 	{"fiber.interrupt", "func efInterrupt[A any](fiber *er.Fiber[A])efEffect[struct{}]{return efFromRuntime(fiber.Interrupt())}\n"},
+	{codecLoweringHelper, goCodecHelpers},
 	{"fiber.cancel", "func efCancel[A any](fiber *er.Fiber[A])efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{fiber.Cancel();return er.Succeed(struct{}{})})}\n"},
 }
 
@@ -400,6 +398,7 @@ func efFromRuntime[A any](program er.Effect[A]) efEffect[A] {return func(ctx efC
 		}
 	}
 	g.dataTypes(&out)
+	out.WriteString(g.codecPlans(r.CodecPlans))
 	services := []*Service{}
 	for _, s := range append(builtinServicesFor(r.Program), r.Program.Services...) {
 		if plan.Requires(RequiresService, serviceIdentity(s.Name)) {
@@ -829,6 +828,8 @@ func (g *goEmitter) inferredTypeBindings(f *Function, arguments []*Expr) map[Typ
 // lower emits an expression in the canonical layout of its checked type.
 func (g *goEmitter) lower(e *Expr, effect bool, ret string, out *strings.Builder, wantValue bool) string {
 	switch e.Kind {
+	case "codec":
+		return g.codecOperation(e, ret, out)
 	case "member":
 		if e.ResolvedFunction != nil {
 			return e.ResolvedFunction.goEmissionName()
