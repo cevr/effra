@@ -108,11 +108,11 @@ func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool
 		if !coverage.exhausted {
 			if !coverage.reachable(row) {
 				if !coverage.exhausted {
-					c.unreachableArm(arm, plan)
+					coverage.unreachableArm(arm, plan)
 					continue
 				}
 			} else {
-				c.unreachableAlternatives(coverage, arm, row, plan)
+				coverage.unreachableAlternatives(arm, row, plan)
 			}
 		}
 		coverage.rows = append(coverage.rows, row)
@@ -141,15 +141,19 @@ func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool
 			for index, variant := range witness {
 				parts[index] = plan.subjects[index].enum.Name + "." + plan.subjects[index].variants[variant]
 			}
-			c.diagnostic("EF117", "missing match arm for "+strings.Join(parts, ", "), e.Span)
+			coverage.claim("EF117", "missing match arm for "+strings.Join(parts, ", "), e.Span)
 		}
 		if more {
-			c.diagnostic("EF117", "further uncovered match combinations omitted", e.Span)
+			coverage.claim("EF117", "further uncovered match combinations omitted", e.Span)
 		}
 	}
 	if coverage.exhausted {
+		// The staged claims came from an incomplete analysis; none is published.
 		c.diagnostic(matchCoverageExhaustedCode, "match coverage analysis exceeds its "+strconv.Itoa(maxMatchCoverageWork)+" work budget; split the decision into smaller matches", e.Span)
 	} else {
+		for _, claim := range coverage.claims {
+			c.diagnostic(claim.Code, claim.Message, claim.Span)
+		}
 		for _, arm := range plan.arms {
 			for subject, cell := range arm.cells {
 				if !cell.total {
@@ -212,18 +216,18 @@ func (c *checker) matchArmCells(arm *MatchArm, plan *matchPlan, declared []map[s
 	return row, cells, ok
 }
 
-func (c *checker) unreachableArm(arm *MatchArm, plan *matchPlan) {
+func (m *matchCoverage) unreachableArm(arm *MatchArm, plan *matchPlan) {
 	if len(arm.Patterns) == 1 && len(arm.Patterns[0]) == 1 {
 		pattern := arm.Patterns[0][0]
-		c.diagnostic("EF117", "duplicate match arm for "+plan.subjects[0].enum.Name+"."+pattern.VariantName, pattern.Span)
+		m.claim("EF117", "duplicate match arm for "+plan.subjects[0].enum.Name+"."+pattern.VariantName, pattern.Span)
 		return
 	}
-	c.diagnostic("EF117", "unreachable match arm; earlier arms cover every combination it names", arm.Span)
+	m.claim("EF117", "unreachable match arm; earlier arms cover every combination it names", arm.Span)
 }
 
 // unreachableAlternatives reports an alternative whose every combination with
 // the arm's other cells is already selected by an earlier arm.
-func (c *checker) unreachableAlternatives(coverage *matchCoverage, arm *MatchArm, row []variantSet, plan *matchPlan) {
+func (m *matchCoverage) unreachableAlternatives(arm *MatchArm, row []variantSet, plan *matchPlan) {
 	for subject, cell := range arm.Patterns {
 		if len(cell) < 2 {
 			continue
@@ -232,13 +236,13 @@ func (c *checker) unreachableAlternatives(coverage *matchCoverage, arm *MatchArm
 			query := slices.Clone(row)
 			query[subject] = newVariantSet(len(plan.subjects[subject].variants))
 			query[subject].add(plan.subjects[subject].index(pattern.VariantName))
-			if coverage.reachable(query) {
+			if m.reachable(query) {
 				continue
 			}
-			if coverage.exhausted {
+			if m.exhausted {
 				return
 			}
-			c.diagnostic("EF117", "unreachable alternative "+plan.subjects[subject].enum.Name+"."+pattern.VariantName+"; earlier arms cover it", pattern.Span)
+			m.claim("EF117", "unreachable alternative "+plan.subjects[subject].enum.Name+"."+pattern.VariantName+"; earlier arms cover it", pattern.Span)
 		}
 	}
 }
@@ -401,12 +405,18 @@ func (s variantSet) count() int {
 // (Maranget-style specialization over closed constructor sets; no wildcard
 // rows exist under the closed-data policy). Variants that select exactly the
 // same live arms at a subject lead to identical subproblems, so each such
-// class is explored once. All questions share one work budget.
+// class is explored once. All questions share one work budget. Coverage
+// diagnostics are staged as claims and published only if analysis completes.
 type matchCoverage struct {
 	widths    []int
 	rows      [][]variantSet
 	work      int
 	exhausted bool
+	claims    []Diagnostic
+}
+
+func (m *matchCoverage) claim(code, message string, span Span) {
+	m.claims = append(m.claims, Diagnostic{Code: code, Message: message, Span: span})
 }
 
 func newMatchCoverage(subjects []matchPlanSubject) *matchCoverage {
@@ -458,7 +468,10 @@ func (m *matchCoverage) useful(live []int, column int, query []variantSet) bool 
 }
 
 // missing returns uncovered combinations in declaration order, at most
-// maxReportedMissingMatchArms of them, and whether more exist.
+// maxReportedMissingMatchArms of them, and whether more exist. Variants are
+// visited in declaration order so the cutoff keeps the earliest witnesses;
+// once one variant of a class proves its subproblem covered, the class's
+// other variants are skipped because they reach the identical subproblem.
 func (m *matchCoverage) missing() ([][]int, bool) {
 	full := make([]variantSet, len(m.widths))
 	for index, width := range m.widths {
@@ -469,53 +482,53 @@ func (m *matchCoverage) missing() ([][]int, bool) {
 	}
 	var found [][]int
 	more := false
-	var walk func(live []int, column int, prefix [][]int)
-	walk = func(live []int, column int, prefix [][]int) {
+	prefix := make([]int, len(m.widths))
+	var walk func(live []int, column int)
+	walk = func(live []int, column int) {
 		if more || !m.spend(1) {
 			return
 		}
 		if column == len(m.widths) {
-			if len(live) == 0 {
-				more = expandWitness(prefix, &found)
+			if len(live) > 0 {
+				return
 			}
+			if len(found) == maxReportedMissingMatchArms {
+				more = true
+				return
+			}
+			found = append(found, slices.Clone(prefix))
 			return
 		}
-		for _, class := range m.classes(live, column, full[column]) {
+		classes := m.classes(live, column, full[column])
+		if m.exhausted {
+			return
+		}
+		classOf := make([]int, m.widths[column])
+		for index, class := range classes {
+			for _, variant := range class.variants {
+				classOf[variant] = index
+			}
+		}
+		covered := make([]bool, len(classes))
+		for variant := range m.widths[column] {
 			if more || m.exhausted {
 				return
 			}
-			walk(class.rows, column+1, append(prefix, class.variants))
+			class := classOf[variant]
+			if covered[class] {
+				continue
+			}
+			before := len(found)
+			prefix[column] = variant
+			walk(classes[class].rows, column+1)
+			covered[class] = len(found) == before && !more && !m.exhausted
 		}
 	}
-	walk(m.allRows(), 0, nil)
+	walk(m.allRows(), 0)
 	if m.exhausted {
 		return nil, false
 	}
 	return found, more
-}
-
-// expandWitness appends each combination of a class witness and reports
-// whether the report limit was passed.
-func expandWitness(classes [][]int, found *[][]int) bool {
-	combination := make([]int, len(classes))
-	var expand func(column int) bool
-	expand = func(column int) bool {
-		if column == len(classes) {
-			if len(*found) == maxReportedMissingMatchArms {
-				return true
-			}
-			*found = append(*found, slices.Clone(combination))
-			return false
-		}
-		for _, variant := range classes[column] {
-			combination[column] = variant
-			if expand(column + 1) {
-				return true
-			}
-		}
-		return false
-	}
-	return expand(0)
 }
 
 type matchClass struct {

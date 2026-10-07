@@ -3,6 +3,7 @@ package compiler
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -156,6 +157,20 @@ fn f(x: Three, y: Three, z: Three) -> string { match x, y, z { Three.A, Three.A,
 	if len(missing) != maxReportedMissingMatchArms || missing[0] != "Three.A, Three.A, Three.B" || missing[2] != "Three.A, Three.B, Three.A" || !omitted {
 		t.Fatalf("bounded witnesses: %q omitted=%v", missing, omitted)
 	}
+	// A and C select the same arms, so they share a class; witnesses still
+	// follow declaration order rather than class order.
+	r = Compile(`enum Three { A; B; C }
+enum Bit { Zero; One }
+fn f(t: Three, b: Bit) -> string { match t, b { Three.A | Three.C, Bit.Zero => "ok" } }`)
+	missing = missing[:0]
+	for _, diagnostic := range r.Diagnostics {
+		if strings.HasPrefix(diagnostic.Message, "missing match arm for ") {
+			missing = append(missing, strings.TrimPrefix(diagnostic.Message, "missing match arm for "))
+		}
+	}
+	if want := []string{"Three.A, Bit.One", "Three.B, Bit.Zero", "Three.B, Bit.One", "Three.C, Bit.One"}; !slices.Equal(missing, want) {
+		t.Fatalf("nonadjacent class witnesses: %q, want %q", missing, want)
+	}
 }
 
 // cyclicProductSource builds n Bit subjects whose arms each fix one adjacent
@@ -201,13 +216,19 @@ func TestMatchProductCoverageIsBounded(t *testing.T) {
 	if hasCode(within, matchCoverageExhaustedCode) || !hasCode(within, "EF117") {
 		t.Fatalf("10-subject product should finish analysis and report real witnesses: %+v", within.Diagnostics)
 	}
-	exhausted := Compile(cyclicProductSource(14))
-	if exhausted.Checked || !hasCode(exhausted, matchCoverageExhaustedCode) {
-		t.Fatalf("14-subject product must refuse with an exhaustion diagnostic: %+v", exhausted.Diagnostics)
-	}
-	for _, diagnostic := range exhausted.Diagnostics {
-		if strings.HasPrefix(diagnostic.Message, "missing match arm") || strings.HasPrefix(diagnostic.Message, "unreachable") {
-			t.Fatalf("exhausted analysis published a partial coverage claim: %+v", diagnostic)
+	// The second source proves an early arm unreachable before the budget
+	// runs out; that claim belongs to the refused analysis too.
+	zeros := strings.TrimSuffix(strings.Repeat("Bit.Zero, ", 14), ", ")
+	earlyClaim := strings.Replace(cyclicProductSource(14), "b13 {\n", "b13 {\n  "+zeros+" => \"first\"\n  "+zeros+" => \"duplicate\"\n", 1)
+	for _, source := range []string{cyclicProductSource(14), earlyClaim} {
+		exhausted := Compile(source)
+		if exhausted.Checked || !hasCode(exhausted, matchCoverageExhaustedCode) {
+			t.Fatalf("14-subject product must refuse with an exhaustion diagnostic: %+v", exhausted.Diagnostics)
+		}
+		for _, diagnostic := range exhausted.Diagnostics {
+			if diagnostic.Code == "EF117" {
+				t.Fatalf("exhausted analysis published a partial coverage claim: %+v", diagnostic)
+			}
 		}
 	}
 	// The budget is a work count, so refusal is deterministic and stops near
