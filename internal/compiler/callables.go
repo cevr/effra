@@ -414,11 +414,20 @@ func (c *checker) callableCall(e *Expr, env map[string]checkedExpression, inEffe
 }
 
 func goSourceType(t *sourceType, fallback string) string {
+	result, _ := goSourceTypeMode(t, fallback)
+	return result
+}
+
+// goSourceTypeMode keeps the distinction between a concrete pure void
+// callable (which has no Go result) and a value carrier (which is still
+// struct{}). The caller chooses whether that distinction is part of a
+// declaration or merely a nested value type.
+func goSourceTypeMode(t *sourceType, fallback string) (string, bool) {
 	if t == nil {
-		return goType(fallback)
+		return goType(fallback), fallback == voidTypeName
 	}
 	if t.Application != "" {
-		return canonicalGoType(t.owner, t.applicationID, map[TypeID]bool{})
+		return canonicalGoType(t.owner, t.applicationID, map[TypeID]bool{}), false
 	}
 	// Nested children are rendered from the canonical parsed syntax retained
 	// on each occurrence in the source type graph by source rendering below.
@@ -426,11 +435,14 @@ func goSourceType(t *sourceType, fallback string) string {
 	for i, name := range t.Parameters {
 		args[i] = goSourceType(t.ParameterTypes[i], name)
 	}
-	result := goSourceType(t.ResultType, t.Result)
+	result, noResult := goSourceTypeMode(t.ResultType, t.Result)
 	if t.Effect {
-		result = "efEffect[" + result + "]"
+		return "func(" + strings.Join(args, ", ") + ") efEffect[" + result + "]", false
 	}
-	return "func(" + strings.Join(args, ", ") + ") " + result
+	if noResult {
+		return "func(" + strings.Join(args, ", ") + ")", true
+	}
+	return "func(" + strings.Join(args, ", ") + ") " + result, false
 }
 
 func jsSourceType(t *sourceType, fallback string, declarations ...map[string]Declaration) string {
