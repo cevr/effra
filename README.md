@@ -447,7 +447,7 @@ Native builds lower checked source into typed Go closures and run `go build`. Th
 | [callables-service.ef](examples/callables-service.ef) | Callbacks that are generic over failure and service rows | Go / JS |
 | [testing.ef](examples/testing.ef) | Fixture providers, typed recovery and owned children in tests | Go / JS |
 | [imports.ef](examples/imports.ef) | Automatic native signatures, partial results and context forwarding | Go |
-| [http.ef](examples/http.ef) | HTTP routes, SDK calls, file scopes and managed shutdown | Go |
+| [http.ef](examples/http.ef) | HTTP routes over `Http.listen`, SDK calls, file scopes and managed shutdown | Go |
 | [lifecycle.ef](examples/lifecycle.ef) | Scoped files, cancellation and runtime snapshots | Go |
 | [ownership.ef](examples/ownership.ef) | Borrowed outer handles and checked scoped file ownership | Go |
 

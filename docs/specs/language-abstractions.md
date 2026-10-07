@@ -22,7 +22,7 @@ The existing opaque `Handler` accepts a function requiring a service and loses t
 
 Further independent source probes at `4f6aed8` admit the same missing requirement through `if` selection of a handler and through a record's Handler field, while a direct local alias preserves the requirement. These are distinct acceptance cases for the common representation; a special repair to Http.serve's helper parameter alone is insufficient.
 
-Replace that erasure with the common function contract. Re-express the current HTTP handler through it and diagnose missing services through the value-flow chain. Preserve existing correctly provisioned HTTP examples. A legacy Handler spelling may remain only as a sound explicit contract; it cannot erase arbitrary rows.
+Replace that erasure with the common function contract. Re-express the current HTTP handler through it and diagnose missing services through the value-flow chain. Preserve existing correctly provisioned HTTP examples. A legacy Handler spelling may remain only as a sound explicit contract; it cannot erase arbitrary rows. (Status 2026-10-07: `Handler` was removed with `Http.serve`.)
 
 Acceptance:
 

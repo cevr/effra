@@ -26,7 +26,7 @@ Exits preserve named failures, defects and interruption separately, including ad
 | Sync / TestSync | `latch() -> Latch`, `await(Latch) -> void`, `signal(Latch) -> void` | Shared one-shot synchronization; waiter interruption does not consume the handle |
 | Env / LiveEnv | `get(string) -> string` | Empty string for absent values; this is not a presence test |
 | Files / LiveFiles | `openRead(string) -> File`, `readText(File) -> string`, `readFile(string) -> string` | IoError; openRead attaches release to the current scope; readFile opens a narrower scope |
-| Http / LiveHttp | `serve(string, Handler) -> void`, `listen(string, HttpLimits, HttpHandler) -> void`, `text(string) -> bytes` | IoError; owns listener, bounds requests, and waits for request cleanup on shutdown. Go and JS |
+| Http / LiveHttp | `listen(string, HttpLimits, HttpHandler) -> void`, `text(string) -> bytes` | IoError; owns listener, bounds requests, and waits for request cleanup on shutdown. Go and JS |
 | Runtime / RuntimeLive | `inspect() -> string` | JSON metadata for the current owning scope |
 
 Files use synchronized managed handles; using a handle after its owner closes produces IoError. This is a runtime guard, not region typing or proof against every mutable alias. Native reads are ordinary blocking Go file reads and may delay cancellation. File reading currently buffers the entire content; streaming/bounded I/O remains future work.
@@ -54,11 +54,13 @@ Automatic source imports now consume Go export data for primitive package functi
 
 ## HTTP server
 
-Run `./bin/ef run examples/http.ef` from the repository. It prints `listening http://127.0.0.1:PORT`; port zero lets the OS select an available port. Use that URL with `/health`, `/users/42`, `/users/slow`, `/users/missing`, or `/file`.
+`Http.listen(address, limits, handler)` is the only builtin HTTP server operation on Go and server JavaScript; every header-read, body-read, idle, body-size and active-exchange limit is explicit and no raw operation bypasses them. Handler service requirements flow into the server recipe, the transport records its absorbed typed failures, and listener/startup failures remain `IoError`.
 
-`Http.serve` accepts a reference to an effect function taking one string path and returning a string. Its declared service requirements flow into the server recipe. Request failures, defects and interruption become a generic HTTP 500 response; the recipe itself admits listener/startup IoError. The restricted handler reference is not a general higher-order type system.
+Run `./bin/ef run examples/http.ef` from the repository. It prints `listening http://127.0.0.1:PORT`; port zero lets the OS select an available port. Use that URL with `/health`, `/users/42`, `/users/slow`, `/users/missing`, or `/file`. Its handler answers each route with a `text/plain; charset=utf-8` `HttpReply.Respond` under literal limits for its workload (no request bodies, five-second reads); a declared `GoError` becomes an empty 500.
 
-Each request executes inside a fresh managed scope, with cancellation linked to its connection and server lifetime. SIGTERM stops admission, cancels requests, and waits for handlers and their cleanup before returning. A foreign call ignoring cancellation can delay shutdown; there is no detached timeout escape. The Go entry currently reports interruption with exit status 1. `serve` is the raw path-to-text control: header reading and idle connections have a five-second timeout and it reads no request bodies. It shares the managed transport's shutdown order with a five-second write grace; a request arriving after shutdown began runs no handler and receives the 500 of a cancelled request.
+Each request executes inside a fresh managed scope, with cancellation linked to its connection and server lifetime. SIGTERM stops admission, cancels requests, and waits for handlers and their cleanup before returning. A foreign call ignoring cancellation can delay shutdown; there is no detached timeout escape. The Go entry currently reports interruption with exit status 1.
+
+Breaking change (2026-10-07): the raw path-to-text `Http.serve(address, handler)`, its host adapters and the `Handler` shorthand were removed without a compatibility facade; a call to `Http.serve` is EF102 and `Handler` is an ordinary name. Migrating to `Http.listen` intentionally changes behaviour: the handler receives the request path with its percent-encoding kept; oversized bodies and exhausted capacity are answered 413 and 503 without running the handler; failure responses (500) have an empty body and no Content-Type; a request cancelled by shutdown receives 503 after its scope closed.
 
 ### Managed transport
 
