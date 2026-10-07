@@ -199,11 +199,6 @@ func TestVoidContractsAcrossFramedLSPAndBackendProcesses(t *testing.T) {
 	}
 	oldSource := `fn bad() -> void { if true { "😀" } else { () } }
 `
-	oldOffset := strings.Index(oldSource, "{ () }") + 2
-	oldRange, ok := compiler.UTF16Range(oldSource, compiler.Span{Offset: oldOffset, Length: 2})
-	if !ok {
-		t.Fatal("could not calculate expected UTF-16 range")
-	}
 	validSource := "fn good() -> void { void }\n"
 	requests := []any{
 		map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{}},
@@ -239,10 +234,11 @@ func TestVoidContractsAcrossFramedLSPAndBackendProcesses(t *testing.T) {
 		t.Fatalf("framed LSP did not expose the focused old-spelling diagnostic: %v", finding)
 	}
 	if got := finding["range"].(map[string]any); !sameJSONValue(got, map[string]any{
-		"start": map[string]any{"line": float64(oldRange.Start.Line), "character": float64(oldRange.Start.Character)},
-		"end":   map[string]any{"line": float64(oldRange.End.Line), "character": float64(oldRange.End.Character)},
+		// The astral emoji occupies two UTF-16 code units, so `()` spans 43..45.
+		"start": map[string]any{"line": float64(0), "character": float64(43)},
+		"end":   map[string]any{"line": float64(0), "character": float64(45)},
 	}) {
-		t.Fatalf("framed LSP range lost UTF-16 coordinates after astral text: %v want %+v", got, oldRange)
+		t.Fatalf("framed LSP range lost UTF-16 coordinates after astral text: %v want 0:43..0:45", got)
 	}
 	validPublication := messages[2]["params"].(map[string]any)
 	if validPublication["version"] != float64(8) || len(validPublication["diagnostics"].([]any)) != 0 {
