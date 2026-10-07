@@ -12,7 +12,7 @@ import (
 // This index is compiler-distributed. It never resolves paths through the
 // filesystem, Go importer, network or an untrusted user interface file.
 //
-//go:embed bundled/functions/*.ef bundled/conversions/*.ef
+//go:embed bundled/functions/*.ef bundled/conversions/*.ef bundled/data/*.ef
 var bundledSources embed.FS
 
 type bundledDeclaration struct {
@@ -23,10 +23,11 @@ type bundledDeclaration struct {
 var bundledIndex = map[string]map[string]bundledDeclaration{
 	"effra/functions":   {"call": {Source: "bundled/functions/call.ef"}, "identity": {Source: "bundled/functions/identity.ef"}, "forwardFile": {Source: "bundled/functions/forward-file.ef"}},
 	"effra/conversions": {"Codec": {Source: "bundled/conversions/codec.ef"}, "witness": {Source: "bundled/conversions/witness.ef", Dependencies: []string{"Codec"}}},
+	"effra/data":        {"Option": {Source: "bundled/data/option.ef"}, "Result": {Source: "bundled/data/result.ef"}},
 }
 
 const bundledInterfaceVersion = "1"
-const SemanticProducerIdentity = "effra/checker-abi-6/bundled-interface-2"
+const SemanticProducerIdentity = "effra/checker-abi-7/bundled-interface-3"
 const maxBundledDeclarations = 256
 const maxBundledReferences = 4096
 const maxBundledSourceBytes = 1 << 20
@@ -226,7 +227,7 @@ func (r *Result) loadBundledImports(source string) {
 			return
 		}
 		bundle, diagnostics := parse(string(data))
-		if len(diagnostics) != 0 || bundle == nil || len(bundle.Items) != 1 || (len(bundle.Functions) == 0 && len(bundle.Records) == 0) {
+		if len(diagnostics) != 0 || bundle == nil || len(bundle.Items) != 1 || (len(bundle.Functions) == 0 && len(bundle.Records) == 0 && len(bundle.Enums) == 0) {
 			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "invalid distributed function source " + key, Span: req.span})
 			return
 		}
@@ -251,8 +252,8 @@ func (r *Result) loadBundledImports(source string) {
 					p.BundledBindings[alias][name] = f
 				}
 			}
-		} else if len(bundle.Records) == 1 {
-			r := bundle.Records[0]
+		} else if data := append(append([]*DataDeclaration{}, bundle.Records...), bundle.Enums...); len(data) == 1 {
+			r := data[0]
 			name, identity, span = r.Name, "template:"+req.module+":module:"+r.Name, r.Span
 			r.Module, r.SourceID, r.Identity = req.module, source, identity
 			sum := sha256.Sum256([]byte(identity))

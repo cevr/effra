@@ -20,3 +20,7 @@ internal/compiler/bundled/conversions/codec.ef
 internal/compiler/bundled/conversions/witness.ef
 examples/layers.ef
 examples/layers-workflow.ef
+internal/compiler/bundled/data/option.ef
+internal/compiler/bundled/data/result.ef
+examples/generic-users.ef
+examples/generic-settings.ef

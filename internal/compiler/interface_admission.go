@@ -100,10 +100,11 @@ func produceBundledSummary(receiver *checker, module, key string, functions []*F
 			return interfaceSummary{}, err
 		}
 		parsed, diagnostics := parse(string(data))
-		if len(diagnostics) != 0 || len(parsed.Records) != 1 {
+		dataDeclarations := append(append([]*DataDeclaration{}, parsed.Records...), parsed.Enums...)
+		if len(diagnostics) != 0 || len(dataDeclarations) != 1 {
 			return interfaceSummary{}, fmt.Errorf("invalid template producer source")
 		}
-		rd := parsed.Records[0]
+		rd := dataDeclarations[0]
 		rd.Module, rd.SourceID, rd.Identity, rd.EmissionName = module, original.SourceID, original.Identity, original.EmissionName
 		p.BundledTemplates = append(p.BundledTemplates, rd)
 		for name, typ := range parsed.typeExpressions {
@@ -177,8 +178,17 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 	// Only already checked signature owners admit nominal and native types.
 	// Structural contracts can then be reconstructed from those canonical IDs.
 	var admitType func(TypeID)
+	seedEdges := 0
+	childType := func(id TypeID) {
+		seedEdges++
+		if seedEdges > maxInterfaceTableEntries {
+			a.err = fmt.Errorf("checked layout admission exceeds budget")
+			return
+		}
+		admitType(id)
+	}
 	admitType = func(id TypeID) {
-		if id == invalidTypeID {
+		if id == invalidTypeID || a.err != nil {
 			return
 		}
 		ref := c.typeNodeID(id)
@@ -188,9 +198,12 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 		a.types[ref] = id
 		n := c.node(id)
 		for _, arg := range n.Args {
-			admitType(arg)
+			childType(arg)
 		}
-		admitType(n.Result)
+		if n.Result != invalidTypeID {
+			childType(n.Result)
+		}
+		c.walkDataFields(id, func(_ string, field Field) { childType(field.typeID) })
 	}
 	for _, f := range functions {
 		admitType(c.checkedFunction(f, true, false).contractID())
@@ -201,12 +214,23 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 				admitType(p.typeID)
 				admitType(p.shapeID)
 			}
+			for _, field := range r.Fields {
+				admitType(field.typeID)
+			}
+			for _, variant := range r.Variants {
+				for _, field := range variant.Fields {
+					admitType(field.typeID)
+				}
+			}
 		}
+	}
+	if a.err != nil {
+		return a.err
 	}
 	seenTemplates := map[string]bool{}
 	for _, template := range dto.Templates {
 		r := c.templates[template.Ref]
-		if r == nil || r.Module != dto.Module || seenTemplates[template.Ref] || r.SourceID != template.Source || len(template.Parameters) != len(r.Parameters) || len(template.Fields) != len(r.Fields) {
+		if r == nil || r.Module != dto.Module || seenTemplates[template.Ref] || r.SourceID != template.Source || template.Kind != r.Kind || len(template.Parameters) != len(r.Parameters) || len(template.Fields) != len(r.Fields) || len(template.Variants) != len(r.Variants) {
 			return fmt.Errorf("template declaration owner mismatch")
 		}
 		seenTemplates[template.Ref] = true
@@ -221,8 +245,19 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 			}
 		}
 		for i, field := range template.Fields {
-			if field.Name != r.Fields[i].Name || field.Parameter < 0 || field.Parameter >= len(r.Parameters) || r.Parameters[field.Parameter].Name != r.Fields[i].Type {
+			if field.Name != r.Fields[i].Name || field.Type != c.typeNodeID(r.Fields[i].typeID) {
 				return fmt.Errorf("template field owner mismatch")
+			}
+		}
+		for i, variant := range template.Variants {
+			owner := r.Variants[i]
+			if variant.Name != owner.Name || len(variant.Fields) != len(owner.Fields) {
+				return fmt.Errorf("template variant owner mismatch")
+			}
+			for j, field := range variant.Fields {
+				if field.Name != owner.Fields[j].Name || field.Type != c.typeNodeID(owner.Fields[j].typeID) {
+					return fmt.Errorf("template variant field owner mismatch")
+				}
 			}
 		}
 	}
@@ -306,10 +341,18 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 			}
 			id, owned := a.types[typ.Ref]
 			if !owned {
-				if (typ.Kind != "callable" && typ.Kind != "recipe" && typ.Kind != "providerRecipe") || typ.Declaration != "" || result == invalidTypeID || (typ.Mode != "pure" && typ.Mode != "effect") {
+				if typ.Kind == "application" {
+					owner := c.templates[typ.Declaration]
+					var err error
+					id, err = c.templateApplication(owner, args)
+					if err != nil {
+						return fmt.Errorf("application has no admitted checked owner: %w", err)
+					}
+				} else if (typ.Kind != "callable" && typ.Kind != "recipe" && typ.Kind != "providerRecipe") || typ.Declaration != "" || result == invalidTypeID || (typ.Mode != "pure" && typ.Mode != "effect") {
 					return fmt.Errorf("type has no admitted canonical owner")
+				} else {
+					id = c.internContract(typ.Kind, typ.Mode, result, args, failure, service)
 				}
-				id = c.internContract(typ.Kind, typ.Mode, result, args, failure, service)
 			}
 			n := c.node(id)
 			if n.Kind != typ.Kind || n.Name != typ.Name || n.Declaration != typ.Declaration || n.Mode != typ.Mode || !slices.Equal(n.Args, args) || n.Result != result || n.FailureRow != failure || n.ServiceRow != service || c.typeNodeID(id) != typ.Ref {
@@ -417,8 +460,11 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 		}
 		body := a.occurrence(d.Body, 0)
 		ownership, captures := a.facts(d.Ownership, 0), a.facts(d.Captures, 0)
-		if !slices.Equal(summarizeInvocationFacts(body.ownershipFacts()), ownership) || !slices.Equal(summarizeInvocationFacts(body.captureFacts()), captures) || body.callableEvidence != e {
-			return fmt.Errorf("declaration summary disagrees with retained body occurrence")
+		ownershipMatches := slices.Equal(summarizeInvocationFacts(body.ownershipFacts()), ownership)
+		capturesMatch := slices.Equal(summarizeInvocationFacts(body.captureFacts()), captures)
+		evidenceMatches := body.callableEvidence == e
+		if !ownershipMatches || !capturesMatch || !evidenceMatches {
+			return fmt.Errorf("declaration %s summary disagrees with retained body occurrence (ownership=%t captures=%t evidence=%t)", d.Ref, ownershipMatches, capturesMatch, evidenceMatches)
 		}
 		values = append(values, admitted{f, ownership, captures, e})
 	}
@@ -515,28 +561,71 @@ func (a *summaryAdmission) occurrence(ref string, depth int) checkedExpression {
 		return checkedExpression{}
 	}
 	fields := map[string]checkedExpression{}
-	shape, hasShape := a.c.checkedFields(id)
-	for _, field := range item.Fields {
-		if _, duplicate := fields[field.Name]; duplicate || !hasShape {
-			a.err = fmt.Errorf("invalid field occurrence shape")
+	layoutID := a.c.occurrenceLayoutID(id)
+	shape, hasShape := a.c.checkedFields(layoutID)
+	_, variants, enum := a.c.checkedVariants(layoutID)
+	if enum {
+		if len(item.Fields) != 0 {
+			a.err = fmt.Errorf("enum occurrence has record fields")
 			return checkedExpression{}
 		}
-		value := a.occurrence(field.Occurrence, depth+1)
-		index := slices.IndexFunc(shape, func(f Field) bool { return f.Name == field.Name })
-		if index < 0 || shape[index].typeID != value.contractID() {
-			a.err = fmt.Errorf("field occurrence contract mismatch")
+		for _, variant := range item.Variants {
+			index := slices.IndexFunc(variants, func(v Variant) bool { return v.Name == variant.Name })
+			if _, duplicate := fields[variant.Name]; duplicate || index < 0 {
+				a.err = fmt.Errorf("invalid variant occurrence owner")
+				return checkedExpression{}
+			}
+			payload := a.c.checkedData("()")
+			payload.fields = a.payloadOccurrences(variant.Fields, variants[index].Fields, depth, true)
+			if a.err != nil {
+				return checkedExpression{}
+			}
+			fields[variant.Name] = payload
+		}
+		if a.c.callableFieldLayout(layoutID, map[TypeID]bool{}, map[TypeID]bool{}, 0) && len(fields) == 0 {
+			a.err = fmt.Errorf("missing variant occurrence evidence")
 			return checkedExpression{}
 		}
-		fields[field.Name] = value
-	}
-	if hasShape && a.c.callableFieldLayout(id, map[TypeID]bool{}, map[TypeID]bool{}, 0) && len(fields) != len(shape) {
-		a.err = fmt.Errorf("incomplete field occurrence shape")
-		return checkedExpression{}
+	} else {
+		if len(item.Variants) != 0 || !hasShape && len(item.Fields) > 0 {
+			a.err = fmt.Errorf("invalid occurrence layout kind")
+			return checkedExpression{}
+		}
+		complete := hasShape && a.c.callableFieldLayout(layoutID, map[TypeID]bool{}, map[TypeID]bool{}, 0)
+		fields = a.payloadOccurrences(item.Fields, shape, depth, complete)
+		if a.err != nil {
+			return checkedExpression{}
+		}
 	}
 	if len(fields) == 0 {
 		fields = nil
 	}
 	return checkedExpression{fields: fields, value: a.c.values.occurrence(id, a.facts(item.Ownership, depth), a.facts(item.Captures, depth)), child: a.facts(item.Child, depth), callableEvidence: evidence, evaluation: a.c.evaluation(ef, es), executed: a.c.evaluation(xf, xs)}
+}
+
+func (a *summaryAdmission) payloadOccurrences(items []summaryFieldOccurrence, shape []Field, depth int, complete bool) map[string]checkedExpression {
+	fields := map[string]checkedExpression{}
+	for _, field := range items {
+		if _, duplicate := fields[field.Name]; duplicate {
+			a.err = fmt.Errorf("duplicate payload occurrence field")
+			return nil
+		}
+		value := a.occurrence(field.Occurrence, depth+1)
+		if a.err != nil {
+			return nil
+		}
+		index := slices.IndexFunc(shape, func(f Field) bool { return f.Name == field.Name })
+		if index < 0 || shape[index].typeID != value.contractID() {
+			a.err = fmt.Errorf("field occurrence contract mismatch")
+			return nil
+		}
+		fields[field.Name] = value
+	}
+	if complete && len(fields) != len(shape) {
+		a.err = fmt.Errorf("incomplete field occurrence shape")
+		return nil
+	}
+	return fields
 }
 
 func (a *summaryAdmission) relation(ref string, depth int) *callbackResultRelation {

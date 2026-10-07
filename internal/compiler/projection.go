@@ -941,6 +941,9 @@ func appendProjectionValue(refs *[]TypeRef, value ValueType) int {
 			appendProjectionRef(refs, argument)
 		}
 		appendProjectionRef(refs, value.Application.Result)
+		if value.Application.ProducedResult != nil {
+			appendProjectionRef(refs, *value.Application.ProducedResult)
+		}
 	}
 	for _, labels := range [][]string{value.Evaluation.Failures, value.Evaluation.Requirements} {
 		if len(labels) > 0 {

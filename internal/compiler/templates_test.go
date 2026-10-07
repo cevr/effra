@@ -131,7 +131,6 @@ fn keep(input: string) -> string { input }
 effect fn decode(input: string) -> (fn(string) -> string) { keep }
 effect fn encode(value: fn(string) -> string) -> string { value("x") }
 effect fn main() -> () { let converter = Convert.witness(decode, encode); () }`,
-		`record Box<T: type> { value: T } effect fn main() -> () { () }`,
 		`fn keep<T: type>(value: T) -> T { value } effect fn main() -> () { () }`,
 	} {
 		for _, target := range []string{"go", "js"} {
@@ -286,7 +285,7 @@ effect fn main() -> () { () }`
 
 func TestBundledWitnessJSExecution(t *testing.T) {
 	for _, fixture := range []struct{ source, output string }{{bundledAnnotatedWitness, "Ada\n"}, {bundledDirectionalWitness, "label:Ada:42\n"}, {bundledSwitchWitness, "enabled\n"}, {bundledPayloadWitness, "Ada\n"}} {
-		if output := runJS(t, fixture.source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != fixture.output {
+		if output := runJSForTarget(t, "js", fixture.source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != fixture.output {
 			t.Fatalf("actual witness fields: got %q, want %q", output, fixture.output)
 		}
 	}
@@ -329,7 +328,7 @@ func TestBundledWitnessTransportRejectsFieldAndShapeCorruption(t *testing.T) {
 		mutate func(*interfaceSummary)
 	}{
 		{"shape owner", func(d *interfaceSummary) { d.Templates[0].Ref = "template:caller:Codec" }},
-		{"shape field slot", func(d *interfaceSummary) { d.Templates[0].Fields[0].Parameter = 0 }},
+		{"shape field slot", func(d *interfaceSummary) { d.Templates[0].Fields[0].Type = d.Templates[0].Parameters[0].Variable }},
 		{"variable owner", func(d *interfaceSummary) { d.Templates[0].Parameters[0].Ref = "type-parameter:caller:T" }},
 		{"missing initialized field", func(d *interfaceSummary) {
 			for i := range d.Occurrences {

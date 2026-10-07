@@ -304,7 +304,7 @@ func TestClosedDataFieldAccessRequiresExecution(t *testing.T) {
 	if lazy.Checked || !hasCode(lazy, "EF106") {
 		t.Fatalf("lazy record field access was admitted: %+v", lazy.Diagnostics)
 	}
-	ready := `record R { name: string } effect fn get() -> R { R { name: "ok" } } effect fn main() -> string { (run get()).name }`
+	ready := `record R { name: string } effect fn loadRecord() -> R { R { name: "ok" } } effect fn main() -> string { (run loadRecord()).name }`
 	if output := runJS(t, ready, `if (await Effect.runPromise(__ef_function_main()) !== "ok") throw new Error("executed record field access failed");`); output != "" {
 		t.Fatalf("unexpected output: %s", output)
 	}

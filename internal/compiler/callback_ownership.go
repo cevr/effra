@@ -155,7 +155,7 @@ func (c *checker) callbackResultOwnership(callee callableEvidence, arguments []c
 		}
 		return facts
 	}
-	facts := c.unknownOwnership(c.displayTypeID(result))
+	facts := c.unknownOwnershipID(result)
 	for i := range facts {
 		facts[i].potentialOwner = true
 		facts[i].Origin = "callback-result"

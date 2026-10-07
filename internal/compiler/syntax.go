@@ -72,9 +72,15 @@ type Variant struct {
 	Parenthesized bool    `json:"-"`
 	Span          Span    `json:"span"`
 }
-type Record struct {
+
+// DataDeclaration owns the common nominal identity and first-order layout for
+// records and closed enums. The checker keeps their distinct declaration kinds.
+type DataDeclaration struct {
+	owner        *checker
+	Kind         string              `json:"-"`
 	Name         string              `json:"name"`
 	Fields       []Field             `json:"fields,omitempty"`
+	Variants     []Variant           `json:"variants,omitempty"`
 	Span         Span                `json:"span"`
 	Module       string              `json:"-"`
 	SourceID     string              `json:"-"`
@@ -82,11 +88,8 @@ type Record struct {
 	EmissionName string              `json:"-"`
 	Parameters   []TemplateParameter `json:"-"`
 }
-type Enum struct {
-	Name     string    `json:"name"`
-	Variants []Variant `json:"variants"`
-	Span     Span      `json:"span"`
-}
+type Record = DataDeclaration
+type Enum = DataDeclaration
 type ErrorDecl struct {
 	Name   string  `json:"name"`
 	Fields []Field `json:"fields,omitempty"`
@@ -96,6 +99,7 @@ type ErrorDecl struct {
 // Declaration is the stable inspection projection for nominal application
 // data. It deliberately contains no target-specific lowering details.
 type Declaration struct {
+	DataKind           string                  `json:"dataKind,omitempty"`
 	Source             string                  `json:"source,omitempty"`
 	TemplateParameters []TemplateParameterView `json:"templateParameters,omitempty"`
 	Kind               string                  `json:"kind"`
@@ -235,12 +239,13 @@ type FieldValue struct {
 	Span  Span
 }
 type MatchPattern struct {
-	TypeName    string
-	VariantName string
-	Bindings    map[string]string
-	Span        Span
-	Extent      Span          `json:"-"`
-	Names       []PatternName `json:"-"`
+	TypeName     string
+	VariantName  string
+	Bindings     map[string]string
+	Span         Span
+	Extent       Span          `json:"-"`
+	Names        []PatternName `json:"-"`
+	ResolvedEnum *Enum         `json:"-"`
 }
 
 // PatternName retains source order and the alias token independently of the
@@ -258,6 +263,7 @@ type MatchArm struct {
 	Extent  Span `json:"-"`
 }
 type Expr struct {
+	constructorType  *sourceType
 	ResolvedTemplate *Record
 	Kind             string
 	Name             string
@@ -464,7 +470,7 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			start := p.peek().span
 			p.take()
 			name := p.name()
-			record := &Record{Name: name.text, Span: name.span}
+			record := &Record{Kind: "record", Name: name.text, Span: name.span}
 			if p.accept("<") {
 				record.Parameters = p.templateParameters()
 			}
@@ -476,8 +482,11 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			start := p.peek().span
 			p.take()
 			name := p.name()
+			e := &Enum{Kind: "enum", Name: name.text, Span: name.span}
+			if p.accept("<") {
+				e.Parameters = p.templateParameters()
+			}
 			p.expect("{")
-			e := &Enum{Name: name.text, Span: name.span}
 			for !p.accept("}") {
 				variantName := p.name()
 				variant := Variant{Name: variantName.text, Span: variantName.span}
@@ -1014,6 +1023,29 @@ func (p *parser) expr(min int) *Expr {
 			e = &Expr{Kind: "construct", Left: e, Fields: p.fieldValues(), Span: e.Span}
 			continue
 		}
+		if p.peek().text == "<" && (e.Kind == "name" || e.Kind == "member") {
+			if e.constructorType != nil {
+				p.fail(p.peek(), "constructor application arguments may be supplied only once")
+			}
+			name := expressionName(e)
+			p.take()
+			t := &sourceType{Application: name, Span: e.Span}
+			for {
+				argument := p.typ()
+				t.ApplicationArguments = append(t.ApplicationArguments, argument)
+				t.ApplicationArgumentTypes = append(t.ApplicationArgumentTypes, p.types[argument])
+				if len(t.ApplicationArguments) > 8 {
+					p.fail(p.peek(), "at most eight template arguments are supported")
+				}
+				if p.accept(">") {
+					break
+				}
+				p.expect(",")
+			}
+			e.constructorType = t
+			p.types[t.display()] = t
+			continue
+		}
 		if p.peek().text == "(" {
 			if e.Kind != "name" && e.Kind != "member" {
 				p.fail(p.peek(), "only named functions and service methods are callable")
@@ -1163,6 +1195,12 @@ func (p *parser) pattern() *MatchPattern {
 		variant := p.name()
 		pattern.VariantName = variant.text
 		pattern.Span.Length = variant.span.Offset + variant.span.Length - pattern.Span.Offset
+		if p.accept(".") {
+			pattern.TypeName += "." + variant.text
+			variant = p.name()
+			pattern.VariantName = variant.text
+			pattern.Span.Length = variant.span.Offset + variant.span.Length - pattern.Span.Offset
+		}
 	}
 	if p.accept("{") {
 		seen := map[string]bool{}
@@ -1186,4 +1224,19 @@ func (p *parser) pattern() *MatchPattern {
 	}
 	pattern.Extent = p.extent(first.span)
 	return pattern
+}
+
+func expressionName(e *Expr) string {
+	if e == nil {
+		return ""
+	}
+	if e.Kind == "name" {
+		return e.Name
+	}
+	if e.Kind == "member" {
+		if parent := expressionName(e.Left); parent != "" {
+			return parent + "." + e.Name
+		}
+	}
+	return ""
 }

@@ -1,0 +1,55 @@
+import Data "effra/data"
+
+error Unavailable
+record User {
+    name: string
+}
+record Envelope<T: type> {
+    value: T
+}
+record LookupProblem {
+    message: string
+}
+
+service Users {
+    effect fn get(id: string) -> Data.Option<User> raises { Unavailable }
+}
+
+impl MemoryUsers for Users {
+    effect fn get(id: string) -> Data.Option<User> raises { Unavailable } {
+        if id == "42" {
+            Data.Option.Some {
+                value: User {
+                    name: "Ada"
+                }
+            }
+        } else {
+            Data.Option<User>.None {}
+        }
+    }
+}
+
+effect fn lookup(id: string) -> Data.Result<Envelope<Data.Option<User>>, LookupProblem> raises { Unavailable } uses { Users } {
+    let user = run Users.get(id)
+    Data.Result<Envelope<Data.Option<User>>, LookupProblem>.Ok {
+        value: Envelope {
+            value: user
+        }
+    }
+}
+
+fn label(result: Data.Result<Envelope<Data.Option<User>>, LookupProblem>) -> string {
+    match result {
+        Data.Result.Ok { value: envelope } => match envelope.value {
+            Data.Option.None => "missing",
+            Data.Option.Some { value: user } => user.name
+        },
+        Data.Result.Err { error: problem } => problem.message
+    }
+}
+
+effect fn main() -> string raises { Unavailable } {
+    let found = run lookup("42").provide<Users>(MemoryUsers)
+    let missing = run lookup("absent").provide<Users>(MemoryUsers)
+    label(found) + ":" + label(missing)
+}

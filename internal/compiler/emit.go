@@ -60,8 +60,12 @@ func jsContractFor(f *Function, declarations map[string]Declaration, nestedDecla
 	if !f.Effect {
 		return success
 	}
+	return jsRowsContract(success, f.Errors, f.Services, declarations)
+}
+
+func jsRowsContract(success string, failures, requirements []string, declarations map[string]Declaration) string {
 	errors := []string{}
-	for _, n := range normalized(f.Errors) {
+	for _, n := range normalized(failures) {
 		if declarations[n].Kind == "row:raises" {
 			term := declarations[n].Name
 			if term == "" {
@@ -79,7 +83,7 @@ func jsContractFor(f *Function, declarations map[string]Declaration, nestedDecla
 		err = strings.Join(errors, " | ")
 	}
 	services := []string{}
-	for _, n := range normalized(f.Services) {
+	for _, n := range normalized(requirements) {
 		if declarations[n].Kind == "row:uses" {
 			term := declarations[n].Name
 			if term == "" {
@@ -90,11 +94,11 @@ func jsContractFor(f *Function, declarations map[string]Declaration, nestedDecla
 			services = append(services, n+"Requirement")
 		}
 	}
-	requirements := "never"
+	serviceType := "never"
 	if len(services) > 0 {
-		requirements = strings.Join(services, " | ")
+		serviceType = strings.Join(services, " | ")
 	}
-	return "Effect.Effect<" + success + ", " + err + ", " + requirements + ">"
+	return "Effect.Effect<" + success + ", " + err + ", " + serviceType + ">"
 }
 
 // Emit consumes only checked compiler IR. JavaScript is never used as a type-checking oracle.
@@ -229,6 +233,11 @@ const __ef_provider_TestSync={latch:()=>Effect.sync(()=>new __ef_latch()),await:
 	for _, r := range r.Program.BundledTemplates {
 		decl.WriteString(jsTemplateDeclaration(r))
 	}
+	for _, data := range append(append([]*DataDeclaration{}, r.Program.Records...), r.Program.Enums...) {
+		if len(data.Parameters) > 0 {
+			decl.WriteString(jsTemplateDeclaration(data))
+		}
+	}
 	if entry {
 		out.WriteString("Effect.runPromise(__ef_function_main()).then(value => { if (value !== undefined) console.log(typeof value === 'bigint' ? value.toString() : value); }, error => { console.error(error); process.exitCode = 1; });\n")
 	}
@@ -238,27 +247,51 @@ const __ef_provider_TestSync={latch:()=>Effect.sync(()=>new __ef_latch()),await:
 func jsTemplateDeclaration(r *Record) string {
 	var decl strings.Builder
 	parameters := []string{}
+	arguments := []string{}
+	dataSlots := []string{}
+	declarations := declarationMap(r.owner.result)
 	for _, p := range r.Parameters {
-		parameter := p.Name
-		if p.Kind == "callable" && p.Constraint != nil {
-			t := p.Constraint
-			args := []string{}
-			for i, name := range t.Parameters {
-				args = append(args, "arg"+fmt.Sprint(i)+": "+name)
-			}
-			result := t.Result
-			if t.Effect {
-				result = "Effect.Effect<" + result + ", unknown, unknown>"
-			}
-			parameter += " extends (" + strings.Join(args, ", ") + ") => " + result
+		name := emittedTypeVariable(r.owner.node(p.typeID))
+		arguments = append(arguments, name)
+		parameter := name
+		if p.Kind == "callable" {
+			parameter += " extends " + canonicalJSDataType(r.owner, p.shapeID, declarations)
 		}
+		// Every argument belongs to application identity, even when a closed
+		// alternative has no payload or a callable slot is otherwise phantom.
+		dataSlots = append(dataSlots, "(value: "+name+") => "+name)
 		parameters = append(parameters, parameter)
 	}
-	decl.WriteString("type __ef_template_" + r.EmissionName + "<" + strings.Join(parameters, ", ") + "> = { ")
-	for _, field := range r.Fields {
-		decl.WriteString("readonly " + quoted(field.Name) + ": " + field.Type + "; ")
+	brand := "__ef_brand_template_" + r.EmissionName
+	decl.WriteString("declare const " + brand + ": unique symbol;\n")
+	decl.WriteString("type __ef_template_" + r.EmissionName + "<" + strings.Join(parameters, ", ") + "> = ")
+	payload := func(fields []Field, variant string) {
+		decl.WriteString("{ readonly [" + brand + "]: readonly [" + strings.Join(dataSlots, ",") + "]; ")
+		if variant != "" {
+			decl.WriteString("readonly _tag: " + quoted(r.Identity+"."+variant) + "; ")
+		}
+		for _, field := range fields {
+			decl.WriteString("readonly " + quoted(field.Name) + ": " + canonicalJSDataType(r.owner, field.typeID, declarations) + "; ")
+		}
+		decl.WriteString("}")
 	}
-	decl.WriteString("};\n")
+	if r.Kind == "enum" {
+		if len(r.Variants) == 0 {
+			decl.WriteString("never")
+		}
+		for i, variant := range r.Variants {
+			if i > 0 {
+				decl.WriteString(" | ")
+			}
+			payload(variant.Fields, variant.Name)
+		}
+	} else {
+		payload(r.Fields, "")
+	}
+	decl.WriteString(";\n")
+	if r.Module == currentModuleIdentity {
+		decl.WriteString("export type " + r.Name + "<" + strings.Join(parameters, ",") + "> = __ef_template_" + r.EmissionName + "<" + strings.Join(arguments, ",") + ">;\n")
+	}
 	return decl.String()
 }
 
@@ -479,26 +512,29 @@ func jsConstruct(e *Expr, effect bool) string {
 	for _, field := range e.Fields {
 		parts = append(parts, "["+quoted(field.Name)+"]: "+jsExpr(field.Value, false))
 	}
+	if e.ResolvedTemplate != nil {
+		if e.ResolvedTemplate.Kind == "enum" {
+			return "({ _tag: " + quoted(e.ResolvedTemplate.Identity+"."+e.Left.Name) + ", " + strings.Join(parts, ", ") + " })"
+		}
+		return "({ " + strings.Join(parts, ", ") + " })"
+	}
 	if e.Left != nil && e.Left.Kind == "member" {
 		return "({ _tag: " + quoted(e.Left.Left.Name+"."+e.Left.Name) + ", " + strings.Join(parts, ", ") + " })"
 	}
 	return "({ " + strings.Join(parts, ", ") + " })"
 }
 func jsConstructCall(e *Expr, effect bool) string {
-	parts := []string{}
-	for _, field := range e.Fields {
-		parts = append(parts, "["+quoted(field.Name)+"]: "+jsExpr(field.Value, false))
-	}
-	if e.Left != nil && e.Left.Kind == "member" {
-		return "({ _tag: " + quoted(e.Left.Left.Name+"."+e.Left.Name) + ", " + strings.Join(parts, ", ") + " })"
-	}
-	return "({ " + strings.Join(parts, ", ") + " })"
+	return jsConstruct(e, effect)
 }
 func jsMatch(e *Expr, effect bool) string {
 	value := jsExpr(e.Left, effect)
 	body := "const __ef_match = " + value + ";\nswitch (__ef_match._tag) {\n"
 	for _, arm := range e.Arms {
-		body += "case " + quoted(arm.Pattern.TypeName+"."+arm.Pattern.VariantName) + ": {\n"
+		owner := arm.Pattern.TypeName
+		if enum := arm.Pattern.ResolvedEnum; enum != nil && len(enum.Parameters) > 0 {
+			owner = enum.Identity
+		}
+		body += "case " + quoted(owner+"."+arm.Pattern.VariantName) + ": {\n"
 		for _, field := range sortedBindingNames(arm.Pattern.Bindings) {
 			binding := arm.Pattern.Bindings[field]
 			if binding != "_" {

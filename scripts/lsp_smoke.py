@@ -102,7 +102,7 @@ def parity(directory):
         path.write_bytes(text.encode())
         report = cli(BINARY, path)
         remote = mcp(BINARY, directory, [{"file": name}])[0]["result"]["structuredContent"]
-        assert_report_parity(report, remote, report_schema=1, snapshot_schema=5)
+        assert_report_parity(report, remote, report_schema=1, snapshot_schema=6)
         messages = exchange([INIT, READY, opened(path, text, 4), STOP, EXIT], fragmented=True)
         capabilities = messages[0]["result"]["capabilities"]
         assert capabilities == {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": True, "change": 1}}
