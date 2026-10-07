@@ -990,6 +990,7 @@ func (r *Result) CheckResponse() map[string]any {
 		"timings": r.Timings, "typeProjectionBudget": r.TypeProjectionBudget, "typeProjectionLimits": projection.Limits,
 		"producerIdentity":    r.ProducerIdentity,
 		"typeProjectionUsage": projection.Usage, "typeProjectionComplete": projection.Complete,
+		"applications": r.ApplicationInspections(),
 	}
 	r.AddProducer(response)
 	if projection.Complete {

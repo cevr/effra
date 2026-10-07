@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -143,6 +144,62 @@ func compareApplicationRequirements(a, b ApplicationRequirement) int {
 		return order
 	}
 	return strings.Compare(a.Identity, b.Identity)
+}
+
+// ApplicationInspection summarizes one native entry mode's plan for CLI and
+// MCP inspection without emitting it. Runtime modules are closed over the
+// catalog's dependencies. A refused plan carries its diagnostic instead.
+type ApplicationInspection struct {
+	Mode           GoGenerationMode                   `json:"mode"`
+	Complete       bool                               `json:"complete"`
+	RuntimeModules []rt.RuntimeModule                 `json:"runtimeModules,omitempty"`
+	Requirements   map[ApplicationRequirementKind]int `json:"requirements,omitempty"`
+	Work           int                                `json:"work"`
+	WorkLimit      int                                `json:"workLimit"`
+	Diagnostics    []Diagnostic                       `json:"diagnostics,omitempty"`
+	Error          string                             `json:"error,omitempty"`
+}
+
+// ApplicationInspections plans every native entry mode the checked source
+// declares: an effect main, and test cases when present. Source that declares
+// neither has no native application to inspect.
+func (r *Result) ApplicationInspections() []ApplicationInspection {
+	inspections := []ApplicationInspection{}
+	if r == nil || !r.Checked || r.Target != "go" {
+		return inspections
+	}
+	if r.Entry() == nil {
+		inspections = append(inspections, r.inspectApplication(GoGenerationBuild, maxApplicationPlanWork))
+	}
+	if _, err := r.Tests(); err == nil {
+		inspections = append(inspections, r.inspectApplication(GoGenerationTest, maxApplicationPlanWork))
+	}
+	return inspections
+}
+
+func (r *Result) inspectApplication(mode GoGenerationMode, limit int) ApplicationInspection {
+	inspection := ApplicationInspection{Mode: mode, WorkLimit: limit}
+	plan, err := r.applicationPlan(mode, limit)
+	var refusal *ApplicationPlanError
+	if errors.As(err, &refusal) {
+		inspection.Diagnostics = []Diagnostic{refusal.Diagnostic()}
+		return inspection
+	}
+	if err == nil {
+		inspection.RuntimeModules, err = plan.RuntimeModuleClosure()
+	}
+	if err != nil {
+		inspection.RuntimeModules = nil
+		inspection.Error = err.Error()
+		return inspection
+	}
+	inspection.Complete = true
+	inspection.Work = plan.Work
+	inspection.Requirements = map[ApplicationRequirementKind]int{}
+	for _, requirement := range plan.Requirements {
+		inspection.Requirements[requirement.Kind]++
+	}
+	return inspection
 }
 
 // ApplicationPlan computes the emission closure for a concrete generated

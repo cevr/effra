@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"bufio"
-	"errors"
 	"go/ast"
 	goparser "go/parser"
 	gotoken "go/token"
@@ -313,13 +312,19 @@ func TestApplicationPlanRefusalIsADiagnosticAndEmitsNothing(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	_, err := r.applicationPlan(GoGenerationBuild, 3)
-	var refusal *ApplicationPlanError
-	if !errors.As(err, &refusal) || refusal.Diagnostic().Code != applicationPlanExhaustedCode {
-		t.Fatalf("exhausted plan = %v", err)
+	inspection := r.inspectApplication(GoGenerationBuild, 3)
+	if inspection.Complete || inspection.RuntimeModules != nil || inspection.Requirements != nil || len(inspection.Diagnostics) != 1 || inspection.Diagnostics[0].Code != applicationPlanExhaustedCode {
+		t.Fatalf("exhausted inspection = %+v", inspection)
 	}
-	if _, err := r.goApplication(GoGenerationBuild); err != nil {
-		t.Fatalf("complete application refused: %v", err)
+	inspections := r.ApplicationInspections()
+	if len(inspections) != 1 || !inspections[0].Complete || inspections[0].Mode != GoGenerationBuild || len(inspections[0].Diagnostics) != 0 {
+		t.Fatalf("complete inspections = %+v", inspections)
+	}
+	if got := r.CheckResponse()["applications"]; got == nil {
+		t.Fatal("check response omitted native application inspection")
+	}
+	if inspections := CompileFor(applicationDAGSource(4), "js").ApplicationInspections(); len(inspections) != 0 {
+		t.Fatalf("JavaScript target reported native applications: %+v", inspections)
 	}
 }
 

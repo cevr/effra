@@ -10,11 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"effra.local/prototype/internal/compiler"
 	"effra.local/prototype/internal/producer"
+	rt "effra.local/prototype/runtime/effra"
 )
 
 func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
@@ -894,5 +896,39 @@ void}`
 	invalidPayload := invalid.(map[string]any)["lint"].(compiler.LintResult)
 	if invalidPayload.LintPassed || invalidPayload.Errors != 1 || invalidPayload.LintDiagnostics[0].Span.Line != 2 {
 		t.Fatalf("MCP accepted invalid suppression: %+v", invalidPayload)
+	}
+}
+
+func TestProjectCheckInspectsNativeApplications(t *testing.T) {
+	root := t.TempDir()
+	source := `effect fn main() -> void {
+    run Console.log("hi").provide<Console>(Stdout)
+}
+effect fn test_noop() -> void {
+    void
+}
+`
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := call(root, "project.check", arguments{File: "main.ef"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applications, ok := result.(map[string]any)["applications"].([]compiler.ApplicationInspection)
+	if !ok || len(applications) != 2 {
+		t.Fatalf("project.check applications = %#v", result.(map[string]any)["applications"])
+	}
+	for index, want := range []struct {
+		mode    compiler.GoGenerationMode
+		modules []rt.RuntimeModule
+	}{{compiler.GoGenerationBuild, []rt.RuntimeModule{rt.RuntimeModuleConsole, rt.RuntimeModuleCore}}, {compiler.GoGenerationTest, []rt.RuntimeModule{rt.RuntimeModuleCore, rt.RuntimeModuleSync}}} {
+		got := applications[index]
+		if got.Mode != want.mode || !got.Complete || !slices.Equal(got.RuntimeModules, want.modules) || len(got.Diagnostics) != 0 {
+			t.Fatalf("application %d = %+v, want %s %v", index, got, want.mode, want.modules)
+		}
+	}
+	if !reflect.DeepEqual(applications, compiler.Compile(source).ApplicationInspections()) {
+		t.Fatal("MCP application inspection drifted from the compiler")
 	}
 }

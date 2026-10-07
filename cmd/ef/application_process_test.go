@@ -285,13 +285,18 @@ func TestGoBuildReportsExhaustedApplicationPlanAsDiagnostic(t *testing.T) {
 	if err := os.WriteFile(source, []byte("effect fn main() -> void {\n"+strings.Repeat("1\n", 1<<20+64)+"void\n}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"build"} {
+	for _, command := range []string{"build", "check"} {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
 			stdout, stderr, code := runTestCLIDir(t, binary, root, "", command, source)
 			var report struct {
-				Checked     bool                  `json:"checked"`
-				Diagnostics []compiler.Diagnostic `json:"diagnostics"`
+				Checked      bool                  `json:"checked"`
+				Diagnostics  []compiler.Diagnostic `json:"diagnostics"`
+				Applications []struct {
+					Mode        compiler.GoGenerationMode `json:"mode"`
+					Complete    bool                      `json:"complete"`
+					Diagnostics []compiler.Diagnostic     `json:"diagnostics"`
+				} `json:"applications"`
 			}
 			if err := json.Unmarshal(stdout, &report); err != nil {
 				t.Fatalf("no JSON report: %v stdout=%q stderr=%q", err, stdout, stderr)
@@ -300,7 +305,12 @@ func TestGoBuildReportsExhaustedApplicationPlanAsDiagnostic(t *testing.T) {
 				t.Fatalf("exhaustion fixture did not check: %+v", report.Diagnostics)
 			}
 			diagnostics := report.Diagnostics
-			if code == 0 || !strings.Contains(string(stderr), "EF136") {
+			if command == "check" {
+				if code != 0 || len(diagnostics) != 0 || len(report.Applications) != 1 || report.Applications[0].Complete {
+					t.Fatalf("check report: code=%d %+v", code, report)
+				}
+				diagnostics = report.Applications[0].Diagnostics
+			} else if code == 0 || !strings.Contains(string(stderr), "EF136") {
 				t.Fatalf("exhausted build succeeded: code=%d stderr=%q", code, stderr)
 			}
 			if len(diagnostics) != 1 || diagnostics[0].Code != "EF136" {
