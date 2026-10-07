@@ -28,7 +28,12 @@ type GoImport struct {
 	Span  Span   `json:"span"`
 }
 type Binding struct {
+	// Symbol is the source display, such as host.Find or (*host.Counter).Add.
+	// Identity is the canonical go/types identity that keys bindings and
+	// checked calls: go:<full name> for a function, and for a method its
+	// actual receiver and name, go:(*example.com/sdk.Client).Add.
 	Symbol       string   `json:"symbol"`
+	Identity     string   `json:"identity"`
 	Package      string   `json:"package"`
 	Signature    string   `json:"hostSignature"`
 	Params       []string `json:"parameters"`
@@ -44,9 +49,7 @@ type Binding struct {
 	// each component's explicit adaptation, including nullability.
 	HostParameters []HostComponent `json:"hostParameters"`
 	HostResults    []HostComponent `json:"hostResults"`
-	// alias and member keep the checked import declaration and exported Go
-	// name separately from the alias-qualified Symbol lookup key.
-	alias  string
+	// member is the exported Go name; a call site supplies its own import alias.
 	member string
 	// native is the go/types full name of the function or method; receiver is
 	// the admitted receiver type of a method binding.
@@ -238,7 +241,7 @@ func (r *Result) loadImports(dir string) {
 				if b, unsupported := normalizeBinding(imp, member, host); unsupported != "" {
 					host.unsupported[b.Symbol] = unsupported
 				} else {
-					r.Program.Bindings[b.Symbol] = b
+					r.Program.Bindings[b.Identity] = b
 				}
 			}
 		}
@@ -291,7 +294,7 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 // normalizeBinding admits one exported function from its native signature. A
 // refused function returns the reason, reported when source calls it.
 func normalizeBinding(imp GoImport, fn *types.Func, host *hostImports) (Binding, string) {
-	b := Binding{Symbol: imp.Alias + "." + fn.Name(), Package: imp.Path, alias: imp.Alias}
+	b := Binding{Symbol: imp.Alias + "." + fn.Name(), Identity: "go:" + imp.Path + "." + fn.Name(), Package: imp.Path}
 	return b, admitCallable(&b, fn, host)
 }
 
@@ -388,7 +391,7 @@ func (c *checker) foreignCall(e *Expr, env localEnv, inEffect bool) bool {
 			return true
 		}
 		key := alias + "." + e.Left.Name
-		b, ok := c.program.Bindings[key]
+		b, ok := c.program.Bindings["go:"+imp.Path+"."+e.Left.Name]
 		var host hostBindingTypes
 		if ok {
 			host, ok = c.hostBinding(b)
@@ -432,9 +435,9 @@ func (c *checker) checkForeignCall(e *Expr, b Binding, host hostBindingTypes, en
 	e.checked = t.clone()
 	e.Type = c.projectChecked(t)
 	e.Text = "foreign"
-	e.Name = b.Symbol
+	e.Name = b.Identity
 	for _, existing := range c.result.Bindings {
-		if existing.Symbol == b.Symbol {
+		if existing.Identity == b.Identity {
 			return
 		}
 	}

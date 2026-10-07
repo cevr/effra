@@ -429,7 +429,7 @@ effect fn program() -> void uses { Console, Foreign } {
 			method = binding
 		}
 	}
-	if method.Package != "" || method.Return != "string" || len(method.HostParameters) != 1 || method.HostParameters[0].Adaptation != hostAdaptReceiver {
+	if method.Package != "" || method.Identity != "go:(error).Error" || method.Return != "string" || len(method.HostParameters) != 1 || method.HostParameters[0].Adaptation != hostAdaptReceiver {
 		t.Fatalf("universe method binding: %+v", method)
 	}
 	plan, err := r.ApplicationPlan(GoGenerationBuild)
@@ -465,5 +465,53 @@ func TestHostUnnamedInterfaceClosesOverSignaturePackages(t *testing.T) {
 	requirePlanned(t, plan, RequiresHostType, "go:interface{Report() string; io.Reader}")
 	if output := runGeneratedGo(t, r); output != "*hosttypes.Source\n*hosttypes.Source\n" {
 		t.Fatalf("unnamed interfaces: %q", output)
+	}
+}
+
+// Method bindings are keyed by the receiver's canonical type and the method,
+// not by display: under the alias bytes, the fixture's *Buffer and the
+// standard *bytes.Buffer both display as *bytes.Buffer, yet each String call
+// keeps its own signature and inspection reports both receivers.
+func TestHostMethodBindingsUseCanonicalReceiverIdentity(t *testing.T) {
+	const imports = `import go bytes "effra.local/prototype/examples/hosttypes"
+import go strconv "strconv"
+import Data "effra/data"
+`
+	r := CompileAt(imports+`effect fn program() -> void uses { Console, Foreign } {
+    match run bytes.NewProbeShadowBuffer() {
+        Data.Option.None => void,
+        Data.Option.Some { value: left } => run Console.log(run strconv.FormatInt(run left.String(), 10))
+    }
+    match run bytes.NewBuffer("x") {
+        Data.Option.None => void,
+        Data.Option.Some { value: right } => run Console.log(run right.String())
+    }
+}`+hostTypesEntry, "go", "../..")
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	identities := map[string]Binding{}
+	for _, binding := range r.Bindings {
+		identities[binding.Identity] = binding
+	}
+	shadow, standard := identities["go:(*effra.local/prototype/examples/hosttypes.Buffer).String"], identities["go:(*bytes.Buffer).String"]
+	if shadow.Symbol != "(*bytes.Buffer).String" || standard.Symbol != "(*bytes.Buffer).String" || shadow.Return != "i64" || standard.Return != "string" || shadow.HostParameters[0].Native != "*effra.local/prototype/examples/hosttypes.Buffer" || standard.HostParameters[0].Native != "*bytes.Buffer" {
+		t.Fatalf("colliding displays shared a binding: %+v", r.Bindings)
+	}
+	if output := runGeneratedGo(t, r); output != "7\nx\n" {
+		t.Fatalf("colliding receivers: %q", output)
+	}
+	wrong := CompileAt(imports+`effect fn program() -> void uses { Console, Foreign } {
+    match run bytes.NewProbeShadowBuffer() {
+        Data.Option.None => void,
+        Data.Option.Some { value: left } => run Console.log(run strconv.FormatInt(run left.String(), 10))
+    }
+    match run bytes.NewBuffer("x") {
+        Data.Option.None => void,
+        Data.Option.Some { value: right } => run Console.log(run strconv.FormatInt(run right.String(), 10))
+    }
+}`+hostTypesEntry, "go", "../..")
+	if wrong.Checked || !hasDiagnosticContaining(wrong, "Go argument must be i64") {
+		t.Fatalf("stdlib String accepted as i64: %+v", wrong.Diagnostics)
 	}
 }

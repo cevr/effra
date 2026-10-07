@@ -120,3 +120,13 @@ func ProbeEmbedded() interface {
 } {
 	return NewSource("y")
 }
+
+// Buffer shares its name with bytes.Buffer, so under the import alias bytes
+// both display as *bytes.Buffer while remaining distinct native types.
+type Buffer struct{}
+
+// NewProbeShadowBuffer returns the fixture's own Buffer.
+func NewProbeShadowBuffer() *Buffer { return &Buffer{} }
+
+// String returns an int64, unlike bytes.Buffer's String.
+func (*Buffer) String() int64 { return 7 }

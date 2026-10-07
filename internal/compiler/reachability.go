@@ -841,10 +841,10 @@ func (p *applicationPlanner) foreign(e *Expr, owner string) {
 		p.err = fmt.Errorf("application foreign call at offset %d has no checked binding", e.Span.Offset)
 		return
 	}
-	identity := "go:" + binding.native
+	identity := binding.Identity
 	p.require(RequiresForeign, identity, owner, "foreign-call")
 	if binding.receiver == nil {
-		imported, ok := p.goImports[binding.alias]
+		imported, ok := p.goImports[e.Left.Left.Name]
 		if !ok {
 			p.err = fmt.Errorf("application foreign binding %s has no import declaration", binding.Symbol)
 			return
@@ -861,7 +861,7 @@ func (p *applicationPlanner) foreign(e *Expr, owner string) {
 	// Native parameter types are not otherwise reached when an argument is a
 	// checked integer literal of a native-width scalar.
 	if p.c.host != nil {
-		host := p.c.host.bindings[binding.Symbol]
+		host := p.c.host.bindings[binding.Identity]
 		// A method's receiver type retains the package declaring its method
 		// set even when no source import names that package.
 		if binding.receiver != nil {

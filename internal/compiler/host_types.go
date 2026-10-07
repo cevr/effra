@@ -360,7 +360,7 @@ func (c *checker) hostResultID(t hostType) TypeID {
 // It reports false when an adaptation is unavailable.
 func (c *checker) hostBinding(b Binding) (hostBindingTypes, bool) {
 	state := c.hostState()
-	if known, ok := state.bindings[b.Symbol]; ok {
+	if known, ok := state.bindings[b.Identity]; ok {
 		return known, true
 	}
 	var result hostBindingTypes
@@ -395,7 +395,7 @@ func (c *checker) hostBinding(b Binding) (hostBindingTypes, bool) {
 		valid = valid && result.errorOption != invalidTypeID
 	}
 	if valid {
-		state.bindings[b.Symbol] = result
+		state.bindings[b.Identity] = result
 	}
 	return result, valid
 }
@@ -475,12 +475,15 @@ func (c *checker) hostMethodCall(e *Expr, receiver checkedExpression, env localE
 }
 
 // hostMethodBinding admits one method in a native receiver's method set. The
-// binding is keyed by the receiver's displayed type, so CLI/MCP inspection
-// report it beside package functions.
+// binding is keyed by the receiver's canonical type and the method name, which
+// select exactly one native method; the receiver's displayed spelling names it
+// for CLI/MCP inspection beside package functions, and two receivers can
+// display alike.
 func (c *checker) hostMethodBinding(receiver types.Type, name string) (Binding, string) {
 	display := c.program.host.display(receiver)
 	symbol := "(" + display + ")." + name
-	if b, ok := c.program.Bindings[symbol]; ok {
+	identity := "go:(" + types.TypeString(receiver, hostPathQualifier) + ")." + name
+	if b, ok := c.program.Bindings[identity]; ok {
 		return b, ""
 	}
 	selection := types.NewMethodSet(receiver).Lookup(nil, name)
@@ -500,7 +503,7 @@ func (c *checker) hostMethodBinding(receiver types.Type, name string) (Binding, 
 	}
 	// A universe method such as error.Error has no package: its binding names
 	// none and needs no import.
-	b := Binding{Symbol: symbol, receiver: &admitted}
+	b := Binding{Symbol: symbol, Identity: identity, receiver: &admitted}
 	if fn.Pkg() != nil {
 		b.Package = fn.Pkg().Path()
 	}
@@ -514,7 +517,7 @@ func (c *checker) hostMethodBinding(receiver types.Type, name string) (Binding, 
 	}
 	receiverComponent := HostComponent{Native: types.TypeString(admitted.native, hostPathQualifier), Type: display, Adaptation: hostAdaptReceiver}
 	b.HostParameters = append([]HostComponent{receiverComponent}, b.HostParameters...)
-	c.program.Bindings[symbol] = b
+	c.program.Bindings[identity] = b
 	return b, ""
 }
 
@@ -949,14 +952,18 @@ func canonicalGoValuesType(c *checker, node *semanticTypeNode, visiting map[Type
 func (g *goEmitter) foreign(e *Expr, effect bool, ret string, out *strings.Builder) string {
 	c := g.program.semantic
 	b := g.bindings[e.Name]
-	host := c.hostState().bindings[b.Symbol]
-	callee := "efGo_" + e.Name
+	host := c.hostState().bindings[b.Identity]
+	var callee string
 	if b.receiver != nil {
 		// The receiver is captured once with the arguments; the native method
 		// runs on that original value when the recipe executes.
 		receiver := g.temp()
 		out.WriteString(receiver + " := " + g.expr(e.Left.Left, effect, ret, out) + "\n")
 		callee = receiver + "." + b.member
+	} else {
+		// Canonical bindings are shared by every alias of one package, so a
+		// function call names the alias written at this call.
+		callee = "efGo_" + e.Left.Left.Name + "." + b.member
 	}
 	args := []string{}
 	if b.Context {

@@ -1289,7 +1289,7 @@ func (r *Result) SymbolBindings(symbol *Symbol) ([]Binding, error) {
 	}
 	bindings := []Binding{}
 	for _, binding := range r.Bindings {
-		if selected[binding.Symbol] {
+		if selected[binding.Identity] {
 			bindings = append(bindings, binding)
 		}
 	}
