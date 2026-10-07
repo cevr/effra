@@ -125,6 +125,54 @@ func TestGenericEnumPayloadTransportFreshArenaAndCorruption(t *testing.T) {
 	}
 }
 
+func TestGenericDataRecipePayloadTransportRejectsMissingCallableFields(t *testing.T) {
+	const source = `record Ops<F:callable effect fn(A)->A,A:type>{operation:F}
+effect fn echo(value:string)->string{value}
+service Audit{effect fn ready()->string}
+fn pure()->Ops<effect fn(string)->string,string>{Ops{operation:echo}}
+effect fn make()->Ops<effect fn(string)->string,string> uses {Audit}{let value=run Audit.ready();Ops{operation:echo}}`
+	for _, target := range []string{"go", "js"} {
+		first := CompileFor(source, target)
+		if !first.Checked {
+			t.Fatalf("%s source control: %+v", target, first.Diagnostics)
+		}
+		dto, err := exportInterfaceSummary(first.projector, currentModuleIdentity, first.Revision, first.Program.Functions)
+		if err != nil {
+			t.Fatalf("%s export: %v", target, err)
+		}
+		fresh := CompileFor(source, target)
+		if err := fresh.projector.admitInterfaceSummary(dto, fresh.Program.Functions); err != nil {
+			t.Fatalf("%s unchanged summary control: %v", target, err)
+		}
+		seenRecipe, seenApplication := false, false
+		for i, occurrence := range dto.Occurrences {
+			id := first.projector.typePublicToID[occurrence.Contract]
+			node := first.projector.node(id)
+			if node == nil || len(occurrence.Fields) == 0 {
+				continue
+			}
+			switch node.Kind {
+			case "recipe":
+				seenRecipe = true
+			case "application":
+				seenApplication = true
+			default:
+				continue
+			}
+			corrupted := dto
+			corrupted.Occurrences = append([]summaryOccurrence{}, dto.Occurrences...)
+			corrupted.Occurrences[i].Fields = []summaryFieldOccurrence{}
+			receiver := CompileFor(source, target)
+			if err := receiver.projector.admitInterfaceSummary(corrupted, receiver.Program.Functions); err == nil {
+				t.Fatalf("%s accepted missing callable fields for %s occurrence", target, node.Kind)
+			}
+		}
+		if !seenRecipe || !seenApplication {
+			t.Fatalf("%s transport fixture did not retain both recipe and application occurrences: recipe=%t application=%t", target, seenRecipe, seenApplication)
+		}
+	}
+}
+
 func TestBundledGenericDataCanonicalSources(t *testing.T) {
 	for _, path := range []string{"bundled/data/option.ef", "bundled/data/result.ef"} {
 		data, err := bundledSources.ReadFile(path)

@@ -591,7 +591,7 @@ func (a *summaryAdmission) occurrence(ref string, depth int) checkedExpression {
 			a.err = fmt.Errorf("invalid occurrence layout kind")
 			return checkedExpression{}
 		}
-		complete := hasShape && a.c.callableFieldLayout(id, map[TypeID]bool{}, map[TypeID]bool{}, 0)
+		complete := hasShape && a.c.callableFieldLayout(layoutID, map[TypeID]bool{}, map[TypeID]bool{}, 0)
 		fields = a.payloadOccurrences(item.Fields, shape, depth, complete)
 		if a.err != nil {
 			return checkedExpression{}
