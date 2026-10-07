@@ -27,7 +27,7 @@ def read_mapping(path: Path) -> dict:
 
 
 def validate_mapping(mapping: dict, root: Path = ROOT) -> list[str]:
-    manifest = corpus.validate_self_contained(root / corpus.OUTPUT_RELATIVE)
+    checkout, manifest = corpus.verify(root)
     if set(mapping) != {"schemaVersion", "sourceCommit", "cases"} or type(mapping["schemaVersion"]) is not int or mapping["schemaVersion"] != 1 or mapping["sourceCommit"] != corpus.COMMIT:
         raise corpus.ImportError("mapping schema or upstream pin is invalid")
     cases = mapping["cases"]
@@ -56,7 +56,7 @@ def validate_mapping(mapping: dict, root: Path = ROOT) -> list[str]:
         line, label = upstream["line"], upstream["label"]
         if path not in references or not isinstance(line, int) or isinstance(line, bool) or line < 1 or not isinstance(label, str) or not label:
             raise corpus.ImportError(f"upstream target is invalid for {identity}")
-        lines = (root / corpus.OUTPUT_RELATIVE / path).read_text(encoding="utf-8").splitlines()
+        lines = (checkout / path).read_text(encoding="utf-8").splitlines()
         if line > len(lines) or re.match(r'\s*it(?:\.(?:effect|live))?\("' + re.escape(label) + r'",', lines[line - 1]) is None:
             raise corpus.ImportError(f"upstream case anchor does not match for {identity}")
         if (path, line) in upstream_cases:

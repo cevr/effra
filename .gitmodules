@@ -1,0 +1,4 @@
+[submodule "conformance/upstream/effect"]
+	path = conformance/upstream/effect
+	url = https://github.com/Effect-TS/effect.git
+	shallow = true

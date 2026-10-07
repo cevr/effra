@@ -2,7 +2,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 python3 scripts/wayfinder.py check
-python3 -B scripts/import_effect_conformance.py --self-check
+python3 -B scripts/import_effect_conformance.py
 python3 -B scripts/test_import_effect_conformance.py
 python3 -B scripts/check_effect_conformance.py
 python3 -B scripts/test_effect_conformance.py

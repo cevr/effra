@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -87,6 +88,8 @@ class MappingTests(unittest.TestCase):
     def test_missing_or_unexecutable_go_is_a_structured_cli_refusal(self) -> None:
         for executable in (False, True):
             with self.subTest(unexecutable_file=executable), tempfile.TemporaryDirectory() as directory:
+                # The corpus verifier reads the pinned submodule through git; only Go is absent.
+                os.symlink(shutil.which("git"), Path(directory) / "git")
                 if executable:
                     runner = Path(directory) / "go"
                     runner.write_bytes(b"unexecutable fixture")

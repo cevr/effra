@@ -1,8 +1,8 @@
 # Upstream behavioral conformance
 
-Effra keeps a licensed, byte-preserved Effect 4.0.1 test reference at commit `460272d30457f4697d8b8c52cad41caccbcace08`. Its **746 reference files and 26 license files are not 746 passing Effra tests**. The ordinary gate checks the complete inventory and independently pinned hashes offline; it never executes the copied TypeScript suite or its imported shell fixtures. Executable permission bits are not copied. Future native fixtures belong to their own Effra test owner.
+Effra pins Effect 4.0.1 at commit `460272d30457f4697d8b8c52cad41caccbcace08` as the git submodule [conformance/upstream/effect](../conformance/README.md). The manifest selects **746 reference files and 26 license files; they are not 746 passing Effra tests**. The ordinary gate requires the checkout at exactly the pinned commit with no modified tracked files. It recomputes the selection, license mapping and per-file hashes from the commit's git objects, compares them with the manifest, and checks the independently pinned integrity root. It never executes the upstream TypeScript suite or its shell fixtures. Future native fixtures belong to their own Effra test owner.
 
-[effect-cases.json](../conformance/effect-cases.json) is the maintained authority for selected behavioral comparisons. Each stable ID points to an exact pinned test file, declaration line and label, states its behavior and limits, and names the existing Effra test that exercises both Go and JS when applicable. The imported manifest authenticates the entire referenced file. Line anchors distinguish identical labels in different suites. IDs stay stable when a future upstream pin changes; review the behavior and update the anchor deliberately.
+[effect-cases.json](../conformance/effect-cases.json) is the maintained authority for selected behavioral comparisons. Each stable ID points to an exact pinned test file, declaration line and label, states its behavior and limits, and names the existing Effra test that exercises both Go and JS when applicable. The manifest authenticates the entire referenced file. Line anchors distinguish identical labels in different suites. IDs stay stable when a future upstream pin changes; review the behavior and update the anchor deliberately.
 
 | Status | Meaning |
 | --- | --- |
@@ -14,8 +14,13 @@ Effra keeps a licensed, byte-preserved Effect 4.0.1 test reference at commit `46
 Unlisted cases remain **reference-only, unassessed**. A source pointer records where evidence lives, not a stored result that stays passing forever. The validator checks pin, corpus integrity, exact upstream anchors, duplicate IDs/cases, status/evidence structure and named Go test declarations. It cannot prove semantic equivalence or infer from a Go function name that its assertions cover a claim; reviewing those assertions and executing them remain required. Arbitrary extra “passed” metadata is refused.
 
 ```sh
+# Once per clone, worktree or Rift: shallow checkout of the pinned submodule
+scripts/init_upstream.sh
+# Offline: fetch the pinned commit from a local Effect clone instead of GitHub
+EFFRA_UPSTREAM_MIRROR=/path/to/effect-clone scripts/init_upstream.sh
+
 # Offline reference and mapping admission
-python3 -B scripts/import_effect_conformance.py --self-check
+python3 -B scripts/import_effect_conformance.py
 python3 -B scripts/check_effect_conformance.py
 
 # Execute the selected existing acceptance tests: real generated Go and JS
@@ -23,10 +28,9 @@ python3 -B scripts/check_effect_conformance.py --run
 
 # Full gate also runs all Go tests, including the selected acceptance tests
 ./scripts/gate.sh
-
-# Optional source-backed verification against immutable cached Git objects
-python3 -B scripts/import_effect_conformance.py /path/to/effect-cache --check
 ```
+
+A missing checkout, a checkout at another commit or a modified tracked file fails with one message naming `scripts/init_upstream.sh`; `scripts/init_upstream.sh --force` restores modified files. To move the pin, fetch and check out the new commit in the submodule, update `COMMIT`, `TAG` and `sourceCommit` in `effect-cases.json`, run `python3 -B scripts/import_effect_conformance.py --refresh`, and review the printed integrity identities before copying them into the script's independently pinned release constants. Then review every mapped anchor.
 
 The first selection covers child interruption and completed child-before-parent cleanup, preservation of an expected failure plus cleanup defect, and virtual-time admission of an unstarted fork. Timeout has an explicit difference row: Effra's nominal `Timeout` and required `Scheduler` differ from upstream `Cause.TimeoutError`; a supplemental timer-defect test ensures defects are not rewritten as timeouts. Existing lifecycle acceptance also checks unobserved child failure, but that assertion has no selected upstream case mapping yet and is not counted as another port.
 

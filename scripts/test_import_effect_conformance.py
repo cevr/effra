@@ -1,4 +1,4 @@
-"""Negative tests for the pinned, reference-only Effect snapshot importer."""
+"""Controls for the pinned, reference-only Effect upstream submodule and its manifest."""
 
 from __future__ import annotations
 
@@ -8,8 +8,10 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -20,299 +22,200 @@ assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
+GIT_ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+GIT = [
+    "git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + os.devnull, "-c", "init.templateDir=",
+    "-c", "protocol.file.allow=always", "-c", "user.name=Snapshot Test", "-c", "user.email=test@example.invalid",
+]
 
-class SnapshotIntegrityTests(unittest.TestCase):
+
+def git(repository: pathlib.Path, *args: str) -> str:
+    return subprocess.run([*GIT, "-C", str(repository), *args], check=True, capture_output=True, text=True, env=GIT_ENV).stdout.strip()
+
+
+def write(root: pathlib.Path, files: dict[str, bytes]) -> None:
+    for relative, contents in files.items():
+        (root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (root / relative).write_bytes(contents)
+
+
+class SubmoduleReferenceTests(unittest.TestCase):
+    """A fixture superproject whose submodule pins a fixture upstream commit."""
+
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(prefix="effect-conformance-test-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="effect-upstream-test-")
         self.root = pathlib.Path(self.temporary.name)
-        self.source = self.root / "source"
-        (self.source / "packages/effect/test").mkdir(parents=True)
-        (self.source / "packages/other/test").mkdir(parents=True)
-        (self.source / "LICENSE").write_bytes(b"root-license\n")
-        (self.source / "packages/effect/LICENSE").write_bytes(b"effect-license\n")
-        (self.source / "packages/effect/test/one.test.ts").write_bytes(b"export const one = 1\n")
-        (self.source / "packages/other/test/two.test.ts").write_bytes(b"export const two = 2\n")
-        git_env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
-        git = ["git", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + os.devnull, "-c", "init.templateDir="]
-        template = self.root / "empty-template"
-        template.mkdir()
-        subprocess.run([*git, "init", "--template=" + str(template), "-q", str(self.source)], check=True, env=git_env)
-        subprocess.run([*git, "-C", str(self.source), "config", "user.email", "test@example.invalid"], check=True, env=git_env)
-        subprocess.run([*git, "-C", str(self.source), "config", "user.name", "Snapshot Test"], check=True, env=git_env)
-        subprocess.run([*git, "-C", str(self.source), "add", "."], check=True, env=git_env)
-        subprocess.run([*git, "-C", str(self.source), "commit", "-qm", "fixture"], check=True, env=git_env)
-        self.commit = subprocess.check_output([*git, "-C", str(self.source), "rev-parse", "HEAD"], text=True, env=git_env).strip()
-        self.custom_tag = f"custom:{self.commit}"
-        self.output = self.root / "snapshot"
-        MODULE.import_snapshot(self.source, self.output, self.commit, self.custom_tag)
+        self.upstream = self.root / "upstream"
+        write(self.upstream, {
+            "LICENSE": b"root-license\n",
+            "packages/effect/LICENSE": b"effect-license\n",
+            "packages/effect/src/Effect.ts": b"export const source = 0\n",
+            "packages/effect/test/one.test.ts": b"export const one = 1\n",
+            "packages/other/test/two.test.ts": b"export const two = 2\n",
+        })
+        git(self.root, "init", "-q", str(self.upstream))
+        git(self.upstream, "add", ".")
+        git(self.upstream, "commit", "-qm", "pinned")
+        self.commit = git(self.upstream, "rev-parse", "HEAD")
+        write(self.upstream, {"packages/other/test/two.test.ts": b"export const two = 22\n"})
+        git(self.upstream, "commit", "-qam", "later")
+        self.later = git(self.upstream, "rev-parse", "HEAD")
+        self.tag = f"custom:{self.commit}"
+
+        self.effra = self.root / "effra"
+        git(self.root, "init", "-q", str(self.effra))
+        (self.effra / "scripts").mkdir()
+        shutil.copy2(ROOT / "scripts" / "init_upstream.sh", self.effra / "scripts" / "init_upstream.sh")
+        git(self.effra, "submodule", "add", "-q", str(self.upstream), str(MODULE.CHECKOUT_RELATIVE))
+        self.checkout = self.effra / MODULE.CHECKOUT_RELATIVE
+        git(self.checkout, "checkout", "-q", "--detach", self.commit)
+        # Only an explicit mirror can satisfy initialization; the recorded URL does not exist.
+        git(self.effra, "config", "-f", ".gitmodules", f"submodule.{MODULE.CHECKOUT_RELATIVE}.url", "file:///nonexistent/effect.git")
+        git(self.effra, "add", ".")
+        git(self.effra, "commit", "-qm", "pin upstream")
+        MODULE.refresh(self.effra, self.commit, self.tag)
+        git(self.effra, "add", str(MODULE.MANIFEST_RELATIVE))
+        git(self.effra, "commit", "-qm", "record manifest")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def manifest(self, output: pathlib.Path) -> dict[str, object]:
-        return json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    def verify(self) -> dict[str, object]:
+        return MODULE.verify(self.effra, self.commit, self.tag)[1]
 
-    def assert_invalid(self, output: pathlib.Path) -> None:
-        with self.assertRaises(MODULE.ImportError):
-            MODULE.validate(self.source, output, self.manifest(output))
+    def assert_refused(self, *fragments: str) -> None:
+        with self.assertRaises(MODULE.ImportError) as refusal:
+            self.verify()
+        for fragment in fragments:
+            self.assertIn(fragment, str(refusal.exception))
 
-    def copy_snapshot(self, name: str) -> pathlib.Path:
-        output = self.root / name
-        shutil.copytree(self.output, output)
-        return output
+    def init_upstream(self, *args: str, mirror: pathlib.Path | None = None) -> None:
+        env = dict(GIT_ENV, EFFRA_UPSTREAM_MIRROR=str(mirror) if mirror else "")
+        subprocess.run(["sh", str(self.effra / "scripts" / "init_upstream.sh"), *args], check=True, capture_output=True, env=env)
 
-    def test_generated_snapshot_is_source_backed_and_maps_nearest_licenses(self) -> None:
-        manifest = self.manifest(self.output)
+    def test_refresh_records_selection_and_nearest_licenses(self) -> None:
+        manifest = self.verify()
         self.assertEqual(manifest["selection"]["count"], 2)
-        self.assertEqual(manifest["licenses"]["mapping"]["packages/effect/test/one.test.ts"], "packages/effect/LICENSE")
-        self.assertEqual(manifest["licenses"]["mapping"]["packages/other/test/two.test.ts"], "LICENSE")
-        MODULE.validate(self.source, self.output, manifest)
-
-    def test_custom_snapshot_is_not_release_eligible(self) -> None:
+        self.assertEqual(manifest["licenses"]["mapping"], {
+            "packages/effect/test/one.test.ts": "packages/effect/LICENSE",
+            "packages/other/test/two.test.ts": "LICENSE",
+        })
+        self.assertEqual([item["path"] for item in manifest["files"]], [
+            "LICENSE", "packages/effect/LICENSE", "packages/effect/test/one.test.ts", "packages/other/test/two.test.ts",
+        ])
+        self.assertEqual(manifest["provenance"]["kind"], "custom-self-consistent")
         with self.assertRaises(MODULE.ImportError):
-            MODULE.validate_self_contained(self.output)
-        MODULE.validate_self_contained(self.output, allow_custom=True)
+            MODULE.validate_release_identity(manifest)
 
-    def test_missing_license_fails(self) -> None:
-        output = self.copy_snapshot("missing-license")
-        (output / "packages/effect/LICENSE").unlink()
-        self.assert_invalid(output)
+    def test_uninitialized_checkout_names_init_and_offline_mirror_restores_it(self) -> None:
+        git(self.effra, "submodule", "deinit", "-q", "-f", str(MODULE.CHECKOUT_RELATIVE))
+        shutil.rmtree(self.effra / ".git" / "modules")
+        self.assert_refused("is not initialized; run scripts/init_upstream.sh")
+        result = subprocess.run(
+            [sys.executable, "-B", str(ROOT / "scripts" / "import_effect_conformance.py"), "--root", str(self.effra)],
+            capture_output=True, text=True, check=False, env=GIT_ENV,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stderr.splitlines(), [
+            f"import_effect_conformance: Effect upstream checkout {MODULE.CHECKOUT_RELATIVE} is not initialized; run scripts/init_upstream.sh",
+        ])
 
-    def test_wrong_schema_fails(self) -> None:
-        output = self.copy_snapshot("wrong-schema")
-        manifest = self.manifest(output)
-        manifest["schemaVersion"] = 1
-        (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        self.assert_invalid(output)
+        self.init_upstream(mirror=self.upstream)
+        self.verify()
+        self.assertEqual(git(self.checkout, "rev-parse", "--is-shallow-repository"), "true")
+        self.assertEqual(git(self.effra, "status", "--porcelain"), "")
 
-    def test_wrong_pin_fails(self) -> None:
-        output = self.copy_snapshot("wrong-pin")
-        manifest = self.manifest(output)
-        manifest["source"]["commit"] = "0" * 40
-        manifest["source"]["url"] = "https://github.com/Effect-TS/effect/tree/" + "0" * 40
-        (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        self.assert_invalid(output)
+    def test_checkout_at_another_commit_names_init_which_restores_the_pin(self) -> None:
+        git(self.checkout, "checkout", "-q", "--detach", self.later)
+        self.assert_refused(f"is at {self.later}, not the pinned commit {self.commit}; run scripts/init_upstream.sh")
+        self.init_upstream()
+        self.verify()
 
-    def test_duplicate_path_fails(self) -> None:
-        output = self.copy_snapshot("duplicate-path")
-        manifest = self.manifest(output)
-        manifest["files"].append(dict(manifest["files"][0]))
-        (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        self.assert_invalid(output)
-
-    def test_changed_bytes_fail(self) -> None:
-        output = self.copy_snapshot("changed-bytes")
-        (output / "packages/effect/test/one.test.ts").write_bytes(b"changed\n")
-        self.assert_invalid(output)
-
-    def test_malformed_types_are_import_errors(self) -> None:
-        output = self.copy_snapshot("malformed-types")
-        manifest = self.manifest(output)
-        manifest["files"][0]["kind"] = []
-        (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        self.assert_invalid(output)
-
-        output = self.copy_snapshot("malformed-license-mapping")
-        manifest = self.manifest(output)
-        reference_path = next(item["path"] for item in manifest["files"] if item["kind"] == "reference")
-        manifest["licenses"]["mapping"][reference_path] = []
-        (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        self.assert_invalid(output)
-
-    def test_special_files_are_rejected_and_preserved(self) -> None:
-        if not hasattr(os, "mkfifo"):
-            self.skipTest("FIFO creation is unavailable on this platform")
-        output = self.copy_snapshot("special-file")
-        fifo = output / "unlisted.fifo"
-        os.mkfifo(fifo)
-        self.assert_invalid(output)
-        with self.assertRaises(MODULE.ImportError):
-            MODULE.validate_self_contained(output, allow_custom=True)
-        self.assertFalse(MODULE.owned_snapshot(output))
-        self.assertTrue(fifo.exists())
-
-        staged = self.copy_snapshot("special-file-staged")
-        staged_fifo = staged / "unlisted.fifo"
-        os.mkfifo(staged_fifo)
-        with self.assertRaises(MODULE.ImportError):
-            MODULE.replace_owned_snapshot(staged, self.output)
-        self.assertTrue(staged_fifo.exists())
-        self.assertTrue((self.output / "manifest.json").is_file())
-
-    def test_jointly_changed_source_and_manifest_still_fails(self) -> None:
-        output = self.copy_snapshot("joint-change")
-        target = output / "packages/effect/test/one.test.ts"
-        target.write_bytes(b"changed-and-rehashed\n")
-        manifest = self.manifest(output)
+    def test_modified_tracked_file_is_refused_even_with_a_rehashed_manifest(self) -> None:
+        target = self.checkout / "packages/effect/test/one.test.ts"
+        target.write_bytes(b"changed and rehashed\n")
+        manifest_path = self.effra / MODULE.MANIFEST_RELATIVE
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         entry = next(item for item in manifest["files"] if item["path"] == "packages/effect/test/one.test.ts")
         entry["bytes"] = target.stat().st_size
-        entry["sha256"] = MODULE.sha256_file(target)
-        (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-        self.assert_invalid(output)
-
-    def test_non_owned_output_is_not_replaced(self) -> None:
-        output = self.root / "non-owned"
-        output.mkdir()
-        (output / "README.md").write_text("unrelated", encoding="utf-8")
-        (output / "manifest.json").write_text('{"name":"unrelated"}', encoding="utf-8")
-        (output / "keep.txt").write_text("keep", encoding="utf-8")
-        with self.assertRaises(MODULE.ImportError):
-            MODULE.import_snapshot(self.source, output, self.commit, self.custom_tag)
-        self.assertEqual((output / "keep.txt").read_text(encoding="utf-8"), "keep")
-
-    def test_invalid_utf8_readme_and_deep_json_are_structured_refusals(self) -> None:
-        for name, filename, contents in (
-            ("invalid-readme", "README.md", b"\xff"),
-            ("deep-manifest", "manifest.json", b"[" * 100000 + b"0" + b"]" * 100000),
-        ):
-            with self.subTest(name=name):
-                output = self.copy_snapshot(name)
-                (output / filename).write_bytes(contents)
-                with self.assertRaises(MODULE.ImportError) as refusal:
-                    MODULE.validate_self_contained(output, allow_custom=True)
-                if name == "deep-manifest":
-                    self.assertIn("not valid UTF-8 JSON", str(refusal.exception))
-                self.assertFalse(MODULE.owned_snapshot(output))
-                staged = self.copy_snapshot(name + "-staged")
-                with self.assertRaises(MODULE.ImportError):
-                    MODULE.replace_owned_snapshot(staged, output)
-                self.assertEqual((output / filename).read_bytes(), contents)
-                result = subprocess.run(
-                    ["python3", "-B", str(ROOT / "scripts/import_effect_conformance.py"), "--self-check", "--output", str(output)],
-                    capture_output=True, text=True, check=False,
-                )
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("import_effect_conformance:", result.stderr)
-                if name == "deep-manifest":
-                    self.assertIn("not valid UTF-8 JSON", result.stderr)
-                self.assertNotIn("Traceback", result.stderr)
-
-
-class ReleaseSnapshotIntegrityTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(prefix="effect-release-conformance-test-")
-        self.root = pathlib.Path(self.temporary.name)
-        self.source = ROOT / "conformance" / "upstream" / "effect-4.0.1"
-        self.output = self.root / "snapshot"
-        shutil.copytree(self.source, self.output)
-
-    def tearDown(self) -> None:
-        self.temporary.cleanup()
-
-    def manifest(self) -> dict[str, object]:
-        return json.loads((self.output / "manifest.json").read_text(encoding="utf-8"))
-
-    def write_manifest(self, manifest: dict[str, object]) -> None:
-        (self.output / "manifest.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
-
-    def assert_invalid(self) -> None:
-        with self.assertRaises(MODULE.ImportError):
-            MODULE.validate_self_contained(self.output)
-
-    def test_committed_release_snapshot_is_exactly_pinned(self) -> None:
-        manifest = MODULE.validate_self_contained(self.source)
-        self.assertEqual((self.source / "manifest.json").read_text(encoding="utf-8"), json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-        self.assertEqual(manifest["selection"]["count"], 746)
-        self.assertEqual(len(manifest["licenses"]["paths"]), 26)
-        self.assertEqual(manifest["source"]["commit"], MODULE.COMMIT)
-        self.assertEqual(manifest["source"]["tag"], MODULE.TAG)
-
-    def test_offline_release_negatives_reject_metadata_and_payload_together(self) -> None:
-        original_manifest = self.manifest()
-
-        manifest = self.manifest()
-        manifest["source"]["commit"] = "0" * 40
-        manifest["source"]["url"] = "https://github.com/Effect-TS/effect/tree/" + "0" * 40
-        self.write_manifest(manifest)
-        self.assert_invalid()
-        self.write_manifest(original_manifest)
-
-        manifest = self.manifest()
-        manifest["selection"]["count"] = 745
-        self.write_manifest(manifest)
-        self.assert_invalid()
-        self.write_manifest(original_manifest)
-
-        manifest = self.manifest()
-        manifest["files"][0]["path"] = "../escape"
-        self.write_manifest(manifest)
-        self.assert_invalid()
-        self.write_manifest(original_manifest)
-
-        manifest = self.manifest()
-        manifest["files"].append(dict(manifest["files"][0]))
-        self.write_manifest(manifest)
-        self.assert_invalid()
-        self.write_manifest(original_manifest)
-
-        manifest = self.manifest()
-        reference = next(item for item in manifest["files"] if item["kind"] == "reference")
-        reference["license"] = "missing-license"
-        manifest["licenses"]["mapping"][reference["path"]] = "missing-license"
-        self.write_manifest(manifest)
-        self.assert_invalid()
-        self.write_manifest(original_manifest)
-
-        manifest = self.manifest()
-        manifest["files"][0]["bytes"] = "not-an-integer"
-        self.write_manifest(manifest)
-        self.assert_invalid()
-        self.write_manifest(original_manifest)
-
-        target = self.output / "packages/ai/anthropic/test/AnthropicClient.test.ts"
-        original_bytes = target.read_bytes()
-        target.write_bytes(b"jointly changed payload\n")
-        manifest = self.manifest()
-        entry = next(item for item in manifest["files"] if item["path"] == "packages/ai/anthropic/test/AnthropicClient.test.ts")
-        entry["bytes"] = target.stat().st_size
-        entry["sha256"] = MODULE.sha256_file(target)
+        entry["sha256"] = MODULE.sha256_bytes(target.read_bytes())
         manifest["integrity"] = MODULE.integrity_for_manifest(manifest)
-        self.write_manifest(manifest)
-        with self.assertRaises(MODULE.ImportError) as error:
-            MODULE.validate_self_contained(self.output)
-        self.assertIn("independently pinned", str(error.exception))
-        target.write_bytes(original_bytes)
+        manifest_path.write_text(MODULE.render_manifest(manifest), encoding="utf-8")
+        self.assert_refused("has modified tracked files", "run scripts/init_upstream.sh --force")
+        self.init_upstream("--force")
+        # The checkout is restored; hashes still come from the pinned objects.
+        self.assert_refused("manifest differs from the pinned checkout at /files[packages/effect/test/one.test.ts]/sha256")
 
-        target.write_bytes(b"changed payload only\n")
-        self.write_manifest(original_manifest)
-        self.assert_invalid()
+    def test_gitlink_must_record_the_pinned_commit(self) -> None:
+        with self.assertRaises(MODULE.ImportError) as refusal:
+            MODULE.verify(self.effra, self.later, f"custom:{self.later}")
+        self.assertIn(f"records {self.commit}, not the pinned commit {self.later}", str(refusal.exception))
 
-    def test_offline_rejects_fully_rehashed_payload_mutation(self) -> None:
-        target = self.output / "packages/ai/anthropic/test/AnthropicClient.test.ts"
-        original_bytes = target.read_bytes()
-        original_manifest = self.manifest()
-        try:
-            target.write_bytes(b"fully changed payload with rehashed metadata\n")
-            manifest = self.manifest()
-            entry = next(item for item in manifest["files"] if item["path"] == "packages/ai/anthropic/test/AnthropicClient.test.ts")
-            entry["bytes"] = target.stat().st_size
-            entry["sha256"] = MODULE.sha256_file(target)
-            manifest["integrity"] = MODULE.integrity_for_manifest(manifest)
-            self.write_manifest(manifest)
-            with self.assertRaises(MODULE.ImportError) as error:
-                MODULE.validate_self_contained(self.output)
-            self.assertIn("independently pinned", str(error.exception))
-        finally:
-            target.write_bytes(original_bytes)
-            self.write_manifest(original_manifest)
+    def test_manifest_must_equal_the_recomputed_canonical_manifest(self) -> None:
+        manifest_path = self.effra / MODULE.MANIFEST_RELATIVE
+        original = manifest_path.read_text(encoding="utf-8")
+        for mutate, location in (
+            (lambda value: value["selection"].update(count=3), "/selection/count"),
+            (lambda value: value["files"].append(dict(value["files"][0])), "/files[length]"),
+            (lambda value: value["licenses"]["mapping"].update({"packages/other/test/two.test.ts": "packages/effect/LICENSE"}), "/licenses/mapping/packages/other/test/two.test.ts"),
+            (lambda value: value["source"].update(tag="effect@4.0.1"), "/source/tag"),
+            (lambda value: value.update(status="passing"), "/status"),
+        ):
+            with self.subTest(location=location):
+                manifest = json.loads(original)
+                mutate(manifest)
+                manifest_path.write_text(MODULE.render_manifest(manifest), encoding="utf-8")
+                self.assert_refused(f"manifest differs from the pinned checkout at {location}")
+        manifest_path.write_text(json.dumps(json.loads(original)), encoding="utf-8")
+        self.assert_refused("manifest is not in canonical form")
+        for contents in (b"\xff", b"[" * 100000 + b"0" + b"]" * 100000):
+            manifest_path.write_bytes(contents)
+            self.assert_refused("manifest is not readable UTF-8 JSON")
 
-    def test_offline_malformed_types_are_import_errors(self) -> None:
-        original_manifest = self.manifest()
-        try:
-            manifest = self.manifest()
-            manifest["files"][0]["kind"] = None
-            self.write_manifest(manifest)
-            self.assert_invalid()
+    def test_missing_git_is_a_structured_cli_refusal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-B", str(ROOT / "scripts" / "import_effect_conformance.py"), "--root", str(self.effra)],
+                capture_output=True, text=True, check=False, env=dict(GIT_ENV, PATH=directory),
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("import_effect_conformance: cannot execute git:", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
-            manifest = self.manifest()
-            reference_path = next(item["path"] for item in manifest["files"] if item["kind"] == "reference")
-            manifest["licenses"]["mapping"][reference_path] = {}
-            self.write_manifest(manifest)
-            self.assert_invalid()
-        finally:
-            self.write_manifest(original_manifest)
+
+class ReleaseReferenceTests(unittest.TestCase):
+    """The repository's own submodule at the Effect 4.0.1 release pin."""
+
+    def setUp(self) -> None:
+        self.checkout, self.manifest = MODULE.verify(ROOT)
+
+    def test_committed_manifest_is_exactly_the_pinned_release(self) -> None:
+        self.assertEqual(self.checkout, ROOT / MODULE.CHECKOUT_RELATIVE)
+        self.assertEqual(self.manifest["source"]["commit"], MODULE.COMMIT)
+        self.assertEqual(self.manifest["source"]["tag"], MODULE.TAG)
+        self.assertEqual(self.manifest["selection"]["count"], 746)
+        self.assertEqual(len(self.manifest["licenses"]["paths"]), 26)
+        self.assertEqual(self.manifest["integrity"]["rootSha256"], MODULE.RELEASE_ROOT_IDENTITY_SHA256)
+        self.assertEqual(self.manifest["integrity"]["referenceIdentitySha256"], MODULE.RELEASE_REFERENCE_IDENTITY_SHA256)
+        self.assertEqual(git(ROOT, "ls-files", "--stage", "--", str(MODULE.CHECKOUT_RELATIVE)).split()[:2], ["160000", MODULE.COMMIT])
+
+    def test_rehashed_manifest_entry_is_rejected(self) -> None:
+        manifest = json.loads(json.dumps(self.manifest))
+        entry = next(item for item in manifest["files"] if item["path"] == "packages/ai/anthropic/test/AnthropicClient.test.ts")
+        entry["sha256"] = MODULE.sha256_bytes(b"fully changed payload with rehashed metadata\n")
+        manifest["integrity"] = MODULE.integrity_for_manifest(manifest)
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "manifest.json"
+            path.write_text(MODULE.render_manifest(manifest), encoding="utf-8")
+            with self.assertRaises(MODULE.ImportError) as refusal:
+                MODULE.verify_manifest(self.checkout, path, MODULE.COMMIT, MODULE.TAG)
+        self.assertIn("/files[packages/ai/anthropic/test/AnthropicClient.test.ts]/sha256", str(refusal.exception))
+
+    def test_independent_release_identity_pins_the_selection_rule(self) -> None:
+        with mock.patch.object(MODULE, "COMPONENTS", MODULE.COMPONENTS - {"typetest"}):
+            changed = MODULE.build_manifest(self.checkout, MODULE.COMMIT, MODULE.TAG)
+        with self.assertRaises(MODULE.ImportError):
+            MODULE.validate_release_identity(changed)
 
 
 if __name__ == "__main__":
