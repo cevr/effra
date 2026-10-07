@@ -104,6 +104,11 @@ var absentProbes = []struct {
 	{"return-any", `fn f() -> any { "a" }`, "any", "any", "Effra has no `any` type", "closed enum", "enum", 2},
 	{"field-unknown", "record Box { value: unknown }\neffect fn main() -> void { void }", "unknown", "unknown", "Effra has no `unknown` type", "closed enum", "enum", 1},
 	{"configuration-any", "service S { effect fn get() -> string }\nimpl Fixed(config: any) for S { effect fn get() -> string { \"a\" } }\neffect fn main() -> void { void }", "any", "any", "Effra has no `any` type", "closed enum", "enum", 1},
+	{"grouped-param", `fn f(x: (unknown)) -> string { "a" }`, "(unknown)", "unknown", "Effra has no `unknown` type", "closed enum", "enum", 1},
+	{"grouped-return", `fn f() -> ( any ) { "a" }`, "( any )", "any", "Effra has no `any` type", "closed enum", "enum", 2},
+	{"grouped-field", "record Box { value: (unknown) }\neffect fn main() -> void { void }", "(unknown)", "unknown", "Effra has no `unknown` type", "closed enum", "enum", 1},
+	{"grouped-variant-field", "enum E { A(x: (any)) }\neffect fn main() -> void { void }", "(any)", "any", "Effra has no `any` type", "closed enum", "enum", 1},
+	{"grouped-configuration", "service S { effect fn get() -> string }\nimpl Fixed(config: ((any))) for S { effect fn get() -> string { \"a\" } }\neffect fn main() -> void { void }", "((any))", "any", "Effra has no `any` type", "closed enum", "enum", 1},
 	{"p32-bang", "fn f(b: bool) -> bool { !b }", "!", "!", "Effra has no `!` operator", "`if b { false } else { true }`", "booleans", 1},
 	{"inequality", "fn f(a: string, b: string) -> bool { a != b }", "!=", "!=", "Effra has no `!=` operator", "`==`", "booleans", 1},
 	{"p33-and", "fn f(a: bool, b: bool) -> bool { a && b }", "&&", "&&", "Effra has no `&&` operator", "`if a { b } else { false }`", "booleans", 1},
@@ -175,6 +180,9 @@ func TestAbsentSyntaxDiagnosticsAcrossCLIMCPAndLSP(t *testing.T) {
 		cliFindings[probe.name] = finding
 		encode(map[string]any{"jsonrpc": "2.0", "id": index + 1, "method": "tools/call", "params": map[string]any{"name": "project.diagnostics", "arguments": map[string]any{"file": probe.name + ".ef"}}})
 		lspInput.Write(voidLSPFrame(t, map[string]any{"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": map[string]any{"textDocument": map[string]any{"uri": "file:///absent/" + probe.name + ".ef", "languageId": "effra", "version": 1, "text": probe.source}}}))
+		// Closing keeps the probes under the server's open-document limit; the
+		// empty publication on close carries no EF003 to collect.
+		lspInput.Write(voidLSPFrame(t, map[string]any{"jsonrpc": "2.0", "method": "textDocument/didClose", "params": map[string]any{"textDocument": map[string]any{"uri": "file:///absent/" + probe.name + ".ef"}}}))
 	}
 
 	// MCP reports the same finding, help and editor projection.

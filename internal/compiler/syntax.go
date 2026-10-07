@@ -64,7 +64,7 @@ type Param struct {
 	TypeRef    TypeRef `json:"typeRef"`
 	Span       Span    `json:"span"`
 	Extent     Span    `json:"-"`
-	TypeSpan   Span    `json:"-"` // the annotation's tokens, for type-position diagnostics
+	TypeSpan   Span    `json:"-"` // the type's tokens inside any grouping, for type-position diagnostics
 	typeID     TypeID
 	sourceType *sourceType
 	binding    *localBinding
@@ -612,9 +612,8 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 					for !p.accept(")") {
 						field := p.name()
 						p.expect(":")
-						typeStart := p.peek().span
-						typ := p.typ()
-						variant.Fields = append(variant.Fields, Field{Name: field.text, Type: typ, sourceType: p.types[typ], Span: field.span, TypeSpan: p.extent(typeStart)})
+						typ, typeSpan := p.typeAnnotation()
+						variant.Fields = append(variant.Fields, Field{Name: field.text, Type: typ, sourceType: p.types[typ], Span: field.span, TypeSpan: typeSpan})
 						if !p.accept(",") {
 							p.expect(")")
 							break
@@ -652,9 +651,8 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 				for !p.accept(")") {
 					param := p.name()
 					p.expect(":")
-					typeStart := p.peek().span
-					typ := p.typ()
-					params = append(params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span), TypeSpan: p.extent(typeStart)})
+					typ, typeSpan := p.typeAnnotation()
+					params = append(params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span), TypeSpan: typeSpan})
 					if !p.accept(",") {
 						p.expect(")")
 						break
@@ -815,6 +813,13 @@ func (p *parser) fail(v token, message string) {
 	panic(syntaxFault{Diagnostic{Code: "EF002", Message: message, Span: v.span}})
 }
 func (p *parser) typ() string {
+	typ, _ := p.typeAnnotation()
+	return typ
+}
+
+// typeAnnotation parses a type and reports the span of its tokens inside any
+// grouping parentheses, so a diagnostic about the type marks the type itself.
+func (p *parser) typeAnnotation() (string, Span) {
 	p.depth++
 	defer func() { p.depth-- }()
 	if p.depth > 64 {
@@ -826,10 +831,11 @@ func (p *parser) typ() string {
 			close := p.tokens[p.at-1]
 			p.failSpan(Span{Offset: open.span.Offset, Length: close.span.Offset + close.span.Length - open.span.Offset, Line: open.span.Line, Column: open.span.Column}, "use void instead of () for the no-value type")
 		}
-		inner := p.typ()
+		inner, span := p.typeAnnotation()
 		p.expect(")")
-		return inner
+		return inner, span
 	}
+	start := p.peek().span
 	if p.peek().text == "fn" || p.peek().text == "effect" {
 		typ := &sourceType{Effect: p.accept("effect")}
 		p.expect("fn")
@@ -857,16 +863,16 @@ func (p *parser) typ() string {
 		}
 		name := typ.display()
 		p.types[name] = typ
-		return name
+		return name, p.extent(start)
 	}
 	if p.peek().text == "void" {
 		p.take()
-		return voidTypeName
+		return voidTypeName, p.extent(start)
 	}
 	if form := p.hostTypeForm(); form != nil {
 		name := form.display()
 		p.types[name] = form
-		return name
+		return name, p.extent(start)
 	}
 	name := p.name()
 	if name.text == "Effect" && p.peek().text == "<" {
@@ -893,7 +899,7 @@ func (p *parser) typ() string {
 		text = t.display()
 		p.types[text] = t
 	}
-	return text
+	return text, p.extent(start)
 }
 
 // hostTypeForm parses Go's own spelling of a native pointer, slice or map
@@ -961,9 +967,8 @@ func (p *parser) fields() []Field {
 	for !p.accept("}") {
 		name := p.name()
 		p.expect(":")
-		typeStart := p.peek().span
-		typ := p.typ()
-		fields = append(fields, Field{Name: name.text, Type: typ, sourceType: p.types[typ], Span: name.span, TypeSpan: p.extent(typeStart)})
+		typ, typeSpan := p.typeAnnotation()
+		fields = append(fields, Field{Name: name.text, Type: typ, sourceType: p.types[typ], Span: name.span, TypeSpan: typeSpan})
 		if !p.accept(",") && !p.accept(";") {
 			if p.peek().text != "}" {
 				continue
@@ -1048,18 +1053,15 @@ func (p *parser) function(body bool) *Function {
 	for !p.accept(")") {
 		param := p.name()
 		p.expect(":")
-		typeStart := p.peek().span
-		typ := p.typ()
-		f.Params = append(f.Params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span), TypeSpan: p.extent(typeStart)})
+		typ, typeSpan := p.typeAnnotation()
+		f.Params = append(f.Params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span), TypeSpan: typeSpan})
 		if !p.accept(",") {
 			p.expect(")")
 			break
 		}
 	}
 	p.expect("->")
-	returnStart := p.peek().span
-	f.Return = p.typ()
-	f.ReturnSpan = p.extent(returnStart)
+	f.Return, f.ReturnSpan = p.typeAnnotation()
 	f.returnType = p.types[f.Return]
 	if p.accept("raises") {
 		f.Errors = p.row()
