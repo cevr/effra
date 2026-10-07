@@ -1,6 +1,8 @@
 package compiler
 
 import (
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -21,6 +23,52 @@ func TestAbsentSyntaxCatalogWording(t *testing.T) {
 		}
 		if entry.Help == "" || entry.Construct == "" {
 			t.Errorf("%s/%s lacks a construct family or help", entry.Position, entry.Spelling)
+		}
+	}
+}
+
+// The EF003 table in docs/tooling.md publishes the catalog: each row's
+// construct, backticked spellings and status must match it, so retiring or
+// reclassifying an entry fails until the table follows.
+func TestAbsentSyntaxDocsTableMatchesCatalog(t *testing.T) {
+	data, err := os.ReadFile("../../docs/tooling.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, table, found := strings.Cut(string(data), "| Construct | Spellings | Status |")
+	if !found {
+		t.Fatal("docs/tooling.md has no EF003 table")
+	}
+	table, _, _ = strings.Cut(table, "\n\n")
+	type classification struct{ construct, spelling, status string }
+	documented := map[classification]bool{}
+	spelling := regexp.MustCompile("`([^`]+)`")
+	construct := strings.NewReplacer("`", "", " ", "-", "/", "-")
+	for _, row := range strings.Split(table, "\n")[2:] {
+		cells := strings.Split(strings.Trim(row, "| "), " | ")
+		if len(cells) != 5 {
+			t.Fatalf("malformed EF003 row %q", row)
+		}
+		spellings := spelling.FindAllStringSubmatch(cells[1], -1)
+		if len(spellings) == 0 {
+			t.Errorf("EF003 row %q names no spelling", row)
+		}
+		for _, match := range spellings {
+			documented[classification{construct.Replace(cells[0]), match[1], cells[2]}] = true
+		}
+	}
+	cataloged := map[classification]bool{}
+	for _, entry := range absentSyntaxCatalog {
+		cataloged[classification{entry.Construct, entry.Spelling, entry.Status}] = true
+	}
+	for entry := range cataloged {
+		if !documented[entry] {
+			t.Errorf("docs/tooling.md EF003 table lacks %+v", entry)
+		}
+	}
+	for entry := range documented {
+		if !cataloged[entry] {
+			t.Errorf("docs/tooling.md EF003 table documents %+v, which the catalog does not", entry)
 		}
 	}
 }
