@@ -175,10 +175,11 @@ func TestJSEntryBehavesLikeTheCompletePrelude(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		complete, _, err := r.emitJS(jsProbe)
+		library, _, err := r.Emit(false)
 		if err != nil {
 			t.Fatal(err)
 		}
+		complete := withCompletePrelude(library)
 		runner := entry[strings.LastIndex(entry, "Effect.runPromise(__ef_function_main())"):]
 		dir := writeJSModule(t, map[string]string{"entry.mjs": entry, "complete.mjs": complete + runner})
 		pruned, prunedErr := runNode(t, dir, "entry.mjs")

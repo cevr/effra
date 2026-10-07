@@ -154,19 +154,58 @@ func runJS(t *testing.T, source, assertions string) string {
 
 func runJSForTarget(t *testing.T, target, source, assertions string) string {
 	t.Helper()
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("Bun is required for backend conformance tests")
-	}
 	r := CompileFor(source, target)
 	if !r.Checked {
 		t.Fatalf("%s target: %+v", target, r.Diagnostics)
 	}
-	// Probes call lowering helpers and `effect` exports directly, so they
-	// run against the library surface with the complete prelude.
-	js, _, err := r.emitJS(jsProbe)
+	js, _, err := r.Emit(false)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The probe runs the public library module. It must close over its own
+	// selected prelude, and every generated name an assertion calls must be
+	// rooted by the probe's source rather than injected by the test.
+	if defects := jsClosureDefects(js); len(defects) > 0 {
+		t.Fatalf("library module: %s\n%s", strings.Join(defects, "; "), js)
+	}
+	bound := map[string]bool{}
+	for _, match := range jsGeneratedBinding.FindAllStringSubmatch(js, -1) {
+		bound[match[1]] = true
+	}
+	for _, name := range jsGeneratedName.FindAllString(assertions, -1) {
+		if !bound[name] {
+			t.Fatalf("probe assertion calls %s, which its source does not root", name)
+		}
+	}
+	return runJSProbe(t, withProbeImports(js), assertions)
+}
+
+// withProbeImports widens a module's `effect` import to every name, since
+// probe assertions are test code that uses `effect` directly. The module's
+// own import closure is checked before the widening.
+func withProbeImports(js string) string {
+	return jsCompleteEffectImport + jsEffectImportLine.ReplaceAllString(js, "")
+}
+
+var jsCompleteEffectImport = "import { " + strings.Join(jsEffectImports, ", ") + " } from 'effect';\n"
+
+// withCompletePrelude replaces a module's selected prelude with every chunk
+// and `effect` import, in catalog order.
+func withCompletePrelude(js string) string {
+	body := jsEffectImportLine.ReplaceAllString(js, "")
+	prelude := jsCompleteEffectImport
+	for _, chunk := range jsPrelude {
+		body = strings.Replace(body, chunk.source, "", 1)
+		prelude += chunk.source
+	}
+	return prelude + body
+}
+
+func runJSProbe(t *testing.T, js, assertions string) string {
+	t.Helper()
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("Bun is required for backend conformance tests")
 	}
 	root := filepath.Join("..", "..")
 	if err = os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {

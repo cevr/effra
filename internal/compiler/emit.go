@@ -107,9 +107,6 @@ const (
 	jsEntry
 	// jsTests runs the selected test cases against the harness providers.
 	jsTests
-	// jsProbe is the library surface with every prelude chunk and `effect`
-	// import, for in-package probes that call lowering helpers directly.
-	jsProbe
 )
 
 // Emit consumes only checked compiler IR. JavaScript is never used as a type-checking oracle.
@@ -153,12 +150,6 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 		return "", "", err
 	}
 	selection := newJSSelection()
-	if surface == jsProbe {
-		for _, chunk := range jsPrelude {
-			selection.chunks[chunk.name] = true
-		}
-		selection.importEffect(jsEffectImports...)
-	}
 	for _, helper := range plan.Identities(RequiresHelper) {
 		chunk, ok := jsPreludeChunkFor[helper]
 		if !ok {

@@ -2,8 +2,24 @@ package compiler
 
 import "testing"
 
+// layerJSHelperSource roots the fork and catch lowerings the layer helper
+// probes compose with __ef_provideLayer, so the probes run the public
+// library module rather than an injected prelude.
+const layerJSHelperSource = layerApplicationSource + `
+error ProbeFailure
+effect fn quiet() -> void { void }
+effect fn failing() -> string raises {ProbeFailure} { fail ProbeFailure }
+effect fn probeHelpers() -> string {
+ scope {
+  let child = fork quiet()
+  run child.join()
+ }
+ run failing().catch<ProbeFailure>("recovered")
+}
+`
+
 func TestLayerJSPreservesEqualUnobservedChildOccurrences(t *testing.T) {
-	output := runJS(t, layerApplicationSource, `
+	output := runJS(t, layerJSHelperSource, `
 const plan={id:'empty',init:()=>({}),nodes:[],expose:state=>state};
 const runCase=async(fresh,layered)=>{
  const shared={_tag:'ConfigError',detail:'same failure'},errors=fresh?[{...shared},{...shared}]:[shared,shared];
@@ -30,7 +46,7 @@ console.log('equal unobserved child occurrences');
 }
 
 func TestLayerJSRetainsEqualReasonsWithinOneProducer(t *testing.T) {
-	output := runJS(t, layerApplicationSource, `
+	output := runJS(t, layerJSHelperSource, `
 const error={_tag:'ConfigError'},original=Cause.fromReasons([Cause.fail(error).reasons[0],Cause.fail(error).reasons[0]]);
 let programs=0,recovered=0;
 const recipe=__ef_provideLayer({id:'composite',init:()=>({}),nodes:[{id:'one',dependencies:[],construct:()=>Effect.failCause(original)}],expose:s=>s},()=>Effect.sync(()=>programs++));
@@ -44,7 +60,7 @@ console.log('composite producer occurrences');
 }
 
 func TestLayerJSTimeoutPreservesRetainedReasonOccurrences(t *testing.T) {
-	output := runJS(t, layerApplicationSource+`
+	output := runJS(t, layerJSHelperSource+`
 effect fn timed() -> string raises {Timeout} uses {Scheduler} { run main().timeout(1) }
 `, `
 const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
@@ -100,7 +116,7 @@ console.log('timeout producer occurrences');
 }
 
 func TestLayerJSPreservesEqualProducerAndCleanupOccurrences(t *testing.T) {
-	output := runJS(t, layerApplicationSource, `
+	output := runJS(t, layerJSHelperSource, `
 const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
 const mismatches=[];
 const traceKey=Context.Service('test/LayerOccurrenceTrace'),trace=Context.make(traceKey,'retained trace');
@@ -153,7 +169,7 @@ console.log('equal producer occurrences');
 }
 
 func TestLayerJSCatchObservesProtectedExitAndPreservesCancellation(t *testing.T) {
-	output := runJS(t, layerApplicationSource, `
+	output := runJS(t, layerJSHelperSource, `
 const traceKey=Context.Service('test/CatchTrace'),trace=Context.make(traceKey,'catch trace');
 const failure={_tag:'ConfigError',detail:'same payload'},defect={message:'fallback defect'};
 let recoveries=0;
