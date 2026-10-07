@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func unitPlan[S any](nodes []Node[S], init func(Unit) S) Plan[Unit, S, *S] {
@@ -495,5 +496,209 @@ func TestLayerSchedulerMasksProducerContinuationsAndDrainsOrderedClose(t *testin
 	}
 	if out := wait(t, done); out.IsFailure() {
 		t.Fatal(out.Cause())
+	}
+}
+
+func awaitRegisteredWaiters(t *testing.T, signal *managedSignal, count int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		signal.mu.Lock()
+		registered := len(signal.waiters)
+		signal.mu.Unlock()
+		if registered == count {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("registered waiters=%d, want %d", registered, count)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// Runtime-seam control: no language caller can cancel one waiter yet. Unlike
+// Effect's MemoMap first-requester build, the producer belongs to the build.
+func TestLayerEntryWaitersShareBuildOwnedProducerAndCancelIndividually(t *testing.T) {
+	for _, fails := range []bool{false, true} {
+		type state struct{ shared, dependent int }
+		started := make(chan context.Context, 1)
+		release := make(chan struct{})
+		var constructions, dependents, released atomic.Int32
+		plan := unitPlan([]Node[state]{
+			{Spec: NodeSpec{ID: "0/shared"}, Construct: func(fc *FiberContext, s *state) Exit[Unit] {
+				constructions.Add(1)
+				resource := Invoke(fc, AcquireRelease("shared", func(context.Context) (Unit, error) { return Unit{}, nil }, func(Unit, context.Context) error { released.Add(1); return nil }))
+				if resource.IsFailure() {
+					return resource
+				}
+				started <- fc.Context()
+				<-release
+				if fails {
+					return Fail[Unit]("ConfigError", &struct{}{})
+				}
+				s.shared = 42
+				return Succeed(Unit{})
+			}},
+			{Spec: NodeSpec{ID: "1/dependent", Dependencies: []NodeID{"0/shared"}}, Construct: func(_ *FiberContext, s *state) Exit[Unit] {
+				dependents.Add(1)
+				s.dependent = s.shared
+				return Succeed(Unit{})
+			}},
+		}, func(Unit) state { return state{} })
+		out := Run(func(fc *FiberContext) Exit[Unit] {
+			s := plan.init(Unit{})
+			build := newLayerBuild(plan, &s, fc)
+			build.start()
+			evaluation := wait(t, started)
+			firstContext, cancelFirst := context.WithCancel(context.Background())
+			first, second := make(chan Exit[Unit], 1), make(chan Exit[Unit], 1)
+			go func() {
+				first <- RunContext(firstContext, func(w *FiberContext) Exit[Unit] { return build.awaitEntry(w, 0) })
+			}()
+			go func() { second <- Run(func(w *FiberContext) Exit[Unit] { return build.awaitEntry(w, 0) }) }()
+			// The dependent producer and both runtime waiters share one pending entry.
+			awaitRegisteredWaiters(t, build.entries[0].outcome, 3)
+			cancelFirst()
+			if out := wait(t, first); !out.Interrupted || !errors.Is(out.Cause()[0].Err, context.Canceled) {
+				t.Fatalf("cancelled waiter: %+v", out)
+			}
+			awaitRegisteredWaiters(t, build.entries[0].outcome, 2)
+			if evaluation.Err() != nil {
+				t.Fatal("cancelling one waiter cancelled the build-owned producer")
+			}
+			close(release)
+			observed := wait(t, second)
+			late := build.awaitEntry(fc, 0)
+			build.await()
+			cause := build.constructionCause()
+			cleanup := build.close()
+			if constructions.Load() != 1 || released.Load() != 1 || len(cleanup) != 0 {
+				t.Fatalf("constructions=%d released=%d cleanup=%v", constructions.Load(), released.Load(), cleanup)
+			}
+			if !fails {
+				if observed.IsFailure() || late.IsFailure() || len(cause) != 0 || dependents.Load() != 1 || s.dependent != 42 {
+					t.Fatalf("shared success: observed=%+v late=%+v cause=%v dependent=%d", observed, late, cause, s.dependent)
+				}
+				return Succeed(Unit{})
+			}
+			// Every waiter observes the same recorded occurrence; the build retains it once.
+			if observed.Failure == nil || late.Failure == nil || observed.Failure.Payload != late.Failure.Payload ||
+				len(cause) != 1 || cause[0].Failure.Payload != observed.Failure.Payload || dependents.Load() != 0 || build.entries[1].scope != nil {
+				t.Fatalf("shared failure: observed=%+v late=%+v cause=%v dependents=%d", observed, late, cause, dependents.Load())
+			}
+			return Succeed(Unit{})
+		})
+		if out.IsFailure() {
+			t.Fatalf("fails=%v: %v", fails, out.Cause())
+		}
+	}
+}
+
+func TestLayerFailureWithConcurrentWaitersIsRetainedOnceAndConsumersNeverOpen(t *testing.T) {
+	type state struct{}
+	release := make(chan struct{})
+	var consumers, released atomic.Int32
+	nodes := []Node[state]{{Spec: NodeSpec{ID: "0/database"}, Construct: func(fc *FiberContext, _ *state) Exit[Unit] {
+		out := Invoke(fc, AcquireRelease("database", func(context.Context) (Unit, error) { return Unit{}, nil }, func(Unit, context.Context) error {
+			released.Add(1)
+			return errors.New("database cleanup")
+		}))
+		if out.IsFailure() {
+			return out
+		}
+		<-release
+		return Fail[Unit]("DbError", 7)
+	}}}
+	for _, id := range []NodeID{"1/accounts", "2/audit", "3/billing"} {
+		nodes = append(nodes, Node[state]{Spec: NodeSpec{ID: id, Dependencies: []NodeID{"0/database"}}, Construct: func(*FiberContext, *state) Exit[Unit] {
+			consumers.Add(1)
+			return Succeed(Unit{})
+		}})
+	}
+	plan := unitPlan(nodes, func(Unit) state { return state{} })
+	go func() { time.Sleep(10 * time.Millisecond); close(release) }()
+	out := Run(Provide(plan, Unit{}, func(*state) Effect[Unit] { return func(*FiberContext) Exit[Unit] { return Succeed(Unit{}) } }))
+	cause := out.Cause()
+	if len(cause) != 2 || cause[0].Failure == nil || cause[0].Failure.Tag != "DbError" || cause[1].Err.Error() != "database cleanup" || consumers.Load() != 0 || released.Load() != 1 {
+		t.Fatalf("shared failure: cause=%v consumers=%d released=%d", cause, consumers.Load(), released.Load())
+	}
+}
+
+func TestLayerBuildCancellationReleasesPendingWaitersAndJoinsProducer(t *testing.T) {
+	type state struct{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan context.Context, 1)
+	finish := make(chan struct{})
+	var consumers, released atomic.Int32
+	nodes := []Node[state]{{Spec: NodeSpec{ID: "0/database"}, Construct: func(fc *FiberContext, _ *state) Exit[Unit] {
+		out := Invoke(fc, AcquireRelease("database", func(context.Context) (Unit, error) { return Unit{}, nil }, func(Unit, context.Context) error { released.Add(1); return nil }))
+		if out.IsFailure() {
+			return out
+		}
+		started <- fc.Context()
+		<-fc.Context().Done()
+		<-finish
+		return Interrupt[Unit](fc.Context().Err())
+	}}}
+	for _, id := range []NodeID{"1/left", "2/right"} {
+		nodes = append(nodes, Node[state]{Spec: NodeSpec{ID: id, Dependencies: []NodeID{"0/database"}}, Construct: func(*FiberContext, *state) Exit[Unit] {
+			consumers.Add(1)
+			return Succeed(Unit{})
+		}})
+	}
+	plan := unitPlan(nodes, func(Unit) state { return state{} })
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContext(ctx, Provide(plan, Unit{}, func(*state) Effect[Unit] { return func(*FiberContext) Exit[Unit] { return Succeed(Unit{}) } }))
+	}()
+	evaluation := wait(t, started)
+	cancel()
+	wait(t, evaluation.Done())
+	select {
+	case <-done:
+		t.Fatal("cancelled build returned before its producer joined")
+	case <-time.After(10 * time.Millisecond):
+	}
+	close(finish)
+	out := wait(t, done)
+	cause := out.Cause()
+	// Abort-induced producer and waiter interruptions are control, not reasons.
+	if len(cause) != 1 || cause[0].Kind != "interrupt" || !errors.Is(cause[0].Err, context.Canceled) || consumers.Load() != 0 || released.Load() != 1 {
+		t.Fatalf("cancelled pending waiters: cause=%v consumers=%d released=%d", cause, consumers.Load(), released.Load())
+	}
+}
+
+func TestLayerShutdownClosesDependentsFirstAndAttemptsEveryFinalizer(t *testing.T) {
+	type state struct{}
+	closed := []string{}
+	resource := func(fc *FiberContext, name string, release func() error) Exit[Unit] {
+		return Invoke(fc, AcquireRelease(name, func(context.Context) (Unit, error) { return Unit{}, nil }, func(Unit, context.Context) error {
+			closed = append(closed, name)
+			return release()
+		}))
+	}
+	node := func(id NodeID, dependencies []NodeID, first, second func() error) Node[state] {
+		return Node[state]{Spec: NodeSpec{ID: id, Dependencies: dependencies}, Construct: func(fc *FiberContext, _ *state) Exit[Unit] {
+			if out := resource(fc, string(id)+".1", first); out.IsFailure() {
+				return out
+			}
+			return resource(fc, string(id)+".2", second)
+		}}
+	}
+	ok := func() error { return nil }
+	plan := unitPlan([]Node[state]{
+		node("a/base", nil, ok, ok),
+		node("b/mid", []NodeID{"a/base"}, func() error { panic("mid release panic") }, ok),
+		node("c/top", []NodeID{"b/mid"}, ok, func() error { return errors.New("top release failed") }),
+		node("d/solo", nil, ok, ok),
+	}, func(Unit) state { return state{} })
+	out := Run(Provide(plan, Unit{}, func(*state) Effect[Unit] {
+		return func(fc *FiberContext) Exit[Unit] { return resource(fc, "program", ok) }
+	}))
+	cause := out.Cause()
+	want := []string{"program", "d/solo.2", "d/solo.1", "c/top.2", "c/top.1", "b/mid.2", "b/mid.1", "a/base.2", "a/base.1"}
+	if !reflect.DeepEqual(closed, want) || len(cause) != 2 || cause[0].Err.Error() != "top release failed" || !strings.Contains(cause[1].Err.Error(), "mid release panic") {
+		t.Fatalf("shutdown order=%v cause=%v", closed, cause)
 	}
 }

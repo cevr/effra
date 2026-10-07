@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -40,13 +41,13 @@ type Node[S any] struct {
 }
 
 type Plan[In, S, Out any] struct {
-	id         PlanID
-	nodes      []Node[S]
-	dependents [][]int
-	order      []int
-	init       func(In) S
-	expose     func(*S) Out
-	invalid    error
+	id           PlanID
+	nodes        []Node[S]
+	dependencies [][]int
+	order        []int
+	init         func(In) S
+	expose       func(*S) Out
+	invalid      error
 }
 
 const maxPlanNodes = 1000
@@ -94,7 +95,8 @@ func NewPlan[In, S, Out any](id PlanID, nodes []Node[S], init func(In) S, expose
 		}
 		indices[node.Spec.ID] = i
 	}
-	plan.dependents = make([][]int, len(nodes))
+	dependents := make([][]int, len(nodes))
+	plan.dependencies = make([][]int, len(nodes))
 	remaining := make([]int, len(nodes))
 	ready := []int{}
 	for i, node := range nodes {
@@ -105,7 +107,8 @@ func NewPlan[In, S, Out any](id PlanID, nodes []Node[S], init func(In) S, expose
 				return invalid("unknown or duplicate dependency")
 			}
 			seen[dependency] = true
-			plan.dependents[index] = append(plan.dependents[index], i)
+			dependents[index] = append(dependents[index], i)
+			plan.dependencies[i] = append(plan.dependencies[i], index)
 		}
 		remaining[i] = len(node.Spec.Dependencies)
 		if remaining[i] == 0 {
@@ -126,7 +129,7 @@ func NewPlan[In, S, Out any](id PlanID, nodes []Node[S], init func(In) S, expose
 		index := ready[0]
 		ready = ready[1:]
 		plan.order = append(plan.order, index)
-		for _, dependent := range plan.dependents[index] {
+		for _, dependent := range dependents[index] {
 			remaining[dependent]--
 			if remaining[dependent] == 0 {
 				ready = append(ready, dependent)
@@ -147,16 +150,18 @@ func NewPlan[In, S, Out any](id PlanID, nodes []Node[S], init func(In) S, expose
 type layerNodeState uint8
 
 const (
-	layerPending layerNodeState = iota
+	layerWaiting layerNodeState = iota
 	layerConstructing
 	layerSucceeded
 	layerFailed
 	layerSkipped
 )
 
-type layerNodeRun struct {
+// layerEntry is one acquisition-table row. The build owns its single producer;
+// dependent producers and other waiters observe its one terminal outcome.
+type layerEntry struct {
 	state          layerNodeState
-	remaining      int
+	outcome        *managedSignal
 	scope          *Scope
 	cancel         context.CancelFunc
 	cause          Cause
@@ -166,16 +171,37 @@ type layerNodeRun struct {
 type layerBuild[S any] struct {
 	mu              sync.Mutex
 	nodes           []Node[S]
-	dependents      [][]int
+	dependencies    [][]int
 	order           []int
-	runs            []layerNodeRun
+	entries         []layerEntry
 	state           *S
 	parent          *FiberContext
 	settled         *managedSignal
-	running         int
-	completed       int
+	finished        int
 	aborted         bool
 	callerInterrupt error
+}
+
+func newLayerBuild[In, S, Out any](plan Plan[In, S, Out], state *S, parent *FiberContext) *layerBuild[S] {
+	build := &layerBuild[S]{nodes: plan.nodes, dependencies: plan.dependencies, order: plan.order,
+		entries: make([]layerEntry, len(plan.nodes)), state: state, parent: parent, settled: newManagedSignal()}
+	for i := range build.entries {
+		build.entries[i].outcome = newManagedSignal()
+	}
+	return build
+}
+
+// start admits every selected producer once, dependencies first. Producers
+// belong to the build rather than to any waiter, so only abort cancels them.
+func (b *layerBuild[S]) start() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, i := range b.order {
+		b.launchLocked(i)
+	}
+	if len(b.nodes) == 0 {
+		b.settled.signal()
+	}
 }
 
 func (b *layerBuild[S]) abortLocked() {
@@ -183,81 +209,153 @@ func (b *layerBuild[S]) abortLocked() {
 		return
 	}
 	b.aborted = true
-	for i := range b.runs {
-		run := &b.runs[i]
-		switch run.state {
-		case layerPending:
-			run.state = layerSkipped
+	for i := range b.entries {
+		entry := &b.entries[i]
+		switch entry.state {
+		case layerWaiting:
+			entry.cancel()
 		case layerConstructing:
-			run.abortCancelled = true
-			run.cancel()
+			entry.abortCancelled = true
+			entry.cancel()
 		}
 	}
 }
 
-// The mutex publishes completed fields before any dependent is launched.
-// Each node gets an owner only when ready, and an independent managed turn.
+// Each producer gets an independent managed turn. It first waits on its
+// dependencies' entries, then receives a node owner only once all succeeded.
 func (b *layerBuild[S]) launchLocked(index int) {
-	run := &b.runs[index]
-	run.state = layerConstructing
-	ctx := withoutSchedulerContinuation(context.WithoutCancel(b.parent.ctx))
-	run.scope = newScopeWithDriver(ctx, b.parent.scope, b.parent.timerDriver())
-	evaluation, cancel := context.WithCancel(run.scope.ctx)
-	run.cancel = cancel
-	fc := &FiberContext{ctx: evaluation, admission: run.scope.ctx, scope: run.scope, driver: run.scope.driver}
-	scheduler, virtual := run.scope.driver.(*TestScheduler)
+	entry := &b.entries[index]
+	base := withoutSchedulerContinuation(context.WithoutCancel(b.parent.ctx))
+	waiting, cancel := context.WithCancel(base)
+	entry.cancel = cancel
+	driver := b.parent.timerDriver()
+	waiter := &FiberContext{ctx: waiting, driver: driver}
+	scheduler, virtual := driver.(*TestScheduler)
 	if virtual {
-		fc.turn = scheduler
+		waiter.turn = scheduler
 		scheduler.reserve()
 	}
-	b.running++
 	go func() {
 		if virtual {
 			finish := scheduler.enter(true)
 			defer finish()
+		}
+		for _, dependency := range b.dependencies[index] {
+			if b.awaitEntry(waiter, dependency).IsFailure() {
+				// The dependency's own entry retains its reasons once.
+				b.finish(index, layerSkipped, nil)
+				return
+			}
+		}
+		fc := b.admit(index, base, driver)
+		if fc == nil {
+			b.finish(index, layerSkipped, nil)
+			return
 		}
 		exit := Invoke(fc, func(fc *FiberContext) Exit[Unit] { return b.nodes[index].Construct(fc, b.state) })
 		b.publish(index, exit)
 	}()
 }
 
-func (b *layerBuild[S]) publish(index int, exit Exit[Unit]) {
+// admit opens the node owner under the build mutex, so abort either refuses
+// the producer or later cancels its evaluation; there is no unowned window.
+func (b *layerBuild[S]) admit(index int, base context.Context, driver timerDriver) *FiberContext {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	run := &b.runs[index]
-	run.cause = exit.Cause()
-	if run.abortCancelled {
+	entry := &b.entries[index]
+	entry.cancel()
+	if b.aborted {
+		return nil
+	}
+	entry.state = layerConstructing
+	entry.scope = newScopeWithDriver(base, b.parent.scope, driver)
+	evaluation, cancel := context.WithCancel(entry.scope.ctx)
+	entry.cancel = cancel
+	fc := &FiberContext{ctx: evaluation, admission: entry.scope.ctx, scope: entry.scope, driver: entry.scope.driver}
+	if scheduler, virtual := driver.(*TestScheduler); virtual {
+		fc.turn = scheduler
+	}
+	return fc
+}
+
+// awaitEntry is the acquisition-table waiter. Every waiter observes the same
+// terminal outcome; cancelling one waiter abandons only its own wait and never
+// the build-owned producer. This deliberately differs from Effect's MemoMap,
+// where interrupting the first requester interrupts the shared acquisition.
+func (b *layerBuild[S]) awaitEntry(fc *FiberContext, index int) Exit[Unit] {
+	entry := &b.entries[index]
+	waiter, complete := entry.outcome.register(fc.turnScheduler())
+	if !complete {
+		resume := fc.suspendScheduler()
+		select {
+		case <-waiter.done:
+			resume()
+		case <-fc.ctx.Done():
+			resume()
+			entry.outcome.cancel(waiter)
+			return Interrupt[Unit](fc.ctx.Err())
+		}
+	}
+	entry.outcome.consume(waiter)
+	// The build mutex also publishes the producer's completed field before a
+	// dependent producer reads it.
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	switch {
+	case entry.state == layerSucceeded:
+		return Succeed(Unit{})
+	case entry.state == layerFailed && len(entry.cause) > 0:
+		return FromCause[Unit](entry.cause)
+	default:
+		// Skipped or abort-interrupted entries carry no fabricated failure.
+		return Interrupt[Unit](context.Canceled)
+	}
+}
+
+func (b *layerBuild[S]) publish(index int, exit Exit[Unit]) {
+	cause := exit.Cause()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	entry := &b.entries[index]
+	if entry.abortCancelled {
 		retained := Cause{}
-		for _, reason := range run.cause {
+		for _, reason := range cause {
 			if reason.Kind != "interrupt" {
 				retained = append(retained, reason)
 			}
 		}
-		run.cause = retained
+		cause = retained
 	}
-	b.running--
-	b.completed++
 	if exit.IsFailure() {
-		run.state = layerFailed
 		b.abortLocked()
-	} else {
-		// Success removes evaluation cancellation authority from the build.
-		// The token then lives until this node's ordered close.
-		run.state = layerSucceeded
-		if !b.aborted {
-			for _, dependent := range b.dependents[index] {
-				b.runs[dependent].remaining--
-				if b.runs[dependent].remaining == 0 {
-					b.launchLocked(dependent)
-				}
-			}
-		}
+		b.finishLocked(index, layerFailed, cause)
+		return
 	}
-	if b.running == 0 && (b.aborted || b.completed == len(b.nodes)) {
+	// Success removes evaluation cancellation authority from the build.
+	// The token then lives until this node's ordered close.
+	b.finishLocked(index, layerSucceeded, nil)
+}
+
+func (b *layerBuild[S]) finish(index int, state layerNodeState, cause Cause) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.finishLocked(index, state, cause)
+}
+
+// The terminal entry is published before its waiters wake and before the
+// build settles, so every observer reads one recorded outcome.
+func (b *layerBuild[S]) finishLocked(index int, state layerNodeState, cause Cause) {
+	entry := &b.entries[index]
+	entry.state, entry.cause = state, cause
+	b.finished++
+	entry.outcome.signal()
+	if b.finished == len(b.nodes) {
 		b.settled.signal()
 	}
 }
 
+// await joins every producer. Caller cancellation is whole-build cancellation:
+// it aborts producers and still waits for their cooperative completion.
 func (b *layerBuild[S]) await() {
 	fc := b.parent
 	waiter, complete := b.settled.register(fc.turnScheduler())
@@ -276,9 +374,6 @@ func (b *layerBuild[S]) await() {
 		if !b.settled.isComplete() {
 			b.callerInterrupt = fc.ctx.Err()
 			b.abortLocked()
-			if b.running == 0 {
-				b.settled.signal()
-			}
 		}
 		b.mu.Unlock()
 		// Producers always join, including masked late native acquisitions.
@@ -288,20 +383,14 @@ func (b *layerBuild[S]) await() {
 	}
 }
 
+// constructionCause retains each producer's reasons once in canonical node
+// order. Waiters never contribute copies of a shared entry's failure.
 func (b *layerBuild[S]) constructionCause() Cause {
 	indices := make([]int, len(b.nodes))
 	for i := range indices {
 		indices[i] = i
 	}
-	slices.SortFunc(indices, func(a, c int) int {
-		if b.nodes[a].Spec.ID < b.nodes[c].Spec.ID {
-			return -1
-		}
-		if b.nodes[a].Spec.ID > b.nodes[c].Spec.ID {
-			return 1
-		}
-		return 0
-	})
+	slices.SortFunc(indices, func(a, c int) int { return strings.Compare(string(b.nodes[a].Spec.ID), string(b.nodes[c].Spec.ID)) })
 	cause := Cause{}
 	if b.callerInterrupt != nil {
 		cause = append(cause, Reason{Kind: "interrupt", Err: b.callerInterrupt})
@@ -310,7 +399,7 @@ func (b *layerBuild[S]) constructionCause() Cause {
 	if b.callerInterrupt == nil {
 		for _, kind := range []string{"failure", "defect", "interrupt"} {
 			for _, i := range indices {
-				for j, reason := range b.runs[i].cause {
+				for j, reason := range b.entries[i].cause {
 					if reason.Kind == kind {
 						primaryNode, primaryReason = i, j
 						break
@@ -325,11 +414,11 @@ func (b *layerBuild[S]) constructionCause() Cause {
 			}
 		}
 		if primaryNode >= 0 {
-			cause = append(cause, b.runs[primaryNode].cause[primaryReason])
+			cause = append(cause, b.entries[primaryNode].cause[primaryReason])
 		}
 	}
 	for _, i := range indices {
-		for j, reason := range b.runs[i].cause {
+		for j, reason := range b.entries[i].cause {
 			if i != primaryNode || j != primaryReason {
 				cause = append(cause, reason)
 			}
@@ -338,12 +427,15 @@ func (b *layerBuild[S]) constructionCause() Cause {
 	return cause
 }
 
+// close releases admitted node owners in reverse canonical topology, so
+// dependents finish before dependencies. Every owner is closed even when an
+// earlier one reports cleanup defects.
 func (b *layerBuild[S]) close() Cause {
 	cause := Cause{}
 	for i := len(b.order) - 1; i >= 0; i-- {
-		run := &b.runs[b.order[i]]
-		if run.scope != nil {
-			cause = append(cause, run.scope.closeWithContext(b.parent)...)
+		entry := &b.entries[b.order[i]]
+		if entry.scope != nil {
+			cause = append(cause, entry.scope.closeWithContext(b.parent)...)
 		}
 	}
 	return cause
@@ -364,21 +456,8 @@ func Provide[In, S, Out, A any](plan Plan[In, S, Out], input In, program func(Ou
 			return Propagate[A](initialized)
 		}
 		state := initialized.Value
-		build := &layerBuild[S]{nodes: plan.nodes, dependents: plan.dependents, order: plan.order,
-			runs: make([]layerNodeRun, len(plan.nodes)), state: &state, parent: fc, settled: newManagedSignal()}
-		build.mu.Lock()
-		for i, node := range plan.nodes {
-			build.runs[i].remaining = len(node.Spec.Dependencies)
-		}
-		for _, i := range plan.order {
-			if build.runs[i].remaining == 0 {
-				build.launchLocked(i)
-			}
-		}
-		if len(plan.nodes) == 0 {
-			build.settled.signal()
-		}
-		build.mu.Unlock()
+		build := newLayerBuild(plan, &state, fc)
+		build.start()
 		build.await()
 		cause := build.constructionCause()
 		var result Exit[A]
