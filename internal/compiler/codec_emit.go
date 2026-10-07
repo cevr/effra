@@ -259,15 +259,22 @@ func jsCodecOperation(e *Expr) string {
 }
 
 // jsCodecExports exports each witness as a frozen object holding its two
-// direction functions, matching the source spelling witness.decode. Only a
-// witness whose plan retains both directions is exported: the object must
-// never reference a direction the plan pruned.
+// direction functions, matching the source spelling witness.decode. Like a
+// function, the object is bound under a generated name and exported under
+// its source name, so a witness never shadows a host global, an import or a
+// generated binding of the module. Only a witness whose plan retains both
+// directions is exported: the object must never reference a direction the
+// plan pruned.
 func (r *Result) jsCodecExports(plan *ApplicationPlan, out, decl *strings.Builder, declarations map[string]Declaration) {
 	for _, codec := range r.Program.Codecs {
 		if codec.decode == nil || codec.encode == nil || !plan.Requires(RequiresFunction, codec.decode.Identity) || !plan.Requires(RequiresFunction, codec.encode.Identity) {
 			continue
 		}
-		out.WriteString("export const " + codec.Name + " = Object.freeze({ decode: " + codec.decode.jsEmissionName() + ", encode: " + codec.encode.jsEmissionName() + " });\n")
-		decl.WriteString("export declare const " + codec.Name + ": { readonly decode: " + jsRowFunctionSignature(r.Program, codec.decode, declarations) + "; readonly encode: " + jsRowFunctionSignature(r.Program, codec.encode, declarations) + " };\n")
+		binding := jsCodecWitnessName(codec)
+		export := "export { " + binding + " as " + codec.Name + " };\n"
+		out.WriteString("const " + binding + " = Object.freeze({ decode: " + codec.decode.jsEmissionName() + ", encode: " + codec.encode.jsEmissionName() + " });\n" + export)
+		decl.WriteString("declare const " + binding + ": { readonly decode: " + jsRowFunctionSignature(r.Program, codec.decode, declarations) + "; readonly encode: " + jsRowFunctionSignature(r.Program, codec.encode, declarations) + " };\n" + export)
 	}
 }
+
+func jsCodecWitnessName(codec *CodecDeclaration) string { return "__ef_codec_witness_" + codec.Name }

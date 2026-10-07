@@ -4,6 +4,9 @@ import (
 	goparser "go/parser"
 	gotoken "go/token"
 	"maps"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -165,7 +168,7 @@ func TestJSCodecEngineIsEmittedOnceWhenDerived(t *testing.T) {
 		if strings.Count(js, "__ef_codecCompile({") != 3 {
 			t.Fatalf("JS must compile one codec per shared plan")
 		}
-		if !strings.Contains(decl, `export declare const userJson: { readonly decode: (arg_input: string) => Effect.Effect<User, { readonly _tag: "JsonDecodeFailure" }, never>; readonly encode: (arg_value: User) => Effect.Effect<string, { readonly _tag: "JsonEncodeFailure" }, never> };`+"\n") {
+		if !strings.Contains(decl, `declare const __ef_codec_witness_userJson: { readonly decode: (arg_input: string) => Effect.Effect<User, { readonly _tag: "JsonDecodeFailure" }, never>; readonly encode: (arg_value: User) => Effect.Effect<string, { readonly _tag: "JsonEncodeFailure" }, never> };`+"\nexport { __ef_codec_witness_userJson as userJson };\n") {
 			t.Fatalf("witness declaration:\n%s", decl)
 		}
 		if strings.Contains(js, "as userJson.decode") || strings.Contains(decl, "as userJson.decode") {
@@ -201,9 +204,11 @@ func TestCodecEmissionIsDeterministic(t *testing.T) {
 }
 
 // The exported witness is a frozen object whose directions are ordinary
-// Effect functions with the direction's tagged failure.
+// Effect functions with the direction's tagged failure, as a host consumer
+// importing the module sees it.
 func TestJSCodecWitnessExports(t *testing.T) {
-	output := runJS(t, codecIdleProgram, `
+	output := runJSConsumer(t, codecIdleProgram, `import { Effect } from "effect";
+import { userJson, eventJson } from "./generated.mjs";
 if (!Object.isFrozen(userJson)) throw new Error("witness is not frozen");
 const user = await Effect.runPromise(userJson.decode('{"name":"Ada","id":"-1"}'));
 if (user.id !== -1n || user.name !== "Ada") throw new Error("decoded " + JSON.stringify(user, (_, v) => typeof v === "bigint" ? v.toString() : v));
@@ -253,5 +258,90 @@ effect fn main() -> string raises { JsonDecodeFailure } {
 	}
 	if output, err := runGoCommand(writeGoApplication(t, r, application), "run", "."); err != nil || string(output) != "abc\n" {
 		t.Fatalf("Go result: %v\n%s", err, output)
+	}
+}
+
+// runJSConsumer emits source as generated.mjs beside a host consumer module
+// and runs the consumer under Bun, so it sees only the module's exports.
+func runJSConsumer(t *testing.T, source, consumer string) string {
+	t.Helper()
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("Bun is required for backend conformance tests")
+	}
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	module, _, err := r.Emit(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join("..", "..", "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(filepath.Join("..", "..", "dist"), "conformance-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	for file, text := range map[string]string{"generated.mjs": module, "consumer.mjs": consumer} {
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	output, err := exec.Command(bun, filepath.Join(dir, "consumer.mjs")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("runtime: %v\n%s", err, output)
+	}
+	return string(output)
+}
+
+// A witness's JS binding is generated and its source name is only an export
+// alias, as for ordinary functions. A witness named after a host global, the
+// Effect import or a generated binding therefore checks, runs as it does on
+// Go, and is imported by host code under its source name.
+func TestJSCodecWitnessNamesDoNotShadowModuleBindings(t *testing.T) {
+	for _, name := range []string{"Object", "TextEncoder", "Effect", "__ef_codecText"} {
+		t.Run(name, func(t *testing.T) {
+			source := `import Json "effra/json"
+
+derive ` + name + ` = Json.codec<string>
+
+effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
+    run ` + name + `.encode(run ` + name + `.decode("\"ok\""))
+}
+`
+			r := Compile(source)
+			if !r.Checked {
+				t.Fatal(r.Diagnostics)
+			}
+			application, err := r.GoApplication(GoGenerationBuild)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if output, err := runGoCommand(writeGoApplication(t, r, application), "run", "."); err != nil || string(output) != "\"ok\"\n" {
+				t.Fatalf("Go result: %v\n%s", err, output)
+			}
+			output := runJSConsumer(t, source, `import { Effect } from "effect";
+import { `+name+` as witness, main } from "./generated.mjs";
+if (!Object.isFrozen(witness)) throw new Error("witness is not frozen");
+const decoded = await Effect.runPromise(witness.decode('"x"'));
+const encoded = await Effect.runPromise(witness.encode(decoded));
+const ran = await Effect.runPromise(main());
+console.log(decoded + " " + encoded + " " + ran);
+`)
+			if output != "x \"x\" \"ok\"\n" {
+				t.Fatalf("JS result: %s", output)
+			}
+			_, declaration, err := r.Emit(false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			binding := "__ef_codec_witness_" + name
+			if !strings.Contains(declaration, "declare const "+binding+": {") || !strings.Contains(declaration, "export { "+binding+" as "+name+" };") {
+				t.Fatalf("witness declaration must alias its generated binding:\n%s", declaration)
+			}
+		})
 	}
 }
