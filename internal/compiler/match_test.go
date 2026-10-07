@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -302,6 +303,51 @@ func TestMatchProductLexicalBindingsResolveToFirstAlternative(t *testing.T) {
 		}
 	}
 	t.Fatal("or-pattern binder use was not recorded")
+}
+
+func TestMatchAlternativeBinderTokensSelectTheJoinedBinding(t *testing.T) {
+	// Each alternative's token binds the one shared name. The second
+	// alternative's payload ownership is unknown, so the joined binding
+	// differs from the first alternative's payload alone.
+	source := `enum Packet { A { file: File } B { file: File } }
+effect fn pick(borrowed: File) -> File {
+ let safe = Packet.A { file: borrowed }
+ match safe { Packet.A { file } | Packet.B { file } => file }
+}
+effect fn main() -> void { void }
+`
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	selectAt := func(offset int) SelectedType {
+		t.Helper()
+		response, err := r.SelectType(TypeSelection{Offset: &offset})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response["selection"].(SelectedType)
+	}
+	firstToken := strings.Index(source, "A { file }") + len("A { ")
+	laterToken := strings.Index(source, "B { file }") + len("B { ")
+	first, later, use := selectAt(firstToken), selectAt(laterToken), selectAt(strings.Index(source, "=> file")+len("=> "))
+	if first.Kind != "bindingDeclaration" || later.Kind != "bindingDeclaration" || use.Kind != "bindingUse" {
+		t.Fatalf("selection kinds: %s, %s, %s", first.Kind, later.Kind, use.Kind)
+	}
+	if later.Binding == nil || use.Binding == nil || later.Binding.ID != first.Binding.ID || use.Binding.ID != first.Binding.ID || later.Binding.DeclarationSpan.Offset != firstToken || later.Span.Offset != laterToken {
+		t.Fatalf("later binder token is not an occurrence of the first declaration: %+v %+v", later, first)
+	}
+	joined := use.Expression.Type.Ownership
+	conditional := false
+	for _, fact := range joined {
+		conditional = conditional || fact.Origin == "conditional"
+	}
+	if len(joined) != 2 || !conditional || !reflect.DeepEqual(first.Expression.Type.Ownership, joined) || !reflect.DeepEqual(later.Expression.Type.Ownership, joined) {
+		t.Fatalf("binder tokens must report the joined ownership %+v; first %+v, later %+v", joined, first.Expression.Type.Ownership, later.Expression.Type.Ownership)
+	}
+	if first.Expression.Type.Success != "File" || later.Expression.Type.Success != "File" {
+		t.Fatalf("binder token types: %+v %+v", first.Expression.Type, later.Expression.Type)
+	}
 }
 
 // alternativeCallableSource binds f from two alternatives whose callable payload

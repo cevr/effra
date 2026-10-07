@@ -245,9 +245,18 @@ func (c *checker) unreachableAlternatives(coverage *matchCoverage, arm *MatchArm
 
 // matchArmBindings checks payload binders and binds each name once in env.
 // Every alternative of a cell must bind the same names with identical payload
-// types; the bound value joins the alternatives' payload provenance.
+// types; the bound value joins the alternatives' payload provenance. The
+// lexical binding is declared by the first alternative's token, lists every
+// later alternative's token as an occurrence and records the completed join.
 func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []map[string]Variant, env map[string]checkedExpression) []matchPlanBinding {
 	var bindings []matchPlanBinding
+	// tokens holds each binding's declaring pattern and binder name spans,
+	// the first alternative's token first.
+	type binderTokens struct {
+		pattern *MatchPattern
+		spans   []Span
+	}
+	var tokens []binderTokens
 	armNames := map[string]bool{}
 	for subject, cell := range arm.Patterns {
 		scrutinee := plan.subjects[subject].value
@@ -293,17 +302,16 @@ func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []ma
 						continue
 					}
 					armNames[binding] = true
-					if c.lexicalOwner != nil {
-						bound = c.bindLocal("pattern", binding, pattern.bindingSpan(fieldName), pattern.Extent, c.result.lexical.patterns[pattern], bound)
-					}
 					cellBindings[binding] = len(bindings)
 					bindings = append(bindings, matchPlanBinding{name: binding, subject: subject, fields: []string{fieldName}, value: bound})
+					tokens = append(tokens, binderTokens{pattern: pattern, spans: []Span{pattern.bindingSpan(fieldName)}})
 					continue
 				}
 				index, shared := cellBindings[binding]
 				if !shared {
 					continue
 				}
+				tokens[index].spans = append(tokens[index].spans, pattern.bindingSpan(fieldName))
 				joined := bindings[index].value
 				// The payload contract is the canonical type, callable failure
 				// and service rows included: the call recipe reads them from the
@@ -331,7 +339,12 @@ func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []ma
 			}
 		}
 	}
-	for _, binding := range bindings {
+	for index := range bindings {
+		binding := &bindings[index]
+		if c.lexicalOwner != nil {
+			declaration := tokens[index]
+			binding.value = c.bindLocal("pattern", binding.name, declaration.spans[0], declaration.pattern.Extent, c.result.lexical.patterns[declaration.pattern], binding.value, declaration.spans[1:]...)
+		}
 		env[binding.name] = binding.value
 	}
 	return bindings

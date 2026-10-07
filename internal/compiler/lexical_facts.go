@@ -16,8 +16,11 @@ type sourceSyntaxFact struct {
 type lexicalBinding struct {
 	ID, Kind, Name   string
 	NameSpan, Extent Span
-	Owner            int
-	Checked          checkedExpression
+	// Occurrences are further binder tokens of the same binding: the later
+	// alternatives of an or-pattern, which NameSpan's first token declares.
+	Occurrences []Span
+	Owner       int
+	Checked     checkedExpression
 }
 
 // maxLexicalFacts bounds original syntax facts and, separately, the name
@@ -338,14 +341,14 @@ func (facts *lexicalFacts) declare(item *SyntaxItem) {
 // bindLocal records the very entry inserted into the checker's environment.
 // Its ID is observational metadata and never participates in type/admission
 // relations. Original declaration offsets make repeated checking idempotent.
-func (c *checker) bindLocal(kind, name string, span, extent Span, owner int, value checkedExpression) checkedExpression {
+func (c *checker) bindLocal(kind, name string, span, extent Span, owner int, value checkedExpression, occurrences ...Span) checkedExpression {
 	value.lexicalBinding = ""
 	if c.lexicalOwner == nil || c.result.lexical == nil || !c.result.lexical.complete || span.Length == 0 {
 		return value
 	}
 	id := fmt.Sprintf("binding:%s:%d", kind, span.Offset)
 	value.lexicalBinding = id
-	c.result.lexical.bindings[id] = lexicalBinding{ID: id, Kind: kind, Name: name, NameSpan: span, Extent: extent, Owner: owner, Checked: value.clone()}
+	c.result.lexical.bindings[id] = lexicalBinding{ID: id, Kind: kind, Name: name, NameSpan: span, Extent: extent, Occurrences: occurrences, Owner: owner, Checked: value.clone()}
 	return value
 }
 

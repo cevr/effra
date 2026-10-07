@@ -246,8 +246,16 @@ func (r *Result) selectOffset(offset int, selected *SelectedType) error {
 	}
 	var value checkedExpression
 	for _, binding := range facts.bindings {
-		if within(binding.NameSpan, offset) {
-			selected.Kind, selected.Span, selected.Extent, selected.Binding = "bindingDeclaration", binding.NameSpan, binding.Extent, bindingInfo(binding)
+		// A later or-pattern binder token binds the same name, so it
+		// selects the one shared binding and its joined value.
+		span, extent, ok := binding.NameSpan, binding.Extent, within(binding.NameSpan, offset)
+		for _, occurrence := range binding.Occurrences {
+			if !ok && within(occurrence, offset) {
+				span, extent, ok = occurrence, occurrence, true
+			}
+		}
+		if ok {
+			selected.Kind, selected.Span, selected.Extent, selected.Binding = "bindingDeclaration", span, extent, bindingInfo(binding)
 			selected.Target = bindingTarget(binding)
 			value = binding.Checked
 			break
