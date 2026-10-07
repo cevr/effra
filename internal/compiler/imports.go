@@ -289,7 +289,10 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 	if err = decoder.Decode(&trailing); err != io.EOF {
 		return nil, nil, fmt.Errorf("effra.bindings.json must contain one JSON object")
 	}
-	for symbol, meta := range contracts {
+	// Keys are validated in sorted order so a load reports the same first
+	// error every time.
+	for _, symbol := range slices.Sorted(maps.Keys(contracts)) {
+		meta := contracts[symbol]
 		if meta.Context != "" && meta.Context != "fiber" {
 			return nil, nil, fmt.Errorf("unsupported context contract for %s", symbol)
 		}

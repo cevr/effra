@@ -214,6 +214,25 @@ effect fn main() -> string {
 	}
 }
 
+// Metadata is validated in key order, so the first invalid entry, and the
+// error a load reports, are the same on every load.
+func TestBindingMetadataValidationOrderIsStable(t *testing.T) {
+	dir := t.TempDir()
+	for name, contents := range map[string]string{
+		"go.mod":              "module example.test/order\n\ngo 1.27\n",
+		"effra.bindings.json": `{"example.test/order.MissingB":{"cancellation":"invalid"},"example.test/order.MissingA":{"context":"invalid"},"example.test/order.MissingC":{"context":"invalid"}}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 32 {
+		if _, _, err := loadContracts(dir); err == nil || err.Error() != "unsupported context contract for example.test/order.MissingA" {
+			t.Fatalf("first metadata error: %v", err)
+		}
+	}
+}
+
 func TestContextForwardingUsesPackageIdentity(t *testing.T) {
 	dir := t.TempDir()
 	for name, contents := range map[string]string{
