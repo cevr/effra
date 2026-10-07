@@ -4,10 +4,12 @@
 The upstream bytes live in the git submodule at conformance/upstream/effect,
 pinned by its gitlink. Effra owns only the manifest: the selection rule, the
 license accounting and the sha256 identity of every selected file. Verification
-requires the checkout at the pinned commit with no tracked modifications,
-recomputes the manifest from the commit's immutable git objects and compares it
-with the committed manifest. These files describe upstream behavior; they are
-not claims that Effra executes or passes the upstream suite.
+requires the checkout at the pinned commit with no tracked modifications and no
+index flag that hides one, recomputes the manifest from the commit's immutable
+git objects and compares it with the committed manifest. Consumers read selected
+files only from those objects, never from the checkout's working files. These
+files describe upstream behavior; they are not claims that Effra executes or
+passes the upstream suite.
 """
 
 from __future__ import annotations
@@ -17,6 +19,8 @@ import hashlib
 import json
 import re
 import subprocess
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -198,7 +202,27 @@ def blob_bytes(checkout: Path, commit: str, paths: list[str]) -> dict[str, bytes
     return blobs
 
 
-def build_manifest(checkout: Path, commit: str, tag: str) -> dict[str, object]:
+@dataclass(frozen=True)
+class PinnedCorpus:
+    """A commit's recomputed manifest and the exact selected bytes it hashes, read from git objects.
+
+    This is the only source of selected upstream contents for consumers: the
+    checkout's working files can differ from the pinned commit behind index flags.
+    """
+
+    manifest: dict[str, object]
+    contents: Mapping[str, bytes]
+
+    def text(self, path: str) -> str:
+        if path not in self.contents:
+            raise ImportError(f"not a selected upstream file: {path}")
+        try:
+            return self.contents[path].decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ImportError(f"selected upstream file is not UTF-8: {path}") from error
+
+
+def read_pinned(checkout: Path, commit: str, tag: str) -> PinnedCorpus:
     """Recompute the manifest of a commit from git objects, never the working tree."""
     tracked = tree_modes(checkout, commit)
     paths = selected_paths(tracked)
@@ -246,7 +270,7 @@ def build_manifest(checkout: Path, commit: str, tag: str) -> dict[str, object]:
         },
     }
     manifest["integrity"] = integrity_for_manifest(manifest)
-    return manifest
+    return PinnedCorpus(manifest, blobs)
 
 
 def render_manifest(manifest: dict[str, object]) -> str:
@@ -287,10 +311,40 @@ def pinned_checkout(root: Path, commit: str) -> Path:
     head = str(run_git(checkout, "rev-parse", "HEAD")).strip()
     if head != commit:
         raise ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} is at {head}, not the pinned commit {commit}; run {INIT_COMMAND}")
+    # core.ignoreStat marks every file git writes assume-unchanged, so the flag refusal below would recur after each repair.
+    ignore_stat = git_process(checkout, "config", "--type=bool", "core.ignoreStat")
+    if ignore_stat.returncode not in (0, 1):
+        raise ImportError(f"git config core.ignoreStat failed: {ignore_stat.stderr.strip()}")
+    if ignore_stat.stdout.strip() == "true":
+        raise ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} enables core.ignoreStat, which hides edits from git status; run git -C {CHECKOUT_RELATIVE} config core.ignoreStat false")
     modified = str(run_git(checkout, "status", "--porcelain=v1", "--untracked-files=no", "--ignore-submodules=all")).splitlines()
     if modified:
         raise ImportError(f"Effect upstream checkout {CHECKOUT_RELATIVE} has modified tracked files ({modified[0].strip()}); run {INIT_COMMAND} --force")
     return checkout
+
+
+def refuse_hidden_paths(checkout: Path, selected: Mapping[str, bytes]) -> None:
+    """Refuse selected paths whose assume-unchanged or skip-worktree flag hides edits from git status."""
+    hidden = []
+    for entry in str(run_git(checkout, "ls-files", "-v", "-z")).split("\x00"):
+        tag, _, path = entry.partition(" ")
+        # ls-files -v writes S for skip-worktree and a lowercase tag for assume-unchanged.
+        if path in selected and (tag.islower() or tag.upper() == "S"):
+            hidden.append(path)
+    if hidden:
+        # Rebuilding the index from HEAD drops every flag at once; update-index applies only one flag option per run.
+        raise ImportError(
+            f"Effect upstream checkout {CHECKOUT_RELATIVE} hides selected tracked files from git status with assume-unchanged or skip-worktree "
+            f"({len(hidden)}, first {hidden[0]}); run git -C {CHECKOUT_RELATIVE} read-tree HEAD, then {INIT_COMMAND} --force"
+        )
+
+
+def checked_out(root: Path, commit: str, tag: str) -> PinnedCorpus:
+    """Read the pinned corpus from git objects once the checkout passes every fail-closed check."""
+    checkout = pinned_checkout(root, commit)
+    corpus = read_pinned(checkout, commit, tag)
+    refuse_hidden_paths(checkout, corpus.contents)
+    return corpus
 
 
 def validate_release_identity(manifest: dict[str, object]) -> None:
@@ -311,9 +365,8 @@ def validate_release_identity(manifest: dict[str, object]) -> None:
         raise ImportError("manifest release identity digest is not the independently pinned corpus")
 
 
-def verify_manifest(checkout: Path, manifest_path: Path, commit: str, tag: str) -> dict[str, object]:
+def verify_manifest(expected: dict[str, object], manifest_path: Path, commit: str, tag: str) -> None:
     """Compare a committed manifest with the one recomputed from the pinned commit."""
-    expected = build_manifest(checkout, commit, tag)
     try:
         text = manifest_path.read_text(encoding="utf-8")
         actual = json.loads(text)
@@ -326,18 +379,18 @@ def verify_manifest(checkout: Path, manifest_path: Path, commit: str, tag: str) 
         raise ImportError("manifest is not in canonical form; run with --refresh")
     if commit == COMMIT and tag == TAG:
         validate_release_identity(expected)
-    return expected
 
 
-def verify(root: Path = ROOT, commit: str = COMMIT, tag: str = TAG) -> tuple[Path, dict[str, object]]:
-    """Verify the pinned checkout and committed manifest; return both for consumers."""
-    checkout = pinned_checkout(root, commit)
-    return checkout, verify_manifest(checkout, root / MANIFEST_RELATIVE, commit, tag)
+def verify(root: Path = ROOT, commit: str = COMMIT, tag: str = TAG) -> PinnedCorpus:
+    """Verify the pinned checkout and committed manifest; return the verified corpus for consumers."""
+    corpus = checked_out(root, commit, tag)
+    verify_manifest(corpus.manifest, root / MANIFEST_RELATIVE, commit, tag)
+    return corpus
 
 
 def refresh(root: Path = ROOT, commit: str = COMMIT, tag: str = TAG) -> dict[str, object]:
     """Rewrite the committed manifest from the pinned checkout."""
-    manifest = build_manifest(pinned_checkout(root, commit), commit, tag)
+    manifest = checked_out(root, commit, tag).manifest
     (root / MANIFEST_RELATIVE).write_text(render_manifest(manifest), encoding="utf-8")
     return manifest
 
@@ -356,7 +409,7 @@ def main() -> int:
         manifest = refresh(root)
         print(json.dumps(manifest["integrity"], indent=2, sort_keys=True))
         return 0
-    _, manifest = verify(root)
+    manifest = verify(root).manifest
     integrity = manifest["integrity"]
     selection = manifest["selection"]
     assert isinstance(integrity, dict)

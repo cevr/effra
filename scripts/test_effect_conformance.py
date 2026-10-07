@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import check_effect_conformance as mapping
 
@@ -48,6 +49,18 @@ class MappingTests(unittest.TestCase):
         bad = copy.deepcopy(self.value)
         bad["cases"][1]["upstream"] = bad["cases"][0]["upstream"]
         self.reject(bad)
+
+    def test_upstream_anchors_come_from_the_verified_pinned_bytes(self) -> None:
+        pinned = mapping.corpus.verify()
+        target = self.value["cases"][0]["upstream"]["file"]
+        on_disk = (mapping.ROOT / mapping.corpus.CHECKOUT_RELATIVE / target).read_bytes()
+        self.assertEqual(pinned.contents[target], on_disk)
+        # Only the verified bytes change; the checkout file still carries every anchor.
+        drifted = mapping.corpus.PinnedCorpus(pinned.manifest, {**pinned.contents, target: b"anchors moved\n"})
+        with mock.patch.object(mapping.corpus, "verify", return_value=drifted):
+            with self.assertRaises(mapping.corpus.ImportError) as refusal:
+                mapping.validate_mapping(self.value)
+        self.assertIn("upstream case anchor does not match", str(refusal.exception))
 
     def test_invalid_native_evidence_targets_fail(self) -> None:
         for field, value in (("file", "internal/compiler/missing_test.go"), ("file", "../outside"), ("test", "TestImaginaryConformance"), ("targets", ["go"])):

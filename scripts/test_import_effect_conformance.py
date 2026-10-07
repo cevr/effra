@@ -20,6 +20,7 @@ SPEC = importlib.util.spec_from_file_location(
 )
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 GIT_ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
@@ -81,13 +82,58 @@ class SubmoduleReferenceTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def verify(self) -> dict[str, object]:
-        return MODULE.verify(self.effra, self.commit, self.tag)[1]
+        return MODULE.verify(self.effra, self.commit, self.tag).manifest
 
     def assert_refused(self, *fragments: str) -> None:
         with self.assertRaises(MODULE.ImportError) as refusal:
-            self.verify()
+            MODULE.verify(self.effra, self.commit, self.tag)
         for fragment in fragments:
             self.assertIn(fragment, str(refusal.exception))
+
+    def edit_hidden_from_status(self, target: str) -> None:
+        """Edit a selected file that index flags hide; git status alone would call the checkout clean."""
+        (self.checkout / target).write_bytes(b"edited behind git status\n")
+        self.assertEqual(git(self.checkout, "status", "--porcelain", "--untracked-files=no"), "")
+
+    def assert_flag_refusal_then_repair(self, target: str) -> None:
+        self.assert_refused(
+            f"hides selected tracked files from git status with assume-unchanged or skip-worktree (1, first {target})",
+            f"run git -C {MODULE.CHECKOUT_RELATIVE} read-tree HEAD, then scripts/init_upstream.sh --force",
+        )
+        # Every integrity-bearing read comes from the pinned objects, never the edited file.
+        self.assertEqual(MODULE.read_pinned(self.checkout, self.commit, self.tag).text(target), "export const one = 1\n")
+        # The printed repair clears the flags; only then can a forced checkout restore the file.
+        git(self.effra, "-C", str(MODULE.CHECKOUT_RELATIVE), "read-tree", "HEAD")
+        self.init_upstream("--force")
+        self.assertEqual((self.checkout / target).read_bytes(), b"export const one = 1\n")
+        self.verify()
+
+    def test_assume_unchanged_edit_is_refused_and_never_read(self) -> None:
+        target = "packages/effect/test/one.test.ts"
+        git(self.checkout, "update-index", "--assume-unchanged", "--", target)
+        self.edit_hidden_from_status(target)
+        self.assert_flag_refusal_then_repair(target)
+
+    def test_skip_worktree_edit_is_refused_and_never_read(self) -> None:
+        target = "packages/effect/test/one.test.ts"
+        git(self.checkout, "update-index", "--skip-worktree", "--", target)
+        self.edit_hidden_from_status(target)
+        self.assert_flag_refusal_then_repair(target)
+
+    def test_ignore_stat_checkout_is_refused_and_never_read(self) -> None:
+        target = "packages/effect/test/one.test.ts"
+        git(self.checkout, "config", "core.ignoreStat", "true")
+        # With core.ignoreStat, git marks every file it writes assume-unchanged.
+        (self.checkout / target).unlink()
+        git(self.checkout, "checkout", "--", target)
+        self.assertEqual(git(self.checkout, "ls-files", "-v", "--", target), f"h {target}")
+        self.edit_hidden_from_status(target)
+        self.assert_refused(
+            f"Effect upstream checkout {MODULE.CHECKOUT_RELATIVE} enables core.ignoreStat, which hides edits from git status",
+            f"git -C {MODULE.CHECKOUT_RELATIVE} config core.ignoreStat false",
+        )
+        git(self.checkout, "config", "core.ignoreStat", "false")
+        self.assert_flag_refusal_then_repair(target)
 
     def init_upstream(self, *args: str, mirror: pathlib.Path | None = None) -> None:
         env = dict(GIT_ENV, EFFRA_UPSTREAM_MIRROR=str(mirror) if mirror else "")
@@ -187,10 +233,10 @@ class ReleaseReferenceTests(unittest.TestCase):
     """The repository's own submodule at the Effect 4.0.1 release pin."""
 
     def setUp(self) -> None:
-        self.checkout, self.manifest = MODULE.verify(ROOT)
+        self.checkout = ROOT / MODULE.CHECKOUT_RELATIVE
+        self.manifest = MODULE.verify(ROOT).manifest
 
     def test_committed_manifest_is_exactly_the_pinned_release(self) -> None:
-        self.assertEqual(self.checkout, ROOT / MODULE.CHECKOUT_RELATIVE)
         self.assertEqual(self.manifest["source"]["commit"], MODULE.COMMIT)
         self.assertEqual(self.manifest["source"]["tag"], MODULE.TAG)
         self.assertEqual(self.manifest["selection"]["count"], 746)
@@ -208,12 +254,12 @@ class ReleaseReferenceTests(unittest.TestCase):
             path = pathlib.Path(directory) / "manifest.json"
             path.write_text(MODULE.render_manifest(manifest), encoding="utf-8")
             with self.assertRaises(MODULE.ImportError) as refusal:
-                MODULE.verify_manifest(self.checkout, path, MODULE.COMMIT, MODULE.TAG)
+                MODULE.verify_manifest(MODULE.read_pinned(self.checkout, MODULE.COMMIT, MODULE.TAG).manifest, path, MODULE.COMMIT, MODULE.TAG)
         self.assertIn("/files[packages/ai/anthropic/test/AnthropicClient.test.ts]/sha256", str(refusal.exception))
 
     def test_independent_release_identity_pins_the_selection_rule(self) -> None:
         with mock.patch.object(MODULE, "COMPONENTS", MODULE.COMPONENTS - {"typetest"}):
-            changed = MODULE.build_manifest(self.checkout, MODULE.COMMIT, MODULE.TAG)
+            changed = MODULE.read_pinned(self.checkout, MODULE.COMMIT, MODULE.TAG).manifest
         with self.assertRaises(MODULE.ImportError):
             MODULE.validate_release_identity(changed)
 
