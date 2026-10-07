@@ -71,18 +71,23 @@ enum HttpReply { Respond { response: HttpResponse }, BadRequest, NotFound, Unsup
 record HttpLimits { maxBodyBytes: i64, readHeaderMillis: i64, readBodyMillis: i64, idleMillis: i64, maxActive: i64 }
 ```
 
-The handler is an effect function `HttpRequest -> HttpReply`. Its service requirements flow into the server recipe and its typed failures are absorbed by the transport (inspection reports them as `AbsorbedFailures`). `path` is the request-target path exactly as received, without query or percent-decoding. `contentType` is empty when absent. Every limit is required; timeouts must lie in 1..2147483647 ms, `maxActive` in 1..2147483647 and `maxBodyBytes` in 0..2^53-1, otherwise the recipe dies before binding.
+The handler is an effect function `HttpRequest -> HttpReply`. Its service requirements flow into the server recipe and its typed failures are absorbed by the transport (inspection reports them as `AbsorbedFailures`). `path` is the request-target path exactly as received, without query or percent-decoding; for an absolute-form target it is the path after the authority (`/` when empty), and the query is removed first. `contentType` is empty when absent. Every limit is required; timeouts must lie in 1..2147483647 ms, `maxActive` in 1..2147483647 and `maxBodyBytes` in 0..2^53-1, otherwise the recipe dies before binding.
 
 | Condition | Response |
 | --- | --- |
 | `Respond` | its status (200..599), body and Content-Type (omitted when empty; never sniffed) |
 | `BadRequest` / `NotFound` / `UnsupportedMediaType` | 400 / 404 / 415, empty body, no Content-Type |
-| active requests at `maxActive`, or shutdown begun | 503, `Connection: close`, handler not run |
+| admitted requests at `maxActive`, or shutdown begun | 503, `Connection: close`, handler not run |
 | declared or chunked body over `maxBodyBytes` | 413, `Connection: close`, handler not run |
 | malformed body framing | 400, `Connection: close`, handler not run |
 | headers or body not received in time | connection closed without a response |
 | handler failure, defect, cleanup failure, or invalid response | 500, empty body |
+| `Respond` Content-Type outside visible ASCII, space and tab | 500, empty body (invalid response) |
 | server shutdown cancels the handler | 503, `Connection: close`, after the request scope closed |
 | client disconnect | handler cancelled; no further bytes |
+
+A request holds its admission from body read until its response has been handed to the operating system or its connection closed, so `maxActive` also bounds buffered responses a slow client has not received. Shutdown stops admission, cancels and joins every request scope, then gives responses still being written `idleMillis` to complete before aborting their connections, and finally closes the listener. A client that stops reading therefore never holds shutdown open, and owned cleanup always completes before any transport abort. Go closes the listener at cancellation; JS keeps it open, answering 503, until the drain ends, because `node:http`'s `close()` would also destroy responses still being written. Bun's `node:http` accepts a whole response at once, so on Bun these response bounds are Bun's own buffering.
+
+The Content-Type policy (visible ASCII, space and horizontal tab) is the intersection of what Go and Node publish unchanged; validation precedes any byte of the response, and a host rejection during publication becomes a 500 (or aborts a response already started) instead of escaping the transport.
 
 Routing, method selection and media-type policy belong to the handler; the example answers a wrong method on a known path with 404, matching the selected profile. Every response is written only after the request scope, including handler resources and children, has closed, so a cleanup failure is never published as success. On JS the transport uses `node:http` (Node or Bun) with Effect fibers; the generated entry interrupts `main` on SIGINT/SIGTERM. General headers, query parameters, streaming bodies, typed endpoints and codecs remain future work.

@@ -2,6 +2,7 @@ package effra
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -168,6 +169,10 @@ func TestHTTPTransportFailsClosedWithGeneric500(t *testing.T) {
 			return respond(99, "text/plain", "never")
 		case "/header":
 			return respond(200, "text/plain\r\nX-Injected: 1", "never")
+		case "/unicode":
+			return respond(200, "text/λ", "never")
+		case "/control":
+			return respond(200, "text/plain\x7f", "never")
 		case "/cleanup":
 			resource := Invoke(fc, AcquireRelease("request", func(context.Context) (Unit, error) { return Unit{}, nil }, func(Unit, context.Context) error { return errors.New("cleanup failed") }))
 			if resource.IsFailure() {
@@ -177,14 +182,28 @@ func TestHTTPTransportFailsClosedWithGeneric500(t *testing.T) {
 		}
 		return respond(200, "", "")
 	})
-	for _, path := range []string{"/failure", "/defect", "/status", "/header", "/cleanup"} {
+	for _, path := range []string{"/failure", "/defect", "/status", "/header", "/unicode", "/control", "/cleanup"} {
 		response, body := exchange(t, server.address, "GET "+path+" HTTP/1.1\r\nHost: x\r\n\r\n")
 		requireStatusOnly(t, response, body, 500)
 	}
+	if response, _ := exchange(t, server.address, "GET / HTTP/1.1\r\nHost: x\r\n\r\n"); response == nil || response.StatusCode != 200 {
+		t.Fatalf("server did not serve after inadmissible responses: %v", response)
+	}
 }
 
+func TestHTTPHeaderValuePolicyAdmitsVisibleASCIIAndBlanks(t *testing.T) {
+	for value, want := range map[string]bool{"": true, "text/plain; charset=utf-8": true, "a\tb ~": true, "text/\u03bb": false, "caf\xe9": false, "a\r\nb": false, "a\x00": false, "a\x7f": false} {
+		if got := admissibleHeaderValue(value); got != want {
+			t.Fatalf("%q: admitted %v", value, got)
+		}
+	}
+}
+
+// The body exceeds every buffer between the handler and the socket, so an
+// early publication would put its first bytes on the wire before cleanup.
 func TestHTTPTransportPublishesOnlyAfterRequestCleanup(t *testing.T) {
 	cleanupStarted, finish := make(chan struct{}), make(chan struct{})
+	large := bytes.Repeat([]byte("d"), 1<<20)
 	server := startTransport(t, testLimits, func(fc *FiberContext, _ HTTPRequest) Exit[HTTPResponse] {
 		resource := Invoke(fc, AcquireRelease("request", func(context.Context) (Unit, error) { return Unit{}, nil }, func(Unit, context.Context) error {
 			close(cleanupStarted)
@@ -194,22 +213,36 @@ func TestHTTPTransportPublishesOnlyAfterRequestCleanup(t *testing.T) {
 		if resource.IsFailure() {
 			return Propagate[HTTPResponse](resource)
 		}
-		return respond(200, "text/plain", "done")
+		return Succeed(HTTPResponse{Status: 200, ContentType: "text/plain", Body: large})
 	})
-	received := make(chan []byte, 1)
+	conn, err := net.Dial("tcp", server.address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	first := make(chan error, 1)
 	go func() {
-		_, body := exchange(t, server.address, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
-		received <- body
+		_, err := reader.Peek(1)
+		first <- err
 	}()
 	wait(t, cleanupStarted)
 	select {
-	case body := <-received:
-		t.Fatalf("response published before cleanup completed: %q", body)
+	case err := <-first:
+		t.Fatalf("response bytes reached the wire before cleanup completed: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
 	close(finish)
-	if body := wait(t, received); string(body) != "done" {
-		t.Fatalf("response after cleanup: %q", body)
+	if err := wait(t, first); err != nil {
+		t.Fatal(err)
+	}
+	response, body := readResponse(t, reader)
+	if response == nil || response.ContentLength != int64(len(large)) || !bytes.Equal(body, large) {
+		t.Fatalf("response after cleanup: %v (%d bytes)", response, len(body))
 	}
 }
 
@@ -335,6 +368,54 @@ func TestHTTPTransportShutdownCancelsActiveWorkAndReports503AfterCleanup(t *test
 	listener.Close()
 }
 
+// A client that stops reading a large response must not hold shutdown open:
+// the request scope has already closed, so only transport I/O remains and the
+// server aborts it once its write grace (IdleTimeout) elapses.
+func TestHTTPTransportShutdownAbortsAStalledResponseAfterCleanup(t *testing.T) {
+	limits := testLimits
+	limits.IdleTimeout = 200 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	bound, cleaned := make(chan string, 1), make(chan struct{})
+	done := make(chan Exit[Unit], 1)
+	large := bytes.Repeat([]byte("s"), 32<<20)
+	go func() {
+		done <- RunContext(ctx, ServeHTTPRequests("127.0.0.1:0", limits, func(HTTPRequest) Effect[HTTPResponse] {
+			return func(fc *FiberContext) Exit[HTTPResponse] {
+				resource := Invoke(fc, AcquireRelease("request", func(context.Context) (Unit, error) { return Unit{}, nil }, func(Unit, context.Context) error { close(cleaned); return nil }))
+				if resource.IsFailure() {
+					return Propagate[HTTPResponse](resource)
+				}
+				return Succeed(HTTPResponse{Status: 200, ContentType: "application/octet-stream", Body: large})
+			}
+		}, func(address string) { bound <- address }))
+	}()
+	address := wait(t, bound)
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	wait(t, cleaned)
+	cancel()
+	select {
+	case exit := <-done:
+		if !exit.Interrupted {
+			t.Fatalf("shutdown did not preserve cancellation: %+v", exit)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown waited on a client that stopped reading")
+	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatalf("listener was not released: %v", err)
+	}
+	listener.Close()
+}
+
 func TestHTTPTransportRejectsImplicitLimits(t *testing.T) {
 	for _, limits := range []HTTPLimits{{}, {MaxBodyBytes: -1, ReadHeaderTimeout: 1, ReadBodyTimeout: 1, IdleTimeout: 1, MaxActive: 1}, {MaxBodyBytes: 1, ReadHeaderTimeout: 1, ReadBodyTimeout: 1, IdleTimeout: 1}} {
 		out := Run(ServeHTTPRequests("127.0.0.1:0", limits, nil, nil))
@@ -345,7 +426,7 @@ func TestHTTPTransportRejectsImplicitLimits(t *testing.T) {
 }
 
 func TestRequestPathKeepsTargetBytes(t *testing.T) {
-	for target, want := range map[string]string{"/a?b": "/a", "/a%2F..//b": "/a%2F..//b", "http://host/x/y?z": "/x/y", "http://host": "/", "*": "*"} {
+	for target, want := range map[string]string{"/a?b": "/a", "/a%2F..//b": "/a%2F..//b", "http://host/x/y?z": "/x/y", "http://host": "/", "http://effra?next=/health": "/", "http://effra/a?next=/b": "/a", "http://effra?": "/", "*": "*"} {
 		if got := requestPath(target); got != want {
 			t.Fatalf("%q: %q != %q", target, got, want)
 		}

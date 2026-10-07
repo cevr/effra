@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -99,7 +100,9 @@ func (l HTTPLimits) validate() error {
 //
 // Every response is written only after the request scope, including the
 // handler's resources and children, has closed. Status-only responses have
-// empty bodies and no Content-Type.
+// empty bodies and no Content-Type. Once the server is cancelled, a response
+// still being written must complete within IdleTimeout; the connection is
+// then aborted, so a client that stops reading cannot hold shutdown open.
 func ServeHTTPRequests(address string, limits HTTPLimits, handler func(HTTPRequest) Effect[HTTPResponse], onListen func(string)) Effect[Unit] {
 	if err := limits.validate(); err != nil {
 		return func(*FiberContext) Exit[Unit] { return Die[Unit](err) }
@@ -118,22 +121,25 @@ type httpTransport struct {
 }
 
 func (t *httpTransport) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	controller := http.NewResponseController(w)
+	status := func(code int, closeConnection bool) func() {
+		return func() { writeStatus(w, code, closeConnection) }
+	}
 	if t.server.Err() != nil {
-		writeStatus(w, http.StatusServiceUnavailable, true)
+		t.publish(controller, status(http.StatusServiceUnavailable, true))
 		return
 	}
 	select {
 	case t.active <- struct{}{}:
 		defer func() { <-t.active }()
 	default:
-		writeStatus(w, http.StatusServiceUnavailable, true)
+		t.publish(controller, status(http.StatusServiceUnavailable, true))
 		return
 	}
 	if r.ContentLength > t.limits.MaxBodyBytes {
-		writeStatus(w, http.StatusRequestEntityTooLarge, true)
+		t.publish(controller, status(http.StatusRequestEntityTooLarge, true))
 		return
 	}
-	controller := http.NewResponseController(w)
 	_ = controller.SetReadDeadline(time.Now().Add(t.limits.ReadBodyTimeout))
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, t.limits.MaxBodyBytes))
 	if err != nil {
@@ -143,11 +149,11 @@ func (t *httpTransport) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var network net.Error
 		switch {
 		case errors.As(err, &tooLarge):
-			writeStatus(w, http.StatusRequestEntityTooLarge, true)
+			t.publish(controller, status(http.StatusRequestEntityTooLarge, true))
 		case errors.As(err, &network) && network.Timeout(), r.Context().Err() != nil:
 			panic(http.ErrAbortHandler)
 		default:
-			writeStatus(w, http.StatusBadRequest, true)
+			t.publish(controller, status(http.StatusBadRequest, true))
 		}
 		return
 	}
@@ -161,12 +167,27 @@ func (t *httpTransport) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// The client is gone: no response remains possible.
 		panic(http.ErrAbortHandler)
 	case exit.Interrupted && t.server.Err() != nil:
-		writeStatus(w, http.StatusServiceUnavailable, true)
+		t.publish(controller, status(http.StatusServiceUnavailable, true))
 	case exit.IsFailure():
-		writeStatus(w, http.StatusInternalServerError, false)
+		t.publish(controller, status(http.StatusInternalServerError, false))
 	default:
-		writeResponse(w, exit.Value)
+		t.publish(controller, func() { writeResponse(w, exit.Value) })
 	}
+}
+
+// publish writes one response while server cancellation bounds its writes:
+// once the server is cancelled they must complete within IdleTimeout, after
+// which they fail and the connection closes, so a client that stops reading
+// cannot hold shutdown open. Callers publish only after the request scope has
+// closed, so the bound never shortens owned cleanup. The response is flushed
+// before the handler returns, so no byte is written outside the bound.
+func (t *httpTransport) publish(controller *http.ResponseController, write func()) {
+	stop := context.AfterFunc(t.server, func() {
+		_ = controller.SetWriteDeadline(time.Now().Add(t.limits.IdleTimeout))
+	})
+	defer stop()
+	write()
+	_ = controller.Flush()
 }
 
 // runRequest executes one handler in a fresh request scope linked to both the
@@ -182,18 +203,19 @@ func runRequest[A any](server context.Context, r *http.Request, program Effect[A
 
 // requestPath returns the path component of a request target exactly as
 // received. Origin-form targets keep their bytes; absolute-form targets use
-// their path after the authority.
+// their path after the authority. The query is removed first, so a slash
+// inside it never becomes the path.
 func requestPath(target string) string {
+	target, _, _ = strings.Cut(target, "?")
 	if scheme := strings.Index(target, "://"); scheme > 0 && !strings.HasPrefix(target, "/") {
 		rest := target[scheme+3:]
 		slash := strings.IndexByte(rest, '/')
 		if slash < 0 {
 			return "/"
 		}
-		target = rest[slash:]
+		return rest[slash:]
 	}
-	path, _, _ := strings.Cut(target, "?")
-	return path
+	return target
 }
 
 func writeStatus(w http.ResponseWriter, status int, closeConnection bool) {
@@ -201,11 +223,26 @@ func writeStatus(w http.ResponseWriter, status int, closeConnection bool) {
 		w.Header().Set("Connection", "close")
 	}
 	w.Header()["Content-Type"] = nil
+	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(status)
 }
 
+// admissibleHeaderValue is the header-value policy shared by every target:
+// visible ASCII, space and horizontal tab. It is the intersection of what Go
+// and Node publish unchanged; anything else is an invalid response.
+func admissibleHeaderValue(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if c := value[i]; c != '\t' && (c < ' ' || c > '~') {
+			return false
+		}
+	}
+	return true
+}
+
+// writeResponse validates the complete response before writing any of it;
+// an invalid response becomes an empty 500.
 func writeResponse(w http.ResponseWriter, response HTTPResponse) {
-	if response.Status < 200 || response.Status > 599 || ((response.Status == http.StatusNoContent || response.Status == http.StatusNotModified) && len(response.Body) > 0) || strings.ContainsAny(response.ContentType, "\r\n") {
+	if response.Status < 200 || response.Status > 599 || ((response.Status == http.StatusNoContent || response.Status == http.StatusNotModified) && len(response.Body) > 0) || !admissibleHeaderValue(response.ContentType) {
 		writeStatus(w, http.StatusInternalServerError, false)
 		return
 	}
@@ -213,6 +250,9 @@ func writeResponse(w http.ResponseWriter, response HTTPResponse) {
 		w.Header()["Content-Type"] = nil
 	} else {
 		w.Header().Set("Content-Type", response.ContentType)
+	}
+	if response.Status != http.StatusNoContent && response.Status != http.StatusNotModified {
+		w.Header().Set("Content-Length", strconv.Itoa(len(response.Body)))
 	}
 	w.WriteHeader(response.Status)
 	_, _ = w.Write(response.Body)

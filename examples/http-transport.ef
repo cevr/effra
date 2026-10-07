@@ -54,7 +54,20 @@ effect fn route(request: HttpRequest) -> HttpReply raises { Unavailable } uses {
                     if request.path == "/malformed" {
                         HttpReply.BadRequest {}
                     } else {
-                        HttpReply.NotFound {}
+                        if request.path == "/invalid" {
+                            // Not a header value every target can publish:
+                            // the transport answers an empty 500.
+                            let body = run Http.text("never")
+                            HttpReply.Respond {
+                                response: HttpResponse {
+                                    status: 200,
+                                    contentType: "text/λ",
+                                    body: body
+                                }
+                            }
+                        } else {
+                            HttpReply.NotFound {}
+                        }
                     }
                 }
             }

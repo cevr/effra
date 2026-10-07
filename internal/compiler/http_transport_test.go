@@ -1,6 +1,9 @@
 package compiler
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -105,17 +108,20 @@ func TestHTTPDataPreludeHasNoSourceSpans(t *testing.T) {
 
 // The JS transport is exercised through its provider with handler recipes
 // whose finalizers are observable, proving publication after owned cleanup.
+// Bun's node:http accepts a whole response at once and reports it finished,
+// so response backpressure is observable, and its cases run, only on Node.
 const httpTransportJSHarness = `
 import net from 'node:net';
+const backpressure = !process.versions.bun;
 const limits = { maxBodyBytes: 16n, readHeaderMillis: 1000n, readBodyMillis: 1000n, idleMillis: 1000n, maxActive: 4n };
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const pending = (promise, ms = 100) => Promise.race([promise.then(() => false), new Promise(r => setTimeout(() => r(true), ms))]);
 const ok = body => ({ _tag: 'HttpReply.Respond', response: { status: 200n, contentType: 'text/plain', body: new TextEncoder().encode(body) } });
-const listen = async (handler, path) => {
+const listen = async (handler, path, bounds = limits) => {
   const bound = deferred();
   const log = console.log;
   console.log = line => { console.log = log; bound.resolve(String(line).replace('listening http://', '')); };
-  const fiber = Effect.runFork(path ? __ef_provider_LiveHttp.serve('127.0.0.1:0', path) : __ef_provider_LiveHttp.listen('127.0.0.1:0', limits, handler));
+  const fiber = Effect.runFork(path ? __ef_provider_LiveHttp.serve('127.0.0.1:0', path) : __ef_provider_LiveHttp.listen('127.0.0.1:0', bounds, handler));
   const [host, port] = (await bound.promise).split(':');
   return { fiber, host, port: Number(port), done: new Promise(resolve => fiber.addObserver(resolve)) };
 };
@@ -133,6 +139,19 @@ const send = (server, path) => {
 const gated = (started, gate, after) => request => Effect.flatMap(
   Effect.acquireRelease(Effect.void, () => Effect.sync(() => started.resolve()).pipe(Effect.andThen(Effect.promise(() => gate.promise)))),
   () => after(request));
+const reply = (contentType, body) => ({ _tag: 'HttpReply.Respond', response: { status: 200n, contentType, body } });
+const large = new Uint8Array(32 << 20);
+// A client that sends (pipelined) requests and stops reading once its first
+// response has started arriving.
+const stall = (server, ...paths) => {
+  const socket = net.connect(server.port, server.host);
+  const receiving = deferred();
+  socket.on('error', () => {});
+  socket.once('data', () => { socket.pause(); receiving.resolve(); });
+  socket.write(paths.map(path => 'GET ' + path + ' HTTP/1.1\r\nHost: x\r\n\r\n').join(''));
+  return { socket, receiving: receiving.promise };
+};
+const cleanedLarge = cleaned => () => Effect.flatMap(Effect.acquireRelease(Effect.void, () => Effect.sync(() => cleaned.resolve())), () => Effect.succeed(reply('application/octet-stream', large)));
 const failures = [];
 const check = (condition, message) => { if (!condition) failures.push(message); };
 
@@ -180,6 +199,49 @@ const check = (condition, message) => { if (!condition) failures.push(message); 
   const exit = await server.done;
   check(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause), 'shutdown did not complete with interruption');
 }
+{ // an inadmissible header value is an empty 500 and the server keeps serving
+  const server = await listen(request => Effect.succeed(request.path === '/bad' ? reply('text/λ', new Uint8Array(0)) : ok('fine')));
+  const bad = await send(server, '/bad').response;
+  check(bad.startsWith('HTTP/1.1 500') && !/content-type/i.test(bad), 'inadmissible header value: ' + bad);
+  const good = await send(server, '/good').response;
+  check(good.startsWith('HTTP/1.1 200') && good.endsWith('fine'), 'server after an inadmissible header value: ' + good);
+  server.fiber.interruptUnsafe();
+  await server.done;
+}
+if (backpressure) { // a queued response keeps its admission until the client received it or left
+  const cleaned = deferred();
+  const big = cleanedLarge(cleaned);
+  const server = await listen(request => request.path === '/big' ? big() : Effect.succeed(ok('small')), null, { ...limits, maxActive: 1n });
+  const stalled = stall(server, '/big');
+  await cleaned.promise;
+  await stalled.receiving;
+  check((await send(server, '/second').status) === 503, 'a queued response released its admission');
+  stalled.socket.destroy();
+  let status;
+  for (let attempt = 0; attempt < 100 && status !== 200; attempt++) {
+    status = await send(server, '/third').status;
+    if (status !== 200) await pending(new Promise(() => {}), 20);
+  }
+  check(status === 200, 'closing the stalled client did not restore admission: ' + status);
+  server.fiber.interruptUnsafe();
+  await server.done;
+}
+if (backpressure) { // shutdown joins the request scope, then aborts a response nobody reads
+  const started = deferred(), cleaned = deferred();
+  const server = await listen(request => request.path === '/big'
+    ? Effect.succeed(reply('application/octet-stream', large))
+    : Effect.flatMap(Effect.acquireRelease(Effect.sync(() => started.resolve()), () => Effect.sync(() => cleaned.resolve())), () => Effect.never), null, { ...limits, idleMillis: 200n });
+  // The pipelined request's post-cleanup 503 queues behind the large
+  // response, which the client stops reading.
+  const stalled = stall(server, '/big', '/held');
+  await started.promise;
+  await stalled.receiving;
+  server.fiber.interruptUnsafe();
+  await cleaned.promise;
+  check(!(await pending(server.done, 3000)), 'shutdown waited on a client that stopped reading');
+  stalled.socket.destroy();
+  await server.done;
+}
 { // the raw path-to-text control keeps its decoded path and text responses
   const server = await listen(null, path => path === '/fail' ? Effect.fail({ _tag: 'Missing' }) : Effect.succeed('hi ' + path));
   const text = await send(server, '/a%20b').response;
@@ -194,8 +256,49 @@ console.log('ok');
 `
 
 func TestHTTPTransportJSPublishesAfterCleanupAndCancelsOnDisconnectAndShutdown(t *testing.T) {
-	output := runJS(t, `effect fn main()->void{let pending=Http.text("x"); void}`, httpTransportJSHarness)
-	if strings.TrimSpace(output) != "ok" {
-		t.Fatalf("JS transport lifecycle: %s", output)
+	for host, output := range runJSOnHTTPHosts(t, `effect fn main()->void{let pending=Http.text("x"); void}`, httpTransportJSHarness) {
+		if strings.TrimSpace(output) != "ok" {
+			t.Fatalf("%s: JS transport lifecycle: %s", host, output)
+		}
 	}
+}
+
+// runJSOnHTTPHosts runs one emitted module with assertions under Node and Bun.
+// The module's directory links the repository's pinned node_modules, so both
+// hosts resolve the same Effect.
+func runJSOnHTTPHosts(t *testing.T, source, assertions string) map[string]string {
+	t.Helper()
+	r := CompileFor(source, "js")
+	if !r.Checked {
+		t.Fatalf("%+v", r.Diagnostics)
+	}
+	js, _, err := r.Emit(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modules, err := filepath.Abs(filepath.Join("..", "..", "node_modules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(modules, filepath.Join(dir, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "probe.mjs")
+	if err := os.WriteFile(path, []byte(js+"\n"+assertions), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outputs := map[string]string{}
+	for _, host := range []string{"node", "bun"} {
+		binary, err := exec.LookPath(host)
+		if err != nil {
+			t.Fatalf("%s is required for the JS HTTP transport", host)
+		}
+		output, err := exec.Command(binary, path).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", host, err, output)
+		}
+		outputs[host] = string(output)
+	}
+	return outputs
 }

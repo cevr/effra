@@ -1,23 +1,32 @@
-"""Drive examples/http-transport.ef over real sockets on the Go and JS targets.
+"""Drive examples/http-transport.ef over real sockets on the Go target and on
+the JS target under Bun and Node.
 
 Every case observes exact wire status/body/content-type. Cancellation is proved
 causally: the example admits one active request, so the admission slot held by
 /slow (a 60s handler) is released only after its request scope is cancelled and
 closed.
 """
-import pathlib, selectors, shutil, signal, socket, subprocess, time
+import os, pathlib, selectors, shutil, signal, socket, subprocess, tempfile, time
 
 root = pathlib.Path(__file__).resolve().parents[1]
 example = "examples/http-transport.ef"
 
 
-def start(target):
+def start(target, scratch):
     if target == "go":
         binary = subprocess.check_output([str(root / "bin/ef"), "build", example], cwd=root, text=True).strip()
         command = [str(root / binary)]
     else:
         module = subprocess.check_output([str(root / "bin/ef"), "build", example, "--target", "js", "--entry"], cwd=root, text=True).strip()
-        command = [shutil.which("bun") or shutil.which("node"), str(root / module)]
+        # The module runs beside a link to the pinned node_modules, so Node
+        # and Bun resolve the same Effect.
+        hosted = pathlib.Path(scratch) / "http-transport.mjs"
+        shutil.copyfile(root / module, hosted)
+        if not (pathlib.Path(scratch) / "node_modules").exists():
+            os.symlink(root / "node_modules", pathlib.Path(scratch) / "node_modules")
+        host = shutil.which(target.removeprefix("js-"))
+        assert host, target + " is required"
+        command = [host, str(hosted)]
     process = subprocess.Popen(command, cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ)
@@ -126,8 +135,8 @@ def poll_health(address, status, deadline=3.0):
         assert time.monotonic() < stop, f"/health did not become {status}: {response}"
 
 
-def check(target):
-    process, address = start(target)
+def check(target, scratch):
+    process, address = start(target, scratch)
     try:
         text = "text/plain; charset=utf-8"
         octets = "application/octet-stream"
@@ -139,6 +148,14 @@ def check(target):
         expect(exchange(address, request("POST", "/echo", b"text", "text/plain")), 415)
         expect(exchange(address, request("GET", "/malformed")), 400)
         expect(exchange(address, request("GET", "/unavailable")), 500)
+        # A response header value outside the shared policy (visible ASCII,
+        # space, tab) fails closed, and the server keeps serving.
+        expect(exchange(address, request("GET", "/invalid")), 500)
+        expect(exchange(address, request("GET", "/health")), 200, b"ok", text)
+        # Absolute-form targets: the query is not part of the path, even when
+        # it contains a slash.
+        expect(exchange(address, request("GET", "http://effra?next=/health")), 404)
+        expect(exchange(address, request("GET", "http://effra/health?next=/echo")), 200, b"ok", text)
         # Body bounds: 16 bytes are admitted; 17 are rejected before the handler.
         expect(exchange(address, request("POST", "/echo", b"x" * 16, octets)), 200, b"x" * 16, octets)
         expect(exchange(address, request("POST", "/echo", b"x" * 17, octets)), 413, close=True)
@@ -176,5 +193,6 @@ def check(target):
             process.communicate()
 
 
-for target in ("go", "js"):
-    check(target)
+with tempfile.TemporaryDirectory() as scratch:
+    for target in ("go", "js-bun", "js-node"):
+        check(target, scratch)
