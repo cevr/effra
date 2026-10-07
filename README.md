@@ -405,7 +405,7 @@ Service laws, such as "decode after encode returns the input", become obligation
 
 The transition table in [the tour](#matching-several-values-at-once) already compiles: a multi-subject match whose every state and event pair is checked. Running it as a machine is specified but not built. In [the machine spec](docs/specs/state-machines.md), an owned runtime admits events, runs each step and owns the work each state starts, as one form of [actor](docs/specs/actors.md) behavior. A step can be a pure function or an effect with its own failures and services.
 
-How a machine is written is not settled. Whether it needs a declaration form, or ships as a library over ordinary functions, waits on construct admission: a new construct must make bad code unrepresentable in a way a library cannot.
+There is no machine declaration. A machine is a bundled library plan over ordinary functions, and one checker rule rejects a `Stay` that would change the state's variant: that is the only guarantee a library could not give, and construct admission admits nothing more.
 
 ## Try it
 
