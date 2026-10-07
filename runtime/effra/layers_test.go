@@ -616,9 +616,19 @@ func TestLayerFailureWithConcurrentWaitersIsRetainedOnceAndConsumersNeverOpen(t 
 		}})
 	}
 	plan := unitPlan(nodes, func(Unit) state { return state{} })
-	go func() { time.Sleep(10 * time.Millisecond); close(release) }()
-	out := Run(Provide(plan, Unit{}, func(*state) Effect[Unit] { return func(*FiberContext) Exit[Unit] { return Succeed(Unit{}) } }))
-	cause := out.Cause()
+	// The build seam Provide drives, so the test can hold the producer until
+	// every consumer waits on its pending entry.
+	var cause Cause
+	Run(func(fc *FiberContext) Exit[Unit] {
+		s := plan.init(Unit{})
+		build := newLayerBuild(plan, &s, fc)
+		build.start()
+		awaitRegisteredWaiters(t, build.entries[0].outcome, 3)
+		close(release)
+		build.await()
+		cause = append(build.constructionCause(), build.close()...)
+		return Succeed(Unit{})
+	})
 	if len(cause) != 2 || cause[0].Failure == nil || cause[0].Failure.Tag != "DbError" || cause[1].Err.Error() != "database cleanup" || consumers.Load() != 0 || released.Load() != 1 {
 		t.Fatalf("shared failure: cause=%v consumers=%d released=%d", cause, consumers.Load(), released.Load())
 	}
@@ -648,11 +658,23 @@ func TestLayerBuildCancellationReleasesPendingWaitersAndJoinsProducer(t *testing
 		}})
 	}
 	plan := unitPlan(nodes, func(Unit) state { return state{} })
-	done := make(chan Exit[Unit], 1)
+	// The build seam Provide drives, so the test can cancel only after both
+	// consumers wait on the pending entry.
+	builds, done := make(chan *layerBuild[state], 1), make(chan Cause, 1)
 	go func() {
-		done <- RunContext(ctx, Provide(plan, Unit{}, func(*state) Effect[Unit] { return func(*FiberContext) Exit[Unit] { return Succeed(Unit{}) } }))
+		RunContext(ctx, func(fc *FiberContext) Exit[Unit] {
+			s := plan.init(Unit{})
+			build := newLayerBuild(plan, &s, fc)
+			build.start()
+			builds <- build
+			build.await()
+			done <- append(build.constructionCause(), build.close()...)
+			return Succeed(Unit{})
+		})
 	}()
+	build := wait(t, builds)
 	evaluation := wait(t, started)
+	awaitRegisteredWaiters(t, build.entries[0].outcome, 2)
 	cancel()
 	wait(t, evaluation.Done())
 	select {
@@ -661,8 +683,7 @@ func TestLayerBuildCancellationReleasesPendingWaitersAndJoinsProducer(t *testing
 	case <-time.After(10 * time.Millisecond):
 	}
 	close(finish)
-	out := wait(t, done)
-	cause := out.Cause()
+	cause := wait(t, done)
 	// Abort-induced producer and waiter interruptions are control, not reasons.
 	if len(cause) != 1 || cause[0].Kind != "interrupt" || !errors.Is(cause[0].Err, context.Canceled) || consumers.Load() != 0 || released.Load() != 1 {
 		t.Fatalf("cancelled pending waiters: cause=%v consumers=%d released=%d", cause, consumers.Load(), released.Load())

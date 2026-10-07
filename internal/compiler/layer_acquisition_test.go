@@ -77,13 +77,13 @@ func TestLayerEntryWaiterCancellationIsBuildOwnedAcrossTargets(t *testing.T) {
 const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
 for(const fails of [false,true]){
  const started=deferred(),release=deferred(),payload={_tag:'ConfigError'};
- let constructions=0,dependents=0,released=0,signal;
+ let constructions=0,dependents=0,released=0,interrupted=false;
  const plan={id:'waiters',init:()=>({}),expose:state=>state,nodes:[
   {id:'0/shared',dependencies:[],construct:state=>Effect.gen(function*(){
    constructions++;
    yield* Effect.acquireRelease(Effect.void,()=>Effect.sync(()=>released++));
-   signal=yield* Effect.abortSignal;started.resolve();
-   yield* Effect.promise(()=>release.promise);
+   started.resolve();
+   yield* Effect.promise(()=>release.promise).pipe(Effect.onInterrupt(()=>Effect.sync(()=>interrupted=true)));
    if(fails)return yield* Effect.fail(payload);
    state.shared=42;
   })},
@@ -98,9 +98,11 @@ for(const fails of [false,true]){
   yield* Fiber.interrupt(first);
   const cancelled=yield* Fiber.await(first);
   if(!Exit.isFailure(cancelled)||!Cause.hasInterruptsOnly(cancelled.cause))throw new Error('cancelled waiter '+JSON.stringify(cancelled));
-  if(signal.aborted)throw new Error('cancelling one waiter cancelled the build-owned producer');
   release.resolve();
-  const observed=yield* Fiber.await(second),late=yield* Effect.exit(build.await(0));
+  const observed=yield* Fiber.await(second);
+  // The second waiter's wake means the producer has exited.
+  if(interrupted)throw new Error('cancelling one waiter interrupted the build-owned producer');
+  const late=yield* Effect.exit(build.await(0));
   yield* build.settle(restore);
   const cause=build.cause(),cleanup=yield* build.close(Cause.empty);
   return {observed,late,cause,cleanup,state:build.state,dependentOwner:build.entries[1].owner};
@@ -121,17 +123,39 @@ console.log('entry waiters');
 	}
 }
 
+// Fiber.await registers through the producer Fiber's addObserver. Producers
+// start from Effect's scheduler queue, after the caller's synchronous
+// continuation, so counting begins before any waiter can register.
+const jsLayerEntryWaiters = `
+const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
+const waiters=(fiber,count)=>new Promise((resolve,reject)=>{
+ let registered=0;const add=fiber.addObserver.bind(fiber);
+ fiber.addObserver=observer=>{if(++registered===count)resolve();return add(observer);};
+ setTimeout(()=>reject(new Error('registered waiters '+registered+', want '+count)),3000).unref();
+});
+`
+
 func TestLayerJSFailureWithConcurrentWaitersIsRetainedOnce(t *testing.T) {
-	output := runJS(t, layerApplicationSource, `
-const consumers=[],released=[];
+	output := runJS(t, layerApplicationSource, jsLayerEntryWaiters+`
+const release=deferred(),consumers=[],released=[];
 const nodes=[{id:'0/database',dependencies:[],construct:()=>Effect.gen(function*(){
  yield* Effect.acquireRelease(Effect.void,()=>Effect.sync(()=>released.push('database')).pipe(Effect.flatMap(()=>Effect.die(new Error('database cleanup')))));
- yield* Effect.sleep(10);
+ yield* Effect.promise(()=>release.promise);
  return yield* Effect.fail({_tag:'DbError'});
 })}];
 for(const id of ['1/accounts','2/audit','3/billing'])nodes.push({id,dependencies:['0/database'],construct:()=>Effect.sync(()=>consumers.push(id))});
-const exit=await Effect.runPromiseExit(__ef_provideLayer({id:'shared-failure',init:()=>({}),nodes,expose:state=>state},()=>Effect.void));
-const reasons=Exit.isFailure(exit)?exit.cause.reasons.map(reason=>reason._tag==='Fail'?reason.error._tag:reason._tag==='Die'?reason.defect.message:reason._tag):[];
+// The build seam __ef_provideLayer drives, so the test can hold the producer
+// until every consumer waits on its pending entry.
+const cause=await Effect.runPromise(Effect.uninterruptibleMask(restore=>Effect.gen(function*(){
+ const build=yield* __ef_layerBuild({id:'shared-failure',init:()=>({}),nodes,expose:state=>state});
+ yield* build.start;
+ const registered=waiters(build.entries[0].fiber,3);
+ yield* Effect.promise(()=>registered);
+ release.resolve();
+ yield* build.settle(restore);
+ return yield* build.close(build.cause());
+})));
+const reasons=cause.reasons.map(reason=>reason._tag==='Fail'?reason.error._tag:reason._tag==='Die'?reason.defect.message:reason._tag);
 if(JSON.stringify(reasons)!=='["DbError","database cleanup"]'||consumers.length||released.length!==1)throw new Error('shared failure '+JSON.stringify({reasons,consumers,released}));
 console.log('shared failure');
 `)
@@ -141,10 +165,9 @@ console.log('shared failure');
 }
 
 func TestLayerJSBuildCancellationReleasesPendingWaitersAndJoinsProducer(t *testing.T) {
-	output := runJS(t, layerApplicationSource, `
-const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
+	output := runJS(t, layerApplicationSource, jsLayerEntryWaiters+`
 const ready=deferred(),canceled=deferred(),finish=deferred();
-let settled=false,released=0;const consumers=[];
+let settled=false,released=0,registered;const consumers=[];
 const nodes=[{id:'0/database',dependencies:[],construct:()=>Effect.uninterruptibleMask(restore=>Effect.gen(function*(){
  yield* Effect.acquireRelease(Effect.void,()=>Effect.sync(()=>released++));
  yield* Effect.exit(restore(Effect.promise(signal=>{signal.addEventListener('abort',()=>canceled.resolve(),{once:true});ready.resolve();return new Promise(()=>{});})));
@@ -152,9 +175,18 @@ const nodes=[{id:'0/database',dependencies:[],construct:()=>Effect.uninterruptib
  return yield* Effect.interrupt;
 }))}];
 for(const id of ['1/left','2/right'])nodes.push({id,dependencies:['0/database'],construct:()=>Effect.sync(()=>consumers.push(id))});
-const fiber=Effect.runFork(__ef_provideLayer({id:'cancel',init:()=>({}),nodes,expose:state=>state},()=>Effect.void));
+// The build seam __ef_provideLayer drives, so the test can interrupt only
+// after both consumers wait on the pending entry.
+const fiber=Effect.runFork(Effect.uninterruptibleMask(restore=>Effect.gen(function*(){
+ const build=yield* __ef_layerBuild({id:'cancel',init:()=>({}),nodes,expose:state=>state});
+ yield* build.start;
+ registered=waiters(build.entries[0].fiber,2);
+ yield* build.settle(restore);
+ const cause=yield* build.close(build.cause());
+ return yield* cause.reasons.length===0?Effect.void:Effect.failCause(cause);
+})));
 fiber.addObserver(()=>settled=true);
-await ready.promise;fiber.interruptUnsafe();await canceled.promise;
+await ready.promise;await registered;fiber.interruptUnsafe();await canceled.promise;
 await new Promise(resolve=>setTimeout(resolve,10));
 if(settled||released)throw new Error('cancelled build returned before joining its producer');
 finish.resolve();
