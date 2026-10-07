@@ -392,6 +392,9 @@ type checker struct {
 	variableOwners          map[string]TemplateParameter
 	lexicalOwner            *Function
 	host                    *hostState
+	// hostCallee is the member expression currently checked as a callee, so
+	// a member of a host value there selects a Go method.
+	hostCallee *Expr
 }
 
 const maxTypeProjectionNodes = 4096
@@ -4130,10 +4133,6 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			t = e.checked
 			break
 		}
-		if c.hostMethodCall(e, env, inEffect) {
-			t = e.checked
-			break
-		}
 		if c.fiberCall(e, env, inEffect) {
 			t = e.checked
 			break
@@ -4356,6 +4355,10 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			}
 		}
 		inner := c.expr(e.Left, env, inEffect)
+		if selected, ok := c.hostSelection(e, inner); ok {
+			t = selected
+			break
+		}
 		if inner.isEffect() {
 			c.diagnostic("EF106", "field access requires an executed value", e.Span)
 			break

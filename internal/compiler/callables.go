@@ -401,7 +401,13 @@ func (c *checker) callableCall(e *Expr, env localEnv, inEffect bool) (checkedExp
 	if !local {
 		return checkedExpression{}, false
 	}
+	previous := c.hostCallee
+	c.hostCallee = e.Left
 	callee := c.expr(e.Left, env, inEffect)
+	c.hostCallee = previous
+	if e.Left.Kind == "member" && e.Left.Text == "hostMethod" {
+		return c.hostMethodCall(e, callee, env, inEffect), true
+	}
 	node := callee.node()
 	if node == nil || node.Kind != "callable" {
 		c.diagnostic("EF103", "local value is not callable", e.Span)

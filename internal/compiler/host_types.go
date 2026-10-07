@@ -52,6 +52,10 @@ type hostImports struct {
 	types map[string]*types.TypeName
 	// unsupported records why an exported function has no binding.
 	unsupported map[string]string
+	// contracts are the reviewed effra.bindings.json behavior assertions,
+	// keyed by go/types full name: example.com/sdk.Lookup for a function,
+	// (*example.com/sdk.Client).Lookup for a method.
+	contracts map[string]behavior
 }
 
 // hostType is one admitted native type. native is normalized: aliases are
@@ -417,26 +421,39 @@ func (c *checker) hostAssignable(actual, expected TypeID) bool {
 	return ok && types.AssignableTo(from, to)
 }
 
-// hostMethodCall checks a native method call on a local host value. Go's
-// method set is the authority. Effra values are not addressable, so a
+// hostSelection resolves a member of a host value. In callee position it
+// selects a Go method on the executed receiver, which hostMethodCall checks;
+// native fields and method values are not admitted. It reports whether inner
+// is a host value.
+func (c *checker) hostSelection(e *Expr, inner checkedExpression) (checkedExpression, bool) {
+	if c.host == nil {
+		return checkedExpression{}, false
+	}
+	if _, ok := c.host.native[inner.resultID()]; !ok {
+		return checkedExpression{}, false
+	}
+	switch {
+	case inner.isEffect():
+		c.diagnostic("EF106", "Go method "+e.Name+" requires an executed receiver", e.Span)
+	case c.hostCallee != e:
+		c.diagnostic("EF106", "Go method "+e.Name+" must be called; native fields and method values are not admitted", e.Span)
+	default:
+		e.Text = "hostMethod"
+		return inner, true
+	}
+	return c.checkedData("invalid"), true
+}
+
+// hostMethodCall checks a native method call on an executed host receiver.
+// Go's method set is the authority. Effra values are not addressable, so a
 // pointer-receiver method needs a pointer value: no copy is made to take an
 // address, and a value-receiver method on a pointer is Go's own selection.
-func (c *checker) hostMethodCall(e *Expr, env localEnv, inEffect bool) bool {
-	if c.host == nil || e.Left.Kind != "member" || e.Left.Left.Kind != "name" {
-		return false
-	}
-	local, ok := env[e.Left.Left.binding]
-	if !ok || local.isEffect() {
-		return false
-	}
-	native, ok := c.host.native[local.valueID()]
-	if !ok {
-		return false
-	}
-	c.expr(e.Left.Left, env, inEffect)
-	b, reason := c.hostMethodBinding(native, e.Left.Name)
+// Any receiver expression is evaluated once, when the recipe is constructed.
+func (c *checker) hostMethodCall(e *Expr, receiver checkedExpression, env localEnv, inEffect bool) checkedExpression {
+	b, reason := c.hostMethodBinding(c.host.native[receiver.valueID()], e.Left.Name)
 	var host hostBindingTypes
 	if reason == "" {
+		var ok bool
 		if host, ok = c.hostBinding(b); !ok {
 			reason = "its signature requires bundled " + hostOptionModule + " " + hostOptionMember + " for absence adaptation"
 		}
@@ -446,12 +463,10 @@ func (c *checker) hostMethodCall(e *Expr, env localEnv, inEffect bool) bool {
 		for _, arg := range e.Args {
 			c.expr(arg, env, inEffect)
 		}
-		e.checked = c.checkedData("invalid")
-		e.Type = c.projectChecked(e.checked)
-		return true
+		return c.checkedData("invalid")
 	}
 	c.checkForeignCall(e, b, host, env, inEffect)
-	return true
+	return e.checked
 }
 
 // hostMethodBinding admits one method in a native receiver's method set. The
@@ -479,11 +494,7 @@ func (c *checker) hostMethodBinding(receiver types.Type, name string) (Binding, 
 		return Binding{}, err.Error()
 	}
 	b := Binding{Symbol: symbol, Package: fn.Pkg().Path(), receiver: &admitted}
-	reason, err := admitCallable(&b, fn, behavior{}, c.program.host)
-	if err != nil {
-		reason = err.Error()
-	}
-	if reason != "" {
+	if reason := admitCallable(&b, fn, c.program.host); reason != "" {
 		return Binding{}, reason
 	}
 	receiverComponent := HostComponent{Native: types.TypeString(admitted.native, hostPathQualifier), Type: display, Adaptation: hostAdaptReceiver}

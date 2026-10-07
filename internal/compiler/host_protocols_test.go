@@ -2,6 +2,8 @@ package compiler
 
 import (
 	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -260,5 +262,137 @@ func TestHostIntegerConversionsAreExplicitAndChecked(t *testing.T) {
 	}
 	if r := CompileAt("effect fn main() -> void {\n    let n = i64(4)\n}", "go", "../.."); r.Checked {
 		t.Fatal("i64 conversion admitted without a Go import")
+	}
+}
+
+// A receiver can be any executed host-valued expression. It is evaluated once
+// when the method recipe is constructed, and the method runs on that original
+// value each time the recipe executes.
+func TestHostMethodReceiverExpressionsAreCapturedOnce(t *testing.T) {
+	r := compileHostTypes(t, `effect fn pick(counter: *host.Counter) -> *host.Counter uses { Console } {
+    run Console.log("picked")
+    counter
+}
+effect fn program() -> void uses { Console, Foreign } {
+    run Console.log(run strconv.FormatInt(run (run host.Offset(run host.Origin(), 4)).Sum(), 10))
+    match run host.Find("known") {
+        Data.Option.None => void,
+        Data.Option.Some { value: counter } => {
+            let step = (run pick(counter)).Increment()
+            let first = run step
+            let second = run step
+            run Console.log(run strconv.Itoa(first) + " " + run strconv.Itoa(second))
+        }
+    }
+}`)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	if output := runGeneratedGo(t, r); output != "4\npicked\n4 5\n" {
+		t.Fatalf("receiver capture: %q", output)
+	}
+	for _, tc := range []struct{ body, message string }{
+		{`run Console.log(run strconv.FormatInt(run host.Origin().Sum(), 10))`, "Go method Sum requires an executed receiver"},
+		{`let point = run host.Origin()
+    let sum = point.Sum`, "Go method Sum must be called"},
+		{`let point = run host.Origin()
+    let x = point.X`, "Go method X must be called"},
+	} {
+		r := compileHostTypes(t, "effect fn program() -> void uses { Console, Foreign } {\n    "+tc.body+"\n}")
+		if r.Checked || !hasDiagnosticContaining(r, tc.message) {
+			t.Fatalf("expected %q: %+v", tc.message, r.Diagnostics)
+		}
+	}
+}
+
+// effra.bindings.json attaches behavior to a method by its go/types full name,
+// the declaring method's identity: a promoted method carries the contract of
+// the method it promotes, and a context-forwarding method observes the managed
+// fiber's cancellation.
+func TestHostMethodBehaviorContracts(t *testing.T) {
+	root := t.TempDir()
+	for name, contents := range map[string]string{
+		"go.mod": "module example.test/methods\n\ngo 1.27\n",
+		"methods.go": `package methods
+
+import "context"
+
+type Client struct{}
+
+func New() *Client { return &Client{} }
+
+func (c *Client) Lookup(ctx context.Context, id string) (string, error) {
+	if id == "slow" {
+		<-ctx.Done()
+		return "partial", ctx.Err()
+	}
+	return "Ada", nil
+}
+
+func (c *Client) Name() string { return "client" }
+
+type Wrapped struct{ *Client }
+
+func Wrap(c *Client) Wrapped { return Wrapped{c} }
+`,
+		"effra.bindings.json": `{"(*example.test/methods.Client).Lookup":{"context":"fiber","cancellation":"cooperative"}}`,
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := CompileAt(`import go m "example.test/methods"
+import Data "effra/data"
+effect fn main() -> string raises {GoError} {
+    match run m.New().provide<Foreign>(Host) {
+        Data.Option.None => "none",
+        Data.Option.Some { value: client } => {
+            let timed = run client.Lookup("slow").orFail().timeout(1).catch<Timeout>("done").provide<Foreign>(Host).provide<Scheduler>(LiveScheduler)
+            let promoted = run (run m.Wrap(client).provide<Foreign>(Host)).Lookup("fast").orFail().provide<Foreign>(Host)
+            timed + ":" + promoted + ":" + run client.Name().provide<Foreign>(Host)
+        }
+    }
+}`, "go", root)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	bindings := map[string]Binding{}
+	for _, binding := range r.Bindings {
+		bindings[binding.Symbol] = binding
+	}
+	for _, symbol := range []string{"(*m.Client).Lookup", "(m.Wrapped).Lookup"} {
+		b := bindings[symbol]
+		if !b.Context || b.Cancellation != "cooperative" || len(b.HostParameters) != 3 || b.HostParameters[1].Adaptation != hostAdaptContext {
+			t.Fatalf("%s contract: %+v", symbol, b)
+		}
+	}
+	if name := bindings["(*m.Client).Name"]; name.Context || name.Cancellation != "unknown" {
+		t.Fatalf("unclassified method acquired a contract: %+v", name)
+	}
+	if output := runGeneratedGo(t, r); output != "done:Ada:client\n" {
+		t.Fatalf("method contracts: %q", output)
+	}
+	if err := os.WriteFile(filepath.Join(root, "effra.bindings.json"), []byte(`{"(*example.test/methods.Client).Name":{"context":"fiber"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	refused := CompileAt(`import go m "example.test/methods"
+import Data "effra/data"
+effect fn main() -> string {
+    match run m.New().provide<Foreign>(Host) {
+        Data.Option.None => "none",
+        Data.Option.Some { value: client } => run client.Name().provide<Foreign>(Host)
+    }
+}`, "go", root)
+	if refused.Checked || !hasDiagnosticContaining(refused, "the context contract requires a first context.Context parameter") {
+		t.Fatalf("context contract on a method without context accepted: %+v", refused.Diagnostics)
+	}
+	if err := os.WriteFile(filepath.Join(root, "effra.bindings.json"), []byte(`{"(*example.test/methods.Client).Name":{"cancellation":"eventually"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if invalid := CompileAt(`import go m "example.test/methods"
+effect fn main() -> void {
+    void
+}`, "go", root); invalid.Checked || !hasCode(invalid, "EF111") {
+		t.Fatalf("invalid method cancellation value accepted: %+v", invalid.Diagnostics)
 	}
 }

@@ -196,7 +196,7 @@ func (r *Result) loadImports(dir string) {
 	hash.Write([]byte(r.Revision))
 	contractData, _ := json.Marshal(contracts)
 	hash.Write(contractData)
-	host := &hostImports{aliases: map[string]string{}, types: map[string]*types.TypeName{}, unsupported: map[string]string{}}
+	host := &hostImports{aliases: map[string]string{}, types: map[string]*types.TypeName{}, unsupported: map[string]string{}, contracts: contracts}
 	r.Program.host = host
 	for _, imp := range r.Program.Imports {
 		if _, exists := host.aliases[imp.Path]; !exists {
@@ -232,10 +232,7 @@ func (r *Result) loadImports(dir string) {
 				if !member.Exported() {
 					continue
 				}
-				b, unsupported, err := normalizeBinding(imp, member, contracts, host)
-				if err != nil {
-					r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF111", Message: err.Error(), Span: imp.Span})
-				} else if unsupported != "" {
+				if b, unsupported := normalizeBinding(imp, member, host); unsupported != "" {
 					host.unsupported[b.Symbol] = unsupported
 				} else {
 					r.Program.Bindings[b.Symbol] = b
@@ -277,37 +274,41 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 	if err = decoder.Decode(&trailing); err != io.EOF {
 		return nil, nil, fmt.Errorf("effra.bindings.json must contain one JSON object")
 	}
+	for symbol, meta := range contracts {
+		if meta.Context != "" && meta.Context != "fiber" {
+			return nil, nil, fmt.Errorf("unsupported context contract for %s", symbol)
+		}
+		if meta.Cancellation != "" && meta.Cancellation != "cooperative" && meta.Cancellation != "unknown" {
+			return nil, nil, fmt.Errorf("unsupported cancellation contract for %s", symbol)
+		}
+	}
 	return contracts, &main, nil
 }
 
 // normalizeBinding admits one exported function from its native signature. A
 // refused function returns the reason, reported when source calls it.
-func normalizeBinding(imp GoImport, fn *types.Func, contracts map[string]behavior, host *hostImports) (Binding, string, error) {
+func normalizeBinding(imp GoImport, fn *types.Func, host *hostImports) (Binding, string) {
 	b := Binding{Symbol: imp.Alias + "." + fn.Name(), Package: imp.Path, alias: imp.Alias}
-	unsupported, err := admitCallable(&b, fn, contracts[imp.Path+"."+fn.Name()], host)
-	return b, unsupported, err
+	return b, admitCallable(&b, fn, host)
 }
 
 // admitCallable admits the native signature of an exported function or
-// method into b: its parameters, complete results and behavior contract.
-func admitCallable(b *Binding, fn *types.Func, meta behavior, host *hostImports) (string, error) {
+// method into b: its parameters, complete results and behavior contract. A
+// contract is keyed by the go/types full name of the declaration, so a
+// promoted method carries the contract of the method it promotes.
+func admitCallable(b *Binding, fn *types.Func, host *hostImports) string {
 	sig := fn.Type().(*types.Signature)
+	meta := host.contracts[fn.FullName()]
 	b.Signature, b.Cancellation, b.Provenance, b.member, b.native = sig.String(), "unknown", "Go export data; behavior unclassified", fn.Name(), fn.FullName()
-	if meta.Context != "" && meta.Context != "fiber" {
-		return "", fmt.Errorf("unsupported context contract for %s", b.Symbol)
-	}
-	if meta.Cancellation != "" && meta.Cancellation != "cooperative" && meta.Cancellation != "unknown" {
-		return "", fmt.Errorf("unsupported cancellation contract for %s", b.Symbol)
-	}
 	if meta.Cancellation != "" {
 		b.Cancellation = meta.Cancellation
 		b.Provenance = "Go export data; reviewed effra.bindings.json assertion"
 	}
 	if sig.TypeParams().Len() > 0 {
-		return "generic Go functions are unsupported", nil
+		return "generic Go functions are unsupported"
 	}
 	if sig.Variadic() {
-		return "variadic Go functions are unsupported", nil
+		return "variadic Go functions are unsupported"
 	}
 	b.Params, b.HostParameters, b.HostResults = []string{}, []HostComponent{}, []HostComponent{}
 	for i := 0; i < sig.Params().Len(); i++ {
@@ -320,7 +321,7 @@ func admitCallable(b *Binding, fn *types.Func, meta behavior, host *hostImports)
 		}
 		admitted, err := admitHostType(typ)
 		if err != nil {
-			return fmt.Sprintf("parameter %d: %v", i+1, err), nil
+			return fmt.Sprintf("parameter %d: %v", i+1, err)
 		}
 		b.params = append(b.params, admitted)
 		b.Params = append(b.Params, host.adaptedDisplay(admitted, false))
@@ -338,7 +339,7 @@ func admitCallable(b *Binding, fn *types.Func, meta behavior, host *hostImports)
 	for i := 0; i < count; i++ {
 		admitted, err := admitHostType(results.At(i).Type())
 		if err != nil {
-			return fmt.Sprintf("result %d: %v", i+1, err), nil
+			return fmt.Sprintf("result %d: %v", i+1, err)
 		}
 		b.results = append(b.results, admitted)
 		component := host.component(admitted, true)
@@ -357,12 +358,12 @@ func admitCallable(b *Binding, fn *types.Func, meta behavior, host *hostImports)
 		b.Return = "(" + strings.Join(displays, ", ") + ")"
 	}
 	if meta.Context == "fiber" && !b.Context {
-		return "the context contract requires a first context.Context parameter", nil
+		return "the context contract requires a first context.Context parameter"
 	}
 	if meta.Cancellation == "cooperative" && !b.Context {
-		return "cooperative cancellation requires context forwarding", nil
+		return "cooperative cancellation requires context forwarding"
 	}
-	return "", nil
+	return ""
 }
 
 func isContext(t types.Type) bool {
