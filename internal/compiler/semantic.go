@@ -391,6 +391,7 @@ type checker struct {
 	typeContext             map[string]TemplateParameter
 	variableOwners          map[string]TemplateParameter
 	lexicalOwner            *Function
+	host                    *hostState
 }
 
 const maxTypeProjectionNodes = 4096
@@ -2820,7 +2821,7 @@ func (c *checker) typeKnown(name string) bool {
 	if c.records[name] != nil || c.enums[name] != nil {
 		return true
 	}
-	return false
+	return c.hostAnnotation(name) != invalidTypeID
 }
 
 func (c *checker) requiresTemplateArguments(name string) bool {
@@ -3047,7 +3048,7 @@ func (c *checker) canonicalRef(ref TypeRef) TypeID {
 			return invalidTypeID
 		}
 	case "named":
-		return invalidTypeID
+		return c.hostAnnotation(ref.Name)
 	}
 	args := argIDs
 	if len(args) == 0 && len(ref.Args) > 0 {
@@ -3261,6 +3262,12 @@ func (c *checker) displayTypeID(id TypeID) string {
 		if len(node.Args) == 1 {
 			return "GoResult:" + c.displayTypeID(node.Args[0])
 		}
+	case "goValues":
+		components := make([]string, len(node.Args))
+		for i, arg := range node.Args {
+			components[i] = c.displayTypeID(arg)
+		}
+		return "(" + strings.Join(components, ", ") + ")"
 	case "provider":
 		return "provider:" + node.Name
 	}
@@ -4377,21 +4384,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			c.diagnostic("EF114", "unknown field "+e.Name+" on "+c.displayTypeID(inner.resultID()), e.Span)
 			break
 		}
-		if !c.isKind(inner, "goResult") {
-			c.diagnostic("EF106", "field access requires an executed GoResult", e.Span)
-			break
-		}
-		switch e.Name {
-		case "value":
-			node := c.resultNode(inner)
-			if node != nil && len(node.Args) == 1 {
-				t = c.checkedDataID(node.Args[0], nil, nil)
-			}
-		case "hasError":
-			t = c.checkedData("bool")
-		default:
-			c.diagnostic("EF102", "GoResult exposes value and hasError", e.Span)
-		}
+		t = c.goResultField(inner, e)
 	case "orFail":
 		t = c.expr(e.Left, env, inEffect)
 		if !t.isEffect() || !c.isKind(t, "goResult") {

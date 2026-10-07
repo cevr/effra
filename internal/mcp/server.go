@@ -774,7 +774,7 @@ func call(root, name string, args arguments) (any, error) {
 				"resourceOwnership":  "Both targets join owned fibers before releasing scope resources; Go File guards closed handles",
 				"cancellation":       "cooperative Go context; timeout waits for shutdown; arbitrary foreign calls may delay it",
 				"targetCapabilities": "scope, fork and timeout support Go and JS; Go imports, Files, Runtime and Http require Go (EF110)",
-				"foreignInterop":     "Go exports supply primitive function shapes; Foreign required; GoResult preserves partial values; context/cancellation metadata are reviewed assertions",
+				"foreignInterop":     "Go exports supply canonical host types and complete result tuples; nullable values adapt through Option; Foreign required; GoResult preserves partial values and native error identity; context/cancellation metadata are reviewed assertions",
 				"runtimeInspection":  "Go Runtime.inspect: current scope metadata, up to 100 resources/child states; no MCP runtime endpoint",
 				"mutableAliases":     "not implemented", "openRows": "not implemented",
 				"inspection":     fmt.Sprintf("schema %d response-local canonical type/row tables; references are revision-scoped, empty rows are omitted, and selected projections refuse explicitly when node, edge, row-label, name, compatibility, or response-byte limits are exceeded", compiler.SemanticSchemaVersion),

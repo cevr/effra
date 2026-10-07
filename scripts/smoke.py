@@ -27,6 +27,7 @@ data_inspection = json.loads(run("inspect", "examples/data.ef", "State").stdout)
 assert data_inspection["declaration"]["kind"] == "enum"
 assert data_inspection["declaration"]["variants"][1]["fields"][0]["type"] == "string"
 assert run("run", "examples/imports.ef").stdout == "ADA\npartial result retained\ntimed out\n"
+assert run("run", "examples/host-types.ef").stdout.splitlines()[2:4] == ["nil interface; typed-nil square; square", "7 with typed-nil *Problem"]
 for target in ("go", "js"):
     assert run("run", "examples/concurrency.ef", "--target", target).stdout == "child joined\ntimed out\nrecovered\n"
 for example, expected in (("workflow", "queued: Welcome, Ada\naccess denied\n"), ("latest-task", "result: new\n")):

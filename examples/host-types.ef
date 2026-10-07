@@ -1,0 +1,100 @@
+import go host "effra.local/prototype/examples/hosttypes"
+import go strconv "strconv"
+import Data "effra/data"
+
+fn same(point: host.Point) -> host.Point {
+    point
+}
+
+effect fn counter(name: string) -> string uses { Foreign } {
+    let found = run host.Find(name)
+    match found {
+        Data.Option.None => "absent",
+        Data.Option.Some { value: present } => {
+            let count = run host.Count(present)
+            run strconv.Itoa(count)
+        }
+    }
+}
+
+effect fn shape(kind: string) -> string uses { Foreign } {
+    let made = run host.MakeShape(kind)
+    match made {
+        Data.Option.None => "nil interface",
+        Data.Option.Some { value: present } => run host.ShapeKind(present)
+    }
+}
+
+effect fn failure(typed: bool) -> string uses { Foreign } {
+    let result = if typed {
+        run host.Typed()
+    } else {
+        run host.Untyped()
+    }
+    let partial = run strconv.Itoa(result.value)
+    let described = match result.error {
+        Data.Option.None => "no error",
+        Data.Option.Some { value: native } => run host.DescribeError(native)
+    }
+    if result.hasError {
+        partial + " with " + described
+    } else {
+        partial + " " + described
+    }
+}
+
+effect fn wrapped() -> string uses { Foreign } {
+    let result = run host.Missing()
+    match result.error {
+        Data.Option.None => "no error",
+        Data.Option.Some { value: native } => run host.DescribeError(native)
+    }
+}
+
+effect fn strict() -> string raises { GoError } uses { Foreign } {
+    let count = run host.Typed().orFail()
+    run strconv.Itoa(count)
+}
+
+effect fn split(text: string) -> string uses { Foreign } {
+    let parts = run host.Split(text)
+    let length = run strconv.Itoa(parts.value.v1)
+    let found = if parts.value.v2 {
+        "found"
+    } else {
+        "missing"
+    }
+    parts.value.v0 + " " + length + " " + found
+}
+
+effect fn names(present: bool) -> string uses { Foreign } {
+    let listed = run host.Names(present)
+    match listed {
+        Data.Option.None => "nil slice",
+        Data.Option.Some { value: present } => run strconv.Itoa(run host.NameCount(present))
+    }
+}
+
+effect fn buffered(text: string) -> string uses { Foreign } {
+    match run host.NewBuffer(text) {
+        Data.Option.None => "no buffer",
+        Data.Option.Some { value: buffer } => run host.BufferText(buffer)
+    }
+}
+
+effect fn program() -> void uses { Foreign, Console } {
+    run Console.log(run host.DescribePoint(same(run host.Offset(run host.Origin(), 4))))
+    run Console.log(run counter("known") + " " + run counter("other"))
+    run Console.log(run shape("none") + "; " + run shape("typed-nil") + "; " + run shape("square"))
+    run Console.log(run failure(true))
+    run Console.log(run failure(false))
+    run Console.log(run wrapped() + "; " + run strict().catch<GoError>("typed-nil error failed"))
+    run Console.log(run split("ab:cde") + "; " + run split("abc"))
+    run Console.log(run names(false) + "; " + run names(true))
+    run Console.log(run buffered("native buffer"))
+    run Console.log(run strconv.Itoa(42))
+}
+
+effect fn main() -> void {
+    run program().provide<Foreign>(Host).provide<Console>(Stdout)
+}

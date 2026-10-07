@@ -37,10 +37,18 @@ type Binding struct {
 	Context      bool     `json:"forwardContext"`
 	Cancellation string   `json:"cancellation"`
 	Provenance   string   `json:"provenance"`
+	// HostParameters and HostResults are the complete native signature with
+	// each component's explicit adaptation, including nullability.
+	HostParameters []HostComponent `json:"hostParameters"`
+	HostResults    []HostComponent `json:"hostResults"`
 	// alias and member keep the checked import declaration and exported Go
 	// name separately from the alias-qualified Symbol lookup key.
 	alias  string
 	member string
+	// params and results are the admitted native types, excluding a forwarded
+	// context and the trailing error.
+	params  []hostType
+	results []hostType
 }
 type behavior struct {
 	Context      string `json:"context"`
@@ -184,6 +192,13 @@ func (r *Result) loadImports(dir string) {
 	hash.Write([]byte(r.Revision))
 	contractData, _ := json.Marshal(contracts)
 	hash.Write(contractData)
+	host := &hostImports{aliases: map[string]string{}, types: map[string]*types.TypeName{}, unsupported: map[string]string{}}
+	r.Program.host = host
+	for _, imp := range r.Program.Imports {
+		if _, exists := host.aliases[imp.Path]; !exists {
+			host.aliases[imp.Path] = imp.Alias
+		}
+	}
 	for _, imp := range r.Program.Imports {
 		// Every declared import is emitted, named or blank, so a package the
 		// generated program cannot import is refused even when uncalled. Its
@@ -204,15 +219,23 @@ func (r *Result) loadImports(dir string) {
 		hash.Write([]byte(imp.Path))
 		hash.Write(archive)
 		for _, name := range pkg.Scope().Names() {
-			fn, ok := pkg.Scope().Lookup(name).(*types.Func)
-			if !ok || !fn.Exported() {
-				continue
-			}
-			b, supported, err := normalizeBinding(imp, fn, contracts)
-			if err != nil {
-				r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF111", Message: err.Error(), Span: imp.Span})
-			} else if supported {
-				r.Program.Bindings[b.Symbol] = b
+			switch member := pkg.Scope().Lookup(name).(type) {
+			case *types.TypeName:
+				if member.Exported() {
+					host.types[imp.Alias+"."+name] = member
+				}
+			case *types.Func:
+				if !member.Exported() {
+					continue
+				}
+				b, unsupported, err := normalizeBinding(imp, member, contracts, host)
+				if err != nil {
+					r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF111", Message: err.Error(), Span: imp.Span})
+				} else if unsupported != "" {
+					host.unsupported[b.Symbol] = unsupported
+				} else {
+					r.Program.Bindings[b.Symbol] = b
+				}
 			}
 		}
 	}
@@ -253,76 +276,87 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 	return contracts, &main, nil
 }
 
-func normalizeBinding(imp GoImport, fn *types.Func, contracts map[string]behavior) (Binding, bool, error) {
+// normalizeBinding admits one exported function from its native signature. A
+// refused function returns the reason, reported when source calls it.
+func normalizeBinding(imp GoImport, fn *types.Func, contracts map[string]behavior, host *hostImports) (Binding, string, error) {
 	sig := fn.Type().(*types.Signature)
 	b := Binding{Symbol: imp.Alias + "." + fn.Name(), Package: imp.Path, Signature: sig.String(), Cancellation: "unknown", Provenance: "Go export data; behavior unclassified", alias: imp.Alias, member: fn.Name()}
 	meta := contracts[imp.Path+"."+fn.Name()]
 	if meta.Context != "" && meta.Context != "fiber" {
-		return b, false, fmt.Errorf("unsupported context contract for %s", b.Symbol)
+		return b, "", fmt.Errorf("unsupported context contract for %s", b.Symbol)
 	}
 	if meta.Cancellation != "" && meta.Cancellation != "cooperative" && meta.Cancellation != "unknown" {
-		return b, false, fmt.Errorf("unsupported cancellation contract for %s", b.Symbol)
+		return b, "", fmt.Errorf("unsupported cancellation contract for %s", b.Symbol)
 	}
 	if meta.Cancellation != "" {
 		b.Cancellation = meta.Cancellation
 		b.Provenance = "Go export data; reviewed effra.bindings.json assertion"
 	}
-	supported := !sig.Variadic() && sig.TypeParams().Len() == 0
+	if sig.TypeParams().Len() > 0 {
+		return b, "generic Go functions are unsupported", nil
+	}
+	if sig.Variadic() {
+		return b, "variadic Go functions are unsupported", nil
+	}
+	b.Params, b.HostParameters, b.HostResults = []string{}, []HostComponent{}, []HostComponent{}
 	for i := 0; i < sig.Params().Len(); i++ {
 		typ := sig.Params().At(i).Type()
 		if i == 0 && isContext(typ) && meta.Context == "fiber" {
 			b.Context = true
 			b.Provenance = "Go export data; reviewed effra.bindings.json assertion"
+			b.HostParameters = append(b.HostParameters, HostComponent{Native: "context.Context", Type: "Fiber context", Adaptation: hostAdaptContext})
 			continue
 		}
-		mapped := hostType(typ)
-		supported = supported && mapped != ""
-		b.Params = append(b.Params, mapped)
+		admitted, err := admitHostType(typ)
+		if err != nil {
+			return b, fmt.Sprintf("parameter %d: %v", i+1, err), nil
+		}
+		b.params = append(b.params, admitted)
+		b.Params = append(b.Params, host.adaptedDisplay(admitted, false))
+		b.HostParameters = append(b.HostParameters, host.component(admitted, false))
 	}
+	// Only a trailing error is an error result; every other component,
+	// including a (T, bool) flag, is retained as an ordinary value.
 	results := sig.Results()
-	b.Return = voidTypeName
-	if results.Len() == 1 && types.Identical(results.At(0).Type(), types.Universe.Lookup("error").Type()) {
+	count := results.Len()
+	if count > 0 && types.Identical(results.At(count-1).Type(), hostErrorType.native) {
 		b.HasError = true
+		count--
 	}
-	if results.Len() > 0 && !b.HasError {
-		b.Return = hostType(results.At(0).Type())
-		supported = supported && b.Return != ""
+	displays := []string{}
+	for i := 0; i < count; i++ {
+		admitted, err := admitHostType(results.At(i).Type())
+		if err != nil {
+			return b, fmt.Sprintf("result %d: %v", i+1, err), nil
+		}
+		b.results = append(b.results, admitted)
+		component := host.component(admitted, true)
+		b.HostResults = append(b.HostResults, component)
+		displays = append(displays, component.Type)
 	}
-	if results.Len() == 2 && types.Identical(results.At(1).Type(), types.Universe.Lookup("error").Type()) {
-		b.HasError = true
-	} else if results.Len() > 1 {
-		supported = false
+	if b.HasError {
+		b.HostResults = append(b.HostResults, HostComponent{Native: "error", Type: "GoResult", Adaptation: hostAdaptError})
+	}
+	switch len(displays) {
+	case 0:
+		b.Return = voidTypeName
+	case 1:
+		b.Return = displays[0]
+	default:
+		b.Return = "(" + strings.Join(displays, ", ") + ")"
 	}
 	if meta.Context == "fiber" && !b.Context {
-		supported = false
+		return b, "the context contract requires a first context.Context parameter", nil
 	}
 	if meta.Cancellation == "cooperative" && !b.Context {
-		supported = false
+		return b, "cooperative cancellation requires context forwarding", nil
 	}
-	return b, supported, nil
+	return b, "", nil
 }
 
 func isContext(t types.Type) bool {
 	named, ok := types.Unalias(t).(*types.Named)
 	return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "context" && named.Obj().Name() == "Context"
-}
-
-func hostType(t types.Type) string {
-	t = types.Unalias(t)
-	if basic, ok := t.(*types.Basic); ok {
-		switch basic.Kind() {
-		case types.String:
-			return "string"
-		case types.Bool:
-			return "bool"
-		case types.Int64:
-			return "i64"
-		}
-	}
-	if slice, ok := t.(*types.Slice); ok && types.Identical(slice.Elem(), types.Typ[types.Uint8]) {
-		return "bytes"
-	}
-	return ""
 }
 
 func (c *checker) foreignCall(e *Expr, env localEnv, inEffect bool) bool {
@@ -340,27 +374,35 @@ func (c *checker) foreignCall(e *Expr, env localEnv, inEffect bool) bool {
 		}
 		key := alias + "." + e.Left.Name
 		b, ok := c.program.Bindings[key]
+		var host hostBindingTypes
+		if ok {
+			host, ok = c.hostBinding(b)
+			if !ok {
+				c.diagnostic("EF112", "Go symbol "+key+" requires bundled "+hostOptionModule+" "+hostOptionMember+" for absence adaptation", e.Span)
+			}
+		} else if reason := c.program.host.unsupportedReason(key); reason != "" {
+			c.diagnostic("EF112", "unsupported Go symbol "+key+": "+reason, e.Span)
+		} else {
+			c.diagnostic("EF112", "unknown Go symbol "+key, e.Span)
+		}
 		if !ok {
-			c.diagnostic("EF112", "unknown or unsupported Go symbol "+key+"; supports non-generic primitive functions and optional error returns", e.Span)
 			e.checked = c.checkedData("invalid")
 			e.Type = c.projectChecked(e.checked)
 			return true
 		}
-		if len(e.Args) != len(b.Params) {
+		if len(e.Args) != len(host.params) {
 			c.diagnostic("EF106", "incorrect Go argument count for "+key, e.Span)
 		}
 		for i, arg := range e.Args {
 			actual := c.expr(arg, env, inEffect)
-			if i < len(b.Params) && (actual.isEffect() || !c.sameType(actual, b.Params[i])) {
-				c.diagnostic("EF106", "Go argument must be "+b.Params[i], arg.Span)
+			if i >= len(host.params) || c.hostIntegerLiteral(arg, host.params[i]) {
+				continue
+			}
+			if actual.isEffect() || !c.assignable(actual.valueID(), host.params[i], 0) {
+				c.diagnostic("EF106", "Go argument must be "+c.displayTypeID(host.params[i]), arg.Span)
 			}
 		}
-		returnID := c.canonicalRef(typeRef(b.Return))
-		resultID := returnID
-		if b.HasError {
-			resultID = c.internType("goResult", "", []TypeID{returnID})
-		}
-		t := checkedExpression{value: c.values.recipe(resultID, nil, checkedEffectCallable, emptyRowID, c.internRow([]string{"Foreign"}), nil, nil)}
+		t := checkedExpression{value: c.values.recipe(host.result, nil, checkedEffectCallable, emptyRowID, c.internRow([]string{"Foreign"}), nil, nil)}
 		e.checked = t.clone()
 		e.Type = c.projectChecked(t)
 		e.Text = "foreign"

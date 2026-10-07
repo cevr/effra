@@ -9,6 +9,7 @@ examples/testing.ef
 examples/lifecycle.ef
 examples/latest-task.ef
 examples/imports.ef
+examples/host-types.ef
 examples/concurrency.ef
 examples/missing-service.ef
 examples/causal.ef

@@ -7,7 +7,7 @@ python3 -B scripts/test_import_effect_conformance.py
 python3 -B scripts/check_effect_conformance.py
 python3 -B scripts/test_effect_conformance.py
 if [ -f go.mod ]; then
-  test -z "$(gofmt -l cmd internal runtime examples/go-interop examples/sdk examples/compare)"
+  test -z "$(gofmt -l cmd internal runtime examples/go-interop examples/sdk examples/compare examples/hosttypes)"
   go vet ./...
   go test ./...
   go build -o bin/ef ./cmd/ef

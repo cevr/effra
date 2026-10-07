@@ -207,6 +207,11 @@ func (r *Result) loadBundledImports(source string) {
 			root(f, provider.Params)
 		}
 	}
+	if len(p.Imports) > 0 && r.Target == "go" {
+		// Nullable native values and native errors adapt through bundled
+		// Option; there is no host-only nullable type.
+		queue = append(queue, request{module: hostOptionModule, member: hostOptionMember})
+	}
 	loaded := map[string]bool{}
 	if exhausted {
 		r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "bundled reference admission exceeds budget", Span: Span{}})

@@ -209,6 +209,7 @@ type Program struct {
 	Comments            []Comment
 	Items               []*SyntaxItem `json:"-"`
 	Bindings            map[string]Binding
+	host                *hostImports
 	Modules             []*goModule
 	UsedImports         map[string]bool
 	GoOnly              bool

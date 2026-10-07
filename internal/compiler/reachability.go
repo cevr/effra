@@ -39,6 +39,7 @@ const (
 	// initialization the application runs, independently of reachable calls.
 	// Its identity is the resolved package path.
 	RequiresGoInitialization ApplicationRequirementKind = "go-initialization"
+	RequiresHostType         ApplicationRequirementKind = "host-type"
 	RequiresHelper           ApplicationRequirementKind = "helper"
 	RequiresRuntimeModule    ApplicationRequirementKind = "runtime-module"
 )
@@ -696,6 +697,14 @@ func (p *applicationPlanner) typeID(id TypeID, via string) {
 		}
 	case "provider":
 		p.service(p.c.services[node.Name], via, "provider-type")
+	case "host":
+		// Generated code spells a native type through its declaring package,
+		// which may differ from every imported call's package.
+		if p.require(RequiresHostType, node.Declaration, via, "type") {
+			for _, path := range p.c.hostPackages(id) {
+				p.require(RequiresGoImport, path, node.Declaration, "host-type")
+			}
+		}
 	}
 	for _, argument := range node.Args {
 		p.typeID(argument, via)
@@ -843,4 +852,13 @@ func (p *applicationPlanner) foreign(e *Expr, owner string) {
 	p.namedGoImport(imported)
 	p.helper("foreign", owner)
 	p.service(p.c.services["Foreign"], owner, "foreign-call")
+	// Native parameter types are not otherwise reached when an argument is a
+	// checked integer literal of a native-width scalar.
+	if p.c.host != nil {
+		host := p.c.host.bindings[binding.Symbol]
+		for _, param := range host.params {
+			p.typeID(param, identity)
+		}
+		p.typeID(host.result, identity)
+	}
 }

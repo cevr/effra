@@ -52,6 +52,9 @@ func goType(t string) string {
 		if t == "void" || t == "never" || t == "invalid" || t == "" {
 			return "struct{}"
 		}
+		if strings.Contains(t, ".") {
+			return hostAnnotationGoName(t)
+		}
 		return "efType_" + goIdent(t)
 	}
 }
@@ -133,6 +136,10 @@ func layoutGoType(c *checker, id TypeID, bindings map[TypeID]goLayout, visiting 
 		if len(node.Args) == 1 {
 			return "er.GoResult[" + layoutGoType(c, node.Args[0], bindings, visiting) + "]"
 		}
+	case "goValues":
+		return canonicalGoValuesType(c, node, visiting)
+	case "host":
+		return c.hostGoType(id)
 	case "provider":
 		return "efService_" + goIdent(node.Name)
 	case "callable", "callable-shape":
@@ -372,7 +379,11 @@ func (r *Result) emitGo(plan *ApplicationPlan) (string, error) {
 			out.WriteString("_ " + strconv.Quote(path) + "\n")
 		}
 	}
-	out.WriteString(")\n")
+	hostImports, hostDeclarations := r.Program.semantic.hostGoDeclarations()
+	for _, imp := range hostImports {
+		out.WriteString(imp + "\n")
+	}
+	out.WriteString(")\n" + hostDeclarations)
 	g.bindings = r.Program.Bindings
 	out.WriteString(`
 type efExit[A any] = er.Exit[A]
@@ -820,10 +831,10 @@ func (g *goEmitter) lower(e *Expr, effect bool, ret string, out *strings.Builder
 			return e.ResolvedFunction.goEmissionName()
 		}
 		left := g.expr(e.Left, effect, ret, out)
-		if e.Name == "hasError" {
-			return "(" + left + ".Err != nil)"
+		if e.Text == "field" {
+			return left + "." + goFieldName(e.Name)
 		}
-		return left + ".Value"
+		return g.goResultField(e, left)
 	case "orFail":
 		left := g.expr(e.Left, effect, ret, out)
 		resultType := g.resultType(e)
@@ -1249,32 +1260,4 @@ func (a *GoApplication) WriteRuntime(directory string) error {
 		}
 	}
 	return nil
-}
-
-func (g *goEmitter) foreign(e *Expr, effect bool, ret string, out *strings.Builder) string {
-	b := g.bindings[e.Name]
-	args := []string{}
-	if b.Context {
-		args = append(args, "fc.Context()")
-	}
-	for _, arg := range e.Args {
-		expr := g.expr(arg, effect, ret, out)
-		temp := g.temp()
-		out.WriteString(temp + " := " + expr + "\n")
-		args = append(args, temp)
-	}
-	call := "efGo_" + e.Name + "(" + strings.Join(args, ",") + ")"
-	result := g.resultType(e)
-	body := "return er.Succeed(" + call + ")"
-	if b.Return == voidTypeName {
-		body = call + ";return er.Succeed(struct{}{})"
-	}
-	if b.HasError {
-		if b.Return == voidTypeName {
-			body = "nativeErr := " + call + ";return er.Succeed(er.GoResult[struct{}]{Value:struct{}{},Err:nativeErr})"
-		} else {
-			body = "nativeValue,nativeErr := " + call + ";return er.Succeed(er.GoResult[" + goType(b.Return) + "]{Value:nativeValue,Err:nativeErr})"
-		}
-	}
-	return "func(ctx efContext)efExit[" + result + "]{if ctx.s_Foreign==nil{return er.Die[" + result + "](fmt.Errorf(\"missing Foreign provider\"))};return er.Invoke(ctx.Runtime,func(fc *er.FiberContext)er.Exit[" + result + "]{" + body + "})}"
 }

@@ -1,6 +1,6 @@
 # Automatic Go protocol interoperability
 
-Authorized owner constraint, 2026-10-06: preserve the standard native protocols that let Go libraries compose. This finite contract extends [host interop](../interop.md) and [language abstractions](language-abstractions.md). Current primitive imports do not implement it. The [Effect language boundary](../research/effect-language-boundary.md) distinguishes checked language contracts from runtime/library behavior.
+Authorized owner constraint, 2026-10-06: preserve the standard native protocols that let Go libraries compose. This finite contract extends [host interop](../interop.md) and [language abstractions](language-abstractions.md). Unit 1 (host types and returns) is implemented as described in [host interop](../interop.md#implemented-go-slice); units 2–4 are not. The [Effect language boundary](../research/effect-language-boundary.md) distinguishes checked language contracts from runtime/library behavior.
 
 ## Native type authority
 

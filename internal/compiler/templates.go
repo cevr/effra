@@ -343,7 +343,7 @@ func (c *checker) directTemplateDataArgument(id TypeID) bool {
 	switch n.Kind {
 	case "primitive":
 		return n.Name != "invalid" && n.Name != "never"
-	case "record", "enum":
+	case "record", "enum", "host":
 		return true
 	case "opaque":
 		return n.Declaration == "" && (n.Name == "File" || n.Name == "Latch")
