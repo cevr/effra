@@ -42,12 +42,16 @@
     "label": {"bounds": {"maxBodyBytes": 32, "maxDepth": 1}, "root": 1, "nodes": [
       {"kind": "string"},
       {"kind": "record", "type": "Label", "fields": [{"name": "name", "node": 0}]}
+    ]},
+    "pair": {"bounds": {"maxBodyBytes": 32, "maxDepth": 1}, "root": 1, "nodes": [
+      {"kind": "string"},
+      {"kind": "record", "type": "Pair", "fields": [{"name": "first", "node": 0}, {"name": "second", "node": 0}]}
     ]}
   },
   "vectors": [
     {"id": "string.plain", "plan": "text", "direction": "decode", "body": "\"hello\"", "expect": {"ok": true, "encoded": "\"hello\""}, "comparison": "matched"},
     {"id": "string.escapes", "plan": "text", "direction": "decode", "body": "\"\\\"\\\\\\/\\b\\f\\n\\r\\tA\u00e9\u00e9\"", "expect": {"ok": true, "encoded": "\"\\\"\\\\/\\b\\f\\n\\r\\tA\u00e9\u00e9\""}, "comparison": "matched"},
-    {"id": "string.surrogate-pair", "plan": "text", "direction": "decode", "body": "\"\ud83d\ude00\"", "expect": {"ok": true, "encoded": "\"\ud83d\ude00\""}, "comparison": "matched"},
+    {"id": "string.surrogate-pair", "plan": "text", "direction": "decode", "body": "\"\\ud83d\\ude00\"", "expect": {"ok": true, "encoded": "\"\ud83d\ude00\""}, "comparison": "matched"},
     {"id": "string.raw-unicode", "plan": "text", "direction": "decode", "body": "\"<>&\u00e9\ud83d\ude00\u2028\u2029\"", "expect": {"ok": true, "encoded": "\"<>&\u00e9\ud83d\ude00\u2028\u2029\""}, "comparison": "matched"},
     {"id": "string.controls", "plan": "text", "direction": "decode", "body": "\"\\u0001\\u001f\\u007f\"", "expect": {"ok": true, "encoded": "\"\\u0001\\u001f\u007f\""}, "comparison": "matched"},
     {"id": "string.nul", "plan": "text", "direction": "decode", "body": "\"a\\u0000b\"", "expect": {"ok": true, "encoded": "\"a\\u0000b\""}, "comparison": "matched"},
@@ -145,7 +149,11 @@
     {"id": "encode.over-bound", "plan": "label", "direction": "encode", "value": {"name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "targets": ["go", "js"], "expect": {"ok": false, "reason": "body-too-large", "path": [], "offset": -1}, "comparison": "difference", "note": "Pinned Effect encodes without a size bound; Effra refuses output beyond MaxBodyBytes."},
     {"id": "encode.i64-range", "plan": "integer", "direction": "encode", "value": {"$i64": "9223372036854775808"}, "targets": ["js"], "expect": {"ok": false, "reason": "range", "path": [], "offset": -1}, "comparison": "matched", "note": "Only JS bigint carriers can exceed the range; the comparator applies the same explicit range check."},
     {"id": "encode.lone-surrogate", "plan": "text", "direction": "encode", "value": {"$utf16": [97, 55296, 98]}, "targets": ["js"], "expect": {"ok": false, "reason": "invalid-unicode", "path": [], "offset": -1}, "comparison": "difference", "note": "JSON.stringify escapes a lone surrogate; Effra refuses text that is not Unicode scalar values."},
-    {"id": "encode.invalid-utf8", "plan": "text", "direction": "encode", "value": {"$hex": "61ff62"}, "targets": ["go"], "expect": {"ok": false, "reason": "invalid-unicode", "path": [], "offset": -1}, "comparison": "not-applicable", "note": "Only Go strings can carry ill-formed UTF-8; JavaScript and the comparator cannot represent this value."}
+    {"id": "encode.invalid-utf8", "plan": "text", "direction": "encode", "value": {"$hex": "61ff62"}, "targets": ["go"], "expect": {"ok": false, "reason": "invalid-unicode", "path": [], "offset": -1}, "comparison": "not-applicable", "note": "Only Go strings can carry ill-formed UTF-8; JavaScript and the comparator cannot represent this value."},
+    {"id": "encode.invalid-unicode-before-bound", "plan": "label", "direction": "encode", "value": {"name": {"$utf16": [97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97,97, 55296]}}, "targets": ["js"], "expect": {"ok": false, "reason": "invalid-unicode", "path": ["name"], "offset": -1}, "comparison": "difference", "note": "A string's Unicode is validated before any of its bytes are written, so ill-formed text whose encoding also exceeds the bound reports invalid-unicode. Pinned Effect escapes the lone surrogate and has no bound."},
+    {"id": "encode.invalid-utf8-before-bound", "plan": "label", "direction": "encode", "value": {"name": {"$hex": "61616161616161616161616161616161616161616161616161616161616161616161616161616161ff"}}, "targets": ["go"], "expect": {"ok": false, "reason": "invalid-unicode", "path": ["name"], "offset": -1}, "comparison": "not-applicable", "note": "Go twin of encode.invalid-unicode-before-bound; only Go strings can carry ill-formed UTF-8."},
+    {"id": "encode.bound-before-later-invalid", "plan": "pair", "direction": "encode", "value": {"first": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "second": {"$utf16": [55296]}}, "targets": ["js"], "expect": {"ok": false, "reason": "body-too-large", "path": [], "offset": -1}, "comparison": "difference", "note": "Failures surface in encode order: an earlier field exhausting the bound wins over a later ill-formed string. Pinned Effect has no bound and escapes the lone surrogate."},
+    {"id": "encode.bound-before-later-invalid-utf8", "plan": "pair", "direction": "encode", "value": {"first": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "second": {"$hex": "ff"}}, "targets": ["go"], "expect": {"ok": false, "reason": "body-too-large", "path": [], "offset": -1}, "comparison": "not-applicable", "note": "Go twin of encode.bound-before-later-invalid; only Go strings can carry ill-formed UTF-8."}
   ],
   "planErrors": [
     {"id": "plan.recursive", "expect": "recursive layout", "plan": {"bounds": {"maxBodyBytes": 64, "maxDepth": 4}, "root": 0, "nodes": [{"kind": "record", "type": "Tree", "fields": [{"name": "next", "node": 0}]}]}},

@@ -99,3 +99,7 @@
 {"id":"encode.i64-range","ok":false,"path":[],"message":"Expected a value between -9223372036854775808n and 9223372036854775807n"}
 {"id":"encode.lone-surrogate","ok":true,"encoded":"\"a\\ud800b\""}
 {"id":"encode.invalid-utf8","skipped":"not-applicable"}
+{"id":"encode.invalid-unicode-before-bound","ok":true,"encoded":"{\"name\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\ud800\"}"}
+{"id":"encode.invalid-utf8-before-bound","skipped":"not-applicable"}
+{"id":"encode.bound-before-later-invalid","ok":true,"encoded":"{\"first\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"second\":\"\\ud800\"}"}
+{"id":"encode.bound-before-later-invalid-utf8","skipped":"not-applicable"}
