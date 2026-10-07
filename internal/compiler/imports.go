@@ -52,8 +52,58 @@ type goModule struct {
 	Replace                   *goModule
 }
 type listedPackage struct {
-	ImportPath, Export string
-	Module             *goModule
+	ImportPath, Export, Name string
+	Standard                 bool
+	Module                   *goModule
+}
+
+// generatedModulePath is the module of every generated Go program. Its main
+// package lives at the module root, so it is also the import path of the
+// package that imports declared foreign packages.
+const generatedModulePath = "effra.generated"
+
+// goImportRefusal applies the Go command's import restrictions
+// (cmd/go/internal/load: disallowInternal, disallowVendor and the program
+// check) to pkg as imported by the generated main package. go list exempts
+// packages named on its command line from these rules, so loading export
+// data does not establish that the generated program may import them.
+func goImportRefusal(pkg listedPackage) string {
+	if index, ok := goInternalElement(pkg.ImportPath); ok {
+		// A module package is visible to importers below the parent of its
+		// final internal element. A standard package is visible only inside
+		// GOROOT, which never contains the generated module.
+		parent := strings.TrimSuffix(pkg.ImportPath[:index], "/")
+		if pkg.Standard || !hasGoPathPrefix(generatedModulePath, parent) {
+			return "use of internal package " + pkg.ImportPath + " not allowed from the generated module " + generatedModulePath
+		}
+	}
+	if strings.HasPrefix(pkg.ImportPath, "vendor/") || strings.Contains(pkg.ImportPath, "/vendor/") {
+		return "use of vendored package " + pkg.ImportPath + " not allowed"
+	}
+	if pkg.Name == "main" {
+		return "import " + strconv.Quote(pkg.ImportPath) + " is a program, not an importable package"
+	}
+	return ""
+}
+
+// goInternalElement returns the index of the final "internal" element of an
+// import path, matching cmd/go's findInternal.
+func goInternalElement(path string) (int, bool) {
+	switch {
+	case strings.HasSuffix(path, "/internal"):
+		return len(path) - len("internal"), true
+	case strings.Contains(path, "/internal/"):
+		return strings.LastIndex(path, "/internal/") + 1, true
+	case path == "internal", strings.HasPrefix(path, "internal/"):
+		return 0, true
+	}
+	return 0, false
+}
+
+// hasGoPathPrefix reports whether path is prefix or lies below it, matching
+// cmd/go's str.HasPathPrefix.
+func hasGoPathPrefix(path, prefix string) bool {
+	return prefix == "" || path == prefix || strings.HasPrefix(path, prefix+"/")
 }
 
 func goCommand(dir string, args ...string) ([]byte, error) {
@@ -92,7 +142,7 @@ func (r *Result) loadImports(dir string) {
 		r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF111", Message: err.Error()})
 		return
 	}
-	exports := map[string]string{}
+	listed := map[string]listedPackage{}
 	modules := map[string]*goModule{}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	for {
@@ -105,16 +155,16 @@ func (r *Result) loadImports(dir string) {
 			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF111", Message: err.Error()})
 			return
 		}
-		exports[pkg.ImportPath] = pkg.Export
+		listed[pkg.ImportPath] = pkg
 		if pkg.Module != nil {
 			modules[pkg.Module.Path] = pkg.Module
 		}
 	}
 	loader := importer.ForCompiler(gotoken.NewFileSet(), "gc", func(path string) (io.ReadCloser, error) {
-		if exports[path] == "" {
+		if listed[path].Export == "" {
 			return nil, fmt.Errorf("missing export data for %s", path)
 		}
-		return os.Open(exports[path])
+		return os.Open(listed[path].Export)
 	})
 	contracts, main, err := loadContracts(dir)
 	if err != nil {
@@ -135,12 +185,18 @@ func (r *Result) loadImports(dir string) {
 	contractData, _ := json.Marshal(contracts)
 	hash.Write(contractData)
 	for _, imp := range r.Program.Imports {
+		// Every declared import is emitted, named or blank, so a package the
+		// generated program cannot import is refused even when uncalled. Its
+		// declarations still load, so calls through it report no second error.
+		if refusal := goImportRefusal(listed[imp.Path]); refusal != "" {
+			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF111", Message: refusal, Span: imp.Span})
+		}
 		pkg, err := loader.Import(imp.Path)
 		if err != nil {
 			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF111", Message: err.Error(), Span: imp.Span})
 			continue
 		}
-		archive, err := os.ReadFile(exports[imp.Path])
+		archive, err := os.ReadFile(listed[imp.Path].Export)
 		if err != nil {
 			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF111", Message: err.Error(), Span: imp.Span})
 			continue
@@ -327,7 +383,7 @@ func (c *checker) foreignCall(e *Expr, env map[string]checkedExpression, inEffec
 // ModuleFile preserves the source workspace's module graph for generated code.
 func (r *Result) ModuleFile() []byte {
 	var out strings.Builder
-	out.WriteString("module effra.generated\n\ngo 1.27\n")
+	out.WriteString("module " + generatedModulePath + "\n\ngo 1.27\n")
 	modules := append([]*goModule{}, r.Program.Modules...)
 	// Sorted output avoids rewriting the generated module on unchanged builds.
 	sort.Slice(modules, func(i, j int) bool { return modules[i].Path < modules[j].Path })

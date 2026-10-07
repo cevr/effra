@@ -162,3 +162,37 @@ func TestCLITestsInitializeDeclaredForeignImportsOnlyWhenLive(t *testing.T) {
 		t.Fatalf("initialization must run once before the cases without calling the dead binding: %q", report.Output)
 	}
 }
+
+// An uncalled import of a package the generated program cannot import is
+// refused by check and build before any Go build runs.
+func TestCLIRefusesForeignImportsTheGeneratedProgramCannotImport(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := writeInitProbeRoot(t)
+	if err := os.MkdirAll(filepath.Join(root, "internal", "hidden"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "hidden", "hidden.go"), []byte("package hidden\n\nfunc Value() int64 { return 1 }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(root, "app", "main.ef")
+	if err := os.WriteFile(source, []byte("import go hidden \"effra.fixture/initprobe/internal/hidden\"\neffect fn main() -> void {\n    void\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"check", "build"} {
+		stdout, stderr, code := runTestCLIDir(t, binary, root, "", command, source)
+		var report struct {
+			Checked      bool                             `json:"checked"`
+			Diagnostics  []compiler.Diagnostic            `json:"diagnostics"`
+			Applications []compiler.ApplicationInspection `json:"applications"`
+		}
+		if err := json.Unmarshal(stdout, &report); err != nil {
+			t.Fatalf("%s: no JSON report: %v stdout=%q stderr=%q", command, err, stdout, stderr)
+		}
+		if code == 0 || report.Checked || len(report.Diagnostics) != 1 || report.Diagnostics[0].Code != "EF111" || report.Diagnostics[0].Span.Line != 1 || len(report.Applications) != 0 {
+			t.Fatalf("%s must refuse the import at its declaration: code=%d %+v stderr=%q", command, code, report, stderr)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "dist")); !os.IsNotExist(err) {
+		t.Fatalf("refused build published output: %v", err)
+	}
+}

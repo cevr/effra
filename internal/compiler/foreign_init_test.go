@@ -21,8 +21,7 @@ const initProbePackage = "effra.fixture/initprobe/registry"
 // module, so the generated module replaces it by directory.
 func writeInitProbeModule(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	files := map[string]string{
+	return writeGoModule(t, map[string]string{
 		"go.mod": "module effra.fixture/initprobe\n\ngo 1.27\n",
 		"dependency/dependency.go": `package dependency
 
@@ -49,7 +48,16 @@ func init() {
 
 func Value() int64 { fmt.Println("foreign-call"); return 7 }
 `,
-	}
+		// Go refuses both packages as imports of the generated program,
+		// although go list loads them as command-line packages.
+		"internal/hidden/hidden.go": "package hidden\n\nfunc Value() int64 { return 1 }\n",
+		"cmd/tool/main.go":          "package main\n\nfunc Value() int64 { return 1 }\n\nfunc main() {}\n",
+	})
+}
+
+func writeGoModule(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
 	for name, content := range files {
 		path := filepath.Join(dir, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -302,6 +310,65 @@ func TestUnresolvedUncalledForeignImportIsRefused(t *testing.T) {
 	r := CompileAt("import go missing \"effra.fixture/initprobe/missing\"\neffect fn main() -> void {\n    void\n}\n", "go", module)
 	if r.Checked || !hasCode(r, "EF111") {
 		t.Fatalf("an unresolved uncalled import must not be admitted: %v", r.Diagnostics)
+	}
+}
+
+// TestDeclaredForeignImportsMustBeImportableByTheGeneratedProgram applies
+// Go's import rules for the generated main package at admission: every
+// declared import is emitted, so a package Go refuses to import is an EF111
+// at its declaration whether or not a call names it.
+func TestDeclaredForeignImportsMustBeImportableByTheGeneratedProgram(t *testing.T) {
+	module := writeInitProbeModule(t)
+	// An internal element is visible below its parent. A module path that
+	// starts with internal has the empty parent, so its registry package is
+	// visible to every importer, the generated program included, while its
+	// own internal/hidden package is not.
+	visible := writeGoModule(t, map[string]string{
+		"go.mod":                    "module internal/initprobe\n\ngo 1.27\n",
+		"registry/registry.go":      "package registry\n\nimport \"fmt\"\n\nfunc init() { fmt.Println(\"visible-init\") }\n\nfunc Value() int64 { fmt.Println(\"foreign-call\"); return 7 }\n",
+		"internal/hidden/hidden.go": "package hidden\n\nfunc Value() int64 { return 1 }\n",
+	})
+	callers := map[string]string{
+		"no caller":        "effect fn main() -> void {\n    void\n}\n",
+		"dead caller":      "effect fn unused() -> i64 uses { Foreign } {\n    run probe.Value()\n}\neffect fn main() -> void {\n    void\n}\n",
+		"reachable caller": "effect fn main() -> i64 {\n    run probe.Value().provide<Foreign>(Host)\n}\n",
+	}
+	for _, refused := range []struct{ name, module, path string }{
+		{"program package", module, "effra.fixture/initprobe/cmd/tool"},
+		{"internal package of the source module", module, "effra.fixture/initprobe/internal/hidden"},
+		{"final internal element", visible, "internal/initprobe/internal/hidden"},
+	} {
+		for caller, body := range callers {
+			t.Run(refused.name+"/"+caller, func(t *testing.T) {
+				r := CompileAt("import go probe "+strconv.Quote(refused.path)+"\n"+body, "go", refused.module)
+				if r.Checked || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "EF111" || len(r.Program.Imports) != 1 || r.Diagnostics[0].Span != r.Program.Imports[0].Span {
+					t.Fatalf("a package the generated program cannot import must be refused at its declaration only: %+v", r.Diagnostics)
+				}
+				if inspections := r.ApplicationInspections(); len(inspections) != 0 {
+					t.Fatalf("a refused import reported application facts: %+v", inspections)
+				}
+			})
+		}
+	}
+	for name, path := range map[string]string{
+		"standard internal package": "internal/abi",
+		"vendored standard package": "vendor/golang.org/x/net/dns/dnsmessage",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := CompileAt("import go probe "+strconv.Quote(path)+"\n"+callers["no caller"], "go", module)
+			if r.Checked || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "EF111" || r.Diagnostics[0].Span != r.Program.Imports[0].Span {
+				t.Fatalf("a standard package hidden from the generated program must be refused: %+v", r.Diagnostics)
+			}
+		})
+	}
+	// Positive control: Go's rule, not a substring match, decides.
+	for caller, want := range map[string]string{"no caller": "visible-init\n", "reachable caller": "visible-init\nforeign-call\n7\n"} {
+		t.Run("visible internal package/"+caller, func(t *testing.T) {
+			_, _, output := buildAndRunInitProbe(t, visible, "import go probe \"internal/initprobe/registry\"\n"+callers[caller], GoGenerationBuild)
+			if output != want {
+				t.Fatalf("visible internal package output = %q", output)
+			}
+		})
 	}
 }
 
