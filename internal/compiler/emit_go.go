@@ -357,9 +357,19 @@ func (r *Result) emitGo(plan *ApplicationPlan) (string, error) {
 	if tests != nil {
 		out.WriteString("\"encoding/json\"\n")
 	}
+	// A named import both qualifies retained calls and initializes its
+	// package; a declared package no retained code names keeps one blank
+	// import for its initialization.
+	named := map[string]bool{}
 	for _, imp := range r.Program.Imports {
 		if plan.includesGoImport(imp.Alias) {
 			out.WriteString("efGo_" + imp.Alias + " " + strconv.Quote(imp.Path) + "\n")
+			named[imp.Path] = true
+		}
+	}
+	for _, path := range plan.Identities(RequiresGoInitialization) {
+		if !named[path] {
+			out.WriteString("_ " + strconv.Quote(path) + "\n")
 		}
 	}
 	out.WriteString(")\n")

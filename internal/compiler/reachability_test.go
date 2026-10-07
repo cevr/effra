@@ -518,7 +518,7 @@ effect fn main() -> bool raises { GoError } {
 }
 `
 
-func TestApplicationPlanRetainsOnlyReachableForeignImports(t *testing.T) {
+func TestApplicationPlanNamesOnlyReachableForeignImports(t *testing.T) {
 	r, plan := checkedApplicationPlan(t, applicationForeignSource, GoGenerationBuild)
 	parse := symbolIdentity(t, r, "parse")
 	requireProvenance(t, plan, RequiresForeign, "go:strconv.ParseBool", parse, "foreign-call")
@@ -529,6 +529,9 @@ func TestApplicationPlanRetainsOnlyReachableForeignImports(t *testing.T) {
 	requireUnplanned(t, plan, RequiresFunction, symbolIdentity(t, r, "trimmed"))
 	requireUnplanned(t, plan, RequiresForeign, "go:strings.TrimSpace")
 	requireUnplanned(t, plan, RequiresGoImport, "strings")
+	// Both declarations root initialization; only strconv is named by code.
+	requireProvenance(t, plan, RequiresGoInitialization, "strconv", "", "declared-foreign-import")
+	requireProvenance(t, plan, RequiresGoInitialization, "strings", "", "declared-foreign-import")
 	if !plan.includesGoImport("strconv") || plan.includesGoImport("strings") {
 		t.Fatalf("emitted import aliases: %v", plan.goImports)
 	}

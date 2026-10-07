@@ -35,8 +35,12 @@ const (
 	RequiresDeclaration   ApplicationRequirementKind = "declaration"
 	RequiresForeign       ApplicationRequirementKind = "foreign"
 	RequiresGoImport      ApplicationRequirementKind = "go-import"
-	RequiresHelper        ApplicationRequirementKind = "helper"
-	RequiresRuntimeModule ApplicationRequirementKind = "runtime-module"
+	// RequiresGoInitialization is a declared foreign Go package whose
+	// initialization the application runs, independently of reachable calls.
+	// Its identity is the resolved package path.
+	RequiresGoInitialization ApplicationRequirementKind = "go-initialization"
+	RequiresHelper           ApplicationRequirementKind = "helper"
+	RequiresRuntimeModule    ApplicationRequirementKind = "runtime-module"
 )
 
 // ApplicationRequirement is one retained identity. Via names the identity
@@ -254,6 +258,7 @@ func (r *Result) applicationPlan(mode GoGenerationMode, limit int) (*Application
 			planner.provider(r.checkedProviders[name], "", "test-harness")
 		}
 	}
+	planner.goInitialization()
 	planner.runtimeModule(rt.RuntimeModuleCore, "", "native-entry")
 	return planner.finish()
 }
@@ -742,6 +747,17 @@ func (p *applicationPlanner) callableValue(f *Function, owner string) {
 	}
 	p.require(RequiresCallableValue, f.Identity, owner, "function-value")
 	p.function(f, owner, "function-value")
+}
+
+// goInitialization roots the package initialization of every explicit
+// foreign Go import. An import declares a runtime initialization dependency
+// as well as host declarations, so it is retained whether or not a reachable
+// call names it. Aliases of one package share its identity. Initialization
+// alone retains no function, binding, Foreign capability or helper.
+func (p *applicationPlanner) goInitialization() {
+	for _, imported := range p.r.Program.Imports {
+		p.require(RequiresGoInitialization, imported.Path, "", "declared-foreign-import")
+	}
 }
 
 // foreign retains one checked host binding, its import declaration and the

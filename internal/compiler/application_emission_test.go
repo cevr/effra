@@ -156,8 +156,14 @@ func TestGoApplicationEmitsExactlyPlannedDeclarations(t *testing.T) {
 	if !slices.Equal(names, want) {
 		t.Fatalf("emitted declarations =\n%v\nwant\n%v", names, want)
 	}
-	if want := []string{"context", "effra.generated/runtime", "fmt", "os", "os/signal", "strconv", "syscall"}; !slices.Equal(imports, want) {
+	if want := []string{"context", "effra.generated/runtime", "fmt", "os", "os/signal", "strconv", "strings", "syscall"}; !slices.Equal(imports, want) {
 		t.Fatalf("emitted imports = %v, want %v", imports, want)
+	}
+	// The unreachable strings caller is pruned, but its declared package
+	// still initializes through one blank import.
+	specs := emittedImportSpecs(t, application.Main)
+	if named, blank := importsOf(specs, "strconv"), importsOf(specs, "strings"); !slices.Equal(named, []string{"efGo_strconv"}) || !slices.Equal(blank, []string{"_"}) {
+		t.Fatalf("foreign imports: strconv %v, strings %v", named, blank)
 	}
 	modules, err := application.Plan.RuntimeModuleClosure()
 	if err != nil {
