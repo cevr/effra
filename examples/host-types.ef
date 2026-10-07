@@ -1,5 +1,6 @@
 import go host "effra.local/prototype/examples/hosttypes"
 import go io "io"
+import go fs "io/fs"
 import go strconv "strconv"
 import Data "effra/data"
 
@@ -117,6 +118,48 @@ effect fn copied(text: string) -> string uses { Foreign } {
     }
 }
 
+effect fn read(text: string) -> string uses { Foreign } {
+    match run host.NewPlain(text) {
+        Data.Option.None => "no reader",
+        Data.Option.Some { value: reader } => {
+            let first = run reader.Read(2)
+            let rest = run reader.Read(8)
+            run host.BytesClass(first.value) + " " + run host.BytesClass(rest.value) + " " + run strconv.FormatBool(rest.hasError)
+        }
+    }
+}
+
+effect fn short(text: string) -> string uses { Foreign } {
+    match run host.RawText(text) {
+        Data.Option.None => "nil bytes",
+        Data.Option.Some { value: data } => match run host.NewShortWriter(2) {
+            Data.Option.None => "no writer",
+            Data.Option.Some { value: writer } => {
+                let written = run writer.Write(data)
+                let reported = match written.error {
+                    Data.Option.None => "nil",
+                    Data.Option.Some { value: err } => run strconv.FormatBool(run host.IsShortWrite(err))
+                }
+                run strconv.Itoa(written.value) + " short=" + reported + " " + run writer.Text()
+            }
+        }
+    }
+}
+
+effect fn listed(names: string) -> string uses { Foreign } {
+    match run host.NewTree(names) {
+        Data.Option.None => "no tree",
+        Data.Option.Some { value: tree } => {
+            let entries = run fs.ReadDir(tree, ".")
+            let text = match entries.value {
+                Data.Option.None => "nil",
+                Data.Option.Some { value } => run host.EntryNames(value)
+            }
+            text + " " + run tree.Report()
+        }
+    }
+}
+
 fn problem(err: error) -> string {
     let asserted = err.as<*host.Problem>()
     let payload = match asserted.v0 {
@@ -150,6 +193,7 @@ effect fn program() -> void uses { Foreign, Console } {
     run Console.log(run raw(false) + "; " + run raw(true) + "; " + run rawText("alias"))
     run Console.log(run buffered("native buffer"))
     run Console.log(run incremented("known") + "; " + run copied("abc") + "; " + run asserted())
+    run Console.log(run read("abc") + "; " + run short("hello") + "; " + run listed("b,a"))
     run Console.log(run strconv.Itoa(42))
 }
 

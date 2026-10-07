@@ -37,6 +37,9 @@ type Binding struct {
 	Context      bool     `json:"forwardContext"`
 	Cancellation string   `json:"cancellation"`
 	Provenance   string   `json:"provenance"`
+	// Protocol names the standard I/O method contract a method call follows
+	// (io.Reader, io.ReaderAt or io.Writer); its buffer and count adapt.
+	Protocol string `json:"protocol,omitempty"`
 	// HostParameters and HostResults are the complete native signature with
 	// each component's explicit adaptation, including nullability.
 	HostParameters []HostComponent `json:"hostParameters"`

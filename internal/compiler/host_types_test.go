@@ -34,6 +34,16 @@ func runGeneratedGo(t *testing.T, r *Result) string {
 // runGoModule runs generated sources as one native module beside the runtime.
 func runGoModule(t *testing.T, r *Result, application *GoApplication, files map[string][]byte) string {
 	t.Helper()
+	output, err := execGoModule(t, application, r, files)
+	if err != nil {
+		t.Fatalf("generated program: %v\n%s", err, output)
+	}
+	return string(output)
+}
+
+// execGoModule runs generated sources and returns the process outcome.
+func execGoModule(t *testing.T, application *GoApplication, r *Result, files map[string][]byte) ([]byte, error) {
+	t.Helper()
 	dir := t.TempDir()
 	if err := application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
@@ -44,11 +54,7 @@ func runGoModule(t *testing.T, r *Result, application *GoApplication, files map[
 			t.Fatal(err)
 		}
 	}
-	output, err := runGoCommand(dir, "run", ".")
-	if err != nil {
-		t.Fatalf("generated program: %v\n%s", err, output)
-	}
-	return string(output)
+	return runGoCommand(dir, "run", ".")
 }
 
 // The authored example is an ordinary program over a local Go package: nominal
@@ -75,6 +81,7 @@ func TestHostTypesExampleExecutesNatively(t *testing.T) {
 		"nil bytes; empty; alias",
 		"native buffer",
 		`4; 3 read=0 writeTo=1 write=1 readFrom=0 "abc"; *Problem nil`,
+		"ab c false; 2 short=true he; a,b open=0 readDir=1",
 		"42",
 	}, "\n") + "\n"
 	if output := runGeneratedGo(t, r); output != want {

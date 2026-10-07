@@ -852,6 +852,10 @@ func (p *applicationPlanner) foreign(e *Expr, owner string) {
 		p.require(RequiresGoImport, imported.Path, identity, "foreign-call")
 		p.namedGoImport(imported)
 	}
+	// A checked write names io.ErrShortWrite even when source never imports io.
+	if protocol, ok := binding.ioProtocol(); ok && !protocol.reader {
+		p.require(RequiresGoImport, "io", identity, "io-protocol")
+	}
 	p.helper("foreign", owner)
 	p.service(p.c.services["Foreign"], owner, "foreign-call")
 	// Native parameter types are not otherwise reached when an argument is a

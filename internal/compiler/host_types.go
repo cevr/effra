@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	gotoken "go/token"
 	"go/types"
 	"slices"
 	"strconv"
@@ -31,6 +32,9 @@ const (
 	hostAdaptError    = "error"    // trailing native error retained by GoResult
 	hostAdaptContext  = "context"  // first context.Context forwarded from the managed fiber
 	hostAdaptReceiver = "receiver" // method receiver, passed as the original native value
+	hostAdaptBuffer   = "buffer"   // read buffer: source supplies its length, Go fills a fresh slice
+	hostAdaptFilled   = "filled"   // read count: the filled prefix of the buffer, as fresh bytes
+	hostAdaptWritten  = "written"  // write count: a short write with a nil error is io.ErrShortWrite
 )
 
 // HostComponent is one native parameter or result of a binding with its
@@ -497,10 +501,73 @@ func (c *checker) hostMethodBinding(receiver types.Type, name string) (Binding, 
 	if reason := admitCallable(&b, fn, c.program.host); reason != "" {
 		return Binding{}, reason
 	}
+	for _, protocol := range hostIOProtocols {
+		if protocol.method == name && types.Implements(receiver, protocol.contract) {
+			protocol.adapt(&b)
+		}
+	}
 	receiverComponent := HostComponent{Native: types.TypeString(admitted.native, hostPathQualifier), Type: display, Adaptation: hostAdaptReceiver}
 	b.HostParameters = append([]HostComponent{receiverComponent}, b.HostParameters...)
 	c.program.Bindings[symbol] = b
 	return b, ""
+}
+
+// hostIOProtocol is one standard I/O method contract.
+type hostIOProtocol struct {
+	name, method string
+	contract     *types.Interface
+	reader       bool
+}
+
+// hostIOProtocols are identified by Go's interface satisfaction, as io.Copy
+// identifies them: a receiver whose method set implements io.Reader follows
+// io.Reader's documented contract for Read. Effra bytes are immutable, so a
+// read takes the buffer length and Go fills a fresh native buffer whose filled
+// prefix is the result; data returned with io.EOF or another error is kept
+// beside that error. A write checks its count: fewer bytes with a nil error
+// is reported as io.ErrShortWrite, as io.Copy reports it. A count outside the
+// buffer is a defect.
+var hostIOProtocols = []hostIOProtocol{
+	{"io.Reader", "Read", hostIOContract("Read"), true},
+	{"io.ReaderAt", "ReadAt", hostIOContract("ReadAt", types.Typ[types.Int64]), true},
+	{"io.Writer", "Write", hostIOContract("Write"), false},
+}
+
+// hostIOContract builds the one-method interface method(p []byte, extra...)
+// (n int, err error); interface satisfaction is structural, so it need not be
+// loaded from package io.
+func hostIOContract(method string, extra ...types.Type) *types.Interface {
+	params := []*types.Var{types.NewParam(gotoken.NoPos, nil, "p", types.NewSlice(types.Typ[types.Byte]))}
+	for _, t := range extra {
+		params = append(params, types.NewParam(gotoken.NoPos, nil, "", t))
+	}
+	results := types.NewTuple(types.NewParam(gotoken.NoPos, nil, "n", types.Typ[types.Int]), types.NewParam(gotoken.NoPos, nil, "err", hostErrorType.native))
+	signature := types.NewSignatureType(nil, nil, nil, types.NewTuple(params...), results, false)
+	return types.NewInterfaceType([]*types.Func{types.NewFunc(gotoken.NoPos, nil, method, signature)}, nil).Complete()
+}
+
+// ioProtocol returns the I/O protocol a method binding follows.
+func (b Binding) ioProtocol() (hostIOProtocol, bool) {
+	index := slices.IndexFunc(hostIOProtocols, func(protocol hostIOProtocol) bool { return protocol.name == b.Protocol })
+	if index < 0 {
+		return hostIOProtocol{}, false
+	}
+	return hostIOProtocols[index], true
+}
+
+// adapt rewrites an admitted protocol method's buffer and count components.
+func (protocol hostIOProtocol) adapt(b *Binding) {
+	b.Protocol = protocol.name
+	if !protocol.reader {
+		b.HostResults[0].Adaptation = hostAdaptWritten
+		return
+	}
+	b.params[0] = hostType{native: types.Typ[types.Int]}
+	b.Params[0] = "int"
+	b.HostParameters[0] = HostComponent{Native: b.HostParameters[0].Native, Type: "int", Adaptation: hostAdaptBuffer}
+	b.results[0] = hostType{native: types.NewSlice(types.Typ[types.Uint8]), primitive: "bytes"}
+	b.HostResults[0] = HostComponent{Native: b.HostResults[0].Native, Type: "bytes", Adaptation: hostAdaptFilled}
+	b.Return = "bytes"
 }
 
 // hostAssert checks value.as<T>() on a native interface value. The result is
@@ -778,6 +845,11 @@ func (c *checker) hostGoDeclarations() ([]string, string) {
 	for _, id := range named {
 		out.WriteString("var _ *" + c.hostGoType(id) + "\n")
 	}
+	// A checked write reports a short write with io.ErrShortWrite.
+	if slices.ContainsFunc(c.result.Bindings, func(b Binding) bool { protocol, ok := b.ioProtocol(); return ok && !protocol.reader }) {
+		paths["io"] = true
+		out.WriteString("var _ = " + hostPackageAlias("io") + ".ErrShortWrite\n")
+	}
 	annotations := []string{}
 	for name := range c.host.annotations {
 		annotations = append(annotations, name)
@@ -846,6 +918,19 @@ func (g *goEmitter) foreign(e *Expr, effect bool, ret string, out *strings.Build
 		out.WriteString(temp + " := " + expr + "\n")
 		args = append(args, temp)
 	}
+	result := g.resultType(e)
+	var body strings.Builder
+	// A protocol count refers to the native buffer passed as the first source
+	// argument; a read fills a fresh buffer of the requested length.
+	protocol, checked := b.ioProtocol()
+	buffer := ""
+	if checked {
+		buffer = args[len(args)-len(e.Args)]
+		if protocol.reader {
+			body.WriteString("if " + buffer + "<0{return er.Die[" + result + "](fmt.Errorf(\"%s buffer length %d is negative\"," + strconv.Quote(b.Symbol) + "," + buffer + "))};efBuffer:=make([]byte," + buffer + ");")
+			args[len(args)-len(e.Args)], buffer = "efBuffer", "efBuffer"
+		}
+	}
 	call := callee + "(" + strings.Join(args, ",") + ")"
 	components := []TypeID{}
 	if node := c.node(host.value); node != nil && node.Kind == "goValues" {
@@ -861,11 +946,19 @@ func (g *goEmitter) foreign(e *Expr, effect bool, ret string, out *strings.Build
 	if b.HasError {
 		results = append(results, "nativeErr")
 	}
-	var body strings.Builder
 	if len(results) > 0 {
 		body.WriteString(strings.Join(results, ",") + " := ")
 	}
 	body.WriteString(call + ";")
+	if checked {
+		body.WriteString("if nativeR0<0||nativeR0>len(" + buffer + "){return er.Die[" + result + "](fmt.Errorf(\"%s returned %d bytes for a %d-byte buffer\"," + strconv.Quote(b.Symbol) + ",nativeR0,len(" + buffer + ")))};")
+		if protocol.reader {
+			body.WriteString("efFilled:=efBuffer[:nativeR0:nativeR0];")
+			names[0] = "efFilled"
+		} else {
+			body.WriteString("if nativeErr==nil&&nativeR0<len(" + buffer + "){nativeErr=" + hostPackageAlias("io") + ".ErrShortWrite};")
+		}
+	}
 	value := "struct{}{}"
 	switch len(components) {
 	case 0:
@@ -882,7 +975,6 @@ func (g *goEmitter) foreign(e *Expr, effect bool, ret string, out *strings.Build
 		value = canonicalGoType(c, host.result, map[TypeID]bool{}) + "{Value:" + value + ",Err:nativeErr}"
 	}
 	body.WriteString("return er.Succeed(" + value + ")")
-	result := g.resultType(e)
 	return "func(ctx efContext)efExit[" + result + "]{if ctx.s_Foreign==nil{return er.Die[" + result + "](fmt.Errorf(\"missing Foreign provider\"))};return er.Invoke(ctx.Runtime,func(fc *er.FiberContext)er.Exit[" + result + "]{" + body.String() + "})}"
 }
 

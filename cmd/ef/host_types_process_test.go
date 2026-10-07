@@ -41,8 +41,10 @@ func TestHostTypeInspectionCLIAndMCPParity(t *testing.T) {
 	selected := readProcessJSON(t, typeOut)
 
 	components := map[string]map[string]any{}
+	protocols := map[string]any{}
 	for _, binding := range inspect["bindings"].([]any) {
 		b := binding.(map[string]any)
+		protocols[b["symbol"].(string)] = b["protocol"]
 		for _, side := range []string{"hostParameters", "hostResults"} {
 			if listed, ok := b[side].([]any); ok && len(listed) > 0 {
 				components[b["symbol"].(string)+" "+side] = listed[0].(map[string]any)
@@ -56,11 +58,16 @@ func TestHostTypeInspectionCLIAndMCPParity(t *testing.T) {
 		"host.BytesClass hostParameters":           {"[]uint8", "bytes", "present"},
 		"(*host.Counter).Increment hostParameters": {"*effra.local/prototype/examples/hosttypes.Counter", "*host.Counter", "receiver"},
 		"io.Copy hostParameters":                   {"io.Writer", "io.Writer", "present"},
+		"(*host.Plain).Read hostResults":           {"int", "bytes", "filled"},
+		"(*host.ShortWriter).Write hostResults":    {"int", "int", "written"},
 	} {
 		got := components[key]
 		if got["native"] != want[0] || got["type"] != want[1] || got["adaptation"] != want[2] {
 			t.Fatalf("%s adaptation %v, want %v", key, got, want)
 		}
+	}
+	if protocols["(*host.Plain).Read"] != "io.Reader" || protocols["(*host.ShortWriter).Write"] != "io.Writer" || protocols["io.Copy"] != nil {
+		t.Fatalf("inspected I/O protocols: %v", protocols)
 	}
 	expression := selected["selection"].(map[string]any)["expression"].(map[string]any)["type"].(map[string]any)["type"].(map[string]any)
 	definitions := map[string]map[string]any{}
