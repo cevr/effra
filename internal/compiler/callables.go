@@ -52,6 +52,13 @@ func (c *checker) sourceCallable(t *sourceType) TypeID {
 	if t.Application != "" {
 		return c.sourceApplication(t)
 	}
+	if !c.sourceTypeKnown(t) {
+		return invalidTypeID
+	}
+	return c.sourceCallableCanonical(t)
+}
+
+func (c *checker) sourceCallableCanonical(t *sourceType) TypeID {
 	args := make([]TypeID, 0, len(t.Parameters))
 	for _, name := range t.Parameters {
 		args = append(args, c.canonicalRef(typeRef(name)))
@@ -64,37 +71,89 @@ func (c *checker) sourceCallable(t *sourceType) TypeID {
 }
 
 func (c *checker) sourceCallableKnown(t *sourceType) bool {
+	return c.sourceTypeKnown(t)
+}
+
+// sourceTypeKnown is the source-admission counterpart to canonicalRef. It
+// walks parsed callable and application arguments before interning their
+// canonical nodes, so a successful generic application cannot hide an
+// undeclared row, an effect row on a pure callable, or an invalid nested
+// argument. The current type/module contexts remain the authority for names;
+// templateApplication remains the authority for finite parameter bounds.
+func (c *checker) sourceTypeKnown(t *sourceType) bool {
+	return c.sourceTypeKnownIn(t, map[*sourceType]bool{})
+}
+
+func (c *checker) sourceTypeKnownIn(t *sourceType, visiting map[*sourceType]bool) bool {
+	if t == nil || visiting[t] {
+		return false
+	}
+	visiting[t] = true
+	defer delete(visiting, t)
 	if t.Application != "" {
-		return c.sourceApplication(t) != invalidTypeID
+		if len(t.ApplicationArguments) != len(t.ApplicationArgumentTypes) {
+			return false
+		}
+		for i, argument := range t.ApplicationArgumentTypes {
+			if argument != nil {
+				if !c.sourceTypeKnownIn(argument, visiting) {
+					return false
+				}
+			} else if !c.typeKnown(t.ApplicationArguments[i]) {
+				return false
+			}
+		}
+		return c.sourceApplicationCanonical(t) != invalidTypeID
 	}
 	if !t.Effect && (len(t.Failures) > 0 || len(t.Services) > 0) {
 		return false
 	}
-	if !c.typeKnown(t.Result) {
+	if t.ResultType != nil {
+		if !c.sourceTypeKnownIn(t.ResultType, visiting) {
+			return false
+		}
+	} else if !c.typeKnown(t.Result) {
 		return false
 	}
-	for _, name := range t.Parameters {
-		if !c.typeKnown(name) {
+	if len(t.ParameterTypes) != len(t.Parameters) {
+		return false
+	}
+	for i, name := range t.Parameters {
+		if t.ParameterTypes[i] != nil {
+			if !c.sourceTypeKnownIn(t.ParameterTypes[i], visiting) {
+				return false
+			}
+		} else if !c.typeKnown(name) {
 			return false
 		}
 	}
-	for _, name := range t.Failures {
-		if c.rowParameter(name, "raises") {
+	return c.sourceRowsKnown(t.Failures, "raises") && c.sourceRowsKnown(t.Services, "uses")
+}
+
+func (c *checker) sourceRowsKnown(labels []string, kind string) bool {
+	for _, name := range labels {
+		if c.rowParameter(name, kind) {
 			continue
 		}
-		if _, ok := c.program.Errors[name]; !ok {
-			return false
-		}
-	}
-	for _, name := range t.Services {
-		if c.rowParameter(name, "uses") {
-			continue
-		}
-		known := c.services[name] != nil
-		for _, service := range c.program.Services {
-			known = known || service.Name == name
-		}
-		if !known {
+		switch kind {
+		case "raises":
+			if c.program == nil {
+				return false
+			}
+			if _, ok := c.program.Errors[name]; !ok {
+				return false
+			}
+		case "uses":
+			known := c.services[name] != nil
+			if c.program != nil {
+				for _, service := range c.program.Services {
+					known = known || service.Name == name
+				}
+			}
+			if !known {
+				return false
+			}
+		default:
 			return false
 		}
 	}

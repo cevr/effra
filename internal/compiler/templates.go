@@ -416,6 +416,13 @@ func (c *checker) templateApplication(r *Record, args []TypeID) (TypeID, error) 
 }
 
 func (c *checker) sourceApplication(t *sourceType) TypeID {
+	if !c.sourceTypeKnown(t) {
+		return invalidTypeID
+	}
+	return c.sourceApplicationCanonical(t)
+}
+
+func (c *checker) sourceApplicationCanonical(t *sourceType) TypeID {
 	r := c.templateByName(t.Application)
 	if r == nil {
 		return invalidTypeID

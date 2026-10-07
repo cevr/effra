@@ -8,6 +8,9 @@ func TestGenericDataTemplatePayloadTypeAdmission(t *testing.T) {
 			`record Holder<T:type>{operation:effect fn(T)->T uses {Missing}}`,
 			`record Holder<T:type>{operation:effect fn(T)->T raises {Missing}}`,
 			`service Users {effect fn get()->string} record Holder<T:type>{operation:fn(T)->T uses {Users}}`,
+			`record Ops<F:callable effect fn(A)->A,A:type>{operation:F} record Holder<T:type>{operation:Ops<effect fn(T)->T uses {Missing},T>}`,
+			`record Ops<F:callable effect fn(A)->A,A:type>{operation:F} record Holder<T:type>{operation:Ops<effect fn(T)->T raises {Missing},T>}`,
+			`service Users {effect fn get()->string} record Ops<F:callable fn(A)->A,A:type>{operation:F} enum Holder<T:type>{Some{operation:Ops<fn(T)->T uses {Users},T>}}`,
 		} {
 			r := CompileFor(source, target)
 			if r.Checked || len(r.Diagnostics) == 0 {
@@ -17,6 +20,10 @@ func TestGenericDataTemplatePayloadTypeAdmission(t *testing.T) {
 		valid := CompileFor(`error Trouble service Users {effect fn get()->string raises {Trouble}} record Holder<T:type>{operation:effect fn(T)->T raises {Trouble} uses {Users}}`, target)
 		if !valid.Checked {
 			t.Fatalf("%s declared generic callable rows were refused: %+v", target, valid.Diagnostics)
+		}
+		nestedValid := CompileFor(`service Users {effect fn get()->string} record Ops<F:callable effect fn(A)->A,A:type>{operation:F} record Holder<T:type>{operation:Ops<effect fn(T)->T uses {Users},T>}`, target)
+		if !nestedValid.Checked {
+			t.Fatalf("%s declared nested generic callable rows were refused: %+v", target, nestedValid.Diagnostics)
 		}
 	}
 }
