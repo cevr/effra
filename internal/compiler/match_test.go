@@ -303,3 +303,57 @@ func TestMatchProductLexicalBindingsResolveToFirstAlternative(t *testing.T) {
 	}
 	t.Fatal("or-pattern binder use was not recorded")
 }
+
+// alternativeCallableSource binds f from two alternatives whose callable payload
+// types are written as first and second.
+func alternativeCallableSource(first, second string) string {
+	return `error Bad
+service Secret { effect fn read() -> string }
+enum Choice {
+ A { f: effect fn() -> string` + first + ` }
+ B { f: effect fn() -> string` + second + ` }
+}
+effect fn bad() -> string raises {Bad} { fail Bad }
+effect fn good() -> string raises {Bad} { "good" }
+effect fn choose(c: Choice) -> string raises {Bad} {
+ match c { Choice.A { f } | Choice.B { f } => run f() }
+}
+effect fn main() -> string {
+ let first = run choose(Choice.A { f: good }).catch<Bad>("caught")
+ let second = run choose(Choice.B { f: bad }).catch<Bad>("caught")
+ first + ";" + second
+}`
+}
+
+func TestMatchAlternativeBindersRequireIdenticalCallableRows(t *testing.T) {
+	// A binder carries one payload contract. Admitting rows from only the first
+	// alternative would drop an undeclared failure or a missing service from
+	// the enclosing function, depending on the order alternatives are written.
+	for _, tc := range []struct{ name, first, second, message string }{
+		{"failure row second", "", " raises {Bad}", "callable raises {Bad} versus {}"},
+		{"failure row first", " raises {Bad}", "", "callable raises {} versus {Bad}"},
+		{"service row second", "", " uses {Secret}", "callable uses {Secret} versus {}"},
+		{"service row first", " uses {Secret}", "", "callable uses {} versus {Secret}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := Compile(alternativeCallableSource(tc.first, tc.second))
+			if r.Checked {
+				t.Fatal("alternatives with different callable rows were admitted")
+			}
+			for _, diagnostic := range r.Diagnostics {
+				if diagnostic.Code == "EF121" && strings.Contains(diagnostic.Message, "alternative binding f has a different type") && strings.Contains(diagnostic.Message, tc.message) {
+					return
+				}
+			}
+			t.Fatalf("want EF121 naming %q, got %+v", tc.message, r.Diagnostics)
+		})
+	}
+	source := alternativeCallableSource(" raises {Bad}", " raises {Bad}")
+	runGenericDataNative(t, source, "good;caught\n")
+	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != "good;caught\n" {
+		t.Fatalf("JS identical-row alternatives: %q", output)
+	}
+	if choose := Compile(source).Find("choose"); choose == nil || len(choose.Actual.Errors) != 1 || choose.Actual.Errors[0] != "Bad" {
+		t.Fatalf("joined callable binder lost its failure row: %+v", choose)
+	}
+}

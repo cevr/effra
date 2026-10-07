@@ -244,8 +244,8 @@ func (c *checker) unreachableAlternatives(coverage *matchCoverage, arm *MatchArm
 }
 
 // matchArmBindings checks payload binders and binds each name once in env.
-// Every alternative of a cell must bind the same names with the same types;
-// the bound value joins the alternatives' payload provenance.
+// Every alternative of a cell must bind the same names with identical payload
+// types; the bound value joins the alternatives' payload provenance.
 func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []map[string]Variant, env map[string]checkedExpression) []matchPlanBinding {
 	var bindings []matchPlanBinding
 	armNames := map[string]bool{}
@@ -305,8 +305,12 @@ func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []ma
 					continue
 				}
 				joined := bindings[index].value
-				if !c.sameValues(joined, bound) {
-					c.diagnostic("EF121", "alternative binding "+binding+" has a different type in "+plan.subjects[subject].enum.Name+"."+pattern.VariantName+" than in "+plan.subjects[subject].enum.Name+"."+first.VariantName, pattern.Span)
+				// The payload contract is the canonical type, callable failure
+				// and service rows included: the call recipe reads them from the
+				// bound value, so a row present in only one alternative would be
+				// silently dropped or invented by whichever alternative is first.
+				if joined.valueID() != bound.valueID() {
+					c.diagnostic("EF121", "alternative binding "+binding+" has a different type in "+plan.subjects[subject].enum.Name+"."+pattern.VariantName+" than in "+plan.subjects[subject].enum.Name+"."+first.VariantName+c.callableRowDifference(bound.valueID(), joined.valueID()), pattern.Span)
 					continue
 				}
 				joined.fields = c.joinExpressionFields(joined, bound, pattern.Span, 0, new(int))
@@ -332,6 +336,28 @@ func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []ma
 	}
 	return bindings
 }
+
+// callableRowDifference names the rows that distinguish two callable payload
+// types of the same shape, which otherwise display identically.
+func (c *checker) callableRowDifference(later, first TypeID) string {
+	left, right := c.node(later), c.node(first)
+	if left == nil || right == nil || left.Kind != "callable" || right.Kind != "callable" || left.Mode != right.Mode || left.Result != right.Result || !slices.Equal(left.Args, right.Args) {
+		return ""
+	}
+	var differences []string
+	if left.FailureRow != right.FailureRow {
+		differences = append(differences, "raises "+rowList(c.rowLabels(left.FailureRow))+" versus "+rowList(c.rowLabels(right.FailureRow)))
+	}
+	if left.ServiceRow != right.ServiceRow {
+		differences = append(differences, "uses "+rowList(c.rowLabels(left.ServiceRow))+" versus "+rowList(c.rowLabels(right.ServiceRow)))
+	}
+	if len(differences) == 0 {
+		return ""
+	}
+	return ": callable " + strings.Join(differences, ", ")
+}
+
+func rowList(labels []string) string { return "{" + strings.Join(labels, ", ") + "}" }
 
 func bindingList(names []string) string {
 	if len(names) == 0 {
