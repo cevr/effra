@@ -90,7 +90,7 @@ Warnings do not make checked source untyped. `--strict` makes warnings fail the 
 let forgotten = task()
 ```
 
-The rule name must be known and the reason must be non-empty. Malformed, unknown, or unused suppressions are `EFL004 invalid-suppression` errors and fail lint in every mode. Suppressions are matched against semantic diagnostic spans in the same source revision; compiler correctness diagnostics cannot be suppressed. Comments remain source text, and no automatic deletion fix is offered.
+Only a `//` line comment is a directive; a block comment containing the same text is ordinary comment text and never suppresses or diagnoses. The rule name must be known and the reason must be non-empty. Malformed, unknown, or unused suppressions are `EFL004 invalid-suppression` errors and fail lint in every mode. Suppressions are matched against semantic diagnostic spans in the same source revision; compiler correctness diagnostics cannot be suppressed. Comments remain source text, and no automatic deletion fix is offered.
 
 ## Local types
 

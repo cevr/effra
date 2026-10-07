@@ -282,7 +282,7 @@ func collectBlockBreaks(layout *formatLayout, block *Block) {
 func formatDirectiveTargetLines(comments []Comment) map[int]bool {
 	lines := map[int]bool{}
 	for _, comment := range comments {
-		if isSuppressionComment(comment.Text) {
+		if isSuppressionComment(comment) {
 			lines[comment.Span.Line+1] = true
 		}
 	}

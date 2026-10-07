@@ -54,8 +54,12 @@ const (
 	suppressionRule   = "invalid-suppression"
 )
 
-func isSuppressionComment(text string) bool {
-	return strings.HasPrefix(strings.TrimLeft(text, " \t"), suppressionPrefix)
+// isSuppressionComment is the single directive policy shared by lint and the
+// formatter. Only a line comment ends at its physical line, so only a line
+// comment can name the following line; a block comment that spells a
+// directive is ordinary comment text wherever layout places it.
+func isSuppressionComment(comment Comment) bool {
+	return !comment.Block && strings.HasPrefix(strings.TrimLeft(comment.Text, " \t"), suppressionPrefix)
 }
 
 func LintRules() []LintRule {
@@ -77,7 +81,7 @@ func parseSuppressions(comments []Comment, revision string, rules map[string]Lin
 	for _, comment := range comments {
 		body := comment.Text
 		trimmed := strings.TrimLeft(body, " \t")
-		if !isSuppressionComment(body) {
+		if !isSuppressionComment(comment) {
 			continue
 		}
 		span := comment.Span

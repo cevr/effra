@@ -253,6 +253,26 @@ record Data { first: string, second: string }`
 		}
 		assertLintMeaning(t, caseSource, formatted.Text)
 	}
+
+	// A block comment spelling a directive is ordinary text in lint and
+	// formatter alike, so moving its target onto the next line by formatting
+	// cannot activate it, and it never suppresses a recipe on its own line.
+	for _, caseSource := range []string{
+		"effect fn task() -> void { void }\neffect fn main() -> void { /* effra-lint-disable-next-line unused-recipe -- intentional */ let pending = task(); void }",
+		"effect fn task() -> void { void }\neffect fn main() -> void {\n/* effra-lint-disable-next-line unused-recipe -- intentional */\nlet pending = task(); void\n}",
+	} {
+		formatted, err := FormatSource(caseSource)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertLintMeaning(t, caseSource, formatted.Text)
+		for _, source := range []string{caseSource, formatted.Text} {
+			lint := Compile(source).Lint(true)
+			if len(lint.LintDiagnostics) != 1 || lint.LintDiagnostics[0].Code != "EFL001" {
+				t.Fatalf("block comment acted as a lint directive: %+v\n%s", lint.LintDiagnostics, source)
+			}
+		}
+	}
 }
 
 func TestFormatPreservesUnicodeCRLFEOFAndEmptyFiles(t *testing.T) {
