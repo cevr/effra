@@ -1003,10 +1003,14 @@ func (r *Result) CheckResponse() map[string]any {
 		response["sources"] = r.Sources
 		response["bundledBindings"] = r.BundledBindings
 		response["bundledInterfaces"] = r.BundledInterfaces
+		if len(r.Codecs) > 0 {
+			response["codecs"] = r.Codecs
+			response["codecPlans"] = r.CodecPlans
+		}
 		usage, err := r.ValidateProjectionResponse(projection, response)
 		if err != nil {
 			projection = refusedProjection(projection.Limits, usage, err.Error())
-			for _, key := range []string{"symbols", "layers", "declarations", "bindings", "types", "rows", "sources", "bundledBindings", "bundledInterfaces"} {
+			for _, key := range []string{"symbols", "layers", "declarations", "bindings", "types", "rows", "sources", "bundledBindings", "bundledInterfaces", "codecs", "codecPlans"} {
 				delete(response, key)
 			}
 			response["typeProjectionComplete"] = false

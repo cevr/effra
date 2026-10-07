@@ -161,6 +161,9 @@ type Function struct {
 	signatureChecked       bool
 	returnCallableEvidence callableEvidence
 	CallbackPolicies       []CallbackPolicy
+	// codec is set on the direction functions a derive declaration
+	// synthesizes; their body is one compiler-owned codec operation.
+	codec *CodecDeclaration
 }
 type Service struct {
 	Name    string
@@ -231,6 +234,10 @@ type Program struct {
 	Providers           []*Provider
 	Layers              []*Layer
 	Functions           []*Function
+	Codecs              []*CodecDeclaration
+	DerivedFunctions    []*Function
+	DerivedBindings     map[string]map[string]*Function
+	BundledDerivations  map[string]map[string]*codecDerivation
 }
 
 // SyntaxItem preserves the lexical declaration order that semantic
@@ -248,6 +255,7 @@ type SyntaxItem struct {
 	Provider      *Provider
 	Layer         *Layer
 	Function      *Function
+	Codec         *CodecDeclaration
 	Span          Span
 	Extent        Span `json:"-"`
 }
@@ -342,6 +350,8 @@ type Expr struct {
 	checked   checkedExpression
 	layerPlan *LayerPlan
 	matchPlan *matchPlan
+	// codec is the derive declaration a synthesized codec operation runs.
+	codec *CodecDeclaration
 	// Evaluation is the work incurred while evaluating this expression now.
 	// Deferred effect rows remain on Type. Keeping the two facts beside the
 	// checked node lets callers reuse the result without walking the subtree.
@@ -741,13 +751,19 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			}
 			program.Layers = append(program.Layers, layer)
 			program.Items = append(program.Items, &SyntaxItem{Kind: "layer", Layer: layer, Span: start})
+		case "derive":
+			start := p.take().span
+			codec := p.codecDeclaration()
+			program.Codecs = append(program.Codecs, codec)
+			program.Items = append(program.Items, &SyntaxItem{Kind: "derive", Codec: codec, Span: start})
+			p.accept(";")
 		default:
 			if head := p.peek(); head.kind == "name" {
 				if _, absent := absentSyntaxAt(absentInDeclaration, head.text); absent {
 					p.failAbsent(absentInDeclaration, head.text, head.span)
 				}
 			}
-			p.fail(p.peek(), "expected error, record, enum, service, impl, layer, or function declaration")
+			p.fail(p.peek(), "expected error, record, enum, service, impl, layer, derive, or function declaration")
 		}
 		item := program.Items[len(program.Items)-1]
 		item.Extent = p.extent(item.Span)

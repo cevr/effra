@@ -137,6 +137,9 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 	if r.Program.GoOnly {
 		return "", "", fmt.Errorf("program uses features currently implemented only for Go")
 	}
+	if err := r.codecEmissionAvailable(); err != nil {
+		return "", "", err
+	}
 	var plan *ApplicationPlan
 	var err error
 	switch surface {

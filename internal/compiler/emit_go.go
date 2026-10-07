@@ -259,6 +259,9 @@ type GoApplication struct {
 // GoApplication plans and lowers one native entry mode. Plan refusals,
 // including EF136 exhaustion, are returned unchanged and nothing is emitted.
 func (r *Result) GoApplication(mode GoGenerationMode) (*GoApplication, error) {
+	if err := r.codecEmissionAvailable(); err != nil {
+		return nil, err
+	}
 	plan, err := r.ApplicationPlan(mode)
 	if err != nil {
 		return nil, err

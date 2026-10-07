@@ -262,6 +262,8 @@ type Result struct {
 	Symbols                []Symbol               `json:"symbols"`
 	Layers                 []LayerPlan            `json:"layers,omitempty"`
 	Declarations           []Declaration          `json:"declarations,omitempty"`
+	Codecs                 []CodecInspection      `json:"codecs,omitempty"`
+	CodecPlans             []*CodecPlan           `json:"codecPlans,omitempty"`
 	Types                  []TypeNode             `json:"types,omitempty"`
 	Rows                   []RowNode              `json:"rows,omitempty"`
 	TypeProjectionBudget   int                    `json:"typeProjectionBudget"`
@@ -2318,6 +2320,7 @@ func (c *checker) check() {
 	for _, name := range builtinErrors() {
 		c.program.Errors[name] = Span{}
 	}
+	c.admitBundledFailures(claim)
 	for _, decl := range c.program.ErrorDecls {
 		if c.errors[decl.Name] == nil {
 			c.errors[decl.Name] = decl
@@ -2433,6 +2436,7 @@ func (c *checker) check() {
 			c.signature(f)
 		}
 	}
+	c.deriveCodecs(claim)
 	for _, s := range c.program.Services {
 		methods := map[string]bool{}
 		for _, f := range s.Methods {
@@ -2530,6 +2534,7 @@ func (c *checker) check() {
 		}
 	}
 	slices.SortFunc(c.result.BundledInterfaces, func(a, b BundledInterfaceInfo) int { return strings.Compare(a.Module, b.Module) })
+	c.publishCodecs()
 	c.validateJSDeclarationNames()
 }
 
@@ -2552,6 +2557,11 @@ func (c *checker) prepareFunctionSummaries() {
 	for alias, bindings := range c.program.BundledBindings {
 		for member, f := range bindings {
 			known[alias+"."+member] = f
+		}
+	}
+	for name, bindings := range c.program.DerivedBindings {
+		for member, f := range bindings {
+			known[name+"."+member] = f
 		}
 	}
 	dependents := make(map[*Function][]*Function, len(functions))
@@ -2782,6 +2792,9 @@ func (c *checker) validateJSDeclarationNames() {
 	}
 	for _, function := range c.program.Functions {
 		validateIdentifier(function.Name, "function export", function.Span)
+	}
+	for _, codec := range c.program.Codecs {
+		validateIdentifier(codec.Name, "codec witness export", codec.Span)
 	}
 }
 func (c *checker) signature(f *Function) {
@@ -4251,7 +4264,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			}
 			if e.Left.Left.binding != nil {
 				c.diagnostic("EF103", "a local shadows service "+key, e.Span)
-			} else if imported := c.program.bundledFunction(e.Left); imported != nil {
+			} else if imported := c.program.memberFunction(e.Left); imported != nil {
 				f = imported
 			} else if s := c.services[key]; s != nil {
 				for _, m := range s.Methods {
@@ -4429,7 +4442,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	case "member":
 		if e.Left != nil && e.Left.Kind == "name" {
 			if e.Left.binding == nil {
-				if f := c.program.bundledFunction(e); f != nil {
+				if f := c.program.memberFunction(e); f != nil {
 					if len(f.RowParameters) > 0 || len(f.TypeParameters) > 0 {
 						c.diagnostic("EF125", "row-polymorphic functions require direct application; first-class polymorphic values are unsupported", e.Span)
 					}
@@ -4575,6 +4588,8 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		}
 	case "provideLayer":
 		t = c.provideLayer(e, env, inEffect)
+	case "codec":
+		t = c.codecOperation(e, env)
 	case "provide":
 		t = c.expr(e.Left, env, inEffect)
 		if c.abstractRow(t.serviceRow()) {

@@ -19,12 +19,17 @@ var bundledSources embed.FS
 type bundledDeclaration struct {
 	Source       string
 	Dependencies []string
+	// Derivation marks a compiler-owned structural derivation. It has no
+	// source body: a derive declaration names it and the checker derives a
+	// plan from the derived type.
+	Derivation *codecDerivation
 }
 
 var bundledIndex = map[string]map[string]bundledDeclaration{
 	"effra/functions":   {"call": {Source: "bundled/functions/call.ef"}, "identity": {Source: "bundled/functions/identity.ef"}, "forwardFile": {Source: "bundled/functions/forward-file.ef"}},
 	"effra/conversions": {"Codec": {Source: "bundled/conversions/codec.ef"}, "witness": {Source: "bundled/conversions/witness.ef", Dependencies: []string{"Codec"}}},
 	"effra/data":        {"Option": {Source: "bundled/data/option.ef"}, "Result": {Source: "bundled/data/result.ef"}},
+	"effra/json":        {"codec": {Derivation: jsonCodecDerivation}},
 }
 
 const bundledInterfaceVersion = "1"
@@ -82,7 +87,7 @@ func (f *Function) jsEmissionName() string {
 }
 
 func (p *Program) checkedFunctions() []*Function {
-	return append(append([]*Function{}, p.Functions...), p.BundledFunctions...)
+	return append(append(append([]*Function{}, p.Functions...), p.BundledFunctions...), p.DerivedFunctions...)
 }
 
 func (p *Program) bundledFunction(e *Expr) *Function {
@@ -121,6 +126,7 @@ func (r *Result) loadBundledImports(source string) {
 	p := r.Program
 	p.BundledBindings = map[string]map[string]*Function{}
 	p.BundledTypeBindings = map[string]map[string]*Record{}
+	p.BundledDerivations = map[string]map[string]*codecDerivation{}
 	r.Sources = []SourceInfo{{ID: "source:user", Module: currentModuleIdentity, Digest: formatDigest(source)}}
 	r.ProducerIdentity = SemanticProducerIdentity
 	aliases := map[string]string{}
@@ -132,6 +138,7 @@ func (r *Result) loadBundledImports(source string) {
 		aliases[imp.Alias] = imp.Path
 		p.BundledBindings[imp.Alias] = map[string]*Function{}
 		p.BundledTypeBindings[imp.Alias] = map[string]*Record{}
+		p.BundledDerivations[imp.Alias] = map[string]*codecDerivation{}
 	}
 	type request struct {
 		module, member string
@@ -202,6 +209,15 @@ func (r *Result) loadBundledImports(source string) {
 	for _, f := range p.Functions {
 		root(f, nil)
 	}
+	for _, codec := range p.Codecs {
+		if module := aliases[codec.Alias]; module != "" {
+			if len(queue) >= maxBundledReferences {
+				exhausted = true
+			} else {
+				queue = append(queue, request{module, codec.Member, codec.DerivationSpan})
+			}
+		}
+	}
 	for _, provider := range p.Providers {
 		for _, f := range provider.Methods {
 			root(f, provider.Params)
@@ -225,6 +241,18 @@ func (r *Result) loadBundledImports(source string) {
 			continue
 		}
 		entry := bundledIndex[req.module][req.member]
+		if entry.Derivation != nil {
+			loaded[key] = true
+			identity := "derivation:" + req.module + ":module:" + req.member
+			content := formatDigest(identity + "\x00" + entry.Derivation.Profile + "\x00" + entry.Derivation.Wire + "\x00" + entry.Derivation.DecodeFailure + "\x00" + entry.Derivation.EncodeFailure)
+			for alias, module := range aliases {
+				if module == req.module {
+					p.BundledDerivations[alias][req.member] = entry.Derivation
+				}
+			}
+			r.BundledBindings = append(r.BundledBindings, BundledBinding{Module: req.module, Name: req.member, Declaration: identity, Content: content})
+			continue
+		}
 		if entry.Source == "" {
 			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "unknown bundled declaration " + key, Span: req.span})
 			continue
