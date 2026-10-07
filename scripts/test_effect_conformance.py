@@ -23,6 +23,7 @@ class MappingTests(unittest.TestCase):
 
     def test_current_selected_cases_have_real_evidence_targets(self) -> None:
         self.assertEqual(mapping.validate_mapping(self.value), [
+            "TestCodecPolicyVectorsAcrossGoJSAndEffect",
             "TestExplicitTestProvidersUseTheHarnessAcrossTargets",
             "TestLifecycleConformanceAcrossGoAndEffect",
             "TestSchedulerTimerFailureIsPreservedAcrossTargets",

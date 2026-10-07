@@ -1,0 +1,101 @@
+{"id":"string.plain","ok":true,"encoded":"\"hello\""}
+{"id":"string.escapes","ok":true,"encoded":"\"\\\"\\\\/\\b\\f\\n\\r\\tAéé\""}
+{"id":"string.surrogate-pair","ok":true,"encoded":"\"😀\""}
+{"id":"string.raw-unicode","ok":true,"encoded":"\"<>&é😀  \""}
+{"id":"string.controls","ok":true,"encoded":"\"\\u0001\\u001f\""}
+{"id":"string.nul","ok":true,"encoded":"\"a\\u0000b\""}
+{"id":"string.lone-high-escape","ok":true,"encoded":"\"a\\ud800b\""}
+{"id":"string.lone-low-escape","ok":true,"encoded":"\"\\udc00\""}
+{"id":"string.high-then-non-low","ok":true,"encoded":"\"\\ud800A\""}
+{"id":"string.raw-control","ok":false,"path":[],"message":"Expected a valid JSON string"}
+{"id":"string.invalid-escape","ok":false,"path":[],"message":"Expected a valid JSON string"}
+{"id":"string.short-unicode-escape","ok":false,"path":[],"message":"Expected a valid JSON string"}
+{"id":"string.unterminated","ok":false,"path":[],"message":"Expected a valid JSON string"}
+{"id":"string.null","ok":false,"path":[],"message":"Expected string"}
+{"id":"string.number","ok":false,"path":[],"message":"Expected string"}
+{"id":"string.object","ok":false,"path":[],"message":"Expected string"}
+{"id":"utf8.invalid-byte","ok":true,"encoded":"\"a�b\""}
+{"id":"utf8.overlong","ok":true,"encoded":"\"��\""}
+{"id":"utf8.encoded-surrogate","ok":true,"encoded":"\"���\""}
+{"id":"utf8.truncated","ok":true,"encoded":"\"�\""}
+{"id":"utf8.above-unicode","ok":true,"encoded":"\"����\""}
+{"id":"utf8.replacement-character","ok":true,"encoded":"\"�\""}
+{"id":"utf8.outside-string","ok":false,"path":[],"message":"Expected a valid JSON string"}
+{"id":"utf8.byte-order-mark","ok":true,"encoded":"\"a\""}
+{"id":"syntax.empty","ok":false,"path":[],"message":"Expected a valid JSON string"}
+{"id":"syntax.whitespace-only","ok":false,"path":[],"message":"Expected a valid JSON string"}
+{"id":"syntax.whitespace-accepted","ok":true,"encoded":"\"a\""}
+{"id":"syntax.trailing-data","ok":false,"path":[],"message":"Expected a valid JSON string"}
+{"id":"syntax.trailing-comma","ok":false,"path":[],"message":"Expected a valid JSON string"}
+{"id":"syntax.leading-zero-number","ok":false,"path":[],"message":"Expected a valid JSON string"}
+{"id":"syntax.truncated-literal","ok":false,"path":[],"message":"Expected a valid JSON string"}
+{"id":"syntax.missing-colon","ok":false,"path":[],"message":"Expected a valid JSON string"}
+{"id":"required.missing-field","ok":false,"path":["id"],"message":"Missing key"}
+{"id":"required.declared-order","ok":false,"path":["active"],"message":"Expected boolean"}
+{"id":"required.nested-missing","ok":false,"path":["owner","email"],"message":"Missing key"}
+{"id":"null.required-string","ok":false,"path":["owner","name"],"message":"Expected string"}
+{"id":"null.required-record","ok":false,"path":["owner"],"message":"Expected object"}
+{"id":"excess.ignored","ok":true,"encoded":"{\"id\":\"1\",\"owner\":{\"name\":\"Ada\",\"email\":\"ada@example.test\"},\"state\":{\"_tag\":\"Idle\"},\"active\":true,\"note\":null}"}
+{"id":"excess.ignored-in-variant","ok":true,"encoded":"{\"id\":\"1\",\"owner\":{\"name\":\"Ada\",\"email\":\"ada@example.test\"},\"state\":{\"_tag\":\"Idle\"},\"active\":true,\"note\":null}"}
+{"id":"excess.reordered-input","ok":true,"encoded":"{\"id\":\"1\",\"owner\":{\"name\":\"Ada\",\"email\":\"ada@example.test\"},\"state\":{\"_tag\":\"Idle\"},\"active\":true,\"note\":null}"}
+{"id":"void.null","ok":true,"encoded":"null"}
+{"id":"void.zero","ok":false,"path":[],"message":"Expected null"}
+{"id":"void.empty-object","ok":false,"path":[],"message":"Expected null"}
+{"id":"void.missing-field","ok":false,"path":["note"],"message":"Missing key"}
+{"id":"bool.true","ok":true,"encoded":"true"}
+{"id":"bool.string","ok":false,"path":[],"message":"Expected boolean"}
+{"id":"union.payload-free","ok":true,"encoded":"{\"_tag\":\"Idle\"}"}
+{"id":"union.payload","ok":true,"encoded":"{\"_tag\":\"Running\",\"runId\":\"r\",\"owner\":{\"name\":\"n\",\"email\":\"e\"}}"}
+{"id":"union.unknown-tag","ok":false,"path":[],"message":"Expected { readonly \"_tag\": \"Idle\", ... } | { readonly \"_tag\": \"Running\", ... }"}
+{"id":"union.missing-tag","ok":false,"path":[],"message":"Expected { readonly \"_tag\": \"Idle\", ... } | { readonly \"_tag\": \"Running\", ... }"}
+{"id":"union.non-string-tag","ok":false,"path":[],"message":"Expected { readonly \"_tag\": \"Idle\", ... } | { readonly \"_tag\": \"Running\", ... }"}
+{"id":"union.tag-case","ok":false,"path":[],"message":"Expected { readonly \"_tag\": \"Idle\", ... } | { readonly \"_tag\": \"Running\", ... }"}
+{"id":"union.domain-tag","ok":false,"path":[],"message":"Expected { readonly \"_tag\": \"Idle\", ... } | { readonly \"_tag\": \"Running\", ... }"}
+{"id":"union.variant-field-missing","ok":false,"path":["owner"],"message":"Missing key"}
+{"id":"union.nested-path","ok":false,"path":["state","owner","email"],"message":"Expected string"}
+{"id":"union.string","ok":false,"path":[],"message":"Expected { readonly \"_tag\": \"Idle\", ... } | { readonly \"_tag\": \"Running\", ... }"}
+{"id":"union.null","ok":false,"path":[],"message":"Expected { readonly \"_tag\": \"Idle\", ... } | { readonly \"_tag\": \"Running\", ... }"}
+{"id":"failure.not-found","ok":true,"encoded":"{\"_tag\":\"NotFound\",\"id\":\"7\",\"resource\":\"user\"}"}
+{"id":"failure.conflict","ok":true,"encoded":"{\"_tag\":\"Conflict\",\"reason\":\"taken\"}"}
+{"id":"failure.undeclared","ok":false,"path":[],"message":"Expected { readonly \"_tag\": \"NotFound\", ... } | { readonly \"_tag\": \"Conflict\", ... }"}
+{"id":"failure.payload-type","ok":false,"path":["id"],"message":"Expected string"}
+{"id":"i64.plain","ok":true,"encoded":"\"42\""}
+{"id":"i64.leading-zeros","ok":true,"encoded":"\"42\""}
+{"id":"i64.negative-zero","ok":true,"encoded":"\"0\""}
+{"id":"i64.negative-leading-zeros","ok":true,"encoded":"\"-7\""}
+{"id":"i64.long-leading-zeros","ok":true,"encoded":"\"1\""}
+{"id":"i64.max","ok":true,"encoded":"\"9223372036854775807\""}
+{"id":"i64.min","ok":true,"encoded":"\"-9223372036854775808\""}
+{"id":"i64.above-max","ok":false,"path":[],"message":"Expected a value between -9223372036854775808n and 9223372036854775807n"}
+{"id":"i64.below-min","ok":false,"path":[],"message":"Expected a value between -9223372036854775808n and 9223372036854775807n"}
+{"id":"i64.huge","ok":false,"path":[],"message":"Expected a value between -9223372036854775808n and 9223372036854775807n"}
+{"id":"i64.plus","ok":false,"path":[],"message":"Expected a string representing a bigint"}
+{"id":"i64.space","ok":false,"path":[],"message":"Expected a string representing a bigint"}
+{"id":"i64.empty","ok":false,"path":[],"message":"Expected a string representing a bigint"}
+{"id":"i64.minus-only","ok":false,"path":[],"message":"Expected a string representing a bigint"}
+{"id":"i64.decimal","ok":false,"path":[],"message":"Expected a string representing a bigint"}
+{"id":"i64.exponent","ok":false,"path":[],"message":"Expected a string representing a bigint"}
+{"id":"i64.non-ascii-digit","ok":false,"path":[],"message":"Expected a string representing a bigint"}
+{"id":"i64.json-number","ok":false,"path":[],"message":"Expected string"}
+{"id":"i64.escaped-digits","ok":true,"encoded":"\"42\""}
+{"id":"duplicate.declared-key","ok":false,"path":["runId"],"message":"Missing key"}
+{"id":"duplicate.excess-key","ok":true,"encoded":"{\"_tag\":\"Idle\"}"}
+{"id":"duplicate.escaped-spelling","ok":true,"encoded":"{\"_tag\":\"Idle\"}"}
+{"id":"duplicate.nested","ok":true,"encoded":"{\"_tag\":\"Idle\"}"}
+{"id":"duplicate.indexed-object","ok":true,"encoded":"{\"_tag\":\"Idle\"}"}
+{"id":"depth.within-bound","ok":true,"encoded":"{\"inner\":{\"value\":\"v\"}}"}
+{"id":"depth.ignored-value","ok":true,"encoded":"{\"inner\":{\"value\":\"v\"}}"}
+{"id":"depth.before-structure","ok":false,"path":["inner","value"],"message":"Expected string"}
+{"id":"depth.root-array","ok":false,"path":[],"message":"Expected string"}
+{"id":"body.at-bound","ok":true,"encoded":"{\"name\":\"aaaaaaaaaaaaaaaaaaaaa\"}"}
+{"id":"body.over-bound","ok":true,"encoded":"{\"name\":\"aaaaaaaaaaaaaaaaaaaaaa\"}"}
+{"id":"body.whitespace-counts","ok":true,"encoded":"{\"name\":\"aaaaaaaaaaaaaaaaaaaa\"}"}
+{"id":"encode.order-and-tag","ok":true,"encoded":"{\"id\":\"-42\",\"owner\":{\"name\":\"Ada\",\"email\":\"ada@example.test\"},\"state\":{\"_tag\":\"Running\",\"runId\":\"r\",\"owner\":{\"name\":\"n\",\"email\":\"e\"}},\"active\":false,\"note\":null}"}
+{"id":"encode.escaping","ok":true,"encoded":"\"q\\\"b\\\\s/c\\u0001\\u001f <>&   é😀\\b\\f\\n\\r\\t\""}
+{"id":"encode.i64-min","ok":true,"encoded":"\"-9223372036854775808\""}
+{"id":"encode.void","ok":true,"encoded":"null"}
+{"id":"encode.failure","ok":true,"encoded":"{\"_tag\":\"Conflict\",\"reason\":\"taken\"}"}
+{"id":"encode.over-bound","ok":true,"encoded":"{\"name\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"}
+{"id":"encode.i64-range","ok":false,"path":[],"message":"Expected a value between -9223372036854775808n and 9223372036854775807n"}
+{"id":"encode.lone-surrogate","ok":true,"encoded":"\"a\\ud800b\""}
+{"id":"encode.invalid-utf8","skipped":"not-applicable"}

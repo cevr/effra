@@ -81,6 +81,62 @@
       "behavior": "A detached child outlives interruption of its parent.",
       "limits": "Effra's first profile requires an owning scope; detached fibers remain unsupported.",
       "evidence": []
+    },
+    {
+      "id": "effect.schema.string",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/schema/Schema.test.ts", "line": 391, "label": "String"},
+      "behavior": "A JSON string decodes to a string and non-strings fail with a typed first issue.",
+      "limits": "Executed by conformance/codecs/effect-comparator.mjs over the shared effra/json-structural-1 policy vectors; the vector test compares Go and JS outcomes with the retained comparator bytes.",
+      "evidence": [{"file": "internal/compiler/codec_engine_test.go", "test": "TestCodecPolicyVectorsAcrossGoJSAndEffect", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.schema.boolean",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/schema/Schema.test.ts", "line": 469, "label": "Boolean"},
+      "behavior": "JSON true/false decode to booleans; other JSON values fail.",
+      "limits": "Executed by conformance/codecs/effect-comparator.mjs over the shared effra/json-structural-1 policy vectors; the vector test compares Go and JS outcomes with the retained comparator bytes.",
+      "evidence": [{"file": "internal/compiler/codec_engine_test.go", "test": "TestCodecPolicyVectorsAcrossGoJSAndEffect", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.schema.void",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/schema/Schema.test.ts", "line": 537, "label": "Void"},
+      "behavior": "Void decodes only from a present JSON null, fails on any other value or a missing key, and encodes as JSON null.",
+      "limits": "Executed by conformance/codecs/effect-comparator.mjs over the shared effra/json-structural-1 policy vectors; the vector test compares Go and JS outcomes with the retained comparator bytes. Effra's void boundary, absence and host-null contracts are unchanged; only the codec representation is compared.",
+      "evidence": [{"file": "internal/compiler/codec_engine_test.go", "test": "TestCodecPolicyVectorsAcrossGoJSAndEffect", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.schema.bigint-from-string",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/schema/Schema.test.ts", "line": 2198, "label": "BigIntFromString"},
+      "behavior": "A signed decimal string decodes to a 64-bit integer with leading zeros and negative zero normalized; non-decimal strings fail.",
+      "limits": "Executed by conformance/codecs/effect-comparator.mjs over the shared effra/json-structural-1 policy vectors; the vector test compares Go and JS outcomes with the retained comparator bytes. The signed 64-bit range is an added comparator check, not upstream BigInt behavior.",
+      "evidence": [{"file": "internal/compiler/codec_engine_test.go", "test": "TestCodecPolicyVectorsAcrossGoJSAndEffect", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.schema.excess-property-ignore",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/schema/Schema.test.ts", "line": 4066, "label": "applies excess-property options to unmatched own keys"},
+      "behavior": "Record and variant decoding ignore excess properties under the default policy.",
+      "limits": "Executed by conformance/codecs/effect-comparator.mjs over the shared effra/json-structural-1 policy vectors; the vector test compares Go and JS outcomes with the retained comparator bytes. Only the ignore policy is profiled; error and preserve are not offered.",
+      "evidence": [{"file": "internal/compiler/codec_engine_test.go", "test": "TestCodecPolicyVectorsAcrossGoJSAndEffect", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.schema.json-string-struct",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/schema/Schema.test.ts", "line": 6030, "label": "use case: create a JSON string serializer for an existing schema"},
+      "behavior": "Decoding a JSON string into a struct reports a missing declared key at its path; malformed text fails as a JSON parse failure.",
+      "limits": "Executed by conformance/codecs/effect-comparator.mjs over the shared effra/json-structural-1 policy vectors; the vector test compares Go and JS outcomes with the retained comparator bytes.",
+      "evidence": [{"file": "internal/compiler/codec_engine_test.go", "test": "TestCodecPolicyVectorsAcrossGoJSAndEffect", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.schema.json-string-admission",
+      "status": "difference",
+      "upstream": {"file": "packages/effect/test/schema/Schema.test.ts", "line": 6011, "label": "use case: Unknown <-> JSON string"},
+      "behavior": "Effra admission is stricter than JSON.parse: duplicate keys, invalid UTF-8, lone surrogate escapes, byte-order marks, and body/depth bounds fail with byte offsets where Effect parses last-wins over replacement-decoded text without bounds.",
+      "limits": "Executed by conformance/codecs/effect-comparator.mjs over the shared effra/json-structural-1 policy vectors; the vector test compares Go and JS outcomes with the retained comparator bytes. Each differing vector is labelled `difference` in json-structural-vectors.json.",
+      "evidence": [{"file": "internal/compiler/codec_engine_test.go", "test": "TestCodecPolicyVectorsAcrossGoJSAndEffect", "targets": ["go", "js"]}]
     }
   ]
 }
