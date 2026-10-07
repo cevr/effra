@@ -25,6 +25,7 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(mapping.validate_mapping(self.value), [
             "TestCodecPolicyVectorsAcrossGoJSAndEffect",
             "TestExplicitTestProvidersUseTheHarnessAcrossTargets",
+            "TestLayerEntryWaiterCancellationIsBuildOwnedAcrossTargets",
             "TestLifecycleConformanceAcrossGoAndEffect",
             "TestSchedulerTimerFailureIsPreservedAcrossTargets",
         ])

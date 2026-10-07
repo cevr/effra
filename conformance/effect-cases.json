@@ -137,6 +137,14 @@
       "behavior": "Effra admission is stricter than JSON.parse: duplicate keys, invalid UTF-8, lone surrogate escapes, byte-order marks, and body/depth bounds fail with byte offsets where Effect parses last-wins over replacement-decoded text without bounds.",
       "limits": "Executed by conformance/codecs/effect-comparator.mjs over the shared effra/json-structural-1 policy vectors; the vector test compares Go and JS outcomes with the retained comparator bytes. Each differing vector is labelled `difference` in json-structural-vectors.json.",
       "evidence": [{"file": "internal/compiler/codec_engine_test.go", "test": "TestCodecPolicyVectorsAcrossGoJSAndEffect", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.layer.interrupted-requester-shared-build",
+      "status": "difference",
+      "upstream": {"file": "packages/effect/test/Layer.test.ts", "line": 505, "label": "interrupting a build does not hang current or later requesters"},
+      "behavior": "Interrupting one requester of a shared layer acquisition leaves other current and later requesters able to complete.",
+      "limits": "Upstream MemoMap builds in the first requester's fiber, so interrupting it completes the shared entry with that interruption for every waiter. Effra producers belong to the provision build: cancelling one waiter abandons only its own wait, the producer continues, and every other waiter observes the actual shared outcome. Whole-build cancellation is the only static-surface trigger; the evidence drives the emitted Go runtime and JavaScript layer runtime seam directly until a language caller exists.",
+      "evidence": [{"file": "internal/compiler/layer_acquisition_test.go", "test": "TestLayerEntryWaiterCancellationIsBuildOwnedAcrossTargets", "targets": ["go", "js"]}]
     }
   ]
 }
