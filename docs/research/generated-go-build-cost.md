@@ -2,7 +2,7 @@
 
 Measured on 2026-10-06 from the clean scheduler branch at `620e1455077f2d15b71d25f1d6256cc44ad2a49f`, before its pending continuation-isolation repair. This is a shared-host diagnostic with an ambient Go cache, not an admitted compile-speed comparison or a cold-build claim.
 
-The retained source is the exact `TestSchedulerDrainsLongManagedContinuationAcrossTargets` fixture: sleep for 20 milliseconds, 1024 sequential latch signals, then sleep for 30 milliseconds, executed by the causal test harness. The public CLI generated and built the native test executable. A wrapper around the actual Go command separated backend build time from the independently repeated executable run.
+The retained source is the exact `TestSchedulerDrainsLongManagedContinuationAcrossTargets` fixture: sleep for 20 milliseconds, 1024 sequential latch signals, then sleep for 30 milliseconds, executed by the causal test harness. The public CLI generated and built the native test executable. A wrapper around the actual Go command separated backend build time from the independently repeated executable run. The gated test no longer uses this body: commit `0170be3` replaced it with nested functions that build in under a second, and the 1024-statement fixture remains at `f4c16b05afe931706f6afc58842345fb87cb743b:internal/compiler/causal_test.go` under the same test name.
 
 | Stage | Observed wall time | Result |
 | --- | ---: | --- |
