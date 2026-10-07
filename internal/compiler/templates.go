@@ -623,14 +623,14 @@ func (c *checker) instantiateDataFields(r *DataDeclaration, declared []Field, ar
 	return fields, true
 }
 
-func (c *checker) templateConstruct(e *Expr, env map[string]checkedExpression, inEffect bool) (checkedExpression, bool) {
+func (c *checker) templateConstruct(e *Expr, env localEnv, inEffect bool) (checkedExpression, bool) {
 	if e.Kind == "call" {
 		root := e.Left
 		for root != nil && root.Kind == "member" {
 			root = root.Left
 		}
 		if root != nil && root.Kind == "name" {
-			if _, local := env[root.Name]; local {
+			if root.binding != nil {
 				return checkedExpression{}, false
 			}
 		}

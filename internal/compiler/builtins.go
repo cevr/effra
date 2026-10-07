@@ -63,15 +63,20 @@ var builtinCallbacks = map[string]struct{ Parameter, Result string }{
 	"HttpHandler": {"HttpRequest", "HttpReply"},
 }
 
+// admitsHTTP reports whether the program refers to the global Http or
+// LiveHttp, as resolved by resolveBindings: a local binding of either name,
+// including a row parameter, is not a reference. The Http service, its
+// provider and its data form one contract admitted only on such a reference,
+// so other programs neither reserve its data names nor inspect it.
+func (p *Program) admitsHTTP() bool {
+	return p != nil && (p.references["Http"] || p.references["LiveHttp"])
+}
+
 // builtinServicesFor and builtinProvidersFor select the prelude one program
-// admits. The Http service, its provider and its data form one contract that
-// is admitted only when the program refers to the global Http or LiveHttp
-// (referencesGlobal: a local binding of either name is not a reference), so
-// other programs neither reserve its data names nor inspect it. Callback type
-// names stay reserved like other builtin type names.
+// admits. Callback type names stay reserved like other builtin type names.
 func builtinServicesFor(program *Program) []*Service {
 	services := builtins()
-	if program != nil && program.httpContract {
+	if program.admitsHTTP() {
 		return services
 	}
 	return slices.DeleteFunc(services, func(s *Service) bool { return s.Name == "Http" })
@@ -79,7 +84,7 @@ func builtinServicesFor(program *Program) []*Service {
 
 func builtinProvidersFor(program *Program) []*Provider {
 	providers := builtinProviders()
-	if program != nil && program.httpContract {
+	if program.admitsHTTP() {
 		return providers
 	}
 	return slices.DeleteFunc(providers, func(p *Provider) bool { return p.Service == "Http" })
@@ -97,7 +102,7 @@ const builtinDataSourceID = "builtin:http"
 // declarations, so a colliding source declaration diagnoses at its own span.
 // The declarations carry no source spans and never enter lexical tooling.
 func addBuiltinData(program *Program) {
-	if !program.httpContract {
+	if !program.admitsHTTP() {
 		return
 	}
 	for _, data := range append(append([]*DataDeclaration{}, program.Records...), program.Enums...) {

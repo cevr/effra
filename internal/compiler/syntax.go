@@ -62,6 +62,7 @@ type Param struct {
 	Extent     Span    `json:"-"`
 	typeID     TypeID
 	sourceType *sourceType
+	binding    *localBinding
 }
 
 // Field is a nominal declaration field. Type is kept as source text for
@@ -193,7 +194,7 @@ type LayerEntry struct {
 }
 type Program struct {
 	interfaceProducer   bool
-	httpContract        bool
+	references          map[string]bool
 	semantic            *checker
 	BundledTemplates    []*Record
 	BundledTypeBindings map[string]map[string]*Record
@@ -249,6 +250,7 @@ type Statement struct {
 	Span     Span
 	NameSpan Span `json:"-"`
 	Extent   Span `json:"-"`
+	binding  *localBinding
 }
 
 // FieldValue.Label is the explicit `name:` token. Shorthand fields and
@@ -290,6 +292,9 @@ type MatchArm struct {
 	Body     *Block
 	Span     Span
 	Extent   Span `json:"-"`
+	// binders holds one binder per bound name of the arm: the alternatives of
+	// a cell bind the same names, and the arm's body reads each name once.
+	binders map[string]*localBinding
 }
 
 // EachPattern visits every alternative of every cell in source order.
@@ -333,6 +338,9 @@ type Expr struct {
 	Executed         EvaluationRows `json:"-"`
 	Identity         string         `json:"-"`
 	ResolvedFunction *Function      `json:"-"`
+	// binding is the local binder a name or static layer provision resolves
+	// to; nil when it resolves globally.
+	binding *localBinding
 }
 
 func lex(source string) ([]token, []Comment, []Diagnostic) {
@@ -710,7 +718,6 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 		item := program.Items[len(program.Items)-1]
 		item.Extent = p.extent(item.Span)
 	}
-	program.httpContract = referencesGlobal(program, "Http", "LiveHttp")
 	return program, tokens, nil
 }
 func (p *parser) peek() token { return p.tokens[p.at] }

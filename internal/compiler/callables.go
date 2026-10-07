@@ -164,22 +164,26 @@ func (c *checker) sourceRowsKnown(labels []string, kind string) bool {
 // source spelling shared by unrelated functions. The finite solver admits one
 // variable per callback row and obtains its least bound from actual arguments.
 func (c *checker) functionRows(f *Function) map[string]RowParameter {
-	context := map[string]RowParameter{}
 	if c.rowDefinitions == nil {
 		c.rowDefinitions = map[string]RowParameter{}
 	}
+	declared := map[string]bool{}
 	for i := range f.RowParameters {
 		p := &f.RowParameters[i]
 		p.Declaration = f.Identity
 		p.ID = "row-parameter:" + f.Identity + ":" + p.Kind + ":" + p.Name
-		if _, duplicate := context[p.Name]; duplicate {
+		if declared[p.Name] {
 			c.diagnostic("EF125", "duplicate row parameter "+p.Name, p.Span)
 		}
+		declared[p.Name] = true
 		if f.Owner != "module" && f.Owner != "" {
 			c.diagnostic("EF125", "row parameters are supported on ordinary module functions", p.Span)
 		}
-		context[p.Name] = *p
 		c.rowDefinitions[p.ID] = *p
+	}
+	context := map[string]RowParameter{}
+	for name, p := range functionRowScope(f) {
+		context[name] = *p
 	}
 	return context
 }
@@ -362,14 +366,14 @@ func (c *checker) assignable(actual, expected TypeID, depth int) bool {
 // callableCall handles lexical values and record fields through their checked
 // contract. Named declarations and nominal service operations use the same
 // assignability relation at their existing call owner.
-func (c *checker) callableCall(e *Expr, env map[string]checkedExpression, inEffect bool) (checkedExpression, bool) {
+func (c *checker) callableCall(e *Expr, env localEnv, inEffect bool) (checkedExpression, bool) {
 	local := false
 	if e.Left.Kind == "name" {
-		_, local = env[e.Left.Name]
+		local = e.Left.binding != nil
 	}
 	if e.Left.Kind == "member" {
 		if e.Left.Left.Kind == "name" {
-			_, local = env[e.Left.Left.Name]
+			local = e.Left.Left.binding != nil
 		} else {
 			local = true
 		}

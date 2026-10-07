@@ -179,74 +179,51 @@ func (r *Result) Lint(strict bool) LintResult {
 			out.Suggestions++
 		}
 	}
-	type binding struct {
-		statement *Statement
-		used      bool
-	}
-	var locals []*binding
-	var block func(*Block, map[string]*binding)
-	var expr func(*Expr, map[string]*binding)
-	expr = func(e *Expr, env map[string]*binding) {
+	// Uses are the binders resolveBindings assigned to name expressions.
+	used := map[*localBinding]bool{}
+	var lazy []*Statement
+	var block func(*Block)
+	var expr func(*Expr)
+	expr = func(e *Expr) {
 		if e == nil {
 			return
 		}
-		if e.Kind == "name" && env[e.Name] != nil {
-			env[e.Name].used = true
+		if e.Kind == "name" && e.binding != nil {
+			used[e.binding] = true
 		}
 		if e.Kind == "provide" && !slices.Contains(e.Left.Type.Services, e.Name) {
 			add(1, "receiver does not require "+e.Name, e.Span)
 		}
-		forEachExprChild(e, func(child *Expr) {
-			expr(child, env)
-		})
+		forEachExprChild(e, expr)
 		for _, arm := range e.Arms {
-			branch := map[string]*binding{}
-			for name, local := range env {
-				branch[name] = local
-			}
-			arm.EachPattern(func(_ int, pattern *MatchPattern) {
-				for _, name := range pattern.Bindings {
-					if name != "_" {
-						branch[name] = &binding{used: false}
-					}
-				}
-			})
-			block(arm.Body, branch)
+			block(arm.Body)
 		}
-		block(e.Then, env)
-		block(e.Else, env)
+		block(e.Then)
+		block(e.Else)
 	}
-	block = func(b *Block, outer map[string]*binding) {
+	block = func(b *Block) {
 		if b == nil {
 			return
 		}
-		env := map[string]*binding{}
-		for name, local := range outer {
-			env[name] = local
-		}
 		for _, s := range b.Statements {
-			expr(s.Value, env)
-			expr(s.Payload, env)
-			if s.Kind == "let" {
-				local := &binding{statement: s}
-				env[s.Name] = local
-				if s.Name != "_" && s.Value.Type.Effect {
-					locals = append(locals, local)
-				}
+			expr(s.Value)
+			expr(s.Payload)
+			if s.Kind == "let" && s.Name != "_" && s.Value.Type.Effect {
+				lazy = append(lazy, s)
 			}
 		}
 	}
 	for _, f := range r.Program.Functions {
-		block(f.Body, nil)
+		block(f.Body)
 	}
 	for _, p := range r.Program.Providers {
 		for _, f := range p.Methods {
-			block(f.Body, nil)
+			block(f.Body)
 		}
 	}
-	for _, local := range locals {
-		if !local.used {
-			add(0, "lazy recipe "+local.statement.Name+" is never referenced", local.statement.Span)
+	for _, s := range lazy {
+		if !used[s.binding] {
+			add(0, "lazy recipe "+s.Name+" is never referenced", s.Span)
 		}
 	}
 	for _, imp := range r.Program.Imports {

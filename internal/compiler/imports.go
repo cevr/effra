@@ -325,7 +325,7 @@ func hostType(t types.Type) string {
 	return ""
 }
 
-func (c *checker) foreignCall(e *Expr, env map[string]checkedExpression, inEffect bool) bool {
+func (c *checker) foreignCall(e *Expr, env localEnv, inEffect bool) bool {
 	if e.Left.Kind != "member" || e.Left.Left.Kind != "name" {
 		return false
 	}
@@ -334,7 +334,7 @@ func (c *checker) foreignCall(e *Expr, env map[string]checkedExpression, inEffec
 		if imp.Alias != alias {
 			continue
 		}
-		if _, shadow := env[alias]; shadow {
+		if e.Left.Left.binding != nil {
 			c.diagnostic("EF103", "local shadows Go import "+alias, e.Span)
 			return true
 		}

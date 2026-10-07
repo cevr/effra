@@ -55,6 +55,8 @@ func TestHTTPListenRejectsHandlerShapesAndShadowedContracts(t *testing.T) {
 		{"shadowed record by row", `record HttpRequest {path:string} effect fn label()->bytes uses {Http} {run Http.text("x")} effect fn main()->void{void}`, "EF101"},
 		{"shadowed record by provider", `record HttpResponse {path:string} effect fn main()->void{let provider=LiveHttp; void}`, "EF101"},
 		{"shadowed record by outer use", `record HttpRequest {path:string} effect fn main()->void{let pending=Http.text("x"); let Http="local"; void}`, "EF101"},
+		{"shadowed record by another function's row", `record HttpRequest {path:string} fn wrap<Http: uses>(task: effect fn() -> string uses { Http }) -> void {void} effect fn label()->bytes uses {Http} {run Http.text("x")} effect fn main()->void{void}`, "EF101"},
+		{"shadowed record by a row of another kind", `record HttpRequest {path:string} fn wrap<Http: raises>(task: effect fn() -> string uses { Http }) -> void {void} effect fn main()->void{void}`, "EF101"},
 		{"shadowed callback", `record HttpHandler {path:string} effect fn main()->void{void}`, "EF101"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -67,8 +69,9 @@ func TestHTTPListenRejectsHandlerShapesAndShadowedContracts(t *testing.T) {
 }
 
 // Admission follows lexically resolved references: a local binding named Http
-// or LiveHttp is not a reference, so it neither reserves the builtin data
-// names nor emits any transport.
+// or LiveHttp, value or row, is not a reference, so it neither reserves the
+// builtin data names nor emits any transport. A row parameter binds throughout
+// its function, including explicit constructor types in its body.
 func TestHTTPContractIsAdmittedOnlyWhenReferenced(t *testing.T) {
 	for _, source := range []string{
 		`record HttpRequest {path:string} effect fn main()->string{let label="Http"; label}`,
@@ -79,6 +82,9 @@ effect fn main() -> string {
 }`,
 		`record HttpRequest {path:string} fn echo(LiveHttp:string)->string{LiveHttp} effect fn main()->string{echo("x")}`,
 		`record HttpRequest {path:string} enum Box {Item {Http: string}} fn open(box:Box)->string{match box {Box.Item {Http} => Http}} effect fn main()->string{open(Box.Item {Http: "x"})}`,
+		boxedRow("Http", "Box<string, effect fn() -> string uses { Http }>"),
+		boxedRow("Row", "Box<string, effect fn() -> string uses { Row }>"),
+		boxedRow("Http", "Box"),
 	} {
 		for _, target := range []string{"go", "js"} {
 			r := CompileFor(source, target)
@@ -126,6 +132,20 @@ func TestHTTPImplementationIsEmittedOnlyForCheckedProviderReferences(t *testing.
 			}
 		}
 	}
+}
+
+// boxedRow stores a row-polymorphic callback through a constructor written
+// with the given head inside the function that binds the row.
+func boxedRow(row, constructor string) string {
+	return `record HttpRequest { path: string }
+record Box<A: type, F: callable effect fn() -> A> { callback: F }
+fn wrap<` + row + `: uses>(task: effect fn() -> string uses { ` + row + ` }) -> void {
+    let boxed = ` + constructor + ` {
+        callback: task
+    }
+    void
+}
+effect fn main() -> void { void }`
 }
 
 func emitHTTPProgram(t *testing.T, r *Result, target string) string {

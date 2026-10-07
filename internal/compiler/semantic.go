@@ -2189,6 +2189,7 @@ func newChecker(program *Program, r *Result) *checker {
 		region:                  "invocation",
 	}
 	c.values = newCheckedValueArena(c)
+	resolveBindings(program)
 	addBuiltinData(program)
 	program.semantic = c
 	r.checkedSymbols = map[string]checkedSymbol{}
@@ -2525,11 +2526,7 @@ func (c *checker) prepareFunctionSummaries() {
 			}
 		}
 		deps := map[*Function]bool{}
-		locals := map[string]bool{}
-		for _, p := range caller.Params {
-			locals[p.Name] = true
-		}
-		collectFunctionDependencies(caller.Body, callerKnown, deps, locals)
+		collectFunctionDependencies(caller.Body, callerKnown, deps)
 		remaining[caller] = len(deps)
 		for callee := range deps {
 			dependents[callee] = append(dependents[callee], caller)
@@ -2612,33 +2609,26 @@ func (c *checker) prepareFunctionSummaries() {
 	c.suppressDiagnostics = previous
 }
 
-func collectFunctionDependencies(block *Block, known map[string]*Function, out map[*Function]bool, locals map[string]bool) {
+func collectFunctionDependencies(block *Block, known map[string]*Function, out map[*Function]bool) {
 	if block == nil {
 		return
 	}
-	bound := map[string]bool{}
-	for name, value := range locals {
-		bound[name] = value
-	}
 	for _, statement := range block.Statements {
-		collectFunctionDependenciesExpr(statement.Value, known, out, bound)
-		collectFunctionDependenciesExpr(statement.Payload, known, out, bound)
-		if statement.Kind == "let" {
-			bound[statement.Name] = true
-		}
+		collectFunctionDependenciesExpr(statement.Value, known, out)
+		collectFunctionDependenciesExpr(statement.Payload, known, out)
 	}
 }
 
-func collectFunctionDependenciesExpr(e *Expr, known map[string]*Function, out map[*Function]bool, locals map[string]bool) {
+func collectFunctionDependenciesExpr(e *Expr, known map[string]*Function, out map[*Function]bool) {
 	if e == nil {
 		return
 	}
-	if e.Kind == "name" && !locals[e.Name] {
+	if e.Kind == "name" && e.binding == nil {
 		if f := known[e.Name]; f != nil {
 			out[f] = true
 		}
 	}
-	if e.Kind == "member" && e.Left != nil && e.Left.Kind == "name" && !locals[e.Left.Name] {
+	if e.Kind == "member" && e.Left != nil && e.Left.Kind == "name" && e.Left.binding == nil {
 		if f := known[e.Left.Name+"."+e.Name]; f != nil {
 			out[f] = true
 		}
@@ -2647,22 +2637,13 @@ func collectFunctionDependenciesExpr(e *Expr, known map[string]*Function, out ma
 	// inspection, with the same child pointers in each view. Use the shared
 	// traversal seam so summary preparation remains linear in the syntax tree.
 	forEachExprChild(e, func(child *Expr) {
-		collectFunctionDependenciesExpr(child, known, out, locals)
+		collectFunctionDependenciesExpr(child, known, out)
 	})
 	for _, arm := range e.Arms {
-		bound := map[string]bool{}
-		for name, value := range locals {
-			bound[name] = value
-		}
-		arm.EachPattern(func(_ int, pattern *MatchPattern) {
-			for _, name := range pattern.Bindings {
-				bound[name] = true
-			}
-		})
-		collectFunctionDependencies(arm.Body, known, out, bound)
+		collectFunctionDependencies(arm.Body, known, out)
 	}
-	collectFunctionDependencies(e.Then, known, out, locals)
-	collectFunctionDependencies(e.Else, known, out, locals)
+	collectFunctionDependencies(e.Then, known, out)
+	collectFunctionDependencies(e.Else, known, out)
 }
 
 // providerSignature checks the explicit constructor boundary. Constructor
@@ -3773,14 +3754,14 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	previousRows := c.rowContext
 	c.rowContext = c.functionRows(f)
 	defer func() { c.rowContext = previousRows }()
-	env := map[string]checkedExpression{}
+	env := localEnv{}
 	for _, p := range locals {
 		parameter := c.checkedData(p.Type)
 		parameter.setOwnership(c.borrowedOwnershipID(parameter.valueID(), "parameter:"+p.Name))
 		if c.lexicalOwner != nil {
 			parameter = c.bindLocal("configuration", p.Name, p.Span, p.Extent, c.result.lexical.parameters[p.Span.Offset], parameter)
 		}
-		env[p.Name] = parameter
+		env[p.binding] = parameter
 	}
 	for _, p := range f.Params {
 		parameter := c.checkedDataID(p.typeID, nil, nil)
@@ -3792,7 +3773,7 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 		if c.lexicalOwner != nil {
 			parameter = c.bindLocal("parameter", p.Name, p.Span, p.Extent, c.result.lexical.parameters[p.Span.Offset], parameter)
 		}
-		env[p.Name] = parameter
+		env[p.binding] = parameter
 	}
 	c.reasons = []Contribution{}
 	previousFacts := c.recordFacts
@@ -3912,8 +3893,8 @@ func (c *checker) displayChecked(t checkedExpression) string {
 	}
 	return c.displayTypeID(t.resultID())
 }
-func clone(env map[string]checkedExpression) map[string]checkedExpression {
-	copy := map[string]checkedExpression{}
+func clone(env localEnv) localEnv {
+	copy := localEnv{}
 	for n, t := range env {
 		copy[n] = t.clone()
 	}
@@ -3950,7 +3931,7 @@ func sortedBindingNames(bindings map[string]string) []string {
 	slices.Sort(names)
 	return names
 }
-func (c *checker) payload(e *Expr, fields []Field, env map[string]checkedExpression, span Span) []OwnershipFact {
+func (c *checker) payload(e *Expr, fields []Field, env localEnv, span Span) []OwnershipFact {
 	declared := fieldsMap(fields)
 	seen := map[string]bool{}
 	ownership := []OwnershipFact{}
@@ -3996,7 +3977,7 @@ func (c *checker) addDeferredEvaluation(e ExpressionEvaluation, t checkedExpress
 	return c.unionEvaluationFacts(e, c.evaluation(t.failureRow(), t.serviceRow()))
 }
 
-func (c *checker) block(b *Block, env map[string]checkedExpression, effect bool) checkedExpression {
+func (c *checker) block(b *Block, env localEnv, effect bool) checkedExpression {
 	out := c.checkedData(voidTypeName)
 	env = clone(env)
 	terminated := false
@@ -4053,14 +4034,14 @@ func (c *checker) block(b *Block, env map[string]checkedExpression, effect bool)
 		}
 		out.evaluation = c.unionEvaluationFacts(out.evaluation, t.executed)
 		if s.Kind == "let" {
-			if _, exists := env[s.Name]; exists {
+			if s.binding.rebinds != nil {
 				c.diagnostic("EF101", "duplicate local "+s.Name, s.Span)
 			}
 			bound := t.clone()
 			if c.lexicalOwner != nil {
 				bound = c.bindLocal("let", s.Name, s.NameSpan, s.Extent, c.result.lexical.statements[s], bound)
 			}
-			env[s.Name] = bound
+			env[s.binding] = bound
 			previousEvaluation := out.evaluation
 			out = c.checkedData(voidTypeName)
 			out.evaluation = previousEvaluation
@@ -4080,7 +4061,7 @@ func (c *checker) block(b *Block, env map[string]checkedExpression, effect bool)
 // contribute to the enclosing computation. The rows are computed once by
 // expr and retained on the checked node; this accessor is deliberately a
 // projection rather than a second subtree walk.
-func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool) checkedExpression {
+func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	t := c.checkedData("invalid")
 	if e.constructorType != nil {
 		c.diagnostic("EF127", "explicit application syntax requires a data constructor", e.Span)
@@ -4095,7 +4076,12 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 	case "void":
 		t = c.checkedData(voidTypeName)
 	case "name":
-		if v, exists := env[e.Name]; exists {
+		if e.binding != nil {
+			v, bound := env[e.binding]
+			if !bound {
+				// The binder was rejected by its own diagnostic.
+				break
+			}
 			c.observeLocalUse(e, v)
 			t = v.clone()
 			// A local read observes a carried value contract; it does not replay
@@ -4179,7 +4165,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		serviceName := ""
 		if e.Left.Kind == "name" {
 			f = c.namedFunction(e.Left.Name)
-			if _, shadow := env[e.Left.Name]; shadow {
+			if e.Left.binding != nil {
 				c.diagnostic("EF103", "calling local values is not supported in this prototype", e.Span)
 				f = nil
 			}
@@ -4188,7 +4174,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			if key == "Files" || key == "Runtime" {
 				c.requireGo(e.Span, "native service "+key)
 			}
-			if _, shadow := env[key]; shadow {
+			if e.Left.Left.binding != nil {
 				c.diagnostic("EF103", "a local shadows service "+key, e.Span)
 			} else if imported := c.program.bundledFunction(e.Left); imported != nil {
 				f = imported
@@ -4342,7 +4328,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 		t.identity = application.ID
 	case "member":
 		if e.Left != nil && e.Left.Kind == "name" {
-			if _, shadow := env[e.Left.Name]; !shadow {
+			if e.Left.binding == nil {
 				if f := c.program.bundledFunction(e); f != nil {
 					if len(f.RowParameters) > 0 || len(f.TypeParameters) > 0 {
 						c.diagnostic("EF125", "row-polymorphic functions require direct application; first-class polymorphic values are unsupported", e.Span)
@@ -4639,7 +4625,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 	return t
 }
 
-func (c *checker) dataCall(e *Expr, env map[string]checkedExpression, inEffect bool) (checkedExpression, bool) {
+func (c *checker) dataCall(e *Expr, env localEnv, inEffect bool) (checkedExpression, bool) {
 	if e.Left == nil {
 		return checkedExpression{}, false
 	}
@@ -4746,7 +4732,7 @@ func (c *checker) dataCall(e *Expr, env map[string]checkedExpression, inEffect b
 	return result, true
 }
 
-func (c *checker) construct(e *Expr, env map[string]checkedExpression, inEffect bool) checkedExpression {
+func (c *checker) construct(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	if value, ok := c.templateConstruct(e, env, inEffect); ok {
 		return value
 	}
@@ -4893,11 +4879,11 @@ func (r *Result) Entry() error {
 	return nil
 }
 
-func (c *checker) fiberCall(e *Expr, env map[string]checkedExpression, inEffect bool) bool {
+func (c *checker) fiberCall(e *Expr, env localEnv, inEffect bool) bool {
 	if e.Left.Kind != "member" || e.Left.Left.Kind != "name" {
 		return false
 	}
-	inner, exists := env[e.Left.Left.Name]
+	inner, exists := env[e.Left.Left.binding]
 	if !exists || !c.isKind(inner, "fiber") {
 		return false
 	}

@@ -63,7 +63,7 @@ func (s matchPlanSubject) index(variant string) int {
 	return slices.Index(s.variants, variant)
 }
 
-func (c *checker) match(e *Expr, env map[string]checkedExpression, inEffect bool) checkedExpression {
+func (c *checker) match(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	plan := &matchPlan{}
 	subjectEvaluation := c.evaluation(emptyRowID, emptyRowID)
 	declared := []map[string]Variant{}
@@ -252,7 +252,7 @@ func (m *matchCoverage) unreachableAlternatives(arm *MatchArm, row []variantSet,
 // types; the bound value joins the alternatives' payload provenance. The
 // lexical binding is declared by the first alternative's token, lists every
 // later alternative's token as an occurrence and records the completed join.
-func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []map[string]Variant, env map[string]checkedExpression) []matchPlanBinding {
+func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []map[string]Variant, env localEnv) []matchPlanBinding {
 	var bindings []matchPlanBinding
 	// tokens holds each binding's declaring pattern and binder name spans,
 	// the first alternative's token first.
@@ -349,7 +349,7 @@ func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []ma
 			declaration := tokens[index]
 			binding.value = c.bindLocal("pattern", binding.name, declaration.spans[0], declaration.pattern.Extent, c.result.lexical.patterns[declaration.pattern], binding.value, declaration.spans[1:]...)
 		}
-		env[binding.name] = binding.value
+		env[arm.binders[binding.name]] = binding.value
 	}
 	return bindings
 }

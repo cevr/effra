@@ -510,7 +510,7 @@ func (c *checker) checkLayerProvider(entry *LayerEntry) *Provider {
 		}
 		previous := c.recordFacts
 		c.recordFacts = true
-		checked := c.expr(arg, map[string]checkedExpression{}, false)
+		checked := c.expr(arg, localEnv{}, false)
 		c.recordFacts = previous
 		if i < len(provider.Params) && (checked.isEffect() || !c.assignable(checked.valueID(), provider.Params[i].typeID, 0)) {
 			c.layerDiagnostic("EF106", "layer constructor argument must be "+provider.Params[i].Type, arg.Span)
@@ -594,13 +594,13 @@ func (r *Result) LayerInspection(name, file string) (map[string]any, error) {
 	return response, nil
 }
 
-func (c *checker) provideLayer(e *Expr, env map[string]checkedExpression, inEffect bool) checkedExpression {
+func (c *checker) provideLayer(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	program := c.expr(e.Left, env, inEffect)
 	if !program.isEffect() {
 		c.layerDiagnostic("EF105", "layer provision requires an Effect value", e.Span)
 		return program
 	}
-	if _, shadowed := env[e.Name]; shadowed {
+	if e.binding != nil {
 		c.layerDiagnostic("EF135", "static layer provision requires an unshadowed layer declaration", e.Span)
 		return program
 	}
