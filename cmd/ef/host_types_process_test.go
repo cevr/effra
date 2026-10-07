@@ -114,3 +114,56 @@ func TestHostTypeInspectionCLIAndMCPParity(t *testing.T) {
 		}
 	}
 }
+
+// An unknown effra.bindings.json key is refused when metadata loads, and CLI
+// check and MCP project.check report the same diagnostic.
+func TestBindingContractKeyDiagnosticsCLIAndMCPParity(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := t.TempDir()
+	for name, contents := range map[string]string{
+		"go.mod":              "module example.test/keys\n\ngo 1.27\n",
+		"keys.go":             "package keys\n\nfunc Fetch() string { return \"fetch\" }\n",
+		"effra.bindings.json": `{"example.test/keys.Fecth":{"cancellation":"unknown"}}`,
+		"main.ef":             "import go keys \"example.test/keys\"\neffect fn main() -> string {\n    run keys.Fetch().provide<Foreign>(Host)\n}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stdout, stderr, code := runTestCLI(t, binary, "check", filepath.Join(root, "main.ef"), "--target", "go")
+	if code == 0 {
+		t.Fatalf("CLI check accepted an unknown contract key: %s", stdout)
+	}
+	cli := readProcessJSON(t, stdout)
+	want := `effra.bindings.json key "example.test/keys.Fecth" matches no Go function or method; near: "example.test/keys.Fetch"`
+	diagnostics, _ := cli["diagnostics"].([]any)
+	if len(diagnostics) != 1 || diagnostics[0].(map[string]any)["code"] != "EF111" || diagnostics[0].(map[string]any)["message"] != want {
+		t.Fatalf("CLI contract key diagnostic: %v (stderr %s)", cli["diagnostics"], stderr)
+	}
+	var input bytes.Buffer
+	for _, message := range []map[string]any{
+		{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "contract-keys-test", "version": "1"}}},
+		{"jsonrpc": "2.0", "method": "notifications/initialized"},
+		{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": map[string]any{"name": "project.check", "arguments": map[string]any{"file": "main.ef", "target": "go"}}},
+	} {
+		if err := json.NewEncoder(&input).Encode(message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	command := exec.Command(binary, "mcp", root)
+	command.Stdin = &input
+	output, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := bytes.Split(bytes.TrimSpace(output), []byte{'\n'})
+	if len(lines) != 2 {
+		t.Fatalf("unexpected MCP response count %d", len(lines))
+	}
+	mcp := readProcessJSON(t, lines[1])["result"].(map[string]any)["structuredContent"].(map[string]any)
+	for _, key := range []string{"checked", "diagnostics", "revision"} {
+		if !reflect.DeepEqual(cli[key], mcp[key]) {
+			t.Fatalf("CLI/MCP %s mismatch:\n%v\n%v", key, cli[key], mcp[key])
+		}
+	}
+}

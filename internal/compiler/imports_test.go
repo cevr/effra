@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -127,6 +129,83 @@ func TestBindingMetadataRejectsUnknownFields(t *testing.T) {
 	r := CompileAt(`import go strings "strings" effect fn main() -> string {run strings.ToUpper("x").provide<Foreign>(Host)}`, "go", dir)
 	if r.Checked || !hasCode(r, "EF111") {
 		t.Fatalf("misspelled behavior assertion accepted: %+v", r.Diagnostics)
+	}
+}
+
+// Every effra.bindings.json key must name a declaration: a function or a
+// method's go/types full name, resolved in the package the key names, which
+// source need not import. An unknown key is refused when metadata loads, one
+// sorted diagnostic per key, with near misses from the same package.
+func TestBindingMetadataRejectsUnknownKeys(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, contents string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.test/keys\n\ngo 1.27\n")
+	write("keys.go", `package keys
+
+type Client struct{}
+
+func (c *Client) Lookup() string { return "lookup" }
+func (Client) Name() string     { return "name" }
+
+func Fetch() string { return "fetch" }
+
+type shared struct{}
+
+func (shared) Shared() string { return "shared" }
+
+type Wrapped struct{ shared }
+
+type Reader interface{ Read() string }
+
+type Box[T any] struct{}
+
+func (*Box[T]) Get() string { return "get" }
+`)
+	source := `import go keys "example.test/keys"
+effect fn main() -> string {
+    run keys.Fetch().provide<Foreign>(Host)
+}`
+	known := []string{
+		"example.test/keys.Fetch", "(*example.test/keys.Client).Lookup", "(example.test/keys.Client).Name",
+		"(example.test/keys.shared).Shared", "(example.test/keys.Reader).Read", "(*example.test/keys.Box[T]).Get",
+		"(error).Error", "strings.ToUpper",
+	}
+	contract := func(keys []string) string {
+		entries := make([]string, len(keys))
+		for i, key := range keys {
+			entries[i] = strconv.Quote(key) + `:{"cancellation":"unknown"}`
+		}
+		return "{" + strings.Join(entries, ",") + "}"
+	}
+	write("effra.bindings.json", contract(known))
+	if r := CompileAt(source, "go", dir); !r.Checked {
+		t.Fatalf("declared keys refused: %+v", r.Diagnostics)
+	}
+	write("effra.bindings.json", contract([]string{
+		"example.test/keys.Fecth", "(example.test/keys.Client).Lookup", "example.test/keys.Client",
+		"example.test/missing.Fetch", "Fetch", "(example.test/keys.Wrapped).Shared",
+	}))
+	r := CompileAt(source, "go", dir)
+	want := []string{
+		`effra.bindings.json key "(example.test/keys.Client).Lookup" matches no Go function or method; near: "(*example.test/keys.Client).Lookup"`,
+		`effra.bindings.json key "(example.test/keys.Wrapped).Shared" matches no Go function or method; near: "(example.test/keys.shared).Shared"`,
+		`effra.bindings.json key "Fetch" is not a go/types full name such as "path.Func" or "(*path.Type).Method"`,
+		`effra.bindings.json key "example.test/keys.Client" matches no Go function or method`,
+		`effra.bindings.json key "example.test/keys.Fecth" matches no Go function or method; near: "example.test/keys.Fetch"`,
+		`effra.bindings.json key "example.test/missing.Fetch" names package example.test/missing, which does not load: `,
+	}
+	if r.Checked || len(r.Diagnostics) != len(want) {
+		t.Fatalf("unknown keys: %+v", r.Diagnostics)
+	}
+	for i, diagnostic := range r.Diagnostics {
+		if diagnostic.Code != "EF111" || !strings.HasPrefix(diagnostic.Message, want[i]) || (!strings.HasSuffix(want[i], ": ") && diagnostic.Message != want[i]) {
+			t.Fatalf("diagnostic %d: %+v, want %q", i, diagnostic, want[i])
+		}
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"go/importer"
 	gotoken "go/token"
 	"go/types"
+	"hash"
 	"io"
 	"maps"
 	"os"
@@ -73,6 +74,7 @@ type listedPackage struct {
 	ImportPath, Export, Name string
 	Standard                 bool
 	Module                   *goModule
+	Error                    *struct{ Err string }
 }
 
 // generatedModulePath is the module of every generated Go program. Its main
@@ -178,11 +180,17 @@ func (r *Result) loadImports(dir string) {
 			modules[pkg.Module.Path] = pkg.Module
 		}
 	}
+	// exports maps a package to its export data. Contract-key checking adds
+	// the packages it lists beyond the import closure, so the loader reads it.
+	exports := make(map[string]string, len(listed))
+	for path, pkg := range listed {
+		exports[path] = pkg.Export
+	}
 	loader := importer.ForCompiler(gotoken.NewFileSet(), "gc", func(path string) (io.ReadCloser, error) {
-		if listed[path].Export == "" {
+		if exports[path] == "" {
 			return nil, fmt.Errorf("missing export data for %s", path)
 		}
-		return os.Open(listed[path].Export)
+		return os.Open(exports[path])
 	})
 	contracts, main, err := loadContracts(dir)
 	if err != nil {
@@ -246,6 +254,7 @@ func (r *Result) loadImports(dir string) {
 			}
 		}
 	}
+	r.Diagnostics = append(r.Diagnostics, checkContractKeys(dir, contracts, exports, loader, hash)...)
 	r.Revision = hex.EncodeToString(hash.Sum(nil))
 	for _, path := range slices.Sorted(maps.Keys(modules)) {
 		r.Program.Modules = append(r.Program.Modules, modules[path])
@@ -289,6 +298,200 @@ func loadContracts(dir string) (map[string]behavior, *goModule, error) {
 		}
 	}
 	return contracts, &main, nil
+}
+
+// checkContractKeys refuses every effra.bindings.json key that is not the
+// go/types full name of an exported function or method, as metadata loading
+// refuses an unknown field. A key resolves in the package it names, which
+// source need not import, so packages outside the import closure are listed
+// separately; their export data joins the semantic revision. Diagnostics are
+// sorted by key and name near misses from the same package.
+func checkContractKeys(dir string, contracts map[string]behavior, exports map[string]string, loader types.Importer, revision hash.Hash) []Diagnostic {
+	keys := slices.Sorted(maps.Keys(contracts))
+	packages := map[string]string{}
+	missing := map[string]bool{}
+	for _, key := range keys {
+		if path, ok := contractKeyPackage(key); ok {
+			packages[key] = path
+			if path != "" && exports[path] == "" {
+				missing[path] = true
+			}
+		}
+	}
+	failed := map[string]string{}
+	if len(missing) > 0 {
+		data, err := goCommand(dir, append([]string{"list", "-e", "-deps", "-export", "-json", "--"}, slices.Sorted(maps.Keys(missing))...)...)
+		if err != nil {
+			return []Diagnostic{{Code: "EF111", Message: err.Error()}}
+		}
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		for {
+			var pkg listedPackage
+			if err = decoder.Decode(&pkg); err == io.EOF {
+				break
+			} else if err != nil {
+				return []Diagnostic{{Code: "EF111", Message: err.Error()}}
+			}
+			if pkg.Error != nil {
+				failed[pkg.ImportPath] = strings.TrimSpace(pkg.Error.Err)
+			} else if exports[pkg.ImportPath] == "" {
+				exports[pkg.ImportPath] = pkg.Export
+			}
+		}
+	}
+	scopes := map[string]*types.Scope{"": types.Universe}
+	for _, path := range slices.Sorted(maps.Values(packages)) {
+		if _, loaded := scopes[path]; loaded || failed[path] != "" {
+			continue
+		}
+		pkg, err := loader.Import(path)
+		if err != nil {
+			failed[path] = err.Error()
+			continue
+		}
+		scopes[path] = pkg.Scope()
+		if archive, err := os.ReadFile(exports[path]); err == nil {
+			revision.Write([]byte(path))
+			revision.Write(archive)
+		}
+	}
+	var diagnostics []Diagnostic
+	for _, key := range keys {
+		path, ok := packages[key]
+		if !ok {
+			diagnostics = append(diagnostics, Diagnostic{Code: "EF111", Message: fmt.Sprintf("effra.bindings.json key %q is not a go/types full name such as %q or %q", key, "path.Func", "(*path.Type).Method")})
+			continue
+		}
+		scope := scopes[path]
+		if scope == nil {
+			diagnostics = append(diagnostics, Diagnostic{Code: "EF111", Message: fmt.Sprintf("effra.bindings.json key %q names package %s, which does not load: %s", key, path, failed[path])})
+			continue
+		}
+		declared := contractDeclarations(scope)
+		if declared[key] {
+			continue
+		}
+		message := fmt.Sprintf("effra.bindings.json key %q matches no Go function or method", key)
+		if near := contractNearMisses(key, scope, declared); len(near) > 0 {
+			quoted := make([]string, len(near))
+			for i, name := range near {
+				quoted[i] = strconv.Quote(name)
+			}
+			message += "; near: " + strings.Join(quoted, ", ")
+		}
+		diagnostics = append(diagnostics, Diagnostic{Code: "EF111", Message: message})
+	}
+	return diagnostics
+}
+
+// contractKeyPackage returns the package a full name belongs to: the text
+// before a function's last dot, or before a method receiver type's last dot
+// once its pointer and type parameters are removed. A receiver without a
+// package names the universe, as in (error).Error.
+func contractKeyPackage(key string) (string, bool) {
+	target := key
+	if strings.HasPrefix(key, "(") {
+		end := strings.LastIndex(key, ").")
+		if end < 0 || end+2 == len(key) {
+			return "", false
+		}
+		target = strings.TrimPrefix(key[1:end], "*")
+		if open := strings.IndexByte(target, '['); open >= 0 {
+			target = target[:open]
+		}
+		if target != "" && !strings.Contains(target, ".") {
+			return "", true
+		}
+	}
+	dot := strings.LastIndex(target, ".")
+	if dot <= 0 || dot == len(target)-1 {
+		return "", false
+	}
+	return target[:dot], true
+}
+
+// contractDeclarations is the set of full names a contract can key in one
+// scope: exported functions and exported methods, including methods declared
+// on unexported types that exported types promote.
+func contractDeclarations(scope *types.Scope) map[string]bool {
+	declared := map[string]bool{}
+	for _, name := range scope.Names() {
+		switch object := scope.Lookup(name).(type) {
+		case *types.Func:
+			if object.Exported() {
+				declared[object.FullName()] = true
+			}
+		case *types.TypeName:
+			named, _ := object.Type().(*types.Named)
+			if named == nil {
+				continue
+			}
+			for i := range named.NumMethods() {
+				if method := named.Method(i); method.Exported() {
+					declared[method.FullName()] = true
+				}
+			}
+			if iface, ok := named.Underlying().(*types.Interface); ok {
+				for i := range iface.NumExplicitMethods() {
+					if method := iface.ExplicitMethod(i); method.Exported() {
+						declared[method.FullName()] = true
+					}
+				}
+			}
+		}
+	}
+	return declared
+}
+
+// contractNearMisses lists at most three declarations a mistyped key likely
+// meant: the declaring method Go selects for the key's receiver and method
+// (a promoted method, or the other receiver form), then full names within
+// edit distance two.
+func contractNearMisses(key string, scope *types.Scope, declared map[string]bool) []string {
+	near := map[string]bool{}
+	if end := strings.LastIndex(key, ")."); strings.HasPrefix(key, "(") && end > 0 {
+		receiver := strings.TrimPrefix(key[1:end], "*")
+		if open := strings.IndexByte(receiver, '['); open >= 0 {
+			receiver = receiver[:open]
+		}
+		if object, ok := scope.Lookup(receiver[strings.LastIndex(receiver, ".")+1:]).(*types.TypeName); ok {
+			for _, t := range []types.Type{object.Type(), types.NewPointer(object.Type())} {
+				if selection := types.NewMethodSet(t).Lookup(nil, key[end+2:]); selection != nil {
+					if name := selection.Obj().(*types.Func).FullName(); declared[name] && name != key {
+						near[name] = true
+					}
+				}
+			}
+		}
+	}
+	for name := range declared {
+		if editDistance(key, name) <= 2 {
+			near[name] = true
+		}
+	}
+	names := slices.Sorted(maps.Keys(near))
+	return names[:min(len(names), 3)]
+}
+
+// editDistance is the Levenshtein distance between two strings, in bytes.
+func editDistance(a, b string) int {
+	previous := make([]int, len(b)+1)
+	for j := range previous {
+		previous[j] = j
+	}
+	for i := range len(a) {
+		current := make([]int, len(b)+1)
+		current[0] = i + 1
+		for j := range len(b) {
+			cost := 1
+			if a[i] == b[j] {
+				cost = 0
+			}
+			current[j+1] = min(previous[j+1]+1, current[j]+1, previous[j]+cost)
+		}
+		previous = current
+	}
+	return previous[len(b)]
 }
 
 // normalizeBinding admits one exported function from its native signature. A
