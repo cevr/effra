@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,23 +35,7 @@ effect fn test_advance_admits_unstarted_fork() -> void raises {AssertionFailed} 
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	goSource, application, err := emitGoApplication(r, GoGenerationTest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	goDir := t.TempDir()
-	if err = application.WriteRuntime(goDir); err != nil {
-		t.Fatal(err)
-	}
-	for name, contents := range map[string][]byte{
-		"go.mod":  []byte(r.ModuleFile()),
-		"main.go": []byte(goSource),
-	} {
-		if err = os.WriteFile(filepath.Join(goDir, name), contents, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	goOutput, err := runWithWatchdog(goDir, 15*time.Second, "go", "run", ".")
+	goOutput, err := runWithWatchdog(buildGeneratedGo(t, r, GoGenerationTest))
 	if err != nil || !strings.Contains(string(goOutput), `"passed":true`) {
 		t.Fatalf("generated Go explicit test providers: %v\n%s", err, goOutput)
 	}
@@ -63,20 +48,7 @@ effect fn test_advance_admits_unstarted_fork() -> void raises {AssertionFailed} 
 	if err != nil {
 		t.Fatal("Bun is required for generated scheduler tests")
 	}
-	root := filepath.Join("..", "..")
-	if err = os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	jsDir, err := os.MkdirTemp(filepath.Join(root, "dist"), "explicit-scheduler-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(jsDir) })
-	jsPath := filepath.Join(jsDir, "scheduler.tests.mjs")
-	if err = os.WriteFile(jsPath, []byte(jsSource), 0600); err != nil {
-		t.Fatal(err)
-	}
-	jsOutput, err := runWithWatchdog(jsDir, 15*time.Second, bun, jsPath)
+	jsOutput, err := runWithWatchdog(bun, writeGeneratedJS(t, "explicit-scheduler-", jsSource))
 	if err != nil || !strings.Contains(string(jsOutput), `"passed":true`) {
 		t.Fatalf("generated JS explicit test providers: %v\n%s", err, jsOutput)
 	}
@@ -91,23 +63,7 @@ func TestExplicitTestProvidersRejectLiveExecutionWithoutHarness(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
-	if err != nil {
-		t.Fatal(err)
-	}
-	goDir := t.TempDir()
-	if err = application.WriteRuntime(goDir); err != nil {
-		t.Fatal(err)
-	}
-	for name, contents := range map[string][]byte{
-		"go.mod":  []byte(r.ModuleFile()),
-		"main.go": []byte(goSource),
-	} {
-		if err = os.WriteFile(filepath.Join(goDir, name), contents, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	goOutput, err := runWithWatchdog(goDir, 15*time.Second, "go", "run", ".")
+	goOutput, err := runWithWatchdog(buildGeneratedGo(t, r, GoGenerationBuild))
 	if err == nil || !strings.Contains(string(goOutput), "test clock requires an active test scheduler") {
 		t.Fatalf("Go TestClock escaped its harness: %v\n%s", err, goOutput)
 	}
@@ -117,12 +73,40 @@ func TestExplicitTestProvidersRejectLiveExecutionWithoutHarness(t *testing.T) {
 	}
 }
 
-// Keep the generated continuation large enough to exercise scheduler handoffs
-// while bounding Go 1.27's compile time for one very large straight-line body.
+// jsHarnessYieldBudget is the per-turn operation budget of the JS test
+// harness's Effect scheduler (prelude/test-harness.mjs shouldYield). A managed
+// fiber that exceeds it is preempted and requeued on the harness dispatcher.
+const jsHarnessYieldBudget = 2048
+
+// A continuation is long when it outlives one scheduler turn, and one
+// adjustment must drain it before committing its target.
+//   - JS: the fiber crosses the harness yield budget and is requeued
+//     mid-continuation; adjustment must run the requeued work. Every run spends
+//     at least one fiber operation, so the budget is crossed under any lowering.
+//   - Go: a managed fiber keeps its turn while it runs; adjustment must wait out
+//     that active window rather than race it. With the wait removed, 4096
+//     signals still passed in about one run in three; 65536 failed all 60.
+//
+// The signals are spread over small nested functions. As one straight-line
+// body, 1024 signals already took the Go build about a minute.
 func TestSchedulerDrainsLongManagedContinuationAcrossTargets(t *testing.T) {
-	source := `effect fn longContinuation(latch: Latch) -> void uses {Clock, Sync} {
+	const fanOut = 16
+	source := `effect fn signal16(latch: Latch) -> void uses {Sync} {
+` + strings.Repeat("    run Sync.signal(latch)\n", fanOut) + `}
+
+effect fn signal256(latch: Latch) -> void uses {Sync} {
+` + strings.Repeat("    run signal16(latch)\n", fanOut) + `}
+
+effect fn signal4096(latch: Latch) -> void uses {Sync} {
+` + strings.Repeat("    run signal256(latch)\n", fanOut) + `}
+
+effect fn signal65536(latch: Latch) -> void uses {Sync} {
+` + strings.Repeat("    run signal4096(latch)\n", fanOut) + `}
+
+effect fn longContinuation(latch: Latch) -> void uses {Clock, Sync} {
     run Clock.sleep(20)
-` + strings.Repeat("    run Sync.signal(latch)\n", 1024) + `    run Clock.sleep(30)
+    run signal65536(latch)
+    run Clock.sleep(30)
 }
 
 effect fn test_scheduler_drains_long_continuation() -> void raises {AssertionFailed} uses {Assert, Clock, Scheduler, Sync} {
@@ -139,29 +123,7 @@ effect fn test_scheduler_drains_long_continuation() -> void raises {AssertionFai
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	goSource, application, err := emitGoApplication(r, GoGenerationTest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	goDir := t.TempDir()
-	if err = application.WriteRuntime(goDir); err != nil {
-		t.Fatal(err)
-	}
-	for name, contents := range map[string][]byte{
-		"go.mod":  []byte(r.ModuleFile()),
-		"main.go": []byte(goSource),
-	} {
-		if err = os.WriteFile(filepath.Join(goDir, name), contents, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Compiling this deliberately long body is slow and load-dependent; bound
-	// it separately so the watchdog below measures only the managed run.
-	binary := filepath.Join(goDir, "scheduler-probe")
-	if output, err := runWithWatchdog(goDir, 5*time.Minute, "go", "build", "-o", binary, "."); err != nil {
-		t.Fatalf("generated Go scheduler test did not build: %v\n%s", err, output)
-	}
-	goOutput, err := runWithWatchdog(goDir, 60*time.Second, binary)
+	goOutput, err := runWithWatchdog(buildGeneratedGo(t, r, GoGenerationTest))
 	if err != nil || !strings.Contains(string(goOutput), `"passed":true`) {
 		t.Fatalf("generated Go scheduler test: %v\n%s", err, goOutput)
 	}
@@ -170,24 +132,14 @@ effect fn test_scheduler_drains_long_continuation() -> void raises {AssertionFai
 	if err != nil {
 		t.Fatal(err)
 	}
+	if budget := fmt.Sprintf("fiber.currentOpCount>=%d", jsHarnessYieldBudget); !strings.Contains(jsSource, budget) {
+		t.Fatalf("generated JS tests no longer yield at %q; re-derive the continuation length", budget)
+	}
 	bun, err := exec.LookPath("bun")
 	if err != nil {
 		t.Fatal("Bun is required for generated scheduler tests")
 	}
-	root := filepath.Join("..", "..")
-	if err = os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	jsDir, err := os.MkdirTemp(filepath.Join(root, "dist"), "causal-scheduler-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(jsDir) })
-	jsPath := filepath.Join(jsDir, "scheduler.tests.mjs")
-	if err = os.WriteFile(jsPath, []byte(jsSource), 0600); err != nil {
-		t.Fatal(err)
-	}
-	jsOutput, err := runWithWatchdog(jsDir, 30*time.Second, bun, jsPath)
+	jsOutput, err := runWithWatchdog(bun, writeGeneratedJS(t, "causal-scheduler-", jsSource))
 	if err != nil || !strings.Contains(string(jsOutput), `"passed":true`) {
 		t.Fatalf("generated JS scheduler test: %v\n%s", err, jsOutput)
 	}
@@ -217,20 +169,7 @@ effect fn main() -> string {
 			if !r.Checked {
 				t.Fatal(r.Diagnostics)
 			}
-			goSource, application, err := emitGoApplication(r, GoGenerationBuild)
-			if err != nil {
-				t.Fatal(err)
-			}
-			goDir := t.TempDir()
-			if err = application.WriteRuntime(goDir); err != nil {
-				t.Fatal(err)
-			}
-			for fileName, contents := range map[string][]byte{"go.mod": []byte(r.ModuleFile()), "main.go": []byte(goSource)} {
-				if err = os.WriteFile(filepath.Join(goDir, fileName), contents, 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			goOutput, err := runWithWatchdog(goDir, 10*time.Second, "go", "run", ".")
+			goOutput, err := runWithWatchdog(buildGeneratedGo(t, r, GoGenerationBuild))
 			if err != nil || string(goOutput) != "timed out\n" {
 				t.Fatalf("generated Go custom scheduler: %v\n%s", err, goOutput)
 			}
@@ -261,20 +200,7 @@ effect fn main() -> string {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
-	if err != nil {
-		t.Fatal(err)
-	}
-	goDir := t.TempDir()
-	if err = application.WriteRuntime(goDir); err != nil {
-		t.Fatal(err)
-	}
-	for name, contents := range map[string][]byte{"go.mod": []byte(r.ModuleFile()), "main.go": []byte(goSource)} {
-		if err = os.WriteFile(filepath.Join(goDir, name), contents, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	goOutput, err := runWithWatchdog(goDir, 10*time.Second, "go", "run", ".")
+	goOutput, err := runWithWatchdog(buildGeneratedGo(t, r, GoGenerationBuild))
 	if err == nil || !strings.Contains(string(goOutput), "invalid millisecond duration") || strings.Contains(string(goOutput), "timed out") {
 		t.Fatalf("generated Go scheduler defect was rewritten: %v\n%s", err, goOutput)
 	}
@@ -285,12 +211,70 @@ let timerStarted;const started=new Promise(resolve=>timerStarted=resolve);const 
 	}
 }
 
-func runWithWatchdog(dir string, timeout time.Duration, command string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+// generatedRunWatchdog bounds one execution of an already-built generated
+// program. A healthy program exits within milliseconds on Go and within about
+// a second on Bun, module loading included, even on a saturated host; a
+// deadlocked one never exits. The bound only separates the two, so no
+// compilation runs under it.
+const generatedRunWatchdog = 15 * time.Second
+
+// buildGeneratedGo writes r's Go application into a fresh module and builds
+// its executable.
+func buildGeneratedGo(t *testing.T, r *Result, mode GoGenerationMode) string {
+	t.Helper()
+	goSource, application, err := emitGoApplication(r, mode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err = application.WriteRuntime(dir); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string][]byte{"go.mod": r.ModuleFile(), "main.go": []byte(goSource)} {
+		if err = os.WriteFile(filepath.Join(dir, name), contents, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return buildGoModule(t, dir)
+}
+
+// buildGoModule builds the generated module in dir and returns its executable.
+// The build is bounded by the go test timeout rather than the run watchdog:
+// its duration belongs to the host and the Go toolchain, not to the behavior
+// the run observes.
+func buildGoModule(t *testing.T, dir string) string {
+	t.Helper()
+	binary := filepath.Join(dir, "program")
+	if output, err := runGoCommand(dir, "build", "-o", binary, "."); err != nil {
+		t.Fatalf("generated Go did not build: %v\n%s", err, output)
+	}
+	return binary
+}
+
+// writeGeneratedJS places a generated test module under dist/, where Bun
+// resolves the pinned effect package.
+func writeGeneratedJS(t *testing.T, prefix, source string) string {
+	t.Helper()
+	root := filepath.Join("..", "..")
+	if err := os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(filepath.Join(root, "dist"), prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	path := filepath.Join(dir, "scheduler.tests.mjs")
+	if err = os.WriteFile(path, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func runWithWatchdog(command string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), generatedRunWatchdog)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, command, args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
+	output, err := exec.CommandContext(ctx, command, args...).CombinedOutput()
 	if ctx.Err() != nil {
 		return output, ctx.Err()
 	}

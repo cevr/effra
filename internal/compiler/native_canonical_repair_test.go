@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestFiberHandleIsNotAnOrdinaryResultArgument(t *testing.T) {
@@ -103,7 +102,7 @@ effect fn main() -> string raises {A, B} {
 					t.Fatal(err)
 				}
 			}
-			goOutput, err := runWithWatchdog(goDir, 15*time.Second, "go", "run", ".")
+			goOutput, err := runWithWatchdog(buildGoModule(t, goDir))
 			if err != nil || string(goOutput) != "hello\n" {
 				t.Fatalf("generated Go fiber branch: %v\n%s", err, goOutput)
 			}
@@ -254,9 +253,7 @@ effect fn main() -> void raises {IoError} {
 					t.Fatal(err)
 				}
 			}
-			if output, err := runWithWatchdog(goDir, 15*time.Second, "go", "build", "."); err != nil {
-				t.Fatalf("generated Go Handler %s build: %v\n%s", tc.name, err, output)
-			}
+			buildGoModule(t, goDir)
 		})
 	}
 }
@@ -291,7 +288,7 @@ effect fn main() -> string raises {A} {
 			t.Fatal(err)
 		}
 	}
-	output, err := runWithWatchdog(goDir, 15*time.Second, "go", "run", ".")
+	output, err := runWithWatchdog(buildGoModule(t, goDir))
 	if err != nil || string(output) != "ok\n" {
 		t.Fatalf("generated Go if condition: %v\n%s", err, output)
 	}
@@ -330,7 +327,7 @@ effect fn main() -> string {
 			t.Fatal(err)
 		}
 	}
-	output, err := runWithWatchdog(goDir, 15*time.Second, "go", "run", ".")
+	output, err := runWithWatchdog(buildGoModule(t, goDir))
 	if err != nil || string(output) != "caught\n" {
 		t.Fatalf("generated Go typed if recovery: %v\n%s", err, output)
 	}
