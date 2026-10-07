@@ -19,7 +19,16 @@ impl Prefixed(prefix: string) for Greeting uses {Names} {
   prefix + name
  }
 }
+effect fn idle() -> string { "idle" }
+effect fn cancelled() -> void {
+ scope {
+  let child = fork idle()
+  run child.interrupt()
+ }
+}
 effect fn main() -> string {
+ // The Go probe forks and interrupts the provided program itself.
+ let probeCancellation = cancelled
  let greeting = run Prefixed("A: ").provide<Names>(NamesA)
  run Greeting.hello("42").provide<Names>(NamesB).provide<Greeting>(greeting)
 }
@@ -54,8 +63,7 @@ func TestProviderCaptureAgreesAcrossGoAndJS(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	// The Go probe forks and interrupts the provided program itself.
-	goSource, application, err := emitGoApplication(r, GoGenerationBuild, hostHelper("fork"), hostHelper("fiber.interrupt"))
+	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}

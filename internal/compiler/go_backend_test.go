@@ -31,7 +31,13 @@ effect fn nested() -> string {
 effect fn bottom() -> string raises {Missing, Broken} {
  if true { fail Missing } else { fail Broken }
 }
-effect fn main() -> string raises {Broken} { unused() run recovered("42") }
+effect fn main() -> string raises {Broken} {
+ unused()
+ // The Go probe below calls nested and bottom directly.
+ let probeNested = nested
+ let probeBottom = bottom
+ run recovered("42")
+}
 `
 
 func TestGoBackendConformance(t *testing.T) {
@@ -39,13 +45,11 @@ func TestGoBackendConformance(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	// The Go probe below calls nested and bottom directly.
-	probeRoots := []applicationHostRoot{hostFunction("nested"), hostFunction("bottom")}
-	source, application, err := emitGoApplication(r, GoGenerationBuild, probeRoots...)
+	source, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, _, _ := emitGoApplication(r, GoGenerationBuild, probeRoots...)
+	again, _, _ := emitGoApplication(r, GoGenerationBuild)
 	if source != again {
 		t.Fatal("nondeterministic Go emission")
 	}

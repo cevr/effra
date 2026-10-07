@@ -17,22 +17,14 @@ import (
 )
 
 // emitGoApplication lowers one native entry mode and returns its generated
-// main with the application whose plan selects the runtime to write. Host
-// roots declare the generated declarations a Go probe calls directly.
-func emitGoApplication(r *Result, mode GoGenerationMode, hostRoots ...applicationHostRoot) (string, *GoApplication, error) {
-	application, err := r.goApplication(mode, hostRoots...)
+// main with the application whose plan selects the runtime to write. A Go
+// probe calls only declarations its fixture's source roots retain.
+func emitGoApplication(r *Result, mode GoGenerationMode) (string, *GoApplication, error) {
+	application, err := r.GoApplication(mode)
 	if err != nil {
 		return "", nil, err
 	}
 	return string(application.Main), application, nil
-}
-
-func hostFunction(name string) applicationHostRoot {
-	return applicationHostRoot{kind: RequiresFunction, name: name}
-}
-
-func hostHelper(name string) applicationHostRoot {
-	return applicationHostRoot{kind: RequiresHelper, name: name}
 }
 
 // emittedGoDeclarations lists the generated file's top-level declaration

@@ -147,12 +147,14 @@ func TestBundledJSExecution(t *testing.T) {
 func TestBundledEmissionNamespaceCannotCollideWithUserNames(t *testing.T) {
 	baseline := Compile(bundledGreeting)
 	name := baseline.Program.BundledFunctions[0].EmissionName
-	source := bundledGreeting + "\nfn " + name + "() -> string { \"user\" }\n"
+	// main takes the colliding user function as a value, so both
+	// declarations are emitted side by side.
+	source := strings.Replace(bundledGreeting, "effect fn main() -> string {", "effect fn main() -> string { let user = "+name+";", 1) + "\nfn " + name + "() -> string { \"user\" }\n"
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	goSource, _, err := emitGoApplication(r, GoGenerationBuild, hostFunction(name))
+	goSource, _, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil || strings.Count(goSource, "func efFunction_"+name+"(") != 1 || !strings.Contains(goSource, "func "+baseline.Program.BundledFunctions[0].goEmissionName()) {
 		t.Fatalf("user/bundle native names collided: %v", err)
 	}

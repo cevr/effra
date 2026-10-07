@@ -35,6 +35,9 @@ effect fn failWithPayload() -> string raises {Invalid} { fail Invalid { message:
 effect fn main() -> string raises {Invalid} {
  let user = User { id: "u1", name: "Ada" }
  let state = RunState.Running { runId: "42" }
+ // Host probes call these failure paths directly.
+ let probeFailure = failWithPayload
+ let probeInterpret = interpret
  if user.name == "Ada" { label(state) } else { "wrong user" }
 }`
 
@@ -239,7 +242,7 @@ func TestClosedDataRunsOnBothBackends(t *testing.T) {
 	if !strings.Contains(output, "closed-data: passed") {
 		t.Fatal(output)
 	}
-	goSource, application, err := emitGoApplication(r, GoGenerationBuild, hostFunction("failWithPayload"), hostFunction("interpret"))
+	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}

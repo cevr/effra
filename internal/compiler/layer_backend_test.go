@@ -15,7 +15,11 @@ effect fn names() -> string uses {Accounts,Invoice} {
 }
 layer Open { Accounts=AccountsLive }
 effect fn borrowed() -> string uses {Database} { run Accounts.name().provide(Open) }
-effect fn main() -> string { run names().provide(TestApp) }
+effect fn main() -> string {
+ // The Go and JS probes run borrowed directly.
+ let probeBorrowed = borrowed
+ run names().provide(TestApp)
+}
 `
 
 func TestLayerSourceProvisionExecutesSharedReplacementAndBorrowedInputAcrossTargets(t *testing.T) {
@@ -23,7 +27,7 @@ func TestLayerSourceProvisionExecutesSharedReplacementAndBorrowedInputAcrossTarg
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	source, application, err := emitGoApplication(r, GoGenerationBuild, hostFunction("borrowed"))
+	source, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}

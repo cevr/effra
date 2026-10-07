@@ -250,11 +250,7 @@ type GoApplication struct {
 // GoApplication plans and lowers one native entry mode. Plan refusals,
 // including EF136 exhaustion, are returned unchanged and nothing is emitted.
 func (r *Result) GoApplication(mode GoGenerationMode) (*GoApplication, error) {
-	return r.goApplication(mode)
-}
-
-func (r *Result) goApplication(mode GoGenerationMode, hostRoots ...applicationHostRoot) (*GoApplication, error) {
-	plan, err := r.applicationPlan(mode, maxApplicationPlanWork, hostRoots...)
+	plan, err := r.ApplicationPlan(mode)
 	if err != nil {
 		return nil, err
 	}

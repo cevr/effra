@@ -24,7 +24,12 @@ effect fn unobserved() -> void raises {Bad} uses {Gate} {
 }
 effect fn timed() -> void raises {Timeout} uses {Gate, Scheduler} {run worker().timeout(20)}
 effect fn recovered() -> void uses {Gate} {run timed().provide<Scheduler>(LiveScheduler).catch<Timeout>(void)}
-effect fn main() -> void {void}
+effect fn main() -> void {
+ // The Go and Effect probes run these programs directly.
+ let probeOwned = owned
+ let probeUnobserved = unobserved
+ let probeRecovered = recovered
+}
 `
 
 func TestLifecycleConformanceAcrossGoAndEffect(t *testing.T) {
@@ -32,7 +37,7 @@ func TestLifecycleConformanceAcrossGoAndEffect(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	code, application, err := emitGoApplication(r, GoGenerationBuild, hostFunction("owned"), hostFunction("unobserved"), hostFunction("recovered"))
+	code, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -211,14 +211,6 @@ func (r *Result) ApplicationPlan(mode GoGenerationMode) (*ApplicationPlan, error
 	return r.applicationPlan(mode, maxApplicationPlanWork)
 }
 
-// applicationHostRoot names one checked declaration that Go host code calls
-// directly, outside the generated entry. There is no native host export
-// surface yet, so only in-package probes of generated code declare them.
-type applicationHostRoot struct {
-	kind ApplicationRequirementKind
-	name string
-}
-
 // LibrarySurface roots a JavaScript library module at its exported
 // surface. A library is not an application: it has no entry or harness, and
 // its roots never widen an entry closure. It shares the planner, so library
@@ -236,7 +228,7 @@ func (r *Result) LibraryPlan() (*ApplicationPlan, error) {
 	return planner.finish()
 }
 
-func (r *Result) applicationPlan(mode GoGenerationMode, limit int, hostRoots ...applicationHostRoot) (*ApplicationPlan, error) {
+func (r *Result) applicationPlan(mode GoGenerationMode, limit int) (*ApplicationPlan, error) {
 	if r == nil || !r.Checked || r.Program == nil || r.Program.semantic == nil {
 		return nil, fmt.Errorf("application plans require checked source")
 	}
@@ -261,9 +253,6 @@ func (r *Result) applicationPlan(mode GoGenerationMode, limit int, hostRoots ...
 		for _, name := range testHarnessProviders {
 			planner.provider(r.checkedProviders[name], "", "test-harness")
 		}
-	}
-	for _, root := range hostRoots {
-		planner.hostRoot(root)
 	}
 	planner.runtimeModule(rt.RuntimeModuleCore, "", "native-entry")
 	return planner.finish()
@@ -406,17 +395,6 @@ func (p *applicationPlanner) librarySurface() {
 	}
 	for _, provider := range p.r.Program.Providers {
 		p.provider(provider, "", "export")
-	}
-}
-
-func (p *applicationPlanner) hostRoot(root applicationHostRoot) {
-	switch root.kind {
-	case RequiresFunction:
-		p.root(p.r.Find(root.name), "host")
-	case RequiresHelper:
-		p.helper(root.name, "")
-	default:
-		p.err = fmt.Errorf("application host root kind %s is unsupported", root.kind)
 	}
 }
 
