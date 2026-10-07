@@ -10,7 +10,7 @@ import (
 
 // This source boundary protects ordinary named callback composition. The base
 // compiler rejects the function-type grammar and cannot call local values;
-// existing Handler tests cover only a special HTTP shape, not this contract.
+// HTTP callback tests cover only the builtin transport shape, not this contract.
 func TestOrdinaryPureCallbackComposition(t *testing.T) {
 	source := `
 record State { name: string }

@@ -18,8 +18,6 @@ func builtins() []*Service {
 		return &Function{Name: name, Return: ret, Params: params, Effect: true, Errors: failures}
 	}
 	p := func(name, typ string) Param { return Param{Name: name, Type: typ} }
-	serve := method("serve", voidTypeName, []Param{p("address", "string"), p("handler", "Handler")}, "IoError")
-	serve.CallbackPolicies = []CallbackPolicy{{Parameter: 1, Kind: "typed-failure-response", PropagateRequirements: true}}
 	listen := method("listen", voidTypeName, []Param{p("address", "string"), p("limits", "HttpLimits"), p("handler", "HttpHandler")}, "IoError")
 	listen.CallbackPolicies = []CallbackPolicy{{Parameter: 2, Kind: "typed-failure-response", PropagateRequirements: true}}
 	return []*Service{
@@ -32,7 +30,7 @@ func builtins() []*Service {
 		{Name: "Env", Methods: []*Function{method("get", "string", []Param{p("name", "string")})}},
 		{Name: "Runtime", Methods: []*Function{method("inspect", "string", nil)}},
 		{Name: "Foreign"},
-		{Name: "Http", Methods: []*Function{serve, listen, method("text", "bytes", []Param{p("text", "string")})}},
+		{Name: "Http", Methods: []*Function{listen, method("text", "bytes", []Param{p("text", "string")})}},
 	}
 }
 func builtinProviders() []*Provider {
@@ -59,7 +57,6 @@ func builtinErrors() []string { return []string{"IoError", "Timeout", "GoError",
 // operation's typed-failure-response policy accepts any effectful callable
 // with exactly that signature and records the callable's own rows.
 var builtinCallbacks = map[string]struct{ Parameter, Result string }{
-	"Handler":     {"string", "string"},
 	"HttpHandler": {"HttpRequest", "HttpReply"},
 }
 

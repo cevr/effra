@@ -22,11 +22,25 @@ import (
 	"effra.local/prototype/internal/compiler"
 )
 
-const httpApplicationSource = `effect fn route(path: string) -> string {
-    "served " + path
+const httpApplicationSource = `effect fn route(request: HttpRequest) -> HttpReply uses { Http } {
+    let body = run Http.text("served " + request.path)
+    HttpReply.Respond {
+        response: HttpResponse {
+            status: 200,
+            contentType: "text/plain; charset=utf-8",
+            body: body
+        }
+    }
 }
 effect fn main() -> void raises { IoError } {
-    run Http.serve("127.0.0.1:0", route).provide<Http>(LiveHttp)
+    let limits = HttpLimits {
+        maxBodyBytes: 0,
+        readHeaderMillis: 5000,
+        readBodyMillis: 5000,
+        idleMillis: 5000,
+        maxActive: 64
+    }
+    run Http.listen("127.0.0.1:0", limits, route).provide<Http>(LiveHttp)
 }
 `
 

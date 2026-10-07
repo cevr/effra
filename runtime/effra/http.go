@@ -13,44 +13,6 @@ import (
 	"time"
 )
 
-// rawHTTPTimeout bounds the raw transport's header reads, idle connections
-// and, once shutdown has joined every request scope, its response writes. It
-// is the JS raw transport's bound.
-const rawHTTPTimeout = 5 * time.Second
-
-// ServeHTTP owns the listener and waits for every request's managed cleanup.
-// onListen exposes the bound address (including an OS-selected port). It is
-// the raw path-to-text transport control: no request limits, plain text
-// responses, and the managed transport's ordered shutdown. A request that
-// arrives once shutdown has begun runs no handler and fails like a cancelled
-// one.
-func ServeHTTP(address string, handler func(string) Effect[string], onListen func(string)) Effect[Unit] {
-	return serveManaged(address, &http.Server{ReadHeaderTimeout: rawHTTPTimeout, IdleTimeout: rawHTTPTimeout}, func(server context.Context) http.Handler {
-		scopes := newRequestScopes(server)
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var exit Exit[string]
-			admitted := scopes.enter()
-			if admitted {
-				exit = func() Exit[string] {
-					defer scopes.leave()
-					return runRequest(server, r, handler(r.URL.Path))
-				}()
-			}
-			scopes.publish(http.NewResponseController(w), rawHTTPTimeout, func() {
-				status, body := http.StatusOK, exit.Value
-				if !admitted || exit.IsFailure() {
-					status, body = http.StatusInternalServerError, "Internal Server Error\n"
-					w.Header().Set("X-Content-Type-Options", "nosniff")
-				}
-				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-				w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-				w.WriteHeader(status)
-				_, _ = io.WriteString(w, body)
-			})
-		})
-	}, onListen)
-}
-
 // HTTPRequest is one admitted request with its complete buffered body. Path
 // is the exact request-target path as received, without query or decoding.
 // ContentType is empty when the request carries no Content-Type header.

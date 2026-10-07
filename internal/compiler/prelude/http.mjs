@@ -167,22 +167,6 @@ const __ef_http_serve = (address, timeouts, onRequest) => Effect.gen(function* (
   }), () => shutdown);
 });
 
-// The raw path-to-text transport control.
-const __ef_http_serve_text = (address, handler) => __ef_http_serve(address, { readHeaderMillis: 5000, idleMillis: 5000 }, (req, res, transport) => {
-  let path;
-  try { path = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); } catch { __ef_http_status(res, 400, true); return; }
-  req.resume();
-  transport.exchange(res);
-  transport.run(res, handler(path), exit => {
-    const failed = Exit.isFailure(exit);
-    const body = Buffer.from(failed ? 'Internal Server Error\n' : String(exit.value));
-    const headers = { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Length': String(body.length) };
-    if (failed) headers['X-Content-Type-Options'] = 'nosniff';
-    res.writeHead(failed ? 500 : 200, headers);
-    res.end(body);
-  });
-});
-
 const __ef_http_listen = (address, source, handler) => Effect.suspend(() => {
   let limits;
   try { limits = __ef_http_limits(source); } catch (error) { return Effect.die(error); }
@@ -234,7 +218,6 @@ const __ef_http_reply = reply => {
   return undefined;
 };
 const __ef_provider_LiveHttp = {
-  serve: (address, handler) => __ef_http_serve_text(address, handler),
   listen: (address, limits, handler) => __ef_http_listen(address, limits, handler),
   text: text => Effect.sync(() => new TextEncoder().encode(text)),
 };

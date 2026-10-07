@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	rt "effra.local/prototype/runtime/effra"
 )
 
 const httpTransportRouteSource = `error Missing
@@ -131,6 +133,44 @@ func TestHTTPImplementationIsEmittedOnlyForCheckedProviderReferences(t *testing.
 				buildGeneratedGo(t, r, GoGenerationBuild)
 			}
 		}
+	}
+}
+
+// Http.listen is the only builtin HTTP server operation: the retired raw
+// path-to-text serve and its Handler shorthand are unknown on every target,
+// and neither emission nor the runtime retains an adapter for them.
+func TestHTTPServeIsRetired(t *testing.T) {
+	for _, target := range []string{"go", "js"} {
+		retired := CompileFor(`effect fn route(path:string)->string{path} effect fn main()->void raises {IoError}{run Http.serve("127.0.0.1:0",route).provide<Http>(LiveHttp)}`, target)
+		if retired.Checked || !hasCode(retired, "EF102") {
+			t.Fatalf("%s: retired Http.serve was admitted: %+v", target, retired.Diagnostics)
+		}
+		if r := CompileFor(`record Handler {path:string} effect fn main()->void{let pending=Http.text("x"); void}`, target); !r.Checked {
+			t.Fatalf("%s: Handler is still a reserved builtin name: %+v", target, r.Diagnostics)
+		}
+		r := CompileFor(httpTransportRouteSource+`effect fn main()->void raises {IoError}{run Http.listen("127.0.0.1:0",limits(),route).provide<Users>(Memory).provide<Http>(LiveHttp)}`, target)
+		if !r.Checked {
+			t.Fatalf("%s: %+v", target, r.Diagnostics)
+		}
+		code := emitHTTPProgram(t, r, target)
+		for _, adapter := range []string{"m_serve", "serve:", "er.ServeHTTP(", "__ef_http_serve_text"} {
+			if strings.Contains(code, adapter) {
+				t.Fatalf("%s: emission retains the raw adapter %q", target, adapter)
+			}
+		}
+	}
+	for name, source := range rt.Sources() {
+		if strings.Contains(string(source), "func ServeHTTP(") || strings.Contains(string(source), "rawHTTPTimeout") {
+			t.Fatalf("runtime %s retains the raw transport", name)
+		}
+	}
+	minimal := Compile(`effect fn main()->string{"ok"}`)
+	plan, err := minimal.ApplicationPlan(GoGenerationBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(plan.RuntimeModules(), rt.RuntimeModuleHTTP) {
+		t.Fatalf("a program without Http selects the HTTP runtime: %v", plan.RuntimeModules())
 	}
 }
 
