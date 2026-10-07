@@ -2,10 +2,11 @@ package compiler
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +79,10 @@ func TestExplicitTestProvidersRejectLiveExecutionWithoutHarness(t *testing.T) {
 // fiber that exceeds it is preempted and requeued on the harness dispatcher.
 const jsHarnessYieldBudget = 2048
 
+// jsYieldBudget finds the harness's yield comparison independently of the
+// names around it.
+var jsYieldBudget = regexp.MustCompile(`\.currentOpCount>=(\d+)`)
+
 // A continuation is long when it outlives one scheduler turn, and one
 // adjustment must drain it before committing its target.
 //   - JS: the fiber crosses the harness yield budget and is requeued
@@ -132,8 +137,8 @@ effect fn test_scheduler_drains_long_continuation() -> void raises {AssertionFai
 	if err != nil {
 		t.Fatal(err)
 	}
-	if budget := fmt.Sprintf("fiber.currentOpCount>=%d", jsHarnessYieldBudget); !strings.Contains(jsSource, budget) {
-		t.Fatalf("generated JS tests no longer yield at %q; re-derive the continuation length", budget)
+	if budgets := jsYieldBudget.FindAllStringSubmatch(jsSource, -1); len(budgets) != 1 || budgets[0][1] != strconv.Itoa(jsHarnessYieldBudget) {
+		t.Fatalf("generated JS tests no longer yield at %d operations (found %q); re-derive the continuation length", jsHarnessYieldBudget, budgets)
 	}
 	bun, err := exec.LookPath("bun")
 	if err != nil {
