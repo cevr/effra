@@ -268,7 +268,18 @@ fn runner(execute: fn(fn() -> void) -> void) -> Runner<void> { Runner<void> { ru
 fn runWith(selected: Runner<void>, callback: fn() -> void) -> void { selected.run(callback) }
 fn factory(make: fn() -> fn() -> void) -> Factory<void> { Factory<void> { make: make } }
 fn produce(selected: Factory<void>) -> fn() -> void { selected.make() }
-effect fn main() -> void { void }
+effect fn main() -> void {
+ // The Go and JavaScript probes call these functions directly.
+ let probeHold = hold
+ let probeRehold = rehold
+ let probeRelease = release
+ let probeHook = hook
+ let probeUnhook = unhook
+ let probeRunner = runner
+ let probeRunWith = runWith
+ let probeFactory = factory
+ let probeProduce = produce
+}
 `
 
 const voidGoAdapterProbe = `package main
@@ -359,8 +370,7 @@ func TestVoidGoCallableLayoutAdaptersCaptureOnceAndInvokeLazily(t *testing.T) {
 	if !r.Checked {
 		t.Fatalf("adapter source rejected: %+v", r.Diagnostics)
 	}
-	// The Go probe calls these functions directly; main does not reach them.
-	generated, application, err := emitGoApplication(r, GoGenerationBuild, hostFunction("hold"), hostFunction("rehold"), hostFunction("release"), hostFunction("hook"), hostFunction("unhook"), hostFunction("runner"), hostFunction("runWith"), hostFunction("factory"), hostFunction("produce"))
+	generated, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +422,15 @@ fn call(e: Envelope<void>) -> Call<fn() -> void, void> { e.call }
 fn action(e: Envelope<void>) -> Action<fn() -> void, void> { e.action }
 fn perform(a: Action<fn() -> void, void>) -> void { match a { Action.Some { operation } => operation(); Action.Idle => void } }
 fn fire(e: Envelope<void>) -> void { e.call.operation() }
-effect fn main() -> void { void }
+effect fn main() -> void {
+ // The Go and JavaScript probes call these functions directly.
+ let probeEnvelop = envelop
+ let probeReenvelop = reenvelop
+ let probeCall = call
+ let probeAction = action
+ let probePerform = perform
+ let probeFire = fire
+}
 `
 
 const voidGoNestedApplicationProbe = `package main
@@ -454,8 +472,7 @@ func TestVoidGoNestedApplicationAdaptersPreserveIdentityAndCounts(t *testing.T) 
 	if !r.Checked {
 		t.Fatalf("nested application source rejected: %+v", r.Diagnostics)
 	}
-	// The Go probe calls these functions directly; main does not reach them.
-	generated, application, err := emitGoApplication(r, GoGenerationBuild, hostFunction("envelop"), hostFunction("reenvelop"), hostFunction("call"), hostFunction("action"), hostFunction("perform"), hostFunction("fire"))
+	generated, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
