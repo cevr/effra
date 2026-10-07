@@ -156,3 +156,33 @@ func labelledProbeCall(r *Result) *Expr {
 	}
 	return nil
 }
+
+// A label selects the same binding its parameter declaration does: a
+// function parameter or, for a provider, a configuration parameter.
+func TestArgumentLabelsSelectTheParameterBinding(t *testing.T) {
+	source := callArgumentDeclarations + `effect fn probe() -> string { let c = card(body: "b", title: "t") let pairs = run Prefixed(suffix: ">", prefix: "<") run Pairs.join(c.title, c.body).provide<Pairs>(pairs) }
+`
+	r := Compile(source)
+	if !r.Checked {
+		t.Fatalf("source was rejected: %+v", r.Diagnostics)
+	}
+	for _, test := range []struct{ label, declaration, kind string }{
+		{`card(body:`, `body: string) -> Card`, "parameter"},
+		{`Prefixed(suffix:`, `suffix: string) for`, "configuration"},
+	} {
+		label := strings.Index(source, test.label) + strings.Index(test.label, "(") + 1
+		declaration := strings.Index(source, test.declaration)
+		selected, err := r.QueryType(TypeSelection{Offset: &label})
+		if err != nil {
+			t.Fatal(err)
+		}
+		declared, err := r.QueryType(TypeSelection{Offset: &declaration})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, want := selected.Selection.Target, declared.Selection.Target
+		if got == nil || want == nil || got.Kind != test.kind || want.Kind != test.kind || got.Identity != want.Identity || got.Span != want.Span {
+			t.Fatalf("%s label target %+v, want the declaration binding %+v", test.label, got, want)
+		}
+	}
+}

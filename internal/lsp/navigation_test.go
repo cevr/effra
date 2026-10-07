@@ -256,25 +256,30 @@ func TestNavigationAnswersSignatureOnlyParameters(t *testing.T) {
 
 func TestNavigationResolvesArgumentLabelsToParameters(t *testing.T) {
 	uri := "file:///tmp/effra-labels.ef"
-	source := "service Pairs { effect fn join(left: string, right: string) -> string }\nfn card(title: string, body: string) -> string { title + body }\neffect fn caller() -> string uses { Pairs } { let c = card(body: \"b\", title: \"t\") run Pairs.join(right: c, left: c) }\n"
+	source := "service Pairs { effect fn join(left: string, right: string) -> string }\nimpl Prefixed(prefix: string, suffix: string) for Pairs { effect fn join(left: string, right: string) -> string { prefix + left + right + suffix } }\nfn card(title: string, body: string) -> string { title + body }\neffect fn caller() -> string uses { Pairs } { let c = card(body: \"b\", title: \"t\") run Pairs.join(right: c, left: c) }\neffect fn configured() -> string { let pairs = run Prefixed(suffix: \">\", prefix: \"<\") run Pairs.join(\"l\", \"r\").provide<Pairs>(pairs) }\n"
 	label := at(t, source, "card(body:", "body")
 	operation := at(t, source, "join(right:", "right")
+	configuration := at(t, source, "Prefixed(suffix:", "suffix")
 	messages, err := runSession(t, initialize(), initialized(), open(uri, source, 1),
 		pointAt(uri, "textDocument/hover", "label", source, label),
 		pointAt(uri, "textDocument/definition", "label-definition", source, label),
 		pointAt(uri, "textDocument/hover", "operation", source, operation),
 		pointAt(uri, "textDocument/definition", "operation-definition", source, operation),
+		pointAt(uri, "textDocument/hover", "configuration", source, configuration),
+		pointAt(uri, "textDocument/definition", "configuration-definition", source, configuration),
 		shutdown(), call("exit", nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	byID := responses(t, messages)
-	for id, want := range map[string]string{"label": "parameter body: string", "operation": "parameter right: string"} {
+	// A provider's configuration parameter is its own binding kind.
+	for id, want := range map[string]string{"label": "parameter body: string", "operation": "parameter right: string", "configuration": "configuration suffix: string"} {
 		if got := hoverText(t, byID[id]); got != want {
 			t.Fatalf("%s hover %q, want %q", id, got, want)
 		}
 	}
 	sameRange(t, "label", byID["label"]["result"].(map[string]any)["range"], editorRange(source, label, len("body")))
 	sameRange(t, "label-definition", byID["label-definition"]["result"].(map[string]any)["range"], editorRange(source, at(t, source, "body: string", "body"), len("body")))
-	sameRange(t, "operation-definition", byID["operation-definition"]["result"].(map[string]any)["range"], editorRange(source, at(t, source, "right: string", "right"), len("right")))
+	sameRange(t, "operation-definition", byID["operation-definition"]["result"].(map[string]any)["range"], editorRange(source, at(t, source, "right: string) -> string }", "right"), len("right")))
+	sameRange(t, "configuration-definition", byID["configuration-definition"]["result"].(map[string]any)["range"], editorRange(source, at(t, source, "suffix: string", "suffix"), len("suffix")))
 }

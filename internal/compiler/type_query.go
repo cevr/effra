@@ -355,7 +355,9 @@ func (r *Result) declarationTarget(t lexicalTarget) (*DeclarationTarget, *Declar
 			}
 			_, original = facts.functions[f]
 		} else if p := t.provider; p != nil {
+			// A provider's parameters bind as configuration in its methods.
 			params, target.Owner, original = p.Params, p.Name, facts.items[p] != nil
+			target.Kind = "configuration"
 		}
 		index := slices.IndexFunc(params, func(p Param) bool { return p.Name == t.parameter })
 		if index < 0 {
@@ -366,7 +368,7 @@ func (r *Result) declarationTarget(t lexicalTarget) (*DeclarationTarget, *Declar
 		ref := c.identityRef(parameter.typeID)
 		target.Type = &ref
 		if original {
-			target.Identity = fmt.Sprintf("binding:parameter:%d", parameter.Span.Offset)
+			target.Identity = fmt.Sprintf("binding:%s:%d", target.Kind, parameter.Span.Offset)
 		}
 		located(original, source, module, parameter.Span, parameter.Extent)
 	case t.function != nil:
