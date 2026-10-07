@@ -46,6 +46,9 @@ type parser struct {
 	at          int
 	depth       int
 	noConstruct int
+	// subjectList is true when the innermost protected control header is a
+	// match subject list, whose commas delimit constructor subjects.
+	subjectList bool
 	types       map[string]*sourceType
 }
 type Param struct {
@@ -1054,7 +1057,10 @@ func (p *parser) expr(min int) *Expr {
 	case start.text == "if":
 		e.Kind = "if"
 		p.noConstruct++
+		subjectList := p.subjectList
+		p.subjectList = false
 		e.Left = p.expr(0)
+		p.subjectList = subjectList
 		p.noConstruct--
 		e.Then = p.block()
 		p.expect("else")
@@ -1064,10 +1070,13 @@ func (p *parser) expr(min int) *Expr {
 		// Subjects are the ordered Args of the match, so every shared child
 		// traversal observes them once and in evaluation order.
 		p.noConstruct++
+		subjectList := p.subjectList
+		p.subjectList = true
 		e.Args = append(e.Args, p.expr(0))
 		for p.accept(",") {
 			e.Args = append(e.Args, p.expr(0))
 		}
+		p.subjectList = subjectList
 		p.noConstruct--
 		p.expect("{")
 		for !p.accept("}") {
@@ -1263,9 +1272,9 @@ func (p *parser) constructorBrace() bool {
 	// constructor has a field colon immediately after its first identifier.
 	if p.tokens[p.at+1].text == "}" {
 		// Empty constructors need one token of context: a control-body brace
-		// follows the constructor, while an empty if/match body is followed by
-		// `else` or the enclosing delimiter.
-		return p.at+2 < len(p.tokens) && p.tokens[p.at+2].text == "{"
+		// or subject comma follows the constructor, while an empty if/match
+		// body is followed by `else` or the enclosing delimiter.
+		return p.constructorFollows(p.at + 2)
 	}
 	if p.at+2 >= len(p.tokens) {
 		return false
@@ -1274,11 +1283,12 @@ func (p *parser) constructorBrace() bool {
 		return true
 	}
 	// A shorthand payload has the form `Constructor { value }`. During a
-	// control expression, the following arm/body brace disambiguates it from
-	// the control block itself; ordinary expressions remain unambiguous because
-	// constructors are enabled outside that protected parser region.
+	// control expression, the following arm/body brace or subject comma
+	// disambiguates it from the control block itself; ordinary expressions
+	// remain unambiguous because constructors are enabled outside that
+	// protected parser region.
 	if p.tokens[p.at+1].kind == "name" && p.tokens[p.at+2].text == "}" {
-		return p.noConstruct == 0 || (p.at+3 < len(p.tokens) && p.tokens[p.at+3].text == "{")
+		return p.noConstruct == 0 || p.constructorFollows(p.at+3)
 	}
 	if p.tokens[p.at+1].kind != "name" || (p.tokens[p.at+2].text != "," && p.tokens[p.at+2].text != ";") {
 		return false
@@ -1296,13 +1306,30 @@ func (p *parser) constructorBrace() bool {
 			return false
 		}
 		if p.tokens[index].text == "}" {
-			return p.noConstruct == 0 || (index+1 < len(p.tokens) && p.tokens[index+1].text == "{")
+			return p.noConstruct == 0 || p.constructorFollows(index+1)
 		}
 		if p.tokens[index].text != "," && p.tokens[index].text != ";" {
 			return false
 		}
 		index++
 	}
+}
+
+// constructorFollows reports whether the token after a candidate payload's
+// closing brace can only follow a constructor in a control header: the
+// control body's own brace, or a comma delimiting match subjects. A control
+// body is never followed by a subject comma; its arms or else come first.
+func (p *parser) constructorFollows(index int) bool {
+	if index >= len(p.tokens) {
+		return false
+	}
+	switch p.tokens[index].text {
+	case "{":
+		return true
+	case ",":
+		return p.subjectList
+	}
+	return false
 }
 
 // patternCell parses one subject's alternatives: `A.X { x } | A.Y { x }`.

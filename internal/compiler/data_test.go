@@ -537,3 +537,47 @@ fn g() -> string { match (Light.Red {}) { Light.Red => "r"; Light.Green => "g" }
 		t.Fatal("delimited constructor in a control header refused", r.Diagnostics)
 	}
 }
+
+func TestConstructorSubjectsBeforeSubjectComma(t *testing.T) {
+	// A subject comma follows only a constructor payload, never a control
+	// body, so empty and shorthand payloads need no parentheses there.
+	source := `enum Bit { Zero; One }
+enum Item { Value { x: i64 }; Pair { x: i64, y: i64 } }
+fn pick() -> string {
+ match Bit.Zero {}, Bit.One {} {
+  Bit.Zero, Bit.Zero | Bit.One => "zero"
+  Bit.One, Bit.Zero | Bit.One => "one"
+ }
+}
+fn single(x: i64) -> string {
+ match Item.Value { x }, Bit.One {} {
+  Item.Value { x: n } | Item.Pair { x: n }, Bit.Zero | Bit.One => if n == x { "x" } else { "other" }
+ }
+}
+fn pair(x: i64, y: i64) -> string {
+ match Bit.One {}, Item.Pair { x, y }, Bit.Zero {} {
+  Bit.Zero | Bit.One, Item.Value { x: n } | Item.Pair { x: n }, Bit.Zero | Bit.One => if n == x { "x" } else { "other" }
+ }
+}
+fn guarded(flag: bool, x: Bit, y: Bit) -> string {
+ match if flag { x } else { y }, x {
+  Bit.Zero | Bit.One, Bit.Zero | Bit.One => if flag { "flag" } else { "plain" }
+ }
+}
+effect fn main() -> string { pick() + ";" + single(1) + ";" + pair(2, 3) + ";" + guarded(true, Bit.Zero {}, Bit.One {}) }`
+	runGenericDataNative(t, source, "zero;x;x;flag\n")
+	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != "zero;x;x;flag\n" {
+		t.Fatalf("JS constructor subjects: %q", output)
+	}
+	first, err := FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := FormatSource(first.Text)
+	if err != nil || second.Changed || second.Text != first.Text {
+		t.Fatalf("formatting is not idempotent: %v\n%s\n---\n%s", err, first.Text, second.Text)
+	}
+	if r := Compile(first.Text); !r.Checked {
+		t.Fatalf("formatted constructor subjects no longer check: %+v\n%s", r.Diagnostics, first.Text)
+	}
+}
