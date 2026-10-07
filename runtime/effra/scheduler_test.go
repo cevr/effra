@@ -107,6 +107,61 @@ func TestTestSchedulerAdvancesSequentialSleepAtIntermediateDeadlines(t *testing.
 	}
 }
 
+// A woken managed continuation that holds its turn without waiting keeps
+// Adjust from selecting the next deadline. The hold is a raw channel receive,
+// so the active window stays open until the test releases it rather than for
+// however long the continuation happens to run.
+func TestTestSchedulerWaitsForHeldManagedTurnBeforeAdvancing(t *testing.T) {
+	scheduler := NewTestScheduler()
+	woke := make(chan struct{})
+	release := make(chan struct{})
+	second := make(chan int64, 1)
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+			if out := Invoke(fc, Sleep(20)); out.IsFailure() {
+				return out
+			}
+			close(woke)
+			<-release
+			out := Invoke(fc, Sleep(30))
+			second <- scheduler.Now()
+			return out
+		})
+	}()
+	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		t.Fatalf("first registration: %v", err)
+	}
+	adjusted := make(chan error, 1)
+	go func() { adjusted <- scheduler.Adjust(50) }()
+	<-woke
+	select {
+	case err := <-adjusted:
+		t.Fatalf("adjust committed while a managed fiber held its turn: err=%v now=%d", err, scheduler.Now())
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case err := <-adjusted:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("adjust did not return after the held turn was released")
+	}
+	select {
+	case point := <-second:
+		if point != 50 {
+			t.Fatalf("second sleep resumed at %d, want 50", point)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("second sleep did not resume")
+	}
+	if out := <-done; out.IsFailure() {
+		t.Fatalf("held continuation failed: %+v", out)
+	}
+}
+
 func TestTestSchedulerWaitsForLatchContinuationBeforeAdvancing(t *testing.T) {
 	scheduler := NewTestScheduler()
 	latch := NewLatch()
