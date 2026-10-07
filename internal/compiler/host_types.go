@@ -137,10 +137,84 @@ func admitHostType(t types.Type) (hostType, error) {
 			return hostType{}, err
 		}
 		return hostType{native: types.NewMap(key.native, element.native), nullable: true}, nil
+	case *types.Interface:
+		// An unnamed interface (including any) is admitted when generated code
+		// can spell every method it requires.
+		if t.Empty() {
+			// The empty interface is spelled any, so its display round-trips
+			// into a source annotation.
+			return hostType{native: hostUniverseAnnotations["any"], nullable: true}, nil
+		}
+		if !hostSpellable(t, map[types.Type]bool{}) {
+			return hostType{}, fmt.Errorf("interface %s mentions a type generated code cannot name", types.TypeString(t, hostPathQualifier))
+		}
+		return hostType{native: t, nullable: true}, nil
 	case *types.TypeParam:
 		return hostType{}, fmt.Errorf("generic host type %s is unsupported", t.Obj().Name())
 	}
 	return hostType{}, fmt.Errorf("unsupported host type form %s", types.TypeString(t, hostPathQualifier))
+}
+
+// hostSpellable reports whether generated code outside the declaring
+// packages can name a native type exactly.
+func hostSpellable(t types.Type, visiting map[types.Type]bool) bool {
+	t = types.Unalias(t)
+	if visiting[t] {
+		return true
+	}
+	visiting[t] = true
+	switch t := t.(type) {
+	case *types.Basic:
+		return t.Kind() != types.UnsafePointer && t.Info()&types.IsUntyped == 0
+	case *types.Named:
+		obj := t.Obj()
+		if obj.Pkg() == nil {
+			return obj.Name() == "error"
+		}
+		return obj.Exported() && hostPackageImportable(obj.Pkg()) && t.TypeArgs().Len() == 0 && t.TypeParams().Len() == 0
+	case *types.Pointer:
+		return hostSpellable(t.Elem(), visiting)
+	case *types.Slice:
+		return hostSpellable(t.Elem(), visiting)
+	case *types.Array:
+		return hostSpellable(t.Elem(), visiting)
+	case *types.Chan:
+		return hostSpellable(t.Elem(), visiting)
+	case *types.Map:
+		return hostSpellable(t.Key(), visiting) && hostSpellable(t.Elem(), visiting)
+	case *types.Signature:
+		if t.TypeParams().Len() > 0 {
+			return false
+		}
+		for _, tuple := range []*types.Tuple{t.Params(), t.Results()} {
+			for i := 0; i < tuple.Len(); i++ {
+				if !hostSpellable(tuple.At(i).Type(), visiting) {
+					return false
+				}
+			}
+		}
+		return true
+	case *types.Struct:
+		for i := 0; i < t.NumFields(); i++ {
+			if !t.Field(i).Exported() || !hostSpellable(t.Field(i).Type(), visiting) {
+				return false
+			}
+		}
+		return true
+	case *types.Interface:
+		for i := 0; i < t.NumExplicitMethods(); i++ {
+			if !t.ExplicitMethod(i).Exported() || !hostSpellable(t.ExplicitMethod(i).Type(), visiting) {
+				return false
+			}
+		}
+		for i := 0; i < t.NumEmbeddeds(); i++ {
+			if !hostSpellable(t.EmbeddedType(i), visiting) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // hostNullable reports whether a native representation has a nil value.
@@ -311,8 +385,18 @@ func (c *checker) hostBinding(b Binding) (hostBindingTypes, bool) {
 	return result, valid
 }
 
+// hostUniverseAnnotations are the predeclared Go types a Go-importing program
+// can annotate by their Go names. Source records, enums and errors of the same
+// name take precedence; a program without Go imports has none of them.
+var hostUniverseAnnotations = map[string]types.Type{
+	"error":   types.Universe.Lookup("error").Type(),
+	"any":     types.Universe.Lookup("any").Type(),
+	"int":     types.Typ[types.Int],
+	"uintptr": types.Typ[types.Uintptr],
+}
+
 // hostAnnotation resolves an alias-qualified source annotation to an exported
-// type of a directly imported package.
+// type of a directly imported package, or a predeclared Go type by name.
 func (c *checker) hostAnnotation(name string) TypeID {
 	if c.program == nil || c.program.host == nil {
 		return invalidTypeID
@@ -320,17 +404,93 @@ func (c *checker) hostAnnotation(name string) TypeID {
 	if id, ok := c.hostState().annotations[name]; ok {
 		return id
 	}
-	declaration := c.program.host.types[name]
-	if declaration == nil {
+	var native types.Type
+	if declaration := c.program.host.types[name]; declaration != nil {
+		native = declaration.Type()
+	} else if universe, ok := hostUniverseAnnotations[name]; ok {
+		native = universe
+	} else {
 		return invalidTypeID
 	}
-	admitted, err := admitHostType(declaration.Type())
+	admitted, err := admitHostType(native)
 	if err != nil {
 		return invalidTypeID
 	}
 	id := c.hostTypeID(admitted)
 	if id != invalidTypeID {
 		c.hostState().annotations[name] = id
+	}
+	return id
+}
+
+// hostNative returns the native Go type an admitted value has at a Go call
+// boundary: a host node's own type, or the exact representation of an Effra
+// primitive.
+func (c *checker) hostNative(id TypeID) (types.Type, bool) {
+	if c.host != nil {
+		if native, ok := c.host.native[id]; ok {
+			return native, true
+		}
+	}
+	node := c.node(id)
+	if node == nil || node.Kind != "primitive" {
+		return nil, false
+	}
+	switch node.Name {
+	case "string":
+		return types.Typ[types.String], true
+	case "bool":
+		return types.Typ[types.Bool], true
+	case "i64":
+		return types.Typ[types.Int64], true
+	case "bytes":
+		return types.NewSlice(types.Typ[types.Uint8]), true
+	}
+	return nil, false
+}
+
+// sourceHostType admits a native pointer, slice or map annotation. Element
+// spellings resolve through the ordinary annotation owner, and the composed
+// native type passes the same admission rule as an imported signature.
+func (c *checker) sourceHostType(t *sourceType) TypeID {
+	if c.program == nil || c.program.host == nil || len(t.HostArguments) != len(t.HostArgumentTypes) {
+		return invalidTypeID
+	}
+	elements := make([]types.Type, len(t.HostArguments))
+	for i, name := range t.HostArguments {
+		id := invalidTypeID
+		if t.HostArgumentTypes[i] != nil {
+			id = c.sourceCallable(t.HostArgumentTypes[i])
+		} else {
+			id = c.canonicalRef(typeRef(name))
+		}
+		native, ok := c.hostNative(id)
+		if !ok {
+			return invalidTypeID
+		}
+		elements[i] = native
+	}
+	var native types.Type
+	switch t.HostForm {
+	case "pointer":
+		native = types.NewPointer(elements[0])
+	case "slice":
+		native = types.NewSlice(elements[0])
+	case "map":
+		if !types.Comparable(elements[0]) {
+			return invalidTypeID
+		}
+		native = types.NewMap(elements[0], elements[1])
+	default:
+		return invalidTypeID
+	}
+	admitted, err := admitHostType(native)
+	if err != nil {
+		return invalidTypeID
+	}
+	id := c.hostTypeID(admitted)
+	if id != invalidTypeID {
+		t.owner, t.hostID = c, id
 	}
 	return id
 }
@@ -409,7 +569,10 @@ func hostPackageAlias(path string) string {
 // hostAnnotationGoName is the generated alias of an alias-qualified source
 // annotation; legacy source rendering reaches it through goType.
 func hostAnnotationGoName(name string) string {
-	alias, member, _ := strings.Cut(name, ".")
+	alias, member, qualified := strings.Cut(name, ".")
+	if !qualified {
+		return "efType_" + goIdent(name)
+	}
 	return "efHostType_" + strconv.Itoa(len(alias)) + "_" + goIdent(alias) + "_" + goIdent(member)
 }
 

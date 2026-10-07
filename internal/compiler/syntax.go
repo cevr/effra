@@ -456,7 +456,7 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 			}
 		} else if i+1 < len(source) && (source[i:i+2] == "->" || source[i:i+2] == "==" || source[i:i+2] == "=>") {
 			i += 2
-		} else if strings.ContainsRune("{}():,;.+<>=|", rune(ch)) {
+		} else if strings.ContainsRune("{}():,;.+<>=|*[]", rune(ch)) {
 			i++
 		} else {
 			return nil, comments, []Diagnostic{{Code: "EF001", Message: fmt.Sprintf("unsupported character %q", ch), Span: Span{start, 1, l, c}}}
@@ -834,6 +834,11 @@ func (p *parser) typ() string {
 		p.take()
 		return voidTypeName
 	}
+	if form := p.hostTypeForm(); form != nil {
+		name := form.display()
+		p.types[name] = form
+		return name
+	}
 	name := p.name()
 	if name.text == "Effect" && p.peek().text == "<" {
 		p.fail(name, "typed recipes are unsupported; use an explicit effect fn callback contract")
@@ -860,6 +865,36 @@ func (p *parser) typ() string {
 		p.types[text] = t
 	}
 	return text
+}
+
+// hostTypeForm parses Go's own spelling of a native pointer, slice or map
+// type (`*sdk.Client`, `[]string`, `map[string]int`). The spelling is the one
+// inspection displays, so a reported host type round-trips into source; the
+// checker admits it only through the imported native declarations.
+func (p *parser) hostTypeForm() *sourceType {
+	start := p.peek()
+	form := &sourceType{Span: start.span}
+	switch {
+	case p.accept("*"):
+		form.HostForm = "pointer"
+	case p.accept("["):
+		p.expect("]")
+		form.HostForm = "slice"
+	case start.text == "map" && p.at+1 < len(p.tokens) && p.tokens[p.at+1].text == "[":
+		p.take()
+		p.take()
+		form.HostForm = "map"
+		key := p.typ()
+		form.HostArguments = append(form.HostArguments, key)
+		form.HostArgumentTypes = append(form.HostArgumentTypes, p.types[key])
+		p.expect("]")
+	default:
+		return nil
+	}
+	element := p.typ()
+	form.HostArguments = append(form.HostArguments, element)
+	form.HostArgumentTypes = append(form.HostArgumentTypes, p.types[element])
+	return form
 }
 
 func (p *parser) templateParameters() []TemplateParameter {

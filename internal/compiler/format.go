@@ -548,6 +548,14 @@ func formatNeedsSpace(previous, current token) bool {
 	if previousText == "(" || previousText == "." || previousText == "<" || previousText == "{" {
 		return false
 	}
+	// Native type spellings are written as Go writes them: `*T`, `[]T`,
+	// `map[K]V`.
+	if previousText == "*" || previousText == "[" || previousText == "]" {
+		return false
+	}
+	if currentText == "[" && previous.kind == "name" {
+		return false
+	}
 	if currentText == "(" {
 		switch previousText {
 		case ")", "]", ">", "(":

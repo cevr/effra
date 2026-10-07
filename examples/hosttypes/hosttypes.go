@@ -6,6 +6,7 @@ package hosttypes
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -166,6 +167,18 @@ func NewBuffer(text string) *bytes.Buffer { return bytes.NewBufferString(text) }
 
 // BufferText reads the native buffer.
 func BufferText(buffer *bytes.Buffer) string { return buffer.String() }
+
+// Counts returns a native map.
+func Counts() map[string]int { return map[string]int{"a": 1, "b": 2} }
+
+// CountOf reads one key.
+func CountOf(counts map[string]int, key string) int { return counts[key] }
+
+// Boxed returns a string inside a native empty interface.
+func Boxed() any { return "text" }
+
+// DynamicType reports a value's native dynamic type.
+func DynamicType(value any) string { return fmt.Sprintf("%T", value) }
 
 // Join is variadic.
 func Join(parts ...string) string { return strings.Join(parts, "") }

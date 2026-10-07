@@ -24,9 +24,23 @@ type sourceType struct {
 	ResultType               *sourceType
 	Failures                 []string
 	Services                 []string
+	// HostForm is a native pointer, slice or map spelling; HostArguments are
+	// its element (and map key) types. hostID is the checked host node.
+	HostForm          string
+	HostArguments     []string
+	HostArgumentTypes []*sourceType
+	hostID            TypeID
 }
 
 func (t *sourceType) display() string {
+	switch t.HostForm {
+	case "pointer":
+		return "*" + t.HostArguments[0]
+	case "slice":
+		return "[]" + t.HostArguments[0]
+	case "map":
+		return "map[" + t.HostArguments[0] + "]" + t.HostArguments[1]
+	}
 	if t.Application != "" {
 		return t.Application + "<" + strings.Join(t.ApplicationArguments, ", ") + ">"
 	}
@@ -49,6 +63,9 @@ func (t *sourceType) display() string {
 }
 
 func (c *checker) sourceCallable(t *sourceType) TypeID {
+	if t.HostForm != "" {
+		return c.sourceHostType(t)
+	}
 	if t.Application != "" {
 		return c.sourceApplication(t)
 	}
@@ -90,6 +107,9 @@ func (c *checker) sourceTypeKnownIn(t *sourceType, visiting map[*sourceType]bool
 	}
 	visiting[t] = true
 	defer delete(visiting, t)
+	if t.HostForm != "" {
+		return c.sourceHostType(t) != invalidTypeID
+	}
 	if t.Application != "" {
 		if len(t.ApplicationArguments) != len(t.ApplicationArgumentTypes) {
 			return false
@@ -433,6 +453,9 @@ func goSourceTypeMode(t *sourceType, fallback string) (string, bool) {
 	if t.Application != "" {
 		return canonicalGoType(t.owner, t.applicationID, map[TypeID]bool{}), false
 	}
+	if t.HostForm != "" {
+		return canonicalGoType(t.owner, t.hostID, map[TypeID]bool{}), false
+	}
 	// Nested children are rendered from the canonical parsed syntax retained
 	// on each occurrence in the source type graph by source rendering below.
 	args := make([]string, len(t.Parameters))
@@ -452,6 +475,10 @@ func goSourceTypeMode(t *sourceType, fallback string) (string, bool) {
 func jsSourceType(t *sourceType, fallback string, declarations ...map[string]Declaration) string {
 	if t == nil {
 		return jsValueType(fallback)
+	}
+	if t.HostForm != "" {
+		// Native Go types never reach JS: Go imports refuse that target.
+		return "never"
 	}
 	if t.Application != "" {
 		if t.Template == nil {

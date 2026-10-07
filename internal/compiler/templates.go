@@ -450,6 +450,10 @@ func (c *checker) bindSourceSyntax(t *sourceType, id TypeID) {
 	if n == nil {
 		return
 	}
+	if t.HostForm != "" && n.Kind == "host" {
+		t.owner, t.hostID = c, id
+		return
+	}
 	if t.Application != "" && n.Kind == "application" {
 		t.owner, t.applicationID, t.Template = c, id, c.templates[n.Declaration]
 		for i, child := range t.ApplicationArgumentTypes {

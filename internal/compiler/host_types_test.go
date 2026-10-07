@@ -374,3 +374,97 @@ func TestApplicationPlanRetainsHostTypePackages(t *testing.T) {
 		t.Fatalf("plan revision %s does not match %s", plan.Revision, r.Revision)
 	}
 }
+
+// Native pointer, slice, map, error, any and int annotations use Go's own
+// spelling, which is also what inspection displays, so a reported host type
+// round-trips into source.
+func TestHostTypeAnnotationSpellings(t *testing.T) {
+	r := compileHostTypes(t, `fn counters(values: []*host.Counter) -> []*host.Counter {
+    values
+}
+fn table(counts: map[string]int) -> map[string]int {
+    counts
+}
+fn names(listed: []string) -> []string {
+    listed
+}
+effect fn count(counter: *host.Counter) -> int uses { Foreign } {
+    run host.Count(counter)
+}
+effect fn describe(err: error) -> string uses { Foreign } {
+    run host.DescribeError(err)
+}
+effect fn kind(value: any, size: int) -> string uses { Foreign } {
+    run host.DynamicType(value) + " " + run strconv.Itoa(size)
+}
+effect fn program() -> void uses { Console, Foreign } {
+    match run host.Find("known") {
+        Data.Option.None => void,
+        Data.Option.Some { value: counter } => run Console.log(run strconv.Itoa(run count(counter)))
+    }
+    match run host.Counts() {
+        Data.Option.None => void,
+        Data.Option.Some { value: counts } => match run host.Boxed() {
+            Data.Option.None => void,
+            Data.Option.Some { value: boxed } => run Console.log(run kind(boxed, run host.CountOf(table(counts), "b")))
+        }
+    }
+    let typed = run host.Typed()
+    match typed.error {
+        Data.Option.None => void,
+        Data.Option.Some { value: native } => run Console.log(run describe(native))
+    }
+    match run host.Names(true) {
+        Data.Option.None => void,
+        Data.Option.Some { value: listed } => run Console.log(run strconv.Itoa(run host.NameCount(names(listed))))
+    }
+}`)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	if output := runGeneratedGo(t, r); output != "3\nstring 2\ntyped-nil *Problem\n0\n" {
+		t.Fatalf("annotated host values: %q", output)
+	}
+	displays := map[string]bool{}
+	for _, binding := range r.Bindings {
+		for _, component := range binding.HostParameters {
+			displays[component.Type] = true
+		}
+	}
+	for _, display := range []string{"*host.Counter", "map[string]int", "[]string", "error", "any", "int"} {
+		if !displays[display] {
+			t.Fatalf("binding display %q missing: %v", display, displays)
+		}
+	}
+	formatted, err := FormatSource(hostTypesImport + "fn f(a:*host.Counter,b:[]string,c:map[string][]*host.Counter) -> []*host.Counter {\n    b\n}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(formatted.Text, "fn f(a: *host.Counter, b: []string, c: map[string][]*host.Counter) -> []*host.Counter {") {
+		t.Fatalf("formatted host spellings: %q", formatted.Text)
+	}
+	for _, tc := range []struct{ name, source string }{
+		{"unknown element", `fn f(values: []host.Missing) -> void {
+    void
+}`},
+		{"incomparable key", `fn f(values: map[[]string]int) -> void {
+    void
+}`},
+		{"unadmitted element", `fn f(values: []host.Join) -> void {
+    void
+}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := compileHostTypes(t, tc.source+"\neffect fn program() -> void uses { Console, Foreign } {\n    void\n}")
+			if r.Checked {
+				t.Fatalf("accepted %s", tc.source)
+			}
+		})
+	}
+	for _, annotation := range []string{"*Point", "[]string", "error", "any", "int"} {
+		r := CompileAt("record Point { x: i64 }\nfn f(value: "+annotation+") -> void {\n    void\n}\neffect fn main() -> void {\n    void\n}", "go", "../..")
+		if r.Checked {
+			t.Fatalf("%s admitted without a Go import", annotation)
+		}
+	}
+}
