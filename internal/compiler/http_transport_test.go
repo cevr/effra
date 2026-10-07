@@ -321,6 +321,59 @@ if (backpressure) { // shutdown joins the request scope, then aborts a response 
   stalled.socket.destroy();
   await server.done;
 }
+{ // a malformed body's admission ends when its 400 has been sent and the connection closed
+  const server = await listen(() => Effect.succeed(ok('fine')), null, { ...limits, maxActive: 1n });
+  const socket = net.connect(server.port, server.host);
+  let answer = '';
+  socket.on('data', chunk => { answer += chunk; });
+  const closed = new Promise(resolve => socket.on('close', resolve));
+  socket.on('error', () => {});
+  socket.write('POST /bad HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nab\r\n0\r\n\r\n');
+  await closed;
+  check(answer.startsWith('HTTP/1.1 400'), 'malformed body response: ' + answer);
+  let status;
+  for (let attempt = 0; attempt < 100 && status !== 200; attempt++) {
+    status = await send(server, '/after').status;
+    if (status !== 200) await pending(new Promise(() => {}), 20);
+  }
+  check(status === 200, 'a closed malformed-body connection kept its admission: ' + status);
+  server.fiber.interruptUnsafe();
+  await server.done;
+}
+if (backpressure) { // a malformed pipelined body keeps its admission until its 400 has drained
+  const cleaned = deferred();
+  const big = cleanedLarge(cleaned);
+  const server = await listen(request => request.path === '/big' ? big() : Effect.succeed(ok('small')), null, { ...limits, maxActive: 2n });
+  const stalled = stall(server, '/big');
+  await cleaned.promise;
+  await stalled.receiving;
+  stalled.socket.write('POST /bad HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nab\r\n0\r\n\r\n');
+  let status;
+  for (let attempt = 0; attempt < 100 && status !== 503; attempt++) {
+    status = await send(server, '/probe').status;
+    if (status !== 503) await pending(new Promise(() => {}), 20);
+  }
+  check(status === 503, 'a malformed body released its admission before its error response: ' + status);
+  // Past its body deadline the malformed request still holds its slot, and
+  // its stopped body timer cuts nothing.
+  await pending(new Promise(() => {}), Number(limits.readBodyMillis) + 200);
+  check((await send(server, '/held').status) === 503, 'a malformed body released its admission at its body deadline');
+  let received = '';
+  const drained = new Promise(resolve => stalled.socket.on('close', resolve));
+  stalled.socket.on('data', chunk => { received += chunk.toString('latin1'); });
+  stalled.socket.resume();
+  await drained;
+  // The queued response's remaining bytes arrive first, then the 400.
+  const answer = 'HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n';
+  check(received.length > answer.length && received.indexOf('HTTP/1.1') === received.length - answer.length && received.endsWith(answer), 'the malformed body was not answered after the queued response');
+  for (let attempt = 0; attempt < 100 && status !== 200; attempt++) {
+    status = await send(server, '/after').status;
+    if (status !== 200) await pending(new Promise(() => {}), 20);
+  }
+  check(status === 200, 'the drained error response did not restore admission: ' + status);
+  server.fiber.interruptUnsafe();
+  await server.done;
+}
 { // the raw path-to-text control keeps its decoded path and text responses
   const server = await listen(null, path => path === '/fail' ? Effect.fail({ _tag: 'Missing' }) : Effect.succeed('hi ' + path));
   const text = await send(server, '/a%20b').response;

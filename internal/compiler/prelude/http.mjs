@@ -122,12 +122,17 @@ const __ef_http_serve = (address, timeouts, onRequest) => Effect.gen(function* (
   };
   // Header timeouts are checked at this interval rather than node's 30s default.
   const server = createServer({ connectionsCheckingInterval: Math.min(timeouts.readHeaderMillis, 1000) }, (req, res) => onRequest(req, res, transport));
-  // Parser failures belong to the transport: retire the request's exchange
-  // before answering, as Go does. A header timeout closes silently.
+  // Parser failures belong to the transport. The request being read stops
+  // reading and keeps its exchange, and so its admission, until the error
+  // response, queued behind any earlier response, has been handed to the OS
+  // or the connection closed (the end callback runs either way); its own
+  // response is never published, so only this write retires it. A header
+  // timeout closes silently.
   server.on('clientError', (error, socket) => {
-    transport.reading.get(socket)?.retire();
+    const reading = transport.reading.get(socket);
+    reading?.stop();
     if (error?.code === 'ERR_HTTP_REQUEST_TIMEOUT' || !socket.writable) socket.destroy();
-    else socket.end('HTTP/1.1 ' + (error?.code === 'HPE_HEADER_OVERFLOW' ? '431 Request Header Fields Too Large' : '400 Bad Request') + '\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+    else socket.end('HTTP/1.1 ' + (error?.code === 'HPE_HEADER_OVERFLOW' ? '431 Request Header Fields Too Large' : '400 Bad Request') + '\r\nContent-Length: 0\r\nConnection: close\r\n\r\n', () => reading?.exchange.retire());
   });
   server.headersTimeout = timeouts.readHeaderMillis;
   server.requestTimeout = 0;
@@ -195,7 +200,7 @@ const __ef_http_listen = (address, source, handler) => Effect.suspend(() => {
     const finish = () => { reading.done = true; clearTimeout(timer); transport.reading.delete(req.socket); };
     const abort = () => { if (reading.done) return; finish(); req.socket?.destroy(); };
     const timer = setTimeout(abort, limits.readBodyMillis);
-    transport.reading.set(req.socket, exchange);
+    transport.reading.set(req.socket, { stop: finish, exchange });
     req.on('data', chunk => {
       if (reading.done) return;
       reading.size += chunk.length;
