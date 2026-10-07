@@ -6,7 +6,7 @@ import (
 	"sort"
 )
 
-//go:embed effect.go fiber.go managed.go scheduler.go scope.go layers.go latch.go http.go files.go interop.go console.go env.go inspect.go
+//go:embed effect.go fiber.go managed.go scheduler.go scope.go layers.go latch.go http.go files.go interop.go console.go env.go inspect.go codec.go codec_json.go
 var sources embed.FS
 
 // RuntimeModule identifies one selectable group of native runtime sources.
@@ -22,6 +22,7 @@ const (
 	RuntimeModuleEnv     RuntimeModule = "env"
 	RuntimeModuleInspect RuntimeModule = "inspect"
 	RuntimeModuleInterop RuntimeModule = "interop"
+	RuntimeModuleCodec   RuntimeModule = "codec"
 )
 
 type runtimeModuleSpec struct {
@@ -66,6 +67,13 @@ var runtimeModuleCatalog = map[RuntimeModule]runtimeModuleSpec{
 	RuntimeModuleInterop: {
 		files:        []string{"interop.go"},
 		dependencies: []RuntimeModule{RuntimeModuleCore},
+	},
+	// Codec plans are pure bounded data transformations: the engine needs no
+	// managed core, scheduler or platform module. Boundary adapters that run a
+	// codec inside an effect retain core through their own module roots.
+	RuntimeModuleCodec: {
+		files:        []string{"codec.go", "codec_json.go"},
+		dependencies: []RuntimeModule{},
 	},
 }
 

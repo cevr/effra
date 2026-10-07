@@ -135,6 +135,7 @@ func TestRuntimeModuleImportBoundariesAndSelectedCompileControls(t *testing.T) {
 		{name: "env", roots: []RuntimeModule{RuntimeModuleEnv}, require: []string{"os"}, forbid: []string{"net/http", "encoding/json", "io"}},
 		{name: "inspect", roots: []RuntimeModule{RuntimeModuleInspect}, require: []string{"encoding/json"}, forbid: []string{"net/http", "os", "io"}},
 		{name: "interop", roots: []RuntimeModule{RuntimeModuleInterop}, require: []string{"context"}, forbid: []string{"net/http", "encoding/json", "os", "io"}},
+		{name: "codec", roots: []RuntimeModule{RuntimeModuleCodec}, require: []string{"unicode/utf8", "strconv"}, forbid: []string{"net/http", "encoding/json", "os", "io", "context", "sync", "reflect"}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

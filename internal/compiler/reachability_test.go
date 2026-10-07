@@ -958,7 +958,7 @@ func TestApplicationPlanRefusesExhaustedWork(t *testing.T) {
 // containing it.
 func runtimeDeclarationModules(t *testing.T) map[string]rt.RuntimeModule {
 	t.Helper()
-	modules := []rt.RuntimeModule{rt.RuntimeModuleCore, rt.RuntimeModuleLayers, rt.RuntimeModuleSync, rt.RuntimeModuleHTTP, rt.RuntimeModuleFiles, rt.RuntimeModuleConsole, rt.RuntimeModuleEnv, rt.RuntimeModuleInspect, rt.RuntimeModuleInterop}
+	modules := []rt.RuntimeModule{rt.RuntimeModuleCore, rt.RuntimeModuleLayers, rt.RuntimeModuleSync, rt.RuntimeModuleHTTP, rt.RuntimeModuleFiles, rt.RuntimeModuleConsole, rt.RuntimeModuleEnv, rt.RuntimeModuleInspect, rt.RuntimeModuleInterop, rt.RuntimeModuleCodec}
 	owners := map[string]rt.RuntimeModule{}
 	closure := map[string]int{}
 	for _, module := range modules {
