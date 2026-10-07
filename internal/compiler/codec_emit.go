@@ -240,11 +240,16 @@ func jsCodecPlanLiteral(plan *CodecPlan) string {
 	return string(encoded)
 }
 
-// jsCodecSupport compiles one JS codec per plan, after the `codec` prelude
-// chunk that the codec lowering helper selects.
-func (r *Result) jsCodecSupport() string {
+// jsCodecSupport compiles one JS codec per plan the module's application
+// plan retains, after the `codec` prelude chunk that the codec lowering
+// helper selects. A plan no executed direction reaches is neither compiled
+// nor able to load the engine.
+func (r *Result) jsCodecSupport(application *ApplicationPlan) string {
 	var out strings.Builder
 	for _, plan := range r.CodecPlans {
+		if !application.Requires(RequiresCodecPlan, plan.ID) {
+			continue
+		}
 		out.WriteString("const " + jsCodecPlanName(plan) + " = __ef_codecCompile(" + jsCodecPlanLiteral(plan) + ");\n")
 	}
 	return out.String()

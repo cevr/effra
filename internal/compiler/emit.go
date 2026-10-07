@@ -270,7 +270,7 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 			out.WriteString(jsLayer(layer))
 		}
 	}
-	out.WriteString(r.jsCodecSupport())
+	out.WriteString(r.jsCodecSupport(plan))
 	for _, f := range r.Program.checkedFunctions() {
 		if !plan.Requires(RequiresFunction, f.Identity) {
 			continue

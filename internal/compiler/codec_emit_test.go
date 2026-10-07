@@ -177,6 +177,62 @@ func TestJSCodecEngineIsEmittedOnceWhenDerived(t *testing.T) {
 	}
 }
 
+// A JS entry lowers only the codec plans its executed directions reach:
+// the engine and its adapters arrive through the codec lowering helper, and
+// one codec is compiled per retained plan. An idle entry loads no engine, and
+// an encode-only or decode-only entry never references the direction its plan
+// pruned. Each entry closes over its prelude and runs under Node.
+func TestJSEntryLowersOnlyItsExecutedCodecPlans(t *testing.T) {
+	for _, tc := range []struct {
+		name, main, output string
+		plans              []string
+		directions         []string
+	}{
+		{name: "idle", main: "effect fn main() -> string {\n    \"ok\"\n}\n", output: "ok\n"},
+		{name: "encode only", main: "effect fn main() -> string raises { JsonEncodeFailure } {\n    run eventJson.encode(Event.Closed {})\n}\n", output: `{"_tag":"Closed"}` + "\n", plans: []string{"Event"}, directions: []string{"eventJson_encode"}},
+		{name: "decode only", main: "effect fn main() -> string raises { JsonDecodeFailure } {\n    let user = run userJson.decode(\"{\\\"id\\\":\\\"7\\\",\\\"name\\\":\\\"Ada\\\"}\")\n    user.name\n}\n", output: "Ada\n", plans: []string{"User"}, directions: []string{"userJson_decode"}},
+		{name: "both", main: strings.TrimPrefix(codecUsingProgram, codecEmissionTypes), output: `{"id":"7","name":"Ada"}{"_tag":"Closed"}` + "\n", plans: []string{"User", "Event"}, directions: []string{"userJson_decode", "userJson_encode", "eventJson_encode"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := Compile(codecEmissionTypes + tc.main)
+			if !r.Checked {
+				t.Fatal(r.Diagnostics)
+			}
+			entry, declarations, err := r.Emit(true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkJSModule(t, tc.name+" entry", entry, declarations)
+			engine := 0
+			if len(tc.plans) > 0 {
+				engine = 1
+			}
+			if strings.Count(entry, "const __ef_codecCompile = ") != engine || strings.Count(entry, "const __ef_codecDecode = ") != engine {
+				t.Fatalf("engine emitted %d times, want %d", strings.Count(entry, "const __ef_codecCompile = "), engine)
+			}
+			if got := strings.Count(entry, "= __ef_codecCompile({"); got != len(tc.plans) {
+				t.Fatalf("compiled %d codecs, want %d", got, len(tc.plans))
+			}
+			for _, root := range tc.plans {
+				if !strings.Contains(entry, "const "+jsCodecPlanName(codecPlanByRoot(t, r, root))+" = ") {
+					t.Fatalf("entry omits the executed %s plan", root)
+				}
+			}
+			for _, witness := range []string{"userJson", "userMirror", "eventJson", "archiveJson"} {
+				for _, direction := range []string{"decode", "encode"} {
+					name := witness + "_" + direction
+					if strings.Contains(entry, "__ef_codec_function_"+name) != slices.Contains(tc.directions, name) {
+						t.Fatalf("direction %s retained=%v, want %v", name, !slices.Contains(tc.directions, name), slices.Contains(tc.directions, name))
+					}
+				}
+			}
+			if output, err := runNode(t, writeJSModule(t, map[string]string{"entry.mjs": entry}), "entry.mjs"); err != nil || output != tc.output {
+				t.Fatalf("entry run: %v\n%s", err, output)
+			}
+		})
+	}
+}
+
 // Emission is a function of the checked program: repeated emission of both
 // targets is byte-identical.
 func TestCodecEmissionIsDeterministic(t *testing.T) {
