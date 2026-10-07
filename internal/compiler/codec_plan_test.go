@@ -229,7 +229,7 @@ func TestCodecPlanRefusesStructuralBudgets(t *testing.T) {
 		})
 	}
 	// A derive declaration reports the refusal as EF138 at its type.
-	source := "import Json \"effra/json\"\n" + wide(maxCodecPlanEdges+1) + "derive wideJson = Json.codec<Wide>\n"
+	source := "import Json \"effra/json\"\n" + wide(maxCodecPlanEdges+1) + "derive wideJson = Json.codec<Wide>(maxBodyBytes: 1048576, maxDepth: 512)\n"
 	r := Compile(source)
 	at := strings.LastIndex(source, "Wide>")
 	if r.Checked || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != codecDerivationCode || r.Diagnostics[0].Span.Offset != at || r.Diagnostics[0].Span.Length != len("Wide") ||

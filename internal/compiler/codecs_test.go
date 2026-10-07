@@ -27,9 +27,9 @@ enum Event {
     Closed
 }
 
-derive userJson = Json.codec<User>(maxBodyBytes: 4096)
-derive eventJson = Json.codec<Event>
-derive eventArchive = Json.codec<Event>
+derive userJson = Json.codec<User>(maxBodyBytes: 4096, maxDepth: 512)
+derive eventJson = Json.codec<Event>(maxBodyBytes: 1048576, maxDepth: 512)
+derive eventArchive = Json.codec<Event>(maxBodyBytes: 1048576, maxDepth: 512)
 
 effect fn roundTrip(text: string) -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
     let codec = Convert.witness(eventJson.decode, eventJson.encode)
@@ -82,7 +82,7 @@ func TestCodecDeriveSynthesizesCheckedDirectionFunctions(t *testing.T) {
 			t.Fatalf("%s: decode contract: %+v", target, decode)
 		}
 		// Two witnesses for one domain type with the same bounds share one
-		// plan; the default and explicit bounds are distinct plans.
+		// plan; different bounds are distinct plans.
 		if r.Codecs[1].Plan != r.Codecs[2].Plan || r.Codecs[0].Plan == r.Codecs[1].Plan || len(r.CodecPlans) != 2 {
 			t.Fatalf("%s: plan sharing: %+v", target, r.Codecs)
 		}
@@ -94,33 +94,38 @@ func TestCodecDerivationRefusals(t *testing.T) {
 	cases := []struct {
 		name, source, code, message string
 	}{
-		{"callable field", "record Job { run: effect fn() -> void }\nderive c = Json.codec<Job>", "EF138", "codec c cannot derive effra/json-structural-1 for Job: effect fn() -> void at Job.run is a function or effect recipe"},
-		{"nested host field", "record Inner { latch: Latch }\nrecord Outer { inner: Inner }\nderive c = Json.codec<Outer>", "EF138", "Latch at Outer.inner.latch"},
-		{"bytes", "derive c = Json.codec<bytes>", "EF138", "bytes at bytes is not representable"},
-		{"generic application", "record Maybe { value: Data.Option<string> }\nderive c = Json.codec<Maybe>", "EF138", "Data.Option<string> at Maybe.value is generic data"},
-		{"recursive layout", "enum List { Nil, Cons { tail: List } }\nderive c = Json.codec<List>", "EF119", "recursive data layout is unsupported"},
-		{"empty enum", "enum Never { }\nderive c = Json.codec<Never>", "EF138", "has no variants"},
-		{"nesting beyond maxDepth", "record A { b: B }\nrecord B { c: C }\nrecord C { text: string }\nderive c = Json.codec<A>(maxDepth: 2)", "EF138", "plan nesting 3 exceeds maxDepth 2"},
-		{"zero maxDepth", "derive c = Json.codec<string>(maxDepth: 0)", "EF138", "maxDepth must be between 1 and 512"},
-		{"maxDepth above ceiling", "derive c = Json.codec<string>(maxDepth: 513)", "EF138", "maxDepth must be between 1 and 512"},
-		{"zero maxBodyBytes", "derive c = Json.codec<string>(maxBodyBytes: 0)", "EF138", "maxBodyBytes must be between 1"},
-		{"unknown option", "derive c = Json.codec<string>(maxItems: 4)", "EF138", "maxItems is unknown"},
-		{"repeated option", "derive c = Json.codec<string>(maxDepth: 4, maxDepth: 5)", "EF138", "maxDepth is repeated"},
-		{"failure declaration", "error Bad { text: string }\nderive c = Json.codec<Bad>", "EF102", "unknown or unsupported value type Bad"},
-		{"unknown type", "derive c = Json.codec<Missing>", "EF102", "unknown or unsupported value type Missing"},
-		{"generic without arguments", "record Box<T: type> { value: T }\nderive c = Json.codec<Box>", "EF127", "generic type Box requires complete application arguments"},
-		{"local generic application", "record Box<T: type> { value: T }\nderive c = Json.codec<Box<string>>", "EF138", "Box<string> at Box<string> is generic data"},
-		{"bundled generic without arguments", "derive c = Json.codec<Data.Option>", "EF102", "unknown or unsupported value type Data.Option"},
+		{"callable field", "record Job { run: effect fn() -> void }\nderive c = Json.codec<Job>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "codec c cannot derive effra/json-structural-1 for Job: effect fn() -> void at Job.run is a function or effect recipe"},
+		{"nested host field", "record Inner { latch: Latch }\nrecord Outer { inner: Inner }\nderive c = Json.codec<Outer>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "Latch at Outer.inner.latch"},
+		{"bytes", "derive c = Json.codec<bytes>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "bytes at bytes is not representable"},
+		{"generic application", "record Maybe { value: Data.Option<string> }\nderive c = Json.codec<Maybe>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "Data.Option<string> at Maybe.value is generic data"},
+		{"recursive layout", "enum List { Nil, Cons { tail: List } }\nderive c = Json.codec<List>(maxBodyBytes: 1024, maxDepth: 8)", "EF119", "recursive data layout is unsupported"},
+		{"empty enum", "enum Never { }\nderive c = Json.codec<Never>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "has no variants"},
+		{"nesting beyond maxDepth", "record A { b: B }\nrecord B { c: C }\nrecord C { text: string }\nderive c = Json.codec<A>(maxBodyBytes: 1024, maxDepth: 2)", "EF138", "plan nesting 3 exceeds maxDepth 2"},
+		{"zero maxDepth", "derive c = Json.codec<string>(maxBodyBytes: 64, maxDepth: 0)", "EF138", "maxDepth must be between 1 and 512"},
+		{"maxDepth above ceiling", "derive c = Json.codec<string>(maxBodyBytes: 64, maxDepth: 513)", "EF138", "maxDepth must be between 1 and 512"},
+		{"zero maxBodyBytes", "derive c = Json.codec<string>(maxBodyBytes: 0, maxDepth: 1)", "EF138", "maxBodyBytes must be between 1"},
+		{"no bounds", "derive c = Json.codec<string>", "EF138", "codec c requires the explicit bound maxBodyBytes; codec bounds have no default"},
+		{"no bounds names maxDepth", "derive c = Json.codec<string>", "EF138", "codec c requires the explicit bound maxDepth; codec bounds have no default"},
+		{"missing maxDepth", "derive c = Json.codec<string>(maxBodyBytes: 64)", "EF138", "codec c requires the explicit bound maxDepth"},
+		{"missing maxBodyBytes", "derive c = Json.codec<string>(maxDepth: 4)", "EF138", "codec c requires the explicit bound maxBodyBytes"},
+		{"empty bounds", "derive c = Json.codec<string>()", "EF138", "codec c requires the explicit bound maxBodyBytes"},
+		{"unknown option", "derive c = Json.codec<string>(maxBodyBytes: 64, maxDepth: 1, maxItems: 4)", "EF138", "maxItems is unknown"},
+		{"repeated option", "derive c = Json.codec<string>(maxBodyBytes: 64, maxDepth: 4, maxDepth: 5)", "EF138", "maxDepth is repeated"},
+		{"failure declaration", "error Bad { text: string }\nderive c = Json.codec<Bad>(maxBodyBytes: 1024, maxDepth: 8)", "EF102", "unknown or unsupported value type Bad"},
+		{"unknown type", "derive c = Json.codec<Missing>(maxBodyBytes: 1024, maxDepth: 8)", "EF102", "unknown or unsupported value type Missing"},
+		{"generic without arguments", "record Box<T: type> { value: T }\nderive c = Json.codec<Box>(maxBodyBytes: 1024, maxDepth: 8)", "EF127", "generic type Box requires complete application arguments"},
+		{"local generic application", "record Box<T: type> { value: T }\nderive c = Json.codec<Box<string>>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "Box<string> at Box<string> is generic data"},
+		{"bundled generic without arguments", "derive c = Json.codec<Data.Option>(maxBodyBytes: 1024, maxDepth: 8)", "EF102", "unknown or unsupported value type Data.Option"},
 		{"unimported derivation", "derive c = Yaml.codec<string>", "EF102", "unknown derivation Yaml.codec"},
 		{"unknown derivation member", "derive c = Json.schema<string>", "EF126", "unknown bundled declaration effra/json/schema"},
 		{"not a derivation", "import Convert \"effra/conversions\"\nrecord User { name: string }\nfn read(text: string) -> User { User { name: text } }\nderive c = Convert.witness<User>", "EF138", "Convert.witness is not a codec derivation"},
-		{"duplicate witness name", "derive c = Json.codec<string>\nderive c = Json.codec<bool>", "EF101", "duplicate declaration c"},
-		{"witness collides with function", "fn c() -> string { \"x\" }\nderive c = Json.codec<string>", "EF101", "duplicate declaration c"},
-		{"failure name collides", "error JsonDecodeFailure\nderive c = Json.codec<string>", "EF101", "duplicate declaration JsonDecodeFailure"},
-		{"undeclared decode failure", "derive c = Json.codec<string>\neffect fn main() -> string { run c.decode(\"\\\"x\\\"\") }", "EF107", "undeclared failures: JsonDecodeFailure"},
-		{"undeclared encode failure", "derive c = Json.codec<string>\neffect fn main() -> string raises { JsonDecodeFailure } { run c.encode(\"x\") }", "EF107", "undeclared failures: JsonEncodeFailure"},
-		{"wrong decode argument", "derive c = Json.codec<string>\neffect fn main() -> string raises { JsonDecodeFailure } { run c.decode(true) }", "EF106", "argument must be string"},
-		{"unknown direction", "derive c = Json.codec<string>\neffect fn main() -> string { run c.parse(\"x\") }", "EF102", "unknown function or service method"},
+		{"duplicate witness name", "derive c = Json.codec<string>(maxBodyBytes: 1024, maxDepth: 8)\nderive c = Json.codec<bool>(maxBodyBytes: 1024, maxDepth: 8)", "EF101", "duplicate declaration c"},
+		{"witness collides with function", "fn c() -> string { \"x\" }\nderive c = Json.codec<string>(maxBodyBytes: 1024, maxDepth: 8)", "EF101", "duplicate declaration c"},
+		{"failure name collides", "error JsonDecodeFailure\nderive c = Json.codec<string>(maxBodyBytes: 1024, maxDepth: 8)", "EF101", "duplicate declaration JsonDecodeFailure"},
+		{"undeclared decode failure", "derive c = Json.codec<string>(maxBodyBytes: 1024, maxDepth: 8)\neffect fn main() -> string { run c.decode(\"\\\"x\\\"\") }", "EF107", "undeclared failures: JsonDecodeFailure"},
+		{"undeclared encode failure", "derive c = Json.codec<string>(maxBodyBytes: 1024, maxDepth: 8)\neffect fn main() -> string raises { JsonDecodeFailure } { run c.encode(\"x\") }", "EF107", "undeclared failures: JsonEncodeFailure"},
+		{"wrong decode argument", "derive c = Json.codec<string>(maxBodyBytes: 1024, maxDepth: 8)\neffect fn main() -> string raises { JsonDecodeFailure } { run c.decode(true) }", "EF106", "argument must be string"},
+		{"unknown direction", "derive c = Json.codec<string>(maxBodyBytes: 1024, maxDepth: 8)\neffect fn main() -> string { run c.parse(\"x\") }", "EF102", "unknown function or service method"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -148,8 +153,8 @@ func TestCodecDerivationRefusals(t *testing.T) {
 // Derive declarations format as one line with canonical spacing, and the
 // formatter's output is a fixed point that checks unchanged.
 func TestCodecDeriveDeclarationsFormat(t *testing.T) {
-	source := "import Json \"effra/json\"\nrecord User { name: string }\nderive   userJson=Json.codec< User >( maxBodyBytes:4096,maxDepth : 4 )\nderive userArchive = Json.codec<User>\n"
-	want := "import Json \"effra/json\"\nrecord User {\n    name: string\n}\nderive userJson = Json.codec<User>(maxBodyBytes: 4096, maxDepth: 4)\nderive userArchive = Json.codec<User>\n"
+	source := "import Json \"effra/json\"\nrecord User { name: string }\nderive   userJson=Json.codec< User >( maxBodyBytes:4096,maxDepth : 4 )\nderive userArchive = Json.codec<User>(maxBodyBytes: 64, maxDepth: 1)\n"
+	want := "import Json \"effra/json\"\nrecord User {\n    name: string\n}\nderive userJson = Json.codec<User>(maxBodyBytes: 4096, maxDepth: 4)\nderive userArchive = Json.codec<User>(maxBodyBytes: 64, maxDepth: 1)\n"
 	assertFormat(t, source, want)
 	if r := Compile(want); !r.Checked || len(r.Codecs) != 2 || r.CodecPlans[0].Bounds != (CodecPlanBounds{MaxBodyBytes: 4096, MaxDepth: 4}) {
 		t.Fatalf("formatted derive declarations: %+v %+v", r.Diagnostics, r.CodecPlans)

@@ -28,7 +28,7 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
 `,
 		"refused.ef": `import Json "effra/json"
 record Job { run: effect fn() -> void }
-derive jobJson = Json.codec<Job>
+derive jobJson = Json.codec<Job>(maxBodyBytes: 1048576, maxDepth: 512)
 `,
 	}
 	for name, source := range files {

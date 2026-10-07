@@ -33,8 +33,8 @@ enum Event {
 
 derive userJson = Json.codec<User>(maxBodyBytes: 4096, maxDepth: 4)
 derive userMirror = Json.codec<User>(maxBodyBytes: 4096, maxDepth: 4)
-derive eventJson = Json.codec<Event>
-derive archiveJson = Json.codec<Archive>
+derive eventJson = Json.codec<Event>(maxBodyBytes: 1048576, maxDepth: 512)
+derive archiveJson = Json.codec<Archive>(maxBodyBytes: 1048576, maxDepth: 512)
 `
 
 // codecUsingProgram executes userJson in both directions and eventJson's
@@ -287,7 +287,7 @@ func TestDerivedDirectionsAreOrdinaryFunctionValues(t *testing.T) {
 	source := `import Json "effra/json"
 import Fns "effra/functions"
 
-derive textJson = Json.codec<string>
+derive textJson = Json.codec<string>(maxBodyBytes: 1048576, maxDepth: 512)
 
 effect fn apply(decode: effect fn(string) -> string raises { JsonDecodeFailure }, input: string) -> string raises { JsonDecodeFailure } {
     run decode(input)
@@ -362,7 +362,7 @@ func TestJSCodecWitnessNamesDoNotShadowModuleBindings(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			source := `import Json "effra/json"
 
-derive ` + name + ` = Json.codec<string>
+derive ` + name + ` = Json.codec<string>(maxBodyBytes: 1048576, maxDepth: 512)
 
 effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
     run ` + name + `.encode(run ` + name + `.decode("\"ok\""))

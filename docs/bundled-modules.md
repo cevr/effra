@@ -75,9 +75,10 @@ Derivation follows the `effra/json-structural-1` profile: strings, booleans,
 `void` as `null`, full-range `i64` as a decimal string, first-order records
 and closed payload enums discriminated by `_tag`. Excess properties are
 ignored, the first issue stops decoding, and output follows declared field
-order. Both bounds are explicit plan data: `maxBodyBytes` (default 1 MiB,
-at most 1 GiB) bounds input and output bytes, and `maxDepth` (default and
-ceiling 512) bounds input nesting and must cover the type's own nesting.
+order. Both bounds are required and are plan data; there is no default.
+`maxBodyBytes` (1 to 1 GiB) bounds input and output bytes, and `maxDepth`
+(1 to 512) bounds input nesting and must cover the type's own nesting. A
+declaration that omits either bound is refused with EF138.
 Functions, effect recipes, host and runtime types, bytes, generic
 applications, failure declarations and empty enums are refused with EF138 and
 the field path at which representation fails; plans are limited to 4096

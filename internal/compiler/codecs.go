@@ -10,17 +10,19 @@ import (
 // or options cannot be represented by its profile. No partial plan is kept.
 const codecDerivationCode = "EF138"
 
-// Default bounds of a derived plan. A derive declaration may lower either
-// one explicitly, and maxBodyBytes may also be raised to its ceiling; the
-// engines themselves never supply a default.
-const (
-	defaultCodecMaxBodyBytes = 1 << 20
-	maxCodecMaxBodyBytes     = 1 << 30
-)
+// maxCodecMaxBodyBytes is the ceiling of a plan's maxBodyBytes. A derive
+// declaration states both bounds explicitly; neither the checker nor the
+// engines supply a default, so every plan's budget is visible at its
+// declaration.
+const maxCodecMaxBodyBytes = 1 << 30
+
+// codecBoundNames are the required bounds of a derive declaration, in
+// canonical order.
+var codecBoundNames = []string{"maxBodyBytes", "maxDepth"}
 
 // CodecDeclaration is one opt-in structural derivation:
 //
-//	derive userJson = Json.codec<User>(maxBodyBytes: 4096)
+//	derive userJson = Json.codec<User>(maxBodyBytes: 4096, maxDepth: 2)
 //
 // It names an explicit witness. The checker synthesizes the ordinary effect
 // functions userJson.decode and userJson.encode, whose signatures carry the
@@ -180,9 +182,11 @@ func (c *checker) deriveCodecs(claim func(string, Span)) {
 	}
 }
 
-// codecBounds resolves the explicit or default bounds of a declaration.
+// codecBounds resolves the explicit bounds of a declaration. Both bounds
+// are required: a declaration missing either one is refused rather than
+// given a default.
 func (c *checker) codecBounds(codec *CodecDeclaration) (CodecPlanBounds, bool) {
-	bounds := CodecPlanBounds{MaxBodyBytes: defaultCodecMaxBodyBytes, MaxDepth: rt.CodecMaxDepth}
+	bounds := CodecPlanBounds{}
 	seen := map[string]bool{}
 	ok := true
 	for _, option := range codec.Options {
@@ -210,6 +214,12 @@ func (c *checker) codecBounds(codec *CodecDeclaration) (CodecPlanBounds, bool) {
 			bounds.MaxDepth = int(option.Value)
 		default:
 			refuse("is unknown; supported options are maxBodyBytes and maxDepth")
+		}
+	}
+	for _, name := range codecBoundNames {
+		if !seen[name] {
+			c.diagnostic(codecDerivationCode, "codec "+codec.Name+" requires the explicit bound "+name+"; codec bounds have no default", codec.Span)
+			ok = false
 		}
 	}
 	return bounds, ok
