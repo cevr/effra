@@ -7,8 +7,12 @@ import "strings"
 // arguments into it, so a declared callable result T instantiated with void
 // keeps a struct{} result while a concrete fn() -> void has none. id is the
 // checked type of the declaration that chose the layout, and bindings maps
-// its type variables to checked types of the use site. A value laid out by
-// its own checked type has no bindings and renders exactly as canonicalGoType.
+// its type variables to the layouts of the use site's type arguments. Each
+// binding keeps its own frame, so frames compose through nested applications:
+// in Envelope<void>'s field Action<fn() -> T, T>, Action's F is bound to
+// fn() -> T laid out in Envelope's frame, and renders func() struct{}. A value
+// laid out by its own checked type has no bindings and renders exactly as
+// canonicalGoType.
 //
 // Only generic data introduces declared layouts. A value read from a generic
 // field or match payload keeps its declared layout through locals and pure
@@ -17,7 +21,7 @@ import "strings"
 // or a callable parameter.
 type goLayout struct {
 	id       TypeID
-	bindings map[TypeID]TypeID
+	bindings map[TypeID]goLayout
 }
 
 func canonicalLayout(id TypeID) goLayout { return goLayout{id: id} }
@@ -29,15 +33,20 @@ func (l goLayout) render(c *checker) string {
 func (l goLayout) child(id TypeID) goLayout { return goLayout{id: id, bindings: l.bindings} }
 
 // resolve returns the checked node the layout describes. A bound type variable
-// switches to the use-site frame, where its binding is laid out canonically.
+// switches to its binding's frame, repeatedly when that binding is itself a
+// type variable of an enclosing declaration.
 func (l goLayout) resolve(c *checker) (*semanticTypeNode, goLayout) {
-	node := c.node(l.id)
-	if node != nil && node.Kind == "type-variable" {
-		if bound, ok := l.bindings[l.id]; ok {
-			return c.node(bound), canonicalLayout(bound)
+	for {
+		node := c.node(l.id)
+		if node == nil || node.Kind != "type-variable" {
+			return node, l
 		}
+		bound, ok := l.bindings[l.id]
+		if !ok {
+			return node, l
+		}
+		l = bound
 	}
-	return node, l
 }
 
 // hasResult reports whether a pure callable result position keeps a Go
@@ -45,17 +54,17 @@ func (l goLayout) resolve(c *checker) (*semanticTypeNode, goLayout) {
 // with void keeps its struct{} carrier.
 func (l goLayout) hasResult(c *checker) bool { return !canonicalVoidType(c, l.id) }
 
-// templateBindings maps a template's type parameters to the arguments of one
-// checked application of it.
-func (g *goEmitter) templateBindings(owner *DataDeclaration, application TypeID) map[TypeID]TypeID {
-	node := g.program.semantic.node(application)
+// templateBindings maps a template's type parameters to the layouts of the
+// arguments of one application of it, each laid out in the application's own
+// frame.
+func templateBindings(owner *DataDeclaration, node *semanticTypeNode, application goLayout) map[TypeID]goLayout {
 	if owner == nil || node == nil || node.Kind != "application" {
 		return nil
 	}
-	bindings := map[TypeID]TypeID{}
+	bindings := map[TypeID]goLayout{}
 	for index, parameter := range owner.Parameters {
 		if index < len(node.Args) {
-			bindings[parameter.typeID] = node.Args[index]
+			bindings[parameter.typeID] = application.child(node.Args[index])
 		}
 	}
 	return bindings
@@ -83,13 +92,13 @@ func templateField(owner *DataDeclaration, variant, name string) (Field, bool) {
 }
 
 // templateFieldLayout returns the declared Go layout of a field of generic
-// data whose checked type is the application data.
-func (g *goEmitter) templateFieldLayout(data TypeID, variant, name string) (goLayout, bool) {
+// data that itself has the layout data.
+func (g *goEmitter) templateFieldLayout(data goLayout, variant, name string) (goLayout, bool) {
 	c := g.program.semantic
 	if c == nil {
 		return goLayout{}, false
 	}
-	node := c.node(data)
+	node, data := data.resolve(c)
 	if node == nil || node.Kind != "application" {
 		return goLayout{}, false
 	}
@@ -101,17 +110,21 @@ func (g *goEmitter) templateFieldLayout(data TypeID, variant, name string) (goLa
 	if !ok {
 		return goLayout{}, false
 	}
-	return goLayout{id: field.typeID, bindings: g.templateBindings(owner, data)}, true
+	return goLayout{id: field.typeID, bindings: templateBindings(owner, node, data)}, true
 }
 
 // adaptGoLayout converts a value from the Go layout it was emitted with to the
 // layout its destination requires. The checker has already proved the source
 // types compatible, so the layouts differ only inside callable signatures,
 // where a void result is a struct{} carrier on one side and absent on the
-// other. A callable is captured once, before its wrapper is built, and invoked
-// only when the wrapper is called. Parameters convert from the destination
-// layout to the original one and results the other way, recursively through
-// nested callables and recipe results. Equal layouts are returned unchanged.
+// other, or inside the type arguments of generic data holding such callables,
+// which Go instantiates as distinct types. A callable is captured once, before
+// its wrapper is built, and invoked only when the wrapper is called.
+// Parameters convert from the destination layout to the original one and
+// results the other way, recursively through nested callables and recipe
+// results. Generic data is rebuilt as the same declaration under the
+// destination's type arguments (adaptData). Equal layouts are returned
+// unchanged.
 func (g *goEmitter) adaptGoLayout(expression string, from, to goLayout, out *strings.Builder) string {
 	c := g.program.semantic
 	if from.id == to.id && len(from.bindings) == 0 && len(to.bindings) == 0 {
@@ -128,6 +141,11 @@ func (g *goEmitter) adaptGoLayout(expression string, from, to goLayout, out *str
 	switch toNode.Kind {
 	case "recipe", "providerRecipe":
 		return g.adaptRecipe(expression, from.child(fromNode.Result), to.child(toNode.Result), out)
+	case "application":
+		if fromNode.Declaration != toNode.Declaration {
+			return expression
+		}
+		return g.adaptData(expression, fromNode, toNode, from, to, out)
 	case "callable":
 	default:
 		return expression
@@ -178,4 +196,57 @@ func (g *goEmitter) adaptRecipe(expression string, from, to goLayout, out *strin
 	var body strings.Builder
 	value := g.adaptGoLayout(exit+".Value", from, to, &body)
 	return "func(ctx efContext) efExit[" + success + "] {\n" + exit + " := " + captured + "(ctx)\nif " + exit + ".IsFailure() {\nreturn er.Propagate[" + success + "](" + exit + ")\n}\n" + body.String() + "return efExit[" + success + "]{Value: " + value + "}\n}"
+}
+
+// adaptData converts generic data between two layouts of one application.
+// Nominal identity is preserved: a record is rebuilt as the same template
+// under the destination's type arguments, and an enum value as its own
+// variant of that template, with every field adapted from its declared
+// layout under the source application to the one under the destination.
+// The value is evaluated once, as the argument of the conversion, and its
+// callable fields are captured by their adapters and invoked only through
+// the converted value. The checker rejects recursive generic data, so the
+// conversion of nested fields terminates.
+func (g *goEmitter) adaptData(expression string, fromNode, toNode *semanticTypeNode, from, to goLayout, out *strings.Builder) string {
+	c := g.program.semantic
+	owner := c.templates[toNode.Declaration]
+	if owner == nil {
+		return expression
+	}
+	fromBindings, toBindings := templateBindings(owner, fromNode, from), templateBindings(owner, toNode, to)
+	fields := func(declared []Field, selector string, body *strings.Builder) string {
+		parts := make([]string, len(declared))
+		for index, field := range declared {
+			adapted := g.adaptGoLayout(selector+"."+goFieldName(field.Name), goLayout{id: field.typeID, bindings: fromBindings}, goLayout{id: field.typeID, bindings: toBindings}, body)
+			parts[index] = goFieldName(field.Name) + ":" + adapted
+		}
+		return "{" + strings.Join(parts, ",") + "}"
+	}
+	value, target := g.temp(), to.render(c)
+	var body strings.Builder
+	if owner.Kind == "enum" {
+		variant := g.temp()
+		body.WriteString("switch " + variant + " := " + value + ".(type) {\n")
+		for _, candidate := range owner.Variants {
+			var arm strings.Builder
+			payload := fields(candidate.Fields, variant, &arm)
+			body.WriteString("case " + layoutVariantType(c, owner, candidate.Name, fromNode, from) + ":\n_ = " + variant + "\n" + arm.String())
+			body.WriteString("return " + layoutVariantType(c, owner, candidate.Name, toNode, to) + payload + "\n")
+		}
+		body.WriteString("}\npanic(\"unreachable enum variant\")\n")
+	} else {
+		payload := fields(owner.Fields, value, &body)
+		body.WriteString("return " + target + payload + "\n")
+	}
+	return "func(" + value + " " + from.render(c) + ") " + target + " {\n" + body.String() + "}(" + expression + ")"
+}
+
+// layoutVariantType renders the Go type of one variant of an enum template
+// application with the given layout.
+func layoutVariantType(c *checker, owner *DataDeclaration, variant string, node *semanticTypeNode, application goLayout) string {
+	args := make([]string, len(node.Args))
+	for index, argument := range node.Args {
+		args[index] = application.child(argument).render(c)
+	}
+	return goVariantType("template_"+owner.EmissionName, variant) + "[" + strings.Join(args, ",") + "]"
 }

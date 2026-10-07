@@ -202,6 +202,41 @@ effect fn main() -> void {
     done();
     void
 }`},
+	{"nested-enum-application-construction", `enum Action<F: callable fn() -> A, A: type> { Some { operation: F } }
+record Envelope<T: type> { action: Action<fn() -> T, T> }
+fn finish() -> void { void }
+fn make() -> Envelope<void> {
+    Envelope<void> {
+        action: Action<fn() -> void, void>.Some { operation: finish }
+    }
+}
+effect fn main() -> void { let e = make(); void }`},
+	{"nested-enum-application-extraction", `enum Action<F: callable fn() -> A, A: type> { Some { operation: F } }
+record Envelope<T: type> { action: Action<fn() -> T, T> }
+fn finish() -> void { void }
+fn make() -> Envelope<void> { Envelope<void> { action: Action<fn() -> void, void>.Some { operation: finish } } }
+fn unwrap(e: Envelope<void>) -> Action<fn() -> void, void> { e.action }
+fn perform(a: Action<fn() -> void, void>) -> void { match a { Action.Some { operation } => operation() } }
+effect fn main() -> void { perform(unwrap(make())); void }`},
+	{"nested-record-application", `record Call<F: callable fn() -> A, A: type> { operation: F }
+record Envelope<T: type> { call: Call<fn() -> T, T> }
+fn finish() -> void { void }
+fn make() -> Envelope<void> { Envelope<void> { call: Call<fn() -> void, void> { operation: finish } } }
+fn unwrap(e: Envelope<void>) -> Call<fn() -> void, void> { e.call }
+effect fn main() -> void { let e = make(); e.call.operation(); let c = unwrap(e); c.operation(); void }`},
+	{"nested-application-option-result-transport", `import Data "effra/data"
+enum Action<F: callable fn() -> A, A: type> { Some { operation: F } }
+record Envelope<T: type> { action: Action<fn() -> T, T> }
+fn finish() -> void { void }
+fn make() -> Envelope<void> { Envelope<void> { action: Action<fn() -> void, void>.Some { operation: finish } } }
+fn wrap() -> Data.Option<Envelope<void>> { Data.Option.Some { value: make() } }
+fn settle() -> Data.Result<Envelope<void>, string> { Data.Result<Envelope<void>, string>.Ok { value: make() } }
+fn perform(a: Action<fn() -> void, void>) -> void { match a { Action.Some { operation } => operation() } }
+effect fn main() -> void {
+    match wrap() { Data.Option.Some { value } => perform(value.action); Data.Option.None => void };
+    match settle() { Data.Result.Ok { value } => perform(value.action); Data.Result.Err { error } => void };
+    void
+}`},
 }
 
 func TestVoidGoBoundaryProgramsExecuteOnBothTargets(t *testing.T) {
@@ -359,5 +394,98 @@ func TestVoidGoCallableLayoutAdaptersCaptureOnceAndInvokeLazily(t *testing.T) {
 	}
 	if output := runJSForTarget(t, "js", voidGoAdapterSource, voidJSAdapterProbe); output != "counted\n" {
 		t.Fatalf("JavaScript callback counts changed: %q", output)
+	}
+}
+
+// voidGoNestedApplicationSource stores concrete callbacks inside generic data
+// whose Go instantiation differs between the declared field layout and the
+// use site, in both a record and an enum inner carrier.
+const voidGoNestedApplicationSource = `record Call<F: callable fn() -> A, A: type> { operation: F }
+enum Action<F: callable fn() -> A, A: type> { Some { operation: F }; Idle }
+record Envelope<T: type> { call: Call<fn() -> T, T>, action: Action<fn() -> T, T> }
+fn envelop(callback: fn() -> void) -> Envelope<void> {
+    Envelope<void> { call: Call<fn() -> void, void> { operation: callback }, action: Action<fn() -> void, void>.Some { operation: callback } }
+}
+fn reenvelop(e: Envelope<void>) -> Envelope<void> { Envelope<void> { call: e.call, action: e.action } }
+fn call(e: Envelope<void>) -> Call<fn() -> void, void> { e.call }
+fn action(e: Envelope<void>) -> Action<fn() -> void, void> { e.action }
+fn perform(a: Action<fn() -> void, void>) -> void { match a { Action.Some { operation } => operation(); Action.Idle => void } }
+fn fire(e: Envelope<void>) -> void { e.call.operation() }
+effect fn main() -> void { void }
+`
+
+const voidGoNestedApplicationProbe = `package main
+
+import "testing"
+
+func TestVoidNestedApplicationAdapterCounts(t *testing.T) {
+	calls := 0
+	envelope := efFunction_reenvelop(efFunction_envelop(func() { calls++ }))
+	call := efFunction_call(envelope)
+	action := efFunction_action(envelope)
+	if calls != 0 {
+		t.Fatalf("nested application adapters invoked the callback while converting it: %d", calls)
+	}
+	call.EfField_9_operation()
+	efFunction_perform(action)
+	efFunction_fire(envelope)
+	if calls != 3 {
+		t.Fatalf("nested application adapters did not invoke the callback exactly once per call: %d", calls)
+	}
+}
+`
+
+const voidJSNestedApplicationProbe = `
+let calls = 0;
+const envelope = __ef_function_reenvelop(__ef_function_envelop(() => { calls++; }));
+const call = __ef_function_call(envelope);
+const action = __ef_function_action(envelope);
+if (calls !== 0) throw new Error("nested capture invoked " + calls);
+call.operation();
+__ef_function_perform(action);
+__ef_function_fire(envelope);
+if (calls !== 3) throw new Error("nested calls " + calls);
+console.log("counted");
+`
+
+func TestVoidGoNestedApplicationAdaptersPreserveIdentityAndCounts(t *testing.T) {
+	r := CompileFor(voidGoNestedApplicationSource, "go")
+	if !r.Checked {
+		t.Fatalf("nested application source rejected: %+v", r.Diagnostics)
+	}
+	generated, err := r.EmitGo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := goparser.ParseFile(gotoken.NewFileSet(), "generated.go", generated, 0)
+	if err != nil {
+		t.Fatalf("generated Go did not parse: %v\n%s", err, generated)
+	}
+	// The conversion keeps the nominal declarations: the extracted value is
+	// the concrete instantiation, never an interface{} or a structural copy.
+	for name, want := range map[string]string{"efFunction_call": "efTemplate_Call[func(), struct{}]", "efFunction_action": "efTemplate_Action[func(), struct{}]"} {
+		function := generatedGoFunction(t, file, name)
+		if function.Type.Results == nil || len(function.Type.Results.List) != 1 || formatGoNode(t, function.Type.Results.List[0].Type) != want {
+			t.Fatalf("%s result changed: %s", name, formatGoNode(t, function.Type))
+		}
+	}
+	if strings.Contains(generated, "any(") || strings.Contains(generated, "interface{}(") {
+		t.Fatalf("nested application adapter erased the nominal type: %s", generated)
+	}
+
+	dir := t.TempDir()
+	if err := WriteRuntime(dir); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"go.mod": "module effra.generated\n\ngo 1.27\n", "main.go": generated, "main_test.go": voidGoNestedApplicationProbe} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if output, err := runGoCommand(dir, "test", "."); err != nil {
+		t.Fatalf("generated nested application adapters failed: %v\n%s\n%s", err, output, generated)
+	}
+	if output := runJSForTarget(t, "js", voidGoNestedApplicationSource, voidJSNestedApplicationProbe); output != "counted\n" {
+		t.Fatalf("JavaScript nested application counts changed: %q", output)
 	}
 }

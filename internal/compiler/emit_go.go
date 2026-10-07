@@ -65,10 +65,10 @@ func canonicalGoType(c *checker, id TypeID, visiting map[TypeID]bool) string {
 }
 
 // layoutGoType renders id as Go instantiates a generic declaration: each type
-// variable bound in bindings is replaced by the canonical rendering of its
-// binding. A void substituted for a declared callable result T therefore
+// variable bound in bindings is replaced by the rendering of its binding's
+// layout. A void substituted for a declared callable result T therefore
 // keeps its struct{} carrier, while a concrete void result is erased.
-func layoutGoType(c *checker, id TypeID, bindings map[TypeID]TypeID, visiting map[TypeID]bool) string {
+func layoutGoType(c *checker, id TypeID, bindings map[TypeID]goLayout, visiting map[TypeID]bool) string {
 	if c == nil || id == invalidTypeID {
 		return "struct{}"
 	}
@@ -110,7 +110,7 @@ func layoutGoType(c *checker, id TypeID, bindings map[TypeID]TypeID, visiting ma
 		return "efType_" + goIdent(node.Name)
 	case "type-variable":
 		if bound, ok := bindings[id]; ok {
-			return canonicalGoType(c, bound, map[TypeID]bool{})
+			return bound.render(c)
 		}
 		return emittedTypeVariable(node)
 	case "application":
@@ -143,7 +143,7 @@ func layoutGoType(c *checker, id TypeID, bindings map[TypeID]TypeID, visiting ma
 	return "struct{}"
 }
 
-func layoutGoCallableType(c *checker, node *semanticTypeNode, bindings map[TypeID]TypeID, visiting map[TypeID]bool) string {
+func layoutGoCallableType(c *checker, node *semanticTypeNode, bindings map[TypeID]goLayout, visiting map[TypeID]bool) string {
 	if node == nil {
 		return "func() struct{}"
 	}
@@ -582,8 +582,8 @@ func (g *goEmitter) declaredLayoutValue(e *Expr, effect bool, ret string, out *s
 		layout, ok := g.locals[e.Name]
 		return "efLocal_" + e.Name, layout, ok
 	case e.Kind == "member" && e.ResolvedFunction == nil && e.Text == "field":
-		left := g.expr(e.Left, effect, ret, out)
-		layout, ok := g.templateFieldLayout(e.Left.checked.valueID(), "", e.Name)
+		left, leftLayout := g.exprLayout(e.Left, effect, ret, out)
+		layout, ok := g.templateFieldLayout(leftLayout, "", e.Name)
 		if !ok {
 			layout = canonicalLayout(e.checked.valueID())
 		}
@@ -669,7 +669,7 @@ func (g *goEmitter) callValue(e *Expr, call string, wantValue bool) string {
 	return "func() " + result + " {\n" + call + "\nreturn struct{}{}\n}()"
 }
 
-func (g *goEmitter) inferredTypeBindings(f *Function, arguments []*Expr) map[TypeID]TypeID {
+func (g *goEmitter) inferredTypeBindings(f *Function, arguments []*Expr) map[TypeID]goLayout {
 	if f == nil || len(f.TypeParameters) == 0 || g.program.semantic == nil {
 		return nil
 	}
@@ -684,7 +684,11 @@ func (g *goEmitter) inferredTypeBindings(f *Function, arguments []*Expr) map[Typ
 		}
 		g.program.semantic.unifyTemplateTypes(parameter.typeID, arguments[index].checked.valueID(), variables, bindings, true)
 	}
-	return bindings
+	layouts := make(map[TypeID]goLayout, len(bindings))
+	for variable, bound := range bindings {
+		layouts[variable] = canonicalLayout(bound)
+	}
+	return layouts
 }
 
 // lower emits an expression in the canonical layout of its checked type.
@@ -976,7 +980,7 @@ func (g *goEmitter) constructedFieldLayout(e *Expr, field string) (goLayout, boo
 	if e.ResolvedTemplate == nil {
 		return goLayout{}, false
 	}
-	return g.templateFieldLayout(e.checked.resultID(), e.Left.Name, field)
+	return g.templateFieldLayout(canonicalLayout(e.checked.resultID()), e.Left.Name, field)
 }
 func (g *goEmitter) constructCall(e *Expr, effect bool, ret string, out *strings.Builder) string {
 	return g.construct(e, effect, ret, out)
@@ -1037,7 +1041,7 @@ func (g *goEmitter) matchArm(scrutinee TypeID, arm *MatchArm, effect bool, resul
 		if binding == "_" {
 			continue
 		}
-		layout, _ := g.templateFieldLayout(scrutinee, arm.Pattern.VariantName, field)
+		layout, _ := g.templateFieldLayout(canonicalLayout(scrutinee), arm.Pattern.VariantName, field)
 		g.bindLocal(binding, layout)
 		body.WriteString("efLocal_" + binding + " := efMatch." + goFieldName(field) + "\n_ = efLocal_" + binding + "\n")
 	}
