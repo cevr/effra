@@ -281,15 +281,10 @@ func (c *checker) assignable(actual, expected TypeID, depth int) bool {
 		if template == nil || len(template.Parameters) != len(a.Args) {
 			return false
 		}
-		for i, parameter := range template.Parameters {
-			if parameter.Kind == "type" && a.Args[i] != b.Args[i] {
-				return false
-			}
-			if parameter.Kind == "callable" && !c.assignable(a.Args[i], b.Args[i], depth+1) {
-				return false
-			}
-		}
-		return true
+		// A complete generic application has one canonical identity. Callable
+		// variance is checked where values initialize declared callable slots;
+		// it does not widen the arguments that identify an application.
+		return slices.Equal(a.Args, b.Args)
 	}
 	if a.Kind != "callable" || b.Kind != "callable" || a.Mode != b.Mode || len(a.Args) != len(b.Args) {
 		return false

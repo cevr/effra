@@ -44,7 +44,7 @@ func TestGenericDataPresenceAndAliasExecution(t *testing.T) {
 		{genericAliasShadow, "local:missing"},
 	} {
 		runGenericDataNative(t, fixture.source, fixture.output+"\n")
-		if output := runJS(t, fixture.source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != fixture.output+"\n" {
+		if output := runJSForTarget(t, "js", fixture.source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != fixture.output+"\n" {
 			t.Fatal(output)
 		}
 	}
@@ -142,7 +142,7 @@ func TestGenericDataUnrelatedCallerExecutionAndSharedSources(t *testing.T) {
 		}
 		source := string(data)
 		runGenericDataNative(t, source, fixture.output+"\n")
-		if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != fixture.output+"\n" {
+		if output := runJSForTarget(t, "js", source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != fixture.output+"\n" {
 			t.Fatal(fixture.path, output)
 		}
 		for _, target := range []string{"go", "js"} {

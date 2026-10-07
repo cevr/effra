@@ -149,14 +149,18 @@ func TestDeferredRows(t *testing.T) {
 	}
 }
 func runJS(t *testing.T, source, assertions string) string {
+	return runJSForTarget(t, "js", source, assertions)
+}
+
+func runJSForTarget(t *testing.T, target, source, assertions string) string {
 	t.Helper()
 	bun, err := exec.LookPath("bun")
 	if err != nil {
 		t.Fatal("Bun is required for backend conformance tests")
 	}
-	r := Compile(source)
+	r := CompileFor(source, target)
 	if !r.Checked {
-		t.Fatalf("%+v", r.Diagnostics)
+		t.Fatalf("%s target: %+v", target, r.Diagnostics)
 	}
 	js, _, err := r.Emit(false)
 	if err != nil {

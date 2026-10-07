@@ -71,6 +71,24 @@ func (c *checker) checkedFields(id TypeID) ([]Field, bool) {
 	return r.Fields, true
 }
 
+// occurrenceLayoutID identifies the data value whose fields are retained on
+// an expression occurrence. A callable/recipe occurrence keeps its own
+// execution contract while carrying field evidence for the value it returns.
+// Summary transport must validate that evidence against the returned layout,
+// not against the callable contract node itself.
+func (c *checker) occurrenceLayoutID(id TypeID) TypeID {
+	n := c.node(id)
+	if n == nil {
+		return invalidTypeID
+	}
+	switch n.Kind {
+	case "callable", "recipe", "providerRecipe":
+		return n.Result
+	default:
+		return id
+	}
+}
+
 func (c *checker) checkedVariants(id TypeID) (*Enum, []Variant, bool) {
 	n := c.node(id)
 	if n == nil {

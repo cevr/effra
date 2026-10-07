@@ -285,7 +285,7 @@ effect fn main() -> () { () }`
 
 func TestBundledWitnessJSExecution(t *testing.T) {
 	for _, fixture := range []struct{ source, output string }{{bundledAnnotatedWitness, "Ada\n"}, {bundledDirectionalWitness, "label:Ada:42\n"}, {bundledSwitchWitness, "enabled\n"}, {bundledPayloadWitness, "Ada\n"}} {
-		if output := runJS(t, fixture.source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != fixture.output {
+		if output := runJSForTarget(t, "js", fixture.source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != fixture.output {
 			t.Fatalf("actual witness fields: got %q, want %q", output, fixture.output)
 		}
 	}

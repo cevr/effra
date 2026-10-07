@@ -153,27 +153,23 @@ func (c *checker) resolveDataTemplateLayouts() {
 		for _, parameter := range declaration.Parameters {
 			c.typeContext[parameter.Name] = parameter
 		}
-		resolve := func(fields []Field) {
-			seen := map[string]bool{}
+		resolve := func(fields []Field, owner string, reserveTag bool) {
 			for i := range fields {
-				if declaration.Kind == "enum" && fields[i].Name == "_tag" {
-					c.diagnostic("EF120", "_tag is reserved for closed variant/error discriminators", fields[i].Span)
-				}
-				if seen[fields[i].Name] {
-					c.diagnostic("EF127", "duplicate generic data field "+fields[i].Name, fields[i].Span)
-				}
-				seen[fields[i].Name] = true
 				id := c.canonicalRef(typeRef(fields[i].Type))
-				if id == invalidTypeID || c.node(id).Kind == "opaque" && !c.directTemplateDataArgument(id) {
+				if node := c.node(id); node != nil && node.Kind == "opaque" && !c.directTemplateDataArgument(id) {
 					c.diagnostic("EF127", "unsupported generic field layout", fields[i].Span)
 				}
 				fields[i].typeID, fields[i].TypeRef = id, c.ref(id)
 				c.bindSourceSyntax(fields[i].sourceType, id)
 			}
+			// Generic fields use the same type, duplicate-name, and discriminator
+			// checks as ordinary declarations while the owner's module and type
+			// parameters are still in scope.
+			c.validateFields(fields, owner, reserveTag)
 		}
-		resolve(declaration.Fields)
+		resolve(declaration.Fields, declaration.Name, declaration.Kind == "enum")
 		for i := range declaration.Variants {
-			resolve(declaration.Variants[i].Fields)
+			resolve(declaration.Variants[i].Fields, declaration.Name+"."+declaration.Variants[i].Name, true)
 		}
 		c.typeContext = previous
 		c.functionModule = previousModule
@@ -478,6 +474,104 @@ func (c *checker) applicationFields(id TypeID) ([]Field, bool) {
 	return c.instantiateDataFields(r, r.Fields, n.Args)
 }
 
+// recontractApplication permits a direct source-factory result to satisfy an
+// explicit record application when every changed callable argument is
+// represented by a checked direct field and all field occurrences fit the
+// requested application. It does not make complete applications assignable.
+func (c *checker) recontractApplication(actual checkedExpression, expected TypeID, returnedCall *Expr) (checkedExpression, bool) {
+	if actual.application == nil || returnedCall == nil || returnedCall.Kind != "call" || returnedCall.ResolvedFunction == nil {
+		return checkedExpression{}, false
+	}
+	a, b := c.node(actual.valueID()), c.node(expected)
+	if a == nil || b == nil || a.Kind != "application" || b.Kind != "application" || a.Declaration != b.Declaration || len(a.Args) != len(b.Args) {
+		return checkedExpression{}, false
+	}
+	// Application identity stays invariant. The only explicit boundary adapter
+	// is a direct call to a source factory whose own return expression constructs
+	// this same nominal application. A forwarded parameter or a call through an
+	// alias has complete field occurrences too, but no fresh-construction proof.
+	factory := returnedCall.ResolvedFunction
+	factoryResult := c.node(factory.returnID)
+	if factoryResult == nil || factoryResult.Kind != "application" || factoryResult.Declaration != a.Declaration || factory.Body == nil || len(factory.Body.Statements) == 0 {
+		return checkedExpression{}, false
+	}
+	callee := factory.Name
+	if factory.Module != "" && factory.Module != currentModuleIdentity {
+		callee = factory.Identity
+	} else if returnedCall.Left != nil && returnedCall.Left.Kind == "member" && returnedCall.Left.Left != nil && returnedCall.Left.Left.Kind == "name" {
+		callee = returnedCall.Left.Left.Name + "." + returnedCall.Left.Name
+	}
+	if actual.application.Callee != callee {
+		return checkedExpression{}, false
+	}
+	last := factory.Body.Statements[len(factory.Body.Statements)-1]
+	if last.Kind != "expr" || last.Value == nil || last.Value.Kind != "construct" || actual.application.Result.ID != c.typeNodeID(actual.valueID()) || actual.application.ProducedResult != nil {
+		return checkedExpression{}, false
+	}
+	owner := c.templates[a.Declaration]
+	if owner == nil || owner.Kind != "record" || len(owner.Parameters) != len(a.Args) {
+		return checkedExpression{}, false
+	}
+	actualFields, actualOK := c.applicationFields(actual.valueID())
+	expectedFields, expectedOK := c.applicationFields(expected)
+	if !actualOK || !expectedOK || len(actualFields) != len(owner.Fields) || len(expectedFields) != len(owner.Fields) || len(actual.fields) != len(owner.Fields) {
+		return checkedExpression{}, false
+	}
+	actualContracts := make(map[string]TypeID, len(actualFields))
+	for _, field := range actualFields {
+		actualContracts[field.Name] = field.typeID
+	}
+	expectedContracts := make(map[string]Field, len(expectedFields))
+	for _, field := range expectedFields {
+		expectedContracts[field.Name] = field
+	}
+	for i, parameter := range owner.Parameters {
+		if a.Args[i] == b.Args[i] {
+			continue
+		}
+		if parameter.Kind != "callable" {
+			return checkedExpression{}, false
+		}
+		represented := false
+		for _, field := range owner.Fields {
+			if field.typeID != parameter.typeID {
+				continue
+			}
+			represented = true
+			value, present := actual.fields[field.Name]
+			contract, known := expectedContracts[field.Name]
+			if !present || !known || !c.assignable(value.valueID(), contract.typeID, 0) {
+				return checkedExpression{}, false
+			}
+		}
+		if !represented {
+			return checkedExpression{}, false
+		}
+	}
+	fields := make(map[string]checkedExpression, len(expectedFields))
+	for _, expectedField := range expectedFields {
+		value, present := actual.fields[expectedField.Name]
+		actualContract, known := actualContracts[expectedField.Name]
+		if !present || !known || !c.assignable(value.valueID(), actualContract, 0) || !c.assignable(value.valueID(), expectedField.typeID, 0) {
+			return checkedExpression{}, false
+		}
+		value = value.clone()
+		value.value = c.values.occurrence(expectedField.typeID, value.ownershipFacts(), value.captureFacts())
+		fields[expectedField.Name] = value
+	}
+	recontracted := actual.clone()
+	recontracted.value = c.values.occurrence(expected, actual.ownershipFacts(), actual.captureFacts())
+	recontracted.fields = fields
+	application := *actual.application
+	produced := application.Result
+	produced.Args = append([]TypeRef{}, produced.Args...)
+	produced.ArgIDs = append([]string{}, produced.ArgIDs...)
+	application.ProducedResult = &produced
+	application.Result = c.ref(expected)
+	recontracted.application = &application
+	return recontracted, true
+}
+
 func (c *checker) applicationVariants(id TypeID) ([]Variant, bool) {
 	n := c.node(id)
 	if n == nil || n.Kind != "application" {
@@ -609,7 +703,9 @@ func (c *checker) templateConstruct(e *Expr, env map[string]checkedExpression, i
 			c.diagnostic("EF127", "duplicate template initializer "+field.Name, e.Span)
 			continue
 		}
-		value := c.expr(field.Value, env, inEffect)
+		// Constructor fields initialize pure data values or latent recipes.
+		// An Effect must be run in its own expression and then stored here.
+		value := c.expr(field.Value, env, false)
 		fields[field.Name] = value.clone()
 		formal := declared[index].typeID
 		if formal == invalidTypeID {

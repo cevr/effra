@@ -55,7 +55,7 @@ func TestBundledGenericDataAdmissionAndExecution(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if output := runJS(t, bundledDataExecutable, `if (await Effect.runPromise(__ef_function_main()) !== "Ada:missing") throw new Error("bundled data result"); console.log("ok");`); output != "ok\n" {
+	if output := runJSForTarget(t, "js", bundledDataExecutable, `if (await Effect.runPromise(__ef_function_main()) !== "Ada:missing") throw new Error("bundled data result"); console.log("ok");`); output != "ok\n" {
 		t.Fatal(output)
 	}
 }
@@ -153,10 +153,10 @@ func TestGenericDataExecutableTargets(t *testing.T) {
 		runGenericDataNative(t, source, "Ada:missing\n")
 	}
 	runGenericDataNative(t, genericCallableDataExecutable, "ok\n")
-	if output := runJS(t, genericCallableDataExecutable, `if (await Effect.runPromise(__ef_function_main()) !== "ok") throw new Error("generic callable payload"); console.log("ok");`); output != "ok\n" {
+	if output := runJSForTarget(t, "js", genericCallableDataExecutable, `if (await Effect.runPromise(__ef_function_main()) !== "ok") throw new Error("generic callable payload"); console.log("ok");`); output != "ok\n" {
 		t.Fatal(output)
 	}
-	if output := runJS(t, genericDataExecutable, `if (await Effect.runPromise(__ef_function_main()) !== "Ada:missing") throw new Error("generic result"); console.log("ok");`); output != "ok\n" {
+	if output := runJSForTarget(t, "js", genericDataExecutable, `if (await Effect.runPromise(__ef_function_main()) !== "Ada:missing") throw new Error("generic result"); console.log("ok");`); output != "ok\n" {
 		t.Fatal(output)
 	}
 	r := CompileFor(genericDataExecutable, "js")

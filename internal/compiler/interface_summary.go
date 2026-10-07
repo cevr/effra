@@ -389,7 +389,7 @@ func (x *summaryExporter) occurrence(f *Function, value checkedExpression, depth
 	}
 	slices.Sort(names)
 	for _, name := range names {
-		if _, _, enum := x.c.checkedVariants(value.valueID()); enum {
+		if _, _, enum := x.c.checkedVariants(x.c.occurrenceLayoutID(value.valueID())); enum {
 			v := summaryVariantOccurrence{Name: name, Fields: []summaryFieldOccurrence{}}
 			for _, field := range sortedOccurrenceFields(value.fields[name].fields) {
 				v.Fields = append(v.Fields, summaryFieldOccurrence{Name: field, Occurrence: x.occurrence(f, value.fields[name].fields[field], depth+1)})

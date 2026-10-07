@@ -65,6 +65,9 @@ type ApplicationIdentity struct {
 	Callee           string           `json:"callee"`
 	Arguments        []TypeRef        `json:"arguments"`
 	Result           TypeRef          `json:"result"`
+	// ProducedResult retains the factory's canonical return type when an
+	// explicit function return contract safely re-contracts its fresh data value.
+	ProducedResult *TypeRef `json:"producedResult,omitempty"`
 }
 
 type CallbackPolicy struct {
@@ -334,6 +337,14 @@ func (e checkedExpression) clone() checkedExpression {
 	if e.application != nil {
 		application := *e.application
 		application.Arguments = append([]TypeRef{}, e.application.Arguments...)
+		application.Result.Args = append([]TypeRef{}, e.application.Result.Args...)
+		application.Result.ArgIDs = append([]string{}, e.application.Result.ArgIDs...)
+		if e.application.ProducedResult != nil {
+			produced := *e.application.ProducedResult
+			produced.Args = append([]TypeRef{}, produced.Args...)
+			produced.ArgIDs = append([]string{}, produced.ArgIDs...)
+			application.ProducedResult = &produced
+		}
 		copy.application = &application
 	}
 	return copy
@@ -2725,7 +2736,9 @@ func (c *checker) signature(f *Function) {
 	c.rowContext = c.functionRows(f)
 	defer func() { c.rowContext = previous }()
 	valid := func(t string, span Span) {
-		if !c.typeKnown(t) {
+		if c.requiresTemplateArguments(t) {
+			c.diagnostic("EF127", "generic type "+t+" requires complete application arguments", span)
+		} else if !c.typeKnown(t) {
 			c.diagnostic("EF102", "unknown or unsupported value type "+t, span)
 		}
 	}
@@ -2775,6 +2788,9 @@ func (c *checker) typeKnown(name string) bool {
 	if c.program != nil && c.program.typeExpressions[name] != nil {
 		return c.sourceCallableKnown(c.program.typeExpressions[name])
 	}
+	if c.requiresTemplateArguments(name) {
+		return false
+	}
 	switch name {
 	case "string", "bool", "()", "i64", "File", "Latch", "bytes", "Handler":
 		return true
@@ -2783,6 +2799,11 @@ func (c *checker) typeKnown(name string) bool {
 		return true
 	}
 	return false
+}
+
+func (c *checker) requiresTemplateArguments(name string) bool {
+	template := c.templateByName(name)
+	return template != nil && len(template.Parameters) > 0
 }
 func (c *checker) typeNodeID(id TypeID) string {
 	if id == invalidTypeID {
@@ -2970,11 +2991,11 @@ func (c *checker) canonicalRef(ref TypeRef) TypeID {
 	// a source declaration but has no declaration authority.
 	switch ref.Kind {
 	case "record":
-		if c.records[ref.Name] == nil {
+		if c.records[ref.Name] == nil || len(c.records[ref.Name].Parameters) > 0 {
 			return invalidTypeID
 		}
 	case "enum":
-		if c.enums[ref.Name] == nil {
+		if c.enums[ref.Name] == nil || len(c.enums[ref.Name].Parameters) > 0 {
 			return invalidTypeID
 		}
 	case "error":
@@ -3242,6 +3263,14 @@ func (c *checker) projectChecked(e checkedExpression) ValueType {
 	if e.application != nil {
 		application := *e.application
 		application.Arguments = append([]TypeRef{}, e.application.Arguments...)
+		application.Result.Args = append([]TypeRef{}, e.application.Result.Args...)
+		application.Result.ArgIDs = append([]string{}, e.application.Result.ArgIDs...)
+		if e.application.ProducedResult != nil {
+			produced := *e.application.ProducedResult
+			produced.Args = append([]TypeRef{}, produced.Args...)
+			produced.ArgIDs = append([]string{}, produced.ArgIDs...)
+			application.ProducedResult = &produced
+		}
 		v.Application = &application
 	}
 	shapeID := e.resultID()
@@ -3586,7 +3615,9 @@ func (c *checker) validateFields(fields []Field, owner string, reserveTag bool) 
 		if field.Name == "_tag" && reserveTag {
 			c.diagnostic("EF120", "_tag is reserved for closed variant/error discriminators", field.Span)
 		}
-		if !c.typeKnown(field.Type) {
+		if c.requiresTemplateArguments(field.Type) {
+			c.diagnostic("EF127", "generic type "+field.Type+" requires complete application arguments", field.Span)
+		} else if !c.typeKnown(field.Type) {
 			c.diagnostic("EF102", "unknown or unsupported field type "+field.Type, field.Span)
 		}
 	}
@@ -3651,6 +3682,31 @@ func (c *checker) function(f *Function, record bool) {
 	c.functionWithLocals(f, record, nil, f.Services)
 }
 
+func (c *checker) publishRecontractedExpression(expr *Expr, result checkedExpression) {
+	if expr == nil {
+		return
+	}
+	facts, exists := c.result.facts[expr]
+	if !exists {
+		return
+	}
+	checked := facts.Checked.clone()
+	checked.value = result.value
+	checked.fields = cloneFieldOccurrences(result.fields)
+	checked.callableEvidence = result.callableEvidence
+	checked.application = result.clone().application
+	checked.identity = result.identity
+	// Re-contracting changes the checked value and its projected fields. The
+	// expression's own evaluation and execution facts remain those computed at
+	// its source occurrence; earlier block statements stay on the function body.
+	expr.checked = checked.clone()
+	expr.Type = c.projectCheckedBase(checked)
+	expr.Identity = checked.identity
+	facts.Checked = checked.clone()
+	facts.Type = expr.Type
+	c.result.facts[expr] = facts
+}
+
 func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, allowedServices []string) {
 	previousTypes := c.typeContext
 	c.typeContext = c.templateContext(f.TypeParameters, f.Identity)
@@ -3679,9 +3735,23 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	c.reasons = []Contribution{}
 	previousFacts := c.recordFacts
 	c.recordFacts = record || previousFacts
+	var returnedExpr *Expr
+	if f.Body != nil && len(f.Body.Statements) > 0 {
+		last := f.Body.Statements[len(f.Body.Statements)-1]
+		if last.Kind == "expr" {
+			returnedExpr = last.Value
+		}
+	}
 	actual := c.withRegion("invocation", func() checkedExpression { return c.block(f.Body, env, f.Effect) })
 	c.recordFacts = previousFacts
-	if !c.isKind(actual, "never") && (!c.assignable(actual.valueID(), f.returnID, 0) || actual.isEffect()) {
+	compatible := c.assignable(actual.valueID(), f.returnID, 0)
+	if !compatible && !actual.isEffect() {
+		if recontracted, ok := c.recontractApplication(actual, f.returnID, returnedExpr); ok {
+			actual, compatible = recontracted, true
+			c.publishRecontractedExpression(returnedExpr, actual)
+		}
+	}
+	if !c.isKind(actual, "never") && (!compatible || actual.isEffect()) {
 		c.diagnostic("EF106", fmt.Sprintf("body returns %s; expected %s", c.displayChecked(actual), f.Return), f.Span)
 	}
 	if missing := c.rowDifference(c.rowLabels(actual.evaluation.failureRowID()), c.rowLabels(f.failureID)); len(missing) > 0 {

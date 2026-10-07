@@ -460,8 +460,11 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 		}
 		body := a.occurrence(d.Body, 0)
 		ownership, captures := a.facts(d.Ownership, 0), a.facts(d.Captures, 0)
-		if !slices.Equal(summarizeInvocationFacts(body.ownershipFacts()), ownership) || !slices.Equal(summarizeInvocationFacts(body.captureFacts()), captures) || body.callableEvidence != e {
-			return fmt.Errorf("declaration summary disagrees with retained body occurrence")
+		ownershipMatches := slices.Equal(summarizeInvocationFacts(body.ownershipFacts()), ownership)
+		capturesMatch := slices.Equal(summarizeInvocationFacts(body.captureFacts()), captures)
+		evidenceMatches := body.callableEvidence == e
+		if !ownershipMatches || !capturesMatch || !evidenceMatches {
+			return fmt.Errorf("declaration %s summary disagrees with retained body occurrence (ownership=%t captures=%t evidence=%t)", d.Ref, ownershipMatches, capturesMatch, evidenceMatches)
 		}
 		values = append(values, admitted{f, ownership, captures, e})
 	}
@@ -558,8 +561,9 @@ func (a *summaryAdmission) occurrence(ref string, depth int) checkedExpression {
 		return checkedExpression{}
 	}
 	fields := map[string]checkedExpression{}
-	shape, hasShape := a.c.checkedFields(id)
-	_, variants, enum := a.c.checkedVariants(id)
+	layoutID := a.c.occurrenceLayoutID(id)
+	shape, hasShape := a.c.checkedFields(layoutID)
+	_, variants, enum := a.c.checkedVariants(layoutID)
 	if enum {
 		if len(item.Fields) != 0 {
 			a.err = fmt.Errorf("enum occurrence has record fields")
@@ -578,7 +582,7 @@ func (a *summaryAdmission) occurrence(ref string, depth int) checkedExpression {
 			}
 			fields[variant.Name] = payload
 		}
-		if a.c.callableFieldLayout(id, map[TypeID]bool{}, map[TypeID]bool{}, 0) && len(fields) == 0 {
+		if a.c.callableFieldLayout(layoutID, map[TypeID]bool{}, map[TypeID]bool{}, 0) && len(fields) == 0 {
 			a.err = fmt.Errorf("missing variant occurrence evidence")
 			return checkedExpression{}
 		}
