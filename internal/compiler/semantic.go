@@ -2385,6 +2385,7 @@ func (c *checker) check() {
 			}
 			methods[f.Name] = true
 			c.signature(f)
+			c.bindSignatureParameters(f)
 			if len(f.Services) > 0 {
 				c.diagnostic("EF103", "service methods cannot declare uses in this prototype", f.Span)
 			}

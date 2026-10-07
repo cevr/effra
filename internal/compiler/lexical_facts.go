@@ -347,6 +347,25 @@ func (c *checker) bindLocal(kind, name string, span, extent Span, owner int, val
 	return value
 }
 
+// bindSignatureParameters records the parameters of an original bodyless
+// declaration, a service operation, from its checked signature. No body
+// environment binds them, so they have declaration facts and no uses.
+func (c *checker) bindSignatureParameters(f *Function) {
+	facts := c.result.lexical
+	if facts == nil {
+		return
+	}
+	if _, original := facts.functions[f]; !original {
+		return
+	}
+	previous := c.lexicalOwner
+	c.lexicalOwner = f
+	defer func() { c.lexicalOwner = previous }()
+	for _, p := range f.Params {
+		c.bindLocal("parameter", p.Name, p.Span, p.Extent, facts.parameters[p.Span.Offset], c.checkedDataID(p.typeID, nil, nil))
+	}
+}
+
 func (c *checker) observeLocalUse(e *Expr, value checkedExpression) {
 	if c.lexicalOwner == nil || c.result.lexical == nil || value.lexicalBinding == "" {
 		return

@@ -1,6 +1,8 @@
 package lsp
 
 import (
+	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -207,5 +209,47 @@ func TestNavigationOnUncheckedSourceAnswersNull(t *testing.T) {
 	}
 	if !published {
 		t.Fatal("incomplete source lost its diagnostics")
+	}
+}
+
+// A service operation has no body, so its parameters are declared only by its
+// checked signature; they answer like a body-checked parameter does.
+func TestNavigationAnswersSignatureOnlyParameters(t *testing.T) {
+	uri := "file:///tmp/effra-service-parameters.ef"
+	source := "// 𐐀\r\nservice Users { effect fn get(id: string, n: i64) -> string } // 𐐀\r\n" +
+		"impl Fixed for Users { effect fn get(key: string, count: i64) -> string { key } }\r\n"
+	probes := []struct{ context, name, declaration, hover string }{
+		{"get(id", "id", "get(id", "parameter id: string"},
+		{", n:", "n", ", n:", "parameter n: i64"},
+		{"get(key", "key", "get(key", "parameter key: string"}, // body-checked control
+		{"{ key }", "key", "get(key", "parameter key: string"},
+	}
+	for _, target := range []string{"go", "js"} {
+		calls := []any{initialize(), initialized(), open(uri, source, 1)}
+		for i, p := range probes {
+			offset := at(t, source, p.context, p.name)
+			calls = append(calls, pointAt(uri, "textDocument/hover", fmt.Sprintf("hover-%d", i), source, offset),
+				pointAt(uri, "textDocument/definition", fmt.Sprintf("definition-%d", i), source, offset))
+		}
+		var in, out bytes.Buffer
+		for _, v := range append(calls, shutdown(), call("exit", nil, nil)) {
+			in.Write(frame(t, v))
+		}
+		if err := Serve(target, &in, &out); err != nil {
+			t.Fatal(err)
+		}
+		byID := responses(t, readMessages(t, &out))
+		for i, p := range probes {
+			label := fmt.Sprintf("%s %q in %q", target, p.name, p.context)
+			if got := hoverText(t, byID[fmt.Sprintf("hover-%d", i)]); got != p.hover {
+				t.Fatalf("%s: hover %q, want %q", label, got, p.hover)
+			}
+			declared := at(t, source, p.declaration, p.name)
+			definition, ok := byID[fmt.Sprintf("definition-%d", i)]["result"].(map[string]any)
+			if !ok || definition["uri"] != uri {
+				t.Fatalf("%s: definition %v", label, byID[fmt.Sprintf("definition-%d", i)])
+			}
+			sameRange(t, label, definition["range"], editorRange(source, declared, len(p.name)))
+		}
 	}
 }
