@@ -396,6 +396,25 @@ if (backpressure) { // shutdown joins the request scope, then aborts a response 
   socket.destroy();
   await server.done;
 }
+{ // a parser error preempts an earlier pipelined response not yet written (a documented JS host limit): the client receives only the 400, and the earlier request is cancelled
+  const started = deferred(), cleaned = deferred();
+  const server = await listen(request => request.path === '/slow'
+    ? Effect.flatMap(Effect.acquireRelease(Effect.sync(() => started.resolve()), () => Effect.sync(() => cleaned.resolve())), () => Effect.never)
+    : Effect.succeed(ok('fine')));
+  const socket = net.connect(server.port, server.host);
+  let received = '';
+  socket.on('data', chunk => { received += chunk; });
+  const closed = new Promise(resolve => socket.on('close', resolve));
+  socket.on('error', () => {});
+  socket.write('GET /slow HTTP/1.1\r\nHost: x\r\n\r\n');
+  await started.promise;
+  socket.write('POST /bad HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nab\r\n0\r\n\r\n');
+  await closed;
+  check(received === 'HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n', 'a malformed body pipelined after an unwritten response: ' + received);
+  check(!(await pending(cleaned.promise, 2000)), 'the preempted request was not cancelled');
+  server.fiber.interruptUnsafe();
+  await server.done;
+}
 if (backpressure) { // a malformed pipelined body keeps its admission until its 400 has drained
   const cleaned = deferred();
   const big = cleanedLarge(cleaned);

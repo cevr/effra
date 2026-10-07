@@ -124,14 +124,16 @@ const __ef_http_serve = (address, timeouts, onRequest) => Effect.gen(function* (
   const server = createServer({ connectionsCheckingInterval: Math.min(timeouts.readHeaderMillis, 1000) }, (req, res) => onRequest(req, res, transport));
   // Parser failures belong to the transport. The request being read stops
   // reading and keeps its exchange, and so its admission, until the error
-  // response, queued behind any earlier response, has been handed to the OS
-  // or the connection closed (the end callback runs either way); its own
-  // response is never published, so only this write retires it. The
-  // transport then destroys the connection itself, as node:http's default
-  // parser-error path does: ending only half-closes it, and a client that
-  // keeps its side open would otherwise hold shutdown open on hosts whose
-  // closeAllConnections leaves such a socket alone (Bun). A header timeout
-  // closes silently.
+  // response has been handed to the OS or the connection closed (the end
+  // callback runs either way); its own response is never published, so only
+  // this write retires it. The transport then destroys the connection itself,
+  // as node:http's default parser-error path does: ending only half-closes
+  // it, and a client that keeps its side open would otherwise hold shutdown
+  // open on hosts whose closeAllConnections leaves such a socket alone (Bun).
+  // The error response goes straight to the socket, outside node:http's
+  // response queue: it follows only bytes already written there, and an
+  // earlier pipelined response not yet written is never sent (a known host
+  // limit, docs/runtime.md). A header timeout closes silently.
   server.on('clientError', (error, socket) => {
     const reading = transport.reading.get(socket);
     reading?.stop();

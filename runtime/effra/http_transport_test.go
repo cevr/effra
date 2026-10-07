@@ -172,6 +172,45 @@ func TestHTTPTransportRejectsMalformedAndStalledBodiesWithoutHandling(t *testing
 	}
 }
 
+// Go serves a connection's requests in order: a malformed body pipelined
+// behind a request whose response is not yet written is answered after that
+// response, never in its place, and the connection then closes.
+func TestHTTPTransportAnswersAPipelinedMalformedBodyAfterTheEarlierResponse(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	server := startTransport(t, testLimits, func(*FiberContext, HTTPRequest) Exit[HTTPResponse] {
+		close(started)
+		<-release
+		return respond(200, "text/plain", "slow")
+	})
+	conn, err := net.Dial("tcp", server.address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := io.WriteString(conn, "GET /slow HTTP/1.1\r\nHost: x\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	wait(t, started)
+	if _, err := io.WriteString(conn, "POST /bad HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nab\r\n0\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	reader := bufio.NewReader(conn)
+	first, body := readResponse(t, reader)
+	if first == nil || first.StatusCode != 200 || string(body) != "slow" {
+		t.Fatalf("earlier response: %v %q", first, body)
+	}
+	second, body := readResponse(t, reader)
+	requireStatusOnly(t, second, body, 400)
+	if _, err := reader.ReadByte(); err != io.EOF {
+		t.Fatalf("connection stayed open after the 400: %v", err)
+	}
+	if calls := server.calls.Load(); calls != 1 {
+		t.Fatalf("the malformed body reached the handler: %d calls", calls)
+	}
+}
+
 func TestHTTPTransportFailsClosedWithGeneric500(t *testing.T) {
 	server := startTransport(t, testLimits, func(fc *FiberContext, request HTTPRequest) Exit[HTTPResponse] {
 		switch request.Path {
