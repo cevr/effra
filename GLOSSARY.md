@@ -84,7 +84,7 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Machine-backed actor** (specified): An actor whose behavior follows a checked machine plan, adding transitions and state-entry lifetimes to ordinary actor ownership and messaging.
 
-**Supervisor** (proposed): An owner that observes completed child exits and applies an explicit restart, stop or escalation policy using fresh child factories and bounded restart attempts.
+**Supervisor** (proposed): An owner that observes completed child exits and applies an explicit restart, stop or escalation policy using fresh child factories and an explicit restart budget: a finite restart intensity, or `unbounded` flagged by the `no-unbounded-restart` justifier rule.
 
 **Actor address** (proposed): A typed identity used to route to an actor independently of its current running instance; an address alone promises neither persistence nor delivery.
 
