@@ -63,3 +63,40 @@ func TestRepeatedCompilationIsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// One hundred fresh compiles of generic-users.ef publish one canonical
+// snapshot, one generated main and one generation. The bundled templates
+// Option and Result once entered the program in either order, which changed
+// the generated Go bytes and with them the published generation identity.
+func TestGenericNativeGenerationIsDeterministic(t *testing.T) {
+	source, err := os.ReadFile("../../examples/generic-users.ef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	facts, mains, generations := map[string]int{}, map[string]int{}, map[string]int{}
+	for i := 0; i < 100; i++ {
+		r := CompileAt(string(source), "go", "../../examples")
+		if !r.Checked {
+			t.Fatal(r.Diagnostics)
+		}
+		application, err := r.GoApplication(GoGenerationBuild)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := r.GoSourceSnapshot("/origin/generic-users.ef", application)
+		if err != nil {
+			t.Fatal(err)
+		}
+		generation, err := PublishGoSourceSnapshot(root, snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		facts[checkedFacts(r)]++
+		mains[digestBytes(application.Main)]++
+		generations[generation.GenerationID]++
+	}
+	if len(facts) != 1 || len(mains) != 1 || len(generations) != 1 {
+		t.Fatalf("100 compiles produced %d canonical snapshots, %d generated mains and %d generations", len(facts), len(mains), len(generations))
+	}
+}

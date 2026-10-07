@@ -448,7 +448,12 @@ func TestClosedDataEmptyEnumEliminationBuildsOnGo(t *testing.T) {
 	source := `enum Empty {}
 fn absurd(value: Empty) -> string { match value {} }
 effect fn effectAbsurd(value: Empty) -> string { match value {} }
-effect fn main() -> string { "ok" }`
+effect fn main() -> string {
+ // Both empty matches are retained, so the native build lowers them.
+ let keepPure = absurd
+ let keepEffect = effectAbsurd
+ "ok"
+}`
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatalf("empty enum elimination should check: %+v", r.Diagnostics)
