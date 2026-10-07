@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 )
@@ -138,7 +139,10 @@ func (r *Result) loadBundledImports(source string) {
 	}
 	queue := []request{}
 	exhausted := false
-	for _, typ := range p.typeExpressions {
+	// Admission order allocates bundled templates' type identities, so the
+	// spelling map is walked in a stable order rather than map order.
+	for _, spelling := range slices.Sorted(maps.Keys(p.typeExpressions)) {
+		typ := p.typeExpressions[spelling]
 		if alias, member, qualified := strings.Cut(typ.Application, "."); qualified && aliases[alias] != "" {
 			if len(queue) >= maxBundledReferences {
 				exhausted = true
