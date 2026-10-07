@@ -308,25 +308,69 @@ effect fn program() -> void uses { Console, Foreign } {
 // effra.bindings.json attaches behavior to a method by its go/types full name,
 // the declaring method's identity: a promoted method carries the contract of
 // the method it promotes, and a context-forwarding method observes the managed
-// fiber's cancellation.
+// fiber's cancellation. The timeout's deadline comes from a Scheduler provider
+// whose sleep waits until the native method has entered, so the interruption
+// is triggered only after entry, and the method reports that it entered with
+// a live context and returned because that context was cancelled.
 func TestHostMethodBehaviorContracts(t *testing.T) {
 	root := t.TempDir()
 	for name, contents := range map[string]string{
 		"go.mod": "module example.test/methods\n\ngo 1.27\n",
 		"methods.go": `package methods
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type Client struct{}
 
 func New() *Client { return &Client{} }
 
+var (
+	entered, returned = make(chan struct{}), make(chan struct{})
+	entry, exit       string
+)
+
 func (c *Client) Lookup(ctx context.Context, id string) (string, error) {
 	if id == "slow" {
-		<-ctx.Done()
-		return "partial", ctx.Err()
+		entry = "entered-dead"
+		if ctx.Err() == nil {
+			entry = "entered-live"
+		}
+		close(entered)
+		defer close(returned)
+		select {
+		case <-ctx.Done():
+			exit = "cancelled"
+			return "partial", ctx.Err()
+		case <-time.After(10 * time.Second):
+			exit = "stuck"
+			return "stuck", nil
+		}
 	}
 	return "Ada", nil
+}
+
+// AwaitEntered is the deadline barrier: it returns once the slow Lookup has
+// entered native code.
+func AwaitEntered() bool {
+	select {
+	case <-entered:
+		return true
+	case <-time.After(10 * time.Second):
+		return false
+	}
+}
+
+// Entry reports how the slow Lookup entered and returned.
+func Entry() string {
+	select {
+	case <-returned:
+		return entry + "," + exit
+	case <-time.After(10 * time.Second):
+		return "not-returned"
+	}
 }
 
 func (c *Client) Name() string { return "client" }
@@ -352,14 +396,21 @@ func NewInstance() Instance { return Instance{} }
 	}
 	r := CompileAt(`import go m "example.test/methods"
 import Data "effra/data"
+impl AfterEntry for Scheduler {
+    effect fn sleep(milliseconds: i64) -> void {
+        if run m.AwaitEntered().provide<Foreign>(Host) { void } else { void }
+    }
+    effect fn advance(milliseconds: i64) -> void { void }
+    effect fn awaitRegistration() -> void { void }
+}
 effect fn main() -> string raises {GoError} {
     match run m.New().provide<Foreign>(Host) {
         Data.Option.None => "none",
         Data.Option.Some { value: client } => {
-            let timed = run client.Lookup("slow").orFail().timeout(1).catch<Timeout>("done").provide<Foreign>(Host).provide<Scheduler>(LiveScheduler)
+            let timed = run client.Lookup("slow").orFail().timeout(1).catch<Timeout>("done").provide<Foreign>(Host).provide<Scheduler>(AfterEntry)
             let promoted = run (run m.Wrap(client).provide<Foreign>(Host)).Lookup("fast").orFail().provide<Foreign>(Host)
             let generic = run (run m.NewInstance().provide<Foreign>(Host)).Lookup("generic").orFail().provide<Foreign>(Host)
-            timed + ":" + promoted + ":" + generic + ":" + run client.Name().provide<Foreign>(Host)
+            timed + ":" + run m.Entry().provide<Foreign>(Host) + ":" + promoted + ":" + generic + ":" + run client.Name().provide<Foreign>(Host)
         }
     }
 }`, "go", root)
@@ -384,7 +435,7 @@ effect fn main() -> string raises {GoError} {
 	if name := bindings["(*m.Client).Name"]; name.Context || name.Cancellation != "unknown" {
 		t.Fatalf("unclassified method acquired a contract: %+v", name)
 	}
-	if output := runGeneratedGo(t, r); output != "done:Ada:generic:client\n" {
+	if output := runGeneratedGo(t, r); output != "done:entered-live,cancelled:Ada:generic:client\n" {
 		t.Fatalf("method contracts: %q", output)
 	}
 	if err := os.WriteFile(filepath.Join(root, "effra.bindings.json"), []byte(`{"(*example.test/methods.Client).Name":{"context":"fiber"}}`), 0600); err != nil {
