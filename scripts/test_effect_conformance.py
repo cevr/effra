@@ -53,8 +53,9 @@ class MappingTests(unittest.TestCase):
     def test_upstream_anchors_come_from_the_verified_pinned_bytes(self) -> None:
         pinned = mapping.corpus.verify()
         target = self.value["cases"][0]["upstream"]["file"]
-        on_disk = (mapping.ROOT / mapping.corpus.CHECKOUT_RELATIVE / target).read_bytes()
-        self.assertEqual(pinned.contents[target], on_disk)
+        on_disk = (mapping.ROOT / mapping.corpus.CHECKOUT_RELATIVE / target).read_text(encoding="utf-8")
+        # Compare lines: a clean checkout may carry converted line endings (core.autocrlf), which verification accepts.
+        self.assertEqual(pinned.text(target).splitlines(), on_disk.splitlines())
         # Only the verified bytes change; the checkout file still carries every anchor.
         drifted = mapping.corpus.PinnedCorpus(pinned.manifest, {**pinned.contents, target: b"anchors moved\n"})
         with mock.patch.object(mapping.corpus, "verify", return_value=drifted):
