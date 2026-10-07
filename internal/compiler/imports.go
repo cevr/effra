@@ -52,9 +52,7 @@ type Binding struct {
 	HostResults    []HostComponent `json:"hostResults"`
 	// member is the exported Go name; a call site supplies its own import alias.
 	member string
-	// native is the go/types full name of the function or method; receiver is
-	// the admitted receiver type of a method binding.
-	native   string
+	// receiver is the admitted receiver type of a method binding.
 	receiver *hostType
 	// params and results are the admitted native types, excluding a forwarded
 	// context and the trailing error.
@@ -513,7 +511,7 @@ func admitCallable(b *Binding, fn *types.Func, host *hostImports) string {
 	// stays the instantiated one.
 	sig := fn.Type().(*types.Signature)
 	meta := host.contracts[fn.Origin().FullName()]
-	b.Signature, b.Cancellation, b.Provenance, b.member, b.native = sig.String(), "unknown", "Go export data; behavior unclassified", fn.Name(), fn.FullName()
+	b.Signature, b.Cancellation, b.Provenance, b.member = sig.String(), "unknown", "Go export data; behavior unclassified", fn.Name()
 	if meta.Cancellation != "" {
 		b.Cancellation = meta.Cancellation
 		b.Provenance = "Go export data; reviewed effra.bindings.json assertion"
