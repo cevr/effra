@@ -1,0 +1,82 @@
+error OrderNotFound {
+    id: string
+}
+error GatewayDown
+
+record Order {
+    id: string
+    total: i64
+}
+
+enum Payment {
+    Pending
+    Authorized {
+        authId: string
+    }
+    Declined {
+        reason: string
+    }
+}
+
+service Orders {
+    effect fn find(id: string) -> Order raises { OrderNotFound }
+}
+
+service Gateway {
+    effect fn authorize(order: Order) -> Payment raises { GatewayDown }
+}
+
+effect fn checkout(id: string) -> string
+    raises { OrderNotFound, GatewayDown, Timeout }
+    uses { Orders, Gateway, Scheduler }
+{
+    let order = run Orders.find(id)
+    let payment = run Gateway.authorize(order).timeout(500)
+    match payment {
+        Payment.Pending => "pending"
+        Payment.Authorized { authId } => "paid " + authId
+        Payment.Declined { reason } => "declined: " + reason
+    }
+}
+
+impl MemoryOrders for Orders {
+    effect fn find(id: string) -> Order raises { OrderNotFound } {
+        if id == "42" {
+            Order {
+                id,
+                total: 1999
+            }
+        } else {
+            fail OrderNotFound {
+                id
+            }
+        }
+    }
+}
+
+impl FakeGateway(authId: string) for Gateway {
+    effect fn authorize(order: Order) -> Payment raises { GatewayDown } {
+        Payment.Authorized {
+            authId
+        }
+    }
+}
+
+layer Live {
+    Orders = MemoryOrders
+    Gateway = FakeGateway("auth-7")
+    Scheduler = LiveScheduler
+}
+
+effect fn report(id: string) -> void uses { Console } {
+    let outcome = run checkout(id).provide(Live)
+        .catch<OrderNotFound>("no such order")
+        .catch<GatewayDown>("gateway down")
+        .catch<Timeout>("gateway timed out")
+    run Console.log(outcome)
+}
+
+effect fn main() -> void {
+    run report("42").provide<Console>(Stdout)
+    run report("7").provide<Console>(Stdout)
+}

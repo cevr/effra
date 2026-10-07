@@ -1,4 +1,5 @@
 examples/main.ef
+examples/checkout.ef
 examples/data.ef
 examples/workflow.ef
 examples/http.ef

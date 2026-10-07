@@ -1,195 +1,484 @@
 # Effra
 
-An experimental language for servers, combining Go's native executable target with explicit effect contracts and owned lifetimes. Write `.ef` files and build them with `ef`.
+**Go's directness and native binaries. Effect's typed failures, explicit dependencies and owned lifetimes. Algebraic data types with exhaustive matching. One small language.**
 
-Effra combines a small explicit language with deferred programs, explicit failures and dependencies, scopes that own children and resources, and host interop without repeating native function signatures. Types and guardrails are inspectable through the same compiler model used by the CLI and MCP.
+Effra is an experimental language for servers. You write `.ef` files and `ef` compiles them to a single static Go executable, or to JavaScript built on [Effect](https://effect.website). Every function signature states what it returns, every way it can fail and every service it needs, and the compiler checks all three.
 
-The direction is **Go-like directness, algebraic data types, and explicit Effect-style contracts**. The [showcase guide](docs/showcases.md) connects these ideas to real application patterns and labels which features remain proposals.
+> **Status: runnable prototype.** Everything in the first two sections compiles and runs today. The gate checks every Effra snippet that isn't labelled as a sketch. Syntax and APIs will still change.
 
-The [contender roadmap](docs/contender-roadmap.md) identifies what real ports still need: application data types, native SDK objects, dependent providers, codecs/streams, incremental tooling and measurable adoption tests.
+## One program, three languages
 
-**Status: runnable prototype.** Syntax, APIs and inspection schemas are experimental. Go is the default target; JavaScript emits pinned Effect. This is a server language experiment, with no kernel or hard real-time execution profile.
+Here is a checkout step written three ways: look up an order, ask a payment gateway to authorize it within 500 ms, and describe the result. The payment result is a closed sum type, and every failure is a named, typed error. All three versions are checked in and print the same thing.
 
-The runnable prototype is a small Go compiler that checks `.ef` source and produces native Go executables or JavaScript using Effect 4.0.1. It supports lazy effects, closed failure/service rows, nominal services, explicit provision, selective recovery, and canonical JSON inspection through CLI and read-only MCP. Both targets support owning scopes, child fibers, cooperative cancellation, and timeouts that wait for cleanup. Go additionally supports automatic primitive host imports, managed files, runtime snapshots, and an HTTP server.
+### Effra
+
+```rust
+error OrderNotFound { id: string }
+error GatewayDown
+
+record Order {
+    id: string
+    total: i64
+}
+
+enum Payment {
+    Pending
+    Authorized { authId: string }
+    Declined { reason: string }
+}
+
+service Orders {
+    effect fn find(id: string) -> Order raises { OrderNotFound }
+}
+
+service Gateway {
+    effect fn authorize(order: Order) -> Payment raises { GatewayDown }
+}
+
+effect fn checkout(id: string) -> string
+    raises { OrderNotFound, GatewayDown, Timeout }
+    uses { Orders, Gateway, Scheduler }
+{
+    let order = run Orders.find(id)
+    let payment = run Gateway.authorize(order).timeout(500)
+    match payment {
+        Payment.Pending => "pending"
+        Payment.Authorized { authId } => "paid " + authId
+        Payment.Declined { reason } => "declined: " + reason
+    }
+}
+```
+
+The signature tells the whole story. `checkout` returns a `string`. It can fail with exactly `OrderNotFound`, `GatewayDown` or `Timeout`. It needs `Orders`, `Gateway` and `Scheduler`, the last because `.timeout` needs a clock to race against. The body is ordinary top-to-bottom code: `run` executes a deferred effect, and the match is exhaustive. Calling `checkout("42")` only builds a lazy program. The caller decides where it runs and what it's provided with ([full program](examples/checkout.ef)):
+
+```rust
+// From examples/checkout.ef
+layer Live {
+    Orders = MemoryOrders
+    Gateway = FakeGateway("auth-7")
+    Scheduler = LiveScheduler
+}
+```
+
+### TypeScript with Effect 4
+
+```ts
+// From examples/compare/checkout.ts
+import { Cause, Context, Data, Effect, Layer } from "effect"
+
+class OrderNotFound extends Data.TaggedError("OrderNotFound")<{ readonly id: string }> {}
+class GatewayDown extends Data.TaggedError("GatewayDown") {}
+
+interface Order {
+  readonly id: string
+  readonly total: number
+}
+
+type Payment = Data.TaggedEnum<{
+  Pending: {}
+  Authorized: { readonly authId: string }
+  Declined: { readonly reason: string }
+}>
+const Payment = Data.taggedEnum<Payment>()
+
+class Orders extends Context.Service<Orders, {
+  readonly find: (id: string) => Effect.Effect<Order, OrderNotFound>
+}>()("Orders") {}
+
+class Gateway extends Context.Service<Gateway, {
+  readonly authorize: (order: Order) => Effect.Effect<Payment, GatewayDown>
+}>()("Gateway") {}
+
+// Inferred: Effect<string, OrderNotFound | GatewayDown | TimeoutError, Orders | Gateway>
+const checkout = (id: string) =>
+  Effect.gen(function* () {
+    const orders = yield* Orders
+    const gateway = yield* Gateway
+    const order = yield* orders.find(id)
+    const payment = yield* gateway.authorize(order).pipe(Effect.timeout("500 millis"))
+    return Payment.$match(payment, {
+      Pending: () => "pending",
+      Authorized: ({ authId }) => `paid ${authId}`,
+      Declined: ({ reason }) => `declined: ${reason}`
+    })
+  })
+```
+
+Effect gives you the same guarantees, and Effra borrows its model directly. The cost is in the encoding: service classes declared through a two-stage generic, generators with `yield*`, `pipe`, and a contract that is inferred rather than written down. You only see that contract by hovering.
+
+### Go
+
+```go
+// From examples/compare/go/main.go
+type OrderNotFoundError struct{ ID string }
+
+func (e *OrderNotFoundError) Error() string { return "order not found: " + e.ID }
+
+var ErrGatewayDown = errors.New("gateway down")
+
+type Order struct {
+	ID    string
+	Total int64
+}
+
+// Payment is a closed set only by convention: any type with isPayment satisfies it.
+type Payment interface{ isPayment() }
+
+type Pending struct{}
+type Authorized struct{ AuthID string }
+type Declined struct{ Reason string }
+
+func (Pending) isPayment()    {}
+func (Authorized) isPayment() {}
+func (Declined) isPayment()   {}
+
+type Orders interface {
+	Find(ctx context.Context, id string) (Order, error)
+}
+
+type Gateway interface {
+	Authorize(ctx context.Context, order Order) (Payment, error)
+}
+
+// Checkout can fail with *OrderNotFoundError, ErrGatewayDown or context.DeadlineExceeded,
+// but the signature only says error, and only this comment says which.
+func Checkout(ctx context.Context, orders Orders, gateway Gateway, id string) (string, error) {
+	order, err := orders.Find(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	payment, err := gateway.Authorize(ctx, order)
+	if err != nil {
+		return "", err
+	}
+	switch p := payment.(type) {
+	case Pending:
+		return "pending", nil
+	case Authorized:
+		return "paid " + p.AuthID, nil
+	case Declined:
+		return "declined: " + p.Reason, nil
+	default: // the compiler cannot prove this unreachable; nil also lands here
+		return "", fmt.Errorf("unknown payment %T", payment)
+	}
+}
+```
+
+Go's version is the most direct to read, and Effra keeps that directness: plain statements, no generators, no combinator chains. What Go can't tell you is which errors come back, whether the switch covers every case, or what a nil `Payment` would do.
+
+### Same mistakes, three compilers
+
+Each row makes one mistake in the program above and records what happens. The Effra column is the actual `ef diagnostics` output, verified by the gate ([`scripts/readme_smoke.py`](scripts/readme_smoke.py)).
+
+| Mistake | Go | TypeScript + Effect | Effra |
+| --- | --- | --- | --- |
+| Forget the `Declined` case | Compiles; falls into `default` at runtime | Type error | `EF117: missing match arm for Payment.Declined` |
+| Add the timeout but don't declare it | Compiles; a new error appears at runtime | Compiles; the inferred error union silently widens | `EF107: undeclared failures: Timeout` |
+| A caller forgets to handle `Timeout` | Compiles | Compiles unless a return type is written by hand | `EF107: undeclared failures: Timeout` |
+| Forget to wire the `Gateway` implementation | Compiles if `nil` is passed or a struct field is left unset; panics when called | Type error at `runPromise` | `EF108: missing service requirements: Gateway` |
+| Build an `Order` without its `total` | Compiles; `total` is silently `0` | Type error | `EF114: missing payload field total` |
+| Typo a variant field (`auth` for `authId`) | Compile error | Type error | `EF114: unknown payload field auth` |
+
+### At a glance
+
+| | Go | TypeScript + Effect | Effra |
+| --- | --- | --- | --- |
+| Which failures can happen | `error`; read the body | Inferred `E` type parameter | Declared in `raises { … }` and checked |
+| What a function needs | Parameters, struct fields, `context` | Inferred `R` type parameter | Declared in `uses { … }` and checked |
+| Sum types | Interface plus marker method, open to anyone | `Data.TaggedEnum` plus `$match` | `enum` with payloads; `match` is exhaustive |
+| Absence | `nil` pointers, interfaces, maps and slices | `null`/`undefined` (strict mode tracks them) | No null; absence is `Option<T>` |
+| Control flow | Plain statements | Generators, `yield*`, `pipe` | Plain statements; `run` marks each effect |
+| Concurrency | Goroutines plus `context`; you own cleanup | Fibers with structured interruption | `scope`, `fork`, `join`, `interrupt`; a scope waits for its children's cleanup |
+| Dependency wiring | Constructors written by hand | `Layer` values | `layer` declarations the compiler checks and can graph |
+| Output | Static native binary | JavaScript on Node, Bun or a browser | Static native Go binary, or JavaScript on Effect |
+
+## A tour of what works today
+
+### Data without null
+
+Records, enums with payloads and generic types compose, and nothing is ever `nil`. The bundled `Data` module supplies `Option` and `Result`:
+
+```rust
+import Data "effra/data"
+
+record User {
+    name: string
+}
+
+fn label(user: Data.Option<User>) -> string {
+    match user {
+        Data.Option.None => "missing"
+        Data.Option.Some { value: found } => found.name
+    }
+}
+
+fn lookup(id: string) -> Data.Option<User> {
+    if id == "42" {
+        Data.Option.Some { value: User { name: "Ada" } }
+    } else {
+        Data.Option<User>.None {}
+    }
+}
+```
+
+### Matching several values at once
+
+`match` takes several subjects and checks every combination of their variants. An arm can list alternatives with `|`, and a name bound in every alternative is bound once. Here a session's transitions are one table:
+
+```rust
+enum Session {
+    Idle
+    Active { key: string }
+    Closed
+}
+
+enum Event {
+    Open { key: string }
+    Refresh { key: string }
+    Close
+}
+
+enum Step {
+    Go { next: Session }
+    Stay
+    Reject { reason: string }
+}
+
+fn step(state: Session, event: Event) -> Step {
+    match state, event {
+        Session.Idle, Event.Open { key } | Event.Refresh { key } => Step.Go { next: Session.Active { key } }
+        Session.Active { key: current }, Event.Open { key } => if current == key { Step.Stay {} } else { Step.Reject { reason: "busy " + current } }
+        Session.Active, Event.Refresh { key } => Step.Go { next: Session.Active { key } }
+        Session.Idle | Session.Active, Event.Close => Step.Go { next: Session.Closed {} }
+        Session.Closed, Event.Open | Event.Refresh | Event.Close => Step.Reject { reason: "closed" }
+    }
+}
+```
+
+Leave out a pair, for example by dropping `Session.Active` from the `Event.Close` arm, and the check fails with `EF117`, naming the missing combination.
+
+### Errors with payloads, and recovery that removes them
+
+Errors are nominal and can carry fields. `.catch<E>(fallback)` removes exactly `E` from the failure row and leaves the rest to the type checker:
+
+```rust
+// From examples/checkout.ef
+effect fn report(id: string) -> void uses { Console } {
+    let outcome = run checkout(id).provide(Live)
+        .catch<OrderNotFound>("no such order")
+        .catch<GatewayDown>("gateway down")
+        .catch<Timeout>("gateway timed out")
+    run Console.log(outcome)
+}
+```
+
+`report` declares no failures, so deleting any one of those `.catch` lines is a compile error.
+
+### Layers: dependency graphs the compiler can see
+
+A `layer` binds services to implementations. Layers merge by identity, so a store shared by two domains is built once. A fixture swaps one node for the whole graph:
+
+```rust
+// From examples/layers.ef
+layer Shared {
+    Store = Memory("live")
+}
+layer Accounts {
+    merge Shared;
+    Account = AccountLive
+}
+layer Invoices {
+    merge Shared;
+    Invoice = InvoiceLive
+}
+layer App provides { Account, Invoice } {
+    merge Accounts, Invoices
+}
+layer Fixture {
+    merge App;
+    replace Store = Memory("fixture")
+}
+```
+
+`provides` hides `Store` from callers. `replace` happens before anything is constructed, and `ef graph` shows the selected graph.
+
+### Structured concurrency
+
+Children belong to a scope. Interrupting one waits for its cleanup to finish before the next line runs, on both targets:
+
+```rust
+// From examples/latest-task.ef
+effect fn replacement() -> string uses { Clock } {
+    scope {
+        let previous = fork search("old")
+        run previous.interrupt()
+        let current = fork search("new")
+        run current.join()
+    }
+}
+```
+
+### Go packages, without writing bindings
+
+The compiler reads signatures straight from Go export data. Native calls are deferred, need an explicit `Foreign` capability, and keep Go's error as data until you choose to raise it:
+
+```rust
+import go strconv "strconv"
+
+effect fn parse(text: string) -> bool raises { GoError } uses { Foreign } {
+    run strconv.ParseBool(text).orFail()
+}
+```
+
+### Tests are ordinary effects
+
+Tests are effect functions whose names start with `test_`. A fixture is just another provider, and each test gets a fresh owning scope. `ef test` runs them on Go, and `ef test --target js` runs them on JavaScript:
+
+```rust
+// From examples/testing.ef
+effect fn test_recovery() -> void raises { AssertionFailed } uses { Assert } {
+    let actual = run greeting("unknown")
+        .provide<Directory>(FixtureDirectory)
+        .catch<Missing>("Unknown user")
+    run Assert.equalText(actual, "Unknown user")
+}
+```
+
+### One compiler model for people, editors and agents
+
+`ef check`, `inspect`, `explain`, `graph`, `diagnostics`, `lint`, `fmt`, `lsp` and `mcp` all read the same checked model. Ask why `checkout` needs what it needs:
+
+```sh
+$ ef explain examples/checkout.ef checkout | jq -c '.symbol.contributions[] | {line: .span.line, kind, names}'
+{"line":33,"kind":"failure","names":["OrderNotFound"]}
+{"line":33,"kind":"requirement","names":["Orders"]}
+{"line":34,"kind":"failure","names":["GatewayDown","Timeout"]}
+{"line":34,"kind":"requirement","names":["Gateway","Scheduler"]}
+```
+
+Line 33 is `run Orders.find(id)`; line 34 is the gateway call with its timeout. The MCP server exposes the same facts to coding agents. Requests are guarded by revision, so an agent can't act on a stale view of the code. Editors get the same model through `ef lsp`: diagnostics, hover and go-to-definition answer from the query behind `ef type --offset`, and document formatting is the `ef fmt` formatter. Range formatting, references and rename are not implemented yet.
+
+## Where it's going
+
+These items are being built now. Each one ships only when it runs on its advertised targets, with diagnostics and tooling support.
+
+| Capability | Status |
+| --- | --- |
+| Payload-aware recovery: `.recover<E>(handler)` passes the error's fields to an effectful handler | In review |
+| Layer runtime: concurrent shared acquisition, rollback and cleanup in reverse order | In progress |
+| Codecs derived from records and enums, with explicit wire ↔ domain transformations | Runtime engine landed; compiler plans in progress |
+| Graph views: `ef graph --kind layers --format mermaid\|dot`, plus MCP and editor views | In progress |
+| HTTP server with bounded, owned shutdown (`Http.listen`) | In progress |
+| Rich Go interop: host types, methods, `io.Reader`/`io.Writer`, `context` | In progress |
+| Library modules: `pub` exports and module-qualified identity | Designed |
+| State machines as a first-class declaration | [Specified](docs/specs/state-machines.md) |
+| Actors with bounded mailboxes and owned behavior | [Specified](docs/specs/actors.md) |
+| Evidence and proofs: values that carry what was checked | [Designed](docs/research/opaque-values-and-evidence.md) |
+
+### Proofs you can't forget to check
+
+Following *Ghosts of Departed Proofs* and Bend's laws-as-obligations, the plan is for the result of a check to become a value that only its owning module can construct. The sensitive operation then takes that value instead of a raw ID:
+
+```rust
+// Sketch: not implemented; syntax will change.
+opaque record RefundGrant {
+    order: OrderId
+    actor: UserId
+}
+
+effect fn authorizeRefund(actor: User, order: Order) -> RefundGrant
+    raises { Forbidden } uses { Policy }
+
+effect fn refund(grant: RefundGrant) -> Receipt raises { GatewayDown } uses { Gateway }
+```
+
+With this in place:
+- Skipping authorization becomes a type error.
+- A grant names the exact order and actor that were approved, so it can't be swapped for another order.
+- The evidence compiles down to the plain IDs it holds, with no proof objects at runtime.
+
+Service laws, such as "decode after encode returns the input", become obligations that every implementation must pass. They are reported honestly as *tested*, never as proved.
+
+### State machines from ordinary functions
+
+The transition table in [the tour](#matching-several-values-at-once) already compiles: a multi-subject match whose every state and event pair is checked. What is missing is the declaration that runs it as a machine:
+
+```rust
+// Sketch: not implemented; syntax will change.
+machine Sessions {
+    initial Session.Idle {}
+    step step
+}
+```
+
+A step can be a pure function or an effect with its own failures and services. The same checked plan drives the runtime, the tests and an `ef graph` state diagram.
 
 ## Try it
 
-Requires Go 1.27+ and Bun; the verification gate also requires Python 3. Run from the repository root.
+You need Go 1.27+ and Bun; the full gate also needs Python 3.
 
 ```sh
 git clone https://github.com/cevr/effra.git
 cd effra
 bun install --frozen-lockfile
 go build -o bin/ef ./cmd/ef
-./bin/ef run examples/main.ef
-# Hello, Ada
-# Unknown user
 
-./bin/ef inspect examples/main.ef greeting
-./bin/ef explain examples/main.ef greeting
-./bin/ef check examples/missing-service.ef  # expected failure: EF108
-./bin/ef fmt --check examples/main.ef
-./bin/ef build examples/main.ef            # standalone executable: dist/main
-./dist/main
-./bin/ef build examples/main.ef -o bin/demo
-./bin/ef build examples/main.ef --target js # dist/main.mjs + dist/main.d.mts
-./bin/ef mcp .                            # newline-delimited JSON-RPC on stdio
-./bin/ef lsp                              # Content-Length framed diagnostics, hover, definition
+./bin/ef run examples/checkout.ef               # paid auth-7 / no such order
+./bin/ef run examples/checkout.ef --target js   # same output, on Effect
+./bin/ef build examples/checkout.ef             # static executable in dist/
+./bin/ef diagnostics examples/missing-service.ef  # expected failure: EF108
+./bin/ef inspect examples/checkout.ef checkout  # the checked contract as JSON
+./bin/ef graph examples/layers.ef               # services, providers and layers
+./bin/ef test examples/testing.ef
+./bin/ef mcp .                                  # compiler tools for agents over stdio
+./bin/ef lsp                                    # diagnostics, hover, definition and formatting over LSP
 ```
 
-`bun run demo` compiles and runs the native Go executable. Use `--target js` with build/run/check to select JavaScript. `bun run gate` checks Go formatting, Go vet, compiler and runtime tests, tracker consistency, and the public CLI/MCP process.
-
-## Example
-
-```rust
-error NotFound
-
-service Users {
-    effect fn get(id: string) -> string raises {NotFound}
-}
-
-effect fn greeting(id: string) -> string
-    raises {NotFound}
-    uses {Users}
-{
-    let name = run Users.get(id)
-    "Hello, " + name
-}
-```
-
-Calling `greeting("42")` constructs a deferred program. `run` executes it within another effect. Inspection reports success `string`, failure `{NotFound}`, and requirement `{Users}`. The [complete runnable example](examples/main.ef) implements and provides Users, recovers NotFound, and supplies Console explicitly.
-
-Go builds lower checked source into typed Go closures and call `go build`; the executable needs no Effra, Bun, Node, or Effect installation to run. Generated native modules are complete immutable snapshots under `dist/go/apps/<application-id>/generations/`; their commit records preserve source ownership and reuse. Each snapshot contains only the declarations and runtime modules its checked entry reaches.
-
-The JavaScript library build exports functions, service keys, and providers for consumers. `--target js --entry` adds host execution; native builds and both run targets require an effect main with no parameters or remaining service requirements.
+Native builds lower checked source into typed Go closures and run `go build`. The executable needs no Effra, Bun, Node or Effect installation to run, and contains only the declarations and runtime modules its entry point reaches. The JavaScript target emits code on pinned Effect 4.0.1, and a JavaScript entry likewise carries only the declarations and prelude helpers it reaches.
 
 ## Runnable examples
 
 | Example | What it demonstrates | Target |
 | --- | --- | --- |
+| [checkout.ef](examples/checkout.ef) | The program from the top of this page | Go / JS |
 | [main.ef](examples/main.ef) | Nominal services, explicit provision and typed recovery | Go / JS |
 | [workflow.ef](examples/workflow.ef) | Authorization, lookup and delivery with three service contracts | Go / JS |
+| [data.ef](examples/data.ef) | Records, enums and exhaustive matching | Go / JS |
+| [generic-users.ef](examples/generic-users.ef) | Generic records with `Option` and `Result` | Go / JS |
 | [layers.ef](examples/layers.ef) | Shared construction, hidden dependencies and whole-graph fixture replacement | Go / JS |
 | [layers-workflow.ef](examples/layers-workflow.ef) | Configured layer provision and retained operation failures | Go / JS |
 | [latest-task.ef](examples/latest-task.ef) | Replace an owned child after interruption and cleanup finish | Go / JS |
-| [callables-service.ef](examples/callables-service.ef) | Ordinary callback composition with argument-driven failure and service rows | Go / JS |
-| [callables-state.ef](examples/callables-state.ef) | Pure transition callbacks stored in records and configured providers | Go / JS |
-| [callables-factory.ef](examples/callables-factory.ef) | Returned callable contracts separate from factory failures and services | Go / JS |
 | [concurrency.ef](examples/concurrency.ef) | Child join/interrupt and deadline recovery | Go / JS |
 | [causal.ef](examples/causal.ef) | Managed virtual time, shared latches and causal cleanup tests | Go / JS |
+| [callables-service.ef](examples/callables-service.ef) | Callbacks that are generic over failure and service rows | Go / JS |
+| [testing.ef](examples/testing.ef) | Fixture providers, typed recovery and owned children in tests | Go / JS |
 | [imports.ef](examples/imports.ef) | Automatic native signatures, partial results and context forwarding | Go |
 | [http.ef](examples/http.ef) | HTTP routes, SDK calls, file scopes and managed shutdown | Go |
 | [lifecycle.ef](examples/lifecycle.ef) | Scoped files, cancellation and runtime snapshots | Go |
 | [ownership.ef](examples/ownership.ef) | Borrowed outer handles and checked scoped file ownership | Go |
-| [go-interop](examples/go-interop/main.go) | Calling the managed runtime from Go | Go |
+
+## Learn more
+
+- [Implemented syntax and limits](docs/prototype.md)
+- [Runtime contracts](docs/runtime.md)
+- [Go interop](docs/interop.md)
+- [Bundled modules](docs/bundled-modules.md)
+- [Testing](docs/testing.md)
+- Tooling: [CLI](docs/tooling.md), [MCP](docs/mcp.md), [LSP](docs/lsp.md)
+- [Showcases](docs/showcases.md): real application patterns, with proposals clearly labelled
+- [Design sketch](docs/design.md) and [contender roadmap](docs/contender-roadmap.md)
+- [North star](NORTH_STAR.md), [prior art](PRIOR_ARTS.md) (Effect, Go, Gleam, ReScript, Elixir, Borgo, Bend and others) and [glossary](GLOSSARY.md)
+- [Upstream conformance](docs/conformance.md): pinned Effect behavior mapped to Go/JS acceptance tests
+
+Open design questions are tracked in the [Wayfinder map](docs/wayfinder/issues/map.md) (`python3 scripts/wayfinder.py frontier`).
+
+## Development
 
 ```sh
-./bin/ef run examples/concurrency.ef
-./bin/ef run examples/concurrency.ef --target js
-./bin/ef run examples/imports.ef
-./bin/ef run examples/http.ef
-# listening http://127.0.0.1:PORT
-```
-
-Use the printed server URL with `/health`, `/users/42`, `/users/slow`, `/users/missing`, or `/file`. Each request has an owning scope. Interrupt/SIGTERM stops admission, requests cancellation, and waits for handler cleanup. Cancellation is cooperative: a foreign call that ignores it can delay shutdown. See the [HTTP contract](docs/runtime.md#http-server).
-
-Static `layer` declarations select pure implementations, merge shared nodes, hide outputs with `provides`, and replace bindings before construction. `.provide(App)` creates a fresh owning build when the deferred program runs; construction uses selected dependencies, while the program receives only public outputs. Remaining construction inputs stay in the program's service contract. Unused declarations remain lazy. Configuration supports checked literal, record and enum values; effect factories, startup effects, layer parameters and dynamic plans remain unsupported diagnostics. CLI/MCP inspection reports the selected graph and configuration types. See the [layer contract](docs/specs/layers.md) for the full intended contract and later units.
-
-## Records, closed data, and pattern matching
-
-Records and closed enums carry typed payloads. Constructors check field names and values, and `match` must cover each declared variant exactly once:
-
-```rust
-enum RunState {
-    Idle
-    Running { runId: string }
-    Waiting { runId: string, requestId: string }
-}
-
-fn status(state: RunState) -> string {
-    match state {
-        RunState.Idle => "idle"
-        RunState.Running { runId } => "running " + runId
-        RunState.Waiting { runId, requestId } => "waiting " + requestId
-    }
-}
-```
-
-Each alternative owns its payload. Adding a variant should make incomplete matches fail to check. Decoding external data still needs an explicit codec; a static enum is not runtime validation. The [showcases](docs/showcases.md) cover ADTs, payload errors, decoded events, owned streams, durable commands and infrastructure outputs, with a [pattern review](docs/research/effect-native-showcases.md) of the policies each example must preserve.
-
-## Go interop
-
-Portable compiler-distributed functions use an explicit import:
-
-```rust
-import Fns "effra/functions"
-
-effect fn echo(input: string) -> string { input }
-effect fn forwarded(input: string) -> string { run Fns.call(echo, input) }
-```
-
-The ordinary forwarding helper preserves callback failure and service rows.
-See [bundled modules](docs/bundled-modules.md) for the finite resolver and its
-source/identity boundaries. User package loading remains unsupported.
-
-```rust
-import go strconv "strconv"
-
-effect fn parse(text: string) -> bool raises {GoError} uses {Foreign} {
-    run strconv.ParseBool(text).orFail()
-}
-```
-
-The compiler loads callable shapes from Go export data. Imported calls are deferred and require the explicit `Foreign` capability, provided by `Host`. A native error initially remains data in `GoResult`, retaining the partial value; `.orFail()` explicitly adapts it into GoError. Optional binding metadata can forward a managed context and declare cancellation behavior. Those declarations are reviewed assertions, not guarantees inferred from a signature. See [interop boundaries](docs/interop.md).
-
-## Agent inspection
-
-`ef check`, `ef inspect` and `ef explain` expose checked contracts, source spans, used host signatures, behavior provenance and compiler timings as JSON. `ef fmt` exposes the canonical syntax-only formatter through stdin, check, write and JSON report modes; it does not typecheck or load packages. `ef mcp .` exposes read-only compiler tools over stdio, including `code.format` for one explicit buffer or guarded disk snapshot. Revisions include imported Go declarations and behavior contracts so stale semantic queries can be rejected; formatter results use a separate source-byte digest and formatter identity. See [MCP setup and limits](docs/mcp.md).
-
-`ef diagnostics FILE --json` and MCP `project.diagnostics` share compiler errors and lint advice, with explicit severities, UTF-8 byte spans and UTF-16 editor ranges. Reports distinguish checked source, unavailable advice and policy failure. `ef lsp` adapts this model to versioned editor buffers and full-document synchronization, answers hover and go-to-definition from the same selected-type query as `ef type --offset`, and formats whole documents with the `ef fmt` formatter; see [supported capabilities and limits](docs/lsp.md). Range formatting, references and rename remain separate work.
-
-## What is experimental
-
-This is a single-file prototype with nominal records, closed enums, typed source failures, managed File handles, explicit effect rows, and static layer plans for pure providers on Go and JS. Lifecycle syntax works on Go and JS/Effect; Files/Runtime/Http and Go imports require Go. Imported package functions currently accept primitive shapes; named host types, methods, generics and arbitrary SDK objects remain unsupported. Codecs, open rows, managed shared layer acquisition, fallible/startup construction, parameterized or inherited layer plans, complete layer tooling/adoption, package cache, source maps, and out-of-process runtime inspection remain future work. See [implemented syntax and limits](docs/prototype.md), [runtime and interop contracts](docs/runtime.md), and [MCP setup](docs/mcp.md). The wider [design sketch](docs/design.md) remains a proposal.
-
-Fast compilation is a design constraint, with separate frontend and import measurements. The current synthetic 10,000-line fixture checks in about 3.65 ms on an Apple M4 Pro; warm imported CLI checks take about 51 ms and cached imported executable builds about 156 ms. These are small, distinct fixtures, not a matched comparison with Go. Persistent import summaries and edit benchmarks remain work. See [measurement receipts](docs/prototype.md#baseline).
-
-## Development and design
-
-```sh
-bun run gate
+bun run gate          # formatting, vet, tests, real Go and JS programs, CLI/MCP/LSP parity, live HTTP
 go test -race ./...
 ```
 
-The gate checks Go formatting, vet, compiler/runtime tests, actual Go and JS programs, CLI/MCP inspection and diagnostic parity, formatter CLI/MCP process parity, and a live HTTP server. Shared lifecycle tests cover child-before-parent cleanup, unobserved child failures and timeout cleanup defects.
-
-[Upstream behavioral conformance](docs/conformance.md) maps selected pinned Effect cases to existing Go/JS acceptance, with explicit differences, pending and unsupported rows. The imported 746 reference files remain reference-only.
-
-Project direction is recorded in [NORTH_STAR.md](NORTH_STAR.md), source comparisons in [PRIOR_ARTS.md](PRIOR_ARTS.md), and canonical terms in [GLOSSARY.md](GLOSSARY.md). The [architecture ledger](plans/architecture-loop-2026-10-05.md) records implementation evidence and unresolved work. Start with [implemented syntax](docs/prototype.md), [runtime contracts](docs/runtime.md), or the broader [design sketch](docs/design.md).
-
-## Wayfinder
-
-The [Effra prototype map](docs/wayfinder/issues/map.md) is the canonical index of unresolved decisions. Its first prototype ticket remains open for user feedback; building the artifact does not settle the language design.
-
-```sh
-python3 scripts/wayfinder.py list
-python3 scripts/wayfinder.py frontier
-```
-
-The local Markdown tracker has [documented claims and dependency conventions](docs/wayfinder/README.md).
-
-## Default development tools
-
-The CLI and read-only MCP share the checked compiler model:
-
-```sh
-./bin/ef lint examples/workflow.ef --strict
-./bin/ef lint rules
-./bin/ef diagnostics examples/workflow.ef --strict --json
-./bin/ef graph examples/workflow.ef
-./bin/ef query examples/latest-task.ef 64
-./bin/ef test examples/testing.ef
-./bin/ef test examples/testing.ef --target js
-```
-
-[Tooling](docs/tooling.md) describes lint severity, declaration metadata, dependency edges and bounded MCP results. [Testing](docs/testing.md) covers assertions, explicit fixture providers, owned test scopes and the real-time watchdog. Codec derivation, open rows and generic containers remain proposed.
+Fast compilation is a design constraint; see the [measurement receipts](docs/prototype.md#baseline). Effra is a server language. Kernels, hard real-time and no-GC execution are out of scope.

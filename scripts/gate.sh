@@ -7,7 +7,7 @@ python3 -B scripts/test_import_effect_conformance.py
 python3 -B scripts/check_effect_conformance.py
 python3 -B scripts/test_effect_conformance.py
 if [ -f go.mod ]; then
-  test -z "$(gofmt -l cmd internal runtime examples/go-interop examples/sdk)"
+  test -z "$(gofmt -l cmd internal runtime examples/go-interop examples/sdk examples/compare)"
   go vet ./...
   go test ./...
   go build -o bin/ef ./cmd/ef
@@ -33,6 +33,7 @@ if [ -f go.mod ]; then
   python3 scripts/diagnostics_smoke.py
   python3 scripts/lsp_smoke.py
   python3 scripts/smoke.py
+  python3 scripts/readme_smoke.py
   python3 scripts/bundled_smoke.py
   python3 scripts/producer_smoke.py
   python3 scripts/format_smoke.py
