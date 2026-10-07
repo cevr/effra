@@ -95,11 +95,25 @@ func bindingTarget(binding lexicalBinding) *DeclarationTarget {
 
 const userSourceID = "source:user"
 
-// SelectType is the shared selected-query owner. It projects retained numeric
-// checker facts, not display strings or a reconstructed lexical environment.
+// TypeQuery is one validated selected-type answer: the complete response
+// CLI and MCP encode, and the same selection editor adapters read typed.
+type TypeQuery struct {
+	Selection SelectedType
+	Response  map[string]any
+}
+
+// SelectType answers CLI and MCP selected-type requests.
 func (r *Result) SelectType(request TypeSelection) (map[string]any, error) {
+	query, err := r.QueryType(request)
+	return query.Response, err
+}
+
+// QueryType is the shared selected-query owner. It projects retained numeric
+// checker facts, not display strings or a reconstructed lexical environment,
+// and admits a selection only when its complete response is admitted.
+func (r *Result) QueryType(request TypeSelection) (TypeQuery, error) {
 	if !r.Checked || r.projector == nil {
-		return nil, ErrUncheckedSource
+		return TypeQuery{}, ErrUncheckedSource
 	}
 	selectors := 0
 	if request.Symbol != "" {
@@ -112,19 +126,19 @@ func (r *Result) SelectType(request TypeSelection) (map[string]any, error) {
 		selectors++
 	}
 	if selectors != 1 {
-		return nil, fmt.Errorf("select exactly one symbol, byte offset or type definition")
+		return TypeQuery{}, fmt.Errorf("select exactly one symbol, byte offset or type definition")
 	}
 	if request.ExpectedRevision != "" && request.ExpectedRevision != r.Revision {
-		return nil, fmt.Errorf("stale semantic revision")
+		return TypeQuery{}, fmt.Errorf("stale semantic revision")
 	}
 	selected := SelectedType{}
 	switch {
 	case request.Definition != "":
 		if request.ExpectedRevision == "" {
-			return nil, fmt.Errorf("type definition lookup requires expectedRevision")
+			return TypeQuery{}, fmt.Errorf("type definition lookup requires expectedRevision")
 		}
 		if _, exists := r.canonical.publicToID[request.Definition]; !exists {
-			return nil, fmt.Errorf("type definition unavailable in this snapshot")
+			return TypeQuery{}, fmt.Errorf("type definition unavailable in this snapshot")
 		}
 		selected.Kind, selected.Definition = "typeDefinition", request.Definition
 	case request.Symbol != "":
@@ -133,25 +147,25 @@ func (r *Result) SelectType(request TypeSelection) (map[string]any, error) {
 		} else if declaration := r.FindDeclaration(request.Symbol); declaration != nil {
 			r.selectDeclaration(declaration, &selected)
 		} else {
-			return nil, fmt.Errorf("named type declaration unavailable")
+			return TypeQuery{}, fmt.Errorf("named type declaration unavailable")
 		}
 	case request.Offset != nil:
 		if err := r.selectOffset(*request.Offset, &selected); err != nil {
-			return nil, err
+			return TypeQuery{}, err
 		}
 	}
 	projection := r.projectSelection(&selected)
 	if !projection.Complete {
-		return nil, fmt.Errorf("%s%s", projectionUnavailable, projection.Error)
+		return TypeQuery{}, fmt.Errorf("%s%s", projectionUnavailable, projection.Error)
 	}
 	selected.Presentation = presentSelection(&selected, projection)
 	declarations := r.ProjectionDeclarations(projection)
 	response := map[string]any{"schemaVersion": r.SchemaVersion, "querySchemaVersion": TypeQuerySchemaVersion, "revision": r.Revision, "target": r.Target, "checked": true, "selection": selected, "types": projection.Types, "rows": projection.Rows, "declarations": declarations, "typeProjectionLimits": projection.Limits, "typeProjectionUsage": projection.Usage, "typeProjectionComplete": true}
 	r.AddSourceInputs(response)
 	if _, err := r.ValidateProjectionResponse(projection, response); err != nil {
-		return nil, err
+		return TypeQuery{}, err
 	}
-	return response, nil
+	return TypeQuery{Selection: selected, Response: response}, nil
 }
 
 func (r *Result) selectSymbol(symbol *Symbol, selected *SelectedType) {

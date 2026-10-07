@@ -32,6 +32,37 @@ func TestUTF16RangeUsesSharedSourceIndex(t *testing.T) {
 	}
 }
 
+func TestSourcePositionsInvertTheSharedIndex(t *testing.T) {
+	source := "a𐐀e\u0301\r\nz\rq\n"
+	positions := NewSourcePositions(source)
+	for offset := 0; offset <= len(source); offset++ {
+		point, ok := positions.Range(Span{Offset: offset})
+		if !ok {
+			continue
+		}
+		want := offset
+		if offset > 0 && source[offset-1] == '\r' && offset < len(source) && source[offset] == '\n' {
+			want = offset - 1 // LSP has no position between CR and LF.
+		}
+		if got, ok := positions.Offset(point.Start); !ok || got != want {
+			t.Fatalf("offset %d -> %+v -> %d %v", offset, point.Start, got, ok)
+		}
+	}
+	for _, clamp := range []struct {
+		position DiagnosticPosition
+		offset   int
+	}{{DiagnosticPosition{Line: 0, Character: 99}, strings.Index(source, "\r\n")}, {DiagnosticPosition{Line: 1, Character: 2}, strings.Index(source, "\rq")}, {DiagnosticPosition{Line: 2, Character: 9}, len(source) - 1}, {DiagnosticPosition{Line: 3, Character: 1}, len(source)}} {
+		if got, ok := positions.Offset(clamp.position); !ok || got != clamp.offset {
+			t.Fatalf("%+v clamps to %d %v, want line end %d", clamp.position, got, ok, clamp.offset)
+		}
+	}
+	for _, invalid := range []DiagnosticPosition{{Line: 0, Character: 2}, {Line: 4, Character: 0}, {Line: -1, Character: 0}, {Line: 0, Character: -1}} {
+		if got, ok := positions.Offset(invalid); ok {
+			t.Fatalf("%+v named offset %d", invalid, got)
+		}
+	}
+}
+
 func TestFileURIUsesCanonicalEscapedIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "space é.ef")
 	if err := os.WriteFile(path, []byte("effect fn main() -> void { void }"), 0600); err != nil {

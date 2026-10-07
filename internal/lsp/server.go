@@ -1,12 +1,14 @@
-// Package lsp adapts the compiler's diagnostic reports to an ordered, bounded
-// stdio session. Analysis is synchronous: there are no detached workers or
-// result queues, and accepted document versions are published in receive order.
+// Package lsp adapts the compiler's diagnostic reports and selected-type
+// queries to an ordered, bounded stdio session. Analysis is synchronous: there
+// are no detached workers or result queues, accepted document versions are
+// published in receive order, and every request reads the current version.
 package lsp
 
 import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -15,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/producer"
 )
 
 const MaxDocuments = 32
@@ -28,6 +31,9 @@ type document struct {
 	snapshot compiler.SourceSnapshot
 	path     string
 	version  int32
+	// analysis is the compiler result of exactly this accepted snapshot. It is
+	// replaced with the snapshot and released on close or shutdown.
+	analysis *compiler.Result
 }
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -176,7 +182,7 @@ func (s *session) handle(req request) error {
 			return s.reject(req, -32600, "initialize requires a request and can occur once")
 		}
 		s.phase = 1
-		return s.result(req.ID, map[string]any{"capabilities": map[string]any{"positionEncoding": "utf-16", "textDocumentSync": map[string]any{"openClose": true, "change": 1}}, "serverInfo": map[string]any{"name": "effra", "version": "0.0.1-prototype"}})
+		return s.result(req.ID, map[string]any{"capabilities": map[string]any{"positionEncoding": "utf-16", "textDocumentSync": map[string]any{"openClose": true, "change": 1}, "hoverProvider": true, "definitionProvider": true}, "serverInfo": map[string]any{"name": "effra", "version": "0.0.1-prototype"}})
 	}
 	if s.phase == 0 {
 		if req.ID == nil {
@@ -220,6 +226,11 @@ func (s *session) handle(req request) error {
 			return s.reject(req, -32600, "document synchronization must be a notification")
 		}
 		return s.synchronize(req)
+	case "textDocument/hover", "textDocument/definition":
+		if req.ID == nil {
+			return s.reject(req, -32600, "navigation must be a request")
+		}
+		return s.navigate(req)
 	default:
 		if req.ID == nil && strings.HasPrefix(req.Method, "$/") {
 			return nil
@@ -320,9 +331,10 @@ func (s *session) synchronize(req request) error {
 		uri = old.snapshot.URI
 	}
 	doc := document{snapshot: compiler.SourceSnapshot{URI: uri, Origin: "buffer", Text: text}, path: path, version: *p.TextDocument.Version}
+	doc.analysis = compiler.CompileAt(text, s.target, filepath.Dir(path))
 	s.documents[path] = doc
 	s.bytes += len(text) - len(old.snapshot.Text)
-	report := compiler.CompileAt(text, s.target, filepath.Dir(path)).DiagnosticReport(doc.snapshot, false)
+	report := doc.analysis.DiagnosticReport(doc.snapshot, false)
 	if _, err := report.Bounded(MaxDiagnostics); err != nil {
 		return s.rejectDocument(req, -32603, doc, err.Error())
 	}
@@ -349,4 +361,69 @@ func publication(uri string, version *int32, diagnostics []compiler.LSPDiagnosti
 }
 func (s *session) publish(uri string, version *int32, diagnostics []compiler.LSPDiagnostic) error {
 	return s.send(publication(uri, version, diagnostics))
+}
+
+// navigate answers hover and definition from the shared selected-type query
+// of the current accepted snapshot. Only a name the checker resolved to a
+// declaration has an answer; other positions, and source without checked
+// facts, answer null. Hover text is the query's own presentation, and a
+// definition is returned only where the target has a location in this buffer.
+func (s *session) navigate(req request) error {
+	var p struct {
+		TextDocument struct {
+			URI string `json:"uri"`
+		} `json:"textDocument"`
+		Position *struct {
+			Line      *uint32 `json:"line"`
+			Character *uint32 `json:"character"`
+		} `json:"position"`
+	}
+	if !objectParams(req.Params, &p) || p.Position == nil || p.Position.Line == nil || p.Position.Character == nil {
+		return s.failure(req.ID, -32602, "invalid text document position parameters")
+	}
+	path, err := documentPath(p.TextDocument.URI)
+	if err != nil {
+		return s.failure(req.ID, -32602, err.Error())
+	}
+	doc, exists := s.documents[path]
+	if !exists {
+		return s.failure(req.ID, -32602, "document is not open")
+	}
+	positions := compiler.NewSourcePositions(doc.snapshot.Text)
+	offset, ok := positions.Offset(compiler.DiagnosticPosition{Line: int(*p.Position.Line), Character: int(*p.Position.Character)})
+	if !ok {
+		return s.failure(req.ID, -32602, documentContext(doc)+"position is outside the document or inside a UTF-16 surrogate pair")
+	}
+	// Qualify exactly as CLI and MCP do, so selections share admission.
+	if err := doc.analysis.Qualify(producer.Current()); err != nil {
+		return s.failure(req.ID, -32803, documentContext(doc)+err.Error())
+	}
+	query, err := doc.analysis.QueryType(compiler.TypeSelection{Offset: &offset})
+	if errors.Is(err, compiler.ErrUncheckedSource) || errors.Is(err, compiler.ErrNoSelection) {
+		return s.result(req.ID, nil)
+	}
+	if err != nil {
+		return s.failure(req.ID, -32803, documentContext(doc)+err.Error())
+	}
+	selected := query.Selection
+	target := selected.Target
+	// An enclosing expression or a keyword is not a name with a declaration.
+	if target == nil || offset < selected.Span.Offset || offset-selected.Span.Offset >= selected.Span.Length {
+		return s.result(req.ID, nil)
+	}
+	if req.Method == "textDocument/definition" {
+		if !target.LocationAvailable {
+			return s.result(req.ID, nil)
+		}
+		declared, ok := positions.Range(target.Span)
+		if !ok {
+			return s.failure(req.ID, -32803, documentContext(doc)+"declaration span has no LSP range")
+		}
+		return s.result(req.ID, map[string]any{"uri": doc.snapshot.URI, "range": declared})
+	}
+	selection, ok := positions.Range(selected.Span)
+	if !ok {
+		return s.failure(req.ID, -32803, documentContext(doc)+"selected span has no LSP range")
+	}
+	return s.result(req.ID, map[string]any{"contents": map[string]any{"kind": "plaintext", "value": selected.Presentation}, "range": selection})
 }

@@ -143,14 +143,17 @@ diagnostic anchors and ordered pattern aliases, and stop at their bounded
 selection expands a canonical reference without fetching a whole project. The
 response's producer metadata qualifies this lookup by the actual executing
 artifact (or explicit process fallback), independently of private ABI identity.
-Custom rule packs, full LSP navigation and comprehensive binding-consumer
-migration remain separate unfinished units.
+LSP hover and definition answer from this same offset query (see below).
+Custom rule packs, references, workspace-wide navigation and comprehensive
+binding-consumer migration remain separate unfinished units.
 
 ## LSP adapter
 
 Ship `ef lsp` over stdio after shared diagnostics and types. Implement initialization, shutdown/exit, full-document open/change/close synchronization, versioned publishDiagnostics, hover and definition using the shared model. Advertise only implemented capabilities. Select UTF-16 positions initially; do not claim negotiated UTF-8/UTF-32 support without conversion tests. Plain messages and plaintext hover remain compatible without optional markup capabilities.
 
-For independent delivery, the diagnostics/document-lifecycle subset may land after shared diagnostics while canonical full types are being built. This preparatory `ef lsp` advertises full-document synchronization and diagnostics only; it does not close the full language-server task or advertise hover/definition/formatting. It uses the same compiler report and preserved buffer/import identity, with public framed-process tests. No duplicate semantic snapshot representation is introduced to parallelize this work.
+For independent delivery, the diagnostics/document-lifecycle subset landed first, after shared diagnostics and while canonical full types were being built. It used the same compiler report and preserved buffer/import identity, with public framed-process tests, and introduced no duplicate semantic snapshot representation.
+
+Hover and definition retain the checked result of each document's current accepted version and answer through the producer-qualified selected-type offset query CLI and MCP expose, over that unsaved buffer. UTF-16 positions convert to UTF-8 byte offsets through the shared source-position index; a character beyond the line length is the line end. Only a selection whose `target` span contains the position answers. Hover content is the query's `presentation` as plaintext with the selected token's range. Definition is the target's declaration name in the same document, only where `locationAvailable` is true; bundled and builtin targets answer null rather than a fabricated location. Whitespace, comments, keywords, literals, unsupported positions and unchecked source answer null. Invalid positions and unopened documents are Invalid Params; query refusals are Request Failed. [The adapter profile](../lsp.md) records the exact wire behavior.
 
 Buffers are versioned and bounded. Reject invalid/out-of-order changes; closing a document clears its diagnostics and releases the buffer. Never publish older analysis over a newer document revision. Framing handles split/coalesced Content-Length messages, bounded bodies, protocol errors and EOF without log output on protocol stdout. Unsupported methods receive protocol errors, not fabricated results. Definition navigation follows semantic bindings, not text search.
 

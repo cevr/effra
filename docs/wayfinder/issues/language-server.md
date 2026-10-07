@@ -2,3 +2,5 @@
 # Shared-model stdio language server
 
 Implement `ef lsp` from the [shared tooling contract](../../specs/semantic-tooling.md): truthful capabilities, versioned full-document synchronization, diagnostics, hover, definition and clean protocol lifecycle. Test real framed transport, unsaved-buffer identity, Unicode positions, stale analysis and bounded admission. No second checker or unimplemented workspace/edit capabilities. Full gate and independent review required.
+
+Progress, not closure: hover and definition now answer from each open document's current accepted checked result through the shared producer-qualified selected-type query, with UTF-16 position conversion on the shared index, `locationAvailable`-bounded definitions and capabilities advertised only for implemented methods ([adapter profile](../../lsp.md)). Framed-process tests cover version ordering, astral/CRLF positions, null positions, refusal recovery and CLI/MCP parity on both targets. Editor formatting ([separate contract](../../specs/formatting.md)) remains before this task can close; independent review and HITL decisions stay open. No performance claim or push.

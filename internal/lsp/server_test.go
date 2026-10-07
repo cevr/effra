@@ -105,7 +105,8 @@ func TestRecoverableInvalidBodyAndLifecycle(t *testing.T) {
 	in.Write(frame(t, call("unknown", nil, 4)))
 	in.Write(frame(t, initialize()))
 	in.Write(frame(t, initialized()))
-	in.Write(frame(t, call("textDocument/hover", nil, "unsupported")))
+	in.Write(frame(t, call("textDocument/rename", nil, "unsupported")))
+	in.Write(frame(t, call("textDocument/hover", nil, "invalid")))
 	in.Write(frame(t, shutdown()))
 	in.Write(frame(t, call("unknown", nil, 6)))
 	in.Write(frame(t, call("exit", nil, nil)))
@@ -113,7 +114,7 @@ func TestRecoverableInvalidBodyAndLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := bufio.NewReader(&out)
-	for _, code := range []int{-32700, -32002, 0, -32601, 0, -32600} {
+	for _, code := range []int{-32700, -32002, 0, -32601, -32602, 0, -32600} {
 		b, err := readFrame(r)
 		if err != nil {
 			t.Fatal(err)

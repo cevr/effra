@@ -121,12 +121,14 @@ func legalDiagnosticPosition(source string, index sourcePositionIndex, offset in
 type sourcePositionIndex struct {
 	positions []DiagnosticPosition
 	valid     []bool
+	lines     []int // byte offset where each LSP line starts
 }
 
 func newSourcePositionIndex(source string) sourcePositionIndex {
 	index := sourcePositionIndex{
 		positions: make([]DiagnosticPosition, len(source)+1),
 		valid:     make([]bool, len(source)+1),
+		lines:     []int{0},
 	}
 	line, character := 0, 0
 	index.positions[0] = DiagnosticPosition{Line: line, Character: character}
@@ -139,6 +141,7 @@ func newSourcePositionIndex(source string) sourcePositionIndex {
 			character = 0
 			index.positions[offset] = DiagnosticPosition{Line: line, Character: character}
 			index.valid[offset] = true
+			index.lines = append(index.lines, offset)
 			continue
 		}
 		if source[offset] == '\n' || source[offset] == '\r' {
@@ -147,6 +150,7 @@ func newSourcePositionIndex(source string) sourcePositionIndex {
 			character = 0
 			index.positions[offset] = DiagnosticPosition{Line: line, Character: character}
 			index.valid[offset] = true
+			index.lines = append(index.lines, offset)
 			continue
 		}
 		runeValue, width := utf8.DecodeRuneInString(source[offset:])
@@ -173,6 +177,51 @@ func newSourcePositionIndex(source string) sourcePositionIndex {
 // a UTF-8 sequence. A CRLF-internal endpoint is normalized to the line end.
 func UTF16Range(source string, span Span) (DiagnosticRange, bool) {
 	return newSourcePositionIndex(source).rangeFor(source, span)
+}
+
+// SourcePositions converts in both directions between UTF-8 byte offsets and
+// LSP UTF-16 positions of one source text, over the index diagnostics use.
+type SourcePositions struct {
+	source string
+	index  sourcePositionIndex
+}
+
+func NewSourcePositions(source string) SourcePositions {
+	return SourcePositions{source: source, index: newSourcePositionIndex(source)}
+}
+
+// Range is UTF16Range over this shared index.
+func (p SourcePositions) Range(span Span) (DiagnosticRange, bool) {
+	return p.index.rangeFor(p.source, span)
+}
+
+// Offset maps an LSP position to the byte offset of the code unit it names.
+// As LSP specifies, a character beyond the line length denotes the line end,
+// before its CR, LF or CRLF terminator. A line outside the source or a
+// character between the two UTF-16 units of one astral character has none.
+func (p SourcePositions) Offset(position DiagnosticPosition) (int, bool) {
+	lines := p.index.lines
+	if position.Line < 0 || position.Character < 0 || position.Line >= len(lines) {
+		return 0, false
+	}
+	start, end := lines[position.Line], len(p.source)
+	if position.Line+1 < len(lines) {
+		end = lines[position.Line+1] - 1
+		if end > start && p.source[end-1] == '\r' && p.source[end] == '\n' {
+			end--
+		}
+	}
+	for offset := start; offset <= end; offset++ {
+		if !p.index.valid[offset] {
+			continue
+		}
+		if character := p.index.positions[offset].Character; character == position.Character {
+			return offset, true
+		} else if character > position.Character {
+			return 0, false
+		}
+	}
+	return end, true
 }
 
 func (index sourcePositionIndex) rangeFor(source string, span Span) (DiagnosticRange, bool) {

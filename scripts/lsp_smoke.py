@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Actual Content-Length framed ef processes and shared diagnostic parity."""
+"""Actual Content-Length framed ef processes, shared diagnostic parity and
+hover/definition parity with CLI and MCP selected-type queries."""
 import argparse
 import json
 import os
@@ -105,7 +106,8 @@ def parity(directory):
         assert_report_parity(report, remote, report_schema=1, snapshot_schema=7)
         messages = exchange([INIT, READY, opened(path, text, 4), STOP, EXIT], fragmented=True)
         capabilities = messages[0]["result"]["capabilities"]
-        assert capabilities == {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": True, "change": 1}}
+        assert capabilities == {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": True, "change": 1},
+                                "hoverProvider": True, "definitionProvider": True}
         published = publications(messages)
         assert published == [{"uri": path.as_uri(), "version": 4,
                               "diagnostics": [f["lsp"] for f in report["diagnostics"]]}]
@@ -127,14 +129,14 @@ def documents(directory):
                   "contentChanges": [{"range": None, "text": bad}]}),
              call("textDocument/didClose", {"textDocument": {"uri": path.as_uri()}}),
              opened(path, bad, -2), call("$/cancelRequest", {"id": "already-complete"}),
-             call("textDocument/hover", identifier="hover"), STOP, EXIT]
+             call("textDocument/rename", identifier="rename"), STOP, EXIT]
     messages = exchange(calls)
     published = publications(messages)
     assert [p.get("version") for p in published] == [7, 8, None, -2], published
     assert published[0]["diagnostics"] and published[1]["diagnostics"] == []
     assert published[2]["diagnostics"] == []
     assert len([m for m in messages if m.get("method") == "window/logMessage"]) == 3
-    assert next(m for m in messages if m.get("id") == "hover")["error"]["code"] == -32601
+    assert next(m for m in messages if m.get("id") == "rename")["error"]["code"] == -32601
     assert cli(BINARY, path)["diagnostics"] == [], "disk changed while analyzing buffer"
     new = directory / "never-created.ef"
     assert not new.exists()
@@ -154,6 +156,156 @@ def documents(directory):
         assert [r["version"] for r in reports] == [1, 2, 3], reports
         assert reports[0]["diagnostics"] == reports[2]["diagnostics"] == [], reports
         assert any(d["code"] == "EF106" for d in reports[1]["diagnostics"]), reports
+
+
+NAVIGATION = "\r\n".join([
+    'import Fns "effra/functions"',
+    'import Data "effra/data"',
+    '// 𐐀 helper is a comment, not a reference',
+    'error Missing { id: string }',
+    'record Box { value: string }',
+    'enum Shape { Circle { radius: i64 }, Square }',
+    'service Users { effect fn get(id: string) -> string raises {Missing} }',
+    'impl Fixed for Users { effect fn get(id: string) -> string raises {Missing} { "𐐀" + id } }',
+    'fn helper() -> string { "helper" }',
+    'fn shadow(helper: string) -> string { let mark = "𐐀é"; mark + helper }',
+    'fn boxed(value: string) -> Box { Box { value: value } }',
+    'fn area(shape: Shape) -> i64 { match shape { Shape.Circle { radius: r } => r, Shape.Square => 0 } }',
+    'fn pick(o: Data.Option<string>) -> string { match o { Data.Option.Some { value: v } => v, Data.Option.None => "none" } }',
+    'fn same(input: string) -> string { Fns.identity(input) }',
+    'fn greet() -> string { "𐐀" + helper() }',
+    'effect fn load(id: string) -> string raises {Missing} uses {Users} {',
+    '    if id == "" { fail Missing { id: id } } else { run Users.get(id) }',
+    '}',
+    'effect fn fixed(id: string) -> string raises {Missing} { run load(id).provide<Users>(Fixed) }',
+    ''])
+
+# (context, name): every byte offset below is the UTF-8 offset of name inside
+# the unique context; the LSP receives only the UTF-16 editor position.
+NAMED = [("import Fns", "Fns"), ("Fns.identity", "Fns"), ("Fns.identity", "identity"),
+         ("error Missing", "Missing"), ("fail Missing", "Missing"), ("Missing { id: id", "id"),
+         ("record Box", "Box"), ("Box { value: value }", "Box"), ("Box { value: value }", "value"),
+         ("enum Shape", "Shape"), ("Shape.Circle {", "Shape"), ("Shape.Circle {", "Circle"),
+         ("radius: r", "radius"), ("=> r,", "r"), ("Shape.Square =>", "Square"),
+         ("Data.Option.Some { value: v }", "Data"), ("Data.Option.Some { value: v }", "Option"),
+         ("Data.Option.Some { value: v }", "Some"), ("=> v,", "v"),
+         ("service Users", "Users"), ("impl Fixed for Users", "Users"), ("run Users.get", "Users"),
+         ("run Users.get", "get"), ("provide<Users>(Fixed)", "Users"), ("provide<Users>(Fixed)", "Fixed"),
+         ("Fixed for Users { effect fn get", "get"), ("run load(id)", "load"),
+         ("fn helper()", "helper"), ("fn shadow(helper", "helper"), ("mark + helper", "helper"),
+         ("let mark", "mark"), ("; mark +", "mark"), ("+ helper()", "helper"), ("fn boxed(value", "value"),
+         ("{ value: value }", "value }")]
+UNNAMED = [("// 𐐀 helper", "helper"), ("fn helper()", "fn"), ("{ let mark", " "),
+           ('"𐐀é"', "é"), ("run load(id)", "run"), ("raises {Missing} uses", "raises")]
+
+
+def offset_of(text, context, name):
+    assert text.count(context) == 1 and name in context, (context, name)
+    return len(text[:text.index(context) + context.index(name)].encode())
+
+
+def editor_range(text, span):
+    return {"start": editor_position(text, span["offset"]),
+            "end": editor_position(text, span["offset"] + span["length"])}
+
+
+def located(path, method, identifier, text, offset):
+    return call(method, {"textDocument": {"uri": path.as_uri()},
+                         "position": editor_position(text, offset)}, identifier)
+
+
+def code_type(directory, name, target, offsets):
+    requests = [{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": {
+        "protocolVersion": "2025-11-25", "capabilities": {},
+        "clientInfo": {"name": "lsp-smoke", "version": "1"}}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"}]
+    requests += [{"jsonrpc": "2.0", "id": index, "method": "tools/call", "params": {
+        "name": "code.type", "arguments": {"file": name, "target": target, "offset": offset}}}
+        for index, offset in enumerate(offsets)]
+    process = subprocess.run([BINARY, "mcp", str(directory)], text=True, capture_output=True, timeout=60,
+                             input="".join(json.dumps(request) + "\n" for request in requests))
+    assert process.returncode == 0, process.stderr
+    replies = {reply["id"]: reply["result"] for reply in map(json.loads, process.stdout.splitlines())}
+    return [None if replies[index].get("isError") else replies[index]["structuredContent"]
+            for index in range(len(offsets))]
+
+
+def cli_type(path, target, offset):
+    process = subprocess.run([BINARY, "type", str(path), "--target", target, "--offset", str(offset)],
+                             text=True, capture_output=True, timeout=30)
+    if process.returncode != 0:
+        assert not process.stdout and process.stderr, process
+        return None
+    return json.loads(process.stdout)
+
+
+def navigation(directory):
+    path = directory / "navigation.ef"
+    text = NAVIGATION
+    path.write_bytes(text.encode())
+    named = [offset_of(text, context, name) for context, name in NAMED]
+    # The last byte of a token selects the same name as its first.
+    named += [offset_of(text, context, name) + len(name.split()[0].encode()) - 1 for context, name in NAMED]
+    unnamed = [offset_of(text, context, name) for context, name in UNNAMED]
+    offsets = named + unnamed
+    astral = offset_of(text, '"𐐀é"', "𐐀")
+    surrogate = editor_position(text, astral)
+    surrogate["character"] += 1
+    for target in ("go", "js"):
+        requests = [INIT, READY, opened(path, text, 5)]
+        for index, offset in enumerate(offsets):
+            requests.append(located(path, "textDocument/hover", f"hover-{index}", text, offset))
+            requests.append(located(path, "textDocument/definition", f"definition-{index}", text, offset))
+        requests += [call("textDocument/hover", {"textDocument": {"uri": path.as_uri()}, "position": surrogate}, "surrogate"),
+                     call("textDocument/definition", {"textDocument": {"uri": path.as_uri()},
+                          "position": {"line": 99, "character": 0}}, "beyond"),
+                     call("textDocument/hover", {"textDocument": {"uri": path.as_uri()}}, "no-position"),
+                     located(path, "textDocument/hover", "after-refusals", text, named[0]),
+                     STOP, EXIT]
+        replies = {m["id"]: m for m in exchange(requests, target=target) if "id" in m}
+        assert all(replies[i]["error"]["code"] == -32602 for i in ("surrogate", "beyond", "no-position")), replies
+        assert replies["after-refusals"]["result"] == replies["hover-0"]["result"]
+        remote = code_type(directory, path.name, target, offsets)
+        for index, offset in enumerate(offsets):
+            local = cli_type(path, target, offset)
+            assert (local is None) == (remote[index] is None), (offset, local, remote[index])
+            hover, definition = replies[f"hover-{index}"], replies[f"definition-{index}"]
+            assert "error" not in hover and "error" not in definition, (hover, definition)
+            selection = local and local["selection"]
+            if local is not None:
+                assert remote[index]["selection"] == selection, (offset, remote[index]["selection"], selection)
+            span = selection and selection["span"]
+            names = (selection is not None and "target" in selection
+                     and span["offset"] <= offset < span["offset"] + span["length"])
+            assert names == (index < len(named)), (index, offset, selection)
+            if not names:
+                assert hover["result"] is None and definition["result"] is None, (offset, hover, definition)
+                continue
+            assert hover["result"] == {"contents": {"kind": "plaintext", "value": selection["presentation"]},
+                                       "range": editor_range(text, span)}, (offset, hover, selection)
+            declared = selection["target"]
+            if declared["locationAvailable"]:
+                assert definition["result"] == {"uri": path.as_uri(), "range": editor_range(text, declared["span"])}
+            else:
+                assert definition["result"] is None and declared["source"] != "source:user", declared
+        # Bundled targets have no location in this buffer; local ones do.
+        bundled = [replies[f"definition-{NAMED.index(key)}"]["result"]
+                   for key in [("Fns.identity", "identity"), ("Data.Option.Some { value: v }", "Some")]]
+        assert bundled == [None, None], bundled
+        shadowed = replies[f"definition-{NAMED.index(('mark + helper', 'helper'))}"]["result"]["range"]
+        assert shadowed == editor_range(text, {"offset": offset_of(text, "fn shadow(helper", "helper"), "length": 6})
+    # The buffer, not the disk file, is navigated: a rename in an unsaved
+    # change moves the definition while the file still holds the old text.
+    renamed = text.replace("helper", "assist")
+    use = offset_of(renamed, "+ assist()", "assist")
+    replies = {m["id"]: m for m in exchange([
+        INIT, READY, opened(path, text, 1), changed(path, renamed, 2), changed(path, text, 2),
+        located(path, "textDocument/hover", "hover", renamed, use),
+        located(path, "textDocument/definition", "definition", renamed, use), STOP, EXIT]) if "id" in m}
+    assert replies["hover"]["result"]["contents"]["value"] == "fn assist() -> string", replies
+    declared = offset_of(renamed, "fn assist()", "assist")
+    assert replies["definition"]["result"]["range"] == editor_range(renamed, {"offset": declared, "length": 6})
+    assert path.read_bytes() == text.encode()
 
 
 def imports(directory):
@@ -318,24 +470,26 @@ def oversized_uri_regression(directory):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--review-case", choices=["uri", "operational", "recovery", "oversized"])
+    parser.add_argument("--review-case", choices=["uri", "operational", "recovery", "oversized", "navigation"])
     arguments = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="effra-lsp-smoke-") as temporary:
         directory = pathlib.Path(temporary)
         if arguments.review_case:
             {"uri": uri_alias_regression, "operational": operational_budget_regression,
              "recovery": refusal_recovery_regression,
-             "oversized": oversized_uri_regression}[arguments.review_case](directory)
+             "oversized": oversized_uri_regression,
+             "navigation": navigation}[arguments.review_case](directory)
         else:
             parity(directory)
             documents(directory)
+            navigation(directory)
             imports(directory)
             bounds_and_protocol(directory)
             uri_alias_regression(directory)
             operational_budget_regression(directory)
             refusal_recovery_regression(directory)
             oversized_uri_regression(directory)
-    print("LSP framed-process diagnostics, documents, imports and protocol checks passed")
+    print("LSP framed-process diagnostics, documents, navigation, imports and protocol checks passed")
 
 
 if __name__ == "__main__":
