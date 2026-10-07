@@ -77,13 +77,13 @@ func sameRange(t *testing.T, label string, got any, want map[string]any) {
 	}
 }
 
-func TestInitializeAdvertisesOnlyImplementedNavigation(t *testing.T) {
+func TestInitializeAdvertisesOnlyImplementedRequests(t *testing.T) {
 	messages, err := runSession(t, initialize(), shutdown(), call("exit", nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	capabilities := messages[0]["result"].(map[string]any)["capabilities"].(map[string]any)
-	if capabilities["hoverProvider"] != true || capabilities["definitionProvider"] != true || len(capabilities) != 4 {
+	if capabilities["hoverProvider"] != true || capabilities["definitionProvider"] != true || capabilities["documentFormattingProvider"] != true || len(capabilities) != 5 {
 		t.Fatalf("capabilities: %v", capabilities)
 	}
 }

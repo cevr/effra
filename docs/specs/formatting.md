@@ -1,6 +1,6 @@
 # Canonical Effra formatting
 
-Status: pure formatter core integrated at45b43d2 and CLI/MCP adapters at e2d6161, 2026-10-06. `ef fmt` and read-only MCP `code.format` share the syntax-only formatter; twelve authored examples are adopted and checked by the gate at19a450b, while LSP formatting remains a future adapter. Formatting keeps Go-like predictability: one style per formatter version, no configurable indentation, quote style or plugin-defined layout.
+Status: pure formatter core integrated at45b43d2 and CLI/MCP adapters at e2d6161, 2026-10-06. `ef fmt` and read-only MCP `code.format` share the syntax-only formatter; twelve authored examples are adopted and checked by the gate at19a450b. LSP `textDocument/formatting` adapts the same formatter to versioned editor buffers (2026-10-07; [adapter profile](../lsp.md#document-formatting)), pending independent review. Formatting keeps Go-like predictability: one style per formatter version, no configurable indentation, quote style or plugin-defined layout.
 
 ## Syntax and preservation
 
@@ -32,7 +32,7 @@ The CLI admits at most 100 files, 2 MiB per file and 8 MiB aggregate input, with
 
 MCP `code.format` returns formatted content or a bounded whole-document edit preview plus input digest and explicit source origin. It never writes source. Accept an explicit buffer or a guarded disk snapshot and reject a mismatched expected digest. Limits fail explicitly; no truncated replacement text. The caller applies the edit only to that same snapshot.
 
-Once the [language server](semantic-tooling.md) is implemented, support `textDocument/formatting` using its current versioned buffer and the same formatter. Advertise document formatting only when implemented. Capture document version/content and reject a result invalidated during computation. Return no edits for already formatted source, a whole-document UTF-16 edit for changed valid syntax, and an explicit request error for unformattable syntax. Editor indentation options do not override the canonical style. Range/on-type formatting and lint code actions remain separate future contracts.
+The [language server](semantic-tooling.md) supports `textDocument/formatting` using its current versioned buffer and the same formatter. Advertise document formatting only when implemented. Capture document version/content and reject a result invalidated during computation. Return no edits for already formatted source, a whole-document UTF-16 edit for changed valid syntax, and an explicit request error for unformattable syntax. Editor indentation options do not override the canonical style. Range/on-type formatting and lint code actions remain separate future contracts.
 
 ## Acceptance and delivery
 

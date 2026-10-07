@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Actual Content-Length framed ef processes, shared diagnostic parity and
-hover/definition parity with CLI and MCP selected-type queries."""
+"""Actual Content-Length framed ef processes, shared diagnostic parity,
+hover/definition parity with CLI and MCP selected-type queries, and document
+formatting parity with `ef fmt` and MCP code.format."""
 import argparse
 import json
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
+
+# Manual runs must not leave scripts/__pycache__ in the worktree.
+sys.dont_write_bytecode = True
 
 from diagnostics_smoke import cli, editor_position, mcp
 from smoke_support import assert_report_parity
@@ -107,7 +112,8 @@ def parity(directory):
         messages = exchange([INIT, READY, opened(path, text, 4), STOP, EXIT], fragmented=True)
         capabilities = messages[0]["result"]["capabilities"]
         assert capabilities == {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": True, "change": 1},
-                                "hoverProvider": True, "definitionProvider": True}
+                                "hoverProvider": True, "definitionProvider": True,
+                                "documentFormattingProvider": True}
         published = publications(messages)
         assert published == [{"uri": path.as_uri(), "version": 4,
                               "diagnostics": [f["lsp"] for f in report["diagnostics"]]}]
@@ -308,6 +314,73 @@ def navigation(directory):
     assert path.read_bytes() == text.encode()
 
 
+# (source, failure code): one shared formatter answers all three surfaces.
+FORMATTING = [
+    ('// 𐐀 note\r\nfn mark() -> string {   "𐐀é" }  // 𐐀𐐀 end', None),
+    ('import go missing "example.invalid/no-such-package"\r\nfn bad() -> string {\r\n  true }\r\n\r\n\r\n', None),
+    ('fn mark() -> string { "e\u0301𐐀" }\n', None),
+    ("", None),
+    ("  \r\n\t\r\n", None),
+    ('fn a() -> void {\r void }', "EF001"),
+    ("fn a() -> () { () }", "EF002"),
+]
+
+
+def code_format(directory, sources):
+    requests = [{"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": {
+        "protocolVersion": "2025-11-25", "capabilities": {},
+        "clientInfo": {"name": "lsp-smoke", "version": "1"}}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"}]
+    requests += [{"jsonrpc": "2.0", "id": index, "method": "tools/call", "params": {
+        "name": "code.format", "arguments": {"source": source}}} for index, source in enumerate(sources)]
+    process = subprocess.run([BINARY, "mcp", str(directory)], text=True, capture_output=True, timeout=60,
+                             input="".join(json.dumps(request) + "\n" for request in requests))
+    assert process.returncode == 0, process.stderr
+    return {reply["id"]: reply["result"] for reply in map(json.loads, process.stdout.splitlines())}
+
+
+def formatting(directory):
+    # Buffers are unsaved: the document path never exists on disk.
+    path = directory / "unsaved-format.ef"
+    remote = code_format(directory, [source for source, _ in FORMATTING])
+    for index, (source, code) in enumerate(FORMATTING):
+        local = subprocess.run([BINARY, "fmt", "--stdin"], input=source.encode(), capture_output=True, timeout=30)
+        for target in ("go", "js"):
+            options = {"tabSize": 2, "insertSpaces": False}
+            replies = {m["id"]: m for m in exchange([
+                INIT, READY, opened(path, "fn stale() -> void {   void }", 1), changed(path, source, 3),
+                changed(path, "fn stale() -> void {   void }", 2),
+                call("textDocument/formatting", {"textDocument": {"uri": path.as_uri()}, "options": options}, "format"),
+                call("unknown", identifier="after"), STOP, EXIT], target=target) if "id" in m}
+            reply = replies["format"]
+            assert replies["after"]["error"]["code"] == -32601, replies
+            if code is not None:
+                detail = local.stderr.decode().split("source cannot be formatted: ", 1)[1].strip()
+                assert local.returncode == 2 and not local.stdout and "EFMT_SYNTAX" in local.stderr.decode(), local
+                assert remote[index]["isError"] and detail in remote[index]["content"][0]["text"], remote[index]
+                assert reply["error"]["code"] == -32803, reply
+                assert f"cannot format: {code}: {detail}" in reply["error"]["message"], reply
+                assert "version 3" in reply["error"]["message"], reply
+                continue
+            assert local.returncode == 0, local
+            formatted = local.stdout.decode()
+            shared = remote[index]["structuredContent"]
+            assert shared["text"] == formatted and shared["changed"] == (formatted != source), shared
+            assert shared["formatterVersion"] == "effra/formatter-6", shared
+            if formatted == source:
+                assert reply["result"] == [], reply
+            else:
+                whole = {"start": {"line": 0, "character": 0}, "end": editor_position(source, len(source.encode()))}
+                assert reply["result"] == [{"range": whole, "newText": formatted}], (reply, whole)
+            # The formatted buffer is already canonical: no edits.
+            again = {m["id"]: m for m in exchange([
+                INIT, READY, opened(path, formatted, 1),
+                call("textDocument/formatting", {"textDocument": {"uri": path.as_uri()}, "options": options}, "again"),
+                STOP, EXIT], target=target) if "id" in m}
+            assert again["again"]["result"] == [], again
+    assert not path.exists()
+
+
 def imports(directory):
     project = directory / "imports"
     sdk = project / "sdk"
@@ -470,7 +543,8 @@ def oversized_uri_regression(directory):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--review-case", choices=["uri", "operational", "recovery", "oversized", "navigation"])
+    parser.add_argument("--review-case", choices=["uri", "operational", "recovery", "oversized", "navigation",
+                                                  "formatting"])
     arguments = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="effra-lsp-smoke-") as temporary:
         directory = pathlib.Path(temporary)
@@ -478,18 +552,19 @@ def main():
             {"uri": uri_alias_regression, "operational": operational_budget_regression,
              "recovery": refusal_recovery_regression,
              "oversized": oversized_uri_regression,
-             "navigation": navigation}[arguments.review_case](directory)
+             "navigation": navigation, "formatting": formatting}[arguments.review_case](directory)
         else:
             parity(directory)
             documents(directory)
             navigation(directory)
+            formatting(directory)
             imports(directory)
             bounds_and_protocol(directory)
             uri_alias_regression(directory)
             operational_budget_regression(directory)
             refusal_recovery_regression(directory)
             oversized_uri_regression(directory)
-    print("LSP framed-process diagnostics, documents, navigation, imports and protocol checks passed")
+    print("LSP framed-process diagnostics, documents, navigation, formatting, imports and protocol checks passed")
 
 
 if __name__ == "__main__":

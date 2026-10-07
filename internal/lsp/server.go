@@ -1,7 +1,8 @@
-// Package lsp adapts the compiler's diagnostic reports and selected-type
-// queries to an ordered, bounded stdio session. Analysis is synchronous: there
-// are no detached workers or result queues, accepted document versions are
-// published in receive order, and every request reads the current version.
+// Package lsp adapts the compiler's diagnostic reports, selected-type queries
+// and syntax formatter to an ordered, bounded stdio session. Analysis is
+// synchronous: there are no detached workers or result queues, accepted
+// document versions are published in receive order, and every request reads
+// the current version.
 package lsp
 
 import (
@@ -27,6 +28,10 @@ const MaxDiagnostics = 1000
 const MaxDocumentURIBytes = 4096
 const MaxLogDetailBytes = 8 << 10
 
+// MaxFormattedBytes bounds one complete formatted replacement; the formatter
+// refuses rather than truncating it.
+const MaxFormattedBytes = 2 * MaxDocumentBytes
+
 type document struct {
 	snapshot compiler.SourceSnapshot
 	path     string
@@ -47,6 +52,13 @@ type session struct {
 	phase     int
 	documents map[string]document
 	bytes     int
+	// format is the shared syntax-only formatter of `ef fmt` and MCP
+	// code.format. Tests substitute it to interleave an edit with a computation.
+	format func(source string) (compiler.FormatResult, error)
+}
+
+func formatSource(source string) (compiler.FormatResult, error) {
+	return compiler.FormatSourceBounded(source, MaxFormattedBytes)
 }
 
 // Serve owns the session until exit or EOF. EOF after shutdown is clean;
@@ -56,7 +68,7 @@ func Serve(target string, in io.Reader, out io.Writer) error {
 	if target != "go" && target != "js" {
 		return fmt.Errorf("LSP target must be go or js")
 	}
-	s := session{out: out, target: target, documents: make(map[string]document)}
+	s := session{out: out, target: target, documents: make(map[string]document), format: formatSource}
 	defer func() { clear(s.documents); s.bytes = 0 }()
 	r := bufio.NewReaderSize(in, 4096)
 	for {
@@ -182,7 +194,7 @@ func (s *session) handle(req request) error {
 			return s.reject(req, -32600, "initialize requires a request and can occur once")
 		}
 		s.phase = 1
-		return s.result(req.ID, map[string]any{"capabilities": map[string]any{"positionEncoding": "utf-16", "textDocumentSync": map[string]any{"openClose": true, "change": 1}, "hoverProvider": true, "definitionProvider": true}, "serverInfo": map[string]any{"name": "effra", "version": "0.0.1-prototype"}})
+		return s.result(req.ID, map[string]any{"capabilities": map[string]any{"positionEncoding": "utf-16", "textDocumentSync": map[string]any{"openClose": true, "change": 1}, "hoverProvider": true, "definitionProvider": true, "documentFormattingProvider": true}, "serverInfo": map[string]any{"name": "effra", "version": "0.0.1-prototype"}})
 	}
 	if s.phase == 0 {
 		if req.ID == nil {
@@ -231,6 +243,11 @@ func (s *session) handle(req request) error {
 			return s.reject(req, -32600, "navigation must be a request")
 		}
 		return s.navigate(req)
+	case "textDocument/formatting":
+		if req.ID == nil {
+			return s.reject(req, -32600, "formatting must be a request")
+		}
+		return s.formatDocument(req)
 	default:
 		if req.ID == nil && strings.HasPrefix(req.Method, "$/") {
 			return nil
@@ -426,4 +443,52 @@ func (s *session) navigate(req request) error {
 		return s.failure(req.ID, -32803, documentContext(doc)+"selected span has no LSP range")
 	}
 	return s.result(req.ID, map[string]any{"contents": map[string]any{"kind": "plaintext", "value": selected.Presentation}, "range": selection})
+}
+
+// formatDocument answers whole-document formatting of the current accepted
+// snapshot with the shared syntax-only formatter. Editor options are ignored:
+// the style is canonical. The result is refused when the document changed
+// while it was computed, so an edit never applies to text it was not made for.
+func (s *session) formatDocument(req request) error {
+	var p struct {
+		TextDocument struct {
+			URI string `json:"uri"`
+		} `json:"textDocument"`
+	}
+	if !objectParams(req.Params, &p) {
+		return s.failure(req.ID, -32602, "invalid document formatting parameters")
+	}
+	path, err := documentPath(p.TextDocument.URI)
+	if err != nil {
+		return s.failure(req.ID, -32602, err.Error())
+	}
+	captured, exists := s.documents[path]
+	if !exists {
+		return s.failure(req.ID, -32602, "document is not open")
+	}
+	result, err := s.format(captured.snapshot.Text)
+	current, exists := s.documents[path]
+	if !exists || current.version != captured.version || current.snapshot.Text != captured.snapshot.Text {
+		return s.failure(req.ID, -32801, documentContext(captured)+"document changed while formatting")
+	}
+	var failure compiler.FormatFailure
+	if errors.As(err, &failure) && len(failure.Diagnostics) > 0 {
+		first := failure.Diagnostics[0]
+		return s.failure(req.ID, -32803, fmt.Sprintf("%scannot format: %s: %s", documentContext(captured), first.Code, first.Message))
+	}
+	if err != nil {
+		return s.failure(req.ID, -32803, documentContext(captured)+"cannot format: "+err.Error())
+	}
+	if !result.Changed {
+		return s.result(req.ID, []any{})
+	}
+	whole, ok := compiler.NewSourcePositions(captured.snapshot.Text).Range(compiler.Span{Length: len(captured.snapshot.Text)})
+	if !ok {
+		return s.failure(req.ID, -32803, documentContext(captured)+"document has no LSP range")
+	}
+	frame, err := encodeFrame(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": []any{map[string]any{"range": whole, "newText": result.Text}}})
+	if err != nil {
+		return s.failure(req.ID, -32803, documentContext(captured)+err.Error())
+	}
+	return writeFrame(s.out, frame)
 }
