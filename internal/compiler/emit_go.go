@@ -23,11 +23,12 @@ func goType(t string) string {
 	if strings.HasPrefix(t, "GoResult:") {
 		return "er.GoResult[" + goType(strings.TrimPrefix(t, "GoResult:")) + "]"
 	}
+	if callback, ok := builtinCallbacks[t]; ok {
+		return "func(" + goType(callback.Parameter) + ") efEffect[" + goType(callback.Result) + "]"
+	}
 	switch t {
 	case "string":
 		return "string"
-	case "Handler":
-		return "func(string) efEffect[string]"
 	case "bool":
 		return "bool"
 	case "i64":
@@ -98,9 +99,10 @@ func layoutGoType(c *checker, id TypeID, bindings map[TypeID]goLayout, visiting 
 			return "struct{}"
 		}
 	case "opaque":
+		if _, ok := builtinCallbacks[node.Name]; ok {
+			return goType(node.Name)
+		}
 		switch node.Name {
-		case "Handler":
-			return "func(string) efEffect[string]"
 		case "File":
 			return "*er.File"
 		case "Latch":
@@ -306,7 +308,7 @@ var builtinGoProviders = map[string]string{
 	"LiveEnv":       "func efProvider_LiveEnv()efService_Env{return efService_Env{m_get:func(name string)efEffect[string]{return efFromRuntime(er.Env(name))}}}\n",
 	"RuntimeLive":   "func efProvider_RuntimeLive()efService_Runtime{return efService_Runtime{m_inspect:func()efEffect[string]{return efFromRuntime(er.InspectScope())}}}\n",
 	"Host":          "func efProvider_Host()efService_Foreign{return efService_Foreign{}}\n",
-	"GoHttp":        "func efProvider_GoHttp()efService_Http{return efService_Http{m_serve:func(address string,handler func(string)efEffect[string])efEffect[struct{}]{return func(ctx efContext)efExit[struct{}]{return er.Invoke(ctx.Runtime,er.ServeHTTP(address,func(path string)er.Effect[string]{return efToRuntime(ctx,handler(path))},func(bound string){fmt.Println(\"listening http://\"+bound)}))}}}}\n",
+	"LiveHttp":      goHTTPProvider(),
 }
 
 // schedulerDrivenProvider reports whether a builtin provider is constructed
@@ -385,7 +387,7 @@ func efFromRuntime[A any](program er.Effect[A]) efEffect[A] {return func(ctx efC
 	}
 	g.dataTypes(&out)
 	services := []*Service{}
-	for _, s := range append(builtins(), r.Program.Services...) {
+	for _, s := range append(builtinServicesFor(r.Program), r.Program.Services...) {
 		if plan.Requires(RequiresService, serviceIdentity(s.Name)) {
 			services = append(services, s)
 		}
@@ -398,7 +400,7 @@ func efFromRuntime[A any](program er.Effect[A]) efEffect[A] {return func(ctx efC
 	for _, s := range services {
 		out.WriteString(goServiceDeclaration(s))
 	}
-	for _, p := range builtinProviders() {
+	for _, p := range builtinProvidersFor(r.Program) {
 		if plan.Requires(RequiresProvider, providerTypeRef(p).Declaration) {
 			out.WriteString(builtinGoProviders[p.Name])
 		}

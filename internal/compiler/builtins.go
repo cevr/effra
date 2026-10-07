@@ -1,6 +1,11 @@
 package compiler
 
-import rt "effra.local/prototype/runtime/effra"
+import (
+	_ "embed"
+	"slices"
+
+	rt "effra.local/prototype/runtime/effra"
+)
 
 // Builtin services and providers name the native runtime modules their
 // generated declarations reference. A service lists modules required by its
@@ -15,6 +20,8 @@ func builtins() []*Service {
 	p := func(name, typ string) Param { return Param{Name: name, Type: typ} }
 	serve := method("serve", voidTypeName, []Param{p("address", "string"), p("handler", "Handler")}, "IoError")
 	serve.CallbackPolicies = []CallbackPolicy{{Parameter: 1, Kind: "typed-failure-response", PropagateRequirements: true}}
+	listen := method("listen", voidTypeName, []Param{p("address", "string"), p("limits", "HttpLimits"), p("handler", "HttpHandler")}, "IoError")
+	listen.CallbackPolicies = []CallbackPolicy{{Parameter: 2, Kind: "typed-failure-response", PropagateRequirements: true}}
 	return []*Service{
 		{Name: "Assert", Methods: []*Function{method("check", voidTypeName, []Param{p("condition", "bool"), p("message", "string")}, "AssertionFailed"), method("equalText", voidTypeName, []Param{p("actual", "string"), p("expected", "string")}, "AssertionFailed")}},
 		{Name: "Console", Methods: []*Function{method("log", voidTypeName, []Param{p("message", "string")})}},
@@ -25,7 +32,7 @@ func builtins() []*Service {
 		{Name: "Env", Methods: []*Function{method("get", "string", []Param{p("name", "string")})}},
 		{Name: "Runtime", Methods: []*Function{method("inspect", "string", nil)}},
 		{Name: "Foreign"},
-		{Name: "Http", Methods: []*Function{serve}},
+		{Name: "Http", Methods: []*Function{serve, listen, method("text", "bytes", []Param{p("text", "string")})}},
 	}
 }
 func builtinProviders() []*Provider {
@@ -42,7 +49,89 @@ func builtinProviders() []*Provider {
 		{Name: "LiveEnv", Service: "Env", native: native(rt.RuntimeModuleEnv)},
 		{Name: "RuntimeLive", Service: "Runtime", native: native(rt.RuntimeModuleInspect)},
 		{Name: "Host", Service: "Foreign"},
-		{Name: "GoHttp", Service: "Http", native: native(rt.RuntimeModuleHTTP)},
+		{Name: "LiveHttp", Service: "Http", native: native(rt.RuntimeModuleHTTP)},
 	}
 }
 func builtinErrors() []string { return []string{"IoError", "Timeout", "GoError", "AssertionFailed"} }
+
+// builtinCallbacks are the finite callback contracts of builtin operations.
+// Each canonicalizes to an effectful callable from Parameter to Result. An
+// operation's typed-failure-response policy accepts any effectful callable
+// with exactly that signature and records the callable's own rows.
+var builtinCallbacks = map[string]struct{ Parameter, Result string }{
+	"Handler":     {"string", "string"},
+	"HttpHandler": {"HttpRequest", "HttpReply"},
+}
+
+// builtinServicesFor and builtinProvidersFor select the prelude one program
+// admits. The Http service, its provider and its data form one contract that
+// is admitted only when the program names Http or LiveHttp, so other programs
+// neither reserve its data names nor inspect or emit any of it. Callback type
+// names stay reserved like other builtin type names.
+func builtinServicesFor(program *Program) []*Service {
+	services := builtins()
+	if program != nil && program.httpContract {
+		return services
+	}
+	return slices.DeleteFunc(services, func(s *Service) bool { return s.Name == "Http" })
+}
+
+func builtinProvidersFor(program *Program) []*Provider {
+	providers := builtinProviders()
+	if program != nil && program.httpContract {
+		return providers
+	}
+	return slices.DeleteFunc(providers, func(p *Provider) bool { return p.Service == "Http" })
+}
+
+// builtinDataSource is the Http service's request/response data contract. It
+// belongs to the finite compatibility prelude of that existing builtin.
+//
+//go:embed builtin/http.ef
+var builtinDataSource string
+
+const builtinDataSourceID = "builtin:http"
+
+// addBuiltinData registers the prelude's nominal data ahead of source
+// declarations, so a colliding source declaration diagnoses at its own span.
+// The declarations carry no source spans and never enter lexical tooling.
+func addBuiltinData(program *Program) {
+	if !program.httpContract {
+		return
+	}
+	for _, data := range append(append([]*DataDeclaration{}, program.Records...), program.Enums...) {
+		if data.SourceID == builtinDataSourceID {
+			return
+		}
+	}
+	builtin, diagnostics := parse(builtinDataSource)
+	if len(diagnostics) != 0 {
+		panic("invalid builtin data source: " + diagnostics[0].Message)
+	}
+	for _, data := range append(append([]*DataDeclaration{}, builtin.Records...), builtin.Enums...) {
+		data.SourceID, data.Span = builtinDataSourceID, Span{}
+		for i := range data.Fields {
+			data.Fields[i].Span = Span{}
+		}
+		for i := range data.Variants {
+			data.Variants[i].Span = Span{}
+			for j := range data.Variants[i].Fields {
+				data.Variants[i].Fields[j].Span = Span{}
+			}
+		}
+	}
+	program.Records = append(builtin.Records, program.Records...)
+	program.Enums = append(builtin.Enums, program.Enums...)
+}
+
+// referencesHTTPContract reports whether any name token refers to the Http
+// service or its provider. Builtin names are global, so a name token is the
+// complete reference set; strings and comments are not name tokens.
+func referencesHTTPContract(tokens []token) bool {
+	for _, t := range tokens {
+		if t.kind == "name" && (t.text == "Http" || t.text == "LiveHttp") {
+			return true
+		}
+	}
+	return false
+}

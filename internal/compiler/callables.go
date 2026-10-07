@@ -507,7 +507,8 @@ func jsRowFunctionSignature(f *Function, declarations map[string]Declaration) st
 			if policy.Kind != "typed-failure-response" {
 				continue
 			}
-			copy.Params[policy.Parameter].sourceType = &sourceType{Effect: true, Parameters: []string{"string"}, ParameterTypes: []*sourceType{nil}, Result: "string", Failures: []string{"__ef_transport_E"}, Services: []string{"__ef_transport_R"}}
+			callback := builtinCallbacks[f.Params[policy.Parameter].Type]
+			copy.Params[policy.Parameter].sourceType = &sourceType{Effect: true, Parameters: []string{callback.Parameter}, ParameterTypes: []*sourceType{nil}, Result: callback.Result, Failures: []string{"__ef_transport_E"}, Services: []string{"__ef_transport_R"}}
 			copy.RowParameters = append(copy.RowParameters, RowParameter{Name: "__ef_transport_E", Kind: "raises"}, RowParameter{Name: "__ef_transport_R", Kind: "uses"})
 			if policy.PropagateRequirements {
 				copy.Services = append(append([]string{}, f.Services...), "__ef_transport_R")

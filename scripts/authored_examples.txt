@@ -3,6 +3,7 @@ examples/checkout.ef
 examples/data.ef
 examples/workflow.ef
 examples/http.ef
+examples/http-transport.ef
 examples/ownership.ef
 examples/testing.ef
 examples/lifecycle.ef

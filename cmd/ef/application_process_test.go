@@ -26,7 +26,7 @@ const httpApplicationSource = `effect fn route(path: string) -> string {
     "served " + path
 }
 effect fn main() -> void raises { IoError } {
-    run Http.serve("127.0.0.1:0", route).provide<Http>(GoHttp)
+    run Http.serve("127.0.0.1:0", route).provide<Http>(LiveHttp)
 }
 `
 

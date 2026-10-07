@@ -556,7 +556,7 @@ func TestApplicationPlanRetainsExampleHTTPCapabilities(t *testing.T) {
 	r, plan := exampleApplicationPlan(t, "http.ef", GoGenerationBuild)
 	route := symbolIdentity(t, r, "route")
 	requireProvenance(t, plan, RequiresCallableValue, route, symbolIdentity(t, r, "main"), "function-value")
-	requireProvenance(t, plan, RequiresRuntimeModule, string(rt.RuntimeModuleHTTP), providerIdentity(t, r, "GoHttp"), "provider-runtime")
+	requireProvenance(t, plan, RequiresRuntimeModule, string(rt.RuntimeModuleHTTP), providerIdentity(t, r, "LiveHttp"), "provider-runtime")
 	requirePlanned(t, plan, RequiresGoImport, "strings", "effra.local/prototype/examples/sdk")
 	requirePlanned(t, plan, RequiresHelper, "timeout")
 	if !sameRuntimeModules(plan, rt.RuntimeModuleCore, rt.RuntimeModuleFiles, rt.RuntimeModuleHTTP, rt.RuntimeModuleInterop) {

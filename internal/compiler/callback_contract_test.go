@@ -16,11 +16,11 @@ effect fn route(path:string)->string raises {Missing} uses {Users}{run Users.get
 
 func TestHandlerErasureBoundariesRetainFailuresAndServices(t *testing.T) {
 	for _, test := range []struct{ name, body, code string }{
-		{"alias", `effect fn main()->void raises {IoError}{let chosen=route;run Http.serve("127.0.0.1:0",chosen).provide<Http>(GoHttp)}`, "EF108"},
-		{"helper", `fn identity(h:Handler)->Handler{h} effect fn main()->void raises {IoError}{let chosen=identity(route);run Http.serve("127.0.0.1:0",chosen).provide<Http>(GoHttp)}`, "EF106"},
-		{"conditional", `effect fn main()->void raises {IoError}{let chosen=if true {route}else{route};run Http.serve("127.0.0.1:0",chosen).provide<Http>(GoHttp)}`, "EF108"},
+		{"alias", `effect fn main()->void raises {IoError}{let chosen=route;run Http.serve("127.0.0.1:0",chosen).provide<Http>(LiveHttp)}`, "EF108"},
+		{"helper", `fn identity(h:Handler)->Handler{h} effect fn main()->void raises {IoError}{let chosen=identity(route);run Http.serve("127.0.0.1:0",chosen).provide<Http>(LiveHttp)}`, "EF106"},
+		{"conditional", `effect fn main()->void raises {IoError}{let chosen=if true {route}else{route};run Http.serve("127.0.0.1:0",chosen).provide<Http>(LiveHttp)}`, "EF108"},
 		{"record empty alias", `record Routes {handler:Handler} effect fn main()->void{let routes=Routes{handler:route};void}`, "EF115"},
-		{"record complete callback", `record Routes {handler:effect fn(string)->string raises {Missing} uses {Users}} effect fn main()->void raises {IoError}{let routes=Routes{handler:route};run Http.serve("127.0.0.1:0",routes.handler).provide<Http>(GoHttp)}`, "EF108"},
+		{"record complete callback", `record Routes {handler:effect fn(string)->string raises {Missing} uses {Users}} effect fn main()->void raises {IoError}{let routes=Routes{handler:route};run Http.serve("127.0.0.1:0",routes.handler).provide<Http>(LiveHttp)}`, "EF108"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			r := Compile(callbackRouteSource + test.body)
@@ -32,7 +32,7 @@ func TestHandlerErasureBoundariesRetainFailuresAndServices(t *testing.T) {
 }
 
 func TestHTTPTransportPolicyIsVisibleInCheckedApplication(t *testing.T) {
-	source := callbackRouteSource + `effect fn main()->void{let pending=Http.serve("127.0.0.1:0",route).provide<Users>(Memory).provide<Http>(GoHttp);void}`
+	source := callbackRouteSource + `effect fn main()->void{let pending=Http.serve("127.0.0.1:0",route).provide<Users>(Memory).provide<Http>(LiveHttp);void}`
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
@@ -58,8 +58,7 @@ func TestHTTPTransportPolicyIsVisibleInCheckedApplication(t *testing.T) {
 	if p := r.ProjectValues([]ValueType{info.Type}); !p.Complete {
 		t.Fatal(p.Error)
 	}
-	portable := Compile(callbackRouteSource + `effect fn main()->void{void}`)
-	_, declaration, err := portable.Emit(false)
+	_, declaration, err := r.Emit(false)
 	if err != nil {
 		t.Fatal(err)
 	}

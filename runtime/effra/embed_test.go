@@ -129,7 +129,7 @@ func TestRuntimeModuleImportBoundariesAndSelectedCompileControls(t *testing.T) {
 		{name: "core", roots: []RuntimeModule{RuntimeModuleCore}, forbid: []string{"net/http", "encoding/json", "os", "io"}},
 		{name: "layers", roots: []RuntimeModule{RuntimeModuleLayers}, require: []string{"context", "sync"}, forbid: []string{"net/http", "encoding/json", "os", "io"}},
 		{name: "sync", roots: []RuntimeModule{RuntimeModuleSync}, forbid: []string{"net/http", "encoding/json", "os", "io"}},
-		{name: "http", roots: []RuntimeModule{RuntimeModuleHTTP}, require: []string{"net/http"}, forbid: []string{"encoding/json", "os", "io"}},
+		{name: "http", roots: []RuntimeModule{RuntimeModuleHTTP}, require: []string{"net/http", "io"}, forbid: []string{"encoding/json", "os"}},
 		{name: "files", roots: []RuntimeModule{RuntimeModuleFiles}, require: []string{"os", "io"}, forbid: []string{"net/http", "encoding/json"}},
 		{name: "console", roots: []RuntimeModule{RuntimeModuleConsole}, require: []string{"fmt"}, forbid: []string{"net/http", "encoding/json", "os", "io"}},
 		{name: "env", roots: []RuntimeModule{RuntimeModuleEnv}, require: []string{"os"}, forbid: []string{"net/http", "encoding/json", "io"}},

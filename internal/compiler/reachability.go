@@ -446,10 +446,10 @@ func (p *applicationPlanner) librarySurface() {
 			p.function(f, "", "export")
 		}
 	}
-	for _, s := range append(builtins(), p.r.Program.Services...) {
+	for _, s := range append(builtinServicesFor(p.r.Program), p.r.Program.Services...) {
 		p.service(p.c.services[s.Name], "", "export")
 	}
-	for _, provider := range builtinProviders() {
+	for _, provider := range builtinProvidersFor(p.r.Program) {
 		if jsExportsBuiltinProvider(provider.Name) {
 			p.provider(p.r.checkedProviders[provider.Name], "", "export")
 		}

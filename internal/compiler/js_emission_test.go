@@ -167,6 +167,11 @@ func TestJSEntryBehavesLikeTheCompletePrelude(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// A transport example serves until interrupted; scripts/
+		// http_transport_smoke.py drives it over sockets instead.
+		if filepath.Base(path) == "http-transport.ef" {
+			continue
+		}
 		r := CompileAt(string(source), "js", "../../examples")
 		if !r.Checked || r.Program.GoOnly || r.Entry() != nil {
 			continue
@@ -180,7 +185,7 @@ func TestJSEntryBehavesLikeTheCompletePrelude(t *testing.T) {
 			t.Fatal(err)
 		}
 		complete := withCompletePrelude(library)
-		runner := entry[strings.LastIndex(entry, "Effect.runPromise(__ef_function_main())"):]
+		runner := entry[strings.LastIndex(entry, "const __ef_signal = new AbortController()"):]
 		dir := writeJSModule(t, map[string]string{"entry.mjs": entry, "complete.mjs": complete + runner})
 		pruned, prunedErr := runNode(t, dir, "entry.mjs")
 		full, fullErr := runNode(t, dir, "complete.mjs")

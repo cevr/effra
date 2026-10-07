@@ -18,7 +18,7 @@ Add ordinary typed function values and explicit finite row parameters together. 
 
 ## Immediate soundness regression
 
-The existing opaque `Handler` accepts a function requiring a service and loses that requirement when passed through a helper parameter. A public program with `route uses {Users}`, `serveIt(h: Handler) uses {Http}` and `main = run serveIt(route).provide<Http>(GoHttp)` currently checks despite missing Users. Independent counsel executed the resulting server and observed a missing-service defect; root independently verified the unchecked requirement in CLI inspection.
+The existing opaque `Handler` accepts a function requiring a service and loses that requirement when passed through a helper parameter. A public program with `route uses {Users}`, `serveIt(h: Handler) uses {Http}` and `main = run serveIt(route).provide<Http>(LiveHttp)` currently checks despite missing Users. Independent counsel executed the resulting server and observed a missing-service defect; root independently verified the unchecked requirement in CLI inspection.
 
 Further independent source probes at `4f6aed8` admit the same missing requirement through `if` selection of a handler and through a record's Handler field, while a direct local alias preserves the requirement. These are distinct acceptance cases for the common representation; a special repair to Http.serve's helper parameter alone is insufficient.
 

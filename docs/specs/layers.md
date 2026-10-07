@@ -21,7 +21,7 @@ layer Domain {
 }
 layer App provides { Users, Audit, Logger, Http } {
     merge Platform, Persistence, Domain
-    Http = GoHttp
+    Http = LiveHttp
 }
 ```
 

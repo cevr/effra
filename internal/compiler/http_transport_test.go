@@ -1,0 +1,201 @@
+package compiler
+
+import (
+	"slices"
+	"strings"
+	"testing"
+)
+
+const httpTransportRouteSource = `error Missing
+service Users {effect fn get(path:string)->string raises {Missing}}
+impl Memory for Users {effect fn get(path:string)->string raises {Missing}{path}}
+effect fn route(request:HttpRequest)->HttpReply raises {Missing} uses {Users, Http} {
+ let name = run Users.get(request.path)
+ let body = run Http.text(name)
+ HttpReply.Respond {response: HttpResponse {status: 200, contentType: request.contentType, body: body}}
+}
+fn limits()->HttpLimits {HttpLimits {maxBodyBytes: 16, readHeaderMillis: 1000, readBodyMillis: 1000, idleMillis: 1000, maxActive: 4}}
+`
+
+func TestHTTPListenRetainsHandlerRowsAndAbsorbedFailures(t *testing.T) {
+	for _, target := range []string{"go", "js"} {
+		source := httpTransportRouteSource + `effect fn main()->void{let pending=Http.listen("127.0.0.1:0",limits(),route).provide<Users>(Memory).provide<Http>(LiveHttp);void}`
+		r := CompileFor(source, target)
+		if !r.Checked {
+			t.Fatalf("%s: %+v", target, r.Diagnostics)
+		}
+		info, err := r.TypeAt(strings.Index(source, "listen("))
+		if err != nil {
+			t.Fatal(err)
+		}
+		policy := info.Type.Application.CallbackPolicies
+		if len(policy) != 1 || policy[0].Parameter != 2 || policy[0].Kind != "typed-failure-response" || !slices.Equal(policy[0].AbsorbedFailures, []string{"Missing"}) {
+			t.Fatalf("%s: wrong transport policy: %+v", target, policy)
+		}
+		if !slices.Equal(info.Type.Errors, []string{"IoError"}) || !slices.Equal(info.Type.Services, []string{"Http", "Users"}) {
+			t.Fatalf("%s: transport contract erased handler rows: %+v", target, info.Type)
+		}
+	}
+	missing := CompileFor(httpTransportRouteSource+`effect fn main()->void raises {IoError}{run Http.listen("127.0.0.1:0",limits(),route).provide<Http>(LiveHttp)}`, "js")
+	if missing.Checked || !hasCode(missing, "EF108") {
+		t.Fatalf("handler service requirement was not propagated: %+v", missing.Diagnostics)
+	}
+}
+
+func TestHTTPListenRejectsHandlerShapesAndShadowedContracts(t *testing.T) {
+	for _, test := range []struct{ name, source, code string }{
+		{"result", `effect fn route(request:HttpRequest)->string{request.path} effect fn main()->void raises {IoError}{run Http.listen("127.0.0.1:0",HttpLimits{maxBodyBytes:1,readHeaderMillis:1,readBodyMillis:1,idleMillis:1,maxActive:1},route).provide<Http>(LiveHttp)}`, "EF106"},
+		{"parameter", `effect fn route(path:string)->HttpReply{HttpReply.NotFound {}} effect fn main()->void raises {IoError}{run Http.listen("127.0.0.1:0",HttpLimits{maxBodyBytes:1,readHeaderMillis:1,readBodyMillis:1,idleMillis:1,maxActive:1},route).provide<Http>(LiveHttp)}`, "EF106"},
+		{"pure", `fn route(request:HttpRequest)->HttpReply{HttpReply.NotFound {}} effect fn main()->void raises {IoError}{run Http.listen("127.0.0.1:0",HttpLimits{maxBodyBytes:1,readHeaderMillis:1,readBodyMillis:1,idleMillis:1,maxActive:1},route).provide<Http>(LiveHttp)}`, "EF106"},
+		{"limits", `effect fn route(request:HttpRequest)->HttpReply{HttpReply.NotFound {}} effect fn main()->void raises {IoError}{run Http.listen("127.0.0.1:0",16,route).provide<Http>(LiveHttp)}`, "EF106"},
+		{"shadowed record", `record HttpRequest {path:string} effect fn main()->void{let pending=Http.text("x"); void}`, "EF101"},
+		{"shadowed callback", `record HttpHandler {path:string} effect fn main()->void{void}`, "EF101"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r := Compile(test.source)
+			if r.Checked || !hasCode(r, test.code) {
+				t.Fatalf("expected %s: %+v", test.code, r.Diagnostics)
+			}
+		})
+	}
+}
+
+func TestHTTPContractIsAdmittedOnlyWhenReferenced(t *testing.T) {
+	for _, target := range []string{"go", "js"} {
+		r := CompileFor(`record HttpRequest {path:string} effect fn main()->string{let label="Http"; label}`, target)
+		if !r.Checked || len(r.Declarations) != 1 || r.Declarations[0].Source != "" {
+			t.Fatalf("%s: unreferenced Http contract was admitted: %+v %+v", target, r.Diagnostics, r.Declarations)
+		}
+		var code string
+		var err error
+		if target == "go" {
+			code, err = r.EmitGo()
+		} else {
+			code, _, err = r.Emit(true)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(code, "LiveHttp") || strings.Contains(code, "efService_Http") || strings.Contains(code, "node:http") {
+			t.Fatalf("%s: unreferenced Http contract was emitted", target)
+		}
+	}
+}
+
+func TestHTTPDataPreludeHasNoSourceSpans(t *testing.T) {
+	r := Compile(`effect fn main()->void{let pending=Http.text("x"); void}`)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	names := []string{}
+	for _, declaration := range r.Declarations {
+		if declaration.Source != builtinDataSourceID {
+			continue
+		}
+		names = append(names, declaration.Name)
+		if declaration.Span != (Span{}) {
+			t.Fatalf("builtin declaration carries a source span: %+v", declaration)
+		}
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"HttpLimits", "HttpReply", "HttpRequest", "HttpResponse"}) {
+		t.Fatalf("builtin HTTP data: %v", names)
+	}
+}
+
+// The JS transport is exercised through its provider with handler recipes
+// whose finalizers are observable, proving publication after owned cleanup.
+const httpTransportJSHarness = `
+import net from 'node:net';
+const limits = { maxBodyBytes: 16n, readHeaderMillis: 1000n, readBodyMillis: 1000n, idleMillis: 1000n, maxActive: 4n };
+const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+const pending = (promise, ms = 100) => Promise.race([promise.then(() => false), new Promise(r => setTimeout(() => r(true), ms))]);
+const ok = body => ({ _tag: 'HttpReply.Respond', response: { status: 200n, contentType: 'text/plain', body: new TextEncoder().encode(body) } });
+const listen = async (handler, path) => {
+  const bound = deferred();
+  const log = console.log;
+  console.log = line => { console.log = log; bound.resolve(String(line).replace('listening http://', '')); };
+  const fiber = Effect.runFork(path ? __ef_provider_LiveHttp.serve('127.0.0.1:0', path) : __ef_provider_LiveHttp.listen('127.0.0.1:0', limits, handler));
+  const [host, port] = (await bound.promise).split(':');
+  return { fiber, host, port: Number(port), done: new Promise(resolve => fiber.addObserver(resolve)) };
+};
+const send = (server, path) => {
+  const socket = net.connect(server.port, server.host);
+  socket.write('GET ' + path + ' HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n');
+  let data = '';
+  const response = new Promise(resolve => {
+    socket.on('data', chunk => { data += chunk; });
+    socket.on('close', () => resolve(data));
+    socket.on('error', () => {});
+  });
+  return { socket, response, status: response.then(text => Number(text.split(' ')[1])) };
+};
+const gated = (started, gate, after) => request => Effect.flatMap(
+  Effect.acquireRelease(Effect.void, () => Effect.sync(() => started.resolve()).pipe(Effect.andThen(Effect.promise(() => gate.promise)))),
+  () => after(request));
+const failures = [];
+const check = (condition, message) => { if (!condition) failures.push(message); };
+
+{ // publication waits for the request scope's cleanup
+  const started = deferred(), gate = deferred();
+  const server = await listen(gated(started, gate, () => Effect.succeed(ok('done'))));
+  const client = send(server, '/');
+  await started.promise;
+  check(await pending(client.response), 'response published before cleanup completed');
+  gate.resolve();
+  const text = await client.response;
+  check(text.startsWith('HTTP/1.1 200') && text.endsWith('done'), 'response after cleanup: ' + text);
+  server.fiber.interruptUnsafe();
+  await server.done;
+}
+{ // a cleanup failure after a successful handler is never published as success
+  const server = await listen(() => Effect.flatMap(Effect.acquireRelease(Effect.void, () => Effect.die(new Error('cleanup failed'))), () => Effect.succeed(ok('never'))));
+  const client = send(server, '/');
+  check((await client.status) === 500, 'failed cleanup was not a generic 500');
+  server.fiber.interruptUnsafe();
+  await server.done;
+}
+{ // client disconnect cancels the handler and completes its cleanup
+  const started = deferred(), cleaned = deferred();
+  const server = await listen(() => Effect.flatMap(Effect.acquireRelease(Effect.sync(() => started.resolve()), () => Effect.sync(() => cleaned.resolve())), () => Effect.never));
+  const client = send(server, '/');
+  await started.promise;
+  client.socket.destroy();
+  check(!(await pending(cleaned.promise, 2000)), 'disconnect did not cancel the handler');
+  server.fiber.interruptUnsafe();
+  await server.done;
+}
+{ // shutdown cancels active work and answers 503 only after its cleanup
+  const started = deferred(), gate = deferred(), active = deferred();
+  const server = await listen(gated(started, gate, () => Effect.sync(() => active.resolve()).pipe(Effect.andThen(Effect.never))));
+  const client = send(server, '/');
+  await active.promise;
+  server.fiber.interruptUnsafe();
+  await started.promise;
+  check(await pending(client.response), 'shutdown response published before cleanup');
+  check(await pending(server.done), 'server completed before request cleanup');
+  gate.resolve();
+  const text = await client.response;
+  check(text.startsWith('HTTP/1.1 503') && /connection: close/i.test(text), 'shutdown response: ' + text);
+  const exit = await server.done;
+  check(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause), 'shutdown did not complete with interruption');
+}
+{ // the raw path-to-text control keeps its decoded path and text responses
+  const server = await listen(null, path => path === '/fail' ? Effect.fail({ _tag: 'Missing' }) : Effect.succeed('hi ' + path));
+  const text = await send(server, '/a%20b').response;
+  check(text.startsWith('HTTP/1.1 200') && /content-type: text\/plain; charset=utf-8/i.test(text) && text.endsWith('hi /a b'), 'raw path response: ' + text);
+  const failed = await send(server, '/fail').response;
+  check(failed.startsWith('HTTP/1.1 500') && failed.endsWith('Internal Server Error\n'), 'raw path failure: ' + failed);
+  server.fiber.interruptUnsafe();
+  await server.done;
+}
+if (failures.length > 0) throw new Error(failures.join('\n'));
+console.log('ok');
+`
+
+func TestHTTPTransportJSPublishesAfterCleanupAndCancelsOnDisconnectAndShutdown(t *testing.T) {
+	output := runJS(t, `effect fn main()->void{let pending=Http.text("x"); void}`, httpTransportJSHarness)
+	if strings.TrimSpace(output) != "ok" {
+		t.Fatalf("JS transport lifecycle: %s", output)
+	}
+}

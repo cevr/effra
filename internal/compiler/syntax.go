@@ -193,6 +193,7 @@ type LayerEntry struct {
 }
 type Program struct {
 	interfaceProducer   bool
+	httpContract        bool
 	semantic            *checker
 	BundledTemplates    []*Record
 	BundledTypeBindings map[string]map[string]*Record
@@ -506,6 +507,7 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 	p := parser{tokens: tokens, types: map[string]*sourceType{}}
 	program = &Program{Comments: comments, Errors: map[string]Span{}, Bindings: map[string]Binding{}, UsedImports: map[string]bool{}}
 	program.typeExpressions = p.types
+	program.httpContract = referencesHTTPContract(tokens)
 	for p.peek().kind != "eof" {
 		switch p.peek().text {
 		case "import":

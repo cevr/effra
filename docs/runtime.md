@@ -1,6 +1,6 @@
 # Managed Go runtime
 
-The native prototype uses `runtime/effra`, a Go-standard-library runtime with typed lazy closures and managed goroutines. The JS target emits pinned Effect with a small ownership policy over Effect fibers, scopes and causes. Shared conformance tests establish child-before-parent cleanup, unobserved failure propagation, and timeout cleanup-defect preservation. Go imports, Files, Runtime and Http remain Go-only (EF110). This is a tested common lifecycle subset, not complete provider parity.
+The native prototype uses `runtime/effra`, a Go-standard-library runtime with typed lazy closures and managed goroutines. The JS target emits pinned Effect with a small ownership policy over Effect fibers, scopes and causes. Shared conformance tests establish child-before-parent cleanup, unobserved failure propagation, and timeout cleanup-defect preservation. Go imports, Files and Runtime remain Go-only (EF110); Http/LiveHttp runs on both targets. This is a tested common lifecycle subset, not complete provider parity.
 
 ## Lifecycle contract
 
@@ -26,7 +26,7 @@ Exits preserve named failures, defects and interruption separately, including ad
 | Sync / TestSync | `latch() -> Latch`, `await(Latch) -> void`, `signal(Latch) -> void` | Shared one-shot synchronization; waiter interruption does not consume the handle |
 | Env / LiveEnv | `get(string) -> string` | Empty string for absent values; this is not a presence test |
 | Files / LiveFiles | `openRead(string) -> File`, `readText(File) -> string`, `readFile(string) -> string` | IoError; openRead attaches release to the current scope; readFile opens a narrower scope |
-| Http / GoHttp | `serve(string, handler) -> void` | IoError; owns listener and waits for request cleanup on shutdown |
+| Http / LiveHttp | `serve(string, Handler) -> void`, `listen(string, HttpLimits, HttpHandler) -> void`, `text(string) -> bytes` | IoError; owns listener, bounds requests, and waits for request cleanup on shutdown. Go and JS |
 | Runtime / RuntimeLive | `inspect() -> string` | JSON metadata for the current owning scope |
 
 Files use synchronized managed handles; using a handle after its owner closes produces IoError. This is a runtime guard, not region typing or proof against every mutable alias. Native reads are ordinary blocking Go file reads and may delay cancellation. File reading currently buffers the entire content; streaming/bounded I/O remains future work.
@@ -58,4 +58,31 @@ Run `./bin/ef run examples/http.ef` from the repository. It prints `listening ht
 
 `Http.serve` accepts a reference to an effect function taking one string path and returning a string. Its declared service requirements flow into the server recipe. Request failures, defects and interruption become a generic HTTP 500 response; the recipe itself admits listener/startup IoError. The restricted handler reference is not a general higher-order type system.
 
-Each request executes inside a fresh managed scope, with cancellation linked to its connection and server lifetime. SIGTERM stops admission, cancels requests, and waits for handlers and their cleanup before returning. A foreign call ignoring cancellation can delay shutdown; there is no detached timeout escape. The Go entry currently reports interruption with exit status 1. Header reading has a five-second timeout; routing, request bodies, streaming and configurable server policies remain future work.
+Each request executes inside a fresh managed scope, with cancellation linked to its connection and server lifetime. SIGTERM stops admission, cancels requests, and waits for handlers and their cleanup before returning. A foreign call ignoring cancellation can delay shutdown; there is no detached timeout escape. The Go entry currently reports interruption with exit status 1. `serve` is the raw path-to-text control: header reading has a five-second timeout and it reads no request bodies.
+
+### Managed transport
+
+`Http.listen(address, limits, handler)` is the bounded buffered HTTP/1.1 transport; [examples/http-transport.ef](../examples/http-transport.ef) is the public program. Referencing `Http` or `LiveHttp` admits these builtin records:
+
+```effra
+record HttpRequest { method: string, path: string, contentType: string, body: bytes }
+record HttpResponse { status: i64, contentType: string, body: bytes }
+enum HttpReply { Respond { response: HttpResponse }, BadRequest, NotFound, UnsupportedMediaType }
+record HttpLimits { maxBodyBytes: i64, readHeaderMillis: i64, readBodyMillis: i64, idleMillis: i64, maxActive: i64 }
+```
+
+The handler is an effect function `HttpRequest -> HttpReply`. Its service requirements flow into the server recipe and its typed failures are absorbed by the transport (inspection reports them as `AbsorbedFailures`). `path` is the request-target path exactly as received, without query or percent-decoding. `contentType` is empty when absent. Every limit is required; timeouts must lie in 1..2147483647 ms, `maxActive` in 1..2147483647 and `maxBodyBytes` in 0..2^53-1, otherwise the recipe dies before binding.
+
+| Condition | Response |
+| --- | --- |
+| `Respond` | its status (200..599), body and Content-Type (omitted when empty; never sniffed) |
+| `BadRequest` / `NotFound` / `UnsupportedMediaType` | 400 / 404 / 415, empty body, no Content-Type |
+| active requests at `maxActive`, or shutdown begun | 503, `Connection: close`, handler not run |
+| declared or chunked body over `maxBodyBytes` | 413, `Connection: close`, handler not run |
+| malformed body framing | 400, `Connection: close`, handler not run |
+| headers or body not received in time | connection closed without a response |
+| handler failure, defect, cleanup failure, or invalid response | 500, empty body |
+| server shutdown cancels the handler | 503, `Connection: close`, after the request scope closed |
+| client disconnect | handler cancelled; no further bytes |
+
+Routing, method selection and media-type policy belong to the handler; the example answers a wrong method on a known path with 404, matching the selected profile. Every response is written only after the request scope, including handler resources and children, has closed, so a cleanup failure is never published as success. On JS the transport uses `node:http` (Node or Bun) with Effect fibers; the generated entry interrupts `main` on SIGINT/SIGTERM. General headers, query parameters, streaming bodies, typed endpoints and codecs remain future work.

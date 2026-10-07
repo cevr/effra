@@ -2075,7 +2075,7 @@ func typeRef(name string) TypeRef {
 		return ref
 	case name == "string", name == "bool", name == "i64", name == "bytes", name == voidTypeName:
 		ref = TypeRef{Kind: "primitive", Name: name}
-	case name == "File", name == "Handler", name == "Latch":
+	case name == "File", name == "Latch", builtinCallbacks[name].Result != "":
 		ref = TypeRef{Kind: "opaque", Name: name}
 	case strings.HasPrefix(name, "Fiber:"):
 		ref = TypeRef{Kind: "fiber", Args: []TypeRef{typeRef(strings.TrimPrefix(name, "Fiber:"))}}
@@ -2187,6 +2187,7 @@ func newChecker(program *Program, r *Result) *checker {
 		region:                  "invocation",
 	}
 	c.values = newCheckedValueArena(c)
+	addBuiltinData(program)
 	program.semantic = c
 	r.checkedSymbols = map[string]checkedSymbol{}
 	r.checkedFunctions = map[*Function]checkedSymbol{}
@@ -2227,11 +2228,11 @@ func (c *checker) registerService(s *Service) {
 func (c *checker) check() {
 	c.checkTemplates()
 	names := map[string]bool{}
-	for _, s := range builtins() {
+	for _, s := range builtinServicesFor(c.program) {
 		c.registerService(s)
 		names[s.Name] = true
 	}
-	for _, p := range builtinProviders() {
+	for _, p := range builtinProvidersFor(c.program) {
 		c.providers[p.Name] = p
 		names[p.Name] = true
 	}
@@ -2247,7 +2248,10 @@ func (c *checker) check() {
 	}
 	claimData := func(name string, span Span) {
 		switch name {
-		case "string", "bool", "i64", "bytes", "File", "Latch", "Handler", "Fiber", "Context", "Effect", "Scope", "Exit", "Cause", "never", "invalid":
+		case "string", "bool", "i64", "bytes", "File", "Latch", "Fiber", "Context", "Effect", "Scope", "Exit", "Cause", "never", "invalid":
+			c.diagnostic("EF101", "reserved data declaration "+name, span)
+		}
+		if _, callback := builtinCallbacks[name]; callback {
 			c.diagnostic("EF101", "reserved data declaration "+name, span)
 		}
 		claim(name, span)
@@ -2281,7 +2285,7 @@ func (c *checker) check() {
 		if len(record.Parameters) > 0 {
 			continue
 		}
-		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "record", Name: record.Name, Identity: c.declarationIdentity("record", "module", record.Name), Fields: record.Fields, Span: record.Span})
+		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "record", Source: record.SourceID, Name: record.Name, Identity: c.declarationIdentity("record", "module", record.Name), Fields: record.Fields, Span: record.Span})
 	}
 	for _, enum := range c.program.Enums {
 		claimData(enum.Name, enum.Span)
@@ -2289,7 +2293,7 @@ func (c *checker) check() {
 		if len(enum.Parameters) > 0 {
 			continue
 		}
-		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "enum", Name: enum.Name, Identity: c.declarationIdentity("enum", "module", enum.Name), Variants: enum.Variants, Span: enum.Span})
+		c.result.Declarations = append(c.result.Declarations, Declaration{Kind: "enum", Source: enum.SourceID, Name: enum.Name, Identity: c.declarationIdentity("enum", "module", enum.Name), Variants: enum.Variants, Span: enum.Span})
 	}
 	for _, decl := range c.program.ErrorDecls {
 		for i := range decl.Fields {
@@ -2376,6 +2380,13 @@ func (c *checker) check() {
 	}
 	for _, layer := range c.program.Layers {
 		claim(layer.Name, layer.Span)
+	}
+	// Builtin operations resolve their signatures like declared ones, so the
+	// application plan retains the builtin data their types name.
+	for _, s := range builtinServicesFor(c.program) {
+		for _, f := range c.services[s.Name].Methods {
+			c.signature(f)
+		}
 	}
 	for _, s := range c.program.Services {
 		methods := map[string]bool{}
@@ -2735,7 +2746,7 @@ func (c *checker) validateJSDeclarationNames() {
 			claim(declaration.Name+"Error", "error payload declaration", declaration.Span)
 		}
 	}
-	services := append(append([]*Service{}, builtins()...), c.program.Services...)
+	services := append(append([]*Service{}, builtinServicesFor(c.program)...), c.program.Services...)
 	for _, service := range services {
 		validateIdentifier(service.Name, "service export", service.Span)
 		claim(service.Name+"Requirement", "service requirement declaration", service.Span)
@@ -2819,7 +2830,10 @@ func (c *checker) typeKnown(name string) bool {
 		return false
 	}
 	switch name {
-	case "string", "bool", voidTypeName, "i64", "File", "Latch", "bytes", "Handler":
+	case "string", "bool", voidTypeName, "i64", "File", "Latch", "bytes":
+		return true
+	}
+	if _, callback := builtinCallbacks[name]; callback {
 		return true
 	}
 	if c.records[name] != nil || c.enums[name] != nil {
@@ -2981,9 +2995,12 @@ func (c *checker) canonicalRef(ref TypeRef) TypeID {
 	if c.program != nil && c.program.typeExpressions[ref.Name] != nil {
 		return c.sourceCallable(c.program.typeExpressions[ref.Name])
 	}
-	if ref.Name == "Handler" {
-		stringID := c.canonicalRef(typeRef("string"))
-		return c.internContract("callable", "effect", stringID, []TypeID{stringID}, emptyRowID, emptyRowID)
+	if callback, ok := builtinCallbacks[ref.Name]; ok {
+		parameterID, resultID := c.canonicalRef(typeRef(callback.Parameter)), c.canonicalRef(typeRef(callback.Result))
+		if parameterID == invalidTypeID || resultID == invalidTypeID {
+			return invalidTypeID
+		}
+		return c.internContract("callable", "effect", resultID, []TypeID{parameterID}, emptyRowID, emptyRowID)
 	}
 	argIDs := []TypeID(nil)
 	if !strings.HasPrefix(ref.ID, "legacy:") {
@@ -3045,7 +3062,7 @@ func (c *checker) canonicalRef(ref TypeRef) TypeID {
 			return invalidTypeID
 		}
 	case "opaque":
-		if !slices.Contains([]string{"File", "Handler", "Latch"}, ref.Name) {
+		if _, callback := builtinCallbacks[ref.Name]; !callback && !slices.Contains([]string{"File", "Latch"}, ref.Name) {
 			return invalidTypeID
 		}
 	case "named":
@@ -3425,18 +3442,19 @@ func (c *checker) sameType(actual checkedExpression, expected string) bool {
 }
 
 // handlerCompatible is the one narrow source compatibility relation for the
-// legacy Handler parameter of Http.serve. It accepts an effectful callable
-// whose actual source signature is string -> string; it does not turn Handler
-// into a general function type or erase the callable's own rows.
+// builtin callback parameters of Http operations. It accepts an effectful
+// callable whose actual source signature is exactly the callback's; it does
+// not turn the callback into a general function type or erase its own rows.
 func (c *checker) handlerCompatible(actual checkedExpression, expected string) bool {
-	if expected != "Handler" {
+	callback, ok := builtinCallbacks[expected]
+	if !ok {
 		return false
 	}
 	node := actual.node()
 	if node == nil || node.Kind != "callable" || node.Mode != "effect" || len(node.Args) != 1 {
 		return false
 	}
-	return node.Args[0] == c.canonicalRef(typeRef("string")) && node.Result == c.canonicalRef(typeRef("string"))
+	return node.Args[0] == c.canonicalRef(typeRef(callback.Parameter)) && node.Result == c.canonicalRef(typeRef(callback.Result))
 }
 
 func (c *checker) sameValues(actual, expected checkedExpression) bool {
@@ -4090,7 +4108,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 				break
 			}
 			t = c.checkedProvider(p, false)
-			if p.Service == "Files" || p.Service == "Runtime" || p.Service == "Foreign" || p.Service == "Http" {
+			if p.Service == "Files" || p.Service == "Runtime" || p.Service == "Foreign" {
 				c.requireGo(e.Span, "native provider "+p.Service)
 			}
 			e.Text = "provider"
@@ -4164,7 +4182,7 @@ func (c *checker) expr(e *Expr, env map[string]checkedExpression, inEffect bool)
 			}
 		} else if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
 			key := e.Left.Left.Name
-			if key == "Files" || key == "Runtime" || key == "Http" {
+			if key == "Files" || key == "Runtime" {
 				c.requireGo(e.Span, "native service "+key)
 			}
 			if _, shadow := env[key]; shadow {

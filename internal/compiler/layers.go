@@ -519,7 +519,7 @@ func (c *checker) checkLayerProvider(entry *LayerEntry) *Provider {
 			c.layerDiagnostic("EF135", "layer configuration must be pure", arg.Span)
 		}
 	}
-	if provider.Service == "Files" || provider.Service == "Runtime" || provider.Service == "Foreign" || provider.Service == "Http" {
+	if provider.Service == "Files" || provider.Service == "Runtime" || provider.Service == "Foreign" {
 		c.requireGo(expr.Span, "native provider "+provider.Service)
 	}
 	return provider

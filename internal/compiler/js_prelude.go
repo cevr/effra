@@ -47,6 +47,7 @@ var jsPrelude = []jsPreludeChunk{
 	{name: "timeout", requires: []string{"lifecycle", "fork", "call"}, imports: []string{"Cause", "Effect", "Exit", "Fiber"}, source: preludeFile("timeout.mjs")},
 	{name: "catch", imports: []string{"Effect", "Exit"}, source: preludeFile("catch.mjs")},
 	{name: "layers", requires: []string{"lifecycle"}, imports: []string{"Cause", "Effect", "Exit", "Fiber", "Queue"}, source: preludeFile("layers.mjs")},
+	{name: "provider:LiveHttp", requires: []string{"lifecycle"}, imports: []string{"Cause", "Effect", "Exit"}, source: preludeFile("http.mjs")},
 	{name: "harness-slot", source: "let __ef_test_harness=null;\n"},
 	{name: "latch", imports: []string{"Effect"}, source: preludeFile("latch.mjs")},
 	{name: "provider:Stdout", imports: []string{"Effect"}, source: "const __ef_provider_Stdout = { log: (message) => Effect.sync(() => console.log(message)) };\n"},

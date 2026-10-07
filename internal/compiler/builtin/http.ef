@@ -1,0 +1,29 @@
+record HttpRequest {
+    method: string,
+    path: string,
+    contentType: string,
+    body: bytes,
+}
+
+record HttpResponse {
+    status: i64,
+    contentType: string,
+    body: bytes,
+}
+
+enum HttpReply {
+    Respond {
+        response: HttpResponse
+    },
+    BadRequest,
+    NotFound,
+    UnsupportedMediaType,
+}
+
+record HttpLimits {
+    maxBodyBytes: i64,
+    readHeaderMillis: i64,
+    readBodyMillis: i64,
+    idleMillis: i64,
+    maxActive: i64,
+}
