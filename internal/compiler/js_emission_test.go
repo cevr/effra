@@ -376,3 +376,38 @@ effect fn main() -> void {
 		}
 	}
 }
+
+// A deadline forks its work internally, so an entry that times out without
+// forking anything itself still selects the fork helper through the timeout
+// chunk's declared edge.
+func TestJSEntryClosesHelperEdgesItDoesNotNameItself(t *testing.T) {
+	r := CompileFor(`effect fn slow() -> string uses { Clock } {
+    run Clock.sleep(10000);
+    "late"
+}
+effect fn main() -> void {
+    let text = run slow().timeout(1).catch<Timeout>("timed out")
+        .provide<Clock>(LiveClock).provide<Scheduler>(LiveScheduler)
+    run Console.log(text).provide<Console>(Stdout)
+}
+`, "js")
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	plan, err := r.ApplicationPlan(GoGenerationBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Requires(RequiresHelper, "fork") || !plan.Requires(RequiresHelper, "timeout") {
+		t.Fatalf("fixture must time out without forking: %v", plan.Identities(RequiresHelper))
+	}
+	entry, declarations, err := r.Emit(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkJSModule(t, "timeout entry", entry, declarations)
+	dir := writeJSModule(t, map[string]string{"entry.mjs": entry})
+	if output, err := runNode(t, dir, "entry.mjs"); err != nil || output != "timed out\n" {
+		t.Fatalf("timeout entry run: %v\n%s", err, output)
+	}
+}
