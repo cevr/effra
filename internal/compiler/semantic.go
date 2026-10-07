@@ -2208,11 +2208,23 @@ func (c *checker) diagnostic(code, message string, span Span) {
 	}
 	c.result.Diagnostics = append(c.result.Diagnostics, Diagnostic{Code: code, Message: message, Span: span})
 }
+
+// registerService finalizes every service operation as a checked callable.
+// Builtins and source services use the same owner identity so downstream
+// semantic consumers do not need a separate intrinsic-service escape hatch.
+func (c *checker) registerService(s *Service) {
+	for _, f := range s.Methods {
+		f.Owner = "service:" + s.Name
+		f.Identity = c.declarationIdentity("function", f.Owner, f.Name)
+	}
+	c.services[s.Name] = s
+}
+
 func (c *checker) check() {
 	c.checkTemplates()
 	names := map[string]bool{}
 	for _, s := range builtins() {
-		c.services[s.Name] = s
+		c.registerService(s)
 		names[s.Name] = true
 	}
 	for _, p := range builtinProviders() {
@@ -2336,12 +2348,8 @@ func (c *checker) check() {
 		return strings.Compare(a.Identity, b.Identity)
 	})
 	for _, s := range c.program.Services {
-		for _, f := range s.Methods {
-			f.Owner = "service:" + s.Name
-			f.Identity = c.declarationIdentity("function", f.Owner, f.Name)
-		}
 		claim(s.Name, s.Span)
-		c.services[s.Name] = s
+		c.registerService(s)
 	}
 	for _, p := range c.program.Providers {
 		for _, f := range p.Methods {

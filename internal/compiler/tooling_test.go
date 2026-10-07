@@ -252,6 +252,7 @@ fn invoke(target: fn() -> string) -> string { target() }
 fn invokeRecord(Logger: Callbacks) -> string { Logger.log("callback") }
 fn direct() -> string { target() }
 effect fn serviceCall() -> string uses {Logger} { run Logger.log("service") }
+effect fn builtinCall() -> () uses {Console} { run Console.log("builtin") }
 `
 	for _, target := range []string{"go", "js"} {
 		r := CompileFor(source, target)
@@ -264,6 +265,7 @@ effect fn serviceCall() -> string uses {Logger} { run Logger.log("service") }
 		}
 		checkedDirect := false
 		checkedService := false
+		checkedBuiltin := false
 		for _, edge := range graph.Edges {
 			if edge.Kind != "calls" {
 				continue
@@ -280,12 +282,18 @@ effect fn serviceCall() -> string uses {Logger} { run Logger.log("service") }
 			if edge.To == "service:Logger" {
 				checkedService = true
 			}
+			if edge.To == "service:Console" {
+				checkedBuiltin = true
+			}
 		}
 		if !checkedDirect {
 			t.Fatalf("%s target: checked direct function call edge missing", target)
 		}
 		if !checkedService {
 			t.Fatalf("%s target: checked service call edge missing", target)
+		}
+		if !checkedBuiltin {
+			t.Fatalf("%s target: checked builtin service call edge missing", target)
 		}
 	}
 }
