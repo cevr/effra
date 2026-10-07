@@ -30,7 +30,7 @@ func checkedApplicationPlan(t *testing.T, source string, mode GoGenerationMode) 
 	return r, plan
 }
 
-func exampleApplicationPlan(t *testing.T, file string, mode GoGenerationMode) (*Result, *ApplicationPlan) {
+func exampleCompile(t *testing.T, file string) *Result {
 	t.Helper()
 	source, err := os.ReadFile("../../examples/" + file)
 	if err != nil {
@@ -40,6 +40,12 @@ func exampleApplicationPlan(t *testing.T, file string, mode GoGenerationMode) (*
 	if !r.Checked {
 		t.Fatal(file, r.Diagnostics)
 	}
+	return r
+}
+
+func exampleApplicationPlan(t *testing.T, file string, mode GoGenerationMode) (*Result, *ApplicationPlan) {
+	t.Helper()
+	r := exampleCompile(t, file)
 	plan, err := r.ApplicationPlan(mode)
 	if err != nil {
 		t.Fatal(file, err)
@@ -794,12 +800,24 @@ func TestApplicationPlanIsDeterministicAndReadOnly(t *testing.T) {
 		{"generic-users.ef", GoGenerationBuild},
 		{"testing.ef", GoGenerationTest},
 	} {
-		r, first := exampleApplicationPlan(t, tc.file, tc.mode)
-		arena := len(r.Program.semantic.typeNodes)
-		canonical := r.canonical
+		// r.canonical and the type arena hold pointers, so the oracle is a
+		// detached deep rendering of the checked facts taken before any
+		// planning, compared after the first and a repeated plan.
+		r := exampleCompile(t, tc.file)
+		facts := checkedFacts(r)
+		first, err := r.ApplicationPlan(tc.mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if checkedFacts(r) != facts {
+			t.Fatalf("%s: the first plan mutated checked facts", tc.file)
+		}
 		again, err := r.ApplicationPlan(tc.mode)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if checkedFacts(r) != facts {
+			t.Fatalf("%s: a repeated plan mutated checked facts", tc.file)
 		}
 		_, fresh := exampleApplicationPlan(t, tc.file, tc.mode)
 		if !reflect.DeepEqual(first, again) || !reflect.DeepEqual(first, fresh) {
@@ -816,12 +834,71 @@ func TestApplicationPlanIsDeterministicAndReadOnly(t *testing.T) {
 		if string(left) != string(right) {
 			t.Fatalf("%s: serialized plans differ", tc.file)
 		}
-		if len(r.Program.semantic.typeNodes) != arena || !reflect.DeepEqual(r.canonical, canonical) {
-			t.Fatalf("%s: planning mutated checked facts", tc.file)
-		}
 		if !slices.IsSortedFunc(first.Requirements, compareApplicationRequirements) {
 			t.Fatalf("%s: requirements are not in canonical order", tc.file)
 		}
+	}
+}
+
+// checkedFacts renders the canonical snapshot and type arena by value,
+// following pointers, so a later mutation through any shared pointer shows.
+func checkedFacts(r *Result) string {
+	var b strings.Builder
+	renderValue(&b, reflect.ValueOf(r.canonical), map[uintptr]int{})
+	renderValue(&b, reflect.ValueOf(r.Program.semantic.typeNodes), map[uintptr]int{})
+	return b.String()
+}
+
+func renderValue(b *strings.Builder, v reflect.Value, seen map[uintptr]int) {
+	switch v.Kind() {
+	case reflect.Invalid:
+		b.WriteString("invalid")
+	case reflect.Pointer:
+		if v.IsNil() {
+			b.WriteString("nil")
+			return
+		}
+		if index, found := seen[v.Pointer()]; found {
+			fmt.Fprintf(b, "&%d", index)
+			return
+		}
+		seen[v.Pointer()] = len(seen)
+		b.WriteString("&")
+		renderValue(b, v.Elem(), seen)
+	case reflect.Interface:
+		renderValue(b, v.Elem(), seen)
+	case reflect.Struct:
+		b.WriteString("{")
+		for i := 0; i < v.NumField(); i++ {
+			b.WriteString(v.Type().Field(i).Name + ":")
+			renderValue(b, v.Field(i), seen)
+			b.WriteString(",")
+		}
+		b.WriteString("}")
+	case reflect.Slice, reflect.Array:
+		fmt.Fprintf(b, "[%d:", v.Len())
+		for i := 0; i < v.Len(); i++ {
+			renderValue(b, v.Index(i), seen)
+			b.WriteString(",")
+		}
+		b.WriteString("]")
+	case reflect.Map:
+		entries := make([]string, 0, v.Len())
+		for iter := v.MapRange(); iter.Next(); {
+			var entry strings.Builder
+			renderValue(&entry, iter.Key(), map[uintptr]int{})
+			entry.WriteString("=")
+			renderValue(&entry, iter.Value(), map[uintptr]int{})
+			entries = append(entries, entry.String())
+		}
+		slices.Sort(entries)
+		fmt.Fprintf(b, "map%v", entries)
+	case reflect.Func, reflect.Chan, reflect.UnsafePointer:
+		fmt.Fprintf(b, "%s(nil=%t)", v.Kind(), v.IsNil())
+	case reflect.String:
+		fmt.Fprintf(b, "%q", v.String())
+	default:
+		fmt.Fprintf(b, "%v", v)
 	}
 }
 
