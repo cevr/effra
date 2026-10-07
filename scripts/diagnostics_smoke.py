@@ -85,7 +85,7 @@ def positions(binary, directory):
         path = write(directory, name, source)
         report = cli(binary, path)
         remote = mcp(binary, directory, [{"file": name}])[0]["result"]["structuredContent"]
-        assert_report_parity(report, remote)
+        assert_report_parity(report, remote, report_schema=1, snapshot_schema=5)
         assert report["revision"] == hashlib.sha256(source.encode()).hexdigest(), name
         assert report["source"] == {"uri": path.as_uri(), "origin": "disk"}, report
         findings = report["diagnostics"]
@@ -108,7 +108,7 @@ def positions(binary, directory):
             assert report["policyPassed"] and not strict["policyPassed"], strict
             assert report["diagnostics"] == strict["diagnostics"], strict
             strict_remote = mcp(binary, directory, [{"file": name, "strict": True}])[0]["result"]["structuredContent"]
-            assert_report_parity(strict_remote, strict)
+            assert_report_parity(strict_remote, strict, report_schema=1, snapshot_schema=5)
 
     for name, source, checked in [
         ("escaped-cr.ef", 'effect fn main() -> string { "\\r" }', True),
@@ -121,7 +121,7 @@ def positions(binary, directory):
     ]:
         report = cli(binary, write(directory, name, source), strict=True)
         remote = mcp(binary, directory, [{"file": name, "strict": True}])[0]["result"]["structuredContent"]
-        assert_report_parity(report, remote)
+        assert_report_parity(report, remote, report_schema=1, snapshot_schema=5)
         assert report["checked"] == checked, report
         if checked:
             assert report["policyPassed"] and report["diagnostics"] == [], report
@@ -164,7 +164,7 @@ def identity(binary, directory):
     requested = dots / "link" / ".." / "b.ef"
     reports = (cli(binary, requested), mcp(binary, directory, [{"file": "dots/link/../b.ef"}])[0]["result"]["structuredContent"])
     for report in reports:
-        assert report == expected, "lexical document identity and analyzed bytes disagree"
+        assert_report_parity(report, expected, target="go", report_schema=1, snapshot_schema=5)
 
     original = write(directory, "one.ef", 'import go fmt "fmt"\neffect fn main() -> () { () }')
     replacement = write(directory, "two.ef", 'effect fn main() -> () { run Console.log("x") }')

@@ -252,6 +252,8 @@ func main(){json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"pr
         assert id_before["strength"] == "unavailable" and id_before["reuseScope"] == "process"
         assert "digest" not in id_before and id_before["qualifier"] != id_other["qualifier"]
         same = facts(processes[0], target="go", expectedProducer=id_before["qualifier"])
+        assert same["producer"] == before["producer"], same
+        assert same["snapshot"] == before["snapshot"], same
         assert_report_parity(same, before, target="go", ignored=("file", "timings"),
                              project=adapter_semantic)
         for target in ("go", "js"):

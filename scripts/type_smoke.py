@@ -44,12 +44,27 @@ def tool(identifier, arguments):
 
 
 def closure(value):
-    type_ids = [node["id"] for node in value["types"]]
-    row_ids = [node["id"] for node in value["rows"]]
-    assert len(type_ids) == len(set(type_ids)), "duplicate canonical type ID"
-    assert len(row_ids) == len(set(row_ids)), "duplicate canonical row ID"
-    types = set(type_ids)
-    rows = set(row_ids)
+    def table_ids(name):
+        entries = value[name]
+        assert isinstance(entries, list), (name, entries)
+        identities = []
+        for node in entries:
+            assert isinstance(node, dict), (name, node)
+            identity = node.get("id")
+            assert type(identity) is str and identity, (name, identity)
+            assert identity not in identities, (name, identity)
+            identities.append(identity)
+        return set(identities)
+
+    types = table_ids("types")
+    rows = table_ids("rows")
+
+    def type_ref(identity, key):
+        assert type(identity) is str and identity and identity in types, (key, identity)
+
+    def row_ref(identity, key):
+        assert type(identity) is str and identity and identity in rows, (key, identity)
+
     def visit(item):
         if isinstance(item, list):
             for child in item:
@@ -59,19 +74,57 @@ def closure(value):
                 if key == "args":
                     assert isinstance(child, list), (key, child)
                     for ref in child:
-                        assert isinstance(ref, str) and ref in types, (key, ref)
-                if key in ("ref", "result") and isinstance(child, str) and child:
-                    assert child in types, (key, child)
-                if key in ("failureRow", "serviceRow") and child:
-                    assert child in rows, (key, child)
+                        type_ref(ref, key)
+                elif key in ("ref", "signature"):
+                    type_ref(child, key)
+                elif key == "result":
+                    if isinstance(child, dict):
+                        assert type(child.get("kind")) is str and child["kind"], (key, child)
+                    else:
+                        type_ref(child, key)
+                elif key in ("failureRow", "serviceRow", "row"):
+                    row_ref(child, key)
                 visit(child)
     visit(value)
 
-
 def assert_causal_wire_rejections(value, label):
     closure(value)
+
+    def rejected(mutated, control):
+        try:
+            closure(mutated)
+        except (AssertionError, KeyError, TypeError):
+            return
+        raise AssertionError(f"{label}: {control} was accepted")
+
+    for malformed in ("", None, 123):
+        empty_type = copy.deepcopy(value)
+        empty_type["types"].append({"id": malformed, "kind": "primitive"})
+        rejected(empty_type, f"malformed type ID {malformed!r}")
+        empty_row = copy.deepcopy(value)
+        empty_row["rows"].append({"id": malformed})
+        rejected(empty_row, f"malformed row ID {malformed!r}")
+
     fiber = next(node for node in value["types"] if node.get("kind") == "fiber")
     child_type = fiber["args"][0]
+    malformed_args = copy.deepcopy(value)
+    malformed_args["types"].append({"id": "", "kind": "primitive"})
+    malformed_fiber = next(node for node in malformed_args["types"] if node.get("kind") == "fiber")
+    malformed_fiber["args"] = [""]
+    rejected(malformed_args, "empty args reference")
+
+    for malformed in ("", None, 123):
+        malformed_ref = copy.deepcopy(value)
+        malformed_ref["selection"]["ref"] = malformed
+        rejected(malformed_ref, f"malformed ref {malformed!r}")
+        malformed_result = copy.deepcopy(value)
+        malformed_result["selection"]["result"] = malformed
+        rejected(malformed_result, f"malformed result {malformed!r}")
+    for malformed in ("", None):
+        malformed_row = copy.deepcopy(value)
+        malformed_row["selection"]["failureRow"] = malformed
+        rejected(malformed_row, f"malformed failure row {malformed!r}")
+
     missing_argument = copy.deepcopy(value)
     missing_argument["types"] = [node for node in missing_argument["types"] if node["id"] != child_type]
     try:
@@ -106,6 +159,17 @@ def assert_causal_wire_rejections(value, label):
         raise AssertionError(f"{label}: missing row was accepted")
 
 
+def assert_snapshot_schema_controls(value, target):
+    for malformed in (999, True):
+        broken = copy.deepcopy(value)
+        broken["snapshot"]["schemaVersion"] = malformed
+        try:
+            producer_snapshot(broken, target)
+        except AssertionError:
+            continue
+        raise AssertionError(f"snapshot schema {malformed!r} was self-certified")
+
+
 with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
     workspace = pathlib.Path(directory)
     path = workspace / "facts.ef"
@@ -134,6 +198,7 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
             if artifact["reuseScope"] == "artifact":
                 assert current == artifact
             closure(view)
+        assert_snapshot_schema_controls(views["use"], target)
         binding = lambda name: views[name]["selection"]["binding"]
         assert binding("let")["id"] == binding("use")["id"]
         assert binding("alias")["id"] == binding("alias-use")["id"] != binding("outer-use")["id"]

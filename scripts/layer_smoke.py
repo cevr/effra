@@ -138,8 +138,7 @@ with tempfile.TemporaryDirectory(prefix="effra-layers-") as directory:
         for output, response in ((inspected_output, inspected), (explained_output, explained)):
             assert response["file"] == str(path)
             assert response["typeProjectionUsage"]["responseBytes"] == len(output.rstrip("\n").encode("utf-8"))
-        assert_report_parity(inspected, explained, target=target,
-                             ignored=("file", "timings"), project=adapter_semantic)
+        assert_report_parity(inspected, explained, target=target)
         plan = inspected["layer"]
         assert plan["provides"] == ["Account", "Invoice"] and not plan["requirements"]
         store = next(node for node in plan["nodes"] if node["service"] == "Store")

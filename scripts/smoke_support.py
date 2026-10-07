@@ -16,13 +16,14 @@ def adapter_semantic(value):
     return result
 
 
-def producer_snapshot(value, target=None):
+def producer_snapshot(value, target=None, snapshot_schema=5):
     """Validate one decorated response and return its producer identity."""
     assert isinstance(value, dict)
     for key in ("schemaVersion", "revision", "target", "producer", "snapshot"):
         assert key in value, key
     expected_target = value["target"] if target is None else target
     assert value["target"] == expected_target, (value["target"], expected_target)
+    assert type(snapshot_schema) is int and snapshot_schema > 0, snapshot_schema
 
     producer = value["producer"]
     snapshot = value["snapshot"]
@@ -45,9 +46,9 @@ def producer_snapshot(value, target=None):
             assert len(producer["qualifier"]) > len("process:")
         else:
             assert producer["qualifier"] == ""
-    assert isinstance(snapshot.get("schemaVersion"), int) and snapshot["schemaVersion"] > 0
+    assert type(snapshot.get("schemaVersion")) is int and snapshot["schemaVersion"] == snapshot_schema
     assert snapshot == {
-        "schemaVersion": snapshot["schemaVersion"],
+        "schemaVersion": snapshot_schema,
         "revision": value["revision"],
         "target": expected_target,
         "producer": producer["qualifier"],
@@ -63,15 +64,19 @@ def _project(value, ignored, project):
     return project(result) if project is not None else result
 
 
-def assert_report_parity(actual, expected, target=None, ignored=(), project=None):
+def assert_report_parity(actual, expected, target=None, ignored=(), project=None,
+                         report_schema=5, snapshot_schema=5):
     """Compare decorated reports without erasing their producer contract.
 
     Artifact-scoped reports are equal after only explicitly named adapter
     envelope projections. Process-scoped reports may differ only in the
     process qualifier; ``none`` reports retain exact metadata equality.
     """
-    actual_producer = producer_snapshot(actual, target)
-    expected_producer = producer_snapshot(expected, target)
+    assert type(report_schema) is int and report_schema > 0, report_schema
+    assert type(actual.get("schemaVersion")) is int and actual["schemaVersion"] == report_schema, actual
+    assert type(expected.get("schemaVersion")) is int and expected["schemaVersion"] == report_schema, expected
+    actual_producer = producer_snapshot(actual, target, snapshot_schema)
+    expected_producer = producer_snapshot(expected, target, snapshot_schema)
     for key in ("schemaVersion", "revision", "target"):
         assert actual[key] == expected[key], (key, actual[key], expected[key])
     for key in ("source", "sources"):
