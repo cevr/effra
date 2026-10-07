@@ -162,7 +162,9 @@ func runJSForTarget(t *testing.T, target, source, assertions string) string {
 	if !r.Checked {
 		t.Fatalf("%s target: %+v", target, r.Diagnostics)
 	}
-	js, _, err := r.Emit(false)
+	// Probes call lowering helpers and `effect` exports directly, so they
+	// run against the library surface with the complete prelude.
+	js, _, err := r.emitJS(jsProbe)
 	if err != nil {
 		t.Fatal(err)
 	}

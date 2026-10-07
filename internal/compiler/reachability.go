@@ -219,6 +219,23 @@ type applicationHostRoot struct {
 	name string
 }
 
+// LibrarySurface roots a JavaScript library module at its exported
+// surface. A library is not an application: it has no entry or harness, and
+// its roots never widen an entry closure. It shares the planner, so library
+// emission selects through the same checked edges as an entry.
+const LibrarySurface GoGenerationMode = "library"
+
+// LibraryPlan computes the closure of every value a library module exports.
+// ApplicationPlan refuses LibrarySurface: only this entry point roots it.
+func (r *Result) LibraryPlan() (*ApplicationPlan, error) {
+	if r == nil || !r.Checked || r.Program == nil || r.Program.semantic == nil {
+		return nil, fmt.Errorf("library plans require checked source")
+	}
+	planner := newApplicationPlanner(r, LibrarySurface, maxApplicationPlanWork)
+	planner.librarySurface()
+	return planner.finish()
+}
+
 func (r *Result) applicationPlan(mode GoGenerationMode, limit int, hostRoots ...applicationHostRoot) (*ApplicationPlan, error) {
 	if r == nil || !r.Checked || r.Program == nil || r.Program.semantic == nil {
 		return nil, fmt.Errorf("application plans require checked source")
@@ -249,11 +266,17 @@ func (r *Result) applicationPlan(mode GoGenerationMode, limit int, hostRoots ...
 		planner.hostRoot(root)
 	}
 	planner.runtimeModule(rt.RuntimeModuleCore, "", "native-entry")
-	planner.drain()
-	if planner.err != nil {
-		return nil, planner.err
+	return planner.finish()
+}
+
+// finish drains the queued expansions and returns the plan in canonical
+// requirement order, or the planner's refusal.
+func (p *applicationPlanner) finish() (*ApplicationPlan, error) {
+	p.drain()
+	if p.err != nil {
+		return nil, p.err
 	}
-	plan := planner.plan
+	plan := p.plan
 	slices.SortFunc(plan.Requirements, compareApplicationRequirements)
 	if _, err := plan.RuntimeSources(); err != nil {
 		return nil, fmt.Errorf("application runtime selection: %w", err)
@@ -361,6 +384,29 @@ func (p *applicationPlanner) root(symbol *Symbol, reason string) {
 		return
 	}
 	p.function(checked.declaration, "", reason)
+}
+
+// librarySurface roots every value a JavaScript library exports: the
+// module's functions and providers, the builtin service tags and the builtin
+// providers with a JavaScript implementation. Data, error and template
+// declarations are type-only in JavaScript and need no value root.
+func (p *applicationPlanner) librarySurface() {
+	for _, f := range p.r.Program.checkedFunctions() {
+		if f.Module == currentModuleIdentity {
+			p.function(f, "", "export")
+		}
+	}
+	for _, s := range append(builtins(), p.r.Program.Services...) {
+		p.service(p.c.services[s.Name], "", "export")
+	}
+	for _, provider := range builtinProviders() {
+		if jsExportsBuiltinProvider(provider.Name) {
+			p.provider(p.r.checkedProviders[provider.Name], "", "export")
+		}
+	}
+	for _, provider := range p.r.Program.Providers {
+		p.provider(provider, "", "export")
+	}
 }
 
 func (p *applicationPlanner) hostRoot(root applicationHostRoot) {
