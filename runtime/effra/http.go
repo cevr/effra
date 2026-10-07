@@ -9,22 +9,44 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
+// rawHTTPTimeout bounds the raw transport's header reads, idle connections
+// and, once shutdown has joined every request scope, its response writes. It
+// is the JS raw transport's bound.
+const rawHTTPTimeout = 5 * time.Second
+
 // ServeHTTP owns the listener and waits for every request's managed cleanup.
 // onListen exposes the bound address (including an OS-selected port). It is
-// the raw path-to-text transport control: no limits, plain text responses.
+// the raw path-to-text transport control: no request limits, plain text
+// responses, and the managed transport's ordered shutdown. A request that
+// arrives once shutdown has begun runs no handler and fails like a cancelled
+// one.
 func ServeHTTP(address string, handler func(string) Effect[string], onListen func(string)) Effect[Unit] {
-	return serveManaged(address, &http.Server{ReadHeaderTimeout: 5 * time.Second}, func(server context.Context) http.Handler {
+	return serveManaged(address, &http.Server{ReadHeaderTimeout: rawHTTPTimeout, IdleTimeout: rawHTTPTimeout}, func(server context.Context) http.Handler {
+		scopes := newRequestScopes(server)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			exit := runRequest(server, r, handler(r.URL.Path))
-			if exit.IsFailure() {
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-				return
+			var exit Exit[string]
+			admitted := scopes.enter()
+			if admitted {
+				exit = func() Exit[string] {
+					defer scopes.leave()
+					return runRequest(server, r, handler(r.URL.Path))
+				}()
 			}
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			_, _ = w.Write([]byte(exit.Value))
+			scopes.publish(http.NewResponseController(w), rawHTTPTimeout, func() {
+				status, body := http.StatusOK, exit.Value
+				if !admitted || exit.IsFailure() {
+					status, body = http.StatusInternalServerError, "Internal Server Error\n"
+					w.Header().Set("X-Content-Type-Options", "nosniff")
+				}
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+				w.WriteHeader(status)
+				_, _ = io.WriteString(w, body)
+			})
 		})
 	}, onListen)
 }
@@ -100,24 +122,74 @@ func (l HTTPLimits) validate() error {
 //
 // Every response is written only after the request scope, including the
 // handler's resources and children, has closed. Status-only responses have
-// empty bodies and no Content-Type. Once the server is cancelled, a response
-// still being written must complete within IdleTimeout; the connection is
-// then aborted, so a client that stops reading cannot hold shutdown open.
+// empty bodies and no Content-Type. Shutdown is ordered: cancellation stops
+// admission and interrupts every request scope; once the last of them has
+// closed, a response still being written must complete within IdleTimeout,
+// after which its connection is aborted, so a client that stops reading
+// cannot hold shutdown open and no abort overlaps application cleanup.
 func ServeHTTPRequests(address string, limits HTTPLimits, handler func(HTTPRequest) Effect[HTTPResponse], onListen func(string)) Effect[Unit] {
 	if err := limits.validate(); err != nil {
 		return func(*FiberContext) Exit[Unit] { return Die[Unit](err) }
 	}
 	server := &http.Server{ReadHeaderTimeout: limits.ReadHeaderTimeout, IdleTimeout: limits.IdleTimeout}
 	return serveManaged(address, server, func(server context.Context) http.Handler {
-		return &httpTransport{server: server, limits: limits, handler: handler, active: make(chan struct{}, limits.MaxActive)}
+		return &httpTransport{server: server, scopes: newRequestScopes(server), limits: limits, handler: handler, active: make(chan struct{}, limits.MaxActive)}
 	}, onListen)
 }
 
 type httpTransport struct {
 	server  context.Context
+	scopes  *requestScopes
 	limits  HTTPLimits
 	handler func(HTTPRequest) Effect[HTTPResponse]
 	active  chan struct{}
+}
+
+// requestScopes separates the two shutdown phases. Server cancellation closes
+// scope admission and interrupts the open request scopes; drained is
+// cancelled once the last of them has closed. Response writers are tracked
+// apart from scopes: they only arm their write bound on drained, so waiting
+// for a scope never waits for a writer.
+type requestScopes struct {
+	mu      sync.Mutex
+	open    int
+	closing bool
+	drained context.Context
+	drain   context.CancelFunc
+}
+
+func newRequestScopes(server context.Context) *requestScopes {
+	s := &requestScopes{}
+	s.drained, s.drain = context.WithCancel(context.Background())
+	context.AfterFunc(server, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.closing = true
+		if s.open == 0 {
+			s.drain()
+		}
+	})
+	return s
+}
+
+// enter opens a request scope unless shutdown has begun.
+func (s *requestScopes) enter() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closing {
+		return false
+	}
+	s.open++
+	return true
+}
+
+func (s *requestScopes) leave() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.open--
+	if s.closing && s.open == 0 {
+		s.drain()
+	}
 }
 
 func (t *httpTransport) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -161,7 +233,14 @@ func (t *httpTransport) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// read observes only client disconnect, never an elapsed body timer.
 	_ = controller.SetReadDeadline(time.Time{})
 	request := HTTPRequest{Method: r.Method, Path: requestPath(r.RequestURI), ContentType: r.Header.Get("Content-Type"), Body: body}
-	exit := runRequest(t.server, r, t.handler(request))
+	if !t.scopes.enter() {
+		t.publish(controller, status(http.StatusServiceUnavailable, true))
+		return
+	}
+	exit := func() Exit[HTTPResponse] {
+		defer t.scopes.leave()
+		return runRequest(t.server, r, t.handler(request))
+	}()
 	switch {
 	case r.Context().Err() != nil:
 		// The client is gone: no response remains possible.
@@ -175,19 +254,24 @@ func (t *httpTransport) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// publish writes one response while server cancellation bounds its writes:
-// once the server is cancelled they must complete within IdleTimeout, after
-// which they fail and the connection closes, so a client that stops reading
-// cannot hold shutdown open. Callers publish only after the request scope has
-// closed, so the bound never shortens owned cleanup. The response is flushed
-// before the handler returns, so no byte is written outside the bound.
-func (t *httpTransport) publish(controller *http.ResponseController, write func()) {
-	stop := context.AfterFunc(t.server, func() {
-		_ = controller.SetWriteDeadline(time.Now().Add(t.limits.IdleTimeout))
+// publish writes one response while the transport-drain phase bounds its
+// writes: once every request scope has closed after server cancellation, they
+// must complete within grace, after which they fail and the connection
+// closes, so a client that stops reading cannot hold shutdown open. The bound
+// starts only after all owned cleanup, never during another request's. The
+// response is flushed before the handler returns, so no byte is written
+// outside the bound.
+func (s *requestScopes) publish(controller *http.ResponseController, grace time.Duration, write func()) {
+	stop := context.AfterFunc(s.drained, func() {
+		_ = controller.SetWriteDeadline(time.Now().Add(grace))
 	})
 	defer stop()
 	write()
 	_ = controller.Flush()
+}
+
+func (t *httpTransport) publish(controller *http.ResponseController, write func()) {
+	t.scopes.publish(controller, t.limits.IdleTimeout, write)
 }
 
 // runRequest executes one handler in a fresh request scope linked to both the

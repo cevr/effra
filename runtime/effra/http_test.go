@@ -1,11 +1,14 @@
 package effra
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestHTTPServesRequestsAndWaitsForRequestCleanupOnShutdown(t *testing.T) {
@@ -70,6 +73,43 @@ func TestHTTPServesRequestsAndWaitsForRequestCleanupOnShutdown(t *testing.T) {
 		t.Fatalf("listener was not released: %v", err)
 	}
 	listener.Close()
+}
+
+// The raw transport shares the managed shutdown order: once every request
+// scope has closed, a client that stops reading holds shutdown open only for
+// the raw write grace.
+func TestHTTPRawShutdownAbortsAStalledResponse(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	bound := make(chan string, 1)
+	done := make(chan Exit[Unit], 1)
+	large := strings.Repeat("s", 32<<20)
+	go func() {
+		done <- RunContext(ctx, ServeHTTP("127.0.0.1:0", func(string) Effect[string] {
+			return func(*FiberContext) Exit[string] { return Succeed(large) }
+		}, func(address string) { bound <- address }))
+	}()
+	address := wait(t, bound)
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bufio.NewReader(conn).Peek(1); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	select {
+	case exit := <-done:
+		if !exit.Interrupted {
+			t.Fatalf("shutdown did not preserve cancellation: %+v", exit)
+		}
+	case <-time.After(rawHTTPTimeout + 3*time.Second):
+		t.Fatal("raw shutdown waited on a client that stopped reading")
+	}
 }
 
 func TestHTTPStartupFailureIsTyped(t *testing.T) {

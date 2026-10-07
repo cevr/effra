@@ -416,6 +416,80 @@ func TestHTTPTransportShutdownAbortsAStalledResponseAfterCleanup(t *testing.T) {
 	listener.Close()
 }
 
+// The write grace is a transport-drain phase: it starts once every request
+// scope has closed, not when the writer's own scope did. A stalled response
+// whose client resumes inside the grace after another request's gated
+// cleanup still arrives whole.
+func TestHTTPTransportShutdownGraceStartsAfterTheLastScopeCloses(t *testing.T) {
+	limits := testLimits
+	limits.MaxActive = 2
+	limits.IdleTimeout = time.Second
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	bound, cleaned, entered, gate := make(chan string, 1), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	done := make(chan Exit[Unit], 1)
+	large := bytes.Repeat([]byte("s"), 32<<20)
+	go func() {
+		done <- RunContext(ctx, ServeHTTPRequests("127.0.0.1:0", limits, func(request HTTPRequest) Effect[HTTPResponse] {
+			return func(fc *FiberContext) Exit[HTTPResponse] {
+				if request.Path == "/big" {
+					close(cleaned)
+					return Succeed(HTTPResponse{Status: 200, ContentType: "application/octet-stream", Body: large})
+				}
+				resource := Invoke(fc, AcquireRelease("gated", func(context.Context) (Unit, error) { return Unit{}, nil }, func(Unit, context.Context) error { <-gate; return nil }))
+				if resource.IsFailure() {
+					return Propagate[HTTPResponse](resource)
+				}
+				close(entered)
+				<-fc.Context().Done()
+				return Interrupt[HTTPResponse](fc.Context().Err())
+			}
+		}, func(address string) { bound <- address }))
+	}()
+	address := wait(t, bound)
+	stalled, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stalled.Close()
+	if _, err := io.WriteString(stalled, "GET /big HTTP/1.1\r\nHost: x\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	wait(t, cleaned)
+	gated, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gated.Close()
+	if _, err := io.WriteString(gated, "GET /gated HTTP/1.1\r\nHost: x\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	wait(t, entered)
+	cancel()
+	// Twice the grace elapses while the other request's cleanup is gated.
+	time.Sleep(2 * limits.IdleTimeout)
+	close(gate)
+	_ = stalled.SetReadDeadline(time.Now().Add(limits.IdleTimeout))
+	response, err := http.ReadResponse(bufio.NewReader(stalled), nil)
+	if err != nil {
+		t.Fatalf("stalled response was aborted before the last scope closed: %v", err)
+	}
+	received, err := io.Copy(io.Discard, response.Body)
+	if response.StatusCode != 200 || received != int64(len(large)) {
+		t.Fatalf("stalled response was aborted before the last scope closed: %d, %d of %d bytes, %v", response.StatusCode, received, len(large), err)
+	}
+	response, body := readResponse(t, bufio.NewReader(gated))
+	requireStatusOnly(t, response, body, http.StatusServiceUnavailable)
+	select {
+	case exit := <-done:
+		if !exit.Interrupted {
+			t.Fatalf("shutdown did not preserve cancellation: %+v", exit)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown did not complete after the drain")
+	}
+}
+
 func TestHTTPTransportRejectsImplicitLimits(t *testing.T) {
 	for _, limits := range []HTTPLimits{{}, {MaxBodyBytes: -1, ReadHeaderTimeout: 1, ReadBodyTimeout: 1, IdleTimeout: 1, MaxActive: 1}, {MaxBodyBytes: 1, ReadHeaderTimeout: 1, ReadBodyTimeout: 1, IdleTimeout: 1}} {
 		out := Run(ServeHTTPRequests("127.0.0.1:0", limits, nil, nil))
