@@ -823,6 +823,11 @@ func (p *applicationPlanner) goInitialization() {
 	for _, imported := range p.r.Program.Imports {
 		p.require(RequiresGoInitialization, imported.Path, "", "declared-foreign-import")
 	}
+	// Host declarations import the packages that spell host types under their
+	// host aliases, so those packages are named and need no blank import.
+	for _, path := range p.c.hostDeclarationPackages() {
+		p.namedGoImport(GoImport{Alias: hostPackageAlias(path), Path: path})
+	}
 }
 
 // namedGoImport records that retained code qualifies imported's package

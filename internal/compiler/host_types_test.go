@@ -477,3 +477,35 @@ effect fn program() -> void uses { Console, Foreign } {
 		}
 	}
 }
+
+// A host type's declaring package is spelled through the plan's named import
+// of it, exactly like a call's alias: a declared import of that package is
+// not also given a blank initialization import, and inspection reports the
+// package as named.
+func TestHostTypePackageIsNamedThroughThePlan(t *testing.T) {
+	r := compileHostTypes(t, `import go bytes "bytes"
+effect fn program() -> void uses { Console, Foreign } {
+    match run host.NewBuffer("native") {
+        Data.Option.None => void,
+        Data.Option.Some { value: buffer } => run Console.log(run buffer.String())
+    }
+}`)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	_, application, err := emitGoApplication(r, GoGenerationBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := importsOf(emittedImportSpecs(t, application.Main), "bytes")
+	if len(names) != 1 || !strings.HasPrefix(names[0], "efGoType_") {
+		t.Fatalf("a package named by a host type needs its named import and no blank duplicate: %v", names)
+	}
+	for _, inspection := range r.ApplicationInspections() {
+		for _, init := range inspection.GoInitialization {
+			if init.Package == "bytes" && init.Lowering != "named" {
+				t.Fatalf("inspection reports %q for a package a host type names", init.Lowering)
+			}
+		}
+	}
+}

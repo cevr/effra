@@ -841,21 +841,12 @@ func (c *checker) hostGoDeclarations() ([]string, string) {
 	if c == nil || c.host == nil {
 		return nil, ""
 	}
-	paths := map[string]bool{}
-	named := map[string]*types.Named{}
-	for _, native := range c.host.native {
-		hostSpelledNamed(native, map[types.Type]bool{}, func(declared *types.Named) {
-			named[types.TypeString(declared, hostPathQualifier)] = declared
-		})
-	}
+	named := c.hostNamedTypes()
 	var out strings.Builder
 	for _, key := range slices.Sorted(maps.Keys(named)) {
-		paths[named[key].Obj().Pkg().Path()] = true
 		out.WriteString("var _ *" + types.TypeString(named[key], func(p *types.Package) string { return hostPackageAlias(p.Path()) }) + "\n")
 	}
-	// A checked write reports a short write with io.ErrShortWrite.
-	if slices.ContainsFunc(c.result.Bindings, func(b Binding) bool { protocol, ok := b.ioProtocol(); return ok && !protocol.reader }) {
-		paths["io"] = true
+	if c.hostWritesNeedIO() {
 		out.WriteString("var _ = " + hostPackageAlias("io") + ".ErrShortWrite\n")
 	}
 	annotations := []string{}
@@ -867,11 +858,46 @@ func (c *checker) hostGoDeclarations() ([]string, string) {
 		out.WriteString("type " + hostAnnotationGoName(name) + " = " + canonicalGoType(c, c.host.annotations[name], map[TypeID]bool{}) + "\n")
 	}
 	imports := []string{}
-	for path := range paths {
+	for _, path := range c.hostDeclarationPackages() {
 		imports = append(imports, hostPackageAlias(path)+" "+strconv.Quote(path))
 	}
-	slices.Sort(imports)
 	return imports, out.String()
+}
+
+// hostNamedTypes is every named host type the generated declarations spell,
+// by canonical spelling.
+func (c *checker) hostNamedTypes() map[string]*types.Named {
+	named := map[string]*types.Named{}
+	for _, native := range c.host.native {
+		hostSpelledNamed(native, map[types.Type]bool{}, func(declared *types.Named) {
+			named[types.TypeString(declared, hostPathQualifier)] = declared
+		})
+	}
+	return named
+}
+
+// hostWritesNeedIO reports whether a checked write reports a short write with
+// io.ErrShortWrite.
+func (c *checker) hostWritesNeedIO() bool {
+	return slices.ContainsFunc(c.result.Bindings, func(b Binding) bool { protocol, ok := b.ioProtocol(); return ok && !protocol.reader })
+}
+
+// hostDeclarationPackages lists, sorted, the packages hostGoDeclarations
+// imports under their host aliases. The application plan names the same
+// packages through namedGoImport, so emission, retention and inspection read
+// one decision.
+func (c *checker) hostDeclarationPackages() []string {
+	if c == nil || c.host == nil {
+		return nil
+	}
+	paths := map[string]bool{}
+	for _, declared := range c.hostNamedTypes() {
+		paths[declared.Obj().Pkg().Path()] = true
+	}
+	if c.hostWritesNeedIO() {
+		paths["io"] = true
+	}
+	return slices.Sorted(maps.Keys(paths))
 }
 
 // hostPackages lists the packages generated code imports to spell a host
