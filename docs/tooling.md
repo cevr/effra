@@ -121,6 +121,12 @@ CLI and MCP limit graphs to 1,000 nodes and 2,000 edges; larger graphs fail expl
 
 Revision-bound checked edit plans, multi-file identities, editor integration, complete ownership provenance and runtime/source correlation remain planned. The bounded ownership evidence described above is implemented without claiming a complete borrow checker. Canonical comment-preserving formatting is implemented by the compiler core and exposed through `ef fmt` and MCP `code.format`; the maintained authored-example selection is checked by the gate, and `ef lsp` answers textDocument/formatting with the same formatter over versioned buffers ([profile](lsp.md#document-formatting)). Compiler errors stay independent of optional style policy. Managed test time already shares scheduling with sleep/deadline primitives; see the [testing contract](testing.md) for its supported causal boundaries and foreign-operation limits.
 
+## Gate prerequisites
+
+`scripts/gate.sh` needs the pinned Effect reference tests, which live in a git submodule. After every clone, Rift or worktree run `scripts/init_upstream.sh` once; offline, set `EFFRA_UPSTREAM_MIRROR` to a local Effect clone that contains the pinned commit. The conformance verifier reads the corpus only from git objects ([conformance](conformance.md)).
+
+The README's TypeScript comparison program is checked with `tsc --strict`. The repository has no TypeScript dependency, so the gate environment supplies `tsc` on PATH, as `run-gate.sh` does. Without it the gate prints a loud `typescript: unchecked` line and the README smoke reports `typescript: unchecked: no tsc on PATH`; it does not fail, so contributors without `tsc` can still gate, but a gate receipt without `typescript: strict` is weaker evidence.
+
 ## Performance receipt
 
 On 2026-10-05, Apple M4 Pro / macOS 27.0.1 / Go 1.27.1 arm64, three one-second warm runs of `BenchmarkCompile10KLines` measured 3.13–3.30 ms per parse/check for the synthetic 2,000-function, 10,000-line fixture (about 14.05 MB and 16,192 allocations). The preceding baseline measured 2.95–3.01 ms; this small measurement is not a controlled attribution of the difference or an end-to-end build ratio. Keep watching it as the checker grows.

@@ -358,20 +358,20 @@ $ ef explain examples/checkout.ef checkout | jq -c '.symbol.contributions[] | {l
 {"line":34,"kind":"requirement","names":["Gateway","Scheduler"]}
 ```
 
-Line 33 is `run Orders.find(id)`; line 34 is the gateway call with its timeout. The MCP server exposes the same facts to coding agents. Its semantic answers carry the source revision they were computed from, and a request that passes `expectedRevision` is refused if the source has changed since. Without it, the server answers from the current source. Editors get the same model through `ef lsp`: diagnostics, hover and go-to-definition answer from the query behind `ef type --offset`, and document formatting is the `ef fmt` formatter. Range formatting, references and rename are not implemented yet.
+Line 33 is `run Orders.find(id)`; line 34 is the gateway call with its timeout. The MCP server exposes the same facts to coding agents. Its semantic answers carry the source revision they were computed from, and a request that passes `expectedRevision` is refused if the source has changed since. Without it, the server answers from the current source, except that a type lookup by definition ID requires `expectedRevision` (an ID is only meaningful for the source it came from). Editors get the same model through `ef lsp`: diagnostics, hover and go-to-definition answer from the query behind `ef type --offset`, and document formatting is the `ef fmt` formatter. Range formatting, references and rename are not implemented yet.
 
 ## Where it's going
 
-These items are being built now. Each one ships only when it runs on its advertised targets, with diagnostics and tooling support.
+Each row states what has landed on this branch, what is in flight and what is only specified or designed. A feature ships only when it runs on its advertised targets, with diagnostics and tooling support.
 
 | Capability | Status |
 | --- | --- |
 | Payload-aware recovery: `.recover<E>(handler)` passes the error's fields to an effectful handler | In review |
-| Layer runtime: concurrent shared acquisition, rollback and cleanup in reverse order | In progress |
+| Layer runtime: concurrent shared acquisition, rollback and cleanup in reverse order | Shared build-owned acquisition with individually cancellable waiters landed on Go and JS; the remaining units are in progress |
 | Codecs derived from records and enums, with explicit wire ↔ domain transformations | Runtime engine landed; compiler plans in progress |
 | Graph views: `ef graph --kind layers --format mermaid\|dot`, plus MCP and editor views | In progress |
-| HTTP server with bounded, owned shutdown (`Http.listen`) | In progress |
-| Rich Go interop: host types, methods, `io.Reader`/`io.Writer`, `context` | In progress |
+| HTTP server with bounded, owned shutdown (`Http.listen`) | Landed on Go and JS ([`http-transport.ef`](examples/http-transport.ef)); typed endpoints, streaming bodies and codecs are not built |
+| Rich Go interop: host types, methods, `io.Reader`/`io.Writer`, `context` | Host types, methods, interface assignment, checked I/O and `context` forwarding landed; owned resources and callbacks in progress |
 | Library modules: `pub` exports and module-qualified identity | Designed |
 | State machines: ordinary step functions run by an owned runtime | [Specified](docs/specs/state-machines.md); not built |
 | Actors with explicit mailbox budgets and owned behavior | [Specified](docs/specs/actors.md); not built |
@@ -447,6 +447,7 @@ Native builds lower checked source into typed Go closures and run `go build`. Th
 | [callables-service.ef](examples/callables-service.ef) | Callbacks that are generic over failure and service rows | Go / JS |
 | [testing.ef](examples/testing.ef) | Fixture providers, typed recovery and owned children in tests | Go / JS |
 | [imports.ef](examples/imports.ef) | Automatic native signatures, partial results and context forwarding | Go |
+| [http-transport.ef](examples/http-transport.ef) | Bounded buffered HTTP/1.1 with explicit limits, typed handler failures and owned shutdown | Go / JS |
 | [http.ef](examples/http.ef) | HTTP routes over `Http.listen`, SDK calls, file scopes and managed shutdown | Go |
 | [lifecycle.ef](examples/lifecycle.ef) | Scoped files, cancellation and runtime snapshots | Go |
 | [ownership.ef](examples/ownership.ef) | Borrowed outer handles and checked scoped file ownership | Go |

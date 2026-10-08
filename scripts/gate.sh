@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+if ! command -v tsc >/dev/null 2>&1; then
+  echo "typescript: unchecked (no tsc on PATH); the README comparison program is not strictly type-checked" >&2
+else
+  echo "typescript: strict ($(command -v tsc))"
+fi
 python3 scripts/wayfinder.py check
 python3 -B scripts/import_effect_conformance.py
 python3 -B scripts/test_import_effect_conformance.py

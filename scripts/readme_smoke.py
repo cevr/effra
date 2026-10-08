@@ -9,8 +9,8 @@ ef = str(root / "bin/ef")
 readme = (root / "README.md").read_text()
 
 
-def process(*command, success=True):
-    result = subprocess.run(command, cwd=root, text=True, capture_output=True)
+def process(*command, success=True, input_text=None):
+    result = subprocess.run(command, cwd=root, text=True, capture_output=True, input=input_text)
     assert (result.returncode == 0) == success, (command, result.stdout, result.stderr)
     return result
 
@@ -19,8 +19,9 @@ def run(*args, success=True):
     return process(ef, *args, success=success)
 
 
+showcase = (root / "examples/checkout.ef").read_text()
 blocks = re.findall(r"^```(rust|ts|go)\n(.*?)^```$", readme, flags=re.S | re.M)
-counts = {"checked": 0, "excerpt": 0, "sketch": 0}
+counts = {"checked": 0, "excerpt": 0, "sketch": 0, "showcase": 0}
 with tempfile.TemporaryDirectory() as scratch:
     for index, (language, body) in enumerate(blocks):
         first, _, rest = body.partition("\n")
@@ -38,8 +39,15 @@ with tempfile.TemporaryDirectory() as scratch:
         snippet.write_text(body)
         report = json.loads(run("check", str(snippet)).stdout)
         assert report["checked"], (index, report["diagnostics"])
+        if "effect fn checkout(" in body:
+            # The checkout program is the README's headline claim: after the
+            # canonical formatter it must be a verbatim part of the gated
+            # showcase, so the README cannot drift from examples/checkout.ef.
+            formatted = process(ef, "fmt", "--stdin", input_text=body).stdout.strip()
+            assert formatted in showcase, f"README checkout block {index} is not a substring of examples/checkout.ef after ef fmt"
+            counts["showcase"] += 1
         counts["checked"] += 1
-assert counts["checked"] >= 3 and counts["excerpt"] >= 6 and counts["sketch"] >= 1, counts
+assert counts["checked"] >= 3 and counts["excerpt"] >= 6 and counts["sketch"] >= 1 and counts["showcase"] == 1, counts
 
 # README: "All three versions are checked in and print the same thing." Run all three.
 outputs = {f"ef run --target {target}": run("run", "examples/checkout.ef", "--target", target).stdout
@@ -61,7 +69,6 @@ assert contract["requirements"] == ["Gateway", "Orders", "Scheduler"]
 
 # Each row of "Same mistakes, three compilers" applies one edit to the showcase and
 # quotes the resulting diagnostic; both the edit's effect and the quote are checked.
-showcase = (root / "examples/checkout.ef").read_text()
 mistakes = [
     ('        Payment.Declined { reason } => "declined: " + reason\n', "",
      "EF117: missing match arm for Payment.Declined"),
