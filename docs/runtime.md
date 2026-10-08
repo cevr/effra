@@ -50,7 +50,7 @@ go run ./examples/go-interop
 # cancelled SDK: Timeout
 ```
 
-Automatic source imports now consume Go export data for primitive package functions. Foreign/Host is the explicit capability for these deferred calls. See [interop](interop.md) and [imports example](../examples/imports.ef). Imported fields/methods and persistent signature caches remain unsupported.
+Automatic source imports now consume Go export data for primitive package functions. Foreign/Host is the explicit capability for these deferred calls. See [interop](interop.md) and [imports example](../examples/imports.ef). Imported methods follow Go's method sets (see [interop](interop.md) and [host types example](../examples/host-types.ef)); native fields, method values and persistent signature caches remain unsupported.
 
 ## HTTP server
 

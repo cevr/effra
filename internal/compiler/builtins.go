@@ -87,7 +87,8 @@ func builtinProviderByReference(provider *Provider) bool {
 }
 
 // builtinServicesFor and builtinProvidersFor select the prelude one program
-// admits. Callback type names stay reserved like other builtin type names.
+// admits. Callback type names are reserved like other builtin type names only
+// where Http is admitted; otherwise they are free for user declarations.
 func builtinServicesFor(program *Program) []*Service {
 	services := builtins()
 	if program.admitsHTTP() {

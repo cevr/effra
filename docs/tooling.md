@@ -125,7 +125,7 @@ Revision-bound checked edit plans, multi-file identities, editor integration, co
 
 `scripts/gate.sh` needs the pinned Effect reference tests, which live in a git submodule. After every clone, Rift or worktree run `scripts/init_upstream.sh` once; offline, set `EFFRA_UPSTREAM_MIRROR` to a local Effect clone that contains the pinned commit. The conformance verifier reads the corpus only from git objects ([conformance](conformance.md)).
 
-The README's TypeScript comparison program is checked with `tsc --strict`. The repository has no TypeScript dependency, so the gate environment supplies `tsc` on PATH, as `run-gate.sh` does. Without it the gate prints a loud `typescript: unchecked` line and the README smoke reports `typescript: unchecked: no tsc on PATH`; it does not fail, so contributors without `tsc` can still gate, but a gate receipt without `typescript: strict` is weaker evidence.
+The README's TypeScript comparison program is checked with `tsc --strict`. The repository has no TypeScript dependency, so the gate environment supplies `tsc` on PATH. Without it the gate prints a loud `typescript: unchecked` line and the README smoke reports `typescript: unchecked: no tsc on PATH`; it does not fail, so contributors without `tsc` can still gate, but a gate receipt without `typescript: strict` is weaker evidence.
 
 ## Performance receipt
 
