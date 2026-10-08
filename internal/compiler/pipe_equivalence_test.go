@@ -329,8 +329,22 @@ func pipeOutputsEqual(a, b pipeOutput) bool {
 }
 
 func compilePipeOutput(t *testing.T, source, dir string, transform func(*Program)) pipeOutput {
+	return compilePipeOutputWithRawMutation(t, source, dir, transform, nil)
+}
+
+// compilePipeOutputWithRawMutation applies mutate to emitted text before the
+// same record/normalization boundary used by the differential. It is a
+// test-only seam for proving that controls observe raw artifacts rather than
+// only text retained after normalization.
+func compilePipeOutputWithRawMutation(t *testing.T, source, dir string, transform func(*Program), mutate func(key, text string) string) pipeOutput {
 	t.Helper()
 	out := pipeOutput{}
+	record := func(key, status, text string) {
+		if status == pipeEmitted && mutate != nil {
+			text = mutate(key, text)
+		}
+		out.record(key, status, text)
+	}
 	for _, target := range []string{"js", "go"} {
 		r := compileTransformed(source, target, dir, transform)
 		if !r.Checked {
@@ -348,40 +362,40 @@ func compilePipeOutput(t *testing.T, source, dir string, transform func(*Program
 			emitJS := func(mode string, emit func() (string, string, error)) {
 				text, declarations, err := emit()
 				if err != nil {
-					out.record("js/"+mode, pipeEmissionFailed, "")
-					out.record("js/"+mode+".d.mts", pipeEmissionFailed, "")
+					record("js/"+mode, pipeEmissionFailed, "")
+					record("js/"+mode+".d.mts", pipeEmissionFailed, "")
 					return
 				}
-				out.record("js/"+mode, pipeEmitted, text)
-				out.record("js/"+mode+".d.mts", pipeEmitted, declarations)
+				record("js/"+mode, pipeEmitted, text)
+				record("js/"+mode+".d.mts", pipeEmitted, declarations)
 			}
 			if entryErr != nil {
-				out.record("js/entry", pipeNoEntry, "")
-				out.record("js/entry.d.mts", pipeNoEntry, "")
+				record("js/entry", pipeNoEntry, "")
+				record("js/entry.d.mts", pipeNoEntry, "")
 			} else {
 				emitJS("entry", func() (string, string, error) { return r.Emit(true) })
 			}
 			emitJS("library", func() (string, string, error) { return r.Emit(false) })
 			if testsErr != nil {
-				out.record("js/tests", pipeNoTests, "")
+				record("js/tests", pipeNoTests, "")
 			} else {
 				emitJS("tests", r.EmitJSTests)
 			}
 			continue
 		}
 		if entryErr != nil {
-			out.record("go/build", pipeNoEntry, "")
+			record("go/build", pipeNoEntry, "")
 		} else if app, err := r.GoApplication(GoGenerationBuild); err != nil {
-			out.record("go/build", pipeEmissionFailed, "")
+			record("go/build", pipeEmissionFailed, "")
 		} else {
-			out.record("go/build", pipeEmitted, string(app.Main))
+			record("go/build", pipeEmitted, string(app.Main))
 		}
 		if testsErr != nil {
-			out.record("go/test", pipeNoTests, "")
+			record("go/test", pipeNoTests, "")
 		} else if text, err := r.EmitGoTests(); err != nil {
-			out.record("go/test", pipeEmissionFailed, "")
+			record("go/test", pipeEmissionFailed, "")
 		} else {
-			out.record("go/test", pipeEmitted, text)
+			record("go/test", pipeEmitted, text)
 		}
 	}
 	return out
@@ -613,21 +627,48 @@ effect fn test_ok() -> void raises { AssertionFailed } uses { Assert } {
 		if artifact.Status != pipeEmitted {
 			t.Fatalf("%s status = %q, want %q", key, artifact.Status, pipeEmitted)
 		}
-		lineEnd := strings.IndexByte(artifact.Text, '\n')
-		if lineEnd < 0 {
-			lineEnd = len(artifact.Text)
-		}
-		changed := pipeOutput{}
-		for existingKey, existing := range out {
-			changed[existingKey] = existing
-		}
-		changedArtifact := artifact
-		changedArtifact.Text = artifact.Text[:lineEnd] + " /* first-line change */" + artifact.Text[lineEnd:]
-		changed[key] = changedArtifact
+		changed := compilePipeOutputWithRawMutation(t, source, ".", nil, func(candidate, text string) string {
+			if candidate != key {
+				return text
+			}
+			return mutateFirstRawArtifactLine(t, candidate, text)
+		})
 		if pipeOutputsEqual(out, changed) {
-			t.Errorf("changing the first line of %s did not change the compared output", key)
+			t.Errorf("changing the first raw line of %s did not change the compared output", key)
 		}
 	}
+}
+
+// mutateFirstRawArtifactLine changes the first meaningful raw line while
+// retaining a recognized generated revision header. Declaration artifacts do
+// not have that header: their first line is a real import and must remain part
+// of the comparison.
+func mutateFirstRawArtifactLine(t *testing.T, key, text string) string {
+	t.Helper()
+	firstEnd := strings.IndexByte(text, '\n')
+	if firstEnd < 0 {
+		firstEnd = len(text)
+	}
+	start := 0
+	if firstEnd < len(text) && strings.HasPrefix(text[:firstEnd], pipeRevisionHeader) && len(text[:firstEnd]) > len(pipeRevisionHeader) {
+		start = firstEnd + 1
+	}
+	lineEnd := strings.IndexByte(text[start:], '\n')
+	if lineEnd < 0 {
+		lineEnd = len(text)
+	} else {
+		lineEnd += start
+	}
+	if start >= lineEnd {
+		t.Fatalf("%s has no first meaningful raw line", key)
+	}
+	line := text[start:lineEnd]
+	if key == "js/library.d.mts" {
+		if !strings.HasPrefix(line, "import type ") || !strings.Contains(line, "from 'effect';") {
+			t.Fatalf("%s first line is not the real declaration import: %q", key, line)
+		}
+	}
+	return text[:lineEnd] + " /* first raw-line change: " + key + " */" + text[lineEnd:]
 }
 
 // The differential must be able to fail: a parser that appended the piped
