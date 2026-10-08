@@ -216,6 +216,24 @@ effect fn program() -> void uses { Console, Foreign } {
 	}
 }
 
+func TestHostReaderSeekPositionalArguments(t *testing.T) {
+	r := compileHostIO(t, `effect fn program() -> void uses { Console, Foreign } {
+    match run strings.NewReader("abc") {
+        Data.Option.None => void,
+        Data.Option.Some { value: reader } => {
+            let position = run reader.Seek(2, 0)
+            run Console.log(run strconv.FormatInt(position.value, 10))
+        }
+    }
+}`)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	if output := runGeneratedGo(t, r); output != "2\n" {
+		t.Fatalf("positional Seek(2, 0) = %q, want 2", output)
+	}
+}
+
 // io.ReaderAt reads at an explicit offset without moving or depending on the
 // reader's own position, and a read reaching the end returns its data with
 // io.EOF. Interleaved Read and ReadAt calls match native Go.

@@ -107,6 +107,55 @@ effect fn main() -> string { run strings.ToUpper(s: "x").provide<Foreign>(Host) 
 	}, false)
 }
 
+func TestGoHostMethodsRejectArgumentLabels(t *testing.T) {
+	tests := []struct {
+		name, arguments string
+		diagnostics     []expectedDiagnostic
+	}{
+		{
+			name:      "known labels",
+			arguments: `offset: 2, whence: 0`,
+			diagnostics: []expectedDiagnostic{
+				{"Go functions take positional arguments; remove label offset", `reader.Seek(offset: 2, whence: 0)`, "offset"},
+				{"Go functions take positional arguments; remove label whence", `reader.Seek(offset: 2, whence: 0)`, "whence"},
+			},
+		},
+		{
+			name:      "reordered known labels",
+			arguments: `whence: 0, offset: 2`,
+			diagnostics: []expectedDiagnostic{
+				{"Go functions take positional arguments; remove label whence", `reader.Seek(whence: 0, offset: 2)`, "whence"},
+				{"Go functions take positional arguments; remove label offset", `reader.Seek(whence: 0, offset: 2)`, "offset"},
+			},
+		},
+		{
+			name:      "unknown labels",
+			arguments: `wrong: 2, alsoWrong: 0`,
+			diagnostics: []expectedDiagnostic{
+				{"Go functions take positional arguments; remove label wrong", `reader.Seek(wrong: 2, alsoWrong: 0)`, "wrong"},
+				{"Go functions take positional arguments; remove label alsoWrong", `reader.Seek(wrong: 2, alsoWrong: 0)`, "alsoWrong"},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := `import go strings "strings"
+import Data "effra/data"
+effect fn main() -> void uses { Foreign } {
+    match run strings.NewReader("abc") {
+        Data.Option.None => void,
+        Data.Option.Some { value: reader } => {
+            let result = run reader.Seek(` + test.arguments + `)
+            void
+        }
+    }
+}
+`
+			assertCallDiagnostics(t, source, Compile(source), test.diagnostics, false)
+		})
+	}
+}
+
 func assertCallDiagnostics(t *testing.T, source string, r *Result, want []expectedDiagnostic, cascades bool) {
 	t.Helper()
 	if len(want) == 0 {

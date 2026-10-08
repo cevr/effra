@@ -666,7 +666,6 @@ func (c *checker) foreignCall(e *Expr, env localEnv, inEffect bool) bool {
 			return true
 		}
 		c.program.UsedImports[alias] = true
-		c.rejectArgumentLabels(e, "Go functions")
 		c.checkForeignCall(e, b, host, env, inEffect)
 		return true
 	}
@@ -677,6 +676,7 @@ func (c *checker) foreignCall(e *Expr, env localEnv, inEffect bool) bool {
 // Arguments are checked against the native parameters with Go's assignment
 // rule, so a concrete host value reaches a native interface directly.
 func (c *checker) checkForeignCall(e *Expr, b Binding, host hostBindingTypes, env localEnv, inEffect bool) {
+	c.rejectArgumentLabels(e, "Go functions")
 	if len(e.Args) != len(host.params) {
 		c.diagnostic("EF106", "incorrect Go argument count for "+b.Symbol, e.Span)
 	}
