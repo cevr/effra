@@ -59,11 +59,11 @@ func (p *parser) codecDeclaration() *CodecDeclaration {
 	member := p.memberName()
 	codec := &CodecDeclaration{Name: name.text, Span: name.span, Alias: alias.text, Member: member.text, DerivationSpan: alias.span}
 	codec.DerivationSpan.Length = member.span.Offset + member.span.Length - alias.span.Offset
-	p.expect("<")
+	p.expectGenericOpen()
 	codec.TypeSpan = p.peek().span
 	codec.Type = p.typ()
 	codec.sourceType = p.types[codec.Type]
-	p.expect(">")
+	p.expectGenericClose()
 	if p.accept("(") {
 		for !p.accept(")") {
 			option := p.name()

@@ -38,6 +38,31 @@ assert stdin.returncode == 0, (stdin.stdout, stdin.stderr)
 assert stdin.stderr == ""
 assert "import go missing" in stdin.stdout and stdin.stdout.endswith("\n")
 
+angle_roles_source = (
+    'record Box<T: type> { value: T }\n'
+    'fn less(left: i64, right: i64) -> bool { left < right }\n'
+    'fn greater(value: i64) -> bool { value > (0) }\n'
+    'effect fn main() -> void { void }'
+)
+angle_roles_want = (
+    'record Box<T: type> {\n'
+    '    value: T\n'
+    '}\n'
+    'fn less(left: i64, right: i64) -> bool {\n'
+    '    left < right\n'
+    '}\n'
+    'fn greater(value: i64) -> bool {\n'
+    '    value > (0)\n'
+    '}\n'
+    'effect fn main() -> void {\n'
+    '    void\n'
+    '}\n'
+)
+angle_roles = run("fmt", "--stdin", input_text=angle_roles_source)
+assert angle_roles.returncode == 0 and angle_roles.stderr == "" and angle_roles.stdout == angle_roles_want
+angle_roles_again = run("fmt", "--stdin", input_text=angle_roles.stdout)
+assert angle_roles_again.returncode == 0 and angle_roles_again.stdout == angle_roles_want
+
 with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     workspace = pathlib.Path(directory)
     path = workspace / "main.ef"
@@ -55,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     write = run("fmt", "--json", str(path))
     assert write.returncode == 0, (write.stdout, write.stderr)
     write_report = json.loads(write.stdout)
-    assert write.stderr == "" and write_report["formatterVersion"] == "effra/formatter-7"
+    assert write.stderr == "" and write_report["formatterVersion"] == "effra/formatter-8"
     assert write_report["schemaVersion"] == 1
     assert write_report["files"][0]["written"]
     assert path.stat().st_mode & 0o777 == original_mode

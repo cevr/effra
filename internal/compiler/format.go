@@ -12,7 +12,7 @@ const FormatterSchemaVersion = 1
 
 // FormatterIdentity names the syntax producer independently from semantic
 // revisions. Adapters must report this identity without querying Git.
-const FormatterIdentity = "effra/formatter-7"
+const FormatterIdentity = "effra/formatter-8"
 
 // FormatResult is the pure, syntax-only formatting snapshot. Its digest is
 // intentionally independent from a checked semantic revision: formatting
@@ -117,6 +117,9 @@ type formatLayout struct {
 	spaced     map[int]bool
 	// patternBraces holds the opening offsets of match pattern payloads.
 	patternBraces map[int]bool
+	// genericAngles is the parser's shared syntax fact for type arguments and
+	// generic postfixes. A comparison angle is deliberately absent here.
+	genericAngles map[int]bool
 	// listGaps are source ranges between match subjects or pattern cells;
 	// commas inside them separate list items rather than statements.
 	listGaps     []Span
@@ -170,7 +173,7 @@ func buildFormatEvents(comments []Comment, tokens []token) []formatEvent {
 }
 
 func buildFormatLayout(source string, program *Program, tokens []token) formatLayout {
-	layout := formatLayout{breaks: map[int]bool{}, inline: map[int]bool{}, preserve: formatDirectiveTargetLines(program.Comments), itemStarts: map[int]bool{}, braces: map[int]braceStyle{}, spaced: map[int]bool{}, patternBraces: map[int]bool{}, inlineCommas: map[int]bool{}}
+	layout := formatLayout{breaks: map[int]bool{}, inline: map[int]bool{}, preserve: formatDirectiveTargetLines(program.Comments), itemStarts: map[int]bool{}, braces: map[int]braceStyle{}, spaced: map[int]bool{}, patternBraces: map[int]bool{}, genericAngles: program.genericAngles, inlineCommas: map[int]bool{}}
 	for _, item := range program.Items {
 		layout.itemStarts[item.Span.Offset] = true
 		layout.breaks[item.Span.Offset] = true
@@ -440,7 +443,7 @@ func (p *formatPrinter) token(eventIndex int, event formatEvent) {
 			p.breaks(1)
 		}
 	}
-	if p.lastToken >= 0 && p.tokens[p.lastToken].text == "}" && p.layout.braces[p.lastToken] == braceBlock && !formatContinuation(current.text) && !p.layout.preserve[current.span.Line] {
+	if p.lastToken >= 0 && p.tokens[p.lastToken].text == "}" && p.layout.braces[p.lastToken] == braceBlock && !p.formatContinuation(current, event.tokenIndex) && !p.layout.preserve[current.span.Line] {
 		p.newline()
 	}
 	if p.lineStart {
@@ -455,35 +458,39 @@ func (p *formatPrinter) token(eventIndex int, event formatEvent) {
 	case "}":
 		p.closeBrace(event.tokenIndex, current)
 	case "(":
-		p.regularSpacing(current.text)
+		p.regularSpacing(current.text, event.tokenIndex)
 		p.write(current.text)
 		p.delimiters = append(p.delimiters, formatDelimiter{text: "(", base: p.lineIndent})
 	case ")":
-		p.regularSpacing(current.text)
+		p.regularSpacing(current.text, event.tokenIndex)
 		p.write(current.text)
 		p.popDelimiter("(")
 	case "<":
-		p.regularSpacing(current.text)
+		p.regularSpacing(current.text, event.tokenIndex)
 		p.write(current.text)
-		p.delimiters = append(p.delimiters, formatDelimiter{text: "<", base: p.lineIndent})
+		if p.layout.genericAngles[event.tokenIndex] {
+			p.delimiters = append(p.delimiters, formatDelimiter{text: "<", base: p.lineIndent})
+		}
 	case ">":
-		p.regularSpacing(current.text)
+		p.regularSpacing(current.text, event.tokenIndex)
 		p.write(current.text)
-		p.popDelimiter("<")
+		if p.layout.genericAngles[event.tokenIndex] {
+			p.popDelimiter("<")
+		}
 	case ",":
-		p.regularSpacing(current.text)
+		p.regularSpacing(current.text, event.tokenIndex)
 		p.write(current.text)
 		if p.topDelimiterStyle() == braceBlock && !p.layout.inlineCommas[current.span.Offset] && !p.nextEventIsInlineStatement(eventIndex) && !p.nextEventIsTrailingComment(eventIndex, event) && !p.nextEventIsPinnedSameLine(eventIndex) {
 			p.newline()
 		}
 	case ";":
-		p.regularSpacing(current.text)
+		p.regularSpacing(current.text, event.tokenIndex)
 		p.write(current.text)
 		if !p.nextEventIsTrailingComment(eventIndex, event) && !p.nextEventIsInlineStatement(eventIndex) && !p.nextEventIsPinnedSameLine(eventIndex) {
 			p.newline()
 		}
 	default:
-		p.regularSpacing(current.text)
+		p.regularSpacing(current.text, event.tokenIndex)
 		p.write(current.text)
 	}
 	p.lastToken = event.tokenIndex
@@ -493,7 +500,7 @@ func (p *formatPrinter) token(eventIndex int, event formatEvent) {
 func (p *formatPrinter) openBrace(eventIndex int, event formatEvent) {
 	current := p.tokens[event.tokenIndex]
 	style := p.layout.braces[event.tokenIndex]
-	p.regularSpacing(current.text)
+	p.regularSpacing(current.text, event.tokenIndex)
 	p.write(current.text)
 	p.delimiters = append(p.delimiters, formatDelimiter{text: "{", style: style, base: p.lineIndent})
 	if style == braceBlock {
@@ -528,16 +535,31 @@ func (p *formatPrinter) closeBrace(tokenIndex int, current token) {
 	p.popDelimiter("{")
 }
 
-func (p *formatPrinter) regularSpacing(current string) {
+func (p *formatPrinter) regularSpacing(current string, currentIndex int) {
 	if p.lineStart || p.lastToken < 0 {
 		return
 	}
 	previous := p.tokens[p.lastToken]
 	currentToken := token{text: current}
+	if p.comparisonAngle(currentIndex) || p.comparisonAngle(p.lastToken) {
+		p.space()
+		return
+	}
+	if previous.text == "-" && p.unaryMinus(p.lastToken) {
+		return
+	}
 	if !formatNeedsSpace(previous, currentToken) {
 		return
 	}
 	p.space()
+}
+
+func (p *formatPrinter) comparisonAngle(index int) bool {
+	if index < 0 || index >= len(p.tokens) {
+		return false
+	}
+	text := p.tokens[index].text
+	return (text == "<" || text == ">") && !p.layout.genericAngles[index]
 }
 
 func formatNeedsSpace(previous, current token) bool {
@@ -576,6 +598,23 @@ func formatNeedsSpace(previous, current token) bool {
 	return true
 }
 
+func (p *formatPrinter) unaryMinus(index int) bool {
+	if index == 0 {
+		return true
+	}
+	previous := p.tokens[index-1]
+	switch previous.text {
+	case ")", "]", "}":
+		return false
+	case "-", "+", "==", "<", "<=", ">", ">=", "*", "/", "%", "|>", "->", "=>", "(", "[", "{", ",", ":", ";":
+		return true
+	case "if", "match", "run", "fork":
+		return true
+	default:
+		return previous.kind != "name" && previous.kind != "integer" && previous.kind != "string"
+	}
+}
+
 func groupedCallKeyword(text string) bool {
 	switch text {
 	case "if", "match", "run", "fork":
@@ -592,6 +631,13 @@ func formatContinuation(current string) bool {
 	default:
 		return false
 	}
+}
+
+func (p *formatPrinter) formatContinuation(current token, index int) bool {
+	if current.text == ">" && !p.layout.genericAngles[index] {
+		return false
+	}
+	return formatContinuation(current.text)
 }
 
 func (p *formatPrinter) topDelimiterStyle() braceStyle {
@@ -653,7 +699,7 @@ func (p *formatPrinter) delimiterBase(text string) (int, bool) {
 
 func (p *formatPrinter) prepareTokenLine(current token, tokenIndex int) {
 	depth := p.continuationDepth()
-	closing := current.text == ")" || current.text == "]" || current.text == ">" || (current.text == "}" && p.layout.braces[tokenIndex] == braceInline)
+	closing := current.text == ")" || current.text == "]" || (current.text == ">" && p.layout.genericAngles[tokenIndex]) || (current.text == "}" && p.layout.braces[tokenIndex] == braceInline)
 	if closing {
 		if base, ok := p.delimiterBase(current.text); ok {
 			p.lineIndent = base

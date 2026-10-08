@@ -162,3 +162,13 @@ func TestCodecDeriveDeclarationsFormat(t *testing.T) {
 		t.Fatalf("formatted derive declarations: %+v %+v", r.Diagnostics, r.CodecPlans)
 	}
 }
+
+func TestCodecDeriveFormattingSharesAngleFactsWithComparisons(t *testing.T) {
+	source := "import Json \"effra/json\"\nrecord User { name: string }\nenum Status { Ready Done }\nderive userJson = Json.codec< User >(maxBodyBytes: 4096, maxDepth: 4)\nderive statusJson = Json.codec< Status >(maxBodyBytes: 64, maxDepth: 1)\nfn ordinaryComparison(left: i64, right: i64) -> bool { left < right }\n"
+	want := "import Json \"effra/json\"\nrecord User {\n    name: string\n}\nenum Status {\n    Ready\n    Done\n}\nderive userJson = Json.codec<User>(maxBodyBytes: 4096, maxDepth: 4)\nderive statusJson = Json.codec<Status>(maxBodyBytes: 64, maxDepth: 1)\nfn ordinaryComparison(left: i64, right: i64) -> bool {\n    left < right\n}\n"
+	assertFormat(t, source, want)
+	r := Compile(want)
+	if !r.Checked || len(r.Codecs) != 2 || len(r.CodecPlans) != 2 {
+		t.Fatalf("formatted record/enum derives or comparison rejected: %+v %+v", r.Diagnostics, r.CodecPlans)
+	}
+}

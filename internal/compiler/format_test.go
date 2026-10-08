@@ -453,6 +453,27 @@ func TestFormatRetainsDeclarationOrderAndTokens(t *testing.T) {
 	}
 }
 
+func TestFormatterUsesSyntaxRolesForAnglesAndComparisons(t *testing.T) {
+	const source = `record Box<T: type> { value: T }
+fn less(left: i64, right: i64) -> bool { left < right }
+fn greater(value: i64) -> bool { value > (0) }
+effect fn main() -> void { void }`
+	const want = `record Box<T: type> {
+    value: T
+}
+fn less(left: i64, right: i64) -> bool {
+    left < right
+}
+fn greater(value: i64) -> bool {
+    value > (0)
+}
+effect fn main() -> void {
+    void
+}
+`
+	assertFormat(t, source, want)
+}
+
 func TestFormatPreservesBlankSeparation(t *testing.T) {
 	source := `import go a "strings";
 

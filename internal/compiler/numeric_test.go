@@ -114,6 +114,26 @@ func TestSigned64ProfileChecksLiteralsAndUnsupportedOperators(t *testing.T) {
 	}
 }
 
+func TestSigned64ProfilePreservesOperatorPrecedenceAndFormatting(t *testing.T) {
+	source := `fn probe(value: i64) -> bool { -value + 1 <= value - 2 }`
+	formatted, err := FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := FormatSource(formatted.Text); err != nil || again.Text != formatted.Text {
+		t.Fatalf("formatted numeric source is not stable: %q %v", formatted.Text, err)
+	}
+	if !strings.Contains(formatted.Text, "-value + 1 <= value - 2") {
+		t.Fatalf("formatter changed unary/binary spacing: %q", formatted.Text)
+	}
+	for _, target := range []string{"go", "js"} {
+		r := CompileFor(formatted.Text+" effect fn main() -> void { void }", target)
+		if !r.Checked {
+			t.Fatalf("formatted numeric source rejected for %s: %+v", target, r.Diagnostics)
+		}
+	}
+}
+
 func TestSigned64ProfileEmitsPerOperationNormalizationAndStrictBigInt(t *testing.T) {
 	r := CompileFor(signed64ProfileSource, "js")
 	if !r.Checked {
