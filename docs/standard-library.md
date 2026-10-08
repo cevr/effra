@@ -18,7 +18,7 @@ Small application binaries are an explicit north star. Bundled availability does
 
 ## Argument order
 
-Library functions put the value they transform first, so they read under the [pipe operator](specs/language-abstractions.md#pipe-operator): `Schedule.exponential(baseMs: 10) |> Schedule.jittered()` is `Schedule.jittered(Schedule.exponential(baseMs: 10))`. Required configuration uses named arguments in one call; optional or repeatable settings and composition are pipe steps over immutable values. This is a review checklist item for every bundled API, not a language rule. Parameter names are public API because callers label them.
+Library functions put the value they transform first, so they read under the [pipe operator](specs/language-abstractions.md#pipe-operator): `Schedule.exponential(baseMs: 10) |> Schedule.jittered()` is `Schedule.jittered(Schedule.exponential(baseMs: 10))`. Required configuration uses named arguments in one call; an optional setting with a constant default is a constant-only parameter default (lane DEF1, admitted); budgets and codec bounds stay required. Repeatable settings and composition are pipe steps over immutable values. This is a review checklist item for every bundled API, not a language rule. Parameter names are public API because callers label them.
 
 ## Capability parity map
 
