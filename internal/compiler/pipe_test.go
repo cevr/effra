@@ -290,7 +290,7 @@ func TestPipeSpanNeverDecidesCompilation(t *testing.T) {
 		source := pipeDeclarations + "effect fn takesCard(card: Card) -> string { card.title }\neffect fn probe() -> string { " + body + " }\neffect fn main() -> void { }\n"
 		for _, target := range []string{"go", "js"} {
 			with := CompileAt(source, target, ".")
-			without := compileAt(source, target, ".", clearPipeSpans)
+			without := compileTransformed(source, target, ".", clearPipeSpans)
 			if with.Checked != without.Checked || len(with.Diagnostics) != len(without.Diagnostics) {
 				t.Fatalf("%s [%s]: checked %v/%v, diagnostics %+v / %+v", body, target, with.Checked, without.Checked, with.Diagnostics, without.Diagnostics)
 			}

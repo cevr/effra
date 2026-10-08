@@ -282,36 +282,102 @@ effect fn main() -> string uses { Foreign } {
 	}
 }
 
-// pipeOutput is what a compiled program emits, minus its source-revision line.
-type pipeOutput struct {
-	diagnostics []string
-	js, goMain  string
-	jsErr, goOK bool
+// compileTransformed is CompileAt with a transform between its parse and check
+// phases, which production runs back to back. A control uses it to inject a
+// wrong desugaring; the transform may be nil.
+func compileTransformed(source, target, dir string, transform func(*Program)) *Result {
+	r, program := parseSource(source, target)
+	if program == nil {
+		return r
+	}
+	if transform != nil {
+		transform(program)
+	}
+	return checkParsed(r, program, dir, source)
+}
+
+// Statuses of one compared artifact. They stay distinct so that a program one
+// target rejects, a program whose emission fails and a program that emits are
+// never compared as if they were the same thing.
+const (
+	pipeEmitted        = "emitted"
+	pipeRejected       = "rejected"        // checking failed; codes hold the diagnostics
+	pipeEmissionFailed = "emission-failed" // checked, but emission returned an error
+	pipeNoTests        = "no-tests"        // checked, but the program has no valid tests
+	pipeNoEntry        = "no-entry"        // checked, but there is no entry to emit
+)
+
+// pipeArtifact is one compared output: its status, the diagnostic codes when
+// rejected, and the text when emitted (minus the source-revision line).
+type pipeArtifact struct {
+	Status string
+	Codes  []string
+	Text   string
+}
+
+// pipeOutput holds every artifact one program compiles to, keyed by
+// "<target>/<mode>": js/check, js/entry, js/entry.d.mts, js/library,
+// js/library.d.mts, js/tests, js/tests.d.mts, go/check, go/build, go/test.
+type pipeOutput map[string]pipeArtifact
+
+func (o pipeOutput) record(key, status, text string) {
+	o[key] = pipeArtifact{Status: status, Text: afterFirstLine(text)}
 }
 
 func compilePipeOutput(t *testing.T, source, dir string, transform func(*Program)) pipeOutput {
 	t.Helper()
-	var out pipeOutput
+	out := pipeOutput{}
 	for _, target := range []string{"js", "go"} {
-		r := compileAt(source, target, dir, transform)
+		r := compileTransformed(source, target, dir, transform)
 		if !r.Checked {
-			if target == "js" {
-				for _, d := range r.Diagnostics {
-					out.diagnostics = append(out.diagnostics, d.Code)
+			codes := []string{}
+			for _, d := range r.Diagnostics {
+				codes = append(codes, d.Code)
+			}
+			out[target+"/check"] = pipeArtifact{Status: pipeRejected, Codes: codes}
+			continue
+		}
+		out[target+"/check"] = pipeArtifact{Status: pipeEmitted}
+		_, testsErr := r.Tests()
+		entryErr := r.Entry()
+		if target == "js" {
+			emitJS := func(mode string, emit func() (string, string, error)) {
+				text, declarations, err := emit()
+				if err != nil {
+					out.record("js/"+mode, pipeEmissionFailed, "")
+					out.record("js/"+mode+".d.mts", pipeEmissionFailed, "")
+					return
 				}
+				out.record("js/"+mode, pipeEmitted, text)
+				out.record("js/"+mode+".d.mts", pipeEmitted, declarations)
+			}
+			if entryErr != nil {
+				out.record("js/entry", pipeNoEntry, "")
+				out.record("js/entry.d.mts", pipeNoEntry, "")
+			} else {
+				emitJS("entry", func() (string, string, error) { return r.Emit(true) })
+			}
+			emitJS("library", func() (string, string, error) { return r.Emit(false) })
+			if testsErr != nil {
+				out.record("js/tests", pipeNoTests, "")
+			} else {
+				emitJS("tests", r.EmitJSTests)
 			}
 			continue
 		}
-		if target == "js" {
-			text, _, err := r.Emit(true)
-			out.jsErr = err != nil
-			out.js = afterFirstLine(text)
+		if entryErr != nil {
+			out.record("go/build", pipeNoEntry, "")
+		} else if app, err := r.GoApplication(GoGenerationBuild); err != nil {
+			out.record("go/build", pipeEmissionFailed, "")
 		} else {
-			app, err := r.GoApplication(GoGenerationBuild)
-			out.goOK = err == nil
-			if err == nil {
-				out.goMain = afterFirstLine(string(app.Main))
-			}
+			out.record("go/build", pipeEmitted, string(app.Main))
+		}
+		if testsErr != nil {
+			out.record("go/test", pipeNoTests, "")
+		} else if text, err := r.EmitGoTests(); err != nil {
+			out.record("go/test", pipeEmissionFailed, "")
+		} else {
+			out.record("go/test", pipeEmitted, text)
 		}
 	}
 	return out
@@ -341,16 +407,49 @@ func afterFirstLine(text string) string {
 }
 
 type pipeDifferential struct {
-	programs, rewritten, calls, emitted int
-	mismatches                          []string
+	programs, rewritten, calls int
+	// status counts the programs (before rewriting) by artifact key and
+	// status, so "rejected", "emission-failed" and "emitted" stay distinct.
+	status map[string]map[string]int
+	// compared counts the programs whose artifact was emitted on both sides of
+	// the comparison, by key: the artifacts whose text was actually compared.
+	compared   map[string]int
+	mismatches []string
 }
 
-// runPipeDifferential rewrites each corpus program and compares both targets'
-// output and the diagnostic codes with the original's. transform is applied to
-// the rewritten program only, which lets a control inject a wrong desugaring.
+// both is the number of programs whose JavaScript entry and Go build were both
+// emitted and compared.
+func (d pipeDifferential) both() int {
+	return d.compared["both"]
+}
+
+// report is one line per artifact: how many programs reached each status and
+// how many had their emitted text compared.
+func (d pipeDifferential) report() string {
+	keys := make([]string, 0, len(d.status))
+	for key := range d.status {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var out strings.Builder
+	for _, key := range keys {
+		statuses := make([]string, 0, len(d.status[key]))
+		for status, n := range d.status[key] {
+			statuses = append(statuses, status+"="+strconv.Itoa(n))
+		}
+		sort.Strings(statuses)
+		out.WriteString("\n  " + key + ": " + strings.Join(statuses, " ") + " compared=" + strconv.Itoa(d.compared[key]))
+	}
+	return out.String()
+}
+
+// runPipeDifferential rewrites each corpus program and compares every
+// artifact on both targets, with its status and diagnostic codes, to the
+// original's. transform is applied to the rewritten program only, which lets a
+// control inject a wrong desugaring.
 func runPipeDifferential(t *testing.T, corpus []pipeCorpusSource, transform func(*Program)) pipeDifferential {
 	t.Helper()
-	var result pipeDifferential
+	result := pipeDifferential{status: map[string]map[string]int{}, compared: map[string]int{}}
 	for _, entry := range corpus {
 		program, diagnostics := safeParse(entry.text)
 		if len(diagnostics) > 0 || program == nil {
@@ -378,8 +477,17 @@ func runPipeDifferential(t *testing.T, corpus []pipeCorpusSource, transform func
 		result.calls += piped
 		before := compilePipeOutput(t, entry.text, entry.dir, nil)
 		after := compilePipeOutput(t, rewritten, entry.dir, transform)
-		if before.js != "" && before.goMain != "" {
-			result.emitted++
+		for key, artifact := range before {
+			if result.status[key] == nil {
+				result.status[key] = map[string]int{}
+			}
+			result.status[key][artifact.Status]++
+			if artifact.Status == pipeEmitted && after[key].Status == pipeEmitted && key != "js/check" && key != "go/check" {
+				result.compared[key]++
+			}
+		}
+		if before["js/entry"].Status == pipeEmitted && before["go/build"].Status == pipeEmitted {
+			result.compared["both"]++
 		}
 		if !reflect.DeepEqual(before, after) {
 			result.mismatches = append(result.mismatches, entry.name)
@@ -403,12 +511,59 @@ func safeParse(source string) (program *Program, diagnostics []Diagnostic) {
 func TestPipeFormCompilesToTheSameOutputAsNestedCalls(t *testing.T) {
 	corpus := pipeCorpus(t)
 	result := runPipeDifferential(t, corpus, nil)
-	t.Logf("%d corpus programs, %d rewritten, %d calls piped, %d emitted on both targets", len(corpus), result.programs, result.calls, result.emitted)
-	if result.programs < 200 || result.calls < 500 || result.emitted < 50 {
-		t.Fatalf("corpus too small to prove equivalence: %d programs, %d calls, %d emitted", result.programs, result.calls, result.emitted)
+	t.Logf("%d corpus programs, %d rewritten, %d calls piped, %d emitted on both targets (JS entry and Go build)%s", len(corpus), result.programs, result.calls, result.both(), result.report())
+	if result.programs < 200 || result.calls < 500 || result.both() < 50 {
+		t.Fatalf("corpus too small to prove equivalence: %d programs, %d calls, %d emitted on both targets", result.programs, result.calls, result.both())
+	}
+	// Every compared artifact must be exercised, or its claim is empty.
+	for _, key := range []string{"js/entry", "js/entry.d.mts", "js/library", "js/library.d.mts", "js/tests", "js/tests.d.mts", "go/build", "go/test"} {
+		if result.compared[key] < pipeMinimumCompared[key] {
+			t.Fatalf("only %d programs compared %s, want at least %d", result.compared[key], key, pipeMinimumCompared[key])
+		}
 	}
 	if len(result.mismatches) > 0 {
 		t.Fatalf("%d programs compile differently in pipe form: %v", len(result.mismatches), result.mismatches[:min(len(result.mismatches), 10)])
+	}
+}
+
+// pipeMinimumCompared is the least number of programs whose emitted text must
+// be compared per artifact. The floors sit below the counts the corpus reaches
+// today (see the test log) so that a corpus change does not trip them, and
+// above zero so that a mode silently dropping out of the comparison does.
+var pipeMinimumCompared = map[string]int{
+	"js/entry": 80, "js/entry.d.mts": 80, "js/library": 100, "js/library.d.mts": 100,
+	"js/tests": 5, "js/tests.d.mts": 5, "go/build": 100, "go/test": 5,
+}
+
+// The statuses the differential records stay distinct: a rejected program, a
+// program with no entry or no tests, and an emitted one are not interchangeable.
+func TestPipeDifferentialRecordsPerTargetStatus(t *testing.T) {
+	status := func(source string) pipeOutput { return compilePipeOutput(t, source, ".", nil) }
+	want := func(out pipeOutput, key, status string) {
+		t.Helper()
+		if got := out[key].Status; got != status {
+			t.Errorf("%s = %q, want %q", key, got, status)
+		}
+	}
+	rejected := status("fn bad() -> string { 1 }\n")
+	want(rejected, "js/check", pipeRejected)
+	want(rejected, "go/check", pipeRejected)
+	if got := rejected["js/check"].Codes; len(got) == 0 {
+		t.Error("a rejected program records no diagnostic codes")
+	}
+	if _, ok := rejected["js/library"]; ok {
+		t.Error("a rejected program records an emission")
+	}
+	library := status("fn shout(text: string) -> string { text + \"!\" }\n")
+	want(library, "js/entry", pipeNoEntry)
+	want(library, "go/build", pipeNoEntry)
+	want(library, "js/library", pipeEmitted)
+	want(library, "js/library.d.mts", pipeEmitted)
+	want(library, "js/tests", pipeNoTests)
+	want(library, "go/test", pipeNoTests)
+	full := status("effect fn main() -> string { \"ok\" }\neffect fn test_ok() -> void raises { AssertionFailed } uses { Assert } {\n    run Assert.check(true, \"holds\")\n}\n")
+	for _, key := range []string{"js/entry", "js/entry.d.mts", "js/library", "js/library.d.mts", "js/tests", "js/tests.d.mts", "go/build", "go/test"} {
+		want(full, key, pipeEmitted)
 	}
 }
 
@@ -438,7 +593,7 @@ func TestPipeDifferentialMaskIsAnchored(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		text := emittedProgram(t, compileAt(string(source), target, filepath.Join("..", "..", "examples"), nil))
+		text := emittedProgram(t, compileTransformed(string(source), target, filepath.Join("..", "..", "examples"), nil))
 		text = text[strings.IndexByte(text, '\n'):]
 		// The permitted mask is spelled out here, independently of the one
 		// under test, so widening that one is caught.

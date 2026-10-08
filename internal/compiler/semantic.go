@@ -2143,30 +2143,39 @@ func CompileFor(source, target string) *Result {
 	return CompileAt(source, target, ".")
 }
 func CompileAt(source, target, dir string) *Result {
-	return compileAt(source, target, dir, nil)
+	r, program := parseSource(source, target)
+	if program == nil {
+		return r
+	}
+	return checkParsed(r, program, dir, source)
 }
 
-// compileAt is CompileAt with a transform applied to the parsed program before
-// it is checked. Production callers pass none; tests use it to prove that a
-// parser-recorded annotation does not decide what compiles.
-func compileAt(source, target, dir string, transform func(*Program)) *Result {
+// parseSource is the parse phase of CompileAt. It returns the result and the
+// parsed program, or a nil program when the target is unsupported or the source
+// has syntax diagnostics: the result is then final.
+func parseSource(source, target string) (*Result, *Program) {
 	start := time.Now()
 	hash := sha256.Sum256([]byte(source))
 	r := &Result{SchemaVersion: SemanticSchemaVersion, Revision: hex.EncodeToString(hash[:]), Target: target, Diagnostics: []Diagnostic{}, Symbols: []Symbol{}, TypeProjectionBudget: maxTypeProjectionNodes, TypeProjectionLimits: defaultProjectionLimits, facts: map[*Expr]ExpressionFacts{}}
 	if target != "go" && target != "js" {
 		r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF110", Message: "unsupported target " + target})
-		return r
+		return r, nil
 	}
 	program, diagnostics := parse(source)
 	r.Timings.ParseMicros = time.Since(start).Microseconds()
 	if len(diagnostics) > 0 {
 		r.Diagnostics = diagnostics
-		r.Timings.TotalMicros = time.Since(start).Microseconds()
-		return r
+		r.Timings.TotalMicros = r.Timings.ParseMicros
+		return r, nil
 	}
-	if transform != nil {
-		transform(program)
-	}
+	return r, program
+}
+
+// checkParsed is the check phase of CompileAt: imports, checking and the
+// semantic projection of the program parseSource returned. source is the text
+// the program was parsed from.
+func checkParsed(r *Result, program *Program, dir, source string) *Result {
+	start := time.Now()
 	r.Program = program
 	r.lexical = captureOriginalSyntax(program)
 	r.loadImports(dir)
@@ -2176,7 +2185,7 @@ func compileAt(source, target, dir string, transform func(*Program)) *Result {
 	c.check()
 	c.publishTypeNodes()
 	r.Timings.CheckMicros = time.Since(checkStart).Microseconds()
-	r.Timings.TotalMicros = time.Since(start).Microseconds()
+	r.Timings.TotalMicros = r.Timings.ParseMicros + time.Since(start).Microseconds()
 	r.Checked = len(r.Diagnostics) == 0
 	return r
 }
