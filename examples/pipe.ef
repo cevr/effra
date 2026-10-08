@@ -1,0 +1,21 @@
+// The pipe operator: x |> f(args) is exactly f(x, args), read left to right.
+fn shout(text: string) -> string {
+    text + "!"
+}
+fn wrap(text: string, open: string, close: string) -> string {
+    open + text + close
+}
+effect fn greet(name: string) -> string {
+    "Hello, " + name
+}
+effect fn main() -> string {
+    // wrap(shout("ada"), open: "<", close: ">")
+    let framed = "ada"
+        |> shout()
+        |> wrap(open: "<", close: ">")
+    // run greet(framed): run takes the whole chain
+    let greeting = run framed |> greet()
+    // shout(run greet("lin")): parentheses pipe the result of a run
+    let second = (run "lin" |> greet()) |> shout()
+    greeting + " / " + second
+}

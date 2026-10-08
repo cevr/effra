@@ -161,7 +161,8 @@ func newPipeRewriter(source string, program *Program) *pipeRewriter {
 func (r *pipeRewriter) text(span Span) string { return r.source[span.Offset : span.Offset+span.Length] }
 
 func (r *pipeRewriter) rewritable(call *Expr) bool {
-	if len(call.Args) == 0 || !staticPath(call.Left) || strings.HasPrefix(r.text(call.Left.Extent), "(") {
+	// A call already written with a pipe has its subject before the callee.
+	if call.PipeSpan.Length > 0 || len(call.Args) == 0 || !staticPath(call.Left) || strings.HasPrefix(r.text(call.Left.Extent), "(") {
 		return false
 	}
 	lo := call.Left.Extent.Offset

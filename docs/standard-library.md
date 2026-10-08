@@ -16,6 +16,10 @@ Versioned library contracts participate in semantic revisions. Describe target s
 
 Small application binaries are an explicit north star. Bundled availability does not imply retention: select only reachable runtime modules, keep unused initialization and registration out, and lower any fluent calls as ordinary statically resolved operations. The [binary reachability contract](specs/binary-reachability.md) requires minimal/core/codec/HTTP receipts and separates compiler distribution size from application and external runtime costs.
 
+## Argument order
+
+Library functions put the value they transform first, so they read under the [pipe operator](specs/language-abstractions.md#pipe-operator): `Schedule.exponential(baseMs: 10) |> Schedule.jittered()` is `Schedule.jittered(Schedule.exponential(baseMs: 10))`. Required configuration uses named arguments in one call; optional or repeatable settings and composition are pipe steps over immutable values. This is a review checklist item for every bundled API, not a language rule. Parameter names are public API because callers label them.
+
 ## Capability parity map
 
 Reference families were inspected in the installed pinned Effect source, including its core, concurrency, data, scheduling and service modules. This map tracks behavioral families rather than reproducing every TypeScript overload.

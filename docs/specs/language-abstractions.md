@@ -110,6 +110,26 @@ Scoped acquisition must make acquisition plus finalizer registration cancellatio
 
 These are finite next implementation contracts, not claims that collections, effectful recovery, public acquisition or fallible shared providers already exist. Each needs its own source cases, negative tests, both-target matrix and upstream behavior mapping before closure.
 
+## Pipe operator
+
+Status: shipped notation (2026-10-08, lane P1). `x |> f(args)` is `f(x, args)`: the piped value is positional argument 1, so it always fills the first declared parameter. The rewrite happens in the parser, before binding or checking, so the checker and both emitters see an ordinary call and the output is byte-identical to the hand-nested program (the revision line aside). The [pipe example](../../examples/pipe.ef) shows each rule below.
+
+```
+Postfix  := Primary { "." Name | TypeArgs | "(" Args ")" | Fields | "|>" PipeCall }
+PipeCall := Name { "." Name } [ TypeArgs ] "(" [ Args ] ")"
+```
+
+- **Form.** The right side is a static name path followed by exactly one argument list. A bare `x |> f`, a parenthesised callee, a keyword form such as `run g()` and a literal are EF002; the bare case is anchored at `f` and says `write f()`. There is no placeholder, last-argument or bare-function form, so there is one canonical spelling and the arity is always visible.
+- **Associativity.** `x |> f() |> g(b)` is `g(f(x), b)`. After the call the chain continues on the result: `x |> f().len` is `f(x).len`. The `.` after `|>` starts a path, so `x |> M.timeout(ms: 5)` is an ordinary call to `M.timeout`, not the postfix `.timeout` intrinsic.
+- **Precedence.** `|>` is in the postfix chain with `.`, call and type application. `run` and `fork` take the whole chain: `run x |> f()` is `run f(x)`, and `(run x) |> f()` pipes the result. This matches the existing `run r.timeout(5)` reading and makes the intrinsic-to-pipe rewrite a local token substitution.
+- **Binary operators.** A pipe chain beside `+` or `==` without parentheses is an EF002 at the `|>`: `a + b |> f()` would silently read `a + f(b)` here but `f(a + b)` in Elixir and Gleam. Write `(a |> f()) + b` or `a + (b |> f())`.
+- **Named arguments.** Positional arguments precede labels, so prepending the piped value is always well formed: `x |> wrap(open: "<", close: ">")` is `wrap(x, open: "<", close: ">")`. Labelling the first parameter is EF106 "the piped value already binds parameter text; remove label text". A callee without parameters is EF106 at the `|>`. A recipe piped into an ordinary parameter, as in `run load() |> shout()`, adds the hint that `|>` binds inside `run`.
+- **Evaluation.** The callee evaluates nothing and the piped value is written first, so source order is evaluation order and no temporary or closure exists.
+- **Tooling.** `Expr.PipeSpan` records the `|>` token for diagnostics, which read it for wording and anchors only; acceptance, checking and emission never do, and a test pins that by erasing it. The formatter keeps the author's breaks, indents each line-leading `|>` one continuation level and spaces the operator.
+- **Library convention: the subject comes first.** Bundled and user APIs that are meant to be piped put the value they transform in the first parameter, as Elixir, Gleam and Effect's data-first forms do. No language rule enforces it. Parameter names remain public API through labels.
+
+Construct status: pipe | n/a | ADMITTED (notation exception, the second member after JSX). It desugars one-to-one at parse time into the ordinary call the author wrote and adds no checking, typing, evaluation order or runtime behavior. It does not shrink `.catch`, `.provide` or `.timeout` by itself: each of those needs checker prerequisites that are not notation. The equivalence gate rewrites every static-callee call with a positional first argument in the `.ef` files and the Go-test programs into pipe form and compares Go and JS output.
+
 ## Performance and restraint
 
 Measure canonical checking, import reuse, emission and generated runtime separately. Compare enum representations on matched codec/server workloads before changing them; an interface representation is not automatically slower and a flattened variant struct can waste space. Keep raw losing results. Avoid renaming established syntax merely to anticipate an unused feature; introduce data-method syntax only with real callers.

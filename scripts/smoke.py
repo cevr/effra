@@ -22,6 +22,8 @@ assert not invalid_report["checked"] and not invalid_report["lintAvailable"] and
 assert run("run", "examples/main.ef").stdout == "Hello, Ada\nUnknown user\n"
 assert run("run", "examples/main.ef", "--target", "js").stdout == "Hello, Ada\nUnknown user\n"
 for target in ("go", "js"):
+    assert run("run", "examples/pipe.ef", "--target", target).stdout == "Hello, <ada!> / Hello, lin!\n"
+for target in ("go", "js"):
     assert run("run", "examples/data.ef", "--target", target).stdout == "running 42\n"
 data_inspection = json.loads(run("inspect", "examples/data.ef", "State").stdout)
 assert data_inspection["declaration"]["kind"] == "enum"

@@ -27,3 +27,4 @@ internal/compiler/bundled/data/option.ef
 internal/compiler/bundled/data/result.ef
 examples/generic-users.ef
 examples/generic-settings.ef
+examples/pipe.ef
