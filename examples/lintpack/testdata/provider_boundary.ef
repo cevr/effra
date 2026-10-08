@@ -1,0 +1,46 @@
+service Mail {
+    effect fn send(to: string) -> void
+}
+
+impl LiveMail for Mail {
+    effect fn send(to: string) -> void {
+        void
+    }
+}
+
+impl FakeMail for Mail {
+    effect fn send(to: string) -> void {
+        void
+    }
+}
+
+layer Production {
+    Mail = LiveMail
+}
+
+effect fn notify(to: string) -> void uses { Mail } {
+    run Mail.send(to)
+}
+
+// LiveMail is mentioned in this comment and string, but not provided here.
+effect fn shadowed() -> string {
+    let LiveMail = FakeMail
+    run notify("LiveMail").provide<Mail>(LiveMail)
+    "LiveMail"
+}
+
+effect fn aliased() -> void {
+    let mailer = LiveMail
+    run notify("b").provide<Mail>(mailer)
+}
+
+effect fn layered() -> void {
+    run notify("c").provide(Production)
+}
+
+effect fn main() -> void {
+    run notify("d").provide<Mail>(LiveMail)
+    run shadowed()
+    run aliased()
+    run layered()
+}

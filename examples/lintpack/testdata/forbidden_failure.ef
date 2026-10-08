@@ -1,0 +1,68 @@
+import go strconv "strconv"
+
+error Denied
+
+record Audit {
+    Denied: string
+}
+
+service Access {
+    effect fn check(id: string) -> void raises { Denied }
+}
+
+impl DemoAccess for Access {
+    effect fn check(id: string) -> void raises { Denied } {
+        if id == "blocked" {
+            fail Denied
+        } else {
+            void
+        }
+    }
+}
+
+effect fn helper(id: string) -> void raises { Denied } uses { Access } {
+    run Access.check(id)
+}
+
+effect fn forwards(id: string) -> void raises { Denied } uses { Access } {
+    run helper(id)
+}
+
+effect fn recovers(id: string) -> void uses { Access } {
+    run helper(id).catch<Denied>(void)
+}
+
+effect fn declaresOnly() -> void raises { Denied } {
+    void
+}
+
+// Denied appears in this comment, a string, a local and a record field.
+effect fn mentions() -> string {
+    let Denied = "Denied"
+    let audit = Audit {
+        Denied: Denied
+    }
+    audit.Denied
+}
+
+effect fn slow() -> string {
+    "late"
+}
+
+effect fn waits() -> string raises { Timeout } uses { Scheduler } {
+    run slow().timeout(1)
+}
+
+effect fn parses() -> bool raises { GoError } uses { Foreign } {
+    run strconv.ParseBool("maybe").orFail()
+}
+
+effect fn main() -> void {
+    run forwards("a").catch<Denied>(void).provide<Access>(DemoAccess)
+    run recovers("b").provide<Access>(DemoAccess)
+    run declaresOnly().catch<Denied>(void)
+    let text = run mentions()
+    let late = run waits().catch<Timeout>("timed out").provide<Scheduler>(LiveScheduler)
+    let parsed = run parses().catch<GoError>(false).provide<Foreign>(Host)
+    run Console.log(text + late).provide<Console>(Stdout)
+}

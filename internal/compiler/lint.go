@@ -1,8 +1,11 @@
 package compiler
 
 import (
+	"fmt"
 	"slices"
 	"strings"
+
+	lintsdk "effra.local/prototype/lint"
 )
 
 // Lint is deliberately separate from admission: optional advice cannot weaken
@@ -54,10 +57,6 @@ const (
 	suppressionRule   = "invalid-suppression"
 )
 
-// isSuppressionComment is the single directive policy shared by lint and the
-// formatter. Only a line comment ends at its physical line, so only a line
-// comment can name the following line; a block comment that spells a
-// directive is ordinary comment text wherever layout places it.
 func isSuppressionComment(comment Comment) bool {
 	return !comment.Block && strings.HasPrefix(strings.TrimLeft(comment.Text, " \t"), suppressionPrefix)
 }
@@ -66,9 +65,67 @@ func LintRules() []LintRule {
 	return []LintRule{
 		{"EFL001", "unused-recipe", "warning", "A local lazy effect is never referenced. Construction does not execute it. Bind to _ to acknowledge deliberate omission."},
 		{"EFL002", "redundant-provision", "suggestion", "The receiver does not require the provided service. A stable provision boundary may be intentional."},
-		{"EFL003", "unused-go-import", "suggestion", "No imported function is referenced. The import still initializes its Go package; remove it only if that initialization is unneeded."},
+		{"EFL003", "unused-go-import", "suggestion", "No function of a Go import is referenced. The import still initializes its Go package; remove it only if that initialization is unneeded."},
 		{"EFL004", suppressionRule, "error", "A next-line lint suppression must name a known rule, explain the exception, and suppress advice on the following source line."},
 	}
+}
+
+// Built-in rules expressed over the public fact model. Their checks read
+// resolved provision and import facts exactly as a rule pack would; codes,
+// messages, spans and severities are unchanged. unused-recipe remains on the
+// scoped walk below: its binding facts are unavailable when lexical facts
+// exhaust their budget, and silently dropping that advice would change
+// built-in behavior.
+var (
+	redundantProvisionRule = &lintsdk.Rule{
+		Name:     "redundant-provision",
+		Requires: []lintsdk.Family{lintsdk.FamilyDeclarations, lintsdk.FamilyProvisions},
+		Check: func(pass *lintsdk.Pass) error {
+			for _, provision := range pass.Snapshot.Provisions {
+				if provision.Kind == lintsdk.ProvisionDirect && !slices.Contains(provision.Receiver, provision.Service) {
+					pass.Reportf(provision.Span, "receiver does not require %s", pass.Snapshot.Service(provision.Service).Name)
+				}
+			}
+			return nil
+		},
+	}
+	unusedGoImportRule = &lintsdk.Rule{
+		Name:     "unused-go-import",
+		Requires: []lintsdk.Family{lintsdk.FamilyImports},
+		Check: func(pass *lintsdk.Pass) error {
+			for _, imported := range pass.Snapshot.Imports {
+				if !imported.Used {
+					pass.Reportf(imported.Span, "no function of Go import %s is referenced; the import still initializes its Go package, so remove it only if that initialization is unneeded", imported.Alias)
+				}
+			}
+			return nil
+		},
+	}
+)
+
+// lintRunnerCode is the reserved lint-runner finding: a built-in rule that
+// could not complete makes lint fail rather than look clean.
+const lintRunnerCode = "EFL000"
+
+// LintRegistry is the custom-lint rule registry: every built-in rule plus
+// the explicitly selected pack manifests. Building or inspecting it never
+// executes pack code.
+func LintRegistry(packs ...lintsdk.Manifest) (*lintsdk.Registry, error) {
+	var builtins []lintsdk.BuiltinRule
+	for _, rule := range LintRules() {
+		severity := lintsdk.Severity(rule.Severity)
+		if rule.Severity == "suggestion" {
+			severity = lintsdk.SeverityHint
+		}
+		builtin := lintsdk.BuiltinRule{Name: rule.Name, Code: rule.Code, Description: rule.Description, DefaultSeverity: severity, Fixed: rule.Name == suppressionRule}
+		for _, checked := range []*lintsdk.Rule{redundantProvisionRule, unusedGoImportRule} {
+			if checked.Name == rule.Name {
+				builtin.Requires = checked.Requires
+			}
+		}
+		builtins = append(builtins, builtin)
+	}
+	return lintsdk.NewRegistry(builtins, packs...)
 }
 
 func suppressionDiagnostic(message string, span Span) LintDiagnostic {
@@ -133,6 +190,15 @@ func suppressionFor(suppressions map[suppressionKey][]*lintSuppression, revision
 	}
 	return matched
 }
+func (r *Result) applyBuiltinRule(rule *lintsdk.Rule, snapshot *lintsdk.Snapshot) ([]lintsdk.Finding, error) {
+	for _, family := range rule.Requires {
+		if reason := snapshot.UnavailableReason(family); reason != "" {
+			return nil, fmt.Errorf("%s facts unavailable: %s", family, reason)
+		}
+	}
+	return lintsdk.Apply(rule, snapshot, lintsdk.Options{})
+}
+
 func (r *Result) Lint(strict bool) LintResult {
 	out := LintResult{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Checked: r.Checked, LintPassed: r.Checked, Strict: strict, Diagnostics: r.Diagnostics, LintDiagnostics: []LintDiagnostic{}}
 	out.ProducerMetadata = r.producerMetadata
@@ -191,9 +257,6 @@ func (r *Result) Lint(strict bool) LintResult {
 		if e.Kind == "name" && e.binding != nil {
 			used[e.binding] = true
 		}
-		if e.Kind == "provide" && !slices.Contains(e.Left.Type.Services, e.Name) {
-			add(1, "receiver does not require "+e.Name, e.Span)
-		}
 		forEachExprChild(e, expr)
 		for _, arm := range e.Arms {
 			block(arm.Body)
@@ -226,9 +289,17 @@ func (r *Result) Lint(strict bool) LintResult {
 			add(0, "lazy recipe "+s.Name+" is never referenced", s.Span)
 		}
 	}
-	for _, imp := range r.Program.Imports {
-		if !r.Program.UsedImports[imp.Alias] {
-			add(2, "no function of Go import "+imp.Alias+" is referenced; the import still initializes its Go package, so remove it only if that initialization is unneeded", imp.Span)
+	snapshot := r.LintFacts(lintsdk.FamilyDeclarations, lintsdk.FamilyProvisions, lintsdk.FamilyImports)
+	for _, rule := range []*lintsdk.Rule{redundantProvisionRule, unusedGoImportRule} {
+		index := slices.IndexFunc(rules, func(builtin LintRule) bool { return builtin.Name == rule.Name })
+		findings, err := r.applyBuiltinRule(rule, snapshot)
+		if err != nil {
+			out.LintDiagnostics = append(out.LintDiagnostics, LintDiagnostic{Code: lintRunnerCode, Rule: "lint-runner", Severity: "error", Message: "built-in lint rule " + rule.Name + " did not complete: " + err.Error()})
+			out.Errors++
+			continue
+		}
+		for _, finding := range findings {
+			add(index, finding.Message, Span{finding.Span.Offset, finding.Span.Length, finding.Span.Line, finding.Span.Column})
 		}
 	}
 	appendUnused()

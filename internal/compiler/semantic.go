@@ -273,6 +273,7 @@ type Result struct {
 	TypeProjectionError    string                 `json:"typeProjectionError,omitempty"`
 	Timings                Timings                `json:"timings"`
 	Program                *Program               `json:"-"`
+	sourceBytes            int
 	facts                  map[*Expr]ExpressionFacts
 	lexical                *lexicalFacts
 	canonical              *canonicalSnapshot
@@ -2158,7 +2159,7 @@ func CompileAt(source, target, dir string) *Result {
 func parseSource(source, target string) (*Result, *Program) {
 	start := time.Now()
 	hash := sha256.Sum256([]byte(source))
-	r := &Result{SchemaVersion: SemanticSchemaVersion, Revision: hex.EncodeToString(hash[:]), Target: target, Diagnostics: []Diagnostic{}, Symbols: []Symbol{}, TypeProjectionBudget: maxTypeProjectionNodes, TypeProjectionLimits: defaultProjectionLimits, facts: map[*Expr]ExpressionFacts{}}
+	r := &Result{SchemaVersion: SemanticSchemaVersion, Revision: hex.EncodeToString(hash[:]), Target: target, Diagnostics: []Diagnostic{}, Symbols: []Symbol{}, TypeProjectionBudget: maxTypeProjectionNodes, TypeProjectionLimits: defaultProjectionLimits, facts: map[*Expr]ExpressionFacts{}, sourceBytes: len(source)}
 	if target != "go" && target != "js" {
 		r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF110", Message: "unsupported target " + target})
 		return r, nil
