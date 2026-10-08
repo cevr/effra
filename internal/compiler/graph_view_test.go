@@ -484,11 +484,20 @@ func TestGraphRequestRefusals(t *testing.T) {
 		{map[string]any{"focus": "x", "depth": float64(3000000000)}, GraphRefusalDepthLimit},
 		{map[string]any{"focus": "x", "depth": 1e300}, GraphRefusalDepthLimit},
 		{map[string]any{"focus": "x", "depth": json.Number("99999999999999999999")}, GraphRefusalDepthLimit},
+		{map[string]any{"focus": "x", "depth": json.Number("65.0")}, GraphRefusalDepthLimit},
 		{map[string]any{"focus": "x", "depth": math.Inf(1)}, GraphRefusalInvocation},
 		{map[string]any{"focus": "x", "depth": math.NaN()}, GraphRefusalInvocation},
 		{map[string]any{"focus": "x", "depth": -1e300}, GraphRefusalInvocation},
 		{map[string]any{"focus": "x", "depth": json.Number("2.5")}, GraphRefusalInvocation},
+		{map[string]any{"focus": "x", "depth": json.Number("1.00000000000000000000001")}, GraphRefusalInvocation},
+		{map[string]any{"focus": "x", "depth": json.Number("64.00000000000000000000001")}, GraphRefusalInvocation},
+		{map[string]any{"focus": "x", "depth": json.Number("1e-999")}, GraphRefusalInvocation},
+		{map[string]any{"focus": "x", "depth": json.Number("-1e-999")}, GraphRefusalInvocation},
 		{map[string]any{"focus": "x", "depth": json.Number("1e400")}, GraphRefusalInvocation},
+		{map[string]any{"focus": "x", "depth": json.Number("01")}, GraphRefusalInvocation},
+		{map[string]any{"focus": "x", "depth": json.Number("1.")}, GraphRefusalInvocation},
+		{map[string]any{"focus": "x", "depth": json.Number("1e2x")}, GraphRefusalInvocation},
+		{map[string]any{"focus": "x", "depth": json.Number("+1")}, GraphRefusalInvocation},
 		{map[string]any{"focus": ""}, GraphRefusalInvocation},
 		{map[string]any{"edgeKinds": []any{"retains"}}, GraphRefusalEdgeKind},
 		{map[string]any{"edgeKinds": []any{}}, GraphRefusalInvocation},
@@ -532,6 +541,27 @@ func TestGraphRequestRefusals(t *testing.T) {
 		request, err := ParseGraphRequest(map[string]any{"focus": "x", "depth": depth})
 		if err != nil || request.Depth == nil || *request.Depth != 2 {
 			t.Fatalf("integer-valued depth %#v was not admitted as 2: %v", depth, err)
+		}
+	}
+	for _, test := range []struct {
+		raw  string
+		want int
+	}{
+		{raw: "1.0", want: 1},
+		{raw: "1e0", want: 1},
+		{raw: "64.0", want: 64},
+		{raw: "-0", want: 0},
+		{raw: "-0.0", want: 0},
+		{raw: "0e999999999999999999999999", want: 0},
+		{raw: "1.2300e2", want: 123},
+	} {
+		request, err := ParseGraphRequest(map[string]any{"focus": "x", "depth": json.Number(test.raw)})
+		if test.want > defaultGraphViewLimits.Depth {
+			requireGraphRefusal(t, err, GraphRefusalDepthLimit)
+			continue
+		}
+		if err != nil || request.Depth == nil || *request.Depth != test.want {
+			t.Fatalf("exact integer-valued depth %q was not admitted as %d: %v", test.raw, test.want, err)
 		}
 	}
 	unchecked := CompileAt(`fn nope() -> missing {}`, "go", ".")

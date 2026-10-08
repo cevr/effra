@@ -413,6 +413,65 @@ func TestGraphViewRefusalsAgreeAcrossCLIAndMCP(t *testing.T) {
 	}
 }
 
+// Raw CLI flag text and framed MCP JSON must share exact depth admission. The
+// cases exercise decimal/exponent spellings, negative zero, fractional tails,
+// underflow, and range errors at the public wire boundary.
+func TestGraphDepthExactAdmissionAcrossCLIAndMCP(t *testing.T) {
+	binary := buildTestCLI(t)
+	path, counter := graphProcessShims(t)
+	root := t.TempDir()
+	copyExample(t, root, "layers.ef")
+	cases := []struct {
+		name  string
+		raw   string
+		value any
+		code  string
+		valid bool
+	}{
+		{name: "zero", raw: "0", value: 0, valid: true},
+		{name: "negative-zero", raw: "-0", value: json.Number("-0"), valid: true},
+		{name: "decimal-zero", raw: "1.0", value: json.Number("1.0"), valid: true},
+		{name: "exponent-zero", raw: "1e0", value: json.Number("1e0"), valid: true},
+		{name: "fractional-tail", raw: "1.00000000000000000000001", value: json.Number("1.00000000000000000000001"), code: compiler.GraphRefusalInvocation},
+		{name: "tiny-positive", raw: "1e-999", value: json.Number("1e-999"), code: compiler.GraphRefusalInvocation},
+		{name: "tiny-negative", raw: "-1e-999", value: json.Number("-1e-999"), code: compiler.GraphRefusalInvocation},
+		{name: "near-limit-fraction", raw: "64.00000000000000000000001", value: json.Number("64.00000000000000000000001"), code: compiler.GraphRefusalInvocation},
+		{name: "exact-over-limit", raw: "65.0", value: json.Number("65.0"), code: compiler.GraphRefusalDepthLimit},
+		{name: "range-error", raw: "1e400", value: json.Number("1e400"), code: compiler.GraphRefusalInvocation},
+	}
+	calls := make([]map[string]any, 0, len(cases))
+	for _, test := range cases {
+		calls = append(calls, map[string]any{"name": "project.graph", "arguments": map[string]any{
+			"file": "layers.ef", "format": "json", "focus": "function:main", "depth": test.value,
+		}})
+	}
+	responses := runGraphMCP(t, binary, path, root, calls)
+	for index, test := range cases {
+		stdout, stderr, exit := runTestCLIWithPath(t, binary, path, root, "graph", filepath.Join(root, "layers.ef"), "--format", "json", "--focus", "function:main", "--depth", test.raw)
+		result := responses[index]["result"].(map[string]any)
+		if test.valid {
+			if exit != 0 {
+				t.Fatalf("%s CLI refused: %d %s", test.name, exit, stderr)
+			}
+			if result["isError"] != false || !sameJSONValue(readProcessJSON(t, stdout), result["structuredContent"]) {
+				t.Fatalf("%s CLI/MCP valid views differ: CLI=%s MCP=%v", test.name, stdout, result)
+			}
+			continue
+		}
+		message := strings.TrimSpace(string(stderr))
+		if exit != 2 || len(stdout) != 0 || !strings.HasPrefix(message, test.code+": ") {
+			t.Fatalf("%s CLI: exit=%d stdout=%q stderr=%q, want %s", test.name, exit, stdout, stderr, test.code)
+		}
+		text := result["content"].([]any)[0].(map[string]any)["text"]
+		if result["isError"] != true || text != message || result["structuredContent"] != nil {
+			t.Fatalf("%s MCP refusal differs: %v, want %q", test.name, result, message)
+		}
+	}
+	if _, err := os.Stat(counter); !os.IsNotExist(err) {
+		t.Fatalf("graph depth requests invoked a toolchain or runtime")
+	}
+}
+
 // The public graph process must carry checked derived codec call facts through
 // both transports. This also verifies that selected edges retain their node
 // contracts and source spans after GraphView reference closure.

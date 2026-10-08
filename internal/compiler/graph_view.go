@@ -537,10 +537,13 @@ func DecodeGraphJSON(raw []byte) (any, error) {
 }
 
 // graphDepth admits a depth however its transport decoded it: an int from a
-// Go caller, a float64 from JSON, or a json.Number from DecodeGraphJSON. It rejects a
-// non-finite, non-integral or negative value and returns the integer value
-// without narrowing, so the hop limit is checked before conversion and an
-// excessive depth gets the same refusal from every transport.
+// Go caller, a float64 from JSON, or a json.Number from DecodeGraphJSON. A
+// json.Number is checked as the original decimal token before ParseFloat is
+// allowed to round it; otherwise a tiny fraction could become zero or a
+// fractional tail could become an integer. It rejects a non-finite,
+// non-integral or negative value and returns the integer value without
+// narrowing, so the hop limit is checked before conversion and an excessive
+// depth gets the same refusal from every transport.
 func graphDepth(value any) (float64, bool) {
 	var depth float64
 	switch value := value.(type) {
@@ -549,6 +552,9 @@ func graphDepth(value any) (float64, bool) {
 	case float64:
 		depth = value
 	case json.Number:
+		if !graphJSONNumberIsInteger(string(value)) {
+			return 0, false
+		}
 		parsed, err := strconv.ParseFloat(string(value), 64)
 		if err != nil {
 			return 0, false
@@ -561,6 +567,126 @@ func graphDepth(value any) (float64, bool) {
 		return 0, false
 	}
 	return depth, true
+}
+
+// graphJSONNumberIsInteger answers the exact question needed by graph depth
+// admission without constructing a big integer or expanding an exponent. It
+// accepts JSON's decimal/exponent spellings when their mathematical value is
+// an integer, including 1.0 and 1e0. The exponent magnitude is saturated at
+// the input length; that is enough to compare decimal places and keeps work
+// bounded by the supplied token.
+func graphJSONNumberIsInteger(raw string) bool {
+	if raw == "" {
+		return false
+	}
+	i := 0
+	if raw[i] == '-' {
+		i++
+		if i == len(raw) {
+			return false
+		}
+	}
+	integerStart := i
+	switch {
+	case raw[i] == '0':
+		i++
+		if i < len(raw) && raw[i] >= '0' && raw[i] <= '9' {
+			return false
+		}
+	case raw[i] >= '1' && raw[i] <= '9':
+		for i < len(raw) && raw[i] >= '0' && raw[i] <= '9' {
+			i++
+		}
+	default:
+		return false
+	}
+	if i == integerStart {
+		return false
+	}
+	if i < len(raw) && raw[i] == '.' {
+		i++
+		fractionStart := i
+		for i < len(raw) && raw[i] >= '0' && raw[i] <= '9' {
+			i++
+		}
+		if i == fractionStart {
+			return false
+		}
+	}
+	mantissaEnd := i
+	if i < len(raw) && (raw[i] == 'e' || raw[i] == 'E') {
+		i++
+		negativeExponent := false
+		if i < len(raw) && (raw[i] == '+' || raw[i] == '-') {
+			negativeExponent = raw[i] == '-'
+			i++
+		}
+		exponentStart := i
+		for i < len(raw) && raw[i] >= '0' && raw[i] <= '9' {
+			i++
+		}
+		if i == exponentStart {
+			return false
+		}
+		if i != len(raw) {
+			return false
+		}
+		exponent := graphSaturatedExponent(raw[exponentStart:i], len(raw))
+		if negativeExponent {
+			exponent = -exponent
+		}
+		return graphJSONMantissaIsInteger(raw, integerStart, mantissaEnd, exponent)
+	}
+	if i != len(raw) {
+		return false
+	}
+	return graphJSONMantissaIsInteger(raw, integerStart, mantissaEnd, 0)
+}
+
+func graphSaturatedExponent(raw string, limit int) int {
+	magnitude := 0
+	for i := 0; i < len(raw); i++ {
+		digit := int(raw[i] - '0')
+		if magnitude > (limit-digit)/10 {
+			return limit
+		}
+		magnitude = magnitude*10 + digit
+		if magnitude > limit {
+			return limit
+		}
+	}
+	return magnitude
+}
+
+func graphJSONMantissaIsInteger(raw string, start, end, exponent int) bool {
+	allZero := true
+	trailingZeros := 0
+	for i := start; i < end; i++ {
+		if raw[i] != '.' && raw[i] != '0' {
+			allZero = false
+		}
+	}
+	if allZero {
+		return true
+	}
+	for i := end - 1; i >= start; i-- {
+		if raw[i] == '.' {
+			continue
+		}
+		if raw[i] != '0' {
+			break
+		}
+		trailingZeros++
+	}
+	fractionDigits := 0
+	for i := start; i < end; i++ {
+		if raw[i] == '.' {
+			fractionDigits = end - i - 1
+			break
+		}
+	}
+	scale := exponent - fractionDigits
+	return scale >= 0 || trailingZeros >= -scale
 }
 
 func (request GraphRequest) viewLimits(r *Result) GraphViewLimits {
