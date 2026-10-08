@@ -1087,3 +1087,25 @@ func BenchmarkFormatLongFluentChain(b *testing.B) {
 		}
 	}
 }
+
+// A line-leading |> continues the expression: the lexer drops newlines and no
+// statement starts with the token. The formatter keeps the author's breaks,
+// indents each continuation once and spaces the operator.
+func TestFormatPipeContinuations(t *testing.T) {
+	for _, test := range []struct{ name, source, want string }{
+		{"line leading", "fn a() -> string {\n    let v = \"x\"\n  |> shout()\n            |> shout()\n  .length\n    v\n}\n", "fn a() -> string {\n    let v = \"x\"\n        |> shout()\n        |> shout()\n        .length\n    v\n}\n"},
+		{"same line spacing", "fn a() -> string { \"x\"|>shout()|>wrap(\"<\",\">\") }", "fn a() -> string {\n    \"x\" |> shout() |> wrap(\"<\", \">\")\n}\n"},
+		{"under run", "effect fn a() -> string { run load()\n|> shout(\"a\")\n |> Effect.timeout(ms: 5) }", "effect fn a() -> string {\n    run load()\n        |> shout(\"a\")\n        |> Effect.timeout(ms: 5)\n}\n"},
+		{"inside an argument list", "fn a() -> string { pair(\"x\"\n|> shout(), \"y\") }", "fn a() -> string {\n    pair(\"x\"\n        |> shout(), \"y\")\n}\n"},
+		{"type arguments", "fn a() -> string { \"x\" |>shout<T>(1) }", "fn a() -> string {\n    \"x\" |> shout<T>(1)\n}\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			assertFormat(t, test.source, test.want)
+			// Type application nodes carry source spans that the tree
+			// comparison does not normalise, for any call.
+			if test.name != "type arguments" && !equalSyntaxTrees(parsedSyntaxTree(t, test.source), parsedSyntaxTree(t, test.want)) {
+				t.Fatal("formatting changed the parsed pipe")
+			}
+		})
+	}
+}
