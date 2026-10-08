@@ -6,6 +6,13 @@ if ! command -v tsc >/dev/null 2>&1; then
 else
   echo "typescript: strict ($(command -v tsc))"
 fi
+# Bytecode is a build product. A tracked one is stale on the next Python.
+tracked_pyc=$(git ls-files '*.pyc')
+if [ -n "$tracked_pyc" ]; then
+  echo "tracked Python bytecode (git rm it; __pycache__/ is ignored):" >&2
+  echo "$tracked_pyc" >&2
+  exit 1
+fi
 python3 scripts/wayfinder.py check
 python3 -B scripts/import_effect_conformance.py
 python3 -B scripts/test_import_effect_conformance.py
