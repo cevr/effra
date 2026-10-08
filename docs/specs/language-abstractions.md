@@ -18,13 +18,56 @@ Add ordinary typed function values and explicit finite row parameters together. 
 
 ## Construct status
 
-This summarizes the current application of the [construct admission rule](../design.md#language-design-principles), from the 2026-10-07 construct audit, its independent review and the machine admission probes. It lists every audited construct by verdict; a construct not listed has no verdict yet and must pass the rule before it is admitted. A construct stays only where it makes bad code unrepresentable and a library cannot, and compiler-special behavior is always spelled as a construct, never hidden in a library API. A verdict changes only when the evidence named for it is shown.
+This is the current application of the [construct admission rule](../design.md#language-design-principles), from the 2026-10-07 construct audit (rows 1-41, numbered below), its independent review, the machine admission probes and the owner decisions recorded after the audit. It lists every audit row with its current verdict; a construct not listed has no verdict yet and must pass the rule before it is admitted. A construct stays only where it makes bad code unrepresentable and a library cannot, and compiler-special behavior is always spelled as a construct, never hidden in a library API. A verdict changes only when the evidence named for it is shown. The SHRINK rows, and `.catch`, `.recover` and `.provide` until their replacement mechanisms exist, describe current compiler debt being deleted, not the target design.
 
-- **KEEP.** `effect fn` and `run`, with `raises` and `uses` rows: a library cannot police its callers' declarations, and `run` is the single sequencing form, adding only row union and owner materialisation. Match exhaustiveness, including the catch-all arm refusal (EF118). `service` and `impl`. The ownership checker (EF123), since only the checker sees value flow. The layer graph checks (EF130–EF134): rows cannot tell a shared node from duplicate nodes, and they drop edges and replacement provenance. Also kept: `fail`, `scope` regions, total `if`, type and row parameters with callable variance, the bare-recipe refusal (EF105), `import`/`import go` with `Foreign` as an ordinary service, portable and mutable payload admission, the reasoned suppression directive with `EFL004` (the rule-2 justifier), the absence of nil/null with initialized fields, and `opaque` as a modifier on record and enum declarations, not a separate form. The `machine` declaration, with a narrow scope (decided 2026-10-07): it binds `initial`, `step` and optional `enter` and `complete` to ordinary functions and owns the static `Stay` same-tag check, which needs compiler knowledge ([state machine admission gate](state-machines.md#construct-admission-gate)). Codec `derive`: compiler-fulfilled structural derivation, requested as `derive name = Json.codec<T>(maxBodyBytes: N, maxDepth: M)` with required bounds. JSX notation: KEEP under the [notation exception](../design.md#language-design-principles), as one-to-one sugar over bundled library calls.
-- **LIBRARY.** `.orFail()`, `Option`, budget values (see [justify, don't ban](../design.md#language-design-principles)), `test_` discovery as a tooling convention. `acquire` is a LIBRARY goal whose admission is UNDECIDED until a release-authority protocol (adoption or consumption of the release obligation) exists. Infrastructure `output {}` is a LIBRARY goal; its syntax is unadmitted.
-- **SHRINK.** Name-specific checker branches become general rules: the `Files.openRead`/`LiveFiles` ownership refinement becomes ownership carried by operation results, the `Http.serve` callback policy becomes general callback-row absorption, and reserved builtin names become qualified declaration metadata. Each branch is deleted once paired evidence passes through the general rule. Duplicate spellings shrink too: the `struct` synonym for `record` and parenthesised variant payloads.
-- **LIBRARY after prerequisites.** `.catch`, `.recover` and `.provide` (service and layer) become bundled library functions, with the fluent spelling equal to a direct call, once two general mechanisms exist: finite row membership and difference, and nameable nominal failure type parameters. They must also keep the handler, provider and build owner relations they materialise today. Until then they stay intrinsic.
-- **UNDECIDED.** `.timeout` and `fork` materialise owner regions (timeout-owned results, parent handle versus child result, child-failure charging); a library version must pass the existing paired borrowed/acquired ownership controls through a general higher-order owner contract. Also undecided: layer `start` and parameterised layers, `Actor<P>` operation references, `?`, service roles, module constants and type aliases, general transactions, local mutation and loops, and generative identities with single-use authority.
+Where a later decision overrides the audit, the later decision wins: `machine` (row 28, audit UNDECIDED leaning SHRINK) and codec `derive` (row 30, audit SHRINK to a generic call) are KEEP, per the visible-construct refinement and the machine admission decision. JSX notation is not an audit row and is not KEEP, which means admitted under the unrepresentability rule; it is the first member of the [notation exception](../design.md#language-design-principles).
+
+| Row | Construct | Verdict | Note |
+| --- | --- | --- | --- |
+| 1 | `effect fn` versus `fn`, purity (EF105, EF106) | KEEP | needs effect typing |
+| 2 | `run` | KEEP | the single sequencing form; adds only row union and owner materialisation |
+| 3 | `raises` and `uses` rows (EF107, EF108), exported upper bounds | KEEP | a library cannot police callers' declarations |
+| 4 | type and row parameters, `callable` constraints, callable variance | KEEP | |
+| 5 | `fail E` | KEEP | generalisation over nominal failure parameters is a prerequisite below |
+| 6 | `error`, `record`, `enum`, generic data, `_tag` (EF120, EF114) | KEEP checks; SHRINK spellings | the `struct` synonym and parenthesised variant payloads go |
+| 7 | `match` coverage (EF117), product and or-patterns (EF121, EF137) | KEEP | |
+| 8 | catch-all arm refusal (EF118) | KEEP | closed interpretation, not a budget |
+| 9 | total `if` | KEEP | |
+| 10 | `scope { }` regions (EF123) | KEEP | |
+| 11 | `fork`, `.join`, `.interrupt`, `.cancel` | UNDECIDED | a library must keep parent-handle versus child-result owners and child-failure charging |
+| 12 | `.catch<E>`, planned `.recover<E>` | SHRINK | to library functions once finite row membership and difference, and nominal failure parameters, exist |
+| 13 | `.provide<S>(impl)` | SHRINK | as row 12, keeping provider owner relations |
+| 14 | `.provide(Layer)` | SHRINK | provision becomes a library operation once rows 12 and the build-owner contract land; the layer graph checker stays (row 19) |
+| 15 | `.timeout(ms)` | UNDECIDED | a library wrapper must pass the paired borrowed and acquired timeout controls |
+| 16 | `.orFail()` | LIBRARY | |
+| 17 | `service` | KEEP | |
+| 18 | `impl` | KEEP | revisit with checked closures |
+| 19 | `layer` with `merge`, `replace`, `provides`, `raises`, `uses` (EF130-EF134) | KEEP | rows cannot tell a shared node from duplicate nodes and drop edges and replacement provenance |
+| 19a | layer `start` | UNDECIDED | |
+| 19b | parameterised layers, `layer T(settings)` | UNDECIDED | |
+| 20 | name-specific checker branches (`Files.openRead`/`LiveFiles`, the `Http.serve` callback policy, reserved builtin names) | SHRINK | to ownership carried by operation results, general callback-row absorption and qualified declaration metadata; each branch is deleted once paired evidence passes |
+| 21 | ownership checker (EF123) and ownership in operation results | KEEP | only the checker sees value flow |
+| 22 | `acquire` | LIBRARY goal; admission UNDECIDED | until a release-authority protocol (adoption or consumption of the release obligation) exists |
+| 23 | no nil or null, initialised fields, `void` versus `()`; `Option` | KEEP checks; `Option` LIBRARY | |
+| 24 | bare-recipe refusal (EF105), unused `let` lint (EFL001) | KEEP | |
+| 25 | `import`, `import go`, `Foreign` | KEEP | `Foreign` is an ordinary service |
+| 26 | `test_` discovery | LIBRARY | tooling convention |
+| 27 | suppression directive with `EFL004` | KEEP | suppression validation for the [justify-don't-ban](../design.md#language-design-principles) policy |
+| 28 | `machine` declaration, `Step`, static `Stay` check | KEEP | decided 2026-10-07; narrow scope, see the [state machine admission gate](state-machines.md#construct-admission-gate); audit: UNDECIDED, leaning SHRINK; superseded 2026-10-07 by the visible-construct rule |
+| 29 | `Actor<P>` client projection and operation references | UNDECIDED | a general operation-reference mechanism must reject a wrong-protocol operation |
+| 30 | codec `derive` | KEEP | compiler-fulfilled structural derivation, `derive name = Json.codec<T>(maxBodyBytes: N, maxDepth: M)` with required bounds; audit: SHRINK; superseded 2026-10-07 by the visible-construct rule |
+| 31 | `opaque` | KEEP | a modifier on record and enum declarations, not a separate form |
+| 32 | budget values | LIBRARY | required explicit choice, legal `unbounded`, justifier lint |
+| 33 | Result `?` | UNDECIDED, unadmitted | |
+| 34 | module constants, type aliases | UNDECIDED | |
+| 35 | general transactions | UNDECIDED | |
+| 36 | mutable-container and portable-message admission | KEEP | |
+| 37 | service roles (`Database at Primary`) | UNDECIDED, unadmitted | |
+| 38 | generative identities, single-use authority, `-> borrowed` | UNDECIDED | |
+| 39 | local mutation and loops | UNDECIDED | |
+| 40 | infrastructure `output {}` | LIBRARY goal; syntax unadmitted | |
+| 41 | finite-profile limits (EF127, EF119, `==` and `+` restrictions) | not prohibitions | support limits, not invariants |
+| n/a | JSX view notation | ADMITTED (notation exception: 1:1 sugar, no semantics) | planned; the view lane has not landed. One-to-one sugar over bundled library calls; first member of the class (decided 2026-10-07) |
 
 ## Handler soundness regression (historical)
 
