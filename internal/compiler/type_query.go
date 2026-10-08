@@ -380,7 +380,16 @@ func (r *Result) declarationTarget(t lexicalTarget) (*DeclarationTarget, *Declar
 			target.Owner = t.provider.Name
 		}
 		_, original := facts.functions[f]
-		located(original, f.SourceID, f.Module, f.Span, f.Extent)
+		if f.codec != nil {
+			// f.Span/Extent belong to the synthesized function and must not
+			// invent a parameter/body location. The derive's retained syntax
+			// fact supplies the real declaration name and full declaration
+			// extent for CLI, MCP and LSP alike.
+			item := facts.items[f.codec]
+			located(item != nil, "", "", f.codec.Span, itemExtent(item, f.codec.Span))
+		} else {
+			located(original, f.SourceID, f.Module, f.Span, f.Extent)
+		}
 	case t.provider != nil:
 		p := t.provider
 		target.Name, target.Owner, target.Identity = p.Name, p.Service, providerTypeRef(p).Declaration
@@ -450,6 +459,13 @@ func (r *Result) declarationTarget(t lexicalTarget) (*DeclarationTarget, *Declar
 		item := facts.items[t.layer]
 		target.Name = t.layer.Name
 		located(item != nil, "", "", t.layer.Span, itemExtent(item, t.layer.Span))
+	case t.codec != nil:
+		// The derive declaration is the source owner of its generated
+		// direction functions. It is a namespace/declaration fact, not a
+		// first-class Codec value, so publish only its real name and extent.
+		item := facts.items[t.codec]
+		target.Name = t.codec.Name
+		located(item != nil, "", "", t.codec.Span, itemExtent(item, t.codec.Span))
 	default:
 		return nil, nil
 	}

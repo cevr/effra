@@ -39,6 +39,7 @@ type lexicalTarget struct {
 	data      *DataDeclaration
 	failure   *ErrorDecl
 	layer     *Layer
+	codec     *CodecDeclaration
 	module    *SyntaxItem
 	variant   string
 	field     string
@@ -270,6 +271,16 @@ func captureOriginalSyntax(program *Program) *lexicalFacts {
 				child(id, expression(entry.Value))
 			}
 		}
+		if codec := item.Codec; codec != nil && facts.complete {
+			// A derived codec is original declaration syntax even though its
+			// direction functions are checker-generated. Retain one bounded
+			// fact for the declaration itself; synthetic parameters and bodies
+			// deliberately remain outside the original syntax tree.
+			codecID := add("codec", codec.Name, codec.Span, item.Extent, codec.Span)
+			if codecID >= 0 {
+				child(id, codecID)
+			}
+		}
 		if !facts.complete {
 			break
 		}
@@ -337,6 +348,9 @@ func (facts *lexicalFacts) declare(item *SyntaxItem) {
 	case item.Layer != nil:
 		facts.items[item.Layer] = item
 		name(item.Layer.Span, lexicalTarget{kind: "layer", layer: item.Layer})
+	case item.Codec != nil:
+		facts.items[item.Codec] = item
+		name(item.Codec.Span, lexicalTarget{kind: "codec", codec: item.Codec})
 	}
 }
 

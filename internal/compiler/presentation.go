@@ -109,6 +109,8 @@ func (p *presenter) selection(s *SelectedType) {
 		p.write("import go " + t.Name + " " + strconv.Quote(t.Module))
 	case "layer":
 		p.write("layer " + t.Name)
+	case "codec":
+		p.write("derive " + t.Name)
 	}
 }
 

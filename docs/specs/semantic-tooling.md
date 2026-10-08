@@ -108,12 +108,16 @@ Query schema 2 adds a selection `target` and a `presentation`. The target is
 the declaration a selected name token denotes: its kind (binding kinds `let`,
 `parameter`, `configuration` and `pattern`; `function`, `operation`, `method`,
 `provider`, `service`, `record`, `enum`, `variant`, `field`, `error`, `module`,
-`hostModule` or `layer`), name, owner, identity, module and source, and its
+`hostModule`, `layer` or `codec`), name, owner, identity, module and source, and its
 declaration-name span and extent in that source. `locationAvailable` is true
 only when the source is the selected snapshot's own text; bundled declarations
 keep their source ID and span in that source, and builtins carry no location.
 Function-like targets carry their declared signature by canonical references,
-and fields their declared type. The checker records each target at the point
+and fields their declared type. A `codec` target is the retained `derive`
+namespace/declaration; generated direction functions keep their callable
+identity and rows while pointing back to that declaration name and full extent.
+This target does not admit `Codec<T>` as a first-class value. The checker
+records each target at the point
 it resolves a name, from original syntax only: callees, service qualifiers and
 operations, provider values and constructors, constructor heads, explicit
 field labels, field accesses, match pattern segments and aliased pattern

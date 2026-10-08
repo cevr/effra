@@ -232,19 +232,23 @@ func (c *checker) codecBounds(codec *CodecDeclaration) (CodecPlanBounds, bool) {
 func (c *checker) codecFunction(codec *CodecDeclaration, direction, parameter, parameterType string, parameterSource *sourceType, result string, resultSource *sourceType, failure string) *Function {
 	name := codec.Name + "." + direction
 	parameterBinding := &localBinding{Kind: "parameter", Name: parameter}
-	operation := &Expr{Kind: "codec", Name: codec.Name, Text: direction, Left: &Expr{Kind: "name", Name: parameter, Span: codec.Span, binding: parameterBinding}, Span: codec.Span, codec: codec}
+	// Every node below is compiler-generated. Keep its source spans empty so
+	// declaration inspection cannot mistake the derive name for a synthetic
+	// parameter or body location; the origin is resolved through codec's
+	// retained SyntaxItem by the shared type-query owner.
+	operation := &Expr{Kind: "codec", Name: codec.Name, Text: direction, Left: &Expr{Kind: "name", Name: parameter, binding: parameterBinding}, codec: codec}
 	f := &Function{
 		Name:         name,
 		Module:       currentModuleIdentity,
 		SourceID:     "source:user",
 		Owner:        "module",
 		EmissionName: codec.Name + "_" + direction,
-		Params:       []Param{{Name: parameter, Type: parameterType, sourceType: parameterSource, Span: codec.Span, binding: parameterBinding}},
+		Params:       []Param{{Name: parameter, Type: parameterType, sourceType: parameterSource, binding: parameterBinding}},
 		Return:       result,
 		returnType:   resultSource,
 		Effect:       true,
 		Errors:       []string{failure},
-		Body:         &Block{Statements: []*Statement{{Kind: "expr", Value: operation, Span: codec.Span}}},
+		Body:         &Block{Statements: []*Statement{{Kind: "expr", Value: operation}}},
 		Span:         codec.Span,
 		DeclSpan:     codec.Span,
 		codec:        codec,
