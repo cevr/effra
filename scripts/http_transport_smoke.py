@@ -84,6 +84,20 @@ def exchange(address, raw):
         return read_response(connection)
 
 
+def sequential(address, raw, deadline=3.0):
+    """exchange() for a plain request that is not about admission. The
+    admission slot is held until the previous response has been handed to the
+    operating system (docs/runtime.md), so a client that reconnects inside
+    that window may see 503; retry on a new connection until the deadline.
+    Cases that assert saturation or shutdown 503 use exchange() and stay
+    strict."""
+    stop = time.monotonic() + deadline
+    while True:
+        response = exchange(address, raw)
+        if response is None or response[0] != 503 or time.monotonic() >= stop:
+            return response
+
+
 def request(method, path, body=None, content_type=None, chunked=False):
     lines = [f"{method} {path} HTTP/1.1", "Host: effra"]
     if content_type is not None:
@@ -148,29 +162,29 @@ def check(target, scratch):
     try:
         text = "text/plain; charset=utf-8"
         octets = "application/octet-stream"
-        expect(exchange(address, request("GET", "/health")), 200, b"ok", text)
+        expect(sequential(address, request("GET", "/health")), 200, b"ok", text)
         # The selected profile answers a wrong method on a known path with 404.
-        expect(exchange(address, request("POST", "/health", b"")), 404)
-        expect(exchange(address, request("GET", "/missing?x=/health")), 404)
-        expect(exchange(address, request("POST", "/echo", b"\xff\x00binary", octets)), 200, b"\xff\x00binary", octets)
-        expect(exchange(address, request("POST", "/echo", b"text", "text/plain")), 415)
-        expect(exchange(address, request("GET", "/malformed")), 400)
-        expect(exchange(address, request("GET", "/unavailable")), 500)
+        expect(sequential(address, request("POST", "/health", b"")), 404)
+        expect(sequential(address, request("GET", "/missing?x=/health")), 404)
+        expect(sequential(address, request("POST", "/echo", b"\xff\x00binary", octets)), 200, b"\xff\x00binary", octets)
+        expect(sequential(address, request("POST", "/echo", b"text", "text/plain")), 415)
+        expect(sequential(address, request("GET", "/malformed")), 400)
+        expect(sequential(address, request("GET", "/unavailable")), 500)
         # A response header value outside the shared policy (visible ASCII,
         # space, tab) fails closed, and the server keeps serving.
-        expect(exchange(address, request("GET", "/invalid")), 500)
-        expect(exchange(address, request("GET", "/health")), 200, b"ok", text)
+        expect(sequential(address, request("GET", "/invalid")), 500)
+        expect(sequential(address, request("GET", "/health")), 200, b"ok", text)
         # Absolute-form targets: the query is not part of the path, even when
         # it contains a slash.
-        expect(exchange(address, request("GET", "http://effra?next=/health")), 404)
-        expect(exchange(address, request("GET", "http://effra/health?next=/echo")), 200, b"ok", text)
+        expect(sequential(address, request("GET", "http://effra?next=/health")), 404)
+        expect(sequential(address, request("GET", "http://effra/health?next=/echo")), 200, b"ok", text)
         # Body bounds: 16 bytes are admitted; 17 are rejected before the handler.
-        expect(exchange(address, request("POST", "/echo", b"x" * 16, octets)), 200, b"x" * 16, octets)
-        expect(exchange(address, request("POST", "/echo", b"x" * 17, octets)), 413, close=True)
-        expect(exchange(address, request("POST", "/echo", b"y" * 16, octets, chunked=True)), 200, b"y" * 16, octets)
-        expect(exchange(address, request("POST", "/echo", b"y" * 17, octets, chunked=True)), 413, close=True)
+        expect(sequential(address, request("POST", "/echo", b"x" * 16, octets)), 200, b"x" * 16, octets)
+        expect(sequential(address, request("POST", "/echo", b"x" * 17, octets)), 413, close=True)
+        expect(sequential(address, request("POST", "/echo", b"y" * 16, octets, chunked=True)), 200, b"y" * 16, octets)
+        expect(sequential(address, request("POST", "/echo", b"y" * 17, octets, chunked=True)), 413, close=True)
         malformed = b"POST /echo HTTP/1.1\r\nHost: effra\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nab\r\n0\r\n\r\n"
-        expect(exchange(address, malformed), 400, close=True)
+        expect(sequential(address, malformed), 400, close=True)
         started = time.monotonic()
         stalled = b"POST /echo HTTP/1.1\r\nHost: effra\r\nContent-Type: application/octet-stream\r\nContent-Length: 4\r\n\r\nx"
         stalled_response = exchange(address, stalled)
