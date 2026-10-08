@@ -151,6 +151,32 @@ func TestParenthesisedPipesBesideBinaryOperatorsAreAccepted(t *testing.T) {
 	}
 }
 
+func TestUnaryPrefixesPreservePipeBinaryRefusal(t *testing.T) {
+	const declarations = `fn bump(value: i64) -> i64 { value + 1 }
+`
+	for _, body := range []string{
+		`-1 |> bump() + 2`,
+		`--1 |> bump() + 2`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			source := declarations + "fn probe() -> i64 { " + body + " }\n"
+			r := Compile(source)
+			if len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "EF002" {
+				t.Fatalf("diagnostics = %+v", r.Diagnostics)
+			}
+			diagnostic := r.Diagnostics[0]
+			if got := source[diagnostic.Span.Offset : diagnostic.Span.Offset+diagnostic.Span.Length]; got != "|>" {
+				t.Fatalf("diagnostic anchored at %q, want |>", got)
+			}
+		})
+	}
+
+	source := declarations + "fn probe() -> i64 { -(-1 |> bump()) + 2 }\n"
+	if r := Compile(source); !r.Checked {
+		t.Fatalf("explicit grouping should isolate the pipe chain: %+v", r.Diagnostics)
+	}
+}
+
 // assertPipeDiagnostics checks each diagnostic's message and the anchor token
 // found inside its unique context substring.
 func assertPipeDiagnostics(t *testing.T, source string, diagnostics []Diagnostic, want ...expectedDiagnostic) {
@@ -439,7 +465,10 @@ func TestPipeIntrinsicNamesAreOrdinaryMembersAfterThePipe(t *testing.T) {
 // Every binary operator the parser admits is classified here as refused
 // beside an unparenthesised pipe chain. Adding an operator without extending
 // this table, and deciding its precedence against |>, fails the test.
-var pipeBinaryOperators = map[string]string{"==": "refused", "+": "refused"}
+var pipeBinaryOperators = map[string]string{
+	"==": "refused", "<": "refused", "<=": "refused", ">": "refused", ">=": "refused",
+	"+": "refused", "-": "refused",
+}
 
 func TestEveryBinaryOperatorIsClassifiedAgainstThePipe(t *testing.T) {
 	for op := range binaryPrecedence {

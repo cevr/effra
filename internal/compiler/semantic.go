@@ -4137,6 +4137,10 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	}
 	switch e.Kind {
 	case "integer":
+		if isMinI64Literal(e.Text) && !e.allowMinLiteral {
+			c.diagnostic("EF001", "integer exceeds i64 range", e.Span)
+			break
+		}
 		t = c.checkedData("i64")
 	case "string":
 		t = c.checkedData("string")
@@ -4653,15 +4657,41 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		t = c.construct(e, env, inEffect)
 	case "match":
 		t = c.match(e, env, inEffect)
+	case "unary":
+		operand := c.expr(e.Left, env, inEffect)
+		node := operand.node()
+		valid := e.Name == "-" && !operand.isEffect() && node != nil && node.Kind == "primitive" && node.Name == "i64"
+		if !valid {
+			c.diagnostic("EF106", "unary - requires an i64 value", e.Span)
+			t = c.checkedData("invalid")
+		} else {
+			t = c.checkedData("i64")
+		}
 	case "binary":
 		left, right := c.expr(e.Left, env, inEffect), c.expr(e.Right, env, inEffect)
 		leftNode, rightNode := left.node(), right.node()
-		valid := !left.isEffect() && !right.isEffect() && c.sameValues(left, right) && leftNode != nil && rightNode != nil && leftNode.Kind == "primitive" && (leftNode.Name == "string" || leftNode.Name == "bool" || leftNode.Name == "i64") && (e.Name != "+" || leftNode.Name == "string")
+		valid := !left.isEffect() && !right.isEffect() && c.sameValues(left, right) && leftNode != nil && rightNode != nil && leftNode.Kind == "primitive" && rightNode.Kind == "primitive"
+		if valid {
+			switch e.Name {
+			case "==":
+				valid = leftNode.Name == "string" || leftNode.Name == "bool" || leftNode.Name == "i64"
+			case "+":
+				valid = leftNode.Name == "string" || leftNode.Name == "i64"
+			case "-", "<", "<=", ">", ">=":
+				valid = leftNode.Name == "i64"
+			default:
+				valid = false
+			}
+		}
 		if !valid {
-			c.diagnostic("EF106", "operator requires matching primitive values; + accepts strings", e.Span)
+			c.diagnostic("EF106", "operator requires matching primitive values; + accepts strings or i64, and - and ordered comparisons accept i64", e.Span)
 		}
 		if valid {
-			t = c.checkedDataID(left.valueID(), nil, nil)
+			if e.Name == "<" || e.Name == "<=" || e.Name == ">" || e.Name == ">=" {
+				t = c.checkedData("bool")
+			} else {
+				t = c.checkedDataID(left.valueID(), nil, nil)
+			}
 		} else {
 			t = c.checkedData("invalid")
 		}

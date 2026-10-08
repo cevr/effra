@@ -57,6 +57,10 @@ type parser struct {
 	// lastPipe is the |> that ends the unparenthesised chain the most recent
 	// expr call returned, zero when that chain held no pipe.
 	lastPipe Span
+	// genericAngles records the angle tokens admitted by the shared type and
+	// generic-application grammar. The formatter consumes these facts instead
+	// of guessing from every literal < or > token.
+	genericAngles map[int]bool
 	// absent is absent-construct recognition state; a condition parser has
 	// none and recognizes nothing.
 	absent *absentScan
@@ -227,6 +231,7 @@ type Program struct {
 	UsedImports         map[string]bool
 	GoOnly              bool
 	Errors              map[string]Span
+	genericAngles       map[int]bool
 	ErrorDecls          []*ErrorDecl
 	Records             []*Record
 	Enums               []*Enum
@@ -374,6 +379,28 @@ type Expr struct {
 	// Diagnostics read it for wording and anchors only: it never decides what
 	// is accepted, how a call is checked or what is emitted.
 	PipeSpan Span `json:"-"`
+	// allowMinLiteral is set only for the magnitude immediately under a unary
+	// minus. The lexer admits that one extra magnitude so the signed minimum
+	// value can be represented without pretending that positive 2^63 fits.
+	allowMinLiteral bool
+}
+
+func i64LiteralMagnitude(text string) (uint64, bool) {
+	value, err := strconv.ParseUint(text, 10, 64)
+	return value, err == nil
+}
+
+func isMinI64Literal(text string) bool {
+	value, ok := i64LiteralMagnitude(text)
+	return ok && value == uint64(1<<63)
+}
+
+func normalizedI64Literal(text string) string {
+	value, ok := i64LiteralMagnitude(text)
+	if !ok {
+		return text
+	}
+	return strconv.FormatUint(value, 10)
 }
 
 func lex(source string) ([]token, []Comment, []Diagnostic) {
@@ -460,7 +487,8 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 			for i < len(source) && source[i] >= '0' && source[i] <= '9' {
 				i++
 			}
-			if _, err := strconv.ParseInt(source[start:i], 10, 64); err != nil {
+			value, err := strconv.ParseUint(source[start:i], 10, 64)
+			if err != nil || value > uint64(1<<63) {
 				return nil, comments, []Diagnostic{{Code: "EF001", Message: "integer exceeds i64 range", Span: Span{start, i - start, l, c}}}
 			}
 		} else if ch == '"' {
@@ -483,9 +511,9 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 			if err := json.Unmarshal([]byte(source[start:i]), &decoded); err != nil {
 				return nil, comments, []Diagnostic{{Code: "EF001", Message: "strings use JSON escapes", Span: Span{start, i - start, l, c}}}
 			}
-		} else if i+1 < len(source) && (source[i:i+2] == "->" || source[i:i+2] == "|>" || source[i:i+2] == "==" || source[i:i+2] == "=>") {
+		} else if i+1 < len(source) && (source[i:i+2] == "->" || source[i:i+2] == "|>" || source[i:i+2] == "==" || source[i:i+2] == "=>" || source[i:i+2] == "<=" || source[i:i+2] == ">=") {
 			i += 2
-		} else if strings.ContainsRune("{}():,;.+<>=|*[]", rune(ch)) {
+		} else if strings.ContainsRune("{}():,;.+-<>=|*[]/%", rune(ch)) {
 			i++
 		} else {
 			if operator, ok := absentOperatorAt(source[i:]); ok {
@@ -548,8 +576,8 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			}
 		}
 	}()
-	p := parser{tokens: tokens, types: map[string]*sourceType{}, absent: &absentScan{}}
-	program = &Program{Comments: comments, Errors: map[string]Span{}, Bindings: map[string]Binding{}, UsedImports: map[string]bool{}}
+	p := parser{tokens: tokens, types: map[string]*sourceType{}, absent: &absentScan{}, genericAngles: map[int]bool{}}
+	program = &Program{Comments: comments, Errors: map[string]Span{}, Bindings: map[string]Binding{}, UsedImports: map[string]bool{}, genericAngles: p.genericAngles}
 	program.typeExpressions = p.types
 	for p.peek().kind != "eof" {
 		switch p.peek().text {
@@ -597,7 +625,7 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			p.take()
 			name := p.name()
 			record := &Record{Kind: "record", Name: name.text, Span: name.span}
-			if p.accept("<") {
+			if p.acceptGenericOpen() {
 				record.Parameters = p.templateParameters()
 			}
 			record.Fields = p.fields()
@@ -609,7 +637,7 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			p.take()
 			name := p.name()
 			e := &Enum{Kind: "enum", Name: name.text, Span: name.span}
-			if p.accept("<") {
+			if p.acceptGenericOpen() {
 				e.Parameters = p.templateParameters()
 			}
 			p.expect("{")
@@ -795,6 +823,42 @@ func (p *parser) accept(text string) bool {
 	}
 	return false
 }
+
+func (p *parser) markGenericAngle(index int) {
+	if p.genericAngles == nil {
+		p.genericAngles = map[int]bool{}
+	}
+	p.genericAngles[index] = true
+}
+
+func (p *parser) acceptGenericOpen() bool {
+	if !p.accept("<") {
+		return false
+	}
+	p.markGenericAngle(p.at - 1)
+	return true
+}
+
+func (p *parser) acceptGenericClose() bool {
+	if !p.accept(">") {
+		return false
+	}
+	p.markGenericAngle(p.at - 1)
+	return true
+}
+
+func (p *parser) expectGenericOpen() token {
+	v := p.expect("<")
+	p.markGenericAngle(p.at - 1)
+	return v
+}
+
+func (p *parser) expectGenericClose() token {
+	v := p.expect(">")
+	p.markGenericAngle(p.at - 1)
+	return v
+}
+
 func (p *parser) expect(text string) token {
 	v := p.take()
 	if v.text != text {
@@ -901,7 +965,7 @@ func (p *parser) typeAnnotation() (string, Span) {
 	if p.accept(".") {
 		text += "." + p.memberName().text
 	}
-	if p.accept("<") {
+	if p.acceptGenericOpen() {
 		t := &sourceType{Application: text, Span: name.span}
 		for {
 			argument := p.typ()
@@ -910,7 +974,7 @@ func (p *parser) typeAnnotation() (string, Span) {
 			if len(t.ApplicationArguments) > 8 {
 				p.fail(name, "at most eight template arguments are supported")
 			}
-			if p.accept(">") {
+			if p.acceptGenericClose() {
 				break
 			}
 			p.expect(",")
@@ -973,7 +1037,7 @@ func (p *parser) templateParameters() []TemplateParameter {
 		if len(parameters) > 8 {
 			p.fail(name, "at most eight template parameters are supported")
 		}
-		if p.accept(">") {
+		if p.acceptGenericClose() {
 			break
 		}
 		p.expect(",")
@@ -1044,7 +1108,7 @@ func (p *parser) function(body bool) *Function {
 	p.expect("fn")
 	name := p.name()
 	f := &Function{Name: name.text, Effect: effect, Span: name.span, DeclSpan: declSpan}
-	if p.accept("<") {
+	if p.acceptGenericOpen() {
 		for {
 			parameter := p.name()
 			p.expect(":")
@@ -1062,7 +1126,7 @@ func (p *parser) function(body bool) *Function {
 			if len(f.RowParameters) > 8 {
 				p.fail(parameter, "at most eight explicit row parameters are supported")
 			}
-			if p.accept(">") {
+			if p.acceptGenericClose() {
 				break
 			}
 			p.expect(",")
@@ -1185,6 +1249,12 @@ func (p *parser) expr(min int) *Expr {
 	case start.kind == "integer":
 		e.Kind = "integer"
 		e.Text = start.text
+	case start.text == "-":
+		e.Kind = "unary"
+		e.Name = start.text
+		e.Left = p.expr(3)
+		e.Left.allowMinLiteral = e.Left.Kind == "integer" && isMinI64Literal(e.Left.Text)
+		chainPipe = p.lastPipe
 	case start.text == "run":
 		e.Kind = "run"
 		e.Left = p.expr(3)
@@ -1318,12 +1388,12 @@ func (p *parser) expr(min int) *Expr {
 			e = &Expr{Kind: "construct", Left: e, Fields: p.fieldValues(), Span: e.Span}
 			continue
 		}
-		if p.peek().text == "<" && (e.Kind == "name" || e.Kind == "member") {
+		if (e.Kind == "name" || e.Kind == "member") && p.genericApplicationAhead() {
 			if e.constructorType != nil {
 				p.fail(p.peek(), "constructor application arguments may be supplied only once")
 			}
 			name := expressionName(e)
-			p.take()
+			p.expectGenericOpen()
 			t := &sourceType{Application: name, Span: e.Span}
 			for {
 				argument := p.typ()
@@ -1332,7 +1402,7 @@ func (p *parser) expr(min int) *Expr {
 				if len(t.ApplicationArguments) > 8 {
 					p.fail(p.peek(), "at most eight template arguments are supported")
 				}
-				if p.accept(">") {
+				if p.acceptGenericClose() {
 					break
 				}
 				p.expect(",")
@@ -1386,9 +1456,9 @@ func (p *parser) expr(min int) *Expr {
 			} else if method.text == "as" && p.peek().text == "<" {
 				// A native type assertion: value.as<T>() keeps Go's match
 				// status beside the adapted value, like v, ok := value.(T).
-				p.expect("<")
+				p.expectGenericOpen()
 				t := p.typ()
-				p.expect(">")
+				p.expectGenericClose()
 				p.expect("(")
 				p.expect(")")
 				e = &Expr{Kind: "hostAssert", Name: t, Left: e, Span: method.span}
@@ -1399,9 +1469,9 @@ func (p *parser) expr(min int) *Expr {
 					e = &Expr{Kind: "provideLayer", Name: layer.text, NameSpan: layer.span, Left: e, Span: method.span}
 					continue
 				}
-				p.expect("<")
+				p.expectGenericOpen()
 				t := p.name()
-				p.expect(">")
+				p.expectGenericClose()
 				p.expect("(")
 				arg := p.expr(0)
 				p.expect(")")
@@ -1412,6 +1482,9 @@ func (p *parser) expr(min int) *Expr {
 			continue
 		}
 		precedence := binaryPrecedence[p.peek().text]
+		if precedence == 0 && unsupportedNumericOperator(p.peek().text) {
+			p.fail(p.peek(), "operator "+p.peek().text+" is not yet supported for i64 values")
+		}
 		if precedence == 0 || precedence < min {
 			break
 		}
@@ -1430,11 +1503,65 @@ func (p *parser) expr(min int) *Expr {
 	return e
 }
 
+// genericApplicationAhead distinguishes a type-argument postfix from the
+// newly admitted less-than comparison. It speculates with the same bounded
+// type grammar used by the real parser, so a later declaration cannot supply
+// a closing `>` and no speculative type or formatter facts escape.
+func (p *parser) genericApplicationAhead() bool {
+	if p.peek().text != "<" {
+		return false
+	}
+	candidate := *p
+	// The probe only needs the type grammar's syntax state. Fresh maps keep
+	// unrelated declarations from becoming per-comparison work and prevent
+	// speculative aliases or formatter facts from sharing parser state.
+	candidate.types = map[string]*sourceType{}
+	candidate.genericAngles = map[int]bool{}
+	return func() (ok bool) {
+		defer func() {
+			if value := recover(); value != nil {
+				if _, fault := value.(syntaxFault); !fault {
+					panic(value)
+				}
+				ok = false
+			}
+		}()
+		candidate.expectGenericOpen()
+		argumentCount := 0
+		for {
+			candidate.typ()
+			argumentCount++
+			if argumentCount > 8 {
+				return false
+			}
+			if candidate.acceptGenericClose() {
+				next := candidate.peek().text
+				return next == "(" || next == "{" || next == "."
+			}
+			if !candidate.accept(",") {
+				return false
+			}
+		}
+	}()
+}
+
 // binaryPrecedence is every binary operator and its binding strength. An
 // unparenthesised pipe chain beside any of them is refused (pipeBesideOperator),
 // and TestEveryBinaryOperatorIsClassifiedAgainstThePipe fails for an operator
 // added here without a decision about it.
-var binaryPrecedence = map[string]int{"==": 1, "+": 2}
+var binaryPrecedence = map[string]int{
+	"==": 1, "<": 1, "<=": 1, ">": 1, ">=": 1,
+	"+": 2, "-": 2,
+}
+
+func unsupportedNumericOperator(operator string) bool {
+	switch operator {
+	case "*", "/", "%":
+		return true
+	default:
+		return false
+	}
+}
 
 // pipeHeadReserved are the words that start another expression form, so they
 // cannot name the function on the right of a |>.
@@ -1495,8 +1622,9 @@ func (p *parser) constructorBrace() bool {
 // speculatePayload parses a payload with fieldValues, then restores the
 // parser, and reports the token index after its closing brace.
 func (p *parser) speculatePayload() (end int, ok bool) {
-	at, depth, noConstruct, subjectList, types := p.at, p.depth, p.noConstruct, p.subjectList, p.types
+	at, depth, noConstruct, subjectList, types, genericAngles := p.at, p.depth, p.noConstruct, p.subjectList, p.types, p.genericAngles
 	p.types = maps.Clone(types)
+	p.genericAngles = maps.Clone(genericAngles)
 	defer func() {
 		if value := recover(); value != nil {
 			if _, fault := value.(syntaxFault); !fault {
@@ -1504,7 +1632,7 @@ func (p *parser) speculatePayload() (end int, ok bool) {
 			}
 			end, ok = 0, false
 		}
-		p.at, p.depth, p.noConstruct, p.subjectList, p.types = at, depth, noConstruct, subjectList, types
+		p.at, p.depth, p.noConstruct, p.subjectList, p.types, p.genericAngles = at, depth, noConstruct, subjectList, types, genericAngles
 	}()
 	p.fieldValues()
 	return p.at, true

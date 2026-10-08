@@ -844,7 +844,24 @@ func (g *goEmitter) lower(e *Expr, effect bool, ret string, out *strings.Builder
 		resultType := g.resultType(e)
 		return "func(ctx efContext)efExit[" + resultType + "]{return er.Invoke(ctx.Runtime,er.OrFail(efToRuntime(ctx," + left + ")))}"
 	case "integer":
-		return "int64(" + e.Text + ")"
+		return "int64(" + normalizedI64Literal(e.Text) + ")"
+	case "unary":
+		if e.Name != "-" {
+			panic("unchecked unary operator reached Go emitter")
+		}
+		// Go accepts the signed minimum as an untyped constant, but converting
+		// its positive magnitude to int64 would fail before the unary operator
+		// can run. Keep the one boundary literal representable at compile time.
+		if e.Left.Kind == "integer" && isMinI64Literal(e.Left.Text) {
+			return "int64(-" + normalizedI64Literal(e.Left.Text) + ")"
+		}
+		// Keep the operand's evaluation exactly once, then apply the negation to
+		// a runtime value. Go constant-folds `-int64(-9223372036854775808)`
+		// before execution and rejects that expression as an overflowing typed
+		// constant; a local gives every unary operation the signed-width runtime
+		// semantics used by the rest of the native arithmetic lowering.
+		operand := g.expr(e.Left, effect, ret, out)
+		return "func() int64 { value := " + operand + "; return -value }()"
 	case "string":
 		return strconv.Quote(e.Text)
 	case "bool":

@@ -476,7 +476,12 @@ func jsExpr(e *Expr, effect bool) string {
 	case "timeout":
 		return "__ef_timeout(" + jsExpr(e.Left, effect) + "," + jsExpr(e.Right, effect) + ")"
 	case "integer":
-		return e.Text + "n"
+		return normalizedI64Literal(e.Text) + "n"
+	case "unary":
+		if e.Name != "-" {
+			panic("unchecked unary operator reached JavaScript emitter")
+		}
+		return "BigInt.asIntN(64, (-" + jsExpr(e.Left, effect) + "))"
 	case "string":
 		return quoted(e.Text)
 	case "bool":
@@ -545,7 +550,11 @@ func jsExpr(e *Expr, effect bool) string {
 		if op == "==" {
 			op = "==="
 		}
-		return "(" + jsExpr(e.Left, effect) + " " + op + " " + jsExpr(e.Right, effect) + ")"
+		left, right := jsExpr(e.Left, effect), jsExpr(e.Right, effect)
+		if (e.Name == "-" || e.Name == "+") && e.Left.checked.node() != nil && e.Left.checked.node().Kind == "primitive" && e.Left.checked.node().Name == "i64" {
+			return "BigInt.asIntN(64, (" + left + " " + e.Name + " " + right + "))"
+		}
+		return "(" + left + " " + op + " " + right + ")"
 	case "if":
 		body := "if (" + jsExpr(e.Left, effect) + ") {\n" + jsBlock(e.Then, effect) + "} else {\n" + jsBlock(e.Else, effect) + "}\n"
 		if effect {
