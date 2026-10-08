@@ -1,12 +1,15 @@
 examples/main.ef
+examples/checkout.ef
 examples/data.ef
 examples/workflow.ef
 examples/http.ef
+examples/http-transport.ef
 examples/ownership.ef
 examples/testing.ef
 examples/lifecycle.ef
 examples/latest-task.ef
 examples/imports.ef
+examples/host-types.ef
 examples/concurrency.ef
 examples/missing-service.ef
 examples/causal.ef
@@ -24,5 +27,7 @@ internal/compiler/bundled/data/option.ef
 internal/compiler/bundled/data/result.ef
 examples/generic-users.ef
 examples/generic-settings.ef
+examples/pipe.ef
+examples/codecs.ef
 examples/lintpack/testdata/provider_boundary.ef
 examples/lintpack/testdata/forbidden_failure.ef
