@@ -131,7 +131,7 @@ func TestVoidContractsAcrossCLIAndMCPProcesses(t *testing.T) {
 	}
 	formatReport := readProcessJSON(t, stdout)
 	if formatReport["schemaVersion"] != float64(compiler.FormatterSchemaVersion) || formatReport["formatterVersion"] != compiler.FormatterIdentity {
-		t.Fatalf("CLI formatter did not expose formatter-6: %v", formatReport)
+		t.Fatalf("CLI formatter did not expose formatter-7: %v", formatReport)
 	}
 
 	formatArguments := map[string]any{"source": formatSource}
