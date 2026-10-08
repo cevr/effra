@@ -820,7 +820,9 @@ func hostPackageAlias(path string) string {
 func hostAnnotationGoName(name string) string {
 	alias, member, qualified := strings.Cut(name, ".")
 	if !qualified {
-		return "efType_" + goIdent(name)
+		// A predeclared Go annotation (int, error, any, uintptr) lives in the
+		// host namespace, never beside a source declaration of the same name.
+		return "efHostType_" + goIdent(name)
 	}
 	return "efHostType_" + strconv.Itoa(len(alias)) + "_" + goIdent(alias) + "_" + goIdent(member)
 }
@@ -1134,4 +1136,17 @@ func (g *goEmitter) goResultField(e *Expr, left string) string {
 		return g.hostOptional(e.checked.resultID(), left+".Err")
 	}
 	return left + ".V" + strings.TrimPrefix(e.Name, "v")
+}
+
+// hostAnnotationSpelled reports whether a bare type name in a legacy string
+// signature spells a registered predeclared Go annotation. A source
+// declaration of the same name always wins, so it keeps its own spelling.
+func (c *checker) hostAnnotationSpelled(name string) bool {
+	if c == nil || c.host == nil {
+		return false
+	}
+	if _, registered := c.host.annotations[name]; !registered {
+		return false
+	}
+	return c.records[name] == nil && c.enums[name] == nil
 }

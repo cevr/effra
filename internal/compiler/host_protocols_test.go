@@ -749,3 +749,26 @@ import Data "effra/data"
 		t.Fatalf("stdlib String accepted as i64: %+v", wrong.Diagnostics)
 	}
 }
+
+// A source declaration named like a predeclared Go annotation keeps its name:
+// the native int the conversions use is spelled in its own generated
+// namespace, so `record int` and i64(n) coexist and the program builds.
+func TestHostAnnotationAliasesDoNotShareTheSourceNamespace(t *testing.T) {
+	r := compileHostTypes(t, `record int { x: i64 }
+effect fn program() -> void uses { Console, Foreign } {
+    match run host.Find("known") {
+        Data.Option.None => void,
+        Data.Option.Some { value: counter } => {
+            let wide = i64(run host.Count(counter))
+            let boxed = int { x: wide }
+            run Console.log(run strconv.FormatInt(boxed.x, 10))
+        }
+    }
+}`)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	if output := runGeneratedGo(t, r); output != "3\n" {
+		t.Fatalf("record int beside native int conversion: %q", output)
+	}
+}

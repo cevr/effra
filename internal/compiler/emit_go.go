@@ -52,7 +52,7 @@ func goType(program *Program, t string) string {
 		if t == "void" || t == "never" || t == "invalid" || t == "" {
 			return "struct{}"
 		}
-		if strings.Contains(t, ".") {
+		if strings.Contains(t, ".") || (program != nil && program.semantic.hostAnnotationSpelled(t)) {
 			return hostAnnotationGoName(t)
 		}
 		return "efType_" + goIdent(t)
