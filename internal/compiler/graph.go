@@ -215,7 +215,11 @@ func (r *Result) walkDependencyFacts(sink dependencyFactSink) {
 				if f.Module != "" && f.Module != currentModuleIdentity {
 					edge(id, "function:"+f.Module+"."+f.Name, "calls", "", e.Span)
 				}
-				if f.Owner == "module" && e.Left.Kind == "name" && nodes["function:"+f.Name] {
+				// The checked resolver has already established the callee identity.
+				// Keep member-shaped derived functions on the same module-owned
+				// path as ordinary local functions; the expression spelling is not
+				// an authority for dependency topology.
+				if f.Owner == "module" && f.Module == currentModuleIdentity && nodes["function:"+f.Name] {
 					edge(id, "function:"+f.Name, "calls", "", e.Span)
 				}
 				if e.Left.Kind == "member" && e.Left.Left.Kind == "name" && f.Owner == "service:"+e.Left.Left.Name && nodes["service:"+e.Left.Left.Name] {

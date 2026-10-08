@@ -123,6 +123,59 @@ func TestGraphViewDependencySerializesLegacyFacts(t *testing.T) {
 	}
 }
 
+// Derived codec directions are checked module functions. Their member syntax
+// must not make the dependency collector drop the call fact, for either the
+// direct or pipe invocation form.
+func TestGraphViewDependencyIncludesCheckedDerivedCodecCalls(t *testing.T) {
+	source := `import Json "effra/json"
+record Parcel { id: i64, label: string }
+derive parcelJson = Json.codec<Parcel>(maxBodyBytes: 256, maxDepth: 1)
+effect fn normalize(value: Parcel) -> Parcel { value }
+effect fn direct(body: string) -> Parcel raises { JsonDecodeFailure } {
+  run parcelJson.decode(body)
+}
+effect fn transfer(body: string) -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
+  let decoded = run body |> parcelJson.decode()
+  let normalized = run decoded |> normalize()
+  run normalized |> parcelJson.encode()
+}
+effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
+  let decoded = run direct("{\"id\":\"1\",\"label\":\"a\"}")
+  run transfer("{\"id\":\"1\",\"label\":\"a\"}")
+}`
+	want := map[string]int{
+		"function:direct":            1,
+		"function:transfer":          1,
+		"function:normalize":         1,
+		"function:parcelJson.decode": 2,
+		"function:parcelJson.encode": 1,
+	}
+	for _, target := range []string{"go", "js"} {
+		t.Run(target, func(t *testing.T) {
+			r := checkedGraphSource(t, source, target)
+			view := graphView(t, r, map[string]any{"kind": "dependency", "edgeKinds": []any{"calls"}})
+			counts := map[string]int{}
+			for _, edge := range viewEdges(view, "calls") {
+				if viewNode(view, edge.SourceID) == nil || viewNode(view, edge.TargetID) == nil {
+					t.Fatalf("call edge has an unresolved endpoint: %+v", edge)
+				}
+				counts[edge.TargetID]++
+			}
+			for target, count := range want {
+				if counts[target] != count {
+					t.Fatalf("call topology for %s: got %d occurrences, want %d (all=%v)", target, counts[target], count, counts)
+				}
+			}
+			for _, target := range []string{"function:parcelJson.decode", "function:parcelJson.encode"} {
+				node := viewNode(view, target)
+				if node == nil || node.Data.Effra.Contract == nil || node.Data.Effra.Source == "" || node.Data.Effra.Span == nil {
+					t.Fatalf("derived codec node lost checked contract/source/span closure: %+v", node)
+				}
+			}
+		})
+	}
+}
+
 func TestGraphTupleIDsAreInjective(t *testing.T) {
 	pairs := [][2][]string{
 		{{"a|b", "c"}, {"a", "b|c"}},

@@ -413,6 +413,94 @@ func TestGraphViewRefusalsAgreeAcrossCLIAndMCP(t *testing.T) {
 	}
 }
 
+// The public graph process must carry checked derived codec call facts through
+// both transports. This also verifies that selected edges retain their node
+// contracts and source spans after GraphView reference closure.
+func TestGraphProcessPublishesDerivedCodecCallsAcrossCLIAndMCP(t *testing.T) {
+	binary := buildTestCLI(t)
+	path, counter := graphProcessShims(t)
+	root := t.TempDir()
+	source := `import Json "effra/json"
+record Parcel { id: i64, label: string }
+derive parcelJson = Json.codec<Parcel>(maxBodyBytes: 256, maxDepth: 1)
+effect fn normalize(value: Parcel) -> Parcel { value }
+effect fn direct(body: string) -> Parcel raises { JsonDecodeFailure } {
+  run parcelJson.decode(body)
+}
+effect fn transfer(body: string) -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
+  let decoded = run body |> parcelJson.decode()
+  let normalized = run decoded |> normalize()
+  run normalized |> parcelJson.encode()
+}
+effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
+  let decoded = run direct("{\"id\":\"1\",\"label\":\"a\"}")
+  run transfer("{\"id\":\"1\",\"label\":\"a\"}")
+}`
+	file := filepath.Join(root, "parcel.ef")
+	if err := os.WriteFile(file, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cli, stderr, code := runTestCLIWithPath(t, binary, path, root, "graph", file, "--format", "json", "--edge-kind", "calls")
+	if code != 0 {
+		t.Fatalf("CLI graph refused: %d %s", code, stderr)
+	}
+	cliView := readProcessJSON(t, cli)
+	responses := runGraphMCP(t, binary, path, root, []map[string]any{{
+		"name":      "project.graph",
+		"arguments": map[string]any{"file": "parcel.ef", "format": "json", "edgeKinds": []any{"calls"}},
+	}})
+	result := responses[0]["result"].(map[string]any)
+	if result["isError"] != false {
+		t.Fatalf("MCP graph refused: %v", result["content"])
+	}
+	mcpView := result["structuredContent"].(map[string]any)
+	if !sameJSONValue(cliView, mcpView) {
+		t.Fatalf("CLI and MCP derived-call views differ")
+	}
+	edges := cliView["edges"].([]any)
+	want := map[string]int{
+		"function:direct":            1,
+		"function:transfer":          1,
+		"function:normalize":         1,
+		"function:parcelJson.decode": 2,
+		"function:parcelJson.encode": 1,
+	}
+	counts := map[string]int{}
+	for _, raw := range edges {
+		edge := raw.(map[string]any)
+		data := edge["data"].(map[string]any)["effra"].(map[string]any)
+		if data["relation"] == "calls" {
+			counts[edge["targetId"].(string)]++
+		}
+	}
+	for target, count := range want {
+		if counts[target] != count {
+			t.Fatalf("public call topology for %s: got %d, want %d (%v)", target, counts[target], count, counts)
+		}
+	}
+	nodes := cliView["nodes"].([]any)
+	for _, target := range []string{"function:parcelJson.decode", "function:parcelJson.encode"} {
+		var found map[string]any
+		for _, raw := range nodes {
+			node := raw.(map[string]any)
+			if node["id"] == target {
+				found = node
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("public view omitted derived codec node %s", target)
+		}
+		facts := found["data"].(map[string]any)["effra"].(map[string]any)
+		if facts["source"] == "" || facts["span"] == nil || facts["contract"] == nil {
+			t.Fatalf("public derived codec node lost source/span/contract closure: %v", found)
+		}
+	}
+	if _, err := os.Stat(counter); !os.IsNotExist(err) {
+		t.Fatalf("graph request invoked a toolchain or runtime: %v", err)
+	}
+}
+
 func runTestCLIWithPath(t *testing.T, binary, path, dir string, args ...string) ([]byte, []byte, int) {
 	t.Helper()
 	command := graphProcessCommand(binary, path, dir, args...)
