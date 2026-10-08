@@ -30,7 +30,7 @@ func builtins() []*Service {
 		{Name: "Env", Methods: []*Function{method("get", "string", []Param{p("name", "string")})}},
 		{Name: "Runtime", Methods: []*Function{method("inspect", "string", nil)}},
 		{Name: "Foreign"},
-		{Name: "Http", Methods: []*Function{listen, method("text", "bytes", []Param{p("text", "string")})}},
+		{Name: "Http", byReference: true, Methods: []*Function{listen, method("text", "bytes", []Param{p("text", "string")})}},
 	}
 }
 func builtinProviders() []*Provider {
@@ -67,6 +67,14 @@ var builtinCallbacks = map[string]struct{ Parameter, Result string }{
 // so other programs neither reserve its data names nor inspect it.
 func (p *Program) admitsHTTP() bool {
 	return p != nil && (p.references["Http"] || p.references["LiveHttp"])
+}
+
+// builtinProviderByReference reports whether a builtin provider implements a
+// contract admitted only by reference. Such a provider is not part of a
+// library's standing surface: plan reachability from the library's roots
+// retains it exactly where checked code selects it.
+func builtinProviderByReference(provider *Provider) bool {
+	return slices.ContainsFunc(builtins(), func(s *Service) bool { return s.byReference && s.Name == provider.Service })
 }
 
 // builtinServicesFor and builtinProvidersFor select the prelude one program

@@ -156,6 +156,9 @@ type Service struct {
 	Name    string
 	Methods []*Function
 	Span    Span
+	// byReference marks a builtin contract admitted only when the program
+	// refers to it, whose providers are retained only through checked use.
+	byReference bool
 	// native lists builtin runtime modules referenced by the service's
 	// operation signatures. Source services leave it empty.
 	native []rt.RuntimeModule

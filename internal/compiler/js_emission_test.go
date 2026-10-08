@@ -167,8 +167,9 @@ func TestJSEntryBehavesLikeTheCompletePrelude(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// A transport example serves until interrupted; scripts/
-		// http_transport_smoke.py drives it over sockets instead.
+		// A transport example serves until interrupted. Its covering test is
+		// scripts/http_transport_smoke.py, run by scripts/gate.sh: it starts the
+		// example on Go and JS and fails when the example stops serving.
 		if filepath.Base(path) == "http-transport.ef" {
 			continue
 		}
