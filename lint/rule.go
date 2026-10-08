@@ -24,11 +24,15 @@ func (s Severity) valid() bool {
 }
 
 // Limits on rule output. A rule exceeding them fails rather than having its
-// findings silently truncated.
+// findings silently truncated. MaxFindingsPerRule is enforced by the
+// custom-rule runner, not by Apply.
 const (
-	MaxFindingsPerRule  = 1000
-	MaxMessageBytes     = 4096
-	MaxRelatedLocations = 16
+	MaxFindingsPerRule       = 1000
+	MaxMessageBytes          = 4096
+	MaxRelatedLocations      = 16
+	MaxSuggestionsPerFinding = 8
+	MaxEditsPerSuggestion    = 64
+	MaxEditTextBytes         = 64 << 10
 )
 
 var identifierPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
@@ -87,9 +91,25 @@ type Related struct {
 // Finding is one rule result. The runner assigns rule identity and
 // severity; a rule cannot choose either.
 type Finding struct {
-	Message string    `json:"message"`
-	Span    Span      `json:"span"`
-	Related []Related `json:"related,omitempty"`
+	Message     string       `json:"message"`
+	Span        Span         `json:"span"`
+	Related     []Related    `json:"related,omitempty"`
+	Suggestions []Suggestion `json:"suggestions,omitempty"`
+}
+
+// Suggestion proposes replacing source text. It is a preview bound to the
+// snapshot revision the rule read: the runner validates it and never
+// applies it, and it is no proof that the edit preserves meaning.
+type Suggestion struct {
+	Message string `json:"message"`
+	Edits   []Edit `json:"edits"`
+}
+
+// Edit replaces the source text at Span with NewText; a zero-length span
+// inserts. Edits of one suggestion must not overlap or share a start.
+type Edit struct {
+	Span    Span   `json:"span"`
+	NewText string `json:"newText"`
 }
 
 // Pass is one rule execution over one snapshot.
@@ -110,11 +130,16 @@ func (p *Pass) Reportf(span Span, format string, args ...any) {
 // Apply runs rule over snapshot with already validated options. It is the
 // single execution path for built-in and pack rules: it recovers a panic as
 // a failure and validates every finding against the snapshot's source.
-// Missing families or targets are the caller's admission decision.
+// Missing families or targets are the caller's admission decision, and so
+// are output-count limits: a custom-rule runner bounds pack output, while
+// built-in rules report every finding to suppression and lint policy.
 func Apply(rule *Rule, snapshot *Snapshot, options Options) (findings []Finding, err error) {
 	if rule == nil || rule.Check == nil {
 		return nil, fmt.Errorf("rule has no check")
 	}
+	// The admitted source bounds output. It is captured before the rule
+	// runs: the rule can write to its snapshot, never to this bound.
+	source := snapshot.Source
 	pass := &Pass{Snapshot: snapshot, Options: options}
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -124,11 +149,8 @@ func Apply(rule *Rule, snapshot *Snapshot, options Options) (findings []Finding,
 	if err := rule.Check(pass); err != nil {
 		return nil, err
 	}
-	if len(pass.findings) > MaxFindingsPerRule {
-		return nil, fmt.Errorf("rule reported %d findings; the limit is %d", len(pass.findings), MaxFindingsPerRule)
-	}
 	for _, finding := range pass.findings {
-		if err := validateFinding(finding, snapshot.Source); err != nil {
+		if err := validateFinding(finding, source); err != nil {
 			return nil, err
 		}
 	}
@@ -151,6 +173,43 @@ func validateFinding(finding Finding, source Source) error {
 		}
 		if err := validateSpan(related.Span, source); err != nil {
 			return fmt.Errorf("related location %q: %w", related.Message, err)
+		}
+	}
+	if len(finding.Suggestions) > MaxSuggestionsPerFinding {
+		return fmt.Errorf("finding %q has %d suggestions; the limit is %d", finding.Message, len(finding.Suggestions), MaxSuggestionsPerFinding)
+	}
+	for _, suggestion := range finding.Suggestions {
+		if err := validateSuggestion(suggestion, source); err != nil {
+			return fmt.Errorf("finding %q: %w", finding.Message, err)
+		}
+	}
+	return nil
+}
+
+// validateSuggestion checks that every edit lies inside the source and that
+// no two edits overlap or start at the same offset, so applying them in
+// any order yields the same text.
+func validateSuggestion(suggestion Suggestion, source Source) error {
+	if err := validateMessage(suggestion.Message); err != nil {
+		return fmt.Errorf("suggestion: %w", err)
+	}
+	if len(suggestion.Edits) == 0 || len(suggestion.Edits) > MaxEditsPerSuggestion {
+		return fmt.Errorf("suggestion %q must have between 1 and %d edits", suggestion.Message, MaxEditsPerSuggestion)
+	}
+	edits := slices.Clone(suggestion.Edits)
+	for _, edit := range edits {
+		if err := validateSpan(edit.Span, source); err != nil {
+			return fmt.Errorf("suggestion %q edit: %w", suggestion.Message, err)
+		}
+		if len(edit.NewText) > MaxEditTextBytes || !utf8.ValidString(edit.NewText) {
+			return fmt.Errorf("suggestion %q edit text must be UTF-8 of at most %d bytes", suggestion.Message, MaxEditTextBytes)
+		}
+	}
+	slices.SortFunc(edits, func(a, b Edit) int { return a.Span.Offset - b.Span.Offset })
+	for i := 1; i < len(edits); i++ {
+		previous, next := edits[i-1].Span, edits[i].Span
+		if previous.Offset == next.Offset || previous.Offset+previous.Length > next.Offset {
+			return fmt.Errorf("suggestion %q has overlapping edits at bytes %d and %d", suggestion.Message, previous.Offset, next.Offset)
 		}
 	}
 	return nil

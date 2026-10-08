@@ -335,3 +335,43 @@ func replacedBuiltinPredicates(r *Result) []string {
 	slices.Sort(out)
 	return out
 }
+
+// Built-in advice is not bounded by the custom-rule output limit: every
+// redundant provision is a suggestion, suppression applies before policy,
+// and lint passes under strict policy however many there are.
+func TestBuiltinLintHasNoCustomOutputLimit(t *testing.T) {
+	provisions := func(count int, suppressed bool) string {
+		var source strings.Builder
+		source.WriteString("effect fn task() -> void { void }\neffect fn main() -> void {\n")
+		if suppressed {
+			source.WriteString("// effra-lint-disable-next-line redundant-provision -- deliberately redundant\n")
+		}
+		for range count {
+			source.WriteString("run task().provide<Console>(Stdout)\n")
+		}
+		source.WriteString("}\n")
+		return source.String()
+	}
+	for _, run := range []struct {
+		count, reported int
+		suppressed      bool
+	}{
+		{lintsdk.MaxFindingsPerRule, lintsdk.MaxFindingsPerRule, false},
+		{lintsdk.MaxFindingsPerRule + 1, lintsdk.MaxFindingsPerRule + 1, false},
+		{lintsdk.MaxFindingsPerRule + 2, lintsdk.MaxFindingsPerRule + 1, true},
+	} {
+		result := Compile(provisions(run.count, run.suppressed))
+		if !result.Checked {
+			t.Fatal(result.Diagnostics)
+		}
+		lint := result.Lint(true)
+		if !lint.LintPassed || lint.Errors != 0 || lint.Suggestions != run.reported || len(lint.LintDiagnostics) != run.reported {
+			t.Fatalf("%d provisions: passed=%v errors=%d suggestions=%d diagnostics=%d", run.count, lint.LintPassed, lint.Errors, lint.Suggestions, len(lint.LintDiagnostics))
+		}
+		for _, diagnostic := range lint.LintDiagnostics {
+			if diagnostic.Rule != "redundant-provision" {
+				t.Fatalf("%d provisions: %+v", run.count, diagnostic)
+			}
+		}
+	}
+}

@@ -167,6 +167,9 @@ func decodeOptionValue(spec OptionSpec, raw json.RawMessage) (any, error) {
 		}
 		return nil
 	}
+	if isNull(raw) {
+		return nil, fmt.Errorf("null is not a %s value", spec.Type)
+	}
 	switch spec.Type {
 	case OptionString:
 		var value string
@@ -190,15 +193,19 @@ func decodeOptionValue(spec OptionSpec, raw json.RawMessage) (any, error) {
 		}
 		return value, nil
 	case OptionStringList:
-		var value []string
-		if err := decodeStrict(raw, &value); err != nil || value == nil {
+		var items []json.RawMessage
+		if err := decodeStrict(raw, &items); err != nil {
 			return nil, fmt.Errorf("expected an array of strings")
 		}
-		if len(value) > maxOptionStrings {
+		if len(items) > maxOptionStrings {
 			return nil, fmt.Errorf("exceeds %d values", maxOptionStrings)
 		}
-		for _, item := range value {
-			if err := enumerated(item); err != nil {
+		value := make([]string, len(items))
+		for i, item := range items {
+			if isNull(item) || decodeStrict(item, &value[i]) != nil {
+				return nil, fmt.Errorf("expected an array of strings")
+			}
+			if err := enumerated(value[i]); err != nil {
 				return nil, err
 			}
 		}
@@ -206,6 +213,10 @@ func decodeOptionValue(spec OptionSpec, raw json.RawMessage) (any, error) {
 	}
 	return nil, fmt.Errorf("unsupported type %q", spec.Type)
 }
+
+// isNull reports an explicit JSON null, which encoding/json would otherwise
+// decode into a scalar's zero value as if a value had been supplied.
+func isNull(raw json.RawMessage) bool { return bytes.Equal(bytes.TrimSpace(raw), []byte("null")) }
 
 // decodeStrict decodes exactly one JSON value, rejecting unknown struct
 // fields, duplicate object keys and trailing data. encoding/json alone keeps

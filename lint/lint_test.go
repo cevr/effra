@@ -109,6 +109,8 @@ func TestManifestValidationRefusals(t *testing.T) {
 		{"bad option type", strings.Replace(base, `"type":"integer"`, `"type":"float"`, 1), "unsupported type"},
 		{"bad default", strings.Replace(base, `"default":"a"`, `"default":"c"`, 1), "not one of"},
 		{"bad target", strings.Replace(base, `"requires":["callables"]`, `"requires":["callables"],"targets":["wasm"]`, 1), "unsupported target"},
+		{"null default", strings.Replace(base, `"default":"a"`, `"default":null`, 1), "null is not a string value"},
+		{"null list default", strings.Replace(base, `"type":"string-list"`, `"type":"string-list","default":[null]`, 1), "expected an array of strings"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -153,7 +155,8 @@ func TestRegistryRefusesDuplicateAndReservedIdentities(t *testing.T) {
 }
 
 func TestConfigurationValidation(t *testing.T) {
-	registry, err := NewRegistry(testBuiltins, testManifest(t, testPack(func(*Pass) error { return nil })))
+	ran := false
+	registry, err := NewRegistry(testBuiltins, testManifest(t, testPack(func(*Pass) error { ran = true; return nil })))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,6 +174,10 @@ func TestConfigurationValidation(t *testing.T) {
 		{"enum option", `{"version":1,"rules":{"acme/no-op":{"options":{"label":"z"}}}}`, ProblemInvalidOptions},
 		{"options not object", `{"version":1,"rules":{"acme/no-op":{"options":[1]}}}`, ProblemInvalidOptions},
 		{"builtin has no options", `{"version":1,"rules":{"unused-recipe":{"options":{"x":true}}}}`, ProblemInvalidOptions},
+		{"null integer", `{"version":1,"rules":{"acme/no-op":{"options":{"limit":null}}}}`, ProblemInvalidOptions},
+		{"null string", `{"version":1,"rules":{"acme/no-op":{"options":{"label":null}}}}`, ProblemInvalidOptions},
+		{"null list", `{"version":1,"rules":{"acme/no-op":{"options":{"names":null}}}}`, ProblemInvalidOptions},
+		{"null list element", `{"version":1,"rules":{"acme/no-op":{"options":{"names":["a",null]}}}}`, ProblemInvalidOptions},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -189,6 +196,10 @@ func TestConfigurationValidation(t *testing.T) {
 		`{"version":1,"rules":{"acme/no-op":{"severity":"error","severity":"off"}}}`,
 		`{"version":1,"rules":{"acme/no-op":{"options":{"limit":1,"limit":2}}}}`,
 		`{"version":1,"rules":{"acme/no-op":null}}`,
+		`{"version":1,"rules":{"acme/no-op":""}}`,
+		`{"version":1,"rules":{"acme/no-op":{"severity":null}}}`,
+		`{"version":1,"rules":{"acme/no-op":{"severity":""}}}`,
+		`{"version":1,"rules":{"acme/no-op":{"severity":1}}}`,
 	} {
 		config, err := ParseConfig([]byte(document))
 		if err == nil {
@@ -198,6 +209,19 @@ func TestConfigurationValidation(t *testing.T) {
 	}
 	if _, err := ParseConfig([]byte(`{"version":1,"preset":"x"}`)); err == nil {
 		t.Fatal("unknown configuration field accepted")
+	}
+	// Omitting severity still selects the default, with options.
+	defaults := configure(t, registry, `{"version":1,"rules":{"acme/no-op":{"options":{"names":["x"]}}}}`)
+	if setting, _ := defaults.Setting("acme/no-op"); setting.Severity != SeverityWarning || !setting.Configured || !reflect.DeepEqual(setting.Options.StringList("names"), []string{"x"}) {
+		t.Fatalf("omitted severity: %+v", setting)
+	}
+	// A required boolean given null is refused, not read as false.
+	required := []OptionSpec{{Name: "enabled", Type: OptionBoolean, Required: true}}
+	if _, err := ValidateOptions(required, json.RawMessage(`{"enabled":null}`)); err == nil || !strings.Contains(err.Error(), "null is not a boolean value") {
+		t.Fatalf("null required boolean: %v", err)
+	}
+	if ran {
+		t.Fatal("a rule ran while configuration was refused")
 	}
 }
 
@@ -324,6 +348,30 @@ func TestEvaluateStatuses(t *testing.T) {
 	}
 }
 
+// A rule cannot authorize its own output by enlarging the source bound in
+// its snapshot: findings are validated against the admitted source.
+func TestApplyValidatesAgainstTheAdmittedSource(t *testing.T) {
+	outside := Span{Offset: 500, Length: 1, Line: 1, Column: 501}
+	for name, check := range map[string]func(*Pass) error{
+		"identical span": func(pass *Pass) error { pass.Reportf(outside, "outside"); return nil },
+		"enlarged bound": func(pass *Pass) error {
+			pass.Snapshot.Source.Bytes = 10_000
+			pass.Reportf(outside, "outside")
+			return nil
+		},
+	} {
+		pack := testPack(check)
+		registry, err := NewRegistry(testBuiltins, testManifest(t, pack))
+		if err != nil {
+			t.Fatal(err)
+		}
+		report, err := Evaluate(pack, configure(t, registry, `{"version":1}`), testSnapshot())
+		if err != nil || report.Complete || report.Rules[0].Status != StatusFailed || !strings.Contains(report.Rules[0].Reason, "outside the 20-byte source") || len(report.Findings) != 0 {
+			t.Fatalf("%s: %+v %v", name, report, err)
+		}
+	}
+}
+
 // In-process rules each read a private copy: a rule that rewrites its
 // snapshot cannot change what a later rule or the caller sees.
 func TestEvaluateIsolatesRuleSnapshots(t *testing.T) {
@@ -381,6 +429,33 @@ func TestSDKDoesNotImportCompilerInternals(t *testing.T) {
 					t.Fatalf("%s imports %s", file, path)
 				}
 			}
+		}
+	}
+}
+
+// A decoded RuleConfig is replaced, never merged: reusing a value for the
+// bare-severity shorthand clears earlier options exactly as the equivalent
+// object does, and a refused document leaves the value unchanged.
+func TestRuleConfigDecodingReplacesAReusedValue(t *testing.T) {
+	for _, shorthand := range []string{`"off"`, `{"severity":"off"}`} {
+		var setting RuleConfig
+		if err := json.Unmarshal([]byte(`{"severity":"warning","options":{"limit":7}}`), &setting); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(shorthand), &setting); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(setting, RuleConfig{Severity: SeverityOff}) {
+			t.Fatalf("%s kept part of the earlier setting: %+v (options %s)", shorthand, setting, setting.Options)
+		}
+	}
+	for _, refused := range []string{`""`, `{"severity":""}`, `{"severity":null,"options":{}}`, `{"options":{},"extra":1}`} {
+		setting := RuleConfig{Severity: SeverityHint, Options: json.RawMessage(`{"limit":7}`)}
+		if err := json.Unmarshal([]byte(refused), &setting); err == nil {
+			t.Fatalf("%s decoded", refused)
+		}
+		if setting.Severity != SeverityHint || string(setting.Options) != `{"limit":7}` {
+			t.Fatalf("refused %s changed the value: %+v", refused, setting)
 		}
 	}
 }

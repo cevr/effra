@@ -82,7 +82,8 @@ type Config struct {
 }
 
 // RuleConfig selects a severity and options. In JSON, a bare severity
-// string is shorthand for {"severity": ...}.
+// string is shorthand for {"severity": ...}. An omitted severity selects the
+// rule's default; an explicit null or empty severity is refused.
 type RuleConfig struct {
 	Severity Severity        `json:"severity,omitempty"`
 	Options  json.RawMessage `json:"options,omitempty"`
@@ -92,17 +93,42 @@ func (c *RuleConfig) UnmarshalJSON(data []byte) error {
 	if string(data) == "null" {
 		return fmt.Errorf("a rule setting must be a severity or an object")
 	}
+	// Both spellings decode into a fresh value that replaces the receiver
+	// only once valid: nothing of a previously decoded setting survives.
+	var fresh RuleConfig
 	var severity string
 	if err := json.Unmarshal(data, &severity); err == nil {
-		*c = RuleConfig{Severity: Severity(severity)}
+		if err := fresh.setSeverity(severity); err != nil {
+			return err
+		}
+		*c = fresh
 		return nil
 	}
-	type plain RuleConfig
-	var value plain
+	var value struct {
+		Severity json.RawMessage `json:"severity"`
+		Options  json.RawMessage `json:"options"`
+	}
 	if err := decodeStrict(data, &value); err != nil {
 		return err
 	}
-	*c = RuleConfig(value)
+	fresh.Options = value.Options
+	if value.Severity != nil {
+		if isNull(value.Severity) || json.Unmarshal(value.Severity, &severity) != nil {
+			return fmt.Errorf("a rule severity must be a string")
+		}
+		if err := fresh.setSeverity(severity); err != nil {
+			return err
+		}
+	}
+	*c = fresh
+	return nil
+}
+
+func (c *RuleConfig) setSeverity(severity string) error {
+	if severity == "" {
+		return fmt.Errorf("a rule severity must not be empty; omit it to select the default")
+	}
+	c.Severity = Severity(severity)
 	return nil
 }
 
@@ -360,75 +386,54 @@ type RuleStatus struct {
 }
 
 // ReportedFinding is a finding projected with its rule identity and
-// configured severity.
+// configured severity. Suggestions are previews bound to the report's
+// semantic revision.
 type ReportedFinding struct {
-	Rule     string    `json:"rule"`
-	Severity Severity  `json:"severity"`
-	Message  string    `json:"message"`
-	Span     Span      `json:"span"`
-	Related  []Related `json:"related,omitempty"`
+	Rule        string       `json:"rule"`
+	Severity    Severity     `json:"severity"`
+	Message     string       `json:"message"`
+	Span        Span         `json:"span"`
+	Related     []Related    `json:"related,omitempty"`
+	Suggestions []Suggestion `json:"suggestions,omitempty"`
 }
 
-// Report is the in-process evaluation result of one pack. Complete is false
-// when any enabled rule was skipped or failed.
+// Report is the evaluation result of one pack. Complete is false when any
+// enabled rule was skipped or failed. Failure is set when the pack as a
+// whole failed (its process crashed, hung or answered invalidly); every
+// rule it was asked to run is then failed and none of its findings is
+// reported.
 type Report struct {
 	Analysis AnalysisIdentity  `json:"analysis"`
 	Complete bool              `json:"complete"`
+	Failure  *ExecutionFailure `json:"failure,omitempty"`
 	Rules    []RuleStatus      `json:"rules"`
 	Findings []ReportedFinding `json:"findings"`
 }
 
 // Evaluate runs a Go pack in-process over snapshot under configuration,
 // which must have been built from a registry containing the pack's
-// manifest. It is the stage-one authoring/test harness; a separate process
-// runner reuses the same admission and finding validation. Each rule reads
-// its own copy decoded from the snapshot's wire form, so a rule sees exactly
-// what a pack process would and cannot alter another rule's facts.
+// manifest. It is the authoring/test harness for Run: the same admission,
+// request, rule execution and response validation under the default
+// limits, including the size of the response a pack process would write,
+// without a process or framing. Each rule reads its own copy decoded from
+// the snapshot's wire form, exactly as in a pack process.
 func Evaluate(pack *Pack, configuration *Configuration, snapshot *Snapshot) (Report, error) {
-	manifest, ok := configuration.registry.Pack(pack.Namespace)
-	if !ok {
-		return Report{}, fmt.Errorf("rule pack %s is not selected by this configuration", pack.Namespace)
-	}
-	wire, err := json.Marshal(snapshot)
+	work, err := prepare(configuration, pack.Namespace, snapshot)
 	if err != nil {
-		return Report{}, fmt.Errorf("encode fact snapshot: %w", err)
+		return Report{}, err
 	}
-	report := Report{Analysis: configuration.Analysis(snapshot), Complete: true, Rules: []RuleStatus{}, Findings: []ReportedFinding{}}
-	for _, metadata := range manifest.Rules {
-		id := pack.Namespace + "/" + metadata.Name
-		setting, _ := configuration.Setting(id)
-		status := RuleStatus{Rule: id}
-		rule := pack.Rule(metadata.Name)
-		switch refusal, reason := admit(manifest, metadata, snapshot); {
-		case setting.Severity == SeverityOff:
-			status.Status = StatusOff
-		case rule == nil:
-			status.Status, status.Reason = StatusFailed, "pack does not implement its manifest rule"
-		case refusal != "":
-			status.Status, status.Reason = refusal, reason
-		default:
-			view := &Snapshot{}
-			if err := json.Unmarshal(wire, view); err != nil {
-				return Report{}, fmt.Errorf("decode fact snapshot: %w", err)
-			}
-			findings, err := Apply(rule, view, setting.Options)
-			if err != nil {
-				status.Status, status.Reason = StatusFailed, err.Error()
-				break
-			}
-			status.Status, status.Findings = StatusCompleted, len(findings)
-			for _, finding := range findings {
-				report.Findings = append(report.Findings, ReportedFinding{Rule: id, Severity: setting.Severity, Message: finding.Message, Span: finding.Span, Related: finding.Related})
-			}
+	if len(work.request.Rules) > 0 {
+		response := respond(pack, work.request)
+		// The size Serve would frame: the same encoding of the same value.
+		wire, err := json.Marshal(response)
+		if err != nil {
+			return Report{}, fmt.Errorf("encode response: %w", err)
 		}
-		if status.Status == StatusSkipped || status.Status == StatusFailed {
-			report.Complete = false
+		if failure := work.accept(response, len(wire), DefaultLimits()); failure != nil {
+			work.fail(failure)
 		}
-		report.Rules = append(report.Rules, status)
 	}
-	slices.SortFunc(report.Rules, func(a, b RuleStatus) int { return strings.Compare(a.Rule, b.Rule) })
-	slices.SortStableFunc(report.Findings, compareFindings)
-	return report, nil
+	return work.finish(), nil
 }
 
 // admit returns the status refusing a rule over snapshot with its reason,
