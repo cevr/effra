@@ -280,7 +280,6 @@ type Result struct {
 	checkedSymbols         map[string]checkedSymbol
 	checkedFunctions       map[*Function]checkedSymbol
 	checkedProviderRoots   map[*Provider]checkedExpression
-	checkedProviderValues  map[*Provider]bool
 	publicationRefused     bool
 	publicationUsage       ProjectionUsage
 }
@@ -415,7 +414,6 @@ func (c *checker) checkedDataID(id TypeID, ownership, captures []OwnershipFact) 
 }
 
 func (c *checker) checkedProvider(p *Provider, recipe bool) checkedExpression {
-	c.result.checkedProviderValues[p] = true
 	providerID := c.canonicalRef(providerTypeRef(p))
 	if recipe {
 		failure := c.internRow(nil)
@@ -2195,7 +2193,6 @@ func newChecker(program *Program, r *Result) *checker {
 	r.checkedSymbols = map[string]checkedSymbol{}
 	r.checkedFunctions = map[*Function]checkedSymbol{}
 	r.checkedProviderRoots = map[*Provider]checkedExpression{}
-	r.checkedProviderValues = map[*Provider]bool{}
 	return c
 }
 

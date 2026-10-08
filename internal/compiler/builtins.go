@@ -134,13 +134,3 @@ func addBuiltinData(program *Program) {
 	program.Records = append(builtin.Records, program.Records...)
 	program.Enums = append(builtin.Enums, program.Enums...)
 }
-
-// referencesBuiltinProvider reports whether checked code holds a value of
-// the named builtin provider: a provider reference, construction or layer
-// selection. Builtin providers have no declaration root, so this is exactly
-// the set of checked references. Their implementations are emitted only for
-// such references, never for an admitted contract alone.
-func (r *Result) referencesBuiltinProvider(name string) bool {
-	provider := r.checkedProviders[name]
-	return provider != nil && r.checkedProviderValues[provider]
-}

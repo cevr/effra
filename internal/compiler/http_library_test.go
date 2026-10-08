@@ -1,8 +1,6 @@
 package compiler
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -75,64 +73,5 @@ func TestJSLibraryInterfaceOnlyHttpKeepsServiceButNotTransport(t *testing.T) {
 	}
 	if strings.Contains(library, "node:http") {
 		t.Fatal("interface-only library embeds the transport")
-	}
-}
-
-// httpLibraryCorpus is every example plus the Http programs above.
-func httpLibraryCorpus(t *testing.T) map[string]string {
-	t.Helper()
-	corpus := map[string]string{
-		"interface only": httpInterfaceOnlyLibrary, "providing": httpProvidingLibrary,
-		"transport routes unprovided": httpTransportRouteSource,
-		"transport routes listening":  httpTransportRouteSource + `effect fn main()->void{let pending=Http.listen("127.0.0.1:0",limits(),route).provide<Users>(Memory).provide<Http>(LiveHttp);void}`,
-		"provided layer":              httpProvidedLayerLibrary, "unprovided layer": httpUnprovidedLayerLibrary, "local name": httpLocalNameLibrary,
-	}
-	files, err := filepath.Glob("../../examples/*.ef")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range files {
-		source, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		corpus[filepath.Base(path)] = string(source)
-	}
-	return corpus
-}
-
-// Transitional: the library plan reaches LiveHttp exactly where the checker
-// recorded a LiveHttp value. Removed with that side table.
-func TestLibraryPlanReachesLiveHttpExactlyWhereCheckedValuesSelectIt(t *testing.T) {
-	selected := 0
-	for name, source := range httpLibraryCorpus(t) {
-		r := CompileAt(source, "go", "../../examples")
-		if !r.Checked {
-			continue
-		}
-		plan, err := r.LibraryPlan()
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		want := r.referencesBuiltinProvider("LiveHttp")
-		got := false
-		if provider := r.checkedProviders["LiveHttp"]; provider != nil {
-			got = plan.Requires(RequiresProvider, providerTypeRef(provider).Declaration)
-		}
-		// An unprovided layer is the one divergence: the checker saw its
-		// LiveHttp value, but the library exports no layer, so the plan does
-		// not carry the transport the old record over-approximated.
-		if name == "unprovided layer" {
-			want = false
-		}
-		if got != want {
-			t.Errorf("%s: library plan retains LiveHttp %v, checked values select it %v", name, got, want)
-		}
-		if want {
-			selected++
-		}
-	}
-	if selected < 3 {
-		t.Fatalf("corpus selects LiveHttp %d times, want at least the providing, layer and http examples", selected)
 	}
 }
