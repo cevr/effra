@@ -104,8 +104,7 @@ func TestCodecDerivationRefusals(t *testing.T) {
 		{"zero maxDepth", "derive c = Json.codec<string>(maxBodyBytes: 64, maxDepth: 0)", "EF138", "maxDepth must be between 1 and 512"},
 		{"maxDepth above ceiling", "derive c = Json.codec<string>(maxBodyBytes: 64, maxDepth: 513)", "EF138", "maxDepth must be between 1 and 512"},
 		{"zero maxBodyBytes", "derive c = Json.codec<string>(maxBodyBytes: 0, maxDepth: 1)", "EF138", "maxBodyBytes must be between 1"},
-		{"no bounds", "derive c = Json.codec<string>", "EF138", "codec c requires the explicit bound maxBodyBytes; codec bounds have no default"},
-		{"no bounds names maxDepth", "derive c = Json.codec<string>", "EF138", "codec c requires the explicit bound maxDepth; codec bounds have no default"},
+		{"no bounds names both", "derive c = Json.codec<string>", "EF138", "codec c requires the explicit bound maxBodyBytes; codec bounds have no default\ncodec c requires the explicit bound maxDepth; codec bounds have no default"},
 		{"missing maxDepth", "derive c = Json.codec<string>(maxBodyBytes: 64)", "EF138", "codec c requires the explicit bound maxDepth"},
 		{"missing maxBodyBytes", "derive c = Json.codec<string>(maxDepth: 4)", "EF138", "codec c requires the explicit bound maxBodyBytes"},
 		{"empty bounds", "derive c = Json.codec<string>()", "EF138", "codec c requires the explicit bound maxBodyBytes"},
@@ -133,12 +132,15 @@ func TestCodecDerivationRefusals(t *testing.T) {
 			if r.Checked {
 				t.Fatalf("source was admitted")
 			}
-			found := false
-			for _, d := range r.Diagnostics {
-				found = found || d.Code == tc.code && strings.Contains(d.Message, tc.message)
-			}
-			if !found {
-				t.Fatalf("want %s %q: %+v", tc.code, tc.message, r.Diagnostics)
+			// A newline in message lists several diagnostics that must all appear.
+			for _, message := range strings.Split(tc.message, "\n") {
+				found := false
+				for _, d := range r.Diagnostics {
+					found = found || d.Code == tc.code && strings.Contains(d.Message, message)
+				}
+				if !found {
+					t.Fatalf("want %s %q: %+v", tc.code, message, r.Diagnostics)
+				}
 			}
 			if _, _, err := r.Emit(false); err == nil {
 				t.Fatal("refused source emitted")
