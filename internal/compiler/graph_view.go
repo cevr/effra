@@ -1,10 +1,12 @@
 package compiler
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"slices"
 	"strconv"
@@ -75,17 +77,19 @@ type GraphViewEdgeData struct {
 // GraphNodeFacts are the checked facts of one published node. Each kind fills
 // only the fields that have meaning for it.
 type GraphNodeFacts struct {
-	Kind      string                 `json:"kind"`
-	Name      string                 `json:"name,omitempty"`
-	Source    string                 `json:"source,omitempty"`
-	Span      *Span                  `json:"span,omitempty"`
-	Contract  *ValueType             `json:"contract,omitempty"`
-	Layer     *GraphLayerFacts       `json:"layer,omitempty"`
-	Binding   *GraphBindingFacts     `json:"binding,omitempty"`
-	Retention *GraphRetentionFacts   `json:"retention,omitempty"`
-	Collapsed *GraphCollapsedFacts   `json:"collapsed,omitempty"`
-	Frontier  bool                   `json:"frontier,omitempty"`
-	Selection *GraphLayerSelectFacts `json:"selection,omitempty"`
+	Kind      string               `json:"kind"`
+	Name      string               `json:"name,omitempty"`
+	Source    string               `json:"source,omitempty"`
+	Span      *Span                `json:"span,omitempty"`
+	Contract  *ValueType           `json:"contract,omitempty"`
+	Layer     *GraphLayerFacts     `json:"layer,omitempty"`
+	Binding   *GraphBindingFacts   `json:"binding,omitempty"`
+	Retention *GraphRetentionFacts `json:"retention,omitempty"`
+	Collapsed *GraphCollapsedFacts `json:"collapsed,omitempty"`
+	Frontier  bool                 `json:"frontier,omitempty"`
+	// Closure marks a node published only because a selected edge names it
+	// in metadata (a plan or a replacement site); it was not traversed.
+	Closure bool `json:"closure,omitempty"`
 }
 
 // GraphEdgeFacts identify one checked relation occurrence.
@@ -101,10 +105,13 @@ type GraphEdgeFacts struct {
 
 // GraphCollapsedFacts records the members a collapse hid. Hidden members are
 // presentation omissions: their IDs remain canonical, no summary edge stands
-// in for them, and a published edge always joins two published facts.
+// in for them, and a published edge always joins two published facts. A
+// hidden member on the depth frontier is listed in HiddenFrontier, and its
+// root then stands on the frontier for it.
 type GraphCollapsedFacts struct {
-	HiddenMembers []string `json:"hiddenMembers"`
-	HiddenEdges   int      `json:"hiddenEdges"`
+	HiddenMembers  []string `json:"hiddenMembers"`
+	HiddenEdges    int      `json:"hiddenEdges"`
+	HiddenFrontier []string `json:"hiddenFrontier,omitempty"`
 }
 
 type GraphViewFacts struct {
@@ -134,6 +141,8 @@ type GraphSelection struct {
 
 // GraphCompleteness separates an intentional selection from a refusal: a
 // successful view is complete for its scope, and the fact totals are exact.
+// Published nodes are the selected nodes left visible by collapse plus the
+// closure nodes that selected edges reference.
 type GraphCompleteness struct {
 	Scope          string   `json:"scope"`
 	Complete       bool     `json:"complete"`
@@ -144,6 +153,7 @@ type GraphCompleteness struct {
 	SelectedEdges  int      `json:"selectedEdges"`
 	PublishedNodes int      `json:"publishedNodes"`
 	PublishedEdges int      `json:"publishedEdges"`
+	ClosureNodes   int      `json:"closureNodes"`
 	Frontier       []string `json:"frontier"`
 }
 
@@ -349,7 +359,7 @@ func GraphOptionSchema() map[string]any {
 var graphKindRelations = map[GraphKind][]string{
 	GraphKindDependency:  {"adapts", "calls", "constructs", "contains", "implements", "materializes", "originates", "provides", "provides-layer", "references", "requires"},
 	GraphKindLayers:      {"consumes-input", "depends-on", "merges", "replaces", "requires-input", "selects"},
-	GraphKindApplication: {"retains", "runtime-requires"},
+	GraphKindApplication: {"retains", "runtime-requires", "selects"},
 }
 
 // graphKindContainment names the forest relation collapse groups follow. A
@@ -444,16 +454,17 @@ func ParseGraphRequest(fields map[string]any) (GraphRequest, error) {
 	}
 	request.Focus = focus
 	if value, present := fields["depth"]; present {
-		depth, ok := graphInteger(value)
-		if !ok || depth < 0 {
+		wide, ok := graphDepth(value)
+		if !ok {
 			return request, graphRefusal(GraphRefusalInvocation, "depth must be a non-negative integer")
 		}
 		if !hasFocus {
 			return request, graphRefusal(GraphRefusalIncompatible, "depth requires focus")
 		}
-		if depth > defaultGraphViewLimits.Depth {
-			return request, graphRefusal(GraphRefusalDepthLimit, "depth %d exceeds the %d-hop limit", depth, defaultGraphViewLimits.Depth)
+		if wide > float64(defaultGraphViewLimits.Depth) {
+			return request, graphRefusal(GraphRefusalDepthLimit, "depth %s exceeds the %d-hop limit", strconv.FormatFloat(wide, 'f', -1, 64), defaultGraphViewLimits.Depth)
 		}
+		depth := int(wide)
 		request.Depth = &depth
 	}
 	if direction, present, err := text("direction"); err != nil {
@@ -488,7 +499,7 @@ func ParseGraphRequest(fields map[string]any) (GraphRequest, error) {
 		return request, err
 	}
 	if len(request.Collapse) > 0 && graphKindContainment[request.Kind] == "" {
-		return request, graphRefusal(GraphRefusalCollapse, "graph kind %s has no containment groups to collapse; shared bindings are not owned by one parent", request.Kind)
+		return request, graphRefusal(GraphRefusalIncompatible, "collapse does not apply to graph kind %s; it has no containment groups because shared bindings are not owned by one parent", request.Kind)
 	}
 	if mode, present, err := text("mode"); err != nil {
 		return request, err
@@ -507,20 +518,49 @@ func ParseGraphRequest(fields map[string]any) (GraphRequest, error) {
 	return request, nil
 }
 
-func graphInteger(value any) (int, bool) {
+// DecodeGraphJSON decodes one JSON value as every graph transport carries it
+// to ParseGraphRequest: numbers stay json.Number, so CLI flag text and MCP
+// arguments reach graph admission as the same Go value, and a literal no
+// float64 holds (such as 1e400) gets graphDepth's refusal rather than a
+// decoder error that only one transport would report.
+func DecodeGraphJSON(raw []byte) (any, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, fmt.Errorf("unexpected data after the JSON value")
+	}
+	return value, nil
+}
+
+// graphDepth admits a depth however its transport decoded it: an int from a
+// Go caller, a float64 from JSON, or a json.Number from DecodeGraphJSON. It rejects a
+// non-finite, non-integral or negative value and returns the integer value
+// without narrowing, so the hop limit is checked before conversion and an
+// excessive depth gets the same refusal from every transport.
+func graphDepth(value any) (float64, bool) {
+	var depth float64
 	switch value := value.(type) {
 	case int:
-		return value, true
+		depth = float64(value)
 	case float64:
-		if value != math.Trunc(value) || value < math.MinInt32 || value > math.MaxInt32 {
+		depth = value
+	case json.Number:
+		parsed, err := strconv.ParseFloat(string(value), 64)
+		if err != nil {
 			return 0, false
 		}
-		return int(value), true
-	case json.Number:
-		n, err := strconv.Atoi(string(value))
-		return n, err == nil
+		depth = parsed
+	default:
+		return 0, false
 	}
-	return 0, false
+	if math.IsNaN(depth) || math.IsInf(depth, 0) || depth != math.Trunc(depth) || depth < 0 {
+		return 0, false
+	}
+	return depth, true
 }
 
 func (request GraphRequest) viewLimits(r *Result) GraphViewLimits {
@@ -691,13 +731,7 @@ func (r *Result) layerGraphFacts(limits GraphViewLimits) (*graphFacts, error) {
 		for _, node := range plan.Nodes {
 			bindingSpan := node.Span
 			facts.addNode(GraphViewNode{ID: node.ID, Label: node.Service, Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: "layer-binding", Name: node.Service, Span: &bindingSpan, Binding: &GraphBindingFacts{Service: node.Service, ServiceIdentity: node.ServiceIdentity}}}}, dependencyContract{})
-			selection := &GraphLayerSelectFacts{
-				Public: node.Public, Implementation: node.Implementation, ImplementationIdentity: node.ImplementationIdentity,
-				SelectionSpan: node.SelectionSpan, Occurrences: node.Occurrences, Replacements: node.Replacements,
-				ConstructionRequirements: node.Requirements, ConstructionFailures: node.Failures,
-				Constructor: node.Constructor, Parameters: node.Parameters, Arguments: node.Arguments, Owner: node.Owner,
-			}
-			facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "selects", plan.ID, node.ID), SourceID: plan.ID, TargetID: node.ID, Label: "selects", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "selects", Plan: plan.ID, Selection: selection}}}, layerNodeContracts(node)...)
+			facts.addLayerSelection(plan.ID, node.ID, node)
 			for _, dependency := range node.Dependencies {
 				facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "depends-on", node.ID, dependency, plan.ID), SourceID: node.ID, TargetID: dependency, Label: "depends-on", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "depends-on", Plan: plan.ID}}})
 			}
@@ -763,6 +797,20 @@ type GraphLayerSelectFacts struct {
 	Owner                    string          `json:"plannedOwner"`
 }
 
+// addLayerSelection publishes one plan's selection of a canonical binding as a
+// plan-qualified selects edge carrying the selection's constructor and
+// configuration types. A binding shared by several plans keeps one node, and
+// each plan's effective implementation lives on its own edge.
+func (f *graphFacts) addLayerSelection(planNode, bindingNode string, node LayerNode) {
+	selection := &GraphLayerSelectFacts{
+		Public: node.Public, Implementation: node.Implementation, ImplementationIdentity: node.ImplementationIdentity,
+		SelectionSpan: node.SelectionSpan, Occurrences: node.Occurrences, Replacements: node.Replacements,
+		ConstructionRequirements: node.Requirements, ConstructionFailures: node.Failures,
+		Constructor: node.Constructor, Parameters: node.Parameters, Arguments: node.Arguments, Owner: node.Owner,
+	}
+	f.addEdge(GraphViewEdge{ID: graphTupleID("edge", "selects", planNode, bindingNode), SourceID: planNode, TargetID: bindingNode, Label: "selects", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "selects", Plan: planNode, Selection: selection}}}, layerNodeContracts(node)...)
+}
+
 // GraphRetentionFacts identify one retained application requirement or a
 // typed provenance origin that is not itself a requirement.
 type GraphRetentionFacts struct {
@@ -775,11 +823,14 @@ type GraphRetentionFacts struct {
 // graphSelection is the selected subgraph before publication.
 type graphSelection struct {
 	nodes    map[string]bool
+	closure  map[string]bool
 	edges    []int
 	frontier []string
 	parents  map[string]string
 	hidden   map[string][]string
 	hiddenN  map[string]int
+	// hiddenFrontier lists, per collapse root, the hidden frontier members.
+	hiddenFrontier map[string][]string
 }
 
 // selectGraph applies focus, depth, direction and relation selection to the
@@ -797,7 +848,7 @@ func (f *graphFacts) selectGraph(request GraphRequest, limits GraphViewLimits) (
 			return nil, graphRefusal(GraphRefusalInvalidView, "fact edge %s has an unpublished endpoint", fact.edge.ID)
 		}
 	}
-	selection := &graphSelection{nodes: map[string]bool{}, parents: map[string]string{}, hidden: map[string][]string{}, hiddenN: map[string]int{}}
+	selection := &graphSelection{nodes: map[string]bool{}, closure: map[string]bool{}, parents: map[string]string{}, hidden: map[string][]string{}, hiddenN: map[string]int{}, hiddenFrontier: map[string][]string{}}
 	if request.Focus == "" {
 		for id := range f.nodes {
 			selection.nodes[id] = true
@@ -870,13 +921,32 @@ func (f *graphFacts) selectGraph(request GraphRequest, limits GraphViewLimits) (
 	if err := f.collapse(request, selection); err != nil {
 		return nil, err
 	}
+	f.closeReferences(selection)
 	return selection, nil
+}
+
+// closeReferences publishes the nodes that selected edges name in metadata
+// but the traversal did not select, such as the plan qualifying a depends-on
+// edge or a selection's replacement site. Closure nodes are never traversed,
+// gain no edges and never join the frontier, so the requested boundary is
+// unchanged while every published reference resolves.
+func (f *graphFacts) closeReferences(selection *graphSelection) {
+	for _, index := range selection.edges {
+		for _, reference := range graphEdgeReferences(f.kind, f.edges[index].edge) {
+			if !selection.nodes[reference.id] && f.nodes[reference.id] != nil {
+				selection.nodes[reference.id] = true
+				selection.closure[reference.id] = true
+			}
+		}
+	}
 }
 
 // collapse hides the interior members of each containment group. A member
 // with any selected relation outside its group stays published as a child of
 // the group root, so every published edge is an original fact edge and no
-// path through the group is fabricated.
+// path through the group is fabricated. Collapse never erases a depth cut: a
+// root whose hidden members include frontier nodes joins the frontier and
+// lists those members.
 func (f *graphFacts) collapse(request GraphRequest, selection *graphSelection) error {
 	if len(request.Collapse) == 0 {
 		return nil
@@ -944,6 +1014,10 @@ func (f *graphFacts) collapse(request GraphRequest, selection *graphSelection) e
 	if request.Focus != "" && group[request.Focus] != "" {
 		boundary[request.Focus] = true
 	}
+	cut := map[string]bool{}
+	for _, id := range selection.frontier {
+		cut[id] = true
+	}
 	for member, root := range group {
 		if boundary[member] {
 			selection.parents[member] = root
@@ -951,6 +1025,9 @@ func (f *graphFacts) collapse(request GraphRequest, selection *graphSelection) e
 		}
 		delete(selection.nodes, member)
 		selection.hidden[root] = append(selection.hidden[root], member)
+		if cut[member] {
+			selection.hiddenFrontier[root] = append(selection.hiddenFrontier[root], member)
+		}
 	}
 	kept := selection.edges[:0]
 	for _, index := range selection.edges {
@@ -966,12 +1043,19 @@ func (f *graphFacts) collapse(request GraphRequest, selection *graphSelection) e
 		selection.hiddenN[root]++
 	}
 	selection.edges = kept
-	frontier := selection.frontier[:0]
+	frontier := []string{}
 	for _, id := range selection.frontier {
 		if selection.nodes[id] {
 			frontier = append(frontier, id)
 		}
 	}
+	for root, members := range selection.hiddenFrontier {
+		slices.Sort(members)
+		if !cut[root] {
+			frontier = append(frontier, root)
+		}
+	}
+	slices.Sort(frontier)
 	selection.frontier = frontier
 	for root := range selection.hidden {
 		slices.Sort(selection.hidden[root])
@@ -980,9 +1064,11 @@ func (f *graphFacts) collapse(request GraphRequest, selection *graphSelection) e
 }
 
 // GraphView projects one selected view of the checked facts of request.Kind.
-// Selection runs over fact topology before any contract or type table is
-// materialized, so a focused request succeeds where the whole view would
-// exceed its limits.
+// The kind's whole fact topology is enumerated within the work limit, then
+// selection runs over it before any contract or type table is materialized.
+// Focus therefore bounds materialization and publication, so a focused
+// request succeeds where the whole view would exceed the node, edge or type
+// limits, but it does not bound enumeration.
 func (r *Result) GraphView(request GraphRequest) (*GraphView, error) {
 	if r == nil || !r.Checked {
 		return nil, graphRefusal(GraphRefusalUnchecked, "graph views require checked source")
@@ -1026,9 +1112,10 @@ func (r *Result) GraphView(request GraphRequest) (*GraphView, error) {
 		node := fact.node
 		node.ParentID = selection.parents[id]
 		if hidden := selection.hidden[id]; len(hidden) > 0 {
-			node.Data.Effra.Collapsed = &GraphCollapsedFacts{HiddenMembers: hidden, HiddenEdges: selection.hiddenN[id]}
+			node.Data.Effra.Collapsed = &GraphCollapsedFacts{HiddenMembers: hidden, HiddenEdges: selection.hiddenN[id], HiddenFrontier: selection.hiddenFrontier[id]}
 		}
 		node.Data.Effra.Frontier = slices.Contains(selection.frontier, id)
+		node.Data.Effra.Closure = selection.closure[id]
 		contract, size, err := r.materializeDependencyContract(fact.contract, limits.TypeProjection.CompatibilityBytes-compatibility)
 		if err != nil {
 			return nil, graphRefusal(GraphRefusalTypeLimit, "graph view contract metadata: %v", err)
@@ -1071,8 +1158,8 @@ func (r *Result) GraphView(request GraphRequest) (*GraphView, error) {
 		Completeness: GraphCompleteness{
 			Scope: scope, Complete: true, Semantics: facts.semantics,
 			FactNodes: len(facts.nodes), FactEdges: len(facts.edges),
-			SelectedNodes: len(nodeIDs) + hiddenCount(selection), SelectedEdges: len(selection.edges) + hiddenEdgeCount(selection),
-			PublishedNodes: len(view.Nodes), PublishedEdges: len(view.Edges), Frontier: selection.frontier,
+			SelectedNodes: len(nodeIDs) - len(selection.closure) + hiddenCount(selection), SelectedEdges: len(selection.edges) + hiddenEdgeCount(selection),
+			PublishedNodes: len(view.Nodes), PublishedEdges: len(view.Edges), ClosureNodes: len(selection.closure), Frontier: selection.frontier,
 		},
 		Facts: GraphFactTables{
 			Sources: append([]SourceInfo{}, r.Sources...), Types: nonNilTypes(projection.Types), Rows: nonNilRows(projection.Rows),
@@ -1170,9 +1257,10 @@ func graphViewID(facts GraphViewFacts) string {
 }
 
 // ValidateGraphView checks a view's structural closure (unique IDs, existing
-// endpoints, parents, initial node and ports, acyclic containment) and its
-// semantic closure (every type, row, declaration, source and plan reference
-// resolves within the view's own facts).
+// endpoints, parents, initial node and ports, acyclic containment), that
+// closure nodes stay untraversed references (no relation, never frontier,
+// counted exactly), and its semantic closure (every type, row, declaration,
+// source and plan reference resolves within the view's own facts).
 func ValidateGraphView(view *GraphView) error {
 	if view == nil {
 		return fmt.Errorf("graph view is absent")
@@ -1219,18 +1307,24 @@ func ValidateGraphView(view *GraphView) error {
 					return fmt.Errorf("hidden member %s of %s is also published", member, node.ID)
 				}
 			}
+			for _, member := range collapsed.HiddenFrontier {
+				if !slices.Contains(collapsed.HiddenMembers, member) || !node.Data.Effra.Frontier {
+					return fmt.Errorf("hidden frontier member %s of %s is not a hidden member of a frontier root", member, node.ID)
+				}
+			}
 		}
 	}
 	if view.InitialNodeID != "" && nodes[view.InitialNodeID] == nil {
 		return fmt.Errorf("initial node %s is not published", view.InitialNodeID)
 	}
 	relations := graphKindRelations[effra.Kind]
-	edges := map[string]bool{}
+	edges, incident := map[string]bool{}, map[string]bool{}
 	for _, edge := range view.Edges {
 		if edge.Type != "edge" || edge.ID == "" || edges[edge.ID] {
 			return fmt.Errorf("graph edge %q is untyped, empty or duplicated", edge.ID)
 		}
 		edges[edge.ID] = true
+		incident[edge.SourceID], incident[edge.TargetID] = true, true
 		source, target := nodes[edge.SourceID], nodes[edge.TargetID]
 		if source == nil || target == nil {
 			return fmt.Errorf("graph edge %s has an unpublished endpoint", edge.ID)
@@ -1241,18 +1335,50 @@ func ValidateGraphView(view *GraphView) error {
 		if !slices.Contains(relations, edge.Data.Effra.Relation) {
 			return fmt.Errorf("graph edge %s has relation %q outside kind %s", edge.ID, edge.Data.Effra.Relation, effra.Kind)
 		}
-		if plan := edge.Data.Effra.Plan; plan != "" && effra.Kind == GraphKindLayers && nodes[plan] == nil {
-			return fmt.Errorf("graph edge %s references unpublished plan %s", edge.ID, plan)
-		}
-		if selection := edge.Data.Effra.Selection; selection != nil {
-			for _, replacement := range selection.Replacements {
-				if nodes[replacement.ID] == nil {
-					return fmt.Errorf("graph edge %s references unpublished replacement %s", edge.ID, replacement.ID)
-				}
+		for _, reference := range graphEdgeReferences(effra.Kind, edge) {
+			if nodes[reference.id] == nil {
+				return fmt.Errorf("graph edge %s references unpublished %s %s", edge.ID, reference.role, reference.id)
 			}
 		}
 	}
+	closure := 0
+	for _, node := range view.Nodes {
+		if !node.Data.Effra.Closure {
+			continue
+		}
+		closure++
+		if incident[node.ID] {
+			return fmt.Errorf("closure node %s has a relation; closure nodes are untraversed references", node.ID)
+		}
+		if node.Data.Effra.Frontier || slices.Contains(effra.Completeness.Frontier, node.ID) {
+			return fmt.Errorf("closure node %s is on the frontier; closure nodes are untraversed references", node.ID)
+		}
+	}
+	if closure != effra.Completeness.ClosureNodes {
+		return fmt.Errorf("completeness counts %d closure nodes but %d are marked", effra.Completeness.ClosureNodes, closure)
+	}
 	return validateGraphViewReferences(view)
+}
+
+// graphNodeReference is one node an edge names in its metadata rather than
+// as an endpoint.
+type graphNodeReference struct{ role, id string }
+
+// graphEdgeReferences lists the nodes an edge's metadata names. Its plan is
+// the node of the plan qualifying the relation in every kind. Replacement
+// sites are nodes of the layers kind; the application kind retains
+// requirements, so there they stay inline source sites of the selection.
+func graphEdgeReferences(kind GraphKind, edge GraphViewEdge) []graphNodeReference {
+	references := []graphNodeReference{}
+	if plan := edge.Data.Effra.Plan; plan != "" {
+		references = append(references, graphNodeReference{"plan", plan})
+	}
+	if selection := edge.Data.Effra.Selection; selection != nil && kind == GraphKindLayers {
+		for _, replacement := range selection.Replacements {
+			references = append(references, graphNodeReference{"replacement", replacement.ID})
+		}
+	}
+	return references
 }
 
 // qualifiedDeclarationPublished resolves a data declaration qualifier
@@ -1402,8 +1528,9 @@ func applicationNodeID(kind ApplicationRequirementKind, identity string) string 
 
 // applicationGraphFacts projects one native application plan: each retained
 // requirement with its limited first-witness provenance, provider operation
-// origins, hidden selected layer nodes with their effective replacements,
-// and the runtime catalog closure. It plans; it never builds or emits.
+// origins, every retained plan's selection of its layer nodes (hidden ones
+// included) with the effective replacement, and the runtime catalog closure.
+// It plans; it never builds or emits.
 func (r *Result) applicationGraphFacts(request GraphRequest, limits GraphViewLimits) (*graphFacts, error) {
 	if r.Target != "go" {
 		return nil, graphRefusal(GraphRefusalTarget, "application graphs plan native Go applications; target %s has no application plan", r.Target)
@@ -1418,6 +1545,7 @@ func (r *Result) applicationGraphFacts(request GraphRequest, limits GraphViewLim
 		"native Go application plan for one entry mode; computed without build, emission or execution",
 		"provenance is the first checked witness of each requirement, not every path that retains it",
 		"callable-value requirements are the conservative target set of every dynamic call",
+		"a layer node shared by several retained plans is one node; each plan's effective selection lives on its selects edge",
 		"a retained requirement is a planned emission obligation; the view makes no JavaScript retention or bundler tree-shaking claim",
 		"runtime-closure nodes are catalog dependencies the selected runtime roots close over",
 	}
@@ -1452,24 +1580,28 @@ func (r *Result) applicationGraphFacts(request GraphRequest, limits GraphViewLim
 		if err := retains(requirement.ViaKind, requirement.Via, requirement.Kind, requirement.Identity, requirement.Reason); err != nil {
 			return nil, err
 		}
-		if requirement.Kind != RequiresLayerNode {
+	}
+	// A retained plan retains each of its selected nodes, so every retained
+	// plan publishes its own selection of the canonical node it may share.
+	for _, requirement := range plan.Requirements {
+		if requirement.Kind != RequiresLayer {
 			continue
 		}
-		layer := layers[requirement.Via]
-		node := layerPlanNode(layer, requirement.Identity)
-		if node == nil {
-			return nil, graphRefusal(GraphRefusalInvalidView, "retained layer node %s has no checked plan selection", requirement.Identity)
+		layer := layers[requirement.Identity]
+		if layer == nil {
+			return nil, graphRefusal(GraphRefusalInvalidView, "retained layer %s has no checked plan", requirement.Identity)
 		}
-		fact := facts.nodes[applicationNodeID(requirement.Kind, requirement.Identity)]
-		fact.node.Label = node.Service
-		fact.node.Data.Effra.Binding = &GraphBindingFacts{Service: node.Service, ServiceIdentity: node.ServiceIdentity}
-		fact.node.Data.Effra.Selection = &GraphLayerSelectFacts{
-			Public: node.Public, Implementation: node.Implementation, ImplementationIdentity: node.ImplementationIdentity,
-			SelectionSpan: node.SelectionSpan, Occurrences: node.Occurrences, Replacements: node.Replacements,
-			ConstructionRequirements: node.Requirements, ConstructionFailures: node.Failures,
-			Constructor: node.Constructor, Parameters: node.Parameters, Arguments: node.Arguments, Owner: node.Owner,
+		planNode := applicationNodeID(RequiresLayer, layer.ID)
+		for _, node := range layer.Nodes {
+			bindingNode := applicationNodeID(RequiresLayerNode, node.ID)
+			fact := facts.nodes[bindingNode]
+			if fact == nil {
+				return nil, graphRefusal(GraphRefusalInvalidView, "layer node %s of retained plan %s is not retained", node.ID, layer.ID)
+			}
+			fact.node.Label = node.Service
+			fact.node.Data.Effra.Binding = &GraphBindingFacts{Service: node.Service, ServiceIdentity: node.ServiceIdentity}
+			facts.addLayerSelection(planNode, bindingNode, node)
 		}
-		fact.values = layerNodeContracts(*node)
 	}
 	for _, origin := range plan.Origins {
 		if err := retains(origin.ViaKind, origin.Via, origin.Kind, origin.Identity, string(origin.Kind)); err != nil {
@@ -1509,16 +1641,4 @@ func (r *Result) applicationGraphFacts(request GraphRequest, limits GraphViewLim
 		return nil, facts.err
 	}
 	return facts, nil
-}
-
-func layerPlanNode(plan *LayerPlan, id string) *LayerNode {
-	if plan == nil {
-		return nil
-	}
-	for i := range plan.Nodes {
-		if plan.Nodes[i].ID == id {
-			return &plan.Nodes[i]
-		}
-	}
-	return nil
 }

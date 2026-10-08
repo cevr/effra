@@ -295,8 +295,10 @@ func parseOptions(args []string) (options, error) {
 				}
 				var value any = args[i]
 				if option.Field == "depth" {
-					if n, err := strconv.Atoi(args[i]); err == nil {
-						value = n
+					// The flag text decodes as the JSON value MCP
+					// carries, so both adapters admit the same depth.
+					if decoded, err := compiler.DecodeGraphJSON([]byte(args[i])); err == nil {
+						value = decoded
 					}
 				}
 				opts.graph[option.Field] = value

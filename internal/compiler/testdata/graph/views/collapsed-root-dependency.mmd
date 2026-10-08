@@ -1,0 +1,36 @@
+flowchart LR
+%% effra graph view effra-graph:dependency:e8b08794394223c042b0684992d3d164
+%% n0: expression:expression:function:helper:148:run:158:call
+%% n1: expression:expression:function:main:210:run:214:call
+%% n2: expression:function:main:210:run
+%% n3: function:helper
+%% n4: function:main
+%% n5: provider:Live
+%% n6: service:Users
+  n1["call @ 4:49"]
+  n2["run @ 4:45"]
+  subgraph g3["function: helper (+1 hidden members, 2 hidden edges)"]
+    n3["function: helper (+1 hidden members, 2 hidden edges)"]
+    n0["call @ 3:57"]
+  end
+  n4["function: main"]
+  n5["provider: Live"]
+  n6["service: Users"]
+  %% e0: edge#124;calls#124;expression:expression:function:helper:148:run:158:call#124;service:Users#124;Users#124;158#124;3
+  n0 -->|"calls"| n6
+  %% e1: edge#124;calls#124;expression:expression:function:main:210:run:214:call#124;function:helper#124;#124;214#124;6
+  n1 -->|"calls"| n3
+  %% e2: edge#124;contains#124;expression:function:main:210:run#124;expression:expression:function:main:210:run:214:call#124;#124;214#124;6
+  n2 -->|"contains"| n1
+  %% e3: edge#124;contains#124;function:main#124;expression:function:main:210:run#124;#124;210#124;3
+  n4 -->|"contains"| n2
+  %% e4: edge#124;implements#124;provider:Live#124;service:Users#124;Users#124;49#124;4
+  n5 -->|"implements"| n6
+  %% e5: edge#124;requires#124;expression:expression:function:helper:148:run:158:call#124;service:Users#124;Users#124;158#124;3
+  n0 -->|"requires"| n6
+  %% e6: edge#124;requires#124;expression:expression:function:main:210:run:214:call#124;service:Users#124;Users#124;214#124;6
+  n1 -->|"requires"| n6
+  %% e7: edge#124;requires#124;function:helper#124;service:Users#124;Users#124;112#124;6
+  n3 -->|"requires"| n6
+  %% e8: edge#124;requires#124;function:main#124;service:Users#124;Users#124;176#124;4
+  n4 -->|"requires"| n6

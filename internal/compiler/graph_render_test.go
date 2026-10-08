@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -95,9 +96,10 @@ func TestRenderGraphViewMermaidEscapesHostileText(t *testing.T) {
 		}
 	}
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	// header + view comment + 4 node comments + 3 node lines + subgraph/end
-	// pair + 3 x (edge comment + edge) lines; no label added a line.
-	if len(lines) != 1+1+4+3+2+6 {
+	// header + view comment + 4 node comments + 4 node lines (the group root
+	// included) + subgraph/end pair + 3 x (edge comment + edge) lines; no
+	// label added a line.
+	if len(lines) != 1+1+4+4+2+6 {
 		t.Fatalf("label text changed the line structure (%d lines):\n%s", len(lines), text)
 	}
 	for _, line := range lines {
@@ -110,7 +112,7 @@ func TestRenderGraphViewMermaidEscapesHostileText(t *testing.T) {
 			t.Fatalf("quoted mermaid label kept syntax: %q", label)
 		}
 	}
-	for _, want := range []string{"naïve 日本", "#34;hi#34;", "#92;N", "#10;", "#128578;", "#8238;", "subgraph n2[", "  end"} {
+	for _, want := range []string{"naïve 日本", "#34;hi#34;", "#92;N", "#10;", "#128578;", "#8238;", "subgraph g2[", "    n2[\"function: group\"]", "  end"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("mermaid output lacks %q:\n%s", want, text)
 		}
@@ -246,7 +248,9 @@ func TestRenderGraphViewExactRenderLimit(t *testing.T) {
 // graphRenderingFixtures pin rendered bytes for the shapes renderers must
 // keep: a recipe alias beside two materializations, a layer diamond with a
 // hidden shared binding and an outer replacement, an open construction input,
-// native test roots and stored callbacks. Renderer changes are deliberate:
+// native test roots, stored callbacks, a collapsed root that keeps its own
+// relations beside a boundary member and hidden interior members, and a
+// focused view with closure references. Renderer changes are deliberate:
 // regenerate these files only together with GraphRendererVersion review.
 var graphRenderingFixtures = []struct {
 	name, file, source, target string
@@ -257,6 +261,135 @@ var graphRenderingFixtures = []struct {
 	{name: "open-input-layers.mmd", source: openLayerSource, fields: map[string]any{"kind": "layers", "format": "mermaid"}},
 	{name: "testing-application-test.mmd", file: "../../examples/testing.ef", fields: map[string]any{"kind": "application", "mode": "test", "format": "mermaid"}},
 	{name: "stored-callback-application.dot", source: applicationStoredCallbackSource, fields: map[string]any{"kind": "application", "format": "dot"}},
+	{name: "collapsed-root-dependency.mmd", source: collapsedRootSource, fields: map[string]any{"format": "mermaid", "focus": "function:helper", "depth": 2, "collapse": []any{"function:helper"}}},
+	{name: "collapsed-root-dependency.dot", source: collapsedRootSource, fields: map[string]any{"format": "dot", "focus": "function:helper", "depth": 2, "collapse": []any{"function:helper"}}},
+	{name: "closure-layers.mmd", source: openLayerSource, fields: map[string]any{"kind": "layers", "format": "mermaid", "focus": layerID("Fixture"), "direction": "outgoing", "depth": 1}},
+	{name: "closure-layers.dot", source: openLayerSource, fields: map[string]any{"kind": "layers", "format": "dot", "focus": layerID("Fixture"), "direction": "outgoing", "depth": 1}},
+}
+
+// collapsedRootSource has a collapse root with incoming and outgoing
+// relations of its own and a member that calls out of the group.
+const collapsedRootSource = `service Users { effect fn get() -> string }
+impl Live for Users { effect fn get() -> string { "u" } }
+effect fn helper() -> string uses { Users } { run Users.get() }
+effect fn main() -> string uses { Users } { run helper() }
+`
+
+// A collapsed root is a node inside its group in both formats: its own
+// relations attach to the root, and the group box has a separate ID.
+func TestRenderGraphViewKeepsTheCollapsedRootANode(t *testing.T) {
+	r := checkedGraphSource(t, collapsedRootSource, "go")
+	view := graphView(t, r, map[string]any{"collapse": []any{"function:helper"}})
+	layout := newGraphRenderLayout(view)
+	root := layout.ids["function:helper"]
+	box := "g" + strings.TrimPrefix(root, "n")
+	if len(layout.children["function:helper"]) == 0 {
+		t.Fatal("fixture has no visible boundary member under the root")
+	}
+	rootEdges := 0
+	for _, edge := range view.Edges {
+		if edge.SourceID == "function:helper" || edge.TargetID == "function:helper" {
+			rootEdges++
+		}
+	}
+	if rootEdges == 0 {
+		t.Fatal("fixture root has no relation of its own")
+	}
+	group := map[GraphFormat]string{GraphFormatMermaid: "subgraph " + box + "[", GraphFormatDOT: "subgraph cluster_" + root + " {"}
+	node := map[GraphFormat]string{GraphFormatMermaid: root + "[", GraphFormatDOT: root + " [label="}
+	edge := map[GraphFormat]string{GraphFormatMermaid: " -->|", GraphFormatDOT: " -> "}
+	for _, format := range []GraphFormat{GraphFormatMermaid, GraphFormatDOT} {
+		rendering, err := RenderGraphView(view, format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(rendering.Text, "\n")
+		start := slices.IndexFunc(lines, func(line string) bool {
+			return strings.TrimSpace(line) == strings.TrimSpace(group[format]) || strings.HasPrefix(strings.TrimSpace(line), group[format])
+		})
+		if start < 0 || !slices.ContainsFunc(lines[start+1:min(start+3, len(lines))], func(line string) bool { return strings.HasPrefix(strings.TrimSpace(line), node[format]) }) {
+			t.Fatalf("%s does not emit the collapsed root as a node inside its group:\n%s", format, rendering.Text)
+		}
+		attached := 0
+		for _, line := range lines {
+			if !strings.Contains(line, edge[format]) {
+				continue
+			}
+			fields := strings.Fields(line)
+			if fields[0] == box || fields[len(fields)-1] == box {
+				t.Fatalf("%s attaches a relation to the group box: %q", format, line)
+			}
+			if fields[0] == root || fields[2] == root || fields[len(fields)-1] == root {
+				attached++
+			}
+		}
+		if attached != rootEdges {
+			t.Fatalf("%s attaches %d of the root's %d relations to the root node:\n%s", format, attached, rootEdges, rendering.Text)
+		}
+	}
+}
+
+// Closure nodes are references published without traversal. Both formats
+// mark exactly those nodes with the closure class, Mermaid through classDef
+// and DOT through a dashed style, so a reader never takes them for traversal
+// results; a view without closure emits no class at all.
+func TestRenderGraphViewMarksClosureNodes(t *testing.T) {
+	r := checkedGraphSource(t, openLayerSource, "go")
+	view := graphView(t, r, map[string]any{"kind": "layers", "focus": layerID("Fixture"), "direction": "outgoing", "depth": 1})
+	layout := newGraphRenderLayout(view)
+	closure, plain := []string{}, []string{}
+	for _, node := range layout.nodes {
+		if node.Data.Effra.Closure {
+			closure = append(closure, layout.ids[node.ID])
+		} else {
+			plain = append(plain, layout.ids[node.ID])
+		}
+	}
+	if len(closure) == 0 || view.Data.Effra.Completeness.ClosureNodes != len(closure) {
+		t.Fatalf("fixture has no closure nodes: %+v", view.Data.Effra.Completeness)
+	}
+	mermaid, err := RenderGraphView(view, GraphFormatMermaid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(mermaid.Text, "\n")
+	if !slices.Contains(lines, "  classDef closure stroke-dasharray:5 5") || !slices.Contains(lines, "  class "+strings.Join(closure, ",")+" closure") {
+		t.Fatalf("mermaid does not class exactly the closure nodes %v:\n%s", closure, mermaid.Text)
+	}
+	dot, err := RenderGraphView(view, GraphFormatDOT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marked := func(id string) bool {
+		return slices.ContainsFunc(strings.Split(dot.Text, "\n"), func(line string) bool {
+			return strings.HasPrefix(strings.TrimSpace(line), id+" [") && strings.HasSuffix(line, `, style=dashed, class="closure"];`)
+		})
+	}
+	for _, id := range closure {
+		if !marked(id) {
+			t.Fatalf("dot does not mark closure node %s:\n%s", id, dot.Text)
+		}
+	}
+	for _, id := range plain {
+		if marked(id) {
+			t.Fatalf("dot marks traversed node %s as closure:\n%s", id, dot.Text)
+		}
+	}
+	for _, rendering := range []*GraphRendering{mermaid, dot} {
+		if !slices.ContainsFunc(rendering.Losses, func(loss string) bool { return strings.Contains(loss, "closure") }) {
+			t.Fatalf("%s losses do not name closure: %v", rendering.Format, rendering.Losses)
+		}
+	}
+	whole := graphView(t, r, map[string]any{"kind": "layers"})
+	for _, format := range []GraphFormat{GraphFormatMermaid, GraphFormatDOT} {
+		rendering, err := RenderGraphView(whole, format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(rendering.Text, "closure") {
+			t.Fatalf("%s marks closure in a view without closure nodes:\n%s", format, rendering.Text)
+		}
+	}
 }
 
 func TestGraphRenderingGoldens(t *testing.T) {

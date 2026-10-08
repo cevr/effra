@@ -22,10 +22,15 @@ type GraphRendering struct {
 }
 
 var graphRenderingLosses = []string{
-	"data.effra facts (contracts, rows, spans, selections and limits) are not rendered; use format json",
+	"data.effra facts (contracts, rows, spans, selections, frontier and limits) are not rendered; use format json",
 	"node and edge IDs appear as comments or id attributes; renderer IDs n0..nN and e0..eN are positional",
 	"collapsed members are omitted; their counts appear in the collapse root label",
+	"closure nodes are references published without traversal; they carry the closure class (dashed), not a label marker, and have no relations of their own",
 }
+
+// graphClosureClass is the class both formats give closure nodes: a Mermaid
+// classDef and class assignment, and a DOT dashed style with the same class.
+const graphClosureClass = "closure"
 
 // GraphViewRendered is the project.graph payload of a diagram format: the
 // complete view beside its one rendering.
@@ -95,6 +100,7 @@ type graphRenderLayout struct {
 	ids      map[string]string
 	children map[string][]*GraphViewNode
 	roots    []*GraphViewNode
+	closure  []string
 }
 
 func newGraphRenderLayout(view *GraphView) *graphRenderLayout {
@@ -105,6 +111,9 @@ func newGraphRenderLayout(view *GraphView) *graphRenderLayout {
 	slices.SortFunc(layout.nodes, func(a, b *GraphViewNode) int { return strings.Compare(a.ID, b.ID) })
 	for i, node := range layout.nodes {
 		layout.ids[node.ID] = fmt.Sprintf("n%d", i)
+		if node.Data.Effra.Closure {
+			layout.closure = append(layout.closure, layout.ids[node.ID])
+		}
 		if node.ParentID == "" {
 			layout.roots = append(layout.roots, node)
 		} else {
@@ -168,6 +177,9 @@ func (layout *graphRenderLayout) mermaid() string {
 	for _, node := range layout.nodes {
 		fmt.Fprintf(&b, "%%%% %s: %s\n", layout.ids[node.ID], mermaidText(node.ID))
 	}
+	if len(layout.closure) > 0 {
+		fmt.Fprintf(&b, "  classDef %s stroke-dasharray:5 5\n", graphClosureClass)
+	}
 	var emit func(node *GraphViewNode, indent string)
 	emit = func(node *GraphViewNode, indent string) {
 		id, label := layout.ids[node.ID], mermaidText(graphNodeLabel(node))
@@ -176,7 +188,9 @@ func (layout *graphRenderLayout) mermaid() string {
 			fmt.Fprintf(&b, "%s%s[\"%s\"]\n", indent, id, label)
 			return
 		}
-		fmt.Fprintf(&b, "%ssubgraph %s[\"%s\"]\n", indent, id, label)
+		// The group gets its own ID so the root stays a node inside it, as
+		// in DOT: the root's own relations attach to the root, not the box.
+		fmt.Fprintf(&b, "%ssubgraph g%s[\"%s\"]\n%s  %s[\"%s\"]\n", indent, strings.TrimPrefix(id, "n"), label, indent, id, label)
 		for _, child := range children {
 			emit(child, indent+"  ")
 		}
@@ -188,6 +202,9 @@ func (layout *graphRenderLayout) mermaid() string {
 	for i, edge := range layout.edges {
 		fmt.Fprintf(&b, "  %%%% e%d: %s\n", i, mermaidText(edge.ID))
 		fmt.Fprintf(&b, "  %s -->|\"%s\"| %s\n", layout.ids[edge.SourceID], mermaidText(graphEdgeLabel(edge)), layout.ids[edge.TargetID])
+	}
+	if len(layout.closure) > 0 {
+		fmt.Fprintf(&b, "  class %s %s\n", strings.Join(layout.closure, ","), graphClosureClass)
 	}
 	return b.String()
 }
@@ -221,7 +238,11 @@ func (layout *graphRenderLayout) dot() string {
 	var emit func(node *GraphViewNode, indent string)
 	emit = func(node *GraphViewNode, indent string) {
 		id := layout.ids[node.ID]
-		attributes := fmt.Sprintf("[label=\"%s\", id=\"%s\"]", dotText(graphNodeLabel(node)), dotText(node.ID))
+		attributes := fmt.Sprintf("label=\"%s\", id=\"%s\"", dotText(graphNodeLabel(node)), dotText(node.ID))
+		if node.Data.Effra.Closure {
+			attributes += fmt.Sprintf(", style=dashed, class=\"%s\"", graphClosureClass)
+		}
+		attributes = "[" + attributes + "]"
 		children := layout.children[node.ID]
 		if len(children) == 0 {
 			fmt.Fprintf(&b, "%s%s %s;\n", indent, id, attributes)

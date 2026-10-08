@@ -1,0 +1,28 @@
+flowchart LR
+%% effra graph view effra-graph:layers:649250eb4e8dd4eb891b568d1ed7ea80
+%% n0: layer:module:file:Accounts:binding:Account:288
+%% n1: layer:module:file:App
+%% n2: layer:module:file:Fixture
+%% n3: layer:module:file:Fixture:replace:416
+%% n4: layer:module:file:Shared:binding:Store:327
+  classDef closure stroke-dasharray:5 5
+  n0["layer-binding: Account"]
+  n1["layer: App"]
+  n2["layer: Fixture"]
+  n3["layer-replacement: replace Store"]
+  n4["layer-binding: Store"]
+  %% e0: edge#124;depends-on#124;layer:module:file:Accounts:binding:Account:288#124;layer:module:file:Shared:binding:Store:327#124;layer:module:file:App
+  n0 -->|"depends-on"| n4
+  %% e1: edge#124;depends-on#124;layer:module:file:Accounts:binding:Account:288#124;layer:module:file:Shared:binding:Store:327#124;layer:module:file:Fixture
+  n0 -->|"depends-on"| n4
+  %% e2: edge#124;merges#124;layer:module:file:Fixture#124;layer:module:file:App#124;405
+  n2 -->|"merges"| n1
+  %% e3: edge#124;selects#124;layer:module:file:App#124;layer:module:file:Accounts:binding:Account:288
+  n1 -->|"selects"| n0
+  %% e4: edge#124;selects#124;layer:module:file:App#124;layer:module:file:Shared:binding:Store:327
+  n1 -->|"selects"| n4
+  %% e5: edge#124;selects#124;layer:module:file:Fixture#124;layer:module:file:Accounts:binding:Account:288
+  n2 -->|"selects"| n0
+  %% e6: edge#124;selects#124;layer:module:file:Fixture#124;layer:module:file:Shared:binding:Store:327
+  n2 -->|"selects"| n4
+  class n3 closure

@@ -1,7 +1,9 @@
 package compiler
 
 import (
+	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	rt "effra.local/prototype/runtime/effra"
@@ -123,22 +125,33 @@ func TestGraphViewApplicationShowsHiddenNodesAndReplacements(t *testing.T) {
 	r, plan := checkedApplicationPlan(t, applicationLayerSource, GoGenerationBuild)
 	view := applicationView(t, r, "build", nil)
 	var hidden, public *GraphViewNode
+	var hiddenSelection *GraphLayerSelectFacts
+	fixture := applicationNodeID(RequiresLayer, layerID("Fixture"))
 	for _, identity := range plan.Identities(RequiresLayerNode) {
 		node := retainedNode(view, RequiresLayerNode, identity)
-		if node == nil || node.Data.Effra.Selection == nil || node.Data.Effra.Binding == nil {
-			t.Fatalf("layer node %s lacks its checked selection", identity)
+		if node == nil || node.Data.Effra.Binding == nil {
+			t.Fatalf("layer node %s lacks its binding", identity)
 		}
-		if node.Data.Effra.Selection.Public {
+		var selection *GraphLayerSelectFacts
+		for _, edge := range viewEdges(view, "selects") {
+			if edge.TargetID == node.ID && edge.SourceID == fixture && edge.Data.Effra.Plan == fixture {
+				selection = edge.Data.Effra.Selection
+			}
+		}
+		if selection == nil {
+			t.Fatalf("layer node %s lacks its plan's checked selection", identity)
+		}
+		if selection.Public {
 			public = node
 		} else {
-			hidden = node
+			hidden, hiddenSelection = node, selection
 		}
 	}
 	if hidden == nil || public == nil || hidden.Data.Effra.Retention.Reason != "hidden-layer-node" {
 		t.Fatal("hidden selected layer node is not visible as hidden")
 	}
-	if len(hidden.Data.Effra.Selection.Replacements) != 1 || hidden.Data.Effra.Selection.Implementation != "FixtureStore" {
-		t.Fatalf("effective replacement is not published: %+v", hidden.Data.Effra.Selection)
+	if len(hiddenSelection.Replacements) != 1 || hiddenSelection.Implementation != "FixtureStore" {
+		t.Fatalf("effective replacement is not published: %+v", hiddenSelection)
 	}
 	replacement := ""
 	for _, edge := range viewEdges(view, "retains") {
@@ -170,6 +183,81 @@ func TestGraphViewApplicationShowsHiddenNodesAndReplacements(t *testing.T) {
 		}
 	}
 	t.Fatal("no provider operation origin witnesses a requirement")
+}
+
+// Shared selects Memory for its Store binding; Fixture merges Shared, so it
+// keeps the same canonical binding, and replaces it with Other.
+const applicationSharedBindingSource = `service Store { effect fn label() -> string }
+impl Memory(label: string) for Store { effect fn label() -> string { label } }
+impl Other for Store { effect fn label() -> string { "other" } }
+layer Shared { Store = Memory("live") }
+layer Fixture { merge Shared; replace Store = Other }
+effect fn main() -> string {
+  let a = run Store.label().provide(Shared)
+  let b = run Store.label().provide(Fixture)
+  a + b
+}
+`
+
+// A canonical binding retained by two plans with different effective
+// implementations publishes one plan-qualified selects edge per plan. The
+// binding node carries only plan-independent facts, so every provider
+// retained through it is the effective implementation of some plan.
+func TestGraphViewApplicationQualifiesSelectionsPerPlan(t *testing.T) {
+	r := checkedGraphSource(t, applicationSharedBindingSource, "go")
+	view := applicationView(t, r, "build", nil)
+	var binding *GraphViewNode
+	for i := range view.Nodes {
+		if view.Nodes[i].Data.Effra.Kind == string(RequiresLayerNode) {
+			if binding != nil {
+				t.Fatal("the shared binding is not one canonical node")
+			}
+			binding = &view.Nodes[i]
+		}
+	}
+	if binding == nil || binding.Data.Effra.Binding == nil || binding.Data.Effra.Binding.Service != "Store" {
+		t.Fatalf("binding node lacks its plan-independent binding facts: %+v", binding)
+	}
+	if encoded, _ := json.Marshal(binding); strings.Contains(string(encoded), `"selection"`) {
+		t.Fatalf("binding node publishes a plan-specific selection: %s", encoded)
+	}
+	selections := map[string]*GraphLayerSelectFacts{}
+	for _, edge := range viewEdges(view, "selects") {
+		if edge.TargetID != binding.ID || edge.Data.Effra.Plan != edge.SourceID || edge.Data.Effra.Selection == nil {
+			t.Fatalf("selects edge %s is not a plan-qualified selection of the binding", edge.ID)
+		}
+		selections[edge.SourceID] = edge.Data.Effra.Selection
+	}
+	shared := selections[applicationNodeID(RequiresLayer, layerID("Shared"))]
+	fixture := selections[applicationNodeID(RequiresLayer, layerID("Fixture"))]
+	if len(selections) != 2 || shared == nil || fixture == nil {
+		t.Fatalf("each retained plan must select the binding: %v", selections)
+	}
+	if shared.Implementation != "Memory" || len(shared.Replacements) != 0 || len(shared.Arguments) != 1 {
+		t.Fatalf("Shared selection is wrong: %+v", shared)
+	}
+	if fixture.Implementation != "Other" || len(fixture.Replacements) != 1 {
+		t.Fatalf("Fixture selection lost its replacement: %+v", fixture)
+	}
+	effective := map[string]bool{shared.ImplementationIdentity: true, fixture.ImplementationIdentity: true}
+	retained := 0
+	for _, edge := range viewEdges(view, "retains") {
+		target := viewNode(view, edge.TargetID)
+		if edge.SourceID == binding.ID && target.Data.Effra.Kind == string(RequiresProvider) {
+			if !effective[target.Data.Effra.Retention.Identity] {
+				t.Fatalf("provider %s is retained through the binding without a selection", target.ID)
+			}
+			retained++
+		}
+	}
+	for _, name := range []string{"Memory", "Other"} {
+		if retainedNode(view, RequiresProvider, providerIdentity(t, r, name)) == nil {
+			t.Fatalf("provider %s is not retained", name)
+		}
+	}
+	if retained == 0 {
+		t.Fatal("no provider is witnessed by the binding")
+	}
 }
 
 func TestGraphViewApplicationShowsCallbacks(t *testing.T) {

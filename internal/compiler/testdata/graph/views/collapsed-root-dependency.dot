@@ -1,0 +1,22 @@
+digraph "effra-graph:dependency:e8b08794394223c042b0684992d3d164" {
+  rankdir=LR;
+  n1 [label="call @ 4:49", id="expression:expression:function:main:210:run:214:call"];
+  n2 [label="run @ 4:45", id="expression:function:main:210:run"];
+  subgraph cluster_n3 {
+    label="function: helper (+1 hidden members, 2 hidden edges)";
+    n3 [label="function: helper (+1 hidden members, 2 hidden edges)", id="function:helper"];
+    n0 [label="call @ 3:57", id="expression:expression:function:helper:148:run:158:call"];
+  }
+  n4 [label="function: main", id="function:main"];
+  n5 [label="provider: Live", id="provider:Live"];
+  n6 [label="service: Users", id="service:Users"];
+  n0 -> n6 [label="calls", id="edge|calls|expression:expression:function:helper:148:run:158:call|service:Users|Users|158|3", class="e0"];
+  n1 -> n3 [label="calls", id="edge|calls|expression:expression:function:main:210:run:214:call|function:helper||214|6", class="e1"];
+  n2 -> n1 [label="contains", id="edge|contains|expression:function:main:210:run|expression:expression:function:main:210:run:214:call||214|6", class="e2"];
+  n4 -> n2 [label="contains", id="edge|contains|function:main|expression:function:main:210:run||210|3", class="e3"];
+  n5 -> n6 [label="implements", id="edge|implements|provider:Live|service:Users|Users|49|4", class="e4"];
+  n0 -> n6 [label="requires", id="edge|requires|expression:expression:function:helper:148:run:158:call|service:Users|Users|158|3", class="e5"];
+  n1 -> n6 [label="requires", id="edge|requires|expression:expression:function:main:210:run:214:call|service:Users|Users|214|6", class="e6"];
+  n3 -> n6 [label="requires", id="edge|requires|function:helper|service:Users|Users|112|6", class="e7"];
+  n4 -> n6 [label="requires", id="edge|requires|function:main|service:Users|Users|176|4", class="e8"];
+}

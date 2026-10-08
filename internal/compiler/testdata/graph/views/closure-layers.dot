@@ -1,0 +1,15 @@
+digraph "effra-graph:layers:649250eb4e8dd4eb891b568d1ed7ea80" {
+  rankdir=LR;
+  n0 [label="layer-binding: Account", id="layer:module:file:Accounts:binding:Account:288"];
+  n1 [label="layer: App", id="layer:module:file:App"];
+  n2 [label="layer: Fixture", id="layer:module:file:Fixture"];
+  n3 [label="layer-replacement: replace Store", id="layer:module:file:Fixture:replace:416", style=dashed, class="closure"];
+  n4 [label="layer-binding: Store", id="layer:module:file:Shared:binding:Store:327"];
+  n0 -> n4 [label="depends-on", id="edge|depends-on|layer:module:file:Accounts:binding:Account:288|layer:module:file:Shared:binding:Store:327|layer:module:file:App", class="e0"];
+  n0 -> n4 [label="depends-on", id="edge|depends-on|layer:module:file:Accounts:binding:Account:288|layer:module:file:Shared:binding:Store:327|layer:module:file:Fixture", class="e1"];
+  n2 -> n1 [label="merges", id="edge|merges|layer:module:file:Fixture|layer:module:file:App|405", class="e2"];
+  n1 -> n0 [label="selects", id="edge|selects|layer:module:file:App|layer:module:file:Accounts:binding:Account:288", class="e3"];
+  n1 -> n4 [label="selects", id="edge|selects|layer:module:file:App|layer:module:file:Shared:binding:Store:327", class="e4"];
+  n2 -> n0 [label="selects", id="edge|selects|layer:module:file:Fixture|layer:module:file:Accounts:binding:Account:288", class="e5"];
+  n2 -> n4 [label="selects", id="edge|selects|layer:module:file:Fixture|layer:module:file:Shared:binding:Store:327", class="e6"];
+}

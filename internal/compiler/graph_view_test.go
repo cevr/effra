@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -177,8 +178,10 @@ func wideGraphSource(functions int) string {
 }
 
 // A focused query selects from fact topology before materializing contracts
-// or type tables, so it succeeds where the whole graph is refused.
-func TestGraphViewFocusSelectsBeforeMaterialization(t *testing.T) {
+// or type tables, so it succeeds where the whole graph is refused. Focus
+// bounds materialization, not enumeration: the whole topology is still
+// enumerated and charged against the work limit.
+func TestGraphViewFocusBoundsMaterializationNotEnumeration(t *testing.T) {
 	r := checkedGraphSource(t, wideGraphSource(1100), "go")
 	if _, err := r.Graph(); err == nil {
 		t.Fatal("whole legacy graph should exceed its node limit")
@@ -199,6 +202,20 @@ func TestGraphViewFocusSelectsBeforeMaterialization(t *testing.T) {
 	if view.InitialNodeID != "function:main" {
 		t.Fatalf("focus is not the initial node: %q", view.InitialNodeID)
 	}
+	usage := view.Data.Effra.Usage
+	if usage.Work < completeness.FactNodes+completeness.FactEdges {
+		t.Fatalf("focused work %d does not cover enumerating %d fact nodes and %d fact edges", usage.Work, completeness.FactNodes, completeness.FactEdges)
+	}
+	limits := defaultGraphViewLimits
+	limits.Work = usage.Work
+	request := graphRequest(t, map[string]any{"focus": "function:main", "depth": 2, "direction": "outgoing"})
+	request.limits = &limits
+	if _, err := r.GraphView(request); err != nil {
+		t.Fatalf("focused view refused at its exact work: %v", err)
+	}
+	limits.Work--
+	_, err = r.GraphView(request)
+	requireGraphRefusal(t, err, GraphRefusalWorkLimit)
 }
 
 func TestGraphViewDirectionDepthAndRelations(t *testing.T) {
@@ -408,16 +425,61 @@ func TestGraphRequestRefusals(t *testing.T) {
 		{map[string]any{"focus": "x", "depth": 1.5}, GraphRefusalInvocation},
 		{map[string]any{"focus": "x", "depth": "2"}, GraphRefusalInvocation},
 		{map[string]any{"focus": "x", "depth": 65}, GraphRefusalDepthLimit},
+		// Every integer-valued depth meets the hop limit before narrowing,
+		// however it arrives: an int, an MCP float64 or a JSON number.
+		{map[string]any{"focus": "x", "depth": 3000000000}, GraphRefusalDepthLimit},
+		{map[string]any{"focus": "x", "depth": float64(3000000000)}, GraphRefusalDepthLimit},
+		{map[string]any{"focus": "x", "depth": 1e300}, GraphRefusalDepthLimit},
+		{map[string]any{"focus": "x", "depth": json.Number("99999999999999999999")}, GraphRefusalDepthLimit},
+		{map[string]any{"focus": "x", "depth": math.Inf(1)}, GraphRefusalInvocation},
+		{map[string]any{"focus": "x", "depth": math.NaN()}, GraphRefusalInvocation},
+		{map[string]any{"focus": "x", "depth": -1e300}, GraphRefusalInvocation},
+		{map[string]any{"focus": "x", "depth": json.Number("2.5")}, GraphRefusalInvocation},
+		{map[string]any{"focus": "x", "depth": json.Number("1e400")}, GraphRefusalInvocation},
 		{map[string]any{"focus": ""}, GraphRefusalInvocation},
 		{map[string]any{"edgeKinds": []any{"retains"}}, GraphRefusalEdgeKind},
 		{map[string]any{"edgeKinds": []any{}}, GraphRefusalInvocation},
 		{map[string]any{"edgeKinds": "calls"}, GraphRefusalInvocation},
-		{map[string]any{"kind": "layers", "collapse": []any{"x"}}, GraphRefusalCollapse},
+		{map[string]any{"kind": "layers", "collapse": []any{"x"}}, GraphRefusalIncompatible},
 		{map[string]any{"mode": "build"}, GraphRefusalIncompatible},
 		{map[string]any{"target": "go"}, GraphRefusalInvocation},
 	} {
-		_, err := ParseGraphRequest(test.fields)
-		requireGraphRefusal(t, err, test.code)
+		t.Run(fmt.Sprintf("%v", test.fields), func(t *testing.T) {
+			_, err := ParseGraphRequest(test.fields)
+			requireGraphRefusal(t, err, test.code)
+		})
+	}
+	// A refused depth is printed as the integer it decoded to, never in
+	// exponent form, whichever transport carried it.
+	for _, depth := range []any{3000000000, float64(3000000000), json.Number("3000000000"), json.Number("3e9")} {
+		_, err := ParseGraphRequest(map[string]any{"focus": "x", "depth": depth})
+		requireGraphRefusal(t, err, GraphRefusalDepthLimit)
+		if want := "EFGRAPH_DEPTH_LIMIT: depth 3000000000 exceeds the 64-hop limit"; err.Error() != want {
+			t.Fatalf("depth %#v refusal is %q, want %q", depth, err, want)
+		}
+	}
+	for _, raw := range []string{`1e400`, `{"depth":1e400}`, `2.0`} {
+		decoded, err := DecodeGraphJSON([]byte(raw))
+		if err != nil {
+			t.Fatalf("%s did not decode: %v", raw, err)
+		}
+		if fields, ok := decoded.(map[string]any); ok {
+			decoded = fields["depth"]
+		}
+		if _, ok := decoded.(json.Number); !ok {
+			t.Fatalf("%s decoded to %T, not json.Number", raw, decoded)
+		}
+	}
+	for _, raw := range []string{`2 3`, `{"depth":2}x`, ``} {
+		if _, err := DecodeGraphJSON([]byte(raw)); err == nil {
+			t.Fatalf("%q decoded as one JSON value", raw)
+		}
+	}
+	for _, depth := range []any{2, 2.0, json.Number("2"), json.Number("2.0")} {
+		request, err := ParseGraphRequest(map[string]any{"focus": "x", "depth": depth})
+		if err != nil || request.Depth == nil || *request.Depth != 2 {
+			t.Fatalf("integer-valued depth %#v was not admitted as 2: %v", depth, err)
+		}
 	}
 	unchecked := CompileAt(`fn nope() -> missing {}`, "go", ".")
 	_, err := unchecked.GraphView(graphRequest(t, map[string]any{"kind": "dependency"}))
@@ -551,6 +613,9 @@ func TestValidateGraphViewRejectsBrokenClosure(t *testing.T) {
 		"hidden published": func(v *GraphView) {
 			v.Nodes[0].Data.Effra.Collapsed = &GraphCollapsedFacts{HiddenMembers: []string{v.Nodes[1].ID}}
 		},
+		"stray hidden frontier": func(v *GraphView) {
+			v.Nodes[0].Data.Effra.Collapsed = &GraphCollapsedFacts{HiddenMembers: []string{"missing"}, HiddenFrontier: []string{"other"}}
+		},
 		"untyped node":      func(v *GraphView) { v.Nodes[0].Type = "vertex" },
 		"wrong view header": func(v *GraphView) { v.Data.Effra.GraphViewVersion = 2 },
 	} {
@@ -558,6 +623,243 @@ func TestValidateGraphViewRejectsBrokenClosure(t *testing.T) {
 		mutate(broken)
 		if err := ValidateGraphView(broken); err == nil {
 			t.Fatalf("validator accepted %s", name)
+		}
+	}
+	// Closure nodes are untraversed references: a closure node with a
+	// relation, on the frontier, or miscounted makes a valid view fail.
+	layers := graphView(t, checkedGraphSource(t, openLayerSource, "go"), map[string]any{"kind": "layers", "focus": layerID("Fixture"), "direction": "outgoing", "depth": 1})
+	if err := ValidateGraphView(layers); err != nil {
+		t.Fatal(err)
+	}
+	closure := slices.IndexFunc(layers.Nodes, func(node GraphViewNode) bool { return node.Data.Effra.Closure })
+	if closure < 0 {
+		t.Fatal("fixture has no closure node")
+	}
+	for name, mutate := range map[string]func(*GraphView){
+		"closure node with a relation": func(v *GraphView) {
+			endpoint := viewNode(v, v.Edges[0].SourceID)
+			endpoint.Data.Effra.Closure = true
+			v.Data.Effra.Completeness.ClosureNodes++
+		},
+		"closure node marked frontier": func(v *GraphView) { v.Nodes[closure].Data.Effra.Frontier = true },
+		"closure node listed on the frontier": func(v *GraphView) {
+			v.Data.Effra.Completeness.Frontier = append(v.Data.Effra.Completeness.Frontier, v.Nodes[closure].ID)
+		},
+		"closure count above the marked nodes": func(v *GraphView) { v.Data.Effra.Completeness.ClosureNodes++ },
+		"closure mark without its count":       func(v *GraphView) { v.Nodes[closure].Data.Effra.Closure = false },
+	} {
+		encoded, _ := json.Marshal(layers)
+		var broken GraphView
+		if err := json.Unmarshal(encoded, &broken); err != nil {
+			t.Fatal(err)
+		}
+		mutate(&broken)
+		if err := ValidateGraphView(&broken); err == nil {
+			t.Errorf("validator accepted %s", name)
+		}
+	}
+}
+
+func layerBindingNode(t *testing.T, view *GraphView, plan, service string) string {
+	t.Helper()
+	for _, node := range view.Nodes {
+		if node.Data.Effra.Kind == "layer-binding" && node.Data.Effra.Binding.Service == service && strings.HasPrefix(node.ID, plan+":binding:") {
+			return node.ID
+		}
+	}
+	t.Fatalf("no %s binding of %s", service, plan)
+	return ""
+}
+
+// encodedNodeReferences lists every string in encoded metadata that is the
+// ID of a fact node: the references a consumer would try to resolve.
+func encodedNodeReferences(value any, facts map[string]bool) []string {
+	references := []string{}
+	switch value := value.(type) {
+	case string:
+		if facts[value] {
+			references = append(references, value)
+		}
+	case []any:
+		for _, item := range value {
+			references = append(references, encodedNodeReferences(item, facts)...)
+		}
+	case map[string]any:
+		for _, item := range value {
+			references = append(references, encodedNodeReferences(item, facts)...)
+		}
+	}
+	return references
+}
+
+// requireReferenceClosure checks that a view publishes every node its edges
+// name in metadata, that each closure node is such a reference outside the
+// traversal (no incident edge, never frontier), and that the accounting
+// separates closure from selection. The expected references come from the
+// encoded edge metadata, not from the projector's reference helper: any
+// string in an edge's data that is the ID of a node of the kind's whole view
+// names that node, so a reference kind the helper omits still fails here.
+func requireReferenceClosure(t *testing.T, whole, view *GraphView) []string {
+	t.Helper()
+	facts := map[string]bool{}
+	for _, node := range whole.Nodes {
+		facts[node.ID] = true
+	}
+	referenced, incident := map[string]bool{}, map[string]bool{}
+	for _, edge := range view.Edges {
+		incident[edge.SourceID], incident[edge.TargetID] = true, true
+		encoded, err := json.Marshal(edge.Data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var data any
+		if err := json.Unmarshal(encoded, &data); err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range encodedNodeReferences(data, facts) {
+			if viewNode(view, id) == nil {
+				t.Fatalf("edge %s references unpublished node %s", edge.ID, id)
+			}
+			referenced[id] = true
+		}
+	}
+	closure := []string{}
+	for _, node := range view.Nodes {
+		if !node.Data.Effra.Closure {
+			continue
+		}
+		if !referenced[node.ID] || incident[node.ID] || node.Data.Effra.Frontier || slices.Contains(view.Data.Effra.Completeness.Frontier, node.ID) {
+			t.Fatalf("closure node %s is not an untraversed reference", node.ID)
+		}
+		closure = append(closure, node.ID)
+	}
+	completeness := view.Data.Effra.Completeness
+	if completeness.ClosureNodes != len(closure) || completeness.PublishedNodes != len(view.Nodes) || completeness.SelectedNodes != len(view.Nodes)-len(closure) {
+		t.Fatalf("closure accounting is wrong: %+v with %d closure nodes", completeness, len(closure))
+	}
+	return closure
+}
+
+// Focused layers views select edges whose metadata names plans and
+// replacement sites outside the traversal. Those nodes are published as
+// closure, so the views validate without widening the requested boundary.
+func TestGraphViewFocusedLayersPublishReferencedClosure(t *testing.T) {
+	r := checkedGraphExample(t, "layers", "go")
+	whole := graphView(t, r, map[string]any{"kind": "layers"})
+	account := layerBindingNode(t, whole, layerID("Accounts"), "Account")
+	replacement := ""
+	for _, node := range whole.Nodes {
+		if node.Data.Effra.Kind == "layer-replacement" && strings.HasPrefix(node.ID, layerID("Fixture")+":replace:") {
+			replacement = node.ID
+		}
+	}
+	for _, test := range []struct {
+		name    string
+		fields  map[string]any
+		closure string
+	}{
+		{"replacement", map[string]any{"focus": layerID("Fixture"), "direction": "outgoing", "depth": 1}, replacement},
+		{"plan-qualified depends-on", map[string]any{"focus": account, "direction": "outgoing", "depth": 1, "edgeKinds": []any{"depends-on"}}, layerID("Accounts")},
+		{"binding neighborhood", map[string]any{"focus": account, "depth": 1}, replacement},
+	} {
+		test.fields["kind"] = "layers"
+		view, err := r.GraphView(graphRequest(t, test.fields))
+		if err != nil {
+			t.Fatalf("%s: focused layers view refused: %v", test.name, err)
+		}
+		closure := requireReferenceClosure(t, whole, view)
+		if !slices.Contains(closure, test.closure) {
+			t.Fatalf("%s: %s is not published as closure: %v", test.name, test.closure, closure)
+		}
+	}
+}
+
+// Every focused view of every kind on every checked example validates: each
+// node as the focus, in each direction, over every relation, and for the
+// kinds whose edges name nodes in metadata, over each single relation.
+func TestGraphViewFocusedViewsValidateOnEveryExample(t *testing.T) {
+	files, err := filepath.Glob("../../examples/*.ef")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no examples: %v", err)
+	}
+	focused := 0
+	for _, file := range files {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, target := range []string{"go", "js"} {
+			r := CompileAt(string(raw), target, filepath.Dir(file))
+			if !r.Checked {
+				continue
+			}
+			for _, kind := range []GraphKind{GraphKindDependency, GraphKindLayers, GraphKindApplication} {
+				whole, err := r.GraphView(graphRequest(t, map[string]any{"kind": string(kind)}))
+				if err != nil {
+					continue
+				}
+				relations := [][]any{nil}
+				for _, relation := range graphKindRelations[kind] {
+					if kind != GraphKindDependency {
+						relations = append(relations, []any{relation})
+					}
+				}
+				for _, node := range whole.Nodes {
+					for _, direction := range []string{"outgoing", "incoming", "both"} {
+						for _, edgeKinds := range relations {
+							fields := map[string]any{"kind": string(kind), "focus": node.ID, "direction": direction, "depth": 1}
+							if edgeKinds != nil {
+								fields["edgeKinds"] = edgeKinds
+							}
+							view, err := r.GraphView(graphRequest(t, fields))
+							if err != nil {
+								t.Fatalf("%s %s %v: %v", filepath.Base(file), target, fields, err)
+							}
+							requireReferenceClosure(t, whole, view)
+							focused++
+						}
+					}
+				}
+			}
+		}
+	}
+	if focused == 0 {
+		t.Fatal("no focused view was checked")
+	}
+}
+
+// Collapse never erases a depth cut: a root whose hidden members were on
+// the frontier stands on the frontier for them and lists them.
+func TestGraphViewCollapseKeepsTheDepthFrontier(t *testing.T) {
+	r := checkedGraphExample(t, "workflow", "go")
+	fields := map[string]any{"focus": "function:main", "depth": 1, "direction": "outgoing"}
+	plain := graphView(t, r, fields)
+	if len(plain.Data.Effra.Completeness.Frontier) == 0 {
+		t.Fatal("fixture has no depth frontier")
+	}
+	fields["collapse"] = []any{"function:main"}
+	collapsed := graphView(t, r, fields)
+	root := viewNode(collapsed, "function:main")
+	if root == nil || root.Data.Effra.Collapsed == nil || len(root.Data.Effra.Collapsed.HiddenMembers) == 0 {
+		t.Fatal("collapse hid no frontier member")
+	}
+	frontier := collapsed.Data.Effra.Completeness.Frontier
+	for _, id := range plain.Data.Effra.Completeness.Frontier {
+		switch {
+		case viewNode(collapsed, id) != nil:
+			if !slices.Contains(frontier, id) {
+				t.Fatalf("visible frontier member %s left the frontier", id)
+			}
+		case !slices.Contains(root.Data.Effra.Collapsed.HiddenFrontier, id) || !slices.Contains(root.Data.Effra.Collapsed.HiddenMembers, id):
+			t.Fatalf("hidden frontier member %s is not listed on its root", id)
+		}
+	}
+	if !slices.Contains(frontier, root.ID) || !root.Data.Effra.Frontier {
+		t.Fatalf("collapse root does not stand on the frontier for its hidden members: %v", frontier)
+	}
+	for _, id := range frontier {
+		if node := viewNode(collapsed, id); node == nil || !node.Data.Effra.Frontier {
+			t.Fatalf("frontier node %s is not a published frontier node", id)
 		}
 	}
 }

@@ -981,7 +981,16 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 		raw = json.RawMessage("{}")
 	}
 	var fields map[string]any
-	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+	if name == "project.graph" {
+		// Graph options decode as the CLI decodes its flags, numbers as
+		// json.Number, so graph admission classifies every depth literal.
+		if decoded, err := compiler.DecodeGraphJSON(raw); err == nil {
+			fields, _ = decoded.(map[string]any)
+		}
+	} else if json.Unmarshal(raw, &fields) != nil {
+		fields = nil
+	}
+	if fields == nil {
 		return args, fmt.Errorf("tool arguments must be an object")
 	}
 	if name == "code.typeAt" {

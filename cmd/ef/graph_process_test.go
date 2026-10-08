@@ -230,6 +230,7 @@ func TestGraphViewsAgreeAcrossCLIAndMCPWithoutExecution(t *testing.T) {
 	cases := []graphProcessCase{
 		{"dependency-json", "layers.ef", []string{"--format", "json"}, map[string]any{"format": "json"}},
 		{"dependency-focus", "layers.ef", []string{"--focus", "function:main", "--depth", "2", "--direction", "outgoing", "--edge-kind", "contains", "--edge-kind", "calls"}, map[string]any{"focus": "function:main", "depth": 2, "direction": "outgoing", "edgeKinds": []any{"calls", "contains"}}},
+		{"dependency-focus-integral-depth", "layers.ef", []string{"--focus", "function:main", "--depth", "2.0"}, map[string]any{"focus": "function:main", "depth": json.Number("2.0")}},
 		{"dependency-collapse-mermaid", "layers.ef", []string{"--format", "mermaid", "--collapse", "function:main"}, map[string]any{"format": "mermaid", "collapse": []any{"function:main"}}},
 		{"layers-json", "layers.ef", []string{"--kind", "layers"}, map[string]any{"kind": "layers"}},
 		{"layers-mermaid", "layers.ef", []string{"--kind", "layers", "--format", "mermaid"}, map[string]any{"kind": "layers", "format": "mermaid"}},
@@ -343,9 +344,14 @@ func TestGraphViewRefusalsAgreeAcrossCLIAndMCP(t *testing.T) {
 		{compiler.GraphRefusalEdgeKind, 2, "layers.ef", []string{"--kind", "layers", "--edge-kind", "calls"}, map[string]any{"kind": "layers", "edgeKinds": []any{"calls"}}},
 		{compiler.GraphRefusalMode, 2, "layers.ef", []string{"--kind", "application", "--mode", "run"}, map[string]any{"kind": "application", "mode": "run"}},
 		{compiler.GraphRefusalDepthLimit, 2, "layers.ef", []string{"--focus", "function:main", "--depth", "65"}, map[string]any{"focus": "function:main", "depth": 65}},
+		{compiler.GraphRefusalDepthLimit, 2, "layers.ef", []string{"--focus", "function:main", "--depth", "3000000000"}, map[string]any{"focus": "function:main", "depth": 3000000000}},
+		{compiler.GraphRefusalDepthLimit, 2, "layers.ef", []string{"--focus", "function:main", "--depth", "99999999999999999999"}, map[string]any{"focus": "function:main", "depth": json.Number("99999999999999999999")}},
 		{compiler.GraphRefusalInvocation, 2, "layers.ef", []string{"--focus", "function:main", "--depth", "two"}, map[string]any{"focus": "function:main", "depth": "two"}},
+		{compiler.GraphRefusalInvocation, 2, "layers.ef", []string{"--focus", "function:main", "--depth", "2.5"}, map[string]any{"focus": "function:main", "depth": 2.5}},
+		{compiler.GraphRefusalInvocation, 2, "layers.ef", []string{"--focus", "function:main", "--depth", "1e400"}, map[string]any{"focus": "function:main", "depth": json.Number("1e400")}},
 		{compiler.GraphRefusalFocus, 1, "layers.ef", []string{"--focus", "function:absent"}, map[string]any{"focus": "function:absent"}},
-		{compiler.GraphRefusalCollapse, 1, "layers.ef", []string{"--kind", "layers", "--collapse", "x"}, map[string]any{"kind": "layers", "collapse": []any{"x"}}},
+		{compiler.GraphRefusalIncompatible, 2, "layers.ef", []string{"--kind", "layers", "--collapse", "x"}, map[string]any{"kind": "layers", "collapse": []any{"x"}}},
+		{compiler.GraphRefusalCollapse, 1, "layers.ef", []string{"--collapse", "function:absent"}, map[string]any{"collapse": []any{"function:absent"}}},
 		{compiler.GraphRefusalTarget, 1, "layers.ef", []string{"--kind", "application", "--target", "js"}, map[string]any{"kind": "application", "target": "js"}},
 		{compiler.GraphRefusalPlan, 1, "layers.ef", []string{"--kind", "application", "--mode", "test"}, map[string]any{"kind": "application", "mode": "test"}},
 		{compiler.GraphRefusalUnchecked, 1, "unchecked.ef", []string{"--kind", "layers"}, map[string]any{"kind": "layers"}},
@@ -372,7 +378,10 @@ func TestGraphViewRefusalsAgreeAcrossCLIAndMCP(t *testing.T) {
 		if code != refusal.exit || len(stdout) != 0 || !strings.HasPrefix(message, refusal.code+": ") {
 			t.Fatalf("CLI %v: exit=%d stdout=%q stderr=%q, want %s exit %d", refusal.flags, code, stdout, stderr, refusal.code, refusal.exit)
 		}
-		result := responses[index]["result"].(map[string]any)
+		result, _ := responses[index]["result"].(map[string]any)
+		if result == nil {
+			t.Fatalf("MCP %v: no tool result: %v", refusal.args, responses[index])
+		}
 		text := result["content"].([]any)[0].(map[string]any)["text"]
 		if result["isError"] != true || text != message || result["structuredContent"] != nil {
 			t.Fatalf("MCP %v: %v, want %q", refusal.args, result, message)
