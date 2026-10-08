@@ -93,6 +93,46 @@ func main() {
 		memory := *pack
 		memory.Rules = []*lint.Rule{&rule}
 		lint.Main(&memory)
+	case "misplaced":
+		// Reports main one byte late under main's own line and column.
+		// The pack sees no source text, so only the host can refuse it.
+		rule := *pack.Rules[0]
+		rule.Check = func(pass *lint.Pass) error {
+			span := pass.Snapshot.FunctionNamed("main").Span
+			span.Offset, span.Length = span.Offset+1, span.Length-1
+			pass.Reportf(span, "misplaced main")
+			return nil
+		}
+		misplaced := *pack
+		misplaced.Rules = []*lint.Rule{&rule}
+		lint.Main(&misplaced)
+	case "env":
+		// Reports what it can see of its environment: how many variables,
+		// and the presence and value of EF_LINT_PROBE.
+		rule := *pack.Rules[0]
+		rule.Check = func(pass *lint.Pass) error {
+			probe := "absent"
+			if value, ok := os.LookupEnv("EF_LINT_PROBE"); ok {
+				probe = "present:" + value
+			}
+			pass.Reportf(pass.Snapshot.FunctionNamed("main").Span, "env %d %s", len(os.Environ()), probe)
+			return nil
+		}
+		env := *pack
+		env.Rules = []*lint.Rule{&rule}
+		lint.Main(&env)
+	case "inputs":
+		// Reports what it receives beyond the facts: the document URI, the
+		// program path it was started as and its working directory.
+		rule := *pack.Rules[0]
+		rule.Check = func(pass *lint.Pass) error {
+			dir, _ := os.Getwd()
+			pass.Reportf(pass.Snapshot.FunctionNamed("main").Span, "uri=%s program=%s dir=%s", pass.Snapshot.Source.URI, os.Args[0], dir)
+			return nil
+		}
+		inputs := *pack
+		inputs.Rules = []*lint.Rule{&rule}
+		lint.Main(&inputs)
 	case "bulky":
 		// Valid findings whose response exceeds the default byte limit;
 		// lint's run_test.go evaluates the same rule in-process.

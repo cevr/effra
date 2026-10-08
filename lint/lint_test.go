@@ -292,6 +292,66 @@ func TestConfigurationDefaultsInspectionAndIdentity(t *testing.T) {
 	}
 }
 
+// A rule declares the targets it supports and is skipped under another.
+// Enabled only by its pack's default or a preset, it does not apply to that
+// target: the skip is marked inapplicable and the report stays complete.
+// Enabled by the project's own configuration, it is a guarantee the run
+// cannot give: the skip leaves the report incomplete. Who enabled the rule
+// is part of its effective setting, so it qualifies the configuration.
+func TestTargetApplicabilityFollowsWhoEnabledTheRule(t *testing.T) {
+	pack := testPack(func(pass *Pass) error {
+		pass.Reportf(pass.Snapshot.FunctionNamed("main").Span, "ran")
+		return nil
+	})
+	pack.Rules[0].Targets = []string{"go"}
+	pack.Presets = []Preset{{Name: "on", Rules: map[string]RuleConfig{"no-op": {Severity: SeverityError}}}}
+	registry, err := NewRegistry(testBuiltins, testManifest(t, pack))
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := testSnapshot()
+	js.Semantic.Target = "js"
+	cases := []struct {
+		name, document         string
+		snapshot               *Snapshot
+		status                 string
+		complete, inapplicable bool
+	}{
+		{"default under go", `{"version":1}`, testSnapshot(), StatusCompleted, true, false},
+		{"default under js", `{"version":1}`, js, StatusSkipped, true, true},
+		{"preset under js", `{"version":1,"extends":["acme/on"]}`, js, StatusSkipped, true, true},
+		{"configured severity under js", `{"version":1,"rules":{"acme/no-op":"warning"}}`, js, StatusSkipped, false, false},
+		{"configured options over a preset under js", `{"version":1,"extends":["acme/on"],"rules":{"acme/no-op":{"options":{"label":"b"}}}}`, js, StatusSkipped, false, false},
+		{"configured off under js", `{"version":1,"rules":{"acme/no-op":"off"}}`, js, StatusOff, true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			report, err := Evaluate(pack, configure(t, registry, c.document), c.snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status := report.Rules[0]
+			if status.Status != c.status || report.Complete != c.complete {
+				t.Fatalf("%+v", report)
+			}
+			if status.Inapplicable != c.inapplicable {
+				t.Fatalf("inapplicable: %+v", status)
+			}
+			if c.status == StatusSkipped && (status.Reason != "target-unsupported: js" || len(report.Findings) != 0) {
+				t.Fatalf("skip: %+v", report)
+			}
+		})
+	}
+	preset := configure(t, registry, `{"version":1,"extends":["acme/on"]}`)
+	configured := configure(t, registry, `{"version":1,"rules":{"acme/no-op":"error"}}`)
+	if preset.Identity() == configured.Identity() {
+		t.Fatal("a preset and the project's configuration enabling a target-restricted rule share a configuration identity")
+	}
+	if preset.Inspect()[0].Enforced || !configured.Inspect()[0].Enforced {
+		t.Fatalf("inspection: %+v %+v", preset.Inspect()[0], configured.Inspect()[0])
+	}
+}
+
 func TestEvaluateStatuses(t *testing.T) {
 	evaluate := func(t *testing.T, check func(*Pass) error, document string, snapshot *Snapshot) Report {
 		t.Helper()

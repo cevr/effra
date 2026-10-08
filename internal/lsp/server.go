@@ -8,6 +8,7 @@ package lsp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/lintpacks"
 	"effra.local/prototype/internal/producer"
 )
 
@@ -49,6 +51,7 @@ type request struct {
 type session struct {
 	out       io.Writer
 	target    string
+	lint      *lintpacks.Session
 	phase     int
 	documents map[string]document
 	bytes     int
@@ -56,12 +59,14 @@ type session struct {
 
 // Serve owns the session until exit or EOF. EOF after shutdown is clean;
 // otherwise it is an abnormal termination. Compiler import calls retain their
-// existing bounded subprocess lifetime and complete before the next message.
-func Serve(target string, in io.Reader, out io.Writer) error {
+// existing bounded subprocess lifetime and complete before the next message;
+// so do the selected lint rule packs, each bounded by its own limits. lint is
+// the lint configuration loaded at startup; nil is the default one.
+func Serve(target string, lint *lintpacks.Session, in io.Reader, out io.Writer) error {
 	if target != "go" && target != "js" {
 		return fmt.Errorf("LSP target must be go or js")
 	}
-	s := session{out: out, target: target, documents: make(map[string]document)}
+	s := session{out: out, target: target, lint: lint, documents: make(map[string]document)}
 	defer func() { clear(s.documents); s.bytes = 0 }()
 	r := bufio.NewReaderSize(in, 4096)
 	for {
@@ -344,7 +349,7 @@ func (s *session) synchronize(req request) error {
 	doc.analysis = compiler.CompileAt(text, s.target, filepath.Dir(path))
 	s.documents[path] = doc
 	s.bytes += len(text) - len(old.snapshot.Text)
-	report := doc.analysis.DiagnosticReport(doc.snapshot, false)
+	report := doc.analysis.DiagnosticReportWith(doc.snapshot, false, s.lint.Run(context.Background(), doc.analysis, doc.snapshot))
 	if _, err := report.Bounded(MaxDiagnostics); err != nil {
 		return s.rejectDocument(req, -32603, doc, err.Error())
 	}

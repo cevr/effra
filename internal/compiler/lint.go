@@ -17,12 +17,21 @@ type LintRule struct {
 	Description string `json:"description"`
 }
 type LintDiagnostic struct {
-	Code     string `json:"code"`
-	Rule     string `json:"rule"`
-	Severity string `json:"severity"`
-	Message  string `json:"message"`
-	Span     Span   `json:"span"`
+	Code        string               `json:"code"`
+	Rule        string               `json:"rule"`
+	Severity    string               `json:"severity"`
+	Message     string               `json:"message"`
+	Span        Span                 `json:"span"`
+	Related     []RelatedLocation    `json:"related,omitempty"`
+	Suggestions []lintsdk.Suggestion `json:"suggestions,omitempty"`
 }
+
+// LintResult is built-in lint advice merged with the reports of the
+// selected rule packs. Complete is false when lint could not evaluate every
+// enabled rule: unchecked source, a built-in rule that did not complete, or
+// a pack rule that failed or was skipped (unless inapplicable). Packs
+// lists each selected pack's execution in namespace order; its findings are
+// in LintDiagnostics.
 type LintResult struct {
 	ProducerMetadata
 	SchemaVersion   int              `json:"schemaVersion"`
@@ -30,12 +39,79 @@ type LintResult struct {
 	Target          string           `json:"target"`
 	Checked         bool             `json:"checked"`
 	LintPassed      bool             `json:"lintPassed"`
+	Complete        bool             `json:"complete"`
 	Strict          bool             `json:"strict"`
 	Diagnostics     []Diagnostic     `json:"diagnostics"`
 	LintDiagnostics []LintDiagnostic `json:"lintDiagnostics"`
+	Packs           []LintPackStatus `json:"packs"`
 	Errors          int              `json:"errors"`
 	Warnings        int              `json:"warnings"`
+	Information     int              `json:"information"`
 	Suggestions     int              `json:"suggestions"`
+}
+
+// LintPacks is the lint configuration in effect with the reports of its
+// selected rule packs over one result, in namespace order. The zero value
+// is the default configuration with no packs.
+type LintPacks struct {
+	Configuration *lintsdk.Configuration
+	Reports       []LintPackReport
+}
+
+// LintPackReport is one selected pack's report with the manifest identity
+// that names it in a lint-runner error.
+type LintPackReport struct {
+	Pack     string
+	Identity string
+	Report   lintsdk.Report
+}
+
+// LintPackStatus is one selected pack's execution in a lint result.
+type LintPackStatus struct {
+	Pack     string                    `json:"pack"`
+	Identity string                    `json:"identity"`
+	Analysis lintsdk.AnalysisIdentity  `json:"analysis"`
+	Complete bool                      `json:"complete"`
+	Failure  *lintsdk.ExecutionFailure `json:"failure,omitempty"`
+	Rules    []lintsdk.RuleStatus      `json:"rules"`
+}
+
+// builtinSeverity is the displayed severity of a built-in rule under the
+// configuration, or false when the rule is off. Configured hint keeps the
+// built-in vocabulary's "suggestion".
+func (p LintPacks) builtinSeverity(rule LintRule) (string, bool) {
+	if p.Configuration == nil {
+		return rule.Severity, true
+	}
+	setting, ok := p.Configuration.Setting(rule.Name)
+	if !ok || !setting.Configured {
+		return rule.Severity, true
+	}
+	if setting.Severity == lintsdk.SeverityOff {
+		return "", false
+	}
+	return lintSeverity(setting.Severity), true
+}
+
+func lintSeverity(severity lintsdk.Severity) string {
+	if severity == lintsdk.SeverityHint {
+		return "suggestion"
+	}
+	return string(severity)
+}
+
+// DefaultLintConfiguration is the configuration of a session that selected
+// no lint configuration: every built-in rule at its default, no packs.
+func DefaultLintConfiguration() *lintsdk.Configuration {
+	registry, err := LintRegistry()
+	if err != nil {
+		panic(err)
+	}
+	configuration, problems := registry.Configure(lintsdk.Config{Version: lintsdk.ConfigVersion})
+	if len(problems) > 0 {
+		panic(fmt.Sprint(problems))
+	}
+	return configuration
 }
 
 type lintSuppression struct {
@@ -199,11 +275,84 @@ func (r *Result) applyBuiltinRule(rule *lintsdk.Rule, snapshot *lintsdk.Snapshot
 	return lintsdk.Apply(rule, snapshot, lintsdk.Options{})
 }
 
+// Lint is built-in lint advice under the default configuration.
 func (r *Result) Lint(strict bool) LintResult {
-	out := LintResult{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Checked: r.Checked, LintPassed: r.Checked, Strict: strict, Diagnostics: r.Diagnostics, LintDiagnostics: []LintDiagnostic{}}
+	return r.LintWith(strict, LintPacks{})
+}
+
+// LintWith merges built-in advice under the configuration with the reports
+// of the selected rule packs. A pack failure, or a pack rule that failed or
+// was skipped, is a reserved lint-runner error naming the pack: incomplete
+// pack execution fails lint policy, since an enabled rule that did not run
+// has not passed. An inapplicable skip is not: the rule, which only its
+// pack's default or a preset enabled, does not apply to this target.
+// Built-in findings are kept. Findings are ordered by source offset, with
+// built-in rules first and packs in namespace order on equal offsets, never
+// by pack completion order.
+func (r *Result) LintWith(strict bool, packs LintPacks) LintResult {
+	out := LintResult{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Checked: r.Checked, LintPassed: r.Checked, Complete: r.Checked, Strict: strict, Diagnostics: r.Diagnostics, LintDiagnostics: []LintDiagnostic{}, Packs: []LintPackStatus{}}
 	out.ProducerMetadata = r.producerMetadata
-	if r.Program == nil {
+	count := func(severity string) {
+		switch severity {
+		case "error":
+			out.Errors++
+		case "warning":
+			out.Warnings++
+		case "information":
+			out.Information++
+		default:
+			out.Suggestions++
+		}
+	}
+	// Pack diagnostics join built-in advice only when the result is
+	// finished: appended last and stably sorted by offset, they follow
+	// built-in advice at an equal offset and keep their namespace order.
+	var packDiagnostics []LintDiagnostic
+	runnerError := func(to *[]LintDiagnostic, message string) {
+		*to = append(*to, LintDiagnostic{Code: lintRunnerCode, Rule: "lint-runner", Severity: "error", Message: message})
+		out.Errors++
+		out.Complete = false
+	}
+	for _, pack := range packs.Reports {
+		report := pack.Report
+		out.Packs = append(out.Packs, LintPackStatus{Pack: pack.Pack, Identity: pack.Identity, Analysis: report.Analysis, Complete: report.Complete, Failure: report.Failure, Rules: report.Rules})
+		if !report.Complete {
+			out.Complete = false
+		}
+		if report.Failure != nil {
+			runnerError(&packDiagnostics, fmt.Sprintf("rule pack %s (%s) failed: %s: %s", pack.Pack, pack.Identity, report.Failure.Code, report.Failure.Message))
+			continue
+		}
+		for _, status := range report.Rules {
+			switch status.Status {
+			case lintsdk.StatusFailed:
+				runnerError(&packDiagnostics, fmt.Sprintf("rule %s of pack %s (%s) failed: %s", status.Rule, pack.Pack, pack.Identity, status.Reason))
+			case lintsdk.StatusSkipped:
+				if status.Inapplicable {
+					continue
+				}
+				runnerError(&packDiagnostics, fmt.Sprintf("rule %s of pack %s (%s) was skipped: %s", status.Rule, pack.Pack, pack.Identity, status.Reason))
+			}
+		}
+		for _, finding := range report.Findings {
+			diagnostic := LintDiagnostic{Code: finding.Rule, Rule: finding.Rule, Severity: lintSeverity(finding.Severity), Message: finding.Message, Span: lintSpan(finding.Span), Suggestions: finding.Suggestions}
+			for _, related := range finding.Related {
+				diagnostic.Related = append(diagnostic.Related, RelatedLocation{Message: related.Message, Span: lintSpan(related.Span)})
+			}
+			packDiagnostics = append(packDiagnostics, diagnostic)
+			count(diagnostic.Severity)
+		}
+	}
+	finish := func() LintResult {
+		out.LintDiagnostics = append(out.LintDiagnostics, packDiagnostics...)
+		slices.SortStableFunc(out.LintDiagnostics, func(a, b LintDiagnostic) int { return a.Span.Offset - b.Span.Offset })
+		if out.Errors > 0 || strict && out.Warnings > 0 || !r.Checked {
+			out.LintPassed = false
+		}
 		return out
+	}
+	if r.Program == nil {
+		return finish()
 	}
 	rules := LintRules()
 	rulesByName := make(map[string]LintRule, len(rules))
@@ -214,15 +363,17 @@ func (r *Result) Lint(strict bool) LintResult {
 	}
 	suppressions, suppressionDiagnostics := parseSuppressions(r.Program.Comments, r.Revision, rulesByName)
 	out.LintDiagnostics = append(out.LintDiagnostics, suppressionDiagnostics...)
-	out.Errors = len(suppressionDiagnostics)
+	out.Errors += len(suppressionDiagnostics)
 	suppressionIndex := map[suppressionKey][]*lintSuppression{}
 	for _, suppression := range suppressions {
 		key := suppressionKey{revision: suppression.revision, rule: suppression.rule, line: suppression.targetLine}
 		suppressionIndex[key] = append(suppressionIndex[key], suppression)
 	}
+	// A suppression of a rule that is off was not evaluated: only a rule
+	// that ran can show that its suppression went unused.
 	appendUnused := func() {
 		for _, suppression := range suppressions {
-			if !suppression.used {
+			if _, enabled := packs.builtinSeverity(rulesByName[suppression.rule]); !suppression.used && enabled {
 				out.LintDiagnostics = append(out.LintDiagnostics, suppressionDiagnostic("unused lint suppression for "+suppression.rule, suppression.span))
 				out.Errors++
 			}
@@ -230,20 +381,16 @@ func (r *Result) Lint(strict bool) LintResult {
 	}
 	if !r.Checked {
 		appendUnused()
-		slices.SortStableFunc(out.LintDiagnostics, func(a, b LintDiagnostic) int { return a.Span.Offset - b.Span.Offset })
-		return out
+		return finish()
 	}
 	add := func(index int, message string, span Span) {
 		rule := rules[index]
-		if suppressionFor(suppressionIndex, r.Revision, rule.Name, span.Line) != nil {
+		severity, enabled := packs.builtinSeverity(rule)
+		if !enabled || suppressionFor(suppressionIndex, r.Revision, rule.Name, span.Line) != nil {
 			return
 		}
-		out.LintDiagnostics = append(out.LintDiagnostics, LintDiagnostic{rule.Code, rule.Name, rule.Severity, message, span})
-		if rule.Severity == "warning" {
-			out.Warnings++
-		} else {
-			out.Suggestions++
-		}
+		out.LintDiagnostics = append(out.LintDiagnostics, LintDiagnostic{Code: rule.Code, Rule: rule.Name, Severity: severity, Message: message, Span: span})
+		count(severity)
 	}
 	// Uses are the binders resolveBindings assigned to name expressions.
 	used := map[*localBinding]bool{}
@@ -292,20 +439,22 @@ func (r *Result) Lint(strict bool) LintResult {
 	snapshot := r.LintFacts(lintsdk.FamilyDeclarations, lintsdk.FamilyProvisions, lintsdk.FamilyImports)
 	for _, rule := range []*lintsdk.Rule{redundantProvisionRule, unusedGoImportRule} {
 		index := slices.IndexFunc(rules, func(builtin LintRule) bool { return builtin.Name == rule.Name })
+		if _, enabled := packs.builtinSeverity(rules[index]); !enabled {
+			continue
+		}
 		findings, err := r.applyBuiltinRule(rule, snapshot)
 		if err != nil {
-			out.LintDiagnostics = append(out.LintDiagnostics, LintDiagnostic{Code: lintRunnerCode, Rule: "lint-runner", Severity: "error", Message: "built-in lint rule " + rule.Name + " did not complete: " + err.Error()})
-			out.Errors++
+			runnerError(&out.LintDiagnostics, "built-in lint rule "+rule.Name+" did not complete: "+err.Error())
 			continue
 		}
 		for _, finding := range findings {
-			add(index, finding.Message, Span{finding.Span.Offset, finding.Span.Length, finding.Span.Line, finding.Span.Column})
+			add(index, finding.Message, lintSpan(finding.Span))
 		}
 	}
 	appendUnused()
-	slices.SortStableFunc(out.LintDiagnostics, func(a, b LintDiagnostic) int { return a.Span.Offset - b.Span.Offset })
-	if out.Errors > 0 || strict && out.Warnings > 0 {
-		out.LintPassed = false
-	}
-	return out
+	return finish()
+}
+
+func lintSpan(span lintsdk.Span) Span {
+	return Span{span.Offset, span.Length, span.Line, span.Column}
 }

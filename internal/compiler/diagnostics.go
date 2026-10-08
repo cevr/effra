@@ -99,6 +99,7 @@ type DiagnosticReport struct {
 	Strict                bool                `json:"strict"`
 	PolicyPassed          bool                `json:"policyPassed"`
 	LintAvailable         bool                `json:"lintAvailable"`
+	LintComplete          bool                `json:"lintComplete"`
 	LintUnavailableReason string              `json:"lintUnavailableReason,omitempty"`
 	TotalCounts           DiagnosticCounts    `json:"totalCounts"`
 	Diagnostics           []DiagnosticFinding `json:"diagnostics"`
@@ -263,6 +264,15 @@ func lspMessage(message, help string) string {
 }
 
 func (r *Result) DiagnosticReport(snapshot SourceSnapshot, strict bool) DiagnosticReport {
+	return r.DiagnosticReportWith(snapshot, strict, LintPacks{})
+}
+
+// DiagnosticReportWith is the diagnostic report with lint advice under the
+// configuration, merged with the reports of its selected rule packs. A
+// lint-runner error has no source location; its LSP projection is the
+// document start, so an editor shows that lint is incomplete instead of
+// dropping the finding.
+func (r *Result) DiagnosticReportWith(snapshot SourceSnapshot, strict bool, packs LintPacks) DiagnosticReport {
 	if snapshot.Origin == "" {
 		snapshot.Origin = "disk"
 	}
@@ -285,7 +295,7 @@ func (r *Result) DiagnosticReport(snapshot SourceSnapshot, strict bool) Diagnost
 	report.LintAvailable = r.Checked
 	positionIndex := newSourcePositionIndex(snapshot.Text)
 	seen := map[string]bool{}
-	appendFinding := func(code, origin, rule, severity, message, help string, span Span) {
+	appendFinding := func(code, origin, rule, severity, message, help string, span Span, related []RelatedLocation) {
 		severity, lspSeverity := diagnosticSeverity(severity)
 		key := strings.Join([]string{code, origin, rule, message, fmt.Sprintf("%d:%d", span.Offset, span.Length)}, "\x00")
 		if seen[key] {
@@ -300,31 +310,32 @@ func (r *Result) DiagnosticReport(snapshot SourceSnapshot, strict bool) Diagnost
 		if location, ok := positionIndex.rangeFor(snapshot.Text, span); hasSourceSpan && ok {
 			finding.LocationAvailable = true
 			finding.LSP = &LSPDiagnostic{Range: location, Severity: lspSeverity, Code: code, Source: "effra", Message: lspMessage(message, help)}
+		} else if code == lintRunnerCode && !hasSourceSpan {
+			finding.LSP = &LSPDiagnostic{Severity: lspSeverity, Code: code, Source: "effra", Message: message}
+		}
+		if finding.Origin == "compiler" || len(related) > 0 {
+			finding.Related = append([]RelatedLocation{}, related...)
+		}
+		if finding.LocationAvailable {
+			for _, related := range related {
+				if location, ok := positionIndex.rangeFor(snapshot.Text, related.Span); ok {
+					finding.LSP.RelatedInformation = append(finding.LSP.RelatedInformation, LSPRelatedInformation{Location: LSPDiagnosticLocation{URI: snapshot.URI, Range: location}, Message: related.Message})
+				}
+			}
 		}
 		report.Diagnostics = append(report.Diagnostics, finding)
 	}
 	for _, diagnostic := range r.Diagnostics {
-		before := len(report.Diagnostics)
-		appendFinding(diagnostic.Code, "compiler", "", "error", diagnostic.Message, diagnostic.Help, diagnostic.Span)
-		if len(report.Diagnostics) > before {
-			finding := &report.Diagnostics[len(report.Diagnostics)-1]
-			finding.Related = append([]RelatedLocation{}, diagnostic.Related...)
-			if finding.LSP != nil {
-				for _, related := range diagnostic.Related {
-					if location, ok := positionIndex.rangeFor(snapshot.Text, related.Span); ok {
-						finding.LSP.RelatedInformation = append(finding.LSP.RelatedInformation, LSPRelatedInformation{Location: LSPDiagnosticLocation{URI: snapshot.URI, Range: location}, Message: related.Message})
-					}
-				}
-			}
-		}
+		appendFinding(diagnostic.Code, "compiler", "", "error", diagnostic.Message, diagnostic.Help, diagnostic.Span, diagnostic.Related)
 	}
 	var lint LintResult
 	if r.Checked {
-		lint = r.Lint(strict)
+		lint = r.LintWith(strict, packs)
 		for _, diagnostic := range lint.LintDiagnostics {
-			appendFinding(diagnostic.Code, "lint", diagnostic.Rule, diagnostic.Severity, diagnostic.Message, "", diagnostic.Span)
+			appendFinding(diagnostic.Code, "lint", diagnostic.Rule, diagnostic.Severity, diagnostic.Message, "", diagnostic.Span, diagnostic.Related)
 		}
 		report.PolicyPassed = lint.LintPassed
+		report.LintComplete = lint.Complete
 	} else {
 		report.PolicyPassed = false
 	}

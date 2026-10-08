@@ -182,3 +182,49 @@ func TestRunBoundsTheRequestWriteHeldByAnEscapedDescendant(t *testing.T) {
 		t.Fatalf("descendant %d was gone before the run returned; the bound is unproven", child)
 	}
 }
+
+// Unix paths are bytes and need not be UTF-8; a pack receives them
+// unchanged. Two working directories, or two programs resolved in them,
+// that differ only in such bytes are two analyses, although their JSON
+// display strings are equal. (A manifest path itself must be text.)
+func TestAnalysisIdentityKeepsPathBytes(t *testing.T) {
+	root := t.TempDir()
+	original, err := os.ReadFile(fixturePack(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dirs []string
+	for _, name := range []string{"d\xff", "d\xfe"} {
+		dir := filepath.Join(root, name)
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Skipf("this file system refuses a name that is not UTF-8: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "pack"), original, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		dirs = append(dirs, dir)
+	}
+	run := func(program, dir string) Report {
+		t.Helper()
+		manifest := fixtureManifest(t, "serve")
+		manifest.Executable.Path = program
+		registry, err := NewRegistry(testBuiltins, manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		report, err := Run(context.Background(), configure(t, registry, `{"version":1}`), "fixture", testSnapshot(), RunOptions{Dir: dir})
+		if err != nil || !report.Complete {
+			t.Fatalf("%+v %v", report, err)
+		}
+		return report
+	}
+	pairs := map[string][2]Report{
+		"working directory": {run(fixturePack(t), dirs[0]), run(fixturePack(t), dirs[1])},
+		"resolved program":  {run("pack", dirs[0]), run("pack", dirs[1])},
+	}
+	for name, pair := range pairs {
+		if a, b := pair[0].Analysis, pair[1].Analysis; a.Digest == b.Digest {
+			t.Errorf("%s: two paths share the analysis %s", name, a.Digest)
+		}
+	}
+}

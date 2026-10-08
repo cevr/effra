@@ -90,7 +90,7 @@ func TestNonobjectBodiesAreInvalidRequests(t *testing.T) {
 		fmt.Fprintf(&input, "Content-Length: %d\r\n\r\n%s", len(body), body)
 		input.Write(frame(t, initialize()))
 		input.Write(frame(t, shutdown()))
-		if err := Serve("go", &input, &out); err != nil {
+		if err := Serve("go", nil, &input, &out); err != nil {
 			t.Fatal(err)
 		}
 		first, err := readFrame(bufio.NewReader(&out))

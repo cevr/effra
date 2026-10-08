@@ -33,8 +33,9 @@ const (
 )
 
 // Request is one protocol request: the selected, admitted rules of one pack
-// with validated options over one fact snapshot. ID digests the rest of
-// the request; a response must echo it and the snapshot revision.
+// with validated options over one fact snapshot. ID is an opaque
+// commitment to the rest of the request and to the execution answering it
+// (see bind); a response must echo it and the snapshot revision.
 type Request struct {
 	ID       string          `json:"id"`
 	Pack     RequestPack     `json:"pack"`
@@ -175,7 +176,7 @@ func runRule(rule *Rule, rawOptions json.RawMessage, snapshot json.RawMessage) (
 // or pack can write.
 type execution struct {
 	namespace string
-	source    Source
+	source    *sourceBounds
 	revision  string
 	settings  map[string]RuleSetting
 	request   Request
@@ -195,7 +196,7 @@ func prepare(configuration *Configuration, namespace string, snapshot *Snapshot)
 	}
 	work := &execution{
 		namespace: namespace,
-		source:    snapshot.Source,
+		source:    newSourceBounds(snapshot.Source),
 		revision:  snapshot.Semantic.Revision,
 		settings:  map[string]RuleSetting{},
 		request: Request{
@@ -203,7 +204,7 @@ func prepare(configuration *Configuration, namespace string, snapshot *Snapshot)
 			Rules:    []RequestRule{},
 			Snapshot: wire,
 		},
-		report: Report{Analysis: configuration.Analysis(snapshot), Complete: true, Rules: []RuleStatus{}, Findings: []ReportedFinding{}},
+		report: Report{Complete: true, Rules: []RuleStatus{}, Findings: []ReportedFinding{}},
 	}
 	for _, metadata := range manifest.Rules {
 		id := namespace + "/" + metadata.Name
@@ -212,15 +213,33 @@ func prepare(configuration *Configuration, namespace string, snapshot *Snapshot)
 			work.report.Rules = append(work.report.Rules, RuleStatus{Rule: id, Status: StatusOff})
 			continue
 		}
-		if refusal, reason := admit(manifest, metadata, snapshot); refusal != "" {
-			work.report.Rules = append(work.report.Rules, RuleStatus{Rule: id, Status: refusal, Reason: reason})
+		if refusal := admit(manifest, metadata, setting, snapshot); refusal.Status != "" {
+			refusal.Rule = id
+			work.report.Rules = append(work.report.Rules, refusal)
 			continue
 		}
 		work.settings[metadata.Name] = setting
 		work.request.Rules = append(work.request.Rules, RequestRule{Name: metadata.Name, Version: metadata.Version, Options: setting.Options.canonical()})
 	}
-	work.request.ID = digest(work.request)
+	work.report.Analysis = configuration.analysis(snapshot, wire).requested(work.request)
 	return work, nil
+}
+
+// bind commits the request ID to the request and to what answers it: a
+// pack process qualified by execution, or, for nil, the in-process
+// authoring harness. The ID digests a domain-separated envelope of both,
+// so an answer computed under another executable or environment cannot
+// bind to this request. Packs echo it as an opaque value.
+func (e *execution) bind(execution *ExecutionIdentity) {
+	domain := "effra.lint.request/in-process"
+	if execution != nil {
+		domain = "effra.lint.request/process"
+		e.report.Analysis = e.report.Analysis.executed(*execution)
+	} else {
+		e.report.Analysis = e.report.Analysis.inProcess()
+	}
+	e.request.ID = ""
+	e.request.ID = digest(map[string]any{"domain": domain, "request": e.request, "execution": execution})
 }
 
 // accept validates an untrusted response, whose serialized payload is size
@@ -292,7 +311,7 @@ func (e *execution) accept(response Response, size int, limits Limits) *Executio
 	return nil
 }
 
-func validateFindings(findings []Finding, source Source) string {
+func validateFindings(findings []Finding, source *sourceBounds) string {
 	if len(findings) > MaxFindingsPerRule {
 		return fmt.Sprintf("rule reported %d findings; the limit is %d", len(findings), MaxFindingsPerRule)
 	}
@@ -318,7 +337,7 @@ func (e *execution) fail(failure *ExecutionFailure) {
 func (e *execution) finish() Report {
 	report := e.report
 	for _, status := range report.Rules {
-		if status.Status == StatusSkipped || status.Status == StatusFailed {
+		if status.Status == StatusFailed || status.Status == StatusSkipped && !status.Inapplicable {
 			report.Complete = false
 		}
 	}

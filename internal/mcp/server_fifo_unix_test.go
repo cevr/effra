@@ -26,7 +26,7 @@ func TestFIFOAdmissionKeepsMCPResponsive(t *testing.T) {
 	}, "\n")
 	var output bytes.Buffer
 	done := make(chan error, 1)
-	go func() { done <- Serve(root, strings.NewReader(messages), &output) }()
+	go func() { done <- Serve(root, nil, strings.NewReader(messages), &output) }()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -69,7 +69,7 @@ func TestDiagnosticsFIFOAdmissionKeepsMCPResponsive(t *testing.T) {
 	}, "\n")
 	var output bytes.Buffer
 	done := make(chan error, 1)
-	go func() { done <- Serve(root, strings.NewReader(messages), &output) }()
+	go func() { done <- Serve(root, nil, strings.NewReader(messages), &output) }()
 	select {
 	case err := <-done:
 		if err != nil {

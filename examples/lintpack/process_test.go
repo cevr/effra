@@ -2,10 +2,13 @@ package lintpack
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"effra.local/prototype/internal/compiler"
@@ -14,12 +17,25 @@ import (
 
 // The built policy-lint program, run over the process protocol on real
 // checked fixtures, reports exactly what in-process evaluation reports:
-// statuses, findings, related locations and analysis identity.
+// statuses, findings and related locations. Its analysis identity is the
+// in-process one qualified by the executable it ran.
 func TestPolicyPackProcessMatchesInProcessEvaluation(t *testing.T) {
 	dir := t.TempDir()
-	if output, err := exec.Command("go", "build", "-o", filepath.Join(dir, "policy-lint"), "./cmd/policy-lint").CombinedOutput(); err != nil {
+	// Windows starts only a file with a PATHEXT extension; the manifest's
+	// extensionless path resolves to it.
+	name := "policy-lint"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if output, err := exec.Command("go", "build", "-o", filepath.Join(dir, name), "./cmd/policy-lint").CombinedOutput(); err != nil {
 		t.Fatal(string(output))
 	}
+	program, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(program)
+	executable := "sha256:" + hex.EncodeToString(sum[:])
 	// The manifest names the program relative to its own directory.
 	manifest, err := Pack.Manifest(lint.Executable{Path: "policy-lint"})
 	if err != nil {
@@ -70,6 +86,18 @@ func TestPolicyPackProcessMatchesInProcessEvaluation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// The process ran with an empty selection, so it received only the
+		// platform's required variables; in-process
+		// evaluation is the authoring harness, never reusable.
+		if execution := got.Analysis.Execution; execution == nil || execution.Executable != executable || !execution.Complete || len(execution.Variables) != len(lint.RequiredVariables(runtime.GOOS)) || want.Analysis.Execution != nil || !want.Analysis.InProcess || want.Analysis.ReuseScope != "none" {
+			t.Fatalf("%s: execution identity %+v, in-process %+v", run.fixture, got.Analysis, want.Analysis)
+		}
+		qualified := got.Analysis
+		qualified.Digest, qualified.Execution, qualified.InProcess, qualified.ReuseScope = want.Analysis.Digest, nil, true, "none"
+		if !reflect.DeepEqual(qualified, want.Analysis) || got.Analysis.Digest == want.Analysis.Digest {
+			t.Fatalf("%s: analysis %+v, in-process %+v", run.fixture, got.Analysis, want.Analysis)
+		}
+		got.Analysis = want.Analysis
 		if !reflect.DeepEqual(got, want) || got.Complete != run.complete || len(got.Findings) != run.findings || got.Failure != nil {
 			t.Fatalf("%s %s:\nprocess    %+v\nin-process %+v", run.fixture, run.config, got, want)
 		}

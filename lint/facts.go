@@ -87,9 +87,13 @@ type Semantic struct {
 }
 
 // Source describes the analysed text. Bytes bounds every finding span.
+// Text is the text itself, which a host supplies so that the runner can
+// check finding positions against it; it is never sent to a pack. When
+// set, it must have exactly Bytes bytes.
 type Source struct {
 	URI   string `json:"uri,omitempty"`
 	Bytes int    `json:"bytes"`
+	Text  string `json:"-"`
 }
 
 // UnavailableFamily explains why a family was not produced.

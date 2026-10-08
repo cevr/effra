@@ -106,7 +106,7 @@ with tempfile.TemporaryDirectory(prefix="effra-tests-") as tmp:
         suite=json.loads(run("test",str(file),"--target",target,"--live","--timeout-ms","100",success=False).stdout)
         assert suite["watchdogExpired"] and not suite["cleanupCompleted"]
 rules=json.loads(run("lint","rules").stdout)
-assert {r["name"] for r in rules} == {"unused-recipe","redundant-provision","unused-go-import","invalid-suppression"}
+assert {r["rule"] for r in rules} == {"unused-recipe","redundant-provision","unused-go-import","invalid-suppression"} and all(r["builtin"] for r in rules)
 graph=json.loads(run("graph","examples/workflow.ef").stdout)
 assert any(e["kind"]=="requires" and e["from"]=="function:welcome" and e["service"]=="Directory" for e in graph["edges"])
 with tempfile.TemporaryDirectory(prefix="effra-tooling-") as tmp:

@@ -70,6 +70,8 @@ type Pack struct {
 	// FactVersions lists the supported fact schema versions.
 	FactVersions []int
 	Rules        []*Rule
+	// Presets are named rule settings a configuration can extend.
+	Presets []Preset
 }
 
 // Rule returns the pack rule called name.
@@ -139,7 +141,7 @@ func Apply(rule *Rule, snapshot *Snapshot, options Options) (findings []Finding,
 	}
 	// The admitted source bounds output. It is captured before the rule
 	// runs: the rule can write to its snapshot, never to this bound.
-	source := snapshot.Source
+	source := newSourceBounds(snapshot.Source)
 	pass := &Pass{Snapshot: snapshot, Options: options}
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -157,11 +159,11 @@ func Apply(rule *Rule, snapshot *Snapshot, options Options) (findings []Finding,
 	return slices.Clone(pass.findings), nil
 }
 
-func validateFinding(finding Finding, source Source) error {
+func validateFinding(finding Finding, source *sourceBounds) error {
 	if err := validateMessage(finding.Message); err != nil {
 		return err
 	}
-	if err := validateSpan(finding.Span, source); err != nil {
+	if err := source.check(finding.Span); err != nil {
 		return fmt.Errorf("finding %q: %w", finding.Message, err)
 	}
 	if len(finding.Related) > MaxRelatedLocations {
@@ -171,7 +173,7 @@ func validateFinding(finding Finding, source Source) error {
 		if err := validateMessage(related.Message); err != nil {
 			return err
 		}
-		if err := validateSpan(related.Span, source); err != nil {
+		if err := source.check(related.Span); err != nil {
 			return fmt.Errorf("related location %q: %w", related.Message, err)
 		}
 	}
@@ -189,7 +191,7 @@ func validateFinding(finding Finding, source Source) error {
 // validateSuggestion checks that every edit lies inside the source and that
 // no two edits overlap or start at the same offset, so applying them in
 // any order yields the same text.
-func validateSuggestion(suggestion Suggestion, source Source) error {
+func validateSuggestion(suggestion Suggestion, source *sourceBounds) error {
 	if err := validateMessage(suggestion.Message); err != nil {
 		return fmt.Errorf("suggestion: %w", err)
 	}
@@ -198,7 +200,7 @@ func validateSuggestion(suggestion Suggestion, source Source) error {
 	}
 	edits := slices.Clone(suggestion.Edits)
 	for _, edit := range edits {
-		if err := validateSpan(edit.Span, source); err != nil {
+		if err := source.check(edit.Span); err != nil {
 			return fmt.Errorf("suggestion %q edit: %w", suggestion.Message, err)
 		}
 		if len(edit.NewText) > MaxEditTextBytes || !utf8.ValidString(edit.NewText) {
@@ -218,13 +220,6 @@ func validateSuggestion(suggestion Suggestion, source Source) error {
 func validateMessage(message string) error {
 	if message == "" || len(message) > MaxMessageBytes || !utf8.ValidString(message) {
 		return fmt.Errorf("finding message must be non-empty UTF-8 of at most %d bytes", MaxMessageBytes)
-	}
-	return nil
-}
-
-func validateSpan(span Span, source Source) error {
-	if span.Offset < 0 || span.Length < 0 || span.Offset > source.Bytes || span.Length > source.Bytes-span.Offset || span.Line < 1 || span.Column < 1 {
-		return fmt.Errorf("span %+v is outside the %d-byte source", span, source.Bytes)
 	}
 	return nil
 }

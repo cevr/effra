@@ -4,6 +4,7 @@ package mcp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/lintpacks"
 	"effra.local/prototype/internal/producer"
 	sourcefile "effra.local/prototype/internal/source"
 )
@@ -488,7 +490,11 @@ func checkSymbolMetadata(symbol compiler.Symbol) error {
 	return nil
 }
 
-func Serve(root string, input io.Reader, output io.Writer) error {
+// Serve answers MCP requests over the workspace root. packs is the lint
+// configuration loaded at startup (nil is the default one); project.lint and
+// project.diagnostics run its selected rule packs, and lint.rules inspects
+// it without running them.
+func Serve(root string, packs *lintpacks.Session, input io.Reader, output io.Writer) error {
 	absolute, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -598,7 +604,7 @@ func Serve(root string, input io.Reader, output io.Writer) error {
 					res.Error = &rpcError{-32602, err.Error()}
 					break
 				}
-				result, err := call(root, params.Name, args)
+				result, err := call(root, packs, params.Name, args)
 				if err == nil && !formatCall {
 					// The frame has two copies of the result, one of them escaped.
 					// Charge both before json.Marshal creates the content text.
@@ -753,7 +759,7 @@ func readWorkspaceSource(root, relative string, maxBytes int) ([]byte, string, e
 	return source, requested, err
 }
 
-func call(root, name string, args arguments) (any, error) {
+func call(root string, packs *lintpacks.Session, name string, args arguments) (any, error) {
 	if name == "code.format" {
 		if err := producer.Current().Require(args.ExpectedProducer); err != nil {
 			return nil, err
@@ -761,7 +767,7 @@ func call(root, name string, args arguments) (any, error) {
 		return formatCode(root, args)
 	}
 	if name == "lint.rules" {
-		return compiler.LintRules(), nil
+		return packs.Rules(), nil
 	}
 	if name == "project.describe" {
 		return map[string]any{
@@ -784,7 +790,7 @@ func call(root, name string, args arguments) (any, error) {
 		}, nil
 	}
 	var snapshot compiler.SourceSnapshot
-	if name == "project.diagnostics" {
+	if name == "project.diagnostics" || name == "project.lint" {
 		uri, err := compiler.FileURI(filepath.Join(root, args.File))
 		if err != nil {
 			return nil, err
@@ -809,9 +815,9 @@ func call(root, name string, args arguments) (any, error) {
 	if args.ExpectedRevision != "" && args.ExpectedRevision != r.Revision {
 		return nil, fmt.Errorf("stale semantic revision; current revision is %s", r.Revision)
 	}
+	snapshot.Text = string(source)
 	if name == "project.diagnostics" {
-		snapshot.Text = string(source)
-		report := r.DiagnosticReport(snapshot, args.Strict)
+		report := r.DiagnosticReportWith(snapshot, args.Strict, packs.Run(context.Background(), r, snapshot))
 		return report.Bounded(maxInspectionItems)
 	}
 	if name == "project.tests" {
@@ -849,7 +855,7 @@ func call(root, name string, args arguments) (any, error) {
 		return graph, nil
 	}
 	if name == "project.lint" {
-		lint := r.Lint(args.Strict)
+		lint := r.LintWith(args.Strict, packs.Run(context.Background(), r, snapshot))
 		compilerTruncated, lintTruncated := len(lint.Diagnostics) > 100, len(lint.LintDiagnostics) > 100
 		if compilerTruncated {
 			lint.Diagnostics = lint.Diagnostics[:100]

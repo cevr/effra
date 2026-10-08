@@ -3,11 +3,14 @@ package lint
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -30,6 +33,15 @@ func TestMain(m *testing.M) {
 
 // fixturePack builds testdata/fixturepack once: every runner test starts a
 // real separate process.
+// executableName is name as a program file on this platform: Windows
+// starts only files with a PATHEXT extension.
+func executableName(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
+}
+
 func fixturePack(t *testing.T) string {
 	t.Helper()
 	fixture.once.Do(func() {
@@ -37,7 +49,7 @@ func fixturePack(t *testing.T) string {
 		if fixture.err != nil {
 			return
 		}
-		fixture.path = filepath.Join(fixture.dir, "fixturepack")
+		fixture.path = filepath.Join(fixture.dir, executableName("fixturepack"))
 		if output, err := exec.Command("go", "build", "-o", fixture.path, "./testdata/fixturepack").CombinedOutput(); err != nil {
 			fixture.err = errors.New(string(output))
 		}
@@ -308,4 +320,165 @@ func TestEvaluateAppliesTheResponseByteLimitLikeRun(t *testing.T) {
 	if evaluated.Failure.Message != run.Failure.Message || !reflect.DeepEqual(evaluated.Rules, run.Rules) {
 		t.Fatalf("in-process and process refusals differ:\n%+v %+v\n%+v %+v", evaluated.Failure, evaluated.Rules, run.Failure, run.Rules)
 	}
+}
+
+// A report from a pack process is qualified by the content of the
+// executable the runner started: equal output from different bytes is a
+// different analysis. Arguments or a #! script leave the content short of
+// the implementation, so such a report is not reusable.
+func TestRunQualifiesTheExecutableContent(t *testing.T) {
+	dir := t.TempDir()
+	original, err := os.ReadFile(fixturePack(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyPack := filepath.Join(dir, executableName("copy"))
+	if err := os.WriteFile(copyPack, append(original, 0), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(path string, args ...string) Report {
+		t.Helper()
+		manifest := fixtureManifest(t, args...)
+		manifest.Executable.Path = path
+		registry, err := NewRegistry(testBuiltins, manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		report, err := Run(context.Background(), configure(t, registry, `{"version":1}`), "fixture", testSnapshot(), RunOptions{Dir: dir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	digestOf := func(data []byte) string {
+		sum := sha256.Sum256(data)
+		return "sha256:" + hex.EncodeToString(sum[:])
+	}
+	unexecuted := fixtureConfiguration(t).Analysis(testSnapshot())
+
+	served, copied := run(fixturePack(t), "serve"), run(copyPack, "serve")
+	if !reflect.DeepEqual(served.Findings, copied.Findings) || served.Analysis.Digest == copied.Analysis.Digest || served.Analysis.Digest == unexecuted.Digest {
+		t.Fatalf("executable content did not qualify the analysis: %+v %+v", served.Analysis, copied.Analysis)
+	}
+	if execution := served.Analysis.Execution; execution.Executable != digestOf(original) || execution.Complete || !strings.HasPrefix(execution.Environment, "sha256:") || len(execution.Variables) != len(RequiredVariables(runtime.GOOS)) || served.Analysis.ReuseScope != "none" {
+		t.Fatalf("an argument-selected pack: %+v", served.Analysis)
+	}
+	// Without arguments the fixture crashes, but its executable fully
+	// qualifies the run and the snapshot's reuse scope stands.
+	bare := run(fixturePack(t))
+	if bare.Failure == nil || !bare.Analysis.Execution.Complete || bare.Analysis.ReuseScope != "artifact" {
+		t.Fatalf("an argument-free pack: %+v %+v", bare.Analysis, bare.Failure)
+	}
+	// Only Unix starts a #! script as a program.
+	if runtime.GOOS != "windows" {
+		script := filepath.Join(dir, "script")
+		if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if report := run("script"); report.Analysis.Execution.Complete || report.Analysis.ReuseScope != "none" {
+			t.Fatalf("a script pack: %+v", report.Analysis)
+		}
+	}
+	// Nothing is executed, so nothing is qualified, when no rule may run.
+	registry, _ := NewRegistry(testBuiltins, fixtureManifest(t, "crash"))
+	off, _ := Run(context.Background(), configure(t, registry, `{"version":1,"rules":{"fixture/rename-main":"off"}}`), "fixture", testSnapshot(), RunOptions{})
+	if off.Analysis.Execution != nil {
+		t.Fatalf("an unstarted pack was qualified: %+v", off.Analysis)
+	}
+}
+
+// The analysis identity qualifies everything a pack process receives. The
+// fixture reports the document URI, its program path and its working
+// directory: each change gives different output from the same source
+// content and executable bytes, so each must give a different analysis,
+// never one reusable identity with two outputs.
+func TestAnalysisIdentityQualifiesEveryPackInput(t *testing.T) {
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	original, err := os.ReadFile(fixturePack(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copied := filepath.Join(dir, executableName("same-bytes"))
+	if err := os.WriteFile(copied, original, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(program, uri, cwd string) Report {
+		t.Helper()
+		manifest := fixtureManifest(t, "inputs")
+		manifest.Executable.Path = program
+		registry, err := NewRegistry(testBuiltins, manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot := testSnapshot()
+		snapshot.Source.URI = uri
+		report, err := Run(context.Background(), configure(t, registry, `{"version":1}`), "fixture", snapshot, RunOptions{Dir: cwd})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !report.Complete || len(report.Findings) != 1 {
+			t.Fatalf("%+v", report)
+		}
+		return report
+	}
+	base := run(fixturePack(t), "file:///w/a.ef", dir)
+	for name, other := range map[string]Report{
+		"document URI":      run(fixturePack(t), "file:///w/b.ef", dir),
+		"program path":      run(copied, "file:///w/a.ef", dir),
+		"working directory": run(fixturePack(t), "file:///w/a.ef", elsewhere),
+	} {
+		if other.Findings[0].Message == base.Findings[0].Message {
+			t.Fatalf("%s: the pack saw no difference: %s", name, other.Findings[0].Message)
+		}
+		if other.Analysis.Digest == base.Analysis.Digest {
+			t.Errorf("%s: two outputs share the analysis %s", name, base.Analysis.Digest)
+		}
+	}
+	// Without a process the snapshot alone must still qualify the analysis.
+	configuration := fixtureConfiguration(t)
+	a, b := testSnapshot(), testSnapshot()
+	a.Source.URI, b.Source.URI = "file:///w/a.ef", "file:///w/b.ef"
+	if configuration.Analysis(a).Digest == configuration.Analysis(b).Digest {
+		t.Errorf("the document URI does not qualify the analysis")
+	}
+}
+
+// Two selected packs can share one executable. Each run sends its own
+// namespace in the request and the SDK checks it, so the two reports
+// differ, and so must their analyses, whether or not a process started.
+func TestAnalysisIdentityQualifiesTheRequestedPack(t *testing.T) {
+	other := fixtureManifest(t, "serve")
+	other.Namespace = "other"
+	registry, err := NewRegistry(testBuiltins, fixtureManifest(t, "serve"), other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(config, namespace string) Report {
+		t.Helper()
+		report, err := Run(context.Background(), configure(t, registry, config), namespace, testSnapshot(), RunOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return report
+	}
+	served, refused := run(`{"version":1}`, "fixture"), run(`{"version":1}`, "other")
+	if !served.Complete || refused.Complete || !strings.Contains(refused.Rules[0].Reason, `request is for pack "other"`) {
+		t.Fatalf("%+v\n%+v", served, refused)
+	}
+	if served.Analysis.Digest == refused.Analysis.Digest {
+		t.Errorf("two packs' reports share the analysis %s", served.Analysis.Digest)
+	}
+	off := `{"version":1,"rules":{"fixture/rename-main":"off","other/rename-main":"off"}}`
+	if a, b := run(off, "fixture"), run(off, "other"); a.Analysis.Execution != nil || a.Analysis.Digest == b.Analysis.Digest {
+		t.Errorf("unstarted packs share the analysis %s", a.Analysis.Digest)
+	}
+}
+
+func fixtureConfiguration(t *testing.T) *Configuration {
+	t.Helper()
+	registry, err := NewRegistry(testBuiltins, fixtureManifest(t, "serve"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return configure(t, registry, `{"version":1}`)
 }

@@ -40,7 +40,7 @@ func TestProtocolLifecycleAndSemanticParity(t *testing.T) {
 		`{bad json}`,
 	}
 	var output bytes.Buffer
-	if err := Serve(root, strings.NewReader(strings.Join(messages, "\n")), &output); err != nil {
+	if err := Serve(root, nil, strings.NewReader(strings.Join(messages, "\n")), &output); err != nil {
 		t.Fatal(err)
 	}
 	decoder := json.NewDecoder(&output)
@@ -125,7 +125,7 @@ func TestServeRejectsInvalidTextBeforeJSONNormalization(t *testing.T) {
 			input = append(input, []byte(`{"jsonrpc":"2.0","id":3,"method":"ping"}`+"\n")...)
 
 			var output bytes.Buffer
-			if err := Serve(t.TempDir(), bytes.NewReader(input), &output); err != nil {
+			if err := Serve(t.TempDir(), nil, bytes.NewReader(input), &output); err != nil {
 				t.Fatal(err)
 			}
 			decoder := json.NewDecoder(&output)
@@ -179,7 +179,7 @@ effect fn main() -> string { run Store.label().provide(App) }`
 		t.Fatal(err)
 	}
 	for _, target := range []string{"go", "js"} {
-		result, err := call(root, "code.inspect", arguments{File: "main.ef", Symbol: "App", Target: target})
+		result, err := call(root, nil, "code.inspect", arguments{File: "main.ef", Symbol: "App", Target: target})
 		if err != nil {
 			t.Fatalf("%s layer inspection failed: %v", target, err)
 		}
@@ -214,7 +214,7 @@ run task().provide<Console>(Stdout)
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := call(root, "project.diagnostics", arguments{File: "main.ef"})
+	result, err := call(root, nil, "project.diagnostics", arguments{File: "main.ef"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,11 +236,11 @@ run task().provide<Console>(Stdout)
 	if report.Revision != expected.Revision || report.Diagnostics[0].LSP == nil || report.Diagnostics[0].LSP.Severity != 2 {
 		t.Fatalf("MCP report drifted from compiler snapshot: %+v", report)
 	}
-	strict, err := call(root, "project.diagnostics", arguments{File: "main.ef", Strict: true})
+	strict, err := call(root, nil, "project.diagnostics", arguments{File: "main.ef", Strict: true})
 	if err != nil || strict.(compiler.DiagnosticReport).PolicyPassed {
 		t.Fatalf("strict policy was not preserved: result=%+v err=%v", strict, err)
 	}
-	if _, err := call(root, "project.diagnostics", arguments{File: "main.ef", ExpectedRevision: "stale"}); err == nil || !strings.Contains(err.Error(), "stale semantic revision") {
+	if _, err := call(root, nil, "project.diagnostics", arguments{File: "main.ef", ExpectedRevision: "stale"}); err == nil || !strings.Contains(err.Error(), "stale semantic revision") {
 		t.Fatalf("stale diagnostics revision was accepted: %v", err)
 	}
 
@@ -248,7 +248,7 @@ run task().provide<Console>(Stdout)
 	if err := os.WriteFile(filepath.Join(root, "invalid.ef"), []byte(invalidSource), 0644); err != nil {
 		t.Fatal(err)
 	}
-	invalid, err := call(root, "project.diagnostics", arguments{File: "invalid.ef"})
+	invalid, err := call(root, nil, "project.diagnostics", arguments{File: "invalid.ef"})
 	if err != nil || invalid.(compiler.DiagnosticReport).LintAvailable || invalid.(compiler.DiagnosticReport).Checked {
 		t.Fatalf("invalid source was presented as lintable: result=%+v err=%v", invalid, err)
 	}
@@ -260,7 +260,7 @@ run task().provide<Console>(Stdout)
 	if err := os.WriteFile(filepath.Join(root, "exact.ef"), []byte(exact.String()), 0644); err != nil {
 		t.Fatal(err)
 	}
-	exactResult, err := call(root, "project.diagnostics", arguments{File: "exact.ef"})
+	exactResult, err := call(root, nil, "project.diagnostics", arguments{File: "exact.ef"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ run task().provide<Console>(Stdout)
 	if err := os.WriteFile(filepath.Join(root, "many.ef"), []byte(many.String()), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := call(root, "project.diagnostics", arguments{File: "many.ef"}); err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+	if _, err := call(root, nil, "project.diagnostics", arguments{File: "many.ef"}); err == nil || !strings.Contains(err.Error(), "exceeds limit") {
 		t.Fatalf("over-limit diagnostics did not remain an explicit tool failure: %v", err)
 	}
 }
@@ -355,7 +355,7 @@ func TestInspectionBoundsCoverNestedSymbolDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"code.inspect", "code.explain"} {
-		result, err := call(root, name, arguments{File: "main.ef", Symbol: "main"})
+		result, err := call(root, nil, name, arguments{File: "main.ef", Symbol: "main"})
 		if err == nil || result != nil || !strings.Contains(err.Error(), "requires checked source") {
 			t.Fatalf("unchecked %s exposed facts: result=%+v err=%v", name, result, err)
 		}
@@ -369,7 +369,7 @@ func assertInspectionBoundary(t *testing.T, source string, wantError bool) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"code.inspect", "code.explain"} {
-		result, err := call(root, name, arguments{File: "main.ef", Symbol: "target"})
+		result, err := call(root, nil, name, arguments{File: "main.ef", Symbol: "target"})
 		if wantError {
 			if err == nil || !strings.Contains(err.Error(), "symbol exceeds prototype inspection limits") {
 				t.Fatalf("%s accepted over-limit symbol: result=%+v err=%v", name, result, err)
@@ -402,7 +402,7 @@ func assertInspectionDimensions(t *testing.T, source string, expected inspection
 		t.Fatal(err)
 	}
 	for _, name := range []string{"code.inspect", "code.explain"} {
-		result, err := call(root, name, arguments{File: "main.ef", Symbol: "target"})
+		result, err := call(root, nil, name, arguments{File: "main.ef", Symbol: "target"})
 		if err != nil {
 			t.Fatalf("%s rejected bounded dimensions: %v", name, err)
 		}
@@ -499,7 +499,7 @@ func TestInvalidSourceIsACompilerResult(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(`effect fn main() -> void { run Console.log("x") }`), 0644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := call(root, "project.check", arguments{File: "main.ef"})
+	result, err := call(root, nil, "project.check", arguments{File: "main.ef"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +516,7 @@ effect fn test_live_layer() -> void { void }`
 		t.Fatal(err)
 	}
 	for _, target := range []string{"go", "js"} {
-		result, err := call(root, "project.tests", arguments{File: "main.ef", Target: target})
+		result, err := call(root, nil, "project.tests", arguments{File: "main.ef", Target: target})
 		if err != nil {
 			t.Fatalf("%s target: %v", target, err)
 		}
@@ -663,7 +663,7 @@ func TestRejectedFormatRequestStillReleasesQueuedPing(t *testing.T) {
 		`{"jsonrpc":"2.0","id":4,"method":"ping"}`,
 	}
 	var output bytes.Buffer
-	if err := Serve(root, strings.NewReader(strings.Join(messages, "\n")), &output); err != nil {
+	if err := Serve(root, nil, strings.NewReader(strings.Join(messages, "\n")), &output); err != nil {
 		t.Fatal(err)
 	}
 	decoder := json.NewDecoder(&output)
@@ -779,7 +779,7 @@ func TestBoundedFormatResponsePreservesIDsAndUsesCompactFallback(t *testing.T) {
 			`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n" + frame + "\n" +
 			`{"jsonrpc":"2.0","id":3,"method":"ping"}` + "\n"
 		var output bytes.Buffer
-		if err := Serve(t.TempDir(), strings.NewReader(input), &output); err != nil {
+		if err := Serve(t.TempDir(), nil, strings.NewReader(input), &output); err != nil {
 			t.Fatalf("admitted unknown-tool request terminated server: %v", err)
 		}
 		lines := bytes.Split(bytes.TrimSuffix(output.Bytes(), []byte{'\n'}), []byte{'\n'})
@@ -841,7 +841,7 @@ func TestTargetInspection(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, target := range []string{"go", "js"} {
-		result, err := call(root, "code.inspect", arguments{File: "main.ef", Symbol: "main", Target: target})
+		result, err := call(root, nil, "code.inspect", arguments{File: "main.ef", Symbol: "main", Target: target})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -866,7 +866,7 @@ void}`
 		t.Fatal(err)
 	}
 	expected := checked.Lint(true)
-	result, err := call(root, "project.lint", arguments{File: "main.ef", Strict: true})
+	result, err := call(root, nil, "project.lint", arguments{File: "main.ef", Strict: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -889,7 +889,7 @@ void}`
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
 		t.Fatal(err)
 	}
-	invalid, err := call(root, "project.lint", arguments{File: "main.ef"})
+	invalid, err := call(root, nil, "project.lint", arguments{File: "main.ef"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -911,7 +911,7 @@ effect fn test_noop() -> void {
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
 		t.Fatal(err)
 	}
-	result, err := call(root, "project.check", arguments{File: "main.ef"})
+	result, err := call(root, nil, "project.check", arguments{File: "main.ef"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -949,7 +949,7 @@ func TestProjectCheckReportsGoInitializationLowering(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			result, err := call(root, "project.check", arguments{File: "main.ef"})
+			result, err := call(root, nil, "project.check", arguments{File: "main.ef"})
 			if err != nil {
 				t.Fatal(err)
 			}

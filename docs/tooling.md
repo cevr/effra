@@ -6,8 +6,9 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 | --- | --- | --- |
 | `ef check FILE` | `project.check` | Non-disableable source admission diagnostics |
 | `ef diagnostics FILE [--strict] [--json]` | `project.diagnostics` | One shared compiler/lint report with byte spans and UTF-16 ranges |
-| `ef lint FILE [--strict]` | `project.lint` | Checked semantic advice; separate `checked` and `lintPassed` |
-| `ef lint rules` | `lint.rules` | Stable codes, severity, names and rationale |
+| `ef lint FILE [--strict] [--lint-config FILE] [--rules MANIFEST]...` | `project.lint` | Checked semantic advice merged with selected rule packs; separate `checked`, `lintPassed` and `complete` |
+| `ef lint rules [--lint-config FILE] [--rules MANIFEST]...` | `lint.rules` | Every registered rule with its identity, default and effective severity, requirements and options; never runs a pack |
+| `ef lint test PATH... [--update] [--lint-config FILE] [--rules MANIFEST]...` | — | Rule-pack source fixtures: `name.ef` against `name.lint.json` through the production pack path |
 | `ef inspect FILE SYMBOL` | `code.inspect` | Declared/body contracts or nominal record, enum and error metadata |
 | `ef explain FILE SYMBOL` | `code.explain` | Local contract contributions |
 | `ef query FILE BYTE_OFFSET` | `code.typeAt` | Expression kind, type, and executed failure/requirement rows |
@@ -118,6 +119,8 @@ let forgotten = task()
 ```
 
 Only a `//` line comment is a directive; a block comment containing the same text is ordinary comment text and never suppresses or diagnoses. The rule name must be known and the reason must be non-empty. Malformed, unknown, or unused suppressions are `EFL004 invalid-suppression` errors and fail lint in every mode. Suppressions are matched against semantic diagnostic spans in the same source revision; compiler correctness diagnostics cannot be suppressed. Comments remain source text, and no automatic deletion fix is offered.
+
+A rule from a selected rule pack that did not run fails lint with an `EFL000` lint-runner error and `complete: false`, because an enabled rule that did not run has not passed. A rule limited to other `targets` is the exception when only its pack's default or a preset enabled it: it does not apply to this target, so it is reported as `skipped` (`target-unsupported`, `inapplicable: true`) and lint stays complete and passing. Configuring the rule in the project's own lint configuration enforces it: under an unsupported target lint then fails with `EFL000`. The full contract is in [the custom lint spec](specs/custom-lint.md).
 
 ## Local types
 

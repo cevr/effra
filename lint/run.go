@@ -4,12 +4,17 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -90,11 +95,17 @@ func (l Limits) withDefaults() Limits {
 // RunOptions place and bound a pack process.
 type RunOptions struct {
 	// Dir resolves a relative executable path (normally the manifest's
-	// directory) and is the process working directory. The executable is
-	// never looked up on PATH.
+	// directory) and is the process working directory; empty means the
+	// runner's own. The executable is never looked up on PATH; on Windows
+	// it resolves to the program file Windows starts for it (a PATHEXT
+	// extension added), and a batch file is refused. Both the
+	// program path and the directory are part of the execution identity.
 	Dir string
-	// Env is the complete process environment; nil means empty. The
-	// request is a pack's only declared input.
+	// Env is the complete process environment; nil means empty. A later
+	// entry for a name replaces an earlier one. On Windows the host's
+	// SYSTEMROOT is added when Env lacks a nonempty one, and every entry
+	// must be UTF-8. The environment the process receives is part of the
+	// execution identity: with the request, it is a pack's declared input.
 	Env    []string
 	Limits Limits
 }
@@ -118,13 +129,29 @@ func Run(ctx context.Context, configuration *Configuration, namespace string, sn
 	if len(work.request.Rules) == 0 {
 		return work.finish(), nil
 	}
-	payload, err := json.Marshal(work.request)
-	if err != nil {
-		return Report{}, fmt.Errorf("encode request: %w", err)
-	}
 	manifest, _ := configuration.registry.Pack(namespace)
 	limits := options.Limits.withDefaults()
-	answer, failure := runProcess(ctx, manifest.Executable, options, limits, payload)
+	// The executable, working directory and environment are qualified
+	// once, before the request is bound and serialized; the process
+	// receives exactly what its identity names.
+	path, execution, failure := qualifyExecutable(manifest.Executable, options.Dir)
+	var environment processEnvironment
+	if failure == nil {
+		environment, err = newProcessEnvironment(runtime.GOOS, options.Env, os.LookupEnv)
+		if err != nil {
+			failure = &ExecutionFailure{Code: FailureSpawn, Message: err.Error()}
+		}
+	}
+	var answer processAnswer
+	if failure == nil {
+		execution.Environment, execution.Variables = environment.digest(runtime.GOARCH), environment.names()
+		work.bind(&execution)
+		payload, err := json.Marshal(work.request)
+		if err != nil {
+			return Report{}, fmt.Errorf("encode request: %w", err)
+		}
+		answer, failure = runProcess(ctx, path, manifest.Executable.Args, environment.entries(), execution.Dir, limits, payload)
+	}
 	if failure == nil {
 		// A response refused after a clean transport keeps the evidence of
 		// the process that sent it.
@@ -152,22 +179,117 @@ type frameRead struct {
 	problem *frameProblem
 }
 
-// runProcess starts the pack in its own process group, writes the request
-// frame, reads one bounded response frame and always kills the group and
-// reaps the pack before returning. A failure carries the process's exit
-// status and retained stderr; so does a successful answer, for a refusal
-// that acceptance decides later.
-func runProcess(ctx context.Context, executable Executable, options RunOptions, limits Limits, payload []byte) (processAnswer, *ExecutionFailure) {
-	if err := ctx.Err(); err != nil {
-		return processAnswer{}, &ExecutionFailure{Code: FailureCancelled, Message: "analysis was cancelled: " + err.Error()}
-	}
+// resolveExecutable is the program file the runner starts for the
+// manifest executable, resolved against dir, which must be absolute; never
+// PATH. See resolveProgram.
+func resolveExecutable(executable Executable, dir string) (string, error) {
+	return resolveProgram(declaredExecutable(executable, dir))
+}
+
+// declaredExecutable is the manifest executable's path made absolute
+// against dir, before any platform resolution.
+func declaredExecutable(executable Executable, dir string) string {
 	path := executable.Path
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(options.Dir, path)
+		path = filepath.Join(dir, path)
 	}
-	path, err := filepath.Abs(path)
+	return filepath.Clean(path)
+}
+
+// resolveProgram is the file the operating system starts for the absolute
+// path. On Windows, starting a path without a PATHEXT extension starts the
+// first of path.com, path.exe, ... that exists (os/exec's extension
+// lookup), so the runner resolves that file with exec.LookPath, which
+// applies the same rule to an absolute path without searching PATH; it
+// then hashes and starts exactly that file. A batch file is refused:
+// cmd.exe would run it with its own command-line parser, which breaks the
+// argument contract of a pack process. Elsewhere the path is the program.
+func resolveProgram(path string) (string, error) {
+	if runtime.GOOS != "windows" {
+		return path, nil
+	}
+	resolved, err := exec.LookPath(path)
 	if err != nil {
-		return processAnswer{}, &ExecutionFailure{Code: FailureSpawn, Message: err.Error()}
+		return "", err
+	}
+	if extension := filepath.Ext(resolved); strings.EqualFold(extension, ".bat") || strings.EqualFold(extension, ".cmd") {
+		return "", fmt.Errorf("pack executable %s is a batch file, which cmd.exe runs with its own argument parser; a pack must be a program", resolved)
+	}
+	return resolved, nil
+}
+
+// admitExecutable resolves the manifest executable against dir and checks,
+// without opening it, that what exists there is a regular program file. An
+// absent file is admitted: only running needs it. When no program file
+// resolves, the declared path itself is checked: a Windows lookup probes
+// only path.com, path.exe, ... and reports a directory at the declared
+// path as not found, which is not absence.
+func admitExecutable(executable Executable, dir string) error {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	declared := declaredExecutable(executable, dir)
+	path, err := resolveProgram(declared)
+	switch {
+	case errors.Is(err, fs.ErrNotExist) || errors.Is(err, exec.ErrNotFound):
+		path = declared
+	case err != nil:
+		return err
+	}
+	info, err := os.Stat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return fmt.Errorf("pack executable: %w", err)
+	case !info.Mode().IsRegular():
+		return fmt.Errorf("pack executable %s is %w", path, errNotRegular)
+	}
+	return nil
+}
+
+// qualifyExecutable resolves the manifest executable against dir, never
+// PATH, to the program file the runner will start (resolveProgram), and
+// digests the content of that regular file. dir, made
+// absolute (the runner's own directory when empty), is the process's
+// working directory. A file that is not regular is refused before it is
+// opened; one that cannot be read is a spawn failure: the runner would not
+// start it.
+func qualifyExecutable(executable Executable, dir string) (string, ExecutionIdentity, *ExecutionFailure) {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", ExecutionIdentity{}, &ExecutionFailure{Code: FailureSpawn, Message: err.Error()}
+	}
+	path, err := resolveExecutable(executable, dir)
+	if err != nil {
+		return "", ExecutionIdentity{}, &ExecutionFailure{Code: FailureSpawn, Message: err.Error()}
+	}
+	file, err := openRegularFile(path)
+	if errors.Is(err, errNotRegular) {
+		return "", ExecutionIdentity{}, &ExecutionFailure{Code: FailureSpawn, Message: "pack executable " + path + " is not a regular file"}
+	}
+	if err != nil {
+		return "", ExecutionIdentity{}, &ExecutionFailure{Code: FailureSpawn, Message: err.Error()}
+	}
+	defer file.Close()
+	hash := sha256.New()
+	head := &headBuffer{limit: 2}
+	if _, err := io.Copy(io.MultiWriter(hash, head), file); err != nil {
+		return "", ExecutionIdentity{}, &ExecutionFailure{Code: FailureSpawn, Message: "read pack executable: " + err.Error()}
+	}
+	script := string(head.data) == "#!"
+	return path, ExecutionIdentity{Program: path, Dir: dir, Paths: framedDigest(path, dir), Executable: "sha256:" + hex.EncodeToString(hash.Sum(nil)), Complete: !script && len(executable.Args) == 0}, nil
+}
+
+// runProcess starts the pack at path in its own process group, writes the
+// request frame, reads one bounded response frame and always kills the
+// group and reaps the pack before returning. A failure carries the
+// process's exit status and retained stderr; so does a successful answer,
+// for a refusal that acceptance decides later.
+func runProcess(ctx context.Context, path string, args, env []string, dir string, limits Limits, payload []byte) (processAnswer, *ExecutionFailure) {
+	if err := ctx.Err(); err != nil {
+		return processAnswer{}, &ExecutionFailure{Code: FailureCancelled, Message: "analysis was cancelled: " + err.Error()}
 	}
 	stdinR, stdinW, err := os.Pipe()
 	if err != nil {
@@ -191,15 +313,11 @@ func runProcess(ctx context.Context, executable Executable, options RunOptions, 
 			file.Close()
 		}
 	}()
-	env := options.Env
-	if env == nil {
-		env = []string{}
-	}
 	cmd := &exec.Cmd{
 		Path:        path,
-		Args:        append([]string{path}, executable.Args...),
+		Args:        append([]string{path}, args...),
 		Env:         env,
-		Dir:         options.Dir,
+		Dir:         dir,
 		Stdin:       stdinR,
 		Stdout:      stdoutW,
 		Stderr:      stderrW,

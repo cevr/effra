@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/lintpacks"
 	"effra.local/prototype/internal/lsp"
 	"effra.local/prototype/internal/mcp"
 	"effra.local/prototype/internal/producer"
@@ -53,6 +54,52 @@ func invalidInvocation(err error) error {
 		return usageError{message: "invalid invocation"}
 	}
 	return usageError{message: err.Error()}
+}
+
+// lintSelection removes the lint configuration flags from args: at most one
+// --lint-config FILE and any number of --rules MANIFEST. Every occurrence
+// counts, and an empty path is refused rather than read as no selection.
+func lintSelection(args []string) (lintpacks.Selection, []string, error) {
+	var selection lintpacks.Selection
+	var rest []string
+	configured := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--lint-config", "--rules":
+			if i+1 == len(args) {
+				return selection, nil, fmt.Errorf("%s requires a value", args[i])
+			}
+			if args[i] == "--lint-config" {
+				if configured {
+					return selection, nil, fmt.Errorf("--lint-config may be given once")
+				}
+				configured = true
+			}
+			if args[i+1] == "" {
+				return selection, nil, fmt.Errorf("%s requires a file path, not an empty value", args[i])
+			}
+			if args[i] == "--rules" {
+				selection.Manifests = append(selection.Manifests, args[i+1])
+			} else {
+				selection.Config = args[i+1]
+			}
+			i++
+		default:
+			rest = append(rest, args[i])
+		}
+	}
+	return selection, rest, nil
+}
+
+// loadLint loads the selected lint configuration. Every failure is an
+// invalid invocation: no pack starts under a configuration that does not
+// load and validate.
+func loadLint(selection lintpacks.Selection) (*lintpacks.Session, error) {
+	session, err := lintpacks.Load(selection)
+	if err != nil {
+		return nil, invalidInvocation(err)
+	}
+	return session, nil
 }
 
 func printJSON(v any) error {
@@ -130,10 +177,15 @@ type options struct {
 	live           bool
 	positional     []string
 	typeSelection  compiler.TypeSelection
+	lint           lintpacks.Selection
 }
 
 func parseOptions(args []string) (options, error) {
 	opts := options{target: "go"}
+	var err error
+	if opts.lint, args, err = lintSelection(args); err != nil {
+		return opts, err
+	}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--target", "-o", "--timeout-ms", "--symbol", "--offset", "--definition", "--revision":
@@ -187,7 +239,7 @@ func parseOptions(args []string) (options, error) {
 }
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] | lint FILE [--strict] [--target go|js] | lint rules | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] | lsp [--target go|js]")
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] [LINT] | lint FILE [--strict] [--target go|js] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go|js] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
 		fmt.Println("type: ef type FILE (--symbol NAME | --offset BYTE | --definition TYPE_ID --revision REVISION) [--target go|js] [--json]")
 		return nil
 	}
@@ -196,32 +248,59 @@ func command(args []string) error {
 	}
 	if args[0] == "lsp" {
 		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
-			fmt.Println("usage: ef lsp [--target go|js]\nContent-Length framed JSON-RPC on stdio. Full-document synchronization and UTF-16 diagnostics only.")
+			fmt.Println("usage: ef lsp [--target go|js] [--lint-config FILE] [--rules MANIFEST]...\nContent-Length framed JSON-RPC on stdio. Full-document synchronization and UTF-16 diagnostics only.\nThe lint configuration loads once at startup; a rule pack failure is published as an EFL000 error at the document start.")
 			return nil
 		}
+		selection, rest, err := lintSelection(args[1:])
+		if err != nil {
+			return invalidInvocation(err)
+		}
 		target := "go"
-		if len(args) == 3 && args[1] == "--target" {
-			target = args[2]
-		} else if len(args) != 1 {
-			return invalidInvocation(fmt.Errorf("usage: ef lsp [--target go|js]"))
+		if len(rest) == 2 && rest[0] == "--target" {
+			target = rest[1]
+		} else if len(rest) != 0 {
+			return invalidInvocation(fmt.Errorf("usage: ef lsp [--target go|js] [--lint-config FILE] [--rules MANIFEST]..."))
 		}
 		if target != "go" && target != "js" {
 			return invalidInvocation(fmt.Errorf("LSP target must be go or js"))
 		}
-		return lsp.Serve(target, os.Stdin, os.Stdout)
+		session, err := loadLint(selection)
+		if err != nil {
+			return err
+		}
+		return lsp.Serve(target, session, os.Stdin, os.Stdout)
 	}
-	if len(args) == 2 && args[0] == "lint" && args[1] == "rules" {
-		return printJSON(compiler.LintRules())
+	if len(args) >= 2 && args[0] == "lint" && args[1] == "test" {
+		return lintTestCommand(args[2:])
+	}
+	if len(args) >= 2 && args[0] == "lint" && args[1] == "rules" {
+		selection, rest, err := lintSelection(args[2:])
+		if err != nil || len(rest) != 0 {
+			return invalidInvocation(fmt.Errorf("usage: ef lint rules [--lint-config FILE] [--rules MANIFEST]..."))
+		}
+		session, err := loadLint(selection)
+		if err != nil {
+			return err
+		}
+		return printJSON(session.Rules())
 	}
 	if args[0] == "mcp" {
+		selection, rest, err := lintSelection(args[1:])
+		if err != nil {
+			return invalidInvocation(err)
+		}
 		root := "."
-		if len(args) > 2 {
-			return fmt.Errorf("usage: ef mcp [ROOT]")
+		if len(rest) > 1 {
+			return fmt.Errorf("usage: ef mcp [ROOT] [--lint-config FILE] [--rules MANIFEST]...")
 		}
-		if len(args) == 2 {
-			root = args[1]
+		if len(rest) == 1 {
+			root = rest[0]
 		}
-		return mcp.Serve(root, os.Stdin, os.Stdout)
+		session, err := loadLint(selection)
+		if err != nil {
+			return err
+		}
+		return mcp.Serve(root, session, os.Stdin, os.Stdout)
 	}
 	switch args[0] {
 	case "check", "diagnostics", "lint", "query", "type", "graph", "inspect", "explain", "build", "run", "test":
@@ -230,23 +309,22 @@ func command(args []string) error {
 	}
 	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
 		if args[0] == "diagnostics" {
-			fmt.Println("usage: ef diagnostics FILE [--strict] [--json] [--target go|js]\nLocations: one-based UTF-16 lines/columns in text; zero-based UTF-16 ranges and original UTF-8 byte spans in JSON.\nExit codes: 0 policy passed; 1 failed policy or source/operational failure; 2 invalid invocation.\nWith --json, source findings produce a report on stdout even when policy fails; operational failures produce no report and explain the error on stderr.")
+			fmt.Println("usage: ef diagnostics FILE [--strict] [--json] [--target go|js] [--lint-config FILE] [--rules MANIFEST]...\nLocations: one-based UTF-16 lines/columns in text; zero-based UTF-16 ranges and original UTF-8 byte spans in JSON.\nExit codes: 0 policy passed; 1 failed policy or source/operational failure; 2 invalid invocation.\nWith --json, source findings produce a report on stdout even when policy fails; operational failures produce no report and explain the error on stderr.")
 			return nil
 		}
 		return command([]string{"--help"})
 	}
-	opts, err := parseOptions(args[1:])
-	if err != nil {
-		if args[0] == "diagnostics" {
+	// diagnostics and lint report invalid invocations with exit 2, apart
+	// from failed policy (1).
+	usage := func(err error) error {
+		if args[0] == "diagnostics" || args[0] == "lint" {
 			return invalidInvocation(err)
 		}
 		return err
 	}
-	usage := func(err error) error {
-		if args[0] == "diagnostics" {
-			return invalidInvocation(err)
-		}
-		return err
+	opts, err := parseOptions(args[1:])
+	if err != nil {
+		return usage(err)
 	}
 	if len(opts.positional) == 0 {
 		return usage(fmt.Errorf("source file required"))
@@ -261,6 +339,9 @@ func command(args []string) error {
 		if args[0] != "diagnostics" {
 			return usage(fmt.Errorf("--strict is only supported by lint"))
 		}
+	}
+	if (opts.lint.Config != "" || len(opts.lint.Manifests) > 0) && args[0] != "lint" && args[0] != "diagnostics" {
+		return usage(fmt.Errorf("--lint-config and --rules are only supported by lint and diagnostics"))
 	}
 	if opts.json && args[0] != "diagnostics" && args[0] != "type" {
 		return usage(fmt.Errorf("--json is only supported by diagnostics"))
@@ -281,13 +362,19 @@ func command(args []string) error {
 	if len(opts.positional) != want {
 		return usage(fmt.Errorf("incorrect arguments for %s", args[0]))
 	}
-	if args[0] == "diagnostics" && filepath.Ext(opts.positional[0]) != ".ef" {
+	if (args[0] == "diagnostics" || args[0] == "lint") && filepath.Ext(opts.positional[0]) != ".ef" {
 		return invalidInvocation(fmt.Errorf("source file must have .ef extension"))
+	}
+	var session *lintpacks.Session
+	if args[0] == "lint" || args[0] == "diagnostics" {
+		if session, err = loadLint(opts.lint); err != nil {
+			return err
+		}
 	}
 	var r *compiler.Result
 	var snapshot compiler.SourceSnapshot
 	var sourceOrigin string
-	if args[0] == "diagnostics" {
+	if args[0] == "diagnostics" || args[0] == "lint" {
 		r, snapshot, err = loadWithSource(opts.positional[0], opts.target)
 	} else if opts.target == "go" && (args[0] == "build" || args[0] == "run" || args[0] == "test") {
 		r, sourceOrigin, err = loadWithOrigin(opts.positional[0], opts.target)
@@ -311,7 +398,7 @@ func command(args []string) error {
 		}
 		return printProjectionJSON(response)
 	case "diagnostics":
-		report := r.DiagnosticReport(snapshot, opts.strict)
+		report := r.DiagnosticReportWith(snapshot, opts.strict, session.Run(context.Background(), r, snapshot))
 		if opts.json {
 			if err := printJSON(report); err != nil {
 				return err
@@ -330,7 +417,7 @@ func command(args []string) error {
 		}
 		return printProjectionJSON(graph)
 	case "lint":
-		lint := r.Lint(opts.strict)
+		lint := r.LintWith(opts.strict, session.Run(context.Background(), r, snapshot))
 		if err := printJSON(lint); err != nil {
 			return err
 		}

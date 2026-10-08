@@ -24,7 +24,7 @@ fn describe(state: State) -> string { match state { State.Ready => "ready" State
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code.inspect","arguments":{"file":"data.ef","symbol":"State"}}}`,
 	}, "\n")
 	var output bytes.Buffer
-	if err := Serve(root, strings.NewReader(messages), &output); err != nil {
+	if err := Serve(root, nil, strings.NewReader(messages), &output); err != nil {
 		t.Fatal(err)
 	}
 	var first, second map[string]any

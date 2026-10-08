@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -32,7 +33,22 @@ type Manifest struct {
 	FactSchema      ManifestSchema `json:"factSchema"`
 	Executable      Executable     `json:"executable"`
 	Rules           []ManifestRule `json:"rules"`
+	Presets         []Preset       `json:"presets,omitempty"`
 }
+
+// Preset is a named set of settings for rules of its own pack, keyed by
+// local rule name. A configuration applies it with extends; it cannot
+// configure built-in rules or another pack.
+type Preset struct {
+	Name        string                `json:"name"`
+	Description string                `json:"description,omitempty"`
+	Rules       map[string]RuleConfig `json:"rules,omitempty"`
+	// Env states the host variables the pack needs, such as PATH for an
+	// interpreter that looks up helpers; a later layer can replace it.
+	Env EnvSelection `json:"env,omitzero"`
+}
+
+const maxPresets = 64
 
 // ManifestSchema names the fact schema versions a pack accepts.
 type ManifestSchema struct {
@@ -120,7 +136,67 @@ func (m Manifest) Validate() error {
 			return fail("rule %s: %v", rule.Name, err)
 		}
 	}
+	if len(m.Presets) > maxPresets {
+		return fail("declares %d presets; the limit is %d", len(m.Presets), maxPresets)
+	}
+	for i, preset := range m.Presets {
+		if !validIdentifier(preset.Name) {
+			return fail("preset name %q must be a lowercase kebab-case identifier", preset.Name)
+		}
+		if slices.ContainsFunc(m.Presets[:i], func(other Preset) bool { return other.Name == preset.Name }) {
+			return fail("duplicate preset %s/%s", m.Namespace, preset.Name)
+		}
+		if err := m.validatePreset(preset); err != nil {
+			return fail("preset %s: %v", preset.Name, err)
+		}
+	}
 	return nil
+}
+
+// validatePreset checks a preset as configuration of its own pack: every
+// key names a pack rule, severities are valid, and options satisfy the
+// rule's schema.
+func (m Manifest) validatePreset(preset Preset) error {
+	if !validText(preset.Description, maxDescriptionLen) {
+		return fmt.Errorf("description exceeds %d bytes", maxDescriptionLen)
+	}
+	if len(preset.Rules) == 0 && !preset.Env.Set {
+		return fmt.Errorf("must configure at least one rule or an environment")
+	}
+	if err := preset.Env.validate(); err != nil {
+		return err
+	}
+	names := make([]string, 0, len(preset.Rules))
+	for name := range preset.Rules {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		rule, ok := m.Rule(name)
+		if !ok {
+			return fmt.Errorf("pack has no rule %q", name)
+		}
+		setting := preset.Rules[name]
+		if setting.Severity != "" && setting.Severity != SeverityOff && !setting.Severity.valid() {
+			return fmt.Errorf("invalid severity %q for %s", setting.Severity, name)
+		}
+		if setting.Options != nil {
+			if _, err := ValidateOptions(rule.Options, setting.Options); err != nil {
+				return fmt.Errorf("%s: %v", name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// Preset returns the manifest preset called name.
+func (m Manifest) Preset(name string) (Preset, bool) {
+	for _, preset := range m.Presets {
+		if preset.Name == name {
+			return preset, true
+		}
+	}
+	return Preset{}, false
 }
 
 func (r ManifestRule) validate() error {
@@ -199,6 +275,11 @@ func (p *Pack) Manifest(executable Executable) (Manifest, error) {
 		Description:     p.Description,
 		FactSchema:      ManifestSchema{Name: FactSchemaName, Versions: slices.Clone(p.FactVersions)},
 		Executable:      Executable{Path: executable.Path, Args: slices.Clone(executable.Args)},
+	}
+	for _, preset := range p.Presets {
+		preset.Rules = maps.Clone(preset.Rules)
+		preset.Env.Names = slices.Clone(preset.Env.Names)
+		manifest.Presets = append(manifest.Presets, preset)
 	}
 	for _, rule := range p.Rules {
 		if rule.Check == nil {

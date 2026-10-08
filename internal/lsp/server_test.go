@@ -34,7 +34,7 @@ func runSession(t *testing.T, calls ...any) ([]map[string]any, error) {
 	for _, v := range calls {
 		in.Write(frame(t, v))
 	}
-	err := Serve("go", &in, &out)
+	err := Serve("go", nil, &in, &out)
 	var messages []map[string]any
 	r := bufio.NewReader(&out)
 	for {
@@ -110,7 +110,7 @@ func TestRecoverableInvalidBodyAndLifecycle(t *testing.T) {
 	in.Write(frame(t, shutdown()))
 	in.Write(frame(t, call("unknown", nil, 6)))
 	in.Write(frame(t, call("exit", nil, nil)))
-	if err := Serve("go", &in, &out); err != nil {
+	if err := Serve("go", nil, &in, &out); err != nil {
 		t.Fatal(err)
 	}
 	r := bufio.NewReader(&out)
@@ -198,7 +198,7 @@ func TestEOFOutputAndVersions(t *testing.T) {
 	if _, err := runSession(t, call("exit", nil, nil)); err == nil {
 		t.Fatal("exit without shutdown accepted")
 	}
-	if err := Serve("go", bytes.NewReader(frame(t, initialize())), failingWriter{}); err == nil {
+	if err := Serve("go", nil, bytes.NewReader(frame(t, initialize())), failingWriter{}); err == nil {
 		t.Fatal("write failure ignored")
 	}
 	if _, err := encodeFrame(strings.Repeat("x", MaxOutputBytes)); err == nil {

@@ -235,7 +235,7 @@ func TestNavigationAnswersSignatureOnlyParameters(t *testing.T) {
 		for _, v := range append(calls, shutdown(), call("exit", nil, nil)) {
 			in.Write(frame(t, v))
 		}
-		if err := Serve(target, &in, &out); err != nil {
+		if err := Serve(target, nil, &in, &out); err != nil {
 			t.Fatal(err)
 		}
 		byID := responses(t, readMessages(t, &out))
