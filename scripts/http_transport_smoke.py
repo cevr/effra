@@ -28,8 +28,9 @@ def start(target, scratch):
         assert host, target + " is required"
         command = [host, str(hosted)]
     process = subprocess.Popen(command, cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    selector = selectors.DefaultSelector()
+    selector = None
     try:
+        selector = selectors.DefaultSelector()
         selector.register(process.stdout, selectors.EVENT_READ)
         assert selector.select(timeout=10), target + " server did not bind"
         line = process.stdout.readline().strip()
@@ -42,7 +43,8 @@ def start(target, scratch):
         process.communicate()
         raise
     finally:
-        selector.close()
+        if selector is not None:
+            selector.close()
     return process, (host, int(port))
 
 
@@ -146,6 +148,22 @@ def hold_slot(address, deadline=3.0):
         assert time.monotonic() < stop, "/slow was never admitted"
 
 
+def hold_malformed(address, raw, deadline=3.0):
+    """Send raw on a connection that stays open after its 400. The slot of
+    the previous response may still be held (docs/runtime.md), so a 503 closes
+    that socket and retries; the accepted connection is returned open."""
+    stop = time.monotonic() + deadline
+    while True:
+        held = connect(address)
+        held.sendall(raw)
+        response = read_response(held)
+        if response is not None and response[0] == 503 and time.monotonic() < stop:
+            held.close()
+            continue
+        expect(response, 400, close=True)
+        return held
+
+
 def poll_health(address, status, deadline=3.0):
     """Wait for /health to report status; it is 503 exactly while the single
     admission slot is held."""
@@ -187,7 +205,7 @@ def check(target, scratch):
         expect(sequential(address, malformed), 400, close=True)
         started = time.monotonic()
         stalled = b"POST /echo HTTP/1.1\r\nHost: effra\r\nContent-Type: application/octet-stream\r\nContent-Length: 4\r\n\r\nx"
-        stalled_response = exchange(address, stalled)
+        stalled_response = sequential(address, stalled)
         assert stalled_response is None, f"stalled body produced a response: {stalled_response}"
         assert time.monotonic() - started < 3, "body read timeout did not close the connection"
         # Client disconnect cancels the active handler and releases admission.
@@ -197,9 +215,7 @@ def check(target, scratch):
         # A client that keeps its connection open after a malformed body's
         # 400 does not hold shutdown open: the transport closes that
         # connection itself once the 400 has been written.
-        held = connect(address)
-        held.sendall(malformed)
-        expect(read_response(held), 400, close=True)
+        held = hold_malformed(address, malformed)
         # Shutdown with active work: the in-flight request receives 503 after
         # its scope closed, then the server completes with interruption
         # within its idleMillis drain grace.

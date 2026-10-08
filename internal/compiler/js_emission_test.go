@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"bufio"
 	"bytes"
 	"io"
 	"net"
@@ -10,7 +9,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -116,38 +117,93 @@ func runNode(t *testing.T, dir, file string) (string, error) {
 	return string(output), err
 }
 
+// nodeServingLimit bounds one served run: startup, the exchange and the drain
+// after SIGTERM all happen inside it.
+const nodeServingLimit = 30 * time.Second
+
+// lineBuffer collects a process's stdout and reports when its first line is
+// complete.
+type lineBuffer struct {
+	mu    sync.Mutex
+	data  bytes.Buffer
+	ready chan struct{}
+	once  sync.Once
+}
+
+func (b *lineBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.data.Write(p)
+	if bytes.IndexByte(b.data.Bytes(), '\n') >= 0 {
+		b.once.Do(func() { close(b.ready) })
+	}
+	return len(p), nil
+}
+
+func (b *lineBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.data.String()
+}
+
 // runNodeServing runs a module that serves until interrupted: it waits for the
 // listening line, performs a fixed request exchange, sends SIGTERM and returns
 // a transcript of the listening line (port elided), the wire responses, the
 // remaining output and the exit status, so two modules compare by behavior.
 func runNodeServing(t *testing.T, dir, file string) (string, error) {
 	t.Helper()
+	transcript, runErr, problem := serveNodeWithin(dir, file, nodeServingLimit)
+	if problem != "" {
+		t.Fatalf("%s: %s", file, problem)
+	}
+	return transcript, runErr
+}
+
+// serveNodeWithin is runNodeServing under one deadline. Every failure after
+// the process starts kills it and waits for it exactly once, and is returned
+// as a problem rather than ending the test, so the watchdog itself is testable.
+func serveNodeWithin(dir, file string, limit time.Duration) (transcript string, runErr error, problem string) {
 	node, err := exec.LookPath("node")
 	if err != nil {
-		t.Fatal("Node is required for JavaScript emission tests")
+		return "", nil, "Node is required for JavaScript emission tests"
 	}
 	main, err := filepath.Abs(filepath.Join(dir, file))
 	if err != nil {
-		t.Fatal(err)
+		return "", nil, err.Error()
 	}
 	command := exec.Command(node, "--preserve-symlinks", "--preserve-symlinks-main", main)
+	stdout := &lineBuffer{ready: make(chan struct{})}
 	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
+	command.Stdout, command.Stderr = stdout, &stderr
 	if err = command.Start(); err != nil {
-		t.Fatal(err)
+		return "", nil, err.Error()
 	}
-	defer func() { _ = command.Process.Kill() }()
-	lines := bufio.NewScanner(stdout)
-	if !lines.Scan() || !strings.HasPrefix(lines.Text(), "listening http://127.0.0.1:") {
-		t.Fatalf("%s did not report listening: %q\n%s", file, lines.Text(), stderr.String())
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	exited := false
+	defer func() {
+		if !exited {
+			_ = command.Process.Kill()
+			<-done
+		}
+	}()
+	timer := time.NewTimer(limit)
+	defer timer.Stop()
+	select {
+	case <-stdout.ready:
+	case err = <-done:
+		exited = true
+		return "", err, "exited without reporting listening: " + stdout.String() + stderr.String()
+	case <-timer.C:
+		return "", nil, "did not report listening within " + limit.String()
 	}
-	address := strings.TrimPrefix(lines.Text(), "listening http://")
-	var transcript strings.Builder
-	transcript.WriteString("listening\n")
+	first, _, _ := strings.Cut(stdout.String(), "\n")
+	if !strings.HasPrefix(first, "listening http://127.0.0.1:") {
+		return "", nil, "unexpected first line " + strconv.Quote(first) + stderr.String()
+	}
+	address := strings.TrimPrefix(first, "listening http://")
+	var out strings.Builder
+	out.WriteString("listening\n")
 	for _, raw := range []string{
 		"GET /health HTTP/1.1\r\nHost: effra\r\nConnection: close\r\n\r\n",
 		"POST /echo HTTP/1.1\r\nHost: effra\r\nConnection: close\r\nContent-Type: application/octet-stream\r\nContent-Length: 4\r\n\r\nping",
@@ -155,7 +211,7 @@ func runNodeServing(t *testing.T, dir, file string) (string, error) {
 	} {
 		connection, err := net.DialTimeout("tcp", address, 5*time.Second)
 		if err != nil {
-			t.Fatal(err)
+			return "", nil, err.Error()
 		}
 		_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
 		_, _ = connection.Write([]byte(raw))
@@ -164,24 +220,43 @@ func runNodeServing(t *testing.T, dir, file string) (string, error) {
 		// The Date header is the only varying byte.
 		for _, line := range strings.Split(string(response), "\r\n") {
 			if !strings.HasPrefix(strings.ToLower(line), "date:") {
-				transcript.WriteString(line + "\n")
+				out.WriteString(line + "\n")
 			}
 		}
 	}
 	if err = command.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
+		return "", nil, err.Error()
 	}
-	rest, _ := io.ReadAll(stdout)
-	transcript.Write(rest)
-	done := make(chan error, 1)
-	go func() { done <- command.Wait() }()
 	select {
 	case err = <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatalf("%s did not exit after SIGTERM", file)
+		exited = true
+	case <-timer.C:
+		return "", nil, "did not exit after SIGTERM within " + limit.String()
 	}
-	transcript.WriteString(stderr.String())
-	return transcript.String(), err
+	_, rest, _ := strings.Cut(stdout.String(), "\n")
+	out.WriteString(rest)
+	out.WriteString(stderr.String())
+	return out.String(), err, ""
+}
+
+// The watchdog bounds startup, and a process that never reports readiness (or
+// exits first) is reaped, so a broken module fails the test instead of
+// hanging it.
+func TestServeNodeWithinBoundsStartup(t *testing.T) {
+	dir := writeJSModule(t, map[string]string{
+		"quiet.mjs": "setTimeout(() => {}, 600000);\n",
+		"exits.mjs": "console.log('not a listening line');\n",
+	})
+	started := time.Now()
+	if _, _, problem := serveNodeWithin(dir, "quiet.mjs", 500*time.Millisecond); !strings.Contains(problem, "did not report listening") {
+		t.Fatalf("quiet module: %q", problem)
+	}
+	if time.Since(started) > 10*time.Second {
+		t.Fatal("the watchdog did not bound startup")
+	}
+	if _, _, problem := serveNodeWithin(dir, "exits.mjs", 10*time.Second); !strings.Contains(problem, "exited without reporting listening") && !strings.Contains(problem, "unexpected first line") {
+		t.Fatalf("exiting module: %q", problem)
+	}
 }
 
 // Every JavaScript-capable authored example emits entry, library and test
@@ -491,5 +566,42 @@ effect fn main() -> void {
 	dir := writeJSModule(t, map[string]string{"entry.mjs": entry})
 	if output, err := runNode(t, dir, "entry.mjs"); err != nil || output != "timed out\n" {
 		t.Fatalf("timeout entry run: %v\n%s", err, output)
+	}
+}
+
+// Every chunk must stand on its own edges. A program that selects only
+// `provider:LiveHttp` gets the chunk's `requires` closure and its own `effect`
+// imports, so the table must name each helper the chunk calls from another
+// chunk and each `effect` namespace it uses. Checking the chunk in isolation
+// matters: in a full program other chunks supply the same names, which hides
+// a deleted edge.
+func TestJSPreludeChunksDeclareTheirOwnEdges(t *testing.T) {
+	definition := regexp.MustCompile(`(?m)^(?:const|let|class|function)\s+(__ef_\w+)`)
+	reference := regexp.MustCompile(`__ef_\w+`)
+	definedBy := map[string]string{}
+	for _, chunk := range jsPrelude {
+		for _, match := range definition.FindAllStringSubmatch(chunk.source, -1) {
+			definedBy[match[1]] = chunk.name
+		}
+	}
+	for _, chunk := range jsPrelude {
+		selection := newJSSelection()
+		if err := selection.use(chunk.name); err != nil {
+			t.Fatal(err)
+		}
+		own := map[string]bool{}
+		for _, match := range definition.FindAllStringSubmatch(chunk.source, -1) {
+			own[match[1]] = true
+		}
+		for _, name := range reference.FindAllString(chunk.source, -1) {
+			if owner, ok := definedBy[name]; ok && !own[name] && !selection.chunks[owner] {
+				t.Errorf("chunk %s uses %s from chunk %s but does not require it", chunk.name, name, owner)
+			}
+		}
+		for _, name := range jsEffectImports {
+			if regexp.MustCompile(`\b`+name+`\.`).MatchString(chunk.source) && !slices.Contains(chunk.imports, name) {
+				t.Errorf("chunk %s uses effect %s but does not import it", chunk.name, name)
+			}
+		}
 	}
 }

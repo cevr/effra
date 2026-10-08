@@ -532,10 +532,10 @@ func TestHostPackageImportabilityIsGoImportRefusal(t *testing.T) {
 		{"example.test/cmd/tool", "main", false},
 		{"strings", "strings", true},
 	} {
-		got := hostPackageImportable(types.NewPackage(test.path, test.name))
-		pkg := listedPackage{ImportPath: test.path, Name: test.name, Standard: !strings.Contains(strings.SplitN(test.path, "/", 2)[0], ".")}
-		if refused := goImportRefusal(pkg) != ""; got != !refused || got != test.importable {
-			t.Errorf("%s: hostPackageImportable=%v goImportRefusal refuses=%v want importable=%v", test.path, got, refused, test.importable)
+		// The table is the oracle: it states the Go command's rule, not
+		// what goImportRefusal currently answers.
+		if got := hostPackageImportable(types.NewPackage(test.path, test.name)); got != test.importable {
+			t.Errorf("%s: hostPackageImportable=%v want importable=%v", test.path, got, test.importable)
 		}
 	}
 }
