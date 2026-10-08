@@ -2256,7 +2256,7 @@ func (c *checker) check() {
 		case "string", "bool", "i64", "bytes", "File", "Latch", "Fiber", "Context", "Effect", "Scope", "Exit", "Cause", "never", "invalid":
 			c.diagnostic("EF101", "reserved data declaration "+name, span)
 		}
-		if _, callback := builtinCallbacks[name]; callback {
+		if _, callback := c.builtinCallback(name); callback {
 			c.diagnostic("EF101", "reserved data declaration "+name, span)
 		}
 		claim(name, span)
@@ -2818,7 +2818,7 @@ func (c *checker) typeKnown(name string) bool {
 	case "string", "bool", voidTypeName, "i64", "File", "Latch", "bytes":
 		return true
 	}
-	if _, callback := builtinCallbacks[name]; callback {
+	if _, callback := c.builtinCallback(name); callback {
 		return true
 	}
 	if c.records[name] != nil || c.enums[name] != nil {
@@ -2980,7 +2980,7 @@ func (c *checker) canonicalRef(ref TypeRef) TypeID {
 	if c.program != nil && c.program.typeExpressions[ref.Name] != nil {
 		return c.sourceCallable(c.program.typeExpressions[ref.Name])
 	}
-	if callback, ok := builtinCallbacks[ref.Name]; ok {
+	if callback, ok := c.builtinCallback(ref.Name); ok {
 		parameterID, resultID := c.canonicalRef(typeRef(callback.Parameter)), c.canonicalRef(typeRef(callback.Result))
 		if parameterID == invalidTypeID || resultID == invalidTypeID {
 			return invalidTypeID
@@ -3047,7 +3047,7 @@ func (c *checker) canonicalRef(ref TypeRef) TypeID {
 			return invalidTypeID
 		}
 	case "opaque":
-		if _, callback := builtinCallbacks[ref.Name]; !callback && !slices.Contains([]string{"File", "Latch"}, ref.Name) {
+		if _, callback := c.builtinCallback(ref.Name); !callback && !slices.Contains([]string{"File", "Latch"}, ref.Name) {
 			return invalidTypeID
 		}
 	case "named":
@@ -3437,7 +3437,7 @@ func (c *checker) sameType(actual checkedExpression, expected string) bool {
 // callable whose actual source signature is exactly the callback's; it does
 // not turn the callback into a general function type or erase its own rows.
 func (c *checker) handlerCompatible(actual checkedExpression, expected string) bool {
-	callback, ok := builtinCallbacks[expected]
+	callback, ok := c.builtinCallback(expected)
 	if !ok {
 		return false
 	}
@@ -4924,4 +4924,13 @@ func (c *checker) requireGo(span Span, feature string) {
 	if c.result.Target != "go" {
 		c.diagnostic("EF110", feature+" is currently implemented only for Go", span)
 	}
+}
+
+// builtinCallback returns a builtin callback contract only where the program
+// admits the contract it belongs to. HttpHandler is part of the Http contract
+// with HttpRequest and HttpReply, which it names: without a reference to Http
+// it is an ordinary unknown type and a free name.
+func (c *checker) builtinCallback(name string) (struct{ Parameter, Result string }, bool) {
+	callback, ok := builtinCallbacks[name]
+	return callback, ok && c.program.admitsHTTP()
 }

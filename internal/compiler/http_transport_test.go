@@ -57,7 +57,7 @@ func TestHTTPListenRejectsHandlerShapesAndShadowedContracts(t *testing.T) {
 		{"shadowed record by outer use", `record HttpRequest {path:string} effect fn main()->void{let pending=Http.text("x"); let Http="local"; void}`, "EF101"},
 		{"shadowed record by another function's row", `record HttpRequest {path:string} fn wrap<Http: uses>(task: effect fn() -> string uses { Http }) -> void {void} effect fn label()->bytes uses {Http} {run Http.text("x")} effect fn main()->void{void}`, "EF101"},
 		{"shadowed record by a row of another kind", `record HttpRequest {path:string} fn wrap<Http: raises>(task: effect fn() -> string uses { Http }) -> void {void} effect fn main()->void{void}`, "EF101"},
-		{"shadowed callback", `record HttpHandler {path:string} effect fn main()->void{void}`, "EF101"},
+		{"shadowed callback", `record HttpHandler {path:string} effect fn main()->void{let pending=Http.text("x"); void}`, "EF101"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			r := Compile(test.source)
@@ -483,4 +483,40 @@ func runJSOnHTTPHosts(t *testing.T, source, assertions string) map[string]string
 		outputs[host] = string(output)
 	}
 	return outputs
+}
+
+// HttpHandler depends on HttpRequest and HttpReply, so it is part of the
+// reference-admitted Http contract: without a reference to Http it is an
+// ordinary unknown type, and the name stays free for user data, as with its
+// sibling data names.
+func TestHttpHandlerIsAdmittedOnlyWithHttp(t *testing.T) {
+	for _, target := range []string{"go", "js"} {
+		r := CompileFor(`fn ignore(h: HttpHandler) -> void { void }
+effect fn main() -> void { void }`, target)
+		if r.Checked {
+			t.Fatalf("%s: unadmitted HttpHandler was accepted", target)
+		}
+		found := false
+		for _, d := range r.Diagnostics {
+			found = found || strings.Contains(d.Message, "HttpHandler")
+		}
+		if !found {
+			t.Fatalf("%s: no unknown-type diagnostic names HttpHandler: %+v", target, r.Diagnostics)
+		}
+		r = CompileFor(`record HttpHandler { path: string }
+effect fn main() -> void { void }`, target)
+		if !r.Checked {
+			t.Fatalf("%s: record HttpHandler without Http: %+v", target, r.Diagnostics)
+		}
+		// Referenced Http still reserves the callback name.
+		r = CompileFor(`record HttpHandler { path: string }
+effect fn main() -> void { let pending = Http.text("x"); void }`, target)
+		reserved := false
+		for _, d := range r.Diagnostics {
+			reserved = reserved || (d.Code == "EF101" && strings.Contains(d.Message, "HttpHandler"))
+		}
+		if !reserved {
+			t.Fatalf("%s: HttpHandler is not reserved once Http is referenced: %+v", target, r.Diagnostics)
+		}
+	}
 }
