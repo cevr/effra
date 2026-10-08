@@ -1,6 +1,9 @@
 package compiler
 
-// forEachExprChild visits each expression-valued child exactly once in source
+// forEachExprChild visits each expression-valued child exactly once. The order
+// is the node's field order (Left, Right, Args, ...), not source order: a pipe
+// call's Left is its callee, which follows Args[0], its subject, in the source.
+// The extents of sibling children are disjoint; no consumer may rely on the
 // order. Checked data calls retain named arguments in both Args and Fields so
 // later tooling can inspect their labels; the value is still one child.
 // Construction and payload expressions use Fields as their only child list.

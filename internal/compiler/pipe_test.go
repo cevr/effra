@@ -2,6 +2,8 @@ package compiler
 
 import (
 	"reflect"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -273,6 +275,9 @@ func clearPipeSpans(program *Program) {
 	visit(reflect.ValueOf(program))
 }
 
+// pipeCalleeNames finds the function each |> in a body calls.
+var pipeCalleeNames = regexp.MustCompile(`\|> (\w+)\(`)
+
 // PipeSpan is for tooling: erasing it from every call leaves the accepted and
 // rejected programs, the diagnostic codes and the emitted bytes unchanged.
 func TestPipeSpanNeverDecidesCompilation(t *testing.T) {
@@ -287,7 +292,8 @@ func TestPipeSpanNeverDecidesCompilation(t *testing.T) {
 		`run load() |> shout()`,
 	}
 	for _, body := range bodies {
-		source := pipeDeclarations + "effect fn takesCard(card: Card) -> string { card.title }\neffect fn probe() -> string { " + body + " }\neffect fn main() -> void { }\n"
+		// main runs probe, so entry emission keeps the piped calls on both targets.
+		source := pipeDeclarations + "effect fn takesCard(card: Card) -> string { card.title }\neffect fn probe() -> string { " + body + " }\neffect fn main() -> void {\n    let _ = run probe()\n}\n"
 		for _, target := range []string{"go", "js"} {
 			with := CompileAt(source, target, ".")
 			without := compileTransformed(source, target, ".", clearPipeSpans)
@@ -305,6 +311,12 @@ func TestPipeSpanNeverDecidesCompilation(t *testing.T) {
 			a, b := emittedProgram(t, with), emittedProgram(t, without)
 			if a != b {
 				t.Fatalf("%s [%s]: emitted bytes differ", body, target)
+			}
+			// The comparison is empty unless the piped code was emitted.
+			for _, callee := range pipeCalleeNames.FindAllStringSubmatch(body, -1) {
+				if !strings.Contains(a, callee[1]) {
+					t.Fatalf("%s [%s]: the emitted program never mentions %s, so the comparison saw no pipe code", body, target, callee[1])
+				}
 			}
 		}
 	}
@@ -325,4 +337,125 @@ func emittedProgram(t *testing.T, r *Result) string {
 		t.Fatal(err)
 	}
 	return string(app.Main)
+}
+
+// A pipe call's extent is the whole call, subject through closing parenthesis,
+// so a query at the operator or the whitespace around it selects the call and
+// not the callee that follows it. The callee is a callable value here, which
+// carries checked facts of its own.
+func TestPipeOffsetsSelectTheWholeCall(t *testing.T) {
+	const call = `x |> f()`
+	source := `fn apply(f: fn(string) -> string, x: string) -> string { ` + call + ` }
+`
+	r := CompileFor(source, "js")
+	if !r.Checked {
+		t.Fatalf("source rejected: %+v", r.Diagnostics)
+	}
+	start := strings.Index(source, call)
+	for _, test := range []struct {
+		name   string
+		offset int
+		want   string
+	}{
+		{"subject", start, "x"},
+		{"space before |>", start + 1, call},
+		{"|", start + 2, call},
+		{">", start + 3, call},
+		{"space after |>", start + 4, call},
+		{"callee", start + 5, "f"},
+		{"parenthesis", start + 6, call},
+	} {
+		offset := test.offset
+		query, err := r.QueryType(TypeSelection{Offset: &offset})
+		if err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		extent := query.Selection.Extent
+		if got := source[extent.Offset : extent.Offset+extent.Length]; got != test.want {
+			t.Errorf("%s: selected %q, want %q", test.name, got, test.want)
+		}
+	}
+}
+
+// The parser's own children list stays disjoint: the callee's extent starts at
+// the callee, not at the subject that precedes it.
+func TestPipeCalleeExtentStartsAtTheCallee(t *testing.T) {
+	source := pipeDeclarations + `fn probe() -> string { "x" |> shout() |> wrap("<", ">") }
+`
+	program, diagnostics := parse(source)
+	if len(diagnostics) > 0 {
+		t.Fatal(diagnostics)
+	}
+	for _, e := range expressionsOf(program) {
+		if e.Kind != "call" || e.PipeSpan.Length == 0 {
+			continue
+		}
+		callee := source[e.Left.Extent.Offset : e.Left.Extent.Offset+e.Left.Extent.Length]
+		if callee != "shout" && callee != "wrap" {
+			t.Errorf("callee extent %q, want the callee name alone", callee)
+		}
+		if e.Extent.Offset > e.Args[0].Extent.Offset {
+			t.Errorf("call extent %+v starts after its subject %+v", e.Extent, e.Args[0].Extent)
+		}
+	}
+}
+
+const pipeIntrinsicNames = `service S {
+    effect fn timeout(x: string) -> string
+    effect fn orFail(x: string) -> string
+    effect fn get(x: string) -> string
+}
+`
+
+// The intrinsic method names .timeout, .orFail, .provide and .catch are
+// reserved after any receiver in the nested spelling, so S.timeout("x") is the
+// timeout intrinsic. After |> they are ordinary members: x |> S.timeout() is an
+// ordinary call. This pins both readings; dot-method lane DOT6 removes the
+// intrinsics and the exception with them.
+func TestPipeIntrinsicNamesAreOrdinaryMembersAfterThePipe(t *testing.T) {
+	check := func(body string) *Result {
+		return CompileFor(pipeIntrinsicNames+"effect fn probe() -> string uses { S } { "+body+" }\n", "js")
+	}
+	for _, op := range []string{"timeout", "orFail", "get"} {
+		if r := check(`run "x" |> S.` + op + `()`); !r.Checked {
+			t.Errorf("x |> S.%s() rejected: %+v", op, r.Diagnostics)
+		}
+	}
+	if r := check(`run S.get("x")`); !r.Checked {
+		t.Errorf("S.get(\"x\") rejected: %+v", r.Diagnostics)
+	}
+	timeout := check(`run S.timeout("x")`)
+	if !slices.ContainsFunc(timeout.Diagnostics, func(d Diagnostic) bool {
+		return d.Code == "EF106" && strings.Contains(d.Message, "timeout requires an Effect")
+	}) {
+		t.Errorf("nested S.timeout(\"x\") = %+v, want the timeout intrinsic's EF106", timeout.Diagnostics)
+	}
+	orFail := check(`run S.orFail("x")`)
+	if len(orFail.Diagnostics) != 1 || orFail.Diagnostics[0].Code != "EF002" {
+		t.Errorf("nested S.orFail(\"x\") = %+v, want the orFail intrinsic's EF002", orFail.Diagnostics)
+	}
+}
+
+// Every binary operator the parser admits is classified here as refused
+// beside an unparenthesised pipe chain. Adding an operator without extending
+// this table, and deciding its precedence against |>, fails the test.
+var pipeBinaryOperators = map[string]string{"==": "refused", "+": "refused"}
+
+func TestEveryBinaryOperatorIsClassifiedAgainstThePipe(t *testing.T) {
+	for op := range binaryPrecedence {
+		if pipeBinaryOperators[op] != "refused" {
+			t.Errorf("binary operator %q is not classified against |>: add it to pipeBinaryOperators with the rule that applies", op)
+		}
+	}
+	for op := range pipeBinaryOperators {
+		if _, ok := binaryPrecedence[op]; !ok {
+			t.Errorf("pipeBinaryOperators names %q, which the parser does not admit", op)
+		}
+		for _, body := range []string{`"a" |> shout() ` + op + ` "b"`, `"a" ` + op + ` "b" |> shout()`} {
+			_, r := pipeProbe(body)
+			if len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "EF002" || !strings.Contains(r.Diagnostics[0].Message, "parenthesise") {
+				t.Errorf("%s: diagnostics = %+v, want the parenthesise refusal", body, r.Diagnostics)
+			}
+		}
+	}
 }

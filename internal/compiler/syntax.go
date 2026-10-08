@@ -1230,8 +1230,12 @@ func (p *parser) expr(min int) *Expr {
 	// members there, so `x |> M.timeout(...)` is a plain call.
 	var piped *Expr
 	var pipeSpan Span
+	// from is where the current e begins: the primary's first token, or the
+	// callee's own first token once a |> has been read, so the callee's extent
+	// does not swallow its subject. The call that follows begins at start again.
+	from := start.span
 	for {
-		e.Extent = p.extent(start.span)
+		e.Extent = p.extent(from)
 		if piped != nil {
 			if p.accept(".") {
 				m := p.memberName()
@@ -1249,7 +1253,7 @@ func (p *parser) expr(min int) *Expr {
 			if head.kind != "name" || pipeHeadReserved[head.text] {
 				p.fail(head, "|> takes a function or operation name followed by arguments")
 			}
-			piped, e = e, &Expr{Kind: "name", Name: head.text, Span: head.span}
+			piped, e, from = e, &Expr{Kind: "name", Name: head.text, Span: head.span}, head.span
 			continue
 		}
 		if (p.noConstruct == 0 || p.constructorBrace()) && p.peek().text == "{" && (e.Kind == "name" || e.Kind == "member") {
@@ -1305,6 +1309,7 @@ func (p *parser) expr(min int) *Expr {
 			p.noConstruct = protected
 			if piped != nil {
 				call.Args, call.PipeSpan, piped = append([]*Expr{piped}, call.Args...), pipeSpan, nil
+				from = start.span
 			}
 			e = call
 			continue
@@ -1348,13 +1353,7 @@ func (p *parser) expr(min int) *Expr {
 			}
 			continue
 		}
-		precedence := 0
-		switch p.peek().text {
-		case "==":
-			precedence = 1
-		case "+":
-			precedence = 2
-		}
+		precedence := binaryPrecedence[p.peek().text]
 		if precedence == 0 || precedence < min {
 			break
 		}
@@ -1372,6 +1371,12 @@ func (p *parser) expr(min int) *Expr {
 	p.lastPipe = chainPipe
 	return e
 }
+
+// binaryPrecedence is every binary operator and its binding strength. An
+// unparenthesised pipe chain beside any of them is refused (pipeBesideOperator),
+// and TestEveryBinaryOperatorIsClassifiedAgainstThePipe fails for an operator
+// added here without a decision about it.
+var binaryPrecedence = map[string]int{"==": 1, "+": 2}
 
 // pipeHeadReserved are the words that start another expression form, so they
 // cannot name the function on the right of a |>.
