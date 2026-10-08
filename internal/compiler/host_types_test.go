@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"go/types"
 	"os"
 	"path/filepath"
 	"strings"
@@ -506,6 +507,35 @@ effect fn program() -> void uses { Console, Foreign } {
 			if init.Package == "bytes" && init.Lowering != "named" {
 				t.Fatalf("inspection reports %q for a package a host type names", init.Lowering)
 			}
+		}
+	}
+}
+
+// One rule decides whether generated code may import a package: a host type
+// is admitted only from packages goImportRefusal admits, so a declared import
+// and a host type's package cannot disagree. cmd/go's vendor rule applies to
+// a "vendor" path element that has a parent directory below it, not to a
+// package whose final element is "vendor".
+func TestHostPackageImportabilityIsGoImportRefusal(t *testing.T) {
+	for _, test := range []struct {
+		path, name string
+		importable bool
+	}{
+		{"example.test/sdk", "sdk", true},
+		{"example.test/sdk/vendor", "vendor", true},
+		{"example.test/vendorish/sdk", "sdk", true},
+		{"example.test/sdk/vendor/dep", "dep", false},
+		{"vendor/golang.org/x/net/dns/dnsmessage", "dnsmessage", false},
+		{"example.test/sdk/internal/dep", "dep", false},
+		{"example.test/sdk/internal", "internal", false},
+		{"internal/abi", "abi", false},
+		{"example.test/cmd/tool", "main", false},
+		{"strings", "strings", true},
+	} {
+		got := hostPackageImportable(types.NewPackage(test.path, test.name))
+		pkg := listedPackage{ImportPath: test.path, Name: test.name, Standard: !strings.Contains(strings.SplitN(test.path, "/", 2)[0], ".")}
+		if refused := goImportRefusal(pkg) != ""; got != !refused || got != test.importable {
+			t.Errorf("%s: hostPackageImportable=%v goImportRefusal refuses=%v want importable=%v", test.path, got, refused, test.importable)
 		}
 	}
 }

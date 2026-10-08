@@ -238,15 +238,14 @@ func hostNullable(underlying types.Type) bool {
 	return false
 }
 
-// hostPackageImportable excludes packages the generated effra.generated module
-// cannot import, so an admitted type always has a native spelling.
+// hostPackageImportable reports whether the generated effra.generated module
+// may import the package, so an admitted type always has a native spelling. It
+// is goImportRefusal's rule, the same one that refuses a declared import of
+// such a package; only the listing facts differ. A standard package has a
+// first path element without a dot, as cmd/go's IsStandardImportPath.
 func hostPackageImportable(p *types.Package) bool {
-	if p.Name() == "main" {
-		return false
-	}
-	return !slices.ContainsFunc(strings.Split(p.Path(), "/"), func(segment string) bool {
-		return segment == "internal" || segment == "vendor"
-	})
+	first, _, _ := strings.Cut(p.Path(), "/")
+	return goImportRefusal(listedPackage{ImportPath: p.Path(), Name: p.Name(), Standard: !strings.Contains(first, ".")}) == ""
 }
 
 func hostIdentity(t types.Type) string { return "go:" + types.TypeString(t, hostPathQualifier) }
