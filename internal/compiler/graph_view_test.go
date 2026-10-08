@@ -128,18 +128,25 @@ func TestGraphViewDependencySerializesLegacyFacts(t *testing.T) {
 // direct or pipe invocation form.
 func TestGraphViewDependencyIncludesCheckedDerivedCodecCalls(t *testing.T) {
 	source := `import Json "effra/json"
+error LedgerFailure
+service Ledger {
+  effect fn touch() -> void raises { LedgerFailure }
+}
 record Parcel { id: i64, label: string }
 derive parcelJson = Json.codec<Parcel>(maxBodyBytes: 256, maxDepth: 1)
-effect fn normalize(value: Parcel) -> Parcel { value }
+effect fn normalize(value: Parcel) -> Parcel raises { LedgerFailure } uses { Ledger } {
+  run Ledger.touch()
+  Parcel { id: value.id + 1, label: value.label }
+}
 effect fn direct(body: string) -> Parcel raises { JsonDecodeFailure } {
   run parcelJson.decode(body)
 }
-effect fn transfer(body: string) -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
+effect fn transfer(body: string) -> string raises { JsonDecodeFailure, JsonEncodeFailure, LedgerFailure } uses { Ledger } {
   let decoded = run body |> parcelJson.decode()
   let normalized = run decoded |> normalize()
   run normalized |> parcelJson.encode()
 }
-effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
+effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure, LedgerFailure } uses { Ledger } {
   let decoded = run direct("{\"id\":\"1\",\"label\":\"a\"}")
   run transfer("{\"id\":\"1\",\"label\":\"a\"}")
 }`
@@ -164,6 +171,175 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
 			for target, count := range want {
 				if counts[target] != count {
 					t.Fatalf("call topology for %s: got %d occurrences, want %d (all=%v)", target, counts[target], count, counts)
+				}
+			}
+			selectedResult := checkedGraphSource(t, source, target)
+			selected := graphView(t, selectedResult, map[string]any{
+				"kind": "dependency", "focus": "function:transfer", "direction": "outgoing", "depth": 3,
+				"edgeKinds": []any{"contains", "calls"},
+			})
+			if err := ValidateGraphView(selected); err != nil {
+				t.Fatalf("selected checked calls view is invalid: %v", err)
+			}
+			requireReferenceClosure(t, view, selected)
+			selectedTargets := map[string]int{}
+			for _, edge := range viewEdges(selected, "calls") {
+				selectedTargets[edge.TargetID]++
+			}
+			for _, callee := range []string{"function:normalize", "function:parcelJson.decode", "function:parcelJson.encode"} {
+				if selectedTargets[callee] != 1 {
+					t.Fatalf("focused transfer view omits checked call to %s: %v", callee, selectedTargets)
+				}
+			}
+			typesByID, rowsByID := map[string]TypeNode{}, map[string]RowNode{}
+			for _, typeNode := range selected.Data.Effra.Facts.Types {
+				typesByID[typeNode.ID] = typeNode
+			}
+			for _, row := range selected.Data.Effra.Facts.Rows {
+				rowsByID[row.ID] = row
+			}
+			requireRowRef := func(owner, id string) {
+				if id != "" {
+					if _, found := rowsByID[id]; !found {
+						t.Fatalf("%s row reference %s is absent from selected row closure", owner, id)
+					}
+				}
+			}
+			var requireTypeRef func(string, TypeRef)
+			requireTypeRef = func(owner string, ref TypeRef) {
+				if ref.ID != "" {
+					if _, found := typesByID[ref.ID]; !found {
+						t.Fatalf("%s type reference %s is absent from selected type closure", owner, ref.ID)
+					}
+				}
+				for _, id := range ref.ArgIDs {
+					if _, found := typesByID[id]; !found {
+						t.Fatalf("%s argument type reference %s is absent from selected type closure", owner, id)
+					}
+				}
+				if ref.Result != "" {
+					if _, found := typesByID[ref.Result]; !found {
+						t.Fatalf("%s result type reference %s is absent from selected type closure", owner, ref.Result)
+					}
+				}
+				requireRowRef(owner, ref.FailureRow)
+				requireRowRef(owner, ref.ServiceRow)
+				for _, arg := range ref.Args {
+					requireTypeRef(owner+" argument", arg)
+				}
+			}
+			var parcel *Declaration
+			for i := range selected.Data.Effra.Facts.Declarations {
+				declaration := &selected.Data.Effra.Facts.Declarations[i]
+				if declaration.Kind == "record" && declaration.Name == "Parcel" {
+					parcel = declaration
+				}
+			}
+			if parcel == nil {
+				t.Fatal("focused transfer view lost the Parcel declaration")
+			}
+			parcelType := TypeNode{}
+			parcelQualifier := parcel.Kind + ":" + currentModuleIdentity + ":" + parcel.Name + ":"
+			for _, typeNode := range typesByID {
+				if typeNode.Kind == parcel.Kind && typeNode.Name == parcel.Name && strings.HasPrefix(typeNode.Declaration, parcelQualifier) && qualifiedDeclarationPublished(typeNode.Declaration, selected.Data.Effra.Facts.Declarations) {
+					if parcelType.ID != "" {
+						t.Fatalf("Parcel declaration has multiple published nominal type nodes: %+v and %+v", parcelType, typeNode)
+					}
+					parcelType = typeNode
+				}
+			}
+			if parcelType.ID == "" || parcel.Identity == "" {
+				t.Fatalf("focused transfer view lost the qualified Parcel type/declaration: type=%+v declaration=%+v", parcelType, parcel)
+			}
+			fieldType := ""
+			for _, field := range parcel.Fields {
+				if field.Name == "id" {
+					if field.TypeRef.Name != "i64" {
+						t.Fatalf("Parcel.id declaration has wrong type reference: %+v", field.TypeRef)
+					}
+					fieldType = field.TypeRef.ID
+				}
+			}
+			i64, hasI64 := typesByID[fieldType]
+			if fieldType == "" || !hasI64 || i64.Kind != "primitive" || i64.Name != "i64" {
+				t.Fatalf("Parcel.id does not reach its published primitive i64 type: fieldRef=%q node=%+v", fieldType, i64)
+			}
+			for callee, want := range map[string]struct {
+				argument, result   string
+				failures, services []string
+			}{
+				"function:normalize":         {argument: "Parcel", result: "Parcel", failures: []string{"LedgerFailure"}, services: []string{"Ledger"}},
+				"function:parcelJson.decode": {argument: "string", result: "Parcel", failures: []string{"JsonDecodeFailure"}},
+				"function:parcelJson.encode": {argument: "Parcel", result: "string", failures: []string{"JsonEncodeFailure"}},
+			} {
+				node := viewNode(selected, callee)
+				if node == nil || node.Data.Effra.Contract == nil || node.Data.Effra.Contract.Callable == nil || node.Data.Effra.Source == "" || node.Data.Effra.Span == nil {
+					t.Fatalf("focused view lost callable contract for %s: %+v", callee, node)
+				}
+				contract := node.Data.Effra.Contract.Callable
+				valueContract := node.Data.Effra.Contract
+				for _, ref := range []TypeRef{valueContract.Type, valueContract.Contract} {
+					requireTypeRef(callee+" signature", ref)
+				}
+				requireRowRef(callee+" value failure", valueContract.FailureRow)
+				requireRowRef(callee+" value service", valueContract.ServiceRow)
+				if len(contract.Parameters) != 1 || contract.Parameters[0].TypeRef.Name != want.argument || contract.Result.Name != want.result {
+					t.Fatalf("focused view has wrong parameter/result for %s: %+v", callee, contract)
+				}
+				for _, typeRef := range []TypeRef{contract.Parameters[0].TypeRef, contract.Result} {
+					if typeRef.ID == "" {
+						t.Fatalf("%s has an unqualified parameter/result type: %+v", callee, typeRef)
+					}
+					requireTypeRef(callee+" parameter/result", typeRef)
+				}
+				if !slices.Equal(contract.Failures, want.failures) || !slices.Equal(contract.Requirements, want.services) {
+					t.Fatalf("%s inline failure/service labels differ from the checked contract: failures=%v services=%v want failures=%v services=%v", callee, contract.Failures, contract.Requirements, want.failures, want.services)
+				}
+				if contract.Signature == "" || valueContract.Contract.ID != contract.Signature {
+					t.Fatalf("%s callable signature does not match its canonical contract reference: callable=%+v value=%+v", callee, contract, valueContract)
+				}
+				signature, found := typesByID[contract.Signature]
+				if !found || signature.Kind != "callable" || signature.Mode != "effect" {
+					t.Fatalf("%s signature does not resolve to a published effect callable type: ref=%q node=%+v found=%t", callee, contract.Signature, signature, found)
+				}
+				if len(signature.Args) != len(contract.Parameters) || signature.Result != contract.Result.ID {
+					t.Fatalf("%s canonical signature arguments/result differ from the callable contract: signature=%+v callable=%+v", callee, signature, contract)
+				}
+				for i, argument := range signature.Args {
+					if _, found := typesByID[argument]; !found || argument != contract.Parameters[i].TypeRef.ID {
+						t.Fatalf("%s canonical signature argument %d does not resolve to its published parameter type: ref=%q parameter=%+v found=%t", callee, i, argument, contract.Parameters[i], found)
+					}
+				}
+				if _, found := typesByID[signature.Result]; !found {
+					t.Fatalf("%s canonical signature result %s is absent from the selected type closure", callee, signature.Result)
+				}
+				// Compatibility callable rows publish labels; the canonical signature owns row IDs.
+				if valueContract.FailureRow != signature.FailureRow || valueContract.ServiceRow != signature.ServiceRow || valueContract.Contract.FailureRow != signature.FailureRow || valueContract.Contract.ServiceRow != signature.ServiceRow {
+					t.Fatalf("%s callable and canonical signature row references disagree: value=%+v typeRef=%+v signature=%+v", callee, valueContract, valueContract.Contract, signature)
+				}
+				checkPublishedRow := func(owner, id string, labels []string) {
+					if len(labels) == 0 {
+						if id != "" {
+							t.Fatalf("%s unexpectedly publishes row %s for empty labels", owner, id)
+						}
+						return
+					}
+					requireRowRef(owner, id)
+					row, found := rowsByID[id]
+					if id == "" || !found || !slices.Equal(row.Labels, labels) {
+						t.Fatalf("%s row %s does not resolve to exact published labels %v: row=%+v found=%t", owner, id, labels, row, found)
+					}
+				}
+				checkPublishedRow(callee+" signature failure", signature.FailureRow, want.failures)
+				checkPublishedRow(callee+" signature service", signature.ServiceRow, want.services)
+				for _, typeRef := range []TypeRef{contract.Parameters[0].TypeRef, contract.Result} {
+					if typeRef.Name != "Parcel" {
+						continue
+					}
+					nodeType := typesByID[typeRef.ID]
+					if typeRef.ID != parcelType.ID || typeRef.Declaration != parcelType.Declaration || nodeType.Declaration != parcelType.Declaration {
+						t.Fatalf("%s Parcel signature reference %s does not resolve through its declaration: %+v", callee, typeRef.ID, nodeType)
+					}
 				}
 			}
 			for _, target := range []string{"function:parcelJson.decode", "function:parcelJson.encode"} {

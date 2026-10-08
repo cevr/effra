@@ -233,6 +233,61 @@ func TestJSEntryLowersOnlyItsExecutedCodecPlans(t *testing.T) {
 	}
 }
 
+// The public decimal-string codec profile composes with checked signed64
+// arithmetic without passing through JSON numbers or changing record/enum
+// refusal behavior. Run the same generated source through both runtimes.
+func TestI64CodecDecimalStringsComposeWithArithmeticOnBothTargets(t *testing.T) {
+	const source = `import Json "effra/json"
+
+record Account { balance: i64 }
+enum Ledger { Posted { amount: i64 } Rejected { reason: string } }
+
+derive i64Json = Json.codec<i64>(maxBodyBytes: 256, maxDepth: 4)
+derive accountJson = Json.codec<Account>(maxBodyBytes: 256, maxDepth: 4)
+derive ledgerJson = Json.codec<Ledger>(maxBodyBytes: 256, maxDepth: 4)
+
+effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
+    let minimum = run i64Json.decode("\"-9223372036854775808\"")
+    let maximum = run i64Json.decode("\"9223372036854775807\"")
+    let minimumWire = run i64Json.encode(minimum)
+    let maximumWire = run i64Json.encode(maximum)
+    let belowWire = run i64Json.encode(minimum - 1)
+    let aboveWire = run i64Json.encode(maximum + 1)
+    let leadingZero = run i64Json.decode("\"0009223372036854775807\"")
+    let canonicalWire = run i64Json.encode(leadingZero)
+    let account = run accountJson.decode("{\"balance\":\"9223372036854775807\"}")
+    let nextAccount = Account { balance: account.balance + 1 }
+    let accountWire = run accountJson.encode(nextAccount)
+    let lowRefused = run i64Json.decode("\"-9223372036854775809\"").catch<JsonDecodeFailure>(101)
+    let highRefused = run i64Json.decode("\"9223372036854775808\"").catch<JsonDecodeFailure>(102)
+    let numberRefused = run i64Json.decode("9223372036854775807").catch<JsonDecodeFailure>(103)
+    let lowRefusedWire = run i64Json.encode(lowRefused)
+    let highRefusedWire = run i64Json.encode(highRefused)
+    let numberRefusedWire = run i64Json.encode(numberRefused)
+    let recordRefused = run accountJson.decode("{\"balance\":\"9223372036854775808\"}").catch<JsonDecodeFailure>(Account { balance: 104 })
+    let recordRefusedWire = run accountJson.encode(recordRefused)
+    let variantRefused = run ledgerJson.decode("{\"_tag\":\"Missing\"}").catch<JsonDecodeFailure>(Ledger.Rejected { reason: "sentinel" })
+    let variantRefusedWire = run ledgerJson.encode(variantRefused)
+    minimumWire + "|" + maximumWire + "|" + belowWire + "|" + aboveWire + "|" + canonicalWire + "|" + accountWire + "|" + lowRefusedWire + "|" + highRefusedWire + "|" + numberRefusedWire + "|" + recordRefusedWire + "|" + variantRefusedWire
+}`
+	const want = `"-9223372036854775808"|"9223372036854775807"|"9223372036854775807"|"-9223372036854775808"|"9223372036854775807"|{"balance":"-9223372036854775808"}|"101"|"102"|"103"|{"balance":"104"}|{"_tag":"Rejected","reason":"sentinel"}
+`
+	goResult := CompileFor(source, "go")
+	if !goResult.Checked {
+		t.Fatalf("Go rejected combined i64 codec source: %+v", goResult.Diagnostics)
+	}
+	application, err := goResult.GoApplication(GoGenerationBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output, err := runGoCommand(writeGoApplication(t, goResult, application), "run", "."); err != nil || string(output) != want {
+		t.Fatalf("Go codec/arithmetic result: %v\nwant %q\n got %q", err, want, output)
+	}
+	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != want {
+		t.Fatalf("JavaScript codec/arithmetic result: want %q, got %q", want, output)
+	}
+}
+
 // Emission is a function of the checked program: repeated emission of both
 // targets is byte-identical.
 func TestCodecEmissionIsDeterministic(t *testing.T) {
