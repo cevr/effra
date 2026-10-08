@@ -19,12 +19,12 @@ type goEmitter struct {
 	locals map[string]goLayout
 }
 
-func goType(t string) string {
+func goType(program *Program, t string) string {
 	if strings.HasPrefix(t, "GoResult:") {
-		return "er.GoResult[" + goType(strings.TrimPrefix(t, "GoResult:")) + "]"
+		return "er.GoResult[" + goType(program, strings.TrimPrefix(t, "GoResult:")) + "]"
 	}
-	if callback, ok := builtinCallbacks[t]; ok {
-		return "func(" + goType(callback.Parameter) + ") efEffect[" + goType(callback.Result) + "]"
+	if callback, ok := program.callback(t); ok {
+		return "func(" + goType(program, callback.Parameter) + ") efEffect[" + goType(program, callback.Result) + "]"
 	}
 	switch t {
 	case "string":
@@ -44,10 +44,10 @@ func goType(t string) string {
 			return "efService_" + goIdent(strings.TrimPrefix(t, "provider:"))
 		}
 		if strings.HasPrefix(t, "Fiber:") {
-			return "*er.Fiber[" + goType(strings.TrimPrefix(t, "Fiber:")) + "]"
+			return "*er.Fiber[" + goType(program, strings.TrimPrefix(t, "Fiber:")) + "]"
 		}
 		if strings.HasPrefix(t, "GoResult:") {
-			return "er.GoResult[" + goType(strings.TrimPrefix(t, "GoResult:")) + "]"
+			return "er.GoResult[" + goType(program, strings.TrimPrefix(t, "GoResult:")) + "]"
 		}
 		if t == "void" || t == "never" || t == "invalid" || t == "" {
 			return "struct{}"
@@ -102,8 +102,8 @@ func layoutGoType(c *checker, id TypeID, bindings map[TypeID]goLayout, visiting 
 			return "struct{}"
 		}
 	case "opaque":
-		if _, ok := builtinCallbacks[node.Name]; ok {
-			return goType(node.Name)
+		if _, ok := c.program.callback(node.Name); ok {
+			return goType(c.program, node.Name)
 		}
 		switch node.Name {
 		case "File":
@@ -220,13 +220,13 @@ func goVariantType(typeName, variantName string) string {
 	// during Go compilation.
 	return "efTypeV_" + strconv.Itoa(len(typeName)) + "_" + goIdent(typeName) + "_" + strconv.Itoa(len(variantName)) + "_" + goIdent(variantName)
 }
-func goParams(f *Function) string {
-	return goParamsList(f.Params)
+func goParams(program *Program, f *Function) string {
+	return goParamsList(program, f.Params)
 }
-func goParamsList(params []Param) string {
+func goParamsList(program *Program, params []Param) string {
 	parts := []string{}
 	for _, p := range params {
-		parts = append(parts, "efLocal_"+p.Name+" "+goSourceType(p.sourceType, p.Type))
+		parts = append(parts, "efLocal_"+p.Name+" "+goSourceType(program, p.sourceType, p.Type))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -237,12 +237,12 @@ func goArgs(f *Function) string {
 	}
 	return strings.Join(parts, ", ")
 }
-func goMethodType(f *Function) string {
+func goMethodType(program *Program, f *Function) string {
 	types := []string{}
 	for _, p := range f.Params {
-		types = append(types, goSourceType(p.sourceType, p.Type))
+		types = append(types, goSourceType(program, p.sourceType, p.Type))
 	}
-	return "func(" + strings.Join(types, ", ") + ") efEffect[" + goSourceType(f.returnType, f.Return) + "]"
+	return "func(" + strings.Join(types, ", ") + ") efEffect[" + goSourceType(program, f.returnType, f.Return) + "]"
 }
 func (g *goEmitter) temp() string { g.next++; return fmt.Sprintf("efTemp%d", g.next) }
 
@@ -326,21 +326,21 @@ func schedulerDrivenProvider(name string) bool {
 
 // goServiceDeclaration emits one service's struct, provision wrapper and
 // operation call wrappers.
-func goServiceDeclaration(s *Service) string {
+func goServiceDeclaration(program *Program, s *Service) string {
 	var out strings.Builder
 	out.WriteString("type efService_" + s.Name + " struct {\n")
 	if s.Name == "Clock" || s.Name == "Scheduler" {
 		out.WriteString("driver *er.TestScheduler\n")
 	}
 	for _, m := range s.Methods {
-		out.WriteString("m_" + m.Name + " " + goMethodType(m) + "\n")
+		out.WriteString("m_" + m.Name + " " + goMethodType(program, m) + "\n")
 	}
 	out.WriteString("}\n")
 	out.WriteString("func efProvide_" + s.Name + "[A any](program efEffect[A], provider efService_" + s.Name + ") efEffect[A] { return func(ctx efContext) efExit[A] {")
 	out.WriteString("ctx.s_" + s.Name + " = &provider; return program(ctx) } }\n")
 	for _, m := range s.Methods {
-		result := goSourceType(m.returnType, m.Return)
-		out.WriteString("func efCall_" + s.Name + "_" + m.Name + "(" + goParams(m) + ") efEffect[" + result + "] { return func(ctx efContext) efExit[" + result + "] {\n")
+		result := goSourceType(program, m.returnType, m.Return)
+		out.WriteString("func efCall_" + s.Name + "_" + m.Name + "(" + goParams(program, m) + ") efEffect[" + result + "] { return func(ctx efContext) efExit[" + result + "] {\n")
 		out.WriteString("if ctx.s_" + s.Name + " == nil || ctx.s_" + s.Name + ".m_" + m.Name + " == nil { return efExit[" + result + "]{Defect:fmt.Errorf(" + strconv.Quote("missing provider "+s.Name+"."+m.Name) + ")} }\n")
 		out.WriteString("return ctx.s_" + s.Name + ".m_" + m.Name + "(" + goArgs(m) + ")(ctx)\n} }\n")
 	}
@@ -409,7 +409,7 @@ func efFromRuntime[A any](program er.Effect[A]) efEffect[A] {return func(ctx efC
 	}
 	out.WriteString("}\n")
 	for _, s := range services {
-		out.WriteString(goServiceDeclaration(s))
+		out.WriteString(goServiceDeclaration(r.Program, s))
 	}
 	for _, p := range builtinProvidersFor(r.Program) {
 		if plan.Requires(RequiresProvider, providerTypeRef(p).Declaration) {
@@ -448,7 +448,7 @@ func efFromRuntime[A any](program er.Effect[A]) efEffect[A] {return func(ctx efC
 				break
 			}
 		}
-		out.WriteString("func main() { base,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop();exit:=er.RunContext(base,func(fc *er.FiberContext) er.Exit[" + goSourceType(r.Program.typeExpressions[mainReturn], mainReturn) + "]{return efFunction_main()(efContext{Runtime:fc})});if exit.IsFailure(){fmt.Fprintln(os.Stderr,exit.Cause());os.Exit(1)}\n")
+		out.WriteString("func main() { base,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop();exit:=er.RunContext(base,func(fc *er.FiberContext) er.Exit[" + goSourceType(r.Program, r.Program.typeExpressions[mainReturn], mainReturn) + "]{return efFunction_main()(efContext{Runtime:fc})});if exit.IsFailure(){fmt.Fprintln(os.Stderr,exit.Cause());os.Exit(1)}\n")
 		if mainReturn != voidTypeName {
 			out.WriteString("fmt.Println(exit.Value)\n")
 		}
@@ -492,14 +492,14 @@ func (g *goEmitter) function(f *Function) string {
 	if f.Effect {
 		ret = "efEffect[" + ret + "]"
 	}
-	open := "func(" + goParams(f) + ")"
+	open := "func(" + goParams(g.program, f) + ")"
 	if !noResult {
 		open += " " + ret
 	}
 	open += " {\n"
 	close := "}\n"
 	if f.Effect {
-		open += "return func(ctx efContext) efExit[" + goSourceType(f.returnType, f.Return) + "] {\nif err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + goSourceType(f.returnType, f.Return) + "](err)}\n"
+		open += "return func(ctx efContext) efExit[" + goSourceType(g.program, f.returnType, f.Return) + "] {\nif err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + goSourceType(g.program, f.returnType, f.Return) + "](err)}\n"
 		close = "}\n}\n"
 	}
 	return open + g.blockType(f.Body, f.Effect, bodyRet, noResult) + close
@@ -515,7 +515,7 @@ func (g *goEmitter) functionDeclaration(f *Function) string {
 	}
 	params := []string{}
 	for _, p := range f.Params {
-		typ := goSourceType(p.sourceType, p.Type)
+		typ := goSourceType(g.program, p.sourceType, p.Type)
 		if len(f.TypeParameters) > 0 || (p.sourceType != nil && p.sourceType.Application != "") {
 			typ = canonicalGoType(c, p.typeID, map[TypeID]bool{})
 		}
@@ -550,7 +550,7 @@ func (g *goEmitter) functionDeclaration(f *Function) string {
 // signature has no result: only a pure function whose result is concretely
 // void. An effect function always returns its recipe.
 func (g *goEmitter) functionReturn(f *Function) (string, bool) {
-	ret, voidResult := goSourceTypeMode(f.returnType, f.Return)
+	ret, voidResult := goSourceTypeMode(g.program, f.returnType, f.Return)
 	if f.returnID != invalidTypeID && g.program.semantic != nil {
 		voidResult = canonicalVoidType(g.program.semantic, f.returnID)
 	}
@@ -565,9 +565,9 @@ func providerConstructed(p *Provider) bool {
 }
 
 func (g *goEmitter) providerConstructor(p *Provider) string {
-	ret := goType("provider:" + p.Service)
+	ret := goType(g.program, "provider:"+p.Service)
 	var out strings.Builder
-	out.WriteString("func efProvider_" + p.Name + "(" + goParamsList(p.Params) + ") efEffect[" + ret + "] {\n")
+	out.WriteString("func efProvider_" + p.Name + "(" + goParamsList(g.program, p.Params) + ") efEffect[" + ret + "] {\n")
 	out.WriteString("return func(ctx efContext) efExit[" + ret + "] {\n")
 	out.WriteString("if err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + ret + "](err)}\n")
 	for _, service := range normalized(p.Services) {
@@ -590,9 +590,9 @@ func (g *goEmitter) providerConstructor(p *Provider) string {
 // invocation context. The Runtime pointer (and therefore cancellation,
 // scope, owner and fiber state) is copied from the current invocation.
 func (g *goEmitter) providerMethod(f *Function, captures []string) string {
-	ret := goSourceType(f.returnType, f.Return)
+	ret := goSourceType(g.program, f.returnType, f.Return)
 	var out strings.Builder
-	out.WriteString("func(" + goParams(f) + ") efEffect[" + ret + "] {\nreturn func(ctx efContext) efExit[" + ret + "] {\n")
+	out.WriteString("func(" + goParams(g.program, f) + ") efEffect[" + ret + "] {\nreturn func(ctx efContext) efExit[" + ret + "] {\n")
 	for _, service := range normalized(captures) {
 		out.WriteString("ctx.s_" + service + " = efCaptured_" + service + "\n")
 	}
@@ -608,7 +608,7 @@ func (g *goEmitter) failedType(name, ret string) string {
 	return "if " + name + ".IsFailure(){return er.Propagate[" + ret + "](" + name + ")}\n"
 }
 func (g *goEmitter) block(b *Block, effect bool, ret string) string {
-	return g.blockType(b, effect, goSourceType(g.program.typeExpressions[ret], ret), false)
+	return g.blockType(b, effect, goSourceType(g.program, g.program.typeExpressions[ret], ret), false)
 }
 
 // blockType lowers a block whose successful completion either returns an
@@ -1021,7 +1021,7 @@ func (g *goEmitter) dataTypes(out *strings.Builder) {
 		case "record", "error":
 			out.WriteString("type efType_" + goIdent(declaration.Name) + " struct {\n")
 			for _, field := range declaration.Fields {
-				out.WriteString(goFieldName(field.Name) + " " + goSourceType(field.sourceType, field.Type) + "\n")
+				out.WriteString(goFieldName(field.Name) + " " + goSourceType(g.program, field.sourceType, field.Type) + "\n")
 			}
 			out.WriteString("}\n")
 		case "enum":
@@ -1029,7 +1029,7 @@ func (g *goEmitter) dataTypes(out *strings.Builder) {
 			for _, variant := range declaration.Variants {
 				out.WriteString("type " + goVariantType(declaration.Name, variant.Name) + " struct {\n")
 				for _, field := range variant.Fields {
-					out.WriteString(goFieldName(field.Name) + " " + goSourceType(field.sourceType, field.Type) + "\n")
+					out.WriteString(goFieldName(field.Name) + " " + goSourceType(g.program, field.sourceType, field.Type) + "\n")
 				}
 				out.WriteString("}\nfunc (" + goVariantType(declaration.Name, variant.Name) + ") efVariant_" + goIdent(declaration.Name) + "() {}\n")
 			}

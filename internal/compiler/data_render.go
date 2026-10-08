@@ -41,6 +41,6 @@ func canonicalJSDataType(c *checker, id TypeID, declarations map[string]Declarat
 		}
 		return "(" + strings.Join(args, ",") + ") => " + result
 	default:
-		return jsValueType(n.Name)
+		return jsValueType(c.program, n.Name)
 	}
 }

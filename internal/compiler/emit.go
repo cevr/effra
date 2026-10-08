@@ -9,9 +9,9 @@ import (
 )
 
 func quoted(s string) string { b, _ := json.Marshal(s); return string(b) }
-func jsValueType(t string) string {
-	if callback, ok := builtinCallbacks[t]; ok {
-		return "(value: " + jsValueType(callback.Parameter) + ") => Effect.Effect<" + jsValueType(callback.Result) + ", never, never>"
+func jsValueType(program *Program, t string) string {
+	if callback, ok := program.callback(t); ok {
+		return "(value: " + jsValueType(program, callback.Parameter) + ") => Effect.Effect<" + jsValueType(program, callback.Result) + ", never, never>"
 	}
 	switch t {
 	case "void":
@@ -33,10 +33,10 @@ func jsValueType(t string) string {
 			return strings.TrimPrefix(t, "provider:") + "Provider"
 		}
 		if strings.HasPrefix(t, "GoResult:") {
-			return "{ readonly value: " + jsValueType(strings.TrimPrefix(t, "GoResult:")) + "; readonly error: Error | undefined }"
+			return "{ readonly value: " + jsValueType(program, strings.TrimPrefix(t, "GoResult:")) + "; readonly error: Error | undefined }"
 		}
 		if strings.HasPrefix(t, "Fiber:") {
-			return "Fiber.Fiber<" + jsValueType(strings.TrimPrefix(t, "Fiber:")) + ">"
+			return "Fiber.Fiber<" + jsValueType(program, strings.TrimPrefix(t, "Fiber:")) + ">"
 		}
 		if strings.ContainsAny(t, ":") {
 			return "never"
@@ -44,15 +44,15 @@ func jsValueType(t string) string {
 		return t
 	}
 }
-func jsContract(f *Function) string {
-	return jsContractFor(f, nil)
+func jsContract(program *Program, f *Function) string {
+	return jsContractFor(program, f, nil)
 }
-func jsContractFor(f *Function, declarations map[string]Declaration, nestedDeclarations ...map[string]Declaration) string {
+func jsContractFor(program *Program, f *Function, declarations map[string]Declaration, nestedDeclarations ...map[string]Declaration) string {
 	resultDeclarations := declarations
 	if len(nestedDeclarations) > 0 {
 		resultDeclarations = nestedDeclarations[0]
 	}
-	success := jsSourceType(f.returnType, f.Return, resultDeclarations)
+	success := jsSourceType(program, f.returnType, f.Return, resultDeclarations)
 	if !f.Effect {
 		return success
 	}
@@ -190,7 +190,7 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 			decl.WriteString("export interface " + declaration.Name + " { ")
 			decl.WriteString("readonly [__ef_brand_" + declaration.Name + "]: \"" + declaration.Name + "\"; ")
 			for _, field := range declaration.Fields {
-				decl.WriteString("readonly " + field.Name + ": " + jsSourceType(field.sourceType, field.Type, declarations) + "; ")
+				decl.WriteString("readonly " + field.Name + ": " + jsSourceType(r.Program, field.sourceType, field.Type, declarations) + "; ")
 			}
 			decl.WriteString("}\n")
 		case "enum":
@@ -206,7 +206,7 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 				}
 				decl.WriteString("{ readonly [__ef_brand_" + declaration.Name + "]: \"" + declaration.Name + "\"; readonly _tag: " + quoted(declaration.Name+"."+variant.Name))
 				for _, field := range variant.Fields {
-					decl.WriteString("; readonly " + field.Name + ": " + jsSourceType(field.sourceType, field.Type, declarations))
+					decl.WriteString("; readonly " + field.Name + ": " + jsSourceType(r.Program, field.sourceType, field.Type, declarations))
 				}
 				decl.WriteString(" }")
 			}
@@ -214,7 +214,7 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 		case "error":
 			decl.WriteString("export interface " + declaration.Name + "Error { readonly _tag: " + quoted(declaration.Name))
 			for _, field := range declaration.Fields {
-				decl.WriteString("; readonly " + field.Name + ": " + jsSourceType(field.sourceType, field.Type, declarations))
+				decl.WriteString("; readonly " + field.Name + ": " + jsSourceType(r.Program, field.sourceType, field.Type, declarations))
 			}
 			decl.WriteString(" }\n")
 		}
@@ -222,13 +222,13 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 	allServices := append(builtinServicesFor(r.Program), r.Program.Services...)
 	for _, s := range allServices {
 		decl.WriteString("export interface " + s.Name + "Requirement { readonly _effraService: " + quoted(s.Name) + " }\n")
-		decl.WriteString("export type " + s.Name + "Provider = " + jsShape(s.Methods, declarations, false) + ";\n")
+		decl.WriteString("export type " + s.Name + "Provider = " + jsShape(r.Program, s.Methods, declarations, false) + ";\n")
 		if !plan.Requires(RequiresService, serviceIdentity(s.Name)) {
 			continue
 		}
 		selection.importEffect("Context")
 		out.WriteString("const __ef_service_" + s.Name + "=Context.Service(" + quoted("effra/prototype/"+s.Name) + ");\nexport { __ef_service_" + s.Name + " as " + s.Name + " };\n")
-		decl.WriteString("declare const __ef_service_" + s.Name + ": Context.Service<" + s.Name + "Requirement, " + jsShape(s.Methods, declarations, false) + ">;\nexport { __ef_service_" + s.Name + " as " + s.Name + " };\n")
+		decl.WriteString("declare const __ef_service_" + s.Name + ": Context.Service<" + s.Name + "Requirement, " + jsShape(r.Program, s.Methods, declarations, false) + ">;\nexport { __ef_service_" + s.Name + " as " + s.Name + " };\n")
 	}
 	for _, p := range builtinProvidersFor(r.Program) {
 		if !plan.Requires(RequiresProvider, providerTypeRef(p).Declaration) {
@@ -238,7 +238,7 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 			return "", "", err
 		}
 		out.WriteString("export {__ef_provider_" + p.Name + " as " + p.Name + "};\n")
-		decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(r.Program.semantic.services[p.Service].Methods, declarations, false) + ";\nexport {__ef_provider_" + p.Name + " as " + p.Name + "};\n")
+		decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(r.Program, r.Program.semantic.services[p.Service].Methods, declarations, false) + ";\nexport {__ef_provider_" + p.Name + " as " + p.Name + "};\n")
 	}
 	for _, p := range r.Program.Providers {
 		if !plan.Requires(RequiresProvider, providerTypeRef(p).Declaration) {
@@ -247,14 +247,14 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 		selection.importEffect("Effect")
 		if providerConstructed(p) {
 			out.WriteString(jsProviderConstructor(p))
-			decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsConstructorType(p, declarations) + ";\nexport { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
+			decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsConstructorType(r.Program, p, declarations) + ";\nexport { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
 		} else {
 			out.WriteString("const __ef_provider_" + p.Name + " = {\n")
 			for _, f := range p.Methods {
 				out.WriteString("[" + quoted(f.Name) + "]: " + jsFunction(f) + ",\n")
 			}
 			out.WriteString("};\n")
-			decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(p.Methods, declarations, true) + ";\nexport { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
+			decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(r.Program, p.Methods, declarations, true) + ";\nexport { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
 		}
 		out.WriteString("export { __ef_provider_" + p.Name + " as " + p.Name + " };\n")
 		for _, f := range p.Methods {
@@ -282,7 +282,7 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 		out.WriteString("const " + f.jsEmissionName() + " = " + jsFunction(f) + ";\n")
 		if f.Module == currentModuleIdentity {
 			out.WriteString("export { " + f.jsEmissionName() + " as " + f.Name + " };\n")
-			decl.WriteString("declare const " + f.jsEmissionName() + ": " + jsRowFunctionSignature(f, declarations) + ";\nexport { " + f.jsEmissionName() + " as " + f.Name + " };\n")
+			decl.WriteString("declare const " + f.jsEmissionName() + ": " + jsRowFunctionSignature(r.Program, f, declarations) + ";\nexport { " + f.jsEmissionName() + " as " + f.Name + " };\n")
 		}
 	}
 	for _, r := range r.Program.BundledTemplates {
@@ -411,15 +411,15 @@ func jsProviderConstructor(p *Provider) string {
 	return "const __ef_provider_" + p.Name + " = (" + strings.Join(params, ", ") + ") => " + body + ";\n"
 }
 
-func jsConstructorType(p *Provider, declarations map[string]Declaration) string {
+func jsConstructorType(program *Program, p *Provider, declarations map[string]Declaration) string {
 	constructor := &Function{Name: p.Name, Params: p.Params, Return: "provider:" + p.Service, Effect: true, Services: normalized(p.Services)}
-	return "(" + jsFunctionParams(p.Params, declarations) + ") => " + jsContractFor(constructor, declarations)
+	return "(" + jsFunctionParams(program, p.Params, declarations) + ") => " + jsContractFor(program, constructor, declarations)
 }
 
-func jsFunctionParams(params []Param, declarations map[string]Declaration) string {
+func jsFunctionParams(program *Program, params []Param, declarations map[string]Declaration) string {
 	parts := []string{}
 	for _, p := range params {
-		parts = append(parts, "arg_"+p.Name+": "+jsSourceType(p.sourceType, p.Type, declarations))
+		parts = append(parts, "arg_"+p.Name+": "+jsSourceType(program, p.sourceType, p.Type, declarations))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -646,7 +646,7 @@ func declarationMap(r *Result) map[string]Declaration {
 	}
 	return result
 }
-func jsShape(methods []*Function, declarations map[string]Declaration, hideServices bool) string {
+func jsShape(program *Program, methods []*Function, declarations map[string]Declaration, hideServices bool) string {
 	out := "{ "
 	for _, f := range methods {
 		contract := f
@@ -655,7 +655,7 @@ func jsShape(methods []*Function, declarations map[string]Declaration, hideServi
 			copy.Services = nil
 			contract = &copy
 		}
-		out += "readonly " + quoted(f.Name) + ": " + jsRowFunctionSignature(contract, declarations) + "; "
+		out += "readonly " + quoted(f.Name) + ": " + jsRowFunctionSignature(program, contract, declarations) + "; "
 	}
 	return out + "}"
 }

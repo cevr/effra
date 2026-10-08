@@ -3004,6 +3004,14 @@ func (c *checker) canonicalRef(ref TypeRef) TypeID {
 		}
 		ref = typeRef(ref.Name)
 	}
+	if _, reserved := builtinCallbacks[ref.Name]; reserved && ref.Kind == "opaque" {
+		// typeRef spells every callback name opaque without knowing the
+		// program. Where builtinCallback does not admit it, the name is a
+		// user declaration and resolves like any other named type.
+		if _, admitted := c.builtinCallback(ref.Name); !admitted {
+			ref.Kind = "named"
+		}
+	}
 	if ref.Kind == "named" {
 		switch {
 		case c.records[ref.Name] != nil:
@@ -4931,6 +4939,5 @@ func (c *checker) requireGo(span Span, feature string) {
 // with HttpRequest and HttpReply, which it names: without a reference to Http
 // it is an ordinary unknown type and a free name.
 func (c *checker) builtinCallback(name string) (struct{ Parameter, Result string }, bool) {
-	callback, ok := builtinCallbacks[name]
-	return callback, ok && c.program.admitsHTTP()
+	return c.program.callback(name)
 }

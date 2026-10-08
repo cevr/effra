@@ -443,8 +443,8 @@ func (c *checker) callableCall(e *Expr, env localEnv, inEffect bool) (checkedExp
 	return checkedExpression{value: value}, true
 }
 
-func goSourceType(t *sourceType, fallback string) string {
-	result, _ := goSourceTypeMode(t, fallback)
+func goSourceType(program *Program, t *sourceType, fallback string) string {
+	result, _ := goSourceTypeMode(program, t, fallback)
 	return result
 }
 
@@ -452,9 +452,9 @@ func goSourceType(t *sourceType, fallback string) string {
 // primitive void. Only a concrete void result is erased from a pure Go
 // signature; void in any value position, including the result of an enclosing
 // callable that returns a no-result callable, keeps a Go type.
-func goSourceTypeMode(t *sourceType, fallback string) (string, bool) {
+func goSourceTypeMode(program *Program, t *sourceType, fallback string) (string, bool) {
 	if t == nil {
-		return goType(fallback), fallback == voidTypeName
+		return goType(program, fallback), fallback == voidTypeName
 	}
 	if t.Application != "" {
 		return canonicalGoType(t.owner, t.applicationID, map[TypeID]bool{}), false
@@ -466,9 +466,9 @@ func goSourceTypeMode(t *sourceType, fallback string) (string, bool) {
 	// on each occurrence in the source type graph by source rendering below.
 	args := make([]string, len(t.Parameters))
 	for i, name := range t.Parameters {
-		args[i] = goSourceType(t.ParameterTypes[i], name)
+		args[i] = goSourceType(program, t.ParameterTypes[i], name)
 	}
-	result, voidResult := goSourceTypeMode(t.ResultType, t.Result)
+	result, voidResult := goSourceTypeMode(program, t.ResultType, t.Result)
 	if t.Effect {
 		return "func(" + strings.Join(args, ", ") + ") efEffect[" + result + "]", false
 	}
@@ -478,9 +478,9 @@ func goSourceTypeMode(t *sourceType, fallback string) (string, bool) {
 	return "func(" + strings.Join(args, ", ") + ") " + result, false
 }
 
-func jsSourceType(t *sourceType, fallback string, declarations ...map[string]Declaration) string {
+func jsSourceType(program *Program, t *sourceType, fallback string, declarations ...map[string]Declaration) string {
 	if t == nil {
-		return jsValueType(fallback)
+		return jsValueType(program, fallback)
 	}
 	if t.HostForm != "" {
 		// Native Go types never reach JS: Go imports refuse that target.
@@ -492,7 +492,7 @@ func jsSourceType(t *sourceType, fallback string, declarations ...map[string]Dec
 		}
 		args := []string{}
 		for i, name := range t.ApplicationArguments {
-			args = append(args, jsSourceType(t.ApplicationArgumentTypes[i], name, declarations...))
+			args = append(args, jsSourceType(program, t.ApplicationArgumentTypes[i], name, declarations...))
 		}
 		return "__ef_template_" + t.Template.EmissionName + "<" + strings.Join(args, ", ") + ">"
 	}
@@ -506,17 +506,17 @@ func jsSourceType(t *sourceType, fallback string, declarations ...map[string]Dec
 		nested = declarations[1]
 	}
 	for i, name := range t.Parameters {
-		args[i] = "arg" + strconv.Itoa(i) + ": " + jsSourceType(t.ParameterTypes[i], name, nested)
+		args[i] = "arg" + strconv.Itoa(i) + ": " + jsSourceType(program, t.ParameterTypes[i], name, nested)
 	}
 	f := &Function{Return: t.Result, returnType: t.ResultType, Effect: t.Effect, Errors: t.Failures, Services: t.Services}
-	return "(" + strings.Join(args, ", ") + ") => " + jsContractFor(f, declared, nested)
+	return "(" + strings.Join(args, ", ") + ") => " + jsContractFor(program, f, declared, nested)
 }
 
 // Each actual callback gets its own TS inference variable. Reusing a single
 // variable in several parameter positions makes TypeScript pick the first
 // callback's row instead of the source solver's least union. The return view
 // joins these witnesses and excludes the formal row's fixed labels.
-func jsRowFunctionSignature(f *Function, declarations map[string]Declaration) string {
+func jsRowFunctionSignature(program *Program, f *Function, declarations map[string]Declaration) string {
 	if len(f.TypeParameters) > 0 {
 		declared := map[string]Declaration{}
 		for name, d := range declarations {
@@ -532,9 +532,9 @@ func jsRowFunctionSignature(f *Function, declarations map[string]Declaration) st
 		}
 		params := []string{}
 		for i, p := range f.Params {
-			params = append(params, "arg"+strconv.Itoa(i)+": "+jsSourceType(p.sourceType, p.Type, declared))
+			params = append(params, "arg"+strconv.Itoa(i)+": "+jsSourceType(program, p.sourceType, p.Type, declared))
 		}
-		return "<" + strings.Join(variables, ", ") + ">(" + strings.Join(params, ", ") + ") => " + jsContractFor(f, declared)
+		return "<" + strings.Join(variables, ", ") + ">(" + strings.Join(params, ", ") + ") => " + jsContractFor(program, f, declared)
 	}
 	if len(f.CallbackPolicies) > 0 {
 		copy := *f
@@ -551,7 +551,7 @@ func jsRowFunctionSignature(f *Function, declarations map[string]Declaration) st
 				copy.Services = append(append([]string{}, f.Services...), "__ef_transport_R")
 			}
 		}
-		return jsRowFunctionSignature(&copy, declarations)
+		return jsRowFunctionSignature(program, &copy, declarations)
 	}
 	copyDeclarations := func() map[string]Declaration {
 		result := map[string]Declaration{}
@@ -632,11 +632,11 @@ func jsRowFunctionSignature(f *Function, declarations map[string]Declaration) st
 		if len(f.RowParameters) > 0 {
 			context = parameterDeclarations[i]
 		}
-		params = append(params, "arg_"+p.Name+": "+jsSourceType(p.sourceType, p.Type, context, nestedDeclarations))
+		params = append(params, "arg_"+p.Name+": "+jsSourceType(program, p.sourceType, p.Type, context, nestedDeclarations))
 	}
 	generic := ""
 	if len(variables) > 0 {
 		generic = "<" + strings.Join(variables, ", ") + ">"
 	}
-	return generic + "(" + strings.Join(params, ", ") + ") => " + jsContractFor(f, resultDeclarations)
+	return generic + "(" + strings.Join(params, ", ") + ") => " + jsContractFor(program, f, resultDeclarations)
 }

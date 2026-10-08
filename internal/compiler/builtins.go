@@ -60,6 +60,15 @@ var builtinCallbacks = map[string]struct{ Parameter, Result string }{
 	"HttpHandler": {"HttpRequest", "HttpReply"},
 }
 
+// callback is the one admission predicate for builtin callback names: a name
+// is the builtin callback only where the program admits the contract it
+// belongs to. The checker's type resolution and both emitters ask it, so they
+// cannot disagree about whether a user declaration of the same name exists.
+func (p *Program) callback(name string) (struct{ Parameter, Result string }, bool) {
+	callback, ok := builtinCallbacks[name]
+	return callback, ok && p.admitsHTTP()
+}
+
 // admitsHTTP reports whether the program refers to the global Http or
 // LiveHttp, as resolved by resolveBindings: a local binding of either name,
 // including a row parameter, is not a reference. The Http service, its

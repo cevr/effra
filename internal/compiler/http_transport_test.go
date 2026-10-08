@@ -520,3 +520,37 @@ effect fn main() -> void { let pending = Http.text("x"); void }`, target)
 		}
 	}
 }
+
+// Without a reference to Http, HttpHandler is an ordinary user name: a record
+// declared with it is used as a parameter type, constructed, read and built
+// on both targets. The callback classification must not leak into the checked
+// or emitted type of a user declaration.
+func TestUserHttpHandlerRecordIsAnOrdinaryTypeWithoutHttp(t *testing.T) {
+	source := `record HttpHandler { path: string }
+fn pathOf(h: HttpHandler) -> string { h.path }
+effect fn main() -> void {
+    run Console.log(pathOf(HttpHandler { path: "user-record" })).provide<Console>(Stdout)
+}`
+	goResult := CompileFor(source, "go")
+	if !goResult.Checked {
+		t.Fatalf("go: %+v", goResult.Diagnostics)
+	}
+	if output := runGeneratedGo(t, goResult); output != "user-record\n" {
+		t.Fatalf("go output %q", output)
+	}
+	jsResult := CompileFor(source, "js")
+	if !jsResult.Checked {
+		t.Fatalf("js: %+v", jsResult.Diagnostics)
+	}
+	entry, declarations, err := jsResult.Emit(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(declarations, "HttpRequest") || strings.Contains(entry, "HttpReply") {
+		t.Fatalf("user HttpHandler was lowered as the builtin callback:\n%s", declarations)
+	}
+	dir := writeJSModule(t, map[string]string{"entry.mjs": entry})
+	if output, err := runNode(t, dir, "entry.mjs"); err != nil || output != "user-record\n" {
+		t.Fatalf("js output %q: %v", output, err)
+	}
+}

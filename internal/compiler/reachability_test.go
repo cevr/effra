@@ -1049,7 +1049,7 @@ func TestBuiltinNativeModulesMatchEmittedRuntimeReferences(t *testing.T) {
 	var generated strings.Builder
 	generated.WriteString("package main\n")
 	for _, service := range builtins() {
-		generated.WriteString(goServiceDeclaration(service))
+		generated.WriteString(goServiceDeclaration(&Program{references: map[string]bool{"Http": true}}, service))
 	}
 	for _, provider := range builtinProviders() {
 		implementation, found := builtinGoProviders[provider.Name]
