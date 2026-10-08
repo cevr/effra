@@ -45,14 +45,37 @@ const (
 	RequiresCodecPlan        ApplicationRequirementKind = "codec-plan"
 )
 
+// OriginProviderMethod classifies a provider operation body. It is a typed
+// provenance origin, not a retained requirement: a materialized provider
+// value carries every operation, so its methods expand with the provider.
+const OriginProviderMethod ApplicationRequirementKind = "provider-method"
+
 // ApplicationRequirement is one retained identity. Via names the identity
-// whose checked body, contract or plan first required it; roots have no Via.
-// Reason classifies that checked edge.
+// whose checked body, contract or plan first required it, and ViaKind
+// classifies it, so provenance never depends on identity spelling; roots have
+// no Via. Reason classifies that checked edge.
 type ApplicationRequirement struct {
 	Kind     ApplicationRequirementKind `json:"kind"`
 	Identity string                     `json:"identity"`
 	Via      string                     `json:"via,omitempty"`
+	ViaKind  ApplicationRequirementKind `json:"viaKind,omitempty"`
 	Reason   string                     `json:"reason"`
+}
+
+// ApplicationOrigin is a provenance origin that is not itself a retained
+// requirement. Each one names the requirement it expands with.
+type ApplicationOrigin struct {
+	Kind     ApplicationRequirementKind `json:"kind"`
+	Identity string                     `json:"identity"`
+	Via      string                     `json:"via"`
+	ViaKind  ApplicationRequirementKind `json:"viaKind"`
+}
+
+// applicationOrigin is the typed witness the planner threads through every
+// expansion in place of an identity string.
+type applicationOrigin struct {
+	kind     ApplicationRequirementKind
+	identity string
 }
 
 // ApplicationPlan is the deterministic emission closure of one concrete
@@ -70,6 +93,7 @@ type ApplicationPlan struct {
 	Target       string                   `json:"target"`
 	Revision     string                   `json:"revision"`
 	Requirements []ApplicationRequirement `json:"requirements"`
+	Origins      []ApplicationOrigin      `json:"origins,omitempty"`
 	Work         int                      `json:"work"`
 	WorkLimit    int                      `json:"workLimit"`
 	// goImports holds the import aliases retained code qualifies, and
@@ -290,7 +314,15 @@ func (r *Result) LibraryPlan() (*ApplicationPlan, error) {
 	return planner.finish()
 }
 
-func (r *Result) applicationPlan(mode GoGenerationMode, limit int) (*ApplicationPlan, error) {
+// applicationHostRoot names one checked declaration that Go host code calls
+// directly, outside the generated entry. There is no native host export
+// surface yet, so only in-package probes of generated code declare them.
+type applicationHostRoot struct {
+	kind ApplicationRequirementKind
+	name string
+}
+
+func (r *Result) applicationPlan(mode GoGenerationMode, limit int, hostRoots ...applicationHostRoot) (*ApplicationPlan, error) {
 	if r == nil || !r.Checked || r.Program == nil || r.Program.semantic == nil {
 		return nil, fmt.Errorf("application plans require checked source")
 	}
@@ -313,11 +345,14 @@ func (r *Result) applicationPlan(mode GoGenerationMode, limit int) (*Application
 			planner.root(test, "test")
 		}
 		for _, name := range testHarnessProviders {
-			planner.provider(r.checkedProviders[name], "", "test-harness")
+			planner.provider(r.checkedProviders[name], applicationOrigin{}, "test-harness")
 		}
 	}
+	for _, root := range hostRoots {
+		planner.hostRoot(root)
+	}
 	planner.goInitialization()
-	planner.runtimeModule(rt.RuntimeModuleCore, "", "native-entry")
+	planner.runtimeModule(rt.RuntimeModuleCore, applicationOrigin{}, "native-entry")
 	return planner.finish()
 }
 
@@ -330,6 +365,9 @@ func (p *applicationPlanner) finish() (*ApplicationPlan, error) {
 	}
 	plan := p.plan
 	slices.SortFunc(plan.Requirements, compareApplicationRequirements)
+	slices.SortFunc(plan.Origins, func(a, b ApplicationOrigin) int {
+		return compareApplicationRequirements(ApplicationRequirement{Kind: a.Kind, Identity: a.Identity}, ApplicationRequirement{Kind: b.Kind, Identity: b.Identity})
+	})
 	if _, err := plan.RuntimeSources(); err != nil {
 		return nil, fmt.Errorf("application runtime selection: %w", err)
 	}
@@ -415,13 +453,13 @@ func (p *applicationPlanner) spend() bool {
 
 // require admits identity once. It returns true only on first admission, so
 // callers queue each declaration's expansion exactly once.
-func (p *applicationPlanner) require(kind ApplicationRequirementKind, identity, via, reason string) bool {
+func (p *applicationPlanner) require(kind ApplicationRequirementKind, identity string, via applicationOrigin, reason string) bool {
 	key := applicationRequirementKey{kind, identity}
 	if p.admitted[key] || !p.spend() {
 		return false
 	}
 	p.admitted[key] = true
-	p.plan.Requirements = append(p.plan.Requirements, ApplicationRequirement{Kind: kind, Identity: identity, Via: via, Reason: reason})
+	p.plan.Requirements = append(p.plan.Requirements, ApplicationRequirement{Kind: kind, Identity: identity, Via: via.identity, ViaKind: via.kind, Reason: reason})
 	return true
 }
 
@@ -435,7 +473,7 @@ func (p *applicationPlanner) root(symbol *Symbol, reason string) {
 		p.err = fmt.Errorf("application root %s has no checked declaration", symbol.Name)
 		return
 	}
-	p.function(checked.declaration, "", reason)
+	p.function(checked.declaration, applicationOrigin{}, reason)
 }
 
 // librarySurface roots every value a JavaScript library exports: the
@@ -445,19 +483,30 @@ func (p *applicationPlanner) root(symbol *Symbol, reason string) {
 func (p *applicationPlanner) librarySurface() {
 	for _, f := range p.r.Program.checkedFunctions() {
 		if f.Module == currentModuleIdentity {
-			p.function(f, "", "export")
+			p.function(f, applicationOrigin{}, "export")
 		}
 	}
 	for _, s := range append(builtinServicesFor(p.r.Program), p.r.Program.Services...) {
-		p.service(p.c.services[s.Name], "", "export")
+		p.service(p.c.services[s.Name], applicationOrigin{}, "export")
 	}
 	for _, provider := range builtinProvidersFor(p.r.Program) {
 		if jsExportsBuiltinProvider(provider.Name) && !builtinProviderByReference(provider) {
-			p.provider(p.r.checkedProviders[provider.Name], "", "export")
+			p.provider(p.r.checkedProviders[provider.Name], applicationOrigin{}, "export")
 		}
 	}
 	for _, provider := range p.r.Program.Providers {
-		p.provider(provider, "", "export")
+		p.provider(provider, applicationOrigin{}, "export")
+	}
+}
+
+func (p *applicationPlanner) hostRoot(root applicationHostRoot) {
+	switch root.kind {
+	case RequiresFunction:
+		p.root(p.r.Find(root.name), "host")
+	case RequiresHelper:
+		p.helper(root.name, applicationOrigin{})
+	default:
+		p.err = fmt.Errorf("application host root kind %s is unsupported", root.kind)
 	}
 }
 
@@ -476,12 +525,12 @@ func (p *applicationPlanner) drain() {
 		case work.data != nil:
 			p.expandData(work.data, work.identity)
 		case work.errorDecl != nil:
-			p.fields(work.errorDecl.Fields, work.identity)
+			p.fields(work.errorDecl.Fields, applicationOrigin{RequiresDeclaration, work.identity})
 		}
 	}
 }
 
-func (p *applicationPlanner) function(f *Function, via, reason string) {
+func (p *applicationPlanner) function(f *Function, via applicationOrigin, reason string) {
 	if f == nil {
 		return
 	}
@@ -491,18 +540,19 @@ func (p *applicationPlanner) function(f *Function, via, reason string) {
 }
 
 func (p *applicationPlanner) expandFunction(f *Function, identity string) {
-	p.signature(f, identity)
-	p.block(f.Body, identity)
+	origin := applicationOrigin{RequiresFunction, identity}
+	p.signature(f, origin)
+	p.block(f.Body, origin)
 }
 
-func (p *applicationPlanner) signature(f *Function, via string) {
+func (p *applicationPlanner) signature(f *Function, via applicationOrigin) {
 	for _, parameter := range f.Params {
 		p.typeID(parameter.typeID, via)
 	}
 	p.typeID(f.returnID, via)
 }
 
-func (p *applicationPlanner) service(s *Service, via, reason string) {
+func (p *applicationPlanner) service(s *Service, via applicationOrigin, reason string) {
 	if s == nil {
 		return
 	}
@@ -515,21 +565,22 @@ func (p *applicationPlanner) service(s *Service, via, reason string) {
 // expandService retains the complete operation table: a provider value is
 // one record of every operation, so a service type needs every signature.
 func (p *applicationPlanner) expandService(s *Service, identity string) {
+	origin := applicationOrigin{RequiresService, identity}
 	for _, module := range s.native {
-		p.runtimeModule(module, identity, "service-runtime")
+		p.runtimeModule(module, origin, "service-runtime")
 	}
 	for _, operation := range s.Methods {
-		p.signature(operation, identity)
+		p.signature(operation, origin)
 	}
 }
 
-func (p *applicationPlanner) operation(f *Function, via string) {
+func (p *applicationPlanner) operation(f *Function, via applicationOrigin) {
 	s := p.operationServices[f]
 	p.require(RequiresOperation, f.Identity, via, "operation-call")
-	p.service(s, f.Identity, "operation")
+	p.service(s, applicationOrigin{RequiresOperation, f.Identity}, "operation")
 }
 
-func (p *applicationPlanner) provider(provider *Provider, via, reason string) {
+func (p *applicationPlanner) provider(provider *Provider, via applicationOrigin, reason string) {
 	if provider == nil {
 		return
 	}
@@ -543,25 +594,28 @@ func (p *applicationPlanner) provider(provider *Provider, via, reason string) {
 // services, configuration types and every operation body. A materialized
 // provider value carries all of its operations, whichever ones are called.
 func (p *applicationPlanner) expandProvider(provider *Provider, identity string) {
-	p.service(p.c.services[provider.Service], identity, "implements")
+	origin := applicationOrigin{RequiresProvider, identity}
+	p.service(p.c.services[provider.Service], origin, "implements")
 	for _, captured := range normalized(provider.Services) {
-		p.service(p.c.services[captured], identity, "provider-capture")
+		p.service(p.c.services[captured], origin, "provider-capture")
 	}
 	for _, parameter := range provider.Params {
-		p.typeID(parameter.typeID, identity)
+		p.typeID(parameter.typeID, origin)
 	}
 	for _, module := range provider.native {
-		p.runtimeModule(module, identity, "provider-runtime")
+		p.runtimeModule(module, origin, "provider-runtime")
 	}
 	for _, method := range provider.Methods {
-		p.signature(method, method.Identity)
-		p.block(method.Body, method.Identity)
+		p.plan.Origins = append(p.plan.Origins, ApplicationOrigin{Kind: OriginProviderMethod, Identity: method.Identity, Via: identity, ViaKind: RequiresProvider})
+		methodOrigin := applicationOrigin{OriginProviderMethod, method.Identity}
+		p.signature(method, methodOrigin)
+		p.block(method.Body, methodOrigin)
 	}
 }
 
 // checkedProvider resolves a provider value or construction recipe through
 // its canonical provider node.
-func (p *applicationPlanner) checkedProvider(e *Expr, via, reason string) {
+func (p *applicationPlanner) checkedProvider(e *Expr, via applicationOrigin, reason string) {
 	node := e.checked.node()
 	if node != nil && node.Kind == "providerRecipe" {
 		node = p.c.node(node.Result)
@@ -578,7 +632,7 @@ func (p *applicationPlanner) checkedProvider(e *Expr, via, reason string) {
 	p.provider(provider, via, reason)
 }
 
-func (p *applicationPlanner) layer(plan *LayerPlan, via string) {
+func (p *applicationPlanner) layer(plan *LayerPlan, via applicationOrigin) {
 	if plan == nil {
 		p.err = fmt.Errorf("application layer provision has no checked plan")
 		return
@@ -592,13 +646,14 @@ func (p *applicationPlanner) layer(plan *LayerPlan, via string) {
 // hidden, with its effective (possibly replacement) implementation and
 // configuration. Replaced selections are not part of the plan.
 func (p *applicationPlanner) expandLayer(plan *LayerPlan) {
-	p.runtimeModule(rt.RuntimeModuleLayers, plan.ID, "layer-provision")
+	origin := applicationOrigin{RequiresLayer, plan.ID}
+	p.runtimeModule(rt.RuntimeModuleLayers, origin, "layer-provision")
 	for _, node := range plan.Nodes {
 		reason := "layer-node"
 		if !node.Public {
 			reason = "hidden-layer-node"
 		}
-		p.require(RequiresLayerNode, node.ID, plan.ID, reason)
+		p.require(RequiresLayerNode, node.ID, origin, reason)
 		selection := plan.selected[node.ID]
 		if selection == nil || selection.provider == nil || selection.effective == nil {
 			p.err = fmt.Errorf("layer node %s has no checked selection", node.ID)
@@ -608,26 +663,27 @@ func (p *applicationPlanner) expandLayer(plan *LayerPlan) {
 		if len(selection.replacements) > 0 {
 			binding = "layer-replacement"
 		}
-		p.provider(selection.provider, node.ID, binding)
-		p.service(p.c.services[node.Service], node.ID, "layer-node")
+		nodeOrigin := applicationOrigin{RequiresLayerNode, node.ID}
+		p.provider(selection.provider, nodeOrigin, binding)
+		p.service(p.c.services[node.Service], nodeOrigin, "layer-node")
 		for _, argument := range selection.effective.Value.Args {
-			p.expr(argument, node.ID)
+			p.expr(argument, nodeOrigin)
 		}
 	}
 	for _, provided := range plan.Provides {
-		p.service(p.c.services[provided], plan.ID, "layer-output")
+		p.service(p.c.services[provided], origin, "layer-output")
 	}
 }
 
-func (p *applicationPlanner) runtimeModule(module rt.RuntimeModule, via, reason string) {
+func (p *applicationPlanner) runtimeModule(module rt.RuntimeModule, via applicationOrigin, reason string) {
 	p.require(RequiresRuntimeModule, string(module), via, reason)
 }
 
-func (p *applicationPlanner) helper(name, via string) {
+func (p *applicationPlanner) helper(name string, via applicationOrigin) {
 	p.require(RequiresHelper, name, via, "lowering")
 }
 
-func (p *applicationPlanner) data(declaration *DataDeclaration, identity, via string) {
+func (p *applicationPlanner) data(declaration *DataDeclaration, identity string, via applicationOrigin) {
 	if declaration == nil {
 		return
 	}
@@ -637,13 +693,14 @@ func (p *applicationPlanner) data(declaration *DataDeclaration, identity, via st
 }
 
 func (p *applicationPlanner) expandData(declaration *DataDeclaration, identity string) {
-	p.fields(declaration.Fields, identity)
+	origin := applicationOrigin{RequiresDeclaration, identity}
+	p.fields(declaration.Fields, origin)
 	for _, variant := range declaration.Variants {
-		p.fields(variant.Fields, identity)
+		p.fields(variant.Fields, origin)
 	}
 }
 
-func (p *applicationPlanner) fields(fields []Field, via string) {
+func (p *applicationPlanner) fields(fields []Field, via applicationOrigin) {
 	for _, field := range fields {
 		p.typeID(field.typeID, via)
 	}
@@ -651,7 +708,7 @@ func (p *applicationPlanner) fields(fields []Field, via string) {
 
 // failure retains a source error declaration raised by a reachable fail
 // statement. Builtin failures have no source declaration to emit.
-func (p *applicationPlanner) failure(name, via string) {
+func (p *applicationPlanner) failure(name string, via applicationOrigin) {
 	declaration := p.c.errors[name]
 	if declaration == nil || !p.sourceErrors[declaration] {
 		return
@@ -665,7 +722,7 @@ func (p *applicationPlanner) failure(name, via string) {
 // typeID expands one canonical type node once. Nominal data is admitted as a
 // declaration and expanded from its declared fields, so recursive data does
 // not recurse here.
-func (p *applicationPlanner) typeID(id TypeID, via string) {
+func (p *applicationPlanner) typeID(id TypeID, via applicationOrigin) {
 	if id == invalidTypeID || p.types[id] || p.err != nil {
 		return
 	}
@@ -703,7 +760,7 @@ func (p *applicationPlanner) typeID(id TypeID, via string) {
 		// which may differ from every imported call's package.
 		if p.require(RequiresHostType, node.Declaration, via, "type") {
 			for _, path := range p.c.hostPackages(id) {
-				p.require(RequiresGoImport, path, node.Declaration, "host-type")
+				p.require(RequiresGoImport, path, applicationOrigin{RequiresHostType, node.Declaration}, "host-type")
 			}
 		}
 	}
@@ -731,7 +788,7 @@ func typeRuntimeModule(node *semanticTypeNode) (rt.RuntimeModule, bool) {
 	return "", false
 }
 
-func (p *applicationPlanner) block(b *Block, owner string) {
+func (p *applicationPlanner) block(b *Block, owner applicationOrigin) {
 	if b == nil {
 		return
 	}
@@ -747,7 +804,7 @@ func (p *applicationPlanner) block(b *Block, owner string) {
 // expr follows the checker's resolution of one expression: its Text
 // classification, resolved declaration, layer plan and canonical value node.
 // A same-spelled local or field never selects a declaration.
-func (p *applicationPlanner) expr(e *Expr, owner string) {
+func (p *applicationPlanner) expr(e *Expr, owner applicationOrigin) {
 	if e == nil || !p.spend() {
 		return
 	}
@@ -769,7 +826,7 @@ func (p *applicationPlanner) expr(e *Expr, owner string) {
 	case "call":
 		switch e.Text {
 		case "callable":
-			p.require(RequiresDynamicCall, owner+"@"+strconv.Itoa(e.Span.Offset), owner, "callable-invocation")
+			p.require(RequiresDynamicCall, owner.identity+"@"+strconv.Itoa(e.Span.Offset), owner, "callable-invocation")
 		case "foreign":
 			p.foreign(e, owner)
 		case "fiber":
@@ -809,7 +866,7 @@ func (p *applicationPlanner) expr(e *Expr, owner string) {
 	}
 }
 
-func (p *applicationPlanner) callableValue(f *Function, owner string) {
+func (p *applicationPlanner) callableValue(f *Function, owner applicationOrigin) {
 	if f == nil {
 		return
 	}
@@ -824,7 +881,7 @@ func (p *applicationPlanner) callableValue(f *Function, owner string) {
 // alone retains no function, binding, Foreign capability or helper.
 func (p *applicationPlanner) goInitialization() {
 	for _, imported := range p.r.Program.Imports {
-		p.require(RequiresGoInitialization, imported.Path, "", "declared-foreign-import")
+		p.require(RequiresGoInitialization, imported.Path, applicationOrigin{}, "declared-foreign-import")
 	}
 	// Host declarations import the packages that spell host types under their
 	// host aliases, so those packages are named and need no blank import.
@@ -843,7 +900,7 @@ func (p *applicationPlanner) namedGoImport(imported GoImport) {
 
 // foreign retains one checked host binding, its import declaration and the
 // Foreign capability the lowering reads from the effect context.
-func (p *applicationPlanner) foreign(e *Expr, owner string) {
+func (p *applicationPlanner) foreign(e *Expr, owner applicationOrigin) {
 	binding, ok := p.r.Program.Bindings[e.Name]
 	if !ok {
 		p.err = fmt.Errorf("application foreign call at offset %d has no checked binding", e.Span.Offset)
@@ -857,12 +914,12 @@ func (p *applicationPlanner) foreign(e *Expr, owner string) {
 			p.err = fmt.Errorf("application foreign binding %s has no import declaration", binding.Symbol)
 			return
 		}
-		p.require(RequiresGoImport, imported.Path, identity, "foreign-call")
+		p.require(RequiresGoImport, imported.Path, applicationOrigin{RequiresForeign, identity}, "foreign-call")
 		p.namedGoImport(imported)
 	}
 	// A checked write names io.ErrShortWrite even when source never imports io.
 	if protocol, ok := binding.ioProtocol(); ok && !protocol.reader {
-		p.require(RequiresGoImport, "io", identity, "io-protocol")
+		p.require(RequiresGoImport, "io", applicationOrigin{RequiresForeign, identity}, "io-protocol")
 	}
 	p.helper("foreign", owner)
 	p.service(p.c.services["Foreign"], owner, "foreign-call")
@@ -873,11 +930,11 @@ func (p *applicationPlanner) foreign(e *Expr, owner string) {
 		// A method's receiver type retains the package declaring its method
 		// set even when no source import names that package.
 		if binding.receiver != nil {
-			p.typeID(host.receiver, identity)
+			p.typeID(host.receiver, applicationOrigin{RequiresForeign, identity})
 		}
 		for _, param := range host.params {
-			p.typeID(param, identity)
+			p.typeID(param, applicationOrigin{RequiresForeign, identity})
 		}
-		p.typeID(host.result, identity)
+		p.typeID(host.result, applicationOrigin{RequiresForeign, identity})
 	}
 }

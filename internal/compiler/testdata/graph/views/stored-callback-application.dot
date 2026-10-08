@@ -1,0 +1,21 @@
+digraph "effra-graph:application:0841bb8e07c3039d1c8f36faff5b9492" {
+  rankdir=LR;
+  n0 [label="callable-value: function:module:file:module:renamed", id="retained|callable-value|function:module:file:module:renamed"];
+  n1 [label="declaration: record:module:file:module:Operations", id="retained|declaration|record:module:file:module:Operations"];
+  n2 [label="declaration: record:module:file:module:State", id="retained|declaration|record:module:file:module:State"];
+  n3 [label="dynamic-call: function:module:file:module:advance@528", id="retained|dynamic-call|function:module:file:module:advance@528"];
+  n4 [label="dynamic-call: function:module:file:module:apply@404", id="retained|dynamic-call|function:module:file:module:apply@404"];
+  n5 [label="function: function:module:file:module:advance", id="retained|function|function:module:file:module:advance"];
+  n6 [label="function: function:module:file:module:apply", id="retained|function|function:module:file:module:apply"];
+  n7 [label="function: function:module:file:module:main", id="retained|function|function:module:file:module:main"];
+  n8 [label="function: function:module:file:module:renamed", id="retained|function|function:module:file:module:renamed"];
+  n9 [label="runtime-module: core", id="retained|runtime-module|core"];
+  n5 -> n3 [label="callable-invocation", id="edge|retains|retained%7Cfunction%7Cfunction:module:file:module:advance|retained%7Cdynamic-call%7Cfunction:module:file:module:advance@528", class="e0"];
+  n5 -> n6 [label="call", id="edge|retains|retained%7Cfunction%7Cfunction:module:file:module:advance|retained%7Cfunction%7Cfunction:module:file:module:apply", class="e1"];
+  n6 -> n4 [label="callable-invocation", id="edge|retains|retained%7Cfunction%7Cfunction:module:file:module:apply|retained%7Cdynamic-call%7Cfunction:module:file:module:apply@404", class="e2"];
+  n7 -> n0 [label="function-value", id="edge|retains|retained%7Cfunction%7Cfunction:module:file:module:main|retained%7Ccallable-value%7Cfunction:module:file:module:renamed", class="e3"];
+  n7 -> n1 [label="type", id="edge|retains|retained%7Cfunction%7Cfunction:module:file:module:main|retained%7Cdeclaration%7Crecord:module:file:module:Operations", class="e4"];
+  n7 -> n2 [label="type", id="edge|retains|retained%7Cfunction%7Cfunction:module:file:module:main|retained%7Cdeclaration%7Crecord:module:file:module:State", class="e5"];
+  n7 -> n5 [label="call", id="edge|retains|retained%7Cfunction%7Cfunction:module:file:module:main|retained%7Cfunction%7Cfunction:module:file:module:advance", class="e6"];
+  n7 -> n8 [label="function-value", id="edge|retains|retained%7Cfunction%7Cfunction:module:file:module:main|retained%7Cfunction%7Cfunction:module:file:module:renamed", class="e7"];
+}

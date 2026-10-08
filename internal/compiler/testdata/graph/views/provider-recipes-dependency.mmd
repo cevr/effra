@@ -1,0 +1,134 @@
+flowchart LR
+%% effra graph view effra-graph:dependency:98ba9c3ba78e3889bf97baeafdf08712
+%% n0: expression:expression:expression:function:main:261:run:277:provide:271:call
+%% n1: expression:expression:function:main:202:run:206:name
+%% n2: expression:expression:function:main:228:run:232:name
+%% n3: expression:expression:function:main:261:run:277:provide
+%% n4: expression:function:main:171:call
+%% n5: expression:function:main:202:run
+%% n6: expression:function:main:228:run
+%% n7: expression:function:main:261:run
+%% n8: function:main
+%% n9: provider-method:Configured.get
+%% n10: provider-recipe:function:main:171
+%% n11: provider-value:expression:function:main:202:run
+%% n12: provider-value:expression:function:main:228:run
+%% n13: provider:Assertions
+%% n14: provider:Configured
+%% n15: provider:Host
+%% n16: provider:LiveClock
+%% n17: provider:LiveEnv
+%% n18: provider:LiveFiles
+%% n19: provider:LiveScheduler
+%% n20: provider:RuntimeLive
+%% n21: provider:Stdout
+%% n22: provider:TestClock
+%% n23: provider:TestScheduler
+%% n24: provider:TestSync
+%% n25: service:Assert
+%% n26: service:Clock
+%% n27: service:Console
+%% n28: service:Env
+%% n29: service:Files
+%% n30: service:Foreign
+%% n31: service:Runtime
+%% n32: service:Scheduler
+%% n33: service:Sync
+%% n34: service:Users
+  n0["call @ 8:13"]
+  n1["name: recipe"]
+  n2["name: recipe"]
+  n3["provide: Users"]
+  n4["call @ 4:16"]
+  n5["run @ 5:15"]
+  n6["run @ 6:16"]
+  n7["run @ 8:3"]
+  n8["function: main"]
+  n9["provider-method: Configured.get"]
+  n10["provider-recipe: Configured"]
+  n11["provider-value: Users"]
+  n12["provider-value: Users"]
+  n13["provider: Assertions"]
+  n14["provider: Configured"]
+  n15["provider: Host"]
+  n16["provider: LiveClock"]
+  n17["provider: LiveEnv"]
+  n18["provider: LiveFiles"]
+  n19["provider: LiveScheduler"]
+  n20["provider: RuntimeLive"]
+  n21["provider: Stdout"]
+  n22["provider: TestClock"]
+  n23["provider: TestScheduler"]
+  n24["provider: TestSync"]
+  n25["service: Assert"]
+  n26["service: Clock"]
+  n27["service: Console"]
+  n28["service: Env"]
+  n29["service: Files"]
+  n30["service: Foreign"]
+  n31["service: Runtime"]
+  n32["service: Scheduler"]
+  n33["service: Sync"]
+  n34["service: Users"]
+  %% e0: edge#124;adapts#124;expression:expression:function:main:261:run:277:provide#124;expression:expression:expression:function:main:261:run:277:provide:271:call#124;#124;277#124;7
+  n3 -->|"adapts"| n0
+  %% e1: edge#124;calls#124;expression:expression:expression:function:main:261:run:277:provide:271:call#124;service:Users#124;Users#124;271#124;3
+  n0 -->|"calls"| n34
+  %% e2: edge#124;constructs#124;expression:function:main:171:call#124;provider-recipe:function:main:171#124;Configured#124;171#124;10
+  n4 -->|"constructs"| n10
+  %% e3: edge#124;contains#124;expression:expression:function:main:261:run:277:provide#124;expression:expression:expression:function:main:261:run:277:provide:271:call#124;#124;271#124;3
+  n3 -->|"contains"| n0
+  %% e4: edge#124;contains#124;expression:function:main:202:run#124;expression:expression:function:main:202:run:206:name#124;#124;206#124;6
+  n5 -->|"contains"| n1
+  %% e5: edge#124;contains#124;expression:function:main:228:run#124;expression:expression:function:main:228:run:232:name#124;#124;232#124;6
+  n6 -->|"contains"| n2
+  %% e6: edge#124;contains#124;expression:function:main:261:run#124;expression:expression:function:main:261:run:277:provide#124;#124;277#124;7
+  n7 -->|"contains"| n3
+  %% e7: edge#124;contains#124;function:main#124;expression:function:main:171:call#124;#124;171#124;10
+  n8 -->|"contains"| n4
+  %% e8: edge#124;contains#124;function:main#124;expression:function:main:202:run#124;#124;202#124;3
+  n8 -->|"contains"| n5
+  %% e9: edge#124;contains#124;function:main#124;expression:function:main:228:run#124;#124;228#124;3
+  n8 -->|"contains"| n6
+  %% e10: edge#124;contains#124;function:main#124;expression:function:main:261:run#124;#124;261#124;3
+  n8 -->|"contains"| n7
+  %% e11: edge#124;contains#124;provider:Configured#124;provider-method:Configured.get#124;#124;98#124;3
+  n14 -->|"contains"| n9
+  %% e12: edge#124;implements#124;provider:Assertions#124;service:Assert#124;Assert#124;0#124;0
+  n13 -->|"implements"| n25
+  %% e13: edge#124;implements#124;provider:Configured#124;service:Users#124;Users#124;49#124;10
+  n14 -->|"implements"| n34
+  %% e14: edge#124;implements#124;provider:Host#124;service:Foreign#124;Foreign#124;0#124;0
+  n15 -->|"implements"| n30
+  %% e15: edge#124;implements#124;provider:LiveClock#124;service:Clock#124;Clock#124;0#124;0
+  n16 -->|"implements"| n26
+  %% e16: edge#124;implements#124;provider:LiveEnv#124;service:Env#124;Env#124;0#124;0
+  n17 -->|"implements"| n28
+  %% e17: edge#124;implements#124;provider:LiveFiles#124;service:Files#124;Files#124;0#124;0
+  n18 -->|"implements"| n29
+  %% e18: edge#124;implements#124;provider:LiveScheduler#124;service:Scheduler#124;Scheduler#124;0#124;0
+  n19 -->|"implements"| n32
+  %% e19: edge#124;implements#124;provider:RuntimeLive#124;service:Runtime#124;Runtime#124;0#124;0
+  n20 -->|"implements"| n31
+  %% e20: edge#124;implements#124;provider:Stdout#124;service:Console#124;Console#124;0#124;0
+  n21 -->|"implements"| n27
+  %% e21: edge#124;implements#124;provider:TestClock#124;service:Clock#124;Clock#124;0#124;0
+  n22 -->|"implements"| n26
+  %% e22: edge#124;implements#124;provider:TestScheduler#124;service:Scheduler#124;Scheduler#124;0#124;0
+  n23 -->|"implements"| n32
+  %% e23: edge#124;implements#124;provider:TestSync#124;service:Sync#124;Sync#124;0#124;0
+  n24 -->|"implements"| n33
+  %% e24: edge#124;materializes#124;expression:function:main:202:run#124;provider-value:expression:function:main:202:run#124;Users#124;202#124;3
+  n5 -->|"materializes"| n11
+  %% e25: edge#124;materializes#124;expression:function:main:228:run#124;provider-value:expression:function:main:228:run#124;Users#124;228#124;3
+  n6 -->|"materializes"| n12
+  %% e26: edge#124;originates#124;provider-recipe:function:main:171#124;provider:Configured#124;#124;171#124;10
+  n10 -->|"originates"| n14
+  %% e27: edge#124;originates#124;provider-value:expression:function:main:202:run#124;provider-recipe:function:main:171#124;#124;202#124;3
+  n11 -->|"originates"| n10
+  %% e28: edge#124;originates#124;provider-value:expression:function:main:228:run#124;provider-recipe:function:main:171#124;#124;228#124;3
+  n12 -->|"originates"| n10
+  %% e29: edge#124;provides#124;expression:expression:function:main:261:run:277:provide#124;provider-value:expression:function:main:202:run#124;Users#124;277#124;7
+  n3 -->|"provides"| n11
+  %% e30: edge#124;requires#124;expression:expression:expression:function:main:261:run:277:provide:271:call#124;service:Users#124;Users#124;271#124;3
+  n0 -->|"requires"| n34

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -108,6 +109,53 @@ func printJSON(v any) error {
 	return encoder.Encode(v)
 }
 
+// graphError maps a graph refusal to its exit class: a malformed request is an
+// invalid invocation (exit 2); a refusal about the checked source is exit 1.
+// Both print the same CODE: message text MCP returns.
+func graphError(err error) error {
+	var refusal *compiler.GraphRefusal
+	if errors.As(err, &refusal) && refusal.Invocation() {
+		return usageError{message: refusal.Error()}
+	}
+	return err
+}
+
+// graphUsage lists the graph view options from the table MCP also advertises.
+func graphUsage() string {
+	var b strings.Builder
+	b.WriteString("graph views: ef graph FILE [--target go|js]")
+	for _, option := range compiler.GraphOptions() {
+		value := strings.ToUpper(option.Field)
+		if len(option.Values) > 0 {
+			value = strings.Join(option.Values, "|")
+		}
+		fmt.Fprintf(&b, " [%s %s]", option.Flag, value)
+		if option.Repeatable {
+			b.WriteString("...")
+		}
+	}
+	b.WriteString("\nWithout view options, ef graph prints the frozen legacy dependency graph JSON.")
+	return b.String()
+}
+
+// printGraphView prints one selected GraphViewV1: compact JSON for json, or
+// exactly the rendering text MCP returns for mermaid and dot.
+func printGraphView(r *compiler.Result, request compiler.GraphRequest) error {
+	view, err := r.GraphView(request)
+	if err != nil {
+		return graphError(err)
+	}
+	payload, rendering, err := compiler.GraphViewPayload(view, request.Format)
+	if err != nil {
+		return graphError(err)
+	}
+	if rendering == nil {
+		return printProjectionJSON(payload)
+	}
+	_, err = io.WriteString(os.Stdout, rendering.Text)
+	return err
+}
+
 // Canonical projection accounting describes compact JSON before terminal LF.
 func printProjectionJSON(v any) error {
 	return json.NewEncoder(os.Stdout).Encode(v)
@@ -178,6 +226,9 @@ type options struct {
 	positional     []string
 	typeSelection  compiler.TypeSelection
 	lint           lintpacks.Selection
+	// graph holds graph view options exactly as the shared compiler admission
+	// receives them from MCP: strings, an integer depth and repeated lists.
+	graph map[string]any
 }
 
 func parseOptions(args []string) (options, error) {
@@ -226,6 +277,31 @@ func parseOptions(args []string) (options, error) {
 		case "--json":
 			opts.json = true
 		default:
+			if option, ok := compiler.GraphOptionField(args[i]); ok {
+				if i+1 == len(args) {
+					return opts, &compiler.GraphRefusal{Code: compiler.GraphRefusalInvocation, Message: args[i] + " requires a value"}
+				}
+				i++
+				if opts.graph == nil {
+					opts.graph = map[string]any{}
+				}
+				if option.Repeatable {
+					values, _ := opts.graph[option.Field].([]any)
+					opts.graph[option.Field] = append(values, args[i])
+					continue
+				}
+				if _, repeated := opts.graph[option.Field]; repeated {
+					return opts, &compiler.GraphRefusal{Code: compiler.GraphRefusalInvocation, Message: option.Flag + " may be given once"}
+				}
+				var value any = args[i]
+				if option.Field == "depth" {
+					if n, err := strconv.Atoi(args[i]); err == nil {
+						value = n
+					}
+				}
+				opts.graph[option.Field] = value
+				continue
+			}
 			if strings.HasPrefix(args[i], "-") {
 				return opts, fmt.Errorf("unknown option %s", args[i])
 			}
@@ -239,8 +315,9 @@ func parseOptions(args []string) (options, error) {
 }
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] [LINT] | lint FILE [--strict] [--target go|js] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go|js] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] [LINT] | lint FILE [--strict] [--target go|js] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] [GRAPH VIEW OPTIONS] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go|js] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
 		fmt.Println("type: ef type FILE (--symbol NAME | --offset BYTE | --definition TYPE_ID --revision REVISION) [--target go|js] [--json]")
+		fmt.Println(graphUsage())
 		return nil
 	}
 	if args[0] == "fmt" {
@@ -314,17 +391,18 @@ func command(args []string) error {
 		}
 		return command([]string{"--help"})
 	}
-	// diagnostics and lint report invalid invocations with exit 2, apart
-	// from failed policy (1).
+	opts, err := parseOptions(args[1:])
+	if err != nil {
+		if args[0] == "diagnostics" || args[0] == "lint" {
+			return invalidInvocation(err)
+		}
+		return graphError(err)
+	}
 	usage := func(err error) error {
 		if args[0] == "diagnostics" || args[0] == "lint" {
 			return invalidInvocation(err)
 		}
 		return err
-	}
-	opts, err := parseOptions(args[1:])
-	if err != nil {
-		return usage(err)
 	}
 	if len(opts.positional) == 0 {
 		return usage(fmt.Errorf("source file required"))
@@ -348,6 +426,17 @@ func command(args []string) error {
 	}
 	if args[0] != "type" && (opts.typeSelection.Symbol != "" || opts.typeSelection.Offset != nil || opts.typeSelection.Definition != "" || opts.typeSelection.ExpectedRevision != "") {
 		return usage(fmt.Errorf("type selection flags are only supported by type"))
+	}
+	if len(opts.graph) > 0 && args[0] != "graph" {
+		return usage(fmt.Errorf("graph view options are only supported by graph"))
+	}
+	var graphRequest *compiler.GraphRequest
+	if len(opts.graph) > 0 {
+		request, err := compiler.ParseGraphRequest(opts.graph)
+		if err != nil {
+			return graphError(err)
+		}
+		graphRequest = &request
 	}
 	if opts.output != "" && args[0] != "build" {
 		return usage(fmt.Errorf("-o is only supported by build"))
@@ -411,6 +500,9 @@ func command(args []string) error {
 		}
 		return nil
 	case "graph":
+		if graphRequest != nil {
+			return printGraphView(r, *graphRequest)
+		}
 		graph, err := r.Graph()
 		if err != nil {
 			return err

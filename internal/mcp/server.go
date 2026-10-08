@@ -73,6 +73,9 @@ type arguments struct {
 	Offset           int    `json:"offset"`
 	OffsetPresent    bool
 	Definition       string
+	// Graph holds project.graph view options for the shared compiler
+	// admission; CLI flags build the same map.
+	Graph map[string]any
 }
 type callParams struct {
 	Name      string          `json:"name"`
@@ -430,6 +433,10 @@ func tools() []tool {
 		},
 		"additionalProperties": false,
 	}
+	graphSchema := schema(false)
+	for field, property := range compiler.GraphOptionSchema() {
+		graphSchema["properties"].(map[string]any)[field] = property
+	}
 	annotations := map[string]bool{"readOnlyHint": true, "destructiveHint": false, "openWorldHint": false}
 	return []tool{
 		{"project.describe", "Compiler capabilities, supported target, and guardrail limits", map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}, annotations},
@@ -437,7 +444,7 @@ func tools() []tool {
 		{"project.check", "Check one file; return revision, bounded diagnostics, and timings", schema(false), annotations},
 		{"project.diagnostics", "Return compiler and semantic lint diagnostics with byte spans and UTF-16 ranges", lintSchema, annotations},
 		{"project.tests", "Discover checked test contracts; reports live-host requirement without executing", schema(false), annotations},
-		{"project.graph", "Static service, provider, constructor and effect dependency graph with incoming dependents", schema(false), annotations},
+		{"project.graph", "Static dependency graph; with kind or format, one selected GraphViewV1 (dependency, layers or application) as json, mermaid or dot", graphSchema, annotations},
 		{"project.lint", "Type-aware advice over checked source; strict mode fails on warnings", lintSchema, annotations},
 		{"lint.rules", "Stable lint codes, severity and rationale", map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}, annotations},
 		{"code.typeAt", "Checked local expression type and executed rows at a byte anchor", querySchema, annotations},
@@ -789,6 +796,14 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 			},
 		}, nil
 	}
+	var graphRequest *compiler.GraphRequest
+	if name == "project.graph" && len(args.Graph) > 0 {
+		request, err := compiler.ParseGraphRequest(args.Graph)
+		if err != nil {
+			return nil, err
+		}
+		graphRequest = &request
+	}
 	var snapshot compiler.SourceSnapshot
 	if name == "project.diagnostics" || name == "project.lint" {
 		uri, err := compiler.FileURI(filepath.Join(root, args.File))
@@ -843,6 +858,14 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 			return nil, err
 		}
 		return response, nil
+	}
+	if name == "project.graph" && graphRequest != nil {
+		view, err := r.GraphView(*graphRequest)
+		if err != nil {
+			return nil, err
+		}
+		payload, _, err := compiler.GraphViewPayload(view, graphRequest.Format)
+		return payload, err
 	}
 	if name == "project.graph" {
 		graph, err := r.Graph()
@@ -974,6 +997,13 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 		}
 	}
 	for key, value := range fields {
+		if name == "project.graph" && compiler.IsGraphOptionField(key) {
+			if args.Graph == nil {
+				args.Graph = map[string]any{}
+			}
+			args.Graph[key] = value
+			continue
+		}
 		if key == "strict" && (name == "project.lint" || name == "project.diagnostics") {
 			flag, ok := value.(bool)
 			if !ok {

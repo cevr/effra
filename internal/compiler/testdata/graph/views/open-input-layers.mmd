@@ -1,0 +1,46 @@
+flowchart LR
+%% effra graph view effra-graph:layers:389f90b3e3d1a08706b5552cb82a7a69
+%% n0: layer-input#124;layer:module:file:Accounts#124;Store
+%% n1: layer:module:file:Accounts
+%% n2: layer:module:file:Accounts:binding:Account:288
+%% n3: layer:module:file:App
+%% n4: layer:module:file:Fixture
+%% n5: layer:module:file:Fixture:replace:416
+%% n6: layer:module:file:Shared
+%% n7: layer:module:file:Shared:binding:Store:327
+  n0["layer-input: Store"]
+  n1["layer: Accounts"]
+  n2["layer-binding: Account"]
+  n3["layer: App"]
+  n4["layer: Fixture"]
+  n5["layer-replacement: replace Store"]
+  n6["layer: Shared"]
+  n7["layer-binding: Store"]
+  %% e0: edge#124;consumes-input#124;layer:module:file:Accounts:binding:Account:288#124;layer-input#37;7Clayer:module:file:Accounts#37;7CStore#124;288
+  n2 -->|"consumes-input"| n0
+  %% e1: edge#124;depends-on#124;layer:module:file:Accounts:binding:Account:288#124;layer:module:file:Shared:binding:Store:327#124;layer:module:file:App
+  n2 -->|"depends-on"| n7
+  %% e2: edge#124;depends-on#124;layer:module:file:Accounts:binding:Account:288#124;layer:module:file:Shared:binding:Store:327#124;layer:module:file:Fixture
+  n2 -->|"depends-on"| n7
+  %% e3: edge#124;merges#124;layer:module:file:App#124;layer:module:file:Accounts#124;378
+  n3 -->|"merges"| n1
+  %% e4: edge#124;merges#124;layer:module:file:App#124;layer:module:file:Shared#124;364
+  n3 -->|"merges"| n6
+  %% e5: edge#124;merges#124;layer:module:file:Fixture#124;layer:module:file:App#124;405
+  n4 -->|"merges"| n3
+  %% e6: edge#124;replaces#124;layer:module:file:Fixture:replace:416#124;layer:module:file:Shared:binding:Store:327#124;layer:module:file:Fixture
+  n5 -->|"replaces"| n7
+  %% e7: edge#124;requires-input#124;layer:module:file:Accounts#124;layer-input#37;7Clayer:module:file:Accounts#37;7CStore
+  n1 -->|"requires-input"| n0
+  %% e8: edge#124;selects#124;layer:module:file:Accounts#124;layer:module:file:Accounts:binding:Account:288
+  n1 -->|"selects"| n2
+  %% e9: edge#124;selects#124;layer:module:file:App#124;layer:module:file:Accounts:binding:Account:288
+  n3 -->|"selects"| n2
+  %% e10: edge#124;selects#124;layer:module:file:App#124;layer:module:file:Shared:binding:Store:327
+  n3 -->|"selects"| n7
+  %% e11: edge#124;selects#124;layer:module:file:Fixture#124;layer:module:file:Accounts:binding:Account:288
+  n4 -->|"selects"| n2
+  %% e12: edge#124;selects#124;layer:module:file:Fixture#124;layer:module:file:Shared:binding:Store:327
+  n4 -->|"selects"| n7
+  %% e13: edge#124;selects#124;layer:module:file:Shared#124;layer:module:file:Shared:binding:Store:327
+  n6 -->|"selects"| n7

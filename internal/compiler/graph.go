@@ -48,75 +48,58 @@ type providerBinding struct {
 	recipe bool
 }
 
-// Graph describes lexical construction and declared dependency edges. It is not
-// a runtime allocation graph or a claim about execution order or layer sharing.
-func (r *Result) Graph() (*DependencyGraph, error) {
-	if !r.Checked {
-		return nil, fmt.Errorf("dependency graphs require checked source")
-	}
-	const maxGraphNodes = 1000
-	const maxGraphEdges = 2000
-	if len(r.checkedServices)+len(r.checkedProviders)+len(r.Symbols) > maxGraphNodes {
-		return nil, fmt.Errorf("dependency graph exceeds %d nodes; use selected inspection", maxGraphNodes)
-	}
-	g := &DependencyGraph{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Nodes: []GraphNode{}, Edges: []GraphEdge{}, Limitations: []string{"single-file static graph; includes deferred recipe construction, not execution order", "checked static layers share selected nodes within each provision; ordinary provider recipes have explicit value identities without general memoized acquisition", "source layer effect factories, startup effects and dynamic plans are unsupported", "node IDs containing offsets are scoped to the semantic revision"}}
-	g.ProducerIdentity, g.Sources = r.ProducerIdentity, append([]SourceInfo{}, r.Sources...)
-	g.ProducerMetadata = r.producerMetadata
-	g.BundledBindings = append([]BundledBinding{}, r.BundledBindings...)
-	g.BundledInterfaces = append([]BundledInterfaceInfo{}, r.BundledInterfaces...)
-	g.Layers = append([]LayerPlan{}, r.Layers...)
+const maxGraphNodes = 1000
+const maxGraphEdges = 2000
+
+// dependencyContract is the unprojected contract of one dependency fact.
+// Projection is the expensive, budgeted part of publication, so the walker
+// hands it to its sink instead of projecting every fact it visits.
+type dependencyContract struct {
+	checked *checkedExpression
+	// value is the contract the compatibility graph publishes. For functions
+	// it is the symbol's whole-source publication, which a source over the
+	// publication budget truncates; selected views project checked instead.
+	value *ValueType
+	// materialized marks a provider value produced by `run`: it is reusable
+	// and has no unresolved row of its own.
+	materialized bool
+}
+
+// dependencyFactSink receives the dependency facts of one checked file in
+// traversal order. A sink returning false stops the walk.
+type dependencyFactSink interface {
+	node(id, kind, name string, span Span, contract dependencyContract) bool
+	source(id, source string)
+	edge(GraphEdge) bool
+}
+
+// walkDependencyFacts is the single owner of the static dependency fact
+// family: lexical construction, declared requirements, provision boundaries
+// and calls. The legacy graph and every graph view serialize these facts;
+// neither re-derives them.
+func (r *Result) walkDependencyFacts(sink dependencyFactSink) {
 	nodes := map[string]bool{}
-	var graphErr error
-	metadataBytes := 0
-	project := func(checked checkedExpression) ValueType {
-		base := r.projector.projectCheckedBase(checked)
-		if graphErr != nil {
-			return base
-		}
-		if _, err := r.projector.checkedCompatibilitySize(checked, base, r.projectionLimits().CompatibilityBytes-metadataBytes); err != nil {
-			graphErr = err
-			return base
-		}
-		return r.projector.projectChecked(checked)
-	}
-	add := func(id, kind, name string, span Span, contract *ValueType) {
-		if graphErr != nil {
+	stopped := false
+	add := func(id, kind, name string, span Span, contract dependencyContract) {
+		if stopped {
 			return
 		}
-		if !nodes[id] {
-			if len(g.Nodes) >= maxGraphNodes {
-				graphErr = fmt.Errorf("dependency graph exceeds %d nodes", maxGraphNodes)
-				return
-			}
-			wire := GraphNode{ID: id, Kind: kind, Name: name, Span: span, Contract: contract}
-			size, err := encodedSize(wire, r.projectionLimits().CompatibilityBytes-metadataBytes)
-			metadataBytes += size
-			if err != nil {
-				graphErr = err
-				return
-			}
-			nodes[id] = true
-			g.Nodes = append(g.Nodes, GraphNode{ID: id, Kind: kind, Name: name, Span: span, Contract: contract})
+		if !sink.node(id, kind, name, span, contract) {
+			stopped = true
+			return
 		}
+		nodes[id] = true
 	}
 	edge := func(from, to, kind, service string, span Span) {
-		if graphErr != nil {
-			return
+		if !stopped && !sink.edge(GraphEdge{from, to, kind, service, span}) {
+			stopped = true
 		}
-		if len(g.Edges) >= maxGraphEdges {
-			graphErr = fmt.Errorf("dependency graph exceeds %d edges", maxGraphEdges)
-			return
-		}
-		g.Edges = append(g.Edges, GraphEdge{from, to, kind, service, span})
 	}
 	requires := func(from, requirement string, span Span, source string) {
 		if parameter, abstract := r.projector.rowDefinitions[requirement]; abstract {
-			add(requirement, "row-parameter", parameter.Name, parameter.Span, nil)
-			for i := range g.Nodes {
-				if g.Nodes[i].ID == requirement {
-					g.Nodes[i].Source = source
-					break
-				}
+			add(requirement, "row-parameter", parameter.Name, parameter.Span, dependencyContract{})
+			if !stopped {
+				sink.source(requirement, source)
 			}
 			edge(from, requirement, "requires", "", span)
 		} else {
@@ -130,7 +113,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	slices.Sort(serviceNames)
 	for _, name := range serviceNames {
 		s := r.checkedServices[name]
-		add("service:"+s.Name, "service", s.Name, s.Span, nil)
+		add("service:"+s.Name, "service", s.Name, s.Span, dependencyContract{})
 	}
 	providerNames := make([]string, 0, len(r.checkedProviders))
 	for name := range r.checkedProviders {
@@ -139,10 +122,10 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	slices.Sort(providerNames)
 	for _, name := range providerNames {
 		p := r.checkedProviders[name]
-		var constructor *ValueType
+		var constructor dependencyContract
 		if providerConstructed(p) {
-			contract := project(r.checkedProviderRoots[p])
-			constructor = &contract
+			root := r.checkedProviderRoots[p]
+			constructor.checked = &root
 		}
 		add("provider:"+p.Name, "provider", p.Name, p.Span, constructor)
 		edge("provider:"+p.Name, "service:"+p.Service, "implements", p.Service, p.Span)
@@ -151,30 +134,30 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		}
 	}
 	for _, s := range r.Symbols {
-		t := s.Contract
-		add("function:"+s.Name, "function", s.Name, s.Span, &t)
-		if len(g.Nodes) > 0 {
-			g.Nodes[len(g.Nodes)-1].Source = s.Source
+		contract := s.Contract
+		declared := r.checkedSymbols[s.Identity].contract
+		add("function:"+s.Name, "function", s.Name, s.Span, dependencyContract{value: &contract, checked: &declared})
+		if !stopped {
+			sink.source("function:"+s.Name, s.Source)
 		}
 		for _, req := range s.Contract.Services {
 			requires("function:"+s.Name, req, s.Span, s.Source)
 		}
 	}
 	for _, plan := range r.Layers {
-		add(plan.ID, "layer-plan", plan.Name, plan.Span, nil)
+		add(plan.ID, "layer-plan", plan.Name, plan.Span, dependencyContract{})
 	}
 	providerOrigins := map[*Expr]providerBinding{}
 	var block func(*Block, string, map[string]providerBinding)
 	var expr func(*Expr, string, map[string]providerBinding) string
 	expr = func(e *Expr, owner string, locals map[string]providerBinding) string {
-		if e == nil || graphErr != nil {
+		if e == nil || stopped {
 			return ""
 		}
 		id := owner
 		if e.Type.Effect || e.Kind == "run" || e.Kind == "scope" || e.Kind == "fork" {
 			id = fmt.Sprintf("expression:%s:%d:%s", owner, e.Span.Offset, e.Kind)
-			t := project(e.checked)
-			add(id, e.Kind, e.Name, e.Span, &t)
+			add(id, e.Kind, e.Name, e.Span, dependencyContract{checked: &e.checked})
 			edge(owner, id, "contains", "", e.Span)
 			for _, req := range e.Type.Services {
 				requires(id, req, e.Span, "source:user")
@@ -196,8 +179,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		block(e.Else, id, cloneStringMap(locals))
 		if e.Kind == "call" && e.Text == "provider-constructor" {
 			recipe := fmt.Sprintf("provider-recipe:%s:%d", owner, e.Span.Offset)
-			t := project(e.checked)
-			add(recipe, "provider-recipe", e.Left.Name, e.Span, &t)
+			add(recipe, "provider-recipe", e.Left.Name, e.Span, dependencyContract{checked: &e.checked})
 			providerOrigins[e] = providerBinding{id: recipe, recipe: true}
 			edge(id, recipe, "constructs", e.Left.Name, e.Span)
 			edge(recipe, "provider:"+e.Left.Name, "originates", "", e.Span)
@@ -205,14 +187,10 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		if e.Kind == "run" && e.Type.Type.Kind == "provider" {
 			if recipe, ok := providerOrigin(e.Left, locals, providerOrigins, nodes); ok && recipe.recipe {
 				provider := "provider-value:" + id
-				t := project(e.checked)
 				// The value materialized by `run` is reusable and has no
 				// unresolved row of its own. Each run gets its own identity,
 				// even when it executes the same lazy constructor recipe.
-				t.Effect = false
-				t.Errors = nil
-				t.Services = nil
-				add(provider, "provider-value", e.Type.Type.Name, e.Span, &t)
+				add(provider, "provider-value", e.Type.Type.Name, e.Span, dependencyContract{checked: &e.checked, materialized: true})
 				providerOrigins[e] = providerBinding{id: provider}
 				edge(id, provider, "materializes", e.Type.Type.Name, e.Span)
 				edge(provider, recipe.id, "originates", "", e.Span)
@@ -224,8 +202,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			provider := binding.id
 			if !ok {
 				provider = fmt.Sprintf("provider-value:%s:%d", owner, e.Right.Span.Offset)
-				t := project(e.Right.checked)
-				add(provider, "provider-value", e.Right.Name, e.Right.Span, &t)
+				add(provider, "provider-value", e.Right.Name, e.Right.Span, dependencyContract{checked: &e.Right.checked})
 			}
 			edge(id, provider, "provides", e.Name, e.Span)
 		}
@@ -278,18 +255,121 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	for _, p := range r.Program.Providers {
 		for _, f := range p.Methods {
 			id := "provider-method:" + p.Name + "." + f.Name
-			t := project(r.checkedFunctions[f].contract)
-			add(id, "provider-method", p.Name+"."+f.Name, f.Span, &t)
+			contract := r.checkedFunctions[f].contract
+			add(id, "provider-method", p.Name+"."+f.Name, f.Span, dependencyContract{checked: &contract})
 			edge("provider:"+p.Name, id, "contains", "", f.Span)
 			block(f.Body, id, map[string]providerBinding{})
 		}
 	}
-	if graphErr != nil {
-		return nil, graphErr
+}
+
+// legacyGraphSink is the compatibility serialization of the dependency facts:
+// the frozen schema-7 `ef graph` result with its whole-file node, edge and
+// compatibility-metadata budgets charged in traversal order.
+type legacyGraphSink struct {
+	r             *Result
+	g             *DependencyGraph
+	nodes         map[string]bool
+	metadataBytes int
+	err           error
+}
+
+func (s *legacyGraphSink) project(contract dependencyContract) (*ValueType, error) {
+	switch {
+	case contract.value != nil:
+		t := *contract.value
+		return &t, nil
+	case contract.checked != nil:
+		checked := *contract.checked
+		base := s.r.projector.projectCheckedBase(checked)
+		if _, err := s.r.projector.checkedCompatibilitySize(checked, base, s.r.projectionLimits().CompatibilityBytes-s.metadataBytes); err != nil {
+			return nil, err
+		}
+		t := s.r.projector.projectChecked(checked)
+		if contract.materialized {
+			t.Effect = false
+			t.Errors = nil
+			t.Services = nil
+		}
+		return &t, nil
+	}
+	return nil, nil
+}
+
+func (s *legacyGraphSink) node(id, kind, name string, span Span, contract dependencyContract) bool {
+	if s.err != nil {
+		return false
+	}
+	projected, err := s.project(contract)
+	if err != nil {
+		s.err = err
+		return false
+	}
+	if s.nodes[id] {
+		return true
+	}
+	if len(s.g.Nodes) >= maxGraphNodes {
+		s.err = fmt.Errorf("dependency graph exceeds %d nodes", maxGraphNodes)
+		return false
+	}
+	wire := GraphNode{ID: id, Kind: kind, Name: name, Span: span, Contract: projected}
+	size, err := encodedSize(wire, s.r.projectionLimits().CompatibilityBytes-s.metadataBytes)
+	s.metadataBytes += size
+	if err != nil {
+		s.err = err
+		return false
+	}
+	s.nodes[id] = true
+	s.g.Nodes = append(s.g.Nodes, wire)
+	return true
+}
+
+func (s *legacyGraphSink) source(id, source string) {
+	for i := len(s.g.Nodes) - 1; i >= 0; i-- {
+		if s.g.Nodes[i].ID == id {
+			s.g.Nodes[i].Source = source
+			return
+		}
+	}
+}
+
+func (s *legacyGraphSink) edge(relationship GraphEdge) bool {
+	if s.err != nil {
+		return false
+	}
+	if len(s.g.Edges) >= maxGraphEdges {
+		s.err = fmt.Errorf("dependency graph exceeds %d edges", maxGraphEdges)
+		return false
+	}
+	s.g.Edges = append(s.g.Edges, relationship)
+	return true
+}
+
+// Graph describes lexical construction and declared dependency edges. It is not
+// a runtime allocation graph or a claim about execution order or layer sharing.
+// It is the frozen legacy serialization; GraphView publishes selected views of
+// the same facts.
+func (r *Result) Graph() (*DependencyGraph, error) {
+	if !r.Checked {
+		return nil, fmt.Errorf("dependency graphs require checked source")
+	}
+	if len(r.checkedServices)+len(r.checkedProviders)+len(r.Symbols) > maxGraphNodes {
+		return nil, fmt.Errorf("dependency graph exceeds %d nodes; use selected inspection", maxGraphNodes)
+	}
+	g := &DependencyGraph{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Nodes: []GraphNode{}, Edges: []GraphEdge{}, Limitations: []string{"single-file static graph; includes deferred recipe construction, not execution order", "checked static layers share selected nodes within each provision; ordinary provider recipes have explicit value identities without general memoized acquisition", "source layer effect factories, startup effects and dynamic plans are unsupported", "node IDs containing offsets are scoped to the semantic revision"}}
+	g.ProducerIdentity, g.Sources = r.ProducerIdentity, append([]SourceInfo{}, r.Sources...)
+	g.ProducerMetadata = r.producerMetadata
+	g.BundledBindings = append([]BundledBinding{}, r.BundledBindings...)
+	g.BundledInterfaces = append([]BundledInterfaceInfo{}, r.BundledInterfaces...)
+	g.Layers = append([]LayerPlan{}, r.Layers...)
+	sink := &legacyGraphSink{r: r, g: g, nodes: map[string]bool{}}
+	r.walkDependencyFacts(sink)
+	if sink.err != nil {
+		return nil, sink.err
 	}
 	incoming := map[string][]string{}
 	for _, relationship := range g.Edges {
-		if nodes[relationship.To] {
+		if sink.nodes[relationship.To] {
 			incoming[relationship.To] = append(incoming[relationship.To], relationship.From)
 		}
 	}
@@ -313,17 +393,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 			contracts = append(contracts, *node.Contract)
 		}
 	}
-	for _, layer := range g.Layers {
-		for _, node := range layer.Nodes {
-			contracts = append(contracts, node.Constructor)
-			for _, parameter := range node.Parameters {
-				contracts = append(contracts, ValueType{Type: parameter.TypeRef})
-			}
-			for _, argument := range node.Arguments {
-				contracts = append(contracts, argument.Type)
-			}
-		}
-	}
+	contracts = append(contracts, layerPlanContracts(g.Layers)...)
 	projection := r.ProjectValues(contracts)
 	if !projection.Complete {
 		return nil, fmt.Errorf("type projection unavailable: %s", projection.Error)
@@ -343,6 +413,29 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 		}
 	}
 	return g, nil
+}
+
+// layerPlanContracts lists the canonical roots a layer plan publishes:
+// effective constructors, configuration parameters and argument types.
+func layerPlanContracts(plans []LayerPlan) []ValueType {
+	contracts := []ValueType{}
+	for _, layer := range plans {
+		for _, node := range layer.Nodes {
+			contracts = append(contracts, layerNodeContracts(node)...)
+		}
+	}
+	return contracts
+}
+
+func layerNodeContracts(node LayerNode) []ValueType {
+	contracts := []ValueType{node.Constructor}
+	for _, parameter := range node.Parameters {
+		contracts = append(contracts, ValueType{Type: parameter.TypeRef})
+	}
+	for _, argument := range node.Arguments {
+		contracts = append(contracts, argument.Type)
+	}
+	return contracts
 }
 
 func cloneStringMap(values map[string]providerBinding) map[string]providerBinding {

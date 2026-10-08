@@ -25,18 +25,19 @@ func efCodecEncode(codec *er.Codec,tag string,value any)efExit[string]{encoded,e
 // codecOperation retains what one executed direction needs: its plan, the
 // nominal declarations the plan's adapters construct, the codec runtime
 // module and the lowering helpers.
-func (p *applicationPlanner) codecOperation(e *Expr, owner string) {
+func (p *applicationPlanner) codecOperation(e *Expr, owner applicationOrigin) {
 	if e.codec == nil || e.codec.plan == nil {
 		p.err = fmt.Errorf("application codec operation at offset %d has no checked plan", e.Span.Offset)
 		return
 	}
 	plan := e.codec.plan
 	if p.require(RequiresCodecPlan, plan.ID, owner, "codec-"+e.Text) {
+		planOrigin := applicationOrigin{RequiresCodecPlan, plan.ID}
 		for _, node := range plan.Nodes {
-			p.typeID(node.typeID, plan.ID)
+			p.typeID(node.typeID, planOrigin)
 		}
 	}
-	p.runtimeModule(rt.RuntimeModuleCodec, plan.ID, "codec-plan")
+	p.runtimeModule(rt.RuntimeModuleCodec, applicationOrigin{RequiresCodecPlan, plan.ID}, "codec-plan")
 	p.helper(codecLoweringHelper, owner)
 }
 

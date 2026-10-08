@@ -1,0 +1,88 @@
+flowchart LR
+%% effra graph view effra-graph:application:87cf08ec327112e3e12b6613c63d2635
+%% n0: retained#124;declaration#124;error:module:file:module:Missing
+%% n1: retained#124;function#124;function:module:file:module:greeting
+%% n2: retained#124;function#124;function:module:file:module:test_greeting
+%% n3: retained#124;function#124;function:module:file:module:test_owned_child
+%% n4: retained#124;function#124;function:module:file:module:test_recovery
+%% n5: retained#124;helper#124;catch
+%% n6: retained#124;helper#124;fiber.join
+%% n7: retained#124;helper#124;fork
+%% n8: retained#124;helper#124;scope
+%% n9: retained#124;operation#124;function:module:file:service:Assert:check
+%% n10: retained#124;operation#124;function:module:file:service:Assert:equalText
+%% n11: retained#124;operation#124;function:module:file:service:Directory:name
+%% n12: retained#124;provider-method#124;function:module:file:provider:FixtureDirectory:name
+%% n13: retained#124;provider#124;provider:module:file:Assertions
+%% n14: retained#124;provider#124;provider:module:file:FixtureDirectory
+%% n15: retained#124;provider#124;provider:module:file:TestClock
+%% n16: retained#124;provider#124;provider:module:file:TestScheduler
+%% n17: retained#124;provider#124;provider:module:file:TestSync
+%% n18: retained#124;runtime-module#124;core
+%% n19: retained#124;runtime-module#124;sync
+%% n20: retained#124;service#124;service:module:file:Assert
+%% n21: retained#124;service#124;service:module:file:Clock
+%% n22: retained#124;service#124;service:module:file:Directory
+%% n23: retained#124;service#124;service:module:file:Scheduler
+%% n24: retained#124;service#124;service:module:file:Sync
+  n0["declaration: error:module:file:module:Missing"]
+  n1["function: function:module:file:module:greeting"]
+  n2["function: function:module:file:module:test_greeting"]
+  n3["function: function:module:file:module:test_owned_child"]
+  n4["function: function:module:file:module:test_recovery"]
+  n5["helper: catch"]
+  n6["helper: fiber.join"]
+  n7["helper: fork"]
+  n8["helper: scope"]
+  n9["operation: function:module:file:service:Assert:check"]
+  n10["operation: function:module:file:service:Assert:equalText"]
+  n11["operation: function:module:file:service:Directory:name"]
+  n12["provider-method: function:module:file:provider:FixtureDirectory:name"]
+  n13["provider: provider:module:file:Assertions"]
+  n14["provider: provider:module:file:FixtureDirectory"]
+  n15["provider: provider:module:file:TestClock"]
+  n16["provider: provider:module:file:TestScheduler"]
+  n17["provider: provider:module:file:TestSync"]
+  n18["runtime-module: core"]
+  n19["runtime-module: sync"]
+  n20["service: service:module:file:Assert"]
+  n21["service: service:module:file:Clock"]
+  n22["service: service:module:file:Directory"]
+  n23["service: service:module:file:Scheduler"]
+  n24["service: service:module:file:Sync"]
+  %% e0: edge#124;retains#124;retained#37;7Cfunction#37;7Cfunction:module:file:module:greeting#124;retained#37;7Coperation#37;7Cfunction:module:file:service:Directory:name
+  n1 -->|"operation-call"| n11
+  %% e1: edge#124;retains#124;retained#37;7Cfunction#37;7Cfunction:module:file:module:test_greeting#124;retained#37;7Cfunction#37;7Cfunction:module:file:module:greeting
+  n2 -->|"call"| n1
+  %% e2: edge#124;retains#124;retained#37;7Cfunction#37;7Cfunction:module:file:module:test_greeting#124;retained#37;7Coperation#37;7Cfunction:module:file:service:Assert:equalText
+  n2 -->|"operation-call"| n10
+  %% e3: edge#124;retains#124;retained#37;7Cfunction#37;7Cfunction:module:file:module:test_greeting#124;retained#37;7Cprovider#37;7Cprovider:module:file:FixtureDirectory
+  n2 -->|"provider-value"| n14
+  %% e4: edge#124;retains#124;retained#37;7Cfunction#37;7Cfunction:module:file:module:test_greeting#124;retained#37;7Cservice#37;7Cservice:module:file:Directory
+  n2 -->|"provision"| n22
+  %% e5: edge#124;retains#124;retained#37;7Cfunction#37;7Cfunction:module:file:module:test_owned_child#124;retained#37;7Chelper#37;7Cfiber.join
+  n3 -->|"lowering"| n6
+  %% e6: edge#124;retains#124;retained#37;7Cfunction#37;7Cfunction:module:file:module:test_owned_child#124;retained#37;7Chelper#37;7Cfork
+  n3 -->|"lowering"| n7
+  %% e7: edge#124;retains#124;retained#37;7Cfunction#37;7Cfunction:module:file:module:test_owned_child#124;retained#37;7Chelper#37;7Cscope
+  n3 -->|"lowering"| n8
+  %% e8: edge#124;retains#124;retained#37;7Cfunction#37;7Cfunction:module:file:module:test_owned_child#124;retained#37;7Coperation#37;7Cfunction:module:file:service:Assert:check
+  n3 -->|"operation-call"| n9
+  %% e9: edge#124;retains#124;retained#37;7Cfunction#37;7Cfunction:module:file:module:test_recovery#124;retained#37;7Chelper#37;7Ccatch
+  n4 -->|"lowering"| n5
+  %% e10: edge#124;retains#124;retained#37;7Coperation#37;7Cfunction:module:file:service:Assert:equalText#124;retained#37;7Cservice#37;7Cservice:module:file:Assert
+  n10 -->|"operation"| n20
+  %% e11: edge#124;retains#124;retained#37;7Cprovider#37;7Cprovider:module:file:FixtureDirectory#124;retained#37;7Cprovider-method#37;7Cfunction:module:file:provider:FixtureDirectory:name
+  n14 -->|"provider-method"| n12
+  %% e12: edge#124;retains#124;retained#37;7Cprovider#37;7Cprovider:module:file:TestClock#124;retained#37;7Cservice#37;7Cservice:module:file:Clock
+  n15 -->|"implements"| n21
+  %% e13: edge#124;retains#124;retained#37;7Cprovider#37;7Cprovider:module:file:TestScheduler#124;retained#37;7Cservice#37;7Cservice:module:file:Scheduler
+  n16 -->|"implements"| n23
+  %% e14: edge#124;retains#124;retained#37;7Cprovider#37;7Cprovider:module:file:TestSync#124;retained#37;7Cruntime-module#37;7Csync
+  n17 -->|"provider-runtime"| n19
+  %% e15: edge#124;retains#124;retained#37;7Cprovider#37;7Cprovider:module:file:TestSync#124;retained#37;7Cservice#37;7Cservice:module:file:Sync
+  n17 -->|"implements"| n24
+  %% e16: edge#124;retains#124;retained#37;7Cprovider-method#37;7Cfunction:module:file:provider:FixtureDirectory:name#124;retained#37;7Cdeclaration#37;7Cerror:module:file:module:Missing
+  n12 -->|"fail"| n0
+  %% e17: edge#124;runtime-requires#124;retained#37;7Cruntime-module#37;7Csync#124;retained#37;7Cruntime-module#37;7Ccore
+  n19 -->|"runtime-requires"| n18

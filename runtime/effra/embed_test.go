@@ -352,3 +352,42 @@ func TestRuntimeModuleClosureFollowsCatalogDependencies(t *testing.T) {
 		}
 	}
 }
+
+// ModuleDependencies publishes the catalog's own direct edges: closing them
+// reproduces SelectModules, and callers cannot mutate the catalog.
+func TestRuntimeModuleDependenciesAreTheCatalogEdges(t *testing.T) {
+	if _, err := ModuleDependencies(RuntimeModule("unknown")); err == nil {
+		t.Fatal("unknown module dependencies were not refused")
+	}
+	for module := range runtimeModuleCatalog {
+		dependencies, err := ModuleDependencies(module)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(dependencies, append([]RuntimeModule{}, runtimeModuleCatalog[module].dependencies...)) {
+			t.Fatalf("%s dependencies %v differ from the catalog", module, dependencies)
+		}
+		closed := map[RuntimeModule]bool{module: true}
+		queue := []RuntimeModule{module}
+		for len(queue) > 0 {
+			next, _ := ModuleDependencies(queue[0])
+			queue = queue[1:]
+			for _, dependency := range next {
+				if !closed[dependency] {
+					closed[dependency] = true
+					queue = append(queue, dependency)
+				}
+			}
+		}
+		selected, err := SelectModules(module)
+		if err != nil || len(selected) != len(closed) {
+			t.Fatalf("%s edge closure %v disagrees with selection %v", module, closed, selected)
+		}
+		if len(dependencies) > 0 {
+			dependencies[0] = RuntimeModule("mutated")
+			if again, _ := ModuleDependencies(module); again[0] == "mutated" {
+				t.Fatal("ModuleDependencies exposed the catalog")
+			}
+		}
+	}
+}

@@ -151,6 +151,17 @@ func SelectModules(roots ...RuntimeModule) ([]RuntimeModule, error) {
 	return modules, nil
 }
 
+// ModuleDependencies returns a copy of module's declared direct catalog
+// dependencies, so inspection tools show the catalog's own edges instead of
+// re-deriving them.
+func ModuleDependencies(module RuntimeModule) ([]RuntimeModule, error) {
+	spec, ok := runtimeModuleCatalog[module]
+	if !ok {
+		return nil, fmt.Errorf("unknown runtime module %q", module)
+	}
+	return append([]RuntimeModule{}, spec.dependencies...), nil
+}
+
 // SelectSources returns a fresh source snapshot for the transitive closure of
 // roots. An empty root set selects no files; it never means all runtime files.
 func SelectSources(roots ...RuntimeModule) (map[string][]byte, error) {

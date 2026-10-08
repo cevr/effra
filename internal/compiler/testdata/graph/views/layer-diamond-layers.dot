@@ -1,0 +1,35 @@
+digraph "effra-graph:layers:349f3e28def679f0b6a45551ac72d714" {
+  rankdir=LR;
+  n0 [label="layer: AccountDomain", id="layer:module:file:AccountDomain"];
+  n1 [label="layer-binding: Accounts", id="layer:module:file:AccountDomain:binding:Accounts:575"];
+  n2 [label="layer: App", id="layer:module:file:App"];
+  n3 [label="layer: InvoiceDomain", id="layer:module:file:InvoiceDomain"];
+  n4 [label="layer-binding: Invoice", id="layer:module:file:InvoiceDomain:binding:Invoice:637"];
+  n5 [label="layer: Shared", id="layer:module:file:Shared"];
+  n6 [label="layer-binding: Database", id="layer:module:file:Shared:binding:Database:512"];
+  n7 [label="layer: TestApp", id="layer:module:file:TestApp"];
+  n8 [label="layer-replacement: replace Database", id="layer:module:file:TestApp:replace:766"];
+  n1 -> n6 [label="depends-on", id="edge|depends-on|layer:module:file:AccountDomain:binding:Accounts:575|layer:module:file:Shared:binding:Database:512|layer:module:file:AccountDomain", class="e0"];
+  n1 -> n6 [label="depends-on", id="edge|depends-on|layer:module:file:AccountDomain:binding:Accounts:575|layer:module:file:Shared:binding:Database:512|layer:module:file:App", class="e1"];
+  n1 -> n6 [label="depends-on", id="edge|depends-on|layer:module:file:AccountDomain:binding:Accounts:575|layer:module:file:Shared:binding:Database:512|layer:module:file:TestApp", class="e2"];
+  n4 -> n6 [label="depends-on", id="edge|depends-on|layer:module:file:InvoiceDomain:binding:Invoice:637|layer:module:file:Shared:binding:Database:512|layer:module:file:App", class="e3"];
+  n4 -> n6 [label="depends-on", id="edge|depends-on|layer:module:file:InvoiceDomain:binding:Invoice:637|layer:module:file:Shared:binding:Database:512|layer:module:file:InvoiceDomain", class="e4"];
+  n4 -> n6 [label="depends-on", id="edge|depends-on|layer:module:file:InvoiceDomain:binding:Invoice:637|layer:module:file:Shared:binding:Database:512|layer:module:file:TestApp", class="e5"];
+  n0 -> n5 [label="merges", id="edge|merges|layer:module:file:AccountDomain|layer:module:file:Shared|561", class="e6"];
+  n2 -> n0 [label="merges", id="edge|merges|layer:module:file:App|layer:module:file:AccountDomain|702", class="e7"];
+  n2 -> n3 [label="merges", id="edge|merges|layer:module:file:App|layer:module:file:InvoiceDomain|723", class="e8"];
+  n3 -> n5 [label="merges", id="edge|merges|layer:module:file:InvoiceDomain|layer:module:file:Shared|623", class="e9"];
+  n7 -> n2 [label="merges", id="edge|merges|layer:module:file:TestApp|layer:module:file:App|755", class="e10"];
+  n8 -> n6 [label="replaces", id="edge|replaces|layer:module:file:TestApp:replace:766|layer:module:file:Shared:binding:Database:512|layer:module:file:TestApp", class="e11"];
+  n0 -> n1 [label="selects", id="edge|selects|layer:module:file:AccountDomain|layer:module:file:AccountDomain:binding:Accounts:575", class="e12"];
+  n0 -> n6 [label="selects", id="edge|selects|layer:module:file:AccountDomain|layer:module:file:Shared:binding:Database:512", class="e13"];
+  n2 -> n1 [label="selects", id="edge|selects|layer:module:file:App|layer:module:file:AccountDomain:binding:Accounts:575", class="e14"];
+  n2 -> n4 [label="selects", id="edge|selects|layer:module:file:App|layer:module:file:InvoiceDomain:binding:Invoice:637", class="e15"];
+  n2 -> n6 [label="selects", id="edge|selects|layer:module:file:App|layer:module:file:Shared:binding:Database:512", class="e16"];
+  n3 -> n4 [label="selects", id="edge|selects|layer:module:file:InvoiceDomain|layer:module:file:InvoiceDomain:binding:Invoice:637", class="e17"];
+  n3 -> n6 [label="selects", id="edge|selects|layer:module:file:InvoiceDomain|layer:module:file:Shared:binding:Database:512", class="e18"];
+  n5 -> n6 [label="selects", id="edge|selects|layer:module:file:Shared|layer:module:file:Shared:binding:Database:512", class="e19"];
+  n7 -> n1 [label="selects", id="edge|selects|layer:module:file:TestApp|layer:module:file:AccountDomain:binding:Accounts:575", class="e20"];
+  n7 -> n4 [label="selects", id="edge|selects|layer:module:file:TestApp|layer:module:file:InvoiceDomain:binding:Invoice:637", class="e21"];
+  n7 -> n6 [label="selects", id="edge|selects|layer:module:file:TestApp|layer:module:file:Shared:binding:Database:512", class="e22"];
+}

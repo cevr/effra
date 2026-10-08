@@ -13,7 +13,7 @@ The compiler's checked model supplies CLI and MCP answers. These are default cap
 | `ef explain FILE SYMBOL` | `code.explain` | Local contract contributions |
 | `ef query FILE BYTE_OFFSET` | `code.typeAt` | Expression kind, type, and executed failure/requirement rows |
 | `ef type FILE --symbol NAME / --offset BYTE / --definition ID` | `code.type` | Selected declaration, lexical binding/use, expression, or canonical definition |
-| `ef graph FILE` | `project.graph` | Dependencies, providers, calls and provision boundaries |
+| `ef graph FILE` | `project.graph` | Dependencies, providers, calls and provision boundaries; with view options, one selected [graph view](#graph-views) |
 | `ef test FILE` | `project.tests` discovers cases | CLI executes; MCP remains read-only |
 | `ef fmt FILE... [--check] [--json]` / `ef fmt --stdin` | `code.format` | Canonical syntax-only formatting; CLI writes atomically, MCP returns a full-text preview and never writes |
 
@@ -145,7 +145,42 @@ For `examples/workflow.ef`, `welcome` requires `Directory`; `DemoDirectory` impl
 
 This is a single-file static composition graph, including deferred calls. It does not establish execution order or runtime allocations. Provider construction is explicit and non-memoized: a reused value is one graph identity, while repeated runs of one recipe are distinct values. Fallible acquisition, lifecycle-safe arbitrary capture, general sharing keys and cycle paths will extend this model when implemented. Expression IDs contain offsets and are scoped to the revision.
 
-CLI and MCP limit graphs to 1,000 nodes and 2,000 edges; larger graphs fail explicitly. The legacy `project.lint` response keeps its separate bounded diagnostic arrays and truncation flags. Full CLI diagnostic reports remain available.
+CLI and MCP limit graphs to 1,000 nodes and 2,000 edges; larger graphs fail explicitly. Selected [graph views](#graph-views) answer focused questions about larger sources. The legacy `project.lint` response keeps its separate bounded diagnostic arrays and truncation flags. Full CLI diagnostic reports remain available.
+
+## Graph views
+
+`ef graph FILE` without view options prints the legacy dependency graph above, byte for byte; `project.graph` without view options returns the same object. Any view option selects one GraphViewV1 instead. Making views the default would be a deliberate graph wire-version transition, not a silent change:
+
+```sh
+ef graph examples/layers.ef --kind layers --format mermaid
+ef graph examples/workflow.ef --focus function:welcome --depth 2 --direction outgoing
+ef graph examples/layers.ef --kind application --mode build --format dot
+```
+
+| CLI flag | MCP argument | Values |
+| --- | --- | --- |
+| `--kind` | `kind` | `dependency` (default), `layers`, `application` |
+| `--format` | `format` | `json` (default), `mermaid`, `dot` |
+| `--focus` | `focus` | exact node ID of the selected kind |
+| `--depth` | `depth` | 0–64 hops from the focus; default 1; requires focus |
+| `--direction` | `direction` | `outgoing`, `incoming`, `both` (default); requires focus |
+| `--edge-kind` (repeatable) | `edgeKinds` | relations to traverse and publish |
+| `--collapse` (repeatable) | `collapse` | containment roots whose interior is hidden |
+| `--mode` | `mode` | `build` (default) or `test`; application only |
+
+A view has the Stately Graph shape: `{id, mode: "directed", initialNodeId, nodes, edges, data}` with typed `node` and `edge` entries, optional `parentId`, `sourcePort` and `targetPort`, and every Effra fact under `data.effra`. Its `id` names the kind and normalized selection within the qualified snapshot; it is not a freshness proof. Edge IDs are injective tuples of relation, endpoints and occurrence (a source position or a layer plan), so parallel relations stay distinct and IDs never depend on traversal order. `data.effra` carries the producer and snapshot qualification, the normalized selection, completeness, limits, usage, limitations, and the view's own closed `sources`, `types`, `rows` and `declarations` tables. Every published reference resolves inside the view.
+
+Kinds:
+
+- `dependency` serializes the same checked facts as the legacy graph through one fact walker; contracts project only for published nodes.
+- `layers` shows each checked layer plan, one canonical node per shared binding, per-plan `selects` edges with visibility, effective implementation, replacement sites and configuration, `depends-on` and `merges` edges, and open construction inputs as explicit `layer-input` boundary nodes with `requires-input` and `consumes-input` edges.
+- `application` shows a native Go application plan for `build` or `test`: one node per retained requirement, typed provider-operation origins, hidden selected layer nodes with their effective replacements, and the runtime catalog closure as `runtime-requires` edges. Each requirement shows only its first checked witness (`retains`). It plans without building, emitting or running code, and it makes no JavaScript retention claim; the JavaScript target is refused.
+
+Selection runs over fact topology before any contract or type table is materialized, so a focused view succeeds on a source whose whole graph exceeds the limits. Completeness reports exact fact totals, the selected and published counts, and the depth frontier. Collapse hides the interior members of a containment group (`contains` for dependency, `retains` for application; layers share bindings and refuse collapse). Members with a selected relation outside the group stay visible as children of the root, and every published edge is an original fact edge, so collapse never creates a path. Hidden members are listed on the root.
+
+Mermaid (`flowchart LR`) and DOT (`digraph`, not `strict`) render the one selected view with positional renderer IDs, the canonical IDs as comments or `id` attributes, and subgraphs or clusters for `parentId`. Mermaid labels pass only letters, digits, space and inert punctuation, and encode every other character as an entity. DOT doubles backslashes, escapes quotes, and makes control and bidi characters visible. MCP returns the view for `json`, and `{view, rendering}` for diagrams, where `rendering.text` is exactly the CLI stdout. Renderings are lossy (`rendering.losses`): `json` is the complete interchange.
+
+Refusals carry a stable `EFGRAPH_*` code and the same `CODE: message` text on CLI stderr and in the MCP tool error. A malformed request (unknown kind or format, an incompatible flag, an invalid depth or mode) exits 2; a refusal about the checked source exits 1. These include unchecked source, an unknown focus, an unsupported target or plan, and the node, edge, work, depth, type, render and response limits. MCP `expectedRevision` and `expectedProducer` refuse stale snapshots as they do for every other tool, and the next queued request still completes. `machine`, `actor` and `html` are refused as not yet available. A refusal never returns a partial view. The response budget charges the payload as MCP transmits it, once structured and once as escaped text, so the CLI refuses the same oversized request.
 
 ## Next capabilities
 
