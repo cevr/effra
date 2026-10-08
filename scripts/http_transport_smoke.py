@@ -29,12 +29,20 @@ def start(target, scratch):
         command = [host, str(hosted)]
     process = subprocess.Popen(command, cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ)
-    assert selector.select(timeout=10), target + " server did not bind"
-    line = process.stdout.readline().strip()
-    selector.close()
-    assert line.startswith("listening http://127.0.0.1:"), line
-    host, port = line.removeprefix("listening http://").rsplit(":", 1)
+    try:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        assert selector.select(timeout=10), target + " server did not bind"
+        line = process.stdout.readline().strip()
+        assert line.startswith("listening http://127.0.0.1:"), line
+        host, port = line.removeprefix("listening http://").rsplit(":", 1)
+    except BaseException:
+        # A server that is alive but never reports readiness must not outlive
+        # the failed start.
+        process.kill()
+        process.communicate()
+        raise
+    finally:
+        selector.close()
     return process, (host, int(port))
 
 
