@@ -27,7 +27,8 @@ var (
 
 // jsClosureDefects is a static oracle over one emitted module: it imports
 // exactly the `effect` names it uses, and every generated name it references
-// is bound in the module. Parameters (__ef_local_, __ef_capture_) are bound
+// is bound in the module. Parameters (__ef_local_, __ef_capture_ and the
+// __ef_argument_ arrow parameters of a reordered-label call adapter) are bound
 // by their functions.
 func jsClosureDefects(js string) []string {
 	defects := []string{}
@@ -52,7 +53,7 @@ func jsClosureDefects(js string) []string {
 		bound[match[1]] = true
 	}
 	for _, name := range jsGeneratedName.FindAllString(js, -1) {
-		if !bound[name] && !strings.HasPrefix(name, "__ef_local_") && !strings.HasPrefix(name, "__ef_capture_") {
+		if !bound[name] && !strings.HasPrefix(name, "__ef_local_") && !strings.HasPrefix(name, "__ef_capture_") && !strings.HasPrefix(name, "__ef_argument_") {
 			defects = append(defects, "unbound "+name)
 			bound[name] = true
 		}

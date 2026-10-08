@@ -9,10 +9,10 @@ effect fn greet(name: string) -> string {
     "Hello, " + name
 }
 effect fn main() -> string {
-    // wrap(shout("ada"), open: "<", close: ">")
+    // wrap(shout("ada"), close: ">", open: "<"): labels may be reordered
     let framed = "ada"
         |> shout()
-        |> wrap(open: "<", close: ">")
+        |> wrap(close: ">", open: "<")
     // run greet(framed): run takes the whole chain
     let greeting = run framed |> greet()
     // shout(run greet("lin")): parentheses pipe the result of a run
