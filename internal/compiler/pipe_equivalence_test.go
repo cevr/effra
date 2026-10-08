@@ -316,11 +316,19 @@ func compilePipeOutput(t *testing.T, source, dir string, transform func(*Program
 	return out
 }
 
-// sourcePositions matches the only emitted text that names a source position:
-// a layer binding's node id ends in its byte offset, and the Go node spec
-// carries the location. Rewriting a call to pipe form moves every later
-// declaration by a few bytes, which is a property of the edited text and not
-// of the desugaring, so these positions are masked before comparing.
+// sourcePositions matches the only emitted text that names a source position,
+// and is anchored to exactly these two patterns:
+//
+//   - `binding:<Name>:<digits>`, the byte offset that ends a layer binding's
+//     node id in both targets (the digits are masked, the name is not);
+//   - `Offset: N, Length: N, Line: N, Column: N`, the source location in a Go
+//     NodeSpec.
+//
+// Rewriting a call to pipe form moves every later declaration by a few bytes,
+// which is a property of the edited text and not of the desugaring, so these
+// positions are masked before comparing. Offset-derived layer ids are unstable
+// under any unrelated edit (backlog LID1); the mask records that, it does not
+// excuse it. TestPipeDifferentialMaskIsAnchored proves nothing else is masked.
 var sourcePositions = regexp.MustCompile(`(binding:\w+:)\d+|Offset: \d+, Length: \d+, Line: \d+, Column: \d+`)
 
 // afterFirstLine drops the source-revision line and masks source positions.
@@ -418,4 +426,65 @@ func TestPipeEquivalenceCatchesAppendingTheSubjectLast(t *testing.T) {
 		t.Fatal("the differential accepted a last-argument desugaring")
 	}
 	t.Logf("%d programs differ under the wrong desugaring", len(result.mismatches))
+}
+
+// The mask may hide the two position patterns and nothing else: changing any
+// byte outside the masked digits must change the compared text, and changing
+// a masked digit must not.
+func TestPipeDifferentialMaskIsAnchored(t *testing.T) {
+	for _, target := range []string{"js", "go"} {
+		source, err := os.ReadFile(filepath.Join("..", "..", "examples", "layers.ef"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := emittedProgram(t, compileAt(string(source), target, filepath.Join("..", "..", "examples"), nil))
+		text = text[strings.IndexByte(text, '\n'):]
+		// The permitted mask is spelled out here, independently of the one
+		// under test, so widening that one is caught.
+		masks := regexp.MustCompile(`binding:\w+:\d+|Offset: \d+, Length: \d+, Line: \d+, Column: \d+`).FindAllStringIndex(text, -1)
+		if len(masks) == 0 {
+			t.Fatalf("%s: the program has no layer positions to mask", target)
+		}
+		maskedDigit := func(i int) bool {
+			if text[i] < '0' || text[i] > '9' {
+				return false
+			}
+			for _, m := range masks {
+				if i >= m[0] && i < m[1] {
+					match := text[m[0]:m[1]]
+					return !strings.HasPrefix(match, "binding:") || i > m[0]+strings.LastIndexByte(match, ':')
+				}
+			}
+			return false
+		}
+		nearMask := func(i int) bool {
+			for _, m := range masks {
+				if i >= m[0]-3 && i < m[1]+3 {
+					return true
+				}
+			}
+			return false
+		}
+		want := afterFirstLine("x" + text)
+		for i := 0; i < len(text); i++ {
+			if text[i] == '\n' {
+				continue
+			}
+			if i%11 != 0 && !maskedDigit(i) && !nearMask(i) {
+				continue
+			}
+			mutated := []byte(text)
+			if c := text[i]; c >= '0' && c <= '9' {
+				mutated[i] = '0' + (c-'0'+1)%10
+			} else {
+				mutated[i] = '~'
+			}
+			same := afterFirstLine("x"+string(mutated)) == want
+			if masked := maskedDigit(i); masked && !same {
+				t.Fatalf("%s: a masked digit at byte %d changed the compared text", target, i)
+			} else if !masked && same {
+				t.Fatalf("%s: changing byte %d (%q) went unnoticed by the differential", target, i, text[i])
+			}
+		}
+	}
 }
