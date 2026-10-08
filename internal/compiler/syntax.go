@@ -53,6 +53,9 @@ type parser struct {
 	// payloadBraces memoizes constructorBrace by brace token index.
 	payloadBraces map[int]bool
 	types         map[string]*sourceType
+	// lastPipe is the |> that ends the unparenthesised chain the most recent
+	// expr call returned, zero when that chain held no pipe.
+	lastPipe Span
 }
 type Param struct {
 	Name       string  `json:"name"`
@@ -350,6 +353,10 @@ type Expr struct {
 	// when every argument binds by position. Args stay in source order, which
 	// is also evaluation order.
 	ArgumentParameters []int `json:"-"`
+	// PipeSpan is the |> token of a call written `x |> f(...)`; Args[0] is x.
+	// Diagnostics read it for wording and anchors only: it never decides what
+	// is accepted, how a call is checked or what is emitted.
+	PipeSpan Span `json:"-"`
 }
 
 func lex(source string) ([]token, []Comment, []Diagnostic) {
@@ -459,7 +466,7 @@ func lex(source string) ([]token, []Comment, []Diagnostic) {
 			if err := json.Unmarshal([]byte(source[start:i]), &decoded); err != nil {
 				return nil, comments, []Diagnostic{{Code: "EF001", Message: "strings use JSON escapes", Span: Span{start, i - start, l, c}}}
 			}
-		} else if i+1 < len(source) && (source[i:i+2] == "->" || source[i:i+2] == "==" || source[i:i+2] == "=>") {
+		} else if i+1 < len(source) && (source[i:i+2] == "->" || source[i:i+2] == "|>" || source[i:i+2] == "==" || source[i:i+2] == "=>") {
 			i += 2
 		} else if strings.ContainsRune("{}():,;.+<>=|*[]", rune(ch)) {
 			i++
@@ -1105,6 +1112,10 @@ func (p *parser) expr(min int) *Expr {
 	}
 	start := p.take()
 	e := &Expr{Span: start.span}
+	// chainPipe is the |> token of the last pipe in this unparenthesised
+	// chain, zero when there is none. A pipe chain beside a binary operator is
+	// a syntax error, so `a + b |> f()` can never be read as `a + f(b)`.
+	var chainPipe Span
 	switch {
 	case (start.text == "fn" && p.anonymousCallableHead()) || (start.text == "effect" && p.peek().text == "fn"):
 		p.fail(start, "anonymous functions and closure captures are unsupported; declare a named module function")
@@ -1114,12 +1125,14 @@ func (p *parser) expr(min int) *Expr {
 	case start.text == "fork":
 		e.Kind = "fork"
 		e.Left = p.expr(3)
+		chainPipe = p.lastPipe
 	case start.kind == "integer":
 		e.Kind = "integer"
 		e.Text = start.text
 	case start.text == "run":
 		e.Kind = "run"
 		e.Left = p.expr(3)
+		chainPipe = p.lastPipe
 	case start.text == "if":
 		e.Kind = "if"
 		p.noConstruct++
@@ -1211,8 +1224,31 @@ func (p *parser) expr(min int) *Expr {
 	default:
 		p.fail(start, "expected expression")
 	}
+	// piped is the value on the left of a |> whose call has not been read yet.
+	// Until the call's argument list ends, the right side is a static name path
+	// with optional type arguments; the intrinsic method names are ordinary
+	// members there, so `x |> M.timeout(...)` is a plain call.
+	var piped *Expr
+	var pipeSpan Span
 	for {
 		e.Extent = p.extent(start.span)
+		if piped != nil {
+			if p.accept(".") {
+				m := p.memberName()
+				e = &Expr{Kind: "member", Name: m.text, Left: e, Span: m.span}
+				continue
+			}
+			if t := p.peek().text; t != "(" && t != "<" {
+				p.fail(p.peek(), "the right side of |> must be a call such as f(...)")
+			}
+		}
+		if p.peek().text == "|>" {
+			pipeSpan = p.take().span
+			chainPipe = pipeSpan
+			head := p.name()
+			piped, e = e, &Expr{Kind: "name", Name: head.text, Span: head.span}
+			continue
+		}
 		if (p.noConstruct == 0 || p.constructorBrace()) && p.peek().text == "{" && (e.Kind == "name" || e.Kind == "member") {
 			e = &Expr{Kind: "construct", Left: e, Fields: p.fieldValues(), Span: e.Span}
 			continue
@@ -1264,6 +1300,9 @@ func (p *parser) expr(min int) *Expr {
 				}
 			}
 			p.noConstruct = protected
+			if piped != nil {
+				call.Args, call.PipeSpan, piped = append([]*Expr{piped}, call.Args...), pipeSpan, nil
+			}
 			e = call
 			continue
 		}
@@ -1316,11 +1355,23 @@ func (p *parser) expr(min int) *Expr {
 		if precedence == 0 || precedence < min {
 			break
 		}
+		if chainPipe.Length > 0 {
+			p.failSpan(chainPipe, pipeBesideOperator(p.peek().text))
+		}
 		op := p.take()
-		e = &Expr{Kind: "binary", Name: op.text, Left: e, Right: p.expr(precedence + 1), Span: op.span}
+		right := p.expr(precedence + 1)
+		if p.lastPipe.Length > 0 {
+			p.failSpan(p.lastPipe, pipeBesideOperator(op.text))
+		}
+		e = &Expr{Kind: "binary", Name: op.text, Left: e, Right: right, Span: op.span}
 	}
 	e.Extent = p.extent(start.span)
+	p.lastPipe = chainPipe
 	return e
+}
+
+func pipeBesideOperator(op string) string {
+	return "a |> chain beside " + op + " is ambiguous; parenthesise: (a |> f()) " + op + " b or a " + op + " (b |> f())"
 }
 
 // An existing identifier named fn remains callable. The unsupported literal
