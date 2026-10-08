@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -146,4 +147,182 @@ func TestParenthesisedPipesBesideBinaryOperatorsAreAccepted(t *testing.T) {
 			t.Errorf("%s rejected: %+v", body, r.Diagnostics)
 		}
 	}
+}
+
+// assertPipeDiagnostics checks each diagnostic's message and the anchor token
+// found inside its unique context substring.
+func assertPipeDiagnostics(t *testing.T, source string, diagnostics []Diagnostic, want ...expectedDiagnostic) {
+	t.Helper()
+	if len(diagnostics) != len(want) {
+		t.Fatalf("diagnostics = %+v, want %d", diagnostics, len(want))
+	}
+	for i, expected := range want {
+		got := diagnostics[i]
+		if strings.Count(source, expected.context) != 1 || !strings.Contains(expected.context, expected.token) {
+			t.Fatalf("ambiguous context %q", expected.context)
+		}
+		offset := strings.Index(source, expected.context) + strings.Index(expected.context, expected.token)
+		if got.Message != expected.message || got.Span.Offset != offset || got.Span.Length != len(expected.token) {
+			t.Fatalf("diagnostic %d = %s %q at %d+%d (%q), want %q at %d+%d (%q)", i, got.Code, got.Message, got.Span.Offset, got.Span.Length, source[got.Span.Offset:got.Span.Offset+got.Span.Length], expected.message, offset, len(expected.token), expected.token)
+		}
+	}
+}
+
+func TestPipeRejectsAnythingButACallOnTheRight(t *testing.T) {
+	for _, test := range []struct {
+		name, body string
+		want       expectedDiagnostic
+	}{
+		{"bare name", `"x" |> shout`, expectedDiagnostic{"the right side of |> must be a call; write shout()", `|> shout }`, "shout"}},
+		{"bare path", `"x" |> Text.trim`, expectedDiagnostic{"the right side of |> must be a call; write Text.trim()", `Text.trim }`, "trim"}},
+		{"bare before operator", `("x" |> shout) + "y"`, expectedDiagnostic{"the right side of |> must be a call; write shout()", `|> shout)`, "shout"}},
+		{"bare in argument", `pair("x" |> shout, "y")`, expectedDiagnostic{"the right side of |> must be a call; write shout()", `|> shout,`, "shout"}},
+		{"parenthesised callee", `"x" |> (shout)()`, expectedDiagnostic{"|> takes a function or operation name followed by arguments", `(shout)`, "("}},
+		{"run operand", `"x" |> run shout()`, expectedDiagnostic{"|> takes a function or operation name followed by arguments", `run shout`, "run"}},
+		{"literal", `"x" |> 1()`, expectedDiagnostic{"|> takes a function or operation name followed by arguments", `1()`, "1"}},
+		{"nothing", `"x" |>`, expectedDiagnostic{"|> takes a function or operation name followed by arguments", `|> }`, "}"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source, r := pipeProbe(test.body)
+			if len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "EF002" {
+				t.Fatalf("diagnostics = %+v", r.Diagnostics)
+			}
+			assertPipeDiagnostics(t, source, r.Diagnostics, test.want)
+		})
+	}
+}
+
+// The checker may read PipeSpan to word and anchor a diagnostic.
+func TestPipeDiagnosticsNameThePipe(t *testing.T) {
+	for _, test := range []struct {
+		name, body string
+		want       []expectedDiagnostic
+	}{
+		{"no parameters", `"x" |> zero()`, []expectedDiagnostic{{"zero takes no parameters, so it cannot receive the piped value", `|> zero`, "|>"}}},
+		{"label names the first parameter", `"x" |> wrap(text: "t", open: "<", close: ">")`, []expectedDiagnostic{{"the piped value already binds parameter text; remove label text", `text: "t"`, "text"}}},
+		{"label names a later bound parameter", `"x" |> wrap("<", open: "o", close: ">")`, []expectedDiagnostic{{"argument label open names a parameter already bound by positional argument 2", `open: "o"`, "open"}}},
+		{"wrong type", `1 |> shout()`, []expectedDiagnostic{{"argument must be string", `1 |>`, "1"}}},
+		{"wrong type inside a chain", `"x" |> shout() |> wrap(1, ">") |> pair("y")`, []expectedDiagnostic{{"argument must be string", `1, ">"`, "1"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source := pipeDeclarations + "effect fn probe() -> string { " + test.body + " }\n"
+			r := CompileFor(source, "js")
+			assertPipeDiagnostics(t, source, r.Diagnostics, test.want...)
+		})
+	}
+}
+
+func TestPipeOfAWrongTypedStepAnchorsAtThePipe(t *testing.T) {
+	source := pipeDeclarations + "fn probe() -> string { \"x\" |> shout() |> wrap(\"<\", \">\") |> takesCard() }\nfn takesCard(card: Card) -> string { card.title }\n"
+	r := CompileFor(source, "js")
+	assertPipeDiagnostics(t, source, r.Diagnostics, expectedDiagnostic{"argument must be Card; piped from wrap(...): string", `|> takesCard`, "|>"})
+}
+
+func TestPipeIntoRunHintsAtParentheses(t *testing.T) {
+	source := pipeDeclarations + "effect fn probe() -> string { run load() |> shout() }\n"
+	r := CompileFor(source, "js")
+	if len(r.Diagnostics) != 2 {
+		t.Fatalf("diagnostics = %+v", r.Diagnostics)
+	}
+	const hint = "argument must be string; |> binds inside run, so to pipe the result write (run load(...)) |> shout()"
+	if got := r.Diagnostics[0]; got.Code != "EF106" || got.Message != hint {
+		t.Fatalf("first diagnostic = %+v, want EF106 %q", got, hint)
+	}
+	if got := r.Diagnostics[1]; got.Code != "EF105" || got.Message != "run requires an Effect value" {
+		t.Fatalf("second diagnostic = %+v", got)
+	}
+	// The parenthesised spelling is the repair the hint names.
+	repaired := pipeDeclarations + "effect fn probe() -> string { (run load()) |> shout() }\n"
+	if r := CompileFor(repaired, "js"); !r.Checked {
+		t.Fatalf("repaired source rejected: %+v", r.Diagnostics)
+	}
+}
+
+// clearPipeSpans zeroes PipeSpan on every call reachable through exported
+// program fields.
+func clearPipeSpans(program *Program) {
+	seen := map[uintptr]bool{}
+	var visit func(reflect.Value)
+	visit = func(v reflect.Value) {
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() || seen[v.Pointer()] {
+				return
+			}
+			seen[v.Pointer()] = true
+			if expr, ok := v.Interface().(*Expr); ok {
+				expr.PipeSpan = Span{}
+			}
+			visit(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				if v.Type().Field(i).IsExported() {
+					visit(v.Field(i))
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				visit(v.Index(i))
+			}
+		case reflect.Map:
+			for _, key := range v.MapKeys() {
+				visit(v.MapIndex(key))
+			}
+		}
+	}
+	visit(reflect.ValueOf(program))
+}
+
+// PipeSpan is for tooling: erasing it from every call leaves the accepted and
+// rejected programs, the diagnostic codes and the emitted bytes unchanged.
+func TestPipeSpanNeverDecidesCompilation(t *testing.T) {
+	bodies := []string{
+		`"x" |> shout()`,
+		`"x" |> wrap(close: ">", open: "<")`,
+		`"x" |> shout() |> wrap("<", ">") |> shout()`,
+		`"x" |> zero()`,
+		`"x" |> wrap(text: "t", open: "<", close: ">")`,
+		`1 |> shout()`,
+		`"x" |> shout() |> wrap("<", ">") |> takesCard()`,
+		`run load() |> shout()`,
+	}
+	for _, body := range bodies {
+		source := pipeDeclarations + "effect fn takesCard(card: Card) -> string { card.title }\neffect fn probe() -> string { " + body + " }\neffect fn main() -> void { }\n"
+		for _, target := range []string{"go", "js"} {
+			with := CompileAt(source, target, ".")
+			without := compileAt(source, target, ".", clearPipeSpans)
+			if with.Checked != without.Checked || len(with.Diagnostics) != len(without.Diagnostics) {
+				t.Fatalf("%s [%s]: checked %v/%v, diagnostics %+v / %+v", body, target, with.Checked, without.Checked, with.Diagnostics, without.Diagnostics)
+			}
+			for i := range with.Diagnostics {
+				if with.Diagnostics[i].Code != without.Diagnostics[i].Code {
+					t.Fatalf("%s [%s]: code %s became %s", body, target, with.Diagnostics[i].Code, without.Diagnostics[i].Code)
+				}
+			}
+			if !with.Checked {
+				continue
+			}
+			a, b := emittedProgram(t, with), emittedProgram(t, without)
+			if a != b {
+				t.Fatalf("%s [%s]: emitted bytes differ", body, target)
+			}
+		}
+	}
+}
+
+// emittedProgram returns the target output of a checked result.
+func emittedProgram(t *testing.T, r *Result) string {
+	t.Helper()
+	if r.Target == "js" {
+		text, _, err := r.Emit(true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return text
+	}
+	app, err := r.GoApplication(GoGenerationBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(app.Main)
 }

@@ -1239,13 +1239,16 @@ func (p *parser) expr(min int) *Expr {
 				continue
 			}
 			if t := p.peek().text; t != "(" && t != "<" {
-				p.fail(p.peek(), "the right side of |> must be a call such as f(...)")
+				p.failSpan(e.Span, "the right side of |> must be a call; write "+expressionName(e)+"()")
 			}
 		}
 		if p.peek().text == "|>" {
 			pipeSpan = p.take().span
 			chainPipe = pipeSpan
-			head := p.name()
+			head := p.take()
+			if head.kind != "name" || pipeHeadReserved[head.text] {
+				p.fail(head, "|> takes a function or operation name followed by arguments")
+			}
 			piped, e = e, &Expr{Kind: "name", Name: head.text, Span: head.span}
 			continue
 		}
@@ -1369,6 +1372,10 @@ func (p *parser) expr(min int) *Expr {
 	p.lastPipe = chainPipe
 	return e
 }
+
+// pipeHeadReserved are the words that start another expression form, so they
+// cannot name the function on the right of a |>.
+var pipeHeadReserved = map[string]bool{"run": true, "fork": true, "if": true, "match": true, "scope": true, "true": true, "false": true, "void": true}
 
 func pipeBesideOperator(op string) string {
 	return "a |> chain beside " + op + " is ambiguous; parenthesise: (a |> f()) " + op + " b or a " + op + " (b |> f())"

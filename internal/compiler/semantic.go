@@ -2143,6 +2143,13 @@ func CompileFor(source, target string) *Result {
 	return CompileAt(source, target, ".")
 }
 func CompileAt(source, target, dir string) *Result {
+	return compileAt(source, target, dir, nil)
+}
+
+// compileAt is CompileAt with a transform applied to the parsed program before
+// it is checked. Production callers pass none; tests use it to prove that a
+// parser-recorded annotation does not decide what compiles.
+func compileAt(source, target, dir string, transform func(*Program)) *Result {
 	start := time.Now()
 	hash := sha256.Sum256([]byte(source))
 	r := &Result{SchemaVersion: SemanticSchemaVersion, Revision: hex.EncodeToString(hash[:]), Target: target, Diagnostics: []Diagnostic{}, Symbols: []Symbol{}, TypeProjectionBudget: maxTypeProjectionNodes, TypeProjectionLimits: defaultProjectionLimits, facts: map[*Expr]ExpressionFacts{}}
@@ -2156,6 +2163,9 @@ func CompileAt(source, target, dir string) *Result {
 		r.Diagnostics = diagnostics
 		r.Timings.TotalMicros = time.Since(start).Microseconds()
 		return r
+	}
+	if transform != nil {
+		transform(program)
 	}
 	r.Program = program
 	r.lexical = captureOriginalSyntax(program)
@@ -2212,6 +2222,27 @@ func (c *checker) publishTypeNodes() {
 	c.result.TypeProjectionComplete = projection.Complete
 	c.result.TypeProjectionError = projection.Error
 }
+
+// pipedArgumentMismatch words the rejection of a piped value. The pipe fills
+// the first parameter, so a recipe that reached an ordinary parameter is most
+// likely a run the author meant to pipe past; a step of a longer chain is
+// anchored at its own |> so the failing step is the one marked. Only wording
+// and anchors depend on the pipe.
+func (c *checker) pipedArgumentMismatch(call, piped *Expr, value checkedExpression, message string) (string, Span) {
+	callee := expressionName(call.Left)
+	if value.isEffect() {
+		recipe := "..."
+		if piped.Kind == "call" {
+			recipe = expressionName(piped.Left) + "(...)"
+		}
+		return message + "; |> binds inside run, so to pipe the result write (run " + recipe + ") |> " + callee + "()", piped.Span
+	}
+	if piped.Kind == "call" {
+		return message + "; piped from " + expressionName(piped.Left) + "(...): " + c.displayTypeID(value.valueID()), call.PipeSpan
+	}
+	return message, piped.Span
+}
+
 func (c *checker) diagnostic(code, message string, span Span) {
 	if c.suppressDiagnostics {
 		return
@@ -4293,7 +4324,11 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 				callbackPolicies = append(callbackPolicies, policy)
 			}
 			if i < len(f.Params) && len(f.RowParameters) == 0 && len(f.TypeParameters) == 0 && !handlerArgument && (arg.isEffect() || !c.assignable(arg.valueID(), parameterIDs[i], 0)) {
-				c.diagnostic("EF106", "argument must be "+f.Params[i].Type, a.Span)
+				message, span := "argument must be "+f.Params[i].Type, a.Span
+				if source == 0 && e.PipeSpan.Length > 0 {
+					message, span = c.pipedArgumentMismatch(e, a, arg, message)
+				}
+				c.diagnostic("EF106", message, span)
 			}
 		}
 		// The application identity lists handler policies by parameter, however

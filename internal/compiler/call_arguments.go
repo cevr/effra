@@ -25,7 +25,11 @@ func (c *checker) bindCallArguments(e *Expr, params []Param, arity string, owner
 	order := make([]int, len(e.Args))
 	if len(e.Fields) == 0 {
 		if len(e.Args) != len(params) {
-			c.diagnostic("EF106", arity, e.Span)
+			if e.PipeSpan.Length > 0 && len(params) == 0 {
+				c.diagnostic("EF106", expressionName(e.Left)+" takes no parameters, so it cannot receive the piped value", e.PipeSpan)
+			} else {
+				c.diagnostic("EF106", arity, e.Span)
+			}
 		}
 		for i := range order {
 			order[i] = -1
@@ -71,6 +75,8 @@ func (c *checker) bindCallArguments(e *Expr, params []Param, arity string, owner
 		case bound[index] >= 0:
 			if _, previous := labels[e.Args[bound[index]]]; previous {
 				c.diagnostic("EF106", "duplicate argument label "+field.Name, field.Label)
+			} else if e.PipeSpan.Length > 0 && bound[index] == 0 {
+				c.diagnostic("EF106", "the piped value already binds parameter "+field.Name+"; remove label "+field.Name, field.Label)
 			} else {
 				c.diagnostic("EF106", "argument label "+field.Name+" names a parameter already bound by positional argument "+strconv.Itoa(bound[index]+1), field.Label)
 			}
