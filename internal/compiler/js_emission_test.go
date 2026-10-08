@@ -1,13 +1,19 @@
 package compiler
 
 import (
+	"bufio"
+	"bytes"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 var (
@@ -110,6 +116,74 @@ func runNode(t *testing.T, dir, file string) (string, error) {
 	return string(output), err
 }
 
+// runNodeServing runs a module that serves until interrupted: it waits for the
+// listening line, performs a fixed request exchange, sends SIGTERM and returns
+// a transcript of the listening line (port elided), the wire responses, the
+// remaining output and the exit status, so two modules compare by behavior.
+func runNodeServing(t *testing.T, dir, file string) (string, error) {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal("Node is required for JavaScript emission tests")
+	}
+	main, err := filepath.Abs(filepath.Join(dir, file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(node, "--preserve-symlinks", "--preserve-symlinks-main", main)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = command.Process.Kill() }()
+	lines := bufio.NewScanner(stdout)
+	if !lines.Scan() || !strings.HasPrefix(lines.Text(), "listening http://127.0.0.1:") {
+		t.Fatalf("%s did not report listening: %q\n%s", file, lines.Text(), stderr.String())
+	}
+	address := strings.TrimPrefix(lines.Text(), "listening http://")
+	var transcript strings.Builder
+	transcript.WriteString("listening\n")
+	for _, raw := range []string{
+		"GET /health HTTP/1.1\r\nHost: effra\r\nConnection: close\r\n\r\n",
+		"POST /echo HTTP/1.1\r\nHost: effra\r\nConnection: close\r\nContent-Type: application/octet-stream\r\nContent-Length: 4\r\n\r\nping",
+		"GET /missing HTTP/1.1\r\nHost: effra\r\nConnection: close\r\n\r\n",
+	} {
+		connection, err := net.DialTimeout("tcp", address, 5*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
+		_, _ = connection.Write([]byte(raw))
+		response, _ := io.ReadAll(connection)
+		connection.Close()
+		// The Date header is the only varying byte.
+		for _, line := range strings.Split(string(response), "\r\n") {
+			if !strings.HasPrefix(strings.ToLower(line), "date:") {
+				transcript.WriteString(line + "\n")
+			}
+		}
+	}
+	if err = command.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	rest, _ := io.ReadAll(stdout)
+	transcript.Write(rest)
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	select {
+	case err = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s did not exit after SIGTERM", file)
+	}
+	transcript.WriteString(stderr.String())
+	return transcript.String(), err
+}
+
 // Every JavaScript-capable authored example emits entry, library and test
 // modules that close over their own prelude and export exactly what their
 // declarations export.
@@ -167,11 +241,12 @@ func TestJSEntryBehavesLikeTheCompletePrelude(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// A transport example serves until interrupted. Its covering test is
-		// scripts/http_transport_smoke.py, run by scripts/gate.sh: it starts the
-		// example on Go and JS and fails when the example stops serving.
+		// A transport example serves until interrupted, so both modules are
+		// served for a bounded exchange and then interrupted; the transcript
+		// is compared like any other program's output.
+		run := runNode
 		if filepath.Base(path) == "http-transport.ef" {
-			continue
+			run = runNodeServing
 		}
 		r := CompileAt(string(source), "js", "../../examples")
 		if !r.Checked || r.Program.GoOnly || r.Entry() != nil {
@@ -188,8 +263,8 @@ func TestJSEntryBehavesLikeTheCompletePrelude(t *testing.T) {
 		complete := withCompletePrelude(library)
 		runner := entry[strings.LastIndex(entry, "const __ef_signal = new AbortController()"):]
 		dir := writeJSModule(t, map[string]string{"entry.mjs": entry, "complete.mjs": complete + runner})
-		pruned, prunedErr := runNode(t, dir, "entry.mjs")
-		full, fullErr := runNode(t, dir, "complete.mjs")
+		pruned, prunedErr := run(t, dir, "entry.mjs")
+		full, fullErr := run(t, dir, "complete.mjs")
 		if (prunedErr == nil) != (fullErr == nil) || pruned != full {
 			t.Fatalf("%s: pruned entry diverged\npruned (%v):\n%s\ncomplete (%v):\n%s", filepath.Base(path), prunedErr, pruned, fullErr, full)
 		}
