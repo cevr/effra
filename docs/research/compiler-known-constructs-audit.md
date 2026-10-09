@@ -174,7 +174,7 @@ Priorities: P1 means decide or fix before more code depends on it. P2 means fix 
 
 **1-P2.** Decided by D1.
 
-**1-P3 (P1 design gate).** Before #11 or #57 implements `Actor<P>`, choose one of two routes:
+**1-P3 (P1 design gate, map ticket T5).** Before #11 or #57 implements `Actor<P>`, choose one of two routes. T5 is decided first: the `Actor<P>` projection units of #11 and #57 depend on T5, and T5 does not wait for #11, #57 or #2 to complete.
 
 - A general mechanism any library can use, such as Gleam OTP's `Subject(msg)` (ordinary generics, no compiler projection). The item then becomes class 3.
 - Syntax for the parts the compiler must derive, for example a predeclared `actor P` handle type, a `spawn` form and a syntactic operation reference for `post`.
@@ -188,7 +188,7 @@ Elixir makes `receive` a special form (`elixir@91ee75bb` `lib/elixir/lib/kernel/
 Rows 12-14 move from SHRINK to KEEP as syntax. Row 15 stays UNDECIDED (see 1-G) and remains syntax meanwhile. This is a scoped Effra choice, not a claim that recovery must be syntax in every language:
 
 - Today the checker must know these forms, and the owner direction says such constructs are syntax.
-- Making recovery ordinary library needs a general mechanism that Effra currently defers. Koka's `try` (formerly `catch`) is an ordinary function over general effect-handler syntax and row-polymorphic effect types: `koka@9c55695d` `lib/std/core/exn.kk:54-56` defines `handle/try` by installing a `final ctl throw-exn` handler, `:58-60` keeps `catch` as a deprecated alias that calls `try`, and the compiler names neither (its one reference into this module is `error-pattern` for match failures, `src/Common/NamePrim.hs:317`). Effect's `catchTag` (`effect@460272d` `packages/effect/src/Effect.ts:2743`) and `provideService` (`Effect.ts:6317`) rely on TypeScript's type-level computation. Library recovery does not inherently require conditional types; Koka shows that handlers plus row polymorphism suffice. But Effra has neither general handlers nor user-visible row difference (row parameters cannot absorb an abstract row; EF125).
+- Making recovery ordinary library needs a general mechanism that Effra currently defers. Koka's `try` (formerly `catch`) is an ordinary function over general effect-handler syntax and row-polymorphic effect types: `koka@9c55695d` `lib/std/core/exn.kk:54-56` defines `handle/try` by installing a `final ctl throw-exn` handler, `:58-60` keeps `catch` as a deprecated alias that calls `try`, and the compiler names neither function. The module is not wholly ordinary: the compiler names its `exception` type, `exn` effect and `error-pattern` function (`src/Common/NamePrim.hs:315-317`) and special-cases `exn` in kind inference (`src/Type/Kind.hs:48`). Effect's `catchTag` (`effect@460272d` `packages/effect/src/Effect.ts:2743`) and `provideService` (`Effect.ts:6317`) rely on TypeScript's type-level computation. Library recovery does not inherently require conditional types; Koka shows that handlers plus row polymorphism suffice. But Effra has neither general handlers nor user-visible row difference (row parameters cannot absorb an abstract row; EF125).
 - A checked-error language without general handlers spells elimination as syntax: MoonBit's `raise`, `try`/`catch` and `noraise` (`moonbit-docs@8d9f3ba2` `error-handling.md:75,161`). Kotlin is not evidence, because its exceptions are unchecked. Elixir's `try` and `receive` special forms (`special_forms.ex:2343,2401`; "cannot be overridden by the developer", `special_forms.ex:7-8`) support the general pattern of fixed compiler-known forms, but they are not checked-row elimination.
 - If Effra later adopts general handlers or row difference, moving `.catch` into a library is a new decision under the "reconsidering a prior" tiebreak.
 
@@ -215,6 +215,23 @@ Rows 12-14 move from SHRINK to KEEP as syntax. Row 15 stays UNDECIDED (see 1-G) 
 
 Prior art: MoonBit core bodies such as `= "%arrayview.len"` (`core@e96ede8b` `builtin/arrayview.mbt:62`; 276 such bodies in `builtin/`); Go's SSA intrinsics for `math.sqrt` and `sync/atomic` (go1.27.0 `src/cmd/compile/internal/ssagen/intrinsics.go:739,1299`); Kotlin's `kotlin.coroutines.intrinsics`. MoonBit's `#callsite(autofill(loc))` on `fail` (`builtin/assert.mbt:35`) changes call checking, so it would be class 1 here.
 
+## Proposed map tickets
+
+These are proposals for the map owner. An edge "A blocks B" means B must not start the named unit before A is decided or done.
+
+| Ticket | Scope | Depends on | Blocks |
+| --- | --- | --- | --- |
+| T1 | Reserve the postfix words (D1); rewrite `pipe_test.go:429-448` as a negative control | — | — |
+| T2a | File/Latch ownership and admission without capability names (1-A) | #34, #65 | — |
+| T2b | Http as an ordinary bundled service; remove `emit_http.go` identity knowledge (1-B, 1-C) | #51, #15 | — |
+| T2c | Declared target capability and the test harness as an ordinary layer (1-E, 1-H) | #15 | — |
+| T3 | Predeclared `Option` (1-D) | #32 | — |
+| T4 | Derive profiles owned by the derive construct (1-F) | #49, #55 | — |
+| T5 | `Actor<P>` projection design gate (1-P3) | Design input only: the statecharts lane's machine decision spelling (1-P1), so a syntax route does not collide with it | The `Actor<P>` projection units of #11 and #57 |
+| T6 | Specify the predeclared `Foreign` protocol and reserved names; decide `Scheduler` with row 15 (1-G) | — | — |
+
+T5 does not depend on #11, #57 or #2 completing. 1-P1 itself is owned by the statecharts lane (#46, #2); this audit adds no ticket for it.
+
 ## Prior art summary
 
 | Source | Syntax for | Library-recognised identity | Lesson for Effra |
@@ -222,7 +239,7 @@ Prior art: MoonBit core bodies such as `= "%arrayview.len"` (`core@e96ede8b` `bu
 | Rust | `?`, `for`, `async`/`.await`, `match` | Lang items: library items marked `#[lang = "…"]` and listed in `language_item_table!` (`rust@69bccf03` `compiler/rustc_attr_ir/src/lang_items.rs:158-473`), including traits (`Try` :372, `Future` :268, `Drop` :193), functions (`Panic` :298 and other panic entry points), structs (`OwnedBox` :359, `Range` :428), the `Option` enum and its variants (:408-410), and trait methods (`FuturePoll` :403) | Rust keeps syntax for the constructs and uses lang items to connect that syntax to library code. Effra adopts the syntax half and rejects the library-recognition half. |
 | Go | `go`, `select`, `chan`, `<-`, `defer`, `map` | None. Predeclared `make`, `len`, `append`, `error`; SSA intrinsics for `math` and `sync/atomic` | Model for D3 and D4: language features are syntax or predeclared, libraries such as `context` and `sync` are ordinary, and intrinsics only swap implementations. |
 | Kotlin | `suspend` | `kotlin.coroutines.intrinsics`; `launch`, `async` and `CoroutineScope` are library | One syntax point (the CPS transform), primitives as intrinsics, the rest library. Its exceptions are unchecked, so they are not row-elimination evidence. |
-| Koka | `handler`, `with`, effect types | None for recovery: `try` (formerly `catch`) is an ordinary function over handlers (`koka@9c55695d` `lib/std/core/exn.kk:54-60`); the compiler does reference `error-pattern` in that module for match failures (`src/Type/Infer.hs:1738`) | Library recovery is possible with general handlers and row polymorphism, which Effra defers. |
+| Koka | `handler`, `with`, effect types | None for recovery: `try` (formerly `catch`) is an ordinary function over handlers (`koka@9c55695d` `lib/std/core/exn.kk:54-60`); the compiler does name that module's `exception`, `exn` and `error-pattern` (`src/Common/NamePrim.hs:315-317`, `src/Type/Kind.hs:48`) | Library recovery is possible with general handlers and row polymorphism, which Effra defers. |
 | Gleam | `use`, `let assert`, `case` | None in the stdlib; compiler-defined prelude (`Result`, `List`, `Nil`) | Compiler-known types live in a language prelude. `use` is one-to-one callback sugar, like the notation exception. |
 | Elixir/OTP | `Kernel.SpecialForms` (`case`, `cond`, `try`, `receive`, `for`, `with`, `fn`) | None. `\|>` is an ordinary `Kernel` macro (`kernel.ex:4509`); `send` and `spawn` delegate to BIFs | Special forms are fixed and documented as language. Actor messaging is library over intrinsics, apart from `receive`. |
 | MoonBit | `raise`, `try`/`catch`/`noraise`, `async`, `T?`, `derive(...)` | Builtin `Option`; `%` intrinsic bodies; `#callsite` attribute | Supports D1 for checked errors without handlers, 1-D (builtin absence) and D4 (intrinsics with declared signatures). |
