@@ -14,6 +14,9 @@ if [ -n "$tracked_pyc" ]; then
   exit 1
 fi
 python3 scripts/wayfinder.py check
+python3 scripts/wayfinder_migration.py --input-snapshot hosted-run-binding-2026-10-08 --check
+python3 -B scripts/test_wayfinder_migration.py
+python3 -B scripts/test_wayfinder_hosted_reconciliation.py
 python3 -B scripts/import_effect_conformance.py
 python3 -B scripts/test_import_effect_conformance.py
 python3 -B scripts/check_effect_conformance.py
