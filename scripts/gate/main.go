@@ -48,6 +48,11 @@ type Step struct {
 	// exactly these inputs. Nil means the step always runs (the tool owns its
 	// cache, or the step is cheaper than hashing).
 	Inputs *Inputs
+	// ToolEnv names executables the step's own cache cannot see, such as the
+	// JavaScript tools Go tests spawn. Their versions reach the step as one
+	// digest in EFFRA_TOOL_VERSIONS; a test that reads it keys Go's test
+	// cache on it.
+	ToolEnv []string
 }
 
 // Inputs declares everything a cached step's result depends on.
@@ -274,6 +279,13 @@ func (g *gate) execute(step *Step) *result {
 	command := exec.CommandContext(context.Background(), step.Argv[0], step.Argv[1:]...)
 	command.Dir = g.root
 	command.Env = stepEnvironment()
+	if len(step.ToolEnv) > 0 {
+		digest := sha256.New()
+		for _, tool := range step.ToolEnv {
+			fmt.Fprintf(digest, "%s\x00%s\x00", tool, g.toolVersion(tool))
+		}
+		command.Env = append(command.Env, "EFFRA_TOOL_VERSIONS="+hex.EncodeToString(digest.Sum(nil))[:16])
+	}
 	var output bytes.Buffer
 	command.Stdout = &output
 	command.Stderr = &output

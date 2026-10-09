@@ -13,6 +13,9 @@ import (
 // cache does not depend on dist/'s changing listing.
 func jsModuleDir(t *testing.T, prefix string) string {
 	t.Helper()
+	// The gate names the JavaScript tool versions here, so a cached pass
+	// never survives a Node, Bun or tsc upgrade.
+	_ = os.Getenv("EFFRA_TOOL_VERSIONS")
 	modules, err := filepath.Abs(filepath.Join("..", "..", "node_modules"))
 	if err != nil {
 		t.Fatal(err)

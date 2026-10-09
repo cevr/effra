@@ -25,6 +25,10 @@ const shardTargetSeconds = 12.0
 // budget: a shard that needs it is a defect to split or fix.
 const testTimeout = "-timeout=15m"
 
+// testTools are the executables Go tests spawn besides the Go toolchain,
+// whose binary and version Go's test cache already keys on.
+var testTools = []string{"node", "bun", "tsc", "git"}
+
 // gofmtDirectories are the Go trees the gate requires to be gofmt-clean.
 var gofmtDirectories = []string{"cmd", "internal", "runtime", "lint", "scripts/gate", "examples/go-interop", "examples/sdk", "examples/compare", "examples/hosttypes", "examples/lintpack"}
 
@@ -122,10 +126,10 @@ func gateSteps(root string) ([]*Step, error) {
 		selections := shardArgs(shard(names, measured, n))
 		for i, selection := range selections {
 			argv := append([]string{"go", "test", testTimeout}, selection...)
-			add(&Step{Name: fmt.Sprintf("go test %s [%d/%d]", shortPackage(root, pkg), i+1, len(selections)), Needs: []string{"go test build"}, Argv: append(argv, pkg)})
+			add(&Step{Name: fmt.Sprintf("go test %s [%d/%d]", shortPackage(root, pkg), i+1, len(selections)), Needs: []string{"go test build"}, Argv: append(argv, pkg), ToolEnv: testTools})
 		}
 	}
-	add(&Step{Name: "go test (other packages)", Needs: []string{"go test build"}, Argv: append([]string{"go", "test", testTimeout}, unsharded...)})
+	add(&Step{Name: "go test (other packages)", Needs: []string{"go test build"}, Argv: append([]string{"go", "test", testTimeout}, unsharded...), ToolEnv: testTools})
 	add(&Step{Name: "build bin/ef", Needs: []string{"go test build"}, Argv: []string{"go", "build", "-o", "bin/ef", "./cmd/ef"}})
 
 	examples, err := authoredExamples(root)
