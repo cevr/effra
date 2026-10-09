@@ -1,0 +1,52 @@
+// Authoritative pure counter domain; host state/events come from these factories.
+record CounterState {
+    count: i64
+}
+
+enum CounterEvent {
+    ClickedDecrement
+    ClickedIncrement
+    ClickedReset
+}
+
+fn initialCounter() -> CounterState {
+    CounterState {
+        count: 0
+    }
+}
+
+fn counterState(count: i64) -> CounterState {
+    CounterState {
+        count: count
+    }
+}
+
+fn clickedDecrement() -> CounterEvent {
+    CounterEvent.ClickedDecrement()
+}
+
+fn clickedIncrement() -> CounterEvent {
+    CounterEvent.ClickedIncrement()
+}
+
+fn clickedReset() -> CounterEvent {
+    CounterEvent.ClickedReset()
+}
+
+fn updateCounter(state: CounterState, event: CounterEvent) -> CounterState {
+    match event {
+        CounterEvent.ClickedDecrement => CounterState {
+            count: state.count - 1
+        }
+        CounterEvent.ClickedIncrement => CounterState {
+            count: state.count + 1
+        }
+        CounterEvent.ClickedReset => CounterState {
+            count: 0
+        }
+    }
+}
+
+fn counterCount(state: CounterState) -> i64 {
+    state.count
+}

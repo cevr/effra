@@ -9,10 +9,11 @@
     "check:capture": "node scripts/check-yield-capture.mjs",
     "check:dependencies": "node scripts/check-dependency-profile.mjs",
     "build:yield": "bun run check:capture && node vendor/solid-yield/scripts/build.mjs && tsc -p tsconfig.yield.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "bun run check:counter-domain && tsc --noEmit -p tsconfig.json",
     "check:setup": "bun run check:capture && bun run check:dependencies && bun run build:yield && bun run typecheck && bun run check:exports",
     "check:exports": "node --conditions=browser --conditions=production scripts/check-dependency-profile.mjs --built",
-    "check:references": "node scripts/check-references.mjs"
+    "check:references": "node scripts/check-references.mjs",
+    "check:counter-domain": "node scripts/check-counter-domain.mjs"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.1",

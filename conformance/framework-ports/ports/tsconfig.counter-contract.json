@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {}
+  },
+  "include": [],
+  "files": [
+    "tests/types/counter-positive.ts"
+  ],
+  "exclude": []
+}

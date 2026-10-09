@@ -28,6 +28,7 @@ const bunVersion = run("BUN_VERSION", "bun", ["--version"]).trim();
 assert.equal(bunVersion, "1.4.2", "references require Bun1.4.2");
 run("CAPTURE", process.execPath, ["scripts/check-yield-capture.mjs"]);
 run("DEPENDENCIES", process.execPath, ["scripts/check-dependency-profile.mjs"]);
+run("COUNTER_DOMAIN", process.execPath, ["scripts/check-counter-domain.mjs"]);
 run("VENDOR_NOEMIT", process.execPath, [compiler, "--noEmit", "-p", "tsconfig.yield.json"]);
 run("VENDOR_BUILD", process.execPath, ["vendor/solid-yield/scripts/build.mjs"]);
 run("VENDOR_DECLARATIONS", process.execPath, [compiler, "-p", "tsconfig.yield.json"]);

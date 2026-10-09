@@ -17,5 +17,10 @@
     "src/**/*.tsx",
     "tests/**/*.ts",
     "tests/**/*.tsx"
+  ],
+  "exclude": [
+    "tests/types/counter-number-negative.ts",
+    "tests/types/counter-state-negative.ts",
+    "tests/types/counter-event-negative.ts"
   ]
 }

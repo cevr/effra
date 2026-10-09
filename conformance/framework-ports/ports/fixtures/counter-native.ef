@@ -1,0 +1,34 @@
+// Appended after exact counter.ef bytes by the control runner, never copied arithmetic.
+// The native entry reports an unhandled failure by its tag alone, so each check
+// first records its label; the last label before AssertionFailed names the failed check.
+effect fn expectCounter(condition: bool, label: string) -> void raises { AssertionFailed } uses { Assert } {
+    run Console.log("COUNTER_CHECK=" + label).provide<Console>(Stdout)
+    run Assert.check(condition, label)
+}
+
+effect fn verifyCounter() -> void raises { AssertionFailed } uses { Assert } {
+    let initial = initialCounter()
+    run expectCounter(counterCount(initial) == 0, "CounterInitial: expected 0")
+    run Console.log("COUNTER_INITIAL_ZERO=0").provide<Console>(Stdout)
+    let incremented = updateCounter(initial, clickedIncrement())
+    run expectCounter(counterCount(incremented) == 1, "ClickedIncrement: expected 1")
+    let decremented = updateCounter(incremented, clickedDecrement())
+    run expectCounter(counterCount(decremented) == 0, "ClickedDecrement: expected 0")
+    let belowZero = updateCounter(decremented, clickedDecrement())
+    run expectCounter(counterCount(belowZero) == -1, "ClickedDecrement: expected -1")
+    let reset = updateCounter(belowZero, clickedReset())
+    run expectCounter(counterCount(reset) == 0, "ClickedReset: expected 0 from -1")
+    let oneAgain = updateCounter(reset, clickedIncrement())
+    run expectCounter(counterCount(oneAgain) == 1, "ClickedIncrement: expected 1 again")
+    let resetOne = updateCounter(oneAgain, clickedReset())
+    run expectCounter(counterCount(resetOne) == 0, "ClickedReset: expected 0 from 1")
+    let wrappedMinimum = updateCounter(counterState(9223372036854775807), clickedIncrement())
+    run expectCounter(counterCount(wrappedMinimum) == -9223372036854775808, "I64Increment: max wraps to min")
+    let wrappedMaximum = updateCounter(counterState(-9223372036854775808), clickedDecrement())
+    run expectCounter(counterCount(wrappedMaximum) == 9223372036854775807, "I64Decrement: min wraps to max")
+    run Console.log("COUNTER_NATIVE_TRACE_WRAP_GREEN").provide<Console>(Stdout)
+}
+
+effect fn main() -> void raises { AssertionFailed } {
+    run verifyCounter().provide<Assert>(Assertions)
+}
