@@ -23,8 +23,9 @@ type jsPreludeChunk struct {
 	name     string
 	requires []string
 	imports  []string
-	// hostModules are the host modules the chunk loads on demand through
-	// import() with a literal specifier.
+	// hostModules are the host modules the chunk loads on demand. The
+	// prelude renders one loader per module (jsHostLoader), and the chunk
+	// calls the loader instead of spelling an import.
 	hostModules []string
 	source      string
 }
@@ -145,6 +146,14 @@ func (s *jsSelection) moduleImports() []JSImport {
 	if names := s.effectNames(); len(names) > 0 {
 		imports = append(imports, JSImport{Specifier: "effect", Names: names})
 	}
+	for _, host := range s.hostModules() {
+		imports = append(imports, JSImport{Specifier: host, Names: []string{}, Dynamic: true})
+	}
+	return imports
+}
+
+// hostModules lists, sorted, the host modules the selected chunks declare.
+func (s *jsSelection) hostModules() []string {
 	hosts := []string{}
 	for _, chunk := range jsPrelude {
 		if s.chunks[chunk.name] {
@@ -156,10 +165,23 @@ func (s *jsSelection) moduleImports() []JSImport {
 		}
 	}
 	slices.Sort(hosts)
-	for _, host := range hosts {
-		imports = append(imports, JSImport{Specifier: host, Names: []string{}, Dynamic: true})
+	return hosts
+}
+
+// jsHostLoader names the function that loads one host module. Chunk text
+// calls the loader and never spells an import, so the prelude renders every
+// host import from a chunk's declaration and an undeclared import cannot be
+// emitted.
+func jsHostLoader(specifier string) string {
+	name := []byte("__ef_host_")
+	for _, r := range []byte(specifier) {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			name = append(name, r)
+		} else {
+			name = append(name, '_')
+		}
 	}
-	return imports
+	return string(name)
 }
 
 // prelude renders the `effect` import declaration followed by the selected
@@ -169,6 +191,9 @@ func (s *jsSelection) prelude() string {
 	out := ""
 	if len(names) > 0 {
 		out = "import { " + strings.Join(names, ", ") + " } from 'effect';\n"
+	}
+	for _, host := range s.hostModules() {
+		out += "const " + jsHostLoader(host) + " = () => import('" + host + "');\n"
 	}
 	for _, chunk := range jsPrelude {
 		if s.chunks[chunk.name] {

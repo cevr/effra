@@ -9,26 +9,45 @@ import (
 	"testing"
 )
 
-// jsDynamicImport finds import() calls with a literal specifier. It is only
-// applied to compiler-owned chunk text and to examples without such strings.
-var jsDynamicImport = regexp.MustCompile(`\bimport\(\s*'([^']+)'\s*\)`)
+// jsImportKeyword finds the import keyword in any form: a declaration, a
+// call with either quote, or a call with space before the parenthesis.
+var jsImportKeyword = regexp.MustCompile(`\bimport\b`)
 
-// Each prelude chunk declares exactly the host modules its own text loads,
-// so a module's declared imports cannot drift from the chunks it emits.
+// jsHostLoaderReference finds calls of rendered host loaders.
+var jsHostLoaderReference = regexp.MustCompile(`\b__ef_host_[A-Za-z0-9_]+`)
+
+// jsHostLoaderLine is the one rendering of a declared host import.
+var jsHostLoaderLine = regexp.MustCompile(`(?m)^const (__ef_host_[A-Za-z0-9_]+) = \(\) => import\('([^']+)'\);$`)
+
+// Chunk text never spells an import, so the prelude's rendered imports are
+// the only ones a module can contain; each chunk references exactly the
+// loaders of the host modules it declares.
 func TestJSPreludeChunksDeclareTheirHostModules(t *testing.T) {
 	declared := 0
+	loaders := map[string]string{}
 	for _, chunk := range jsPrelude {
-		loaded := []string{}
-		for _, match := range jsDynamicImport.FindAllStringSubmatch(chunk.source, -1) {
-			loaded = append(loaded, match[1])
+		if jsImportKeyword.MatchString(chunk.source) {
+			t.Errorf("chunk %s spells an import; declare a host module and call its loader", chunk.name)
 		}
-		slices.Sort(loaded)
-		want := slices.Sorted(slices.Values(chunk.hostModules))
-		if !slices.Equal(loaded, want) {
-			t.Errorf("chunk %s loads %v but declares %v", chunk.name, loaded, want)
+		referenced := []string{}
+		for _, name := range jsHostLoaderReference.FindAllString(chunk.source, -1) {
+			if !slices.Contains(referenced, name) {
+				referenced = append(referenced, name)
+			}
 		}
-		if strings.Contains(chunk.source, "\nimport ") || strings.HasPrefix(chunk.source, "import ") {
-			t.Errorf("chunk %s has a static import; only the prelude renders the effect import", chunk.name)
+		slices.Sort(referenced)
+		want := []string{}
+		for _, host := range chunk.hostModules {
+			loader := jsHostLoader(host)
+			if other, taken := loaders[loader]; taken && other != host {
+				t.Errorf("host modules %s and %s share loader %s", other, host, loader)
+			}
+			loaders[loader] = host
+			want = append(want, loader)
+		}
+		slices.Sort(want)
+		if !slices.Equal(referenced, want) {
+			t.Errorf("chunk %s calls loaders %v but declares %v", chunk.name, referenced, want)
 		}
 		declared += len(chunk.hostModules)
 	}
@@ -37,8 +56,24 @@ func TestJSPreludeChunksDeclareTheirHostModules(t *testing.T) {
 	}
 }
 
+// The guard sees every spelling of an import, including the forms a
+// single-quote call pattern would miss.
+func TestJSImportGuardSeesEverySpelling(t *testing.T) {
+	for _, text := range []string{`import("node:fs")`, `import ('node:fs')`, "import(`node:fs`)", `import fs from 'node:fs'`, `import{a}from'x'`} {
+		if !jsImportKeyword.MatchString(text) {
+			t.Errorf("guard misses %s", text)
+		}
+	}
+	for _, text := range []string{`important`, `__ef_host_node_http()`, `reimported`} {
+		if jsImportKeyword.MatchString(text) {
+			t.Errorf("guard flags %s", text)
+		}
+	}
+}
+
 // EmitModule's import set is exactly what the emitted text imports: the
-// rendered effect names, and the dynamic host modules of selected chunks.
+// rendered effect names, and the rendered loaders of the selected chunks'
+// host modules.
 func TestJSModuleImportsAreTheEmittedImports(t *testing.T) {
 	files, err := filepath.Glob("../../examples/*.ef")
 	if err != nil {
@@ -71,12 +106,12 @@ func TestJSModuleImportsAreTheEmittedImports(t *testing.T) {
 				rendered = append(rendered, strings.Split(match[1], ", ")...)
 			}
 			hosts := []string{}
-			for _, match := range jsDynamicImport.FindAllStringSubmatch(module.Source, -1) {
-				if !slices.Contains(hosts, match[1]) {
-					hosts = append(hosts, match[1])
+			for _, match := range jsHostLoaderLine.FindAllStringSubmatch(module.Source, -1) {
+				if match[1] != jsHostLoader(match[2]) {
+					t.Errorf("%s: loader %s renders %s", path, match[1], match[2])
 				}
+				hosts = append(hosts, match[2])
 			}
-			slices.Sort(hosts)
 			gotEffect, gotHosts := []string{}, []string{}
 			for _, imported := range module.Imports {
 				switch {
@@ -95,7 +130,7 @@ func TestJSModuleImportsAreTheEmittedImports(t *testing.T) {
 		}
 	}
 	if !sawHost {
-		t.Fatal("no example exercises a dynamic host import")
+		t.Fatal("no example exercises a host import")
 	}
 }
 

@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"effra.local/prototype/internal/receipt"
 )
 
 func TestBuildReceiptIsBuildOnlyAndRefusedBuildsWriteNone(t *testing.T) {
@@ -71,6 +75,12 @@ func TestBuildReceiptRefusesInputsArtifactsAndAliases(t *testing.T) {
 	if err := os.Symlink(root, filepath.Join(root, "dir-link")); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(root, "parent", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("parent", "sub"), filepath.Join(root, "jump")); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name    string
 		args    []string
@@ -79,6 +89,8 @@ func TestBuildReceiptRefusesInputsArtifactsAndAliases(t *testing.T) {
 		{"go executable", []string{"-o", "result"}, "result"},
 		{"go executable spelled differently", []string{"-o", "out/result"}, "out/../out/result"},
 		{"go default executable", nil, "dist/main"},
+		{"absent go executable through a link and ..", []string{"-o", "parent/result"}, "jump/../result"},
+		{"go executable below a missing directory and ..", []string{"-o", "result"}, "missing/../result"},
 		{"source", nil, "main.ef"},
 		{"source through a directory link", nil, "dir-link/main.ef"},
 		{"source symlink", nil, "source-link"},
@@ -99,7 +111,7 @@ func TestBuildReceiptRefusesInputsArtifactsAndAliases(t *testing.T) {
 	if data, err := os.ReadFile(source); err != nil || string(data) != string(original) {
 		t.Fatalf("source changed: %v %q", err, data)
 	}
-	for _, built := range []string{"dist", "out", "result"} {
+	for _, built := range []string{"dist", "out", "result", "parent/result"} {
 		if _, err := os.Stat(filepath.Join(root, built)); !os.IsNotExist(err) {
 			t.Errorf("refused build wrote %s: %v", built, err)
 		}
@@ -171,5 +183,75 @@ func TestJSReceiptListsDeclaredImportsOnly(t *testing.T) {
 		if got := strings.Join(specifiers, " "); got != want {
 			t.Errorf("%s: external modules %q, want %q", name, got, want)
 		}
+	}
+}
+
+// runReceiptCLI runs the CLI in directory with extra environment entries.
+func runReceiptCLI(t *testing.T, binary, directory string, environment []string, args ...string) ([]byte, []byte, int) {
+	t.Helper()
+	command := exec.Command(binary, args...)
+	command.Dir = directory
+	command.Env = append(os.Environ(), environment...)
+	var stdout, stderr bytes.Buffer
+	command.Stdout, command.Stderr = &stdout, &stderr
+	err := command.Run()
+	if exit, ok := err.(*exec.ExitError); ok {
+		return stdout.Bytes(), stderr.Bytes(), exit.ExitCode()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stdout.Bytes(), stderr.Bytes(), 0
+}
+
+// Embedded build information omits CGO flags under -trimpath, so the
+// receipt records the C toolchain inputs of a cgo build itself: differing
+// CGO flags differ in the receipt, the cgo packages are listed and the C
+// compiler is identified. With cgo disabled none of that applies.
+func TestBuildReceiptRecordsCgoInputs(t *testing.T) {
+	if _, err := exec.LookPath("gcc"); err != nil {
+		t.Skip("no C compiler")
+	}
+	binary := buildTestCLI(t)
+	root := t.TempDir()
+	source := filepath.Join(root, "http.ef")
+	if err := os.WriteFile(source, []byte(httpApplicationSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	build := func(name string, environment ...string) receipt.Application {
+		t.Helper()
+		path := filepath.Join(root, name+".json")
+		if stdout, stderr, code := runReceiptCLI(t, binary, root, append([]string{"CC=gcc", "GOFLAGS="}, environment...), "build", source, "-o", filepath.Join(root, name), "--receipt", path); code != 0 {
+			t.Fatalf("%s: build failed: code=%d stdout=%q stderr=%q", name, code, stdout, stderr)
+		}
+		return readReceipt(t, path)
+	}
+	first := build("first", "CGO_ENABLED=1", "CGO_CFLAGS=-O2 -g -DEFFRA_RECEIPT_FIRST")
+	second := build("second", "CGO_ENABLED=1", "CGO_CFLAGS=-O2 -g -DEFFRA_RECEIPT_SECOND")
+	pure := build("pure", "CGO_ENABLED=0")
+
+	if _, embedded := first.Binary.Build.Settings["CGO_CFLAGS"]; embedded {
+		t.Fatalf("premise changed: build information records CGO_CFLAGS under -trimpath: %+v", first.Binary.Build.Settings)
+	}
+	if !strings.Contains(first.Toolchain.Env["CGO_CFLAGS"], "EFFRA_RECEIPT_FIRST") || !strings.Contains(second.Toolchain.Env["CGO_CFLAGS"], "EFFRA_RECEIPT_SECOND") {
+		t.Fatalf("CGO flags not recorded: %q %q", first.Toolchain.Env["CGO_CFLAGS"], second.Toolchain.Env["CGO_CFLAGS"])
+	}
+	for _, key := range []string{"CC", "CXX", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_LDFLAGS"} {
+		if _, found := first.Toolchain.Env[key]; !found {
+			t.Errorf("receipt does not record %s", key)
+		}
+	}
+	if !slices.Contains(first.Deps.Cgo, "net") || !slices.Contains(first.Deps.Cgo, "runtime/cgo") {
+		t.Fatalf("cgo packages not listed: %v", first.Deps.Cgo)
+	}
+	if len(first.Toolchain.CCompilers) == 0 {
+		t.Fatal("C compiler not identified")
+	}
+	compiler := first.Toolchain.CCompilers[0]
+	if compiler.Variable != "CC" || compiler.Command != "gcc" || !filepath.IsAbs(compiler.Path) || len(compiler.SHA256) != 64 || compiler.Version == "" {
+		t.Fatalf("incomplete C compiler identity: %+v", compiler)
+	}
+	if pure.Toolchain.Env["CGO_ENABLED"] != "0" || len(pure.Deps.Cgo) != 0 || len(pure.Toolchain.CCompilers) != 0 {
+		t.Fatalf("pure build reports cgo inputs: enabled=%q packages=%v compilers=%+v", pure.Toolchain.Env["CGO_ENABLED"], pure.Deps.Cgo, pure.Toolchain.CCompilers)
 	}
 }

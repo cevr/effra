@@ -617,10 +617,12 @@ func command(args []string) error {
 	case "build", "run":
 		var path string
 		var measured *receipt.Application
+		var destination *receipt.Destination
 		if opts.receipt != "" {
-			if err := checkReceiptPath(opts); err != nil {
+			if destination, err = admitReceipt(opts); err != nil {
 				return err
 			}
+			defer destination.Close()
 		}
 		if opts.target == "go" {
 			path, measured, err = buildGo(r, opts.positional[0], sourceOrigin, opts.output, opts.receipt != "")
@@ -635,7 +637,7 @@ func command(args []string) error {
 		}
 		if args[0] == "build" {
 			if measured != nil {
-				if err := receipt.Write(opts.receipt, measured); err != nil {
+				if err := destination.Publish(measured); err != nil {
 					return err
 				}
 			}
@@ -707,10 +709,11 @@ func jsOutputPaths(source, output string) (string, string) {
 	return output, strings.TrimSuffix(output, ".mjs") + ".d.mts"
 }
 
-// checkReceiptPath refuses, before anything is built, a receipt path that
+// admitReceipt refuses, before anything is built, a receipt path that
 // would replace the build's source or one of its artifacts, or that lies in
-// the managed generated-module tree.
-func checkReceiptPath(opts options) error {
+// the managed generated-module tree. The admitted destination is the one
+// the receipt is published to.
+func admitReceipt(opts options) (*receipt.Destination, error) {
 	source := opts.positional[0]
 	protected := []string{source}
 	managed := []string{}
@@ -721,7 +724,7 @@ func checkReceiptPath(opts options) error {
 		module, declaration := jsOutputPaths(source, opts.output)
 		protected = append(protected, module, declaration)
 	}
-	return receipt.CheckPath(opts.receipt, protected, managed)
+	return receipt.Admit(opts.receipt, protected, managed)
 }
 
 // buildGo builds the ordinary native application. With measure, it also

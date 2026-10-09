@@ -7,6 +7,7 @@ package receipt
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"debug/buildinfo"
 	"encoding/hex"
@@ -25,7 +26,7 @@ import (
 )
 
 // Schema versions the application receipt.
-const Schema = "effra.application-receipt/2"
+const Schema = "effra.application-receipt/3"
 
 // GoBuildFlags are the flags of every native build: ef build, its stripped
 // companions and the size-conformance controls. A generated module is
@@ -109,18 +110,41 @@ type Generation struct {
 // Toolchain is the effective go command configuration of a build: the
 // environment the go command resolves, including inherited GOFLAGS and
 // architecture tuning, and the literal build flags.
+//
+// With cgo enabled, the C toolchain is an input too. The go command omits
+// CGO flags from embedded build information under -trimpath, so the
+// receipt records them from the environment, and it identifies each C
+// compiler a cgo build invokes. Headers and libraries the C toolchain
+// reads are not identified; a receipt whose dependencies list cgo packages
+// is therefore not a complete reproduction identity.
 type Toolchain struct {
-	Env   map[string]string `json:"env"`
-	Flags []string          `json:"flags"`
+	Env        map[string]string `json:"env"`
+	Flags      []string          `json:"flags"`
+	CCompilers []CCompiler       `json:"cCompilers,omitempty"`
 }
 
-// toolchainKeys are the go env settings that change what a build produces.
-var toolchainKeys = []string{"GOVERSION", "GOTOOLCHAIN", "GOOS", "GOARCH", "GOAMD64", "GOARM", "GOARM64", "GO386", "GOEXPERIMENT", "GOFLAGS", "CGO_ENABLED"}
+// CCompiler identifies one C toolchain command of a cgo build.
+type CCompiler struct {
+	Variable string `json:"variable"`
+	Command  string `json:"command"`
+	Path     string `json:"path"`
+	SHA256   string `json:"sha256"`
+	Version  string `json:"version"`
+}
 
+// toolchainKeys are the go env settings that change what a build produces,
+// including the C toolchain settings a cgo build reads.
+var toolchainKeys = []string{"GOVERSION", "GOTOOLCHAIN", "GOOS", "GOARCH", "GOAMD64", "GOARM", "GOARM64", "GO386", "GOEXPERIMENT", "GOFLAGS", "CGO_ENABLED", "CC", "CXX", "FC", "AR", "PKG_CONFIG", "CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_FFLAGS", "CGO_LDFLAGS"}
+
+// Dependencies lists the transitive packages of a build. Cgo lists those
+// compiled with cgo in the build's configuration; it is empty when cgo is
+// disabled, because cgo files are then excluded.
 type Dependencies struct {
 	Transitive  []string `json:"transitive"`
 	Standard    int      `json:"standard"`
 	NonStandard []string `json:"nonStandard"`
+	Cgo         []string `json:"cgo"`
+	cxx         bool
 }
 
 // Artifact is one measured file. An executable also carries the build
@@ -228,6 +252,9 @@ func Native(r *compiler.Result, source string, application *compiler.GoApplicati
 	if receipt.Deps, err = MeasureDependencies(generation.Directory, "."); err != nil {
 		return nil, err
 	}
+	if receipt.Toolchain.CCompilers, err = MeasureCCompilers(receipt.Toolchain, receipt.Deps); err != nil {
+		return nil, err
+	}
 	if receipt.Binary, err = MeasureExecutable(executable); err != nil {
 		return nil, err
 	}
@@ -318,26 +345,71 @@ func GoImports(directory string) (map[string][]string, error) {
 
 // MeasureDependencies lists the transitive package dependencies of pkg.
 func MeasureDependencies(directory, pkg string) (*Dependencies, error) {
-	out, err := goTool(directory, "list", "-mod=readonly", "-deps", "-f", "{{.ImportPath}} {{.Standard}}", pkg)
+	out, err := goTool(directory, "list", "-mod=readonly", "-deps", "-f", "{{.ImportPath}} {{.Standard}} {{len .CgoFiles}} {{len .CXXFiles}}", pkg)
 	if err != nil {
 		return nil, err
 	}
-	deps := &Dependencies{Transitive: []string{}, NonStandard: []string{}}
+	deps := &Dependencies{Transitive: []string{}, NonStandard: []string{}, Cgo: []string{}}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		path, standard, ok := strings.Cut(line, " ")
-		if !ok {
+		fields := strings.Fields(line)
+		if len(fields) != 4 {
 			return nil, fmt.Errorf("unexpected go list line %q", line)
 		}
+		path := fields[0]
 		deps.Transitive = append(deps.Transitive, path)
-		if standard == "true" {
+		if fields[1] == "true" {
 			deps.Standard++
 		} else {
 			deps.NonStandard = append(deps.NonStandard, path)
 		}
+		if fields[2] != "0" {
+			deps.Cgo = append(deps.Cgo, path)
+			deps.cxx = deps.cxx || fields[3] != "0"
+		}
 	}
 	slices.Sort(deps.Transitive)
 	slices.Sort(deps.NonStandard)
+	slices.Sort(deps.Cgo)
 	return deps, nil
+}
+
+// MeasureCCompilers identifies the C compilers a cgo build of deps
+// invokes: CC whenever a package uses cgo, and CXX when one also has C++
+// files. It records nothing when cgo is disabled or unused.
+func MeasureCCompilers(toolchain *Toolchain, deps *Dependencies) ([]CCompiler, error) {
+	if toolchain.Env["CGO_ENABLED"] != "1" || len(deps.Cgo) == 0 {
+		return nil, nil
+	}
+	variables := []string{"CC"}
+	if deps.cxx {
+		variables = append(variables, "CXX")
+	}
+	compilers := []CCompiler{}
+	for _, variable := range variables {
+		command := toolchain.Env[variable]
+		fields := strings.Fields(command)
+		if len(fields) == 0 {
+			return nil, fmt.Errorf("cgo build has no %s", variable)
+		}
+		path, err := exec.LookPath(fields[0])
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", variable, err)
+		}
+		if path, err = filepath.EvalSymlinks(path); err != nil {
+			return nil, fmt.Errorf("%s: %w", variable, err)
+		}
+		artifact, err := MeasureFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", variable, err)
+		}
+		version, err := exec.Command(path, "--version").Output()
+		if err != nil {
+			return nil, fmt.Errorf("%s --version: %w", variable, err)
+		}
+		first, _, _ := strings.Cut(string(version), "\n")
+		compilers = append(compilers, CCompiler{Variable: variable, Command: command, Path: path, SHA256: artifact.SHA256, Version: strings.TrimSpace(first)})
+	}
+	return compilers, nil
 }
 
 // MeasureFile records a file's bytes and digest.
@@ -346,8 +418,12 @@ func MeasureFile(path string) (*Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
+	return measureBytes(data), nil
+}
+
+func measureBytes(data []byte) *Artifact {
 	digest := sha256.Sum256(data)
-	return &Artifact{Bytes: int64(len(data)), SHA256: hex.EncodeToString(digest[:])}, nil
+	return &Artifact{Bytes: int64(len(data)), SHA256: hex.EncodeToString(digest[:])}
 }
 
 // MeasureExecutable records a Go executable's bytes, digest and embedded
@@ -464,13 +540,17 @@ func JavaScript(r *compiler.Result, source, mode string, module compiler.JSModul
 	// is the external dependency listed below.
 	receipt.Plan.RuntimeModules = []rt.RuntimeModule{}
 	delete(receipt.Plan.Requirements, compiler.RequiresRuntimeModule)
-	if receipt.Module, err = MeasureFile(modulePath); err != nil {
+	// The declared imports belong to the emitted text, so the measured file
+	// must be exactly that text: the same bytes are compared and hashed.
+	written, err := os.ReadFile(modulePath)
+	if err != nil {
 		return nil, err
 	}
-	receipt.Module.Path = modulePath
-	if receipt.Module.Bytes != int64(len(module.Source)) {
+	if !bytes.Equal(written, []byte(module.Source)) {
 		return nil, fmt.Errorf("%s does not hold the emitted module", modulePath)
 	}
+	receipt.Module = measureBytes(written)
+	receipt.Module.Path = modulePath
 	if receipt.Decl, err = MeasureFile(declarationPath); err != nil {
 		return nil, err
 	}
@@ -479,61 +559,183 @@ func JavaScript(r *compiler.Result, source, mode string, module compiler.JSModul
 	return receipt, nil
 }
 
-// CheckPath refuses a receipt path that names an input or an artifact of
-// the same build, or lies inside a managed output tree. Paths are compared
-// after resolving symbolic links, and existing files also by identity, so
-// an alias of a protected file is refused as well.
-func CheckPath(path string, protected []string, managed []string) error {
+// Destination is an admitted receipt path. Admission resolves the path's
+// parent with the file system's own semantics, so a symbolic link is
+// followed before a later `..` is applied, exactly as publication will
+// address it. It then opens the deepest existing directory of that parent
+// and keeps it open: publication creates and renames the receipt inside
+// that directory, so retargeting a link on the path after admission cannot
+// redirect the write.
+type Destination struct {
+	path    string
+	root    *os.Root
+	missing []string
+	name    string
+}
+
+// Admit refuses a receipt path that names an input or an artifact of the
+// same build, or lies inside a managed output tree, and otherwise returns
+// the one destination publication will write. The receipt's location and
+// every protected path are resolved the same way; an existing receipt
+// entry is also compared by identity and, if it is a symbolic link, by its
+// target, so an alias of a protected file is refused as well.
+func Admit(path string, protected []string, managed []string) (*Destination, error) {
 	if path == "" {
-		return fmt.Errorf("--receipt requires a path")
+		return nil, fmt.Errorf("--receipt requires a path")
 	}
-	target, err := resolve(path)
+	parent, name := splitLeaf(path)
+	if name == "" || name == "." || name == ".." {
+		return nil, fmt.Errorf("receipt path %s does not name a file", path)
+	}
+	directory, missing, err := physical(parent)
+	if err != nil {
+		return nil, fmt.Errorf("receipt path %s: %w", path, err)
+	}
+	if info, err := os.Stat(directory); err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("receipt path %s: %s is not a directory", path, parent)
+	}
+	for _, component := range missing {
+		if component == "." || component == ".." {
+			return nil, fmt.Errorf("receipt path %s steps through %q below a missing directory", path, component)
+		}
+	}
+	target := filepath.Join(append(append([]string{directory}, missing...), name)...)
+	candidates := []string{target}
+	if info, err := os.Lstat(target); err == nil {
+		if info.IsDir() {
+			return nil, fmt.Errorf("receipt path %s is a directory", path)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			if resolved, err := resolveFull(target); err == nil {
+				candidates = append(candidates, resolved)
+			}
+		}
+	}
+	for _, other := range protected {
+		resolved, err := resolveFull(other)
+		if err != nil {
+			return nil, err
+		}
+		if slices.Contains(candidates, resolved) || sameFile(target, other) {
+			return nil, fmt.Errorf("receipt path %s names the build's own %s", path, other)
+		}
+	}
+	for _, tree := range managed {
+		resolved, err := resolveFull(tree)
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range candidates {
+			if relative, err := filepath.Rel(resolved, candidate); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				return nil, fmt.Errorf("receipt path %s lies inside the managed output %s", path, tree)
+			}
+		}
+	}
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return nil, fmt.Errorf("receipt path %s: %w", path, err)
+	}
+	return &Destination{path: path, root: root, missing: missing, name: name}, nil
+}
+
+// Publish writes the receipt atomically inside the admitted directory: a
+// complete temporary file replaces the destination entry by rename, so a
+// reader never sees a truncated receipt and no other file is written
+// through. It closes the destination.
+func (d *Destination) Publish(receipt *Application) error {
+	defer d.Close()
+	data, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
 		return err
 	}
-	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		return fmt.Errorf("receipt path %s is a directory", path)
-	}
-	for _, other := range protected {
-		resolved, err := resolve(other)
-		if err != nil {
-			return err
-		}
-		if resolved == target || sameFile(path, other) {
-			return fmt.Errorf("receipt path %s names the build's own %s", path, other)
+	directory := "."
+	if len(d.missing) > 0 {
+		directory = filepath.Join(d.missing...)
+		if err := d.root.MkdirAll(directory, 0o755); err != nil {
+			return fmt.Errorf("receipt path %s: %w", d.path, err)
 		}
 	}
-	for _, root := range managed {
-		resolved, err := resolve(root)
-		if err != nil {
-			return err
-		}
-		if relative, err := filepath.Rel(resolved, target); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("receipt path %s lies inside the managed output %s", path, root)
-		}
+	nonce := make([]byte, 8)
+	if _, err := rand.Read(nonce); err != nil {
+		return err
+	}
+	temporary := filepath.Join(directory, ".receipt-"+hex.EncodeToString(nonce))
+	file, err := d.root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("receipt path %s: %w", d.path, err)
+	}
+	defer d.root.Remove(temporary)
+	if _, err := file.Write(append(data, '\n')); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Chmod(0o644); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := d.root.Rename(temporary, filepath.Join(directory, d.name)); err != nil {
+		return fmt.Errorf("receipt path %s: %w", d.path, err)
 	}
 	return nil
 }
 
-// resolve returns the absolute path with every existing symbolic link
-// resolved, including a link at the path itself.
-func resolve(path string) (string, error) {
-	absolute, err := filepath.Abs(path)
+// Close releases an admitted destination without publishing.
+func (d *Destination) Close() error {
+	return d.root.Close()
+}
+
+// splitLeaf splits path at its last separator without cleaning it, so the
+// parent keeps every component the file system will walk.
+func splitLeaf(path string) (string, string) {
+	index := strings.LastIndexByte(path, filepath.Separator)
+	switch {
+	case index < 0:
+		return ".", path
+	case index == 0:
+		return string(filepath.Separator), path[1:]
+	default:
+		return path[:index], path[index+1:]
+	}
+}
+
+// physical resolves path as the file system walks it: it returns the
+// deepest existing prefix with every symbolic link resolved and each `..`
+// applied to the resolved directory, and the components below it that do
+// not exist yet. A relative path is resolved from the physical working
+// directory. The path is never cleaned lexically before resolution, which
+// would apply `..` to a link's own name instead of its target.
+func physical(path string) (string, []string, error) {
+	separator := string(filepath.Separator)
+	if !filepath.IsAbs(path) {
+		working, err := os.Getwd()
+		if err != nil {
+			return "", nil, err
+		}
+		if working, err = filepath.EvalSymlinks(working); err != nil {
+			return "", nil, err
+		}
+		path = working + separator + path
+	}
+	components := strings.FieldsFunc(path, func(r rune) bool { return r == filepath.Separator })
+	for count := len(components); count >= 0; count-- {
+		if resolved, err := filepath.EvalSymlinks(separator + strings.Join(components[:count], separator)); err == nil {
+			return resolved, components[count:], nil
+		}
+	}
+	return "", nil, fmt.Errorf("cannot resolve %s", path)
+}
+
+// resolveFull returns the path a build would address: the physical
+// existing prefix joined with the components it would create.
+func resolveFull(path string) (string, error) {
+	directory, missing, err := physical(path)
 	if err != nil {
 		return "", err
 	}
-	existing, rest := absolute, []string{}
-	for {
-		if resolved, err := filepath.EvalSymlinks(existing); err == nil {
-			return filepath.Join(append([]string{resolved}, rest...)...), nil
-		}
-		parent := filepath.Dir(existing)
-		if parent == existing {
-			return absolute, nil
-		}
-		rest = append([]string{filepath.Base(existing)}, rest...)
-		existing = parent
-	}
+	return filepath.Join(append([]string{directory}, missing...)...), nil
 }
 
 func sameFile(a, b string) bool {
@@ -546,37 +748,6 @@ func sameFile(a, b string) bool {
 		return false
 	}
 	return os.SameFile(left, right)
-}
-
-// Write publishes the receipt atomically: a complete temporary file in the
-// destination directory replaces the destination entry by rename, so a
-// reader never sees a truncated receipt and no other file is written through.
-func Write(path string, receipt *Application) error {
-	data, err := json.MarshalIndent(receipt, "", "  ")
-	if err != nil {
-		return err
-	}
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		return err
-	}
-	temporary, err := os.CreateTemp(directory, ".receipt-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temporary.Name())
-	if _, err := temporary.Write(append(data, '\n')); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Chmod(0o644); err != nil {
-		temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporary.Name(), path)
 }
 
 func withEnv(environment []string, key, value string) []string {
