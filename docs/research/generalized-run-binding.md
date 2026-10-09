@@ -162,6 +162,14 @@ The names and package version are therefore not treated as exact source
 equivalence. The pinned copies and the locked package metadata remain in the
 private research receipt area; no public blob is invented for them.
 
+### Elixir `with`
+
+At Elixir `91ee75bb` ([pins](../../PRIOR_ARTS.md#standing-comparison-languages-elixir-with-erlangotp-and-moonbit-2026-10-09)), `with` chains `pattern <- expr` clauses, and on the first non-match it returns the unmatched value unchanged. An optional `else` handles it like `case`, and if no `else` clause matches, the result is a run-time `WithClauseError` (`lib/elixir/lib/kernel/special_forms.ex:L1587-L1670`). The documentation warns that all failures flatten into one `else` (`L1673-L1675`). This is the shortest-path evidence for a Result-family binder: it is lexical and needs no builder. It also shows the costs Effra would have to remove. An untyped short-circuit value would erase which failure arrived, and an incomplete `else` becomes a run-time failure rather than a checked one. Any Effra admission would need the typed failure union and exhaustive handling required by **Explicit contracts and clear guardrails**.
+
+### MoonBit checked errors and implicit awaits
+
+At docs `8d9f3ba2`, a MoonBit call to a raising function rethrows implicitly, `try … catch … noraise` handles it, and conversion to `Result` is an explicit `catch` expression (`next/language/error-handling.md:L148-L210`). Async calls are also implicit awaits tracked by the compiler (`next/language/async-experimental.md:L36-L44`). MoonBit therefore needs no binding form, because effects propagate through ordinary calls. Effra rejects that for effects because construction and execution are distinct: a call builds a recipe, and `run` marks where it executes. The comparison supports keeping `run` explicit rather than generalizing it into implicit propagation.
+
 ## Continuation and contract obligations
 
 Any future experiment must make these obligations observable in the shared

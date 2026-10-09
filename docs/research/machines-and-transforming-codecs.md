@@ -43,6 +43,12 @@ The independent design counsel proposed several additional policies. Applying **
 
 Derivation plans share nominal type structure and diagnose unsupported or recursive layouts with field paths. A transformation runs lazily under an owner, without hidden retries or duplicated execution. The [native server contract](../specs/native-server-contracts.md) specifies directional contracts, policy versions, cancellation, inspection and the server/non-server acceptance cases.
 
+## Prior art: Elixir, Erlang/OTP and MoonBit
+
+Erlang/OTP `gen_statem` at `516126e9` is the closest production machine runtime ([pins](../../PRIOR_ARTS.md#standing-comparison-languages-elixir-with-erlangotp-and-moonbit-2026-10-09)). The [machine specification](../specs/state-machines.md#prior-art-erlangotp-gen_statem) records how Effra adapts its enter calls, `repeat_state` and `state_timeout`, and how a pure `enter` makes its run-time enter-change crash unrepresentable. Its `postpone` action, which retries an event after the next state change (`lib/stdlib/src/gen_statem.erl:L848-L857`), stays outside the first profile, matching the deferral of selective receive.
+
+For codecs, Elixir's `JSON` module decodes objects into string-keyed maps with no struct-targeted decoding, and structs opt into encoding with `@derive {JSON.Encoder, only: [...]}` (`lib/elixir/lib/json.ex:L4-L33`, `L314-L326` at `91ee75bb`). MoonBit derives `ToJson`/`FromJson`, but its documentation calls the format "mainly for debugging", says argument behavior "is unstable", and changes the `Option` encoding depending on whether it is a direct struct field (`next/language/derive.md:L121-L199` at docs `8d9f3ba2`). Both confirm the decision above to keep opt-in derivation and explicit wire records instead of treating derived output as a stable public format. Elixir's allow-list `only:` form supports keeping field exposure explicit.
+
 ## Validation still required
 
 These comparisons settle the initial design direction. Implementation must supply executable negative checks, Go/JS behavior, cancellation and completed cleanup, CLI/MCP parity, and bounded compiler-cost receipts. Copied reference tests remain reference material until each applicable behavior is mapped to a passing Effra test.
