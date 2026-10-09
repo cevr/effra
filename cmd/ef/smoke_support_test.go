@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-// The process smokes formerly lived in scripts/*_smoke.py and drove bin/ef
+// The process smokes formerly lived in Python scripts and drove bin/ef
 // from the repository root, writing dist/ there. Their Go ports drive the
 // package's test CLI in a private workspace instead.
 

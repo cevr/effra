@@ -52,7 +52,6 @@ var pythonChecks = []struct {
 // smokes in one chain write the same dist/<name> outputs in the repository
 // root, so they must not overlap; separate chains share no output path.
 var smokeChains = [][]string{
-	{"smoke", "producer_smoke"},
 	{"diagnostics_smoke"},
 	{"lsp_smoke"},
 	{"readme_smoke"},

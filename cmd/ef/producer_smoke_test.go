@@ -110,8 +110,8 @@ func TestProducerSmoke(t *testing.T) {
 				}
 				if c.command == "type" {
 					cliSmokeEqual(t, cli["snapshot"], selected["snapshot"])
-					cliSmokeEqual(t, cliSmokeAt(t, cli, "querySchemaVersion"), float64(2))
-					cliSmokeEqual(t, cliSmokeAt(t, selected, "querySchemaVersion"), float64(2))
+					cliSmokeEqual(t, cliSmokeAt(t, cli, "querySchemaVersion"), float64(4))
+					cliSmokeEqual(t, cliSmokeAt(t, selected, "querySchemaVersion"), float64(4))
 				}
 			}
 		}
