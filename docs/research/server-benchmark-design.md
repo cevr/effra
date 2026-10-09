@@ -14,7 +14,7 @@ Verified locally: Node v26.8.2, Bun1.4.2, Go1.27.1 darwin/arm64; Mac16,8, 12 phy
 
 Effra `runtime/effra/http.go` currently exposes `ServeHTTP(address, path -> Effect[string])`. It passes `r.URL.Path`, creates a managed request scope linked to request and server cancellation, completes scope cleanup before responding, emits status200 text/plain UTF-8 for success and generic HTTP500 for failure. It configures ReadHeaderTimeout=5s; other server fields use Go defaults. It owns listener shutdown and waits for request cleanup. This is not yet a general request/body/header/status/streaming interface.
 
-`cmd/ef/main.go:251` writes generated Go/runtime artifacts only when content changes, then invokes `go build -trimpath`. Existing compiler timings separate imports/parse/check, not all emission/linking/process costs. `scripts/http_smoke.py` validates real routes, file scope, timeout, failure500 and SIGTERM. Reuse its observable boundaries while expanding coverage. An Effra JS domain module behind a handwritten adapter is an optional separately labelled cohort, not evidence that Effra's LiveHttp backend already works on JS.
+`cmd/ef/main.go:251` writes generated Go/runtime artifacts only when content changes, then invokes `go build -trimpath`. Existing compiler timings separate imports/parse/check, not all emission/linking/process costs. `TestHTTPSmokeServesRoutesBoundariesAndSIGTERMShutdown` (`cmd/ef/http_smoke_test.go`) validates real routes, file scope, timeout, failure500 and SIGTERM. Reuse its observable boundaries while expanding coverage. An Effra JS domain module behind a handwritten adapter is an optional separately labelled cohort, not evidence that Effra's LiveHttp backend already works on JS.
 
 ## Cohorts
 

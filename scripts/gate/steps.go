@@ -60,8 +60,6 @@ var smokeChains = [][]string{
 	{"format_smoke"},
 	{"layer_smoke"},
 	{"type_smoke"},
-	{"http_smoke"},
-	{"http_transport_smoke"},
 }
 
 func gateSteps(root string) ([]*Step, error) {
