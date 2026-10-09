@@ -219,3 +219,29 @@ func TestLintStatusNotificationIsOptIn(t *testing.T) {
 		t.Fatalf("notifications %v", methods)
 	}
 }
+
+// A receipt runs the production pack path and records each phase; with
+// the pack's rule off, no process starts.
+func TestReceiptRecordsPackPhases(t *testing.T) {
+	dir := packs(t)
+	serve := filepath.Join(dir, "fixture-serve", "manifest.json")
+	path, _ := filepath.Abs("../../examples/lintpack/testdata/provider_boundary.ef")
+	receipt, err := load(t, lintpacks.Selection{Manifests: []string{serve}}).Receipt(context.Background(), path, "go", 2)
+	if err != nil || len(receipt.Runs) != 2 {
+		t.Fatalf("%v %+v", err, receipt)
+	}
+	for _, run := range receipt.Runs {
+		pack := run.PackRuns[0]
+		if !run.Checked || !pack.Started || pack.FirstByteNanos <= 0 || pack.ExitNanos <= 0 || pack.ResponseBytes == 0 || pack.Rules[0].Status != lint.StatusCompleted {
+			t.Fatalf("enabled run %+v", run)
+		}
+	}
+	off := load(t, lintpacks.Selection{Config: writeConfig(t, `{"version":1,"packs":[{"manifest":`+strconv.Quote(serve)+`}],"rules":{"fixture/rename-main":"off"}}`)})
+	receipt, err = off.Receipt(context.Background(), path, "go", 1)
+	if err != nil || receipt.Runs[0].PackRuns[0].Started || receipt.Runs[0].PackRuns[0].SpawnNanos != 0 {
+		t.Fatalf("disabled: %v %+v", err, receipt.Runs)
+	}
+	if _, err := off.Receipt(context.Background(), path, "go", 0); err == nil {
+		t.Fatal("zero runs accepted")
+	}
+}
