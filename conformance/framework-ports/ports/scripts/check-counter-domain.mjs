@@ -23,7 +23,9 @@ const generated = path.join(leaf, ".generated");
 mkdirSync(generated, { recursive: true });
 const work = mkdtempSync(path.join(generated, "counter-domain-"));
 const localTS = path.join(leaf, "node_modules/typescript/bin/tsc");
-const env = { ...process.env, GOCACHE: "/home/exedev/.cache/go-build", GOPROXY: "off", GOTOOLCHAIN: "auto", GOWORK: "off" };
+// Native builds run inside this checkout, where Go would stamp its revision into every program; without the stamp,
+// identical generated sources build identical bytes, which verification is keyed on.
+const env = { ...process.env, GOCACHE: "/home/exedev/.cache/go-build", GOPROXY: "off", GOTOOLCHAIN: "auto", GOWORK: "off", GOFLAGS: [process.env.GOFLAGS, "-buildvcs=false"].filter(Boolean).join(" ") };
 const records = [];
 const hash = data => createHash("sha256").update(data).digest("hex");
 const fileHash = file => hash(readFileSync(file));
