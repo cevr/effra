@@ -56,32 +56,37 @@ func formatSmokeRun(t *testing.T, binary, directory string, input []byte, args .
 	return nil, nil, -1
 }
 
-// formatSmokeLine encodes one compact JSON-RPC line without HTML escaping,
-// matching Python's json.dumps for the ASCII payloads used here.
-func formatSmokeLine(t *testing.T, value any) string {
+// The MCP messages below are ordered objects, so json.dumps-compatible
+// encoding reproduces the Python smoke's request bytes exactly; the frame
+// controls measure and pad those bytes.
+
+func formatSmokeInitialize(client string) smokeObject {
+	return smokeObject{{"jsonrpc", "2.0"}, {"id", 1}, {"method", "initialize"}, {"params", smokeObject{
+		{"protocolVersion", "2025-11-25"}, {"capabilities", smokeObject{}},
+		{"clientInfo", smokeObject{{"name", client}, {"version", "1"}}},
+	}}}
+}
+
+var formatSmokeReady = smokeObject{{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}}
+
+func formatSmokePing(id int) smokeObject {
+	return smokeObject{{"jsonrpc", "2.0"}, {"id", id}, {"method", "ping"}}
+}
+
+func formatSmokeCall(id any, arguments smokeObject) smokeObject {
+	return smokeObject{{"jsonrpc", "2.0"}, {"id", id}, {"method", "tools/call"},
+		{"params", smokeObject{{"name", "code.format"}, {"arguments", arguments}}}}
+}
+
+// formatSmokeSession sends each message as json.dumps(message) to
+// `ef mcp <workspace>` and decodes every reply line.
+func formatSmokeSession(t *testing.T, binary, workspace string, messages ...smokeObject) ([]map[string]any, []byte, []byte, int) {
 	t.Helper()
-	var buffer bytes.Buffer
-	encoder := json.NewEncoder(&buffer)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(value); err != nil {
-		t.Fatal(err)
+	lines := make([]string, len(messages))
+	for index, message := range messages {
+		lines[index] = string(smokeDumps(t, message))
 	}
-	return strings.TrimSuffix(buffer.String(), "\n")
-}
-
-func formatSmokeInitialize(t *testing.T, client string) string {
-	return formatSmokeLine(t, map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{
-		"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": client, "version": "1"},
-	}})
-}
-
-const (
-	formatSmokeReady = `{"jsonrpc":"2.0","method":"notifications/initialized"}`
-	formatSmokePing  = `{"jsonrpc":"2.0","id":3,"method":"ping"}`
-)
-
-func formatSmokeCall(t *testing.T, id any, arguments map[string]any) string {
-	return formatSmokeLine(t, map[string]any{"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": map[string]any{"name": "code.format", "arguments": arguments}})
+	return formatSmokeMCP(t, binary, workspace, lines...)
 }
 
 // formatSmokeMCP sends newline-terminated lines to `ef mcp <workspace>` and
@@ -404,14 +409,14 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 	t.Run("mcp-session", func(t *testing.T) {
 		t.Parallel()
 		digest := sha256.Sum256([]byte(formatSmokeSource))
-		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain,
-			formatSmokeInitialize(t, "format-smoke"),
+		replies, stdout, stderr, code := formatSmokeSession(t, binary, chain,
+			formatSmokeInitialize("format-smoke"),
 			formatSmokeReady,
-			`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
-			formatSmokeCall(t, 3, map[string]any{"source": formatSmokeSource, "uri": "buffer://main.ef", "expectedDigest": hex.EncodeToString(digest[:])}),
-			formatSmokeCall(t, 4, map[string]any{"file": "main.ef"}),
-			formatSmokeCall(t, 5, map[string]any{"source": formatSmokeSource, "expectedDigest": "stale"}),
-			`{"jsonrpc":"2.0","id":6,"method":"ping"}`,
+			smokeObject{{"jsonrpc", "2.0"}, {"id", 2}, {"method", "tools/list"}},
+			formatSmokeCall(3, smokeObject{{"source", formatSmokeSource}, {"uri", "buffer://main.ef"}, {"expectedDigest", hex.EncodeToString(digest[:])}}),
+			formatSmokeCall(4, smokeObject{{"file", "main.ef"}}),
+			formatSmokeCall(5, smokeObject{{"source", formatSmokeSource}, {"expectedDigest", "stale"}}),
+			formatSmokePing(6),
 		)
 		if code != 0 || !reflect.DeepEqual(formatSmokeIDs(replies), []any{1.0, 2.0, 3.0, 4.0, 5.0, 6.0}) {
 			t.Fatalf("exit %d stdout=%q stderr=%q", code, stdout, stderr)
@@ -445,11 +450,11 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 
 	t.Run("mcp-output-limit", func(t *testing.T) {
 		t.Parallel()
-		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain,
-			formatSmokeInitialize(t, "format-expansion"),
+		replies, stdout, stderr, code := formatSmokeSession(t, binary, chain,
+			formatSmokeInitialize("format-expansion"),
 			formatSmokeReady,
-			formatSmokeCall(t, 2, map[string]any{"source": string(formatSmokeExpansion(20000))}),
-			formatSmokePing,
+			formatSmokeCall(2, smokeObject{{"source", string(formatSmokeExpansion(20000))}}),
+			formatSmokePing(3),
 		)
 		if code != 0 || !reflect.DeepEqual(formatSmokeIDs(replies), []any{1.0, 2.0, 3.0}) {
 			t.Fatalf("exit %d stdout=%q stderr=%q", code, stdout, stderr)
@@ -463,24 +468,30 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 
 	t.Run("mcp-target-argument", func(t *testing.T) {
 		t.Parallel()
-		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain,
-			formatSmokeInitialize(t, "format-target"),
+		replies, stdout, stderr, code := formatSmokeSession(t, binary, chain,
+			formatSmokeInitialize("format-target"),
 			formatSmokeReady,
-			formatSmokeCall(t, 2, map[string]any{"source": "", "target": "go"}),
-			formatSmokePing,
+			formatSmokeCall(2, smokeObject{{"source", ""}, {"target", "go"}}),
+			formatSmokePing(3),
 		)
 		if code != 0 || len(replies) != 3 || !formatSmokeEmptyResult(replies[2]) || replies[1]["error"] == nil {
 			t.Fatalf("exit %d stdout=%q stderr=%q", code, stdout, stderr)
 		}
 	})
 
-	initialize := formatSmokeInitialize(t, "format-smoke")
+	// The compact lines the Python smoke framed by hand.
+	initialize := string(smokeDumpsCompact(t, formatSmokeInitialize("format-smoke")))
+	ready := string(smokeDumpsCompact(t, formatSmokeReady))
+	ping := string(smokeDumpsCompact(t, formatSmokePing(3)))
+	compactCall := func(id any, arguments smokeObject) string {
+		return string(smokeDumpsCompact(t, formatSmokeCall(id, arguments)))
+	}
 	compactFormat := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code.format","arguments":{"source":""}}}`
 	for _, size := range []int{formatSmokeFrameLimit - 1, formatSmokeFrameLimit, formatSmokeFrameLimit + 1, formatSmokeFrameLimit + 1024*1024} {
 		t.Run("mcp-frame-"+strconv.Itoa(size), func(t *testing.T) {
 			t.Parallel()
 			raw := compactFormat + strings.Repeat(" ", size-len(compactFormat))
-			replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, formatSmokeReady, raw, formatSmokePing)
+			replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, ready, raw, ping)
 			want := []any{1.0, 2.0, 3.0}
 			if size > formatSmokeFrameLimit {
 				want = []any{1.0, nil, 3.0}
@@ -493,7 +504,7 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 
 	t.Run("mcp-malformed-json", func(t *testing.T) {
 		t.Parallel()
-		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, formatSmokeReady, "{bad json}", formatSmokePing)
+		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, ready, "{bad json}", ping)
 		if code != 0 || !reflect.DeepEqual(formatSmokeIDs(replies), []any{1.0, nil, 3.0}) {
 			t.Fatalf("exit %d stdout=%q stderr=%q", code, stdout, stderr)
 		}
@@ -501,7 +512,7 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 
 	t.Run("mcp-malformed-json-at-eof", func(t *testing.T) {
 		t.Parallel()
-		stdout, stderr, code := formatSmokeRun(t, binary, chain, []byte(initialize+"\n"+formatSmokeReady+"\n{bad json}"), "mcp", chain)
+		stdout, stderr, code := formatSmokeRun(t, binary, chain, []byte(initialize+"\n"+ready+"\n{bad json}"), "mcp", chain)
 		lines := bytes.Split(bytes.TrimRight(stdout, "\n"), []byte("\n"))
 		if code != 0 || len(lines) == 0 {
 			t.Fatalf("exit %d stdout=%q stderr=%q", code, stdout, stderr)
@@ -517,13 +528,13 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 		// encoder leaves HTML characters alone. Fill the admitted request
 		// close enough to the frame cap that the response envelope itself
 		// crosses the cap.
-		empty := formatSmokeCall(t, 2, map[string]any{"source": "", "uri": ""})
+		empty := compactCall(2, smokeObject{{"source", ""}, {"uri", ""}})
 		length := min(formatSmokeFrameLimit/2, (formatSmokeFrameLimit-len(empty))/2)
-		line := formatSmokeCall(t, 2, map[string]any{"source": "", "uri": strings.Repeat(`"`, length)})
+		line := compactCall(2, smokeObject{{"source", ""}, {"uri", strings.Repeat(`"`, length)}})
 		if len(line) > formatSmokeFrameLimit {
 			t.Fatalf("request line is %d bytes", len(line))
 		}
-		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, formatSmokeReady, line, formatSmokePing)
+		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, ready, line, ping)
 		if code != 0 || len(replies) < 2 || !formatSmokeEmptyResult(replies[len(replies)-1]) {
 			t.Fatalf("exit %d stdout=%.400q stderr=%q", code, stdout, stderr)
 		}
@@ -535,7 +546,7 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 	t.Run("mcp-html-id-unescaped", func(t *testing.T) {
 		t.Parallel()
 		id := strings.Repeat("<", 3*1024*1024)
-		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, formatSmokeReady, formatSmokeCall(t, id, map[string]any{"source": ""}), formatSmokePing)
+		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, ready, compactCall(id, smokeObject{{"source", ""}}), ping)
 		if code != 0 || len(replies) < 2 || !formatSmokeEmptyResult(replies[len(replies)-1]) {
 			t.Fatalf("exit %d stdout=%.400q stderr=%q", code, stdout, stderr)
 		}
@@ -546,12 +557,12 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 
 	t.Run("mcp-near-limit-id", func(t *testing.T) {
 		t.Parallel()
-		id := strings.Repeat("a", formatSmokeFrameLimit-len(formatSmokeCall(t, "", map[string]any{"source": ""})))
-		line := formatSmokeCall(t, id, map[string]any{"source": ""})
+		id := strings.Repeat("a", formatSmokeFrameLimit-len(compactCall("", smokeObject{{"source", ""}})))
+		line := compactCall(id, smokeObject{{"source", ""}})
 		if len(line) != formatSmokeFrameLimit {
 			t.Fatalf("request line is %d bytes", len(line))
 		}
-		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, formatSmokeReady, line, formatSmokePing)
+		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, ready, line, ping)
 		if code != 0 || !reflect.DeepEqual(formatSmokeIDs(replies), []any{1.0, id, 3.0}) {
 			t.Fatalf("exit %d stdout=%.400q stderr=%q", code, stdout, stderr)
 		}
@@ -566,7 +577,7 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 		t.Run(fmt.Sprintf("mcp-separator-id-U+%04X", []rune(separator)[0]), func(t *testing.T) {
 			t.Parallel()
 			line, id := formatSmokeExactIDLine(t, validPrefix, validSuffix, separator)
-			replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, formatSmokeReady, line, formatSmokePing)
+			replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, ready, line, ping)
 			if code != 0 || !reflect.DeepEqual(formatSmokeIDs(replies), []any{1.0, id, 3.0}) {
 				t.Fatalf("exit %d stdout=%.400q stderr=%q", code, stdout, stderr)
 			}
@@ -592,7 +603,7 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 	} {
 		t.Run("mcp-missing-arguments-"+c.name, func(t *testing.T) {
 			t.Parallel()
-			replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, formatSmokeReady, c.line, formatSmokePing)
+			replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, ready, c.line, ping)
 			if code != 0 || !reflect.DeepEqual(formatSmokeIDs(replies), []any{1.0, c.id, 3.0}) {
 				t.Fatalf("exit %d stdout=%.400q stderr=%q", code, stdout, stderr)
 			}
@@ -611,7 +622,7 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 		if len(line) != formatSmokeFrameLimit {
 			t.Fatalf("request line is %d bytes", len(line))
 		}
-		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, formatSmokeReady, line, formatSmokePing)
+		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain, initialize, ready, line, ping)
 		if code != 0 || !reflect.DeepEqual(formatSmokeIDs(replies), []any{1.0, 2.0, 3.0}) {
 			t.Fatalf("exit %d stdout=%.400q stderr=%q", code, stdout, stderr)
 		}
@@ -622,15 +633,16 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 
 	t.Run("mcp-id-variants", func(t *testing.T) {
 		t.Parallel()
-		call := `,"method":"tools/call","params":{"name":"code.format","arguments":{"source":""}}}`
-		quoted := "quote\"\u0001"
-		replies, stdout, stderr, code := formatSmokeMCP(t, binary, chain,
-			formatSmokeInitialize(t, "format-id-variants"),
+		empty := smokeObject{{"source", ""}}
+		quoted := "quote\"\x01"
+		replies, stdout, stderr, code := formatSmokeSession(t, binary, chain,
+			formatSmokeInitialize("format-id-variants"),
 			formatSmokeReady,
-			`{"jsonrpc":"2.0","id":-0.0`+call,
-			`{"jsonrpc":"2.0","id":null`+call,
-			formatSmokeCall(t, quoted, map[string]any{"source": ""}),
-			formatSmokePing,
+			// Python's json.dumps(-0.0) spells the negative zero.
+			formatSmokeCall(json.Number("-0.0"), empty),
+			formatSmokeCall(nil, empty),
+			formatSmokeCall(quoted, empty),
+			formatSmokePing(3),
 		)
 		if code != 0 || !reflect.DeepEqual(formatSmokeIDs(replies), []any{1.0, 0.0, nil, quoted, 3.0}) {
 			t.Fatalf("exit %d stdout=%q stderr=%q", code, stdout, stderr)
@@ -647,11 +659,11 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		formatSmokeWrite(t, filepath.Join(dir, "invalid-utf8.ef"), []byte("// invalid \xff\neffect fn main() -> void { void }\n"))
-		replies, stdout, stderr, code := formatSmokeMCP(t, binary, dir,
-			formatSmokeInitialize(t, "format-utf8"),
+		replies, stdout, stderr, code := formatSmokeSession(t, binary, dir,
+			formatSmokeInitialize("format-utf8"),
 			formatSmokeReady,
-			formatSmokeCall(t, 2, map[string]any{"file": "invalid-utf8.ef"}),
-			formatSmokePing,
+			formatSmokeCall(2, smokeObject{{"file", "invalid-utf8.ef"}}),
+			formatSmokePing(3),
 		)
 		if code != 0 || len(replies) != 3 || !formatSmokeEmptyResult(replies[2]) {
 			t.Fatalf("exit %d stdout=%q stderr=%q", code, stdout, stderr)

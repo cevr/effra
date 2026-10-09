@@ -21,7 +21,7 @@ import (
 // diagnostics_smoke_linux_test.go.
 
 // diagnosticsSmokeRequests is one MCP session calling project.diagnostics
-// once per argument, followed by a ping.
+// once per argument, followed by a ping, each line json.dumps(message).
 func diagnosticsSmokeRequests(t *testing.T, arguments []map[string]any) string {
 	t.Helper()
 	messages := []any{
@@ -37,7 +37,7 @@ func diagnosticsSmokeRequests(t *testing.T, arguments []map[string]any) string {
 	messages = append(messages, map[string]any{"jsonrpc": "2.0", "id": "after", "method": "ping"})
 	var input strings.Builder
 	for _, message := range messages {
-		input.Write(mustJSON(t, message))
+		input.Write(smokeDumps(t, message))
 		input.WriteByte('\n')
 	}
 	return input.String()
@@ -186,14 +186,14 @@ func diagnosticsSmokeEpochControls(t *testing.T, report, remote map[string]any) 
 func TestDiagnosticsSmokePositions(t *testing.T) {
 	binary := buildTestCLI(t)
 	warning := "effect fn task() -> string { \"ok\" }\r\n" +
-		"effect fn main() -> string { let s = \"𐐀é\"; " +
+		"effect fn main() -> string { let s = \"𐐀e\u0301\"; " +
 		"let forgotten = task(); run task().provide<Console>(Stdout) }\r\n"
 	for index, fixture := range []struct {
 		name     string
 		source   string
 		expected []diagnosticsSmokeFinding
 	}{
-		{"unicode.ef", "effect fn main() -> void { \"𐐀é\" @ }", []diagnosticsSmokeFinding{{"EF001", "@", 1, "error", 1}}},
+		{"unicode.ef", "effect fn main() -> void { \"𐐀e\u0301\" @ }", []diagnosticsSmokeFinding{{"EF001", "@", 1, "error", 1}}},
 		{"crlf.ef", "// comment\r\neffect fn main() -> void { void }\r\n@", []diagnosticsSmokeFinding{{"EF001", "@", 1, "error", 1}}},
 		{"eof.ef", "effect fn main() -> void {\r\n", []diagnosticsSmokeFinding{{"EF002", "", 0, "error", 1}}},
 		{"warning.ef", warning, []diagnosticsSmokeFinding{{"EFL001", "let forgotten", 3, "warning", 2}, {"EFL002", "provide", 7, "hint", 4}}},

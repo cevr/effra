@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -9,8 +10,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // The process smokes formerly lived in Python scripts and drove bin/ef
@@ -323,4 +327,124 @@ func deepCopyJSON(t *testing.T, value map[string]any) map[string]any {
 		t.Fatal(err)
 	}
 	return result
+}
+
+// smokeObject is a JSON object whose members keep their written order, as
+// the members of a Python dict literal do, so a request built from it
+// encodes to the exact bytes the Python smoke sent.
+type smokeObject []smokeMember
+
+type smokeMember struct {
+	key   string
+	value any
+}
+
+func (object smokeObject) MarshalJSON() ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	buffer.WriteByte('{')
+	for index, member := range object {
+		if index > 0 {
+			buffer.WriteByte(',')
+		}
+		if err := encoder.Encode(member.key); err != nil {
+			return nil, err
+		}
+		buffer.Truncate(buffer.Len() - 1)
+		buffer.WriteByte(':')
+		if err := encoder.Encode(member.value); err != nil {
+			return nil, err
+		}
+		buffer.Truncate(buffer.Len() - 1)
+	}
+	buffer.WriteByte('}')
+	return buffer.Bytes(), nil
+}
+
+// smokeDumps encodes a request as Python's json.dumps(value): characters
+// outside printable ASCII as \uXXXX escapes (astral ones as UTF-16 surrogate
+// pairs), <, > and & literal, and ", " and ": " separators. A map's members
+// are ordered by key, which no server's decoding depends on; a smokeObject
+// keeps its written order and so reproduces Python's bytes exactly.
+func smokeDumps(t *testing.T, value any) []byte {
+	t.Helper()
+	return smokePythonJSON(t, value, true, true)
+}
+
+// smokeDumpsUTF8 encodes as json.dumps(value, ensure_ascii=False): text
+// stays literal UTF-8, line and paragraph separators included.
+func smokeDumpsUTF8(t *testing.T, value any) []byte {
+	t.Helper()
+	return smokePythonJSON(t, value, false, true)
+}
+
+// smokeDumpsCompact encodes as json.dumps(value, separators=(",", ":")).
+func smokeDumpsCompact(t *testing.T, value any) []byte {
+	t.Helper()
+	return smokePythonJSON(t, value, true, false)
+}
+
+func smokePythonJSON(t *testing.T, value any, asciiOnly, spaced bool) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		t.Fatal(err)
+	}
+	return pythonJSON(bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), asciiOnly, spaced)
+}
+
+// pythonJSON rewrites Go's compact, HTML-unescaped JSON to Python's
+// spelling. Both escape quote, backslash and C0 controls alike. Go also
+// escapes U+2028 and U+2029, which Python leaves literal unless asciiOnly,
+// where Python escapes every character outside printable ASCII. Python
+// separates members and items with ", " and keys with ": " unless compact.
+func pythonJSON(encoded []byte, asciiOnly, spaced bool) []byte {
+	var out bytes.Buffer
+	inString := false
+	for index := 0; index < len(encoded); {
+		c := encoded[index]
+		switch {
+		case !inString:
+			inString = c == '"'
+			out.WriteByte(c)
+			if spaced && (c == ',' || c == ':') {
+				out.WriteByte(' ')
+			}
+			index++
+		case c == '\\' && encoded[index+1] == 'u':
+			escape := string(encoded[index : index+6])
+			if code, _ := strconv.ParseUint(escape[2:], 16, 16); !asciiOnly && (code == 0x2028 || code == 0x2029) {
+				out.WriteRune(rune(code))
+			} else {
+				out.WriteString(escape)
+			}
+			index += 6
+		case c == '\\':
+			out.Write(encoded[index : index+2])
+			index += 2
+		case c == '"':
+			inString = false
+			out.WriteByte(c)
+			index++
+		case c == 0x7f && asciiOnly:
+			fmt.Fprintf(&out, "\\u%04x", c)
+			index++
+		case c < utf8.RuneSelf || !asciiOnly:
+			out.WriteByte(c)
+			index++
+		default:
+			r, size := utf8.DecodeRune(encoded[index:])
+			if r >= 0x10000 {
+				high, low := utf16.EncodeRune(r)
+				fmt.Fprintf(&out, "\\u%04x\\u%04x", high, low)
+			} else {
+				fmt.Fprintf(&out, "\\u%04x", r)
+			}
+			index += size
+		}
+	}
+	return out.Bytes()
 }

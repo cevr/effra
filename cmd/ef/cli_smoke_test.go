@@ -538,7 +538,7 @@ func cliSmokeMCP(t *testing.T, binary, dir, workspace string, deadline time.Dura
 	t.Helper()
 	var input bytes.Buffer
 	for _, message := range messages {
-		input.Write(mustJSON(t, message))
+		input.Write(smokeDumps(t, message))
 		input.WriteByte('\n')
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)

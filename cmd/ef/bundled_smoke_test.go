@@ -61,7 +61,7 @@ func bundledSmokeMCP(t *testing.T, binary, directory, client string, calls ...ma
 	}
 	var input strings.Builder
 	for _, message := range messages {
-		input.Write(mustJSON(t, message))
+		input.Write(smokeDumps(t, message))
 		input.WriteByte('\n')
 	}
 	stdout, stderr, code := runTestCLIDir(t, binary, directory, input.String(), "mcp", directory)

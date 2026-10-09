@@ -413,7 +413,7 @@ func producerSmokeStart(t *testing.T, binary, workspace string) *producerSmokeSe
 
 func (s *producerSmokeServer) send(message map[string]any) {
 	s.t.Helper()
-	if _, err := s.stdin.Write(append(mustJSON(s.t, message), '\n')); err != nil {
+	if _, err := s.stdin.Write(append(smokeDumps(s.t, message), '\n')); err != nil {
 		s.t.Fatalf("write MCP request: %v", err)
 	}
 }

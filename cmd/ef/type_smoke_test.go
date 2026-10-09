@@ -658,7 +658,7 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 			}
 			var input bytes.Buffer
 			for _, request := range requests {
-				input.Write(mustJSON(t, request))
+				input.Write(smokeDumps(t, request))
 				input.WriteByte('\n')
 			}
 			stdout, stderr, code := runTestCLIDir(t, binary, workspace, input.String(), "mcp", workspace)

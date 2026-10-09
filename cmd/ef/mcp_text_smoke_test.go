@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"testing"
 )
 
@@ -12,18 +11,12 @@ import (
 func TestCompiledMCPAdmitsTextLosslesslyAndAnswersQueuedPing(t *testing.T) {
 	binary := buildTestCLI(t)
 	workspace := smokeWorkspace(t)
-	line := func(value any) []byte {
-		data, err := json.Marshal(value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return append(data, '\n')
-	}
-	initialize := line(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{
-		"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "mcp-text-smoke", "version": "1"},
-	}})
-	ready := line(map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"})
-	ping := line(map[string]any{"jsonrpc": "2.0", "id": 3, "method": "ping"})
+	// The exact lines the Python smoke's json_line produced.
+	const (
+		initialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"mcp-text-smoke","version":"1"}}}` + "\n"
+		ready      = `{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"
+		ping       = `{"jsonrpc":"2.0","id":3,"method":"ping"}` + "\n"
+	)
 	formatRequest := func(sourceJSON []byte) []byte {
 		request := []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"code.format","arguments":{"source":`)
 		request = append(request, sourceJSON...)
@@ -38,14 +31,16 @@ func TestCompiledMCPAdmitsTextLosslesslyAndAnswersQueuedPing(t *testing.T) {
 		{"unpaired-high-surrogate", `"// \ud800"`, true},
 		{"unpaired-low-surrogate", `"// \udc00"`, true},
 		{"literal-replacement-character", "\"// �\"", false},
-		{"astral-surrogate-pair", `"// 😀"`, false},
+		// The escaped pair, not literal UTF-8: its admission is the control
+		// for the unpaired escapes above.
+		{"astral-surrogate-pair", `"// \ud83d\ude00"`, false},
 		{"literal-backslash", `"// \\ud800"`, false},
 		{"empty", `""`, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			input := bytes.Join([][]byte{initialize, ready, formatRequest([]byte(c.sourceJSON)), ping}, nil)
-			stdout, stderr, code := runTestCLIDir(t, binary, workspace, string(input), "mcp", workspace)
+			input := initialize + ready + string(formatRequest([]byte(c.sourceJSON))) + ping
+			stdout, stderr, code := runTestCLIDir(t, binary, workspace, input, "mcp", workspace)
 			if code != 0 || len(stderr) != 0 {
 				t.Fatalf("exit %d stdout=%q stderr=%q", code, stdout, stderr)
 			}

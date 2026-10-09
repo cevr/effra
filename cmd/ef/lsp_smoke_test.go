@@ -89,22 +89,12 @@ func lspSmokeCall(method string, params any, id any) map[string]any {
 	return value
 }
 
-// lspSmokeJSON encodes like the smoke's json.dumps(ensure_ascii=False):
-// UTF-8 text and no HTML escaping.
-func lspSmokeJSON(t *testing.T, value any) []byte {
-	t.Helper()
-	var body bytes.Buffer
-	encoder := json.NewEncoder(&body)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(value); err != nil {
-		t.Fatal(err)
-	}
-	return bytes.TrimSuffix(body.Bytes(), []byte("\n"))
-}
-
+// lspSmokeFrame frames a message as the smoke did: its body is
+// json.dumps(value, ensure_ascii=False), so a fragmented write splits literal
+// UTF-8 sequences.
 func lspSmokeFrame(t *testing.T, value any) []byte {
 	t.Helper()
-	body := lspSmokeJSON(t, value)
+	body := smokeDumpsUTF8(t, value)
 	return append([]byte(fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))), body...)
 }
 
@@ -356,7 +346,7 @@ func lspSmokeResult(t *testing.T, reply map[string]any) any {
 func lspSmokeSame(t *testing.T, got, want any, context string) {
 	t.Helper()
 	if !sameJSONValue(got, want) {
-		t.Fatalf("%s:\n got %s\nwant %s", context, lspSmokeJSON(t, got), lspSmokeJSON(t, want))
+		t.Fatalf("%s:\n got %s\nwant %s", context, smokeDumpsUTF8(t, got), smokeDumpsUTF8(t, want))
 	}
 }
 
@@ -387,11 +377,13 @@ func (c lspSmokeCLI) diagnostics(t *testing.T, path string) map[string]any {
 	return report
 }
 
+// mcp sends each request as json.dumps(request), the smoke's ASCII-escaped
+// MCP encoding, to one stdio session.
 func (c lspSmokeCLI) mcp(t *testing.T, directory string, requests []any) []map[string]any {
 	t.Helper()
 	var input bytes.Buffer
 	for _, request := range requests {
-		input.Write(lspSmokeJSON(t, request))
+		input.Write(smokeDumps(t, request))
 		input.WriteByte('\n')
 	}
 	stdout, stderr, code, err := lspSmokeRun(c.binary, c.cwd, input.String(), "mcp", directory)
@@ -452,10 +444,10 @@ func (c lspSmokeCLI) mcpTools(t *testing.T, directory, tool string, arguments []
 
 func lspSmokeParity(t *testing.T, cli lspSmokeCLI) {
 	warning := "effect fn task() -> string { \"ok\" }\r\n" +
-		"effect fn main() -> string { let s = \"𐐀é\"; " +
+		"effect fn main() -> string { let s = \"𐐀e\u0301\"; " +
 		"let forgotten = task(); run task().provide<Console>(Stdout) }\r\n"
 	fixtures := []struct{ name, text string }{
-		{"unicode.ef", "effect fn main() -> void { \"𐐀é\" @ }"},
+		{"unicode.ef", "effect fn main() -> void { \"𐐀e\u0301\" @ }"},
 		{"crlf.ef", "// comment\r\neffect fn main() -> void { void }\r\n@"},
 		{"eof.ef", "effect fn main() -> void {\r\n"},
 		{"warning.ef", warning},
