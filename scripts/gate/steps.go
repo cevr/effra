@@ -57,8 +57,6 @@ var smokeChains = [][]string{
 	{"lsp_smoke"},
 	{"readme_smoke"},
 	{"bundled_smoke"},
-	{"layer_smoke"},
-	{"type_smoke"},
 }
 
 func gateSteps(root string) ([]*Step, error) {

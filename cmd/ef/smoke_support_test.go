@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -102,15 +104,33 @@ func adapterSemantic(value map[string]any) map[string]any {
 	return result
 }
 
+// Current wire epochs of a decorated report and of its embedded semantic
+// snapshot; the two advance independently.
+const (
+	defaultReportSchema   = 8
+	defaultSnapshotSchema = 8
+)
+
 var artifactDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-// producerSnapshot validates one decorated response and returns its producer
-// identity. An empty target accepts the response's own.
+// producerSnapshot validates one response envelope and its independent
+// snapshot epoch and returns its producer identity, failing the test when the
+// response is malformed. An empty target accepts the response's own.
 func producerSnapshot(t *testing.T, value map[string]any, target string, snapshotSchema int) map[string]any {
 	t.Helper()
+	producer, err := checkProducerSnapshot(value, target, snapshotSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return producer
+}
+
+// checkProducerSnapshot is producerSnapshot reporting a malformed response as
+// an error, so a control can observe the oracle refusing one.
+func checkProducerSnapshot(value map[string]any, target string, snapshotSchema int) (map[string]any, error) {
 	for _, key := range []string{"schemaVersion", "revision", "target", "producer", "snapshot"} {
 		if _, ok := value[key]; !ok {
-			t.Fatalf("decorated response lacks %s: %v", key, value)
+			return nil, fmt.Errorf("decorated response lacks %s: %v", key, value)
 		}
 	}
 	expectedTarget := value["target"]
@@ -118,16 +138,22 @@ func producerSnapshot(t *testing.T, value map[string]any, target string, snapsho
 		expectedTarget = target
 	}
 	if value["target"] != expectedTarget {
-		t.Fatalf("target = %v, want %v", value["target"], expectedTarget)
+		return nil, fmt.Errorf("target = %v, want %v", value["target"], expectedTarget)
 	}
 	producer, ok := value["producer"].(map[string]any)
 	snapshot, ok2 := value["snapshot"].(map[string]any)
 	if !ok || !ok2 {
-		t.Fatalf("producer and snapshot must be objects: %v", value)
+		return nil, fmt.Errorf("producer and snapshot must be objects: %v", value)
+	}
+	if !positiveJSONInt(value["schemaVersion"]) {
+		return nil, fmt.Errorf("report schema %#v is not a positive integer", value["schemaVersion"])
+	}
+	if snapshotSchema <= 0 {
+		return nil, fmt.Errorf("expected snapshot schema %d is not positive", snapshotSchema)
 	}
 	for _, key := range []string{"strength", "qualifier", "reuseScope"} {
 		if _, ok := producer[key]; !ok {
-			t.Fatalf("producer lacks %s: %v", key, producer)
+			return nil, fmt.Errorf("producer lacks %s: %v", key, producer)
 		}
 	}
 	scope := producer["reuseScope"]
@@ -135,30 +161,33 @@ func producerSnapshot(t *testing.T, value map[string]any, target string, snapsho
 	case "artifact":
 		digest, _ := producer["digest"].(string)
 		if producer["strength"] != "executing-artifact" || !artifactDigest.MatchString(digest) || producer["qualifier"] != digest {
-			t.Fatalf("artifact producer: %v", producer)
+			return nil, fmt.Errorf("artifact producer: %v", producer)
 		}
 		if reason, ok := producer["reason"]; ok && reason != "" {
-			t.Fatalf("artifact producer carries a reason: %v", producer)
+			return nil, fmt.Errorf("artifact producer carries a reason: %v", producer)
 		}
 	case "process", "none":
 		if producer["strength"] != "unavailable" {
-			t.Fatalf("unavailable producer: %v", producer)
+			return nil, fmt.Errorf("unavailable producer: %v", producer)
 		}
 		if digest, ok := producer["digest"]; ok && digest != "" {
-			t.Fatalf("unavailable producer carries a digest: %v", producer)
+			return nil, fmt.Errorf("unavailable producer carries a digest: %v", producer)
 		}
 		if reason, _ := producer["reason"].(string); reason == "" {
-			t.Fatalf("unavailable producer lacks a reason: %v", producer)
+			return nil, fmt.Errorf("unavailable producer lacks a reason: %v", producer)
 		}
 		qualifier, _ := producer["qualifier"].(string)
 		if scope == "process" && (!strings.HasPrefix(qualifier, "process:") || len(qualifier) <= len("process:")) {
-			t.Fatalf("process producer qualifier: %v", producer)
+			return nil, fmt.Errorf("process producer qualifier: %v", producer)
 		}
 		if scope == "none" && qualifier != "" {
-			t.Fatalf("none producer qualifier: %v", producer)
+			return nil, fmt.Errorf("none producer qualifier: %v", producer)
 		}
 	default:
-		t.Fatalf("reuse scope %v", scope)
+		return nil, fmt.Errorf("reuse scope %v", scope)
+	}
+	if observed := snapshot["schemaVersion"]; !positiveJSONInt(observed) || observed != float64(snapshotSchema) {
+		return nil, fmt.Errorf("snapshot schema = %#v, want %d", observed, snapshotSchema)
 	}
 	want := map[string]any{
 		"schemaVersion": float64(snapshotSchema),
@@ -168,9 +197,16 @@ func producerSnapshot(t *testing.T, value map[string]any, target string, snapsho
 		"reuseScope":    scope,
 	}
 	if !reflect.DeepEqual(snapshot, want) {
-		t.Fatalf("snapshot = %v, want %v", snapshot, want)
+		return nil, fmt.Errorf("snapshot = %v, want %v", snapshot, want)
 	}
-	return producer
+	return producer, nil
+}
+
+// positiveJSONInt reports whether a decoded JSON value is a positive integer:
+// a boolean or fractional number is not.
+func positiveJSONInt(value any) bool {
+	number, ok := value.(float64)
+	return ok && number > 0 && number == math.Trunc(number)
 }
 
 // parityOptions are assertReportParity's optional projections.
@@ -178,8 +214,8 @@ type parityOptions struct {
 	target         string
 	ignored        []string
 	project        func(map[string]any) map[string]any
-	reportSchema   int // default 7
-	snapshotSchema int // default 7
+	reportSchema   int // default defaultReportSchema
+	snapshotSchema int // default defaultSnapshotSchema
 }
 
 // assertReportParity compares decorated reports without erasing their
@@ -189,10 +225,10 @@ type parityOptions struct {
 func assertReportParity(t *testing.T, actual, expected map[string]any, options parityOptions) {
 	t.Helper()
 	if options.reportSchema == 0 {
-		options.reportSchema = 7
+		options.reportSchema = defaultReportSchema
 	}
 	if options.snapshotSchema == 0 {
-		options.snapshotSchema = 7
+		options.snapshotSchema = defaultSnapshotSchema
 	}
 	for _, report := range []map[string]any{actual, expected} {
 		if report["schemaVersion"] != float64(options.reportSchema) {

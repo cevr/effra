@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -36,11 +35,8 @@ effect fn main() -> string raises {Child} {
  run child.join()
 }
 effect fn fetch(item: string) -> string uses {Labels} { run Labels.read(item) }
+effect fn guarded<E: raises>(notice: Notice, cb: effect fn(Notice) -> string raises {E}) -> string raises {E, Child} { "ok" }
 `
-
-// typeSmokeProbeEnv names the file a re-executed test binary reads to run
-// producerSnapshot on one response; see TestTypeSmokeProducerSnapshotProbe.
-const typeSmokeProbeEnv = "EFFRA_TYPE_SMOKE_PRODUCER_PROBE"
 
 // typeSmokeSelector is one cursor selection: a name and the byte offset just
 // after the given prefix of the matched text.
@@ -353,47 +349,12 @@ func typeSmokeAssertCausalWireRejections(t *testing.T, value map[string]any, lab
 	rejected(missingRows, "missing row")
 }
 
-// TestTypeSmokeProducerSnapshotProbe runs producerSnapshot on one response
-// in a re-executed test binary, so the parent can observe the shared oracle
-// refusing a response without failing itself. It skips in ordinary runs.
-func TestTypeSmokeProducerSnapshotProbe(t *testing.T) {
-	path := os.Getenv(typeSmokeProbeEnv)
-	if path == "" {
-		t.Skip("runs only as the producer-snapshot probe of TestTypeSmokeSelectedFactsAndCanonicalDefinitions")
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var probe struct {
-		Value  map[string]any `json:"value"`
-		Target string         `json:"target"`
-	}
-	if err := json.Unmarshal(data, &probe); err != nil {
-		t.Fatal(err)
-	}
-	producerSnapshot(t, probe.Value, probe.Target, 7)
-}
-
-// typeSmokeProducerSnapshotAccepts reports whether producerSnapshot accepts
-// value, judged by the probe test in a child test process.
+// typeSmokeProducerSnapshotAccepts reports whether the shared producer
+// oracle accepts value.
 func typeSmokeProducerSnapshotAccepts(t *testing.T, value map[string]any, target string) bool {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "probe.json")
-	if err := os.WriteFile(path, mustJSON(t, map[string]any{"value": value, "target": target}), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.Command(os.Args[0], "-test.run=^TestTypeSmokeProducerSnapshotProbe$", "-test.count=1", "-test.v")
-	command.Env = append(os.Environ(), typeSmokeProbeEnv+"="+path)
-	output, err := command.CombinedOutput()
-	switch {
-	case err == nil && bytes.Contains(output, []byte("--- PASS: TestTypeSmokeProducerSnapshotProbe")):
-		return true
-	case err != nil && bytes.Contains(output, []byte("--- FAIL: TestTypeSmokeProducerSnapshotProbe")):
-		return false
-	}
-	t.Fatalf("producer-snapshot probe did not run: %v\n%s", err, output)
-	return false
+	_, err := checkProducerSnapshot(value, target, defaultSnapshotSchema)
+	return err == nil
 }
 
 // typeSmokeAssertSnapshotSchemaControls proves the shared producer oracle
@@ -451,7 +412,11 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 		{"bundled", typeSmokeOffset(t, "Fns.identity", len("Fns."))},
 		{"module-alias", typeSmokeOffset(t, "Fns.identity", 0)},
 		{"variant", typeSmokeOffset(t, "Notice.Named {", len("Notice."))},
+		{"annotation", typeSmokeOffset(t, "notice: Notice)", len("notice: "))},
+		{"row-parameter", typeSmokeOffset(t, "raises {E, Child}", len("raises {"))},
+		{"row-label", typeSmokeOffset(t, "raises {E, Child}", len("raises {E, "))},
 	}
+	namedSymbols := []string{"Labels", "Prefix", "Labels.read"}
 	for _, target := range []string{"go", "js"} {
 		t.Run(target, func(t *testing.T) {
 			t.Parallel()
@@ -468,7 +433,11 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 				typeArgs(path, "--symbol", "Notice"),
 				typeArgs(path, "--offset", strconv.Itoa(len(typeSmokeSource))),
 				typeArgs(invalid, "--symbol", "invalid"),
+				typeArgs(path, "--symbol", "Labels.missing"),
 			)
+			for _, name := range namedSymbols {
+				commands = append(commands, typeArgs(path, "--symbol", name))
+			}
 			runs := typeSmokeRunAll(binary, workspace, commands)
 			views := map[string]map[string]any{}
 			for index, selector := range selectors {
@@ -478,12 +447,17 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 			nominal := typeSmokeSucceeded(t, runs[len(selectors)+1])
 			typeSmokeRefused(t, runs[len(selectors)+2])
 			typeSmokeRefused(t, runs[len(selectors)+3])
+			typeSmokeRefused(t, runs[len(selectors)+4])
+			named := map[string]map[string]any{}
+			for index, name := range namedSymbols {
+				named[name] = typeSmokeSucceeded(t, runs[len(selectors)+5+index])
+			}
 
-			artifact := producerSnapshot(t, views["use"], target, 7)
+			artifact := producerSnapshot(t, views["use"], target, defaultSnapshotSchema)
 			artifactScope := artifact["reuseScope"] == "artifact"
 			for _, selector := range selectors {
 				view := views[selector.name]
-				if !typeSmokeTruthy(view["checked"]) || !typeSmokeTruthy(view["typeProjectionComplete"]) || view["querySchemaVersion"] != float64(2) {
+				if !typeSmokeTruthy(view["checked"]) || !typeSmokeTruthy(view["typeProjectionComplete"]) || view["querySchemaVersion"] != float64(4) {
 					t.Fatalf("%s: unchecked or incomplete view: %v", selector.name, view)
 				}
 				if !typeSmokeTruthy(view["producerIdentity"]) || !typeSmokeTruthy(view["sources"]) || !typeSmokeTruthy(view["bundledInterfaces"]) {
@@ -492,7 +466,7 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 				if !typeSmokeTruthy(typeSmokeAt(t, view, "selection", "locationAvailable")) {
 					t.Fatalf("%s: selection location unavailable", selector.name)
 				}
-				current := producerSnapshot(t, view, target, 7)
+				current := producerSnapshot(t, view, target, defaultSnapshotSchema)
 				if artifactScope && !reflect.DeepEqual(current, artifact) {
 					t.Fatalf("%s: producer %v, want %v", selector.name, current, artifact)
 				}
@@ -555,6 +529,22 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 				{"variant owner", declared("variant", "owner"), "Notice"},
 				{"variant offset", declared("variant", "span", "offset"), sourceOffset("Named {", 0)},
 				{"variant presentation", presentation("variant"), "variant Notice.Named { value: string }"},
+				// Annotation and row-label tokens resolve through the checked
+				// type and row: a row parameter is the function's own, other
+				// labels are errors.
+				{"annotation selection kind", selectionKind("annotation"), "reference"},
+				{"annotation kind", declared("annotation", "kind"), "enum"},
+				{"annotation offset", declared("annotation", "span", "offset"), sourceOffset("Notice {", 0)},
+				{"row-parameter kind", declared("row-parameter", "kind"), "rowParameter"},
+				{"row-parameter owner", declared("row-parameter", "owner"), "guarded"},
+				{"row-parameter offset", declared("row-parameter", "span", "offset"), sourceOffset("guarded<E", len("guarded<"))},
+				{"row-parameter presentation", presentation("row-parameter"), "row parameter guarded.E: raises"},
+				{"row-label kind", declared("row-label", "kind"), "error"},
+				{"row-label presentation", presentation("row-label"), "error Child"},
+				{"Labels target kind", typeSmokeAt(t, named["Labels"], "selection", "target", "kind"), "service"},
+				{"Prefix target kind", typeSmokeAt(t, named["Prefix"], "selection", "target", "kind"), "provider"},
+				{"Labels.read target kind", typeSmokeAt(t, named["Labels.read"], "selection", "target", "kind"), "operation"},
+				{"Labels.read presentation", typeSmokeAt(t, named["Labels.read"], "selection", "presentation"), "effect fn Labels.read(item: string) -> string"},
 				{"unrelated selection kind", typeSmokeAt(t, unrelated, "selection", "kind"), "declaration"},
 				{"nominal selection kind", typeSmokeAt(t, nominal, "selection", "kind"), "declaration"},
 				{"nominal field type", typeSmokeAt(t, nominal, "selection", "declaration", "variants", 0, "fields", 0, "type"), "string"},
@@ -589,7 +579,7 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 			typeSmokeRefused(t, runs[2])
 			typeSmokeRefused(t, runs[3])
 
-			definitionProducer := producerSnapshot(t, definition, target, 7)
+			definitionProducer := producerSnapshot(t, definition, target, defaultSnapshotSchema)
 			if artifactScope && !reflect.DeepEqual(definitionProducer, artifact) {
 				t.Fatalf("definition producer %v, want %v", definitionProducer, artifact)
 			}
@@ -650,6 +640,10 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 				typeSmokeTool(27, typeSmokeMerge(map[string]any{"file": file, "target": target, "definition": fiberID,
 					"expectedRevision": revision}, guard)),
 			)
+			for index, name := range namedSymbols {
+				requests = append(requests, typeSmokeTool(28+index, typeSmokeMerge(map[string]any{
+					"file": file, "target": target, "symbol": name}, guard)))
+			}
 			if artifactScope {
 				staleQualifier := "sha256:" + strings.Repeat("0", 64)
 				if staleQualifier == artifact["qualifier"] {
@@ -706,6 +700,9 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 			}
 			assertReportParity(t, structured(20), unrelated, parityOptions{target: target})
 			assertReportParity(t, structured(21), definition, parityOptions{target: target})
+			for index, name := range namedSymbols {
+				assertReportParity(t, structured(28+index), named[name], parityOptions{target: target})
+			}
 			actualFiberDefinition := structured(27)
 			assertReportParity(t, actualFiberDefinition, fiberDefinition, parityOptions{target: target})
 			if mcpFiber == nil {
