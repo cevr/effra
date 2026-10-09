@@ -164,9 +164,14 @@ defect or interruption propagates unchanged and is never a
 `JsonDecodeFailure`/`JsonEncodeFailure`.
 
 Decoding validates the whole structure first and only then runs decode
-transformations in declared depth-first order, so malformed input never
-reaches a transformation or its services. Encoding runs encode
-transformations first, in the same order, and then writes bounded output.
+transformations depth first in declared field order, each after the
+transformations nested in its representation, so malformed input never
+reaches a transformation or its services. Encoding runs each encode
+transformation before those nested in its representation, as the bounded
+writer reaches it, and retains nothing beyond the bounded output: once the
+output exceeds `maxBodyBytes` it stops writing but still runs the remaining
+transformations, so every transformation runs before a structural failure
+is reported and a transformation's failure takes precedence over it.
 
 ### Failure witnesses and typed endpoints
 
@@ -220,9 +225,11 @@ function with EF102. A transform node adds no nesting of its own; its
 representation's nesting counts against `maxDepth`.
 
 Inspection reports a transformed witness's `representation`, its `with`
-list, and each direction's `transformations` in execution order with the
-witness, the first plan path where it applies, its function and that
-function's own failures and requirements. Plans carry `transform` nodes
+list, and each direction's `transformations` in the order of each
+witness's first invocation by that direction (decoding lists a nested
+witness before its parent, encoding after it) with the plan path of that
+invocation, its function and that function's own failures and
+requirements. Plans carry `transform` nodes
 with the witness, child node, step index and both function identities;
 structural nodes under a `with` scope have a scoped identity, so equal
 scopes share a plan. [`examples/codec-transforms.ef`](../examples/codec-transforms.ef)

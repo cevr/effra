@@ -633,3 +633,59 @@ console.log("bounded: done");
 		t.Fatalf("JS encode constructed output beyond the bound:\n%s", output)
 	}
 }
+
+// The JS engine's encode retains nothing beyond its bounded output: a value
+// of 40 small objects whose shared children expand to 2^20 transformed
+// leaves runs every step in order and fails body-too-large under a 64-byte
+// budget, while the heap measured at the last step, after a full
+// collection, stays near its starting size (preparing a full tree first
+// held a copy of every expanded record there). A failing last step still
+// takes precedence over the deferred body-too-large, and the same plan over
+// three levels fits a 128-byte budget and encodes exactly.
+func TestCodecJSEngineEncodeRetainsNoPreparedTree(t *testing.T) {
+	_, root := readCodecVectors(t)
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("Bun is required for codec conformance vectors")
+	}
+	output := runCodecJS(t, bun, root, `
+const shared = (levels, maxBodyBytes) => {
+  const nodes = [{ kind: "string" }, { kind: "transform", type: "witness:leafJson", child: 0, step: 0 }];
+  let value = "x";
+  for (let level = 1; level <= levels; level++) {
+    nodes.push({ kind: "record", type: "Level" + level, fields: [{ name: "a", node: nodes.length - 1 }, { name: "b", node: nodes.length - 1 }] });
+    value = { a: value, b: value };
+  }
+  return { codec: __ef_codecCompile({ profile: "effra/json-structural-1", bounds: { maxBodyBytes, maxDepth: levels + 1 }, root: nodes.length - 1, nodes }), value };
+};
+const drive = (requests, step) => {
+  let next = requests.next();
+  while (!next.done) next = requests.next(step(next.value.value));
+  return next.value;
+};
+const levels = 20, leaves = 2 ** levels;
+const { codec, value } = shared(levels, 64);
+Bun.gc(true);
+const before = process.memoryUsage().heapUsed;
+let calls = 0, retained = 0;
+const result = drive(codec.stream(value), leaf => {
+  if (++calls === leaves) { Bun.gc(true); retained = process.memoryUsage().heapUsed - before; }
+  return leaf;
+});
+if (result.ok || result.issue.reason !== "body-too-large" || calls !== leaves) throw new Error("shared value: " + JSON.stringify(result) + " after " + calls + " steps");
+if (retained > 8 * 1024 * 1024) throw new Error("encoding a 64-byte budget retained " + retained + " bytes for " + leaves + " leaves");
+calls = 0;
+try {
+  drive(codec.stream(value), leaf => { if (++calls === leaves) throw new Error("rejected"); return leaf; });
+  throw new Error("a failed last step was not reported");
+} catch (error) { if (error.message !== "rejected") throw error; }
+const small = shared(3, 128);
+const fitted = drive(small.codec.stream(small.value), leaf => leaf);
+const leaf = '{"a":"x","b":"x"}', pair = '{"a":' + leaf + ',"b":' + leaf + '}';
+if (!fitted.ok || new TextDecoder().decode(fitted.bytes) !== '{"a":' + pair + ',"b":' + pair + '}') throw new Error("fitting control " + JSON.stringify(fitted));
+console.log("bounded");
+`)
+	if string(output) != "bounded\n" {
+		t.Fatalf("JS engine: %s", output)
+	}
+}

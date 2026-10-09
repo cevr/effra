@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	rt "effra.local/prototype/runtime/effra"
 )
 
 // codecTransformSource composes a pure nominal witness, an effectful witness
@@ -121,17 +123,104 @@ func TestCodecTransformationRowsAreDirectionSpecific(t *testing.T) {
 		if !slices.Equal(decode.Failures, []string{"JsonDecodeFailure", "Unknown"}) || !slices.Equal(decode.Requirements, []string{"Lookup"}) {
 			t.Fatalf("%s: team decode contract: %+v", target, decode)
 		}
-		// Transformations are listed in the order the direction runs them,
-		// each at the first path where it applies, with its own rows.
+		// Transformations are listed in the order of each one's first
+		// invocation by the direction, at that invocation's path, with its
+		// own rows: decoding resolves Member's email before Member itself,
+		// encoding projects Member before its email.
 		var steps []string
 		for _, step := range team.Decode.Transformations {
 			steps = append(steps, step.Witness+"@"+step.Path+":"+step.Domain+"<-"+step.Representation+":"+strings.Join(step.Requirements, ","))
 		}
-		if want := []string{"memberJson@Team.lead:Member<-MemberWire:Lookup", "emailJson@Team.lead.email:Email<-string:"}; !slices.Equal(steps, want) {
+		if want := []string{"emailJson@Team.lead.email:Email<-string:", "memberJson@Team.lead:Member<-MemberWire:Lookup"}; !slices.Equal(steps, want) {
 			t.Fatalf("%s: decode transformations %q, want %q", target, steps, want)
 		}
-		if encode := team.Encode.Transformations; len(encode) != 2 || encode[0].Function == team.Decode.Transformations[0].Function || !slices.Equal(encode[0].Requirements, []string{"Journal"}) {
-			t.Fatalf("%s: encode transformations: %+v", target, encode)
+		steps = nil
+		for _, step := range team.Encode.Transformations {
+			steps = append(steps, step.Witness+"@"+step.Path+":"+strings.Join(step.Requirements, ","))
+		}
+		if want := []string{"memberJson@Team.lead:Journal", "emailJson@Team.lead.email:"}; !slices.Equal(steps, want) {
+			t.Fatalf("%s: encode transformations %q, want %q", target, steps, want)
+		}
+	}
+}
+
+// The published orders are the engine's: running teamJson's plan on the Go
+// codec engine with recording steps invokes each witness first in exactly
+// the inspected order for each direction, while the full traces show the
+// nesting (Member's email resolves before Member on decode, after it on
+// encode).
+func TestCodecTransformationInspectionMatchesObservedSteps(t *testing.T) {
+	r := Compile(codecTransformSource)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	var plan *CodecPlan
+	for _, codec := range r.Program.Codecs {
+		if codec.Name == "teamJson" {
+			plan = codec.plan
+		}
+	}
+	if plan == nil {
+		t.Fatal("teamJson has no plan")
+	}
+	type carrier struct {
+		variant int
+		fields  []any
+	}
+	runtimePlan := runtimeCodecPlanOf(plan)
+	for index, node := range plan.Nodes {
+		if node.Kind == rt.CodecTransform {
+			runtimePlan.Nodes[index].Type, runtimePlan.Nodes[index].Child, runtimePlan.Nodes[index].Step = node.ID, *node.Child, *node.Step
+			continue
+		}
+		if node.data != nil {
+			runtimePlan.Nodes[index].Construct = func(variant int, fields []any) any { return carrier{variant, append([]any{}, fields...)} }
+			runtimePlan.Nodes[index].Project = func(value any) (int, []any) { c := value.(carrier); return c.variant, c.fields }
+		}
+	}
+	codec, err := rt.CompileCodec(runtimePlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := []string{}
+	recording := func(direction string) []rt.CodecStep {
+		steps := make([]rt.CodecStep, len(plan.transforms))
+		for step, witness := range plan.transforms {
+			name := witness.Name
+			steps[step] = func(value any) (any, error) {
+				trace = append(trace, direction+":"+name)
+				return value, nil
+			}
+		}
+		return steps
+	}
+	firsts := func(direction string) []string {
+		out := []string{}
+		for _, entry := range trace {
+			if name, ok := strings.CutPrefix(entry, direction+":"); ok && !slices.Contains(out, name) {
+				out = append(out, name)
+			}
+		}
+		return out
+	}
+	value, err := codec.DecodeSteps([]byte(`{"lead":{"email":"a"},"contact":"b","backup":"c"}`), recording("decode"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := codec.EncodeSteps(value, recording("encode")); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"decode:emailJson", "decode:memberJson", "decode:emailJson", "decode:emailJson", "encode:memberJson", "encode:emailJson", "encode:emailJson", "encode:emailJson"}; !slices.Equal(trace, want) {
+		t.Fatalf("observed steps %q, want %q", trace, want)
+	}
+	team := codecInspectionNamed(t, r, "teamJson")
+	for direction, published := range map[string][]CodecTransformationInspection{"decode": team.Decode.Transformations, "encode": team.Encode.Transformations} {
+		names := []string{}
+		for _, step := range published {
+			names = append(names, step.Witness)
+		}
+		if observed := firsts(direction); !slices.Equal(names, observed) {
+			t.Fatalf("%s inspection %q, observed first invocations %q", direction, names, observed)
 		}
 	}
 }

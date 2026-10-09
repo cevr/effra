@@ -210,14 +210,14 @@ const __ef_codecParse = (data, maxDepth, text) => {
 
 // __ef_codecCompile validates a plan once (linear in nodes and edges) and
 // returns { decode(Uint8Array), encode(value), steps, pending, resolve,
-// prepare }. decode and encode run the structural phase and return
+// stream }. decode and encode run the structural phase and return
 // { ok: true, value | bytes } or { ok: false, issue }. A plan with transform
 // nodes has `pending` set and `steps` transformations: resolve(decoded) and
-// prepare(domain) are generators that yield { step, value } requests in
+// stream(domain) are generators that yield { step, value } requests in
 // declared depth-first order and receive each step's result, so the engine
 // stays synchronous and Effect-free while its caller runs the steps. Decoding
-// resolves only after the whole structure decoded; encoding prepares before
-// any byte is written.
+// resolves only after the whole structure decoded; stream writes as it goes
+// and returns encode's result once every step has run.
 const __ef_codecCompile = plan => {
   const invalid = message => { throw new Error("invalid codec plan: " + message); };
   const named = text => typeof text === "string" && text !== "" && text.isWellFormed();
@@ -381,11 +381,12 @@ const __ef_codecCompile = plan => {
       return { ok: true, value: decodeNode(root, __ef_codecParse(body, maxDepth, text), null) };
     });
   };
-  const encode = value => settle("encode", () => {
-    // Every byte is reserved against the allowance before the piece holding
-    // it is built, so no piece or output beyond maxBodyBytes is constructed.
-    // Failures surface in encode order; a string's Unicode is validated
-    // before any of its bytes are written, as in the Go engine.
+  // encoder creates one bounded output. Every byte is reserved against the
+  // allowance before the piece holding it is built, so no piece or output
+  // beyond maxBodyBytes is constructed. Failures surface in encode order; a
+  // string's Unicode is validated before any of its bytes are written, as in
+  // the Go engine. encodeNode writes a subtree without transformations.
+  const encoder = () => {
     const out = [];
     let size = 0;
     const reserve = count => {
@@ -427,7 +428,7 @@ const __ef_codecCompile = plan => {
     };
     const encodeNode = (node, value, path) => {
       switch (node.kind) {
-        case "transform": return encodeNode(node.child, value, path);
+        case "transform": return defect("a transform node reached the structural writer");
         case "string":
           if (typeof value !== "string") defect(`string node received ${typeof value}`);
           if (!value.isWellFormed()) fail("invalid-unicode", path);
@@ -457,12 +458,16 @@ const __ef_codecCompile = plan => {
         }
       }
     };
-    encodeNode(root, value, null);
-    return { ok: true, bytes: bytes.encode(out.join("")) };
+    return { write, encodeNode, defect, finish: () => bytes.encode(out.join("")) };
+  };
+  const encode = value => settle("encode", () => {
+    const output = encoder();
+    output.encodeNode(root, value, null);
+    return { ok: true, bytes: output.finish() };
   });
   // The decoded carriers of a pending subtree are fresh, so resolve replaces
-  // each transformed field in place. prepare copies every pending carrier and
-  // never mutates the caller's domain value.
+  // each transformed field in place. stream never mutates the caller's
+  // domain value.
   const variantFields = (node, value) => {
     if (node.kind === "record") return node.fields;
     const position = typeof value === "object" && value !== null ? node.domain.get(value[__ef_codecTagKey]) : undefined;
@@ -474,19 +479,45 @@ const __ef_codecCompile = plan => {
     for (const field of variantFields(node, value)) if (field.node.pending) value[field.name] = yield* resolve(field.node, value[field.name]);
     return value;
   }
-  function* prepare(node, value) {
-    if (node.kind === "transform") {
-      const represented = yield { step: node.step, value };
-      return node.child.pending ? yield* prepare(node.child, represented) : represented;
+  // stream encodes a pending plan in one encode-order pass: it yields a
+  // transform node's step request when the writer reaches it and writes the
+  // result at once, so no prepared tree is ever built and memory stays
+  // O(maxBodyBytes) plus the plan's nesting. The first structural failure is
+  // deferred: from then on nothing is written or retained, but the pass
+  // continues through pending nodes, yielding the remaining steps, so every
+  // transformation runs, in declared depth-first order, before a structural
+  // failure is reported, and a failed step (which ends the caller's driver)
+  // takes precedence over it. It returns encode's result.
+  function* stream(value) {
+    const output = encoder();
+    let issue;
+    const attempt = run => {
+      const settled = settle("encode", () => { run(); return { ok: true }; });
+      if (!settled.ok) issue = settled.issue;
+    };
+    function* visit(node, value, path) {
+      if (!node.pending) {
+        if (issue === undefined) attempt(() => output.encodeNode(node, value, path));
+        return;
+      }
+      if (node.kind === "transform") return yield* visit(node.child, yield { step: node.step, value }, path);
+      if (typeof value !== "object" || value === null) output.defect(`${node.kind} node received ${typeof value}`);
+      const fields = variantFields(node, value);
+      const open = node.kind === "union" ? node.variants[node.domain.get(value[__ef_codecTagKey])].open : "{";
+      if (issue === undefined) attempt(() => output.write(open));
+      let separated = node.kind === "union";
+      for (const field of fields) {
+        if (!Object.hasOwn(value, field.name)) output.defect(`carrier lacks field ${JSON.stringify(field.name)}`);
+        if (separated && issue === undefined) attempt(() => output.write(","));
+        separated = true;
+        if (issue === undefined) attempt(() => output.write(field.key));
+        // A path exists only to report a structural failure.
+        yield* visit(field.node, value[field.name], issue === undefined ? { parent: path, name: field.name } : null);
+      }
+      if (issue === undefined) attempt(() => output.write("}"));
     }
-    if (typeof value !== "object" || value === null) throw new Error(`effra codec: ${node.kind} node received ${typeof value}`);
-    const fields = variantFields(node, value);
-    const copy = node.kind === "union" ? [[__ef_codecTagKey, value[__ef_codecTagKey]]] : [];
-    for (const field of fields) {
-      if (!Object.hasOwn(value, field.name)) throw new Error(`effra codec: carrier lacks field ${JSON.stringify(field.name)}`);
-      copy.push([field.name, field.node.pending ? yield* prepare(field.node, value[field.name]) : value[field.name]]);
-    }
-    return Object.fromEntries(copy);
+    yield* visit(root, value, null);
+    return issue === undefined ? { ok: true, bytes: output.finish() } : { ok: false, issue };
   }
-  return { decode, encode, steps: steps.size, pending: root.pending, resolve: value => resolve(root, value), prepare: value => prepare(root, value) };
+  return { decode, encode, steps: steps.size, pending: root.pending, resolve: value => resolve(root, value), stream };
 };

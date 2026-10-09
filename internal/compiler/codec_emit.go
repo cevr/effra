@@ -226,11 +226,8 @@ const __ef_codecDecode = (codec, tag, text, steps) => Effect.suspend(() => {
 });
 const __ef_codecEncode = (codec, tag, value, steps) => Effect.suspend(() => {
   __ef_codecSteps(codec, steps);
-  const structural = prepared => {
-    const result = codec.encode(prepared);
-    return result.ok ? Effect.succeed(__ef_codecBytes.decode(result.bytes)) : __ef_codecFailure(tag, result.issue);
-  };
-  return codec.pending ? Effect.flatMap(__ef_codecRun(codec.prepare(value), steps), structural) : structural(value);
+  const settle = result => result.ok ? Effect.succeed(__ef_codecBytes.decode(result.bytes)) : __ef_codecFailure(tag, result.issue);
+  return codec.pending ? Effect.flatMap(__ef_codecRun(codec.stream(value), steps), settle) : settle(codec.encode(value));
 });
 `
 

@@ -186,8 +186,7 @@ const stepped = (id, stage, run) => {
   }
 };
 const encode = (id, stage, codec, plan, value) => stepped(id, stage, () => {
-  const prepared = codec.pending ? drive(codec.prepare(value), stepsFor(plan, "encode")) : value;
-  const result = codec.encode(prepared);
+  const result = codec.pending ? drive(codec.stream(value), stepsFor(plan, "encode")) : codec.encode(value);
   return result.ok ? { id, ok: true, encoded: new TextDecoder("utf-8", { fatal: true }).decode(result.bytes) } : issue(id, stage, result);
 });
 const lines = [];

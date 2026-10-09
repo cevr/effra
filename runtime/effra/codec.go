@@ -475,67 +475,90 @@ func (n *codecNode) resolve(value any, steps []CodecStep) (any, error) {
 	return n.construct(pending.variant, pending.fields), nil
 }
 
-// prepare runs the encode transformations under a pending node in declared
-// order, before any byte is written, and returns the projected value the
-// structural phase encodes.
-func (n *codecNode) prepare(value any, steps []CodecStep) (any, error) {
+// Encode encodes a plan without transformations; see EncodeSteps.
+func (c *Codec) Encode(value any) ([]byte, error) { return c.EncodeSteps(value, nil) }
+
+// EncodeSteps writes compact JSON in declared field order, with each
+// union's discriminator first, running each encode transformation when the
+// writer reaches it. Output larger than MaxBodyBytes is a typed failure,
+// detected before any byte beyond the bound is constructed, and nothing
+// else is retained: encoder memory is O(MaxBodyBytes) plus the plan's
+// nesting, whatever the value's size or sharing. Transformations run in
+// declared depth-first (pre)order, and every one runs before any
+// structural failure is reported, so a step's error, returned unchanged,
+// takes precedence over every structural failure. Structural failures
+// surface in encode order; a string's Unicode is validated before any of its
+// bytes are written, so ill-formed text reports invalid-unicode even when
+// its encoding would also exceed the remaining allowance.
+func (c *Codec) EncodeSteps(value any, steps []CodecStep) ([]byte, error) {
+	c.checkSteps(steps)
+	encoder := codecEncoder{limit: c.bounds.MaxBodyBytes}
+	if !c.root.pending {
+		if failure := c.root.encode(&encoder, value, nil); failure != nil {
+			return nil, failure
+		}
+		return encoder.out, nil
+	}
+	if err := c.root.stream(&encoder, value, nil, steps); err != nil {
+		return nil, err
+	}
+	if encoder.failure != nil {
+		return nil, encoder.failure
+	}
+	return encoder.out, nil
+}
+
+// stream encodes a pending node in one encode-order pass: a transformation
+// runs when the writer reaches it and its result is written at once, so no
+// prepared tree is ever built. The first structural failure is deferred on
+// the encoder rather than returned: from then on nothing is written or
+// retained, but the pass continues through pending nodes only, running the
+// remaining transformations, so the observable steps and the precedence of
+// a step's error are those of running every transformation first.
+func (n *codecNode) stream(e *codecEncoder, value any, path *codecPath, steps []CodecStep) error {
+	if !n.pending {
+		if e.failure == nil {
+			e.failure = n.encode(e, value, path)
+		}
+		return nil
+	}
 	if n.kind == CodecTransform {
 		represented, err := steps[n.step](value)
-		if err != nil || !n.child.pending {
-			return represented, err
+		if err != nil {
+			return err
 		}
-		return n.child.prepare(represented, steps)
+		return n.child.stream(e, represented, path, steps)
 	}
 	variant, projected := n.project(value)
-	fields := n.fields
+	fields, open, separated := n.fields, []byte{'{'}, false
 	if n.kind == CodecUnion {
 		if variant < 0 || variant >= len(n.variants) {
 			panic(fmt.Sprintf("effra codec: union adapter returned variant %d of %d", variant, len(n.variants)))
 		}
-		fields = n.variants[variant].fields
+		fields, open, separated = n.variants[variant].fields, n.variants[variant].open, true
 	}
 	if len(projected) != len(fields) {
 		panic(fmt.Sprintf("effra codec: adapter returned %d fields for %d declared", len(projected), len(fields)))
 	}
-	prepared := make([]any, len(projected))
+	e.emit(open...)
 	for i, field := range fields {
-		prepared[i] = projected[i]
-		if field.node.pending {
-			value, err := field.node.prepare(projected[i], steps)
-			if err != nil {
-				return nil, err
-			}
-			prepared[i] = value
+		if separated {
+			e.emit(',')
+		}
+		separated = true
+		e.emit(field.key...)
+		at := path
+		if e.failure == nil {
+			// A path exists only to report a structural failure, so a
+			// pass that already failed allocates none.
+			at = &codecPath{parent: path, name: field.name}
+		}
+		if err := field.node.stream(e, projected[i], at, steps); err != nil {
+			return err
 		}
 	}
-	return codecPending{variant: variant, fields: prepared}, nil
-}
-
-// Encode encodes a plan without transformations; see EncodeSteps.
-func (c *Codec) Encode(value any) ([]byte, error) { return c.EncodeSteps(value, nil) }
-
-// EncodeSteps first runs the plan's encode transformations in declared
-// depth-first order, then writes compact JSON in declared field order, with
-// each union's discriminator first. Output larger than MaxBodyBytes is a
-// typed failure, detected before any byte beyond the bound is constructed.
-// Structural failures surface in encode order; a string's Unicode is
-// validated before any of its bytes are written, so ill-formed text reports
-// invalid-unicode even when its encoding would also exceed the remaining
-// allowance. A step's error is returned unchanged.
-func (c *Codec) EncodeSteps(value any, steps []CodecStep) ([]byte, error) {
-	c.checkSteps(steps)
-	if c.root.pending {
-		prepared, err := c.root.prepare(value, steps)
-		if err != nil {
-			return nil, err
-		}
-		value = prepared
-	}
-	encoder := codecEncoder{limit: c.bounds.MaxBodyBytes}
-	if failure := c.root.encode(&encoder, value, nil); failure != nil {
-		return nil, failure
-	}
-	return encoder.out, nil
+	e.emit('}')
+	return nil
 }
 
 // codecPath is a parent-linked failure path; it is materialized only when a
@@ -638,6 +661,17 @@ func decodeCodecFields(fields []codecField, object *codecJSON, path *codecPath) 
 type codecEncoder struct {
 	out   []byte
 	limit int
+	// failure is the first structural failure of a pass that runs
+	// transformations; once set, emit writes nothing.
+	failure *CodecError
+}
+
+// emit writes bytes unless a structural failure is already deferred, and
+// defers the failure its write reports.
+func (e *codecEncoder) emit(bytes ...byte) {
+	if e.failure == nil {
+		e.failure = e.write(bytes...)
+	}
 }
 
 func (e *codecEncoder) write(bytes ...byte) *CodecError {
@@ -688,10 +722,8 @@ func (n *codecNode) encode(e *codecEncoder, value any, path *codecPath) *CodecEr
 		var scratch [22]byte
 		quoted := append(strconv.AppendInt(append(scratch[:0], '"'), number, 10), '"')
 		return e.write(quoted...)
-	case CodecTransform:
-		return n.child.encode(e, value, path)
 	case CodecRecord:
-		_, fields := n.projected(value)
+		_, fields := n.project(value)
 		if failure := e.write('{'); failure != nil {
 			return failure
 		}
@@ -700,7 +732,7 @@ func (n *codecNode) encode(e *codecEncoder, value any, path *codecPath) *CodecEr
 		}
 		return e.write('}')
 	case CodecUnion:
-		index, fields := n.projected(value)
+		index, fields := n.project(value)
 		if index < 0 || index >= len(n.variants) {
 			panic(fmt.Sprintf("effra codec: union adapter returned variant %d of %d", index, len(n.variants)))
 		}
@@ -714,16 +746,6 @@ func (n *codecNode) encode(e *codecEncoder, value any, path *codecPath) *CodecEr
 		return e.write('}')
 	}
 	panic("effra codec: unvalidated node kind " + string(n.kind))
-}
-
-// projected returns a nominal value's variant and fields: a pending node's
-// value was already projected by prepare.
-func (n *codecNode) projected(value any) (int, []any) {
-	if n.pending {
-		pending := value.(codecPending)
-		return pending.variant, pending.fields
-	}
-	return n.project(value)
 }
 
 func encodeCodecFields(e *codecEncoder, fields []codecField, values []any, path *codecPath, separated bool) *CodecError {

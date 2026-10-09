@@ -38,6 +38,53 @@ type CodecPlan struct {
 	paths      []string
 }
 
+// encodeOrder lists transform steps in the order encoding first invokes
+// them: a transformation runs before the transformations of its
+// representation, so first invocations follow the plan's preorder, which is
+// step order.
+func (plan *CodecPlan) encodeOrder() []int {
+	order := make([]int, len(plan.transforms))
+	for step := range order {
+		order[step] = step
+	}
+	return order
+}
+
+// decodeOrder lists transform steps in the order decoding first invokes
+// them. Decoding resolves a transformation's representation, including its
+// nested transformations, before the transformation itself, in declared
+// field order, so first invocations follow the plan's postorder. A shared
+// node completes at its first visit, and no node contains itself, so a
+// memoized postorder walk of the DAG yields exactly that order.
+func (plan *CodecPlan) decodeOrder() []int {
+	order := []int{}
+	seen := make([]bool, len(plan.Nodes))
+	var walk func(int)
+	walk = func(index int) {
+		if seen[index] {
+			return
+		}
+		seen[index] = true
+		node := plan.Nodes[index]
+		if node.Child != nil {
+			walk(*node.Child)
+		}
+		for _, field := range node.Fields {
+			walk(field.Node)
+		}
+		for _, variant := range node.Variants {
+			for _, field := range variant.Fields {
+				walk(field.Node)
+			}
+		}
+		if node.Step != nil {
+			order = append(order, *node.Step)
+		}
+	}
+	walk(plan.Root)
+	return order
+}
+
 // CodecPlanBounds are the explicit limits a plan carries to both engines,
 // which supply no defaults. MaxBodyBytes bounds decoded input and encoded
 // output; MaxDepth bounds input nesting and covers the plan's own nesting.
