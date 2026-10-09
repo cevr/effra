@@ -191,6 +191,10 @@ type machineCheck struct {
 	// role-scoped trigger enum while walking step (event) or complete (outcome).
 	role    string
 	trigger *Enum
+	// roleFunction is the step or complete function being walked.
+	roleFunction *Function
+	// transitionKeys deduplicates published transitions in constant time.
+	transitionKeys map[string]bool
 }
 
 // checkMachines runs after every function body is checked, so bound bodies
@@ -540,21 +544,105 @@ func (v machineVariants) ordered(enum *Enum) []string {
 	return out
 }
 
+// size is the length of ordered(enum) without allocating it.
+func (v machineVariants) size(enum *Enum) int {
+	if v == nil {
+		return len(enum.Variants)
+	}
+	return len(v)
+}
+
+// covers reports whether a Stay check under v implies the same check under
+// w. A non-nil narrowing is checked strictly, and narrowing further only
+// removes alternatives, so a non-nil superset covers a non-nil subset. nil
+// (unnarrowed) is lenient for Stay (the runtime defect applies) yet refines
+// to every alternative a match names, so it covers only itself.
+func (v machineVariants) covers(w machineVariants) bool {
+	if v == nil || w == nil {
+		return v == nil && w == nil
+	}
+	for variant := range w {
+		if !v[variant] {
+			return false
+		}
+	}
+	return true
+}
+
 type machineNarrowing struct {
 	states, triggers machineVariants
 }
 
-// machineScope is one function body read under the machine: which binders
-// denote the current state and trigger, the let aliases seen, the helper chain
-// and the caller site that reports a helper's findings.
+// machineVisit is the context one function body is walked under: the
+// narrowing of the current state and trigger, and which parameters receive
+// them. The Stay rule's verdict depends on all three, so a recursive call is
+// reused only when an active visit of the same function covers its context.
+type machineVisit struct {
+	function         *Function
+	states, triggers machineVariants
+	bound            string
+}
+
+// covers reports whether checking under v already discharges w. Triggers
+// only decide which arms are reachable, so nil (every trigger) covers any
+// trigger narrowing; states follow machineVariants.covers.
+func (v machineVisit) covers(w machineVisit) bool {
+	if v.function != w.function || v.bound != w.bound || !v.states.covers(w.states) {
+		return false
+	}
+	if v.triggers == nil {
+		return true
+	}
+	if w.triggers == nil {
+		return false
+	}
+	for trigger := range w.triggers {
+		if !v.triggers[trigger] {
+			return false
+		}
+	}
+	return true
+}
+
+func machineVisitOf(f *Function, scope *machineScope, n machineNarrowing) machineVisit {
+	bound := make([]byte, len(f.Params))
+	for index, parameter := range f.Params {
+		bound[index] = '-'
+		switch {
+		case parameter.binding != nil && scope.states[parameter.binding] && scope.triggers[parameter.binding]:
+			bound[index] = 'B'
+		case parameter.binding != nil && scope.states[parameter.binding]:
+			bound[index] = 'S'
+		case parameter.binding != nil && scope.triggers[parameter.binding]:
+			bound[index] = 'T'
+		}
+	}
+	return machineVisit{function: f, states: n.states, triggers: n.triggers, bound: string(bound)}
+}
+
+// machineScope is one function body read under the machine: the function,
+// which binders denote the current state and trigger, the let aliases seen,
+// the visits in progress along this chain, the helper chain and the caller
+// site that reports a helper's findings.
 type machineScope struct {
+	function *Function
 	states   map[*localBinding]bool
 	triggers map[*localBinding]bool
 	lets     map[*localBinding]*Expr
 	roots    map[*localBinding]*localBinding
-	active   map[*Function]bool
+	active   []machineVisit
 	via      []string
 	site     Span
+}
+
+// reentry decides a call to a function already being walked on this chain.
+// It reports covered when an active visit's context discharges the new one,
+// so the recursion adds nothing the rule could reject; otherwise the body is
+// walked again under the narrower context. Contexts are finite subsets, and
+// a covered context is never re-walked, so the chain terminates; each walk is
+// charged, and the helper depth bounds the chain.
+func (s *machineScope) reentry(visit machineVisit) bool {
+	return slices.ContainsFunc(s.active, func(active machineVisit) bool { return active.covers(visit) })
 }
 
 func (m *machineCheck) walkRole(f *Function, role string, trigger *Enum) {
@@ -562,13 +650,15 @@ func (m *machineCheck) walkRole(f *Function, role string, trigger *Enum) {
 		return
 	}
 	m.role, m.trigger = role, trigger
-	scope := &machineScope{states: map[*localBinding]bool{}, triggers: map[*localBinding]bool{}, lets: map[*localBinding]*Expr{}, roots: map[*localBinding]*localBinding{}, active: map[*Function]bool{f: true}}
+	m.roleFunction = f
+	scope := &machineScope{function: f, states: map[*localBinding]bool{}, triggers: map[*localBinding]bool{}, lets: map[*localBinding]*Expr{}, roots: map[*localBinding]*localBinding{}}
 	if b := f.Params[0].binding; b != nil {
 		scope.states[b] = true
 	}
 	if b := f.Params[1].binding; b != nil {
 		scope.triggers[b] = true
 	}
+	scope.active = []machineVisit{machineVisitOf(f, scope, machineNarrowing{})}
 	m.block(scope, f.Body, machineNarrowing{}, true, false)
 }
 
@@ -738,15 +828,17 @@ func (m *machineCheck) follow(s *machineScope, call *Expr, n machineNarrowing, t
 	if !ok || state != m.state {
 		return false
 	}
-	if s.active[callee] {
-		// Recursion re-enters a body already walked under a wider narrowing:
-		// narrowing only shrinks along a chain, so nothing new can fail.
+	inner := m.helperScope(s, callee, call)
+	visit := machineVisitOf(callee, inner, n)
+	if s.reentry(visit) {
+		// Recursion in a covered context: the caller records the
+		// conservative decision for this call.
 		return false
 	}
 	if len(s.via) >= maxMachineHelperDepth {
 		return m.helperDepthExhausted(s, call, n)
 	}
-	inner := m.helperScope(s, callee, call)
+	inner.active = append(slices.Clone(s.active), visit)
 	m.block(inner, callee.Body, n, tail, guarded)
 	return true
 }
@@ -776,15 +868,11 @@ func (m *machineCheck) helperDepthExhausted(s *machineScope, call *Expr, n machi
 }
 
 func (m *machineCheck) helperScope(s *machineScope, callee *Function, call *Expr) *machineScope {
-	active := map[*Function]bool{callee: true}
-	for f := range s.active {
-		active[f] = true
-	}
 	site := s.site
 	if len(s.via) == 0 {
 		site = call.Span
 	}
-	inner := &machineScope{states: map[*localBinding]bool{}, triggers: map[*localBinding]bool{}, lets: map[*localBinding]*Expr{}, roots: map[*localBinding]*localBinding{}, active: active, via: append(slices.Clone(s.via), callee.Name), site: site}
+	inner := &machineScope{function: callee, states: map[*localBinding]bool{}, triggers: map[*localBinding]bool{}, lets: map[*localBinding]*Expr{}, roots: map[*localBinding]*localBinding{}, via: append(slices.Clone(s.via), callee.Name), site: site}
 	for index, argument := range call.Args {
 		parameter := index
 		if index < len(call.ArgumentParameters) {
@@ -843,12 +931,18 @@ func (m *machineCheck) paths(s *machineScope, e *Expr, n machineNarrowing) []sta
 		return m.blockPaths(s, e.Then, n)
 	case "call":
 		callee := e.ResolvedFunction
-		if callee != nil && callee.Body != nil && callee.Module == currentModuleIdentity && callee.returnID == m.state && !callee.Effect && !s.active[callee] {
+		if callee != nil && callee.Body != nil && callee.Module == currentModuleIdentity && callee.returnID == m.state && !callee.Effect {
+			inner := m.helperScope(s, callee, e)
+			visit := machineVisitOf(callee, inner, n)
+			if s.reentry(visit) {
+				return []statePath{{span: e.Span, via: s.via}}
+			}
 			if len(s.via) >= maxMachineHelperDepth {
 				m.helperDepthExhausted(s, e, n)
 				return []statePath{{span: e.Span, via: s.via}}
 			}
-			return m.blockPaths(m.helperScope(s, callee, e), callee.Body, n)
+			inner.active = append(slices.Clone(s.active), visit)
+			return m.blockPaths(inner, callee.Body, n)
 		}
 	}
 	return []statePath{{span: e.Span, via: s.via}}
@@ -891,7 +985,10 @@ func (m *machineCheck) checkStay(s *machineScope, e, argument *Expr, n machineNa
 		at := e.Span
 		if len(path.via) > 0 {
 			message += " (through helper " + strings.Join(path.via, " -> ") + ")"
-			if s.site.Length > 0 {
+			// A Stay inside a helper reports at the caller's call of it; one in
+			// the step body itself, reached again through recursion, reports
+			// at the Stay.
+			if s.site.Length > 0 && s.function != m.roleFunction {
 				at = s.site
 			}
 		}
@@ -910,17 +1007,21 @@ func (m *machineCheck) transition(s *machineScope, span Span, n machineNarrowing
 	if targets == nil {
 		targets = []string{}
 	}
-	// A transition's From and Targets lists are plan output; charging them
-	// bounds plan size, the enterable fixpoint and the graph projection.
-	if !m.charge(len(targets) + len(n.states.ordered(m.enum))) {
+	// A transition's From, On and Targets lists are plan output. Charging
+	// them before they are allocated bounds plan size, the enterable search
+	// and the graph projection.
+	if !m.charge(len(targets) + n.states.size(m.enum) + n.triggers.size(m.trigger) + len(s.via)) {
 		return
 	}
 	t := MachineTransition{Role: m.role, From: n.states.ordered(m.enum), On: n.triggers.ordered(m.trigger), Decision: decision, Targets: targets, Precision: precision, Guarded: guarded, Via: slices.Clone(s.via), Span: span}
-	for _, existing := range m.plan.Transitions {
-		if existing.Role == t.Role && existing.Span == t.Span && existing.Decision == t.Decision && existing.Precision == t.Precision && existing.Guarded == t.Guarded && slices.Equal(existing.From, t.From) && slices.Equal(existing.On, t.On) && slices.Equal(existing.Targets, t.Targets) && slices.Equal(existing.Via, t.Via) {
-			return
-		}
+	key := strings.Join([]string{t.Role, fmt.Sprint(t.Span.Offset, ":", t.Span.Length), t.Decision, t.Precision, fmt.Sprint(t.Guarded), strings.Join(t.From, "|"), strings.Join(t.On, "|"), strings.Join(t.Targets, "|"), strings.Join(t.Via, "|")}, "\x00")
+	if m.transitionKeys == nil {
+		m.transitionKeys = map[string]bool{}
 	}
+	if m.transitionKeys[key] {
+		return
+	}
+	m.transitionKeys[key] = true
 	t.ID = fmt.Sprintf("%s:transition:%d", m.plan.ID, len(m.plan.Transitions))
 	m.plan.Transitions = append(m.plan.Transitions, t)
 }

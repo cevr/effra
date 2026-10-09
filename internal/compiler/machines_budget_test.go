@@ -284,3 +284,125 @@ func TestMachineCheckResponseRefusalKeepsReferenceClosure(t *testing.T) {
 		t.Fatalf("refused response references %d types without a types table: %v", len(dangling), dangling[:1])
 	}
 }
+
+// Recursion is analysed per context. A body first walked with the state
+// unnarrowed admits a literal Stay there; reaching it again through a
+// recursive call under a narrowed state is a new obligation, so it is walked
+// again, never assumed covered.
+func recursiveStaySource(stay string) string {
+	return `import Machines "effra/machines"
+enum S { Idle  Active }
+enum E { Start  Stop }
+fn step(state: S, event: E) -> Machines.Step<S, void> {
+    match event {
+        E.Stop => Machines.Step<S, void>.Stay(` + stay + `)
+        E.Start => match state {
+            S.Idle => step(state, E.Stop {})
+            S.Active => Machines.Step<S, void>.Ignore {}
+        }
+    }
+}
+machine M { initial S.Idle {}; step step }
+`
+}
+
+func TestMachineStayRecursionIsContextSensitive(t *testing.T) {
+	source := recursiveStaySource("S.Active {}")
+	r := Compile(source)
+	if got := machineCodes(r); !slices.Equal(got, []string{"EF139"}) || r.FindMachine("M") != nil {
+		t.Fatalf("recursive wrong-tag Stay codes = %v: %+v", got, r.Diagnostics)
+	}
+	d := r.Diagnostics[0]
+	if anchor := source[d.Span.Offset : d.Span.Offset+d.Span.Length]; anchor != "Stay" || !strings.Contains(d.Message, "narrows the state to S.Idle but Stay constructs S.Active") {
+		t.Fatalf("finding anchored at %q: %s", anchor, d.Message)
+	}
+	// The recursion only ever reaches the Stop arm with the state Idle, so a
+	// Stay keeping Idle is accepted.
+	if r := Compile(recursiveStaySource("S.Idle {}")); r.FindMachine("M") == nil {
+		t.Fatalf("recursive same-tag Stay refused: %+v", r.Diagnostics)
+	}
+	// Recursion in the context it was entered with is covered and terminates.
+	same := Compile(`import Machines "effra/machines"
+enum S { Idle  Active }
+enum E { Ping }
+fn step(state: S, event: E) -> Machines.Step<S, void> {
+    match state {
+        S.Idle => step(state, event)
+        S.Active => Machines.Step<S, void>.Stay(state)
+    }
+}
+machine M { initial S.Idle {}; step step }
+`)
+	if same.FindMachine("M") == nil {
+		t.Fatalf("same-context recursion refused: %+v", same.Diagnostics)
+	}
+}
+
+func recursiveCycleSource(length int) string {
+	var b strings.Builder
+	b.WriteString(`import Machines "effra/machines"
+enum S { Idle  Active }
+enum E { Ping }
+fn step(state: S, event: E) -> Machines.Step<S, void> {
+    match state {
+        S.Idle => h0(state)
+        S.Active => Machines.Step<S, void>.Ignore {}
+    }
+}
+`)
+	for i := 0; i < length; i++ {
+		fmt.Fprintf(&b, "fn h%d(state: S) -> Machines.Step<S, void> { h%d(state) }\n", i, (i+1)%length)
+	}
+	b.WriteString("machine M { initial S.Idle {}; step step }\n")
+	return b.String()
+}
+
+// A recursive cycle that closes within the helper depth is covered when it
+// returns to its first context; one longer than the depth under a narrowed
+// state cannot be checked and is refused, never admitted.
+func TestMachineRecursiveCyclesTerminateOrRefuse(t *testing.T) {
+	if r := Compile(recursiveCycleSource(3)); r.FindMachine("M") == nil {
+		t.Fatalf("short recursive cycle refused: %+v", r.Diagnostics)
+	}
+	r := Compile(recursiveCycleSource(maxMachineHelperDepth + 2))
+	if got := machineCodes(r); !slices.Equal(got, []string{"EF142"}) || r.FindMachine("M") != nil {
+		t.Fatalf("long narrowed cycle codes = %v: %+v", got, r.Diagnostics)
+	}
+}
+
+// Trigger lists are plan output too. A singleton state with 2000 events makes
+// each unnarrowed Ignore tail list every event, about 2000 units. One helper
+// of 20 tails fits the budget; two helpers (40 tails) do not.
+func wideEventTailsSource(helpers int) string {
+	var b strings.Builder
+	b.WriteString("import Machines \"effra/machines\"\nenum S { Only }\nenum E {")
+	for i := 0; i < 2000; i++ {
+		fmt.Fprintf(&b, " E%d", i)
+	}
+	b.WriteString(" }\nfn step(state: S, event: E) -> Machines.Step<S, void> {\n")
+	for h := 0; h < helpers-1; h++ {
+		fmt.Fprintf(&b, "    if true { tails%d(state, event, 0) } else {\n", h)
+	}
+	fmt.Fprintf(&b, "    tails%d(state, event, 0)\n%s}\n", helpers-1, strings.Repeat("    }\n", helpers-1))
+	for h := 0; h < helpers; h++ {
+		fmt.Fprintf(&b, "fn tails%d(state: S, event: E, n: i64) -> Machines.Step<S, void> {\n", h)
+		for i := 0; i < 19; i++ {
+			fmt.Fprintf(&b, "    if n == %d { Machines.Step<S, void>.Ignore {} } else {\n", i)
+		}
+		b.WriteString("    Machines.Step<S, void>.Ignore {}\n")
+		b.WriteString(strings.Repeat("    }\n", 19))
+		b.WriteString("}\n")
+	}
+	b.WriteString("machine Wide { initial S.Only {}; step step }\n")
+	return b.String()
+}
+
+func TestMachineTriggerListsAreCharged(t *testing.T) {
+	if r := Compile(wideEventTailsSource(1)); r.FindMachine("Wide") == nil {
+		t.Fatalf("20 wide-event tails refused: %v", machineCodes(r))
+	}
+	r := Compile(wideEventTailsSource(2))
+	if got := machineCodes(r); !slices.Equal(got, []string{"EF142"}) || r.FindMachine("Wide") != nil {
+		t.Fatalf("40 wide-event tails codes = %v: %+v", got, r.Diagnostics)
+	}
+}
