@@ -202,7 +202,7 @@ func goReceipt(r *compiler.Result, source string, application *compiler.GoApplic
 	if receipt.Binary, err = artifactReceipt(binary); err != nil {
 		return nil, err
 	}
-	if receipt.Symbols, err = symbolReceipt(executable); err != nil {
+	if receipt.Symbols, err = symbolReceipt(generation.Directory, executable); err != nil {
 		return nil, err
 	}
 	return receipt, nil
@@ -326,8 +326,11 @@ func artifactReceipt(path string) (*receiptArtifact, error) {
 
 var nmLine = regexp.MustCompile(`^\s*[0-9a-f]*\s+(\d+)\s+(\S)\s+(.*)$`)
 
-func symbolReceipt(binary string) (*receiptSymbols, error) {
-	out, err := goTool(filepath.Dir(binary), "tool", "nm", "-size", "-type", binary)
+// symbolReceipt runs nm from the generated module, so the go command selects
+// the same toolchain that built the executable; another toolchain's nm may
+// classify and order symbols differently.
+func symbolReceipt(directory, binary string) (*receiptSymbols, error) {
+	out, err := goTool(directory, "tool", "nm", "-size", "-type", binary)
 	if err != nil {
 		return nil, err
 	}
