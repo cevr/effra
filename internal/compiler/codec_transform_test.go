@@ -298,6 +298,112 @@ derive nameJson = Json.codec<string>(maxBodyBytes: 64, maxDepth: 1, decode: name
 	}
 }
 
+// A transformed witness's decoded value is constructed by the codec
+// operation, which records no ownership or capture facts, so its domain
+// must be plain data. The direct control: returning a scope-acquired File
+// from that scope is EF123. Routing the same acquisition through a decode
+// transformation is refused at the witness (EF138), whether the domain is
+// the resource itself, a record holding one, an enum variant holding one,
+// or a function value; a plain-data transformed value leaves the scope like
+// any other value.
+func TestCodecTransformationDomainsArePlainData(t *testing.T) {
+	header := `import Json "effra/json"
+effect fn open(path: string) -> File raises { IoError } {
+    run Files.openRead(path).provide<Files>(LiveFiles)
+}
+fn path(file: File) -> string {
+    "fixture"
+}
+record Handle {
+    file: File
+}
+effect fn openHandle(path: string) -> Handle raises { IoError } {
+    let file = run open(path)
+    Handle { file: file }
+}
+fn handlePath(handle: Handle) -> string {
+    "fixture"
+}
+enum Slot {
+    Empty
+    Held { file: File }
+}
+fn emptySlot(path: string) -> Slot {
+    Slot.Empty {}
+}
+fn slotPath(slot: Slot) -> string {
+    "fixture"
+}
+record Callback {
+    run: fn(string) -> string
+}
+fn same(text: string) -> string {
+    text
+}
+fn callback(text: string) -> Callback {
+    Callback { run: same }
+}
+fn callbackText(callback: Callback) -> string {
+    "same"
+}
+record Email {
+    text: string
+}
+fn parseEmail(text: string) -> Email {
+    Email { text: text }
+}
+fn renderEmail(email: Email) -> string {
+    email.text
+}
+derive emailJson = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: parseEmail, encode: renderEmail)
+`
+	direct := header + `effect fn escape() -> File raises { IoError } {
+    scope {
+        run open("examples/fixture.txt")
+    }
+}
+`
+	if r := Compile(direct); r.Checked || !hasCode(r, "EF123") {
+		t.Fatalf("direct acquisition control: %+v", r.Diagnostics)
+	}
+	cases := []struct{ name, source, message string }{
+		{"resource domain", "derive fileJson = Json.codec<File>(maxBodyBytes: 64, maxDepth: 1, decode: open, encode: path)\n" + `effect fn escape() -> File raises { IoError, JsonDecodeFailure } {
+    scope {
+        run fileJson.decode("\"examples/fixture.txt\"")
+    }
+}
+`, "codec fileJson cannot transform File: File at File is a host or runtime type"},
+		{"record holding a resource", "derive handleJson = Json.codec<Handle>(maxBodyBytes: 64, maxDepth: 1, decode: openHandle, encode: handlePath)", "codec handleJson cannot transform Handle: File at Handle.file is a host or runtime type"},
+		{"variant holding a resource", "derive slotJson = Json.codec<Slot>(maxBodyBytes: 64, maxDepth: 1, decode: emptySlot, encode: slotPath)", "codec slotJson cannot transform Slot: File at Slot.Held.file is a host or runtime type"},
+		{"function field", "derive callbackJson = Json.codec<Callback>(maxBodyBytes: 64, maxDepth: 1, decode: callback, encode: callbackText)", "Callback.run is a function or effect recipe"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := Compile(header + tc.source)
+			if r.Checked {
+				t.Fatal("source was admitted")
+			}
+			found := false
+			for _, d := range r.Diagnostics {
+				found = found || d.Code == "EF138" && strings.Contains(d.Message, tc.message)
+			}
+			if !found {
+				t.Fatalf("want EF138 %q: %+v", tc.message, r.Diagnostics)
+			}
+		})
+	}
+	// Positive control: a plain-data transformed value decoded inside a
+	// scope leaves it, and the header checks without any refused witness.
+	if r := Compile(header + `effect fn leave() -> Email raises { JsonDecodeFailure } {
+    scope {
+        run emailJson.decode("\"ada@example.com\"")
+    }
+}
+`); !r.Checked {
+		t.Fatalf("plain-data control: %+v", r.Diagnostics)
+	}
+}
+
 // Transformed witnesses format on one line, `with` clause included.
 func TestCodecTransformationDeclarationsFormat(t *testing.T) {
 	source := "import Json \"effra/json\"\nrecord Email { text: string }\nrecord Box { email: Email }\nfn parseEmail(text: string) -> Email { Email { text: text } }\nfn renderEmail(email: Email) -> string { email.text }\nderive emailJson=Json.codec<Email>( maxBodyBytes:64,maxDepth:1,decode:parseEmail , encode : renderEmail )\nderive boxJson = Json.codec<Box>(maxBodyBytes: 64, maxDepth: 2)  with   emailJson\n"

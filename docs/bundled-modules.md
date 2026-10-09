@@ -150,7 +150,12 @@ representation and returns the derived type, `encode` takes the derived type
 and returns the same representation. The representation's plan is derived
 structurally, so the conversion is the only hand-written part. The two
 directions need not be inverses; a normalizing witness may accept a legacy
-spelling and always write the canonical one.
+spelling and always write the canonical one. The derived type itself must be
+plain data: primitives, records, enums and generic data over them. A domain
+that is or holds a resource (`File`, `Latch`, a fiber), a function or effect
+recipe value is refused with EF138 at its path, because a decoded value
+carries no ownership facts and must never smuggle a scope-owned resource
+past the EF123 escape check.
 
 Each direction function's rows are its structural failure plus the declared
 failures and services of every transformation that direction runs, so a

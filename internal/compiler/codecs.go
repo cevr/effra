@@ -540,7 +540,46 @@ func (c *checker) codecTransformation(codec *CodecDeclaration, options map[strin
 	if !ok {
 		return nil
 	}
+	if refusal := c.codecValueLayout(codec.domainID, codec.Type, codec.Type, map[TypeID]bool{}); refusal != "" {
+		c.diagnostic(codecDerivationCode, "codec "+codec.Name+" cannot transform "+codec.Type+": "+refusal+"; a transformed witness decodes plain data, never a resource, function or runtime value", codec.TypeSpan)
+		return nil
+	}
 	return &codecTransform{decode: decodeFunction, encode: encodeFunction, repID: representation, repDisplay: decodeFunction.Params[0].Type}
+}
+
+// codecValueLayout refuses a transformed witness's domain type unless every
+// type its layout reaches is plain data: primitives, records, enums and
+// generic data over them. The structural plan derives only the
+// representation, so this is the domain's own admission. A decoded value is
+// constructed inside the codec operation, which records no ownership or
+// capture facts for it; a resource (File, Latch, Fiber), a function or
+// recipe value, or a type variable could carry those facts, so admitting it
+// would let a scope-owned value escape unchecked.
+func (c *checker) codecValueLayout(id TypeID, display, path string, seen map[TypeID]bool) string {
+	if seen[id] {
+		return ""
+	}
+	seen[id] = true
+	node := c.node(id)
+	if node == nil {
+		return "unresolved type at " + path
+	}
+	switch node.Kind {
+	case "primitive":
+		return ""
+	case "record", "enum", "application":
+		refusal := ""
+		c.walkDataFields(id, func(name string, field Field) {
+			if refusal == "" {
+				refusal = c.codecValueLayout(field.typeID, field.Type, path+"."+name, seen)
+			}
+		})
+		return refusal
+	case "callable", "callable-shape", "recipe", "providerRecipe":
+		return display + " at " + path + " is a function or effect recipe"
+	default:
+		return display + " at " + path + " is a host or runtime type"
+	}
 }
 
 // codecWith resolves a declaration's `with` clause. Each entry names
