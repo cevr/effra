@@ -149,13 +149,37 @@ func TestCodecTransformationRowsAreDirectionSpecific(t *testing.T) {
 	}
 }
 
+// codecTransformMain retains teamJson's decode and encode directions in a
+// generated application.
+const codecTransformMain = `
+impl Known for Lookup {
+    effect fn known(text: string) -> bool {
+        true
+    }
+}
+
+impl Quiet for Journal {
+    effect fn note(text: string) -> void raises { Refused } {
+        void
+    }
+}
+
+effect fn main() -> void raises { JsonDecodeFailure, JsonEncodeFailure, Refused, Unknown } {
+    let team = run teamJson.decode("{}").provide<Lookup>(Known)
+    let text = run writeTeam(team).provide<Journal>(Quiet)
+    void
+}
+`
+
 // The published orders are the engine's plan orders: running teamJson's
-// plan (no unions, so every value visits every node) on the Go codec engine
-// with recording steps invokes each witness first in exactly the inspected
-// order for each direction, while the full traces show the nesting
-// (Member's email resolves before Member on decode, after it on encode).
+// plan (no unions, so every value visits every node) in a generated Go
+// application, through its Construct adapters and its generated writer, with
+// recording steps invokes each witness first in exactly the inspected order
+// for each direction, while the full traces show the nesting (Member's email
+// resolves before Member on decode, after it on encode).
 func TestCodecTransformationInspectionMatchesObservedSteps(t *testing.T) {
-	r := Compile(codecTransformSource)
+	t.Parallel()
+	r := CompileFor(codecTransformSource+codecTransformMain, "go")
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
@@ -168,35 +192,57 @@ func TestCodecTransformationInspectionMatchesObservedSteps(t *testing.T) {
 	if plan == nil {
 		t.Fatal("teamJson has no plan")
 	}
-	runtimePlan := runtimeCodecPlanOf(plan)
-	for index, node := range plan.Nodes {
-		if node.Kind == rt.CodecTransform {
-			runtimePlan.Nodes[index].Type, runtimePlan.Nodes[index].Child, runtimePlan.Nodes[index].Step = node.ID, *node.Child, *node.Step
-			continue
-		}
-		if node.data != nil {
-			runtimePlan.Nodes[index].Construct = func(variant int, fields []any) any { return codecVectorCarrier(variant, fields) }
-			if node.Kind == rt.CodecUnion {
-				runtimePlan.Nodes[index].Variant = codecVectorVariant
-			}
-		}
-	}
-	codec, err := rt.CompileCodec(runtimePlan)
+	code, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
-	trace := []string{}
-	recording := func(direction string) []rt.CodecStep {
-		steps := make([]rt.CodecStep, len(plan.transforms))
-		for step, witness := range plan.transforms {
-			name := witness.Name
-			steps[step] = func(value any) (any, error) {
-				trace = append(trace, direction+":"+name)
-				return value, nil
-			}
-		}
-		return steps
+	// Each recording step converts between its witness's generated domain
+	// and representation as the witness's own functions do.
+	// Decode steps are untyped plan steps; encode steps are the writer's
+	// typed steps.
+	steps := map[string][2]string{
+		"emailJson":  {"efType_Email{EfField_4_text:value.(string)}", "(value efType_Email)(string,error){TRACE;return value.EfField_4_text,nil}"},
+		"memberJson": {"efType_Member{EfField_5_email:value.(efType_MemberWire).EfField_5_email}", "(value efType_Member)(efType_MemberWire,error){TRACE;return efType_MemberWire{EfField_5_email:value.EfField_5_email},nil}"},
 	}
+	decode, encode := []string{}, []string{}
+	for step, witness := range plan.transforms {
+		convert, ok := steps[witness.Name]
+		if !ok {
+			t.Fatalf("no recording step for %s", witness.Name)
+		}
+		decode = append(decode, fmt.Sprintf("func(value any)(any,error){trace=append(trace,%q);return %s,nil}", "decode:"+witness.Name, convert[0]))
+		encode = append(encode, fmt.Sprintf("S%d:func%s", step, strings.Replace(convert[1], "TRACE", fmt.Sprintf("trace=append(trace,%q)", "encode:"+witness.Name), 1)))
+	}
+	probe := strings.NewReplacer("@PLAN@", goCodecPlanName(plan), "@ENCODE@", goCodecEncodeName(plan), "@STEPS@", goCodecStepsName(plan), "@DECODING@", strings.Join(decode, ","), "@ENCODING@", strings.Join(encode, ",")).Replace(`package main
+import("strings";"testing";er "effra.generated/runtime")
+func TestTrace(t *testing.T){
+ var trace []string
+ value,err:=@PLAN@.DecodeSteps([]byte(` + "`" + `{"lead":{"email":"a"},"contact":"b","backup":"c"}` + "`" + `),[]er.CodecStep{@DECODING@})
+ if err!=nil{t.Fatal(err)}
+ team:=value.(efType_Team)
+ output,err:=@ENCODE@(&team,@STEPS@{@ENCODING@})
+ if err!=nil||string(output)!=` + "`" + `{"lead":{"email":"a"},"contact":"b","backup":"c"}` + "`" + `{t.Fatalf("encoded %s %v",output,err)}
+ t.Log("TRACE "+strings.Join(trace," "))
+}
+`)
+	dir := t.TempDir()
+	if err = application.WriteRuntime(dir); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string][]byte{"go.mod": r.ModuleFile(), "main.go": []byte(code), "main_test.go": []byte(probe)} {
+		if err = os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	output, err := runGoCommand(dir, "test", "-v", "-run", "TestTrace", ".")
+	if err != nil {
+		t.Fatalf("generated trace: %v %s", err, output)
+	}
+	match := regexp.MustCompile(`TRACE ([^\n]*)`).FindSubmatch(output)
+	if match == nil {
+		t.Fatalf("generated trace printed nothing: %s", output)
+	}
+	trace := strings.Fields(string(match[1]))
 	firsts := func(direction string) []string {
 		out := []string{}
 		for _, entry := range trace {
@@ -205,13 +251,6 @@ func TestCodecTransformationInspectionMatchesObservedSteps(t *testing.T) {
 			}
 		}
 		return out
-	}
-	value, err := codec.DecodeSteps([]byte(`{"lead":{"email":"a"},"contact":"b","backup":"c"}`), recording("decode"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := codec.EncodeSteps(value, recording("encode")); err != nil {
-		t.Fatal(err)
 	}
 	if want := []string{"decode:emailJson", "decode:memberJson", "decode:emailJson", "decode:emailJson", "encode:memberJson", "encode:emailJson", "encode:emailJson", "encode:emailJson"}; !slices.Equal(trace, want) {
 		t.Fatalf("observed steps %q, want %q", trace, want)
@@ -570,10 +609,8 @@ func TestCodecTransformationInspectionIsStaticPlanOrder(t *testing.T) {
 		if node.Kind == rt.CodecTransform {
 			runtimePlan.Nodes[index].Type, runtimePlan.Nodes[index].Child, runtimePlan.Nodes[index].Step = node.ID, *node.Child, *node.Step
 		} else if node.data != nil {
-			runtimePlan.Nodes[index].Construct = func(variant int, fields []any) any { return codecVectorCarrier(variant, fields) }
-			if node.Kind == rt.CodecUnion {
-				runtimePlan.Nodes[index].Variant = codecVectorVariant
-			}
+			// Decoding only: a carrier is never read back.
+			runtimePlan.Nodes[index].Construct = func(_ int, fields []any) any { return fields }
 		}
 	}
 	codec, err := rt.CompileCodec(runtimePlan)
@@ -664,14 +701,16 @@ effect fn main() -> void raises { JsonDecodeFailure, JsonEncodeFailure } {
 }
 
 // The generated Go path reads nested records in place. Over a Level16 value
-// (2^16 transformed leaves, one MiB of inline structs), the emitted plan,
-// its generated adapters and carriers retain no more than a few KiB at the
-// last transformation, after a collection, and the pass allocates no more
-// than that; projecting each record into boxed fields retained a copy of
-// every subtree on the current path (about two MiB) and allocated a copy
-// of the value per level. The generated direction function runs every
-// transformation and reports body-too-large; the three-level control
-// encodes exactly through the same adapters.
+// (2^16 transformed leaves, one MiB of inline structs), the plan's generated
+// writer retains no more than a few KiB at the last transformation, after a
+// collection, and the pass allocates no more than that; projecting each
+// record into boxed fields retained a copy of every subtree on the current
+// path and allocated a copy of the value per level. The writer is also held
+// to the matched idiomatic Go control: a hand-written encoder of the same
+// shape (one function per type, fields passed by pointer, the same typed
+// transformation, the same budget) may allocate and retain at most 1 KiB
+// less. The generated direction function runs every transformation and
+// reports body-too-large; the three-level control encodes exactly.
 func TestCodecGeneratedGoEncodeReadsNestedRecordsInPlace(t *testing.T) {
 	t.Parallel()
 	const levels = 16
@@ -683,49 +722,77 @@ func TestCodecGeneratedGoEncodeReadsNestedRecordsInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := regexp.MustCompile(`var (efCodecPlan_\d+) = efCodecCompile\(er\.CodecPlan\{Profile:\s*"[^"]*",\s*Bounds:\s*er\.CodecBounds\{MaxBodyBytes:\s*80,`).FindStringSubmatch(code)
-	if plan == nil {
-		t.Fatal("deepJson's plan was not emitted")
+	var deep *CodecPlan
+	for _, codec := range r.Program.Codecs {
+		if codec.Name == "deepJson" {
+			deep = codec.plan
+		}
 	}
-	if strings.Contains(code, "efCodecProject_") {
-		t.Fatal("generated code still projects records into boxed fields")
+	if deep == nil || !strings.Contains(code, "func "+goCodecEncodeName(deep)+"(") {
+		t.Fatal("deepJson's writer was not emitted")
+	}
+	if strings.Contains(code, "efCodecProject_") || strings.Contains(code, "reflect") {
+		t.Fatal("generated code projects records into boxed fields or reflects over them")
 	}
 	dir := t.TempDir()
 	if err = application.WriteRuntime(dir); err != nil {
 		t.Fatal(err)
 	}
 	// Each level's value is built once from the one below, as generated
-	// code nests records: inline, by value.
-	var values strings.Builder
+	// code nests records: inline, by value. The control has one function
+	// per level, as a hand-written encoder of these types would.
+	var values, control strings.Builder
 	values.WriteString("func level0()efType_Leaf{return efType_Leaf{EfField_4_code:\"x\"}}\n")
+	control.WriteString("func controlLevel0(w *controlWriter,v *efType_Leaf)error{code,err:=leafStep(*v);if err!=nil{return err};w.str(code);return nil}\n")
 	for level := 1; level <= levels; level++ {
 		fmt.Fprintf(&values, "func level%[1]d()efType_Level%[1]d{below:=level%[2]d();return efType_Level%[1]d{EfField_1_a:below,EfField_1_b:below}}\n", level, level-1)
+		fmt.Fprintf(&control, "func controlLevel%[1]d(w *controlWriter,v *efType_Level%[1]d)error{w.raw(`{\"a\":`);if err:=controlLevel%[2]d(w,&v.EfField_1_a);err!=nil{return err};w.raw(`,\"b\":`);if err:=controlLevel%[2]d(w,&v.EfField_1_b);err!=nil{return err};w.raw(`}`);return nil}\n", level, level-1)
 	}
-	probe := strings.NewReplacer("DEEP_PLAN", plan[1], "LEVELS", strconv.Itoa(levels), "LEVEL_VALUES", values.String()).Replace(`package main
+	probe := strings.NewReplacer("@ENCODE@", goCodecEncodeName(deep), "@STEPS@", goCodecStepsName(deep), "@LEVELS@", strconv.Itoa(levels), "@VALUES@", values.String(), "@CONTROL@", control.String()).Replace(`package main
 import("runtime";"testing";er "effra.generated/runtime")
-LEVEL_VALUES
-// The value is boxed before the baseline: the boundary receives it as its
-// argument, and only what the pass adds is measured.
-func measure(value any)(retained,allocated int64,calls int,err error){
- var before,at,after runtime.MemStats
- var representation any="x"
- steps:=[]er.CodecStep{func(v any)(any,error){
-  _=v.(efType_Leaf)
-  if calls++;calls==1<<LEVELS{runtime.GC();runtime.ReadMemStats(&at)}
-  return representation,nil
- }}
- runtime.GC();runtime.ReadMemStats(&before)
- _,err=DEEP_PLAN.EncodeSteps(value,steps)
- runtime.ReadMemStats(&after)
- return int64(at.HeapAlloc)-int64(before.HeapAlloc),int64(after.TotalAlloc-before.TotalAlloc),calls,err
+@VALUES@
+var calls int
+var at runtime.MemStats
+// leafStep is the transformation both encoders call, typed, per leaf.
+func leafStep(leaf efType_Leaf)(string,error){
+ if calls++;calls==1<<@LEVELS@{runtime.GC();runtime.ReadMemStats(&at)}
+ return leaf.EfField_4_code,nil
+}
+// controlWriter is the hand-written encoder's budgeted output. Its leaves
+// are plain ASCII, so it writes them without escaping.
+type controlWriter struct{out []byte;limit int;failed bool}
+func (w *controlWriter)raw(text string){if w.failed{return};if len(w.out)+len(text)>w.limit{w.failed=true;return};w.out=append(w.out,text...)}
+func (w *controlWriter)str(text string){w.raw("\"");w.raw(text);w.raw("\"")}
+@CONTROL@
+// measure reports what one pass adds over the value: the live heap at its
+// last transformation, after a collection, and the bytes it allocates. It
+// keeps the least of several passes after a warm-up, so allocations the Go
+// runtime makes for itself during a pass (starting a thread for the
+// collector, say) are not charged to the encoder.
+func measure(encode func()error)(retained,allocated int64,err error){
+ retained,allocated=1<<62,1<<62
+ for pass:=0;pass<6;pass++{
+  calls=0
+  var before,after runtime.MemStats
+  runtime.GC();runtime.ReadMemStats(&before)
+  err=encode()
+  runtime.ReadMemStats(&after)
+  if pass>0{retained,allocated=min(retained,int64(at.HeapAlloc)-int64(before.HeapAlloc)),min(allocated,int64(after.TotalAlloc-before.TotalAlloc))}
+ }
+ return retained,allocated,err
 }
 func TestDeepEncode(t *testing.T){
- var value any=levelLEVELS()
- retained,allocated,calls,err:=measure(value)
+ value:=level@LEVELS@()
+ retained,allocated,err:=measure(func()error{_,err:=@ENCODE@(&value,@STEPS@{S0:leafStep});return err})
  failure,ok:=err.(*er.CodecError)
- if !ok||failure.Reason!=er.CodecBodyTooLarge||calls!=1<<LEVELS{t.Fatalf("deep value: %v after %d steps",err,calls)}
- if retained>8<<10||allocated>8<<10{t.Fatalf("encoding an 80-byte budget over %d inline leaves retained %d and allocated %d bytes",1<<LEVELS,retained,allocated)}
- deep:=er.Run(func(fc *er.FiberContext)er.Exit[string]{return efFunction_encodeDeep(levelLEVELS())(efContext{Runtime:fc})})
+ if !ok||failure.Reason!=er.CodecBodyTooLarge||calls!=1<<@LEVELS@{t.Fatalf("deep value: %v after %d steps",err,calls)}
+ controlRetained,controlAllocated,err:=measure(func()error{w:=&controlWriter{limit:80};if err:=controlLevel@LEVELS@(w,&value);err!=nil{return err};if !w.failed{t.Fatal("control fit its budget")};return nil})
+ if err!=nil||calls!=1<<@LEVELS@{t.Fatalf("control: %v after %d steps",err,calls)}
+ t.Logf("MEASURE generated retained=%d allocated=%d control retained=%d allocated=%d",retained,allocated,controlRetained,controlAllocated)
+ runtime.KeepAlive(&value)
+ if retained>8<<10||allocated>8<<10{t.Fatalf("encoding an 80-byte budget over %d inline leaves retained %d and allocated %d bytes",1<<@LEVELS@,retained,allocated)}
+ if retained>controlRetained+1<<10||allocated>controlAllocated+1<<10{t.Fatalf("the generated writer retained %d and allocated %d bytes; the hand-written control %d and %d",retained,allocated,controlRetained,controlAllocated)}
+ deep:=er.Run(func(fc *er.FiberContext)er.Exit[string]{return efFunction_encodeDeep(level@LEVELS@())(efContext{Runtime:fc})})
  cause:=deep.Cause()
  if !deep.IsFailure()||len(cause)!=1||cause[0].Failure==nil||cause[0].Failure.Tag!="JsonEncodeFailure"{t.Fatalf("deep direction: %+v",deep)}
  if payload,ok:=cause[0].Failure.Payload.(*er.CodecError);!ok||payload.Reason!=er.CodecBodyTooLarge{t.Fatalf("deep direction payload: %+v",cause[0].Failure.Payload)}
@@ -735,12 +802,16 @@ func TestDeepEncode(t *testing.T){
 }
 `)
 	for name, data := range map[string][]byte{"go.mod": r.ModuleFile(), "main.go": []byte(code), "main_test.go": []byte(probe)} {
-		if err = os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
+		if err = os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if output, err := runGoCommand(dir, "test", "."); err != nil {
+	output, err := runGoCommand(dir, "test", "-count=1", "-v", "-run", "TestDeepEncode", ".")
+	if err != nil {
 		t.Fatalf("generated deep encode: %v %s", err, output)
+	}
+	if measured := regexp.MustCompile(`MEASURE [^\n]*`).Find(output); measured != nil {
+		t.Log(string(measured))
 	}
 }
 

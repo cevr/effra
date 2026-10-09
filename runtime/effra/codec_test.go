@@ -15,7 +15,9 @@ import (
 
 // These carriers mirror the native declarations the compiler emits for
 // records, closed enums and payload failures; the adapters below are the
-// small per-type functions a derived plan supplies.
+// small per-type functions a derived plan supplies, and the writers are
+// shaped as the compiler generates them: one function per type, fields
+// passed by pointer, a union's variant bound once in a type switch.
 type codecTestPerson struct {
 	Name  string
 	Email string
@@ -77,15 +79,6 @@ func codecTestAccountPlan(bounds CodecBounds) CodecPlan {
 					}
 					return codecTestRunning{RunID: f[0].(string), Owner: f[1].(codecTestPerson)}
 				},
-				Variant: func(v any) int {
-					switch v.(type) {
-					case codecTestIdle:
-						return 0
-					case codecTestRunning:
-						return 1
-					}
-					panic("unknown State variant")
-				},
 			},
 		},
 	}
@@ -103,10 +96,98 @@ func codecTestFailurePlan() CodecPlan {
 				Kind: CodecUnion, Type: "NotFound",
 				Variants:  []CodecVariant{{Tag: "NotFound", Fields: []CodecField{{"id", 0}, {"resource", 1}}}},
 				Construct: func(_ int, f []any) any { return codecTestNotFound{ID: f[0].(int64), Resource: f[1].(string)} },
-				Variant:   func(any) int { return 0 },
 			},
 		},
 	}
+}
+
+func codecTestWritePerson(w *CodecWriter, v *codecTestPerson) {
+	if !w.Live() {
+		return
+	}
+	w.Raw(`{"name":`)
+	w.Enter("name")
+	w.String(v.Name)
+	w.Leave()
+	w.Raw(`,"email":`)
+	w.Enter("email")
+	w.String(v.Email)
+	w.Leave()
+	w.Raw(`}`)
+}
+
+func codecTestWriteState(w *CodecWriter, v *codecTestState) {
+	if !w.Live() {
+		return
+	}
+	switch x := (*v).(type) {
+	case codecTestIdle:
+		w.Raw(`{"_tag":"Idle"}`)
+	case codecTestRunning:
+		w.Raw(`{"_tag":"Running","runId":`)
+		w.Enter("runId")
+		w.String(x.RunID)
+		w.Leave()
+		w.Raw(`,"owner":`)
+		w.Enter("owner")
+		codecTestWritePerson(w, &x.Owner)
+		w.Leave()
+		w.Raw(`}`)
+	default:
+		panic("effra codec: codecTestState carrier holds no declared variant")
+	}
+}
+
+func codecTestWriteAccount(w *CodecWriter, v *codecTestAccount) {
+	if !w.Live() {
+		return
+	}
+	w.Raw(`{"id":`)
+	w.Enter("id")
+	w.I64(v.ID)
+	w.Leave()
+	w.Raw(`,"owner":`)
+	w.Enter("owner")
+	codecTestWritePerson(w, &v.Owner)
+	w.Leave()
+	w.Raw(`,"state":`)
+	w.Enter("state")
+	codecTestWriteState(w, &v.State)
+	w.Leave()
+	w.Raw(`,"active":`)
+	w.Enter("active")
+	w.Bool(v.Active)
+	w.Leave()
+	w.Raw(`,"note":`)
+	w.Enter("note")
+	w.Void()
+	w.Leave()
+	w.Raw(`}`)
+}
+
+func codecTestEncodeAccount(codec *Codec, value codecTestAccount) ([]byte, error) {
+	w := codec.Writer()
+	codecTestWriteAccount(w, &value)
+	return w.Finish(nil)
+}
+
+func codecTestEncodeNotFound(codec *Codec, payload any) ([]byte, error) {
+	w := codec.Writer()
+	switch x := payload.(type) {
+	case codecTestNotFound:
+		w.Raw(`{"_tag":"NotFound","id":`)
+		w.Enter("id")
+		w.I64(x.ID)
+		w.Leave()
+		w.Raw(`,"resource":`)
+		w.Enter("resource")
+		w.String(x.Resource)
+		w.Leave()
+		w.Raw(`}`)
+	default:
+		panic("effra codec: NotFound carrier holds no declared variant")
+	}
+	return w.Finish(nil)
 }
 
 func mustCompileCodec(t *testing.T, plan CodecPlan) *Codec {
@@ -130,7 +211,7 @@ func TestCodecRoundTripsGeneratedCarriers(t *testing.T) {
 	if !reflect.DeepEqual(value, want) {
 		t.Fatalf("decoded %#v, want %#v", value, want)
 	}
-	encoded, err := codec.Encode(value)
+	encoded, err := codecTestEncodeAccount(codec, value.(codecTestAccount))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +225,7 @@ func TestCodecRoundTripsGeneratedCarriers(t *testing.T) {
 	}
 
 	idle := codecTestAccount{ID: 1, Owner: ada, State: codecTestIdle{}}
-	encoded, err = codec.Encode(idle)
+	encoded, err = codecTestEncodeAccount(codec, idle)
 	if err != nil || !strings.Contains(string(encoded), `"state":{"_tag":"Idle"}`) {
 		t.Fatalf("payload-free variant: %s %v", encoded, err)
 	}
@@ -154,7 +235,7 @@ func TestCodecRoundTripsGeneratedCarriers(t *testing.T) {
 	if err != nil || value != (codecTestNotFound{ID: 7, Resource: "user"}) {
 		t.Fatalf("payload failure decode: %#v %v", value, err)
 	}
-	encoded, err = failure.Encode(value)
+	encoded, err = codecTestEncodeNotFound(failure, value)
 	if err != nil || string(encoded) != `{"_tag":"NotFound","id":"7","resource":"user"}` {
 		t.Fatalf("payload failure encode: %s %v", encoded, err)
 	}
@@ -212,7 +293,7 @@ func TestCodecFailuresNeverEchoInput(t *testing.T) {
 func TestCodecEncodeFailuresAreTyped(t *testing.T) {
 	codec := mustCompileCodec(t, codecTestAccountPlan(CodecBounds{MaxBodyBytes: 4096, MaxDepth: 4}))
 	invalid := codecTestAccount{ID: 1, Owner: codecTestPerson{Name: "a\xffb", Email: "e"}, State: codecTestIdle{}}
-	_, err := codec.Encode(invalid)
+	_, err := codecTestEncodeAccount(codec, invalid)
 	want := &CodecError{Direction: CodecEncode, Reason: CodecInvalidUnicode, Path: []string{"owner", "name"}, Offset: -1}
 	var failure *CodecError
 	if !errors.As(err, &failure) || !reflect.DeepEqual(failure, want) {
@@ -220,16 +301,16 @@ func TestCodecEncodeFailuresAreTyped(t *testing.T) {
 	}
 
 	value := codecTestAccount{ID: 1, Owner: codecTestPerson{Name: "a", Email: "e"}, State: codecTestIdle{}}
-	full, err := codec.Encode(value)
+	full, err := codecTestEncodeAccount(codec, value)
 	if err != nil {
 		t.Fatal(err)
 	}
 	exact := codecTestAccountPlan(CodecBounds{MaxBodyBytes: len(full), MaxDepth: 4})
-	if encoded, err := mustCompileCodec(t, exact).Encode(value); err != nil || string(encoded) != string(full) {
+	if encoded, err := codecTestEncodeAccount(mustCompileCodec(t, exact), value); err != nil || string(encoded) != string(full) {
 		t.Fatalf("output at the exact bound was refused: %v", err)
 	}
 	short := codecTestAccountPlan(CodecBounds{MaxBodyBytes: len(full) - 1, MaxDepth: 4})
-	_, err = mustCompileCodec(t, short).Encode(value)
+	_, err = codecTestEncodeAccount(mustCompileCodec(t, short), value)
 	want = &CodecError{Direction: CodecEncode, Reason: CodecBodyTooLarge, Path: []string{}, Offset: -1}
 	if !errors.As(err, &failure) || !reflect.DeepEqual(failure, want) {
 		t.Fatalf("over-limit encode: %#v", err)
@@ -252,9 +333,14 @@ func TestCodecEncodeConstructsNoOutputBeyondTheBound(t *testing.T) {
 	}
 	for _, limit := range []int{32, 4096} {
 		codec := mustCompileCodec(t, CodecPlan{Profile: CodecProfileJSON, Bounds: CodecBounds{MaxBodyBytes: limit, MaxDepth: 1}, Nodes: []CodecNode{{Kind: CodecString}}})
+		encode := func(text string) ([]byte, error) {
+			w := codec.Writer()
+			w.String(text)
+			return w.Finish(nil)
+		}
 		for name, text := range inputs {
 			var failure *CodecError
-			if _, err := codec.Encode(text); !errors.As(err, &failure) || failure.Reason != CodecBodyTooLarge {
+			if _, err := encode(text); !errors.As(err, &failure) || failure.Reason != CodecBodyTooLarge {
 				t.Fatalf("%s under %d bytes: %#v", name, limit, err)
 			}
 			const runs = 8
@@ -262,35 +348,13 @@ func TestCodecEncodeConstructsNoOutputBeyondTheBound(t *testing.T) {
 			runtime.GC()
 			runtime.ReadMemStats(&before)
 			for range runs {
-				_, _ = codec.Encode(text)
+				_, _ = encode(text)
 			}
 			runtime.ReadMemStats(&after)
 			if perRun := (after.TotalAlloc - before.TotalAlloc) / runs; perRun > uint64(4*limit+1024) {
 				t.Errorf("%s under %d bytes allocated %d bytes per Encode", name, limit, perRun)
 			}
 		}
-	}
-}
-
-func TestCodecAdapterMismatchIsADefect(t *testing.T) {
-	value := codecTestAccount{Owner: codecTestPerson{Name: "a", Email: "e"}, State: codecTestIdle{}}
-	cases := map[string]func(*CodecPlan){
-		"field count":     func(p *CodecPlan) { p.Nodes[5].Fields = p.Nodes[5].Fields[:1] },
-		"primitive carry": func(p *CodecPlan) { p.Nodes[5].Fields[0].Node = 2 },
-		"variant index":   func(p *CodecPlan) { p.Nodes[6].Variant = func(any) int { return 2 } },
-	}
-	for name, edit := range cases {
-		t.Run(name, func(t *testing.T) {
-			plan := codecTestAccountPlan(CodecBounds{MaxBodyBytes: 4096, MaxDepth: 4})
-			edit(&plan)
-			codec := mustCompileCodec(t, plan)
-			defer func() {
-				if recovered := recover(); recovered == nil || !strings.HasPrefix(recovered.(string), "effra codec:") {
-					t.Fatalf("adapter mismatch was not an engine defect: %v", recovered)
-				}
-			}()
-			_, _ = codec.Encode(value)
-		})
 	}
 }
 
@@ -352,8 +416,6 @@ func TestCodecPlanValidationRejectsMalformedPlans(t *testing.T) {
 		"empty union":        {func(p *CodecPlan) { p.Nodes[6].Variants = nil }, "needs variants"},
 		"record variants":    {func(p *CodecPlan) { p.Nodes[5].Variants = []CodecVariant{{Tag: "X"}} }, "has variants"},
 		"missing adapter":    {func(p *CodecPlan) { p.Nodes[5].Construct = nil }, "Construct"},
-		"missing variant":    {func(p *CodecPlan) { p.Nodes[6].Variant = nil }, "for a union only, Variant"},
-		"record variant":     {func(p *CodecPlan) { p.Nodes[5].Variant = p.Nodes[6].Variant }, "for a union only, Variant"},
 		"anonymous nominal":  {func(p *CodecPlan) { p.Nodes[5].Type = "" }, "type identity"},
 		"nominal primitive":  {func(p *CodecPlan) { p.Nodes[0].Type = "Name" }, "nominal structure"},
 		"primitive adapters": {func(p *CodecPlan) { p.Nodes[0].Construct = p.Nodes[5].Construct }, "nominal structure"},
@@ -377,10 +439,11 @@ func TestCodecCompiledPlanIsIsolatedFromCallerMutation(t *testing.T) {
 	codec := mustCompileCodec(t, plan)
 	plan.Nodes[5].Fields[0].Name = "renamed"
 	plan.Nodes[6].Variants[1].Tag = "Moved"
-	value := codecTestAccount{ID: 1, Owner: codecTestPerson{Name: "a", Email: "e"}, State: codecTestRunning{RunID: "r", Owner: codecTestPerson{Name: "a", Email: "e"}}}
-	encoded, err := codec.Encode(value)
-	if err != nil || !strings.Contains(string(encoded), `{"_tag":"Running","runId":"r"`) || strings.Contains(string(encoded), "renamed") {
-		t.Fatalf("compiled codec observed caller mutation: %s %v", encoded, err)
+	body := `{"id":"1","owner":{"name":"a","email":"e"},"state":{"_tag":"Running","runId":"r","owner":{"name":"a","email":"e"}},"active":false,"note":null}`
+	value, err := codec.Decode([]byte(body))
+	want := codecTestAccount{ID: 1, Owner: codecTestPerson{Name: "a", Email: "e"}, State: codecTestRunning{RunID: "r", Owner: codecTestPerson{Name: "a", Email: "e"}}}
+	if err != nil || !reflect.DeepEqual(value, want) {
+		t.Fatalf("compiled codec observed caller mutation: %#v %v", value, err)
 	}
 }
 
@@ -399,7 +462,7 @@ func TestCodecConcurrentUseSharesOnlyImmutableState(t *testing.T) {
 					failures <- err
 					return
 				}
-				encoded, err := codec.Encode(value)
+				encoded, err := codecTestEncodeAccount(codec, value.(codecTestAccount))
 				if err != nil || string(encoded) != string(body) {
 					failures <- errors.New("concurrent round trip changed bytes")
 					return

@@ -3,7 +3,6 @@ package effra
 import (
 	"fmt"
 	"math"
-	"reflect"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -64,14 +63,12 @@ type CodecBounds struct {
 
 // CodecNode describes one canonical type. Primitive carriers are fixed:
 // string, bool, struct{}{} for void and int64. Record and union nodes carry a
-// nominal Type identity and compiler-generated adapters: Construct receives a
-// variant index (0 for records) and decoded field values in declared order.
-// A union node's Variant names the variant its carrier holds. For encoding,
-// a record carrier, and the value a union carrier holds, is a struct whose
-// fields are the declared fields in declared order; the engine reads those
-// fields in place, so encoding never copies a nested record. A carrier
-// without declared fields is not read (a fieldless failure's is nil). Adapters and carriers are trusted compiler output,
-// so a mismatch is a defect (panic), never a typed codec failure.
+// nominal Type identity and a compiler-generated Construct adapter, which
+// receives a variant index (0 for records) and the decoded field values in
+// declared order. Encoding does not read the plan's nodes: compiler-generated
+// writers walk the value through a CodecWriter (see Codec.Writer). Adapters
+// are trusted compiler output, so a mismatch is a defect (panic), never a
+// typed codec failure.
 //
 // A transform node carries its witness identity as Type, its representation
 // node as Child and the index of its transformation among the plan's Steps.
@@ -82,18 +79,17 @@ type CodecNode struct {
 	Fields    []CodecField
 	Variants  []CodecVariant
 	Construct func(variant int, fields []any) any
-	Variant   func(value any) int
 	Child     int
 	Step      int
 }
 
-// CodecStep is one transformation of the direction being executed. A decode
-// step receives the decoded representation and returns the domain value; an
-// encode step receives the domain value and returns its representation. A
-// non-nil error halts the boundary and is returned unchanged, so a step can
-// carry any outcome its caller distinguishes (generated code carries the
-// transformation's exact cause) and is never confused with a structural
-// *CodecError. The engine itself stays independent of effect execution.
+// CodecStep is one decode transformation: it receives the decoded
+// representation and returns the domain value. A non-nil error halts the
+// boundary and is returned unchanged, so a step can carry any outcome its
+// caller distinguishes (generated code carries the transformation's exact
+// cause) and is never confused with a structural *CodecError. The engine
+// itself stays independent of effect execution. Encode steps are typed:
+// a generated writer calls them directly (see Codec.Writer).
 type CodecStep func(value any) (any, error)
 
 // CodecField names a wire key and the node decoding its value. In this
@@ -166,6 +162,9 @@ type Codec struct {
 	bounds CodecBounds
 	root   *codecNode
 	steps  int
+	// nesting is the plan's record/union nesting: the most declared keys
+	// an encode path holds.
+	nesting int
 }
 
 type codecNode struct {
@@ -174,21 +173,17 @@ type codecNode struct {
 	variants  []codecVariant
 	tags      map[string]int
 	construct func(int, []any) any
-	variant   func(any) int
-	// open is a record's opening brace; a union's opening bytes are its
-	// variants'.
-	open  []byte
-	child *codecNode
-	step  int
+	child     *codecNode
+	step      int
 	// pending marks a node whose subtree contains a transformation. Its
 	// structural phase carries codecPending values instead of carriers, and
 	// its transformation phase completes them in declared order.
 	pending bool
 }
 
-// codecPending is the not yet constructed (decode) or already projected
-// (encode) form of a nominal node on a path to a transformation. It is
-// private, so it can never be mistaken for a generated carrier.
+// codecPending is the not yet constructed form of a nominal node on a path
+// to a decode transformation. It is private, so it can never be mistaken
+// for a generated carrier.
 type codecPending struct {
 	variant int
 	fields  []any
@@ -196,12 +191,10 @@ type codecPending struct {
 
 type codecField struct {
 	name string
-	key  []byte
 	node *codecNode
 }
 
 type codecVariant struct {
-	open   []byte
 	fields []codecField
 }
 
@@ -255,7 +248,7 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 	for index, node := range plan.Nodes {
 		switch node.Kind {
 		case CodecString, CodecBool, CodecVoid, CodecI64:
-			if node.Type != "" || len(node.Fields) > 0 || len(node.Variants) > 0 || node.Construct != nil || node.Variant != nil || node.Child != 0 || node.Step != 0 {
+			if node.Type != "" || len(node.Fields) > 0 || len(node.Variants) > 0 || node.Construct != nil || node.Child != 0 || node.Step != 0 {
 				return invalid("primitive node %d carries nominal structure", index)
 			}
 			if previous, ok := primitives[node.Kind]; ok {
@@ -263,8 +256,8 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 			}
 			primitives[node.Kind] = index
 		case CodecRecord, CodecUnion:
-			if node.Type == "" || node.Construct == nil || (node.Variant != nil) != (node.Kind == CodecUnion) {
-				return invalid("nominal node %d needs a type identity, Construct and, for a union only, Variant", index)
+			if node.Type == "" || node.Construct == nil {
+				return invalid("nominal node %d needs a type identity and Construct", index)
 			}
 			if node.Child != 0 || node.Step != 0 {
 				return invalid("nominal node %d carries transform structure", index)
@@ -274,7 +267,7 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 			}
 			types[node.Type] = index
 		case CodecTransform:
-			if node.Type == "" || len(node.Fields) > 0 || len(node.Variants) > 0 || node.Construct != nil || node.Variant != nil {
+			if node.Type == "" || len(node.Fields) > 0 || len(node.Variants) > 0 || node.Construct != nil {
 				return invalid("transform node %d needs a witness identity and no structure of its own", index)
 			}
 			if previous, ok := types[node.Type]; ok {
@@ -295,7 +288,7 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 		default:
 			return invalid("node %d has unsupported kind %q", index, node.Kind)
 		}
-		compiled[index] = codecNode{kind: node.Kind, construct: node.Construct, variant: node.Variant, step: node.Step}
+		compiled[index] = codecNode{kind: node.Kind, construct: node.Construct, step: node.Step}
 		switch node.Kind {
 		case CodecRecord:
 			if len(node.Variants) > 0 {
@@ -330,7 +323,7 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 	link := func(fields []CodecField) []codecField {
 		out := make([]codecField, len(fields))
 		for i, field := range fields {
-			out[i] = codecField{name: field.Name, key: codecSpell("", field.Name, ":"), node: &compiled[field.Node]}
+			out[i] = codecField{name: field.Name, node: &compiled[field.Node]}
 		}
 		return out
 	}
@@ -344,12 +337,11 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 		case CodecTransform:
 			compiled[index].child = &compiled[node.Child]
 		case CodecRecord:
-			compiled[index].fields, compiled[index].open = link(node.Fields), []byte{'{'}
+			compiled[index].fields = link(node.Fields)
 		case CodecUnion:
 			compiled[index].variants = make([]codecVariant, len(node.Variants))
 			for variant, alternative := range node.Variants {
-				open := codecSpell(string(codecSpell("{", CodecTagKey, ":")), alternative.Tag, "")
-				compiled[index].variants[variant] = codecVariant{open: open, fields: link(alternative.Fields)}
+				compiled[index].variants[variant] = codecVariant{fields: link(alternative.Fields)}
 			}
 		}
 	}
@@ -412,7 +404,7 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 			return invalid("node %d is unreachable from root", index)
 		}
 	}
-	return &Codec{bounds: plan.Bounds, root: &compiled[plan.Root], steps: len(steps)}, nil
+	return &Codec{bounds: plan.Bounds, root: &compiled[plan.Root], steps: len(steps), nesting: depth[plan.Root]}, nil
 }
 
 // Steps is the number of transformations a direction must supply.
@@ -483,136 +475,100 @@ func (n *codecNode) resolve(value any, steps []CodecStep) (any, error) {
 	return n.construct(pending.variant, pending.fields), nil
 }
 
-// Encode encodes a plan without transformations; see EncodeSteps.
-func (c *Codec) Encode(value any) ([]byte, error) { return c.EncodeSteps(value, nil) }
-
-// EncodeSteps writes compact JSON in declared field order, with each
-// union's discriminator first, running each encode transformation when the
-// writer reaches it. Output larger than MaxBodyBytes is a typed failure,
-// detected before any byte beyond the bound is constructed, and nothing
-// else is retained: encoder memory is O(MaxBodyBytes) plus the plan's
-// nesting, whatever the value's size or sharing. The value is read in
-// place: a nested record is never copied, and only a transformation's
-// domain value is handed to its step. Transformations run in
-// declared depth-first (pre)order, and every one runs before any
-// structural failure is reported, so a step's error, returned unchanged,
-// takes precedence over every structural failure. Structural failures
-// surface in encode order; a string's Unicode is validated before any of its
-// bytes are written, so ill-formed text reports invalid-unicode even when
-// its encoding would also exceed the remaining allowance.
-func (c *Codec) EncodeSteps(value any, steps []CodecStep) ([]byte, error) {
-	c.checkSteps(steps)
-	encoder := codecEncoder{limit: c.bounds.MaxBodyBytes}
-	// ValueOf of an interface value is not addressable, so every field,
-	// element and held value derived from it aliases the caller's memory.
-	carrier := reflect.ValueOf(value)
-	if !c.root.pending {
-		if failure := c.root.encode(&encoder, carrier, nil); failure != nil {
-			return nil, failure
-		}
-		return encoder.out, nil
-	}
-	if err := c.root.stream(&encoder, carrier, nil, steps); err != nil {
-		return nil, err
-	}
-	if encoder.failure != nil {
-		return nil, encoder.failure
-	}
-	return encoder.out, nil
+// Writer starts one encode pass of the plan for its compiler-generated
+// writer.
+//
+// A generated writer is a family of functions, one per plan node, that call
+// one another directly: a record's writer passes a pointer to each field to
+// the field's writer, so the value is read in place and no nested record is
+// copied; a union's writer binds the variant it holds once, in a type
+// switch, as any Go match over the generated enum does; and a transform
+// node's writer calls its typed encode step with the domain value, by
+// value, and writes the representation the step returns. It writes compact
+// JSON in declared field order, with each union's discriminator first,
+// spelling keys and tags at compile time with CodecSpelling.
+//
+// Output larger than MaxBodyBytes is a typed failure, detected before any
+// byte beyond the bound is constructed, and nothing else is retained:
+// encoder memory is O(MaxBodyBytes) plus the plan's nesting, whatever the
+// value's size or sharing. The first structural failure is deferred rather
+// than returned: from then on nothing is written, a writer whose subtree
+// has no transformation returns at once (Live), and the writers of the
+// remaining transformations still run them in declared depth-first
+// (pre)order. So every transformation runs before any structural failure
+// is reported, and the error of a step that halts the pass, returned
+// unchanged by Finish, takes precedence over every structural failure. Structural failures surface in
+// encode order; a string's Unicode is validated before any of its bytes are
+// written, so ill-formed text reports invalid-unicode even when its encoding
+// would also exceed the remaining allowance.
+func (c *Codec) Writer() *CodecWriter {
+	return &CodecWriter{encoder: codecEncoder{limit: c.bounds.MaxBodyBytes}, path: make([]string, 0, c.nesting)}
 }
 
-// stream encodes a pending node in one encode-order pass: a transformation
-// runs when the writer reaches it and its result is written at once, so no
-// prepared tree is ever built. The first structural failure is deferred on
-// the encoder rather than returned: from then on nothing is written or
-// retained, but the pass continues through pending nodes only, running the
-// remaining transformations, so the observable steps and the precedence of
-// a step's error are those of running every transformation first.
-func (n *codecNode) stream(e *codecEncoder, value reflect.Value, path *codecPath, steps []CodecStep) error {
-	if !n.pending {
-		if e.failure == nil {
-			e.failure = n.encode(e, value, path)
-		}
-		return nil
-	}
-	if n.kind == CodecTransform {
-		var domain any
-		if value = codecHeld(value); value.IsValid() {
-			// Interface on a non-addressable value shares its memory.
-			domain = value.Interface()
-		}
-		represented, err := steps[n.step](domain)
-		if err != nil {
-			return err
-		}
-		return n.child.stream(e, reflect.ValueOf(represented), path, steps)
-	}
-	fields, open, separated, carrier := n.carrier(value)
-	e.emit(open...)
-	for i, field := range fields {
-		if separated {
-			e.emit(',')
-		}
-		separated = true
-		e.emit(field.key...)
-		at := path
-		if e.failure == nil {
-			// A path exists only to report a structural failure, so a
-			// pass that already failed allocates none.
-			at = &codecPath{parent: path, name: field.name}
-		}
-		if err := field.node.stream(e, carrier.Field(i), at, steps); err != nil {
-			return err
-		}
-	}
-	e.emit('}')
-	return nil
+// CodecWriter is one encode pass. Its path holds the declared keys of the
+// field being written, outermost first; it is copied only to report a
+// structural failure.
+type CodecWriter struct {
+	encoder codecEncoder
+	path    []string
 }
 
-// codecHeld unwraps an interface-typed field to the value it holds, without
-// copying it.
-func codecHeld(value reflect.Value) reflect.Value {
-	if value.Kind() == reflect.Interface {
-		return value.Elem()
+// Live reports that no structural failure is deferred. A writer whose
+// subtree runs no transformation does nothing once the pass has failed.
+func (w *CodecWriter) Live() bool { return w.encoder.failure == nil }
+
+// Raw writes compiler-spelled plan text: braces, separators, keys and tags.
+func (w *CodecWriter) Raw(text string) {
+	if w.encoder.failure == nil {
+		w.encoder.failure = w.encoder.writeText(text)
 	}
-	return value
 }
 
-// codecCarrierType names a carrier's Go type for a defect message.
-func codecCarrierType(value reflect.Value) string {
-	if !value.IsValid() {
-		return "nil"
+// Enter and Leave bracket the value of the declared field name.
+func (w *CodecWriter) Enter(name string) { w.path = append(w.path, name) }
+func (w *CodecWriter) Leave()            { w.path = w.path[:len(w.path)-1] }
+
+// String writes a JSON string, refusing ill-formed Unicode at the current
+// path before writing any of its bytes.
+func (w *CodecWriter) String(text string) {
+	if w.encoder.failure != nil {
+		return
 	}
-	return value.Type().String()
+	if !utf8.ValidString(text) {
+		w.encoder.failure = &CodecError{Direction: CodecEncode, Reason: CodecInvalidUnicode, Path: append([]string{}, w.path...), Offset: -1}
+		return
+	}
+	w.encoder.failure = w.encoder.writeString(text)
 }
 
-// carrier resolves a nominal node's carrier in place: the declared fields of
-// the record or of the variant it holds, the bytes that open its object, and
-// the struct whose fields are those fields in declared order. A carrier
-// without declared fields is not read, so a fieldless failure's carrier may
-// be nil.
-func (n *codecNode) carrier(value reflect.Value) (fields []codecField, open []byte, separated bool, carrier reflect.Value) {
-	carrier = codecHeld(value)
-	fields, open = n.fields, n.open
-	if n.kind == CodecUnion {
-		var held any
-		if carrier.IsValid() {
-			held = carrier.Interface()
-		}
-		index := n.variant(held)
-		if index < 0 || index >= len(n.variants) {
-			panic(fmt.Sprintf("effra codec: union adapter returned variant %d of %d", index, len(n.variants)))
-		}
-		fields, open, separated = n.variants[index].fields, n.variants[index].open, true
+func (w *CodecWriter) Bool(value bool) {
+	if value {
+		w.Raw("true")
+	} else {
+		w.Raw("false")
 	}
-	if len(fields) == 0 {
-		// Nothing is read from a carrier without declared fields.
-		return fields, open, separated, carrier
+}
+
+// I64 writes a signed decimal string.
+func (w *CodecWriter) I64(value int64) {
+	if w.encoder.failure == nil {
+		var scratch [22]byte
+		w.encoder.failure = w.encoder.write(append(strconv.AppendInt(append(scratch[:0], '"'), value, 10), '"')...)
 	}
-	if !carrier.IsValid() || carrier.Kind() != reflect.Struct || carrier.NumField() != len(fields) {
-		panic(fmt.Sprintf("effra codec: %s carrier %s does not hold its %d declared fields", n.kind, codecCarrierType(carrier), len(fields)))
+}
+
+func (w *CodecWriter) Void() { w.Raw("null") }
+
+// Finish ends the pass: the error of the step that halted it, else the
+// deferred structural failure, else the output.
+func (w *CodecWriter) Finish(halted error) ([]byte, error) {
+	if halted != nil {
+		return nil, halted
 	}
-	return fields, open, separated, carrier
+	if w.encoder.failure != nil {
+		return nil, w.encoder.failure
+	}
+	return w.encoder.out, nil
 }
 
 // codecPath is a parent-linked failure path; it is materialized only when a
@@ -715,17 +671,9 @@ func decodeCodecFields(fields []codecField, object *codecJSON, path *codecPath) 
 type codecEncoder struct {
 	out   []byte
 	limit int
-	// failure is the first structural failure of a pass that runs
-	// transformations; once set, emit writes nothing.
+	// failure is the pass's first structural failure; once it is set,
+	// nothing more is written.
 	failure *CodecError
-}
-
-// emit writes bytes unless a structural failure is already deferred, and
-// defers the failure its write reports.
-func (e *codecEncoder) emit(bytes ...byte) {
-	if e.failure == nil {
-		e.failure = e.write(bytes...)
-	}
 }
 
 func (e *codecEncoder) write(bytes ...byte) *CodecError {
@@ -736,64 +684,22 @@ func (e *codecEncoder) write(bytes ...byte) *CodecError {
 	return nil
 }
 
-// codecSpell renders compiler-owned plan text (a key or tag) as a JSON
-// string between prefix and suffix. Plan text is not body output, so it is
-// not bounded by MaxBodyBytes.
-func codecSpell(prefix, text, suffix string) []byte {
-	e := codecEncoder{out: []byte(prefix), limit: math.MaxInt}
-	_ = e.writeString(text)
-	return append(e.out, suffix...)
+func (e *codecEncoder) writeText(text string) *CodecError {
+	if len(e.out)+len(text) > e.limit {
+		return codecFailure(CodecEncode, CodecBodyTooLarge, nil)
+	}
+	e.out = append(e.out, text...)
+	return nil
 }
 
-func (n *codecNode) encode(e *codecEncoder, value reflect.Value, path *codecPath) *CodecError {
-	value = codecHeld(value)
-	leaf := func(want reflect.Type) {
-		if !value.IsValid() || value.Type() != want {
-			panic(fmt.Sprintf("effra codec: %s node received %s", n.kind, codecCarrierType(value)))
-		}
-	}
-	switch n.kind {
-	case CodecString:
-		leaf(reflect.TypeFor[string]())
-		text := value.String()
-		if !utf8.ValidString(text) {
-			return codecFailure(CodecEncode, CodecInvalidUnicode, path)
-		}
-		return e.writeString(text)
-	case CodecBool:
-		leaf(reflect.TypeFor[bool]())
-		var scratch [5]byte
-		return e.write(strconv.AppendBool(scratch[:0], value.Bool())...)
-	case CodecVoid:
-		leaf(reflect.TypeFor[struct{}]())
-		return e.write('n', 'u', 'l', 'l')
-	case CodecI64:
-		leaf(reflect.TypeFor[int64]())
-		var scratch [22]byte
-		quoted := append(strconv.AppendInt(append(scratch[:0], '"'), value.Int(), 10), '"')
-		return e.write(quoted...)
-	case CodecRecord, CodecUnion:
-		fields, open, separated, carrier := n.carrier(value)
-		if failure := e.write(open...); failure != nil {
-			return failure
-		}
-		for i, field := range fields {
-			if separated {
-				if failure := e.write(','); failure != nil {
-					return failure
-				}
-			}
-			separated = true
-			if failure := e.write(field.key...); failure != nil {
-				return failure
-			}
-			if failure := field.node.encode(e, carrier.Field(i), &codecPath{parent: path, name: field.name}); failure != nil {
-				return failure
-			}
-		}
-		return e.write('}')
-	}
-	panic("effra codec: unvalidated node kind " + string(n.kind))
+// CodecSpelling renders compiler-owned plan text (a key or tag) as the JSON
+// string CodecProfileJSON writes for it, with JSON.stringify escaping. A
+// compiler spells a generated writer's keys and tags with it. Plan text is
+// not body output, so it is not bounded by MaxBodyBytes.
+func CodecSpelling(text string) string {
+	e := codecEncoder{limit: math.MaxInt}
+	_ = e.writeString(text)
+	return string(e.out)
 }
 
 // codecParseI64 accepts an optional '-' and ASCII digits. Leading zeros and

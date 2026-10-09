@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -299,53 +297,10 @@ func codecComparison(expect codecOutcome, effect codecEffectLine, parseFailure s
 	return "difference"
 }
 
-// codecVectorCarrier stands in for a compiler-generated record or union
-// carrier: like a generated struct, it holds the declared fields in
-// declared order, so the engine reads it in place. Its field names carry
-// the variant index; a fieldless variant's carrier is its index.
-func codecVectorCarrier(variant int, fields []any) any {
-	if len(fields) == 0 {
-		return variant
-	}
-	declared := make([]reflect.StructField, len(fields))
-	for i := range fields {
-		declared[i] = reflect.StructField{Name: "V" + strconv.Itoa(variant) + "F" + strconv.Itoa(i), Type: reflect.TypeFor[any]()}
-	}
-	carrier := reflect.New(reflect.StructOf(declared)).Elem()
-	for i := range fields {
-		carrier.Field(i).Set(reflect.ValueOf(&fields[i]).Elem())
-	}
-	return carrier.Interface()
-}
-
-// codecVectorVariant is the variant index a stand-in carrier holds.
-func codecVectorVariant(value any) int {
-	if index, ok := value.(int); ok {
-		return index
-	}
-	name := reflect.TypeOf(value).Field(0).Name
-	index, err := strconv.Atoi(name[1:strings.IndexByte(name, 'F')])
-	if err != nil {
-		panic(err)
-	}
-	return index
-}
-
-// codecVectorFields are a stand-in carrier's declared-order field values.
-func codecVectorFields(value any) []any {
-	if _, ok := value.(int); ok {
-		return nil
-	}
-	carrier := reflect.ValueOf(value)
-	fields := make([]any, carrier.NumField())
-	for i := range fields {
-		fields[i] = carrier.Field(i).Interface()
-	}
-	return fields
-}
-
+// codecVectorGoPlan is a vector plan for the runtime engine's validator,
+// with inert Construct adapters: plan errors never reach a carrier.
 func codecVectorGoPlan(plan codecVectorPlan, profile string) rt.CodecPlan {
-	construct := func(variant int, fields []any) any { return codecVectorCarrier(variant, fields) }
+	construct := func(int, []any) any { panic("plan errors construct no carrier") }
 	fields := func(list []codecVectorField) []rt.CodecField {
 		out := []rt.CodecField{}
 		for _, field := range list {
@@ -365,7 +320,7 @@ func codecVectorGoPlan(plan codecVectorPlan, profile string) rt.CodecPlan {
 			for _, variant := range node.Variants {
 				compiled.Variants = append(compiled.Variants, rt.CodecVariant{Tag: variant.Tag, Fields: fields(variant.Fields)})
 			}
-			compiled.Construct, compiled.Variant = construct, codecVectorVariant
+			compiled.Construct = construct
 		case rt.CodecTransform:
 			compiled.Child, compiled.Step = node.Child, node.Step
 		}
@@ -374,78 +329,12 @@ func codecVectorGoPlan(plan codecVectorPlan, profile string) rt.CodecPlan {
 	return out
 }
 
-// codecVectorGoValue builds a Go carrier from a neutral encode value.
-func codecVectorGoValue(t *testing.T, plan codecVectorPlan, index int, value any) any {
-	node := plan.Nodes[index]
-	marker, _ := value.(map[string]any)
-	fields := func(list []codecVectorField, source map[string]any) []any {
-		out := []any{}
-		for _, field := range list {
-			out = append(out, codecVectorGoValue(t, plan, field.Node, source[field.Name]))
-		}
-		return out
-	}
-	switch node.Kind {
-	case "string":
-		if text, ok := value.(string); ok {
-			return text
-		}
-		raw, err := hex.DecodeString(marker["$hex"].(string))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(raw)
-	case "bool":
-		return value.(bool)
-	case "transform":
-		// A transformed position holds its behavior's domain value.
-		return value
-	case "void":
-		return struct{}{}
-	case "i64":
-		number, err := strconv.ParseInt(marker["$i64"].(string), 10, 64)
-		if err != nil {
-			t.Fatalf("Go cannot carry i64 %v: %v", marker, err)
-		}
-		return number
-	case "record":
-		return codecVectorCarrier(0, fields(node.Fields, marker))
-	case "union":
-		for position, variant := range node.Variants {
-			if variant.Tag == marker["$variant"] {
-				return codecVectorCarrier(position, fields(variant.Fields, marker["fields"].(map[string]any)))
-			}
-		}
-	}
-	t.Fatalf("neutral value %v does not fit node %d", value, index)
-	return nil
-}
-
-// runCodecVectorsGo returns outcomes by vector id, and plan-error messages
-// (as Reason) by plan-error id.
+// runCodecVectorsGo returns outcomes by vector id, from the generated Go
+// path, and plan-error messages (as Reason) by plan-error id.
 func runCodecVectorsGo(t *testing.T, document codecVectorDocument) map[string]codecOutcome {
 	t.Helper()
-	settle := func(output []byte, err error) codecOutcome {
-		var failure *rt.CodecError
-		if errors.As(err, &failure) {
-			return codecOutcome{Reason: string(failure.Reason), Path: failure.Path, Offset: failure.Offset}
-		}
-		if err != nil {
-			t.Fatalf("untyped codec failure: %v", err)
-		}
-		return codecOutcome{OK: true, Encoded: string(output)}
-	}
-	codecs := map[string]*rt.Codec{}
-	for name, plan := range document.Plans {
-		codec, err := rt.CompileCodec(codecVectorGoPlan(plan, document.Profile))
-		if err != nil {
-			t.Fatalf("plan %s: %v", name, err)
-		}
-		codecs[name] = codec
-	}
-	results := map[string]codecOutcome{}
+	jobs := []codecVectorJob{}
 	for _, vector := range document.Vectors {
-		codec := codecs[vector.Plan]
 		switch {
 		case vector.Direction == "decode":
 			body := []byte{}
@@ -456,27 +345,16 @@ func runCodecVectorsGo(t *testing.T, document codecVectorDocument) map[string]co
 			} else {
 				t.Fatalf("%s: %v", vector.ID, err)
 			}
-			value, err := codec.Decode(body)
-			if err != nil {
-				results[vector.ID] = settle(nil, err)
-				continue
-			}
-			// A decoded value must re-encode; a failure here is reported
-			// apart from decode failures so encode checks cannot mask them.
-			outcome := settle(codec.Encode(value))
-			if !outcome.OK {
-				outcome.Reason = "re-encode " + outcome.Reason
-			}
-			results[vector.ID] = outcome
+			jobs = append(jobs, codecVectorJob{id: vector.ID, plan: vector.Plan, body: body, decode: true})
 		case slices.Contains(vector.Targets, "go"):
 			var value any
 			if err := json.Unmarshal(vector.Value, &value); err != nil {
 				t.Fatalf("%s: %v", vector.ID, err)
 			}
-			plan := document.Plans[vector.Plan]
-			results[vector.ID] = settle(codec.Encode(codecVectorGoValue(t, plan, plan.Root, value)))
+			jobs = append(jobs, codecVectorJob{id: vector.ID, plan: vector.Plan, value: value})
 		}
 	}
+	results := runCodecVectorsGenerated(t, document.Profile, document.Plans, jobs)
 	for _, planError := range document.PlanErrors {
 		profile := document.Profile
 		if planError.Profile != "" {

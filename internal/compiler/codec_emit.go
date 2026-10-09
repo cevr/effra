@@ -3,6 +3,7 @@ package compiler
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -14,19 +15,21 @@ import (
 // module and each executed plan only through a reachable direction.
 const codecLoweringHelper = "codec"
 
-// goCodecHelpers adapt the native engine to a direction function's recipe.
-// A structural failure carries the bounded *er.CodecError as its payload; a
-// transformation step runs its function's recipe on the caller's context and
-// halts with the recipe's exact cause, so its typed failure, defect or
-// interruption propagates unchanged and is never a structural failure. A plan
-// the engine refuses is a compiler defect, so it panics at initialization.
+// goCodecHelpers adapt the native engine and a plan's generated writer to a
+// direction function's recipe. A structural failure carries the bounded
+// *er.CodecError as its payload; a transformation step runs its function's
+// recipe on the caller's context and halts with the recipe's exact cause, so
+// its typed failure, defect or interruption propagates unchanged and is never
+// a structural failure. A plan the engine refuses is a compiler defect, so it
+// panics at initialization.
 const goCodecHelpers = `func efCodecCompile(plan er.CodecPlan)*er.Codec{codec,err:=er.CompileCodec(plan);if err!=nil{panic(err)};return codec}
 type efCodecHalt struct{cause er.Cause}
 func (h *efCodecHalt)Error()string{return "codec transformation halted: "+h.cause.Error()}
 func efCodecStep[A any](exit efExit[A])(any,error){if exit.IsFailure(){return nil,&efCodecHalt{cause:exit.Cause()}};return exit.Value,nil}
+func efCodecTyped[A any](exit efExit[A])(A,error){if exit.IsFailure(){var zero A;return zero,&efCodecHalt{cause:exit.Cause()}};return exit.Value,nil}
 func efCodecExit[A any](tag string,err error)efExit[A]{if halt,ok:=err.(*efCodecHalt);ok{return er.FromCause[A](halt.cause)};return er.Fail[A](tag,err)}
 func efCodecDecode[A any](codec *er.Codec,tag string,input string,steps []er.CodecStep)efExit[A]{value,err:=codec.DecodeSteps([]byte(input),steps);if err!=nil{return efCodecExit[A](tag,err)};return er.Succeed(value.(A))}
-func efCodecEncode(codec *er.Codec,tag string,value any,steps []er.CodecStep)efExit[string]{encoded,err:=codec.EncodeSteps(value,steps);if err!=nil{return efCodecExit[string](tag,err)};return er.Succeed(string(encoded))}
+func efCodecEncoded(tag string,encoded []byte,err error)efExit[string]{if err!=nil{return efCodecExit[string](tag,err)};return er.Succeed(string(encoded))}
 `
 
 // codecOperation retains what one executed direction needs: its plan, the
@@ -48,16 +51,29 @@ func (p *applicationPlanner) codecOperation(e *Expr, owner applicationOrigin) {
 	p.helper(codecLoweringHelper, owner)
 }
 
+// goLocalPattern matches a generated local variable, which an encode entry
+// can read through a pointer without holding a copy.
+var goLocalPattern = regexp.MustCompile(`^efLocal_[A-Za-z0-9_]+$`)
+
 func goCodecPlanName(plan *CodecPlan) string { return "efCodecPlan_" + strconv.Itoa(plan.index) }
+
+// goCodecEncodeName is the generated encode entry of a plan: it takes a
+// pointer to the boundary value, which it reads in place, and the plan's
+// encode steps, and returns the output or the error that ended the pass.
+func goCodecEncodeName(plan *CodecPlan) string { return "efCodecEncode_" + strconv.Itoa(plan.index) }
+
+// goCodecStepsName is the struct of a plan's typed encode steps, one field
+// S<step> per transformation.
+func goCodecStepsName(plan *CodecPlan) string { return "efCodecSteps_" + strconv.Itoa(plan.index) }
 
 // goCodecKinds names the runtime constant of each plan node kind.
 var goCodecKinds = map[rt.CodecKind]string{rt.CodecString: "er.CodecString", rt.CodecBool: "er.CodecBool", rt.CodecVoid: "er.CodecVoid", rt.CodecI64: "er.CodecI64", rt.CodecRecord: "er.CodecRecord", rt.CodecUnion: "er.CodecUnion", rt.CodecTransform: "er.CodecTransform"}
 
 // codecPlans emits every retained plan once, in derivation order, as a
-// compiled package-level codec. Nominal nodes reference one Construct
-// adapter per declaration, and union nodes one Variant adapter, shared by
-// every plan. Encoding reads the generated structs' fields in place, in
-// declared order, so it needs no projection adapter that would copy them.
+// compiled package-level codec and its generated writer. Nominal nodes
+// reference one Construct adapter per declaration, shared by every plan;
+// decoding runs on the plan. Encoding runs the plan's writer, which reads the
+// generated structs in place (see goCodecWriters).
 func (g *goEmitter) codecPlans(plans []*CodecPlan) string {
 	var adapters, compiled strings.Builder
 	emitted := map[TypeID]bool{}
@@ -94,25 +110,19 @@ func (g *goEmitter) codecPlans(plans []*CodecPlan) string {
 					literal += ",Variants:[]er.CodecVariant{" + strings.Join(variants, ",") + "}"
 				}
 				literal += ",Construct:efCodecConstruct_" + goIdent(node.data.Name)
-				if node.Kind == rt.CodecUnion {
-					literal += ",Variant:efCodecVariant_" + goIdent(node.data.Name)
-				}
 			}
 			nodes = append(nodes, literal+"}")
 		}
 		compiled.WriteString("var " + goCodecPlanName(plan) + " = efCodecCompile(er.CodecPlan{Profile:" + strconv.Quote(plan.Profile) + ",Bounds:er.CodecBounds{MaxBodyBytes:" + strconv.Itoa(plan.Bounds.MaxBodyBytes) + ",MaxDepth:" + strconv.Itoa(plan.Bounds.MaxDepth) + "},Root:" + strconv.Itoa(plan.Root) + ",Nodes:[]er.CodecNode{\n" + strings.Join(nodes, ",\n") + "}})\n")
+		compiled.WriteString(goCodecWriters(goCodecPlanName(plan), strconv.Itoa(plan.index), plan.Root, g.codecWriterNodes(plan)))
 	}
 	return adapters.String() + compiled.String()
 }
 
-// codecAdapters emits the engine's carrier adapters of one nominal node.
-// Construct asserts each decoded field to its declared layout, rendered
-// from the field's canonical type: derived plans hold only first-order
-// data, so no template bindings apply. A union's Variant names the variant
-// its carrier holds with a type switch that binds nothing, so it copies no
-// variant struct. The engine encodes a carrier's fields in place, which is
-// sound because generated structs declare exactly the declared fields in
-// declared order. A carrier mismatch is a defect and panics.
+// codecAdapters emits the Construct adapter of one nominal node. It asserts
+// each decoded field to its declared layout, rendered from the field's
+// canonical type: derived plans hold only first-order data, so no template
+// bindings apply. A carrier mismatch is a defect and panics.
 func (g *goEmitter) codecAdapters(node CodecPlanNode) string {
 	c := g.program.semantic
 	name := goIdent(node.data.Name)
@@ -124,35 +134,237 @@ func (g *goEmitter) codecAdapters(node CodecPlanNode) string {
 		}
 		return values
 	}
-	var out strings.Builder
 	if node.Kind == rt.CodecRecord {
-		out.WriteString("func efCodecConstruct_" + name + "(_ int,fields []any)any{return " + typeName + "{" + strings.Join(construct(node.Fields), ",") + "}}\n")
-		return out.String()
+		return "func efCodecConstruct_" + name + "(_ int,fields []any)any{return " + typeName + "{" + strings.Join(construct(node.Fields), ",") + "}}\n"
 	}
-	defect := "panic(" + strconv.Quote("effra codec: unknown variant of "+node.data.Name) + ")"
 	if node.data.Kind == "error" {
 		// A failure witness's one variant is the failure's payload: its
 		// declaration's struct, or nil for a fieldless failure.
-		fields := node.Variants[0].Fields
-		if len(fields) == 0 {
-			out.WriteString("func efCodecConstruct_" + name + "(_ int,_ []any)any{return nil}\n")
-			out.WriteString("func efCodecVariant_" + name + "(value any)int{switch value.(type){case nil," + typeName + ":return 0};" + defect + "}\n")
-			return out.String()
+		if fields := node.Variants[0].Fields; len(fields) > 0 {
+			return "func efCodecConstruct_" + name + "(_ int,fields []any)any{return " + typeName + "{" + strings.Join(construct(fields), ",") + "}}\n"
 		}
-		out.WriteString("func efCodecConstruct_" + name + "(_ int,fields []any)any{return " + typeName + "{" + strings.Join(construct(fields), ",") + "}}\n")
-		out.WriteString("func efCodecVariant_" + name + "(value any)int{switch value.(type){case " + typeName + ":return 0};" + defect + "}\n")
-		return out.String()
+		return "func efCodecConstruct_" + name + "(_ int,_ []any)any{return nil}\n"
 	}
+	var out strings.Builder
 	out.WriteString("func efCodecConstruct_" + name + "(variant int,fields []any)any{switch variant{\n")
 	for index, variant := range node.Variants {
 		out.WriteString("case " + strconv.Itoa(index) + ":return " + typeName + "(" + goVariantType(node.data.Name, variant.Tag) + "{" + strings.Join(construct(variant.Fields), ",") + "})\n")
 	}
-	out.WriteString("};" + defect + "}\n")
-	out.WriteString("func efCodecVariant_" + name + "(value any)int{switch value.(type){\n")
-	for index, variant := range node.Variants {
-		out.WriteString("case " + goVariantType(node.data.Name, variant.Tag) + ":return " + strconv.Itoa(index) + "\n")
+	out.WriteString("};panic(" + strconv.Quote("effra codec: unknown variant of "+node.data.Name) + ")}\n")
+	return out.String()
+}
+
+// codecWriterNodes describes a plan's nodes in the generated Go layout its
+// writer reads: each node's carrier type (a transform node's is its domain),
+// each field's Go selector and each variant's struct.
+func (g *goEmitter) codecWriterNodes(plan *CodecPlan) []goCodecWriterNode {
+	c := g.program.semantic
+	fields := func(declared []CodecPlanField) []goCodecWriterField {
+		out := make([]goCodecWriterField, 0, len(declared))
+		for _, field := range declared {
+			out = append(out, goCodecWriterField{Name: field.Name, GoField: goFieldName(field.Name), Node: field.Node})
+		}
+		return out
 	}
-	out.WriteString("};" + defect + "}\n")
+	nodes := make([]goCodecWriterNode, 0, len(plan.Nodes))
+	for _, node := range plan.Nodes {
+		writer := goCodecWriterNode{Kind: node.Kind, GoType: canonicalGoType(c, node.typeID, map[TypeID]bool{})}
+		switch node.Kind {
+		case rt.CodecTransform:
+			writer.Child, writer.Step = *node.Child, *node.Step
+		case rt.CodecRecord:
+			writer.Fields = fields(node.Fields)
+		case rt.CodecUnion:
+			if node.data.Kind == "error" {
+				// A failure's payload is its declaration's struct, or nil
+				// for a fieldless failure; it reaches the writer as any.
+				writer.GoType, writer.Failure = "any", true
+			}
+			for _, variant := range node.Variants {
+				goType := goVariantType(node.data.Name, variant.Tag)
+				if writer.Failure {
+					goType = "efType_" + goIdent(node.data.Name)
+				}
+				writer.Variants = append(writer.Variants, goCodecWriterVariant{Tag: variant.Tag, GoType: goType, Fields: fields(variant.Fields)})
+			}
+		}
+		nodes = append(nodes, writer)
+	}
+	return nodes
+}
+
+// goCodecWriterNode is one plan node in the Go layout a generated writer
+// reads: GoType is the node's carrier (a transform node's domain; a failure
+// root's payload, any). A union's variants name their structs; a failure's
+// one variant names its declaration's struct.
+type goCodecWriterNode struct {
+	Kind     rt.CodecKind
+	GoType   string
+	Failure  bool
+	Fields   []goCodecWriterField
+	Variants []goCodecWriterVariant
+	Child    int
+	Step     int
+}
+
+type goCodecWriterField struct {
+	Name    string
+	GoField string
+	Node    int
+}
+
+type goCodecWriterVariant struct {
+	Tag    string
+	GoType string
+	Fields []goCodecWriterField
+}
+
+// goCodecWriters emits one plan's writer: one function per record, union
+// and transform node, calling one another directly, the plan's typed encode
+// steps (goCodecStepsName) and its encode entry (goCodecEncodeName). The
+// encode pass reads the value in place:
+//
+//   - a record's writer passes a pointer to each field to the field's
+//     writer, so no nested record is copied;
+//   - a union's writer binds the variant it holds once, in a type switch, as
+//     any Go match over the generated enum does, and reads that binding
+//     through pointers; a carrier holding no declared variant is a defect;
+//   - a transform node's writer calls its typed step with the domain value,
+//     by value, and writes the representation the step returns, so neither
+//     is boxed.
+//
+// Keys, tags and separators are spelled at compile time. A writer whose
+// subtree holds no transformation returns nothing and stops once the pass
+// has failed; one that holds a transformation returns the error of a step
+// that halts the pass, so every transformation runs in declared order before
+// a deferred structural failure is reported.
+func goCodecWriters(planName, suffix string, root int, nodes []goCodecWriterNode) string {
+	pending := make([]int8, len(nodes))
+	var isPending func(int) bool
+	isPending = func(index int) bool {
+		if pending[index] != 0 {
+			return pending[index] > 0
+		}
+		node := nodes[index]
+		result := node.Kind == rt.CodecTransform
+		children := []int{}
+		if node.Kind == rt.CodecTransform {
+			children = append(children, node.Child)
+		}
+		for _, field := range node.Fields {
+			children = append(children, field.Node)
+		}
+		for _, variant := range node.Variants {
+			for _, field := range variant.Fields {
+				children = append(children, field.Node)
+			}
+		}
+		for _, child := range children {
+			result = isPending(child) || result
+		}
+		pending[index] = -1
+		if result {
+			pending[index] = 1
+		}
+		return result
+	}
+	name := func(index int) string { return "efCodecWrite_" + suffix + "_" + strconv.Itoa(index) }
+	stepsType := "efCodecSteps_" + suffix
+	raw := func(text string) string { return "w.Raw(" + strconv.Quote(text) + ")\n" }
+	// write renders the statements writing node index from a value
+	// expression and a pointer to it.
+	write := func(index int, value, pointer string) string {
+		switch nodes[index].Kind {
+		case rt.CodecString:
+			return "w.String(" + value + ")\n"
+		case rt.CodecBool:
+			return "w.Bool(" + value + ")\n"
+		case rt.CodecI64:
+			return "w.I64(" + value + ")\n"
+		case rt.CodecVoid:
+			return "w.Void()\n"
+		}
+		if isPending(index) {
+			return "if err:=" + name(index) + "(w,s," + pointer + ");err!=nil{return err}\n"
+		}
+		return name(index) + "(w," + pointer + ")\n"
+	}
+	// object writes an object that opens with head: each field's key
+	// follows head (after separator) or the previous field's value.
+	object := func(head, separator string, fields []goCodecWriterField, base string) string {
+		var out strings.Builder
+		for _, field := range fields {
+			out.WriteString(raw(head + separator + rt.CodecSpelling(field.Name) + ":"))
+			out.WriteString("w.Enter(" + strconv.Quote(field.Name) + ")\n")
+			out.WriteString(write(field.Node, base+"."+field.GoField, "&"+base+"."+field.GoField))
+			out.WriteString("w.Leave()\n")
+			head, separator = "", ","
+		}
+		return out.String() + raw(head+"}")
+	}
+	var out strings.Builder
+	steps := []string{}
+	for _, node := range nodes {
+		if node.Kind == rt.CodecTransform {
+			for len(steps) <= node.Step {
+				steps = append(steps, "")
+			}
+			steps[node.Step] = "S" + strconv.Itoa(node.Step) + " func(" + node.GoType + ")(" + nodes[node.Child].GoType + ",error)\n"
+		}
+	}
+	out.WriteString("type " + stepsType + " struct{\n" + strings.Join(steps, "") + "}\n")
+	for index, node := range nodes {
+		if node.Kind != rt.CodecRecord && node.Kind != rt.CodecUnion && node.Kind != rt.CodecTransform {
+			continue
+		}
+		signature, done := "func "+name(index)+"(w *er.CodecWriter,", "}\n"
+		if isPending(index) {
+			signature += "s *" + stepsType + ",v *" + node.GoType + ")error{\n"
+			done = "return nil\n}\n"
+		} else {
+			signature += "v *" + node.GoType + "){\nif !w.Live(){return}\n"
+		}
+		out.WriteString(signature)
+		switch node.Kind {
+		case rt.CodecRecord:
+			out.WriteString(object("{", "", node.Fields, "v"))
+		case rt.CodecUnion:
+			binds := false
+			for _, variant := range node.Variants {
+				for _, field := range variant.Fields {
+					binds = binds || nodes[field.Node].Kind != rt.CodecVoid
+				}
+			}
+			if binds {
+				out.WriteString("switch x:=(*v).(type){\n")
+			} else {
+				out.WriteString("switch (*v).(type){\n")
+			}
+			for _, variant := range node.Variants {
+				held := variant.GoType
+				if node.Failure && len(variant.Fields) == 0 {
+					held = "nil," + held
+				}
+				out.WriteString("case " + held + ":\n")
+				out.WriteString(object("{"+rt.CodecSpelling(rt.CodecTagKey)+":"+rt.CodecSpelling(variant.Tag), ",", variant.Fields, "x"))
+			}
+			out.WriteString("default:panic(" + strconv.Quote("effra codec: "+node.GoType+" carrier holds no declared variant") + ")\n}\n")
+		case rt.CodecTransform:
+			represented := "r"
+			if nodes[node.Child].Kind == rt.CodecVoid {
+				represented = "_"
+			}
+			out.WriteString(represented + ",err:=s.S" + strconv.Itoa(node.Step) + "(*v)\nif err!=nil{return err}\n")
+			out.WriteString(write(node.Child, "r", "&r"))
+		}
+		out.WriteString(done)
+	}
+	out.WriteString("func efCodecEncode_" + suffix + "(value *" + nodes[root].GoType + ",steps " + stepsType + ")([]byte,error){\nw:=" + planName + ".Writer()\n")
+	if isPending(root) {
+		out.WriteString("return w.Finish(" + name(root) + "(w,&steps,value))\n}\n")
+		return out.String()
+	}
+	out.WriteString(write(root, "*value", "value") + "return w.Finish(nil)\n}\n")
 	return out.String()
 }
 
@@ -164,6 +376,9 @@ func (g *goEmitter) codecAdapters(node CodecPlanNode) string {
 func (g *goEmitter) codecOperation(e *Expr, ret string, out *strings.Builder) string {
 	codec := e.codec
 	input := g.expr(e.Left, true, ret, out)
+	if e.Text == "encode" {
+		return g.codecEncodeOperation(e, input, ret, out)
+	}
 	steps := "nil"
 	if len(e.Args) > 0 {
 		adapted := []string{}
@@ -179,12 +394,59 @@ func (g *goEmitter) codecOperation(e *Expr, ret string, out *strings.Builder) st
 		}
 		steps = "[]er.CodecStep{" + strings.Join(adapted, ",") + "}"
 	}
-	call := "efCodecEncode(" + goCodecPlanName(codec.plan) + "," + strconv.Quote(codec.derivation.EncodeFailure) + "," + input + "," + steps + ")"
-	if e.Text == "decode" {
-		call = "efCodecDecode[" + g.valueType(e) + "](" + goCodecPlanName(codec.plan) + "," + strconv.Quote(codec.derivation.DecodeFailure) + "," + input + "," + steps + ")"
-	}
 	name := g.temp()
-	out.WriteString(name + " := " + call + "\n" + g.failed(name, ret))
+	if e.Text == "decode" {
+		out.WriteString(name + " := efCodecDecode[" + g.valueType(e) + "](" + goCodecPlanName(codec.plan) + "," + strconv.Quote(codec.derivation.DecodeFailure) + "," + input + "," + steps + ")\n" + g.failed(name, ret))
+		return name + ".Value"
+	}
+	panic("unreachable codec direction " + e.Text)
+}
+
+// codecEncodeOperation runs an encode direction through its plan's
+// generated writer. Each encode step is typed by its transform node: it
+// takes the domain carrier and returns the representation carrier, so the
+// writer boxes neither. An effect step runs its function's recipe on the
+// direction's own context and halts with the recipe's exact cause.
+func (g *goEmitter) codecEncodeOperation(e *Expr, input, ret string, out *strings.Builder) string {
+	c := g.program.semantic
+	plan := e.codec.plan
+	fields := []string{}
+	for _, step := range e.Args {
+		value := g.expr(step, true, ret, out)
+		f := step.ResolvedFunction
+		var node *CodecPlanNode
+		for index := range plan.Nodes {
+			if candidate := &plan.Nodes[index]; candidate.Kind == rt.CodecTransform && *candidate.Step == len(fields) {
+				node = candidate
+			}
+		}
+		if node == nil {
+			panic(fmt.Sprintf("codec plan %s has no transformation %d", plan.ID, len(fields)))
+		}
+		domain := canonicalGoType(c, node.typeID, map[TypeID]bool{})
+		representation := canonicalGoType(c, plan.Nodes[*node.Child].typeID, map[TypeID]bool{})
+		body := "return " + value + "(value),nil"
+		switch {
+		case f.Effect:
+			body = "return efCodecTyped(" + value + "(value)(ctx))"
+		case canonicalVoidType(c, f.returnID):
+			body = value + "(value);return struct{}{},nil"
+		}
+		fields = append(fields, "S"+strconv.Itoa(len(fields))+":func(value "+domain+")("+representation+",error){"+body+"}")
+	}
+	// A local is read in place; any other value is held once. A failure's
+	// payload reaches its writer as any.
+	if root := plan.Nodes[plan.Root]; root.data != nil && root.data.Kind == "error" {
+		held := g.temp()
+		out.WriteString("var " + held + " any = " + input + "\n")
+		input = held
+	} else if !goLocalPattern.MatchString(input) {
+		held := g.temp()
+		out.WriteString(held + " := " + input + "\n")
+		input = held
+	}
+	name, encoded, err := g.temp(), g.temp(), g.temp()
+	out.WriteString(encoded + "," + err + " := " + goCodecEncodeName(plan) + "(&" + input + "," + goCodecStepsName(plan) + "{" + strings.Join(fields, ",") + "})\n" + name + " := efCodecEncoded(" + strconv.Quote(e.codec.derivation.EncodeFailure) + "," + encoded + "," + err + ")\n" + g.failed(name, ret))
 	return name + ".Value"
 }
 

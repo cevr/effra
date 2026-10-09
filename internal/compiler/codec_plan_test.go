@@ -267,9 +267,6 @@ func runtimeCodecPlanOf(plan *CodecPlan) rt.CodecPlan {
 		if node.data != nil {
 			converted.Type = node.ID
 			converted.Construct = func(int, []any) any { return nil }
-			if node.Kind == rt.CodecUnion {
-				converted.Variant = func(any) int { return 0 }
-			}
 			converted.Fields = fields(node.Fields)
 			for _, variant := range node.Variants {
 				converted.Variants = append(converted.Variants, rt.CodecVariant{Tag: variant.Tag, Fields: fields(variant.Fields)})

@@ -3,7 +3,6 @@ package compiler
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,106 +36,23 @@ type codecTransformDocument struct {
 
 const codecTransformVectorsPath = "conformance/codecs/json-transform-vectors.json"
 
-// codecVectorStepFailure is a behavior's own failure. The engines return it
-// unchanged, so it carries no codec path.
-type codecVectorStepFailure struct{ step, message string }
-
-func (f *codecVectorStepFailure) Error() string { return f.step + ": " + f.message }
-
-func codecTransformBehaviorsGo() map[string]map[string]rt.CodecStep {
-	refuse := func(step, message string) error { return &codecVectorStepFailure{step: step, message: message} }
-	return map[string]map[string]rt.CodecStep{
-		"email": {
-			"decode": func(value any) (any, error) {
-				if value.(string) == "" {
-					return nil, refuse("email", "empty")
-				}
-				return strings.ToLower(value.(string)), nil
-			},
-			"encode": func(value any) (any, error) {
-				if value.(string) == "blocked" {
-					return nil, refuse("email", "blocked")
-				}
-				return value, nil
-			},
-		},
-		"status": {
-			"decode": func(value any) (any, error) {
-				if codecVectorVariant(value) == 2 {
-					return "Suspended", nil
-				}
-				return "Active", nil
-			},
-			"encode": func(value any) (any, error) {
-				return codecVectorCarrier(map[string]int{"Active": 0, "Suspended": 2}[value.(string)], nil), nil
-			},
-		},
-		"box": {
-			"decode": func(value any) (any, error) { return codecVectorFields(value)[0], nil },
-			"encode": func(value any) (any, error) { return codecVectorCarrier(0, []any{value}), nil },
-		},
-	}
-}
-
-func codecTransformStepsGo(t *testing.T, plan codecVectorPlan, direction string) []rt.CodecStep {
-	t.Helper()
-	behaviors := codecTransformBehaviorsGo()
-	var steps []rt.CodecStep
-	for _, node := range plan.Nodes {
-		if node.Kind != "transform" {
-			continue
-		}
-		for len(steps) <= node.Step {
-			steps = append(steps, nil)
-		}
-		steps[node.Step] = behaviors[node.Behavior][direction]
-		if steps[node.Step] == nil {
-			t.Fatalf("Go harness has no %s behavior %q", direction, node.Behavior)
-		}
-	}
-	return steps
-}
-
+// runCodecTransformVectorsGo runs the vectors on the generated Go path; a
+// decoded value is re-encoded, and a re-encode failure is staged apart.
 func runCodecTransformVectorsGo(t *testing.T, document codecTransformDocument) map[string]codecOutcome {
 	t.Helper()
-	settle := func(stage string, output []byte, err error) codecOutcome {
-		var failure *rt.CodecError
-		var step *codecVectorStepFailure
-		switch {
-		case errors.As(err, &failure):
-			return codecOutcome{Reason: stage + string(failure.Reason), Path: failure.Path, Offset: failure.Offset}
-		case errors.As(err, &step):
-			return codecOutcome{Step: stage + step.step, Message: step.message}
-		case err != nil:
-			t.Fatalf("untyped codec failure: %v", err)
-		}
-		return codecOutcome{OK: true, Encoded: string(output)}
-	}
-	results := map[string]codecOutcome{}
+	jobs := []codecVectorJob{}
 	for _, vector := range document.Vectors {
-		plan := document.Plans[vector.Plan]
-		codec, err := rt.CompileCodec(codecVectorGoPlan(plan, document.Profile))
-		if err != nil {
-			t.Fatalf("plan %s: %v", vector.Plan, err)
-		}
-		decodeSteps, encodeSteps := codecTransformStepsGo(t, plan, "decode"), codecTransformStepsGo(t, plan, "encode")
 		if vector.Direction == "decode" {
-			value, err := codec.DecodeSteps([]byte(*vector.Body), decodeSteps)
-			if err != nil {
-				results[vector.ID] = settle("", nil, err)
-				continue
-			}
-			output, err := codec.EncodeSteps(value, encodeSteps)
-			results[vector.ID] = settle("re-encode ", output, err)
+			jobs = append(jobs, codecVectorJob{id: vector.ID, plan: vector.Plan, body: []byte(*vector.Body), decode: true})
 			continue
 		}
 		var value any
 		if err := json.Unmarshal(vector.Value, &value); err != nil {
 			t.Fatalf("%s: %v", vector.ID, err)
 		}
-		output, err := codec.EncodeSteps(codecVectorGoValue(t, plan, plan.Root, value), encodeSteps)
-		results[vector.ID] = settle("", output, err)
+		jobs = append(jobs, codecVectorJob{id: vector.ID, plan: vector.Plan, value: value})
 	}
+	results := runCodecVectorsGenerated(t, document.Profile, document.Plans, jobs)
 	for _, planError := range document.PlanErrors {
 		if _, err := rt.CompileCodec(codecVectorGoPlan(planError.Plan, document.Profile)); err == nil {
 			t.Fatalf("%s: Go accepted an invalid plan", planError.ID)
