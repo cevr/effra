@@ -31,7 +31,8 @@ const maxLexicalFacts = 100000
 // lexicalTarget is the declaration denoted by one source name token. It keeps
 // the checker's own declaration pointers; nothing is re-resolved by name.
 // Variant and field narrow an owning data or error declaration; parameter
-// narrows a function, operation or provider to one declared parameter.
+// narrows a function, operation or provider to one declared parameter, and
+// names a row parameter of a function or a template parameter of data.
 type lexicalTarget struct {
 	kind      string
 	function  *Function
@@ -315,6 +316,11 @@ func (facts *lexicalFacts) declare(item *SyntaxItem) {
 		for _, f := range methods {
 			owner.function = f
 			name(f.Span, owner)
+			for _, row := range f.RowParameters {
+				parameter := owner
+				parameter.kind, parameter.parameter = "rowParameter", row.Name
+				name(row.Span, parameter)
+			}
 		}
 	}
 	switch {
@@ -335,6 +341,9 @@ func (facts *lexicalFacts) declare(item *SyntaxItem) {
 		}
 		facts.items[data] = item
 		name(data.Span, lexicalTarget{kind: data.Kind, data: data})
+		for _, parameter := range data.Parameters {
+			name(parameter.Span, lexicalTarget{kind: "typeParameter", data: data, parameter: parameter.Name})
+		}
 		fields(data.Fields, lexicalTarget{kind: "field", data: data})
 		for _, variant := range data.Variants {
 			name(variant.Span, lexicalTarget{kind: "variant", data: data, variant: variant.Name})
@@ -442,7 +451,15 @@ func (c *checker) observeReference(node any, span Span, target lexicalTarget) {
 	case *Provider:
 		original = facts.items[n] != nil
 	}
-	if !original {
+	if original {
+		facts.addReference(span, target)
+	}
+}
+
+// addReference records one original token's checker-selected declaration,
+// within the shared name-fact cap.
+func (facts *lexicalFacts) addReference(span Span, target lexicalTarget) {
+	if !facts.complete || span.Length == 0 {
 		return
 	}
 	if _, exists := facts.references[span.Offset]; !exists && len(facts.declarations)+len(facts.references) >= maxLexicalFacts {

@@ -2188,6 +2188,7 @@ func checkParsed(r *Result, program *Program, dir, source string) *Result {
 	c := newChecker(program, r)
 	checkStart := time.Now()
 	c.check()
+	c.observeDeclarationSyntax()
 	c.publishTypeNodes()
 	r.Timings.CheckMicros = time.Since(checkStart).Microseconds()
 	r.Timings.TotalMicros = r.Timings.ParseMicros + time.Since(start).Microseconds()

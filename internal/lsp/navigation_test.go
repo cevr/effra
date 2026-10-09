@@ -338,3 +338,64 @@ func TestNavigationResolvesArgumentLabelsToParameters(t *testing.T) {
 	sameRange(t, "operation-definition", byID["operation-definition"]["result"].(map[string]any)["range"], editorRange(source, at(t, source, "right: string) -> string }", "right"), len("right")))
 	sameRange(t, "configuration-definition", byID["configuration-definition"]["result"].(map[string]any)["range"], editorRange(source, at(t, source, "suffix: string", "suffix"), len("suffix")))
 }
+
+// Type annotations and row labels answer from the same checked-type and
+// checked-row resolution CLI and MCP select: template and row parameters
+// shadow same-spelled module declarations, bundled targets have no location
+// in this document, and primitives name no declaration.
+func TestNavigationResolvesTypeAnnotationsAndRowLabels(t *testing.T) {
+	uri := "file:///tmp/effra-annotations.ef"
+	source := "import Data \"effra/data\" // 𐐀\r\nerror E\r\nrecord Box { value: string }\r\nrecord Wrap<Box: type> { inner: Box }\r\n" +
+		"effect fn apply<E: raises>(box: Data.Option<Box>, cb: effect fn(Box) -> string raises {E}) -> Wrap<Box> raises {E} { Wrap { inner: Box { value: \"x\" } } }\r\n"
+	probes := []struct{ context, name, declaration, hover string }{
+		{"inner: Box }", "Box", "Wrap<Box:", "type parameter Wrap.Box: type"},
+		{"fn(Box)", "Box", "record Box {", "record Box { value: string }"},
+		{"Data.Option<Box>", "Data", "import Data", "import Data \"effra/data\""},
+		{"-> Wrap<Box> raises", "Wrap", "record Wrap", "record Wrap<Box: type> { inner: Box }"},
+		{"raises {E}) ->", "E", "apply<E", "row parameter apply.E: raises"},
+		{"Wrap<Box> raises {E}", "E", "apply<E", "row parameter apply.E: raises"},
+	}
+	option := at(t, source, "Data.Option<Box>", "Option")
+	primitive := at(t, source, "-> string raises", "string")
+	for _, target := range []string{"go", "js"} {
+		calls := []any{initialize(), initialized(), open(uri, source, 1)}
+		for i, p := range probes {
+			offset := at(t, source, p.context, p.name)
+			calls = append(calls, pointAt(uri, "textDocument/hover", fmt.Sprintf("hover-%d", i), source, offset+len(p.name)-1),
+				pointAt(uri, "textDocument/definition", fmt.Sprintf("definition-%d", i), source, offset))
+		}
+		calls = append(calls, pointAt(uri, "textDocument/hover", "bundled-hover", source, option),
+			pointAt(uri, "textDocument/definition", "bundled-definition", source, option),
+			pointAt(uri, "textDocument/hover", "primitive", source, primitive),
+			shutdown(), call("exit", nil, nil))
+		var in, out bytes.Buffer
+		for _, v := range calls {
+			in.Write(frame(t, v))
+		}
+		if err := Serve(target, nil, &in, &out); err != nil {
+			t.Fatal(err)
+		}
+		byID := responses(t, readMessages(t, &out))
+		for i, p := range probes {
+			label := fmt.Sprintf("%s %q in %q", target, p.name, p.context)
+			hover := byID[fmt.Sprintf("hover-%d", i)]
+			if got := hoverText(t, hover); got != p.hover {
+				t.Fatalf("%s: hover %q, want %q", label, got, p.hover)
+			}
+			sameRange(t, label, hover["result"].(map[string]any)["range"], editorRange(source, at(t, source, p.context, p.name), len(p.name)))
+			definition, ok := byID[fmt.Sprintf("definition-%d", i)]["result"].(map[string]any)
+			if !ok || definition["uri"] != uri {
+				t.Fatalf("%s: definition %v", label, byID[fmt.Sprintf("definition-%d", i)])
+			}
+			sameRange(t, label, definition["range"], editorRange(source, at(t, source, p.declaration, p.name), len(p.name)))
+		}
+		if got := hoverText(t, byID["bundled-hover"]); got != "enum Option<T: type> { None, Some { value: T } }" {
+			t.Fatalf("%s bundled hover %q", target, got)
+		}
+		for _, id := range []string{"bundled-definition", "primitive"} {
+			if result, present := byID[id]["result"]; !present || result != nil {
+				t.Fatalf("%s %s: %v", target, id, byID[id])
+			}
+		}
+	}
+}

@@ -41,7 +41,7 @@ fn marked(required required: string) -> string { required }`
 			if !r.Checked {
 				t.Fatalf("checked parameter facts rejected: %+v", r.Diagnostics)
 			}
-			if r.SchemaVersion != SemanticSchemaVersion || SemanticSchemaVersion != 8 || TypeQuerySchemaVersion != 3 || interfaceSummarySchema != 4 || SemanticProducerIdentity != "effra/checker-abi-9/bundled-interface-4" {
+			if r.SchemaVersion != SemanticSchemaVersion || SemanticSchemaVersion != 8 || TypeQuerySchemaVersion != 4 || interfaceSummarySchema != 4 || SemanticProducerIdentity != "effra/checker-abi-9/bundled-interface-4" {
 				t.Fatalf("semantic contract epoch is stale: schema=%d query=%d interface=%d producer=%s", r.SchemaVersion, TypeQuerySchemaVersion, interfaceSummarySchema, SemanticProducerIdentity)
 			}
 			findSymbol := func(name string) *Symbol {
@@ -84,7 +84,7 @@ fn marked(required required: string) -> string { required }`
 				t.Fatalf("zero default was lost from callable type: %+v", ordinary.Contract.Callable.Parameters)
 			}
 			response, err := r.QueryType(TypeSelection{Symbol: "ordinary"})
-			if err != nil || response.Selection.Symbol == nil || response.Selection.Target == nil || response.Selection.Target.Callable == nil || response.Response["querySchemaVersion"] != 3 {
+			if err != nil || response.Selection.Symbol == nil || response.Selection.Target == nil || response.Selection.Target.Callable == nil || response.Response["querySchemaVersion"] != 4 {
 				t.Fatalf("query omitted checked callable facts: selection=%+v err=%v", response.Selection, err)
 			}
 			if response.Selection.Presentation != `fn ordinary(required: string = "x", budget: i64 = 0, bound: string = "!", maxActive: i64 = 0, maxDepth: i64 = 0, maxBodyBytes: i64 = 0, enabled: bool = false, empty: string = "") -> string` {

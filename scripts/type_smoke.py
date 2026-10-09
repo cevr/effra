@@ -27,6 +27,7 @@ effect fn main() -> string raises {Child} {
  run child.join()
 }
 effect fn fetch(item: string) -> string uses {Labels} { run Labels.read(item) }
+effect fn guarded<E: raises>(notice: Notice, cb: effect fn(Notice) -> string raises {E}) -> string raises {E, Child} { "ok" }
 '''
 
 
@@ -193,12 +194,15 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
         ("bundled", source.index("Fns.identity") + len("Fns.")),
         ("module-alias", source.index("Fns.identity")),
         ("variant", source.index("Notice.Named {") + len("Notice.")),
+        ("annotation", source.index("notice: Notice)") + len("notice: ")),
+        ("row-parameter", source.index("raises {E, Child}") + len("raises {")),
+        ("row-label", source.index("raises {E, Child}") + len("raises {E, ")),
     ]
     for target in ("go", "js"):
         views = {name: cli(path, target, "--offset", str(offset)) for name, offset in selectors}
         artifact = producer_snapshot(views["use"], target)
         for view in views.values():
-            assert view["checked"] and view["typeProjectionComplete"] and view["querySchemaVersion"] == 3
+            assert view["checked"] and view["typeProjectionComplete"] and view["querySchemaVersion"] == 4
             assert view["producerIdentity"] and view["sources"] and view["bundledInterfaces"]
             assert view["selection"]["locationAvailable"]
             current = producer_snapshot(view, target)
@@ -238,6 +242,18 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
         assert declared("variant")["kind"] == "variant" and declared("variant")["owner"] == "Notice"
         assert declared("variant")["span"]["offset"] == source.index("Named {")
         assert presentation("variant") == "variant Notice.Named { value: string }"
+        # Annotation and row-label tokens resolve through the checked type and
+        # row: a row parameter is the function's own, other labels are errors.
+        assert views["annotation"]["selection"]["kind"] == "reference"
+        assert declared("annotation")["kind"] == "enum" and declared("annotation")["span"]["offset"] == source.index("Notice {")
+        assert declared("row-parameter")["kind"] == "rowParameter" and declared("row-parameter")["owner"] == "guarded"
+        assert declared("row-parameter")["span"]["offset"] == source.index("guarded<E") + len("guarded<")
+        assert presentation("row-parameter") == "row parameter guarded.E: raises"
+        assert declared("row-label")["kind"] == "error" and presentation("row-label") == "error Child"
+        named = {name: cli(path, target, "--symbol", name) for name in ("Labels", "Prefix", "Labels.read")}
+        assert [named[name]["selection"]["target"]["kind"] for name in named] == ["service", "provider", "operation"]
+        assert named["Labels.read"]["selection"]["presentation"] == "effect fn Labels.read(item: string) -> string"
+        cli(path, target, "--symbol", "Labels.missing", success=False)
         unrelated = cli(path, target, "--symbol", "unrelated")
         nominal = cli(path, target, "--symbol", "Notice")
         assert unrelated["selection"]["kind"] == nominal["selection"]["kind"] == "declaration"
@@ -286,6 +302,8 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
             tool(27, {"file": path.name, "target": target, "definition": fiber_id,
                       "expectedRevision": revision, **producer_guard}),
         ])
+        for index, name in enumerate(named, 28):
+            requests.append(tool(index, {"file": path.name, "target": target, "symbol": name, **producer_guard}))
         if artifact["reuseScope"] == "artifact":
             stale_qualifier = "sha256:" + "0" * 64
             if stale_qualifier == artifact["qualifier"]:
@@ -309,6 +327,8 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
                 mcp_fiber = actual
         assert_report_parity(replies[20]["result"]["structuredContent"], unrelated, target=target)
         assert_report_parity(replies[21]["result"]["structuredContent"], definition, target=target)
+        for index, name in enumerate(named, 28):
+            assert_report_parity(replies[index]["result"]["structuredContent"], named[name], target=target)
         actual_fiber_definition = replies[27]["result"]["structuredContent"]
         assert_report_parity(actual_fiber_definition, fiber_definition, target=target)
         assert mcp_fiber is not None

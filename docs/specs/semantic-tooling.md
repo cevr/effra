@@ -95,24 +95,31 @@ or `--definition TYPE_ID --revision REVISION`; `--target go|js` is supported.
 MCP `code.type` accepts exactly one `symbol`, `offset`, or `definition`; a
 definition requires `expectedRevision`. `expectedProducer` is an independent
 optional guard, including when `expectedRevision` is supplied. Named selection
-returns the existing function or nominal declaration contract. Byte offsets
+returns the existing function or nominal declaration contract; since query
+schema 4 it also names an original service, provider, layer, `derive` or
+local generic data declaration, and `Service.operation` or `Provider.method`,
+from the declaration namespace (never a token search), answering exactly as
+that declaration's name token does. Byte offsets
 select original declaration/name tokens, actual checked lexical uses, or
 retained checked expression extents. Local shadowing and provider receivers
 resolve through checker binding identities. Shorthand fields retain their name
 token extent, and Fiber operation receivers use the same observed local-read
-owner as other checked uses. The query adds `querySchemaVersion: 3` beside the
+owner as other checked uses. The query adds `querySchemaVersion: 4` beside the
 shared semantic schema and producer-qualified snapshot; the existing
 `ef query`/`code.typeAt` diagnostic-anchor behavior remains unchanged.
 
 Query schema 2 added a selection `target` and a `presentation`; schema 3 adds
 caller-choice parameter facts (`requiredChoice` and a checked scalar
-`defaultValue`) to callable and parameter targets. The target is
+`defaultValue`) to callable and parameter targets; schema 4 adds the
+annotation, row-label and named-declaration selections below. The target is
 the declaration a selected name token denotes: its kind (binding kinds `let`,
 `parameter`, `configuration` and `pattern`; `function`, `operation`, `method`,
 `provider`, `service`, `record`, `enum`, `variant`, `field`, `error`, `module`,
-`hostModule`, `layer`, `codec` or `constant`), name, owner, identity, module and
-source, and its declaration-name span and extent in that source. A `constant`
-target carries its projected type and checked scalar value. `locationAvailable` is true
+`hostModule`, `layer`, `codec` or `constant`; since schema 4 also
+`typeParameter` and `rowParameter`, which add `parameterKind` (`type`/`callable`
+or `raises`/`uses`)), name, owner, identity, module and source, and its
+declaration-name span and extent in that source. A `constant` target carries
+its projected type and checked scalar value. `locationAvailable` is true
 only when the source is the selected snapshot's own text; bundled declarations
 keep their source ID and span in that source, and builtins carry no location.
 Function-like targets carry their declared signature by canonical references,
@@ -129,8 +136,32 @@ and bundled module aliases and members. Declaration name tokens are captured
 from the parsed items. Nothing is resolved by name search. A token with no
 checked expression anchored at it selects kind `reference`; otherwise the
 anchored expression keeps its existing selection kind and gains the target.
-Type annotations, row labels, layer entries and provisions, Go host members
-and Fiber operation names do not yet select targets.
+
+Query schema 4 also selects type-annotation and declared row-label tokens.
+The parser retains each annotation occurrence's name, alias-qualifier and
+row-label tokens on the declaration that owns it (parameters, provider
+configuration, results and record, enum and error fields), beside the
+display-interned spelling the checker reads; signature and provider `uses`
+rows keep their label tokens likewise. After checking, each occurrence is
+paired with the canonical type the checker retained for that declaration, as
+`bindSourceSyntax` pairs renderer syntax: the checked node, not the spelling,
+supplies the declaration (`application` to its template, nominal records,
+enums and errors, and a type variable to the owning data declaration's
+template parameter), and callable annotations bind their parameters, result
+and rows structurally. A row label's resolution is read from the checked row:
+a label the checker bound to a row parameter carries that parameter's
+identity, so it shadows a same-spelled error or service; every other label
+names its declared error or service. Template and row parameter names are
+declaration tokens. An alias qualifier selects its import. Primitives,
+builtin opaque types and Go host members name no declaration and remain
+unselectable. This mirrors Go's `go/types` `Info.Uses`, which records the
+object every identifier in a type expression denotes, including the package
+of a qualified identifier. Rejected: resolving annotation spellings by name
+at query time (wrong under template/row parameter shadowing), and an
+offset-keyed occurrence table (not structural: it broke formatter syntax-tree
+parity). Layer entries and provisions, Go host members, Fiber operation
+names and expression-position type arguments (`Pair<T> { … }`, `.as<T>()`)
+do not yet select targets.
 
 `presentation` is the one plaintext rendering of a selection, shared by CLI,
 MCP and LSP hover. It is rendered after projection from the response's own

@@ -3,6 +3,7 @@ package compiler
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -254,6 +255,49 @@ fn pick(o: Data.Option<string>) -> string { match o { Data.Option.Some { value: 
 			}
 			if got.Target.LocationAvailable != probe.local || (got.Target.Source == userSourceID) != probe.local {
 				t.Fatalf("%s: target location %+v", label, got.Target)
+			}
+		}
+	}
+}
+
+// A named query addresses the declaration namespace: services, providers,
+// layers, local generic data and `Owner.member` operations and methods select
+// exactly the declaration their name token selects.
+func TestNamedDeclarationQueriesMatchDeclarationTokens(t *testing.T) {
+	source := targetFixture + `layer App { Users = Fixed }
+`
+	for _, target := range []string{"go", "js"} {
+		r := CompileFor(source, target)
+		if !r.Checked {
+			t.Fatalf("%s fixture: %+v", target, r.Diagnostics)
+		}
+		for _, probe := range []struct{ symbol, context, name string }{
+			{"Users", "service Users", "Users"},
+			{"Fixed", "impl Fixed", "Fixed"},
+			{"Prefix", "impl Prefix", "Prefix"},
+			{"Users.get", "service Users { effect fn get", "get"},
+			{"Fixed.get", "Fixed for Users { effect fn get", "get"},
+			{"Pair", "record Pair", "Pair"},
+			{"App", "layer App", "App"},
+		} {
+			label := target + " " + probe.symbol
+			offset := at(t, source, probe.context, probe.name)
+			token, err := r.QueryType(TypeSelection{Offset: &offset})
+			if err != nil || token.Selection.Kind != "declaration" || token.Selection.Target == nil {
+				t.Fatalf("%s: token selection %+v: %v", label, token.Selection, err)
+			}
+			named, err := r.QueryType(TypeSelection{Symbol: probe.symbol})
+			if err != nil {
+				t.Fatalf("%s: %v", label, err)
+			}
+			got, want := named.Selection, token.Selection
+			if got.Kind != "declaration" || !reflect.DeepEqual(got.Target, want.Target) || got.Presentation != want.Presentation || got.Span != want.Span || got.Extent != want.Extent || !got.LocationAvailable {
+				t.Fatalf("%s: named %+v target %+v, token %+v target %+v", label, got, got.Target, want, want.Target)
+			}
+		}
+		for _, missing := range []string{"Users.missing", "Missing.id", "Users.get.id", "Nope", "Data.Option.Some"} {
+			if _, err := r.QueryType(TypeSelection{Symbol: missing}); err == nil || err.Error() != "named type declaration unavailable" {
+				t.Fatalf("%s %q: %v", target, missing, err)
 			}
 		}
 	}

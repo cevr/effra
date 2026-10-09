@@ -4,11 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 )
 
-// TypeQuerySchemaVersion 3 adds caller-choice parameter facts to selected
-// callable declarations and the public parameter projection.
-const TypeQuerySchemaVersion = 3
+// TypeQuerySchemaVersion 3 added caller-choice parameter facts to selected
+// callable declarations and the public parameter projection. Version 4
+// selects type-annotation and row-label tokens, adds the typeParameter and
+// rowParameter target kinds with their parameterKind, and names services,
+// providers, layers, operations and methods.
+const TypeQuerySchemaVersion = 4
 
 // Selection refusals that adapters classify. Their text is the public message.
 var (
@@ -54,6 +58,9 @@ type DeclarationTarget struct {
 	Parameter         *Param             `json:"parameter,omitempty"`
 	Type              *TypeRef           `json:"type,omitempty"`
 	Constant          *ConstantValue     `json:"constant,omitempty"`
+	// ParameterKind is a row parameter's raises/uses or a template
+	// parameter's type/callable kind.
+	ParameterKind string `json:"parameterKind,omitempty"`
 }
 
 // DeclaredSignature is a function, operation or method's own declared
@@ -148,7 +155,7 @@ func (r *Result) QueryType(request TypeSelection) (TypeQuery, error) {
 			r.selectSymbol(symbol, &selected)
 		} else if declaration := r.FindDeclaration(request.Symbol); declaration != nil {
 			r.selectDeclaration(declaration, &selected)
-		} else {
+		} else if !r.selectNamedItem(request.Symbol, &selected) {
 			return TypeQuery{}, fmt.Errorf("named type declaration unavailable")
 		}
 	case request.Offset != nil:
@@ -217,6 +224,63 @@ func (r *Result) selectDeclaration(declaration *Declaration, selected *SelectedT
 		selected.Extent, selected.LocationAvailable = item.Extent, true
 		return
 	}
+}
+
+// selectNamedItem selects an original top-level declaration that has no
+// public symbol or nominal declaration view by its declared name: a service,
+// provider, layer, derive or local generic data declaration, or
+// `Owner.member` for a service operation or provider method. This is the
+// declaration namespace a named query addresses, not a search of tokens.
+func (r *Result) selectNamedItem(name string, selected *SelectedType) bool {
+	if r.lexical == nil {
+		return false
+	}
+	found := namedItem(r.Program.Items, name)
+	if found.kind == "" {
+		return false
+	}
+	target, declaration := r.declarationTarget(found)
+	if target == nil || !target.LocationAvailable {
+		return false
+	}
+	selected.Kind, selected.Span, selected.Extent, selected.LocationAvailable = "declaration", target.Span, target.Extent, true
+	selected.Target, selected.Declaration = target, declaration
+	return true
+}
+
+func namedItem(items []*SyntaxItem, name string) lexicalTarget {
+	owner, member, qualified := strings.Cut(name, ".")
+	method := func(target lexicalTarget, methods []*Function) lexicalTarget {
+		for _, f := range methods {
+			if f.Name == member {
+				target.function = f
+				return target
+			}
+		}
+		return lexicalTarget{}
+	}
+	for _, item := range items {
+		switch {
+		case item.Service != nil && qualified && item.Service.Name == owner:
+			return method(lexicalTarget{kind: "operation", service: item.Service}, item.Service.Methods)
+		case item.Provider != nil && qualified && item.Provider.Name == owner:
+			return method(lexicalTarget{kind: "method", provider: item.Provider}, item.Provider.Methods)
+		case qualified:
+		case item.Service != nil && item.Service.Name == name:
+			return lexicalTarget{kind: "service", service: item.Service}
+		case item.Provider != nil && item.Provider.Name == name:
+			return lexicalTarget{kind: "provider", provider: item.Provider}
+		case item.Layer != nil && item.Layer.Name == name:
+			return lexicalTarget{kind: "layer", layer: item.Layer}
+		case item.Codec != nil && item.Codec.Name == name:
+			return lexicalTarget{kind: "codec", codec: item.Codec}
+		case item.Record != nil && item.Record.Name == name && len(item.Record.Parameters) > 0:
+			return lexicalTarget{kind: item.Record.Kind, data: item.Record}
+		case item.Enum != nil && item.Enum.Name == name && len(item.Enum.Parameters) > 0:
+			return lexicalTarget{kind: item.Enum.Kind, data: item.Enum}
+		}
+	}
+	return lexicalTarget{}
 }
 
 // selectOffset prefers, in order: an original declaration name, a binding
@@ -349,6 +413,32 @@ func (r *Result) declarationTarget(t lexicalTarget) (*DeclarationTarget, *Declar
 	}
 	var declaration *Declaration
 	switch {
+	case t.kind == "rowParameter":
+		f := t.function
+		index := slices.IndexFunc(f.RowParameters, func(p RowParameter) bool { return p.Name == t.parameter })
+		if index < 0 {
+			return nil, nil
+		}
+		row := f.RowParameters[index]
+		target.Name, target.Owner, target.Identity, target.ParameterKind = row.Name, f.Name, row.ID, row.Kind
+		if t.service != nil {
+			target.Owner = t.service.Name + "." + f.Name
+		} else if t.provider != nil {
+			target.Owner = t.provider.Name + "." + f.Name
+		}
+		_, original := facts.functions[f]
+		located(original, f.SourceID, f.Module, row.Span, row.Span)
+	case t.kind == "typeParameter":
+		d := t.data
+		index := slices.IndexFunc(d.Parameters, func(p TemplateParameter) bool { return p.Name == t.parameter })
+		if index < 0 {
+			return nil, nil
+		}
+		parameter := d.Parameters[index]
+		target.Name, target.Owner, target.Identity, target.ParameterKind = parameter.Name, d.Name, parameter.Identity, parameter.Kind
+		ref := c.identityRef(parameter.typeID)
+		target.Type = &ref
+		located(facts.items[d] != nil, d.SourceID, d.Module, parameter.Span, parameter.Span)
 	case t.kind == "parameter":
 		// A call's argument label denotes the declared parameter it binds.
 		params, original, source, module := []Param(nil), false, "", ""

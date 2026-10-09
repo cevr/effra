@@ -204,9 +204,14 @@ NAMED = [("import Fns", "Fns"), ("Fns.identity", "Fns"), ("Fns.identity", "ident
          ("fn helper()", "helper"), ("fn shadow(helper", "helper"), ("mark + helper", "helper"),
          ("let mark", "mark"), ("; mark +", "mark"), ("+ helper()", "helper"), ("fn boxed(value", "value"),
          ("{ value: value }", "value }"), ("Cold { level: degrees }", "degrees"),
-         ("Hot { level: degrees }", "degrees"), ("=> degrees", "degrees")]
+         ("Hot { level: degrees }", "degrees"), ("=> degrees", "degrees"),
+         # Type annotations and row labels resolve through checked types and rows.
+         ("-> Box {", "Box"), ("shape: Shape)", "Shape"), ("raises {Missing} uses", "Missing"),
+         ("uses {Users} {", "Users"), ("pick(o: Data.Option<string>)", "Data"),
+         ("pick(o: Data.Option<string>)", "Option")]
 UNNAMED = [("// 𐐀 helper", "helper"), ("fn helper()", "fn"), ("{ let mark", " "),
-           ('"𐐀é"', "é"), ("run load(id)", "run"), ("raises {Missing} uses", "raises")]
+           ('"𐐀é"', "é"), ("run load(id)", "run"), ("raises {Missing} uses", "raises"),
+           ("pick(o: Data.Option<string>)", "string")]
 
 
 def offset_of(text, context, name):

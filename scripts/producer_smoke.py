@@ -151,7 +151,7 @@ with tempfile.TemporaryDirectory(prefix="effra-producer-") as temporary:
                     assert cli["typeProjectionUsage"]["responseBytes"] == len(encoded.rstrip("\n").encode("utf-8"))
                 if command == "type":
                     assert cli["snapshot"] == selected["snapshot"]
-                    assert cli["querySchemaVersion"] == selected["querySchemaVersion"] == 3
+                    assert cli["querySchemaVersion"] == selected["querySchemaVersion"] == 4
         profile_source = '''import Fns "effra/functions"
 error MissingProfile
 service Profiles { effect fn name(id: string) -> string raises {MissingProfile} }

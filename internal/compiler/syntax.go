@@ -54,6 +54,10 @@ type parser struct {
 	// payloadBraces memoizes constructorBrace by brace token index.
 	payloadBraces map[int]bool
 	types         map[string]*sourceType
+	// lastType and lastRow are the most recent type annotation occurrence
+	// and row labels, for the declaration that owns them.
+	lastType *typeSyntax
+	lastRow  []rowLabel
 	// lastPipe is the |> that ends the unparenthesised chain the most recent
 	// expr call returned, zero when that chain held no pipe.
 	lastPipe Span
@@ -81,6 +85,8 @@ type Param struct {
 	typeID         TypeID
 	sourceType     *sourceType
 	binding        *localBinding
+	// Annotation is this declaration's own type annotation occurrence.
+	Annotation *typeSyntax `json:"-"`
 }
 
 // Field is a nominal declaration field. Type is kept as source text for
@@ -94,6 +100,7 @@ type Field struct {
 	Span       Span    `json:"span"`
 	TypeSpan   Span    `json:"-"`
 	typeID     TypeID
+	Annotation *typeSyntax `json:"-"`
 }
 type Variant struct {
 	Name          string  `json:"name"`
@@ -176,6 +183,11 @@ type Function struct {
 	// codec is set on the direction functions a derive declaration
 	// synthesizes; their body is one compiler-owned codec operation.
 	codec *CodecDeclaration
+
+	// ReturnAnnotation, ErrorLabels and ServiceLabels are the declared
+	// result annotation and row label tokens.
+	ReturnAnnotation           *typeSyntax `json:"-"`
+	ErrorLabels, ServiceLabels []rowLabel  `json:"-"`
 }
 type Service struct {
 	Name    string
@@ -203,6 +215,8 @@ type Provider struct {
 	// native lists builtin runtime modules referenced by the provider's
 	// implementation. Source providers leave it empty.
 	native []rt.RuntimeModule
+	// ServiceLabels are the constructor's `uses` row label tokens.
+	ServiceLabels []rowLabel `json:"-"`
 }
 
 // Layer declarations select construction recipes without executing them.
@@ -698,7 +712,7 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 						field := p.name()
 						p.expect(":")
 						typ, typeSpan := p.typeAnnotation()
-						variant.Fields = append(variant.Fields, Field{Name: field.text, Type: typ, sourceType: p.types[typ], Span: field.span, TypeSpan: typeSpan})
+						variant.Fields = append(variant.Fields, Field{Name: field.text, Type: typ, sourceType: p.types[typ], Span: field.span, TypeSpan: typeSpan, Annotation: p.lastType})
 						if !p.accept(",") {
 							p.expect(")")
 							break
@@ -737,7 +751,7 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 					param := p.name()
 					p.expect(":")
 					typ, typeSpan := p.typeAnnotation()
-					params = append(params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span), TypeSpan: typeSpan})
+					params = append(params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span), TypeSpan: typeSpan, Annotation: p.lastType})
 					if !p.accept(",") {
 						p.expect(")")
 						break
@@ -747,11 +761,12 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			p.expect("for")
 			service := p.name()
 			var services []string
+			var serviceLabels []rowLabel
 			if p.accept("uses") {
-				services = p.row()
+				services, serviceLabels = p.row(), p.lastRow
 			}
 			p.expect("{")
-			v := &Provider{Name: name.text, Service: service.text, ServiceSpan: service.span, Params: params, Services: services, Span: name.span}
+			v := &Provider{Name: name.text, Service: service.text, ServiceSpan: service.span, Params: params, Services: services, ServiceLabels: serviceLabels, Span: name.span}
 			for !p.accept("}") {
 				v.Methods = append(v.Methods, p.function(true))
 			}
@@ -946,6 +961,7 @@ func (p *parser) typ() string {
 
 // typeAnnotation parses a type and reports the span of its tokens inside any
 // grouping parentheses, so a diagnostic about the type marks the type itself.
+// Each occurrence also leaves its syntax tree in p.lastType.
 func (p *parser) typeAnnotation() (string, Span) {
 	p.depth++
 	defer func() { p.depth-- }()
@@ -963,14 +979,22 @@ func (p *parser) typeAnnotation() (string, Span) {
 		return inner, span
 	}
 	start := p.peek().span
+	occurrence := &typeSyntax{}
+	done := func(name string) (string, Span) {
+		occurrence.Extent = p.extent(start)
+		p.lastType = occurrence
+		return name, occurrence.Extent
+	}
 	if p.peek().text == "fn" || p.peek().text == "effect" {
 		typ := &sourceType{Effect: p.accept("effect")}
+		occurrence.Form = "callable"
 		p.expect("fn")
 		p.expect("(")
 		for !p.accept(")") {
 			parameter := p.typ()
 			typ.Parameters = append(typ.Parameters, parameter)
 			typ.ParameterTypes = append(typ.ParameterTypes, p.types[parameter])
+			occurrence.Args = append(occurrence.Args, p.lastType)
 			if len(typ.Parameters) > 256 {
 				p.fail(p.peek(), "callable type exceeds 256 parameters")
 			}
@@ -982,32 +1006,36 @@ func (p *parser) typeAnnotation() (string, Span) {
 		p.expect("->")
 		typ.Result = p.typ()
 		typ.ResultType = p.types[typ.Result]
+		occurrence.Result = p.lastType
 		if p.accept("raises") {
-			typ.Failures = p.row()
+			typ.Failures, occurrence.Failures = p.row(), p.lastRow
 		}
 		if p.accept("uses") {
-			typ.Services = p.row()
+			typ.Services, occurrence.Services = p.row(), p.lastRow
 		}
 		name := typ.display()
 		p.types[name] = typ
-		return name, p.extent(start)
+		return done(name)
 	}
 	if p.peek().text == "void" {
 		p.take()
-		return voidTypeName, p.extent(start)
+		return done(voidTypeName)
 	}
-	if form := p.hostTypeForm(); form != nil {
+	if form := p.hostTypeForm(occurrence); form != nil {
 		name := form.display()
 		p.types[name] = form
-		return name, p.extent(start)
+		return done(name)
 	}
 	name := p.name()
 	if name.text == "Effect" && p.peek().text == "<" {
 		p.fail(name, "typed recipes are unsupported; use an explicit effect fn callback contract")
 	}
 	text := name.text
+	occurrence.Name = rowLabel{Name: name.text, Span: name.span}
 	if p.accept(".") {
-		text += "." + p.memberName().text
+		member := p.memberName()
+		text += "." + member.text
+		occurrence.Qualifier, occurrence.Name = occurrence.Name, rowLabel{Name: member.text, Span: member.span}
 	}
 	if p.acceptGenericOpen() {
 		t := &sourceType{Application: text, Span: name.span}
@@ -1015,6 +1043,7 @@ func (p *parser) typeAnnotation() (string, Span) {
 			argument := p.typ()
 			t.ApplicationArguments = append(t.ApplicationArguments, argument)
 			t.ApplicationArgumentTypes = append(t.ApplicationArgumentTypes, p.types[argument])
+			occurrence.Args = append(occurrence.Args, p.lastType)
 			if len(t.ApplicationArguments) > 8 {
 				p.fail(name, "at most eight template arguments are supported")
 			}
@@ -1026,14 +1055,14 @@ func (p *parser) typeAnnotation() (string, Span) {
 		text = t.display()
 		p.types[text] = t
 	}
-	return text, p.extent(start)
+	return done(text)
 }
 
 // hostTypeForm parses Go's own spelling of a native pointer, slice or map
 // type (`*sdk.Client`, `[]string`, `map[string]int`). The spelling is the one
 // inspection displays, so a reported host type round-trips into source; the
 // checker admits it only through the imported native declarations.
-func (p *parser) hostTypeForm() *sourceType {
+func (p *parser) hostTypeForm(occurrence *typeSyntax) *sourceType {
 	start := p.peek()
 	form := &sourceType{Span: start.span}
 	switch {
@@ -1049,13 +1078,16 @@ func (p *parser) hostTypeForm() *sourceType {
 		key := p.typ()
 		form.HostArguments = append(form.HostArguments, key)
 		form.HostArgumentTypes = append(form.HostArgumentTypes, p.types[key])
+		occurrence.Args = append(occurrence.Args, p.lastType)
 		p.expect("]")
 	default:
 		return nil
 	}
+	occurrence.Form = "host"
 	element := p.typ()
 	form.HostArguments = append(form.HostArguments, element)
 	form.HostArgumentTypes = append(form.HostArgumentTypes, p.types[element])
+	occurrence.Args = append(occurrence.Args, p.lastType)
 	return form
 }
 
@@ -1095,7 +1127,7 @@ func (p *parser) fields() []Field {
 		name := p.name()
 		p.expect(":")
 		typ, typeSpan := p.typeAnnotation()
-		fields = append(fields, Field{Name: name.text, Type: typ, sourceType: p.types[typ], Span: name.span, TypeSpan: typeSpan})
+		fields = append(fields, Field{Name: name.text, Type: typ, sourceType: p.types[typ], Span: name.span, TypeSpan: typeSpan, Annotation: p.lastType})
 		if !p.accept(",") && !p.accept(";") {
 			if p.peek().text != "}" {
 				continue
@@ -1137,8 +1169,11 @@ func (p *parser) fieldValues() []FieldValue {
 func (p *parser) row() []string {
 	p.expect("{")
 	var names []string
+	p.lastRow = nil
 	for !p.accept("}") {
-		names = append(names, p.name().text)
+		label := p.name()
+		names = append(names, label.text)
+		p.lastRow = append(p.lastRow, rowLabel{Name: label.text, Span: label.span})
 		if !p.accept(",") {
 			p.expect("}")
 			break
@@ -1187,7 +1222,7 @@ func (p *parser) function(body bool) *Function {
 		typ, typeSpan := p.typeAnnotation()
 		parameter := Param{
 			Name: param.text, Type: typ, sourceType: p.types[typ],
-			Span: param.span, TypeSpan: typeSpan,
+			Span: param.span, TypeSpan: typeSpan, Annotation: p.lastType,
 			requiredChoice: required.text == "required", requiredSpan: required.span,
 		}
 		if p.accept("=") {
@@ -1203,15 +1238,16 @@ func (p *parser) function(body bool) *Function {
 	}
 	p.expect("->")
 	f.Return, f.ReturnSpan = p.typeAnnotation()
+	f.ReturnAnnotation = p.lastType
 	f.returnType = p.types[f.Return]
 	if p.accept("raises") {
-		f.Errors = p.row()
+		f.Errors, f.ErrorLabels = p.row(), p.lastRow
 	} else if p.peek().text == "throws" {
 		old := p.take()
 		p.fail(old, "the Effra failure-row keyword `throws` was replaced by `raises`; use `raises`")
 	}
 	if p.accept("uses") {
-		f.Services = p.row()
+		f.Services, f.ServiceLabels = p.row(), p.lastRow
 	}
 	if body {
 		f.Body = p.block()

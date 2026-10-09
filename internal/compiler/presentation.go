@@ -123,6 +123,12 @@ func (p *presenter) selection(s *SelectedType) {
 		p.write("derive " + t.Name)
 	case "constant":
 		p.constantDeclaration(t)
+	case "typeParameter", "rowParameter":
+		kind := "type"
+		if t.Kind == "rowParameter" {
+			kind = "row"
+		}
+		p.write(kind + " parameter " + t.Owner + "." + t.Name + ": " + t.ParameterKind)
 	}
 }
 
