@@ -95,6 +95,7 @@ func TestBuildReceiptRefusesInputsArtifactsAndAliases(t *testing.T) {
 		{"absent go executable through a link and ..", []string{"-o", "parent/result"}, "jump/../result"},
 		{"go executable below a missing directory and ..", []string{"-o", "result"}, "missing/../result"},
 		{"absent go executable through a dangling link", []string{"-o", "late/result"}, "late-link/result"},
+		{"go executable spelled through a link and ..", []string{"-o", "jump/../result"}, "parent/result"},
 		{"source", nil, "main.ef"},
 		{"source through a directory link", nil, "dir-link/main.ef"},
 		{"source symlink", nil, "source-link"},
@@ -153,6 +154,20 @@ func TestBuildReceiptRefusesInputsArtifactsAndAliases(t *testing.T) {
 	}
 	if _, found := written.Toolchain.Env["GOFLAGS"]; !found {
 		t.Fatalf("receipt does not record effective GOFLAGS: %+v", written.Toolchain.Env)
+	}
+
+	// The executable is written where admission located it: with jump ->
+	// parent/sub, -o jump/../located is parent/located, so a receipt named
+	// located beside the source is a different file and both survive.
+	if stdout, stderr, code := runTestCLIDir(t, binary, root, "", "build", source, "-o", "jump/../located", "--receipt", "located"); code != 0 {
+		t.Fatalf("build failed: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	executable, err := os.ReadFile(filepath.Join(root, "parent", "located"))
+	if err != nil || len(executable) == 0 || executable[0] == '{' {
+		t.Fatalf("executable not at the located path: %v", err)
+	}
+	if located := readReceipt(t, filepath.Join(root, "located")); located.Binary.Path != "jump/../located" || located.Binary.Bytes != int64(len(executable)) {
+		t.Fatalf("receipt measured another file: %+v", located.Binary)
 	}
 }
 
@@ -252,20 +267,21 @@ func TestBuildReceiptRecordsCgoInputs(t *testing.T) {
 		t.Fatal("C compiler not identified")
 	}
 	compiler := first.Toolchain.CCompilers[0]
-	if compiler.Variable != "CC" || compiler.Command != "gcc" || len(compiler.Arguments) != 0 || !filepath.IsAbs(compiler.Program.Path) || len(compiler.Program.SHA256) != 64 || compiler.Underlying != nil || compiler.Version == "" {
+	if compiler.Variable != "CC" || compiler.Command != "gcc" || len(compiler.Arguments) != 0 || !filepath.IsAbs(compiler.Program.Path) || len(compiler.Program.SHA256) != 64 || compiler.Version == "" {
 		t.Fatalf("incomplete C compiler identity: %+v", compiler)
 	}
 
 	// The go command splits compiler settings with its quoting rules and
 	// runs any leading arguments: a quoted program is gcc itself, and a
-	// wrapper is recorded beside the compiler it runs.
+	// wrapper is recorded as the program with its arguments, answered by
+	// the compiler it runs.
 	quoted := build("quoted", "CGO_ENABLED=1", `CC="gcc"`)
 	if got := quoted.Toolchain.CCompilers; len(got) != 1 || got[0].Command != `"gcc"` || got[0].Program != compiler.Program || got[0].Version != compiler.Version {
 		t.Fatalf("quoted CC measured as %+v, want program %+v", got, compiler.Program)
 	}
 	wrapped := build("wrapped", "CGO_ENABLED=1", "CC=env gcc")
-	if got := wrapped.Toolchain.CCompilers; len(got) != 1 || got[0].Program.Name != "env" || !slices.Equal(got[0].Arguments, []string{"gcc"}) || got[0].Underlying == nil || *got[0].Underlying != compiler.Program || got[0].Version != compiler.Version {
-		t.Fatalf("wrapped CC measured as %+v (underlying %+v), want env running %+v", got, got[0].Underlying, compiler.Program)
+	if got := wrapped.Toolchain.CCompilers; len(got) != 1 || got[0].Program.Name != "env" || !slices.Equal(got[0].Arguments, []string{"gcc"}) || got[0].Version != compiler.Version {
+		t.Fatalf("wrapped CC measured as %+v, want env answering as %q", got, compiler.Version)
 	}
 	if pure.Toolchain.Env["CGO_ENABLED"] != "0" || len(pure.Deps.Cgo) != 0 || len(pure.Toolchain.CCompilers) != 0 {
 		t.Fatalf("pure build reports cgo inputs: enabled=%q packages=%v compilers=%+v", pure.Toolchain.Env["CGO_ENABLED"], pure.Deps.Cgo, pure.Toolchain.CCompilers)

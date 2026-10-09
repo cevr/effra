@@ -43,6 +43,20 @@ func publish(t *testing.T, destination *receipt.Destination) {
 	}
 }
 
+// at locates each path once, as the CLI does for a build's paths.
+func at(t *testing.T, paths ...string) []receipt.Location {
+	t.Helper()
+	locations := []receipt.Location{}
+	for _, path := range paths {
+		location, err := receipt.Locate(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		locations = append(locations, location)
+	}
+	return locations
+}
+
 func exists(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil
@@ -59,14 +73,24 @@ func TestAdmitResolvesLinksBeforeParentSteps(t *testing.T) {
 	output := filepath.Join(root, "out", "result")
 	spelled := root + "/jump/../result"
 
-	if _, err := receipt.Admit(spelled, []string{output}, nil); err == nil || !strings.Contains(err.Error(), "names the build's own") {
+	if _, err := receipt.Admit(spelled, at(t, output), nil); err == nil || !strings.Contains(err.Error(), "names the build's own") {
 		t.Fatalf("receipt %s admitted over the absent output %s: %v", spelled, output, err)
 	}
-	if _, err := receipt.Admit(root+"/jump/../sub/../../out/result", []string{output}, nil); err == nil {
+	if _, err := receipt.Admit(root+"/jump/../sub/../../out/result", at(t, output), nil); err == nil {
 		t.Fatal("a longer spelling of the output was admitted")
 	}
 
-	destination, err := receipt.Admit(root+"/jump/../other.json", []string{output}, nil)
+	// A build path is located the same way, once: `-o jump/../result`
+	// names out/result for admission, for the build and for measurement.
+	built := at(t, spelled)[0]
+	if built.Path() != output || built.String() != spelled {
+		t.Fatalf("output %s located at %s, want %s", spelled, built.Path(), output)
+	}
+	if _, err := receipt.Admit(output, []receipt.Location{built}, nil); err == nil {
+		t.Fatal("receipt over the located output admitted")
+	}
+
+	destination, err := receipt.Admit(root+"/jump/../other.json", at(t, output), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,25 +152,26 @@ func TestPublishStaysInTheAdmittedDirectory(t *testing.T) {
 func TestAdmitRefusesDanglingLinks(t *testing.T) {
 	root := physicalRoot(t)
 	symlink(t, "out", filepath.Join(root, "jump"))
-	// The third case creates out for the receipt, after which jump
-	// resolves and the probe finds the output's future entry.
 	cases := []struct {
 		receipt   string
 		protected string
-		reason    string
 	}{
-		{root + "/jump/result", root + "/out/result", "cannot be resolved"},
-		{root + "/jump/deeper/result", root + "/elsewhere", "cannot be resolved"},
-		{root + "/out/result", root + "/jump/result", "names the build's own"},
+		{root + "/jump/result", root + "/out/result"},
+		{root + "/jump/deeper/result", root + "/elsewhere"},
 	}
 	for _, c := range cases {
-		destination, err := receipt.Admit(c.receipt, []string{c.protected}, nil)
+		destination, err := receipt.Admit(c.receipt, at(t, c.protected), nil)
 		if err == nil {
 			destination.Close()
 			t.Errorf("receipt %s admitted beside %s", c.receipt, c.protected)
-		} else if !strings.Contains(err.Error(), c.reason) {
+		} else if !strings.Contains(err.Error(), "cannot be resolved") {
 			t.Errorf("receipt %s beside %s refused for another reason: %v", c.receipt, c.protected, err)
 		}
+	}
+	// A build path through a dangling link has no single location, so it
+	// cannot be located for admission or for the build.
+	if _, err := receipt.Locate(root + "/jump/result"); err == nil || !strings.Contains(err.Error(), "cannot be resolved") {
+		t.Fatalf("a path through a dangling link was located: %v", err)
 	}
 	if exists(filepath.Join(root, "out")) {
 		t.Fatal("a refused admission left a created directory")
@@ -182,11 +207,26 @@ func TestPublishIgnoresLinksCreatedAfterAdmission(t *testing.T) {
 	if exists(filepath.Join(root, "unused")) {
 		t.Fatal("an unpublished destination left its created directories")
 	}
-	if _, err := receipt.Admit(root+"/refused/inner/result", []string{root + "/refused/inner/result"}, nil); err == nil {
+	if _, err := receipt.Admit(root+"/refused/inner/result", at(t, root+"/refused/inner/result"), nil); err == nil {
 		t.Fatal("receipt over the output admitted")
 	}
 	if exists(filepath.Join(root, "refused")) {
 		t.Fatal("a refused admission left its created directories")
+	}
+
+	// Cleanup removes only the directory admission created: one put in
+	// its place afterwards is kept.
+	replaced, err := receipt.Admit(root+"/swapped/receipt.json", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "swapped")); err != nil {
+		t.Fatal(err)
+	}
+	mkdir(t, filepath.Join(root, "swapped"))
+	replaced.Close()
+	if !exists(filepath.Join(root, "swapped")) {
+		t.Fatal("cleanup removed a directory admission did not create")
 	}
 }
 
@@ -200,7 +240,7 @@ func TestAdmitComparesNamesAsTheFileSystemDoes(t *testing.T) {
 	}
 	_, err := os.Lstat(filepath.Join(root, "PROBE"))
 	insensitive := err == nil
-	destination, err := receipt.Admit(root+"/RESULT", []string{root + "/result"}, nil)
+	destination, err := receipt.Admit(root+"/RESULT", at(t, root+"/result"), nil)
 	if insensitive {
 		if err == nil {
 			destination.Close()
@@ -211,17 +251,24 @@ func TestAdmitComparesNamesAsTheFileSystemDoes(t *testing.T) {
 	} else {
 		destination.Close()
 	}
-	if exists(filepath.Join(root, "RESULT")) {
-		t.Fatal("admission left its probe entry")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != "probe" {
+			t.Errorf("admission left %s behind", entry.Name())
+		}
 	}
 	if !insensitive {
-		t.Skip("case-sensitive file system: the alias case cannot be expressed")
+		t.Skip("case-sensitive file system: the alias case cannot be expressed here; run with TMPDIR on a case-insensitive volume")
 	}
 }
 
 // Compiler settings are split as the go command splits them, with quoted
-// fields and leading arguments; a wrapper is recorded beside the program
-// it runs, and the version comes from the complete command.
+// fields and leading arguments. The program is the file the kernel runs,
+// and the version comes from the complete command; what a wrapper runs is
+// not guessed.
 func TestMeasureCCompilersFollowsGoCommandSplitting(t *testing.T) {
 	directory := filepath.Join(physicalRoot(t), "dir with space")
 	mkdir(t, directory)
@@ -241,18 +288,39 @@ func TestMeasureCCompilersFollowsGoCommandSplitting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if quoted.Program.Path != fake || !slices.Equal(quoted.Arguments, []string{"-O2"}) || quoted.Underlying != nil || quoted.Version != "fake cc -O2 --version" {
+	if quoted.Program.Path != fake || !slices.Equal(quoted.Arguments, []string{"-O2"}) || quoted.Version != "fake cc -O2 --version" {
 		t.Fatalf("quoted command measured as %+v", quoted)
 	}
 	wrapped, err := measure("env '" + fake + "'")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wrapped.Program.Name != "env" || wrapped.Underlying == nil || wrapped.Underlying.Path != fake || wrapped.Version != "fake cc --version" {
+	if wrapped.Program.Name != "env" || !slices.Equal(wrapped.Arguments, []string{fake}) || wrapped.Version != "fake cc --version" {
 		t.Fatalf("wrapped command measured as %+v", wrapped)
 	}
 	if _, err := measure(`"` + fake); err == nil || !strings.Contains(err.Error(), "unterminated") {
 		t.Fatalf("unterminated quote accepted: %v", err)
+	}
+
+	// A `..` after a link applies to the link's target, as the kernel
+	// walks the path the go command executes: the decoy beside the link's
+	// own name is never measured or probed.
+	tools, actual := filepath.Join(filepath.Dir(directory), "tools"), filepath.Join(filepath.Dir(directory), "actual")
+	mkdir(t, filepath.Join(actual, "sub"))
+	mkdir(t, tools)
+	symlink(t, filepath.Join(actual, "sub"), filepath.Join(tools, "jump"))
+	if err := os.WriteFile(filepath.Join(actual, "cc"), []byte("#!/bin/sh\necho actual cc\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tools, "cc"), []byte("#!/bin/sh\necho decoy cc\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	through, err := measure(tools + "/jump/../cc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if through.Program.Path != filepath.Join(actual, "cc") || through.Version != "actual cc" {
+		t.Fatalf("link-then-.. compiler measured as %+v", through)
 	}
 }
 
@@ -301,14 +369,15 @@ func TestJavaScriptMeasuresOnlyTheEmittedModule(t *testing.T) {
 	if err := os.WriteFile(modulePath, []byte(swapped), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := receipt.JavaScript(r, "http.ef", "entry", module, modulePath, declarationPath); err == nil || !strings.Contains(err.Error(), "does not hold the emitted module") {
+	locations := at(t, modulePath, declarationPath)
+	if _, err := receipt.JavaScript(r, "http.ef", "entry", module, locations[0], locations[1]); err == nil || !strings.Contains(err.Error(), "does not hold the emitted module") {
 		t.Fatalf("same-length substitute measured: %v", err)
 	}
 
 	if err := os.WriteFile(modulePath, []byte(module.Source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	measured, err := receipt.JavaScript(r, "http.ef", "entry", module, modulePath, declarationPath)
+	measured, err := receipt.JavaScript(r, "http.ef", "entry", module, locations[0], locations[1])
 	if err != nil {
 		t.Fatal(err)
 	}

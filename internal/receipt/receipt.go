@@ -28,7 +28,7 @@ import (
 )
 
 // Schema versions the application receipt.
-const Schema = "effra.application-receipt/4"
+const Schema = "effra.application-receipt/5"
 
 // GoBuildFlags are the flags of every native build: ef build, its stripped
 // companions and the size-conformance controls. A generated module is
@@ -127,19 +127,17 @@ type Toolchain struct {
 
 // CCompiler identifies one C toolchain command of a cgo build. The go
 // command splits the setting into a program and leading arguments (see
-// splitCommand) and runs the program with those arguments. Program is
-// that executable. When the program is a wrapper, such as `env gcc` or
-// `ccache gcc`, Underlying is the first operand that names a different
-// executable on PATH; it is a best-effort identification. Version is the
-// first line the complete command prints for --version, so it describes
-// whatever compiler actually answers.
+// splitCommand) and runs the program with those arguments. Program is the
+// file that runs. Version is the first line the complete command prints
+// for --version, so for a wrapper such as `ccache gcc` it describes the
+// compiler that actually answers. What a wrapper runs is not inferred
+// from its arguments.
 type CCompiler struct {
-	Variable   string      `json:"variable"`
-	Command    string      `json:"command"`
-	Arguments  []string    `json:"arguments"`
-	Program    Executable  `json:"program"`
-	Underlying *Executable `json:"underlying,omitempty"`
-	Version    string      `json:"version"`
+	Variable  string     `json:"variable"`
+	Command   string     `json:"command"`
+	Arguments []string   `json:"arguments"`
+	Program   Executable `json:"program"`
+	Version   string     `json:"version"`
 }
 
 // Executable is a resolved program file and its digest.
@@ -245,15 +243,12 @@ func planOf(plan *compiler.ApplicationPlan) (Plan, error) {
 // Native measures one published generation and the executable built from
 // it, running the go command from the generated module so it selects the
 // toolchain that built the executable.
-func Native(r *compiler.Result, source string, application *compiler.GoApplication, generation compiler.GoGeneration, binary string) (*Application, error) {
+func Native(r *compiler.Result, source string, application *compiler.GoApplication, generation compiler.GoGeneration, binary Location) (*Application, error) {
 	receipt, err := newApplication(r, source, "go", string(application.Plan.Mode))
 	if err != nil {
 		return nil, err
 	}
-	executable, err := filepath.Abs(binary)
-	if err != nil {
-		return nil, err
-	}
+	executable := binary.Path()
 	if receipt.Plan, err = planOf(application.Plan); err != nil {
 		return nil, err
 	}
@@ -275,7 +270,7 @@ func Native(r *compiler.Result, source string, application *compiler.GoApplicati
 	if receipt.Binary, err = MeasureExecutable(executable); err != nil {
 		return nil, err
 	}
-	receipt.Binary.Path = binary
+	receipt.Binary.Path = binary.String()
 	if receipt.Symbols, err = MeasureSymbols(generation.Directory, executable); err != nil {
 		return nil, err
 	}
@@ -416,19 +411,11 @@ func MeasureCCompilers(toolchain *Toolchain, deps *Dependencies) ([]CCompiler, e
 			return nil, fmt.Errorf("%s: %w", variable, err)
 		}
 		compiler := CCompiler{Variable: variable, Command: command, Arguments: fields[1:], Program: *program}
-		for _, operand := range fields[1:] {
-			if strings.HasPrefix(operand, "-") || strings.Contains(operand, "=") {
-				continue
-			}
-			if underlying, err := resolveExecutable(operand); err == nil && underlying.Path != program.Path {
-				compiler.Underlying = underlying
-			}
-			break
-		}
-		// argv[0] stays the spelled program, as the go command runs it:
-		// a driver such as gcc reports the name it was invoked by.
-		probe := exec.Command(program.Path, append(slices.Clone(fields[1:]), "--version")...)
-		probe.Args[0] = fields[0]
+		// The probe is invoked exactly as cgo invokes the compiler
+		// (cmd/cgo/gcc.go:1744, util.go:58): exec of the spelled program
+		// with the leading arguments, so the same file answers and a
+		// driver such as gcc reports the name it was invoked by.
+		probe := exec.Command(fields[0], append(slices.Clone(fields[1:]), "--version")...)
 		version, err := probe.Output()
 		if err != nil {
 			return nil, fmt.Errorf("%s --version: %w", variable, err)
@@ -440,17 +427,23 @@ func MeasureCCompilers(toolchain *Toolchain, deps *Dependencies) ([]CCompiler, e
 	return compilers, nil
 }
 
-// resolveExecutable finds name as exec does and identifies the file.
+// resolveExecutable finds name as exec does and identifies the file the
+// kernel runs: links are resolved as the file system walks the path before
+// it is made absolute, so a `..` after a link applies to the link's target.
 func resolveExecutable(name string) (*Executable, error) {
 	path, err := exec.LookPath(name)
 	if err != nil {
 		return nil, err
 	}
-	if path, err = filepath.Abs(path); err != nil {
-		return nil, err
-	}
 	if path, err = filepath.EvalSymlinks(path); err != nil {
 		return nil, err
+	}
+	if !filepath.IsAbs(path) {
+		working, err := physicalWorkingDirectory()
+		if err != nil {
+			return nil, err
+		}
+		path = filepath.Join(working, path)
 	}
 	artifact, err := MeasureFile(path)
 	if err != nil {
@@ -601,7 +594,7 @@ func symbolPackage(name string) string {
 // JavaScript records an emitted module and its declaration file. External
 // modules are the imports emission declared for the module, so program text
 // that spells an import is never mistaken for one.
-func JavaScript(r *compiler.Result, source, mode string, module compiler.JSModule, modulePath, declarationPath string) (*Application, error) {
+func JavaScript(r *compiler.Result, source, mode string, module compiler.JSModule, modulePath, declarationPath Location) (*Application, error) {
 	receipt, err := newApplication(r, source, "js", mode)
 	if err != nil {
 		return nil, err
@@ -624,7 +617,7 @@ func JavaScript(r *compiler.Result, source, mode string, module compiler.JSModul
 	delete(receipt.Plan.Requirements, compiler.RequiresRuntimeModule)
 	// The declared imports belong to the emitted text, so the measured file
 	// must be exactly that text: the same bytes are compared and hashed.
-	written, err := os.ReadFile(modulePath)
+	written, err := os.ReadFile(modulePath.Path())
 	if err != nil {
 		return nil, err
 	}
@@ -632,14 +625,45 @@ func JavaScript(r *compiler.Result, source, mode string, module compiler.JSModul
 		return nil, fmt.Errorf("%s does not hold the emitted module", modulePath)
 	}
 	receipt.Module = measureBytes(written)
-	receipt.Module.Path = modulePath
-	if receipt.Decl, err = MeasureFile(declarationPath); err != nil {
+	receipt.Module.Path = modulePath.String()
+	if receipt.Decl, err = MeasureFile(declarationPath.Path()); err != nil {
 		return nil, err
 	}
-	receipt.Decl.Path = declarationPath
+	receipt.Decl.Path = declarationPath.String()
 	receipt.External = slices.Clone(module.Imports)
 	return receipt, nil
 }
+
+// Location is a path resolved once, as the file system walks it: the
+// existing prefix with every link resolved and each `..` applied to the
+// resolved directory, joined with the components a writer will create. A
+// component that exists but cannot be walked, such as a dangling link, is
+// an error. The CLI resolves each build path once and hands the same
+// Location to admission, to the build that writes it and to measurement,
+// so no step can address a different file by cleaning the spelling
+// differently.
+type Location struct {
+	spelled  string
+	resolved string
+}
+
+// Locate resolves spelled once.
+func Locate(spelled string) (Location, error) {
+	if spelled == "" {
+		return Location{}, fmt.Errorf("empty path")
+	}
+	resolved, err := resolveFull(spelled)
+	if err != nil {
+		return Location{}, fmt.Errorf("%s: %w", spelled, err)
+	}
+	return Location{spelled: spelled, resolved: resolved}, nil
+}
+
+// Path is the absolute resolved path a writer opens.
+func (l Location) Path() string { return l.resolved }
+
+// String is the path as it was spelled, for messages and records.
+func (l Location) String() string { return l.spelled }
 
 // Destination is an admitted receipt location: one file name in a
 // directory that admission holds open as an os.Root. Publication creates
@@ -649,30 +673,34 @@ func JavaScript(r *compiler.Result, source, mode string, module compiler.JSModul
 type Destination struct {
 	path      string
 	base      *os.Root
-	created   []string
+	created   []createdDirectory
 	parent    *os.Root
 	name      string
 	published bool
+}
+
+type createdDirectory struct {
+	path string
+	info os.FileInfo
 }
 
 // Admit refuses a receipt path that names an input or an artifact of the
 // same build, or lies inside a managed output tree, and otherwise returns
 // the one destination publication writes.
 //
-// The receipt's parent is resolved as the file system walks it: a link is
-// followed before a later `..` applies. A component that exists but cannot
-// be walked, such as a dangling link, is refused rather than treated as a
-// directory to create. Missing parent directories are created during
-// admission, so the publication directory exists and is pinned before the
-// build; they are removed again if nothing is published.
+// The receipt's parent is resolved as Locate resolves paths. Missing
+// parent directories are created during admission, so the publication
+// directory exists and is pinned before the build; if nothing is
+// published they are removed again, each only if it is still the
+// directory admission created.
 //
-// Names are compared as the file system compares them. Admission holds an
-// entry at the receipt name while it compares, creating an empty probe if
-// none exists, and looks up each protected path: on a case-insensitive or
-// normalizing volume a differently spelled output resolves to that entry
-// even before the build creates it. Existing entries are also compared by
-// identity, and a symbolic link at the receipt name by its target.
-func Admit(path string, protected []string, managed []string) (*Destination, error) {
+// Admission never creates the receipt's own name before publication.
+// Names are compared as the file system compares them: by identity for
+// existing entries (and, for a link at the receipt name, its target), and
+// for a protected path in the same directory by asking the volume whether
+// the two names are equivalent, using a probe in an owned temporary
+// directory there (see equivalentNames).
+func Admit(path string, protected []Location, managed []Location) (*Destination, error) {
 	if path == "" {
 		return nil, fmt.Errorf("--receipt requires a path")
 	}
@@ -706,7 +734,11 @@ func Admit(path string, protected []string, managed []string) (*Destination, err
 		if err := base.Mkdir(relative, 0o755); err != nil {
 			return nil, fmt.Errorf("receipt path %s: %w", path, err)
 		}
-		d.created = append(d.created, relative)
+		info, err := base.Lstat(relative)
+		if err != nil {
+			return nil, fmt.Errorf("receipt path %s: %w", path, err)
+		}
+		d.created = append(d.created, createdDirectory{path: relative, info: info})
 	}
 	if d.parent, err = base.OpenRoot(relative); err != nil {
 		return nil, fmt.Errorf("receipt path %s: %w", path, err)
@@ -714,26 +746,9 @@ func Admit(path string, protected []string, managed []string) (*Destination, err
 	if err := d.pinned(relative); err != nil {
 		return nil, err
 	}
-	parentPath := filepath.Join(append([]string{directory}, missing...)...)
-	target := filepath.Join(parentPath, name)
-
-	probe := false
-	if _, err := d.parent.Lstat(name); errors.Is(err, fs.ErrNotExist) {
-		file, err := d.parent.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err != nil {
-			return nil, fmt.Errorf("receipt path %s: %w", path, err)
-		}
-		file.Close()
-		probe = true
-	}
-	refusal := d.compare(target, protected, managed)
-	if probe {
-		if err := d.parent.Remove(name); err != nil && refusal == nil {
-			refusal = fmt.Errorf("receipt path %s: %w", path, err)
-		}
-	}
-	if refusal != nil {
-		return nil, refusal
+	target := filepath.Join(append(append([]string{directory}, missing...), name)...)
+	if err := d.compare(target, protected, managed); err != nil {
+		return nil, err
 	}
 	admitted = true
 	return d, nil
@@ -759,60 +774,70 @@ func (d *Destination) pinned(relative string) error {
 	return nil
 }
 
-// compare refuses the receipt entry at target when it is, or will be, one
-// of the protected files, or lies in a managed tree.
-func (d *Destination) compare(target string, protected, managed []string) error {
-	entry, err := d.parent.Lstat(d.name)
+// compare refuses the receipt name at target when it is, or will be, one
+// of the protected files, or lies in a managed tree. Lookups happen after
+// admission created the publication directory, so a protected path whose
+// directory the volume considers the same resolves to it.
+func (d *Destination) compare(target string, protected, managed []Location) error {
+	directory, err := d.parent.Stat(".")
 	if err != nil {
 		return fmt.Errorf("receipt path %s: %w", d.path, err)
 	}
-	if entry.IsDir() {
-		return fmt.Errorf("receipt path %s is a directory", d.path)
-	}
-	identities := []os.FileInfo{entry}
+	identities := []os.FileInfo{}
 	candidates := []string{target}
-	if entry.Mode()&os.ModeSymlink != 0 {
-		if followed, err := os.Stat(target); err == nil {
-			identities = append(identities, followed)
+	if entry, err := d.parent.Lstat(d.name); err == nil {
+		if entry.IsDir() {
+			return fmt.Errorf("receipt path %s is a directory", d.path)
 		}
-		if resolved, err := resolveFull(target); err == nil {
-			candidates = append(candidates, resolved)
+		identities = append(identities, entry)
+		if entry.Mode()&os.ModeSymlink != 0 {
+			if followed, err := os.Stat(target); err == nil {
+				identities = append(identities, followed)
+			}
+			if resolved, err := resolveFull(target); err == nil {
+				candidates = append(candidates, resolved)
+			}
 		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("receipt path %s: %w", d.path, err)
 	}
 	same := func(info os.FileInfo) bool {
 		return slices.ContainsFunc(identities, func(identity os.FileInfo) bool { return os.SameFile(identity, info) })
 	}
 	for _, other := range protected {
-		resolved, err := resolveFull(other)
-		if err != nil {
-			return fmt.Errorf("receipt path %s: the build's %s: %w", d.path, other, err)
-		}
-		if slices.Contains(candidates, resolved) {
-			return fmt.Errorf("receipt path %s names the build's own %s", d.path, other)
+		refusal := fmt.Errorf("receipt path %s names the build's own %s", d.path, other)
+		if slices.Contains(candidates, other.resolved) {
+			return refusal
 		}
 		for _, lookup := range []func(string) (os.FileInfo, error){os.Stat, os.Lstat} {
-			if info, err := lookup(resolved); err == nil && same(info) {
-				return fmt.Errorf("receipt path %s names the build's own %s", d.path, other)
+			if info, err := lookup(other.resolved); err == nil && same(info) {
+				return refusal
+			}
+		}
+		if parent, err := os.Stat(filepath.Dir(other.resolved)); err == nil && os.SameFile(parent, directory) {
+			equivalent, err := d.equivalentNames(d.name, filepath.Base(other.resolved))
+			if err != nil {
+				return fmt.Errorf("receipt path %s: comparing with %s: %w", d.path, other, err)
+			}
+			if equivalent {
+				return refusal
 			}
 		}
 	}
 	for _, tree := range managed {
-		resolved, err := resolveFull(tree)
-		if err != nil {
-			return fmt.Errorf("receipt path %s: managed output %s: %w", d.path, tree, err)
-		}
+		refusal := fmt.Errorf("receipt path %s lies inside the managed output %s", d.path, tree)
 		for _, candidate := range candidates {
-			if relative, err := filepath.Rel(resolved, candidate); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-				return fmt.Errorf("receipt path %s lies inside the managed output %s", d.path, tree)
+			if relative, err := filepath.Rel(tree.resolved, candidate); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+				return refusal
 			}
 		}
-		treeInfo, err := os.Stat(resolved)
+		root, err := os.Stat(tree.resolved)
 		if err != nil {
 			continue
 		}
 		for ancestor := filepath.Dir(target); ; ancestor = filepath.Dir(ancestor) {
-			if info, err := os.Stat(ancestor); err == nil && os.SameFile(info, treeInfo) {
-				return fmt.Errorf("receipt path %s lies inside the managed output %s", d.path, tree)
+			if info, err := os.Stat(ancestor); err == nil && os.SameFile(info, root) {
+				return refusal
 			}
 			if filepath.Dir(ancestor) == ancestor {
 				break
@@ -820,6 +845,56 @@ func (d *Destination) compare(target string, protected, managed []string) error 
 		}
 	}
 	return nil
+}
+
+// equivalentNames asks the volume whether two names denote one entry in
+// the publication directory, without creating either name there. It makes
+// an owned temporary directory inside the publication directory, which
+// shares its name semantics (a case-insensitive or normalizing volume, or
+// an inherited per-directory casefold flag), creates a file named a in it
+// and looks up b. Everything it created is removed, each entry only if it
+// is still the one it created.
+func (d *Destination) equivalentNames(a, b string) (bool, error) {
+	if a == b {
+		return true, nil
+	}
+	nonce := make([]byte, 8)
+	if _, err := rand.Read(nonce); err != nil {
+		return false, err
+	}
+	scratch := ".effra-receipt-probe-" + hex.EncodeToString(nonce)
+	if err := d.parent.Mkdir(scratch, 0o700); err != nil {
+		return false, err
+	}
+	scratchInfo, err := d.parent.Lstat(scratch)
+	if err != nil {
+		return false, err
+	}
+	defer d.removeOwned(scratch, scratchInfo)
+	probe := filepath.Join(scratch, a)
+	file, err := d.parent.OpenFile(probe, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return false, err
+	}
+	probeInfo, err := file.Stat()
+	file.Close()
+	if err != nil {
+		return false, err
+	}
+	defer d.removeOwned(probe, probeInfo)
+	found, err := d.parent.Lstat(filepath.Join(scratch, b))
+	if err != nil {
+		return false, nil
+	}
+	return os.SameFile(found, probeInfo), nil
+}
+
+// removeOwned removes name from the publication directory only if it is
+// still the entry described by owned.
+func (d *Destination) removeOwned(name string, owned os.FileInfo) {
+	if current, err := d.parent.Lstat(name); err == nil && os.SameFile(current, owned) {
+		d.parent.Remove(name)
+	}
 }
 
 // Publish writes the receipt atomically inside the admitted directory: a
@@ -841,19 +916,28 @@ func (d *Destination) Publish(receipt *Application) error {
 	if err != nil {
 		return fmt.Errorf("receipt path %s: %w", d.path, err)
 	}
-	defer d.parent.Remove(temporary)
-	if _, err := file.Write(append(data, '\n')); err != nil {
+	owned, err := file.Stat()
+	if err != nil {
 		file.Close()
 		return err
+	}
+	fail := func(err error) error {
+		file.Close()
+		d.removeOwned(temporary, owned)
+		return err
+	}
+	if _, err := file.Write(append(data, '\n')); err != nil {
+		return fail(err)
 	}
 	if err := file.Chmod(0o644); err != nil {
-		file.Close()
-		return err
+		return fail(err)
 	}
 	if err := file.Close(); err != nil {
+		d.removeOwned(temporary, owned)
 		return err
 	}
 	if err := d.parent.Rename(temporary, d.name); err != nil {
+		d.removeOwned(temporary, owned)
 		return fmt.Errorf("receipt path %s: %w", d.path, err)
 	}
 	d.published = true
@@ -861,7 +945,8 @@ func (d *Destination) Publish(receipt *Application) error {
 }
 
 // Close releases an admitted destination. Without a publication it also
-// removes the directories admission created, when they are still empty.
+// removes the directories admission created, each only if it is still the
+// directory admission created and is empty.
 func (d *Destination) Close() error {
 	if d.parent != nil {
 		d.parent.Close()
@@ -872,7 +957,10 @@ func (d *Destination) Close() error {
 	}
 	if !d.published {
 		for index := len(d.created) - 1; index >= 0; index-- {
-			d.base.Remove(d.created[index])
+			created := d.created[index]
+			if current, err := d.base.Lstat(created.path); err == nil && os.SameFile(current, created.info) {
+				d.base.Remove(created.path)
+			}
 		}
 	}
 	err := d.base.Close()
@@ -894,6 +982,15 @@ func splitLeaf(path string) (string, string) {
 	}
 }
 
+// physicalWorkingDirectory is the working directory with links resolved.
+func physicalWorkingDirectory() (string, error) {
+	working, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(working)
+}
+
 // physical resolves path as the file system walks it: it returns the
 // deepest existing prefix with every symbolic link resolved and each `..`
 // applied to the resolved directory, and the components below it that do
@@ -905,11 +1002,8 @@ func splitLeaf(path string) (string, string) {
 func physical(path string) (string, []string, error) {
 	separator := string(filepath.Separator)
 	if !filepath.IsAbs(path) {
-		working, err := os.Getwd()
+		working, err := physicalWorkingDirectory()
 		if err != nil {
-			return "", nil, err
-		}
-		if working, err = filepath.EvalSymlinks(working); err != nil {
 			return "", nil, err
 		}
 		path = working + separator + path
@@ -931,26 +1025,14 @@ func physical(path string) (string, []string, error) {
 	return "", nil, fmt.Errorf("cannot resolve %s", path)
 }
 
-// resolveFull returns the path a build would address: the physical
-// existing prefix joined with the components it would create.
+// resolveFull returns the path a writer addresses: the physical existing
+// prefix joined with the components it would create.
 func resolveFull(path string) (string, error) {
 	directory, missing, err := physical(path)
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(append([]string{directory}, missing...)...), nil
-}
-
-func sameFile(a, b string) bool {
-	left, err := os.Stat(a)
-	if err != nil {
-		return false
-	}
-	right, err := os.Stat(b)
-	if err != nil {
-		return false
-	}
-	return os.SameFile(left, right)
 }
 
 func withEnv(environment []string, key, value string) []string {
