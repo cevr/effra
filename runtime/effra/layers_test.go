@@ -725,3 +725,54 @@ func TestLayerShutdownClosesDependentsFirstAndAttemptsEveryFinalizer(t *testing.
 		t.Fatalf("shutdown order=%v cause=%v", closed, cause)
 	}
 }
+
+// A layer node's constructor is an owner like any other: one which forks a
+// failing worker, never observes it, then ends by interruption (it joins a
+// cancelled sibling) is cancellation-aborted, so the node's ordered close
+// discards the worker's typed failure (design R6 X1, "every nested owner").
+func TestLayerNodeOwnerDiscardsUnobservedChildFailureWhenConstructionIsInterrupted(t *testing.T) {
+	plan := unitPlan([]Node[Unit]{{Spec: NodeSpec{ID: "node"}, Construct: func(fc *FiberContext, _ *Unit) Exit[Unit] {
+		failed := Invoke(fc, Fork(failingChild("Boom")))
+		<-failed.Value.done
+		parked := Invoke(fc, Fork(parkedChild()))
+		parked.Value.Cancel()
+		joined := Invoke(fc, parked.Value.Join())
+		if joined.IsFailure() {
+			return Propagate[Unit](joined)
+		}
+		return Succeed(Unit{})
+	}}}, func(Unit) Unit { return Unit{} })
+	out := Run(Provide(plan, Unit{}, func(*Unit) Effect[Unit] {
+		return func(*FiberContext) Exit[Unit] { return Succeed(Unit{}) }
+	}))
+	if !out.IsFailure() {
+		t.Fatal("an interrupted construction must fail the build")
+	}
+	for _, reason := range out.Cause() {
+		if reason.Kind == "failure" {
+			t.Fatalf("the abandoned worker's typed failure escaped the node owner: %v", out.Cause())
+		}
+	}
+}
+
+// Control: a construction which ends by an ordinary failure is not aborted, so
+// the worker's failure is kept beside it.
+func TestLayerNodeOwnerKeepsUnobservedChildFailureWhenConstructionFails(t *testing.T) {
+	plan := unitPlan([]Node[Unit]{{Spec: NodeSpec{ID: "node"}, Construct: func(fc *FiberContext, _ *Unit) Exit[Unit] {
+		failed := Invoke(fc, Fork(failingChild("Boom")))
+		<-failed.Value.done
+		return Fail[Unit]("Construct", nil)
+	}}}, func(Unit) Unit { return Unit{} })
+	out := Run(Provide(plan, Unit{}, func(*Unit) Effect[Unit] {
+		return func(*FiberContext) Exit[Unit] { return Succeed(Unit{}) }
+	}))
+	tags := map[string]bool{}
+	for _, reason := range out.Cause() {
+		if reason.Kind == "failure" {
+			tags[reason.Failure.Tag] = true
+		}
+	}
+	if !tags["Construct"] || !tags["Boom"] {
+		t.Fatalf("want the construction failure and the worker failure, got %v", out.Cause())
+	}
+}

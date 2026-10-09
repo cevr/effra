@@ -34,6 +34,31 @@ func (c Cause) Error() string {
 	}
 	return strings.Join(parts, "; ")
 }
+
+// withoutFailures drops the ordinary typed failures of a cause. A
+// cancellation-aborted owner abandons the work of the children it had not
+// observed; defects, interruptions and cleanup failures stay.
+func (c Cause) withoutFailures() Cause {
+	out := Cause{}
+	for _, r := range c {
+		if r.Kind != "failure" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// hasInterrupt reports whether the exit carries interruption, alone or with
+// other reasons.
+func (e Exit[A]) hasInterrupt() bool {
+	for _, r := range e.Cause() {
+		if r.Kind == "interrupt" {
+			return true
+		}
+	}
+	return false
+}
+
 func (c Cause) OnlyInterrupts() bool {
 	if len(c) == 0 {
 		return false
@@ -218,7 +243,8 @@ func runScopeWithContinuation[A any](scope *Scope, program Effect[A], admitted b
 		finish = scheduler.enter(admitted)
 		defer finish()
 	}
-	exit := withCleanup(Invoke(fc, program), scope.closeWithContext(fc))
+	exit := Invoke(fc, program)
+	exit = withCleanup(exit, scope.closeWithContext(fc, exit.hasInterrupt()))
 	if complete != nil {
 		complete(exit)
 	}
@@ -248,16 +274,42 @@ func Scoped[A any](program Effect[A]) Effect[A] {
 	return func(fc *FiberContext) Exit[A] {
 		scope := newScopeWithDriver(fc.ctx, fc.scope, fc.timerDriver())
 		child := &FiberContext{ctx: scope.ctx, scope: scope, driver: scope.driver, turn: fc.turn, continuation: fc.continuation}
-		return withCleanup(Invoke(child, program), scope.closeWithContext(child))
+		exit := Invoke(child, program)
+		return withCleanup(exit, scope.closeWithContext(child, exit.hasInterrupt()))
 	}
 }
+
+// solitaryFailure reports whether exit fails only with the typed tag.
+// Defects, interruption and any additional reason, including a cleanup
+// failure, keep the complete cause outside ordinary selective recovery.
+func (e Exit[A]) solitaryFailure(tag string) bool {
+	return e.Failure != nil && e.Failure.Tag == tag && e.Defect == nil && !e.Interrupted && len(e.Additional) == 0
+}
+
 func Catch[A any](program Effect[A], tag string, fallback func() A) Effect[A] {
 	return func(fc *FiberContext) Exit[A] {
 		out := Invoke(fc, program)
-		if out.Failure != nil && out.Failure.Tag == tag && out.Defect == nil && !out.Interrupted && len(out.Additional) == 0 {
+		if out.solitaryFailure(tag) {
 			return Succeed(fallback())
 		}
 		return out
+	}
+}
+
+// Recover runs handler with the typed payload of a solitary tag failure.
+// The handler's recipe executes under the same fiber, so interruption and
+// its cleanup follow ordinary Invoke semantics.
+func Recover[A, P any](program Effect[A], tag string, handler func(P) Effect[A]) Effect[A] {
+	return func(fc *FiberContext) Exit[A] {
+		out := Invoke(fc, program)
+		if !out.solitaryFailure(tag) {
+			return out
+		}
+		payload, ok := out.Failure.Payload.(P)
+		if !ok && out.Failure.Payload != nil {
+			return Die[A](fmt.Errorf("failure %s carries payload %T", tag, out.Failure.Payload))
+		}
+		return Invoke(fc, handler(payload))
 	}
 }
 func normalizeTimerDriver(driver timerDriver) timerDriver {
@@ -454,7 +506,9 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 			completeProducer(producerContinuation)
 			child := childDone.get()
 			timer := timerDone.get()
-			retained := nonInterrupt(child.Cause())
+			// The timer won: the timed computation is abandoned, so its ordinary typed
+			// failures are discarded; defects and cleanup failures stay.
+			retained := nonInterrupt(child.Cause().withoutFailures())
 			timerRetained := nonInterrupt(timer.Cause())
 			if err := fc.ctx.Err(); err != nil {
 				return FromCause[A](append(Cause{{Kind: "interrupt", Err: err}}, append(retained, timerRetained...)...))
@@ -484,7 +538,7 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 			}
 			child := childDone.get()
 			timer := timerDone.get()
-			retained := append(nonInterrupt(child.Cause()), nonInterrupt(timer.Cause())...)
+			retained := append(nonInterrupt(child.Cause().withoutFailures()), nonInterrupt(timer.Cause())...)
 			return FromCause[A](append(Cause{{Kind: "interrupt", Err: fc.ctx.Err()}}, retained...))
 		}
 	}

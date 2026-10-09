@@ -113,7 +113,13 @@ func (s *Scope) bindCleanupContinuation(continuation *schedulerContinuation) boo
 	return bound
 }
 
-func (s *Scope) closeWithScheduler(scheduler *TestScheduler, continuation *schedulerContinuation) Cause {
+// closeWithScheduler closes the owner. aborted reports that its body ended by
+// interruption; an owner whose context already carries a cancellation request
+// is aborted too. The classification is fixed here, before close requests the
+// cancellation of the children, and a cancellation-aborted owner discards the
+// ordinary typed failures of children nobody observed (defects and cleanup
+// failures stay). A close that is not aborted raises them.
+func (s *Scope) closeWithScheduler(scheduler *TestScheduler, continuation *schedulerContinuation, aborted bool) Cause {
 	s.mu.Lock()
 	if s.state != Open {
 		done := s.done
@@ -138,6 +144,7 @@ func (s *Scope) closeWithScheduler(scheduler *TestScheduler, continuation *sched
 	}
 	s.state = Closing
 	children := append([]ownedFiber{}, s.children...)
+	aborted = aborted || s.ctx.Err() != nil
 	s.mu.Unlock()
 	s.cancel()
 	for _, child := range children {
@@ -149,7 +156,10 @@ func (s *Scope) closeWithScheduler(scheduler *TestScheduler, continuation *sched
 	s.acquiring.Wait()
 	for _, child := range children {
 		cause := child.closeResultManaged(scheduler, continuation)
-		if !cause.OnlyInterrupts() {
+		if aborted {
+			cause = cause.withoutFailures()
+		}
+		if !cause.OnlyInterrupts() && len(cause) > 0 {
 			outcome = append(outcome, cause...)
 		}
 	}
@@ -175,11 +185,11 @@ func (s *Scope) closeWithScheduler(scheduler *TestScheduler, continuation *sched
 	return append(Cause{}, outcome...)
 }
 
-func (s *Scope) Close() Cause { return s.closeWithScheduler(nil, nil) }
+func (s *Scope) Close() Cause { return s.closeWithScheduler(nil, nil, false) }
 
-func (s *Scope) closeWithContext(fc *FiberContext) Cause {
+func (s *Scope) closeWithContext(fc *FiberContext, aborted bool) Cause {
 	if fc == nil || fc.turnScheduler() == nil {
-		return s.Close()
+		return s.closeWithScheduler(nil, nil, aborted)
 	}
 	scheduler := fc.turnScheduler()
 	s.mu.Lock()
@@ -217,7 +227,7 @@ func (s *Scope) closeWithContext(fc *FiberContext) Cause {
 			scheduler.completeContinuation(continuation)
 		}
 	}()
-	return s.closeWithScheduler(scheduler, continuation)
+	return s.closeWithScheduler(scheduler, continuation, aborted)
 }
 
 func AcquireRelease[A any](name string, acquire func(context.Context) (A, error), release func(A, context.Context) error) Effect[A] {

@@ -180,6 +180,10 @@ type layerEntry struct {
 	cancel         context.CancelFunc
 	cause          Cause
 	abortCancelled bool
+	// aborted is set when the node's construction ended by interruption or
+	// the build asked it to stop: its owner is then cancellation-aborted and
+	// discards the typed failures of children nobody observed (Scope.Close).
+	aborted bool
 }
 
 type layerBuild[S any] struct {
@@ -331,6 +335,7 @@ func (b *layerBuild[S]) publish(index int, exit Exit[Unit]) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	entry := &b.entries[index]
+	entry.aborted = entry.abortCancelled || exit.hasInterrupt()
 	if entry.abortCancelled {
 		retained := Cause{}
 		for _, reason := range cause {
@@ -449,7 +454,9 @@ func (b *layerBuild[S]) close() Cause {
 	for i := len(b.order) - 1; i >= 0; i-- {
 		entry := &b.entries[b.order[i]]
 		if entry.scope != nil {
-			cause = append(cause, entry.scope.closeWithContext(b.parent)...)
+			// The node owner closes on the build's fiber: a cancellation request
+			// on it, like one met during construction, aborts the owner.
+			cause = append(cause, entry.scope.closeWithContext(b.parent, entry.aborted || b.parent.ctx.Err() != nil)...)
 		}
 	}
 	return cause
