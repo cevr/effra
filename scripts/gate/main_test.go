@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -342,6 +343,47 @@ func TestGeneratedInputsAreDigestedWhenTheKeyIsComputed(t *testing.T) {
 	}
 	if first == second {
 		t.Fatal("a generated input rewritten during the run kept its earlier digest")
+	}
+}
+
+func TestCheckoutIdentityNamesHeadTreeAndCleanliness(t *testing.T) {
+	root := fixture(t)
+	git := func(args ...string) string {
+		t.Helper()
+		command := exec.Command("git", args...)
+		command.Dir = root
+		output, err := command.Output()
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	want := "gate: head " + git("rev-parse", "HEAD") + " tree " + git("rev-parse", "HEAD^{tree}") + " clean="
+	for _, change := range []struct {
+		name  string
+		apply func()
+		clean bool
+	}{
+		{"committed", func() {}, true},
+		{"ignored output", func() { write(t, root, "runs/output", "ignored\n") }, true},
+		{"untracked file", func() { write(t, root, "src/new.txt", "new\n") }, false},
+	} {
+		change.apply()
+		identity, err := checkoutIdentity(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if identity != want+fmt.Sprint(change.clean) {
+			t.Fatalf("%s: %q, want clean=%t", change.name, identity, change.clean)
+		}
+	}
+	if err := os.Remove(filepath.Join(root, "src/new.txt")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "src/input.txt", "staged\n")
+	git("add", "src/input.txt")
+	if identity, _ := checkoutIdentity(root); !strings.HasSuffix(identity, "clean=false") {
+		t.Fatalf("staged change: %q", identity)
 	}
 }
 

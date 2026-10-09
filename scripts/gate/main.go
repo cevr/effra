@@ -164,6 +164,13 @@ func main() {
 	} else {
 		fmt.Printf("typescript: strict (%s)\n", tsc)
 	}
+	// The second line binds the log to the checkout it checked. A dirty
+	// checkout still runs, and says so.
+	identity, err := checkoutIdentity(root)
+	if err != nil {
+		fatal(err)
+	}
+	fmt.Println(identity)
 	g := &gate{root: root, cacheDir: cacheDirectory(), noCache: *noCache, steps: steps}
 	os.Exit(g.run(os.Stdout))
 }
@@ -179,6 +186,34 @@ func repositoryRoot() (string, error) {
 		return "", fmt.Errorf("locate repository root: %w", err)
 	}
 	return strings.TrimSpace(string(executable)), nil
+}
+
+// checkoutIdentity names the commit and tree the gate starts from, and
+// whether the checkout matches them: no staged, unstaged or untracked
+// (non-ignored) changes, submodules included.
+func checkoutIdentity(root string) (string, error) {
+	git := func(args ...string) (string, error) {
+		command := exec.Command("git", args...)
+		command.Dir = root
+		output, err := command.Output()
+		if err != nil {
+			return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		}
+		return string(output), nil
+	}
+	head, err := git("rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	tree, err := git("rev-parse", "HEAD^{tree}")
+	if err != nil {
+		return "", err
+	}
+	status, err := git("status", "--porcelain=v1", "-z", "--untracked-files=normal")
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("gate: head %s tree %s clean=%t", strings.TrimSpace(head), strings.TrimSpace(tree), status == ""), nil
 }
 
 func cacheDirectory() string {
