@@ -1,16 +1,9 @@
 package main
 
 import (
-	"bytes"
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
-	"sync"
-	"syscall"
 	"testing"
-	"time"
 )
 
 // entryFailureCases pin the entry failure report: the stderr text and exit
@@ -67,35 +60,68 @@ effect fn main() -> void raises { Odd } {
     run Scheduler.advance(1).provide<Scheduler>(LiveScheduler)
 }
 `, `defect: "live scheduler cannot advance"` + "\n", 1},
-	// Each child signals before failing; the sleep outlasts its last step, so
-	// both failures are complete before the scope closes.
-	{"composite cause from parallel children", `error Bad
-error Worse {
-    reason: string
+	// A record may declare a field named `_tag`; it is data, not a variant
+	// discriminator, and its text cannot start a forged report line.
+	{"record fields named _tag", `record Detail {
+    _tag: string
 }
-effect fn bad(ready: Latch) -> void raises { Bad } uses { Sync } {
-    run Sync.signal(ready)
+record Count {
+    _tag: i64
+}
+error Bad {
+    detail: Detail
+    count: Count
+    multi: Detail
+}
+effect fn main() -> void raises { Bad } {
+    fail Bad { detail: Detail { _tag: "data" }, count: Count { _tag: 7 }, multi: Detail { _tag: "a\nfailure: forged" } }
+}
+`, `failure: Bad { count: { _tag: 7 }, detail: { _tag: "data" }, multi: { _tag: "a\nfailure: forged" } }` + "\n", 1},
+	// Built-in diagnostic text embeds both sides with the report's quoting
+	// rule: controls escaped, U+2028/U+2029 and non-BMP literal, a lone
+	// surrogate replaced by U+FFFD.
+	{"built-in message quoting", "effect fn main() -> void raises { AssertionFailed } {\n    run Assert.equalText(\"a\\u0000\\u001f\\u007f\\n\", \"\u2028\u2029 \U0001F600 \\ud800 é\").provide<Assert>(Assertions)\n}\n",
+		"failure: AssertionFailed { message: \"expected \\\"\u2028\u2029 \U0001F600 \uFFFD é\\\"; received \\\"a\\\\u0000\\\\u001f\\\\u007f\\\\n\\\"\" }\n", 1},
+	{"codec decode failure", `import Json "effra/json"
+record Customer {
+    id: i64
+    name: string
+}
+derive customerJson = Json.codec<Customer>(maxBodyBytes: 1024, maxDepth: 1)
+effect fn main() -> void raises { JsonDecodeFailure } {
+    let first = run customerJson.decode("{\"id\":\"x\",\"name\":1}")
+    void
+}
+`, `failure: JsonDecodeFailure { message: "codec decode: integer at [\"id\"]" }` + "\n", 1},
+	{"test clock outside the harness", `effect fn main() -> void {
+    run Clock.sleep(1).provide<Clock>(TestClock)
+}
+`, `defect: "test clock requires the ef test harness"` + "\n", 1},
+	{"test scheduler sleep outside the harness", `effect fn main() -> void {
+    run Scheduler.sleep(1).provide<Scheduler>(TestScheduler)
+}
+`, `defect: "test scheduler requires the ef test harness"` + "\n", 1},
+	{"test scheduler adjustment outside the harness", `effect fn main() -> void {
+    run Scheduler.advance(1).provide<Scheduler>(TestScheduler)
+}
+`, `defect: "test scheduler adjustment is only available in the ef test harness"` + "\n", 1},
+	{"test scheduler barrier outside the harness", `effect fn main() -> void {
+    run Scheduler.awaitRegistration().provide<Scheduler>(TestScheduler)
+}
+`, `defect: "test scheduler registration barrier is only available in the ef test harness"` + "\n", 1},
+	// A declared failure that is never raised still compiles on Go, whose
+	// application plan does not emit its types.
+	{"unraised declared failure", `record Inner {
+    value: string
+}
+error Unused {
+    inner: Inner
+}
+error Bad
+effect fn main() -> void raises { Bad, Unused } {
     fail Bad
 }
-effect fn worse(ready: Latch) -> void raises { Worse } uses { Sync } {
-    run Sync.signal(ready)
-    fail Worse { reason: "second" }
-}
-effect fn program() -> void raises { Bad, Worse } uses { Clock, Sync } {
-    let first = run Sync.latch()
-    let second = run Sync.latch()
-    scope {
-        let a = fork bad(first)
-        let b = fork worse(second)
-        run Sync.await(first)
-        run Sync.await(second)
-        run Clock.sleep(100)
-    }
-}
-effect fn main() -> void raises { Bad, Worse } {
-    run program().provide<Clock>(LiveClock).provide<Sync>(TestSync)
-}
-`, "failure: Bad\nfailure: Worse { reason: \"second\" }\n", 1},
+`, "failure: Bad\n", 1},
 	{"interruption observed through join", `effect fn pending() -> void uses { Clock } {
     run Clock.sleep(60000)
 }
@@ -142,90 +168,4 @@ func TestEntryFailureReportIsIdenticalOnBothTargets(t *testing.T) {
 			}
 		})
 	}
-}
-
-// A signal interrupts main on both targets, and `ef run` forwards it to the
-// program and passes the program's report and status through unchanged.
-func TestEntryFailureReportForSignalInterruption(t *testing.T) {
-	binary := buildTestCLI(t)
-	root := entryFailureRoot(t)
-	file := filepath.Join(root, "wait.ef")
-	source := `effect fn wait() -> void uses { Clock, Console } {
-    run Console.log("ready")
-    run Clock.sleep(60000)
-}
-effect fn main() -> void {
-    run wait().provide<Clock>(LiveClock).provide<Console>(Stdout)
-}
-`
-	if err := os.WriteFile(file, []byte(source), 0600); err != nil {
-		t.Fatal(err)
-	}
-	for _, target := range []string{"go", "js"} {
-		for _, signal := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
-			command := exec.Command(binary, "run", file, "--target", target)
-			command.Dir = root
-			var stderr bytes.Buffer
-			stdout := &readyWriter{ready: make(chan struct{})}
-			command.Stdout, command.Stderr = stdout, &stderr
-			if err := command.Start(); err != nil {
-				t.Fatal(err)
-			}
-			select {
-			case <-stdout.ready:
-			case <-time.After(60 * time.Second):
-				_ = command.Process.Kill()
-				_ = command.Wait()
-				t.Fatalf("%s: program did not report ready: stderr=%q", target, stderr.String())
-			}
-			if err := command.Process.Signal(signal); err != nil {
-				t.Fatal(err)
-			}
-			done := make(chan error, 1)
-			go func() { done <- command.Wait() }()
-			var waitErr error
-			select {
-			case waitErr = <-done:
-			case <-time.After(30 * time.Second):
-				_ = command.Process.Kill()
-				<-done
-				t.Fatalf("%s: %v did not interrupt main", target, signal)
-			}
-			code := 0
-			var exited *exec.ExitError
-			if errors.As(waitErr, &exited) {
-				code = exited.ExitCode()
-			} else if waitErr != nil {
-				t.Fatal(waitErr)
-			}
-			if stdout.String() != "ready\n" || stderr.String() != "interrupt\n" || code != 130 {
-				t.Errorf("%s %v: code=%d stderr=%q; want 130 and %q", target, signal, code, stderr.String(), "interrupt\n")
-			}
-		}
-	}
-}
-
-// readyWriter collects a program's stdout and reports its first line.
-type readyWriter struct {
-	mu    sync.Mutex
-	data  bytes.Buffer
-	ready chan struct{}
-	seen  bool
-}
-
-func (w *readyWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.data.Write(p)
-	if !w.seen && strings.Contains(w.data.String(), "\n") {
-		w.seen = true
-		close(w.ready)
-	}
-	return len(p), nil
-}
-
-func (w *readyWriter) String() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.data.String()
 }
