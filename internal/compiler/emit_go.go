@@ -1104,12 +1104,17 @@ func goTemplateDeclaration(r *Record) string {
 	}
 	if r.Kind == "enum" {
 		marker := "efVariantTemplate_" + r.EmissionName
-		out.WriteString("type efTemplate_" + r.EmissionName + params + " interface { " + marker + "(" + strings.Join(arguments, ",") + ") }\n")
+		// The marker takes no type arguments: a method set that mentions T would
+		// make every instantiation a distinct Go GC shape, so each runtime generic
+		// over an option would be stenciled once per payload type. The Effra
+		// checker is the type authority; the variant structs stay generic so a
+		// type switch still tells Some[A] from Some[B].
+		out.WriteString("type efTemplate_" + r.EmissionName + params + " interface { " + marker + "() }\n")
 		for _, variant := range r.Variants {
 			name := goVariantType("template_"+r.EmissionName, variant.Name)
 			out.WriteString("type " + name + params + " struct {\n")
 			fields(variant.Fields)
-			out.WriteString("}\nfunc (" + name + args + ") " + marker + "(" + strings.Join(arguments, ",") + ") {}\n")
+			out.WriteString("}\nfunc (" + name + args + ") " + marker + "() {}\n")
 		}
 		return out.String()
 	}
@@ -1305,7 +1310,9 @@ func (g *goEmitter) matchSwitch(e *Expr, subjects []string, effect bool, resultT
 		for variant, name := range subject.variants {
 			body.WriteString("case " + g.variantType(subject.value.valueID(), subject.enum, name) + ": " + tags[index] + " = " + strconv.Itoa(variant) + "\n")
 		}
-		body.WriteString("}\n")
+		// Variant markers carry no type arguments, so Go no longer rejects a
+		// foreign dynamic value; refuse it rather than select the first arm.
+		body.WriteString("default: panic(\"unreachable enum variant\")\n}\n")
 	}
 	body.WriteString("switch {\n")
 	for _, arm := range plan.arms {
