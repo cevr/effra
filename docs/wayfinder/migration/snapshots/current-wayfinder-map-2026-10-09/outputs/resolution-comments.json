@@ -1,0 +1,718 @@
+{
+  "historicalLinkRevision": {
+    "commit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+    "repository": "cevr/effra",
+    "role": "historical-link-target"
+  },
+  "inputSnapshot": {
+    "path": "docs/wayfinder/migration/snapshots/current-wayfinder-map-2026-10-09/outputs/input-manifest.json",
+    "sha256": "7898cf990d2bed85d21edd4376475ffb1fd2ce2743eb981241a7e1730b3c146c"
+  },
+  "items": [
+    {
+      "comments": [
+        {
+          "body": "## Resolution\n\nOwner feedback on 2026-10-05, after reviewing the public runnable prototype and README, found the direction useful for a finite slice: Go-like simplicity with Effect-style guarantees, followed by a request for more showcases such as algebraic data types and pattern matching. This resolves the prototype's usefulness reaction only. It does not resolve the separate Go backend/lifecycle/cost parity question, package-boundary measurements or any other HITL ticket.\n\nPublic evidence: the [runnable `.ef` example](https://github.com/cevr/effra/blob/779dc58368149452b0fd42b0debb291e3001c8ac/examples/main.ef), [prototype limits](https://github.com/cevr/effra/blob/779dc58368149452b0fd42b0debb291e3001c8ac/docs/prototype.md), [read-only MCP surface](https://github.com/cevr/effra/blob/779dc58368149452b0fd42b0debb291e3001c8ac/docs/mcp.md), and [public README](https://github.com/cevr/effra/blob/779dc58368149452b0fd42b0debb291e3001c8ac/README.md). The source artifact and its receipt remain evidence for this finite reaction, not a claim of complete language, runtime or performance support.\n",
+          "ordinal": 1,
+          "sourceHeading": "Resolution",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "001",
+      "sourceSha256": "62c646128668586418637de7e6890abef90219b1d1f765d2ce139152956d418c",
+      "title": "Does explicit run and contract inspection make the tiny language useful?"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "002",
+      "sourceSha256": "69aea3e581263af12a82e493bf60337e7143b5f99ed8e40abcca09e7f0cdd6bc",
+      "title": "What cancellation and resource ownership contract must both targets preserve?"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "003",
+      "sourceSha256": "adc5767e8d9fc326179760238f3df71cdf1faeea6e6020c54752d7340af0ae6e",
+      "title": "Which compilation boundary preserves speed as the language grows?"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "004",
+      "sourceSha256": "80250a711630989fb9531cd7a7b6eed92ecfd8cce410793180660d4f3eeceb6d",
+      "title": "What shared semantics make a Go backend credible?"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "005",
+      "sourceSha256": "ee9cf407fd09320d1517b57c2025e4f35bcb55c5badd0921b76fd797c1770447",
+      "title": "How can Go and TypeScript imports avoid binding boilerplate while exposing trust?"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "actor-conformance",
+      "sourceSha256": "42b33edac22e54f63a99822afe0f3adc41df1e03ace9db86c93804cb7da3a465",
+      "title": "Actor contract inspection and adoption conformance"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "actor-protocol",
+      "sourceSha256": "5a73e3f460ad9937dcba9ed8a918345f839504585fca94764a97d944f9d3ee16",
+      "title": "Checked ordinary actor protocols and portable ownership"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "actor-receive",
+      "sourceSha256": "2962f9e0c897cbec3cf6d31eb37cc0dfbb617d3919d53f0efa313baa0851a839",
+      "title": "Restricted ordinary actor receive loops"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "actor-runtime",
+      "sourceSha256": "95fdae4e7d1f821ff61da85a00ff7155d3fdad9efd015f8df71db43424dc1396",
+      "title": "Owned sequential handler actors on Go and JavaScript"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "binary-reachability",
+      "sourceSha256": "2ab2d00d510d9d9bf18d9910bdf7deab2494bfc751bdd864d081cb0e770f34a7",
+      "title": "Reachable runtime modules and small executable receipts"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "capability-synthesis",
+      "sourceSha256": "54e8f1f03b533f16f81be718eeced40bf00c583fd05c88784e2a97749f5abf0c",
+      "title": "Implement the accepted capability and lawful-runtime synthesis"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "client-lifetime-bridge",
+      "sourceSha256": "bf0c2b613e85a1e517d5385d4b63cedb3a6e8e530695bae09800723c530f7187",
+      "title": "Owned client lifetime bridge for view and foreign components (VW4)"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "constant-parameter-defaults",
+      "sourceSha256": "0f9963ffc54d8aefae15efd547613209ba1be463a9f7c22672b3934c4dd58287",
+      "title": "Constant-only parameter defaults and explicit call contracts"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "custom-lint",
+      "sourceSha256": "3a92fedbc0ed2ebcaf3ff7451ba85e0f10e4172a0fa9284a7235f61c0d66c26f",
+      "title": "Versioned custom lint rules and shared rule packs"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "editor-formatting",
+      "sourceSha256": "602682e87160cf8e05da95f8929888fb24d2b67b678c91e19cab581c40258abd",
+      "title": "Shared formatter through versioned LSP documents"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "effect-recovery",
+      "sourceSha256": "26ac4f656c592faf7842ade94c619cc19924759b4d130d1d6727fd620d4bc7f0",
+      "title": "Payload-aware typed recovery and outcomes"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Resolution comments\n\nClosed after mechanical adoption19a450b and its full branch/integration gates. Twelve explicitly maintained authored examples pass the syntax-only formatter check; eleven changed, while the deliberate missing-service example remains byte-identical and still reports EF108 when checked. Independent replay of the exact built formatter over all twelve original sources matches the adopted bytes, and every second pass is unchanged. `scripts/authored_examples.txt` owns the gate selection and missing/empty entries fail explicitly. Editor formatting remains separately blocked on the language server; this closure advertises no LSP capability.\n",
+          "ordinal": 1,
+          "sourceHeading": "Resolution comments",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "formatter",
+      "sourceSha256": "81b66f3841d293f24e29a32015a8fd813aece8ab2a74c1c87d1d6333bcf09fde",
+      "title": "Canonical comment-preserving formatter with CLI and MCP"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Resolution\n\nAll five foundation implementation children are reviewed and integrated through `a9da03a`. The combined full gate passes; the full Go race suite passes at documentation-only successor `8debbc2`. Public CLI/MCP ownership metadata agrees, generic fixtures execute on applicable targets, and frontend/import/tool observations are retained without a comparative performance claim. See the [permanent raw integration receipts](https://github.com/cevr/effra/blob/779dc58368149452b0fd42b0debb291e3001c8ac/docs/receipts/foundations-2026-10-06/README.md). Transferred ownership/testing checkouts were retired only after verified all-ref bundles and clean integrated ancestry checks; other completed registered lanes were retired after their gates.\n\nThis closes the finite foundation stage. Native function contracts, legacy Handler erasure, codecs/server conformance, compile-speed improvements and matched benchmarks remain separately tracked. No HITL ticket is resolved by this receipt.\n",
+          "ordinal": 1,
+          "sourceHeading": "Resolution",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "foundation-conformance",
+      "sourceSha256": "a9518d73741b7c6a8d30b5c6345c70bb8640f1f9aff859f59dc73763ca8665f9",
+      "title": "Production fixture and tool conformance"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Integration receipt before independent review\n\nImplemented canonical type/declaration metadata, nominal records and payload enums, exhaustive matching, structured failures, and typed Go/JS emission. Integration `49778be` includes implementation commits `ecbcea4`, `b31a8ae`, `5201606`, `e7bf8e6`, and `d807751`. Full gate, race suite, both-target fixture execution, stdio inspection, and strict TypeScript nominal checking passed. Unsupported recursive layouts, ordinary error-valued success types, and JS declaration name collisions diagnose explicitly.\n\n",
+          "ordinal": 1,
+          "sourceHeading": "Integration receipt before independent review",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        },
+        {
+          "body": "## Review reopened\n\nIndependent review found admitted match-row, constructor/payload and Go field-mangling cases that need regression tests and repair before this task resolves. Passing existing gates is preliminary evidence, not completion of those acceptance clauses.\n\n",
+          "ordinal": 2,
+          "sourceHeading": "Review reopened",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        },
+        {
+          "body": "## Final resolution\n\nIntegrated review repairs `2613227`, `7040c5e` and `ccfce95` at `163040c`. Independent review verified all original findings, nested nominal identity, empty-enum elimination and multi-field control shorthand. The integrated full gate and Go race suite passed. Both-target data fixtures, declaration inspection and strict TypeScript checks passed. Recursive layouts and unsupported success-channel error values remain explicit diagnostics; this does not supply external codecs or generic collections.\n",
+          "ordinal": 3,
+          "sourceHeading": "Final resolution",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "foundation-data",
+      "sourceSha256": "ff354d502db26d22bd2dcb0d07bb24606206f0442b2eb51ea4b72c3b5dfcbf02",
+      "title": "Closed application data and exhaustive interpretation"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Resolution\n\nImplemented named next-line optional-lint suppression with required reasons, source comment spans, and malformed/unknown/unused validation. Compiler admission errors remain mandatory. Shared CLI/MCP parity, the full gate, and Go race suite passed on integration commit `7362739`; implementation commits `efacbda` and `7362739`.\n",
+          "ordinal": 1,
+          "sourceHeading": "Resolution",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "foundation-lint",
+      "sourceSha256": "28bcf2f8c34a418114edaaeca11dd9aa22022580a5c976aa951eb8a46fdfa99d",
+      "title": "Reasoned semantic lint suppression"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Implementation underway\n\nImplementation starts from integrated data/provider tip `163040c`; predecessor receipts remain under independent review. Bounded provenance follows recipe captures separately from invocation-owned acquisitions and preserves borrowed outer handles. Unknown summaries stay explicit.\n\n",
+          "ordinal": 1,
+          "sourceHeading": "Implementation underway",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        },
+        {
+          "body": "## Remote independent review\n\nThe independent review of `d2a5a6a` on 2026-10-06 blocks integration. Repairs must cover nested enum projection, execution-owned deferred results and fork results, recovery fallback provenance, field-sensitive helper summaries, bounded structural traversal and dependency-sensitive summary computation. Public source probes demonstrated missed closed-owner errors; existing aggregate tests did not isolate each acceptance case. Keep the task open until repaired source probes and independent review pass.\n\nThe first repair commits `e8b2147`/`668e5a9` pass gates and the original reproducers. Rereview still blocks integration: root parameter projection can erase proof, deferred helpers can incorrectly rebind already materialized borrowed handles, and primitive-only shared record graphs bypass the traversal budget. These are distinct public acceptance cases, not reasons to weaken the ownership contract.\n\n",
+          "ordinal": 2,
+          "sourceHeading": "Remote independent review",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        },
+        {
+          "body": "## Reviewed integration\n\nResolved at `a9da03a` on 2026-10-06. Independent review cleared the final bounded-domain repair `ceda2c2`, including overlapping joins, widening exclusions, deferred parameter substitution and nested source coordinates. The integrated checker retains shared syntax traversal, `raises` syntax and explicit Scheduler requirements. Both branch and combined repository gates pass.\n\nExact clean integrated-binary probes reject an inner acquisition escaping through a two-field selection helper with EF123, admit the same helper over two borrowed outer handles, and execute the public ownership example. Raw integrated receipts are `/tmp/effra-ownership-integrated-gate.log` and `/tmp/effra-ownership-integrated-live.json`; independent law and public-source review is retained in the architecture-loop cache as `ownership-substitution-review.md`.\n\nThis closes the finite File/Fiber provenance foundation, not general borrow checking. Bounded analysis may conservatively reject potential ownership when it cannot establish safety; foreign behavior remains explicit. Typed callback provenance belongs to the following native-interfaces task and must preserve these distinctions.\n",
+          "ordinal": 3,
+          "sourceHeading": "Reviewed integration",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "foundation-ownership",
+      "sourceSha256": "b7cb2c5a2f25d5e7e1c844fa93c26e6bd5e7e39c4c4cc858cec5738947e81e0d",
+      "title": "Reject proven closed-owner handle escape"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Implementation asset\n\n[Construction and lexical capture seam](https://github.com/cevr/effra/blob/779dc58368149452b0fd42b0debb291e3001c8ac/docs/specs/provider-construction.md).\n\n",
+          "ordinal": 1,
+          "sourceHeading": "Implementation asset",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        },
+        {
+          "body": "## Resolution\n\nIntegrated constructor/configuration, lexical service-value capture and graph provenance at `163040c`; independent review repair `6a84eda` is merged through `7430883`. Config-only JS recipes now allocate on each execution, and graphs link materialized values to recipes and constructor declarations with incoming dependents. Independent public JS identity, CLI graph and Go/JS current-owner/cancellation checks passed. The integrated full gate and Go race suite passed at `e5777f7`. Explicit materialized values are reusable; fallible acquisition, scoped initialization memoization and cycle solving remain unavailable.\n",
+          "ordinal": 2,
+          "sourceHeading": "Resolution",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "foundation-providers",
+      "sourceSha256": "8215668f1e81b8ab19f5ba438f90461e83463f15c6a71d27aa362f0abad25fd6",
+      "title": "Dependency-capturing provider composition"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Resolution\n\nResolved through the [integrated conformance receipt](https://github.com/cevr/effra/issues/21) on 2026-10-06. Every implementation child is closed with named evidence; broader library and language stages remain open under the map.\n",
+          "ordinal": 1,
+          "sourceHeading": "Resolution",
+          "syntheticHeading": true,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "foundation-spec",
+      "sourceSha256": "7a45099f8a8ab23aa3c50a1641655f4de97f30220fc38e70bac69d0a8e9f4123",
+      "title": "Production foundation implementation"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Review history\n\nImplementation31dd137 passes its Linux gate/race/public probe receipts, but independent review blocks integration: a partial time advance can deadlock when scope cleanup sleeps beyond the requested target, and repeated join/deadline probes expose a quiescence-check/advance race. Preserve cleanup publication ordering while distinguishing runnable continuations from genuinely suspended cleanup. Add isolated public regressions before closure.\n\nClaude2 counsel round1 independently confirms both and adds intermediate-timer causality (a later due timer overtakes runnable earlier completion), timeout/latch variants of partial cleanup, and JS advance before an admitted fork registers its timer. Consolidated repair must distinguish runnable from parked continuations at every time selection, drain JS before its first selection, preserve exact cleanup causes and document managed-only observation. Report and exact public probes: `/tmp/effra-claude2-scheduler-review.md` on the workbox; the permanent acceptance belongs in tests/specs, not only this local receipt.\n\n",
+          "ordinal": 1,
+          "sourceHeading": "Review history",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        },
+        {
+          "body": "## Integration receipt\n\nReviewed repairs through ac8f1e2 and the permanent fast-first join regression f03f340 are integrated at cf3783c. Branch/integration gates and the integrated full Go race suite pass; the public five-case causal example passes Go and JS with the same semantic revision. Independent review covers partial cleanup, both join orders, nested timeouts, already-closing work and composite causes. The final transferred checkout is cleanly retired with all Git refs preserved in a verified local bundle.\n\nThe follow-up invalid-handle/fresh-fixture batch is integrated at616f0b4: fixes4a27f3b and65a8882 make nil/zero native handles consistently fail, centralize managed validation and create generated-JS scratch parents. Claude2 round1 approves and final fix-only round2 is clear, with guard-removal mutation tests and repeated runtime races. Branch and root full gates pass; root focused runtime race20 and the public causal example on both targets pass. Raw logs `/tmp/effra-latch-{branch-integration-gate,integrated-gate,integrated-live}.log` and `/tmp/effra-latch-causal-{go,js}.json`. This closes the finite scheduler/testing foundation; it does not establish arbitrary foreign-operation quiescence.\n",
+          "ordinal": 2,
+          "sourceHeading": "Integration receipt",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "foundation-testing",
+      "sourceSha256": "17abc6578da69ae69185051b3a7b62f1810d6c0fe3053724883001fd56ab1662",
+      "title": "Causal synchronization and scheduler-backed tests"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "framework-corpus",
+      "sourceSha256": "0f27ace2ca74f87a6af05a5fcd28c873845459d727d12ad960e82617f9587637",
+      "title": "Complete 34-directory framework adoption corpus"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Resolution comments\n\n2026-10-06: implemented in ff625433 and repaired in b86ccf22, independently reviewed through two claude2 rounds and finite Astra closure (`pass1/generated-output-b86-final-closure.md`). Integrated at 2e23a8943215f4e28f07943f8ad1a63616035f94. Complete content-addressed modules have exclusive regular-file commit markers; reuse validates exact ownership, inventory and bytes. Raw output roots follow physical OS path semantics while source admission retains the shared lexical loader policy. Generated native builds disable inherited workspaces and enforce readonly module graphs. Tests cover failed exclusive publication with completed inventory, cleanup/retry, retained orphans/history, concurrent winners and exact unchanged bytes/mtime; no literal SIGKILL or power-loss durability is claimed.\n\nBranch and root full gates passed: `/tmp/effra-generated-output-branch-integration-gate.log` SHA256 f9c0561e83a6110d35973b0ae1a13873c15c7920f25b5b83b67ec7e999525ba5 and `/tmp/effra-generated-output-root-integration-gate.log` SHA256 5a2262722fe8982d6c5153bcb25e127635c034f634871d1d84617bc7519b07a6. Independent preservation check verifies all31 pre-existing native output nodes unchanged, including the retired stdlib source. The runtime split may now integrate; application reachability and size evidence remain open in the parent task.\n",
+          "ordinal": 1,
+          "sourceHeading": "Resolution comments",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "generated-output-ownership",
+      "sourceSha256": "301f3095301ff03bf7833a2b77ff0e49d0a69b64ec7a8ccef4f5c6e5f0d1c712",
+      "title": "Isolated owned native generated modules"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "generic-data",
+      "sourceSha256": "320ca5b58caf2ae5341c4b61c4bf9200cc09f85ecdb2e551af0909ca8a1896aa",
+      "title": "Reusable generic data and product matching"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "host-callbacks",
+      "sourceSha256": "23de48f6db769d9cb45abe9cf1ff83cfc271197dd94313442c909b625f67f511",
+      "title": "Go callbacks and scoped inverse interface bridges"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "host-interop",
+      "sourceSha256": "8b9949074ca2bdba38868289371c87954480fd039c2341cdeed1d64f00fe9c7e",
+      "title": "Automatic Go host values and standard protocols"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "host-protocols",
+      "sourceSha256": "fd545086f6f5f4c604c2f92dae361b78a5143f9732f120df72f2c270fcea8f29",
+      "title": "Native Go receiver methods and interface assignment"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "host-resources",
+      "sourceSha256": "e4b5de02f653fa2c9f93796523f25e74fb66e4c80c42c71a15244ae9406e6d00",
+      "title": "Owned Go resource borrowing and cancellation contracts"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "host-types",
+      "sourceSha256": "aeab7bb84c8312defeb4412880f47908aaec90a03e91b5aaba9877ef3094c40b",
+      "title": "Canonical Go host types and complete return tuples"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "js-control-flow-lowering",
+      "sourceSha256": "ad80077f752f3584916e0531d73e1de8e95bc06e0b69b3f5f0b72665ee8b8a1d",
+      "title": "Direct JavaScript control-flow lowering with preserved effects"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "jsx-notation",
+      "sourceSha256": "50498c3a8596408db4e63cfbae6cabc5e2e1ffeddfb58ffdb128eef367ef9e9e",
+      "title": "One-to-one JSX view notation (VW6)"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "language-layers",
+      "sourceSha256": "60840f3acf7e5edd9b0d5266b3b8b0cd72229c40b18e98ead3f5f29b7a891236",
+      "title": "First-class declarative layers and owned acquisition"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "language-server",
+      "sourceSha256": "6f4dcb87a1bc30b1b65042b2416a606947965de5c90227779b1e5b17f18c62a8",
+      "title": "Shared-model stdio language server"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "layer-construction",
+      "sourceSha256": "ee6efadfc8e22c94534aeadec2d833af14918fd7562debb4fbac0923f482a915",
+      "title": "Fallible provider factories and retained startup effects"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "layer-instances",
+      "sourceSha256": "70643f1fb6b4cd8035529b1e3dc5da6f0d1ea4d9b8e303d3e0ad626d923d5f1e",
+      "title": "Parameterized layer plans and inherited application services"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "layer-plans",
+      "sourceSha256": "52a82d34fa569ed9f7841952ecc293f587b454d584ff8c5676a58ba046abb5e9",
+      "title": "Checked static layer plans and construction graphs"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "layer-runtime",
+      "sourceSha256": "585ab5ec64b3c8e116bcd998cfcf2b78cbfaf1958b047e27b0c524e445a46990",
+      "title": "Scope-owned concurrent layer acquisition and rollback"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "layer-tooling",
+      "sourceSha256": "4b65e9270ef66cc1b5b3fedde52892590b034938e1479d75d734ca0db2d57d9c",
+      "title": "Layer graph tooling and declarative adoption examples"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Resolution comments\n\n2026-10-06: independently reviewed preparatory adapter `11412a7` integrated at `6cbbed0` after merging current root. Actual framed-process checks prove shared CLI/MCP diagnostics, UTF-16 versioned unsaved buffers, URI alias identity/echo, bounded refusal/recovery, imported document base and clean lifecycle. Both Claude rounds consumed; required alias/output-budget/raw-escape repairs have causal RED/GREEN controls and finite Astra closure. Native race and full branch/root gates pass, logs `/tmp/effra-lsp-{branch,root}-integration-gate.log`, SHA256 `568bd9dbbe1380c5cfa66ae24de7c933984353ae454da533e155b1155f808288` and `5323e5c8330adf31fccdfe8d170d14d8cffaa5e9a34762a1f66a9b0e985261d2`. All 31 legacy output nodes are unchanged.\n\n[Supported profile](https://github.com/cevr/effra/blob/779dc58368149452b0fd42b0debb291e3001c8ac/docs/lsp.md) documents synchronous analysis, Linux local URI limits and unavailable-analysis logs retaining prior versioned diagnostics. Full types, hover, definition, completion and formatting remain separate open work. This child closes diagnostics/document lifecycle only; parent language-server and HITL decisions stay open. No performance claim or push.\n",
+          "ordinal": 1,
+          "sourceHeading": "Resolution comments",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "lsp-diagnostics",
+      "sourceSha256": "9ff0a0387a0a2d2d8b077cbcf80bab06e088ba8042dad1cf747d004b9d0c60c6",
+      "title": "Versioned LSP documents and shared diagnostics"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "machine-conformance",
+      "sourceSha256": "f409d5d5c0fb7a2186fc84151664f5c22ca200741966ddad644296adaba06ad6",
+      "title": "Machine inspection and boundary conformance"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "machine-plan",
+      "sourceSha256": "648d10c82173985c8754efdd74d8449aeaf88e395d355240ec7e10bad380f948",
+      "title": "Canonical machine plans and transition checks"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "machine-provider-conformance",
+      "sourceSha256": "b72b88be2a5288d870da94ca55fbb1467fefacf0ca7e54643d2e83a2382c7bab",
+      "title": "Machine execution across independent userland runtime providers"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "machine-provider-contract",
+      "sourceSha256": "dbbb71d2a7d5d8c9414700eea38c3695dce4a56cd4b6daf5175e132d96883f6e",
+      "title": "Runtime-independent machine plans and userland provider contract"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "machine-runtime",
+      "sourceSha256": "7c4c9ae6210e9b1a3c75610daae1fe911e035a965358f71fdeabd2c4b6142726",
+      "title": "Machine behavior on the shared owned actor runtime"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "map",
+      "sourceSha256": "a942408751343f0c9ce92b7789d0917802bdfca3d748128a6361bd0063c1523a",
+      "title": "Effra prototype map"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "measurement-ledger",
+      "sourceSha256": "fe711dd14832bbcd051b4a8350280920dac03ca9ac7b5dd620236f5c15c365fe",
+      "title": "Retained measurement ledger and benchmark-last closure"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "native-codecs",
+      "sourceSha256": "538a079aa359379312b56ad52b282a035930edf31e706f8d57555fd3844b3022",
+      "title": "Checked nominal JSON codecs"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "native-execution-lowering",
+      "sourceSha256": "409a84d74ed55773e93e4326065515b9f7d9f07467a101d31ab9a271953ff3ea",
+      "title": "Direct native execution and matched build-cost receipts"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "native-http",
+      "sourceSha256": "c265b6791ac031b0c561b5e7348d6af082ddda19b78797ebd66350bda1ff221c",
+      "title": "Managed HTTP and typed endpoint composition"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "native-interfaces",
+      "sourceSha256": "3b4b7c37a6fa0c6c441a7403df4b85891ffa4f5b4ee0e227ce05b58f66604b62",
+      "title": "Bundled interfaces and typed function values"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "native-rpc",
+      "sourceSha256": "fe7c636a81c1a43be2ca0db891fd195f9aaca0d263a217ee21e3cc8df112ea22",
+      "title": "Compatible unary RPC contracts"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "native-server-conformance",
+      "sourceSha256": "2ddcdc1b2ad98ccfcaa28a187b1490bcd28205241ce5bac5d550777b20ddcc7c",
+      "title": "Framework and server tool conformance"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "native-server-spec",
+      "sourceSha256": "513806152973f004899e41123f12728b221642f993cf85a58dbcc7f5a88c3a52",
+      "title": "Native codecs and typed server contracts"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "numeric-arithmetic",
+      "sourceSha256": "ab129c672c04bbbd8e0ac0e9c98d8924e66fb4a08284dcb0e64d057da5e80e36",
+      "title": "General numeric arithmetic and cross-target integer policy"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "ordinary-actors",
+      "sourceSha256": "0c53fb2a051737ef32e680acd7ab3df5485bf87c0277b6340f7a889a04b4a6d3",
+      "title": "Ordinary owned actor protocols and behavior"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Resolution comments\n\n2026-10-05 — Source audit established four constraints: sleep and timeout need one inherited timer driver; provider captures must retain dependency values while using the invocation owner; data payloads/function summaries must preserve ownership provenance; deterministic time advancement needs registration/readiness barriers. Existing documented timeout requirements also need reconciliation with checking. These are acceptance constraints, not new implementation receipts. Applied in [production foundation contracts](https://github.com/cevr/effra/blob/779dc58368149452b0fd42b0debb291e3001c8ac/docs/specs/production-foundations.md).\n",
+          "ordinal": 1,
+          "sourceHeading": "Resolution comments",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "research-foundations",
+      "sourceSha256": "938d822599a253dfa43339da15937bfb0d6ba67690c70e7cec9938ec3f0a141f",
+      "title": "Which production patterns constrain the next foundation contracts?"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "run-binding",
+      "sourceSha256": "0c4fdd660f8f71bf217027c306e4a749f547a35ff800b60aad8d502a245c4a7b",
+      "title": "Generalized run sequencing and checked userland binding"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Resolution comments\n\n2026-10-06: source-seam work independently reviewed and repaired through0e4f5be, then merged current integrated publisher into the branch and root at637313bdbfdec6352e0ae033e35d5d16333643ac. One catalog owns8 selectable runtime modules and their actual dependency closure; fresh snapshots and real selected-package compilation are gated. The split preserves all11 moved declaration token hashes/comments and leaves scheduler/lifecycle sources unchanged. Source-inventory coverage detects unclassified new runtime files. Normal inherited Go build-cache behavior and trimpath controls pass.\n\nBoth integration gates passed: `/tmp/effra-runtime-modules-branch-integration-gate.log` SHA2569c7ba1e0ae4c3f6f2cfaf5541e00d7778c87b753ae18f8492752a19eb60e51a8 and `/tmp/effra-runtime-modules-root-integration-gate.log` SHA25608d3b3a7719e965f1c4922061f4c8f753191483f3a34a8954a05600bef580596. Root's public example builds and executes with12 split runtime source files in a completed isolated module, without the retired stdlib in that module; all31 prior legacy output nodes, including that old stdlib, remain byte/type/mtime unchanged. Raw live receipt `/tmp/effra-runtime-split-root-live.json` and finite review `pass1/runtime-modules-review.md` retained. Application emission still selects all sources; checked reachability and small-binary evidence remain open in the parent task.\n",
+          "ordinal": 1,
+          "sourceHeading": "Resolution comments",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "runtime-modules",
+      "sourceSha256": "cd753ffbc75c02a9943132bfba7958209e06333147a078f01c4dbf2434cf6172",
+      "title": "Selectable native runtime source modules"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Resolution\n\nCompleted at integration0217b8e after independent Astra review and two Claude2 rounds. Final conditional approval's lexical-path repair d901339 has a real CLI/MCP red-before-green regression; all OS-thread child lists are used by the causal identity test. Branch merge7d5c49c and root integration gates pass, including public Unicode/CRLF/lone-CR/EOF, severity/policy/suppression, exact2MiB/100 limits, FIFO+queued ping, static symlink and causal retarget checks. Four compiling guard mutations fail their intended public assertions; final counsel independently reproduced them against the committed script. Raw `/tmp/effra-diagnostics-{lexical-gate,branch-integration-gate,integrated-gate}.log` and review reports retained. Full canonical types and the actual LSP server remain separate open tasks.\n",
+          "ordinal": 1,
+          "sourceHeading": "Resolution",
+          "syntheticHeading": true,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "semantic-diagnostics",
+      "sourceSha256": "820dc7aecb29ad574270f8e615757e697c5e4f8ca3569b358299a7e1d557f527",
+      "title": "Shared editor-grade diagnostics through CLI and MCP"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "semantic-types",
+      "sourceSha256": "393fa43b3f5978471e024071e81c78ecbe825be0a847100e9a1790061d7a160c",
+      "title": "Complete canonical type and binding inspection"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "server-benchmarks",
+      "sourceSha256": "9439b41e7b411d439f4aa6c95b77b879a63e64fe010d61e24d41797d95afb02c",
+      "title": "Matched server performance against TypeScript and optimized Go"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "state-machines",
+      "sourceSha256": "dada933a6a5fc9fd3bc350ce79e0d8ce8e21ab7cd75f3bd1276658464fff2247",
+      "title": "Checked machines and machine-backed actors"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "stdlib-flow",
+      "sourceSha256": "31eda605ee7cf7fe348ca592787b8ff4031ff81c486ce23d1e11081654e2fa56",
+      "title": "Bounded queues, streams, retry and drainable workers"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "stdlib-owned-core",
+      "sourceSha256": "2e9234c731e55760812c9de349361793fbf215d90db8c80d7288384059f3fe97",
+      "title": "Owned acquisition, synchronization and time library"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Direction\n\nThe toolchain ships the library and runtime together. Public contracts remain explicit and CLI/MCP inspectable. Complete parity needs behavior receipts and a supported-target matrix; familiar names and a giant implicit prelude cannot replace those receipts.\n\n",
+          "ordinal": 1,
+          "sourceHeading": "Direction",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        },
+        {
+          "body": "## Resolution comments\n\n2026-10-06: pinned Effect4.0.1 source/test research, independent counsel and refreshed read-only application-source comparisons produced [finite capability contracts](https://github.com/cevr/effra/blob/779dc58368149452b0fd42b0debb291e3001c8ac/docs/specs/standard-library-capabilities.md) and five open implementation batches: [owned core](https://github.com/cevr/effra/issues/65), [services](https://github.com/cevr/effra/issues/67), [flow](https://github.com/cevr/effra/issues/64), [shared/platform](https://github.com/cevr/effra/issues/68), and [telemetry/batching](https://github.com/cevr/effra/issues/69). This closes the inventory/specification question only. No new library family or native conformance pass is claimed. Mutable payload ownership, exact sharing policy, byte bounds and transaction admission remain explicit constraints rather than inferred guarantees.\n",
+          "ordinal": 2,
+          "sourceHeading": "Resolution comments",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "stdlib-parity",
+      "sourceSha256": "e4e992d2411cbbe6c4de1c80ad49bc9535c976c505c6097d604584761a5173f4",
+      "title": "Bundled standard library capability and language contracts"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "stdlib-services",
+      "sourceSha256": "5b1b79aac49fb25510a3f8ef78ca92228611a080aa9a89f7720b9a3e2d7ce558",
+      "title": "Fallible providers, configuration and structured logs"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "stdlib-shared-platform",
+      "sourceSha256": "0fe06435dabda74c71973e04a738160d627baf48b994e7e89e5492250feafdfe",
+      "title": "Shared producers, pools and managed platform clients"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "stdlib-telemetry-batching",
+      "sourceSha256": "817cc4b3847cb58cc36b4c7fabe79ad975f6a62fdb5376f83a50e3c679d148a6",
+      "title": "Owned telemetry and context-partitioned request batching"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Resolution comments\n\nIntegrated45b43d2 after independent Astra review and two Claude2 core rounds. Canonical syntax-child traversal now serves formatter, lint, graph, TypeAt and test admission, preserving separate branch and scope handling. Independent named/checked-positional controls retain capabilities, advice, edges and selected type/span; actual CLI queries and MCP TypeAt with queued ping complete under bounded watchdogs. Permanent process coverage is in scripts/smoke.py. Branch/root gates and integrated focused live checks pass; raw `/tmp/effra-formatter-{branch-integration-gate,integrated-gate,integrated-live}.log`. This closes the finite traversal defect, not full type tooling or formatting adapters.\n",
+          "ordinal": 1,
+          "sourceHeading": "Resolution comments",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "syntax-traversal",
+      "sourceSha256": "30d3f42fed4717bca04dfe0491b04f95cd580b4d1ec1efecce28c0223e4d96d5",
+      "title": "Bound shared syntax traversal across developer tools"
+    },
+    {
+      "comments": [],
+      "desiredState": "open",
+      "localId": "typescript-declarations",
+      "sourceSha256": "ea548ef1a213a4bc8fc16d817a68f850787d7dc9ba722d34138ddf4993c723e4",
+      "title": "TypeScript declaration projection and reverse imports (VW3)"
+    },
+    {
+      "comments": [
+        {
+          "body": "## Resolution comments\n\n2026-10-06: independently reviewed importer and maintained mapping integrated at62baa74 after final proof repaira395674. Licensed unchanged corpus contains746 reference files and26 license files; the gate verifies complete inventory and immutable hashes offline. Ten selected stable behavior IDs point to actual source anchors and qualified Go/JS acceptance or explicit differences/pending/unsupported states. Selected tests execute both targets, including a ten-hour virtual wait under15s watchdogs; copied references alone count as zero native passes.\n\nBoth Claude rounds consumed, required causal deep-JSON/test-time repairs verified by finite root/Astra closure. Branch and root full gates pass, logs `/tmp/effra-upstream-{branch,root}-integration-gate.log`, SHA25660e183866005494c16ab575d0ac542e1c712835d01699bcd8c5d7e87f47e22ba and0714e37576f0495039c9a93534510a079cf8a9b15365835d438c8b9c47ed0952. All31 legacy output nodes remain unchanged. [Maintained conformance documentation](https://github.com/cevr/effra/blob/779dc58368149452b0fd42b0debb291e3001c8ac/docs/conformance.md) describes admission/proof limits. Later library/server ports remain owned by their implementation tasks and extend this same mapping; no full Effect parity or performance claim.\n",
+          "ordinal": 1,
+          "sourceHeading": "Resolution comments",
+          "syntheticHeading": false,
+          "unresolvedReferences": []
+        }
+      ],
+      "desiredState": "closed",
+      "localId": "upstream-conformance",
+      "sourceSha256": "63e23436a0fbb9d38bfd8bcd2448ad8e5472febfb5e94d29699cd79e6cd5c512",
+      "title": "Pinned upstream tests and executable conformance mapping"
+    }
+  ],
+  "repository": "cevr/effra",
+  "schemaVersion": 2
+}

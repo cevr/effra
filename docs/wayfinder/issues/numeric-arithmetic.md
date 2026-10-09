@@ -1,7 +1,11 @@
 <!-- {"id": "numeric-arithmetic", "title": "General numeric arithmetic and cross-target integer policy", "status": "open", "labels": ["wayfinder:task", "implementation:task"], "parent": "generic-data", "assignee": null, "blocked_by": []} -->
 # General numeric arithmetic and cross-target integer policy
 
-Implement the first finite numeric profile required by the application corpus. The current checker refuses `i64 +` in `internal/compiler/semantic.go` while allowing string concatenation; a counter-specific workaround, bounded enum state or update moved into TypeScript is not an arithmetic implementation.
+Implement the first finite numeric profile required by the application corpus. The 2026-10-08 hosted-body capture said the checker refused `i64 +` in `internal/compiler/semantic.go` while allowing string concatenation; that sentence records the earlier baseline.
+
+## Current local source reconciliation (2026-10-09)
+
+At accepted compiler source `07d861f0296a216b78cd0c9e0a1ba2896a0d06d9`, the checker admits `i64 +` as well as string concatenation (`internal/compiler/semantic.go:4673-4688`). The finite signed-64 profile also admits subtraction, unary minus, comparisons, equality and bounded literals; JS operations normalize with `BigInt.asIntN(64, ...)`, and Go uses `int64` (`docs/research/numeric-arithmetic.md:9-27`). The captured hosted body hash and hosted state remain the values from the immutable 2026-10-08 intake; this local note does not assert a hosted update or ticket closure.
 
 ## Acceptance
 

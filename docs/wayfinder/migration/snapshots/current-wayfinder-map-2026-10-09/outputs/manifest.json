@@ -1,0 +1,42 @@
+{
+  "counts": {
+    "closedIssues": 17,
+    "graphEdges": 190,
+    "localIssues": 74,
+    "pendingEdges": 0,
+    "publishableIssues": 0,
+    "resolutionComments": 24,
+    "unresolvedReferences": 12
+  },
+  "historicalLinkRevision": {
+    "commit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+    "repository": "cevr/effra",
+    "role": "historical-link-target"
+  },
+  "inputSnapshot": {
+    "path": "docs/wayfinder/migration/snapshots/current-wayfinder-map-2026-10-09/outputs/input-manifest.json",
+    "sha256": "7898cf990d2bed85d21edd4376475ffb1fd2ce2743eb981241a7e1730b3c146c"
+  },
+  "mappingPath": "docs/wayfinder/migration/snapshots/current-wayfinder-map-2026-10-09/outputs/hosted-identities.json",
+  "outputSnapshotId": "current-wayfinder-map-2026-10-09",
+  "payloads": {
+    "edges": {
+      "path": "docs/wayfinder/migration/snapshots/current-wayfinder-map-2026-10-09/outputs/edges.json",
+      "sha256": "93278308d0992f6d495cc0fd329ed665db38ceede503becec3c5a1be28f73acd"
+    },
+    "issues": {
+      "path": "docs/wayfinder/migration/snapshots/current-wayfinder-map-2026-10-09/outputs/issues.json",
+      "sha256": "2d97db2624e665067258bbb456371f00f75dc8e74c73c8adda236384eaf690e3"
+    },
+    "resolutionComments": {
+      "path": "docs/wayfinder/migration/snapshots/current-wayfinder-map-2026-10-09/outputs/resolution-comments.json",
+      "sha256": "6e4d0e474b86b4a8b441e976cca98c97b3559ffc338e39cf9ec0d1c3bee4bc41"
+    },
+    "unresolvedReferences": {
+      "path": "docs/wayfinder/migration/snapshots/current-wayfinder-map-2026-10-09/outputs/unresolved-references.json",
+      "sha256": "73a1c13fb51977e1d103a81f8885eacd1bd44e5a68e917d0ca10552e467380a6"
+    }
+  },
+  "repository": "cevr/effra",
+  "schemaVersion": 2
+}
