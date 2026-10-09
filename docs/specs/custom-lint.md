@@ -123,9 +123,42 @@ Rejected alternatives:
 - Diagnose a directive for an unselected pack. ESLint reports "Definition for rule … was not found" (`lib/linter/linter.js:283-285`). Packs are explicit selections that legitimately differ between an editor and CI, and starting a pack to validate a directive is forbidden. golangci-lint likewise only logs unknown linter names (`nolint_filter.go:97-105`). Effra keeps unknown names in a selected namespace or a reserved namespace as errors, as Biome's `suppressions/unknownRule` does (`crates/biome_analyze/src/suppressions.rs:564-605`).
 - Make the reason optional. ESLint's `-- description` is optional. Biome requires a reason (`crates/biome_suppression/src/lib.rs:415-420`), and golangci-lint's nolintlint can (`require-explanation`). Effra keeps it mandatory, per justify-don't-ban.
 - Report not-evaluated as a hint diagnostic. Every editor without the CI-only pack would then show noise on correct directives, and no inspected linter does it. A parallel `publishDiagnostics` extension field was also rejected: unknown fields have no defined client behavior. Opt-in custom server notifications have precedent in rust-analyzer's `experimental/serverStatus` and clangd's `textDocument/clangd.fileStatus`.
+- Credo's model (Elixir; `rrrene/credo` at `90c5541`). `# credo:disable-for-next-line`, `-this-file`, `-previous-line` and `-lines:N` (`lib/credo/check/config_comment.ex:7-52`) name one check module or a regex, and they have no reason field. The rest of the line becomes the check atom (`config_comment.ex:139-142`), so a misspelled or unloaded check silently suppresses nothing. The opt-in `Credo.Check.Design.RedundantConfigComments` reports any comment that ignored no issue, including one whose check the configuration disabled (`lib/credo/check/design/redundant_config_comments.ex:8-12`, `39-63`). Effra rejects four parts of this: regex targets (a directive must name one rule), the missing reason, unvalidated names, and treating a config-disabled rule as unused. Elixir's compiler has no per-site warning suppression comment. It silences undefined-function warnings per module with `@compile {:no_warn_undefined, …}` (`elixir-lang/elixir` at `91ee75b`, `lib/elixir/lib/module.ex:606-607`), and `--warnings-as-errors` changes policy, not visibility. That matches Effra's split between configuration (severity, `off`) and reasoned per-line acknowledgement.
+- MoonBit's model (`moonbit-docs` at `8d9f3ba`). Warnings are configured per package with `warnings = "-unused_value"` / `"warn-list"` and per module, plus `--warn-list`, `--alert-list` and `--deny-warn` on `moon check` (`next/toolchain/moon/package.md:1043-1106`, `next/toolchain/moon/commands.md:111-114`, `154-155`). The only per-site control is a `#warnings("-name")` attribute on a top-level declaration. It takes no reason and "only works with some specific warnings" (`next/language/attributes/warnings.md:3-26`). Effra keeps declaration-wide or package-wide silencing in configuration, where it is visible in the configuration identity. In source it admits only a next-line acknowledgement with a reason, because a declaration-scoped switch hides later findings in the same declaration without review.
 - A second directive grammar such as `effra-ignore`. It would duplicate formatter attachment rules and `EFL004` validation. The owner's effect-oxlint plugin (`ca2ce6a`) instead holds plugin rules to the host's one directive. Its rules are namespaced (`effect/noUnboundedRetry`) inside oxlint's `oxlint-disable-next-line`. Its `effect/requireSuppressionReason` requires every directive to name its target and give a `--` reason, and it rejects a wrongly qualified name rather than ignoring it (`README.md:83-90`; `tests/syntax-platform-rule-edges.test.ts:526-533`).
 
-Not yet implemented (stage three): cost receipts.
+### Implemented stage three: cost receipts and the build/run control
+
+`ef lint receipt FILE [--runs N] [--target go|js] (--lint-config FILE | --rules MANIFEST...)` prints a raw cost receipt (`kind: effra.lint.cost-receipt`, `version: 1`). It runs the same `internal/lintpacks` session, runner and merge as `ef lint`, but on a separate path (`Session.Receipt`), so `ef lint` itself measures nothing. The header holds:
+- the host's GOOS, GOARCH, CPU count and Go version, and the producer identity;
+- the source's URI, byte count and target;
+- the configuration identity and its rule inspection;
+- a `claim` stating that the numbers are raw wall-clock measurements with no aggregate, baseline or performance claim.
+
+Each of the 1–100 runs reads and compiles the source afresh and starts every enabled pack as a new process. Run 0 is the first in its `ef` process, so it includes cold operating-system caches for that process. A run records nanoseconds for:
+- `frontendNanos`: read, compile and check;
+- `factsNanos`: extracting the families the enabled pack rules require, once for all packs;
+- `packsNanos`: all packs running in parallel;
+- `lintNanos`: built-in rules, suppressions and merge.
+
+Each pack also gets a `packRun`, filled from `lint.RunOptions.Trace`, an optional hook that never changes a report:
+- `prepareNanos` and `snapshotBytes`: fact serialization into the snapshot wire form, plus rule admission;
+- `qualifyNanos`: executable hashing and environment admission;
+- `encodeNanos` and `requestBytes`;
+- `spawnNanos`: process creation;
+- `firstByteNanos`: from process creation to the first response byte;
+- `exitNanos`: until the process is reaped;
+- `responseBytes` and `acceptNanos`: response validation;
+- `started`, the rule statuses and any failure.
+
+A pack's own startup cannot be separated from its decoding and rule work without pack cooperation, so `firstByteNanos` bounds both rather than claiming a split. With every rule of a pack off, `started` is false and every process phase is zero. Its snapshot is still serialized once, and the receipt shows that cost. Receipts are evidence for the benchmark phase, not a measurement claim; none is checked in. A process test covers both the enabled and the disabled receipt (`cmd/ef/lint_cost_process_test.go`).
+
+`ef build` and `ef run` refuse `--lint-config` and `--rules`, and no other path selects a pack, so they never start one. Emitted programs link no lint SDK or pack code. `TestBuildAndRunNeverStartRulePacksProcess` checks this with a pack that records every start in a marker file:
+- both lint flags are refused by `ef build` and `ef run`, under both targets;
+- building (Go and JS) and running a source whose directive names the pack leave the marker absent;
+- neither the native executable nor the JS module contains the SDK's import path, the pack's namespace, its program text or the directive text;
+- `ef lint` with the same configuration does start the pack (the positive control for the marker);
+- the `ef` binary itself does contain the SDK path (the positive control for the byte scan).
 
 ## Prior-art decisions
 

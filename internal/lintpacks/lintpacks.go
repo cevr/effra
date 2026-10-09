@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"effra.local/prototype/internal/compiler"
 	"effra.local/prototype/lint"
@@ -102,6 +103,12 @@ func (s *Session) Configuration() *lint.Configuration {
 // character position whose line and column match its offset. Packs never
 // run over unchecked source: lint is unavailable there.
 func (s *Session) Run(ctx context.Context, result *compiler.Result, source compiler.SourceSnapshot) compiler.LintPacks {
+	return s.run(ctx, result, source, nil)
+}
+
+// run is Run, recording its cost in traces when traces is non-nil;
+// traces.Packs[i] is the run of the pack reported at index i.
+func (s *Session) run(ctx context.Context, result *compiler.Result, source compiler.SourceSnapshot, traces *runTraces) compiler.LintPacks {
 	packs := compiler.LintPacks{Configuration: s.Configuration()}
 	if !s.SelectsPacks() || !result.Checked {
 		return packs
@@ -109,21 +116,31 @@ func (s *Session) Run(ctx context.Context, result *compiler.Result, source compi
 	// One capture of the host environment serves every pack of this
 	// analysis: each receives exactly its selected variables from it.
 	host := lint.CaptureHost()
+	began := time.Now()
 	snapshot := result.LintFacts(s.families()...)
 	snapshot.Source.URI, snapshot.Source.Text = source.URI, source.Text
 	selected := slices.Clone(s.selection.Packs)
 	slices.SortFunc(selected, func(a, b lint.SelectedPack) int { return strings.Compare(a.Manifest.Namespace, b.Manifest.Namespace) })
 	packs.Reports = make([]compiler.LintPackReport, len(selected))
+	if traces != nil {
+		traces.Facts = time.Since(began)
+		traces.Packs = make([]lint.Trace, len(selected))
+	}
+	began = time.Now()
 	var wait sync.WaitGroup
 	for i, pack := range selected {
 		namespace := pack.Manifest.Namespace
 		packs.Reports[i] = compiler.LintPackReport{Pack: namespace, Identity: pack.Manifest.Identity()}
+		options := lint.RunOptions{Dir: pack.Dir, Env: host.Select(s.configuration.Environment(namespace))}
+		if traces != nil {
+			options.Trace = &traces.Packs[i]
+		}
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
 			// Run reads the snapshot without changing it, so the packs
 			// share one.
-			report, err := lint.Run(ctx, s.configuration, namespace, snapshot, lint.RunOptions{Dir: pack.Dir, Env: host.Select(s.configuration.Environment(namespace))})
+			report, err := lint.Run(ctx, s.configuration, namespace, snapshot, options)
 			if err != nil {
 				// Run refuses only an unselected namespace or a snapshot
 				// it cannot encode: a runner fault, never a clean result.
@@ -133,7 +150,18 @@ func (s *Session) Run(ctx context.Context, result *compiler.Result, source compi
 		}()
 	}
 	wait.Wait()
+	if traces != nil {
+		traces.Wall = time.Since(began)
+	}
 	return packs
+}
+
+// runTraces is the cost of one Session.run: fact extraction, each pack's
+// run, and the wall time of all packs running in parallel.
+type runTraces struct {
+	Facts time.Duration
+	Packs []lint.Trace
+	Wall  time.Duration
 }
 
 // families is every fact family an enabled pack rule requires.

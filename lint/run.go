@@ -108,6 +108,46 @@ type RunOptions struct {
 	// execution identity: with the request, it is a pack's declared input.
 	Env    []string
 	Limits Limits
+	// Trace, when set, receives where this run spent its wall time. It is
+	// measurement only: it never changes the report.
+	Trace *Trace
+}
+
+// Trace is the raw cost of one Run, for lint cost receipts. Durations are
+// wall-clock and unaggregated; a zero duration is a phase that did not
+// happen. The pack's own startup and rule work cannot be told apart from
+// outside the process: FirstByte bounds both, from the moment the process
+// exists until it begins answering.
+type Trace struct {
+	// Prepare encodes the fact snapshot into its wire form and admits the
+	// rules; SnapshotBytes is the size of that wire form.
+	Prepare       time.Duration
+	SnapshotBytes int
+	// Started reports whether a pack process was started. No process
+	// starts when no rule may run.
+	Started bool
+	// Qualify hashes the executable and admits the environment.
+	Qualify time.Duration
+	// Encode encodes the request; RequestBytes is its payload size.
+	Encode       time.Duration
+	RequestBytes int
+	// Spawn is process creation, until the operating system returned it.
+	Spawn time.Duration
+	// FirstByte runs from process creation to the first response byte.
+	FirstByte time.Duration
+	// Exit runs from process creation until the process was reaped.
+	Exit          time.Duration
+	ResponseBytes int
+	// Accept validates the response against the request.
+	Accept time.Duration
+}
+
+// trace is options.Trace, or a discarded one.
+func (o RunOptions) trace() *Trace {
+	if o.Trace == nil {
+		return &Trace{}
+	}
+	return o.Trace
 }
 
 // outputGrace bounds the request write and the output reads after the pack
@@ -122,10 +162,14 @@ const outputGrace = 2 * time.Second
 // is reserved for a namespace that is not selected or an unencodable
 // snapshot. Cancelling ctx kills the pack.
 func Run(ctx context.Context, configuration *Configuration, namespace string, snapshot *Snapshot, options RunOptions) (Report, error) {
+	trace := options.trace()
+	*trace = Trace{}
+	began := time.Now()
 	work, err := prepare(configuration, namespace, snapshot)
 	if err != nil {
 		return Report{}, err
 	}
+	trace.Prepare, trace.SnapshotBytes = time.Since(began), len(work.request.Snapshot)
 	if len(work.request.Rules) == 0 {
 		return work.finish(), nil
 	}
@@ -134,6 +178,7 @@ func Run(ctx context.Context, configuration *Configuration, namespace string, sn
 	// The executable, working directory and environment are qualified
 	// once, before the request is bound and serialized; the process
 	// receives exactly what its identity names.
+	began = time.Now()
 	path, execution, failure := qualifyExecutable(manifest.Executable, options.Dir)
 	var environment processEnvironment
 	if failure == nil {
@@ -142,22 +187,28 @@ func Run(ctx context.Context, configuration *Configuration, namespace string, sn
 			failure = &ExecutionFailure{Code: FailureSpawn, Message: err.Error()}
 		}
 	}
+	trace.Qualify = time.Since(began)
 	var answer processAnswer
 	if failure == nil {
 		execution.Environment, execution.Variables = environment.digest(runtime.GOARCH), environment.names()
 		work.bind(&execution)
+		began = time.Now()
 		payload, err := json.Marshal(work.request)
 		if err != nil {
 			return Report{}, fmt.Errorf("encode request: %w", err)
 		}
-		answer, failure = runProcess(ctx, path, manifest.Executable.Args, environment.entries(), execution.Dir, limits, payload)
+		trace.Encode, trace.RequestBytes = time.Since(began), len(payload)
+		answer, failure = runProcess(ctx, path, manifest.Executable.Args, environment.entries(), execution.Dir, limits, payload, trace)
 	}
 	if failure == nil {
 		// A response refused after a clean transport keeps the evidence of
 		// the process that sent it.
+		trace.ResponseBytes = answer.size
+		began = time.Now()
 		if failure = work.accept(answer.response, answer.size, limits); failure != nil {
 			failure.Exit, failure.Stderr = answer.exit, answer.stderr
 		}
+		trace.Accept = time.Since(began)
 	}
 	if failure != nil {
 		failure.Pack = namespace
@@ -287,7 +338,7 @@ func qualifyExecutable(executable Executable, dir string) (string, ExecutionIden
 // group and reaps the pack before returning. A failure carries the
 // process's exit status and retained stderr; so does a successful answer,
 // for a refusal that acceptance decides later.
-func runProcess(ctx context.Context, path string, args, env []string, dir string, limits Limits, payload []byte) (processAnswer, *ExecutionFailure) {
+func runProcess(ctx context.Context, path string, args, env []string, dir string, limits Limits, payload []byte, trace *Trace) (processAnswer, *ExecutionFailure) {
 	if err := ctx.Err(); err != nil {
 		return processAnswer{}, &ExecutionFailure{Code: FailureCancelled, Message: "analysis was cancelled: " + err.Error()}
 	}
@@ -323,7 +374,10 @@ func runProcess(ctx context.Context, path string, args, env []string, dir string
 		Stderr:      stderrW,
 		SysProcAttr: processGroupAttr(),
 	}
+	spawning := time.Now()
 	err = cmd.Start()
+	started := time.Now()
+	trace.Spawn = started.Sub(spawning)
 	// The child holds its own copies; the runner keeps only its ends, so
 	// the pipes report end of stream once every pack process is gone.
 	stdinR.Close()
@@ -332,6 +386,7 @@ func runProcess(ctx context.Context, path string, args, env []string, dir string
 	if err != nil {
 		return processAnswer{}, &ExecutionFailure{Code: FailureSpawn, Message: err.Error()}
 	}
+	trace.Started = true
 	pid := cmd.Process.Pid
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()
@@ -363,7 +418,10 @@ func runProcess(ctx context.Context, path string, args, env []string, dir string
 		close(written)
 	}()
 	read := make(chan frameRead, 1)
-	go func() { read <- readResponse(stdoutR, limits.MaxResponseBytes) }()
+	// The reader goroutine stamps the first byte; receiving its result
+	// orders that stamp before every read of it below.
+	stdout := &firstByteReader{reader: stdoutR}
+	go func() { read <- readResponse(stdout, limits.MaxResponseBytes) }()
 
 	timer := time.NewTimer(limits.Timeout)
 	defer timer.Stop()
@@ -374,6 +432,7 @@ func runProcess(ctx context.Context, path string, args, env []string, dir string
 		select {
 		case waitErr = <-waited:
 			exited = true
+			trace.Exit = time.Since(started)
 		case <-timeout:
 			timeout = nil
 			if stopped == nil {
@@ -419,6 +478,9 @@ func runProcess(ctx context.Context, path string, args, env []string, dir string
 	case output.problem != nil:
 		failure = &ExecutionFailure{Code: output.problem.code, Message: output.problem.message}
 	}
+	if !stdout.first.IsZero() {
+		trace.FirstByte = stdout.first.Sub(started)
+	}
 	var response Response
 	if failure == nil {
 		if err := decodeStrict(output.payload, &response); err != nil {
@@ -434,6 +496,20 @@ func runProcess(ctx context.Context, path string, args, env []string, dir string
 		return processAnswer{}, failure
 	}
 	return processAnswer{response: response, size: len(output.payload), exit: cmd.ProcessState.String(), stderr: retained}, nil
+}
+
+// firstByteReader records when the first byte arrived.
+type firstByteReader struct {
+	reader io.Reader
+	first  time.Time
+}
+
+func (r *firstByteReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 && r.first.IsZero() {
+		r.first = time.Now()
+	}
+	return n, err
 }
 
 // readResponse reads one bounded response frame and requires the stream to

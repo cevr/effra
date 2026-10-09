@@ -127,6 +127,8 @@ A directive can also name a rule-pack rule as `namespace/rule`. A malformed qual
 
 Only a rule that ran can show a directive unused, so a directive for a rule that is off is not-evaluated rather than an error. See [suppression states](specs/custom-lint.md#implemented-stage-three-suppression-states).
 
+`ef lint receipt FILE [--runs N] [--target go|js] [LINT]` prints a raw [lint cost receipt](specs/custom-lint.md#implemented-stage-three-cost-receipts-and-the-buildrun-control). Per run, it reports nanoseconds for the frontend, fact extraction, each pack's fact serialization and process phases, and the merge. It makes no performance claim. `ef build` and `ef run` never start a rule pack.
+
 A rule from a selected rule pack that did not run fails lint with an `EFL000` lint-runner error and `complete: false`, because an enabled rule that did not run has not passed. A rule limited to other `targets` is the exception when only its pack's default or a preset enabled it: it does not apply to this target, so it is reported as `skipped` (`target-unsupported`, `inapplicable: true`) and lint stays complete and passing. Configuring the rule in the project's own lint configuration enforces it: under an unsupported target lint then fails with `EFL000`. The full contract is in [the custom lint spec](specs/custom-lint.md).
 
 ## Local types
