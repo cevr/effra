@@ -1,0 +1,209 @@
+{
+  "repository": "https://github.com/devagrawal09/solid-yield",
+  "commit": "2f2431da101ffc1c0e3fde7b5aa4fcb6b009584c",
+  "packageVersion": "0.0.0",
+  "license": "MIT",
+  "status": "pinned-source-build-prerequisite-not-a-framework-port",
+  "files": [
+    {
+      "path": "vendor/solid-yield/LICENSE",
+      "sourcePath": "packages/yield/LICENSE",
+      "gitMode": "100644",
+      "gitBlob": "c8eb81627d628bde4b3803d1f0136998b21216a2",
+      "bytes": 1068,
+      "sha256": "780a849ac55f243573b37829a614eb96871310d0dfa9b91c342efc4d2b0fab9d"
+    },
+    {
+      "path": "vendor/solid-yield/NOTICE",
+      "sourcePath": "packages/yield/NOTICE",
+      "gitMode": "100644",
+      "gitBlob": "7c0620984a10cf4cad9f50e5e6cfaee4c2030de4",
+      "bytes": 1467,
+      "sha256": "dc245f85363b5bffe8710024c7062d77af0a85621776e6d2b2f32ce048524d54"
+    },
+    {
+      "path": "vendor/solid-yield/README.md",
+      "sourcePath": "packages/yield/README.md",
+      "gitMode": "100644",
+      "gitBlob": "85282384d6e9bfe82aa2365976f805bf860e1f98",
+      "bytes": 6486,
+      "sha256": "3a9d7f4dba45218cb8819343485f2d2f76b2ab140d650cf98bafd26cb2d76442"
+    },
+    {
+      "path": "vendor/solid-yield/jsx/jsx-properties.d.ts",
+      "sourcePath": "packages/yield/jsx/jsx-properties.d.ts",
+      "gitMode": "100644",
+      "gitBlob": "c4da5063cdf157eb0011f4a46d4c8bf90919ddd6",
+      "bytes": 3125,
+      "sha256": "601a0c4aee4b0f3a1583970f55a045694e561d745adde7b31222437411106f25"
+    },
+    {
+      "path": "vendor/solid-yield/jsx/jsx-runtime.d.ts",
+      "sourcePath": "packages/yield/jsx/jsx-runtime.d.ts",
+      "gitMode": "100644",
+      "gitBlob": "5c324baa227fcf1364ec800e73f8fb9913c835f1",
+      "bytes": 724,
+      "sha256": "367c97f61666702caeb70be63062138ca30cf3e7001466a6b7207dfeb7cc563c"
+    },
+    {
+      "path": "vendor/solid-yield/jsx/jsx.d.ts",
+      "sourcePath": "packages/yield/jsx/jsx.d.ts",
+      "gitMode": "100644",
+      "gitBlob": "79bb1eb51fdbb66dffdbd9828115bda6454be4d4",
+      "bytes": 166638,
+      "sha256": "7036adba9d77277cf848f7d6417910709172057d64bdb9732023047f1ffd8bba"
+    },
+    {
+      "path": "vendor/solid-yield/package.json",
+      "sourcePath": "packages/yield/package.json",
+      "gitMode": "100644",
+      "gitBlob": "7973a5389c1ea5de3e278c6e8fe09d5b5c141093",
+      "bytes": 4073,
+      "sha256": "5ea8ad99961a5c5d00100f566c5db17c511c32300cf3d172fcea975e4ce09468"
+    },
+    {
+      "path": "vendor/solid-yield/scripts/build.mjs",
+      "sourcePath": "packages/yield/scripts/build.mjs",
+      "gitMode": "100644",
+      "gitBlob": "03cfeee681fb9ed55157b5dbf6c02b35c6f35a46",
+      "bytes": 2522,
+      "sha256": "9268bee62887f322d49e0de681388bfbddce4170ddf469a2643eb5afb3215cac"
+    },
+    {
+      "path": "vendor/solid-yield/scripts/jsx-from-web.mjs",
+      "sourcePath": "packages/yield/scripts/jsx-from-web.mjs",
+      "gitMode": "100644",
+      "gitBlob": "0c31d50284bf5bf0db8aac822b40bbfbd4f072f8",
+      "bytes": 3276,
+      "sha256": "0d92deed07ae59188f7591bb0af62d7386cafb7489c18555e37dc87fd64cb74f"
+    },
+    {
+      "path": "vendor/solid-yield/scripts/jsx-web-shared.mjs",
+      "sourcePath": "packages/yield/scripts/jsx-web-shared.mjs",
+      "gitMode": "100644",
+      "gitBlob": "d9ec23675eb15210967e9521490daad2bb76733e",
+      "bytes": 3783,
+      "sha256": "49a28dc05a527ad7aa3a0948b27baeedae51aeffbdb051008abab207bf54ad65"
+    },
+    {
+      "path": "vendor/solid-yield/src/context.ts",
+      "sourcePath": "packages/yield/src/context.ts",
+      "gitMode": "100644",
+      "gitBlob": "574947654ceb9e6c11dda4dd29bb433648a9aa06",
+      "bytes": 8310,
+      "sha256": "a7f3700cc8864140ce584b5077d196384154b4974afb1b49a20a87d9cd878e03"
+    },
+    {
+      "path": "vendor/solid-yield/src/element.ts",
+      "sourcePath": "packages/yield/src/element.ts",
+      "gitMode": "100644",
+      "gitBlob": "ee20eac250f6d2fd38f9a4ebfd9f2e41e018220f",
+      "bytes": 2617,
+      "sha256": "e125e432dc0810a222522754db2f513b7cca7c48a1bdad65831f6afc97391b12"
+    },
+    {
+      "path": "vendor/solid-yield/src/failure.ts",
+      "sourcePath": "packages/yield/src/failure.ts",
+      "gitMode": "100644",
+      "gitBlob": "af34067a46a1d397b3125fcbc393febe2cc6f9cf",
+      "bytes": 1378,
+      "sha256": "73fa7306085c72e7e2c950ef060a4466447b97a347523bf669db387db3d5d025"
+    },
+    {
+      "path": "vendor/solid-yield/src/flow.ts",
+      "sourcePath": "packages/yield/src/flow.ts",
+      "gitMode": "100644",
+      "gitBlob": "1347098608333258e542d7f97f34c96cb44fdb72",
+      "bytes": 26974,
+      "sha256": "287dd36204a3d20aaadcb2242e3d27daa8f3f93a46428b1c2adb9e0f50f09821"
+    },
+    {
+      "path": "vendor/solid-yield/src/foreign.ts",
+      "sourcePath": "packages/yield/src/foreign.ts",
+      "gitMode": "100644",
+      "gitBlob": "6d8fe200aaa11f7323962a861ea6afd1369b3bf7",
+      "bytes": 5462,
+      "sha256": "aef7834972f54b9d503d0c4fa6f2798d6fb6e717d90a3b94e26ba2734d3285d0"
+    },
+    {
+      "path": "vendor/solid-yield/src/h.ts",
+      "sourcePath": "packages/yield/src/h.ts",
+      "gitMode": "100644",
+      "gitBlob": "d10f559e5aeff243988d95b645095039e512f4e0",
+      "bytes": 8575,
+      "sha256": "3afb5f6a96ecce7d670ca6d82aa37c5e7ded88df65a083aba65b5bb88e711957"
+    },
+    {
+      "path": "vendor/solid-yield/src/holes.ts",
+      "sourcePath": "packages/yield/src/holes.ts",
+      "gitMode": "100644",
+      "gitBlob": "5b292fb86dd804e663b04f5d137f91822caca466",
+      "bytes": 5712,
+      "sha256": "e05d288e6e55859b5704662808b2f5f811e3cdb004be1b0885c4d7c9816128d7"
+    },
+    {
+      "path": "vendor/solid-yield/src/index.ts",
+      "sourcePath": "packages/yield/src/index.ts",
+      "gitMode": "100644",
+      "gitBlob": "1e7917c93402c30eea06f5460c0afb3556fd82b4",
+      "bytes": 2493,
+      "sha256": "9c31132425c76a812eac95d63e68e999f569dffc8b56dc65c29f022ec3ea0336"
+    },
+    {
+      "path": "vendor/solid-yield/src/internal.ts",
+      "sourcePath": "packages/yield/src/internal.ts",
+      "gitMode": "100644",
+      "gitBlob": "c8db7783bf65a44d63d4e9175621b565b958b49a",
+      "bytes": 313,
+      "sha256": "7593ef6162febfc427fa23d26c4c387a1c726e724baad9342693832e93a0a495"
+    },
+    {
+      "path": "vendor/solid-yield/src/jsx-runtime.ts",
+      "sourcePath": "packages/yield/src/jsx-runtime.ts",
+      "gitMode": "100644",
+      "gitBlob": "fef6226550949f48c11db9c367651d773a4f62b7",
+      "bytes": 937,
+      "sha256": "a0f4cb7001943cb73712013855ac288f8cba5e5a56d71ad388911729669915f9"
+    },
+    {
+      "path": "vendor/solid-yield/src/lazy.ts",
+      "sourcePath": "packages/yield/src/lazy.ts",
+      "gitMode": "100644",
+      "gitBlob": "5cc78bcf62d2b6064965c2f20d4c96009c17b408",
+      "bytes": 6351,
+      "sha256": "0897d24e53648eb5b0884b3d65ec4b8d274a78858bce65174f995e04c9903cd0"
+    },
+    {
+      "path": "vendor/solid-yield/src/render.ts",
+      "sourcePath": "packages/yield/src/render.ts",
+      "gitMode": "100644",
+      "gitBlob": "1b9dc0001897eaf158e72fd33301322eb10b4767",
+      "bytes": 6480,
+      "sha256": "0216dee424786ab16f7833a4c3f76b1e3ab0a408711c386350e515bb7f6b7188"
+    },
+    {
+      "path": "vendor/solid-yield/src/runtime.ts",
+      "sourcePath": "packages/yield/src/runtime.ts",
+      "gitMode": "100644",
+      "gitBlob": "9ce00d057d246fc1d7be0da14883e7bcbb3ccce0",
+      "bytes": 78790,
+      "sha256": "866e34e0bf3d75d51670fa8937bd162e6686411c9deee37bec11aa07c225b3b9"
+    },
+    {
+      "path": "vendor/solid-yield/src/types.ts",
+      "sourcePath": "packages/yield/src/types.ts",
+      "gitMode": "100644",
+      "gitBlob": "3412790b86603ab17772984aa27c521a5f6c760d",
+      "bytes": 31974,
+      "sha256": "96b1f4c7f5e56d4452da4b8a6cadec5bfcd3d962ab21f38493bf7990932bc478"
+    },
+    {
+      "path": "vendor/solid-yield/tsconfig.build.json",
+      "sourcePath": "packages/yield/tsconfig.build.json",
+      "gitMode": "100644",
+      "gitBlob": "863ed5eb190fdb1aecbe90f78f3e793b07501152",
+      "bytes": 366,
+      "sha256": "64e448a1703db120cafd6a3fe440d1079583700d8ace2d2082df9d9901d6405a"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "name": "@effra/framework-ports",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "vendor/solid-yield"
+  ],
+  "scripts": {
+    "check:capture": "node scripts/check-yield-capture.mjs",
+    "check:dependencies": "node scripts/check-dependency-profile.mjs",
+    "build:yield": "bun run check:capture && node vendor/solid-yield/scripts/build.mjs && tsc -p tsconfig.yield.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check:setup": "bun run check:capture && bun run check:dependencies && bun run build:yield && bun run typecheck && bun run check:exports",
+    "check:exports": "node --conditions=browser --conditions=production scripts/check-dependency-profile.mjs --built",
+    "check:references": "node scripts/check-references.mjs"
+  },
+  "dependencies": {
+    "@effect/atom-react": "4.0.1",
+    "scheduler": "0.27.0",
+    "@solidjs/h": "2.0.0-rc.13",
+    "@solidjs/web": "2.0.0-rc.13",
+    "effect": "4.0.1",
+    "happy-dom": "20.14.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "solid-js": "2.0.0-rc.13",
+    "solid-yield": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "bun-types": "1.4.2",
+    "esbuild": "0.28.2",
+    "typescript": "6.0.3"
+  }
+}

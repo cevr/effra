@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.yield.json",
+  "compilerOptions": {
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "noEmit": true,
+    "rootDir": ".",
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "types": [
+      "bun-types"
+    ],
+    "paths": {}
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx"
+  ]
+}

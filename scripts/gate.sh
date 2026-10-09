@@ -22,6 +22,7 @@ python3 -B scripts/import_effect_conformance.py
 python3 -B scripts/import_foldkit_corpus.py --self-check
 python3 -B scripts/test_import_effect_conformance.py
 python3 -B scripts/test_import_foldkit_corpus.py
+node conformance/framework-ports/ports/scripts/check-references.mjs
 python3 -B scripts/check_effect_conformance.py
 python3 -B scripts/test_effect_conformance.py
 if [ -f go.mod ]; then

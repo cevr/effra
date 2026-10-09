@@ -1,0 +1,47 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "./vendor/solid-yield/dist/types",
+    "rootDir": "./vendor/solid-yield/src",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "jsx": "preserve",
+    "jsxImportSource": "solid-yield",
+    "ignoreDeprecations": "6.0",
+    "paths": {
+      "solid-yield": [
+        "./vendor/solid-yield/src/index.ts"
+      ],
+      "solid-yield/h": [
+        "./vendor/solid-yield/src/h.ts"
+      ],
+      "solid-yield/internal": [
+        "./vendor/solid-yield/src/internal.ts"
+      ],
+      "solid-yield/jsx-runtime": [
+        "./vendor/solid-yield/jsx/jsx-runtime.d.ts"
+      ],
+      "solid-js": [
+        "./node_modules/solid-js/types/index.d.ts"
+      ],
+      "@solidjs/web": [
+        "./node_modules/@solidjs/web/types/index.d.ts"
+      ],
+      "@solidjs/h": [
+        "./node_modules/@solidjs/h/types/index.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "./vendor/solid-yield/src/**/*.ts"
+  ]
+}
