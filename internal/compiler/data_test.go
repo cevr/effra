@@ -489,7 +489,12 @@ effect fn main() -> string {
 
 func checkStrictTypeScript(t *testing.T, declaration, consumer string) {
 	t.Helper()
-	root := filepath.Join("..", "..")
+	// The compiler runs in a scratch directory outside the repository, so the
+	// local TypeScript candidate must not be relative to the package.
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
 	dir := jsModuleDir(t, "strict-ts-")
 	declarationPath := filepath.Join(dir, "generated.d.mts")
 	consumerPath := filepath.Join(dir, "consumer.mts")
