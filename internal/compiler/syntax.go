@@ -617,14 +617,18 @@ func firstInvalidUTF8Diagnostic(source string) (Diagnostic, bool) {
 }
 
 func parse(source string) (program *Program, diagnostics []Diagnostic) {
-	program, _, diagnostics = parseSyntax(source)
+	program, _, _, diagnostics = parseSyntax(source)
 	return program, diagnostics
 }
 
-func parseSyntax(source string) (program *Program, tokens []token, diagnostics []Diagnostic) {
-	tokens, comments, diagnostics := lex(source)
+// parseSyntax parses source. The comments are those the lexer collected,
+// returned whether or not a program was built: a syntax fault does not
+// erase what the source says before or around it. After a lexical fault
+// they are the comments lexed before it.
+func parseSyntax(source string) (program *Program, tokens []token, comments []Comment, diagnostics []Diagnostic) {
+	tokens, comments, diagnostics = lex(source)
 	if len(diagnostics) > 0 {
-		return nil, tokens, diagnostics
+		return nil, tokens, comments, diagnostics
 	}
 	defer func() {
 		if value := recover(); value != nil {
@@ -868,7 +872,7 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 		item := program.Items[len(program.Items)-1]
 		item.Extent = p.extent(item.Span)
 	}
-	return program, tokens, nil
+	return program, tokens, comments, nil
 }
 func (p *parser) peek() token { return p.tokens[p.at] }
 

@@ -273,18 +273,21 @@ type Result struct {
 	TypeProjectionError    string                 `json:"typeProjectionError,omitempty"`
 	Timings                Timings                `json:"timings"`
 	Program                *Program               `json:"-"`
-	sourceBytes            int
-	facts                  map[*Expr]ExpressionFacts
-	lexical                *lexicalFacts
-	canonical              *canonicalSnapshot
-	checkedProviders       map[string]*Provider
-	checkedServices        map[string]*Service
-	projector              *checker
-	checkedSymbols         map[string]checkedSymbol
-	checkedFunctions       map[*Function]checkedSymbol
-	checkedProviderRoots   map[*Provider]checkedExpression
-	publicationRefused     bool
-	publicationUsage       ProjectionUsage
+	// comments are the source's comments as lexed, kept whether or not
+	// the source parsed, so lint suppressions survive a syntax fault.
+	comments             []Comment
+	sourceBytes          int
+	facts                map[*Expr]ExpressionFacts
+	lexical              *lexicalFacts
+	canonical            *canonicalSnapshot
+	checkedProviders     map[string]*Provider
+	checkedServices      map[string]*Service
+	projector            *checker
+	checkedSymbols       map[string]checkedSymbol
+	checkedFunctions     map[*Function]checkedSymbol
+	checkedProviderRoots map[*Provider]checkedExpression
+	publicationRefused   bool
+	publicationUsage     ProjectionUsage
 }
 
 type checkedSymbol struct {
@@ -2170,7 +2173,8 @@ func parseSource(source, target string) (*Result, *Program) {
 		r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF110", Message: "unsupported target " + target})
 		return r, nil
 	}
-	program, diagnostics := parse(source)
+	program, _, comments, diagnostics := parseSyntax(source)
+	r.comments = comments
 	r.Timings.ParseMicros = time.Since(start).Microseconds()
 	if len(diagnostics) > 0 {
 		r.Diagnostics = diagnostics

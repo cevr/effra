@@ -63,7 +63,7 @@ func FormatSourceBounded(source string, maxOutputBytes int) (FormatResult, error
 
 func formatSource(source string, maxOutputBytes int) (FormatResult, error) {
 	inputDigest := formatDigest(source)
-	program, tokens, diagnostics := parseSyntax(source)
+	program, tokens, _, diagnostics := parseSyntax(source)
 	if len(diagnostics) > 0 {
 		return FormatResult{SchemaVersion: FormatterSchemaVersion, InputDigest: inputDigest}, FormatFailure{Diagnostics: diagnostics}
 	}

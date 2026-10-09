@@ -154,6 +154,8 @@ func TestSuppressionStatesAgreeAcrossSurfaces(t *testing.T) {
 		{"applied", "go", directive + main, load(t, lintpacks.Selection{Manifests: []string{serve}}), compiler.SuppressionApplied, "", false},
 		{"unused", "go", directive + "effect fn helper() -> void { void }\n" + main, load(t, lintpacks.Selection{Manifests: []string{serve}}), compiler.SuppressionUnused, "", true},
 		{"unchecked source", "go", directive + "effect fn main() -> void { run Console.log(\"x\") }\n", load(t, lintpacks.Selection{Manifests: []string{serve}}), compiler.SuppressionNotEvaluated, compiler.NotEvaluatedUncheckedSource, false},
+		{"lexical fault", "go", directive + "effect fn main() -> void { run Console.log(\"x) }\n", load(t, lintpacks.Selection{Manifests: []string{serve}}), compiler.SuppressionNotEvaluated, compiler.NotEvaluatedUncheckedSource, false},
+		{"syntax fault", "go", directive + "effect fn main( -> void { void }\n", load(t, lintpacks.Selection{Manifests: []string{serve}}), compiler.SuppressionNotEvaluated, compiler.NotEvaluatedUncheckedSource, false},
 		{"pack not selected", "go", directive + main, nil, compiler.SuppressionNotEvaluated, compiler.NotEvaluatedPackNotSelected, false},
 		{"rule off", "go", directive + main, load(t, lintpacks.Selection{Config: writeConfig(t, `{"version":1,"packs":[{"manifest":`+strconv.Quote(serve)+`}],"rules":{"fixture/rename-main":"off"}}`)}), compiler.SuppressionNotEvaluated, compiler.NotEvaluatedRuleOff, false},
 		{"pack failed", "go", directive + main, load(t, lintpacks.Selection{Manifests: []string{filepath.Join(dir, "fixture-crash", "manifest.json")}}), compiler.SuppressionNotEvaluated, compiler.NotEvaluatedPackFailed, false},
@@ -188,6 +190,43 @@ func TestSuppressionStatesAgreeAcrossSurfaces(t *testing.T) {
 				t.Fatalf("LSP published %+v for %+v", got.published, got.report.Diagnostics)
 			}
 		})
+	}
+}
+
+// A rule the configuration turned off keeps rule-off when another rule of
+// the same pack runs and the pack exits non-zero; only the rule that was
+// requested is pack-failed.
+func TestSuppressionOfDisabledRuleSurvivesPackFailure(t *testing.T) {
+	dir := packs(t)
+	var mixed lint.Manifest
+	data, _ := os.ReadFile(filepath.Join(dir, "fixture-crash", "manifest.json"))
+	json.Unmarshal(data, &mixed)
+	other := mixed.Rules[0]
+	other.Name = "other"
+	mixed.Rules = append(mixed.Rules, other)
+	manifest := filepath.Join(dir, "fixture-crash", "mixed.json")
+	data, _ = json.Marshal(mixed)
+	if err := os.WriteFile(manifest, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	session := load(t, lintpacks.Selection{Config: writeConfig(t, `{"version":1,"packs":[{"manifest":`+strconv.Quote(manifest)+`}],"rules":{"fixture/rename-main":"off"}}`)})
+	const off = "// effra-lint-disable-next-line fixture/rename-main -- the entry point keeps its name\n"
+	const requested = "// effra-lint-disable-next-line fixture/other -- reviewed\n"
+	text := requested + "effect fn helper() -> void { void }\n" + off + "effect fn main() -> void { void }\n"
+	got := analyseOnEverySurface(t, session, "go", text)
+	if len(got.lint.Packs) != 1 || got.lint.Packs[0].Failure == nil || got.lint.Packs[0].Failure.Code != lint.FailureCrashed {
+		t.Fatalf("pack did not fail: %+v", got.lint.Packs)
+	}
+	var reasons []string
+	for _, suppression := range got.lint.Suppressions {
+		reasons = append(reasons, suppression.Rule+" "+suppression.Status+" "+suppression.Reason)
+	}
+	want := []string{"fixture/other not-evaluated pack-failed", "fixture/rename-main not-evaluated rule-off"}
+	if !reflect.DeepEqual(reasons, want) {
+		t.Fatalf("suppressions %v, want %v", reasons, want)
+	}
+	if !reflect.DeepEqual(got.mcpLint.Suppressions, got.lint.Suppressions) || !reflect.DeepEqual(got.mcpReport.Suppressions, got.report.Suppressions) || !reflect.DeepEqual(got.lsp, got.report.Suppressions) {
+		t.Fatalf("surfaces disagree:\nMCP lint %+v\nMCP report %+v\nLSP %+v\nwant %+v", got.mcpLint.Suppressions, got.mcpReport.Suppressions, got.lsp, got.report.Suppressions)
 	}
 }
 

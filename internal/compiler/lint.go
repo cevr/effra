@@ -371,15 +371,15 @@ func (r *Result) LintWith(strict bool, packs LintPacks) LintResult {
 	// suppressed finding is never counted.
 	var suppressions []*lintSuppression
 	suppressionIndex := map[suppressionKey][]*lintSuppression{}
-	if r.Program != nil {
-		var invalid []LintDiagnostic
-		suppressions, invalid = parseSuppressions(r.Program.Comments, packs.configuration())
-		out.LintDiagnostics = append(out.LintDiagnostics, invalid...)
-		out.Errors += len(invalid)
-		for _, suppression := range suppressions {
-			key := suppressionKey{rule: suppression.rule, line: suppression.targetLine}
-			suppressionIndex[key] = append(suppressionIndex[key], suppression)
-		}
+	// They come from the lexed comments, not the tree: source that did
+	// not parse keeps its directives, each not evaluated as unchecked
+	// source, and no rule runs over it.
+	suppressions, invalid := parseSuppressions(r.sourceComments(), packs.configuration())
+	out.LintDiagnostics = append(out.LintDiagnostics, invalid...)
+	out.Errors += len(invalid)
+	for _, suppression := range suppressions {
+		key := suppressionKey{rule: suppression.rule, line: suppression.targetLine}
+		suppressionIndex[key] = append(suppressionIndex[key], suppression)
 	}
 	// Pack diagnostics join built-in advice only when the result is
 	// finished: appended last and stably sorted by offset, they follow
@@ -545,6 +545,16 @@ func (r *Result) suppressionOutcome(suppression *lintSuppression, packs LintPack
 		return SuppressionApplied, ""
 	}
 	return SuppressionUnused, ""
+}
+
+// sourceComments are the comments of the analysed source: those the lexer
+// collected, which a syntax fault keeps, or the parsed program's for a
+// result built without the parse phase.
+func (r *Result) sourceComments() []Comment {
+	if r.comments == nil && r.Program != nil {
+		return r.Program.Comments
+	}
+	return r.comments
 }
 
 // notEvaluated is why a selected pack's rule did not complete over this

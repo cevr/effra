@@ -431,7 +431,7 @@ func TestFormatBoundedHonorsExactOutputBoundary(t *testing.T) {
 
 func TestFormatRetainsDeclarationOrderAndTokens(t *testing.T) {
 	source := `fn first() -> string { "\\u00e9" } record R { field: string } error E enum Choice { A B } fn second() -> i64 { 001 }`
-	program, _, diagnostics := parseSyntax(source)
+	program, _, _, diagnostics := parseSyntax(source)
 	if len(diagnostics) != 0 || len(program.Items) != 5 {
 		t.Fatalf("ordered syntax items missing: items=%+v diagnostics=%+v", program.Items, diagnostics)
 	}
@@ -835,7 +835,7 @@ type syntaxPointer struct {
 
 func parsedSyntaxTree(t *testing.T, source string) *Program {
 	t.Helper()
-	program, _, diagnostics := parseSyntax(source)
+	program, _, _, diagnostics := parseSyntax(source)
 	if len(diagnostics) != 0 {
 		t.Fatalf("source did not parse: %+v", diagnostics)
 	}
@@ -985,7 +985,7 @@ func tokenLineText(tokens []token, line int) string {
 
 func syntaxShape(t *testing.T, source string) []string {
 	t.Helper()
-	program, _, diagnostics := parseSyntax(source)
+	program, _, _, diagnostics := parseSyntax(source)
 	if len(diagnostics) != 0 {
 		t.Fatalf("source did not parse: %+v", diagnostics)
 	}

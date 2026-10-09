@@ -175,3 +175,38 @@ func TestLintSuppressionNeverHidesCompilerErrors(t *testing.T) {
 		t.Fatalf("control: %+v", lint)
 	}
 }
+
+// Source that does not lex or parse keeps its directives: each is not
+// evaluated as unchecked source, without any rule running and without
+// parser recovery. A malformed name still diagnoses, and the syntax
+// diagnostic is never hidden.
+func TestLintSuppressionSurvivesSyntaxFaults(t *testing.T) {
+	const directives = "// effra-lint-disable-next-line acme/rule -- pack runs in CI\n// effra-lint-disable-next-line unused-recipe -- kept\n"
+	for code, body := range map[string]string{
+		"EF001": "effect fn main() -> void { run Console.log(\"x) }\n",
+		"EF002": "effect fn main( -> void { void }\n",
+	} {
+		source := directives + body
+		result := CompileAt(source, "go", ".")
+		if result.Program != nil || !hasCode(result, code) {
+			t.Fatalf("%s: %+v", code, result.Diagnostics)
+		}
+		lint := result.Lint(true)
+		if len(lint.Suppressions) != 2 || len(lint.LintDiagnostics) != 0 || lint.Errors != 0 {
+			t.Fatalf("%s: %+v", code, lint)
+		}
+		for _, suppression := range lint.Suppressions {
+			if suppression.Status != SuppressionNotEvaluated || suppression.Reason != NotEvaluatedUncheckedSource {
+				t.Fatalf("%s: %+v", code, suppression)
+			}
+		}
+		report := result.DiagnosticReport(SourceSnapshot{URI: "main.ef", Text: source}, false)
+		if report.PolicyPassed || len(report.Diagnostics) != 1 || report.Diagnostics[0].Code != code || len(report.Suppressions) != 2 {
+			t.Fatalf("%s: %+v", code, report)
+		}
+		malformed := CompileAt("// effra-lint-disable-next-line acme/1rule -- bad\n"+body, "go", ".").Lint(true)
+		if len(malformed.Suppressions) != 0 || len(malformed.LintDiagnostics) != 1 || malformed.LintDiagnostics[0].Code != "EFL004" {
+			t.Fatalf("%s malformed: %+v", code, malformed)
+		}
+	}
+}
