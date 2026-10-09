@@ -114,10 +114,38 @@ const (
 // Entry output lowers the effect main's application plan; library output
 // lowers the plan rooted at every export.
 func (r *Result) Emit(entry bool) (string, string, error) {
+	module, err := r.EmitModule(entry)
+	return module.Source, module.Declaration, err
+}
+
+// JSImport is one module a generated JavaScript module imports. A static
+// import names its bindings; a dynamic import is loaded on demand through
+// import() with this literal specifier and binds no names statically.
+type JSImport struct {
+	Specifier string   `json:"specifier"`
+	Names     []string `json:"names"`
+	Dynamic   bool     `json:"dynamic,omitempty"`
+}
+
+// JSModule is one emitted JavaScript module, its TypeScript declarations
+// and the complete set of modules it imports, as emission declared them.
+type JSModule struct {
+	Source      string
+	Declaration string
+	Imports     []JSImport
+}
+
+// EmitModule emits the entry or library module with its declared imports.
+func (r *Result) EmitModule(entry bool) (JSModule, error) {
 	if entry {
-		return r.emitJS(jsEntry)
+		return r.emitJSModule(jsEntry)
 	}
-	return r.emitJS(jsLibrary)
+	return r.emitJSModule(jsLibrary)
+}
+
+func (r *Result) emitJS(surface jsSurface) (string, string, error) {
+	module, err := r.emitJSModule(surface)
+	return module.Source, module.Declaration, err
 }
 
 // jsExportsBuiltinProvider reports whether a builtin provider has a
@@ -126,16 +154,16 @@ func jsExportsBuiltinProvider(name string) bool {
 	return slices.ContainsFunc(jsPrelude, func(chunk jsPreludeChunk) bool { return chunk.name == "provider:"+name })
 }
 
-func (r *Result) emitJS(surface jsSurface) (string, string, error) {
+func (r *Result) emitJSModule(surface jsSurface) (JSModule, error) {
 	if !r.Checked {
-		return "", "", fmt.Errorf("refusing to emit source with diagnostics")
+		return JSModule{}, fmt.Errorf("refusing to emit source with diagnostics")
 	}
 	// Foreign Go imports and native-only features have no JavaScript
 	// lowering. Such a program is refused whether or not its entry reaches
 	// them, so pruning never silently drops a host binding or its module
 	// initialization.
 	if r.Program.GoOnly {
-		return "", "", fmt.Errorf("program uses features currently implemented only for Go")
+		return JSModule{}, fmt.Errorf("program uses features currently implemented only for Go")
 	}
 	var plan *ApplicationPlan
 	var err error
@@ -148,31 +176,31 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 		plan, err = r.LibraryPlan()
 	}
 	if err != nil {
-		return "", "", err
+		return JSModule{}, err
 	}
 	selection := newJSSelection()
 	for _, helper := range plan.Identities(RequiresHelper) {
 		chunk, ok := jsPreludeChunkFor[helper]
 		if !ok {
-			return "", "", fmt.Errorf("JavaScript has no lowering for helper %s", helper)
+			return JSModule{}, fmt.Errorf("JavaScript has no lowering for helper %s", helper)
 		}
 		if err := selection.use(chunk); err != nil {
-			return "", "", err
+			return JSModule{}, err
 		}
 	}
 	if len(plan.Identities(RequiresOperation)) > 0 {
 		if err := selection.use("call"); err != nil {
-			return "", "", err
+			return JSModule{}, err
 		}
 	}
 	if len(plan.Identities(RequiresLayer)) > 0 {
 		if err := selection.use("layers"); err != nil {
-			return "", "", err
+			return JSModule{}, err
 		}
 	}
 	if surface == jsTests {
 		if err := selection.use("test-harness"); err != nil {
-			return "", "", err
+			return JSModule{}, err
 		}
 	}
 	var out, decl strings.Builder
@@ -237,7 +265,7 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 			continue
 		}
 		if err := selection.use("provider:" + p.Name); err != nil {
-			return "", "", err
+			return JSModule{}, err
 		}
 		out.WriteString("export {__ef_provider_" + p.Name + " as " + p.Name + "};\n")
 		decl.WriteString("declare const __ef_provider_" + p.Name + ": " + jsShape(r.Program, r.Program.semantic.services[p.Service].Methods, declarations, false) + ";\nexport {__ef_provider_" + p.Name + " as " + p.Name + "};\n")
@@ -262,7 +290,7 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 		for _, f := range p.Methods {
 			if f.Effect {
 				if err := selection.use("lifecycle"); err != nil {
-					return "", "", err
+					return JSModule{}, err
 				}
 			}
 		}
@@ -279,7 +307,7 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 		}
 		if f.Effect {
 			if err := selection.use("lifecycle"); err != nil {
-				return "", "", err
+				return JSModule{}, err
 			}
 		}
 		out.WriteString("const " + f.jsEmissionName() + " = " + jsFunction(f) + ";\n")
@@ -302,7 +330,8 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 		// SIGINT/SIGTERM interrupt main, as the Go entry's signal context does.
 		out.WriteString("const __ef_signal = new AbortController();\nconst __ef_stop = () => __ef_signal.abort();\nprocess.once('SIGINT', __ef_stop);\nprocess.once('SIGTERM', __ef_stop);\nEffect.runPromise(__ef_function_main(), { signal: __ef_signal.signal }).then(value => { if (value !== undefined) console.log(typeof value === 'bigint' ? value.toString() : value); }, error => { console.error(error); process.exitCode = 1; }).finally(() => { process.off('SIGINT', __ef_stop); process.off('SIGTERM', __ef_stop); });\n")
 	}
-	return "// Generated by the Effra prototype. Source revision: " + r.Revision + "\n" + selection.prelude() + out.String(), decl.String(), nil
+	source := "// Generated by the Effra prototype. Source revision: " + r.Revision + "\n" + selection.prelude() + out.String()
+	return JSModule{Source: source, Declaration: decl.String(), Imports: selection.moduleImports()}, nil
 }
 
 func jsTemplateDeclaration(r *Record) string {
