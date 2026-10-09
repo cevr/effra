@@ -36,7 +36,7 @@
       "blockedBy": [
         46
       ],
-      "bodySha256": "4f4aa408314bb01ffd3e800792fa2320c03633fa7ef2a6729b91c8e84bf3e14f",
+      "bodySha256": "be81b0e0ef7f13a216ba96c36c803bf1f8100ad8efbcf87186466722139163ba",
       "labels": [
         "implementation:task",
         "wayfinder:task"
@@ -46,7 +46,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Runtime-independent machine plans and userland provider contract",
-      "updatedAt": "2026-10-09T15:49:04Z",
+      "updatedAt": "2026-10-09T17:55:55Z",
       "url": "https://github.com/cevr/effra/issues/3"
     },
     {
@@ -330,10 +330,10 @@
       ],
       "number": 19,
       "parent": 55,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Payload-aware typed recovery and outcomes",
-      "updatedAt": "2026-10-08T18:37:22Z",
+      "updatedAt": "2026-10-09T19:21:28Z",
       "url": "https://github.com/cevr/effra/issues/19"
     },
     {
@@ -751,7 +751,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Scope-owned concurrent layer acquisition and rollback",
-      "updatedAt": "2026-10-09T15:49:19Z",
+      "updatedAt": "2026-10-09T17:13:19Z",
       "url": "https://github.com/cevr/effra/issues/42"
     },
     {
@@ -1100,10 +1100,10 @@
       ],
       "number": 61,
       "parent": 1,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Complete canonical type and binding inspection",
-      "updatedAt": "2026-10-08T18:41:05Z",
+      "updatedAt": "2026-10-09T17:13:06Z",
       "url": "https://github.com/cevr/effra/issues/61"
     },
     {
@@ -1329,10 +1329,10 @@
       ],
       "number": 74,
       "parent": 1,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Constant-only parameter defaults and explicit call contracts",
-      "updatedAt": "2026-10-09T04:35:27Z",
+      "updatedAt": "2026-10-09T18:01:52Z",
       "url": "https://github.com/cevr/effra/issues/74"
     },
     {
@@ -1350,10 +1350,10 @@
       ],
       "number": 75,
       "parent": 50,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Direct JavaScript control-flow lowering with preserved effects",
-      "updatedAt": "2026-10-09T04:35:29Z",
+      "updatedAt": "2026-10-09T18:01:50Z",
       "url": "https://github.com/cevr/effra/issues/75"
     },
     {
@@ -1368,10 +1368,10 @@
       ],
       "number": 76,
       "parent": 55,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Typed recipe values in generic containers",
-      "updatedAt": "2026-10-09T15:08:40Z",
+      "updatedAt": "2026-10-09T19:22:06Z",
       "url": "https://github.com/cevr/effra/issues/76"
     },
     {
@@ -1384,10 +1384,10 @@
       ],
       "number": 77,
       "parent": 55,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Signed-64 multiplication, division, remainder and conversions",
-      "updatedAt": "2026-10-09T15:08:43Z",
+      "updatedAt": "2026-10-09T18:01:32Z",
       "url": "https://github.com/cevr/effra/issues/77"
     },
     {
@@ -1400,10 +1400,10 @@
       ],
       "number": 78,
       "parent": 1,
-      "state": "open",
-      "stateReason": null,
+      "state": "closed",
+      "stateReason": "completed",
       "title": "Custom-lint suppression states and cost receipts",
-      "updatedAt": "2026-10-09T15:08:46Z",
+      "updatedAt": "2026-10-09T18:47:15Z",
       "url": "https://github.com/cevr/effra/issues/78"
     },
     {
@@ -1421,6 +1421,38 @@
       "title": "Single registry for diagnostic codes and versioned identities",
       "updatedAt": "2026-10-09T15:49:45Z",
       "url": "https://github.com/cevr/effra/issues/79"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "5b4b99dc5d31ca98fab291f36552238ac43b1c5de4e3373a114c117456f3058c",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 80,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "JavaScript Scheduler.awaitRegistration hangs after an immediately completed fork",
+      "updatedAt": "2026-10-09T16:19:03Z",
+      "url": "https://github.com/cevr/effra/issues/80"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "053fdd392c932112fe49c216d3944e7e63dca5e25b4cc081f5a273612cd0d50c",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 81,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Unsigned and host-width integers, explicit conversions and checked overflow",
+      "updatedAt": "2026-10-09T18:01:29Z",
+      "url": "https://github.com/cevr/effra/issues/81"
     }
   ],
   "map": 1,
