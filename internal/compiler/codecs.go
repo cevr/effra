@@ -103,7 +103,7 @@ var jsonCodecDerivation = &codecDerivation{Module: "effra/json", Member: "codec"
 // admits on import. They are tag failures whose payload is a bounded
 // message, like the builtin failures, and their names are claimed against
 // every other declaration.
-var bundledFailures = map[string][]string{"effra/json": {jsonCodecDerivation.DecodeFailure, jsonCodecDerivation.EncodeFailure}}
+var bundledFailures = map[string][]string{"effra/json": {jsonCodecDerivation.DecodeFailure, jsonCodecDerivation.EncodeFailure}, i64TextModule: {i64ParseFailure}}
 
 // memberFunction resolves a qualified function member: a bundled module
 // function through its import alias, or an operation of a derived codec.
@@ -120,7 +120,15 @@ func (p *Program) memberFunction(e *Expr) *Function {
 // admitBundledFailures registers the failure declarations of every imported
 // bundled module that declares some.
 func (c *checker) admitBundledFailures(claim func(string, Span)) {
-	for _, imported := range c.program.BundledImports {
+	imports := append([]BundledImport{}, c.program.BundledImports...)
+	if c.program.interfaceProducer {
+		// The isolated interface producer checks a module's members without
+		// an import declaration; it admits the failures their rows name.
+		for _, f := range c.program.BundledFunctions {
+			imports = append(imports, BundledImport{Path: f.Module})
+		}
+	}
+	for _, imported := range imports {
 		for _, name := range bundledFailures[imported.Path] {
 			if c.errors[name] != nil {
 				continue

@@ -262,7 +262,9 @@ effect fn main() -> void { let g = run Greeter.greet().provide<Greeter>(Loud); v
 	for _, source := range sources {
 		r := CompileAt(source.text, "go", source.dir)
 		if !r.Checked {
-			if strings.HasSuffix(source.name, "missing-service.ef") || strings.HasSuffix(source.name, "witness.ef") {
+			// witness.ef needs its module's Codec, and i64/parse.ef names the
+			// failure its module admits; both check only through an import.
+			if strings.HasSuffix(source.name, "missing-service.ef") || strings.HasSuffix(source.name, "witness.ef") || strings.HasSuffix(source.name, filepath.Join("i64", "parse.ef")) {
 				continue
 			}
 			t.Fatalf("%s did not check: %v", source.name, r.Diagnostics)

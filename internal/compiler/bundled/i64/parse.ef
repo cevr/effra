@@ -1,0 +1,6 @@
+// The body is compiler-owned: the loader replaces this marker with the
+// decimal parse operation. Text must match [+-]?[0-9]+ and fit the signed
+// 64-bit range; otherwise the operation fails with I64ParseFailure.
+effect fn parse(text: string) -> i64 raises { I64ParseFailure } {
+    "effra:intrinsic i64.parse"
+}

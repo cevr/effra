@@ -49,6 +49,8 @@ var jsPrelude = []jsPreludeChunk{
 	{name: "layers", requires: []string{"lifecycle"}, imports: []string{"Cause", "Effect", "Exit", "Fiber", "Queue"}, source: preludeFile("layers.mjs")},
 	{name: "provider:LiveHttp", requires: []string{"lifecycle"}, imports: []string{"Cause", "Effect", "Exit"}, source: preludeFile("http.mjs")},
 	{name: "codec", imports: []string{"Effect"}, source: codecEngineJS + jsCodecAdapters},
+	{name: i64FormatOp, source: jsI64FormatHelper},
+	{name: i64ParseOp, imports: []string{"Effect"}, source: jsI64ParseHelper},
 	{name: "harness-slot", source: "let __ef_test_harness=null;\n"},
 	{name: "latch", imports: []string{"Effect"}, source: preludeFile("latch.mjs")},
 	{name: "provider:Stdout", imports: []string{"Effect"}, source: "const __ef_provider_Stdout = { log: (message) => Effect.sync(() => console.log(message)) };\n"},
@@ -74,6 +76,8 @@ var jsPreludeChunkFor = map[string]string{
 	"timeout":         "timeout",
 	"catch":           "catch",
 	"codec":           "codec",
+	i64FormatOp:       i64FormatOp,
+	i64ParseOp:        i64ParseOp,
 }
 
 // jsSelection is the set of chunks and `effect` imports one module emits.

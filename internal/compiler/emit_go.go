@@ -367,6 +367,9 @@ func (r *Result) emitGo(plan *ApplicationPlan) (string, error) {
 	if tests != nil {
 		out.WriteString("\"encoding/json\"\n")
 	}
+	if plan.requiresStrconv() {
+		out.WriteString("\"strconv\"\n")
+	}
 	// The plan decides each declared package's import form: the named import
 	// of every alias retained code qualifies, which also initializes its
 	// package, or one blank import for initialization alone.
@@ -392,7 +395,7 @@ type efEffect[A any] func(efContext) efExit[A]
 func efToRuntime[A any](ctx efContext,program efEffect[A]) er.Effect[A] {return func(fc *er.FiberContext) er.Exit[A] {ctx.Runtime=fc;return program(ctx)}}
 func efFromRuntime[A any](program er.Effect[A]) efEffect[A] {return func(ctx efContext)efExit[A]{return er.Invoke(ctx.Runtime,program)}}
 `)
-	for _, helper := range goEmissionHelpers {
+	for _, helper := range append(append([]struct{ name, source string }{}, goEmissionHelpers...), goI64TextHelpers...) {
 		if plan.Requires(RequiresHelper, helper.name) {
 			out.WriteString(helper.source)
 		}
@@ -925,6 +928,8 @@ func (g *goEmitter) lower(e *Expr, effect bool, ret string, out *strings.Builder
 	switch e.Kind {
 	case "codec":
 		return g.codecOperation(e, ret, out)
+	case "intrinsic":
+		return g.intrinsicOperation(e, ret, out)
 	case "member":
 		if e.ResolvedFunction != nil {
 			return e.ResolvedFunction.goEmissionName()

@@ -126,6 +126,9 @@ func produceBundledSummary(receiver *checker, module, key string, functions []*F
 			return interfaceSummary{}, fmt.Errorf("invalid interface producer source")
 		}
 		f := parsed.Functions[0]
+		if !admitBundledIntrinsic(bundledIndex[module][original.Name].Intrinsic, f) {
+			return interfaceSummary{}, fmt.Errorf("invalid interface producer intrinsic")
+		}
 		f.Module, f.SourceID, f.Identity, f.EmissionName = module, original.SourceID, original.Identity, original.EmissionName
 		p.BundledFunctions = append(p.BundledFunctions, f)
 		for name, typ := range parsed.typeExpressions {

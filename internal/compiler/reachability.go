@@ -845,6 +845,8 @@ func (p *applicationPlanner) expr(e *Expr, owner applicationOrigin) {
 		}
 	case "codec":
 		p.codecOperation(e, owner)
+	case "intrinsic":
+		p.helper(e.Name, owner)
 	case "scope", "fork", "catch", "orFail":
 		p.helper(e.Kind, owner)
 	case "timeout":

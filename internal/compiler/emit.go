@@ -575,6 +575,8 @@ func jsExpr(e *Expr, effect bool) string {
 	switch e.Kind {
 	case "codec":
 		return jsCodecOperation(e)
+	case "intrinsic":
+		return jsIntrinsicOperation(e)
 	case "member":
 		if e.ResolvedFunction != nil {
 			return e.ResolvedFunction.jsEmissionName()

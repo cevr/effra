@@ -13,7 +13,7 @@ import (
 // This index is compiler-distributed. It never resolves paths through the
 // filesystem, Go importer, network or an untrusted user interface file.
 //
-//go:embed bundled/functions/*.ef bundled/conversions/*.ef bundled/data/*.ef bundled/constants/*.ef
+//go:embed bundled/functions/*.ef bundled/conversions/*.ef bundled/data/*.ef bundled/constants/*.ef bundled/i64/*.ef
 var bundledSources embed.FS
 
 type bundledDeclaration struct {
@@ -23,6 +23,9 @@ type bundledDeclaration struct {
 	// source body: a derive declaration names it and the checker derives a
 	// plan from the derived type.
 	Derivation *codecDerivation
+	// Intrinsic names the compiler-owned operation that replaces the body
+	// marker of a function source (see admitBundledIntrinsic).
+	Intrinsic string
 }
 
 var bundledIndex = map[string]map[string]bundledDeclaration{
@@ -31,6 +34,7 @@ var bundledIndex = map[string]map[string]bundledDeclaration{
 	"effra/data":        {"Option": {Source: "bundled/data/option.ef"}, "Result": {Source: "bundled/data/result.ef"}},
 	"effra/constants":   {"defaultSuffix": {Source: "bundled/constants/default-suffix.ef"}},
 	"effra/json":        {"codec": {Derivation: jsonCodecDerivation}},
+	i64TextModule:       {"format": {Source: "bundled/i64/format.ef", Intrinsic: i64FormatOp}, "parse": {Source: "bundled/i64/parse.ef", Intrinsic: i64ParseOp}},
 }
 
 const bundledInterfaceVersion = "1"
@@ -303,6 +307,10 @@ func (r *Result) loadBundledImports(source string) {
 		name, identity, source, span := "", "", "source:"+key, Span{}
 		if len(bundle.Functions) == 1 {
 			f := bundle.Functions[0]
+			if !admitBundledIntrinsic(entry.Intrinsic, f) {
+				r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "invalid distributed function source " + key, Span: req.span})
+				return
+			}
 			name, identity, span = f.Name, "function:"+req.module+":module:"+f.Name, f.DeclSpan
 			f.Module, f.SourceID, f.Identity = req.module, source, identity
 			sum := sha256.Sum256([]byte(identity))

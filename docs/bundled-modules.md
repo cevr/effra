@@ -55,6 +55,35 @@ serialization, decoding, or round-trip laws. User generic declarations and
 nested template data arguments remain unsupported. Public inspection JSON is
 explanatory output and is never admitted as executable ownership proof.
 
+## Decimal i64 text
+
+The distributed `effra/i64` module converts between `i64` and decimal text and
+provides the `I64ParseFailure` failure:
+
+```rust
+import I64 "effra/i64"
+
+effect fn quantity(text: string) -> i64 raises { I64ParseFailure } {
+    run I64.parse(text)
+}
+
+fn label(count: i64) -> string {
+    I64.format(count)
+}
+```
+
+`I64.format` is pure and total. `I64.parse` is an effect operation: text must
+match Go's base-10 grammar `[+-]?[0-9]+` (leading zeros admitted, no
+whitespace, prefixes or separators) and fit the signed 64-bit range. Syntax is
+classified before range on both targets, and the failure message is
+`invalid i64 syntax` or `i64 out of range`; it never echoes the input. Both
+members have ordinary source signatures in the distribution, and only their
+bodies are compiler-owned operations, so inspection, rows and interface
+summaries treat them as ordinary bundled functions. Native output imports
+`strconv` and JS output includes a helper only for the operations an
+application reaches. There are no implicit `i64`/`string` conversions; see
+[portable i64 arithmetic](research/numeric-arithmetic.md).
+
 ## Structural JSON codecs
 
 The distributed `effra/json` module provides the `codec` derivation and the

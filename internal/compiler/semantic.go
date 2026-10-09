@@ -4671,6 +4671,8 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		t = c.provideLayer(e, env, inEffect)
 	case "codec":
 		t = c.codecOperation(e, env)
+	case "intrinsic":
+		t = c.intrinsicOperation(e, env)
 	case "provide":
 		t = c.expr(e.Left, env, inEffect)
 		if c.abstractRow(t.serviceRow()) {
