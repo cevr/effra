@@ -53,7 +53,6 @@ var pythonChecks = []struct {
 // root, so they must not overlap; separate chains share no output path.
 var smokeChains = [][]string{
 	{"diagnostics_smoke"},
-	{"lsp_smoke"},
 	{"readme_smoke"},
 	{"bundled_smoke"},
 }

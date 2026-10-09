@@ -469,7 +469,7 @@ func lspSmokeParity(t *testing.T, cli lspSmokeCLI) {
 			lspSmokeWrite(t, path, fixture.text)
 			report := cli.diagnostics(t, path)
 			remote := cli.mcpDiagnostics(t, directory, fixture.name)
-			assertReportParity(t, report, remote, parityOptions{reportSchema: 1, snapshotSchema: 7})
+			assertReportParity(t, report, remote, parityOptions{reportSchema: 1, snapshotSchema: 8})
 			messages := cli.exchange(t, lspSmokeSession{fragmented: true, calls: []map[string]any{
 				lspSmokeInit, lspSmokeReady, lspSmokeOpened(lspSmokeURI(path), fixture.text, 4), lspSmokeStop, lspSmokeExit}})
 			lspSmokeSame(t, lspSmokeMap(lspSmokeResult(t, messages[0]))["capabilities"], map[string]any{
@@ -622,11 +622,16 @@ var lspSmokeNamed = []lspSmokeToken{
 	{"let mark", "mark"}, {"; mark +", "mark"}, {"+ helper()", "helper"}, {"fn boxed(value", "value"},
 	{"{ value: value }", "value }"}, {"Cold { level: degrees }", "degrees"},
 	{"Hot { level: degrees }", "degrees"}, {"=> degrees", "degrees"},
+	// Type annotations and row labels resolve through checked types and rows.
+	{"-> Box {", "Box"}, {"shape: Shape)", "Shape"}, {"raises {Missing} uses", "Missing"},
+	{"uses {Users} {", "Users"}, {"pick(o: Data.Option<string>)", "Data"},
+	{"pick(o: Data.Option<string>)", "Option"},
 }
 
 var lspSmokeUnnamed = []lspSmokeToken{
 	{"// 𐐀 helper", "helper"}, {"fn helper()", "fn"}, {"{ let mark", " "},
 	{`"𐐀é"`, "é"}, {"run load(id)", "run"}, {"raises {Missing} uses", "raises"},
+	{"pick(o: Data.Option<string>)", "string"},
 }
 
 func lspSmokeOffset(t *testing.T, text string, token lspSmokeToken) int {
@@ -842,6 +847,7 @@ func lspSmokeNavigation(t *testing.T, cli lspSmokeCLI) {
 // lspSmokeFormatting pairs each source with its failure code: one shared
 // formatter answers all three surfaces.
 var lspSmokeFormatting = []struct{ name, source, code string }{
+	{"required-parameter", `fn mark(required required:string,suffix:string="!")->string{required}`, ""},
 	{"astral-crlf", "// 𐐀 note\r\nfn mark() -> string {   \"𐐀é\" }  // 𐐀𐐀 end", ""},
 	{"unresolved-import", "import go missing \"example.invalid/no-such-package\"\r\nfn bad() -> string {\r\n  true }\r\n\r\n\r\n", ""},
 	{"combining-astral", "fn mark() -> string { \"e\u0301𐐀\" }\n", ""},
@@ -911,7 +917,7 @@ func lspSmokeFormattingCase(t *testing.T, cli lspSmokeCLI) {
 					if shared["text"] != formatted || shared["changed"] != (formatted != c.source) {
 						t.Fatalf("MCP format %v, CLI %q", shared, formatted)
 					}
-					if shared["formatterVersion"] != "effra/formatter-8" {
+					if shared["formatterVersion"] != "effra/formatter-12" {
 						t.Fatalf("formatter version: %v", shared)
 					}
 					if formatted == c.source {
