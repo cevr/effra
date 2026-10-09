@@ -468,6 +468,7 @@ func TestPipeIntrinsicNamesAreOrdinaryMembersAfterThePipe(t *testing.T) {
 var pipeBinaryOperators = map[string]string{
 	"==": "refused", "<": "refused", "<=": "refused", ">": "refused", ">=": "refused",
 	"+": "refused", "-": "refused",
+	"*": "refused", "/": "refused", "%": "refused",
 }
 
 func TestEveryBinaryOperatorIsClassifiedAgainstThePipe(t *testing.T) {

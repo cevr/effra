@@ -112,7 +112,7 @@ const Alias:string=Ending`
 	if err != nil {
 		t.Fatalf("format constant declaration syntax: %v", err)
 	}
-	if FormatterIdentity != "effra/formatter-10" || !strings.Contains(first.Text, "const Ending: string = \"!\"") {
+	if FormatterIdentity != "effra/formatter-12" || !strings.Contains(first.Text, "const Ending: string = \"!\"") {
 		t.Fatalf("constant syntax has stale producer identity or formatting: identity=%s text=%s", FormatterIdentity, first.Text)
 	}
 	second, err := FormatSource(first.Text)

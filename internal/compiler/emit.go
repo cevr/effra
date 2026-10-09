@@ -669,7 +669,12 @@ func jsExpr(e *Expr, effect bool) string {
 			op = "==="
 		}
 		left, right := jsExpr(e.Left, effect), jsExpr(e.Right, effect)
-		if (e.Name == "-" || e.Name == "+") && e.Left.checked.node() != nil && e.Left.checked.node().Kind == "primitive" && e.Left.checked.node().Name == "i64" {
+		// bigint is arbitrary precision; each i64 result that can leave the
+		// signed 64-bit range wraps here as Go int64 does. BigInt division and
+		// remainder truncate toward zero like Go. A remainder is smaller in
+		// magnitude than its divisor and needs no normalization; MIN / -1 is
+		// the one quotient that does.
+		if (e.Name == "-" || e.Name == "+" || e.Name == "*" || e.Name == "/") && e.Left.checked.node() != nil && e.Left.checked.node().Kind == "primitive" && e.Left.checked.node().Name == "i64" {
 			return "BigInt.asIntN(64, (" + left + " " + e.Name + " " + right + "))"
 		}
 		return "(" + left + " " + op + " " + right + ")"

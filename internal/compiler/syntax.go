@@ -65,6 +65,9 @@ type parser struct {
 	// generic-application grammar. The formatter consumes these facts instead
 	// of guessing from every literal < or > token.
 	genericAngles map[int]bool
+	// multiplications records the `*` tokens parsed as the binary operator,
+	// so the formatter can space them apart from a native pointer type `*T`.
+	multiplications map[int]bool
 	// absent is absent-construct recognition state; a condition parser has
 	// none and recognizes nothing.
 	absent *absentScan
@@ -255,6 +258,7 @@ type Program struct {
 	GoOnly                  bool
 	Errors                  map[string]Span
 	genericAngles           map[int]bool
+	multiplications         map[int]bool
 	ErrorDecls              []*ErrorDecl
 	Records                 []*Record
 	Enums                   []*Enum
@@ -632,8 +636,8 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			}
 		}
 	}()
-	p := parser{tokens: tokens, types: map[string]*sourceType{}, absent: &absentScan{}, genericAngles: map[int]bool{}}
-	program = &Program{Comments: comments, Errors: map[string]Span{}, Bindings: map[string]Binding{}, UsedImports: map[string]bool{}, genericAngles: p.genericAngles}
+	p := parser{tokens: tokens, types: map[string]*sourceType{}, absent: &absentScan{}, genericAngles: map[int]bool{}, multiplications: map[int]bool{}}
+	program = &Program{Comments: comments, Errors: map[string]Span{}, Bindings: map[string]Binding{}, UsedImports: map[string]bool{}, genericAngles: p.genericAngles, multiplications: p.multiplications}
 	program.typeExpressions = p.types
 	for p.peek().kind != "eof" {
 		switch p.peek().text {
@@ -890,6 +894,13 @@ func (p *parser) accept(text string) bool {
 		return true
 	}
 	return false
+}
+
+func (p *parser) markMultiplication(index int) {
+	if p.multiplications == nil {
+		p.multiplications = map[int]bool{}
+	}
+	p.multiplications[index] = true
 }
 
 func (p *parser) markGenericAngle(index int) {
@@ -1367,7 +1378,7 @@ func (p *parser) expr(min int) *Expr {
 		e.Then = p.block()
 	case start.text == "fork":
 		e.Kind = "fork"
-		e.Left = p.expr(3)
+		e.Left = p.expr(prefixPrecedence)
 		chainPipe = p.lastPipe
 	case start.kind == "integer":
 		e.Kind = "integer"
@@ -1375,12 +1386,12 @@ func (p *parser) expr(min int) *Expr {
 	case start.text == "-":
 		e.Kind = "unary"
 		e.Name = start.text
-		e.Left = p.expr(3)
+		e.Left = p.expr(prefixPrecedence)
 		e.Left.allowMinLiteral = e.Left.Kind == "integer" && isMinI64Literal(e.Left.Text)
 		chainPipe = p.lastPipe
 	case start.text == "run":
 		e.Kind = "run"
-		e.Left = p.expr(3)
+		e.Left = p.expr(prefixPrecedence)
 		chainPipe = p.lastPipe
 	case start.text == "if":
 		e.Kind = "if"
@@ -1605,14 +1616,14 @@ func (p *parser) expr(min int) *Expr {
 			continue
 		}
 		precedence := binaryPrecedence[p.peek().text]
-		if precedence == 0 && unsupportedNumericOperator(p.peek().text) {
-			p.fail(p.peek(), "operator "+p.peek().text+" is not yet supported for i64 values")
-		}
 		if precedence == 0 || precedence < min {
 			break
 		}
 		if chainPipe.Length > 0 {
 			p.failSpan(chainPipe, pipeBesideOperator(p.peek().text))
+		}
+		if p.peek().text == "*" {
+			p.markMultiplication(p.at)
 		}
 		op := p.take()
 		right := p.expr(precedence + 1)
@@ -1640,6 +1651,7 @@ func (p *parser) genericApplicationAhead() bool {
 	// speculative aliases or formatter facts from sharing parser state.
 	candidate.types = map[string]*sourceType{}
 	candidate.genericAngles = map[int]bool{}
+	candidate.multiplications = map[int]bool{}
 	return func() (ok bool) {
 		defer func() {
 			if value := recover(); value != nil {
@@ -1675,16 +1687,13 @@ func (p *parser) genericApplicationAhead() bool {
 var binaryPrecedence = map[string]int{
 	"==": 1, "<": 1, "<=": 1, ">": 1, ">=": 1,
 	"+": 2, "-": 2,
+	"*": 3, "/": 3, "%": 3,
 }
 
-func unsupportedNumericOperator(operator string) bool {
-	switch operator {
-	case "*", "/", "%":
-		return true
-	default:
-		return false
-	}
-}
+// prefixPrecedence binds the operand of a prefix form (unary -, run, fork)
+// tighter than every binary operator, so `-a / b` is `(-a) / b` as in Go and
+// JavaScript. Truncating division distinguishes the two at the signed minimum.
+const prefixPrecedence = 4
 
 // pipeHeadReserved are the words that start another expression form, so they
 // cannot name the function on the right of a |>.
@@ -1745,9 +1754,10 @@ func (p *parser) constructorBrace() bool {
 // speculatePayload parses a payload with fieldValues, then restores the
 // parser, and reports the token index after its closing brace.
 func (p *parser) speculatePayload() (end int, ok bool) {
-	at, depth, noConstruct, subjectList, types, genericAngles := p.at, p.depth, p.noConstruct, p.subjectList, p.types, p.genericAngles
+	at, depth, noConstruct, subjectList, types, genericAngles, multiplications := p.at, p.depth, p.noConstruct, p.subjectList, p.types, p.genericAngles, p.multiplications
 	p.types = maps.Clone(types)
 	p.genericAngles = maps.Clone(genericAngles)
+	p.multiplications = maps.Clone(multiplications)
 	defer func() {
 		if value := recover(); value != nil {
 			if _, fault := value.(syntaxFault); !fault {
@@ -1755,7 +1765,7 @@ func (p *parser) speculatePayload() (end int, ok bool) {
 			}
 			end, ok = 0, false
 		}
-		p.at, p.depth, p.noConstruct, p.subjectList, p.types, p.genericAngles = at, depth, noConstruct, subjectList, types, genericAngles
+		p.at, p.depth, p.noConstruct, p.subjectList, p.types, p.genericAngles, p.multiplications = at, depth, noConstruct, subjectList, types, genericAngles, multiplications
 	}()
 	p.fieldValues()
 	return p.at, true

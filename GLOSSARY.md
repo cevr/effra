@@ -16,6 +16,10 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Exhaustive match**: An interpretation that covers each declared alternative exactly once and executes only its selected arm.
 
+**Signed-64 wrap** (specified): The portable `i64` arithmetic rule: each admitted `+`, `-`, `*`, `/` and unary `-` result is reduced to its two's-complement signed 64-bit residue, so `MIN / -1` is `MIN`. Division and remainder truncate toward zero.
+
+**Divisor proof** (specified): Checked evidence that an `i64` divisor is not zero: a nonzero integer literal, or a local binding inside an `if` branch whose comparison of that binding with an integer literal excludes zero. `/` and `%` are admitted only with one, so division by zero is not representable in checked source.
+
 **Failure payload**: The declared data carried by a named failure, separate from an ordinary success value.
 
 **Effect contract**: The success value, named failures, and required services of a deferred Effra program.

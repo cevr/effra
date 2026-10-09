@@ -13,7 +13,7 @@ fn marked(required required:string = "x") -> string { required }`
 	if err != nil {
 		t.Fatalf("format contextual parameter syntax: %v", err)
 	}
-	if FormatterIdentity != "effra/formatter-10" || !strings.Contains(first.Text, `ordinary(required: string,`) || !strings.Contains(first.Text, `fn marked(required required: string = "x")`) || !strings.Contains(first.Text, `suffix: string = "!"`) {
+	if FormatterIdentity != "effra/formatter-12" || !strings.Contains(first.Text, `ordinary(required: string,`) || !strings.Contains(first.Text, `fn marked(required required: string = "x")`) || !strings.Contains(first.Text, `suffix: string = "!"`) {
 		t.Fatalf("formatter epoch or parameter formatting is stale: identity=%s text=%s", FormatterIdentity, first.Text)
 	}
 	second, err := FormatSource(first.Text)

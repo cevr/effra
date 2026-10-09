@@ -400,6 +400,10 @@ type checker struct {
 	// hostCallee is the member expression currently checked as a callee, so
 	// a member of a host value there selects a Go method.
 	hostCallee *Expr
+	// nonzero counts, per local binding, the enclosing if branches whose
+	// condition proves the binding is not zero. Bindings are immutable, so
+	// the proof holds for every use inside the branch (see divisorProof).
+	nonzero map[*localBinding]int
 }
 
 const maxTypeProjectionNodes = 4096
@@ -4749,14 +4753,16 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 				valid = leftNode.Name == "string" || leftNode.Name == "bool" || leftNode.Name == "i64"
 			case "+":
 				valid = leftNode.Name == "string" || leftNode.Name == "i64"
-			case "-", "<", "<=", ">", ">=":
+			case "-", "*", "/", "%", "<", "<=", ">", ">=":
 				valid = leftNode.Name == "i64"
 			default:
 				valid = false
 			}
 		}
 		if !valid {
-			c.diagnostic("EF106", "operator requires matching primitive values; + accepts strings or i64, and - and ordered comparisons accept i64", e.Span)
+			c.diagnostic("EF106", "operator requires matching primitive values; + accepts strings or i64, and -, *, /, % and ordered comparisons accept i64", e.Span)
+		} else if (e.Name == "/" || e.Name == "%") && !c.divisorProof(e.Right) {
+			c.diagnostic("EF150", divisorRefusal(e), e.Right.Span)
 		}
 		if valid {
 			if e.Name == "<" || e.Name == "<=" || e.Name == ">" || e.Name == ">=" {
@@ -4776,7 +4782,9 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		if condition.isEffect() || conditionNode == nil || conditionNode.Kind != "primitive" || conditionNode.Name != "bool" {
 			c.diagnostic("EF106", "if condition must be bool", e.Left.Span)
 		}
-		a, b := c.block(e.Then, env, inEffect), c.block(e.Else, env, inEffect)
+		thenProof, elseProof := nonzeroBranchProofs(e.Left)
+		a := c.withNonzero(thenProof, func() checkedExpression { return c.block(e.Then, env, inEffect) })
+		b := c.withNonzero(elseProof, func() checkedExpression { return c.block(e.Else, env, inEffect) })
 		if c.isKind(a, "never") {
 			t = b
 		} else if c.isKind(b, "never") {

@@ -12,7 +12,7 @@ const FormatterSchemaVersion = 1
 
 // FormatterIdentity names the syntax producer independently from semantic
 // revisions. Adapters must report this identity without querying Git.
-const FormatterIdentity = "effra/formatter-10"
+const FormatterIdentity = "effra/formatter-12"
 
 // FormatResult is the pure, syntax-only formatting snapshot. Its digest is
 // intentionally independent from a checked semantic revision: formatting
@@ -120,6 +120,9 @@ type formatLayout struct {
 	// genericAngles is the parser's shared syntax fact for type arguments and
 	// generic postfixes. A comparison angle is deliberately absent here.
 	genericAngles map[int]bool
+	// multiplications holds the `*` tokens the parser admitted as the binary
+	// operator; every other `*` spells a native pointer type and stays attached.
+	multiplications map[int]bool
 	// listGaps are source ranges between match subjects or pattern cells;
 	// commas inside them separate list items rather than statements.
 	listGaps     []Span
@@ -173,7 +176,7 @@ func buildFormatEvents(comments []Comment, tokens []token) []formatEvent {
 }
 
 func buildFormatLayout(source string, program *Program, tokens []token) formatLayout {
-	layout := formatLayout{breaks: map[int]bool{}, inline: map[int]bool{}, preserve: formatDirectiveTargetLines(program.Comments), itemStarts: map[int]bool{}, braces: map[int]braceStyle{}, spaced: map[int]bool{}, patternBraces: map[int]bool{}, genericAngles: program.genericAngles, inlineCommas: map[int]bool{}}
+	layout := formatLayout{breaks: map[int]bool{}, inline: map[int]bool{}, preserve: formatDirectiveTargetLines(program.Comments), itemStarts: map[int]bool{}, braces: map[int]braceStyle{}, spaced: map[int]bool{}, patternBraces: map[int]bool{}, genericAngles: program.genericAngles, multiplications: program.multiplications, inlineCommas: map[int]bool{}}
 	for _, item := range program.Items {
 		layout.itemStarts[item.Span.Offset] = true
 		layout.breaks[item.Span.Offset] = true
@@ -543,7 +546,7 @@ func (p *formatPrinter) regularSpacing(current string, currentIndex int) {
 	}
 	previous := p.tokens[p.lastToken]
 	currentToken := token{text: current}
-	if p.comparisonAngle(currentIndex) || p.comparisonAngle(p.lastToken) {
+	if p.comparisonAngle(currentIndex) || p.comparisonAngle(p.lastToken) || p.layout.multiplications[currentIndex] || p.layout.multiplications[p.lastToken] {
 		p.space()
 		return
 	}
