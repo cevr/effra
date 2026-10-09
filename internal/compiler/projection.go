@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"unicode/utf8"
 )
 
 // ProjectionLimits bound the public, response-local canonical type view. The
@@ -173,6 +175,19 @@ type projectionJSONField struct {
 	omitEmpty, omitZero bool
 }
 
+// projectionFieldsByType memoizes projectionJSONFields: a type's fields are
+// fixed, and sizing every response re-derived them by reflection.
+var projectionFieldsByType sync.Map // reflect.Type -> []projectionJSONField
+
+// cachedProjectionJSONFields returns typ's shared, read-only field list.
+func cachedProjectionJSONFields(typ reflect.Type) []projectionJSONField {
+	if fields, ok := projectionFieldsByType.Load(typ); ok {
+		return fields.([]projectionJSONField)
+	}
+	fields, _ := projectionFieldsByType.LoadOrStore(typ, projectionJSONFields(typ))
+	return fields.([]projectionJSONField)
+}
+
 // Retained response structs use ordinary JSON fields, including anonymous
 // metadata and zero-value omission. Resolve embedding and name dominance before
 // charging values, as encoding/json does; no encoded buffer is allocated.
@@ -258,7 +273,6 @@ func projectionEmptyJSONValue(v reflect.Value) bool {
 // allocating either representation.
 func encodedSizeMode(value any, limit int, embedded bool) (int, error) {
 	count := 0
-	fieldsByType := map[reflect.Type][]projectionJSONField{}
 	if embedded {
 		count = 2
 	}
@@ -279,7 +293,9 @@ func encodedSizeMode(value any, limit int, embedded bool) (int, error) {
 			return err
 		}
 		for _, ch := range s {
-			n := len(string(ch))
+			// Ranging yields utf8.RuneError for invalid bytes, encoded as
+			// its three-byte replacement, exactly as len(string(ch)).
+			n := utf8.RuneLen(ch)
 			switch ch {
 			case '"', '\\':
 				n = 2
@@ -382,11 +398,7 @@ func encodedSizeMode(value any, limit int, embedded bool) (int, error) {
 				return err
 			}
 			first := true
-			fields, found := fieldsByType[v.Type()]
-			if !found {
-				fields = projectionJSONFields(v.Type())
-				fieldsByType[v.Type()] = fields
-			}
+			fields := cachedProjectionJSONFields(v.Type())
 			for _, field := range fields {
 				f, missing := v, false
 				for _, index := range field.index {
