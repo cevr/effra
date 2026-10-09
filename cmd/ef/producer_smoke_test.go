@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -287,10 +286,11 @@ func producerSmokeRead(t *testing.T, path string) string {
 }
 
 // The Python smoke's deadlines: its run() helper (every build, git and
-// compiler run) and a single CLI check.
+// compiler run), a single CLI check, and one MCP response or exit.
 const (
 	producerSmokeRunTimeout   = 120 * time.Second
 	producerSmokeCheckTimeout = 15 * time.Second
+	producerSmokeMCPTimeout   = 15 * time.Second
 )
 
 // producerSmokeRun runs a program in dir under the run() deadline, requires
@@ -369,48 +369,75 @@ type producerSmokeServer struct {
 	t       *testing.T
 	command *exec.Cmd
 	stdin   io.WriteCloser
-	lines   chan []byte
+	stdout  producerSmokeOutput
 	stderr  bytes.Buffer
 	index   int
-	closed  bool
+	// done closes once the server's only wait owner has reaped it and its
+	// output has been copied; waitErr is then its exit.
+	done    chan struct{}
+	waitErr error
+}
+
+// producerSmokeOutput collects a server's stdout without ever blocking the
+// copy, so reaping never waits on the test's reads.
+type producerSmokeOutput struct {
+	mu     sync.Mutex
+	buffer []byte
+	ready  chan struct{}
+}
+
+func (o *producerSmokeOutput) Write(p []byte) (int, error) {
+	o.mu.Lock()
+	o.buffer = append(o.buffer, p...)
+	o.mu.Unlock()
+	select {
+	case o.ready <- struct{}{}:
+	default:
+	}
+	return len(p), nil
+}
+
+// line removes and returns the first complete line, if one has arrived.
+func (o *producerSmokeOutput) line() ([]byte, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	index := bytes.IndexByte(o.buffer, '\n')
+	if index < 0 {
+		return nil, false
+	}
+	line := append([]byte(nil), o.buffer[:index]...)
+	o.buffer = o.buffer[index+1:]
+	return line, true
 }
 
 func producerSmokeStart(t *testing.T, binary, workspace string) *producerSmokeServer {
 	t.Helper()
-	server := &producerSmokeServer{t: t, lines: make(chan []byte, 16)}
+	server := &producerSmokeServer{t: t, done: make(chan struct{})}
+	server.stdout.ready = make(chan struct{}, 1)
 	server.command = exec.Command(binary, "mcp", workspace)
 	server.command.Dir = workspace
+	server.command.Stdout = &server.stdout
 	server.command.Stderr = &server.stderr
+	server.command.WaitDelay = smokeWaitDelay
 	var err error
 	if server.stdin, err = server.command.StdinPipe(); err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := server.command.StdoutPipe()
-	if err != nil {
 		t.Fatal(err)
 	}
 	if err := server.command.Start(); err != nil {
 		t.Fatal(err)
 	}
 	go func() {
-		defer close(server.lines)
-		reader := bufio.NewReader(stdout)
-		for {
-			line, err := reader.ReadBytes('\n')
-			if len(line) > 0 {
-				server.lines <- line
-			}
-			if err != nil {
-				return
-			}
-		}
+		server.waitErr = server.command.Wait()
+		close(server.done)
 	}()
+	// A server still running when the test ends, normally or not, is
+	// killed; either way the cleanup returns only once it has been reaped.
 	t.Cleanup(func() {
-		if !server.closed {
+		select {
+		case <-server.done:
+		default:
 			_ = server.command.Process.Kill()
-			for range server.lines {
-			}
-			_ = server.command.Wait()
+			<-server.done
 		}
 	})
 	server.request("initialize", map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{},
@@ -419,6 +446,7 @@ func producerSmokeStart(t *testing.T, binary, workspace string) *producerSmokeSe
 	return server
 }
 
+// send writes json.dumps(message) and a newline, as the Python smoke did.
 func (s *producerSmokeServer) send(message map[string]any) {
 	s.t.Helper()
 	if _, err := s.stdin.Write(append(smokeDumps(s.t, message), '\n')); err != nil {
@@ -428,15 +456,23 @@ func (s *producerSmokeServer) send(message map[string]any) {
 
 func (s *producerSmokeServer) receive() map[string]any {
 	s.t.Helper()
-	select {
-	case line, open := <-s.lines:
-		if !open {
-			s.t.Fatalf("server ended before producer response: stderr=%s", s.stderr.String())
+	deadline := time.NewTimer(producerSmokeMCPTimeout)
+	defer deadline.Stop()
+	for {
+		if line, ok := s.stdout.line(); ok {
+			return smokeJSON(s.t, line)
 		}
-		return smokeJSON(s.t, line)
-	case <-time.After(15 * time.Second):
-		s.t.Fatal("producer control response deadline")
-		return nil
+		select {
+		case <-s.stdout.ready:
+		case <-s.done:
+			// All output has been copied once the server is reaped.
+			if line, ok := s.stdout.line(); ok {
+				return smokeJSON(s.t, line)
+			}
+			s.t.Fatalf("server ended before producer response: %v stderr=%s", s.waitErr, s.stderr.String())
+		case <-deadline.C:
+			s.t.Fatal("producer control response deadline")
+		}
 	}
 }
 
@@ -460,23 +496,20 @@ func (s *producerSmokeServer) tool(name string, arguments map[string]any) map[st
 	return s.request("tools/call", map[string]any{"name": name, "arguments": arguments})
 }
 
-// close ends input and requires a clean exit with nothing on stderr.
+// close ends input and requires a clean exit with nothing on stderr. A server
+// that outlives the deadline is killed and reaped before the test fails.
 func (s *producerSmokeServer) close() {
 	s.t.Helper()
-	s.closed = true
 	_ = s.stdin.Close()
-	deadline := time.After(15 * time.Second)
-	for drained := false; !drained; {
-		select {
-		case _, open := <-s.lines:
-			drained = !open
-		case <-deadline:
-			_ = s.command.Process.Kill()
-			s.t.Fatal("server did not exit after its input closed")
-		}
+	select {
+	case <-s.done:
+	case <-time.After(producerSmokeMCPTimeout):
+		_ = s.command.Process.Kill()
+		<-s.done
+		s.t.Fatalf("server did not exit after its input closed; stderr=%s", s.stderr.String())
 	}
-	if err := s.command.Wait(); err != nil || s.stderr.Len() != 0 {
-		s.t.Fatalf("server exit: %v stderr=%s", err, s.stderr.String())
+	if s.waitErr != nil || s.stderr.Len() != 0 {
+		s.t.Fatalf("server exit: %v stderr=%s", s.waitErr, s.stderr.String())
 	}
 }
 

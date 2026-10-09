@@ -19,7 +19,10 @@ import (
 type httpSmokeServer struct {
 	command *exec.Cmd
 	stderr  bytes.Buffer
-	done    chan error
+	// done closes once the server's only wait owner has reaped it; waitErr
+	// is then its exit.
+	done    chan struct{}
+	waitErr error
 	// address is the readiness line's URL without the "listening " prefix.
 	address string
 }
@@ -47,19 +50,24 @@ func (w *httpSmokeLineWriter) Write(p []byte) (int, error) {
 }
 
 // httpSmokeStart runs command in dir and waits up to ten seconds for its
-// readiness line. A server that never reports readiness is killed. The test's
-// cleanup kills a server that is still running.
+// readiness line. The test's cleanup kills a server that is still running,
+// including one that never reported readiness, and returns once it has been
+// reaped.
 func httpSmokeStart(t *testing.T, dir string, command ...string) *httpSmokeServer {
 	t.Helper()
-	server := &httpSmokeServer{command: exec.Command(command[0], command[1:]...), done: make(chan error, 1)}
+	server := &httpSmokeServer{command: exec.Command(command[0], command[1:]...), done: make(chan struct{})}
 	server.command.Dir = dir
 	stdout := &httpSmokeLineWriter{lines: make(chan string, 1)}
 	server.command.Stdout = stdout
 	server.command.Stderr = &server.stderr
+	server.command.WaitDelay = smokeWaitDelay
 	if err := server.command.Start(); err != nil {
 		t.Fatal(err)
 	}
-	go func() { server.done <- server.command.Wait() }()
+	go func() {
+		server.waitErr = server.command.Wait()
+		close(server.done)
+	}()
 	t.Cleanup(func() {
 		select {
 		case <-server.done:
@@ -74,9 +82,8 @@ func httpSmokeStart(t *testing.T, dir string, command ...string) *httpSmokeServe
 			t.Fatalf("readiness line = %q", line)
 		}
 		server.address = strings.TrimPrefix(line, "listening ")
-	case err := <-server.done:
-		server.done <- err // Leave the result for the cleanup.
-		t.Fatalf("%s exited before binding: %v\n%s", command[0], err, server.stderr.String())
+	case <-server.done:
+		t.Fatalf("%s exited before binding: %v\n%s", command[0], server.waitErr, server.stderr.String())
 	case <-time.After(10 * time.Second):
 		t.Fatalf("%s server did not bind", command[0])
 	}
@@ -93,15 +100,15 @@ func (server *httpSmokeServer) httpSmokeStop(t *testing.T) (int, string) {
 	return server.httpSmokeWait(t)
 }
 
-// httpSmokeWait waits up to ten seconds for the process to exit.
+// httpSmokeWait waits up to ten seconds for the process to exit; the cleanup
+// kills and reaps one that does not.
 func (server *httpSmokeServer) httpSmokeWait(t *testing.T) (int, string) {
 	t.Helper()
 	select {
-	case err := <-server.done:
-		server.done <- err // Leave the result for the cleanup.
+	case <-server.done:
 		var exit *exec.ExitError
-		if err != nil && !errors.As(err, &exit) {
-			t.Fatal(err)
+		if server.waitErr != nil && !errors.As(server.waitErr, &exit) {
+			t.Fatal(server.waitErr)
 		}
 		return server.command.ProcessState.ExitCode(), server.stderr.String()
 	case <-time.After(10 * time.Second):
