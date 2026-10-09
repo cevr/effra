@@ -366,7 +366,7 @@ Each row states what has landed on this branch, what is in flight and what is on
 
 | Capability | Status |
 | --- | --- |
-| Payload-aware recovery: `.recover<E>(handler)` passes the error's fields to an effectful handler | In review |
+| Payload-aware recovery: `.recover<E>(handler)` passes the error's fields to an effectful handler | Landed on Go and JS ([`recovery-outcome.ef`](examples/recovery-outcome.ef), [`recovery-codec.ef`](examples/recovery-codec.ef)); reified `Exit` is not exposed |
 | Layer runtime: concurrent shared acquisition, rollback and cleanup in reverse order | Shared build-owned acquisition with individually cancellable waiters landed on Go and JS; the remaining units are in progress |
 | Codecs derived from records and enums, with explicit wire ↔ domain transformations | Structural JSON derivation through [`effra/json`](docs/bundled-modules.md) runs on Go and JS; transformations in progress |
 | Graph views: `ef graph --kind layers --format mermaid\|dot`, plus MCP and editor views | In progress |
@@ -442,6 +442,10 @@ Native builds lower checked source into typed Go closures and run `go build`. Th
 | [layers.ef](examples/layers.ef) | Shared construction, hidden dependencies and whole-graph fixture replacement | Go / JS |
 | [layers-workflow.ef](examples/layers-workflow.ef) | Configured layer provision and retained operation failures | Go / JS |
 | [latest-task.ef](examples/latest-task.ef) | Replace an owned child after interruption and cleanup finish | Go / JS |
+| [recipes-retry.ef](examples/recipes-retry.ef) | Lazy typed recipes stored in generic records and Option; each retry runs again | Go / JS |
+| [recipes-queue.ef](examples/recipes-queue.ef) | Recipe enum payloads, Result slots and recipe-returning callable fields | Go / JS |
+| [recovery-outcome.ef](examples/recovery-outcome.ef) | Payload-binding recovery of a stored job recipe into an Outcome | Go / JS |
+| [recovery-codec.ef](examples/recovery-codec.ef) | Effectful recovery handler converting a decode failure into a domain failure | Go / JS |
 | [concurrency.ef](examples/concurrency.ef) | Child join/interrupt and deadline recovery | Go / JS |
 | [causal.ef](examples/causal.ef) | Managed virtual time, shared latches and causal cleanup tests | Go / JS |
 | [callables-service.ef](examples/callables-service.ef) | Callbacks that are generic over failure and service rows | Go / JS |

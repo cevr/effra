@@ -226,7 +226,7 @@ A checked machine declaration should lower to a finite, provider-independent pla
 
 ## Failure is more than a Result
 
-The runtime result should distinguish `Success(A)` from failure causes containing typed failures E, defects, or interruption. Ordinary recovery handles E. An explicit supervision/sandbox operation may inspect the full cause. Preserve multiple concurrent failures and cleanup failures instead of silently keeping only the first.
+The runtime result should distinguish `Success(A)` from failure causes containing typed failures E, defects, or interruption. Ordinary recovery handles E. An explicit supervision/sandbox operation may inspect the full cause. Preserve multiple concurrent failures and cleanup failures instead of silently keeping only the first. The one exception is an explicit cancellation: a cancellation-aborted owner discards the ordinary typed failures of children it had not observed, because the party that cancelled already holds a different declared outcome (see [runtime](runtime.md)); defects and cleanup failures are always preserved.
 
 Recoverable Go panics can be captured at managed task boundaries as defects and trigger cleanup. Fatal runtime failures, process termination, and arbitrary unmanaged goroutine panics cannot receive the same guarantee.
 
