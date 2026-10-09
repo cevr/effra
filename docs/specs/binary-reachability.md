@@ -59,45 +59,76 @@ The application plan represents this obligation separately from callable use. Na
 
 ## Application receipts and size conformance
 
-Adopted 2026-10-09 for #14.
+Adopted 2026-10-09 for #14; revised the same day after review.
 
-`ef build FILE [--target go|js] --receipt PATH` writes an application receipt (`effra.application-receipt/1`) after a successful build. A refused or unchecked build writes no receipt, and only `build` accepts the flag. A native receipt records:
+`internal/receipt` is the single owner of measurement. `ef build --receipt` and the size-conformance matrix build, measure and summarize through its functions, so a matrix row and a CLI receipt cannot disagree about method.
+
+`ef build FILE [--target go|js] --receipt PATH` writes an application receipt (`effra.application-receipt/2`) after a successful build. Only `build` accepts the flag, and an empty path is a parse error. A refused or unchecked build writes no receipt.
+
+The receipt path is checked before anything is built (`receipt.CheckPath`). It is refused when it names:
+
+- the build's source;
+- one of the build's artifacts: the executable, or the JavaScript module and declaration, including default output names;
+- a path inside the managed generated-module tree `dist/go/apps`.
+
+Paths are compared after resolving symbolic links through the longest existing prefix. Existing files are also compared by identity (`os.SameFile`), so a respelled path, a directory link, a symbolic link or a hard link to a protected file is refused as well. The receipt is published atomically: it is written to a temporary file in the destination directory and renamed into place. An existing file or symbolic link at the receipt path is therefore replaced, never written through, and an interrupted write leaves no partial receipt.
+
+A native receipt records:
 
 - the plan's closed runtime modules and requirement counts;
-- the published generation's identity and its files, with bytes and hashes;
+- the published generation's identity and its manifest files, with bytes and hashes;
 - each generated package's direct imports, and the transitive dependencies from `go list -deps`;
-- the toolchain identity and build flags;
-- the executable's bytes and hash;
-- a per-package summary of `go tool nm -size -type` with the complete listing digest.
+- the effective build settings: the `go env -json` values that change the output (`GOVERSION`, `GOTOOLCHAIN`, `GOOS`, `GOARCH`, the architecture levels, `GOEXPERIMENT`, inherited `GOFLAGS` and `CGO_ENABLED`) and the literal build flags;
+- the executable's bytes and hash, and the build information the linker embedded in it (`debug/buildinfo`), which is the authoritative record of how it was built;
+- a per-package summary of `go tool nm -size -type`, with the digest of the complete listing.
 
-`nm` runs from the generated module. The go command can select a different toolchain outside that module (`GOTOOLCHAIN=auto` with `go 1.27`), and another toolchain's `nm` classifies and orders symbols differently. A JavaScript receipt records the emitted module and declaration bytes, and every external module the artifact imports. Static imports name their bindings. Dynamic `import()` calls with literal specifiers, such as the HTTP transport's `node:http`, are marked dynamic. A computed specifier refuses the receipt, because it cannot be accounted for. Every receipt reports the compiler distribution separately: the `ef` executable and all bundled runtime sources.
+Every native build, including stripped companions and controls, uses `-trimpath -mod=readonly -buildvcs=false` with `GOWORK=off`. VCS stamping is off because a generation identifies the module. Otherwise a module published inside a repository would embed that repository's revision and dirty state, and identical generations would build different executables. `nm` runs from the generated module. Outside that module the go command can select a different toolchain (`GOTOOLCHAIN=auto` with `go 1.27`), and another toolchain's `nm` classifies and orders symbols differently.
 
-The deterministic part runs in the gate. `cmd/ef/size_process_test.go` builds the public fixtures in `conformance/size/fixtures` on both targets through `--receipt`, and asserts:
+A JavaScript receipt records the emitted module and declaration bytes, and the module's external imports. Emission declares those imports: `Result.EmitModule` returns the module text together with its `effect` import names and the host modules of the selected prelude chunks. The HTTP transport chunk declares its dynamic `node:http` import. Program text that spells an import is therefore never mistaken for one. The receipt also checks that the written module is byte-identical to the emitted one. Every receipt reports the compiler distribution separately: the `ef` executable and all bundled runtime sources.
 
-- the closed runtime modules and the generated runtime files;
-- that `net`, `net/http`, `crypto/tls`, `encoding/json` and `os/exec` are absent from both the dependencies and the symbol table;
-- both targets' output;
-- that unused declarations and pipe spelling leave the generated runtime, imports, dependencies, symbol listing, executable size and emitted JavaScript unchanged.
+The deterministic part runs in the gate:
 
-The HTTP row is the negative control: it must show the transport in the same fields. With all-source emission substituted, the test fails on every row with retained files, dependencies and `net`/`net/http`/`crypto/tls` symbols.
+- `cmd/ef/size_process_test.go` builds the public fixtures in `conformance/size/fixtures` on both targets through `--receipt`, and asserts:
+  - the closed runtime modules and the generated runtime files;
+  - that `net`, `net/http`, `crypto/tls`, `encoding/json` and `os/exec` are absent from both the dependencies and the symbol table;
+  - both targets' output;
+  - that unused declarations and pipe spelling leave the generated runtime, imports, dependencies, symbol listing, executable size and emitted JavaScript unchanged.
 
-`scripts/size_conformance.py` is the explicit, expensive matrix. It uses one matched configuration: `CGO_ENABLED=0 -trimpath -mod=readonly`, plus a `-ldflags=-s -w` companion for every unstripped binary. It builds every fixture, an all-source counterfactual (the same generation with every distributed runtime source), the idiomatic Go controls, and the TypeScript/Effect 4.0.1 controls in `conformance/size/controls`. It measures every binary with the same functions and fails if an Effra receipt disagrees. It compares every program's output across cohorts. For JavaScript it reports three sizes separately: the emitted module, the minified application with `effect` external, and the minified deployment with `effect` inlined. `--record` writes the run with its commit, toolchain and fixture/control/runtime hashes. [conformance/size/README.md](../../conformance/size/README.md) lists the commands.
+  The HTTP row is the negative control: it must show the transport in the same fields. With all-source emission substituted, the test fails on every row with retained files, dependencies and `net`/`net/http`/`crypto/tls` symbols.
+- `cmd/ef/receipt_process_test.go` covers the flag's parsing, refused builds, every protected path and alias, atomic replacement of a symbolic link, the recorded build settings and the absence of VCS stamping inside a Git repository. It also checks that program strings spelling `import()` add no external module while the HTTP program lists `node:http`.
+- `internal/compiler/js_imports_test.go` checks that every prelude chunk declares exactly the host modules its text loads, and that each example's declared imports equal its emitted imports.
 
-Decision and rejected alternatives:
+`go run ./conformance/size/matrix [-out DIR] [-record PATH]` is the explicit, expensive matrix. It uses one matched configuration: `CGO_ENABLED=0`, an empty `GOFLAGS`, the native build flags above, and a `-ldflags=-s -w` companion for every unstripped binary. It builds:
+
+- every fixture, through `ef build --receipt`;
+- an all-source counterfactual of each fixture's generation, with every distributed runtime source;
+- the idiomatic Go controls;
+- the TypeScript/Effect 4.0.1 controls in `conformance/size/controls`, type-checked with `tsc` when it is available.
+
+It measures controls and counterfactuals with the same `internal/receipt` functions, fails if an Effra receipt disagrees with that measurement, and compares every program's output across cohorts. For JavaScript it reports separately the emitted module, the minified application with `effect` external, the minified deployment with `effect` inlined, and the deployment delta between the two. `-record` writes the run with its commit, dirty state, toolchain and fixture, control and runtime hashes. [conformance/size/README.md](../../conformance/size/README.md) lists the commands.
+
+Controls are labelled by contract:
+
+- *Matched* controls are the explicit members of a semantic equivalence baseline: they preserve the fixture's guarantees. The Go minimal control installs signal-driven cancellation with `signal.NotifyContext`, runs its work in a scope that owns a context, a cancel function and a wait group, and checks cancellation before reporting the result. The TypeScript minimal control runs its work in `Effect.scoped`, with abort-signal wiring.
+- An *unmatched floor* does less than the fixture and only bounds it from below. `controls/go/minimal-floor` prints its result with no cancellation or scope.
+
+Decisions and rejected alternatives:
 
 - Select source modules before compilation. Do not rely on the linker. Go's linker roots `main.main` together with every package's init task (`cmd/link/internal/ld/deadcode.go`, go1.27.0), so imported packages keep their initialization and the globals it reaches. The all-source counterfactual quantifies this. The minimal row grows from 2,668,552 to 5,566,115 bytes and from 65 to 200 dependencies, and gains `net`, `net/http`, `crypto/tls` and `encoding/json`, although no HTTP function is reachable.
-- Measure the artifact, not the emitter's intent. External JavaScript imports are read from the emitted module, so the receipt does not depend on JavaScript lowering internals. Bundled sizes come from a real bundler, `bun build --minify`. Bundlers drop unused modules only when the package declares that it has no side effects. Effect 4.0.1 declares `sideEffects` for a single JIT-enable file, so its bundled runtime is measured and attributed to the deployment, not assumed. This follows the [esbuild](https://esbuild.github.io/api/#tree-shaking) and Rollup tree-shaking model.
+- Take JavaScript imports from emission. Rejected: scanning the artifact text for `import` forms. A scan misreads program strings, and it cannot tell the compiler's imports from program text. Each prelude chunk declares its host modules beside its text, and a test holds the declarations to the text. Bundled sizes come from a real bundler, `bun build --minify`. Like [esbuild](https://esbuild.github.io/api/#tree-shaking) and Rollup, it drops an unused module when the package declares that it has no side effects (`sideEffects`), or when its own conservative analysis proves the module's top-level code pure. Effect 4.0.1 declares `sideEffects` for a single JIT-enable file. Its bundled runtime is therefore measured and attributed to the deployment, not assumed.
+- Rejected: a separate measurement script. The first matrix was a Python script that duplicated the CLI's measurement and checked agreement after the fact. The matrix is now a Go program over `internal/receipt`, so both paths share one implementation.
 - MoonBit, the closest whole-program comparison (`moonbitlang/moonbit-compiler` at `d4ada10`), removes dead code in two places:
-  - `Core_dce.eliminate_dead_code` (`src/core_dce.ml:116`) runs on the linked core program as an optimization pass (`src/driver_util.ml:74`). Its roots are top-level initialization expressions, which are always kept (`src/core_dce.ml:130`), and public definitions (`:134`, `:136`, `:144`). Every method and extension method is kept conservatively, because trait dispatch can reach it without a visible call (`:139`). An unused `let` is dropped only when its right-hand side is pure (`:73`).
-  - On wasm, `Shrink_wasmir.shrink` (`src/shrink_wasmir.ml:292`) closes the module over its exports, start function and function-table elements (`:230`, `:237`, `:239`, `:248`). Indirect-call targets are roots.
+  - `Core_dce.eliminate_dead_code` (`src/core_dce.ml:116`) runs per package, inside `core_of_tast` (`src/driver_util.ml:68`, `:74`), before linking. Linking is a separate step: `link_core` (`src/driver_util.ml:269`) links the package cores (`:278`). The pass's roots are top-level initialization expressions, which are always kept (`src/core_dce.ml:130`), and public definitions (`:134`, `:136`, `:144`). Every method and extension method is kept conservatively, because trait dispatch can reach it without a visible call (`:139`). An unused `let` is dropped only when its right-hand side is pure (`:73`).
+  - On wasm, `Shrink_wasmir.shrink` (`src/shrink_wasmir.ml:292`) runs on the linked module (`src/driver_util.ml:287`). It closes the module over its exports, start function and function-table elements (`src/shrink_wasmir.ml:230`, `:237`, `:239`, `:248`). Indirect-call targets are roots.
 
   Effra adopts the same three rules at the source-module boundary: initialization is a root (Go init tasks and declared foreign imports), effects are never dropped as dead, and dynamic call targets are an explicit finite root set (checked function-value references). Effra rejects MoonBit's blanket method retention. Its provider operations are retained only with a materialized provider, so an unused provider or service adds nothing, as the minimal-unused row shows.
-- Elixir/BEAM releases are the contrasting point (`elixir-lang/elixir` at `91ee75b`). `mix release` selects applications, not code. `:applications` defaults to the current application and its transitive application dependencies (`lib/mix/lib/mix/tasks/release.ex:358`). `copy_app` and `copy_ebin` copy every `.beam` in each selected application (`lib/mix/lib/mix/release.ex:831`, `:861`). `:strip_beams` removes only debug and documentation chunks (`release.ex:382`; `strip_beam`, `lib/mix/lib/mix/release.ex:938`). That fits a runtime with `apply/3` and hot code loading, where a closed-world walk cannot see every call. Effra rejects this granularity. Its calls are statically checked, and dynamic targets are finite, so module selection by application, or by whole library, would retain unreachable implementations and their initialization. It is the "quietly retain the whole library" fallback this contract forbids. The BEAM model also confirms the stripped-size rule below: removing metadata is not removing code.
+- Elixir/BEAM releases are the contrasting point (`elixir-lang/elixir` at `91ee75b`). `mix release` selects applications, not code. `:applications` defaults to the current application and its transitive application dependencies (`lib/mix/lib/mix/tasks/release.ex:358`). `copy_app` and `copy_ebin` copy every `.beam` in each selected application (`lib/mix/lib/mix/release.ex:831`, `:861`). `:strip_beams` removes debug information, documentation chunks and other nonessential metadata (`lib/mix/lib/mix/tasks/release.ex:382`). `strip_beam` (`lib/mix/lib/mix/release.ex:938`) keeps only the significant chunks plus `Attr` (`:91`, `:940`). That fits a runtime with `apply/3` and hot code loading, where a closed-world walk cannot see every call. Effra rejects this granularity. Its calls are statically checked, and dynamic targets are finite, so module selection by application, or by whole library, would retain unreachable implementations and their initialization. It is the "quietly retain the whole library" fallback this contract forbids. The BEAM model also confirms the stripped-size rule below: removing metadata is not removing code.
 - Rejected: reporting only the stripped size. Stripping and compression are not evidence that unused code was removed. Unstripped receipts keep the symbols, and stripped companions are recorded beside them.
-- Rejected: a per-fixture byte budget in the gate. Budgets come from measured baselines, which this run records for the first time. The gate asserts retention facts that do not depend on the toolchain.
-- Rejected: an MCP build receipt. MCP `project.check` already reports each entry mode's closed modules and requirement counts. Building executables from MCP is a separate capability decision.
+- Rejected: comparing an Effra row only with a control that does less. A print-only Go program omits the cancellation the minimal fixture must keep, so it is recorded as an unmatched floor, and the matched control is the comparison.
+- Rejected, for now: a per-fixture byte budget in the gate. Budgets come from measured baselines, and the matched baselines are not complete yet (see below). The gate asserts retention facts that do not depend on the toolchain.
+- Rejected, for now: an MCP build receipt. MCP `project.check` already reports each entry mode's closed modules and requirement counts. Building executables from MCP is a separate capability decision.
 
-Recorded run `conformance/size/receipts/2026-10-09.json`. Commit `3dc8c5d`, go1.27.0 linux/amd64, `CGO_ENABLED=0`, Bun 1.4.2, Node v24.11.1, Effect 4.0.1. Raw bytes:
+Recorded run `conformance/size/receipts/2026-10-09.json` (`effra.size-conformance/2`). Commit `6af082c` with a clean tree, go1.27.0 linux/amd64, `CGO_ENABLED=0`, Bun 1.4.2, Node v24.11.1, Effect 4.0.1. It replaces the first record (commit `3dc8c5d`, schema `/1`). It was re-recorded because the receipt schema gained build settings, build information and declared imports, the matched minimal controls were added, and native builds dropped VCS stamping. Every Effra application row has the same bytes as in the first record. The Go controls changed by a few bytes without VCS stamping: the floor from 2,337,969 to 2,337,985 and the managed control from 2,584,714 to 2,584,698. Raw bytes:
 
 | Row | Go | Go stripped | Go deps | JS module | JS app (min) | JS deploy (min) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -107,20 +138,34 @@ Recorded run `conformance/size/receipts/2026-10-09.json`. Commit `3dc8c5d`, go1.
 | managed | 2,813,732 | 1,839,264 | 65 | 9,875 | 4,842 | 35,227 |
 | managed, all-source | 5,698,975 | 3,846,304 | 200 | | | |
 | codec | 2,787,773 | 1,818,784 | 65 | 25,311 | 12,185 | 41,600 |
+| codec, all-source | 5,672,730 | 3,825,824 | 200 | | | |
 | http | 8,825,391 | 5,992,608 | 191 | 16,426 | 7,010 | 36,535 |
 | direct / pipe | 2,669,458 | 1,732,768 | 65 | 4,092 | 1,739 | 30,660 |
-| Go control, minimal | 2,337,969 | 1,507,488 | 60 | | | |
-| Go control, managed | 2,584,714 | 1,675,424 | 62 | | | |
-| TS/Effect control, minimal | | | | 598 (source) | 316 | 23,828 |
-| TS/Effect control, managed | | | | 1,442 (source) | 765 | 40,796 |
+| Go control, minimal (matched) | 2,548,908 | 1,650,848 | 62 | | | |
+| Go control, minimal floor (unmatched) | 2,337,985 | 1,507,488 | 60 | | | |
+| Go control, managed (matched) | 2,584,698 | 1,675,424 | 62 | | | |
+| TS/Effect control, minimal (matched) | | | | 651 (source) | 326 | 27,292 |
+| TS/Effect control, managed (matched) | | | | 1,442 (source) | 765 | 40,796 |
 
-The compiler executable is reported separately from these application rows; it was 16,722,909 bytes in the recorded run, and the bundled runtime sources were 15 files and 107,281 bytes.
+The compiler executable is reported separately from these application rows. It was 16,893,943 bytes in the recorded run, and the bundled runtime sources were 15 files and 107,281 bytes.
 
 Retention observations, not claims:
 
-- A pure minimal entry retains the `core` module: scopes, fibers, the scheduler, and signal-driven cancellation through `os/signal`. Compared with the Go control, the largest symbol deltas are `time` (+41 KB), the generated runtime (+17 KB), `context` and `os/signal`. The Go control installs no signal handling.
-- The managed row's residual over its Go control is mostly the generated runtime (166 symbols, 55 KB of text) and generated `main` (+12 KB). Apart from the generated runtime, `cmp` and `strings`, both executables retain symbols from the same packages.
+- A pure minimal entry retains the `core` module: scopes, fibers, the scheduler, and signal-driven cancellation through `os/signal`. It is 119,644 bytes over the matched Go control. Its largest per-package deltas (text plus data) are the generated runtime (+17 KB), `fmt` (+7.9 KB), linker-synthesized `go:` symbols (+5.2 KB), `slices` (+3.9 KB) and `context` (+2.9 KB). Only the generated runtime, `cmp` and `strings` are packages the control lacks. Against the unmatched floor the gap is 330,567 bytes, led by `time` (+41.5 KB), which the matched control also retains.
+- The managed row's residual over its matched Go control is mostly the generated runtime (+56 KB) and generated `main` (+12 KB). Apart from the generated runtime, `cmp` and `strings`, both executables retain symbols from the same packages.
 - Splitting `core` so that an entry without forks, sleeps or deadlines does not retain the scheduler is a candidate transformation. It must preserve entry cancellation, and it remains unmeasured.
+
+Delivered for #14: the application plan's source selection and stale-generation reconciliation (above); `ef build --receipt` with protected, atomic publication; the `internal/receipt` measurement owner; the gate's retention checks; the Go matrix; matched minimal and managed controls on both targets; and the recorded run.
+
+Remaining for #14:
+
+- matched Go and TypeScript controls for the codec and HTTP rows, which currently have no comparison;
+- the ordinary-handler and machine-backed actor rows of the acceptance matrix, once actors land;
+- per-fixture budgets derived from matched baselines;
+- the measured `core` split above;
+- a decision on MCP build receipts.
+
+Per-family size evidence for the libraries in #65 belongs to #65, which consumes this receipt machinery and matrix.
 
 ## Acceptance matrix
 
@@ -149,8 +194,8 @@ Establish per-fixture budgets from measured baselines rather than inventing a gl
 The source-module split must also work over outputs from the previous compiler. The current additive writer leaves the former `stdlib.go` alongside its replacement declarations: both fresh versions compile, but the upgrade fails. Implement isolated, owned complete generated modules before integrating that split. This output boundary can proceed before canonical application reachability, retaining current all-source emission. Full source origin, target and ordinary/test mode distinguish artifacts; interrupted publication, concurrent builds and unchanged reuse need explicit controls. Do not satisfy this requirement by deleting old output directories in the gate or special-casing a retired filename.
 
 1. Implement module selection through the versioned bundled interface/runtime boundary and preserve both-target behavior.
-2. Add minimal and managed-effect size/dependency fixtures, then codec and HTTP fixtures as those libraries land. (Minimal, managed, codec, HTTP, unused-growth and direct/pipe rows landed 2026-10-09. Controls cover the minimal and managed rows.)
-3. Integrate deterministic reachability checks into the gate and record build-size receipts through CLI/MCP capability inspection. Keep expensive toolchain/bundler matrix runs in an explicit required size-conformance command. (Landed 2026-10-09 as `ef build --receipt`, `cmd/ef/size_process_test.go` and `scripts/size_conformance.py`; MCP keeps check-time module inspection.)
+2. Add minimal and managed-effect size/dependency fixtures, then codec and HTTP fixtures as those libraries land. (Minimal, managed, codec, HTTP, unused-growth and direct/pipe rows landed 2026-10-09. Matched controls cover the minimal and managed rows; codec and HTTP controls and the actor rows remain.)
+3. Integrate deterministic reachability checks into the gate and record build-size receipts through CLI/MCP capability inspection. Keep expensive toolchain/bundler matrix runs in an explicit required size-conformance command. (Landed 2026-10-09 as `ef build --receipt`, `internal/receipt`, `cmd/ef/size_process_test.go` and `go run ./conformance/size/matrix`; MCP keeps check-time module inspection.)
 4. Recheck new library modules and any fluent API against the same matrix. No capability is called tree-shakable solely because its surface uses static types.
 
 ## Prior art: Elixir, Erlang/OTP and MoonBit

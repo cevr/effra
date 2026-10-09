@@ -197,6 +197,8 @@ overhead or a fixed speedup multiplier.
 
 **Test watchdog**: A harness deadline independent of program time. Forced termination leaves managed cleanup unconfirmed.
 
-**Application receipt** (implemented): A raw measurement of one built application: the runtime modules and declarations its plan retained, its generated files, imports, dependencies, executable or module bytes and symbols, and the external runtime it does not contain. It reports the compiler distribution separately and makes no performance claim.
+**Application receipt** (implemented): A raw measurement of one built application: the runtime modules and declarations its plan retained, its generated files, imports, dependencies, effective build settings, executable or module bytes and symbols, and the external runtime it does not contain. It reports the compiler distribution separately and makes no performance claim.
+
+**Unmatched floor** (size conformance): A control program that does less than the fixture it accompanies, such as printing a result without the entry's cancellation and scope. It is recorded only as a lower bound and is never compared as a member of a semantic equivalence baseline.
 
 **Program time**: The time authority under which managed sleeps and deadlines execute. Test program time can advance independently of the watchdog's wall clock.

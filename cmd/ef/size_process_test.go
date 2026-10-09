@@ -18,7 +18,7 @@ import (
 // sizeFixture is one row of the size-conformance matrix in
 // conformance/size/fixtures. The deterministic retention facts are checked
 // here, in the gate; byte comparisons against the Go and TypeScript/Effect
-// controls belong to scripts/size_conformance.py.
+// controls belong to the matrix in conformance/size/matrix.
 type sizeFixture struct {
 	name    string
 	modules []rt.RuntimeModule
