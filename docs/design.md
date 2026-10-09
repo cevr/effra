@@ -41,7 +41,7 @@ A notation that gains any semantics leaves this class and must pass the ordinary
 - **`pub readonly`.** This is the construction-authority tier. Other modules may read and match the data, but only the owner module constructs it. The spelling replaces the earlier `opaque` word for this tier, because the fields stay visible.
 - **`law` / `contract`.** This is a visible construct for service and runtime laws, written `law name() uses {...} { ... }` inside a service or contract. A law suite checks the laws, and a refuted law refuses the build. The construct is visible because that checking is compiler-special.
 
-The [capability synthesis task](wayfinder/issues/capability-synthesis.md) and the [constant-parameter-defaults task](wayfinder/issues/constant-parameter-defaults.md) track implementation.
+The [capability synthesis task](https://github.com/cevr/effra/issues/15) and the [constant-parameter-defaults task](https://github.com/cevr/effra/issues/74) track implementation.
 
 Together these cover every syntax proposal: a construct for semantics the compiler must know, and the notation exception for pure sugar. Anything else is a library API, a diagnostic or a lint rule.
 
