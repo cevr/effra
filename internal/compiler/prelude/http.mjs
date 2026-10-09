@@ -91,8 +91,26 @@ const __ef_http_address = address => {
   if (!/^[0-9]{1,5}$/.test(port) || Number(port) > 65535) return invalid('port must be a decimal number from 0 to 65535');
   return { host: host === '' ? undefined : host, port: Number(port) };
 };
-// A name is resolved before listening, because hosts report a failed lookup
-// differently (Node: getaddrinfo ENOTFOUND; Bun: listen ENOENT or EAGAIN).
+// __ef_http_listen_target is the listen host and port. A name is looked up
+// exactly once, here, and the listener binds the selected numeric answer, so
+// listen() never resolves again and binds what the lookup returned. Go's
+// net.Listen binds the first IPv4 answer, else the first answer; so does this.
+// Any lookup failure, or no answer, is `host lookup failed`, because hosts
+// report it differently (Node: getaddrinfo ENOTFOUND; Bun: listen ENOENT or
+// EAGAIN). resolver is the host DNS boundary: { isIP, lookup } from node:net
+// and node:dns/promises.
+const __ef_http_listen_target = (address, resolver) => Effect.gen(function* () {
+  const parsed = __ef_http_address(address);
+  if (parsed.error !== undefined) return yield* Effect.fail({ _tag: 'IoError', message: parsed.error });
+  const { host, port } = parsed;
+  if (host === undefined || resolver.isIP(host) !== 0) return { host, port };
+  const answers = yield* Effect.promise(() => Promise.resolve().then(() => resolver.lookup(host, { all: true })).then(found => Array.isArray(found) ? found : [], () => []));
+  const selected = answers.find(answer => answer.family === 4) ?? answers[0];
+  if (typeof selected?.address !== 'string' || resolver.isIP(selected.address) === 0) {
+    return yield* Effect.fail({ _tag: 'IoError', message: 'HTTP listen on ' + __ef_quoteText(address) + ': host lookup failed' });
+  }
+  return { host: selected.address, port };
+});
 const __ef_http_listen_error = (address, error) => {
   const prefix = 'HTTP listen on ' + __ef_quoteText(address) + ': ';
   switch (error?.code) {
@@ -114,15 +132,9 @@ const __ef_http_bound = server => {
 // transport.run executes an Effra request program in its own owned scope with
 // the listener's services and, once that scope has closed, publishes its exit
 // through respond unless the client is gone.
-const __ef_http_serve = (address, timeouts, onRequest) => Effect.gen(function* () {
-  const parsed = __ef_http_address(address);
-  if (parsed.error !== undefined) return yield* Effect.fail({ _tag: 'IoError', message: parsed.error });
-  const { host, port } = parsed;
+const __ef_http_serve = (address, timeouts, onRequest, resolver) => Effect.gen(function* () {
   const [{ createServer }, { isIP }, { lookup }] = yield* Effect.promise(() => Promise.all([import('node:http'), import('node:net'), import('node:dns/promises')]));
-  if (host !== undefined && isIP(host) === 0) {
-    const resolved = yield* Effect.promise(() => lookup(host).then(() => true, () => false));
-    if (!resolved) return yield* Effect.fail({ _tag: 'IoError', message: 'HTTP listen on ' + __ef_quoteText(address) + ': host lookup failed' });
-  }
+  const { host, port } = yield* __ef_http_listen_target(address, resolver ?? { isIP, lookup });
   const context = yield* Effect.context();
   const transport = { closing: false, fibers: new Map(), exchanges: new Set(), reading: new WeakMap() };
   transport.exchange = (res, release = () => {}) => {
