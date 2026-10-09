@@ -119,15 +119,7 @@ effect fn main() -> string raises {A, B} {
 			if err != nil {
 				t.Fatal("Bun is required for generated fiber tests")
 			}
-			root := filepath.Join("..", "..")
-			if err := os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {
-				t.Fatal(err)
-			}
-			jsDir, err := os.MkdirTemp(filepath.Join(root, "dist"), "fiber-shape-")
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = os.RemoveAll(jsDir) })
+			jsDir := jsModuleDir(t, "fiber-shape-")
 			jsPath := filepath.Join(jsDir, "fiber.mjs")
 			if err := os.WriteFile(jsPath, []byte(jsSource), 0600); err != nil {
 				t.Fatal(err)

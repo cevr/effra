@@ -496,14 +496,7 @@ for (const line of lines) console.log(JSON.stringify(line));
 // arguments follow the module path.
 func runCodecJS(t *testing.T, bun, root, script string, args ...string) []byte {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp(filepath.Join(root, "dist"), "codec-engine-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := jsModuleDir(t, "codec-engine-")
 	path := filepath.Join(dir, "engine.mjs")
 	module := "import { readFileSync } from \"node:fs\";\n" + codecEngineJS + "\n" + script
 	if err := os.WriteFile(path, []byte(module), 0644); err != nil {

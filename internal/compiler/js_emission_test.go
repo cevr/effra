@@ -80,19 +80,11 @@ func checkJSModule(t *testing.T, label, js, declarations string) {
 	}
 }
 
-// writeJSModule places modules under dist/ so Node resolves the pinned
+// writeJSModule places modules where Node resolves the pinned
 // `effect` package from the repository's node_modules.
 func writeJSModule(t *testing.T, files map[string]string) string {
 	t.Helper()
-	root := filepath.Join("..", "..")
-	if err := os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp(filepath.Join(root, "dist"), "js-emission-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := jsModuleDir(t, "js-emission-")
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
 			t.Fatal(err)
@@ -107,7 +99,7 @@ func runNode(t *testing.T, dir, file string) (string, error) {
 	if err != nil {
 		t.Fatal("Node is required for JavaScript emission tests")
 	}
-	// dist/ may be a symbolic link. Name the module by its path through the
+	// node_modules is a symbolic link. Name the module by its path through the
 	// link so Node resolves `effect` from this repository's node_modules.
 	main, err := filepath.Abs(filepath.Join(dir, file))
 	if err != nil {

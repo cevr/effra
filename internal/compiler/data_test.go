@@ -490,14 +490,7 @@ effect fn main() -> string {
 func checkStrictTypeScript(t *testing.T, declaration, consumer string) {
 	t.Helper()
 	root := filepath.Join("..", "..")
-	if err := os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp(filepath.Join(root, "dist"), "strict-ts-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := jsModuleDir(t, "strict-ts-")
 	declarationPath := filepath.Join(dir, "generated.d.mts")
 	consumerPath := filepath.Join(dir, "consumer.mts")
 	if err := os.WriteFile(declarationPath, []byte(declaration), 0644); err != nil {

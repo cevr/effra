@@ -388,14 +388,7 @@ func runJSConsumer(t *testing.T, source, consumer string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join("..", "..", "dist"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp(filepath.Join("..", "..", "dist"), "conformance-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := jsModuleDir(t, "conformance-")
 	for file, text := range map[string]string{"generated.mjs": module, "consumer.mjs": consumer} {
 		if err := os.WriteFile(filepath.Join(dir, file), []byte(text), 0o644); err != nil {
 			t.Fatal(err)

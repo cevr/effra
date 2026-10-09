@@ -207,15 +207,7 @@ func runJSProbe(t *testing.T, js, assertions string) string {
 	if err != nil {
 		t.Fatal("Bun is required for backend conformance tests")
 	}
-	root := filepath.Join("..", "..")
-	if err = os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp(filepath.Join(root, "dist"), "conformance-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := jsModuleDir(t, "conformance-")
 	path := filepath.Join(dir, "probe.mjs")
 	if err = os.WriteFile(path, []byte(js+"\n"+assertions), 0644); err != nil {
 		t.Fatal(err)

@@ -37,38 +37,48 @@ func pipeCorpus(t *testing.T) []pipeCorpusSource {
 		seen[text] = true
 		corpus = append(corpus, pipeCorpusSource{name, dir, text})
 	}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() && (entry.Name() == "node_modules" || entry.Name() == ".git" || entry.Name() == "upstream") {
-			return filepath.SkipDir
-		}
-		switch {
-		case strings.HasSuffix(path, ".ef"):
-			text, err := os.ReadFile(path)
+	// Authored programs and Go tests live in the module's source trees, walked
+	// in the order a walk of the repository root would reach them. Listing
+	// the root itself would make the corpus, and this package's test cache,
+	// depend on build outputs (dist/, bin/) that other processes rewrite.
+	var err error
+	for _, tree := range []string{"cmd", "examples", "internal", "lint", "runtime"} {
+		err = filepath.WalkDir(filepath.Join(root, tree), func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			add(path, filepath.Dir(path), string(text))
-		case strings.HasSuffix(path, "_test.go"):
-			file, err := goparser.ParseFile(gotoken.NewFileSet(), path, nil, 0)
-			if err != nil {
-				return err
+			if entry.IsDir() && (entry.Name() == "node_modules" || entry.Name() == ".git" || entry.Name() == "upstream") {
+				return filepath.SkipDir
 			}
-			ast.Inspect(file, func(n ast.Node) bool {
-				lit, ok := n.(*ast.BasicLit)
-				if !ok || lit.Kind != gotoken.STRING || !strings.HasPrefix(lit.Value, "`") {
+			switch {
+			case strings.HasSuffix(path, ".ef"):
+				text, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				add(path, filepath.Dir(path), string(text))
+			case strings.HasSuffix(path, "_test.go"):
+				file, err := goparser.ParseFile(gotoken.NewFileSet(), path, nil, 0)
+				if err != nil {
+					return err
+				}
+				ast.Inspect(file, func(n ast.Node) bool {
+					lit, ok := n.(*ast.BasicLit)
+					if !ok || lit.Kind != gotoken.STRING || !strings.HasPrefix(lit.Value, "`") {
+						return true
+					}
+					if text, err := strconv.Unquote(lit.Value); err == nil && strings.Contains(text, "(") {
+						add(path, ".", text)
+					}
 					return true
-				}
-				if text, err := strconv.Unquote(lit.Value); err == nil && strings.Contains(text, "(") {
-					add(path, ".", text)
-				}
-				return true
-			})
+				})
+			}
+			return nil
+		})
+		if err != nil {
+			break
 		}
-		return nil
-	})
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

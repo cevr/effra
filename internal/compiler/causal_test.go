@@ -256,21 +256,13 @@ func buildGoModule(t *testing.T, dir string) string {
 	return binary
 }
 
-// writeGeneratedJS places a generated test module under dist/, where Bun
-// resolves the pinned effect package.
+// writeGeneratedJS places a generated test module where Bun resolves the
+// pinned effect package.
 func writeGeneratedJS(t *testing.T, prefix, source string) string {
 	t.Helper()
-	root := filepath.Join("..", "..")
-	if err := os.MkdirAll(filepath.Join(root, "dist"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp(filepath.Join(root, "dist"), prefix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := jsModuleDir(t, prefix)
 	path := filepath.Join(dir, "scheduler.tests.mjs")
-	if err = os.WriteFile(path, []byte(source), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return path
