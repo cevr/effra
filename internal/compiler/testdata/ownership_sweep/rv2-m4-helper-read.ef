@@ -1,0 +1,29 @@
+error WithFile { file: File }
+error Nope { code: i64 }
+effect fn readFile(file: File) -> string raises { IoError } {
+    run Files.readText(file).provide<Files>(LiveFiles)
+}
+effect fn rejected(file: File) -> string raises { WithFile } {
+    fail WithFile { file: file }
+}
+effect fn retrieve(failure: WithFile) -> string raises { IoError } { run readFile(failure.file).catch<IoError>("closed") }
+fn ignore(failure: WithFile) -> string { "fixture-ok" }
+effect fn viaHelper(w: WithFile) -> string raises { IoError } { run readFile(w.file) }
+fn pick(w: WithFile) -> File { w.file }
+effect fn apply(cb: effect fn(File) -> string raises { IoError }, f: File) -> string raises { IoError } { run cb(f) }
+effect fn h1(failure: WithFile) -> string { run viaHelper(failure).catch<IoError>("closed") }
+effect fn h2(failure: WithFile) -> string { run readFile(pick(failure)).catch<IoError>("closed") }
+effect fn h3(failure: WithFile) -> string { run apply(readFile, failure.file).catch<IoError>("closed") }
+effect fn job() -> string raises { WithFile, IoError } {
+    let file = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    run rejected(file)
+}
+effect fn consume(mode: i64) -> string raises { IoError, Timeout } uses { Scheduler } {
+    scope {
+        if mode == 1 { run job().timeout(5000).recover<WithFile>(h1) } else {
+            if mode == 2 { run job().timeout(5000).recover<WithFile>(h2) } else { run job().timeout(5000).recover<WithFile>(h3) } }
+    }
+}
+effect fn main() -> void raises { IoError, Timeout } {
+    run Console.log(run consume(3).provide<Scheduler>(LiveScheduler)).provide<Console>(Stdout)
+}

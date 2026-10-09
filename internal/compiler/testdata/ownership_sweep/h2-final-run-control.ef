@@ -1,0 +1,86 @@
+error WithFile { file: File }
+error Nope { code: i64 }
+enum Pick { A, B }
+record BoxS { task: Effect<string, { IoError, Nope }> }
+record BoxF { task: Effect<string, { WithFile, IoError, Nope }> }
+record BoxSS { task: Effect<Effect<string, { IoError, Nope }>, { IoError, Nope }> }
+record BoxFF { task: Effect<Effect<string, { WithFile, IoError, Nope }>, { IoError, Nope }> }
+record Holder { file: File }
+record BoxH { task: Effect<Holder, { IoError, Nope }> }
+record BoxHH { task: Effect<Effect<Holder, { IoError, Nope }>, { IoError, Nope }> }
+effect fn readFile(file: File) -> string raises { IoError } {
+    run Files.readText(file).provide<Files>(LiveFiles)
+}
+effect fn rejected(file: File) -> string raises { WithFile } {
+    fail WithFile { file: file }
+}
+effect fn retrieve(failure: WithFile) -> string raises { IoError } { run readFile(failure.file) }
+effect fn s1() -> File raises { IoError, Nope } {
+    run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+}
+effect fn t1(f: File) -> File raises { IoError, Nope } { f }
+effect fn s2() -> Effect<string, { IoError, Nope }> raises { IoError, Nope } {
+    let g = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    readFile(g)
+}
+effect fn t2(f: File) -> Effect<string, { IoError, Nope }> raises { IoError, Nope } { readFile(f) }
+effect fn s3() -> Effect<Effect<string, { IoError, Nope }>, { IoError, Nope }> raises { IoError, Nope } { s2() }
+effect fn t3(f: File) -> Effect<Effect<string, { IoError, Nope }>, { IoError, Nope }> raises { IoError, Nope } { t2(f) }
+effect fn f1() -> string raises { WithFile, IoError, Nope } {
+    let file = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    run rejected(file)
+}
+effect fn g1(f: File) -> string raises { WithFile, IoError, Nope } { run rejected(f) }
+effect fn f2() -> Effect<string, { WithFile, IoError, Nope }> raises { IoError, Nope } {
+    let g = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    rejected(g)
+}
+effect fn g2(f: File) -> Effect<string, { WithFile, IoError, Nope }> raises { IoError, Nope } { rejected(f) }
+effect fn f3() -> Effect<Effect<string, { WithFile, IoError, Nope }>, { IoError, Nope }> raises { IoError, Nope } { f2() }
+effect fn g3(f: File) -> Effect<Effect<string, { WithFile, IoError, Nope }>, { IoError, Nope }> raises { IoError, Nope } { g2(f) }
+effect fn cStr() -> string raises { IoError, Nope } { "alt" }
+effect fn cStrF() -> string raises { WithFile, IoError, Nope } { "alt" }
+effect fn cT() -> Effect<string, { IoError, Nope }> raises { IoError, Nope } { cStr() }
+effect fn cTF() -> Effect<string, { WithFile, IoError, Nope }> raises { IoError, Nope } { cStrF() }
+fn hStr(n: Nope) -> string { "alt" }
+effect fn hFile(n: Nope) -> File raises { IoError } {
+    run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+}
+fn hT(n: Nope) -> Effect<string, { IoError, Nope }> { cStr() }
+fn hTF(n: Nope) -> Effect<string, { WithFile, IoError, Nope }> { cStrF() }
+fn hTT(n: Nope) -> Effect<Effect<string, { IoError, Nope }>, { IoError, Nope }> { cT() }
+fn hTTF(n: Nope) -> Effect<Effect<string, { WithFile, IoError, Nope }>, { IoError, Nope }> { cTF() }
+effect fn h1() -> Holder raises { IoError, Nope } {
+    let g = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    Holder { file: g }
+}
+effect fn k1(f: File) -> Holder raises { IoError, Nope } { Holder { file: f } }
+effect fn h2() -> Effect<Holder, { IoError, Nope }> raises { IoError, Nope } {
+    let g = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    k1(g)
+}
+effect fn k2(f: File) -> Effect<Holder, { IoError, Nope }> raises { IoError, Nope } { k1(f) }
+effect fn h3() -> Effect<Effect<Holder, { IoError, Nope }>, { IoError, Nope }> raises { IoError, Nope } { h2() }
+effect fn k3(f: File) -> Effect<Effect<Holder, { IoError, Nope }>, { IoError, Nope }> raises { IoError, Nope } { k2(f) }
+effect fn hHolder(n: Nope) -> Holder raises { IoError } {
+    let g = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    Holder { file: g }
+}
+effect fn cH() -> Holder raises { IoError, Nope } {
+    let g = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    Holder { file: g }
+}
+effect fn cHH() -> Effect<Holder, { IoError, Nope }> raises { IoError, Nope } { cH() }
+fn hH(n: Nope) -> Effect<Holder, { IoError, Nope }> { cH() }
+fn hHH(n: Nope) -> Effect<Effect<Holder, { IoError, Nope }>, { IoError, Nope }> { cHH() }
+
+effect fn consume(flag: bool, pick: Pick) -> string raises { IoError, Nope, Timeout, WithFile } uses { Scheduler } {
+    scope {
+        let m1 = run h2()
+        let v2 = run m1
+        run readFile(v2.file).catch<IoError>("closed")
+    }
+}
+effect fn main() -> void raises { IoError, Nope, Timeout, WithFile } {
+    run Console.log(run consume(true, Pick.A {}).provide<Scheduler>(LiveScheduler)).provide<Console>(Stdout)
+}

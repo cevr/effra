@@ -1,0 +1,14 @@
+error WithFile { file: File }
+effect fn rejected(file: File) -> string raises { WithFile } {
+    fail WithFile { file: file }
+}
+effect fn job() -> string raises { WithFile, IoError } {
+    let file = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    run rejected(file)
+}
+effect fn stage() -> string raises { WithFile, IoError } {
+    scope { run job() }
+}
+effect fn main() -> void raises { IoError } {
+    run Console.log(run stage().catch<WithFile>("payload discarded")).provide<Console>(Stdout)
+}

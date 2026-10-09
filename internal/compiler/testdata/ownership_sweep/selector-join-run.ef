@@ -1,0 +1,21 @@
+record Pair { outer: File, inner: File }
+fn choose(flag: bool, pair: Pair) -> File { if flag { pair.outer } else { pair.inner } }
+effect fn readFile(file: File) -> string raises { IoError } {
+    run Files.readText(file).provide<Files>(LiveFiles)
+}
+effect fn bad(flag: bool, borrowed: File) -> File raises { IoError } {
+    scope {
+        let acquired = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+        choose(flag, Pair { outer: acquired, inner: borrowed })
+    }
+}
+effect fn consume() -> string raises { IoError } {
+    scope {
+        let borrowed = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+        let chosen = run bad(true, borrowed)
+        run readFile(chosen).catch<IoError>("closed")
+    }
+}
+effect fn main() -> void raises { IoError } {
+    run Console.log(run consume()).provide<Console>(Stdout)
+}

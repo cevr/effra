@@ -1,0 +1,18 @@
+record Holder { file: File }
+effect fn readFile(file: File) -> string raises { IoError } {
+    run Files.readText(file).provide<Files>(LiveFiles)
+}
+effect fn mkHolder() -> Holder raises { IoError } {
+    let g = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    Holder { file: g }
+}
+effect fn consume() -> string raises { IoError, Timeout } uses { Scheduler } {
+    scope {
+        let box = scope { run mkHolder() }
+        let closedHolder = box
+        run readFile(closedHolder.file).catch<IoError>("closed")
+    }
+}
+effect fn main() -> void raises { IoError, Timeout } {
+    run Console.log(run consume().provide<Scheduler>(LiveScheduler)).provide<Console>(Stdout)
+}

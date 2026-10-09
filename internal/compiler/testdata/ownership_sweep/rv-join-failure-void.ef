@@ -1,0 +1,28 @@
+error WithFile { file: File }
+effect fn readFile(file: File) -> string raises { IoError } {
+    run Files.readText(file).provide<Files>(LiveFiles)
+}
+effect fn rejected(file: File) -> string raises { WithFile } {
+    fail WithFile { file: file }
+}
+effect fn job() -> string raises { WithFile, IoError } {
+    let file = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    run rejected(file)
+}
+effect fn retrieve(failure: WithFile) -> void raises { IoError } {
+    let text = run readFile(failure.file).catch<IoError>("closed")
+    run Console.log(text).provide<Console>(Stdout)
+}
+effect fn stage() -> void raises { WithFile, IoError } uses { Scheduler } {
+    let fiber = fork job()
+    run Scheduler.sleep(300)
+    let s = run fiber.join()
+}
+effect fn consume() -> void raises { IoError } uses { Scheduler } {
+    scope {
+        run stage().recover<WithFile>(retrieve)
+    }
+}
+effect fn main() -> void {
+    run consume().provide<Scheduler>(LiveScheduler).catch<IoError>(void)
+}

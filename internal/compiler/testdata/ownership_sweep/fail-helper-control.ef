@@ -1,0 +1,20 @@
+error WithFile { file: File }
+effect fn readFile(file: File) -> string raises { IoError } {
+    run Files.readText(file).provide<Files>(LiveFiles)
+}
+effect fn rejected(file: File) -> string raises { WithFile } {
+    fail WithFile { file: file }
+}
+effect fn job() -> string raises { WithFile, IoError } {
+    let file = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    run rejected(file)
+}
+effect fn retrieve(failure: WithFile) -> string raises { IoError } { run readFile(failure.file) }
+effect fn consume() -> string raises { IoError } {
+    scope {
+        run job().recover<WithFile>(retrieve).catch<IoError>("closed")
+    }
+}
+effect fn main() -> void raises { IoError } {
+    run Console.log(run consume()).provide<Console>(Stdout)
+}

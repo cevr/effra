@@ -1,0 +1,37 @@
+error WithFile { file: File }
+error Nope { code: i64 }
+effect fn readFile(file: File) -> string raises { IoError } {
+    run Files.readText(file).provide<Files>(LiveFiles)
+}
+effect fn rejected(file: File) -> string raises { WithFile } {
+    fail WithFile { file: file }
+}
+effect fn retrieve(failure: WithFile) -> string raises { IoError } { run readFile(failure.file).catch<IoError>("closed") }
+fn ignore(failure: WithFile) -> string { "fixture-ok" }
+effect fn job() -> string raises { WithFile, IoError } {
+    let file = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    run rejected(file)
+}
+effect fn bail() -> string raises { Nope } {
+    fail Nope { code: 1 }
+}
+effect fn maybeReject(file: File, flag: bool) -> string raises { WithFile } {
+    if flag { run rejected(file) } else { "kept" }
+}
+effect fn stage() -> string raises { Nope, WithFile, IoError } uses { Scheduler } {
+    let fiber = fork job()
+    let early = run bail()
+    run fiber.join()
+}
+effect fn consume(outer: File, flag: bool) -> string raises { WithFile, IoError } uses { Scheduler } {
+    scope {
+        let r = run stage().catch<Nope>("early").catch<WithFile>("joined")
+        run Scheduler.sleep(200)
+        run maybeReject(outer, flag)
+    }
+}
+effect fn main() -> void raises { IoError } {
+    let outer = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    let text = run consume(outer, false).recover<WithFile>(retrieve).provide<Scheduler>(LiveScheduler)
+    run Console.log(text).provide<Console>(Stdout)
+}
