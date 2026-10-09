@@ -1,0 +1,130 @@
+[
+{
+"name": "catch-fallback-fields",
+"go": "unsafe"
+},
+{
+"name": "fail-direct-control",
+"go": "safe"
+},
+{
+"name": "fail-helper-control",
+"go": "safe"
+},
+{
+"name": "fork-field-direct",
+"go": "unsafe"
+},
+{
+"name": "h2-final-run-control",
+"go": "safe"
+},
+{
+"name": "if-timeout-field",
+"go": "unsafe"
+},
+{
+"name": "rows-unjoined-boom",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "rv-closure-failure-outside",
+"go": "unsafe"
+},
+{
+"name": "rv-fork-unjoined-failure",
+"go": "row-unsafe",
+"witness": "rv-fork-unjoined-failure-sleep"
+},
+{
+"name": "rv-fork-unjoined-failure-sleep",
+"go": "row-unsafe"
+},
+{
+"name": "rv-interrupt-failure",
+"go": "unsafe"
+},
+{
+"name": "rv-join-failure-void",
+"go": "unsafe"
+},
+{
+"name": "rv-nine-params",
+"go": "safe"
+},
+{
+"name": "rv-selector-join",
+"go": "unsafe",
+"witness": "selector-join-run"
+},
+{
+"name": "rv2-file-exit-before-join",
+"go": "unsafe"
+},
+{
+"name": "rv2-m4-factory-recover-inside",
+"go": "unsafe"
+},
+{
+"name": "rv2-m4-factory-recover-inside-ignore",
+"go": "safe"
+},
+{
+"name": "rv2-m4-factory-recover-param",
+"go": "unsafe"
+},
+{
+"name": "rv2-m4-helper-read",
+"go": "unsafe"
+},
+{
+"name": "rv2-rows-exit-before-join",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "rv2-rows-exit-before-join-control",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "rv2-rows-fiber-out-of-scope",
+"go": "unsafe"
+},
+{
+"name": "rv2-rows-forked-observer",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "rv2-rows-nested-scope-join",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "rv2-rows-timeout-join",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "scope-failure-catch-control",
+"go": "safe"
+},
+{
+"name": "scope-field-direct",
+"go": "unsafe"
+},
+{
+"name": "scope-field-projection",
+"go": "unsafe"
+},
+{
+"name": "selector-join-run",
+"go": "unsafe"
+},
+{
+"name": "timeout-field-direct",
+"go": "unsafe"
+}
+]

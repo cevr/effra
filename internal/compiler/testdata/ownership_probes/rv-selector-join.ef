@@ -1,0 +1,9 @@
+record Pair { outer: File, inner: File }
+fn choose(flag: bool, pair: Pair) -> File { if flag { pair.outer } else { pair.inner } }
+effect fn bad(flag: bool, borrowed: File) -> File raises {IoError} uses {Files} {
+ scope {
+  let acquired = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
+  choose(flag, Pair { outer: acquired, inner: borrowed })
+ }
+}
+effect fn main() -> void { void }

@@ -1,0 +1,27 @@
+enum N9 { A, B, C, D, E, F, G, H, I }
+effect fn readFile(file: File) -> string raises { IoError } {
+    run Files.readText(file).provide<Files>(LiveFiles)
+}
+effect fn pick(n: N9, a: File, b: File, c: File, d: File, e: File, f: File, g: File, h: File, i: File) -> File {
+    match n {
+        N9.A => a
+        N9.B => b
+        N9.C => c
+        N9.D => d
+        N9.E => e
+        N9.F => f
+        N9.G => g
+        N9.H => h
+        N9.I => i
+    }
+}
+effect fn consume() -> string raises { IoError } {
+    scope {
+        let x = run Files.openRead("{{fixture}}").provide<Files>(LiveFiles)
+        let chosen = run pick(N9.I {}, x, x, x, x, x, x, x, x, x)
+        run readFile(chosen)
+    }
+}
+effect fn main() -> void raises { IoError } {
+    run Console.log(run consume()).provide<Console>(Stdout)
+}

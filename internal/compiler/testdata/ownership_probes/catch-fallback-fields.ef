@@ -1,0 +1,23 @@
+error Nope { code: i64 }
+record Holder { file: File }
+effect fn readFile(file: File) -> string raises { IoError } {
+    run Files.readText(file).provide<Files>(LiveFiles)
+}
+effect fn pick(f: File, flag: bool) -> Holder raises { Nope } {
+    if flag { fail Nope { code: 1 } } else { Holder { file: f } }
+}
+effect fn mkHolder() -> Holder raises { IoError } {
+    let g = run Files.openRead("{{fixture}}").provide<Files>(LiveFiles)
+    Holder { file: g }
+}
+effect fn consume() -> string raises { IoError, Timeout } uses { Scheduler } {
+    scope {
+        let outer = run Files.openRead("{{fixture}}").provide<Files>(LiveFiles)
+        let closedHolder = run mkHolder().timeout(5000)
+        let h = run pick(outer, true).catch<Nope>(closedHolder)
+        run readFile(h.file).catch<IoError>("closed")
+    }
+}
+effect fn main() -> void raises { IoError, Timeout } {
+    run Console.log(run consume().provide<Scheduler>(LiveScheduler)).provide<Console>(Stdout)
+}

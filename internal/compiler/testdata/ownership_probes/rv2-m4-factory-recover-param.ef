@@ -1,0 +1,26 @@
+error WithFile { file: File }
+error Nope { code: i64 }
+effect fn readFile(file: File) -> string raises { IoError } {
+    run Files.readText(file).provide<Files>(LiveFiles)
+}
+effect fn rejected(file: File) -> string raises { WithFile } {
+    fail WithFile { file: file }
+}
+effect fn retrieve(failure: WithFile) -> string raises { IoError } { run readFile(failure.file).catch<IoError>("closed") }
+fn ignore(failure: WithFile) -> string { "fixture-ok" }
+effect fn wrapP(f: File) -> Effect<string, { IoError }> raises { IoError } {
+    rejected(f).recover<WithFile>(retrieve)
+}
+effect fn outer() -> Effect<string, { IoError }> raises { IoError } {
+    let g = run Files.openRead("{{fixture}}").provide<Files>(LiveFiles)
+    run wrapP(g)
+}
+effect fn consume() -> string raises { IoError, Timeout } uses { Scheduler } {
+    scope {
+        let m = run outer().timeout(5000)
+        run m
+    }
+}
+effect fn main() -> void raises { IoError, Timeout } {
+    run Console.log(run consume().provide<Scheduler>(LiveScheduler)).provide<Console>(Stdout)
+}
