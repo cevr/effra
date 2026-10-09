@@ -81,7 +81,7 @@ Harel's slogan is "statecharts = state-diagrams + depth + orthogonality + broadc
 - **XState v6.** `enq.raise` feeds the internal queue. The macrostep loop runs eventless transitions, then internal events (`stateUtils.ts:2697-2801`). Transition functions double as guards and can run twice (`stateUtils.ts:2400-2440`), so they must be pure and synchronous. A returned promise throws (`stateUtils.ts:2858-2874`).
 - **gen_statem.** The `next_event` action inserts events "as the next to process before any already queued events" (E:1041-1053). The `internal` event type cannot come from outside (G:1329-1332). There is no broadcast inside one machine.
 - **MoonBit.** No construct.
-- **Effra mapping.** One step evaluation calls each region's step with the same event, and a region's output becomes a sibling's event through an ordinary call in the same evaluation ([P3](#p3-atomic-broadcast-in-state-guards-and-a-chain-reaction)). The order is the written order: deterministic, with no internal queue and no microstep ambiguity. A cyclic chain is ordinary recursion and needs no special semantics. Harel's "same instant" reading is matched by construction. STATEMATE's next-step reading is available by deferring through an outcome, and is not the default.
+- **Effra mapping.** One step evaluation calls each region's step with the same event, and a region's output becomes a sibling's event through an ordinary call in the same evaluation ([P3](#p3-atomic-broadcast-in-state-guards-and-a-chain-reaction)). The order is the written order, with no internal queue and no microstep. A cyclic chain is ordinary recursion and needs no special semantics. Harel's "same instant" reading is matched by construction. STATEMATE's next-step reading is available by deferring through an outcome, and is not the default.
 
 ### History: shallow H and deep H*
 
@@ -92,7 +92,7 @@ Harel's slogan is "statecharts = state-diagrams + depth + orthogonality + broadc
   - Semantics: "remembering one state for each state whose area includes an H-connector, and one basic configuration if it includes an H*-connector" (p.266).
 - **STATEMATE.** H restores "the substate … which the system was in when most recently in S". H* restores the basic configuration relative to S. With no history, the target is treated as S. `history-clear(S)` and `deep-clear(S)` forget it (§5, p.304–307). History is updated before states are removed, within the step (stage 3(b), p.314).
 - **SCXML.**
-  - Shallow "MUST record the immediately active children of its parent before taking any transition that exits the parent". Deep records the active atomic descendants. A default history transition applies on the first visit (§3.10).
+  - Shallow "MUST record the immediately active children of its parent before taking any transition that exits the parent". Deep records the active atomic descendants. A default history transition applies on the first visit, and its executable content runs after the parent's `<onentry>` (§3.10).
   - Shallow re-entry enters a compound child's default initial state (§3.1.4).
   - There is no clear construct.
 - **XState v6.**
@@ -105,6 +105,7 @@ Harel's slogan is "statecharts = state-diagrams + depth + orthogonality + broadc
 - **Effra mapping.**
   - History is a field that keeps the child value in the inactive variant, such as `Suspended { history: Option<Playback> }`.
   - Deep restore uses the value as is. Shallow restore is an ordinary function that keeps the top-level tag and re-initialises nested regions. `None` is the default history, and clearing is `stay Suspended(None)` ([P4](#p4-shallow-and-deep-history)).
+  - SCXML's default history content runs after the parent's entry. In Effra, the default path is the `None` arm deciding `go` to an initial literal, so any effects on that path are entry work of the configuration it enters, started after the parent's entry under C5's order. They are not part of the step.
   - One semantic difference: statechart history remembers configuration, while retained Effra data also remembers payloads. Shallow restore must reset nested data deliberately. [The history laws](#history-laws) state this.
 
 ### Conditions and `in(state)`
@@ -119,7 +120,7 @@ Harel's slogan is "statecharts = state-diagrams + depth + orthogonality + broadc
 - **XState v6.** The `stateIn` guard and the `in` property were removed (CHANGELOG `:2516`, `:2541-2553`). Transition functions call `matchesState` (`utils.ts:28-56`) on the snapshot instead.
 - **gen_statem.** Pattern match on the state term in `handle_event/4` clauses (G:1760-1770).
 - **MoonBit.** `match` with guards. Guards do not count toward coverage (L/fundamentals.md:2003-2005).
-- **Effra mapping.** A sibling's state is an ordinary value the parent passes along. The author chooses the pre-step value (STATEMATE) or the post-step value (SCXML-like), and the choice is visible in the source ([P3](#p3-atomic-broadcast-in-state-guards-and-a-chain-reaction)). A child step must stay `(state, event)` to remain a declared machine ([p3b](#p3-atomic-broadcast-in-state-guards-and-a-chain-reaction): a three-parameter step is EF140). So the sibling fact travels in the child's event: see [open question 2](#open-questions).
+- **Effra mapping.** A sibling's state is an ordinary value the parent passes along. The author chooses the pre-step value, which matches STATEMATE's start-of-step reading and SCXML's selection against the configuration of the current microstep, or the post-step value, which no statechart guard reads: it is explicit sequencing, closer to a reaction in a later SCXML microstep. The choice is visible in the source ([P3](#p3-atomic-broadcast-in-state-guards-and-a-chain-reaction)). A child step must stay `(state, event)` to remain a declared machine ([p3b](#p3-atomic-broadcast-in-state-guards-and-a-chain-reaction): a three-parameter step is EF140). So the sibling fact travels in the child's event: see [open question 2](#open-questions).
 
 ### Entry, exit, activities and per-state work
 
@@ -318,12 +319,13 @@ The flat product grows as N·2^N, which is Harel's blow-up (p.243). The factored
 
 #### (c) Atomic broadcast and in-state guards within one step
 
-**Holds, and is more deterministic than SCXML or XState.**
+**Holds.**
 
 - P3 delivers one event to every region in one evaluation.
 - A guard reads a sibling value that the author chose explicitly as pre-step or post-step.
 - A region output reaches a sibling in the same evaluation.
-- Nothing is queued, and the order is source order. SCXML needs document order to reach determinism (Appendix D principles), and XState's region order is unsorted.
+- Nothing is queued, and the order is source order. SCXML fixes its order by document order (Appendix D principles), while XState's region order is not explicitly sorted.
+- A post-step guard is Effra sequencing, not SCXML guard selection, which reads the configuration before the microstep's transitions run.
 
 Two weaknesses remain:
 
@@ -422,11 +424,13 @@ fn playerStep(state: Player, input: Input) -> decision<Player, void> {
 | Rule | Behavior |
 | --- | --- |
 | R1 Binding | `region V.field M` names a variant of the machine's state, one of its payload fields, and a declared machine `M` in the same module whose state type is the field's type. One binding per line, in source order; the order is the *region order*. A missing variant or field, a type mismatch, an undeclared `M`, a duplicate binding or a cycle through regions is a declaration diagnostic. |
-| R2 Region update | Inside `stay V { … }` for a region-owning `V`, each region field is written `field <- d`, where `d` is a decision over the region's state. A plain value for a region field in a `stay` is a diagnostic. `field <- ignore` leaves the region untouched and spells an omission instead of hiding it. `<-` on a non-region field, outside a constructor, or inside `go` (which re-enters every region) is a diagnostic. |
+| R2 Region update and provenance | Inside `stay V { … }` for a region-owning `V`, each region field is written `field <- d`, where `d` is a decision over the region's state. A plain value for a region field is a diagnostic. `field <- ignore` leaves the region untouched and spells an omission instead of hiding it. `<-` is accepted only as a field initializer written directly as the argument of `stay`: on a non-region field, in a constructor outside `stay` (for example `let next = Player.On { … }`), or inside `go` (which re-enters every region) it is a diagnostic. **Every `stay` whose possible tags include a region-owning variant must carry region provenance**: its argument is either the unchanged current state (`stay state`, defined as every region `<- ignore`) or a literal `V { field <- d, … }`. This holds through helpers as well: a followed helper's `stay` obeys the same rule, and the walk anchors the current state as it does for EF139. Any other value is refused, because its region decisions are unknown: a `let`-bound state, a state-returning helper result, a parameter that is not the current state, or a dynamic value. `let next = Player.On(…); stay next` is therefore refused, so a parent `stay` can never drop a region's re-entry. |
 | R3 Region decisions | `d` may be a call to `M`'s bound step or complete function (a *delegation*), a decision-returning helper (followed under the existing helper depth), or a literal decision such as `playback <- go Playback.Stopped {}`, which is a parent-driven arrow into the region (Harel inter-level, p.241). Inside the arm, the region field's binder is that region's current state, so EF139 judges literal `stay` decisions against the narrowed field. |
 | R4 Child checking | `M` is checked as a machine in its own right (EF139, EF140, plan). A region binding is the only way a child participates, so the undeclared-child hole (n3b) closes. |
-| R5 Regions do not finish | A region-bound machine whose plan has a `done` or conservative `any` transition is refused. A region is final through its own terminal variant, and "all regions final" is an ordinary match. This is a declaration rule, because `never` is not an admitted `Step` output today (`n5`: `EF102 unknown or unsupported value type Machines.Step<Door, never>`). |
+| R5 Regions do not finish | `done` never reaches a region, which two checks guarantee. First, a region-bound machine whose plan has a `done` or conservative `any` transition is refused. Second, at every application `field <- d`, the checker walks `d` through `let` aliases, `if`/`match` arms and followed helpers. It accepts only these forms: a direct call to the region machine's bound step or complete (proved done-free by the first check), a literal `go`, `stay`, `ignore` or `reject`, or a helper whose tail decisions are all of these. A literal `done`, a decision whose source is undecidable (a parameter, a function value, a helper beyond the depth limit, a conservative path) or a `match` with any such arm is refused. Refusing an undecidable source is never fail-open (EF142 discipline). A region is final through its own terminal variant, and "all regions final" is an ordinary match. This must be a declaration rule, because `never` is not an admitted `Step` output today (`n5`: `EF102 unknown or unsupported value type Machines.Step<Door, never>`). |
 | R6 Depth | A single region on a variant is Harel depth with its own plan. Several regions are orthogonality. Regions nest by binding a region machine that has regions of its own. |
+
+**Parsing `<-`.** `<-` is not a token. The parser recognises a field name followed by adjacent `<` and `-` only in a field-initializer position, where the ordinary form would be `name:`. Everywhere else `x<-1` keeps its meaning `x < -1`, and a lexer test pins that.
 
 **Plan facts.**
 
@@ -446,7 +450,7 @@ The child plans stay separate, so plan size stays additive. The graph view nests
 - All cleanup completes before commit, as today.
 - A region's work completion is routed to that region machine's `complete`. Its decision is applied as `stay V { field <- d, others <- ignore }`. SCXML similarly routes invoke results to the invoking state, and a parent-mediated alternative is [open question 3](#open-questions).
 
-**Provider view.** The lowered plan gains a region table. The lowered decision for a machine with regions carries a fixed-width per-region change code (kept, stayed or re-entered), so the provider never compares state values. gen_statem compares terms (E:565-591); Effra reads a decision.
+**Provider view.** The lowered plan gains a region table. The lowered decision for a machine with regions carries a fixed-width per-region change code (kept, stayed or re-entered) with **no terminal case**: R5 makes `done` unrepresentable at a region, so the lowered type cannot express it. The provider never compares state values. gen_statem compares terms (E:565-591); Effra reads a decision.
 
 **Lowering obligation.**
 
@@ -479,9 +483,12 @@ Each of these is accepted by a library or composition encoding today. Factored p
 **Negative controls.**
 
 - A plain value written to a region field inside `stay` (n1 shape).
+- `let next = Player.On(…); stay next`, `stay helperReturningPlayer(…)` and `stay p` for a non-current parameter `p` whose tags include a region-owning variant: refused for missing region provenance (B1). `stay state` is accepted and is equivalent to every region `<- ignore`.
+- `playback <- done`, `playback <- d` where `d` is a parameter or comes from a helper that can return `done`, and a `match` with one `done` arm: refused (R5). The same probe through a `let` alias must also be refused.
+- `x<-1` in an ordinary expression still parses as a comparison.
 - `<-` on a non-region field, inside `go`, or outside a decision.
 - A region bound to an undeclared machine or a mismatched field type.
-- A region machine with `done` (R5).
+- A region-bound machine whose plan has `done` or `any` (R5).
 - A literal `field <- stay` that changes the region tag (EF139).
 - A duplicate region binding.
 - A region cycle.
@@ -495,7 +502,7 @@ History stays ordinary data, for three reasons.
 2. *Every variant is one ordinary function.* Deep restore is the value. Shallow restore is a reset function. Default history is `None` or an initial literal. Clear is `stay Suspended(None)`. Intermediate depth (Harel Fig. 12) is a function that resets below a chosen level.
 3. *No bad program becomes unrepresentable.* A `history` keyword could not stop an author from forgetting to record or from restoring the wrong value, so it fails [construct admission](../design.md#language-design-principles).
 
-XState v6 now requires an explicit default target (`StateNode.ts:359-376`). Effra's `Option` match forces the same choice through exhaustiveness. The lifetime half of history (fresh epochs on restore) is a provider law, not syntax: see [history laws](#history-laws).
+XState v6 now requires an explicit default target (`StateNode.ts:359-376`). Effra's `Option` match forces the same choice through exhaustiveness. The lifetime half of history (fresh epochs on restore) is a provider law, not syntax: see [history laws](#history-laws). Which epochs renew follows the decision: a parent `go` renews the parent and its regions, while `field <- go remembered` renews only that region. Effects on the default path run as entry work of the restored configuration, after the parent's entry, matching the ordering of SCXML's default history content (§3.10).
 
 ## 3. Decision syntax
 
@@ -564,8 +571,15 @@ This is one atomic change with no compatibility shim (subtract before adding).
 
 - Remove the bundled `Step` template, and with it `effra/machines`, unless the runtime surface needs that module later.
 - Rewrite `Machines.Step<S, O>.Go(x)` to `go x`, and likewise for each variant. The footprint is 2 examples, 19 fixtures under `internal/compiler/testdata/machines/`, `machines_test.go` and `machines_budget_test.go`.
+- Rename embedded Effra identifiers that become keywords, keeping each test's contract. The census at `69fa66a`:
+  - `effect fn go<…>` service operations and their calls in `internal/compiler/operation_rows_test.go` (22 declarations) and `cmd/ef/operation_rows_process_test.go` (4);
+  - `fn ignore(h: HttpHandler)` in `internal/compiler/http_transport_test.go:494`;
+  - `fn settle(done: bool)` in `internal/compiler/lower_tail_test.go:271`;
+  - `let done = …` four times in `internal/compiler/void_go_abi_test.go:163-201`.
+
+  Go host code (for example `done` channels in `runtime/`) and Python are unaffected. M1 re-runs this census on its base, because other lanes add embedded programs.
 - Update the EF139 and EF140 messages ("`stay` keeps the current entry …").
-- Bump the formatter identity to `effra/formatter-12`, and update `bundled_smoke` and its interface hashes.
+- Bump the formatter identity to `effra/formatter-15`, the identity allocated for this change at integration (12 is already taken by the numeric work on main). Update `bundled_smoke` and its interface hashes.
 
 **Equivalence control.** The plan facts of `machine-search.ef` and `machine-breaker.ef` before and after the rewrite are identical apart from spans and the removed bundled binding.
 
@@ -595,7 +609,7 @@ This is one atomic change with no compatibility shim (subtract before adding).
 - A `stay` that changes the narrowed tag: EF139.
 - `decision<S, O>` with a non-enum or generic `S`: EF140.
 - A decision match missing `done`: EF117.
-- A user enum named `Step` or a function named `go`-like: ordinary, never special.
+- A user enum named `Step` is ordinary data, never special. After migration, a function named `go`, `ignore` or `done` is an ordinary reserved-word diagnostic that names the decision form.
 - A stale `Machines.Step` import after migration: ordinary unknown-module diagnostic.
 
 ## 4. GDP augmenting machines
@@ -605,7 +619,7 @@ The [evidence research](opaque-values-and-evidence.md) separates four properties
 | Property | Machine use | Checkable now? |
 | --- | --- | --- |
 | **Subject identity:** which entity the evidence is about | A state payload carries evidence about *its* subject. For example, `Unlocked { grant: Grant }`, where `Grant` holds the key it authorised. Outcomes are bound to (actor generation, entry epoch, work id). `Actor<M>` names the declaration. | Partly. The payload shape checks. Binding outcomes to entries is a provider law. |
-| **Construction authority:** who may mint the value | Evidence in payloads is minted only by its owning module's check (`pub readonly`). Decisions are minted only by decision syntax. A `Plan` is minted only by lowering a declaration name ([forged-plan control](../specs/machine-provider-contract.md#negative-controls)). Completion envelopes are minted only by the provider. A `Running` is constructible only from the `Plan` it runs. | Not yet: n6 shows a forged `Grant` accepted. Needs owner-controlled construction (#15). |
+| **Construction authority:** who may mint the value | Evidence in payloads is minted only by its owning module's check (`pub readonly`). Decisions are minted only by decision syntax. A `Plan` is minted only by lowering a declaration name ([forged-plan control](../specs/machine-provider-contract.md#negative-controls)). Completion envelopes are minted only by the provider. A `Running` carries the plan identity and a start token minted by the spawn boundary, and that boundary validates both before it produces `Actor<M>`. | Not yet: n6 shows a forged `Grant` accepted. Needs owner-controlled construction (#15). |
 | **Lifetime:** the owner scope the value may not outlive | Entry-owned resources may not escape into state, output or outcome values ([spec](../specs/state-machines.md#ownership-and-publication)). Evidence obtained in an evaluation is data, not a resource. | Conservative data-only check today (EF141). Portable ownership is #11. |
 | **Freshness:** whether evidence still describes the present | Stale completions are rejected by the entry-epoch fence at dequeue. Evidence such as `Grant` is a record of a past decision, and revalidation is an explicit effectful step. | Runtime only, by design (see below). |
 
@@ -644,7 +658,7 @@ Negative control `n6` replaces an `Ignore` with `Go(Door.Unlocked(Grant("forged"
 
 ### Entry epochs as GDP-style fresh names: what is feasible
 
-GDP's rank-2 names give freshness inside a lexical scope (Noonan, `Theory/Named.hs`). Entries are sequential *dynamic* lifetimes: a completion is produced in one entry and dequeued in a later one, and no static scope spans both. Rejecting staleness by type is therefore **infeasible without a dependent or linear protocol**, and that is rejected below. The feasible parts:
+GDP's rank-2 names give freshness inside a lexical scope (Noonan, `Theory/Named.hs`). Entries are sequential *dynamic* lifetimes: a completion is produced in one entry and dequeued in a later one, and no static scope spans both. Rejecting staleness by type is therefore **not expressible in Effra's chosen model**. Its names are lexically scoped and its ownership lifetimes are scope-bound, so no type can relate a value produced in one dynamic entry to the entry current at dequeue. Expressing it would need generative names tied to runtime epochs, which amounts to a dependent or linear protocol, and that is rejected below. The parts the model can express:
 
 - *Construction authority.* The completion envelope (epoch and work id) is provider-minted and invisible to user code. `complete` receives only the `Outcome` payload, so user code can neither forge a current-epoch completion nor branch on the epoch. Today `Outcome` must be a type distinct from `Event` (EF140), which already prevents forging a completion through `send`.
 - *Subject binding.* A work recipe is constructed by `enter(state)` for exactly one entry. Its envelope binds it to that entry, and redirecting it to another entry or region is unrepresentable because user code never holds the envelope.
@@ -654,7 +668,22 @@ GDP's rank-2 names give freshness inside a lexical scope (Noonan, `Theory/Named.
 
 `MachineRuntime.start` returns `Running<S, E, O, F>`. The subject identity of a running handle is the plan it executes, and two declarations can share `S`, `E` and `O`.
 
-**Proposal.** `Running` is constructible only from the `Plan` value being executed, and it carries `plan.facts.id`. The caller-facing handle stays `Actor<M>`, which names the declaration. A provider that returns a handle for another plan is then refused by construction rather than by review. This needs owner-controlled construction (#15) and is recorded as a provider-contract negative control (ticket M5).
+Construction authority alone does not correlate a handle with its plan. `Running<S, E, O, F>` is structural in its type arguments, so two declarations with the same `S`, `E`, `O` and `F` share one `Running` type. A provider that mints a genuine `Running` for plan B can return it from a start of plan A and still type-check. Ordinary nominal records do not prove that relation ([opaque values](opaque-values-and-evidence.md#proposed-common-surface): combining evidence for different subjects needs explicit subject equality validation).
+
+**Proposal: identity validation at the spawn boundary.**
+
+1. The trusted boundary that produces `Actor<M>` is the lowered spawn for declaration `M`. It mints a fresh, unforgeable start token for each start and passes `(plan, token)` to `MachineRuntime.start`.
+2. `Running` is opaque and constructible only by the provider from `(plan, token)` (owner-controlled construction, #15). It carries `plan.facts.id`, the plan revision and the token.
+3. Before producing `Actor<M>`, the boundary checks that the returned handle's plan id and revision equal `M`'s lowered plan and that its token equals the one it minted. On a mismatch, the start fails with a typed `MachineStartFailure` identity-mismatch case and no `Actor<M>` exists. The check is one comparison of plan id, revision and token per start, not per message.
+4. The caller-facing handle stays `Actor<M>`, which names the declaration.
+
+What this proves: user code and providers cannot make `Actor<M>` refer to a handle for another plan or another start. What it does not prove: a provider could still wire a correctly labelled handle to the wrong execution internally. That is a refuted conformance law (the handle's observations diverge from `M`'s plan), not a type error. A generative nominal correlation (a fresh type per declaration) was considered and deferred under the same document's rule to add generative identities only after concrete callers need them.
+
+Negative controls (ticket M5):
+
+- *Same shape, different plan.* Declarations `A` and `B` with identical `S`, `E`, `O` and `F`. A test provider returns `B`'s `Running` from `start(planA)`. Expected result: an identity-mismatch `MachineStartFailure`, and no `Actor<A>`.
+- *Same plan, other start.* A provider returns the handle from an earlier start of the same plan. Expected result: a token mismatch failure.
+- *Forged handle.* User code builds a `Running` value directly. Expected result: a construction diagnostic.
 
 ## 5. Laws augmenting machines
 
@@ -666,31 +695,33 @@ Notation: `(s, ε)` is the committed state and entry, and `⟦d⟧` is the effec
 
 | Law | Statement | Rows it rests on |
 | --- | --- | --- |
-| D1 `ignore` is identity | `⟦ignore⟧(s, ε) = (s, ε)`. No entry work is started or cancelled, and the caller's acknowledgement succeeds. | P2, P6 (serial evaluation), R11 |
-| D2 `stay` keeps the entry | `⟦stay s'⟧(s, ε) = (s', ε)` with `tag(s') = tag(s)`. Entry work and timers continue, and completions for `ε` are still accepted. A dynamic tag change is a defect after cleanup. | P1, R15 |
-| D3 `go` re-enters | `⟦go s'⟧(s, ε) = (s', ε')` with `ε'` never used before, including when `s' = s`. The `ε` cleanup completes before commit, and `go` is not idempotent: two `go s` decisions produce two epochs. | P4, P5, P8, R1, R2, R5 |
+| D1 `ignore` is identity | `⟦ignore⟧(s, ε) = (s, ε)`. No entry work is started or cancelled, and the caller's acknowledgement succeeds. | P2 (the step runs as one invoke), P4 (the entry scope is untouched), R2 (no finalizer runs) |
+| D2 `stay` keeps the entry | `⟦stay s'⟧(s, ε) = (s', ε)` with `tag(s') = tag(s)`. Entry work and timers continue, and completions for `ε` are still accepted. A dynamic tag change is a defect after cleanup. | P2, P4, R2 (scope kept, no finalizer); P1 and R15 for the defect path |
+| D3 `go` re-enters | `⟦go s'⟧(s, ε) = (s', ε')` with `ε'` never used before, including when `s' = s`. The `ε` cleanup completes before commit, and `go` is not idempotent: two `go s` decisions produce two epochs. | P8 and R5 (old entry work interrupted), P4, R2 and R1 (old scope closed, finalizers once, in order), P6 (new entry work forked into the new scope) |
 | D4 `reject` is observable and inert | State and entry are as for `ignore`, and the originating caller observes `Rejected`. `reject` and `ignore` differ only in caller observation. | P1, P3, R6 |
-| D5 `done` is terminal | Cleanup, then one output published once. Every waiter observes the same output, and later sends observe `Stopped`. | P4, R2, R3, R6 |
+| D5 `done` is terminal | Cleanup, then one output published once. Every waiter observes the same output, and later sends observe `Stopped`. | P4, R2 (cleanup), P1 and R3 (one output), R6 (observation) |
 | D6 `stay state` ≅ `ignore` | Equal on state and entry. Plan facts still distinguish them. | follows from D1 and D2 |
 
 ### Composition laws (regions)
 
-| Law | Statement |
-| --- | --- |
-| C1 Delegation homomorphism | For a region `f` bound to `M`, while the parent stays in `V`, the region's state and region-entry trace under `f <- M.step(s_f, e)` equal `M` run standalone on the same event sequence, with its own epochs. |
-| C2 Commutativity up to isomorphism | Swapping two region bindings gives isomorphic plans and decisions (a field permutation). Only exit and entry *order* changes, so order is pinned to region order and is not claimed commutative. |
-| C3 Associativity | Nesting regions `(A×B)×C` and declaring `A×B×C` flat give isomorphic decisions and states. Epoch nesting differs, and only the observable decisions and per-region work traces are compared. |
-| C4 Identity | A region machine with one variant whose step always decides `ignore` adds no observable behavior: `A×Unit ≅ A`. |
-| C5 Hierarchy ordering | Parent `go` out of `V` closes regions in reverse region order, each with its descendants first, then the parent entry, before commit. Entry is parent first, then regions in order. |
-| C6 Sibling independence | `f <- go …` closes and restarts only `f`'s entry. A sibling's work and epoch are unchanged. |
+C2 and C3 are compiler facts about plans and are checked by plan comparison. C1, C5 and C6 are provider obligations.
+
+| Law | Statement | Rows it rests on |
+| --- | --- | --- |
+| C1 Delegation homomorphism | For a region `f` bound to `M`, while the parent stays in `V`, the region's state and region-entry trace under `f <- M.step(s_f, e)` equal `M` run standalone on the same event sequence, with its own epochs. | Per region: P4 (region scope), P6 (region work forked into it), P8 and R5 (interrupted on region `go`) |
+| C2 Commutativity up to isomorphism | Swapping two region bindings gives isomorphic plans and decisions (a field permutation). Only exit and entry *order* changes, so order is pinned to region order and is not claimed commutative. | Compiler (plan facts) |
+| C3 Associativity | Nesting regions `(A×B)×C` and declaring `A×B×C` flat give isomorphic decisions and states, provided the grouping machine `A×B` is a pure, work-free delegate: no `enter`, no `complete`, and a step that only delegates to its regions. Epoch nesting differs, and only the observable decisions and per-region work traces are compared. | Compiler (plan facts) |
+| C4 Identity | `Unit` is a single-variant machine with a pure, effect-free step that always decides `ignore`, and no `enter`, `complete` or entry work. Binding it as a region adds no observable behavior: `A×Unit ≅ A`. A region with work is never an identity. | Compiler (plan facts) |
+| C5 Hierarchy ordering | Parent `go` out of `V` closes regions in reverse region order, each with its descendants first, then the parent entry, before commit. Entry is parent first, then regions in order. | R2 (finalizers in reverse acquisition order), R1 (once) |
+| C6 Sibling independence | `f <- go …` closes and restarts only `f`'s entry. A sibling's work and epoch are unchanged. | R9 (sibling isolation), R2 (only `f`'s scope closes) |
 
 ### History laws
 
-These are ordinary property tests over user functions (H2–H4) plus provider obligations (H1, H5):
+History is data (section 2.6), so H2–H5 are ordinary property tests over the user's history functions, not provider obligations. Only H1 is a provider obligation, because it concerns entry lifetimes.
 
 | Law | Statement |
 | --- | --- |
-| H1 Restore is re-entry, not resumption | Restoring a remembered configuration starts fresh epochs for the parent and every restored region. Completions from pre-exit entries are stale and are counted. This is XState v6's "restart instead of leaking" (CHANGELOG `:1111`). |
+| H1 Restore is re-entry, not resumption | Restoring re-enters, so pre-exit completions are stale and are counted. Which epochs renew depends on the decision. In the suspend/restore pattern (the parent decides `go` to the remembered configuration), the parent and every restored region get fresh epochs. A region-level restore, `field <- go remembered`, renews only that region's epoch: this is Harel's history arrow that keeps the enclosing state (p.238). This is XState v6's "restart instead of leaking" (CHANGELOG `:1111`). Rows: P8 and R5 (old entries interrupted), P6 and R9 (new work forked, isolated), P8 and R4 (the epoch fence drops stale completions). |
 | H2 Deep restore | `restore(Some(x), deep) = x`: re-enter after exit equals the remembered state. |
 | H3 Shallow restore | `tag(shallow(x)) = tag(x)`, and nested regions equal their initial values. |
 | H4 Idempotence | `shallow(shallow(x)) = shallow(x)`. |
@@ -702,7 +733,9 @@ Every provider passes these on each target, recorded by revision, target and fix
 
 1. D1–D6 on the search and breaker programs.
 2. C1, C5 and C6 on the two region programs.
-3. H1 on the history player.
+3. H1 on the history player, in both the parent `go` and the region-level `field <- go` forms.
+
+H2–H5 run as property tests over the history example's functions, with no provider involved.
 
 Each has a causal mutant:
 
@@ -734,7 +767,7 @@ These rows extend the existing obligation table with the same categories. Region
    - *Rejected:* bare `stay`, because it would need the rejected current-state heuristic.
    - *Rejected:* reserving `decision`, in favour of a predeclared type like Go's `error`.
 6. **Static staleness is out of scope.**
-   - *Rejected:* type-indexed entry names (GDP rank-2) for completions, since entries are dynamic and sequential.
+   - *Rejected:* type-indexed entry names (GDP rank-2) for completions. Entries are dynamic and sequential, and Effra's lexically scoped names and scope-bound lifetimes cannot relate a completion to the entry current at dequeue. This is a limit of the chosen model, not of typing in general.
    - *Rejected:* a linear or dependent protocol, which needs a second type-level language (as in the [lawful runtime rejections](lawful-runtime-contract.md#rejected-alternatives-and-counterevidence)).
    - The fence stays a provider law, with provider-minted envelopes.
 7. **A region's sibling facts travel in the child's event (for now).**
@@ -753,17 +786,18 @@ Proposed tickets. Numbers in parentheses are existing hosted issues.
 | M1 Decision syntax | Replace the bundled `Step` with the predeclared `decision<S, O>` and the five forms and patterns. Migrate examples, fixtures and tests. Bump the formatter identity. Add hover and completion. | Current checker (#46) | [Section 3](#acceptance-criteria-and-negative-controls) criteria and controls. Plan-fact equivalence on both examples. Full gate. |
 | M2 Region bindings: declaration and plan | `region V.field M` rules R1–R6 and `<-` updates. Plan `regions` facts and nested graph clusters. No runtime. | M1, #46 | [Section 2.5](#25-proposed-region-bindings) criteria 1–2 and the negative controls. P1 and P3 rewritten. Additive plan size receipt (N up to 8). |
 | M3 Region entry lifetimes | Nested region entries and epochs, the work identity tuple, exit and entry order, lock-step re-entry, region completion routing. | M2, #19, #52, #11, #47 | Section 2.5 criterion 3 on the first provider. Laws C1, C5, C6 and H1 with mutants. |
-| M4 Decision, region and history laws in the provider contract | Add D1–D6, C1–C6 and H1/H5 rows to the [obligation table](../specs/machine-provider-contract.md#provider-obligations) with assurance categories, plus the conformance programs. | M1 (D rows); M3 (C and H rows); #3, #4 | Rows recorded, mutants refute, and unresolved rows carry justifiers. Cross-provider runs in #4. |
-| M5 Machine evidence | `pub readonly` evidence payload pattern, provider-minted completion envelopes, and `Running` constructible only from its `Plan`. | #15 (owner-controlled construction), #3 | n6 becomes a diagnostic. Forged-plan and foreign-`Running` negative controls. Second unrelated example (validated lease). |
+| M4a Law rows and fixtures in the provider contract (#3) | Add D1–D6, C1, C5, C6 and H1 rows to the [obligation table](../specs/machine-provider-contract.md#provider-obligations) with their P/R rows and assurance categories. Define the conformance programs and causal mutants as fixtures. | M1 (D rows); M2 (C and H definitions); #3 | Rows recorded with justifiers for unresolved ones. Fixture and mutant definitions are checked in. |
+| M4b First-provider runtime for the laws (#47) | Make the first provider pass the M4a fixtures, and make every mutant refute. | M4a, M3, #47 | All M4a fixtures pass on one provider, and every mutant fails. |
+| M5 Machine evidence | `pub readonly` evidence payload pattern, provider-minted completion envelopes, opaque `Running` carrying plan id, revision and start token, and identity validation at the spawn boundary with a typed `MachineStartFailure` mismatch. | #15 (owner-controlled construction), #3 | n6 becomes a diagnostic. Controls for a forged plan, a forged handle, same shape with a different plan, and same plan from another start. Second unrelated example (validated lease). |
 | M6 Composition lowering measurements | Allocation, dispatch and size of product steps and decisions against a tagged-struct Go control and a TS/Effect control. Evaluates the flat decision representation. | M1, M2; benchmarks-last | Measured receipts in the measurement ledger. Unmeasured remains unresolved. |
 | M7 Composition guide and examples | A user-facing guide: hierarchy by nesting, regions, history patterns (deep, shallow, default, clear), evidence in payloads. Two examples in the authored example list. | M1, M2 | Examples check and run on Go and JS. Readme and bundled smoke pass. |
 
 **Effect on existing tickets:**
 
 - #46 (machine-plan) gains M1 as a follow-on: the template-identity recognition is superseded.
-- #3 (machine-provider-contract) gains the D rows and `Running` authority (M4, M5).
-- #47 (machine-runtime) owns M3's provider side.
-- #4 (machine-provider-conformance) runs M4's programs on two providers.
+- #3 (machine-provider-contract) owns the law rows and the fixture and mutant definitions (M4a) and `Running` identity validation (M5).
+- #47 (machine-runtime) owns M3's provider side and the first-provider runtime that passes the fixtures (M4b).
+- #4 (machine-provider-conformance) consumes the M4a fixtures across providers.
 - #11 (actor-protocol) gates M3 through portable ownership and `Actor<M>`.
 - No HITL ticket is closed.
 
