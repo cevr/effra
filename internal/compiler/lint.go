@@ -548,33 +548,36 @@ func (r *Result) suppressionOutcome(suppression *lintSuppression, packs LintPack
 }
 
 // notEvaluated is why a selected pack's rule did not complete over this
-// analysis, or "" when it completed. A pack without a report did not run
-// its rules and counts as failed: its silence cannot show a suppression
-// unused.
+// analysis, or "" when it completed. The rule's own status decides first:
+// a rule the configuration turned off or admission skipped was never
+// requested, so a failure of the pack's other rules does not relabel it.
+// Pack-failed is reserved for a rule the pack was asked to run, and for a
+// pack without a report, whose silence cannot show a suppression unused.
 func (p LintPacks) notEvaluated(rule string) string {
 	namespace, _, _ := strings.Cut(rule, "/")
 	index := slices.IndexFunc(p.Reports, func(report LintPackReport) bool { return report.Pack == namespace })
-	if index < 0 || p.Reports[index].Report.Failure != nil {
+	if index < 0 {
 		return NotEvaluatedPackFailed
 	}
-	statuses := p.Reports[index].Report.Rules
-	status := slices.IndexFunc(statuses, func(status lintsdk.RuleStatus) bool { return status.Rule == rule })
+	report := p.Reports[index].Report
+	status := slices.IndexFunc(report.Rules, func(status lintsdk.RuleStatus) bool { return status.Rule == rule })
 	if status < 0 {
 		return NotEvaluatedPackFailed
 	}
-	switch statuses[status].Status {
-	case lintsdk.StatusCompleted:
-		return ""
+	switch report.Rules[status].Status {
 	case lintsdk.StatusOff:
 		return NotEvaluatedRuleOff
 	case lintsdk.StatusSkipped:
-		if strings.HasPrefix(statuses[status].Reason, NotEvaluatedTargetUnsupported) {
+		if strings.HasPrefix(report.Rules[status].Reason, NotEvaluatedTargetUnsupported) {
 			return NotEvaluatedTargetUnsupported
 		}
 		return NotEvaluatedFactsUnavailable
-	default:
-		return NotEvaluatedPackFailed
+	case lintsdk.StatusCompleted:
+		if report.Failure == nil {
+			return ""
+		}
 	}
+	return NotEvaluatedPackFailed
 }
 
 // configuration is the configuration in effect: the default one when the
