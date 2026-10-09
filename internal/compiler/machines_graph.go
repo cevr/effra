@@ -51,8 +51,19 @@ type GraphMachineTransitionFacts struct {
 	Via        []string `json:"via,omitempty"`
 }
 
-func machineStateNodeID(plan *MachinePlan, variant string) string {
-	return graphTupleID("machine-state", plan.ID, variant)
+// machineGraphID builds a generated graph identity after charging its bytes
+// to the view's work. Plan IDs carry the machine's source name and every state
+// node and edge identity repeats one, so identities are charged by length, not
+// only by count.
+func machineGraphID(facts *graphFacts, prefix string, parts ...string) (string, bool) {
+	n := len(prefix)
+	for _, part := range parts {
+		n += 1 + len(part) + 2*(strings.Count(part, "%")+strings.Count(part, "|"))
+	}
+	if !facts.spend(machineTextUnits(n)) {
+		return "", false
+	}
+	return graphTupleID(prefix, parts...), true
 }
 
 func (r *Result) machineGraphFacts(limits GraphViewLimits) (*graphFacts, error) {
@@ -91,32 +102,54 @@ func machineGraphPlan(facts *graphFacts, plan *MachinePlan) bool {
 		return false
 	}
 	for _, state := range plan.States {
-		id := machineStateNodeID(plan, state.Variant)
+		id, ok := machineGraphID(facts, "machine-state", plan.ID, state.Variant)
+		if !ok {
+			return false
+		}
 		if facts.addNode(GraphViewNode{ID: id, Label: state.Variant, Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: "machine-state", Name: state.Variant, MachineState: &GraphMachineStateFacts{Variant: state.Variant, Initial: state.Initial, Enterable: state.Enterable}}}}, dependencyContract{}) == nil {
 			return false
 		}
-		if !facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "contains", plan.ID, id), SourceID: plan.ID, TargetID: id, Label: "contains", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "contains", Plan: plan.ID}}}) {
+		edgeID, ok := machineGraphID(facts, "edge", "contains", plan.ID, id)
+		if !ok || !facts.addEdge(GraphViewEdge{ID: edgeID, SourceID: plan.ID, TargetID: id, Label: "contains", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "contains", Plan: plan.ID}}}) {
 			return false
 		}
 	}
 	initialSpan := plan.Initial.Span
-	initial := machineStateNodeID(plan, plan.Initial.Variant)
-	if !facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", "initial", plan.ID, initial), SourceID: plan.ID, TargetID: initial, Label: "initial", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "initial", Span: &initialSpan, Plan: plan.ID}}}) {
+	initial, ok := machineGraphID(facts, "machine-state", plan.ID, plan.Initial.Variant)
+	if !ok {
 		return false
 	}
-	output := graphTupleID("machine-output", plan.ID)
+	initialEdge, ok := machineGraphID(facts, "edge", "initial", plan.ID, initial)
+	if !ok || !facts.addEdge(GraphViewEdge{ID: initialEdge, SourceID: plan.ID, TargetID: initial, Label: "initial", Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: "initial", Span: &initialSpan, Plan: plan.ID}}}) {
+		return false
+	}
+	output, ok := machineGraphID(facts, "machine-output", plan.ID)
+	if !ok {
+		return false
+	}
 	if plan.Terminal && facts.addNode(GraphViewNode{ID: output, Label: "output", Data: GraphViewNodeData{Effra: GraphNodeFacts{Kind: "machine-output", Name: plan.Name}}}, dependencyContract{}) == nil {
 		return false
 	}
 	for _, t := range plan.Transitions {
 		at := t.Span
 		transition := &GraphMachineTransitionFacts{Transition: t.ID, Role: t.Role, On: t.On, Precision: t.Precision, Guarded: t.Guarded, Via: t.Via}
+		labelBytes := len(t.Decision) + 2
+		for _, on := range t.On {
+			labelBytes += len(on) + 3
+		}
+		if !facts.spend(machineTextUnits(labelBytes)) {
+			return false
+		}
 		label := t.Decision + ": " + strings.Join(t.On, " | ")
 		edge := func(relation, source, target string) bool {
-			return facts.addEdge(GraphViewEdge{ID: graphTupleID("edge", relation, source, target, t.ID), SourceID: source, TargetID: target, Label: label, Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: relation, Span: &at, Plan: plan.ID, Transition: transition}}})
+			id, ok := machineGraphID(facts, "edge", relation, source, target, t.ID)
+			return ok && facts.addEdge(GraphViewEdge{ID: id, SourceID: source, TargetID: target, Label: label, Data: GraphViewEdgeData{Effra: GraphEdgeFacts{Relation: relation, Span: &at, Plan: plan.ID, Transition: transition}}})
 		}
 		for _, from := range t.From {
-			source := machineStateNodeID(plan, from)
+			source, ok := machineGraphID(facts, "machine-state", plan.ID, from)
+			if !ok {
+				return false
+			}
 			switch t.Decision {
 			case machineDecisionIgnore, machineDecisionReject:
 				if !edge(t.Decision, source, source) {
@@ -128,7 +161,8 @@ func machineGraphPlan(facts *graphFacts, plan *MachinePlan) bool {
 				}
 			default:
 				for _, target := range t.Targets {
-					if !edge(t.Decision, source, machineStateNodeID(plan, target)) {
+					id, ok := machineGraphID(facts, "machine-state", plan.ID, target)
+					if !ok || !edge(t.Decision, source, id) {
 						return false
 					}
 				}

@@ -393,7 +393,7 @@ func TestMachineInspectionAndGraphView(t *testing.T) {
 	if view.Data.Effra.Completeness.Semantics != machinePlanEvidence || len(view.Nodes) != 6 {
 		t.Fatalf("view = %+v nodes=%d", view.Data.Effra.Completeness, len(view.Nodes))
 	}
-	focused, err := ParseGraphRequest(map[string]any{"kind": "machine", "focus": machineStateNodeID(r.FindMachine("Search"), "Ready"), "edgeKinds": []any{"go"}})
+	focused, err := ParseGraphRequest(map[string]any{"kind": "machine", "focus": graphTupleID("machine-state", r.FindMachine("Search").ID, "Ready"), "edgeKinds": []any{"go"}})
 	if err != nil {
 		t.Fatal(err)
 	}

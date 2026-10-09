@@ -407,12 +407,13 @@ func TestMachineTriggerListsAreCharged(t *testing.T) {
 	}
 }
 
-// Transition keys are canonical positions and ordinals: their size follows
-// the list lengths the budget charges, never the length of an identifier.
+// Transition keys are narrowing and helper ordinals: their size never
+// follows the length of an identifier or the width of a narrowing.
 func TestMachineTransitionKeysIgnoreIdentifierLength(t *testing.T) {
 	m := &machineCheck{role: machineStep}
 	long := strings.Repeat("h", 1<<20)
-	key := m.transitionKey(Span{Offset: 1 << 20, Length: 9}, machineDecisionGo, machineTargetLiteral, true, []int{0, 1}, []int{2}, []int{3}, []string{long, long + "x", long})
+	wide := &machineSet{id: 7, positions: make([]int32, 1<<16)}
+	key := m.transitionKey(Span{Offset: 1 << 20, Length: 9}, machineDecisionGo, machineTargetLiteral, true, wide, &machineSet{id: 2}, nil, []string{long, long + "x", long})
 	if len(key) > 64 {
 		t.Fatalf("key for three 1 MiB helper names is %d bytes", len(key))
 	}
@@ -465,29 +466,45 @@ func TestMachinePlanFinalizationIsCharged(t *testing.T) {
 	}
 }
 
-// Go targets that keep the current state enumerate its narrowing. Paths that
-// share one narrowing are enumerated once; distinct narrowings are each
-// charged, so repeated enumeration over a wide enum is refused.
-func currentTargetsSource(refineEachPath bool) string {
+// Go targets that keep the current state enumerate its narrowing.
+// Narrowings are canonical, so paths whose narrowings are equal share one
+// value and are enumerated once, even when each path refines the state again;
+// distinct narrowings are each charged, so repeated enumeration of different
+// wide narrowings is refused. pick fans out to 4 groups of 17 tails (68
+// paths); each tail ends in keep<k>, which re-matches the state.
+func currentTargetsSource(distinct bool) string {
+	const width, groups, tails = 1000, 4, 17
 	var b strings.Builder
 	b.WriteString("import Machines \"effra/machines\"\nenum W {")
-	for i := 0; i < 4000; i++ {
+	for i := 0; i < width; i++ {
 		fmt.Fprintf(&b, " V%d", i)
 	}
-	most := make([]string, 3999)
+	most := make([]string, width-1)
 	for i := range most {
 		most[i] = fmt.Sprintf("W.V%d", i)
 	}
-	fmt.Fprintf(&b, " }\nenum E { Ping }\nfn step(state: W, event: E) -> Machines.Step<W, void> {\n    match state {\n        %s => Machines.Step<W, void>.Go(pick(state, 0))\n        W.V3999 => Machines.Step<W, void>.Ignore {}\n    }\n}\n", strings.Join(most, " | "))
-	b.WriteString("fn pick(state: W, n: i64) -> W {\n")
-	for i := 0; i < 19; i++ {
-		fmt.Fprintf(&b, "    if n == %d { keep(state) } else {\n", i)
+	fmt.Fprintf(&b, " }\nenum E { Ping }\nfn step(state: W, event: E) -> Machines.Step<W, void> {\n    match state {\n        %s => Machines.Step<W, void>.Go(pick(state, 0))\n        W.V%d => Machines.Step<W, void>.Ignore {}\n    }\n}\n", strings.Join(most, " | "), width-1)
+	nested := func(call func(int) string, count int) string {
+		var body strings.Builder
+		for i := 0; i < count-1; i++ {
+			fmt.Fprintf(&body, "    if n == %d { %s } else {\n", i, call(i))
+		}
+		fmt.Fprintf(&body, "    %s\n%s", call(count-1), strings.Repeat("    }\n", count-1))
+		return body.String()
 	}
-	b.WriteString("    keep(state)\n" + strings.Repeat("    }\n", 19) + "}\n")
-	if refineEachPath {
-		fmt.Fprintf(&b, "fn keep(state: W) -> W {\n    match state {\n        %s => state\n        W.V3999 => state\n    }\n}\n", strings.Join(most, " | "))
-	} else {
-		b.WriteString("fn keep(state: W) -> W { state }\n")
+	fmt.Fprintf(&b, "fn pick(state: W, n: i64) -> W {\n%s}\n", nested(func(g int) string { return fmt.Sprintf("group%d(state, n)", g) }, groups))
+	keeps := 1
+	if distinct {
+		keeps = groups * tails
+	}
+	for g := 0; g < groups; g++ {
+		fmt.Fprintf(&b, "fn group%d(state: W, n: i64) -> W {\n%s}\n", g, nested(func(i int) string { return fmt.Sprintf("keep%d(state)", (g*tails+i)%keeps) }, tails))
+	}
+	for k := 0; k < keeps; k++ {
+		// keep<k> admits every state but V<k> in one arm, so each keeps a
+		// different narrowing of the step's arm.
+		arm := slices.Delete(slices.Clone(most), k, k+1)
+		fmt.Fprintf(&b, "fn keep%d(state: W) -> W {\n    match state {\n        %s => state\n        W.V%d | W.V%d => state\n    }\n}\n", k, strings.Join(arm, " | "), k, width-1)
 	}
 	b.WriteString("machine M { initial W.V0 {}; step step }\n")
 	return b.String()
@@ -497,14 +514,14 @@ func TestMachineCurrentTargetsAreDeduplicatedAndCharged(t *testing.T) {
 	r := Compile(currentTargetsSource(false))
 	plan := r.FindMachine("M")
 	if plan == nil {
-		t.Fatalf("shared narrowing refused: %v", machineCodes(r))
+		t.Fatalf("68 equal narrowings refused: %v", machineCodes(r))
 	}
 	if !slices.ContainsFunc(plan.Transitions, func(tr MachineTransition) bool {
-		return tr.Decision == "go" && tr.Precision == machineTargetCurrent && len(tr.Targets) == 3999
+		return tr.Decision == "go" && tr.Precision == machineTargetCurrent && len(tr.Targets) == 999
 	}) {
 		t.Fatal("current-state targets lost")
 	}
 	if r := Compile(currentTargetsSource(true)); !slices.Equal(machineCodes(r), []string{"EF142"}) || r.FindMachine("M") != nil {
-		t.Fatalf("20 distinct 3999-state enumerations codes = %v: %v", machineCodes(r), r.Diagnostics)
+		t.Fatalf("68 distinct 998-state enumerations codes = %v: %v", machineCodes(r), r.Diagnostics)
 	}
 }

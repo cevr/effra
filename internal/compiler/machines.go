@@ -23,7 +23,6 @@ package compiler
 import (
 	"encoding/binary"
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 )
@@ -74,7 +73,10 @@ const (
 // completion function, and it claims no reachability, liveness or current
 // enabledness. Transitions are possible edges from a bounded local walk.
 type MachinePlan struct {
-	ID               string                   `json:"id"`
+	ID string `json:"id"`
+	// Ordinal is the declaration's position in its module; it prefixes the
+	// plan's transition IDs.
+	Ordinal          int                      `json:"ordinal"`
 	Name             string                   `json:"name"`
 	Span             Span                     `json:"span"`
 	State            MachineDataRef           `json:"state"`
@@ -158,7 +160,7 @@ var machinePlanLimitations = []string{
 	"inspection never executes a step, entry or completion function",
 	"entry work, spawn, actor handles and runtime snapshots are not admitted in this profile",
 	"flat states only; hierarchy, parallel regions, history and delayed transitions are unsupported",
-	"transition IDs and spans are scoped to the semantic revision",
+	"transition IDs (declaration ordinal and index) and spans are scoped to the semantic revision",
 }
 
 func machineID(name string) string { return "machine:" + currentModuleIdentity + ":" + name }
@@ -181,10 +183,12 @@ func (c *checker) machineValueRefusal(e *Expr, machine *Machine) checkedExpressi
 	return c.checkedData("invalid")
 }
 
-// machineCheck holds one declaration's analysis.
+// machineCheck holds one declaration's analysis. Every program-sized value it
+// builds goes through the charged builders in machines_alloc.go.
 type machineCheck struct {
 	c       *checker
 	machine *Machine
+	ordinal int
 	plan    *MachinePlan
 	state   TypeID
 	enum    *Enum
@@ -192,26 +196,33 @@ type machineCheck struct {
 	work    int
 	failed  bool
 	refused bool
-	seen    map[string]bool
+	seen    map[machineReport]bool
 	// role-scoped trigger enum while walking step (event) or complete (outcome).
 	role    string
 	trigger *Enum
 	// roleFunction is the step or complete function being walked.
 	roleFunction *Function
 	// transitionKeys deduplicates published transitions by a compact key of
-	// variant indices and ordinals, never by joined source text.
+	// narrowing ordinals, span and helper ordinals, never by source text.
 	transitionKeys map[string]bool
-	// shared is the module-wide budget every declaration also charges.
+	// shared is the module-wide budget and projection memo.
 	shared *machineBudget
 	// indexes maps each enum's variant names to declaration positions.
 	indexes map[*Enum]map[string]int
 	// viaIndex numbers helper names for transition keys.
 	viaIndex map[string]int
+	// sets interns canonical narrowings per enum; setCount numbers them.
+	sets     map[*Enum]map[string]*machineSet
+	setCount int
+	// refinements and subsets memoize narrowing operations.
+	refinements map[machineRefinement]*machineSet
+	subsets     map[[2]*machineSet]bool
 }
 
-type machineBudget struct {
-	work      int
-	exhausted bool
+// machineReport deduplicates diagnostics without copying their text.
+type machineReport struct {
+	code, message  string
+	offset, length int
 }
 
 // checkMachines runs after every function body is checked, so bound bodies
@@ -224,8 +235,12 @@ func (c *checker) checkMachines() {
 	}
 	c.result.Machines = []MachinePlan{}
 	shared := &machineBudget{}
-	for _, machine := range c.program.Machines {
-		check := &machineCheck{c: c, machine: machine, seen: map[string]bool{}, shared: shared}
+	if machineAnalysisProbe != nil {
+		machineAnalysisProbe(false, 0)
+		defer func() { machineAnalysisProbe(true, shared.work) }()
+	}
+	for ordinal, machine := range c.program.Machines {
+		check := &machineCheck{c: c, machine: machine, ordinal: ordinal, seen: map[machineReport]bool{}, shared: shared}
 		if plan := check.run(); plan != nil {
 			c.result.Machines = append(c.result.Machines, *plan)
 		}
@@ -233,14 +248,15 @@ func (c *checker) checkMachines() {
 	slices.SortFunc(c.result.Machines, func(a, b MachinePlan) int { return strings.Compare(a.ID, b.ID) })
 }
 
+// report records a diagnostic. After an analysis refusal only EF142 is
+// reported for the declaration: the refusal already rejects the source, and a
+// check the budget cut short is not evidence of a contract violation.
 func (m *machineCheck) report(code, message string, span Span) {
 	m.failed = true
 	if m.refused && code != machineBudgetCode {
-		// A check that stopped because the budget ran out is not evidence of
-		// a contract violation; the budget refusal is the diagnostic.
 		return
 	}
-	key := code + "\x00" + message + "\x00" + fmt.Sprint(span.Offset, ":", span.Length)
+	key := machineReport{code: code, message: message, offset: span.Offset, length: span.Length}
 	if m.seen[key] {
 		return
 	}
@@ -282,12 +298,12 @@ func (m *machineCheck) charge(units int) bool {
 func (m *machineCheck) boundFunction(binding *MachineBinding) *Function {
 	f := m.c.functions[binding.Name]
 	if f == nil || f.Module != currentModuleIdentity {
-		m.report(machineContractCode, "machine "+binding.Kind+" names unknown module function "+binding.Name, binding.NameSpan)
+		m.reportf(machineContractCode, binding.NameSpan, "machine %s names unknown module function %s", binding.Kind, binding.Name)
 		return nil
 	}
 	m.c.observeReference(m.machine, binding.NameSpan, lexicalTarget{kind: "function", function: f})
 	if len(f.RowParameters) > 0 || len(f.TypeParameters) > 0 {
-		m.report(machineContractCode, "machine "+binding.Kind+" "+f.Name+" must be a monomorphic function; row and type parameters are unsupported", binding.NameSpan)
+		m.reportf(machineContractCode, binding.NameSpan, "machine %s %s must be a monomorphic function; row and type parameters are unsupported", binding.Kind, f.Name)
 		return nil
 	}
 	return f
@@ -308,7 +324,7 @@ func (m *machineCheck) userEnum(id TypeID) *Enum {
 	if n == nil || n.Kind != "enum" {
 		return nil
 	}
-	enum, _, ok := m.c.checkedVariants(id)
+	enum, _, ok := m.variantsOf(id)
 	if !ok || enum == nil || len(enum.Parameters) > 0 || len(enum.Variants) == 0 {
 		return nil
 	}
@@ -326,18 +342,22 @@ func (m *machineCheck) run() *MachinePlan {
 	enterBinding := machine.binding(machineEnter)
 	completeBinding := machine.binding(machineComplete)
 	if stepBinding == nil {
-		m.report(machineContractCode, "machine "+machine.Name+" requires a step binding", machine.Span)
+		m.reportf(machineContractCode, machine.Span, "machine %s requires a step binding", machine.Name)
 	}
 	if initialBinding == nil {
-		m.report(machineContractCode, "machine "+machine.Name+" requires an initial state", machine.Span)
+		m.reportf(machineContractCode, machine.Span, "machine %s requires an initial state", machine.Name)
 	}
 	if enterBinding != nil {
-		m.report(machineAdmissionCode, "machine entry work is not yet admitted: enter returns an optional deferred Outcome recipe, which needs typed recipe values, payload-aware recovery of work failures and checked entry ownership; declare the machine without enter and complete until those land", enterBinding.Span)
+		m.reportf(machineAdmissionCode, enterBinding.Span, "machine entry work is not yet admitted: enter returns an optional deferred Outcome recipe, which needs typed recipe values, payload-aware recovery of work failures and checked entry ownership; declare the machine without enter and complete until those land")
 	}
 	if completeBinding != nil && enterBinding == nil {
-		m.report(machineContractCode, "machine complete consumes the outcome of entry work, so it requires an enter binding", completeBinding.Span)
+		m.reportf(machineContractCode, completeBinding.Span, "machine complete consumes the outcome of entry work, so it requires an enter binding")
 	}
-	m.plan = &MachinePlan{ID: machineID(machine.Name), Name: machine.Name, Span: machine.Span, Functions: []MachineFunction{}, Transitions: []MachineTransition{}, States: []MachineStateFacts{}, TerminalFailures: []MachineRowContribution{}, Requirements: []MachineRowContribution{}, Evidence: machinePlanEvidence, Limitations: append([]string{}, machinePlanLimitations...)}
+	id, ok := m.text("machine:", currentModuleIdentity, ":", machine.Name)
+	if !ok {
+		return nil
+	}
+	m.plan = &MachinePlan{ID: id, Ordinal: m.ordinal, Name: machine.Name, Span: machine.Span, Functions: []MachineFunction{}, Transitions: []MachineTransition{}, States: []MachineStateFacts{}, TerminalFailures: []MachineRowContribution{}, Requirements: []MachineRowContribution{}, Evidence: machinePlanEvidence, Limitations: append([]string{}, machinePlanLimitations...)}
 	var step *Function
 	var event *Enum
 	if stepBinding != nil {
@@ -382,55 +402,51 @@ func (m *machineCheck) decisionSignature(f *Function, binding *MachineBinding, r
 		triggerWord = "outcome"
 	}
 	if len(f.Params) != 2 {
-		m.report(machineContractCode, fmt.Sprintf("machine %s %s must take (state, %s) parameters; it declares %d", role, f.Name, triggerWord, len(f.Params)), at)
+		m.reportf(machineContractCode, at, "machine %s %s must take (state, %s) parameters; it declares %d", role, f.Name, triggerWord, len(f.Params))
 		return nil
 	}
 	state, output, ok := m.stepArguments(f.returnID)
 	if !ok {
-		m.report(machineContractCode, "machine "+role+" "+f.Name+" must return the bundled effra/machines Step<State, Output>; it returns "+m.c.displayTypeID(f.returnID), at)
+		m.reportf(machineContractCode, at, "machine %s %s must return the bundled effra/machines Step<State, Output>; it returns %s", role, f.Name, m.display(f.returnID))
 		return nil
 	}
 	if f.Params[0].typeID != state {
-		m.report(machineContractCode, "machine "+role+" "+f.Name+" takes the current state first: its first parameter is "+f.Params[0].Type+" but it returns Step<"+m.c.displayTypeID(state)+", …>", f.Params[0].Span)
+		m.reportf(machineContractCode, f.Params[0].Span, "machine %s %s takes the current state first: its first parameter is %s but it returns Step<%s, …>", role, f.Name, f.Params[0].Type, m.display(state))
 		return nil
 	}
 	enum := m.userEnum(state)
 	if enum == nil {
-		m.report(machineContractCode, "machine state "+m.c.displayTypeID(state)+" must be a closed, non-generic enum declared in this module", f.Params[0].Span)
+		m.reportf(machineContractCode, f.Params[0].Span, "machine state %s must be a closed, non-generic enum declared in this module", m.display(state))
 		return nil
 	}
 	trigger := m.userEnum(f.Params[1].typeID)
 	if trigger == nil {
-		m.report(machineContractCode, "machine "+triggerWord+" "+f.Params[1].Type+" must be a closed, non-generic enum declared in this module", f.Params[1].Span)
+		m.reportf(machineContractCode, f.Params[1].Span, "machine %s %s must be a closed, non-generic enum declared in this module", triggerWord, f.Params[1].Type)
 		return nil
 	}
 	if trigger == enum {
-		m.report(machineContractCode, "machine "+triggerWord+" and state must be distinct types; "+trigger.Name+" is both", f.Params[1].Span)
+		m.reportf(machineContractCode, f.Params[1].Span, "machine %s and state must be distinct types; %s is both", triggerWord, trigger.Name)
 		return nil
 	}
 	if role == machineStep {
 		m.state, m.enum, m.output = state, enum, output
-		if refusal := m.dataRefusal(state, enum.Name, map[TypeID]bool{}); refusal != "" {
-			m.report(machineAdmissionCode, refusal, f.Params[0].Span)
-		}
-		if refusal := m.dataRefusal(f.Params[1].typeID, trigger.Name, map[TypeID]bool{}); refusal != "" {
-			m.report(machineAdmissionCode, refusal, f.Params[1].Span)
-		}
-		if refusal := m.dataRefusal(output, "output "+m.c.displayTypeID(output), map[TypeID]bool{}); refusal != "" {
-			m.report(machineAdmissionCode, refusal, at)
+		m.dataRefusal(state, enum.Name, f.Params[0].Span)
+		m.dataRefusal(f.Params[1].typeID, trigger.Name, f.Params[1].Span)
+		if label, ok := m.text("output ", m.display(output)); ok {
+			m.dataRefusal(output, label, at)
 		}
 		return trigger
 	}
 	if state != m.state {
-		m.report(machineContractCode, "machine complete "+f.Name+" must use the step state "+m.enum.Name+"; it uses "+enum.Name, f.Params[0].Span)
+		m.reportf(machineContractCode, f.Params[0].Span, "machine complete %s must use the step state %s; it uses %s", f.Name, m.enum.Name, enum.Name)
 		return nil
 	}
 	if output != m.output {
-		m.report(machineContractCode, "machine complete "+f.Name+" must publish the step output "+m.c.displayTypeID(m.output)+"; it publishes "+m.c.displayTypeID(output), at)
+		m.reportf(machineContractCode, at, "machine complete %s must publish the step output %s; it publishes %s", f.Name, m.display(m.output), m.display(output))
 		return nil
 	}
 	if event != nil && trigger == event {
-		m.report(machineContractCode, "machine outcome and event must be distinct types so public sends cannot forge work completion; "+trigger.Name+" is both", f.Params[1].Span)
+		m.reportf(machineContractCode, f.Params[1].Span, "machine outcome and event must be distinct types so public sends cannot forge work completion; %s is both", trigger.Name)
 		return nil
 	}
 	return trigger
@@ -439,36 +455,87 @@ func (m *machineCheck) decisionSignature(f *Function, binding *MachineBinding, r
 // dataRefusal is the conservative payload rule until the portable ownership
 // checker owns machine data: state, event, outcome and output values are
 // closed first-order data. Callables, recipes, providers, fibers and host or
-// runtime handles are refused rather than admitted unchecked.
+// runtime handles are refused (EF141) rather than admitted unchecked.
 //
 // It is a reachability search from one root with a visited set that is never
 // cleared, so every reachable type is inspected exactly once whatever its
-// nesting depth or sharing. Each type costs one budget unit; exhaustion reports
-// EF142 and refuses the declaration instead of admitting the rest.
-func (m *machineCheck) dataRefusal(id TypeID, path string, visited map[TypeID]bool) string {
-	if visited[id] || !m.spend() {
-		return ""
+// nesting depth or sharing. Each type and each field costs budget, and the
+// field path is kept as a trail of labels, built into text only for the
+// refusal; exhaustion refuses the declaration with EF142 instead of admitting
+// the rest.
+func (m *machineCheck) dataRefusal(root TypeID, label string, at Span) {
+	walk := &machinePayloadWalk{m: m, visited: map[TypeID]bool{}, trail: []string{label}}
+	behavior, id, refused := walk.visit(root)
+	if !refused {
+		return
 	}
-	visited[id] = true
+	path, ok := m.text(walk.trail...)
+	if !ok {
+		return
+	}
+	if behavior {
+		m.reportf(machineAdmissionCode, at, "machine data %s carries a function or effect recipe; machine state, event and output values are not yet admitted to carry behavior: portable machine payloads need checked actor ownership", path)
+		return
+	}
+	m.reportf(machineAdmissionCode, at, "machine data %s carries %s; machine state, event and output values are not yet admitted to carry host, provider or runtime handles: portable machine payloads need checked actor ownership", path, m.display(id))
+}
+
+type machinePayloadWalk struct {
+	m       *machineCheck
+	visited map[TypeID]bool
+	trail   []string
+}
+
+// visit reports the first refused type reachable from id: whether it carries
+// behavior, and its type. On a refusal the trail holds its field path.
+func (w *machinePayloadWalk) visit(id TypeID) (behavior bool, at TypeID, refused bool) {
+	m := w.m
+	if w.visited[id] || !m.spend() {
+		return false, invalidTypeID, false
+	}
+	w.visited[id] = true
 	n := m.c.node(id)
 	if n == nil {
-		return ""
+		return false, invalidTypeID, false
 	}
 	switch n.Kind {
 	case "primitive", "never", "invalid":
-		return ""
+		return false, invalidTypeID, false
 	case "enum", "record", "application":
-		refusal := ""
-		m.c.walkDataFields(id, func(name string, field Field) {
-			if refusal == "" {
-				refusal = m.dataRefusal(field.typeID, path+"."+name, visited)
+		if fields, ok := m.fieldsOf(id); ok {
+			if !m.charge(2 * len(fields)) {
+				return false, invalidTypeID, false
 			}
-		})
-		return refusal
+			for _, field := range fields {
+				w.trail = append(w.trail, ".", field.Name)
+				if behavior, at, refused := w.visit(field.typeID); refused {
+					return behavior, at, true
+				}
+				w.trail = w.trail[:len(w.trail)-2]
+			}
+			return false, invalidTypeID, false
+		}
+		if _, variants, ok := m.variantsOf(id); ok {
+			// A variant without fields allocates nothing and reaches no type;
+			// only fields are charged.
+			for _, variant := range variants {
+				if len(variant.Fields) > 0 && !m.charge(4*len(variant.Fields)) {
+					return false, invalidTypeID, false
+				}
+				for _, field := range variant.Fields {
+					w.trail = append(w.trail, ".", variant.Name, ".", field.Name)
+					if behavior, at, refused := w.visit(field.typeID); refused {
+						return behavior, at, true
+					}
+					w.trail = w.trail[:len(w.trail)-4]
+				}
+			}
+		}
+		return false, invalidTypeID, false
 	case "callable", "callable-shape", "recipe", "providerRecipe":
-		return "machine data " + path + " carries a function or effect recipe; machine state, event and output values are not yet admitted to carry behavior: portable machine payloads need checked actor ownership"
+		return true, id, true
 	default:
-		return "machine data " + path + " carries " + m.c.displayTypeID(id) + "; machine state, event and output values are not yet admitted to carry host, provider or runtime handles: portable machine payloads need checked actor ownership"
+		return false, id, true
 	}
 }
 
@@ -476,20 +543,36 @@ func (m *machineCheck) dataRefusal(id TypeID, path string, visited map[TypeID]bo
 // plan identity records its tag; evaluating it constructs data only.
 func (m *machineCheck) checkInitial(binding *MachineBinding) {
 	value := binding.Value
+	// Checking the initial expression allocates in proportion to its source.
+	if !m.charge(1 + machineTextUnits(value.Span.Length)) {
+		return
+	}
 	previous := m.c.recordFacts
 	m.c.recordFacts = true
 	checked := m.c.expr(value, localEnv{}, false)
 	m.c.recordFacts = previous
 	if checked.isEffect() || checked.valueID() != m.state {
-		m.report(machineContractCode, "machine initial state must be a "+m.enum.Name+" value; found "+m.c.displayChecked(checked), value.Span)
+		m.reportf(machineContractCode, value.Span, "machine initial state must be a %s value; found %s", m.enum.Name, m.displayChecked(checked))
 		return
 	}
 	variant, ok := m.literalVariant(value)
 	if !ok || !m.staticValue(value) {
-		m.report(machineContractCode, "machine initial state must be a literal "+m.enum.Name+" constructor with a static payload", value.Span)
+		m.reportf(machineContractCode, value.Span, "machine initial state must be a literal %s constructor with a static payload", m.enum.Name)
 		return
 	}
 	m.plan.Initial = MachineInitial{Variant: variant, Span: value.Span}
+}
+
+// displayChecked is the checker's display of a checked value, built from
+// charged text.
+func (m *machineCheck) displayChecked(checked checkedExpression) string {
+	if !checked.isEffect() {
+		return m.display(checked.resultID())
+	}
+	failures, _ := m.join(", ", m.c.retainedRowLabels(checked.failureRow()))
+	services, _ := m.join(", ", m.c.retainedRowLabels(checked.serviceRow()))
+	text, _ := m.text("Effect<", m.display(checked.resultID()), ", {", failures, "}, {", services, "}>")
+	return text
 }
 
 // staticValue admits literal data only. Nesting is bounded by the parsed
@@ -558,102 +641,10 @@ func (m *machineCheck) stepDecision(e *Expr) (string, *Expr, bool) {
 	return e.Left.Name, argument, true
 }
 
-// machineVariants is a narrowing: the variants a subject may have here. nil means
-// unnarrowed, every declared variant.
-type machineVariants map[string]bool
-
-func (v machineVariants) admits(variant string) bool { return v == nil || v[variant] }
-
-func (v machineVariants) refine(cell []*MatchPattern) machineVariants {
-	out := machineVariants{}
-	for _, pattern := range cell {
-		if v.admits(pattern.VariantName) {
-			out[pattern.VariantName] = true
-		}
-	}
-	return out
-}
-
-// positions lists the set as declaration positions in order; nil lists
-// every variant. A non-nil set costs its own size, never the enum's: names
-// resolve through an index built (and charged) once per enum.
-func (m *machineCheck) positions(v machineVariants, enum *Enum) []int {
-	if v == nil {
-		out := make([]int, len(enum.Variants))
-		for i := range out {
-			out[i] = i
-		}
-		return out
-	}
-	index := m.variantIndex(enum)
-	out := make([]int, 0, len(v))
-	for name := range v {
-		if i, ok := index[name]; ok {
-			out = append(out, i)
-		}
-	}
-	slices.Sort(out)
-	return out
-}
-
-// order lists the set's variant names in declaration order.
-func (m *machineCheck) order(v machineVariants, enum *Enum) []string {
-	return machineNames(m.positions(v, enum), enum)
-}
-
-func machineNames(positions []int, enum *Enum) []string {
-	out := make([]string, len(positions))
-	for j, i := range positions {
-		out[j] = enum.Variants[i].Name
-	}
-	return out
-}
-
-func (m *machineCheck) variantIndex(enum *Enum) map[string]int {
-	if index, ok := m.indexes[enum]; ok {
-		return index
-	}
-	if !m.charge(len(enum.Variants)) {
-		return nil
-	}
-	index := make(map[string]int, len(enum.Variants))
-	for i, variant := range enum.Variants {
-		index[variant.Name] = i
-	}
-	if m.indexes == nil {
-		m.indexes = map[*Enum]map[string]int{}
-	}
-	m.indexes[enum] = index
-	return index
-}
-
-// size is the length of ordered(enum) without allocating it.
-func (v machineVariants) size(enum *Enum) int {
-	if v == nil {
-		return len(enum.Variants)
-	}
-	return len(v)
-}
-
-// covers reports whether a Stay check under v implies the same check under
-// w. A non-nil narrowing is checked strictly, and narrowing further only
-// removes alternatives, so a non-nil superset covers a non-nil subset. nil
-// (unnarrowed) is lenient for Stay (the runtime defect applies) yet refines
-// to every alternative a match names, so it covers only itself.
-func (v machineVariants) covers(w machineVariants) bool {
-	if v == nil || w == nil {
-		return v == nil && w == nil
-	}
-	for variant := range w {
-		if !v[variant] {
-			return false
-		}
-	}
-	return true
-}
-
+// machineNarrowing is the narrowing of the current state and trigger: the
+// variants each may have here. A nil set is unnarrowed.
 type machineNarrowing struct {
-	states, triggers machineVariants
+	states, triggers *machineSet
 }
 
 // machineVisit is the context one function body is walked under: the
@@ -662,32 +653,39 @@ type machineNarrowing struct {
 // reused only when an active visit of the same function covers its context.
 type machineVisit struct {
 	function         *Function
-	states, triggers machineVariants
+	states, triggers *machineSet
 	bound            string
 }
 
-// covers reports whether checking under v already discharges w. Triggers
-// only decide which arms are reachable, so nil (every trigger) covers any
-// trigger narrowing; states follow machineVariants.covers.
-func (v machineVisit) covers(w machineVisit) bool {
-	if v.function != w.function || v.bound != w.bound || !v.states.covers(w.states) {
+// covers reports whether checking under v already discharges w. A non-nil
+// state narrowing is checked strictly, and narrowing further only removes
+// alternatives, so a non-nil superset covers a non-nil subset. nil
+// (unnarrowed) is lenient for Stay (the runtime defect applies) yet refines to
+// every alternative a match names, so it covers only itself. Triggers only
+// decide which arms are reachable, so nil (every trigger) covers any trigger
+// narrowing.
+func (m *machineCheck) covers(v, w machineVisit) bool {
+	if v.function != w.function || v.bound != w.bound {
+		return false
+	}
+	if v.states == nil || w.states == nil {
+		if v.states != nil || w.states != nil {
+			return false
+		}
+	} else if !m.subset(w.states, v.states) {
 		return false
 	}
 	if v.triggers == nil {
 		return true
 	}
-	if w.triggers == nil {
-		return false
-	}
-	for trigger := range w.triggers {
-		if !v.triggers[trigger] {
-			return false
-		}
-	}
-	return true
+	return w.triggers != nil && m.subset(w.triggers, v.triggers)
 }
 
-func machineVisitOf(f *Function, scope *machineScope, n machineNarrowing) machineVisit {
+// visitOf builds the visit context of f, charged by its parameter count.
+func (m *machineCheck) visitOf(f *Function, scope *machineScope, n machineNarrowing) (machineVisit, bool) {
+	if !m.charge(1 + len(f.Params)) {
+		return machineVisit{}, false
+	}
 	bound := make([]byte, len(f.Params))
 	for index, parameter := range f.Params {
 		bound[index] = '-'
@@ -700,7 +698,7 @@ func machineVisitOf(f *Function, scope *machineScope, n machineNarrowing) machin
 			bound[index] = 'T'
 		}
 	}
-	return machineVisit{function: f, states: n.states, triggers: n.triggers, bound: string(bound)}
+	return machineVisit{function: f, states: n.states, triggers: n.triggers, bound: string(bound)}, true
 }
 
 // machineScope is one function body read under the machine: the function,
@@ -724,8 +722,8 @@ type machineScope struct {
 // walked again under the narrower context. Contexts are finite subsets, and
 // a covered context is never re-walked, so the chain terminates; each walk is
 // charged, and the helper depth bounds the chain.
-func (s *machineScope) reentry(visit machineVisit) bool {
-	return slices.ContainsFunc(s.active, func(active machineVisit) bool { return active.covers(visit) })
+func (m *machineCheck) reentry(s *machineScope, visit machineVisit) bool {
+	return slices.ContainsFunc(s.active, func(active machineVisit) bool { return m.covers(active, visit) })
 }
 
 func (m *machineCheck) walkRole(f *Function, role string, trigger *Enum) {
@@ -741,7 +739,11 @@ func (m *machineCheck) walkRole(f *Function, role string, trigger *Enum) {
 	if b := f.Params[1].binding; b != nil {
 		scope.triggers[b] = true
 	}
-	scope.active = []machineVisit{machineVisitOf(f, scope, machineNarrowing{})}
+	visit, ok := m.visitOf(f, scope, machineNarrowing{})
+	if !ok {
+		return
+	}
+	scope.active = []machineVisit{visit}
 	m.block(scope, f.Body, machineNarrowing{}, true, false)
 }
 
@@ -789,7 +791,7 @@ func (m *machineCheck) aliasRoot(s *machineScope, b *localBinding) *localBinding
 		if !ok || value == nil || value.Kind != "name" || value.binding == nil || onChain[root] {
 			break
 		}
-		if !m.spend() {
+		if !m.charge(3) {
 			return nil
 		}
 		chain, onChain[root] = append(chain, root), true
@@ -803,7 +805,7 @@ func (m *machineCheck) aliasRoot(s *machineScope, b *localBinding) *localBinding
 
 // arm intersects the narrowing with every cell whose subject is the current
 // state or trigger. exact is false when a subject is other data, which makes
-// the arm a data-dependent guard.
+// the arm a data-dependent guard. A refused refinement is unreachable.
 func (m *machineCheck) arm(s *machineScope, match *Expr, arm *MatchArm, n machineNarrowing) (machineNarrowing, bool, bool) {
 	out, exact := n, true
 	for index, subject := range match.Args {
@@ -812,15 +814,17 @@ func (m *machineCheck) arm(s *machineScope, match *Expr, arm *MatchArm, n machin
 		}
 		switch {
 		case m.denotes(s.states, s, subject):
-			out.states = out.states.refine(arm.Patterns[index])
-			if len(out.states) == 0 {
+			states, ok := m.refine(m.enum, out.states, arm, index)
+			if !ok || len(states.positions) == 0 {
 				return out, exact, false
 			}
+			out.states = states
 		case m.denotes(s.triggers, s, subject):
-			out.triggers = out.triggers.refine(arm.Patterns[index])
-			if len(out.triggers) == 0 {
+			triggers, ok := m.refine(m.trigger, out.triggers, arm, index)
+			if !ok || len(triggers.positions) == 0 {
 				return out, exact, false
 			}
+			out.triggers = triggers
 		default:
 			exact = false
 		}
@@ -911,9 +915,15 @@ func (m *machineCheck) follow(s *machineScope, call *Expr, n machineNarrowing, t
 	if !ok || state != m.state {
 		return false
 	}
-	inner := m.helperScope(s, callee, call)
-	visit := machineVisitOf(callee, inner, n)
-	if s.reentry(visit) {
+	inner, ok := m.helperScope(s, callee, call)
+	if !ok {
+		return true
+	}
+	visit, ok := m.visitOf(callee, inner, n)
+	if !ok {
+		return true
+	}
+	if m.reentry(s, visit) {
 		// Recursion in a covered context: the caller records the
 		// conservative decision for this call.
 		return false
@@ -941,16 +951,26 @@ func (m *machineCheck) helperDepthExhausted(s *machineScope, call *Expr, n machi
 	if !carries {
 		return false
 	}
-	chain := append(slices.Clone(s.via), call.ResolvedFunction.Name)
 	at := call.Span
 	if s.site.Length > 0 {
 		at = s.site
 	}
-	m.report(machineBudgetCode, fmt.Sprintf("machine %s cannot check Step.Stay through helper %s: the chain exceeds %d helpers while the current state is narrowed or passed; no plan is published", m.machine.Name, strings.Join(chain, " -> "), maxMachineHelperDepth), at)
+	if chain, ok := m.join(" -> ", append(slices.Clone(s.via), call.ResolvedFunction.Name)); ok {
+		if message, ok := m.textf("machine %s cannot check Step.Stay through helper %s: the chain exceeds %d helpers while the current state is narrowed or passed; no plan is published", m.machine.Name, chain, maxMachineHelperDepth); ok {
+			m.report(machineBudgetCode, message, at)
+		}
+	}
+	// The refusal ends the declaration's analysis.
+	m.failed, m.refused = true, true
 	return true
 }
 
-func (m *machineCheck) helperScope(s *machineScope, callee *Function, call *Expr) *machineScope {
+// helperScope binds a helper's parameters for one call, charged by the call's
+// width.
+func (m *machineCheck) helperScope(s *machineScope, callee *Function, call *Expr) (*machineScope, bool) {
+	if !m.charge(4 + len(call.Args) + len(s.via)) {
+		return nil, false
+	}
 	site := s.site
 	if len(s.via) == 0 {
 		site = call.Span
@@ -971,69 +991,97 @@ func (m *machineCheck) helperScope(s *machineScope, callee *Function, call *Expr
 			inner.triggers[callee.Params[parameter].binding] = true
 		}
 	}
-	return inner
+	return inner, true
 }
 
 // statePath is one visible way a State value is produced: a literal
-// constructor tag, the unchanged current state, or a dynamic value.
+// constructor (variant is its position, or -1), the unchanged current state,
+// or a dynamic value.
 type statePath struct {
-	variant  string
+	variant  int32
 	same     bool
-	narrowed machineVariants
+	narrowed *machineSet
 	span     Span
 	via      []string
 }
 
-func (m *machineCheck) paths(s *machineScope, e *Expr, n machineNarrowing) []statePath {
-	if e == nil || !m.spend() {
-		return []statePath{{}}
+// addPath appends one path after charging it, so the paths a walk retains
+// never outnumber the units it paid.
+func (m *machineCheck) addPath(out []statePath, path statePath) []statePath {
+	if !m.spend() {
+		return out
+	}
+	return append(out, path)
+}
+
+// paths appends the visible ways e produces a State value to out. A refusal
+// stops collection; the declaration is then withheld.
+func (m *machineCheck) paths(s *machineScope, e *Expr, n machineNarrowing, out []statePath) []statePath {
+	if e == nil {
+		return m.addPath(out, statePath{variant: -1})
+	}
+	if !m.spend() {
+		return out
 	}
 	if m.denotes(s.states, s, e) {
-		return []statePath{{same: true, narrowed: n.states, span: e.Span, via: s.via}}
+		return m.addPath(out, statePath{variant: -1, same: true, narrowed: n.states, span: e.Span, via: s.via})
 	}
-	if variant, ok := m.literalVariant(e); ok {
-		return []statePath{{variant: variant, narrowed: n.states, span: e.Span, via: s.via}}
+	if name, ok := m.literalVariant(e); ok {
+		variant, ok := m.position(m.enum, name)
+		if !ok {
+			return out
+		}
+		return m.addPath(out, statePath{variant: variant, narrowed: n.states, span: e.Span, via: s.via})
 	}
 	switch e.Kind {
 	case "name":
 		if value, ok := s.lets[e.binding]; ok && e.binding != nil {
-			return m.paths(s, value, n)
+			return m.paths(s, value, n, out)
 		}
 	case "if":
-		return append(m.blockPaths(s, e.Then, n), m.blockPaths(s, e.Else, n)...)
+		out = m.blockPaths(s, e.Then, n, out)
+		return m.blockPaths(s, e.Else, n, out)
 	case "match":
-		out := []statePath{}
 		for _, arm := range e.Arms {
 			narrowed, _, reachable := m.arm(s, e, arm, n)
 			if reachable {
-				out = append(out, m.blockPaths(s, arm.Body, narrowed)...)
+				out = m.blockPaths(s, arm.Body, narrowed, out)
 			}
 		}
 		return out
 	case "scope":
-		return m.blockPaths(s, e.Then, n)
+		return m.blockPaths(s, e.Then, n, out)
 	case "call":
 		callee := e.ResolvedFunction
 		if callee != nil && callee.Body != nil && callee.Module == currentModuleIdentity && callee.returnID == m.state && !callee.Effect {
-			inner := m.helperScope(s, callee, e)
-			visit := machineVisitOf(callee, inner, n)
-			if s.reentry(visit) {
-				return []statePath{{span: e.Span, via: s.via}}
+			inner, ok := m.helperScope(s, callee, e)
+			if !ok {
+				return out
+			}
+			visit, ok := m.visitOf(callee, inner, n)
+			if !ok {
+				return out
+			}
+			if m.reentry(s, visit) {
+				return m.addPath(out, statePath{variant: -1, span: e.Span, via: s.via})
 			}
 			if len(s.via) >= maxMachineHelperDepth {
 				m.helperDepthExhausted(s, e, n)
-				return []statePath{{span: e.Span, via: s.via}}
+				return m.addPath(out, statePath{variant: -1, span: e.Span, via: s.via})
 			}
 			inner.active = append(slices.Clone(s.active), visit)
-			return m.blockPaths(inner, callee.Body, n)
+			return m.blockPaths(inner, callee.Body, n, out)
 		}
 	}
-	return []statePath{{span: e.Span, via: s.via}}
+	return m.addPath(out, statePath{variant: -1, span: e.Span, via: s.via})
 }
 
-func (m *machineCheck) blockPaths(s *machineScope, b *Block, n machineNarrowing) []statePath {
+func (m *machineCheck) blockPaths(s *machineScope, b *Block, n machineNarrowing, out []statePath) []statePath {
 	if b == nil || len(b.Statements) == 0 {
-		return []statePath{{}}
+		return m.addPath(out, statePath{variant: -1})
+	}
+	if !m.charge(len(b.Statements)) {
+		return out
 	}
 	for _, statement := range b.Statements {
 		if statement.Kind == "let" && statement.Value != nil && statement.binding != nil {
@@ -1042,9 +1090,9 @@ func (m *machineCheck) blockPaths(s *machineScope, b *Block, n machineNarrowing)
 	}
 	last := b.Statements[len(b.Statements)-1]
 	if last.Kind != "expr" {
-		return nil
+		return out
 	}
-	return m.paths(s, last.Value, n)
+	return m.paths(s, last.Value, n, out)
 }
 
 // checkStay is the static same-tag rule. Inside an arm narrowing the current
@@ -1052,26 +1100,29 @@ func (m *machineCheck) blockPaths(s *machineScope, b *Block, n machineNarrowing)
 // an arm admitting several variants accepts only the unchanged state. An
 // unnarrowed or dynamic value keeps the runtime defect.
 func (m *machineCheck) checkStay(s *machineScope, e, argument *Expr, n machineNarrowing) {
-	for _, path := range m.paths(s, argument, n) {
-		if path.variant == "" || path.narrowed == nil || len(path.narrowed) == 1 && path.narrowed[path.variant] {
+	for _, path := range m.paths(s, argument, n, nil) {
+		if path.variant < 0 || path.narrowed == nil || len(path.narrowed.positions) == 1 && path.narrowed.positions[0] == path.variant {
 			continue
 		}
-		// The message lists the narrowing; charge it before building it.
-		if !m.charge(path.narrowed.size(m.enum)) {
+		enum := m.enum.Name
+		variant := m.enum.Variants[path.variant].Name
+		qualified, ok := m.qualified(path.narrowed)
+		if !ok {
 			return
 		}
-		enum := m.enum.Name
-		qualified := m.order(path.narrowed, m.enum)
-		for i := range qualified {
-			qualified[i] = enum + "." + qualified[i]
-		}
-		message := fmt.Sprintf("Step.Stay keeps the current entry, so it cannot change the state tag: this arm narrows the state to %s but Stay constructs %s.%s; use Step.Go", strings.Join(qualified, " | "), enum, path.variant)
+		format := "Step.Stay keeps the current entry, so it cannot change the state tag: this arm narrows the state to %s but Stay constructs %s.%s; use Step.Go%s"
 		if path.narrowed.admits(path.variant) {
-			message = fmt.Sprintf("Step.Stay keeps the current entry, so it cannot change the state tag: this arm admits %s, so the literal %s.%s changes the tag for another alternative; split the arm or use Stay with the current state", strings.Join(qualified, " | "), enum, path.variant)
+			format = "Step.Stay keeps the current entry, so it cannot change the state tag: this arm admits %s, so the literal %s.%s changes the tag for another alternative; split the arm or use Stay with the current state%s"
 		}
-		at := e.Span
+		at, helper := e.Span, ""
 		if len(path.via) > 0 {
-			message += " (through helper " + strings.Join(path.via, " -> ") + ")"
+			chain, ok := m.join(" -> ", path.via)
+			if !ok {
+				return
+			}
+			if helper, ok = m.text(" (through helper ", chain, ")"); !ok {
+				return
+			}
 			// A Stay inside a helper reports at the caller's call of it; one in
 			// the step body itself, reached again through recursion, reports
 			// at the Stay.
@@ -1079,28 +1130,50 @@ func (m *machineCheck) checkStay(s *machineScope, e, argument *Expr, n machineNa
 				at = s.site
 			}
 		}
-		m.report(machineStayCode, message, at)
+		m.reportf(machineStayCode, at, format, qualified, enum, variant, helper)
 	}
 }
 
-// transition records one possible decision. targets is a variant set: nil
-// means every state, an empty set means no target state.
-func (m *machineCheck) transition(s *machineScope, span Span, n machineNarrowing, decision string, targets machineVariants, precision string, guarded bool) {
+// qualified lists a narrowing as `Enum.Variant | …`, charged before it is
+// built.
+func (m *machineCheck) qualified(set *machineSet) (string, bool) {
+	n := 0
+	for _, i := range set.positions {
+		n += len(m.enum.Name) + 1 + len(m.enum.Variants[i].Name) + 3
+	}
+	if !m.charge(machineTextUnits(n)) {
+		return "", false
+	}
+	var b strings.Builder
+	b.Grow(n)
+	for j, i := range set.positions {
+		if j > 0 {
+			b.WriteString(" | ")
+		}
+		b.WriteString(m.enum.Name)
+		b.WriteByte('.')
+		b.WriteString(m.enum.Variants[i].Name)
+	}
+	return b.String(), true
+}
+
+// transition records one possible decision. targets is a narrowing of the
+// state: nil means every state, the empty set no target state.
+func (m *machineCheck) transition(s *machineScope, span Span, n machineNarrowing, decision string, targets *machineSet, precision string, guarded bool) {
 	if len(m.plan.Transitions) >= maxMachineTransitions {
 		if !m.refused {
-			m.refused = true
 			m.report(machineBudgetCode, fmt.Sprintf("machine %s exceeds %d possible transitions; no plan is published", m.machine.Name, maxMachineTransitions), m.machine.Span)
+			m.refused = true
 		}
 		return
 	}
 	// A transition's From, On, Targets and Via lists are plan output.
 	// Charging them before they are allocated bounds plan size, the
 	// enterable search and the graph projection.
-	if !m.charge(targets.size(m.enum) + n.states.size(m.enum) + n.triggers.size(m.trigger) + len(s.via)) {
+	if !m.charge(2 + targets.size(m.enum) + n.states.size(m.enum) + n.triggers.size(m.trigger) + len(s.via)) {
 		return
 	}
-	from, on, to := m.positions(n.states, m.enum), m.positions(n.triggers, m.trigger), m.positions(targets, m.enum)
-	key := m.transitionKey(span, decision, precision, guarded, from, on, to, s.via)
+	key := m.transitionKey(span, decision, precision, guarded, n.states, n.triggers, targets, s.via)
 	if m.transitionKeys == nil {
 		m.transitionKeys = map[string]bool{}
 	}
@@ -1108,17 +1181,15 @@ func (m *machineCheck) transition(s *machineScope, span Span, n machineNarrowing
 		return
 	}
 	m.transitionKeys[key] = true
-	t := MachineTransition{Role: m.role, From: machineNames(from, m.enum), On: machineNames(on, m.trigger), Decision: decision, Targets: machineNames(to, m.enum), Precision: precision, Guarded: guarded, Via: slices.Clone(s.via), Span: span}
-	t.ID = fmt.Sprintf("%s:transition:%d", m.plan.ID, len(m.plan.Transitions))
-	m.plan.Transitions = append(m.plan.Transitions, t)
+	m.plan.Transitions = append(m.plan.Transitions, MachineTransition{ID: m.transitionID(len(m.plan.Transitions)), Role: m.role, From: n.states.names(m.enum), On: n.triggers.names(m.trigger), Decision: decision, Targets: targets.names(m.enum), Precision: precision, Guarded: guarded, Via: slices.Clone(s.via), Span: span})
 }
 
 // transitionKey is a compact canonical identity: the role, decision and
-// precision are fixed words, the span is two integers, and every list is
-// variant positions or helper ordinals. Its size follows the charged list
-// lengths, never the length of a source identifier.
-func (m *machineCheck) transitionKey(span Span, decision, precision string, guarded bool, from, on, to []int, via []string) string {
-	key := make([]byte, 0, 32+2*(len(from)+len(on)+len(to)+len(via)))
+// precision are fixed words, the span is two integers, each narrowing is its
+// interned ordinal and each helper its ordinal. Its size never follows the
+// length of a source identifier or the width of a narrowing.
+func (m *machineCheck) transitionKey(span Span, decision, precision string, guarded bool, from, on, to *machineSet, via []string) string {
+	key := make([]byte, 0, 48+2*len(via))
 	key = append(key, m.role...)
 	key = append(key, 0)
 	key = append(key, decision...)
@@ -1132,11 +1203,8 @@ func (m *machineCheck) transitionKey(span Span, decision, precision string, guar
 	}
 	key = binary.AppendUvarint(key, uint64(span.Offset))
 	key = binary.AppendUvarint(key, uint64(span.Length))
-	for _, list := range [][]int{from, on, to} {
-		key = binary.AppendUvarint(key, uint64(len(list)))
-		for _, i := range list {
-			key = binary.AppendUvarint(key, uint64(i))
-		}
+	for _, set := range []*machineSet{from, on, to} {
+		key = binary.AppendUvarint(key, uint64(set.ordinal()))
 	}
 	if m.viaIndex == nil {
 		m.viaIndex = map[string]int{}
@@ -1156,30 +1224,37 @@ func (m *machineCheck) transitionKey(span Span, decision, precision string, guar
 func (m *machineCheck) decision(s *machineScope, e *Expr, variant string, argument *Expr, n machineNarrowing, guarded bool) {
 	switch variant {
 	case "Go":
-		targets, precision := m.targets(s, argument, n)
-		m.transition(s, e.Span, n, machineDecisionGo, targets, precision, guarded)
+		if targets, precision, ok := m.targets(s, argument, n); ok {
+			m.transition(s, e.Span, n, machineDecisionGo, targets, precision, guarded)
+		}
 	case "Stay":
 		m.transition(s, e.Span, n, machineDecisionStay, n.states, machineTargetCurrent, guarded)
-	case "Ignore":
-		m.transition(s, e.Span, n, machineDecisionIgnore, machineVariants{}, machineTargetLiteral, guarded)
-	case "Reject":
-		m.transition(s, e.Span, n, machineDecisionReject, machineVariants{}, machineTargetLiteral, guarded)
-	case "Done":
-		m.transition(s, e.Span, n, machineDecisionDone, machineVariants{}, machineTargetLiteral, guarded)
+	case "Ignore", "Reject", "Done":
+		decision := machineDecisionDone
+		switch variant {
+		case "Ignore":
+			decision = machineDecisionIgnore
+		case "Reject":
+			decision = machineDecisionReject
+		}
+		if none, ok := m.empty(m.enum); ok {
+			m.transition(s, e.Span, n, decision, none, machineTargetLiteral, guarded)
+		}
 	}
 }
 
-// targets resolves the states a Go decision enters, as a set (nil means
-// every state). Paths that keep the current state share their narrowing
-// with the caller, so each distinct narrowing is enumerated once, and each
-// enumeration is charged before it runs.
-func (m *machineCheck) targets(s *machineScope, argument *Expr, n machineNarrowing) (machineVariants, string) {
-	set, precision, every := machineVariants{}, machineTargetLiteral, false
-	enumerated := map[uintptr]bool{}
-	for _, path := range m.paths(s, argument, n) {
+// targets resolves the states a Go decision enters, as a narrowing (nil means
+// every state). Paths that keep the current state carry canonical narrowings,
+// so equal narrowings are enumerated once, and each distinct enumeration is
+// charged before it runs.
+func (m *machineCheck) targets(s *machineScope, argument *Expr, n machineNarrowing) (*machineSet, string, bool) {
+	precision, every := machineTargetLiteral, false
+	positions := []int32{}
+	enumerated := map[*machineSet]bool{}
+	for _, path := range m.paths(s, argument, n, nil) {
 		switch {
-		case path.variant != "":
-			set[path.variant] = true
+		case path.variant >= 0:
+			positions = append(positions, path.variant)
 		case path.same:
 			if precision == machineTargetLiteral {
 				precision = machineTargetCurrent
@@ -1188,25 +1263,27 @@ func (m *machineCheck) targets(s *machineScope, argument *Expr, n machineNarrowi
 				every = true
 				continue
 			}
-			identity := reflect.ValueOf(path.narrowed).Pointer()
-			if every || enumerated[identity] {
+			if every || enumerated[path.narrowed] {
 				continue
 			}
-			enumerated[identity] = true
-			if !m.charge(len(path.narrowed)) {
-				return machineVariants{}, precision
+			if !m.charge(1 + len(path.narrowed.positions)) {
+				return nil, precision, false
 			}
-			for variant := range path.narrowed {
-				set[variant] = true
-			}
+			enumerated[path.narrowed] = true
+			positions = append(positions, path.narrowed.positions...)
 		default:
-			return nil, machineTargetConservative
+			return nil, machineTargetConservative, !m.refused
 		}
 	}
-	if every {
-		return nil, precision
+	if m.refused {
+		return nil, precision, false
 	}
-	return set, precision
+	if every {
+		return nil, precision, true
+	}
+	slices.Sort(positions)
+	set, ok := m.intern(m.enum, slices.Compact(positions))
+	return set, precision, ok
 }
 
 // conservative records a Step value the walk cannot see into: any decision to
@@ -1219,92 +1296,88 @@ func (m *machineCheck) conservative(s *machineScope, e *Expr, n machineNarrowing
 	m.transition(s, e.Span, n, machineDecisionAny, nil, machineTargetConservative, guarded)
 }
 
-func (m *machineCheck) function(role string, f *Function) MachineFunction {
-	kind := "pure"
-	failures, services := []string{}, []string{}
-	if f.Effect {
-		kind = "effect"
-		failures = normalized(m.c.rowLabels(f.failureID))
-		services = normalized(m.c.rowLabels(f.serviceID))
-	}
-	return MachineFunction{Role: role, Name: f.Name, Identity: f.Identity, Span: f.Span, Kind: kind, Failures: failures, Services: services, Contract: m.c.projectCheckedBase(m.c.checkedFunction(f, true, false))}
-}
-
-func (m *machineCheck) dataRef(id TypeID, enum *Enum) MachineDataRef {
-	return MachineDataRef{Name: enum.Name, Identity: m.c.declarationQualifier("enum", enum.Name), Variants: m.order(nil, enum), Type: m.c.projectCheckedBase(m.c.checkedDataID(id, nil, nil))}
-}
-
-// finishPlan completes a checked plan. Its state and event variant lists and
-// per-state facts are charged before they are allocated; a refusal withholds
-// the plan.
+// finishPlan completes a checked plan. Module-wide projections are memoized
+// and charged once; the plan's own state facts and enterable search are
+// charged before they are allocated. A refusal withholds the plan.
 func (m *machineCheck) finishPlan(step *Function, event *Enum, complete *Function) bool {
-	if !m.charge(2*len(m.enum.Variants) + len(event.Variants)) {
+	plan := m.plan
+	var ok bool
+	if plan.State, ok = m.dataRef(m.state, m.enum); !ok {
 		return false
 	}
-	plan := m.plan
-	plan.State = m.dataRef(m.state, m.enum)
-	plan.Event = m.dataRef(step.Params[1].typeID, event)
-	plan.Output = m.c.projectCheckedBase(m.c.checkedDataID(m.output, nil, nil))
-	plan.Functions = append(plan.Functions, m.function(machineStep, step))
+	if plan.Event, ok = m.dataRef(step.Params[1].typeID, event); !ok {
+		return false
+	}
+	if plan.Output, ok = m.value(m.output); !ok {
+		return false
+	}
+	stepFacts, ok := m.function(machineStep, step)
+	if !ok {
+		return false
+	}
+	plan.Functions = append(plan.Functions, stepFacts)
 	if complete != nil {
-		plan.Functions = append(plan.Functions, m.function(machineComplete, complete))
+		completeFacts, ok := m.function(machineComplete, complete)
+		if !ok {
+			return false
+		}
+		plan.Functions = append(plan.Functions, completeFacts)
 	}
-	failures, services := map[string][]string{}, map[string][]string{}
-	for _, f := range plan.Functions {
-		for _, name := range f.Failures {
-			failures[name] = append(failures[name], f.Role)
-		}
-		for _, name := range f.Services {
-			services[name] = append(services[name], f.Role)
-		}
+	rows, ok := m.rows(step, complete, plan.Functions)
+	if !ok {
+		return false
 	}
-	plan.TerminalFailures = machineContributions(failures)
-	plan.Requirements = machineContributions(services)
-	// Enterable states: a worklist over the transitions indexed by source, so
-	// the work is linear in the charged plan size.
-	bySource := map[string][]int{}
-	for index, t := range plan.Transitions {
-		if t.Decision == machineDecisionDone || t.Decision == machineDecisionAny {
-			plan.Terminal = true
-		}
-		if t.Decision != machineDecisionGo && t.Decision != machineDecisionStay && t.Decision != machineDecisionAny {
-			continue
-		}
-		for _, from := range t.From {
-			bySource[from] = append(bySource[from], index)
-		}
+	plan.TerminalFailures, plan.Requirements = rows.failures, rows.requirements
+	// Enterable states: a worklist over the transitions indexed by source
+	// position. The index entries follow the From lists each transition
+	// already paid for; the per-state facts and marks are charged here.
+	if !m.charge(1 + 2*len(m.enum.Variants) + len(plan.Transitions)) {
+		return false
 	}
-	enterable := machineVariants{plan.Initial.Variant: true}
-	fired := make([]bool, len(plan.Transitions))
-	for work := []string{plan.Initial.Variant}; len(work) > 0; {
-		state := work[len(work)-1]
-		work = work[:len(work)-1]
-		for _, index := range bySource[state] {
-			if fired[index] {
+	initial := int32(slices.IndexFunc(m.enum.Variants, func(v Variant) bool { return v.Name == plan.Initial.Variant }))
+	enterable := make([]bool, len(m.enum.Variants))
+	enterable[initial] = true
+	if len(plan.Transitions) > 0 {
+		index := m.variantIndex(m.enum)
+		if index == nil {
+			return false
+		}
+		bySource := map[int32][]int{}
+		for i, t := range plan.Transitions {
+			if t.Decision == machineDecisionDone || t.Decision == machineDecisionAny {
+				plan.Terminal = true
+			}
+			if t.Decision != machineDecisionGo && t.Decision != machineDecisionStay && t.Decision != machineDecisionAny {
 				continue
 			}
-			fired[index] = true
-			for _, target := range plan.Transitions[index].Targets {
-				if !enterable[target] {
-					enterable[target] = true
-					work = append(work, target)
+			for _, from := range t.From {
+				source := int32(index[from])
+				bySource[source] = append(bySource[source], i)
+			}
+		}
+		fired := make([]bool, len(plan.Transitions))
+		for work := []int32{initial}; len(work) > 0; {
+			state := work[len(work)-1]
+			work = work[:len(work)-1]
+			for _, i := range bySource[state] {
+				if fired[i] {
+					continue
+				}
+				fired[i] = true
+				for _, target := range plan.Transitions[i].Targets {
+					if position := int32(index[target]); !enterable[position] {
+						enterable[position] = true
+						work = append(work, position)
+					}
 				}
 			}
 		}
 	}
-	for _, variant := range m.enum.Variants {
-		plan.States = append(plan.States, MachineStateFacts{Variant: variant.Name, Initial: variant.Name == plan.Initial.Variant, Enterable: enterable[variant.Name]})
+	plan.States = make([]MachineStateFacts, len(m.enum.Variants))
+	for i, variant := range m.enum.Variants {
+		plan.States[i] = MachineStateFacts{Variant: variant.Name, Initial: int32(i) == initial, Enterable: enterable[i]}
 	}
 	return true
-}
-
-func machineContributions(rows map[string][]string) []MachineRowContribution {
-	out := []MachineRowContribution{}
-	for name, roles := range rows {
-		out = append(out, MachineRowContribution{Name: name, Roles: normalized(roles)})
-	}
-	slices.SortFunc(out, func(a, b MachineRowContribution) int { return strings.Compare(a.Name, b.Name) })
-	return out
 }
 
 // FindMachine returns the checked plan of a machine declaration. A program
