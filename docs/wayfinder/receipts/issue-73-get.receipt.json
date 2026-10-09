@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "endpoint": "repos/cevr/effra/issues/73",
+  "exit": 0,
+  "sourceCommit": "4627f414414cc964840b53894b7161482687de69",
+  "sourceTree": "ff2e8954a6063772b5fcd7dee9abc9929b58613c",
+  "responseSha256": "ffc6e98c256aa31dc330d77e370ea304836d007ff166de62c6700227f240575e"
+}

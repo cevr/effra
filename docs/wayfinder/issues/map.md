@@ -18,54 +18,45 @@ Advance Effra into a credible Go-backed server language by implementing producti
 
 On 2026-10-06 the owner explicitly set the goal to fully implement the authorized Wayfinder specifications and extend them as evidence reveals ergonomic improvements, stronger guarantees and performance opportunities. Continue across review and implementation units without waiting for routine human confirmation. Read the standing principles before any genuine question.
 
-Use upstream implementation/test evidence, real usage, independent counsel and measured results to add concrete acceptance clauses and task dependencies. Prioritize changes that make the standard library reusable, preserve explicit inspectable contracts and improve measured costs. Record new opportunities with a finite supported scope and executable exit criteria; do not convert an aspiration into an implemented guarantee. Existing HITL decision tickets remain separate and require actual owner feedback before closure. No push is authorized.
+Use upstream implementation/test evidence, real usage, independent counsel and measured results to add concrete acceptance clauses and task dependencies. Prioritize changes that make the standard library reusable, preserve explicit inspectable contracts and improve measured costs. Record new opportunities with a finite supported scope and executable exit criteria; do not convert an aspiration into an implemented guarantee. Existing HITL decision tickets remain separate and require actual owner feedback before closure. Writers never push. Owner scope, 2026-10-07: root may integrate accepted, fully gated fast-forward commits into `main` after review; that permission does not grant push authority to lane writers.
 
 Owner update, 2026-10-06: defer benchmark development and measurement until the final phase, and increase independent implementation parallelism. Keep canonical type work, generated output ownership, upstream conformance import/mapping and [LSP diagnostics/document lifecycle](lsp-diagnostics.md) in isolated lanes. Their shared contracts determine integration order; parallel work does not bypass review or dependent feature gates.
 
 Owner update, 2026-10-06: architecture loops must seek useful primitives making Effects explicit, declarative and delightful. Record production ceremony, compare regular alternatives and prove improvements with two unrelated runnable callers, visible contracts and negative controls. First-class layers are the next adopted case; source-only research informs acceptance without certifying runtime behavior.
 
+Owner update, 2026-10-08: strong abstractions are a destination only when the
+illegal states and invalid operations covered by their checked contract are
+unrepresentable in checked Effra source, while foreign/trusted behavior remains
+explicitly qualified, and they preserve the same validation, ownership,
+cancellation and completed cleanup as explicit Go and TypeScript/Effect
+controls. Record erasure/direct lowering/retention and measure residual
+allocation, dispatch, checks, retained modules, executable bytes and runtime
+cost under matched conditions; benchmark work remains last and no universal
+zero-overhead claim is admitted.
+
+Owner update, 2026-10-08: native compiled applications target performance at
+least as good as optimized idiomatic Go under the same contract. The JS target
+must pursue every material measurable lowering or specialization, including
+static match dispatch and a generated/specialized effect runtime when useful,
+while retaining the pinned default Effect-compatible ABI and userland contract.
+Generated code may be machine-written; typed errors, service rows, ownership,
+cancellation, scopes and completed cleanup remain unchanged. A many-times
+speedup is an ambition to test, not a current result or universal multiplier.
+
+This map indexes resolved decisions and retained implementation receipts. Open implementation work remains in the native parent, child and dependency graph; query it with `wayfinder frontier` instead of duplicating open-ticket lists here. Pragma/runtime selections must retain prior-art comparisons, NORTH_STAR checks, rejected alternatives and their evidence in the relevant spikes; the current JS ABI remains pinned Effect-compatible until a scoped provider decision says otherwise.
+
 ## Decisions so far
 
+- [Does explicit run and contract inspection make the tiny language useful?](001.md): resolved narrowly from the owner's 2026-10-05 reaction to the public runnable prototype. The finite `.ef` slice was judged useful for Go-like simplicity and Effect-style guarantees, with more ADT/pattern showcases requested; backend/lifecycle/cost parity remains independently open.
 - [Which production patterns constrain the next foundation contracts?](research-foundations.md): timer scheduling, dependency capture and nested ownership set the foundation acceptance seams.
 - [Bundled standard library capability contracts](stdlib-parity.md): resolved the finite inventory/specification question through pinned source/tests, counsel and generic adoption patterns; implementation remains open in five batches.
 
-## Additional implementation
-
-- [First-class declarative layers](language-layers.md): owner-directed `service`/`impl`/`layer` composition, inferred provides/raises/uses, checked merges and replacement, identity sharing and owned acquisition. Five gated children cover [static plans](layer-plans.md), [managed acquisition](layer-runtime.md), [fallible/startup construction](layer-construction.md), [plan instances and inherited inputs](layer-instances.md), and [tooling/adoption](layer-tooling.md). Refreshed production source audit adds replacement topology, borrowed services and retained hidden startup nodes; none is claimed implemented yet.
-
-- [Automatic Go host values and standard protocols](host-interop.md): owner-required native declaration reuse, complete results, direct method/interface compatibility and explicit managed borrowing/callback boundaries. Four finite units and source-grounded acceptance are specified; primitive-only imports do not establish these guarantees.
-
-- [Bound shared syntax traversal](syntax-traversal.md): resolved at45b43d2 with canonical child visits across formatter, lint, diagnostics, graph, type queries and test admission. Permanent deep CLI/MCP queries retain their facts and service a queued ping; integration gates pass.
-
-- [Canonical formatter](formatter.md): resolved through19a450b with one comment-preserving printer, bounded `ef fmt`/read-only MCP adapters and twelve authored examples checked by the gate. Independent review, exact-output replay and integration gates pass. [Editor formatting](editor-formatting.md) is implemented through the language server and pending independent review.
-
-- [Versioned custom lint rules and shared rule packs](custom-lint.md): user-authored policies consume canonical facts and report through CLI/MCP/LSP, with options, source-fixture tests and optional bounded execution independent of ordinary compilation.
-
-- [Shared editor-grade diagnostics](semantic-diagnostics.md), [complete canonical types](semantic-types.md), and a [stdio language server](language-server.md): owner-requested warnings/errors and full semantic inspection across CLI, MCP and editor, with one checked snapshot model.
-
-  The independently useful [versioned LSP diagnostics/document child](lsp-diagnostics.md) is integrated and reviewed at `6cbbed0` with real framed-process and full integration gates. Full type/navigation/formatting capabilities remain pending the parent contract.
-
-- [Matched server performance against TypeScript and optimized Go](server-benchmarks.md): owner-requested server equivalence, throughput/latency, resource, startup/shutdown and separate build receipts. Performance superiority remains a measured question.
-
-- [Bundled standard library capability and language contracts](stdlib-parity.md): owner-directed Effect-grade library distribution, with compiler-enforced semantics, ordinary inspectable library contracts and staged behavioral parity.
-- Library implementation: [owned core](stdlib-owned-core.md), [services](stdlib-services.md), [bounded flow](stdlib-flow.md), [shared producers/platform clients](stdlib-shared-platform.md), and [telemetry/batching](stdlib-telemetry-batching.md), with finite [contracts and causal gates](../../specs/standard-library-capabilities.md). Existing native server work retains its own graph and priority.
-
-- [Native codecs and typed server contracts](native-server-spec.md): reusable bundled interfaces, typed function values, checked codecs, managed endpoints and compatible unary RPC precede actual framework measurements.
-
-- [Bundled interfaces and typed function values](native-interfaces.md): canonical Unit 1 and callable/row/ownership Unit 2 are reviewed and integrated; explicit bundled contracts and shared template applications remain Unit 3. Closed ordinary callbacks and returned-callback factories have runnable portable examples; this parent stays open.
-
-- [Pinned upstream tests and executable conformance mapping](upstream-conformance.md): integrated and reviewed at62baa74 with licensed immutable corpus, ten qualified behavior mappings and actual selected Go/JS acceptance. Full integration gates pass; copied tests do not count as native passes. Later library/server tasks extend the same mapping.
-
-- [Ordinary owned actors](ordinary-actors.md): owner-refined runtime/stdlib capability through service/impl/effect protocols, typed replies, portable ownership and explicit admission/concurrency. Handler and receive-loop usage does not require a machine or a new DSL. [Protocol](actor-protocol.md), [runtime](actor-runtime.md), [receive](actor-receive.md) and [conformance](actor-conformance.md) remain open; supervision/addressing/persistence are separate capabilities.
-- [Checked machines and machine-backed actors](state-machines.md): owner-requested state-machine primitive over ordinary ADTs, explicit pure or effectful steps, owned invocation and shared graph inspection, adapted to the ordinary actor core. Flat states first; advanced statecharts/durability remain unsupported until specified.
-
-- [Reusable generic data and product matching](generic-data.md), followed by [payload-aware recovery](effect-recovery.md): ordinary Option/Result, finite generic data, exhaustive state/event decisions and typed outcome conversion shared by codecs and machines.
-
-- [Reachable runtime modules and small executable receipts](binary-reachability.md): small binaries with unused standard-library facilities excluded, including through fluent APIs; module/import/symbol and raw size evidence accompany implementation. [Runtime source modules](runtime-modules.md) completed and integrated at637313b after the owned-output prerequisite; checked application reachability and size proof remain open.
-
-- [Direct native execution and matched build cost](native-execution-lowering.md): the retained long-body compiler profile motivates a general lowering repair after canonical function contracts, preserving laziness and managed execution while measuring backend cost separately.
-
-- [Isolated owned native generated modules](generated-output-ownership.md): completed and integrated at2e23a894 with full gates and independent review. Complete immutable modules preserve legacy/unknown output and validate reuse; this closes the runtime split's output prerequisite, while application reachability remains open.
+- [Bound shared syntax traversal](syntax-traversal.md): resolved at `45b43d2` with canonical child visits across formatter, lint, diagnostics, graph, type queries and test admission. Permanent deep CLI/MCP queries retain their facts and service a queued ping; integration gates pass.
+- [Canonical formatter](formatter.md): resolved through `19a450b` with one comment-preserving printer, bounded `ef fmt`/read-only MCP adapters and twelve authored examples checked by the gate. Independent review, exact-output replay and integration gates pass; editor formatting remains separately pending the language server.
+- [Versioned LSP diagnostics/document lifecycle](lsp-diagnostics.md): integrated and reviewed at `6cbbed0` with real framed-process and full integration gates; full type/navigation/formatting capabilities remain pending the parent contract.
+- [Pinned upstream tests and executable conformance mapping](upstream-conformance.md): integrated and reviewed at `62baa74` with a licensed immutable corpus, ten qualified behavior mappings and actual selected Go/JS acceptance. Copied tests do not count as native passes; later library/server tasks extend the same mapping.
+- [Runtime source modules](runtime-modules.md): completed and integrated at `637313b` after the owned-output prerequisite; checked application reachability and size proof remain open in their native parent.
+- [Isolated owned native generated modules](generated-output-ownership.md): completed and integrated at `2e23a894` with full gates and independent review. Complete immutable modules preserve legacy/unknown output and validate reuse; application reachability remains open.
 
 ## Foundation implementation receipts
 

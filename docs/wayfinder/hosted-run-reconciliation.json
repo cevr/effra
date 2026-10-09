@@ -1,0 +1,215 @@
+{
+  "schemaVersion": 1,
+  "kind": "wayfinder-hosted-run-reconciliation",
+  "repository": "cevr/effra",
+  "capturedAt": "2026-10-08T19:02:31Z",
+  "sourceSubject": {
+    "commit": "4627f414414cc964840b53894b7161482687de69",
+    "tree": "ff2e8954a6063772b5fcd7dee9abc9929b58613c",
+    "lane": "wayfinder-hosted-run-reconciliation-2026-10-08",
+    "role": "accepted preparation/source base for the original hosted wave and extension authoring",
+    "containsExtensionBytes": false,
+    "extensionContentIsBoundBy": "localSource content hashes below",
+    "scope": "new durable extension; original 71-item migration wave remains immutable"
+  },
+  "scope": {
+    "originalWave": {
+      "canonicalIssues": 71,
+      "nativeEdges": 183,
+      "resolutionComments": 24,
+      "finiteHistoricalClosures": 17,
+      "hostedVerificationArtifact": {
+        "portablePath": "docs/wayfinder/receipts/original-hosted-verification-final.json",
+        "portableSha256": "0b9db394d7d6018db8767842278bb7fd1b216f3bfbd102b3ef07d60191288034",
+        "rootJsonPath": "/home/exedev/.cache/architecture-loop/effra/resume-2026-10-06/github-wayfinder-execution-native-20261008/hosted-verification-final.json",
+        "rootJsonSha256": "0b9db394d7d6018db8767842278bb7fd1b216f3bfbd102b3ef07d60191288034",
+        "rootVerdictPath": "/home/exedev/.cache/architecture-loop/effra/resume-2026-10-06/wayfinder-hosted-execution-root-verdict-native-20261008.md",
+        "rootVerdictSha256": "ea391866aea7a850dceb9031055638ef052c8494d676c36f99657dcaa2001f42"
+      },
+      "stateClosureEdgeAuthority": "portable original-hosted-verification-final.json; mapping hostedState fields remain historical provenance",
+      "administrativeDuplicate": {
+        "issueNumber": 63,
+        "state": "not_planned",
+        "countsAsHistoricalCompletion": false,
+        "separateFromHistoricalCompletions": true
+      }
+    },
+    "extension": {
+      "localId": "run-binding",
+      "canonicalIssueNumber": 73,
+      "canonicalIssueId": 5767369413,
+      "canonicalIssuesAfterAddition": 72,
+      "nativeEdgesAfterAddition": 184,
+      "parentLocalId": "map",
+      "parentIssueNumber": 1,
+      "parentIssueId": 5764998176,
+      "syntaxAdmission": "not admitted",
+      "goal": "active entire implementation"
+    },
+    "pendingPublicSourceReferences": 12
+  },
+  "localSource": {
+    "issueMirror": {
+      "localId": "run-binding",
+      "path": "docs/wayfinder/issues/run-binding.md",
+      "sha256": "0c4fdd660f8f71bf217027c306e4a749f547a35ff800b60aad8d502a245c4a7b",
+      "hostedBodySha256": "4c5b6b7637d3e4e135aa946cfaff0f25bdd8483a94840d065794a608262c4043",
+      "bodyBinding": "hosted marker plus local body after metadata and title; exact GET body hash matches"
+    },
+    "researchRecord": {
+      "path": "docs/research/generalized-run-binding.md",
+      "sha256": "1851fef6945586681da8b0163f001f157b5779ab39153476a943985f4b75017e"
+    },
+    "mapping": {
+      "path": "docs/wayfinder/hosted-identities.json",
+      "sha256": "9d9bd3f595e34459531ef245132f96a09170e36e81fcdda980b50a4896f8faaf"
+    },
+    "migration": {
+      "inputManifest": {
+        "path": "docs/wayfinder/migration/input-manifest.json",
+        "fileSha256": "0373fa5b59890288ddc7de40cf817444a8f05c0a377af30132bfa8dadd7c16dc",
+        "canonicalContentSha256": "82e5751d2a5e9ee4a2bcd3ec8ea55dbbe834ce8e716a66770189bc90804b661a"
+      },
+      "manifest": {
+        "path": "docs/wayfinder/migration/manifest.json",
+        "fileSha256": "a385301d464fcd257ef4e7dd440d237f10092bdc987899e7496dd84e13aa5606"
+      },
+      "payloads": {
+        "issues": {
+          "path": "docs/wayfinder/migration/issues.json",
+          "sha256": "080bf9882c4971765914884a2a68e69d7a934eb63a3c5910b55658ee78ca3625"
+        },
+        "edges": {
+          "path": "docs/wayfinder/migration/edges.json",
+          "sha256": "4f3160ecd8f03128be35c98b3d0f2092ff6a16ca52ca947ea97bae0d168c62b0"
+        },
+        "resolutionComments": {
+          "path": "docs/wayfinder/migration/resolution-comments.json",
+          "sha256": "a1972667fa03564176311adcd9a98d89ed9bf89016ac51bbff8035f357bb526c"
+        },
+        "unresolvedReferences": {
+          "path": "docs/wayfinder/migration/unresolved-references.json",
+          "sha256": "a02527ad88e54245ef21dff97399457d3e294678f1818d98fd67d9dc86b7e711"
+        }
+      }
+    },
+    "portableEvidence": {
+      "safePublicJson": true,
+      "files": [
+        {
+          "path": "docs/wayfinder/receipts/issue-73-get.response.json",
+          "sha256": "ffc6e98c256aa31dc330d77e370ea304836d007ff166de62c6700227f240575e",
+          "kind": "native-get-response"
+        },
+        {
+          "path": "docs/wayfinder/receipts/issue-73-get.receipt.json",
+          "sha256": "7012076a650d41a4c26157424321dd2f3d18bd1bcbaa60ead923140dbd3288f0",
+          "kind": "native-get-receipt"
+        },
+        {
+          "path": "docs/wayfinder/receipts/map-sub-issues-get.response.json",
+          "sha256": "135dfd643024b553d082f182d4ff8574080ad7411944c1db54a7f87dec25f64d",
+          "kind": "native-get-response"
+        },
+        {
+          "path": "docs/wayfinder/receipts/map-sub-issues-get.receipt.json",
+          "sha256": "1a10fde8a18b6448bdb5d213c210774d1e695b409c3a7f49341d517dcea4879e",
+          "kind": "native-get-receipt"
+        },
+        {
+          "path": "docs/wayfinder/receipts/original-hosted-verification-final.json",
+          "sha256": "0b9db394d7d6018db8767842278bb7fd1b216f3bfbd102b3ef07d60191288034",
+          "kind": "original-wave-verifier"
+        }
+      ]
+    }
+  },
+  "hosted": {
+    "issue": {
+      "number": 73,
+      "issueId": 5767369413,
+      "url": "https://github.com/cevr/effra/issues/73",
+      "title": "Generalized run sequencing and checked userland binding",
+      "state": "open",
+      "bodySha256": "4c5b6b7637d3e4e135aa946cfaff0f25bdd8483a94840d065794a608262c4043",
+      "nativeGET": {
+        "method": "GET",
+        "endpoint": "repos/cevr/effra/issues/73",
+        "exit": 0,
+        "sourceCommit": "4627f414414cc964840b53894b7161482687de69",
+        "sourceTree": "ff2e8954a6063772b5fcd7dee9abc9929b58613c",
+        "responseSha256": "ffc6e98c256aa31dc330d77e370ea304836d007ff166de62c6700227f240575e",
+        "responsePath": "docs/wayfinder/receipts/issue-73-get.response.json",
+        "receiptPath": "docs/wayfinder/receipts/issue-73-get.receipt.json",
+        "rootResponsePath": "/home/exedev/.cache/architecture-loop/effra/resume-2026-10-06/github-wayfinder-execution-native-20261008/20261008T190229282634Z-GET-repos_cevr_effra_issues_73.response.json",
+        "rootReceiptPath": "/home/exedev/.cache/architecture-loop/effra/resume-2026-10-06/github-wayfinder-execution-native-20261008/20261008T190229282634Z-GET-repos_cevr_effra_issues_73.receipt.json",
+        "receiptSha256": "7012076a650d41a4c26157424321dd2f3d18bd1bcbaa60ead923140dbd3288f0"
+      }
+    },
+    "parent": {
+      "number": 1,
+      "issueId": 5764998176,
+      "url": "https://github.com/cevr/effra/issues/1",
+      "apiUrl": "https://api.github.com/repos/cevr/effra/issues/1",
+      "relation": "parent",
+      "nativeGET": {
+        "method": "GET",
+        "endpoint": "repos/cevr/effra/issues/1/sub_issues?per_page=100",
+        "exit": 0,
+        "sourceCommit": "4627f414414cc964840b53894b7161482687de69",
+        "sourceTree": "ff2e8954a6063772b5fcd7dee9abc9929b58613c",
+        "responseSha256": "135dfd643024b553d082f182d4ff8574080ad7411944c1db54a7f87dec25f64d",
+        "responsePath": "docs/wayfinder/receipts/map-sub-issues-get.response.json",
+        "receiptPath": "docs/wayfinder/receipts/map-sub-issues-get.receipt.json",
+        "rootResponsePath": "/home/exedev/.cache/architecture-loop/effra/resume-2026-10-06/github-wayfinder-execution-native-20261008/20261008T190231094065Z-GET-repos_cevr_effra_issues_1_sub_issues.response.json",
+        "rootReceiptPath": "/home/exedev/.cache/architecture-loop/effra/resume-2026-10-06/github-wayfinder-execution-native-20261008/20261008T190231094065Z-GET-repos_cevr_effra_issues_1_sub_issues.receipt.json",
+        "receiptSha256": "1a10fde8a18b6448bdb5d213c210774d1e695b409c3a7f49341d517dcea4879e"
+      },
+      "inverseConfirmed": true
+    }
+  },
+  "transport": {
+    "source": "root-retained native GET receipts",
+    "rawReceiptDirectory": "/home/exedev/.cache/architecture-loop/effra/resume-2026-10-06/github-wayfinder-execution-native-20261008",
+    "actualEndpointIdsBound": true,
+    "sourceCommitAndTreeBound": true,
+    "responseAndReceiptHashesBound": true,
+    "noSyntheticPublicBlob": true,
+    "preparerEdge": {
+      "path": "docs/wayfinder/migration/edges.json",
+      "parentLocalId": "map",
+      "childLocalId": "run-binding",
+      "kind": "parent",
+      "relationshipStatus": "unverified",
+      "relationshipReceipt": null
+    }
+  },
+  "offlineCausalControls": {
+    "localIssueMetadataAndHostedBodyHashMatch": true,
+    "mappingUsesActualIssueNumberAndId": true,
+    "migrationCountsAre72IssuesAnd184Edges": true,
+    "original71WaveRetained": true,
+    "administrativeDuplicate63SeparateFrom17Completions": true,
+    "pendingPublicSourceReferencesRetained": 12,
+    "preparerDoesNotUpgradeRelationshipReceipt": true,
+    "generalizedSyntaxAdmitted": false,
+    "goComparisonExecuted": false,
+    "benchmarkExecuted": false,
+    "mandatoryPortableResponseAndReceiptBytes": true,
+    "parentMemberIdAndInverseUrlChecked": true,
+    "originalWaveVerifierBytesCheckedSeparately": true,
+    "negativeControls": [
+      "missing receipt or response",
+      "tampered receipt or response bytes",
+      "wrong parent member ID or inverse URL",
+      "changed original closure/comment count",
+      "changed body hash or source commit binding"
+    ]
+  },
+  "limits": [
+    "The native GET receipts prove hosted identity, body, state, and parent relation only.",
+    "The research record distinguishes current Effra run behavior from a proposed checked rule; it is not an implementation receipt.",
+    "No law, performance, Go execution, two-target generalized binding, or closure claim is made.",
+    "The 12 pending public-source references remain pending and no public blob is fabricated."
+  ]
+}

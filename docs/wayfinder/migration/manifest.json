@@ -1,0 +1,41 @@
+{
+  "counts": {
+    "closedIssues": 17,
+    "graphEdges": 184,
+    "localIssues": 72,
+    "pendingEdges": 179,
+    "publishableIssues": 67,
+    "resolutionComments": 24,
+    "unresolvedReferences": 36
+  },
+  "historicalLinkRevision": {
+    "commit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+    "repository": "cevr/effra",
+    "role": "historical-link-target"
+  },
+  "inputSnapshot": {
+    "path": "docs/wayfinder/migration/input-manifest.json",
+    "sha256": "82e5751d2a5e9ee4a2bcd3ec8ea55dbbe834ce8e716a66770189bc90804b661a"
+  },
+  "mappingPath": "docs/wayfinder/hosted-identities.json",
+  "payloads": {
+    "edges": {
+      "path": "docs/wayfinder/migration/edges.json",
+      "sha256": "4f3160ecd8f03128be35c98b3d0f2092ff6a16ca52ca947ea97bae0d168c62b0"
+    },
+    "issues": {
+      "path": "docs/wayfinder/migration/issues.json",
+      "sha256": "080bf9882c4971765914884a2a68e69d7a934eb63a3c5910b55658ee78ca3625"
+    },
+    "resolutionComments": {
+      "path": "docs/wayfinder/migration/resolution-comments.json",
+      "sha256": "a1972667fa03564176311adcd9a98d89ed9bf89016ac51bbff8035f357bb526c"
+    },
+    "unresolvedReferences": {
+      "path": "docs/wayfinder/migration/unresolved-references.json",
+      "sha256": "a02527ad88e54245ef21dff97399457d3e294678f1818d98fd67d9dc86b7e711"
+    }
+  },
+  "repository": "cevr/effra",
+  "schemaVersion": 2
+}

@@ -1,0 +1,3093 @@
+{
+  "historicalLinkRevision": {
+    "commit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+    "repository": "cevr/effra",
+    "role": "historical-link-target"
+  },
+  "inputSnapshot": {
+    "path": "docs/wayfinder/migration/input-manifest.json",
+    "sha256": "82e5751d2a5e9ee4a2bcd3ec8ea55dbbe834ce8e716a66770189bc90804b661a"
+  },
+  "items": [
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "002",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "001",
+      "pendingLocalIds": [
+        "001",
+        "002"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "003",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "001",
+      "pendingLocalIds": [
+        "001",
+        "003"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "actor-runtime",
+      "pendingLocalIds": [
+        "actor-conformance",
+        "actor-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "host-interop",
+      "pendingLocalIds": [
+        "actor-conformance",
+        "host-interop"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "semantic-types",
+      "pendingLocalIds": [
+        "actor-conformance",
+        "semantic-types"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-protocol",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "generic-data",
+      "pendingLocalIds": [
+        "actor-protocol",
+        "generic-data"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-protocol",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "actor-protocol",
+        "native-interfaces"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-protocol",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "stdlib-owned-core",
+      "pendingLocalIds": [
+        "actor-protocol",
+        "stdlib-owned-core"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-receive",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "actor-protocol",
+      "pendingLocalIds": [
+        "actor-protocol",
+        "actor-receive"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-receive",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "actor-runtime",
+      "pendingLocalIds": [
+        "actor-receive",
+        "actor-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-runtime",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "actor-protocol",
+      "pendingLocalIds": [
+        "actor-protocol",
+        "actor-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-runtime",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-ownership",
+      "pendingLocalIds": [
+        "actor-runtime",
+        "foundation-ownership"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-runtime",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-testing",
+      "pendingLocalIds": [
+        "actor-runtime",
+        "foundation-testing"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "binary-reachability",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "binary-reachability",
+        "native-interfaces"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "capability-synthesis",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "host-interop",
+      "pendingLocalIds": [
+        "capability-synthesis",
+        "host-interop"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "capability-synthesis",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": 3,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/3",
+      "parentLocalId": "machine-provider-contract",
+      "pendingLocalIds": [
+        "capability-synthesis"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "capability-synthesis",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "semantic-types",
+      "pendingLocalIds": [
+        "capability-synthesis",
+        "semantic-types"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "client-lifetime-bridge",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "host-interop",
+      "pendingLocalIds": [
+        "client-lifetime-bridge",
+        "host-interop"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "client-lifetime-bridge",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "typescript-declarations",
+      "pendingLocalIds": [
+        "client-lifetime-bridge",
+        "typescript-declarations"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "custom-lint",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "language-server",
+      "pendingLocalIds": [
+        "custom-lint",
+        "language-server"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "custom-lint",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "semantic-types",
+      "pendingLocalIds": [
+        "custom-lint",
+        "semantic-types"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "editor-formatting",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "formatter",
+      "pendingLocalIds": [
+        "editor-formatting",
+        "formatter"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "editor-formatting",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "language-server",
+      "pendingLocalIds": [
+        "editor-formatting",
+        "language-server"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "effect-recovery",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "generic-data",
+      "pendingLocalIds": [
+        "effect-recovery",
+        "generic-data"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "effect-recovery",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "effect-recovery",
+        "native-interfaces"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-data",
+      "pendingLocalIds": [
+        "foundation-conformance",
+        "foundation-data"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-lint",
+      "pendingLocalIds": [
+        "foundation-conformance",
+        "foundation-lint"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-ownership",
+      "pendingLocalIds": [
+        "foundation-conformance",
+        "foundation-ownership"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-providers",
+      "pendingLocalIds": [
+        "foundation-conformance",
+        "foundation-providers"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-testing",
+      "pendingLocalIds": [
+        "foundation-conformance",
+        "foundation-testing"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-ownership",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-data",
+      "pendingLocalIds": [
+        "foundation-data",
+        "foundation-ownership"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-ownership",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-providers",
+      "pendingLocalIds": [
+        "foundation-ownership",
+        "foundation-providers"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-providers",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-data",
+      "pendingLocalIds": [
+        "foundation-data",
+        "foundation-providers"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "framework-corpus",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "client-lifetime-bridge",
+      "pendingLocalIds": [
+        "client-lifetime-bridge",
+        "framework-corpus"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "framework-corpus",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "jsx-notation",
+      "pendingLocalIds": [
+        "framework-corpus",
+        "jsx-notation"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "framework-corpus",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": 4,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/4",
+      "parentLocalId": "machine-provider-conformance",
+      "pendingLocalIds": [
+        "framework-corpus"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "framework-corpus",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "numeric-arithmetic",
+      "pendingLocalIds": [
+        "framework-corpus",
+        "numeric-arithmetic"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "framework-corpus",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "typescript-declarations",
+      "pendingLocalIds": [
+        "framework-corpus",
+        "typescript-declarations"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "generated-output-ownership",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-spec",
+      "pendingLocalIds": [
+        "foundation-spec",
+        "generated-output-ownership"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "generic-data",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "generic-data",
+        "native-interfaces"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "host-callbacks",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "host-resources",
+      "pendingLocalIds": [
+        "host-callbacks",
+        "host-resources"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "host-interop",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "host-interop",
+        "native-interfaces"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "host-protocols",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "host-types",
+      "pendingLocalIds": [
+        "host-protocols",
+        "host-types"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "host-resources",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "host-protocols",
+      "pendingLocalIds": [
+        "host-protocols",
+        "host-resources"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "host-resources",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "stdlib-owned-core",
+      "pendingLocalIds": [
+        "host-resources",
+        "stdlib-owned-core"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "host-types",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "generic-data",
+      "pendingLocalIds": [
+        "generic-data",
+        "host-types"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "host-types",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "host-types",
+        "native-interfaces"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "jsx-notation",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "typescript-declarations",
+      "pendingLocalIds": [
+        "jsx-notation",
+        "typescript-declarations"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "language-server",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "lsp-diagnostics",
+      "pendingLocalIds": [
+        "language-server",
+        "lsp-diagnostics"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "language-server",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "semantic-diagnostics",
+      "pendingLocalIds": [
+        "language-server",
+        "semantic-diagnostics"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "language-server",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "semantic-types",
+      "pendingLocalIds": [
+        "language-server",
+        "semantic-types"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-construction",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "layer-plans",
+      "pendingLocalIds": [
+        "layer-construction",
+        "layer-plans"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-construction",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "layer-runtime",
+      "pendingLocalIds": [
+        "layer-construction",
+        "layer-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-construction",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "layer-construction",
+        "native-interfaces"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-construction",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "stdlib-owned-core",
+      "pendingLocalIds": [
+        "layer-construction",
+        "stdlib-owned-core"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-instances",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "layer-construction",
+      "pendingLocalIds": [
+        "layer-construction",
+        "layer-instances"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-plans",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-providers",
+      "pendingLocalIds": [
+        "foundation-providers",
+        "layer-plans"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-runtime",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-testing",
+      "pendingLocalIds": [
+        "foundation-testing",
+        "layer-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-tooling",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "layer-instances",
+      "pendingLocalIds": [
+        "layer-instances",
+        "layer-tooling"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "lsp-diagnostics",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "semantic-diagnostics",
+      "pendingLocalIds": [
+        "lsp-diagnostics",
+        "semantic-diagnostics"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "machine-runtime",
+      "pendingLocalIds": [
+        "machine-conformance",
+        "machine-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-codecs",
+      "pendingLocalIds": [
+        "machine-conformance",
+        "native-codecs"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-http",
+      "pendingLocalIds": [
+        "machine-conformance",
+        "native-http"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-plan",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "actor-protocol",
+      "pendingLocalIds": [
+        "actor-protocol",
+        "machine-plan"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-plan",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "effect-recovery",
+      "pendingLocalIds": [
+        "effect-recovery",
+        "machine-plan"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-plan",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "generic-data",
+      "pendingLocalIds": [
+        "generic-data",
+        "machine-plan"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-plan",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "machine-plan",
+        "native-interfaces"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": 4,
+      "childHostedUrl": "https://github.com/cevr/effra/issues/4",
+      "childLocalId": "machine-provider-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": 3,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/3",
+      "parentLocalId": "machine-provider-contract",
+      "pendingLocalIds": [],
+      "publishable": true,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "ready-to-publish"
+    },
+    {
+      "childHostedIssueNumber": 4,
+      "childHostedUrl": "https://github.com/cevr/effra/issues/4",
+      "childLocalId": "machine-provider-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "machine-runtime",
+      "pendingLocalIds": [
+        "machine-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": 3,
+      "childHostedUrl": "https://github.com/cevr/effra/issues/3",
+      "childLocalId": "machine-provider-contract",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "machine-plan",
+      "pendingLocalIds": [
+        "machine-plan"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-runtime",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "actor-runtime",
+      "pendingLocalIds": [
+        "actor-runtime",
+        "machine-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-runtime",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-ownership",
+      "pendingLocalIds": [
+        "foundation-ownership",
+        "machine-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-runtime",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-testing",
+      "pendingLocalIds": [
+        "foundation-testing",
+        "machine-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-runtime",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "machine-plan",
+      "pendingLocalIds": [
+        "machine-plan",
+        "machine-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "measurement-ledger",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "framework-corpus",
+      "pendingLocalIds": [
+        "framework-corpus",
+        "measurement-ledger"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "measurement-ledger",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-execution-lowering",
+      "pendingLocalIds": [
+        "measurement-ledger",
+        "native-execution-lowering"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "measurement-ledger",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-conformance",
+      "pendingLocalIds": [
+        "measurement-ledger",
+        "native-server-conformance"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-codecs",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "native-codecs",
+        "native-interfaces"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-execution-lowering",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "native-execution-lowering",
+        "native-interfaces"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-http",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-codecs",
+      "pendingLocalIds": [
+        "native-codecs",
+        "native-http"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-interfaces",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-ownership",
+      "pendingLocalIds": [
+        "foundation-ownership",
+        "native-interfaces"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-interfaces",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-testing",
+      "pendingLocalIds": [
+        "foundation-testing",
+        "native-interfaces"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-rpc",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-http",
+      "pendingLocalIds": [
+        "native-http",
+        "native-rpc"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-server-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-conformance",
+      "pendingLocalIds": [
+        "foundation-conformance",
+        "native-server-conformance"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-server-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-rpc",
+      "pendingLocalIds": [
+        "native-rpc",
+        "native-server-conformance"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-server-conformance",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "upstream-conformance",
+      "pendingLocalIds": [
+        "native-server-conformance",
+        "upstream-conformance"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-server-spec",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-spec",
+      "pendingLocalIds": [
+        "foundation-spec",
+        "native-server-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "runtime-modules",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-spec",
+      "pendingLocalIds": [
+        "foundation-spec",
+        "runtime-modules"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "runtime-modules",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "generated-output-ownership",
+      "pendingLocalIds": [
+        "generated-output-ownership",
+        "runtime-modules"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "semantic-types",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "native-interfaces",
+        "semantic-types"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "semantic-types",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "semantic-diagnostics",
+      "pendingLocalIds": [
+        "semantic-diagnostics",
+        "semantic-types"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "server-benchmarks",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "custom-lint",
+      "pendingLocalIds": [
+        "custom-lint",
+        "server-benchmarks"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "server-benchmarks",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "editor-formatting",
+      "pendingLocalIds": [
+        "editor-formatting",
+        "server-benchmarks"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "server-benchmarks",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "machine-conformance",
+      "pendingLocalIds": [
+        "machine-conformance",
+        "server-benchmarks"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "server-benchmarks",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-execution-lowering",
+      "pendingLocalIds": [
+        "native-execution-lowering",
+        "server-benchmarks"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "server-benchmarks",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-conformance",
+      "pendingLocalIds": [
+        "native-server-conformance",
+        "server-benchmarks"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "server-benchmarks",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "stdlib-telemetry-batching",
+      "pendingLocalIds": [
+        "server-benchmarks",
+        "stdlib-telemetry-batching"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-flow",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "stdlib-owned-core",
+      "pendingLocalIds": [
+        "stdlib-flow",
+        "stdlib-owned-core"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-owned-core",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "binary-reachability",
+      "pendingLocalIds": [
+        "binary-reachability",
+        "stdlib-owned-core"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-owned-core",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "effect-recovery",
+      "pendingLocalIds": [
+        "effect-recovery",
+        "stdlib-owned-core"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-owned-core",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "generic-data",
+      "pendingLocalIds": [
+        "generic-data",
+        "stdlib-owned-core"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-owned-core",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "native-interfaces",
+        "stdlib-owned-core"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-owned-core",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "upstream-conformance",
+      "pendingLocalIds": [
+        "stdlib-owned-core",
+        "upstream-conformance"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-parity",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-spec",
+      "pendingLocalIds": [
+        "foundation-spec",
+        "stdlib-parity"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-services",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "layer-construction",
+      "pendingLocalIds": [
+        "layer-construction",
+        "stdlib-services"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-services",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "stdlib-owned-core",
+      "pendingLocalIds": [
+        "stdlib-owned-core",
+        "stdlib-services"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-shared-platform",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "stdlib-flow",
+      "pendingLocalIds": [
+        "stdlib-flow",
+        "stdlib-shared-platform"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-shared-platform",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "stdlib-services",
+      "pendingLocalIds": [
+        "stdlib-services",
+        "stdlib-shared-platform"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-telemetry-batching",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "stdlib-flow",
+      "pendingLocalIds": [
+        "stdlib-flow",
+        "stdlib-telemetry-batching"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-telemetry-batching",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "stdlib-services",
+      "pendingLocalIds": [
+        "stdlib-services",
+        "stdlib-telemetry-batching"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-telemetry-batching",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "stdlib-shared-platform",
+      "pendingLocalIds": [
+        "stdlib-shared-platform",
+        "stdlib-telemetry-batching"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "typescript-declarations",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-interfaces",
+      "pendingLocalIds": [
+        "native-interfaces",
+        "typescript-declarations"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "typescript-declarations",
+      "kind": "blocked-by",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "semantic-types",
+      "pendingLocalIds": [
+        "semantic-types",
+        "typescript-declarations"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "001",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "001"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "002",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "002"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "003",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "003"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "004",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "004"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "005",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "005"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-conformance",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "ordinary-actors",
+      "pendingLocalIds": [
+        "actor-conformance",
+        "ordinary-actors"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-protocol",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "ordinary-actors",
+      "pendingLocalIds": [
+        "actor-protocol",
+        "ordinary-actors"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-receive",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "ordinary-actors",
+      "pendingLocalIds": [
+        "actor-receive",
+        "ordinary-actors"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "actor-runtime",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "ordinary-actors",
+      "pendingLocalIds": [
+        "actor-runtime",
+        "ordinary-actors"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "binary-reachability",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-spec",
+      "pendingLocalIds": [
+        "binary-reachability",
+        "native-server-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "capability-synthesis",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "capability-synthesis"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "client-lifetime-bridge",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "client-lifetime-bridge"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "custom-lint",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "custom-lint"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "editor-formatting",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "editor-formatting"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "effect-recovery",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-spec",
+      "pendingLocalIds": [
+        "effect-recovery",
+        "native-server-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "formatter",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "formatter"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-conformance",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-spec",
+      "pendingLocalIds": [
+        "foundation-conformance",
+        "foundation-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-data",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-spec",
+      "pendingLocalIds": [
+        "foundation-data",
+        "foundation-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-lint",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-spec",
+      "pendingLocalIds": [
+        "foundation-lint",
+        "foundation-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-ownership",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-spec",
+      "pendingLocalIds": [
+        "foundation-ownership",
+        "foundation-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-providers",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-spec",
+      "pendingLocalIds": [
+        "foundation-providers",
+        "foundation-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-spec",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "foundation-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "foundation-testing",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "foundation-spec",
+      "pendingLocalIds": [
+        "foundation-spec",
+        "foundation-testing"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "framework-corpus",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-conformance",
+      "pendingLocalIds": [
+        "framework-corpus",
+        "native-server-conformance"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "generated-output-ownership",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "binary-reachability",
+      "pendingLocalIds": [
+        "binary-reachability",
+        "generated-output-ownership"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "generic-data",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-spec",
+      "pendingLocalIds": [
+        "generic-data",
+        "native-server-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "host-callbacks",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "host-interop",
+      "pendingLocalIds": [
+        "host-callbacks",
+        "host-interop"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "host-interop",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "host-interop"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "host-protocols",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "host-interop",
+      "pendingLocalIds": [
+        "host-interop",
+        "host-protocols"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "host-resources",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "host-interop",
+      "pendingLocalIds": [
+        "host-interop",
+        "host-resources"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "host-types",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "host-interop",
+      "pendingLocalIds": [
+        "host-interop",
+        "host-types"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "jsx-notation",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "jsx-notation"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "language-layers",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "language-layers"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "language-server",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "language-server"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-construction",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "language-layers",
+      "pendingLocalIds": [
+        "language-layers",
+        "layer-construction"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-instances",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "language-layers",
+      "pendingLocalIds": [
+        "language-layers",
+        "layer-instances"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-plans",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "language-layers",
+      "pendingLocalIds": [
+        "language-layers",
+        "layer-plans"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-runtime",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "language-layers",
+      "pendingLocalIds": [
+        "language-layers",
+        "layer-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "layer-tooling",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "language-layers",
+      "pendingLocalIds": [
+        "language-layers",
+        "layer-tooling"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "lsp-diagnostics",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "language-server",
+      "pendingLocalIds": [
+        "language-server",
+        "lsp-diagnostics"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-conformance",
+      "kind": "parent",
+      "parentHostedIssueNumber": 2,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/2",
+      "parentLocalId": "state-machines",
+      "pendingLocalIds": [
+        "machine-conformance"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-plan",
+      "kind": "parent",
+      "parentHostedIssueNumber": 2,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/2",
+      "parentLocalId": "state-machines",
+      "pendingLocalIds": [
+        "machine-plan"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": 4,
+      "childHostedUrl": "https://github.com/cevr/effra/issues/4",
+      "childLocalId": "machine-provider-conformance",
+      "kind": "parent",
+      "parentHostedIssueNumber": 2,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/2",
+      "parentLocalId": "state-machines",
+      "pendingLocalIds": [],
+      "publishable": true,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "ready-to-publish"
+    },
+    {
+      "childHostedIssueNumber": 3,
+      "childHostedUrl": "https://github.com/cevr/effra/issues/3",
+      "childLocalId": "machine-provider-contract",
+      "kind": "parent",
+      "parentHostedIssueNumber": 2,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/2",
+      "parentLocalId": "state-machines",
+      "pendingLocalIds": [],
+      "publishable": true,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "ready-to-publish"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "machine-runtime",
+      "kind": "parent",
+      "parentHostedIssueNumber": 2,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/2",
+      "parentLocalId": "state-machines",
+      "pendingLocalIds": [
+        "machine-runtime"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "measurement-ledger",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "server-benchmarks",
+      "pendingLocalIds": [
+        "measurement-ledger",
+        "server-benchmarks"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-codecs",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-spec",
+      "pendingLocalIds": [
+        "native-codecs",
+        "native-server-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-execution-lowering",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-spec",
+      "pendingLocalIds": [
+        "native-execution-lowering",
+        "native-server-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-http",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-spec",
+      "pendingLocalIds": [
+        "native-http",
+        "native-server-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-interfaces",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-spec",
+      "pendingLocalIds": [
+        "native-interfaces",
+        "native-server-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-rpc",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-spec",
+      "pendingLocalIds": [
+        "native-rpc",
+        "native-server-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-server-conformance",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-spec",
+      "pendingLocalIds": [
+        "native-server-conformance",
+        "native-server-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "native-server-spec",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "native-server-spec"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "numeric-arithmetic",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "generic-data",
+      "pendingLocalIds": [
+        "generic-data",
+        "numeric-arithmetic"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "ordinary-actors",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "ordinary-actors"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "research-foundations",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "research-foundations"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": 73,
+      "childHostedUrl": "https://github.com/cevr/effra/issues/73",
+      "childLocalId": "run-binding",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [],
+      "publishable": true,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "ready-to-publish"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "runtime-modules",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "binary-reachability",
+      "pendingLocalIds": [
+        "binary-reachability",
+        "runtime-modules"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "semantic-diagnostics",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "semantic-diagnostics"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "semantic-types",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "semantic-types"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "server-benchmarks",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "server-benchmarks"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": 2,
+      "childHostedUrl": "https://github.com/cevr/effra/issues/2",
+      "childLocalId": "state-machines",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [],
+      "publishable": true,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "ready-to-publish"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-flow",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "stdlib-flow"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-owned-core",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "stdlib-owned-core"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-parity",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "stdlib-parity"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-services",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "stdlib-services"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-shared-platform",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "stdlib-shared-platform"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "stdlib-telemetry-batching",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "stdlib-telemetry-batching"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "syntax-traversal",
+      "kind": "parent",
+      "parentHostedIssueNumber": 1,
+      "parentHostedUrl": "https://github.com/cevr/effra/issues/1",
+      "parentLocalId": "map",
+      "pendingLocalIds": [
+        "syntax-traversal"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "typescript-declarations",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "host-interop",
+      "pendingLocalIds": [
+        "host-interop",
+        "typescript-declarations"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    },
+    {
+      "childHostedIssueNumber": null,
+      "childHostedUrl": null,
+      "childLocalId": "upstream-conformance",
+      "kind": "parent",
+      "parentHostedIssueNumber": null,
+      "parentHostedUrl": null,
+      "parentLocalId": "native-server-spec",
+      "pendingLocalIds": [
+        "native-server-spec",
+        "upstream-conformance"
+      ],
+      "publishable": false,
+      "relationshipReceipt": null,
+      "relationshipStatus": "unverified",
+      "status": "pending-hosted-identities"
+    }
+  ],
+  "repository": "cevr/effra",
+  "schemaVersion": 2
+}

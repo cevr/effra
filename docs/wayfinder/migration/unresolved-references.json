@@ -1,0 +1,267 @@
+{
+  "historicalLinkRevision": {
+    "commit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+    "repository": "cevr/effra",
+    "role": "historical-link-target"
+  },
+  "inputSnapshot": {
+    "path": "docs/wayfinder/migration/input-manifest.json",
+    "sha256": "82e5751d2a5e9ee4a2bcd3ec8ea55dbbe834ce8e716a66770189bc90804b661a"
+  },
+  "items": [
+    {
+      "historicalLinkCommit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+      "kind": "path",
+      "path": "docs/research/jsx-pragmas-and-runtime-selection.md",
+      "reason": "absent-at-historical-link-revision",
+      "source": "../../research/jsx-pragmas-and-runtime-selection.md",
+      "sourceLocalId": "jsx-notation",
+      "status": "unresolved"
+    },
+    {
+      "historicalLinkCommit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+      "kind": "path",
+      "path": "docs/research/lawful-runtime-contract.md",
+      "reason": "absent-at-historical-link-revision",
+      "source": "../../research/lawful-runtime-contract.md",
+      "sourceLocalId": "capability-synthesis",
+      "status": "unresolved"
+    },
+    {
+      "historicalLinkCommit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+      "kind": "path",
+      "path": "docs/research/lawful-runtime-contract.md",
+      "reason": "absent-at-historical-link-revision",
+      "source": "../../research/lawful-runtime-contract.md",
+      "sourceLocalId": "client-lifetime-bridge",
+      "status": "unresolved"
+    },
+    {
+      "historicalLinkCommit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+      "kind": "path",
+      "path": "docs/research/lawful-runtime-contract.md",
+      "reason": "absent-at-historical-link-revision",
+      "source": "../../research/lawful-runtime-contract.md",
+      "sourceLocalId": "framework-corpus",
+      "status": "unresolved"
+    },
+    {
+      "historicalLinkCommit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+      "kind": "path",
+      "path": "docs/research/lawful-runtime-contract.md",
+      "reason": "absent-at-historical-link-revision",
+      "source": "../../research/lawful-runtime-contract.md",
+      "sourceLocalId": "jsx-notation",
+      "status": "unresolved"
+    },
+    {
+      "historicalLinkCommit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+      "kind": "path",
+      "path": "docs/research/lawful-runtime-contract.md",
+      "reason": "absent-at-historical-link-revision",
+      "source": "../../research/lawful-runtime-contract.md",
+      "sourceLocalId": "language-layers",
+      "status": "unresolved"
+    },
+    {
+      "historicalLinkCommit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+      "kind": "path",
+      "path": "docs/research/lawful-runtime-contract.md",
+      "reason": "absent-at-historical-link-revision",
+      "source": "../../research/lawful-runtime-contract.md",
+      "sourceLocalId": "layer-construction",
+      "status": "unresolved"
+    },
+    {
+      "historicalLinkCommit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+      "kind": "path",
+      "path": "docs/research/lawful-runtime-contract.md",
+      "reason": "absent-at-historical-link-revision",
+      "source": "../../research/lawful-runtime-contract.md",
+      "sourceLocalId": "layer-runtime",
+      "status": "unresolved"
+    },
+    {
+      "historicalLinkCommit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+      "kind": "path",
+      "path": "docs/research/lawful-runtime-contract.md",
+      "reason": "absent-at-historical-link-revision",
+      "source": "../../research/lawful-runtime-contract.md",
+      "sourceLocalId": "machine-provider-conformance",
+      "status": "unresolved"
+    },
+    {
+      "historicalLinkCommit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+      "kind": "path",
+      "path": "docs/research/lawful-runtime-contract.md",
+      "reason": "absent-at-historical-link-revision",
+      "source": "../../research/lawful-runtime-contract.md",
+      "sourceLocalId": "machine-provider-contract",
+      "status": "unresolved"
+    },
+    {
+      "historicalLinkCommit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+      "kind": "path",
+      "path": "docs/research/lawful-runtime-contract.md",
+      "reason": "absent-at-historical-link-revision",
+      "source": "../../research/lawful-runtime-contract.md",
+      "sourceLocalId": "stdlib-owned-core",
+      "status": "unresolved"
+    },
+    {
+      "historicalLinkCommit": "779dc58368149452b0fd42b0debb291e3001c8ac",
+      "kind": "path",
+      "path": "docs/research/numeric-arithmetic.md",
+      "reason": "absent-at-historical-link-revision",
+      "source": "../../research/numeric-arithmetic.md",
+      "sourceLocalId": "numeric-arithmetic",
+      "status": "unresolved"
+    },
+    {
+      "kind": "issue",
+      "localId": "001",
+      "source": "001.md",
+      "sourceLocalId": "map"
+    },
+    {
+      "kind": "issue",
+      "localId": "actor-runtime",
+      "source": "actor-runtime.md",
+      "sourceLocalId": "machine-runtime"
+    },
+    {
+      "kind": "issue",
+      "localId": "formatter",
+      "source": "formatter.md",
+      "sourceLocalId": "map"
+    },
+    {
+      "kind": "issue",
+      "localId": "foundation-conformance",
+      "source": "foundation-conformance.md",
+      "sourceLocalId": "foundation-spec"
+    },
+    {
+      "kind": "issue",
+      "localId": "foundation-data",
+      "source": "foundation-data.md",
+      "sourceLocalId": "map"
+    },
+    {
+      "kind": "issue",
+      "localId": "foundation-lint",
+      "source": "foundation-lint.md",
+      "sourceLocalId": "map"
+    },
+    {
+      "kind": "issue",
+      "localId": "foundation-providers",
+      "source": "foundation-providers.md",
+      "sourceLocalId": "map"
+    },
+    {
+      "kind": "issue",
+      "localId": "foundation-testing",
+      "source": "foundation-testing.md",
+      "sourceLocalId": "map"
+    },
+    {
+      "kind": "issue",
+      "localId": "generated-output-ownership",
+      "source": "generated-output-ownership.md",
+      "sourceLocalId": "map"
+    },
+    {
+      "kind": "issue",
+      "localId": "generated-output-ownership",
+      "source": "generated-output-ownership.md",
+      "sourceLocalId": "runtime-modules"
+    },
+    {
+      "kind": "issue",
+      "localId": "language-layers",
+      "source": "language-layers.md",
+      "sourceLocalId": "stdlib-services"
+    },
+    {
+      "kind": "issue",
+      "localId": "lsp-diagnostics",
+      "source": "lsp-diagnostics.md",
+      "sourceLocalId": "map"
+    },
+    {
+      "kind": "issue",
+      "localId": "ordinary-actors",
+      "source": "ordinary-actors.md",
+      "sourceLocalId": "state-machines"
+    },
+    {
+      "kind": "issue",
+      "localId": "research-foundations",
+      "source": "research-foundations.md",
+      "sourceLocalId": "map"
+    },
+    {
+      "kind": "issue",
+      "localId": "runtime-modules",
+      "source": "runtime-modules.md",
+      "sourceLocalId": "binary-reachability"
+    },
+    {
+      "kind": "issue",
+      "localId": "runtime-modules",
+      "source": "runtime-modules.md",
+      "sourceLocalId": "map"
+    },
+    {
+      "kind": "issue",
+      "localId": "stdlib-flow",
+      "source": "stdlib-flow.md",
+      "sourceLocalId": "stdlib-parity"
+    },
+    {
+      "kind": "issue",
+      "localId": "stdlib-owned-core",
+      "source": "stdlib-owned-core.md",
+      "sourceLocalId": "stdlib-parity"
+    },
+    {
+      "kind": "issue",
+      "localId": "stdlib-parity",
+      "source": "stdlib-parity.md",
+      "sourceLocalId": "map"
+    },
+    {
+      "kind": "issue",
+      "localId": "stdlib-services",
+      "source": "stdlib-services.md",
+      "sourceLocalId": "stdlib-parity"
+    },
+    {
+      "kind": "issue",
+      "localId": "stdlib-shared-platform",
+      "source": "stdlib-shared-platform.md",
+      "sourceLocalId": "stdlib-parity"
+    },
+    {
+      "kind": "issue",
+      "localId": "stdlib-telemetry-batching",
+      "source": "stdlib-telemetry-batching.md",
+      "sourceLocalId": "stdlib-parity"
+    },
+    {
+      "kind": "issue",
+      "localId": "syntax-traversal",
+      "source": "syntax-traversal.md",
+      "sourceLocalId": "map"
+    },
+    {
+      "kind": "issue",
+      "localId": "upstream-conformance",
+      "source": "upstream-conformance.md",
+      "sourceLocalId": "map"
+    }
+  ],
+  "repository": "cevr/effra",
+  "schemaVersion": 2
+}
