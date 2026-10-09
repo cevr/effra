@@ -48,7 +48,7 @@ var jsPrelude = []jsPreludeChunk{
 	{name: "recover", imports: []string{"Effect", "Exit"}, source: preludeFile("recover.mjs")},
 	{name: "catch", requires: []string{"recover"}, imports: []string{"Effect"}, source: preludeFile("catch.mjs")},
 	{name: "layers", requires: []string{"lifecycle"}, imports: []string{"Cause", "Effect", "Exit", "Fiber", "Queue"}, source: preludeFile("layers.mjs")},
-	{name: "provider:LiveHttp", requires: []string{"lifecycle"}, imports: []string{"Cause", "Effect", "Exit"}, source: preludeFile("http.mjs")},
+	{name: "provider:LiveHttp", requires: []string{"lifecycle", "quote"}, imports: []string{"Cause", "Effect", "Exit"}, source: preludeFile("http.mjs")},
 	{name: "codec", imports: []string{"Effect"}, source: codecEngineJS + jsCodecAdapters},
 	{name: i64FormatOp, source: jsI64FormatHelper},
 	{name: i64ParseOp, imports: []string{"Effect"}, source: jsI64ParseHelper},

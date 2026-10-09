@@ -66,12 +66,41 @@ const __ef_http_guard = (res, publish) => {
     }
   }
 };
+// HTTP listen addresses and listener failures are Effra-owned text, the same
+// bytes as runtime/effra/http.go (parseHTTPAddress, httpListenError). The
+// result is the listen host and port, or the IoError message.
 const __ef_http_address = address => {
-  const colon = address.lastIndexOf(':');
-  if (colon < 0) throw new Error('invalid HTTP address ' + address);
-  let host = address.slice(0, colon);
-  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
-  return { host: host === '' ? undefined : host, port: Number(address.slice(colon + 1)) };
+  const invalid = reason => ({ error: 'invalid HTTP address ' + __ef_quoteText(address) + ': ' + reason });
+  let host, port;
+  if (address.startsWith('[')) {
+    const end = address.indexOf(']');
+    if (end < 0) return invalid('unbalanced brackets');
+    host = address.slice(1, end);
+    port = address.slice(end + 1);
+    if (!port.startsWith(':')) return invalid('missing port');
+    port = port.slice(1);
+    if (host === '' || /[[\]]/.test(host) || !host.includes(':')) return invalid('brackets must enclose an IPv6 address');
+  } else {
+    const colon = address.lastIndexOf(':');
+    if (colon < 0) return invalid('missing port');
+    host = address.slice(0, colon);
+    port = address.slice(colon + 1);
+    if (/[[\]]/.test(host)) return invalid('unbalanced brackets');
+    if (host.includes(':')) return invalid('an IPv6 host must be in brackets');
+  }
+  if (!/^[0-9]{1,5}$/.test(port) || Number(port) > 65535) return invalid('port must be a decimal number from 0 to 65535');
+  return { host: host === '' ? undefined : host, port: Number(port) };
+};
+// A name is resolved before listening, because hosts report a failed lookup
+// differently (Node: getaddrinfo ENOTFOUND; Bun: listen ENOENT or EAGAIN).
+const __ef_http_listen_error = (address, error) => {
+  const prefix = 'HTTP listen on ' + __ef_quoteText(address) + ': ';
+  switch (error?.code) {
+    case 'EADDRINUSE': return prefix + 'address in use';
+    case 'EADDRNOTAVAIL': return prefix + 'address not available';
+    case 'EACCES': case 'EPERM': return prefix + 'permission denied';
+  }
+  return prefix + String(error?.message ?? error);
 };
 const __ef_http_bound = server => {
   const bound = server.address();
@@ -86,9 +115,15 @@ const __ef_http_bound = server => {
 // the listener's services and, once that scope has closed, publishes its exit
 // through respond unless the client is gone.
 const __ef_http_serve = (address, timeouts, onRequest) => Effect.gen(function* () {
-  const { createServer } = yield* Effect.promise(() => import('node:http'));
+  const parsed = __ef_http_address(address);
+  if (parsed.error !== undefined) return yield* Effect.fail({ _tag: 'IoError', message: parsed.error });
+  const { host, port } = parsed;
+  const [{ createServer }, { isIP }, { lookup }] = yield* Effect.promise(() => Promise.all([import('node:http'), import('node:net'), import('node:dns/promises')]));
+  if (host !== undefined && isIP(host) === 0) {
+    const resolved = yield* Effect.promise(() => lookup(host).then(() => true, () => false));
+    if (!resolved) return yield* Effect.fail({ _tag: 'IoError', message: 'HTTP listen on ' + __ef_quoteText(address) + ': host lookup failed' });
+  }
   const context = yield* Effect.context();
-  const { host, port } = __ef_http_address(address);
   const transport = { closing: false, fibers: new Map(), exchanges: new Set(), reading: new WeakMap() };
   transport.exchange = (res, release = () => {}) => {
     let settle;
@@ -147,7 +182,7 @@ const __ef_http_serve = (address, timeouts, onRequest) => Effect.gen(function* (
   server.requestTimeout = 0;
   server.keepAliveTimeout = timeouts.idleMillis;
   const listen = Effect.callback(resume => {
-    const failed = error => resume(Effect.fail({ _tag: 'IoError', message: String(error?.message ?? error) }));
+    const failed = error => resume(Effect.fail({ _tag: 'IoError', message: __ef_http_listen_error(address, error) }));
     server.once('error', failed);
     server.listen(port, host, () => { server.off('error', failed); resume(Effect.void); });
   });

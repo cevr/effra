@@ -70,6 +70,20 @@ Automatic source imports now consume Go export data for primitive package functi
 
 `Http.listen(address, limits, handler)` is the only builtin HTTP server operation on Go and server JavaScript; every header-read, body-read, idle, body-size and active-exchange limit is explicit and no raw operation bypasses them. Handler service requirements flow into the server recipe, the transport records its absorbed typed failures, and listener/startup failures remain `IoError`.
 
+Listen addresses and listener failures are Effra-owned text, identical on Go and JavaScript (`parseHTTPAddress` and `httpListenError` in `runtime/effra/http.go`, `__ef_http_address` and `__ef_http_listen_error` in `internal/compiler/prelude/http.mjs`). An address is `host:port`:
+
+- The port is 0 to 65535 in decimal. Port 0 lets the OS choose. A service name such as `http` or an empty port is refused.
+- The host is empty (every interface), a name or IPv4 address without a colon, or an IPv6 address in brackets, such as `[::1]:8080`.
+
+Any other address fails with `IoError` before the host sees it, such as `invalid HTTP address "bad": missing port`. Other reasons are `unbalanced brackets`, `an IPv6 host must be in brackets`, `brackets must enclose an IPv6 address` and `port must be a decimal number from 0 to 65535`. A host listener failure is reported as `HTTP listen on "ADDRESS": CLASS`. The classes are:
+
+- `address in use` (EADDRINUSE)
+- `address not available` (EADDRNOTAVAIL)
+- `permission denied` (EACCES or EPERM)
+- `host lookup failed`: the host name does not resolve. JavaScript resolves a name before listening, because Node reports `getaddrinfo ENOTFOUND` while Bun reports `listen ENOENT` or `EAGAIN`.
+
+Any other listener failure keeps the host's text after the prefix, and is the one host-specific entry failure report. Go wraps errors in `net.OpError` with its own text (`listen tcp ...: bind: address already in use`), and Node exposes a portable `code` beside host text, so the classes key on errno and lookup errors rather than on text. Erlang's `:gen_tcp.listen` returns POSIX atoms such as `{:error, :eaddrinuse}` and formats them separately (`:inet.format_error/1`), which is the model followed here. The WASI sockets interface used by MoonBit's WASI examples has the same small set (`address-in-use`, `address-not-bindable`, `access-denied`, `name-unresolvable`, `unknown`). Before 2026-10-09, Go passed `net.Listen` text through and JavaScript raised a defect for an address without a colon.
+
 Run `./bin/ef run examples/http.ef` from the repository. It prints `listening http://127.0.0.1:PORT`; port zero lets the OS select an available port. Use that URL with `/health`, `/users/42`, `/users/slow`, `/users/missing`, or `/file`. Its handler answers each route with a `text/plain; charset=utf-8` `HttpReply.Respond` under literal limits for its workload (no request bodies, five-second reads); a declared `GoError` becomes an empty 500.
 
 Each request executes inside a fresh managed scope, with cancellation linked to its connection and server lifetime. SIGTERM stops admission, cancels requests, and waits for handlers and their cleanup before returning. A foreign call ignoring cancellation can delay shutdown; there is no detached timeout escape. The Go entry currently reports interruption with exit status 1.
