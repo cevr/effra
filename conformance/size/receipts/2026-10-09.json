@@ -1,7 +1,7 @@
 {
  "schema": "effra.size-conformance/2",
  "identity": {
-  "commit": "270016eaf2f0782cfba21f00b6335a494929bdbd",
+  "commit": "afdf7462f762af00fa5cc8ebc33caeeda9b3115a",
   "dirty": false,
   "toolchain": {
    "env": {
