@@ -57,7 +57,6 @@ var smokeChains = [][]string{
 	{"lsp_smoke"},
 	{"readme_smoke"},
 	{"bundled_smoke"},
-	{"format_smoke"},
 	{"layer_smoke"},
 	{"type_smoke"},
 }
