@@ -79,6 +79,102 @@ effect fn main() -> void { void }`
 	}
 }
 
+func rehashInterfaceSummaryForTest(t *testing.T, dto interfaceSummary) (interfaceSummary, []byte) {
+	t.Helper()
+	dto.ContentHash = ""
+	data, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dto.ContentHash = formatDigest(string(data))
+	data, err = json.Marshal(dto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dto, data
+}
+
+func TestLocalAndDistributedSummarySourceVersionsStayDistinct(t *testing.T) {
+	local := Compile("effect fn main() -> void { void }")
+	if !local.Checked {
+		t.Fatal(local.Diagnostics)
+	}
+	localSummary, err := exportInterfaceSummary(local.projector, currentModuleIdentity, local.Revision, local.Program.Functions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(localSummary.Sources) != 1 {
+		t.Fatalf("local source manifest = %+v", localSummary.Sources)
+	}
+	localSource := localSummary.Sources[0]
+	if localSource.ID != "source:user" || localSource.Module != currentModuleIdentity || localSource.Digest == "" || localSource.Version != "" {
+		t.Fatalf("local source must retain its unversioned content identity: %+v", localSource)
+	}
+	localContent := localSummary
+	localContent.ContentHash = ""
+	localBytes, err := json.Marshal(localContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if formatDigest(string(localBytes)) != localSummary.ContentHash {
+		t.Fatal("local summary content hash does not cover its unversioned source")
+	}
+
+	distributed := Compile(bundledGreeting)
+	if !distributed.Checked {
+		t.Fatal(distributed.Diagnostics)
+	}
+	dto, ok := distributed.projector.admittedSummaries["effra/functions"]
+	if !ok || len(dto.Sources) == 0 {
+		t.Fatalf("distributed summary source manifest missing: %+v", dto.Sources)
+	}
+	for _, source := range dto.Sources {
+		if source.ID == "source:user" || source.Module != dto.Module || source.Version != bundledInterfaceVersion {
+			t.Fatalf("distributed source is not versioned compiler provenance: %+v", source)
+		}
+	}
+	wire, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeInterfaceSummary(wire, dto.ContentHash, dto.SourceInput)
+	if err != nil {
+		t.Fatalf("versioned compiler-distributed summary did not round trip: %v", err)
+	}
+	if !reflect.DeepEqual(decoded.Sources, dto.Sources) {
+		t.Fatalf("distributed source manifest changed during round trip: got %+v, want %+v", decoded.Sources, dto.Sources)
+	}
+
+	missingSourceVersion := dto
+	missingSourceVersion.Sources = append([]SourceInfo{}, dto.Sources...)
+	missingSourceVersion.Sources[0].Version = ""
+	missingSourceVersion, wire = rehashInterfaceSummaryForTest(t, missingSourceVersion)
+	if _, err := decodeInterfaceSummary(wire, missingSourceVersion.ContentHash, missingSourceVersion.SourceInput); err == nil || !strings.Contains(err.Error(), "required interface field version missing") {
+		t.Fatalf("missing distributed source version did not fail strict decoding: %v", err)
+	}
+
+	localProvenance := dto
+	localProvenance.Sources = append([]SourceInfo{}, dto.Sources...)
+	localProvenance.Sources[0].ID = "source:user"
+	localProvenance.Sources[0].Module = currentModuleIdentity
+	localProvenance.Sources[0].Version = bundledInterfaceVersion
+	localProvenance, wire = rehashInterfaceSummaryForTest(t, localProvenance)
+	decodedLocalProvenance, err := decodeInterfaceSummary(wire, localProvenance.ContentHash, localProvenance.SourceInput)
+	if err != nil {
+		t.Fatalf("provenance control should reach receiver manifest validation: %v", err)
+	}
+	if err := distributed.projector.admitInterfaceSummary(decodedLocalProvenance, distributed.Program.BundledFunctions); err == nil {
+		t.Fatal("local unversioned provenance admitted as a distributed summary")
+	}
+
+	missingInterfaceVersion := dto
+	missingInterfaceVersion.Version = ""
+	missingInterfaceVersion, wire = rehashInterfaceSummaryForTest(t, missingInterfaceVersion)
+	if _, err := decodeInterfaceSummary(wire, missingInterfaceVersion.ContentHash, missingInterfaceVersion.SourceInput); err == nil {
+		t.Fatal("missing distributed interface version admitted")
+	}
+}
+
 func TestBundledManagedCallbackControlsAcrossOrders(t *testing.T) {
 	for _, target := range []string{"go", "js"} {
 		for _, alias := range []string{"Fns", "Other"} {
