@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -113,6 +114,11 @@ func TestBuildReceiptRefusesInputsArtifactsAndAliases(t *testing.T) {
 	if err := os.Symlink(victim, filepath.Join(root, "receipt.json")); err != nil {
 		t.Fatal(err)
 	}
+	// The build root is a repository: its revision must not reach the
+	// generated module's executable.
+	if output, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, output)
+	}
 	if stdout, stderr, code := runTestCLIDir(t, binary, root, "", "build", source, "-o", "result", "--receipt", "receipt.json"); code != 0 {
 		t.Fatalf("build failed: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
@@ -122,6 +128,9 @@ func TestBuildReceiptRefusesInputsArtifactsAndAliases(t *testing.T) {
 	written := readReceipt(t, filepath.Join(root, "receipt.json"))
 	if written.Binary == nil || written.Binary.Build == nil || written.Binary.Build.Settings["-trimpath"] != "true" {
 		t.Fatalf("receipt lacks the executable's build information: %+v", written.Binary)
+	}
+	if _, stamped := written.Binary.Build.Settings["vcs"]; stamped {
+		t.Fatalf("executable carries VCS stamping: %+v", written.Binary.Build.Settings)
 	}
 	if written.Toolchain == nil || written.Toolchain.Env["GOVERSION"] == "" || written.Binary.Build.GoVersion != written.Toolchain.Env["GOVERSION"] {
 		t.Fatalf("receipt toolchain %+v does not match the executable's Go version", written.Toolchain)

@@ -28,8 +28,11 @@ import (
 const Schema = "effra.application-receipt/2"
 
 // GoBuildFlags are the flags of every native build: ef build, its stripped
-// companions and the size-conformance controls.
-var GoBuildFlags = []string{"-trimpath", "-mod=readonly"}
+// companions and the size-conformance controls. A generated module is
+// identified by its generation, so VCS stamping is off: otherwise a module
+// published inside a repository would embed that repository's revision and
+// dirty state, and identical generations would build different executables.
+var GoBuildFlags = []string{"-trimpath", "-mod=readonly", "-buildvcs=false"}
 
 // StripFlags build a stripped companion of an otherwise identical build.
 var StripFlags = []string{"-ldflags=-s -w"}
