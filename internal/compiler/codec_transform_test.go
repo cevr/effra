@@ -149,11 +149,11 @@ func TestCodecTransformationRowsAreDirectionSpecific(t *testing.T) {
 	}
 }
 
-// The published orders are the engine's: running teamJson's plan on the Go
-// codec engine with recording steps invokes each witness first in exactly
-// the inspected order for each direction, while the full traces show the
-// nesting (Member's email resolves before Member on decode, after it on
-// encode).
+// The published orders are the engine's plan orders: running teamJson's
+// plan (no unions, so every value visits every node) on the Go codec engine
+// with recording steps invokes each witness first in exactly the inspected
+// order for each direction, while the full traces show the nesting
+// (Member's email resolves before Member on decode, after it on encode).
 func TestCodecTransformationInspectionMatchesObservedSteps(t *testing.T) {
 	r := Compile(codecTransformSource)
 	if !r.Checked {
@@ -501,6 +501,115 @@ func TestCodecTransformationDeclarationsFormat(t *testing.T) {
 	source := "import Json \"effra/json\"\nrecord Email { text: string }\nrecord Box { email: Email }\nfn parseEmail(text: string) -> Email { Email { text: text } }\nfn renderEmail(email: Email) -> string { email.text }\nderive emailJson=Json.codec<Email>( maxBodyBytes:64,maxDepth:1,decode:parseEmail , encode : renderEmail )\nderive boxJson = Json.codec<Box>(maxBodyBytes: 64, maxDepth: 2)  with   emailJson\n"
 	want := "import Json \"effra/json\"\nrecord Email {\n    text: string\n}\nrecord Box {\n    email: Email\n}\nfn parseEmail(text: string) -> Email {\n    Email {\n        text: text\n    }\n}\nfn renderEmail(email: Email) -> string {\n    email.text\n}\nderive emailJson = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: parseEmail, encode: renderEmail)\nderive boxJson = Json.codec<Box>(maxBodyBytes: 64, maxDepth: 2) with emailJson\n"
 	assertFormat(t, source, want)
+}
+
+// codecBranchSource puts witnesses on two variants of a union, followed by
+// a field that repeats the first variant's witness.
+const codecBranchSource = `import Json "effra/json"
+
+record Email {
+    text: string
+}
+
+record Member {
+    id: string
+}
+
+fn emailOf(text: string) -> Email {
+    Email { text: text }
+}
+
+fn emailText(email: Email) -> string {
+    email.text
+}
+
+fn memberOf(id: string) -> Member {
+    Member { id: id }
+}
+
+fn memberId(member: Member) -> string {
+    member.id
+}
+
+enum Choice {
+    A { email: Email }
+    B { member: Member }
+}
+
+record Holder {
+    choice: Choice
+    email: Email
+}
+
+derive emailJson = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: emailOf, encode: emailText)
+derive memberJson = Json.codec<Member>(maxBodyBytes: 64, maxDepth: 1, decode: memberOf, encode: memberId)
+derive holderJson = Json.codec<Holder>(maxBodyBytes: 256, maxDepth: 3) with emailJson, memberJson
+`
+
+// Inspection publishes the static plan order, not one value's run. For a
+// Holder whose choice selects B, decoding invokes Member before the
+// trailing Email, while inspection lists Email (first applying at
+// Holder.choice.A.email) before Member; a value selecting A invokes them in
+// the inspected order.
+func TestCodecTransformationInspectionIsStaticPlanOrder(t *testing.T) {
+	r := Compile(codecBranchSource)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	var plan *CodecPlan
+	for _, codec := range r.Program.Codecs {
+		if codec.Name == "holderJson" {
+			plan = codec.plan
+		}
+	}
+	if plan == nil {
+		t.Fatal("holderJson has no plan")
+	}
+	runtimePlan := runtimeCodecPlanOf(plan)
+	for index, node := range plan.Nodes {
+		if node.Kind == rt.CodecTransform {
+			runtimePlan.Nodes[index].Type, runtimePlan.Nodes[index].Child, runtimePlan.Nodes[index].Step = node.ID, *node.Child, *node.Step
+		} else if node.data != nil {
+			runtimePlan.Nodes[index].Construct = func(variant int, fields []any) any { return codecVectorCarrier(variant, fields) }
+			if node.Kind == rt.CodecUnion {
+				runtimePlan.Nodes[index].Variant = codecVectorVariant
+			}
+		}
+	}
+	codec, err := rt.CompileCodec(runtimePlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firsts := func(input string) []string {
+		out := []string{}
+		steps := make([]rt.CodecStep, len(plan.transforms))
+		for step, witness := range plan.transforms {
+			steps[step] = func(value any) (any, error) {
+				if !slices.Contains(out, witness.Name) {
+					out = append(out, witness.Name)
+				}
+				return value, nil
+			}
+		}
+		if _, err := codec.DecodeSteps([]byte(input), steps); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	holder := codecInspectionNamed(t, r, "holderJson")
+	published := []string{}
+	for _, step := range holder.Decode.Transformations {
+		published = append(published, step.Witness+"@"+step.Path)
+	}
+	if want := []string{"emailJson@Holder.choice.A.email", "memberJson@Holder.choice.B.member"}; !slices.Equal(published, want) {
+		t.Fatalf("decode inspection %q, want %q", published, want)
+	}
+	if observed := firsts(`{"choice":{"_tag":"B","member":"m"},"email":"e"}`); !slices.Equal(observed, []string{"memberJson", "emailJson"}) {
+		t.Fatalf("a value selecting B invoked %q", observed)
+	}
+	if observed := firsts(`{"choice":{"_tag":"A","email":"a"},"email":"e"}`); !slices.Equal(observed, []string{"emailJson"}) {
+		t.Fatalf("a value selecting A invoked %q", observed)
+	}
 }
 
 // codecDeepSource nests records 16 levels deep over a transformed leaf:

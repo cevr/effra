@@ -38,10 +38,12 @@ type CodecPlan struct {
 	paths      []string
 }
 
-// encodeOrder lists transform steps in the order encoding first invokes
-// them: a transformation runs before the transformations of its
-// representation, so first invocations follow the plan's preorder, which is
-// step order.
+// encodeOrder is encoding's static plan order: each transform step once, in
+// the plan's preorder (a transformation before those of its
+// representation), which is step order. It is a property of the plan, not
+// of a value: a value invokes only the steps of the union variants it
+// holds, so its first invocations follow this order only along the branches
+// it selects.
 func (plan *CodecPlan) encodeOrder() []int {
 	order := make([]int, len(plan.transforms))
 	for step := range order {
@@ -50,12 +52,14 @@ func (plan *CodecPlan) encodeOrder() []int {
 	return order
 }
 
-// decodeOrder lists transform steps in the order decoding first invokes
-// them. Decoding resolves a transformation's representation, including its
-// nested transformations, before the transformation itself, in declared
-// field order, so first invocations follow the plan's postorder. A shared
-// node completes at its first visit, and no node contains itself, so a
-// memoized postorder walk of the DAG yields exactly that order.
+// decodeOrder is decoding's static plan order: each transform step once, in
+// the plan's postorder (a transformation's representation, including its
+// nested transformations, before the transformation itself), with fields
+// and then every variant in declared order. A shared node completes at its
+// first visit, and no node contains itself, so a memoized postorder walk of
+// the DAG lists every step once. Like encodeOrder it describes the plan: a
+// value whose union selects a later variant invokes that variant's steps
+// before a step the static order lists earlier on another branch.
 func (plan *CodecPlan) decodeOrder() []int {
 	order := []int{}
 	seen := make([]bool, len(plan.Nodes))

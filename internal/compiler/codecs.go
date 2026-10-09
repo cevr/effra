@@ -732,13 +732,14 @@ type CodecInspection struct {
 }
 
 // CodecDirectionInspection is the contract of one direction function.
-// Transformations lists each transformation's witness once, in the order of
-// its first invocation by that direction, with the plan path of that first
-// invocation, its function and that function's own checked rows: the
+// Transformations lists each transformation's witness once, in the
+// direction's static plan order, with the first plan path at which it
+// applies, its function and that function's own checked rows: the
 // contribution paths of the direction's rows beyond its structural failure.
-// Encoding runs a transformation before its representation's (preorder);
-// decoding runs it after them (postorder), so nested witnesses are listed in
-// opposite orders.
+// Encoding orders a transformation before its representation's (preorder);
+// decoding after them (postorder), so nested witnesses are listed in
+// opposite orders. The order describes the plan, not one value's run: a
+// value invokes only the witnesses on the union variants it holds.
 type CodecDirectionInspection struct {
 	Function        string                          `json:"function"`
 	Failures        []string                        `json:"failures"`

@@ -225,11 +225,14 @@ function with EF102. A transform node adds no nesting of its own; its
 representation's nesting counts against `maxDepth`.
 
 Inspection reports a transformed witness's `representation`, its `with`
-list, and each direction's `transformations` in the order of each
-witness's first invocation by that direction (decoding lists a nested
-witness before its parent, encoding after it) with the plan path of that
-invocation, its function and that function's own failures and
-requirements. Plans carry `transform` nodes
+list, and each direction's `transformations`: each witness once, in the
+direction's static plan order (decoding lists a nested witness before its
+parent, encoding after it; fields and variants in declared order), with
+the first plan path at which it applies, its function and that function's
+own failures and requirements. The order describes the plan, not a run: a
+value invokes only the witnesses on the union variants it holds, so one
+selecting a later variant can invoke that variant's witness before a
+witness listed earlier on another branch. Plans carry `transform` nodes
 with the witness, child node, step index and both function identities;
 structural nodes under a `with` scope have a scoped identity, so equal
 scopes share a plan. [`examples/codec-transforms.ef`](../examples/codec-transforms.ef)
