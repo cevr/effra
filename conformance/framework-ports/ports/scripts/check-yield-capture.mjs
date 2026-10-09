@@ -13,7 +13,8 @@ for (const file of provenance.files) {
   const filename = path.join(root, file.path);
   const info = await lstat(filename);
   assert.ok(info.isFile(), `capture must be a regular file: ${file.path}`);
-  assert.equal(info.mode & 0o777, file.gitMode === "100755" ? 0o755 : 0o644, file.path);
+  // Git records only the owner executable bit; other permission bits follow the checkout umask.
+  assert.equal((info.mode & 0o100) !== 0, file.gitMode === "100755", `executable bit: ${file.path}`);
   const bytes = await readFile(filename);
   assert.equal(bytes.length, file.bytes, file.path);
   assert.equal(createHash("sha256").update(bytes).digest("hex"), file.sha256, file.path);

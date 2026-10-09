@@ -170,6 +170,24 @@ class CorpusImporterControls(unittest.TestCase):
                 str(refusal.exception),
             )
 
+    def test_snapshot_modes_follow_the_git_executable_bit_only(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="foldkit-corpus-mode-") as temporary:
+            snapshot = pathlib.Path(temporary) / "snapshot"
+            shutil.copytree(
+                ROOT / MODULE.SNAPSHOT_RELATIVE,
+                snapshot,
+                symlinks=True,
+            )
+            manifest = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
+            regular = next(item for item in manifest["files"] if item["mode"] == "100644")
+            target = snapshot.joinpath(*pathlib.PurePosixPath(regular["path"]).parts)
+            os.chmod(target, 0o600)
+            MODULE.validate_snapshot(snapshot)
+            os.chmod(target, 0o700)
+            with self.assertRaises(MODULE.CorpusImportError) as refusal:
+                MODULE.validate_snapshot(snapshot)
+            self.assertIn("snapshot executable mode mismatch", str(refusal.exception))
+
     def test_failed_capture_removes_unpublished_snapshot_and_stage(self) -> None:
         with tempfile.TemporaryDirectory(prefix="foldkit-corpus-capture-") as temporary:
             repository_root = pathlib.Path(temporary)

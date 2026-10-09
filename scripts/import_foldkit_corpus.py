@@ -655,10 +655,11 @@ def validate_snapshot(snapshot: Path) -> dict[str, Any]:
             if not stat.S_ISREG(info.st_mode):
                 raise CorpusImportError(f"snapshot regular-file mode mismatch: {path}")
             body = candidate.read_bytes()
-            actual_mode = stat.S_IMODE(info.st_mode)
-            expected_mode = 0o755 if mode == "100755" else 0o644
-            if actual_mode != expected_mode:
-                raise CorpusImportError(f"snapshot permission mode mismatch: {path}")
+            # Git records only the owner executable bit (100644 or 100755); the
+            # remaining permission bits follow the checkout umask.
+            executable = bool(info.st_mode & stat.S_IXUSR)
+            if executable != (mode == "100755"):
+                raise CorpusImportError(f"snapshot executable mode mismatch: {path}")
         else:
             raise CorpusImportError(f"unsupported mode in snapshot manifest: {path}")
         if len(body) != item.get("bytes") or sha256_bytes(body) != item.get("sha256"):
