@@ -21,6 +21,12 @@ func (r *Result) LintFacts(families ...lintsdk.Family) *lintsdk.Snapshot {
 	if len(families) == 0 {
 		families = lintsdk.Families()
 	}
+	return r.LintFactsFor(families)
+}
+
+// LintFactsFor is LintFacts over exactly the requested families: an empty
+// request derives none, and every family is then not-requested.
+func (r *Result) LintFactsFor(families []lintsdk.Family) *lintsdk.Snapshot {
 	semantic := lintsdk.Semantic{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target}
 	if qualified := r.producerMetadata.Snapshot; qualified.Producer != "" {
 		semantic.Producer, semantic.ReuseScope = qualified.Producer, qualified.ReuseScope
@@ -41,7 +47,7 @@ func (r *Result) LintFacts(families ...lintsdk.Family) *lintsdk.Snapshot {
 	}
 	ready := r.Checked && r.Program != nil && r.Program.semantic != nil
 	deriver := &lintFactDeriver{r: r}
-	if ready {
+	if ready && len(requested) > 0 {
 		deriver.c = r.Program.semantic
 		deriver.index()
 	}

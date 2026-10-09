@@ -69,6 +69,11 @@ func TestLintReceiptCLIProcess(t *testing.T) {
 	if pack.Started || pack.SpawnNanos != 0 || pack.FirstByteNanos != 0 || pack.ExitNanos != 0 || pack.RequestBytes != 0 || pack.ResponseBytes != 0 || pack.Rules[0].Status != lint.StatusOff || pack.Rules[1].Status != lint.StatusOff {
 		t.Fatalf("disabled pack run %+v", pack)
 	}
+	// With no enabled pack rule, no fact family is derived: the snapshot
+	// is smaller than the one the enabled rule's families need.
+	if pack.SnapshotBytes == 0 || pack.SnapshotBytes >= on.Runs[0].PackRuns[0].SnapshotBytes {
+		t.Fatalf("disabled snapshot %d bytes, enabled %d", pack.SnapshotBytes, on.Runs[0].PackRuns[0].SnapshotBytes)
+	}
 
 	if stdout, _, code := runTestCLI(t, binary, "lint", "receipt", "--help"); code != 0 || !strings.Contains(string(stdout), "no aggregate") {
 		t.Fatalf("help: exit %d %s", code, stdout)

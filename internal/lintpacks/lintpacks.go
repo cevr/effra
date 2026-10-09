@@ -117,7 +117,9 @@ func (s *Session) run(ctx context.Context, result *compiler.Result, source compi
 	// analysis: each receives exactly its selected variables from it.
 	host := lint.CaptureHost()
 	began := time.Now()
-	snapshot := result.LintFacts(s.families()...)
+	// Exactly the families enabled pack rules require: a session whose
+	// pack rules are all off derives none.
+	snapshot := result.LintFactsFor(s.families())
 	snapshot.Source.URI, snapshot.Source.Text = source.URI, source.Text
 	selected := slices.Clone(s.selection.Packs)
 	slices.SortFunc(selected, func(a, b lint.SelectedPack) int { return strings.Compare(a.Manifest.Namespace, b.Manifest.Namespace) })
