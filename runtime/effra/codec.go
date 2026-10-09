@@ -36,6 +36,10 @@ const (
 	CodecI64    CodecKind = "i64"
 	CodecRecord CodecKind = "record"
 	CodecUnion  CodecKind = "union"
+	// CodecTransform applies one checked transformation between a
+	// representation (its Child node) and a domain value. It writes no JSON
+	// of its own: the wire form is the representation's.
+	CodecTransform CodecKind = "transform"
 )
 
 // CodecPlan is a bounded DAG over canonical types. Nodes reference children
@@ -63,6 +67,10 @@ type CodecBounds struct {
 // variant index (0 for records) and decoded field values in declared order;
 // Project returns them for encoding. Adapters are trusted compiler output, so
 // a carrier mismatch is a defect (panic), never a typed codec failure.
+//
+// A transform node carries its witness identity as Type, its representation
+// node as Child and the index of its transformation among the plan's Steps.
+// Each transform node has its own step: indices are dense from 0.
 type CodecNode struct {
 	Kind      CodecKind
 	Type      string
@@ -70,7 +78,18 @@ type CodecNode struct {
 	Variants  []CodecVariant
 	Construct func(variant int, fields []any) any
 	Project   func(value any) (variant int, fields []any)
+	Child     int
+	Step      int
 }
+
+// CodecStep is one transformation of the direction being executed. A decode
+// step receives the decoded representation and returns the domain value; an
+// encode step receives the domain value and returns its representation. A
+// non-nil error halts the boundary and is returned unchanged, so a step can
+// carry any outcome its caller distinguishes (generated code carries the
+// transformation's exact cause) and is never confused with a structural
+// *CodecError. The engine itself stays independent of effect execution.
+type CodecStep func(value any) (any, error)
 
 // CodecField names a wire key and the node decoding its value. In this
 // profile the wire key is the source field name.
@@ -141,6 +160,7 @@ func (e *CodecError) Error() string {
 type Codec struct {
 	bounds CodecBounds
 	root   *codecNode
+	steps  int
 }
 
 type codecNode struct {
@@ -150,6 +170,20 @@ type codecNode struct {
 	tags      map[string]int
 	construct func(int, []any) any
 	project   func(any) (int, []any)
+	child     *codecNode
+	step      int
+	// pending marks a node whose subtree contains a transformation. Its
+	// structural phase carries codecPending values instead of carriers, and
+	// its transformation phase completes them in declared order.
+	pending bool
+}
+
+// codecPending is the not yet constructed (decode) or already projected
+// (encode) form of a nominal node on a path to a transformation. It is
+// private, so it can never be mistaken for a generated carrier.
+type codecPending struct {
+	variant int
+	fields  []any
 }
 
 type codecField struct {
@@ -188,6 +222,7 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 	compiled := make([]codecNode, len(plan.Nodes))
 	primitives := map[CodecKind]int{}
 	types := map[string]int{}
+	steps := map[int]int{}
 	edges := 0
 	checkFields := func(index int, fields []CodecField, reserved string) error {
 		names := make(map[string]struct{}, len(fields))
@@ -212,7 +247,7 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 	for index, node := range plan.Nodes {
 		switch node.Kind {
 		case CodecString, CodecBool, CodecVoid, CodecI64:
-			if node.Type != "" || len(node.Fields) > 0 || len(node.Variants) > 0 || node.Construct != nil || node.Project != nil {
+			if node.Type != "" || len(node.Fields) > 0 || len(node.Variants) > 0 || node.Construct != nil || node.Project != nil || node.Child != 0 || node.Step != 0 {
 				return invalid("primitive node %d carries nominal structure", index)
 			}
 			if previous, ok := primitives[node.Kind]; ok {
@@ -223,14 +258,36 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 			if node.Type == "" || node.Construct == nil || node.Project == nil {
 				return invalid("nominal node %d needs a type identity and both adapters", index)
 			}
+			if node.Child != 0 || node.Step != 0 {
+				return invalid("nominal node %d carries transform structure", index)
+			}
 			if previous, ok := types[node.Type]; ok {
 				return invalid("nodes %d and %d repeat type %q instead of sharing it", previous, index, node.Type)
 			}
 			types[node.Type] = index
+		case CodecTransform:
+			if node.Type == "" || len(node.Fields) > 0 || len(node.Variants) > 0 || node.Construct != nil || node.Project != nil {
+				return invalid("transform node %d needs a witness identity and no structure of its own", index)
+			}
+			if previous, ok := types[node.Type]; ok {
+				return invalid("nodes %d and %d repeat witness %q instead of sharing it", previous, index, node.Type)
+			}
+			types[node.Type] = index
+			edges++
+			if node.Child < 0 || node.Child >= len(plan.Nodes) {
+				return invalid("transform node %d references missing node %d", index, node.Child)
+			}
+			if node.Step < 0 || node.Step >= len(plan.Nodes) {
+				return invalid("transform node %d has step %d out of range", index, node.Step)
+			}
+			if previous, ok := steps[node.Step]; ok {
+				return invalid("nodes %d and %d share step %d", previous, index, node.Step)
+			}
+			steps[node.Step] = index
 		default:
 			return invalid("node %d has unsupported kind %q", index, node.Kind)
 		}
-		compiled[index] = codecNode{kind: node.Kind, construct: node.Construct, project: node.Project}
+		compiled[index] = codecNode{kind: node.Kind, construct: node.Construct, project: node.Project, step: node.Step}
 		switch node.Kind {
 		case CodecRecord:
 			if len(node.Variants) > 0 {
@@ -269,8 +326,15 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 		}
 		return out
 	}
+	for step := range steps {
+		if step >= len(steps) {
+			return invalid("steps are not dense: %d of %d", step, len(steps))
+		}
+	}
 	for index, node := range plan.Nodes {
 		switch node.Kind {
+		case CodecTransform:
+			compiled[index].child = &compiled[node.Child]
 		case CodecRecord:
 			compiled[index].fields = link(node.Fields)
 		case CodecUnion:
@@ -311,11 +375,16 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 		for _, variant := range node.Variants {
 			children = append(children, variant.Fields...)
 		}
+		if node.Kind == CodecTransform {
+			children = append(children, CodecField{Node: node.Child})
+			compiled[index].pending = true
+		}
 		for _, child := range children {
 			if err := visit(child.Node, containers); err != nil {
 				return err
 			}
 			deepest = max(deepest, depth[child.Node])
+			compiled[index].pending = compiled[index].pending || compiled[child.Node].pending
 		}
 		if node.Kind == CodecRecord || node.Kind == CodecUnion {
 			deepest++
@@ -335,12 +404,29 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 			return invalid("node %d is unreachable from root", index)
 		}
 	}
-	return &Codec{bounds: plan.Bounds, root: &compiled[plan.Root]}, nil
+	return &Codec{bounds: plan.Bounds, root: &compiled[plan.Root], steps: len(steps)}, nil
 }
 
-// Decode parses body once into a bounded JSON value, then decodes the plan in
-// declared order. The first failure is returned as a *CodecError.
-func (c *Codec) Decode(body []byte) (any, error) {
+// Steps is the number of transformations a direction must supply.
+func (c *Codec) Steps() int { return c.steps }
+
+func (c *Codec) checkSteps(steps []CodecStep) {
+	if len(steps) != c.steps {
+		panic(fmt.Sprintf("effra codec: plan has %d transformations; got %d steps", c.steps, len(steps)))
+	}
+}
+
+// Decode decodes a plan without transformations; see DecodeSteps.
+func (c *Codec) Decode(body []byte) (any, error) { return c.DecodeSteps(body, nil) }
+
+// DecodeSteps parses body once into a bounded JSON value, decodes the plan's
+// structure in declared order, and only then runs its decode transformations
+// in declared depth-first order. Malformed input therefore never reaches a
+// transformation. The first structural failure is returned as a *CodecError;
+// a step's error is returned unchanged. steps must hold one decode step per
+// transformation, indexed by transform node Step.
+func (c *Codec) DecodeSteps(body []byte, steps []CodecStep) (any, error) {
+	c.checkSteps(steps)
 	if len(body) > c.bounds.MaxBodyBytes {
 		return nil, &CodecError{Direction: CodecDecode, Reason: CodecBodyTooLarge, Path: []string{}, Offset: -1}
 	}
@@ -353,16 +439,98 @@ func (c *Codec) Decode(body []byte) (any, error) {
 	if failure != nil {
 		return nil, failure
 	}
+	if c.root.pending {
+		return c.root.resolve(value, steps)
+	}
 	return value, nil
 }
 
-// Encode writes compact JSON in declared field order, with each union's
-// discriminator first. Output larger than MaxBodyBytes is a typed failure,
-// detected before any byte beyond the bound is constructed. Failures surface
-// in encode order; a string's Unicode is validated before any of its bytes
-// are written, so ill-formed text reports invalid-unicode even when its
-// encoding would also exceed the remaining allowance.
-func (c *Codec) Encode(value any) ([]byte, error) {
+// resolve runs the decode transformations under a pending node in declared
+// order and constructs the carriers that waited for them.
+func (n *codecNode) resolve(value any, steps []CodecStep) (any, error) {
+	if n.kind == CodecTransform {
+		if n.child.pending {
+			inner, err := n.child.resolve(value, steps)
+			if err != nil {
+				return nil, err
+			}
+			value = inner
+		}
+		return steps[n.step](value)
+	}
+	pending := value.(codecPending)
+	fields := n.fields
+	if n.kind == CodecUnion {
+		fields = n.variants[pending.variant].fields
+	}
+	for i, field := range fields {
+		if field.node.pending {
+			resolved, err := field.node.resolve(pending.fields[i], steps)
+			if err != nil {
+				return nil, err
+			}
+			pending.fields[i] = resolved
+		}
+	}
+	return n.construct(pending.variant, pending.fields), nil
+}
+
+// prepare runs the encode transformations under a pending node in declared
+// order, before any byte is written, and returns the projected value the
+// structural phase encodes.
+func (n *codecNode) prepare(value any, steps []CodecStep) (any, error) {
+	if n.kind == CodecTransform {
+		represented, err := steps[n.step](value)
+		if err != nil || !n.child.pending {
+			return represented, err
+		}
+		return n.child.prepare(represented, steps)
+	}
+	variant, projected := n.project(value)
+	fields := n.fields
+	if n.kind == CodecUnion {
+		if variant < 0 || variant >= len(n.variants) {
+			panic(fmt.Sprintf("effra codec: union adapter returned variant %d of %d", variant, len(n.variants)))
+		}
+		fields = n.variants[variant].fields
+	}
+	if len(projected) != len(fields) {
+		panic(fmt.Sprintf("effra codec: adapter returned %d fields for %d declared", len(projected), len(fields)))
+	}
+	prepared := make([]any, len(projected))
+	for i, field := range fields {
+		prepared[i] = projected[i]
+		if field.node.pending {
+			value, err := field.node.prepare(projected[i], steps)
+			if err != nil {
+				return nil, err
+			}
+			prepared[i] = value
+		}
+	}
+	return codecPending{variant: variant, fields: prepared}, nil
+}
+
+// Encode encodes a plan without transformations; see EncodeSteps.
+func (c *Codec) Encode(value any) ([]byte, error) { return c.EncodeSteps(value, nil) }
+
+// EncodeSteps first runs the plan's encode transformations in declared
+// depth-first order, then writes compact JSON in declared field order, with
+// each union's discriminator first. Output larger than MaxBodyBytes is a
+// typed failure, detected before any byte beyond the bound is constructed.
+// Structural failures surface in encode order; a string's Unicode is
+// validated before any of its bytes are written, so ill-formed text reports
+// invalid-unicode even when its encoding would also exceed the remaining
+// allowance. A step's error is returned unchanged.
+func (c *Codec) EncodeSteps(value any, steps []CodecStep) ([]byte, error) {
+	c.checkSteps(steps)
+	if c.root.pending {
+		prepared, err := c.root.prepare(value, steps)
+		if err != nil {
+			return nil, err
+		}
+		value = prepared
+	}
 	encoder := codecEncoder{limit: c.bounds.MaxBodyBytes}
 	if failure := c.root.encode(&encoder, value, nil); failure != nil {
 		return nil, failure
@@ -412,11 +580,16 @@ func (n *codecNode) decode(value *codecJSON, path *codecPath) (any, *CodecError)
 			}
 			return number, nil
 		}
+	case CodecTransform:
+		return n.child.decode(value, path)
 	case CodecRecord:
 		if value.kind == codecJSONObject {
 			fields, failure := decodeCodecFields(n.fields, value, path)
 			if failure != nil {
 				return nil, failure
+			}
+			if n.pending {
+				return codecPending{fields: fields}, nil
 			}
 			return n.construct(0, fields), nil
 		}
@@ -433,6 +606,9 @@ func (n *codecNode) decode(value *codecJSON, path *codecPath) (any, *CodecError)
 			fields, failure := decodeCodecFields(n.variants[variant].fields, value, path)
 			if failure != nil {
 				return nil, failure
+			}
+			if n.pending {
+				return codecPending{variant: variant, fields: fields}, nil
 			}
 			return n.construct(variant, fields), nil
 		}
@@ -512,8 +688,10 @@ func (n *codecNode) encode(e *codecEncoder, value any, path *codecPath) *CodecEr
 		var scratch [22]byte
 		quoted := append(strconv.AppendInt(append(scratch[:0], '"'), number, 10), '"')
 		return e.write(quoted...)
+	case CodecTransform:
+		return n.child.encode(e, value, path)
 	case CodecRecord:
-		_, fields := n.project(value)
+		_, fields := n.projected(value)
 		if failure := e.write('{'); failure != nil {
 			return failure
 		}
@@ -522,7 +700,7 @@ func (n *codecNode) encode(e *codecEncoder, value any, path *codecPath) *CodecEr
 		}
 		return e.write('}')
 	case CodecUnion:
-		index, fields := n.project(value)
+		index, fields := n.projected(value)
 		if index < 0 || index >= len(n.variants) {
 			panic(fmt.Sprintf("effra codec: union adapter returned variant %d of %d", index, len(n.variants)))
 		}
@@ -536,6 +714,16 @@ func (n *codecNode) encode(e *codecEncoder, value any, path *codecPath) *CodecEr
 		return e.write('}')
 	}
 	panic("effra codec: unvalidated node kind " + string(n.kind))
+}
+
+// projected returns a nominal value's variant and fields: a pending node's
+// value was already projected by prepare.
+func (n *codecNode) projected(value any) (int, []any) {
+	if n.pending {
+		pending := value.(codecPending)
+		return pending.variant, pending.fields
+	}
+	return n.project(value)
 }
 
 func encodeCodecFields(e *codecEncoder, fields []codecField, values []any, path *codecPath, separated bool) *CodecError {

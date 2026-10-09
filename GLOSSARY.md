@@ -135,7 +135,9 @@ overhead or a fixed speedup multiplier.
 
 **Codec plan** (implemented): The bounded, shared structural DAG one derivation checks for a domain type under a profile. Both targets' engines execute the same plan; an application retains it only through an executed direction.
 
-**Codec transformation** (specified): A checked conversion in a codec's decoding or encoding direction, carrying its own expected failures and required services. The two directions need not be mathematical inverses.
+**Codec transformation** (implemented): A checked conversion in a codec's decoding or encoding direction, carrying its own expected failures and required services. The two directions need not be mathematical inverses. A witness states one with `decode:` and `encode:` functions over a structurally derived representation.
+
+**Transformed witness** (implemented): A codec witness that states a codec transformation. A parent witness composes transformed witnesses only by listing them in its `with` clause; each applies wherever its domain type occurs in the parent's representation.
 
 **Machine** (specified): A checked definition of state and event types, transition policies and state-owned behavior.
 

@@ -54,6 +54,11 @@ type codecVectorPlan struct {
 			DomainTag string             `json:"domainTag"`
 			Fields    []codecVectorField `json:"fields"`
 		} `json:"variants"`
+		// Transform nodes name their representation node, step index and
+		// the target-neutral behavior each harness implements.
+		Child    int    `json:"child"`
+		Step     int    `json:"step"`
+		Behavior string `json:"behavior"`
 	} `json:"nodes"`
 }
 
@@ -76,18 +81,24 @@ type codecVector struct {
 }
 
 // codecOutcome is one Effra engine result: encoded output on success (for
-// decode vectors, the decoded value re-encoded), or the typed failure.
+// decode vectors, the decoded value re-encoded), the typed codec failure, or
+// a transformation step's own failure, returned unchanged.
 type codecOutcome struct {
 	OK      bool     `json:"ok"`
 	Encoded string   `json:"encoded"`
 	Reason  string   `json:"reason"`
 	Path    []string `json:"path"`
 	Offset  int      `json:"offset"`
+	Step    string   `json:"step"`
+	Message string   `json:"message"`
 }
 
 func (o codecOutcome) String() string {
 	if o.OK {
 		return "ok " + strconv.Quote(o.Encoded)
+	}
+	if o.Step != "" {
+		return fmt.Sprintf("step %s failed %q", o.Step, o.Message)
 	}
 	return fmt.Sprintf("%s at byte %d path %q", o.Reason, o.Offset, o.Path)
 }
@@ -320,6 +331,8 @@ func codecVectorGoPlan(plan codecVectorPlan, profile string) rt.CodecPlan {
 				compiled.Variants = append(compiled.Variants, rt.CodecVariant{Tag: variant.Tag, Fields: fields(variant.Fields)})
 			}
 			compiled.Construct, compiled.Project = construct, project
+		case rt.CodecTransform:
+			compiled.Child, compiled.Step = node.Child, node.Step
 		}
 		out.Nodes = append(out.Nodes, compiled)
 	}
@@ -349,6 +362,9 @@ func codecVectorGoValue(t *testing.T, plan codecVectorPlan, index int, value any
 		return string(raw)
 	case "bool":
 		return value.(bool)
+	case "transform":
+		// A transformed position holds its behavior's domain value.
+		return value
 	case "void":
 		return struct{}{}
 	case "i64":

@@ -209,8 +209,15 @@ const __ef_codecParse = (data, maxDepth, text) => {
 };
 
 // __ef_codecCompile validates a plan once (linear in nodes and edges) and
-// returns { decode(Uint8Array), encode(value) }. Each returns
-// { ok: true, value | bytes } or { ok: false, issue }.
+// returns { decode(Uint8Array), encode(value), steps, pending, resolve,
+// prepare }. decode and encode run the structural phase and return
+// { ok: true, value | bytes } or { ok: false, issue }. A plan with transform
+// nodes has `pending` set and `steps` transformations: resolve(decoded) and
+// prepare(domain) are generators that yield { step, value } requests in
+// declared depth-first order and receive each step's result, so the engine
+// stays synchronous and Effect-free while its caller runs the steps. Decoding
+// resolves only after the whole structure decoded; encoding prepares before
+// any byte is written.
 const __ef_codecCompile = plan => {
   const invalid = message => { throw new Error("invalid codec plan: " + message); };
   const named = text => typeof text === "string" && text !== "" && text.isWellFormed();
@@ -223,7 +230,7 @@ const __ef_codecCompile = plan => {
   if (!Array.isArray(nodes) || nodes.length === 0 || nodes.length > 4096) invalid("plan must have between 1 and 4096 nodes");
   if (!index(plan.root, nodes.length)) invalid(`root ${plan.root} is not a node`);
   const compiled = nodes.map(node => ({ kind: node?.kind }));
-  const primitives = new Map(), types = new Map();
+  const primitives = new Map(), types = new Map(), steps = new Map();
   let edges = 0;
   const checkFields = (at, fields, reserved) => {
     if (!Array.isArray(fields)) invalid(`node ${at} needs a field list`);
@@ -240,14 +247,26 @@ const __ef_codecCompile = plan => {
   nodes.forEach((node, at) => {
     switch (node?.kind) {
       case "string": case "bool": case "void": case "i64":
-        if (node.type !== undefined || node.fields !== undefined || node.variants !== undefined) invalid(`primitive node ${at} carries nominal structure`);
+        if (node.type !== undefined || node.fields !== undefined || node.variants !== undefined || node.child !== undefined || node.step !== undefined) invalid(`primitive node ${at} carries nominal structure`);
         if (primitives.has(node.kind)) invalid(`nodes ${primitives.get(node.kind)} and ${at} repeat primitive ${node.kind} instead of sharing it`);
         primitives.set(node.kind, at);
         break;
       case "record": case "union":
         if (!named(node.type)) invalid(`nominal node ${at} needs a type identity`);
+        if (node.child !== undefined || node.step !== undefined) invalid(`nominal node ${at} carries transform structure`);
         if (types.has(node.type)) invalid(`nodes ${types.get(node.type)} and ${at} repeat type ${JSON.stringify(node.type)} instead of sharing it`);
         types.set(node.type, at);
+        break;
+      case "transform":
+        if (!named(node.type) || node.fields !== undefined || node.variants !== undefined) invalid(`transform node ${at} needs a witness identity and no structure of its own`);
+        if (types.has(node.type)) invalid(`nodes ${types.get(node.type)} and ${at} repeat witness ${JSON.stringify(node.type)} instead of sharing it`);
+        types.set(node.type, at);
+        edges++;
+        if (!index(node.child, nodes.length)) invalid(`transform node ${at} references missing node ${node.child}`);
+        if (!index(node.step, nodes.length)) invalid(`transform node ${at} has step ${node.step} out of range`);
+        if (steps.has(node.step)) invalid(`nodes ${steps.get(node.step)} and ${at} share step ${node.step}`);
+        steps.set(node.step, at);
+        Object.assign(compiled[at], { step: node.step });
         break;
       default:
         invalid(`node ${at} has unsupported kind ${JSON.stringify(node?.kind)}`);
@@ -271,8 +290,10 @@ const __ef_codecCompile = plan => {
     }
     if (edges > 65536) invalid("more than 65536 fields and variants");
   });
+  for (const step of steps.keys()) if (step >= steps.size) invalid(`steps are not dense: ${step} of ${steps.size}`);
   const link = fields => fields.map(field => ({ name: field.name, key: JSON.stringify(field.name) + ":", node: compiled[field.node] }));
   nodes.forEach((node, at) => {
+    if (node.kind === "transform") compiled[at].child = compiled[node.child];
     if (node.kind === "record") compiled[at].fields = link(node.fields);
     if (node.kind === "union") {
       compiled[at].variants = node.variants.map(variant => ({
@@ -291,9 +312,13 @@ const __ef_codecCompile = plan => {
     state[at] = 1;
     let deepest = 0;
     const children = [...(node.fields ?? []), ...(node.variants ?? []).flatMap(variant => variant.fields)];
+    if (node.kind === "transform") children.push({ node: node.child });
+    // pending marks a subtree containing a transformation.
+    compiled[at].pending = node.kind === "transform";
     for (const child of children) {
       visit(child.node, containers);
       deepest = Math.max(deepest, depths[child.node]);
+      compiled[at].pending ||= compiled[child.node].pending;
     }
     depths[at] = deepest + (container ? 1 : 0);
     state[at] = 2;
@@ -336,6 +361,7 @@ const __ef_codecCompile = plan => {
       case "bool": if (value.kind === "bool") return value.value; break;
       case "void": if (value.kind === "null") return undefined; break;
       case "i64": if (value.kind === "string") return parseI64(value.value, path); break;
+      case "transform": return decodeNode(node.child, value, path);
       case "record": if (value.kind === "object") return Object.fromEntries(decodeFields(node.fields, value, path)); break;
       case "union":
         if (value.kind === "object") {
@@ -401,6 +427,7 @@ const __ef_codecCompile = plan => {
     };
     const encodeNode = (node, value, path) => {
       switch (node.kind) {
+        case "transform": return encodeNode(node.child, value, path);
         case "string":
           if (typeof value !== "string") defect(`string node received ${typeof value}`);
           if (!value.isWellFormed()) fail("invalid-unicode", path);
@@ -433,5 +460,33 @@ const __ef_codecCompile = plan => {
     encodeNode(root, value, null);
     return { ok: true, bytes: bytes.encode(out.join("")) };
   });
-  return { decode, encode };
+  // The decoded carriers of a pending subtree are fresh, so resolve replaces
+  // each transformed field in place. prepare copies every pending carrier and
+  // never mutates the caller's domain value.
+  const variantFields = (node, value) => {
+    if (node.kind === "record") return node.fields;
+    const position = typeof value === "object" && value !== null ? node.domain.get(value[__ef_codecTagKey]) : undefined;
+    if (position === undefined) throw new Error("effra codec: union carrier has an unknown domain tag");
+    return node.variants[position].fields;
+  };
+  function* resolve(node, value) {
+    if (node.kind === "transform") return yield { step: node.step, value: node.child.pending ? yield* resolve(node.child, value) : value };
+    for (const field of variantFields(node, value)) if (field.node.pending) value[field.name] = yield* resolve(field.node, value[field.name]);
+    return value;
+  }
+  function* prepare(node, value) {
+    if (node.kind === "transform") {
+      const represented = yield { step: node.step, value };
+      return node.child.pending ? yield* prepare(node.child, represented) : represented;
+    }
+    if (typeof value !== "object" || value === null) throw new Error(`effra codec: ${node.kind} node received ${typeof value}`);
+    const fields = variantFields(node, value);
+    const copy = node.kind === "union" ? [[__ef_codecTagKey, value[__ef_codecTagKey]]] : [];
+    for (const field of fields) {
+      if (!Object.hasOwn(value, field.name)) throw new Error(`effra codec: carrier lacks field ${JSON.stringify(field.name)}`);
+      copy.push([field.name, field.node.pending ? yield* prepare(field.node, value[field.name]) : value[field.name]]);
+    }
+    return Object.fromEntries(copy);
+  }
+  return { decode, encode, steps: steps.size, pending: root.pending, resolve: value => resolve(root, value), prepare: value => prepare(root, value) };
 };

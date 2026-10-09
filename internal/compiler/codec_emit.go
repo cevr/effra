@@ -15,11 +15,18 @@ import (
 const codecLoweringHelper = "codec"
 
 // goCodecHelpers adapt the native engine to a direction function's recipe.
-// A failure carries the bounded *er.CodecError as its payload; a plan the
-// engine refuses is a compiler defect, so it panics at initialization.
+// A structural failure carries the bounded *er.CodecError as its payload; a
+// transformation step runs its function's recipe on the caller's context and
+// halts with the recipe's exact cause, so its typed failure, defect or
+// interruption propagates unchanged and is never a structural failure. A plan
+// the engine refuses is a compiler defect, so it panics at initialization.
 const goCodecHelpers = `func efCodecCompile(plan er.CodecPlan)*er.Codec{codec,err:=er.CompileCodec(plan);if err!=nil{panic(err)};return codec}
-func efCodecDecode[A any](codec *er.Codec,tag string,input string)efExit[A]{value,err:=codec.Decode([]byte(input));if err!=nil{return er.Fail[A](tag,err)};return er.Succeed(value.(A))}
-func efCodecEncode(codec *er.Codec,tag string,value any)efExit[string]{encoded,err:=codec.Encode(value);if err!=nil{return er.Fail[string](tag,err)};return er.Succeed(string(encoded))}
+type efCodecHalt struct{cause er.Cause}
+func (h *efCodecHalt)Error()string{return "codec transformation halted: "+h.cause.Error()}
+func efCodecStep[A any](exit efExit[A])(any,error){if exit.IsFailure(){return nil,&efCodecHalt{cause:exit.Cause()}};return exit.Value,nil}
+func efCodecExit[A any](tag string,err error)efExit[A]{if halt,ok:=err.(*efCodecHalt);ok{return er.FromCause[A](halt.cause)};return er.Fail[A](tag,err)}
+func efCodecDecode[A any](codec *er.Codec,tag string,input string,steps []er.CodecStep)efExit[A]{value,err:=codec.DecodeSteps([]byte(input),steps);if err!=nil{return efCodecExit[A](tag,err)};return er.Succeed(value.(A))}
+func efCodecEncode(codec *er.Codec,tag string,value any,steps []er.CodecStep)efExit[string]{encoded,err:=codec.EncodeSteps(value,steps);if err!=nil{return efCodecExit[string](tag,err)};return er.Succeed(string(encoded))}
 `
 
 // codecOperation retains what one executed direction needs: its plan, the
@@ -44,7 +51,7 @@ func (p *applicationPlanner) codecOperation(e *Expr, owner applicationOrigin) {
 func goCodecPlanName(plan *CodecPlan) string { return "efCodecPlan_" + strconv.Itoa(plan.index) }
 
 // goCodecKinds names the runtime constant of each plan node kind.
-var goCodecKinds = map[rt.CodecKind]string{rt.CodecString: "er.CodecString", rt.CodecBool: "er.CodecBool", rt.CodecVoid: "er.CodecVoid", rt.CodecI64: "er.CodecI64", rt.CodecRecord: "er.CodecRecord", rt.CodecUnion: "er.CodecUnion"}
+var goCodecKinds = map[rt.CodecKind]string{rt.CodecString: "er.CodecString", rt.CodecBool: "er.CodecBool", rt.CodecVoid: "er.CodecVoid", rt.CodecI64: "er.CodecI64", rt.CodecRecord: "er.CodecRecord", rt.CodecUnion: "er.CodecUnion", rt.CodecTransform: "er.CodecTransform"}
 
 // codecPlans emits every retained plan once, in derivation order, as a
 // compiled package-level codec. Nominal nodes reference one pair of
@@ -66,6 +73,9 @@ func (g *goEmitter) codecPlans(plans []*CodecPlan) string {
 		nodes := []string{}
 		for _, node := range plan.Nodes {
 			literal := "{Kind:" + goCodecKinds[node.Kind]
+			if node.Kind == rt.CodecTransform {
+				literal += ",Type:" + strconv.Quote(node.ID) + ",Child:" + strconv.Itoa(*node.Child) + ",Step:" + strconv.Itoa(*node.Step)
+			}
 			if node.data != nil {
 				if !emitted[node.typeID] {
 					emitted[node.typeID] = true
@@ -145,13 +155,31 @@ func (g *goEmitter) codecAdapters(node CodecPlanNode) string {
 }
 
 // codecOperation lowers one executed direction inside its function's
-// recipe: the operation runs now, and its typed failure propagates.
+// recipe: the operation runs now, and its typed failure propagates. Each
+// transformation step adapts its function value to the engine: it asserts
+// the step's input carrier, runs an effect function's recipe on the
+// direction's own context and returns a pure function's result directly.
 func (g *goEmitter) codecOperation(e *Expr, ret string, out *strings.Builder) string {
 	codec := e.codec
 	input := g.expr(e.Left, true, ret, out)
-	call := "efCodecEncode(" + goCodecPlanName(codec.plan) + "," + strconv.Quote(codec.derivation.EncodeFailure) + "," + input + ")"
+	steps := "nil"
+	if len(e.Args) > 0 {
+		adapted := []string{}
+		for _, step := range e.Args {
+			value := g.expr(step, true, ret, out)
+			f := step.ResolvedFunction
+			call := value + "(value.(" + canonicalGoType(g.program.semantic, f.Params[0].typeID, map[TypeID]bool{}) + "))"
+			body := "return " + call + ",nil"
+			if f.Effect {
+				body = "return efCodecStep(" + call + "(ctx))"
+			}
+			adapted = append(adapted, "func(value any)(any,error){"+body+"}")
+		}
+		steps = "[]er.CodecStep{" + strings.Join(adapted, ",") + "}"
+	}
+	call := "efCodecEncode(" + goCodecPlanName(codec.plan) + "," + strconv.Quote(codec.derivation.EncodeFailure) + "," + input + "," + steps + ")"
 	if e.Text == "decode" {
-		call = "efCodecDecode[" + g.valueType(e) + "](" + goCodecPlanName(codec.plan) + "," + strconv.Quote(codec.derivation.DecodeFailure) + "," + input + ")"
+		call = "efCodecDecode[" + g.valueType(e) + "](" + goCodecPlanName(codec.plan) + "," + strconv.Quote(codec.derivation.DecodeFailure) + "," + input + "," + steps + ")"
 	}
 	name := g.temp()
 	out.WriteString(name + " := " + call + "\n" + g.failed(name, ret))
@@ -168,14 +196,28 @@ const jsCodecAdapters = `const __ef_codecText = new TextEncoder();
 const __ef_codecBytes = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 const __ef_codecMessage = issue => "codec " + issue.direction + ": " + issue.reason + (issue.offset >= 0 ? " at byte " + issue.offset : "") + (issue.path.length > 0 ? " at " + issue.path.map(name => "[" + JSON.stringify(name) + "]").join("") : "");
 const __ef_codecFailure = (tag, issue) => Effect.fail({ _tag: tag, message: __ef_codecMessage(issue), issue });
-const __ef_codecDecode = (codec, tag, text) => Effect.suspend(() => {
+const __ef_codecRun = (requests, steps) => Effect.gen(function* () {
+  let next = requests.next();
+  while (!next.done) next = requests.next(yield* steps[next.value.step](next.value.value));
+  return next.value;
+});
+const __ef_codecSteps = (codec, steps) => {
+  if (steps.length !== codec.steps) throw new Error("effra codec: plan has " + codec.steps + " transformations; got " + steps.length + " steps");
+};
+const __ef_codecDecode = (codec, tag, text, steps) => Effect.suspend(() => {
+  __ef_codecSteps(codec, steps);
   if (!text.isWellFormed()) return __ef_codecFailure(tag, { direction: "decode", reason: "invalid-unicode", path: [], offset: -1 });
   const result = codec.decode(__ef_codecText.encode(text));
-  return result.ok ? Effect.succeed(result.value) : __ef_codecFailure(tag, result.issue);
+  if (!result.ok) return __ef_codecFailure(tag, result.issue);
+  return codec.pending ? __ef_codecRun(codec.resolve(result.value), steps) : Effect.succeed(result.value);
 });
-const __ef_codecEncode = (codec, tag, value) => Effect.suspend(() => {
-  const result = codec.encode(value);
-  return result.ok ? Effect.succeed(__ef_codecBytes.decode(result.bytes)) : __ef_codecFailure(tag, result.issue);
+const __ef_codecEncode = (codec, tag, value, steps) => Effect.suspend(() => {
+  __ef_codecSteps(codec, steps);
+  const structural = prepared => {
+    const result = codec.encode(prepared);
+    return result.ok ? Effect.succeed(__ef_codecBytes.decode(result.bytes)) : __ef_codecFailure(tag, result.issue);
+  };
+  return codec.pending ? Effect.flatMap(__ef_codecRun(codec.prepare(value), steps), structural) : structural(value);
 });
 `
 
@@ -197,6 +239,8 @@ type jsCodecNode struct {
 	Type     string           `json:"type,omitempty"`
 	Fields   *[]jsCodecField  `json:"fields,omitempty"`
 	Variants []jsCodecVariant `json:"variants,omitempty"`
+	Child    *int             `json:"child,omitempty"`
+	Step     *int             `json:"step,omitempty"`
 }
 
 type jsCodecPlan struct {
@@ -220,8 +264,11 @@ func jsCodecPlanLiteral(plan *CodecPlan) string {
 	literal := jsCodecPlan{Profile: plan.Profile, Bounds: plan.Bounds, Root: plan.Root, Nodes: make([]jsCodecNode, 0, len(plan.Nodes))}
 	for _, node := range plan.Nodes {
 		converted := jsCodecNode{Kind: node.Kind}
-		if node.data != nil {
+		if node.data != nil || node.Kind == rt.CodecTransform {
 			converted.Type = node.ID
+		}
+		if node.Kind == rt.CodecTransform {
+			converted.Child, converted.Step = node.Child, node.Step
 		}
 		switch node.Kind {
 		case rt.CodecRecord:
@@ -256,12 +303,24 @@ func (r *Result) jsCodecSupport(application *ApplicationPlan) string {
 	return out.String()
 }
 
+// jsCodecOperation passes each transformation step as a function from its
+// input to an Effect: an effect function value already is one, and a pure
+// function's result is lifted lazily, so a thrown defect stays a defect.
 func jsCodecOperation(e *Expr) string {
 	codec := e.codec
-	if e.Text == "decode" {
-		return "(yield* __ef_codecDecode(" + jsCodecPlanName(codec.plan) + ", " + quoted(codec.derivation.DecodeFailure) + ", " + jsExpr(e.Left, true) + "))"
+	steps := []string{}
+	for _, step := range e.Args {
+		value := jsExpr(step, true)
+		if step.ResolvedFunction != nil && !step.ResolvedFunction.Effect {
+			value = "(value => Effect.sync(() => " + value + "(value)))"
+		}
+		steps = append(steps, value)
 	}
-	return "(yield* __ef_codecEncode(" + jsCodecPlanName(codec.plan) + ", " + quoted(codec.derivation.EncodeFailure) + ", " + jsExpr(e.Left, true) + "))"
+	list := "[" + strings.Join(steps, ", ") + "]"
+	if e.Text == "decode" {
+		return "(yield* __ef_codecDecode(" + jsCodecPlanName(codec.plan) + ", " + quoted(codec.derivation.DecodeFailure) + ", " + jsExpr(e.Left, true) + ", " + list + "))"
+	}
+	return "(yield* __ef_codecEncode(" + jsCodecPlanName(codec.plan) + ", " + quoted(codec.derivation.EncodeFailure) + ", " + jsExpr(e.Left, true) + ", " + list + "))"
 }
 
 // jsCodecExports exports each witness as a frozen object holding its two

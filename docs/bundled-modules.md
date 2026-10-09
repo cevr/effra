@@ -128,6 +128,56 @@ and includes the shared engine once, only when such a plan exists, so an idle
 entry has no witness and no engine and an encode-only entry omits the decode
 witness. A library surface roots every direction of every witness: it exports
 each witness as a frozen `{ decode, encode }` object and carries the engine
-once whenever it derives any codec. Transformations, arrays, payload-failure
-codecs, error accumulation and stricter excess-property profiles are not yet
-supported.
+once whenever it derives any codec. Arrays, payload-failure codecs, error
+accumulation and stricter excess-property profiles are not yet supported.
+
+### Transformed witnesses
+
+A witness may state a transformation between its derived type and a
+distinct representation, and a parent witness composes transformed
+witnesses explicitly:
+
+```
+derive emailJson = Json.codec<Email>(maxBodyBytes: 256, maxDepth: 1, decode: parseEmail, encode: renderEmail)
+derive accountJson = Json.codec<Account>(maxBodyBytes: 4096, maxDepth: 3) with emailJson
+```
+
+`decode` and `encode` name ordinary first-order module functions of one
+parameter, pure or effect, and are required together: `decode` takes the
+representation and returns the derived type, `encode` takes the derived type
+and returns the same representation. The representation's plan is derived
+structurally, so the conversion is the only hand-written part. The two
+directions need not be inverses; a normalizing witness may accept a legacy
+spelling and always write the canonical one.
+
+Each direction function's rows are its structural failure plus the declared
+failures and services of every transformation that direction runs, so a
+decode-only service never appears on `encode`. A transformation's failure,
+defect or interruption propagates unchanged and is never a
+`JsonDecodeFailure`/`JsonEncodeFailure`.
+
+Decoding validates the whole structure first and only then runs decode
+transformations in declared depth-first order, so malformed input never
+reaches a transformation or its services. Encoding runs encode
+transformations first, in the same order, and then writes bounded output.
+Cancellation during a transformation stops the boundary after that
+transformation's own scope closes; no later transformation runs.
+
+`with` lists transformed witnesses of record and enum types. A listed
+witness applies wherever its domain type occurs in the parent's
+representation; its own representation uses only its own `with` list.
+Selection is explicit: there is no global or implicit witness. A repeated,
+self, structural, primitive-domain, ambiguous (two witnesses for one type),
+unused or recursive entry is refused with EF138; an unknown witness or
+function with EF102. A transform node adds no nesting of its own; its
+representation's nesting counts against `maxDepth`.
+
+Inspection reports a transformed witness's `representation`, its `with`
+list, and each direction's `transformations` in execution order with the
+witness, the first plan path where it applies, its function and that
+function's own failures and requirements. Plans carry `transform` nodes
+with the witness, child node, step index and both function identities;
+structural nodes under a `with` scope have a scoped identity, so equal
+scopes share a plan. [`examples/codec-transforms.ef`](../examples/codec-transforms.ef)
+exercises pure, normalizing, refining and effectful witnesses, nested
+composition and a configuration caller on Go and JS.

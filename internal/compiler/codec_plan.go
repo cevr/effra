@@ -32,6 +32,10 @@ type CodecPlan struct {
 	// index is the plan's position in Result.CodecPlans; emitted plan names
 	// derive from it, so they follow checked derivation order.
 	index int
+	// transforms lists the witness of each transform node by step, and
+	// paths the first plan path at which each step applies.
+	transforms []*CodecDeclaration
+	paths      []string
 }
 
 // CodecPlanBounds are the explicit limits a plan carries to both engines,
@@ -42,13 +46,22 @@ type CodecPlanBounds struct {
 	MaxDepth     int `json:"maxDepth"`
 }
 
+// A transform node's ID is its witness's declaration identity. It names
+// the witness, its representation node (Child), its step index and the
+// function identity of each direction's transformation.
 type CodecPlanNode struct {
 	ID       string             `json:"id"`
 	Kind     rt.CodecKind       `json:"kind"`
 	Fields   []CodecPlanField   `json:"fields,omitempty"`
 	Variants []CodecPlanVariant `json:"variants,omitempty"`
+	Witness  string             `json:"witness,omitempty"`
+	Child    *int               `json:"child,omitempty"`
+	Step     *int               `json:"step,omitempty"`
+	Decode   string             `json:"decode,omitempty"`
+	Encode   string             `json:"encode,omitempty"`
 	typeID   TypeID
 	data     *DataDeclaration
+	witness  *CodecDeclaration
 }
 
 type CodecPlanField struct {
@@ -91,17 +104,22 @@ func (p *codecPlanPath) String() string {
 	return strings.Join(segments, ".")
 }
 
-// deriveCodecPlan derives the plan of root. Each canonical type node is
-// visited once, so the cost is linear in distinct types and fields however
-// many paths share them. A refusal names the field path at which the
-// profile cannot represent the type; no partial plan is returned.
-func (c *checker) deriveCodecPlan(profile string, root TypeID, display string, bounds CodecPlanBounds) (*CodecPlan, string) {
+// deriveCodecPlan derives the plan of a declaration. Each canonical type is
+// one node per governing `with` scope, and each transformed witness is one
+// transform node whose representation is derived under that witness's own
+// scope, so the cost is linear in distinct (type, scope) pairs and fields
+// however many paths share them. A refusal names the field path at which the
+// profile cannot represent the type, or an unused `with` entry; no partial
+// plan is returned.
+func (c *checker) deriveCodecPlan(codec *CodecDeclaration, bounds CodecPlanBounds) (*CodecPlan, string) {
+	profile := codec.derivation.Profile
 	plan := &CodecPlan{Profile: profile, Bounds: bounds}
-	indices := map[TypeID]int{}
-	active := map[TypeID]bool{}
-	depths := map[TypeID]int{}
-	// Fields and variants are both edges under one ceiling, as the runtime
-	// engines count them; edge refuses the edge at path past the ceiling.
+	indices := map[string]int{}
+	active := map[string]bool{}
+	depths := []int{}
+	used := map[*CodecDeclaration]bool{}
+	// Fields, variants and transform children are all edges under one
+	// ceiling, as the runtime engines count them.
 	edges := 0
 	edge := func(path *codecPlanPath) string {
 		edges++
@@ -110,19 +128,65 @@ func (c *checker) deriveCodecPlan(profile string, root TypeID, display string, b
 		}
 		return ""
 	}
+	room := func(path *codecPlanPath) string {
+		if len(plan.Nodes) >= maxCodecPlanNodes {
+			return "plan exceeds " + strconv.Itoa(maxCodecPlanNodes) + " nodes at " + path.String()
+		}
+		return ""
+	}
+	var visit func(id TypeID, scope *CodecDeclaration, path *codecPlanPath, display string) (int, string)
+	// transform derives witness's transform node: its representation under
+	// the witness's own scope, at the same path.
+	transform := func(witness *CodecDeclaration, path *codecPlanPath) (int, string) {
+		key := "witness:" + witness.Name
+		if active[key] {
+			return 0, "recursive layout through codec " + witness.Name + " at " + path.String()
+		}
+		if index, done := indices[key]; done {
+			return index, ""
+		}
+		if refusal := room(path); refusal != "" {
+			return 0, refusal
+		}
+		if refusal := edge(path); refusal != "" {
+			return 0, refusal
+		}
+		index, step := len(plan.Nodes), len(plan.transforms)
+		indices[key] = index
+		plan.Nodes = append(plan.Nodes, CodecPlanNode{ID: c.declarationIdentity("codec", "module", witness.Name), Kind: rt.CodecTransform, Witness: witness.Name, Step: &step, Decode: witness.transform.decode.Identity, Encode: witness.transform.encode.Identity, typeID: witness.domainID, witness: witness})
+		depths = append(depths, 0)
+		plan.transforms = append(plan.transforms, witness)
+		plan.paths = append(plan.paths, path.String())
+		active[key] = true
+		child, refusal := visit(witness.transform.repID, witness, path, witness.transform.repDisplay)
+		if refusal != "" {
+			return 0, refusal
+		}
+		active[key] = false
+		plan.Nodes[index].Child = &child
+		depths[index] = depths[child]
+		return index, ""
+	}
 	// display is the source spelling of the type at path, which names
 	// callable and generic types readably in a refusal.
-	var visit func(id TypeID, path *codecPlanPath, display string) (int, string)
-	visit = func(id TypeID, path *codecPlanPath, display string) (int, string) {
-		if active[id] {
-			return 0, "recursive layout through " + display + " at " + path.String()
-		}
-		if index, done := indices[id]; done {
-			return index, ""
+	visit = func(id TypeID, scope *CodecDeclaration, path *codecPlanPath, display string) (int, string) {
+		if witness := scope.with[id]; witness != nil {
+			used[witness] = true
+			return transform(witness, path)
 		}
 		node := c.node(id)
 		if node == nil {
 			return 0, "unresolved type at " + path.String()
+		}
+		key := strconv.Itoa(int(id))
+		if node.Kind == "record" || node.Kind == "enum" {
+			key += "@" + scope.withKey
+		}
+		if active[key] {
+			return 0, "recursive layout through " + display + " at " + path.String()
+		}
+		if index, done := indices[key]; done {
+			return index, ""
 		}
 		unsupported := func(reason string) (int, string) {
 			return 0, display + " at " + path.String() + " " + reason
@@ -162,20 +226,24 @@ func (c *checker) deriveCodecPlan(profile string, root TypeID, display string, b
 		if kind == rt.CodecUnion && len(data.Variants) == 0 {
 			return unsupported("has no variants to decode")
 		}
-		if len(plan.Nodes) >= maxCodecPlanNodes {
-			return 0, "plan exceeds " + strconv.Itoa(maxCodecPlanNodes) + " nodes at " + path.String()
+		if refusal := room(path); refusal != "" {
+			return 0, refusal
 		}
 		index := len(plan.Nodes)
-		indices[id] = index
+		indices[key] = index
 		identity := "primitive:" + node.Name
 		if data != nil {
 			identity = c.declarationIdentity(node.Kind, "module", node.Name)
+			if scope.withKey != "" {
+				identity += "@with:" + scope.withKey
+			}
 		}
 		plan.Nodes = append(plan.Nodes, CodecPlanNode{ID: identity, Kind: kind, typeID: id, data: data})
+		depths = append(depths, 0)
 		if data == nil {
 			return index, ""
 		}
-		active[id] = true
+		active[key] = true
 		deepest := 0
 		fields := func(declared []Field, owner *codecPlanPath) ([]CodecPlanField, string) {
 			out := make([]CodecPlanField, 0, len(declared))
@@ -186,11 +254,11 @@ func (c *checker) deriveCodecPlan(profile string, root TypeID, display string, b
 				if kind == rt.CodecUnion && field.Name == rt.CodecTagKey {
 					return nil, "variant field " + owner.child(field.Name).String() + " collides with the " + rt.CodecTagKey + " discriminator"
 				}
-				child, refusal := visit(field.typeID, owner.child(field.Name), field.Type)
+				child, refusal := visit(field.typeID, scope, owner.child(field.Name), field.Type)
 				if refusal != "" {
 					return nil, refusal
 				}
-				deepest = max(deepest, depths[field.typeID])
+				deepest = max(deepest, depths[child])
 				out = append(out, CodecPlanField{Name: field.Name, Node: child, typeID: field.typeID})
 			}
 			return out, ""
@@ -215,15 +283,29 @@ func (c *checker) deriveCodecPlan(profile string, root TypeID, display string, b
 			}
 			plan.Nodes[index].Variants = variants
 		}
-		active[id] = false
-		depths[id] = deepest + 1
+		active[key] = false
+		depths[index] = deepest + 1
 		return index, ""
 	}
-	index, refusal := visit(root, &codecPlanPath{name: display}, display)
+	root := &codecPlanPath{name: codec.Type}
+	var index int
+	var refusal string
+	if codec.transform != nil {
+		index, refusal = transform(codec, root)
+	} else {
+		index, refusal = visit(codec.domainID, codec, root, codec.Type)
+	}
 	if refusal != "" {
 		return nil, refusal
 	}
-	plan.Root, plan.Nesting = index, depths[root]
+	for _, reference := range codec.With {
+		for _, witness := range codec.with {
+			if witness.Name == reference.Name && !used[witness] {
+				return nil, "with entry " + witness.Name + " is unused: " + witness.Type + " does not occur in the representation of " + codec.Type
+			}
+		}
+	}
+	plan.Root, plan.Nesting = index, depths[index]
 	if plan.Nesting > bounds.MaxDepth {
 		return nil, "plan nesting " + strconv.Itoa(plan.Nesting) + " exceeds maxDepth " + strconv.Itoa(bounds.MaxDepth)
 	}
