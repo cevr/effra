@@ -1,8 +1,9 @@
-// TypeScript/Effect 4.0.1 control for fixtures/minimal.ef: the same result,
-// run with the same termination-signal cancellation as Effra's JS entry.
+// TypeScript/Effect 4.0.1 control for fixtures/minimal.ef with the same entry
+// contract as Effra's JS entry: the program runs in an owning scope, and a
+// termination signal cancels it.
 import { Effect } from "effect"
 
-const program = Effect.succeed("minimal")
+const program = Effect.scoped(Effect.succeed("minimal"))
 
 const abort = new AbortController()
 const stop = () => abort.abort()
