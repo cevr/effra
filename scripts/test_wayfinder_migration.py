@@ -350,6 +350,285 @@ class WayfinderMigrationTests(unittest.TestCase):
                 migration.run(root, mapping_path, write=True, check=False, output_snapshot_id="fixture-current-1")
             self.assertEqual(historical_output.read_bytes(), b"historical output bytes\n")
 
+    def test_current_mapping_binds_captured_identities_and_exact_mapping_path(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        intake = migration.select_current_identity_intake(root, migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID)
+        rows = migration.issue_snapshot(root)
+        mapping_path = root / migration.CURRENT_IDENTITY_MAPPING_PATH
+        mapping_bytes = mapping_path.read_bytes()
+        mapping = migration.load_mapping(
+            mapping_path,
+            rows,
+            mapping_bytes=mapping_bytes,
+            current_identity_intake=intake,
+        )
+        self.assertEqual(len(intake.identities), 74)
+        self.assertEqual(mapping["localIssueCount"], 74)
+        self.assertEqual(mapping["verifiedHostedCount"], 74)
+        self.assertEqual(mapping["pendingHostedCount"], 0)
+        self.assertEqual(mapping["currentIdentityIntake"]["rawResponseSha256"], migration.CURRENT_IDENTITY_RAW_RESPONSE_SHA256)
+        self.assertEqual(mapping["currentIdentityIntake"]["excludedDuplicate"], {"number": 63, "duplicateOf": 62})
+
+        issue_five = migration.identity_index(mapping)["001"]
+        self.assertEqual(issue_five["hostedIssueNumber"], 5)
+        self.assertEqual(issue_five["hostedTitle"], "Does explicit run and contract inspection make the tiny language useful?")
+        self.assertEqual(issue_five["hostedState"], "closed")
+        self.assertEqual(issue_five["hostedLabels"], ["wayfinder:prototype"])
+        self.assertNotIn(63, {identity["hostedIssueNumber"] for identity in mapping["identities"]})
+
+        manifest = migration.canonical_input_manifest(
+            root,
+            rows,
+            mapping,
+            mapping_path=migration.CURRENT_IDENTITY_MAPPING_PATH,
+            mapping_bytes=mapping_bytes,
+            current_identity_intake=intake,
+        )
+        hosted_mapping_input = manifest["record"]["inputs"]["hostedMapping"]
+        self.assertEqual(hosted_mapping_input["path"], migration.CURRENT_IDENTITY_MAPPING_PATH)
+        self.assertEqual(hosted_mapping_input["sha256"], migration.sha256_bytes(mapping_bytes))
+        self.assertEqual(
+            manifest["record"]["inputs"]["currentIdentityIntake"]["rawResponse"]["sha256"],
+            migration.CURRENT_IDENTITY_RAW_RESPONSE_SHA256,
+        )
+        with self.assertRaisesRegex(migration.MigrationError, "exact selected mapping path and bytes"):
+            migration.canonical_input_manifest(root, rows, mapping, current_identity_intake=intake)
+        with self.assertRaisesRegex(migration.MigrationError, "require explicit current identity intake"):
+            migration.canonical_input_manifest(
+                root,
+                rows,
+                mapping,
+                mapping_path=migration.CURRENT_IDENTITY_MAPPING_PATH,
+                mapping_bytes=mapping_bytes,
+            )
+        with self.assertRaisesRegex(migration.MigrationError, "distinct repository-relative mapping path"):
+            migration.canonical_input_manifest(
+                root,
+                rows,
+                mapping,
+                mapping_path="docs/wayfinder/hosted-identities.json",
+                mapping_bytes=mapping_bytes,
+                current_identity_intake=intake,
+            )
+        with self.assertRaisesRegex(migration.MigrationError, "requires --mapping"):
+            migration.run(
+                root,
+                root / "docs" / "wayfinder" / "hosted-identities.json",
+                write=False,
+                check=True,
+                output_snapshot_id=migration.CURRENT_IDENTITY_OUTPUT_SNAPSHOT_ID,
+                current_identity_intake_id=migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID,
+            )
+        with self.assertRaisesRegex(migration.MigrationError, "requires --current-identity-intake"):
+            migration.run(
+                root,
+                mapping_path,
+                write=False,
+                check=True,
+                output_snapshot_id="current-map-without-intake",
+            )
+        with self.assertRaisesRegex(migration.MigrationError, "requires --current-identity-intake"):
+            migration.run(
+                root,
+                root / migration.PRESERVED_U2_CURRENT_IDENTITY_MAPPING_PATH,
+                write=False,
+                check=True,
+                output_snapshot_id="preserved-u2-map-without-intake",
+            )
+
+        mutated_fields = {
+            "hostedIssueNumber": lambda identity: identity.__setitem__("hostedIssueNumber", identity["hostedIssueNumber"] + 1000),
+            "hostedIssueId": lambda identity: identity.__setitem__("hostedIssueId", identity["hostedIssueId"] + 1),
+            "hostedUrl": lambda identity: identity.__setitem__("hostedUrl", identity["hostedUrl"] + "/wrong"),
+            "hostedTitle": lambda identity: identity.__setitem__("hostedTitle", identity["hostedTitle"] + " changed"),
+            "hostedState": lambda identity: identity.__setitem__("hostedState", "open"),
+            "hostedBodySha256": lambda identity: identity.__setitem__("hostedBodySha256", "0" * 64),
+            "hostedLabels": lambda identity: identity.__setitem__("hostedLabels", []),
+            "localSourceSha256": lambda identity: identity.__setitem__("localSourceSha256", "0" * 64),
+        }
+        for field, mutate in mutated_fields.items():
+            with self.subTest(field=field):
+                changed = copy.deepcopy(mapping)
+                target = next(identity for identity in changed["identities"] if identity["localId"] == "001")
+                mutate(target)
+                with self.assertRaisesRegex(migration.MigrationError, rf"current identity 001 field {field} differs"):
+                    migration.load_mapping(
+                        mapping_path,
+                        rows,
+                        mapping_bytes=migration.canonical_json(changed).encode("utf-8"),
+                        current_identity_intake=intake,
+                    )
+
+        duplicated = copy.deepcopy(mapping)
+        duplicated["identities"].append(copy.deepcopy(duplicated["identities"][0]))
+        with self.assertRaisesRegex(migration.MigrationError, "duplicate current local identity"):
+            migration.load_mapping(
+                mapping_path,
+                rows,
+                mapping_bytes=migration.canonical_json(duplicated).encode("utf-8"),
+                current_identity_intake=intake,
+            )
+
+        changed_identity_set = copy.deepcopy(mapping)
+        changed_identity_set["identities"][0]["localId"] = "not-a-captured-marker"
+        with self.assertRaisesRegex(migration.MigrationError, "current identity set differs"):
+            migration.load_mapping(
+                mapping_path,
+                rows,
+                mapping_bytes=migration.canonical_json(changed_identity_set).encode("utf-8"),
+                current_identity_intake=intake,
+            )
+
+        historical_inputs = migration.select_migration_inputs(root, migration.HISTORICAL_INPUT_SNAPSHOT_ID)
+        historical_rows = migration.issue_snapshot(root, historical_inputs)
+        historical_mapping = migration.load_mapping(
+            root / "docs" / "wayfinder" / "hosted-identities.json",
+            historical_rows,
+            mapping_bytes=historical_inputs.mapping_bytes,
+        )
+        historical_manifest = migration.canonical_input_manifest(
+            root,
+            historical_rows,
+            historical_mapping,
+            preparer_bytes=historical_inputs.preparer_bytes,
+        )
+        self.assertEqual(historical_manifest["sha256"], migration.HISTORICAL_INPUT_CANONICAL_SHA256)
+
+    def test_current_identity_intake_never_falls_back_to_live_or_tampered_files(self) -> None:
+        source_root = Path(__file__).resolve().parents[1]
+        intake_root = (
+            source_root
+            / "docs"
+            / "wayfinder"
+            / "migration"
+            / "snapshots"
+            / migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID
+        )
+        with tempfile.TemporaryDirectory(prefix="wayfinder-current-intake-negative-") as directory:
+            root = Path(directory)
+            target = root / intake_root.relative_to(source_root)
+            target.parent.mkdir(parents=True)
+            shutil.copytree(intake_root, target)
+            selected = migration.select_current_identity_intake(root, migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID)
+            self.assertEqual(len(selected.identities), 74)
+
+            raw_response = target / "all-issues.raw.json"
+            original_raw = raw_response.read_bytes()
+            raw_response.unlink()
+            with self.assertRaisesRegex(migration.MigrationError, "missing current identity intake raw response"):
+                migration.select_current_identity_intake(root, migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID)
+
+            raw_response.write_bytes(original_raw + b"tampered")
+            with self.assertRaisesRegex(migration.MigrationError, "current identity intake raw response bytes changed"):
+                migration.select_current_identity_intake(root, migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID)
+
+            raw_response.write_bytes(original_raw)
+            binding = target / "read-binding.json"
+            original_binding = binding.read_bytes()
+            binding.unlink()
+            with self.assertRaisesRegex(migration.MigrationError, "missing current identity intake read binding"):
+                migration.select_current_identity_intake(root, migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID)
+
+            binding.write_bytes(original_binding + b"tampered")
+            with self.assertRaisesRegex(migration.MigrationError, "current identity intake read binding bytes changed"):
+                migration.select_current_identity_intake(root, migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID)
+
+            binding.write_bytes(original_binding)
+            descriptor = target / "snapshot.json"
+            descriptor.write_bytes(descriptor.read_bytes() + b"tampered")
+            with self.assertRaisesRegex(migration.MigrationError, "current identity intake descriptor bytes changed"):
+                migration.select_current_identity_intake(root, migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID)
+
+    def test_current_output_snapshot_checks_exact_identity_and_refuses_tampering(self) -> None:
+        source_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory(prefix="wayfinder-current-output-control-") as directory:
+            root = Path(directory)
+            shutil.copytree(source_root / "docs" / "wayfinder", root / "docs" / "wayfinder")
+            (root / "scripts").mkdir()
+            shutil.copy2(source_root / "scripts" / "wayfinder_migration.py", root / "scripts" / "wayfinder_migration.py")
+            git_directory = run_git(source_root, "rev-parse", "--absolute-git-dir").strip()
+            (root / ".git").write_text(f"gitdir: {git_directory}\n", encoding="utf-8")
+            mapping_path = root / migration.CURRENT_IDENTITY_MAPPING_PATH
+
+            self.assertEqual(
+                migration.run(
+                    root,
+                    mapping_path,
+                    write=False,
+                    check=True,
+                    output_snapshot_id=migration.CURRENT_IDENTITY_OUTPUT_SNAPSHOT_ID,
+                    current_identity_intake_id=migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID,
+                ),
+                0,
+            )
+
+            output_directory = (
+                root
+                / "docs"
+                / "wayfinder"
+                / "migration"
+                / "snapshots"
+                / migration.CURRENT_IDENTITY_OUTPUT_SNAPSHOT_ID
+                / "outputs"
+            )
+            output_path = output_directory / "hosted-identities.json"
+            output_path.write_bytes(output_path.read_bytes() + b"tampered")
+            self.assertEqual(
+                migration.run(
+                    root,
+                    mapping_path,
+                    write=False,
+                    check=True,
+                    output_snapshot_id=migration.CURRENT_IDENTITY_OUTPUT_SNAPSHOT_ID,
+                    current_identity_intake_id=migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID,
+                ),
+                1,
+            )
+            with self.assertRaisesRegex(migration.MigrationError, "already exists with different bytes"):
+                migration.run(
+                    root,
+                    mapping_path,
+                    write=True,
+                    check=False,
+                    output_snapshot_id=migration.CURRENT_IDENTITY_OUTPUT_SNAPSHOT_ID,
+                    current_identity_intake_id=migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID,
+                )
+
+    def test_reconciled_current_source_cannot_rewrite_the_u2_output_identity(self) -> None:
+        source_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory(prefix="wayfinder-current-u2-preservation-") as directory:
+            root = Path(directory)
+            shutil.copytree(source_root / "docs" / "wayfinder", root / "docs" / "wayfinder")
+            (root / "scripts").mkdir()
+            shutil.copy2(source_root / "scripts" / "wayfinder_migration.py", root / "scripts" / "wayfinder_migration.py")
+            git_directory = run_git(source_root, "rev-parse", "--absolute-git-dir").strip()
+            (root / ".git").write_text(f"gitdir: {git_directory}\n", encoding="utf-8")
+
+            preserved_outputs = (
+                root
+                / "docs"
+                / "wayfinder"
+                / "migration"
+                / "snapshots"
+                / "current-wayfinder-map-2026-10-09"
+                / "outputs"
+            )
+            before = {path.name: path.read_bytes() for path in preserved_outputs.iterdir() if path.is_file()}
+            self.assertTrue(before, "accepted U2 output snapshot is missing")
+
+            with self.assertRaisesRegex(migration.MigrationError, "already exists with different bytes"):
+                migration.run(
+                    root,
+                    root / migration.CURRENT_IDENTITY_MAPPING_PATH,
+                    write=True,
+                    check=False,
+                    output_snapshot_id="current-wayfinder-map-2026-10-09",
+                    current_identity_intake_id=migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID,
+                )
+
+            after = {path.name: path.read_bytes() for path in preserved_outputs.iterdir() if path.is_file()}
+            self.assertEqual(after, before)
+
     def test_payload_validation_rejects_a_blob_target_at_the_wrong_revision(self) -> None:
         root = Path(__file__).resolve().parents[1]
         inputs = migration.select_migration_inputs(root, migration.HISTORICAL_INPUT_SNAPSHOT_ID)

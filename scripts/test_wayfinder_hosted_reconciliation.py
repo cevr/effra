@@ -410,6 +410,50 @@ def check(*, run_rehashed_controls: bool = True, run_ordinary_clone: bool = True
     )
     validate_original_verifier(artifact, verifier)
 
+    current_intake = migration.select_current_identity_intake(
+        ROOT,
+        migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID,
+    )
+    current_rows = migration.issue_snapshot(ROOT)
+    current_mapping_path = ROOT / migration.CURRENT_IDENTITY_MAPPING_PATH
+    current_mapping_bytes = current_mapping_path.read_bytes()
+    current_mapping = migration.load_mapping(
+        current_mapping_path,
+        current_rows,
+        mapping_bytes=current_mapping_bytes,
+        current_identity_intake=current_intake,
+    )
+    current_input_snapshot = migration.canonical_input_manifest(
+        ROOT,
+        current_rows,
+        current_mapping,
+        mapping_path=migration.CURRENT_IDENTITY_MAPPING_PATH,
+        mapping_bytes=current_mapping_bytes,
+        current_identity_intake=current_intake,
+    )
+    current_mapping_input = current_input_snapshot["record"]["inputs"]["hostedMapping"]
+    require(current_mapping_input["path"] == migration.CURRENT_IDENTITY_MAPPING_PATH, "current mapping source path changed")
+    require(current_mapping_input["sha256"] == sha256_bytes(current_mapping_bytes), "current mapping source bytes changed")
+    current_intake_input = current_input_snapshot["record"]["inputs"]["currentIdentityIntake"]
+    require(
+        current_intake_input["rawResponse"]["sha256"] == migration.CURRENT_IDENTITY_RAW_RESPONSE_SHA256,
+        "current raw identity intake binding changed",
+    )
+    require(len(current_rows) == 74, "current local issue count changed")
+    require(current_mapping["verifiedHostedCount"] == 74, "current captured identity count changed")
+    require(
+        migration.run(
+            ROOT,
+            current_mapping_path,
+            write=False,
+            check=True,
+            output_snapshot_id=migration.CURRENT_IDENTITY_OUTPUT_SNAPSHOT_ID,
+            current_identity_intake_id=migration.CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID,
+        )
+        == 0,
+        "current identity output snapshot is stale",
+    )
+
     # Each negative mutates evidence while leaving the expected counts and
     # source shape otherwise intact. A copied status/count flag is insufficient
     # proof when the bytes or endpoint relation no longer match.

@@ -30,6 +30,26 @@ HISTORICAL_INPUT_SNAPSHOT_ID = "hosted-run-binding-2026-10-08"
 HISTORICAL_INPUT_SNAPSHOT_DESCRIPTOR_SHA256 = "cbf02a3830b39463986022c7be9838f1100fa6c4bb04f5c9b415b9f729e4cd5d"
 HISTORICAL_INPUT_MANIFEST_SHA256 = "0373fa5b59890288ddc7de40cf817444a8f05c0a377af30132bfa8dadd7c16dc"
 HISTORICAL_INPUT_CANONICAL_SHA256 = "82e5751d2a5e9ee4a2bcd3ec8ea55dbbe834ce8e716a66770189bc90804b661a"
+CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID = "github-wayfinder-current-intake-2026-10-08"
+CURRENT_IDENTITY_INTAKE_DESCRIPTOR_SHA256 = "7f9ee47619a7a2f20e97d1666037c0d04105fbf7811728361dc2f73bcb29ebbe"
+CURRENT_IDENTITY_RAW_RESPONSE_SHA256 = "c7a7d8a7be5f1e763363acddada990e3a8db926e77c391ccd94470c198d4b375"
+CURRENT_IDENTITY_READ_BINDING_SHA256 = "ea23fc457d1825d3ecb5e03d68f61613e787a2404e4889b91ae85c8c004d4cf4"
+CURRENT_IDENTITY_MAPPING_PATH = "docs/wayfinder/migration/current-hosted-identities-2026-10-09-source-reconciled.json"
+PRESERVED_U2_CURRENT_IDENTITY_MAPPING_PATH = "docs/wayfinder/migration/current-hosted-identities-2026-10-08.json"
+CURRENT_IDENTITY_OUTPUT_SNAPSHOT_ID = "current-wayfinder-map-2026-10-09-source-reconciled"
+CURRENT_IDENTITY_RAW_RESPONSE_PATH = (
+    "docs/wayfinder/migration/snapshots/github-wayfinder-current-intake-2026-10-08/all-issues.raw.json"
+)
+CURRENT_IDENTITY_READ_BINDING_PATH = (
+    "docs/wayfinder/migration/snapshots/github-wayfinder-current-intake-2026-10-08/read-binding.json"
+)
+CURRENT_IDENTITY_DESCRIPTOR_PATH = (
+    "docs/wayfinder/migration/snapshots/github-wayfinder-current-intake-2026-10-08/snapshot.json"
+)
+CURRENT_IDENTITY_DUPLICATE_NUMBER = 63
+CURRENT_IDENTITY_DUPLICATE_OF = 62
+CURRENT_IDENTITY_ISSUE_COUNT = 75
+CURRENT_IDENTITY_CANONICAL_COUNT = 74
 REPOSITORY = "cevr/effra"
 HISTORICAL_LINK_COMMIT = "779dc58368149452b0fd42b0debb291e3001c8ac"
 HISTORICAL_LINK_REVISION = {
@@ -110,6 +130,39 @@ class MigrationInputs:
     research_record_bytes: bytes | None = None
 
 
+@dataclass(frozen=True)
+class CapturedHostedIdentity:
+    """Identity fields projected from one captured hosted issue object."""
+
+    local_id: str
+    issue_number: int
+    issue_id: int
+    url: str
+    title: str
+    state: str
+    body_sha256: str
+    labels: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CurrentIdentityIntake:
+    """One immutable capture used to verify the current hosted identity map."""
+
+    snapshot_id: str
+    descriptor_path: str
+    descriptor_sha256: str
+    raw_response_path: str
+    raw_response_sha256: str
+    read_binding_path: str
+    read_binding_sha256: str
+    read_at: str
+    endpoint: str
+    issue_count: int
+    duplicate_number: int
+    duplicate_of: int
+    identities: tuple[CapturedHostedIdentity, ...]
+
+
 def canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
@@ -120,6 +173,241 @@ def sha256_bytes(value: bytes) -> str:
 
 def sha256_text(value: str) -> str:
     return sha256_bytes(value.encode("utf-8"))
+
+
+def select_current_identity_intake(root: Path, snapshot_id: str) -> CurrentIdentityIntake:
+    """Select the one retained complete issue-list capture for current mapping.
+
+    This is a separate current identity input.  It does not select or modify
+    the historical migration bundle, whose input selector remains unchanged.
+    """
+
+    if snapshot_id != CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID:
+        raise MigrationError(f"unknown current identity intake snapshot: {snapshot_id}")
+
+    descriptor_path = root / CURRENT_IDENTITY_DESCRIPTOR_PATH
+    raw_path = root / CURRENT_IDENTITY_RAW_RESPONSE_PATH
+    binding_path = root / CURRENT_IDENTITY_READ_BINDING_PATH
+    try:
+        descriptor_bytes = descriptor_path.read_bytes()
+    except OSError as error:
+        raise MigrationError(f"missing current identity intake descriptor: {descriptor_path}") from error
+    if sha256_bytes(descriptor_bytes) != CURRENT_IDENTITY_INTAKE_DESCRIPTOR_SHA256:
+        raise MigrationError("current identity intake descriptor bytes changed")
+    try:
+        descriptor = json.loads(descriptor_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise MigrationError(f"invalid current identity intake descriptor: {error}") from error
+    if (
+        descriptor.get("schemaVersion") != 1
+        or descriptor.get("kind") != "wayfinder-current-hosted-identity-intake"
+        or descriptor.get("snapshotId") != snapshot_id
+        or descriptor.get("repository") != REPOSITORY
+        or descriptor.get("rawResponse")
+        != {
+            "path": CURRENT_IDENTITY_RAW_RESPONSE_PATH,
+            "sha256": CURRENT_IDENTITY_RAW_RESPONSE_SHA256,
+            "issueCount": CURRENT_IDENTITY_ISSUE_COUNT,
+        }
+        or descriptor.get("readBinding", {}).get("path") != CURRENT_IDENTITY_READ_BINDING_PATH
+        or descriptor.get("readBinding", {}).get("sha256") != CURRENT_IDENTITY_READ_BINDING_SHA256
+        or descriptor.get("readBinding", {}).get("rawExit") != 0
+        or descriptor.get("identityProjection")
+        != {
+            "canonicalIssueCount": CURRENT_IDENTITY_CANONICAL_COUNT,
+            "excludedIssues": [
+                {
+                    "number": CURRENT_IDENTITY_DUPLICATE_NUMBER,
+                    "duplicateOf": CURRENT_IDENTITY_DUPLICATE_OF,
+                    "marker": "effra-wayfinder-migration-duplicate-of",
+                }
+            ],
+        }
+    ):
+        raise MigrationError("current identity intake descriptor identity changed")
+
+    try:
+        raw_response_bytes = raw_path.read_bytes()
+    except OSError as error:
+        raise MigrationError(f"missing current identity intake raw response: {raw_path}") from error
+    if sha256_bytes(raw_response_bytes) != CURRENT_IDENTITY_RAW_RESPONSE_SHA256:
+        raise MigrationError("current identity intake raw response bytes changed")
+    try:
+        read_binding_bytes = binding_path.read_bytes()
+    except OSError as error:
+        raise MigrationError(f"missing current identity intake read binding: {binding_path}") from error
+    if sha256_bytes(read_binding_bytes) != CURRENT_IDENTITY_READ_BINDING_SHA256:
+        raise MigrationError("current identity intake read binding bytes changed")
+    try:
+        pages = json.loads(raw_response_bytes.decode("utf-8"))
+        read_binding = json.loads(read_binding_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise MigrationError(f"invalid current identity intake JSON: {error}") from error
+
+    if not isinstance(pages, list) or len(pages) != 1 or not isinstance(pages[0], list):
+        raise MigrationError("current identity intake must contain one captured issues page")
+    issues = pages[0]
+    if len(issues) != CURRENT_IDENTITY_ISSUE_COUNT:
+        raise MigrationError("current identity intake issue count changed")
+    issue_numbers: set[int] = set()
+    issue_ids: set[int] = set()
+    state_counts = {"open": 0, "closed": 0}
+    identities: list[CapturedHostedIdentity] = []
+    excluded: list[tuple[int, int]] = []
+    seen_local_ids: set[str] = set()
+    marker_pattern = re.compile(r"\A<!-- effra-wayfinder-id: ([A-Za-z0-9][A-Za-z0-9._-]*) -->\r?\n")
+    duplicate_pattern = re.compile(r"\A<!-- effra-wayfinder-migration-duplicate-of: ([1-9][0-9]*) -->\r?\n\r?\n")
+    for issue in issues:
+        if not isinstance(issue, dict) or "pull_request" in issue:
+            raise MigrationError("current identity intake contains a non-issue row")
+        number = issue.get("number")
+        issue_id = issue.get("id")
+        if type(number) is not int or number <= 0 or number in issue_numbers:
+            raise MigrationError("current identity intake has an invalid or duplicate issue number")
+        if type(issue_id) is not int or issue_id <= 0 or issue_id in issue_ids:
+            raise MigrationError("current identity intake has an invalid or duplicate hosted issue ID")
+        issue_numbers.add(number)
+        issue_ids.add(issue_id)
+        url = issue.get("html_url")
+        title = issue.get("title")
+        state = issue.get("state")
+        body = issue.get("body")
+        labels = issue.get("labels")
+        if url != f"{HOSTED_ROOT}/issues/{number}":
+            raise MigrationError(f"current issue #{number} URL differs from its canonical issue identity")
+        if not isinstance(title, str) or not title or state not in state_counts or not isinstance(body, str):
+            raise MigrationError(f"current issue #{number} lacks captured title, state, or body")
+        if not isinstance(labels, list) or any(not isinstance(label, dict) or not isinstance(label.get("name"), str) for label in labels):
+            raise MigrationError(f"current issue #{number} has invalid captured labels")
+        label_names = tuple(label["name"] for label in labels)
+        if len(label_names) != len(set(label_names)):
+            raise MigrationError(f"current issue #{number} has duplicate captured label names")
+        state_counts[state] += 1
+
+        duplicate = duplicate_pattern.match(body)
+        if number == CURRENT_IDENTITY_DUPLICATE_NUMBER:
+            if duplicate is None or int(duplicate.group(1)) != CURRENT_IDENTITY_DUPLICATE_OF or state != "closed":
+                raise MigrationError("current identity duplicate exclusion marker changed")
+            excluded.append((number, int(duplicate.group(1))))
+            continue
+        if duplicate is not None:
+            raise MigrationError(f"current issue #{number} has an unexpected duplicate exclusion marker")
+        marker = marker_pattern.match(body)
+        if marker is None:
+            raise MigrationError(f"current issue #{number} lacks a leading canonical local identity marker")
+        local_id = marker.group(1)
+        if local_id in seen_local_ids:
+            raise MigrationError(f"current intake contains duplicate local marker: {local_id}")
+        seen_local_ids.add(local_id)
+        identities.append(
+            CapturedHostedIdentity(
+                local_id=local_id,
+                issue_number=number,
+                issue_id=issue_id,
+                url=url,
+                title=title,
+                state=state,
+                body_sha256=sha256_bytes(body.encode("utf-8")),
+                labels=label_names,
+            )
+        )
+
+    if issue_numbers != set(range(1, CURRENT_IDENTITY_ISSUE_COUNT + 1)):
+        raise MigrationError("current identity intake issue number set changed")
+    if len(issue_ids) != CURRENT_IDENTITY_ISSUE_COUNT:
+        raise MigrationError("current identity intake hosted issue IDs are not unique")
+    if excluded != [(CURRENT_IDENTITY_DUPLICATE_NUMBER, CURRENT_IDENTITY_DUPLICATE_OF)]:
+        raise MigrationError("current identity intake duplicate exclusion set changed")
+    if len(identities) != CURRENT_IDENTITY_CANONICAL_COUNT:
+        raise MigrationError("current identity intake canonical identity count changed")
+    if (
+        read_binding.get("endpoint") != descriptor.get("readBinding", {}).get("endpoint")
+        or read_binding.get("readAt") != descriptor.get("readBinding", {}).get("readAt")
+        or read_binding.get("rawSHA256") != CURRENT_IDENTITY_RAW_RESPONSE_SHA256
+        or read_binding.get("rawExit") != 0
+        or read_binding.get("issueCount") != CURRENT_IDENTITY_ISSUE_COUNT
+        or read_binding.get("numbers") != list(range(1, CURRENT_IDENTITY_ISSUE_COUNT + 1))
+        or read_binding.get("states") != state_counts
+    ):
+        raise MigrationError("current identity intake read binding does not match its raw response")
+
+    return CurrentIdentityIntake(
+        snapshot_id=snapshot_id,
+        descriptor_path=CURRENT_IDENTITY_DESCRIPTOR_PATH,
+        descriptor_sha256=CURRENT_IDENTITY_INTAKE_DESCRIPTOR_SHA256,
+        raw_response_path=CURRENT_IDENTITY_RAW_RESPONSE_PATH,
+        raw_response_sha256=CURRENT_IDENTITY_RAW_RESPONSE_SHA256,
+        read_binding_path=CURRENT_IDENTITY_READ_BINDING_PATH,
+        read_binding_sha256=CURRENT_IDENTITY_READ_BINDING_SHA256,
+        read_at=read_binding["readAt"],
+        endpoint=read_binding["endpoint"],
+        issue_count=CURRENT_IDENTITY_ISSUE_COUNT,
+        duplicate_number=CURRENT_IDENTITY_DUPLICATE_NUMBER,
+        duplicate_of=CURRENT_IDENTITY_DUPLICATE_OF,
+        identities=tuple(sorted(identities, key=lambda item: item.local_id)),
+    )
+
+
+def build_current_identity_mapping(
+    intake: CurrentIdentityIntake,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build the current mapping from captured hosted IDs and current local markers."""
+
+    rows_by_id = {row["metadata"]["id"]: row for row in rows}
+    if len(rows_by_id) != len(rows):
+        raise MigrationError("current local issue markers are not unique")
+    captured_by_id = {identity.local_id: identity for identity in intake.identities}
+    if set(rows_by_id) != set(captured_by_id):
+        missing = sorted(set(rows_by_id) - set(captured_by_id))
+        extra = sorted(set(captured_by_id) - set(rows_by_id))
+        raise MigrationError(f"current local markers differ from captured identities (missing={missing}, extra={extra})")
+
+    identities: list[dict[str, Any]] = []
+    for local_id in sorted(captured_by_id):
+        captured = captured_by_id[local_id]
+        row = rows_by_id[local_id]
+        identities.append(
+            {
+                "localId": local_id,
+                "localTitle": row["metadata"]["title"],
+                "localSourceSha256": row["sourceSha256"],
+                "hostedStatus": "verified",
+                "hostedIssueNumber": captured.issue_number,
+                "hostedIssueId": captured.issue_id,
+                "hostedUrl": captured.url,
+                "hostedTitle": captured.title,
+                "hostedState": captured.state,
+                "hostedBodySha256": captured.body_sha256,
+                "hostedLabels": list(captured.labels),
+                "identityKind": "captured-current-issue-list",
+            }
+        )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "repository": REPOSITORY,
+        "historicalLinkRevision": dict(HISTORICAL_LINK_REVISION),
+        "mapLocalId": "map",
+        "migrationStatus": "read-only-current-identity-capture",
+        "currentIdentityIntake": {
+            "snapshotId": intake.snapshot_id,
+            "descriptorPath": intake.descriptor_path,
+            "descriptorSha256": intake.descriptor_sha256,
+            "rawResponsePath": intake.raw_response_path,
+            "rawResponseSha256": intake.raw_response_sha256,
+            "readBindingPath": intake.read_binding_path,
+            "readBindingSha256": intake.read_binding_sha256,
+            "readAt": intake.read_at,
+            "endpoint": intake.endpoint,
+            "issueCount": intake.issue_count,
+            "canonicalIdentityCount": len(intake.identities),
+            "excludedDuplicate": {"number": intake.duplicate_number, "duplicateOf": intake.duplicate_of},
+        },
+        "localIssueCount": len(rows),
+        "verifiedHostedCount": len(identities),
+        "pendingHostedCount": 0,
+        "identities": identities,
+    }
 
 
 def git_object_type(root: Path, revision: str, relative: str) -> str | None:
@@ -171,6 +459,9 @@ def canonical_input_manifest(
     mapping: dict[str, Any],
     *,
     preparer_bytes: bytes | None = None,
+    mapping_path: str | None = None,
+    mapping_bytes: bytes | None = None,
+    current_identity_intake: CurrentIdentityIntake | None = None,
 ) -> dict[str, Any]:
     """Describe every non-generated input used to prepare the payloads.
 
@@ -178,6 +469,20 @@ def canonical_input_manifest(
     the canonical hosted mapping.  Generated payloads are intentionally absent
     so the source digest cannot become circular.
     """
+
+    if current_identity_intake is None and (mapping_path is not None or mapping_bytes is not None):
+        raise MigrationError("selected current mapping path and bytes require explicit current identity intake")
+    if current_identity_intake is not None:
+        if mapping_path is None or mapping_bytes is None:
+            raise MigrationError("current identity manifest requires the exact selected mapping path and bytes")
+        selected_mapping_path = PurePosixPath(mapping_path)
+        if (
+            selected_mapping_path.is_absolute()
+            or ".." in selected_mapping_path.parts
+            or selected_mapping_path.as_posix() != mapping_path
+            or mapping_path == "docs/wayfinder/hosted-identities.json"
+        ):
+            raise MigrationError("current identity manifest requires a distinct repository-relative mapping path")
 
     issue_inputs: list[dict[str, Any]] = []
     for row in rows:
@@ -196,6 +501,7 @@ def canonical_input_manifest(
     if preparer_bytes is None:
         preparer_bytes = preparer_path.read_bytes()
     mapping_text = canonical_json(mapping)
+    hosted_mapping_path = mapping_path or "docs/wayfinder/hosted-identities.json"
     record = {
         "schemaVersion": INPUT_MANIFEST_SCHEMA_VERSION,
         "kind": "wayfinder-input-snapshot",
@@ -208,8 +514,8 @@ def canonical_input_manifest(
                 "sha256": sha256_bytes(preparer_bytes),
             },
             "hostedMapping": {
-                "path": "docs/wayfinder/hosted-identities.json",
-                "sha256": sha256_text(mapping_text),
+                "path": hosted_mapping_path,
+                "sha256": sha256_bytes(mapping_bytes) if mapping_bytes is not None else sha256_text(mapping_text),
                 "localIssueCount": mapping["localIssueCount"],
                 "verifiedHostedCount": mapping["verifiedHostedCount"],
                 "pendingHostedCount": mapping["pendingHostedCount"],
@@ -221,6 +527,30 @@ def canonical_input_manifest(
             "pendingHostedIdentities": mapping["pendingHostedCount"],
         },
     }
+    if current_identity_intake is not None:
+        record["inputs"]["currentIdentityIntake"] = {
+            "snapshotId": current_identity_intake.snapshot_id,
+            "descriptor": {
+                "path": current_identity_intake.descriptor_path,
+                "sha256": current_identity_intake.descriptor_sha256,
+            },
+            "rawResponse": {
+                "path": current_identity_intake.raw_response_path,
+                "sha256": current_identity_intake.raw_response_sha256,
+                "issueCount": current_identity_intake.issue_count,
+            },
+            "readBinding": {
+                "path": current_identity_intake.read_binding_path,
+                "sha256": current_identity_intake.read_binding_sha256,
+                "readAt": current_identity_intake.read_at,
+                "endpoint": current_identity_intake.endpoint,
+            },
+            "canonicalIdentityCount": len(current_identity_intake.identities),
+            "excludedDuplicate": {
+                "number": current_identity_intake.duplicate_number,
+                "duplicateOf": current_identity_intake.duplicate_of,
+            },
+        }
     return {
         "record": record,
         "sha256": sha256_text(canonical_json(record)),
@@ -378,9 +708,17 @@ def bootstrap_mapping(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def load_mapping(path: Path, rows: list[dict[str, Any]], *, mapping_bytes: bytes | None = None) -> dict[str, Any]:
+def load_mapping(
+    path: Path,
+    rows: list[dict[str, Any]],
+    *,
+    mapping_bytes: bytes | None = None,
+    current_identity_intake: CurrentIdentityIntake | None = None,
+) -> dict[str, Any]:
     if mapping_bytes is None:
         if not path.exists():
+            if current_identity_intake is not None:
+                raise MigrationError(f"missing current identity mapping: {path}")
             return bootstrap_mapping(rows)
         mapping_bytes = path.read_bytes()
     try:
@@ -394,6 +732,42 @@ def load_mapping(path: Path, rows: list[dict[str, Any]], *, mapping_bytes: bytes
     identities = mapping.get("identities")
     if not isinstance(identities, list):
         raise MigrationError(f"{path}: identities must be a list")
+    if current_identity_intake is not None:
+        expected_mapping = build_current_identity_mapping(current_identity_intake, rows)
+        if canonical_json(mapping) != canonical_json(expected_mapping):
+            expected_by_id = {identity["localId"]: identity for identity in expected_mapping["identities"]}
+            actual_by_id: dict[str, Any] = {}
+            duplicate_ids: set[str] = set()
+            for identity in identities:
+                if not isinstance(identity, dict) or not isinstance(identity.get("localId"), str):
+                    raise MigrationError(f"{path}: current mapping contains an identity without a local marker")
+                local_id = identity["localId"]
+                if local_id in actual_by_id:
+                    duplicate_ids.add(local_id)
+                actual_by_id[local_id] = identity
+            if duplicate_ids:
+                raise MigrationError(f"{path}: duplicate current local identity {sorted(duplicate_ids)[0]}")
+            if set(actual_by_id) != set(expected_by_id):
+                missing = sorted(set(expected_by_id) - set(actual_by_id))
+                extra = sorted(set(actual_by_id) - set(expected_by_id))
+                raise MigrationError(f"{path}: current identity set differs (missing={missing}, extra={extra})")
+            for local_id, expected_identity in expected_by_id.items():
+                actual_identity = actual_by_id[local_id]
+                for field, expected_value in expected_identity.items():
+                    if canonical_json(actual_identity.get(field)) != canonical_json(expected_value):
+                        raise MigrationError(
+                            f"{path}: current identity {local_id} field {field} differs from captured inputs"
+                        )
+                if set(actual_identity) != set(expected_identity):
+                    raise MigrationError(f"{path}: current identity {local_id} has unexpected fields")
+            for field, expected_value in expected_mapping.items():
+                if field == "identities":
+                    continue
+                if canonical_json(mapping.get(field)) != canonical_json(expected_value):
+                    raise MigrationError(f"{path}: current mapping field {field} differs from captured inputs")
+            if set(mapping) != set(expected_mapping):
+                raise MigrationError(f"{path}: current mapping has unexpected fields")
+        return mapping
     local_ids = {row["metadata"]["id"] for row in rows}
     mapped_local_ids = {identity.get("localId") for identity in identities if identity.get("localId") is not None}
     if mapped_local_ids != local_ids:
@@ -1213,9 +1587,31 @@ def run(
     check: bool,
     input_snapshot_id: str | None = None,
     output_snapshot_id: str | None = None,
+    current_identity_intake_id: str | None = None,
 ) -> int:
     if input_snapshot_id is not None and output_snapshot_id is not None:
         raise MigrationError("historical input and current output snapshots cannot be selected together")
+    if input_snapshot_id is not None and current_identity_intake_id is not None:
+        raise MigrationError("historical migration and current identity inputs cannot be selected together")
+    if current_identity_intake_id is not None and mapping_path is None:
+        raise MigrationError("--current-identity-intake requires an explicit --mapping")
+    if current_identity_intake_id is not None and output_snapshot_id is None:
+        raise MigrationError("--current-identity-intake requires a distinct --output-snapshot")
+    if current_identity_intake_id is not None:
+        expected_mapping_path = (root / CURRENT_IDENTITY_MAPPING_PATH).resolve()
+        if mapping_path is None or mapping_path.resolve() != expected_mapping_path:
+            raise MigrationError(
+                f"--current-identity-intake requires --mapping {CURRENT_IDENTITY_MAPPING_PATH}"
+            )
+    elif mapping_path is not None:
+        for guarded_mapping_path in (
+            CURRENT_IDENTITY_MAPPING_PATH,
+            PRESERVED_U2_CURRENT_IDENTITY_MAPPING_PATH,
+        ):
+            if mapping_path.resolve() == (root / guarded_mapping_path).resolve():
+                raise MigrationError(
+                    f"--mapping {guarded_mapping_path} requires --current-identity-intake"
+                )
     if write and output_snapshot_id is None:
         raise MigrationError("--write requires a distinct --output-snapshot identity")
     if check and input_snapshot_id is None and output_snapshot_id is None:
@@ -1230,10 +1626,28 @@ def run(
     inputs = select_migration_inputs(root, input_snapshot_id, mapping_path)
     if inputs.snapshot_id != "live" and not check:
         raise MigrationError("historical input snapshots are read-only and support --check only")
+    current_identity_intake = (
+        select_current_identity_intake(root, current_identity_intake_id)
+        if current_identity_intake_id is not None
+        else None
+    )
     rows = issue_snapshot(root, inputs)
     selected_mapping_path = mapping_path or root / "docs" / "wayfinder" / "hosted-identities.json"
-    mapping = load_mapping(selected_mapping_path, rows, mapping_bytes=inputs.mapping_bytes)
-    input_snapshot = canonical_input_manifest(root, rows, mapping, preparer_bytes=inputs.preparer_bytes)
+    mapping = load_mapping(
+        selected_mapping_path,
+        rows,
+        mapping_bytes=inputs.mapping_bytes,
+        current_identity_intake=current_identity_intake,
+    )
+    input_snapshot = canonical_input_manifest(
+        root,
+        rows,
+        mapping,
+        preparer_bytes=inputs.preparer_bytes,
+        mapping_path=(str(selected_mapping_path.relative_to(root)) if current_identity_intake is not None else None),
+        mapping_bytes=(inputs.mapping_bytes if current_identity_intake is not None else None),
+        current_identity_intake=current_identity_intake,
+    )
     if inputs.expected_canonical_sha256 is not None and input_snapshot["sha256"] != inputs.expected_canonical_sha256:
         raise MigrationError("selected historical input canonical binding changed")
     if inputs.snapshot_id == "live" and output_snapshot_id is None and (write or check):
@@ -1312,6 +1726,12 @@ def main(argv: list[str] | None = None) -> int:
         help="check one pinned historical input bundle instead of the current checkout",
     )
     parser.add_argument(
+        "--current-identity-intake",
+        choices=(CURRENT_IDENTITY_INTAKE_SNAPSHOT_ID,),
+        default=None,
+        help="bind the current mapping to one retained raw hosted issue-list capture",
+    )
+    parser.add_argument(
         "--output-snapshot",
         default=None,
         help="immutable identity/path for a new current-state migration output",
@@ -1323,6 +1743,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--write and --check are mutually exclusive")
     if args.input_snapshot is not None and args.mapping is not None:
         parser.error("--mapping cannot override an explicitly selected input snapshot")
+    if args.current_identity_intake is not None and args.input_snapshot is not None:
+        parser.error("--current-identity-intake cannot be combined with --input-snapshot")
+    if args.current_identity_intake is not None and args.mapping is None:
+        parser.error("--current-identity-intake requires --mapping")
+    if args.current_identity_intake is not None and args.output_snapshot is None:
+        parser.error("--current-identity-intake requires --output-snapshot")
     if args.input_snapshot is not None and not args.check:
         parser.error("--input-snapshot is read-only and requires --check")
     if args.input_snapshot is not None and args.output_snapshot is not None:
@@ -1334,7 +1760,15 @@ def main(argv: list[str] | None = None) -> int:
     root = args.root.resolve()
     mapping_path = args.mapping.resolve() if args.mapping is not None else None
     try:
-        return run(root, mapping_path, args.write, args.check, args.input_snapshot, args.output_snapshot)
+        return run(
+            root,
+            mapping_path,
+            args.write,
+            args.check,
+            args.input_snapshot,
+            args.output_snapshot,
+            args.current_identity_intake,
+        )
     except MigrationError as error:
         print(f"wayfinder migration: error: {error}", file=sys.stderr)
         return 2

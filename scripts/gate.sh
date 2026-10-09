@@ -15,6 +15,7 @@ if [ -n "$tracked_pyc" ]; then
 fi
 python3 scripts/wayfinder.py check
 python3 scripts/wayfinder_migration.py --input-snapshot hosted-run-binding-2026-10-08 --check
+python3 scripts/wayfinder_migration.py --current-identity-intake github-wayfinder-current-intake-2026-10-08 --mapping docs/wayfinder/migration/current-hosted-identities-2026-10-09-source-reconciled.json --check --output-snapshot current-wayfinder-map-2026-10-09-source-reconciled
 python3 -B scripts/test_wayfinder_migration.py
 python3 -B scripts/test_wayfinder_hosted_reconciliation.py
 python3 -B scripts/import_effect_conformance.py
