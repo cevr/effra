@@ -4,30 +4,105 @@
 // node/cleanup reason is an occurrence, so retain a private identity through
 // later Effect joins without wrapping its typed payload or replacing tracing.
 const __ef_layerOccurrences = cause => __ef_causeOccurrences(cause);
-// One build owns an acquisition table with one producer Fiber per selected
-// node. Dependent producers and other waiters observe an entry's terminal
-// outcome; interrupting a waiter never interrupts the build-owned producer.
-// This deliberately differs from Effect's MemoMap first-requester build.
-const __ef_layerBuild = plan => Effect.gen(function* () {
-  const state = yield* Effect.sync(plan.init);
-  const changes = yield* Queue.make({ capacity: Math.max(1, plan.nodes.length) });
-  const indices = new Map(plan.nodes.map((node, index) => [node.id, index]));
-  const entries = plan.nodes.map(node => ({ state: "waiting", dependencies: node.dependencies.map(id => indices.get(id)),
-    owner: undefined, fiber: undefined, cause: Cause.empty, abortCancelled: false, dependents: [] }));
-  const order = [];
-  const counts = entries.map(entry => entry.dependencies.length);
-  const ready = [];
-  entries.forEach((entry, index) => {
-    for (const dependency of entry.dependencies) entries[dependency].dependents.push(index);
+// Identities compare by code point, the order Go's bytewise UTF-8 comparison
+// gives, so canonical order is one relation on both targets. UTF-16 `<`
+// would place supplementary-plane identities before U+E000..U+FFFF.
+const __ef_layerIdentityOrder = (a, b) => {
+  for (let index = 0; index < a.length && index < b.length; index++) {
+    let left = a.charCodeAt(index), right = b.charCodeAt(index);
+    if (left === right) continue;
+    if (left >= 0xD800 && right >= 0xD800) {
+      left = left >= 0xE000 ? left - 0x800 : left + 0x2000;
+      right = right >= 0xE000 ? right - 0x800 : right + 0x2000;
+    }
+    return left < right ? -1 : 1;
+  }
+  return a.length - b.length;
+};
+// Metadata is charged in UTF-8 bytes, as Go measures identities.
+const __ef_layerUTF8Length = text => {
+  let length = 0;
+  for (let index = 0; index < text.length; index++) {
+    const unit = text.charCodeAt(index);
+    if (unit >= 0xD800 && unit < 0xDC00) {
+      const next = text.charCodeAt(index + 1);
+      if (next >= 0xDC00 && next < 0xE000) { length += 4; index++; continue; }
+    }
+    length += unit < 0x80 ? 1 : unit < 0x800 ? 2 : 3;
+  }
+  return length;
+};
+// The runtime seam's graph check, mirroring runtime/effra NewPlan with the
+// same bounds, order and refusals: a malformed plan is a defect at provision,
+// before init or any constructor, and a cycle never becomes a build that
+// waits forever. A node kind is "binding" (the default) or "startup".
+const __ef_layerGraph = plan => {
+  const invalid = message => ({ invalid: new Error("invalid layer plan: " + message) });
+  if (typeof plan?.id !== "string" || plan.id === "" || typeof plan.init !== "function" || typeof plan.expose !== "function" || !Array.isArray(plan.nodes)) {
+    return invalid("missing identity, initializer or output adapter");
+  }
+  const nodes = plan.nodes;
+  if (nodes.length > 1000) return invalid("more than 1000 nodes");
+  let metadata = __ef_layerUTF8Length(plan.id), edges = 0;
+  if (metadata > 100000) return invalid("metadata bound exceeded");
+  const dependencies = nodes.map(node => node?.dependencies ?? []);
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index], declared = dependencies[index];
+    if (!Array.isArray(declared)) return invalid("unknown or duplicate dependency");
+    metadata += 1 + (typeof node?.id === "string" ? __ef_layerUTF8Length(node.id) : 0);
+    edges += declared.length;
+    if (metadata > 100000 || edges > 10000) return invalid("metadata bound exceeded");
+    for (const dependency of declared) {
+      metadata += 1 + (typeof dependency === "string" ? __ef_layerUTF8Length(dependency) : 0);
+      if (metadata > 100000) return invalid("metadata bound exceeded");
+    }
+  }
+  const indices = new Map();
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index];
+    if (typeof node?.id !== "string" || node.id === "" || typeof node.construct !== "function" || (node.kind !== undefined && node.kind !== "binding" && node.kind !== "startup")) {
+      return invalid("missing node identity/constructor or unsupported kind");
+    }
+    if (indices.has(node.id)) return invalid("duplicate node identity");
+    indices.set(node.id, index);
+  }
+  const resolved = [], dependents = nodes.map(() => []), counts = [], ready = [];
+  for (let index = 0; index < nodes.length; index++) {
+    const seen = new Set();
+    resolved.push([]);
+    for (const dependency of dependencies[index]) {
+      if (!indices.has(dependency) || seen.has(dependency)) return invalid("unknown or duplicate dependency");
+      seen.add(dependency);
+      dependents[indices.get(dependency)].push(index);
+      resolved[index].push(indices.get(dependency));
+    }
+    counts.push(resolved[index].length);
     if (counts[index] === 0) ready.push(index);
-  });
-  const compare = (a, b) => plan.nodes[a].id < plan.nodes[b].id ? -1 : plan.nodes[a].id > plan.nodes[b].id ? 1 : 0;
+  }
+  const compare = (a, b) => __ef_layerIdentityOrder(nodes[a].id, nodes[b].id);
+  const order = [];
   while (ready.length > 0) {
     ready.sort(compare);
     const index = ready.shift();
     order.push(index);
-    for (const dependent of entries[index].dependents) if (--counts[dependent] === 0) ready.push(dependent);
+    for (const dependent of dependents[index]) if (--counts[dependent] === 0) ready.push(dependent);
   }
+  if (order.length !== nodes.length) return invalid("dependency cycle");
+  return { order, dependencies: resolved, compare };
+};
+// One build owns an acquisition table with one producer Fiber per selected
+// node. Dependent producers and other waiters observe an entry's terminal
+// outcome; interrupting a waiter never interrupts the build-owned producer.
+// This deliberately differs from Effect's MemoMap first-requester build.
+const __ef_layerBuild = plan => Effect.suspend(() => {
+  const graph = __ef_layerGraph(plan);
+  return graph.invalid ? Effect.die(graph.invalid) : __ef_layerBuildGraph(plan, graph);
+});
+const __ef_layerBuildGraph = (plan, { order, dependencies, compare }) => Effect.gen(function* () {
+  const state = yield* Effect.sync(plan.init);
+  const changes = yield* Queue.make({ capacity: Math.max(1, plan.nodes.length) });
+  const entries = plan.nodes.map((_, index) => ({ state: "waiting", dependencies: dependencies[index],
+    owner: undefined, fiber: undefined, cause: Cause.empty, abortCancelled: false }));
   const build = { aborted: false, callerCause: Cause.empty };
   const terminal = entry => entry.state === "succeeded" || entry.state === "failed" || entry.state === "skipped";
   // The terminal entry is recorded before its producer exits, so every waiter
