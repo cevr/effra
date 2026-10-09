@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -379,17 +378,11 @@ void}`)
 			source := cliSmokeNestedData(30, c.named)
 			file := cliSmokeWrite(t, workspace, c.name, source)
 			offset := cliSmokeDeepOffset(source)
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			command := exec.CommandContext(ctx, binary, "query", file, strconv.Itoa(offset))
-			command.Dir = workspace
-			var stdout, stderr bytes.Buffer
-			command.Stdout, command.Stderr = &stdout, &stderr
-			err := command.Run()
-			cancel()
-			if err != nil {
-				t.Fatalf("%s query: %v stdout=%q stderr=%q", c.name, err, stdout.String(), stderr.String())
+			stdout, stderr, code := runSmokeCLI(t, 5*time.Second, binary, workspace, "", "query", file, strconv.Itoa(offset))
+			if code != 0 {
+				t.Fatalf("%s query: exit %d stdout=%q stderr=%q", c.name, code, stdout, stderr)
 			}
-			payload := smokeJSON(t, stdout.Bytes())
+			payload := smokeJSON(t, stdout)
 			if cliSmokeAt(t, payload, "checked") != true || cliSmokeAt(t, payload, "expression", "span", "offset") != float64(offset) {
 				t.Fatalf("%s query = %s", c.name, mustJSON(t, payload))
 			}
@@ -536,27 +529,17 @@ func cliSmokeCall(id int, name string, arguments map[string]any) map[string]any 
 // closes its input and returns the decoded responses once it exits.
 func cliSmokeMCP(t *testing.T, binary, dir, workspace string, deadline time.Duration, messages ...any) []map[string]any {
 	t.Helper()
-	var input bytes.Buffer
+	var input strings.Builder
 	for _, message := range messages {
 		input.Write(smokeDumps(t, message))
 		input.WriteByte('\n')
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), deadline)
-	defer cancel()
-	command := exec.CommandContext(ctx, binary, "mcp", workspace)
-	command.Dir = dir
-	command.Stdin = &input
-	var stdout, stderr bytes.Buffer
-	command.Stdout, command.Stderr = &stdout, &stderr
-	err := command.Run()
-	if ctx.Err() != nil {
-		t.Fatalf("MCP server did not finish within %s\nstdout=%s\nstderr=%s", deadline, stdout.String(), stderr.String())
-	}
-	if err != nil {
-		t.Fatalf("MCP server: %v\nstderr=%s", err, stderr.String())
+	stdout, stderr, code := runSmokeCLI(t, deadline, binary, dir, input.String(), "mcp", workspace)
+	if code != 0 {
+		t.Fatalf("MCP server: exit %d\nstderr=%s", code, stderr)
 	}
 	var responses []map[string]any
-	for _, line := range strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n") {
+	for _, line := range strings.Split(strings.TrimSuffix(string(stdout), "\n"), "\n") {
 		responses = append(responses, smokeJSON(t, []byte(line)))
 	}
 	return responses

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Ported from scripts/type_smoke.py: selected lexical and type facts from
@@ -63,8 +64,17 @@ type typeSmokeRun struct {
 	err    error
 }
 
-// typeSmokeRunAll runs independent CLI invocations concurrently in dir.
-func typeSmokeRunAll(binary, dir string, commands [][]string) []typeSmokeRun {
+// The Python smoke's deadlines for one `ef type` process and for the MCP
+// session.
+const (
+	typeSmokeCLITimeout = 30 * time.Second
+	typeSmokeMCPTimeout = 60 * time.Second
+)
+
+// typeSmokeRunAll runs independent CLI invocations concurrently in dir, each
+// under timeout; a process that outlives it is killed, reaped and reported
+// as the run's error.
+func typeSmokeRunAll(binary, dir string, timeout time.Duration, commands [][]string) []typeSmokeRun {
 	runs := make([]typeSmokeRun, len(commands))
 	var group sync.WaitGroup
 	for index, args := range commands {
@@ -73,16 +83,8 @@ func typeSmokeRunAll(binary, dir string, commands [][]string) []typeSmokeRun {
 			defer group.Done()
 			command := exec.Command(binary, args...)
 			command.Dir = dir
-			var stdout, stderr bytes.Buffer
-			command.Stdout, command.Stderr = &stdout, &stderr
-			err := command.Run()
-			run := typeSmokeRun{args: args, stdout: stdout.Bytes(), stderr: stderr.Bytes()}
-			if exit, ok := err.(*exec.ExitError); ok {
-				run.code = exit.ExitCode()
-			} else if err != nil {
-				run.err = err
-			}
-			runs[index] = run
+			stdout, stderr, code, err := runSmokeDeadline(command, timeout)
+			runs[index] = typeSmokeRun{args: args, stdout: stdout, stderr: stderr, code: code, err: err}
 		}()
 	}
 	group.Wait()
@@ -438,7 +440,7 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 			for _, name := range namedSymbols {
 				commands = append(commands, typeArgs(path, "--symbol", name))
 			}
-			runs := typeSmokeRunAll(binary, workspace, commands)
+			runs := typeSmokeRunAll(binary, workspace, typeSmokeCLITimeout, commands)
 			views := map[string]map[string]any{}
 			for index, selector := range selectors {
 				views[selector.name] = typeSmokeSucceeded(t, runs[index])
@@ -568,7 +570,7 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 			fiberID, _ := typeSmokeAt(t, views["fiber"], "selection", "expression", "type", "type", "ref").(string)
 
 			// Stage 2: revision-bound canonical definitions and their refusals.
-			runs = typeSmokeRunAll(binary, workspace, [][]string{
+			runs = typeSmokeRunAll(binary, workspace, typeSmokeCLITimeout, [][]string{
 				typeArgs(path, "--definition", typeID, "--revision", revision),
 				typeArgs(path, "--definition", fiberID, "--revision", revision),
 				typeArgs(path, "--definition", typeID),
@@ -661,7 +663,7 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 				input.Write(smokeDumps(t, request))
 				input.WriteByte('\n')
 			}
-			stdout, stderr, code := runTestCLIDir(t, binary, workspace, input.String(), "mcp", workspace)
+			stdout, stderr, code := runSmokeCLI(t, typeSmokeMCPTimeout, binary, workspace, input.String(), "mcp", workspace)
 			if code != 0 {
 				t.Fatalf("mcp exit %d: %s", code, stderr)
 			}

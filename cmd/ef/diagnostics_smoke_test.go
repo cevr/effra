@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -19,6 +20,10 @@ import (
 // editor ranges and admission boundaries, compared across the CLI and the
 // stdio MCP server. The Linux-only symlink replacement race lives in
 // diagnostics_smoke_linux_test.go.
+
+// diagnosticsSmokeTimeout is the Python smoke's deadline for one CLI or MCP
+// process.
+const diagnosticsSmokeTimeout = 30 * time.Second
 
 // diagnosticsSmokeRequests is one MCP session calling project.diagnostics
 // once per argument, followed by a ping, each line json.dumps(message).
@@ -57,7 +62,7 @@ func diagnosticsSmokeReplies(t *testing.T, stdout []byte) []map[string]any {
 // tool replies, after checking the trailing ping proves the session drained.
 func diagnosticsSmokeMCP(t *testing.T, binary, directory string, arguments ...map[string]any) []map[string]any {
 	t.Helper()
-	stdout, stderr, code := runTestCLIDir(t, binary, directory, diagnosticsSmokeRequests(t, arguments), "mcp", directory)
+	stdout, stderr, code := runSmokeCLI(t, diagnosticsSmokeTimeout, binary, directory, diagnosticsSmokeRequests(t, arguments), "mcp", directory)
 	if code != 0 {
 		t.Fatalf("mcp exit %d: %s", code, stderr)
 	}
@@ -97,7 +102,7 @@ func diagnosticsSmokeCLI(t *testing.T, binary, path string, strict bool) map[str
 	if strict {
 		arguments = append(arguments, "--strict")
 	}
-	stdout, stderr, code := runTestCLIDir(t, binary, filepath.Dir(path), "", arguments...)
+	stdout, stderr, code := runSmokeCLI(t, diagnosticsSmokeTimeout, binary, filepath.Dir(path), "", arguments...)
 	if code != 0 && code != 1 {
 		t.Fatalf("diagnostics exit %d: %s", code, stderr)
 	}

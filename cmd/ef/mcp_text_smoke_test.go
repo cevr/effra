@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"testing"
+	"time"
 )
 
 // Ported from scripts/mcp_text_smoke.py: the compiled stdio MCP server admits
@@ -40,7 +41,7 @@ func TestCompiledMCPAdmitsTextLosslesslyAndAnswersQueuedPing(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			input := initialize + ready + string(formatRequest([]byte(c.sourceJSON))) + ping
-			stdout, stderr, code := runTestCLIDir(t, binary, workspace, input, "mcp", workspace)
+			stdout, stderr, code := runSmokeCLI(t, 10*time.Second, binary, workspace, input, "mcp", workspace)
 			if code != 0 || len(stderr) != 0 {
 				t.Fatalf("exit %d stdout=%q stderr=%q", code, stdout, stderr)
 			}

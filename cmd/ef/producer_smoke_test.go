@@ -139,7 +139,7 @@ effect fn greeting(id: string) -> string raises {MissingProfile} uses {Profiles}
 		if version := cliSmokeAt(t, formatted, "formatterVersion"); version == nil || version == "" {
 			t.Fatalf("code.format lacks a formatter version: %s", mustJSON(t, formatted))
 		}
-		stdout, stderr, code := runTestCLIDir(t, first, directory, "", "fmt", file, "--check", "--json")
+		stdout, stderr, code := runSmokeCLI(t, producerSmokeCheckTimeout, first, directory, "", "fmt", file, "--check", "--json")
 		if code != 0 && code != 1 {
 			t.Fatalf("fmt --check: exit %d stderr=%s", code, stderr)
 		}
@@ -270,7 +270,7 @@ func main(){json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"pr
 		lazy := producerSmokeOverlays(t, root, directory, ownerPath, map[string]string{"lazy": lazySource})["lazy"]
 		producerSmokeRun(t, directory, lazy, "build", file, "--target", "js", "-o", filepath.Join(directory, "app.mjs"))
 		cliSmokeEqual(t, producerSmokeRun(t, directory, lazy, "run", file, "--target", "go"), "ok\n")
-		_, stderr, code := runTestCLIDir(t, lazy, directory, "", "check", file)
+		_, stderr, code := runSmokeCLI(t, producerSmokeCheckTimeout, lazy, directory, "", "check", file)
 		if code == 0 || !strings.Contains(string(stderr), "producer acquisition forbidden") {
 			t.Fatalf("check did not acquire identity: exit %d stderr=%s", code, stderr)
 		}
@@ -286,17 +286,24 @@ func producerSmokeRead(t *testing.T, path string) string {
 	return string(data)
 }
 
-// producerSmokeRun runs a program in dir, requires success and returns stdout.
+// The Python smoke's deadlines: its run() helper (every build, git and
+// compiler run) and a single CLI check.
+const (
+	producerSmokeRunTimeout   = 120 * time.Second
+	producerSmokeCheckTimeout = 15 * time.Second
+)
+
+// producerSmokeRun runs a program in dir under the run() deadline, requires
+// success and returns stdout.
 func producerSmokeRun(t *testing.T, dir, program string, args ...string) string {
 	t.Helper()
 	command := exec.Command(program, args...)
 	command.Dir = dir
-	var stdout, stderr bytes.Buffer
-	command.Stdout, command.Stderr = &stdout, &stderr
-	if err := command.Run(); err != nil {
-		t.Fatalf("%s %v: %v\nstdout=%s\nstderr=%s", program, args, err, stdout.String(), stderr.String())
+	stdout, stderr, code := runSmokeCommand(t, producerSmokeRunTimeout, command)
+	if code != 0 {
+		t.Fatalf("%s %v: exit %d\nstdout=%s\nstderr=%s", program, args, code, stdout, stderr)
 	}
-	return stdout.String()
+	return string(stdout)
 }
 
 func producerSmokeDigest(t *testing.T, path string) string {
@@ -338,9 +345,10 @@ func producerSmokeOverlays(t *testing.T, root, directory, source string, replace
 			defer group.Done()
 			command := exec.Command("go", "build", "-overlay", overlay, "-o", binary, "./cmd/ef")
 			command.Dir = root
-			if output, err := command.CombinedOutput(); err != nil {
+			stdout, stderr, code, err := runSmokeDeadline(command, producerSmokeRunTimeout)
+			if err != nil || code != 0 {
 				lock.Lock()
-				failures = append(failures, fmt.Errorf("build %s: %v\n%s", name, err, output))
+				failures = append(failures, fmt.Errorf("build %s: exit %d %v\n%s%s", name, code, err, stdout, stderr))
 				lock.Unlock()
 			}
 		}()

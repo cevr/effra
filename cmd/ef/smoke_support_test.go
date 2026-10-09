@@ -3,16 +3,19 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -327,6 +330,76 @@ func deepCopyJSON(t *testing.T, value map[string]any) map[string]any {
 		t.Fatal(err)
 	}
 	return result
+}
+
+// smokeWaitDelay bounds how long a killed or exited smoke child may keep its
+// output pipes open through a surviving grandchild before Wait closes them.
+const smokeWaitDelay = 5 * time.Second
+
+// errSmokeDeadline marks a smoke process that outlived its deadline.
+var errSmokeDeadline = errors.New("smoke process exceeded its deadline")
+
+// runSmokeDeadline runs an unstarted command to completion under a
+// per-operation deadline, as the Python smokes' subprocess.run(timeout=...)
+// did, and returns its output and exit code. On expiry the child is killed
+// and reaped before an errSmokeDeadline error returns. It never touches a
+// testing.T, so concurrent runners may use it.
+func runSmokeDeadline(command *exec.Cmd, timeout time.Duration) ([]byte, []byte, int, error) {
+	var stdout, stderr bytes.Buffer
+	command.Stdout, command.Stderr = &stdout, &stderr
+	if command.WaitDelay == 0 {
+		command.WaitDelay = smokeWaitDelay
+	}
+	if err := command.Start(); err != nil {
+		return nil, nil, -1, err
+	}
+	// This goroutine is the command's only wait owner; done closes once the
+	// child has been reaped and its output copied.
+	var err error
+	done := make(chan struct{})
+	go func() {
+		err = command.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		_ = command.Process.Kill()
+		<-done
+		return stdout.Bytes(), stderr.Bytes(), -1, fmt.Errorf("%w: %s %s after %v\nstdout=%q\nstderr=%q",
+			errSmokeDeadline, command.Path, strings.Join(command.Args[1:], " "), timeout, stdout.Bytes(), stderr.Bytes())
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return stdout.Bytes(), stderr.Bytes(), exit.ExitCode(), nil
+	}
+	if err != nil {
+		return stdout.Bytes(), stderr.Bytes(), -1, err
+	}
+	return stdout.Bytes(), stderr.Bytes(), 0, nil
+}
+
+// runSmokeCommand is runSmokeDeadline failing the test when the command
+// cannot run or outlives its deadline.
+func runSmokeCommand(t *testing.T, timeout time.Duration, command *exec.Cmd) ([]byte, []byte, int) {
+	t.Helper()
+	stdout, stderr, code, err := runSmokeDeadline(command, timeout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stdout, stderr, code
+}
+
+// runSmokeCLI runs the CLI in directory with input on stdin under a
+// per-operation deadline.
+func runSmokeCLI(t *testing.T, timeout time.Duration, binary, directory, input string, args ...string) ([]byte, []byte, int) {
+	t.Helper()
+	command := exec.Command(binary, args...)
+	command.Dir = directory
+	command.Stdin = strings.NewReader(input)
+	return runSmokeCommand(t, timeout, command)
 }
 
 // smokeObject is a JSON object whose members keep their written order, as

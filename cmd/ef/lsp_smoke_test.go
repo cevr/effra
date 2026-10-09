@@ -116,21 +116,25 @@ func lspSmokeDecode(t *testing.T, data []byte) []map[string]any {
 	return messages
 }
 
-// lspSmokeRun runs one CLI process without touching t, so goroutines may use
-// it.
-func lspSmokeRun(binary, dir, input string, args ...string) ([]byte, []byte, int, error) {
+// lspSmokeRun runs one CLI process under the smoke's deadline for it,
+// without touching t, so goroutines may use it.
+func lspSmokeRun(timeout time.Duration, binary, dir, input string, args ...string) ([]byte, []byte, int, error) {
 	command := exec.Command(binary, args...)
 	command.Dir = dir
 	command.Stdin = strings.NewReader(input)
-	var stdout, stderr bytes.Buffer
-	command.Stdout, command.Stderr = &stdout, &stderr
-	err := command.Run()
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		return stdout.Bytes(), stderr.Bytes(), exit.ExitCode(), nil
-	}
-	return stdout.Bytes(), stderr.Bytes(), 0, err
+	return runSmokeDeadline(command, timeout)
 }
+
+// The smoke's subprocess deadlines: one framed LSP session, a CLI query
+// (diagnostics, type or fmt), a diagnostics MCP session, a type or format MCP
+// session, and the refused-target start.
+const (
+	lspSmokeSessionDeadline  = 40 * time.Second
+	lspSmokeCLIDeadline      = 30 * time.Second
+	lspSmokeDiagnosticsMCP   = 30 * time.Second
+	lspSmokeToolMCP          = 60 * time.Second
+	lspSmokeBadTargetTimeout = 5 * time.Second
+)
 
 func (c lspSmokeCLI) exchange(t *testing.T, s lspSmokeSession) []map[string]any {
 	t.Helper()
@@ -147,9 +151,12 @@ func (c lspSmokeCLI) exchange(t *testing.T, s lspSmokeSession) []map[string]any 
 		}
 		payload = append(payload, frame...)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	// The deadline kills the server, and Wait below reaps it before the test
+	// fails; WaitDelay bounds the wait for pipes a grandchild might hold.
+	ctx, cancel := context.WithTimeout(context.Background(), lspSmokeSessionDeadline)
 	defer cancel()
 	command := exec.CommandContext(ctx, c.binary, "lsp", "--target", target)
+	command.WaitDelay = smokeWaitDelay
 	command.Dir = c.cwd
 	if s.environment != nil {
 		command.Env = append(os.Environ(), s.environment...)
@@ -366,7 +373,7 @@ func lspSmokeAbsent(t *testing.T, path string) {
 
 func (c lspSmokeCLI) diagnostics(t *testing.T, path string) map[string]any {
 	t.Helper()
-	stdout, stderr, code, err := lspSmokeRun(c.binary, c.cwd, "", "diagnostics", path, "--json")
+	stdout, stderr, code, err := lspSmokeRun(lspSmokeCLIDeadline, c.binary, c.cwd, "", "diagnostics", path, "--json")
 	if err != nil || (code != 0 && code != 1) {
 		t.Fatalf("diagnostics exit %d: %v %q", code, err, stderr)
 	}
@@ -379,14 +386,14 @@ func (c lspSmokeCLI) diagnostics(t *testing.T, path string) map[string]any {
 
 // mcp sends each request as json.dumps(request), the smoke's ASCII-escaped
 // MCP encoding, to one stdio session.
-func (c lspSmokeCLI) mcp(t *testing.T, directory string, requests []any) []map[string]any {
+func (c lspSmokeCLI) mcp(t *testing.T, timeout time.Duration, directory string, requests []any) []map[string]any {
 	t.Helper()
 	var input bytes.Buffer
 	for _, request := range requests {
 		input.Write(smokeDumps(t, request))
 		input.WriteByte('\n')
 	}
-	stdout, stderr, code, err := lspSmokeRun(c.binary, c.cwd, input.String(), "mcp", directory)
+	stdout, stderr, code, err := lspSmokeRun(timeout, c.binary, c.cwd, input.String(), "mcp", directory)
 	if err != nil || code != 0 {
 		t.Fatalf("mcp exit %d: %v %q", code, err, stderr)
 	}
@@ -414,7 +421,7 @@ func (c lspSmokeCLI) mcpDiagnostics(t *testing.T, directory, file string) map[st
 		map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/call",
 			"params": map[string]any{"name": "project.diagnostics", "arguments": map[string]any{"file": file}}},
 		map[string]any{"jsonrpc": "2.0", "id": "after", "method": "ping"})
-	replies := c.mcp(t, directory, requests)
+	replies := c.mcp(t, lspSmokeDiagnosticsMCP, directory, requests)
 	if len(replies) != 3 {
 		t.Fatalf("mcp replies: %v", replies)
 	}
@@ -430,7 +437,7 @@ func (c lspSmokeCLI) mcpTools(t *testing.T, directory, tool string, arguments []
 		requests = append(requests, map[string]any{"jsonrpc": "2.0", "id": index, "method": "tools/call",
 			"params": map[string]any{"name": tool, "arguments": argument}})
 	}
-	byID := lspSmokeReplies(c.mcp(t, directory, requests))
+	byID := lspSmokeReplies(c.mcp(t, lspSmokeToolMCP, directory, requests))
 	results := make([]map[string]any, len(arguments))
 	for index := range arguments {
 		reply, ok := byID[strconv.Itoa(index)]
@@ -665,7 +672,7 @@ func (c lspSmokeCLI) lspSmokeTypes(t *testing.T, path, target string, offsets []
 			defer group.Done()
 			slots <- struct{}{}
 			defer func() { <-slots }()
-			stdout, stderr, code, err := lspSmokeRun(c.binary, c.cwd, "", "type", path, "--target", target, "--offset", strconv.Itoa(offset))
+			stdout, stderr, code, err := lspSmokeRun(lspSmokeCLIDeadline, c.binary, c.cwd, "", "type", path, "--target", target, "--offset", strconv.Itoa(offset))
 			switch {
 			case err != nil:
 				failures[index] = err.Error()
@@ -868,7 +875,7 @@ func lspSmokeFormattingCase(t *testing.T, cli lspSmokeCLI) {
 	for index, c := range lspSmokeFormatting {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			stdout, stderr, code, err := lspSmokeRun(cli.binary, cli.cwd, c.source, "fmt", "--stdin")
+			stdout, stderr, code, err := lspSmokeRun(lspSmokeCLIDeadline, cli.binary, cli.cwd, c.source, "fmt", "--stdin")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1054,7 +1061,7 @@ func lspSmokeBoundsAndProtocol(t *testing.T, cli lspSmokeCLI) {
 		})
 	}
 	run("bad-target", func(t *testing.T) {
-		stdout, stderr, code, err := lspSmokeRun(cli.binary, cli.cwd, "", "lsp", "--target", "bad")
+		stdout, stderr, code, err := lspSmokeRun(lspSmokeBadTargetTimeout, cli.binary, cli.cwd, "", "lsp", "--target", "bad")
 		if err != nil || code != 2 || len(stdout) != 0 || len(stderr) == 0 {
 			t.Fatalf("lsp --target bad: exit %d %v stdout=%q stderr=%q", code, err, stdout, stderr)
 		}

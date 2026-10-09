@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Ported from scripts/layer_smoke.py: checked layer provision through the
@@ -213,15 +214,19 @@ func layerSmokeExpect(t *testing.T, run typeSmokeRun, success bool) typeSmokeRun
 	return run
 }
 
+// layerSmokeTimeout is the Python smoke's deadline for every CLI and MCP
+// process.
+const layerSmokeTimeout = 30 * time.Second
+
 func TestLayerSmokeProvisionCLIMCPAndFormatter(t *testing.T) {
 	binary := buildTestCLI(t)
 	// Formatting is target-independent and runs once.
 	scratch := smokeWorkspace(t)
-	formatted, stderr, code := runTestCLIDir(t, binary, scratch, layerSmokeSource, "fmt", "--stdin")
+	formatted, stderr, code := runSmokeCLI(t, layerSmokeTimeout, binary, scratch, layerSmokeSource, "fmt", "--stdin")
 	if code != 0 {
 		t.Fatalf("fmt --stdin: exit %d: %s", code, stderr)
 	}
-	again, stderr, code := runTestCLIDir(t, binary, scratch, string(formatted), "fmt", "--stdin")
+	again, stderr, code := runSmokeCLI(t, layerSmokeTimeout, binary, scratch, string(formatted), "fmt", "--stdin")
 	if code != 0 || !bytes.Equal(again, formatted) {
 		t.Fatalf("formatting is not idempotent: exit %d %s\n%s\n%s", code, stderr, formatted, again)
 	}
@@ -297,7 +302,7 @@ func TestLayerSmokeProvisionCLIMCPAndFormatter(t *testing.T) {
 			}
 			path := paths["app.ef"]
 			withTarget := func(args ...string) []string { return append(args, "--target", target) }
-			runs := typeSmokeRunAll(binary, workspace, [][]string{
+			runs := typeSmokeRunAll(binary, workspace, layerSmokeTimeout, [][]string{
 				withTarget("check", path),                               // 0
 				withTarget("inspect", path, "Fixture"),                  // 1
 				withTarget("explain", path, "Fixture"),                  // 2
@@ -521,7 +526,7 @@ func TestLayerSmokeProvisionCLIMCPAndFormatter(t *testing.T) {
 				input.Write(smokeDumps(t, request))
 				input.WriteByte('\n')
 			}
-			stdout, stderr, code := runTestCLIDir(t, binary, workspace, input.String(), "mcp", project)
+			stdout, stderr, code := runSmokeCLI(t, layerSmokeTimeout, binary, workspace, input.String(), "mcp", project)
 			if code != 0 {
 				t.Fatalf("mcp exit %d: %s", code, stderr)
 			}
