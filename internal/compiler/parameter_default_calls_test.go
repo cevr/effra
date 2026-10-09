@@ -129,6 +129,66 @@ func TestOmittedArgumentsCompileToTheExplicitConstantCall(t *testing.T) {
 	}
 }
 
+// rowDefaultSource instantiates a row-polymorphic callee with a non-empty
+// failure row and service row through a callback, so the omitted and explicit
+// calls must agree on substituted rows as well as arguments.
+func rowDefaultSource(call string) string {
+	return `error Missing
+service Directory {
+    effect fn find(key: string) -> string raises { Missing }
+}
+impl MemoryDirectory for Directory {
+    effect fn find(key: string) -> string raises { Missing } {
+        if key == "seed" { "found " + key } else { fail Missing }
+    }
+}
+effect fn lookup(key: string) -> string raises { Missing } uses { Directory } {
+    run Directory.find(key)
+}
+effect fn through<E: raises, R: uses>(callback: effect fn(string) -> string raises { E } uses { R }, input: string = "seed") -> string raises { E } uses { R } {
+    run callback(input)
+}
+effect fn caller() -> string raises { Missing } uses { Directory } {
+    ` + call + `
+}
+effect fn main() -> string {
+    run caller().provide<Directory>(MemoryDirectory).catch<Missing>("missing")
+}
+`
+}
+
+func TestOmittedArgumentsInstantiateNonEmptyRows(t *testing.T) {
+	omitted := rowDefaultSource("run through(lookup)")
+	r := CompileFor(omitted, "go")
+	if !r.Checked {
+		t.Fatalf("row-polymorphic omitted call rejected: %+v", r.Diagnostics)
+	}
+	found := false
+	for _, expression := range expressionsOf(r.Program) {
+		if expression.Kind != "call" || expression.ResolvedFunction == nil || expression.ResolvedFunction.Name != "through" {
+			continue
+		}
+		application := expression.checked.application
+		nonEmpty := 0
+		for _, argument := range application.RowArguments {
+			if argument.Row != "" {
+				nonEmpty++
+			}
+		}
+		found = len(expression.parameterArguments()) == 2 && len(application.RowArguments) == 2 && nonEmpty == 2
+	}
+	if !found {
+		t.Fatal("the omitting call did not instantiate both non-empty rows")
+	}
+	if !reflect.DeepEqual(compilePipeOutput(t, omitted, ".", nil), compilePipeOutput(t, rowDefaultSource(`run through(lookup, "seed")`), ".", nil)) {
+		t.Fatal("omitted and explicit calls differ under non-empty raises and uses rows")
+	}
+	runOnEveryHost(t, omitted, "found seed\n")
+	if reflect.DeepEqual(compilePipeOutput(t, omitted, ".", nil), compilePipeOutput(t, rowDefaultSource(`run through(lookup, "other")`), ".", nil)) {
+		t.Fatal("row differential did not observe a different explicit constant")
+	}
+}
+
 func TestOmittedArgumentsUseTheCalleesCurrentDefault(t *testing.T) {
 	// The default belongs to the callee's declaration. Changing it changes
 	// every omitting caller's emitted call and result, and nothing else.
