@@ -88,7 +88,7 @@ Read it for a dynamically typed language whose concurrency, supervision and life
 | Numbers, `kernel.ex:L483-L511`, `L1600-L1625` | `div/2` and `/` raise `ArithmeticError` on zero, and `/` always returns a float. That integers are arbitrary precision is unverified as a quoted source sentence. | Compared in [portable i64 arithmetic](docs/research/numeric-arithmetic.md#elixir-and-moonbit-comparison). |
 | Defaults and visibility, `pages/getting-started/modules-and-functions.md:L62`, `L115-L169`; `typespecs.md:L235-L241` | `def`/`defp`; `\\` defaults evaluated at each call; `@opaque` is a typespec notion, not compiler-enforced. | Effra defaults are constant-only, and `pub`/`pub readonly` are checked constructs. |
 
-Inputs to existing owners rather than new questions: a checked `postpone`/selective-receive equivalent belongs to the deferred [restricted receive loops](docs/wayfinder/issues/actor-receive.md) ticket; restart backoff is already part of the [actor supervision contract](docs/specs/actors.md#acknowledgement-cancellation-and-shutdown); and a typed multi-step binding over `Result`, where `with` returns untyped values, belongs to [generalized run binding](docs/research/generalized-run-binding.md#elixir-with).
+Inputs to existing owners rather than new questions: a checked `postpone`/selective-receive equivalent belongs to the deferred [restricted receive loops](https://github.com/cevr/effra/issues/12) ticket; restart backoff is already part of the [actor supervision contract](docs/specs/actors.md#acknowledgement-cancellation-and-shutdown); and a typed multi-step binding over `Result`, where `with` returns untyped values, belongs to [generalized run binding](docs/research/generalized-run-binding.md#elixir-with).
 
 #### MoonBit
 
