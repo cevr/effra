@@ -393,10 +393,14 @@ func (c *checker) checkEndpointFailures(endpoint *EndpointDeclaration, witnesses
 	}
 	for _, name := range reachable {
 		if !mapped[name] {
+			// The diagnostic names its origin, never the endpoint's handler
+			// option: a handler origin exists only for a resolved handler,
+			// while an input or output witness can raise beside an unknown
+			// or refused handler.
 			origin := origins[name][0]
-			source := "handler " + endpoint.handler.Name
-			if origin.Stage != "handler" {
-				source = origin.Stage + " witness " + origin.Witness
+			source := origin.Stage + " witness " + origin.Witness
+			if origin.Stage == "handler" {
+				source = "handler " + endpoint.handler.Name
 			}
 			remedy := "add " + name + ": <status> to its raises clause or recover it"
 			if name == jsonCodecDerivation.DecodeFailure || name == jsonCodecDerivation.EncodeFailure {
@@ -450,15 +454,20 @@ func endpointFunction(c *checker, name string, errors, services []string, body *
 	return f
 }
 
-// rows are the declared rows of an endpoint's handler function: the
-// terminal JsonEncodeFailure when it encodes any body, and every service its
-// input decoding, handler and output encoding need. Mapped failures are
-// answered, and malformed input is answered 400, so neither remains.
+// rows are the declared rows of an endpoint's handler function: every
+// mapped failure, the terminal JsonEncodeFailure when it encodes any body,
+// and every service its input decoding, handler and output encoding need.
+// A mapped failure is answered only when it is the whole cause; a compound
+// cause, such as a handler failure beside an unobserved child's failure or a
+// cleanup defect, propagates complete, like the conservative fork row, so
+// every mapped failure remains declared. Structurally malformed input is
+// always a lone cause, answered 400, so JsonDecodeFailure never remains.
 func (endpoint *EndpointDeclaration) rows() ([]string, []string) {
 	errors, services := []string{}, union(nil, endpoint.handler.Services)
 	encodes := endpoint.output != nil
 	for _, mapping := range endpoint.mappings {
 		encodes = encodes || mapping.codec != nil
+		errors = append(errors, mapping.failure)
 	}
 	if encodes {
 		errors = append(errors, jsonCodecDerivation.EncodeFailure)
@@ -546,8 +555,8 @@ func (c *checker) synthesizeRoutes(table *EndpointDeclaration) {
 }
 
 // endpointOperation checks the body of a synthesized endpoint or route
-// table. Its rows are its function's declared rows: the mapped failures are
-// answered, so only the terminal encoding failure and the services remain.
+// table. Its rows are its function's declared rows: the mapped failures a
+// compound cause carries, the terminal encoding failure and the services.
 func (c *checker) endpointOperation(e *Expr, env localEnv) checkedExpression {
 	c.expr(e.Left, env, false)
 	for _, arg := range e.Args {

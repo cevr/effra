@@ -114,9 +114,11 @@ declaration that omits either bound is refused with EF138.
 Functions, effect recipes, host and runtime types, bytes, generic
 applications and empty enums are refused with EF138 and the field path at
 which representation fails. A failure (`error`) declaration is not a value
-type, so naming one as the derived type is refused earlier with EF102, like
-an unknown type. Plans are limited to 4096 nodes and 65536 fields and
-variants.
+type: as a field or element of a value codec it is refused with EF138 at that
+path (its field declaration is already EF102), and it is the derived type
+only of a [failure witness](#failure-witnesses-and-typed-endpoints), which
+must name a failure declared in its own module. Plans are limited to 4096
+nodes and 65536 fields and variants.
 
 `ef check` and MCP `project.check` report each witness under `codecs`, with
 its domain and wire types and each direction's function, failures and
@@ -191,8 +193,12 @@ raise to a 4xx/5xx status and optionally a failure witness of that failure.
 An unmapped failure is `EF107`; mapping an unreachable failure, mapping one
 twice, or mapping `JsonDecodeFailure`/`JsonEncodeFailure` is `EF138`.
 
-The synthesized function's rows are every service those functions need and,
-when it encodes any body, the terminal `JsonEncodeFailure`. Inspection
+The synthesized function's rows are every service those functions need,
+every mapped failure and, when it encodes any body, the terminal
+`JsonEncodeFailure`. A mapped failure is answered only when it is the whole
+cause; a compound cause (a handler failure beside an unobserved failed child
+or a cleanup defect) propagates complete, so a direct caller declares the
+mapped failures, and `Http.listen` absorbs them as its generic 500. Inspection
 (`endpoints` in CLI/MCP) lists each endpoint's method, path, status,
 witnesses, handler, mapped responses with the stage and function that raise
 them, its input profile and its terminal encoding policy.

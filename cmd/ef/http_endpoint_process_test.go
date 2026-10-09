@@ -18,7 +18,7 @@ import (
 // terminal, so the call fails with JsonEncodeFailure followed by the mapped
 // failure it could not answer, and is never mapped again.
 const endpointTerminalTest = `
-effect fn test_failed_failure_body_keeps_both_causes() -> void raises { JsonEncodeFailure } {
+effect fn test_failed_failure_body_keeps_both_causes() -> void raises { JsonEncodeFailure, NothingToCancel, OutOfStock, UnknownMember, Unpublishable } {
     let code = run order("application/json", "{\"member\":\"m-1\",\"item\":\"tea\",\"quantity\":\"3\"}").provide<Http>(LiveHttp).provide<Directory>(Members).provide<Inventory>(Stock).provide<Ledger>(Books)
 }
 `
@@ -128,5 +128,73 @@ func TestEndpointFactsMatchAcrossCLIAndMCP(t *testing.T) {
 	}
 	if !slices.Equal(names, []string{"placeOrder", "cancelOrder", "health", "api"}) {
 		t.Fatalf("endpoints %q", names)
+	}
+}
+
+// endpointNameFixture maps a failure whose legal name is __proto__ beside an
+// ordinary failure name, and calls both endpoints directly.
+const endpointNameFixture = `error __proto__
+error Taken
+
+effect fn proto() -> void raises { __proto__ } {
+    fail __proto__
+}
+
+effect fn taken() -> void raises { Taken } {
+    fail Taken
+}
+
+derive protoEndpoint = Http.endpoint(method: "POST", path: "/proto", handler: proto, status: 204) raises { __proto__: 409 }
+derive takenEndpoint = Http.endpoint(method: "POST", path: "/taken", handler: taken, status: 204) raises { Taken: 409 }
+
+fn status(reply: HttpReply) -> i64 {
+    match reply {
+        HttpReply.Respond { response } => response.status
+        HttpReply.BadRequest => 400
+        HttpReply.NotFound => 404
+        HttpReply.UnsupportedMediaType => 415
+    }
+}
+
+effect fn request(path: string) -> HttpRequest uses { Http } {
+    let body = run Http.text("")
+    HttpRequest {
+        method: "POST",
+        path: path,
+        contentType: "",
+        body: body
+    }
+}
+
+effect fn test_proto_failure_is_mapped() -> void raises { AssertionFailed, __proto__ } uses { Assert } {
+    let reply = run protoEndpoint(run request("/proto").provide<Http>(LiveHttp))
+    run Assert.check(status(reply) == 409, "a failure named __proto__ answers its mapped status")
+}
+
+effect fn test_ordinary_failure_is_mapped() -> void raises { AssertionFailed, Taken } uses { Assert } {
+    let reply = run takenEndpoint(run request("/taken").provide<Http>(LiveHttp))
+    run Assert.check(status(reply) == 409, "an ordinary failure answers its mapped status")
+}
+
+effect fn main() -> void {
+}
+`
+
+// A failure named __proto__ is an ordinary mapping key on both targets, like
+// the ordinary-name control: JS lowers mappings to a Map, never an object
+// literal whose __proto__ entry would set its prototype.
+func TestEndpointFailureNamesAreOrdinaryKeys(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := t.TempDir()
+	fixture := filepath.Join(root, "names.ef")
+	if err := os.WriteFile(fixture, []byte(endpointNameFixture), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"go", "js"} {
+		stdout, stderr, code := runTestCLIDir(t, binary, root, "", "test", fixture, "--target", target)
+		var report endpointTestReport
+		if err := json.Unmarshal(stdout, &report); err != nil || code != 0 || !report.Passed || len(report.Tests) != 2 {
+			t.Fatalf("%s: code %d %v\nstdout=%s\nstderr=%s", target, code, err, stdout, stderr)
+		}
 	}
 }

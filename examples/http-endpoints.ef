@@ -159,7 +159,11 @@ fn status(reply: HttpReply) -> i64 {
     }
 }
 
-effect fn order(contentType: string, body: string) -> i64 raises { JsonEncodeFailure } uses { Http, Directory, Inventory, Ledger } {
+// Calling a route table directly keeps every mapped failure in its row: a
+// lone mapped failure is answered with its status, but a compound cause
+// (say, a handler failure beside an unobserved child's failure) propagates
+// complete, so the caller declares them. Http.listen absorbs them as 500.
+effect fn order(contentType: string, body: string) -> i64 raises { JsonEncodeFailure, NothingToCancel, OutOfStock, UnknownMember, Unpublishable } uses { Http, Directory, Inventory, Ledger } {
     let bytes = run Http.text(body)
     let request = HttpRequest {
         method: "POST",
@@ -170,24 +174,24 @@ effect fn order(contentType: string, body: string) -> i64 raises { JsonEncodeFai
     status(run api(request))
 }
 
-effect fn test_order_is_created() -> void raises { AssertionFailed, JsonEncodeFailure } uses { Assert } {
+effect fn test_order_is_created() -> void raises { AssertionFailed, JsonEncodeFailure, NothingToCancel, OutOfStock, UnknownMember, Unpublishable } uses { Assert } {
     let code = run order("application/json", "{\"member\":\"m-1\",\"item\":\"tea\",\"quantity\":\"2\"}").provide<Http>(LiveHttp).provide<Directory>(Members).provide<Inventory>(Stock).provide<Ledger>(Books)
     run Assert.check(code == 201, "a valid order is created")
 }
 
-effect fn test_unknown_member_is_not_malformed_input() -> void raises { AssertionFailed, JsonEncodeFailure } uses { Assert } {
+effect fn test_unknown_member_is_not_malformed_input() -> void raises { AssertionFailed, JsonEncodeFailure, NothingToCancel, OutOfStock, UnknownMember, Unpublishable } uses { Assert } {
     let unknown = run order("application/json", "{\"member\":\"m-9\",\"item\":\"tea\",\"quantity\":\"2\"}").provide<Http>(LiveHttp).provide<Directory>(Members).provide<Inventory>(Stock).provide<Ledger>(Books)
     let malformed = run order("application/json", "{\"member\":\"m-1\"}").provide<Http>(LiveHttp).provide<Directory>(Members).provide<Inventory>(Stock).provide<Ledger>(Books)
     run Assert.check(unknown == 422, "the decode transformation's failure answers its mapped status")
     run Assert.check(malformed == 400, "structurally malformed input answers 400")
 }
 
-effect fn test_handler_failure_answers_its_status() -> void raises { AssertionFailed, JsonEncodeFailure } uses { Assert } {
+effect fn test_handler_failure_answers_its_status() -> void raises { AssertionFailed, JsonEncodeFailure, NothingToCancel, OutOfStock, UnknownMember, Unpublishable } uses { Assert } {
     let code = run order("application/json", "{\"member\":\"m-1\",\"item\":\"tea\",\"quantity\":\"9\"}").provide<Http>(LiveHttp).provide<Directory>(Members).provide<Inventory>(Stock).provide<Ledger>(Books)
     run Assert.check(code == 409, "the handler's failure answers its mapped status")
 }
 
-effect fn test_unsupported_media_type() -> void raises { AssertionFailed, JsonEncodeFailure } uses { Assert } {
+effect fn test_unsupported_media_type() -> void raises { AssertionFailed, JsonEncodeFailure, NothingToCancel, OutOfStock, UnknownMember, Unpublishable } uses { Assert } {
     let code = run order("text/plain", "{}").provide<Http>(LiveHttp).provide<Directory>(Members).provide<Inventory>(Stock).provide<Ledger>(Books)
     run Assert.check(code == 415, "an endpoint with input requires JSON")
 }

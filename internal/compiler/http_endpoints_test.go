@@ -1,6 +1,8 @@
 package compiler
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -20,16 +22,18 @@ func endpointInspection(t *testing.T, r *Result, name string) EndpointInspection
 }
 
 // An endpoint's primary rows keep every service its input decoding, handler
-// and output encoding need, and only the terminal encoding failure: mapped
-// failures are answered. A route table's rows are the union of its
-// endpoints'. Inspection names each mapped failure's origins.
+// and output encoding need, the terminal encoding failure when it encodes a
+// body, and every mapped failure: a lone mapped failure is answered, but a
+// compound cause carrying one propagates complete. A route table's rows are
+// the union of its endpoints'. Inspection names each mapped failure's
+// origins.
 func TestEndpointRowsAndInspection(t *testing.T) {
 	r := exampleCompile(t, "http-endpoints.ef")
 	place := endpointInspection(t, r, "placeOrder")
 	if place.Kind != "endpoint" || place.Method != "POST" || place.Path != "/orders" || place.Status != 201 || place.Input != "orderJson" || place.Output != "receiptJson" {
 		t.Fatalf("placeOrder: %+v", place)
 	}
-	if !slices.Equal(place.Failures, []string{"JsonEncodeFailure"}) || !slices.Equal(place.Requirements, []string{"Directory", "Inventory", "Ledger"}) {
+	if !slices.Equal(place.Failures, []string{"JsonEncodeFailure", "OutOfStock", "UnknownMember", "Unpublishable"}) || !slices.Equal(place.Requirements, []string{"Directory", "Inventory", "Ledger"}) {
 		t.Fatalf("placeOrder rows: %v %v", place.Failures, place.Requirements)
 	}
 	if place.Terminal == nil || place.Terminal.Failure != "JsonEncodeFailure" || place.Terminal.Status != 500 || place.Malformed == nil || place.Malformed.Status != 400 || place.Malformed.UnsupportedType != 415 {
@@ -49,11 +53,11 @@ func TestEndpointRowsAndInspection(t *testing.T) {
 		}
 	}
 	cancel := endpointInspection(t, r, "cancelOrder")
-	if len(cancel.Failures) != 0 || cancel.Terminal != nil || cancel.Malformed != nil || len(cancel.Responses) != 1 || cancel.Responses[0].Body != "" {
+	if !slices.Equal(cancel.Failures, []string{"NothingToCancel"}) || cancel.Terminal != nil || cancel.Malformed != nil || len(cancel.Responses) != 1 || cancel.Responses[0].Body != "" {
 		t.Fatalf("an endpoint encoding no body has no terminal policy: %+v", cancel)
 	}
 	api := endpointInspection(t, r, "api")
-	if api.Kind != "routes" || !slices.Equal(api.Routes, []string{"placeOrder", "cancelOrder", "health"}) || !slices.Equal(api.Failures, []string{"JsonEncodeFailure"}) || !slices.Equal(api.Requirements, []string{"Directory", "Inventory", "Ledger"}) {
+	if api.Kind != "routes" || !slices.Equal(api.Routes, []string{"placeOrder", "cancelOrder", "health"}) || !slices.Equal(api.Failures, []string{"JsonEncodeFailure", "NothingToCancel", "OutOfStock", "UnknownMember", "Unpublishable"}) || !slices.Equal(api.Requirements, []string{"Directory", "Inventory", "Ledger"}) {
 		t.Fatalf("api: %+v", api)
 	}
 	failureWitnesses := 0
@@ -95,7 +99,7 @@ derive lookup = Http.endpoint(method: "POST", path: "/find", input: textJson, ha
 	if unused.Requires(RequiresHelper, endpointLoweringHelper) || len(unused.Identities(RequiresCodecPlan)) != 0 || unused.Requires(RequiresRuntimeModule, string(rt.RuntimeModuleCodec)) {
 		t.Fatalf("an unreachable endpoint retained work: %v %v", unused.Identities(RequiresHelper), unused.Identities(RequiresCodecPlan))
 	}
-	r, used := checkedApplicationPlan(t, source+"effect fn call() -> HttpReply raises { JsonEncodeFailure } uses { Http } {\n    let body = run Http.text(\"\\\"a\\\"\")\n    run lookup(HttpRequest { method: \"POST\", path: \"/find\", contentType: \"application/json\", body: body })\n}\neffect fn main() -> HttpReply raises { JsonEncodeFailure } {\n    run call().provide<Http>(LiveHttp)\n}\n", GoGenerationBuild)
+	r, used := checkedApplicationPlan(t, source+"effect fn call() -> HttpReply raises { JsonEncodeFailure, Missing } uses { Http } {\n    let body = run Http.text(\"\\\"a\\\"\")\n    run lookup(HttpRequest { method: \"POST\", path: \"/find\", contentType: \"application/json\", body: body })\n}\neffect fn main() -> HttpReply raises { JsonEncodeFailure, Missing } {\n    run call().provide<Http>(LiveHttp)\n}\n", GoGenerationBuild)
 	if !used.Requires(RequiresHelper, endpointLoweringHelper) || !used.Requires(RequiresRuntimeModule, string(rt.RuntimeModuleCodec)) || len(used.Identities(RequiresCodecPlan)) != 2 {
 		t.Fatalf("a reachable endpoint lacks work: %v %v", used.Identities(RequiresHelper), used.Identities(RequiresCodecPlan))
 	}
@@ -171,6 +175,13 @@ derive health = Http.endpoint(method: "GET", path: "/health", handler: ping, sta
 		{"parameterized path", `derive e = Http.endpoint(method: "GET", path: "/items/{id}", handler: ping, status: 204)`, "EF138", "must be an exact static path"},
 		{"relative path", `derive e = Http.endpoint(method: "GET", path: "health", handler: ping, status: 204)`, "EF138", "must be an exact static path"},
 		{"unknown handler", `derive e = Http.endpoint(method: "GET", path: "/health", handler: missing, status: 204)`, "EF102", "unknown function missing for endpoint e option handler"},
+		// An unknown or refused handler beside an input witness whose
+		// transformation raises an unmapped failure: the failure diagnostic
+		// names the input witness, the handler keeps its own diagnostic, and
+		// checking never needs the unresolved handler.
+		{"unknown handler with unmapped input failure", `derive e = Http.endpoint(method: "POST", path: "/take", input: itemJson, handler: missing, output: receiptJson, status: 201)`, "EF102", "unknown function missing for endpoint e option handler"},
+		{"unknown handler reports the input failure", `derive e = Http.endpoint(method: "POST", path: "/take", input: itemJson, handler: missing, output: receiptJson, status: 201)`, "EF107", "endpoint e does not map failure Unknown raised by its input witness itemJson"},
+		{"handler of the wrong kind with unmapped input failure", `derive e = Http.endpoint(method: "POST", path: "/take", input: itemJson, handler: "take", output: receiptJson, status: 201)`, "EF107", "endpoint e does not map failure Unknown raised by its input witness itemJson"},
 		{"unknown witness", `derive e = Http.endpoint(method: "POST", path: "/take", input: missingJson, handler: take, output: receiptJson, status: 201) raises { Busy: 503 }`, "EF102", "unknown codec witness missingJson"},
 		{"failure witness as input", `derive e = Http.endpoint(method: "POST", path: "/take", input: unknownJson, handler: take, output: receiptJson, status: 201) raises { Busy: 503 }`, "EF138", "input unknownJson is a failure witness"},
 		{"body witness of another failure", `derive e = Http.endpoint(method: "POST", path: "/take", input: itemJson, handler: take, output: receiptJson, status: 201) raises { Unknown: 404 busyJson, Busy: 503 }`, "EF138", "failure Unknown body busyJson must be a failure witness of Unknown"},
@@ -189,11 +200,15 @@ derive api = Http.routes(inner, take1)`, "EF138", "route table api entry inner i
 		{"endpoint name collides", `fn health() -> void {
 }
 derive health = Http.endpoint(method: "GET", path: "/health", handler: ping, status: 204)`, "EF101", "duplicate declaration health"},
-		{"transformation services stay required", good + `effect fn main() -> HttpReply raises { JsonEncodeFailure } uses { Http } {
+		{"transformation services stay required", good + `effect fn main() -> HttpReply raises { Busy, JsonEncodeFailure, Unknown } uses { Http } {
     let body = run Http.text("x")
     run take1(HttpRequest { method: "POST", path: "/take", contentType: "application/json", body: body })
 }`, "EF108", "missing service requirements: Directory"},
-		{"terminal encoding failure stays declared", good + `effect fn main() -> HttpReply uses { Http, Directory } {
+		{"mapped failures stay declared", good + `effect fn main() -> HttpReply raises { JsonEncodeFailure } uses { Http, Directory } {
+    let body = run Http.text("x")
+    run take1(HttpRequest { method: "POST", path: "/take", contentType: "application/json", body: body })
+}`, "EF107", "undeclared failures: Busy, Unknown"},
+		{"terminal encoding failure stays declared", good + `effect fn main() -> HttpReply raises { Busy, Unknown } uses { Http, Directory } {
     let body = run Http.text("x")
     run take1(HttpRequest { method: "POST", path: "/take", contentType: "application/json", body: body })
 }`, "EF107", "undeclared failures: JsonEncodeFailure"},
@@ -220,7 +235,7 @@ derive health = Http.endpoint(method: "GET", path: "/health", handler: ping, sta
 	if r := Compile(header + good + "derive api = Http.routes(take1, health)\n"); !r.Checked {
 		t.Fatalf("positive control: %v", r.Diagnostics)
 	}
-	if r := Compile(header + good + `effect fn main() -> HttpReply raises { JsonEncodeFailure } uses { Http, Directory } {
+	if r := Compile(header + good + `effect fn main() -> HttpReply raises { Busy, JsonEncodeFailure, Unknown } uses { Http, Directory } {
     let body = run Http.text("x")
     run take1(HttpRequest { method: "POST", path: "/take", contentType: "application/json", body: body })
 }
@@ -233,4 +248,85 @@ func TestEndpointDeclarationsFormat(t *testing.T) {
 	source := "fn ping() -> void {\n}\nderive health=Http.endpoint( method:\"GET\",path : \"/health\",handler:ping,status:204 )\nderive api = Http.routes( health )\n"
 	want := "fn ping() -> void {\n}\nderive health = Http.endpoint(method: \"GET\", path: \"/health\", handler: ping, status: 204)\nderive api = Http.routes(health)\n"
 	assertFormat(t, source, want)
+	// Endpoint and route-table declarations are a syntax admission, so the
+	// formatter identity that formats them is formatter-14.
+	if FormatterIdentity != "effra/formatter-14" {
+		t.Fatalf("formatter identity %s does not name the endpoint admission", FormatterIdentity)
+	}
+}
+
+// endpointCauseProbe calls one endpoint directly with a handler whose
+// service fails as the probe chooses: alone, or together with a second
+// mapped failure in one compound cause, as a handler scope closing over an
+// unobserved failed child produces.
+const endpointCauseProbe = `error First
+error Second
+service Work {
+    effect fn perform() -> void raises { First, Second }
+}
+effect fn handle() -> void raises { First, Second } uses { Work } {
+    run Work.perform()
+}
+derive work = Http.endpoint(method: "POST", path: "/work", handler: handle, status: 204) raises { First: 409, Second: 410 }
+effect fn main() -> void {
+    let probe = work
+}
+`
+
+// Calling an endpoint directly answers a lone mapped failure with its
+// status, and propagates a compound cause of mapped failures complete and
+// in order on both targets; the endpoint's row declares both failures.
+func TestEndpointDirectInvocationKeepsCompoundCauses(t *testing.T) {
+	r := Compile(endpointCauseProbe)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	if work := endpointInspection(t, r, "work"); !slices.Equal(work.Failures, []string{"First", "Second"}) {
+		t.Fatalf("a compound cause's mapped failures are undeclared: %v", work.Failures)
+	}
+	code, application, err := emitGoApplication(r, GoGenerationBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err = application.WriteRuntime(dir); err != nil {
+		t.Fatal(err)
+	}
+	probe := `package main
+import("testing"; er "effra.generated/runtime")
+func call(cause er.Cause)efExit[efType_HttpReply]{
+ work:=efService_Work{m_perform:func()efEffect[struct{}]{return func(efContext)efExit[struct{}]{return er.FromCause[struct{}](cause)}}}
+ request:=efType_HttpRequest{EfField_6_method:"POST",EfField_4_path:"/work"}
+ return er.Run(func(fc *er.FiberContext)er.Exit[efType_HttpReply]{return efFunction_work(request)(efContext{Runtime:fc,s_Work:&work})})
+}
+func TestCauses(t *testing.T){
+ first:=er.Reason{Kind:"failure",Failure:&er.Failure{Tag:"First"}}
+ second:=er.Reason{Kind:"failure",Failure:&er.Failure{Tag:"Second"}}
+ lone:=call(er.Cause{second})
+ reply,ok:=lone.Value.(efTypeV_9_HttpReply_7_Respond)
+ if lone.IsFailure()||!ok||reply.EfField_8_response.EfField_6_status!=410{t.Fatalf("lone mapped failure: %+v",lone)}
+ compound:=call(er.Cause{first,second}).Cause()
+ if len(compound)!=2||compound[0].Failure==nil||compound[0].Failure.Tag!="First"||compound[1].Failure==nil||compound[1].Failure.Tag!="Second"{t.Fatalf("compound cause: %+v",compound)}
+}
+`
+	for name, data := range map[string][]byte{"go.mod": r.ModuleFile(), "main.go": []byte(code), "main_test.go": []byte(probe)} {
+		if err = os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if output, err := runGoCommand(dir, "test", "."); err != nil {
+		t.Fatalf("Go endpoint causes: %v %s", err, output)
+	}
+	js := runJS(t, endpointCauseProbe, `
+const call = failures => Effect.runPromise(Effect.exit(Effect.provideService(__ef_function_work({ method: "POST", path: "/work", contentType: "", body: new Uint8Array(0) }), __ef_service_Work, { perform: () => Effect.failCause(failures.map(tag => Cause.fail({ _tag: tag })).reduce(Cause.combine)) })));
+const lone = await call(["Second"]);
+if (lone._tag !== "Success" || lone.value.response.status !== 410n) throw new Error("lone mapped failure " + JSON.stringify(lone));
+const compound = await call(["First", "Second"]);
+const tags = compound._tag === "Failure" ? compound.cause.reasons.map(reason => reason._tag + ":" + reason.error?._tag) : [];
+if (tags.join(",") !== "Fail:First,Fail:Second") throw new Error("compound cause " + tags);
+console.log("endpoint causes");
+`)
+	if js != "endpoint causes\n" {
+		t.Fatalf("JS endpoint causes: %s", js)
+	}
 }

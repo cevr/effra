@@ -7,7 +7,7 @@ const __ef_endpointRespond = (status, body) => Effect.succeed({ _tag: "HttpReply
 const __ef_endpointOnly = (cause, tag) => cause.reasons.length === 1 && cause.reasons[0]._tag === "Fail" && cause.reasons[0].error?._tag === tag;
 const __ef_endpointFailed = (cause, failures) => {
   const failure = cause.reasons.length === 1 && cause.reasons[0]._tag === "Fail" ? cause.reasons[0].error : undefined;
-  const mapped = failure !== undefined && Object.hasOwn(failures, failure._tag) ? failures[failure._tag] : undefined;
+  const mapped = failure === undefined ? undefined : failures.get(failure._tag);
   if (mapped === undefined) return Effect.failCause(cause);
   if (mapped.encode === undefined) return __ef_endpointRespond(mapped.status);
   return Effect.flatMap(Effect.exit(mapped.encode(failure)), exit => Exit.isSuccess(exit) ? __ef_endpointRespond(mapped.status, exit.value) : Effect.failCause(Cause.combine(exit.cause, cause)));
@@ -29,5 +29,6 @@ const __ef_endpoint = (request, method, path, decode, handler, encode, status, f
 });
 const __ef_routes = (request, table) => Effect.suspend(() => {
   const key = request.method + " " + request.path;
-  return Object.hasOwn(table, key) ? table[key](request) : Effect.succeed({ _tag: "HttpReply.NotFound" });
+  const route = table.get(key);
+  return route === undefined ? Effect.succeed({ _tag: "HttpReply.NotFound" }) : route(request);
 });
