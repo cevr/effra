@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/receipt"
 	rt "effra.local/prototype/runtime/effra"
 )
 
@@ -43,32 +45,32 @@ var sizeFixtures = []sizeFixture{
 }
 
 type builtSize struct {
-	native ApplicationReceipt
-	js     ApplicationReceipt
+	native receipt.Application
+	js     receipt.Application
 	module []byte
 }
 
-func readReceipt(t *testing.T, path string) ApplicationReceipt {
+func readReceipt(t *testing.T, path string) receipt.Application {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var receipt ApplicationReceipt
+	var measured receipt.Application
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&receipt); err != nil {
+	if err := decoder.Decode(&measured); err != nil {
 		t.Fatalf("%s: %v", path, err)
 	}
-	if receipt.Schema != applicationReceiptSchema {
-		t.Fatalf("%s: schema %q", path, receipt.Schema)
+	if measured.Schema != receipt.Schema {
+		t.Fatalf("%s: schema %q", path, measured.Schema)
 	}
-	return receipt
+	return measured
 }
 
-func symbolPackages(receipt ApplicationReceipt) map[string]receiptSymbolsPackage {
-	packages := map[string]receiptSymbolsPackage{}
-	for _, entry := range receipt.Symbols.Packages {
+func symbolPackages(measured receipt.Application) map[string]receipt.SymbolPackage {
+	packages := map[string]receipt.SymbolPackage{}
+	for _, entry := range measured.Symbols.Packages {
 		packages[entry.Package] = entry
 	}
 	return packages
@@ -119,16 +121,16 @@ func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
 		row := builtSize{native: readReceipt(t, native), js: readReceipt(t, module), module: emitted}
 		built[fixture.name] = row
 
-		receipt := row.native
-		if !slices.Equal(receipt.Plan.RuntimeModules, fixture.modules) {
-			t.Errorf("%s: runtime modules = %v, want %v", fixture.name, receipt.Plan.RuntimeModules, fixture.modules)
+		measured := row.native
+		if !slices.Equal(measured.Plan.RuntimeModules, fixture.modules) {
+			t.Errorf("%s: runtime modules = %v, want %v", fixture.name, measured.Plan.RuntimeModules, fixture.modules)
 		}
 		selected, err := rt.SelectSources(fixture.modules...)
 		if err != nil {
 			t.Fatal(err)
 		}
 		runtimeFiles := []string{}
-		for _, file := range receipt.Generation.Files {
+		for _, file := range measured.Generation.Files {
 			if name, found := strings.CutPrefix(file.Path, "runtime/"); found {
 				runtimeFiles = append(runtimeFiles, name)
 				if file.Bytes != len(selected[name]) {
@@ -139,15 +141,15 @@ func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
 		if len(runtimeFiles) != len(selected) {
 			t.Errorf("%s: generated runtime files %v, want the selected %d", fixture.name, runtimeFiles, len(selected))
 		}
-		if receipt.Compiler.RuntimeSourceBytes <= receipt.Generation.RuntimeBytes && fixture.name != "http" {
-			t.Errorf("%s: application runtime %d bytes is not smaller than the distributed runtime %d", fixture.name, receipt.Generation.RuntimeBytes, receipt.Compiler.RuntimeSourceBytes)
+		if measured.Compiler.RuntimeSourceBytes <= measured.Generation.RuntimeBytes && fixture.name != "http" {
+			t.Errorf("%s: application runtime %d bytes is not smaller than the distributed runtime %d", fixture.name, measured.Generation.RuntimeBytes, measured.Compiler.RuntimeSourceBytes)
 		}
-		if info, err := os.Stat(executable); err != nil || info.Size() != receipt.Binary.Bytes {
-			t.Errorf("%s: receipt binary bytes %d do not match the executable (%v)", fixture.name, receipt.Binary.Bytes, err)
+		if info, err := os.Stat(executable); err != nil || info.Size() != measured.Binary.Bytes {
+			t.Errorf("%s: receipt binary bytes %d do not match the executable (%v)", fixture.name, measured.Binary.Bytes, err)
 		}
-		symbols := symbolPackages(receipt)
+		symbols := symbolPackages(measured)
 		for _, name := range fixture.absent {
-			if slices.Contains(receipt.Deps.Transitive, name) {
+			if slices.Contains(measured.Deps.Transitive, name) {
 				t.Errorf("%s: depends on %s", fixture.name, name)
 			}
 			if _, found := symbols[name]; found {
@@ -155,15 +157,15 @@ func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
 			}
 		}
 		for _, name := range fixture.present {
-			if !slices.Contains(receipt.Deps.Transitive, name) {
+			if !slices.Contains(measured.Deps.Transitive, name) {
 				t.Errorf("%s: does not depend on %s", fixture.name, name)
 			}
 			if _, found := symbols[name]; !found {
 				t.Errorf("%s: executable has no %s symbols", fixture.name, name)
 			}
 		}
-		if len(receipt.Deps.NonStandard) != 2 || receipt.Deps.NonStandard[0] != "effra.generated" || receipt.Deps.NonStandard[1] != "effra.generated/runtime" {
-			t.Errorf("%s: non-standard dependencies %v", fixture.name, receipt.Deps.NonStandard)
+		if len(measured.Deps.NonStandard) != 2 || measured.Deps.NonStandard[0] != "effra.generated" || measured.Deps.NonStandard[1] != "effra.generated/runtime" {
+			t.Errorf("%s: non-standard dependencies %v", fixture.name, measured.Deps.NonStandard)
 		}
 
 		js := row.js
@@ -173,7 +175,7 @@ func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
 		if len(js.External) == 0 || js.External[0].Specifier != "effect" || js.External[0].Dynamic {
 			t.Errorf("%s: js external runtime %+v does not name effect statically", fixture.name, js.External)
 		}
-		hostHTTP := slices.ContainsFunc(js.External, func(link receiptExternalLink) bool { return link.Specifier == "node:http" && link.Dynamic })
+		hostHTTP := slices.ContainsFunc(js.External, func(link compiler.JSImport) bool { return link.Specifier == "node:http" && link.Dynamic })
 		if hostHTTP != (fixture.name == "http") {
 			t.Errorf("%s: js node:http link = %v: %+v", fixture.name, hostHTTP, js.External)
 		}
@@ -199,8 +201,8 @@ func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
 	// executable size natively, and an identical module in JavaScript.
 	for _, pair := range [][2]string{{"minimal", "minimal-unused"}, {"direct", "pipe"}} {
 		a, b := built[pair[0]], built[pair[1]]
-		runtimeOnly := func(files []receiptFile) []receiptFile {
-			return slices.DeleteFunc(slices.Clone(files), func(file receiptFile) bool { return !strings.HasPrefix(file.Path, "runtime/") })
+		runtimeOnly := func(files []receipt.File) []receipt.File {
+			return slices.DeleteFunc(slices.Clone(files), func(file receipt.File) bool { return !strings.HasPrefix(file.Path, "runtime/") })
 		}
 		if !slices.Equal(runtimeOnly(a.native.Generation.Files), runtimeOnly(b.native.Generation.Files)) {
 			t.Errorf("%s/%s: generated runtime differs", pair[0], pair[1])

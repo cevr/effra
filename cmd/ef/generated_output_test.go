@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/receipt"
 	rt "effra.local/prototype/runtime/effra"
 )
 
@@ -298,7 +299,7 @@ func TestNativeGoBuildRejectsModuleMutationDespiteInheritedFlags(t *testing.T) {
 	t.Setenv("GOFLAGS", "-mod=mod")
 	before := generationFileStates(t, root)
 	output := filepath.Join(t.TempDir(), "program")
-	child := nativeGoBuildCommand(root, output)
+	child := receipt.GoBuildCommand(root, output, ".")
 	if data, err := child.CombinedOutput(); err == nil || !strings.Contains(string(data), "replaced but not required") {
 		t.Fatalf("native child admitted a missing module requirement: err=%v output=%s", err, data)
 	}

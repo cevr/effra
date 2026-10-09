@@ -19,6 +19,7 @@ import (
 	"effra.local/prototype/internal/lsp"
 	"effra.local/prototype/internal/mcp"
 	"effra.local/prototype/internal/producer"
+	"effra.local/prototype/internal/receipt"
 	sourcefile "effra.local/prototype/internal/source"
 )
 
@@ -255,6 +256,9 @@ func parseOptions(args []string) (options, error) {
 			} else if flag == "--revision" {
 				opts.typeSelection.ExpectedRevision = args[i]
 			} else if flag == "--receipt" {
+				if args[i] == "" {
+					return opts, fmt.Errorf("--receipt requires a non-empty path")
+				}
 				opts.receipt = args[i]
 			} else if flag == "--offset" {
 				n, err := strconv.Atoi(args[i])
@@ -612,11 +616,16 @@ func command(args []string) error {
 		return runTests(r, opts.positional[0], sourceOrigin, opts.timeoutMillis)
 	case "build", "run":
 		var path string
-		var receipt *ApplicationReceipt
+		var measured *receipt.Application
+		if opts.receipt != "" {
+			if err := checkReceiptPath(opts); err != nil {
+				return err
+			}
+		}
 		if opts.target == "go" {
-			path, receipt, err = buildGo(r, opts.positional[0], sourceOrigin, opts.output, opts.receipt != "")
+			path, measured, err = buildGo(r, opts.positional[0], sourceOrigin, opts.output, opts.receipt != "")
 		} else {
-			path, receipt, err = buildJS(r, opts.positional[0], opts.output, opts.entry || args[0] == "run", opts.receipt != "")
+			path, measured, err = buildJS(r, opts.positional[0], opts.output, opts.entry || args[0] == "run", opts.receipt != "")
 		}
 		if err != nil {
 			if !r.Checked {
@@ -625,8 +634,8 @@ func command(args []string) error {
 			return err
 		}
 		if args[0] == "build" {
-			if receipt != nil {
-				if err := writeReceipt(opts.receipt, receipt); err != nil {
+			if measured != nil {
+				if err := receipt.Write(opts.receipt, measured); err != nil {
 					return err
 				}
 			}
@@ -682,9 +691,42 @@ func sourceBase(source string) string {
 	return strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
 }
 
+// goOutputPath is the executable a native build writes.
+func goOutputPath(source, output string) string {
+	if output == "" {
+		return filepath.Join("dist", sourceBase(source))
+	}
+	return output
+}
+
+// jsOutputPaths are the module and declaration file a JavaScript build writes.
+func jsOutputPaths(source, output string) (string, string) {
+	if output == "" {
+		output = filepath.Join("dist", sourceBase(source)+".mjs")
+	}
+	return output, strings.TrimSuffix(output, ".mjs") + ".d.mts"
+}
+
+// checkReceiptPath refuses, before anything is built, a receipt path that
+// would replace the build's source or one of its artifacts, or that lies in
+// the managed generated-module tree.
+func checkReceiptPath(opts options) error {
+	source := opts.positional[0]
+	protected := []string{source}
+	managed := []string{}
+	if opts.target == "go" {
+		protected = append(protected, goOutputPath(source, opts.output))
+		managed = append(managed, goApplicationsRoot)
+	} else {
+		module, declaration := jsOutputPaths(source, opts.output)
+		protected = append(protected, module, declaration)
+	}
+	return receipt.CheckPath(opts.receipt, protected, managed)
+}
+
 // buildGo builds the ordinary native application. With measure, it also
 // returns the application receipt of the published generation and executable.
-func buildGo(r *compiler.Result, source, origin, output string, measure bool) (string, *ApplicationReceipt, error) {
+func buildGo(r *compiler.Result, source, origin, output string, measure bool) (string, *receipt.Application, error) {
 	application, err := goApplication(r, compiler.GoGenerationBuild)
 	if err != nil {
 		return "", nil, err
@@ -693,11 +735,11 @@ func buildGo(r *compiler.Result, source, origin, output string, measure bool) (s
 	if err != nil || !measure {
 		return path, nil, err
 	}
-	receipt, err := goReceipt(r, source, application, generation, path)
+	measured, err := receipt.Native(r, source, application, generation, path)
 	if err != nil {
 		return "", nil, fmt.Errorf("receipt: %w", err)
 	}
-	return path, receipt, nil
+	return path, measured, nil
 }
 
 // goApplication plans and lowers one native entry mode. A plan refusal is a
@@ -716,13 +758,11 @@ func buildGoApplication(r *compiler.Result, source, origin, output string, appli
 	if err != nil {
 		return "", compiler.GoGeneration{}, err
 	}
-	generation, err := compiler.PublishGoSourceSnapshot(filepath.Join("dist", "go", "apps"), snapshot)
+	generation, err := compiler.PublishGoSourceSnapshot(goApplicationsRoot, snapshot)
 	if err != nil {
 		return "", compiler.GoGeneration{}, err
 	}
-	if output == "" {
-		output = filepath.Join("dist", sourceBase(source))
-	}
+	output = goOutputPath(source, output)
 	absolute, err := filepath.Abs(output)
 	if err != nil {
 		return "", compiler.GoGeneration{}, err
@@ -731,7 +771,7 @@ func buildGoApplication(r *compiler.Result, source, origin, output string, appli
 		return "", compiler.GoGeneration{}, err
 	}
 	// Imported packages use the resolved module graph; the executable is standalone.
-	child := nativeGoBuildCommand(generation.Directory, absolute)
+	child := receipt.GoBuildCommand(generation.Directory, absolute, ".")
 	child.Stdout = os.Stderr
 	child.Stderr = os.Stderr
 	if err = child.Run(); err != nil {
@@ -740,34 +780,27 @@ func buildGoApplication(r *compiler.Result, source, origin, output string, appli
 	return output, generation, nil
 }
 
-func nativeGoBuildCommand(directory, output string) *exec.Cmd {
-	child := exec.Command("go", "build", "-trimpath", "-mod=readonly", "-o", output, ".")
-	child.Dir = directory
-	child.Env = replaceEnv(os.Environ(), "GOWORK", "off")
-	return child
-}
+// goApplicationsRoot is the managed tree of published generated modules.
+var goApplicationsRoot = filepath.Join("dist", "go", "apps")
 
 // buildJS writes the JavaScript module and its declarations. With measure, it
 // also returns the application receipt of the written module.
-func buildJS(r *compiler.Result, source, output string, entry, measure bool) (string, *ApplicationReceipt, error) {
-	js, decl, err := r.Emit(entry)
+func buildJS(r *compiler.Result, source, output string, entry, measure bool) (string, *receipt.Application, error) {
+	module, err := r.EmitModule(entry)
 	if err != nil {
 		return "", nil, err
 	}
-	if output == "" {
-		output = filepath.Join("dist", sourceBase(source)+".mjs")
-	}
+	output, declaration := jsOutputPaths(source, output)
 	if filepath.Ext(output) != ".mjs" {
 		return "", nil, fmt.Errorf("JavaScript output must have .mjs extension")
 	}
 	if err = os.MkdirAll(filepath.Dir(output), 0755); err != nil {
 		return "", nil, err
 	}
-	if err = writeChanged(output, []byte(js)); err != nil {
+	if err = writeChanged(output, []byte(module.Source)); err != nil {
 		return "", nil, err
 	}
-	declaration := strings.TrimSuffix(output, ".mjs") + ".d.mts"
-	if err = writeChanged(declaration, []byte(decl)); err != nil {
+	if err = writeChanged(declaration, []byte(module.Declaration)); err != nil {
 		return "", nil, err
 	}
 	if !measure {
@@ -777,11 +810,11 @@ func buildJS(r *compiler.Result, source, output string, entry, measure bool) (st
 	if entry {
 		mode = "entry"
 	}
-	receipt, err := jsReceipt(r, source, mode, output, declaration)
+	measured, err := receipt.JavaScript(r, source, mode, module, output, declaration)
 	if err != nil {
 		return "", nil, fmt.Errorf("receipt: %w", err)
 	}
-	return output, receipt, nil
+	return output, measured, nil
 }
 func writeChanged(path string, content []byte) error {
 	old, err := os.ReadFile(path)
