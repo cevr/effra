@@ -116,6 +116,7 @@ Foundation integration update (2026-10-06; `a9da03a`): bounded File/Fiber proven
 - Local fixtures and scratch artifacts are the default for live checks. Paid services, deployment, and production data are outside routine checks (drafted 2026-10-05).
 - Continue the authorized Wayfinder and architecture-loop work autonomously, extending finite implementation specs with evidence-backed ergonomic, guarantee and performance improvements (owner, 2026-10-06). Follow the standing principles before a genuine question; reversible implementation choices do not require a checkpoint.
 - Use pinned Effect source and its licensed test corpus, plus real usage, to guide the bundled library (owner, 2026-10-06). Public examples and application-pattern notes stay generic. Agent roles, models and independent review are set only in [AGENTS.md](AGENTS.md).
+- Compare Elixir (with Erlang/OTP) and MoonBit alongside Go, TypeScript/Effect, Gleam and ReScript in every language decision where they have a relevant construct; [PRIOR_ARTS.md](PRIOR_ARTS.md#standing-comparison-languages-elixir-with-erlangotp-and-moonbit-2026-10-09) holds the pinned rows (owner, 2026-10-07, 2026-10-08 and 2026-10-09).
 
 ## Sweeps
 
