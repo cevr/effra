@@ -51,6 +51,10 @@ type providerBinding struct {
 const maxGraphNodes = 1000
 const maxGraphEdges = 2000
 
+// GraphSchemaVersion identifies the legacy dependency graph JSON contract.
+// It advances independently from SemanticSchemaVersion.
+const GraphSchemaVersion = 7
+
 // dependencyContract is the unprojected contract of one dependency fact.
 // Projection is the expensive, budgeted part of publication, so the walker
 // hands it to its sink instead of projecting every fact it visits.
@@ -360,7 +364,7 @@ func (r *Result) Graph() (*DependencyGraph, error) {
 	if len(r.checkedServices)+len(r.checkedProviders)+len(r.Symbols) > maxGraphNodes {
 		return nil, fmt.Errorf("dependency graph exceeds %d nodes; use selected inspection", maxGraphNodes)
 	}
-	g := &DependencyGraph{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Nodes: []GraphNode{}, Edges: []GraphEdge{}, Limitations: []string{"single-file static graph; includes deferred recipe construction, not execution order", "checked static layers share selected nodes within each provision; ordinary provider recipes have explicit value identities without general memoized acquisition", "source layer effect factories, startup effects and dynamic plans are unsupported", "node IDs containing offsets are scoped to the semantic revision"}}
+	g := &DependencyGraph{SchemaVersion: GraphSchemaVersion, Revision: r.Revision, Target: r.Target, Nodes: []GraphNode{}, Edges: []GraphEdge{}, Limitations: []string{"single-file static graph; includes deferred recipe construction, not execution order", "checked static layers share selected nodes within each provision; ordinary provider recipes have explicit value identities without general memoized acquisition", "source layer effect factories, startup effects and dynamic plans are unsupported", "node IDs containing offsets are scoped to the semantic revision"}}
 	g.ProducerIdentity, g.Sources = r.ProducerIdentity, append([]SourceInfo{}, r.Sources...)
 	g.ProducerMetadata = r.producerMetadata
 	g.BundledBindings = append([]BundledBinding{}, r.BundledBindings...)

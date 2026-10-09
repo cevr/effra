@@ -50,6 +50,25 @@ func legacyGraphBytes(t *testing.T, source, dir, target string) []byte {
 	return encoded.Bytes()
 }
 
+func TestLegacyGraphSchemaVersionIsIndependentOfSemanticResult(t *testing.T) {
+	result := Compile(`fn identity(value: string) -> string { value }`)
+	if !result.Checked {
+		t.Fatalf("fixture is not checked: %v", result.Diagnostics)
+	}
+
+	result.SchemaVersion++
+	graph, err := result.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.SchemaVersion != GraphSchemaVersion {
+		t.Fatalf("legacy graph schema followed semantic result schema: got %d, want graph schema %d", graph.SchemaVersion, GraphSchemaVersion)
+	}
+	if graph.SchemaVersion == result.SchemaVersion {
+		t.Fatalf("fixture did not separate graph and semantic result schemas: graph %d, semantic %d", graph.SchemaVersion, result.SchemaVersion)
+	}
+}
+
 func TestLegacyGraphJSONGolden(t *testing.T) {
 	for _, fixture := range legacyGraphFixtures {
 		for _, target := range []string{"go", "js"} {
