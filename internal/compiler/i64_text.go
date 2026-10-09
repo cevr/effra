@@ -74,7 +74,11 @@ func (c *checker) intrinsicOperation(e *Expr, env localEnv) checkedExpression {
 // Both need strconv, which the generated main imports only then.
 var goI64TextHelpers = []struct{ name, source string }{
 	{i64FormatOp, "func efI64Format(value int64)string{return strconv.FormatInt(value,10)}\n"},
-	{i64ParseOp, `func efI64Parse(text string)efExit[int64]{digits:=text;if len(digits)>0&&(digits[0]=='+'||digits[0]=='-'){digits=digits[1:]};if digits==""{return er.Fail[int64](` + quotedGo(i64ParseFailure) + `,` + quotedGo(i64SyntaxMessage) + `)};for index:=0;index<len(digits);index++{if digits[index]<'0'||digits[index]>'9'{return er.Fail[int64](` + quotedGo(i64ParseFailure) + `,` + quotedGo(i64SyntaxMessage) + `)}};value,err:=strconv.ParseInt(text,10,64);if err!=nil{return er.Fail[int64](` + quotedGo(i64ParseFailure) + `,` + quotedGo(i64RangeMessage) + `)};return er.Succeed(value)}
+	// efI64Parse classifies syntax, then decides range on the decimal text,
+	// so it reads its input once and allocates nothing proportional to it
+	// (strconv's NumError would copy the whole input). ParseUint then sees
+	// at most 19 digits and cannot fail; the minimum wraps on negation.
+	{i64ParseOp, `func efI64Parse(text string)efExit[int64]{digits,negative:=text,false;if len(digits)>0&&(digits[0]=='+'||digits[0]=='-'){negative=digits[0]=='-';digits=digits[1:]};if digits==""{return er.Fail[int64](` + quotedGo(i64ParseFailure) + `,` + quotedGo(i64SyntaxMessage) + `)};for index:=0;index<len(digits);index++{if digits[index]<'0'||digits[index]>'9'{return er.Fail[int64](` + quotedGo(i64ParseFailure) + `,` + quotedGo(i64SyntaxMessage) + `)}};for len(digits)>1&&digits[0]=='0'{digits=digits[1:]};limit:="9223372036854775807";if negative{limit="9223372036854775808"};if len(digits)>len(limit)||(len(digits)==len(limit)&&digits>limit){return er.Fail[int64](` + quotedGo(i64ParseFailure) + `,` + quotedGo(i64RangeMessage) + `)};magnitude,_:=strconv.ParseUint(digits,10,64);value:=int64(magnitude);if negative{value=-value};return er.Succeed(value)}
 `},
 }
 
@@ -101,10 +105,17 @@ func (g *goEmitter) intrinsicOperation(e *Expr, ret string, out *strings.Builder
 
 const jsI64FormatHelper = "const __ef_i64Format = value => String(value);\n"
 
+// jsI64ParseHelper decides range on the decimal text itself and calls
+// BigInt only on at most 20 characters. BigInt over unbounded text is
+// super-linear and engine-limited (a thrown RangeError would become a
+// defect), while Go's ParseInt stops at the first overflowing digit.
 const jsI64ParseHelper = `const __ef_i64Parse = text => Effect.suspend(() => {
   if (!/^[+-]?[0-9]+$/.test(text)) return Effect.fail({ _tag: "` + i64ParseFailure + `", message: "` + i64SyntaxMessage + `" });
-  const value = BigInt(text);
-  return value < -9223372036854775808n || value > 9223372036854775807n ? Effect.fail({ _tag: "` + i64ParseFailure + `", message: "` + i64RangeMessage + `" }) : Effect.succeed(value);
+  const negative = text.charCodeAt(0) === 45;
+  const digits = text.replace(/^[+-]?0*/, "");
+  const limit = negative ? "9223372036854775808" : "9223372036854775807";
+  if (digits.length > limit.length || (digits.length === limit.length && digits > limit)) return Effect.fail({ _tag: "` + i64ParseFailure + `", message: "` + i64RangeMessage + `" });
+  return Effect.succeed(BigInt((negative ? "-" : "") + (digits === "" ? "0" : digits)));
 });
 `
 

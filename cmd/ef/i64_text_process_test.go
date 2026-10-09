@@ -41,6 +41,14 @@ var i64TextVectors = []struct{ text, formatted, failure string }{
 	{"1_000", "", "invalid i64 syntax"},
 	{"1e3", "", "invalid i64 syntax"},
 	{"١", "", "invalid i64 syntax"},
+	// Unbounded input: range is decided on the text, never by building a
+	// host big integer from it, and syntax still wins over range.
+	{strings.Repeat("9", 400000), "", "i64 out of range"},
+	{"-" + strings.Repeat("9", 400000), "", "i64 out of range"},
+	{strings.Repeat("9", 400000) + "x", "", "invalid i64 syntax"},
+	{strings.Repeat("0", 400000) + "42", "42", ""},
+	{"-" + strings.Repeat("0", 400000) + "9223372036854775808", "-9223372036854775808", ""},
+	{"+" + strings.Repeat("0", 400000) + "9223372036854775808", "", "i64 out of range"},
 }
 
 func TestI64TextConversionsMatchAcrossGoAndJS(t *testing.T) {
@@ -104,12 +112,12 @@ func TestI64TextConversionsMatchAcrossGoAndJS(t *testing.T) {
 		got := reports["go"][fmt.Sprintf("test_parse_%d", index)]
 		if vector.failure == "" {
 			if !got.Passed {
-				t.Errorf("parse %q: want %s, got %+v", vector.text, vector.formatted, got)
+				t.Errorf("parse %.40q: want %s, got %+v", vector.text, vector.formatted, got)
 			}
 			continue
 		}
 		if want := []reason{{Kind: "failure", Tag: "I64ParseFailure", Message: vector.failure}}; got.Passed || !reflect.DeepEqual(got.Reasons, want) {
-			t.Errorf("parse %q: want %+v, got %+v", vector.text, want, got)
+			t.Errorf("parse %.40q: want %+v, got %+v", vector.text, want, got)
 		}
 	}
 	for index := range 5 {

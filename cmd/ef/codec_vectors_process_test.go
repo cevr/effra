@@ -85,7 +85,9 @@ func codecVectorValue(plan string, raw json.RawMessage) (string, bool) {
 		return "void", ok
 	case "integer":
 		digits, ok := object["$i64"].(string)
-		return digits, ok && !strings.HasPrefix(digits, "-")
+		// A negative value, the minimum included, is a unary minus over its
+		// magnitude literal.
+		return digits, ok
 	case "label":
 		name, ok := text(object["name"])
 		return "Label { name: " + name + " }", ok
@@ -164,8 +166,7 @@ func TestDerivedCodecPolicyVectorsMatchAcrossGoAndJS(t *testing.T) {
 		source.WriteString("    let value = " + input + "\n    let encoded = run " + vector.Plan + "Json.encode(value)\n    run Assert.equalText(encoded, " + string(encoded) + ")\n}\n")
 		expected[test] = vector
 	}
-	// Negative i64 values have no source literal; decode vectors cover them.
-	if want := []string{"encode.order-and-tag", "encode.i64-min"}; !reflect.DeepEqual(unspelled, want) || len(expected) < 80 {
+	if want := []string{"encode.order-and-tag"}; !reflect.DeepEqual(unspelled, want) || len(expected) < 80 {
 		t.Fatalf("selected %d vectors; unspelled %v", len(expected), unspelled)
 	}
 	path := filepath.Join(root, "vectors.ef")
