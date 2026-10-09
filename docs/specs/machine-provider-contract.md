@@ -57,6 +57,9 @@ A provider receives two layers. Neither layer gives access to the compiler.
 
 ### Why explicit parameters, and who writes them
 
+The decision a step returns is a closed protocol that every provider matches as data and never extends. Today it is the bundled `Step` enum; the owner has directed that it become syntax. [How `Step` is recognised](state-machines.md#how-step-is-recognised) records the current implementation, that direction, and where provider-specific behaviour goes.
+
+
 Provider code is generic library code. It must preserve each machine's rows without whole-program inference, so it takes the finite type and row parameters that the [language abstraction contract](language-abstractions.md) already provides, and solves them from the plan argument at a direct call. Authors of machines and their callers never write those parameters. The declaration name, used where a `Plan` is expected, lowers to its plan value, just as a function name is a function value. Until lowering lands, that use is EF141 rather than a passthrough. `Actor<Session>` stays the caller-facing handle that names the declaration (#11). This separates two jobs. The spike's six-argument structural handle was rejected as a caller's type, and it survives only as the provider's internal signature.
 
 A provider is an ordinary service, so it is selected and provided like any other:

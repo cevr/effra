@@ -195,6 +195,13 @@ Prior art for the decisions here:
 | `event_timeout` (cancelled by any event), `state_timeout` (cancelled by a state change), generic time-outs | Not supported as syntax; timed work belongs to entry work | An entry-owned timer is cancelled when its entry ends. That matches `state_timeout`, except that a same-tag `Go` also restarts it |
 | Next state chosen by returning a term; the engine has no static plan | Checked plan with possible transitions | Inspection has no `gen_statem` counterpart; `sys:get_state` is a runtime snapshot |
 
+### How `Step` is recognised
+
+- *Current implementation (#46).* `Step` is a bundled enum ([`bundled/machines/step.ef`](../../internal/compiler/bundled/machines/step.ef)). The parser knows only the `machine` declaration form, and the checker recognises `Step` by its bundled template identity (`template:effra/machines:module:Step`).
+- *Owner direction (2026-10-09).* Checker-known constructs should be syntax, not special-cased library items, and recognising `Step` by template identity is such a special case. The statecharts design lane (`docs/research/statecharts-composition-and-evidence.md`, landing separately) will propose decision syntax to replace it, for example `go`, `stay`, `ignore`, `reject` and `done` forms. The plan and provider contract keep receiving typed decision data.
+- *Closed protocol either way.* The decisions are a closed set between the checker and every provider, so transitions are provable and every provider agrees on their meaning. Providers match the decisions as data and never extend them, the way `gen_statem` interprets ordinary return tuples at runtime (`state_callback_result`, `lib/stdlib/src/gen_statem.erl` at OTP `516126e9`; Elixir calls the same `:gen_statem`). Provider-specific behaviour, such as `postpone` or `state_timeout` and `event_timeout` (refused today with EF002), goes through services in the step's `uses` row or through `Output`. A new core decision is a versioned language change.
+- *Rejected: an open, user-defined decision set.* Each provider would then decide what a decision means, losing the static `Stay` check, the canonical plan and portability across providers. That is the free-monad interpreter model of Scala and Haskell, where the interpreter, not the checker, owns meaning. [Users write their own runtimes](machine-provider-contract.md) as providers over the closed set.
+
 ## Acceptance and delivery
 
 1. Land reviewed lifetime/scheduler foundations and ordinary function/row/generic data mechanisms. No opaque callback shortcut. Keep plan lowering, provider selection and provider execution as ordinary typed boundaries.
