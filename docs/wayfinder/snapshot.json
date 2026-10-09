@@ -1,0 +1,1455 @@
+{
+  "issues": [
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "69ef6b2cc78ddc35b6e56d8c56ef2175e7751eab8a8d5943a589ebe3872f04a5",
+      "labels": [
+        "wayfinder:map"
+      ],
+      "number": 1,
+      "parent": null,
+      "state": "open",
+      "stateReason": null,
+      "title": "Effra language, runtimes, and interoperability map",
+      "updatedAt": "2026-10-09T15:12:06Z",
+      "url": "https://github.com/cevr/effra/issues/1"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "a2f4256bbc7aa5bb43d39648172679c97269e725446249f42b0039298eb0c4d0",
+      "labels": [
+        "implementation:spec",
+        "wayfinder:task"
+      ],
+      "number": 2,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Checked machines and machine-backed actors",
+      "updatedAt": "2026-10-08T18:41:39Z",
+      "url": "https://github.com/cevr/effra/issues/2"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        46
+      ],
+      "bodySha256": "4f4aa408314bb01ffd3e800792fa2320c03633fa7ef2a6729b91c8e84bf3e14f",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 3,
+      "parent": 2,
+      "state": "open",
+      "stateReason": null,
+      "title": "Runtime-independent machine plans and userland provider contract",
+      "updatedAt": "2026-10-09T15:49:04Z",
+      "url": "https://github.com/cevr/effra/issues/3"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        3,
+        47
+      ],
+      "bodySha256": "47d31aebd5a58fb181d0a67d2af629dff106f0bec12bf530ae76f12b1281576c",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 4,
+      "parent": 2,
+      "state": "open",
+      "stateReason": null,
+      "title": "Machine execution across independent userland runtime providers",
+      "updatedAt": "2026-10-09T15:49:06Z",
+      "url": "https://github.com/cevr/effra/issues/4"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "25760cf1ed41725e2d9de32467631ac21fc505e7a13f2e3e0d442cd42091c020",
+      "labels": [
+        "wayfinder:prototype"
+      ],
+      "number": 5,
+      "parent": 1,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Does explicit run and contract inspection make the tiny language useful?",
+      "updatedAt": "2026-10-08T18:45:47Z",
+      "url": "https://github.com/cevr/effra/issues/5"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        5
+      ],
+      "bodySha256": "4b1652e598e35873431ddf31fa21661b5edf4775e5f2d753a5ffdcafc28a8db9",
+      "labels": [
+        "wayfinder:grilling"
+      ],
+      "number": 6,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "What cancellation and resource ownership contract must both targets preserve?",
+      "updatedAt": "2026-10-08T18:36:12Z",
+      "url": "https://github.com/cevr/effra/issues/6"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        5
+      ],
+      "bodySha256": "039b977d67250657246a7add8c387d34e3278e4e2209af2ee8753e15aeac6f87",
+      "labels": [
+        "wayfinder:prototype"
+      ],
+      "number": 7,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Which compilation boundary preserves speed as the language grows?",
+      "updatedAt": "2026-10-08T18:36:16Z",
+      "url": "https://github.com/cevr/effra/issues/7"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "93307c0f9ae8f477381ef2307997dac74ce16cd5e8500c91d370d5c81c123bd0",
+      "labels": [
+        "wayfinder:prototype"
+      ],
+      "number": 8,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "What shared semantics make a Go backend credible?",
+      "updatedAt": "2026-10-08T18:36:19Z",
+      "url": "https://github.com/cevr/effra/issues/8"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "2d31725b6c73ea0e115bc9aae24bedcd7b4f0c5a720ea08c6fb9d9d352ee9ae2",
+      "labels": [
+        "wayfinder:grilling"
+      ],
+      "number": 9,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "How can Go and TypeScript imports avoid binding boilerplate while exposing trust?",
+      "updatedAt": "2026-10-08T18:36:22Z",
+      "url": "https://github.com/cevr/effra/issues/9"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        13,
+        32,
+        61
+      ],
+      "bodySha256": "efe47e364722e944fb1355d9825a5e401e9d6ebc7eee1af7d80760fbfa5a72d1",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 10,
+      "parent": 57,
+      "state": "open",
+      "stateReason": null,
+      "title": "Actor contract inspection and adoption conformance",
+      "updatedAt": "2026-10-08T18:36:26Z",
+      "url": "https://github.com/cevr/effra/issues/10"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        30,
+        52,
+        65
+      ],
+      "bodySha256": "47b3cb32f45bcae1d3e8df88442b2663e210d8f32405f9bbfd9bbd41e829e6d4",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 11,
+      "parent": 57,
+      "state": "open",
+      "stateReason": null,
+      "title": "Checked ordinary actor protocols and portable ownership",
+      "updatedAt": "2026-10-08T18:36:29Z",
+      "url": "https://github.com/cevr/effra/issues/11"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        11,
+        13
+      ],
+      "bodySha256": "f3b4a21b718ee3ee01fda99cdeca7705d13a730f3efb919fb787dccbb520507d",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 12,
+      "parent": 57,
+      "state": "open",
+      "stateReason": null,
+      "title": "Restricted ordinary actor receive loops",
+      "updatedAt": "2026-10-08T18:36:33Z",
+      "url": "https://github.com/cevr/effra/issues/12"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        11,
+        24,
+        27
+      ],
+      "bodySha256": "b3723d0ef4702293905dc1c0004e1a14b25649eb9b977db68783feb12d2fd08b",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 13,
+      "parent": 57,
+      "state": "open",
+      "stateReason": null,
+      "title": "Owned sequential handler actors on Go and JavaScript",
+      "updatedAt": "2026-10-08T18:36:36Z",
+      "url": "https://github.com/cevr/effra/issues/13"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        52
+      ],
+      "bodySha256": "bffcff4b2e1aa4495991cb9581a4bc6a37f3b845baf4e7551758d46efedd0c0b",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 14,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Reachable runtime modules and small executable receipts",
+      "updatedAt": "2026-10-08T18:37:05Z",
+      "url": "https://github.com/cevr/effra/issues/14"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        3,
+        32,
+        61
+      ],
+      "bodySha256": "dbae4cafcb6d2c9962965ad36620d77c8dc2345ebd1a5e7abe353fee73d90a11",
+      "labels": [
+        "implementation:spec",
+        "wayfinder:task"
+      ],
+      "number": 15,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Implement the accepted capability and lawful-runtime synthesis",
+      "updatedAt": "2026-10-09T15:49:08Z",
+      "url": "https://github.com/cevr/effra/issues/15"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        32,
+        71
+      ],
+      "bodySha256": "77ca1508597f1c213194a8d53902dd38927aa642f40192a4a43347c3c5ba22ab",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 16,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Owned client lifetime bridge for view and foreign components (VW4)",
+      "updatedAt": "2026-10-09T15:49:09Z",
+      "url": "https://github.com/cevr/effra/issues/16"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "0d476e3f7f092752957368d594089de9d3897c1467d891b453a6244b7c7f9a69",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 17,
+      "parent": 1,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Versioned custom lint rules and shared rule packs",
+      "updatedAt": "2026-10-09T15:10:54Z",
+      "url": "https://github.com/cevr/effra/issues/17"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        20
+      ],
+      "bodySha256": "5f0e9bfb3657169da45eb20893698c14722dea51f560018fa2a9ed7db105cc1e",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 18,
+      "parent": 1,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Shared formatter through versioned LSP documents",
+      "updatedAt": "2026-10-09T15:06:49Z",
+      "url": "https://github.com/cevr/effra/issues/18"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        30,
+        52
+      ],
+      "bodySha256": "d4f9a5fcd9ce185fc5b7fb9365ad5f0d2a7dcc0993d3d4bacddf9706dfd18718",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 19,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Payload-aware typed recovery and outcomes",
+      "updatedAt": "2026-10-08T18:37:22Z",
+      "url": "https://github.com/cevr/effra/issues/19"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "87279c68198b7e1a8fb5de967724ccb5a494a5bc539d7c3ae6edd5df5f71e58c",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 20,
+      "parent": 1,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Canonical comment-preserving formatter with CLI and MCP",
+      "updatedAt": "2026-10-08T18:45:51Z",
+      "url": "https://github.com/cevr/effra/issues/20"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        22,
+        23,
+        24,
+        25,
+        27
+      ],
+      "bodySha256": "2b288df79b49639789d3fa0d9fab79b15f2e0720b029d9b8296d07a0bff4575a",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 21,
+      "parent": 26,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Production fixture and tool conformance",
+      "updatedAt": "2026-10-08T18:45:56Z",
+      "url": "https://github.com/cevr/effra/issues/21"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "fc830e0e77ffbb4e0b113a7b4f5a7297a44b9701a78e3baa37f9d9e08023d701",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 22,
+      "parent": 26,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Closed application data and exhaustive interpretation",
+      "updatedAt": "2026-10-08T18:46:00Z",
+      "url": "https://github.com/cevr/effra/issues/22"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "2236512193678cb5d2b8777513916dd4399f582b00870f482a3c65893d89817a",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 23,
+      "parent": 26,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Reasoned semantic lint suppression",
+      "updatedAt": "2026-10-08T18:46:03Z",
+      "url": "https://github.com/cevr/effra/issues/23"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        22,
+        25
+      ],
+      "bodySha256": "1acfee38c087587f295c65edd8f220bfd14c7ddc95807866bb4a632c81fd8c84",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 24,
+      "parent": 26,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Reject proven closed-owner handle escape",
+      "updatedAt": "2026-10-08T18:46:07Z",
+      "url": "https://github.com/cevr/effra/issues/24"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        22
+      ],
+      "bodySha256": "6ce5f529bf59417229e65fdde2092af4e4a5f1cf8c28850c81cdefbeca0183f0",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 25,
+      "parent": 26,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Dependency-capturing provider composition",
+      "updatedAt": "2026-10-08T18:46:11Z",
+      "url": "https://github.com/cevr/effra/issues/25"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "da802b64db717df592cb6ff9d9a31c9c7863738da08b692ca18a1a7a5bfc86d7",
+      "labels": [
+        "implementation:spec",
+        "wayfinder:task"
+      ],
+      "number": 26,
+      "parent": 1,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Production foundation implementation",
+      "updatedAt": "2026-10-08T18:46:15Z",
+      "url": "https://github.com/cevr/effra/issues/26"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "abdf5a19f2d43e58d3e0565e9a006ad99d9376617b244b255d908af7e7d5a960",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 27,
+      "parent": 26,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Causal synchronization and scheduler-backed tests",
+      "updatedAt": "2026-10-08T18:46:19Z",
+      "url": "https://github.com/cevr/effra/issues/27"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        4,
+        16,
+        36,
+        56,
+        71
+      ],
+      "bodySha256": "8c43581286a5e3c0069bf23294e2688c8dc3ee95adab280a1eb8ecf38eacfc85",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 28,
+      "parent": 54,
+      "state": "open",
+      "stateReason": null,
+      "title": "Complete 34-directory framework adoption corpus",
+      "updatedAt": "2026-10-09T15:49:12Z",
+      "url": "https://github.com/cevr/effra/issues/28"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        26
+      ],
+      "bodySha256": "6c5c90529392614247b4382e8c1fa02eaeea6153ce7a87c5c57153cffb6c7a7b",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 29,
+      "parent": 14,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Isolated owned native generated modules",
+      "updatedAt": "2026-10-08T18:46:23Z",
+      "url": "https://github.com/cevr/effra/issues/29"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        52
+      ],
+      "bodySha256": "e7ea73b689bbb8baf35e1e4c5490a0c796a28febe8de5449883243fe0a27f4ac",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 30,
+      "parent": 55,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Reusable generic data and product matching",
+      "updatedAt": "2026-10-09T15:10:50Z",
+      "url": "https://github.com/cevr/effra/issues/30"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        34
+      ],
+      "bodySha256": "f64a97f760ad139ea3704ec6cb93429f9dedde325299b9fe5eaf3fa5c64c4e53",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 31,
+      "parent": 32,
+      "state": "open",
+      "stateReason": null,
+      "title": "Go callbacks and scoped inverse interface bridges",
+      "updatedAt": "2026-10-08T18:38:11Z",
+      "url": "https://github.com/cevr/effra/issues/31"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        52
+      ],
+      "bodySha256": "3a9a0d703051e19982fc52e16b06793d8c050d5ab357cebc1b76ba87998dbc81",
+      "labels": [
+        "implementation:spec",
+        "wayfinder:task"
+      ],
+      "number": 32,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Automatic Go host values and standard protocols",
+      "updatedAt": "2026-10-08T18:38:15Z",
+      "url": "https://github.com/cevr/effra/issues/32"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        35
+      ],
+      "bodySha256": "222aea9c0b624a708cf63c3d77cd0c957d38535dc347becf24888339ab056b1d",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 33,
+      "parent": 32,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Native Go receiver methods and interface assignment",
+      "updatedAt": "2026-10-09T15:06:46Z",
+      "url": "https://github.com/cevr/effra/issues/33"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        33,
+        65
+      ],
+      "bodySha256": "e78ae7e38fc27daafc00393ea35c099e99e01ae3ccb37316e37de0d97fb3db79",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 34,
+      "parent": 32,
+      "state": "open",
+      "stateReason": null,
+      "title": "Owned Go resource borrowing and cancellation contracts",
+      "updatedAt": "2026-10-08T18:38:32Z",
+      "url": "https://github.com/cevr/effra/issues/34"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        30,
+        52
+      ],
+      "bodySha256": "791451155fa4ac3d25b7c8c1f66af37b53726dd03580f0b26abb6985b47baeb6",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 35,
+      "parent": 32,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Canonical Go host types and complete return tuples",
+      "updatedAt": "2026-10-09T15:06:42Z",
+      "url": "https://github.com/cevr/effra/issues/35"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        71
+      ],
+      "bodySha256": "9251afd81251517b2e4382189f7b36e6b6125e8460b351a4d621cef363076afa",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 36,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "One-to-one JSX view notation (VW6)",
+      "updatedAt": "2026-10-09T15:49:14Z",
+      "url": "https://github.com/cevr/effra/issues/36"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "e0f7fb72f2a05f3ade529a0c7eaf20ec2216929599bddad0a194bf5cdbc37350",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 37,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "First-class declarative layers and owned acquisition",
+      "updatedAt": "2026-10-09T15:49:15Z",
+      "url": "https://github.com/cevr/effra/issues/37"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        44,
+        60,
+        61
+      ],
+      "bodySha256": "bc860cb92873798d4f46c32c2acc2330a390a39e01fb79d348472249c4361fe3",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 38,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Shared-model stdio language server",
+      "updatedAt": "2026-10-09T15:48:54Z",
+      "url": "https://github.com/cevr/effra/issues/38"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        41,
+        42,
+        52,
+        65
+      ],
+      "bodySha256": "0cbcc6d46d1268efbdb99a1687fbe8d5853eb63cdd5c9aa9bd9bc2f6a9e2ae06",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 39,
+      "parent": 37,
+      "state": "open",
+      "stateReason": null,
+      "title": "Fallible provider factories and retained startup effects",
+      "updatedAt": "2026-10-09T15:49:17Z",
+      "url": "https://github.com/cevr/effra/issues/39"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        39
+      ],
+      "bodySha256": "d258476d584759ef7318591c20699c97381e0af99bd3d9961e663a504c739985",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 40,
+      "parent": 37,
+      "state": "open",
+      "stateReason": null,
+      "title": "Parameterized layer plans and inherited application services",
+      "updatedAt": "2026-10-08T18:38:53Z",
+      "url": "https://github.com/cevr/effra/issues/40"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        25
+      ],
+      "bodySha256": "3f06d81971367c60af79ffb6f4d0f2dea517e27cf3a4f2f183f36b2fef79326c",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 41,
+      "parent": 37,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Checked static layer plans and construction graphs",
+      "updatedAt": "2026-10-09T15:06:40Z",
+      "url": "https://github.com/cevr/effra/issues/41"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        27
+      ],
+      "bodySha256": "b62df3cbd2135ec99bf50e8ab2ed75c8ed6c5e0da0b0d4ee1934a0de16829e7b",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 42,
+      "parent": 37,
+      "state": "open",
+      "stateReason": null,
+      "title": "Scope-owned concurrent layer acquisition and rollback",
+      "updatedAt": "2026-10-09T15:49:19Z",
+      "url": "https://github.com/cevr/effra/issues/42"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        40
+      ],
+      "bodySha256": "fecd1e2f02b9636284e73b36d52cdc707723380a8554c0fa13f086e02b3121cb",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 43,
+      "parent": 37,
+      "state": "open",
+      "stateReason": null,
+      "title": "Layer graph tooling and declarative adoption examples",
+      "updatedAt": "2026-10-08T18:39:04Z",
+      "url": "https://github.com/cevr/effra/issues/43"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        60
+      ],
+      "bodySha256": "bf55159758cbfbca408a7fb40fcf184cdcca517fafca02f38166f7990d4268e1",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 44,
+      "parent": 38,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Versioned LSP documents and shared diagnostics",
+      "updatedAt": "2026-10-08T18:46:33Z",
+      "url": "https://github.com/cevr/effra/issues/44"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        47,
+        49,
+        51
+      ],
+      "bodySha256": "347a17eaf47effb03875faac1d2e2deea41de53022eb997ce5067893e66912a5",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 45,
+      "parent": 2,
+      "state": "open",
+      "stateReason": null,
+      "title": "Machine inspection and boundary conformance",
+      "updatedAt": "2026-10-08T18:39:40Z",
+      "url": "https://github.com/cevr/effra/issues/45"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        11,
+        19,
+        30,
+        52
+      ],
+      "bodySha256": "a95303910af94e7010ef712c2006963e15ff7077c443f3cfe9daaebc54eb22ea",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 46,
+      "parent": 2,
+      "state": "open",
+      "stateReason": null,
+      "title": "Canonical machine plans and transition checks",
+      "updatedAt": "2026-10-09T15:48:56Z",
+      "url": "https://github.com/cevr/effra/issues/46"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        13,
+        24,
+        27,
+        46
+      ],
+      "bodySha256": "30d3f9a15e7901ab7c1f9760de6fe017ddc3112490a653c4e312a5394e2d273a",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 47,
+      "parent": 2,
+      "state": "open",
+      "stateReason": null,
+      "title": "Machine behavior on the shared owned actor runtime",
+      "updatedAt": "2026-10-08T18:39:54Z",
+      "url": "https://github.com/cevr/effra/issues/47"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        28,
+        50,
+        54
+      ],
+      "bodySha256": "b23e6739d8f73b41d3f65fc6bf57cafc53e953b0da8f1430f8332cb617e57e37",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 48,
+      "parent": 62,
+      "state": "open",
+      "stateReason": null,
+      "title": "Retained measurement ledger and benchmark-last closure",
+      "updatedAt": "2026-10-08T18:39:58Z",
+      "url": "https://github.com/cevr/effra/issues/48"
+    },
+    {
+      "assignees": [
+        "cevr"
+      ],
+      "blockedBy": [
+        52
+      ],
+      "bodySha256": "846a3a197358c3af507e8eb1b6f4408c73e333a1281d63d97fd9780d2aba5c02",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 49,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Checked nominal JSON codecs",
+      "updatedAt": "2026-10-08T20:42:57Z",
+      "url": "https://github.com/cevr/effra/issues/49"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        52
+      ],
+      "bodySha256": "3d975ce23e9fd61dfd30c51cb674e68c8c0268c47d4a628b21322dfcb1c759d7",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 50,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Direct native execution and matched build-cost receipts",
+      "updatedAt": "2026-10-09T15:48:57Z",
+      "url": "https://github.com/cevr/effra/issues/50"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        49
+      ],
+      "bodySha256": "46cfdee7195d50d68de58e96ae0e831058d609ca50a9e4a17ea51b758c37f06b",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 51,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Managed HTTP and typed endpoint composition",
+      "updatedAt": "2026-10-08T18:40:08Z",
+      "url": "https://github.com/cevr/effra/issues/51"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        24,
+        27
+      ],
+      "bodySha256": "76b81567d29b873c5a2f0e4245a4bc8dde0ea2643b8df176fb71aeaa5352a143",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 52,
+      "parent": 55,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Bundled interfaces and typed function values",
+      "updatedAt": "2026-10-09T15:06:37Z",
+      "url": "https://github.com/cevr/effra/issues/52"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        51
+      ],
+      "bodySha256": "e240e1b20049e562f2f29c4441be95b2c7758544a3e4249a08f93ce2035657a3",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 53,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Compatible unary RPC contracts",
+      "updatedAt": "2026-10-08T18:40:38Z",
+      "url": "https://github.com/cevr/effra/issues/53"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        21,
+        53,
+        72
+      ],
+      "bodySha256": "1f83d1c24b77ad5b6722171d0c3819f31571f7b02619a5ac877d73f04d506747",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 54,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Framework and server tool conformance",
+      "updatedAt": "2026-10-08T18:40:41Z",
+      "url": "https://github.com/cevr/effra/issues/54"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        26
+      ],
+      "bodySha256": "34525ca4536ea890e0f348d8715d8e91318b6aaf0fd45e797f2b6347b99f392a",
+      "labels": [
+        "implementation:spec",
+        "wayfinder:task"
+      ],
+      "number": 55,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Native codecs and typed server contracts",
+      "updatedAt": "2026-10-08T18:40:45Z",
+      "url": "https://github.com/cevr/effra/issues/55"
+    },
+    {
+      "assignees": [
+        "cevr"
+      ],
+      "blockedBy": [],
+      "bodySha256": "170fe985e4c84d011d74ec66448838ea7f76dcdf390a5bc57315432ff33c3637",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 56,
+      "parent": 30,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "General numeric arithmetic and cross-target integer policy",
+      "updatedAt": "2026-10-09T15:10:52Z",
+      "url": "https://github.com/cevr/effra/issues/56"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "d9d8b707b0062dc7ef032a81c41672762b2f44e6ed378b1f0be5c7b6fecb1904",
+      "labels": [
+        "implementation:spec",
+        "wayfinder:task"
+      ],
+      "number": 57,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Ordinary owned actor protocols and behavior",
+      "updatedAt": "2026-10-08T18:40:51Z",
+      "url": "https://github.com/cevr/effra/issues/57"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "9c2651b6911ff9eac283bdca95e394bd75c7b79b20f049ca126e200fc110c1aa",
+      "labels": [
+        "wayfinder:research"
+      ],
+      "number": 58,
+      "parent": 1,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Which production patterns constrain the next foundation contracts?",
+      "updatedAt": "2026-10-08T18:46:38Z",
+      "url": "https://github.com/cevr/effra/issues/58"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        26,
+        29
+      ],
+      "bodySha256": "88a8d571b38f59ea47c6cb8b7209a69a50f7ca58824c480c9c671b9df5c58af2",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 59,
+      "parent": 14,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Selectable native runtime source modules",
+      "updatedAt": "2026-10-08T18:46:42Z",
+      "url": "https://github.com/cevr/effra/issues/59"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "969fcfd39e530a87e36e16f173bb771cb621cdd45d2f4c9ed0bc9eb24ee64772",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 60,
+      "parent": 1,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Shared editor-grade diagnostics through CLI and MCP",
+      "updatedAt": "2026-10-08T18:46:46Z",
+      "url": "https://github.com/cevr/effra/issues/60"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        52,
+        60
+      ],
+      "bodySha256": "3c38479f871aec0c849149ad981d303f4408305c10183e349fc7f452732a62d0",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 61,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Complete canonical type and binding inspection",
+      "updatedAt": "2026-10-08T18:41:05Z",
+      "url": "https://github.com/cevr/effra/issues/61"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        17,
+        18,
+        45,
+        50,
+        54,
+        69,
+        78
+      ],
+      "bodySha256": "ab479f7a7f1ba4c677af7bb46c07d8b6b2685b9596ac8bebcfdd9fe6f6cf9fa8",
+      "labels": [
+        "implementation:spec",
+        "wayfinder:task"
+      ],
+      "number": 62,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Matched server performance against TypeScript and optimized Go",
+      "updatedAt": "2026-10-08T18:41:36Z",
+      "url": "https://github.com/cevr/effra/issues/62"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        65
+      ],
+      "bodySha256": "5b86c243774649ab27c8ae61c06e376edbb03933bf53d1bff675738e90e8a6af",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 64,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Bounded queues, streams, retry and drainable workers",
+      "updatedAt": "2026-10-09T15:48:59Z",
+      "url": "https://github.com/cevr/effra/issues/64"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        14,
+        19,
+        30,
+        52,
+        72
+      ],
+      "bodySha256": "22cc5b06fca90d11b92eafdf3f4d7a636baf45842672916a440615042e8a7e62",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 65,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Owned acquisition, synchronization and time library",
+      "updatedAt": "2026-10-09T15:49:21Z",
+      "url": "https://github.com/cevr/effra/issues/65"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        26
+      ],
+      "bodySha256": "afc58f15bd071ff38c4c06b3715bc115d8e669b790e4f7a878357444ab1d659d",
+      "labels": [
+        "research:needed",
+        "wayfinder:research"
+      ],
+      "number": 66,
+      "parent": 1,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Bundled standard library capability and language contracts",
+      "updatedAt": "2026-10-08T18:46:50Z",
+      "url": "https://github.com/cevr/effra/issues/66"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        39,
+        65
+      ],
+      "bodySha256": "c536ff48d02427ee310ebc06ff5194d280ebf717f9fd4cf221c2b1afe6ac0b2a",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 67,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Fallible providers, configuration and structured logs",
+      "updatedAt": "2026-10-08T18:41:53Z",
+      "url": "https://github.com/cevr/effra/issues/67"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        64,
+        67
+      ],
+      "bodySha256": "39991a311766953352918f56101dc67ce4a457af50c22c47a1b4f73d720b694f",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 68,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Shared producers, pools and managed platform clients",
+      "updatedAt": "2026-10-09T15:49:01Z",
+      "url": "https://github.com/cevr/effra/issues/68"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        64,
+        67,
+        68
+      ],
+      "bodySha256": "fc548e06b71f0cff6e6b1f57df3b4b00daf4747d2156fcea44c271abcb91ca9a",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 69,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Owned telemetry and context-partitioned request batching",
+      "updatedAt": "2026-10-09T15:49:02Z",
+      "url": "https://github.com/cevr/effra/issues/69"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "2d49a346c3d49d1b2850fdc729211d21dd7afc5ead311800c49a2ef5d2edb363",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 70,
+      "parent": 1,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Bound shared syntax traversal across developer tools",
+      "updatedAt": "2026-10-08T18:46:54Z",
+      "url": "https://github.com/cevr/effra/issues/70"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        52,
+        61
+      ],
+      "bodySha256": "c93f5b68523544903c0a18fe2e06edbf2099f539a334ebed2932061b1921e692",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 71,
+      "parent": 32,
+      "state": "open",
+      "stateReason": null,
+      "title": "TypeScript declaration projection and reverse imports (VW3)",
+      "updatedAt": "2026-10-08T18:42:07Z",
+      "url": "https://github.com/cevr/effra/issues/71"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "93ece1a7800ac9b7fcef44086a85caf8c5829d6fd15edac7f02b3af5a6f8ceb1",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 72,
+      "parent": 55,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Pinned upstream tests and executable conformance mapping",
+      "updatedAt": "2026-10-08T18:46:58Z",
+      "url": "https://github.com/cevr/effra/issues/72"
+    },
+    {
+      "assignees": [
+        "cevr"
+      ],
+      "blockedBy": [],
+      "bodySha256": "4c5b6b7637d3e4e135aa946cfaff0f25bdd8483a94840d065794a608262c4043",
+      "labels": [
+        "wayfinder:research"
+      ],
+      "number": 73,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Generalized run sequencing and checked userland binding",
+      "updatedAt": "2026-10-08T19:02:28Z",
+      "url": "https://github.com/cevr/effra/issues/73"
+    },
+    {
+      "assignees": [
+        "cevr"
+      ],
+      "blockedBy": [
+        20,
+        70
+      ],
+      "bodySha256": "742ee88a1603a177b637e6d8027868965da04334117d64d8abfd6054fe21f7e0",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 74,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Constant-only parameter defaults and explicit call contracts",
+      "updatedAt": "2026-10-09T04:35:27Z",
+      "url": "https://github.com/cevr/effra/issues/74"
+    },
+    {
+      "assignees": [
+        "cevr"
+      ],
+      "blockedBy": [
+        22,
+        70
+      ],
+      "bodySha256": "c50f4af295e0daf9d15901d59a08964f14bab60be9dbd0f63c9b6837a635f71a",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 75,
+      "parent": 50,
+      "state": "open",
+      "stateReason": null,
+      "title": "Direct JavaScript control-flow lowering with preserved effects",
+      "updatedAt": "2026-10-09T04:35:29Z",
+      "url": "https://github.com/cevr/effra/issues/75"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        19
+      ],
+      "bodySha256": "7231accc64285f5cb656418a85636bdb3c46135c8b003884e362450d1874b3ac",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 76,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Typed recipe values in generic containers",
+      "updatedAt": "2026-10-09T15:08:40Z",
+      "url": "https://github.com/cevr/effra/issues/76"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "22633940442d674e79c31ab026436c5531c83e79b75d55d4b40d0fe1e2610822",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 77,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Signed-64 multiplication, division, remainder and conversions",
+      "updatedAt": "2026-10-09T15:08:43Z",
+      "url": "https://github.com/cevr/effra/issues/77"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "8e5585463f103b2def4b4414566ea01cf5945b32bd3ce46cb9486279ed06472f",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 78,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Custom-lint suppression states and cost receipts",
+      "updatedAt": "2026-10-09T15:08:46Z",
+      "url": "https://github.com/cevr/effra/issues/78"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "dd62f22fe4f29227bc53a71d13f3ae437ea6168e2120cb42eba990b04c22b0c3",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 79,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Single registry for diagnostic codes and versioned identities",
+      "updatedAt": "2026-10-09T15:49:45Z",
+      "url": "https://github.com/cevr/effra/issues/79"
+    }
+  ],
+  "map": 1,
+  "mapReferences": [
+    5,
+    17,
+    18,
+    20,
+    22,
+    23,
+    25,
+    27,
+    29,
+    30,
+    33,
+    35,
+    41,
+    44,
+    52,
+    56,
+    58,
+    59,
+    66,
+    70,
+    72,
+    76,
+    77,
+    78
+  ],
+  "repository": "cevr/effra",
+  "schema": "effra-wayfinder-snapshot/1"
+}

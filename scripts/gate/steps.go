@@ -40,8 +40,7 @@ var testInstalled = []string{"node_modules"}
 // gofmtDirectories are the Go trees the gate requires to be gofmt-clean.
 var gofmtDirectories = []string{"cmd", "internal", "runtime", "lint", "scripts/gate", "scripts/conformance", "examples/go-interop", "examples/sdk", "examples/compare", "examples/hosttypes", "examples/lintpack"}
 
-// pythonChecks are the wayfinder map's Python checks in their historical
-// order; the map-tooling lane owns their replacement. readsHistory marks the
+// pythonChecks are the retired local tracker's migration checks. readsHistory marks the
 // checks that resolve repository links offline through Git: commits, their
 // trees and every tree on the way to a linked path. That reachable history
 // is an input no file digest captures, and keying it would mean hashing the
@@ -51,7 +50,6 @@ var pythonChecks = []struct {
 	argv         []string
 	readsHistory bool
 }{
-	{"wayfinder check", []string{"python3", "scripts/wayfinder.py", "check"}, false},
 	{"wayfinder migration: hosted run binding", []string{"python3", "scripts/wayfinder_migration.py", "--input-snapshot", "hosted-run-binding-2026-10-08", "--check"}, true},
 	{"wayfinder migration: current map", []string{"python3", "scripts/wayfinder_migration.py", "--current-identity-intake", "github-wayfinder-current-intake-2026-10-08", "--mapping", "docs/wayfinder/migration/current-hosted-identities-2026-10-09-source-reconciled.json", "--check", "--output-snapshot", "current-wayfinder-map-2026-10-09-source-reconciled"}, true},
 	{"wayfinder migration tests", []string{"python3", "-B", "scripts/test_wayfinder_migration.py"}, true},
@@ -79,6 +77,7 @@ func gateSteps(root string) ([]*Step, error) {
 		return step
 	}
 	add(&Step{Name: "no tracked python bytecode", Argv: []string{"sh", "-c", `tracked=$(git ls-files '*.pyc'); if [ -n "$tracked" ]; then echo "tracked Python bytecode (git rm it; __pycache__/ is ignored):"; echo "$tracked"; exit 1; fi`}})
+	add(&Step{Name: "wayfinder snapshot check", Argv: []string{"go", "run", "./cmd/wayfinder", "check", "--snapshot"}, Inputs: wayfinderSnapshotInputs()})
 
 	for _, step := range wayfinderSteps() {
 		add(step)
@@ -154,6 +153,20 @@ func gateSteps(root string) ([]*Step, error) {
 	add(&Step{Name: "ef fmt --check", Needs: []string{"build bin/ef"}, Argv: append([]string{"./bin/ef", "fmt", "--check"}, examples...)})
 
 	return steps, nil
+}
+
+// wayfinderSnapshotInputs keys the check that the committed Wayfinder snapshot
+// is a structurally valid map: the snapshot, the command's non-test sources
+// (it imports only the standard library) and the Go toolchain. The check never
+// reads GitHub, so a stale snapshot passes; the command's fixture tests run
+// with the other Go packages.
+func wayfinderSnapshotInputs() *Inputs {
+	return &Inputs{
+		Paths:   []string{"docs/wayfinder/snapshot.json", "cmd/wayfinder/", "go.mod"},
+		Exclude: []string{"cmd/wayfinder/*_test.go"},
+		Tools:   []string{"go"},
+		Env:     []string{"GOFLAGS", "GOEXPERIMENT"},
+	}
 }
 
 // frameworkPorts is the framework-port reference leaf: its own lockfile and
