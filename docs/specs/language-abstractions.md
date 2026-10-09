@@ -68,10 +68,10 @@ Where a later decision overrides the audit, the later decision wins: `machine` (
 | 9 | total `if` | KEEP | |
 | 10 | `scope { }` regions (EF123) | KEEP | |
 | 11 | `fork`, `.join`, `.interrupt`, `.cancel` | UNDECIDED | a library must keep parent-handle versus child-result owners and child-failure charging |
-| 12 | `.catch<E>`, planned `.recover<E>` | KEEP (syntax) | Row-label elimination is compiler-known, so it is syntax (owner direction 2026-10-09, [audit D1](../research/compiler-known-constructs-audit.md#decisions); audit: SHRINK to library once finite row difference exists). A later finite row-difference constraint would extend the construct to abstract rows, not move it into a library. The postfix word is reserved. |
+| 12 | `.catch<E>`, planned `.recover<E>` | KEEP (syntax) | Row-label elimination is compiler-known, so it is syntax (owner direction 2026-10-09, [audit D1](../research/compiler-known-constructs-audit.md#decisions); audit: SHRINK to library once finite row difference exists). Library recovery would need general handlers or user-visible row difference, which Effra defers; adopting them would be a new decision. Reserving the postfix word is proposed (audit D1), not in force. |
 | 13 | `.provide<S>(impl)` | KEEP (syntax) | as row 12, keeping provider owner relations; audit: SHRINK |
 | 14 | `.provide(Layer)` | KEEP (syntax) | as row 12; the layer graph checker stays (row 19); audit: SHRINK to a library operation |
-| 15 | `.timeout(ms)` | UNDECIDED | a library wrapper must pass the paired borrowed and acquired timeout controls; until then it stays a reserved postfix construct, never a method the checker special-cases |
+| 15 | `.timeout(ms)` | UNDECIDED | a library wrapper must pass the paired borrowed and acquired timeout controls; until then it stays a postfix construct, never a method the checker special-cases. Its `Scheduler` requirement is an open gate ([audit 1-G](../research/compiler-known-constructs-audit.md#proposals-for-class-1-entries)) |
 | 16 | `.orFail()` | LIBRARY | currently a postfix construct; it is demoted only when `GoResult` is ordinary data and no checker branch remains |
 | 17 | `service` | KEEP | |
 | 18 | `impl` | KEEP | revisit with checked closures |

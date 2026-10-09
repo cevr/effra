@@ -65,11 +65,13 @@ overhead or a fixed speedup multiplier.
 
 **Predeclared language identifier**: A name the language specification defines in every module without an import or library declaration, such as `Fiber` or `Timeout`, following Go's predeclared `len` and `error`. Capability services are not predeclared language identifiers, even when the compiler currently declares them.
 
-**Postfix construct**: A compiler-known construct written after a receiver with `.`, such as `.catch<E>(h)`, `.provide<S>(p)` or `.timeout(ms)`. Its word is reserved, so it never reads as an ordinary member.
+**Postfix construct**: A compiler-known construct written after a receiver with `.`, such as `.catch<E>(h)`, `.provide<S>(p)` or `.timeout(ms)`. The parser claims its word after any receiver. Declaring that word as a member name is proposed to become a diagnostic, but it is not one yet.
 
-**Special-cased library item** (rejected pattern): A bundled, prelude or library declaration that the compiler recognises by identity or name to grant it language semantics, also called a lang item. An item stops being one only by losing every compiler branch, or by becoming syntax.
+**Special-cased library item** (rejected pattern): A bundled, prelude or library declaration that the compiler recognises by identity or name to produce a semantic fact about it (a diagnostic, checked type, row or ownership fact), also called a lang item. An item stops being one only by losing every such branch or by becoming syntax. Backend retention or emission keyed on the item does not by itself make it one.
 
-**Implementation intrinsic**: A target implementation the compiler or runtime substitutes for an ordinary declared signature. The declared signature remains the only checking, row, ownership and inspection authority, so removing the intrinsic changes no diagnostic or checked fact.
+**Library intrinsic**: A target implementation the compiler substitutes for an ordinary declared library signature. The signature remains the only source of diagnostics, checked types, rows and ownership. The intrinsic may add backend facts such as retained runtime modules. The implementation of a syntax construct is part of that construct, not a library intrinsic.
+
+**Language protocol**: A nominal row label whose charging or discharge a construct's own checking rule defines, such as `Foreign` for calls through `import go`. It is predeclared. An ordinary capability service, whose label enters a row only through declared operations or requirements, is not a language protocol.
 
 **Pipe** (implemented): The notation `x |> f(args)`, which is the ordinary call `f(x, args)`.
 
