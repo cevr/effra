@@ -238,3 +238,63 @@ func renderOperatorTree(e *Expr) string {
 		return e.Text
 	}
 }
+
+// signed64TailSource is a defaulted self-tail loop over the multiplicative
+// operators: factor and modulus are omitted on every self call, `/` divides
+// by a literal and `%` by a parameter proven nonzero by its guard, and `*`
+// wraps on most iterations. A million iterations overflow a JS stack unless
+// the call is a loop.
+const signed64TailSource = `fn mix(n: i64, factor: i64 = 6364136223846793005, acc: i64 = 1, modulus: i64 = 1000003) -> i64 {
+    if n == 0 {
+        acc
+    } else {
+        if modulus == 0 {
+            acc
+        } else {
+            mix(n - 1, acc: acc * factor / 7 + n % modulus)
+        }
+    }
+}
+effect fn main() -> string {
+    if mix(1000000) == EXPECTED { "ok" } else { "bad" }
+}
+`
+
+func TestSigned64ArithmeticInDefaultedSelfTailLoop(t *testing.T) {
+	factor, acc := int64(6364136223846793005), int64(1)
+	for n := int64(1000000); n > 0; n-- {
+		acc = acc*factor/7 + n%1000003
+	}
+	source := strings.Replace(signed64TailSource, "EXPECTED", i64Source(acc), 1)
+	r := CompileFor(source, "js")
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	if lowerTail(r.Find("mix").function(t, r)) == nil {
+		t.Fatal("defaulted self-tail call over signed arithmetic was not planned as a loop")
+	}
+	runOnEveryHost(t, source, "ok\n")
+	js, _, err := r.Emit(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	product := "BigInt.asIntN(64, (__ef_local_acc * __ef_local_factor))"
+	if strings.Count(js, "while (true)") != 1 || strings.Count(js, product) != 1 {
+		t.Fatalf("expected one loop with one wrapped product:\n%s", js)
+	}
+	assertion := fmt.Sprintf(`if (await Effect.runPromise(%s()) !== "ok") throw new Error("tail arithmetic result changed");`, r.Find("main").function(t, r).jsEmissionName())
+	if output, err := runJSHostModule(t, "node", js, assertion); err != nil {
+		t.Fatalf("tail arithmetic module failed: %v\n%s", err, output)
+	}
+	unwrapped := strings.Replace(js, product, "(__ef_local_acc * __ef_local_factor)", 1)
+	if output, err := runJSHostModule(t, "node", unwrapped, assertion); err == nil || !strings.Contains(output, "tail arithmetic result changed") {
+		t.Fatalf("unwrapped product mutant did not fail at the intended assertion: %v\n%.400s", err, output)
+	}
+	native, _, err := emitGoApplication(CompileFor(source, "go"), GoGenerationBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(native, "for {") != 1 {
+		t.Fatalf("expected one native loop:\n%s", native)
+	}
+}
