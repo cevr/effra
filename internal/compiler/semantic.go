@@ -293,6 +293,7 @@ type Result struct {
 	Diagnostics            []Diagnostic           `json:"diagnostics"`
 	Symbols                []Symbol               `json:"symbols"`
 	Layers                 []LayerPlan            `json:"layers,omitempty"`
+	Machines               []MachinePlan          `json:"machines,omitempty"`
 	Declarations           []Declaration          `json:"declarations,omitempty"`
 	Codecs                 []CodecInspection      `json:"codecs,omitempty"`
 	CodecPlans             []*CodecPlan           `json:"codecPlans,omitempty"`
@@ -2499,6 +2500,9 @@ func (c *checker) check() {
 	for _, layer := range c.program.Layers {
 		claim(layer.Name, layer.Span)
 	}
+	for _, machine := range c.program.Machines {
+		claim(machine.Name, machine.Span)
+	}
 	// Builtin operations resolve their signatures like declared ones, so the
 	// application plan retains the builtin data their types name.
 	for _, s := range builtinServicesFor(c.program) {
@@ -2588,6 +2592,7 @@ func (c *checker) check() {
 	for _, f := range c.program.checkedFunctions() {
 		c.function(f, true)
 	}
+	c.checkMachines()
 	for module, admitted := range c.admittedSummaries {
 		functions := []*Function{}
 		for _, f := range c.program.BundledFunctions {
@@ -4525,6 +4530,8 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			e.ResolvedFunction = f
 			e.Text = "function"
 			c.observeReference(e, e.Span, lexicalTarget{kind: "function", function: f})
+		} else if machine := c.machineNamed(e.Name); machine != nil {
+			t = c.machineValueRefusal(e, machine)
 		} else if !c.absentName(absentInValue, e.Name, e.Span) {
 			c.diagnostic("EF102", "unknown value "+e.Name, e.Span)
 		}

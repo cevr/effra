@@ -86,7 +86,10 @@ type GraphNodeFacts struct {
 	Binding   *GraphBindingFacts   `json:"binding,omitempty"`
 	Retention *GraphRetentionFacts `json:"retention,omitempty"`
 	Collapsed *GraphCollapsedFacts `json:"collapsed,omitempty"`
-	Frontier  bool                 `json:"frontier,omitempty"`
+	// Machine and MachineState are filled by the machine kind only.
+	Machine      *GraphMachineFacts      `json:"machine,omitempty"`
+	MachineState *GraphMachineStateFacts `json:"machineState,omitempty"`
+	Frontier     bool                    `json:"frontier,omitempty"`
 	// Closure marks a node published only because a selected edge names it
 	// in metadata (a plan or a replacement site); it was not traversed.
 	Closure bool `json:"closure,omitempty"`
@@ -101,6 +104,8 @@ type GraphEdgeFacts struct {
 	Selection    *GraphLayerSelectFacts `json:"selection,omitempty"`
 	Reason       string                 `json:"reason,omitempty"`
 	FirstWitness bool                   `json:"firstWitness,omitempty"`
+	// Transition is filled by the machine kind only.
+	Transition *GraphMachineTransitionFacts `json:"transition,omitempty"`
 }
 
 // GraphCollapsedFacts records the members a collapse hid. Hidden members are
@@ -297,7 +302,7 @@ const maxGraphOptionItems = 64
 const maxGraphOptionBytes = 1024
 
 var graphOptions = []GraphOption{
-	{Field: "kind", Flag: "--kind", Values: []string{"dependency", "layers", "application"}, Description: "Graph view kind; selecting kind or format requests GraphViewV1"},
+	{Field: "kind", Flag: "--kind", Values: []string{"dependency", "layers", "application", "machine"}, Description: "Graph view kind; selecting kind or format requests GraphViewV1"},
 	{Field: "format", Flag: "--format", Values: []string{"json", "mermaid", "dot"}, Description: "Rendering of the one selected view; json is the complete interchange"},
 	{Field: "focus", Flag: "--focus", Description: "Exact node ID to select around; requires a checked node of the kind"},
 	{Field: "depth", Flag: "--depth", Description: "Hops from the focus; requires focus; default 1"},
@@ -360,6 +365,7 @@ var graphKindRelations = map[GraphKind][]string{
 	GraphKindDependency:  {"adapts", "calls", "constructs", "contains", "implements", "materializes", "originates", "provides", "provides-layer", "references", "requires"},
 	GraphKindLayers:      {"consumes-input", "depends-on", "merges", "replaces", "requires-input", "selects"},
 	GraphKindApplication: {"retains", "runtime-requires", "selects"},
+	GraphKindMachine:     machineGraphRelations,
 }
 
 // graphKindContainment names the forest relation collapse groups follow. A
@@ -367,6 +373,7 @@ var graphKindRelations = map[GraphKind][]string{
 var graphKindContainment = map[GraphKind]string{
 	GraphKindDependency:  "contains",
 	GraphKindApplication: "retains",
+	GraphKindMachine:     "contains",
 }
 
 // graphApplicationModes maps the public entry modes, named after the `ef
@@ -428,12 +435,12 @@ func ParseGraphRequest(fields map[string]any) (GraphRequest, error) {
 		return request, err
 	} else if present {
 		switch GraphKind(kind) {
-		case GraphKindDependency, GraphKindLayers, GraphKindApplication:
+		case GraphKindDependency, GraphKindLayers, GraphKindApplication, GraphKindMachine:
 			request.Kind = GraphKind(kind)
-		case GraphKindMachine, GraphKindActor:
+		case GraphKindActor:
 			return request, graphRefusal(GraphRefusalKindUnavailable, "graph kind %s is not implemented; its checked plan owner has not landed", kind)
 		default:
-			return request, graphRefusal(GraphRefusalKind, "unknown graph kind %q; use dependency, layers or application", kind)
+			return request, graphRefusal(GraphRefusalKind, "unknown graph kind %q; use dependency, layers, application or machine", kind)
 		}
 	}
 	if format, present, err := text("format"); err != nil {
@@ -1209,6 +1216,8 @@ func (r *Result) GraphView(request GraphRequest) (*GraphView, error) {
 		facts, err = r.layerGraphFacts(limits)
 	case GraphKindApplication:
 		facts, err = r.applicationGraphFacts(request, limits)
+	case GraphKindMachine:
+		facts, err = r.machineGraphFacts(limits)
 	default:
 		return nil, graphRefusal(GraphRefusalKind, "unknown graph kind %q", request.Kind)
 	}

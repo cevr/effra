@@ -1008,6 +1008,9 @@ func (r *Result) CheckResponse() map[string]any {
 	if projection.Complete {
 		response["symbols"] = r.Symbols
 		response["layers"] = r.Layers
+		if len(r.Machines) > 0 {
+			response["machines"] = r.Machines
+		}
 		response["declarations"] = r.Declarations
 		response["bindings"] = r.Bindings
 		response["types"] = projection.Types

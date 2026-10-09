@@ -204,6 +204,39 @@ effect fn main() -> string { run Store.label().provide(App) }`
 	}
 }
 
+// A machine declaration is inspected through the same code.inspect path as
+// the CLI; the response is the compiler's canonical plan projection.
+func TestMachineInspectionMatchesCompilerPlan(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("..", "..", "examples", "machine-breaker.ef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "breaker.ef"), source, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"go", "js"} {
+		result, err := call(root, nil, "code.inspect", arguments{File: "breaker.ef", Symbol: "CircuitBreaker", Target: target})
+		if err != nil {
+			t.Fatalf("%s machine inspection failed: %v", target, err)
+		}
+		response := result.(map[string]any)
+		plan, ok := response["machine"].(*compiler.MachinePlan)
+		if !ok || response["file"] != "breaker.ef" {
+			t.Fatalf("%s machine response = %#v", target, response)
+		}
+		want := compiler.CompileFor(string(source), target).FindMachine("CircuitBreaker")
+		got, _ := json.Marshal(plan)
+		expected, _ := json.Marshal(want)
+		if string(got) != string(expected) {
+			t.Fatalf("%s MCP plan differs from the compiler plan", target)
+		}
+	}
+	if _, err := call(root, nil, "code.inspect", arguments{File: "breaker.ef", Symbol: "Breaker2"}); err == nil {
+		t.Fatal("unknown machine name inspected")
+	}
+}
+
 func TestDiagnosticsReportMatchesCompilerAndBoundsResults(t *testing.T) {
 	root := t.TempDir()
 	source := `effect fn task() -> string { "ok" }

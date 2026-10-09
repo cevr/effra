@@ -1,0 +1,16 @@
+import Machines "effra/machines"
+
+enum SessionState { Idle  Active { key: string }  Closed }
+enum SessionEvent { Open { key: string }  Close  Touch  Restore { snapshot: SessionState } }
+fn sessionStep(state: SessionState, event: SessionEvent) -> Machines.Step<SessionState, void> {
+    match state, event {
+        SessionState.Active { key }, SessionEvent.Open { key: next } => Machines.Step<SessionState, void>.Stay { next: if key == next { state } else { SessionState.Idle {} } }
+        SessionState.Active, SessionEvent.Close | SessionEvent.Touch | SessionEvent.Restore => Machines.Step<SessionState, void>.Ignore {}
+        SessionState.Idle | SessionState.Closed, SessionEvent.Open | SessionEvent.Close | SessionEvent.Touch | SessionEvent.Restore => Machines.Step<SessionState, void>.Ignore {}
+    }
+}
+
+machine Session {
+    initial SessionState.Idle {}
+    step sessionStep
+}

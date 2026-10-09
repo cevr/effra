@@ -278,6 +278,16 @@ func captureOriginalSyntax(program *Program) *lexicalFacts {
 				child(id, expression(entry.Value))
 			}
 		}
+		if machine := item.Machine; machine != nil {
+			for _, binding := range machine.Bindings {
+				if !facts.complete {
+					break
+				}
+				if binding.Value != nil {
+					child(id, expression(binding.Value))
+				}
+			}
+		}
 		if codec := item.Codec; codec != nil && facts.complete {
 			// A derived codec is original declaration syntax even though its
 			// direction functions are checker-generated. Retain one bounded
@@ -366,6 +376,10 @@ func (facts *lexicalFacts) declare(item *SyntaxItem) {
 	case item.Layer != nil:
 		facts.items[item.Layer] = item
 		name(item.Layer.Span, lexicalTarget{kind: "layer", layer: item.Layer})
+	case item.Machine != nil:
+		// The machine name has no lexical target kind yet; its bound function
+		// names publish ordinary function references from the checker.
+		facts.items[item.Machine] = item
 	case item.Codec != nil:
 		facts.items[item.Codec] = item
 		name(item.Codec.Span, lexicalTarget{kind: "codec", codec: item.Codec})
@@ -449,6 +463,8 @@ func (c *checker) observeReference(node any, span Span, target lexicalTarget) {
 		_, original = facts.patterns[n]
 		original = original && c.recordFacts
 	case *Provider:
+		original = facts.items[n] != nil
+	case *Machine:
 		original = facts.items[n] != nil
 	}
 	if original {

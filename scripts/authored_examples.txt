@@ -35,3 +35,6 @@ examples/recipes-retry.ef
 examples/recipes-queue.ef
 examples/recovery-outcome.ef
 examples/recovery-codec.ef
+examples/machine-search.ef
+examples/machine-breaker.ef
+internal/compiler/bundled/machines/step.ef

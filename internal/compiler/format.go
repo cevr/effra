@@ -218,6 +218,8 @@ func buildFormatLayout(source string, program *Program, tokens []token) formatLa
 			collectFunctionBreaks(&layout, item.Function)
 		case "constant":
 			collectExpressionBreaks(&layout, item.Constant.Expr)
+		case "machine":
+			collectMachineBreaks(&layout, item.Machine)
 		}
 	}
 	for _, gap := range layout.listGaps {

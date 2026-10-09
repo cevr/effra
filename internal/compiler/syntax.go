@@ -286,6 +286,7 @@ type Program struct {
 	Services                []*Service
 	Providers               []*Provider
 	Layers                  []*Layer
+	Machines                []*Machine // machine declarations; see machines_syntax.go
 	Functions               []*Function
 	Constants               []*Constant
 	Codecs                  []*CodecDeclaration
@@ -308,6 +309,7 @@ type SyntaxItem struct {
 	Service       *Service
 	Provider      *Provider
 	Layer         *Layer
+	Machine       *Machine
 	Function      *Function
 	Constant      *Constant
 	Codec         *CodecDeclaration
@@ -876,6 +878,12 @@ func parseSyntax(source string) (program *Program, tokens []token, comments []Co
 			}
 			program.Layers = append(program.Layers, layer)
 			program.Items = append(program.Items, &SyntaxItem{Kind: "layer", Layer: layer, Span: start})
+		case "machine":
+			start := p.take().span
+			machine := p.machineDeclaration()
+			program.Machines = append(program.Machines, machine)
+			program.Items = append(program.Items, &SyntaxItem{Kind: "machine", Machine: machine, Span: start})
+			p.accept(";")
 		case "derive":
 			start := p.take().span
 			codec := p.codecDeclaration()
@@ -888,7 +896,7 @@ func parseSyntax(source string) (program *Program, tokens []token, comments []Co
 					p.failAbsent(absentInDeclaration, head.text, head.span)
 				}
 			}
-			p.fail(p.peek(), "expected error, record, enum, service, impl, layer, derive, or function declaration")
+			p.fail(p.peek(), "expected error, record, enum, service, impl, layer, machine, derive, or function declaration")
 		}
 		item := program.Items[len(program.Items)-1]
 		item.Extent = p.extent(item.Span)

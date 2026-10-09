@@ -132,13 +132,50 @@ Status: DECIDED, 2026-10-07. `machine` is an admitted declaration with a narrow 
 **Scope.** The declaration binds `initial`, `step` and optional `enter` and `complete` to ordinary named functions. Behavior stays in those functions; there is no transition, guard or error-handling sub-language.
 
 **What the declaration owns.**
-- *The static `Stay` rule*, as part of declaration checking. The declaration names the current state: the first parameter of `step` and of `complete`. Inside a match arm that narrows the current state, a constructed `Stay` argument must be the single variant the arm narrows to. An or-pattern cell that narrows to several variants, such as `SessionState.Idle | SessionState.Active { key: _ }`, accepts only `Stay(state)`, the unchanged subject. Without narrowing the value is dynamic, and the runtime defect applies. The rule follows the current state into helpers through the argument that carries it, so a helper whose S parameter is something else is not misjudged. It keys on the bundled `Step` identity and binding records, never on spelling, and applies to pure and effectful functions alike. It is mandatory, never a lint. Its diagnostic code is assigned at implementation; it is not EF138, which codecs use.
+- *The static `Stay` rule*, as part of declaration checking. The declaration names the current state: the first parameter of `step` and of `complete`. Inside a match arm that narrows the current state, a constructed `Stay` argument must be the single variant the arm narrows to. An or-pattern cell that narrows to several variants, such as `SessionState.Idle | SessionState.Active { key: _ }`, accepts only `Stay(state)`, the unchanged subject. Without narrowing the value is dynamic, and the runtime defect applies. The rule follows the current state into helpers through the argument that carries it, so a helper whose S parameter is something else is not misjudged. It keys on the bundled `Step` identity and binding records, never on spelling, and applies to pure and effectful functions alike. It is mandatory, never a lint. Its diagnostic code is EF139; it is not EF138, which codecs use.
 - *The rows.* The declaration is the nominal home of the step and completion failure rows and of the step, completion and work service rows. Spawn charges them, and `Actor<Session>` names the declaration, so public operations and rows follow from it without a caller-written tuple or row parameters on data types.
 - *Plan identity.* The declaration is the stable identity that graph tooling projects, with the bounded, non-executing walk that [inspection](#inspection-and-boundaries) specifies.
 
 **Prior art.** No compared system checks same-state statically: XState v6 avoids it with a targetless keep transition; effect-machine and gen_statem compare tags or terms at runtime; gleam_otp and Akka have no such check. All of them type handles structurally or by message type. Effra's compile-time `Stay` rule is new, and it is the reason the declaration exists.
 
 **Remaining prerequisites, all general.** The bundled `Step` enum, errors declared by distributed modules, and distributed spawn with the actor runtime. Constructor-argument inference from the expected type is ergonomics only.
+
+## Implementation status (2026-10-09)
+
+The declaration, its checks and its inspectable plan have landed; the runtime has not. What exists:
+
+- **Syntax.** `machine Name { initial <expr>; step f; enter g; complete h }` at top level, one binding per line in source order, formatted canonically. Type parameters, unknown or duplicate bindings, a bound name followed by `.`, `(` or `<`, and statechart words (`states`, `on`, `after`, `always`, `invoke`, `entry`, `exit`, `parallel`, `history`, `guard`, `context`, `actions`, `final` and similar) are EF002 parse diagnostics that say where that behavior belongs.
+- **Bundled decisions.** [`effra/machines`](../bundled-modules.md#machine-decisions) distributes `Step<S, O> { Go { next }, Stay { next }, Ignore, Reject, Done { output } }` as ordinary generic data. The checker keys on its template identity.
+- **Declaration contract (EF140).** `step` is a pure or effect function `(S, E) -> Step<S, O>` whose first parameter is the current state. `S` is a closed, non-generic user enum, and `E` is a distinct closed user enum. `complete` takes the same `S` and `O` and an outcome type distinct from `E`, so an event cannot forge a work completion. `initial` is a literal constructor of `S` with a static payload. Ordinary match diagnostics (EF117 missing or unreachable pairs, EF121 binder consistency, EF137 coverage budget) apply unchanged because step functions are ordinary code, and so do undeclared failures and missing services (EF108).
+- **Static `Stay` rule (EF139).** As specified in the [admission gate](#construct-admission-gate). It is keyed on binder identity, so aliases and shadowing are exact. Or-pattern arms that admit several variants accept only `Stay(state)`. The rule follows helpers to depth 4 through the argument that carries the state, and anchors the diagnostic at the caller's call site, naming the helper chain. An unnarrowed literal `Stay` is dynamic and left to the runtime defect. The stricter reading, which rejects every literal `Stay` outside narrowing, was considered and rejected because the gate's text makes that case dynamic. The spike's 18 probes are ported in `internal/compiler/testdata/machines/`, with two corrections. A helper whose state parameter comes second is now checked through that parameter. A helper whose S parameter is not the current state is accepted, which fixes the spike's false positive.
+- **Not yet admitted (EF141), never passed through.** The checker refuses three things:
+  - *`enter`.* Its deferred `Outcome` recipe needs typed recipe values (#52), payload-aware recovery of work failures (#19) and checked entry ownership (#11, #47). Because `enter` is refused, `complete` without `enter` is an EF140 contract error.
+  - *Using a machine name as a value.* That would be spawn or `Actor<M>`, which needs #11 and #47.
+  - *Non-portable payloads.* A conservative data-only check refuses callables, recipes, provider recipes and host, provider or runtime handles in `S`, `E` and `O` payloads until portable ownership (#11) owns this rule.
+- **Budgets (EF142).** 256 declarations per module, 65,536 walk steps and 4,096 transitions per declaration.
+- **Canonical plan.** Each declaration is published under `machines` in `ef check` and `project.check` and through `ef inspect FILE Machine` and `code.inspect`, only for fully checked source. The plan carries:
+  - a stable `machine:<module>:<name>` identity and the state, event and output identities;
+  - the initial variant;
+  - the bound functions with kind (pure or effect), failures, services and full contract, plus per-role terminal-failure and requirement contributions;
+  - possible transitions as from-set × trigger-set → decision, each with a `literal`, `current` or `conservative` target precision, a guard flag, a helper chain and a source span;
+  - per-state `initial` and `enterable` facts, and whether some decision can finish;
+  - the evidence label `checked-static-machine-plan` and the plan's limitations.
+
+  `enterable` is a sound over-approximation from `initial` over `go`, `stay` and conservative edges. It is published as a fact, not a diagnostic, and it is not a reachability proof. Decisions the walk cannot classify become `any` transitions with conservative targets. `ef graph --kind machine` and MCP `project.graph` project the same plan as a GraphViewV1 ([tooling](../tooling.md#graph-views)). Planning never evaluates a step: a step that recurses forever still plans, as one conservative `any` transition.
+- **Emission.** The declaration emits nothing. Step functions are ordinary functions that run on Go and JS, as [`machine-search.ef`](../../examples/machine-search.ef) and [`machine-breaker.ef`](../../examples/machine-breaker.ef) show: a pure step, and an effectful step with a declared failure and a service.
+
+Still gated, all on general mechanisms rather than on the declaration:
+
+- *#19.* Payload-aware recovery of entry-work failures into `Outcome`, and the explicit-recovery-versus-terminal-failure cases in delivery item 3.
+- *#11 and #47.* `Actor<M>`, spawn charging of the declaration's rows, send, call and result operations, terminal failures reaching waiting observations, portable payload ownership in place of the conservative check, and runtime snapshots.
+- *#52.* Typed recipe values for the `enter` result.
+- *Delivery items 3 and 4 and the measurements in item 2.* Runtime execution, frontend, emission and adversarial cost measurements (benchmarks-last), request-owned HTTP cancellation, and a non-server actor.
+
+Prior art for the decisions here:
+
+- *Anchoring the current state on the first parameter.* gen_statem passes the state as a fixed callback argument, and effect-machine's handlers receive the state explicitly. The spike's "only S-typed parameter" heuristic is rejected.
+- *A static `Stay` rule with a dynamic fallback.* XState v6 uses targetless transitions, and gen_statem's `keep_state` and effect-machine compare at runtime. Rust typestate makes illegal states unrepresentable only for statically known states; Effra checks the narrowed cases and leaves dynamic values to the runtime defect.
+- *Refusing statechart words.* XState's hierarchy, parallel regions, history and delays stay out of the first profile.
 
 ## Acceptance and delivery
 

@@ -369,11 +369,11 @@ Each row states what has landed on this branch, what is in flight and what is on
 | Payload-aware recovery: `.recover<E>(handler)` passes the error's fields to an effectful handler | Landed on Go and JS ([`recovery-outcome.ef`](examples/recovery-outcome.ef), [`recovery-codec.ef`](examples/recovery-codec.ef)); reified `Exit` is not exposed |
 | Layer runtime: concurrent shared acquisition, rollback and cleanup in reverse order | Shared build-owned acquisition with individually cancellable waiters landed on Go and JS; the remaining units are in progress |
 | Codecs derived from records and enums, with explicit wire ↔ domain transformations | Structural JSON derivation through [`effra/json`](docs/bundled-modules.md) runs on Go and JS; transformations in progress |
-| Graph views: `ef graph --kind layers --format mermaid\|dot`, plus MCP and editor views | In progress |
+| Graph views: `ef graph --kind layers\|machine --format mermaid\|dot`, plus MCP and editor views | In progress |
 | HTTP server with bounded, owned shutdown (`Http.listen`) | Landed on Go and JS ([`http-transport.ef`](examples/http-transport.ef)); typed endpoints, streaming bodies and codecs are not built |
 | Rich Go interop: host types, methods, `io.Reader`/`io.Writer`, `context` | Host types, methods, interface assignment, checked I/O and `context` forwarding landed; owned resources and callbacks in progress |
 | Library modules: `pub` exports and module-qualified identity | Designed |
-| State machines: ordinary step functions run by an owned runtime | [Specified](docs/specs/state-machines.md); not built |
+| State machines: ordinary step functions run by an owned runtime | The `machine` declaration, its static `Stay` check and inspectable plans landed ([`machine-search.ef`](examples/machine-search.ef)); the runtime is specified, not built |
 | Actors with explicit mailbox budgets and owned behavior | [Specified](docs/specs/actors.md); not built |
 | Evidence and proofs: values that carry what was checked | [Designed](docs/research/opaque-values-and-evidence.md) |
 
@@ -403,9 +403,9 @@ Service laws, such as "decode after encode returns the input", become obligation
 
 ### State machines from ordinary functions
 
-The transition table in [the tour](#matching-several-values-at-once) already compiles: a multi-subject match whose every state and event pair is checked. Running it as a machine is specified but not built. In [the machine spec](docs/specs/state-machines.md), an owned runtime admits events, runs each step and owns the work each state starts, as one form of [actor](docs/specs/actors.md) behavior. A step can be a pure function or an effect with its own failures and services.
+The transition table in [the tour](#matching-several-values-at-once) already compiles: a multi-subject match whose every state and event pair is checked. Running it as a machine is specified; the declaration and its checks have landed, the runtime has not. In [the machine spec](docs/specs/state-machines.md), an owned runtime admits events, runs each step and owns the work each state starts, as one form of [actor](docs/specs/actors.md) behavior. A step can be a pure function or an effect with its own failures and services.
 
-A machine will be a small `machine` declaration that names its initial state and its ordinary step functions. The declaration earns its place because the compiler checks something no library can: a `Stay` decision must keep the state's variant. Behavior stays in ordinary functions.
+A machine is a small `machine` declaration that names its initial state and its ordinary step functions. The declaration earns its place because the compiler checks something no library can: a `Stay` decision must keep the state's variant. Behavior stays in ordinary functions.
 
 ## Try it
 
