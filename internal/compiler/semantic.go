@@ -451,6 +451,9 @@ type checker struct {
 	ownershipReports    []ownershipReport
 	reportingFunction   *Function
 	suppressDiagnostics bool
+	// erasedCodes are diagnostic codes dropped where they are reported (see
+	// checkParsedErasing); nil for every public compilation.
+	erasedCodes map[string]bool
 	// source is the checked text, used to place suggested edits.
 	source            string
 	publicationBytes  int
@@ -2196,6 +2199,14 @@ func parseSource(source, target string) (*Result, *Program) {
 // semantic projection of the program parseSource returned. source is the text
 // the program was parsed from.
 func checkParsed(r *Result, program *Program, dir, source string) *Result {
+	return checkParsedErasing(r, program, dir, source, nil)
+}
+
+// checkParsedErasing checks with the diagnostics of the erased codes
+// dropped where they are reported. It exists to witness runtime truth: the
+// ownership matrix executes a refused program as if its EF123 and EF107
+// refusals had not been reported. No public entry point erases.
+func checkParsedErasing(r *Result, program *Program, dir, source string, erased map[string]bool) *Result {
 	start := time.Now()
 	r.Program = program
 	r.lexical = captureOriginalSyntax(program)
@@ -2203,6 +2214,7 @@ func checkParsed(r *Result, program *Program, dir, source string) *Result {
 	r.loadBundledImports(source)
 	c := newChecker(program, r)
 	c.source = source
+	c.erasedCodes = erased
 	checkStart := time.Now()
 	c.check()
 	c.observeDeclarationSyntax()
@@ -2278,7 +2290,7 @@ func (c *checker) pipedArgumentMismatch(call, piped *Expr, value checkedExpressi
 }
 
 func (c *checker) diagnostic(code, message string, span Span) {
-	if c.suppressDiagnostics {
+	if c.suppressDiagnostics || c.erasedCodes[code] {
 		return
 	}
 	c.result.Diagnostics = append(c.result.Diagnostics, Diagnostic{Code: code, Message: message, Span: span})

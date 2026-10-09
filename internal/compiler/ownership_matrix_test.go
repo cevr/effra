@@ -156,8 +156,10 @@ func ownershipFixture(t *testing.T) string {
 }
 
 type ownershipMatrix struct {
-	sources   map[string]string
-	truths    map[string]string
+	sources map[string]string
+	truths  map[string]string
+	// witnesses maps a probe to the probe whose execution witnesses it.
+	witnesses map[string]string
 	decisions []ownershipDecision
 }
 
@@ -167,7 +169,7 @@ func loadOwnershipMatrix(t *testing.T, fixture string, decide bool) ownershipMat
 	t.Helper()
 	var truthRows []ownershipTruth
 	var probes []ownershipProbe
-	m := ownershipMatrix{sources: map[string]string{}, truths: map[string]string{}}
+	m := ownershipMatrix{sources: map[string]string{}, truths: map[string]string{}, witnesses: map[string]string{}}
 	readOwnershipJSON(t, filepath.Join("testdata", "ownership_matrix", "truth.json"), &truthRows)
 	readOwnershipJSON(t, filepath.Join("testdata", "ownership_probes", "probes.json"), &probes)
 	programs := ownershipMatrixPrograms(fixture)
@@ -198,6 +200,9 @@ func loadOwnershipMatrix(t *testing.T, fixture string, decide bool) ownershipMat
 			t.Fatal("missing probe source", probe.Name)
 		}
 		m.sources["probe/"+probe.Name] = source
+		if probe.Witness != "" {
+			m.witnesses["probe/"+probe.Name] = "probe/" + probe.Witness
+		}
 		for target, truth := range map[string]string{"go": probe.Go, "js": probe.JS} {
 			if truth == "" {
 				continue
@@ -226,6 +231,133 @@ func TestOwnershipMatrixMatchesTruth(t *testing.T) {
 	for _, key := range slices.Sorted(maps.Keys(counts)) {
 		t.Logf("%s %d", key, counts[key])
 	}
+	computed, policy := unwitnessedOwnershipRows(m)
+	for _, key := range policy {
+		t.Errorf("declared-row-policy row %s has no executed witness", key)
+	}
+	for _, drift := range ownershipMismatchDrift(computed, readKnownOwnershipMismatches(t), unwitnessedMismatch) {
+		t.Error(drift)
+	}
+}
+
+// ownershipMismatch is one reviewed difference between a row's recorded
+// truth and what executing it shows (known_mismatches.json).
+type ownershipMismatch struct {
+	Recorded string `json:"recorded"`
+	Executed string `json:"executed"`
+	Reason   string `json:"reason"`
+}
+
+// ownershipUnwitnessed is the executed class of a row whose program keeps a
+// diagnostic after its EF123 and EF107 refusals are erased: it cannot run,
+// so it has no executed witness.
+const ownershipUnwitnessed = "unknown:diagnostics"
+
+func unwitnessedMismatch(m ownershipMismatch) bool { return m.Executed == ownershipUnwitnessed }
+
+func readKnownOwnershipMismatches(t *testing.T) map[string]ownershipMismatch {
+	t.Helper()
+	known := map[string]ownershipMismatch{}
+	readOwnershipJSON(t, filepath.Join("testdata", "ownership_matrix", "known_mismatches.json"), &known)
+	return known
+}
+
+// ownershipMismatchKey is the key scripts/ownership_truth.py records.
+func ownershipMismatchKey(row, target string) string { return row + " [" + target + "]" }
+
+// compileErasingOwnership compiles source as the erased checker of
+// scripts/ownership_truth.py does: EF123 and EF107 are dropped where they
+// are reported, so a refused program is checked to completion.
+func compileErasingOwnership(source, target string) *Result {
+	r, program := parseSource(source, target)
+	if program == nil {
+		return r
+	}
+	return checkParsedErasing(r, program, ".", source, map[string]bool{"EF123": true, "EF107": true})
+}
+
+// unwitnessedOwnershipRows computes, without executing anything, every row
+// which has no executed witness: the program that executes it (the row, or
+// the probe that witnesses it) keeps a diagnostic once its ownership and
+// row refusals are erased. A program the checker admits reported nothing to
+// erase, so only refused programs are rechecked. A declared-row-policy row
+// is never a mismatch; one without a witness is returned separately.
+func unwitnessedOwnershipRows(m ownershipMatrix) (map[string]ownershipMismatch, []string) {
+	refused := map[string]bool{}
+	for _, decision := range m.decisions {
+		if len(decision.diagnostics) > 0 {
+			refused[decision.Set+"/"+decision.Name+"/"+decision.Target] = true
+		}
+	}
+	type row struct{ key, executes, target string }
+	var rows []row
+	for _, truthKey := range slices.Sorted(maps.Keys(m.truths)) {
+		cut := strings.LastIndex(truthKey, "/")
+		key, target := truthKey[:cut], truthKey[cut+1:]
+		executes := key
+		if witness, ok := m.witnesses[key]; ok {
+			executes = witness
+		}
+		if refused[executes+"/"+target] {
+			rows = append(rows, row{key, executes, target})
+		}
+	}
+	unwitnessed := make([]bool, len(rows))
+	var wait sync.WaitGroup
+	next := make(chan int)
+	for range runtime.GOMAXPROCS(0) {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for i := range next {
+				unwitnessed[i] = len(compileErasingOwnership(m.sources[rows[i].executes], rows[i].target).Diagnostics) > 0
+			}
+		}()
+	}
+	for i := range rows {
+		next <- i
+	}
+	close(next)
+	wait.Wait()
+	computed := map[string]ownershipMismatch{}
+	var policy []string
+	for i, r := range rows {
+		if !unwitnessed[i] {
+			continue
+		}
+		recorded := m.truths[r.key+"/"+r.target]
+		if recorded == "declared-row-policy" {
+			policy = append(policy, ownershipMismatchKey(r.key, r.target))
+			continue
+		}
+		computed[ownershipMismatchKey(r.key, r.target)] = ownershipMismatch{Recorded: recorded, Executed: ownershipUnwitnessed}
+	}
+	return computed, policy
+}
+
+// ownershipMismatchDrift compares the mismatches computed for one family
+// with the reviewed entries of that family: a computed mismatch which is not
+// reviewed (new), one whose recorded or executed class differs from its
+// entry (changed), and an entry which no longer happens (vanished) are each
+// drift.
+func ownershipMismatchDrift(computed, known map[string]ownershipMismatch, family func(ownershipMismatch) bool) []string {
+	var drift []string
+	for _, key := range slices.Sorted(maps.Keys(computed)) {
+		got := computed[key]
+		want, ok := known[key]
+		switch {
+		case !ok:
+			drift = append(drift, fmt.Sprintf("new ownership mismatch %s: recorded %s, executed %s", key, got.Recorded, got.Executed))
+		case want.Recorded != got.Recorded || want.Executed != got.Executed:
+			drift = append(drift, fmt.Sprintf("changed ownership mismatch %s: recorded %s, executed %s; reviewed recorded %s, executed %s", key, got.Recorded, got.Executed, want.Recorded, want.Executed))
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(known)) {
+		if _, ok := computed[key]; !ok && family(known[key]) {
+			drift = append(drift, fmt.Sprintf("vanished ownership mismatch %s: reviewed as recorded %s, executed %s, it no longer happens", key, known[key].Recorded, known[key].Executed))
+		}
+	}
+	return drift
 }
 
 // TestOwnershipMatrixRaisingTwins keeps the truth of every row whose use
@@ -335,6 +467,79 @@ func TestOwnershipMatrixNativeTruth(t *testing.T) {
 		if got := ownershipNativeTruth(t, r); got != truth {
 			t.Errorf("%s: native truth %s, recorded %s", key, got, truth)
 		}
+	}
+	// Every reviewed mismatch with an executed witness is executed again with
+	// the erased checker and the real Go backend: its recorded class must
+	// still be that of truth.json and its executed class must not change or
+	// vanish. (Rows without an executed witness are enforced by
+	// TestOwnershipMatrixMatchesTruth; finding a new executed mismatch among
+	// rows that are not reviewed needs scripts/ownership_truth.py's full run.)
+	known := readKnownOwnershipMismatches(t)
+	executed := map[string]ownershipMismatch{}
+	for _, key := range slices.Sorted(maps.Keys(known)) {
+		if unwitnessedMismatch(known[key]) {
+			continue
+		}
+		row, target, ok := strings.Cut(strings.TrimSuffix(key, "]"), " [")
+		if !ok || target != "go" {
+			t.Fatalf("%s: a reviewed executed mismatch needs a native Go witness", key)
+		}
+		recorded, exists := m.truths[row+"/"+target]
+		if !exists {
+			t.Errorf("%s: reviewed mismatch names no matrix row", key)
+			continue
+		}
+		r := compileErasingOwnership(m.sources[row], target)
+		if !r.Checked {
+			executed[key] = ownershipMismatch{Recorded: recorded, Executed: ownershipUnwitnessed}
+			continue
+		}
+		if got := ownershipNativeTruth(t, r); got != recorded {
+			executed[key] = ownershipMismatch{Recorded: recorded, Executed: got}
+		}
+	}
+	for _, drift := range ownershipMismatchDrift(executed, known, func(m ownershipMismatch) bool { return !unwitnessedMismatch(m) }) {
+		t.Error(drift)
+	}
+}
+
+// TestOwnershipMismatchDriftDetectsEveryDirection mutates the reviewed set
+// against the computed one in each direction the gate must refuse.
+func TestOwnershipMismatchDriftDetectsEveryDirection(t *testing.T) {
+	computed := map[string]ownershipMismatch{
+		"matrix/a [go]": {Recorded: "unsafe", Executed: ownershipUnwitnessed},
+		"matrix/b [js]": {Recorded: "safe", Executed: ownershipUnwitnessed},
+	}
+	reviewed := func() map[string]ownershipMismatch {
+		return map[string]ownershipMismatch{
+			"matrix/a [go]": {Recorded: "unsafe", Executed: ownershipUnwitnessed, Reason: "reviewed"},
+			"matrix/b [js]": {Recorded: "safe", Executed: ownershipUnwitnessed, Reason: "reviewed"},
+			"matrix/c [go]": {Recorded: "unsafe", Executed: "safe", Reason: "another family"},
+		}
+	}
+	if drift := ownershipMismatchDrift(computed, reviewed(), unwitnessedMismatch); len(drift) != 0 {
+		t.Fatalf("reviewed set drifts: %v", drift)
+	}
+	for _, test := range []struct {
+		name, want string
+		mutate     func(map[string]ownershipMismatch)
+	}{
+		{"new", "new ownership mismatch matrix/a [go]", func(k map[string]ownershipMismatch) { delete(k, "matrix/a [go]") }},
+		{"changed", "changed ownership mismatch matrix/b [js]", func(k map[string]ownershipMismatch) {
+			k["matrix/b [js]"] = ownershipMismatch{Recorded: "unsafe", Executed: ownershipUnwitnessed}
+		}},
+		{"vanished", "vanished ownership mismatch matrix/d [go]", func(k map[string]ownershipMismatch) {
+			k["matrix/d [go]"] = ownershipMismatch{Recorded: "unsafe", Executed: ownershipUnwitnessed}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			known := reviewed()
+			test.mutate(known)
+			drift := ownershipMismatchDrift(computed, known, unwitnessedMismatch)
+			if len(drift) != 1 || !strings.HasPrefix(drift[0], test.want) {
+				t.Fatalf("drift = %v, want %q", drift, test.want)
+			}
+		})
 	}
 }
 
