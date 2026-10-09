@@ -1,7 +1,7 @@
 {
  "schema": "effra.size-conformance/2",
  "identity": {
-  "commit": "e7e82283cea8ed43615df704a5266542bffcdaf1",
+  "commit": "270016eaf2f0782cfba21f00b6335a494929bdbd",
   "dirty": false,
   "toolchain": {
    "env": {
@@ -64,7 +64,7 @@
    "codec.go": "4fbe84f34519754f83f41d19f1635a82346b57fa4d8491dbd1c6075d8590f6b0",
    "codec_json.go": "4116e9e6b8bde24f5cf03a8d15edeedb693e237d8bea1cab77d6b47206db7cde",
    "console.go": "ca3ff1d53ed9c1847edf1b4c4fa967c88469d9330fc606aabcf69a1135c63918",
-   "effect.go": "8d79b29e35e70d38128f59c84edb4e77a6d0f3aff5fcf4b98ad229192ad6e206",
+   "effect.go": "85358f6dbd64a6ce8962155dd137d119e6751653c83d306c90f3d6b119c2eba8",
    "env.go": "4903cda8568f8f6ecf10f433be0b28fb64dae8878494d34f4f7b56b66fb8e93a",
    "fiber.go": "1a58a66ee526fa69f245f4b28a6d587d51d5821408604e4f9d95ea75af9eb8f1",
    "files.go": "8c3050b25815d71d5a49221f67fb061c6db30c2399b78b14aa7aebdeeb69cb9b",
@@ -72,18 +72,18 @@
    "inspect.go": "958bd0c8cb80dd7407af4a6f83b3c19fadd4672d9083ddf371bc117f7bfc5a9b",
    "interop.go": "2bdae97b82660c9307d068f95aee9f47102d98e9234e6f6ca780cfca60f851e3",
    "latch.go": "1614ff7c7548fa8eda6fa3899ebd5d7856bebee984476668ae66818a94caf1ee",
-   "layers.go": "fe75c6180ed2eeb3cee8c7808b05cc9aa15ea5652444e0d453b693bf7977bd94",
+   "layers.go": "c438fffbb7ba7e973fa6e16878092c2ae2646587bfa56e260469faf500b57ce7",
    "managed.go": "4be0f11dcc5263a265d1506168869df6934e3ba2349ecca8260a842d90ad3951",
    "scheduler.go": "1ddf46593f1b676419587cdcbf54a97e0b55223fdb0c49314839b6a077f9c21c",
-   "scope.go": "04fa0c7306b147f1e988b3a050fe636064763de172efdfe90765e552e4ea6fb8"
+   "scope.go": "a50fa5e346aee027583f41601db6e18c5bd1f76f403ad36f20bfdeb611acaf3d"
   }
  },
  "distribution": {
-  "producer": "effra/checker-abi-9/bundled-interface-4",
-  "executableBytes": 17140576,
+  "producer": "effra/checker-abi-10/bundled-interface-5",
+  "executableBytes": 17784453,
   "runtimeModules": 10,
   "runtimeSourceFiles": 15,
-  "runtimeSourceBytes": 107840
+  "runtimeSourceBytes": 110726
  },
  "fixtures": {
   "codec": {
@@ -101,7 +101,7 @@
      "runtime-module": 2
     },
     "mainBytes": 3925,
-    "runtimeBytes": 74832,
+    "runtimeBytes": 77238,
     "runtimeFiles": [
      "codec.go",
      "codec_json.go",
@@ -144,8 +144,8 @@
      "platform": []
     },
     "binary": {
-     "bytes": 2787773,
-     "sha256": "e4f1386c708ffd765fd42f9a089330777714aebb37b93398f776278ed6afce07",
+     "bytes": 2788461,
+     "sha256": "c5c521ce6995ca1250201143eabe2dc6f67396b6c58f8946482b4853908ea823",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -162,7 +162,7 @@
     "symbols": {
      "tool": "go tool nm -size -type",
      "count": 2904,
-     "listingSha256": "07c9b6f0be4ccaac12fb7f9b5b35e6c18ee325f1f47a9baf5e3acc27897e3c76",
+     "listingSha256": "e1bf0ba1e08f096b641cb99d13cb0e829f2d39908f92ce363c84e92ec5ef3c76",
      "packages": [
       {
        "package": "(constant)",
@@ -197,8 +197,8 @@
       {
        "package": "effra.generated/runtime",
        "symbols": 81,
-       "textBytes": 54813,
-       "dataBytes": 384
+       "textBytes": 56561,
+       "dataBytes": 440
       },
       {
        "package": "errors",
@@ -222,7 +222,7 @@
        "package": "go:",
        "symbols": 16,
        "textBytes": 2,
-       "dataBytes": 146478
+       "dataBytes": 146582
       },
       {
        "package": "internal/abi",
@@ -408,7 +408,7 @@
        "package": "runtime",
        "symbols": 1632,
        "textBytes": 444011,
-       "dataBytes": 235117
+       "dataBytes": 235124
       },
       {
        "package": "runtime/debug",
@@ -480,7 +480,7 @@
     },
     "stripped": {
      "bytes": 1818784,
-     "sha256": "2723eac1c98fe8111416bd128844541d6fb0e54c99e3a408e7a6fc4ec482722c",
+     "sha256": "5923b6bb565b72ae4de91baa29760e193efc5f968e559ccec932bc117103b675",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -510,8 +510,8 @@
       ]
      },
      "binary": {
-      "bytes": 5672730,
-      "sha256": "39b1479d74583cb4527473cc730a6938e5315be858524510ac6d44a0d3a698f0",
+      "bytes": 5678210,
+      "sha256": "f0192a920f44d944ffcb4546afe082a867ecf2eae1986068343d5ae56393dbaf",
       "build": {
        "goVersion": "go1.27.0",
        "settings": {
@@ -528,7 +528,7 @@
      "symbols": {
       "tool": "go tool nm -size -type",
       "count": 5431,
-      "listingSha256": "5d6eecfa23d0c84abb683593cda4eeaf4854576471462ddb78c8d32e5dc1425a",
+      "listingSha256": "7df972a172f88e375367aff1f69d59c9f92138634152c4db032aecf911cfd1b7",
       "packages": [
        {
         "package": "(constant)",
@@ -875,8 +875,8 @@
        {
         "package": "effra.generated/runtime",
         "symbols": 82,
-        "textBytes": 55171,
-        "dataBytes": 384
+        "textBytes": 56919,
+        "dataBytes": 440
        },
        {
         "package": "encoding/asn1",
@@ -954,7 +954,7 @@
         "package": "go:",
         "symbols": 18,
         "textBytes": 163,
-        "dataBytes": 243022
+        "dataBytes": 243126
        },
        {
         "package": "hash",
@@ -1266,7 +1266,7 @@
         "package": "runtime",
         "symbols": 1753,
         "textBytes": 464001,
-        "dataBytes": 240009
+        "dataBytes": 240020
        },
        {
         "package": "runtime/debug",
@@ -1421,8 +1421,8 @@
       ]
      },
      "stripped": {
-      "bytes": 3825824,
-      "sha256": "585de854353276c23b1073f4538c581f2a6c8655bec0959a1a82336ae2c8cb34",
+      "bytes": 3829920,
+      "sha256": "c89080d606a2cb39886b71d0be89026e6f1d63273bebad00f310989f47ed8dc9",
       "build": {
        "goVersion": "go1.27.0",
        "settings": {
@@ -1439,16 +1439,16 @@
     }
    },
    "js": {
-    "moduleBytes": 25311,
+    "moduleBytes": 27252,
     "applicationMinified": {
-     "bytes": 12185,
-     "sha256": "6fe5541988b5118b7bb8ab39be62372d030dab2be91850626375cfa5ffcda921"
+     "bytes": 12767,
+     "sha256": "c7340baf7b5ce7736594ad61a9bd9b51e1631db95f6ac06f26022cda4554c4b1"
     },
     "deploymentMinified": {
-     "bytes": 41600,
-     "sha256": "4b507c5191f7eb95a45d2f56de6a95ed07a31186b9d665e83f13ef943581b1c5"
+     "bytes": 42131,
+     "sha256": "360dccf59317cc5028989546a744be7a16e08f969053bb6be6f28d46c8fd5ec4"
     },
-    "deploymentDeltaBytes": 29415,
+    "deploymentDeltaBytes": 29364,
     "externalRuntime": [
      {
       "specifier": "effect",
@@ -1464,7 +1464,7 @@
      }
     ],
     "declarationBytes": 3124,
-    "moduleSha256": "3be0a768c4ad463dad7883106fade99146e806d409af06023475a7185f1797b2",
+    "moduleSha256": "ca176e33407f43a6c21d1ef6ddd80488a7e7cbfd07752bc06b611cb02520a062",
     "requirements": {
      "codec-plan": 1,
      "declaration": 1,
@@ -1484,7 +1484,7 @@
      "runtime-module": 1
     },
     "mainBytes": 2144,
-    "runtimeBytes": 46443,
+    "runtimeBytes": 48849,
     "runtimeFiles": [
      "effect.go",
      "fiber.go",
@@ -1523,8 +1523,8 @@
      "platform": []
     },
     "binary": {
-     "bytes": 2669458,
-     "sha256": "d42574b5ddca6e5d71291e713151ff9018c94e3b30b7b845cb3e96a66313effe",
+     "bytes": 2678394,
+     "sha256": "662cf31eddb50f1df05a184736a1082640c78133ed3b7c0fb781d47a1e20e856",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -1541,7 +1541,7 @@
     "symbols": {
      "tool": "go tool nm -size -type",
      "count": 2848,
-     "listingSha256": "41bba7a35c7a1e4285e8dc4f191821feb60cc56ac0a6e03fd5ffae5da9a052a2",
+     "listingSha256": "3be54ec4c075061949fffb392e9f09d727f8d88944056b9b429a4ab0d2abbb8c",
      "packages": [
       {
        "package": "(constant)",
@@ -1576,8 +1576,8 @@
       {
        "package": "effra.generated/runtime",
        "symbols": 50,
-       "textBytes": 18094,
-       "dataBytes": 272
+       "textBytes": 19842,
+       "dataBytes": 304
       },
       {
        "package": "errors",
@@ -1601,7 +1601,7 @@
        "package": "go:",
        "symbols": 16,
        "textBytes": 2,
-       "dataBytes": 139542
+       "dataBytes": 139646
       },
       {
        "package": "internal/abi",
@@ -1787,7 +1787,7 @@
        "package": "runtime",
        "symbols": 1632,
        "textBytes": 444011,
-       "dataBytes": 234885
+       "dataBytes": 234896
       },
       {
        "package": "runtime/debug",
@@ -1858,8 +1858,8 @@
      ]
     },
     "stripped": {
-     "bytes": 1732768,
-     "sha256": "f730d66e48f7cc1e0b1f0fa1a748c09e847eee9e5b3451d1eadaccb62f13770b",
+     "bytes": 1740960,
+     "sha256": "aa6239c81c1b520ea1553bd036eaac710b44c18af346ff26deebdc5dd2c4701b",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -1875,16 +1875,16 @@
     }
    },
    "js": {
-    "moduleBytes": 4092,
+    "moduleBytes": 6033,
     "applicationMinified": {
-     "bytes": 1739,
-     "sha256": "09358d0e30b8716cf8577f64bd4ed927c45b49e2599927c52df58d5f1478e001"
+     "bytes": 2312,
+     "sha256": "bc11502641d147c8c1aac42126c282167e63b149d10ece0a64755fcd27494507"
     },
     "deploymentMinified": {
-     "bytes": 30660,
-     "sha256": "fae3317e1a887b6555e20ea0f5f8f5a27da78ed69baf68e123c29bc12db7a1bb"
+     "bytes": 31201,
+     "sha256": "735bc625dd4ea4027d9bb532237b6d44ec9a4d5233e7dcc7cec77ff7bbf40c31"
     },
-    "deploymentDeltaBytes": 28921,
+    "deploymentDeltaBytes": 28889,
     "externalRuntime": [
      {
       "specifier": "effect",
@@ -1900,7 +1900,7 @@
      }
     ],
     "declarationBytes": 2928,
-    "moduleSha256": "1ed91c11dbf5c037fdd4602ca6eb1aa34e86c2b5d6b50708564b54b398a9f6b9",
+    "moduleSha256": "d592b927b622fbc8dda51ba6575451202699014dc4f7c1b473c6106500a2b531",
     "requirements": {
      "function": 4
     }
@@ -1922,7 +1922,7 @@
      "service": 1
     },
     "mainBytes": 6572,
-    "runtimeBytes": 59589,
+    "runtimeBytes": 61995,
     "runtimeFiles": [
      "effect.go",
      "fiber.go",
@@ -1970,8 +1970,8 @@
      ]
     },
     "binary": {
-     "bytes": 8825391,
-     "sha256": "6760a0f9a7eb449e4a01c643183b8ae930b8e11e83e75075fb3d969cddd2516a",
+     "bytes": 8835591,
+     "sha256": "e1e6b86582c2a375d7286c7fe7260b62bd1e5f15cab9d2e775ab8c22d2970272",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -1988,7 +1988,7 @@
     "symbols": {
      "tool": "go tool nm -size -type",
      "count": 8482,
-     "listingSha256": "bbc98abc59b38cb0fb7cf50cc6611f87c0ca4a968685205862e62f9d40233af4",
+     "listingSha256": "9b4565f6dca963d89038c4a77c685ad424429a098fa4448d6b053f7203347b69",
      "packages": [
       {
        "package": "(constant)",
@@ -2413,8 +2413,8 @@
       {
        "package": "effra.generated/runtime",
        "symbols": 181,
-       "textBytes": 62879,
-       "dataBytes": 1424
+       "textBytes": 65770,
+       "dataBytes": 1584
       },
       {
        "package": "encoding/asn1",
@@ -2456,7 +2456,7 @@
        "package": "go:",
        "symbols": 20,
        "textBytes": 323,
-       "dataBytes": 375950
+       "dataBytes": 376158
       },
       {
        "package": "hash",
@@ -2792,7 +2792,7 @@
        "package": "runtime",
        "symbols": 1777,
        "textBytes": 470235,
-       "dataBytes": 246050
+       "dataBytes": 246066
       },
       {
        "package": "runtime/debug",
@@ -2965,8 +2965,8 @@
      ]
     },
     "stripped": {
-     "bytes": 5992608,
-     "sha256": "76f615c5c37720bd16da9c88c7a255292036ba484206d8b5a1d8d0374daa8d4f",
+     "bytes": 6000800,
+     "sha256": "998a15bf2d934c9c8d125335d3b95051915189a8da555864ad48b57e4b7b06b3",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -2982,16 +2982,16 @@
     }
    },
    "js": {
-    "moduleBytes": 16475,
+    "moduleBytes": 18416,
     "applicationMinified": {
-     "bytes": 7016,
-     "sha256": "47c7115f23e36fde77369660c5e27fce9bbc8ed47d2bdeae6ed36f14f33fcffe"
+     "bytes": 7597,
+     "sha256": "4d24e4fdefb64f81d7561d096be290f834421fdec77e6c24f33c281a7e941f40"
     },
     "deploymentMinified": {
-     "bytes": 36541,
-     "sha256": "6c2ea7c2cd533a1c33da504cd7771edaa382f9eda43c8e605338da5758cb2170"
+     "bytes": 37076,
+     "sha256": "5206a3670fa45837ad93a1944e4993031d1662337eccbcd1b0cdd0d3c5695e40"
     },
-    "deploymentDeltaBytes": 29525,
+    "deploymentDeltaBytes": 29479,
     "externalRuntime": [
      {
       "specifier": "effect",
@@ -3012,7 +3012,7 @@
      }
     ],
     "declarationBytes": 5565,
-    "moduleSha256": "9c4af9b03fe589e2eb0dfcd2d5446ca9ceda8060693025e49a928647ba164a77",
+    "moduleSha256": "7b81a65694d9e38050385bbef97d0739aeba7cbfd2f9df488be0f4818ff7790b",
     "requirements": {
      "callable-value": 1,
      "declaration": 4,
@@ -3039,7 +3039,7 @@
      "service": 2
     },
     "mainBytes": 8414,
-    "runtimeBytes": 46443,
+    "runtimeBytes": 48849,
     "runtimeFiles": [
      "effect.go",
      "fiber.go",
@@ -3078,8 +3078,8 @@
      "platform": []
     },
     "binary": {
-     "bytes": 2813732,
-     "sha256": "fb9e46fca88f03a8c58bc2163793995469ae8b04ee2e7ad077685d969d7e2dfe",
+     "bytes": 2824163,
+     "sha256": "3c37587a8e3d3f6724737ce61ea480cdb5cb5e1913fe4af1a46524a76e904b72",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -3095,8 +3095,8 @@
     },
     "symbols": {
      "tool": "go tool nm -size -type",
-     "count": 3015,
-     "listingSha256": "95b309754374712d5771dc1eeffef7e46a6c7ef2853f4db5da5051acb6a3eb65",
+     "count": 3018,
+     "listingSha256": "fd126551ab42a9853e6914c54d17b17d09187b4807a431b57988c8c7a20f57ef",
      "packages": [
       {
        "package": "(constant)",
@@ -3130,9 +3130,9 @@
       },
       {
        "package": "effra.generated/runtime",
-       "symbols": 166,
-       "textBytes": 55064,
-       "dataBytes": 1184
+       "symbols": 169,
+       "textBytes": 59651,
+       "dataBytes": 1288
       },
       {
        "package": "errors",
@@ -3156,7 +3156,7 @@
        "package": "go:",
        "symbols": 16,
        "textBytes": 2,
-       "dataBytes": 144990
+       "dataBytes": 145270
       },
       {
        "package": "internal/abi",
@@ -3342,7 +3342,7 @@
        "package": "runtime",
        "symbols": 1632,
        "textBytes": 444011,
-       "dataBytes": 235144
+       "dataBytes": 235170
       },
       {
        "package": "runtime/debug",
@@ -3413,8 +3413,8 @@
      ]
     },
     "stripped": {
-     "bytes": 1839264,
-     "sha256": "0ed0241a6da812b8856e2083458df6943d1db4af58a9e88f6585e8cf474e8752",
+     "bytes": 1847456,
+     "sha256": "5ccabcaa639267514d3449245352fd64b3834f12c80c8af1604f92464d9ef0d3",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -3444,8 +3444,8 @@
       ]
      },
      "binary": {
-      "bytes": 5698975,
-      "sha256": "56cdf31ef4f75d6c6397b44b77e0bb8ac49614f66a9840408afc9ea5ac4ecec8",
+      "bytes": 5709198,
+      "sha256": "0c5082829d580cad7411f50e78a03fdf83af2f03939db578e463fedc8468c814",
       "build": {
        "goVersion": "go1.27.0",
        "settings": {
@@ -3461,8 +3461,8 @@
      },
      "symbols": {
       "tool": "go tool nm -size -type",
-      "count": 5535,
-      "listingSha256": "6c91ee62be3b89e7db6b08bae646de01468ea2360481eb47a5ef388a624eeeb4",
+      "count": 5538,
+      "listingSha256": "f42ded0e5fdb46192040dd27b080605c9afadd9671eb62b980fd4b75fac69c6d",
       "packages": [
        {
         "package": "(constant)",
@@ -3808,9 +3808,9 @@
        },
        {
         "package": "effra.generated/runtime",
-        "symbols": 167,
-        "textBytes": 55422,
-        "dataBytes": 1184
+        "symbols": 170,
+        "textBytes": 60009,
+        "dataBytes": 1288
        },
        {
         "package": "encoding/asn1",
@@ -3888,7 +3888,7 @@
         "package": "go:",
         "symbols": 18,
         "textBytes": 163,
-        "dataBytes": 241582
+        "dataBytes": 241862
        },
        {
         "package": "hash",
@@ -4200,7 +4200,7 @@
         "package": "runtime",
         "symbols": 1753,
         "textBytes": 464001,
-        "dataBytes": 240041
+        "dataBytes": 240063
        },
        {
         "package": "runtime/debug",
@@ -4355,8 +4355,8 @@
       ]
      },
      "stripped": {
-      "bytes": 3846304,
-      "sha256": "86ccc37967501ede4acd3d17a8ac808e6cae7727db325b1df841dba25a5ece21",
+      "bytes": 3854496,
+      "sha256": "8cb83599707b5b3d249e7fa4a8a9b31088aa2b9c0adbd40973eb75229b97a779",
       "build": {
        "goVersion": "go1.27.0",
        "settings": {
@@ -4373,16 +4373,16 @@
     }
    },
    "js": {
-    "moduleBytes": 9875,
+    "moduleBytes": 12263,
     "applicationMinified": {
-     "bytes": 4842,
-     "sha256": "87bf4098c6cfcb3c5951740a2903241daf35431cc5560c4de8e6c9d0470e6b11"
+     "bytes": 5416,
+     "sha256": "e920a41901b0b0dddbba0bdc5bb9b829a0bd7b0488dea8b6ef8cae1ecb9ab4ba"
     },
     "deploymentMinified": {
-     "bytes": 35227,
-     "sha256": "5b5bb4f18ae72735439cc274891428698b7ea6ab16c6551d941b4f201c9280df"
+     "bytes": 35785,
+     "sha256": "89def238042a12062bab63a668b735551abb41bde2e335446ccd2af80b432b4b"
     },
-    "deploymentDeltaBytes": 30385,
+    "deploymentDeltaBytes": 30369,
     "externalRuntime": [
      {
       "specifier": "effect",
@@ -4397,8 +4397,8 @@
       ]
      }
     ],
-    "declarationBytes": 4276,
-    "moduleSha256": "256c0ea81690533c51fc60d07364535992c0db664d86c07422c5aae7169b49cb",
+    "declarationBytes": 4304,
+    "moduleSha256": "5b44d9531b901fd2804d041ec70d4cf398b1a79facbedefe94592a6fe6e1f0a1",
     "requirements": {
      "declaration": 1,
      "function": 5,
@@ -4420,7 +4420,7 @@
      "runtime-module": 1
     },
     "mainBytes": 1239,
-    "runtimeBytes": 46443,
+    "runtimeBytes": 48849,
     "runtimeFiles": [
      "effect.go",
      "fiber.go",
@@ -4459,8 +4459,8 @@
      "platform": []
     },
     "binary": {
-     "bytes": 2668552,
-     "sha256": "c5fcf2370b9b81c87a3f6bc33e3a378f64a4933b1694ac2459d0b5da0a0bd27a",
+     "bytes": 2669360,
+     "sha256": "b9e30012b9e1dbcdc6a685b8057fdf9c488a9bf93cb5611354d5513a4626ee0b",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -4477,7 +4477,7 @@
     "symbols": {
      "tool": "go tool nm -size -type",
      "count": 2846,
-     "listingSha256": "22ca53e33ae2af8f1ec0d15a3a4d12209f8722c65d8a85f696c01c164548278e",
+     "listingSha256": "b2d7b4390770b7f05dfc9fa8dc8ff79deffec7f3985bfd2a2b3643c6307b9545",
      "packages": [
       {
        "package": "(constant)",
@@ -4512,8 +4512,8 @@
       {
        "package": "effra.generated/runtime",
        "symbols": 48,
-       "textBytes": 16758,
-       "dataBytes": 240
+       "textBytes": 18506,
+       "dataBytes": 272
       },
       {
        "package": "errors",
@@ -4537,7 +4537,7 @@
        "package": "go:",
        "symbols": 16,
        "textBytes": 2,
-       "dataBytes": 139310
+       "dataBytes": 139414
       },
       {
        "package": "internal/abi",
@@ -4723,7 +4723,7 @@
        "package": "runtime",
        "symbols": 1632,
        "textBytes": 444011,
-       "dataBytes": 234876
+       "dataBytes": 234883
       },
       {
        "package": "runtime/debug",
@@ -4795,7 +4795,7 @@
     },
     "stripped": {
      "bytes": 1732768,
-     "sha256": "2bf8cb7d3cb7a700a2d4e25f87dba7c7c54b7700d68d95e68d066afb9ae22a1a",
+     "sha256": "19df3e67bd3cb6ab0164d7931f45452ec8fe54d6ff99307cfae6020d276243e8",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -4825,8 +4825,8 @@
       ]
      },
      "binary": {
-      "bytes": 5566115,
-      "sha256": "bdd666060db75e08a54a581c72fa15667742ea12b549110f2d3a757fbc39908d",
+      "bytes": 5566699,
+      "sha256": "8ee91ccbdfbf107a7c264017b9f802d4c829792399c8a996fdaa61ee5377b8c3",
       "build": {
        "goVersion": "go1.27.0",
        "settings": {
@@ -4843,7 +4843,7 @@
      "symbols": {
       "tool": "go tool nm -size -type",
       "count": 5379,
-      "listingSha256": "3c7431942922f907a14e135e8875a38c3b8b34d9140ae998c2ba042734acb79c",
+      "listingSha256": "37f2327a0f4188df443bd1f45e7e3c2e2d5b6ccbc8d89a2633f93bb76496b9a6",
       "packages": [
        {
         "package": "(constant)",
@@ -5190,8 +5190,8 @@
        {
         "package": "effra.generated/runtime",
         "symbols": 49,
-        "textBytes": 17116,
-        "dataBytes": 240
+        "textBytes": 18864,
+        "dataBytes": 272
        },
        {
         "package": "encoding/asn1",
@@ -5269,7 +5269,7 @@
         "package": "go:",
         "symbols": 18,
         "textBytes": 163,
-        "dataBytes": 236094
+        "dataBytes": 236190
        },
        {
         "package": "hash",
@@ -5581,7 +5581,7 @@
         "package": "runtime",
         "symbols": 1753,
         "textBytes": 464001,
-        "dataBytes": 239780
+        "dataBytes": 239787
        },
        {
         "package": "runtime/debug",
@@ -5737,7 +5737,7 @@
      },
      "stripped": {
       "bytes": 3748000,
-      "sha256": "4663326204ab74fd009e1fe5739d3a7a3bd041ae74a0f4a6ef6b486a09ded104",
+      "sha256": "6f9e2ef2439b66711a2a4460c1c44ee8010a3cb31ecf1cec086e5059c18b465a",
       "build": {
        "goVersion": "go1.27.0",
        "settings": {
@@ -5754,16 +5754,16 @@
     }
    },
    "js": {
-    "moduleBytes": 3467,
+    "moduleBytes": 5408,
     "applicationMinified": {
-     "bytes": 1589,
-     "sha256": "db07ea2da80383c38a7151fd22e99ede0d1ff855e47524f282976e4762be5317"
+     "bytes": 2162,
+     "sha256": "3007f6046e978df971013562bb9983648bde134c3f4e1f17a06cc69e5b522b1c"
     },
     "deploymentMinified": {
-     "bytes": 30503,
-     "sha256": "309ef47c93d015992a8cf3a59f0f389bc59b87115c97f40d53a9c71ec44adc4d"
+     "bytes": 31044,
+     "sha256": "7eb565330578a16afa53fb7d2cd4fe611807b8fec631a9ffb51876d90a12d1a6"
     },
-    "deploymentDeltaBytes": 28914,
+    "deploymentDeltaBytes": 28882,
     "externalRuntime": [
      {
       "specifier": "effect",
@@ -5779,7 +5779,7 @@
      }
     ],
     "declarationBytes": 2547,
-    "moduleSha256": "7ce6fe2d98c4f1927d5c54cf62be3cb59e63ab8562dd7da42f0e66a7e66d48a6",
+    "moduleSha256": "38cb824a8df56bed7fd711351584d283455dd0afe1277b7daf0d9f23ac1649f7",
     "requirements": {
      "function": 1
     }
@@ -5796,7 +5796,7 @@
      "runtime-module": 1
     },
     "mainBytes": 1239,
-    "runtimeBytes": 46443,
+    "runtimeBytes": 48849,
     "runtimeFiles": [
      "effect.go",
      "fiber.go",
@@ -5835,8 +5835,8 @@
      "platform": []
     },
     "binary": {
-     "bytes": 2668552,
-     "sha256": "2a6f9179b6a9ad07bc7224a7bfedbc25233342b83bbc2480482ddd5dd9961a74",
+     "bytes": 2669360,
+     "sha256": "a097f91e13c88b11ff0fb782e6f0f2a17a48127867d5f43ff5dce11f1c27696f",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -5853,7 +5853,7 @@
     "symbols": {
      "tool": "go tool nm -size -type",
      "count": 2846,
-     "listingSha256": "22ca53e33ae2af8f1ec0d15a3a4d12209f8722c65d8a85f696c01c164548278e",
+     "listingSha256": "b2d7b4390770b7f05dfc9fa8dc8ff79deffec7f3985bfd2a2b3643c6307b9545",
      "packages": [
       {
        "package": "(constant)",
@@ -5888,8 +5888,8 @@
       {
        "package": "effra.generated/runtime",
        "symbols": 48,
-       "textBytes": 16758,
-       "dataBytes": 240
+       "textBytes": 18506,
+       "dataBytes": 272
       },
       {
        "package": "errors",
@@ -5913,7 +5913,7 @@
        "package": "go:",
        "symbols": 16,
        "textBytes": 2,
-       "dataBytes": 139310
+       "dataBytes": 139414
       },
       {
        "package": "internal/abi",
@@ -6099,7 +6099,7 @@
        "package": "runtime",
        "symbols": 1632,
        "textBytes": 444011,
-       "dataBytes": 234876
+       "dataBytes": 234883
       },
       {
        "package": "runtime/debug",
@@ -6171,7 +6171,7 @@
     },
     "stripped": {
      "bytes": 1732768,
-     "sha256": "273f188d520af60903cfcc3c34e2be19fbc3b7f613abd9502ab2a25c5b4d34d8",
+     "sha256": "7b865db9f74d1cd721c0e4ad34bd579c99602e3e57d480883f03f0c05e6de43b",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -6187,16 +6187,16 @@
     }
    },
    "js": {
-    "moduleBytes": 3467,
+    "moduleBytes": 5408,
     "applicationMinified": {
-     "bytes": 1589,
-     "sha256": "db07ea2da80383c38a7151fd22e99ede0d1ff855e47524f282976e4762be5317"
+     "bytes": 2162,
+     "sha256": "3007f6046e978df971013562bb9983648bde134c3f4e1f17a06cc69e5b522b1c"
     },
     "deploymentMinified": {
-     "bytes": 30503,
-     "sha256": "309ef47c93d015992a8cf3a59f0f389bc59b87115c97f40d53a9c71ec44adc4d"
+     "bytes": 31044,
+     "sha256": "7eb565330578a16afa53fb7d2cd4fe611807b8fec631a9ffb51876d90a12d1a6"
     },
-    "deploymentDeltaBytes": 28914,
+    "deploymentDeltaBytes": 28882,
     "externalRuntime": [
      {
       "specifier": "effect",
@@ -6211,8 +6211,8 @@
       ]
      }
     ],
-    "declarationBytes": 4749,
-    "moduleSha256": "fe8932d55e57e9567656d7f2ae9421dac1e18af907d2b079e8b2014da2559cd1",
+    "declarationBytes": 4785,
+    "moduleSha256": "1ed5307789bc50faaf3e9caf881d8eaff52581d51e00501fc60c080ae47c0a2e",
     "requirements": {
      "function": 1
     }
@@ -6229,7 +6229,7 @@
      "runtime-module": 1
     },
     "mainBytes": 2144,
-    "runtimeBytes": 46443,
+    "runtimeBytes": 48849,
     "runtimeFiles": [
      "effect.go",
      "fiber.go",
@@ -6268,8 +6268,8 @@
      "platform": []
     },
     "binary": {
-     "bytes": 2669458,
-     "sha256": "869dbb4c0133f6bc76998203ad5bfb34f73eef1b8cd5e56d4341daec30b20985",
+     "bytes": 2678394,
+     "sha256": "e1e60be595014853352f5fcd60aedf2d2a2ab69959297345190d2b58d39be055",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -6286,7 +6286,7 @@
     "symbols": {
      "tool": "go tool nm -size -type",
      "count": 2848,
-     "listingSha256": "41bba7a35c7a1e4285e8dc4f191821feb60cc56ac0a6e03fd5ffae5da9a052a2",
+     "listingSha256": "3be54ec4c075061949fffb392e9f09d727f8d88944056b9b429a4ab0d2abbb8c",
      "packages": [
       {
        "package": "(constant)",
@@ -6321,8 +6321,8 @@
       {
        "package": "effra.generated/runtime",
        "symbols": 50,
-       "textBytes": 18094,
-       "dataBytes": 272
+       "textBytes": 19842,
+       "dataBytes": 304
       },
       {
        "package": "errors",
@@ -6346,7 +6346,7 @@
        "package": "go:",
        "symbols": 16,
        "textBytes": 2,
-       "dataBytes": 139542
+       "dataBytes": 139646
       },
       {
        "package": "internal/abi",
@@ -6532,7 +6532,7 @@
        "package": "runtime",
        "symbols": 1632,
        "textBytes": 444011,
-       "dataBytes": 234885
+       "dataBytes": 234896
       },
       {
        "package": "runtime/debug",
@@ -6603,8 +6603,8 @@
      ]
     },
     "stripped": {
-     "bytes": 1732768,
-     "sha256": "8b8ecb4c3ba9acad64f1bfee6850d7d853e1fa13721a058388e590332111583d",
+     "bytes": 1740960,
+     "sha256": "6395e3247bfd365e1ba60cab3dc35fdcbbd05d4580fcc067525497a4ac8025ec",
      "build": {
       "goVersion": "go1.27.0",
       "settings": {
@@ -6620,16 +6620,16 @@
     }
    },
    "js": {
-    "moduleBytes": 4092,
+    "moduleBytes": 6033,
     "applicationMinified": {
-     "bytes": 1739,
-     "sha256": "09358d0e30b8716cf8577f64bd4ed927c45b49e2599927c52df58d5f1478e001"
+     "bytes": 2312,
+     "sha256": "bc11502641d147c8c1aac42126c282167e63b149d10ece0a64755fcd27494507"
     },
     "deploymentMinified": {
-     "bytes": 30660,
-     "sha256": "fae3317e1a887b6555e20ea0f5f8f5a27da78ed69baf68e123c29bc12db7a1bb"
+     "bytes": 31201,
+     "sha256": "735bc625dd4ea4027d9bb532237b6d44ec9a4d5233e7dcc7cec77ff7bbf40c31"
     },
-    "deploymentDeltaBytes": 28921,
+    "deploymentDeltaBytes": 28889,
     "externalRuntime": [
      {
       "specifier": "effect",
@@ -6645,7 +6645,7 @@
      }
     ],
     "declarationBytes": 2928,
-    "moduleSha256": "44a36ed519125111d985393904fb38cc0781fdd20c3ab0639037807de868beb9",
+    "moduleSha256": "44308342590bb94d3a96941c26ad959d939b07295c45c48416a4f28f5cab12d5",
     "requirements": {
      "function": 4
     }
