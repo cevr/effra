@@ -17,6 +17,8 @@ type TemplateParameter struct {
 	Constraint *sourceType `json:"-"`
 	typeID     TypeID
 	shapeID    TypeID
+	// Annotation is the constraint's own annotation occurrence.
+	Annotation *typeSyntax `json:"-"`
 }
 
 type TemplateParameterView struct {

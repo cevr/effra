@@ -1102,7 +1102,7 @@ func (p *parser) templateParameters() []TemplateParameter {
 		case "type":
 		case "callable":
 			constraint := p.typ()
-			parameter.Constraint = p.types[constraint]
+			parameter.Constraint, parameter.Annotation = p.types[constraint], p.lastType
 			if parameter.Constraint == nil || parameter.Constraint.Application != "" {
 				p.fail(kind, "callable constraints require a direct callable shape")
 			}

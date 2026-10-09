@@ -71,6 +71,11 @@ func (c *checker) observeDeclarationSyntax() {
 			if data == nil {
 				data = item.Enum
 			}
+			// A callable constraint's checked shape names the declaration's
+			// own type parameters.
+			for _, parameter := range data.Parameters {
+				c.observeAnnotation(parameter.Annotation, parameter.shapeID, lexicalTarget{}, data)
+			}
 			c.observeFieldSyntax(data.Fields, data)
 			for _, variant := range data.Variants {
 				c.observeFieldSyntax(variant.Fields, data)

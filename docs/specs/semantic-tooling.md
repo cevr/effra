@@ -140,7 +140,8 @@ anchored expression keeps its existing selection kind and gains the target.
 Query schema 4 also selects type-annotation and declared row-label tokens.
 The parser retains each annotation occurrence's name, alias-qualifier and
 row-label tokens on the declaration that owns it (parameters, provider
-configuration, results and record, enum and error fields), beside the
+configuration, results, record, enum and error fields, and callable template
+constraints), beside the
 display-interned spelling the checker reads; signature and provider `uses`
 rows keep their label tokens likewise. After checking, each occurrence is
 paired with the canonical type the checker retained for that declaration, as
@@ -148,7 +149,9 @@ paired with the canonical type the checker retained for that declaration, as
 supplies the declaration (`application` to its template, nominal records,
 enums and errors, and a type variable to the owning data declaration's
 template parameter), and callable annotations bind their parameters, result
-and rows structurally. A row label's resolution is read from the checked row:
+and rows structurally. A callable template constraint is walked against the
+checked constraint shape with its owning record or enum, so its parameter and
+result tokens select that declaration's own template parameters. A row label's resolution is read from the checked row:
 a label the checker bound to a row parameter carries that parameter's
 identity, so it shadows a same-spelled error or service; every other label
 names its declared error or service. Template and row parameter names are

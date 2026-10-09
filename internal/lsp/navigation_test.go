@@ -399,3 +399,37 @@ func TestNavigationResolvesTypeAnnotationsAndRowLabels(t *testing.T) {
 		}
 	}
 }
+
+// Annotations the checker could not resolve publish no references: hover and
+// definition answer null, and the server keeps serving afterwards.
+func TestNavigationOnUnresolvedAnnotationsAnswersNull(t *testing.T) {
+	uri := "file:///tmp/effra-unresolved-annotations.ef"
+	source := "record Box { value: string }\nrecord Bad<F: callable fn(Missing) -> Box> { cb: F }\nfn lost(value: Unknown) -> Box raises {Nope} { value }\n"
+	probes := map[string]int{
+		"constraint": at(t, source, "fn(Missing)", "Missing"),
+		"result":     at(t, source, "-> Box> {", "Box"),
+		"parameter":  at(t, source, "value: Unknown", "Unknown"),
+		"row":        at(t, source, "raises {Nope}", "Nope"),
+	}
+	calls := []any{initialize(), initialized(), open(uri, source, 1)}
+	for id, offset := range probes {
+		calls = append(calls, pointAt(uri, "textDocument/hover", "hover-"+id, source, offset),
+			pointAt(uri, "textDocument/definition", "definition-"+id, source, offset))
+	}
+	calls = append(calls, pointAt(uri, "textDocument/hover", "after", source, at(t, source, "record Box", "Box")), shutdown(), call("exit", nil, nil))
+	messages, err := runSession(t, calls...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := responses(t, messages)
+	for id := range probes {
+		for _, request := range []string{"hover-" + id, "definition-" + id} {
+			if m, ok := byID[request]; !ok || m["result"] != nil || m["error"] != nil {
+				t.Fatalf("%s: expected null result, got %v", request, m)
+			}
+		}
+	}
+	if m, ok := byID["after"]; !ok || m["error"] != nil {
+		t.Fatalf("server stopped answering: %v", m)
+	}
+}

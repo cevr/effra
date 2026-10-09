@@ -196,3 +196,61 @@ fn second(c: Box) -> Box { c }
 		t.Fatalf("selected %d annotation occurrences", seen)
 	}
 }
+
+// A callable template constraint's parameter and result tokens bind through
+// the checked constraint shape to the owning declaration's own type
+// parameters: they shadow same-spelled module declarations inside the owner
+// only, on records and enums, whichever order the parameters are declared in.
+func TestCallableConstraintAnnotationsSelectOwnerTypeParameters(t *testing.T) {
+	source := `record Box { value: string }
+record Holder<Box: type, F: callable fn(Box) -> Box> { cb: F }
+enum Act<F: callable fn(Box) -> Box, Box: type> { Idle; Run { f: F } }
+record Outside { box: Box }
+`
+	type expectation struct{ context, name, owner, declaration, presentation string }
+	expectations := []expectation{
+		{"callable fn(Box) -> Box> {", "Box", "Holder", "Holder<Box", "type parameter Holder.Box: type"},
+		{"-> Box> { cb", "Box", "Holder", "Holder<Box", "type parameter Holder.Box: type"},
+		{"cb: F", "F", "Holder", "F: callable fn(Box) -> Box> { cb", "type parameter Holder.F: callable"},
+		{"Act<F: callable fn(Box)", "Box", "Act", "Box: type> { Idle", "type parameter Act.Box: type"},
+		{"-> Box, Box: type", "Box", "Act", "Box: type> { Idle", "type parameter Act.Box: type"},
+		{"f: F", "F", "Act", "Act<F", "type parameter Act.F: callable"},
+	}
+	for _, target := range []string{"go", "js"} {
+		r := CompileFor(source, target)
+		if !r.Checked {
+			t.Fatalf("%s fixture: %+v", target, r.Diagnostics)
+		}
+		for _, want := range expectations {
+			offset := at(t, source, want.context, want.name)
+			label := fmt.Sprintf("%s %q in %q", target, want.name, want.context)
+			query, err := r.QueryType(TypeSelection{Offset: &offset})
+			if err != nil {
+				t.Fatalf("%s: %v", label, err)
+			}
+			selected := query.Selection
+			if selected.Kind != "reference" || selected.Target == nil || selected.Target.Kind != "typeParameter" || selected.Target.Owner != want.owner || selected.Target.Name != want.name || selected.Span.Offset != offset {
+				t.Fatalf("%s: selection %+v target %+v", label, selected, selected.Target)
+			}
+			if declared := at(t, source, want.declaration, want.name); !selected.Target.LocationAvailable || selected.Target.Span.Offset != declared {
+				t.Fatalf("%s: target %+v, want declaration at %d", label, selected.Target, declared)
+			}
+			if selected.Presentation != want.presentation {
+				t.Fatalf("%s: presentation %q, want %q", label, selected.Presentation, want.presentation)
+			}
+		}
+		// Negative control: outside the owners, Box is the module record.
+		offset := at(t, source, "box: Box", "Box")
+		query, err := r.QueryType(TypeSelection{Offset: &offset})
+		if err != nil || query.Selection.Target == nil || query.Selection.Target.Kind != "record" || query.Selection.Target.Span.Offset != at(t, source, "record Box", "Box") {
+			t.Fatalf("%s outside owner: %+v (%v)", target, query.Selection, err)
+		}
+		// The constraint's keywords stay unselectable.
+		for _, probe := range []struct{ context, name string }{{"F: callable fn(Box) -> Box> {", "callable"}, {"callable fn(Box) -> Box> {", "fn"}} {
+			offset := at(t, source, probe.context, probe.name)
+			if _, err := r.QueryType(TypeSelection{Offset: &offset}); !errors.Is(err, ErrNoSelection) {
+				t.Fatalf("%s %q: %v", target, probe.name, err)
+			}
+		}
+	}
+}
