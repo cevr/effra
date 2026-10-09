@@ -37,3 +37,7 @@ Future TS/JS interop must adapt null/undefined/optional properties into checked 
 - Native method fast paths and concrete object identity survive present-value adaptation. Mutation/downcast controls cannot use stale presence evidence. JS wire tests preserve required-field refusal and explicitly chosen absence policy.
 
 These gates belong to generic-data and host-types, with their full review/gates and later managed-resource controls. No new syntax or runtime guarantee is claimed by this document.
+
+## Prior art: Elixir and MoonBit
+
+MoonBit abbreviates `Option[T]` as `T?` (`next/language/fundamentals.md:L361` at docs `8d9f3ba2`). An optional argument without a default has type `T?`, and a supplied argument is wrapped in `Some` (`L734-L754`); `unwrap` panics on `None` (core `builtin/option.mbt:L35-L44` at `e96ede8b`). Its compiler may lay out `None` as a null or sentinel (`src/pass_layout.ml:L98-L155` at `d4ada10d`). Effra keeps the closed alternative but rejects the postfix spelling, implicit `Some` wrapping and unchecked unwrap. An internal null layout is compatible with the rule that runtime representations may contain null. Elixir's `nil` is an ordinary atom, and `JSON.decode` maps JSON null to it (`lib/elixir/lib/json.ex:L314-L326` at `91ee75bb`); the owner's no-nil rule rejects such a value. Pins are in [PRIOR_ARTS](../../PRIOR_ARTS.md#moonbit).
