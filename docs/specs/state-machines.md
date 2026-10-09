@@ -148,3 +148,13 @@ Status: DECIDED, 2026-10-07. `machine` is an admitted declaration with a narrow 
 4. Exercise request-owned HTTP cancellation and a non-server actor through the same library. Map pinned v6/Effect Machine behaviors to passing/different/unsupported cases. Run full gates, native race checks, frontend/emission measurements and independent review before advertising support.
 
 Decided by **Go-like local readability**, **Redesign From First Principles** and **Never Block on the Human**: one small declaration, ordinary functions for behavior and reusable bundled decisions. This replaces the earlier nested machine syntax sketch and does not close historical Wayfinder HITL tickets. The 2026-10-07 [admission gate](#construct-admission-gate) confirmed the declaration: it owns the static `Stay` rule.
+
+## Statecharts composition and decision syntax (2026-10-09)
+
+Status: proposed, not implemented. The evidence, probes and rejected alternatives are in [statecharts composition and evidence](../research/statecharts-composition-and-evidence.md), which compares Harel 1987, STATEMATE, SCXML, XState v6 (`ac890f2a3`), `gen_statem` and MoonBit.
+
+- **Owner direction, 2026-10-09.** For machines and for language constructs generally, syntax is preferred over a library item that the checker special-cases.
+- **Hierarchy and history stay ordinary data.** A variant carries its child state, and outer match arms cover every child configuration. History is a remembered child value restored by a later `go`. No `history` declaration is added. The statechart words remain EF002 until a ticket admits them.
+- **Orthogonal regions keep their state as data.** The declaration gains `region V.field M` bindings to separately declared child machines, with `field <- decision` updates. Regions give per-region entries and epochs, checked delegation and factored plan facts. Composition alone is not enough: it accepts a region change lifted as a parent `Stay`, so stale region work can still complete, and it cannot express SCXML exit/entry order.
+- **`Step` gives way to decision syntax.** The predeclared `decision<S, O>` type replaces the bundled `Step` enum, which the checker recognizes by template identity. Its forms are `go e`, `stay e`, `ignore`, `reject` and `done e`, written as expressions and as patterns. Plan facts are unchanged. EF139 follows the `stay` form.
+- **Laws.** Decision, region and history laws extend the [provider obligations](machine-provider-contract.md#provider-obligations) with the existing lawful-runtime rows. They add no new vocabulary.
