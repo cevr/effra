@@ -304,41 +304,45 @@ func TestJSEntryBehavesLikeTheCompletePrelude(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Examples are independent programs, so each runs as a parallel subtest.
 	for _, path := range files {
-		source, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		// A transport example serves until interrupted, so both modules are
-		// served for a bounded exchange and then interrupted; the transcript
-		// is compared like any other program's output.
-		run := runNode
-		if filepath.Base(path) == "http-transport.ef" {
-			run = runNodeServing
-		}
-		r := CompileAt(string(source), "js", "../../examples")
-		if !r.Checked || r.Program.GoOnly || r.Entry() != nil {
-			continue
-		}
-		entry, _, err := r.Emit(true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		library, _, err := r.Emit(false)
-		if err != nil {
-			t.Fatal(err)
-		}
-		complete := withCompletePrelude(library)
-		runner := entry[strings.LastIndex(entry, "const __ef_signal = new AbortController()"):]
-		dir := writeJSModule(t, map[string]string{"entry.mjs": entry, "complete.mjs": complete + runner})
-		pruned, prunedErr := run(t, dir, "entry.mjs")
-		full, fullErr := run(t, dir, "complete.mjs")
-		if (prunedErr == nil) != (fullErr == nil) || pruned != full {
-			t.Fatalf("%s: pruned entry diverged\npruned (%v):\n%s\ncomplete (%v):\n%s", filepath.Base(path), prunedErr, pruned, fullErr, full)
-		}
-		if len(entry) >= len(complete+runner) {
-			t.Fatalf("%s: entry retained the complete prelude", filepath.Base(path))
-		}
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			t.Parallel()
+			source, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// A transport example serves until interrupted, so both modules are
+			// served for a bounded exchange and then interrupted; the transcript
+			// is compared like any other program's output.
+			run := runNode
+			if filepath.Base(path) == "http-transport.ef" {
+				run = runNodeServing
+			}
+			r := CompileAt(string(source), "js", "../../examples")
+			if !r.Checked || r.Program.GoOnly || r.Entry() != nil {
+				return
+			}
+			entry, _, err := r.Emit(true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			library, _, err := r.Emit(false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			complete := withCompletePrelude(library)
+			runner := entry[strings.LastIndex(entry, "const __ef_signal = new AbortController()"):]
+			dir := writeJSModule(t, map[string]string{"entry.mjs": entry, "complete.mjs": complete + runner})
+			pruned, prunedErr := run(t, dir, "entry.mjs")
+			full, fullErr := run(t, dir, "complete.mjs")
+			if (prunedErr == nil) != (fullErr == nil) || pruned != full {
+				t.Fatalf("%s: pruned entry diverged\npruned (%v):\n%s\ncomplete (%v):\n%s", filepath.Base(path), prunedErr, pruned, fullErr, full)
+			}
+			if len(entry) >= len(complete+runner) {
+				t.Fatalf("%s: entry retained the complete prelude", filepath.Base(path))
+			}
+		})
 	}
 }
 
