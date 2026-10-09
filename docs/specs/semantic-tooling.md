@@ -100,16 +100,19 @@ select original declaration/name tokens, actual checked lexical uses, or
 retained checked expression extents. Local shadowing and provider receivers
 resolve through checker binding identities. Shorthand fields retain their name
 token extent, and Fiber operation receivers use the same observed local-read
-owner as other checked uses. The query adds `querySchemaVersion: 2` beside the
+owner as other checked uses. The query adds `querySchemaVersion: 3` beside the
 shared semantic schema and producer-qualified snapshot; the existing
 `ef query`/`code.typeAt` diagnostic-anchor behavior remains unchanged.
 
-Query schema 2 adds a selection `target` and a `presentation`. The target is
+Query schema 2 added a selection `target` and a `presentation`; schema 3 adds
+caller-choice parameter facts (`requiredChoice` and a checked scalar
+`defaultValue`) to callable and parameter targets. The target is
 the declaration a selected name token denotes: its kind (binding kinds `let`,
 `parameter`, `configuration` and `pattern`; `function`, `operation`, `method`,
 `provider`, `service`, `record`, `enum`, `variant`, `field`, `error`, `module`,
-`hostModule`, `layer` or `codec`), name, owner, identity, module and source, and its
-declaration-name span and extent in that source. `locationAvailable` is true
+`hostModule`, `layer`, `codec` or `constant`), name, owner, identity, module and
+source, and its declaration-name span and extent in that source. A `constant`
+target carries its projected type and checked scalar value. `locationAvailable` is true
 only when the source is the selected snapshot's own text; bundled declarations
 keep their source ID and span in that source, and builtins carry no location.
 Function-like targets carry their declared signature by canonical references,
@@ -133,8 +136,9 @@ and Fiber operation names do not yet select targets.
 MCP and LSP hover. It is rendered after projection from the response's own
 type and row tables and declaration views, for example
 `effect fn Users.get(id: string) -> string raises {Missing}`,
-`record Box { value: string }`, `let tag: Tag` or
-`Effect<string, {Missing}, {Users}>`. A 4096-byte budget bounds its expansion
+`record Box { value: string }`, `const Suffix: string = "!"`, `let tag: Tag`
+or `Effect<string, {Missing}, {Users}>`. A constant or parameter default shows
+its checked value, not the alias spelled at the declaration. A 4096-byte budget bounds its expansion
 of shared type graphs, with explicit `…` elision.
 
 Selected responses contain only the reachable canonical type/row closure and
