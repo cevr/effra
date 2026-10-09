@@ -42,6 +42,7 @@ type lexicalTarget struct {
 	failure   *ErrorDecl
 	layer     *Layer
 	codec     *CodecDeclaration
+	endpoint  *EndpointDeclaration
 	constant  *Constant
 	module    *SyntaxItem
 	variant   string
@@ -288,6 +289,15 @@ func captureOriginalSyntax(program *Program) *lexicalFacts {
 				child(id, codecID)
 			}
 		}
+		if endpoint := item.Endpoint; endpoint != nil && facts.complete {
+			// Like a codec, an endpoint or route table is original derive
+			// syntax whose handler function the checker synthesizes; only
+			// the declaration itself is retained.
+			endpointID := add("endpoint", endpoint.Name, endpoint.Span, item.Extent, endpoint.Span)
+			if endpointID >= 0 {
+				child(id, endpointID)
+			}
+		}
 		if !facts.complete {
 			break
 		}
@@ -369,6 +379,12 @@ func (facts *lexicalFacts) declare(item *SyntaxItem) {
 	case item.Codec != nil:
 		facts.items[item.Codec] = item
 		name(item.Codec.Span, lexicalTarget{kind: "codec", codec: item.Codec})
+	case item.Endpoint != nil:
+		// The derive name declares the synthesized handler function, which
+		// exists only once the endpoint checks; the target keeps the
+		// declaration and resolves that function when projected.
+		facts.items[item.Endpoint] = item
+		name(item.Endpoint.Span, lexicalTarget{kind: "function", endpoint: item.Endpoint})
 	}
 }
 
