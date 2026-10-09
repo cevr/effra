@@ -59,32 +59,37 @@ The application plan represents this obligation separately from callable use. Na
 
 ## Application receipts and size conformance
 
-Adopted 2026-10-09 for #14; revised the same day after review.
+Adopted 2026-10-09 for #14; revised twice the same day after review.
 
-`internal/receipt` is the single owner of measurement. `ef build --receipt` and the size-conformance matrix build, measure and summarize through its functions, so a matrix row and a CLI receipt cannot disagree about method.
+`internal/receipt` is the single owner of measurement. `ef build --receipt` and the size-conformance matrix build, measure and summarize through its functions, so the two share one method.
 
-`ef build FILE [--target go|js] --receipt PATH` writes an application receipt (`effra.application-receipt/2`) after a successful build. Only `build` accepts the flag, and an empty path is a parse error. A refused or unchecked build writes no receipt.
+`ef build FILE [--target go|js] --receipt PATH` writes an application receipt (`effra.application-receipt/3`) after a successful build. Only `build` accepts the flag, and an empty path is a parse error. A refused or unchecked build writes no receipt.
 
-The receipt path is checked before anything is built (`receipt.CheckPath`). It is refused when it names:
+The receipt path is admitted before anything is built (`receipt.Admit`), and the admitted `Destination` is the only place the receipt is published. The path is refused when it names:
 
 - the build's source;
 - one of the build's artifacts: the executable, or the JavaScript module and declaration, including default output names;
 - a path inside the managed generated-module tree `dist/go/apps`.
 
-Paths are compared after resolving symbolic links through the longest existing prefix. Existing files are also compared by identity (`os.SameFile`), so a respelled path, a directory link, a symbolic link or a hard link to a protected file is refused as well. The receipt is published atomically: it is written to a temporary file in the destination directory and renamed into place. An existing file or symbolic link at the receipt path is therefore replaced, never written through, and an interrupted write leaves no partial receipt.
+Admission resolves the receipt's parent directory as the file system walks it. The path is never cleaned lexically first: a `..` after a symbolic link applies to the link's target, not to the link's name. With `jump` linked to `out/sub`, `--receipt jump/../result` therefore names `out/result`, and it is refused when that is the build's executable, even before the executable exists. A `..` below a directory that does not exist yet is refused rather than guessed. Protected paths are resolved the same way. An existing receipt entry is also compared by identity (`os.SameFile`) and, when it is a symbolic link, by its target, so a respelled path, a directory link, a symbolic link or a hard link to a protected file is refused as well.
+
+Admission then opens the deepest existing directory of the resolved parent as an `os.Root` and keeps it open. Publication creates any missing directories, writes a temporary file and renames it into place, all inside that root. Retargeting a link on the path between admission and publication therefore cannot redirect the write. An existing file or symbolic link at the receipt path is replaced, never written through, and an interrupted write leaves no partial receipt. The guarantee covers the receipt only: the build's own outputs are written by the ordinary build path.
 
 A native receipt records:
 
 - the plan's closed runtime modules and requirement counts;
 - the published generation's identity and its manifest files, with bytes and hashes;
 - each generated package's direct imports, and the transitive dependencies from `go list -deps`;
-- the effective build settings: the `go env -json` values that change the output (`GOVERSION`, `GOTOOLCHAIN`, `GOOS`, `GOARCH`, the architecture levels, `GOEXPERIMENT`, inherited `GOFLAGS` and `CGO_ENABLED`) and the literal build flags;
+- the effective build settings: the `go env -json` values that change the output (`GOVERSION`, `GOTOOLCHAIN`, `GOOS`, `GOARCH`, the architecture levels, `GOEXPERIMENT`, inherited `GOFLAGS`, `CGO_ENABLED`, and the C toolchain settings `CC`, `CXX`, `FC`, `AR`, `PKG_CONFIG` and `CGO_CFLAGS`, `CGO_CPPFLAGS`, `CGO_CXXFLAGS`, `CGO_FFLAGS`, `CGO_LDFLAGS`) and the literal build flags;
+- the dependencies compiled with cgo in the build's configuration, and, when there are any, the identity of each C compiler the build invokes: its command, resolved path, executable hash and `--version` line (`CC`, and `CXX` when a cgo package has C++ files);
 - the executable's bytes and hash, and the build information the linker embedded in it (`debug/buildinfo`), which is the authoritative record of how it was built;
 - a per-package summary of `go tool nm -size -type`, with the digest of the complete listing.
 
+The C toolchain settings are recorded from the environment because embedded build information omits CGO flags, and `-ldflags`, under `-trimpath` (`cmd/go/internal/load/pkg.go:2506`, go1.27.0). Headers and libraries the C toolchain reads are not identified. A receipt whose dependencies list cgo packages is therefore not a complete reproduction identity. With `CGO_ENABLED=0` the cgo list is empty and no C compiler is recorded.
+
 Every native build, including stripped companions and controls, uses `-trimpath -mod=readonly -buildvcs=false` with `GOWORK=off`. VCS stamping is off because a generation identifies the module. Otherwise a module published inside a repository would embed that repository's revision and dirty state, and identical generations would build different executables. `nm` runs from the generated module. Outside that module the go command can select a different toolchain (`GOTOOLCHAIN=auto` with `go 1.27`), and another toolchain's `nm` classifies and orders symbols differently.
 
-A JavaScript receipt records the emitted module and declaration bytes, and the module's external imports. Emission declares those imports: `Result.EmitModule` returns the module text together with its `effect` import names and the host modules of the selected prelude chunks. The HTTP transport chunk declares its dynamic `node:http` import. Program text that spells an import is therefore never mistaken for one. The receipt also checks that the written module is byte-identical to the emitted one. Every receipt reports the compiler distribution separately: the `ef` executable and all bundled runtime sources.
+A JavaScript receipt records the emitted module and declaration bytes, and the module's external imports. Emission declares those imports: `Result.EmitModule` returns the module text together with its `effect` import names and the host modules of the selected prelude chunks. Chunk text never spells an import. The prelude renders one loader per declared host module (`const __ef_host_node_http = () => import('node:http');`), and the HTTP transport chunk calls that loader. Every import in a module is therefore rendered from a declaration, and program text that spells an import is never mistaken for one. The receipt compares the written module with the emitted text byte for byte, and hashes those same bytes. Every receipt reports the compiler distribution separately: the `ef` executable and all bundled runtime sources.
 
 The deterministic part runs in the gate:
 
@@ -95,17 +100,18 @@ The deterministic part runs in the gate:
   - that unused declarations and pipe spelling leave the generated runtime, imports, dependencies, symbol listing, executable size and emitted JavaScript unchanged.
 
   The HTTP row is the negative control: it must show the transport in the same fields. With all-source emission substituted, the test fails on every row with retained files, dependencies and `net`/`net/http`/`crypto/tls` symbols.
-- `cmd/ef/receipt_process_test.go` covers the flag's parsing, refused builds, every protected path and alias, atomic replacement of a symbolic link, the recorded build settings and the absence of VCS stamping inside a Git repository. It also checks that program strings spelling `import()` add no external module while the HTTP program lists `node:http`.
-- `internal/compiler/js_imports_test.go` checks that every prelude chunk declares exactly the host modules its text loads, and that each example's declared imports equal its emitted imports.
+- `cmd/ef/receipt_process_test.go` covers the flag's parsing, refused builds, every protected path and alias (including an absent executable reached through a link and `..`), atomic replacement of a symbolic link, the recorded build settings and the absence of VCS stamping inside a Git repository. It builds the HTTP program with cgo under two different `CGO_CFLAGS` and without cgo: the flags differ in the receipts, the cgo packages and C compiler appear only with cgo, and embedded build information lacks the flags. It also checks that program strings spelling `import()` add no external module while the HTTP program lists `node:http`.
+- `internal/receipt/receipt_test.go` checks link-then-`..` resolution, publication into the admitted directory after a link on the path is retargeted, refusal of unresolvable paths, and refusal of a same-length substitute for the emitted JavaScript module.
+- `internal/compiler/js_imports_test.go` checks that no prelude chunk spells an import in any form, that each chunk calls exactly the loaders of its declared host modules, and that each example's declared imports equal its rendered imports.
 
 `go run ./conformance/size/matrix [-out DIR] [-record PATH]` is the explicit, expensive matrix. It uses one matched configuration: `CGO_ENABLED=0`, an empty `GOFLAGS`, the native build flags above, and a `-ldflags=-s -w` companion for every unstripped binary. It builds:
 
 - every fixture, through `ef build --receipt`;
-- an all-source counterfactual of each fixture's generation, with every distributed runtime source;
+- an all-source counterfactual of the minimal, managed and codec generations, with every distributed runtime source;
 - the idiomatic Go controls;
 - the TypeScript/Effect 4.0.1 controls in `conformance/size/controls`, type-checked with `tsc` when it is available.
 
-It measures controls and counterfactuals with the same `internal/receipt` functions, fails if an Effra receipt disagrees with that measurement, and compares every program's output across cohorts. For JavaScript it reports separately the emitted module, the minified application with `effect` external, the minified deployment with `effect` inlined, and the deployment delta between the two. `-record` writes the run with its commit, dirty state, toolchain and fixture, control and runtime hashes. [conformance/size/README.md](../../conformance/size/README.md) lists the commands.
+Effra rows are the `ef build --receipt` receipts themselves, plus a measured stripped companion. Controls and counterfactuals are measured with the same `internal/receipt` functions. The matrix does not measure Effra executables a second time, so it is a shared method, not an independent cross-check. It runs every program that has an expected output, unstripped and stripped, and fails on any difference. For JavaScript it reports separately the emitted module, the minified application with `effect` external, the minified deployment with `effect` inlined, and the deployment delta between the two. `-record` writes the run with its commit, dirty state, toolchain and fixture, control and runtime hashes. [conformance/size/README.md](../../conformance/size/README.md) lists the commands.
 
 Controls are labelled by contract:
 
@@ -116,6 +122,9 @@ Decisions and rejected alternatives:
 
 - Select source modules before compilation. Do not rely on the linker. Go's linker roots `main.main` together with every package's init task (`cmd/link/internal/ld/deadcode.go`, go1.27.0), so imported packages keep their initialization and the globals it reaches. The all-source counterfactual quantifies this. The minimal row grows from 2,668,552 to 5,566,115 bytes and from 65 to 200 dependencies, and gains `net`, `net/http`, `crypto/tls` and `encoding/json`, although no HTTP function is reachable.
 - Take JavaScript imports from emission. Rejected: scanning the artifact text for `import` forms. A scan misreads program strings, and it cannot tell the compiler's imports from program text. Each prelude chunk declares its host modules beside its text, and a test holds the declarations to the text. Bundled sizes come from a real bundler, `bun build --minify`. Like [esbuild](https://esbuild.github.io/api/#tree-shaking) and Rollup, it drops an unused module when the package declares that it has no side effects (`sideEffects`), or when its own conservative analysis proves the module's top-level code pure. Effect 4.0.1 declares `sideEffects` for a single JIT-enable file. Its bundled runtime is therefore measured and attributed to the deployment, not assumed.
+- Publish to one admitted destination inside an `os.Root` (`os/root.go:82`, go1.27.0). Rejected: checking a path and later renaming to its spelling. The check cleaned `..` lexically while the rename followed links, so the two could address different files, and a link retargeted between them redirected the write. Pinning the parent follows the `openat`/`renameat` discipline `os.Root` provides.
+- Record C toolchain inputs; do not pin `CGO_ENABLED=0` for `ef build`. ko builds with `CGO_ENABLED=0` by default and lets the user override it (`ko-build/ko` at `16c8737`, `pkg/build/gobuild.go:568`). rules_go offers `pure` as an opt-in mode that filters cgo code out (`bazel-contrib/rules_go` at `2abe8cc`, `go/modes.rst:66`). Go's net package then selects its pure-Go resolver (`net/conf.go:100`). Pinning would silently change declared foreign Go packages that use cgo, which a measurement must not do. The matrix pins `CGO_ENABLED=0`, like ko, so its rows have no C toolchain inputs. Go's own build information stops at the same boundary: its comment at `cmd/go/internal/load/pkg.go:2506` notes that cgo already defeats reproducibility, because header and library versions are not stamped.
+- Render host imports from declarations. Rejected: a pattern guard over chunk text, which missed `import("x")` and `import ('x')`.
 - Rejected: a separate measurement script. The first matrix was a Python script that duplicated the CLI's measurement and checked agreement after the fact. The matrix is now a Go program over `internal/receipt`, so both paths share one implementation.
 - MoonBit, the closest whole-program comparison (`moonbitlang/moonbit-compiler` at `d4ada10`), removes dead code in two places:
   - `Core_dce.eliminate_dead_code` (`src/core_dce.ml:116`) runs per package, inside `core_of_tast` (`src/driver_util.ml:68`, `:74`), before linking. Linking is a separate step: `link_core` (`src/driver_util.ml:269`) links the package cores (`:278`). The pass's roots are top-level initialization expressions, which are always kept (`src/core_dce.ml:130`), and public definitions (`:134`, `:136`, `:144`). Every method and extension method is kept conservatively, because trait dispatch can reach it without a visible call (`:139`). An unused `let` is dropped only when its right-hand side is pure (`:73`).
@@ -128,7 +137,15 @@ Decisions and rejected alternatives:
 - Rejected, for now: a per-fixture byte budget in the gate. Budgets come from measured baselines, and the matched baselines are not complete yet (see below). The gate asserts retention facts that do not depend on the toolchain.
 - Rejected, for now: an MCP build receipt. MCP `project.check` already reports each entry mode's closed modules and requirement counts. Building executables from MCP is a separate capability decision.
 
-Recorded run `conformance/size/receipts/2026-10-09.json` (`effra.size-conformance/2`). Commit `6af082c` with a clean tree, go1.27.0 linux/amd64, `CGO_ENABLED=0`, Bun 1.4.2, Node v24.11.1, Effect 4.0.1. It replaces the first record (commit `3dc8c5d`, schema `/1`). It was re-recorded because the receipt schema gained build settings, build information and declared imports, the matched minimal controls were added, and native builds dropped VCS stamping. Every Effra application row has the same bytes as in the first record. The Go controls changed by a few bytes without VCS stamping: the floor from 2,337,969 to 2,337,985 and the managed control from 2,584,714 to 2,584,698. Raw bytes:
+Recorded run `conformance/size/receipts/2026-10-09.json` (`effra.size-conformance/2`). Commit `6ced9be` with a clean tree, on main `abcbe44`, go1.27.0 linux/amd64, `CGO_ENABLED=0`, Bun 1.4.2, Node v24.11.1, Effect 4.0.1.
+
+History of this record:
+
+- The first record was taken at commit `3dc8c5d` with receipt schema `/1`.
+- It was re-recorded at `6af082c`. The receipt gained build settings, build information and declared imports, the matched minimal controls were added, and native builds dropped VCS stamping. Every Effra row kept its bytes. The Go floor moved from 2,337,969 to 2,337,985 bytes and the managed control from 2,584,714 to 2,584,698.
+- It was re-recorded again at `6ced9be`. The receipt gained C toolchain inputs, and JavaScript host imports are now rendered loaders. Only the HTTP JavaScript row changed: the module grew from 16,426 to 16,475 bytes, the minified application from 7,010 to 7,016 and the deployment from 36,535 to 36,541. Every native row kept its bytes.
+
+Raw bytes:
 
 | Row | Go | Go stripped | Go deps | JS module | JS app (min) | JS deploy (min) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -139,7 +156,7 @@ Recorded run `conformance/size/receipts/2026-10-09.json` (`effra.size-conformanc
 | managed, all-source | 5,698,975 | 3,846,304 | 200 | | | |
 | codec | 2,787,773 | 1,818,784 | 65 | 25,311 | 12,185 | 41,600 |
 | codec, all-source | 5,672,730 | 3,825,824 | 200 | | | |
-| http | 8,825,391 | 5,992,608 | 191 | 16,426 | 7,010 | 36,535 |
+| http | 8,825,391 | 5,992,608 | 191 | 16,475 | 7,016 | 36,541 |
 | direct / pipe | 2,669,458 | 1,732,768 | 65 | 4,092 | 1,739 | 30,660 |
 | Go control, minimal (matched) | 2,548,908 | 1,650,848 | 62 | | | |
 | Go control, minimal floor (unmatched) | 2,337,985 | 1,507,488 | 60 | | | |
@@ -147,15 +164,17 @@ Recorded run `conformance/size/receipts/2026-10-09.json` (`effra.size-conformanc
 | TS/Effect control, minimal (matched) | | | | 651 (source) | 326 | 27,292 |
 | TS/Effect control, managed (matched) | | | | 1,442 (source) | 765 | 40,796 |
 
-The compiler executable is reported separately from these application rows. It was 16,893,943 bytes in the recorded run, and the bundled runtime sources were 15 files and 107,281 bytes.
+The compiler executable is reported separately from these application rows. It was 17,056,908 bytes in the recorded run, and the bundled runtime sources were 15 files and 107,840 bytes.
 
 Retention observations, not claims:
 
-- A pure minimal entry retains the `core` module: scopes, fibers, the scheduler, and signal-driven cancellation through `os/signal`. It is 119,644 bytes over the matched Go control. Its largest per-package deltas (text plus data) are the generated runtime (+17 KB), `fmt` (+7.9 KB), linker-synthesized `go:` symbols (+5.2 KB), `slices` (+3.9 KB) and `context` (+2.9 KB). Only the generated runtime, `cmp` and `strings` are packages the control lacks. Against the unmatched floor the gap is 330,567 bytes, led by `time` (+41.5 KB), which the matched control also retains.
-- The managed row's residual over its matched Go control is mostly the generated runtime (+56 KB) and generated `main` (+12 KB). Apart from the generated runtime, `cmp` and `strings`, both executables retain symbols from the same packages.
+Attribution comes from the symbol table only. Sized symbols cover part of each file-size gap. The rest (section padding, headers, metadata that `nm` does not size) is unexplained.
+
+- A pure minimal entry retains the `core` module: scopes, fibers, the scheduler, and signal-driven cancellation through `os/signal`. It is 119,644 bytes over the matched Go control, and sized symbols account for 42,071 of them. The largest per-package symbol deltas (text plus data) are the generated runtime (+17.0 KB), `fmt` (+7.9 KB), linker-synthesized `go:` symbols (+5.2 KB), `slices` (+3.9 KB) and `context` (+2.9 KB). Only the generated runtime, `cmp` and `strings` are packages the control lacks. Against the unmatched floor the gap is 330,567 bytes, with 119,543 in sized symbols, led by `time` (+41.5 KB), which the matched control also retains.
+- The managed row is 229,034 bytes over its matched Go control, and sized symbols account for 91,252 of them. The generated runtime (+56.2 KB) and generated `main` (+12.1 KB) together are 68,328 bytes. Apart from the generated runtime, `cmp` and `strings`, both executables retain symbols from the same packages.
 - Splitting `core` so that an entry without forks, sleeps or deadlines does not retain the scheduler is a candidate transformation. It must preserve entry cancellation, and it remains unmeasured.
 
-Delivered for #14: the application plan's source selection and stale-generation reconciliation (above); `ef build --receipt` with protected, atomic publication; the `internal/receipt` measurement owner; the gate's retention checks; the Go matrix; matched minimal and managed controls on both targets; and the recorded run.
+Delivered for #14: the application plan's source selection and stale-generation reconciliation (above); `ef build --receipt` with admission against the build's own paths and atomic publication into a pinned directory; receipts that record effective Go and C toolchain inputs; the `internal/receipt` measurement owner; the gate's retention checks; the Go matrix; matched minimal and managed controls on both targets; and the recorded run.
 
 Remaining for #14:
 

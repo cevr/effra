@@ -21,6 +21,7 @@ Public programs and controls for the [small executable contract](../../docs/spec
 ```sh
 # Deterministic retention and receipt checks. These run in the gate as part of go test ./...
 go test ./cmd/ef -run 'TestSizeFixtures|TestBuildReceipt|TestJSReceipt'
+go test ./internal/receipt
 
 # One application's receipt
 ef build conformance/size/fixtures/managed.ef -o dist/managed --receipt dist/managed.receipt.json
@@ -30,15 +31,15 @@ ef build conformance/size/fixtures/managed.ef --target js --entry -o dist/manage
 go run ./conformance/size/matrix -out /tmp/effra-size [-record conformance/size/receipts/DATE.json]
 ```
 
-`--receipt` refuses a path that names the build's source or one of its artifacts, including aliases through symbolic or hard links, and any path inside `dist/go/apps`. It publishes the receipt atomically.
+`--receipt` refuses a path that names the build's source or one of its artifacts, including aliases through symbolic or hard links and spellings where `..` follows a link, and any path inside `dist/go/apps`. It publishes the receipt atomically inside the directory it admitted.
 
-The matrix builds with `CGO_ENABLED=0`, an empty `GOFLAGS` and `-trimpath -mod=readonly -buildvcs=false`, and builds a `-ldflags=-s -w` companion for every unstripped binary. It measures every Effra and control binary with the same functions, and it fails if an Effra receipt disagrees with that measurement or if any program's output differs from the expected output. For JavaScript it reports separately:
+The matrix builds with `CGO_ENABLED=0`, an empty `GOFLAGS` and `-trimpath -mod=readonly -buildvcs=false`, and builds a `-ldflags=-s -w` companion for every unstripped binary. Effra rows are the `ef build --receipt` receipts; controls and counterfactuals are measured with the same `internal/receipt` functions. The matrix fails if any program's output differs from the expected output. For JavaScript it reports separately:
 
 - the emitted module;
 - the minified application bundle, with `effect` external;
 - the minified deployment bundle, with `effect` inlined;
 - the deployment delta between the two.
 
-The all-source counterfactual rebuilds a fixture's generation with every runtime source the compiler distributes. It measures what source selection removes that the Go linker's own dead-code elimination does not.
+The all-source counterfactual rebuilds the minimal, managed and codec generations with every runtime source the compiler distributes. It measures what source selection removes that the Go linker's own dead-code elimination does not.
 
 The codec and HTTP rows have no matched controls yet; see the remaining work in the spec.

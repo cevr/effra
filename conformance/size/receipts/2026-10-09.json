@@ -1,11 +1,20 @@
 {
  "schema": "effra.size-conformance/2",
  "identity": {
-  "commit": "6af082c92f3afef9d3441912152b28d6a72ab894",
+  "commit": "6ced9be68389d406b74b8c5b63c2d8dfd3b60214",
   "dirty": false,
   "toolchain": {
    "env": {
+    "AR": "ar",
+    "CC": "gcc",
+    "CGO_CFLAGS": "-O2 -g",
+    "CGO_CPPFLAGS": "",
+    "CGO_CXXFLAGS": "-O2 -g",
     "CGO_ENABLED": "0",
+    "CGO_FFLAGS": "-O2 -g",
+    "CGO_LDFLAGS": "-O2 -g",
+    "CXX": "g++",
+    "FC": "",
     "GO386": "",
     "GOAMD64": "v1",
     "GOARCH": "amd64",
@@ -15,7 +24,8 @@
     "GOFLAGS": "",
     "GOOS": "linux",
     "GOTOOLCHAIN": "auto",
-    "GOVERSION": "go1.27.0"
+    "GOVERSION": "go1.27.0",
+    "PKG_CONFIG": "pkg-config"
    },
    "flags": [
     "-trimpath",
@@ -62,7 +72,7 @@
    "inspect.go": "958bd0c8cb80dd7407af4a6f83b3c19fadd4672d9083ddf371bc117f7bfc5a9b",
    "interop.go": "2bdae97b82660c9307d068f95aee9f47102d98e9234e6f6ca780cfca60f851e3",
    "latch.go": "1614ff7c7548fa8eda6fa3899ebd5d7856bebee984476668ae66818a94caf1ee",
-   "layers.go": "b33d58b64ed268520d63353d1f9ac120b18fb1fe236c367ede62d316f562b6ae",
+   "layers.go": "fe75c6180ed2eeb3cee8c7808b05cc9aa15ea5652444e0d453b693bf7977bd94",
    "managed.go": "4be0f11dcc5263a265d1506168869df6934e3ba2349ecca8260a842d90ad3951",
    "scheduler.go": "1ddf46593f1b676419587cdcbf54a97e0b55223fdb0c49314839b6a077f9c21c",
    "scope.go": "04fa0c7306b147f1e988b3a050fe636064763de172efdfe90765e552e4ea6fb8"
@@ -70,10 +80,10 @@
  },
  "distribution": {
   "producer": "effra/checker-abi-9/bundled-interface-4",
-  "executableBytes": 16893943,
+  "executableBytes": 17056908,
   "runtimeModules": 10,
   "runtimeSourceFiles": 15,
-  "runtimeSourceBytes": 107281
+  "runtimeSourceBytes": 107840
  },
  "fixtures": {
   "codec": {
@@ -501,7 +511,7 @@
      },
      "binary": {
       "bytes": 5672730,
-      "sha256": "44b6e93bbb38b38994178037949e0e259afe13501ce920d5cd1085b8c8964cb8",
+      "sha256": "39b1479d74583cb4527473cc730a6938e5315be858524510ac6d44a0d3a698f0",
       "build": {
        "goVersion": "go1.27.0",
        "settings": {
@@ -1412,7 +1422,7 @@
      },
      "stripped": {
       "bytes": 3825824,
-      "sha256": "90f3773c5e266eb0ebc1d4d594b9d6d425521aa90ec6b14e6b59c74bca05dc67",
+      "sha256": "585de854353276c23b1073f4538c581f2a6c8655bec0959a1a82336ae2c8cb34",
       "build": {
        "goVersion": "go1.27.0",
        "settings": {
@@ -2972,14 +2982,14 @@
     }
    },
    "js": {
-    "moduleBytes": 16426,
+    "moduleBytes": 16475,
     "applicationMinified": {
-     "bytes": 7010,
-     "sha256": "948c9569b57c0b9bcf5ffbc1b3d093d0360ecd9c8a4360c4190724da5b38905b"
+     "bytes": 7016,
+     "sha256": "47c7115f23e36fde77369660c5e27fce9bbc8ed47d2bdeae6ed36f14f33fcffe"
     },
     "deploymentMinified": {
-     "bytes": 36535,
-     "sha256": "8d6913de9ff820ad100aa67a5b9e0ec4f8f1f7878f0bda969fb1b39cd63ff1b9"
+     "bytes": 36541,
+     "sha256": "6c2ea7c2cd533a1c33da504cd7771edaa382f9eda43c8e605338da5758cb2170"
     },
     "deploymentDeltaBytes": 29525,
     "externalRuntime": [
@@ -3002,7 +3012,7 @@
      }
     ],
     "declarationBytes": 5565,
-    "moduleSha256": "50c5c65c960cfb8dc2d5c7187f60b16727d5f0b810cc07342388e3668569a975",
+    "moduleSha256": "9c4af9b03fe589e2eb0dfcd2d5446ca9ceda8060693025e49a928647ba164a77",
     "requirements": {
      "callable-value": 1,
      "declaration": 4,
@@ -3435,7 +3445,7 @@
      },
      "binary": {
       "bytes": 5698975,
-      "sha256": "fc7ed3956b1573535bb982f78a6abea7701bd894da62865576143fceebf36fce",
+      "sha256": "56cdf31ef4f75d6c6397b44b77e0bb8ac49614f66a9840408afc9ea5ac4ecec8",
       "build": {
        "goVersion": "go1.27.0",
        "settings": {
@@ -4346,7 +4356,7 @@
      },
      "stripped": {
       "bytes": 3846304,
-      "sha256": "21b936bae9d38123f74e95912b85221b3eec04085b220718fda2f8fb654f4941",
+      "sha256": "86ccc37967501ede4acd3d17a8ac808e6cae7727db325b1df841dba25a5ece21",
       "build": {
        "goVersion": "go1.27.0",
        "settings": {
@@ -4816,7 +4826,7 @@
      },
      "binary": {
       "bytes": 5566115,
-      "sha256": "75965e41a270ee9e557978410bbfe6e63b3d9558a919b897b02f667e5aa3a506",
+      "sha256": "bdd666060db75e08a54a581c72fa15667742ea12b549110f2d3a757fbc39908d",
       "build": {
        "goVersion": "go1.27.0",
        "settings": {
@@ -5727,7 +5737,7 @@
      },
      "stripped": {
       "bytes": 3748000,
-      "sha256": "66434f65b449f0cb585b08db565c5b37625ae208617d060436d7c3de3a1a1a3e",
+      "sha256": "4663326204ab74fd009e1fe5739d3a7a3bd041ae74a0f4a6ef6b486a09ded104",
       "build": {
        "goVersion": "go1.27.0",
        "settings": {
