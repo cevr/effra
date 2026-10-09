@@ -259,3 +259,62 @@ render("a", "!", 7n);
 render("a", undefined, 7n, false);
 void full;`)
 }
+
+const defaultedTailSource = `fn walk(n: i64, step: i64 = 1, acc: i64 = 0) -> i64 {
+    if n == 0 {
+        acc
+    } else {
+        if n == 5 {
+            walk(n - 1, step: 3, acc: acc + step)
+        } else {
+            walk(acc: acc + step, n: n - 1)
+        }
+    }
+}
+effect fn main() -> string {
+    if walk(1000000) == 1000002 { "ok" } else { "bad" }
+}
+`
+
+func TestDefaultedSelfTailCallsLoopAndResetOmittedSlots(t *testing.T) {
+	// The omitted step resets to its constant on every iteration: only the
+	// iteration after n == 5 adds 3. A million iterations also overflow a
+	// V8 stack unless both self calls, defaulted and labelled, are loops.
+	r := CompileFor(defaultedTailSource, "js")
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	walk := r.Find("walk").function(t, r)
+	if lowerTail(walk) == nil {
+		t.Fatal("defaulted, labelled self-tail call was not planned as a loop")
+	}
+	runOnEveryHost(t, defaultedTailSource, "ok\n")
+	js, _, err := r.Emit(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(js, "while (true)") != 1 || strings.Count(js, "__ef_function_walk(") != 1+strings.Count(js, "__ef_function_walk(1000000n)") {
+		t.Fatalf("a defaulted self-tail call stayed recursive:\n%s", js)
+	}
+	reset := "const __ef_next_step = 1n;"
+	if strings.Count(js, reset) != 1 {
+		t.Fatalf("the omitted slot was not reassigned from its constant:\n%s", js)
+	}
+	// Causal control: keeping the previous iteration's value in the omitted
+	// slot changes the result.
+	sticky := strings.Replace(js, reset, "const __ef_next_step = __ef_arg_step;", 1)
+	assertion := fmt.Sprintf(`if (await Effect.runPromise(%s()) !== "ok") throw new Error("defaulted tail result changed");`, r.Find("main").function(t, r).jsEmissionName())
+	if output, err := runJSHostModule(t, "node", js, assertion); err != nil {
+		t.Fatalf("defaulted tail module failed: %v\n%s", err, output)
+	}
+	if output, err := runJSHostModule(t, "node", sticky, assertion); err == nil || !strings.Contains(output, "defaulted tail result changed") {
+		t.Fatalf("sticky omitted-slot mutant did not fail at the intended assertion: %v\n%s", err, output)
+	}
+	native, _, err := emitGoApplication(CompileFor(defaultedTailSource, "go"), GoGenerationBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(native, "for {") != 1 {
+		t.Fatalf("expected one native loop:\n%s", native)
+	}
+}

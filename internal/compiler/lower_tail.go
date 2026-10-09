@@ -103,7 +103,7 @@ func (t *tailLoop) selfCall(e *Expr) bool {
 		return false
 	}
 	f := t.function
-	if e.ResolvedFunction != f || f.Owner != "module" || e.Left == nil || e.Left.Kind != "name" || len(e.Args) != len(f.Params) {
+	if e.ResolvedFunction != f || f.Owner != "module" || e.Left == nil || e.Left.Kind != "name" || len(e.boundArguments()) != len(f.Params) {
 		return false
 	}
 	arguments := e.parameterArguments()
