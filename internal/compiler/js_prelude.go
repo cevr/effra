@@ -52,6 +52,7 @@ var jsPrelude = []jsPreludeChunk{
 	{name: "codec", imports: []string{"Effect"}, source: codecEngineJS + jsCodecAdapters},
 	{name: i64FormatOp, source: jsI64FormatHelper},
 	{name: i64ParseOp, imports: []string{"Effect"}, source: jsI64ParseHelper},
+	{name: "entry", imports: []string{"Effect", "Exit"}, source: preludeFile("entry.mjs")},
 	{name: "harness-slot", source: "let __ef_test_harness=null;\n"},
 	{name: "latch", imports: []string{"Effect"}, source: preludeFile("latch.mjs")},
 	{name: "provider:Stdout", imports: []string{"Effect"}, source: "const __ef_provider_Stdout = { log: (message) => Effect.sync(() => console.log(message)) };\n"},

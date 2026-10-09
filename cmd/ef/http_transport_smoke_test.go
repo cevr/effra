@@ -369,8 +369,8 @@ func httpTransportSmokeCheck(t *testing.T, dir string, command ...string) {
 	if elapsed := time.Since(signalled); elapsed >= 5*time.Second {
 		t.Fatalf("shutdown took %v", elapsed)
 	}
-	if exit != 1 || !strings.Contains(strings.ToLower(stderr), "interrupt") {
-		t.Fatalf("shutdown: exit %d\n%s", exit, stderr)
+	if exit != 130 || stderr != "interrupt\n" {
+		t.Fatalf("shutdown: exit %d stderr %q, want 130 and %q", exit, stderr, "interrupt\n")
 	}
 	held.Close()
 	// Client connections may linger in TIME_WAIT; a live listener would still

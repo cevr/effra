@@ -230,6 +230,34 @@ The runtime result should distinguish `Success(A)` from failure causes containin
 
 Recoverable Go panics can be captured at managed task boundaries as defects and trigger cleanup. Fatal runtime failures, process termination, and arbitrary unmanaged goroutine panics cannot receive the same guarantee.
 
+### Entry failure report
+
+When `main`'s exit is a failure, the program entry writes an [entry failure report](../GLOSSARY.md) to stderr and exits; stdout receives nothing more. The Go executable (`runtime/effra/report.go`) and the JavaScript entry (`internal/compiler/prelude/entry.mjs`) produce the same bytes, and `cmd/ef/entry_failure_process_test.go` compares both targets' stderr and status for each reason kind. `ef run` forwards SIGINT and SIGTERM to the program and passes its report and status through unchanged.
+
+The report has one line per cause reason, in cause order. A scope's cause lists its body's reasons, then unobserved children in fork order, then cleanup.
+
+```text
+failure: Bad
+failure: Invalid { code: 42, message: "bad \"input\"" }
+defect: "live scheduler cannot advance"
+interrupt
+```
+
+- A named failure prints its tag, then its payload fields in braces when it has any. A built-in failure that carries diagnostic text, such as `AssertionFailed`, reports it as its `message` field. `Timeout` has no payload on either target.
+- A defect prints its message as a quoted string. Interruption prints `interrupt` with no host detail.
+- Payload values use one grammar on both targets. Strings are double-quoted: `"` and `\` are escaped, newline, carriage return and tab use `\n`, `\r` and `\t`, other C0 controls and DEL use `\u00XX`, and invalid text is replaced by U+FFFD. `i64` is decimal, `bool` is `true` or `false`, and `void` is `void`. A record prints as `{ field: value, ... }`, or `{}` with no fields. An enum alternative prints its variant name, followed by its fields when it has any, such as `Some { value: "h" }`. Bytes print as `<bytes len=N>`, a callable as `<fn>`, and any other value, such as a handle or host value, as `<opaque>`.
+- Fields are listed in byte order of their source names. The JavaScript representation keeps construction order, not declaration order, so byte order is the only order both targets can reproduce without extra generated metadata.
+- The exit status is 130 when every reason is an interruption, and 1 otherwise.
+
+Prior art: Effect's `runMain` uses `defaultTeardown`, which exits 130 for interruption-only causes and 1 otherwise, and it logs the cause with `Cause.pretty`. Go's convention for a failed `main` is to print the error to stderr and exit 1, and 130 is the shell's status for SIGINT (128 + 2). Rejected alternatives:
+
+- Effect's `Cause.pretty` output and Node's `console.error` object dump were rejected because they include stack frames, fiber ids and host inspection syntax.
+- Go's `Cause.Error()` text was rejected because it keeps only the tags and drops the payload.
+- Declaration order would need a generated renderer for each type, or metadata on the JavaScript side.
+- Printing nothing for interruption, as Effect does, was rejected because a reported interruption tells an operator or agent why the process stopped.
+
+Known gap: codec failures still carry target-specific payloads (JavaScript adds an `issue` object), so their reports are not yet byte-identical.
+
 ## Compiler and Go runtime
 
 Effect typing and an Effect runtime are different design layers. Error/service rows and nominal capability identities can be checked and erased; they do not intrinsically require GC, fibers, boxed instructions, or a scheduler. First-class lazy computations do require a concrete representation for captures and execution, whose allocation and dispatch costs depend on lowering. For server workloads, managed memory and the existing JS/Go runtimes are appropriate, but they remain visible operational constraints rather than hidden implications of a type signature.

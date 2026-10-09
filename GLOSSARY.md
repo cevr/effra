@@ -22,6 +22,8 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Failure payload**: The declared data carried by a named failure, separate from an ordinary success value.
 
+**Entry failure report**: The deterministic stderr text and exit status a program entry produces when `main` fails. It lists each cause reason in order, as a named failure with its payload, a defect message or an interruption, and it is identical on every target.
+
 **Effect contract**: The success value, named failures, and required services of a deferred Effra program.
 
 **Semantic equivalence baseline** (acceptance term): A matched Effra, explicit

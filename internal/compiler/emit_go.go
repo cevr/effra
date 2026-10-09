@@ -454,7 +454,7 @@ func efFromRuntime[A any](program er.Effect[A]) efEffect[A] {return func(ctx efC
 				break
 			}
 		}
-		out.WriteString("func main() { base,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop();exit:=er.RunContext(base,func(fc *er.FiberContext) er.Exit[" + goSourceType(r.Program, r.Program.typeExpressions[mainReturn], mainReturn) + "]{return efFunction_main()(efContext{Runtime:fc})});if exit.IsFailure(){fmt.Fprintln(os.Stderr,exit.Cause());os.Exit(1)}\n")
+		out.WriteString("func main() { base,stop:=signal.NotifyContext(context.Background(),os.Interrupt,syscall.SIGTERM);defer stop();exit:=er.RunContext(base,func(fc *er.FiberContext) er.Exit[" + goSourceType(r.Program, r.Program.typeExpressions[mainReturn], mainReturn) + "]{return efFunction_main()(efContext{Runtime:fc})});if exit.IsFailure(){cause:=exit.Cause();fmt.Fprint(os.Stderr,er.EntryReport(cause));os.Exit(er.EntryExitCode(cause))}\n")
 		if mainReturn != voidTypeName {
 			out.WriteString("fmt.Println(exit.Value)\n")
 		}

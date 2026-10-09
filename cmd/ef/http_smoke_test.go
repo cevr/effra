@@ -208,7 +208,8 @@ func TestHTTPSmokeServesRoutesBoundariesAndSIGTERMShutdown(t *testing.T) {
 			}
 		})
 	})
-	if exit, stderr := server.httpSmokeStop(t); exit != 1 || !strings.Contains(stderr, "context canceled") {
-		t.Fatalf("SIGTERM shutdown: exit %d\n%s", exit, stderr)
+	// The entry failure report: interruption alone exits 130.
+	if exit, stderr := server.httpSmokeStop(t); exit != 130 || stderr != "interrupt\n" {
+		t.Fatalf("SIGTERM shutdown: exit %d stderr %q, want 130 and %q", exit, stderr, "interrupt\n")
 	}
 }

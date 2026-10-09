@@ -6,7 +6,7 @@ import (
 	"sort"
 )
 
-//go:embed effect.go fiber.go managed.go scheduler.go scope.go layers.go latch.go http.go files.go interop.go console.go env.go inspect.go codec.go codec_json.go
+//go:embed effect.go fiber.go managed.go report.go scheduler.go scope.go layers.go latch.go http.go files.go interop.go console.go env.go inspect.go codec.go codec_json.go
 var sources embed.FS
 
 // RuntimeModule identifies one selectable group of native runtime sources.
@@ -34,7 +34,7 @@ type runtimeModuleSpec struct {
 // copied source maps and byte slices, never this catalog or its file lists.
 var runtimeModuleCatalog = map[RuntimeModule]runtimeModuleSpec{
 	RuntimeModuleCore: {
-		files: []string{"effect.go", "fiber.go", "managed.go", "scheduler.go", "scope.go"},
+		files: []string{"effect.go", "fiber.go", "managed.go", "report.go", "scheduler.go", "scope.go"},
 	},
 	RuntimeModuleLayers: {
 		files:        []string{"layers.go"},
