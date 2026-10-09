@@ -172,7 +172,8 @@
       "blockedBy": [
         30,
         52,
-        65
+        65,
+        101
       ],
       "bodySha256": "47b3cb32f45bcae1d3e8df88442b2663e210d8f32405f9bbfd9bbd41e829e6d4",
       "labels": [
@@ -1662,6 +1663,145 @@
       "title": "How does Effra's JS output size compare with MoonBit's?",
       "updatedAt": "2026-10-09T19:44:31Z",
       "url": "https://github.com/cevr/effra/issues/94"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "0040640b09c1791dc59df9dc8c772b379bef0bde22c84b74a0549c8911c78849",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 95,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Reserve the postfix construct words catch, provide, timeout, orFail and recover",
+      "updatedAt": "2026-10-09T20:06:03Z",
+      "url": "https://github.com/cevr/effra/issues/95"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        34,
+        65
+      ],
+      "bodySha256": "8f5f7c185a665e82cc587705bd3477b39ae5ff86e6e3f34730e5d647c0efc7ab",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 96,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "File and Latch ownership and admission without capability names",
+      "updatedAt": "2026-10-09T20:06:04Z",
+      "url": "https://github.com/cevr/effra/issues/96"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        15,
+        51
+      ],
+      "bodySha256": "febd160f31464cb2eedd530f074afacfdd8bc39c0a80aa1ae5395a7ba3e7469a",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 97,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Http as an ordinary bundled service without emitter identity knowledge",
+      "updatedAt": "2026-10-09T20:06:06Z",
+      "url": "https://github.com/cevr/effra/issues/97"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        15
+      ],
+      "bodySha256": "ac48b32cfca176c1af86f208fbd23eb703fb27b7aa7fe8e0c7d4523c000d4769",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 98,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Declared target capability and the test harness as an ordinary layer",
+      "updatedAt": "2026-10-09T20:06:08Z",
+      "url": "https://github.com/cevr/effra/issues/98"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        32
+      ],
+      "bodySha256": "45ec86ea0e2dd8fe814c99476552bba493806e23aa033ec72e5009337e9e58de",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 99,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Predeclared Option type",
+      "updatedAt": "2026-10-09T20:06:09Z",
+      "url": "https://github.com/cevr/effra/issues/99"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        49,
+        55
+      ],
+      "bodySha256": "fb78a12e6005c167bd037c5ba59d42932a6ba2f1f0288a965cf30635a133573c",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 100,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Derive profiles owned by the derive construct",
+      "updatedAt": "2026-10-09T20:06:11Z",
+      "url": "https://github.com/cevr/effra/issues/100"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "55aa753a360bdb8a266f708fb7e3a431d4c9ab7ab6dce05a142d2077443c353c",
+      "labels": [
+        "wayfinder:grilling"
+      ],
+      "number": 101,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Actor<P> projection: general library mechanism or syntax?",
+      "updatedAt": "2026-10-09T20:06:12Z",
+      "url": "https://github.com/cevr/effra/issues/101"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "8327b75fc2af22a40ac9aa5c9edc5db63bd5b49c95a0a4e28f8b860a9b9a2980",
+      "labels": [
+        "wayfinder:research"
+      ],
+      "number": 102,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Specify the predeclared Foreign protocol and reserved names; decide Scheduler with row 15",
+      "updatedAt": "2026-10-09T20:06:14Z",
+      "url": "https://github.com/cevr/effra/issues/102"
     }
   ],
   "map": 1,
