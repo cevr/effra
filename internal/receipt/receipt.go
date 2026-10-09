@@ -12,7 +12,9 @@ import (
 	"debug/buildinfo"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +28,7 @@ import (
 )
 
 // Schema versions the application receipt.
-const Schema = "effra.application-receipt/3"
+const Schema = "effra.application-receipt/4"
 
 // GoBuildFlags are the flags of every native build: ef build, its stripped
 // companions and the size-conformance controls. A generated module is
@@ -123,13 +125,28 @@ type Toolchain struct {
 	CCompilers []CCompiler       `json:"cCompilers,omitempty"`
 }
 
-// CCompiler identifies one C toolchain command of a cgo build.
+// CCompiler identifies one C toolchain command of a cgo build. The go
+// command splits the setting into a program and leading arguments (see
+// splitCommand) and runs the program with those arguments. Program is
+// that executable. When the program is a wrapper, such as `env gcc` or
+// `ccache gcc`, Underlying is the first operand that names a different
+// executable on PATH; it is a best-effort identification. Version is the
+// first line the complete command prints for --version, so it describes
+// whatever compiler actually answers.
 type CCompiler struct {
-	Variable string `json:"variable"`
-	Command  string `json:"command"`
-	Path     string `json:"path"`
-	SHA256   string `json:"sha256"`
-	Version  string `json:"version"`
+	Variable   string      `json:"variable"`
+	Command    string      `json:"command"`
+	Arguments  []string    `json:"arguments"`
+	Program    Executable  `json:"program"`
+	Underlying *Executable `json:"underlying,omitempty"`
+	Version    string      `json:"version"`
+}
+
+// Executable is a resolved program file and its digest.
+type Executable struct {
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
 }
 
 // toolchainKeys are the go env settings that change what a build produces,
@@ -387,29 +404,94 @@ func MeasureCCompilers(toolchain *Toolchain, deps *Dependencies) ([]CCompiler, e
 	compilers := []CCompiler{}
 	for _, variable := range variables {
 		command := toolchain.Env[variable]
-		fields := strings.Fields(command)
+		fields, err := splitCommand(command)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", variable, err)
+		}
 		if len(fields) == 0 {
 			return nil, fmt.Errorf("cgo build has no %s", variable)
 		}
-		path, err := exec.LookPath(fields[0])
+		program, err := resolveExecutable(fields[0])
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", variable, err)
 		}
-		if path, err = filepath.EvalSymlinks(path); err != nil {
-			return nil, fmt.Errorf("%s: %w", variable, err)
+		compiler := CCompiler{Variable: variable, Command: command, Arguments: fields[1:], Program: *program}
+		for _, operand := range fields[1:] {
+			if strings.HasPrefix(operand, "-") || strings.Contains(operand, "=") {
+				continue
+			}
+			if underlying, err := resolveExecutable(operand); err == nil && underlying.Path != program.Path {
+				compiler.Underlying = underlying
+			}
+			break
 		}
-		artifact, err := MeasureFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", variable, err)
-		}
-		version, err := exec.Command(path, "--version").Output()
+		// argv[0] stays the spelled program, as the go command runs it:
+		// a driver such as gcc reports the name it was invoked by.
+		probe := exec.Command(program.Path, append(slices.Clone(fields[1:]), "--version")...)
+		probe.Args[0] = fields[0]
+		version, err := probe.Output()
 		if err != nil {
 			return nil, fmt.Errorf("%s --version: %w", variable, err)
 		}
 		first, _, _ := strings.Cut(string(version), "\n")
-		compilers = append(compilers, CCompiler{Variable: variable, Command: command, Path: path, SHA256: artifact.SHA256, Version: strings.TrimSpace(first)})
+		compiler.Version = strings.TrimSpace(first)
+		compilers = append(compilers, compiler)
 	}
 	return compilers, nil
+}
+
+// resolveExecutable finds name as exec does and identifies the file.
+func resolveExecutable(name string) (*Executable, error) {
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return nil, err
+	}
+	if path, err = filepath.Abs(path); err != nil {
+		return nil, err
+	}
+	if path, err = filepath.EvalSymlinks(path); err != nil {
+		return nil, err
+	}
+	artifact, err := MeasureFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return &Executable{Name: name, Path: path, SHA256: artifact.SHA256}, nil
+}
+
+// splitCommand splits a compiler setting as the go command does
+// (cmd/internal/quoted.Split, which cannot be imported): fields are
+// separated by spaces, tabs and newlines, and a field may be wrapped in
+// single or double quotes, with no escapes inside.
+func splitCommand(s string) ([]string, error) {
+	space := func(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
+	fields := []string{}
+	for len(s) > 0 {
+		for len(s) > 0 && space(s[0]) {
+			s = s[1:]
+		}
+		if len(s) == 0 {
+			break
+		}
+		if s[0] == '"' || s[0] == '\'' {
+			quote := s[0]
+			s = s[1:]
+			i := strings.IndexByte(s, quote)
+			if i < 0 {
+				return nil, fmt.Errorf("unterminated %c string", quote)
+			}
+			fields = append(fields, s[:i])
+			s = s[i+1:]
+			continue
+		}
+		i := 0
+		for i < len(s) && !space(s[i]) {
+			i++
+		}
+		fields = append(fields, s[:i])
+		s = s[i:]
+	}
+	return fields, nil
 }
 
 // MeasureFile records a file's bytes and digest.
@@ -559,83 +641,185 @@ func JavaScript(r *compiler.Result, source, mode string, module compiler.JSModul
 	return receipt, nil
 }
 
-// Destination is an admitted receipt path. Admission resolves the path's
-// parent with the file system's own semantics, so a symbolic link is
-// followed before a later `..` is applied, exactly as publication will
-// address it. It then opens the deepest existing directory of that parent
-// and keeps it open: publication creates and renames the receipt inside
-// that directory, so retargeting a link on the path after admission cannot
-// redirect the write.
+// Destination is an admitted receipt location: one file name in a
+// directory that admission holds open as an os.Root. Publication creates
+// and renames the receipt inside that directory and nowhere else, so no
+// path is resolved again after admission and a link created or retargeted
+// on the path later cannot redirect the write.
 type Destination struct {
-	path    string
-	root    *os.Root
-	missing []string
-	name    string
+	path      string
+	base      *os.Root
+	created   []string
+	parent    *os.Root
+	name      string
+	published bool
 }
 
 // Admit refuses a receipt path that names an input or an artifact of the
 // same build, or lies inside a managed output tree, and otherwise returns
-// the one destination publication will write. The receipt's location and
-// every protected path are resolved the same way; an existing receipt
-// entry is also compared by identity and, if it is a symbolic link, by its
-// target, so an alias of a protected file is refused as well.
+// the one destination publication writes.
+//
+// The receipt's parent is resolved as the file system walks it: a link is
+// followed before a later `..` applies. A component that exists but cannot
+// be walked, such as a dangling link, is refused rather than treated as a
+// directory to create. Missing parent directories are created during
+// admission, so the publication directory exists and is pinned before the
+// build; they are removed again if nothing is published.
+//
+// Names are compared as the file system compares them. Admission holds an
+// entry at the receipt name while it compares, creating an empty probe if
+// none exists, and looks up each protected path: on a case-insensitive or
+// normalizing volume a differently spelled output resolves to that entry
+// even before the build creates it. Existing entries are also compared by
+// identity, and a symbolic link at the receipt name by its target.
 func Admit(path string, protected []string, managed []string) (*Destination, error) {
 	if path == "" {
 		return nil, fmt.Errorf("--receipt requires a path")
 	}
-	parent, name := splitLeaf(path)
+	parentSpelling, name := splitLeaf(path)
 	if name == "" || name == "." || name == ".." {
 		return nil, fmt.Errorf("receipt path %s does not name a file", path)
 	}
-	directory, missing, err := physical(parent)
+	directory, missing, err := physical(parentSpelling)
 	if err != nil {
 		return nil, fmt.Errorf("receipt path %s: %w", path, err)
-	}
-	if info, err := os.Stat(directory); err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("receipt path %s: %s is not a directory", path, parent)
 	}
 	for _, component := range missing {
 		if component == "." || component == ".." {
 			return nil, fmt.Errorf("receipt path %s steps through %q below a missing directory", path, component)
 		}
 	}
-	target := filepath.Join(append(append([]string{directory}, missing...), name)...)
+	base, err := os.OpenRoot(directory)
+	if err != nil {
+		return nil, fmt.Errorf("receipt path %s: %w", path, err)
+	}
+	d := &Destination{path: path, base: base, name: name}
+	admitted := false
+	defer func() {
+		if !admitted {
+			d.Close()
+		}
+	}()
+	relative := "."
+	for _, component := range missing {
+		relative = filepath.Join(relative, component)
+		if err := base.Mkdir(relative, 0o755); err != nil {
+			return nil, fmt.Errorf("receipt path %s: %w", path, err)
+		}
+		d.created = append(d.created, relative)
+	}
+	if d.parent, err = base.OpenRoot(relative); err != nil {
+		return nil, fmt.Errorf("receipt path %s: %w", path, err)
+	}
+	if err := d.pinned(relative); err != nil {
+		return nil, err
+	}
+	parentPath := filepath.Join(append([]string{directory}, missing...)...)
+	target := filepath.Join(parentPath, name)
+
+	probe := false
+	if _, err := d.parent.Lstat(name); errors.Is(err, fs.ErrNotExist) {
+		file, err := d.parent.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return nil, fmt.Errorf("receipt path %s: %w", path, err)
+		}
+		file.Close()
+		probe = true
+	}
+	refusal := d.compare(target, protected, managed)
+	if probe {
+		if err := d.parent.Remove(name); err != nil && refusal == nil {
+			refusal = fmt.Errorf("receipt path %s: %w", path, err)
+		}
+	}
+	if refusal != nil {
+		return nil, refusal
+	}
+	admitted = true
+	return d, nil
+}
+
+// pinned confirms that the opened publication directory is the directory
+// entry admission resolved or created, not a link substituted for it.
+func (d *Destination) pinned(relative string) error {
+	if relative == "." {
+		return nil
+	}
+	entry, err := d.base.Lstat(relative)
+	if err != nil {
+		return fmt.Errorf("receipt path %s: %w", d.path, err)
+	}
+	opened, err := d.parent.Stat(".")
+	if err != nil {
+		return fmt.Errorf("receipt path %s: %w", d.path, err)
+	}
+	if !entry.IsDir() || !os.SameFile(entry, opened) {
+		return fmt.Errorf("receipt path %s: its directory changed during admission", d.path)
+	}
+	return nil
+}
+
+// compare refuses the receipt entry at target when it is, or will be, one
+// of the protected files, or lies in a managed tree.
+func (d *Destination) compare(target string, protected, managed []string) error {
+	entry, err := d.parent.Lstat(d.name)
+	if err != nil {
+		return fmt.Errorf("receipt path %s: %w", d.path, err)
+	}
+	if entry.IsDir() {
+		return fmt.Errorf("receipt path %s is a directory", d.path)
+	}
+	identities := []os.FileInfo{entry}
 	candidates := []string{target}
-	if info, err := os.Lstat(target); err == nil {
-		if info.IsDir() {
-			return nil, fmt.Errorf("receipt path %s is a directory", path)
+	if entry.Mode()&os.ModeSymlink != 0 {
+		if followed, err := os.Stat(target); err == nil {
+			identities = append(identities, followed)
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			if resolved, err := resolveFull(target); err == nil {
-				candidates = append(candidates, resolved)
-			}
+		if resolved, err := resolveFull(target); err == nil {
+			candidates = append(candidates, resolved)
 		}
+	}
+	same := func(info os.FileInfo) bool {
+		return slices.ContainsFunc(identities, func(identity os.FileInfo) bool { return os.SameFile(identity, info) })
 	}
 	for _, other := range protected {
 		resolved, err := resolveFull(other)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("receipt path %s: the build's %s: %w", d.path, other, err)
 		}
-		if slices.Contains(candidates, resolved) || sameFile(target, other) {
-			return nil, fmt.Errorf("receipt path %s names the build's own %s", path, other)
+		if slices.Contains(candidates, resolved) {
+			return fmt.Errorf("receipt path %s names the build's own %s", d.path, other)
+		}
+		for _, lookup := range []func(string) (os.FileInfo, error){os.Stat, os.Lstat} {
+			if info, err := lookup(resolved); err == nil && same(info) {
+				return fmt.Errorf("receipt path %s names the build's own %s", d.path, other)
+			}
 		}
 	}
 	for _, tree := range managed {
 		resolved, err := resolveFull(tree)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("receipt path %s: managed output %s: %w", d.path, tree, err)
 		}
 		for _, candidate := range candidates {
 			if relative, err := filepath.Rel(resolved, candidate); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-				return nil, fmt.Errorf("receipt path %s lies inside the managed output %s", path, tree)
+				return fmt.Errorf("receipt path %s lies inside the managed output %s", d.path, tree)
+			}
+		}
+		treeInfo, err := os.Stat(resolved)
+		if err != nil {
+			continue
+		}
+		for ancestor := filepath.Dir(target); ; ancestor = filepath.Dir(ancestor) {
+			if info, err := os.Stat(ancestor); err == nil && os.SameFile(info, treeInfo) {
+				return fmt.Errorf("receipt path %s lies inside the managed output %s", d.path, tree)
+			}
+			if filepath.Dir(ancestor) == ancestor {
+				break
 			}
 		}
 	}
-	root, err := os.OpenRoot(directory)
-	if err != nil {
-		return nil, fmt.Errorf("receipt path %s: %w", path, err)
-	}
-	return &Destination{path: path, root: root, missing: missing, name: name}, nil
+	return nil
 }
 
 // Publish writes the receipt atomically inside the admitted directory: a
@@ -648,23 +832,16 @@ func (d *Destination) Publish(receipt *Application) error {
 	if err != nil {
 		return err
 	}
-	directory := "."
-	if len(d.missing) > 0 {
-		directory = filepath.Join(d.missing...)
-		if err := d.root.MkdirAll(directory, 0o755); err != nil {
-			return fmt.Errorf("receipt path %s: %w", d.path, err)
-		}
-	}
 	nonce := make([]byte, 8)
 	if _, err := rand.Read(nonce); err != nil {
 		return err
 	}
-	temporary := filepath.Join(directory, ".receipt-"+hex.EncodeToString(nonce))
-	file, err := d.root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	temporary := ".receipt-" + hex.EncodeToString(nonce)
+	file, err := d.parent.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return fmt.Errorf("receipt path %s: %w", d.path, err)
 	}
-	defer d.root.Remove(temporary)
+	defer d.parent.Remove(temporary)
 	if _, err := file.Write(append(data, '\n')); err != nil {
 		file.Close()
 		return err
@@ -676,15 +853,31 @@ func (d *Destination) Publish(receipt *Application) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
-	if err := d.root.Rename(temporary, filepath.Join(directory, d.name)); err != nil {
+	if err := d.parent.Rename(temporary, d.name); err != nil {
 		return fmt.Errorf("receipt path %s: %w", d.path, err)
 	}
+	d.published = true
 	return nil
 }
 
-// Close releases an admitted destination without publishing.
+// Close releases an admitted destination. Without a publication it also
+// removes the directories admission created, when they are still empty.
 func (d *Destination) Close() error {
-	return d.root.Close()
+	if d.parent != nil {
+		d.parent.Close()
+		d.parent = nil
+	}
+	if d.base == nil {
+		return nil
+	}
+	if !d.published {
+		for index := len(d.created) - 1; index >= 0; index-- {
+			d.base.Remove(d.created[index])
+		}
+	}
+	err := d.base.Close()
+	d.base = nil
+	return err
 }
 
 // splitLeaf splits path at its last separator without cleaning it, so the
@@ -704,9 +897,11 @@ func splitLeaf(path string) (string, string) {
 // physical resolves path as the file system walks it: it returns the
 // deepest existing prefix with every symbolic link resolved and each `..`
 // applied to the resolved directory, and the components below it that do
-// not exist yet. A relative path is resolved from the physical working
+// not exist. A relative path is resolved from the physical working
 // directory. The path is never cleaned lexically before resolution, which
-// would apply `..` to a link's own name instead of its target.
+// would apply `..` to a link's own name instead of its target. A
+// component that exists but cannot be walked, such as a dangling link or
+// a file, is an error: it is never replayed as a missing directory.
 func physical(path string) (string, []string, error) {
 	separator := string(filepath.Separator)
 	if !filepath.IsAbs(path) {
@@ -721,9 +916,17 @@ func physical(path string) (string, []string, error) {
 	}
 	components := strings.FieldsFunc(path, func(r rune) bool { return r == filepath.Separator })
 	for count := len(components); count >= 0; count-- {
-		if resolved, err := filepath.EvalSymlinks(separator + strings.Join(components[:count], separator)); err == nil {
-			return resolved, components[count:], nil
+		resolved, err := filepath.EvalSymlinks(separator + strings.Join(components[:count], separator))
+		if err != nil {
+			continue
 		}
+		if count < len(components) {
+			next := filepath.Join(resolved, components[count])
+			if _, err := os.Lstat(next); !errors.Is(err, fs.ErrNotExist) {
+				return "", nil, fmt.Errorf("%s exists but cannot be resolved (a dangling link or a non-directory)", separator+strings.Join(components[:count+1], separator))
+			}
+		}
+		return resolved, components[count:], nil
 	}
 	return "", nil, fmt.Errorf("cannot resolve %s", path)
 }

@@ -81,6 +81,9 @@ func TestBuildReceiptRefusesInputsArtifactsAndAliases(t *testing.T) {
 	if err := os.Symlink(filepath.Join("parent", "sub"), filepath.Join(root, "jump")); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Symlink("late", filepath.Join(root, "late-link")); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name    string
 		args    []string
@@ -91,6 +94,7 @@ func TestBuildReceiptRefusesInputsArtifactsAndAliases(t *testing.T) {
 		{"go default executable", nil, "dist/main"},
 		{"absent go executable through a link and ..", []string{"-o", "parent/result"}, "jump/../result"},
 		{"go executable below a missing directory and ..", []string{"-o", "result"}, "missing/../result"},
+		{"absent go executable through a dangling link", []string{"-o", "late/result"}, "late-link/result"},
 		{"source", nil, "main.ef"},
 		{"source through a directory link", nil, "dir-link/main.ef"},
 		{"source symlink", nil, "source-link"},
@@ -111,7 +115,7 @@ func TestBuildReceiptRefusesInputsArtifactsAndAliases(t *testing.T) {
 	if data, err := os.ReadFile(source); err != nil || string(data) != string(original) {
 		t.Fatalf("source changed: %v %q", err, data)
 	}
-	for _, built := range []string{"dist", "out", "result", "parent/result"} {
+	for _, built := range []string{"dist", "out", "result", "parent/result", "late", "missing"} {
 		if _, err := os.Stat(filepath.Join(root, built)); !os.IsNotExist(err) {
 			t.Errorf("refused build wrote %s: %v", built, err)
 		}
@@ -248,8 +252,20 @@ func TestBuildReceiptRecordsCgoInputs(t *testing.T) {
 		t.Fatal("C compiler not identified")
 	}
 	compiler := first.Toolchain.CCompilers[0]
-	if compiler.Variable != "CC" || compiler.Command != "gcc" || !filepath.IsAbs(compiler.Path) || len(compiler.SHA256) != 64 || compiler.Version == "" {
+	if compiler.Variable != "CC" || compiler.Command != "gcc" || len(compiler.Arguments) != 0 || !filepath.IsAbs(compiler.Program.Path) || len(compiler.Program.SHA256) != 64 || compiler.Underlying != nil || compiler.Version == "" {
 		t.Fatalf("incomplete C compiler identity: %+v", compiler)
+	}
+
+	// The go command splits compiler settings with its quoting rules and
+	// runs any leading arguments: a quoted program is gcc itself, and a
+	// wrapper is recorded beside the compiler it runs.
+	quoted := build("quoted", "CGO_ENABLED=1", `CC="gcc"`)
+	if got := quoted.Toolchain.CCompilers; len(got) != 1 || got[0].Command != `"gcc"` || got[0].Program != compiler.Program || got[0].Version != compiler.Version {
+		t.Fatalf("quoted CC measured as %+v, want program %+v", got, compiler.Program)
+	}
+	wrapped := build("wrapped", "CGO_ENABLED=1", "CC=env gcc")
+	if got := wrapped.Toolchain.CCompilers; len(got) != 1 || got[0].Program.Name != "env" || !slices.Equal(got[0].Arguments, []string{"gcc"}) || got[0].Underlying == nil || *got[0].Underlying != compiler.Program || got[0].Version != compiler.Version {
+		t.Fatalf("wrapped CC measured as %+v (underlying %+v), want env running %+v", got, got[0].Underlying, compiler.Program)
 	}
 	if pure.Toolchain.Env["CGO_ENABLED"] != "0" || len(pure.Deps.Cgo) != 0 || len(pure.Toolchain.CCompilers) != 0 {
 		t.Fatalf("pure build reports cgo inputs: enabled=%q packages=%v compilers=%+v", pure.Toolchain.Env["CGO_ENABLED"], pure.Deps.Cgo, pure.Toolchain.CCompilers)

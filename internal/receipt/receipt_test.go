@@ -3,6 +3,7 @@ package receipt_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -117,6 +118,141 @@ func TestPublishStaysInTheAdmittedDirectory(t *testing.T) {
 		if strings.HasPrefix(entry.Name(), ".receipt-") {
 			t.Errorf("temporary file %s left behind", entry.Name())
 		}
+	}
+}
+
+// A link that exists but cannot be resolved is refused, never replayed
+// as a missing directory: otherwise `jump/result` with `jump -> out`
+// would pass as a new directory and later follow the link onto the
+// output the build creates at out/result.
+func TestAdmitRefusesDanglingLinks(t *testing.T) {
+	root := physicalRoot(t)
+	symlink(t, "out", filepath.Join(root, "jump"))
+	// The third case creates out for the receipt, after which jump
+	// resolves and the probe finds the output's future entry.
+	cases := []struct {
+		receipt   string
+		protected string
+		reason    string
+	}{
+		{root + "/jump/result", root + "/out/result", "cannot be resolved"},
+		{root + "/jump/deeper/result", root + "/elsewhere", "cannot be resolved"},
+		{root + "/out/result", root + "/jump/result", "names the build's own"},
+	}
+	for _, c := range cases {
+		destination, err := receipt.Admit(c.receipt, []string{c.protected}, nil)
+		if err == nil {
+			destination.Close()
+			t.Errorf("receipt %s admitted beside %s", c.receipt, c.protected)
+		} else if !strings.Contains(err.Error(), c.reason) {
+			t.Errorf("receipt %s beside %s refused for another reason: %v", c.receipt, c.protected, err)
+		}
+	}
+	if exists(filepath.Join(root, "out")) {
+		t.Fatal("a refused admission left a created directory")
+	}
+}
+
+// Admission creates missing parent directories and pins the deepest one,
+// so a link substituted for a created directory after admission cannot
+// redirect publication. Directories created for a receipt that is never
+// published are removed.
+func TestPublishIgnoresLinksCreatedAfterAdmission(t *testing.T) {
+	root := physicalRoot(t)
+	elsewhere := filepath.Join(root, "elsewhere")
+	mkdir(t, elsewhere)
+	destination, err := receipt.Admit(root+"/new/deeper/receipt.json", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(root, "new", "deeper"), filepath.Join(root, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	symlink(t, elsewhere, filepath.Join(root, "new", "deeper"))
+	publish(t, destination)
+	if exists(filepath.Join(elsewhere, "receipt.json")) || !exists(filepath.Join(root, "moved", "receipt.json")) {
+		t.Fatal("publication followed a link created after admission")
+	}
+
+	unpublished, err := receipt.Admit(root+"/unused/inner/receipt.json", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unpublished.Close()
+	if exists(filepath.Join(root, "unused")) {
+		t.Fatal("an unpublished destination left its created directories")
+	}
+	if _, err := receipt.Admit(root+"/refused/inner/result", []string{root + "/refused/inner/result"}, nil); err == nil {
+		t.Fatal("receipt over the output admitted")
+	}
+	if exists(filepath.Join(root, "refused")) {
+		t.Fatal("a refused admission left its created directories")
+	}
+}
+
+// Names are compared as the file system compares them, even before the
+// output exists. A case-insensitive volume treats RESULT and result as one
+// entry; a case-sensitive one keeps them apart and cannot express the case.
+func TestAdmitComparesNamesAsTheFileSystemDoes(t *testing.T) {
+	root := physicalRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "probe"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := os.Lstat(filepath.Join(root, "PROBE"))
+	insensitive := err == nil
+	destination, err := receipt.Admit(root+"/RESULT", []string{root + "/result"}, nil)
+	if insensitive {
+		if err == nil {
+			destination.Close()
+			t.Fatal("RESULT admitted over the absent output result on a case-insensitive volume")
+		}
+	} else if err != nil {
+		t.Fatalf("distinct names refused on a case-sensitive volume: %v", err)
+	} else {
+		destination.Close()
+	}
+	if exists(filepath.Join(root, "RESULT")) {
+		t.Fatal("admission left its probe entry")
+	}
+	if !insensitive {
+		t.Skip("case-sensitive file system: the alias case cannot be expressed")
+	}
+}
+
+// Compiler settings are split as the go command splits them, with quoted
+// fields and leading arguments; a wrapper is recorded beside the program
+// it runs, and the version comes from the complete command.
+func TestMeasureCCompilersFollowsGoCommandSplitting(t *testing.T) {
+	directory := filepath.Join(physicalRoot(t), "dir with space")
+	mkdir(t, directory)
+	fake := filepath.Join(directory, "fake-cc")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho \"fake cc $1 $2\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deps := &receipt.Dependencies{Cgo: []string{"net"}}
+	measure := func(command string) (receipt.CCompiler, error) {
+		compilers, err := receipt.MeasureCCompilers(&receipt.Toolchain{Env: map[string]string{"CGO_ENABLED": "1", "CC": command}}, deps)
+		if err != nil {
+			return receipt.CCompiler{}, err
+		}
+		return compilers[0], nil
+	}
+	quoted, err := measure(`"` + fake + `" -O2`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quoted.Program.Path != fake || !slices.Equal(quoted.Arguments, []string{"-O2"}) || quoted.Underlying != nil || quoted.Version != "fake cc -O2 --version" {
+		t.Fatalf("quoted command measured as %+v", quoted)
+	}
+	wrapped, err := measure("env '" + fake + "'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wrapped.Program.Name != "env" || wrapped.Underlying == nil || wrapped.Underlying.Path != fake || wrapped.Version != "fake cc --version" {
+		t.Fatalf("wrapped command measured as %+v", wrapped)
+	}
+	if _, err := measure(`"` + fake); err == nil || !strings.Contains(err.Error(), "unterminated") {
+		t.Fatalf("unterminated quote accepted: %v", err)
 	}
 }
 
