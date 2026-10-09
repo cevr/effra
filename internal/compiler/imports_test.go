@@ -112,6 +112,7 @@ effect fn main() -> string raises {GoError} {
 	}
 	cmd := exec.Command("go", "run", "-race", ".")
 	cmd.Dir = dir
+	cmd.Env = generatedGoEnvironment()
 	output, err := cmd.CombinedOutput()
 	if err != nil || string(output) != "partial:done\n" {
 		t.Fatalf("imported SDK: %v %s", err, output)

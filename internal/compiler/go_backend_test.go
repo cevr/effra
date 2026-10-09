@@ -134,8 +134,19 @@ func TestGoBackendRefusesInvalidEntry(t *testing.T) {
 	}
 }
 
+// runGoCommand runs the go command for a generated module in dir.
 func runGoCommand(dir string, args ...string) ([]byte, error) {
 	command := exec.Command("go", args...)
 	command.Dir = dir
+	command.Env = generatedGoEnvironment()
 	return command.CombinedOutput()
+}
+
+// generatedGoEnvironment builds generated modules as `ef build` does, with
+// -trimpath. Each test writes its module to a fresh temporary directory;
+// without -trimpath that directory is part of every package's build key, so
+// the identical generated runtime recompiled for every test and every run.
+// Flags in GOFLAGS that a go subcommand does not take are ignored.
+func generatedGoEnvironment() []string {
+	return append(os.Environ(), "GOFLAGS="+strings.TrimSpace(os.Getenv("GOFLAGS")+" -trimpath"))
 }
