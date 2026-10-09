@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// legacyGraphFixtures freeze the no-option `ef graph` JSON before GraphViewV1
-// selection exists. The compiler-level encoding matches the CLI's
+// legacyGraphFixtures freeze the no-option `ef graph` JSON independently of
+// GraphViewV1 selection. The compiler-level encoding matches the CLI's
 // printProjectionJSON; producer metadata is absent because these results are
 // not qualified by an executing artifact. The goldens have no regeneration
 // switch: changing the legacy wire requires a deliberate version transition.
@@ -66,6 +66,50 @@ func TestLegacyGraphSchemaVersionIsIndependentOfSemanticResult(t *testing.T) {
 	}
 	if graph.SchemaVersion == result.SchemaVersion {
 		t.Fatalf("fixture did not separate graph and semantic result schemas: graph %d, semantic %d", graph.SchemaVersion, result.SchemaVersion)
+	}
+}
+
+func TestLegacyGraphPublishesCheckedParameterFactsAndProducerEpoch(t *testing.T) {
+	result := Compile(`fn decorate(required value: string, suffix: string = "!") -> string { value + suffix }`)
+	if !result.Checked {
+		t.Fatalf("fixture is not checked: %v", result.Diagnostics)
+	}
+	if result.SchemaVersion != SemanticSchemaVersion || SemanticSchemaVersion != 8 {
+		t.Fatalf("semantic result epoch = %d, want %d", result.SchemaVersion, SemanticSchemaVersion)
+	}
+
+	graph, err := result.Graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph.SchemaVersion != GraphSchemaVersion {
+		t.Fatalf("legacy graph epoch = %d, owner = %d", graph.SchemaVersion, GraphSchemaVersion)
+	}
+	if GraphSchemaVersion != 8 {
+		t.Fatalf("legacy graph schema owner = %d; want 8", GraphSchemaVersion)
+	}
+	if graph.ProducerIdentity != SemanticProducerIdentity {
+		t.Fatalf("legacy graph producer identity = %q, owner = %q", graph.ProducerIdentity, SemanticProducerIdentity)
+	}
+	if SemanticProducerIdentity != "effra/checker-abi-9/bundled-interface-4" {
+		t.Fatalf("semantic producer identity owner = %q", SemanticProducerIdentity)
+	}
+
+	var callable *CallableType
+	for _, node := range graph.Nodes {
+		if node.ID == "function:decorate" && node.Contract != nil {
+			callable = node.Contract.Callable
+			break
+		}
+	}
+	if callable == nil || len(callable.Parameters) != 2 {
+		t.Fatalf("legacy graph callable contract missing: %+v", callable)
+	}
+	if !callable.Parameters[0].RequiredChoice || callable.Parameters[0].DefaultValue != nil {
+		t.Fatalf("required-choice graph parameter = %+v", callable.Parameters[0])
+	}
+	if callable.Parameters[1].RequiredChoice || callable.Parameters[1].DefaultValue == nil || *callable.Parameters[1].DefaultValue != (ConstantValue{Kind: "string", Value: "!"}) {
+		t.Fatalf("default graph parameter = %+v", callable.Parameters[1])
 	}
 }
 

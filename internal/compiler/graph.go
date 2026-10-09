@@ -53,7 +53,7 @@ const maxGraphEdges = 2000
 
 // GraphSchemaVersion identifies the legacy dependency graph JSON contract.
 // It advances independently from SemanticSchemaVersion.
-const GraphSchemaVersion = 7
+const GraphSchemaVersion = 8
 
 // dependencyContract is the unprojected contract of one dependency fact.
 // Projection is the expensive, budgeted part of publication, so the walker
@@ -272,7 +272,7 @@ func (r *Result) walkDependencyFacts(sink dependencyFactSink) {
 }
 
 // legacyGraphSink is the compatibility serialization of the dependency facts:
-// the frozen schema-7 `ef graph` result with its whole-file node, edge and
+// the schema-8 `ef graph` result with its whole-file node, edge and
 // compatibility-metadata budgets charged in traversal order.
 type legacyGraphSink struct {
 	r             *Result

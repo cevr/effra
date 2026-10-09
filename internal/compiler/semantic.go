@@ -221,7 +221,7 @@ type RowID uint32
 const invalidTypeID TypeID = 0
 const emptyRowID RowID = 0
 
-const SemanticSchemaVersion = 7
+const SemanticSchemaVersion = 8
 
 const voidTypeName = "void"
 
@@ -2569,7 +2569,9 @@ func (c *checker) implementsOperation(got, want *Function) bool {
 		return false
 	}
 	for i := range got.Params {
-		if rename(got.Params[i].typeID) != want.Params[i].typeID {
+		// A required choice is part of the operation's call contract, so an
+		// implementation must keep each parameter's choice marker.
+		if rename(got.Params[i].typeID) != want.Params[i].typeID || got.Params[i].RequiredChoice != want.Params[i].RequiredChoice {
 			return false
 		}
 	}
@@ -2880,7 +2882,7 @@ func (c *checker) signature(f *Function) {
 		p.TypeRef = c.typeRef(p.Type)
 		p.typeID = c.canonicalRef(p.TypeRef)
 		c.bindSourceSyntax(p.sourceType, p.typeID)
-		c.refuseUnadmittedParameterContract(p)
+		c.checkParameterContract(f, p)
 		if names[p.Name] {
 			c.diagnostic("EF101", "duplicate parameter "+p.Name, p.Span)
 		}
@@ -3749,8 +3751,15 @@ func publicValue(t ValueType) ValueType {
 func publicParams(params []Param) []Param {
 	params = append([]Param{}, params...)
 	for i := range params {
+		params[i].defaultExpr = nil
+		params[i].requiredSpan = Span{}
+		params[i].defaultSpan = Span{}
 		params[i].typeID = invalidTypeID
 		params[i].sourceType = nil
+		if params[i].DefaultValue != nil {
+			value := *params[i].DefaultValue
+			params[i].DefaultValue = &value
+		}
 	}
 	return params
 }
@@ -3893,6 +3902,7 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, c
 		parameter.setOwnership(c.borrowedOwnershipID(p.typeID, "parameter:"+p.Name))
 		if c.lexicalOwner != nil {
 			parameter = c.bindLocal("parameter", p.Name, p.Span, p.Extent, c.result.lexical.parameters[p.Span.Offset], parameter)
+			c.attachParameterFacts(parameter.lexicalBinding, p)
 		}
 		env[p.binding] = parameter
 	}
@@ -3988,11 +3998,9 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, c
 }
 
 func callableIdentity(c *checker, f *Function) *CallableType {
-	parameters := append([]Param{}, f.Params...)
+	parameters := publicParams(f.Params)
 	for i := range parameters {
-		parameters[i].TypeRef = c.ref(parameters[i].typeID)
-		parameters[i].sourceType = nil
-		parameters[i].typeID = invalidTypeID
+		parameters[i].TypeRef = c.ref(f.Params[i].typeID)
 	}
 	kind := "pure"
 	if f.Effect {

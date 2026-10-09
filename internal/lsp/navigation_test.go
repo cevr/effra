@@ -131,6 +131,27 @@ func TestNavigationReadsTheCurrentAcceptedVersion(t *testing.T) {
 	}
 }
 
+func TestHoverPresentsCheckedParameterRolesAndDefaults(t *testing.T) {
+	uri := "file:///tmp/effra-parameter-default-hover.ef"
+	source := "fn render(required key: string, suffix: string = \"!\") -> string { key + suffix }\n"
+	callable := at(t, source, "fn render", "render")
+	parameter := at(t, source, "suffix: string", "suffix")
+	messages, err := runSession(t, initialize(), initialized(), open(uri, source, 1),
+		pointAt(uri, "textDocument/hover", "callable", source, callable),
+		pointAt(uri, "textDocument/hover", "parameter", source, parameter),
+		shutdown(), call("exit", nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := responses(t, messages)
+	if got := hoverText(t, byID["callable"]); got != `fn render(required key: string, suffix: string = "!") -> string` {
+		t.Fatalf("callable hover omitted checked parameter facts: %q", got)
+	}
+	if got := hoverText(t, byID["parameter"]); got != `parameter suffix: string = "!"` {
+		t.Fatalf("parameter hover omitted its default: %q", got)
+	}
+}
+
 func TestNavigationUsesUTF16PositionsAndDeclarations(t *testing.T) {
 	uri := "file:///tmp/effra-positions.ef"
 	source := "// 𐐀 note\r\nfn helper(value: string) -> string { value }\r\nfn caller() -> string { let s = \"𐐀é\"; helper(s) }\r\n"

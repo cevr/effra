@@ -198,7 +198,7 @@ with tempfile.TemporaryDirectory(prefix="effra-type-") as directory:
         views = {name: cli(path, target, "--offset", str(offset)) for name, offset in selectors}
         artifact = producer_snapshot(views["use"], target)
         for view in views.values():
-            assert view["checked"] and view["typeProjectionComplete"] and view["querySchemaVersion"] == 2
+            assert view["checked"] and view["typeProjectionComplete"] and view["querySchemaVersion"] == 3
             assert view["producerIdentity"] and view["sources"] and view["bundledInterfaces"]
             assert view["selection"]["locationAvailable"]
             current = producer_snapshot(view, target)

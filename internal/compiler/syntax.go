@@ -66,12 +66,14 @@ type parser struct {
 	absent *absentScan
 }
 type Param struct {
-	Name           string  `json:"name"`
-	Type           string  `json:"type"`
-	TypeRef        TypeRef `json:"typeRef"`
-	Span           Span    `json:"span"`
-	Extent         Span    `json:"-"`
-	TypeSpan       Span    `json:"-"` // the type's tokens inside any grouping, for type-position diagnostics
+	Name           string         `json:"name"`
+	Type           string         `json:"type"`
+	TypeRef        TypeRef        `json:"typeRef"`
+	Span           Span           `json:"span"`
+	RequiredChoice bool           `json:"requiredChoice"`
+	DefaultValue   *ConstantValue `json:"defaultValue"`
+	Extent         Span           `json:"-"`
+	TypeSpan       Span           `json:"-"` // the type's tokens inside any grouping, for type-position diagnostics
 	requiredChoice bool
 	requiredSpan   Span
 	defaultExpr    *Expr

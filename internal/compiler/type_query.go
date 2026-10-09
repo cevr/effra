@@ -6,9 +6,9 @@ import (
 	"slices"
 )
 
-// TypeQuerySchemaVersion 2 adds the selected declaration target and the
-// shared plaintext presentation to every selected-type response.
-const TypeQuerySchemaVersion = 2
+// TypeQuerySchemaVersion 3 adds caller-choice parameter facts to selected
+// callable declarations and the public parameter projection.
+const TypeQuerySchemaVersion = 3
 
 // Selection refusals that adapters classify. Their text is the public message.
 var (
@@ -51,6 +51,7 @@ type DeclarationTarget struct {
 	Span              Span               `json:"span"`
 	Extent            Span               `json:"extent"`
 	Callable          *DeclaredSignature `json:"callable,omitempty"`
+	Parameter         *Param             `json:"parameter,omitempty"`
 	Type              *TypeRef           `json:"type,omitempty"`
 	Constant          *ConstantValue     `json:"constant,omitempty"`
 }
@@ -91,7 +92,7 @@ func bindingInfo(binding lexicalBinding) *BindingInfo {
 }
 
 func bindingTarget(binding lexicalBinding) *DeclarationTarget {
-	return &DeclarationTarget{Kind: binding.Kind, Name: binding.Name, Identity: binding.ID, Source: userSourceID, LocationAvailable: true, Span: binding.NameSpan, Extent: binding.Extent}
+	return &DeclarationTarget{Kind: binding.Kind, Name: binding.Name, Identity: binding.ID, Source: userSourceID, LocationAvailable: true, Span: binding.NameSpan, Extent: binding.Extent, Parameter: cloneParam(binding.Parameter)}
 }
 
 const userSourceID = "source:user"
@@ -368,6 +369,8 @@ func (r *Result) declarationTarget(t lexicalTarget) (*DeclarationTarget, *Declar
 		}
 		parameter := params[index]
 		target.Name = parameter.Name
+		parameterView := publicParams([]Param{parameter})[0]
+		target.Parameter = &parameterView
 		ref := c.identityRef(parameter.typeID)
 		target.Type = &ref
 		if original {
@@ -563,6 +566,9 @@ func (r *Result) projectSelection(selected *SelectedType) TypeProjection {
 	if target := selected.Target; target != nil {
 		if target.Type != nil {
 			appendProjectionRef(&refs, *target.Type)
+		}
+		if target.Parameter != nil {
+			appendProjectionRef(&refs, target.Parameter.TypeRef)
 		}
 		if callable := target.Callable; callable != nil {
 			for _, parameter := range callable.TypeParameters {

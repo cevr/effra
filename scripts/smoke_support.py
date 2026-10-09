@@ -16,18 +16,20 @@ def adapter_semantic(value):
     return result
 
 
-def producer_snapshot(value, target=None, snapshot_schema=7):
-    """Validate one decorated response and return its producer identity."""
+def producer_snapshot(value, target=None, snapshot_schema=8):
+    """Validate one response envelope and its independent snapshot epoch."""
     assert isinstance(value, dict)
     for key in ("schemaVersion", "revision", "target", "producer", "snapshot"):
         assert key in value, key
     expected_target = value["target"] if target is None else target
     assert value["target"] == expected_target, (value["target"], expected_target)
-    assert type(snapshot_schema) is int and snapshot_schema > 0, snapshot_schema
-
     producer = value["producer"]
     snapshot = value["snapshot"]
     assert isinstance(producer, dict) and isinstance(snapshot, dict)
+    observed_report_schema = value["schemaVersion"]
+    assert type(observed_report_schema) is int and observed_report_schema > 0, observed_report_schema
+    observed_snapshot_schema = snapshot.get("schemaVersion")
+    assert type(snapshot_schema) is int and snapshot_schema > 0, snapshot_schema
     for key in ("strength", "qualifier", "reuseScope"):
         assert key in producer, key
     scope = producer["reuseScope"]
@@ -46,7 +48,7 @@ def producer_snapshot(value, target=None, snapshot_schema=7):
             assert len(producer["qualifier"]) > len("process:")
         else:
             assert producer["qualifier"] == ""
-    assert type(snapshot.get("schemaVersion")) is int and snapshot["schemaVersion"] == snapshot_schema
+    assert type(observed_snapshot_schema) is int and observed_snapshot_schema == snapshot_schema, (observed_snapshot_schema, snapshot_schema)
     assert snapshot == {
         "schemaVersion": snapshot_schema,
         "revision": value["revision"],
@@ -65,9 +67,10 @@ def _project(value, ignored, project):
 
 
 def assert_report_parity(actual, expected, target=None, ignored=(), project=None,
-                         report_schema=7, snapshot_schema=7):
+                         report_schema=8, snapshot_schema=8):
     """Compare decorated reports without erasing their producer contract.
 
+    The outer report and embedded semantic snapshot have separate epochs.
     Artifact-scoped reports are equal after only explicitly named adapter
     envelope projections. Process-scoped reports may differ only in the
     process qualifier; ``none`` reports retain exact metadata equality.

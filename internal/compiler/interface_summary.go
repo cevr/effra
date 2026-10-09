@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-const interfaceSummarySchema = 3
+const interfaceSummarySchema = 4
 const ownershipSummarySchema = 3
 const maxInterfaceSummaryBytes = 1 << 20
 const maxInterfaceClosureBytes = 8 << 20
@@ -76,8 +76,10 @@ type summaryDeclaration struct {
 	Body           string             `json:"body"`
 }
 type summaryParameter struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name           string         `json:"name"`
+	Type           string         `json:"type"`
+	RequiredChoice bool           `json:"requiredChoice"`
+	DefaultValue   *ConstantValue `json:"defaultValue"`
 }
 type summaryType struct {
 	Ref         string   `json:"ref"`
@@ -233,7 +235,7 @@ func exportInterfaceSummary(c *checker, module, sourceInput string, functions []
 		}
 		d := summaryDeclaration{Ref: f.Identity, Source: f.SourceID, Signature: x.typ(checked.contract.valueID()), Parameters: []summaryParameter{}, Ownership: x.facts(f, f.Ownership, 0), Captures: x.facts(f, f.Captures, 0), ReturnEvidence: x.callable(f.returnCallableEvidence), Body: x.occurrence(f, checked.body, 0)}
 		for _, p := range f.Params {
-			d.Parameters = append(d.Parameters, summaryParameter{Name: p.Name, Type: x.typ(p.typeID)})
+			d.Parameters = append(d.Parameters, summaryParameter{Name: p.Name, Type: x.typ(p.typeID), RequiredChoice: p.RequiredChoice, DefaultValue: cloneConstantValue(p.DefaultValue)})
 		}
 		x.dto.Declarations = append(x.dto.Declarations, d)
 		implementation.WriteString("\x00" + f.Identity + "\x00")
@@ -436,8 +438,9 @@ func (x *summaryExporter) relation(f *Function, relation *callbackResultRelation
 	return ref
 }
 
-// First reject duplicate keys, null/default manufacture, trailing bytes and
-// hostile depth/width before the typed decoder allocates the complete tables.
+// First reject duplicate keys, misplaced nulls, trailing bytes and hostile
+// depth/width before the typed decoder allocates the complete tables. A null
+// defaultValue is the one explicit absent-default representation.
 func validateSummaryJSON(data []byte) error {
 	if len(data) == 0 || len(data) > maxInterfaceSummaryBytes {
 		return fmt.Errorf("interface summary byte budget exceeded")
@@ -445,8 +448,8 @@ func validateSummaryJSON(data []byte) error {
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.UseNumber()
 	count := 0
-	var value func(int) error
-	value = func(depth int) error {
+	var value func(int, bool) error
+	value = func(depth int, allowNull bool) error {
 		count++
 		if depth > 64 || count > 65536 {
 			return fmt.Errorf("interface JSON graph budget exceeded")
@@ -456,6 +459,9 @@ func validateSummaryJSON(data []byte) error {
 			return err
 		}
 		if token == nil {
+			if allowNull {
+				return nil
+			}
 			return fmt.Errorf("null interface field is unsupported")
 		}
 		if delim, ok := token.(json.Delim); ok {
@@ -472,13 +478,13 @@ func validateSummaryJSON(data []byte) error {
 						return fmt.Errorf("duplicate or invalid interface key")
 					}
 					keys[key] = true
-					if err = value(depth + 1); err != nil {
+					if err = value(depth+1, key == "defaultValue"); err != nil {
 						return err
 					}
 				}
 			case '[':
 				for d.More() {
-					if err = value(depth + 1); err != nil {
+					if err = value(depth+1, false); err != nil {
 						return err
 					}
 				}
@@ -490,7 +496,7 @@ func validateSummaryJSON(data []byte) error {
 		}
 		return nil
 	}
-	if err := value(0); err != nil {
+	if err := value(0, false); err != nil {
 		return err
 	}
 	if _, err := d.Token(); err != io.EOF {
@@ -504,6 +510,11 @@ func requireSummaryFields(data []byte, typ reflect.Type, depth int) error {
 		return fmt.Errorf("interface field depth exceeded")
 	}
 	switch typ.Kind() {
+	case reflect.Pointer:
+		if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+			return nil
+		}
+		return requireSummaryFields(data, typ.Elem(), depth+1)
 	case reflect.Struct:
 		fields := map[string]json.RawMessage{}
 		if err := json.Unmarshal(data, &fields); err != nil {

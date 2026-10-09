@@ -154,6 +154,12 @@ func (r *resolver) function(f *Function, outer lexicalScope) {
 		r.sourceType(f.Params[i].sourceType, scope)
 		scope.values[f.Params[i].Name] = r.bind(&f.Params[i], "parameter")
 	}
+	// Defaults are declaration contracts, not body expressions. Resolve them
+	// after every parameter has entered scope so an earlier or later parameter
+	// can never be mistaken for a same-spelled global constant.
+	for i := range f.Params {
+		r.expr(f.Params[i].defaultExpr, scope)
+	}
 	r.sourceType(f.returnType, scope)
 	r.block(f.Body, scope)
 }

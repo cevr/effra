@@ -11,6 +11,29 @@ func isI64IntegerLiteral(text string) bool {
 	return err == nil
 }
 
+func cloneConstantValue(value *ConstantValue) *ConstantValue {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func cloneParam(parameter *Param) *Param {
+	if parameter == nil {
+		return nil
+	}
+	copy := publicParams([]Param{*parameter})[0]
+	return &copy
+}
+
+func sameConstantValue(left, right *ConstantValue) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
 func (c *checker) registerConstants(claim func(string, Span)) {
 	for _, declaration := range c.program.Constants {
 		module := declaration.Module
@@ -138,6 +161,9 @@ func (c *checker) constantReference(module string, expression *Expr) *Constant {
 		return nil
 	}
 	if expression.Kind == "name" {
+		if expression.binding != nil {
+			return nil
+		}
 		if byName := c.constantsByModule[module]; byName != nil {
 			return byName[expression.Name]
 		}

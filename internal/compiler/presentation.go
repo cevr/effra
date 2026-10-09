@@ -63,7 +63,17 @@ func (p *presenter) selection(s *SelectedType) {
 	switch t.Kind {
 	case "function", "operation", "method":
 		p.callable(t)
-	case "let", "parameter", "configuration", "pattern":
+	case "parameter":
+		p.write("parameter ")
+		if t.Parameter != nil {
+			p.parameter(*t.Parameter)
+		} else {
+			p.write(t.Name + ": ")
+			if t.Type != nil {
+				p.typ(t.Type.ID, 0)
+			}
+		}
+	case "let", "configuration", "pattern":
 		p.write(t.Kind + " " + t.Name + ": ")
 		if s.Expression != nil {
 			p.value(s.Expression.Type)
@@ -215,13 +225,35 @@ func (p *presenter) callable(t *DeclarationTarget) {
 		if i > 0 {
 			p.write(", ")
 		}
-		p.write(parameter.Name + ": ")
-		p.typ(parameter.TypeRef.ID, 0)
+		p.parameter(parameter)
 	}
 	p.write(") -> ")
 	p.result(c.Result.ID, 0)
 	p.clause(" raises ", c.FailureRow)
 	p.clause(" uses ", c.ServiceRow)
+}
+
+func (p *presenter) parameter(parameter Param) {
+	if parameter.RequiredChoice {
+		p.write("required ")
+	}
+	p.write(parameter.Name + ": ")
+	p.typ(parameter.TypeRef.ID, 0)
+	if parameter.DefaultValue != nil {
+		p.write(" = ")
+		p.constant(*parameter.DefaultValue)
+	}
+}
+
+func (p *presenter) constant(value ConstantValue) {
+	switch value.Kind {
+	case "string":
+		p.write(strconv.Quote(value.Value))
+	case "i64", "bool":
+		p.write(value.Value)
+	default:
+		p.truncated = true
+	}
 }
 
 // value renders a checked value by its complete contract identity, which

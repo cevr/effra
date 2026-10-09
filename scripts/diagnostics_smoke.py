@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Public diagnostic snapshots, editor ranges and admission boundaries."""
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -66,6 +67,45 @@ def editor_position(source, byte_offset):
             "character": len(lines[-1].encode("utf-16-le")) // 2}
 
 
+def diagnostic_epoch_controls(report, remote):
+    def rejected(actual, label):
+        try:
+            # Compare the malformed object with itself so parity inequality
+            # cannot make a missing epoch validator look like a refusal.
+            assert_report_parity(actual, actual, report_schema=1, snapshot_schema=8)
+        except AssertionError:
+            return
+        raise AssertionError(f"diagnostic report accepted malformed {label}")
+
+    assert_report_parity(report, remote, report_schema=1, snapshot_schema=8)
+
+    wrong_envelope = copy.deepcopy(report)
+    wrong_envelope["schemaVersion"] = 8
+    rejected(wrong_envelope, "outer envelope epoch")
+
+    non_integer_envelope = copy.deepcopy(report)
+    non_integer_envelope["schemaVersion"] = True
+    rejected(non_integer_envelope, "boolean outer envelope epoch")
+
+    wrong_snapshot = copy.deepcopy(report)
+    wrong_snapshot["snapshot"]["schemaVersion"] = 999
+    rejected(wrong_snapshot, "semantic snapshot epoch")
+
+    non_integer_snapshot = copy.deepcopy(report)
+    non_integer_snapshot["snapshot"]["schemaVersion"] = True
+    rejected(non_integer_snapshot, "boolean semantic snapshot epoch")
+
+    wrong_qualifier = copy.deepcopy(report)
+    producer = wrong_qualifier["producer"]
+    if producer["reuseScope"] == "artifact":
+        producer["qualifier"] = producer["digest"][:-1] + ("0" if producer["digest"][-1] != "0" else "1")
+    elif producer["reuseScope"] == "process":
+        producer["qualifier"] = "process:"
+    else:
+        producer["qualifier"] = "unexpected"
+    rejected(wrong_qualifier, "producer qualifier")
+
+
 def positions(binary, directory):
     warning = ('effect fn task() -> string { "ok" }\r\n'
                'effect fn main() -> string { let s = "𐐀é"; '
@@ -81,11 +121,15 @@ def positions(binary, directory):
         ("cr-code.ef", 'effect fn main() -> void { void }\r@', [("EF001", "\r", 1, "error", 1)]),
         ("cr-comment.ef", '// comment\r@ effect fn main() -> void { void }\n', [("EF001", "\r", 1, "error", 1)]),
     ]
+    epoch_controls_checked = False
     for name, source, expected in fixtures:
         path = write(directory, name, source)
         report = cli(binary, path)
         remote = mcp(binary, directory, [{"file": name}])[0]["result"]["structuredContent"]
-        assert_report_parity(report, remote, report_schema=1, snapshot_schema=7)
+        assert_report_parity(report, remote, report_schema=1, snapshot_schema=8)
+        if not epoch_controls_checked:
+            diagnostic_epoch_controls(report, remote)
+            epoch_controls_checked = True
         assert report["revision"] == hashlib.sha256(source.encode()).hexdigest(), name
         assert report["source"] == {"uri": path.as_uri(), "origin": "disk"}, report
         findings = report["diagnostics"]
@@ -108,7 +152,7 @@ def positions(binary, directory):
             assert report["policyPassed"] and not strict["policyPassed"], strict
             assert report["diagnostics"] == strict["diagnostics"], strict
             strict_remote = mcp(binary, directory, [{"file": name, "strict": True}])[0]["result"]["structuredContent"]
-            assert_report_parity(strict_remote, strict, report_schema=1, snapshot_schema=7)
+            assert_report_parity(strict_remote, strict, report_schema=1, snapshot_schema=8)
 
     for name, source, checked in [
         ("escaped-cr.ef", 'effect fn main() -> string { "\\r" }', True),
@@ -121,7 +165,7 @@ def positions(binary, directory):
     ]:
         report = cli(binary, write(directory, name, source), strict=True)
         remote = mcp(binary, directory, [{"file": name, "strict": True}])[0]["result"]["structuredContent"]
-        assert_report_parity(report, remote, report_schema=1, snapshot_schema=7)
+        assert_report_parity(report, remote, report_schema=1, snapshot_schema=8)
         assert report["checked"] == checked, report
         if checked:
             assert report["policyPassed"] and report["diagnostics"] == [], report
@@ -164,7 +208,7 @@ def identity(binary, directory):
     requested = dots / "link" / ".." / "b.ef"
     reports = (cli(binary, requested), mcp(binary, directory, [{"file": "dots/link/../b.ef"}])[0]["result"]["structuredContent"])
     for report in reports:
-        assert_report_parity(report, expected, target="go", report_schema=1, snapshot_schema=7)
+        assert_report_parity(report, expected, target="go", report_schema=1, snapshot_schema=8)
 
     original = write(directory, "one.ef", 'import go fmt "fmt"\neffect fn main() -> void { void }')
     replacement = write(directory, "two.ef", 'effect fn main() -> void { run Console.log("x") }')

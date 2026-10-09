@@ -72,7 +72,7 @@ effect fn main() -> void { void }`
 	if _, err = decodeInterfaceSummary(encoded, da.ContentHash, da.SourceInput); err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{`"sourceSet":true`, `"sourcePath":""`, `"unresolved":false`, `"potentialOwner":true`, `"remainder":false`, `"executed":`, `"evaluation":`} {
+	for _, required := range []string{`"sourceSet":true`, `"sourcePath":""`, `"unresolved":false`, `"potentialOwner":true`, `"remainder":false`, `"executed":`, `"evaluation":`, `"requiredChoice":false`, `"defaultValue":null`} {
 		if !strings.Contains(string(encoded), required) {
 			t.Fatalf("lost explicit fact %s", required)
 		}
@@ -218,12 +218,16 @@ func TestBundledTransportRejectsMalformedAndStaleData(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, wire := range map[string][]byte{
-		"trailing":      append(append([]byte{}, data...), []byte(` {}`)...),
-		"duplicate":     []byte(strings.Replace(string(data), fmt.Sprintf(`"interfaceSchema":%d`, interfaceSummarySchema), fmt.Sprintf(`"interfaceSchema":%d,"interfaceSchema":%d`, interfaceSummarySchema, interfaceSummarySchema), 1)),
-		"missing false": []byte(strings.Replace(string(data), `,"unresolved":false`, ``, 1)),
-		"null":          []byte(strings.Replace(string(data), `"trustedHost":[]`, `"trustedHost":null`, 1)),
-		"unknown":       []byte(strings.Replace(string(data), `"trustedHost":[]`, `"trustedHost":[],"extra":false`, 1)),
-		"stale ABI":     []byte(strings.ReplaceAll(string(data), SemanticProducerIdentity, "stale")),
+		"trailing":                    append(append([]byte{}, data...), []byte(` {}`)...),
+		"duplicate":                   []byte(strings.Replace(string(data), fmt.Sprintf(`"interfaceSchema":%d`, interfaceSummarySchema), fmt.Sprintf(`"interfaceSchema":%d,"interfaceSchema":%d`, interfaceSummarySchema, interfaceSummarySchema), 1)),
+		"missing false":               []byte(strings.Replace(string(data), `,"unresolved":false`, ``, 1)),
+		"missing parameter role":      []byte(strings.Replace(string(data), `"requiredChoice":false,`, ``, 1)),
+		"missing parameter default":   []byte(strings.Replace(string(data), `,"defaultValue":null`, ``, 1)),
+		"malformed parameter role":    []byte(strings.Replace(string(data), `"requiredChoice":false`, `"requiredChoice":0`, 1)),
+		"malformed parameter default": []byte(strings.Replace(string(data), `"defaultValue":null`, `"defaultValue":false`, 1)),
+		"null":                        []byte(strings.Replace(string(data), `"trustedHost":[]`, `"trustedHost":null`, 1)),
+		"unknown":                     []byte(strings.Replace(string(data), `"trustedHost":[]`, `"trustedHost":[],"extra":false`, 1)),
+		"stale ABI":                   []byte(strings.ReplaceAll(string(data), SemanticProducerIdentity, "stale")),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := decodeInterfaceSummary(wire, dto.ContentHash, dto.SourceInput); err == nil {
@@ -239,6 +243,57 @@ func TestBundledTransportRejectsMalformedAndStaleData(t *testing.T) {
 	}
 }
 
+func TestResolvedDefaultWireRoundTripUsesVersionedProducerSummary(t *testing.T) {
+	r := Compile(bundledGreeting)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	dto, ok := r.projector.admittedSummaries["effra/functions"]
+	if !ok || len(dto.Sources) == 0 {
+		t.Fatalf("versioned producer summary missing: %+v", dto.Sources)
+	}
+	versionedDefault := dto
+	versionedDefault.Declarations = append([]summaryDeclaration{}, dto.Declarations...)
+	foundParameter := false
+	for i := range versionedDefault.Declarations {
+		parameters := versionedDefault.Declarations[i].Parameters
+		if len(parameters) == 0 {
+			continue
+		}
+		versionedDefault.Declarations[i].Parameters = append([]summaryParameter{}, parameters...)
+		value := ConstantValue{Kind: "string", Value: "fixture"}
+		versionedDefault.Declarations[i].Parameters[0].DefaultValue = &value
+		foundParameter = true
+		break
+	}
+	if !foundParameter {
+		t.Fatal("versioned producer fixture has no parameter for the default wire")
+	}
+	versionedDefault, encoded := rehashInterfaceSummaryForTest(t, versionedDefault)
+	decoded, err := decodeInterfaceSummary(encoded, versionedDefault.ContentHash, versionedDefault.SourceInput)
+	if err != nil {
+		t.Fatalf("versioned default-bearing producer summary did not round trip: %v", err)
+	}
+	foundDefault := false
+	for _, declaration := range decoded.Declarations {
+		for _, parameter := range declaration.Parameters {
+			if parameter.DefaultValue != nil && *parameter.DefaultValue == (ConstantValue{Kind: "string", Value: "fixture"}) {
+				foundDefault = true
+			}
+		}
+	}
+	if !foundDefault {
+		t.Fatal("versioned summary round trip lost its resolved scalar default")
+	}
+	missingValue := strings.Replace(string(encoded), `"defaultValue":{"kind":"string","value":"fixture"}`, `"defaultValue":{"kind":"string"}`, 1)
+	if missingValue == string(encoded) {
+		t.Fatal("versioned default wire did not contain the scalar value")
+	}
+	if _, err := decodeInterfaceSummary([]byte(missingValue), versionedDefault.ContentHash, versionedDefault.SourceInput); err == nil || !strings.Contains(err.Error(), "required interface field value missing") {
+		t.Fatalf("missing scalar value was not the causal decoder refusal: %v", err)
+	}
+}
+
 func TestBundledTransportRejectsOwnerAndGraphCorruption(t *testing.T) {
 	source := `import Fns "effra/functions" effect fn keep(file:File)->File{file} effect fn outer(file:File)->File{run Fns.forwardFile(keep,file)} effect fn main()->void{void}`
 	r := Compile(source)
@@ -250,6 +305,18 @@ func TestBundledTransportRejectsOwnerAndGraphCorruption(t *testing.T) {
 		name   string
 		mutate func(*interfaceSummary)
 	}{
+		{"parameter required-choice role", func(d *interfaceSummary) {
+			if len(d.Declarations) == 0 || len(d.Declarations[0].Parameters) == 0 {
+				t.Fatal("summary fixture has no parameter owner")
+			}
+			d.Declarations[0].Parameters[0].RequiredChoice = true
+		}},
+		{"parameter resolved default", func(d *interfaceSummary) {
+			if len(d.Declarations) == 0 || len(d.Declarations[0].Parameters) == 0 {
+				t.Fatal("summary fixture has no parameter owner")
+			}
+			d.Declarations[0].Parameters[0].DefaultValue = &ConstantValue{Kind: "string", Value: "stale"}
+		}},
 		{"declaration", func(d *interfaceSummary) { d.Declarations[0].Ref = "function:caller:module:keep" }},
 		{"ordinal", func(d *interfaceSummary) {
 			for i := range d.Evidence {

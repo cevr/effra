@@ -454,7 +454,7 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 		}
 		seenDeclarations[d.Ref] = true
 		for i, p := range d.Parameters {
-			if p.Name != f.Params[i].Name || a.types[p.Type] != f.Params[i].typeID {
+			if p.Name != f.Params[i].Name || a.types[p.Type] != f.Params[i].typeID || p.RequiredChoice != f.Params[i].RequiredChoice || !sameConstantValue(p.DefaultValue, f.Params[i].DefaultValue) {
 				return fmt.Errorf("parameter owner mismatch")
 			}
 		}

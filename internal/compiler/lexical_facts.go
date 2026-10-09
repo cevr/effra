@@ -16,6 +16,7 @@ type sourceSyntaxFact struct {
 type lexicalBinding struct {
 	ID, Kind, Name   string
 	NameSpan, Extent Span
+	Parameter        *Param
 	// Occurrences are further binder tokens of the same binding: the later
 	// alternatives of an or-pattern, which NameSpan's first token declares.
 	Occurrences []Span
@@ -199,6 +200,7 @@ func captureOriginalSyntax(program *Program) *lexicalFacts {
 		}
 		facts.parameters[p.Span.Offset] = id
 		child(parent, id)
+		child(id, expression(p.defaultExpr))
 		return facts.complete
 	}
 	function := func(f *Function) int {
@@ -375,6 +377,18 @@ func (c *checker) bindLocal(kind, name string, span, extent Span, owner int, val
 	return value
 }
 
+func (c *checker) attachParameterFacts(binding string, parameter Param) {
+	if binding == "" || c.result.lexical == nil {
+		return
+	}
+	owner, ok := c.result.lexical.bindings[binding]
+	if !ok {
+		return
+	}
+	owner.Parameter = cloneParam(&parameter)
+	c.result.lexical.bindings[binding] = owner
+}
+
 // bindSignatureParameters records the parameters of an original bodyless
 // declaration, a service operation, from its checked signature. No body
 // environment binds them, so they have declaration facts and no uses.
@@ -390,7 +404,8 @@ func (c *checker) bindSignatureParameters(f *Function) {
 	c.lexicalOwner = f
 	defer func() { c.lexicalOwner = previous }()
 	for _, p := range f.Params {
-		c.bindLocal("parameter", p.Name, p.Span, p.Extent, facts.parameters[p.Span.Offset], c.checkedDataID(p.typeID, nil, nil))
+		binding := c.bindLocal("parameter", p.Name, p.Span, p.Extent, facts.parameters[p.Span.Offset], c.checkedDataID(p.typeID, nil, nil))
+		c.attachParameterFacts(binding.lexicalBinding, p)
 	}
 }
 

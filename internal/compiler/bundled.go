@@ -34,7 +34,7 @@ var bundledIndex = map[string]map[string]bundledDeclaration{
 }
 
 const bundledInterfaceVersion = "1"
-const SemanticProducerIdentity = "effra/checker-abi-8/bundled-interface-3"
+const SemanticProducerIdentity = "effra/checker-abi-9/bundled-interface-4"
 const maxBundledDeclarations = 256
 const maxBundledReferences = 4096
 const maxBundledSourceBytes = 1 << 20
@@ -208,15 +208,25 @@ func (r *Result) loadBundledImports(source string) {
 			}
 		}
 	}
-	root := func(f *Function, extras []Param) {
+	root := func(f *Function, extras []Param, includeDefaults bool) {
 		bound := map[string]bool{}
 		for _, param := range append(append([]Param{}, f.Params...), extras...) {
 			bound[param.Name] = true
 		}
+		if includeDefaults {
+			for _, param := range f.Params {
+				visit(param.defaultExpr, bound)
+			}
+		}
 		block(f.Body, bound)
 	}
 	for _, f := range p.Functions {
-		root(f, nil)
+		root(f, nil, true)
+	}
+	for _, service := range p.Services {
+		for _, f := range service.Methods {
+			root(f, nil, true)
+		}
 	}
 	for _, constant := range p.Constants {
 		visit(constant.Expr, map[string]bool{})
@@ -232,7 +242,9 @@ func (r *Result) loadBundledImports(source string) {
 	}
 	for _, provider := range p.Providers {
 		for _, f := range provider.Methods {
-			root(f, provider.Params)
+			// Implementation declarations never own defaults. Their default
+			// syntax is rejected by signature admission and adds no import roots.
+			root(f, provider.Params, false)
 		}
 	}
 	if len(p.Imports) > 0 && r.Target == "go" {
