@@ -4,6 +4,8 @@ Status: owner-directed design, 2026-10-06; not implemented language or library s
 
 An actor is an owned, addressable instance of behavior with typed messages/replies and explicit admission/concurrency policy. It need not be a state machine. Reuse ordinary `service`, `impl`, effect functions, `uses`, `raises` and scope ownership. An owned effect without a message interface remains a fiber. A machine adds checked transitions and state-entry lifetimes to one form of actor behavior.
 
+Machine plans remain provider-independent. A runtime provider receives the checked plan through ordinary typed library/function/service ownership and supplies execution, admission and cleanup; compiler/parser code does not select a builtin machine engine. The planned first Effra provider is intended to use this ordinary actor core, so ordinary actors remain useful without machine transitions and a provider boundary does not turn every actor into a machine.
+
 Supervision, durable addressing and persistence are separately selected capabilities for either behavior form. Local actor identity promises neither durable storage nor delivery after a process failure. No actor DSL is adopted. Under [construct admission](../design.md#language-design-principles), a new construct must demonstrate a guarantee the common type/row/ownership model cannot express, through two unrelated executable consumers and a missed negative diagnostic.
 
 ## Protocol and behavior

@@ -20,6 +20,29 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Effect contract**: The success value, named failures, and required services of a deferred Effra program.
 
+**Semantic equivalence baseline** (acceptance term): A matched Effra, explicit
+Go and TypeScript/Effect program pair that performs the same validation and
+observable work while preserving the same failure/service rows, ownership,
+cancellation and completed-cleanup behavior. The native Go member is an
+optimized idiomatic Go control with the same contract. The JS member may use
+the pinned Effect userland runtime or a generated/specialized implementation
+behind the same default ABI. The baseline makes an abstraction's generated and
+runtime costs attributable rather than inferred from unequal examples.
+
+**Zero-cost abstraction obligation** (destination, not current support): A
+candidate abstraction must make the illegal states and invalid operations
+covered by its checked contract unrepresentable in checked Effra source, while
+foreign and trusted behavior remains explicitly qualified, and then erase or
+directly lower without an abstraction-induced executable size/runtime penalty
+against a semantic equivalence baseline. Retained allocation, dispatch, module,
+byte and residual-check costs must be visible in matched receipts. Native output
+targets parity with or better performance than the optimized idiomatic Go
+member. JS work must pursue every material measured lowering or specialization
+opportunity, including match dispatch and generated effect-runtime paths, while
+preserving the pinned default ABI and userland runtime contract. This obligation
+never removes a required guardrail and does not promise universally zero
+overhead or a fixed speedup multiplier.
+
 **Failure row**: The unordered set of nominal failures admitted by an effect contract.
 
 **Requirement row**: The unordered set of nominal services needed to execute an effect.
@@ -81,6 +104,12 @@ Effra describes server programs using explicit, inspectable effect contracts.
 **Codec transformation** (specified): A checked conversion in a codec's decoding or encoding direction, carrying its own expected failures and required services. The two directions need not be mathematical inverses.
 
 **Machine** (specified): A checked definition of state and event types, transition policies and state-owned behavior.
+
+**Machine plan** (specified): The finite, source-revisioned provider-independent facts lowered from a checked machine declaration, including nominal state/event/outcome/output identities, callable rows, transition edges, entry/work identity rules and inspection data.
+
+**Machine provider** (specified): An ordinary typed library, function or service implementation that consumes a machine plan and owns its execution, admission, scopes, cleanup and runtime observation without changing the plan's identities or public rows.
+
+**Provider conformance** (specified): Evidence that independently authored machine providers execute the same checked plans on the same target with unchanged declarations/compiler selection while preserving the declared observable contracts and recording their separate runtime obligations.
 
 **Actor** (specified): An owned, addressable instance of behavior with typed messages/replies and explicit admission/concurrency policy. Ordinary handlers or receive loops can supply behavior; an effect without a message interface remains a fiber.
 

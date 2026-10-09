@@ -31,6 +31,66 @@ Owner direction refreshed 2026-10-06: preserve Go-like simplicity, Effect-style 
 | [Zerolang — agent-task and conformance evaluation](https://github.com/vercel-labs/zerolang/tree/7e1a64d27cc37671df31c6370890bce86f5135e1/evals) | Same pin; `evals/src/{cases,run,source}.ts`, `scripts/validation-suite.mts`, `conformance/run.mjs`, `scripts/snapshot-command-contracts.mts` | Independent candidate compile/run checks, task-specific outputs and layered command/runtime conformance; workflow-counter and fixture-exposure limits | Effra deterministic toolchain tasks plus optional held-out live-agent trials with protected oracles and matched text-only controls; do not inherit efficiency or target-parity claims |
 | [Stately Graph](https://github.com/statelyai/graph/tree/02815c6eaea83ebbf7d37fbbc39e744aa3cfcea7) | `02815c6eaea83ebbf7d37fbbc39e744aa3cfcea7`; `src/types.ts`, `schemas/`, `src/formats/{mermaid,dot}`, `src/formats/support.ts`, `src/coverage.ts`, `src/walks.ts`, `src/algorithms` | Plain-JSON graph interchange, nested nodes and ports, declared format fidelity, coverage paths and graph algorithms | GraphViewV1 for `ef graph`/MCP/editor views of dependencies, layers, application plans, machines and actors; shape-compatible data, compiler-owned semantics, no runtime dependency |
 
+### Zero-cost abstraction comparison, 2026-10-08
+
+The owner added a destination obligation that strong abstractions should make
+the illegal states and invalid operations covered by their checked contract
+unrepresentable in checked Effra source, while foreign/trusted behavior remains
+explicit, without imposing an abstraction-only executable cost. The follow-up
+target is explicit: a native Go application must match or beat optimized
+idiomatic Go under the same contract, and JS must pursue every measurable
+lowering or specialization opportunity. The following primary sources constrain
+that phrase and its limits:
+
+| Primary source | Mechanism observed | Effra comparison and limit |
+| --- | --- | --- |
+| [The Rust Book: Using Iterators](https://doc.rust-lang.org/book/ch13-04-performance.html) | A bounded iterator-versus-loop example is used to show that a high-level iterator can lower to comparable machine code; the page discusses unrolling as a possible runtime win and directs readers toward measurement. It does not itself establish a code-size cost. | Effra may erase or directly lower a regular abstraction when validation, ownership, cancellation and cleanup remain equivalent. Emitted size/retention and runtime tradeoffs are an Effra measurement obligation; the Rust example is counterevidence against assuming abstraction overhead, not proof of universal equivalence or zero cost. |
+| [C++ Core Guidelines Per.7](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#rper-efficiency), [Per.11](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#rper-comp), [P.9](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#Rp-waste), [Per.6](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines#per6-dont-make-claims-about-performance-without-measurements) | Per.7 supplies the general design-for-optimization direction; Per.11 moves computation from run time to compile time to reduce code size and run time; P.9 says time/space spent on safety is not waste; Per.6 requires measurements before performance claims. | Effra may specialize or lower a checked abstraction, but its rows, ownership evidence, cancellation checkpoints and completed cleanup are real work. A residual check or allocation must remain visible and measured; safety cannot be deleted to make a candidate look free. |
+| [Go compiler pipeline](https://go.dev/src/cmd/compile/README), [GC guide: eliminating heap allocations](https://go.dev/doc/gc-guide#eliminating-heap-allocations), and [PGO](https://go.dev/doc/pgo) | Go combines inlining, devirtualization, escape analysis, desugaring and SSA lowering; escape outcomes depend on context, and profiles can guide optimization. `go build -gcflags=-m=3` exposes compiler decisions. | Optimized idiomatic Go is the native acceptance control, with the same rows, ownership, cancellation and cleanup. Compare Effra output against that control under matched toolchain and workload; preserve allocation, GC, compile and link evidence instead of assuming a source form wins. |
+| [Generalized Evidence Passing for Effect Handlers](https://www.microsoft.com/en-us/research/wp-content/uploads/2021/03/multip-tr-v2.pdf) (Xie/Leijen, MSR-TR-2021-5, v2, pp. 1–2) | Canonical evidence vectors can replace handler search; tail-resumptive operations can avoid a yield/resume cycle; bind inlining and join-point sharing improve generated code. The paper establishes contextual equivalence for its optimized algebraic-handler translation and reports scoped effect-handler measurements. | A generated or specialized Effra effect runtime may use these ideas or a different strategy even when its output is not human-style code. The paper does not establish Effra structured-concurrency, cancellation or completed-cleanup laws, nor an absolute cross-language speedup; those remain matched contract tests and measurements. |
+| [V8 Maglev](https://v8.dev/blog/maglev) | V8 uses runtime feedback, shapes, speculative specialized nodes, deoptimization and multiple tiers. | Effra inference: JS `match` lowering to `if`/`switch`, direct dispatch and effect-runtime specialization may vary with branch shape, warmup, engine/version and type distribution. Maglev does not compare these Effra strategies; record cold/warm behavior and preserve the pinned default Effect-compatible ABI and userland runtime contract. |
+| [Pinned Effect 4.0.1 `Effect.ts`](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/Effect.ts) | Effect's userland runtime and type-level API provide the JS contract surface for deferred effects, failure/service rows, scopes and fibers; the pinned source is the default comparator. | A generated/specialized runtime may replace internal implementation paths while retaining the same public ABI and observable errors, cancellation, scopes and completed cleanup. It must be compared with explicit TypeScript/Effect work and its losing results retained. |
+| [Effra accepted checked-match emitter](https://github.com/cevr/effra/blob/f091cd6db870c08ca1d82f100150ce0f3363e6a8/internal/compiler/emit.go) and [current emitter](internal/compiler/emit.go#L447) | The accepted multi-subject plan evaluates each subject once and emits ordered `if` branches with tag tests; the current single-subject path emits a `switch` on the tag. Effectful match branches remain wrapped in `yield* Effect.gen`, while pure matches use an IIFE. | These are existing emitted strategies, not performance results. The lowering unit compares them and generated/specialized runtime paths under the same subject/body/tag semantics, preserving the default JS ABI and lifecycle laws. |
+
+The adopted evidence shape is a three-way semantic baseline: an Effra
+candidate, an explicit Go program and an explicit TypeScript/Effect program
+perform the same validation and observable work, preserve the same ownership,
+cancellation and cleanup behavior, and expose the same failure/service rows.
+Receipts must identify whether the abstraction was erased, directly lowered or
+retained behind dispatch; they must report retained modules, emitted source,
+executable bytes, allocations, dispatch and residual checks. Unequal work,
+weakened guardrails, an omitted TypeScript typecheck or an isolated
+microbenchmark is counterevidence, not a pass. This joins the existing
+measurement ledger and benchmark-last gate; no current Effra performance claim
+is made here.
+
+The native Go acceptance cohort is an optimized idiomatic Go implementation of
+the same contract, including validation, failure/service rows, ownership,
+cancellation and completed cleanup. The native executable target is to match or
+beat that cohort; a slower, equal or inconclusive result stays visible rather
+than being reframed as a win. The JS cohort keeps the pinned Effect-compatible
+ABI and userland runtime behavior while exploring every material measurable
+compiler/lowering opportunity: static match dispatch to `if`/`switch`, direct
+calls, join-point sharing, tail-resumptive paths and generated or specialized
+effect-runtime code are examples. A potential many-times speedup is an ambition
+to test, not a current result or universal multiplier.
+
+Generated runtime code is allowed when it is an ordinary compiler/provider
+implementation, not new user syntax. It must retain the same typed errors and
+service rows, ownership, cancellation, scopes, interruption behavior and
+completed cleanup. The pinned default JS ABI remains the compatibility boundary;
+an alternate ABI requires a separate decision and conformance record.
+
+Rejected alternatives are a universal zero-overhead promise, forcing every
+abstraction to inline, removing ownership/validation checks, or judging only a
+small straight-line fixture. Rewriting every `match` to `if`, relying on V8's
+warm tiers without cold/warm evidence, or replacing the pinned Effect runtime
+without an ABI decision are also rejected. The Rust page's scope and Effra's
+size/retention measurement obligation, C++ Per.11's compile-time/code-size
+tradeoff, Go's context-dependent escape analysis, V8's speculative deoptimization and the
+effect-handler paper's scope of equivalence are direct reasons to retain losing
+results and keep the decision scoped.
+
 Application usage is surveyed as generic patterns below. Exact private checkout pointers stay in local research notes; private source is not copied into this public repository. Upstream reference tests retain their own license and provenance and remain distinct from passing Effra tests.
 
 ### Refreshed layer usage, 2026-10-06

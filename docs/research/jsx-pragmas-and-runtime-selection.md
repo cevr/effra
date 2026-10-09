@@ -1,0 +1,43 @@
+# User-defined JSX pragmas and target-qualified host views
+
+Status: adopted notation direction, implementation queued, 2026-10-08. This record is design/source research. It does not claim JSX parsing, a browser adapter, React/Solid parity, or an alternate runtime.
+
+## Question and boundary
+
+Effra needs a concise notation for ordinary view-library calls without making React, Solid, a universal `Element`, or a second effect runtime part of the language. The accepted exception is one-to-one sugar: a selected pragma supplies the ordinary factory, fragment operation and result types; the syntax adds no checking rule, evaluation, effect execution, ownership or host lifecycle behavior.
+
+The pragma is target-qualified. Portable ordinary-call and view/domain fixtures may run on Go and JS. React, Solid 2 and solid-yield are JavaScript host callers: a Go build that needs their host imports must diagnose target unavailability rather than imply browser support. Their conformance rows test the same userland selection seam, not compiler-hardcoded framework branches.
+
+## Primary source comparison
+
+| Pinned source and inspected path | Mechanism observed | Effra choice and limitation |
+| --- | --- | --- |
+| Pinned [TypeScript `jsxFactory`/`jsxImportSource` implementation](https://github.com/microsoft/TypeScript/tree/a1ef42b9ea7032fa60df127d42b4c86fd2a110ee/tsc/internal/transformers/jsxtransforms), [compiler options](https://github.com/microsoft/TypeScript/tree/a1ef42b9ea7032fa60df127d42b4c86fd2a110ee/tsc/internal/tsoptions) and the public [`jsxFactory` docs](https://www.typescriptlang.org/tsconfig/jsxFactory.html) | A file/configuration selects an ordinary factory; `jsxImportSource` selects a module for automatic JSX runtime imports and the namespace also supplies JSX typing. | Adopt visible userland selection and ordinary callable/result types. Preserve Effra rows, source spans, target clauses and ownership; do not copy TypeScript's structural JSX namespace as a universal guarantee. |
+| [Babel JSX transform](https://babeljs.io/docs/babel-plugin-transform-react-jsx), classic factory/fragment options and automatic runtime options | Classic lowering and automatic import-source selection are distinct, and a later host transform can add framework behavior. | Keep parse/desugar, host rendering, reactivity and lifecycle as separate contracts. A further transform requires its own named checked pipeline and receipt. Factory selection alone does not prove cleanup or hydration equivalence. |
+| Pinned [Solid 2 Effect example](https://github.com/solidjs/solid/tree/8d23a5a13b23f8bfd5f01ceca5d2a73305d11fd7/examples/effect), inspected at `examples/effect/src/solid-effect.ts` and `examples/effect/src/typeahead.tsx` | The adapter maps an Effect 3.22.0 value into an `AsyncIterable`; `return()` requests fiber interruption without awaiting it, and cleanup disposes the runtime without an awaited join. | Treat this as JS host prior art for an adapter obligation, not Effect 4 compatibility or an Effra completed-cleanup proof. Client ownership remains a separate bridge. |
+| Pinned [solid-yield](https://github.com/devagrawal09/solid-yield/tree/2f2431da101ffc1c0e3fde7b5aa4fcb6b009584c) paths `packages/yield/src/types.ts`, `element.ts`, `render.ts`, `foreign.ts`, and `examples/effect-yield/src/solid-effect.ts` | The library keeps pending reads `P`, failures `E`, waiting event `W` and required contexts `R` distinct; yield components use generator holes, and the foreign handoff checks failure/context claims. | Preserve those distinctions when a future JS adapter is implemented. A JSX factory does not collapse P/E/W/R into Effra's rows, and a listed context is not proof until setup reads it. |
+| Pinned [Effect 4.0.1](https://github.com/Effect-TS/effect/tree/460272d30457f4697d8b8c52cad41caccbcace08) paths `packages/effect/src/Effect.ts`, `Context.ts`, `Scheduler.ts` and `Layer.ts` | Effect values carry `A`, `E`, `R`; Context and Layer provide ordinary runtime/library composition; scheduler and clock policy are runtime contracts rather than JSX syntax. | Keep the current JS ABI Effect-compatible and require explicit `run`/rows/ownership. A pragma is not runtime selection or a law proof, and an alternate representation needs a separate ABI decision. |
+
+The repository-side comparison is the ordinary Effra seam in `internal/compiler/syntax.go`, `internal/compiler/semantic.go`, `internal/compiler/emit.go` and `internal/compiler/emit_go.go`, plus the existing source/target declaration projection. These are source paths to inspect for implementation; they do not imply that JSX is currently accepted.
+
+## Ordinary Go and TypeScript/Effect contrast
+
+Go has no JSX syntax. Its honest comparison is a typed ordinary library: a `View.Node` or domain record is constructed by named functions, and an `net/http` handler receives a context and returns explicit data/errors. A Go caller therefore exercises the same factory/result contract only when the selected library is available on Go. It does not exercise browser mount, reactivity, event binding or hydration. A target-unavailable React/Solid/solid-yield import is a diagnostic.
+
+TypeScript JSX lowers to ordinary calls, but the selected library decides whether a result is an inert node, a React element, a Solid reactive value or a solid-yield component. Effect values remain `Effect<A, E, R>` and do not become nodes. Effra follows the readable ordinary-call shape while retaining its checked success/failure/service rows and explicit delayed evaluation. No implicit `Effect.run` is inserted.
+
+The finite notation accepts only the reviewed element, fragment, attribute, quoted-text, child-expression and prop-punning forms. Unsupported spreads, dynamic names, unsafe raw content, invalid tags/properties/children/events and effect values used as nodes diagnose. The exact pragma spelling remains an implementation decision from these comparisons; no new spelling is current support.
+
+This fits **Go-like simplicity through regular abstractions** by reducing repeated call syntax while keeping the library contract visible. It fits **explicit contracts and clear guardrails** because source desugaring, rows, target availability and ownership remain inspectable. It fits **honest target capabilities** by separating Go ordinary views from JS browser hosts. The tradeoff is a parser and tooling cost for sugar that could be written as ordinary calls; the notation earns that cost only if two unrelated same-target libraries use it without compiler edits and the desugared form is available to tooling.
+
+## Rejected alternatives and counterevidence
+
+- Hard-coded React/Solid branches, fixed `View.Node`/`Client.Element` vocabulary and a universal element coercion are rejected: they turn host-library policy into language ownership and erase target differences.
+- A fixed import path swapped with environment or package replacement is rejected for runtime selection: it hides whole-program lowering and makes a library silently change execution. The current JS ABI remains pinned Effect-compatible; a second Go runtime must exist before visible runtime selection is implemented.
+- Implicit execution of an effect-valued child is rejected: the ordinary call must show its delayed value, rows and explicit `run` boundary.
+- Treating a TypeScript JSX transform as framework/lifecycle equivalence is rejected. Solid's effect adapter and solid-yield's separate P/E/W/R channels are counterevidence; actual mount/update/dispose tests are required.
+- A plain JSX factory cannot prove hydration, streaming, SSR parity, reactive scheduling or completed cleanup. Evidence that a host transform changes calls or ownership would require a separate target/provider contract and could overturn the one-to-one exception.
+
+## Finite execution required
+
+Before this becomes supported notation, compile two unrelated userland pragma libraries on the same target with no parser/compiler edits: for example, a typed inert/server library and a JS browser host library. Exercise equivalent ordinary calls and exact desugaring on Go and JS where the library is portable. Run React, Solid 2 and solid-yield only as JS host programs through their selected definitions; record unavailable-Go diagnostics for their host imports. Negative controls cover an unresolved or wrong-signature pragma, target absence, bad tag/property/child/event types, mixed result types, undeclared rows, unsafe raw content and effect-valued children. Preserve source spans, formatter/LSP projections and generated declarations. Full gates and independent review precede any framework or runtime support claim.

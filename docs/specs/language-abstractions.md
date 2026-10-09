@@ -133,6 +133,38 @@ Equivalence gate: the differential rewrites every static-callee call with a posi
 
 ## Performance and restraint
 
+### Zero-cost abstraction obligation
+
+Strong abstractions are a destination obligation alongside fast compilation and
+small executables. An admitted construct must make the illegal states and
+invalid operations covered by its checked contract unrepresentable in checked
+Effra source, while foreign and trusted behavior remains explicitly qualified,
+without weakening its checked failures, service rows, ownership, cancellation
+or completed cleanup. Its cost unit is a semantic
+equivalence baseline: the Effra caller, an explicit Go caller and an explicit
+TypeScript/Effect caller perform the same validation and observable work under
+the same ownership/lifetime policy.
+
+The implementation records whether the abstraction is erased, directly lowered
+or retained behind a runtime representation. Matched receipts expose emitted
+source, retained modules, executable bytes, allocations, dispatch and residual
+checks. A candidate with unexplained abstraction-only cost remains unresolved;
+neither an unequal fixture nor a weakened guardrail is a zero-cost result. The
+Rust iterator, C++ Per.7/Per.11/P.9/Per.6 and Go compiler/escape-analysis comparisons in
+[`PRIOR_ARTS.md`](../../PRIOR_ARTS.md#zero-cost-abstraction-comparison-2026-10-08)
+are primary constraints and counterevidence, not a universal Effra claim.
+
+The native Go acceptance control is optimized idiomatic Go performing the same
+validation, failure/service rows, ownership, cancellation and completed cleanup.
+The native target must match or beat that control on a matched workload; a
+slower or inconclusive result remains unresolved. The JS target must pursue
+every material measurable lowering or specialization opportunity, including
+static `match` dispatch to `if`/`switch`, direct calls, join-point sharing and
+generated effect-runtime paths where the emitted code benefits. Such generated
+code may be machine-written rather than human-style source, but it preserves
+the pinned default Effect-compatible ABI and userland runtime contract. A
+many-times speedup is an ambition to test, not a current result or promise.
+
 Measure canonical checking, import reuse, emission and generated runtime separately. Compare enum representations on matched codec/server workloads before changing them; an interface representation is not automatically slower and a flattened variant struct can waste space. Keep raw losing results. Avoid renaming established syntax merely to anticipate an unused feature; introduce data-method syntax only with real callers.
 
 The [native server specification](native-server-contracts.md) consumes these mechanisms. Routing, retry, caching, queues and RPC framing remain library policies behind ordinary checked interfaces. No route-specific syntax, implicit dependency search or unchecked host conversions are introduced by this spec.

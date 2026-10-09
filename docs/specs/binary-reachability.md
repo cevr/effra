@@ -19,6 +19,22 @@ Keep language guarantees intact: size optimizations cannot remove cancellation c
 - Use module/contract identity to share reusable codec/runtime implementations rather than copying them at every call site. Generic specialization needs code-size evidence as well as checking-time bounds.
 - The JS target should preserve tree-shakable module boundaries and static imports. Report emitted module size, bundled/minified application size and external runtime dependencies separately; a tiny wrapper with an uncounted Effect dependency is not a small complete deployment.
 
+Abstraction retention is part of this reachability contract. Compare an Effra
+candidate with semantically equivalent explicit Go and TypeScript/Effect
+programs that preserve validation, ownership, cancellation and cleanup. Record
+whether the abstraction is erased, directly lowered or retained, and expose any
+abstraction-only module, initialization, dispatch or allocation cost in the
+same source/module/symbol/byte receipts. Size evidence never licenses removing
+a required guardrail; benchmark-last ordering remains in force. The native Go
+comparison uses an optimized idiomatic same-contract application. The JS target
+may select generated or specialized effect-runtime modules, including a
+machine-written representation, when it preserves the pinned default
+Effect-compatible ABI and userland runtime contract. Static `match` lowering,
+direct dispatch and specialized runtime paths remain candidate transformations;
+their retained modules, initialization, dispatch, allocations and bytes must be
+measured under cold and warm engine conditions. A possible many-times speedup is
+an experiment target, not a current claim.
+
 Before application planning, `runtime/effra.Sources()` copied every runtime source file into generated Go modules, including the HTTP file and its imports when no HTTP operation was called. Linker removal of unreachable functions alone does not establish removal of package initialization, so selection happens at the source emission boundary below.
 
 The preparatory source seam exposes `runtime/effra.SelectSources`, which closes an explicit root set over the `core`, `layers`, `sync`, `http`, `files`, `console`, `env`, `inspect`, and `interop` modules while `Sources()` remains the full admitted set bundled with the compiler. `SelectModules` is the catalog's single dependency authority: it closes roots over declared module dependencies, and `SelectSources` copies exactly the files of that closure. `layers` depends on `core`. `core` conservatively groups effect, scope, fiber, managed-signal, and scheduler sources because their ownership and scheduling types are mutually connected; this grouping is a source boundary, not an application reachability or binary-size claim. Empty roots select no sources, and unknown roots fail explicitly.
