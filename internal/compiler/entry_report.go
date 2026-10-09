@@ -225,10 +225,13 @@ type jsEntryReportVariant struct {
 	Fields []jsEntryReportField `json:"fields"`
 }
 
+// A record node always carries its field list and an enum node its variant
+// list, possibly empty; the other kinds carry neither. An absent list never
+// stands for an empty one.
 type jsEntryReportNode struct {
-	Kind     string                 `json:"kind"`
-	Fields   []jsEntryReportField   `json:"fields,omitempty"`
-	Variants []jsEntryReportVariant `json:"variants,omitempty"`
+	Kind     string                  `json:"kind"`
+	Fields   *[]jsEntryReportField   `json:"fields,omitempty"`
+	Variants *[]jsEntryReportVariant `json:"variants,omitempty"`
 }
 
 type jsEntryReportFailure struct {
@@ -257,12 +260,17 @@ func (r *Result) jsEntryReport() string {
 		table.Failures = append(table.Failures, jsEntryReportFailure{failure.tag, failure.diagnostic, fields(failure.fields)})
 	}
 	for _, node := range plan.nodes {
-		lowered := jsEntryReportNode{Kind: node.kind, Fields: fields(node.fields)}
-		if node.kind != "record" {
-			lowered.Fields = nil
-		}
-		for _, variant := range node.variants {
-			lowered.Variants = append(lowered.Variants, jsEntryReportVariant{variant.jsTag, variant.name, fields(variant.fields)})
+		lowered := jsEntryReportNode{Kind: node.kind}
+		switch node.kind {
+		case "record":
+			declared := fields(node.fields)
+			lowered.Fields = &declared
+		case "enum":
+			variants := []jsEntryReportVariant{}
+			for _, variant := range node.variants {
+				variants = append(variants, jsEntryReportVariant{variant.jsTag, variant.name, fields(variant.fields)})
+			}
+			lowered.Variants = &variants
 		}
 		table.Nodes = append(table.Nodes, lowered)
 	}

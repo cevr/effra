@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -77,11 +78,30 @@ effect fn main() -> void raises { Bad } {
     fail Bad { detail: Detail { _tag: "data" }, count: Count { _tag: 7 }, multi: Detail { _tag: "a\nfailure: forged" } }
 }
 `, `failure: Bad { count: { _tag: 7 }, detail: { _tag: "data" }, multi: { _tag: "a\nfailure: forged" } }` + "\n", 1},
+	// An empty record and a payload-less variant carry explicit empty field
+	// lists in the plan; neither may be read as an absent list.
+	{"empty record and payload-less variant", `record Empty {}
+enum Mark {
+    Plain
+    Tagged { label: string }
+}
+error Bad {
+    empty: Empty
+    mark: Mark
+}
+effect fn main() -> void raises { Bad } {
+    fail Bad { empty: Empty {}, mark: Mark.Plain {} }
+}
+`, "failure: Bad { empty: {}, mark: Plain }\n", 1},
 	// Built-in diagnostic text embeds both sides with the report's quoting
 	// rule: controls escaped, U+2028/U+2029 and non-BMP literal, a lone
 	// surrogate replaced by U+FFFD.
 	{"built-in message quoting", "effect fn main() -> void raises { AssertionFailed } {\n    run Assert.equalText(\"a\\u0000\\u001f\\u007f\\n\", \"\u2028\u2029 \U0001F600 \\ud800 é\").provide<Assert>(Assertions)\n}\n",
 		"failure: AssertionFailed { message: \"expected \\\"\u2028\u2029 \U0001F600 \uFFFD é\\\"; received \\\"a\\\\u0000\\\\u001f\\\\u007f\\\\n\\\"\" }\n", 1},
+	// HTTP listen addresses are checked by Effra before the host sees them.
+	{"HTTP address without a port", httpListenSource("bad"), `failure: IoError { message: "invalid HTTP address \"bad\": missing port" }` + "\n", 1},
+	{"HTTP address with an unbracketed IPv6 host", httpListenSource("::1:80"), `failure: IoError { message: "invalid HTTP address \"::1:80\": an IPv6 host must be in brackets" }` + "\n", 1},
+	{"HTTP address with a service-name port", httpListenSource(":http"), `failure: IoError { message: "invalid HTTP address \":http\": port must be a decimal number from 0 to 65535" }` + "\n", 1},
 	{"codec decode failure", `import Json "effra/json"
 record Customer {
     id: i64
@@ -167,5 +187,50 @@ func TestEntryFailureReportIsIdenticalOnBothTargets(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// httpListenSource is a program whose main listens on address with valid
+// limits and handler, so only the address and the host decide the outcome.
+func httpListenSource(address string) string {
+	return `effect fn route(request: HttpRequest) -> HttpReply uses { Http } {
+    let body = run Http.text("")
+    HttpReply.Respond { response: HttpResponse { status: 200, contentType: "", body: body } }
+}
+effect fn main() -> void raises { IoError } {
+    let limits = HttpLimits { maxBodyBytes: 0, readHeaderMillis: 5000, readBodyMillis: 5000, idleMillis: 5000, maxActive: 1 }
+    run Http.listen("` + address + `", limits, route).provide<Http>(LiveHttp)
+}
+`
+}
+
+// Host listener failures are classified into Effra-owned messages, as
+// Erlang's :inet reports {:error, :eaddrinuse} rather than host text. The
+// port in use is held by this test; 192.0.2.1 (TEST-NET-1) is assigned to no
+// local interface; a .invalid name never resolves (RFC 6761).
+func TestEntryFailureReportForHTTPListenFailures(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := entryFailureRoot(t)
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	for index, test := range []struct{ address, class string }{
+		{held.Addr().String(), "address in use"},
+		{"192.0.2.1:0", "address not available"},
+		{"nosuchhost.invalid:0", "host lookup failed"},
+	} {
+		file := filepath.Join(root, "listen"+string(rune('a'+index))+".ef")
+		if err := os.WriteFile(file, []byte(httpListenSource(test.address)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		want := `failure: IoError { message: "HTTP listen on \"` + test.address + `\": ` + test.class + `" }` + "\n"
+		for _, target := range []string{"go", "js"} {
+			stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", target)
+			if string(stderr) != want || code != 1 || len(stdout) != 0 {
+				t.Errorf("%s %s: code=%d stderr=%q stdout=%q; want 1 and %q", target, test.address, code, stderr, stdout, want)
+			}
+		}
 	}
 }
