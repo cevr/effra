@@ -211,7 +211,8 @@ func writeDurations(root string) error {
 			return fmt.Errorf("go test -json %s: %w", pkg, err)
 		}
 		// Elapsed omits time a test spends waiting for its parallel
-		// subtests, so a test's weight is its wall time from run to finish.
+		// subtests, so a test's weight is its wall time to finish, counted
+		// from its start or, for a parallel test, from when it resumes.
 		measured := map[string]float64{}
 		started := map[string]time.Time{}
 		decoder := json.NewDecoder(bytes.NewReader(output))
@@ -228,7 +229,7 @@ func writeDurations(root string) error {
 				continue
 			}
 			switch event.Action {
-			case "run":
+			case "run", "cont":
 				started[event.Test] = event.Time
 			case "pass", "fail", "skip":
 				measured[event.Test] = math.Round(event.Time.Sub(started[event.Test]).Seconds()*100) / 100
