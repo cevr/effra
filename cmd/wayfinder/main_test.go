@@ -99,11 +99,33 @@ func conn(key string, values ...any) map[string]any {
 
 type spec struct {
 	labels    []string
-	parent    int // 0: none
-	blocked   []any
+	parent    any   // 0 or nil: none; int: this repository; foreign: another repository
+	blocked   []any // int: this repository; foreign: another repository
 	closed    bool
 	assignees []any
 	body      string
+}
+
+// foreign is an issue in another repository.
+type foreign struct {
+	repo   string
+	number int
+}
+
+// ref is a relationship endpoint as GitHub returns it, with its repository.
+func ref(value any) map[string]any {
+	if other, ok := value.(foreign); ok {
+		return map[string]any{"number": other.number, "repository": map[string]any{"nameWithOwner": other.repo}}
+	}
+	return map[string]any{"number": value, "repository": map[string]any{"nameWithOwner": testRepo}}
+}
+
+func blockers(values ...any) map[string]any {
+	nodes := make([]any, len(values))
+	for index, value := range values {
+		nodes[index] = ref(value)
+	}
+	return map[string]any{"totalCount": len(values), "nodes": nodes}
 }
 
 func node(number int, s spec) map[string]any {
@@ -112,8 +134,8 @@ func node(number int, s spec) map[string]any {
 		state, reason = "CLOSED", "COMPLETED"
 	}
 	var parent any
-	if s.parent != 0 {
-		parent = map[string]any{"number": s.parent}
+	if s.parent != nil && s.parent != 0 {
+		parent = ref(s.parent)
 	}
 	labels := make([]any, len(s.labels))
 	for index, label := range s.labels {
@@ -123,7 +145,7 @@ func node(number int, s spec) map[string]any {
 		"number": number, "title": fmt.Sprintf("Issue %d", number), "state": state, "stateReason": reason,
 		"url": fmt.Sprintf("https://github.com/%s/issues/%d", testRepo, number), "updatedAt": "2026-10-09T00:00:00Z",
 		"body": s.body, "labels": conn("name", labels...), "assignees": conn("login", s.assignees...),
-		"parent": parent, "blockedBy": conn("number", s.blocked...),
+		"parent": parent, "blockedBy": blockers(s.blocked...),
 	}
 }
 
@@ -442,7 +464,7 @@ func TestSnapshotCheckReportsStalenessWithoutWriting(t *testing.T) {
 func TestSnapshotRefusesAStructurallyInvalidMap(t *testing.T) {
 	h := newHarness(t)
 	nodes := fixture()
-	nodes[1]["blockedBy"] = conn("number", 4) // #2 <-> #4
+	nodes[1]["blockedBy"] = blockers(4) // #2 <-> #4
 	h.serve(nodes, nil)
 	path := filepath.Join(h.tmp, "snapshot.json")
 	expectFailure(t, h.live("snapshot", "--output", path), "blocked-by cycle: #2 -> #4 -> #2")
@@ -588,4 +610,151 @@ func TestLiveMapMustBeUnique(t *testing.T) {
 	nodes[2]["labels"] = conn("name", "wayfinder:map")
 	h.serve(nodes, nil)
 	expectFailure(t, h.live("frontier"), "expected exactly one open wayfinder:map issue, found [1, 3]")
+}
+
+// Repository identity ---------------------------------------------------------------------------------------
+
+func statuses(t *testing.T, out result) map[int]string {
+	t.Helper()
+	var issues []map[string]any
+	if err := json.Unmarshal([]byte(out.stdout), &issues); err != nil {
+		t.Fatalf("%v: %s", err, out.stderr)
+	}
+	result := map[int]string{}
+	for _, issue := range issues {
+		result[int(issue["number"].(float64))] = issue["status"].(string)
+	}
+	return result
+}
+
+// A foreign blocker shares its number with a closed issue in the map. Reduced to a bare number it would alias the
+// closed local #6 and put #15 on the frontier; it must keep its repository and be refused.
+func TestForeignBlockerNeverAliasesALocalIssue(t *testing.T) {
+	h := newHarness(t)
+	nodes := append(fixture(), node(15, spec{labels: task, parent: 1, blocked: []any{foreign{"other/repo", 6}}}))
+	h.serve(nodes, nil)
+	expectInts(t, h.jsonNumbers("frontier"), []int{2, 5, 9, 10})
+	if got := statuses(t, h.live("list", "--json"))[15]; got != "blocked" {
+		t.Fatalf("#15 status = %q, want blocked", got)
+	}
+	expectContains(t, h.live("list").stdout, "(blocked by other/repo#6)")
+	expectFailure(t, h.live("check"), "#15 is blocked by other/repo#6, outside acme/widgets; the map holds one repository")
+	path := filepath.Join(h.tmp, "snapshot.json")
+	expectFailure(t, h.live("snapshot", "--output", path), "#15 is blocked by other/repo#6, outside acme/widgets")
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("a snapshot with a foreign blocker was written")
+	}
+}
+
+// A foreign parent shares its number with the map root. It must not confer membership.
+func TestForeignParentIsNotMapMembership(t *testing.T) {
+	h := newHarness(t)
+	h.serve(append(fixture(), node(15, spec{labels: task, parent: foreign{"other/repo", 1}})), nil)
+	if _, ok := statuses(t, h.live("list", "--json"))[15]; ok {
+		t.Fatal("#15 under foreign parent other/repo#1 was listed as a map member")
+	}
+	out := h.live("check")
+	if out.code != 0 {
+		t.Fatal(out.stderr)
+	}
+	expectContains(t, out.stderr, "warning: #15 is open with Wayfinder labels but is not under the map")
+	path := filepath.Join(h.tmp, "snapshot.json")
+	if out := h.live("snapshot", "--output", path); out.code != 0 {
+		t.Fatal(out.stderr)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "issues/15") {
+		t.Fatal("snapshot contains #15")
+	}
+}
+
+// Endpoint repository names compare case-insensitively, as GitHub's do.
+func TestLocalEndpointsMatchTheRepositoryCaseInsensitively(t *testing.T) {
+	h := newHarness(t)
+	nodes := fixture()
+	nodes[3]["blockedBy"] = blockers(foreign{"Acme/Widgets", 2})
+	h.serve(nodes, nil)
+	if out := h.live("check"); out.code != 0 {
+		t.Fatal(out.stderr)
+	}
+	if got := statuses(t, h.live("list", "--json"))[4]; got != "blocked" {
+		t.Fatalf("#4 status = %q, want blocked", got)
+	}
+}
+
+// Map blockers ----------------------------------------------------------------------------------------------
+
+func TestMapBlockersAreValidated(t *testing.T) {
+	h := newHarness(t)
+	root := rec(1, []string{"wayfinder:map"}, nil, []any{999}, "open")
+	snapshot := doc(nil, task2(2))
+	snapshot["issues"].([]any)[0] = map[string]any(root)
+	expectFailure(t, h.offlineCheck(snapshot), "#1 is blocked by #999, which is not in the map")
+
+	nodes := fixture()
+	nodes[0]["blockedBy"] = blockers(foreign{"other/repo", 2})
+	h.serve(nodes, nil)
+	expectFailure(t, h.live("check"), "#1 is blocked by other/repo#2, outside acme/widgets")
+
+	nodes[0]["blockedBy"] = blockers(14) // in the repository, not in the map
+	h.serve(nodes, nil)
+	path := filepath.Join(h.tmp, "snapshot.json")
+	expectFailure(t, h.live("snapshot", "--output", path), "#1 is blocked by #14, which is not in the map")
+}
+
+// Paging ----------------------------------------------------------------------------------------------------
+
+func TestTruncatedConnectionsFailInsteadOfDroppingEdges(t *testing.T) {
+	for _, field := range []string{"labels", "blockedBy"} {
+		t.Run(field, func(t *testing.T) {
+			h := newHarness(t)
+			nodes := fixture()
+			connection := nodes[3][field].(map[string]any)
+			connection["totalCount"] = connection["totalCount"].(int) + 1
+			h.serve(nodes, nil)
+			expectFailure(t, h.live("frontier"), "#4 has more "+field+" than one page; extend the query")
+		})
+	}
+}
+
+// Canonical bytes -------------------------------------------------------------------------------------------
+
+// The expected bytes are written out by hand (and match Python's json.dumps(indent=2, sort_keys=True,
+// ensure_ascii=False)), so the renderer cannot vouch for itself: only the JSON escapes are escaped, while DEL,
+// U+2028, non-ASCII and HTML characters stay raw.
+func TestSnapshotBytesAreCanonical(t *testing.T) {
+	h := newHarness(t)
+	child := node(2, spec{labels: task, parent: 1})
+	child["title"] = "q\" b\\ \b\f\x01\x1f del\x7f ls  é 😀 <&>"
+	h.serve([]map[string]any{node(1, spec{labels: []string{"wayfinder:map"}}), child}, nil)
+	path := filepath.Join(h.tmp, "snapshot.json")
+	if out := h.live("snapshot", "--output", path); out.code != 0 {
+		t.Fatal(out.stderr)
+	}
+	issue := func(number int, labels, parent, title string) string {
+		return `    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "labels": [
+        "` + labels + `"
+      ],
+      "number": ` + strconv.Itoa(number) + `,
+      "parent": ` + parent + `,
+      "state": "open",
+      "stateReason": null,
+      "title": "` + title + `",
+      "updatedAt": "2026-10-09T00:00:00Z",
+      "url": "https://github.com/acme/widgets/issues/` + strconv.Itoa(number) + `"
+    }`
+	}
+	want := "{\n  \"issues\": [\n" +
+		issue(1, "wayfinder:map", "null", "Issue 1") + ",\n" +
+		issue(2, "wayfinder:task", "1", "q\\\" b\\\\ \\b\\f\\u0001\\u001f del\x7f ls  é 😀 <&>") + "\n" +
+		"  ],\n  \"map\": 1,\n  \"mapReferences\": [],\n  \"repository\": \"acme/widgets\",\n" +
+		"  \"schema\": \"effra-wayfinder-snapshot/1\"\n}\n"
+	got, _ := os.ReadFile(path)
+	if string(got) != want {
+		t.Fatalf("snapshot bytes differ:\n got %q\nwant %q", got, want)
+	}
 }

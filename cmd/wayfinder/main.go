@@ -363,7 +363,16 @@ func (c cli) line(document Document, issue Issue) string {
 	detail := ""
 	switch status {
 	case "blocked":
-		detail = " (blocked by " + refs(openBlockers(issue, document.index())) + ")"
+		blockers := []string{}
+		if local := refs(openBlockers(issue, document.index())); local != "" {
+			blockers = append(blockers, local)
+		}
+		for _, foreign := range issue.Foreign {
+			if name, ok := strings.CutPrefix(foreign, "is blocked by "); ok {
+				blockers = append(blockers, name)
+			}
+		}
+		detail = " (blocked by " + strings.Join(blockers, ",") + ")"
 	case "claimed":
 		logins := make([]string, len(issue.Assignees))
 		for index, login := range issue.Assignees {

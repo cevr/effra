@@ -33,8 +33,8 @@ var hitlLabels = []string{"wayfinder:grilling", "wayfinder:prototype", "wayfinde
 const issueFields = `number title state stateReason url updatedAt body
   labels(first: 50) { totalCount nodes { name } }
   assignees(first: 20) { totalCount nodes { login } }
-  parent { number }
-  blockedBy(first: 100) { totalCount nodes { number } }`
+  parent { number repository { nameWithOwner } }
+  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }`
 
 var issuesQuery = `query($owner: String!, $name: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
@@ -83,6 +83,11 @@ type Issue struct {
 	URL         string
 	UpdatedAt   string
 	BodySHA256  string
+	// Foreign holds relationship endpoints in another repository, such as "is blocked by other/repo#6".
+	// The map holds one repository, so `check` rejects them and a snapshot never contains them; they are never
+	// reduced to bare numbers, which would alias this repository's issues.
+	Foreign        []string
+	foreignBlocker bool
 }
 
 // Document is the map: the snapshot schema, whether read live or from the committed mirror.
@@ -205,13 +210,22 @@ type gqlIssue struct {
 	Assignees connection[struct {
 		Login string `json:"login"`
 	}] `json:"assignees"`
-	Parent *struct {
-		Number int `json:"number"`
-	} `json:"parent"`
-	BlockedBy connection[struct {
-		Number int `json:"number"`
-	}] `json:"blockedBy"`
+	Parent    *endpoint            `json:"parent"`
+	BlockedBy connection[endpoint] `json:"blockedBy"`
 }
+
+// endpoint is a relationship's other issue, which GitHub allows to live in another repository.
+type endpoint struct {
+	Number     int `json:"number"`
+	Repository struct {
+		NameWithOwner string `json:"nameWithOwner"`
+	} `json:"repository"`
+}
+
+// local reports whether the endpoint is in repo. GitHub owner and repository names are case-insensitive.
+func (e endpoint) local(repo string) bool { return strings.EqualFold(e.Repository.NameWithOwner, repo) }
+
+func (e endpoint) String() string { return fmt.Sprintf("%s#%d", e.Repository.NameWithOwner, e.Number) }
 
 func checkPage(node gqlIssue, field string, total, length int) error {
 	if total > length {
@@ -263,7 +277,7 @@ func fetchIssues(repo string) ([]gqlIssue, error) {
 }
 
 // project maps one GraphQL issue node to its snapshot record.
-func project(node gqlIssue) (Issue, error) {
+func project(node gqlIssue, repo string) (Issue, error) {
 	labels, err := node.labels()
 	if err != nil {
 		return Issue{}, err
@@ -278,22 +292,33 @@ func project(node gqlIssue) (Issue, error) {
 	if err := checkPage(node, "blockedBy", node.BlockedBy.TotalCount, len(node.BlockedBy.Nodes)); err != nil {
 		return Issue{}, err
 	}
-	blockers := make([]int, len(node.BlockedBy.Nodes))
-	for index, item := range node.BlockedBy.Nodes {
-		blockers[index] = item.Number
+	var blockers []int
+	var foreign []string
+	foreignBlocker := false
+	for _, item := range node.BlockedBy.Nodes {
+		if item.local(repo) {
+			blockers = append(blockers, item.Number)
+		} else {
+			foreign = append(foreign, "is blocked by "+item.String())
+			foreignBlocker = true
+		}
 	}
 	issue := Issue{
 		Number: node.Number, Title: node.Title, State: strings.ToLower(node.State), Labels: uniqueStrings(labels),
 		Assignees: uniqueStrings(assignees), BlockedBy: uniqueInts(blockers), URL: node.URL, UpdatedAt: node.UpdatedAt,
+		foreignBlocker: foreignBlocker,
 	}
 	if node.StateReason != nil && *node.StateReason != "" {
 		reason := strings.ToLower(*node.StateReason)
 		issue.StateReason = &reason
 	}
-	if node.Parent != nil {
+	if node.Parent != nil && node.Parent.local(repo) {
 		parent := node.Parent.Number
 		issue.Parent = &parent
+	} else if node.Parent != nil {
+		foreign = append(foreign, "has parent "+node.Parent.String())
 	}
+	issue.Foreign = foreign
 	body := ""
 	if node.Body != nil {
 		body = *node.Body
@@ -350,7 +375,8 @@ func buildMap(nodes []gqlIssue, repo string) (Document, []string, error) {
 	root := maps[0]
 	children := map[int][]gqlIssue{}
 	for _, node := range nodes {
-		if node.Parent != nil {
+		// A parent in another repository is not this map's issue, whatever its number.
+		if node.Parent != nil && node.Parent.local(repo) {
 			children[node.Parent.Number] = append(children[node.Parent.Number], node)
 		}
 	}
@@ -389,7 +415,7 @@ func buildMap(nodes []gqlIssue, repo string) (Document, []string, error) {
 	}
 	document := Document{Repository: repo, Map: root.Number, MapReferences: issueReferences(body, repo), live: true}
 	for _, node := range tree {
-		issue, err := project(node)
+		issue, err := project(node, repo)
 		if err != nil {
 			return Document{}, nil, err
 		}
@@ -587,7 +613,7 @@ func (document Document) status(issue Issue) string {
 		return "closed"
 	case len(issue.Assignees) > 0:
 		return "claimed"
-	case len(openBlockers(issue, document.index())) > 0:
+	case issue.foreignBlocker || len(openBlockers(issue, document.index())) > 0:
 		return "blocked"
 	case len(document.openChildren()[issue.Number]) > 0:
 		return "rollup"
@@ -676,6 +702,21 @@ func (document Document) check() ([]string, []string) {
 		errs = append(errs, fmt.Sprintf("map #%d must be open and have no parent", root.Number))
 	}
 	for _, issue := range document.Issues {
+		// Relationship checks apply to every issue, the map included.
+		for _, foreign := range issue.Foreign {
+			errs = append(errs, fmt.Sprintf("#%d %s, outside %s; the map holds one repository", issue.Number, foreign, document.Repository))
+		}
+		for _, blocker := range issue.BlockedBy {
+			if _, ok := issues[blocker]; !ok {
+				errs = append(errs, fmt.Sprintf("#%d is blocked by #%d, which is not in the map", issue.Number, blocker))
+			}
+		}
+		if issue.State == "closed" {
+			if stale := openBlockers(issue, issues); len(stale) > 0 {
+				warnings = append(warnings, fmt.Sprintf("#%d is closed but still blocked by open %s; the edge looks stale", issue.Number, refs(stale)))
+			}
+		}
+		// Ticket checks: the map has no parent and no type label.
 		if issue.Number == root.Number {
 			continue
 		}
@@ -701,16 +742,6 @@ func (document Document) check() ([]string, []string) {
 		}
 		if len(types) != 1 {
 			errs = append(errs, fmt.Sprintf("#%d needs exactly one type label from %s, has %s", issue.Number, pyList(typeLabels), pyList(types)))
-		}
-		for _, blocker := range issue.BlockedBy {
-			if _, ok := issues[blocker]; !ok {
-				errs = append(errs, fmt.Sprintf("#%d is blocked by #%d, which is not in the map", issue.Number, blocker))
-			}
-		}
-		if issue.State == "closed" {
-			if stale := openBlockers(issue, issues); len(stale) > 0 {
-				warnings = append(warnings, fmt.Sprintf("#%d is closed but still blocked by open %s; the edge looks stale", issue.Number, refs(stale)))
-			}
 		}
 	}
 	for _, reference := range document.MapReferences {
