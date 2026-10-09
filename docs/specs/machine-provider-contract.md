@@ -8,7 +8,7 @@ A checked machine declaration lowers to a provider-independent **machine plan**.
 
 Checking owns declaration validity, nominal identity, exhaustive finite decisions, public rows, source locations and the plan's revision. Lowering owns the representation of those facts for a target. A provider owns execution, admission, scopes, cleanup, scheduling and runtime observations. Inspection reads the plan or a runtime snapshot and never executes a step, entry, completion or provider callback.
 
-The plan must remain usable when the provider changes. Provider selection is an ordinary library, function or service operation, analogous to the existing ownership of `.catch` and `.provide`. The compiler and parser do not dispatch to a default machine engine, and an unsupported provider or binding is a normal checked diagnostic. A provider cannot change the plan's nominal identities, declared rows, transition decisions or source revision while executing it.
+The plan must remain usable when the provider changes. Provider selection is an ordinary library, function or service operation: the compiler emits the plan and never recognises a provider by identity or name (owner direction 2026-10-09). This is not analogous to `.catch` and `.provide`, which are compiler-known postfix constructs that stay syntax ([audit](../research/compiler-known-constructs-audit.md#key-findings)). The compiler and parser do not dispatch to a default machine engine, and an unsupported provider or binding is a normal checked diagnostic. A provider cannot change the plan's nominal identities, declared rows, transition decisions or source revision while executing it.
 
 ## Typed provider contract
 

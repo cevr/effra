@@ -180,6 +180,20 @@ results and keep the decision scoped.
 
 Application usage is surveyed as generic patterns below. Exact private checkout pointers stay in local research notes; private source is not copied into this public repository. Upstream reference tests retain their own license and provenance and remain distinct from passing Effra tests.
 
+### Compiler-known construct comparison, 2026-10-09
+
+The owner directed that every compiler-known construct be syntax rather than a special-cased library item ([NORTH_STAR](NORTH_STAR.md#tiebreaks)). These sources inform where the boundary falls; the [audit](docs/research/compiler-known-constructs-audit.md#prior-art-summary) holds the per-entry comparison. A row is source evidence only.
+
+| Source (pin / paths) | Take | Reject |
+| --- | --- | --- |
+| Rust reference ([`?`](https://doc.rust-lang.org/reference/expressions/operator-expr.html#the-question-mark-operator), [`for`](https://doc.rust-lang.org/reference/expressions/loop-expr.html#iterator-loops), [`.await`](https://doc.rust-lang.org/reference/expressions/await-expr.html)), read 2026-10-09 | Syntax for control constructs even in a trait-based language; reserved postfix `.await` as the model for reserved postfix construct words | Lang items: without traits, an identity the checker recognises is bare special-casing |
+| Go spec [predeclared identifiers](https://go.dev/ref/spec#Predeclared_identifiers); go1.27.0 `src/cmd/compile/internal/ssagen/intrinsics.go:739,1299` | `go`, `select`, `chan` as syntax; `len`, `make`, `error` as predeclared language identifiers; SSA intrinsics that swap only the implementation | — |
+| Kotlin coroutines (already cited in the [lawful runtime contract](docs/research/lawful-runtime-contract.md)) | One `suspend` keyword; primitives in `kotlin.coroutines.intrinsics`; scopes and builders as library | — |
+| Gleam `52e735c8`; `compiler-core/src/type_/prelude.rs:18-26`, `src/type_/expression.rs:765` (`use`) | A compiler-defined prelude for the types the compiler knows, with no special-cased stdlib items; `use` as one-to-one sugar | — |
+| Elixir `91ee75bb`; `lib/elixir/lib/kernel/special_forms.ex:7-8,1986,2343,2401`, `kernel.ex:1207,4509` | Fixed special forms (`case`, `try`, `receive`) documented as language; `\|>`, `send` and `spawn` as ordinary library over BIFs | Macros as a general extension route |
+| MoonBit docs `8d9f3ba2` (`error-handling.md:75,161`, `fundamentals.md:361`, `derive.md:121`), compiler `d4ada10d` (`src/builtin.ml:58`, `src/parsing_syntax.ml:1154`), core `e96ede8b` (`builtin/arrayview.mbt:62`) | Typed errors as syntax; builtin `Option` with `T?`; `%` intrinsic bodies behind declared signatures | `#callsite` attributes that alter call checking |
+| Effect `460272d`; `packages/effect/src/Effect.ts:1431` (`gen`), `:2743` (`catchTag`) | Library-only constructs work when the host's general type machinery carries them | Reproducing TypeScript type-level computation to make recovery a library |
+
 ### Refreshed layer usage, 2026-10-06
 
 Source-only comparison; no application tests were executed. Generic findings and adopted differences are in [layer composition](docs/research/layer-composition.md). Versions differ from the Effra runtime pin and do not establish inherited parity.

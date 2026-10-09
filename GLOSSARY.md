@@ -61,6 +61,16 @@ overhead or a fixed speedup multiplier.
 
 **Notation exception**: A syntax form admitted without an unrepresentability argument because it desugars one-to-one, at parse time, into ordinary calls and adds no checking, typing, evaluation order or runtime behavior.
 
+**Compiler-known construct**: A form whose meaning the compiler must know for checking, inference, plan facts, inspection or special lowering. By owner direction (2026-10-09) it is spelled as syntax or a predeclared language identifier.
+
+**Predeclared language identifier**: A name the language specification defines in every module without an import or library declaration, such as `Fiber` or `Timeout`, following Go's predeclared `len` and `error`. Capability services are not predeclared language identifiers, even when the compiler currently declares them.
+
+**Postfix construct**: A compiler-known construct written after a receiver with `.`, such as `.catch<E>(h)`, `.provide<S>(p)` or `.timeout(ms)`. Its word is reserved, so it never reads as an ordinary member.
+
+**Special-cased library item** (rejected pattern): A bundled, prelude or library declaration that the compiler recognises by identity or name to grant it language semantics, also called a lang item. An item stops being one only by losing every compiler branch, or by becoming syntax.
+
+**Implementation intrinsic**: A target implementation the compiler or runtime substitutes for an ordinary declared signature. The declared signature remains the only checking, row, ownership and inspection authority, so removing the intrinsic changes no diagnostic or checked fact.
+
 **Pipe** (implemented): The notation `x |> f(args)`, which is the ordinary call `f(x, args)`.
 
 **Receiver method** (admitted, not implemented): A function declared with an explicit receiver in its type's owner module, such as `fn (u: User) display()`. The call `u.display()` is exactly `User.display(u)`.
