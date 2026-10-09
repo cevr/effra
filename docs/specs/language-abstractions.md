@@ -39,7 +39,7 @@ Rules:
 
 This is the current application of the [construct admission rule](../design.md#language-design-principles), from the 2026-10-07 construct audit (rows 1-41, numbered below), its independent review, the machine admission probes and the owner decisions recorded after the audit. It lists every audit row with its current verdict; a construct not listed has no verdict yet and must pass the rule before it is admitted. A construct stays only where it makes bad code unrepresentable and a library cannot, and compiler-special behavior is always spelled as a construct, never hidden in a library API. A verdict changes only when the evidence named for it is shown. The SHRINK rows, and `.catch`, `.recover` and `.provide` until their replacement mechanisms exist, describe current compiler debt being deleted, not the target design.
 
-Where a later decision overrides the audit, the later decision wins: `machine` (row 28, audit UNDECIDED leaning SHRINK) and codec `derive` (row 30, audit SHRINK to a generic call) are KEEP, per the visible-construct refinement and the machine admission decision. JSX notation is not an audit row and is not KEEP, which means admitted under the unrepresentability rule; it is the first member of the [notation exception](../design.md#language-design-principles). Pipe syntax is its second member; see the n/a row in this table for its conditional verdict and the [Pipe operator](#pipe-operator) section for its contract. Pipe notation alone deletes none of rows 12-14 or 16, which still need their checker prerequisites.
+Where a later decision overrides the audit, the later decision wins: `machine` (row 28, audit UNDECIDED leaning SHRINK) and codec `derive` (row 30, audit SHRINK to a generic call) are KEEP, per the visible-construct refinement and the machine admission decision. JSX notation is not an audit row and is not KEEP, which means admitted under the unrepresentability rule; it is the first member of the [notation exception](../design.md#language-design-principles). Pipe syntax is its second member; see the n/a row in this table for its conditional verdict and the [Pipe operator](#pipe-operator) section for its contract. Go-style receiver methods and constant-only parameter defaults are its third and fourth members, and `pub`, `pub readonly` and `law`/`contract` are admitted constructs (owner decisions, 2026-10-08); none of these four is implemented yet. Pipe notation alone deletes none of rows 12-14 or 16, which still need their checker prerequisites.
 
 | Row | Construct | Verdict | Note |
 | --- | --- | --- | --- |
@@ -86,8 +86,12 @@ Where a later decision overrides the audit, the later decision wins: `machine` (
 | 39 | local mutation and loops | UNDECIDED | |
 | 40 | infrastructure `output {}` | LIBRARY goal; syntax unadmitted | |
 | 41 | finite-profile limits (EF127, EF119, `==` and `+` restrictions) | not prohibitions | support limits, not invariants |
-| n/a | JSX view notation | ADMITTED (notation exception: 1:1 sugar, no semantics) | planned; the view lane has not landed. One-to-one sugar over bundled library calls; first member of the class (decided 2026-10-07) |
+| n/a | JSX view notation | ADMITTED (notation exception: 1:1 sugar, no semantics) | planned; the view lane has not landed. One-to-one sugar over the ordinary calls of a user-defined pragma (refined 2026-10-08; [JSX pragma record](../research/jsx-pragmas-and-runtime-selection.md)); first member of the class (decided 2026-10-07) |
 | n/a | Pipe operator | ADMITTED (notation exception, conditional on the P2 desugared-call hover/view check) | second member of the notation exception; see [Pipe operator](#pipe-operator) |
+| n/a | Go-style receiver methods | ADMITTED (notation exception) | planned; third member. Owner module only, `u.m(x)` is `u \|> User.m(x)`; no extension or overload search ([design](../design.md#language-design-principles)) |
+| n/a | Constant-only parameter defaults | ADMITTED (notation exception) | planned; fourth member. Literal or named constant inserted at the call site; budgets stay required |
+| n/a | `pub` visibility and `pub readonly` construction authority | ADMITTED | planned; private by default, no capitalization export; `pub readonly` replaces the `opaque` word for the construction-authority tier |
+| n/a | `law` / `contract` | ADMITTED (visible construct) | planned; a law suite checks service and runtime laws and a refuted law refuses the build |
 
 ## Handler soundness regression (historical)
 

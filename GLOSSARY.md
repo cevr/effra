@@ -53,6 +53,24 @@ overhead or a fixed speedup multiplier.
 
 **Callback-result relation**: Retained evidence relating a callback invocation's returned handles to its resolved named callee and input ownership. It is separate from ownership of the callable value; an unresolved relation remains potential ownership.
 
+**Construct admission**: The rule that a language construct, meaning syntax or a checker rule, exists only to make bad code unrepresentable where a library cannot.
+
+**Notation exception**: A syntax form admitted without an unrepresentability argument because it desugars one-to-one, at parse time, into ordinary calls and adds no checking, typing, evaluation order or runtime behavior.
+
+**Pipe** (implemented): The notation `x |> f(args)`, which is the ordinary call `f(x, args)`.
+
+**Receiver method** (admitted, not implemented): A function declared with an explicit receiver in its type's owner module, such as `fn (u: User) display()`. The call `u.display()` is exactly `User.display(u)`.
+
+**Constant parameter default** (admitted, not implemented): A literal or named constant declared for a parameter and inserted at the call site when the argument is omitted.
+
+**Visibility** (admitted, not implemented): Whether another module may name a declaration. Declarations are private by default and exported with `pub`; the case of a name carries no meaning.
+
+**Construction authority** (admitted, not implemented): The right to construct values of a nominal type. A `pub readonly` type lets other modules read and match its values while only its owner module constructs them.
+
+**Law** (admitted, not implemented): A named obligation declared in a service or contract and checked by a law suite. A refuted law refuses the build.
+
+**JSX pragma** (admitted, not implemented): A user-defined selection of the factory, fragment and result types to which JSX notation desugars.
+
 **Target provider**: An implementation of a service on a particular execution target.
 
 **Provider construction contract**: The configuration and required services used to create a provider value, distinct from the contract of invoking its service operations.
@@ -111,6 +129,10 @@ overhead or a fixed speedup multiplier.
 
 **Provider conformance** (specified): Evidence that independently authored machine providers execute the same checked plans on the same target with unchanged declarations/compiler selection while preserving the declared observable contracts and recording their separate runtime obligations.
 
+**Effect runtime provider** (direction): An implementation of the lawful runtime contract that executes Effra effects on a target. Pinned Effect is the default and reference JavaScript provider, and `runtime/effra` is the native Go provider.
+
+**Lawful runtime contract** (specified research): The host operations and laws an effect runtime provider must satisfy, with each obligation's evidence classified as nominally checked, trusted decision, tested law, refuted or unresolved/unavailable.
+
 **Actor** (specified): An owned, addressable instance of behavior with typed messages/replies and explicit admission/concurrency policy. Ordinary handlers or receive loops can supply behavior; an effect without a message interface remains a fiber.
 
 **Machine-backed actor** (specified): An actor whose behavior follows a checked machine plan, adding transitions and state-entry lifetimes to ordinary actor ownership and messaging.
@@ -140,6 +162,8 @@ overhead or a fixed speedup multiplier.
 ## Tooling and testing
 
 **Lint advice**: Optional guidance about an admitted program, distinct from diagnostics that determine whether its contracts are valid.
+
+**Justifier rule**: A default-preset lint rule that flags a legal but reviewable choice, such as an `unbounded` budget, until a suppression records the reason.
 
 **Expression anchor**: A source location identifying the expression described by a diagnostic or local type query.
 

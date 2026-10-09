@@ -18,7 +18,7 @@ Deferred effects need explicit execution and checked failure/service rows. Host 
 
 ## Language design principles
 
-These owner rules govern every language and library proposal. All were set on 2026-10-07.
+These owner rules govern every language and library proposal. They were set on 2026-10-07, and the notation members and visibility/law decisions were added on 2026-10-08.
 
 **Construct admission (owner rule, 2026-10-07).** A language construct, meaning syntax or a checker rule, exists only to make bad code unrepresentable where a library cannot. Anything userland expresses just as well is a library API, a compiler diagnostic or a lint rule. Prefer a minimal checker rule over new syntax.
 
@@ -26,7 +26,22 @@ How to apply: every construct proposal, brief and review answers one question fi
 
 **Compiler-special behavior is a visible construct (owner refinement, 2026-10-07).** Compiler-special behavior is spelled as a construct; a library API never carries hidden compiler checks or fulfilment. When the compiler must know something about a form, whether a check such as the machine `Stay` rule or a structural fulfilment such as codec derivation, that form is syntax. A general checker rule over ordinary language forms, such as ownership checking, needs no new syntax; a check or fulfilment tied to one library API does. The construct still has to justify itself under construct admission by making bad code unrepresentable.
 
-**Notation exception (1:1 sugar, no semantics; owner decision, 2026-10-07).** A syntax form may be admitted without an unrepresentability argument only when it desugars one-to-one, at parse time, into ordinary calls. It must add no checking, typing, evaluation order or runtime behavior beyond those calls, and the formatter and tooling must show the desugared form on request. Each member is recorded by name. The first member is JSX view notation (decided 2026-10-07; specified by the views/JSX spike). The second member is the pipe operator `x |> f(args)`, which desugars to the ordinary call `f(x, args)` the author names (decided 2026-10-08; [specified here](specs/language-abstractions.md#pipe-operator)), admitted conditionally: the tooling clause is unmet until the P2 desugared view shows the call at a `|>`. A notation that gains any semantics leaves this class and must pass the ordinary admission rule.
+**Notation exception (1:1 sugar, no semantics; owner decision, 2026-10-07).** A syntax form may be admitted without an unrepresentability argument only when it desugars one-to-one, at parse time, into ordinary calls. It must add no checking, typing, evaluation order or runtime behavior beyond those calls, and the formatter and tooling must show the desugared form on request. Each member is recorded by name, with its implementation status:
+
+1. **JSX view notation** (decided 2026-10-07; refined 2026-10-08). Admitted, not implemented. A user-defined pragma supplies the factory, fragment and result types, and each accepted form desugars one-to-one to that pragma's ordinary calls. The owner asked for JSX 2.0 rather than a copy of the frozen JSX specification, and for user-defined pragmas rather than framework adapters, matching how an effect runtime is meant to be user-provided. The compiler hard-codes no React, Solid or view-node vocabulary. See the [JSX pragma record](research/jsx-pragmas-and-runtime-selection.md); the pragma spelling is still open.
+2. **Pipe operator** `x |> f(args)` (decided 2026-10-08). Shipped. It desugars to the ordinary call `f(x, args)` the author names ([specified here](specs/language-abstractions.md#pipe-operator)). The admission is conditional: the tooling clause stays unmet until the P2 desugared view shows the call at a `|>`.
+3. **Go-style receiver methods** (decided 2026-10-08, from the owner's preference for dot chaining as an equivalent of piping). Admitted, not implemented. `fn (u: User) display()` is declared in the type's owner module only, and `u.display()` is exactly `u |> User.display()` with byte-identical output. There are no methods on primitives or type parameters. `.catch`, `.provide`, `.timeout` and `.orFail` become ordinary `effra/effect` methods, and lint picks one spelling per call site. Import-scoped extension methods in the C# style are excluded: what a call resolves to would then depend on the importing file, and the call would no longer be exactly one named owner function.
+4. **Constant-only parameter defaults** (decided 2026-10-08). Admitted, not implemented. A literal or named constant such as `maxActive: i64 = 1024` is inserted at the call site, so an omitted argument is the same ordinary call as the explicit constant. Calls, effects and parameter-dependent defaults are refused. Budgets and codec bounds stay required under [justify, don't ban](#language-design-principles). A changed default is a public contract change.
+
+A notation that gains any semantics leaves this class and must pass the ordinary admission rule.
+
+**Visibility and laws (owner decisions, 2026-10-08).** These are constructs rather than notation, and none of them is implemented in the current compiler:
+
+- **`pub`.** Declarations are private by default, and `pub` exports them. Go's capitalized export is not adopted, so the case of a name is only a naming convention.
+- **`pub readonly`.** This is the construction-authority tier. Other modules may read and match the data, but only the owner module constructs it. The spelling replaces the earlier `opaque` word for this tier, because the fields stay visible.
+- **`law` / `contract`.** This is a visible construct for service and runtime laws, written `law name() uses {...} { ... }` inside a service or contract. A law suite checks the laws, and a refuted law refuses the build. The construct is visible because that checking is compiler-special.
+
+The [capability synthesis task](wayfinder/issues/capability-synthesis.md) and the [constant-parameter-defaults task](wayfinder/issues/constant-parameter-defaults.md) track implementation.
 
 Together these cover every syntax proposal: a construct for semantics the compiler must know, and the notation exception for pure sugar. Anything else is a library API, a diagnostic or a lint rule.
 
