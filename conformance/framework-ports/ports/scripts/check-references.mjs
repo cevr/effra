@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, realpathSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -33,11 +33,19 @@ run("VENDOR_BUILD", process.execPath, ["vendor/solid-yield/scripts/build.mjs"]);
 run("VENDOR_DECLARATIONS", process.execPath, [compiler, "-p", "tsconfig.yield.json"]);
 run("CONSUMER_NOEMIT", process.execPath, [compiler, "--noEmit", "-p", "tsconfig.json"]);
 run("PUBLIC_EXPORTS", process.execPath, ["--conditions=browser", "--conditions=production", "scripts/check-dependency-profile.mjs", "--built"]);
-const mounted = run("MOUNTED", "bun", ["--conditions=browser", "--conditions=production", "test", "--preload", "./tests/process-dom-preload.ts", "tests/framework-references.test.tsx"]);
+// Bun hides per-test pass lines when it detects an AI agent caller, so per-host results come from its JUnit record.
+const junit = path.join(root, ".generated/framework-references.junit.xml");
+mkdirSync(path.dirname(junit), { recursive: true });
+rmSync(junit, { force: true });
+const mounted = run("MOUNTED", "bun", ["--conditions=browser", "--conditions=production", "test", "--preload", "./tests/process-dom-preload.ts", "--reporter=junit", `--reporter-outfile=${junit}`, "tests/framework-references.test.tsx"]);
 assert.match(mounted, /^\s*3 pass\s*$/m, "all three mounted cases must execute");
 assert.match(mounted, /^\s*0 fail\s*$/m, "mounted failures cannot pass");
 assert.doesNotMatch(mounted, /^\s*[1-9][0-9]* (?:skip|todo)\s*$/m, "skipped mounted cases cannot pass");
+const report = readFileSync(junit, "utf8");
+assert.match(report, /<testsuites name="bun test" tests="3" assertions="[1-9][0-9]*" failures="0" skipped="0"/, "JUnit record: three executed cases, no failures or skips");
+assert.equal((report.match(/<testcase /g) ?? []).length, 3, "JUnit record lists exactly three cases");
 for (const host of ["react-atom", "solid-effect", "solid-yield"]) {
-  assert.ok(mounted.includes(`(pass) ${host} reference mounts, applies source events below zero, resets from nonzero and releases its subscriptions`), `missing executed host: ${host}`);
+  const name = `${host} reference mounts, applies source events below zero, resets from nonzero and releases its subscriptions`;
+  assert.match(report, new RegExp(`<testcase name="${name}"[^>]* assertions="[1-9][0-9]*" />`), `missing executed host: ${host}`);
 }
 console.log("FRAMEWORK_REFERENCES_EXIT=0 (three mounted Number-reference hosts; no compiled Effra ports)");

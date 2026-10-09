@@ -28,7 +28,9 @@ From this leaf directory, run `bun run check:references`. From the repository ro
 The mounted runtime profile is explicitly mixed: `NODE_ENV=test` enables React's development `act`, while `--conditions=browser --conditions=production` selects Solid/yield production browser exports. This is not a production React check. The runner sets these values regardless of the caller's environment and invokes:
 
 ```sh
-NODE_ENV=test bun --conditions=browser --conditions=production test --preload ./tests/process-dom-preload.ts tests/framework-references.test.tsx
+NODE_ENV=test bun --conditions=browser --conditions=production test --preload ./tests/process-dom-preload.ts --reporter=junit --reporter-outfile=.generated/framework-references.junit.xml tests/framework-references.test.tsx
 ```
+
+Bun omits per-test pass lines when it detects an AI agent caller, so the runner reads each host's executed result from that fresh ignored JUnit record instead of the console reporter.
 
 The repository-relative preload owns the process DOM before static renderer imports cache DOM availability. Each case closes its separate fixture and restores the bootstrap descriptors; one final `afterAll` closes the process owner. Use the complete runner for required build/typecheck/export coverage. The abbreviated bare test command is not the durable route; no failure of that command is claimed. For clean-output validation, move only ignored `vendor/solid-yield/dist` to task scratch before invoking the complete runner.
