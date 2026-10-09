@@ -32,7 +32,7 @@ def run_bytes(*args, input_bytes=None, cwd=root, timeout=120):
     )
 
 
-source = 'import go missing "example.invalid/no-such-package"\neffect fn main() -> string { "ok" }'
+source = 'import go missing "example.invalid/no-such-package"\neffect fn main(required config: string, suffix: string = "ok") -> string { suffix }'
 stdin = run("fmt", "--stdin", input_text=source)
 assert stdin.returncode == 0, (stdin.stdout, stdin.stderr)
 assert stdin.stderr == ""
@@ -80,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix="effra-format-") as directory:
     write = run("fmt", "--json", str(path))
     assert write.returncode == 0, (write.stdout, write.stderr)
     write_report = json.loads(write.stdout)
-    assert write.stderr == "" and write_report["formatterVersion"] == "effra/formatter-9"
+    assert write.stderr == "" and write_report["formatterVersion"] == "effra/formatter-10"
     assert write_report["schemaVersion"] == 1
     assert write_report["files"][0]["written"]
     assert path.stat().st_mode & 0o777 == original_mode

@@ -2880,6 +2880,7 @@ func (c *checker) signature(f *Function) {
 		p.TypeRef = c.typeRef(p.Type)
 		p.typeID = c.canonicalRef(p.TypeRef)
 		c.bindSourceSyntax(p.sourceType, p.typeID)
+		c.refuseUnadmittedParameterContract(p)
 		if names[p.Name] {
 			c.diagnostic("EF101", "duplicate parameter "+p.Name, p.Span)
 		}

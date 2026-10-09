@@ -327,6 +327,7 @@ def navigation(directory):
 
 # (source, failure code): one shared formatter answers all three surfaces.
 FORMATTING = [
+    ('fn mark(required required:string,suffix:string="!")->string{required}', None),
     ('// 𐐀 note\r\nfn mark() -> string {   "𐐀é" }  // 𐐀𐐀 end', None),
     ('import go missing "example.invalid/no-such-package"\r\nfn bad() -> string {\r\n  true }\r\n\r\n\r\n', None),
     ('fn mark() -> string { "e\u0301𐐀" }\n', None),
@@ -377,7 +378,7 @@ def formatting(directory):
             formatted = local.stdout.decode()
             shared = remote[index]["structuredContent"]
             assert shared["text"] == formatted and shared["changed"] == (formatted != source), shared
-            assert shared["formatterVersion"] == "effra/formatter-9", shared
+            assert shared["formatterVersion"] == "effra/formatter-10", shared
             if formatted == source:
                 assert reply["result"] == [], reply
             else:

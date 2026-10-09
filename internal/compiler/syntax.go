@@ -66,15 +66,19 @@ type parser struct {
 	absent *absentScan
 }
 type Param struct {
-	Name       string  `json:"name"`
-	Type       string  `json:"type"`
-	TypeRef    TypeRef `json:"typeRef"`
-	Span       Span    `json:"span"`
-	Extent     Span    `json:"-"`
-	TypeSpan   Span    `json:"-"` // the type's tokens inside any grouping, for type-position diagnostics
-	typeID     TypeID
-	sourceType *sourceType
-	binding    *localBinding
+	Name           string  `json:"name"`
+	Type           string  `json:"type"`
+	TypeRef        TypeRef `json:"typeRef"`
+	Span           Span    `json:"span"`
+	Extent         Span    `json:"-"`
+	TypeSpan       Span    `json:"-"` // the type's tokens inside any grouping, for type-position diagnostics
+	requiredChoice bool
+	requiredSpan   Span
+	defaultExpr    *Expr
+	defaultSpan    Span
+	typeID         TypeID
+	sourceType     *sourceType
+	binding        *localBinding
 }
 
 // Field is a nominal declaration field. Type is kept as source text for
@@ -1172,10 +1176,24 @@ func (p *parser) function(body bool) *Function {
 	}
 	p.expect("(")
 	for !p.accept(")") {
+		required := token{}
+		if p.peek().text == "required" && p.at+2 < len(p.tokens) && p.tokens[p.at+1].kind == "name" && p.tokens[p.at+2].text == ":" {
+			required = p.take()
+		}
 		param := p.name()
 		p.expect(":")
 		typ, typeSpan := p.typeAnnotation()
-		f.Params = append(f.Params, Param{Name: param.text, Type: typ, sourceType: p.types[typ], Span: param.span, Extent: p.extent(param.span), TypeSpan: typeSpan})
+		parameter := Param{
+			Name: param.text, Type: typ, sourceType: p.types[typ],
+			Span: param.span, TypeSpan: typeSpan,
+			requiredChoice: required.text == "required", requiredSpan: required.span,
+		}
+		if p.accept("=") {
+			parameter.defaultExpr = p.scalarConstantExpr()
+			parameter.defaultSpan = parameter.defaultExpr.Span
+		}
+		parameter.Extent = p.extent(param.span)
+		f.Params = append(f.Params, parameter)
 		if !p.accept(",") {
 			p.expect(")")
 			break

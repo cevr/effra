@@ -120,7 +120,7 @@ func TestVoidContractsAcrossCLIAndMCPProcesses(t *testing.T) {
 	}
 	assertVoidDiagnostic(t, legacyReport, strings.Index(legacyTypeSource, "-> ()")+3, "no-value type")
 
-	formatSource := "fn pure()->void{void}\n"
+	formatSource := "fn pure(required required:string,suffix:string=\"!\")->void{void}\n"
 	formatPath := filepath.Join(root, "format.ef")
 	if err := os.WriteFile(formatPath, []byte(formatSource), 0600); err != nil {
 		t.Fatal(err)
@@ -131,7 +131,11 @@ func TestVoidContractsAcrossCLIAndMCPProcesses(t *testing.T) {
 	}
 	formatReport := readProcessJSON(t, stdout)
 	if formatReport["schemaVersion"] != float64(compiler.FormatterSchemaVersion) || formatReport["formatterVersion"] != compiler.FormatterIdentity {
-		t.Fatalf("CLI formatter did not expose formatter-9: %v", formatReport)
+		t.Fatalf("CLI formatter did not expose formatter-10: %v", formatReport)
+	}
+	formattedSource, err := os.ReadFile(formatPath)
+	if err != nil || !strings.Contains(string(formattedSource), `fn pure(required required: string, suffix: string = "!") -> void {`) || !strings.Contains(string(formattedSource), "\n    void\n}") {
+		t.Fatalf("CLI formatter did not preserve canonical required/default syntax: %q / %v", formattedSource, err)
 	}
 
 	formatArguments := map[string]any{"source": formatSource}
@@ -174,8 +178,8 @@ func TestVoidContractsAcrossCLIAndMCPProcesses(t *testing.T) {
 		}
 	}
 	mcpFormat := readProcessJSON(t, lines[3])["result"].(map[string]any)["structuredContent"].(map[string]any)
-	if mcpFormat["schemaVersion"] != float64(compiler.FormatterSchemaVersion) || mcpFormat["formatterVersion"] != compiler.FormatterIdentity || !strings.Contains(mcpFormat["text"].(string), "void") {
-		t.Fatalf("MCP formatter did not expose canonical void/versioned output: %v", mcpFormat)
+	if mcpFormat["schemaVersion"] != float64(compiler.FormatterSchemaVersion) || mcpFormat["formatterVersion"] != compiler.FormatterIdentity || !strings.Contains(mcpFormat["text"].(string), `fn pure(required required: string, suffix: string = "!") -> void {`) || !strings.Contains(mcpFormat["text"].(string), "\n    void\n}") {
+		t.Fatalf("MCP formatter did not expose canonical required/default/versioned output: %v", mcpFormat)
 	}
 	mcpLegacy := readProcessJSON(t, lines[4])["result"].(map[string]any)["structuredContent"].(map[string]any)
 	assertVoidDiagnostic(t, mcpLegacy, strings.Index(legacyLiteralSource, "{ () }")+2, "no-value expression")
