@@ -1,6 +1,6 @@
 # Effra
 
-Implementation subagents use `gpt-6.1-sol` with medium reasoning, explicitly selected by the user on 2026-10-06. Pass the model and reasoning settings explicitly and use a scoped handoff when replacing an agent. Earlier Effra handoffs naming Luna models are superseded. Keep `gpt-6-astra` for orchestration and root review, and use the separate Herdr `claude2` instance for independent counsel. Parallel native subagents are explicitly authorized; give each an isolated lane and one writer. Use native subagents for implementation rather than separate Codex panes.
+Claude orchestrates. Opus native subagents implement, one writer per isolated lane, running in parallel as far as the work DAG allows. After each implementation, get an independent review with the counsel-review skill (`okra counsel --deep`, Sol at max reasoning), continuing past two rounds while findings remain. This is the owner's choice of 2026-10-09; older handoffs naming other models, Herdr panes or Codex panes are superseded.
 
 Read README.md, docs/design.md, and docs/wayfinder/README.md before changing the language.
 
@@ -10,7 +10,7 @@ For language architecture, runtime/interop contracts, or terminology changes, re
 - Public effect contracts are explicit. Do not silently admit missing services or undeclared errors.
 - Keep unsupported syntax a diagnostic, never an unchecked passthrough to JavaScript.
 - Build a small Go compiler. Go is the default native executable target; JavaScript emits the pinned Effect runtime. Preserve the shared conformance corpus.
-- Use Rift for isolated repository changes. Do not publish or push unless requested.
+- Use Rift for isolated repository changes. Implementers never push; the orchestrator integrates accepted, reviewed, gated heads into local `main` and pushes or publishes only on the owner's request in the current session.
 - After creating a Rift, worktree or clone, run `scripts/init_upstream.sh` before the gate. Offline, set `EFFRA_UPSTREAM_MIRROR` to a local Effect clone that contains the pinned commit.
 - On the exe workbox, transferred `.rift` markers may be unregistered and the transferred source is on ext4. If `workrift` cannot resolve it, use an isolated Git worktree as architecture-loop permits. Reuse the exact locked `node_modules` from the verified source; install only when the lockfile changes. Verify registry membership before workspace cleanup.
 - Run `./scripts/gate.sh` before handoff. Performance claims require measured evidence.
