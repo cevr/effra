@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -1041,48 +1042,53 @@ func TestGraphViewFocusedViewsValidateOnEveryExample(t *testing.T) {
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no examples: %v", err)
 	}
-	focused := 0
-	for _, file := range files {
-		raw, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, target := range []string{"go", "js"} {
-			r := CompileAt(string(raw), target, filepath.Dir(file))
-			if !r.Checked {
-				continue
-			}
-			for _, kind := range []GraphKind{GraphKindDependency, GraphKindLayers, GraphKindApplication} {
-				whole, err := r.GraphView(graphRequest(t, map[string]any{"kind": string(kind)}))
-				if err != nil {
-					continue
-				}
-				relations := [][]any{nil}
-				for _, relation := range graphKindRelations[kind] {
-					if kind != GraphKindDependency {
-						relations = append(relations, []any{relation})
+	var focused atomic.Int64
+	t.Run("examples", func(t *testing.T) {
+		for _, file := range files {
+			for _, target := range []string{"go", "js"} {
+				t.Run(filepath.Base(file)+"/"+target, func(t *testing.T) {
+					t.Parallel()
+					raw, err := os.ReadFile(file)
+					if err != nil {
+						t.Fatal(err)
 					}
-				}
-				for _, node := range whole.Nodes {
-					for _, direction := range []string{"outgoing", "incoming", "both"} {
-						for _, edgeKinds := range relations {
-							fields := map[string]any{"kind": string(kind), "focus": node.ID, "direction": direction, "depth": 1}
-							if edgeKinds != nil {
-								fields["edgeKinds"] = edgeKinds
+					r := CompileAt(string(raw), target, filepath.Dir(file))
+					if !r.Checked {
+						return
+					}
+					for _, kind := range []GraphKind{GraphKindDependency, GraphKindLayers, GraphKindApplication} {
+						whole, err := r.GraphView(graphRequest(t, map[string]any{"kind": string(kind)}))
+						if err != nil {
+							continue
+						}
+						relations := [][]any{nil}
+						for _, relation := range graphKindRelations[kind] {
+							if kind != GraphKindDependency {
+								relations = append(relations, []any{relation})
 							}
-							view, err := r.GraphView(graphRequest(t, fields))
-							if err != nil {
-								t.Fatalf("%s %s %v: %v", filepath.Base(file), target, fields, err)
+						}
+						for _, node := range whole.Nodes {
+							for _, direction := range []string{"outgoing", "incoming", "both"} {
+								for _, edgeKinds := range relations {
+									fields := map[string]any{"kind": string(kind), "focus": node.ID, "direction": direction, "depth": 1}
+									if edgeKinds != nil {
+										fields["edgeKinds"] = edgeKinds
+									}
+									view, err := r.GraphView(graphRequest(t, fields))
+									if err != nil {
+										t.Fatalf("%s %s %v: %v", filepath.Base(file), target, fields, err)
+									}
+									requireReferenceClosure(t, whole, view)
+									focused.Add(1)
+								}
 							}
-							requireReferenceClosure(t, whole, view)
-							focused++
 						}
 					}
-				}
+				})
 			}
 		}
-	}
-	if focused == 0 {
+	})
+	if focused.Load() == 0 {
 		t.Fatal("no focused view was checked")
 	}
 }

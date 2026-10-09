@@ -8,19 +8,51 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"effra.local/prototype/internal/compiler"
 )
 
+// testCLI is this package's CLI, built once per test process. Every process
+// test drives the same executable bytes, so rebuilding it per test only
+// repeated an identical link.
+var testCLI struct {
+	once        sync.Once
+	environment []string
+	dir         string
+	path        string
+	err         error
+	output      []byte
+}
+
+func TestMain(m *testing.M) {
+	// The CLI builds in the process's own environment, before any test
+	// overrides Go variables with t.Setenv.
+	testCLI.environment = os.Environ()
+	code := m.Run()
+	if testCLI.dir != "" {
+		_ = os.RemoveAll(testCLI.dir)
+	}
+	os.Exit(code)
+}
+
 func buildTestCLI(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "ef")
-	command := exec.Command("go", "build", "-o", path, ".")
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("build CLI: %v\n%s", err, output)
+	testCLI.once.Do(func() {
+		testCLI.dir, testCLI.err = os.MkdirTemp("", "ef-test-cli-")
+		if testCLI.err != nil {
+			return
+		}
+		testCLI.path = filepath.Join(testCLI.dir, "ef")
+		command := exec.Command("go", "build", "-o", testCLI.path, ".")
+		command.Env = testCLI.environment
+		testCLI.output, testCLI.err = command.CombinedOutput()
+	})
+	if testCLI.err != nil {
+		t.Fatalf("build CLI: %v\n%s", testCLI.err, testCLI.output)
 	}
-	return path
+	return testCLI.path
 }
 
 func runTestCLI(t *testing.T, binary string, args ...string) ([]byte, []byte, int) {

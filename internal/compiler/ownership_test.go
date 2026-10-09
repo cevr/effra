@@ -1590,6 +1590,7 @@ func TestOwnershipCoverageRetainsEveryTerminalAroundTheFactCap(t *testing.T) {
 				enum := enum
 				name := fmt.Sprintf("width-%d-layers-%d-enum-%t", width, layers, enum)
 				t.Run(name, func(t *testing.T) {
+					t.Parallel()
 					for position := 0; position < width; position++ {
 						position := position
 						t.Run(fmt.Sprintf("position-%d-safe", position), func(t *testing.T) {

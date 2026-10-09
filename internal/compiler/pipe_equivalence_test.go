@@ -486,34 +486,56 @@ func (d pipeDifferential) report() string {
 // control inject a wrong desugaring.
 func runPipeDifferential(t *testing.T, corpus []pipeCorpusSource, transform func(*Program)) pipeDifferential {
 	t.Helper()
+	// Each program compiles independently, so the corpus runs as parallel
+	// subtests; the tally is then folded in corpus order.
+	type outcome struct {
+		piped         int
+		before, after pipeOutput
+	}
+	outcomes := make([]*outcome, len(corpus))
+	t.Run("corpus", func(t *testing.T) {
+		for i, entry := range corpus {
+			t.Run(strconv.Itoa(i), func(t *testing.T) {
+				t.Parallel()
+				program, diagnostics := safeParse(entry.text)
+				if len(diagnostics) > 0 || program == nil {
+					return
+				}
+				rewriter := newPipeRewriter(entry.text, program)
+				rewritten := rewriter.render(0, len(entry.text))
+				if len(rewriter.calls) == 0 {
+					return
+				}
+				again, diagnostics := safeParse(rewritten)
+				if len(diagnostics) > 0 {
+					t.Fatalf("%s: the pipe form does not parse: %+v\n%s", entry.name, diagnostics, rewritten)
+				}
+				piped := 0
+				for _, e := range expressionsOf(again) {
+					if e.Kind == "call" && e.PipeSpan.Length > 0 {
+						piped++
+					}
+				}
+				if piped == 0 {
+					return
+				}
+				outcomes[i] = &outcome{
+					piped:  piped,
+					before: compilePipeOutput(t, entry.text, entry.dir, nil),
+					after:  compilePipeOutput(t, rewritten, entry.dir, transform),
+				}
+			})
+		}
+	})
 	result := pipeDifferential{status: map[string]map[string]int{}, compared: map[string]int{}}
-	for _, entry := range corpus {
-		program, diagnostics := safeParse(entry.text)
-		if len(diagnostics) > 0 || program == nil {
+	for i, entry := range corpus {
+		o := outcomes[i]
+		if o == nil {
 			continue
 		}
-		rewriter := newPipeRewriter(entry.text, program)
-		rewritten := rewriter.render(0, len(entry.text))
-		if len(rewriter.calls) == 0 {
-			continue
-		}
-		again, diagnostics := safeParse(rewritten)
-		if len(diagnostics) > 0 {
-			t.Fatalf("%s: the pipe form does not parse: %+v\n%s", entry.name, diagnostics, rewritten)
-		}
-		piped := 0
-		for _, e := range expressionsOf(again) {
-			if e.Kind == "call" && e.PipeSpan.Length > 0 {
-				piped++
-			}
-		}
-		if piped == 0 {
-			continue
-		}
+		before, after := o.before, o.after
 		result.programs++
-		result.calls += piped
-		before := compilePipeOutput(t, entry.text, entry.dir, nil)
-		after := compilePipeOutput(t, rewritten, entry.dir, transform)
+		result.calls += o.piped
 		for key, artifact := range before {
 			if result.status[key] == nil {
 				result.status[key] = map[string]int{}

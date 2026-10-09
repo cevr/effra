@@ -51,16 +51,19 @@ func TestRepeatedCompilationIsDeterministic(t *testing.T) {
 		t.Fatal("no authored examples", err)
 	}
 	for _, path := range files {
-		source, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		first := observeCompilation(t, string(source))
-		for i := 0; i < 12; i++ {
-			if again := observeCompilation(t, string(source)); again != first {
-				t.Fatalf("%s: compile %d diverged from the first compile", filepath.Base(path), i+2)
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			t.Parallel()
+			source, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
+			first := observeCompilation(t, string(source))
+			for i := 0; i < 12; i++ {
+				if again := observeCompilation(t, string(source)); again != first {
+					t.Fatalf("%s: compile %d diverged from the first compile", filepath.Base(path), i+2)
+				}
+			}
+		})
 	}
 }
 
