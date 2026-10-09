@@ -19,7 +19,9 @@ python3 scripts/wayfinder_migration.py --current-identity-intake github-wayfinde
 python3 -B scripts/test_wayfinder_migration.py
 python3 -B scripts/test_wayfinder_hosted_reconciliation.py
 python3 -B scripts/import_effect_conformance.py
+python3 -B scripts/import_foldkit_corpus.py --self-check
 python3 -B scripts/test_import_effect_conformance.py
+python3 -B scripts/test_import_foldkit_corpus.py
 python3 -B scripts/check_effect_conformance.py
 python3 -B scripts/test_effect_conformance.py
 if [ -f go.mod ]; then

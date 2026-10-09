@@ -1,0 +1,1865 @@
+{
+  "coverage": [
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/api-cache/package.json"
+      ],
+      "example": "api-cache",
+      "focus": "Shared API cache and tabbed data reads",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "api-cache",
+      "focus": "Shared API cache and tabbed data reads",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "api-cache",
+      "focus": "Shared API cache and tabbed data reads",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "api-cache",
+      "focus": "Shared API cache and tabbed data reads",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "api-cache",
+      "focus": "Shared API cache and tabbed data reads",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "api-cache",
+      "focus": "Shared API cache and tabbed data reads",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/api-cache-query/package.json"
+      ],
+      "example": "api-cache-query",
+      "focus": "Typed query cache with explicit data consumers",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "api-cache-query",
+      "focus": "Typed query cache with explicit data consumers",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "api-cache-query",
+      "focus": "Typed query cache with explicit data consumers",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "api-cache-query",
+      "focus": "Typed query cache with explicit data consumers",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "api-cache-query",
+      "focus": "Typed query cache with explicit data consumers",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "api-cache-query",
+      "focus": "Typed query cache with explicit data consumers",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/auth/package.json"
+      ],
+      "example": "auth",
+      "focus": "Session restoration, routing, and login",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "auth",
+      "focus": "Session restoration, routing, and login",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "auth",
+      "focus": "Session restoration, routing, and login",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "auth",
+      "focus": "Session restoration, routing, and login",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "auth",
+      "focus": "Session restoration, routing, and login",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "auth",
+      "focus": "Session restoration, routing, and login",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/canvas-art/package.json"
+      ],
+      "example": "canvas-art",
+      "focus": "Canvas commands and generated drawing state",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "canvas-art",
+      "focus": "Canvas commands and generated drawing state",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "canvas-art",
+      "focus": "Canvas commands and generated drawing state",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "canvas-art",
+      "focus": "Canvas commands and generated drawing state",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "canvas-art",
+      "focus": "Canvas commands and generated drawing state",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "canvas-art",
+      "focus": "Canvas commands and generated drawing state",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/charting/package.json"
+      ],
+      "example": "charting",
+      "focus": "Chart and data-visualization interactions",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "charting",
+      "focus": "Chart and data-visualization interactions",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "charting",
+      "focus": "Chart and data-visualization interactions",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "charting",
+      "focus": "Chart and data-visualization interactions",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "charting",
+      "focus": "Chart and data-visualization interactions",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "charting",
+      "focus": "Chart and data-visualization interactions",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/counter/package.json"
+      ],
+      "example": "counter",
+      "focus": "Minimal model, messages, update, and view",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "counter",
+      "focus": "Minimal model, messages, update, and view",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "counter",
+      "focus": "Minimal model, messages, update, and view",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "counter",
+      "focus": "Minimal model, messages, update, and view",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "counter",
+      "focus": "Minimal model, messages, update, and view",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "counter",
+      "focus": "Minimal model, messages, update, and view",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/counters/package.json"
+      ],
+      "example": "counters",
+      "focus": "Multiple independent counter models",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "counters",
+      "focus": "Multiple independent counter models",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "counters",
+      "focus": "Multiple independent counter models",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "counters",
+      "focus": "Multiple independent counter models",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "counters",
+      "focus": "Multiple independent counter models",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "counters",
+      "focus": "Multiple independent counter models",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/crash-view/package.json"
+      ],
+      "example": "crash-view",
+      "focus": "Failure presentation at a view boundary",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "crash-view",
+      "focus": "Failure presentation at a view boundary",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "crash-view",
+      "focus": "Failure presentation at a view boundary",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "crash-view",
+      "focus": "Failure presentation at a view boundary",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "crash-view",
+      "focus": "Failure presentation at a view boundary",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "crash-view",
+      "focus": "Failure presentation at a view boundary",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/embedding/package.json"
+      ],
+      "example": "embedding",
+      "focus": "Embedding an application through host ports",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "embedding",
+      "focus": "Embedding an application through host ports",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "embedding",
+      "focus": "Embedding an application through host ports",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "embedding",
+      "focus": "Embedding an application through host ports",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "embedding",
+      "focus": "Embedding an application through host ports",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "embedding",
+      "focus": "Embedding an application through host ports",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/form/package.json"
+      ],
+      "example": "form",
+      "focus": "Field validation and asynchronous submission",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "form",
+      "focus": "Field validation and asynchronous submission",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "form",
+      "focus": "Field validation and asynchronous submission",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "form",
+      "focus": "Field validation and asynchronous submission",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "form",
+      "focus": "Field validation and asynchronous submission",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "form",
+      "focus": "Field validation and asynchronous submission",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/generative-art/package.json"
+      ],
+      "example": "generative-art",
+      "focus": "Procedural artwork and generated commands",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "generative-art",
+      "focus": "Procedural artwork and generated commands",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "generative-art",
+      "focus": "Procedural artwork and generated commands",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "generative-art",
+      "focus": "Procedural artwork and generated commands",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "generative-art",
+      "focus": "Procedural artwork and generated commands",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "generative-art",
+      "focus": "Procedural artwork and generated commands",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/interrupting-commands/package.json"
+      ],
+      "example": "interrupting-commands",
+      "focus": "Keyed cancellation of concurrent uploads",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "interrupting-commands",
+      "focus": "Keyed cancellation of concurrent uploads",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "interrupting-commands",
+      "focus": "Keyed cancellation of concurrent uploads",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "interrupting-commands",
+      "focus": "Keyed cancellation of concurrent uploads",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "interrupting-commands",
+      "focus": "Keyed cancellation of concurrent uploads",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "interrupting-commands",
+      "focus": "Keyed cancellation of concurrent uploads",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/job-application/package.json"
+      ],
+      "example": "job-application",
+      "focus": "Calendar and job-application form flow",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "job-application",
+      "focus": "Calendar and job-application form flow",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "job-application",
+      "focus": "Calendar and job-application form flow",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "job-application",
+      "focus": "Calendar and job-application form flow",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "job-application",
+      "focus": "Calendar and job-application form flow",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "job-application",
+      "focus": "Calendar and job-application form flow",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/kanban/package.json"
+      ],
+      "example": "kanban",
+      "focus": "Persisted board state and task movement",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "kanban",
+      "focus": "Persisted board state and task movement",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "kanban",
+      "focus": "Persisted board state and task movement",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "kanban",
+      "focus": "Persisted board state and task movement",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "kanban",
+      "focus": "Persisted board state and task movement",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "kanban",
+      "focus": "Persisted board state and task movement",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/managed-resource-layer/package.json"
+      ],
+      "example": "managed-resource-layer",
+      "focus": "Layer acquisition through managed resource lifetime",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "managed-resource-layer",
+      "focus": "Layer acquisition through managed resource lifetime",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "managed-resource-layer",
+      "focus": "Layer acquisition through managed resource lifetime",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "managed-resource-layer",
+      "focus": "Layer acquisition through managed resource lifetime",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "managed-resource-layer",
+      "focus": "Layer acquisition through managed resource lifetime",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "managed-resource-layer",
+      "focus": "Layer acquisition through managed resource lifetime",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/map/package.json"
+      ],
+      "example": "map",
+      "focus": "Map and geolocation host integration",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "map",
+      "focus": "Map and geolocation host integration",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "map",
+      "focus": "Map and geolocation host integration",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "map",
+      "focus": "Map and geolocation host integration",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "map",
+      "focus": "Map and geolocation host integration",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "map",
+      "focus": "Map and geolocation host integration",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/personal-blog/package.json"
+      ],
+      "example": "personal-blog",
+      "focus": "Routed article pages and content loading",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "personal-blog",
+      "focus": "Routed article pages and content loading",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "personal-blog",
+      "focus": "Routed article pages and content loading",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "personal-blog",
+      "focus": "Routed article pages and content loading",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "personal-blog",
+      "focus": "Routed article pages and content loading",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "personal-blog",
+      "focus": "Routed article pages and content loading",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/pixel-art/package.json"
+      ],
+      "example": "pixel-art",
+      "focus": "Pixel editing and persisted drawing state",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "pixel-art",
+      "focus": "Pixel editing and persisted drawing state",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "pixel-art",
+      "focus": "Pixel editing and persisted drawing state",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "pixel-art",
+      "focus": "Pixel editing and persisted drawing state",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "pixel-art",
+      "focus": "Pixel editing and persisted drawing state",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "pixel-art",
+      "focus": "Pixel editing and persisted drawing state",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/query-sync/package.json"
+      ],
+      "example": "query-sync",
+      "focus": "URL query state synchronized with model state",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "query-sync",
+      "focus": "URL query state synchronized with model state",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "query-sync",
+      "focus": "URL query state synchronized with model state",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "query-sync",
+      "focus": "URL query state synchronized with model state",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "query-sync",
+      "focus": "URL query state synchronized with model state",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "query-sync",
+      "focus": "URL query state synchronized with model state",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/route-transitions/package.json"
+      ],
+      "example": "route-transitions",
+      "focus": "Route changes with explicit transition state",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "route-transitions",
+      "focus": "Route changes with explicit transition state",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "route-transitions",
+      "focus": "Route changes with explicit transition state",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "route-transitions",
+      "focus": "Route changes with explicit transition state",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "route-transitions",
+      "focus": "Route changes with explicit transition state",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "route-transitions",
+      "focus": "Route changes with explicit transition state",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/routing/package.json"
+      ],
+      "example": "routing",
+      "focus": "Routed application state and navigation commands",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "routing",
+      "focus": "Routed application state and navigation commands",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "routing",
+      "focus": "Routed application state and navigation commands",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "routing",
+      "focus": "Routed application state and navigation commands",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "routing",
+      "focus": "Routed application state and navigation commands",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "routing",
+      "focus": "Routed application state and navigation commands",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/shopping-cart/package.json"
+      ],
+      "example": "shopping-cart",
+      "focus": "Cart state and derived checkout information",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "shopping-cart",
+      "focus": "Cart state and derived checkout information",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "shopping-cart",
+      "focus": "Cart state and derived checkout information",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "shopping-cart",
+      "focus": "Cart state and derived checkout information",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "shopping-cart",
+      "focus": "Cart state and derived checkout information",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "shopping-cart",
+      "focus": "Cart state and derived checkout information",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/slow-warnings/package.json"
+      ],
+      "example": "slow-warnings",
+      "focus": "Slow work observation and warning UI",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "slow-warnings",
+      "focus": "Slow work observation and warning UI",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "slow-warnings",
+      "focus": "Slow work observation and warning UI",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "slow-warnings",
+      "focus": "Slow work observation and warning UI",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "slow-warnings",
+      "focus": "Slow work observation and warning UI",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "slow-warnings",
+      "focus": "Slow work observation and warning UI",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/snake/package.json"
+      ],
+      "example": "snake",
+      "focus": "Tick-driven interactive game state",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "snake",
+      "focus": "Tick-driven interactive game state",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "snake",
+      "focus": "Tick-driven interactive game state",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "snake",
+      "focus": "Tick-driven interactive game state",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "snake",
+      "focus": "Tick-driven interactive game state",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "snake",
+      "focus": "Tick-driven interactive game state",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/ssg/package.json"
+      ],
+      "example": "ssg",
+      "focus": "Static-site generation over route data",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "ssg",
+      "focus": "Static-site generation over route data",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "ssg",
+      "focus": "Static-site generation over route data",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "ssg",
+      "focus": "Static-site generation over route data",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "ssg",
+      "focus": "Static-site generation over route data",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "ssg",
+      "focus": "Static-site generation over route data",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/ssr/package.json"
+      ],
+      "example": "ssr",
+      "focus": "Server rendering and initial application state",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "ssr",
+      "focus": "Server rendering and initial application state",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "ssr",
+      "focus": "Server rendering and initial application state",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "ssr",
+      "focus": "Server rendering and initial application state",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "ssr",
+      "focus": "Server rendering and initial application state",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "ssr",
+      "focus": "Server rendering and initial application state",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/state-machine/package.json"
+      ],
+      "example": "state-machine",
+      "focus": "Guarded checkout state machine",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "state-machine",
+      "focus": "Guarded checkout state machine",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "state-machine",
+      "focus": "Guarded checkout state machine",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "state-machine",
+      "focus": "Guarded checkout state machine",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "state-machine",
+      "focus": "Guarded checkout state machine",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "state-machine",
+      "focus": "Guarded checkout state machine",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/stopwatch/package.json"
+      ],
+      "example": "stopwatch",
+      "focus": "Time commands and subscriptions",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "stopwatch",
+      "focus": "Time commands and subscriptions",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "stopwatch",
+      "focus": "Time commands and subscriptions",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "stopwatch",
+      "focus": "Time commands and subscriptions",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "stopwatch",
+      "focus": "Time commands and subscriptions",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "stopwatch",
+      "focus": "Time commands and subscriptions",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/todo/package.json"
+      ],
+      "example": "todo",
+      "focus": "Persisted task editing",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "todo",
+      "focus": "Persisted task editing",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "todo",
+      "focus": "Persisted task editing",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "todo",
+      "focus": "Persisted task editing",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "todo",
+      "focus": "Persisted task editing",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "todo",
+      "focus": "Persisted task editing",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/ui-showcase/package.json"
+      ],
+      "example": "ui-showcase",
+      "focus": "Reusable UI controls and routing",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "ui-showcase",
+      "focus": "Reusable UI controls and routing",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "ui-showcase",
+      "focus": "Reusable UI controls and routing",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "ui-showcase",
+      "focus": "Reusable UI controls and routing",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "ui-showcase",
+      "focus": "Reusable UI controls and routing",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "ui-showcase",
+      "focus": "Reusable UI controls and routing",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/view-transitions/package.json"
+      ],
+      "example": "view-transitions",
+      "focus": "Browser view-transition lifecycle",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "view-transitions",
+      "focus": "Browser view-transition lifecycle",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "view-transitions",
+      "focus": "Browser view-transition lifecycle",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "view-transitions",
+      "focus": "Browser view-transition lifecycle",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "view-transitions",
+      "focus": "Browser view-transition lifecycle",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "view-transitions",
+      "focus": "Browser view-transition lifecycle",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/weather/package.json"
+      ],
+      "example": "weather",
+      "focus": "Typed HTTP requests and async result state",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "weather",
+      "focus": "Typed HTTP requests and async result state",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "weather",
+      "focus": "Typed HTTP requests and async result state",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "weather",
+      "focus": "Typed HTTP requests and async result state",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "weather",
+      "focus": "Typed HTTP requests and async result state",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "weather",
+      "focus": "Typed HTTP requests and async result state",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/web-components/package.json"
+      ],
+      "example": "web-components",
+      "focus": "Custom-element definition and host boundary",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "web-components",
+      "focus": "Custom-element definition and host boundary",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "web-components",
+      "focus": "Custom-element definition and host boundary",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "web-components",
+      "focus": "Custom-element definition and host boundary",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "web-components",
+      "focus": "Custom-element definition and host boundary",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "web-components",
+      "focus": "Custom-element definition and host boundary",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [
+        "conformance/upstream/foldkit-d21db423/examples/websocket-chat/package.json"
+      ],
+      "example": "websocket-chat",
+      "focus": "Socket resource and streaming messages",
+      "host": "foldkit-reference",
+      "note": "Pinned upstream source only; not Effra execution coverage.",
+      "status": "reference-only"
+    },
+    {
+      "evidence": [],
+      "example": "websocket-chat",
+      "focus": "Socket resource and streaming messages",
+      "host": "react-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "websocket-chat",
+      "focus": "Socket resource and streaming messages",
+      "host": "solid-2-dom",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "websocket-chat",
+      "focus": "Socket resource and streaming messages",
+      "host": "solid-yield",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "websocket-chat",
+      "focus": "Socket resource and streaming messages",
+      "host": "effra-go",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "example": "websocket-chat",
+      "focus": "Socket resource and streaming messages",
+      "host": "effra-effect-js",
+      "note": "No executable port or Effra fixture is present in unit 1.",
+      "status": "pending"
+    }
+  ],
+  "examples": [
+    {
+      "focus": "Shared API cache and tabbed data reads",
+      "id": "api-cache"
+    },
+    {
+      "focus": "Typed query cache with explicit data consumers",
+      "id": "api-cache-query"
+    },
+    {
+      "focus": "Session restoration, routing, and login",
+      "id": "auth"
+    },
+    {
+      "focus": "Canvas commands and generated drawing state",
+      "id": "canvas-art"
+    },
+    {
+      "focus": "Chart and data-visualization interactions",
+      "id": "charting"
+    },
+    {
+      "focus": "Minimal model, messages, update, and view",
+      "id": "counter"
+    },
+    {
+      "focus": "Multiple independent counter models",
+      "id": "counters"
+    },
+    {
+      "focus": "Failure presentation at a view boundary",
+      "id": "crash-view"
+    },
+    {
+      "focus": "Embedding an application through host ports",
+      "id": "embedding"
+    },
+    {
+      "focus": "Field validation and asynchronous submission",
+      "id": "form"
+    },
+    {
+      "focus": "Procedural artwork and generated commands",
+      "id": "generative-art"
+    },
+    {
+      "focus": "Keyed cancellation of concurrent uploads",
+      "id": "interrupting-commands"
+    },
+    {
+      "focus": "Calendar and job-application form flow",
+      "id": "job-application"
+    },
+    {
+      "focus": "Persisted board state and task movement",
+      "id": "kanban"
+    },
+    {
+      "focus": "Layer acquisition through managed resource lifetime",
+      "id": "managed-resource-layer"
+    },
+    {
+      "focus": "Map and geolocation host integration",
+      "id": "map"
+    },
+    {
+      "focus": "Routed article pages and content loading",
+      "id": "personal-blog"
+    },
+    {
+      "focus": "Pixel editing and persisted drawing state",
+      "id": "pixel-art"
+    },
+    {
+      "focus": "URL query state synchronized with model state",
+      "id": "query-sync"
+    },
+    {
+      "focus": "Route changes with explicit transition state",
+      "id": "route-transitions"
+    },
+    {
+      "focus": "Routed application state and navigation commands",
+      "id": "routing"
+    },
+    {
+      "focus": "Cart state and derived checkout information",
+      "id": "shopping-cart"
+    },
+    {
+      "focus": "Slow work observation and warning UI",
+      "id": "slow-warnings"
+    },
+    {
+      "focus": "Tick-driven interactive game state",
+      "id": "snake"
+    },
+    {
+      "focus": "Static-site generation over route data",
+      "id": "ssg"
+    },
+    {
+      "focus": "Server rendering and initial application state",
+      "id": "ssr"
+    },
+    {
+      "focus": "Guarded checkout state machine",
+      "id": "state-machine"
+    },
+    {
+      "focus": "Time commands and subscriptions",
+      "id": "stopwatch"
+    },
+    {
+      "focus": "Persisted task editing",
+      "id": "todo"
+    },
+    {
+      "focus": "Reusable UI controls and routing",
+      "id": "ui-showcase"
+    },
+    {
+      "focus": "Browser view-transition lifecycle",
+      "id": "view-transitions"
+    },
+    {
+      "focus": "Typed HTTP requests and async result state",
+      "id": "weather"
+    },
+    {
+      "focus": "Custom-element definition and host boundary",
+      "id": "web-components"
+    },
+    {
+      "focus": "Socket resource and streaming messages",
+      "id": "websocket-chat"
+    }
+  ],
+  "hosts": [
+    "foldkit-reference",
+    "react-dom",
+    "solid-2-dom",
+    "solid-yield",
+    "effra-go",
+    "effra-effect-js"
+  ],
+  "schemaVersion": 1,
+  "snapshot": {
+    "manifest": "conformance/upstream/foldkit-d21db423/manifest.json",
+    "path": "conformance/upstream/foldkit-d21db423",
+    "status": "reference-only-not-executed"
+  },
+  "source": {
+    "commit": "d21db423ac0ba676b22aa7a7b4041ba409ec2c52",
+    "foldkitVersion": "0.167.0",
+    "repository": "foldkit/foldkit",
+    "tree": "ccbd07912275e62385bd9fdccaf2e1e695cadb4b",
+    "url": "https://github.com/foldkit/foldkit/tree/d21db423ac0ba676b22aa7a7b4041ba409ec2c52",
+    "workspaceEffectVersion": "4.0.0"
+  },
+  "status": "unit-1-reference-capture; host-ports-pending"
+}
