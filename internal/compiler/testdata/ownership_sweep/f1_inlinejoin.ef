@@ -1,0 +1,10 @@
+error Boom { code: i64 }
+effect fn work() -> string raises { Boom } uses { Scheduler } {
+    run Scheduler.sleep(10)
+    "done"
+}
+fn exclaim(s: string) -> string { s }
+effect fn main() -> void raises { Boom } uses { Scheduler, Console } {
+    let g = fork work()
+    run Console.log(run g.join())
+}

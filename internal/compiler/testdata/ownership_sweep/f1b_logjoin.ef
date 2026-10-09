@@ -1,0 +1,12 @@
+error Boom { code: i64 }
+effect fn work() -> string raises { Boom } uses { Scheduler } {
+    run Scheduler.sleep(10)
+    "done"
+}
+effect fn pipeline() -> void raises { Boom } uses { Scheduler, Console } {
+    let g = fork work()
+    run Console.log(run g.join())
+}
+effect fn main() -> void {
+    run pipeline().catch<Boom>(void).provide<Scheduler>(LiveScheduler).provide<Console>(Stdout)
+}

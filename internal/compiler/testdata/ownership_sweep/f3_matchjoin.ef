@@ -1,0 +1,17 @@
+error Boom { code: i64 }
+enum Mode { Fast, Slow }
+effect fn work() -> string raises { Boom } uses { Scheduler } {
+    run Scheduler.sleep(10)
+    "done"
+}
+effect fn pipeline(m: Mode) -> string raises { Boom } uses { Scheduler } {
+    let g = fork work()
+    match m {
+        Mode.Fast => run g.join()
+        Mode.Slow => run g.join()
+    }
+}
+effect fn main() -> void {
+    let r = run pipeline(Mode.Fast {}).catch<Boom>("b").provide<Scheduler>(LiveScheduler)
+    run Console.log(r).provide<Console>(Stdout)
+}
