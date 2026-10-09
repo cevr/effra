@@ -6,7 +6,7 @@ Effra owns the metadata beside it:
 
 | File | Contents |
 | --- | --- |
-| `effect-upstream.manifest.json` | The selected 746 reference files and their 26 licenses, the nearest-license mapping and a sha256 per file, plus the canonical integrity root. `scripts/import_effect_conformance.py` recomputes it from the pinned commit's git objects and refuses any difference. |
+| `effect-upstream.manifest.json` | The selected 746 reference files and their 26 licenses, the nearest-license mapping and a sha256 per file, plus the canonical integrity root. `go run ./scripts/conformance import` recomputes it from the pinned commit's git objects and refuses any difference. |
 | `effect-cases.json` | Selected upstream cases mapped to existing Effra acceptance tests, with status and limits. |
 | `codecs/` | Codec policy vectors compared against the pinned Effect runtime. |
 

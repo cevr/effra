@@ -20,11 +20,11 @@ scripts/init_upstream.sh
 EFFRA_UPSTREAM_MIRROR=/path/to/effect-clone scripts/init_upstream.sh
 
 # Offline reference and mapping admission
-python3 -B scripts/import_effect_conformance.py
-python3 -B scripts/check_effect_conformance.py
+go run ./scripts/conformance import
+go run ./scripts/conformance check
 
 # Execute the selected existing acceptance tests: real generated Go and JS
-python3 -B scripts/check_effect_conformance.py --run
+go run ./scripts/conformance check --run
 
 # Full gate also runs all Go tests, including the selected acceptance tests
 ./scripts/gate.sh
@@ -35,8 +35,8 @@ A missing checkout, a checkout at another commit or a modified tracked file fail
 To move the pin:
 
 1. Fetch and check out the new commit in the submodule, then stage it with `git add conformance/upstream/effect`. The verifier compares the checkout with the gitlink in the index, so `--refresh` refuses a pin that is not staged.
-2. Update `COMMIT` and `TAG` in `scripts/import_effect_conformance.py`, and `sourceCommit` in `conformance/effect-cases.json`.
-3. Run `python3 -B scripts/import_effect_conformance.py --refresh`. Review the printed integrity identities and the new counts before copying them into the script's independently pinned `RELEASE_*` constants.
+2. Update `pinnedCommit` and `pinnedTag` in `scripts/conformance/corpus.go`, and `sourceCommit` in `conformance/effect-cases.json`.
+3. Run `go run ./scripts/conformance import --refresh`. Review the printed integrity identities and the new counts before copying them into the independently pinned `release*` constants in `scripts/conformance/corpus.go`.
 4. Review every mapped anchor.
 5. Update the prose that states the pin and counts: the first paragraph of this page, the pin and the manifest row's counts in `conformance/README.md`, and the Effect and Effect Cluster rows of `PRIOR_ARTS.md`. Other citations of the old commit, such as the source comparison below and those in `docs/research` and `docs/specs`, record what was read at that commit; change one only when its source is re-read at the new pin.
 

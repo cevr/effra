@@ -83,6 +83,8 @@ func TestCurrentSelectedCasesHaveRealEvidenceTargets(t *testing.T) {
 		"TestCodecPolicyVectorsAcrossGoJSAndEffect",
 		"TestExplicitTestProvidersUseTheHarnessAcrossTargets",
 		"TestLayerEntryWaiterCancellationIsBuildOwnedAcrossTargets",
+		"TestLayerFailedBuildRetriesOnlyThroughANewBuildAcrossTargets",
+		"TestLayerRollbackCancellationAndCauseCompositionAcrossTargets",
 		"TestLifecycleConformanceAcrossGoAndEffect",
 		"TestSchedulerTimerFailureIsPreservedAcrossTargets",
 	}

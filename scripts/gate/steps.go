@@ -34,9 +34,10 @@ var testTools = []string{"node", "bun", "tsc", "git"}
 var testToolEnvironment = []string{"NODE_OPTIONS", "NODE_PATH", "BUN_CONFIG_REGISTRY"}
 
 // gofmtDirectories are the Go trees the gate requires to be gofmt-clean.
-var gofmtDirectories = []string{"cmd", "internal", "runtime", "lint", "scripts/gate", "examples/go-interop", "examples/sdk", "examples/compare", "examples/hosttypes", "examples/lintpack"}
+var gofmtDirectories = []string{"cmd", "internal", "runtime", "lint", "scripts/gate", "scripts/conformance", "examples/go-interop", "examples/sdk", "examples/compare", "examples/hosttypes", "examples/lintpack"}
 
-// pythonSteps are the repository's Python checks in their historical order.
+// pythonChecks are the wayfinder map's Python checks in their historical
+// order; the map-tooling lane owns their replacement.
 var pythonChecks = []struct {
 	name string
 	argv []string
@@ -46,10 +47,6 @@ var pythonChecks = []struct {
 	{"wayfinder migration: current map", []string{"python3", "scripts/wayfinder_migration.py", "--current-identity-intake", "github-wayfinder-current-intake-2026-10-08", "--mapping", "docs/wayfinder/migration/current-hosted-identities-2026-10-09-source-reconciled.json", "--check", "--output-snapshot", "current-wayfinder-map-2026-10-09-source-reconciled"}},
 	{"wayfinder migration tests", []string{"python3", "-B", "scripts/test_wayfinder_migration.py"}},
 	{"wayfinder hosted reconciliation tests", []string{"python3", "-B", "scripts/test_wayfinder_hosted_reconciliation.py"}},
-	{"effect conformance import", []string{"python3", "-B", "scripts/import_effect_conformance.py"}},
-	{"effect conformance import tests", []string{"python3", "-B", "scripts/test_import_effect_conformance.py"}},
-	{"effect conformance mapping", []string{"python3", "-B", "scripts/check_effect_conformance.py"}},
-	{"effect conformance mapping tests", []string{"python3", "-B", "scripts/test_effect_conformance.py"}},
 }
 
 func gateSteps(root string) ([]*Step, error) {
@@ -62,12 +59,8 @@ func gateSteps(root string) ([]*Step, error) {
 
 	python := []string{"python3", "git"}
 	wayfinder := &Inputs{Paths: []string{"scripts/*.py", "docs/wayfinder/", ".gitignore"}, Tools: python}
-	conformance := &Inputs{Paths: []string{"scripts/*.py", "conformance/", ".gitmodules", "scripts/init_upstream.sh", "internal/compiler/*_test.go"}, Tools: python, Submodule: "conformance/upstream/effect"}
 	for _, check := range pythonChecks {
-		inputs := conformance
-		if strings.HasPrefix(check.name, "wayfinder") {
-			inputs = wayfinder
-		}
+		inputs := wayfinder
 		if check.name == "wayfinder hosted reconciliation tests" {
 			// Its ordinary-clone control refuses unstaged or untracked files,
 			// then reruns the checker in a clone rebuilt from HEAD plus the
@@ -77,6 +70,12 @@ func gateSteps(root string) ([]*Step, error) {
 		}
 		add(&Step{Name: check.name, Argv: check.argv, Inputs: inputs})
 	}
+	// The corpus verifier reads the pinned submodule's git objects and the
+	// mapping names evidence tests in internal/compiler. Its own tests run with
+	// the other Go packages.
+	conformance := &Inputs{Paths: []string{"scripts/conformance/", "conformance/", ".gitmodules", "scripts/init_upstream.sh", "internal/compiler/*_test.go", "go.mod"}, Tools: []string{"go", "git"}, Submodule: "conformance/upstream/effect"}
+	add(&Step{Name: "effect conformance import", Argv: []string{"go", "run", "./scripts/conformance", "import"}, Inputs: conformance})
+	add(&Step{Name: "effect conformance mapping", Argv: []string{"go", "run", "./scripts/conformance", "check"}, Inputs: conformance})
 
 	add(&Step{Name: "gofmt", Argv: append([]string{"sh", "-c", `unformatted=$(gofmt -l "$@"); if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi`, "gofmt"}, gofmtDirectories...)})
 	// Building every test binary once lets vet, the shards and the CLI build
