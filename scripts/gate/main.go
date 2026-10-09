@@ -89,7 +89,10 @@ type result struct {
 	output   []byte
 	duration time.Duration
 	cpu      time.Duration
-	note     string
+	// begun is when the step started, from the start of the run, so a
+	// log shows the critical path and not only each step's own time.
+	begun time.Duration
+	note  string
 }
 
 type receipt struct {
@@ -101,6 +104,7 @@ type receipt struct {
 }
 
 type gate struct {
+	started  time.Time
 	root     string
 	cacheDir string
 	noCache  bool
@@ -190,6 +194,7 @@ func cacheDirectory() string {
 // run executes the graph and returns the process exit code.
 func (g *gate) run(out io.Writer) int {
 	started := time.Now()
+	g.started = started
 	index := map[string]int{}
 	for i, step := range g.steps {
 		if _, duplicate := index[step.Name]; duplicate {
@@ -250,11 +255,11 @@ func (g *gate) run(out io.Writer) int {
 		r := results[i]
 		switch r.outcome {
 		case passed:
-			fmt.Fprintf(out, "== %s: ok (%.1fs, cpu %.1fs)\n", step.Name, r.duration.Seconds(), r.cpu.Seconds())
+			fmt.Fprintf(out, "== %s: ok (%.1fs, cpu %.1fs, from %.1fs)\n", step.Name, r.duration.Seconds(), r.cpu.Seconds(), r.begun.Seconds())
 		case cached:
 			fmt.Fprintf(out, "== %s: ok, cached (%s)\n", step.Name, r.note)
 		case failed:
-			fmt.Fprintf(out, "== %s: FAILED (%.1fs, cpu %.1fs)\n", step.Name, r.duration.Seconds(), r.cpu.Seconds())
+			fmt.Fprintf(out, "== %s: FAILED (%.1fs, cpu %.1fs, from %.1fs)\n", step.Name, r.duration.Seconds(), r.cpu.Seconds(), r.begun.Seconds())
 			failures = append(failures, step.Name)
 		case blocked:
 			fmt.Fprintf(out, "== %s: not run (%s)\n", step.Name, r.note)
@@ -311,7 +316,7 @@ func (g *gate) execute(step *Step) *result {
 	command.Stdout = &output
 	command.Stderr = &output
 	err := command.Run()
-	r := &result{outcome: passed, output: output.Bytes(), duration: time.Since(started)}
+	r := &result{outcome: passed, output: output.Bytes(), duration: time.Since(started), begun: started.Sub(g.started)}
 	if command.ProcessState != nil {
 		// A reaped child's usage includes the descendants it reaped.
 		r.cpu = command.ProcessState.UserTime() + command.ProcessState.SystemTime()
