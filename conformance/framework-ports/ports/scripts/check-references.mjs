@@ -3,7 +3,11 @@ import { mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { parseArgs } from "node:util";
 
+// --counter-domain-artifacts DIR verifies counter-domain artifacts an earlier emission wrote (see
+// check-counter-domain.mjs); without it the counter-domain control builds a fresh compiler and emits them itself.
+const { "counter-domain-artifacts": counterArtifacts } = parseArgs({ options: { "counter-domain-artifacts": { type: "string" } }, strict: true }).values;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const compiler = path.join(root, "node_modules/typescript/bin/tsc");
 const compilerPackage = JSON.parse(readFileSync(path.join(root, "node_modules/typescript/package.json"), "utf8"));
@@ -28,7 +32,7 @@ const bunVersion = run("BUN_VERSION", "bun", ["--version"]).trim();
 assert.equal(bunVersion, "1.4.2", "references require Bun1.4.2");
 run("CAPTURE", process.execPath, ["scripts/check-yield-capture.mjs"]);
 run("DEPENDENCIES", process.execPath, ["scripts/check-dependency-profile.mjs"]);
-run("COUNTER_DOMAIN", process.execPath, ["scripts/check-counter-domain.mjs"]);
+run("COUNTER_DOMAIN", process.execPath, ["scripts/check-counter-domain.mjs", ...(counterArtifacts ? ["--verify", path.resolve(counterArtifacts)] : [])]);
 run("VENDOR_NOEMIT", process.execPath, [compiler, "--noEmit", "-p", "tsconfig.yield.json"]);
 run("VENDOR_BUILD", process.execPath, ["vendor/solid-yield/scripts/build.mjs"]);
 run("VENDOR_DECLARATIONS", process.execPath, [compiler, "-p", "tsconfig.yield.json"]);

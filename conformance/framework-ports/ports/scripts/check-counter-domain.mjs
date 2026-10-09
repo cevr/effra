@@ -1,17 +1,27 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { parseArgs } from "node:util";
 
+// The control has two halves. Emission runs the compiler: it checks and builds the authored domain, the native
+// harness and the increment mutant into an artifact directory. Verification never runs the compiler: it proves the
+// emitted JavaScript, declarations and native programs against the leaf's TypeScript, Bun and Node. With no options
+// the control builds a fresh current-source compiler and runs both halves. --emit DIR runs only emission into DIR,
+// with --compiler naming a compiler built from the current source; --verify DIR runs only verification of DIR. The
+// repository gate emits with the bin/ef it built in the same run and keys verification on the emitted bytes, so a
+// compiler change that leaves every artifact identical does not repeat verification.
+const options = parseArgs({ options: { compiler: { type: "string" }, emit: { type: "string" }, verify: { type: "string" } }, strict: true }).values;
+assert.ok(!(options.emit && options.verify), "--emit and --verify are separate halves");
+assert.ok(!(options.compiler && options.verify), "verification never runs a compiler");
 const leaf = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repository = path.resolve(leaf, "../../..");
 const generated = path.join(leaf, ".generated");
 mkdirSync(generated, { recursive: true });
 const work = mkdtempSync(path.join(generated, "counter-domain-"));
-const compiler = path.join(work, "ef");
 const localTS = path.join(leaf, "node_modules/typescript/bin/tsc");
 const env = { ...process.env, GOCACHE: "/home/exedev/.cache/go-build", GOPROXY: "off", GOTOOLCHAIN: "auto", GOWORK: "off" };
 const records = [];
@@ -99,8 +109,11 @@ function classifierControls() {
     return { target, name, expected: accepted ? "accepted" : "rejected", rejection };
   });
 }
-const evidence = { schema: "effra-counter-domain-controls-v1", claim: "Domain/ABI controls only; all 170 Effra coverage rows pending", work, source: { path: domainPath, sha256: fileHash(domainPath) }, harness: { path: harnessPath, sha256: fileHash(harnessPath) }, mutation: { original: mutation, replacement: mutation.replace("+ 1", "- 1"), productionSha256: hash(domain), mutantSha256: hash(mutant) }, records, artifacts: [], nativePublicationNamespace: { buildCwd: work, snapshots: path.join(work, "dist/go/apps"), owner: "cmd/ef/main.go:690 cwd-relative publication" } };
-const receipt = path.join(generated, "counter-domain-evidence.json");
+const mode = options.emit ? "emit" : options.verify ? "verify" : "complete";
+// Emission records stay outside the artifact directory: compiler reports carry timings, and the directory's bytes are
+// verification's cache key.
+const evidence = { schema: "effra-counter-domain-controls-v2", mode, claim: "Domain/ABI controls only; all 170 Effra coverage rows pending", work, source: { path: domainPath, sha256: fileHash(domainPath) }, harness: { path: harnessPath, sha256: fileHash(harnessPath) }, mutation: { original: mutation, replacement: mutation.replace("+ 1", "- 1"), productionSha256: hash(domain), mutantSha256: hash(mutant) }, records, artifacts: [], nativePublicationNamespace: { buildCwd: work, snapshots: path.join(work, "dist/go/apps"), owner: "cmd/ef/main.go:690 cwd-relative publication" } };
+const receipt = path.join(generated, mode === "emit" ? "counter-domain-emit-evidence.json" : "counter-domain-evidence.json");
 function save() { writeFileSync(receipt, `${JSON.stringify(evidence, null, 2)}\n`); }
 function run(label, executable, args, expectedFailure = false, cwd = leaf) {
   console.log(`COUNTER_${label}_COMMAND=${JSON.stringify([executable, ...args])}`);
@@ -143,35 +156,73 @@ function strictConsumer(label, module, filename = "positive") {
   run(`${label}_TYPES`, process.execPath, [localTS, "--noEmit", "-p", config]);
   artifact(source); artifact(config);
 }
-function nativeSource(label, source) {
-  const filename = path.join(work, `${label}.ef`);
-  const combined = `${source}\n${harness}`;
-  writeFileSync(filename, combined);
-  assert.equal(readFileSync(filename).subarray(0, Buffer.byteLength(source)).toString(), source, "native harness retains exact domain prefix bytes");
-  evidence.artifacts.push({ path: filename, sha256: fileHash(filename), domainPrefixBytes: Buffer.byteLength(source), domainPrefixSha256: hash(source), assertionSuffixSha256: hash(`\n${harness}`) });
-  return filename;
-}
 function intendedMutant(record, target) {
   record.causalIdentity = classifyMutant(record, target);
   save();
 }
 
-try {
-  evidence.classifierControls = classifierControls(); save();
-  assert.equal(process.versions.node, "24.11.1", "selected actual Node version");
-  const tsPackage = JSON.parse(readFileSync(path.join(leaf, "node_modules/typescript/package.json"), "utf8"));
-  assert.equal(tsPackage.version, "6.0.3");
-  assert.ok(realpathSync(localTS).startsWith(`${path.join(leaf, "node_modules")}/`), "leaf TypeScript owner, no root fallback");
-  assert.equal(run("BUN_VERSION", "bun", ["--version"]).stdout.trim(), "1.4.2");
-  assert.equal(run("LEAF_TS_VERSION", process.execPath, [localTS, "--version"]).stdout.trim(), "Version 6.0.3");
-  evidence.parent = { head: run("SOURCE_HEAD", "git", ["rev-parse", "HEAD"], false, repository).stdout.trim(), headTree: run("SOURCE_TREE", "git", ["rev-parse", "HEAD^{tree}"], false, repository).stdout.trim() };
-  const files = run("COMPILER_INPUTS", "git", ["ls-files", "-z", "--", "cmd", "internal", "go.mod", "go.sum"], false, repository).stdout.split("\0").filter(Boolean);
-  evidence.compilerInputs = files.map(file => ({ path: file, sha256: fileHash(path.join(repository, file)) }));
-  evidence.compilerInputsSha256 = hash(JSON.stringify(evidence.compilerInputs));
-  run("COMPILER_BUILD", "go", ["build", "-trimpath", "-mod=readonly", "-o", compiler, "./cmd/ef"], false, repository);
-  artifact(compiler);
+// The emitted artifact directory: every file the compiler produced or was given, and a manifest naming the authored
+// bytes they came from. Its contents are deterministic, so identical compiler behavior yields identical bytes.
+const emitted = {
+  production: "counter.mjs",
+  productionNative: "production-native.ef",
+  native: "counter-go",
+  mutantNative: "mutant-native.ef",
+  nativeMutant: "counter-go-mutant",
+  hostMutant: target => `${target.toLowerCase()}-mutant`,
+};
+const hosts = [["Bun", "bun"], ["Node", process.execPath]];
+const nativeSourceText = source => `${source}\n${harness}`;
+function manifest() {
+  return { schema: "effra-counter-domain-artifacts-v1", domainSha256: hash(domain), harnessSha256: hash(harness), mutantSha256: hash(mutant), nativePrefixBytes: { production: Buffer.byteLength(domain), mutant: Buffer.byteLength(mutant) } };
+}
+function nativeSource(dir, name, source) {
+  const filename = path.join(dir, name);
+  const combined = nativeSourceText(source);
+  writeFileSync(filename, combined);
+  assert.equal(readFileSync(filename).subarray(0, Buffer.byteLength(source)).toString(), source, "native harness retains exact domain prefix bytes");
+  evidence.artifacts.push({ path: filename, sha256: fileHash(filename), domainPrefixBytes: Buffer.byteLength(source), domainPrefixSha256: hash(source), assertionSuffixSha256: hash(`\n${harness}`) });
+  return filename;
+}
+function snapshotsStayInWork() {
+  assert.equal(realpathSync(evidence.nativePublicationNamespace.snapshots), path.join(realpathSync(work), "dist/go/apps"), "native snapshots remain inside the fresh ignored workspace");
+}
+
+function emit(compiler, dir) {
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
   run("SOURCE_GO_CHECK", compiler, ["check", domainPath, "--target", "go"]);
   run("SOURCE_JS_CHECK", compiler, ["check", domainPath, "--target", "js"]);
+  const production = path.join(dir, emitted.production);
+  run("LIBRARY_BUILD", compiler, ["build", domainPath, "--target", "js", "-o", production]);
+  artifact(production); artifact(production.replace(/\.mjs$/, ".d.mts"));
+  for (const [source, name, binary, label] of [[domain, emitted.productionNative, emitted.native, "PRODUCTION"], [mutant, emitted.mutantNative, emitted.nativeMutant, "MUTANT"]]) {
+    const native = nativeSource(dir, name, source);
+    run(`GO_${label}_CHECK`, compiler, ["check", native, "--target", "go"]);
+    run(`GO_${label}_BUILD`, compiler, ["build", native, "--target", "go", "-o", path.join(dir, binary)], false, work);
+    snapshotsStayInWork();
+    artifact(path.join(dir, binary));
+  }
+  for (const [target] of hosts) {
+    const name = emitted.hostMutant(target);
+    const source = path.join(dir, `${name}.ef`);
+    writeFileSync(source, mutant);
+    assert.equal(fileHash(source), hash(mutant)); artifact(source);
+    run(`${target}_MUTANT_CHECK`, compiler, ["check", source, "--target", "js"]);
+    const output = path.join(dir, `${name}.mjs`);
+    run(`${target}_MUTANT_BUILD`, compiler, ["build", source, "--target", "js", "-o", output]);
+    artifact(output); artifact(output.replace(/\.mjs$/, ".d.mts"));
+  }
+  writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify(manifest(), null, 2)}\n`);
+  save();
+}
+
+function verify(dir) {
+  // The artifacts must come from the current authored domain and harness.
+  assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "manifest.json"), "utf8")), manifest(), "emitted artifacts belong to the current domain, harness and mutant");
+  assert.equal(readFileSync(path.join(dir, emitted.productionNative), "utf8"), nativeSourceText(domain), "emitted production native source is the current domain and harness");
+  assert.equal(readFileSync(path.join(dir, emitted.mutantNative), "utf8"), nativeSourceText(mutant), "emitted mutant native source is the current mutant and harness");
+  for (const [target] of hosts) assert.equal(readFileSync(path.join(dir, `${emitted.hostMutant(target)}.ef`), "utf8"), mutant, `emitted ${target} mutant source is the current mutant`);
   const production = path.join(generated, "counter.mjs");
   const effectPackagePath = path.join(leaf, "node_modules/effect/package.json");
   const effectPackage = JSON.parse(readFileSync(effectPackagePath, "utf8"));
@@ -190,7 +241,11 @@ try {
     }
   }
   assert.ok(!existsSync(production) && !existsSync(production.replace(/\.mjs$/, ".d.mts")));
-  run("LIBRARY_BUILD", compiler, ["build", domainPath, "--target", "js", "-o", production]);
+  // The consumers import the canonical path, so the fresh emission is installed there.
+  for (const [from, to] of [[path.join(dir, emitted.production), production], [path.join(dir, emitted.production.replace(/\.mjs$/, ".d.mts")), production.replace(/\.mjs$/, ".d.mts")]]) {
+    copyFileSync(from, to);
+    assert.equal(fileHash(to), fileHash(from), "canonical output is the emitted artifact");
+  }
   abi(production);
   run("POSITIVE_TYPES", process.execPath, [localTS, "--noEmit", "-p", path.join(leaf, "tsconfig.counter-contract.json")]);
   for (const [kind, column, expected] of [["number", 14, /number[\s\S]*bigint/], ["state", 15, /__ef_brand_CounterState/], ["event", 33, /__ef_brand_CounterEvent/]]) {
@@ -204,46 +259,71 @@ try {
     assert.equal((output.match(/error TS[0-9]+:/g) ?? []).length, 1, "one intended negative diagnostic, not arbitrary compiler failure");
     assert.match(output, expected); record.intendedDiagnostic = diagnostic; save();
   }
-  const productionNative = nativeSource("production-native", domain);
-  run("GO_PRODUCTION_CHECK", compiler, ["check", productionNative, "--target", "go"]);
-  const native = path.join(work, "counter-go");
-  run("GO_PRODUCTION_BUILD", compiler, ["build", productionNative, "--target", "go", "-o", native], false, work);
-  assert.equal(realpathSync(evidence.nativePublicationNamespace.snapshots), path.join(realpathSync(work), "dist/go/apps"), "native snapshots remain inside the fresh ignored workspace");
-  artifact(native);
+  const native = path.join(dir, emitted.native);
+  artifact(path.join(dir, emitted.productionNative)); artifact(native);
   const go = run("GO_PRODUCTION_RUN", native, []);
   assert.match(go.stdout, /^COUNTER_INITIAL_ZERO=0$/m);
   assert.deepEqual(checkedLabels(go.stdout), nativeChecks, "Go production runs every labelled check in order");
   assert.match(go.stdout, /^COUNTER_NATIVE_TRACE_WRAP_GREEN$/m);
-  const mutantNative = nativeSource("mutant-native", mutant);
-  run("GO_MUTANT_CHECK", compiler, ["check", mutantNative, "--target", "go"]);
-  const nativeMutant = path.join(work, "counter-go-mutant");
-  run("GO_MUTANT_BUILD", compiler, ["build", mutantNative, "--target", "go", "-o", nativeMutant], false, work);
-  assert.equal(realpathSync(evidence.nativePublicationNamespace.snapshots), path.join(realpathSync(work), "dist/go/apps"), "native snapshots remain inside the fresh ignored workspace");
-  artifact(nativeMutant);
+  const nativeMutant = path.join(dir, emitted.nativeMutant);
+  artifact(path.join(dir, emitted.mutantNative)); artifact(nativeMutant);
   intendedMutant(run("GO_MUTANT_RUN", nativeMutant, [], true), "Go");
-  for (const [target, executable] of [["Bun", "bun"], ["Node", process.execPath]]) {
-    const name = target.toLowerCase();
+  for (const [target, executable] of hosts) {
     strictConsumer(`${target}_PRODUCTION`, production);
     const result = run(`${target}_PRODUCTION_RUN`, executable, [path.join(leaf, "tests/counter-domain.mjs"), production, target]);
     assert.deepEqual(checkedLabels(result.stdout), nativeChecks, `${target} production runs every labelled check in order`);
     assert.deepEqual(failureLines(result.stdout), [], `${target} production reports no failure`);
     assert.equal(result.stderr, "", `${target} production has no host error output`);
     assert.match(result.stdout, new RegExp(`^COUNTER_DOMAIN_TRACE_WRAP_GREEN=${target}$`, "m"));
-    const source = path.join(work, `${name}-mutant.ef`);
-    writeFileSync(source, mutant);
-    assert.equal(fileHash(source), hash(mutant)); artifact(source);
-    run(`${target}_MUTANT_CHECK`, compiler, ["check", source, "--target", "js"]);
-    const output = path.join(work, `${name}-mutant.mjs`);
-    run(`${target}_MUTANT_BUILD`, compiler, ["build", source, "--target", "js", "-o", output]);
+    const output = path.join(dir, `${emitted.hostMutant(target)}.mjs`);
     abi(output); strictConsumer(`${target}_MUTANT`, output);
     intendedMutant(run(`${target}_MUTANT_RUN`, executable, [path.join(leaf, "tests/counter-domain.mjs"), output, target], true), target);
   }
+}
+
+try {
+  evidence.classifierControls = classifierControls(); save();
+  assert.equal(process.versions.node, "24.11.1", "selected actual Node version");
+  if (mode !== "emit") {
+    const tsPackage = JSON.parse(readFileSync(path.join(leaf, "node_modules/typescript/package.json"), "utf8"));
+    assert.equal(tsPackage.version, "6.0.3");
+    assert.ok(realpathSync(localTS).startsWith(`${path.join(leaf, "node_modules")}/`), "leaf TypeScript owner, no root fallback");
+    assert.equal(run("BUN_VERSION", "bun", ["--version"]).stdout.trim(), "1.4.2");
+    assert.equal(run("LEAF_TS_VERSION", process.execPath, [localTS, "--version"]).stdout.trim(), "Version 6.0.3");
+  }
+  evidence.parent = { head: run("SOURCE_HEAD", "git", ["rev-parse", "HEAD"], false, repository).stdout.trim(), headTree: run("SOURCE_TREE", "git", ["rev-parse", "HEAD^{tree}"], false, repository).stdout.trim() };
+  let compiler = null;
+  if (mode !== "verify") {
+    const files = run("COMPILER_INPUTS", "git", ["ls-files", "-z", "--", "cmd", "internal", "go.mod", "go.sum"], false, repository).stdout.split("\0").filter(Boolean);
+    evidence.compilerInputs = files.map(file => ({ path: file, sha256: fileHash(path.join(repository, file)) }));
+    evidence.compilerInputsSha256 = hash(JSON.stringify(evidence.compilerInputs));
+    if (options.compiler) {
+      // The caller built this compiler from the current source in the same run; the input hashes above and the
+      // PREPOST check below bind the run to that source.
+      compiler = path.resolve(options.compiler);
+      evidence.compiler = { provided: options.compiler, path: compiler, sha256: fileHash(compiler) };
+    } else {
+      compiler = path.join(work, "ef");
+      run("COMPILER_BUILD", "go", ["build", "-trimpath", "-mod=readonly", "-o", compiler, "./cmd/ef"], false, repository);
+      artifact(compiler);
+    }
+  }
+  const dir = path.resolve(options.emit ?? options.verify ?? path.join(work, "emitted"));
+  evidence.emitted = dir;
+  if (mode !== "verify") emit(compiler, dir);
+  if (mode !== "emit") verify(dir);
   assert.equal(fileHash(domainPath), hash(domain));
   assert.equal(fileHash(harnessPath), hash(harness));
-  for (const input of evidence.compilerInputs) assert.equal(fileHash(path.join(repository, input.path)), input.sha256, "compiler input PREPOST");
-  evidence.result = "DOMAIN_ABI_PRODUCTION_GREEN_AND_THREE_INTENDED_MUTANTS_RED";
-  save();
-  console.log("COUNTER_DOMAIN_CONTROLS_EXIT=0 (Go/Bun/Node production trace+wrap; three causal authored-domain mutants RED; no mounted Effra ports)");
+  if (evidence.compilerInputs) for (const input of evidence.compilerInputs) assert.equal(fileHash(path.join(repository, input.path)), input.sha256, "compiler input PREPOST");
+  if (mode === "emit") {
+    evidence.result = "DOMAIN_HARNESS_AND_MUTANTS_CHECKED_AND_EMITTED";
+    save();
+    console.log(`COUNTER_DOMAIN_EMIT_EXIT=0 (checked and emitted the domain, native harness and three mutants into ${dir})`);
+  } else {
+    evidence.result = "DOMAIN_ABI_PRODUCTION_GREEN_AND_THREE_INTENDED_MUTANTS_RED";
+    save();
+    console.log("COUNTER_DOMAIN_CONTROLS_EXIT=0 (Go/Bun/Node production trace+wrap; three causal authored-domain mutants RED; no mounted Effra ports)");
+  }
 } catch (error) {
   evidence.error = error instanceof Error ? error.stack : String(error); save(); throw error;
 }

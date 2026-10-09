@@ -73,6 +73,11 @@ type Inputs struct {
 	// permissions and content and every symlink's target, following links
 	// as Node and Bun resolve them. An absent directory is a distinct input.
 	Installed []string
+	// Generated names files or directories that a step this one Needs
+	// writes during the run, such as emitted artifacts. Each is digested
+	// like Installed, but when this step's key is computed: Installed trees
+	// are digested once per run because nothing writes them.
+	Generated []string
 }
 
 type outcome int
@@ -467,6 +472,13 @@ func (g *gate) key(step *Step) (string, error) {
 	}
 	for _, dir := range inputs.Installed {
 		fmt.Fprintf(hash, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
+	}
+	for _, name := range inputs.Generated {
+		digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(name)), g.root)
+		if err != nil {
+			return "", fmt.Errorf("digest generated %s: %w", name, err)
+		}
+		fmt.Fprintf(hash, "generated\x00%s\x00%s\x00", name, digest)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }

@@ -321,6 +321,30 @@ func TestToolDigestCoversInstalledTestDependencies(t *testing.T) {
 	}
 }
 
+// A step that consumes another step's output keys on that output as it is
+// when the consumer starts, not as it was when the run began.
+func TestGeneratedInputsAreDigestedWhenTheKeyIsComputed(t *testing.T) {
+	root := fixture(t)
+	write(t, root, "out/artifact", "first emission\n")
+	g := &gate{root: root, cacheDir: t.TempDir()}
+	if err := g.loadFiles(); err != nil {
+		t.Fatal(err)
+	}
+	step := &Step{Name: "consumer", Argv: []string{"true"}, Inputs: &Inputs{Paths: []string{"src/"}, Generated: []string{"out"}}}
+	first, err := g.key(step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "out/artifact", "second emission\n")
+	second, err := g.key(step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("a generated input rewritten during the run kept its earlier digest")
+	}
+}
+
 func TestEnvironmentInputsAreInputs(t *testing.T) {
 	root := fixture(t)
 	inputs := &Inputs{Paths: []string{"src/"}, Env: []string{"EFFRA_GATE_ENV_INPUT"}}
