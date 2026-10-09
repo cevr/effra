@@ -16,6 +16,25 @@ Canonical type positions serialize as bounded references to shared definitions, 
 
 Add ordinary typed function values and explicit finite row parameters together. A reusable helper must preserve its argument's failure/service requirements without a checker branch named after that helper. Instantiate row parameters from argument contracts, support finite union and concrete-label elimination, and reject unsupported ambiguous inference. General conditional type computation and whole-program inference are outside this design.
 
+## Row parameters on service operations and implementation methods
+
+A service operation and the implementation method that satisfies it may declare row parameters, `E: raises` and `R: uses`, with the same inference as ordinary functions: each is solved from the callback argument rows at a direct call, and the operation's result rows are instantiated from the solution (`RowArguments` in inspection). The general callback form is expressible without a checker branch:
+
+```ef
+service Server {
+    effect fn listen<E: raises, R: uses>(address: string, handler: effect fn(Request) -> Reply raises { E } uses { R }) -> void raises { IoError } uses { R }
+}
+```
+
+Rules:
+
+- **Rows only.** A type parameter on an operation or implementation method is `EF125`: a Go struct field cannot be generic, whereas rows are erased and cost nothing at the host boundary.
+- **Operation `uses` names only row parameters.** A fixed label (`uses { Console }`) is `EF103`: an operation's requirements are what its caller supplies through the callback, never an ambient capability. Construction requirements belong to `impl ... uses { ... }` (see [layers](layers.md)). The call adds the service itself to the caller's row, as for any operation.
+- **Conformance is up to renaming.** The implementation method must declare the same number of row parameters in the same kinds and positions (arity or kind mismatch is `EF104`); names are free. Types are compared after identifying the corresponding parameters. The implementation may raise fewer failures than the operation and may not raise a failure the operation does not.
+- **Limit: an Effra body cannot absorb an abstract row.** An implementation that runs `handler` raises `E` and uses `R`; it can only forward them, so its method must list `E` in `raises` or fail `EF107`. Catching `E` is `EF125` because recovery of an abstract row needs a row-difference constraint the finite solver does not have. Absorbing `E` into a typed response (the `typed-failure-response` of an HTTP server) is sound only in a trusted host body, which is a later `extern` unit. Consequently a test fake of such a service cannot drive the handler itself; tests call route functions directly.
+- **The body is checked against the declared row.** An implementation method may use only the services in its own declared `uses` row (its row parameters included) plus the constructor's concrete captures; using a callback requirement it did not declare is `EF108`, as for a module function. Captures are concrete and are never re-resolved under the method's row binders, so a binder spelled like a captured service neither hides nor widens either.
+- Row parameters on operations and impl methods lower exactly as on functions: Go and JavaScript see the callback as an ordinary callable, and the TypeScript declaration of the service and provider type carries the generic row variables.
+
 ## Construct status
 
 This is the current application of the [construct admission rule](../design.md#language-design-principles), from the 2026-10-07 construct audit (rows 1-41, numbered below), its independent review, the machine admission probes and the owner decisions recorded after the audit. It lists every audit row with its current verdict; a construct not listed has no verdict yet and must pass the rule before it is admitted. A construct stays only where it makes bad code unrepresentable and a library cannot, and compiler-special behavior is always spelled as a construct, never hidden in a library API. A verdict changes only when the evidence named for it is shown. The SHRINK rows, and `.catch`, `.recover` and `.provide` until their replacement mechanisms exist, describe current compiler debt being deleted, not the target design.

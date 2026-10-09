@@ -6,6 +6,8 @@ Status: authorized implementation contract, 2026-10-06. This replaces repeated p
 
 `service` declares operations. `impl` supplies behavior and declares construction dependencies. `layer` selects implementations and assembles their lazy acquisition graph. Service-operation rows remain separate from provider-construction rows; a layer does not acquire every service an operation may need later. Domain operations retain explicit requirements. Provide the assembled graph once at an application, command, handler or test boundary.
 
+Service-operation rows may be row-polymorphic: the operation declares `E: raises` and `R: uses` parameters, and its `uses` row may name only its declared `uses` parameters. Implementation methods declare matching row parameters and may also repeat concrete constructor captures in their own `uses` row. These are properties of the operation and method, not construction rows; operation rows are solved at each call from callback arguments, so a fixed `uses { Console }` on a service operation remains `EF103` and construction requirements stay on `impl ... uses`. See [language abstractions](language-abstractions.md#row-parameters-on-service-operations-and-implementation-methods).
+
 ```ef
 layer Platform {
     Config = EnvConfig

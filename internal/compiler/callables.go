@@ -196,8 +196,8 @@ func (c *checker) functionRows(f *Function) map[string]RowParameter {
 			c.diagnostic("EF125", "duplicate row parameter "+p.Name, p.Span)
 		}
 		declared[p.Name] = true
-		if f.Owner != "module" && f.Owner != "" {
-			c.diagnostic("EF125", "row parameters are supported on ordinary module functions", p.Span)
+		if !rowParametersAdmitted(f.Owner) {
+			c.diagnostic("EF125", "row parameters are supported on module functions, service operations and implementation methods", p.Span)
 		}
 		c.rowDefinitions[p.ID] = *p
 	}
@@ -206,6 +206,30 @@ func (c *checker) functionRows(f *Function) map[string]RowParameter {
 		context[name] = *p
 	}
 	return context
+}
+
+// rowParametersAdmitted names the declarations that may bind row variables:
+// ordinary functions, service operations and the implementation methods that
+// satisfy them. Rows are erased, so an operation may be row-polymorphic where
+// it could not be type-polymorphic (Go struct fields cannot be generic).
+func rowParametersAdmitted(owner string) bool {
+	return owner == "" || owner == "module" || operationOwner(owner)
+}
+
+// operationOwner reports a service operation or an implementation method.
+func operationOwner(owner string) bool {
+	return strings.HasPrefix(owner, "service:") || strings.HasPrefix(owner, "provider:")
+}
+
+// rowParameterDeclared reports whether label names a row parameter of kind
+// declared by f itself.
+func (c *checker) rowParameterDeclared(f *Function, label, kind string) bool {
+	for _, p := range f.RowParameters {
+		if p.Name == label && p.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *checker) rowParameter(name, kind string) bool {

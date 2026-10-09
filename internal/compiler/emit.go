@@ -878,8 +878,17 @@ func jsShape(program *Program, methods []*Function, declarations map[string]Decl
 	for _, f := range methods {
 		contract := f
 		if hideServices {
+			// Captured construction services are hidden; the operation's own
+			// row parameters remain part of the contract.
 			copy := *f
 			copy.Services = nil
+			for _, label := range f.Services {
+				for _, row := range f.RowParameters {
+					if row.Kind == "uses" && row.Name == label {
+						copy.Services = append(copy.Services, label)
+					}
+				}
+			}
 			contract = &copy
 		}
 		out += "readonly " + quoted(f.Name) + ": " + jsRowFunctionSignature(program, contract, declarations) + "; "

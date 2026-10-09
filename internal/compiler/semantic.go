@@ -2447,8 +2447,10 @@ func (c *checker) check() {
 			methods[f.Name] = true
 			c.signature(f)
 			c.bindSignatureParameters(f)
-			if len(f.Services) > 0 {
-				c.diagnostic("EF103", "service methods cannot declare uses in this prototype", f.Span)
+			for _, label := range f.Services {
+				if !c.rowParameterDeclared(f, label, "uses") {
+					c.diagnostic("EF103", "service operation uses may name only its row parameters; "+label+" is a fixed requirement", f.Span)
+				}
 			}
 		}
 	}
@@ -2485,7 +2487,7 @@ func (c *checker) check() {
 			methods[f.Name] = f
 			c.signature(f)
 			for _, required := range normalized(f.Services) {
-				if !slices.Contains(normalized(p.Services), required) {
+				if !slices.Contains(normalized(p.Services), required) && !c.rowParameterDeclared(f, required, "uses") {
 					c.diagnostic("EF103", "provider method "+p.Name+"."+f.Name+" captures undeclared service "+required, f.Span)
 				}
 			}
@@ -2497,13 +2499,7 @@ func (c *checker) check() {
 				c.diagnostic("EF104", "provider "+p.Name+" is missing method "+want.Name, p.Span)
 				continue
 			}
-			equal := got.Effect && c.canonicalRef(typeRef(got.Return)) == c.canonicalRef(typeRef(want.Return)) && len(got.Params) == len(want.Params)
-			if equal {
-				for i := range got.Params {
-					equal = equal && c.canonicalRef(typeRef(got.Params[i].Type)) == c.canonicalRef(typeRef(want.Params[i].Type))
-				}
-			}
-			if !equal || len(difference(got.Errors, want.Errors)) > 0 {
+			if !c.implementsOperation(got, want) {
 				c.diagnostic("EF104", "implementation does not satisfy service method "+s.Name+"."+want.Name, got.Span)
 			}
 		}
@@ -2537,6 +2533,46 @@ func (c *checker) check() {
 	slices.SortFunc(c.result.BundledInterfaces, func(a, b BundledInterfaceInfo) int { return strings.Compare(a.Module, b.Module) })
 	c.publishCodecs()
 	c.validateJSDeclarationNames()
+}
+
+// implementsOperation compares an implementation method with its operation up
+// to row-parameter renaming: the parameters correspond by position and kind,
+// the implementation may raise less than the operation and use no row
+// parameter the operation does not bind.
+func (c *checker) implementsOperation(got, want *Function) bool {
+	if !got.Effect || len(got.Params) != len(want.Params) || len(got.RowParameters) != len(want.RowParameters) {
+		return false
+	}
+	bindings := map[string][]string{}
+	for i, p := range got.RowParameters {
+		if p.Kind != want.RowParameters[i].Kind {
+			return false
+		}
+		bindings[p.ID] = []string{want.RowParameters[i].ID}
+	}
+	rename := func(id TypeID) TypeID {
+		if len(bindings) == 0 {
+			return id
+		}
+		return c.substituteCanonical(id, nil, bindings)
+	}
+	if rename(got.returnID) != want.returnID {
+		return false
+	}
+	for i := range got.Params {
+		if rename(got.Params[i].typeID) != want.Params[i].typeID {
+			return false
+		}
+	}
+	if len(difference(c.rowLabels(c.instantiateRow(got.failureID, bindings)), c.rowLabels(want.failureID))) > 0 {
+		return false
+	}
+	for _, label := range c.rowLabels(c.instantiateRow(got.serviceID, bindings)) {
+		if _, abstract := c.rowDefinitions[label]; abstract && !slices.Contains(c.rowLabels(want.serviceID), label) {
+			return false
+		}
+	}
+	return true
 }
 
 // prepareFunctionSummaries computes bounded ownership summaries before the
@@ -2730,11 +2766,15 @@ func (c *checker) providerSignature(p *Provider) {
 // requirements in scope. A method may repeat a captured requirement with
 // `uses { ... }` for local clarity, but it can never widen the constructor's
 // row. The service operation contract remains the service declaration's
-// contract, which has no captured construction row.
+// contract, which has no captured construction row. The body is checked
+// against canonical identities: the method's declared row (f.serviceID, whose
+// row parameters are the method's own binders) plus the constructor's concrete
+// captures. Captures are never re-resolved under the method's binders, so a
+// binder spelled like a capture cannot widen or hide either.
 func (c *checker) providerFunction(p *Provider, f *Function) {
 	previousFacts := c.recordFacts
 	c.recordFacts = true
-	c.functionWithLocals(f, false, p.Params, p.Services)
+	c.functionWithLocals(f, false, p.Params, normalized(p.Services))
 	c.recordFacts = previousFacts
 }
 
@@ -2802,7 +2842,9 @@ func (c *checker) signature(f *Function) {
 	previousTypes, previousModule := c.typeContext, c.functionModule
 	c.typeContext, c.functionModule = c.templateContext(f.TypeParameters, f.Identity), f.Module
 	defer func() { c.typeContext, c.functionModule = previousTypes, previousModule }()
-	if len(f.TypeParameters) > 0 && (f.Module == "" || f.Module == currentModuleIdentity) {
+	if len(f.TypeParameters) > 0 && operationOwner(f.Owner) {
+		c.diagnostic("EF125", "type parameters are unsupported on service operations and implementation methods; only row parameters are admitted", f.Span)
+	} else if len(f.TypeParameters) > 0 && (f.Module == "" || f.Module == currentModuleIdentity) {
 		c.diagnostic("EF127", "user generic functions are unavailable; use an explicit compiler-distributed declaration", f.Span)
 	}
 	previous := c.rowContext
@@ -3777,7 +3819,7 @@ func (c *checker) function(f *Function, record bool) {
 	if !record && !c.program.interfaceProducer && c.admittedSummaries[f.Module].Module != "" {
 		return
 	}
-	c.functionWithLocals(f, record, nil, f.Services)
+	c.functionWithLocals(f, record, nil, nil)
 }
 
 func (c *checker) publishRecontractedExpression(expr *Expr, result checkedExpression) {
@@ -3805,7 +3847,7 @@ func (c *checker) publishRecontractedExpression(expr *Expr, result checkedExpres
 	c.result.facts[expr] = facts
 }
 
-func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, allowedServices []string) {
+func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, capturedServices []string) {
 	previousLexicalOwner := c.lexicalOwner
 	c.lexicalOwner = nil
 	if c.result.lexical != nil {
@@ -3825,7 +3867,7 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	defer func() { c.rowContext = previousRows }()
 	env := localEnv{}
 	for _, p := range locals {
-		parameter := c.checkedData(p.Type)
+		parameter := c.checkedDataID(p.typeID, nil, nil)
 		parameter.setOwnership(c.borrowedOwnershipID(parameter.valueID(), "parameter:"+p.Name))
 		if c.lexicalOwner != nil {
 			parameter = c.bindLocal("configuration", p.Name, p.Span, p.Extent, c.result.lexical.parameters[p.Span.Offset], parameter)
@@ -3869,7 +3911,7 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, a
 	if missing := c.rowDifference(c.rowLabels(actual.evaluation.failureRowID()), c.rowLabels(f.failureID)); len(missing) > 0 {
 		c.diagnostic("EF107", "undeclared failures: "+strings.Join(missing, ", "), f.Span)
 	}
-	if missing := c.rowDifference(c.rowLabels(actual.evaluation.serviceRowID()), c.sourceRow(allowedServices, "uses")); len(missing) > 0 {
+	if missing := c.rowDifference(c.rowLabels(actual.evaluation.serviceRowID()), union(c.rowLabels(f.serviceID), capturedServices)); len(missing) > 0 {
 		c.diagnostic("EF108", "missing service requirements: "+strings.Join(missing, ", "), f.Span)
 		if !c.suppressDiagnostics {
 			diagnostic := &c.result.Diagnostics[len(c.result.Diagnostics)-1]
@@ -4235,7 +4277,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 						i = source
 					}
 					argumentTypes[i] = got
-					if i < len(provider.Params) && (got.isEffect() || !c.sameType(got, provider.Params[i].Type)) {
+					if i < len(provider.Params) && (got.isEffect() || !c.assignable(got.valueID(), provider.Params[i].typeID, 0)) {
 						c.diagnostic("EF106", "provider configuration argument must be "+provider.Params[i].Type, arg.Span)
 					}
 				}
@@ -4385,6 +4427,9 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			resultID = c.substituteCanonical(f.returnID, typeBindings, bindings)
 			failureRow = c.instantiateRow(f.failureID, bindings)
 			serviceLabels = c.rowLabels(c.instantiateRow(f.serviceID, bindings))
+			if serviceName != "" {
+				serviceLabels = union(serviceLabels, []string{serviceName})
+			}
 			for _, parameter := range f.RowParameters {
 				rowArguments = append(rowArguments, RowArgument{Parameter: parameter, Row: c.rowNodeID(c.internRow(bindings[parameter.ID]))})
 			}
