@@ -4,13 +4,14 @@
 change the checker, or claim a law, performance, Go, or two-target result.
 
 The hosted question is [Generalized run sequencing and checked userland binding](https://github.com/cevr/effra/issues/73).
-Its durable local mirror is [`issues/run-binding.md`](../wayfinder/issues/run-binding.md),
-and the separate GET-backed reconciliation record is
-[`hosted-run-reconciliation.json`](../wayfinder/hosted-run-reconciliation.json).
-The selected public JSON response and receipt bytes used by that record are
-retained under [`wayfinder/receipts/`](../wayfinder/receipts/); they bind issue
-73, its map membership, and the original 71-item verifier without claiming
-that the accepted source subject has been published.
+Its former local mirror (`docs/wayfinder/issues/run-binding.md`), the
+separate GET-backed reconciliation record
+(`docs/wayfinder/hosted-run-reconciliation.json`) and the public JSON response
+and receipt bytes it used (`docs/wayfinder/receipts/`) were retired with the
+local tracker and remain at commit `43af514c` (see the
+[Wayfinder archive](../wayfinder/ARCHIVE.md)). They bound issue 73, its map
+membership, and the original 71-item verifier without claiming that the
+accepted source subject has been published.
 The source subject for this record is commit
 `4627f414414cc964840b53894b7161482687de69`, tree
 `ff2e8954a6063772b5fcd7dee9abc9929b58613c`. The original 71-item hosted

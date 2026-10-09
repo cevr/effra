@@ -1,6 +1,0 @@
-<!-- {"id": "actor-conformance", "title": "Actor contract inspection and adoption conformance", "status": "open", "labels": ["implementation:task"], "parent": "ordinary-actors", "assignee": null, "blocked_by": ["actor-runtime", "semantic-types", "host-interop"]} -->
-# Actor contract inspection and adoption conformance
-
-Unit4 of [actors](../../specs/actors.md): two unrelated runnable before/after room-roster/device-spooler callers; actual CLI/MCP/LSP full protocol, rows, captures, policy and ownership facts with invalid-request continuity. Inspection executes no behavior. Causal device/HTTP lifetime and cancellation controls, machine adapter regressions when available and no mandatory machine/persistence/module retention. Source prior arts have explicit different/unsupported mappings; retain raw gates and independent review. Size/build/server measurements stay in the final phase, no current performance claim.
-
-Use a service with a fixed semaphore plus Ref/resource ownership as the ordinary library baseline. Isolate actor benefits with causal typed MailboxFull, caller-detachment, stop/discard and queue-inspection controls. Stable annotated handle projections and full Exit/Cause observation must agree across tooling. Deferred receive has independent closure and never blocks this handler profile.

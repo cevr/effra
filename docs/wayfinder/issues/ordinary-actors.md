@@ -1,6 +1,0 @@
-<!-- {"id": "ordinary-actors", "title": "Ordinary owned actor protocols and behavior", "status": "open", "labels": ["implementation:spec"], "parent": "map", "assignee": null, "blocked_by": []} -->
-# Ordinary owned actor protocols and behavior
-
-Owner refinement, 2026-10-06: implement the finite [actor contract](../../specs/actors.md) through ordinary service/impl/effect functions, explicit rows and scopes. Runtime/stdlib owns addressable behavior, typed messaging and admission/concurrency; a machine is one specialization. Handler and receive-loop source usage does not justify a new DSL.
-
-Gated children deliver protocol/ownership projection, owned handler runtime and tooling/adoption. Receive behavior is separately deferred until it earns a distinct guarantee beyond handlers; it does not block handler conformance. Message and native-alias admission, acknowledgement stages, constructor/method/terminal contracts and full inspection must remain explicit. Supervision, durable addressing, persistence and replay are separate following capabilities. Two unrelated runnable before/after consumers against semaphore-plus-Ref composition, full gates and independent review precede closure. No HITL closure or benchmark claim.

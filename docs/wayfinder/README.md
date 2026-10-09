@@ -1,46 +1,43 @@
-# Local Markdown tracker
+# Wayfinder
 
-The checked-in tracker is the local authoring surface. The repository also retains a dated hosted-input snapshot; its identities are historical evidence and do not describe the current captured identity mapping. Commands here operate on local files and do not query GitHub.
+The Wayfinder map lives on GitHub, and only there: issue [#1](https://github.com/cevr/effra/issues/1) (label `wayfinder:map`) and its native sub-issues in `cevr/effra`. The repository keeps a derived, read-only [snapshot](snapshot.json) for offline reading and the offline gate. Nothing in the repository is a second source of map state. The local Markdown tracker and migration records that preceded this are described in the [archive](ARCHIVE.md).
 
-## Wayfinding operations
+## How the map is represented
 
-Issues live in `issues/*.md`. Each has a JSON metadata line in an HTML comment: immutable `id`, `title`, `status` (`open`/`closed`), `labels`, `parent`, `assignee`, and `blocked_by` issue IDs. This tracker has no native dependency API; `blocked_by` is its explicit fallback convention.
+- **Map.** The single open issue labelled `wayfinder:map`. Its body holds the destination, standing owner direction and the index of decisions.
+- **Tickets.** Every transitive native sub-issue of the map. Each carries exactly one type label: `wayfinder:task` (agent-implementable), or a human-in-the-loop (HITL) label `wayfinder:grilling`, `wayfinder:prototype` or `wayfinder:research`. Secondary labels such as `implementation:spec` or `implementation:task` describe a task's kind.
+- **Parent and child.** Native sub-issues. A parent with open children is a rollup; it is done when its children are.
+- **Dependencies.** Native "blocked by" relationships. A ticket is blocked while any blocker is open.
+- **Claims.** A GitHub assignee.
+- **Progress, decisions and resolutions.** Issue comments. The body states the question or contract; it is edited only when the contract itself changes.
+- **HITL tickets** are resolved by owner feedback only. Agents never close them, even when the related implementation is complete.
 
-The map is the issue labelled `wayfinder:map`. Its body is the canonical index. Child decision tickets hold questions; resolutions are appended under `## Resolution comments`, never inserted into the question.
+## Reading the map
 
-Query `python3 scripts/wayfinder.py frontier`: open, unassigned children whose blockers are closed, ordered by ID. `list` shows all children, including claimed/blocked tickets. `check` validates identities, references, and cycles. Claim a ticket by setting its assignee before work. Close only after resolution; append its named link and gist to the map. IDs are immutable; refer to titles in prose.
-
-Serialize tracker changes through Git. Re-read metadata before editing; do not overwrite another session's claim. This local tracker is intended for one workspace, not distributed concurrent writes.
-
-## Historical hosted migration input
-
-The accepted `hosted-run-binding-2026-10-08` input records the hosted mapping captured for the historical migration on 2026-10-08. Its five verified identities (the map and children 2, 3, 4, and 73) describe that snapshot only. The archived statement that later publication could fill pending entries is also a record of that historical state, not a claim about the current captured identity map.
-
-Run the historical check from the repository root:
+`cmd/wayfinder` reads GitHub through `gh api graphql` (Go standard library, read-only):
 
 ```sh
-python3 scripts/wayfinder_migration.py --input-snapshot hosted-run-binding-2026-10-08 --check
+go run ./cmd/wayfinder frontier          # open, unassigned, unblocked, non-rollup tickets, HITL excluded
+go run ./cmd/wayfinder frontier --all    # also HITL tickets that are otherwise ready
+go run ./cmd/wayfinder list              # every ticket with its derived status
+go run ./cmd/wayfinder show 41           # one ticket: relationships, body and comments
+go run ./cmd/wayfinder check             # structural check of the live map
+go run ./cmd/wayfinder snapshot          # regenerate docs/wayfinder/snapshot.json
+go run ./cmd/wayfinder snapshot --check  # exit 1 if the snapshot differs from GitHub
 ```
 
-The selected bundle contains 72 issue inputs, the historical hosted mapping, the preparer source and the research record. The checker validates the archived bytes and does not fall back to live issue, mapping, preparer or research-record files. It preserves the original 71-issue/183-edge input wave from commit `4627f414414cc964840b53894b7161482687de69` separately from the later `run-binding` extension to 72 issues/184 edges. The snapshot descriptor binds the bundle to the retained input-manifest identity and binds the research record separately; the original manifest, receipt and response bytes remain unchanged.
+Run it from the repository; the default snapshot path is resolved from the nearest `go.mod`. Add `--snapshot` to `frontier`, `list`, `show` or `check` to read the committed snapshot without network access, and `--json` to the read commands for machine output. Each ticket has one derived status: `closed`, `claimed`, `blocked`, `rollup`, `hitl` or `ready`; the frontier is `ready`.
 
-For this historical run, the preparer produced deterministic payloads in the selected output snapshot:
+`check` reports errors for a blocked-by or parent cycle, an open ticket under a closed parent, a ticket without exactly one type label, a parent or blocker outside the map, a map body reference to an issue outside the map, and anything other than one open map. It warns about a closed ticket still blocked by an open one (a stale edge) and, live, about open Wayfinder-labelled issues outside the map. `snapshot` refuses to write a map with errors.
 
-- `issues.json` contains one payload per local issue with its source path and byte hash, metadata, and question/body text. Existing hosted identities use `preserve-existing`; pending identities use `create`. Historical local assignees are provenance and are not sent as hosted assignees.
-- `resolution-comments.json` carries separate comments for closed records, retaining their original headings and text. Open records have no generated resolution comments.
-- `edges.json` records parent and `blocked-by` edges. `ready-to-publish` means both endpoints had verified identities in the selected historical mapping; it does not mean the hosted relationship was read or created. Relationships remained `unverified` without a separate native-edge receipt.
-- `unresolved-references.json` records local issue links without a hosted identity and repository links absent from the historical link revision. Repository links become exact GitHub `blob` or `tree` links only when the referenced Git object exists at that revision; otherwise the payload retains a `local-reference:` link and reason.
-- `input-manifest.json` binds each issue's path, source-byte hash and parsed metadata, plus the preparer hash and historical hosted-mapping hash. Its identity is independent of generated payloads. The snapshot descriptor separately binds the research record; `manifest.json` records the historical link revision, input-snapshot hash, output hashes and counts.
+The snapshot records, per ticket, number, title, state and reason, labels, assignees, parent, blocked-by, URL, `updatedAt` and a SHA-256 of the body; it records the issue numbers the map body references. It is deterministic: the same GitHub state always produces the same bytes. The gate runs `go run ./cmd/wayfinder check --snapshot`, and `go test ./...` runs the command's fixture tests against a fake `gh`; it never contacts GitHub, so a stale snapshot does not fail the gate. GitHub wins over the snapshot.
 
-In the 2026-10-08 mapping, five entries were verified and all other local issues were explicitly pending. The donor's note that a later publication could fill those entries describes that historical state only. Any such publication would require actual identities and a separately reviewed mapping and output snapshot; ordering does not supply an issue number or URL. Labels also retain local type distinctions: `implementation:*` adds `wayfinder:task`, `research:needed` adds `wayfinder:research`, and historical local assignees remain provenance rather than hosted-user assignments.
+## Workflow
 
-For example, the historical `issues/001.md` record was narrowly closed from its owner's recorded reaction to the public prototype; its question, prototype assets and separate resolution record remain. This did not close the backend, lifecycle or cost questions. `issues/formatter.md` remains a historical closed implementation task with its original resolution record represented separately; its receipts are not a performance claim.
-
-## Current captured identities and source baseline (2026-10-09)
-
-The current identity intake is the immutable 2026-10-08 capture `github-wayfinder-current-intake-2026-10-08`: 75 issue rows, 74 canonical identities, with only the closed duplicate #63 excluded as a duplicate of #62. The legitimate issue #5 remains local ID `001`. A separate read-only refresh on 2026-10-09 matched the captured raw response byte-for-byte. The captured issue status and body hashes are hosted observations; local status, assignee, resolution text, and relationship state remain separate.
-
-The mapping [`current-hosted-identities-2026-10-09-source-reconciled.json`](migration/current-hosted-identities-2026-10-09-source-reconciled.json) binds those hosted identities to the current local issue-source hashes. `hostedBodySha256` remains bound to the captured hosted body, while `localSourceSha256` reflects the dated local source. In particular, [`native-execution-lowering.md`](issues/native-execution-lowering.md) and [`numeric-arithmetic.md`](issues/numeric-arithmetic.md) carry local source interpretations pinned to compiler commit `07d861f0296a216b78cd0c9e0a1ba2896a0d06d9`; neither note changes the captured hosted body or claims that the hosted issue was updated. The regenerated output uses the distinct identity `current-wayfinder-map-2026-10-09-source-reconciled`, so the prior `current-wayfinder-map-2026-10-09` outputs remain unchanged. Generated relationship status remains `unverified` until a separate relationship update is included in a new reviewed output.
+1. The orchestrator picks work from `frontier` and assigns the ticket on GitHub.
+2. Implementation lanes do not edit GitHub or the snapshot. A lane's final report carries a "Map update" section: acceptance clauses satisfied with test evidence, what remains, and suggested new or split tickets.
+3. The orchestrator applies the update on GitHub: a progress or resolution comment, body edits when the contract changes, new tickets as sub-issues with blocked-by edges, and closure of satisfied non-HITL tickets.
+4. The orchestrator runs `go run ./cmd/wayfinder check`, then `snapshot`, and commits `docs/wayfinder/snapshot.json` with the work it describes.
 
 ## Research and spike acceptance
 
@@ -50,4 +47,4 @@ For a zero-cost abstraction record, the packet also names semantically equivalen
 
 The native Go baseline is optimized idiomatic Go with the same contract; a native result below that baseline remains unresolved. The JavaScript packet records the pinned Effect-compatible ABI and userland version and every material measured lowering or specialization candidate, including static `match` dispatch and a generated effect runtime when applicable. Machine-written generated code is allowed as an implementation detail but must preserve typed errors, service rows, ownership, cancellation, scopes and completed cleanup. Possible speedups remain ambitions to measure, not current claims or universal multipliers. The packet records cold and warm engine evidence and rejected or losing alternatives.
 
-Durable records include [portable i64 arithmetic](../research/numeric-arithmetic.md), [user-defined JSX pragmas and target-qualified host views](../research/jsx-pragmas-and-runtime-selection.md), [the lawful runtime contract and evidence categories](../research/lawful-runtime-contract.md), and [generalized `run` binding](../research/generalized-run-binding.md) with its [GET-backed hosted reconciliation](hosted-run-reconciliation.json).
+Durable records include [portable i64 arithmetic](../research/numeric-arithmetic.md), [user-defined JSX pragmas and target-qualified host views](../research/jsx-pragmas-and-runtime-selection.md), [the lawful runtime contract and evidence categories](../research/lawful-runtime-contract.md), and [generalized `run` binding](../research/generalized-run-binding.md) (its GET-backed hosted reconciliation is [archived](ARCHIVE.md)).

@@ -1,6 +1,0 @@
-<!-- {"id": "stdlib-owned-core", "title": "Owned acquisition, synchronization and time library", "status": "open", "labels": ["implementation:task"], "parent": "map", "assignee": null, "blocked_by": ["native-interfaces", "generic-data", "effect-recovery", "upstream-conformance", "binary-reachability"]} -->
-# Owned acquisition, synchronization and time library
-
-Implement Owned core in [bundled library capability contracts](../../specs/standard-library-capabilities.md). Start with public acquire/finalization and typed Deferred/Ref through ordinary versioned interfaces; follow with fixed semaphore, bounded concurrency and Duration/clock. The [lawful runtime contract](../../research/lawful-runtime-contract.md) owns P5/P9 boundary and shared law-obligation categories; RS2's public managed wait and private-core reference check are prerequisites where this library uses them.
-
-Gate both-target causal cancellation/cleanup and actual race tests, explicit failure/service rows, mutable-payload ownership admission, two unrelated callers and per-family import/build/binary receipts. No primitive-specific compiler branches, detached producers, or claim that a mutable container cannot retain shorter-lived resources.

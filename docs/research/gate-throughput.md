@@ -22,7 +22,7 @@ Go hashes the listing of every directory a test opens, so either one invalidated
 `scripts/gate.sh` runs `go run ./scripts/gate`, a dependency-graph runner of about 700 lines ([tooling](../tooling.md#merge-gate)). Its rules:
 
 - **Concurrency.** Steps run concurrently up to the CPU count. Output is printed in declaration order, and a failure blocks only its dependents.
-- **Content-addressed receipts for non-Go steps.** A step declares its inputs: repository paths (tracked and untracked files, hashed), tool versions, environment variables, whether the tree is committable, and the submodule's HEAD, status and index flags. A pass is recorded under the hash of those inputs, outside the tree. Failures are never recorded.
+- **Content-addressed receipts for non-Go steps.** A step declares its inputs: repository paths (tracked and untracked files, hashed), tool versions, environment variables, installed dependency trees, and the submodule's HEAD, status and index flags. A pass is recorded under the hash of those inputs, outside the tree. Failures are never recorded.
 - **Go tests own their cache.** Go's test cache keys on the test binary, flags, and the environment and files a test reads. Wrapping it in a coarser cache would be less sound, so the runner never caches Go tests itself. Instead it removes what defeated Go's cache:
   - JavaScript scratch modules now live under the test's temp directory;
   - the pipe corpus walks only source trees;
@@ -50,7 +50,7 @@ Every check the old gate ran still runs. `go run ./scripts/gate --list` prints t
 | Old command | Now |
 | --- | --- |
 | tracked `*.pyc` check | step `no tracked python bytecode` |
-| 5 wayfinder commands | same commands. `wayfinder check` reads only its files and is cached on `scripts/*.py`, `docs/wayfinder/` and `.gitignore`. The other four resolve repository links offline through commits and the trees beneath them; no file digest captures that history, so they run every time. The map-tooling lane owns their replacement. |
+| 5 wayfinder commands | retired with the local tracker ([Wayfinder archive](../wayfinder/ARCHIVE.md)). Step `wayfinder snapshot check` runs `go run ./cmd/wayfinder check --snapshot`, keyed on the snapshot, the command's non-test sources and the Go version; the command's fixture tests run in `go test (other packages)`. The four history-reading migration checks, and the committability input only the hosted-reconciliation test needed, are gone. |
 | `import_effect_conformance.py`, `check_effect_conformance.py` | `go run ./scripts/conformance import`, `go run ./scripts/conformance check`, keyed on the corpus, mapping, verifier and submodule state. Both produce the same output and refusals as the Python. |
 | `test_import_effect_conformance.py`, `test_effect_conformance.py` | `go test ./scripts/conformance`, with every Python case ported, inside `go test (other packages)` |
 | gofmt, `go vet ./...` | same, gofmt also covering `scripts/gate` and `scripts/conformance` |
@@ -77,7 +77,7 @@ Every port was checked in three ways:
 | Scenario | Wall | Notes |
 | --- | ---: | --- |
 | Before, full gate | ~446 s | sequential, load 15–27 |
-| (a) No-op | 21.9 s | load 59→54; every cacheable step cached. The four wayfinder checks that read Git history always run, and the hosted-reconciliation test (21.7 s) is the floor. Before they always ran: 1.3–1.7 s at load 30–36 |
+| (a) No-op | 2.1 s | load 64; every step cached. Retiring the local tracker removed the four wayfinder checks that read Git history and always ran (21.9 s at load 59→54 while they remained; 1.3–1.7 s at load 30–36 before they always ran) |
 | (a′) After a commit that changes no inputs | 3.3 s | VCS stamping relinks `bin/ef`; Go tests all cached |
 | Example edit (`examples/main.ef`) | 25 s | only the 10 shards whose tests read examples rerun |
 | (b) Typical internal/compiler edit | 49 s at load 8→23; 69 s at load 18→50 | every compiler-dependent test reruns; 390–650 CPU-s |

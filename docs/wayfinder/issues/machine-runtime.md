@@ -1,6 +1,0 @@
-<!-- {"id": "machine-runtime", "title": "Machine behavior on the shared owned actor runtime", "status": "open", "labels": ["implementation:task"], "parent": "state-machines", "assignee": null, "blocked_by": ["machine-plan", "actor-runtime", "foundation-testing", "foundation-ownership"]} -->
-# Machine behavior on the shared owned actor runtime
-
-Adapt checked machine plans to the [ordinary actor runtime](actor-runtime.md), retaining machine-only entries/transitions/completion capacity rather than defining every actor as a machine. Bound admission/control delivery, serialize events, reject self-call deadlocks, fence stale entry completions and await cleanup before stable-state/terminal publication. Shared target tests cover the [spec](../../specs/state-machines.md), including exact composite causes, stop waiter interruption and logical time. Full gate/race review required.
-
-Effectful step/completion evaluation runs once in an actor-owned temporary scope. Serialize across suspension; commit only after successful evaluation and cleanup. Stop cancels/waits and prevents a late commit; a cancelled call waiter does not retract admitted work. Test typed failure, explicit recovery, cleanup defects, external writes without implied rollback and no effects during inspection.

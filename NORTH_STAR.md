@@ -142,7 +142,7 @@ Foundation integration update (2026-10-06; `a9da03a`): bounded File/Fiber proven
 
 | Candidate | Why it stays rejected |
 | --- | --- |
-| Kernel or hard real-time execution profile | Outside the owner's revised server scope, 2026-10-05; [Wayfinder map](docs/wayfinder/issues/map.md#out-of-scope). |
+| Kernel or hard real-time execution profile | Outside the owner's revised server scope, 2026-10-05; [Wayfinder map](https://github.com/cevr/effra/issues/1), "Out of scope". |
 | Treat host type declarations as proof of foreign behavior | Breaks **Explicit contracts and clear guardrails**; [interop trust distinction](docs/interop.md#behavior-contracts-without-signature-duplication). |
 | Replace `.ef` with an authoritative graph database | Conflicts with the repository's source-authority rule; borrow focused semantic queries/edits instead ([design](docs/design.md#compiler-backed-mcp-and-semantic-editing)). |
 

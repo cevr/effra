@@ -151,12 +151,12 @@ func TestFailuresAreNeverCached(t *testing.T) {
 	}
 }
 
-func TestCommittabilityAndToolsAreInputs(t *testing.T) {
+func TestToolsAreInputs(t *testing.T) {
 	root := fixture(t)
 	g := &gate{root: root, cacheDir: t.TempDir()}
 	key := func(inputs *Inputs) string {
 		t.Helper()
-		g.files, g.digests, g.clean, g.tools = nil, nil, "", nil
+		g.files, g.digests, g.tools = nil, nil, nil
 		if err := g.loadFiles(); err != nil {
 			t.Fatal(err)
 		}
@@ -165,12 +165,6 @@ func TestCommittabilityAndToolsAreInputs(t *testing.T) {
 			t.Fatal(err)
 		}
 		return k
-	}
-	clean := &Inputs{Paths: []string{"src/"}, Clean: true}
-	before := key(clean)
-	write(t, root, "scratch.txt", "untracked\n")
-	if key(clean) == before {
-		t.Fatal("an untracked file did not change a committability-keyed step")
 	}
 	if key(&Inputs{Paths: []string{"src/"}}) != key(&Inputs{Paths: []string{"src/"}}) {
 		t.Fatal("keys are not deterministic")
@@ -327,14 +321,14 @@ func TestToolDigestCoversInstalledTestDependencies(t *testing.T) {
 	}
 }
 
-func TestEnvironmentInputsSeparateReducedRuns(t *testing.T) {
+func TestEnvironmentInputsAreInputs(t *testing.T) {
 	root := fixture(t)
-	inputs := &Inputs{Paths: []string{"src/"}, Env: []string{"EFFRA_SKIP_ORDINARY_CLONE"}}
-	t.Setenv("EFFRA_SKIP_ORDINARY_CLONE", "1")
-	reduced := keyOf(t, root, inputs)
-	os.Unsetenv("EFFRA_SKIP_ORDINARY_CLONE")
-	if keyOf(t, root, inputs) == reduced {
-		t.Fatal("a run that skipped the ordinary-clone control shares the full run's key")
+	inputs := &Inputs{Paths: []string{"src/"}, Env: []string{"EFFRA_GATE_ENV_INPUT"}}
+	t.Setenv("EFFRA_GATE_ENV_INPUT", "1")
+	set := keyOf(t, root, inputs)
+	os.Unsetenv("EFFRA_GATE_ENV_INPUT")
+	if keyOf(t, root, inputs) == set {
+		t.Fatal("a declared environment variable did not join the key")
 	}
 }
 
@@ -372,32 +366,27 @@ func TestHistoryReadingStepsNeverReplay(t *testing.T) {
 	}
 }
 
-// Every wayfinder check whose script reaches Git, directly or through the
-// migration module, must be a history reader and so always run.
-func TestWayfinderChecksThatReadHistoryAlwaysRun(t *testing.T) {
-	repository := filepath.Join("..", "..")
-	readsGit := regexp.MustCompile(`\["git"|\bwayfinder_migration\b`)
-	steps := wayfinderSteps()
-	if len(steps) != len(pythonChecks) {
-		t.Fatalf("%d wayfinder steps for %d checks", len(steps), len(pythonChecks))
+func TestWayfinderSnapshotCheckKeysOnTheSnapshotSourcesAndGo(t *testing.T) {
+	inputs := wayfinderSnapshotInputs()
+	for name, want := range map[string]bool{
+		"docs/wayfinder/snapshot.json": true, "cmd/wayfinder/model.go": true, "go.mod": true,
+		"cmd/wayfinder/main_test.go": false, "docs/wayfinder/README.md": false,
+	} {
+		if selected(name, inputs) != want {
+			t.Errorf("selected(%s) = %t, want %t", name, !want, want)
+		}
 	}
-	for index, check := range pythonChecks {
-		history := false
-		for _, argument := range check.argv {
-			if !strings.HasSuffix(argument, ".py") {
-				continue
-			}
-			source, err := os.ReadFile(filepath.Join(repository, filepath.FromSlash(argument)))
-			if err != nil {
-				t.Fatal(err)
-			}
-			history = history || readsGit.Match(source)
-		}
-		if history != check.readsHistory {
-			t.Errorf("%s: script reaches Git = %t, readsHistory = %t", check.name, history, check.readsHistory)
-		}
-		if cached := steps[index].Inputs != nil; cached == check.readsHistory {
-			t.Errorf("%s: cached = %t, readsHistory = %t", check.name, cached, check.readsHistory)
-		}
+	root := fixture(t)
+	write(t, root, "docs/wayfinder/snapshot.json", "{}\n")
+	write(t, root, "cmd/wayfinder/main.go", "package main\n")
+	withoutGo := *inputs
+	withoutGo.Tools = nil
+	if keyOf(t, root, inputs) == keyOf(t, root, &withoutGo) {
+		t.Fatal("the Go version did not join the key")
+	}
+	before := keyOf(t, root, inputs)
+	write(t, root, "docs/wayfinder/snapshot.json", "{\"changed\": true}\n")
+	if keyOf(t, root, inputs) == before {
+		t.Fatal("a snapshot edit replayed the recorded pass")
 	}
 }

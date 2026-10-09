@@ -469,7 +469,7 @@ Native builds lower checked source into typed Go closures and run `go build`. Th
 - [North star](NORTH_STAR.md), [prior art](PRIOR_ARTS.md) (Effect, Go, Gleam, ReScript, Elixir, Borgo, Bend and others) and [glossary](GLOSSARY.md)
 - [Upstream conformance](docs/conformance.md): pinned Effect behavior mapped to Go/JS acceptance tests
 
-Open design questions are tracked in the [Wayfinder map](docs/wayfinder/issues/map.md) (`python3 scripts/wayfinder.py frontier`).
+Open design questions are tracked in the [Wayfinder map](https://github.com/cevr/effra/issues/1) on GitHub (`go run ./cmd/wayfinder frontier`; see [docs/wayfinder](docs/wayfinder/README.md)).
 
 ## Development
 

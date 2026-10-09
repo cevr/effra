@@ -1,8 +1,0 @@
-{
-  "method": "GET",
-  "endpoint": "repos/cevr/effra/issues/1/sub_issues?per_page=100",
-  "exit": 0,
-  "sourceCommit": "4627f414414cc964840b53894b7161482687de69",
-  "sourceTree": "ff2e8954a6063772b5fcd7dee9abc9929b58613c",
-  "responseSha256": "135dfd643024b553d082f182d4ff8574080ad7411944c1db54a7f87dec25f64d"
-}

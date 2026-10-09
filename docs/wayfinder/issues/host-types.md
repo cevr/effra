@@ -1,4 +1,0 @@
-<!-- {"id": "host-types", "title": "Canonical Go host types and complete return tuples", "status": "open", "labels": ["implementation:task"], "parent": "host-interop", "assignee": null, "blocked_by": ["native-interfaces", "generic-data"]} -->
-# Canonical Go host types and complete return tuples
-
-Unit 1 of the [Go protocol contract](../../specs/go-protocol-interop.md): reachable imported type/declaration identity, native scalars and explicit absence adaptation, complete results, lazy Foreign calls and shared inspection. The [absence contract](../../specs/absence-and-host-boundaries.md) prohibits nil/null language values; nullable host values use admitted closed alternatives. Prove typed-nil/error identity and partial returns through public source without `err != nil`; unsupported generics and widths diagnose. Generic data is a real dependency for reusable Option, not a host-only unchecked nullable type. Full gate and independent review required.

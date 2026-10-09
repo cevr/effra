@@ -66,9 +66,6 @@ type Inputs struct {
 	Tools []string
 	// Env names environment variables whose values are inputs.
 	Env []string
-	// Clean makes the tree's committability an input: whether it has
-	// unstaged changes to tracked files or untracked, non-ignored files.
-	Clean bool
 	// Submodule makes a submodule's checked-out commit and status an input.
 	Submodule string
 	// Installed names directories outside Git's view, such as an installed
@@ -112,7 +109,6 @@ type gate struct {
 	digests  map[string]string
 	tools    map[string]string
 	toolsMu  sync.Mutex
-	clean    string
 	modules  map[string]string
 	factsMu  sync.Mutex
 
@@ -457,13 +453,6 @@ func (g *gate) key(step *Step) (string, error) {
 		value, set := os.LookupEnv(name)
 		fmt.Fprintf(hash, "env\x00%s\x00%t\x00%s\x00", name, set, value)
 	}
-	if inputs.Clean {
-		state, err := g.committable()
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(hash, "clean\x00%s\x00", state)
-	}
 	if inputs.Submodule != "" {
 		state, err := g.submoduleState(inputs.Submodule)
 		if err != nil {
@@ -639,26 +628,6 @@ func (g *gate) toolVersion(tool string) string {
 	}
 	g.tools[tool] = version
 	return version
-}
-
-// committable reports whether the tree has no unstaged changes to tracked
-// files and no untracked, non-ignored files.
-func (g *gate) committable() (string, error) {
-	g.factsMu.Lock()
-	defer g.factsMu.Unlock()
-	if g.clean != "" {
-		return g.clean, nil
-	}
-	unstaged, err := g.git("diff", "--name-only", "-z")
-	if err != nil {
-		return "", err
-	}
-	untracked, err := g.git("ls-files", "-z", "--others", "--exclude-standard")
-	if err != nil {
-		return "", err
-	}
-	g.clean = fmt.Sprintf("unstaged=%t untracked=%t", len(unstaged) > 0, len(untracked) > 0)
-	return g.clean, nil
 }
 
 func (g *gate) submoduleState(dir string) (string, error) {

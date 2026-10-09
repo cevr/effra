@@ -1,4 +1,0 @@
-<!-- {"id": "layer-tooling", "title": "Layer graph tooling and declarative adoption examples", "status": "open", "labels": ["implementation:task"], "parent": "language-layers", "assignee": null, "blocked_by": ["layer-instances"]} -->
-# Layer graph tooling and declarative adoption examples
-
-Unit5 of [layers](../../specs/layers.md): source/revision-grounded CLI/MCP/LSP facts, inferred/declared contracts, public/hidden/startup nodes, sharing/application/replacement provenance, incoming dependents, construction paths, planned/proved ownership and child-failure observation policy. Actual invalid edit/request followed by valid query/ping must keep tooling alive. Runnable before/after callers, formatter round trips, all finite runtime negatives, selected hidden effects and unused declaration/module controls precede full gate and review. Size/build/server measurements remain in the final measurement phase.
