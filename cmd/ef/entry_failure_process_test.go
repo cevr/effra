@@ -220,6 +220,10 @@ func TestEntryFailureReportForHTTPListenFailures(t *testing.T) {
 		{held.Addr().String(), "address in use"},
 		{"192.0.2.1:0", "address not available"},
 		{"nosuchhost.invalid:0", "host lookup failed"},
+		// Neither an empty zone nor a zone on dotted IPv4 is a numeric
+		// address (Go's netip.ParseAddr), so both are looked up as names.
+		{"[::1%]:0", "host lookup failed"},
+		{"127.0.0.1%0:0", "host lookup failed"},
 	} {
 		file := filepath.Join(root, "listen"+string(rune('a'+index))+".ef")
 		if err := os.WriteFile(file, []byte(httpListenSource(test.address)), 0600); err != nil {

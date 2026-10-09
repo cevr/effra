@@ -91,42 +91,58 @@ const __ef_http_address = address => {
   if (!/^[0-9]{1,5}$/.test(port) || Number(port) > 65535) return invalid('port must be a decimal number from 0 to 65535');
   return { host: host === '' ? undefined : host, port: Number(port) };
 };
-// __ef_http_ipv4 is the dotted IPv4 form of a numeric host that Go's
+// __ef_http_parse_addr mirrors Go's netip.ParseAddr, the one place a listen
+// host or a lookup answer is read as a numeric address: the zone is split
+// off first, the address part is classified, and the zone is valid only when
+// non-empty and on an IPv6 address. The result is { family, address, zone },
+// or undefined for anything that is not a numeric address.
+const __ef_http_parse_addr = (isIP, text) => {
+  if (typeof text !== 'string') return undefined;
+  const percent = text.indexOf('%');
+  const address = percent < 0 ? text : text.slice(0, percent);
+  const zone = percent < 0 ? '' : text.slice(percent + 1);
+  const family = isIP(address);
+  if (family === 0) return undefined;
+  if (percent >= 0 && (family !== 6 || zone === '')) return undefined;
+  return { family, address, zone };
+};
+// __ef_http_ipv4 is the dotted IPv4 form of a parsed address that Go's
 // IP.To4 accepts: an IPv4 address or an IPv4-mapped IPv6 address
-// (::ffff:a.b.c.d), classified without its zone. Go listens on the 4-byte
-// form of such an address and ignores the zone for the IPv4 socket, so a
-// mapped address binds its IPv4 address here too. Anything else, including
-// a genuine IPv6 address, is undefined and keeps its zone.
-const __ef_http_ipv4 = (isIP, host) => {
-  if (isIP(host) === 4) return host;
-  const zone = host.indexOf('%');
-  const bare = zone < 0 ? host : host.slice(0, zone);
-  if (isIP(bare) !== 6) return undefined;
+// (::ffff:a.b.c.d). Go listens on the 4-byte form of such an address and
+// ignores the zone for the IPv4 socket. Anything else is undefined.
+const __ef_http_ipv4 = parsed => {
+  if (parsed.family === 4) return parsed.address;
   let canonical;
-  try { canonical = new URL('http://[' + bare + ']/').hostname; } catch { return undefined; }
+  try { canonical = new URL('http://[' + parsed.address + ']/').hostname; } catch { return undefined; }
   const mapped = /^\[::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/.exec(canonical);
   if (mapped === null) return undefined;
   const high = parseInt(mapped[1], 16), low = parseInt(mapped[2], 16);
   return [high >> 8, high & 255, low >> 8, low & 255].join('.');
 };
+// __ef_http_bind_host is the host a parsed address binds: its IPv4 form when
+// it has one, else the IPv6 address with its zone.
+const __ef_http_bind_host = parsed => __ef_http_ipv4(parsed) ?? (parsed.zone === '' ? parsed.address : parsed.address + '%' + parsed.zone);
 // __ef_http_select is the host a listener binds for a name's answers, as Go's
 // net.Listen binds: the first answer IP.To4 accepts, in its IPv4 form, else
 // the first numeric answer. Undefined when no answer is numeric.
 const __ef_http_select = (isIP, answers) => {
-  const numeric = answers.map(answer => answer?.address).filter(candidate => typeof candidate === 'string' && isIP(candidate) !== 0);
-  return numeric.map(candidate => __ef_http_ipv4(isIP, candidate)).find(candidate => candidate !== undefined) ?? numeric[0];
+  const numeric = answers.map(answer => __ef_http_parse_addr(isIP, answer?.address)).filter(parsed => parsed !== undefined);
+  const selected = numeric.find(parsed => __ef_http_ipv4(parsed) !== undefined) ?? numeric[0];
+  return selected === undefined ? undefined : __ef_http_bind_host(selected);
 };
-// __ef_http_listen_target is the listen host and port. A name is looked up
-// exactly once, here, and the listener binds the selected numeric answer, so
-// listen() never resolves again and binds what the lookup returned. Any
-// lookup failure, or no answer, is `host lookup failed`, because hosts report
-// it differently (Node: getaddrinfo ENOTFOUND; Bun: listen ENOENT or EAGAIN).
+// __ef_http_listen_target is the listen host and port. A numeric host binds
+// directly. A name is looked up exactly once, here, and the listener binds
+// the selected numeric answer, so listen() never resolves again and binds
+// what the lookup returned. Any lookup failure, or no numeric answer, is
+// `host lookup failed`, because hosts report it differently (Node:
+// getaddrinfo ENOTFOUND; Bun: listen ENOENT or EAGAIN).
 const __ef_http_listen_target = (address, isIP, lookup) => Effect.gen(function* () {
   const parsed = __ef_http_address(address);
   if (parsed.error !== undefined) return yield* Effect.fail({ _tag: 'IoError', message: parsed.error });
   const { host, port } = parsed;
   if (host === undefined) return { host, port };
-  if (isIP(host) !== 0) return { host: __ef_http_ipv4(isIP, host) ?? host, port };
+  const literal = __ef_http_parse_addr(isIP, host);
+  if (literal !== undefined) return { host: __ef_http_bind_host(literal), port };
   const answers = yield* Effect.promise(() => Promise.resolve().then(() => lookup(host, { all: true })).then(found => Array.isArray(found) ? found : [], () => []));
   const selected = __ef_http_select(isIP, answers);
   if (selected === undefined) return yield* Effect.fail({ _tag: 'IoError', message: 'HTTP listen on ' + __ef_quoteText(address) + ': host lookup failed' });

@@ -24,6 +24,8 @@ const answers = {
   'mapped.example': [{ address: '::1', family: 6 }, { address: '::ffff:127.0.0.3', family: 6 }],
   'mapped-first.example': [{ address: '::ffff:127.0.0.4', family: 6 }, { address: '127.0.0.5', family: 4 }],
   'zoned.example': [{ address: 'fe80::1%lo', family: 6 }, { address: '::ffff:7f00:7%0', family: 6 }],
+  'zone-name.example': [{ address: '::1', family: 6 }, { address: '::ffff:7f00:8%lo_0', family: 6 }],
+  'bad-zones.example': [{ address: '127.0.0.1%0', family: 4 }, { address: '::1%', family: 6 }],
   'empty.example': [],
 };
 const calls = globalThis.__dnsCalls = [];
@@ -81,8 +83,17 @@ var httpListenCases = []httpListenCase{
 	// A zoned mapped answer is IPv4 without its zone; the zoned link-local
 	// answer before it is genuine IPv6 and not preferred.
 	{"zoned.example:0", "127.0.0.7", `["zoned.example all"]`, "127.0.0.7"},
+	// A zone is any non-empty text, as Go's netip.ParseAddr reads it; hosts
+	// that cannot parse it as part of an address must not see it whole.
+	{"zone-name.example:0", "127.0.0.8", `["zone-name.example all"]`, "127.0.0.8"},
+	// An empty zone or a zone on dotted IPv4 is not a numeric address, so
+	// such answers are discarded and such literals are looked up as names.
+	{"bad-zones.example:0", `HTTP listen on "bad-zones.example:0": host lookup failed`, `["bad-zones.example all"]`, ""},
 	{"[::ffff:127.0.0.6]:0", "127.0.0.6", `[]`, "127.0.0.6"},
 	{"[::ffff:7f00:2%0]:0", "127.0.0.2", `[]`, "127.0.0.2"},
+	{"[::ffff:7f00:2%lo_0]:0", "127.0.0.2", `[]`, "127.0.0.2"},
+	{"[::1%]:0", `HTTP listen on "[::1%]:0": host lookup failed`, `["::1% all"]`, ""},
+	{"127.0.0.1%0:0", `HTTP listen on "127.0.0.1%0:0": host lookup failed`, `["127.0.0.1%0 all"]`, ""},
 	// A genuine IPv6 literal keeps its zone. Selection only: no interface on
 	// a test host is guaranteed to own fe80::1.
 	{"[fe80::1%lo]:0", "fe80::1%lo", `[]`, ""},
