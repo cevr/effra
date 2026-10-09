@@ -1,0 +1,20 @@
+error Boom { code: i64 }
+effect fn job() -> string raises { Boom } {
+    fail Boom { code: 7 }
+}
+effect fn stage() -> string raises { Boom } uses { Scheduler } {
+    let g = fork job()
+    run Scheduler.sleep(30)
+    "x"
+}
+effect fn apply(cb: effect fn() -> string raises { Boom } uses { Scheduler }) -> string uses { Scheduler } {
+    run cb().catch<Boom>("b")
+}
+effect fn consume() -> string uses { Scheduler } {
+    scope {
+        run apply(stage)
+    }
+}
+effect fn main() -> void {
+    run Console.log(run consume().provide<Scheduler>(LiveScheduler)).provide<Console>(Stdout)
+}

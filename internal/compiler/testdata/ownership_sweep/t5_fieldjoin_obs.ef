@@ -1,0 +1,18 @@
+error Boom
+record Holder { task: Effect<string, {Boom}, {Scheduler}> }
+effect fn work() -> string raises {Boom} { fail Boom }
+effect fn ordinary() -> string uses {Scheduler} {
+    "ordinary"
+}
+effect fn stage(m: i64) -> string raises {Boom} uses {Scheduler} {
+    let g = fork work()
+    run Scheduler.sleep(30)
+    let h = if m == 1 { Holder { task: g.join() } } else { Holder { task: ordinary() } }
+    run h.task
+}
+effect fn consume(m: i64) -> string uses {Scheduler} {
+    scope { run stage(m).catch<Boom>("b") }
+}
+effect fn main() -> void {
+    run Console.log(run consume(2).provide<Scheduler>(LiveScheduler)).provide<Console>(Stdout)
+}

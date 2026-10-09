@@ -1,0 +1,18 @@
+error Boom { code: i64 }
+error Nope { code: i64 }
+effect fn job() -> string raises { Boom } {
+    fail Boom { code: 7 }
+}
+effect fn child() -> string raises { Nope, Boom } uses { Scheduler } {
+    let g = fork job()
+    run Scheduler.sleep(30)
+    fail Nope { code: 1 }
+}
+effect fn consume() -> string raises { Boom } uses { Scheduler } {
+    let f = fork child()
+    run f.join().catch<Nope>("n")
+}
+effect fn main() -> void raises { Boom } {
+    let r = run consume().provide<Scheduler>(LiveScheduler)
+    run Console.log(r).provide<Console>(Stdout)
+}

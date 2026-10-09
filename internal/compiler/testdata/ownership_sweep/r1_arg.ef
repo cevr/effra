@@ -1,0 +1,7 @@
+error A
+effect fn task() -> string raises {A} { fail A }
+effect fn stage() -> string raises {A} uses { Scheduler } { let f = fork task()
+ run Scheduler.sleep(30)
+ "done" }
+effect fn handle(r: Effect<string, {A}, {Scheduler}>) -> string uses { Scheduler } { run r.catch<A>("h") }
+effect fn main() -> void { run Console.log(run handle(stage()).provide<Scheduler>(LiveScheduler)).provide<Console>(Stdout) }

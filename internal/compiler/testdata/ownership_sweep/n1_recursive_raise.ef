@@ -1,0 +1,8 @@
+error Boom { code: i64 }
+effect fn step(n: i64) -> string raises { Boom } {
+    if n == 2 { fail Boom { code: 1 } } else { run step(2) }
+}
+effect fn main() -> void {
+    let r = run step(0).catch<Boom>("b")
+    run Console.log(r).provide<Console>(Stdout)
+}

@@ -1,0 +1,25 @@
+error WithFile { file: File }
+record Holder { task: Effect<string, {WithFile}> }
+
+effect fn rejected(file: File) -> string raises {WithFile} {
+    fail WithFile { file: file }
+}
+effect fn open() -> File raises {IoError} {
+    run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+}
+effect fn retrieve(failure: WithFile) -> string raises {IoError} {
+    run Files.readText(failure.file).provide<Files>(LiveFiles)
+}
+effect fn make(flag: bool, outer: File) -> Holder raises {IoError} {
+    scope {
+        let inner = run open()
+        Holder { task: rejected(inner) }
+    }
+}
+effect fn main() -> void raises {IoError} {
+    let outer = run open()
+    let h = run make(false, outer)
+    run Console.log(
+        run h.task.recover<WithFile>(retrieve).catch<IoError>("closed")
+    ).provide<Console>(Stdout)
+}

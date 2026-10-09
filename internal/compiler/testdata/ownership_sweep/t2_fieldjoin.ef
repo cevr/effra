@@ -1,0 +1,22 @@
+error Boom
+record Holder { task: Effect<string, {Boom}, {Scheduler}> }
+
+effect fn work() -> string raises {Boom} { fail Boom }
+effect fn ordinary() -> string raises {Boom} uses {Scheduler} {
+    "ordinary"
+}
+effect fn stage() -> string raises {Boom} uses {Scheduler} {
+    let g = fork work()
+    run Scheduler.sleep(30)
+    "done"
+}
+effect fn main() -> void {
+    let h = if false {
+        Holder { task: ordinary() }
+    } else {
+        Holder { task: stage() }
+    }
+    run Console.log(
+        run h.task.catch<Boom>("handled").provide<Scheduler>(LiveScheduler)
+    ).provide<Console>(Stdout)
+}

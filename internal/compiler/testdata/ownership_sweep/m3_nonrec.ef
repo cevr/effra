@@ -1,0 +1,19 @@
+error Boom { code: i64 }
+effect fn job() -> string raises { Boom } {
+    fail Boom { code: 7 }
+}
+effect fn leaf() -> string uses { Scheduler } {
+    let g = fork job()
+    run g.join().catch<Boom>("leaf")
+}
+effect fn rec(n: i64) -> string raises { Boom } uses { Scheduler } {
+    let g = fork job()
+    let inner = if n == 2 { "base" } else { run leaf() }
+    run g.join().catch<Boom>(inner)
+}
+effect fn consume() -> string uses { Scheduler } {
+    scope { run rec(0).catch<Boom>("b") }
+}
+effect fn main() -> void {
+    run Console.log(run consume().provide<Scheduler>(LiveScheduler)).provide<Console>(Stdout)
+}

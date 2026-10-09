@@ -1,0 +1,11 @@
+error Boom { code: i64 }
+effect fn job() -> string raises { Boom } {
+    fail Boom { code: 7 }
+}
+effect fn work() -> void raises { Boom } uses { Scheduler } {
+    let g = fork job()
+    run Scheduler.sleep(30)
+}
+effect fn main() -> void raises { Boom } {
+    run work().provide<Scheduler>(LiveScheduler)
+}

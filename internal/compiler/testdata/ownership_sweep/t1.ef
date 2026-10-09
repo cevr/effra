@@ -1,0 +1,11 @@
+error Boom { code: i64 }
+effect fn job() -> string raises { Boom } {
+    fail Boom { code: 7 }
+}
+effect fn main() -> void raises { Boom } uses { Scheduler } {
+    scope {
+        let fiber = fork job()
+        run Scheduler.sleep(50)
+        run Console.log("x").provide<Console>(Stdout)
+    }
+}

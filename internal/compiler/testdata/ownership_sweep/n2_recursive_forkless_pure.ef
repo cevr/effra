@@ -1,0 +1,9 @@
+error Boom { code: i64 }
+effect fn step(n: i64) -> string raises { Boom } uses { Scheduler } {
+    run Scheduler.sleep(1)
+    if n == 2 { "done" } else { run step(2) }
+}
+effect fn main() -> void {
+    let r = run step(0).catch<Boom>("b").provide<Scheduler>(LiveScheduler)
+    run Console.log(r).provide<Console>(Stdout)
+}

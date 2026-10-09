@@ -1,0 +1,40 @@
+effect fn readFile(file: File) -> string raises { IoError } {
+    run Files.readText(file).provide<Files>(LiveFiles)
+}
+effect fn mk() -> Effect<File, { IoError }> {
+    Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+}
+effect fn mk2() -> Effect<Effect<File, { IoError }>> {
+    mk()
+}
+effect fn bad() -> string raises { IoError } {
+    let inner = run mk()
+    let f = scope { run inner }
+    run readFile(f)
+}
+effect fn good() -> string raises { IoError } {
+    let inner = run mk()
+    let f = run inner
+    run readFile(f)
+}
+effect fn bad2() -> string raises { IoError } {
+    let outer = run mk2()
+    let inner = scope { run outer }
+    let f = run inner
+    run readFile(f)
+}
+effect fn good2() -> string raises { IoError } {
+    let outer = run mk2()
+    let inner = run outer
+    let f = run inner
+    run readFile(f)
+}
+effect fn bad3() -> string raises { IoError } {
+    let outer = run mk2()
+    let inner = run outer
+    let f = scope { run inner }
+    run readFile(f)
+}
+effect fn main() -> void raises { IoError } {
+    run Console.log(run good()).provide<Console>(Stdout)
+}
