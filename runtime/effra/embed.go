@@ -110,6 +110,17 @@ func Sources() map[string][]byte {
 	return out
 }
 
+// Modules lists every catalog module in identity order: the runtime the
+// compiler distributes, not what any application selects.
+func Modules() []RuntimeModule {
+	modules := make([]RuntimeModule, 0, len(runtimeModuleCatalog))
+	for module := range runtimeModuleCatalog {
+		modules = append(modules, module)
+	}
+	sort.Slice(modules, func(i, j int) bool { return modules[i] < modules[j] })
+	return modules
+}
+
 // SelectModules closes roots over the catalog's declared dependencies and
 // returns the selected modules in identity order. The catalog is the only
 // dependency authority: callers name roots, never a module's dependencies.

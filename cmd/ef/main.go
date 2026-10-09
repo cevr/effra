@@ -223,6 +223,7 @@ type options struct {
 	json           bool
 	timeoutMillis  int
 	live           bool
+	receipt        string
 	positional     []string
 	typeSelection  compiler.TypeSelection
 	lint           lintpacks.Selection
@@ -239,7 +240,7 @@ func parseOptions(args []string) (options, error) {
 	}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--target", "-o", "--timeout-ms", "--symbol", "--offset", "--definition", "--revision":
+		case "--target", "-o", "--receipt", "--timeout-ms", "--symbol", "--offset", "--definition", "--revision":
 			if i+1 == len(args) {
 				return opts, fmt.Errorf("%s requires a value", args[i])
 			}
@@ -253,6 +254,8 @@ func parseOptions(args []string) (options, error) {
 				opts.typeSelection.Definition = args[i]
 			} else if flag == "--revision" {
 				opts.typeSelection.ExpectedRevision = args[i]
+			} else if flag == "--receipt" {
+				opts.receipt = args[i]
 			} else if flag == "--offset" {
 				n, err := strconv.Atoi(args[i])
 				if err != nil || n < 0 {
@@ -317,7 +320,7 @@ func parseOptions(args []string) (options, error) {
 }
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] [LINT] | lint FILE [--strict] [--target go|js] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | lint receipt FILE [--runs N] [--target go|js] [LINT] | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] [GRAPH VIEW OPTIONS] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go|js] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] [LINT] | lint FILE [--strict] [--target go|js] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | lint receipt FILE [--runs N] [--target go|js] [LINT] | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] [GRAPH VIEW OPTIONS] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] [--receipt PATH] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go|js] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
 		fmt.Println("type: ef type FILE (--symbol NAME | --offset BYTE | --definition TYPE_ID --revision REVISION) [--target go|js] [--json]")
 		fmt.Println(graphUsage())
 		return nil
@@ -445,6 +448,9 @@ func command(args []string) error {
 	}
 	if opts.output != "" && args[0] != "build" {
 		return usage(fmt.Errorf("-o is only supported by build"))
+	}
+	if opts.receipt != "" && args[0] != "build" {
+		return usage(fmt.Errorf("--receipt is only supported by build"))
 	}
 	if opts.entry && (args[0] != "build" || opts.target != "js") {
 		return usage(fmt.Errorf("--entry is only needed for JavaScript builds"))
@@ -606,10 +612,11 @@ func command(args []string) error {
 		return runTests(r, opts.positional[0], sourceOrigin, opts.timeoutMillis)
 	case "build", "run":
 		var path string
+		var receipt *ApplicationReceipt
 		if opts.target == "go" {
-			path, err = buildGo(r, opts.positional[0], sourceOrigin, opts.output)
+			path, receipt, err = buildGo(r, opts.positional[0], sourceOrigin, opts.output, opts.receipt != "")
 		} else {
-			path, err = buildJS(r, opts.positional[0], opts.output, opts.entry || args[0] == "run")
+			path, receipt, err = buildJS(r, opts.positional[0], opts.output, opts.entry || args[0] == "run", opts.receipt != "")
 		}
 		if err != nil {
 			if !r.Checked {
@@ -618,6 +625,11 @@ func command(args []string) error {
 			return err
 		}
 		if args[0] == "build" {
+			if receipt != nil {
+				if err := writeReceipt(opts.receipt, receipt); err != nil {
+					return err
+				}
+			}
 			fmt.Println(path)
 			return nil
 		}
@@ -669,12 +681,23 @@ func printDiagnosticText(report compiler.DiagnosticReport, source string) {
 func sourceBase(source string) string {
 	return strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
 }
-func buildGo(r *compiler.Result, source, origin, output string) (string, error) {
+
+// buildGo builds the ordinary native application. With measure, it also
+// returns the application receipt of the published generation and executable.
+func buildGo(r *compiler.Result, source, origin, output string, measure bool) (string, *ApplicationReceipt, error) {
 	application, err := goApplication(r, compiler.GoGenerationBuild)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return buildGoApplication(r, source, origin, output, application)
+	path, generation, err := buildGoApplication(r, source, origin, output, application)
+	if err != nil || !measure {
+		return path, nil, err
+	}
+	receipt, err := goReceipt(r, source, application, generation, path)
+	if err != nil {
+		return "", nil, fmt.Errorf("receipt: %w", err)
+	}
+	return path, receipt, nil
 }
 
 // goApplication plans and lowers one native entry mode. A plan refusal is a
@@ -688,33 +711,33 @@ func goApplication(r *compiler.Result, mode compiler.GoGenerationMode) (*compile
 	return application, err
 }
 
-func buildGoApplication(r *compiler.Result, source, origin, output string, application *compiler.GoApplication) (string, error) {
+func buildGoApplication(r *compiler.Result, source, origin, output string, application *compiler.GoApplication) (string, compiler.GoGeneration, error) {
 	snapshot, err := r.GoSourceSnapshot(origin, application)
 	if err != nil {
-		return "", err
+		return "", compiler.GoGeneration{}, err
 	}
 	generation, err := compiler.PublishGoSourceSnapshot(filepath.Join("dist", "go", "apps"), snapshot)
 	if err != nil {
-		return "", err
+		return "", compiler.GoGeneration{}, err
 	}
 	if output == "" {
 		output = filepath.Join("dist", sourceBase(source))
 	}
 	absolute, err := filepath.Abs(output)
 	if err != nil {
-		return "", err
+		return "", compiler.GoGeneration{}, err
 	}
 	if err = os.MkdirAll(filepath.Dir(absolute), 0755); err != nil {
-		return "", err
+		return "", compiler.GoGeneration{}, err
 	}
 	// Imported packages use the resolved module graph; the executable is standalone.
 	child := nativeGoBuildCommand(generation.Directory, absolute)
 	child.Stdout = os.Stderr
 	child.Stderr = os.Stderr
 	if err = child.Run(); err != nil {
-		return "", fmt.Errorf("Go build failed: %w", err)
+		return "", compiler.GoGeneration{}, fmt.Errorf("Go build failed: %w", err)
 	}
-	return output, nil
+	return output, generation, nil
 }
 
 func nativeGoBuildCommand(directory, output string) *exec.Cmd {
@@ -723,28 +746,42 @@ func nativeGoBuildCommand(directory, output string) *exec.Cmd {
 	child.Env = replaceEnv(os.Environ(), "GOWORK", "off")
 	return child
 }
-func buildJS(r *compiler.Result, source, output string, entry bool) (string, error) {
+
+// buildJS writes the JavaScript module and its declarations. With measure, it
+// also returns the application receipt of the written module.
+func buildJS(r *compiler.Result, source, output string, entry, measure bool) (string, *ApplicationReceipt, error) {
 	js, decl, err := r.Emit(entry)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if output == "" {
 		output = filepath.Join("dist", sourceBase(source)+".mjs")
 	}
 	if filepath.Ext(output) != ".mjs" {
-		return "", fmt.Errorf("JavaScript output must have .mjs extension")
+		return "", nil, fmt.Errorf("JavaScript output must have .mjs extension")
 	}
 	if err = os.MkdirAll(filepath.Dir(output), 0755); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err = writeChanged(output, []byte(js)); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	declaration := strings.TrimSuffix(output, ".mjs") + ".d.mts"
 	if err = writeChanged(declaration, []byte(decl)); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return output, nil
+	if !measure {
+		return output, nil, nil
+	}
+	mode := "library"
+	if entry {
+		mode = "entry"
+	}
+	receipt, err := jsReceipt(r, source, mode, output, declaration)
+	if err != nil {
+		return "", nil, fmt.Errorf("receipt: %w", err)
+	}
+	return output, receipt, nil
 }
 func writeChanged(path string, content []byte) error {
 	old, err := os.ReadFile(path)
@@ -784,7 +821,7 @@ func runTests(r *compiler.Result, source, origin string, timeoutMillis int) erro
 		if err != nil {
 			return err
 		}
-		path, err = buildGoApplication(r, source, origin, filepath.Join("dist", sourceBase(source)+".tests"), application)
+		path, _, err = buildGoApplication(r, source, origin, filepath.Join("dist", sourceBase(source)+".tests"), application)
 		if err != nil {
 			return err
 		}
