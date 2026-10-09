@@ -107,7 +107,11 @@ Every admitted directive gets one `SuppressionStatus` (`rule`, `status`, `reason
 - `applied`: the directive removed at least one finding of its rule whose primary range starts on the covered line. The rule can be built-in or a pack rule. Suppressed findings are removed before counting and policy.
 - `unused`: the rule completed with no such finding. This is also an `EFL004` error, as before.
 - `not-evaluated` with a reason:
-  - `unchecked-source`: no rule runs. This applies to built-in directives too: unchecked source no longer reports them unused. Directives come from the comments the lexer collected, not from the tree, so source with a syntax fault (`EF001`, `EF002`) keeps them, before or after the fault, as `unchecked-source` with no parser recovery and no rule evaluated. A malformed or unknown name still diagnoses there.
+  - `unchecked-source`: no rule runs. This applies to built-in directives too: unchecked source no longer reports them unused. Directives come from the comments the lexer collected, not from the tree, so source that does not parse keeps the directives that were lexed, each `unchecked-source`, with no parser recovery and no rule evaluated. A malformed or unknown name among them still diagnoses. Which comments are kept depends on where the source stops:
+    - A parser fault (`EF002`) keeps every lexed comment, before or after the fault.
+    - A lexical fault (`EF001`) keeps only the comments collected before it: `@` on line 1 is `EF001` with an empty suppression list.
+    - Invalid UTF-8, rejected before lexing, collects none.
+    - An unsupported target (`EF110`) returns before lexing, so its directives get no status.
   - `pack-not-selected`
   - `rule-off`: the rule is configured off. This applies to built-in rules too; they used to be silently dropped.
   - `pack-failed`: the rule was requested and the pack failed, the rule failed, or the pack has no report. The rule's own status decides first: an off or admission-skipped rule keeps `rule-off`, `facts-unavailable` or `target-unsupported` when another rule of the same pack makes the pack fail.
