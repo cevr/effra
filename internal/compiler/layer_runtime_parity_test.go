@@ -306,6 +306,12 @@ func TestLayerMalformedPlansDefectBeforeCallbacksAcrossTargets(t *testing.T) {
 		"dependencyCycle":      "dependency cycle",
 		"startupKindAccepted":  "ok",
 		"utf8WithinMetadataOK": "ok",
+		// Lone surrogates have no UTF-8 encoding; Go spells the same code
+		// point's would-be bytes, which utf8.ValidString also refuses.
+		"malformedPlanIdentity":       "identity is not well-formed Unicode",
+		"loneLowSurrogateIdentity":    "identity is not well-formed Unicode",
+		"loneHighSurrogateDependency": "identity is not well-formed Unicode",
+		"astralIdentitiesAccepted":    "ok",
 	}
 	want := map[string]string{}
 	for name, message := range cases {
@@ -348,6 +354,10 @@ func TestLayerParityProbe(t *testing.T){
   "dependencyCycle":{"p",[]Node[Unit]{node("a","b"),node("b","a"),node("c")}},
   "startupKindAccepted":{"p",[]Node[Unit]{startup}},
   "utf8WithinMetadataOK":{"p",[]Node[Unit]{node(strings.Repeat("é",49990))}},
+  "malformedPlanIdentity":{"p\xed\xa0\x80",[]Node[Unit]{node("a")}},
+  "loneLowSurrogateIdentity":{"p",[]Node[Unit]{node("x\xed\xb0\x80"),node("x\U00010000")}},
+  "loneHighSurrogateDependency":{"p",[]Node[Unit]{node("a"),node("b","x\xed\xa0\x80")}},
+  "astralIdentitiesAccepted":{"p",[]Node[Unit]{node("x\U00010000"),node("x\uFFFF","x\U00010000")}},
  }
  for name,spec:=range plans{
   callbacks=0
@@ -382,6 +392,10 @@ const plans={
  dependencyCycle:['p',[node('a','b'),node('b','a'),node('c')]],
  startupKindAccepted:['p',[{...node('s'),kind:'startup'}]],
  utf8WithinMetadataOK:['p',[node('é'.repeat(49990))]],
+ malformedPlanIdentity:['p\uD800',[node('a')]],
+ loneLowSurrogateIdentity:['p',[node('x\uDC00'),node('x\u{10000}')]],
+ loneHighSurrogateDependency:['p',[node('a'),node('b','x\uD800')]],
+ astralIdentitiesAccepted:['p',[node('x\u{10000}'),node('x\uFFFF','x\u{10000}')]],
 };
 for(const [name,[id,nodes]] of Object.entries(plans)){
  callbacks=0;

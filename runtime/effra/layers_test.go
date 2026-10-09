@@ -394,6 +394,8 @@ func TestLayerMalformedPlansAndAdapterPanicsDefectBeforeOrAfterJoinedRollback(t 
 		{{Spec: NodeSpec{ID: "a", Dependencies: []NodeID{"missing"}}, Construct: construct}},
 		{{Spec: NodeSpec{ID: "a", Dependencies: []NodeID{"b"}}, Construct: construct}, {Spec: NodeSpec{ID: "b", Dependencies: []NodeID{"a"}}, Construct: construct}},
 		{{Spec: NodeSpec{ID: NodeID(strings.Repeat("x", maxPlanMetadata+1))}, Construct: construct}},
+		{{Spec: NodeSpec{ID: "\xff"}, Construct: construct}},
+		{{Spec: NodeSpec{ID: "a", Source: NodeSource{Module: "\xff"}}, Construct: construct}},
 	} {
 		plan := unitPlan(nodes, func(Unit) Unit { calls.Add(1); return Unit{} })
 		out := Run(Provide(plan, Unit{}, func(*Unit) Effect[Unit] {

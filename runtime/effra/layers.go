@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 type NodeID string
@@ -68,17 +69,30 @@ func NewPlan[In, S, Out any](id PlanID, nodes []Node[S], init func(In) S, expose
 	if len(nodes) > maxPlanNodes {
 		return invalid("more than 1000 nodes")
 	}
+	// Identity text must be well-formed Unicode before it is measured or
+	// ordered, so byte order is code point order and the JS seam, which sees
+	// UTF-16, reaches the same refusal, bounds and canonical order.
+	const malformed = "identity is not well-formed Unicode"
+	if !utf8.ValidString(string(id)) {
+		return invalid(malformed)
+	}
 	metadata, edges := len(id), 0
 	if metadata > maxPlanMetadata {
 		return invalid("metadata bound exceeded")
 	}
 	for _, node := range nodes {
+		if !utf8.ValidString(string(node.Spec.ID)) || !utf8.ValidString(node.Spec.Source.Module) {
+			return invalid(malformed)
+		}
 		metadata += 1 + len(node.Spec.ID) + len(node.Spec.Source.Module)
 		edges += len(node.Spec.Dependencies)
 		if metadata > maxPlanMetadata || edges > maxPlanEdges {
 			return invalid("metadata bound exceeded")
 		}
 		for _, dependency := range node.Spec.Dependencies {
+			if !utf8.ValidString(string(dependency)) {
+				return invalid(malformed)
+			}
 			metadata += 1 + len(dependency)
 			if metadata > maxPlanMetadata {
 				return invalid("metadata bound exceeded")

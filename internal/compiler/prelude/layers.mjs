@@ -6,7 +6,8 @@
 const __ef_layerOccurrences = cause => __ef_causeOccurrences(cause);
 // Identities compare by code point, the order Go's bytewise UTF-8 comparison
 // gives, so canonical order is one relation on both targets. UTF-16 `<`
-// would place supplementary-plane identities before U+E000..U+FFFF.
+// would place supplementary-plane identities before U+E000..U+FFFF. The
+// mapping assumes well-formed text; __ef_layerGraph refuses lone surrogates.
 const __ef_layerIdentityOrder = (a, b) => {
   for (let index = 0; index < a.length && index < b.length; index++) {
     let left = a.charCodeAt(index), right = b.charCodeAt(index);
@@ -19,14 +20,18 @@ const __ef_layerIdentityOrder = (a, b) => {
   }
   return a.length - b.length;
 };
-// Metadata is charged in UTF-8 bytes, as Go measures identities.
+// Metadata is charged in UTF-8 bytes, as Go measures identities. A lone
+// surrogate is not well-formed Unicode and has no UTF-8 encoding: -1.
 const __ef_layerUTF8Length = text => {
   let length = 0;
   for (let index = 0; index < text.length; index++) {
     const unit = text.charCodeAt(index);
-    if (unit >= 0xD800 && unit < 0xDC00) {
+    if (unit >= 0xD800 && unit < 0xE000) {
       const next = text.charCodeAt(index + 1);
-      if (next >= 0xDC00 && next < 0xE000) { length += 4; index++; continue; }
+      if (unit >= 0xDC00 || !(next >= 0xDC00 && next < 0xE000)) return -1;
+      length += 4;
+      index++;
+      continue;
     }
     length += unit < 0x80 ? 1 : unit < 0x800 ? 2 : 3;
   }
@@ -43,17 +48,27 @@ const __ef_layerGraph = plan => {
   }
   const nodes = plan.nodes;
   if (nodes.length > 1000) return invalid("more than 1000 nodes");
-  let metadata = __ef_layerUTF8Length(plan.id), edges = 0;
+  // Identity text must be well-formed Unicode before it is measured or
+  // ordered, as Go NewPlan requires valid UTF-8; code point order then
+  // matches Go's byte order.
+  const malformed = "identity is not well-formed Unicode";
+  const measure = text => typeof text === "string" ? __ef_layerUTF8Length(text) : 0;
+  let metadata = measure(plan.id), edges = 0;
+  if (metadata < 0) return invalid(malformed);
   if (metadata > 100000) return invalid("metadata bound exceeded");
   const dependencies = nodes.map(node => node?.dependencies ?? []);
   for (let index = 0; index < nodes.length; index++) {
     const node = nodes[index], declared = dependencies[index];
     if (!Array.isArray(declared)) return invalid("unknown or duplicate dependency");
-    metadata += 1 + (typeof node?.id === "string" ? __ef_layerUTF8Length(node.id) : 0);
+    const length = measure(node?.id);
+    if (length < 0) return invalid(malformed);
+    metadata += 1 + length;
     edges += declared.length;
     if (metadata > 100000 || edges > 10000) return invalid("metadata bound exceeded");
     for (const dependency of declared) {
-      metadata += 1 + (typeof dependency === "string" ? __ef_layerUTF8Length(dependency) : 0);
+      const length = measure(dependency);
+      if (length < 0) return invalid(malformed);
+      metadata += 1 + length;
       if (metadata > 100000) return invalid("metadata bound exceeded");
     }
   }
