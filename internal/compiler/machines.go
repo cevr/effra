@@ -21,7 +21,9 @@ package compiler
 // protocols, spawn and the owned runtime).
 
 import (
+	"encoding/binary"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 )
@@ -42,6 +44,9 @@ const (
 	// argument paths and helper bodies. Exhausting it refuses the plan.
 	maxMachineWork        = 1 << 16
 	maxMachineTransitions = 4096
+	// maxMachineModuleWork bounds all declarations of a module together, so
+	// many declarations over one wide enum cannot multiply plan output.
+	maxMachineModuleWork = 1 << 20
 )
 
 // Step decisions as published in plans and graphs. "any" is a conservative
@@ -193,8 +198,20 @@ type machineCheck struct {
 	trigger *Enum
 	// roleFunction is the step or complete function being walked.
 	roleFunction *Function
-	// transitionKeys deduplicates published transitions in constant time.
+	// transitionKeys deduplicates published transitions by a compact key of
+	// variant indices and ordinals, never by joined source text.
 	transitionKeys map[string]bool
+	// shared is the module-wide budget every declaration also charges.
+	shared *machineBudget
+	// indexes maps each enum's variant names to declaration positions.
+	indexes map[*Enum]map[string]int
+	// viaIndex numbers helper names for transition keys.
+	viaIndex map[string]int
+}
+
+type machineBudget struct {
+	work      int
+	exhausted bool
 }
 
 // checkMachines runs after every function body is checked, so bound bodies
@@ -206,8 +223,9 @@ func (c *checker) checkMachines() {
 		return
 	}
 	c.result.Machines = []MachinePlan{}
+	shared := &machineBudget{}
 	for _, machine := range c.program.Machines {
-		check := &machineCheck{c: c, machine: machine, seen: map[string]bool{}}
+		check := &machineCheck{c: c, machine: machine, seen: map[string]bool{}, shared: shared}
 		if plan := check.run(); plan != nil {
 			c.result.Machines = append(c.result.Machines, *plan)
 		}
@@ -216,8 +234,13 @@ func (c *checker) checkMachines() {
 }
 
 func (m *machineCheck) report(code, message string, span Span) {
-	key := code + "\x00" + message + "\x00" + fmt.Sprint(span.Offset, ":", span.Length)
 	m.failed = true
+	if m.refused && code != machineBudgetCode {
+		// A check that stopped because the budget ran out is not evidence of
+		// a contract violation; the budget refusal is the diagnostic.
+		return
+	}
+	key := code + "\x00" + message + "\x00" + fmt.Sprint(span.Offset, ":", span.Length)
 	if m.seen[key] {
 		return
 	}
@@ -235,6 +258,18 @@ func (m *machineCheck) charge(units int) bool {
 		return false
 	}
 	m.work += units
+	m.shared.work += units
+	if m.shared.work > maxMachineModuleWork {
+		m.refused = true
+		if m.shared.exhausted {
+			// Reported once for the module; this declaration is withheld too.
+			m.failed = true
+			return false
+		}
+		m.shared.exhausted = true
+		m.report(machineBudgetCode, fmt.Sprintf("machine declarations exceed their shared %d-unit analysis budget; no plan is published", maxMachineModuleWork), m.machine.Span)
+		return false
+	}
 	if m.work > maxMachineWork {
 		m.refused = true
 		m.report(machineBudgetCode, fmt.Sprintf("machine %s analysis exceeds its %d-unit budget; no plan is published", m.machine.Name, maxMachineWork), m.machine.Span)
@@ -281,6 +316,10 @@ func (m *machineCheck) userEnum(id TypeID) *Enum {
 }
 
 func (m *machineCheck) run() *MachinePlan {
+	if m.shared.exhausted {
+		// The module refusal is already reported; no further plan publishes.
+		return nil
+	}
 	machine := m.machine
 	stepBinding := machine.binding(machineStep)
 	initialBinding := machine.binding(machineInitial)
@@ -327,7 +366,9 @@ func (m *machineCheck) run() *MachinePlan {
 	if m.failed || m.refused || step == nil || event == nil || m.enum == nil {
 		return nil
 	}
-	m.finishPlan(step, event, complete)
+	if !m.finishPlan(step, event, complete) {
+		return nil
+	}
 	return m.plan
 }
 
@@ -533,15 +574,57 @@ func (v machineVariants) refine(cell []*MatchPattern) machineVariants {
 	return out
 }
 
-// ordered lists the set in declaration order; nil lists every variant.
-func (v machineVariants) ordered(enum *Enum) []string {
-	out := []string{}
-	for _, variant := range enum.Variants {
-		if v.admits(variant.Name) {
-			out = append(out, variant.Name)
+// positions lists the set as declaration positions in order; nil lists
+// every variant. A non-nil set costs its own size, never the enum's: names
+// resolve through an index built (and charged) once per enum.
+func (m *machineCheck) positions(v machineVariants, enum *Enum) []int {
+	if v == nil {
+		out := make([]int, len(enum.Variants))
+		for i := range out {
+			out[i] = i
+		}
+		return out
+	}
+	index := m.variantIndex(enum)
+	out := make([]int, 0, len(v))
+	for name := range v {
+		if i, ok := index[name]; ok {
+			out = append(out, i)
 		}
 	}
+	slices.Sort(out)
 	return out
+}
+
+// order lists the set's variant names in declaration order.
+func (m *machineCheck) order(v machineVariants, enum *Enum) []string {
+	return machineNames(m.positions(v, enum), enum)
+}
+
+func machineNames(positions []int, enum *Enum) []string {
+	out := make([]string, len(positions))
+	for j, i := range positions {
+		out[j] = enum.Variants[i].Name
+	}
+	return out
+}
+
+func (m *machineCheck) variantIndex(enum *Enum) map[string]int {
+	if index, ok := m.indexes[enum]; ok {
+		return index
+	}
+	if !m.charge(len(enum.Variants)) {
+		return nil
+	}
+	index := make(map[string]int, len(enum.Variants))
+	for i, variant := range enum.Variants {
+		index[variant.Name] = i
+	}
+	if m.indexes == nil {
+		m.indexes = map[*Enum]map[string]int{}
+	}
+	m.indexes[enum] = index
+	return index
 }
 
 // size is the length of ordered(enum) without allocating it.
@@ -973,8 +1056,12 @@ func (m *machineCheck) checkStay(s *machineScope, e, argument *Expr, n machineNa
 		if path.variant == "" || path.narrowed == nil || len(path.narrowed) == 1 && path.narrowed[path.variant] {
 			continue
 		}
+		// The message lists the narrowing; charge it before building it.
+		if !m.charge(path.narrowed.size(m.enum)) {
+			return
+		}
 		enum := m.enum.Name
-		qualified := path.narrowed.ordered(m.enum)
+		qualified := m.order(path.narrowed, m.enum)
 		for i := range qualified {
 			qualified[i] = enum + "." + qualified[i]
 		}
@@ -996,7 +1083,9 @@ func (m *machineCheck) checkStay(s *machineScope, e, argument *Expr, n machineNa
 	}
 }
 
-func (m *machineCheck) transition(s *machineScope, span Span, n machineNarrowing, decision string, targets []string, precision string, guarded bool) {
+// transition records one possible decision. targets is a variant set: nil
+// means every state, an empty set means no target state.
+func (m *machineCheck) transition(s *machineScope, span Span, n machineNarrowing, decision string, targets machineVariants, precision string, guarded bool) {
 	if len(m.plan.Transitions) >= maxMachineTransitions {
 		if !m.refused {
 			m.refused = true
@@ -1004,17 +1093,14 @@ func (m *machineCheck) transition(s *machineScope, span Span, n machineNarrowing
 		}
 		return
 	}
-	if targets == nil {
-		targets = []string{}
-	}
-	// A transition's From, On and Targets lists are plan output. Charging
-	// them before they are allocated bounds plan size, the enterable search
-	// and the graph projection.
-	if !m.charge(len(targets) + n.states.size(m.enum) + n.triggers.size(m.trigger) + len(s.via)) {
+	// A transition's From, On, Targets and Via lists are plan output.
+	// Charging them before they are allocated bounds plan size, the
+	// enterable search and the graph projection.
+	if !m.charge(targets.size(m.enum) + n.states.size(m.enum) + n.triggers.size(m.trigger) + len(s.via)) {
 		return
 	}
-	t := MachineTransition{Role: m.role, From: n.states.ordered(m.enum), On: n.triggers.ordered(m.trigger), Decision: decision, Targets: targets, Precision: precision, Guarded: guarded, Via: slices.Clone(s.via), Span: span}
-	key := strings.Join([]string{t.Role, fmt.Sprint(t.Span.Offset, ":", t.Span.Length), t.Decision, t.Precision, fmt.Sprint(t.Guarded), strings.Join(t.From, "|"), strings.Join(t.On, "|"), strings.Join(t.Targets, "|"), strings.Join(t.Via, "|")}, "\x00")
+	from, on, to := m.positions(n.states, m.enum), m.positions(n.triggers, m.trigger), m.positions(targets, m.enum)
+	key := m.transitionKey(span, decision, precision, guarded, from, on, to, s.via)
 	if m.transitionKeys == nil {
 		m.transitionKeys = map[string]bool{}
 	}
@@ -1022,8 +1108,49 @@ func (m *machineCheck) transition(s *machineScope, span Span, n machineNarrowing
 		return
 	}
 	m.transitionKeys[key] = true
+	t := MachineTransition{Role: m.role, From: machineNames(from, m.enum), On: machineNames(on, m.trigger), Decision: decision, Targets: machineNames(to, m.enum), Precision: precision, Guarded: guarded, Via: slices.Clone(s.via), Span: span}
 	t.ID = fmt.Sprintf("%s:transition:%d", m.plan.ID, len(m.plan.Transitions))
 	m.plan.Transitions = append(m.plan.Transitions, t)
+}
+
+// transitionKey is a compact canonical identity: the role, decision and
+// precision are fixed words, the span is two integers, and every list is
+// variant positions or helper ordinals. Its size follows the charged list
+// lengths, never the length of a source identifier.
+func (m *machineCheck) transitionKey(span Span, decision, precision string, guarded bool, from, on, to []int, via []string) string {
+	key := make([]byte, 0, 32+2*(len(from)+len(on)+len(to)+len(via)))
+	key = append(key, m.role...)
+	key = append(key, 0)
+	key = append(key, decision...)
+	key = append(key, 0)
+	key = append(key, precision...)
+	key = append(key, 0)
+	if guarded {
+		key = append(key, 1)
+	} else {
+		key = append(key, 0)
+	}
+	key = binary.AppendUvarint(key, uint64(span.Offset))
+	key = binary.AppendUvarint(key, uint64(span.Length))
+	for _, list := range [][]int{from, on, to} {
+		key = binary.AppendUvarint(key, uint64(len(list)))
+		for _, i := range list {
+			key = binary.AppendUvarint(key, uint64(i))
+		}
+	}
+	if m.viaIndex == nil {
+		m.viaIndex = map[string]int{}
+	}
+	key = binary.AppendUvarint(key, uint64(len(via)))
+	for _, name := range via {
+		ordinal, ok := m.viaIndex[name]
+		if !ok {
+			ordinal = len(m.viaIndex)
+			m.viaIndex[name] = ordinal
+		}
+		key = binary.AppendUvarint(key, uint64(ordinal))
+	}
+	return string(key)
 }
 
 func (m *machineCheck) decision(s *machineScope, e *Expr, variant string, argument *Expr, n machineNarrowing, guarded bool) {
@@ -1032,35 +1159,54 @@ func (m *machineCheck) decision(s *machineScope, e *Expr, variant string, argume
 		targets, precision := m.targets(s, argument, n)
 		m.transition(s, e.Span, n, machineDecisionGo, targets, precision, guarded)
 	case "Stay":
-		m.transition(s, e.Span, n, machineDecisionStay, n.states.ordered(m.enum), machineTargetCurrent, guarded)
+		m.transition(s, e.Span, n, machineDecisionStay, n.states, machineTargetCurrent, guarded)
 	case "Ignore":
-		m.transition(s, e.Span, n, machineDecisionIgnore, nil, machineTargetLiteral, guarded)
+		m.transition(s, e.Span, n, machineDecisionIgnore, machineVariants{}, machineTargetLiteral, guarded)
 	case "Reject":
-		m.transition(s, e.Span, n, machineDecisionReject, nil, machineTargetLiteral, guarded)
+		m.transition(s, e.Span, n, machineDecisionReject, machineVariants{}, machineTargetLiteral, guarded)
 	case "Done":
-		m.transition(s, e.Span, n, machineDecisionDone, nil, machineTargetLiteral, guarded)
+		m.transition(s, e.Span, n, machineDecisionDone, machineVariants{}, machineTargetLiteral, guarded)
 	}
 }
 
-// targets resolves the states a Go decision enters.
-func (m *machineCheck) targets(s *machineScope, argument *Expr, n machineNarrowing) ([]string, string) {
-	set, precision := machineVariants{}, machineTargetLiteral
+// targets resolves the states a Go decision enters, as a set (nil means
+// every state). Paths that keep the current state share their narrowing
+// with the caller, so each distinct narrowing is enumerated once, and each
+// enumeration is charged before it runs.
+func (m *machineCheck) targets(s *machineScope, argument *Expr, n machineNarrowing) (machineVariants, string) {
+	set, precision, every := machineVariants{}, machineTargetLiteral, false
+	enumerated := map[uintptr]bool{}
 	for _, path := range m.paths(s, argument, n) {
 		switch {
 		case path.variant != "":
 			set[path.variant] = true
 		case path.same:
-			for _, variant := range path.narrowed.ordered(m.enum) {
-				set[variant] = true
-			}
 			if precision == machineTargetLiteral {
 				precision = machineTargetCurrent
 			}
+			if path.narrowed == nil {
+				every = true
+				continue
+			}
+			identity := reflect.ValueOf(path.narrowed).Pointer()
+			if every || enumerated[identity] {
+				continue
+			}
+			enumerated[identity] = true
+			if !m.charge(len(path.narrowed)) {
+				return machineVariants{}, precision
+			}
+			for variant := range path.narrowed {
+				set[variant] = true
+			}
 		default:
-			return machineVariants(nil).ordered(m.enum), machineTargetConservative
+			return nil, machineTargetConservative
 		}
 	}
-	return set.ordered(m.enum), precision
+	if every {
+		return nil, precision
+	}
+	return set, precision
 }
 
 // conservative records a Step value the walk cannot see into: any decision to
@@ -1070,7 +1216,7 @@ func (m *machineCheck) conservative(s *machineScope, e *Expr, n machineNarrowing
 	if !ok || state != m.state {
 		return
 	}
-	m.transition(s, e.Span, n, machineDecisionAny, machineVariants(nil).ordered(m.enum), machineTargetConservative, guarded)
+	m.transition(s, e.Span, n, machineDecisionAny, nil, machineTargetConservative, guarded)
 }
 
 func (m *machineCheck) function(role string, f *Function) MachineFunction {
@@ -1085,10 +1231,16 @@ func (m *machineCheck) function(role string, f *Function) MachineFunction {
 }
 
 func (m *machineCheck) dataRef(id TypeID, enum *Enum) MachineDataRef {
-	return MachineDataRef{Name: enum.Name, Identity: m.c.declarationQualifier("enum", enum.Name), Variants: machineVariants(nil).ordered(enum), Type: m.c.projectCheckedBase(m.c.checkedDataID(id, nil, nil))}
+	return MachineDataRef{Name: enum.Name, Identity: m.c.declarationQualifier("enum", enum.Name), Variants: m.order(nil, enum), Type: m.c.projectCheckedBase(m.c.checkedDataID(id, nil, nil))}
 }
 
-func (m *machineCheck) finishPlan(step *Function, event *Enum, complete *Function) {
+// finishPlan completes a checked plan. Its state and event variant lists and
+// per-state facts are charged before they are allocated; a refusal withholds
+// the plan.
+func (m *machineCheck) finishPlan(step *Function, event *Enum, complete *Function) bool {
+	if !m.charge(2*len(m.enum.Variants) + len(event.Variants)) {
+		return false
+	}
 	plan := m.plan
 	plan.State = m.dataRef(m.state, m.enum)
 	plan.Event = m.dataRef(step.Params[1].typeID, event)
@@ -1143,6 +1295,7 @@ func (m *machineCheck) finishPlan(step *Function, event *Enum, complete *Functio
 	for _, variant := range m.enum.Variants {
 		plan.States = append(plan.States, MachineStateFacts{Variant: variant.Name, Initial: variant.Name == plan.Initial.Variant, Enterable: enterable[variant.Name]})
 	}
+	return true
 }
 
 func machineContributions(rows map[string][]string) []MachineRowContribution {

@@ -406,3 +406,105 @@ func TestMachineTriggerListsAreCharged(t *testing.T) {
 		t.Fatalf("40 wide-event tails codes = %v: %+v", got, r.Diagnostics)
 	}
 }
+
+// Transition keys are canonical positions and ordinals: their size follows
+// the list lengths the budget charges, never the length of an identifier.
+func TestMachineTransitionKeysIgnoreIdentifierLength(t *testing.T) {
+	m := &machineCheck{role: machineStep}
+	long := strings.Repeat("h", 1<<20)
+	key := m.transitionKey(Span{Offset: 1 << 20, Length: 9}, machineDecisionGo, machineTargetLiteral, true, []int{0, 1}, []int{2}, []int{3}, []string{long, long + "x", long})
+	if len(key) > 64 {
+		t.Fatalf("key for three 1 MiB helper names is %d bytes", len(key))
+	}
+	// End to end: a 64 KiB state variant and helper name over many tails
+	// still plans, and the published names are the source names.
+	name := "V" + strings.Repeat("x", 1<<16)
+	helper := "h" + strings.Repeat("y", 1<<16)
+	var b strings.Builder
+	fmt.Fprintf(&b, "import Machines \"effra/machines\"\nenum S { %s }\nenum E { Ping }\nfn step(state: S, event: E) -> Machines.Step<S, void> { %s(state, 0) }\nfn %s(state: S, n: i64) -> Machines.Step<S, void> {\n", name, helper, helper)
+	for i := 0; i < 19; i++ {
+		fmt.Fprintf(&b, "    if n == %d { Machines.Step<S, void>.Stay(state) } else {\n", i)
+	}
+	b.WriteString("    Machines.Step<S, void>.Ignore {}\n" + strings.Repeat("    }\n", 19) + "}\n")
+	fmt.Fprintf(&b, "machine M { initial S.%s {}; step step }\n", name)
+	plan := Compile(b.String()).FindMachine("M")
+	if plan == nil || len(plan.Transitions) != 20 || plan.Transitions[0].From[0] != name || plan.Transitions[0].Via[0] != helper {
+		t.Fatalf("long-identifier plan: %+v", plan != nil)
+	}
+}
+
+// A step that only fails has no transitions, yet its plan lists every state
+// and event. Those lists are charged, per declaration and across the module,
+// so many declarations over one wide enum are refused instead of allocating.
+func failingWideMachinesSource(variants, declarations int) string {
+	var b strings.Builder
+	b.WriteString("import Machines \"effra/machines\"\nerror Boom\nenum W {")
+	for i := 0; i < variants; i++ {
+		fmt.Fprintf(&b, " V%d", i)
+	}
+	b.WriteString(" }\nenum E { Ping }\neffect fn step(state: W, event: E) -> Machines.Step<W, void> raises { Boom } { fail Boom }\n")
+	for i := 0; i < declarations; i++ {
+		fmt.Fprintf(&b, "machine M%d { initial W.V0 {}; step step }\n", i)
+	}
+	return b.String()
+}
+
+func TestMachinePlanFinalizationIsCharged(t *testing.T) {
+	// One declaration whose state list alone exceeds its budget.
+	if r := Compile(failingWideMachinesSource(maxMachineWork, 1)); !slices.Equal(machineCodes(r), []string{"EF142"}) {
+		t.Fatalf("wide zero-transition plan codes = %v", machineCodes(r))
+	}
+	// 20 declarations over 20,000 states fit the shared module budget; 60 do
+	// not, and the module refusal is reported once.
+	if r := Compile(failingWideMachinesSource(20000, 20)); r.FindMachine("M19") == nil {
+		t.Fatalf("20 wide declarations refused: %v", machineCodes(r))
+	}
+	r := Compile(failingWideMachinesSource(20000, 60))
+	if got := machineCodes(r); !slices.Equal(got, []string{"EF142"}) || !strings.Contains(r.Diagnostics[0].Message, "shared") || r.FindMachine("M0") != nil {
+		t.Fatalf("60 wide declarations codes = %v: %v", got, r.Diagnostics)
+	}
+}
+
+// Go targets that keep the current state enumerate its narrowing. Paths that
+// share one narrowing are enumerated once; distinct narrowings are each
+// charged, so repeated enumeration over a wide enum is refused.
+func currentTargetsSource(refineEachPath bool) string {
+	var b strings.Builder
+	b.WriteString("import Machines \"effra/machines\"\nenum W {")
+	for i := 0; i < 4000; i++ {
+		fmt.Fprintf(&b, " V%d", i)
+	}
+	most := make([]string, 3999)
+	for i := range most {
+		most[i] = fmt.Sprintf("W.V%d", i)
+	}
+	fmt.Fprintf(&b, " }\nenum E { Ping }\nfn step(state: W, event: E) -> Machines.Step<W, void> {\n    match state {\n        %s => Machines.Step<W, void>.Go(pick(state, 0))\n        W.V3999 => Machines.Step<W, void>.Ignore {}\n    }\n}\n", strings.Join(most, " | "))
+	b.WriteString("fn pick(state: W, n: i64) -> W {\n")
+	for i := 0; i < 19; i++ {
+		fmt.Fprintf(&b, "    if n == %d { keep(state) } else {\n", i)
+	}
+	b.WriteString("    keep(state)\n" + strings.Repeat("    }\n", 19) + "}\n")
+	if refineEachPath {
+		fmt.Fprintf(&b, "fn keep(state: W) -> W {\n    match state {\n        %s => state\n        W.V3999 => state\n    }\n}\n", strings.Join(most, " | "))
+	} else {
+		b.WriteString("fn keep(state: W) -> W { state }\n")
+	}
+	b.WriteString("machine M { initial W.V0 {}; step step }\n")
+	return b.String()
+}
+
+func TestMachineCurrentTargetsAreDeduplicatedAndCharged(t *testing.T) {
+	r := Compile(currentTargetsSource(false))
+	plan := r.FindMachine("M")
+	if plan == nil {
+		t.Fatalf("shared narrowing refused: %v", machineCodes(r))
+	}
+	if !slices.ContainsFunc(plan.Transitions, func(tr MachineTransition) bool {
+		return tr.Decision == "go" && tr.Precision == machineTargetCurrent && len(tr.Targets) == 3999
+	}) {
+		t.Fatal("current-state targets lost")
+	}
+	if r := Compile(currentTargetsSource(true)); !slices.Equal(machineCodes(r), []string{"EF142"}) || r.FindMachine("M") != nil {
+		t.Fatalf("20 distinct 3999-state enumerations codes = %v: %v", machineCodes(r), r.Diagnostics)
+	}
+}
