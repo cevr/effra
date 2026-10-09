@@ -125,7 +125,7 @@ A directive can also name a rule-pack rule as `namespace/rule`. A malformed qual
 - `unused`: its rule completed without a finding to remove. This is also an `EFL004` error.
 - `not-evaluated`: its rule did not run. The reason is one of `unchecked-source`, `pack-not-selected`, `rule-off`, `pack-failed`, `facts-unavailable` or `target-unsupported`. A not-evaluated directive does not fail lint.
 
-Only a rule that ran can show a directive unused, so a directive for a rule that is off is not-evaluated rather than an error. See [suppression states](specs/custom-lint.md#implemented-stage-three-suppression-states).
+Only a rule that ran can show a directive unused, so a directive for a rule that is off is not-evaluated rather than an error. A rule that is off or skipped keeps that reason even when another rule of its pack makes the pack fail. Source with a syntax error keeps its directives as `unchecked-source`. See [suppression states](specs/custom-lint.md#implemented-stage-three-suppression-states).
 
 `ef lint receipt FILE [--runs N] [--target go|js] [LINT]` prints a raw [lint cost receipt](specs/custom-lint.md#implemented-stage-three-cost-receipts-and-the-buildrun-control). Per run, it reports nanoseconds for the frontend, fact extraction, each pack's fact serialization and process phases, and the merge. It makes no performance claim. `ef build` and `ef run` never start a rule pack.
 

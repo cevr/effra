@@ -116,8 +116,11 @@ type RunOptions struct {
 // Trace is the raw cost of one Run, for lint cost receipts. Durations are
 // wall-clock and unaggregated; a zero duration is a phase that did not
 // happen. The pack's own startup and rule work cannot be told apart from
-// outside the process: FirstByte bounds both, from the moment the process
-// exists until it begins answering.
+// outside the process. FirstByte is the first byte the process writes to
+// stdout, whatever it is: Serve writes a frame's header and payload in one
+// write after rule work, but a pack may write a header, or any bytes,
+// earlier, so FirstByte bounds startup plus whatever work preceded that
+// write, not necessarily the rules.
 type Trace struct {
 	// Prepare encodes the fact snapshot into its wire form and admits the
 	// rules; SnapshotBytes is the size of that wire form.
@@ -133,7 +136,9 @@ type Trace struct {
 	RequestBytes int
 	// Spawn is process creation, until the operating system returned it.
 	Spawn time.Duration
-	// FirstByte runs from process creation to the first response byte.
+	// FirstByte runs from process creation to the first byte read from
+	// the process's stdout, which may be a frame header sent before any
+	// rule work.
 	FirstByte time.Duration
 	// Exit runs from process creation until the process was reaped.
 	Exit          time.Duration
