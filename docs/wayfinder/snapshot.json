@@ -3,7 +3,7 @@
     {
       "assignees": [],
       "blockedBy": [],
-      "bodySha256": "69ef6b2cc78ddc35b6e56d8c56ef2175e7751eab8a8d5943a589ebe3872f04a5",
+      "bodySha256": "b1d80821950316cac03f1bce781d41f44722a756529b8a1f2695111411ac9136",
       "labels": [
         "wayfinder:map"
       ],
@@ -12,7 +12,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Effra language, runtimes, and interoperability map",
-      "updatedAt": "2026-10-09T15:12:06Z",
+      "updatedAt": "2026-10-09T19:46:25Z",
       "url": "https://github.com/cevr/effra/issues/1"
     },
     {
@@ -203,7 +203,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Restricted ordinary actor receive loops",
-      "updatedAt": "2026-10-08T18:36:33Z",
+      "updatedAt": "2026-10-09T19:45:22Z",
       "url": "https://github.com/cevr/effra/issues/12"
     },
     {
@@ -1311,7 +1311,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Generalized run sequencing and checked userland binding",
-      "updatedAt": "2026-10-08T19:02:28Z",
+      "updatedAt": "2026-10-09T19:45:23Z",
       "url": "https://github.com/cevr/effra/issues/73"
     },
     {
@@ -1419,7 +1419,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Single registry for diagnostic codes and versioned identities",
-      "updatedAt": "2026-10-09T15:49:45Z",
+      "updatedAt": "2026-10-09T19:45:21Z",
       "url": "https://github.com/cevr/effra/issues/79"
     },
     {
@@ -1453,13 +1453,226 @@
       "title": "Unsigned and host-width integers, explicit conversions and checked overflow",
       "updatedAt": "2026-10-09T18:01:29Z",
       "url": "https://github.com/cevr/effra/issues/81"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "148964ae53f9b19341b87ae8f81aeead5becef17fc35b3084bcb4468f8179d26",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 82,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Gate: compiler edit to green in under 10 s",
+      "updatedAt": "2026-10-09T19:44:14Z",
+      "url": "https://github.com/cevr/effra/issues/82"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "6b24697d8659e70802fc0334e9d78851a6759dfda8d01ff6d75400c4e925bdaa",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 83,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Execute or retire the 154 unexecuted ownership-matrix entries",
+      "updatedAt": "2026-10-09T19:44:16Z",
+      "url": "https://github.com/cevr/effra/issues/83"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        49,
+        51
+      ],
+      "bodySha256": "4c6d02e80a49ae09631d1fffdac01dd7c179237028f41e665175ab5e4523b530",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 84,
+      "parent": 14,
+      "state": "open",
+      "stateReason": null,
+      "title": "Matched Go and TypeScript size controls for the codec and HTTP rows",
+      "updatedAt": "2026-10-09T19:44:17Z",
+      "url": "https://github.com/cevr/effra/issues/84"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        84
+      ],
+      "bodySha256": "28bb7901368aced082e9947a5685f746e5442b1f7669012b952e0df688135709",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 85,
+      "parent": 14,
+      "state": "open",
+      "stateReason": null,
+      "title": "Per-fixture size budgets derived from matched baselines",
+      "updatedAt": "2026-10-09T19:44:19Z",
+      "url": "https://github.com/cevr/effra/issues/85"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [
+        13
+      ],
+      "bodySha256": "ce8a7d484dddee91543fb958ffa981b528f88fe1dc8efb78a8ebf859202366ff",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 86,
+      "parent": 14,
+      "state": "open",
+      "stateReason": null,
+      "title": "Ordinary-handler and machine-backed actor size rows",
+      "updatedAt": "2026-10-09T19:44:20Z",
+      "url": "https://github.com/cevr/effra/issues/86"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "f9e488c1e5734ee24f3e5e9c0f32925fde1a4aadfec0166a438fef2390d57d7e",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 87,
+      "parent": 14,
+      "state": "open",
+      "stateReason": null,
+      "title": "Measured core-module split for entries without the scheduler",
+      "updatedAt": "2026-10-09T19:44:21Z",
+      "url": "https://github.com/cevr/effra/issues/87"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "76175136794157200102580035a30aba8c15ac8e4dcbed7967b005985f5bafce",
+      "labels": [
+        "wayfinder:grilling"
+      ],
+      "number": 88,
+      "parent": 14,
+      "state": "open",
+      "stateReason": null,
+      "title": "Should MCP build executables and return build receipts?",
+      "updatedAt": "2026-10-09T19:44:23Z",
+      "url": "https://github.com/cevr/effra/issues/88"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "59b2033799fbdc8b31909b7ebfa8b74249261a92f9c6255dee7a5747cea92f1d",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 89,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Constants as value expressions",
+      "updatedAt": "2026-10-09T19:44:24Z",
+      "url": "https://github.com/cevr/effra/issues/89"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "9464095458ebae9f41f1b9a65b223d6b4f3a718be72ed9d544a793ab6a62073f",
+      "labels": [
+        "wayfinder:research"
+      ],
+      "number": 90,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Should public data default to the readonly tier?",
+      "updatedAt": "2026-10-09T19:44:26Z",
+      "url": "https://github.com/cevr/effra/issues/90"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "9fa7b4353e8703985719e9b8b829a5c47a23ec43e12d52e6414d04aab8f22147",
+      "labels": [
+        "wayfinder:research"
+      ],
+      "number": 91,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Record-update authority on types with private fields",
+      "updatedAt": "2026-10-09T19:44:27Z",
+      "url": "https://github.com/cevr/effra/issues/91"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "05d120f13902cbf9bbc0286688511bc2f1b727b4b2f49e59e7a3538a2cdc23b4",
+      "labels": [
+        "wayfinder:research"
+      ],
+      "number": 92,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Should contification extend to tail-called local join points?",
+      "updatedAt": "2026-10-09T19:44:28Z",
+      "url": "https://github.com/cevr/effra/issues/92"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "ee0a3f68821adb28e49d3f9df4047e7cbb9e76a70a26a45e2fe3af8572e502ac",
+      "labels": [
+        "wayfinder:research"
+      ],
+      "number": 93,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Would `.mbti`-style interface text help bundled interfaces?",
+      "updatedAt": "2026-10-09T19:44:30Z",
+      "url": "https://github.com/cevr/effra/issues/93"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "b7c7bbe35c353f5892c9d71b36bcc479b19fefae96709af08e8a3e786fd8935b",
+      "labels": [
+        "wayfinder:research"
+      ],
+      "number": 94,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "How does Effra's JS output size compare with MoonBit's?",
+      "updatedAt": "2026-10-09T19:44:31Z",
+      "url": "https://github.com/cevr/effra/issues/94"
     }
   ],
   "map": 1,
   "mapReferences": [
+    2,
     5,
+    12,
+    14,
     17,
     18,
+    19,
     20,
     22,
     23,
@@ -1471,6 +1684,9 @@
     35,
     41,
     44,
+    46,
+    49,
+    51,
     52,
     56,
     58,
@@ -1478,9 +1694,18 @@
     66,
     70,
     72,
+    73,
     76,
     77,
-    78
+    78,
+    79,
+    82,
+    83,
+    84,
+    88,
+    89,
+    90,
+    94
   ],
   "repository": "cevr/effra",
   "schema": "effra-wayfinder-snapshot/1"
