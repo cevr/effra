@@ -139,7 +139,7 @@ Decisions and rejected alternatives:
 - Rejected, for now: a per-fixture byte budget in the gate. Budgets come from measured baselines, and the matched baselines are not complete yet (see below). The gate asserts retention facts that do not depend on the toolchain.
 - Rejected, for now: an MCP build receipt. MCP `project.check` already reports each entry mode's closed modules and requirement counts. Building executables from MCP is a separate capability decision.
 
-Recorded run `conformance/size/receipts/2026-10-09.json` (`effra.size-conformance/2`). Commit `575a004` with a clean tree, on `bdbbecf` (main `0cf4a0d` plus the gate-throughput branch), go1.27.0 linux/amd64, `CGO_ENABLED=0`, Bun 1.4.2, Node v24.11.1, Effect 4.0.1.
+Recorded run `conformance/size/receipts/2026-10-09.json` (`effra.size-conformance/2`). Commit `e7e8228` with a clean tree, on `bdbbecf` (main `0cf4a0d` plus the gate-throughput branch), go1.27.0 linux/amd64, `CGO_ENABLED=0`, Bun 1.4.2, Node v24.11.1, Effect 4.0.1.
 
 History of this record:
 
@@ -147,6 +147,7 @@ History of this record:
 - It was re-recorded at the commit that disabled VCS stamping (now `a3a3c3d`). The receipt gained build settings, build information and declared imports, the matched minimal controls were added, and native builds dropped VCS stamping. Every Effra row kept its bytes. The Go floor moved from 2,337,969 to 2,337,985 bytes and the managed control from 2,584,714 to 2,584,698.
 - It was re-recorded again at the receipt repair commit (now `fc3d7b8`). The receipt gained C toolchain inputs, and JavaScript host imports are now rendered loaders. Only the HTTP JavaScript row changed: the module grew from 16,426 to 16,475 bytes, the minified application from 7,010 to 7,016 and the deployment from 36,535 to 36,541. Every native row kept its bytes.
 - It was re-recorded at `575a004` after rebasing onto `bdbbecf`. Every application row kept its bytes. Only the compiler executable changed, from 17,056,908 to 17,125,397 bytes.
+- It was re-recorded at `e7e8228` after the admission and compiler-command repair. Every application row kept its bytes. Only the compiler executable changed, to 17,140,576 bytes.
 
 Raw bytes:
 
@@ -167,7 +168,7 @@ Raw bytes:
 | TS/Effect control, minimal (matched) | | | | 651 (source) | 326 | 27,292 |
 | TS/Effect control, managed (matched) | | | | 1,442 (source) | 765 | 40,796 |
 
-The compiler executable is reported separately from these application rows. It was 17,125,397 bytes in the recorded run, and the bundled runtime sources were 15 files and 107,840 bytes.
+The compiler executable is reported separately from these application rows. It was 17,140,576 bytes in the recorded run, and the bundled runtime sources were 15 files and 107,840 bytes.
 
 Retention observations, not claims:
 

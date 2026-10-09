@@ -1,7 +1,7 @@
 {
  "schema": "effra.size-conformance/2",
  "identity": {
-  "commit": "575a0048ac72e7c5028785421d92b65179de0c25",
+  "commit": "e7e82283cea8ed43615df704a5266542bffcdaf1",
   "dirty": false,
   "toolchain": {
    "env": {
@@ -80,7 +80,7 @@
  },
  "distribution": {
   "producer": "effra/checker-abi-9/bundled-interface-4",
-  "executableBytes": 17125397,
+  "executableBytes": 17140576,
   "runtimeModules": 10,
   "runtimeSourceFiles": 15,
   "runtimeSourceBytes": 107840
