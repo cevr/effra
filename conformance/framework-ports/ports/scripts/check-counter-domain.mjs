@@ -27,10 +27,13 @@ assert.equal(domain.split(mutation).length, 2, "exactly one authored increment b
 const mutant = domain.replace(mutation, mutation.replace("+ 1", "- 1"));
 assert.notEqual(mutant, domain);
 const positive = readFileSync(path.join(leaf, "tests/types/counter-positive.ts"), "utf8");
-// Both harnesses print COUNTER_CHECK=<label> before each check. The native entry reports an unhandled failure by its
-// tag alone; the host harness reports its failure as one structured COUNTER_FAILURE JSON line.
+// Both harnesses print COUNTER_CHECK=<label> before each check. The native entry writes the entry failure report
+// (docs/design.md), whose AssertionFailed line carries the failed label; the host harness reports its failure as one
+// structured COUNTER_FAILURE JSON line.
 const nativeChecks = ["CounterInitial: expected 0", "ClickedIncrement: expected 1", "ClickedDecrement: expected 0", "ClickedDecrement: expected -1", "ClickedReset: expected 0 from -1", "ClickedIncrement: expected 1 again", "ClickedReset: expected 0 from 1", "I64Increment: max wraps to min", "I64Decrement: min wraps to max"];
 const intendedCheck = "ClickedIncrement: expected 1";
+// The labels contain no character the report's string grammar escapes.
+const nativeReport = label => `failure: AssertionFailed { message: "${label}" }\n`;
 const checksThrough = label => nativeChecks.slice(0, nativeChecks.indexOf(label) + 1);
 const intendedLabels = checksThrough(intendedCheck);
 const checkedLabels = stdout => [...stdout.matchAll(/^COUNTER_CHECK=(.*)$/gm)].map(match => match[1]);
@@ -47,7 +50,7 @@ function classifyMutant(record, target) {
   if (target === "Go") {
     assert.deepEqual(failureLines(record.stdout), [], "native harness has no host failure line");
     assert.equal(lastLine(record.stdout), `COUNTER_CHECK=${intendedCheck}`, "native output ends at the intended check");
-    assert.equal(record.stderr, "AssertionFailed\n", "native public Assert failure identity and no other cause");
+    assert.equal(record.stderr, nativeReport(intendedCheck), "native public Assert failure identity, its label and no other cause");
     return { target, setupAndInitialZeroReached: true, intendedAssertion: intendedCheck, failure: "AssertionFailed", actualMutantExit: record.exit };
   }
   assert.match(record.stdout, new RegExp(`^COUNTER_SETUP_OK=${target}$`, "m"), "actual public module import/setup succeeded");
@@ -85,12 +88,13 @@ function classifierControls() {
     );
   }
   cases.push(
-    ["Go", "intended", true, { exit: 1, stdout: lines(labelLines(intendedLabels)), stderr: "AssertionFailed\n" }],
-    ["Go", "later again-label failure", false, { exit: 1, stdout: lines(labelLines(checksThrough(again))), stderr: "AssertionFailed\n" }],
-    ["Go", "decrement failure", false, { exit: 1, stdout: lines(labelLines(checksThrough(decrement))), stderr: "AssertionFailed\n" }],
+    ["Go", "intended", true, { exit: 1, stdout: lines(labelLines(intendedLabels)), stderr: nativeReport(intendedCheck) }],
+    ["Go", "later again-label failure", false, { exit: 1, stdout: lines(labelLines(checksThrough(again))), stderr: nativeReport(again) }],
+    ["Go", "decrement failure", false, { exit: 1, stdout: lines(labelLines(checksThrough(decrement))), stderr: nativeReport(decrement) }],
     ["Go", "build failure", false, { exit: 1, stdout: "", stderr: `EF106 near ${intendedCheck}\n` }],
     ["Go", "missing failure", false, { exit: 1, stdout: lines(labelLines(intendedLabels)), stderr: "" }],
-    ["Go", "additional cause", false, { exit: 1, stdout: lines(labelLines(intendedLabels)), stderr: "AssertionFailed; defect: cleanup\n" }],
+    ["Go", "additional cause", false, { exit: 1, stdout: lines(labelLines(intendedLabels)), stderr: nativeReport(intendedCheck) + 'defect: "cleanup"\n' }],
+    ["Go", "intended label at a later check", false, { exit: 1, stdout: lines(labelLines(intendedLabels)), stderr: nativeReport(again) }],
   );
   return cases.map(([target, name, accepted, record]) => {
     let rejection = null;
