@@ -241,3 +241,23 @@ func TestMissingOrUnexecutableGoIsAStructuredCLIRefusal(t *testing.T) {
 		}
 	}
 }
+
+func TestMalformedTrailingDataIsRefusedAtTheMappingBoundary(t *testing.T) {
+	t.Parallel()
+	original, err := os.ReadFile(filepath.Join(repoRoot(t), mappingRelative))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeJSON(string(original) + " \n\t"); err != nil {
+		t.Fatalf("trailing whitespace refused: %v", err)
+	}
+	for _, suffix := range []string{" garbage", ",", "]", "}", " {}", " 1", `"`, "\x00"} {
+		path := filepath.Join(t.TempDir(), "effect-cases.json")
+		if err := os.WriteFile(path, append(append([]byte{}, original...), suffix...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := readMapping(path); err == nil || err.Error() != "mapping is not valid UTF-8 JSON" {
+			t.Fatalf("suffix %q: err = %v, want the invalid-JSON refusal", suffix, err)
+		}
+	}
+}

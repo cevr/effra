@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"math/big"
 	"os"
@@ -53,7 +54,9 @@ func decodeJSON(text string) (any, error) {
 	if err := decoder.Decode(&value); err != nil {
 		return nil, err
 	}
-	if _, err := decoder.Token(); err == nil {
+	// Python's json.loads admits only whitespace after the value: any other
+	// trailing token, valid or not, is extra data.
+	if _, err := decoder.Token(); err != io.EOF {
 		return nil, fmt.Errorf("extra data after JSON value")
 	}
 	return value, nil
