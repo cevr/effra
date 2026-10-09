@@ -29,6 +29,10 @@ const testTimeout = "-timeout=15m"
 // whose binary and version Go's test cache already keys on.
 var testTools = []string{"node", "bun", "tsc", "git"}
 
+// testToolEnvironment are variables those tools read but Go tests do not, so
+// Go's test cache cannot see them; they join the tool digest.
+var testToolEnvironment = []string{"NODE_OPTIONS", "NODE_PATH", "BUN_CONFIG_REGISTRY"}
+
 // gofmtDirectories are the Go trees the gate requires to be gofmt-clean.
 var gofmtDirectories = []string{"cmd", "internal", "runtime", "lint", "scripts/gate", "examples/go-interop", "examples/sdk", "examples/compare", "examples/hosttypes", "examples/lintpack"}
 
@@ -46,15 +50,6 @@ var pythonChecks = []struct {
 	{"effect conformance import tests", []string{"python3", "-B", "scripts/test_import_effect_conformance.py"}},
 	{"effect conformance mapping", []string{"python3", "-B", "scripts/check_effect_conformance.py"}},
 	{"effect conformance mapping tests", []string{"python3", "-B", "scripts/test_effect_conformance.py"}},
-}
-
-// smokeChains are the process smokes against bin/ef. A chain runs in order:
-// smokes in one chain write the same dist/<name> outputs in the repository
-// root, so they must not overlap; separate chains share no output path.
-var smokeChains = [][]string{
-	{"diagnostics_smoke"},
-	{"readme_smoke"},
-	{"bundled_smoke"},
 }
 
 func gateSteps(root string) ([]*Step, error) {
@@ -130,24 +125,6 @@ func gateSteps(root string) ([]*Step, error) {
 	}
 	add(&Step{Name: "ef fmt --check", Needs: []string{"build bin/ef"}, Argv: append([]string{"./bin/ef", "fmt", "--check"}, examples...)})
 
-	// The smokes drive bin/ef, Go, Bun, Node and tsc over the whole module,
-	// examples and runtime; only design records are outside their reach.
-	smokeTools := []string{"go", "python3", "bun", "node", "tsc", "git"}
-	smokeEnv := []string{"NODE_OPTIONS", "NODE_PATH", "BUN_CONFIG_REGISTRY"}
-	smokeInputs := &Inputs{Exclude: []string{"docs/", "plans/", "AGENTS.md", "CHANGELOG.md", "GLOSSARY.md", "NORTH_STAR.md", "PRIOR_ARTS.md", "void-migration-freeze-*.md"}, Tools: smokeTools, Env: smokeEnv}
-	readmeInputs := &Inputs{Tools: smokeTools, Env: smokeEnv}
-	for _, chain := range smokeChains {
-		needs := []string{"build bin/ef"}
-		for _, smoke := range chain {
-			inputs := smokeInputs
-			if smoke == "readme_smoke" {
-				// README excerpts may quote any file.
-				inputs = readmeInputs
-			}
-			add(&Step{Name: smoke, Needs: needs, Argv: []string{"python3", "scripts/" + smoke + ".py"}, Inputs: inputs})
-			needs = []string{"build bin/ef", smoke}
-		}
-	}
 	return steps, nil
 }
 

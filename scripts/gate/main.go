@@ -49,9 +49,9 @@ type Step struct {
 	// cache, or the step is cheaper than hashing).
 	Inputs *Inputs
 	// ToolEnv names executables the step's own cache cannot see, such as the
-	// JavaScript tools Go tests spawn. Their versions reach the step as one
-	// digest in EFFRA_TOOL_VERSIONS; a test that reads it keys Go's test
-	// cache on it.
+	// JavaScript tools Go tests spawn. Their versions, with the environment
+	// they read (testToolEnvironment), reach the step as one digest in
+	// EFFRA_TOOL_VERSIONS; a test that reads it keys Go's test cache on it.
 	ToolEnv []string
 }
 
@@ -145,7 +145,7 @@ func main() {
 		return
 	}
 	// The first line states whether the README comparison program is
-	// strictly type-checked; readme_smoke degrades without tsc.
+	// strictly type-checked; TestReadmeSmoke skips that check without tsc.
 	if tsc, err := exec.LookPath("tsc"); err != nil {
 		fmt.Fprintln(os.Stderr, "typescript: unchecked (no tsc on PATH); the README comparison program is not strictly type-checked")
 	} else {
@@ -283,6 +283,10 @@ func (g *gate) execute(step *Step) *result {
 		digest := sha256.New()
 		for _, tool := range step.ToolEnv {
 			fmt.Fprintf(digest, "%s\x00%s\x00", tool, g.toolVersion(tool))
+		}
+		for _, name := range testToolEnvironment {
+			value, set := os.LookupEnv(name)
+			fmt.Fprintf(digest, "env\x00%s\x00%t\x00%s\x00", name, set, value)
 		}
 		command.Env = append(command.Env, "EFFRA_TOOL_VERSIONS="+hex.EncodeToString(digest.Sum(nil))[:16])
 	}

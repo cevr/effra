@@ -222,8 +222,17 @@ type parityOptions struct {
 // producer contract. Artifact-scoped reports are equal after only explicitly
 // named adapter envelope projections; process-scoped reports may differ only
 // in the process qualifier; "none" reports retain exact metadata equality.
+// The outer report and the embedded semantic snapshot have separate epochs.
 func assertReportParity(t *testing.T, actual, expected map[string]any, options parityOptions) {
 	t.Helper()
+	if err := checkReportParity(actual, expected, options); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// checkReportParity is assertReportParity reporting a mismatch as an error,
+// so a control can observe the oracle refusing a malformed report.
+func checkReportParity(actual, expected map[string]any, options parityOptions) error {
 	if options.reportSchema == 0 {
 		options.reportSchema = defaultReportSchema
 	}
@@ -232,37 +241,53 @@ func assertReportParity(t *testing.T, actual, expected map[string]any, options p
 	}
 	for _, report := range []map[string]any{actual, expected} {
 		if report["schemaVersion"] != float64(options.reportSchema) {
-			t.Fatalf("report schema = %v, want %d: %v", report["schemaVersion"], options.reportSchema, report)
+			return fmt.Errorf("report schema = %#v, want %d: %v", report["schemaVersion"], options.reportSchema, report)
 		}
 	}
-	actualProducer := producerSnapshot(t, actual, options.target, options.snapshotSchema)
-	expectedProducer := producerSnapshot(t, expected, options.target, options.snapshotSchema)
+	actualProducer, err := checkProducerSnapshot(actual, options.target, options.snapshotSchema)
+	if err != nil {
+		return err
+	}
+	expectedProducer, err := checkProducerSnapshot(expected, options.target, options.snapshotSchema)
+	if err != nil {
+		return err
+	}
 	for _, key := range []string{"schemaVersion", "revision", "target"} {
 		if !reflect.DeepEqual(actual[key], expected[key]) {
-			t.Fatalf("%s: %v != %v", key, actual[key], expected[key])
+			return fmt.Errorf("%s: %v != %v", key, actual[key], expected[key])
 		}
 	}
 	for _, key := range []string{"source", "sources"} {
 		left, inLeft := actual[key]
 		right, inRight := expected[key]
 		if inLeft != inRight || !reflect.DeepEqual(left, right) {
-			t.Fatalf("%s: %v != %v", key, left, right)
+			return fmt.Errorf("%s: %v != %v", key, left, right)
 		}
 	}
 	if actualProducer["reuseScope"] != expectedProducer["reuseScope"] {
-		t.Fatalf("reuse scopes differ: %v / %v", actualProducer, expectedProducer)
+		return fmt.Errorf("reuse scopes differ: %v / %v", actualProducer, expectedProducer)
 	}
-	project := func(value map[string]any) map[string]any {
-		result := deepCopyJSON(t, value)
+	project := func(value map[string]any) (map[string]any, error) {
+		result, err := copyJSON(value)
+		if err != nil {
+			return nil, err
+		}
 		for _, key := range options.ignored {
 			delete(result, key)
 		}
 		if options.project != nil {
 			result = options.project(result)
 		}
-		return result
+		return result, nil
 	}
-	left, right := project(actual), project(expected)
+	left, err := project(actual)
+	if err != nil {
+		return err
+	}
+	right, err := project(expected)
+	if err != nil {
+		return err
+	}
 	if actualProducer["reuseScope"] == "process" {
 		for _, report := range []map[string]any{left, right} {
 			report["producer"].(map[string]any)["qualifier"] = "<process>"
@@ -270,16 +295,32 @@ func assertReportParity(t *testing.T, actual, expected map[string]any, options p
 		}
 	}
 	if !reflect.DeepEqual(left, right) {
-		t.Fatalf("reports differ:\n%s\n%s", mustJSON(t, left), mustJSON(t, right))
+		leftJSON, _ := json.Marshal(left)
+		rightJSON, _ := json.Marshal(right)
+		return fmt.Errorf("reports differ:\n%s\n%s", leftJSON, rightJSON)
 	}
+	return nil
+}
+
+// copyJSON copies a decoded JSON object through its encoding.
+func copyJSON(value map[string]any) (map[string]any, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // deepCopyJSON copies a decoded JSON object.
 func deepCopyJSON(t *testing.T, value map[string]any) map[string]any {
 	t.Helper()
-	data, err := json.Marshal(value)
+	result, err := copyJSON(value)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return smokeJSON(t, data)
+	return result
 }

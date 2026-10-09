@@ -144,12 +144,51 @@ type diagnosticsSmokeFinding struct {
 	numeric  int
 }
 
+// diagnosticsSmokeEpochControls proves the parity oracle checks the outer
+// report and embedded snapshot epochs independently, and the producer
+// qualifier. Each malformed report is compared with itself so parity
+// inequality cannot make a missing epoch validator look like a refusal.
+func diagnosticsSmokeEpochControls(t *testing.T, report, remote map[string]any) {
+	t.Helper()
+	options := parityOptions{reportSchema: 1, snapshotSchema: 8}
+	assertReportParity(t, report, remote, options)
+	rejected := func(label string, mutate func(map[string]any)) {
+		t.Helper()
+		malformed := deepCopyJSON(t, report)
+		mutate(malformed)
+		if checkReportParity(malformed, malformed, options) == nil {
+			t.Fatalf("diagnostic report accepted malformed %s", label)
+		}
+	}
+	snapshot := func(value map[string]any) map[string]any { return value["snapshot"].(map[string]any) }
+	rejected("outer envelope epoch", func(value map[string]any) { value["schemaVersion"] = float64(8) })
+	rejected("boolean outer envelope epoch", func(value map[string]any) { value["schemaVersion"] = true })
+	rejected("semantic snapshot epoch", func(value map[string]any) { snapshot(value)["schemaVersion"] = float64(999) })
+	rejected("boolean semantic snapshot epoch", func(value map[string]any) { snapshot(value)["schemaVersion"] = true })
+	rejected("producer qualifier", func(value map[string]any) {
+		producer := value["producer"].(map[string]any)
+		switch producer["reuseScope"] {
+		case "artifact":
+			digest, _ := producer["digest"].(string)
+			last := "0"
+			if strings.HasSuffix(digest, "0") {
+				last = "1"
+			}
+			producer["qualifier"] = digest[:len(digest)-1] + last
+		case "process":
+			producer["qualifier"] = "process:"
+		default:
+			producer["qualifier"] = "unexpected"
+		}
+	})
+}
+
 func TestDiagnosticsSmokePositions(t *testing.T) {
 	binary := buildTestCLI(t)
 	warning := "effect fn task() -> string { \"ok\" }\r\n" +
 		"effect fn main() -> string { let s = \"𐐀é\"; " +
 		"let forgotten = task(); run task().provide<Console>(Stdout) }\r\n"
-	for _, fixture := range []struct {
+	for index, fixture := range []struct {
 		name     string
 		source   string
 		expected []diagnosticsSmokeFinding
@@ -169,7 +208,11 @@ func TestDiagnosticsSmokePositions(t *testing.T) {
 			path := diagnosticsSmokeWrite(t, directory, fixture.name, source)
 			report := diagnosticsSmokeCLI(t, binary, path, false)
 			remote := diagnosticsSmokeRemote(t, binary, directory, map[string]any{"file": fixture.name})
-			assertReportParity(t, report, remote, parityOptions{reportSchema: 1, snapshotSchema: 7})
+			assertReportParity(t, report, remote, parityOptions{reportSchema: 1, snapshotSchema: 8})
+			if index == 0 {
+				// The epoch red controls run once, on the first fixture.
+				diagnosticsSmokeEpochControls(t, report, remote)
+			}
 			digest := sha256.Sum256([]byte(source))
 			if report["revision"] != hex.EncodeToString(digest[:]) {
 				t.Fatalf("revision = %v", report["revision"])
@@ -231,7 +274,7 @@ func TestDiagnosticsSmokePositions(t *testing.T) {
 					t.Fatalf("strict changed findings: %v", strict)
 				}
 				strictRemote := diagnosticsSmokeRemote(t, binary, directory, map[string]any{"file": fixture.name, "strict": true})
-				assertReportParity(t, strictRemote, strict, parityOptions{reportSchema: 1, snapshotSchema: 7})
+				assertReportParity(t, strictRemote, strict, parityOptions{reportSchema: 1, snapshotSchema: 8})
 			}
 		})
 	}
@@ -254,7 +297,7 @@ func TestDiagnosticsSmokePositions(t *testing.T) {
 			directory := t.TempDir()
 			report := diagnosticsSmokeCLI(t, binary, diagnosticsSmokeWrite(t, directory, fixture.name, fixture.source), true)
 			remote := diagnosticsSmokeRemote(t, binary, directory, map[string]any{"file": fixture.name, "strict": true})
-			assertReportParity(t, report, remote, parityOptions{reportSchema: 1, snapshotSchema: 7})
+			assertReportParity(t, report, remote, parityOptions{reportSchema: 1, snapshotSchema: 8})
 			if report["checked"] != fixture.checked {
 				t.Fatalf("checked = %v: %v", report["checked"], report)
 			}
@@ -349,7 +392,7 @@ func TestDiagnosticsSmokeIdentity(t *testing.T) {
 			diagnosticsSmokeCLI(t, binary, requested, false),
 			diagnosticsSmokeRemote(t, binary, directory, map[string]any{"file": "dots/link/../b.ef"}),
 		} {
-			assertReportParity(t, report, expected, parityOptions{target: "go", reportSchema: 1, snapshotSchema: 7})
+			assertReportParity(t, report, expected, parityOptions{target: "go", reportSchema: 1, snapshotSchema: 8})
 		}
 	})
 	t.Run("symlink-uri", func(t *testing.T) {

@@ -170,7 +170,7 @@ Go's version is the most direct to read, and Effra keeps that directness: plain 
 
 ### Same mistakes, three compilers
 
-Each row makes one mistake in the program above and records what happens. The Effra column is the actual `ef diagnostics` output, verified by the gate ([`scripts/readme_smoke.py`](scripts/readme_smoke.py)).
+Each row makes one mistake in the program above and records what happens. The Effra column is the actual `ef diagnostics` output, verified by the gate ([`TestReadmeSmoke`](cmd/ef/readme_smoke_test.go)).
 
 | Mistake | Go | TypeScript + Effect | Effra |
 | --- | --- | --- | --- |
