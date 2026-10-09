@@ -383,7 +383,7 @@ Following *Ghosts of Departed Proofs* and Bend's laws-as-obligations, the plan i
 
 ```rust
 // Sketch: not implemented; syntax will change.
-opaque record RefundGrant {
+pub readonly record RefundGrant {
     order: OrderId
     actor: UserId
 }
