@@ -182,3 +182,45 @@ func TestAbortedCloseKeepsCleanupFailures(t *testing.T) {
 		t.Fatalf("the cleanup failure was discarded: %v", out.Cause())
 	}
 }
+
+// A layer node's owner follows the same rule (the Go side of
+// TestJSLayerNodeOwnerIsCancellationAborted): construction that ends by
+// interruption aborts the node owner, which discards the unobserved child
+// failure, while a construction that fails normally raises it beside its own.
+func TestLayerNodeOwnerIsCancellationAborted(t *testing.T) {
+	provide := func(construct func(fc *FiberContext) Exit[Unit]) Exit[int] {
+		plan := unitPlan([]Node[struct{}]{{Spec: NodeSpec{ID: "node"}, Construct: func(fc *FiberContext, _ *struct{}) Exit[Unit] {
+			return construct(fc)
+		}}}, func(Unit) struct{} { return struct{}{} })
+		return Run(Provide(plan, Unit{}, func(*struct{}) Effect[int] { return func(*FiberContext) Exit[int] { return Succeed(1) } }))
+	}
+	tags := func(exit Exit[int]) []string {
+		out := []string{}
+		for _, reason := range exit.Cause() {
+			if reason.Kind == "failure" {
+				out = append(out, "failure:"+reason.Failure.Tag)
+			} else {
+				out = append(out, reason.Kind)
+			}
+		}
+		return out
+	}
+	interrupted := provide(func(fc *FiberContext) Exit[Unit] {
+		failed := Invoke(fc, Fork(failingChild("Boom")))
+		<-failed.Value.done
+		parked := Invoke(fc, Fork(parkedChild()))
+		parked.Value.Cancel()
+		return Propagate[Unit](Invoke(fc, parked.Value.Join()))
+	})
+	if got := tags(interrupted); len(got) != 1 || got[0] != "interrupt" {
+		t.Fatalf("interrupted construction: got %v, want the interruption alone", got)
+	}
+	failed := provide(func(fc *FiberContext) Exit[Unit] {
+		child := Invoke(fc, Fork(failingChild("Boom")))
+		<-child.Value.done
+		return Fail[Unit]("Construct", nil)
+	})
+	if got := tags(failed); len(got) != 2 || got[0] != "failure:Construct" || got[1] != "failure:Boom" {
+		t.Fatalf("failed construction: got %v, want Construct then Boom", got)
+	}
+}

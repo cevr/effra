@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -784,5 +785,36 @@ func TestNamedHandlerPendingIsInstantiated(t *testing.T) {
 	}
 	if r.Checked || !guard {
 		t.Fatalf("a pending function passed as an ordinary callable must keep the guard, got checked=%v %+v", r.Checked, r.Diagnostics)
+	}
+}
+
+// A recipe annotation names no declaration itself; its success type and the
+// labels of its two rows select their checked declarations like a callable
+// annotation's (type_syntax.go).
+func TestRecipeAnnotationsSelectCheckedDeclarations(t *testing.T) {
+	const source = `error Missing { id: string }
+record Box { value: string }
+service Users { effect fn get(id: string) -> Box raises {Missing} }
+fn later(box: Box) -> Effect<Box, {Missing}, {Users}> { Users.get(box.value) }
+`
+	for _, target := range []string{"go", "js"} {
+		r := CompileFor(source, target)
+		if !r.Checked {
+			t.Fatalf("%s fixture: %+v", target, r.Diagnostics)
+		}
+		for _, want := range []struct{ name, kind string }{{"Box", "record"}, {"Missing", "error"}, {"Users", "service"}} {
+			offset := at(t, source, "-> Effect<Box, {Missing}, {Users}>", want.name)
+			query, err := r.QueryType(TypeSelection{Offset: &offset})
+			if err != nil {
+				t.Fatalf("%s %s: %v", target, want.name, err)
+			}
+			if selected := query.Selection; selected.Kind != "reference" || selected.Target == nil || selected.Target.Kind != want.kind || selected.Target.Name != want.name {
+				t.Fatalf("%s %s: selection %+v target %+v", target, want.name, selected, selected.Target)
+			}
+		}
+		offset := at(t, source, "-> Effect<Box", "Effect")
+		if _, err := r.QueryType(TypeSelection{Offset: &offset}); !errors.Is(err, ErrNoSelection) {
+			t.Fatalf("%s: Effect selected a declaration: %v", target, err)
+		}
 	}
 }
