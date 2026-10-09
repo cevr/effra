@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -422,26 +423,8 @@ func TestBundledTransportRejectsOwnerAndGraphCorruption(t *testing.T) {
 		{"closed payload owner", func(d *interfaceSummary) {
 			d.Declarations[0].Failures = []summaryFailure{{Layer: 0, Label: "Forged", Owners: []summaryOwner{{Path: "file", Status: "owned", OwnerKind: "scope", Region: summaryRegion{Kind: "unknown", Ordinal: -1}, Relation: summaryReference{Kind: "absent"}, Environment: []summaryEnvironmentOwner{}}}}}
 		}},
-		// Pending child evidence (design §5.3) is recomputed too: a forged
-		// pending entry or a fork instance outside pending is refused.
-		{"forged pending failure", func(d *interfaceSummary) {
-			d.Declarations[0].Failures = append(d.Declarations[0].Failures, summaryFailure{Layer: 0, Label: "Forged", Pending: true, Owners: []summaryOwner{}})
-		}},
-		{"fork without pending", func(d *interfaceSummary) {
-			d.Declarations[0].Failures = append(d.Declarations[0].Failures, summaryFailure{Layer: 0, Label: "Forged", Fork: "fork:1", Owners: []summaryOwner{}})
-		}},
-		{"with without pending", func(d *interfaceSummary) {
-			d.Declarations[0].Failures = append(d.Declarations[0].Failures, summaryFailure{Layer: 0, Label: "Forged", With: []string{"Nope"}, Owners: []summaryOwner{}})
-		}},
-		{"unsorted with", func(d *interfaceSummary) {
-			d.Declarations[0].Failures = append(d.Declarations[0].Failures, summaryFailure{Layer: 0, Label: "Forged", Pending: true, With: []string{"B", "A"}, Owners: []summaryOwner{}})
-		}},
-		{"empty with label", func(d *interfaceSummary) {
-			d.Declarations[0].Failures = append(d.Declarations[0].Failures, summaryFailure{Layer: 0, Label: "Forged", Pending: true, With: []string{""}, Owners: []summaryOwner{}})
-		}},
-		{"noncanonical failure order", func(d *interfaceSummary) {
-			d.Declarations[0].Failures = []summaryFailure{{Layer: 1, Label: "A", Owners: []summaryOwner{}}, {Layer: 0, Label: "B", Owners: []summaryOwner{}}}
-		}},
+		// Failure decoder invariants and pending child evidence are covered
+		// causally by TestSummaryFailureEvidenceRefusalsAreCausal.
 		{"missing type", func(d *interfaceSummary) { d.Types = d.Types[1:] }},
 		{"duplicate type", func(d *interfaceSummary) { d.Types = append(d.Types, d.Types[0]) }},
 		{"empty nonempty row", func(d *interfaceSummary) { d.Rows[0].Labels = []string{} }},
@@ -465,6 +448,120 @@ func TestBundledTransportRejectsOwnerAndGraphCorruption(t *testing.T) {
 			fresh := Compile(source)
 			if err := fresh.projector.admitInterfaceSummary(corrupt, fresh.Program.BundledFunctions); err == nil {
 				t.Fatal("corrupt summary admitted")
+			}
+		})
+	}
+}
+
+// summaryFailureFixture checks one declaration whose genuine failure
+// evidence has two ordinary labels and a pending child failure with a fork
+// instance and the ordinary failures it may be raised with.
+const summaryFailureFixture = `error Boom { code: i64 }
+error Nope { code: i64 }
+effect fn job() -> string raises { Boom } {
+    fail Boom { code: 7 }
+}
+effect fn reject() -> void raises { Nope } {
+    fail Nope { code: 2 }
+}
+effect fn sequel() -> string raises { Boom, Nope } uses { Scheduler } {
+    let a = fork job()
+    run reject()
+    run a.join()
+}
+effect fn main() -> void { void }`
+
+// summaryFailureFunctions is the fixture's transported declaration. The
+// helpers' bodies end in fail, whose never type is a body-only type the
+// summary has no owner for, so only sequel is transported.
+func summaryFailureFunctions(r *Result) []*Function {
+	return slices.DeleteFunc(slices.Clone(r.Program.Functions), func(f *Function) bool { return f.Name != "sequel" })
+}
+
+// TestSummaryFailureEvidenceRefusalsAreCausal mutates exactly one invariant
+// of otherwise valid failure evidence and requires that invariant's own
+// refusal. Each decoder check is therefore the cause of its refusal: without
+// it the mutation is admitted or refused by a different check. Forged and
+// erased entries are well formed and are refused only by the comparison
+// with the retained body.
+func TestSummaryFailureEvidenceRefusalsAreCausal(t *testing.T) {
+	producer := Compile(summaryFailureFixture)
+	if !producer.Checked {
+		t.Fatal(producer.Diagnostics)
+	}
+	dto, err := exportInterfaceSummary(producer.projector, currentModuleIdentity, "failure-evidence", summaryFailureFunctions(producer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration := slices.IndexFunc(dto.Declarations, func(d summaryDeclaration) bool { return strings.HasSuffix(d.Ref, ":sequel") })
+	if declaration < 0 {
+		t.Fatal("fixture declaration missing")
+	}
+	wantShape := []summaryFailure{
+		{Layer: 0, Label: "Boom", With: []string{}, Owners: []summaryOwner{}},
+		{Layer: 0, Label: "Nope", With: []string{}, Owners: []summaryOwner{}},
+		{Layer: 0, Label: "Boom", Pending: true, Fork: "#0", With: []string{"Boom", "Nope"}, Owners: []summaryOwner{}},
+	}
+	if got := dto.Declarations[declaration].Failures; !reflect.DeepEqual(got, wantShape) {
+		t.Fatalf("fixture failure evidence changed: %+v", got)
+	}
+	receiver := Compile(summaryFailureFixture)
+	if err := receiver.projector.admitInterfaceSummary(dto, summaryFailureFunctions(receiver)); err != nil {
+		t.Fatalf("valid failure evidence refused: %v", err)
+	}
+	wire, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, want string
+		mutate     func([]summaryFailure) []summaryFailure
+	}{
+		{"layer out of range", "failure evidence layer out of range", func(f []summaryFailure) []summaryFailure {
+			f[0].Layer = maxSummaryLayers + 1
+			return f
+		}},
+		{"missing label", "failure evidence without a label", func(f []summaryFailure) []summaryFailure {
+			f[0].Label = ""
+			return f
+		}},
+		{"fork without pending", "fork instance on non-pending failure evidence", func(f []summaryFailure) []summaryFailure {
+			f[2].Pending = false
+			return f
+		}},
+		{"with without pending", "with labels on non-pending failure evidence", func(f []summaryFailure) []summaryFailure {
+			f[2].Pending, f[2].Fork = false, ""
+			return f
+		}},
+		{"unsorted with", "noncanonical failure evidence with labels", func(f []summaryFailure) []summaryFailure {
+			f[2].With = []string{"Nope", "Boom"}
+			return f
+		}},
+		{"empty with label", "noncanonical failure evidence with labels", func(f []summaryFailure) []summaryFailure {
+			f[2].With = []string{"Boom", "Nope", ""}
+			return f
+		}},
+		{"out of canonical order", "failure evidence out of canonical order", func(f []summaryFailure) []summaryFailure {
+			f[0], f[1] = f[1], f[0]
+			return f
+		}},
+		{"forged pending failure", "failures=false", func(f []summaryFailure) []summaryFailure {
+			return append(f, summaryFailure{Layer: 0, Label: "Nope", Pending: true, Fork: "#9", With: []string{}, Owners: []summaryOwner{}})
+		}},
+		{"erased failure", "failures=false", func(f []summaryFailure) []summaryFailure {
+			return slices.Delete(f, 1, 2)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var corrupt interfaceSummary
+			if err := json.Unmarshal(wire, &corrupt); err != nil {
+				t.Fatal(err)
+			}
+			corrupt.Declarations[declaration].Failures = test.mutate(corrupt.Declarations[declaration].Failures)
+			fresh := Compile(summaryFailureFixture)
+			err := fresh.projector.admitInterfaceSummary(corrupt, summaryFailureFunctions(fresh))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("refusal = %v, want %q", err, test.want)
 			}
 		})
 	}

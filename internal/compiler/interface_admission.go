@@ -443,6 +443,9 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 	for _, ref := range slices.Sorted(maps.Keys(a.relations)) {
 		a.relation(ref, 0)
 	}
+	if a.err != nil {
+		return a.err
+	}
 	seenDeclarations := map[string]bool{}
 	type admitted struct {
 		f                   *Function
@@ -469,6 +472,11 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 		body := a.occurrence(d.Body, 0)
 		ownership, captures := a.facts(d.Ownership, 0), a.facts(d.Captures, 0)
 		failures := a.failures(d.Failures, 0)
+		// A decoder refusal is the cause: it is reported before the decoded
+		// evidence is compared with what the retained body recomputes.
+		if a.err != nil {
+			return a.err
+		}
 		if err := a.wellFormedLayers(f, ownership, captures); err != nil {
 			return err
 		}
@@ -690,13 +698,30 @@ func canonicalWith(labels []string) bool {
 
 // failures decodes payload evidence. Keys are strictly ordered, so each
 // failure has one canonical encoding; a label without an entry stays ⊤.
+// Each invariant has its own refusal, checked before the evidence is
+// compared with the retained body.
 func (a *summaryAdmission) failures(items []summaryFailure, depth int) failureEvidence {
 	var out failureEvidence
 	var previous failureKey
 	for i, item := range items {
 		key := failureKey{layer: item.Layer, label: item.Label, pending: item.Pending, fork: item.Fork, with: joinWith(item.With)}
-		if item.Layer < 0 || item.Layer > maxSummaryLayers || item.Label == "" || (!item.Pending && (item.Fork != "" || len(item.With) > 0)) || !canonicalWith(item.With) || i > 0 && compareFailureKeys(previous, key) >= 0 {
-			a.err = fmt.Errorf("noncanonical failure evidence")
+		var refusal string
+		switch {
+		case item.Layer < 0 || item.Layer > maxSummaryLayers:
+			refusal = "failure evidence layer out of range"
+		case item.Label == "":
+			refusal = "failure evidence without a label"
+		case !item.Pending && item.Fork != "":
+			refusal = "fork instance on non-pending failure evidence"
+		case !item.Pending && len(item.With) > 0:
+			refusal = "with labels on non-pending failure evidence"
+		case !canonicalWith(item.With):
+			refusal = "noncanonical failure evidence with labels"
+		case i > 0 && compareFailureKeys(previous, key) >= 0:
+			refusal = "failure evidence out of canonical order"
+		}
+		if refusal != "" {
+			a.err = fmt.Errorf("%s", refusal)
 			return nil
 		}
 		previous = key
