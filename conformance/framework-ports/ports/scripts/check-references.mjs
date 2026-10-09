@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
 
 // --counter-domain-artifacts DIR verifies counter-domain artifacts an earlier emission wrote (see
@@ -16,8 +16,23 @@ assert.ok(realpathSync(compiler).startsWith(`${path.join(root, "node_modules")}/
 const env = { ...process.env, NODE_ENV: "test", NO_COLOR: "1", FORCE_COLOR: "0" };
 console.log("reference profile: React development act (NODE_ENV=test); Solid/yield browser-production exports; leaf TypeScript6.0.3 skipLibCheck=true");
 function run(label, executable, args) {
+  return settle(label, executable, args, spawnSync(executable, args, { cwd: root, env, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }));
+}
+// start runs a command alongside others; its output is reported, as run reports it, when the caller awaits it.
+function start(label, executable, args) {
+  return new Promise(resolve => {
+    const child = spawn(executable, args, { cwd: root, env });
+    const stdout = [];
+    const stderr = [];
+    const text = chunks => Buffer.concat(chunks).toString("utf8");
+    child.stdout.on("data", chunk => stdout.push(chunk));
+    child.stderr.on("data", chunk => stderr.push(chunk));
+    child.on("error", error => resolve({ status: null, signal: null, error, stdout: text(stdout), stderr: text(stderr) }));
+    child.on("close", (status, signal) => resolve({ status, signal, error: null, stdout: text(stdout), stderr: text(stderr) }));
+  }).then(result => () => settle(label, executable, args, result));
+}
+function settle(label, executable, args, result) {
   console.log(`${label}_COMMAND=${JSON.stringify([executable, ...args])}`);
-  const result = spawnSync(executable, args, { cwd: root, env, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   console.log(`${label}_EXIT=${result.status}`);
@@ -32,10 +47,12 @@ const bunVersion = run("BUN_VERSION", "bun", ["--version"]).trim();
 assert.equal(bunVersion, "1.4.2", "references require Bun1.4.2");
 run("CAPTURE", process.execPath, ["scripts/check-yield-capture.mjs"]);
 run("DEPENDENCIES", process.execPath, ["scripts/check-dependency-profile.mjs"]);
-run("COUNTER_DOMAIN", process.execPath, ["scripts/check-counter-domain.mjs", ...(counterArtifacts ? ["--verify", path.resolve(counterArtifacts)] : [])]);
-run("VENDOR_NOEMIT", process.execPath, [compiler, "--noEmit", "-p", "tsconfig.yield.json"]);
+// The counter-domain control and the vendor build share nothing, so they run together; the consumer check needs
+// both. Emitting the vendor declarations type-checks the same program a separate --noEmit pass would.
+const counterDomain = start("COUNTER_DOMAIN", process.execPath, ["scripts/check-counter-domain.mjs", ...(counterArtifacts ? ["--verify", path.resolve(counterArtifacts)] : [])]);
 run("VENDOR_BUILD", process.execPath, ["vendor/solid-yield/scripts/build.mjs"]);
 run("VENDOR_DECLARATIONS", process.execPath, [compiler, "-p", "tsconfig.yield.json"]);
+(await counterDomain)();
 run("CONSUMER_NOEMIT", process.execPath, [compiler, "--noEmit", "-p", "tsconfig.json"]);
 run("PUBLIC_EXPORTS", process.execPath, ["--conditions=browser", "--conditions=production", "scripts/check-dependency-profile.mjs", "--built"]);
 // Bun hides per-test pass lines when it detects an AI agent caller, so per-host results come from its JUnit record.

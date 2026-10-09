@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSy
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
 
 // The control has two halves. Emission runs the compiler: it checks and builds the authored domain, the native
@@ -116,9 +116,30 @@ const evidence = { schema: "effra-counter-domain-controls-v2", mode, claim: "Dom
 const receipt = path.join(generated, mode === "emit" ? "counter-domain-emit-evidence.json" : "counter-domain-evidence.json");
 function save() { writeFileSync(receipt, `${JSON.stringify(evidence, null, 2)}\n`); }
 function run(label, executable, args, expectedFailure = false, cwd = leaf) {
-  console.log(`COUNTER_${label}_COMMAND=${JSON.stringify([executable, ...args])}`);
   const result = spawnSync(executable, args, { cwd, env, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
-  const record = { label, argv: [executable, ...args], cwd, exit: result.status, signal: result.signal, stdout: result.stdout ?? "", stderr: result.stderr ?? "", spawnError: result.error?.message ?? null, expectedFailure };
+  return settle(label, [executable, ...args], cwd, result, expectedFailure);
+}
+// start runs a command alongside the synchronous ones; finish reports it exactly as run would, in the order the
+// caller awaits it, so the log stays deterministic.
+function start(label, executable, args, cwd = leaf) {
+  return new Promise(resolve => {
+    const child = spawn(executable, args, { cwd, env });
+    const stdout = [];
+    const stderr = [];
+    const text = chunks => Buffer.concat(chunks).toString("utf8");
+    child.stdout.on("data", chunk => stdout.push(chunk));
+    child.stderr.on("data", chunk => stderr.push(chunk));
+    child.on("error", error => resolve({ status: null, signal: null, error, stdout: text(stdout), stderr: text(stderr) }));
+    child.on("close", (status, signal) => resolve({ status, signal, error: null, stdout: text(stdout), stderr: text(stderr) }));
+  }).then(result => ({ label, argv: [executable, ...args], cwd, result }));
+}
+async function finish(pending, expectedFailure = false) {
+  const { label, argv, cwd, result } = await pending;
+  return settle(label, argv, cwd, result, expectedFailure);
+}
+function settle(label, argv, cwd, result, expectedFailure) {
+  console.log(`COUNTER_${label}_COMMAND=${JSON.stringify(argv)}`);
+  const record = { label, argv, cwd, exit: result.status, signal: result.signal, stdout: result.stdout ?? "", stderr: result.stderr ?? "", spawnError: result.error?.message ?? null, expectedFailure };
   records.push(record); save();
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
@@ -145,16 +166,45 @@ function abi(module) {
   for (const name of requiredValues) assert.match(text, new RegExp(`export \\{[^}]*\\bas ${name}\\s*\\}`), `declared public export ${name}`);
   artifact(module); artifact(declarations); save();
 }
+// The positive consumer, rewritten to import one emitted module.
 function strictConsumer(label, module, filename = "positive") {
   const source = path.join(work, `${label}-${filename}.ts`);
   const specifier = path.relative(path.dirname(source), module).split(path.sep).join("/");
   const text = positive.replaceAll("../../.generated/counter.mjs", specifier.startsWith(".") ? specifier : `./${specifier}`);
   assert.ok(!text.includes("../../.generated/counter.mjs"));
   writeFileSync(source, text);
-  const config = path.join(work, `${label}-${filename}.json`);
-  writeFileSync(config, JSON.stringify({ extends: path.join(leaf, "tsconfig.counter-contract.json"), files: [source], include: [], exclude: [] }));
-  run(`${label}_TYPES`, process.execPath, [localTS, "--noEmit", "-p", config]);
-  artifact(source); artifact(config);
+  artifact(source);
+  return source;
+}
+// Every strict consumer is checked in one program under the contract profile. Each file is an ES module that
+// declares no globals, so its diagnostics are exactly those it gets alone; one program reads the libraries once
+// instead of once per consumer. Each negative must reach its one intended diagnostic, and nothing else may fail.
+const negatives = [["number", 14, /number[\s\S]*bigint/], ["state", 15, /__ef_brand_CounterState/], ["event", 33, /__ef_brand_CounterEvent/]].map(([kind, column, expected]) => ({ kind, column, expected, source: path.join(leaf, `tests/types/counter-${kind}-negative.ts`) }));
+function startContractTypes(positives) {
+  for (const source of [...positives, ...negatives.map(negative => negative.source)]) assert.ok(!/^\s*declare\s+global\b/m.test(readFileSync(source, "utf8")), `${source} declares no globals`);
+  const config = path.join(work, "contract-consumers.json");
+  writeFileSync(config, JSON.stringify({ extends: path.join(leaf, "tsconfig.counter-contract.json"), files: [...positives, ...negatives.map(negative => negative.source)], include: [], exclude: [] }));
+  artifact(config);
+  return start("CONTRACT_TYPES", process.execPath, [localTS, "--noEmit", "--pretty", "false", "-p", config]);
+}
+async function finishContractTypes(pending) {
+  const record = await finish(pending, true);
+  const output = `${record.stdout}\n${record.stderr}`;
+  const located = /^(.+)\((\d+),(\d+)\): error (TS[0-9]+): /gm;
+  const starts = [...output.matchAll(located)];
+  assert.equal(starts.length, (output.match(/error TS[0-9]+:/g) ?? []).length, "every diagnostic names its file and position");
+  const diagnostics = starts.map((match, index) => ({ file: path.resolve(leaf, match[1]), line: Number(match[2]), column: Number(match[3]), code: match[4], text: output.slice(match.index, starts[index + 1]?.index ?? output.length) }));
+  record.intendedDiagnostics = [];
+  for (const negative of negatives) {
+    const own = diagnostics.filter(diagnostic => diagnostic.file === negative.source);
+    const diagnostic = `counter-${negative.kind}-negative.ts(3,${negative.column}): error TS2345:`;
+    assert.equal(own.length, 1, `one intended negative diagnostic in ${negative.source}, not arbitrary compiler failure`);
+    assert.ok(own[0].text.includes(diagnostic), `intended parameter/brand location ${diagnostic}`);
+    assert.match(own[0].text, negative.expected);
+    record.intendedDiagnostics.push(diagnostic);
+  }
+  assert.equal(diagnostics.length, negatives.length, "the positive consumers are clean");
+  save();
 }
 function intendedMutant(record, target) {
   record.causalIdentity = classifyMutant(record, target);
@@ -217,7 +267,7 @@ function emit(compiler, dir) {
   save();
 }
 
-function verify(dir) {
+async function verify(dir) {
   // The artifacts must come from the current authored domain and harness.
   assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "manifest.json"), "utf8")), manifest(), "emitted artifacts belong to the current domain, harness and mutant");
   assert.equal(readFileSync(path.join(dir, emitted.productionNative), "utf8"), nativeSourceText(domain), "emitted production native source is the current domain and harness");
@@ -247,18 +297,14 @@ function verify(dir) {
     assert.equal(fileHash(to), fileHash(from), "canonical output is the emitted artifact");
   }
   abi(production);
-  run("POSITIVE_TYPES", process.execPath, [localTS, "--noEmit", "-p", path.join(leaf, "tsconfig.counter-contract.json")]);
-  for (const [kind, column, expected] of [["number", 14, /number[\s\S]*bigint/], ["state", 15, /__ef_brand_CounterState/], ["event", 33, /__ef_brand_CounterEvent/]]) {
-    const source = path.join(leaf, `tests/types/counter-${kind}-negative.ts`);
-    const config = path.join(work, `negative-${kind}.json`);
-    writeFileSync(config, JSON.stringify({ extends: path.join(leaf, "tsconfig.counter-contract.json"), files: [source], include: [], exclude: [] }));
-    const record = run(`NEGATIVE_${kind.toUpperCase()}`, process.execPath, [localTS, "--noEmit", "--pretty", "false", "-p", config], true);
-    const output = `${record.stdout}\n${record.stderr}`;
-    const diagnostic = `counter-${kind}-negative.ts(3,${column}): error TS2345:`;
-    assert.ok(output.includes(diagnostic), `intended parameter/brand location ${diagnostic}`);
-    assert.equal((output.match(/error TS[0-9]+:/g) ?? []).length, 1, "one intended negative diagnostic, not arbitrary compiler failure");
-    assert.match(output, expected); record.intendedDiagnostic = diagnostic; save();
+  const positives = [path.join(leaf, "tests/types/counter-positive.ts")];
+  for (const [target] of hosts) {
+    const output = path.join(dir, `${emitted.hostMutant(target)}.mjs`);
+    abi(output);
+    positives.push(strictConsumer(`${target}_PRODUCTION`, production), strictConsumer(`${target}_MUTANT`, output));
   }
+  // The type check runs while the programs execute.
+  const types = startContractTypes(positives);
   const native = path.join(dir, emitted.native);
   artifact(path.join(dir, emitted.productionNative)); artifact(native);
   const go = run("GO_PRODUCTION_RUN", native, []);
@@ -269,16 +315,15 @@ function verify(dir) {
   artifact(path.join(dir, emitted.mutantNative)); artifact(nativeMutant);
   intendedMutant(run("GO_MUTANT_RUN", nativeMutant, [], true), "Go");
   for (const [target, executable] of hosts) {
-    strictConsumer(`${target}_PRODUCTION`, production);
     const result = run(`${target}_PRODUCTION_RUN`, executable, [path.join(leaf, "tests/counter-domain.mjs"), production, target]);
     assert.deepEqual(checkedLabels(result.stdout), nativeChecks, `${target} production runs every labelled check in order`);
     assert.deepEqual(failureLines(result.stdout), [], `${target} production reports no failure`);
     assert.equal(result.stderr, "", `${target} production has no host error output`);
     assert.match(result.stdout, new RegExp(`^COUNTER_DOMAIN_TRACE_WRAP_GREEN=${target}$`, "m"));
     const output = path.join(dir, `${emitted.hostMutant(target)}.mjs`);
-    abi(output); strictConsumer(`${target}_MUTANT`, output);
     intendedMutant(run(`${target}_MUTANT_RUN`, executable, [path.join(leaf, "tests/counter-domain.mjs"), output, target], true), target);
   }
+  await finishContractTypes(types);
 }
 
 try {
@@ -311,7 +356,7 @@ try {
   const dir = path.resolve(options.emit ?? options.verify ?? path.join(work, "emitted"));
   evidence.emitted = dir;
   if (mode !== "verify") emit(compiler, dir);
-  if (mode !== "emit") verify(dir);
+  if (mode !== "emit") await verify(dir);
   assert.equal(fileHash(domainPath), hash(domain));
   assert.equal(fileHash(harnessPath), hash(harness));
   if (evidence.compilerInputs) for (const input of evidence.compilerInputs) assert.equal(fileHash(path.join(repository, input.path)), input.sha256, "compiler input PREPOST");
