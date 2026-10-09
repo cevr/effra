@@ -75,7 +75,7 @@ Where a later decision overrides the audit, the later decision wins: `machine` (
 | 28 | `machine` declaration, `Step`, static `Stay` check | KEEP | decided 2026-10-07; narrow scope, see the [state machine admission gate](state-machines.md#construct-admission-gate); audit: UNDECIDED, leaning SHRINK; superseded 2026-10-07 by the visible-construct rule |
 | 29 | `Actor<P>` client projection and operation references | UNDECIDED | a general operation-reference mechanism must reject a wrong-protocol operation |
 | 30 | codec `derive` | KEEP | compiler-fulfilled structural derivation, `derive name = Json.codec<T>(maxBodyBytes: N, maxDepth: M)` with required bounds; audit: SHRINK; superseded 2026-10-07 by the visible-construct rule |
-| 31 | `opaque` | KEEP | a modifier on record and enum declarations, not a separate form |
+| 31 | construction-authority modifier, spelled `pub readonly` | KEEP | a modifier on record and enum declarations, not a separate form; others read and match, only the owner module constructs. Owner decision 2026-10-08 replaced the earlier `opaque` spelling, which wrongly suggested hidden fields. `pub` visibility is a separate n/a row |
 | 32 | budget values | LIBRARY | required explicit choice, legal `unbounded`, justifier lint |
 | 33 | Result `?` | UNDECIDED, unadmitted | |
 | 34 | module constants, type aliases | KEEP (finite constant slice); type aliases UNDECIDED | Typed `i64`, `string` and `bool` scalar literals or direct aliases only; imports resolve only compiler-distributed public constants. Calls/effects, computed expressions and nominal constructors remain outside the constant boundary (DEF1 decision4). |
