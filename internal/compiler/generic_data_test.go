@@ -101,7 +101,7 @@ func TestGenericEnumFormattingAdmissionIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := FormatSource(formatted.Text)
-	if err != nil || second.Text != formatted.Text || FormatterIdentity != "effra/formatter-8" || FormatterSchemaVersion != 1 {
+	if err != nil || second.Text != formatted.Text || FormatterIdentity != "effra/formatter-9" || FormatterSchemaVersion != 1 {
 		t.Fatal("generic syntax formatting identity/idempotence", formatted, second, err)
 	}
 }

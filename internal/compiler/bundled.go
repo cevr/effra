@@ -13,7 +13,7 @@ import (
 // This index is compiler-distributed. It never resolves paths through the
 // filesystem, Go importer, network or an untrusted user interface file.
 //
-//go:embed bundled/functions/*.ef bundled/conversions/*.ef bundled/data/*.ef
+//go:embed bundled/functions/*.ef bundled/conversions/*.ef bundled/data/*.ef bundled/constants/*.ef
 var bundledSources embed.FS
 
 type bundledDeclaration struct {
@@ -29,6 +29,7 @@ var bundledIndex = map[string]map[string]bundledDeclaration{
 	"effra/functions":   {"call": {Source: "bundled/functions/call.ef"}, "identity": {Source: "bundled/functions/identity.ef"}, "forwardFile": {Source: "bundled/functions/forward-file.ef"}},
 	"effra/conversions": {"Codec": {Source: "bundled/conversions/codec.ef"}, "witness": {Source: "bundled/conversions/witness.ef", Dependencies: []string{"Codec"}}},
 	"effra/data":        {"Option": {Source: "bundled/data/option.ef"}, "Result": {Source: "bundled/data/result.ef"}},
+	"effra/constants":   {"defaultSuffix": {Source: "bundled/constants/default-suffix.ef"}},
 	"effra/json":        {"codec": {Derivation: jsonCodecDerivation}},
 }
 
@@ -132,6 +133,7 @@ func (r *Result) loadBundledImports(source string) {
 	p := r.Program
 	p.BundledBindings = map[string]map[string]*Function{}
 	p.BundledTypeBindings = map[string]map[string]*Record{}
+	p.BundledConstantBindings = map[string]map[string]*Constant{}
 	p.BundledDerivations = map[string]map[string]*codecDerivation{}
 	r.Sources = []SourceInfo{{ID: "source:user", Module: currentModuleIdentity, Digest: formatDigest(source)}}
 	r.ProducerIdentity = SemanticProducerIdentity
@@ -144,6 +146,7 @@ func (r *Result) loadBundledImports(source string) {
 		aliases[imp.Alias] = imp.Path
 		p.BundledBindings[imp.Alias] = map[string]*Function{}
 		p.BundledTypeBindings[imp.Alias] = map[string]*Record{}
+		p.BundledConstantBindings[imp.Alias] = map[string]*Constant{}
 		p.BundledDerivations[imp.Alias] = map[string]*codecDerivation{}
 	}
 	type request struct {
@@ -215,6 +218,9 @@ func (r *Result) loadBundledImports(source string) {
 	for _, f := range p.Functions {
 		root(f, nil)
 	}
+	for _, constant := range p.Constants {
+		visit(constant.Expr, map[string]bool{})
+	}
 	for _, codec := range p.Codecs {
 		if module := aliases[codec.Alias]; module != "" {
 			if len(queue) >= maxBundledReferences {
@@ -270,7 +276,7 @@ func (r *Result) loadBundledImports(source string) {
 			return
 		}
 		bundle, diagnostics := parse(string(data))
-		if len(diagnostics) != 0 || bundle == nil || len(bundle.Items) != 1 || (len(bundle.Functions) == 0 && len(bundle.Records) == 0 && len(bundle.Enums) == 0) {
+		if len(diagnostics) != 0 || bundle == nil || len(bundle.Items) != 1 || (len(bundle.Functions) == 0 && len(bundle.Records) == 0 && len(bundle.Enums) == 0 && len(bundle.Constants) == 0) {
 			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "invalid distributed function source " + key, Span: req.span})
 			return
 		}
@@ -305,6 +311,16 @@ func (r *Result) loadBundledImports(source string) {
 			for alias, module := range aliases {
 				if module == req.module {
 					p.BundledTypeBindings[alias][name] = r
+				}
+			}
+		} else if len(bundle.Constants) == 1 {
+			constant := bundle.Constants[0]
+			name, identity, span = constant.Name, constantIdentity(req.module, constant.Name), constant.Span
+			constant.Module, constant.SourceID, constant.Identity = req.module, source, identity
+			p.Constants = append(p.Constants, constant)
+			for alias, module := range aliases {
+				if module == req.module {
+					p.BundledConstantBindings[alias][name] = constant
 				}
 			}
 		} else {

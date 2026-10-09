@@ -125,6 +125,8 @@ type Declaration struct {
 	DataKind           string                  `json:"dataKind,omitempty"`
 	Source             string                  `json:"source,omitempty"`
 	TemplateParameters []TemplateParameterView `json:"templateParameters,omitempty"`
+	Type               *TypeRef                `json:"type,omitempty"`
+	Constant           *ConstantValue          `json:"constant,omitempty"`
 	Kind               string                  `json:"kind"`
 	Name               string                  `json:"name"`
 	Identity           string                  `json:"identity,omitempty"`
@@ -213,36 +215,38 @@ type LayerEntry struct {
 	Continuation bool
 }
 type Program struct {
-	interfaceProducer   bool
-	references          map[string]bool
-	semantic            *checker
-	BundledTemplates    []*Record
-	BundledTypeBindings map[string]map[string]*Record
-	typeExpressions     map[string]*sourceType
-	Imports             []GoImport
-	BundledImports      []BundledImport
-	BundledFunctions    []*Function
-	BundledBindings     map[string]map[string]*Function
-	Comments            []Comment
-	Items               []*SyntaxItem `json:"-"`
-	Bindings            map[string]Binding
-	host                *hostImports
-	Modules             []*goModule
-	UsedImports         map[string]bool
-	GoOnly              bool
-	Errors              map[string]Span
-	genericAngles       map[int]bool
-	ErrorDecls          []*ErrorDecl
-	Records             []*Record
-	Enums               []*Enum
-	Services            []*Service
-	Providers           []*Provider
-	Layers              []*Layer
-	Functions           []*Function
-	Codecs              []*CodecDeclaration
-	DerivedFunctions    []*Function
-	DerivedBindings     map[string]map[string]*Function
-	BundledDerivations  map[string]map[string]*codecDerivation
+	interfaceProducer       bool
+	references              map[string]bool
+	semantic                *checker
+	BundledTemplates        []*Record
+	BundledTypeBindings     map[string]map[string]*Record
+	BundledConstantBindings map[string]map[string]*Constant
+	typeExpressions         map[string]*sourceType
+	Imports                 []GoImport
+	BundledImports          []BundledImport
+	BundledFunctions        []*Function
+	BundledBindings         map[string]map[string]*Function
+	Comments                []Comment
+	Items                   []*SyntaxItem `json:"-"`
+	Bindings                map[string]Binding
+	host                    *hostImports
+	Modules                 []*goModule
+	UsedImports             map[string]bool
+	GoOnly                  bool
+	Errors                  map[string]Span
+	genericAngles           map[int]bool
+	ErrorDecls              []*ErrorDecl
+	Records                 []*Record
+	Enums                   []*Enum
+	Services                []*Service
+	Providers               []*Provider
+	Layers                  []*Layer
+	Functions               []*Function
+	Constants               []*Constant
+	Codecs                  []*CodecDeclaration
+	DerivedFunctions        []*Function
+	DerivedBindings         map[string]map[string]*Function
+	BundledDerivations      map[string]map[string]*codecDerivation
 }
 
 // SyntaxItem preserves the lexical declaration order that semantic
@@ -260,9 +264,32 @@ type SyntaxItem struct {
 	Provider      *Provider
 	Layer         *Layer
 	Function      *Function
+	Constant      *Constant
 	Codec         *CodecDeclaration
 	Span          Span
 	Extent        Span `json:"-"`
+}
+
+// ConstantValue is a checked scalar source value. Nominal constructors and
+// computed expressions remain outside the constant-default admission.
+type ConstantValue struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+}
+
+type Constant struct {
+	Name     string         `json:"name"`
+	Type     string         `json:"type"`
+	Span     Span           `json:"span"`
+	Extent   Span           `json:"-"`
+	TypeSpan Span           `json:"-"`
+	Expr     *Expr          `json:"-"`
+	Module   string         `json:"-"`
+	SourceID string         `json:"-"`
+	Identity string         `json:"-"`
+	Value    *ConstantValue `json:"-"`
+	invalid  bool
+	typeID   TypeID
 }
 type Block struct {
 	Statements []*Statement
@@ -619,6 +646,17 @@ func parseSyntax(source string) (program *Program, tokens []token, diagnostics [
 			}
 			program.ErrorDecls = append(program.ErrorDecls, decl)
 			program.Items = append(program.Items, &SyntaxItem{Kind: "error", Error: decl, Span: start})
+			p.accept(";")
+		case "const":
+			start := p.take().span
+			name := p.name()
+			p.expect(":")
+			typ, typeSpan := p.typeAnnotation()
+			p.expect("=")
+			value := p.scalarConstantExpr()
+			decl := &Constant{Name: name.text, Type: typ, TypeSpan: typeSpan, Expr: value, Span: name.span, Extent: p.extent(start)}
+			program.Constants = append(program.Constants, decl)
+			program.Items = append(program.Items, &SyntaxItem{Kind: "constant", Constant: decl, Span: start, Extent: decl.Extent})
 			p.accept(";")
 		case "record", "struct":
 			start := p.peek().span
@@ -1163,6 +1201,26 @@ func (p *parser) function(body bool) *Function {
 	f.Extent = p.extent(declSpan)
 	return f
 }
+
+// scalarConstantExpr admits a direct unary-minus integer token as one signed
+// scalar literal. It does not enable general unary expression syntax.
+func (p *parser) scalarConstantExpr() *Expr {
+	if p.peek().text == "-" {
+		minus := p.take()
+		if p.at+1 >= len(p.tokens) || p.tokens[p.at].kind != "integer" {
+			p.failSpan(minus.span, "constant value must be a scalar literal or direct constant alias")
+		}
+		magnitude := p.take()
+		span := minus.span
+		span.Length = magnitude.span.Offset + magnitude.span.Length - minus.span.Offset
+		return &Expr{Kind: "integer", Text: "-" + magnitude.text, Span: span, Extent: span}
+	}
+	if p.peek().text == "+" {
+		p.failSpan(p.peek().span, "constant value must be a scalar literal or direct constant alias")
+	}
+	return p.expr(0)
+}
+
 func (p *parser) block() *Block {
 	p.depth++
 	defer func() { p.depth-- }()

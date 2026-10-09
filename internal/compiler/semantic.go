@@ -370,6 +370,8 @@ type checker struct {
 	records                 map[string]*Record
 	enums                   map[string]*Enum
 	errors                  map[string]*ErrorDecl
+	constants               map[string]*Constant
+	constantsByModule       map[string]map[string]*Constant
 	typeIntern              map[string]*semanticTypeNode
 	typeNodes               []*semanticTypeNode
 	rowIntern               map[string]RowID
@@ -2203,6 +2205,8 @@ func newChecker(program *Program, r *Result) *checker {
 		records:                 map[string]*Record{},
 		enums:                   map[string]*Enum{},
 		errors:                  map[string]*ErrorDecl{},
+		constants:               map[string]*Constant{},
+		constantsByModule:       map[string]map[string]*Constant{},
 		typeIntern:              map[string]*semanticTypeNode{},
 		rowIntern:               map[string]RowID{},
 		nextTypeID:              1,
@@ -2310,6 +2314,7 @@ func (c *checker) check() {
 	for _, imp := range c.program.BundledImports {
 		claim(imp.Alias, imp.Span)
 	}
+	c.registerConstants(claim)
 	errors := make([]string, 0, len(c.program.Errors))
 	for name := range c.program.Errors {
 		errors = append(errors, name)
@@ -2396,6 +2401,10 @@ func (c *checker) check() {
 		}
 	}
 	c.validateDataLayouts()
+	previousRecordFacts := c.recordFacts
+	c.recordFacts = true
+	c.checkConstants()
+	c.recordFacts = previousRecordFacts
 	slices.SortStableFunc(c.result.Declarations, func(a, b Declaration) int {
 		if offset := a.Span.Offset - b.Span.Offset; offset != 0 {
 			return offset
@@ -4179,7 +4188,9 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	}
 	switch e.Kind {
 	case "integer":
-		if isMinI64Literal(e.Text) && !e.allowMinLiteral {
+		// Ordinary literals and signed constant literals must fit i64; the
+		// unsigned minimum magnitude fits only directly under unary minus.
+		if !isI64IntegerLiteral(e.Text) && !(e.allowMinLiteral && isMinI64Literal(e.Text)) {
 			c.diagnostic("EF001", "integer exceeds i64 range", e.Span)
 			break
 		}

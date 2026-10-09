@@ -52,6 +52,7 @@ type DeclarationTarget struct {
 	Extent            Span               `json:"extent"`
 	Callable          *DeclaredSignature `json:"callable,omitempty"`
 	Type              *TypeRef           `json:"type,omitempty"`
+	Constant          *ConstantValue     `json:"constant,omitempty"`
 }
 
 // DeclaredSignature is a function, operation or method's own declared
@@ -207,6 +208,8 @@ func (r *Result) selectDeclaration(declaration *Declaration, selected *SelectedT
 			selected.Target, _ = r.declarationTarget(lexicalTarget{kind: data.Kind, data: data})
 		case item.Error != nil && item.Error.Span == declaration.Span && item.Error.Name == declaration.Name:
 			selected.Target, _ = r.declarationTarget(lexicalTarget{kind: "error", failure: item.Error})
+		case item.Constant != nil && item.Constant.Span == declaration.Span && item.Constant.Name == declaration.Name:
+			selected.Target, _ = r.declarationTarget(lexicalTarget{kind: "constant", constant: item.Constant})
 		default:
 			continue
 		}
@@ -390,6 +393,20 @@ func (r *Result) declarationTarget(t lexicalTarget) (*DeclarationTarget, *Declar
 		} else {
 			located(original, f.SourceID, f.Module, f.Span, f.Extent)
 		}
+	case t.constant != nil:
+		constant := t.constant
+		target.Name, target.Identity, target.Module = constant.Name, constant.Identity, constant.Module
+		if constant.Value != nil {
+			value := *constant.Value
+			target.Constant = &value
+		}
+		if constant.typeID != invalidTypeID {
+			ref := c.identityRef(constant.typeID)
+			target.Type = &ref
+		}
+		declaration = r.declarationByIdentity(constant.Identity)
+		item := facts.items[constant]
+		located(item != nil, constant.SourceID, constant.Module, constant.Span, itemExtent(item, constant.Span))
 	case t.provider != nil:
 		p := t.provider
 		target.Name, target.Owner, target.Identity = p.Name, p.Service, providerTypeRef(p).Declaration

@@ -377,7 +377,7 @@ def formatting(directory):
             formatted = local.stdout.decode()
             shared = remote[index]["structuredContent"]
             assert shared["text"] == formatted and shared["changed"] == (formatted != source), shared
-            assert shared["formatterVersion"] == "effra/formatter-8", shared
+            assert shared["formatterVersion"] == "effra/formatter-9", shared
             if formatted == source:
                 assert reply["result"] == [], reply
             else:

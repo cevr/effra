@@ -40,6 +40,7 @@ type lexicalTarget struct {
 	failure   *ErrorDecl
 	layer     *Layer
 	codec     *CodecDeclaration
+	constant  *Constant
 	module    *SyntaxItem
 	variant   string
 	field     string
@@ -230,6 +231,9 @@ func captureOriginalSyntax(program *Program) *lexicalFacts {
 		if item.Function != nil {
 			child(id, function(item.Function))
 		}
+		if item.Constant != nil {
+			child(id, expression(item.Constant.Expr))
+		}
 		if !facts.complete {
 			break
 		}
@@ -345,6 +349,9 @@ func (facts *lexicalFacts) declare(item *SyntaxItem) {
 	case item.Function != nil:
 		facts.items[item.Function] = item
 		functions(lexicalTarget{kind: "function"}, []*Function{item.Function})
+	case item.Constant != nil:
+		facts.items[item.Constant] = item
+		name(item.Constant.Span, lexicalTarget{kind: "constant", constant: item.Constant})
 	case item.Layer != nil:
 		facts.items[item.Layer] = item
 		name(item.Layer.Span, lexicalTarget{kind: "layer", layer: item.Layer})

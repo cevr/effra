@@ -78,7 +78,7 @@ Where a later decision overrides the audit, the later decision wins: `machine` (
 | 31 | `opaque` | KEEP | a modifier on record and enum declarations, not a separate form |
 | 32 | budget values | LIBRARY | required explicit choice, legal `unbounded`, justifier lint |
 | 33 | Result `?` | UNDECIDED, unadmitted | |
-| 34 | module constants, type aliases | UNDECIDED | |
+| 34 | module constants, type aliases | KEEP (finite constant slice); type aliases UNDECIDED | Typed `i64`, `string` and `bool` scalar literals or direct aliases only; imports resolve only compiler-distributed public constants. Calls/effects, computed expressions and nominal constructors remain outside the constant boundary (DEF1 decision4). |
 | 35 | general transactions | UNDECIDED | |
 | 36 | mutable-container and portable-message admission | KEEP | |
 | 37 | service roles (`Database at Primary`) | UNDECIDED, unadmitted | |

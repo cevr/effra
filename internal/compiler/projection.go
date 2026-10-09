@@ -1193,6 +1193,9 @@ func (r *Result) ProjectDeclaration(declaration *Declaration) TypeProjection {
 }
 
 func appendDeclarationRefs(refs *[]TypeRef, declaration *Declaration) {
+	if declaration.Type != nil {
+		appendProjectionRef(refs, *declaration.Type)
+	}
 	for _, field := range declaration.Fields {
 		appendProjectionRef(refs, field.TypeRef)
 	}

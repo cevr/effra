@@ -12,7 +12,7 @@ const FormatterSchemaVersion = 1
 
 // FormatterIdentity names the syntax producer independently from semantic
 // revisions. Adapters must report this identity without querying Git.
-const FormatterIdentity = "effra/formatter-8"
+const FormatterIdentity = "effra/formatter-9"
 
 // FormatResult is the pure, syntax-only formatting snapshot. Its digest is
 // intentionally independent from a checked semantic revision: formatting
@@ -213,6 +213,8 @@ func buildFormatLayout(source string, program *Program, tokens []token) formatLa
 			}
 		case "function":
 			collectFunctionBreaks(&layout, item.Function)
+		case "constant":
+			collectExpressionBreaks(&layout, item.Constant.Expr)
 		}
 	}
 	for _, gap := range layout.listGaps {
