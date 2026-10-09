@@ -1,0 +1,37 @@
+# Size conformance
+
+Public programs and controls for the [small executable contract](../../docs/specs/binary-reachability.md). Every number they produce is a raw measurement. None is a performance claim or a size budget.
+
+| Path | Contents |
+| --- | --- |
+| `fixtures/minimal.ef` | Pure minimal entry. |
+| `fixtures/minimal-unused.ef` | The same entry plus HTTP, codec, provider, console/env and bundled declarations it never reaches. |
+| `fixtures/managed.ef` | Managed effect without platform I/O: owned children, join, interruption, a deadline and typed recovery. |
+| `fixtures/codec.ef` | Codec-only consumer of one derived JSON codec. |
+| `fixtures/http.ef` | HTTP application. It is built and measured but not run. |
+| `fixtures/direct.ef`, `fixtures/pipe.ef` | The same program written with direct calls and with the pipe. |
+| `controls/go/{minimal,managed}` | Idiomatic Go programs with the same contract, built with the same flags. They use only the standard library. |
+| `controls/ts/{minimal,managed}.ts` | TypeScript programs on Effect 4.0.1 with the same contract. `host.d.ts` declares the `process` surface they use. |
+| `receipts/*.json` | Recorded matrix runs. Each one is bound to its commit, toolchain and fixture/control/runtime hashes. |
+
+## Commands
+
+```sh
+# Deterministic retention checks. These run in the gate as part of go test ./...
+go test ./cmd/ef -run 'TestSizeFixtures|TestBuildReceipt'
+
+# One application's receipt
+ef build conformance/size/fixtures/managed.ef -o dist/managed --receipt dist/managed.receipt.json
+ef build conformance/size/fixtures/managed.ef --target js --entry -o dist/managed.mjs --receipt dist/managed.js.receipt.json
+
+# The explicit matrix. It needs go, bun and node; tsc is used when it is on PATH
+python3 scripts/size_conformance.py --out /tmp/effra-size [--record conformance/size/receipts/DATE.json]
+```
+
+The matrix builds with `CGO_ENABLED=0 -trimpath -mod=readonly`, and builds a `-ldflags=-s -w` companion for every unstripped binary. It measures every Effra and control binary with the same functions, and it fails if an Effra receipt disagrees with that measurement or if any program's output differs from the expected output. For JavaScript it reports three sizes separately:
+
+- the emitted module;
+- the minified application bundle, with `effect` external;
+- the minified deployment bundle, with `effect` inlined.
+
+The all-source counterfactual rebuilds a fixture's generation with every runtime source the compiler distributes. It measures what source selection removes that the Go linker's own dead-code elimination does not.

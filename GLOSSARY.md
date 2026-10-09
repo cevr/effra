@@ -197,4 +197,6 @@ overhead or a fixed speedup multiplier.
 
 **Test watchdog**: A harness deadline independent of program time. Forced termination leaves managed cleanup unconfirmed.
 
+**Application receipt** (implemented): A raw measurement of one built application: the runtime modules and declarations its plan retained, its generated files, imports, dependencies, executable or module bytes and symbols, and the external runtime it does not contain. It reports the compiler distribution separately and makes no performance claim.
+
 **Program time**: The time authority under which managed sleeps and deadlines execute. Test program time can advance independently of the watchdog's wall clock.
