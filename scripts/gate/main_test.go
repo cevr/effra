@@ -338,11 +338,14 @@ func TestEnvironmentInputsSeparateReducedRuns(t *testing.T) {
 	}
 }
 
-func TestGitObjectsNamedByInputsAreInputs(t *testing.T) {
+// A step that reads Git history declares no inputs, so it can never replay a
+// pass recorded while history it needs was present. The control removes only
+// a commit's root tree and keeps the commit, as a partial object store would.
+func TestHistoryReadingStepsNeverReplay(t *testing.T) {
 	root := fixture(t)
 	git := func(args ...string) string {
 		t.Helper()
-		command := exec.Command("git", append([]string{"-c", "user.name=gate", "-c", "user.email=gate@invalid", "-c", "commit.gpgsign=false"}, args...)...)
+		command := exec.Command("git", args...)
 		command.Dir = root
 		output, err := command.CombinedOutput()
 		if err != nil {
@@ -350,23 +353,51 @@ func TestGitObjectsNamedByInputsAreInputs(t *testing.T) {
 		}
 		return strings.TrimSpace(string(output))
 	}
-	// A commit only a side branch holds, named by an input file.
-	git("checkout", "-qb", "history")
-	write(t, root, "docs/history.md", "historical\n")
-	git("add", ".")
-	git("commit", "-qm", "historical")
-	historical := git("rev-parse", "HEAD")
-	git("checkout", "-q", "-")
-	write(t, root, "src/links.txt", "evidence at "+historical+"\n")
-	inputs := &Inputs{Paths: []string{"src/"}, GitObjects: true}
-	present := keyOf(t, root, inputs)
-	if keyOf(t, root, &Inputs{Paths: []string{"src/"}}) == present {
-		t.Fatal("GitObjects did not join the key")
+	commit := git("rev-parse", "HEAD")
+	tree := git("rev-parse", "HEAD^{tree}")
+	reader := []*Step{{Name: "history", Argv: []string{"sh", "-c", `mkdir -p runs && echo run >> runs/history && git ls-tree "$1" -- src/input.txt`, "history", commit}}}
+	cache := t.TempDir()
+	for run := 1; run <= 2; run++ {
+		if code, out := runGate(t, root, cache, reader); code != 0 || strings.Contains(out, "cached") || runs(t, root, "history") != run {
+			t.Fatalf("run %d: exit %d, executions %d\n%s", run, code, runs(t, root, "history"), out)
+		}
 	}
-	git("branch", "-qD", "history")
-	git("reflog", "expire", "--expire=now", "--all")
-	git("gc", "-q", "--prune=now")
-	if keyOf(t, root, inputs) == present {
-		t.Fatal("identical files replayed a key recorded while the named commit was present")
+	if err := os.Remove(filepath.Join(root, ".git", "objects", tree[:2], tree[2:])); err != nil {
+		t.Fatal(err)
+	}
+	git("cat-file", "-e", commit+"^{commit}")
+	code, out := runGate(t, root, cache, reader)
+	if code != 1 || runs(t, root, "history") != 3 || !strings.Contains(out, "== history: FAILED") {
+		t.Fatalf("a missing root tree did not fail the history reader: exit %d\n%s", code, out)
+	}
+}
+
+// Every wayfinder check whose script reaches Git, directly or through the
+// migration module, must be a history reader and so always run.
+func TestWayfinderChecksThatReadHistoryAlwaysRun(t *testing.T) {
+	repository := filepath.Join("..", "..")
+	readsGit := regexp.MustCompile(`\["git"|\bwayfinder_migration\b`)
+	steps := wayfinderSteps()
+	if len(steps) != len(pythonChecks) {
+		t.Fatalf("%d wayfinder steps for %d checks", len(steps), len(pythonChecks))
+	}
+	for index, check := range pythonChecks {
+		history := false
+		for _, argument := range check.argv {
+			if !strings.HasSuffix(argument, ".py") {
+				continue
+			}
+			source, err := os.ReadFile(filepath.Join(repository, filepath.FromSlash(argument)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			history = history || readsGit.Match(source)
+		}
+		if history != check.readsHistory {
+			t.Errorf("%s: script reaches Git = %t, readsHistory = %t", check.name, history, check.readsHistory)
+		}
+		if cached := steps[index].Inputs != nil; cached == check.readsHistory {
+			t.Errorf("%s: cached = %t, readsHistory = %t", check.name, cached, check.readsHistory)
+		}
 	}
 }

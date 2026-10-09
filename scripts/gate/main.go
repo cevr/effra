@@ -44,8 +44,9 @@ type Step struct {
 	// Argv runs in the repository root with the gate's environment.
 	Argv []string
 	// Inputs, when set, makes the step's pass reusable under the hash of
-	// exactly these inputs. Nil means the step always runs (the tool owns its
-	// cache, or the step is cheaper than hashing).
+	// exactly these inputs. Nil means the step always runs: the tool owns its
+	// cache, the step is cheaper than hashing, or it reads inputs no digest
+	// here captures, such as Git history.
 	Inputs *Inputs
 	// ToolEnv names executables the step's own cache cannot see, such as the
 	// JavaScript tools Go tests spawn. Their versions, with the environment
@@ -75,12 +76,6 @@ type Inputs struct {
 	// permissions and content and every symlink's target, following links
 	// as Node and Bun resolve them. An absent directory is a distinct input.
 	Installed []string
-	// GitObjects makes Git history an input for a step that reads it
-	// offline: whether the repository is shallow, and whether each object
-	// a selected file names by a full 40-digit hexadecimal ID is present.
-	// Identical files then never replay a pass recorded in a checkout that
-	// held history this one lacks.
-	GitObjects bool
 }
 
 type outcome int
@@ -445,22 +440,15 @@ func (g *gate) key(step *Step) (string, error) {
 	inputs := step.Inputs
 	hash := sha256.New()
 	fmt.Fprintf(hash, "%s\x00%s\x00%q\x00", cacheVersion, step.Name, step.Argv)
-	var files []string
+	files := 0
 	for _, name := range g.files {
 		if selected(name, inputs) {
 			fmt.Fprintf(hash, "file\x00%s\x00%s\x00", name, g.digests[name])
-			files = append(files, name)
+			files++
 		}
 	}
-	if len(files) == 0 {
+	if files == 0 {
 		return "", fmt.Errorf("%s: declared inputs select no files", step.Name)
-	}
-	if inputs.GitObjects {
-		state, err := g.objectPresence(files)
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(hash, "objects\x00%s\x00", state)
 	}
 	for _, tool := range inputs.Tools {
 		fmt.Fprintf(hash, "tool\x00%s\x00%s\x00", tool, g.toolVersion(tool))
@@ -487,44 +475,6 @@ func (g *gate) key(step *Step) (string, error) {
 		fmt.Fprintf(hash, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-var objectName = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
-
-// objectPresence reports whether the repository is shallow and which of the
-// object IDs named in files are present in it.
-func (g *gate) objectPresence(files []string) (string, error) {
-	names := map[string]bool{}
-	for _, name := range files {
-		content, err := os.ReadFile(filepath.Join(g.root, filepath.FromSlash(name)))
-		if err != nil {
-			continue // a missing or unreadable file is already a distinct digest
-		}
-		for _, match := range objectName.FindAll(content, -1) {
-			names[string(match)] = true
-		}
-	}
-	sorted := make([]string, 0, len(names))
-	for name := range names {
-		sorted = append(sorted, name)
-	}
-	sort.Strings(sorted)
-	shallow, err := g.git("rev-parse", "--is-shallow-repository")
-	if err != nil {
-		return "", err
-	}
-	state := "shallow=" + strings.TrimSpace(string(shallow)) + "\n"
-	if len(sorted) == 0 {
-		return state, nil
-	}
-	command := exec.Command("git", "cat-file", "--batch-check=%(objectname) %(objecttype)")
-	command.Dir = g.root
-	command.Stdin = strings.NewReader(strings.Join(sorted, "\n") + "\n")
-	output, err := command.Output()
-	if err != nil {
-		return "", fmt.Errorf("git cat-file --batch-check: %w", err)
-	}
-	return state + string(output), nil
 }
 
 // installed digests an installed tree once per gate run.

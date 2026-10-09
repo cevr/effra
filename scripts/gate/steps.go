@@ -41,16 +41,35 @@ var testInstalled = []string{"node_modules"}
 var gofmtDirectories = []string{"cmd", "internal", "runtime", "lint", "scripts/gate", "scripts/conformance", "examples/go-interop", "examples/sdk", "examples/compare", "examples/hosttypes", "examples/lintpack"}
 
 // pythonChecks are the wayfinder map's Python checks in their historical
-// order; the map-tooling lane owns their replacement.
+// order; the map-tooling lane owns their replacement. readsHistory marks the
+// checks that resolve repository links offline through Git: commits, their
+// trees and every tree on the way to a linked path. That reachable history
+// is an input no file digest captures, and keying it would mean hashing the
+// object store, so those checks always run.
 var pythonChecks = []struct {
-	name string
-	argv []string
+	name         string
+	argv         []string
+	readsHistory bool
 }{
-	{"wayfinder check", []string{"python3", "scripts/wayfinder.py", "check"}},
-	{"wayfinder migration: hosted run binding", []string{"python3", "scripts/wayfinder_migration.py", "--input-snapshot", "hosted-run-binding-2026-10-08", "--check"}},
-	{"wayfinder migration: current map", []string{"python3", "scripts/wayfinder_migration.py", "--current-identity-intake", "github-wayfinder-current-intake-2026-10-08", "--mapping", "docs/wayfinder/migration/current-hosted-identities-2026-10-09-source-reconciled.json", "--check", "--output-snapshot", "current-wayfinder-map-2026-10-09-source-reconciled"}},
-	{"wayfinder migration tests", []string{"python3", "-B", "scripts/test_wayfinder_migration.py"}},
-	{"wayfinder hosted reconciliation tests", []string{"python3", "-B", "scripts/test_wayfinder_hosted_reconciliation.py"}},
+	{"wayfinder check", []string{"python3", "scripts/wayfinder.py", "check"}, false},
+	{"wayfinder migration: hosted run binding", []string{"python3", "scripts/wayfinder_migration.py", "--input-snapshot", "hosted-run-binding-2026-10-08", "--check"}, true},
+	{"wayfinder migration: current map", []string{"python3", "scripts/wayfinder_migration.py", "--current-identity-intake", "github-wayfinder-current-intake-2026-10-08", "--mapping", "docs/wayfinder/migration/current-hosted-identities-2026-10-09-source-reconciled.json", "--check", "--output-snapshot", "current-wayfinder-map-2026-10-09-source-reconciled"}, true},
+	{"wayfinder migration tests", []string{"python3", "-B", "scripts/test_wayfinder_migration.py"}, true},
+	{"wayfinder hosted reconciliation tests", []string{"python3", "-B", "scripts/test_wayfinder_hosted_reconciliation.py"}, true},
+}
+
+// wayfinderSteps caches only the checks that read nothing but their files.
+func wayfinderSteps() []*Step {
+	inputs := &Inputs{Paths: []string{"scripts/*.py", "docs/wayfinder/", ".gitignore"}, Tools: []string{"python3"}}
+	var steps []*Step
+	for _, check := range pythonChecks {
+		step := &Step{Name: check.name, Argv: check.argv}
+		if !check.readsHistory {
+			step.Inputs = inputs
+		}
+		steps = append(steps, step)
+	}
+	return steps
 }
 
 func gateSteps(root string) ([]*Step, error) {
@@ -61,22 +80,8 @@ func gateSteps(root string) ([]*Step, error) {
 	}
 	add(&Step{Name: "no tracked python bytecode", Argv: []string{"sh", "-c", `tracked=$(git ls-files '*.pyc'); if [ -n "$tracked" ]; then echo "tracked Python bytecode (git rm it; __pycache__/ is ignored):"; echo "$tracked"; exit 1; fi`}})
 
-	python := []string{"python3", "git"}
-	// The migration checks resolve historical repository links offline
-	// from this repository's object store.
-	wayfinder := &Inputs{Paths: []string{"scripts/*.py", "docs/wayfinder/", ".gitignore"}, Tools: python, GitObjects: true}
-	for _, check := range pythonChecks {
-		inputs := wayfinder
-		if check.name == "wayfinder hosted reconciliation tests" {
-			// Its ordinary-clone control refuses unstaged or untracked files,
-			// then reruns the checker in a clone rebuilt from HEAD plus the
-			// staged patch. Git guarantees that clone holds the staged tree,
-			// so beyond committability only the checker's own inputs matter.
-			// EFFRA_SKIP_ORDINARY_CLONE=1 skips that control, so it is an
-			// input: a reduced run never replays as the full one.
-			inputs = &Inputs{Paths: wayfinder.Paths, Tools: python, Clean: true, GitObjects: true, Env: []string{"EFFRA_SKIP_ORDINARY_CLONE"}}
-		}
-		add(&Step{Name: check.name, Argv: check.argv, Inputs: inputs})
+	for _, step := range wayfinderSteps() {
+		add(step)
 	}
 	// The corpus verifier reads the pinned submodule's git objects and the
 	// mapping names evidence tests in internal/compiler. Its own tests run with

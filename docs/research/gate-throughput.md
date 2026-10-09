@@ -50,7 +50,7 @@ Every check the old gate ran still runs. `go run ./scripts/gate --list` prints t
 | Old command | Now |
 | --- | --- |
 | tracked `*.pyc` check | step `no tracked python bytecode` |
-| 5 wayfinder commands | same commands, cached on `scripts/*.py`, `docs/wayfinder/` and `.gitignore`. The hosted-reconciliation test is also keyed on committability, because it refuses a dirty tree and rebuilds a clone from HEAD. The map-tooling lane owns their replacement. |
+| 5 wayfinder commands | same commands. `wayfinder check` reads only its files and is cached on `scripts/*.py`, `docs/wayfinder/` and `.gitignore`. The other four resolve repository links offline through commits and the trees beneath them; no file digest captures that history, so they run every time. The map-tooling lane owns their replacement. |
 | `import_effect_conformance.py`, `check_effect_conformance.py` | `go run ./scripts/conformance import`, `go run ./scripts/conformance check`, keyed on the corpus, mapping, verifier and submodule state. Both produce the same output and refusals as the Python. |
 | `test_import_effect_conformance.py`, `test_effect_conformance.py` | `go test ./scripts/conformance`, with every Python case ported, inside `go test (other packages)` |
 | gofmt, `go vet ./...` | same, gofmt also covering `scripts/gate` and `scripts/conformance` |
