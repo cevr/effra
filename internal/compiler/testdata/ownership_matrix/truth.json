@@ -1,0 +1,7012 @@
+[
+{
+"name": "s1_run@1_plain",
+"go": "safe"
+},
+{
+"name": "s1_run@1_provide-in",
+"go": "safe"
+},
+{
+"name": "s1_run@1_recover-in",
+"go": "safe"
+},
+{
+"name": "s1_run@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "s1_run@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "s1_run@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "s1_run@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "s1_run@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "s1_run@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "s1_run@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "s1_run@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "s1_run@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "s1_timeout@1_plain",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s1_timeout@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_plain",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s1_scope@1_plain",
+"go": "unsafe"
+},
+{
+"name": "s1_scope@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "s1_scope@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "s1_scope@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "s1_scope@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s1_scope@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s1_scope@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s1_scope@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s1_scope@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s1_scope@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s1_scope@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s1_scope@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_plain",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s1_provision@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s2_run@1_plain",
+"go": "safe"
+},
+{
+"name": "s2_run@1_provide-in",
+"go": "safe"
+},
+{
+"name": "s2_run@1_recover-in",
+"go": "safe"
+},
+{
+"name": "s2_run@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "s2_run@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "s2_run@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "s2_run@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "s2_run@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "s2_run@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "s2_run@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "s2_run@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "s2_run@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "s2_timeout@1_plain",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s2_timeout@2_plain",
+"go": "safe"
+},
+{
+"name": "s2_timeout@2_provide-in",
+"go": "safe"
+},
+{
+"name": "s2_timeout@2_provide-out",
+"go": "safe"
+},
+{
+"name": "s2_timeout@2_recover-in",
+"go": "safe"
+},
+{
+"name": "s2_timeout@2_recover-out",
+"go": "safe"
+},
+{
+"name": "s2_timeout@2_catch-in",
+"go": "safe"
+},
+{
+"name": "s2_timeout@2_catch-out",
+"go": "safe"
+},
+{
+"name": "s2_timeout@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "s2_timeout@2_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "s2_timeout@2_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "s2_timeout@2_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "s2_timeout@2_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "s2_fork@1_plain",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s2_fork@2_plain",
+"go": "safe"
+},
+{
+"name": "s2_fork@2_provide-in",
+"go": "safe"
+},
+{
+"name": "s2_fork@2_provide-out",
+"go": "safe"
+},
+{
+"name": "s2_fork@2_recover-in",
+"go": "safe"
+},
+{
+"name": "s2_fork@2_recover-out",
+"go": "safe"
+},
+{
+"name": "s2_fork@2_catch-in",
+"go": "safe"
+},
+{
+"name": "s2_fork@2_catch-out",
+"go": "safe"
+},
+{
+"name": "s2_fork@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "s2_fork@2_plain_if-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "s2_fork@2_plain_if-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "s2_fork@2_plain_match-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "s2_fork@2_plain_match-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "s2_scope@1_plain",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s2_scope@2_plain",
+"go": "safe"
+},
+{
+"name": "s2_scope@2_provide-in",
+"go": "safe"
+},
+{
+"name": "s2_scope@2_recover-in",
+"go": "safe"
+},
+{
+"name": "s2_scope@2_catch-in",
+"go": "safe"
+},
+{
+"name": "s2_scope@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "s2_scope@2_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "s2_scope@2_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "s2_scope@2_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "s2_scope@2_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "s2_provision@1_plain",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s2_provision@2_plain",
+"go": "safe"
+},
+{
+"name": "s2_provision@2_provide-in",
+"go": "safe"
+},
+{
+"name": "s2_provision@2_provide-out",
+"go": "safe"
+},
+{
+"name": "s2_provision@2_recover-in",
+"go": "safe"
+},
+{
+"name": "s2_provision@2_recover-out",
+"go": "safe"
+},
+{
+"name": "s2_provision@2_catch-in",
+"go": "safe"
+},
+{
+"name": "s2_provision@2_catch-out",
+"go": "safe"
+},
+{
+"name": "s2_provision@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "s2_provision@2_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "s2_provision@2_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "s2_provision@2_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "s2_provision@2_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_run@1_plain",
+"go": "safe"
+},
+{
+"name": "s3_run@1_provide-in",
+"go": "safe"
+},
+{
+"name": "s3_run@1_recover-in",
+"go": "safe"
+},
+{
+"name": "s3_run@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "s3_run@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_run@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "s3_run@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_run@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "s3_run@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_run@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "s3_run@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_run@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_plain",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_provide-in",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_provide-out",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_recover-in",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_recover-out",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_helper_plain",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_timeout@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "s3_timeout@2_plain",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_provide-out",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_recover-out",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s3_timeout@3_plain",
+"go": "safe"
+},
+{
+"name": "s3_timeout@3_provide-in",
+"go": "safe"
+},
+{
+"name": "s3_timeout@3_provide-out",
+"go": "safe"
+},
+{
+"name": "s3_timeout@3_recover-in",
+"go": "safe"
+},
+{
+"name": "s3_timeout@3_recover-out",
+"go": "safe"
+},
+{
+"name": "s3_timeout@3_catch-in",
+"go": "safe"
+},
+{
+"name": "s3_timeout@3_catch-out",
+"go": "safe"
+},
+{
+"name": "s3_timeout@3_cb_plain",
+"go": "safe"
+},
+{
+"name": "s3_timeout@3_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_timeout@3_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_timeout@3_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_timeout@3_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_fork@1_plain",
+"go": "safe"
+},
+{
+"name": "s3_fork@1_provide-in",
+"go": "safe"
+},
+{
+"name": "s3_fork@1_provide-out",
+"go": "safe"
+},
+{
+"name": "s3_fork@1_recover-in",
+"go": "safe"
+},
+{
+"name": "s3_fork@1_recover-out",
+"go": "safe"
+},
+{
+"name": "s3_fork@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "s3_fork@1_helper_plain",
+"go": "safe"
+},
+{
+"name": "s3_fork@1_plain_if-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "s3_fork@1_plain_if-main-first-result",
+"go": "declared-row-policy"
+},
+{
+"name": "s3_fork@1_plain_if-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "s3_fork@1_plain_if-main-second-result",
+"go": "declared-row-policy"
+},
+{
+"name": "s3_fork@1_plain_match-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "s3_fork@1_plain_match-main-first-result",
+"go": "declared-row-policy"
+},
+{
+"name": "s3_fork@1_plain_match-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "s3_fork@1_plain_match-main-second-result",
+"go": "declared-row-policy"
+},
+{
+"name": "s3_fork@2_plain",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_provide-out",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_recover-out",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s3_fork@3_plain",
+"go": "safe"
+},
+{
+"name": "s3_fork@3_provide-in",
+"go": "safe"
+},
+{
+"name": "s3_fork@3_provide-out",
+"go": "safe"
+},
+{
+"name": "s3_fork@3_recover-in",
+"go": "safe"
+},
+{
+"name": "s3_fork@3_recover-out",
+"go": "safe"
+},
+{
+"name": "s3_fork@3_catch-in",
+"go": "safe"
+},
+{
+"name": "s3_fork@3_catch-out",
+"go": "safe"
+},
+{
+"name": "s3_fork@3_cb_plain",
+"go": "safe"
+},
+{
+"name": "s3_fork@3_plain_if-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "s3_fork@3_plain_if-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "s3_fork@3_plain_match-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "s3_fork@3_plain_match-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "s3_scope@1_plain",
+"go": "safe"
+},
+{
+"name": "s3_scope@1_provide-in",
+"go": "safe"
+},
+{
+"name": "s3_scope@1_recover-in",
+"go": "safe"
+},
+{
+"name": "s3_scope@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "s3_scope@1_helper_plain",
+"go": "safe"
+},
+{
+"name": "s3_scope@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_scope@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "s3_scope@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_scope@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "s3_scope@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_scope@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "s3_scope@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_scope@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "s3_scope@2_plain",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@2_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s3_scope@3_plain",
+"go": "safe"
+},
+{
+"name": "s3_scope@3_provide-in",
+"go": "safe"
+},
+{
+"name": "s3_scope@3_recover-in",
+"go": "safe"
+},
+{
+"name": "s3_scope@3_catch-in",
+"go": "safe"
+},
+{
+"name": "s3_scope@3_cb_plain",
+"go": "safe"
+},
+{
+"name": "s3_scope@3_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_scope@3_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_scope@3_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_scope@3_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_plain",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_provide-in",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_provide-out",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_recover-in",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_recover-out",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_helper_plain",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_provision@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "s3_provision@2_plain",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_provide-out",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_recover-out",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "s3_provision@3_plain",
+"go": "safe"
+},
+{
+"name": "s3_provision@3_provide-in",
+"go": "safe"
+},
+{
+"name": "s3_provision@3_provide-out",
+"go": "safe"
+},
+{
+"name": "s3_provision@3_recover-in",
+"go": "safe"
+},
+{
+"name": "s3_provision@3_recover-out",
+"go": "safe"
+},
+{
+"name": "s3_provision@3_catch-in",
+"go": "safe"
+},
+{
+"name": "s3_provision@3_catch-out",
+"go": "safe"
+},
+{
+"name": "s3_provision@3_cb_plain",
+"go": "safe"
+},
+{
+"name": "s3_provision@3_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_provision@3_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "s3_provision@3_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "s3_provision@3_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h1_run@1_plain",
+"go": "safe"
+},
+{
+"name": "h1_run@1_provide-in",
+"go": "safe"
+},
+{
+"name": "h1_run@1_recover-in",
+"go": "safe"
+},
+{
+"name": "h1_run@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "h1_run@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "h1_run@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "h1_run@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "h1_run@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "h1_run@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "h1_run@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "h1_run@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h1_run@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "h1_timeout@1_plain",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h1_timeout@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_plain",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h1_fork@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h1_scope@1_plain",
+"go": "unsafe"
+},
+{
+"name": "h1_scope@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "h1_scope@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h1_scope@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "h1_scope@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h1_scope@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h1_scope@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h1_scope@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h1_scope@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h1_scope@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h1_scope@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h1_scope@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_plain",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h1_provision@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h2_run@1_plain",
+"go": "safe"
+},
+{
+"name": "h2_run@1_provide-in",
+"go": "safe"
+},
+{
+"name": "h2_run@1_recover-in",
+"go": "safe"
+},
+{
+"name": "h2_run@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "h2_run@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "h2_run@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "h2_run@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "h2_run@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "h2_run@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "h2_run@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "h2_run@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h2_run@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "h2_timeout@1_plain",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@2_plain",
+"go": "safe"
+},
+{
+"name": "h2_timeout@2_provide-in",
+"go": "safe"
+},
+{
+"name": "h2_timeout@2_provide-out",
+"go": "safe"
+},
+{
+"name": "h2_timeout@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@2_recover-out",
+"go": "safe"
+},
+{
+"name": "h2_timeout@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "h2_timeout@2_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "h2_timeout@2_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "h2_timeout@2_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "h2_timeout@2_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "h2_timeout@2_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "h2_timeout@2_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "h2_timeout@2_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h2_timeout@2_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "h2_fork@1_plain",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@2_plain",
+"go": "safe"
+},
+{
+"name": "h2_fork@2_provide-in",
+"go": "safe"
+},
+{
+"name": "h2_fork@2_provide-out",
+"go": "safe"
+},
+{
+"name": "h2_fork@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@2_recover-out",
+"go": "safe"
+},
+{
+"name": "h2_fork@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "h2_fork@2_plain_if-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "h2_fork@2_plain_if-main-first-result",
+"go": "declared-row-policy"
+},
+{
+"name": "h2_fork@2_plain_if-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "h2_fork@2_plain_if-main-second-result",
+"go": "declared-row-policy"
+},
+{
+"name": "h2_fork@2_plain_match-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "h2_fork@2_plain_match-main-first-result",
+"go": "declared-row-policy"
+},
+{
+"name": "h2_fork@2_plain_match-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "h2_fork@2_plain_match-main-second-result",
+"go": "declared-row-policy"
+},
+{
+"name": "h2_scope@1_plain",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@2_plain",
+"go": "safe"
+},
+{
+"name": "h2_scope@2_provide-in",
+"go": "safe"
+},
+{
+"name": "h2_scope@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "h2_scope@2_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "h2_scope@2_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "h2_scope@2_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "h2_scope@2_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "h2_scope@2_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "h2_scope@2_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "h2_scope@2_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h2_scope@2_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "h2_provision@1_plain",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@2_plain",
+"go": "safe"
+},
+{
+"name": "h2_provision@2_provide-in",
+"go": "safe"
+},
+{
+"name": "h2_provision@2_provide-out",
+"go": "safe"
+},
+{
+"name": "h2_provision@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@2_recover-out",
+"go": "safe"
+},
+{
+"name": "h2_provision@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "h2_provision@2_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "h2_provision@2_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "h2_provision@2_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "h2_provision@2_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "h2_provision@2_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "h2_provision@2_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "h2_provision@2_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h2_provision@2_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_run@1_plain",
+"go": "safe"
+},
+{
+"name": "h3_run@1_provide-in",
+"go": "safe"
+},
+{
+"name": "h3_run@1_recover-in",
+"go": "safe"
+},
+{
+"name": "h3_run@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "h3_run@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_run@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_run@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_run@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_run@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_run@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_run@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_run@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_plain",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_provide-in",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_provide-out",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_recover-in",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_recover-out",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_helper_plain",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_timeout@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_timeout@2_plain",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_provide-out",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_recover-out",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@3_plain",
+"go": "safe"
+},
+{
+"name": "h3_timeout@3_provide-in",
+"go": "safe"
+},
+{
+"name": "h3_timeout@3_provide-out",
+"go": "safe"
+},
+{
+"name": "h3_timeout@3_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@3_recover-out",
+"go": "safe"
+},
+{
+"name": "h3_timeout@3_cb_plain",
+"go": "safe"
+},
+{
+"name": "h3_timeout@3_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_timeout@3_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_timeout@3_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_timeout@3_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_timeout@3_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_timeout@3_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_timeout@3_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_timeout@3_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_fork@1_plain",
+"go": "safe"
+},
+{
+"name": "h3_fork@1_provide-in",
+"go": "safe"
+},
+{
+"name": "h3_fork@1_provide-out",
+"go": "safe"
+},
+{
+"name": "h3_fork@1_recover-in",
+"go": "safe"
+},
+{
+"name": "h3_fork@1_recover-out",
+"go": "safe"
+},
+{
+"name": "h3_fork@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "h3_fork@1_helper_plain",
+"go": "safe"
+},
+{
+"name": "h3_fork@1_plain_if-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@1_plain_if-main-first-result",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@1_plain_if-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@1_plain_if-main-second-result",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@1_plain_match-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@1_plain_match-main-first-result",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@1_plain_match-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@1_plain_match-main-second-result",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@2_plain",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_provide-out",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_recover-out",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@3_plain",
+"go": "safe"
+},
+{
+"name": "h3_fork@3_provide-in",
+"go": "safe"
+},
+{
+"name": "h3_fork@3_provide-out",
+"go": "safe"
+},
+{
+"name": "h3_fork@3_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@3_recover-out",
+"go": "safe"
+},
+{
+"name": "h3_fork@3_cb_plain",
+"go": "safe"
+},
+{
+"name": "h3_fork@3_plain_if-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@3_plain_if-main-first-result",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@3_plain_if-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@3_plain_if-main-second-result",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@3_plain_match-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@3_plain_match-main-first-result",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@3_plain_match-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_fork@3_plain_match-main-second-result",
+"go": "declared-row-policy"
+},
+{
+"name": "h3_scope@1_plain",
+"go": "safe"
+},
+{
+"name": "h3_scope@1_provide-in",
+"go": "safe"
+},
+{
+"name": "h3_scope@1_recover-in",
+"go": "safe"
+},
+{
+"name": "h3_scope@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "h3_scope@1_helper_plain",
+"go": "safe"
+},
+{
+"name": "h3_scope@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_scope@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_scope@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_scope@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_scope@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_scope@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_scope@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_scope@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_scope@2_plain",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@2_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@3_plain",
+"go": "safe"
+},
+{
+"name": "h3_scope@3_provide-in",
+"go": "safe"
+},
+{
+"name": "h3_scope@3_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@3_cb_plain",
+"go": "safe"
+},
+{
+"name": "h3_scope@3_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_scope@3_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_scope@3_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_scope@3_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_scope@3_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_scope@3_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_scope@3_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_scope@3_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_plain",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_provide-in",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_provide-out",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_recover-in",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_recover-out",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_helper_plain",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_provision@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_provision@2_plain",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_provide-out",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_recover-out",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@3_plain",
+"go": "safe"
+},
+{
+"name": "h3_provision@3_provide-in",
+"go": "safe"
+},
+{
+"name": "h3_provision@3_provide-out",
+"go": "safe"
+},
+{
+"name": "h3_provision@3_recover-in",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@3_recover-out",
+"go": "safe"
+},
+{
+"name": "h3_provision@3_cb_plain",
+"go": "safe"
+},
+{
+"name": "h3_provision@3_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_provision@3_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_provision@3_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_provision@3_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "h3_provision@3_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "h3_provision@3_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "h3_provision@3_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "h3_provision@3_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "p2_run@1_plain",
+"go": "safe"
+},
+{
+"name": "p2_run@1_provide-in",
+"go": "safe"
+},
+{
+"name": "p2_run@1_recover-in",
+"go": "safe"
+},
+{
+"name": "p2_run@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "p2_run@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "p2_run@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "p2_run@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "p2_run@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "p2_run@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "p2_run@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "p2_run@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "p2_run@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "p2_timeout@1_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_provide-out",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_recover-out",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_timeout@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_provide-out",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_recover-out",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_fork@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@2_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_scope@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_provide-out",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_recover-out",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p2_provision@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_run@1_plain",
+"go": "safe"
+},
+{
+"name": "p3_run@1_provide-in",
+"go": "safe"
+},
+{
+"name": "p3_run@1_recover-in",
+"go": "safe"
+},
+{
+"name": "p3_run@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "p3_run@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "p3_run@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "p3_run@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "p3_run@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "p3_run@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "p3_run@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "p3_run@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "p3_run@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "p3_timeout@1_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@2_plain",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_provide-in",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_provide-out",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_recover-in",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_recover-out",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_helper_plain",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "p3_timeout@2_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "p3_timeout@3_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_provide-out",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_recover-out",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_timeout@3_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@2_plain",
+"go": "safe"
+},
+{
+"name": "p3_fork@2_provide-in",
+"go": "safe"
+},
+{
+"name": "p3_fork@2_provide-out",
+"go": "safe"
+},
+{
+"name": "p3_fork@2_recover-in",
+"go": "safe"
+},
+{
+"name": "p3_fork@2_recover-out",
+"go": "safe"
+},
+{
+"name": "p3_fork@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "p3_fork@2_helper_plain",
+"go": "safe"
+},
+{
+"name": "p3_fork@2_plain_if-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "p3_fork@2_plain_if-main-first-result",
+"go": "declared-row-policy"
+},
+{
+"name": "p3_fork@2_plain_if-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "p3_fork@2_plain_if-main-second-result",
+"go": "declared-row-policy"
+},
+{
+"name": "p3_fork@2_plain_match-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "p3_fork@2_plain_match-main-first-result",
+"go": "declared-row-policy"
+},
+{
+"name": "p3_fork@2_plain_match-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "p3_fork@2_plain_match-main-second-result",
+"go": "declared-row-policy"
+},
+{
+"name": "p3_fork@3_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_provide-out",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_recover-out",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_fork@3_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@2_plain",
+"go": "safe"
+},
+{
+"name": "p3_scope@2_provide-in",
+"go": "safe"
+},
+{
+"name": "p3_scope@2_recover-in",
+"go": "safe"
+},
+{
+"name": "p3_scope@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "p3_scope@2_helper_plain",
+"go": "safe"
+},
+{
+"name": "p3_scope@2_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "p3_scope@2_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "p3_scope@2_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "p3_scope@2_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "p3_scope@2_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "p3_scope@2_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "p3_scope@2_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "p3_scope@2_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "p3_scope@3_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@3_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@3_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@3_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@3_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@3_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@3_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@3_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@3_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@3_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@3_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_scope@3_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@2_plain",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_provide-in",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_provide-out",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_recover-in",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_recover-out",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_helper_plain",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "p3_provision@2_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "p3_provision@3_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_provide-in",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_provide-out",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_recover-in",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_recover-out",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "p3_provision@3_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f1_run@1_plain",
+"go": "safe"
+},
+{
+"name": "f1_run@1_provide-in",
+"go": "safe"
+},
+{
+"name": "f1_run@1_recover-in",
+"go": "safe"
+},
+{
+"name": "f1_run@1_catch-in",
+"go": "safe"
+},
+{
+"name": "f1_run@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "f1_run@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "f1_run@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "f1_run@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "f1_run@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "f1_timeout@1_plain",
+"go": "unsafe"
+},
+{
+"name": "f1_timeout@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "f1_timeout@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "f1_timeout@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "f1_timeout@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "f1_timeout@1_catch-in",
+"go": "unsafe"
+},
+{
+"name": "f1_timeout@1_catch-out",
+"go": "unsafe"
+},
+{
+"name": "f1_timeout@1_plain_handler-in",
+"go": "safe"
+},
+{
+"name": "f1_timeout@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "f1_timeout@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f1_timeout@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f1_timeout@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f1_timeout@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f1_fork@1_plain",
+"go": "unsafe"
+},
+{
+"name": "f1_fork@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "f1_fork@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "f1_fork@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "f1_fork@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "f1_fork@1_catch-in",
+"go": "unsafe"
+},
+{
+"name": "f1_fork@1_catch-out",
+"go": "unsafe"
+},
+{
+"name": "f1_fork@1_plain_handler-in",
+"go": "safe"
+},
+{
+"name": "f1_fork@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "f1_fork@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f1_fork@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f1_fork@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f1_fork@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f1_scope@1_plain",
+"go": "unsafe"
+},
+{
+"name": "f1_scope@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "f1_scope@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "f1_scope@1_catch-in",
+"go": "unsafe"
+},
+{
+"name": "f1_scope@1_plain_handler-in",
+"go": "safe"
+},
+{
+"name": "f1_scope@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "f1_scope@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f1_scope@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f1_scope@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f1_scope@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f1_provision@1_plain",
+"go": "unsafe"
+},
+{
+"name": "f1_provision@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "f1_provision@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "f1_provision@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "f1_provision@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "f1_provision@1_catch-in",
+"go": "unsafe"
+},
+{
+"name": "f1_provision@1_catch-out",
+"go": "unsafe"
+},
+{
+"name": "f1_provision@1_plain_handler-in",
+"go": "safe"
+},
+{
+"name": "f1_provision@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "f1_provision@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f1_provision@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f1_provision@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f1_provision@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f2_run@1_plain",
+"go": "safe"
+},
+{
+"name": "f2_run@1_provide-in",
+"go": "safe"
+},
+{
+"name": "f2_run@1_recover-in",
+"go": "safe"
+},
+{
+"name": "f2_run@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "f2_run@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "f2_run@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "f2_run@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "f2_run@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "f2_run@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "f2_run@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "f2_run@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "f2_run@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "f2_timeout@1_plain",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f2_timeout@2_plain",
+"go": "safe"
+},
+{
+"name": "f2_timeout@2_provide-in",
+"go": "safe"
+},
+{
+"name": "f2_timeout@2_provide-out",
+"go": "safe"
+},
+{
+"name": "f2_timeout@2_recover-in",
+"go": "safe"
+},
+{
+"name": "f2_timeout@2_recover-out",
+"go": "safe"
+},
+{
+"name": "f2_timeout@2_catch-in",
+"go": "safe"
+},
+{
+"name": "f2_timeout@2_catch-out",
+"go": "safe"
+},
+{
+"name": "f2_timeout@2_plain_handler-in",
+"go": "safe"
+},
+{
+"name": "f2_timeout@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "f2_timeout@2_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "f2_timeout@2_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "f2_timeout@2_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "f2_timeout@2_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "f2_fork@1_plain",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f2_fork@2_plain",
+"go": "safe"
+},
+{
+"name": "f2_fork@2_provide-in",
+"go": "safe"
+},
+{
+"name": "f2_fork@2_provide-out",
+"go": "safe"
+},
+{
+"name": "f2_fork@2_recover-in",
+"go": "safe"
+},
+{
+"name": "f2_fork@2_recover-out",
+"go": "safe"
+},
+{
+"name": "f2_fork@2_catch-in",
+"go": "safe"
+},
+{
+"name": "f2_fork@2_catch-out",
+"go": "safe"
+},
+{
+"name": "f2_fork@2_plain_handler-in",
+"go": "safe"
+},
+{
+"name": "f2_fork@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "f2_fork@2_plain_if-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "f2_fork@2_plain_if-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "f2_fork@2_plain_match-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "f2_fork@2_plain_match-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "f2_scope@1_plain",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f2_scope@2_plain",
+"go": "safe"
+},
+{
+"name": "f2_scope@2_provide-in",
+"go": "safe"
+},
+{
+"name": "f2_scope@2_recover-in",
+"go": "safe"
+},
+{
+"name": "f2_scope@2_catch-in",
+"go": "safe"
+},
+{
+"name": "f2_scope@2_plain_handler-in",
+"go": "safe"
+},
+{
+"name": "f2_scope@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "f2_scope@2_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "f2_scope@2_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "f2_scope@2_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "f2_scope@2_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "f2_provision@1_plain",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_provide-in",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_provide-out",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_recover-in",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_recover-out",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@1_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f2_provision@2_plain",
+"go": "safe"
+},
+{
+"name": "f2_provision@2_provide-in",
+"go": "safe"
+},
+{
+"name": "f2_provision@2_provide-out",
+"go": "safe"
+},
+{
+"name": "f2_provision@2_recover-in",
+"go": "safe"
+},
+{
+"name": "f2_provision@2_recover-out",
+"go": "safe"
+},
+{
+"name": "f2_provision@2_catch-in",
+"go": "safe"
+},
+{
+"name": "f2_provision@2_catch-out",
+"go": "safe"
+},
+{
+"name": "f2_provision@2_plain_handler-in",
+"go": "safe"
+},
+{
+"name": "f2_provision@2_cb_plain",
+"go": "safe"
+},
+{
+"name": "f2_provision@2_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "f2_provision@2_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "f2_provision@2_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "f2_provision@2_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_run@1_plain",
+"go": "safe"
+},
+{
+"name": "f3_run@1_provide-in",
+"go": "safe"
+},
+{
+"name": "f3_run@1_recover-in",
+"go": "safe"
+},
+{
+"name": "f3_run@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "f3_run@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_run@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "f3_run@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_run@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "f3_run@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_run@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "f3_run@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_run@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_plain",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_provide-in",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_provide-out",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_recover-in",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_recover-out",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_helper_plain",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_timeout@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "f3_timeout@2_plain",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_provide-out",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_recover-out",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f3_timeout@3_plain",
+"go": "safe"
+},
+{
+"name": "f3_timeout@3_provide-in",
+"go": "safe"
+},
+{
+"name": "f3_timeout@3_provide-out",
+"go": "safe"
+},
+{
+"name": "f3_timeout@3_recover-in",
+"go": "safe"
+},
+{
+"name": "f3_timeout@3_recover-out",
+"go": "safe"
+},
+{
+"name": "f3_timeout@3_catch-in",
+"go": "safe"
+},
+{
+"name": "f3_timeout@3_catch-out",
+"go": "safe"
+},
+{
+"name": "f3_timeout@3_plain_handler-in",
+"go": "safe"
+},
+{
+"name": "f3_timeout@3_cb_plain",
+"go": "safe"
+},
+{
+"name": "f3_timeout@3_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_timeout@3_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_timeout@3_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_timeout@3_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_fork@1_plain",
+"go": "safe"
+},
+{
+"name": "f3_fork@1_provide-in",
+"go": "safe"
+},
+{
+"name": "f3_fork@1_provide-out",
+"go": "safe"
+},
+{
+"name": "f3_fork@1_recover-in",
+"go": "safe"
+},
+{
+"name": "f3_fork@1_recover-out",
+"go": "safe"
+},
+{
+"name": "f3_fork@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "f3_fork@1_helper_plain",
+"go": "safe"
+},
+{
+"name": "f3_fork@1_plain_if-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "f3_fork@1_plain_if-main-first-result",
+"go": "declared-row-policy"
+},
+{
+"name": "f3_fork@1_plain_if-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "f3_fork@1_plain_if-main-second-result",
+"go": "declared-row-policy"
+},
+{
+"name": "f3_fork@1_plain_match-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "f3_fork@1_plain_match-main-first-result",
+"go": "declared-row-policy"
+},
+{
+"name": "f3_fork@1_plain_match-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "f3_fork@1_plain_match-main-second-result",
+"go": "declared-row-policy"
+},
+{
+"name": "f3_fork@2_plain",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_provide-out",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_recover-out",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f3_fork@3_plain",
+"go": "safe"
+},
+{
+"name": "f3_fork@3_provide-in",
+"go": "safe"
+},
+{
+"name": "f3_fork@3_provide-out",
+"go": "safe"
+},
+{
+"name": "f3_fork@3_recover-in",
+"go": "safe"
+},
+{
+"name": "f3_fork@3_recover-out",
+"go": "safe"
+},
+{
+"name": "f3_fork@3_catch-in",
+"go": "safe"
+},
+{
+"name": "f3_fork@3_catch-out",
+"go": "safe"
+},
+{
+"name": "f3_fork@3_plain_handler-in",
+"go": "safe"
+},
+{
+"name": "f3_fork@3_cb_plain",
+"go": "safe"
+},
+{
+"name": "f3_fork@3_plain_if-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "f3_fork@3_plain_if-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "f3_fork@3_plain_match-main-first-value",
+"go": "declared-row-policy"
+},
+{
+"name": "f3_fork@3_plain_match-main-second-value",
+"go": "declared-row-policy"
+},
+{
+"name": "f3_scope@1_plain",
+"go": "safe"
+},
+{
+"name": "f3_scope@1_provide-in",
+"go": "safe"
+},
+{
+"name": "f3_scope@1_recover-in",
+"go": "safe"
+},
+{
+"name": "f3_scope@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "f3_scope@1_helper_plain",
+"go": "safe"
+},
+{
+"name": "f3_scope@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_scope@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "f3_scope@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_scope@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "f3_scope@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_scope@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "f3_scope@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_scope@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "f3_scope@2_plain",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@2_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f3_scope@3_plain",
+"go": "safe"
+},
+{
+"name": "f3_scope@3_provide-in",
+"go": "safe"
+},
+{
+"name": "f3_scope@3_recover-in",
+"go": "safe"
+},
+{
+"name": "f3_scope@3_catch-in",
+"go": "safe"
+},
+{
+"name": "f3_scope@3_plain_handler-in",
+"go": "safe"
+},
+{
+"name": "f3_scope@3_cb_plain",
+"go": "safe"
+},
+{
+"name": "f3_scope@3_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_scope@3_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_scope@3_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_scope@3_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_plain",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_provide-in",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_provide-out",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_recover-in",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_recover-out",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_cb_plain",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_helper_plain",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_plain_if-main-first-result",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_plain_if-main-second-result",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_plain_match-main-first-result",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_provision@1_plain_match-main-second-result",
+"go": "safe"
+},
+{
+"name": "f3_provision@2_plain",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_provide-in",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_provide-out",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_recover-in",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_recover-out",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_cb_plain",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_helper_plain",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_plain_if-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_plain_if-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_plain_if-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_plain_if-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_plain_match-main-first-value",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_plain_match-main-first-result",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_plain_match-main-second-value",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@2_plain_match-main-second-result",
+"go": "unsafe"
+},
+{
+"name": "f3_provision@3_plain",
+"go": "safe"
+},
+{
+"name": "f3_provision@3_provide-in",
+"go": "safe"
+},
+{
+"name": "f3_provision@3_provide-out",
+"go": "safe"
+},
+{
+"name": "f3_provision@3_recover-in",
+"go": "safe"
+},
+{
+"name": "f3_provision@3_recover-out",
+"go": "safe"
+},
+{
+"name": "f3_provision@3_catch-in",
+"go": "safe"
+},
+{
+"name": "f3_provision@3_catch-out",
+"go": "safe"
+},
+{
+"name": "f3_provision@3_plain_handler-in",
+"go": "safe"
+},
+{
+"name": "f3_provision@3_cb_plain",
+"go": "safe"
+},
+{
+"name": "f3_provision@3_plain_if-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_provision@3_plain_if-main-second-value",
+"go": "safe"
+},
+{
+"name": "f3_provision@3_plain_match-main-first-value",
+"go": "safe"
+},
+{
+"name": "f3_provision@3_plain_match-main-second-value",
+"go": "safe"
+},
+{
+"name": "hd_run_in_read",
+"go": "safe"
+},
+{
+"name": "hd_run_in_ignore",
+"go": "safe"
+},
+{
+"name": "hd_timeout_in_read",
+"go": "safe"
+},
+{
+"name": "hd_timeout_in_ignore",
+"go": "safe"
+},
+{
+"name": "hd_timeout_out_read",
+"go": "unsafe"
+},
+{
+"name": "hd_timeout_out_ignore",
+"go": "safe"
+},
+{
+"name": "hd_fork_in_read",
+"go": "safe"
+},
+{
+"name": "hd_fork_in_ignore",
+"go": "safe"
+},
+{
+"name": "hd_fork_out_read",
+"go": "unsafe"
+},
+{
+"name": "hd_fork_out_ignore",
+"go": "safe"
+},
+{
+"name": "hd_scope_in_read",
+"go": "safe"
+},
+{
+"name": "hd_scope_in_ignore",
+"go": "safe"
+},
+{
+"name": "hd_scope_out_read",
+"go": "unsafe"
+},
+{
+"name": "hd_scope_out_ignore",
+"go": "safe"
+},
+{
+"name": "hd_provision_in_read",
+"go": "safe"
+},
+{
+"name": "hd_provision_in_ignore",
+"go": "safe"
+},
+{
+"name": "hd_provision_out_read",
+"go": "unsafe"
+},
+{
+"name": "hd_provision_out_ignore",
+"go": "safe"
+},
+{
+"name": "kp_run_in",
+"go": "safe"
+},
+{
+"name": "kp_timeout_in",
+"go": "unsafe"
+},
+{
+"name": "kp_timeout_out",
+"go": "unsafe"
+},
+{
+"name": "kp_fork_in",
+"go": "unsafe"
+},
+{
+"name": "kp_fork_out",
+"go": "unsafe"
+},
+{
+"name": "kp_scope_in",
+"go": "unsafe"
+},
+{
+"name": "kp_scope_out",
+"go": "unsafe"
+},
+{
+"name": "kp_provision_in",
+"go": "unsafe"
+},
+{
+"name": "kp_provision_out",
+"go": "unsafe"
+},
+{
+"name": "ch_join_child_read",
+"go": "safe"
+},
+{
+"name": "ch_join_child_ignore",
+"go": "safe"
+},
+{
+"name": "ch_join_observer_read",
+"go": "unsafe"
+},
+{
+"name": "ch_join_observer_ignore",
+"go": "safe"
+},
+{
+"name": "ch_join_stage_read",
+"go": "unsafe"
+},
+{
+"name": "ch_join_stage_ignore",
+"go": "safe"
+},
+{
+"name": "ch_join_outside_read",
+"go": "unsafe"
+},
+{
+"name": "ch_join_outside_ignore",
+"go": "safe"
+},
+{
+"name": "ch_interrupt_child_read",
+"go": "safe"
+},
+{
+"name": "ch_interrupt_child_ignore",
+"go": "safe"
+},
+{
+"name": "ch_interrupt_observer_read",
+"go": "unsafe"
+},
+{
+"name": "ch_interrupt_observer_ignore",
+"go": "safe"
+},
+{
+"name": "ch_interrupt_stage_read",
+"go": "unsafe"
+},
+{
+"name": "ch_interrupt_stage_ignore",
+"go": "safe"
+},
+{
+"name": "ch_interrupt_outside_read",
+"go": "unsafe"
+},
+{
+"name": "ch_interrupt_outside_ignore",
+"go": "safe"
+},
+{
+"name": "ch_none_child_read",
+"go": "safe"
+},
+{
+"name": "ch_none_child_ignore",
+"go": "safe"
+},
+{
+"name": "ch_none_stage_read",
+"go": "row-unsafe"
+},
+{
+"name": "ch_none_stage_ignore",
+"go": "row-unsafe"
+},
+{
+"name": "ch_none_outside_read",
+"go": "unsafe"
+},
+{
+"name": "ch_none_outside_ignore",
+"go": "safe"
+},
+{
+"name": "rw_join_child_ignore",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "rw_join_observer_ignore",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "rw_join_stage_ignore",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "rw_join_outside_ignore",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "rw_interrupt_child_ignore",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "rw_interrupt_observer_ignore",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "rw_interrupt_stage_ignore",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "rw_interrupt_outside_ignore",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "rw_none_child_ignore",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "rw_none_stage_ignore",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "rw_none_outside_ignore",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "fr_run_inside_read",
+"go": "safe"
+},
+{
+"name": "fr_timeout_inside_read",
+"go": "unsafe"
+},
+{
+"name": "fr_fork_inside_read",
+"go": "unsafe"
+},
+{
+"name": "fr_provision_inside_read",
+"go": "unsafe"
+},
+{
+"name": "fr_run_inside_ignore",
+"go": "safe"
+},
+{
+"name": "fr_timeout_inside_ignore",
+"go": "safe"
+},
+{
+"name": "fr_fork_inside_ignore",
+"go": "safe"
+},
+{
+"name": "fr_provision_inside_ignore",
+"go": "safe"
+},
+{
+"name": "fr_run_param_read",
+"go": "safe"
+},
+{
+"name": "fr_timeout_param_read",
+"go": "unsafe"
+},
+{
+"name": "fr_fork_param_read",
+"go": "unsafe"
+},
+{
+"name": "fr_provision_param_read",
+"go": "unsafe"
+},
+{
+"name": "fr_run_param_ignore",
+"go": "safe"
+},
+{
+"name": "fr_timeout_param_ignore",
+"go": "safe"
+},
+{
+"name": "fr_fork_param_ignore",
+"go": "safe"
+},
+{
+"name": "fr_provision_param_ignore",
+"go": "safe"
+},
+{
+"name": "rw_exitjoin",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "rw_exitjoincontrol",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "rw_timeoutjoin",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "rw_forkedobserver",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "rw_nestedscope",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "ch_exitjoin",
+"go": "unsafe"
+},
+{
+"name": "h2_timeout@2_recover-in_raising",
+"go": "unsafe"
+},
+{
+"name": "h2_fork@2_recover-in_raising",
+"go": "unsafe"
+},
+{
+"name": "h2_scope@2_recover-in_raising",
+"go": "unsafe"
+},
+{
+"name": "h2_provision@2_recover-in_raising",
+"go": "unsafe"
+},
+{
+"name": "h3_timeout@3_recover-in_raising",
+"go": "unsafe"
+},
+{
+"name": "h3_fork@3_recover-in_raising",
+"go": "unsafe"
+},
+{
+"name": "h3_scope@3_recover-in_raising",
+"go": "unsafe"
+},
+{
+"name": "h3_provision@3_recover-in_raising",
+"go": "unsafe"
+},
+{
+"name": "s1_fork@1_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s1_fork@1_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s1_fork@1_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s1_fork@1_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s1_fork@1_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s1_fork@1_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s1_fork@1_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s1_fork@1_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s2_fork@1_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s2_fork@1_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s2_fork@1_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s2_fork@1_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s2_fork@1_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s2_fork@1_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s2_fork@1_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s2_fork@1_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s2_fork@2_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s2_fork@2_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s2_fork@2_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s2_fork@2_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@1_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@1_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@1_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@1_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@1_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@1_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@1_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@1_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@2_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@2_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@2_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@2_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@2_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@2_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@2_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@2_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@3_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@3_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@3_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "s3_fork@3_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h1_fork@1_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h1_fork@1_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h1_fork@1_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h1_fork@1_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h1_fork@1_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h1_fork@1_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h1_fork@1_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h1_fork@1_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@1_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@1_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@1_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@1_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@1_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@1_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@1_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@1_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@2_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@2_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@2_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@2_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@2_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@2_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@2_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h2_fork@2_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@1_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@1_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@1_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@1_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@1_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@1_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@1_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@1_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@2_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@2_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@2_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@2_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@2_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@2_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@2_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@2_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@3_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@3_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@3_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@3_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@3_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@3_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@3_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "h3_fork@3_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@1_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@1_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@1_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@1_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@1_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@1_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@1_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@1_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@2_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@2_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@2_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@2_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@2_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@2_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@2_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p2_fork@2_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@1_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@1_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@1_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@1_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@1_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@1_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@1_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@1_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@2_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@2_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@2_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@2_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@2_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@2_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@2_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@2_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@3_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@3_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@3_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@3_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@3_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@3_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@3_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "p3_fork@3_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f1_fork@1_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f1_fork@1_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f1_fork@1_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f1_fork@1_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f2_fork@1_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f2_fork@1_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f2_fork@1_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f2_fork@1_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f2_fork@1_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f2_fork@1_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f2_fork@1_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f2_fork@1_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f2_fork@2_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f2_fork@2_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f2_fork@2_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f2_fork@2_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@1_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@1_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@1_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@1_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@1_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@1_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@1_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@1_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@2_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@2_plain_if-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@2_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@2_plain_if-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@2_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@2_plain_match-main-first-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@2_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@2_plain_match-main-second-result_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@3_plain_if-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@3_plain_if-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@3_plain_match-main-first-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "f3_fork@3_plain_match-main-second-value_raising",
+"go": "row-unsafe"
+},
+{
+"name": "ff_join_inner-left_retrieve",
+"go": "unsafe"
+},
+{
+"name": "ff_join_inner-left_ignore",
+"go": "safe"
+},
+{
+"name": "ff_join_inner-right_retrieve",
+"go": "unsafe"
+},
+{
+"name": "ff_join_inner-right_ignore",
+"go": "safe"
+},
+{
+"name": "ff_join_outer-both_retrieve",
+"go": "safe"
+},
+{
+"name": "ff_helper_pure_retrieve",
+"go": "unsafe"
+},
+{
+"name": "ff_helper_pure_ignore",
+"go": "safe"
+},
+{
+"name": "ff_helper_effect_retrieve",
+"go": "unsafe"
+},
+{
+"name": "ff_helper_effect_ignore",
+"go": "safe"
+},
+{
+"name": "ff_helper_nested_retrieve",
+"go": "unsafe"
+},
+{
+"name": "ff_helper_nested_ignore",
+"go": "safe"
+},
+{
+"name": "ff_helper_twice_retrieve",
+"go": "unsafe"
+},
+{
+"name": "ff_helper_twice_ignore",
+"go": "safe"
+},
+{
+"name": "ff_helper_inline_retrieve",
+"go": "unsafe"
+},
+{
+"name": "ff_helper_inline_ignore",
+"go": "safe"
+},
+{
+"name": "ff_helper_outer_retrieve",
+"go": "safe"
+},
+{
+"name": "fj_pending_right",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "fj_pending_left",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "fj_pending_none",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "fj_pending_joined",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "fj_observe_left",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "fj_observe_right",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "fj_observe_both",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "nj_call_arg",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "nj_call_arg_deep",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "nj_effect_call_arg",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "nj_let_call_arg",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "nj_binary",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "nj_scope_arg",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "nj_match_all",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "nj_match_first",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "nj_match_second",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "nj_match_arg_all",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "nj_match_arg_first",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "nj_if_arg_all",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "nj_if_arg_first",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "nj_if_arg_second",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "nj_order_join_first",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "nj_order_fail_first",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "nj_order_fail_first_nested",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_body_child",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_body_child_bail",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_body_child_nested",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_child_only",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_body_only",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_fail_before_fork_taken",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_fail_before_fork_skipped",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_caught_inside",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_child_joined",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_other_child_joined",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_two_children",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_two_same_label",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_two_calls",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_one_call",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_child_and_call",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_selected_fiber",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_child_edge",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_child_edge_joined",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_interrupt_retained",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_join_retained",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_timeout_fires",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_x_s2_interrupt_latejoin",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_x_s3_scope_close_cancel",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_x_w1_cancel_retained",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_x_w2_unobserved_retained",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_x_b1_join_cancelled",
+"go": "interrupted",
+"js": "interrupted"
+},
+{
+"name": "cc_x_u1_undeclared_interrupt",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_x_u2_undeclared_timeout",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_x_r1_deadline_race",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_alt_if",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_alt_if_else_taken",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_alt_match",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_alt_calls",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_alt_both_fail",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_alt_nested",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_alt_if_then_fork",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_alt_if_then_fail",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_alt_two_in_arm",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_alt_match_then_fork",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_alt_calls_then_call",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_alt_nested_then_fork",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_provision_two_children",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_provision_one_child",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_joins_in_order",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_joins_in_order_first_caught",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_alt_arm_joined_then_fork",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_b1_handler_child_alias",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_b1_handler_child_nested",
+"go": "row-unsafe",
+"js": "row-unsafe"
+},
+{
+"name": "cc_b1_handler_child_only",
+"go": "safe",
+"js": "safe"
+},
+{
+"name": "cc_b1_source_child_only",
+"go": "safe",
+"js": "safe"
+}
+]

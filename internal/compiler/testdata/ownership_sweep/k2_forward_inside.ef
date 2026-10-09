@@ -1,0 +1,24 @@
+error WithFile { file: File }
+error Other { file: File }
+error Nope { code: i64 }
+effect fn readFile(file: File) -> string raises { IoError } {
+    run Files.readText(file).provide<Files>(LiveFiles)
+}
+effect fn open() -> File raises { IoError } {
+    run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+}
+effect fn rejected() -> string raises { WithFile, IoError } {
+    let file = run open()
+    fail WithFile { file: file }
+}
+effect fn rejectedOther(file: File) -> string raises { Other } {
+    fail Other { file: file }
+}
+effect fn retrieve(failure: WithFile) -> string raises { IoError } { run readFile(failure.file).catch<IoError>("closed") }
+effect fn retrieveOther(failure: Other) -> string raises { IoError } { run readFile(failure.file).catch<IoError>("closed") }
+effect fn forward(f: WithFile) -> string raises { Other } { run rejectedOther(f.file) }
+
+effect fn main() -> void raises { IoError, Timeout } {
+    let r = run rejected().recover<WithFile>(forward).recover<Other>(retrieveOther).timeout(5000).provide<Scheduler>(LiveScheduler)
+    run Console.log(r).provide<Console>(Stdout)
+}

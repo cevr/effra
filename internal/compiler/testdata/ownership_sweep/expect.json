@@ -1,0 +1,7 @@
+{
+ "a1_branchfiber.ef": "executes the path that joins the failing child; the other branch leaves it unobserved, so the refusal is correct (design 5.3 rule 2)",
+ "d6_armjoin.ef": "joined in one arm only; the executed path takes the join arm. Refused since b29ddf3 by design",
+ "m1_recursion.ef": "rec(2) may raise Boom before the join; an exit before the join leaves the child pending, as at statement level",
+ "m2_recursion_nojoin.ef": "child never observed; executes one recursion path",
+ "rv-fork-unjoined-failure.ef": "unjoined failing child; Go executes it before the child fails (race), JS raises it. Witness: rv-fork-unjoined-failure-sleep"
+}

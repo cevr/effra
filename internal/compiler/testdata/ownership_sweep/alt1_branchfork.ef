@@ -1,0 +1,19 @@
+error Boom { code: i64 }
+effect fn job() -> string raises { Boom } {
+    fail Boom { code: 7 }
+}
+effect fn consume(flag: bool) -> string raises { Boom } uses { Scheduler } {
+    scope {
+        if flag {
+            let a = fork job()
+        } else {
+            let b = fork job()
+        }
+        run Scheduler.sleep(50)
+        "done"
+    }
+}
+effect fn main() -> void {
+    let r = run consume(true).catch<Boom>("b").provide<Scheduler>(LiveScheduler)
+    run Console.log(r).provide<Console>(Stdout)
+}

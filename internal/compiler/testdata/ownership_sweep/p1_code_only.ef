@@ -1,0 +1,15 @@
+error WithFile { file: File, code: i64 }
+effect fn rejected() -> string raises { WithFile, IoError } {
+    let file = run Files.openRead("@FIXTURE@").provide<Files>(LiveFiles)
+    fail WithFile { file: file, code: 4 }
+}
+fn codeOnly(failure: WithFile) -> string { "ok" }
+fn pickCode(failure: WithFile) -> i64 { failure.code }
+effect fn consumeCode(failure: WithFile) -> string raises { IoError } {
+    let c = pickCode(failure)
+    "code"
+}
+effect fn main() -> void raises { IoError, Timeout } {
+    let r = run rejected().timeout(5000).recover<WithFile>(consumeCode).catch<IoError>("io").provide<Scheduler>(LiveScheduler)
+    run Console.log(r).provide<Console>(Stdout)
+}

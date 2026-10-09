@@ -1,0 +1,27 @@
+error Boom { code: i64 }
+error Nope { code: i64 }
+
+effect fn job() -> string raises { Boom } {
+    fail Boom { code: 1 }
+}
+effect fn source() -> string raises { Boom, Nope } uses { Scheduler } {
+    let child = fork job()
+    run Scheduler.sleep(30)
+    fail Nope { code: 1 }
+}
+effect fn handler(n: Nope) -> string raises { Boom } uses { Scheduler } {
+    let child = fork job()
+    run Scheduler.sleep(30)
+    "handled"
+}
+effect fn stage() -> string raises { Boom } uses { Scheduler } {
+    run source().recover<Nope>(handler).catch<Boom>("unused")
+}
+effect fn consume() -> string raises { Boom } uses { Scheduler } {
+    scope { run stage() }
+}
+effect fn main() -> void {
+    run Console.log(
+        run consume().catch<Boom>("caught").provide<Scheduler>(LiveScheduler)
+    ).provide<Console>(Stdout)
+}

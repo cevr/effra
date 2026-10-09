@@ -1,0 +1,29 @@
+error Boom { code: i64 }
+error Nope { code: i64 }
+effect fn job() -> string raises { Boom } {
+    fail Boom { code: 7 }
+}
+effect fn job2() -> string raises { Nope } {
+    fail Nope { code: 1 }
+}
+effect fn quiet() -> string uses { Scheduler } {
+    run Scheduler.sleep(10)
+    "q"
+}
+effect fn spawn() -> string raises { Boom } uses { Scheduler } {
+    let g = fork job()
+    run Scheduler.sleep(1)
+    "spawned"
+}
+
+effect fn consume(flag: bool) -> string raises { Boom } uses { Scheduler } {
+    scope {
+        let r = if flag { run spawn() } else { run spawn() }
+        run Scheduler.sleep(50)
+        r
+    }
+}
+effect fn main() -> void {
+    let r = run consume(true).catch<Boom>("b").provide<Scheduler>(LiveScheduler)
+    run Console.log(r).provide<Console>(Stdout)
+}
