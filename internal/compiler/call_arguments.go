@@ -14,16 +14,41 @@ import (
 // parameter left without an argument are errors anchored at the offending
 // token. Binding never changes evaluation: arguments run in source order.
 //
-// It returns the parameter index each argument binds (-1 when it binds none)
-// and whether the binding is complete. A positional-only call keeps the
-// caller's arity diagnostic and continues checking by position. A complete
-// labelled binding that is not the identity is retained on the call for
+// A parameter the call leaves without an argument binds its declared
+// constant default instead, when it has one: the call receives the checked
+// literal of that constant in the parameter's slot (see bindDefaults), as if
+// the author had written the value there. Constants have no evaluation, so
+// authored arguments keep their source order and run once.
+//
+// It returns the parameter index each authored argument binds (-1 when it
+// binds none) and whether the binding is complete. A positional-only call
+// keeps the caller's arity diagnostic and continues checking by position. A
+// complete binding that is not the identity is retained on the call for
 // emission; see ArgumentParameters. Each label naming a declared parameter
 // is recorded as a reference to that parameter of owner.
 func (c *checker) bindCallArguments(e *Expr, params []Param, arity string, owner lexicalTarget) ([]int, bool) {
 	e.ArgumentParameters = nil
+	e.BoundArguments = nil
 	order := make([]int, len(e.Args))
 	if len(e.Fields) == 0 {
+		if len(e.Args) < len(params) && hasDefault(params) {
+			bound := make([]int, len(params))
+			for i := range bound {
+				bound[i] = -1
+				if i < len(e.Args) {
+					bound[i] = i
+				}
+			}
+			for i := range e.Args {
+				order[i] = i
+			}
+			if missing := omittedWithoutDefault(params, bound); len(missing) > 0 {
+				c.diagnostic("EF106", "missing argument for parameter "+strings.Join(missing, ", "), e.Span)
+				return order, false
+			}
+			bindDefaults(e, params, bound, order)
+			return order, true
+		}
 		if len(e.Args) != len(params) {
 			if e.PipeSpan.Length > 0 && len(params) == 0 {
 				c.diagnostic("EF106", expressionName(e.Left)+" takes no parameters, so it cannot receive the piped value", e.PipeSpan)
@@ -90,26 +115,107 @@ func (c *checker) bindCallArguments(e *Expr, params []Param, arity string, owner
 		c.diagnostic("EF106", arity, e.Span)
 		complete = false
 	}
-	missing := []string{}
-	for index, arg := range bound {
-		if arg < 0 {
-			missing = append(missing, params[index].Name)
-		}
-	}
-	if len(missing) > 0 {
+	if missing := omittedWithoutDefault(params, bound); len(missing) > 0 {
 		c.diagnostic("EF106", "missing argument for parameter "+strings.Join(missing, ", "), e.Span)
 		complete = false
 	}
 	if !complete {
 		return order, false
 	}
-	for i, parameter := range order {
+	bindDefaults(e, params, bound, order)
+	return order, true
+}
+
+// omittedWithoutDefault names the parameters a binding leaves without an
+// argument and without a declared constant default.
+func omittedWithoutDefault(params []Param, bound []int) []string {
+	missing := []string{}
+	for index, arg := range bound {
+		if arg < 0 && params[index].DefaultValue == nil {
+			missing = append(missing, params[index].Name)
+		}
+	}
+	return missing
+}
+
+func hasDefault(params []Param) bool {
+	return slices.ContainsFunc(params, func(p Param) bool { return p.DefaultValue != nil })
+}
+
+// bindDefaults completes a binding whose every omitted parameter has a
+// default. Each omitted parameter receives its constant's literal, placed in
+// the bound vector before the first authored argument that binds a later
+// parameter. Constants evaluate nothing, so authored arguments keep their
+// source order, and a call whose authored arguments bind parameters in
+// increasing order becomes the identity: the plain positional call with every
+// constant written in its own slot. bound maps each parameter to its
+// authored argument (-1 when omitted) and order each authored argument to its
+// parameter; the binding is retained on the call when it is not the identity.
+func bindDefaults(e *Expr, params []Param, bound []int, order []int) {
+	arguments := make([]*Expr, 0, len(params))
+	parameters := make([]int, 0, len(params))
+	next := 0
+	defaultsBefore := func(limit int) {
+		for ; next < limit; next++ {
+			if bound[next] < 0 {
+				arguments = append(arguments, constantArgument(*params[next].DefaultValue, e.Span))
+				parameters = append(parameters, next)
+			}
+		}
+	}
+	for i, arg := range e.Args {
+		defaultsBefore(order[i])
+		arguments, parameters = append(arguments, arg), append(parameters, order[i])
+	}
+	defaultsBefore(len(params))
+	if len(arguments) > len(e.Args) {
+		e.BoundArguments = arguments
+	}
+	for i, parameter := range parameters {
 		if parameter != i {
-			e.ArgumentParameters = order
+			e.ArgumentParameters = parameters
 			break
 		}
 	}
-	return order, true
+}
+
+// constantArgument is the checked argument expression of a constant value:
+// the literal an author would write for it. A negative i64 is one signed
+// literal, as in a constant declaration, rather than a runtime negation.
+func constantArgument(value ConstantValue, span Span) *Expr {
+	kind := value.Kind
+	if kind == "i64" {
+		kind = "integer"
+	}
+	return &Expr{Kind: kind, Text: value.Value, Span: span, Extent: span, defaultArgument: true}
+}
+
+// checkDefaultArguments checks a call's constant default arguments and
+// returns each one's checked value by the parameter it binds. They are closed
+// literals, so they need no environment and record no source facts.
+func (c *checker) checkDefaultArguments(e *Expr) map[int]checkedExpression {
+	if e.BoundArguments == nil {
+		return nil
+	}
+	previous := c.recordFacts
+	c.recordFacts = false
+	defer func() { c.recordFacts = previous }()
+	checked := map[int]checkedExpression{}
+	for i, argument := range e.BoundArguments {
+		if argument.defaultArgument {
+			checked[e.argumentParameter(i)] = c.expr(argument, nil, false)
+		}
+	}
+	return checked
+}
+
+// boundArguments is a checked call's complete argument vector in evaluation
+// order: the authored Args with any constant defaults in their slots.
+func (e *Expr) boundArguments() []*Expr {
+	if e.BoundArguments != nil {
+		return e.BoundArguments
+	}
+	return e.Args
 }
 
 // rejectArgumentLabels diagnoses labels on a callee whose parameters have no
@@ -121,7 +227,7 @@ func (c *checker) rejectArgumentLabels(e *Expr, callee string) {
 	}
 }
 
-// argumentParameter returns the parameter bound by the source argument at
+// argumentParameter returns the parameter bound by the bound argument at
 // index. Unlabelled and identity-labelled calls bind by position.
 func (e *Expr) argumentParameter(index int) int {
 	if e.ArgumentParameters == nil {
@@ -130,15 +236,16 @@ func (e *Expr) argumentParameter(index int) int {
 	return e.ArgumentParameters[index]
 }
 
-// parameterArguments returns a checked call's arguments in parameter order.
-// Emitters evaluate e.Args in source order and pass these positions.
+// parameterArguments returns a checked call's bound arguments in parameter
+// order. Emitters evaluate boundArguments in order and pass these positions.
 func (e *Expr) parameterArguments() []*Expr {
+	bound := e.boundArguments()
 	if e.ArgumentParameters == nil {
-		return e.Args
+		return bound
 	}
-	arguments := make([]*Expr, len(e.Args))
+	arguments := make([]*Expr, len(bound))
 	for i, parameter := range e.ArgumentParameters {
-		arguments[parameter] = e.Args[i]
+		arguments[parameter] = bound[i]
 	}
 	return arguments
 }

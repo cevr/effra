@@ -2,8 +2,11 @@
 
 Effra admits explicit portable imports from a finite compiler distribution.
 `import Fns "effra/functions"` resolves the ordinary `Fns.call` forwarding
-function, the pure `Fns.identity` function, and the managed callback forwarding
-function `Fns.forwardFile`. Go package imports keep their
+function, the pure `Fns.identity` function, the managed callback forwarding
+function `Fns.forwardFile`, and `Fns.suffixed(input, suffix = "!")`, whose
+constant default is bound at each caller that omits it (see
+[constant parameter defaults](specs/language-abstractions.md#constant-parameter-defaults)).
+Go package imports keep their
 separate `import go` form. User package loading and version selection remain
 unsupported and produce diagnostics without searching the filesystem or network.
 

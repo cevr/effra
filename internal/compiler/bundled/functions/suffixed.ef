@@ -1,0 +1,3 @@
+fn suffixed(input: string, suffix: string = "!") -> string {
+    input + suffix
+}

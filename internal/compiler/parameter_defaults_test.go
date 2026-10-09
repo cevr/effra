@@ -282,9 +282,11 @@ render(undefined);`)
 			t.Fatalf("positive out-of-range default did not retain EF106 for %s: %+v", target, positiveOverflow.Diagnostics)
 		}
 	}
-	missing := Compile(`fn render(value: string = "x") -> string { value } fn caller() -> string { render() }`)
-	if missing.Checked || !hasCode(missing, "EF106") {
-		t.Fatalf("B1b admitted omitted calls before the checked B2 plan: %+v", missing.Diagnostics)
+	// B2 binds the omitted argument to the declared constant; see
+	// parameter_default_calls_test.go for the call contract.
+	omitted := Compile(`fn render(value: string = "x") -> string { value } fn caller() -> string { render() }`)
+	if !omitted.Checked {
+		t.Fatalf("checked B2 binding refused an omitted defaulted argument: %+v", omitted.Diagnostics)
 	}
 }
 

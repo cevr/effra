@@ -418,10 +418,19 @@ type Expr struct {
 	// to; nil when it resolves globally.
 	binding *localBinding
 	// ArgumentParameters is a checked call's label binding:
-	// ArgumentParameters[i] is the parameter that Args[i] binds. It is nil
-	// when every argument binds by position. Args stay in source order, which
-	// is also evaluation order.
+	// ArgumentParameters[i] is the parameter that bound argument i (see
+	// boundArguments) binds. It is nil when every argument binds by position.
+	// Args stay in source order, which is also evaluation order.
 	ArgumentParameters []int `json:"-"`
+	// BoundArguments is set only on a checked call that omits defaulted
+	// parameters: Args in source order, with the checked literal of each
+	// omitted parameter's constant default placed before the first authored
+	// argument that binds a later parameter. It is never authored syntax:
+	// tooling that walks source reads Args alone.
+	BoundArguments []*Expr `json:"-"`
+	// defaultArgument marks a constant literal the checker synthesized for an
+	// omitted parameter.
+	defaultArgument bool
 	// PipeSpan is the |> token of a call written `x |> f(...)`; Args[0] is x.
 	// Diagnostics read it for wording and anchors only: it never decides what
 	// is accepted, how a call is checked or what is emitted.

@@ -26,7 +26,7 @@ type bundledDeclaration struct {
 }
 
 var bundledIndex = map[string]map[string]bundledDeclaration{
-	"effra/functions":   {"call": {Source: "bundled/functions/call.ef"}, "identity": {Source: "bundled/functions/identity.ef"}, "forwardFile": {Source: "bundled/functions/forward-file.ef"}},
+	"effra/functions":   {"call": {Source: "bundled/functions/call.ef"}, "identity": {Source: "bundled/functions/identity.ef"}, "forwardFile": {Source: "bundled/functions/forward-file.ef"}, "suffixed": {Source: "bundled/functions/suffixed.ef"}},
 	"effra/conversions": {"Codec": {Source: "bundled/conversions/codec.ef"}, "witness": {Source: "bundled/conversions/witness.ef", Dependencies: []string{"Codec"}}},
 	"effra/data":        {"Option": {Source: "bundled/data/option.ef"}, "Result": {Source: "bundled/data/result.ef"}},
 	"effra/constants":   {"defaultSuffix": {Source: "bundled/constants/default-suffix.ef"}},

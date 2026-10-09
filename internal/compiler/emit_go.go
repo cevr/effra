@@ -584,7 +584,7 @@ func (g *goEmitter) tailCall(call *Expr, tail *goTail, out *strings.Builder) {
 	f := tail.loop.function
 	bindings := g.inferredTypeBindings(f, call.parameterArguments())
 	temps := make([]string, len(f.Params))
-	for sourceIndex, arg := range call.Args {
+	for sourceIndex, arg := range call.boundArguments() {
 		parameter := call.argumentParameter(sourceIndex)
 		if tail.loop.unchanged(call, parameter) {
 			continue
@@ -1023,9 +1023,10 @@ func (g *goEmitter) lower(e *Expr, effect bool, ret string, out *strings.Builder
 			}
 			return "efProvider_" + e.Left.Name + "(" + strings.Join(args, ", ") + ")"
 		}
-		args := make([]string, len(e.Args))
+		arguments := e.boundArguments()
+		args := make([]string, len(arguments))
 		bindings := g.inferredTypeBindings(e.ResolvedFunction, e.parameterArguments())
-		for index, a := range e.Args {
+		for index, a := range arguments {
 			expr := ""
 			parameter := e.argumentParameter(index)
 			if e.ResolvedFunction != nil && parameter < len(e.ResolvedFunction.Params) {

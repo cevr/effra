@@ -4366,7 +4366,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		}
 		// Arguments are checked in source order and recorded by parameter.
 		order, bound := c.bindCallArguments(e, f.Params, "incorrect argument count", lexicalTarget{function: f, service: service})
-		argumentTypes := make([]checkedExpression, len(e.Args))
+		argumentTypes := make([]checkedExpression, len(e.boundArguments()))
 		t = c.checkedFunction(f, false, true)
 		var callbackPolicies []CallbackPolicy
 		parameterIDs := c.functionParameterTypeIDs(f)
@@ -4425,6 +4425,12 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 				}
 				c.diagnostic("EF106", message, span)
 			}
+		}
+		// An omitted parameter's constant default is an ordinary argument of
+		// the call from here on: generic and row inference, ownership and the
+		// application identity see the same vector as the explicit spelling.
+		for parameter, argument := range c.checkDefaultArguments(e) {
+			argumentTypes[parameter] = argument
 		}
 		// The application identity lists handler policies by parameter, however
 		// the call spells its labels.

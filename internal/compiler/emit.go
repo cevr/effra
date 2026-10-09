@@ -529,7 +529,7 @@ func jsTailCall(call *Expr, loop *tailLoop) string {
 	var out strings.Builder
 	out.WriteString("{\n")
 	next := make([]string, len(loop.function.Params))
-	for sourceIndex, arg := range call.Args {
+	for sourceIndex, arg := range call.boundArguments() {
 		parameter := call.argumentParameter(sourceIndex)
 		if loop.unchanged(call, parameter) {
 			continue
@@ -691,15 +691,16 @@ func jsExpr(e *Expr, effect bool) string {
 // body only reads its own parameters, so a yield in an argument stays in the
 // enclosing generator.
 func jsBoundCall(e *Expr, effect bool, call func(args string) string) string {
-	args := make([]string, len(e.Args))
-	for i, a := range e.Args {
+	arguments := e.boundArguments()
+	args := make([]string, len(arguments))
+	for i, a := range arguments {
 		args[i] = jsExpr(a, effect)
 	}
 	if e.ArgumentParameters == nil {
 		return call(strings.Join(args, ", "))
 	}
-	names := make([]string, len(e.Args))
-	bound := make([]string, len(e.Args))
+	names := make([]string, len(arguments))
+	bound := make([]string, len(arguments))
 	for i, parameter := range e.ArgumentParameters {
 		names[i] = "__ef_argument_" + strconv.Itoa(i)
 		bound[parameter] = names[i]
