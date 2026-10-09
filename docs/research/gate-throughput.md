@@ -77,7 +77,7 @@ Every port was checked in three ways:
 | Scenario | Wall | Notes |
 | --- | ---: | --- |
 | Before, full gate | ~446 s | sequential, load 15–27 |
-| (a) No-op | 1.3–1.6 s | load 30–36; every step cached |
+| (a) No-op | 21.9 s | load 59→54; every cacheable step cached. The four wayfinder checks that read Git history always run, and the hosted-reconciliation test (21.7 s) is the floor. Before they always ran: 1.3–1.7 s at load 30–36 |
 | (a′) After a commit that changes no inputs | 3.3 s | VCS stamping relinks `bin/ef`; Go tests all cached |
 | Example edit (`examples/main.ef`) | 25 s | only the 10 shards whose tests read examples rerun |
 | (b) Typical internal/compiler edit | 49 s at load 8→23; 69 s at load 18→50 | every compiler-dependent test reruns; 390–650 CPU-s |
