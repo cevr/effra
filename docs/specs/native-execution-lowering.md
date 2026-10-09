@@ -37,15 +37,29 @@ limits explicit.
 [generalized evidence-passing report]: https://www.microsoft.com/en-us/research/wp-content/uploads/2021/03/multip-tr-v2.pdf
 [V8 Maglev report]: https://v8.dev/blog/maglev
 
-The current JavaScript [`jsMatch`](../../internal/compiler/emit.go#L624) path
-evaluates each subject once in order and emits ordered `if` branches. Constrained
-subject cells use tag comparisons in both single- and multi-subject matches;
-total arms use a `true` condition. Effectful branches remain wrapped in
-`yield* Effect.gen`, while pure branches use an IIFE. This is the
-current emitted baseline, not a measured win. A `switch` or direct-dispatch
-form remains a future comparison candidate. The lowering unit compares those
-candidates and any generated/specialized runtime under identical
-subject/body/tag semantics and preserves the pinned ABI and lifecycle laws.
+The historical checked-match emitter at `f091cd6db870c08ca1d82f100150ce0f3363e6a8`
+and the numeric baseline `07d861f0296a216b78cd0c9e0a1ba2896a0d06d9`
+emitted ordered `if` branches uniformly. That archived baseline remains
+separate from the current emitter carried from accepted LOW donor
+`0a1c8b4768f3d82475d39f2ab0f5ee4d22259cb0`.
+
+The current JavaScript [`jsMatchStatements`](../../internal/compiler/emit.go#L757)
+path evaluates each subject once in source order and keeps branches lazy.
+[`jsCanSwitchMatch`](../../internal/compiler/emit.go#L830) admits a tag `switch`
+only for checked eligible single-subject plans with explicit, non-total variant
+cells. Product matches, total cells and other general plans retain the ordered
+condition chain; constrained cells compare tags and wholly total arms use a
+`true` condition. At [discarded, returned and admitted self-tail sites](../../internal/compiler/emit.go#L489),
+`if` and `match` emit direct statements: discarded branches continue with the
+following statement, while tail branches return, fail or continue an admitted
+self-tail loop. Expression-valued subpositions retain their value-producing
+`yield* Effect.gen` or pure IIFE wrapper ([`jsExpr`](../../internal/compiler/emit.go#L676),
+[`jsMatch`](../../internal/compiler/emit.go#L742)). The outer automatic scope and
+explicit scope/cleanup boundaries remain, along with the pinned default
+Effect-compatible JS ABI. These are current emitted shapes, not measured
+allocation reductions or speedups. Further dispatch and generated/specialized
+runtime candidates require comparisons under identical subject/body/tag
+semantics and lifecycle laws.
 
 Deliver after the [ordinary function/interface seam](language-abstractions.md), in compiling and gated units:
 

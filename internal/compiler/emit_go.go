@@ -515,13 +515,18 @@ func (g *goEmitter) functionDeclaration(f *Function) string {
 		ret = canonicalGoType(c, f.returnID, map[TypeID]bool{})
 		noResult = !f.Effect && canonicalVoidType(c, f.returnID)
 	}
+	loop := lowerTail(f)
+	parameterPrefix := "efLocal_"
+	if loop != nil {
+		parameterPrefix = "efArg_"
+	}
 	params := []string{}
 	for _, p := range f.Params {
 		typ := goSourceType(g.program, p.sourceType, p.Type)
 		if len(f.TypeParameters) > 0 || (p.sourceType != nil && p.sourceType.Application != "") {
 			typ = canonicalGoType(c, p.typeID, map[TypeID]bool{})
 		}
-		params = append(params, "efLocal_"+p.Name+" "+typ)
+		params = append(params, parameterPrefix+p.Name+" "+typ)
 	}
 	variables := []string{}
 	for _, p := range f.TypeParameters {
@@ -545,7 +550,68 @@ func (g *goEmitter) functionDeclaration(f *Function) string {
 		open += "return func(ctx efContext) efExit[" + ret + "] {\nif err:=ctx.Runtime.Checkpoint();err!=nil{return er.Interrupt[" + ret + "](err)}\n"
 		close = "}\n" + close
 	}
+	if loop != nil {
+		return open + g.loopBody(f, loop, ret, noResult) + close
+	}
 	return open + g.blockType(f.Body, f.Effect, ret, noResult) + close
+}
+
+// loopBody lowers a pure function with self tail calls to a `for` loop. The
+// parameters are only the loop's carried state (efArg_*); each iteration
+// declares its own efLocal_* from them, so anything the body captures sees
+// the values of its own iteration, as it would in a separate call. Every path
+// through the body returns or continues; a `for` without a break ends the
+// function.
+func (g *goEmitter) loopBody(f *Function, loop *tailLoop, ret string, noResult bool) string {
+	var out strings.Builder
+	out.WriteString("for {\n")
+	for _, p := range f.Params {
+		out.WriteString("efLocal_" + p.Name + " := efArg_" + p.Name + "\n_ = efLocal_" + p.Name + "\n")
+	}
+	out.WriteString(g.blockTail(f.Body, false, ret, noResult, &goTail{loop: loop}))
+	out.WriteString("}\n")
+	return out.String()
+}
+
+// goTail marks a block as being in tail position of a loop function.
+type goTail struct{ loop *tailLoop }
+
+// tailCall continues the loop with the call's arguments. Each changing
+// authored argument is evaluated once, left to right, into a temporary before
+// any loop state is reassigned, then stored in its checked parameter slot. An
+// unchanged simple parameter reference needs no temporary or reassignment.
+func (g *goEmitter) tailCall(call *Expr, tail *goTail, out *strings.Builder) {
+	f := tail.loop.function
+	bindings := g.inferredTypeBindings(f, call.parameterArguments())
+	temps := make([]string, len(f.Params))
+	for sourceIndex, arg := range call.Args {
+		parameter := call.argumentParameter(sourceIndex)
+		if tail.loop.unchanged(call, parameter) {
+			continue
+		}
+		value := g.exprAt(arg, goLayout{id: f.Params[parameter].typeID, bindings: bindings}, false, "", out)
+		temps[parameter] = g.temp()
+		out.WriteString(temps[parameter] + " := " + value + "\n")
+	}
+	for parameter, p := range f.Params {
+		if temps[parameter] != "" {
+			out.WriteString("efArg_" + p.Name + " = " + temps[parameter] + "\n")
+		}
+	}
+	out.WriteString("continue\n")
+}
+
+// tailBranches lowers an `if` or `match` on the tail spine as statements in
+// the enclosing loop body.
+func (g *goEmitter) tailBranches(e *Expr, ret string, noResult bool, tail *goTail, out *strings.Builder) {
+	if e.Kind == "if" {
+		condition := g.expr(e.Left, false, ret, out)
+		out.WriteString("if " + condition + " {\n" + g.blockTail(e.Then, false, ret, noResult, tail) + "} else {\n" + g.blockTail(e.Else, false, ret, noResult, tail) + "}\n")
+		return
+	}
+	subjects := g.matchSubjects(e, false, ret, out)
+	out.WriteString(g.matchSwitch(e, subjects, false, ret, noResult, tail))
+	out.WriteString("default: panic(\"unreachable non-exhaustive match\")\n}\n")
 }
 
 // functionReturn renders a function's success type and reports whether its Go
@@ -620,6 +686,15 @@ func (g *goEmitter) block(b *Block, effect bool, ret string) string {
 // with void, and a void tail is evaluated once for its effects before the
 // block completes with void in whatever form its result mode requires.
 func (g *goEmitter) blockType(b *Block, effect bool, ret string, noResult bool) string {
+	return g.blockTail(b, effect, ret, noResult, nil)
+}
+
+// blockTail is blockType for a block that may be in tail position of a loop
+// function (tail != nil). There the last statement is lowered by
+// tailStatement, and a block that completes with void must return explicitly
+// even when the function has no result: falling off the end would run the
+// next iteration.
+func (g *goEmitter) blockTail(b *Block, effect bool, ret string, noResult bool, tail *goTail) string {
 	defer g.enterScope()()
 	var out strings.Builder
 	completeVoid := func() {
@@ -628,6 +703,8 @@ func (g *goEmitter) blockType(b *Block, effect bool, ret string, noResult bool) 
 			out.WriteString("return efExit[" + ret + "]{Value:struct{}{}}\n")
 		case !noResult:
 			out.WriteString("return struct{}{}\n")
+		case tail != nil:
+			out.WriteString("return\n")
 		}
 	}
 	if len(b.Statements) == 0 {
@@ -654,6 +731,9 @@ func (g *goEmitter) blockType(b *Block, effect bool, ret string, noResult bool) 
 			g.exprStatement(s.Value, effect, ret, &out)
 			continue
 		}
+		if tail != nil && g.tailStatement(s.Value, ret, noResult, tail, &out) {
+			continue
+		}
 		if s.Value != nil && s.Value.checked.node() != nil && s.Value.checked.node().Kind == "never" {
 			expr := g.expr(s.Value, effect, ret, &out)
 			if effect {
@@ -677,6 +757,21 @@ func (g *goEmitter) blockType(b *Block, effect bool, ret string, noResult bool) 
 	}
 	return out.String()
 }
+
+// tailStatement lowers the last statement of a loop function's tail block when
+// it is a self tail call or a branch leading to one.
+func (g *goEmitter) tailStatement(e *Expr, ret string, noResult bool, tail *goTail, out *strings.Builder) bool {
+	switch {
+	case tail.loop.isCall(e):
+		g.tailCall(e, tail, out)
+	case tail.loop.onSpine(e):
+		g.tailBranches(e, ret, noResult, tail, out)
+	default:
+		return false
+	}
+	return true
+}
+
 func (g *goEmitter) expr(e *Expr, effect bool, ret string, out *strings.Builder) string {
 	return g.exprWithValue(e, effect, ret, out, true)
 }
@@ -1169,14 +1264,36 @@ func (g *goEmitter) variantType(id TypeID, owner *Enum, variant string) string {
 // into temporaries; each tested subject's variant is decoded once; arms then
 // test those tags in source order and each body is emitted once.
 func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder) string {
-	plan := e.matchPlan
+	subjects := g.matchSubjects(e, effect, ret, out)
+	resultType := g.valueType(e)
+	body := g.matchSwitch(e, subjects, effect, resultType, false, nil)
+	if effect {
+		body += "default: return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable non-exhaustive match\")}\n}\n"
+		name := g.temp()
+		out.WriteString(name + " := func() efExit[" + resultType + "] {\n" + body + "}()\n" + g.failed(name, ret))
+		return name + ".Value"
+	}
+	body += "default: panic(\"unreachable non-exhaustive match\")\n}\n"
+	return "func() " + resultType + " {\n" + body + "}()"
+}
+
+// matchSubjects evaluates each subject once, in order, into a temporary.
+func (g *goEmitter) matchSubjects(e *Expr, effect bool, ret string, out *strings.Builder) []string {
 	subjects := make([]string, len(e.Args))
 	for index, subject := range e.Args {
 		value := g.expr(subject, effect, ret, out)
 		subjects[index] = g.temp()
 		out.WriteString(subjects[index] + " := " + value + "\n_ = " + subjects[index] + "\n")
 	}
-	resultType := g.valueType(e)
+	return subjects
+}
+
+// matchSwitch lowers the variant tests and the arms up to, but not including,
+// the default case, so a caller can close the switch for its own result mode.
+// resultType and noResult describe the arm bodies; tail marks them as tails of
+// a loop function.
+func (g *goEmitter) matchSwitch(e *Expr, subjects []string, effect bool, resultType string, noResult bool, tail *goTail) string {
+	plan := e.matchPlan
 	var body strings.Builder
 	tags := make([]string, len(subjects))
 	for index, subject := range plan.subjects {
@@ -1207,16 +1324,9 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 			conditions = append(conditions, "true")
 		}
 		body.WriteString("case " + strings.Join(conditions, " && ") + ":\n")
-		g.matchArm(plan, arm, subjects, effect, resultType, &body)
+		g.matchArm(plan, arm, subjects, effect, resultType, noResult, tail, &body)
 	}
-	if effect {
-		body.WriteString("default: return efExit[" + resultType + "]{Defect:fmt.Errorf(\"unreachable non-exhaustive match\")}\n}\n")
-		name := g.temp()
-		out.WriteString(name + " := func() efExit[" + resultType + "] {\n" + body.String() + "}()\n" + g.failed(name, ret))
-		return name + ".Value"
-	}
-	body.WriteString("default: panic(\"unreachable non-exhaustive match\")\n}\n")
-	return "func() " + resultType + " {\n" + body.String() + "}()"
+	return body.String()
 }
 
 // matchArm binds an arm's payload binders and lowers its body in one scope.
@@ -1224,7 +1334,7 @@ func (g *goEmitter) match(e *Expr, effect bool, ret string, out *strings.Builder
 // variant declares. A binder joined across alternatives has one Go local, so
 // each alternative's declared layout is adapted to the binder's canonical
 // layout before the assignment.
-func (g *goEmitter) matchArm(plan *matchPlan, arm matchPlanArm, subjects []string, effect bool, resultType string, body *strings.Builder) {
+func (g *goEmitter) matchArm(plan *matchPlan, arm matchPlanArm, subjects []string, effect bool, resultType string, noResult bool, tail *goTail, body *strings.Builder) {
 	defer g.enterScope()()
 	for _, binding := range arm.bindings {
 		subject := plan.subjects[binding.subject]
@@ -1251,7 +1361,7 @@ func (g *goEmitter) matchArm(plan *matchPlan, arm matchPlanArm, subjects []strin
 		}
 		body.WriteString("_ = " + local + "\n")
 	}
-	body.WriteString(g.blockType(arm.body, effect, resultType, false))
+	body.WriteString(g.blockTail(arm.body, effect, resultType, noResult, tail))
 }
 
 // WriteRuntime writes the application's selected runtime sources below

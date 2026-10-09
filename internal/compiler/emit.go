@@ -361,11 +361,32 @@ func (r *Result) ProgramDeclarations() []Declaration {
 	return append([]Declaration{}, r.Declarations...)
 }
 func jsFunction(f *Function) string {
+	if loop := lowerTail(f); loop != nil {
+		return jsLoopFunction(f, loop)
+	}
 	params := []string{}
 	for _, p := range f.Params {
 		params = append(params, "__ef_local_"+p.Name)
 	}
 	return "(" + strings.Join(params, ", ") + ") => " + jsEffectBody(f)
+}
+
+// jsLoopFunction lowers a pure function with self tail calls to a loop. The
+// parameters are only the loop's carried state (__ef_arg_*); the body reads
+// per-iteration constants (__ef_local_*), so anything it captures sees the
+// values of its own iteration, as it would in a separate call.
+func jsLoopFunction(f *Function, loop *tailLoop) string {
+	var out strings.Builder
+	params := []string{}
+	for _, p := range f.Params {
+		params = append(params, "__ef_arg_"+p.Name)
+	}
+	out.WriteString("(" + strings.Join(params, ", ") + ") => {\nwhile (true) {\n")
+	for _, p := range f.Params {
+		out.WriteString("const __ef_local_" + p.Name + " = __ef_arg_" + p.Name + ";\n")
+	}
+	out.WriteString(jsBlockIn(f.Body, false, loop, jsReturnBlock) + "}\n}")
+	return out.String()
 }
 func jsEffectBody(f *Function) string {
 	open, close := "{", "}"
@@ -427,15 +448,32 @@ func jsFunctionParams(program *Program, params []Param, declarations map[string]
 }
 
 func jsBlock(b *Block, effect bool) string {
+	return jsBlockIn(b, effect, nil, jsReturnBlock)
+}
+
+type jsBlockCompletion uint8
+
+const (
+	jsReturnBlock jsBlockCompletion = iota
+	jsDiscardBlock
+)
+
+// jsBlockIn lowers a block. A returned block produces its final value or
+// continues a planned self-tail loop. A discarded block completes the branch
+// and resumes at the next statement in its enclosing block.
+func jsBlockIn(b *Block, effect bool, loop *tailLoop, completion jsBlockCompletion) string {
 	var out strings.Builder
 	if len(b.Statements) == 0 {
-		return "return undefined;\n"
+		if completion == jsReturnBlock {
+			return "return undefined;\n"
+		}
+		return ""
 	}
 	for i, s := range b.Statements {
 		switch s.Kind {
 		case "let":
 			out.WriteString("const __ef_local_" + s.Name + " = " + jsExpr(s.Value, effect) + ";\n")
-			if i == len(b.Statements)-1 {
+			if i == len(b.Statements)-1 && completion == jsReturnBlock {
 				out.WriteString("return undefined;\n")
 			}
 		case "fail":
@@ -446,12 +484,92 @@ func jsBlock(b *Block, effect bool) string {
 			out.WriteString("return yield* Effect.fail({ _tag: " + quoted(s.Name) + ", ..." + payload + " });\n")
 		default:
 			if i == len(b.Statements)-1 {
+				if completion == jsDiscardBlock {
+					out.WriteString(jsStatement(s.Value, effect))
+					continue
+				}
+				if loop.isCall(s.Value) {
+					out.WriteString(jsTailCall(s.Value, loop))
+					continue
+				}
+				if loop.onSpine(s.Value) {
+					out.WriteString(jsTailBranches(s.Value, loop))
+					continue
+				}
+				if s.Value.Kind == "if" {
+					out.WriteString(jsIfStatement(s.Value, effect, func(b *Block) string {
+						return jsBlockIn(b, effect, nil, jsReturnBlock)
+					}))
+					continue
+				}
+				if s.Value.Kind == "match" {
+					// Give match subjects a lexical scope separate from their arm
+					// bindings, so a nested match can safely reuse local subject names.
+					out.WriteString("{\n" + jsMatchStatements(s.Value, effect, jsReturnBlock, func(b *Block) string {
+						return jsBlockIn(b, effect, nil, jsReturnBlock)
+					}) + "}\n")
+					continue
+				}
 				out.WriteString("return ")
+			} else if s.Value.Kind == "if" || s.Value.Kind == "match" {
+				out.WriteString(jsStatement(s.Value, effect))
+				continue
 			}
 			out.WriteString(jsExpr(s.Value, effect) + ";\n")
 		}
 	}
 	return out.String()
+}
+
+// jsTailCall continues the loop with the call's arguments. Each changing
+// authored argument is evaluated once, left to right, before any loop state is
+// reassigned, then stored in its checked parameter slot. An unchanged simple
+// parameter reference needs no temporary or reassignment.
+func jsTailCall(call *Expr, loop *tailLoop) string {
+	var out strings.Builder
+	out.WriteString("{\n")
+	next := make([]string, len(loop.function.Params))
+	for sourceIndex, arg := range call.Args {
+		parameter := call.argumentParameter(sourceIndex)
+		if loop.unchanged(call, parameter) {
+			continue
+		}
+		name := "__ef_next_" + loop.function.Params[parameter].Name
+		out.WriteString("const " + name + " = " + jsExpr(arg, false) + ";\n")
+		next[parameter] = name
+	}
+	for parameter, p := range loop.function.Params {
+		if next[parameter] != "" {
+			out.WriteString("__ef_arg_" + p.Name + " = " + next[parameter] + ";\n")
+		}
+	}
+	out.WriteString("continue;\n}\n")
+	return out.String()
+}
+
+// jsTailBranches lowers an `if` or `match` on the tail spine as statements in
+// the enclosing loop body. Each branch ends in a return or a continue.
+func jsTailBranches(e *Expr, loop *tailLoop) string {
+	branch := func(b *Block) string { return jsBlockIn(b, false, loop, jsReturnBlock) }
+	if e.Kind == "if" {
+		return jsIfStatement(e, false, branch)
+	}
+	return "{\n" + jsMatchStatements(e, false, jsReturnBlock, branch) + "}\n"
+}
+
+// jsStatement emits control flow directly when its value is discarded. Its
+// branches share the current generator/function and then continue at the next
+// statement in the enclosing block.
+func jsStatement(e *Expr, effect bool) string {
+	branch := func(b *Block) string { return jsBlockIn(b, effect, nil, jsDiscardBlock) }
+	switch e.Kind {
+	case "if":
+		return jsIfStatement(e, effect, branch)
+	case "match":
+		return "{\n" + jsMatchStatements(e, effect, jsDiscardBlock, branch) + "}\n"
+	default:
+		return jsExpr(e, effect) + ";\n"
+	}
 }
 func jsExpr(e *Expr, effect bool) string {
 	switch e.Kind {
@@ -556,7 +674,7 @@ func jsExpr(e *Expr, effect bool) string {
 		}
 		return "(" + left + " " + op + " " + right + ")"
 	case "if":
-		body := "if (" + jsExpr(e.Left, effect) + ") {\n" + jsBlock(e.Then, effect) + "} else {\n" + jsBlock(e.Else, effect) + "}\n"
+		body := jsIfStatement(e, effect, func(b *Block) string { return jsBlock(b, effect) })
 		if effect {
 			return "(yield* Effect.gen(function* () {\n" + body + "}))"
 		}
@@ -622,6 +740,21 @@ func jsConstructCall(e *Expr, effect bool) string {
 // jsMatch lowers the checked match plan with the same first-match order as
 // Go: subjects are evaluated once, in order, and each body is emitted once.
 func jsMatch(e *Expr, effect bool) string {
+	body := jsMatchStatements(e, effect, jsReturnBlock, func(b *Block) string { return jsBlock(b, effect) })
+	if effect {
+		return "(yield* Effect.gen(function* () {\n" + body + "}))"
+	}
+	return "(() => {\n" + body + "})()"
+}
+
+// jsIfStatement is the statement form of an `if`; branch lowers each block.
+func jsIfStatement(e *Expr, effect bool, branch func(*Block) string) string {
+	return "if (" + jsExpr(e.Left, effect) + ") {\n" + branch(e.Then) + "} else {\n" + branch(e.Else) + "}\n"
+}
+
+// jsMatchStatements lowers the checked match plan. Branch mode controls the
+// arm result while the plan retains first-match order and subject evaluation.
+func jsMatchStatements(e *Expr, effect bool, completion jsBlockCompletion, branch func(*Block) string) string {
 	plan := e.matchPlan
 	body := ""
 	subjects := make([]string, len(e.Args))
@@ -629,38 +762,97 @@ func jsMatch(e *Expr, effect bool) string {
 		subjects[index] = "__ef_match_" + strconv.Itoa(index)
 		body += "const " + subjects[index] + " = " + jsExpr(subject, effect) + ";\n"
 	}
-	for _, arm := range plan.arms {
+	if jsCanSwitchMatch(plan) {
+		body += "switch (" + subjects[0] + "._tag) {\n"
+		for _, arm := range plan.arms {
+			cell := arm.cells[0]
+			for _, pattern := range cell.alternatives {
+				body += "case " + quoted(jsVariantTag(pattern)) + ":\n"
+			}
+			body += "{\n" + jsMatchBindings(arm, subjects)
+			body += branch(arm.body)
+			if completion == jsDiscardBlock {
+				body += "break;\n"
+			}
+			body += "}\n"
+		}
+		body += "default: throw new Error(\"unreachable non-exhaustive match\");\n}\n"
+		return body
+	}
+	for armIndex, arm := range plan.arms {
 		conditions := []string{}
-		for index, cell := range arm.cells {
+		for subjectIndex, cell := range arm.cells {
 			if cell.total {
 				continue
 			}
 			alternatives := []string{}
 			for _, pattern := range cell.alternatives {
-				alternatives = append(alternatives, subjects[index]+"._tag === "+quoted(jsVariantTag(pattern)))
+				alternatives = append(alternatives, subjects[subjectIndex]+"._tag === "+quoted(jsVariantTag(pattern)))
 			}
 			conditions = append(conditions, "("+strings.Join(alternatives, " || ")+")")
 		}
 		if len(conditions) == 0 {
 			conditions = append(conditions, "true")
 		}
-		body += "if (" + strings.Join(conditions, " && ") + ") {\n"
-		for _, binding := range arm.bindings {
-			subject := subjects[binding.subject]
-			alternatives := arm.cells[binding.subject].alternatives
-			value := subject + "[" + quoted(binding.fields[len(alternatives)-1]) + "]"
-			for alternative := len(alternatives) - 2; alternative >= 0; alternative-- {
-				value = subject + "._tag === " + quoted(jsVariantTag(alternatives[alternative])) + " ? " + subject + "[" + quoted(binding.fields[alternative]) + "] : " + value
-			}
-			body += "const __ef_local_" + binding.name + " = " + value + ";\n"
+		if armIndex == 0 {
+			body += "if (" + strings.Join(conditions, " && ") + ") {\n"
+		} else {
+			body += "else if (" + strings.Join(conditions, " && ") + ") {\n"
 		}
-		body += jsBlock(arm.body, effect) + "}\n"
+		body += jsMatchBindings(arm, subjects)
+		body += branch(arm.body) + "}\n"
 	}
-	body += "throw new Error(\"unreachable non-exhaustive match\");\n"
-	if effect {
-		return "(yield* Effect.gen(function* () {\n" + body + "}))"
+	if len(plan.arms) == 0 {
+		body += "throw new Error(\"unreachable non-exhaustive match\");\n"
+	} else {
+		body += "else { throw new Error(\"unreachable non-exhaustive match\"); }\n"
 	}
-	return "(() => {\n" + body + "})()"
+	return body
+}
+
+func jsMatchBindings(arm matchPlanArm, subjects []string) string {
+	body := ""
+	for _, binding := range arm.bindings {
+		subject := subjects[binding.subject]
+		alternatives := arm.cells[binding.subject].alternatives
+		value := subject + "[" + quoted(binding.fields[len(alternatives)-1]) + "]"
+		for alternative := len(alternatives) - 2; alternative >= 0; alternative-- {
+			value = subject + "._tag === " + quoted(jsVariantTag(alternatives[alternative])) + " ? " + subject + "[" + quoted(binding.fields[alternative]) + "] : " + value
+		}
+		body += "const __ef_local_" + binding.name + " = " + value + ";\n"
+	}
+	return body
+}
+
+// A single tested subject with explicit checked variant cells can use a tag
+// switch. Product, total, or otherwise general plans stay on the ordered
+// condition chain below.
+func jsCanSwitchMatch(plan *matchPlan) bool {
+	if plan == nil || len(plan.subjects) != 1 || !plan.subjects[0].tested || len(plan.arms) == 0 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, arm := range plan.arms {
+		if len(arm.cells) != 1 || arm.cells[0].total || len(arm.cells[0].alternatives) == 0 {
+			return false
+		}
+		for _, pattern := range arm.cells[0].alternatives {
+			if pattern == nil || pattern.VariantName == "" {
+				return false
+			}
+			tag := jsVariantTag(pattern)
+			if seen[tag] {
+				return false
+			}
+			seen[tag] = true
+		}
+		for _, binding := range arm.bindings {
+			if binding.subject != 0 || len(binding.fields) != len(arm.cells[0].alternatives) {
+				return false
+			}
+		}
+	}
+	return len(seen) == len(plan.subjects[0].variants)
 }
 
 func jsVariantTag(pattern *MatchPattern) string {

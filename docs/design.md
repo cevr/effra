@@ -303,6 +303,34 @@ Define portable numeric and data semantics rather than silently inheriting each 
 
 The Go target should expose efficient server facilities: byte buffers, fixed-width integers, networking, processes, synchronization, profiling, and curated OS bindings. Go-specific unsafe or ABI-dependent operations remain explicit and visible to inspection. Target constraints distinguish server JS, browser JS, and Go OS/architecture combinations. Do not label an operation portable when one backend cannot meet its contract. A freestanding backend and no-GC execution are outside the current design scope.
 
+### Shared post-check lowering
+
+The target-neutral IR above is grown only as its consumers need it. The first piece is a small pass that runs after checking, reads the checked tree, and returns annotations both emitters consume (`internal/compiler/lower_tail.go`); it builds no intermediate tree. Its first consumer turns self tail calls into loops.
+
+Effra has no loop construct, so recursion is the only iteration. Goroutine stacks grow, but a V8 stack does not, so a deep pure self recursion that runs on Go overflows on Node. That is a target-parity defect, so the loop is part of the language contract rather than an optimization:
+
+- A call is rewritten when it is a direct application of the pure function that contains it (the checker's resolved function, never a callable value or a shadowing name) and is in tail position: the last statement of the body, and recursively of every `if` branch and `match` arm that is itself in tail position.
+- Go emits `for` and JavaScript emits `while (true)` with `continue`. Parameters become loop state; each iteration declares its own bindings from them, so anything that captures a parameter sees its own iteration's value, and every argument is evaluated, left to right, before any parameter changes.
+- Mutual recursion, non-tail self calls (`"x" + f(n)`) and effect functions keep their recursive form. Only the functions with a self tail call change in emitted output.
+- The `if` and `match` expressions on the tail path are emitted as statements inside the loop. The pass records them (`onSpine`) so that statement-position `if`/`match` lowering, planned next, can reuse the same walk instead of finding tails again.
+
+Prior art: MoonBit contifies self tail calls into a loop in its shared IR, so mutual recursion is also left alone; Gleam's `tail_call_loop` does the same in its JavaScript backend; the BEAM does it for every tail call.
+
+#### JavaScript statement and tail control flow
+
+The next slice emits checked `if` and `match` nodes directly where their value is discarded or returned from a function. A discarded branch completes and execution continues with the following statement; a tail branch returns, fails, or continues an admitted self-tail loop. Conditions and match subjects keep source order and single evaluation, while branches stay lazy. A one-subject match may use `switch` only when its checked plan has explicit, non-total variant cells; product matches, total cells, and other general plans use the checked ordered condition chain. Expression-valued subpositions retain their value-producing wrapper. The JavaScript emitter consumes the existing checker-owned match plan and does not infer exhaustiveness or bindings again.
+
+At those direct sites, effectful branches remain in the enclosing `Effect.gen` body. The outer `__ef_autoScope` and explicit `scope` boundary remain in place. Pinned Effect 4.0.1 source shows that `Effect.gen` suspends iterator creation and forwards iterator completion or failure ([`effect.ts`](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/internal/effect.ts#L1217-L1239), [iterator completion](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/internal/effect.ts#L1408-L1439)); this is a contract reference, not proof for removing other wrappers. Nullary enum construction also stays fresh and mutable for JavaScript callers; no shared singleton is emitted.
+
+Pinned compiler comparisons clarify the mechanism boundary:
+
+- MoonBit's [`pass_contification.ml`](https://github.com/moonbitlang/moonbit-compiler/blob/d4ada10d212b5376f7f8bf49cd2fbaa275a395df/src/pass_contification.ml#L126-L216) rewrites self tail calls in shared Core IR. Its public compiler targets wasm-gc; this does not establish JavaScript output behavior.
+- Gleam's JavaScript [`tail_call_loop`](https://github.com/gleam-lang/gleam/blob/52e735c82d42811dd08d29d5508f564da081fd7d/compiler-core/src/javascript/expression.rs#L350-L390) emits a loop for tail recursion. That is a JS-specific tail-call lowering, not a general statement/match pass.
+- ReScript's [`js_pass_tailcall_inline.ml`](https://github.com/rescript-lang/rescript-compiler/blob/30ce3698ef683137039c7eb7ded2915b278d26ee/compiler/core/js_pass_tailcall_inline.ml#L150-L192) performs returned-call inlining; it is not self-tail loop conversion.
+- Effra's Go emitter uses ordinary Go `if` and `switch` statements for branch control. That is the native-control-flow reference, not a performance result.
+
+This lowering changes deterministic emitted shape and keeps the matched Go behavior as its control. No allocation reduction or speedup is claimed; matched performance measurement remains separate work.
+
 ## TypeScript content-mapper integration
 
 The user identified [typescript-go PR #4712, Content mappers](https://github.com/microsoft/typescript-go/pull/4712). It merged August 19, 2026. The protocol transforms foreign source into virtual JS/TS with source-span mappings and diagnostics, allowing TypeScript tooling to work across the boundary. Content-mapped inputs do not produce JavaScript through TypeScript emit; Effra must emit runnable code itself. Complex transformed syntax still needs language-specific tooling.

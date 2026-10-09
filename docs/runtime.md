@@ -16,6 +16,10 @@ Cancellation is cooperative. Managed waits and generated effect boundaries obser
 
 Exits preserve named failures, defects and interruption separately, including additional cleanup/child causes. `.catch<Tag>(value)` handles a lone matching failure; it does not erase accompanying cleanup defects. Managed panics become defects while cleanup runs. Fatal runtime/process termination and unmanaged goroutine panics are outside this protocol.
 
+## Recursion depth
+
+A pure function whose self call is in tail position runs in constant stack on both targets: Go emits a `for` loop and JavaScript a `while (true)` loop, so a recursion that is a million calls deep behaves the same on Go, Bun and Node. Non-tail recursion, mutual recursion and recursion through `run` are ordinary calls and are bounded by the host. Go grows a goroutine stack to 1 GB and then aborts the process; V8 raises `RangeError` after roughly ten thousand frames. A recursion through `run self()` that is a million calls deep completes on JavaScript (Effect.gen keeps its frames on the heap) but exceeds the Go stack limit, so portable programs should not rely on deep effect recursion.
+
 ## Small standard library
 
 | Service / provider | Operations | Contract |
