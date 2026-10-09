@@ -743,3 +743,40 @@ func TestDeepEncode(t *testing.T){
 		t.Fatalf("generated deep encode: %v %s", err, output)
 	}
 }
+
+// codecWideDomainSource is a transformed domain whose layout visits
+// fields+2 type occurrences: Wide, its field and Big's fields.
+func codecWideDomainSource(fields int) string {
+	var source strings.Builder
+	source.WriteString("import Json \"effra/json\"\nrecord Big {\n")
+	for i := range fields {
+		fmt.Fprintf(&source, "    f%d: i64\n", i)
+	}
+	source.WriteString(`}
+record Wide {
+    big: Big
+}
+fn wideOf(big: Big) -> Wide {
+    Wide { big: big }
+}
+fn bigOf(wide: Wide) -> Big {
+    wide.big
+}
+derive wideJson = Json.codec<Wide>(maxBodyBytes: 1048576, maxDepth: 1, decode: wideOf, encode: bigOf)
+`)
+	return source.String()
+}
+
+// The plain-data walk of a transformed domain is charged one unit per type
+// occurrence against a 4096-unit budget: a domain visiting exactly 4096
+// occurrences is admitted, and one more is refused with EF127, not
+// admitted or diagnosed as a non-plain domain.
+func TestCodecTransformationDomainWalkIsBudgeted(t *testing.T) {
+	if r := Compile(codecWideDomainSource(codecDomainLayoutWork - 2)); !r.Checked {
+		t.Fatalf("a domain within the budget was refused: %v", r.Diagnostics)
+	}
+	r := Compile(codecWideDomainSource(codecDomainLayoutWork - 1))
+	if r.Checked || len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "EF127" || !strings.Contains(r.Diagnostics[0].Message, "codec wideJson cannot transform Wide: its layout exceeds the 4096 work budget") {
+		t.Fatalf("a domain over the budget: %v", r.Diagnostics)
+	}
+}

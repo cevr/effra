@@ -13,6 +13,11 @@ import (
 // or options cannot be represented by its profile. No partial plan is kept.
 const codecDerivationCode = "EF138"
 
+// codecDomainLayoutWork bounds the plain-data walk of one transformed
+// domain: one unit per type occurrence visited. It equals the plan node
+// ceiling, the size of the largest structural plan a codec may derive.
+const codecDomainLayoutWork = maxCodecPlanNodes
+
 // maxCodecMaxBodyBytes is the ceiling of a plan's maxBodyBytes. A derive
 // declaration states both bounds explicitly; neither the checker nor the
 // engines supply a default, so every plan's budget is visible at its
@@ -540,7 +545,13 @@ func (c *checker) codecTransformation(codec *CodecDeclaration, options map[strin
 	if !ok {
 		return nil
 	}
-	if refusal := c.codecValueLayout(codec.domainID, codec.Type, codec.Type, map[TypeID]bool{}); refusal != "" {
+	work := codecDomainLayoutWork
+	refusal := c.codecValueLayout(codec.domainID, codec.Type, codec.Type, map[TypeID]bool{}, &work)
+	if work < 0 {
+		c.diagnostic("EF127", "codec "+codec.Name+" cannot transform "+codec.Type+": its layout exceeds the "+strconv.Itoa(codecDomainLayoutWork)+" work budget of a transformed domain", codec.TypeSpan)
+		return nil
+	}
+	if refusal != "" {
 		c.diagnostic(codecDerivationCode, "codec "+codec.Name+" cannot transform "+codec.Type+": "+refusal+"; a transformed witness decodes plain data, never a resource, function or runtime value", codec.TypeSpan)
 		return nil
 	}
@@ -555,7 +566,16 @@ func (c *checker) codecTransformation(codec *CodecDeclaration, options map[strin
 // capture facts for it; a resource (File, Latch, Fiber), a function or
 // recipe value, or a type variable could carry those facts, so admitting it
 // would let a scope-owned value escape unchecked.
-func (c *checker) codecValueLayout(id TypeID, display, path string, seen map[TypeID]bool) string {
+//
+// The walk is memoized by type and charged one unit of work per type
+// occurrence it visits, memoized or not, against the caller's budget, so it
+// stops after codecDomainLayoutWork visits whatever the layout's width or
+// depth; an exhausted budget leaves work negative (EF127, a finite-profile
+// limit like the plan's own ceilings).
+func (c *checker) codecValueLayout(id TypeID, display, path string, seen map[TypeID]bool, work *int) string {
+	if *work--; *work < 0 {
+		return ""
+	}
 	if seen[id] {
 		return ""
 	}
@@ -570,8 +590,8 @@ func (c *checker) codecValueLayout(id TypeID, display, path string, seen map[Typ
 	case "record", "enum", "application":
 		refusal := ""
 		c.walkDataFields(id, func(name string, field Field) {
-			if refusal == "" {
-				refusal = c.codecValueLayout(field.typeID, field.Type, path+"."+name, seen)
+			if refusal == "" && *work >= 0 {
+				refusal = c.codecValueLayout(field.typeID, field.Type, path+"."+name, seen, work)
 			}
 		})
 		return refusal

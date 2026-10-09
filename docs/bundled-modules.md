@@ -155,7 +155,9 @@ plain data: primitives, records, enums and generic data over them. A domain
 that is or holds a resource (`File`, `Latch`, a fiber), a function or effect
 recipe value is refused with EF138 at its path, because a decoded value
 carries no ownership facts and must never smuggle a scope-owned resource
-past the EF123 escape check.
+past the EF123 escape check. The check walks the domain's layout once per
+type and charges one unit per type occurrence against a 4096-unit budget,
+the plan node ceiling; a layout that needs more is refused with EF127.
 
 Each direction function's rows are its structural failure plus the declared
 failures and services of every transformation that direction runs, so a
