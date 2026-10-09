@@ -58,7 +58,6 @@ var smokeChains = [][]string{
 	{"readme_smoke"},
 	{"bundled_smoke"},
 	{"format_smoke"},
-	{"mcp_text_smoke"},
 	{"layer_smoke"},
 	{"type_smoke"},
 	{"http_smoke"},

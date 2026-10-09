@@ -1,0 +1,249 @@
+package main
+
+import (
+	"encoding/json"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+// The process smokes formerly lived in scripts/*_smoke.py and drove bin/ef
+// from the repository root, writing dist/ there. Their Go ports drive the
+// package's test CLI in a private workspace instead.
+
+// smokeWorkspace returns a temporary workspace holding copies of the named
+// repository files and directories (relative to the repository root), with
+// node_modules linked to the pinned install. The copies are read in this
+// process, so Go's test cache sees every input and reruns the test when one
+// changes; the CLI's own reads in a subprocess would be invisible to it.
+func smokeWorkspace(t *testing.T, paths ...string) string {
+	t.Helper()
+	// The gate names the external tool versions (Node, Bun, tsc) here, so a
+	// cached pass never survives a tool upgrade.
+	_ = os.Getenv("EFFRA_TOOL_VERSIONS")
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	for _, path := range paths {
+		source := filepath.Join(root, filepath.FromSlash(path))
+		err := filepath.WalkDir(source, func(name string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			relative, err := filepath.Rel(root, name)
+			if err != nil {
+				return err
+			}
+			target := filepath.Join(workspace, relative)
+			if entry.IsDir() {
+				return os.MkdirAll(target, 0o755)
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			data, err := os.ReadFile(name)
+			if err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(target, data, info.Mode().Perm())
+		})
+		if err != nil {
+			t.Fatalf("copy %s into the smoke workspace: %v", path, err)
+		}
+	}
+	modules := filepath.Join(root, "node_modules")
+	if _, err := os.Stat(modules); err != nil {
+		t.Fatalf("pinned JavaScript packages: %v", err)
+	}
+	if err := os.Symlink(modules, filepath.Join(workspace, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	return workspace
+}
+
+// smokeJSON decodes one JSON document or fails the test.
+func smokeJSON(t *testing.T, data []byte) map[string]any {
+	t.Helper()
+	var value map[string]any
+	if err := json.Unmarshal(data, &value); err != nil {
+		t.Fatalf("not a JSON object: %v\n%s", err, data)
+	}
+	return value
+}
+
+// adapterSemantic removes only adapter envelope and byte-charge fields from a
+// report.
+func adapterSemantic(value map[string]any) map[string]any {
+	result := map[string]any{}
+	for key, item := range value {
+		if key != "file" && key != "timings" {
+			result[key] = item
+		}
+	}
+	if usage, ok := result["typeProjectionUsage"].(map[string]any); ok {
+		kept := map[string]any{}
+		for key, item := range usage {
+			if key != "compatibilityBytes" && key != "nameBytes" && key != "responseBytes" {
+				kept[key] = item
+			}
+		}
+		result["typeProjectionUsage"] = kept
+	}
+	return result
+}
+
+var artifactDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// producerSnapshot validates one decorated response and returns its producer
+// identity. An empty target accepts the response's own.
+func producerSnapshot(t *testing.T, value map[string]any, target string, snapshotSchema int) map[string]any {
+	t.Helper()
+	for _, key := range []string{"schemaVersion", "revision", "target", "producer", "snapshot"} {
+		if _, ok := value[key]; !ok {
+			t.Fatalf("decorated response lacks %s: %v", key, value)
+		}
+	}
+	expectedTarget := value["target"]
+	if target != "" {
+		expectedTarget = target
+	}
+	if value["target"] != expectedTarget {
+		t.Fatalf("target = %v, want %v", value["target"], expectedTarget)
+	}
+	producer, ok := value["producer"].(map[string]any)
+	snapshot, ok2 := value["snapshot"].(map[string]any)
+	if !ok || !ok2 {
+		t.Fatalf("producer and snapshot must be objects: %v", value)
+	}
+	for _, key := range []string{"strength", "qualifier", "reuseScope"} {
+		if _, ok := producer[key]; !ok {
+			t.Fatalf("producer lacks %s: %v", key, producer)
+		}
+	}
+	scope := producer["reuseScope"]
+	switch scope {
+	case "artifact":
+		digest, _ := producer["digest"].(string)
+		if producer["strength"] != "executing-artifact" || !artifactDigest.MatchString(digest) || producer["qualifier"] != digest {
+			t.Fatalf("artifact producer: %v", producer)
+		}
+		if reason, ok := producer["reason"]; ok && reason != "" {
+			t.Fatalf("artifact producer carries a reason: %v", producer)
+		}
+	case "process", "none":
+		if producer["strength"] != "unavailable" {
+			t.Fatalf("unavailable producer: %v", producer)
+		}
+		if digest, ok := producer["digest"]; ok && digest != "" {
+			t.Fatalf("unavailable producer carries a digest: %v", producer)
+		}
+		if reason, _ := producer["reason"].(string); reason == "" {
+			t.Fatalf("unavailable producer lacks a reason: %v", producer)
+		}
+		qualifier, _ := producer["qualifier"].(string)
+		if scope == "process" && (!strings.HasPrefix(qualifier, "process:") || len(qualifier) <= len("process:")) {
+			t.Fatalf("process producer qualifier: %v", producer)
+		}
+		if scope == "none" && qualifier != "" {
+			t.Fatalf("none producer qualifier: %v", producer)
+		}
+	default:
+		t.Fatalf("reuse scope %v", scope)
+	}
+	want := map[string]any{
+		"schemaVersion": float64(snapshotSchema),
+		"revision":      value["revision"],
+		"target":        expectedTarget,
+		"producer":      producer["qualifier"],
+		"reuseScope":    scope,
+	}
+	if !reflect.DeepEqual(snapshot, want) {
+		t.Fatalf("snapshot = %v, want %v", snapshot, want)
+	}
+	return producer
+}
+
+// parityOptions are assertReportParity's optional projections.
+type parityOptions struct {
+	target         string
+	ignored        []string
+	project        func(map[string]any) map[string]any
+	reportSchema   int // default 7
+	snapshotSchema int // default 7
+}
+
+// assertReportParity compares decorated reports without erasing their
+// producer contract. Artifact-scoped reports are equal after only explicitly
+// named adapter envelope projections; process-scoped reports may differ only
+// in the process qualifier; "none" reports retain exact metadata equality.
+func assertReportParity(t *testing.T, actual, expected map[string]any, options parityOptions) {
+	t.Helper()
+	if options.reportSchema == 0 {
+		options.reportSchema = 7
+	}
+	if options.snapshotSchema == 0 {
+		options.snapshotSchema = 7
+	}
+	for _, report := range []map[string]any{actual, expected} {
+		if report["schemaVersion"] != float64(options.reportSchema) {
+			t.Fatalf("report schema = %v, want %d: %v", report["schemaVersion"], options.reportSchema, report)
+		}
+	}
+	actualProducer := producerSnapshot(t, actual, options.target, options.snapshotSchema)
+	expectedProducer := producerSnapshot(t, expected, options.target, options.snapshotSchema)
+	for _, key := range []string{"schemaVersion", "revision", "target"} {
+		if !reflect.DeepEqual(actual[key], expected[key]) {
+			t.Fatalf("%s: %v != %v", key, actual[key], expected[key])
+		}
+	}
+	for _, key := range []string{"source", "sources"} {
+		left, inLeft := actual[key]
+		right, inRight := expected[key]
+		if inLeft != inRight || !reflect.DeepEqual(left, right) {
+			t.Fatalf("%s: %v != %v", key, left, right)
+		}
+	}
+	if actualProducer["reuseScope"] != expectedProducer["reuseScope"] {
+		t.Fatalf("reuse scopes differ: %v / %v", actualProducer, expectedProducer)
+	}
+	project := func(value map[string]any) map[string]any {
+		result := deepCopyJSON(t, value)
+		for _, key := range options.ignored {
+			delete(result, key)
+		}
+		if options.project != nil {
+			result = options.project(result)
+		}
+		return result
+	}
+	left, right := project(actual), project(expected)
+	if actualProducer["reuseScope"] == "process" {
+		for _, report := range []map[string]any{left, right} {
+			report["producer"].(map[string]any)["qualifier"] = "<process>"
+			report["snapshot"].(map[string]any)["producer"] = "<process>"
+		}
+	}
+	if !reflect.DeepEqual(left, right) {
+		t.Fatalf("reports differ:\n%s\n%s", mustJSON(t, left), mustJSON(t, right))
+	}
+}
+
+// deepCopyJSON copies a decoded JSON object.
+func deepCopyJSON(t *testing.T, value map[string]any) map[string]any {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return smokeJSON(t, data)
+}
