@@ -30,13 +30,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
 // cacheVersion is part of every key; bump it when a step's meaning changes in
 // a way its declared inputs cannot see.
-const cacheVersion = "effra-gate-v1"
+const cacheVersion = "effra-gate-v2"
 
 // Step is one gate check.
 type Step struct {
@@ -71,6 +70,17 @@ type Inputs struct {
 	Clean bool
 	// Submodule makes a submodule's checked-out commit and status an input.
 	Submodule string
+	// Installed names directories outside Git's view, such as an installed
+	// node_modules, whose contents are an input: every file's path,
+	// permissions and content and every symlink's target, following links
+	// as Node and Bun resolve them. An absent directory is a distinct input.
+	Installed []string
+	// GitObjects makes Git history an input for a step that reads it
+	// offline: whether the repository is shallow, and whether each object
+	// a selected file names by a full 40-digit hexadecimal ID is present.
+	// Identical files then never replay a pass recorded in a checkout that
+	// held history this one lacks.
+	GitObjects bool
 }
 
 type outcome int
@@ -110,6 +120,9 @@ type gate struct {
 	clean    string
 	modules  map[string]string
 	factsMu  sync.Mutex
+
+	installedDigests map[string]string
+	installedMu      sync.Mutex
 }
 
 func main() {
@@ -123,7 +136,7 @@ func main() {
 	}
 	// File-mode assertions in the process tests expect the conventional
 	// creation mask; the gate fixes it rather than inheriting a caller's.
-	syscall.Umask(0o022)
+	setCreationMask()
 	// Steps run concurrently, and git status/diff (including the Go
 	// toolchain's VCS stamping) otherwise take the index lock to refresh
 	// stat data, failing a concurrent step that must write the index.
@@ -200,6 +213,16 @@ func (g *gate) run(out io.Writer) int {
 				fmt.Fprintf(out, "gate: step %q needs unknown step %q\n", step.Name, need)
 				return 2
 			}
+		}
+	}
+	// Digest the test dependency trees while files load and early steps run;
+	// the first Go test step then finds the digest ready.
+	for _, step := range g.steps {
+		if len(step.ToolEnv) > 0 {
+			for _, dir := range testInstalled {
+				go g.installed(dir)
+			}
+			break
 		}
 	}
 	if err := g.loadFiles(); err != nil {
@@ -287,6 +310,9 @@ func (g *gate) execute(step *Step) *result {
 		for _, name := range testToolEnvironment {
 			value, set := os.LookupEnv(name)
 			fmt.Fprintf(digest, "env\x00%s\x00%t\x00%s\x00", name, set, value)
+		}
+		for _, dir := range testInstalled {
+			fmt.Fprintf(digest, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
 		}
 		command.Env = append(command.Env, "EFFRA_TOOL_VERSIONS="+hex.EncodeToString(digest.Sum(nil))[:16])
 	}
@@ -419,15 +445,22 @@ func (g *gate) key(step *Step) (string, error) {
 	inputs := step.Inputs
 	hash := sha256.New()
 	fmt.Fprintf(hash, "%s\x00%s\x00%q\x00", cacheVersion, step.Name, step.Argv)
-	files := 0
+	var files []string
 	for _, name := range g.files {
 		if selected(name, inputs) {
 			fmt.Fprintf(hash, "file\x00%s\x00%s\x00", name, g.digests[name])
-			files++
+			files = append(files, name)
 		}
 	}
-	if files == 0 {
+	if len(files) == 0 {
 		return "", fmt.Errorf("%s: declared inputs select no files", step.Name)
+	}
+	if inputs.GitObjects {
+		state, err := g.objectPresence(files)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(hash, "objects\x00%s\x00", state)
 	}
 	for _, tool := range inputs.Tools {
 		fmt.Fprintf(hash, "tool\x00%s\x00%s\x00", tool, g.toolVersion(tool))
@@ -449,6 +482,180 @@ func (g *gate) key(step *Step) (string, error) {
 			return "", err
 		}
 		fmt.Fprintf(hash, "submodule\x00%s\x00%s\x00", inputs.Submodule, state)
+	}
+	for _, dir := range inputs.Installed {
+		fmt.Fprintf(hash, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+var objectName = regexp.MustCompile(`\b[0-9a-f]{40}\b`)
+
+// objectPresence reports whether the repository is shallow and which of the
+// object IDs named in files are present in it.
+func (g *gate) objectPresence(files []string) (string, error) {
+	names := map[string]bool{}
+	for _, name := range files {
+		content, err := os.ReadFile(filepath.Join(g.root, filepath.FromSlash(name)))
+		if err != nil {
+			continue // a missing or unreadable file is already a distinct digest
+		}
+		for _, match := range objectName.FindAll(content, -1) {
+			names[string(match)] = true
+		}
+	}
+	sorted := make([]string, 0, len(names))
+	for name := range names {
+		sorted = append(sorted, name)
+	}
+	sort.Strings(sorted)
+	shallow, err := g.git("rev-parse", "--is-shallow-repository")
+	if err != nil {
+		return "", err
+	}
+	state := "shallow=" + strings.TrimSpace(string(shallow)) + "\n"
+	if len(sorted) == 0 {
+		return state, nil
+	}
+	command := exec.Command("git", "cat-file", "--batch-check=%(objectname) %(objecttype)")
+	command.Dir = g.root
+	command.Stdin = strings.NewReader(strings.Join(sorted, "\n") + "\n")
+	output, err := command.Output()
+	if err != nil {
+		return "", fmt.Errorf("git cat-file --batch-check: %w", err)
+	}
+	return state + string(output), nil
+}
+
+// installed digests an installed tree once per gate run.
+func (g *gate) installed(dir string) string {
+	g.installedMu.Lock()
+	defer g.installedMu.Unlock()
+	if g.installedDigests == nil {
+		g.installedDigests = map[string]string{}
+	}
+	if digest, ok := g.installedDigests[dir]; ok {
+		return digest
+	}
+	digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(dir)), g.root)
+	if err != nil {
+		// An unreadable tree never matches a recorded pass.
+		digest = fmt.Sprintf("error:%v:%d", err, time.Now().UnixNano())
+	}
+	g.installedDigests[dir] = digest
+	return digest
+}
+
+// installedDigest hashes a tree's contents, following symbolic links (each
+// directory once, by its resolved path) and hashing files concurrently. A
+// link from the tree back into the repository, such as a workspace package,
+// contributes only its target: the files there are repository inputs, and
+// outputs Git ignores there are not inputs.
+func installedDigest(root, repository string) (string, error) {
+	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
+		return "absent", nil
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	resolvedRepository, err := filepath.EvalSymlinks(repository)
+	if err != nil {
+		return "", err
+	}
+	within := func(name, dir string) bool {
+		relative, err := filepath.Rel(dir, name)
+		return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+	}
+	type file struct{ relative, path string }
+	var entries []string
+	var files []file
+	visited := map[string]bool{}
+	var walk func(relative, name string) error
+	walk = func(relative, name string) error {
+		info, err := os.Lstat(name)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(name)
+			if err != nil {
+				return err
+			}
+			entries = append(entries, "link\x00"+relative+"\x00"+target)
+			resolved, err := filepath.EvalSymlinks(name)
+			if err != nil {
+				entries = append(entries, "dangling\x00"+relative)
+				return nil
+			}
+			if within(resolved, resolvedRepository) && !within(resolved, resolvedRoot) {
+				return nil
+			}
+			if info, err = os.Stat(name); err != nil {
+				return err
+			}
+		}
+		switch {
+		case info.IsDir():
+			resolved, err := filepath.EvalSymlinks(name)
+			if err != nil {
+				return err
+			}
+			if visited[resolved] {
+				entries = append(entries, "seen\x00"+relative)
+				return nil
+			}
+			visited[resolved] = true
+			children, err := os.ReadDir(name)
+			if err != nil {
+				return err
+			}
+			entries = append(entries, "dir\x00"+relative)
+			for _, child := range children {
+				if err := walk(path.Join(relative, child.Name()), filepath.Join(name, child.Name())); err != nil {
+					return err
+				}
+			}
+		case info.Mode().IsRegular():
+			entries = append(entries, fmt.Sprintf("file\x00%s\x00%v", relative, info.Mode().Perm()))
+			files = append(files, file{relative, name})
+		default:
+			entries = append(entries, fmt.Sprintf("other\x00%s\x00%v", relative, info.Mode()))
+		}
+		return nil
+	}
+	if err := walk(".", root); err != nil {
+		return "", err
+	}
+	sums := make([]string, len(files))
+	errs := make([]error, len(files))
+	var wg sync.WaitGroup
+	work := make(chan int)
+	for range max(2, runtime.NumCPU()) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range work {
+				content, err := os.ReadFile(files[index].path)
+				sum := sha256.Sum256(content)
+				sums[index], errs[index] = hex.EncodeToString(sum[:]), err
+			}
+		}()
+	}
+	for index := range files {
+		work <- index
+	}
+	close(work)
+	wg.Wait()
+	hash := sha256.New()
+	for _, entry := range entries {
+		fmt.Fprintf(hash, "%s\x00", entry)
+	}
+	for index, f := range files {
+		if errs[index] != nil {
+			return "", errs[index]
+		}
+		fmt.Fprintf(hash, "%s\x00%s\x00", f.relative, sums[index])
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }

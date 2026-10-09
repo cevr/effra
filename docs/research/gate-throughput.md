@@ -96,7 +96,7 @@ Every port was checked in three ways:
 
 turbo 2.11.7 was evaluated, installed only in a scratch directory. A cache hit costs 40–120 ms, against about 1.3 s for this runner's no-op, almost all of which is Go's own test-cache checks. Turbo was rejected for these reasons:
 
-1. **Wrong unit for Go.** Turbo's Go support is per module, and Effra is one module. It cannot express shards computed from measured durations, or the complement shard that makes coverage complete.
+1. **Wrong unit for Go.** Turbo's Go support is per module, and Effra is one module. Turbo has no built-in duration sharding: shards computed from measured durations, and the complement shard that makes coverage complete, would have to be generated as separate tasks outside it.
 2. **Its cache cannot replace Go's.** Turbo caches by declared globs. Go's cache also sees the environment and the files a test reads; replacing it with globs would be less sound. Leaving Go tests uncached in turbo leaves turbo with nothing to win.
 3. **Inputs it cannot declare without hacks:** tool versions, the submodule's index flags, and committability.
 4. **Cost of adoption.** An npm dependency, lockfile changes and a shared `node_modules` rollout. Single-package mode also forbids `//#` tasks, so every step would need a package.json script.

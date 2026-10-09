@@ -33,6 +33,10 @@ var testTools = []string{"node", "bun", "tsc", "git"}
 // Go's test cache cannot see them; they join the tool digest.
 var testToolEnvironment = []string{"NODE_OPTIONS", "NODE_PATH", "BUN_CONFIG_REGISTRY"}
 
+// testInstalled are installed dependency trees Go tests run Node and Bun
+// over; their content digest joins the tool digest.
+var testInstalled = []string{"node_modules"}
+
 // gofmtDirectories are the Go trees the gate requires to be gofmt-clean.
 var gofmtDirectories = []string{"cmd", "internal", "runtime", "lint", "scripts/gate", "scripts/conformance", "examples/go-interop", "examples/sdk", "examples/compare", "examples/hosttypes", "examples/lintpack"}
 
@@ -58,7 +62,9 @@ func gateSteps(root string) ([]*Step, error) {
 	add(&Step{Name: "no tracked python bytecode", Argv: []string{"sh", "-c", `tracked=$(git ls-files '*.pyc'); if [ -n "$tracked" ]; then echo "tracked Python bytecode (git rm it; __pycache__/ is ignored):"; echo "$tracked"; exit 1; fi`}})
 
 	python := []string{"python3", "git"}
-	wayfinder := &Inputs{Paths: []string{"scripts/*.py", "docs/wayfinder/", ".gitignore"}, Tools: python}
+	// The migration checks resolve historical repository links offline
+	// from this repository's object store.
+	wayfinder := &Inputs{Paths: []string{"scripts/*.py", "docs/wayfinder/", ".gitignore"}, Tools: python, GitObjects: true}
 	for _, check := range pythonChecks {
 		inputs := wayfinder
 		if check.name == "wayfinder hosted reconciliation tests" {
@@ -66,7 +72,9 @@ func gateSteps(root string) ([]*Step, error) {
 			// then reruns the checker in a clone rebuilt from HEAD plus the
 			// staged patch. Git guarantees that clone holds the staged tree,
 			// so beyond committability only the checker's own inputs matter.
-			inputs = &Inputs{Paths: wayfinder.Paths, Tools: python, Clean: true}
+			// EFFRA_SKIP_ORDINARY_CLONE=1 skips that control, so it is an
+			// input: a reduced run never replays as the full one.
+			inputs = &Inputs{Paths: wayfinder.Paths, Tools: python, Clean: true, GitObjects: true, Env: []string{"EFFRA_SKIP_ORDINARY_CLONE"}}
 		}
 		add(&Step{Name: check.name, Argv: check.argv, Inputs: inputs})
 	}
@@ -75,6 +83,16 @@ func gateSteps(root string) ([]*Step, error) {
 	// the other Go packages.
 	conformance := &Inputs{Paths: []string{"scripts/conformance/", "conformance/", ".gitmodules", "scripts/init_upstream.sh", "internal/compiler/*_test.go", "go.mod"}, Tools: []string{"go", "git"}, Submodule: "conformance/upstream/effect"}
 	add(&Step{Name: "effect conformance import", Argv: []string{"go", "run", "./scripts/conformance", "import"}, Inputs: conformance})
+	// The Foldkit checks walk the snapshot directory, so files Git ignores
+	// there are inputs too.
+	foldkit := &Inputs{Paths: []string{"scripts/import_foldkit_corpus.py", "scripts/test_import_foldkit_corpus.py", "conformance/"}, Tools: python, Installed: []string{"conformance/upstream/foldkit-d21db423"}}
+	add(&Step{Name: "foldkit corpus self-check", Argv: []string{"python3", "-B", "scripts/import_foldkit_corpus.py", "--self-check"}, Inputs: foldkit})
+	add(&Step{Name: "foldkit corpus importer tests", Argv: []string{"python3", "-B", "scripts/test_import_foldkit_corpus.py"}, Inputs: foldkit})
+	references, err := frameworkReferenceInputs(root)
+	if err != nil {
+		return nil, err
+	}
+	add(&Step{Name: "framework-port references", Argv: []string{"node", frameworkPorts + "scripts/check-references.mjs"}, Inputs: references})
 	add(&Step{Name: "effect conformance mapping", Argv: []string{"go", "run", "./scripts/conformance", "check"}, Inputs: conformance})
 
 	add(&Step{Name: "gofmt", Argv: append([]string{"sh", "-c", `unformatted=$(gofmt -l "$@"); if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi`, "gofmt"}, gofmtDirectories...)})
@@ -116,7 +134,12 @@ func gateSteps(root string) ([]*Step, error) {
 		}
 	}
 	add(&Step{Name: "go test (other packages)", Needs: []string{"go test build"}, Argv: append([]string{"go", "test", testTimeout}, unsharded...), ToolEnv: testTools})
-	add(&Step{Name: "build bin/ef", Needs: []string{"go test build"}, Argv: []string{"go", "build", "-o", "bin/ef", "./cmd/ef"}})
+	// Without a VCS stamp the binary depends only on its sources, so a commit
+	// that changes none of them reuses the link instead of relinking for a
+	// new revision. The gate's bin/ef therefore declares no vcs.revision in
+	// its producer identity, while its artifact digest still identifies the
+	// executing bytes.
+	add(&Step{Name: "build bin/ef", Needs: []string{"go test build"}, Argv: []string{"go", "build", "-buildvcs=false", "-o", "bin/ef", "./cmd/ef"}})
 
 	examples, err := authoredExamples(root)
 	if err != nil {
@@ -125,6 +148,41 @@ func gateSteps(root string) ([]*Step, error) {
 	add(&Step{Name: "ef fmt --check", Needs: []string{"build bin/ef"}, Argv: append([]string{"./bin/ef", "fmt", "--check"}, examples...)})
 
 	return steps, nil
+}
+
+// frameworkPorts is the framework-port reference leaf: its own lockfile and
+// installed node_modules, which Git ignores.
+const frameworkPorts = "conformance/framework-ports/ports/"
+
+// frameworkReferenceInputs keys the framework-port reference check. Beyond
+// its leaf, the counter-domain control builds ./cmd/ef from source and runs
+// the compiled Go and JavaScript programs, so every non-test file of the
+// compiler's main-module packages is an input, with the Go and JavaScript
+// toolchains and the environment they read.
+func frameworkReferenceInputs(root string) (*Inputs, error) {
+	command := exec.Command("go", "list", "-deps", "-f", "{{if .Module}}{{if .Module.Main}}{{.Dir}}{{end}}{{end}}", "./cmd/ef")
+	command.Dir = root
+	output, err := command.Output()
+	if err != nil {
+		return nil, fmt.Errorf("go list -deps ./cmd/ef: %w", err)
+	}
+	inputs := &Inputs{
+		Paths:     []string{frameworkPorts, "go.mod", "go.sum"},
+		Tools:     []string{"node", "bun", "go", "git"},
+		Env:       append([]string{"GOFLAGS", "GOOS", "GOARCH", "CGO_ENABLED", "GOEXPERIMENT"}, testToolEnvironment...),
+		Installed: []string{frameworkPorts + "node_modules"},
+	}
+	for _, dir := range strings.Fields(string(output)) {
+		relative, err := filepath.Rel(root, dir)
+		if err != nil || strings.HasPrefix(relative, "..") {
+			return nil, fmt.Errorf("compiler package %s is outside %s", dir, root)
+		}
+		relative = filepath.ToSlash(relative)
+		inputs.Paths = append(inputs.Paths, relative+"/")
+		// Test files are not build inputs.
+		inputs.Exclude = append(inputs.Exclude, relative+"/*_test.go")
+	}
+	return inputs, nil
 }
 
 func goPackages(root string) ([]string, error) {

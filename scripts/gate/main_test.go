@@ -222,3 +222,151 @@ func TestTestNamesFindTopLevelTestsOnly(t *testing.T) {
 		t.Fatalf("names = %q", names)
 	}
 }
+
+// keyOf computes a step key from a fresh view of the fixture.
+func keyOf(t *testing.T, root string, inputs *Inputs) string {
+	t.Helper()
+	g := &gate{root: root, cacheDir: t.TempDir()}
+	if err := g.loadFiles(); err != nil {
+		t.Fatal(err)
+	}
+	k, err := g.key(&Step{Name: "s", Argv: []string{"true"}, Inputs: inputs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+func TestInstalledTreeContentsAreInputs(t *testing.T) {
+	root := fixture(t)
+	write(t, root, ".gitignore", "/runs/\n/deps/\n/src/out/\n")
+	write(t, root, "deps/pkg/index.js", "export const one = 1\n")
+	write(t, root, "deps/.store/lib@1/lib.js", "export const lib = 1\n")
+	if err := os.Symlink(".store/lib@1", filepath.Join(root, "deps/lib")); err != nil {
+		t.Fatal(err)
+	}
+	// A workspace link back into the repository contributes only its target.
+	if err := os.Symlink("../src", filepath.Join(root, "deps/workspace")); err != nil {
+		t.Fatal(err)
+	}
+	inputs := &Inputs{Paths: []string{"docs/"}, Installed: []string{"deps"}}
+	before := keyOf(t, root, inputs)
+	if keyOf(t, root, inputs) != before {
+		t.Fatal("installed keys are not deterministic")
+	}
+
+	// Same size and modification time, different bytes.
+	file := filepath.Join(root, "deps/pkg/index.js")
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "deps/pkg/index.js", "export const one = 2\n")
+	if err := os.Chtimes(file, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	edited := keyOf(t, root, inputs)
+	if edited == before {
+		t.Fatal("a content edit that keeps size and mtime replayed the installed key")
+	}
+	write(t, root, "deps/.store/lib@1/lib.js", "export const lib = 2\n")
+	linked := keyOf(t, root, inputs)
+	if linked == edited {
+		t.Fatal("an edit behind an internal symlink did not change the installed key")
+	}
+	if err := os.Chmod(file, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	moded := keyOf(t, root, inputs)
+	if moded == linked {
+		t.Fatal("a permission change did not change the installed key")
+	}
+	write(t, root, "src/out/generated.js", "ignored output\n")
+	if keyOf(t, root, inputs) != moded {
+		t.Fatal("an ignored output behind a workspace link changed the installed key")
+	}
+	if err := os.RemoveAll(filepath.Join(root, "deps")); err != nil {
+		t.Fatal(err)
+	}
+	if keyOf(t, root, inputs) == moded {
+		t.Fatal("removing the installed tree did not change the key")
+	}
+}
+
+func TestToolDigestCoversInstalledTestDependencies(t *testing.T) {
+	root := fixture(t)
+	write(t, root, ".gitignore", "/runs/\n/node_modules/\n")
+	write(t, root, "node_modules/effect/index.js", "export const one = 1\n")
+	steps := func() []*Step {
+		return []*Step{{Name: "digest", Argv: []string{"sh", "-c", `echo "tools=$EFFRA_TOOL_VERSIONS"`}, ToolEnv: []string{"sh"}}}
+	}
+	digest := func() string {
+		t.Helper()
+		code, out := runGate(t, root, t.TempDir(), steps())
+		if code != 0 {
+			t.Fatalf("exit %d\n%s", code, out)
+		}
+		match := regexp.MustCompile(`tools=([0-9a-f]{16})`).FindStringSubmatch(out)
+		if match == nil {
+			t.Fatalf("no tool digest in\n%s", out)
+		}
+		return match[1]
+	}
+	before := digest()
+	file := filepath.Join(root, "node_modules/effect/index.js")
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "node_modules/effect/index.js", "export const one = 2\n")
+	if err := os.Chtimes(file, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if digest() == before {
+		t.Fatal("an installed dependency edit left EFFRA_TOOL_VERSIONS unchanged")
+	}
+}
+
+func TestEnvironmentInputsSeparateReducedRuns(t *testing.T) {
+	root := fixture(t)
+	inputs := &Inputs{Paths: []string{"src/"}, Env: []string{"EFFRA_SKIP_ORDINARY_CLONE"}}
+	t.Setenv("EFFRA_SKIP_ORDINARY_CLONE", "1")
+	reduced := keyOf(t, root, inputs)
+	os.Unsetenv("EFFRA_SKIP_ORDINARY_CLONE")
+	if keyOf(t, root, inputs) == reduced {
+		t.Fatal("a run that skipped the ordinary-clone control shares the full run's key")
+	}
+}
+
+func TestGitObjectsNamedByInputsAreInputs(t *testing.T) {
+	root := fixture(t)
+	git := func(args ...string) string {
+		t.Helper()
+		command := exec.Command("git", append([]string{"-c", "user.name=gate", "-c", "user.email=gate@invalid", "-c", "commit.gpgsign=false"}, args...)...)
+		command.Dir = root
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	// A commit only a side branch holds, named by an input file.
+	git("checkout", "-qb", "history")
+	write(t, root, "docs/history.md", "historical\n")
+	git("add", ".")
+	git("commit", "-qm", "historical")
+	historical := git("rev-parse", "HEAD")
+	git("checkout", "-q", "-")
+	write(t, root, "src/links.txt", "evidence at "+historical+"\n")
+	inputs := &Inputs{Paths: []string{"src/"}, GitObjects: true}
+	present := keyOf(t, root, inputs)
+	if keyOf(t, root, &Inputs{Paths: []string{"src/"}}) == present {
+		t.Fatal("GitObjects did not join the key")
+	}
+	git("branch", "-qD", "history")
+	git("reflog", "expire", "--expire=now", "--all")
+	git("gc", "-q", "--prune=now")
+	if keyOf(t, root, inputs) == present {
+		t.Fatal("identical files replayed a key recorded while the named commit was present")
+	}
+}
