@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/testinputs"
 )
 
 // testCLI is this package's CLI, built once per test process. Every process
@@ -30,7 +31,8 @@ func TestMain(m *testing.M) {
 	// The CLI builds in the process's own environment, before any test
 	// overrides Go variables with t.Setenv.
 	testCLI.environment = os.Environ()
-	code := m.Run()
+	// Process tests run Node and Bun over the installed JavaScript packages.
+	code := testinputs.Run(m, filepath.Join("..", ".."))
 	if testCLI.dir != "" {
 		_ = os.RemoveAll(testCLI.dir)
 	}
