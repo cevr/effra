@@ -33,7 +33,7 @@ func TestCheckedValueConstructorsUseOneCanonicalTypeArena(t *testing.T) {
 	data := arena.data(result, ownership, captures)
 	pure := arena.callable(result, []TypeID{parameter}, checkedPureCallable, emptyRowID, emptyRowID, ownership, captures)
 	effect := arena.callable(result, []TypeID{parameter}, checkedEffectCallable, failure, service, ownership, captures)
-	recipe := arena.recipe(result, []TypeID{parameter}, checkedEffectCallable, failure, service, ownership, captures)
+	recipe := arena.recipe(result, checkedEffectCallable, failure, service, ownership, captures)
 	fiber := arena.fiber(result, failure, ownership, captures)
 	providerRecipe := arena.providerRecipe(provider, failure, service, ownership, captures)
 	otherProviderRecipe := arena.providerRecipe(otherProvider, failure, service, ownership, captures)
@@ -87,8 +87,11 @@ func TestCheckedValueConstructorsUseOneCanonicalTypeArena(t *testing.T) {
 	if arena.callable(result, nil, checkedEffectCallable, failure, service, nil, nil).contractID() == effect.contractID() {
 		t.Fatal("callable contracts with different parameter IDs shared an ID")
 	}
-	if arena.recipe(result, []TypeID{parameter}, checkedEffectCallable, failure, service, nil, nil).contractID() == effect.contractID() {
+	if arena.recipe(result, checkedEffectCallable, failure, service, nil, nil).contractID() == arena.callable(result, nil, checkedEffectCallable, failure, service, nil, nil).contractID() {
 		t.Fatal("callable and recipe contracts shared an ID")
+	}
+	if arena.recipe(result, checkedEffectCallable, failure, service, nil, nil).contractID() != recipe.contractID() {
+		t.Fatal("equal recipe contracts were not interned")
 	}
 	if otherProviderRecipe.contractID() == providerRecipe.contractID() || arena.provider(otherProvider, nil, nil).contractID() == providerValue.contractID() {
 		t.Fatal("provider declaration identity was omitted from the canonical contract")

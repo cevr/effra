@@ -448,6 +448,7 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 		f                   *Function
 		ownership, captures []OwnershipFact
 		evidence            callableEvidence
+		failures            failureEvidence
 	}
 	values := []admitted{}
 	for _, d := range dto.Declarations {
@@ -467,24 +468,99 @@ func (c *checker) admitInterfaceSummary(dto interfaceSummary, functions []*Funct
 		}
 		body := a.occurrence(d.Body, 0)
 		ownership, captures := a.facts(d.Ownership, 0), a.facts(d.Captures, 0)
-		ownershipMatches := slices.Equal(summarizeInvocationFacts(body.ownershipFacts()), ownership)
-		capturesMatch := slices.Equal(summarizeInvocationFacts(body.captureFacts()), captures)
-		evidenceMatches := body.callableEvidence == e
-		if !ownershipMatches || !capturesMatch || !evidenceMatches {
-			return fmt.Errorf("declaration %s summary disagrees with retained body occurrence (ownership=%t captures=%t evidence=%t)", d.Ref, ownershipMatches, capturesMatch, evidenceMatches)
+		failures := a.failures(d.Failures, 0)
+		if err := a.wellFormedLayers(f, ownership, captures); err != nil {
+			return err
 		}
-		values = append(values, admitted{f, ownership, captures, e})
+		summary := c.summaryOccurrence(body, f.Effect)
+		ownershipMatches := slices.Equal(summary.ownershipFacts(), ownership)
+		capturesMatch := slices.Equal(summary.captureFacts(), captures)
+		evidenceMatches := body.callableEvidence == e
+		// The declaration's payload evidence is recomputed from the
+		// retained body exactly as the producer's function edge does.
+		expected := mapFailureFacts(c.declaredFailures(summary.failures, c.failureLayerRows(body.valueID()), c.callFailureRows(f.returnID, f.Effect, f.failureID)), transportableFacts)
+		failuresMatch := equalFailures(expected, failures)
+		if !ownershipMatches || !capturesMatch || !evidenceMatches || !failuresMatch {
+			return fmt.Errorf("declaration %s summary disagrees with retained body occurrence (ownership=%t captures=%t evidence=%t failures=%t)", d.Ref, ownershipMatches, capturesMatch, evidenceMatches, failuresMatch)
+		}
+		values = append(values, admitted{f, ownership, captures, e, failures})
 	}
 	if a.err != nil {
 		return a.err
 	}
 	for _, v := range values {
-		v.f.Ownership, v.f.Captures, v.f.returnCallableEvidence = v.ownership, v.captures, v.evidence
+		v.f.Ownership, v.f.Captures, v.f.returnCallableEvidence, v.f.failures = v.ownership, v.captures, v.evidence, v.failures
 		for _, d := range dto.Declarations {
 			if d.Ref == v.f.Identity {
-				v.f.returnFields = cloneFieldOccurrences(a.occurrence(d.Body, 0).fields)
+				v.f.returnFields = cloneFieldOccurrences(c.summaryOccurrence(a.occurrence(d.Body, 0), v.f.Effect).fields)
 				break
 			}
+		}
+	}
+	return nil
+}
+
+// maxSummaryLayers bounds the layer and level indices a summary may name.
+const maxSummaryLayers = 64
+
+// owner decodes one owner atom. Closed owners are transient: a summary
+// never carries a timeout or child owner of the producing module.
+func (a *summaryAdmission) owner(name string, r summaryRegion) (ownershipOwnerKind, string, bool) {
+	index := slices.Index(summaryOwnerKinds[:], name)
+	kind := ownershipOwnerKind(index)
+	if index < 0 || closedOwnerKind(kind) {
+		return 0, "", false
+	}
+	if (r.Kind != "parameter" && r.Kind != "exec" && r.Ordinal != -1) || (r.Kind != "parameter" && r.Declaration != "") {
+		a.err = fmt.Errorf("noncanonical region")
+		return 0, "", false
+	}
+	switch r.Kind {
+	case "unknown":
+		return kind, "", true
+	case "wildcard":
+		return kind, "*", true
+	case "invocation":
+		return kind, "invocation", kind == ownershipOwnerLexical
+	case "parameter-wildcard":
+		return kind, "parameter:*", true
+	case "exec":
+		if kind != ownershipOwnerExec || r.Ordinal < 0 || r.Ordinal > maxSummaryLayers || r.Declaration != "" {
+			return 0, "", false
+		}
+		return kind, execRegion(r.Ordinal), true
+	case "parameter":
+		f := a.functions[r.Declaration]
+		if f == nil || r.Ordinal < 0 || r.Ordinal >= len(f.Params) {
+			a.err = fmt.Errorf("invalid region owner")
+			return 0, "", false
+		}
+		return kind, "parameter:" + f.Params[r.Ordinal].Name, true
+	}
+	a.err = fmt.Errorf("unsupported region discriminant")
+	return 0, "", false
+}
+
+// wellFormedLayers checks a declaration's summary against its call layers
+// (design §8 row 35): a held layer names a layer of the call occurrence and
+// an Exec owner names an enclosing binder, so no Exec is free beyond the
+// declared depth and no transient Lexical region survives the edge.
+func (a *summaryAdmission) wellFormedLayers(f *Function, ownership, captures []OwnershipFact) error {
+	layers := a.c.invocationLayers(f.returnID, f.Effect)
+	for _, fact := range ownership {
+		if fact.ownerKind == ownershipOwnerExec && fact.exec >= layers {
+			return fmt.Errorf("declaration %s summary names a free layer executor", f.Identity)
+		}
+		if fact.ownerKind == ownershipOwnerLexical {
+			return fmt.Errorf("declaration %s summary retains a transient region", f.Identity)
+		}
+	}
+	for _, fact := range captures {
+		if fact.layer > layers || (fact.ownerKind == ownershipOwnerExec && fact.exec >= fact.layer) {
+			return fmt.Errorf("declaration %s summary names a free layer executor", f.Identity)
+		}
+		if fact.ownerKind == ownershipOwnerLexical {
+			return fmt.Errorf("declaration %s summary retains a transient region", f.Identity)
 		}
 	}
 	return nil
@@ -497,50 +573,39 @@ func (a *summaryAdmission) facts(items []summaryOwner, depth int) []OwnershipFac
 			a.err = fmt.Errorf("noncanonical ownership source or remainder")
 			return nil
 		}
-		kind := slices.Index(summaryOwnerKinds[:], item.OwnerKind)
-		if kind < 0 || item.OwnerKind == "child" || item.OwnerKind == "timeout" || (item.Status != "owned" && item.Status != "borrowed" && item.Status != "unknown") {
+		kind, region, ok := a.owner(item.OwnerKind, item.Region)
+		if !ok || (item.Status != "owned" && item.Status != "borrowed" && item.Status != "unknown") || item.Layer < 0 || item.Layer > maxSummaryLayers {
 			a.err = fmt.Errorf("unsupported owner facts")
 			return nil
 		}
-		region := ""
-		r := item.Region
-		switch r.Kind {
-		case "unknown":
-			region = ""
-		case "wildcard":
-			region = "*"
-		case "invocation":
-			region = "invocation"
-		case "deferred":
-			region = "deferred"
-		case "parameter-wildcard":
-			region = "parameter:*"
-		case "parameter":
-			f := a.functions[r.Declaration]
-			if f == nil || r.Ordinal < 0 || r.Ordinal >= len(f.Params) {
-				a.err = fmt.Errorf("invalid region owner")
+		fact := OwnershipFact{Path: item.Path, Status: item.Status, Region: region, Origin: item.Origin, source: item.SourcePath, sourceSet: item.SourceSet, ownerKind: kind, potentialOwner: item.PotentialOwner, remainder: item.Remainder, remainderExclusions: item.RemainderExclusions, layer: item.Layer}
+		if kind == ownershipOwnerExec {
+			fact.exec = item.Region.Ordinal
+		}
+		env := make([]OwnershipFact, 0, len(item.Environment))
+		for _, entry := range item.Environment {
+			owner, ownerRegion, ok := a.owner(entry.OwnerKind, entry.Region)
+			if !ok || owner == ownershipOwnerRelation || owner == ownershipOwnerParameter || owner == ownershipOwnerUnknown || len(env) > maxSummaryLayers {
+				a.err = fmt.Errorf("unsupported relation environment")
 				return nil
 			}
-			region = "parameter:" + f.Params[r.Ordinal].Name
-		default:
-			a.err = fmt.Errorf("unsupported region discriminant")
-			return nil
+			atom := OwnershipFact{Status: "owned", Region: ownerRegion, ownerKind: owner}
+			if owner == ownershipOwnerExec {
+				atom.exec = entry.Region.Ordinal
+			}
+			env = append(env, atom)
 		}
-		if r.Kind != "parameter" && (r.Ordinal != -1 || r.Declaration != "") {
-			a.err = fmt.Errorf("noncanonical region")
-			return nil
-		}
-		fact := OwnershipFact{Path: item.Path, Status: item.Status, Region: region, Origin: item.Origin, source: item.SourcePath, sourceSet: item.SourceSet, ownerKind: ownershipOwnerKind(kind), potentialOwner: item.PotentialOwner, remainder: item.Remainder, remainderExclusions: item.RemainderExclusions}
 		switch item.Relation.Kind {
 		case "absent":
-			if item.Relation.Ref != "" {
+			if item.Relation.Ref != "" || kind == ownershipOwnerRelation || len(env) != 0 {
 				a.err = fmt.Errorf("invalid absent relation")
 			}
 		case "relation":
 			fact.callbackRelation = a.relation(item.Relation.Ref, depth+1)
-			if !item.PotentialOwner {
-				a.err = fmt.Errorf("relation cannot discharge potential ownership")
+			if kind != ownershipOwnerRelation || len(env) < 2 {
+				a.err = fmt.Errorf("relation evidence requires a relation owner and its environment")
 			}
+			fact.relationEnv = encodeOwnerEnv(env)
 		default:
 			a.err = fmt.Errorf("unsupported relation discriminant")
 		}
@@ -567,6 +632,8 @@ func (a *summaryAdmission) occurrence(ref string, depth int) checkedExpression {
 		a.err = fmt.Errorf("dangling occurrence reference")
 		return checkedExpression{}
 	}
+	evaluation, executed := a.evaluation(ef, es, item.Evaluation, depth), a.evaluation(xf, xs, item.Executed, depth)
+	failures := a.failures(item.Failures, depth)
 	fields := map[string]checkedExpression{}
 	layoutID := a.c.occurrenceLayoutID(id)
 	shape, hasShape := a.c.checkedFields(layoutID)
@@ -607,7 +674,77 @@ func (a *summaryAdmission) occurrence(ref string, depth int) checkedExpression {
 	if len(fields) == 0 {
 		fields = nil
 	}
-	return checkedExpression{fields: fields, value: a.c.values.occurrence(id, a.facts(item.Ownership, depth), a.facts(item.Captures, depth)), child: a.facts(item.Child, depth), callableEvidence: evidence, evaluation: a.c.evaluation(ef, es), executed: a.c.evaluation(xf, xs)}
+	return checkedExpression{fields: fields, value: a.c.values.occurrence(id, a.facts(item.Ownership, depth), a.facts(item.Captures, depth)), child: a.facts(item.Child, depth), callableEvidence: evidence, evaluation: evaluation, executed: executed, failures: failures}
+}
+
+// canonicalWith reports whether labels are a sorted set of non-empty labels
+// without a separator.
+func canonicalWith(labels []string) bool {
+	for i, label := range labels {
+		if label == "" || strings.Contains(label, ",") || i > 0 && labels[i-1] >= label {
+			return false
+		}
+	}
+	return true
+}
+
+// failures decodes payload evidence. Keys are strictly ordered, so each
+// failure has one canonical encoding; a label without an entry stays ⊤.
+func (a *summaryAdmission) failures(items []summaryFailure, depth int) failureEvidence {
+	var out failureEvidence
+	var previous failureKey
+	for i, item := range items {
+		key := failureKey{layer: item.Layer, label: item.Label, pending: item.Pending, fork: item.Fork, with: joinWith(item.With)}
+		if item.Layer < 0 || item.Layer > maxSummaryLayers || item.Label == "" || (!item.Pending && (item.Fork != "" || len(item.With) > 0)) || !canonicalWith(item.With) || i > 0 && compareFailureKeys(previous, key) >= 0 {
+			a.err = fmt.Errorf("noncanonical failure evidence")
+			return nil
+		}
+		previous = key
+		if out == nil {
+			out = failureEvidence{}
+		}
+		out[key] = canonicalDecodedFacts(a.facts(item.Owners, depth))
+	}
+	return out
+}
+
+// pendingAtZero decodes an evaluation's pending or live failures: pending
+// entries of layer 0.
+func (a *summaryAdmission) pendingAtZero(items []summaryFailure, depth int) failureEvidence {
+	out := a.failures(items, depth)
+	for key := range out {
+		if !key.pending || key.layer != 0 {
+			a.err = fmt.Errorf("noncanonical evaluation pending evidence")
+			return nil
+		}
+	}
+	return out
+}
+
+// evaluation decodes an evaluation's rows, layer-0 payload evidence, uses
+// and the failures of its forked children.
+func (a *summaryAdmission) evaluation(failureRow, serviceRow RowID, item summaryRows, depth int) ExpressionEvaluation {
+	var payloads map[string][]OwnershipFact
+	for i, payload := range item.Payloads {
+		if payload.Layer != 0 || payload.Label == "" || payload.Pending || payload.Fork != "" || i > 0 && item.Payloads[i-1].Label >= payload.Label {
+			a.err = fmt.Errorf("noncanonical evaluation payload evidence")
+			return ExpressionEvaluation{}
+		}
+		if payloads == nil {
+			payloads = map[string][]OwnershipFact{}
+		}
+		payloads[payload.Label] = canonicalDecodedFacts(a.facts(payload.Owners, depth))
+	}
+	e := a.c.evaluationWith(failureRow, serviceRow, payloads, canonicalDecodedFacts(a.facts(item.Uses, depth)))
+	e.pending, e.live = a.pendingAtZero(item.Pending, depth), a.pendingAtZero(item.Live, depth)
+	return e
+}
+
+func canonicalDecodedFacts(facts []OwnershipFact) []OwnershipFact {
+	if len(facts) == 0 {
+		return nil
+	}
+	return facts
 }
 
 func (a *summaryAdmission) payloadOccurrences(items []summaryFieldOccurrence, shape []Field, depth int, complete bool) map[string]checkedExpression {
@@ -659,7 +796,11 @@ func (a *summaryAdmission) relation(ref string, depth int) *callbackResultRelati
 	if a.err != nil {
 		return nil
 	}
-	relation := a.c.callbackRelation(evidence, args, result, item.Path)
+	if item.Held < -1 || item.Held > maxSummaryLayers || item.Failure != "" && item.Held < 0 {
+		a.err = fmt.Errorf("callback relation slot out of range")
+		return nil
+	}
+	relation := a.c.callbackRelation(evidence, args, result, item.Path, item.Held, item.Effect, item.Failure)
 	if relation == nil {
 		a.err = fmt.Errorf("callback relation arena budget exceeded")
 		return nil
@@ -668,7 +809,7 @@ func (a *summaryAdmission) relation(ref string, depth int) *callbackResultRelati
 	// operational field; future changes cannot silently regress the owning key.
 	for i, arg := range args {
 		actual := relation.arguments[i]
-		if !reflect.DeepEqual(actual.fields, arg.fields) || !reflect.DeepEqual(actual.captureFacts(), arg.captureFacts()) || !reflect.DeepEqual(actual.child, arg.child) || actual.evaluation != arg.evaluation || actual.executed != arg.executed {
+		if !reflect.DeepEqual(actual.fields, arg.fields) || !reflect.DeepEqual(actual.captureFacts(), arg.captureFacts()) || !reflect.DeepEqual(actual.child, arg.child) || !reflect.DeepEqual(actual.evaluation, arg.evaluation) || !reflect.DeepEqual(actual.executed, arg.executed) || !reflect.DeepEqual(actual.failures, arg.failures) {
 			a.err = fmt.Errorf("callback interner would lose operational facts")
 			return nil
 		}

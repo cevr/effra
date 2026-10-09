@@ -1,4 +1,4 @@
-digraph "effra-graph:application:260c88ff047c6eb68b9edb2a588651a6" {
+digraph "effra-graph:application:c6e4ea6404c675703e51fee6f15d4ae7" {
   rankdir=LR;
   n0 [label="callable-value: function:module:file:module:renamed", id="retained|callable-value|function:module:file:module:renamed"];
   n1 [label="declaration: record:module:file:module:Operations", id="retained|declaration|record:module:file:module:Operations"];

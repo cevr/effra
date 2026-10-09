@@ -38,7 +38,7 @@ var bundledIndex = map[string]map[string]bundledDeclaration{
 }
 
 const bundledInterfaceVersion = "1"
-const SemanticProducerIdentity = "effra/checker-abi-9/bundled-interface-4"
+const SemanticProducerIdentity = "effra/checker-abi-10/bundled-interface-5"
 const maxBundledDeclarations = 256
 const maxBundledReferences = 4096
 const maxBundledSourceBytes = 1 << 20

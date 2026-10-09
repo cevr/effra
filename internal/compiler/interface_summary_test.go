@@ -72,7 +72,7 @@ effect fn main() -> void { void }`
 	if _, err = decodeInterfaceSummary(encoded, da.ContentHash, da.SourceInput); err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{`"sourceSet":true`, `"sourcePath":""`, `"unresolved":false`, `"potentialOwner":true`, `"remainder":false`, `"executed":`, `"evaluation":`, `"requiredChoice":false`, `"defaultValue":null`} {
+	for _, required := range []string{`"sourceSet":true`, `"sourcePath":""`, `"unresolved":false`, `"potentialOwner":false`, `"ownerKind":"relation"`, `"environment":[{`, `"layer":0`, `"held":`, `"effect":`, `"remainder":false`, `"executed":`, `"evaluation":`, `"requiredChoice":false`, `"defaultValue":null`} {
 		if !strings.Contains(string(encoded), required) {
 			t.Fatalf("lost explicit fact %s", required)
 		}
@@ -243,6 +243,43 @@ func TestBundledTransportRejectsMalformedAndStaleData(t *testing.T) {
 	}
 }
 
+// TestBundledTransportRejectsPreRecoveryProducers pins the producer epoch that
+// introduced layer-indexed owners and failure payload evidence. A summary from
+// the previous producer (checker ABI 9, bundled interface 4, interface schema
+// 4, ownership schema 3) is refused even when its digest is self-consistent,
+// so its ownership facts are never read under the new owner vocabulary.
+func TestBundledTransportRejectsPreRecoveryProducers(t *testing.T) {
+	r := Compile(bundledGreeting)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	if SemanticProducerIdentity != "effra/checker-abi-10/bundled-interface-5" || interfaceSummarySchema != 5 || ownershipSummarySchema != 4 {
+		t.Fatalf("producer epoch = %s interface=%d ownership=%d", SemanticProducerIdentity, interfaceSummarySchema, ownershipSummarySchema)
+	}
+	current, encoded := rehashInterfaceSummaryForTest(t, r.projector.admittedSummaries["effra/functions"])
+	if _, err := decodeInterfaceSummary(encoded, current.ContentHash, current.SourceInput); err != nil {
+		t.Fatalf("current producer summary refused: %v", err)
+	}
+	const previous = "effra/checker-abi-9/bundled-interface-4"
+	for name, edit := range map[string]func(*interfaceSummary){
+		"previous producer":         func(s *interfaceSummary) { s.SemanticABI, s.Producer = previous, previous },
+		"previous interface schema": func(s *interfaceSummary) { s.InterfaceSchema = 4 },
+		"previous ownership schema": func(s *interfaceSummary) { s.OwnershipSchema = 3 },
+		"previous epoch": func(s *interfaceSummary) {
+			s.SemanticABI, s.Producer, s.InterfaceSchema, s.OwnershipSchema = previous, previous, 4, 3
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			stale := current
+			edit(&stale)
+			stale, wire := rehashInterfaceSummaryForTest(t, stale)
+			if _, err := decodeInterfaceSummary(wire, stale.ContentHash, stale.SourceInput); err == nil || err.Error() != "incompatible interface producer or schema" {
+				t.Fatalf("pre-recovery summary was not refused as incompatible: %v", err)
+			}
+		})
+	}
+}
+
 func TestResolvedDefaultWireRoundTripUsesVersionedProducerSummary(t *testing.T) {
 	r := Compile(bundledGreeting)
 	if !r.Checked {
@@ -342,13 +379,69 @@ func TestBundledTransportRejectsOwnerAndGraphCorruption(t *testing.T) {
 			arg := d.Relations[0].Arguments[0]
 			for i := range d.Occurrences {
 				if d.Occurrences[i].Ref == arg {
-					d.Occurrences[i].Ownership = append(d.Occurrences[i].Ownership, summaryOwner{Status: "unknown", OwnerKind: "callback-result", Region: summaryRegion{Kind: "unknown", Ordinal: -1}, PotentialOwner: true, Relation: summaryReference{Kind: "relation", Ref: ref}})
+					env := []summaryEnvironmentOwner{{OwnerKind: "exec", Region: summaryRegion{Kind: "exec", Ordinal: 0}}, {OwnerKind: "exec", Region: summaryRegion{Kind: "exec", Ordinal: 1}}}
+					d.Occurrences[i].Ownership = append(d.Occurrences[i].Ownership, summaryOwner{Status: "unknown", OwnerKind: "relation", Region: summaryRegion{Kind: "unknown", Ordinal: -1}, Relation: summaryReference{Kind: "relation", Ref: ref}, Environment: env})
 					return
 				}
 			}
 		}},
-		{"false potential", func(d *interfaceSummary) { d.Declarations[0].Ownership[0].PotentialOwner = false }},
+		{"erased relation environment", func(d *interfaceSummary) {
+			for i := range d.Declarations {
+				for j := range d.Declarations[i].Ownership {
+					if d.Declarations[i].Ownership[j].OwnerKind == "relation" {
+						d.Declarations[i].Ownership[j].Environment = []summaryEnvironmentOwner{}
+						return
+					}
+				}
+			}
+			t.Fatal("no relation owner")
+		}},
+		{"free layer executor", func(d *interfaceSummary) {
+			for i := range d.Declarations {
+				for j := range d.Declarations[i].Ownership {
+					if d.Declarations[i].Ownership[j].OwnerKind == "relation" {
+						d.Declarations[i].Ownership[j].OwnerKind = "exec"
+						d.Declarations[i].Ownership[j].Region = summaryRegion{Kind: "exec", Ordinal: maxSummaryLayers}
+						d.Declarations[i].Ownership[j].Relation = summaryReference{Kind: "absent"}
+						d.Declarations[i].Ownership[j].Environment = []summaryEnvironmentOwner{}
+						return
+					}
+				}
+			}
+			t.Fatal("no relation owner")
+		}},
+		{"closed owner", func(d *interfaceSummary) {
+			d.Declarations[0].Ownership[0].OwnerKind = "timeout"
+		}},
 		{"erased ownership", func(d *interfaceSummary) { d.Declarations[0].Ownership = []summaryOwner{} }},
+		// Payload evidence is recomputed from the retained body: a forged
+		// proof, a transient owner or a second encoding is refused.
+		{"forged failure evidence", func(d *interfaceSummary) {
+			d.Declarations[0].Failures = append(d.Declarations[0].Failures, summaryFailure{Layer: 0, Label: "Forged", Owners: []summaryOwner{}})
+		}},
+		{"closed payload owner", func(d *interfaceSummary) {
+			d.Declarations[0].Failures = []summaryFailure{{Layer: 0, Label: "Forged", Owners: []summaryOwner{{Path: "file", Status: "owned", OwnerKind: "scope", Region: summaryRegion{Kind: "unknown", Ordinal: -1}, Relation: summaryReference{Kind: "absent"}, Environment: []summaryEnvironmentOwner{}}}}}
+		}},
+		// Pending child evidence (design §5.3) is recomputed too: a forged
+		// pending entry or a fork instance outside pending is refused.
+		{"forged pending failure", func(d *interfaceSummary) {
+			d.Declarations[0].Failures = append(d.Declarations[0].Failures, summaryFailure{Layer: 0, Label: "Forged", Pending: true, Owners: []summaryOwner{}})
+		}},
+		{"fork without pending", func(d *interfaceSummary) {
+			d.Declarations[0].Failures = append(d.Declarations[0].Failures, summaryFailure{Layer: 0, Label: "Forged", Fork: "fork:1", Owners: []summaryOwner{}})
+		}},
+		{"with without pending", func(d *interfaceSummary) {
+			d.Declarations[0].Failures = append(d.Declarations[0].Failures, summaryFailure{Layer: 0, Label: "Forged", With: []string{"Nope"}, Owners: []summaryOwner{}})
+		}},
+		{"unsorted with", func(d *interfaceSummary) {
+			d.Declarations[0].Failures = append(d.Declarations[0].Failures, summaryFailure{Layer: 0, Label: "Forged", Pending: true, With: []string{"B", "A"}, Owners: []summaryOwner{}})
+		}},
+		{"empty with label", func(d *interfaceSummary) {
+			d.Declarations[0].Failures = append(d.Declarations[0].Failures, summaryFailure{Layer: 0, Label: "Forged", Pending: true, With: []string{""}, Owners: []summaryOwner{}})
+		}},
+		{"noncanonical failure order", func(d *interfaceSummary) {
+			d.Declarations[0].Failures = []summaryFailure{{Layer: 1, Label: "A", Owners: []summaryOwner{}}, {Layer: 0, Label: "B", Owners: []summaryOwner{}}}
+		}},
 		{"missing type", func(d *interfaceSummary) { d.Types = d.Types[1:] }},
 		{"duplicate type", func(d *interfaceSummary) { d.Types = append(d.Types, d.Types[0]) }},
 		{"empty nonempty row", func(d *interfaceSummary) { d.Rows[0].Labels = []string{} }},
@@ -374,5 +467,41 @@ func TestBundledTransportRejectsOwnerAndGraphCorruption(t *testing.T) {
 				t.Fatal("corrupt summary admitted")
 			}
 		})
+	}
+}
+
+// A pending failure keeps the ordinary failures it may be raised with
+// across a function edge (design §5.3 rule 6): the encoding is canonical and
+// round-trips.
+func TestPendingFailureWithRoundTrips(t *testing.T) {
+	c := Compile("effect fn main() -> void { void }").projector
+	keys := []failureKey{
+		{layer: 0, label: "A", pending: true, fork: "#0"},
+		{layer: 0, label: "A", pending: true, fork: "#0", with: "B,C"},
+		{layer: 0, label: "A", pending: true, fork: "#1", with: "B"},
+	}
+	evidence := failureEvidence{}
+	for _, key := range keys {
+		evidence[key] = nil
+	}
+	x := &summaryExporter{}
+	encoded := x.failures(nil, evidence, 0)
+	for i, item := range encoded {
+		if !canonicalWith(item.With) {
+			t.Fatalf("item %d: with %v is not canonical", i, item.With)
+		}
+	}
+	a := &summaryAdmission{c: c}
+	decoded := a.failures(encoded, 0)
+	if a.err != nil {
+		t.Fatal(a.err)
+	}
+	if !equalFailures(decoded, evidence) {
+		t.Fatalf("round trip changed the evidence: %v != %v", decoded, evidence)
+	}
+	for _, with := range [][]string{{"B", "A"}, {"A", "A"}, {""}, {"A,B"}} {
+		if canonicalWith(with) {
+			t.Fatalf("with %q is not canonical", with)
+		}
 	}
 }

@@ -25,9 +25,11 @@ effect fn unobserved() -> void raises {Bad} uses {Gate} {
 effect fn timed() -> void raises {Timeout} uses {Gate, Scheduler} {run worker().timeout(20)}
 effect fn recovered() -> void uses {Gate} {run timed().provide<Scheduler>(LiveScheduler).catch<Timeout>(void)}
 effect fn main() -> void {
- // The Go and Effect probes run these programs directly.
+ // The Go and Effect probes run these programs directly. unobserved may
+ // leave its child unobserved, which no callable value can carry, so its
+ // recipe roots it instead of its function value.
  let probeOwned = owned
- let probeUnobserved = unobserved
+ let probeUnobserved = unobserved()
  let probeRecovered = recovered
 }
 `

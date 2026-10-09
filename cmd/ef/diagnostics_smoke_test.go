@@ -155,7 +155,7 @@ type diagnosticsSmokeFinding struct {
 // inequality cannot make a missing epoch validator look like a refusal.
 func diagnosticsSmokeEpochControls(t *testing.T, report, remote map[string]any) {
 	t.Helper()
-	options := parityOptions{reportSchema: 1, snapshotSchema: 8}
+	options := parityOptions{reportSchema: 1, snapshotSchema: 9}
 	assertReportParity(t, report, remote, options)
 	rejected := func(label string, mutate func(map[string]any)) {
 		t.Helper()
@@ -213,7 +213,7 @@ func TestDiagnosticsSmokePositions(t *testing.T) {
 			path := diagnosticsSmokeWrite(t, directory, fixture.name, source)
 			report := diagnosticsSmokeCLI(t, binary, path, false)
 			remote := diagnosticsSmokeRemote(t, binary, directory, map[string]any{"file": fixture.name})
-			assertReportParity(t, report, remote, parityOptions{reportSchema: 1, snapshotSchema: 8})
+			assertReportParity(t, report, remote, parityOptions{reportSchema: 1, snapshotSchema: 9})
 			if index == 0 {
 				// The epoch red controls run once, on the first fixture.
 				diagnosticsSmokeEpochControls(t, report, remote)
@@ -279,7 +279,7 @@ func TestDiagnosticsSmokePositions(t *testing.T) {
 					t.Fatalf("strict changed findings: %v", strict)
 				}
 				strictRemote := diagnosticsSmokeRemote(t, binary, directory, map[string]any{"file": fixture.name, "strict": true})
-				assertReportParity(t, strictRemote, strict, parityOptions{reportSchema: 1, snapshotSchema: 8})
+				assertReportParity(t, strictRemote, strict, parityOptions{reportSchema: 1, snapshotSchema: 9})
 			}
 		})
 	}
@@ -302,7 +302,7 @@ func TestDiagnosticsSmokePositions(t *testing.T) {
 			directory := t.TempDir()
 			report := diagnosticsSmokeCLI(t, binary, diagnosticsSmokeWrite(t, directory, fixture.name, fixture.source), true)
 			remote := diagnosticsSmokeRemote(t, binary, directory, map[string]any{"file": fixture.name, "strict": true})
-			assertReportParity(t, report, remote, parityOptions{reportSchema: 1, snapshotSchema: 8})
+			assertReportParity(t, report, remote, parityOptions{reportSchema: 1, snapshotSchema: 9})
 			if report["checked"] != fixture.checked {
 				t.Fatalf("checked = %v: %v", report["checked"], report)
 			}
@@ -397,7 +397,7 @@ func TestDiagnosticsSmokeIdentity(t *testing.T) {
 			diagnosticsSmokeCLI(t, binary, requested, false),
 			diagnosticsSmokeRemote(t, binary, directory, map[string]any{"file": "dots/link/../b.ef"}),
 		} {
-			assertReportParity(t, report, expected, parityOptions{target: "go", reportSchema: 1, snapshotSchema: 8})
+			assertReportParity(t, report, expected, parityOptions{target: "go", reportSchema: 1, snapshotSchema: 9})
 		}
 	})
 	t.Run("symlink-uri", func(t *testing.T) {

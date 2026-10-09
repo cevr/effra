@@ -156,16 +156,30 @@ func newPipeRewriter(source string, program *Program) *pipeRewriter {
 	for _, e := range expressionsOf(program) {
 		switch {
 		case e.Kind == "binary":
-			r.operands[e.Left], r.operands[e.Right] = true, true
+			r.markOperand(e.Left)
+			r.markOperand(e.Right)
 		case e.Kind == "run" || e.Kind == "fork":
 			// Keep a rewritten recipe call grouped when run/fork is adjacent
 			// to a binary operator, so the pipe is not ambiguous with it.
-			r.operands[e.Left] = true
+			r.markOperand(e.Left)
 		case e.Kind == "call" && r.rewritable(e):
 			r.calls = append(r.calls, e)
 		}
 	}
 	return r
+}
+
+// markOperand groups an operand and the receivers of its postfix chain:
+// `f(x).provide<S>(p) + y` rewrites to `(x |> f()).provide<S>(p) + y`.
+func (r *pipeRewriter) markOperand(e *Expr) {
+	for ; e != nil; e = e.Left {
+		r.operands[e] = true
+		switch e.Kind {
+		case "provide", "provideLayer", "catch", "recover", "timeout", "orFail":
+			continue
+		}
+		return
+	}
 }
 
 func (r *pipeRewriter) text(span Span) string { return r.source[span.Offset : span.Offset+span.Length] }

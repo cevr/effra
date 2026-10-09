@@ -15,7 +15,8 @@ type rowLabel struct {
 // only: like bindSourceSyntax, its names take their declarations from the
 // checked type the annotation resolved to, never from the spelling.
 type typeSyntax struct {
-	// Form is "callable", "host", or empty for a named, applied or void type.
+	// Form is "callable", "host", "recipe", or empty for a named, applied or
+	// void type.
 	Form            string
 	Qualifier, Name rowLabel
 	Extent          Span
@@ -157,6 +158,16 @@ func (c *checker) observeTypeSyntax(occurrence *typeSyntax, id TypeID, owner lex
 		if node.Kind == "host" {
 			children(node.Args)
 		}
+		return
+	case "recipe":
+		// Effect<Success, {Failures}, {Services}> names no declaration
+		// itself; its success type and row labels do.
+		if node.Kind != "recipe" {
+			return
+		}
+		c.observeTypeSyntax(occurrence.Result, node.Result, owner, data, depth+1)
+		c.observeRowLabels(occurrence.Failures, node.FailureRow, "raises", owner)
+		c.observeRowLabels(occurrence.Services, node.ServiceRow, "uses", owner)
 		return
 	}
 	name := occurrence.Name

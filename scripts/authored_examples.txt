@@ -31,3 +31,7 @@ examples/pipe.ef
 examples/codecs.ef
 examples/lintpack/testdata/provider_boundary.ef
 examples/lintpack/testdata/forbidden_failure.ef
+examples/recipes-retry.ef
+examples/recipes-queue.ef
+examples/recovery-outcome.ef
+examples/recovery-codec.ef

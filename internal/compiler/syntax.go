@@ -19,11 +19,28 @@ type Span struct {
 	Column int `json:"column"`
 }
 type Diagnostic struct {
-	Code    string            `json:"code"`
-	Message string            `json:"message"`
-	Help    string            `json:"help,omitempty"` // what to write instead, when known
-	Span    Span              `json:"span"`
-	Related []RelatedLocation `json:"related,omitempty"`
+	Code        string            `json:"code"`
+	Message     string            `json:"message"`
+	Help        string            `json:"help,omitempty"` // what to write instead, when known
+	Span        Span              `json:"span"`
+	Related     []RelatedLocation `json:"related,omitempty"`
+	Suggestions []Suggestion      `json:"suggestions,omitempty"`
+}
+
+// Suggestion is a labelled source repair proposed with a diagnostic. It is
+// a preview bound to the checked source revision: nothing applies it, and
+// the edited program must be checked again. The wire shape is shared with
+// lint findings so compiler and lint repairs can use one transport.
+type Suggestion struct {
+	Message string       `json:"message"`
+	Edits   []SourceEdit `json:"edits"`
+}
+
+// SourceEdit replaces the source bytes at Span with NewText; a zero-length
+// span inserts. Edits of one suggestion neither overlap nor share a start.
+type SourceEdit struct {
+	Span    Span   `json:"span"`
+	NewText string `json:"newText"`
 }
 type RelatedLocation struct {
 	Message string `json:"message"`
@@ -169,15 +186,19 @@ type Function struct {
 	Captures     []OwnershipFact
 	// Identity is assigned by the checker from the canonical callable
 	// contract. The source name remains a projection used by the emitters.
-	Identity               string    `json:"-"`
-	Owner                  string    `json:"-"`
-	Contract               ValueType `json:"-"`
-	Actual                 ValueType `json:"-"`
-	returnType             *sourceType
-	returnID               TypeID
-	RowParameters          []RowParameter
-	TypeParameters         []TemplateParameter
-	returnFields           map[string]checkedExpression
+	Identity       string    `json:"-"`
+	Owner          string    `json:"-"`
+	Contract       ValueType `json:"-"`
+	Actual         ValueType `json:"-"`
+	returnType     *sourceType
+	returnID       TypeID
+	RowParameters  []RowParameter
+	TypeParameters []TemplateParameter
+	returnFields   map[string]checkedExpression
+	// failures is the summary's failure payload evidence per call layer.
+	failures failureEvidence
+	// returnsNever records a checked body with no successful completion.
+	returnsNever           bool
 	failureID              RowID
 	serviceID              RowID
 	signatureChecked       bool
@@ -1052,7 +1073,8 @@ func (p *parser) typeAnnotation() (string, Span) {
 	}
 	name := p.name()
 	if name.text == "Effect" && p.peek().text == "<" {
-		p.fail(name, "typed recipes are unsupported; use an explicit effect fn callback contract")
+		occurrence.Form = "recipe"
+		return done(p.recipeType(name, occurrence))
 	}
 	text := name.text
 	occurrence.Name = rowLabel{Name: name.text, Span: name.span}
@@ -1115,6 +1137,28 @@ func (p *parser) hostTypeForm(occurrence *typeSyntax) *sourceType {
 	return form
 }
 
+// recipeType parses the explicit deferred-program contract
+// Effect<Success, {Failures}, {Services}>. Rows are positional and delimited
+// inside the angle brackets, so a recipe type never absorbs a following
+// declaration's raises/uses clause. Omitted trailing rows are empty.
+func (p *parser) recipeType(name token, occurrence *typeSyntax) string {
+	p.expectGenericOpen()
+	typ := &sourceType{Recipe: true, Span: name.span}
+	typ.Result = p.typ()
+	typ.ResultType = p.types[typ.Result]
+	occurrence.Result = p.lastType
+	if p.accept(",") {
+		typ.Failures, occurrence.Failures = p.row(), p.lastRow
+		if p.accept(",") {
+			typ.Services, occurrence.Services = p.row(), p.lastRow
+		}
+	}
+	p.expectGenericClose()
+	text := typ.display()
+	p.types[text] = typ
+	return text
+}
+
 func (p *parser) templateParameters() []TemplateParameter {
 	parameters := []TemplateParameter{}
 	for {
@@ -1127,7 +1171,7 @@ func (p *parser) templateParameters() []TemplateParameter {
 		case "callable":
 			constraint := p.typ()
 			parameter.Constraint, parameter.Annotation = p.types[constraint], p.lastType
-			if parameter.Constraint == nil || parameter.Constraint.Application != "" {
+			if parameter.Constraint == nil || parameter.Constraint.Application != "" || parameter.Constraint.Recipe {
 				p.fail(kind, "callable constraints require a direct callable shape")
 			}
 		default:
@@ -1600,7 +1644,7 @@ func (p *parser) expr(min int) *Expr {
 				p.expect("(")
 				p.expect(")")
 				e = &Expr{Kind: "hostAssert", Name: t, Left: e, Span: method.span}
-			} else if method.text == "provide" || method.text == "catch" {
+			} else if method.text == "provide" || method.text == "catch" || (method.text == "recover" && p.peek().text == "<") {
 				if method.text == "provide" && p.accept("(") {
 					layer := p.name()
 					p.expect(")")

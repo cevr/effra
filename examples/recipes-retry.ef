@@ -1,0 +1,56 @@
+// A retry policy stores lazy recipes as data. Constructing the policy runs
+// nothing; each retry executes the stored recipes again.
+import Data "effra/data"
+
+error Transient
+
+record Attempt<T: type> {
+    label: string;
+    work: Effect<T, { Transient }, { Console }>
+}
+
+record RetryPolicy<T: type> {
+    primary: Attempt<T>;
+    backup: Data.Option<Attempt<T>>
+}
+
+effect fn probe(name: string) -> string raises { Transient } uses { Console } {
+    run Console.log("probe " + name)
+    if name == "flaky" {
+        fail Transient
+    } else {
+        name + " ok"
+    }
+}
+
+effect fn attempt(step: Attempt<string>) -> string uses { Console } {
+    run step.work.catch<Transient>(step.label + " failed")
+}
+
+effect fn retry(policy: RetryPolicy<string>) -> string uses { Console } {
+    let first = run attempt(policy.primary)
+    match policy.backup {
+        Data.Option.None => first,
+        Data.Option.Some { value: backup } => first + "; " + run attempt(backup)
+    }
+}
+
+effect fn main() -> void {
+    let policy = RetryPolicy {
+        primary: Attempt {
+            label: "flaky",
+            work: probe("flaky")
+        },
+        backup: Data.Option.Some {
+            value: Attempt {
+                label: "stable",
+                work: probe("stable")
+            }
+        }
+    }
+    run Console.log("constructed").provide<Console>(Stdout)
+    let once = run retry(policy).provide<Console>(Stdout)
+    let again = run retry(policy).provide<Console>(Stdout)
+    run Console.log(once).provide<Console>(Stdout)
+    run Console.log(again).provide<Console>(Stdout)
+}

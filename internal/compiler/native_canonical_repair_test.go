@@ -37,7 +37,9 @@ effect fn main() -> void raises {A} uses {Console} {
 		failures    []string
 		requirement []string
 	}{
-		{marker: "fork task", failures: []string{"A"}, requirement: []string{"Console"}},
+		// The fork charges the child's requirements, not its failures: they
+		// stay live until join or interrupt observes the child (design §5.3).
+		{marker: "fork task", failures: nil, requirement: []string{"Console"}},
 		{marker: "run a.join", failures: []string{"A"}, requirement: nil},
 		{marker: "run a.interrupt", failures: []string{"A"}, requirement: nil},
 		{marker: "run a.cancel", failures: nil, requirement: nil},

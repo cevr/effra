@@ -888,10 +888,13 @@ func renderValue(b *strings.Builder, v reflect.Value, seen map[uintptr]int) {
 	case reflect.Map:
 		entries := make([]string, 0, v.Len())
 		for iter := v.MapRange(); iter.Next(); {
+			// Entries render in sorted order, not iteration order, so each
+			// starts from the pointers already on its path: a cycle through a
+			// map (a summary's payload evidence naming its own function) ends.
 			var entry strings.Builder
-			renderValue(&entry, iter.Key(), map[uintptr]int{})
+			renderValue(&entry, iter.Key(), maps.Clone(seen))
 			entry.WriteString("=")
-			renderValue(&entry, iter.Value(), map[uintptr]int{})
+			renderValue(&entry, iter.Value(), maps.Clone(seen))
 			entries = append(entries, entry.String())
 		}
 		slices.Sort(entries)

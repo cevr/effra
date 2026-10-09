@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 )
 
-const interfaceSummarySchema = 4
-const ownershipSummarySchema = 3
+const interfaceSummarySchema = 5
+const ownershipSummarySchema = 4
 const maxInterfaceSummaryBytes = 1 << 20
 const maxInterfaceClosureBytes = 8 << 20
 const maxInterfaceTableEntries = 4096
@@ -74,6 +75,25 @@ type summaryDeclaration struct {
 	Captures       []summaryOwner     `json:"captures"`
 	ReturnEvidence string             `json:"returnEvidence"`
 	Body           string             `json:"body"`
+	// Failures carries the payload evidence of each call layer's failures
+	// (design §4.1), including the failures of forked children pending on a
+	// layer (§5.3). A handle-carrying label without an ordinary entry
+	// decodes as ⊤, so a consumer never treats missing evidence as a proof.
+	Failures []summaryFailure `json:"failures"`
+}
+
+// summaryFailure is the payload evidence of one failure label raised by one
+// layer of an occurrence, or pending on it (Pending, with the fork instance
+// key Fork and the ordinary failures With it may be raised together with). A payload owned by a closed owner is
+// encoded as ⊤: a summary never names a transient owner of the producing
+// module.
+type summaryFailure struct {
+	Layer   int            `json:"layer"`
+	Label   string         `json:"label"`
+	Pending bool           `json:"pending"`
+	Fork    string         `json:"fork"`
+	With    []string       `json:"with"`
+	Owners  []summaryOwner `json:"owners"`
 }
 type summaryParameter struct {
 	Name           string         `json:"name"`
@@ -116,6 +136,13 @@ type summaryEvidence struct {
 type summaryRows struct {
 	Failures string `json:"failures"`
 	Services string `json:"services"`
+	// Payloads is the payload evidence of the failures incurred (layer 0),
+	// Uses the handles the evaluation's executed layers dereference, and
+	// Pending and Live the failures of its forked children (design §5.3).
+	Payloads []summaryFailure `json:"payloads"`
+	Uses     []summaryOwner   `json:"uses"`
+	Pending  []summaryFailure `json:"pending"`
+	Live     []summaryFailure `json:"live"`
 }
 type summaryOccurrence struct {
 	Variants   []summaryVariantOccurrence `json:"variants"`
@@ -128,6 +155,7 @@ type summaryOccurrence struct {
 	Evidence   string                     `json:"evidence"`
 	Evaluation summaryRows                `json:"evaluation"`
 	Executed   summaryRows                `json:"executed"`
+	Failures   []summaryFailure           `json:"failures"`
 }
 
 type summaryVariantOccurrence struct {
@@ -144,6 +172,9 @@ type summaryRelation struct {
 	Arguments []string `json:"arguments"`
 	Result    string   `json:"result"`
 	Path      string   `json:"path"`
+	Held      int      `json:"held"`
+	Effect    bool     `json:"effect"`
+	Failure   string   `json:"failure"`
 }
 type summaryRegion struct {
 	Kind        string `json:"kind"`
@@ -162,9 +193,20 @@ type summaryOwner struct {
 	Remainder           bool             `json:"remainder"`
 	RemainderExclusions string           `json:"remainderExclusions"`
 	Relation            summaryReference `json:"relation"`
+	// Layer is the held layer of a captures fact.
+	Layer int `json:"layer"`
+	// Environment is the owner vector of a relation fact.
+	Environment []summaryEnvironmentOwner `json:"environment"`
 }
 
-var summaryOwnerKinds = [...]string{"unknown", "parameter", "deferred", "invocation-result", "lexical", "child", "timeout", "callback-result"}
+// summaryEnvironmentOwner is one owner bound to a layer of a deferred
+// invocation.
+type summaryEnvironmentOwner struct {
+	OwnerKind string        `json:"ownerKind"`
+	Region    summaryRegion `json:"region"`
+}
+
+var summaryOwnerKinds = [...]string{"unknown", "parameter", "exec", "lexical", "child", "timeout", "relation", "scope", "provision"}
 
 type summaryExporter struct {
 	c            *checker
@@ -233,7 +275,7 @@ func exportInterfaceSummary(c *checker, module, sourceInput string, functions []
 		if !ok {
 			return interfaceSummary{}, fmt.Errorf("summary requires finalized declaration %s", f.Identity)
 		}
-		d := summaryDeclaration{Ref: f.Identity, Source: f.SourceID, Signature: x.typ(checked.contract.valueID()), Parameters: []summaryParameter{}, Ownership: x.facts(f, f.Ownership, 0), Captures: x.facts(f, f.Captures, 0), ReturnEvidence: x.callable(f.returnCallableEvidence), Body: x.occurrence(f, checked.body, 0)}
+		d := summaryDeclaration{Ref: f.Identity, Source: f.SourceID, Signature: x.typ(checked.contract.valueID()), Parameters: []summaryParameter{}, Ownership: x.facts(f, f.Ownership, 0), Captures: x.facts(f, f.Captures, 0), ReturnEvidence: x.callable(f.returnCallableEvidence), Body: x.occurrence(f, checked.body, 0), Failures: x.failures(f, f.failures, 0)}
 		for _, p := range f.Params {
 			d.Parameters = append(d.Parameters, summaryParameter{Name: p.Name, Type: x.typ(p.typeID), RequiredChoice: p.RequiredChoice, DefaultValue: cloneConstantValue(p.DefaultValue)})
 		}
@@ -343,11 +385,14 @@ func (x *summaryExporter) region(f *Function, region string) summaryRegion {
 		d.Kind = "wildcard"
 	case "invocation":
 		d.Kind = "invocation"
-	case "deferred":
-		d.Kind = "deferred"
 	case "parameter:*":
 		d.Kind = "parameter-wildcard"
 	default:
+		if level, ok := strings.CutPrefix(region, "exec:"); ok {
+			if ordinal, err := strconv.Atoi(level); err == nil && ordinal >= 0 {
+				return summaryRegion{Kind: "exec", Ordinal: ordinal}
+			}
+		}
 		if name, ok := strings.CutPrefix(region, "parameter:"); ok {
 			for i, p := range f.Params {
 				if p.Name == name {
@@ -367,13 +412,52 @@ func (x *summaryExporter) facts(f *Function, facts []OwnershipFact, depth int) [
 			x.err = fmt.Errorf("unsupported owner kind")
 			return out
 		}
-		d := summaryOwner{Path: fact.Path, Status: fact.Status, Region: x.region(f, fact.Region), Origin: fact.Origin, SourcePath: fact.source, SourceSet: fact.sourceSet, OwnerKind: summaryOwnerKinds[fact.ownerKind], PotentialOwner: fact.potentialOwner, Remainder: fact.remainder, RemainderExclusions: fact.remainderExclusions, Relation: summaryReference{Kind: "absent"}}
+		d := summaryOwner{Path: fact.Path, Status: fact.Status, Region: x.region(f, fact.Region), Origin: fact.Origin, SourcePath: fact.source, SourceSet: fact.sourceSet, OwnerKind: summaryOwnerKinds[fact.ownerKind], PotentialOwner: fact.potentialOwner, Remainder: fact.remainder, RemainderExclusions: fact.remainderExclusions, Relation: summaryReference{Kind: "absent"}, Layer: fact.layer, Environment: []summaryEnvironmentOwner{}}
+		for _, owner := range decodeOwnerEnv(fact.relationEnv) {
+			d.Environment = append(d.Environment, summaryEnvironmentOwner{OwnerKind: summaryOwnerKinds[owner.ownerKind], Region: x.region(f, owner.Region)})
+		}
 		if fact.callbackRelation != nil {
 			d.Relation = summaryReference{Kind: "relation", Ref: x.relation(f, fact.callbackRelation, depth+1)}
 		}
 		out = append(out, d)
 	}
 	return out
+}
+
+// evaluationRows encodes an evaluation: its rows, payload evidence and uses.
+func (x *summaryExporter) evaluationRows(f *Function, e ExpressionEvaluation, depth int) summaryRows {
+	d := summaryRows{Failures: x.row(e.failureRowID()), Services: x.row(e.serviceRowID()), Payloads: []summaryFailure{}, Uses: x.facts(f, transportableFacts(e.uses), depth)}
+	for _, label := range slices.Sorted(maps.Keys(e.payloads)) {
+		d.Payloads = append(d.Payloads, summaryFailure{Layer: 0, Label: label, Owners: x.facts(f, transportableFacts(e.payloads[label]), depth)})
+	}
+	d.Pending, d.Live = x.failures(f, e.pending, depth), x.failures(f, e.live, depth)
+	return d
+}
+
+// failures encodes payload evidence in canonical key order.
+func (x *summaryExporter) failures(f *Function, failures failureEvidence, depth int) []summaryFailure {
+	out := []summaryFailure{}
+	for _, key := range sortedFailureKeys(failures) {
+		out = append(out, summaryFailure{Layer: key.layer, Label: key.label, Pending: key.pending, Fork: key.fork, With: append([]string{}, key.withLabels()...), Owners: x.facts(f, transportableFacts(failures[key]), depth)})
+	}
+	return out
+}
+
+// transportableFacts replaces each closed owner by ⊤. A closed owner names
+// a transient region of the producing module; both refuse any dereference,
+// so the consumer's verdicts are unchanged.
+func transportableFacts(facts []OwnershipFact) []OwnershipFact {
+	if !slices.ContainsFunc(facts, func(fact OwnershipFact) bool { return closedOwnerKind(fact.ownerKind) }) {
+		return facts
+	}
+	out := make([]OwnershipFact, 0, len(facts))
+	for _, fact := range facts {
+		if closedOwnerKind(fact.ownerKind) {
+			fact = OwnershipFact{Path: fact.Path, Status: "unknown", Origin: unknownPayloadOrigin, potentialOwner: true, layer: fact.layer}
+		}
+		out = append(out, fact)
+	}
+	return normalizeFacts(out)
 }
 
 func (x *summaryExporter) occurrence(f *Function, value checkedExpression, depth int) string {
@@ -384,7 +468,7 @@ func (x *summaryExporter) occurrence(f *Function, value checkedExpression, depth
 	}
 	index := len(x.dto.Occurrences)
 	x.dto.Occurrences = append(x.dto.Occurrences, summaryOccurrence{})
-	d := summaryOccurrence{Variants: []summaryVariantOccurrence{}, Fields: []summaryFieldOccurrence{}, Ref: ref, Contract: x.typ(value.contractID()), Ownership: x.facts(f, value.ownershipFacts(), depth), Captures: x.facts(f, value.captureFacts(), depth), Child: x.facts(f, value.child, depth), Evidence: x.callable(value.callableEvidence), Evaluation: summaryRows{Failures: x.row(value.evaluation.failureRowID()), Services: x.row(value.evaluation.serviceRowID())}, Executed: summaryRows{Failures: x.row(value.executed.failureRowID()), Services: x.row(value.executed.serviceRowID())}}
+	d := summaryOccurrence{Variants: []summaryVariantOccurrence{}, Fields: []summaryFieldOccurrence{}, Ref: ref, Contract: x.typ(value.contractID()), Ownership: x.facts(f, value.ownershipFacts(), depth), Captures: x.facts(f, value.captureFacts(), depth), Child: x.facts(f, value.child, depth), Evidence: x.callable(value.callableEvidence), Evaluation: x.evaluationRows(f, value.evaluation, depth), Executed: x.evaluationRows(f, value.executed, depth), Failures: x.failures(f, value.failures, depth)}
 	names := []string{}
 	for name := range value.fields {
 		names = append(names, name)
@@ -429,7 +513,7 @@ func (x *summaryExporter) relation(f *Function, relation *callbackResultRelation
 	ref := "relation:" + strconv.Itoa(len(x.relations))
 	x.relations[relation] = ref
 	x.visiting[relation] = true
-	d := summaryRelation{Ref: ref, Evidence: x.callable(relation.callee), Arguments: []string{}, Result: x.typ(relation.result), Path: relation.path}
+	d := summaryRelation{Ref: ref, Evidence: x.callable(relation.callee), Arguments: []string{}, Result: x.typ(relation.result), Path: relation.path, Held: relation.held, Effect: relation.effect, Failure: relation.failure}
 	for _, arg := range relation.arguments {
 		d.Arguments = append(d.Arguments, x.occurrence(f, arg, depth+1))
 	}

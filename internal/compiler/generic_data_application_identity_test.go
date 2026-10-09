@@ -133,8 +133,11 @@ effect fn main()->string{let pipe=widened();run pipe.run("Ada").provide<Audit>(M
 			t.Fatalf("%s re-contract discarded borrowed field ownership: %+v", target, fileView.ownershipFacts())
 		}
 		capturedCall, err := good.TypeAt(strings.Index(source, "view.run(file)") + len("view."))
-		if err != nil || !slices.Equal(capturedCall.Type.Errors, []string{"Trouble"}) || !slices.Equal(capturedCall.Type.Services, []string{"Audit"}) || !slices.ContainsFunc(capturedCall.Type.Captures, func(fact OwnershipFact) bool { return fact.Path == "capture:arg0" && fact.Status == "borrowed" }) {
-			t.Fatalf("%s callable invocation after re-contract lost rows or argument capture evidence: info=%+v err=%v", target, capturedCall, err)
+		// echo returns its argument without dereferencing it: the run
+		// result is owned by the argument's owner and the recipe holds
+		// no use obligation (held = dereference obligations).
+		if err != nil || !slices.Equal(capturedCall.Type.Errors, []string{"Trouble"}) || !slices.Equal(capturedCall.Type.Services, []string{"Audit"}) || !slices.ContainsFunc(capturedCall.Type.Ownership, func(fact OwnershipFact) bool { return fact.Region == "parameter:file" && fact.Status == "borrowed" }) || len(capturedCall.Type.Captures) != 0 {
+			t.Fatalf("%s callable invocation after re-contract lost rows or argument owner evidence: info=%+v err=%v", target, capturedCall, err)
 		}
 		field := fileView.fields["run"]
 		fileFactory := good.checkedFunctions[functionNamed(good.Program.Functions, "fileFactory")].body.fields["run"]

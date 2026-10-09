@@ -358,12 +358,14 @@ effect fn main() -> void { void }
 	if later.Binding == nil || use.Binding == nil || later.Binding.ID != first.Binding.ID || use.Binding.ID != first.Binding.ID || later.Binding.DeclarationSpan.Offset != firstToken || later.Span.Offset != laterToken {
 		t.Fatalf("later binder token is not an occurrence of the first declaration: %+v %+v", later, first)
 	}
+	// Owner sets are exact: the join keeps the first alternative's borrowed
+	// parameter fact and the second's unknown fact side by side.
 	joined := use.Expression.Type.Ownership
-	conditional := false
+	statuses := map[string]bool{}
 	for _, fact := range joined {
-		conditional = conditional || fact.Origin == "conditional"
+		statuses[fact.Status] = true
 	}
-	if len(joined) != 2 || !conditional || !reflect.DeepEqual(first.Expression.Type.Ownership, joined) || !reflect.DeepEqual(later.Expression.Type.Ownership, joined) {
+	if len(joined) != 2 || !statuses["borrowed"] || !statuses["unknown"] || !reflect.DeepEqual(first.Expression.Type.Ownership, joined) || !reflect.DeepEqual(later.Expression.Type.Ownership, joined) {
 		t.Fatalf("binder tokens must report the joined ownership %+v; first %+v, later %+v", joined, first.Expression.Type.Ownership, later.Expression.Type.Ownership)
 	}
 	if first.Expression.Type.Success != "File" || later.Expression.Type.Success != "File" {

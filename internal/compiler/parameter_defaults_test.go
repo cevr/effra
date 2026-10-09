@@ -41,7 +41,7 @@ fn marked(required required: string) -> string { required }`
 			if !r.Checked {
 				t.Fatalf("checked parameter facts rejected: %+v", r.Diagnostics)
 			}
-			if r.SchemaVersion != SemanticSchemaVersion || SemanticSchemaVersion != 8 || TypeQuerySchemaVersion != 4 || interfaceSummarySchema != 4 || SemanticProducerIdentity != "effra/checker-abi-9/bundled-interface-4" {
+			if r.SchemaVersion != SemanticSchemaVersion || SemanticSchemaVersion != 9 || TypeQuerySchemaVersion != 4 || interfaceSummarySchema != 5 || SemanticProducerIdentity != "effra/checker-abi-10/bundled-interface-5" {
 				t.Fatalf("semantic contract epoch is stale: schema=%d query=%d interface=%d producer=%s", r.SchemaVersion, TypeQuerySchemaVersion, interfaceSummarySchema, SemanticProducerIdentity)
 			}
 			findSymbol := func(name string) *Symbol {
@@ -154,11 +154,11 @@ effect fn main() -> string { run Store.label().provide(Shared) }`
 		t.Fatalf("build layer GraphView: %v", err)
 	}
 	facts := view.Data.Effra
-	if facts.GraphViewVersion != 1 || facts.Snapshot.SchemaVersion != SemanticSchemaVersion || facts.ProducerIdentity != "effra/checker-abi-9/bundled-interface-4" {
+	if facts.GraphViewVersion != 1 || facts.Snapshot.SchemaVersion != SemanticSchemaVersion || facts.ProducerIdentity != "effra/checker-abi-10/bundled-interface-5" {
 		t.Fatalf("GraphView envelope or nested semantic qualification changed: view=%d snapshot=%d producer=%q", facts.GraphViewVersion, facts.Snapshot.SchemaVersion, facts.ProducerIdentity)
 	}
-	if SemanticSchemaVersion != 8 {
-		t.Fatalf("semantic schema owner = %d, want 8", SemanticSchemaVersion)
+	if SemanticSchemaVersion != 9 {
+		t.Fatalf("semantic schema owner = %d, want 9", SemanticSchemaVersion)
 	}
 	var selectedParameter *Param
 	for _, edge := range view.Edges {

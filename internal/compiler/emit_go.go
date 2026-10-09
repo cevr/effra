@@ -292,6 +292,7 @@ func (r *Result) EmitGo() (string, error) {
 // retains the expression kind that calls them.
 var goEmissionHelpers = []struct{ name, source string }{
 	{"catch", "func efCatch[A any](program efEffect[A],tag string,fallback func()A)efEffect[A]{return func(ctx efContext)efExit[A]{return er.Invoke(ctx.Runtime,er.Catch(efToRuntime(ctx,program),tag,fallback))}}\n"},
+	{"recover", "func efRecover[A,P any](program efEffect[A],tag string,handler func(P)efEffect[A])efEffect[A]{return func(ctx efContext)efExit[A]{return er.Invoke(ctx.Runtime,er.Recover(efToRuntime(ctx,program),tag,func(payload P)er.Effect[A]{return efToRuntime(ctx,handler(payload))}))}}\n"},
 	{"scope", "func efScoped[A any](program efEffect[A])efEffect[A]{return func(ctx efContext)efExit[A]{return er.Invoke(ctx.Runtime,er.Scoped(efToRuntime(ctx,program)))}}\n"},
 	{"timeout", "func efTimeout[A any](program efEffect[A],duration int64)efEffect[A]{return func(ctx efContext)efExit[A]{if ctx.s_Scheduler==nil||ctx.s_Scheduler.m_sleep==nil{return er.Die[A](fmt.Errorf(\"missing provider Scheduler.sleep\"))};deadline:=ctx.s_Scheduler.m_sleep(duration);return er.Invoke(ctx.Runtime,er.TimeoutWithEffect(efToRuntime(ctx,program),efToRuntime(ctx,deadline)))}}\n"},
 	{"fork", "func efFork[A any](program efEffect[A])efEffect[*er.Fiber[A]]{return func(ctx efContext)efExit[*er.Fiber[A]]{return er.Invoke(ctx.Runtime,er.Fork(efToRuntime(ctx,program)))}}\n"},
@@ -1070,6 +1071,8 @@ func (g *goEmitter) lower(e *Expr, effect bool, ret string, out *strings.Builder
 		valueType := g.resultType(e)
 		right := g.expr(e.Right, false, ret, &fallback)
 		return "efCatch(" + left + ", " + strconv.Quote(e.Name) + ", func() " + valueType + " {\n" + fallback.String() + "return " + right + "\n})"
+	case "recover":
+		return g.recoverFailure(e, effect, ret, out)
 	case "binary":
 		left := g.expr(e.Left, effect, ret, out)
 		name := g.temp()

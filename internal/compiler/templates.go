@@ -331,6 +331,11 @@ func (c *checker) templateDataArgument(id TypeID) bool {
 			memo[id] = true
 			return true
 		}
+		if n != nil && n.Kind == "recipe" {
+			// A lazy recipe is admitted data when its eventual success is.
+			memo[id] = n.Mode == checkedEffectCallable.mode() && visit(n.Result, depth+1)
+			return memo[id]
+		}
 		memo[id] = c.directTemplateDataArgument(id)
 		return memo[id]
 	}
@@ -463,6 +468,10 @@ func (c *checker) bindSourceSyntax(t *sourceType, id TypeID) {
 				c.bindSourceSyntax(child, n.Args[i])
 			}
 		}
+		return
+	}
+	if n.Kind == "recipe" {
+		c.bindSourceSyntax(t.ResultType, n.Result)
 		return
 	}
 	if n.Kind == "callable" {
@@ -716,8 +725,9 @@ func (c *checker) templateConstruct(e *Expr, env localEnv, inEffect bool) (check
 			c.diagnostic("EF127", "duplicate template initializer "+field.Name, e.Span)
 			continue
 		}
-		// Constructor fields initialize pure data values or latent recipes.
-		// An Effect must be run in its own expression and then stored here.
+		// Constructor fields initialize pure data values or latent recipes. A
+		// recipe initializes only a declared recipe slot; it is never executed
+		// by construction.
 		value := c.expr(field.Value, env, false)
 		fields[field.Name] = value.clone()
 		formal := declared[index].typeID
@@ -726,7 +736,7 @@ func (c *checker) templateConstruct(e *Expr, env localEnv, inEffect bool) (check
 				formal = r.Parameters[p].typeID
 			}
 		}
-		if value.isEffect() || !c.unifyTemplateTypes(formal, value.valueID(), variables, types) {
+		if !c.unifyTemplateTypes(formal, value.valueID(), variables, types) {
 			c.diagnostic("EF127", "template fields require initialized values", e.Span)
 			continue
 		}
@@ -770,7 +780,7 @@ func (c *checker) templateConstruct(e *Expr, env localEnv, inEffect bool) (check
 	for _, field := range instantiated {
 		if value, exists := fields[field.Name]; exists {
 			if !c.assignable(value.valueID(), field.typeID, 0) {
-				c.diagnostic("EF127", "constructor field contract mismatch", e.Span)
+				c.diagnostic("EF127", "constructor field "+field.Name+" must be "+c.displayTypeID(field.typeID), e.Span)
 				return result, true
 			}
 			value.value = c.values.occurrence(field.typeID, value.ownershipFacts(), value.captureFacts())
@@ -785,8 +795,10 @@ func (c *checker) templateConstruct(e *Expr, env localEnv, inEffect bool) (check
 			c.diagnostic("EF127", "missing initialized template field "+field.Name, e.Span)
 			return result, true
 		}
-		owners = append(owners, prependFacts(field.Name, value.ownershipFacts())...)
-		captures = append(captures, prependFacts(field.Name, value.captureFacts())...)
+		owners = append(owners, prependFacts(field.Name, heldFacts(value, 0))...)
+		if node := value.node(); node == nil || node.Kind != "recipe" {
+			captures = append(captures, prependFacts(field.Name, value.captureFacts())...)
+		}
 		evaluation = c.unionEvaluationFacts(evaluation, value.executed)
 	}
 	result = c.checkedDataID(id, normalizeFacts(owners), normalizeFacts(captures))
@@ -863,6 +875,17 @@ func (c *checker) unifyTemplateTypes(formal, actual TypeID, variables map[TypeID
 				return true
 			}
 			if a.Mode != b.Mode || (invariant || !(len(inferRows) > 0 && inferRows[0])) && (a.FailureRow != b.FailureRow || a.ServiceRow != b.ServiceRow) {
+				return false
+			}
+		} else if a.Kind == "recipe" {
+			// Recipes have no parameters. Inside an application identity every
+			// slot is invariant. Outside one, the success type is covariant and
+			// rows are upper bounds; inference binds only the success type and
+			// the instantiated field contract decides row admission.
+			if !invariant && c.assignable(actual, formal, 0) {
+				return true
+			}
+			if a.Mode != b.Mode || invariant && (a.FailureRow != b.FailureRow || a.ServiceRow != b.ServiceRow) {
 				return false
 			}
 		} else {

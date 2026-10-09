@@ -1,0 +1,82 @@
+// Work-to-outcome conversion: a stored job recipe is recovered into an
+// Outcome value. Recovering a recipe constructs a new recipe and runs
+// nothing; every run executes the stored work again.
+error Rejected {
+    reason: string
+}
+error Busy
+
+enum Outcome {
+    Done {
+        value: string
+    }
+    Failed {
+        reason: string
+    }
+}
+
+record Job {
+    label: string;
+    work: Effect<Outcome, { Rejected, Busy }, { Console }>
+}
+
+effect fn attempt(name: string) -> Outcome raises { Rejected, Busy } uses { Console } {
+    run Console.log("attempt " + name)
+    if name == "busy" {
+        fail Busy
+    } else {
+        if name == "bad" {
+            fail Rejected {
+                reason: name + " refused"
+            }
+        } else {
+            Outcome.Done {
+                value: name
+            }
+        }
+    }
+}
+
+fn rejected(failure: Rejected) -> Outcome {
+    Outcome.Failed {
+        reason: failure.reason
+    }
+}
+
+fn describe(outcome: Outcome) -> string {
+    match outcome {
+        Outcome.Done { value } => "done " + value,
+        Outcome.Failed { reason } => "failed " + reason
+    }
+}
+
+effect fn settle(job: Job) -> string raises { Busy } uses { Console } {
+    let settled = job.work.recover<Rejected>(rejected)
+    run Console.log("settling " + job.label)
+    describe(run settled)
+}
+
+effect fn report(job: Job) -> string uses { Console } {
+    run settle(job).catch<Busy>(job.label + " busy")
+}
+
+effect fn main() -> void {
+    let ok = Job {
+        label: "ok",
+        work: attempt("ok")
+    }
+    let bad = Job {
+        label: "bad",
+        work: attempt("bad")
+    }
+    let busy = Job {
+        label: "busy",
+        work: attempt("busy")
+    }
+    run Console.log("constructed").provide<Console>(Stdout)
+    let first = run report(bad).provide<Console>(Stdout)
+    let again = run report(bad).provide<Console>(Stdout)
+    let done = run report(ok).provide<Console>(Stdout)
+    let waiting = run report(busy).provide<Console>(Stdout)
+    run Console.log(first + "; " + again + "; " + done + "; " + waiting).provide<Console>(Stdout)
+}

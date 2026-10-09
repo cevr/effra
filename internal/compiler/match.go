@@ -68,15 +68,15 @@ func (c *checker) match(e *Expr, env localEnv, inEffect bool) checkedExpression 
 	subjectEvaluation := c.evaluation(emptyRowID, emptyRowID)
 	declared := []map[string]Variant{}
 	valid := true
+	// The subjects evaluate in order, then one arm runs.
+	var subjectObservations []observation
 	for _, subject := range e.Args {
 		value := c.expr(subject, env, inEffect)
 		subjectEvaluation = c.unionEvaluationFacts(subjectEvaluation, value.evaluation)
-		if value.isEffect() {
-			c.diagnostic("EF106", "match subject must be a value; execute an Effect with run", subject.Span)
-		}
+		subjectObservations = append(subjectObservations, c.observationOf(value))
+		c.expect(!value.isEffect(), "EF106", "match subject must be a value; execute an Effect with run", subject.Span, value)
 		enum, variants, isEnum := c.checkedVariants(value.valueID())
-		if !isEnum {
-			c.diagnostic("EF116", "match requires a closed enum value", subject.Span)
+		if !c.expect(isEnum, "EF116", "match requires a closed enum value", subject.Span, value) {
 			valid = false
 			continue
 		}
@@ -95,6 +95,7 @@ func (c *checker) match(e *Expr, env localEnv, inEffect bool) checkedExpression 
 	coverage := newMatchCoverage(plan.subjects)
 	result := c.checkedData("never")
 	branchEvaluation := c.evaluation(emptyRowID, emptyRowID)
+	var arms []observation
 	haveResult := false
 	for _, arm := range e.Arms {
 		if len(arm.Patterns) != len(plan.subjects) {
@@ -118,21 +119,23 @@ func (c *checker) match(e *Expr, env localEnv, inEffect bool) checkedExpression 
 		coverage.rows = append(coverage.rows, row)
 		branchEnv := clone(env)
 		bindings := c.matchArmBindings(arm, plan, declared, branchEnv)
-		branch := c.block(arm.Body, branchEnv, inEffect)
+		// An arm's final value is the match's value: a recipe there is
+		// selected, and the consumer of the match decides whether it runs.
+		branch := c.branchBlock(arm.Body, branchEnv, inEffect)
 		plan.arms = append(plan.arms, matchPlanArm{cells: cells, bindings: bindings, body: arm.Body})
 		if !c.isKind(branch, "never") {
-			if !haveResult {
+			if !haveResult || (c.poisoned(result) && !c.poisoned(branch)) {
 				result, haveResult = branch, true
+			} else if c.poisoned(branch) {
+				// Already reported; the arms' contract is the others'.
 			} else if !c.sameValues(result, branch) || result.isEffect() != branch.isEffect() {
 				c.diagnostic("EF106", "match branches must return the same type", arm.Span)
 			} else {
-				result = c.joinContractRows(result, branch)
-				result.fields = c.joinExpressionFields(result, branch, arm.Span, 0, new(int))
-				result.setOwnership(mergeFacts(result.ownershipFacts(), branch.ownershipFacts()))
-				result.setCaptures(mergeFacts(result.captureFacts(), branch.captureFacts()))
+				result = c.joinContractRows(c.joinOccurrence(result, branch, arm.Span), branch)
 			}
 		}
-		branchEvaluation = c.unionEvaluationFacts(branchEvaluation, branch.evaluation)
+		branchEvaluation = c.unionEvaluationFacts(branchEvaluation, c.alternativeEvaluation(branch.evaluation, e.Span.Offset, len(arms)))
+		arms = append(arms, c.observationOf(branch))
 	}
 	if !coverage.exhausted {
 		missing, more := coverage.missing()
@@ -167,6 +170,7 @@ func (c *checker) match(e *Expr, env localEnv, inEffect bool) checkedExpression 
 		result = c.checkedData("never")
 	}
 	result.evaluation = c.unionEvaluationFacts(subjectEvaluation, branchEvaluation)
+	result.observe(sequenceObservations(append(subjectObservations, alternativeObservations(arms...))...))
 	return result
 }
 
@@ -295,10 +299,18 @@ func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []ma
 				} else if c.node(field.typeID) != nil && c.node(field.typeID).Kind == "callable" {
 					bound.callableEvidence = callableEvidence{unresolved: true}
 				}
-				bound.setOwnership(projectVariantFacts(scrutinee.ownershipFacts(), pattern.VariantName, fieldName))
-				bound.setCaptures(projectVariantFacts(scrutinee.captureFacts(), pattern.VariantName, fieldName))
-				if len(bound.ownershipFacts()) == 0 {
-					bound.setOwnership(c.unknownOwnershipID(field.typeID))
+				_, retained := scrutinee.fields[pattern.VariantName]
+				if c.recipeType(field.typeID) {
+					// The scrutinee's facts at the payload path are the handles
+					// the stored recipe holds (recipes.go).
+					held := mergeFacts(projectVariantFacts(scrutinee.ownershipFacts(), pattern.VariantName, fieldName), projectVariantFacts(scrutinee.captureFacts(), pattern.VariantName, fieldName))
+					bound = c.recipeOccurrence(bound, retained, field.typeID, held)
+				} else {
+					bound.setOwnership(projectVariantFacts(scrutinee.ownershipFacts(), pattern.VariantName, fieldName))
+					bound.setCaptures(projectVariantFacts(scrutinee.captureFacts(), pattern.VariantName, fieldName))
+					if len(bound.ownershipFacts()) == 0 {
+						bound.setOwnership(c.unknownOwnershipID(field.typeID))
+					}
 				}
 				if alternative == 0 {
 					if armNames[binding] {
@@ -325,13 +337,9 @@ func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []ma
 					c.diagnostic("EF121", "alternative binding "+binding+" has a different type in "+plan.subjects[subject].enum.Name+"."+pattern.VariantName+" than in "+plan.subjects[subject].enum.Name+"."+first.VariantName+c.callableRowDifference(bound.valueID(), joined.valueID()), pattern.Span)
 					continue
 				}
-				joined.fields = c.joinExpressionFields(joined, bound, pattern.Span, 0, new(int))
-				joined.setOwnership(mergeFacts(joined.ownershipFacts(), bound.ownershipFacts()))
-				joined.setCaptures(mergeFacts(joined.captureFacts(), bound.captureFacts()))
-				joined.callableEvidence = joinCallableEvidence(joined.callableEvidence, bound.callableEvidence)
-				if joined.callableDecl != bound.callableDecl {
-					joined.callableDecl = nil
-				}
+				// One occurrence join keeps every evidence slot of both
+				// alternatives (occurrence_slots.go).
+				joined = c.joinOccurrence(joined, bound, pattern.Span)
 				bindings[index].value = joined
 				bindings[index].fields = append(bindings[index].fields, fieldName)
 			}

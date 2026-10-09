@@ -117,7 +117,7 @@ const __ef_layerBuildGraph = (plan, { order, dependencies, compare }) => Effect.
   const state = yield* Effect.sync(plan.init);
   const changes = yield* Queue.make({ capacity: Math.max(1, plan.nodes.length) });
   const entries = plan.nodes.map((_, index) => ({ state: "waiting", dependencies: dependencies[index],
-    owner: undefined, fiber: undefined, cause: Cause.empty, abortCancelled: false }));
+    owner: undefined, fiber: undefined, cause: Cause.empty, abortCancelled: false, aborted: false }));
   const build = { aborted: false, callerCause: Cause.empty };
   const terminal = entry => entry.state === "succeeded" || entry.state === "failed" || entry.state === "skipped";
   // The terminal entry is recorded before its producer exits, so every waiter
@@ -161,6 +161,9 @@ const __ef_layerBuildGraph = (plan, { order, dependencies, compare }) => Effect.
     entry.state = "constructing";
     const exit = yield* Effect.exit(restore(__ef_useOwner(entry.owner, Effect.suspend(() => plan.nodes[index].construct(state)))));
     let cause = Exit.isFailure(exit) ? exit.cause : Cause.empty;
+    // The node owner is cancellation-aborted when construction ended by
+    // interruption or the build asked it to stop (see __ef_closeOwner).
+    entry.aborted = entry.abortCancelled || cause.reasons.some(reason => reason._tag === "Interrupt");
     if (entry.abortCancelled) cause = Cause.fromReasons(cause.reasons.filter(reason => reason._tag !== "Interrupt"));
     // Success removes evaluation cancellation authority; the owner lives until ordered close.
     finish(index, Exit.isFailure(exit) ? "failed" : "succeeded", __ef_layerOccurrences(cause));
@@ -208,7 +211,7 @@ const __ef_layerBuildGraph = (plan, { order, dependencies, compare }) => Effect.
   build.close = cause => Effect.gen(function* () {
     for (const index of order.toReversed()) {
       if (!entries[index].owner) continue;
-      const cleanup = yield* __ef_closeOwner(entries[index].owner, Exit.succeed(undefined));
+      const cleanup = yield* __ef_closeOwner(entries[index].owner, Exit.succeed(undefined), entries[index].aborted);
       if (Exit.isFailure(cleanup)) cause = Cause.combine(cause, __ef_layerOccurrences(cleanup.cause));
     }
     return cause;

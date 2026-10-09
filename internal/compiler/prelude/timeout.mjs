@@ -1,3 +1,15 @@
+// The deadline won: the timed computation is abandoned. Its ordinary typed
+// failures are discarded; defects and typed cleanup failures are kept.
+const __ef_abandoned = (cause, workExit) => {
+  if (!Exit.isFailure(workExit)) return cause;
+  for (const reason of workExit.cause.reasons) {
+    if (reason._tag === "Die" || (reason._tag === "Fail" && reason.annotations.has(__ef_causeCleanupReason.key))) {
+      cause = Cause.combine(cause, __ef_causeOccurrences(Cause.fromReasons([reason])));
+    }
+  }
+  return cause;
+};
+
 const __ef_timeout = (program, ms) => Effect.suspend(() => {
   if (ms < 0n || ms > 2147483647n) return Effect.die(new Error("invalid millisecond duration"));
   return __ef_scoped(Effect.uninterruptibleMask(restore => Effect.gen(function* () {
@@ -22,19 +34,11 @@ const __ef_timeout = (program, ms) => Effect.suspend(() => {
     }
     if (Exit.isFailure(winner.exit)) {
       let cause = __ef_causeOccurrences(winner.exit.cause);
-      if (Exit.isFailure(workExit)) {
-        for (const reason of workExit.cause.reasons) {
-          if (reason._tag === "Fail" || reason._tag === "Die") cause = Cause.combine(cause, __ef_causeOccurrences(Cause.fromReasons([reason])));
-        }
-      }
+      cause = __ef_abandoned(cause, workExit);
       return yield* Effect.failCause(cause);
     }
     let cause = __ef_causeOccurrences(Cause.fail({ _tag: "Timeout" }));
-    if (Exit.isFailure(workExit)) {
-      for (const reason of workExit.cause.reasons) {
-        if (reason._tag === "Fail" || reason._tag === "Die") cause = Cause.combine(cause, __ef_causeOccurrences(Cause.fromReasons([reason])));
-      }
-    }
+    cause = __ef_abandoned(cause, workExit);
     return yield* Effect.failCause(cause);
   })));
 });

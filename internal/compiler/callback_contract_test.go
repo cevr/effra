@@ -83,7 +83,6 @@ void checked;void reciprocal;void erased;`)
 func TestUnsupportedCallableFormsDiagnoseAtTheirSourceBoundary(t *testing.T) {
 	for _, test := range []struct{ source, message string }{
 		{`effect fn main()->void{let callback=fn(x:string)->string{x};void}`, "anonymous functions and closure captures"},
-		{`fn store(recipe:Effect<string>)->void{void} effect fn main()->void{void}`, "typed recipes are unsupported"},
 		{`effect fn generic<E: raises>(cb:effect fn(string)->string raises {E})->string raises {E}{run cb("x")} effect fn main()->void{let callback=generic;void}`, "first-class polymorphic values are unsupported"},
 	} {
 		t.Run(test.message, func(t *testing.T) {

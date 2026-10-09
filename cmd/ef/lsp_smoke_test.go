@@ -468,7 +468,7 @@ func lspSmokeParity(t *testing.T, cli lspSmokeCLI) {
 			lspSmokeWrite(t, path, fixture.text)
 			report := cli.diagnostics(t, path)
 			remote := cli.mcpDiagnostics(t, directory, fixture.name)
-			assertReportParity(t, report, remote, parityOptions{reportSchema: 1, snapshotSchema: 8})
+			assertReportParity(t, report, remote, parityOptions{reportSchema: 1, snapshotSchema: 9})
 			messages := cli.exchange(t, lspSmokeSession{fragmented: true, calls: []map[string]any{
 				lspSmokeInit, lspSmokeReady, lspSmokeOpened(lspSmokeURI(path), fixture.text, 4), lspSmokeStop, lspSmokeExit}})
 			lspSmokeSame(t, lspSmokeMap(lspSmokeResult(t, messages[0]))["capabilities"], map[string]any{

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -125,22 +126,40 @@ type RowArgument struct {
 	Row       string       `json:"row"`
 }
 
-// ownershipOwnerKind separates the origin of an owner from its rendered
-// region. The region string remains part of the inspection contract, while
-// this internal kind prevents a deferred recipe result from being confused
-// with a value already owned by the caller's lexical scope.
+// ownershipOwnerKind is the owner atom of a fact (design §3.1). The region
+// string remains part of the inspection contract; the kind keeps an owner
+// bound by a layer's executor apart from a value already owned by a lexical
+// region.
+//
+//   - Parameter: Param(p, π), the owners of caller argument p at input path π
+//     (Region "parameter:p", source π).
+//   - Exec: Exec(i), owned by the executor of layer i of the enclosing
+//     occurrence (see owner_layers.go).
+//   - Lexical: owned by a lexical region (Region "scope:N", "invocation").
+//   - Child, Timeout, Scope, Provision: Closed(k, site), owned by an owner
+//     which has closed. Scope and Provision appear only on failure payloads
+//     which outlived their region (design §5.4).
+//   - Relation: Rel(ρ), the owners of a deferred callback result.
+//   - Unknown: no proven owner; with potentialOwner it is ⊤.
 type ownershipOwnerKind uint8
 
 const (
 	ownershipOwnerUnknown ownershipOwnerKind = iota
 	ownershipOwnerParameter
-	ownershipOwnerDeferred
-	ownershipOwnerInvocationResult
+	ownershipOwnerExec
 	ownershipOwnerLexical
 	ownershipOwnerChild
 	ownershipOwnerTimeout
-	ownershipOwnerCallbackResult
+	ownershipOwnerRelation
+	ownershipOwnerScope
+	ownershipOwnerProvision
 )
+
+// closedOwnerKind reports the owner kinds which have completed cleanup by the
+// time a value carrying them is observable.
+func closedOwnerKind(kind ownershipOwnerKind) bool {
+	return kind == ownershipOwnerChild || kind == ownershipOwnerTimeout || kind == ownershipOwnerScope || kind == ownershipOwnerProvision
+}
 
 // OwnershipFact is the bounded ownership evidence carried by a checked value.
 // A fact is deliberately explicit about uncertainty: the compiler rejects a
@@ -180,6 +199,15 @@ type OwnershipFact struct {
 	// sibling fact from another alternative to discharge it.
 	remainderExclusions string
 	callbackRelation    *callbackResultRelation
+	// exec is the level of an Exec owner: the executor of layer exec of the
+	// occurrence carrying the fact. Region renders it as "exec:<level>".
+	exec int
+	// layer is the recipe layer whose held set a captures fact belongs to.
+	// Ownership facts describe the innermost success and keep layer 0.
+	layer int
+	// relationEnv is the owner vector of a Relation fact: the owner bound to
+	// each layer of the deferred invocation (see owner_layers.go).
+	relationEnv string
 }
 
 // TypeRef is the canonical semantic identity used by checking, emission and
@@ -222,7 +250,10 @@ type RowID uint32
 const invalidTypeID TypeID = 0
 const emptyRowID RowID = 0
 
-const SemanticSchemaVersion = 8
+// SemanticSchemaVersion 9 publishes recipe contracts without constructor
+// parameters and per-path owner evidence (owners and evidence grade) on
+// checked values.
+const SemanticSchemaVersion = 9
 
 const voidTypeName = "void"
 
@@ -314,6 +345,9 @@ type checkedExpression struct {
 	evaluation ExpressionEvaluation
 	executed   ExpressionEvaluation
 	child      []OwnershipFact
+	// failures is the payload evidence of the failures of each recipe layer
+	// (or of a Fiber's child); see failure_evidence.go.
+	failures failureEvidence
 	// callableDecl is projection metadata only. Its type and row facts are
 	// never read for checking; those facts come from value's canonical node.
 	callableDecl     *Function
@@ -321,6 +355,20 @@ type checkedExpression struct {
 	identity         string
 	callableEvidence callableEvidence
 	lexicalBinding   string
+	// forks is the fork instances a Fiber occurrence may denote (design
+	// §5.3); join and interrupt observe a child only through a Fiber which
+	// denotes exactly one instance.
+	forks []string
+	// observes is the fork instances executing a recipe's layer 0 observes
+	// before each exit that completes it: join and interrupt, kept by
+	// recover, catch, orFail and service provision around them.
+	observes []string
+	// kills is the fork instances evaluating the expression observes before
+	// its success exit; exitKills is what it observes before each of its
+	// typed-failure exits. Both compose along evaluation order
+	// (fork_observations.go); the enclosing block reads them.
+	kills     []string
+	exitKills []string
 }
 
 func (e checkedExpression) contractID() TypeID      { return e.value.contractID() }
@@ -346,6 +394,7 @@ func (e checkedExpression) clone() checkedExpression {
 	copy := e
 	copy.fields = cloneFieldOccurrences(e.fields)
 	copy.child = cloneFacts(e.child)
+	copy.failures = cloneFailures(e.failures)
 	if e.application != nil {
 		application := *e.application
 		application.Arguments = append([]TypeRef{}, e.application.Arguments...)
@@ -363,6 +412,10 @@ func (e checkedExpression) clone() checkedExpression {
 }
 
 type checker struct {
+	// handlerOperand is the operand of the recover being checked: a named
+	// function there is instantiated by handlerResult, so its pending
+	// children do not reach a callable contract.
+	handlerOperand          *Expr
 	program                 *Program
 	result                  *Result
 	functions               map[string]*Function
@@ -389,18 +442,28 @@ type checker struct {
 	declarationFingerprints map[string]string
 	reasons                 []Contribution
 	region                  string
-	suppressDiagnostics     bool
-	publicationBytes        int
-	rowContext              map[string]RowParameter
-	rowDefinitions          map[string]RowParameter
-	callbackRelations       map[string]*callbackResultRelation
-	functionModule          string
-	admittedSummaries       map[string]interfaceSummary
-	templates               map[string]*Record
-	typeContext             map[string]TemplateParameter
-	variableOwners          map[string]TemplateParameter
-	lexicalOwner            *Function
-	host                    *hostState
+	// reportedOwnership holds the EF123 roots already reported (see
+	// reportOwnership); reportingFunction scopes roots without a source
+	// offset to the function being checked.
+	reportedOwnership map[reportedOwnershipRoot]bool
+	// ownershipReports lists each emitted EF123 with the roots it reported
+	// first, in emission order.
+	ownershipReports    []ownershipReport
+	reportingFunction   *Function
+	suppressDiagnostics bool
+	// source is the checked text, used to place suggested edits.
+	source            string
+	publicationBytes  int
+	rowContext        map[string]RowParameter
+	rowDefinitions    map[string]RowParameter
+	callbackRelations map[string]*callbackResultRelation
+	functionModule    string
+	admittedSummaries map[string]interfaceSummary
+	templates         map[string]*Record
+	typeContext       map[string]TemplateParameter
+	variableOwners    map[string]TemplateParameter
+	lexicalOwner      *Function
+	host              *hostState
 	// hostCallee is the member expression currently checked as a callee, so
 	// a member of a host value there selects a Go method.
 	hostCallee *Expr
@@ -467,7 +530,7 @@ func (c *checker) checkedFunction(f *Function, declaration, recipe bool) checked
 	case declaration:
 		checked = c.values.callable(result, parameters, kind, failure, service, f.Ownership, f.Captures)
 	case recipe && f.Effect:
-		checked = c.values.recipe(result, parameters, kind, failure, service, f.Ownership, f.Captures)
+		checked = c.values.recipe(result, kind, failure, service, f.Ownership, f.Captures)
 	default:
 		checked = c.values.occurrence(result, f.Ownership, f.Captures)
 	}
@@ -517,7 +580,9 @@ func (c *checker) ownershipPathsID(root TypeID, prefix string) []string {
 	var containsHandle func(TypeID) bool
 	containsHandle = func(name TypeID) bool {
 		n := c.node(name)
-		if n == nil || n.Kind == "type-variable" || n.Name == "File" || n.Kind == "fiber" {
+		if n == nil || n.Kind == "type-variable" || n.Name == "File" || n.Kind == "fiber" || n.Kind == "recipe" {
+			// A stored recipe may hold managed handles captured from its
+			// arguments; it is an opaque leaf for ownership paths.
 			return true
 		}
 		if known, ok := containsMemo[name]; ok {
@@ -564,7 +629,7 @@ func (c *checker) ownershipPathsID(root TypeID, prefix string) []string {
 			truncated = true
 			return
 		}
-		if n.Name == "File" || n.Kind == "fiber" {
+		if n.Name == "File" || n.Kind == "fiber" || n.Kind == "recipe" {
 			paths = append(paths, path)
 			return
 		}
@@ -1075,6 +1140,9 @@ func projectVariantFacts(facts []OwnershipFact, variant, field string) []Ownersh
 	return normalizeFacts(projected)
 }
 
+// mergeFacts is the join of two alternatives' facts: per path, the union of
+// their owner sets (design §3.2). An owner proven by either alternative stays
+// in the join, so a conditional escape is checked against every owner.
 func mergeFacts(a, b []OwnershipFact) []OwnershipFact {
 	if len(a) == 0 {
 		return cloneFacts(b)
@@ -1082,44 +1150,7 @@ func mergeFacts(a, b []OwnershipFact) []OwnershipFact {
 	if len(b) == 0 {
 		return cloneFacts(a)
 	}
-	paths := map[string][]OwnershipFact{}
-	for _, fact := range append(append([]OwnershipFact{}, a...), b...) {
-		paths[fact.Path] = append(paths[fact.Path], fact)
-	}
-	out := make([]OwnershipFact, 0, len(paths))
-	for path, facts := range paths {
-		normalized := normalizeFacts(facts)
-		if len(normalized) == 1 {
-			out = append(out, normalized[0])
-			continue
-		}
-		// Keep every proven owned alternative. Collapsing an owned branch into
-		// unknown would make a conditional escape look safe at a scope edge.
-		out = append(out, normalized...)
-		out = append(out, OwnershipFact{Path: path, Status: "unknown", Origin: "conditional"})
-	}
-	return normalizeFacts(out)
-}
-
-func materializeExecutionFacts(facts []OwnershipFact, region string, ownerKind ownershipOwnerKind) []OwnershipFact {
-	out := cloneFacts(facts)
-	for i := range out {
-		if out[i].ownerKind == ownershipOwnerInvocationResult || out[i].ownerKind == ownershipOwnerDeferred || out[i].ownerKind == ownershipOwnerCallbackResult {
-			out[i].Region = region
-			out[i].ownerKind = ownerKind
-		}
-	}
-	return normalizeFacts(out)
-}
-
-func summarizeInvocationFacts(facts []OwnershipFact) []OwnershipFact {
-	out := cloneFacts(facts)
-	for i := range out {
-		if out[i].ownerKind == ownershipOwnerLexical && out[i].Region == "invocation" {
-			out[i].ownerKind = ownershipOwnerInvocationResult
-		}
-	}
-	return normalizeFacts(out)
+	return normalizeFacts(slices.Concat(a, b))
 }
 
 func conservativeCycleFacts(observed ...[]OwnershipFact) []OwnershipFact {
@@ -1187,7 +1218,10 @@ func instantiateFacts(facts []OwnershipFact, params []Param, args []ValueType) [
 func instantiateCheckedFacts(facts []OwnershipFact, params []Param, args []checkedExpression) []OwnershipFact {
 	ownership := make([][]OwnershipFact, len(args))
 	for i := range args {
-		ownership[i] = args[i].ownershipFacts()
+		// Parameter-relative summary facts describe handles held by the
+		// argument. For a recipe argument those are its captures; its result
+		// facts are never parameter-relative.
+		ownership[i] = heldFacts(args[i], 0)
 	}
 	return instantiateOwnershipFacts(facts, params, ownership)
 }
@@ -1205,7 +1239,7 @@ func instantiateOwnershipFacts(facts []OwnershipFact, params []Param, args [][]O
 			}
 			matched = true
 			if i >= len(args) || len(args[i]) == 0 {
-				out = append(out, OwnershipFact{Path: fact.Path, Status: "unknown", Origin: "helper"})
+				out = append(out, OwnershipFact{Path: fact.Path, Status: "unknown", Origin: "helper", layer: fact.layer})
 				continue
 			}
 			hasConcreteSource := slices.ContainsFunc(args[i], func(argument OwnershipFact) bool {
@@ -1219,6 +1253,7 @@ func instantiateOwnershipFacts(facts []OwnershipFact, params []Param, args [][]O
 					continue
 				}
 				copy := argument
+				copy.layer = fact.layer
 				copy.potentialOwner = copy.potentialOwner || fact.potentialOwner
 				copy.remainder = fact.remainder
 				copy.remainderExclusions = fact.remainderExclusions
@@ -1228,9 +1263,7 @@ func instantiateOwnershipFacts(facts []OwnershipFact, params []Param, args [][]O
 					// unspecified descendant. Preserve complete whole-value
 					// wildcard evidence, but do not turn an ambiguous projected
 					// field into a certain owned fact.
-					if parameterSourceTop(fact) {
-						copy.Origin = "conditional"
-					} else if !preserveWildcard {
+					if !preserveWildcard {
 						copy.Status = "unknown"
 						copy.Origin = "bounded"
 						copy.potentialOwner = true
@@ -1254,15 +1287,13 @@ func instantiateOwnershipFacts(facts []OwnershipFact, params []Param, args [][]O
 			if !slices.ContainsFunc(args[i], func(argument OwnershipFact) bool {
 				return ownershipPathMatches(argument.Path, fact.source)
 			}) {
-				out = append(out, OwnershipFact{Path: fact.Path, Status: "unknown", Origin: "helper"})
+				out = append(out, OwnershipFact{Path: fact.Path, Status: "unknown", Origin: "helper", layer: fact.layer})
 			}
 		}
 		if !matched {
-			copy := fact
-			// Invocation ownership belongs to the eventual execution, rather
-			// than to the scope where a deferred recipe is constructed. Keep
-			// this marker until run/fork materializes the recipe.
-			out = append(out, copy)
+			// Every other owner atom (Exec, Lexical, Closed) is already an
+			// owner of the call's own occurrence.
+			out = append(out, fact)
 		}
 	}
 	return normalizeFacts(out)
@@ -1278,71 +1309,46 @@ func canSkipWildcardForSource(fact OwnershipFact, source string) bool {
 	return fact.Status == "borrowed" && !fact.potentialOwner && fact.Origin == "bounded-all-borrowed"
 }
 
-func mergeSamePathAlternatives(facts []OwnershipFact) (OwnershipFact, bool) {
-	for _, fact := range facts[1:] {
-		if fact.callbackRelation != facts[0].callbackRelation {
-			return OwnershipFact{}, false
-		}
+// ownerIdentity is the owner atom of a fact (design §3.1): two facts of
+// one path with the same identity describe the same owner and merge, while
+// distinct owners stay distinct members of the path's owner set. The
+// parameter selector (source) is part of the Param atom (B2).
+func ownerIdentity(fact OwnershipFact) string {
+	relation := ""
+	if fact.callbackRelation != nil {
+		relation = fact.callbackRelation.key
 	}
-	if len(facts) < 2 {
-		return OwnershipFact{}, false
-	}
-	status := facts[0].Status
-	for _, fact := range facts[1:] {
-		if fact.Status != status {
-			return OwnershipFact{}, false
-		}
-	}
-	if isWildcardPath(facts[0].Path) {
-		if status != "unknown" {
-			return OwnershipFact{}, false
-		}
-		merged := facts[0]
-		for _, fact := range facts[1:] {
-			merged = mergePotentialWildcard(merged, fact)
-		}
-		return merged, true
-	}
-	merged := facts[0]
-	allParameterRegions := strings.HasPrefix(merged.Region, "parameter:")
-	sourceTop := false
-	for _, fact := range facts[1:] {
-		if fact.Region != merged.Region {
-			if !strings.HasPrefix(fact.Region, "parameter:") {
-				allParameterRegions = false
-			}
-			merged.Region = "*"
-		}
-		merged.potentialOwner = merged.potentialOwner || fact.potentialOwner
-		if merged.ownerKind != fact.ownerKind {
-			merged.ownerKind = ownershipOwnerUnknown
-		}
-		if merged.sourceSet != fact.sourceSet || (merged.sourceSet && merged.source != fact.source) {
-			sourceTop = true
-			merged.sourceSet = false
-			merged.source = ""
-		}
-	}
-	if allParameterRegions && sourceTop {
-		if merged.Region == "*" {
-			merged.Region = "parameter:*"
-		}
-		merged.source = "*"
-		merged.sourceSet = true
-		merged.Origin = "conditional"
-	} else if allParameterRegions && merged.Region == "*" {
-		merged.Region = "parameter:*"
-	}
-	if merged.Origin != facts[len(facts)-1].Origin {
-		merged.Origin = "conditional"
-	}
-	merged.remainder = false
-	merged.remainderExclusions = ""
-	return merged, true
+	return fmt.Sprintf("%q\x00%q\x00%d\x00%d\x00%q\x00%t\x00%q\x00%q", fact.Path, fact.Status, fact.ownerKind, fact.layer, fact.Region, fact.sourceSet, fact.source, relation) + "\x00" + fact.relationEnv
 }
 
-func parameterSourceTop(fact OwnershipFact) bool {
-	return fact.sourceSet && fact.source == "*" && fact.Origin == "conditional" && strings.HasPrefix(fact.Region, "parameter:")
+// mergeKey groups the facts normalizeFacts merges. An unknown wildcard is
+// one ⊤ marker per path and layer whatever owner it names.
+func mergeKey(fact OwnershipFact) string {
+	if isWildcardPath(fact.Path) && fact.Status == "unknown" {
+		return fmt.Sprintf("wildcard\x00%q\x00%d", fact.Path, fact.layer)
+	}
+	return ownerIdentity(fact)
+}
+
+// mergeSameOwner merges two facts naming one owner. Provenance is the
+// minimum origin, so the merge is commutative, associative and idempotent.
+func mergeSameOwner(a, b OwnershipFact) OwnershipFact {
+	if a == b {
+		return a
+	}
+	if isWildcardPath(a.Path) && a.Status == "unknown" {
+		return mergePotentialWildcard(a, b)
+	}
+	merged := a
+	if b.Origin < merged.Origin {
+		merged.Origin = b.Origin
+	}
+	merged.potentialOwner = a.potentialOwner || b.potentialOwner
+	if a.remainder != b.remainder || a.remainderExclusions != b.remainderExclusions {
+		merged.remainder = false
+		merged.remainderExclusions = ""
+	}
+	return merged
 }
 
 type ownershipProvenanceKey struct {
@@ -1530,7 +1536,8 @@ func compactOwnedFacts(facts []OwnershipFact, maxFacts int) ([]OwnershipFact, bo
 		if fact.Region != region {
 			region = "*"
 		}
-		if fact.ownerKind != ownerKind {
+		if fact.ownerKind != ownerKind || fact.Region != region {
+			// The fact budget is exhausted: distinct owners widen to ⊤.
 			region = "*"
 			ownerKind = ownershipOwnerUnknown
 		}
@@ -1741,10 +1748,8 @@ func mergePotentialWildcard(a, b OwnershipFact) OwnershipFact {
 		merged.remainder = false
 		merged.remainderExclusions = ""
 	}
-	if merged.Region != b.Region {
+	if merged.Region != b.Region || merged.ownerKind != b.ownerKind {
 		merged.Region = "*"
-	}
-	if merged.ownerKind != b.ownerKind {
 		merged.ownerKind = ownershipOwnerUnknown
 	}
 	if merged.sourceSet != b.sourceSet || (merged.sourceSet && merged.source != b.source) {
@@ -1857,36 +1862,46 @@ func compareOwnershipFacts(a, b OwnershipFact) int {
 	if a.remainderExclusions != b.remainderExclusions {
 		return strings.Compare(a.remainderExclusions, b.remainderExclusions)
 	}
-	return 0
+	if a.layer != b.layer {
+		return a.layer - b.layer
+	}
+	if a.exec != b.exec {
+		return a.exec - b.exec
+	}
+	return strings.Compare(a.relationEnv, b.relationEnv)
 }
 
 func normalizeFacts(facts []OwnershipFact) []OwnershipFact {
 	if len(facts) == 0 {
 		return nil
 	}
+	if layered := slices.ContainsFunc(facts, func(fact OwnershipFact) bool { return fact.layer != facts[0].layer }); layered {
+		// Each held layer is its own evidence set; budgets and wildcard
+		// coalescing never mix two layers.
+		layers := map[int][]OwnershipFact{}
+		for _, fact := range facts {
+			layers[fact.layer] = append(layers[fact.layer], fact)
+		}
+		var out []OwnershipFact
+		for _, layer := range slices.Sorted(maps.Keys(layers)) {
+			out = append(out, normalizeFacts(layers[layer])...)
+		}
+		return out
+	}
 	out := append([]OwnershipFact{}, facts...)
 	slices.SortStableFunc(out, compareOwnershipFacts)
 	result := make([]OwnershipFact, 0, len(out))
-	for i := 0; i < len(out); {
-		j := i + 1
-		for j < len(out) && out[j].Path == out[i].Path && out[j].Status == out[i].Status {
-			j++
+	merged := map[string]int{}
+	for _, fact := range out {
+		key := mergeKey(fact)
+		if at, ok := merged[key]; ok {
+			result[at] = mergeSameOwner(result[at], fact)
+			continue
 		}
-		group := out[i:j]
-		if len(group) > 1 {
-			if merged, ok := mergeSamePathAlternatives(group); ok {
-				result = append(result, merged)
-				i = j
-				continue
-			}
-		}
-		for _, fact := range group {
-			if len(result) == 0 || result[len(result)-1] != fact {
-				result = append(result, fact)
-			}
-		}
-		i = j
+		merged[key] = len(result)
+		result = append(result, fact)
 	}
+	slices.SortStableFunc(result, compareOwnershipFacts)
 	result = coalesceOwnedWildcards(result)
 	result = retainIncompleteWildcards(result)
 	const maxFacts = 64
@@ -2051,7 +2066,7 @@ func hasOwnedFact(facts []OwnershipFact, region string) bool {
 
 func hasOwnedClosed(facts []OwnershipFact) bool {
 	for _, fact := range facts {
-		if fact.Status == "owned" && (fact.ownerKind == ownershipOwnerChild || fact.ownerKind == ownershipOwnerTimeout || strings.HasPrefix(fact.Region, "child:") || strings.HasPrefix(fact.Region, "timeout:")) {
+		if fact.Status == "owned" && closedOwnerKind(fact.ownerKind) {
 			return true
 		}
 	}
@@ -2065,14 +2080,6 @@ func hasPotentialOwner(facts []OwnershipFact) bool {
 		}
 	}
 	return false
-}
-
-func (c *checker) rejectOwnedEscape(facts []OwnershipFact, span Span) {
-	if hasPotentialOwner(facts) {
-		c.diagnostic("EF123", "ownership analysis budget exhausted before proving value safe", span)
-	} else if hasOwnedFact(facts, c.region) || hasOwnedClosed(facts) {
-		c.diagnostic("EF123", "value owned by closing scope cannot escape", span)
-	}
 }
 
 func (c *checker) withRegion(region string, fn func() checkedExpression) checkedExpression {
@@ -2195,6 +2202,7 @@ func checkParsed(r *Result, program *Program, dir, source string) *Result {
 	r.loadImports(dir)
 	r.loadBundledImports(source)
 	c := newChecker(program, r)
+	c.source = source
 	checkStart := time.Now()
 	c.check()
 	c.observeDeclarationSyntax()
@@ -2274,6 +2282,36 @@ func (c *checker) diagnostic(code, message string, span Span) {
 		return
 	}
 	c.result.Diagnostics = append(c.result.Diagnostics, Diagnostic{Code: code, Message: message, Span: span})
+}
+
+// scopeResultRecipe reports a recipe in the final position of a scope. The
+// scope does not run it; the suggestion wraps the complete expression in one
+// explicit run, which the edited program must still pass on recheck.
+func (c *checker) scopeResultRecipe(e *Expr) {
+	span := e.Extent
+	if span.Length == 0 {
+		span = e.Span
+	}
+	diagnostic := Diagnostic{Code: "EF105", Message: "scope result is an unexecuted recipe; use run here to execute it before the scope closes", Span: span}
+	if end, ok := c.sourceSpan(span.Offset + span.Length); ok && span.Length > 0 {
+		diagnostic.Suggestions = []Suggestion{{Message: "Execute this recipe inside the scope", Edits: []SourceEdit{
+			{Span: Span{Offset: span.Offset, Line: span.Line, Column: span.Column}, NewText: "run ("},
+			{Span: end, NewText: ")"},
+		}}}
+	}
+	if !c.suppressDiagnostics {
+		c.result.Diagnostics = append(c.result.Diagnostics, diagnostic)
+	}
+}
+
+// sourceSpan is the empty span at a byte offset of the checked source, with
+// the lexer's 1-based line and byte column.
+func (c *checker) sourceSpan(offset int) (Span, bool) {
+	if offset < 0 || offset > len(c.source) {
+		return Span{}, false
+	}
+	prefix := c.source[:offset]
+	return Span{Offset: offset, Line: 1 + strings.Count(prefix, "\n"), Column: offset - strings.LastIndex(prefix, "\n")}, true
 }
 
 // registerService finalizes every service operation as a checked callable.
@@ -2511,6 +2549,9 @@ func (c *checker) check() {
 				}
 			}
 			c.providerFunction(p, f)
+			// Callers dispatch the service method to whichever provider is
+			// in scope: its contract cannot carry a pending child failure.
+			c.requireObservedChildren(f, f.Span)
 		}
 		for _, want := range s.Methods {
 			got := methods[want.Name]
@@ -2682,6 +2723,14 @@ func (c *checker) prepareFunctionSummaries() {
 	}
 	observedOwnership := map[*Function][][]OwnershipFact{}
 	observedCaptures := map[*Function][][]OwnershipFact{}
+	// Failure payload evidence ascends from ⊥ like the other summary
+	// slots (design §5.2 F18): a member not yet summarized raises its
+	// failures with proven-empty payloads, not unknown ones.
+	for _, f := range cycle {
+		if f.failures == nil {
+			f.failures = c.bottomFailures(f)
+		}
+	}
 	maxIterations := len(cycle) * 8
 	if maxIterations < 32 {
 		maxIterations = 32
@@ -2691,12 +2740,13 @@ func (c *checker) prepareFunctionSummaries() {
 		f := queue[head]
 		queued[f] = false
 		beforeOwnership, beforeCaptures := cloneFacts(f.Ownership), cloneFacts(f.Captures)
+		beforeFailures := cloneFailures(f.failures)
 		beforeCallable := f.returnCallableEvidence
 		c.function(f, false)
 		observedOwnership[f] = append(observedOwnership[f], beforeOwnership, cloneFacts(f.Ownership))
 		observedCaptures[f] = append(observedCaptures[f], beforeCaptures, cloneFacts(f.Captures))
 		iterations++
-		changed := !slices.Equal(beforeOwnership, f.Ownership) || !slices.Equal(beforeCaptures, f.Captures) || beforeCallable != f.returnCallableEvidence
+		changed := !slices.Equal(beforeOwnership, f.Ownership) || !slices.Equal(beforeCaptures, f.Captures) || !equalFailures(beforeFailures, f.failures) || beforeCallable != f.returnCallableEvidence
 		if !changed {
 			continue
 		}
@@ -2712,6 +2762,9 @@ func (c *checker) prepareFunctionSummaries() {
 		for _, f := range cycle {
 			f.Ownership = conservativeCycleFacts(observedOwnership[f]...)
 			f.Captures = conservativeCycleFacts(observedCaptures[f]...)
+			// Inconclusive payload evidence is unknown (fail closed): every
+			// failure may also come from an unobserved child.
+			f.failures = c.topPending(f)
 			f.returnCallableEvidence = callableEvidence{unresolved: true}
 		}
 	}
@@ -2832,6 +2885,8 @@ func (c *checker) validateJSDeclarationNames() {
 	}
 	for _, declaration := range c.result.Declarations {
 		if declaration.Kind == "error" {
+			// The raw error name is exported as its payload type alias.
+			validateIdentifier(declaration.Name, "error payload type", declaration.Span)
 			validateIdentifier(declaration.Name+"Error", "error payload declaration", declaration.Span)
 		} else {
 			validateIdentifier(declaration.Name, "data declaration", declaration.Span)
@@ -2871,10 +2926,10 @@ func (c *checker) signature(f *Function) {
 	previous := c.rowContext
 	c.rowContext = c.functionRows(f)
 	defer func() { c.rowContext = previous }()
-	valid := func(t string, span, typeSpan Span) {
+	valid := func(t string, span, typeSpan Span, known func(string) bool) {
 		if c.requiresTemplateArguments(t) {
 			c.diagnostic("EF127", "generic type "+t+" requires complete application arguments", span)
-		} else if !c.typeKnown(t) && !c.absentName(absentInType, t, typeSpan) {
+		} else if !known(t) && !c.absentName(absentInType, t, typeSpan) {
 			message := "unknown or unsupported value type " + t
 			if t == "unit" {
 				message += "; use void for no-value results"
@@ -2882,13 +2937,13 @@ func (c *checker) signature(f *Function) {
 			c.diagnostic("EF102", message, span)
 		}
 	}
-	valid(f.Return, f.Span, f.ReturnSpan)
+	valid(f.Return, f.Span, f.ReturnSpan, c.typeKnown)
 	f.returnID = c.canonicalRef(typeRef(f.Return))
 	c.bindSourceSyntax(f.returnType, f.returnID)
 	names := map[string]bool{}
 	for i := range f.Params {
 		p := &f.Params[i]
-		valid(p.Type, p.Span, p.TypeSpan)
+		valid(p.Type, p.Span, p.TypeSpan, c.parameterTypeKnown)
 		p.TypeRef = c.typeRef(p.Type)
 		p.typeID = c.canonicalRef(p.TypeRef)
 		c.bindSourceSyntax(p.sourceType, p.typeID)
@@ -2943,6 +2998,14 @@ func (c *checker) typeKnown(name string) bool {
 		return true
 	}
 	return c.hostAnnotation(name) != invalidTypeID
+}
+
+// parameterTypeKnown admits a declared error as its nominal payload type, in
+// addition to ordinary values, where a function receives one: a recovery
+// handler parameter. Errors remain unavailable as stored or returned success
+// values, and builtin failures have no source payload declaration.
+func (c *checker) parameterTypeKnown(name string) bool {
+	return c.typeKnown(name) || c.errors[name] != nil && !slices.Contains(builtinErrors(), name)
 }
 
 func (c *checker) requiresTemplateArguments(name string) bool {
@@ -3414,6 +3477,8 @@ func (c *checker) displayTypeID(id TypeID) string {
 		return "(" + strings.Join(components, ", ") + ")"
 	case "provider":
 		return "provider:" + node.Name
+	case "recipe":
+		return recipeDisplay(c.displayTypeID(node.Result), c.rowLabels(node.FailureRow), c.rowLabels(node.ServiceRow))
 	}
 	return node.Name
 }
@@ -3522,7 +3587,7 @@ func (c *checker) recontractRows(e checkedExpression, failure, service RowID) Ch
 	}
 	switch node.Kind {
 	case "recipe":
-		return c.values.recipe(node.Result, append([]TypeID{}, node.Args...), e.value.callableKind(), failure, service, e.ownershipFacts(), e.captureFacts())
+		return c.values.recipe(node.Result, e.value.callableKind(), failure, service, e.ownershipFacts(), e.captureFacts())
 	case "providerRecipe":
 		return c.values.providerRecipe(node.Result, failure, service, e.ownershipFacts(), e.captureFacts())
 	case "callable":
@@ -3535,7 +3600,7 @@ func (c *checker) recontractRows(e checkedExpression, failure, service RowID) Ch
 		if failure == emptyRowID && service == emptyRowID {
 			return c.values.data(e.resultID(), e.ownershipFacts(), e.captureFacts())
 		}
-		return c.values.recipe(e.resultID(), nil, checkedEffectCallable, failure, service, e.ownershipFacts(), e.captureFacts())
+		return c.values.recipe(e.resultID(), checkedEffectCallable, failure, service, e.ownershipFacts(), e.captureFacts())
 	}
 }
 
@@ -3549,7 +3614,7 @@ func (c *checker) invocationContract(e checkedExpression, effect bool) checkedEx
 	if node := e.node(); node != nil && node.Kind == "callable" {
 		failure, service := e.evaluation.failureRowID(), e.evaluation.serviceRowID()
 		if failure != emptyRowID || service != emptyRowID {
-			e.value = c.values.recipe(e.valueID(), nil, checkedEffectCallable, failure, service, e.ownershipFacts(), e.captureFacts())
+			e.value = c.values.recipe(e.valueID(), checkedEffectCallable, failure, service, e.ownershipFacts(), e.captureFacts())
 			// Named callable metadata describes the returned value, not this
 			// enclosing invocation. Evidence remains available for substitution.
 			e.callableDecl = nil
@@ -3558,8 +3623,33 @@ func (c *checker) invocationContract(e checkedExpression, effect bool) checkedEx
 		}
 		return e
 	}
+	if node := e.node(); node != nil && node.Kind == "recipe" {
+		// A returned recipe is data. Executing the enclosing function yields
+		// that complete recipe; its own rows are not the function body's rows.
+		failure, service := e.evaluation.failureRowID(), e.evaluation.serviceRowID()
+		e.value = c.values.recipe(e.valueID(), checkedEffectCallable, failure, service, e.ownershipFacts(), e.captureFacts())
+		e.callableDecl = nil
+		e.identity = ""
+		e.application = nil
+		return e
+	}
 	e.value = c.recontractRows(e, e.evaluation.failureRowID(), e.evaluation.serviceRowID())
 	return e
+}
+
+// singleFailureFieldType is the declared field of a one-field failure, used
+// by the `fail Error(value)` shorthand.
+func (c *checker) singleFailureFieldType(name string) TypeID {
+	if decl := c.errors[name]; decl != nil && len(decl.Fields) == 1 {
+		return decl.Fields[0].typeID
+	}
+	return invalidTypeID
+}
+
+// recipeType reports whether id is a declared recipe value contract.
+func (c *checker) recipeType(id TypeID) bool {
+	node := c.node(id)
+	return node != nil && node.Kind == "recipe"
 }
 
 func (c *checker) typeRef(name string) TypeRef {
@@ -3597,6 +3687,30 @@ func (c *checker) sameResultType(actual, expected checkedExpression) bool {
 	return actual.valueID() == expected.resultID() || c.isNeverValue(actual)
 }
 
+// expect reports a failed consumer check unless one of its operands is
+// already invalid, whose own diagnostic is then the only report. It returns
+// whether the check passed. Consumer checks go through expect so a new
+// consumer cannot cascade (lane E2 R5 design §7.2).
+func (c *checker) expect(ok bool, code, message string, span Span, operands ...checkedExpression) bool {
+	if !ok && !c.poisoned(operands...) {
+		c.diagnostic(code, message, span)
+	}
+	return ok
+}
+
+// poisoned reports an operand whose type is the already-reported invalid
+// type. Like Gleam's typed invalid expression, it is accepted silently by
+// every later check that depends on it, so one rejected expression yields
+// one diagnostic; checks independent of it still report.
+func (c *checker) poisoned(values ...checkedExpression) bool {
+	for _, value := range values {
+		if c.isKind(value, "invalid") {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *checker) isNeverValue(value checkedExpression) bool {
 	node := value.node()
 	return node != nil && node.Kind == "never"
@@ -3618,7 +3732,7 @@ func (c *checker) isNeverResult(value checkedExpression) bool {
 // separate relation because a recipe and its eventual result can share a
 // success type while carrying entirely different rows and execution state.
 func (c *checker) sameContract(actual, expected checkedExpression) bool {
-	if c.isNeverResult(actual) || c.isNeverResult(expected) {
+	if c.isNeverResult(actual) || c.isNeverResult(expected) || c.poisoned(actual, expected) {
 		return true
 	}
 	if actual.valueID() == expected.valueID() {
@@ -3925,6 +4039,11 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, c
 			parameter.callableEvidence = callableEvidence{parameter: f, parameterName: p.Name}
 		}
 		parameter.setOwnership(c.borrowedOwnershipID(p.typeID, "parameter:"+p.Name))
+		if c.recipeType(p.typeID) {
+			// The caller's recipe holds borrowed handles; what executing it
+			// returns is unresolved inside this function.
+			parameter = c.recipeOccurrence(parameter, false, p.typeID, parameter.ownershipFacts())
+		}
 		if c.lexicalOwner != nil {
 			parameter = c.bindLocal("parameter", p.Name, p.Span, p.Extent, c.result.lexical.parameters[p.Span.Offset], parameter)
 			c.attachParameterFacts(parameter.lexicalBinding, p)
@@ -3932,6 +4051,9 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, c
 		env[p.binding] = parameter
 	}
 	c.reasons = []Contribution{}
+	previousReporting := c.reportingFunction
+	c.reportingFunction = f
+	defer func() { c.reportingFunction = previousReporting }()
 	previousFacts := c.recordFacts
 	c.recordFacts = record || previousFacts
 	var returnedExpr *Expr
@@ -3941,7 +4063,7 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, c
 			returnedExpr = last.Value
 		}
 	}
-	actual := c.withRegion("invocation", func() checkedExpression { return c.block(f.Body, env, f.Effect) })
+	actual := c.withRegion("invocation", func() checkedExpression { return c.blockReturning(f.Body, env, f.Effect, f.returnID) })
 	c.recordFacts = previousFacts
 	compatible := c.assignable(actual.valueID(), f.returnID, 0)
 	if !compatible && !actual.isEffect() {
@@ -3950,11 +4072,23 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, c
 			c.publishRecontractedExpression(returnedExpr, actual)
 		}
 	}
-	if !c.isKind(actual, "never") && (!compatible || actual.isEffect()) {
+	// An invalid body result was already diagnosed where it arose.
+	if !c.isKind(actual, "never") && !c.isKind(actual, "invalid") && (!compatible || (actual.isEffect() && !c.recipeType(f.returnID))) {
 		c.diagnostic("EF106", fmt.Sprintf("body returns %s; expected %s", c.displayChecked(actual), f.Return), f.Span)
 	}
+	// The end of the body is an exit: a child still unobserved there is
+	// pending on the call layer, and its failures are in the body's row
+	// (design §5.3 rules 1 and 5). An effect function invocation is not an
+	// owner, so the caller's owner raises them.
+	actual.evaluation = c.exitAll(actual.evaluation, nil)
 	if missing := c.rowDifference(c.rowLabels(actual.evaluation.failureRowID()), c.rowLabels(f.failureID)); len(missing) > 0 {
-		c.diagnostic("EF107", "undeclared failures: "+strings.Join(missing, ", "), f.Span)
+		if slices.Contains(missing, compositeCause) {
+			missing = remove(missing, compositeCause)
+			c.diagnostic("EF107", "undeclared failures: "+compositeCause+"; an owner may close over a failing child together with a failure of its body, or over two failing children, and the runtime raises a composite cause which no handler matches (design §5.3 rule 6): join or interrupt the child first", f.Span)
+		}
+		if len(missing) > 0 {
+			c.diagnostic("EF107", "undeclared failures: "+strings.Join(missing, ", "), f.Span)
+		}
 	}
 	if missing := c.rowDifference(c.rowLabels(actual.evaluation.serviceRowID()), union(c.rowLabels(f.serviceID), capturedServices)); len(missing) > 0 {
 		c.diagnostic("EF108", "missing service requirements: "+strings.Join(missing, ", "), f.Span)
@@ -3967,14 +4101,17 @@ func (c *checker) functionWithLocals(f *Function, record bool, locals []Param, c
 			}
 		}
 	}
-	actual = c.invocationContract(actual, f.Effect)
+	f.returnsNever = c.isKind(actual, "never")
+	actual = c.invocationContract(c.completeFailures(actual), f.Effect)
 	if f.Identity == "" {
 		f.Identity = "function:" + f.Name
 	}
-	f.Ownership = summarizeInvocationFacts(actual.ownershipFacts())
-	f.Captures = summarizeInvocationFacts(actual.captureFacts())
+	summary := c.summaryOccurrence(actual, f.Effect)
+	f.Ownership = summary.ownershipFacts()
+	f.Captures = summary.captureFacts()
+	f.failures = c.declaredFailures(summary.failures, c.failureLayerRows(actual.valueID()), c.callFailureRows(f.returnID, f.Effect, f.failureID))
 	f.returnCallableEvidence = actual.callableEvidence
-	f.returnFields = cloneFieldOccurrences(actual.fields)
+	f.returnFields = cloneFieldOccurrences(summary.fields)
 	declared := c.checkedFunction(f, true, false)
 	declared.identity = f.Identity
 	c.result.checkedFunctions[f] = checkedSymbol{contract: declared, body: actual, declaration: f}
@@ -4043,7 +4180,7 @@ func callableIdentity(c *checker, f *Function) *CallableType {
 }
 func (c *checker) displayChecked(t checkedExpression) string {
 	if t.isEffect() {
-		return "Effect<" + c.displayTypeID(t.resultID()) + ", {" + strings.Join(c.rowLabels(t.failureRow()), ", ") + "}, {" + strings.Join(c.rowLabels(t.serviceRow()), ", ") + "}>"
+		return recipeDisplay(c.displayTypeID(t.resultID()), c.rowLabels(t.failureRow()), c.rowLabels(t.serviceRow()))
 	}
 	return c.displayTypeID(t.resultID())
 }
@@ -4100,10 +4237,12 @@ func (c *checker) payload(e *Expr, fields []Field, env localEnv, span Span) []Ow
 		}
 		seen[field.Name] = true
 		got := c.expr(field.Value, env, false)
-		if got.isEffect() || !c.sameType(got, want.Type) {
+		// A recipe is admitted only by a declared recipe field; assignability
+		// refuses it in every other slot.
+		if !c.sameType(got, want.Type) {
 			c.diagnostic("EF115", "payload field "+field.Name+" must be "+want.Type, field.Span)
 		}
-		ownership = append(ownership, prependFacts(field.Name, got.ownershipFacts())...)
+		ownership = append(ownership, prependFacts(field.Name, heldFacts(got, 0))...)
 	}
 	for _, field := range fields {
 		if !seen[field.Name] {
@@ -4127,15 +4266,80 @@ func (c *checker) childEvaluation(e *Expr) ExpressionEvaluation {
 	return result
 }
 
-func (c *checker) addDeferredEvaluation(e ExpressionEvaluation, t checkedExpression) ExpressionEvaluation {
-	return c.unionEvaluationFacts(e, c.evaluation(t.failureRow(), t.serviceRow()))
+// requireObservedChildren refuses a function used as a callable value when
+// its call may leave a forked child unobserved (design §5.3). A callable or
+// service method type promises that its row is raised by its invocation:
+// recover and catch around an invocation of an unknown callee handle it.
+// A pending failure is raised later, by the owner that closes after the
+// call, so no contract can carry it.
+func (c *checker) requireObservedChildren(f *Function, span Span) {
+	labels := anyPendingLabels(f.failures)
+	for _, field := range f.returnFields {
+		labels = union(labels, carriedPending(field, 1))
+	}
+	slices.Sort(labels)
+	if len(labels) == 0 {
+		return
+	}
+	c.diagnostic("EF107", f.Name+" may leave forked child failures unobserved ("+strings.Join(labels, ", ")+"); a callable or service contract cannot carry them, so join or interrupt the child first", span)
 }
 
+// blockResult says what consumes a block's final expression, which decides
+// how a recipe there is diagnosed. It never executes the recipe.
+type blockResult int
+
+const (
+	// blockStatement discards the final value; a recipe there is unused.
+	blockStatement blockResult = iota
+	// blockSelected makes the final value the block's value: a branch arm or
+	// a declared recipe-result slot selects the recipe without running it.
+	blockSelected
+	// blockScope publishes the final value from a closing scope, which
+	// admits no unexecuted recipe.
+	blockScope
+)
+
 func (c *checker) block(b *Block, env localEnv, effect bool) checkedExpression {
+	return c.blockValue(b, env, effect, blockStatement)
+}
+
+// branchBlock checks an if or match arm. Its final expression is the value of
+// the enclosing branch expression, so a recipe there is selected rather than
+// discarded; the statement or slot that consumes the branch decides whether
+// that value is used.
+func (c *checker) branchBlock(b *Block, env localEnv, effect bool) checkedExpression {
+	return c.blockValue(b, env, effect, blockSelected)
+}
+
+// blockReturning checks a block whose final expression initializes result.
+// A recipe in that position is a returned value, not a discarded lazy
+// effect, only when the declared slot is itself a recipe contract.
+func (c *checker) blockReturning(b *Block, env localEnv, effect bool, result TypeID) checkedExpression {
+	if c.recipeType(result) {
+		return c.blockValue(b, env, effect, blockSelected)
+	}
+	return c.blockValue(b, env, effect, blockStatement)
+}
+
+func (c *checker) blockValue(b *Block, env localEnv, effect bool, result blockResult) checkedExpression {
 	out := c.checkedData(voidTypeName)
 	env = clone(env)
 	terminated := false
-	for _, s := range b.Statements {
+	// Fork observation is flow-sensitive (design §5.3 rule 2): a child
+	// forked by an earlier statement is pending at every exit a later
+	// statement may take before a join or interrupt observes it. killed is
+	// what the statements so far observed; guaranteed is what was observed
+	// before every exit taken so far.
+	var killed, guaranteed []string
+	exited := false
+	exit := func(observed []string) {
+		if exited {
+			guaranteed = intersectStrings(guaranteed, observed)
+		} else {
+			guaranteed, exited = append([]string{}, observed...), true
+		}
+	}
+	for index, s := range b.Statements {
 		if terminated {
 			c.diagnostic("EF109", "unreachable statement after fail", s.Span)
 		}
@@ -4148,6 +4352,10 @@ func (c *checker) block(b *Block, env localEnv, effect bool) checkedExpression {
 			} else if decl := c.errors[s.Name]; decl != nil {
 				c.observeReference(s, s.NameSpan, lexicalTarget{kind: "error", failure: decl})
 			}
+			// The payload keeps the owners of the handles it carries (design
+			// §5.2 F1): the failing execution's owners stay attached, and a
+			// handler is checked against the handles it dereferences.
+			var payloadFacts []OwnershipFact
 			if s.Payload != nil {
 				if s.Payload.Kind == "payload" {
 					fields := []Field(nil)
@@ -4155,11 +4363,16 @@ func (c *checker) block(b *Block, env localEnv, effect bool) checkedExpression {
 						fields = decl.Fields
 						c.observeFieldLabels(s.Payload, s.Payload.Fields, fields, lexicalTarget{failure: decl})
 					}
-					c.rejectOwnedEscape(c.payload(s.Payload, fields, env, s.Payload.Span), s.Payload.Span)
+					payloadFacts = c.payload(s.Payload, fields, env, s.Payload.Span)
+					for _, field := range s.Payload.Fields {
+						c.refuseCarriedPending(field.Value.checked, field.Span)
+					}
 				} else {
-					payload := c.expr(s.Payload, env, false)
-					c.rejectOwnedEscape(payload.ownershipFacts(), s.Payload.Span)
-					if payload.isEffect() {
+					payload := c.refuseCarriedPending(c.expr(s.Payload, env, false), s.Payload.Span)
+					if decl := c.errors[s.Name]; decl != nil && len(decl.Fields) == 1 {
+						payloadFacts = prependFacts(decl.Fields[0].Name, heldFacts(payload, 0))
+					}
+					if payload.isEffect() && !c.recipeType(c.singleFailureFieldType(s.Name)) {
 						c.diagnostic("EF105", "failure payload must be pure", s.Payload.Span)
 					}
 					if decl := c.errors[s.Name]; decl != nil {
@@ -4173,20 +4386,38 @@ func (c *checker) block(b *Block, env localEnv, effect bool) checkedExpression {
 			} else if decl := c.errors[s.Name]; decl != nil {
 				// The shorthand `fail Error` and `fail Error()` still need to
 				// satisfy every declared payload field.
-				c.rejectOwnedEscape(c.payload(&Expr{Kind: "payload", Span: s.Span}, decl.Fields, env, s.Span), s.Span)
+				payloadFacts = c.payload(&Expr{Kind: "payload", Span: s.Span}, decl.Fields, env, s.Span)
 			}
-			previousEvaluation := out.evaluation
+			// fail is an exit: every child still unobserved is pending.
+			previousEvaluation := c.exitAll(out.evaluation, []string{s.Name})
+			exit(killed)
 			out = c.checkedData("never")
-			out.evaluation = c.unionEvaluationFacts(previousEvaluation, c.evaluation(c.internRow([]string{s.Name}), emptyRowID))
+			out.evaluation = c.unionEvaluationFacts(previousEvaluation, c.evaluationWith(c.internRow([]string{s.Name}), emptyRowID, map[string][]OwnershipFact{s.Name: payloadFacts}, nil))
 			terminated = true
 			c.reasons = append(c.reasons, Contribution{"failure", []string{s.Name}, s.Span})
 			continue
 		}
 		t := c.expr(s.Value, env, effect)
-		if s.Kind != "let" && (c.unsafePotentialOwner(t.ownershipFacts()) || hasOwnedClosed(t.ownershipFacts())) {
-			c.diagnostic("EF123", "value owned by a closing scope cannot escape", s.Span)
+		// A recipe value escapes with the handles it holds; what running it
+		// returns stays deferred on the recipe until it actually runs.
+		// A selected tail flows into its enclosing branch or recipe value,
+		// where the joined value is checked once.
+		selectedTail := result == blockSelected && index == len(b.Statements)-1
+		if escaping := expandRelations(heldFacts(t, 0)); s.Kind != "let" && !selectedTail && (hasPotentialOwner(escaping) || hasOwnedClosed(escaping)) {
+			c.reportOwnership("value owned by a closing scope cannot escape", s.Span, ownershipRoots(escaping, ""))
 		}
-		out.evaluation = c.unionEvaluationFacts(out.evaluation, t.executed)
+		current := out.evaluation
+		if len(c.rowLabels(t.executed.failureRowID())) > 0 {
+			// The statement may exit: the children forked before it and
+			// not observed before that exit stay pending.
+			crossing, observed := current.live, killed
+			crossing, observed = killForks(crossing, t.exitKills), unionStrings(killed, t.exitKills)
+			current = c.exitPending(current, crossing, c.rowLabels(t.executed.failureRowID()))
+			exit(observed)
+		}
+		current.live = killForks(current.live, t.kills)
+		killed = unionStrings(killed, t.kills)
+		out.evaluation = c.unionEvaluationFacts(current, t.executed)
 		if s.Kind == "let" {
 			if s.binding.rebinds != nil {
 				c.diagnostic("EF101", "duplicate local "+s.Name, s.Span)
@@ -4200,7 +4431,12 @@ func (c *checker) block(b *Block, env localEnv, effect bool) checkedExpression {
 			out = c.checkedData(voidTypeName)
 			out.evaluation = previousEvaluation
 		} else {
-			if t.isEffect() {
+			last := index == len(b.Statements)-1
+			switch {
+			case !t.isEffect() || last && result == blockSelected:
+			case last && result == blockScope:
+				c.scopeResultRecipe(s.Value)
+			default:
 				c.diagnostic("EF105", "unused lazy effect; execute with run or bind it with let", s.Span)
 			}
 			previousEvaluation := out.evaluation
@@ -4208,6 +4444,10 @@ func (c *checker) block(b *Block, env localEnv, effect bool) checkedExpression {
 			out.evaluation = c.unionEvaluationFacts(previousEvaluation, t.executed)
 		}
 	}
+	// The success exit: the block exports what it observed before every
+	// exit.
+	exit(killed)
+	out.kills, out.exitKills = guaranteed, guaranteed
 	return out
 }
 
@@ -4266,6 +4506,9 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 				c.diagnostic("EF125", "row-polymorphic functions require direct application; first-class polymorphic values are unsupported", e.Span)
 			}
 			t = c.checkedFunction(f, true, false)
+			if e != c.handlerOperand {
+				c.requireObservedChildren(f, e.Span)
+			}
 			t.setOwnership(nil)
 			e.ResolvedFunction = f
 			e.Text = "function"
@@ -4313,7 +4556,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 					}
 				}
 				for source, arg := range e.Args {
-					got := c.expr(arg, env, false)
+					got := c.refuseCarriedPending(c.expr(arg, env, false), arg.Span)
 					i := order[source]
 					if i < 0 && !bound {
 						continue
@@ -4408,15 +4651,8 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		if serviceName != "" {
 			serviceLabels = union(serviceLabels, []string{serviceName})
 		}
-		if serviceName == "Files" && e.Left.Name == "openRead" {
-			// A service name alone is not an acquisition proof: a custom Files
-			// provider may borrow a File. The default service operation is
-			// therefore explicit unknown until a known LiveFiles provision
-			// discharges it below.
-			t.setOwnership([]OwnershipFact{{Status: "unknown", Origin: "service"}})
-		}
 		for source, a := range e.Args {
-			arg := c.expr(a, env, inEffect)
+			arg := c.refuseCarriedPending(c.refuseClosedArgument(c.expr(a, env, inEffect), a.Span), a.Span)
 			i := order[source]
 			if i < 0 && !bound {
 				// The rejected binding already diagnosed this argument.
@@ -4426,9 +4662,6 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 				i = source
 			}
 			argumentTypes[i] = arg
-			if c.unsafePotentialOwner(arg.ownershipFacts()) || hasOwnedClosed(arg.ownershipFacts()) {
-				c.diagnostic("EF123", "value owned by a closing scope cannot be used", a.Span)
-			}
 			handlerArgument := false
 			for _, policy := range f.CallbackPolicies {
 				if policy.Parameter != i || i >= len(f.Params) || !c.handlerCompatible(arg, f.Params[i].Type) {
@@ -4442,7 +4675,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 				policy.FailureRow = c.rowNodeID(arg.failureRow())
 				callbackPolicies = append(callbackPolicies, policy)
 			}
-			if i < len(f.Params) && len(f.RowParameters) == 0 && len(f.TypeParameters) == 0 && !handlerArgument && (arg.isEffect() || !c.assignable(arg.valueID(), parameterIDs[i], 0)) {
+			if i < len(f.Params) && len(f.RowParameters) == 0 && len(f.TypeParameters) == 0 && !handlerArgument && !c.assignable(arg.valueID(), parameterIDs[i], 0) {
 				message, span := "argument must be "+f.Params[i].Type, a.Span
 				if source == 0 && e.PipeSpan.Length > 0 {
 					message, span = c.pipedArgumentMismatch(e, a, arg, message)
@@ -4501,26 +4734,32 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		if len(f.Captures) > 0 {
 			t.setCaptures(c.instantiateCallbackFacts(f.Captures, f, argumentTypes, 0))
 		}
+		// The callee's failure payloads, instantiated (design §5.2 F3).
+		t.failures = c.instantiateFailures(f.failures, f, argumentTypes, 0)
+		if serviceName != "" {
+			operation := c.operationResult(resultID, argumentTypes, f.Effect, failureRow)
+			t.setOwnership(operation.ownership)
+			t.setCaptures(operation.captures)
+			t.failures = operation.failures
+		}
 		if f.Effect {
-			t.value = c.values.recipe(resultID, parameterIDs, checkedEffectCallable, failureRow, c.internRow(serviceLabels), t.ownershipFacts(), t.captureFacts())
+			t.value = c.values.recipe(resultID, checkedEffectCallable, failureRow, c.internRow(serviceLabels), t.ownershipFacts(), t.captureFacts())
 		} else {
 			t.value = c.values.occurrence(resultID, t.ownershipFacts(), t.captureFacts())
 		}
 		t.callableEvidence = substituteCallableEvidence(f.returnCallableEvidence, f, argumentTypes)
 		t.fields = c.instantiateFieldOccurrences(f.returnFields, f, argumentTypes, typeBindings, rowBindings, 0)
-		if len(t.fields) > 0 {
-			owners, captures := cloneFacts(t.ownershipFacts()), cloneFacts(t.captureFacts())
-			for name, value := range t.fields {
-				owners = append(owners, prependFacts(name, value.ownershipFacts())...)
-				captures = append(captures, prependFacts(name, value.captureFacts())...)
-			}
-			t.setOwnership(normalizeFacts(owners))
-			t.setCaptures(normalizeFacts(captures))
-		}
-		if f.Effect {
+		owners, captures := c.containerFieldFacts(t.ownershipFacts(), t.captureFacts(), t.fields, c.recipeDepth(t.valueID()))
+		t.setOwnership(owners)
+		t.setCaptures(captures)
+		if f.Effect && serviceName != "" {
+			// A service operation dispatches to whichever provider is in
+			// scope, an unknown callee: executing it uses every argument it
+			// was given (design §4.2). A summarized callee's call layer uses
+			// exactly the handles its body dereferences, instantiated above.
 			for i, argument := range argumentTypes {
 				if i < len(f.Params) {
-					t.setCaptures(append(t.captureFacts(), prependFacts("capture:"+f.Params[i].Name, argument.ownershipFacts())...))
+					t.setCaptures(append(t.captureFacts(), prependFacts("capture:"+f.Params[i].Name, heldFacts(argument, 0))...))
 				}
 			}
 			t.setCaptures(normalizeFacts(t.captureFacts()))
@@ -4548,6 +4787,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 						c.diagnostic("EF125", "row-polymorphic functions require direct application; first-class polymorphic values are unsupported", e.Span)
 					}
 					t = c.checkedFunction(f, true, false)
+					c.requireObservedChildren(f, e.Span)
 					t.setOwnership(nil)
 					e.ResolvedFunction = f
 					e.Text = "function"
@@ -4580,11 +4820,15 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			}
 			break
 		}
-		if fields, ok := fieldsFor(c, c.namedType(inner), ""); ok {
+		fields, ok := fieldsFor(c, c.namedType(inner), "")
+		if node := inner.node(); !ok && node != nil && node.Kind == "error" && c.errors[node.Name] != nil {
+			fields, ok = c.errors[node.Name].Fields, true
+		}
+		if ok {
 			for _, field := range fields {
 				if field.Name == e.Name {
 					t = c.projectFieldOccurrence(inner, field)
-					if len(t.ownershipFacts()) == 0 {
+					if len(t.ownershipFacts()) == 0 && !c.recipeType(field.typeID) {
 						t.setOwnership(c.unknownOwnershipID(field.typeID))
 					}
 					e.Text = "field"
@@ -4598,18 +4842,24 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			c.diagnostic("EF114", "unknown field "+e.Name+" on "+c.displayTypeID(inner.resultID()), e.Span)
 			break
 		}
+		if c.poisoned(inner) {
+			// Already reported; the field of an invalid value is invalid.
+			break
+		}
 		t = c.goResultField(inner, e)
 	case "orFail":
 		t = c.expr(e.Left, env, inEffect)
-		if !t.isEffect() || !c.isKind(t, "goResult") {
-			c.diagnostic("EF106", "orFail requires an Effect returning GoResult", e.Span)
+		if !c.expect(t.isEffect() && c.isKind(t, "goResult"), "EF106", "orFail requires an Effect returning GoResult", e.Span, t) {
 			break
 		}
 		if node := c.resultNode(t); node != nil && len(node.Args) == 1 {
 			failure := c.internRow(union(c.rowLabels(t.failureRow()), []string{"GoError"}))
-			result := checkedExpression{value: c.values.recipe(node.Args[0], nil, checkedEffectCallable, failure, t.serviceRow(), t.ownershipFacts(), t.captureFacts())}
+			result := checkedExpression{value: c.values.recipe(node.Args[0], checkedEffectCallable, failure, t.serviceRow(), t.ownershipFacts(), t.captureFacts())}
 			result.evaluation = t.evaluation
 			result.executed = t.executed
+			// GoError carries no handle (design §5.2 F8).
+			result.failures = t.failures
+			result.observes = t.observes
 			t = result
 		}
 	case "scope":
@@ -4617,23 +4867,90 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			c.diagnostic("EF105", "scope requires an effect function", e.Span)
 		}
 		scopeRegion := fmt.Sprintf("scope:%d", e.Span.Offset)
-		t = c.withRegion(scopeRegion, func() checkedExpression { return c.block(e.Then, env, inEffect) })
-		if hasPotentialOwner(t.ownershipFacts()) || hasPotentialOwner(t.captureFacts()) || hasOwnedFact(t.ownershipFacts(), scopeRegion) || hasOwnedFact(t.captureFacts(), scopeRegion) {
-			c.diagnostic("EF123", "value owned by closing scope cannot escape", e.Span)
+		t = c.withRegion(scopeRegion, func() checkedExpression { return c.blockValue(e.Then, env, inEffect, blockScope) })
+		// The scope edge (design §5.4 F14): a failure payload the scope owns
+		// leaves it owned by the closed scope, refused only where a handler
+		// dereferences it, and the obligations its body met inside the
+		// scope are discharged.
+		// The scope owns the children its body forked: it raises their
+		// failures when it closes (design §5.3 rule 4, F14).
+		kills := t.kills
+		closing := c.dischargeEvaluation(t.evaluation)
+		closing.payloads = mapPayloadFacts(closing.payloads, func(facts []OwnershipFact) []OwnershipFact {
+			return c.closeRegionFacts(facts, scopeRegion, ownershipOwnerScope)
+		})
+		closing.uses = withoutRegionUses(closing.uses, scopeRegion)
+		t.evaluation = closing
+		t = c.closeRegionFailures(t, scopeRegion, ownershipOwnerScope)
+		if escaping := expandRelations(slices.Concat(t.ownershipFacts(), t.captureFacts(), storedRecipeEvidence(t))); hasPotentialOwner(escaping) || hasOwnedFact(escaping, scopeRegion) {
+			c.reportOwnership("value owned by closing scope cannot escape", e.Span, ownershipRoots(escaping, scopeRegion))
 		}
+		if t.isEffect() {
+			// The unexecuted tail was reported at its own span. The scope has
+			// no admitted result, so consumers must not report it again as a
+			// discarded effect or a mismatched type.
+			rejected := c.checkedData("invalid")
+			rejected.evaluation, rejected.executed = t.evaluation, t.executed
+			t = rejected
+		}
+		// The scope exports the observations its body guarantees.
+		t.kills, t.exitKills = kills, kills
 	case "fork":
 		inner := c.expr(e.Left, env, inEffect)
-		if !inEffect || !inner.isEffect() {
+		if !inEffect {
 			c.diagnostic("EF105", "fork requires an Effect inside an effect function", e.Span)
+		} else {
+			c.expect(inner.isEffect(), "EF105", "fork requires an Effect inside an effect function", e.Span, inner)
+		}
+		if inner.isEffect() {
+			c.requireOpenHeldCaptures(inner, e.Span)
 		}
 		childRegion := fmt.Sprintf("child:%d", e.Span.Offset)
+		forkKey := fmt.Sprintf("fork:%d", e.Span.Offset)
+		// The child executes its recipe under its own owner, which closes
+		// before a joined recipe can observe the child's result. This owner is
+		// distinct from the owner of the Fiber handle returned to the parent.
+		// The child's scope is the owner of its own forks: their pending
+		// failures are raised by the child (design §5.4, fork edge).
+		var child, captures []OwnershipFact
+		var childFailures map[string][]OwnershipFact
+		var resultFailures failureEvidence
+		if inner.isEffect() {
+			inner = c.completeFailures(inner)
+			// A child fiber's owner raises the grandchildren the child left
+			// unobserved after its body, as failures of the child. An
+			// interrupt which cancels the running child abandons them
+			// (cancellation-aborted close), so none is retained for it.
+			inner = c.dischargeOccurrence(inner)
+			// join returns the child's result by its type alone.
+			c.refuseCarriedPending(inner, e.Span)
+			bound, raised, _ := c.executeLayer(inner, closedOwner(ownershipOwnerChild, childRegion))
+			child, captures, childFailures = bound.ownershipFacts(), bound.captureFacts(), raised
+			// A joined recipe's later layers are the child's result layers,
+			// numbered under the join's binder.
+			result := c.checkedDataID(inner.resultID(), nil, nil)
+			result.failures = bound.failures
+			resultFailures = c.liftOccurrence(result).failures
+		}
 		fiberFailure := inner.failureRow()
-		t = checkedExpression{value: c.values.fiber(inner.resultID(), fiberFailure, []OwnershipFact{{Status: "owned", Region: c.region, Origin: "fork", ownerKind: ownershipOwnerLexical}}, inner.captureFacts())}
-		t.setOwnership([]OwnershipFact{{Status: "owned", Region: c.region, Origin: "fork", ownerKind: ownershipOwnerLexical}})
-		// The child executes its recipe under its own owner. This is distinct
-		// from the owner of the Fiber handle returned to the parent.
-		t.child = materializeExecutionFacts(inner.ownershipFacts(), childRegion, ownershipOwnerChild)
-		t.evaluation = c.addDeferredEvaluation(inner.evaluation, inner)
+		t = checkedExpression{value: c.values.fiber(inner.resultID(), fiberFailure, []OwnershipFact{{Status: "owned", Region: c.region, Origin: "fork", ownerKind: ownershipOwnerLexical}}, captures)}
+		t.child = child
+		t.forks = []string{forkKey}
+		// The child's failures are owned by the closed child owner (design
+		// §5.2 F11); the Fiber carries them, numbered like its joined
+		// recipe, for join and interrupt.
+		t.failures = withLayerPayloads(resultFailures, 0, childFailures)
+		// The fork charges no row (design §5.3 rule 1): the child's failures
+		// are live on the forking body until a join or interrupt observes
+		// the child, and pending once an exit may leave it unobserved.
+		forked := c.evaluationWith(emptyRowID, inner.serviceRow(), nil, heldAt(inner.captureFacts(), 0))
+		for _, label := range c.rowLabels(inner.failureRow()) {
+			if forked.live == nil {
+				forked.live = failureEvidence{}
+			}
+			forked.live[failureKey{label: label, pending: true, fork: forkKey}] = cloneFacts(childFailures[label])
+		}
+		t.evaluation = c.unionEvaluationFacts(inner.evaluation, forked)
 		for i := range t.child {
 			if t.child[i].Region == childRegion && t.child[i].Status == "owned" {
 				t.child[i].Origin = "child-acquisition"
@@ -4651,36 +4968,59 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		// would reject a valid caller-owned value.
 		inner := c.expr(e.Left, env, inEffect)
 		t = inner
-		if !t.isEffect() || duration.isEffect() || !c.sameType(duration, "i64") {
-			c.diagnostic("EF106", "timeout requires an Effect and an i64 millisecond duration", e.Span)
+		durationValid := !duration.isEffect() && c.sameType(duration, "i64")
+		if !t.isEffect() || !durationValid {
+			c.expect((t.isEffect() || c.poisoned(t)) && durationValid, "EF106", "timeout requires an Effect and an i64 millisecond duration", e.Span, duration)
 			// Invalid operands retain their value contract and caller evaluation;
 			// only an admitted recipe can acquire timeout-owned facts and rows.
 			break
 		}
-		t.setOwnership(materializeExecutionFacts(t.ownershipFacts(), timeoutRegion, ownershipOwnerTimeout))
-		t.setCaptures(materializeExecutionFacts(t.captureFacts(), timeoutRegion, ownershipOwnerTimeout))
+		// Layer 0 executes under the timeout owner, which has closed by the
+		// time its success is observable: close(L, timeout).
+		// The timeout child owns the children its layer forks (design §5.4):
+		// it raises their failures, and a timed-out join observes nothing.
+		// A deadline which wins abandons the timed computation, so Timeout is
+		// raised alone; work which wins closes the owner normally and raises
+		// its unobserved children.
+		t = c.completeFailures(t)
+		t = c.dischargeOccurrence(t)
+		t.observes = nil
+		t = c.closeOccurrence(t, closedOwner(ownershipOwnerTimeout, timeoutRegion))
 		t.value = c.recontractRows(t, c.internRow(union(c.rowLabels(t.failureRow()), []string{"Timeout"})), c.internRow(union(c.rowLabels(t.serviceRow()), []string{"Scheduler"})))
 	case "run":
 		inner := c.expr(e.Left, env, inEffect)
 		if !inEffect {
 			c.diagnostic("EF105", "run is only valid inside effect functions", e.Span)
 		}
-		if !inner.isEffect() {
-			c.diagnostic("EF105", "run requires an Effect value", e.Span)
+		if c.expect(inner.isEffect(), "EF105", "run requires an Effect value", e.Span, inner) {
+			c.requireOpenHeldCaptures(inner, e.Span)
 		}
 		t = inner.clone()
 		t.value = c.checkedDataID(inner.resultID(), nil, nil).value
 		t.application = nil
 		t.identity = ""
-		// Ownership created by a deferred recipe belongs to the owner
-		// which actually executes it. Construction may happen outside a
-		// scope, or in an outer scope before a nested run.
-		t.setOwnership(materializeExecutionFacts(inner.ownershipFacts(), c.region, ownershipOwnerLexical))
-		t.setCaptures(materializeExecutionFacts(inner.captureFacts(), c.region, ownershipOwnerLexical))
-		if !c.isKind(t, "provider") {
-			t.setCaptures(nil)
+		// exec(L, Lexical(region)): the current region owns what layer 0
+		// acquires, and a produced recipe keeps its own layers. The body
+		// raises layer 0's failures with their payload evidence and uses
+		// the handles layer 0 holds (design §4.2, §5.2 F2).
+		var payloads map[string][]OwnershipFact
+		var pending failureEvidence
+		if inner.isEffect() {
+			executed, raised, unobserved := c.executeLayer(inner, lexicalOwner(c.region))
+			t.setOwnership(executed.ownershipFacts())
+			t.setCaptures(executed.captureFacts())
+			t.fields = executed.fields
+			t.failures = executed.failures
+			payloads, pending = raised, unobserved
 		}
-		t.evaluation = c.addDeferredEvaluation(inner.evaluation, inner)
+		t.observes, t.forks = nil, nil
+		executedLayer := c.evaluationWith(inner.failureRow(), inner.serviceRow(), payloads, heldAt(inner.captureFacts(), 0))
+		executedLayer.pending = atCall(pending, e.Span.Offset)
+		t.evaluation = c.unionEvaluationFacts(inner.evaluation, executedLayer)
+		// Building the recipe evaluates its operands first, which may
+		// observe children or exit; executing a join or interrupt then
+		// observes its child before both of its exits.
+		t.observe(sequenceObservations(c.observationOf(inner), observation{kills: inner.observes, exitKills: inner.observes, exits: len(c.rowLabels(inner.failureRow())) > 0}))
 		if len(c.rowLabels(inner.failureRow())) > 0 {
 			c.reasons = append(c.reasons, Contribution{"failure", c.rowLabels(inner.failureRow()), e.Span})
 		}
@@ -4699,24 +5039,15 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			c.diagnostic("EF125", "provision of an abstract row requires an unsupported row difference constraint", e.Span)
 		}
 		provider := c.expr(e.Right, env, inEffect)
-		if !t.isEffect() {
-			c.diagnostic("EF105", "provide requires an Effect value", e.Span)
-		}
+		c.expect(t.isEffect(), "EF105", "provide requires an Effect value", e.Span, t)
 		if service := c.services[e.Name]; service == nil {
 			c.diagnostic("EF102", "unknown service "+e.Name, e.Span)
 		} else {
 			c.observeReference(e, e.NameSpan, lexicalTarget{kind: "service", service: service})
 		}
 		providerNode := provider.node()
-		if providerNode == nil || providerNode.Kind != "provider" || providerNode.Name != e.Name || provider.isEffect() {
-			c.diagnostic("EF104", "provider must implement "+e.Name, e.Right.Span)
-		}
+		c.expect(providerNode != nil && providerNode.Kind == "provider" && providerNode.Name == e.Name && !provider.isEffect(), "EF104", "provider must implement "+e.Name, e.Right.Span, provider)
 		t.setCaptures(normalizeFacts(append(t.captureFacts(), provider.captureFacts()...)))
-		if e.Name == "Files" && e.Right.Kind == "name" && e.Right.Name == "LiveFiles" {
-			if e.Left.Kind == "call" && e.Left.Left != nil && e.Left.Left.Kind == "member" && e.Left.Left.Left.Kind == "name" && e.Left.Left.Left.Name == "Files" && e.Left.Left.Name == "openRead" {
-				t.setOwnership([]OwnershipFact{{Status: "owned", Region: "deferred", Origin: "acquisition", ownerKind: ownershipOwnerDeferred}})
-			}
-		}
 		serviceLabels := remove(c.rowLabels(t.serviceRow()), e.Name)
 		t.value = c.recontractRows(t, t.failureRow(), c.internRow(serviceLabels))
 	case "catch":
@@ -4725,32 +5056,34 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			c.diagnostic("EF125", "recovery of an abstract row requires an unsupported row difference constraint", e.Span)
 		}
 		fallback := c.expr(e.Right, env, false)
-		if !t.isEffect() {
-			c.diagnostic("EF105", "catch requires an Effect value", e.Span)
-		}
+		c.expect(t.isEffect(), "EF105", "catch requires an Effect value", e.Span, t)
 		if _, exists := c.program.Errors[e.Name]; !exists {
 			c.diagnostic("EF102", "unknown failure "+e.Name, e.Span)
 		} else {
 			c.observeReference(e, e.NameSpan, lexicalTarget{kind: "error", failure: c.errors[e.Name]})
-			if !c.hasRow(t, true, e.Name) {
-				c.diagnostic("EF107", "effect does not admit failure "+e.Name, e.Span)
-			}
+			c.expect(c.hasRow(t, true, e.Name), "EF107", "effect does not admit failure "+e.Name, e.Span, t)
 		}
-		if fallback.isEffect() || !c.sameResultType(fallback, t) {
-			c.diagnostic("EF106", "prototype catch fallback must be a pure "+c.displayTypeID(t.resultID()), e.Right.Span)
-		}
+		c.expect(!fallback.isEffect() && c.sameResultType(fallback, t), "EF106", "prototype catch fallback must be a pure "+c.displayTypeID(t.resultID()), e.Right.Span, t, fallback)
 		// Recovery can publish the fallback value on the handled-failure
 		// branch. Preserve both its returned ownership and any provider
 		// captures; dropping either branch turns a closed-owner escape into a
-		// false safe result.
-		t.setOwnership(mergeFacts(t.ownershipFacts(), fallback.ownershipFacts()))
-		t.setCaptures(mergeFacts(t.captureFacts(), fallback.captureFacts()))
-		t.callableEvidence = joinCallableEvidence(t.callableEvidence, fallback.callableEvidence)
-		if t.callableDecl != fallback.callableDecl {
-			t.callableDecl = nil
+		// false safe result. The fallback is the success of the recovered
+		// layer, so it joins under that layer's binder. A payload catch
+		// discards is never dereferenced (design §5.5).
+		if t.isEffect() && !c.poisoned(fallback) {
+			lifted := c.liftOccurrence(fallback)
+			lifted.value = c.values.recipe(fallback.valueID(), checkedEffectCallable, emptyRowID, emptyRowID, lifted.ownershipFacts(), lifted.captureFacts())
+			fallback = lifted
 		}
-		failureLabels := remove(c.rowLabels(t.failureRow()), e.Name)
-		t.value = c.recontractRows(t, c.internRow(failureLabels), t.serviceRow())
+		observes := t.observes
+		t = c.joinOccurrence(t, fallback, e.Span)
+		t.observes = observes
+		// The fallback handles every ordinary raise of the label.
+		t.failures = handleWith(withLayerPayloads(t.failures, 0, withoutLabel(layerPayloads(t.failures, 0), e.Name)), e.Name, nil)
+		t.value = c.recontractRows(t, c.internRow(c.handledRow(t, e.Name)), t.serviceRow())
+		t = c.completeHandled(t, e.Name)
+	case "recover":
+		t = c.recoverFailure(e, env, inEffect)
 	case "construct":
 		t = c.construct(e, env, inEffect)
 	case "match":
@@ -4760,7 +5093,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		node := operand.node()
 		valid := e.Name == "-" && !operand.isEffect() && node != nil && node.Kind == "primitive" && node.Name == "i64"
 		if !valid {
-			c.diagnostic("EF106", "unary - requires an i64 value", e.Span)
+			c.expect(false, "EF106", "unary - requires an i64 value", e.Span, operand)
 			t = c.checkedData("invalid")
 		} else {
 			t = c.checkedData("i64")
@@ -4781,9 +5114,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 				valid = false
 			}
 		}
-		if !valid {
-			c.diagnostic("EF106", "operator requires matching primitive values; + accepts strings or i64, and -, *, /, % and ordered comparisons accept i64", e.Span)
-		} else if (e.Name == "/" || e.Name == "%") && !c.divisorProof(e.Right) {
+		if c.expect(valid, "EF106", "operator requires matching primitive values; + accepts strings or i64, and -, *, /, % and ordered comparisons accept i64", e.Span, left, right) && (e.Name == "/" || e.Name == "%") && !c.divisorProof(e.Right) {
 			c.diagnostic("EF150", divisorRefusal(e), e.Right.Span)
 		}
 		if valid {
@@ -4801,40 +5132,45 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	case "if":
 		condition := c.expr(e.Left, env, inEffect)
 		conditionNode := condition.node()
-		if condition.isEffect() || conditionNode == nil || conditionNode.Kind != "primitive" || conditionNode.Name != "bool" {
-			c.diagnostic("EF106", "if condition must be bool", e.Left.Span)
-		}
+		c.expect(!condition.isEffect() && conditionNode != nil && conditionNode.Kind == "primitive" && conditionNode.Name == "bool", "EF106", "if condition must be bool", e.Left.Span, condition)
 		thenProof, elseProof := nonzeroBranchProofs(e.Left)
-		a := c.withNonzero(thenProof, func() checkedExpression { return c.block(e.Then, env, inEffect) })
-		b := c.withNonzero(elseProof, func() checkedExpression { return c.block(e.Else, env, inEffect) })
-		if c.isKind(a, "never") {
+		a := c.withNonzero(thenProof, func() checkedExpression { return c.branchBlock(e.Then, env, inEffect) })
+		b := c.withNonzero(elseProof, func() checkedExpression { return c.branchBlock(e.Else, env, inEffect) })
+		// The arms are alternatives: the children one forks never exist
+		// together with the other's.
+		a.evaluation = c.alternativeEvaluation(a.evaluation, e.Span.Offset, 0)
+		b.evaluation = c.alternativeEvaluation(b.evaluation, e.Span.Offset, 1)
+		// A never branch contributes no value and an already-reported invalid
+		// branch takes the other branch's contract, as unification would.
+		if c.isKind(a, "never") || (c.poisoned(a) && !c.isKind(b, "never")) {
 			t = b
-		} else if c.isKind(b, "never") {
+		} else if c.isKind(b, "never") || c.poisoned(b) {
 			t = a
 		} else {
-			t = a.clone()
-			t.fields = c.joinExpressionFields(a, b, e.Span, 0, new(int))
+			t = c.joinOccurrence(a, b, e.Span)
 			if !c.sameValues(a, b) || a.isEffect() != b.isEffect() {
 				c.diagnostic("EF106", "if branches must return the same type", e.Span)
 			} else {
 				t = c.joinContractRows(t, b)
 			}
-			t.setOwnership(mergeFacts(a.ownershipFacts(), b.ownershipFacts()))
-			t.setCaptures(mergeFacts(a.captureFacts(), b.captureFacts()))
-			if a.callableDecl != b.callableDecl {
-				t.callableDecl = nil
-			}
-		}
-		if a.isEffect() || b.isEffect() {
-			c.diagnostic("EF103", "returning Effect values from branches is not supported in this prototype", e.Span)
 		}
 		t.evaluation = c.unionEvaluationFacts(condition.evaluation, c.unionEvaluationFacts(a.evaluation, b.evaluation))
+		// The condition evaluates, then either arm runs: only what both
+		// arms observe is observed, and a failing condition exits before
+		// either arm.
+		t.observe(sequenceObservations(c.observationOf(condition), alternativeObservations(c.observationOf(a), c.observationOf(b))))
 	default:
 		c.diagnostic("EF103", "unsupported expression "+e.Kind, e.Span)
 	}
 	// Every checked expression owns one evaluation summary. Child summaries are
 	// shared through this node instead of being recomputed by each consumer.
 	t.evaluation = c.unionEvaluationFacts(t.evaluation, c.childEvaluation(e))
+	switch e.Kind {
+	case "run", "scope", "if", "match":
+		// These compose their own observations above.
+	default:
+		t.observe(c.childObservation(e))
+	}
 	if t.callableDecl == nil && t.application == nil {
 		t.identity = c.typeNodeID(t.contractID())
 	}
@@ -4945,7 +5281,7 @@ func (c *checker) dataCall(e *Expr, env localEnv, inEffect bool) (checkedExpress
 	for i, arg := range e.Args {
 		got := c.expr(arg, env, false)
 		argumentTypes[i] = got
-		if i < len(fields) && (got.isEffect() || !c.sameType(got, fields[i].Type)) {
+		if i < len(fields) && !c.sameType(got, fields[i].Type) {
 			c.diagnostic("EF115", "payload field "+fields[i].Name+" must be "+fields[i].Type, arg.Span)
 		}
 	}
@@ -4960,7 +5296,7 @@ func (c *checker) dataCall(e *Expr, env localEnv, inEffect bool) (checkedExpress
 	ownership := []OwnershipFact{}
 	for i, got := range argumentTypes {
 		if i < len(fields) {
-			ownership = append(ownership, prependFacts(fields[i].Name, got.ownershipFacts())...)
+			ownership = append(ownership, prependFacts(fields[i].Name, heldFacts(got, 0))...)
 		}
 	}
 	if variantName != "" {
@@ -5139,16 +5475,35 @@ func (c *checker) fiberCall(e *Expr, env localEnv, inEffect bool) bool {
 	}
 	resultID := node.Args[0]
 	failureRow := inner.failureRow()
-	t := checkedExpression{value: c.values.recipe(resultID, nil, checkedEffectCallable, failureRow, emptyRowID, nil, nil)}
+	// Every fiber operation is a recipe holding the Fiber handle. A joined
+	// recipe's success is the child's result: its evidence (already owned by
+	// the closed child owner) moves under the joined recipe's binder.
+	fiber := heldFacts(inner, 0)
+	// join and interrupt raise the child's failures, owned by the closed
+	// child owner (design §5.2 F11, F12): interrupt re-raises a child cause
+	// which is not an interruption (fiber.go Interrupt).
+	joined := c.completeFailures(inner).failures
+	childFailures := layerPayloads(joined, 0)
+	t := checkedExpression{value: c.values.recipe(resultID, checkedEffectCallable, failureRow, emptyRowID, nil, fiber)}
 	switch e.Left.Name {
 	case "join":
-		t.setOwnership(cloneFacts(inner.child))
+		result := c.liftOccurrence(c.checkedDataID(resultID, cloneFacts(inner.child), inner.captureFacts()))
+		t.setOwnership(result.ownershipFacts())
+		t.setCaptures(normalizeFacts(append(cloneFacts(fiber), result.captureFacts()...)))
+		t.failures = joined
 	case "interrupt":
-		t = checkedExpression{value: c.values.recipe(c.canonicalRef(typeRef(voidTypeName)), nil, checkedEffectCallable, failureRow, emptyRowID, nil, nil)}
+		t = checkedExpression{value: c.values.recipe(c.canonicalRef(typeRef(voidTypeName)), checkedEffectCallable, failureRow, emptyRowID, nil, fiber)}
+		t.failures = withLayerPayloads(nil, 0, childFailures)
 	case "cancel":
-		t = checkedExpression{value: c.values.recipe(c.canonicalRef(typeRef(voidTypeName)), nil, checkedEffectCallable, emptyRowID, emptyRowID, nil, nil)}
+		t = checkedExpression{value: c.values.recipe(c.canonicalRef(typeRef(voidTypeName)), checkedEffectCallable, emptyRowID, emptyRowID, nil, fiber)}
 	default:
 		c.diagnostic("EF102", "unknown fiber operation "+e.Left.Name, e.Span)
+	}
+	// join and interrupt wait for the child and mark it observed before
+	// either of their exits (design §5.3 rule 2). A Fiber which may denote
+	// several fork instances observes none of them; cancel never waits.
+	if (e.Left.Name == "join" || e.Left.Name == "interrupt") && len(inner.forks) == 1 {
+		t.observes = []string{inner.forks[0]}
 	}
 	e.Text = "fiber"
 	e.checked = t.clone()

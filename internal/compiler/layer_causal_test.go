@@ -97,11 +97,13 @@ for(const kind of ['timer-success','timer-failure','work'])for(const fresh of [f
    release[first].resolve();await Promise.race([completed[first].promise,deadline]);release[1-first].resolve();
   }
   const exit=await Promise.race([result,deadline]),reasons=Exit.isFailure(exit)?exit.cause.reasons:[];
-  const expected=kind==='work'?['Fail','Fail','Die','Die','Die']:['Fail','Fail','Fail','Die','Die'];
+  // A deadline which wins abandons the timed computation: its typed failures are discarded, its defects stay.
+  const expected=kind==='work'?['Fail','Fail','Die','Die','Die']:['Fail','Die','Die'];
   if(failures!==2||programs!==0||JSON.stringify(order)!=='["b","a"]'||JSON.stringify(reasons.map(r=>r._tag))!==JSON.stringify(expected)){mismatches.push({kind,fresh,first,failures,programs,order,tags:reasons.map(r=>r._tag)});continue;}
   const base=kind==='work'?0:1;
-  if(reasons[base].error!==errors[0]||reasons[base+1].error!==errors[1]||reasons[base+2].defect!==defects[1]||reasons[base+3].defect!==defects[0])throw new Error('timeout altered canonical original payloads');
-  if(reasons.slice(base,base+4).some(reason=>reason.annotations.get(traceKey.key)!=='producer trace')){mismatches.push({kind,fresh,first,trace:'producer annotations lost'});continue;}
+  if(kind==='work'){if(reasons[0].error!==errors[0]||reasons[1].error!==errors[1]||reasons[2].defect!==defects[1]||reasons[3].defect!==defects[0])throw new Error('timeout altered canonical original payloads');}
+  else if(reasons[1].defect!==defects[1]||reasons[2].defect!==defects[0])throw new Error('timeout altered canonical original payloads');
+  if(reasons.slice(base,kind==='work'?4:3).some(reason=>reason.annotations.get(traceKey.key)!=='producer trace')){mismatches.push({kind,fresh,first,trace:'producer annotations lost'});continue;}
   const timerReason=kind==='work'?reasons[4]:reasons[0];
   if(kind==='timer-success'){if(timerReason.error._tag!=='Timeout')throw new Error('timeout lost primary control');}
   else if(timerReason.annotations.get(traceKey.key)!=='timer trace'||(kind==='work'?timerReason.defect!==timerDefect:timerReason.error!==timerError))mismatches.push({kind,fresh,first,trace:'timer annotations or original payload lost'});

@@ -40,6 +40,8 @@ func canonicalJSDataType(c *checker, id TypeID, declarations map[string]Declarat
 			}
 		}
 		return "(" + strings.Join(args, ",") + ") => " + result
+	case "recipe":
+		return jsRowsContract(canonicalJSDataType(c, n.Result, declarations), c.rowLabels(n.FailureRow), c.rowLabels(n.ServiceRow), declarations)
 	default:
 		return jsValueType(c.program, n.Name)
 	}

@@ -130,6 +130,14 @@ func (c *checker) walkDataFields(id TypeID, visit func(string, Field)) bool {
 		}
 		return true
 	}
+	// A declared error payload is a nominal product; its handles are part of
+	// the layout a recovery handler receives.
+	if n := c.node(id); n != nil && n.Kind == "error" && c.errors[n.Name] != nil {
+		for _, field := range c.errors[n.Name].Fields {
+			visit(field.Name, field)
+		}
+		return true
+	}
 	return false
 }
 
@@ -187,6 +195,12 @@ func (c *checker) parameterPayloadFields(f *Function, parameter, path string, fi
 		if c.node(field.typeID).Kind == "callable" {
 			value.callableEvidence = callableEvidence{parameter: f, parameterName: parameter, parameterPath: fieldPath}
 		}
+		if c.recipeType(field.typeID) {
+			// The caller's recipe holds what the parameter holds at this path.
+			held := []OwnershipFact{{Status: "borrowed", Region: "parameter:" + parameter, Origin: "parameter", source: fieldPath, sourceSet: true, ownerKind: ownershipOwnerParameter}}
+			opaque := c.opaqueRecipe(field.typeID, held)
+			value.value, value.failures = opaque.value, opaque.failures
+		}
 		value.fields = c.parameterFieldOccurrences(f, parameter, fieldPath, field.typeID, visiting, depth+1, nodes, layouts)
 		values[field.Name] = value
 	}
@@ -194,7 +208,12 @@ func (c *checker) parameterPayloadFields(f *Function, parameter, path string, fi
 }
 
 func (c *checker) joinExpressionFields(a, b checkedExpression, span Span, depth int, nodes *int) map[string]checkedExpression {
-	if _, _, enum := c.checkedVariants(a.valueID()); !enum {
+	if _, _, enum := c.checkedVariants(c.occurrenceLayoutID(a.valueID())); !enum {
+		// An occurrence without a field table is described by its path
+		// facts alone; the joined path facts then describe both sides.
+		if (a.fields == nil) != (b.fields == nil) {
+			return nil
+		}
 		return c.joinFieldOccurrences(a.fields, b.fields, span, depth, nodes)
 	}
 	if depth > 32 {
@@ -238,6 +257,13 @@ func (c *checker) projectFieldOccurrence(inner checkedExpression, field Field) c
 		if c.node(field.typeID).Kind == "callable" {
 			value.callableEvidence = callableEvidence{unresolved: true}
 		}
+	}
+	if c.recipeType(field.typeID) {
+		held := mergeFacts(projectFacts(inner.ownershipFacts(), field.Name), projectFacts(inner.captureFacts(), field.Name))
+		value = c.recipeOccurrence(value, known, field.typeID, held)
+		value.evaluation = c.evaluation(emptyRowID, emptyRowID)
+		value.executed = value.evaluation
+		return value
 	}
 	value.setOwnership(projectFacts(inner.ownershipFacts(), field.Name))
 	value.setCaptures(projectFacts(inner.captureFacts(), field.Name))
@@ -286,12 +312,19 @@ func (c *checker) instantiateFieldOccurrences(fields map[string]checkedExpressio
 			c.diagnostic("EF127", "field contract substitution unavailable", f.Span)
 			continue
 		}
-		value.value = c.values.occurrence(id, c.instantiateCallbackFacts(value.ownershipFacts(), f, args, 0), c.instantiateCallbackFacts(value.captureFacts(), f, args, 0))
+		// Every fact slot of the occurrence (owners, captures, child and
+		// the payload and pending evidence of its failures) goes through
+		// the slot walker; only the contract, the rows and the nested
+		// fields, which carry the bounded budget, are rewritten here.
+		fields := value.fields
+		value = mapOccurrenceSlotFacts(value, func(_ checkedExpression, _ occurrenceFactSlot, facts []OwnershipFact) []OwnershipFact {
+			return c.instantiateCallbackFacts(facts, f, args, 0)
+		})
+		value.value = c.values.occurrence(id, value.ownershipFacts(), value.captureFacts())
 		value.callableEvidence = substituteCallableEvidence(value.callableEvidence, f, args)
 		value.evaluation = c.evaluation(c.instantiateRow(value.evaluation.failureRowID(), rows), c.instantiateRow(value.evaluation.serviceRowID(), rows))
 		value.executed = c.evaluation(c.instantiateRow(value.executed.failureRowID(), rows), c.instantiateRow(value.executed.serviceRowID(), rows))
-		value.child = c.instantiateCallbackFacts(value.child, f, args, 0)
-		value.fields = c.instantiateFieldOccurrences(value.fields, f, args, types, rows, depth+1, nodes)
+		value.fields = c.instantiateFieldOccurrences(fields, f, args, types, rows, depth+1, nodes)
 		values[name] = value
 	}
 	return values
@@ -318,14 +351,9 @@ func (c *checker) joinFieldOccurrences(a, b map[string]checkedExpression, span S
 			c.diagnostic("EF127", "incompatible or excessive field occurrence join", span)
 			return nil
 		}
-		value := c.joinContractRows(left, right)
-		value.setOwnership(mergeFacts(left.ownershipFacts(), right.ownershipFacts()))
-		value.setCaptures(mergeFacts(left.captureFacts(), right.captureFacts()))
-		value.callableEvidence = joinCallableEvidence(left.callableEvidence, right.callableEvidence)
-		value.child = mergeFacts(left.child, right.child)
+		value := c.joinContractRows(c.joinOccurrenceAt(left, right, span, depth+1, nodes), right)
 		value.evaluation = c.unionEvaluationFacts(left.evaluation, right.evaluation)
 		value.executed = c.unionEvaluationFacts(left.executed, right.executed)
-		value.fields = c.joinExpressionFields(left, right, span, depth+1, nodes)
 		joined[name] = value
 	}
 	return joined
@@ -392,6 +420,11 @@ func initializedFieldOccurrences(fields []FieldValue) (map[string]checkedExpress
 	for _, field := range fields {
 		value := field.Value.checked.clone()
 		values[field.Name] = value
+		if node := value.node(); node != nil && node.Kind == "recipe" {
+			// Recipe captures are held handles, recorded as container
+			// ownership by the constructor.
+			continue
+		}
 		captures = append(captures, prependFacts(field.Name, value.captureFacts())...)
 	}
 	return values, normalizeFacts(captures)

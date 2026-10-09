@@ -114,8 +114,8 @@ func adapterSemantic(value map[string]any) map[string]any {
 // Current wire epochs of a decorated report and of its embedded semantic
 // snapshot; the two advance independently.
 const (
-	defaultReportSchema   = 8
-	defaultSnapshotSchema = 8
+	defaultReportSchema   = 9
+	defaultSnapshotSchema = 9
 )
 
 var artifactDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)

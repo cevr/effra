@@ -689,7 +689,7 @@ func (c *checker) checkForeignCall(e *Expr, b Binding, host hostBindingTypes, en
 			c.diagnostic("EF106", "Go argument must be "+c.displayTypeID(host.params[i]), arg.Span)
 		}
 	}
-	t := checkedExpression{value: c.values.recipe(host.result, nil, checkedEffectCallable, emptyRowID, c.internRow([]string{"Foreign"}), nil, nil)}
+	t := checkedExpression{value: c.values.recipe(host.result, checkedEffectCallable, emptyRowID, c.internRow([]string{"Foreign"}), nil, nil)}
 	e.checked = t.clone()
 	e.Type = c.projectChecked(t)
 	e.Text = "foreign"

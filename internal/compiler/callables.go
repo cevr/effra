@@ -18,6 +18,7 @@ type sourceType struct {
 	Application              string
 	ApplicationArguments     []string
 	Effect                   bool
+	Recipe                   bool // Effect<Result, {Failures}, {Services}>, not a callable
 	Parameters               []string
 	ParameterTypes           []*sourceType
 	Result                   string
@@ -44,6 +45,9 @@ func (t *sourceType) display() string {
 	if t.Application != "" {
 		return t.Application + "<" + strings.Join(t.ApplicationArguments, ", ") + ">"
 	}
+	if t.Recipe {
+		return recipeDisplay(t.Result, t.Failures, t.Services)
+	}
 	kind := "fn"
 	if t.Effect {
 		kind = "effect fn"
@@ -62,6 +66,20 @@ func (t *sourceType) display() string {
 	return text
 }
 
+// recipeDisplay is the one readable spelling of a recipe contract. Rows are
+// normalized and trailing empty rows are omitted, so source, formatter-visible
+// declarations and diagnostics agree on Effect<string, {Broken}>.
+func recipeDisplay(result string, failures, services []string) string {
+	text := "Effect<" + result
+	if len(failures) > 0 || len(services) > 0 {
+		text += ", {" + strings.Join(normalized(failures), ", ") + "}"
+	}
+	if len(services) > 0 {
+		text += ", {" + strings.Join(normalized(services), ", ") + "}"
+	}
+	return text + ">"
+}
+
 func (c *checker) sourceCallable(t *sourceType) TypeID {
 	if t.HostForm != "" {
 		return c.sourceHostType(t)
@@ -76,6 +94,12 @@ func (c *checker) sourceCallable(t *sourceType) TypeID {
 }
 
 func (c *checker) sourceCallableCanonical(t *sourceType) TypeID {
+	if t.Recipe {
+		// A recipe value has no parameters. Its identity is exactly its
+		// success type and explicit rows, independent of the callable that
+		// constructed it.
+		return c.internContract("recipe", checkedEffectCallable.mode(), c.canonicalRef(typeRef(t.Result)), nil, c.internRow(c.sourceRow(t.Failures, "raises")), c.internRow(c.sourceRow(t.Services, "uses")))
+	}
 	args := make([]TypeID, 0, len(t.Parameters))
 	for _, name := range t.Parameters {
 		args = append(args, c.canonicalRef(typeRef(name)))
@@ -125,7 +149,7 @@ func (c *checker) sourceTypeKnownIn(t *sourceType, visiting map[*sourceType]bool
 		}
 		return c.sourceApplicationCanonical(t) != invalidTypeID
 	}
-	if !t.Effect && (len(t.Failures) > 0 || len(t.Services) > 0) {
+	if !t.Effect && !t.Recipe && (len(t.Failures) > 0 || len(t.Services) > 0) {
 		return false
 	}
 	if t.ResultType != nil {
@@ -143,7 +167,7 @@ func (c *checker) sourceTypeKnownIn(t *sourceType, visiting map[*sourceType]bool
 			if !c.sourceTypeKnownIn(t.ParameterTypes[i], visiting) {
 				return false
 			}
-		} else if !c.typeKnown(name) {
+		} else if !c.parameterTypeKnown(name) {
 			return false
 		}
 	}
@@ -291,7 +315,7 @@ func (c *checker) inferRows(f *Function, arguments []checkedExpression, span Spa
 			break
 		}
 		formal, actual := c.node(p.typeID), c.node(arguments[i].valueID())
-		if formal == nil || actual == nil || formal.Kind != "callable" || actual.Kind != "callable" {
+		if formal == nil || actual == nil || !rowCarrier(formal) || formal.Kind != actual.Kind {
 			continue
 		}
 		for _, pair := range [][2]RowID{{formal.FailureRow, actual.FailureRow}, {formal.ServiceRow, actual.ServiceRow}} {
@@ -329,11 +353,17 @@ func (c *checker) inferRows(f *Function, arguments []checkedExpression, span Spa
 		}
 	}
 	for i, p := range f.Params {
-		if i < len(arguments) && (arguments[i].isEffect() || !c.assignable(arguments[i].valueID(), c.substituteCanonical(p.typeID, types, bindings), 0)) {
+		if i < len(arguments) && !c.assignable(arguments[i].valueID(), c.substituteCanonical(p.typeID, types, bindings), 0) {
 			c.diagnostic("EF106", "argument has incompatible instantiated callback contract", span)
 		}
 	}
 	return bindings
+}
+
+// rowCarrier reports a direct argument whose contract carries inferable rows:
+// an effect callback or a recipe value.
+func rowCarrier(n *semanticTypeNode) bool {
+	return n.Kind == "callable" || n.Kind == "recipe"
 }
 
 func (c *checker) validateRowInference(f *Function) {
@@ -343,7 +373,7 @@ func (c *checker) validateRowInference(f *Function) {
 	bound := map[string]bool{}
 	for _, p := range f.Params {
 		n := c.node(p.typeID)
-		if n == nil || n.Kind != "callable" {
+		if n == nil || !rowCarrier(n) {
 			continue
 		}
 		for _, row := range []RowID{n.FailureRow, n.ServiceRow} {
@@ -380,7 +410,8 @@ func (c *checker) assignable(actual, expected TypeID, depth int) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	if a.Kind == "never" {
+	if a.Kind == "never" || a.Kind == "invalid" || b.Kind == "invalid" {
+		// never has no value; invalid was already reported where it arose.
 		return true
 	}
 	if a.Kind == "application" && b.Kind == "application" && a.Declaration == b.Declaration && len(a.Args) == len(b.Args) {
@@ -393,6 +424,12 @@ func (c *checker) assignable(actual, expected TypeID, depth int) bool {
 		// it does not widen the arguments that identify an application.
 		return slices.Equal(a.Args, b.Args)
 	}
+	if a.Kind == "recipe" && b.Kind == "recipe" {
+		// A recipe value is covariant in its success type and its failure and
+		// service rows are upper bounds. It is never interchangeable with the
+		// callable that constructs a recipe.
+		return a.Mode == b.Mode && c.assignable(a.Result, b.Result, depth+1) && c.rowsWithin(a, b)
+	}
 	if a.Kind != "callable" || b.Kind != "callable" || a.Mode != b.Mode || len(a.Args) != len(b.Args) {
 		return false
 	}
@@ -404,7 +441,11 @@ func (c *checker) assignable(actual, expected TypeID, depth int) bool {
 			return false
 		}
 	}
-	return len(difference(c.rowLabels(a.FailureRow), c.rowLabels(b.FailureRow))) == 0 && len(difference(c.rowLabels(a.ServiceRow), c.rowLabels(b.ServiceRow))) == 0
+	return c.rowsWithin(a, b)
+}
+
+func (c *checker) rowsWithin(actual, expected *semanticTypeNode) bool {
+	return len(difference(c.rowLabels(actual.FailureRow), c.rowLabels(expected.FailureRow))) == 0 && len(difference(c.rowLabels(actual.ServiceRow), c.rowLabels(expected.ServiceRow))) == 0
 }
 
 // callableCall handles lexical values and record fields through their checked
@@ -433,8 +474,7 @@ func (c *checker) callableCall(e *Expr, env localEnv, inEffect bool) (checkedExp
 		return c.hostMethodCall(e, callee, env, inEffect), true
 	}
 	node := callee.node()
-	if node == nil || node.Kind != "callable" {
-		c.diagnostic("EF103", "local value is not callable", e.Span)
+	if !c.expect(node != nil && node.Kind == "callable", "EF103", "local value is not callable", e.Span, callee) {
 		return c.checkedData("invalid"), true
 	}
 	c.rejectArgumentLabels(e, "callable values")
@@ -443,29 +483,45 @@ func (c *checker) callableCall(e *Expr, env localEnv, inEffect bool) (checkedExp
 	}
 	arguments := make([]checkedExpression, len(e.Args))
 	for i, arg := range e.Args {
-		arguments[i] = c.expr(arg, env, inEffect)
-		if c.unsafePotentialOwner(arguments[i].ownershipFacts()) || hasOwnedClosed(arguments[i].ownershipFacts()) {
-			c.diagnostic("EF123", "value owned by a closing scope cannot be used", arg.Span)
-		}
+		arguments[i] = c.refuseCarriedPending(c.refuseClosedArgument(c.expr(arg, env, inEffect), arg.Span), arg.Span)
 		if i < len(node.Args) && !c.assignable(arguments[i].valueID(), node.Args[i], 0) {
 			c.diagnostic("EF106", "callback argument has incompatible type", arg.Span)
 		}
 	}
-	ownership := c.callbackResultOwnership(callee.callableEvidence, arguments, node.Result, 0)
-	captures := cloneFacts(callee.captureFacts())
-	if node.Mode == "effect" {
+	effect := node.Mode == "effect"
+	invoked := c.invocationEvidence(callee.callableEvidence, arguments, node.Result, effect, node.FailureRow, identityOwnerEnv(c.invocationLayers(node.Result, effect)), 0)
+	ownership := invoked.ownership
+	captures := invoked.captures
+	if effect && !summarizedCallees(callee.callableEvidence, effect) {
+		// An unknown callee uses every argument it was given (design
+		// §4.2); a summarized one uses what its body dereferences, which
+		// the instantiated summary already holds.
 		for i, argument := range arguments {
-			captures = append(captures, prependFacts("capture:arg"+strconv.Itoa(i), argument.ownershipFacts())...)
+			captures = append(captures, prependFacts("capture:arg"+strconv.Itoa(i), heldFacts(argument, 0))...)
 		}
 	}
 	var value CheckedValue
 	if node.Mode == "effect" {
-		value = c.values.recipe(node.Result, node.Args, checkedEffectCallable, node.FailureRow, node.ServiceRow, ownership, normalizeFacts(captures))
+		value = c.values.recipe(node.Result, checkedEffectCallable, node.FailureRow, node.ServiceRow, ownership, normalizeFacts(captures))
 	} else {
-		value = c.values.occurrence(node.Result, ownership, nil)
+		value = c.values.occurrence(node.Result, ownership, normalizeFacts(captures))
 	}
 	e.Text = "callable"
-	return checkedExpression{value: value}, true
+	return checkedExpression{value: value, fields: invoked.fields, failures: invoked.failures}, true
+}
+
+// summarizedCallees reports whether every callee of an invocation is a named
+// function whose summary invocationEvidence instantiates.
+func summarizedCallees(evidence callableEvidence, effect bool) bool {
+	if evidence.unresolved || evidence.parameter != nil || evidence.count == 0 {
+		return false
+	}
+	for _, f := range evidence.callees[:evidence.count] {
+		if len(f.TypeParameters) > 0 || len(f.RowParameters) > 0 || f.Effect != effect {
+			return false
+		}
+	}
+	return true
 }
 
 func goSourceType(program *Program, t *sourceType, fallback string) string {
@@ -486,6 +542,11 @@ func goSourceTypeMode(program *Program, t *sourceType, fallback string) (string,
 	}
 	if t.HostForm != "" {
 		return canonicalGoType(t.owner, t.hostID, map[TypeID]bool{}), false
+	}
+	if t.Recipe {
+		// A recipe value is always an efEffect carrier; a void success is
+		// carried as struct{} like any other effect result.
+		return "efEffect[" + goSourceType(program, t.ResultType, t.Result) + "]", false
 	}
 	// Nested children are rendered from the canonical parsed syntax retained
 	// on each occurrence in the source type graph by source rendering below.
@@ -520,6 +581,13 @@ func jsSourceType(program *Program, t *sourceType, fallback string, declarations
 			args = append(args, jsSourceType(program, t.ApplicationArgumentTypes[i], name, declarations...))
 		}
 		return "__ef_template_" + t.Template.EmissionName + "<" + strings.Join(args, ", ") + ">"
+	}
+	if t.Recipe {
+		var declared map[string]Declaration
+		if len(declarations) > 0 {
+			declared = declarations[0]
+		}
+		return jsRowsContract(jsSourceType(program, t.ResultType, t.Result, declarations...), t.Failures, t.Services, declared)
 	}
 	args := make([]string, len(t.Parameters))
 	var declared map[string]Declaration

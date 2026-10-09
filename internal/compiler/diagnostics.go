@@ -77,6 +77,22 @@ type DiagnosticFinding struct {
 	Related           []RelatedLocation `json:"related,omitempty"`
 	LocationAvailable bool              `json:"locationAvailable"`
 	LSP               *LSPDiagnostic    `json:"lsp,omitempty"`
+	// Suggestions are compiler-proposed repair previews bound to the report's
+	// revision, producer and target. A query never applies them.
+	Suggestions []DiagnosticSuggestion `json:"suggestions,omitempty"`
+}
+
+// DiagnosticSuggestion is the projected form of a compiler Suggestion. Each
+// edit keeps its UTF-8 byte span and adds the matching UTF-16 range.
+type DiagnosticSuggestion struct {
+	Message string           `json:"message"`
+	Edits   []DiagnosticEdit `json:"edits"`
+}
+
+type DiagnosticEdit struct {
+	Span    Span            `json:"span"`
+	NewText string          `json:"newText"`
+	Range   DiagnosticRange `json:"range"`
 }
 
 type DiagnosticCounts struct {
@@ -338,7 +354,11 @@ func (r *Result) DiagnosticReportWith(snapshot SourceSnapshot, strict bool, pack
 		report.Diagnostics = append(report.Diagnostics, finding)
 	}
 	for _, diagnostic := range r.Diagnostics {
+		before := len(report.Diagnostics)
 		appendFinding(diagnostic.Code, "compiler", "", "error", diagnostic.Message, diagnostic.Help, diagnostic.Span, diagnostic.Related)
+		if len(report.Diagnostics) > before {
+			report.Diagnostics[len(report.Diagnostics)-1].Suggestions = projectSuggestions(snapshot.Text, positionIndex, diagnostic.Suggestions)
+		}
 	}
 	// Lint always decides suppression statuses; its findings join the
 	// report only for checked source.
@@ -409,4 +429,25 @@ func (r DiagnosticReport) Bounded(limit int) (DiagnosticReport, error) {
 	}
 	r.ReturnedCount = len(r.Diagnostics)
 	return r, nil
+}
+
+// projectSuggestions keeps only suggestions whose every edit lies inside this
+// snapshot, so a suggestion never names a position the text does not have.
+func projectSuggestions(source string, index sourcePositionIndex, suggestions []Suggestion) []DiagnosticSuggestion {
+	var projected []DiagnosticSuggestion
+	for _, suggestion := range suggestions {
+		edits := make([]DiagnosticEdit, 0, len(suggestion.Edits))
+		for _, edit := range suggestion.Edits {
+			location, ok := index.rangeFor(source, edit.Span)
+			if !ok {
+				edits = nil
+				break
+			}
+			edits = append(edits, DiagnosticEdit{Span: edit.Span, NewText: edit.NewText, Range: location})
+		}
+		if len(edits) > 0 {
+			projected = append(projected, DiagnosticSuggestion{Message: suggestion.Message, Edits: edits})
+		}
+	}
+	return projected
 }

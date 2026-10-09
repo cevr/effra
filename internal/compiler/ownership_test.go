@@ -94,7 +94,9 @@ effect fn main() -> void { void }
 		t.Fatal(r.Diagnostics)
 	}
 	deferred, err := r.TypeAt(strings.Index(source, "readLater(file)"))
-	if err != nil || len(deferred.Type.Captures) != 1 || deferred.Type.Captures[0].Origin != "parameter" {
+	// The deferred recipe holds the parameter it dereferences when run; the
+	// obligation is the callee's summary use, instantiated at this call.
+	if err != nil || len(deferred.Type.Captures) != 1 || deferred.Type.Captures[0].Region != "parameter:file" || deferred.Type.Captures[0].Status != "borrowed" {
 		t.Fatalf("deferred recipe did not retain its capture evidence: %+v %v", deferred, err)
 	}
 	executed, err := r.TypeAt(strings.Index(source, "run readLater"))
@@ -167,14 +169,18 @@ effect fn borrow(file: File) -> File raises {IoError} uses {Files} {
 effect fn main() -> void { void }
 `
 
-func TestOwnershipKeepsCustomFilesAcquisitionUnknown(t *testing.T) {
+// A service name is not an acquisition proof, and a custom Files provider may
+// borrow a File. The operation result is therefore possibly owned: owned by
+// the runner for every escape check, and labelled as an operation result
+// rather than a proven acquisition.
+func TestOwnershipCustomFilesOperationResultIsOwnedByItsRunner(t *testing.T) {
 	r := Compile(ownershipBorrowingFiles)
 	if !r.Checked {
 		t.Fatalf("custom Files provider should remain admitted: %+v", r.Diagnostics)
 	}
 	symbol := r.Find("borrow")
-	if symbol == nil || len(symbol.Actual.Ownership) != 1 || symbol.Actual.Ownership[0].Status != "unknown" {
-		t.Fatalf("custom Files provider must expose unknown ownership: %+v", symbol)
+	if symbol == nil || len(symbol.Actual.Ownership) != 1 || symbol.Actual.Ownership[0].Status != "owned" || symbol.Actual.Ownership[0].Origin != "operation-result" {
+		t.Fatalf("custom Files provider must expose a possibly owned operation result: %+v", symbol)
 	}
 }
 
@@ -1649,6 +1655,8 @@ effect fn main() -> void { void }
 `,
 		},
 		{
+			// The payload keeps the closed scope as its owner; the
+			// recovery handler that dereferences it is refused.
 			name: "failure payload",
 			source: `
 error WithFile { file: File }
@@ -1657,6 +1665,12 @@ effect fn bad() -> string raises {WithFile, IoError} uses {Files} {
   let file = run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)
   fail WithFile { file: file }
  }
+}
+effect fn read(failure: WithFile) -> string raises {IoError} uses {Files} {
+ run Files.readText(failure.file)
+}
+effect fn consume() -> string raises {IoError} uses {Files} {
+ run bad().recover<WithFile>(read)
 }
 effect fn main() -> void { void }
 `,

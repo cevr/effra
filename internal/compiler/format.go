@@ -372,7 +372,50 @@ func isInlineBrace(source string, comments []Comment, tokens []token, open, clos
 	if open > 0 && (tokens[open-1].text == "raises" || tokens[open-1].text == "uses" || tokens[open-1].text == "provides") {
 		return true
 	}
+	if isRecipeRowBrace(tokens, open) {
+		return true
+	}
 	return close+1 < len(tokens) && tokens[close+1].text == "=>"
+}
+
+// isRecipeRowBrace recognizes the failure/service rows of Effect<T, {E}, {S}>.
+// A row follows a comma directly inside the recipe type's angle brackets.
+func isRecipeRowBrace(tokens []token, open int) bool {
+	if open < 1 || tokens[open-1].text != "," {
+		return false
+	}
+	depth := 0
+	for i := open - 2; i > 0 && open-i <= 4096; i-- {
+		switch tokens[i].text {
+		case "}":
+			// Skip an earlier row of the same recipe type.
+			braces := 1
+			for i--; i > 0 && braces > 0 && open-i <= 4096; i-- {
+				switch tokens[i].text {
+				case "}":
+					braces++
+				case "{":
+					braces--
+				}
+			}
+			if braces > 0 {
+				return false
+			}
+			i++
+		case ">":
+			depth++
+		case "<":
+			if depth == 0 {
+				return tokens[i-1].text == "Effect"
+			}
+			depth--
+		case "{", ";", "(", ")":
+			if depth == 0 {
+				return false
+			}
+		}
+	}
+	return false
 }
 
 func hasCommentBetween(comments []Comment, start, end int) bool {

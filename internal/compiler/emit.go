@@ -217,6 +217,8 @@ func (r *Result) emitJS(surface jsSurface) (string, string, error) {
 				decl.WriteString("; readonly " + field.Name + ": " + jsSourceType(r.Program, field.sourceType, field.Type, declarations))
 			}
 			decl.WriteString(" }\n")
+			// The declared error name is also its payload's value type.
+			decl.WriteString("export type " + declaration.Name + " = " + declaration.Name + "Error;\n")
 		}
 	}
 	allServices := append(builtinServicesFor(r.Program), r.Program.Services...)
@@ -665,6 +667,14 @@ func jsExpr(e *Expr, effect bool) string {
 		return "__ef_layer_" + e.Name + "(" + jsExpr(e.Left, effect) + ")"
 	case "catch":
 		return "__ef_catch(" + jsExpr(e.Left, effect) + ", " + quoted(e.Name) + ", () => (" + jsExpr(e.Right, false) + "))"
+	case "recover":
+		// The handler value is evaluated with the recipe; it is invoked only
+		// on the recovered failure path.
+		invoke := "Effect.sync(() => handler(payload))"
+		if node := e.Right.checked.node(); node != nil && node.Mode == "effect" {
+			invoke = "handler(payload)"
+		}
+		return "__ef_recover(" + jsExpr(e.Left, effect) + ", " + quoted(e.Name) + ", ((handler) => (payload) => " + invoke + ")(" + jsExpr(e.Right, false) + "))"
 	case "binary":
 		op := e.Name
 		if op == "==" {

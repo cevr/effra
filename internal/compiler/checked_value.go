@@ -214,13 +214,13 @@ func (a *checkedValueArena) callable(result TypeID, parameters []TypeID, kind ch
 	return a.occurrence(contract, ownership, captures)
 }
 
-func (a *checkedValueArena) recipe(result TypeID, parameters []TypeID, kind checkedCallableKind, failure, service RowID, ownership, captures []OwnershipFact) CheckedValue {
+// recipe interns a deferred program value. A recipe has no parameters: the
+// callable which constructed it is evaluation history, not part of the value
+// contract, so equal success/failure/service contracts share one identity.
+func (a *checkedValueArena) recipe(result TypeID, kind checkedCallableKind, failure, service RowID, ownership, captures []OwnershipFact) CheckedValue {
 	a.requireType(result)
-	for _, parameter := range parameters {
-		a.requireType(parameter)
-	}
 	a.validateCallableRows(kind, failure, service)
-	contract := a.checker.internContract("recipe", kind.mode(), result, parameters, failure, service)
+	contract := a.checker.internContract("recipe", kind.mode(), result, nil, failure, service)
 	return a.occurrence(contract, ownership, captures)
 }
 
@@ -250,12 +250,32 @@ func (a *checkedValueArena) provider(provider TypeID, ownership, captures []Owne
 	return a.occurrence(provider, ownership, captures)
 }
 
-// ExpressionEvaluation stores only canonical row IDs. It is deliberately
+// ExpressionEvaluation stores the canonical row IDs an expression incurs
+// when it is evaluated, with their owner evidence. It is deliberately
 // separate from CheckedValue: constructing a recipe does not incur its rows,
 // while run/fail/branch expressions can contribute rows to their own fact.
+//
+//   - payloads is the payload evidence of the failures in failureRow (design
+//     §5.2), one entry per label in the evaluating body's numbering. An
+//     entry is evidence; a handle-carrying label without an entry has
+//     unknown payload owners (fail closed, see completeEvaluation).
+//   - uses is the dereference obligation of the evaluation (design §4.2):
+//     the handles the layers it executes use.
+//   - pending is the failures of forked children which may be unobserved
+//     at an exit of the evaluation (design §5.3), keyed at layer 0. Their
+//     labels are in failureRow: the closing owner raises them.
+//   - live is the failures of children forked by the evaluation which no
+//     exit has passed yet. Their labels are not in failureRow: a later
+//     join or interrupt in the same body may still observe them. An exit
+//     (a statement which may fail, a fail, the end of a function body)
+//     moves them to pending; an owner edge raises both.
 type ExpressionEvaluation struct {
 	failureRow RowID
 	serviceRow RowID
+	payloads   map[string][]OwnershipFact
+	uses       []OwnershipFact
+	pending    failureEvidence
+	live       failureEvidence
 }
 
 func (e ExpressionEvaluation) failureRowID() RowID { return e.failureRow }
@@ -271,13 +291,29 @@ func (c *checker) evaluation(failureRow, serviceRow RowID) ExpressionEvaluation 
 	return ExpressionEvaluation{failureRow: failureRow, serviceRow: serviceRow}
 }
 
+// evaluationWith is an evaluation whose failures carry payload evidence and
+// whose execution uses the given handles.
+func (c *checker) evaluationWith(failureRow, serviceRow RowID, payloads map[string][]OwnershipFact, uses []OwnershipFact) ExpressionEvaluation {
+	e := c.evaluation(failureRow, serviceRow)
+	e.payloads = clonePayloads(payloads)
+	e.uses = normalizeFacts(cloneFacts(uses))
+	return e
+}
+
 func (c *checker) evaluationFromLabels(failures, services []string) ExpressionEvaluation {
 	return c.evaluation(c.internRow(failures), c.internRow(services))
 }
 
 func (c *checker) unionEvaluationFacts(a, b ExpressionEvaluation) ExpressionEvaluation {
-	return c.evaluation(
+	out := c.evaluation(
 		c.internRow(union(c.rowLabels(a.failureRow), c.rowLabels(b.failureRow))),
 		c.internRow(union(c.rowLabels(a.serviceRow), c.rowLabels(b.serviceRow))),
 	)
+	// Each side is completed against its own row first: a label one side
+	// raises without evidence stays unknown in the union.
+	out.payloads = mergePayloads(c.completeEvaluation(a).payloads, c.completeEvaluation(b).payloads)
+	out.uses = mergeFacts(a.uses, b.uses)
+	out.pending = mergeFailures(a.pending, b.pending)
+	out.live = mergeFailures(a.live, b.live)
+	return out
 }

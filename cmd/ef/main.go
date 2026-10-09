@@ -661,6 +661,9 @@ func printDiagnosticText(report compiler.DiagnosticReport, source string) {
 		if diagnostic.Help != "" {
 			fmt.Printf("  help: %s\n", diagnostic.Help)
 		}
+		for _, suggestion := range diagnostic.Suggestions {
+			fmt.Printf("  suggestion: %s\n", suggestion.Message)
+		}
 	}
 }
 func sourceBase(source string) string {

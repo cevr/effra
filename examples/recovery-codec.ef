@@ -1,0 +1,58 @@
+// Codec conversion: a wire decode failure is recovered by an effectful
+// handler that reads the Malformed payload, records it through a service and
+// raises the domain failure. Recovery removes Malformed and adds exactly the
+// handler's InvalidAge failure and Audit requirement.
+import Convert "effra/conversions"
+
+error Malformed {
+    input: string
+}
+error InvalidAge {
+    reason: string
+}
+
+service Audit {
+    effect fn note(message: string) -> void
+}
+
+impl Printed for Audit {
+    effect fn note(message: string) -> void {
+        run Console.log("audit " + message).provide<Console>(Stdout)
+    }
+}
+
+effect fn decodeAge(wire: string) -> string raises { Malformed } {
+    if wire == "42" {
+        "age 42"
+    } else {
+        fail Malformed {
+            input: wire
+        }
+    }
+}
+
+effect fn encodeAge(age: string) -> string {
+    age
+}
+
+effect fn invalid(failure: Malformed) -> string raises { InvalidAge } uses { Audit } {
+    run Audit.note("malformed " + failure.input)
+    fail InvalidAge {
+        reason: "not an age: " + failure.input
+    }
+}
+
+fn explain(failure: InvalidAge) -> string {
+    failure.reason
+}
+
+effect fn domainAge(wire: string) -> string raises { InvalidAge } uses { Audit } {
+    let codec = Convert.witness(decodeAge, encodeAge)
+    run codec.decode(wire).recover<Malformed>(invalid)
+}
+
+effect fn main() -> void {
+    let good = run domainAge("42").provide<Audit>(Printed).recover<InvalidAge>(explain)
+    let bad = run domainAge("forty").provide<Audit>(Printed).recover<InvalidAge>(explain)
+    run Console.log(good + "; " + bad).provide<Console>(Stdout)
+}

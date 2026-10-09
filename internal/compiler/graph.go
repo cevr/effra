@@ -52,8 +52,9 @@ const maxGraphNodes = 1000
 const maxGraphEdges = 2000
 
 // GraphSchemaVersion identifies the legacy dependency graph JSON contract.
-// It advances independently from SemanticSchemaVersion.
-const GraphSchemaVersion = 8
+// It advances independently from SemanticSchemaVersion. Version 9 carries
+// the semantic-9 recipe contracts and per-path owner evidence.
+const GraphSchemaVersion = 9
 
 // dependencyContract is the unprojected contract of one dependency fact.
 // Projection is the expensive, budgeted part of publication, so the walker
@@ -272,7 +273,7 @@ func (r *Result) walkDependencyFacts(sink dependencyFactSink) {
 }
 
 // legacyGraphSink is the compatibility serialization of the dependency facts:
-// the schema-8 `ef graph` result with its whole-file node, edge and
+// the schema-9 `ef graph` result with its whole-file node, edge and
 // compatibility-metadata budgets charged in traversal order.
 type legacyGraphSink struct {
 	r             *Result
@@ -470,7 +471,7 @@ func providerOrigin(e *Expr, locals map[string]providerBinding, origins map[*Exp
 		if e.Text == "provider" && nodes["provider:"+e.Name] {
 			return providerBinding{id: "provider:" + e.Name}, true
 		}
-	case "provide", "catch":
+	case "provide", "catch", "recover":
 		return providerOrigin(e.Left, locals, origins, nodes)
 	}
 	return providerBinding{}, false

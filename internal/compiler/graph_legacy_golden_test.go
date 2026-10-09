@@ -74,7 +74,7 @@ func TestLegacyGraphPublishesCheckedParameterFactsAndProducerEpoch(t *testing.T)
 	if !result.Checked {
 		t.Fatalf("fixture is not checked: %v", result.Diagnostics)
 	}
-	if result.SchemaVersion != SemanticSchemaVersion || SemanticSchemaVersion != 8 {
+	if result.SchemaVersion != SemanticSchemaVersion || SemanticSchemaVersion != 9 {
 		t.Fatalf("semantic result epoch = %d, want %d", result.SchemaVersion, SemanticSchemaVersion)
 	}
 
@@ -85,13 +85,13 @@ func TestLegacyGraphPublishesCheckedParameterFactsAndProducerEpoch(t *testing.T)
 	if graph.SchemaVersion != GraphSchemaVersion {
 		t.Fatalf("legacy graph epoch = %d, owner = %d", graph.SchemaVersion, GraphSchemaVersion)
 	}
-	if GraphSchemaVersion != 8 {
-		t.Fatalf("legacy graph schema owner = %d; want 8", GraphSchemaVersion)
+	if GraphSchemaVersion != 9 {
+		t.Fatalf("legacy graph schema owner = %d; want 9", GraphSchemaVersion)
 	}
 	if graph.ProducerIdentity != SemanticProducerIdentity {
 		t.Fatalf("legacy graph producer identity = %q, owner = %q", graph.ProducerIdentity, SemanticProducerIdentity)
 	}
-	if SemanticProducerIdentity != "effra/checker-abi-9/bundled-interface-4" {
+	if SemanticProducerIdentity != "effra/checker-abi-10/bundled-interface-5" {
 		t.Fatalf("semantic producer identity owner = %q", SemanticProducerIdentity)
 	}
 

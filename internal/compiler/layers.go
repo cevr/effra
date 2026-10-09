@@ -597,7 +597,9 @@ func (r *Result) LayerInspection(name, file string) (map[string]any, error) {
 func (c *checker) provideLayer(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	program := c.expr(e.Left, env, inEffect)
 	if !program.isEffect() {
-		c.layerDiagnostic("EF105", "layer provision requires an Effect value", e.Span)
+		if !c.poisoned(program) {
+			c.layerDiagnostic("EF105", "layer provision requires an Effect value", e.Span)
+		}
 		return program
 	}
 	if e.binding != nil {
@@ -617,20 +619,37 @@ func (c *checker) provideLayer(e *Expr, env localEnv, inEffect bool) checkedExpr
 	// program failure row, including any ordinary row parameter identity.
 	remaining := difference(c.rowLabels(program.serviceRow()), plan.Provides)
 	program.value = c.recontractRows(program, program.failureRow(), c.internRow(union(remaining, plan.Requirements)))
+	// The program's layer 0 executes under the provision owner before the
+	// provision closes (design §5.4, M5): what it acquires is owned by the
+	// provision, and nothing the provision owns may survive its edge.
 	region := fmt.Sprintf("provision:%d", e.Span.Offset)
 	if len(program.ownershipFacts()) == 0 {
-		program.setOwnership(c.unknownOwnership(c.displayTypeID(program.resultID())))
+		program.setOwnership(c.unknownOwnershipID(c.innermostValue(program.resultID())))
 	}
-	program.setOwnership(materializeExecutionFacts(program.ownershipFacts(), region, ownershipOwnerLexical))
-	program.setCaptures(materializeExecutionFacts(program.captureFacts(), region, ownershipOwnerLexical))
-	for _, facts := range [][]OwnershipFact{program.ownershipFacts(), program.captureFacts()} {
-		uncertain := false
-		for _, fact := range facts {
-			uncertain = uncertain || fact.Status == "unknown"
+	// The provision's node scope owns the children the program forks
+	// (layers.md:36): it raises their pending failures at its close.
+	program = c.completeFailures(program)
+	program = c.dischargeOccurrence(program)
+	program = c.closeOccurrence(program, lexicalOwner(region))
+	// A failure payload the provision owns leaves the provision owned by
+	// the closed provision (design §5.4 F15), refused only where a handler
+	// dereferences it.
+	program = c.closeRegionFailures(c.completeFailures(program), region, ownershipOwnerProvision)
+	var escaping []OwnershipFact
+	for _, fact := range program.captureFacts() {
+		if fact.layer > 0 {
+			escaping = append(escaping, fact)
 		}
-		if uncertain || hasPotentialOwner(facts) || hasOwnedFact(facts, region) || hasOwnedClosed(facts) {
-			c.layerDiagnostic("EF123", "value owned by the closing layer provision or with unresolved ownership cannot escape", e.Span)
-		}
+	}
+	escaping = expandRelations(slices.Concat(program.ownershipFacts(), escaping, storedRecipeEvidence(program)))
+	uncertain := false
+	for _, fact := range escaping {
+		uncertain = uncertain || fact.Status == "unknown"
+	}
+	if uncertain || hasPotentialOwner(escaping) || hasOwnedFact(escaping, region) {
+		c.reportOwnershipWith("value owned by the closing layer provision or with unresolved ownership cannot escape", e.Span, ownershipRoots(escaping, region), func(code, message string, span Span) {
+			c.layerDiagnostic(code, message, span)
+		})
 	}
 	for _, path := range plan.ConstructionPaths {
 		c.reasons = append(c.reasons, Contribution{Kind: "layer-construction-input", Names: []string{path.Input}, Span: path.Span})

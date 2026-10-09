@@ -1,0 +1,88 @@
+// A job queue stores lazy recipes as enum payloads, inside bundled Result
+// values and as the results of stored callables. Each run executes again.
+import Data "effra/data"
+
+error Rejected
+
+record Ticket {
+    id: string
+}
+
+enum Job<T: type> {
+    Ready {
+        ticket: Ticket;
+        task: Effect<T, { Rejected }, { Console }>
+    },
+    Deferred {
+        ticket: Ticket;
+        reason: string
+    }
+}
+
+record Worker {
+    prepare: fn(string) -> Effect<string, { Rejected }, { Console }>
+}
+
+effect fn deliver(id: string) -> string raises { Rejected } uses { Console } {
+    run Console.log("deliver " + id)
+    if id == "bad" {
+        fail Rejected
+    } else {
+        "sent " + id
+    }
+}
+
+fn delivery(id: string) -> Effect<string, { Rejected }, { Console }> {
+    deliver(id)
+}
+
+fn admit(worker: Worker, id: string) -> Data.Result<Effect<string, { Rejected }, { Console }>, string> {
+    if id == "late" {
+        Data.Result<Effect<string, { Rejected }, { Console }>, string>.Err {
+            error: "deferred " + id
+        }
+    } else {
+        Data.Result<Effect<string, { Rejected }, { Console }>, string>.Ok {
+            value: worker.prepare(id)
+        }
+    }
+}
+
+fn enqueue(worker: Worker, id: string) -> Job<string> {
+    match admit(worker, id) {
+        Data.Result.Ok { value: task } => Job.Ready {
+            ticket: Ticket {
+                id: id
+            },
+            task: task
+        },
+        Data.Result.Err { error: reason } => Job<string>.Deferred {
+            ticket: Ticket {
+                id: id
+            },
+            reason: reason
+        }
+    }
+}
+
+effect fn work(job: Job<string>) -> string uses { Console } {
+    match job {
+        Job.Ready { ticket, task } => run task.catch<Rejected>("rejected " + ticket.id),
+        Job.Deferred { ticket, reason } => ticket.id + " " + reason
+    }
+}
+
+effect fn main() -> void {
+    let worker = Worker {
+        prepare: delivery
+    }
+    let first = enqueue(worker, "a")
+    let second = enqueue(worker, "bad")
+    let third = enqueue(worker, "late")
+    run Console.log("queued").provide<Console>(Stdout)
+    let a = run work(first).provide<Console>(Stdout)
+    let b = run work(second).provide<Console>(Stdout)
+    let c = run work(third).provide<Console>(Stdout)
+    let again = run work(first).provide<Console>(Stdout)
+    run Console.log(a + ", " + b + ", " + c + ", " + again).provide<Console>(Stdout)
+}
