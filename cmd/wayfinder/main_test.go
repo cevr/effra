@@ -52,9 +52,10 @@ func fakeGH(args []string) int {
 		return 1
 	}
 	var state struct {
-		Nodes    []map[string]any `json:"nodes"`
-		PageSize int              `json:"pageSize"`
-		Comments map[string][]any `json:"comments"`
+		Repository string           `json:"repository"`
+		Nodes      []map[string]any `json:"nodes"`
+		PageSize   int              `json:"pageSize"`
+		Comments   map[string][]any `json:"comments"`
 	}
 	data, _ := os.ReadFile(os.Getenv("FAKE_GH_STATE"))
 	if err := json.Unmarshal(data, &state); err != nil {
@@ -77,7 +78,7 @@ func fakeGH(args []string) int {
 	} else {
 		start, _ := strconv.Atoi(fields["cursor"])
 		end := min(start+state.PageSize, len(state.Nodes))
-		response = map[string]any{"repository": map[string]any{"issues": map[string]any{
+		response = map[string]any{"repository": map[string]any{"nameWithOwner": state.Repository, "issues": map[string]any{
 			"pageInfo": map[string]any{"hasNextPage": end < len(state.Nodes), "endCursor": strconv.Itoa(end)},
 			"nodes":    state.Nodes[start:end],
 		}}}
@@ -101,6 +102,7 @@ type spec struct {
 	labels    []string
 	parent    any   // 0 or nil: none; int: this repository; foreign: another repository
 	blocked   []any // int: this repository; foreign: another repository
+	children  []foreign
 	closed    bool
 	assignees []any
 	body      string
@@ -110,14 +112,20 @@ type spec struct {
 type foreign struct {
 	repo   string
 	number int
+	closed bool
 }
 
-// ref is a relationship endpoint as GitHub returns it, with its repository.
+// ref is a relationship endpoint as GitHub returns it, with its repository. The command reads the state of a
+// local endpoint from the map, so local endpoints report OPEN here.
 func ref(value any) map[string]any {
 	if other, ok := value.(foreign); ok {
-		return map[string]any{"number": other.number, "repository": map[string]any{"nameWithOwner": other.repo}}
+		state := "OPEN"
+		if other.closed {
+			state = "CLOSED"
+		}
+		return map[string]any{"number": other.number, "state": state, "repository": map[string]any{"nameWithOwner": other.repo}}
 	}
-	return map[string]any{"number": value, "repository": map[string]any{"nameWithOwner": testRepo}}
+	return map[string]any{"number": value, "state": "OPEN", "repository": map[string]any{"nameWithOwner": testRepo}}
 }
 
 func blockers(values ...any) map[string]any {
@@ -145,8 +153,40 @@ func node(number int, s spec) map[string]any {
 		"number": number, "title": fmt.Sprintf("Issue %d", number), "state": state, "stateReason": reason,
 		"url": fmt.Sprintf("https://github.com/%s/issues/%d", testRepo, number), "updatedAt": "2026-10-09T00:00:00Z",
 		"body": s.body, "labels": conn("name", labels...), "assignees": conn("login", s.assignees...),
-		"parent": parent, "blockedBy": blockers(s.blocked...),
+		"parent": parent, "blockedBy": blockers(s.blocked...), "foreignChildren": s.children,
 	}
+}
+
+// withSubIssues gives each node GitHub's sub-issue connection: its local children, read from their parent
+// links, then its foreign children. A node that already carries a connection keeps it.
+func withSubIssues(nodes []map[string]any) []map[string]any {
+	result := make([]map[string]any, len(nodes))
+	for index, original := range nodes {
+		node := map[string]any{}
+		for key, value := range original {
+			node[key] = value
+		}
+		delete(node, "foreignChildren")
+		if _, ok := node["subIssues"]; !ok {
+			var children []any
+			for _, child := range nodes {
+				parent, _ := child["parent"].(map[string]any)
+				if parent == nil || fmt.Sprint(parent["number"]) != fmt.Sprint(node["number"]) ||
+					!strings.EqualFold(parent["repository"].(map[string]any)["nameWithOwner"].(string), testRepo) {
+					continue
+				}
+				children = append(children, map[string]any{"number": child["number"], "state": child["state"],
+					"repository": map[string]any{"nameWithOwner": testRepo}})
+			}
+			others, _ := original["foreignChildren"].([]foreign)
+			for _, other := range others {
+				children = append(children, ref(other))
+			}
+			node["subIssues"] = map[string]any{"totalCount": len(children), "nodes": append([]any{}, children...)}
+		}
+		result[index] = node
+	}
+	return result
 }
 
 var task, grill = []string{"wayfinder:task"}, []string{"wayfinder:grilling"}
@@ -246,7 +286,7 @@ func (h *harness) serve(nodes []map[string]any, comments map[string]any) {
 	if comments == nil {
 		comments = map[string]any{}
 	}
-	data, _ := json.Marshal(map[string]any{"nodes": nodes, "pageSize": 4, "comments": comments})
+	data, _ := json.Marshal(map[string]any{"repository": testRepo, "nodes": withSubIssues(nodes), "pageSize": 4, "comments": comments})
 	if err := os.WriteFile(h.state, data, 0o644); err != nil {
 		h.t.Fatal(err)
 	}
@@ -595,8 +635,10 @@ func TestShowOfflineReportsRelationshipsWithoutNetwork(t *testing.T) {
 	if got := fmt.Sprintf("%v %v %v", detail["blocking"], detail["children"], detail["status"]); got != "[4] [] ready" {
 		t.Fatalf("got %v %v %v", detail["blocking"], detail["children"], detail["status"])
 	}
-	if _, ok := detail["comments"]; ok {
-		t.Fatal("offline show must not carry comments")
+	for _, key := range []string{"comments", "foreign"} {
+		if _, ok := detail[key]; ok {
+			t.Fatalf("offline show must not carry %s", key)
+		}
 	}
 }
 
@@ -631,25 +673,42 @@ func statuses(t *testing.T, out result) map[int]string {
 // closed local #6 and put #15 on the frontier; it must keep its repository and be refused.
 func TestForeignBlockerNeverAliasesALocalIssue(t *testing.T) {
 	h := newHarness(t)
-	nodes := append(fixture(), node(15, spec{labels: task, parent: 1, blocked: []any{foreign{"other/repo", 6}}}))
+	nodes := append(fixture(), node(15, spec{labels: task, parent: 1, blocked: []any{foreign{repo: "other/repo", number: 6}}}))
 	h.serve(nodes, nil)
 	expectInts(t, h.jsonNumbers("frontier"), []int{2, 5, 9, 10})
 	if got := statuses(t, h.live("list", "--json"))[15]; got != "blocked" {
 		t.Fatalf("#15 status = %q, want blocked", got)
 	}
 	expectContains(t, h.live("list").stdout, "(blocked by other/repo#6)")
+	show := h.live("show", "15")
+	expectContains(t, show.stdout, "blocked by: other/repo#6")
+	var detail map[string]any
+	if err := json.Unmarshal([]byte(h.live("show", "15", "--json").stdout), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(detail["blockedBy"], detail["foreign"]); got != "[] map[blockedBy:[other/repo#6] parent:<nil> subIssues:[]]" {
+		t.Fatalf("live JSON relationships = %s", got)
+	}
 	expectFailure(t, h.live("check"), "#15 is blocked by other/repo#6, outside acme/widgets; the map holds one repository")
 	path := filepath.Join(h.tmp, "snapshot.json")
 	expectFailure(t, h.live("snapshot", "--output", path), "#15 is blocked by other/repo#6, outside acme/widgets")
 	if _, err := os.Stat(path); err == nil {
 		t.Fatal("a snapshot with a foreign blocker was written")
 	}
+
+	// A closed foreign blocker no longer blocks, but the edge is still refused.
+	h.serve(append(fixture(), node(15, spec{labels: task, parent: 1, blocked: []any{foreign{repo: "other/repo", number: 2, closed: true}}})), nil)
+	if got := statuses(t, h.live("list", "--json"))[15]; got != "ready" {
+		t.Fatalf("#15 status = %q, want ready", got)
+	}
+	expectInts(t, h.jsonNumbers("frontier"), []int{2, 5, 9, 10, 15})
+	expectFailure(t, h.live("check"), "#15 is blocked by other/repo#2, outside acme/widgets")
 }
 
 // A foreign parent shares its number with the map root. It must not confer membership.
 func TestForeignParentIsNotMapMembership(t *testing.T) {
 	h := newHarness(t)
-	h.serve(append(fixture(), node(15, spec{labels: task, parent: foreign{"other/repo", 1}})), nil)
+	h.serve(append(fixture(), node(15, spec{labels: task, parent: foreign{repo: "other/repo", number: 1}})), nil)
 	if _, ok := statuses(t, h.live("list", "--json"))[15]; ok {
 		t.Fatal("#15 under foreign parent other/repo#1 was listed as a map member")
 	}
@@ -672,7 +731,7 @@ func TestForeignParentIsNotMapMembership(t *testing.T) {
 func TestLocalEndpointsMatchTheRepositoryCaseInsensitively(t *testing.T) {
 	h := newHarness(t)
 	nodes := fixture()
-	nodes[3]["blockedBy"] = blockers(foreign{"Acme/Widgets", 2})
+	nodes[3]["blockedBy"] = blockers(foreign{repo: "Acme/Widgets", number: 2})
 	h.serve(nodes, nil)
 	if out := h.live("check"); out.code != 0 {
 		t.Fatal(out.stderr)
@@ -692,7 +751,7 @@ func TestMapBlockersAreValidated(t *testing.T) {
 	expectFailure(t, h.offlineCheck(snapshot), "#1 is blocked by #999, which is not in the map")
 
 	nodes := fixture()
-	nodes[0]["blockedBy"] = blockers(foreign{"other/repo", 2})
+	nodes[0]["blockedBy"] = blockers(foreign{repo: "other/repo", number: 2})
 	h.serve(nodes, nil)
 	expectFailure(t, h.live("check"), "#1 is blocked by other/repo#2, outside acme/widgets")
 
@@ -756,5 +815,74 @@ func TestSnapshotBytesAreCanonical(t *testing.T) {
 	got, _ := os.ReadFile(path)
 	if string(got) != want {
 		t.Fatalf("snapshot bytes differ:\n got %q\nwant %q", got, want)
+	}
+}
+
+// A foreign sub-issue shares its number with the closed local #6. A child set read only from this repository
+// would make #15 a ready leaf; its open foreign child keeps it a rollup, and check refuses the edge.
+func TestForeignChildKeepsItsParentOffTheFrontier(t *testing.T) {
+	h := newHarness(t)
+	h.serve(append(fixture(), node(15, spec{labels: task, parent: 1, children: []foreign{{repo: "other/repo", number: 6}}})), nil)
+	expectInts(t, h.jsonNumbers("frontier"), []int{2, 5, 9, 10})
+	if got := statuses(t, h.live("list", "--json"))[15]; got != "rollup" {
+		t.Fatalf("#15 status = %q, want rollup", got)
+	}
+	expectContains(t, h.live("list").stdout, "(open children other/repo#6)")
+	expectContains(t, h.live("show", "15").stdout, "children: other/repo#6")
+	expectFailure(t, h.live("check"), "#15 has sub-issue other/repo#6, outside acme/widgets; the map holds one repository")
+	path := filepath.Join(h.tmp, "snapshot.json")
+	expectFailure(t, h.live("snapshot", "--output", path), "#15 has sub-issue other/repo#6, outside acme/widgets")
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("a snapshot with a foreign sub-issue was written")
+	}
+
+	// A closed foreign child no longer holds its parent back, but the edge is still refused.
+	h.serve(append(fixture(), node(15, spec{labels: task, parent: 1, children: []foreign{{repo: "other/repo", number: 6, closed: true}}})), nil)
+	if got := statuses(t, h.live("list", "--json"))[15]; got != "ready" {
+		t.Fatalf("#15 status = %q, want ready", got)
+	}
+	expectFailure(t, h.live("check"), "#15 has sub-issue other/repo#6, outside acme/widgets")
+}
+
+func TestIncompleteChildSetsFailInsteadOfGuessing(t *testing.T) {
+	h := newHarness(t)
+	nodes := fixture()
+	nodes[7]["subIssues"] = map[string]any{"totalCount": 2, "nodes": []any{ref(9)}} // #8 has one more child than one page
+	h.serve(nodes, nil)
+	expectFailure(t, h.live("frontier"), "#8 has more subIssues than one page; extend the query")
+
+	nodes[7]["subIssues"] = map[string]any{"totalCount": 0, "nodes": []any{}} // #8's connection disagrees with #9's parent link
+	h.serve(nodes, nil)
+	expectFailure(t, h.live("frontier"), "#8 lists sub-issues [] but parent links name [9]; GitHub changed during the read, retry")
+}
+
+// GitHub names repositories case-insensitively. The snapshot records GitHub's spelling, which its issue URLs
+// carry, so a snapshot read with any spelling of --repo loads offline.
+func TestCaseVariantRepoWritesTheCanonicalName(t *testing.T) {
+	h := newHarness(t)
+	nodes := fixture()
+	nodes[0]["body"] = "See #2 and https://github.com/ACME/Widgets/issues/9."
+	h.serve(nodes, nil)
+	path := filepath.Join(h.tmp, "snapshot.json")
+	if out := h.runWith(h.bin, "snapshot", "--output", path, "--repo", "ACME/WIDGETS"); out.code != 0 {
+		t.Fatal(out.stderr)
+	}
+	if out := h.offline("check", "--snapshot", path); out.code != 0 {
+		t.Fatal(out.stderr)
+	}
+	var snapshot struct {
+		Repository    string `json:"repository"`
+		MapReferences []int  `json:"mapReferences"`
+	}
+	data, _ := os.ReadFile(path)
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Repository != testRepo {
+		t.Fatalf("repository = %q, want %q", snapshot.Repository, testRepo)
+	}
+	expectInts(t, snapshot.MapReferences, []int{2, 9})
+	if out := h.runWith(h.bin, "snapshot", "--check", "--output", path, "--repo", "Acme/Widgets"); out.code != 0 {
+		t.Fatal(out.stderr)
 	}
 }

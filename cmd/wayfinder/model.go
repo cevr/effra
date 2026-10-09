@@ -34,10 +34,12 @@ const issueFields = `number title state stateReason url updatedAt body
   labels(first: 50) { totalCount nodes { name } }
   assignees(first: 20) { totalCount nodes { login } }
   parent { number repository { nameWithOwner } }
-  blockedBy(first: 100) { totalCount nodes { number repository { nameWithOwner } } }`
+  blockedBy(first: 100) { totalCount nodes { number state repository { nameWithOwner } } }
+  subIssues(first: 100) { totalCount nodes { number state repository { nameWithOwner } } }`
 
 var issuesQuery = `query($owner: String!, $name: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
+    nameWithOwner
     issues(first: 50, after: $cursor, orderBy: {field: CREATED_AT, direction: ASC}) {
       pageInfo { hasNextPage endCursor }
       nodes { ` + issueFields + ` }
@@ -83,11 +85,57 @@ type Issue struct {
 	URL         string
 	UpdatedAt   string
 	BodySHA256  string
-	// Foreign holds relationship endpoints in another repository, such as "is blocked by other/repo#6".
-	// The map holds one repository, so `check` rejects them and a snapshot never contains them; they are never
-	// reduced to bare numbers, which would alias this repository's issues.
-	Foreign        []string
-	foreignBlocker bool
+	// Relationships with issues in another repository, which GitHub allows. The map holds one repository, so
+	// `check` rejects them and a snapshot never contains them. They keep their repository and are never reduced
+	// to bare numbers, which would alias this repository's issues; live views show them qualified.
+	ForeignParent   *foreignRef
+	ForeignBlockers []foreignRef
+	ForeignChildren []foreignRef
+}
+
+// foreignRef is an issue in another repository.
+type foreignRef struct {
+	Name string // OWNER/NAME#N
+	Open bool
+}
+
+func names(refs []foreignRef, openOnly bool) []string {
+	result := []string{}
+	for _, ref := range refs {
+		if ref.Open || !openOnly {
+			result = append(result, ref.Name)
+		}
+	}
+	return result
+}
+
+func openCount(refs []foreignRef) int { return len(names(refs, true)) }
+
+// foreignRelationships describes each foreign relationship for `check`.
+func (issue Issue) foreignRelationships() []string {
+	var result []string
+	if issue.ForeignParent != nil {
+		result = append(result, "has parent "+issue.ForeignParent.Name)
+	}
+	for _, name := range names(issue.ForeignBlockers, false) {
+		result = append(result, "is blocked by "+name)
+	}
+	for _, name := range names(issue.ForeignChildren, false) {
+		result = append(result, "has sub-issue "+name)
+	}
+	return result
+}
+
+// foreignValue is the live JSON view of the foreign relationships; snapshot records have none.
+func (issue Issue) foreignValue() object {
+	var parent any
+	if issue.ForeignParent != nil {
+		parent = issue.ForeignParent.Name
+	}
+	return object{
+		{"parent", parent}, {"blockedBy", stringValues(names(issue.ForeignBlockers, false))},
+		{"subIssues", stringValues(names(issue.ForeignChildren, false))},
+	}
 }
 
 // Document is the map: the snapshot schema, whether read live or from the committed mirror.
@@ -212,11 +260,13 @@ type gqlIssue struct {
 	}] `json:"assignees"`
 	Parent    *endpoint            `json:"parent"`
 	BlockedBy connection[endpoint] `json:"blockedBy"`
+	SubIssues connection[endpoint] `json:"subIssues"`
 }
 
 // endpoint is a relationship's other issue, which GitHub allows to live in another repository.
 type endpoint struct {
-	Number     int `json:"number"`
+	Number     int    `json:"number"`
+	State      string `json:"state"`
 	Repository struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	} `json:"repository"`
@@ -225,7 +275,9 @@ type endpoint struct {
 // local reports whether the endpoint is in repo. GitHub owner and repository names are case-insensitive.
 func (e endpoint) local(repo string) bool { return strings.EqualFold(e.Repository.NameWithOwner, repo) }
 
-func (e endpoint) String() string { return fmt.Sprintf("%s#%d", e.Repository.NameWithOwner, e.Number) }
+func (e endpoint) foreign() foreignRef {
+	return foreignRef{Name: fmt.Sprintf("%s#%d", e.Repository.NameWithOwner, e.Number), Open: e.State != "CLOSED"}
+}
 
 func checkPage(node gqlIssue, field string, total, length int) error {
 	if total > length {
@@ -245,17 +297,19 @@ func (node gqlIssue) labels() ([]string, error) {
 	return values, nil
 }
 
-func fetchIssues(repo string) ([]gqlIssue, error) {
+// fetchIssues reads every issue in repo and GitHub's canonical spelling of the repository name.
+func fetchIssues(repo string) (string, []gqlIssue, error) {
 	owner, name, err := splitRepo(repo)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	var nodes []gqlIssue
 	var cursor any
 	for {
 		var data struct {
 			Repository struct {
-				Issues struct {
+				NameWithOwner string `json:"nameWithOwner"`
+				Issues        struct {
 					PageInfo struct {
 						HasNextPage bool   `json:"hasNextPage"`
 						EndCursor   string `json:"endCursor"`
@@ -265,12 +319,15 @@ func fetchIssues(repo string) ([]gqlIssue, error) {
 			} `json:"repository"`
 		}
 		if err := graphql(issuesQuery, []variable{{"owner", owner}, {"name", name}, {"cursor", cursor}}, &data); err != nil {
-			return nil, err
+			return "", nil, err
 		}
 		page := data.Repository.Issues
 		nodes = append(nodes, page.Nodes...)
 		if !page.PageInfo.HasNextPage {
-			return nodes, nil
+			if !strings.EqualFold(data.Repository.NameWithOwner, repo) {
+				return "", nil, failf("GitHub answered for repository '%s', not '%s'", data.Repository.NameWithOwner, repo)
+			}
+			return data.Repository.NameWithOwner, nodes, nil
 		}
 		cursor = page.PageInfo.EndCursor
 	}
@@ -292,21 +349,28 @@ func project(node gqlIssue, repo string) (Issue, error) {
 	if err := checkPage(node, "blockedBy", node.BlockedBy.TotalCount, len(node.BlockedBy.Nodes)); err != nil {
 		return Issue{}, err
 	}
+	if err := checkPage(node, "subIssues", node.SubIssues.TotalCount, len(node.SubIssues.Nodes)); err != nil {
+		return Issue{}, err
+	}
+	issue := Issue{
+		Number: node.Number, Title: node.Title, State: strings.ToLower(node.State), Labels: uniqueStrings(labels),
+		Assignees: uniqueStrings(assignees), URL: node.URL, UpdatedAt: node.UpdatedAt,
+	}
 	var blockers []int
-	var foreign []string
-	foreignBlocker := false
 	for _, item := range node.BlockedBy.Nodes {
 		if item.local(repo) {
 			blockers = append(blockers, item.Number)
 		} else {
-			foreign = append(foreign, "is blocked by "+item.String())
-			foreignBlocker = true
+			issue.ForeignBlockers = append(issue.ForeignBlockers, item.foreign())
 		}
 	}
-	issue := Issue{
-		Number: node.Number, Title: node.Title, State: strings.ToLower(node.State), Labels: uniqueStrings(labels),
-		Assignees: uniqueStrings(assignees), BlockedBy: uniqueInts(blockers), URL: node.URL, UpdatedAt: node.UpdatedAt,
-		foreignBlocker: foreignBlocker,
+	issue.BlockedBy = uniqueInts(blockers)
+	// Local children come from their parent links, which every repository issue carries; only foreign ones are
+	// recorded here.
+	for _, item := range node.SubIssues.Nodes {
+		if !item.local(repo) {
+			issue.ForeignChildren = append(issue.ForeignChildren, item.foreign())
+		}
 	}
 	if node.StateReason != nil && *node.StateReason != "" {
 		reason := strings.ToLower(*node.StateReason)
@@ -316,9 +380,9 @@ func project(node gqlIssue, repo string) (Issue, error) {
 		parent := node.Parent.Number
 		issue.Parent = &parent
 	} else if node.Parent != nil {
-		foreign = append(foreign, "has parent "+node.Parent.String())
+		parent := node.Parent.foreign()
+		issue.ForeignParent = &parent
 	}
-	issue.Foreign = foreign
 	body := ""
 	if node.Body != nil {
 		body = *node.Body
@@ -330,7 +394,7 @@ func project(node gqlIssue, repo string) (Issue, error) {
 
 // issueReferences finds `#N` (not preceded by a word character, `/` or `&`) and full issue URLs.
 func issueReferences(body, repo string) []int {
-	pattern := regexp.MustCompile(`(github\.com/` + regexp.QuoteMeta(repo) + `/issues/|#)([0-9]+)`)
+	pattern := regexp.MustCompile(`((?i:github\.com/` + regexp.QuoteMeta(repo) + `)/issues/|#)([0-9]+)`)
 	found := map[int]bool{}
 	for _, match := range pattern.FindAllStringSubmatchIndex(body, -1) {
 		if body[match[2]:match[3]] == "#" && match[0] > 0 {
@@ -422,15 +486,32 @@ func buildMap(nodes []gqlIssue, repo string) (Document, []string, error) {
 		document.Issues = append(document.Issues, issue)
 	}
 	sort.Slice(document.Issues, func(i, j int) bool { return document.Issues[i].Number < document.Issues[j].Number })
+	// Membership follows parent links; each member's sub-issue connection must name the same local children,
+	// so the frontier and the snapshot never rest on a partial child set.
+	for _, node := range tree {
+		var linked, listed []int
+		for _, child := range children[node.Number] {
+			linked = append(linked, child.Number)
+		}
+		for _, item := range node.SubIssues.Nodes {
+			if item.local(repo) {
+				listed = append(listed, item.Number)
+			}
+		}
+		if intList(uniqueInts(linked)) != intList(uniqueInts(listed)) {
+			return Document{}, nil, failf("#%d lists sub-issues %s but parent links name %s; GitHub changed during the read, retry",
+				node.Number, intList(uniqueInts(listed)), intList(uniqueInts(linked)))
+		}
+	}
 	return document, strays, nil
 }
 
 func loadLive(repo string) (Document, []string, error) {
-	nodes, err := fetchIssues(repo)
+	canonical, nodes, err := fetchIssues(repo)
 	if err != nil {
 		return Document{}, nil, err
 	}
-	return buildMap(nodes, repo)
+	return buildMap(nodes, canonical)
 }
 
 // Snapshot source -------------------------------------------------------------------------------------------
@@ -613,9 +694,9 @@ func (document Document) status(issue Issue) string {
 		return "closed"
 	case len(issue.Assignees) > 0:
 		return "claimed"
-	case issue.foreignBlocker || len(openBlockers(issue, document.index())) > 0:
+	case openCount(issue.ForeignBlockers) > 0 || len(openBlockers(issue, document.index())) > 0:
 		return "blocked"
-	case len(document.openChildren()[issue.Number]) > 0:
+	case openCount(issue.ForeignChildren) > 0 || len(document.openChildren()[issue.Number]) > 0:
 		return "rollup"
 	}
 	for _, label := range issue.Labels {
@@ -703,7 +784,7 @@ func (document Document) check() ([]string, []string) {
 	}
 	for _, issue := range document.Issues {
 		// Relationship checks apply to every issue, the map included.
-		for _, foreign := range issue.Foreign {
+		for _, foreign := range issue.foreignRelationships() {
 			errs = append(errs, fmt.Sprintf("#%d %s, outside %s; the map holds one repository", issue.Number, foreign, document.Repository))
 		}
 		for _, blocker := range issue.BlockedBy {

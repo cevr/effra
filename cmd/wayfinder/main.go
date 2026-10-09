@@ -363,16 +363,7 @@ func (c cli) line(document Document, issue Issue) string {
 	detail := ""
 	switch status {
 	case "blocked":
-		blockers := []string{}
-		if local := refs(openBlockers(issue, document.index())); local != "" {
-			blockers = append(blockers, local)
-		}
-		for _, foreign := range issue.Foreign {
-			if name, ok := strings.CutPrefix(foreign, "is blocked by "); ok {
-				blockers = append(blockers, name)
-			}
-		}
-		detail = " (blocked by " + strings.Join(blockers, ",") + ")"
+		detail = " (blocked by " + qualified(openBlockers(issue, document.index()), names(issue.ForeignBlockers, true)) + ")"
 	case "claimed":
 		logins := make([]string, len(issue.Assignees))
 		for index, login := range issue.Assignees {
@@ -380,9 +371,27 @@ func (c cli) line(document Document, issue Issue) string {
 		}
 		detail = " (claimed by " + strings.Join(logins, ",") + ")"
 	case "rollup":
-		detail = " (open children " + refs(document.openChildren()[issue.Number]) + ")"
+		detail = " (open children " + qualified(document.openChildren()[issue.Number], names(issue.ForeignChildren, true)) + ")"
 	}
 	return fmt.Sprintf("#%-4d %-8s %-10s %s%s", issue.Number, status, kind(issue), issue.Title, detail)
+}
+
+// qualified lists local issues as #N and foreign ones as OWNER/NAME#N.
+func qualified(local []int, foreign []string) string {
+	var parts []string
+	if text := refs(local); text != "" {
+		parts = append(parts, text)
+	}
+	return strings.Join(append(parts, foreign...), ",")
+}
+
+// liveRecord is an issue's JSON record; live reads add its foreign relationships, which a snapshot never has.
+func liveRecord(document Document, issue Issue) object {
+	record := issue.record(!document.live)
+	if document.live {
+		record = append(record, field{"foreign", issue.foreignValue()})
+	}
+	return record
 }
 
 func (c cli) emit(document Document, issues []Issue) {
@@ -394,7 +403,7 @@ func (c cli) emit(document Document, issues []Issue) {
 	}
 	values := make([]any, len(issues))
 	for index, issue := range issues {
-		values[index] = append(issue.record(!document.live), field{"status", document.status(issue)})
+		values[index] = append(liveRecord(document, issue), field{"status", document.status(issue)})
 	}
 	fmt.Fprintln(c.stdout, renderJSON(values, false))
 }
@@ -424,7 +433,7 @@ func (c cli) show(document Document) (int, error) {
 		}
 	}
 	status := document.status(*issue)
-	detail := append(issue.record(!document.live), field{"status", status}, field{"children", intValues(children)}, field{"blocking", intValues(blocking)})
+	detail := append(liveRecord(document, *issue), field{"status", status}, field{"children", intValues(children)}, field{"blocking", intValues(blocking)})
 	var body *string
 	var comments []liveComment
 	if c.snapshot == nil {
@@ -465,12 +474,14 @@ func (c cli) show(document Document) (int, error) {
 	parent := "-"
 	if issue.Parent != nil && *issue.Parent != 0 {
 		parent = refs([]int{*issue.Parent})
+	} else if issue.ForeignParent != nil {
+		parent = issue.ForeignParent.Name
 	}
 	fmt.Fprintf(c.stdout, "#%d %s\n%s\n", issue.Number, issue.Title, issue.URL)
 	fmt.Fprintf(c.stdout, "status: %s  state: %s%s\n", status, issue.State, reason)
 	fmt.Fprintf(c.stdout, "labels: %s  assignees: %s\n", orDash(strings.Join(issue.Labels, ", ")), orDash(strings.Join(issue.Assignees, ", ")))
-	fmt.Fprintf(c.stdout, "parent: %s  children: %s\n", parent, orDash(refs(children)))
-	fmt.Fprintf(c.stdout, "blocked by: %s  blocking: %s\n", orDash(refs(issue.BlockedBy)), orDash(refs(blocking)))
+	fmt.Fprintf(c.stdout, "parent: %s  children: %s\n", parent, orDash(qualified(children, names(issue.ForeignChildren, false))))
+	fmt.Fprintf(c.stdout, "blocked by: %s  blocking: %s\n", orDash(qualified(issue.BlockedBy, names(issue.ForeignBlockers, false))), orDash(refs(blocking)))
 	if c.snapshot == nil {
 		text := ""
 		if body != nil {
