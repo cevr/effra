@@ -145,6 +145,46 @@
       "behavior": "Interrupting one requester of a shared layer acquisition leaves other current and later requesters able to complete.",
       "limits": "Upstream MemoMap builds in the first requester's fiber, so interrupting it completes the shared entry with that interruption for every waiter. Effra producers belong to the provision build: cancelling one waiter abandons only its own wait, the producer continues, and every other waiter observes the actual shared outcome. Whole-build cancellation is the only static-surface trigger; the evidence drives the emitted Go runtime and JavaScript layer runtime seam directly until a language caller exists.",
       "evidence": [{"file": "internal/compiler/layer_acquisition_test.go", "test": "TestLayerEntryWaiterCancellationIsBuildOwnedAcrossTargets", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.layer.parallel-acquisition",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/Layer.test.ts", "line": 15, "label": "layers can be acquired in parallel"},
+      "behavior": "Independent selected nodes acquire concurrently; cancelling the build while one producer never completes still returns after every producer joins.",
+      "limits": "Effra asserts the cancelDuringConcurrentAcquisition trace: a cooperative producer observes cancellation, a masked concurrent acquisition completes late, nothing is released or returned before both join, and the cause is the caller's interruption alone. It drives the emitted Go runtime and the JavaScript layer runtime seam directly, not upstream Layer.merge.",
+      "evidence": [{"file": "internal/compiler/layer_runtime_parity_test.go", "test": "TestLayerRollbackCancellationAndCauseCompositionAcrossTargets", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.layer.interrupted-shared-build-preserves-failure",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/Layer.test.ts", "line": 44, "label": "preserves a failure when a shared layer build is interrupted"},
+      "behavior": "When a sibling fails while a shared node is still being acquired and another node waits on it, the build fails with the actual failure; the abort-induced interruption of the shared node does not replace or fabricate it.",
+      "limits": "Effra asserts the partialFailureRollback trace: the pending shared producer is cancelled and joined, its waiter never constructs, rollback releases dependents first and the typed failure stays primary beside every cleanup defect. Only the fail case is exercised; defect primary selection is covered by the Go runtime suite.",
+      "evidence": [{"file": "internal/compiler/layer_runtime_parity_test.go", "test": "TestLayerRollbackCancellationAndCauseCompositionAcrossTargets", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.layer.interruption-releases-acquired",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/Layer.test.ts", "line": 322, "label": "interruption with multiple layers"},
+      "behavior": "Interrupting a build releases every resource that some node acquired, including one whose uninterruptible acquisition completes after the interruption.",
+      "limits": "Upstream only checks that acquired implies released after an arbitrary interruption point. Effra fixes the interruption point while two producers run and asserts the exact release order and that the late acquisition is released exactly once.",
+      "evidence": [{"file": "internal/compiler/layer_runtime_parity_test.go", "test": "TestLayerRollbackCancellationAndCauseCompositionAcrossTargets", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.layer.finalizers-dependent-first",
+      "status": "covered",
+      "upstream": {"file": "packages/effect/test/Layer.test.ts", "line": 357, "label": "finalizers with multiple layers with provideTo"},
+      "behavior": "Node finalizers run after the provided program's, dependents before their dependencies.",
+      "limits": "Effra asserts the programFailureWithCleanupDefects trace, which also requires every finalizer to run after a program failure and each cleanup defect to follow the program failure in close order. Independent nodes close sequentially in reverse canonical order; concurrent closure is permitted but not exercised.",
+      "evidence": [{"file": "internal/compiler/layer_runtime_parity_test.go", "test": "TestLayerRollbackCancellationAndCauseCompositionAcrossTargets", "targets": ["go", "js"]}]
+    },
+    {
+      "id": "effect.layer.memoizes-across-builds",
+      "status": "difference",
+      "upstream": {"file": "packages/effect/test/Layer.test.ts", "line": 621, "label": "memoizes layer across builds"},
+      "behavior": "Separate provisions are separate builds with independent acquisition tables: a node is acquired again by each build, a failed build retains its one outcome and is retried only by a new explicit build, and a caller-owned borrowed resource stays open across both.",
+      "limits": "Upstream shares one MemoMap across builds so the second build reuses the first build's layer. Effra has no shared or global memo map; explicit cross-build leases remain libraries with their own owning scope.",
+      "evidence": [{"file": "internal/compiler/layer_runtime_parity_test.go", "test": "TestLayerFailedBuildRetriesOnlyThroughANewBuildAcrossTargets", "targets": ["go", "js"]}]
     }
   ]
 }

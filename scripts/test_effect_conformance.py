@@ -28,6 +28,8 @@ class MappingTests(unittest.TestCase):
             "TestCodecPolicyVectorsAcrossGoJSAndEffect",
             "TestExplicitTestProvidersUseTheHarnessAcrossTargets",
             "TestLayerEntryWaiterCancellationIsBuildOwnedAcrossTargets",
+            "TestLayerFailedBuildRetriesOnlyThroughANewBuildAcrossTargets",
+            "TestLayerRollbackCancellationAndCauseCompositionAcrossTargets",
             "TestLifecycleConformanceAcrossGoAndEffect",
             "TestSchedulerTimerFailureIsPreservedAcrossTargets",
         ])

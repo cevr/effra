@@ -42,6 +42,8 @@ To move the pin:
 
 The first selection covers child interruption and completed child-before-parent cleanup, preservation of an expected failure plus cleanup defect, and virtual-time admission of an unstarted fork. Timeout has an explicit difference row: Effra's nominal `Timeout` and required `Scheduler` differ from upstream `Cause.TimeoutError`; a supplemental timer-defect test ensures defects are not rewritten as timeouts. Existing lifecycle acceptance also checks unobserved child failure, but that assertion has no selected upstream case mapping yet and is not counted as another port.
 
+Layer acquisition maps five `Layer.test.ts` cases to shared traces over the emitted Go runtime and the JavaScript layer runtime. Four are covered: parallel acquisition under build cancellation, a failure preserved while a shared acquisition is abandoned, release of every acquired resource after interruption, and dependent-first finalization. Cross-build memoization is a difference row: separate Effra provisions are separate builds with independent acquisition tables, so a failed build is retried only by a new explicit build. The first-requester interruption row is also a difference, because producers belong to the build rather than to their first waiter.
+
 Generic acquisition, Deferred, Ref and fixed-capacity semaphore cases remain pending. Parallel scope finalization and detached child lifetime remain unsupported. Scheduler duration/precision and the rest of the corpus are not implied by the selected virtual-time fixture. Each later library, codec, server or machine family can add its own selected cases to the same mapping instead of creating another parity table.
 
 ## Acquisition and scope source comparison
