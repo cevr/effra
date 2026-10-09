@@ -34,20 +34,21 @@ type LintDiagnostic struct {
 // in LintDiagnostics.
 type LintResult struct {
 	ProducerMetadata
-	SchemaVersion   int              `json:"schemaVersion"`
-	Revision        string           `json:"revision"`
-	Target          string           `json:"target"`
-	Checked         bool             `json:"checked"`
-	LintPassed      bool             `json:"lintPassed"`
-	Complete        bool             `json:"complete"`
-	Strict          bool             `json:"strict"`
-	Diagnostics     []Diagnostic     `json:"diagnostics"`
-	LintDiagnostics []LintDiagnostic `json:"lintDiagnostics"`
-	Packs           []LintPackStatus `json:"packs"`
-	Errors          int              `json:"errors"`
-	Warnings        int              `json:"warnings"`
-	Information     int              `json:"information"`
-	Suggestions     int              `json:"suggestions"`
+	SchemaVersion   int                 `json:"schemaVersion"`
+	Revision        string              `json:"revision"`
+	Target          string              `json:"target"`
+	Checked         bool                `json:"checked"`
+	LintPassed      bool                `json:"lintPassed"`
+	Complete        bool                `json:"complete"`
+	Strict          bool                `json:"strict"`
+	Diagnostics     []Diagnostic        `json:"diagnostics"`
+	LintDiagnostics []LintDiagnostic    `json:"lintDiagnostics"`
+	Suppressions    []SuppressionStatus `json:"suppressions"`
+	Packs           []LintPackStatus    `json:"packs"`
+	Errors          int                 `json:"errors"`
+	Warnings        int                 `json:"warnings"`
+	Information     int                 `json:"information"`
+	Suggestions     int                 `json:"suggestions"`
 }
 
 // LintPacks is the lint configuration in effect with the reports of its
@@ -114,17 +115,58 @@ func DefaultLintConfiguration() *lintsdk.Configuration {
 	return configuration
 }
 
+// Suppression statuses. Only a rule that completed over this analysis can
+// show that its suppression was unused; a directive whose rule did not run
+// is not-evaluated with a reason.
+const (
+	SuppressionApplied      = "applied"
+	SuppressionUnused       = "unused"
+	SuppressionNotEvaluated = "not-evaluated"
+)
+
+// Reasons a suppression was not evaluated.
+const (
+	// NotEvaluatedUncheckedSource: the source did not check, so no rule ran.
+	NotEvaluatedUncheckedSource = "unchecked-source"
+	// NotEvaluatedPackNotSelected: the namespace names no selected pack; a
+	// pack is never started merely to validate a directive.
+	NotEvaluatedPackNotSelected = "pack-not-selected"
+	// NotEvaluatedRuleOff: the configuration turns the rule off.
+	NotEvaluatedRuleOff = "rule-off"
+	// NotEvaluatedPackFailed: the pack, or its execution of the rule, failed.
+	NotEvaluatedPackFailed = "pack-failed"
+	// NotEvaluatedFactsUnavailable: a fact family the rule requires is
+	// unavailable for this source.
+	NotEvaluatedFactsUnavailable = "facts-unavailable"
+	// NotEvaluatedTargetUnsupported: the rule does not support the target.
+	NotEvaluatedTargetUnsupported = "target-unsupported"
+)
+
+// SuppressionStatus is the outcome of one well-formed suppression directive
+// naming a known built-in rule or a namespace/rule: applied when it removed
+// at least one finding of its rule on the line it covers, unused when that
+// rule completed with no such finding, and not-evaluated with a reason when
+// the rule did not run. Span is the directive comment; Line is the 1-based
+// source line it covers. A malformed or unknown directive has no status: it
+// is an EFL004 finding.
+type SuppressionStatus struct {
+	Rule   string `json:"rule"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+	Span   Span   `json:"span"`
+	Line   int    `json:"line"`
+}
+
 type lintSuppression struct {
-	revision   string
 	rule       string
+	target     lintsdk.SuppressionTarget
 	targetLine int
 	span       Span
 	used       bool
 }
 type suppressionKey struct {
-	revision string
-	rule     string
-	line     int
+	rule string
+	line int
 }
 
 const (
@@ -208,7 +250,10 @@ func suppressionDiagnostic(message string, span Span) LintDiagnostic {
 	return LintDiagnostic{Code: suppressionCode, Rule: suppressionRule, Severity: "error", Message: message, Span: span}
 }
 
-func parseSuppressions(comments []Comment, revision string, rules map[string]LintRule) ([]*lintSuppression, []LintDiagnostic) {
+// parseSuppressions reads every next-line directive. A directive names one
+// built-in rule or one namespace/rule under configuration; a malformed or
+// unknown name is an EFL004 finding and has no status.
+func parseSuppressions(comments []Comment, configuration *lintsdk.Configuration) ([]*lintSuppression, []LintDiagnostic) {
 	var suppressions []*lintSuppression
 	var diagnostics []LintDiagnostic
 	for _, comment := range comments {
@@ -246,26 +291,30 @@ func parseSuppressions(comments []Comment, revision string, rules map[string]Lin
 			malformed("malformed lint suppression: it must include a non-empty reason after ` -- `")
 			continue
 		}
-		if _, ok := rules[target]; !ok {
+		kind := configuration.SuppressionTarget(target)
+		switch kind {
+		case lintsdk.TargetMalformed:
+			malformed("malformed lint suppression: rule " + target + " must be a built-in rule name or namespace/rule")
+			continue
+		case lintsdk.TargetUnknown:
 			diagnostics = append(diagnostics, suppressionDiagnostic("unknown lint rule "+target, span))
 			continue
 		}
-		suppressions = append(suppressions, &lintSuppression{revision: revision, rule: target, targetLine: span.Line + 1, span: span})
+		suppressions = append(suppressions, &lintSuppression{rule: target, target: kind, targetLine: span.Line + 1, span: span})
 	}
 	return suppressions, diagnostics
 }
 
-func suppressionFor(suppressions map[suppressionKey][]*lintSuppression, revision, rule string, line int) *lintSuppression {
-	key := suppressionKey{revision: revision, rule: rule, line: line}
-	var matched *lintSuppression
-	for _, suppression := range suppressions[key] {
-		if suppression.revision == revision {
-			suppression.used = true
-			matched = suppression
-		}
+// suppressed marks every suppression of rule covering line as used and
+// reports whether there was one.
+func suppressed(suppressions map[suppressionKey][]*lintSuppression, rule string, line int) bool {
+	matches := suppressions[suppressionKey{rule: rule, line: line}]
+	for _, suppression := range matches {
+		suppression.used = true
 	}
-	return matched
+	return len(matches) > 0
 }
+
 func (r *Result) applyBuiltinRule(rule *lintsdk.Rule, snapshot *lintsdk.Snapshot) ([]lintsdk.Finding, error) {
 	for _, family := range rule.Requires {
 		if reason := snapshot.UnavailableReason(family); reason != "" {
@@ -289,8 +338,15 @@ func (r *Result) Lint(strict bool) LintResult {
 // Built-in findings are kept. Findings are ordered by source offset, with
 // built-in rules first and packs in namespace order on equal offsets, never
 // by pack completion order.
+//
+// Next-line suppressions name a built-in rule or a namespace/rule. A
+// suppression removes the findings of its rule whose primary range starts
+// on the line it covers, built-in and pack findings alike; it can never
+// remove a compiler diagnostic or a lint-runner error. Every well-formed
+// directive receives a SuppressionStatus; an unused one is also an EFL004
+// error, while a not-evaluated one does not affect policy.
 func (r *Result) LintWith(strict bool, packs LintPacks) LintResult {
-	out := LintResult{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Checked: r.Checked, LintPassed: r.Checked, Complete: r.Checked, Strict: strict, Diagnostics: r.Diagnostics, LintDiagnostics: []LintDiagnostic{}, Packs: []LintPackStatus{}}
+	out := LintResult{SchemaVersion: r.SchemaVersion, Revision: r.Revision, Target: r.Target, Checked: r.Checked, LintPassed: r.Checked, Complete: r.Checked, Strict: strict, Diagnostics: r.Diagnostics, LintDiagnostics: []LintDiagnostic{}, Suppressions: []SuppressionStatus{}, Packs: []LintPackStatus{}}
 	out.ProducerMetadata = r.producerMetadata
 	count := func(severity string) {
 		switch severity {
@@ -302,6 +358,27 @@ func (r *Result) LintWith(strict bool, packs LintPacks) LintResult {
 			out.Information++
 		default:
 			out.Suggestions++
+		}
+	}
+	rules := LintRules()
+	rulesByName := make(map[string]LintRule, len(rules))
+	for _, rule := range rules {
+		if rule.Name != suppressionRule {
+			rulesByName[rule.Name] = rule
+		}
+	}
+	// Suppressions are read before any finding is admitted, so a
+	// suppressed finding is never counted.
+	var suppressions []*lintSuppression
+	suppressionIndex := map[suppressionKey][]*lintSuppression{}
+	if r.Program != nil {
+		var invalid []LintDiagnostic
+		suppressions, invalid = parseSuppressions(r.Program.Comments, packs.configuration())
+		out.LintDiagnostics = append(out.LintDiagnostics, invalid...)
+		out.Errors += len(invalid)
+		for _, suppression := range suppressions {
+			key := suppressionKey{rule: suppression.rule, line: suppression.targetLine}
+			suppressionIndex[key] = append(suppressionIndex[key], suppression)
 		}
 	}
 	// Pack diagnostics join built-in advice only when the result is
@@ -335,6 +412,9 @@ func (r *Result) LintWith(strict bool, packs LintPacks) LintResult {
 			}
 		}
 		for _, finding := range report.Findings {
+			if suppressed(suppressionIndex, finding.Rule, finding.Span.Line) {
+				continue
+			}
 			diagnostic := LintDiagnostic{Code: finding.Rule, Rule: finding.Rule, Severity: lintSeverity(finding.Severity), Message: finding.Message, Span: lintSpan(finding.Span), Suggestions: finding.Suggestions}
 			for _, related := range finding.Related {
 				diagnostic.Related = append(diagnostic.Related, RelatedLocation{Message: related.Message, Span: lintSpan(related.Span)})
@@ -343,7 +423,18 @@ func (r *Result) LintWith(strict bool, packs LintPacks) LintResult {
 			count(diagnostic.Severity)
 		}
 	}
+	// Built-in rules that did not complete over this source.
+	incomplete := map[string]bool{}
 	finish := func() LintResult {
+		for _, suppression := range suppressions {
+			status := SuppressionStatus{Rule: suppression.rule, Span: suppression.span, Line: suppression.targetLine}
+			status.Status, status.Reason = r.suppressionOutcome(suppression, packs, rulesByName, incomplete)
+			if status.Status == SuppressionUnused {
+				out.LintDiagnostics = append(out.LintDiagnostics, suppressionDiagnostic("unused lint suppression for "+suppression.rule, suppression.span))
+				out.Errors++
+			}
+			out.Suppressions = append(out.Suppressions, status)
+		}
 		out.LintDiagnostics = append(out.LintDiagnostics, packDiagnostics...)
 		slices.SortStableFunc(out.LintDiagnostics, func(a, b LintDiagnostic) int { return a.Span.Offset - b.Span.Offset })
 		if out.Errors > 0 || strict && out.Warnings > 0 || !r.Checked {
@@ -351,42 +442,13 @@ func (r *Result) LintWith(strict bool, packs LintPacks) LintResult {
 		}
 		return out
 	}
-	if r.Program == nil {
-		return finish()
-	}
-	rules := LintRules()
-	rulesByName := make(map[string]LintRule, len(rules))
-	for _, rule := range rules {
-		if rule.Name != suppressionRule {
-			rulesByName[rule.Name] = rule
-		}
-	}
-	suppressions, suppressionDiagnostics := parseSuppressions(r.Program.Comments, r.Revision, rulesByName)
-	out.LintDiagnostics = append(out.LintDiagnostics, suppressionDiagnostics...)
-	out.Errors += len(suppressionDiagnostics)
-	suppressionIndex := map[suppressionKey][]*lintSuppression{}
-	for _, suppression := range suppressions {
-		key := suppressionKey{revision: suppression.revision, rule: suppression.rule, line: suppression.targetLine}
-		suppressionIndex[key] = append(suppressionIndex[key], suppression)
-	}
-	// A suppression of a rule that is off was not evaluated: only a rule
-	// that ran can show that its suppression went unused.
-	appendUnused := func() {
-		for _, suppression := range suppressions {
-			if _, enabled := packs.builtinSeverity(rulesByName[suppression.rule]); !suppression.used && enabled {
-				out.LintDiagnostics = append(out.LintDiagnostics, suppressionDiagnostic("unused lint suppression for "+suppression.rule, suppression.span))
-				out.Errors++
-			}
-		}
-	}
-	if !r.Checked {
-		appendUnused()
+	if r.Program == nil || !r.Checked {
 		return finish()
 	}
 	add := func(index int, message string, span Span) {
 		rule := rules[index]
 		severity, enabled := packs.builtinSeverity(rule)
-		if !enabled || suppressionFor(suppressionIndex, r.Revision, rule.Name, span.Line) != nil {
+		if !enabled || suppressed(suppressionIndex, rule.Name, span.Line) {
 			return
 		}
 		out.LintDiagnostics = append(out.LintDiagnostics, LintDiagnostic{Code: rule.Code, Rule: rule.Name, Severity: severity, Message: message, Span: span})
@@ -444,6 +506,7 @@ func (r *Result) LintWith(strict bool, packs LintPacks) LintResult {
 		}
 		findings, err := r.applyBuiltinRule(rule, snapshot)
 		if err != nil {
+			incomplete[rule.Name] = true
 			runnerError(&out.LintDiagnostics, "built-in lint rule "+rule.Name+" did not complete: "+err.Error())
 			continue
 		}
@@ -451,8 +514,76 @@ func (r *Result) LintWith(strict bool, packs LintPacks) LintResult {
 			add(index, finding.Message, lintSpan(finding.Span))
 		}
 	}
-	appendUnused()
 	return finish()
+}
+
+// suppressionOutcome decides a suppression's status once every rule that
+// could run has run. Unchecked source runs no rule. Otherwise the rule's
+// own execution decides: a rule that is off, in an unselected pack, or that
+// failed or was skipped was not evaluated; a completed rule applied the
+// suppression if it removed a finding and left it unused otherwise.
+func (r *Result) suppressionOutcome(suppression *lintSuppression, packs LintPacks, builtins map[string]LintRule, incomplete map[string]bool) (string, string) {
+	if !r.Checked {
+		return SuppressionNotEvaluated, NotEvaluatedUncheckedSource
+	}
+	switch suppression.target {
+	case lintsdk.TargetUnselected:
+		return SuppressionNotEvaluated, NotEvaluatedPackNotSelected
+	case lintsdk.TargetBuiltin:
+		if _, enabled := packs.builtinSeverity(builtins[suppression.rule]); !enabled {
+			return SuppressionNotEvaluated, NotEvaluatedRuleOff
+		}
+		if incomplete[suppression.rule] {
+			return SuppressionNotEvaluated, NotEvaluatedFactsUnavailable
+		}
+	case lintsdk.TargetPack:
+		if reason := packs.notEvaluated(suppression.rule); reason != "" {
+			return SuppressionNotEvaluated, reason
+		}
+	}
+	if suppression.used {
+		return SuppressionApplied, ""
+	}
+	return SuppressionUnused, ""
+}
+
+// notEvaluated is why a selected pack's rule did not complete over this
+// analysis, or "" when it completed. A pack without a report did not run
+// its rules and counts as failed: its silence cannot show a suppression
+// unused.
+func (p LintPacks) notEvaluated(rule string) string {
+	namespace, _, _ := strings.Cut(rule, "/")
+	index := slices.IndexFunc(p.Reports, func(report LintPackReport) bool { return report.Pack == namespace })
+	if index < 0 || p.Reports[index].Report.Failure != nil {
+		return NotEvaluatedPackFailed
+	}
+	statuses := p.Reports[index].Report.Rules
+	status := slices.IndexFunc(statuses, func(status lintsdk.RuleStatus) bool { return status.Rule == rule })
+	if status < 0 {
+		return NotEvaluatedPackFailed
+	}
+	switch statuses[status].Status {
+	case lintsdk.StatusCompleted:
+		return ""
+	case lintsdk.StatusOff:
+		return NotEvaluatedRuleOff
+	case lintsdk.StatusSkipped:
+		if strings.HasPrefix(statuses[status].Reason, NotEvaluatedTargetUnsupported) {
+			return NotEvaluatedTargetUnsupported
+		}
+		return NotEvaluatedFactsUnavailable
+	default:
+		return NotEvaluatedPackFailed
+	}
+}
+
+// configuration is the configuration in effect: the default one when the
+// caller supplied none.
+func (p LintPacks) configuration() *lintsdk.Configuration {
+	if p.Configuration == nil {
+		return DefaultLintConfiguration()
+	}
+	return p.Configuration
 }
 
 func lintSpan(span lintsdk.Span) Span {

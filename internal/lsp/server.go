@@ -55,6 +55,9 @@ type session struct {
 	phase     int
 	documents map[string]document
 	bytes     int
+	// lintStatus is set when the client opted into effra/lintStatus with
+	// the experimental client capability effraLintStatus.
+	lintStatus bool
 }
 
 // Serve owns the session until exit or EOF. EOF after shutdown is clean;
@@ -192,6 +195,15 @@ func (s *session) handle(req request) error {
 			return s.reject(req, -32600, "initialize requires a request and can occur once")
 		}
 		s.phase = 1
+		var capabilities struct {
+			Experimental struct {
+				EffraLintStatus bool `json:"effraLintStatus"`
+			} `json:"experimental"`
+		}
+		// Malformed or absent capabilities leave the opt-in off.
+		if objectParams(params["capabilities"], &capabilities) {
+			s.lintStatus = capabilities.Experimental.EffraLintStatus
+		}
 		return s.result(req.ID, map[string]any{"capabilities": map[string]any{"positionEncoding": "utf-16", "textDocumentSync": map[string]any{"openClose": true, "change": 1}, "hoverProvider": true, "definitionProvider": true, "documentFormattingProvider": true}, "serverInfo": map[string]any{"name": "effra", "version": "0.0.1-prototype"}})
 	}
 	if s.phase == 0 {
@@ -365,7 +377,29 @@ func (s *session) synchronize(req request) error {
 	if err != nil {
 		return s.rejectDocument(req, -32603, doc, err.Error())
 	}
+	if s.lintStatus {
+		status, err := encodeFrame(lintStatus(uri, doc.version, report))
+		if err != nil {
+			return s.rejectDocument(req, -32603, doc, err.Error())
+		}
+		frame = append(frame, status...)
+	}
 	return writeFrame(s.out, frame)
+}
+
+// lintStatus is the effra/lintStatus notification that follows a
+// publication for a client that opted in: the structured lint state of the
+// same report, which publishDiagnostics cannot carry. Its suppressions are
+// the report's, so CLI, MCP and LSP report identical statuses and ranges.
+func lintStatus(uri string, version int32, report compiler.DiagnosticReport) any {
+	return map[string]any{"jsonrpc": "2.0", "method": "effra/lintStatus", "params": map[string]any{
+		"uri":           uri,
+		"version":       version,
+		"revision":      report.Revision,
+		"lintAvailable": report.LintAvailable,
+		"lintComplete":  report.LintComplete,
+		"suppressions":  report.Suppressions,
+	}}
 }
 func publication(uri string, version *int32, diagnostics []compiler.LSPDiagnostic) any {
 	p := map[string]any{"uri": uri, "diagnostics": diagnostics}

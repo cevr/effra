@@ -72,7 +72,7 @@ Source identity is the escaped, absolute, lexically normalized requested documen
 
 Diagnostic text uses one-based UTF-16 line/column locations. JSON LSP ranges are zero-based UTF-16; original compiler spans remain UTF-8 bytes. Source supports LF and CRLF line endings. Standalone raw CR outside string literals receives EF001 with an LF/CRLF correction; a raw CR inside a string receives the JSON-escape diagnostic. `\r` inside an escaped string remains valid content. Editor-position conversion recognizes CR as a line boundary even when locating that unsupported source byte.
 
-For unchecked source, the initial diagnostic report omits all lint evaluation, including suppression validation; its unavailable reason is explicit. The legacy `ef lint` surface retains its own suppression-validation behavior. This does not allow any suppression to remove compiler diagnostics.
+For unchecked source, the diagnostic report omits all lint findings, including malformed or unknown suppression diagnostics; its unavailable reason is explicit. Its `suppressions` still list every well-formed directive as `not-evaluated` with reason `unchecked-source`. The `ef lint` surface keeps reporting malformed and unknown directives on unchecked source. Like the diagnostic report, it never reports a directive unused there, because no rule ran. This does not allow any suppression to remove compiler diagnostics.
 
 The CLI prints one finding per line by default and emits the complete report with `--json`. A policy failure exits 1, an invalid invocation exits 2, and file or compiler operation failures remain operational errors. MCP returns source errors as successful structured reports with `policyPassed: false`; source admission, stale-revision, path, and output-limit failures remain tool errors. MCP accepts at most 100 diagnostic findings and reports an explicit limit error above that boundary. The report's `totalCounts` and `returnedCount` are exact for every successful response.
 
@@ -119,6 +119,13 @@ let forgotten = task()
 ```
 
 Only a `//` line comment is a directive; a block comment containing the same text is ordinary comment text and never suppresses or diagnoses. The rule name must be known and the reason must be non-empty. Malformed, unknown, or unused suppressions are `EFL004 invalid-suppression` errors and fail lint in every mode. Suppressions are matched against semantic diagnostic spans in the same source revision; compiler correctness diagnostics cannot be suppressed. Comments remain source text, and no automatic deletion fix is offered.
+
+A directive can also name a rule-pack rule as `namespace/rule`. A malformed qualified name, an unknown rule of a selected pack and a reserved namespace are `EFL004` errors. A namespace that no selected pack has is accepted without starting anything. Every well-formed directive has a status in `suppressions` (`ef lint`, `ef diagnostics --json`, MCP and the LSP `effra/lintStatus` notification):
+- `applied`: it removed a finding.
+- `unused`: its rule completed without a finding to remove. This is also an `EFL004` error.
+- `not-evaluated`: its rule did not run. The reason is one of `unchecked-source`, `pack-not-selected`, `rule-off`, `pack-failed`, `facts-unavailable` or `target-unsupported`. A not-evaluated directive does not fail lint.
+
+Only a rule that ran can show a directive unused, so a directive for a rule that is off is not-evaluated rather than an error. See [suppression states](specs/custom-lint.md#implemented-stage-three-suppression-states).
 
 A rule from a selected rule pack that did not run fails lint with an `EFL000` lint-runner error and `complete: false`, because an enabled rule that did not run has not passed. A rule limited to other `targets` is the exception when only its pack's default or a preset enabled it: it does not apply to this target, so it is reported as `skipped` (`target-unsupported`, `inapplicable: true`) and lint stays complete and passing. Configuring the rule in the project's own lint configuration enforces it: under an unsupported target lint then fails with `EFL000`. The full contract is in [the custom lint spec](specs/custom-lint.md).
 

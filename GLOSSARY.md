@@ -169,6 +169,8 @@ overhead or a fixed speedup multiplier.
 
 **Justifier rule**: A default-preset lint rule that flags a legal but reviewable choice, such as an `unbounded` budget, until a suppression records the reason.
 
+**Suppression status**: The outcome of one reasoned lint suppression in one analysis. It is applied when it removed a finding of its rule, unused when that rule ran and found nothing to remove, or not evaluated, with a reason, when the rule did not run.
+
 **Expression anchor**: A source location identifying the expression described by a diagnostic or local type query.
 
 **Dependency graph**: A revision-scoped view of program contracts and the relationships between functions, services and providers. Incoming relationships identify dependents.

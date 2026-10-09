@@ -103,8 +103,19 @@ type DiagnosticReport struct {
 	LintUnavailableReason string              `json:"lintUnavailableReason,omitempty"`
 	TotalCounts           DiagnosticCounts    `json:"totalCounts"`
 	Diagnostics           []DiagnosticFinding `json:"diagnostics"`
-	ReturnedCount         int                 `json:"returnedCount"`
-	Truncated             bool                `json:"truncated"`
+	// Suppressions is the status of every well-formed suppression
+	// directive, also for unchecked source, where none was evaluated.
+	Suppressions  []DiagnosticSuppression `json:"suppressions"`
+	ReturnedCount int                     `json:"returnedCount"`
+	Truncated     bool                    `json:"truncated"`
+}
+
+// DiagnosticSuppression is a suppression status with the zero-based UTF-16
+// range of its directive, which every surface reports identically. Range
+// is absent only when the report has no text to locate the directive in.
+type DiagnosticSuppression struct {
+	SuppressionStatus
+	Range *DiagnosticRange `json:"range,omitempty"`
 }
 
 func legalDiagnosticPosition(source string, index sourcePositionIndex, offset int) (DiagnosticPosition, bool) {
@@ -288,6 +299,7 @@ func (r *Result) DiagnosticReportWith(snapshot SourceSnapshot, strict bool, pack
 		Checked:          r.Checked,
 		Strict:           strict,
 		Diagnostics:      []DiagnosticFinding{},
+		Suppressions:     []DiagnosticSuppression{},
 	}
 	if !r.Checked {
 		report.LintUnavailableReason = "source is unchecked; semantic lint advice is unavailable"
@@ -328,9 +340,17 @@ func (r *Result) DiagnosticReportWith(snapshot SourceSnapshot, strict bool, pack
 	for _, diagnostic := range r.Diagnostics {
 		appendFinding(diagnostic.Code, "compiler", "", "error", diagnostic.Message, diagnostic.Help, diagnostic.Span, diagnostic.Related)
 	}
-	var lint LintResult
+	// Lint always decides suppression statuses; its findings join the
+	// report only for checked source.
+	lint := r.LintWith(strict, packs)
+	for _, status := range lint.Suppressions {
+		suppression := DiagnosticSuppression{SuppressionStatus: status}
+		if location, ok := positionIndex.rangeFor(snapshot.Text, status.Span); ok {
+			suppression.Range = &location
+		}
+		report.Suppressions = append(report.Suppressions, suppression)
+	}
 	if r.Checked {
-		lint = r.LintWith(strict, packs)
 		for _, diagnostic := range lint.LintDiagnostics {
 			appendFinding(diagnostic.Code, "lint", diagnostic.Rule, diagnostic.Severity, diagnostic.Message, "", diagnostic.Span, diagnostic.Related)
 		}

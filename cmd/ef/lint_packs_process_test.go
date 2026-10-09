@@ -131,23 +131,40 @@ func TestLintFixtureCommandProcess(t *testing.T) {
 	// A negative control: no provision of LiveMail, but built-in advice.
 	clean := "service Mail {\n    effect fn send(to: string) -> void\n}\n\nimpl LiveMail for Mail {\n    effect fn send(to: string) -> void {\n        void\n    }\n}\n\neffect fn task() -> string { \"ok\" }\neffect fn main() -> void { let forgotten = task(); void }\n"
 	os.WriteFile(filepath.Join(fixtures, "clean.ef"), []byte(clean), 0o644)
+	// A reasoned suppression of one pack finding, and one naming a pack
+	// this configuration does not select.
+	suppressed := strings.Replace(string(boundary), "    run notify(\"b\")", "    // effra-lint-disable-next-line policy/provider-boundary -- the alias is reviewed\n    run notify(\"b\")", 1)
+	suppressed = strings.Replace(suppressed, "    run shadowed()", "    // effra-lint-disable-next-line acme/other -- enforced in CI\n    run shadowed()", 1)
+	os.WriteFile(filepath.Join(fixtures, "suppressed.ef"), []byte(suppressed), 0o644)
 
 	stdout, stderr, code := runTestCLI(t, binary, "lint", "test", fixtures, "--update", "--lint-config", config)
-	if code != 0 || strings.Count(string(stdout), "updated ") != 2 {
+	if code != 0 || strings.Count(string(stdout), "updated ") != 3 {
 		t.Fatalf("update: exit %d %s %s", code, stdout, stderr)
 	}
 	var expectation struct {
-		Complete bool                      `json:"complete"`
-		Rules    []lint.RuleStatus         `json:"rules"`
-		Findings []compiler.LintDiagnostic `json:"findings"`
+		Complete     bool                         `json:"complete"`
+		Rules        []lint.RuleStatus            `json:"rules"`
+		Findings     []compiler.LintDiagnostic    `json:"findings"`
+		Suppressions []compiler.SuppressionStatus `json:"suppressions"`
 	}
 	data, _ = os.ReadFile(filepath.Join(fixtures, "boundary.lint.json"))
 	if json.Unmarshal(data, &expectation); !expectation.Complete || len(expectation.Findings) != 2 || expectation.Findings[0].Rule != "policy/provider-boundary" || len(expectation.Rules) != 2 || expectation.Rules[1].Findings != 2 {
 		t.Fatalf("boundary expectation %s", data)
 	}
+	if strings.Contains(string(data), "suppressions") {
+		t.Fatalf("an expectation without suppressions names them: %s", data)
+	}
 	data, _ = os.ReadFile(filepath.Join(fixtures, "clean.lint.json"))
 	if json.Unmarshal(data, &expectation); len(expectation.Findings) != 0 || expectation.Rules[1].Status != lint.StatusCompleted {
 		t.Fatalf("clean expectation %s", data)
+	}
+	expectation.Suppressions = nil
+	data, _ = os.ReadFile(filepath.Join(fixtures, "suppressed.lint.json"))
+	json.Unmarshal(data, &expectation)
+	if len(expectation.Findings) != 1 || !strings.HasPrefix(expectation.Findings[0].Message, "layered") || len(expectation.Suppressions) != 2 ||
+		expectation.Suppressions[0].Rule != "policy/provider-boundary" || expectation.Suppressions[0].Status != compiler.SuppressionApplied ||
+		expectation.Suppressions[1].Rule != "acme/other" || expectation.Suppressions[1].Reason != compiler.NotEvaluatedPackNotSelected {
+		t.Fatalf("suppressed expectation %s", data)
 	}
 	if lintOut, _, _ := runTestCLI(t, binary, "lint", filepath.Join(fixtures, "clean.ef")); !strings.Contains(string(lintOut), "unused-recipe") {
 		t.Fatalf("control: the clean fixture has no built-in advice: %s", lintOut)
@@ -157,7 +174,7 @@ func TestLintFixtureCommandProcess(t *testing.T) {
 	}
 
 	stdout, _, code = runTestCLI(t, binary, "lint", "test", fixtures, "--lint-config", config)
-	if code != 0 || strings.Count(string(stdout), "ok   ") != 2 {
+	if code != 0 || strings.Count(string(stdout), "ok   ") != 3 {
 		t.Fatalf("check: exit %d %s", code, stdout)
 	}
 	// An expectation that differs by one severity fails, showing both.

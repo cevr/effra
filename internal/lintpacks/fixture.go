@@ -20,12 +20,15 @@ import (
 
 // Expectation is what a source fixture expects of the selected packs: the
 // status of every pack rule, the pack findings and any lint-runner errors,
-// and whether the analysis was complete. Built-in advice is outside it, so
-// a fixture tests its packs, not the compiler's own rules.
+// and whether the analysis was complete, plus the status of every
+// suppression naming a namespace/rule. Built-in advice and built-in
+// suppressions are outside it, so a fixture tests its packs, not the
+// compiler's own rules.
 type Expectation struct {
-	Complete bool                      `json:"complete"`
-	Rules    []lint.RuleStatus         `json:"rules"`
-	Findings []compiler.LintDiagnostic `json:"findings"`
+	Complete     bool                         `json:"complete"`
+	Rules        []lint.RuleStatus            `json:"rules"`
+	Findings     []compiler.LintDiagnostic    `json:"findings"`
+	Suppressions []compiler.SuppressionStatus `json:"suppressions,omitempty"`
 }
 
 // ExpectationPath is the expectation file of a fixture: name.ef expects
@@ -74,6 +77,11 @@ func (s *Session) Fixture(ctx context.Context, path, target string) (Expectation
 			expectation.Findings = append(expectation.Findings, diagnostic)
 		}
 	}
+	for _, suppression := range merged.Suppressions {
+		if strings.Contains(suppression.Rule, "/") {
+			expectation.Suppressions = append(expectation.Suppressions, suppression)
+		}
+	}
 	return expectation, nil
 }
 
@@ -109,7 +117,10 @@ func (e Expectation) Equal(other Expectation) bool {
 }
 
 func (e Expectation) normal() Expectation {
-	normal := Expectation{Complete: e.Complete, Rules: slices.Clone(e.Rules), Findings: slices.Clone(e.Findings)}
+	normal := Expectation{Complete: e.Complete, Rules: slices.Clone(e.Rules), Findings: slices.Clone(e.Findings), Suppressions: slices.Clone(e.Suppressions)}
+	if len(normal.Suppressions) == 0 {
+		normal.Suppressions = nil
+	}
 	if normal.Rules == nil {
 		normal.Rules = []lint.RuleStatus{}
 	}

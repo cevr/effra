@@ -40,7 +40,7 @@ func TestLintWithAppliesConfiguredBuiltinSeverity(t *testing.T) {
 		{"hint", forgotten, `{"version":1,"rules":{"unused-recipe":"hint"}}`, "suggestion", 1, true},
 		{"off", forgotten, `{"version":1,"rules":{"unused-recipe":"off"}}`, "", 0, true},
 		// The rule that would use the suppression did not run, so the
-		// suppression is not reported unused.
+		// suppression is not reported unused: it is not-evaluated, rule-off.
 		{"off suppressed", strings.Replace(suppressed, "let forgotten = task()", "let forgotten = 1", 1), `{"version":1,"rules":{"unused-recipe":"off"}}`, "", 0, true},
 	}
 	for _, c := range cases {

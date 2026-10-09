@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -197,9 +198,15 @@ run Console.log("x")
 	if r.Checked || !hasCode(r, "EF108") {
 		t.Fatalf("compiler diagnostic was suppressed: %+v", r.Diagnostics)
 	}
+	// No rule ran over unchecked source, so the suppression is neither
+	// applied nor unused: it was not evaluated.
 	lint := r.Lint(false)
-	if lint.Checked || lint.LintPassed || len(lint.Diagnostics) == 0 || lint.Errors != 1 || len(lint.LintDiagnostics) != 1 {
+	if lint.Checked || lint.LintPassed || len(lint.Diagnostics) == 0 || lint.Errors != 0 || len(lint.LintDiagnostics) != 0 || len(lint.Suppressions) != 1 {
 		t.Fatalf("unchecked source received suppressible lint semantics: %+v", lint)
+	}
+	want := []SuppressionStatus{{Rule: "unused-recipe", Status: SuppressionNotEvaluated, Reason: NotEvaluatedUncheckedSource, Span: lint.Suppressions[0].Span, Line: 3}}
+	if !reflect.DeepEqual(lint.Suppressions, want) || lint.Suppressions[0].Span.Line != 2 {
+		t.Fatalf("suppression status on unchecked source: %+v", lint.Suppressions)
 	}
 }
 
