@@ -121,6 +121,21 @@ func (p *presenter) selection(s *SelectedType) {
 		p.write("layer " + t.Name)
 	case "codec":
 		p.write("derive " + t.Name)
+	case "constant":
+		p.constantDeclaration(t)
+	}
+}
+
+// constantDeclaration renders a selected constant as its source declaration:
+// the projected type and the checked scalar value, never the alias spelling.
+func (p *presenter) constantDeclaration(t *DeclarationTarget) {
+	p.write("const " + t.Name + ": ")
+	if t.Type != nil {
+		p.typ(t.Type.ID, 0)
+	}
+	if t.Constant != nil {
+		p.write(" = ")
+		p.constant(*t.Constant)
 	}
 }
 

@@ -152,6 +152,40 @@ func TestHoverPresentsCheckedParameterRolesAndDefaults(t *testing.T) {
 	}
 }
 
+func TestHoverPresentsCheckedConstants(t *testing.T) {
+	uri := "file:///tmp/effra-constant-hover.ef"
+	source := "const Suffix: string = \"!\"\nconst Limit: i64 = -1\nconst Enabled: bool = true\n" +
+		"fn render(value: string = Suffix, limit: i64 = Limit, enabled: bool = Enabled) -> string { value }\n"
+	probes := []struct{ context, name, hover string }{
+		{"const Suffix", "Suffix", `const Suffix: string = "!"`},
+		{"= Suffix", "Suffix", `const Suffix: string = "!"`},
+		{"const Limit", "Limit", "const Limit: i64 = -1"},
+		{"= Limit", "Limit", "const Limit: i64 = -1"},
+		{"const Enabled", "Enabled", "const Enabled: bool = true"},
+		{"= Enabled", "Enabled", "const Enabled: bool = true"},
+		{"value: string", "value", `parameter value: string = "!"`},
+	}
+	for _, target := range []string{"go", "js"} {
+		calls := []any{initialize(), initialized(), open(uri, source, 1)}
+		for i, p := range probes {
+			calls = append(calls, pointAt(uri, "textDocument/hover", fmt.Sprintf("hover-%d", i), source, at(t, source, p.context, p.name)))
+		}
+		var in, out bytes.Buffer
+		for _, v := range append(calls, shutdown(), call("exit", nil, nil)) {
+			in.Write(frame(t, v))
+		}
+		if err := Serve(target, nil, &in, &out); err != nil {
+			t.Fatal(err)
+		}
+		byID := responses(t, readMessages(t, &out))
+		for i, p := range probes {
+			if got := hoverText(t, byID[fmt.Sprintf("hover-%d", i)]); got != p.hover {
+				t.Fatalf("%s %q in %q: hover %q, want %q", target, p.name, p.context, got, p.hover)
+			}
+		}
+	}
+}
+
 func TestNavigationUsesUTF16PositionsAndDeclarations(t *testing.T) {
 	uri := "file:///tmp/effra-positions.ef"
 	source := "// 𐐀 note\r\nfn helper(value: string) -> string { value }\r\nfn caller() -> string { let s = \"𐐀é\"; helper(s) }\r\n"

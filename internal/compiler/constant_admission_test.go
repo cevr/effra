@@ -120,3 +120,38 @@ const Alias:string=Ending`
 		t.Fatalf("constant formatter was not idempotent: %q / %v", second.Text, err)
 	}
 }
+
+func TestConstantSelectionsPresentCheckedDeclarations(t *testing.T) {
+	source := `import Defaults "effra/constants"
+const Suffix: string = "!"
+const Limit: i64 = -9223372036854775808
+const Enabled: bool = true
+const LimitAlias: i64 = Limit
+fn render(value: string = Suffix, limit: i64 = LimitAlias, enabled: bool = Enabled, tail: string = Defaults.defaultSuffix) -> string { value }`
+	probes := []struct{ context, name, want string }{
+		{"const Suffix", "Suffix", `const Suffix: string = "!"`},
+		{"value: string = Suffix", "Suffix", `const Suffix: string = "!"`},
+		{"const Limit:", "Limit", `const Limit: i64 = -9223372036854775808`},
+		{"const Enabled", "Enabled", `const Enabled: bool = true`},
+		{"enabled: bool = Enabled", "Enabled", `const Enabled: bool = true`},
+		{"const LimitAlias", "LimitAlias", `const LimitAlias: i64 = -9223372036854775808`},
+		{"limit: i64 = LimitAlias", "LimitAlias", `const LimitAlias: i64 = -9223372036854775808`},
+		{"Defaults.defaultSuffix", "defaultSuffix", `const defaultSuffix: string = "!"`},
+		{"fn render", "render", `fn render(value: string = "!", limit: i64 = -9223372036854775808, enabled: bool = true, tail: string = "!") -> string`},
+	}
+	for _, target := range []string{"go", "js"} {
+		t.Run(target, func(t *testing.T) {
+			r := CompileFor(source, target)
+			if !r.Checked {
+				t.Fatalf("constant presentation fixture rejected on %s: %+v", target, r.Diagnostics)
+			}
+			for _, probe := range probes {
+				offset := strings.Index(source, probe.context) + strings.Index(probe.context, probe.name)
+				response, err := r.QueryType(TypeSelection{Offset: &offset})
+				if err != nil || response.Selection.Presentation != probe.want {
+					t.Fatalf("%s at %q presented %q, want %q (err=%v)", probe.name, probe.context, response.Selection.Presentation, probe.want, err)
+				}
+			}
+		})
+	}
+}
