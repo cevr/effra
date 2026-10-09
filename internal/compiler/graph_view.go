@@ -751,6 +751,9 @@ type graphFacts struct {
 	work        int
 	workLimit   int
 	err         error
+	// refusals counts admissions attempted after the work limit; a producer
+	// that stops at the first refusal keeps it at one.
+	refusals int
 }
 
 func newGraphFacts(kind GraphKind, limits GraphViewLimits) *graphFacts {
@@ -759,9 +762,11 @@ func newGraphFacts(kind GraphKind, limits GraphViewLimits) *graphFacts {
 
 func (f *graphFacts) spend(units int) bool {
 	if f.err != nil {
+		f.refusals++
 		return false
 	}
 	if units > f.workLimit-f.work {
+		f.refusals++
 		f.err = graphRefusal(GraphRefusalWorkLimit, "graph view work exceeds its %d-unit limit", f.workLimit)
 		return false
 	}

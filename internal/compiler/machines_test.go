@@ -65,6 +65,24 @@ func TestMachineStaySameTagRule(t *testing.T) {
 			if got := machineCodes(r); !slices.Equal(got, want) {
 				t.Fatalf("codes = %v, want %v: %+v", got, want, r.Diagnostics)
 			}
+			// Every Stay finding is anchored at the Stay variant token, or at
+			// the caller's call of the first helper that contains the Stay.
+			for _, d := range r.Diagnostics {
+				if d.Code != "EF139" {
+					continue
+				}
+				anchor := string(source)[d.Span.Offset : d.Span.Offset+d.Span.Length]
+				if _, chain, ok := strings.Cut(d.Message, "(through helper "); ok {
+					helper, _, _ := strings.Cut(strings.TrimSuffix(chain, ")"), " -> ")
+					// A Stay in the step whose value comes from a helper stays
+					// at the Stay; a Stay inside a helper anchors at its call.
+					if anchor != helper && anchor != "Stay" {
+						t.Fatalf("helper finding anchored at %q, want %q or Stay", anchor, helper)
+					}
+				} else if anchor != "Stay" {
+					t.Fatalf("Stay finding anchored at %q", anchor)
+				}
+			}
 			if len(want) == 0 && strings.Contains(string(source), "machine Session") && r.FindMachine("Session") == nil {
 				t.Fatal("accepted declaration published no plan")
 			}
@@ -138,6 +156,7 @@ fn jobStep(state: Job, event: Cmd) -> Machines.Step<Job, void> { Machines.Step<J
 machine Jobs { initial Job.Idle {}; step jobStep }`, []string{"EF141"}, "carries a function or effect recipe"},
 		{"duplicate name", machinePrelude + lightStepSource + "machine lightStep { initial Light.Red {}; step lightStep }", []string{"EF101"}, "duplicate declaration lightStep"},
 		{"statechart word", machinePrelude + lightStepSource + "machine Lights { initial Light.Red {}; states { } }", []string{"EF002"}, "machine states is unsupported"},
+		{"gen_statem word", machinePrelude + lightStepSource + "machine Lights { initial Light.Red {}; step lightStep; postpone lightStep }", []string{"EF002"}, "machine postpone is unsupported"},
 		{"duplicate binding", machinePrelude + lightStepSource + "machine Lights { initial Light.Red {}; step lightStep; step lightStep }", []string{"EF002"}, "duplicate machine step binding"},
 		{"inline behavior", machinePrelude + lightStepSource + "machine Lights { initial Light.Red {}; step lightStep(1) }", []string{"EF002"}, "names a module function"},
 		{"type parameters", machinePrelude + lightStepSource + "machine Lights<T> { initial Light.Red {}; step lightStep }", []string{"EF002"}, "take no type parameters"},
@@ -409,7 +428,7 @@ func TestMachineFormattingIsCanonical(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(first.Text, "machine Lights {\n    initial Light.Green {\n        cars: 1\n    }\n    step lightStep\n}") {
+	if FormatterIdentity != "effra/formatter-13" || !strings.Contains(first.Text, "machine Lights {\n    initial Light.Green {\n        cars: 1\n    }\n    step lightStep\n}") {
 		t.Fatalf("formatted:\n%s", first.Text)
 	}
 	second, err := FormatSource(first.Text)

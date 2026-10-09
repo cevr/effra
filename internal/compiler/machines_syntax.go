@@ -45,7 +45,7 @@ var machineStatechartWords = map[string]bool{
 	"states": true, "state": true, "on": true, "after": true, "always": true, "invoke": true,
 	"entry": true, "exit": true, "parallel": true, "history": true, "guard": true, "guards": true,
 	"transition": true, "transitions": true, "context": true, "actions": true, "action": true,
-	"timeout": true, "final": true, "output": true,
+	"timeout": true, "final": true, "output": true, "postpone": true, "state_timeout": true, "event_timeout": true,
 }
 
 func (p *parser) machineDeclaration() *Machine {
@@ -62,7 +62,7 @@ func (p *parser) machineDeclaration() *Machine {
 		case machineInitial, machineStep, machineEnter, machineComplete:
 		default:
 			if machineStatechartWords[head.text] {
-				p.fail(head, "machine "+head.text+" is unsupported: a machine binds only initial, step, enter and complete; hierarchy, parallel regions, history, eventless or delayed transitions, guards and actions stay in ordinary functions")
+				p.fail(head, "machine "+head.text+" is unsupported: a machine binds only initial, step, enter and complete; hierarchy, parallel regions, history, eventless or delayed transitions, postponement, guards and actions stay in ordinary functions")
 			}
 			p.fail(head, "expected a machine binding: initial, step, enter or complete")
 		}

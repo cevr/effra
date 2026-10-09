@@ -221,11 +221,16 @@ func (m *machineCheck) report(code, message string, span Span) {
 	m.c.diagnostic(code, message, span)
 }
 
-func (m *machineCheck) spend() bool {
+// spend charges one unit of the declaration's analysis budget. Exhaustion is a
+// refusal, never a fallback: it reports EF142 once and withholds the plan, so a
+// caller that stops early on false never admits what it did not inspect.
+func (m *machineCheck) spend() bool { return m.charge(1) }
+
+func (m *machineCheck) charge(units int) bool {
 	if m.refused {
 		return false
 	}
-	m.work++
+	m.work += units
 	if m.work > maxMachineWork {
 		m.refused = true
 		m.report(machineBudgetCode, fmt.Sprintf("machine %s analysis exceeds its %d-unit budget; no plan is published", m.machine.Name, maxMachineWork), m.machine.Span)
@@ -360,13 +365,13 @@ func (m *machineCheck) decisionSignature(f *Function, binding *MachineBinding, r
 	}
 	if role == machineStep {
 		m.state, m.enum, m.output = state, enum, output
-		if refusal := m.dataRefusal(state, enum.Name, map[TypeID]bool{}, 0); refusal != "" {
+		if refusal := m.dataRefusal(state, enum.Name, map[TypeID]bool{}); refusal != "" {
 			m.report(machineAdmissionCode, refusal, f.Params[0].Span)
 		}
-		if refusal := m.dataRefusal(f.Params[1].typeID, trigger.Name, map[TypeID]bool{}, 0); refusal != "" {
+		if refusal := m.dataRefusal(f.Params[1].typeID, trigger.Name, map[TypeID]bool{}); refusal != "" {
 			m.report(machineAdmissionCode, refusal, f.Params[1].Span)
 		}
-		if refusal := m.dataRefusal(output, "output "+m.c.displayTypeID(output), map[TypeID]bool{}, 0); refusal != "" {
+		if refusal := m.dataRefusal(output, "output "+m.c.displayTypeID(output), map[TypeID]bool{}); refusal != "" {
 			m.report(machineAdmissionCode, refusal, at)
 		}
 		return trigger
@@ -390,10 +395,16 @@ func (m *machineCheck) decisionSignature(f *Function, binding *MachineBinding, r
 // checker owns machine data: state, event, outcome and output values are
 // closed first-order data. Callables, recipes, providers, fibers and host or
 // runtime handles are refused rather than admitted unchecked.
-func (m *machineCheck) dataRefusal(id TypeID, path string, visiting map[TypeID]bool, depth int) string {
-	if visiting[id] || depth > 32 || !m.spend() {
+//
+// It is a reachability search from one root with a visited set that is never
+// cleared, so every reachable type is inspected exactly once whatever its
+// nesting depth or sharing. Each type costs one budget unit; exhaustion reports
+// EF142 and refuses the declaration instead of admitting the rest.
+func (m *machineCheck) dataRefusal(id TypeID, path string, visited map[TypeID]bool) string {
+	if visited[id] || !m.spend() {
 		return ""
 	}
+	visited[id] = true
 	n := m.c.node(id)
 	if n == nil {
 		return ""
@@ -402,12 +413,10 @@ func (m *machineCheck) dataRefusal(id TypeID, path string, visiting map[TypeID]b
 	case "primitive", "never", "invalid":
 		return ""
 	case "enum", "record", "application":
-		visiting[id] = true
-		defer delete(visiting, id)
 		refusal := ""
 		m.c.walkDataFields(id, func(name string, field Field) {
 			if refusal == "" {
-				refusal = m.dataRefusal(field.typeID, path+"."+name, visiting, depth+1)
+				refusal = m.dataRefusal(field.typeID, path+"."+name, visited)
 			}
 		})
 		return refusal
@@ -431,15 +440,17 @@ func (m *machineCheck) checkInitial(binding *MachineBinding) {
 		return
 	}
 	variant, ok := m.literalVariant(value)
-	if !ok || !m.staticValue(value, 0) {
+	if !ok || !m.staticValue(value) {
 		m.report(machineContractCode, "machine initial state must be a literal "+m.enum.Name+" constructor with a static payload", value.Span)
 		return
 	}
 	m.plan.Initial = MachineInitial{Variant: variant, Span: value.Span}
 }
 
-func (m *machineCheck) staticValue(e *Expr, depth int) bool {
-	if e == nil || depth > 32 || !m.spend() {
+// staticValue admits literal data only. Nesting is bounded by the parsed
+// expression and charged to the budget; exhaustion refuses with EF142.
+func (m *machineCheck) staticValue(e *Expr) bool {
+	if e == nil || !m.spend() {
 		return false
 	}
 	switch e.Kind {
@@ -449,7 +460,7 @@ func (m *machineCheck) staticValue(e *Expr, depth int) bool {
 		return e.Left != nil && e.Left.Kind == "integer"
 	case "construct":
 		for _, field := range e.Fields {
-			if !m.staticValue(field.Value, depth+1) {
+			if !m.staticValue(field.Value) {
 				return false
 			}
 		}
@@ -459,7 +470,7 @@ func (m *machineCheck) staticValue(e *Expr, depth int) bool {
 			return false
 		}
 		for _, field := range e.Fields {
-			if !m.staticValue(field.Value, depth+1) {
+			if !m.staticValue(field.Value) {
 				return false
 			}
 		}
@@ -540,6 +551,7 @@ type machineScope struct {
 	states   map[*localBinding]bool
 	triggers map[*localBinding]bool
 	lets     map[*localBinding]*Expr
+	roots    map[*localBinding]*localBinding
 	active   map[*Function]bool
 	via      []string
 	site     Span
@@ -550,7 +562,7 @@ func (m *machineCheck) walkRole(f *Function, role string, trigger *Enum) {
 		return
 	}
 	m.role, m.trigger = role, trigger
-	scope := &machineScope{states: map[*localBinding]bool{}, triggers: map[*localBinding]bool{}, lets: map[*localBinding]*Expr{}, active: map[*Function]bool{f: true}}
+	scope := &machineScope{states: map[*localBinding]bool{}, triggers: map[*localBinding]bool{}, lets: map[*localBinding]*Expr{}, roots: map[*localBinding]*localBinding{}, active: map[*Function]bool{f: true}}
 	if b := f.Params[0].binding; b != nil {
 		scope.states[b] = true
 	}
@@ -574,17 +586,46 @@ func (m *machineCheck) block(s *machineScope, b *Block, n machineNarrowing, tail
 	}
 }
 
-func (m *machineCheck) denotes(set map[*localBinding]bool, s *machineScope, e *Expr, depth int) bool {
-	if e == nil || e.Kind != "name" || e.binding == nil || depth > 16 {
+// denotes reports whether e names a binder in set, through any chain of let
+// aliases. Alias chains have no depth cutoff: each binder resolves once per
+// scope to its root (memoized in s.roots), each resolution step costs one
+// budget unit, and exhaustion refuses the declaration with EF142. A cutoff that
+// answered "unrelated" would silently drop narrowing and admit a wrong-tag Stay.
+func (m *machineCheck) denotes(set map[*localBinding]bool, s *machineScope, e *Expr) bool {
+	if e == nil || e.Kind != "name" || e.binding == nil {
 		return false
 	}
-	if set[e.binding] {
-		return true
+	root := m.aliasRoot(s, e.binding)
+	return root != nil && set[root]
+}
+
+// aliasRoot follows let aliases from b to the binder they name. It returns nil
+// once the budget is exhausted (already refused).
+func (m *machineCheck) aliasRoot(s *machineScope, b *localBinding) *localBinding {
+	if root, ok := s.roots[b]; ok {
+		return root
 	}
-	if value, ok := s.lets[e.binding]; ok {
-		return m.denotes(set, s, value, depth+1)
+	chain, onChain := []*localBinding{}, map[*localBinding]bool{}
+	root := b
+	for {
+		if cached, ok := s.roots[root]; ok {
+			root = cached
+			break
+		}
+		value, ok := s.lets[root]
+		if !ok || value == nil || value.Kind != "name" || value.binding == nil || onChain[root] {
+			break
+		}
+		if !m.spend() {
+			return nil
+		}
+		chain, onChain[root] = append(chain, root), true
+		root = value.binding
 	}
-	return false
+	for _, alias := range chain {
+		s.roots[alias] = root
+	}
+	return root
 }
 
 // arm intersects the narrowing with every cell whose subject is the current
@@ -597,12 +638,12 @@ func (m *machineCheck) arm(s *machineScope, match *Expr, arm *MatchArm, n machin
 			continue
 		}
 		switch {
-		case m.denotes(s.states, s, subject, 0):
+		case m.denotes(s.states, s, subject):
 			out.states = out.states.refine(arm.Patterns[index])
 			if len(out.states) == 0 {
 				return out, exact, false
 			}
-		case m.denotes(s.triggers, s, subject, 0):
+		case m.denotes(s.triggers, s, subject):
 			out.triggers = out.triggers.refine(arm.Patterns[index])
 			if len(out.triggers) == 0 {
 				return out, exact, false
@@ -697,11 +738,40 @@ func (m *machineCheck) follow(s *machineScope, call *Expr, n machineNarrowing, t
 	if !ok || state != m.state {
 		return false
 	}
-	if s.active[callee] || len(s.via) >= maxMachineHelperDepth {
+	if s.active[callee] {
+		// Recursion re-enters a body already walked under a wider narrowing:
+		// narrowing only shrinks along a chain, so nothing new can fail.
 		return false
+	}
+	if len(s.via) >= maxMachineHelperDepth {
+		return m.helperDepthExhausted(s, call, n)
 	}
 	inner := m.helperScope(s, callee, call)
 	m.block(inner, callee.Body, n, tail, guarded)
+	return true
+}
+
+// helperDepthExhausted decides a followable helper call beyond the helper
+// depth. When the current state is narrowed here, or the call passes the
+// current state, the helper could produce a Stay the rule must judge, so the
+// declaration is refused with EF142 rather than admitted unread. Otherwise
+// every Stay inside it is unnarrowed, which the rule leaves to the runtime
+// defect, and the conservative decision the caller records is exact. It
+// reports whether the call was refused.
+func (m *machineCheck) helperDepthExhausted(s *machineScope, call *Expr, n machineNarrowing) bool {
+	carries := n.states != nil
+	for _, argument := range call.Args {
+		carries = carries || m.denotes(s.states, s, argument)
+	}
+	if !carries {
+		return false
+	}
+	chain := append(slices.Clone(s.via), call.ResolvedFunction.Name)
+	at := call.Span
+	if s.site.Length > 0 {
+		at = s.site
+	}
+	m.report(machineBudgetCode, fmt.Sprintf("machine %s cannot check Step.Stay through helper %s: the chain exceeds %d helpers while the current state is narrowed or passed; no plan is published", m.machine.Name, strings.Join(chain, " -> "), maxMachineHelperDepth), at)
 	return true
 }
 
@@ -714,7 +784,7 @@ func (m *machineCheck) helperScope(s *machineScope, callee *Function, call *Expr
 	if len(s.via) == 0 {
 		site = call.Span
 	}
-	inner := &machineScope{states: map[*localBinding]bool{}, triggers: map[*localBinding]bool{}, lets: map[*localBinding]*Expr{}, active: active, via: append(slices.Clone(s.via), callee.Name), site: site}
+	inner := &machineScope{states: map[*localBinding]bool{}, triggers: map[*localBinding]bool{}, lets: map[*localBinding]*Expr{}, roots: map[*localBinding]*localBinding{}, active: active, via: append(slices.Clone(s.via), callee.Name), site: site}
 	for index, argument := range call.Args {
 		parameter := index
 		if index < len(call.ArgumentParameters) {
@@ -723,10 +793,10 @@ func (m *machineCheck) helperScope(s *machineScope, callee *Function, call *Expr
 		if parameter < 0 || parameter >= len(callee.Params) || callee.Params[parameter].binding == nil {
 			continue
 		}
-		if m.denotes(s.states, s, argument, 0) {
+		if m.denotes(s.states, s, argument) {
 			inner.states[callee.Params[parameter].binding] = true
 		}
-		if m.denotes(s.triggers, s, argument, 0) {
+		if m.denotes(s.triggers, s, argument) {
 			inner.triggers[callee.Params[parameter].binding] = true
 		}
 	}
@@ -747,7 +817,7 @@ func (m *machineCheck) paths(s *machineScope, e *Expr, n machineNarrowing) []sta
 	if e == nil || !m.spend() {
 		return []statePath{{}}
 	}
-	if m.denotes(s.states, s, e, 0) {
+	if m.denotes(s.states, s, e) {
 		return []statePath{{same: true, narrowed: n.states, span: e.Span, via: s.via}}
 	}
 	if variant, ok := m.literalVariant(e); ok {
@@ -773,7 +843,11 @@ func (m *machineCheck) paths(s *machineScope, e *Expr, n machineNarrowing) []sta
 		return m.blockPaths(s, e.Then, n)
 	case "call":
 		callee := e.ResolvedFunction
-		if callee != nil && callee.Body != nil && callee.Module == currentModuleIdentity && callee.returnID == m.state && !callee.Effect && !s.active[callee] && len(s.via) < maxMachineHelperDepth {
+		if callee != nil && callee.Body != nil && callee.Module == currentModuleIdentity && callee.returnID == m.state && !callee.Effect && !s.active[callee] {
+			if len(s.via) >= maxMachineHelperDepth {
+				m.helperDepthExhausted(s, e, n)
+				return []statePath{{span: e.Span, via: s.via}}
+			}
 			return m.blockPaths(m.helperScope(s, callee, e), callee.Body, n)
 		}
 	}
@@ -835,6 +909,11 @@ func (m *machineCheck) transition(s *machineScope, span Span, n machineNarrowing
 	}
 	if targets == nil {
 		targets = []string{}
+	}
+	// A transition's From and Targets lists are plan output; charging them
+	// bounds plan size, the enterable fixpoint and the graph projection.
+	if !m.charge(len(targets) + len(n.states.ordered(m.enum))) {
+		return
 	}
 	t := MachineTransition{Role: m.role, From: n.states.ordered(m.enum), On: n.triggers.ordered(m.trigger), Decision: decision, Targets: targets, Precision: precision, Guarded: guarded, Via: slices.Clone(s.via), Span: span}
 	for _, existing := range m.plan.Transitions {
@@ -928,25 +1007,34 @@ func (m *machineCheck) finishPlan(step *Function, event *Enum, complete *Functio
 	}
 	plan.TerminalFailures = machineContributions(failures)
 	plan.Requirements = machineContributions(services)
+	// Enterable states: a worklist over the transitions indexed by source, so
+	// the work is linear in the charged plan size.
+	bySource := map[string][]int{}
+	for index, t := range plan.Transitions {
+		if t.Decision == machineDecisionDone || t.Decision == machineDecisionAny {
+			plan.Terminal = true
+		}
+		if t.Decision != machineDecisionGo && t.Decision != machineDecisionStay && t.Decision != machineDecisionAny {
+			continue
+		}
+		for _, from := range t.From {
+			bySource[from] = append(bySource[from], index)
+		}
+	}
 	enterable := machineVariants{plan.Initial.Variant: true}
-	for changed := true; changed; {
-		changed = false
-		for _, t := range plan.Transitions {
-			if t.Decision == machineDecisionDone {
-				plan.Terminal = true
-			}
-			if t.Decision == machineDecisionAny {
-				plan.Terminal = true
-			}
-			if t.Decision != machineDecisionGo && t.Decision != machineDecisionStay && t.Decision != machineDecisionAny {
+	fired := make([]bool, len(plan.Transitions))
+	for work := []string{plan.Initial.Variant}; len(work) > 0; {
+		state := work[len(work)-1]
+		work = work[:len(work)-1]
+		for _, index := range bySource[state] {
+			if fired[index] {
 				continue
 			}
-			if !slices.ContainsFunc(t.From, func(variant string) bool { return enterable[variant] }) {
-				continue
-			}
-			for _, target := range t.Targets {
+			fired[index] = true
+			for _, target := range plan.Transitions[index].Targets {
 				if !enterable[target] {
-					enterable[target], changed = true, true
+					enterable[target] = true
+					work = append(work, target)
 				}
 			}
 		}

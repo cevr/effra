@@ -1006,26 +1006,28 @@ func (r *Result) CheckResponse() map[string]any {
 	}
 	r.AddProducer(response)
 	if projection.Complete {
-		response["symbols"] = r.Symbols
-		response["layers"] = r.Layers
-		if len(r.Machines) > 0 {
-			response["machines"] = r.Machines
+		// Every table that references the projected types, rows or
+		// declarations lives in this one map, so a refusal removes all of them
+		// together and a new table cannot be left behind with dangling refs.
+		metadata := map[string]any{
+			"symbols": r.Symbols, "layers": r.Layers, "declarations": r.Declarations, "bindings": r.Bindings,
+			"types": projection.Types, "rows": projection.Rows, "sources": r.Sources,
+			"bundledBindings": r.BundledBindings, "bundledInterfaces": r.BundledInterfaces,
 		}
-		response["declarations"] = r.Declarations
-		response["bindings"] = r.Bindings
-		response["types"] = projection.Types
-		response["rows"] = projection.Rows
-		response["sources"] = r.Sources
-		response["bundledBindings"] = r.BundledBindings
-		response["bundledInterfaces"] = r.BundledInterfaces
+		if len(r.Machines) > 0 {
+			metadata["machines"] = r.Machines
+		}
 		if len(r.Codecs) > 0 {
-			response["codecs"] = r.Codecs
-			response["codecPlans"] = r.CodecPlans
+			metadata["codecs"] = r.Codecs
+			metadata["codecPlans"] = r.CodecPlans
+		}
+		for key, value := range metadata {
+			response[key] = value
 		}
 		usage, err := r.ValidateProjectionResponse(projection, response)
 		if err != nil {
 			projection = refusedProjection(projection.Limits, usage, err.Error())
-			for _, key := range []string{"symbols", "layers", "declarations", "bindings", "types", "rows", "sources", "bundledBindings", "bundledInterfaces", "codecs", "codecPlans"} {
+			for key := range metadata {
 				delete(response, key)
 			}
 			response["typeProjectionComplete"] = false
