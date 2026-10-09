@@ -100,13 +100,23 @@ These hold once lowering lands, all through ordinary diagnostics:
 - *Contract-erasing provider.* An implementation of `start` whose result drops `F`, or whose `uses` omits `R`, fails conformance against the operation (EF104 or the row diagnostics). An adapter that changes rows must be visible at its own typed boundary.
 - *Forged plan.* Building a `Plan` record by hand is refused, because only lowering of a checked declaration constructs one: `facts.evidence` is `checked-static-machine-plan`, and the record is opaque to user construction. This rests on the [opaque-value evidence](../research/opaque-values-and-evidence.md) work. Until that work lands, this control is unresolved and the draft must not ship.
 
+### Against the `gen_statem` engine
+
+The engine loop in `gen_statem` (OTP `516126e9`, `lib/stdlib/src/gen_statem.erl`, the *state transition* sequence) is the closest existing provider. It shows which duties belong to the provider and which this contract moves elsewhere:
+
+- *Serial evaluation and queueing* are the engine's in `gen_statem`: one process, one callback at a time, `next_event` insertion ahead of the queue. The provider owns these here too, plus bounded admission, which `gen_statem` leaves to the mailbox.
+- *State change detection* is a runtime term comparison in `gen_statem`. Here the plan's decision says it, `Go` or `Stay`, and the static `Stay` rule is a compiler fact the provider must not re-derive. A provider still owes the runtime defect for a dynamic `Stay` that changes the tag.
+- *State enter calls* run after a state change and may not change state (`enter_action()`). Entry work here is the same shape, but the provider also owns the entry's scope and cleans it up before committing the next state. `gen_statem` has no per-state ownership, so this obligation is new.
+- *Postpone and time-outs* (`postpone`, `event_timeout`, `state_timeout` and generic time-outs) are engine features in `gen_statem`. They are outside the first profile. When added, a state time-out should be entry-owned work, so the entry epoch cancels it, rather than a provider-private timer that bypasses the plan.
+- *Termination* in `gen_statem` is `{stop, Reason}` plus `terminate/3`. Here it is `Done(output)` after cleanup, or a terminal typed failure that waiting observations receive, and a provider must keep the complete cause.
+
 ### Prior art
 
 - *XState v6.* `ActorLogic` with `transition`/`getInitialSnapshot` and `createActor(logic)` separates logic from the runtime with many type parameters that users rarely write. Effra's split is the same, except that the decision is a checked `Step` value rather than a snapshot.
-- *Erlang gen_statem.* A callback module supplies `init` and the state functions, the `gen_statem` behaviour owns the process, and `keep_state` corresponds to `Stay`. The provider here plays the behaviour's part.
+- *Erlang gen_statem.* A callback module supplies `init` and the state functions, the `gen_statem` behaviour owns the process, and `keep_state` corresponds to `Stay`. The provider here plays the behaviour's part. See the comparison below.
+- *Elixir.* There is no machine abstraction in core; Elixir programs use `:gen_statem` directly or a wrapper library. `GenServer` shows the same split between behaviour and process.
 - *effect-machine and Effect.* `Machine<State, Event, R>` keeps services in the type, which is the model for `uses { R }` as the spawn charge.
 - *Akka Typed.* `Behavior[T]` is a value that a separate `ActorSystem` runs, and `Behaviors.same` is a runtime keep-state marker. Effra checks the narrowed case statically.
-- *Elixir.* `GenServer` and `:gen_statem` show the same separation of behaviour and process.
 - *Rust typestate.* Illegal transitions are unrepresentable for statically known states. The checked plan carries that guarantee as facts, and the provider never re-derives it.
 - *MoonBit and Roc.* The platform/application split, where the application is pure description and the platform owns effects, matches the plan and provider split: the provider is the swappable platform for one plan.
 
