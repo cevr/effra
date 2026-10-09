@@ -3,6 +3,7 @@ package effra
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -64,9 +65,13 @@ type CodecBounds struct {
 // CodecNode describes one canonical type. Primitive carriers are fixed:
 // string, bool, struct{}{} for void and int64. Record and union nodes carry a
 // nominal Type identity and compiler-generated adapters: Construct receives a
-// variant index (0 for records) and decoded field values in declared order;
-// Project returns them for encoding. Adapters are trusted compiler output, so
-// a carrier mismatch is a defect (panic), never a typed codec failure.
+// variant index (0 for records) and decoded field values in declared order.
+// A union node's Variant names the variant its carrier holds. For encoding,
+// a record carrier, and the value a union carrier holds, is a struct whose
+// fields are the declared fields in declared order; the engine reads those
+// fields in place, so encoding never copies a nested record. A carrier
+// without declared fields is not read (a fieldless failure's is nil). Adapters and carriers are trusted compiler output,
+// so a mismatch is a defect (panic), never a typed codec failure.
 //
 // A transform node carries its witness identity as Type, its representation
 // node as Child and the index of its transformation among the plan's Steps.
@@ -77,7 +82,7 @@ type CodecNode struct {
 	Fields    []CodecField
 	Variants  []CodecVariant
 	Construct func(variant int, fields []any) any
-	Project   func(value any) (variant int, fields []any)
+	Variant   func(value any) int
 	Child     int
 	Step      int
 }
@@ -169,9 +174,12 @@ type codecNode struct {
 	variants  []codecVariant
 	tags      map[string]int
 	construct func(int, []any) any
-	project   func(any) (int, []any)
-	child     *codecNode
-	step      int
+	variant   func(any) int
+	// open is a record's opening brace; a union's opening bytes are its
+	// variants'.
+	open  []byte
+	child *codecNode
+	step  int
 	// pending marks a node whose subtree contains a transformation. Its
 	// structural phase carries codecPending values instead of carriers, and
 	// its transformation phase completes them in declared order.
@@ -247,7 +255,7 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 	for index, node := range plan.Nodes {
 		switch node.Kind {
 		case CodecString, CodecBool, CodecVoid, CodecI64:
-			if node.Type != "" || len(node.Fields) > 0 || len(node.Variants) > 0 || node.Construct != nil || node.Project != nil || node.Child != 0 || node.Step != 0 {
+			if node.Type != "" || len(node.Fields) > 0 || len(node.Variants) > 0 || node.Construct != nil || node.Variant != nil || node.Child != 0 || node.Step != 0 {
 				return invalid("primitive node %d carries nominal structure", index)
 			}
 			if previous, ok := primitives[node.Kind]; ok {
@@ -255,8 +263,8 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 			}
 			primitives[node.Kind] = index
 		case CodecRecord, CodecUnion:
-			if node.Type == "" || node.Construct == nil || node.Project == nil {
-				return invalid("nominal node %d needs a type identity and both adapters", index)
+			if node.Type == "" || node.Construct == nil || (node.Variant != nil) != (node.Kind == CodecUnion) {
+				return invalid("nominal node %d needs a type identity, Construct and, for a union only, Variant", index)
 			}
 			if node.Child != 0 || node.Step != 0 {
 				return invalid("nominal node %d carries transform structure", index)
@@ -266,7 +274,7 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 			}
 			types[node.Type] = index
 		case CodecTransform:
-			if node.Type == "" || len(node.Fields) > 0 || len(node.Variants) > 0 || node.Construct != nil || node.Project != nil {
+			if node.Type == "" || len(node.Fields) > 0 || len(node.Variants) > 0 || node.Construct != nil || node.Variant != nil {
 				return invalid("transform node %d needs a witness identity and no structure of its own", index)
 			}
 			if previous, ok := types[node.Type]; ok {
@@ -287,7 +295,7 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 		default:
 			return invalid("node %d has unsupported kind %q", index, node.Kind)
 		}
-		compiled[index] = codecNode{kind: node.Kind, construct: node.Construct, project: node.Project, step: node.Step}
+		compiled[index] = codecNode{kind: node.Kind, construct: node.Construct, variant: node.Variant, step: node.Step}
 		switch node.Kind {
 		case CodecRecord:
 			if len(node.Variants) > 0 {
@@ -336,7 +344,7 @@ func CompileCodec(plan CodecPlan) (*Codec, error) {
 		case CodecTransform:
 			compiled[index].child = &compiled[node.Child]
 		case CodecRecord:
-			compiled[index].fields = link(node.Fields)
+			compiled[index].fields, compiled[index].open = link(node.Fields), []byte{'{'}
 		case CodecUnion:
 			compiled[index].variants = make([]codecVariant, len(node.Variants))
 			for variant, alternative := range node.Variants {
@@ -483,7 +491,9 @@ func (c *Codec) Encode(value any) ([]byte, error) { return c.EncodeSteps(value, 
 // writer reaches it. Output larger than MaxBodyBytes is a typed failure,
 // detected before any byte beyond the bound is constructed, and nothing
 // else is retained: encoder memory is O(MaxBodyBytes) plus the plan's
-// nesting, whatever the value's size or sharing. Transformations run in
+// nesting, whatever the value's size or sharing. The value is read in
+// place: a nested record is never copied, and only a transformation's
+// domain value is handed to its step. Transformations run in
 // declared depth-first (pre)order, and every one runs before any
 // structural failure is reported, so a step's error, returned unchanged,
 // takes precedence over every structural failure. Structural failures
@@ -493,13 +503,16 @@ func (c *Codec) Encode(value any) ([]byte, error) { return c.EncodeSteps(value, 
 func (c *Codec) EncodeSteps(value any, steps []CodecStep) ([]byte, error) {
 	c.checkSteps(steps)
 	encoder := codecEncoder{limit: c.bounds.MaxBodyBytes}
+	// ValueOf of an interface value is not addressable, so every field,
+	// element and held value derived from it aliases the caller's memory.
+	carrier := reflect.ValueOf(value)
 	if !c.root.pending {
-		if failure := c.root.encode(&encoder, value, nil); failure != nil {
+		if failure := c.root.encode(&encoder, carrier, nil); failure != nil {
 			return nil, failure
 		}
 		return encoder.out, nil
 	}
-	if err := c.root.stream(&encoder, value, nil, steps); err != nil {
+	if err := c.root.stream(&encoder, carrier, nil, steps); err != nil {
 		return nil, err
 	}
 	if encoder.failure != nil {
@@ -515,7 +528,7 @@ func (c *Codec) EncodeSteps(value any, steps []CodecStep) ([]byte, error) {
 // retained, but the pass continues through pending nodes only, running the
 // remaining transformations, so the observable steps and the precedence of
 // a step's error are those of running every transformation first.
-func (n *codecNode) stream(e *codecEncoder, value any, path *codecPath, steps []CodecStep) error {
+func (n *codecNode) stream(e *codecEncoder, value reflect.Value, path *codecPath, steps []CodecStep) error {
 	if !n.pending {
 		if e.failure == nil {
 			e.failure = n.encode(e, value, path)
@@ -523,23 +536,18 @@ func (n *codecNode) stream(e *codecEncoder, value any, path *codecPath, steps []
 		return nil
 	}
 	if n.kind == CodecTransform {
-		represented, err := steps[n.step](value)
+		var domain any
+		if value = codecHeld(value); value.IsValid() {
+			// Interface on a non-addressable value shares its memory.
+			domain = value.Interface()
+		}
+		represented, err := steps[n.step](domain)
 		if err != nil {
 			return err
 		}
-		return n.child.stream(e, represented, path, steps)
+		return n.child.stream(e, reflect.ValueOf(represented), path, steps)
 	}
-	variant, projected := n.project(value)
-	fields, open, separated := n.fields, []byte{'{'}, false
-	if n.kind == CodecUnion {
-		if variant < 0 || variant >= len(n.variants) {
-			panic(fmt.Sprintf("effra codec: union adapter returned variant %d of %d", variant, len(n.variants)))
-		}
-		fields, open, separated = n.variants[variant].fields, n.variants[variant].open, true
-	}
-	if len(projected) != len(fields) {
-		panic(fmt.Sprintf("effra codec: adapter returned %d fields for %d declared", len(projected), len(fields)))
-	}
+	fields, open, separated, carrier := n.carrier(value)
 	e.emit(open...)
 	for i, field := range fields {
 		if separated {
@@ -553,12 +561,58 @@ func (n *codecNode) stream(e *codecEncoder, value any, path *codecPath, steps []
 			// pass that already failed allocates none.
 			at = &codecPath{parent: path, name: field.name}
 		}
-		if err := field.node.stream(e, projected[i], at, steps); err != nil {
+		if err := field.node.stream(e, carrier.Field(i), at, steps); err != nil {
 			return err
 		}
 	}
 	e.emit('}')
 	return nil
+}
+
+// codecHeld unwraps an interface-typed field to the value it holds, without
+// copying it.
+func codecHeld(value reflect.Value) reflect.Value {
+	if value.Kind() == reflect.Interface {
+		return value.Elem()
+	}
+	return value
+}
+
+// codecCarrierType names a carrier's Go type for a defect message.
+func codecCarrierType(value reflect.Value) string {
+	if !value.IsValid() {
+		return "nil"
+	}
+	return value.Type().String()
+}
+
+// carrier resolves a nominal node's carrier in place: the declared fields of
+// the record or of the variant it holds, the bytes that open its object, and
+// the struct whose fields are those fields in declared order. A carrier
+// without declared fields is not read, so a fieldless failure's carrier may
+// be nil.
+func (n *codecNode) carrier(value reflect.Value) (fields []codecField, open []byte, separated bool, carrier reflect.Value) {
+	carrier = codecHeld(value)
+	fields, open = n.fields, n.open
+	if n.kind == CodecUnion {
+		var held any
+		if carrier.IsValid() {
+			held = carrier.Interface()
+		}
+		index := n.variant(held)
+		if index < 0 || index >= len(n.variants) {
+			panic(fmt.Sprintf("effra codec: union adapter returned variant %d of %d", index, len(n.variants)))
+		}
+		fields, open, separated = n.variants[index].fields, n.variants[index].open, true
+	}
+	if len(fields) == 0 {
+		// Nothing is read from a carrier without declared fields.
+		return fields, open, separated, carrier
+	}
+	if !carrier.IsValid() || carrier.Kind() != reflect.Struct || carrier.NumField() != len(fields) {
+		panic(fmt.Sprintf("effra codec: %s carrier %s does not hold its %d declared fields", n.kind, codecCarrierType(carrier), len(fields)))
+	}
+	return fields, open, separated, carrier
 }
 
 // codecPath is a parent-linked failure path; it is materialized only when a
@@ -691,82 +745,55 @@ func codecSpell(prefix, text, suffix string) []byte {
 	return append(e.out, suffix...)
 }
 
-func (n *codecNode) encode(e *codecEncoder, value any, path *codecPath) *CodecError {
+func (n *codecNode) encode(e *codecEncoder, value reflect.Value, path *codecPath) *CodecError {
+	value = codecHeld(value)
+	leaf := func(want reflect.Type) {
+		if !value.IsValid() || value.Type() != want {
+			panic(fmt.Sprintf("effra codec: %s node received %s", n.kind, codecCarrierType(value)))
+		}
+	}
 	switch n.kind {
 	case CodecString:
-		text, ok := value.(string)
-		if !ok {
-			panic(fmt.Sprintf("effra codec: string node received %T", value))
-		}
+		leaf(reflect.TypeFor[string]())
+		text := value.String()
 		if !utf8.ValidString(text) {
 			return codecFailure(CodecEncode, CodecInvalidUnicode, path)
 		}
 		return e.writeString(text)
 	case CodecBool:
-		boolean, ok := value.(bool)
-		if !ok {
-			panic(fmt.Sprintf("effra codec: bool node received %T", value))
-		}
+		leaf(reflect.TypeFor[bool]())
 		var scratch [5]byte
-		return e.write(strconv.AppendBool(scratch[:0], boolean)...)
+		return e.write(strconv.AppendBool(scratch[:0], value.Bool())...)
 	case CodecVoid:
-		if _, ok := value.(struct{}); !ok {
-			panic(fmt.Sprintf("effra codec: void node received %T", value))
-		}
+		leaf(reflect.TypeFor[struct{}]())
 		return e.write('n', 'u', 'l', 'l')
 	case CodecI64:
-		number, ok := value.(int64)
-		if !ok {
-			panic(fmt.Sprintf("effra codec: i64 node received %T", value))
-		}
+		leaf(reflect.TypeFor[int64]())
 		var scratch [22]byte
-		quoted := append(strconv.AppendInt(append(scratch[:0], '"'), number, 10), '"')
+		quoted := append(strconv.AppendInt(append(scratch[:0], '"'), value.Int(), 10), '"')
 		return e.write(quoted...)
-	case CodecRecord:
-		_, fields := n.project(value)
-		if failure := e.write('{'); failure != nil {
+	case CodecRecord, CodecUnion:
+		fields, open, separated, carrier := n.carrier(value)
+		if failure := e.write(open...); failure != nil {
 			return failure
 		}
-		if failure := encodeCodecFields(e, n.fields, fields, path, false); failure != nil {
-			return failure
-		}
-		return e.write('}')
-	case CodecUnion:
-		index, fields := n.project(value)
-		if index < 0 || index >= len(n.variants) {
-			panic(fmt.Sprintf("effra codec: union adapter returned variant %d of %d", index, len(n.variants)))
-		}
-		variant := n.variants[index]
-		if failure := e.write(variant.open...); failure != nil {
-			return failure
-		}
-		if failure := encodeCodecFields(e, variant.fields, fields, path, true); failure != nil {
-			return failure
+		for i, field := range fields {
+			if separated {
+				if failure := e.write(','); failure != nil {
+					return failure
+				}
+			}
+			separated = true
+			if failure := e.write(field.key...); failure != nil {
+				return failure
+			}
+			if failure := field.node.encode(e, carrier.Field(i), &codecPath{parent: path, name: field.name}); failure != nil {
+				return failure
+			}
 		}
 		return e.write('}')
 	}
 	panic("effra codec: unvalidated node kind " + string(n.kind))
-}
-
-func encodeCodecFields(e *codecEncoder, fields []codecField, values []any, path *codecPath, separated bool) *CodecError {
-	if len(values) != len(fields) {
-		panic(fmt.Sprintf("effra codec: adapter returned %d fields for %d declared", len(values), len(fields)))
-	}
-	for i, field := range fields {
-		if separated {
-			if failure := e.write(','); failure != nil {
-				return failure
-			}
-		}
-		separated = true
-		if failure := e.write(field.key...); failure != nil {
-			return failure
-		}
-		if failure := field.node.encode(e, values[i], &codecPath{parent: path, name: field.name}); failure != nil {
-			return failure
-		}
-	}
-	return nil
 }
 
 // codecParseI64 accepts an optional '-' and ASCII digits. Leading zeros and

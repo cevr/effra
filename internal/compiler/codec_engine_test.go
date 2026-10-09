@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -298,19 +299,53 @@ func codecComparison(expect codecOutcome, effect codecEffectLine, parseFailure s
 	return "difference"
 }
 
-// codecVectorCarrier stands in for compiler-generated record and union
-// carriers: the variant index and declared-order field values.
-type codecVectorCarrier struct {
-	variant int
-	fields  []any
+// codecVectorCarrier stands in for a compiler-generated record or union
+// carrier: like a generated struct, it holds the declared fields in
+// declared order, so the engine reads it in place. Its field names carry
+// the variant index; a fieldless variant's carrier is its index.
+func codecVectorCarrier(variant int, fields []any) any {
+	if len(fields) == 0 {
+		return variant
+	}
+	declared := make([]reflect.StructField, len(fields))
+	for i := range fields {
+		declared[i] = reflect.StructField{Name: "V" + strconv.Itoa(variant) + "F" + strconv.Itoa(i), Type: reflect.TypeFor[any]()}
+	}
+	carrier := reflect.New(reflect.StructOf(declared)).Elem()
+	for i := range fields {
+		carrier.Field(i).Set(reflect.ValueOf(&fields[i]).Elem())
+	}
+	return carrier.Interface()
+}
+
+// codecVectorVariant is the variant index a stand-in carrier holds.
+func codecVectorVariant(value any) int {
+	if index, ok := value.(int); ok {
+		return index
+	}
+	name := reflect.TypeOf(value).Field(0).Name
+	index, err := strconv.Atoi(name[1:strings.IndexByte(name, 'F')])
+	if err != nil {
+		panic(err)
+	}
+	return index
+}
+
+// codecVectorFields are a stand-in carrier's declared-order field values.
+func codecVectorFields(value any) []any {
+	if _, ok := value.(int); ok {
+		return nil
+	}
+	carrier := reflect.ValueOf(value)
+	fields := make([]any, carrier.NumField())
+	for i := range fields {
+		fields[i] = carrier.Field(i).Interface()
+	}
+	return fields
 }
 
 func codecVectorGoPlan(plan codecVectorPlan, profile string) rt.CodecPlan {
-	construct := func(variant int, fields []any) any { return codecVectorCarrier{variant: variant, fields: fields} }
-	project := func(value any) (int, []any) {
-		carrier := value.(codecVectorCarrier)
-		return carrier.variant, carrier.fields
-	}
+	construct := func(variant int, fields []any) any { return codecVectorCarrier(variant, fields) }
 	fields := func(list []codecVectorField) []rt.CodecField {
 		out := []rt.CodecField{}
 		for _, field := range list {
@@ -324,13 +359,13 @@ func codecVectorGoPlan(plan codecVectorPlan, profile string) rt.CodecPlan {
 		switch compiled.Kind {
 		case rt.CodecRecord:
 			compiled.Fields = fields(node.Fields)
-			compiled.Construct, compiled.Project = construct, project
+			compiled.Construct = construct
 		case rt.CodecUnion:
 			compiled.Variants = []rt.CodecVariant{}
 			for _, variant := range node.Variants {
 				compiled.Variants = append(compiled.Variants, rt.CodecVariant{Tag: variant.Tag, Fields: fields(variant.Fields)})
 			}
-			compiled.Construct, compiled.Project = construct, project
+			compiled.Construct, compiled.Variant = construct, codecVectorVariant
 		case rt.CodecTransform:
 			compiled.Child, compiled.Step = node.Child, node.Step
 		}
@@ -374,11 +409,11 @@ func codecVectorGoValue(t *testing.T, plan codecVectorPlan, index int, value any
 		}
 		return number
 	case "record":
-		return codecVectorCarrier{fields: fields(node.Fields, marker)}
+		return codecVectorCarrier(0, fields(node.Fields, marker))
 	case "union":
 		for position, variant := range node.Variants {
 			if variant.Tag == marker["$variant"] {
-				return codecVectorCarrier{variant: position, fields: fields(variant.Fields, marker["fields"].(map[string]any))}
+				return codecVectorCarrier(position, fields(variant.Fields, marker["fields"].(map[string]any)))
 			}
 		}
 	}

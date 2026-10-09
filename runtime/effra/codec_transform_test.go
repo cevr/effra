@@ -3,6 +3,7 @@ package effra
 import (
 	"errors"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -33,17 +34,12 @@ func codecTestProfilePlan() CodecPlan {
 				Construct: func(_ int, f []any) any {
 					return codecTestProfile{ID: f[0].(string), Email: f[1].(codecTestEmail), Contact: f[2].(codecTestContact), Active: f[3].(bool)}
 				},
-				Project: func(v any) (int, []any) {
-					p := v.(codecTestProfile)
-					return 0, []any{p.ID, p.Email, p.Contact, p.Active}
-				},
 			},
 			{Kind: CodecTransform, Type: "witness:emailJson", Child: 0, Step: 0},
 			{
 				Kind: CodecRecord, Type: "Contact",
 				Fields:    []CodecField{{"email", 2}},
 				Construct: func(_ int, f []any) any { return codecTestContact{Email: f[0].(codecTestEmail)} },
-				Project:   func(v any) (int, []any) { return 0, []any{v.(codecTestContact).Email} },
 			},
 			{Kind: CodecBool},
 		},
@@ -211,14 +207,26 @@ func TestCodecTransformPlanValidation(t *testing.T) {
 	}
 }
 
-// codecTestShared is a level of a balanced binary value whose two children
-// are one shared value, so a value of 2*levels small objects in memory
-// encodes to 2^levels transformed leaves.
-type codecTestShared struct{ fields []any }
+// codecTestPair is a record whose two fields hold the level below inline,
+// as the Go backend stores nested records: a value of n levels is one
+// contiguous struct of 2^n leaves. Projecting such a record into boxed
+// fields copies each child's whole subtree.
+type codecTestPair[T any] struct{ A, B T }
 
-// codecTestSharedPlan has one record node per level (Level1..levels, both
+func codecTestDouble[T any](leaf T) codecTestPair[T] { return codecTestPair[T]{leaf, leaf} }
+
+// codecTestDeepPair is 16 levels over the string "x": 2^16 inline leaves,
+// one MiB of string headers.
+func codecTestDeepPair() any {
+	d1 := codecTestDouble(codecTestDouble(codecTestDouble(codecTestDouble("x"))))
+	d2 := codecTestDouble(codecTestDouble(codecTestDouble(codecTestDouble(d1))))
+	d3 := codecTestDouble(codecTestDouble(codecTestDouble(codecTestDouble(d2))))
+	return codecTestDouble(codecTestDouble(codecTestDouble(codecTestDouble(d3))))
+}
+
+// codecTestPairPlan has one record node per level (Level1..levels, both
 // fields naming the level below) over one transform node of a string leaf.
-func codecTestSharedPlan(levels, maxBodyBytes int) (CodecPlan, any) {
+func codecTestPairPlan(levels, maxBodyBytes int) CodecPlan {
 	plan := CodecPlan{
 		Profile: CodecProfileJSON,
 		Bounds:  CodecBounds{MaxBodyBytes: maxBodyBytes, MaxDepth: levels + 1},
@@ -227,63 +235,83 @@ func codecTestSharedPlan(levels, maxBodyBytes int) (CodecPlan, any) {
 			{Kind: CodecTransform, Type: "witness:leafJson", Child: 0, Step: 0},
 		},
 	}
-	var value any = "x"
 	for level := 1; level <= levels; level++ {
 		below := len(plan.Nodes) - 1
 		plan.Nodes = append(plan.Nodes, CodecNode{
 			Kind: CodecRecord, Type: "Level" + string(rune('A'+level)),
 			Fields:    []CodecField{{"a", below}, {"b", below}},
-			Construct: func(_ int, f []any) any { return codecTestShared{fields: f} },
-			Project:   func(v any) (int, []any) { return 0, v.(codecTestShared).fields },
+			Construct: func(int, []any) any { panic("decode is not exercised") },
 		})
-		value = codecTestShared{fields: []any{value, value}}
 	}
 	plan.Root = len(plan.Nodes) - 1
-	return plan, value
+	return plan
 }
 
-// Encoding a shared value retains nothing beyond the bounded output: with a
-// 64-byte budget and 2^16 transformed leaves, every transformation still
-// runs in order (the steps are those of running every one first), the
-// result is body-too-large, and the pass allocates a bounded amount
-// independent of the value's expansion (preparing a full tree allocated a
-// container per expanded record). A failing last step still takes
-// precedence over the deferred body-too-large. Positive control: the same
-// plan over three levels fits a 128-byte budget and encodes exactly.
-func TestCodecEncodeRetainsNoPreparedTree(t *testing.T) {
-	const levels = 16
-	plan, value := codecTestSharedPlan(levels, 64)
-	codec, err := CompileCodec(plan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls := 0
-	steps := []CodecStep{func(v any) (any, error) { calls++; return v, nil }}
-	_, err = codec.EncodeSteps(value, steps)
-	var failure *CodecError
-	if !errors.As(err, &failure) || failure.Reason != CodecBodyTooLarge || calls != 1<<levels {
-		t.Fatalf("shared value: %v after %d of %d steps", err, calls, 1<<levels)
-	}
-	if allocations := testing.AllocsPerRun(3, func() { _, _ = codec.EncodeSteps(value, steps) }); allocations > 64 {
-		t.Fatalf("encoding a 64-byte budget allocated %.0f times for %d leaves", allocations, 1<<levels)
-	}
-	calls = 0
-	last := []CodecStep{func(v any) (any, error) {
+// codecTestMeasure encodes value with an identity step and reports the live
+// heap growth at the last of leaves steps, after a collection (what the pass
+// retains at its deepest point), and the bytes the whole pass allocated.
+// The value is boxed before the baseline, so its own copy is not counted.
+func codecTestMeasure(codec *Codec, value any, leaves int, fail error) (retained, allocated int64, calls int, err error) {
+	var before, at, after runtime.MemStats
+	steps := []CodecStep{func(v any) (any, error) {
 		calls++
-		if calls == 1<<levels {
-			return nil, errCodecTestRejected
+		if calls == leaves {
+			runtime.GC()
+			runtime.ReadMemStats(&at)
+			if fail != nil {
+				return nil, fail
+			}
 		}
 		return v, nil
 	}}
-	if _, err := codec.EncodeSteps(value, last); !errors.Is(err, errCodecTestRejected) {
-		t.Fatalf("a failed step after the budget was exceeded: %v", err)
-	}
-	small, smallValue := codecTestSharedPlan(3, 128)
-	smallCodec, err := CompileCodec(small)
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err = codec.EncodeSteps(value, steps)
+	runtime.ReadMemStats(&after)
+	// The collection inside the step allocates nothing the pass retains,
+	// but its own accounting is part of TotalAlloc; it is a few hundred
+	// bytes against the allowance below.
+	return int64(at.HeapAlloc) - int64(before.HeapAlloc), int64(after.TotalAlloc - before.TotalAlloc), calls, err
+}
+
+// codecTestAllowance is the encoder's whole budget beyond a 64-byte output:
+// its output buffer, a deferred failure and collector bookkeeping. Copying
+// one level of the value below would exceed it 64 times over.
+const codecTestAllowance = 8 << 10
+
+// Encoding reads the value in place and retains nothing beyond the bounded
+// output. Over 16 levels of inline nested records (2^16 transformed
+// leaves, one MiB) with a 64-byte budget, every transformation still runs
+// in order, the result is body-too-large, and both the live heap at the
+// last step and the bytes the whole pass allocates stay within a few KiB
+// (projecting each record into boxed fields retained a copy of every
+// subtree on the current path, about two MiB, and allocated one copy of the
+// value per level). A failing last step still takes precedence over the
+// deferred body-too-large. Positive control: the same plan over three
+// levels fits a 128-byte budget and encodes exactly.
+func TestCodecEncodeRetainsNoPreparedTree(t *testing.T) {
+	const levels = 16
+	codec, err := CompileCodec(codecTestPairPlan(levels, 64))
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err := smallCodec.EncodeSteps(smallValue, steps)
+	value := codecTestDeepPair()
+	retained, allocated, calls, err := codecTestMeasure(codec, value, 1<<levels, nil)
+	var failure *CodecError
+	if !errors.As(err, &failure) || failure.Reason != CodecBodyTooLarge || calls != 1<<levels {
+		t.Fatalf("deep value: %v after %d of %d steps", err, calls, 1<<levels)
+	}
+	if retained > codecTestAllowance || allocated > codecTestAllowance {
+		t.Fatalf("encoding a 64-byte budget over %d inline leaves retained %d and allocated %d bytes", 1<<levels, retained, allocated)
+	}
+	if _, _, _, err := codecTestMeasure(codec, value, 1<<levels, errCodecTestRejected); !errors.Is(err, errCodecTestRejected) {
+		t.Fatalf("a failed step after the budget was exceeded: %v", err)
+	}
+	small, err := CompileCodec(codecTestPairPlan(3, 128))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := small.EncodeSteps(codecTestDouble(codecTestDouble(codecTestDouble("x"))), []CodecStep{func(v any) (any, error) { return v, nil }})
 	leaf := `{"a":"x","b":"x"}`
 	pair := `{"a":` + leaf + `,"b":` + leaf + `}`
 	if want := `{"a":` + pair + `,"b":` + pair + `}`; err != nil || string(output) != want {

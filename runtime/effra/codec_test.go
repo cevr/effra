@@ -60,20 +60,12 @@ func codecTestAccountPlan(bounds CodecBounds) CodecPlan {
 				Construct: func(_ int, f []any) any {
 					return codecTestAccount{ID: f[0].(int64), Owner: f[1].(codecTestPerson), State: f[2].(codecTestState), Active: f[3].(bool), Note: f[4].(struct{})}
 				},
-				Project: func(v any) (int, []any) {
-					a := v.(codecTestAccount)
-					return 0, []any{a.ID, a.Owner, a.State, a.Active, a.Note}
-				},
 			},
 			{
 				Kind: CodecRecord, Type: "Person",
 				Fields: []CodecField{{"name", 0}, {"email", 0}},
 				Construct: func(_ int, f []any) any {
 					return codecTestPerson{Name: f[0].(string), Email: f[1].(string)}
-				},
-				Project: func(v any) (int, []any) {
-					p := v.(codecTestPerson)
-					return 0, []any{p.Name, p.Email}
 				},
 			},
 			{
@@ -85,12 +77,12 @@ func codecTestAccountPlan(bounds CodecBounds) CodecPlan {
 					}
 					return codecTestRunning{RunID: f[0].(string), Owner: f[1].(codecTestPerson)}
 				},
-				Project: func(v any) (int, []any) {
-					switch s := v.(type) {
+				Variant: func(v any) int {
+					switch v.(type) {
 					case codecTestIdle:
-						return 0, nil
+						return 0
 					case codecTestRunning:
-						return 1, []any{s.RunID, s.Owner}
+						return 1
 					}
 					panic("unknown State variant")
 				},
@@ -111,10 +103,7 @@ func codecTestFailurePlan() CodecPlan {
 				Kind: CodecUnion, Type: "NotFound",
 				Variants:  []CodecVariant{{Tag: "NotFound", Fields: []CodecField{{"id", 0}, {"resource", 1}}}},
 				Construct: func(_ int, f []any) any { return codecTestNotFound{ID: f[0].(int64), Resource: f[1].(string)} },
-				Project: func(v any) (int, []any) {
-					n := v.(codecTestNotFound)
-					return 0, []any{n.ID, n.Resource}
-				},
+				Variant:   func(any) int { return 0 },
 			},
 		},
 	}
@@ -286,9 +275,9 @@ func TestCodecEncodeConstructsNoOutputBeyondTheBound(t *testing.T) {
 func TestCodecAdapterMismatchIsADefect(t *testing.T) {
 	value := codecTestAccount{Owner: codecTestPerson{Name: "a", Email: "e"}, State: codecTestIdle{}}
 	cases := map[string]func(*CodecPlan){
-		"field count":     func(p *CodecPlan) { p.Nodes[5].Project = func(any) (int, []any) { return 0, []any{"only-one"} } },
-		"primitive carry": func(p *CodecPlan) { p.Nodes[5].Project = func(any) (int, []any) { return 0, []any{1, "e"} } },
-		"variant index":   func(p *CodecPlan) { p.Nodes[6].Project = func(any) (int, []any) { return 2, nil } },
+		"field count":     func(p *CodecPlan) { p.Nodes[5].Fields = p.Nodes[5].Fields[:1] },
+		"primitive carry": func(p *CodecPlan) { p.Nodes[5].Fields[0].Node = 2 },
+		"variant index":   func(p *CodecPlan) { p.Nodes[6].Variant = func(any) int { return 2 } },
 	}
 	for name, edit := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -310,12 +299,11 @@ func TestCodecSharedPlanNodesAvoidPathEnumeration(t *testing.T) {
 	const levels = 300
 	plan := CodecPlan{Profile: CodecProfileJSON, Bounds: CodecBounds{MaxBodyBytes: 64, MaxDepth: levels}}
 	identity := func(_ int, fields []any) any { return fields }
-	project := func(value any) (int, []any) { return 0, value.([]any) }
 	for level := 0; level < levels; level++ {
 		plan.Nodes = append(plan.Nodes, CodecNode{
 			Kind: CodecRecord, Type: "Level" + strconv.Itoa(level),
 			Fields:    []CodecField{{"left", level + 1}, {"right", level + 1}},
-			Construct: identity, Project: project,
+			Construct: identity,
 		})
 	}
 	plan.Nodes = append(plan.Nodes, CodecNode{Kind: CodecBool})
@@ -354,7 +342,7 @@ func TestCodecPlanValidationRejectsMalformedPlans(t *testing.T) {
 			p.Nodes[4].Fields[1].Node = 7
 		}, "repeat type"},
 		"unreachable": {func(p *CodecPlan) {
-			p.Nodes = append(p.Nodes, CodecNode{Kind: CodecRecord, Type: "Orphan", Construct: p.Nodes[5].Construct, Project: p.Nodes[5].Project})
+			p.Nodes = append(p.Nodes, CodecNode{Kind: CodecRecord, Type: "Orphan", Construct: p.Nodes[5].Construct})
 		}, "unreachable"},
 		"duplicate field":    {func(p *CodecPlan) { p.Nodes[5].Fields[1].Name = "name" }, "repeats field"},
 		"empty field":        {func(p *CodecPlan) { p.Nodes[5].Fields[1].Name = "" }, "field name"},
@@ -363,7 +351,9 @@ func TestCodecPlanValidationRejectsMalformedPlans(t *testing.T) {
 		"discriminator":      {func(p *CodecPlan) { p.Nodes[6].Variants[1].Fields[0].Name = CodecTagKey }, "discriminator"},
 		"empty union":        {func(p *CodecPlan) { p.Nodes[6].Variants = nil }, "needs variants"},
 		"record variants":    {func(p *CodecPlan) { p.Nodes[5].Variants = []CodecVariant{{Tag: "X"}} }, "has variants"},
-		"missing adapter":    {func(p *CodecPlan) { p.Nodes[5].Project = nil }, "both adapters"},
+		"missing adapter":    {func(p *CodecPlan) { p.Nodes[5].Construct = nil }, "Construct"},
+		"missing variant":    {func(p *CodecPlan) { p.Nodes[6].Variant = nil }, "for a union only, Variant"},
+		"record variant":     {func(p *CodecPlan) { p.Nodes[5].Variant = p.Nodes[6].Variant }, "for a union only, Variant"},
 		"anonymous nominal":  {func(p *CodecPlan) { p.Nodes[5].Type = "" }, "type identity"},
 		"nominal primitive":  {func(p *CodecPlan) { p.Nodes[0].Type = "Name" }, "nominal structure"},
 		"primitive adapters": {func(p *CodecPlan) { p.Nodes[0].Construct = p.Nodes[5].Construct }, "nominal structure"},

@@ -2,7 +2,12 @@ package compiler
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -163,10 +168,6 @@ func TestCodecTransformationInspectionMatchesObservedSteps(t *testing.T) {
 	if plan == nil {
 		t.Fatal("teamJson has no plan")
 	}
-	type carrier struct {
-		variant int
-		fields  []any
-	}
 	runtimePlan := runtimeCodecPlanOf(plan)
 	for index, node := range plan.Nodes {
 		if node.Kind == rt.CodecTransform {
@@ -174,8 +175,10 @@ func TestCodecTransformationInspectionMatchesObservedSteps(t *testing.T) {
 			continue
 		}
 		if node.data != nil {
-			runtimePlan.Nodes[index].Construct = func(variant int, fields []any) any { return carrier{variant, append([]any{}, fields...)} }
-			runtimePlan.Nodes[index].Project = func(value any) (int, []any) { c := value.(carrier); return c.variant, c.fields }
+			runtimePlan.Nodes[index].Construct = func(variant int, fields []any) any { return codecVectorCarrier(variant, fields) }
+			if node.Kind == rt.CodecUnion {
+				runtimePlan.Nodes[index].Variant = codecVectorVariant
+			}
 		}
 	}
 	codec, err := rt.CompileCodec(runtimePlan)
@@ -498,4 +501,136 @@ func TestCodecTransformationDeclarationsFormat(t *testing.T) {
 	source := "import Json \"effra/json\"\nrecord Email { text: string }\nrecord Box { email: Email }\nfn parseEmail(text: string) -> Email { Email { text: text } }\nfn renderEmail(email: Email) -> string { email.text }\nderive emailJson=Json.codec<Email>( maxBodyBytes:64,maxDepth:1,decode:parseEmail , encode : renderEmail )\nderive boxJson = Json.codec<Box>(maxBodyBytes: 64, maxDepth: 2)  with   emailJson\n"
 	want := "import Json \"effra/json\"\nrecord Email {\n    text: string\n}\nrecord Box {\n    email: Email\n}\nfn parseEmail(text: string) -> Email {\n    Email {\n        text: text\n    }\n}\nfn renderEmail(email: Email) -> string {\n    email.text\n}\nderive emailJson = Json.codec<Email>(maxBodyBytes: 64, maxDepth: 1, decode: parseEmail, encode: renderEmail)\nderive boxJson = Json.codec<Box>(maxBodyBytes: 64, maxDepth: 2) with emailJson\n"
 	assertFormat(t, source, want)
+}
+
+// codecDeepSource nests records 16 levels deep over a transformed leaf:
+// LevelK holds two LevelK-1 fields inline, so a Level16 is one contiguous
+// struct of 2^16 leaves in generated Go. deepJson's 80-byte budget is
+// exceeded long before the last leaf; smallJson fits a three-level value.
+func codecDeepSource(levels int) string {
+	var source strings.Builder
+	source.WriteString(`import Json "effra/json"
+
+record Leaf {
+    code: string
+}
+
+fn leafCode(leaf: Leaf) -> string {
+    leaf.code
+}
+
+fn leafOf(code: string) -> Leaf {
+    Leaf { code: code }
+}
+
+derive leafJson = Json.codec<Leaf>(maxBodyBytes: 64, maxDepth: 1, decode: leafOf, encode: leafCode)
+`)
+	below := "Leaf"
+	for level := 1; level <= levels; level++ {
+		name := "Level" + strconv.Itoa(level)
+		fmt.Fprintf(&source, "\nrecord %s {\n    a: %s\n    b: %s\n}\n", name, below, below)
+		below = name
+	}
+	fmt.Fprintf(&source, `
+derive deepJson = Json.codec<Level%d>(maxBodyBytes: 80, maxDepth: %d) with leafJson
+derive smallJson = Json.codec<Level3>(maxBodyBytes: 256, maxDepth: 4) with leafJson
+
+effect fn encodeDeep(value: Level%d) -> string raises { JsonEncodeFailure } {
+    run deepJson.encode(value)
+}
+
+effect fn encodeSmall(value: Level3) -> string raises { JsonEncodeFailure } {
+    run smallJson.encode(value)
+}
+
+effect fn main() -> void raises { JsonDecodeFailure, JsonEncodeFailure } {
+    let small = run smallJson.decode("{}")
+    let smallText = run encodeSmall(small)
+    let deep = run deepJson.decode("{}")
+    let deepText = run encodeDeep(deep)
+    void
+}
+`, levels, levels+1, levels)
+	return source.String()
+}
+
+// The generated Go path reads nested records in place. Over a Level16 value
+// (2^16 transformed leaves, one MiB of inline structs), the emitted plan,
+// its generated adapters and carriers retain no more than a few KiB at the
+// last transformation, after a collection, and the pass allocates no more
+// than that; projecting each record into boxed fields retained a copy of
+// every subtree on the current path (about two MiB) and allocated a copy
+// of the value per level. The generated direction function runs every
+// transformation and reports body-too-large; the three-level control
+// encodes exactly through the same adapters.
+func TestCodecGeneratedGoEncodeReadsNestedRecordsInPlace(t *testing.T) {
+	t.Parallel()
+	const levels = 16
+	r := CompileFor(codecDeepSource(levels), "go")
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	code, application, err := emitGoApplication(r, GoGenerationBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := regexp.MustCompile(`var (efCodecPlan_\d+) = efCodecCompile\(er\.CodecPlan\{Profile:\s*"[^"]*",\s*Bounds:\s*er\.CodecBounds\{MaxBodyBytes:\s*80,`).FindStringSubmatch(code)
+	if plan == nil {
+		t.Fatal("deepJson's plan was not emitted")
+	}
+	if strings.Contains(code, "efCodecProject_") {
+		t.Fatal("generated code still projects records into boxed fields")
+	}
+	dir := t.TempDir()
+	if err = application.WriteRuntime(dir); err != nil {
+		t.Fatal(err)
+	}
+	// Each level's value is built once from the one below, as generated
+	// code nests records: inline, by value.
+	var values strings.Builder
+	values.WriteString("func level0()efType_Leaf{return efType_Leaf{EfField_4_code:\"x\"}}\n")
+	for level := 1; level <= levels; level++ {
+		fmt.Fprintf(&values, "func level%[1]d()efType_Level%[1]d{below:=level%[2]d();return efType_Level%[1]d{EfField_1_a:below,EfField_1_b:below}}\n", level, level-1)
+	}
+	probe := strings.NewReplacer("DEEP_PLAN", plan[1], "LEVELS", strconv.Itoa(levels), "LEVEL_VALUES", values.String()).Replace(`package main
+import("runtime";"testing";er "effra.generated/runtime")
+LEVEL_VALUES
+// The value is boxed before the baseline: the boundary receives it as its
+// argument, and only what the pass adds is measured.
+func measure(value any)(retained,allocated int64,calls int,err error){
+ var before,at,after runtime.MemStats
+ var representation any="x"
+ steps:=[]er.CodecStep{func(v any)(any,error){
+  _=v.(efType_Leaf)
+  if calls++;calls==1<<LEVELS{runtime.GC();runtime.ReadMemStats(&at)}
+  return representation,nil
+ }}
+ runtime.GC();runtime.ReadMemStats(&before)
+ _,err=DEEP_PLAN.EncodeSteps(value,steps)
+ runtime.ReadMemStats(&after)
+ return int64(at.HeapAlloc)-int64(before.HeapAlloc),int64(after.TotalAlloc-before.TotalAlloc),calls,err
+}
+func TestDeepEncode(t *testing.T){
+ var value any=levelLEVELS()
+ retained,allocated,calls,err:=measure(value)
+ failure,ok:=err.(*er.CodecError)
+ if !ok||failure.Reason!=er.CodecBodyTooLarge||calls!=1<<LEVELS{t.Fatalf("deep value: %v after %d steps",err,calls)}
+ if retained>8<<10||allocated>8<<10{t.Fatalf("encoding an 80-byte budget over %d inline leaves retained %d and allocated %d bytes",1<<LEVELS,retained,allocated)}
+ deep:=er.Run(func(fc *er.FiberContext)er.Exit[string]{return efFunction_encodeDeep(levelLEVELS())(efContext{Runtime:fc})})
+ cause:=deep.Cause()
+ if !deep.IsFailure()||len(cause)!=1||cause[0].Failure==nil||cause[0].Failure.Tag!="JsonEncodeFailure"{t.Fatalf("deep direction: %+v",deep)}
+ if payload,ok:=cause[0].Failure.Payload.(*er.CodecError);!ok||payload.Reason!=er.CodecBodyTooLarge{t.Fatalf("deep direction payload: %+v",cause[0].Failure.Payload)}
+ small:=er.Run(func(fc *er.FiberContext)er.Exit[string]{return efFunction_encodeSmall(level3())(efContext{Runtime:fc})})
+ leaf:="{\"a\":\"x\",\"b\":\"x\"}";pair:="{\"a\":"+leaf+",\"b\":"+leaf+"}"
+ if small.IsFailure()||small.Value!="{\"a\":"+pair+",\"b\":"+pair+"}"{t.Fatalf("fitting control: %+v",small)}
+}
+`)
+	for name, data := range map[string][]byte{"go.mod": r.ModuleFile(), "main.go": []byte(code), "main_test.go": []byte(probe)} {
+		if err = os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if output, err := runGoCommand(dir, "test", "."); err != nil {
+		t.Fatalf("generated deep encode: %v %s", err, output)
+	}
 }

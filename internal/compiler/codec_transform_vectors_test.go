@@ -62,18 +62,18 @@ func codecTransformBehaviorsGo() map[string]map[string]rt.CodecStep {
 		},
 		"status": {
 			"decode": func(value any) (any, error) {
-				if value.(codecVectorCarrier).variant == 2 {
+				if codecVectorVariant(value) == 2 {
 					return "Suspended", nil
 				}
 				return "Active", nil
 			},
 			"encode": func(value any) (any, error) {
-				return codecVectorCarrier{variant: map[string]int{"Active": 0, "Suspended": 2}[value.(string)]}, nil
+				return codecVectorCarrier(map[string]int{"Active": 0, "Suspended": 2}[value.(string)], nil), nil
 			},
 		},
 		"box": {
-			"decode": func(value any) (any, error) { return value.(codecVectorCarrier).fields[0], nil },
-			"encode": func(value any) (any, error) { return codecVectorCarrier{fields: []any{value}}, nil },
+			"decode": func(value any) (any, error) { return codecVectorFields(value)[0], nil },
+			"encode": func(value any) (any, error) { return codecVectorCarrier(0, []any{value}), nil },
 		},
 	}
 }

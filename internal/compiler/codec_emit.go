@@ -54,8 +54,10 @@ func goCodecPlanName(plan *CodecPlan) string { return "efCodecPlan_" + strconv.I
 var goCodecKinds = map[rt.CodecKind]string{rt.CodecString: "er.CodecString", rt.CodecBool: "er.CodecBool", rt.CodecVoid: "er.CodecVoid", rt.CodecI64: "er.CodecI64", rt.CodecRecord: "er.CodecRecord", rt.CodecUnion: "er.CodecUnion", rt.CodecTransform: "er.CodecTransform"}
 
 // codecPlans emits every retained plan once, in derivation order, as a
-// compiled package-level codec. Nominal nodes reference one pair of
-// Construct/Project adapters per declaration, shared by every plan.
+// compiled package-level codec. Nominal nodes reference one Construct
+// adapter per declaration, and union nodes one Variant adapter, shared by
+// every plan. Encoding reads the generated structs' fields in place, in
+// declared order, so it needs no projection adapter that would copy them.
 func (g *goEmitter) codecPlans(plans []*CodecPlan) string {
 	var adapters, compiled strings.Builder
 	emitted := map[TypeID]bool{}
@@ -91,7 +93,10 @@ func (g *goEmitter) codecPlans(plans []*CodecPlan) string {
 					}
 					literal += ",Variants:[]er.CodecVariant{" + strings.Join(variants, ",") + "}"
 				}
-				literal += ",Construct:efCodecConstruct_" + goIdent(node.data.Name) + ",Project:efCodecProject_" + goIdent(node.data.Name)
+				literal += ",Construct:efCodecConstruct_" + goIdent(node.data.Name)
+				if node.Kind == rt.CodecUnion {
+					literal += ",Variant:efCodecVariant_" + goIdent(node.data.Name)
+				}
 			}
 			nodes = append(nodes, literal+"}")
 		}
@@ -101,9 +106,13 @@ func (g *goEmitter) codecPlans(plans []*CodecPlan) string {
 }
 
 // codecAdapters emits the engine's carrier adapters of one nominal node.
-// Each field is asserted to its declared layout, rendered from the field's
-// canonical type: derived plans hold only first-order data, so no template
-// bindings apply. A carrier mismatch is a defect and panics.
+// Construct asserts each decoded field to its declared layout, rendered
+// from the field's canonical type: derived plans hold only first-order
+// data, so no template bindings apply. A union's Variant names the variant
+// its carrier holds with a type switch that binds nothing, so it copies no
+// variant struct. The engine encodes a carrier's fields in place, which is
+// sound because generated structs declare exactly the declared fields in
+// declared order. A carrier mismatch is a defect and panics.
 func (g *goEmitter) codecAdapters(node CodecPlanNode) string {
 	c := g.program.semantic
 	name := goIdent(node.data.Name)
@@ -115,53 +124,33 @@ func (g *goEmitter) codecAdapters(node CodecPlanNode) string {
 		}
 		return values
 	}
-	project := func(local string, declared []CodecPlanField) string {
-		values := []string{}
-		for _, field := range declared {
-			values = append(values, local+"."+goFieldName(field.Name))
-		}
-		return "[]any{" + strings.Join(values, ",") + "}"
-	}
 	var out strings.Builder
 	if node.Kind == rt.CodecRecord {
 		out.WriteString("func efCodecConstruct_" + name + "(_ int,fields []any)any{return " + typeName + "{" + strings.Join(construct(node.Fields), ",") + "}}\n")
-		if len(node.Fields) == 0 {
-			out.WriteString("func efCodecProject_" + name + "(value any)(int,[]any){_=value.(" + typeName + ");return 0,[]any{}}\n")
-		} else {
-			out.WriteString("func efCodecProject_" + name + "(value any)(int,[]any){record:=value.(" + typeName + ");return 0," + project("record", node.Fields) + "}\n")
-		}
 		return out.String()
 	}
+	defect := "panic(" + strconv.Quote("effra codec: unknown variant of "+node.data.Name) + ")"
 	if node.data.Kind == "error" {
 		// A failure witness's one variant is the failure's payload: its
 		// declaration's struct, or nil for a fieldless failure.
 		fields := node.Variants[0].Fields
 		if len(fields) == 0 {
 			out.WriteString("func efCodecConstruct_" + name + "(_ int,_ []any)any{return nil}\n")
-			out.WriteString("func efCodecProject_" + name + "(value any)(int,[]any){if value!=nil{_=value.(" + typeName + ")};return 0,[]any{}}\n")
+			out.WriteString("func efCodecVariant_" + name + "(value any)int{switch value.(type){case nil," + typeName + ":return 0};" + defect + "}\n")
 			return out.String()
 		}
 		out.WriteString("func efCodecConstruct_" + name + "(_ int,fields []any)any{return " + typeName + "{" + strings.Join(construct(fields), ",") + "}}\n")
-		out.WriteString("func efCodecProject_" + name + "(value any)(int,[]any){payload:=value.(" + typeName + ");return 0," + project("payload", fields) + "}\n")
+		out.WriteString("func efCodecVariant_" + name + "(value any)int{switch value.(type){case " + typeName + ":return 0};" + defect + "}\n")
 		return out.String()
 	}
-	defect := "panic(" + strconv.Quote("effra codec: unknown variant of "+node.data.Name) + ")"
 	out.WriteString("func efCodecConstruct_" + name + "(variant int,fields []any)any{switch variant{\n")
 	for index, variant := range node.Variants {
 		out.WriteString("case " + strconv.Itoa(index) + ":return " + typeName + "(" + goVariantType(node.data.Name, variant.Tag) + "{" + strings.Join(construct(variant.Fields), ",") + "})\n")
 	}
 	out.WriteString("};" + defect + "}\n")
-	bound := false
-	for _, variant := range node.Variants {
-		bound = bound || len(variant.Fields) > 0
-	}
-	if bound {
-		out.WriteString("func efCodecProject_" + name + "(value any)(int,[]any){switch variant:=value.(type){\n")
-	} else {
-		out.WriteString("func efCodecProject_" + name + "(value any)(int,[]any){switch value.(type){\n")
-	}
+	out.WriteString("func efCodecVariant_" + name + "(value any)int{switch value.(type){\n")
 	for index, variant := range node.Variants {
-		out.WriteString("case " + goVariantType(node.data.Name, variant.Tag) + ":return " + strconv.Itoa(index) + "," + project("variant", variant.Fields) + "\n")
+		out.WriteString("case " + goVariantType(node.data.Name, variant.Tag) + ":return " + strconv.Itoa(index) + "\n")
 	}
 	out.WriteString("};" + defect + "}\n")
 	return out.String()
