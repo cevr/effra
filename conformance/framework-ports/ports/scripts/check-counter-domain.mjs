@@ -27,10 +27,78 @@ assert.equal(domain.split(mutation).length, 2, "exactly one authored increment b
 const mutant = domain.replace(mutation, mutation.replace("+ 1", "- 1"));
 assert.notEqual(mutant, domain);
 const positive = readFileSync(path.join(leaf, "tests/types/counter-positive.ts"), "utf8");
-// The native entry reports an unhandled failure by its tag alone, so the native suffix labels each check before Assert.check.
+// Both harnesses print COUNTER_CHECK=<label> before each check. The native entry reports an unhandled failure by its
+// tag alone; the host harness reports its failure as one structured COUNTER_FAILURE JSON line.
 const nativeChecks = ["CounterInitial: expected 0", "ClickedIncrement: expected 1", "ClickedDecrement: expected 0", "ClickedDecrement: expected -1", "ClickedReset: expected 0 from -1", "ClickedIncrement: expected 1 again", "ClickedReset: expected 0 from 1", "I64Increment: max wraps to min", "I64Decrement: min wraps to max"];
 const intendedCheck = "ClickedIncrement: expected 1";
+const checksThrough = label => nativeChecks.slice(0, nativeChecks.indexOf(label) + 1);
+const intendedLabels = checksThrough(intendedCheck);
 const checkedLabels = stdout => [...stdout.matchAll(/^COUNTER_CHECK=(.*)$/gm)].map(match => match[1]);
+const failureLines = stdout => [...stdout.matchAll(/^COUNTER_FAILURE=(.*)$/gm)].map(match => match[1]);
+const lastLine = stdout => stdout.trimEnd().split("\n").at(-1);
+// The mutant turns the first increment into 0 - 1, so the intended check observes -1 where 1 is expected.
+const intendedObservation = { actual: "-1", expected: "1" };
+function classifyMutant(record, target) {
+  assert.ok(Number.isInteger(record.exit) && record.exit !== 0, `${target} mutant needs a real nonzero exit`);
+  assert.equal(record.signal ?? null, null, `${target} mutant cannot be satisfied by a signal`);
+  assert.match(record.stdout, /^COUNTER_INITIAL_ZERO=0$/m, `${target} mutant reaches successful initialization`);
+  assert.deepEqual(checkedLabels(record.stdout), intendedLabels, `${target} mutant stops at the intended labelled check`);
+  assert.doesNotMatch(record.stdout, /COUNTER_(?:NATIVE|DOMAIN)_TRACE_WRAP_GREEN/);
+  if (target === "Go") {
+    assert.deepEqual(failureLines(record.stdout), [], "native harness has no host failure line");
+    assert.equal(lastLine(record.stdout), `COUNTER_CHECK=${intendedCheck}`, "native output ends at the intended check");
+    assert.equal(record.stderr, "AssertionFailed\n", "native public Assert failure identity and no other cause");
+    return { target, setupAndInitialZeroReached: true, intendedAssertion: intendedCheck, failure: "AssertionFailed", actualMutantExit: record.exit };
+  }
+  assert.match(record.stdout, new RegExp(`^COUNTER_SETUP_OK=${target}$`, "m"), "actual public module import/setup succeeded");
+  const lines = failureLines(record.stdout);
+  assert.equal(lines.length, 1, `${target} mutant reports exactly one structured failure`);
+  assert.equal(lastLine(record.stdout), `COUNTER_FAILURE=${lines[0]}`, "the failure is the final output");
+  const failure = JSON.parse(lines[0]);
+  assert.equal(failure.name, "AssertionError", "host assertion failure, not a setup error");
+  assert.equal(failure.code, "ERR_ASSERTION");
+  assert.equal(failure.message, intendedCheck, "failure message is exactly the intended label");
+  assert.deepEqual(failure.observed, intendedObservation, "intended check observed the mutant value");
+  assert.equal(record.stderr, "", `${target} mutant has no uncaught host error`);
+  return { target, setupAndInitialZeroReached: true, intendedAssertion: intendedCheck, failure, actualMutantExit: record.exit };
+}
+// In-memory negative controls: the classifier must accept the intended failure and reject near misses.
+function classifierControls() {
+  const labelLines = labels => labels.flatMap(label => label === nativeChecks[0] ? [`COUNTER_CHECK=${label}`, "COUNTER_INITIAL_ZERO=0"] : [`COUNTER_CHECK=${label}`]);
+  const lines = items => items.length ? `${items.join("\n")}\n` : "";
+  const hostOutput = (target, labels, failure) => lines([`COUNTER_SETUP_OK=${target}`, ...labelLines(labels), ...(failure ? [`COUNTER_FAILURE=${JSON.stringify(failure)}`] : [])]);
+  const assertion = (message, actual, expected) => ({ name: "AssertionError", code: "ERR_ASSERTION", message, observed: { actual, expected } });
+  const again = "ClickedIncrement: expected 1 again";
+  const decrement = "ClickedDecrement: expected 0";
+  const excerpt = `check("${intendedCheck}", domain.counterCount(state), 1n);\nerror: ${decrement}\n`;
+  const cases = [];
+  for (const target of ["Bun", "Node"]) {
+    cases.push(
+      [target, "intended", true, { exit: 1, stdout: hostOutput(target, intendedLabels, assertion(intendedCheck, "-1", "1")), stderr: "" }],
+      [target, "later again-label failure", false, { exit: 1, stdout: hostOutput(target, checksThrough(again), assertion(again, "2", "1")), stderr: "" }],
+      [target, "again message at the intended position", false, { exit: 1, stdout: hostOutput(target, intendedLabels, assertion(again, "-1", "1")), stderr: "" }],
+      [target, "decrement failure with increment excerpt", false, { exit: 1, stdout: hostOutput(target, checksThrough(decrement), assertion(decrement, "1", "0")), stderr: excerpt }],
+      [target, "setup failure", false, { exit: 1, stdout: lines([`COUNTER_FAILURE=${JSON.stringify({ name: "Error", code: "ERR_MODULE_NOT_FOUND", message: `Cannot find module; ${intendedCheck}`, observed: null })}`]), stderr: "" }],
+      [target, "build failure", false, { exit: 1, stdout: "", stderr: `EF102 near ${intendedCheck}\n` }],
+      [target, "missing failure line", false, { exit: 1, stdout: hostOutput(target, intendedLabels, null), stderr: "" }],
+      [target, "zero exit", false, { exit: 0, stdout: hostOutput(target, intendedLabels, assertion(intendedCheck, "-1", "1")), stderr: "" }],
+    );
+  }
+  cases.push(
+    ["Go", "intended", true, { exit: 1, stdout: lines(labelLines(intendedLabels)), stderr: "AssertionFailed\n" }],
+    ["Go", "later again-label failure", false, { exit: 1, stdout: lines(labelLines(checksThrough(again))), stderr: "AssertionFailed\n" }],
+    ["Go", "decrement failure", false, { exit: 1, stdout: lines(labelLines(checksThrough(decrement))), stderr: "AssertionFailed\n" }],
+    ["Go", "build failure", false, { exit: 1, stdout: "", stderr: `EF106 near ${intendedCheck}\n` }],
+    ["Go", "missing failure", false, { exit: 1, stdout: lines(labelLines(intendedLabels)), stderr: "" }],
+    ["Go", "additional cause", false, { exit: 1, stdout: lines(labelLines(intendedLabels)), stderr: "AssertionFailed; defect: cleanup\n" }],
+  );
+  return cases.map(([target, name, accepted, record]) => {
+    let rejection = null;
+    try { classifyMutant({ signal: null, ...record }, target); } catch (error) { rejection = error instanceof Error ? error.message : String(error); }
+    assert.equal(rejection === null, accepted, `classifier control ${target} "${name}" must be ${accepted ? "accepted" : "rejected"}${rejection ? `: ${rejection}` : ""}`);
+    return { target, name, expected: accepted ? "accepted" : "rejected", rejection };
+  });
+}
 const evidence = { schema: "effra-counter-domain-controls-v1", claim: "Domain/ABI controls only; all 170 Effra coverage rows pending", work, source: { path: domainPath, sha256: fileHash(domainPath) }, harness: { path: harnessPath, sha256: fileHash(harnessPath) }, mutation: { original: mutation, replacement: mutation.replace("+ 1", "- 1"), productionSha256: hash(domain), mutantSha256: hash(mutant) }, records, artifacts: [], nativePublicationNamespace: { buildCwd: work, snapshots: path.join(work, "dist/go/apps"), owner: "cmd/ef/main.go:690 cwd-relative publication" } };
 const receipt = path.join(generated, "counter-domain-evidence.json");
 function save() { writeFileSync(receipt, `${JSON.stringify(evidence, null, 2)}\n`); }
@@ -84,18 +152,12 @@ function nativeSource(label, source) {
   return filename;
 }
 function intendedMutant(record, target) {
-  assert.match(record.stdout, /^COUNTER_INITIAL_ZERO=0$/m, `${target} mutant reaches successful initialization`);
-  if (target !== "Go") assert.match(record.stdout, new RegExp(`^COUNTER_SETUP_OK=${target}$`, "m"), "actual public module import/setup succeeded");
-  if (target === "Go") {
-    assert.deepEqual(checkedLabels(record.stdout), nativeChecks.slice(0, nativeChecks.indexOf(intendedCheck) + 1), "Go mutant stops at the intended labelled check");
-    assert.equal(record.stderr, "AssertionFailed\n", "native public Assert failure identity and no other cause");
-  } else assert.match(record.stderr, /ClickedIncrement: expected 1/, `${target} fails the intended event assertion`);
-  assert.doesNotMatch(record.stdout, /COUNTER_(?:NATIVE|DOMAIN)_TRACE_WRAP_GREEN/);
-  record.causalIdentity = { target, setupAndInitialZeroReached: true, intendedAssertion: intendedCheck, actualMutantExit: record.exit };
+  record.causalIdentity = classifyMutant(record, target);
   save();
 }
 
 try {
+  evidence.classifierControls = classifierControls(); save();
   assert.equal(process.versions.node, "24.11.1", "selected actual Node version");
   const tsPackage = JSON.parse(readFileSync(path.join(leaf, "node_modules/typescript/package.json"), "utf8"));
   assert.equal(tsPackage.version, "6.0.3");
@@ -163,6 +225,9 @@ try {
     const name = target.toLowerCase();
     strictConsumer(`${target}_PRODUCTION`, production);
     const result = run(`${target}_PRODUCTION_RUN`, executable, [path.join(leaf, "tests/counter-domain.mjs"), production, target]);
+    assert.deepEqual(checkedLabels(result.stdout), nativeChecks, `${target} production runs every labelled check in order`);
+    assert.deepEqual(failureLines(result.stdout), [], `${target} production reports no failure`);
+    assert.equal(result.stderr, "", `${target} production has no host error output`);
     assert.match(result.stdout, new RegExp(`^COUNTER_DOMAIN_TRACE_WRAP_GREEN=${target}$`, "m"));
     const source = path.join(work, `${name}-mutant.ef`);
     writeFileSync(source, mutant);
