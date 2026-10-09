@@ -134,6 +134,7 @@ func (c *checker) deriveCodecPlan(codec *CodecDeclaration, bounds CodecPlanBound
 		}
 		return ""
 	}
+	root := &codecPlanPath{name: codec.Type}
 	var visit func(id TypeID, scope *CodecDeclaration, path *codecPlanPath, display string) (int, string)
 	// transform derives witness's transform node: its representation under
 	// the witness's own scope, at the same path.
@@ -216,7 +217,12 @@ func (c *checker) deriveCodecPlan(codec *CodecDeclaration, bounds CodecPlanBound
 		case "callable", "callable-shape", "recipe", "providerRecipe":
 			return unsupported("is a function or effect recipe and cannot cross a codec boundary")
 		case "error":
-			return unsupported("is a failure declaration, not codec data")
+			// Only a failure witness's root is a failure; a failure is never
+			// a field of codec data.
+			if !codec.failure || path != root {
+				return unsupported("is a failure declaration, not codec data")
+			}
+			data, kind = c.failureData(node.Name), rt.CodecUnion
 		default:
 			return unsupported("is a host or runtime type and cannot cross a codec boundary")
 		}
@@ -287,7 +293,6 @@ func (c *checker) deriveCodecPlan(codec *CodecDeclaration, bounds CodecPlanBound
 		depths[index] = deepest + 1
 		return index, ""
 	}
-	root := &codecPlanPath{name: codec.Type}
 	var index int
 	var refusal string
 	if codec.transform != nil {

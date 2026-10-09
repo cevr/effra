@@ -132,6 +132,19 @@ func (g *goEmitter) codecAdapters(node CodecPlanNode) string {
 		}
 		return out.String()
 	}
+	if node.data.Kind == "error" {
+		// A failure witness's one variant is the failure's payload: its
+		// declaration's struct, or nil for a fieldless failure.
+		fields := node.Variants[0].Fields
+		if len(fields) == 0 {
+			out.WriteString("func efCodecConstruct_" + name + "(_ int,_ []any)any{return nil}\n")
+			out.WriteString("func efCodecProject_" + name + "(value any)(int,[]any){if value!=nil{_=value.(" + typeName + ")};return 0,[]any{}}\n")
+			return out.String()
+		}
+		out.WriteString("func efCodecConstruct_" + name + "(_ int,fields []any)any{return " + typeName + "{" + strings.Join(construct(fields), ",") + "}}\n")
+		out.WriteString("func efCodecProject_" + name + "(value any)(int,[]any){payload:=value.(" + typeName + ");return 0," + project("payload", fields) + "}\n")
+		return out.String()
+	}
 	defect := "panic(" + strconv.Quote("effra codec: unknown variant of "+node.data.Name) + ")"
 	out.WriteString("func efCodecConstruct_" + name + "(variant int,fields []any)any{switch variant{\n")
 	for index, variant := range node.Variants {
@@ -276,7 +289,12 @@ func jsCodecPlanLiteral(plan *CodecPlan) string {
 			converted.Fields = &declared
 		case rt.CodecUnion:
 			for _, variant := range node.Variants {
-				converted.Variants = append(converted.Variants, jsCodecVariant{Tag: variant.Tag, DomainTag: node.data.Name + "." + variant.Tag, Fields: fields(variant.Fields)})
+				// A failure's carrier is tagged with the failure's own name.
+				domainTag := node.data.Name + "." + variant.Tag
+				if node.data.Kind == "error" {
+					domainTag = node.data.Name
+				}
+				converted.Variants = append(converted.Variants, jsCodecVariant{Tag: variant.Tag, DomainTag: domainTag, Fields: fields(variant.Fields)})
 			}
 		}
 		literal.Nodes = append(literal.Nodes, converted)

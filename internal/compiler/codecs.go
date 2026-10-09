@@ -37,6 +37,13 @@ var codecBoundNames = []string{"maxBodyBytes", "maxDepth"}
 //
 //	derive emailJson = Json.codec<Email>(maxBodyBytes: 256, maxDepth: 1, decode: parseEmail, encode: renderEmail)
 //	derive accountJson = Json.codec<Account>(maxBodyBytes: 4096, maxDepth: 2) with emailJson
+//
+// A failure witness derives a source failure declaration. Its plan encodes
+// the failure as a one-variant union tagged with the failure's name, the
+// carrier the failure already has, and it is used only as an endpoint's
+// mapped failure body (see EndpointDeclaration):
+//
+//	derive outOfStockJson = Json.codec<OutOfStock>(maxBodyBytes: 256, maxDepth: 1)
 type CodecDeclaration struct {
 	Name           string
 	Span           Span
@@ -64,14 +71,22 @@ type CodecDeclaration struct {
 	// headerChecked reports that the declaration's derivation and type
 	// resolved, so its direction functions exist.
 	headerChecked bool
+	// failure marks a failure witness: a structural witness of a source
+	// failure declaration, which encodes that failure's payload as a mapped
+	// endpoint failure body. It has no direction functions.
+	failure bool
 }
 
 // CodecOption is one option of a derive declaration: an integer plan bound,
 // or the function name of a transformation direction.
 type CodecOption struct {
-	Name      string
-	Value     int64
-	Function  string
+	Name     string
+	Value    int64
+	Function string
+	// Text is a string option's decoded value; Quoted marks it a string.
+	// Only endpoint options take strings.
+	Text      string
+	Quoted    bool
 	Span      Span
 	ValueSpan Span
 }
@@ -228,22 +243,34 @@ func (c *checker) deriveCodecs(claim func(string, Span)) {
 			c.diagnostic("EF127", "generic type "+codec.Type+" requires complete application arguments", codec.TypeSpan)
 			continue
 		}
-		if !c.typeKnown(codec.Type) {
+		if c.errors[codec.Type] != nil && !c.sourceFailure(codec.Type) {
+			c.diagnostic(codecDerivationCode, "failure witness "+codec.Name+" of "+codec.Type+" must derive a failure declared in this module; builtin and bundled failures are answered by their profile", codec.TypeSpan)
+			continue
+		}
+		if !c.typeKnown(codec.Type) && !c.sourceFailure(codec.Type) {
 			c.diagnostic("EF102", "unknown or unsupported value type "+codec.Type, codec.TypeSpan)
 			continue
 		}
 		codec.domainID = c.canonicalRef(c.typeRef(codec.Type))
 		c.bindSourceSyntax(codec.sourceType, codec.domainID)
 		bounds, transformation, ok := c.codecOptions(codec)
+		if node := c.node(codec.domainID); node != nil && node.Kind == "error" {
+			if !c.failureWitness(codec, transformation) {
+				continue
+			}
+		} else {
+			codec.transform = c.codecTransformation(codec, transformation)
+		}
 		if ok {
 			bounded[codec] = bounds
 		}
-		codec.transform = c.codecTransformation(codec, transformation)
 		codec.headerChecked = true
 		checked = append(checked, codec)
 	}
 	for _, codec := range checked {
-		c.codecWith(codec, named)
+		if !codec.failure {
+			c.codecWith(codec, named)
+		}
 	}
 	for _, codec := range checked {
 		if bounds, ok := bounded[codec]; ok && codec.transformValid(transformationNamed(codec)) && c.codecComposable(codec) {
@@ -257,6 +284,9 @@ func (c *checker) deriveCodecs(claim func(string, Span)) {
 				c.result.CodecPlans = append(c.result.CodecPlans, plan)
 				codec.plan = plan
 			}
+		}
+		if codec.failure {
+			continue
 		}
 		decodeErrors, decodeServices := []string{codec.derivation.DecodeFailure}, []string{}
 		encodeErrors, encodeServices := []string{codec.derivation.EncodeFailure}, []string{}
@@ -272,6 +302,46 @@ func (c *checker) deriveCodecs(claim func(string, Span)) {
 		c.program.DerivedBindings[codec.Name] = map[string]*Function{"decode": codec.decode, "encode": codec.encode}
 		c.program.DerivedFunctions = append(c.program.DerivedFunctions, codec.decode, codec.encode)
 	}
+}
+
+// failureWitness admits a derive declaration of a failure type as a failure
+// witness: the failure is declared in source, so its payload is the
+// declaration's own data, and the witness is purely structural. It reports
+// whether the header is admitted.
+func (c *checker) failureWitness(codec *CodecDeclaration, transformation map[string]*CodecOption) bool {
+	refuse := func(message string, span Span) bool {
+		c.diagnostic(codecDerivationCode, "failure witness "+codec.Name+" of "+codec.Type+" "+message, span)
+		return false
+	}
+	if !c.sourceFailure(codec.Type) {
+		return refuse("must derive a failure declared in this module; builtin and bundled failures are answered by their profile", codec.TypeSpan)
+	}
+	for _, name := range codecTransformOptions {
+		if option := transformation[name]; option != nil {
+			return refuse("is structural; a failure body takes no "+name+" transformation", option.Span)
+		}
+	}
+	if len(codec.With) > 0 {
+		return refuse("is structural; a failure body composes no witnesses", codec.With[0].Span)
+	}
+	codec.failure = true
+	codec.with, codec.withSettled = map[TypeID]*CodecDeclaration{}, true
+	return true
+}
+
+// sourceFailure reports whether name is a failure declared in this module.
+func (c *checker) sourceFailure(name string) bool {
+	return slices.ContainsFunc(c.program.ErrorDecls, func(decl *ErrorDecl) bool { return decl.Name == name })
+}
+
+// failureData is the one-variant union a failure witness's plan derives: the
+// variant is tagged with the failure's name and carries its fields.
+func (c *checker) failureData(name string) *DataDeclaration {
+	decl := c.errors[name]
+	if decl == nil {
+		return nil
+	}
+	return &DataDeclaration{Kind: "error", Name: name, Variants: []Variant{{Name: name, Fields: decl.Fields}}}
 }
 
 // transformationNamed reports whether a declaration names a transformation
@@ -604,20 +674,22 @@ func (c *checker) codecOperation(e *Expr, env localEnv) checkedExpression {
 // declaration: its witness name, domain and wire types, plan and the checked
 // contract of each direction function. A transformed witness also reports
 // the representation its plan derives structurally; With lists the
-// witnesses it composes.
+// witnesses it composes. A failure witness reports Failure and has no
+// direction functions.
 type CodecInspection struct {
-	Name           string                   `json:"name"`
-	Derivation     string                   `json:"derivation"`
-	Profile        string                   `json:"profile"`
-	Domain         string                   `json:"domain"`
-	DomainType     string                   `json:"domainType"`
-	Wire           string                   `json:"wire"`
-	Representation string                   `json:"representation,omitempty"`
-	With           []string                 `json:"with,omitempty"`
-	Plan           string                   `json:"plan,omitempty"`
-	Decode         CodecDirectionInspection `json:"decode"`
-	Encode         CodecDirectionInspection `json:"encode"`
-	Span           Span                     `json:"span"`
+	Name           string                    `json:"name"`
+	Derivation     string                    `json:"derivation"`
+	Profile        string                    `json:"profile"`
+	Domain         string                    `json:"domain"`
+	DomainType     string                    `json:"domainType"`
+	Wire           string                    `json:"wire"`
+	Representation string                    `json:"representation,omitempty"`
+	With           []string                  `json:"with,omitempty"`
+	Plan           string                    `json:"plan,omitempty"`
+	Failure        bool                      `json:"failure,omitempty"`
+	Decode         *CodecDirectionInspection `json:"decode,omitempty"`
+	Encode         *CodecDirectionInspection `json:"encode,omitempty"`
+	Span           Span                      `json:"span"`
 }
 
 // CodecDirectionInspection is the contract of one direction function.
@@ -647,11 +719,14 @@ type CodecTransformationInspection struct {
 // functions have been checked, reading their checked rows.
 func (c *checker) publishCodecs() {
 	for _, codec := range c.program.Codecs {
-		if codec.decode == nil || codec.encode == nil || codec.derivation == nil {
+		if codec.derivation == nil || !codec.failure && (codec.decode == nil || codec.encode == nil) || codec.failure && codec.plan == nil {
 			continue
 		}
-		direction := func(f *Function, decode bool) CodecDirectionInspection {
-			out := CodecDirectionInspection{Function: f.Identity, Failures: append([]string{}, c.rowLabels(f.failureID)...), Requirements: append([]string{}, c.rowLabels(f.serviceID)...)}
+		direction := func(f *Function, decode bool) *CodecDirectionInspection {
+			if f == nil {
+				return nil
+			}
+			out := &CodecDirectionInspection{Function: f.Identity, Failures: append([]string{}, c.rowLabels(f.failureID)...), Requirements: append([]string{}, c.rowLabels(f.serviceID)...)}
 			if codec.plan == nil {
 				return out
 			}
@@ -681,6 +756,7 @@ func (c *checker) publishCodecs() {
 			Wire:       codec.derivation.Wire,
 			Decode:     direction(codec.decode, true),
 			Encode:     direction(codec.encode, false),
+			Failure:    codec.failure,
 			Span:       codec.Span,
 		}
 		if codec.transform != nil {

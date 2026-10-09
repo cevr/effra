@@ -30,6 +30,7 @@ examples/generic-settings.ef
 examples/pipe.ef
 examples/codecs.ef
 examples/codec-transforms.ef
+examples/http-endpoints.ef
 examples/lintpack/testdata/provider_boundary.ef
 examples/lintpack/testdata/forbidden_failure.ef
 examples/recipes-retry.ef

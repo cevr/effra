@@ -312,11 +312,11 @@ func TestJSEntryBehavesLikeTheCompletePrelude(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// A transport example serves until interrupted, so both modules are
-			// served for a bounded exchange and then interrupted; the transcript
-			// is compared like any other program's output.
+			// A transport or endpoint example serves until interrupted, so both
+			// modules are served for a bounded exchange and then interrupted;
+			// the transcript is compared like any other program's output.
 			run := runNode
-			if filepath.Base(path) == "http-transport.ef" {
+			if base := filepath.Base(path); base == "http-transport.ef" || base == "http-endpoints.ef" {
 				run = runNodeServing
 			}
 			r := CompileAt(string(source), "js", "../../examples")

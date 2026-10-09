@@ -296,6 +296,7 @@ type Result struct {
 	Declarations           []Declaration          `json:"declarations,omitempty"`
 	Codecs                 []CodecInspection      `json:"codecs,omitempty"`
 	CodecPlans             []*CodecPlan           `json:"codecPlans,omitempty"`
+	Endpoints              []EndpointInspection   `json:"endpoints,omitempty"`
 	Types                  []TypeNode             `json:"types,omitempty"`
 	Rows                   []RowNode              `json:"rows,omitempty"`
 	TypeProjectionBudget   int                    `json:"typeProjectionBudget"`
@@ -2526,6 +2527,7 @@ func (c *checker) check() {
 	for _, f := range c.program.checkedFunctions() {
 		c.signature(f)
 	}
+	c.deriveEndpoints(claim)
 	if !c.program.interfaceProducer && len(c.program.BundledFunctions)+len(c.program.BundledTemplates) > 0 {
 		if err := c.admitBundledSummaries(); err != nil {
 			c.diagnostic("EF126", "bundled interface refused: "+err.Error(), Span{})
@@ -2604,6 +2606,7 @@ func (c *checker) check() {
 	}
 	slices.SortFunc(c.result.BundledInterfaces, func(a, b BundledInterfaceInfo) int { return strings.Compare(a.Module, b.Module) })
 	c.publishCodecs()
+	c.publishEndpoints()
 	c.validateJSDeclarationNames()
 }
 
@@ -5045,6 +5048,8 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		t = c.codecOperation(e, env)
 	case "intrinsic":
 		t = c.intrinsicOperation(e, env)
+	case "endpoint", "routes":
+		t = c.endpointOperation(e, env)
 	case "provide":
 		t = c.expr(e.Left, env, inEffect)
 		if c.abstractRow(t.serviceRow()) {

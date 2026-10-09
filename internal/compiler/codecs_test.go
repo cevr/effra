@@ -110,7 +110,9 @@ func TestCodecDerivationRefusals(t *testing.T) {
 		{"empty bounds", "derive c = Json.codec<string>()", "EF138", "codec c requires the explicit bound maxBodyBytes"},
 		{"unknown option", "derive c = Json.codec<string>(maxBodyBytes: 64, maxDepth: 1, maxItems: 4)", "EF138", "maxItems is unknown"},
 		{"repeated option", "derive c = Json.codec<string>(maxBodyBytes: 64, maxDepth: 4, maxDepth: 5)", "EF138", "maxDepth is repeated"},
-		{"failure declaration", "error Bad { text: string }\nderive c = Json.codec<Bad>(maxBodyBytes: 1024, maxDepth: 8)", "EF102", "unknown or unsupported value type Bad"},
+		// A failure declaration derives a failure witness, which encodes only
+		// mapped endpoint failure bodies and has no direction functions.
+		{"failure witness has no directions", "error Bad { text: string }\nderive c = Json.codec<Bad>(maxBodyBytes: 1024, maxDepth: 8)\neffect fn main() -> void { let f = c.decode }", "EF102", "unknown value c"},
 		{"unknown type", "derive c = Json.codec<Missing>(maxBodyBytes: 1024, maxDepth: 8)", "EF102", "unknown or unsupported value type Missing"},
 		{"generic without arguments", "record Box<T: type> { value: T }\nderive c = Json.codec<Box>(maxBodyBytes: 1024, maxDepth: 8)", "EF127", "generic type Box requires complete application arguments"},
 		{"local generic application", "record Box<T: type> { value: T }\nderive c = Json.codec<Box<string>>(maxBodyBytes: 1024, maxDepth: 8)", "EF138", "Box<string> at Box<string> is generic data"},

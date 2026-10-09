@@ -160,6 +160,42 @@ Decoding validates the whole structure first and only then runs decode
 transformations in declared depth-first order, so malformed input never
 reaches a transformation or its services. Encoding runs encode
 transformations first, in the same order, and then writes bounded output.
+
+### Failure witnesses and typed endpoints
+
+A derive declaration of a failure declared in the module is a *failure
+witness*. It is structural only (bounds, no transformations, no `with`),
+has no `decode`/`encode` functions, and encodes the failure as
+`{"_tag": "<Failure>", ...fields}`, the shape of a pinned Effect
+`TaggedError` schema. It is used only as an endpoint's failure body.
+
+`Http.endpoint` and `Http.routes` derive typed HTTP handlers over the
+managed transport ([runtime contract](runtime.md#typed-endpoints)):
+
+```
+derive outOfStockJson = Json.codec<OutOfStock>(maxBodyBytes: 128, maxDepth: 1)
+derive placeOrder = Http.endpoint(method: "POST", path: "/orders", input: orderJson, handler: place, output: receiptJson, status: 201) raises { OutOfStock: 409 outOfStockJson, Unknown: 422 }
+derive api = Http.routes(placeOrder, health)
+run Http.listen(address, limits, api)
+```
+
+Each declaration synthesizes an ordinary effect function of its name from
+`HttpRequest` to `HttpReply`, so it is passed to `Http.listen`, called and
+inspected like any handler. `method` (GET, POST, PUT, PATCH, DELETE),
+`path` (an exact static path), `handler` and `status` (2xx) are required;
+`input` and `output` name data witnesses. The handler takes the input's
+domain type (or nothing) and returns the output's (or `void`); it may be
+pure or effectful. `raises` maps every named failure the input's decode
+transformations, the handler and the output's encode transformations can
+raise to a 4xx/5xx status and optionally a failure witness of that failure.
+An unmapped failure is `EF107`; mapping an unreachable failure, mapping one
+twice, or mapping `JsonDecodeFailure`/`JsonEncodeFailure` is `EF138`.
+
+The synthesized function's rows are every service those functions need and,
+when it encodes any body, the terminal `JsonEncodeFailure`. Inspection
+(`endpoints` in CLI/MCP) lists each endpoint's method, path, status,
+witnesses, handler, mapped responses with the stage and function that raise
+them, its input profile and its terminal encoding policy.
 Cancellation during a transformation stops the boundary after that
 transformation's own scope closes; no later transformation runs.
 

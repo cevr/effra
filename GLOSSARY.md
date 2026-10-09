@@ -137,6 +137,12 @@ overhead or a fixed speedup multiplier.
 
 **Codec transformation** (implemented): A checked conversion in a codec's decoding or encoding direction, carrying its own expected failures and required services. The two directions need not be mathematical inverses. A witness states one with `decode:` and `encode:` functions over a structurally derived representation.
 
+**Failure witness** (implemented): A structural codec witness of a failure declared in the module, used only as an endpoint's failure body. It encodes the failure tagged with its name and has no direction functions.
+
+**Endpoint** (implemented): A declaration `derive name = Http.endpoint(...)` binding a method, an exact static path, optional input and output witnesses, a success status, a handler function and the response of every named failure its input decoding, handler and output encoding can raise. It synthesizes an ordinary handler function from `HttpRequest` to `HttpReply`.
+
+**Route table** (implemented): A declaration `derive name = Http.routes(...)` composing endpoints into one handler that dispatches on exact method and path; no two entries serve the same pair.
+
 **Transformed witness** (implemented): A codec witness that states a codec transformation. A parent witness composes transformed witnesses only by listing them in its `with` clause; each applies wherever its domain type occurs in the parent's representation.
 
 **Machine** (specified): A checked definition of state and event types, transition policies and state-owned behavior.

@@ -299,6 +299,7 @@ var goEmissionHelpers = []struct{ name, source string }{
 	{"fiber.join", "func efJoin[A any](fiber *er.Fiber[A])efEffect[A]{return efFromRuntime(fiber.Join())}\n"},
 	{"fiber.interrupt", "func efInterrupt[A any](fiber *er.Fiber[A])efEffect[struct{}]{return efFromRuntime(fiber.Interrupt())}\n"},
 	{codecLoweringHelper, goCodecHelpers},
+	{endpointLoweringHelper, goEndpointHelpers()},
 	{"fiber.cancel", "func efCancel[A any](fiber *er.Fiber[A])efEffect[struct{}]{return efFromRuntime(func(*er.FiberContext)er.Exit[struct{}]{fiber.Cancel();return er.Succeed(struct{}{})})}\n"},
 }
 
@@ -931,6 +932,8 @@ func (g *goEmitter) lower(e *Expr, effect bool, ret string, out *strings.Builder
 		return g.codecOperation(e, ret, out)
 	case "intrinsic":
 		return g.intrinsicOperation(e, ret, out)
+	case "endpoint", "routes":
+		return g.endpointOperation(e, ret, out)
 	case "member":
 		if e.ResolvedFunction != nil {
 			return e.ResolvedFunction.goEmissionName()
