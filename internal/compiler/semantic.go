@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -3271,20 +3272,35 @@ func (c *checker) declarationFingerprint(kind, name string) string {
 }
 
 func semanticNodeKey(kind, name, declaration, mode string, args []TypeID, result TypeID, failure, service RowID) string {
-	var key strings.Builder
+	// Every checked expression interns its type, so the key is built with
+	// appends rather than fmt; the spelling is unchanged.
+	key := make([]byte, 0, 72+len(kind)+len(name)+len(declaration)+len(mode)+4*len(args))
 	writeString := func(label, value string) {
-		fmt.Fprintf(&key, "%s%d:%s;", label, len(value), value)
+		key = append(key, label...)
+		key = strconv.AppendInt(key, int64(len(value)), 10)
+		key = append(key, ':')
+		key = append(key, value...)
+		key = append(key, ';')
 	}
 	writeString("kind", kind)
 	writeString("name", name)
 	writeString("decl", declaration)
 	writeString("mode", mode)
-	fmt.Fprintf(&key, "args%d:", len(args))
+	key = append(key, "args"...)
+	key = strconv.AppendInt(key, int64(len(args)), 10)
+	key = append(key, ':')
 	for _, arg := range args {
-		fmt.Fprintf(&key, "%d,", arg)
+		key = strconv.AppendUint(key, uint64(arg), 10)
+		key = append(key, ',')
 	}
-	fmt.Fprintf(&key, ";result%d;failure%d;service%d;", result, failure, service)
-	return key.String()
+	key = append(key, ";result"...)
+	key = strconv.AppendUint(key, uint64(result), 10)
+	key = append(key, ";failure"...)
+	key = strconv.AppendUint(key, uint64(failure), 10)
+	key = append(key, ";service"...)
+	key = strconv.AppendUint(key, uint64(service), 10)
+	key = append(key, ';')
+	return string(key)
 }
 
 // internSemanticNode is the sole structural interner for data types, value
