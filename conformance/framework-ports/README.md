@@ -13,18 +13,18 @@ The proposed isolated host-tool versions are React/React DOM `19.3.0`, Solid/Sol
 Given a local Git checkout containing the pinned Foldkit commit:
 
 ```sh
-python3 -B scripts/import_foldkit_corpus.py /path/to/foldkit --check
-python3 -B scripts/import_foldkit_corpus.py --self-check
-python3 -B scripts/test_import_foldkit_corpus.py
+go run ./scripts/conformance foldkit /path/to/foldkit --check
+go run ./scripts/conformance foldkit --self-check
+go test -run TestFoldkit ./scripts/conformance
 ```
 
 The first command compares every captured file and the complete 34-example inventory against the pinned Git objects. The offline self-check verifies the frozen per-file identities and the coverage matrix. The source capture can be regenerated only into a fresh destination with:
 
 ```sh
-python3 -B scripts/import_foldkit_corpus.py /path/to/foldkit --capture
+go run ./scripts/conformance foldkit /path/to/foldkit --capture
 ```
 
-The repository gate runs the offline check and the standard-library-only importer controls. Those controls verify the complete pinned matrix, source-backed evidence paths, refusal of premature implementation claims, malformed-root and row diagnostics, symlink referents, and cleanup after a failed publication; they do not duplicate host behavior tests. Full gate receipts for this architecture lane are recorded outside the repository by `R/run-gate.sh` with an explicit `umask 022` and the shared validation lock. The captured pnpm lock/workspace files provide the upstream reference's declared toolchain, but the corpus does not install it or claim execution. Authored host packages use their own scoped lockfiles and Bun scripts.
+The repository gate runs the offline check and the importer controls, which need only Go. Those controls verify the complete pinned matrix, source-backed evidence paths, refusal of premature implementation claims, malformed-root and row diagnostics, symlink referents, and cleanup after a failed publication; they do not duplicate host behavior tests. Full gate receipts for this architecture lane are recorded outside the repository by `R/run-gate.sh` with an explicit `umask 022` and the shared validation lock. The captured pnpm lock/workspace files provide the upstream reference's declared toolchain, but the corpus does not install it or claim execution. Authored host packages use their own scoped lockfiles and Bun scripts.
 
 ## Effra and machine boundary
 

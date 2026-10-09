@@ -85,9 +85,10 @@ func gateSteps(root string) ([]*Step, error) {
 	add(&Step{Name: "effect conformance import", Argv: []string{"go", "run", "./scripts/conformance", "import"}, Inputs: conformance})
 	// The Foldkit checks walk the snapshot directory, so files Git ignores
 	// there are inputs too.
-	foldkit := &Inputs{Paths: []string{"scripts/import_foldkit_corpus.py", "scripts/test_import_foldkit_corpus.py", "conformance/"}, Tools: python, Installed: []string{"conformance/upstream/foldkit-d21db423"}}
-	add(&Step{Name: "foldkit corpus self-check", Argv: []string{"python3", "-B", "scripts/import_foldkit_corpus.py", "--self-check"}, Inputs: foldkit})
-	add(&Step{Name: "foldkit corpus importer tests", Argv: []string{"python3", "-B", "scripts/test_import_foldkit_corpus.py"}, Inputs: foldkit})
+	// there are inputs too. The importer's controls run with the other Go
+	// packages.
+	foldkit := &Inputs{Paths: []string{"scripts/conformance/", "conformance/", "go.mod"}, Tools: []string{"go"}, Installed: []string{"conformance/upstream/foldkit-d21db423"}}
+	add(&Step{Name: "foldkit corpus self-check", Argv: []string{"go", "run", "./scripts/conformance", "foldkit", "--self-check"}, Inputs: foldkit})
 	references, err := frameworkReferenceInputs(root)
 	if err != nil {
 		return nil, err

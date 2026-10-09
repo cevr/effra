@@ -112,6 +112,77 @@ func pyScalarEqual(left, right any) bool {
 	return left == right
 }
 
+// pyEqual is Python's == on json.loads values and the strings, numbers,
+// lists and dicts built to compare with them: bool is an int, and int and
+// float compare by exact value.
+func pyEqual(left, right any) bool {
+	if l, ok := pyNumeric(left); ok {
+		r, ok := pyNumeric(right)
+		return ok && l != nil && r != nil && l.Cmp(r) == 0
+	}
+	switch l := left.(type) {
+	case nil:
+		return right == nil
+	case string:
+		r, ok := right.(string)
+		return ok && l == r
+	case []any:
+		r, ok := right.([]any)
+		if !ok || len(l) != len(r) {
+			return false
+		}
+		for i := range l {
+			if !pyEqual(l[i], r[i]) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		r, ok := right.(map[string]any)
+		if !ok || len(l) != len(r) {
+			return false
+		}
+		for key, value := range l {
+			other, present := r[key]
+			if !present || !pyEqual(value, other) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// pyNumeric is the exact value of a Python int, bool or float, as a nil
+// value for NaN, which equals nothing.
+func pyNumeric(value any) (*big.Float, bool) {
+	switch v := value.(type) {
+	case bool:
+		if v {
+			return big.NewFloat(1), true
+		}
+		return big.NewFloat(0), true
+	case int:
+		return new(big.Float).SetInt64(int64(v)), true
+	case json.Number:
+		if i, ok := jsonInt(v); ok {
+			return new(big.Float).SetInt(i), true
+		}
+		if f := jsonFloat(v); !math.IsNaN(f) {
+			return new(big.Float).SetFloat64(f), true
+		}
+		return nil, true
+	}
+	return nil, false
+}
+
+// prettyJSON is json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2).
+func prettyJSON(value any) string {
+	var out bytes.Buffer
+	encodePy(&out, value, false, 2, 0)
+	return out.String()
+}
+
 // canonicalJSON is json.dumps(value, ensure_ascii=False, sort_keys=True,
 // separators=(",", ":")).encode("utf-8").
 func canonicalJSON(value any) []byte {
