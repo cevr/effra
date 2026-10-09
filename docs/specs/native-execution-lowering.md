@@ -37,15 +37,15 @@ limits explicit.
 [generalized evidence-passing report]: https://www.microsoft.com/en-us/research/wp-content/uploads/2021/03/multip-tr-v2.pdf
 [V8 Maglev report]: https://v8.dev/blog/maglev
 
-The checked emitter already supplies distinct JS comparison forms. The accepted
-multi-subject match plan at [`f091cd6`](https://github.com/cevr/effra/blob/f091cd6db870c08ca1d82f100150ce0f3363e6a8/internal/compiler/emit.go)
-evaluates subjects once and emits ordered `if` branches with tag tests; the
-current single-subject [`jsMatch`](../../internal/compiler/emit.go#L447) path
-emits a `switch`. Effectful branches remain wrapped in `yield* Effect.gen`, and
-pure branches use an IIFE. These are existing output strategies, not measured
-wins. The lowering unit compares them and any generated/specialized runtime
-under identical subject/body/tag semantics and preserves the pinned ABI and
-lifecycle laws.
+The current JavaScript [`jsMatch`](../../internal/compiler/emit.go#L624) path
+evaluates each subject once in order and emits ordered `if` branches. Constrained
+subject cells use tag comparisons in both single- and multi-subject matches;
+total arms use a `true` condition. Effectful branches remain wrapped in
+`yield* Effect.gen`, while pure branches use an IIFE. This is the
+current emitted baseline, not a measured win. A `switch` or direct-dispatch
+form remains a future comparison candidate. The lowering unit compares those
+candidates and any generated/specialized runtime under identical
+subject/body/tag semantics and preserves the pinned ABI and lifecycle laws.
 
 Deliver after the [ordinary function/interface seam](language-abstractions.md), in compiling and gated units:
 
