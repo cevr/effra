@@ -83,6 +83,7 @@ Every port was checked in three ways:
 | (b) Typical internal/compiler edit | 49 s at load 8→23; 69 s at load 18→50 | every compiler-dependent test reruns; 390–650 CPU-s |
 | Everything re-executed (`GOFLAGS=-count=1 … --no-cache`), 3 consecutive runs | 54, 43, 43 s | load 44–66; all passed, about 440 CPU-s each |
 | (c) Cold: empty `GOCACHE` and receipts | 93 s | load 46→63; 972 CPU-s, mostly compiling the toolchain's and the generated runtime's packages |
+| Everything re-executed at `a160ca2` (rebased on `abcbe44`, round-1 repairs, 39 steps including framework-port references) | 56.5 s | 1-minute load 18.0 before, 35.2 after (553 sessions on the host); all passed. The critical path is now `framework-port references` at 54.7 s, whose counter-domain check builds `./cmd/ef` and runs `tsc` serially; the slowest Go shard took 29.4 s |
 
 **(b) is not under 10 s.** After a compiler edit, every compiler and CLI test legitimately reruns. On 16 shared cores that is about 400 CPU-s, a floor of about 25 s even on an idle host. The single slowest test (an EF136 budget check over a 2^20-statement program, about 7 s per process) sets the shortest possible critical path. Getting under 10 s would mean cutting test CPU by 3–5×, or running fewer tests per edit. The second option needs test-impact analysis, which is unsound unless it is as complete as Go's own cache. Next candidates, by measured cost:
 
