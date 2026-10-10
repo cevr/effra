@@ -22,7 +22,10 @@ func TestGoRuntimeEnvironmentKeysEveryStepThatRunsGoPrograms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := &gate{root: root, cacheDir: t.TempDir(), steps: steps}
+	// The steps' declared tools and environment are evaluated over a fixture:
+	// the repository's own files, which the emission step rewrites every run,
+	// would keep Go's test cache from ever replaying this test.
+	g := &gate{root: fixture(t), cacheDir: t.TempDir()}
 	if err := g.loadFiles(); err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +36,9 @@ func TestGoRuntimeEnvironmentKeysEveryStepThatRunsGoPrograms(t *testing.T) {
 		observed := fingerprint{map[string]string{}, map[string]string{}}
 		for _, step := range steps {
 			if step.Inputs != nil && (step.Argv[0] == "go" || step.Name == "framework-port references") {
-				key, err := g.key(step)
+				declared := *step.Inputs
+				declared.Paths, declared.Exclude, declared.Submodule, declared.Installed, declared.Generated = []string{"src/"}, nil, "", nil, nil
+				key, err := g.key(&Step{Name: step.Name, Argv: step.Argv, Inputs: &declared})
 				if err != nil {
 					t.Fatal(err)
 				}
