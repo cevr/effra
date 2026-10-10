@@ -220,7 +220,7 @@ source, retained modules, executable bytes, allocations, dispatch and residual
 checks. A candidate with unexplained abstraction-only cost remains unresolved;
 neither an unequal fixture nor a weakened guardrail is a zero-cost result. The
 Rust iterator, C++ Per.7/Per.11/P.9/Per.6 and Go compiler/escape-analysis comparisons in
-[`PRIOR_ARTS.md`](../../PRIOR_ARTS.md#zero-cost-abstraction-comparison-2026-10-08)
+[`PRIOR_ART.md`](../../PRIOR_ART.md#zero-cost-abstraction-comparison-2026-10-08)
 are primary constraints and counterevidence, not a universal Effra claim.
 
 The native Go acceptance control is optimized idiomatic Go performing the same
@@ -240,7 +240,7 @@ The [native server specification](native-server-contracts.md) consumes these mec
 
 ## Prior art: Elixir and MoonBit
 
-Pins and the full rows are in [PRIOR_ARTS](../../PRIOR_ARTS.md#standing-comparison-languages-elixir-with-erlangotp-and-moonbit-2026-10-09); the pipe comparison is in [Pipe operator](#pipe-operator) and the default-argument comparison is in [Constant parameter defaults](#constant-parameter-defaults). MoonBit paths are at docs `8d9f3ba2` and Elixir paths at `91ee75bb`.
+Pins and the full rows are in [PRIOR_ART](../../PRIOR_ART.md#standing-comparison-languages-elixir-with-erlangotp-and-moonbit-2026-10-09); the pipe comparison is in [Pipe operator](#pipe-operator) and the default-argument comparison is in [Constant parameter defaults](#constant-parameter-defaults). MoonBit paths are at docs `8d9f3ba2` and Elixir paths at `91ee75bb`.
 
 - **Failure rows.** MoonBit checks errors. A signature names one `suberror` type after `raise`, calls propagate implicitly, and several error types in one `try` widen to the open `Error`, whose matches need `_` (`next/language/error-handling.md:L10-L53`, `L89-L234`). Its `raise?` lets a higher-order function inherit a callback's error-ness (`L119-L146`). Effra keeps finite nominal unions and row parameters that carry the callback's actual failure set, because widening to an open supertype would erase the public contract (**Explicit contracts and clear guardrails**). Elixir has no static failure rows; it uses `{:ok, _}`/`{:error, _}` tuples and raising `!` variants (`lib/elixir/pages/getting-started/try-catch-and-rescue.md:L70-L100`).
 - **Visibility and construction authority.** MoonBit types are `priv`, abstract by default, `pub` readonly ("cannot be constructed or mutated in other packages") or `pub(all)` (`next/language/packages.md:L104-L156`). MoonBit's `pub` is Effra's `pub readonly` tier with the default inverted: plain public data is readonly there and construction is the opt-in. A fully public MoonBit struct with `priv` fields cannot be constructed outside, yet its public fields can be changed by functional update (`L124-L127`), while a readonly `pub` type rejects that update (`L155-L156`); any future Effra record-update form must respect construction authority. Elixir has no such tier: any module can build `%S{}`, and `@enforce_keys` is "not enforced on updates" (`lib/elixir/lib/kernel.ex:L5583-L5602`).

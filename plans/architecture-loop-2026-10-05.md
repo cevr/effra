@@ -6,7 +6,7 @@ Goal: establish the project's north stars and prior arts as the basis for buildi
 
 Every architecture pass now seeks recurring production Effect ceremony that a small regular primitive can express explicitly, declaratively and delightfully. Compare an ordinary library solution, preserve visible execution/failure/service/ownership facts, and prove adoption with two unrelated runnable before/after callers and negative controls. Recorded in NORTH_STAR's new ergonomics sweep; no source sketch counts as implementation.
 
-Refreshed five production application sources through the repository-cache workflow; exact public pins and generic comparisons are in PRIOR_ARTS and [layer research](../docs/research/layer-composition.md), with private pointers retained outside the repo. Source-only audits found explicit application graph/replacement machinery, manual bottom-up wiring, startup nodes without outputs, application-service reinjection, context-sensitive fresh instances and owned/borrowed resource distinctions. No application tests were run. Decided by **Redesign From First Principles**: adopt the owner's first-class graph assembly, not a second hidden provider framework. Reject upstream roots-only exposure, duplicate-provider precedence and failure erasure against explicit-contract/ownership north stars.
+Refreshed five production application sources through the repository-cache workflow; exact public pins and generic comparisons are in PRIOR_ART and [layer research](../docs/research/layer-composition.md), with private pointers retained outside the repo. Source-only audits found explicit application graph/replacement machinery, manual bottom-up wiring, startup nodes without outputs, application-service reinjection, context-sensitive fresh instances and owned/borrowed resource distinctions. No application tests were run. Decided by **Redesign From First Principles**: adopt the owner's first-class graph assembly, not a second hidden provider framework. Reject upstream roots-only exposure, duplicate-provider precedence and failure erasure against explicit-contract/ownership north stars.
 
 Added the [five-unit layer contract](../docs/specs/layers.md) and six open implementation tickets. Runtime and static-plan preparation may proceed independently through one agreed seam; fallible construction then consumes both plus canonical bundled interfaces. Replacements recompute edges/rows before acquisition/cycle checks, explicitly selected hidden startup effects remain, inherited application services are borrowed, and compatible context follows instance identity rather than structural equality. These are specified acceptance cases, not delivered guarantees. Existing HITL decisions remain open; benchmark work remains last; no push.
 
@@ -39,7 +39,7 @@ Scope: establishment and runtime integration receipts. This ledger does not clai
 
 ## Prior art
 
-`PRIOR_ARTS.md` is the authoritative comparison index. Its Settled section carries adopted/rejected verdicts with implementation status; its To survey section carries open research. Establishment reused the inspected sources in `docs/design.md` and `docs/interop.md` and refreshed focused compiler, runtime and semantic-tooling source reads. It did not execute external application examples or resolve their remaining questions.
+`PRIOR_ART.md` is the authoritative comparison index. Its Settled section carries adopted/rejected verdicts with implementation status; its To survey section carries open research. Establishment reused the inspected sources in `docs/design.md` and `docs/interop.md` and refreshed focused compiler, runtime and semantic-tooling source reads. It did not execute external application examples or resolve their remaining questions.
 
 ## Project sweeps
 
@@ -63,7 +63,7 @@ These are draft interpretations for asynchronous correction, not blockers. No be
 
 ## Establishment
 
-- Established `NORTH_STAR.md` and `PRIOR_ARTS.md` by the architecture-loop autonomous setup workflow. Drafts remain marked; decided by **Never Block on the Human**.
+- Established `NORTH_STAR.md` and `PRIOR_ART.md` by the architecture-loop autonomous setup workflow. Drafts remain marked; decided by **Never Block on the Human**.
 - Made `GLOSSARY.md` the canonical domain glossary, preserving the earlier definitions and adding the resolved lifecycle/interop terms. Added repository pointers; decided by **Redesign From First Principles**.
 - Kept proposals and current guarantees distinct. The baseline compiler lacks host imports, scoped lifetimes, package caching, and runtime state inspection; this setup does not close those gaps.
 - Validation: full `./scripts/gate.sh` and `git diff --check`, with final results recorded in the handoff. No push/publication or Wayfinder HITL closure.
@@ -74,8 +74,8 @@ Actor-model comparison added2026-10-06 and refined by the owner: actors need not
 
 | Decision | From | Files | Status |
 | --- | --- | --- | --- |
-| Refresh ownership/type/inspection gap receipts after managed runtime integration | setup | NORTH_STAR.md, PRIOR_ARTS.md, this ledger | done: runtime receipt below |
-| Run the first full architecture pass over all unswept directories and open prior-art questions | setup | Architecture areas and research in PRIOR_ARTS.md | open |
+| Refresh ownership/type/inspection gap receipts after managed runtime integration | setup | NORTH_STAR.md, PRIOR_ART.md, this ledger | done: runtime receipt below |
+| Run the first full architecture pass over all unswept directories and open prior-art questions | setup | Architecture areas and research in PRIOR_ART.md | open |
 | Establish matched end-to-end build fixtures and select evidence-based budgets | setup | Compiler/build performance sweep | open |
 
 ## Close
