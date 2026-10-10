@@ -4,7 +4,7 @@ Effra's public architecture is described through generic patterns. This index re
 
 ## Language and library references
 
-Owner direction refreshed 2026-10-06: preserve Go-like simplicity, Effect-style guarantees and Borgo-like algebraic data/abstractions. This repository keeps the established `PRIOR_ARTS.md` name as its canonical prior-art index.
+Owner direction refreshed 2026-10-06: preserve Go-like simplicity, Effect-style guarantees and Borgo-like algebraic data/abstractions. This repository keeps the established `PRIOR_ART.md` name as its canonical prior-art index.
 
 | Source | Revision / paths | Read it for | Compare with |
 | --- | --- | --- | --- |
