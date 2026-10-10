@@ -332,7 +332,7 @@ func TestJSEntryBehavesLikeTheCompletePrelude(t *testing.T) {
 				t.Fatal(err)
 			}
 			complete := withCompletePrelude(library)
-			runner := entry[strings.LastIndex(entry, "const __ef_signal = new AbortController()"):]
+			runner := entry[strings.LastIndex(entry, "const __ef_entryReport = "):]
 			dir := writeJSModule(t, map[string]string{"entry.mjs": entry, "complete.mjs": complete + runner})
 			pruned, prunedErr := run(t, dir, "entry.mjs")
 			full, fullErr := run(t, dir, "complete.mjs")

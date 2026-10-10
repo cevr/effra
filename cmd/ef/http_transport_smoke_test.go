@@ -152,7 +152,7 @@ type httpWireLifecycle struct {
 	Probe          string           `json:"probe"`
 	WithinMillis   int              `json:"withinMillis"`
 	ExitCode       int              `json:"exitCode"`
-	StderrContains string           `json:"stderrContains"`
+	Stderr         string           `json:"stderr"`
 }
 
 // httpWireVectorsLoad decodes one vector file and requires its program to
@@ -528,11 +528,8 @@ func httpWireVectorsRun(t *testing.T, vectors httpWireVectors, dir string, comma
 	if elapsed := time.Since(signalled); elapsed >= time.Duration(c.WithinMillis)*time.Millisecond {
 		t.Fatalf("%s: shutdown took %v", c.Name, elapsed)
 	}
-	if exit != c.ExitCode || !strings.Contains(strings.ToLower(stderr), c.StderrContains) {
-		t.Fatalf("%s: exit %d\n%s", c.Name, exit, stderr)
-	}
-	if held != nil {
-		held.Close()
+	if exit != c.ExitCode || stderr != c.Stderr {
+		t.Fatalf("%s: exit %d stderr %q, want %d and %q", c.Name, exit, stderr, c.ExitCode, c.Stderr)
 	}
 	// Client connections may linger in TIME_WAIT; a live listener would still
 	// refuse this bind. Go listeners set SO_REUSEADDR.

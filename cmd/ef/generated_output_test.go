@@ -12,8 +12,21 @@ import (
 	"testing"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/receipt"
 	rt "effra.local/prototype/runtime/effra"
 )
+
+// loadWithOrigin loads path as every command does and returns the origin the
+// generated module records.
+func loadWithOrigin(t *testing.T, path string) (*compiler.Result, string, error) {
+	t.Helper()
+	source, err := locateSource(path)
+	if err != nil {
+		return nil, "", err
+	}
+	r, _, err := loadSource(source, "go")
+	return r, source.Path(), err
+}
 
 func TestResolveSourceOriginMatchesAdmittedPath(t *testing.T) {
 	root := t.TempDir()
@@ -37,7 +50,7 @@ func TestResolveSourceOriginMatchesAdmittedPath(t *testing.T) {
 	}
 
 	t.Chdir(root)
-	r, origin, err := loadWithOrigin("jump/origin.ef", "go")
+	r, origin, err := loadWithOrigin(t, "jump/origin.ef")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +67,7 @@ func TestResolveSourceOriginMatchesAdmittedPath(t *testing.T) {
 	// admitted bytes rather than the different file selected by raw-path OS
 	// walking through the symlink.
 	logicalPath := "jump/../origin.ef"
-	r, origin, err = loadWithOrigin(logicalPath, "go")
+	r, origin, err = loadWithOrigin(t, logicalPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +80,7 @@ func TestResolveSourceOriginMatchesAdmittedPath(t *testing.T) {
 	}
 
 	absPath := root + string(os.PathSeparator) + "jump" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "origin.ef"
-	_, absoluteOrigin, err := loadWithOrigin(absPath, "go")
+	_, absoluteOrigin, err := loadWithOrigin(t, absPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +311,7 @@ func TestNativeGoBuildRejectsModuleMutationDespiteInheritedFlags(t *testing.T) {
 	t.Setenv("GOFLAGS", "-mod=mod")
 	before := generationFileStates(t, root)
 	output := filepath.Join(t.TempDir(), "program")
-	child := nativeGoBuildCommand(root, output)
+	child := receipt.GoBuildCommand(root, output, ".")
 	if data, err := child.CombinedOutput(); err == nil || !strings.Contains(string(data), "replaced but not required") {
 		t.Fatalf("native child admitted a missing module requirement: err=%v output=%s", err, data)
 	}

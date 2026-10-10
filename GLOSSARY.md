@@ -22,6 +22,8 @@ Effra describes server programs using explicit, inspectable effect contracts.
 
 **Failure payload**: The declared data carried by a named failure, separate from an ordinary success value.
 
+**Entry failure report**: The deterministic stderr text and exit status a program entry produces when `main` fails. It lists each cause reason in order, as a named failure with its payload, a defect message or an interruption. Payloads are rendered from the checked types of `main`'s failure row, so the report is identical on every target for every failure in that row that both targets can raise, including built-in, codec and HTTP listener failures. The one exception is an unclassified HTTP listener failure, which keeps the host's text.
+
 **Effect contract**: The success value, named failures, and required services of a deferred Effra program.
 
 **Semantic equivalence baseline** (acceptance term): A matched Effra, explicit
@@ -204,5 +206,9 @@ overhead or a fixed speedup multiplier.
 **Live test mode**: Explicit permission for a test program to use host capabilities or real program time, distinct from fixture substitution.
 
 **Test watchdog**: A harness deadline independent of program time. Forced termination leaves managed cleanup unconfirmed.
+
+**Application receipt** (implemented): A raw measurement of one built application: the runtime modules and declarations its plan retained, its generated files, imports, dependencies, effective build settings, executable or module bytes and symbols, and the external runtime it does not contain. It reports the compiler distribution separately and makes no performance claim.
+
+**Unmatched floor** (size conformance): A control program that does less than the fixture it accompanies, such as printing a result without the entry's cancellation and scope. It is recorded only as a lower bound and is never compared as a member of a semantic equivalence baseline.
 
 **Program time**: The time authority under which managed sleeps and deadlines execute. Test program time can advance independently of the watchdog's wall clock.

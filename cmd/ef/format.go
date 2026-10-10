@@ -180,11 +180,11 @@ func formatCommand(args []string) error {
 			report.Success = false
 			report.Failures = append(report.Failures, formatFailureReport{Code: "EFMT_INVOCATION", Message: err.Error()})
 			if printErr := printJSON(report); printErr != nil {
-				return formatExitError{code: 2, message: printErr.Error()}
+				return exitStatusError{code: 2, message: printErr.Error()}
 			}
-			return formatExitError{code: 2, handled: true}
+			return exitStatusError{code: 2, handled: true}
 		}
-		return formatExitError{code: 2, message: err.Error()}
+		return exitStatusError{code: 2, message: err.Error()}
 	}
 	if opts.help {
 		fmt.Fprint(os.Stdout, fmtHelp)
@@ -197,22 +197,22 @@ func formatCommand(args []string) error {
 	report, err := formatFiles(opts)
 	if opts.json {
 		if printErr := printJSON(report); printErr != nil {
-			return formatExitError{code: 2, message: printErr.Error()}
+			return exitStatusError{code: 2, message: printErr.Error()}
 		}
 		if err != nil {
-			return formatExitError{code: 2, handled: true}
+			return exitStatusError{code: 2, handled: true}
 		}
 		if opts.check && reportHasChanges(report) {
-			return formatExitError{code: 1, handled: true}
+			return exitStatusError{code: 1, handled: true}
 		}
 		return nil
 	}
 	printFormatHumanStatus(opts, report)
 	if err != nil {
-		return formatExitError{code: 2, message: err.Error()}
+		return exitStatusError{code: 2, message: err.Error()}
 	}
 	if opts.check && reportHasChanges(report) {
-		return formatExitError{code: 1, handled: true}
+		return exitStatusError{code: 1, handled: true}
 	}
 	return nil
 }
@@ -236,20 +236,20 @@ func newFormatReport(opts fmtOptions) formatReport {
 func formatStdin() error {
 	input, err := io.ReadAll(io.LimitReader(os.Stdin, int64(maxFormatInputBytes)+1))
 	if err != nil {
-		return formatExitError{code: 2, message: (&formatAdapterError{code: "EFMT_READ", message: err.Error()}).Error()}
+		return exitStatusError{code: 2, message: (&formatAdapterError{code: "EFMT_READ", message: err.Error()}).Error()}
 	}
 	if len(input) > maxFormatInputBytes {
-		return formatExitError{code: 2, message: (&formatAdapterError{code: "EFMT_INPUT_LIMIT", message: fmt.Sprintf("stdin exceeds %d-byte limit", maxFormatInputBytes)}).Error()}
+		return exitStatusError{code: 2, message: (&formatAdapterError{code: "EFMT_INPUT_LIMIT", message: fmt.Sprintf("stdin exceeds %d-byte limit", maxFormatInputBytes)}).Error()}
 	}
 	result, err := compiler.FormatSourceBounded(string(input), maxFormatOutputBytes)
 	if err != nil {
-		return formatExitError{code: 2, message: formatSourceError("", err).Error()}
+		return exitStatusError{code: 2, message: formatSourceError("", err).Error()}
 	}
 	if len(result.Text) > maxFormatOutputBytes {
-		return formatExitError{code: 2, message: (&formatAdapterError{code: "EFMT_OUTPUT_LIMIT", message: fmt.Sprintf("formatted stdin exceeds %d-byte limit", maxFormatOutputBytes)}).Error()}
+		return exitStatusError{code: 2, message: (&formatAdapterError{code: "EFMT_OUTPUT_LIMIT", message: fmt.Sprintf("formatted stdin exceeds %d-byte limit", maxFormatOutputBytes)}).Error()}
 	}
 	if _, err = io.WriteString(os.Stdout, result.Text); err != nil {
-		return formatExitError{code: 2, message: (&formatAdapterError{code: "EFMT_WRITE", message: err.Error()}).Error()}
+		return exitStatusError{code: 2, message: (&formatAdapterError{code: "EFMT_WRITE", message: err.Error()}).Error()}
 	}
 	return nil
 }

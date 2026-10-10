@@ -1,0 +1,63 @@
+// The minimal entry plus declarations it never reaches. Each one would retain
+// a runtime module, codec plan, provider or bundled member if it were a root.
+import Json "effra/json"
+import Functions "effra/functions"
+
+error Missing
+
+record Customer {
+    id: i64
+    name: string
+}
+
+derive customerJson = Json.codec<Customer>(maxBodyBytes: 1024, maxDepth: 1)
+
+service Directory {
+    effect fn get(key: string) -> string raises { Missing }
+}
+
+impl Names for Directory {
+    effect fn get(key: string) -> string raises { Missing } {
+        "name:" + key
+    }
+}
+
+effect fn encodeCustomer(customer: Customer) -> string raises { JsonEncodeFailure } {
+    run customerJson.encode(customer)
+}
+
+effect fn route(request: HttpRequest) -> HttpReply uses { Http } {
+    let body = run Http.text("served " + request.path)
+    HttpReply.Respond {
+        response: HttpResponse {
+            status: 200,
+            contentType: "text/plain; charset=utf-8",
+            body: body
+        }
+    }
+}
+
+effect fn serve() -> void raises { IoError } {
+    let limits = HttpLimits {
+        maxBodyBytes: 0,
+        readHeaderMillis: 5000,
+        readBodyMillis: 5000,
+        idleMillis: 5000,
+        maxActive: 64
+    }
+    run Http.listen("127.0.0.1:0", limits, route).provide<Http>(LiveHttp)
+}
+
+effect fn announce(label: string) -> string uses { Console, Env } {
+    let value = run Env.get(label)
+    run Console.log(value)
+    value
+}
+
+effect fn lookup(key: string) -> string raises { Missing } uses { Directory } {
+    run Functions.identity(key) |> Directory.get()
+}
+
+effect fn main() -> string {
+    "minimal"
+}

@@ -65,7 +65,7 @@ func TestExplicitTestProvidersRejectLiveExecutionWithoutHarness(t *testing.T) {
 		t.Fatal(r.Diagnostics)
 	}
 	goOutput, err := runWithWatchdog(buildGeneratedGo(t, r, GoGenerationBuild))
-	if err == nil || !strings.Contains(string(goOutput), "test clock requires an active test scheduler") {
+	if err == nil || !strings.Contains(string(goOutput), "test clock requires the ef test harness") {
 		t.Fatalf("Go TestClock escaped its harness: %v\n%s", err, goOutput)
 	}
 	jsOutput := runJS(t, source, `const exit=await Effect.runPromiseExit(__ef_function_main());if(exit._tag!=="Failure"||!exit.cause.reasons.some(reason=>reason._tag==="Die"&&String(reason.defect).includes("test clock requires the ef test harness")))throw new Error("JS TestClock escaped its harness "+JSON.stringify(exit));`)

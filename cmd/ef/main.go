@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"effra.local/prototype/internal/compiler"
@@ -19,12 +21,13 @@ import (
 	"effra.local/prototype/internal/lsp"
 	"effra.local/prototype/internal/mcp"
 	"effra.local/prototype/internal/producer"
+	"effra.local/prototype/internal/receipt"
 	sourcefile "effra.local/prototype/internal/source"
 )
 
 func main() {
 	if err := command(os.Args[1:]); err != nil {
-		if exit, ok := err.(formatExitError); ok {
+		if exit, ok := err.(exitStatusError); ok {
 			if !exit.handled && exit.message != "" {
 				fmt.Fprintln(os.Stderr, exit.message)
 			}
@@ -42,13 +45,13 @@ type usageError struct{ message string }
 
 func (e usageError) Error() string { return e.message }
 
-type formatExitError struct {
+type exitStatusError struct {
 	code    int
 	message string
 	handled bool
 }
 
-func (e formatExitError) Error() string { return e.message }
+func (e exitStatusError) Error() string { return e.message }
 
 func invalidInvocation(err error) error {
 	if err == nil {
@@ -161,59 +164,38 @@ func printProjectionJSON(v any) error {
 	return json.NewEncoder(os.Stdout).Encode(v)
 }
 func load(path, target string) (*compiler.Result, error) {
-	r, _, err := loadWithSource(path, target)
+	source, err := locateSource(path)
+	if err != nil {
+		return nil, err
+	}
+	r, _, err := loadSource(source, target)
 	return r, err
 }
 
-func loadWithSource(path, target string) (*compiler.Result, compiler.SourceSnapshot, error) {
+// locateSource admits a source path once. Every command loads, builds,
+// tests and measures through the returned location, so no step reads,
+// protects or records a different file by interpreting the spelling again.
+func locateSource(path string) (receipt.Location, error) {
 	if filepath.Ext(path) != ".ef" {
-		return nil, compiler.SourceSnapshot{}, fmt.Errorf("source file must have .ef extension")
+		return receipt.Location{}, fmt.Errorf("source file must have .ef extension")
 	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return nil, compiler.SourceSnapshot{}, err
-	}
-	uri, err := compiler.FileURI(absolute)
-	if err != nil {
-		return nil, compiler.SourceSnapshot{}, err
-	}
-	source, err := sourcefile.ReadRegularFile(absolute, 0)
-	if err != nil {
-		return nil, compiler.SourceSnapshot{}, err
-	}
-	snapshot := compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: string(source)}
-	return compiler.CompileAt(snapshot.Text, target, filepath.Dir(absolute)), snapshot, nil
+	return receipt.LocateSource(path)
 }
 
-// loadWithOrigin keeps the established source admission and semantic module
-// resolution path, while returning the physical origin for generated output.
-// The origin is derived from the same absolute path that loadWithSource read;
-// it never describes a different file selected from the raw caller spelling.
-func loadWithOrigin(path, target string) (*compiler.Result, string, error) {
-	r, _, err := loadWithSource(path, target)
+// loadSource reads and checks the located source. Diagnostics name the
+// admitted path and module imports resolve beside it; the bytes come from
+// the file it reaches.
+func loadSource(source receipt.Location, target string) (*compiler.Result, compiler.SourceSnapshot, error) {
+	uri, err := compiler.FileURI(source.Admitted())
 	if err != nil {
-		return nil, "", err
+		return nil, compiler.SourceSnapshot{}, err
 	}
-	absolute, err := filepath.Abs(path)
+	text, err := sourcefile.ReadRegularFile(source.Path(), 0)
 	if err != nil {
-		return nil, "", err
+		return nil, compiler.SourceSnapshot{}, err
 	}
-	origin, err := resolveSourceOrigin(absolute)
-	if err != nil {
-		return nil, "", err
-	}
-	return r, origin, nil
-}
-
-// resolveSourceOrigin follows the operating system's path walk for the
-// already-admitted absolute source path. Diagnostics retain the established
-// lexical URI and source admission policy above.
-func resolveSourceOrigin(absolutePath string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(absolutePath)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Abs(resolved)
+	snapshot := compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: string(text)}
+	return compiler.CompileAt(snapshot.Text, target, filepath.Dir(source.Admitted())), snapshot, nil
 }
 
 type options struct {
@@ -223,6 +205,7 @@ type options struct {
 	json           bool
 	timeoutMillis  int
 	live           bool
+	receipt        string
 	positional     []string
 	typeSelection  compiler.TypeSelection
 	lint           lintpacks.Selection
@@ -239,7 +222,7 @@ func parseOptions(args []string) (options, error) {
 	}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--target", "-o", "--timeout-ms", "--symbol", "--offset", "--definition", "--revision":
+		case "--target", "-o", "--receipt", "--timeout-ms", "--symbol", "--offset", "--definition", "--revision":
 			if i+1 == len(args) {
 				return opts, fmt.Errorf("%s requires a value", args[i])
 			}
@@ -253,6 +236,11 @@ func parseOptions(args []string) (options, error) {
 				opts.typeSelection.Definition = args[i]
 			} else if flag == "--revision" {
 				opts.typeSelection.ExpectedRevision = args[i]
+			} else if flag == "--receipt" {
+				if args[i] == "" {
+					return opts, fmt.Errorf("--receipt requires a non-empty path")
+				}
+				opts.receipt = args[i]
 			} else if flag == "--offset" {
 				n, err := strconv.Atoi(args[i])
 				if err != nil || n < 0 {
@@ -317,7 +305,7 @@ func parseOptions(args []string) (options, error) {
 }
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] [LINT] | lint FILE [--strict] [--target go|js] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | lint receipt FILE [--runs N] [--target go|js] [LINT] | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] [GRAPH VIEW OPTIONS] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go|js] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] [LINT] | lint FILE [--strict] [--target go|js] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | lint receipt FILE [--runs N] [--target go|js] [LINT] | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] [GRAPH VIEW OPTIONS] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] [--receipt PATH] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go|js] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
 		fmt.Println("type: ef type FILE (--symbol NAME | --offset BYTE | --definition TYPE_ID --revision REVISION) [--target go|js] [--json]")
 		fmt.Println(graphUsage())
 		return nil
@@ -446,6 +434,9 @@ func command(args []string) error {
 	if opts.output != "" && args[0] != "build" {
 		return usage(fmt.Errorf("-o is only supported by build"))
 	}
+	if opts.receipt != "" && args[0] != "build" {
+		return usage(fmt.Errorf("--receipt is only supported by build"))
+	}
 	if opts.entry && (args[0] != "build" || opts.target != "js") {
 		return usage(fmt.Errorf("--entry is only needed for JavaScript builds"))
 	}
@@ -465,16 +456,11 @@ func command(args []string) error {
 			return err
 		}
 	}
-	var r *compiler.Result
-	var snapshot compiler.SourceSnapshot
-	var sourceOrigin string
-	if args[0] == "diagnostics" || args[0] == "lint" {
-		r, snapshot, err = loadWithSource(opts.positional[0], opts.target)
-	} else if opts.target == "go" && (args[0] == "build" || args[0] == "run" || args[0] == "test") {
-		r, sourceOrigin, err = loadWithOrigin(opts.positional[0], opts.target)
-	} else {
-		r, err = load(opts.positional[0], opts.target)
+	source, err := locateSource(opts.positional[0])
+	if err != nil {
+		return err
 	}
+	r, snapshot, err := loadSource(source, opts.target)
 	if err != nil {
 		return err
 	}
@@ -498,7 +484,7 @@ func command(args []string) error {
 				return err
 			}
 		} else {
-			printDiagnosticText(report, opts.positional[0])
+			printDiagnosticText(report, source.String())
 		}
 		if !report.PolicyPassed {
 			return fmt.Errorf("diagnostics failed policy")
@@ -558,7 +544,7 @@ func command(args []string) error {
 		symbol := r.Find(opts.positional[1])
 		if symbol == nil {
 			if r.FindLayer(opts.positional[1]) != nil {
-				response, err := r.LayerInspection(opts.positional[1], opts.positional[0])
+				response, err := r.LayerInspection(opts.positional[1], source.String())
 				if err != nil {
 					return err
 				}
@@ -603,13 +589,24 @@ func command(args []string) error {
 		if err := r.TestMode(opts.live); err != nil {
 			return err
 		}
-		return runTests(r, opts.positional[0], sourceOrigin, opts.timeoutMillis)
+		return runTests(r, source, opts.timeoutMillis)
 	case "build", "run":
-		var path string
+		paths, err := locateBuild(source, opts)
+		if err != nil {
+			return err
+		}
+		var measured *receipt.Application
+		var destination *receipt.Destination
+		if opts.receipt != "" {
+			if destination, err = receipt.Admit(opts.receipt, paths.protected(), paths.managed); err != nil {
+				return err
+			}
+			defer destination.Close()
+		}
 		if opts.target == "go" {
-			path, err = buildGo(r, opts.positional[0], sourceOrigin, opts.output)
+			measured, err = buildGo(r, paths.source, paths.output, opts.receipt != "")
 		} else {
-			path, err = buildJS(r, opts.positional[0], opts.output, opts.entry || args[0] == "run")
+			measured, err = buildJS(r, paths.source, paths.output, paths.declaration, opts.entry || args[0] == "run", opts.receipt != "")
 		}
 		if err != nil {
 			if !r.Checked {
@@ -618,13 +615,15 @@ func command(args []string) error {
 			return err
 		}
 		if args[0] == "build" {
-			fmt.Println(path)
+			if measured != nil {
+				if err := destination.Publish(measured); err != nil {
+					return err
+				}
+			}
+			fmt.Println(paths.output)
 			return nil
 		}
-		absolute, err := filepath.Abs(path)
-		if err != nil {
-			return err
-		}
+		absolute := paths.output.Path()
 		runtime := absolute
 		arguments := []string{}
 		if opts.target == "js" {
@@ -641,9 +640,36 @@ func command(args []string) error {
 		child.Stdout = os.Stdout
 		child.Stderr = os.Stderr
 		child.Stdin = os.Stdin
-		return child.Run()
+		return runEntryProcess(child)
 	default:
 		return fmt.Errorf("unknown command %s", args[0])
+	}
+}
+
+// runEntryProcess runs a built program as `ef run`'s child. SIGINT and SIGTERM
+// are forwarded so the program's entry interrupts main and reports, and the
+// program's exit status passes through without an extra message: the entry
+// failure report is the program's own output.
+func runEntryProcess(child *exec.Cmd) error {
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	if err := child.Start(); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- child.Wait() }()
+	for {
+		select {
+		case received := <-signals:
+			_ = child.Process.Signal(received)
+		case err := <-done:
+			var exited *exec.ExitError
+			if errors.As(err, &exited) && exited.ExitCode() > 0 {
+				return exitStatusError{code: exited.ExitCode(), handled: true}
+			}
+			return err
+		}
 	}
 }
 
@@ -669,12 +695,103 @@ func printDiagnosticText(report compiler.DiagnosticReport, source string) {
 func sourceBase(source string) string {
 	return strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
 }
-func buildGo(r *compiler.Result, source, origin, output string) (string, error) {
+
+// goOutputPath is the executable a native build writes.
+func goOutputPath(source, output string) string {
+	if output == "" {
+		return filepath.Join("dist", sourceBase(source))
+	}
+	return output
+}
+
+// jsOutputPaths are the module and declaration file a JavaScript build writes.
+func jsOutputPaths(source, output string) (string, string) {
+	if output == "" {
+		output = filepath.Join("dist", sourceBase(source)+".mjs")
+	}
+	return output, strings.TrimSuffix(output, ".mjs") + ".d.mts"
+}
+
+// buildPaths are a build's source and artifact locations. Each is
+// resolved once, and the same value is handed to receipt admission, to the
+// build that writes it and to measurement.
+type buildPaths struct {
+	source      receipt.Location
+	output      receipt.Location
+	declaration receipt.Location
+	managed     []receipt.Location
+}
+
+func locateBuild(source receipt.Location, opts options) (buildPaths, error) {
+	paths := buildPaths{source: source}
+	var err error
+	if opts.target == "go" {
+		if paths.output, err = locateArtifact(goOutputPath(source.String(), opts.output)); err != nil {
+			return paths, err
+		}
+		root, err := receipt.Locate(goApplicationsRoot)
+		if err != nil {
+			return paths, err
+		}
+		paths.managed = []receipt.Location{root}
+		return paths, nil
+	}
+	module, declaration := jsOutputPaths(source.String(), opts.output)
+	if filepath.Ext(module) != ".mjs" {
+		return paths, fmt.Errorf("JavaScript output must have .mjs extension")
+	}
+	if paths.output, err = locateArtifact(module); err != nil {
+		return paths, err
+	}
+	paths.declaration, err = locateArtifact(declaration)
+	return paths, err
+}
+
+// locateArtifact locates a file the build writes. A directory is refused
+// before anything is built: the go command would write a child executable
+// named after the package into it, a file no other step addresses, so the
+// spelling must name the file itself.
+func locateArtifact(path string) (receipt.Location, error) {
+	if strings.HasSuffix(path, string(filepath.Separator)) {
+		return receipt.Location{}, fmt.Errorf("output %s names a directory; name the file to write", path)
+	}
+	location, err := receipt.Locate(path)
+	if err != nil {
+		return receipt.Location{}, err
+	}
+	if info, err := os.Stat(location.Path()); err == nil && info.IsDir() {
+		return receipt.Location{}, fmt.Errorf("output %s is a directory; name the file to write", path)
+	}
+	return location, nil
+}
+
+// protected are the paths a receipt must never replace: the source and
+// every artifact the build writes.
+func (p buildPaths) protected() []receipt.Location {
+	protected := []receipt.Location{p.source, p.output}
+	if p.declaration.Path() != "" {
+		protected = append(protected, p.declaration)
+	}
+	return protected
+}
+
+// buildGo builds the ordinary native application at output. With measure,
+// it also returns the application receipt of the published generation and
+// executable.
+func buildGo(r *compiler.Result, source, output receipt.Location, measure bool) (*receipt.Application, error) {
 	application, err := goApplication(r, compiler.GoGenerationBuild)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return buildGoApplication(r, source, origin, output, application)
+	generation, err := buildGoApplication(r, source, output, application)
+	if err != nil || !measure {
+		return nil, err
+	}
+	measured, err := receipt.Native(r, source, application, generation, output)
+	if err != nil {
+		return nil, fmt.Errorf("receipt: %w", err)
+	}
+	return measured, nil
 }
 
 // goApplication plans and lowers one native entry mode. A plan refusal is a
@@ -688,63 +805,59 @@ func goApplication(r *compiler.Result, mode compiler.GoGenerationMode) (*compile
 	return application, err
 }
 
-func buildGoApplication(r *compiler.Result, source, origin, output string, application *compiler.GoApplication) (string, error) {
-	snapshot, err := r.GoSourceSnapshot(origin, application)
+func buildGoApplication(r *compiler.Result, source receipt.Location, output receipt.Location, application *compiler.GoApplication) (compiler.GoGeneration, error) {
+	snapshot, err := r.GoSourceSnapshot(source.Path(), application)
 	if err != nil {
-		return "", err
+		return compiler.GoGeneration{}, err
 	}
-	generation, err := compiler.PublishGoSourceSnapshot(filepath.Join("dist", "go", "apps"), snapshot)
+	generation, err := compiler.PublishGoSourceSnapshot(goApplicationsRoot, snapshot)
 	if err != nil {
-		return "", err
+		return compiler.GoGeneration{}, err
 	}
-	if output == "" {
-		output = filepath.Join("dist", sourceBase(source))
-	}
-	absolute, err := filepath.Abs(output)
-	if err != nil {
-		return "", err
-	}
-	if err = os.MkdirAll(filepath.Dir(absolute), 0755); err != nil {
-		return "", err
+	if err = os.MkdirAll(filepath.Dir(output.Path()), 0755); err != nil {
+		return compiler.GoGeneration{}, err
 	}
 	// Imported packages use the resolved module graph; the executable is standalone.
-	child := nativeGoBuildCommand(generation.Directory, absolute)
+	child := receipt.GoBuildCommand(generation.Directory, output.Path(), ".")
 	child.Stdout = os.Stderr
 	child.Stderr = os.Stderr
 	if err = child.Run(); err != nil {
-		return "", fmt.Errorf("Go build failed: %w", err)
+		return compiler.GoGeneration{}, fmt.Errorf("Go build failed: %w", err)
 	}
-	return output, nil
+	return generation, nil
 }
 
-func nativeGoBuildCommand(directory, output string) *exec.Cmd {
-	child := exec.Command("go", "build", "-trimpath", "-mod=readonly", "-o", output, ".")
-	child.Dir = directory
-	child.Env = replaceEnv(os.Environ(), "GOWORK", "off")
-	return child
-}
-func buildJS(r *compiler.Result, source, output string, entry bool) (string, error) {
-	js, decl, err := r.Emit(entry)
+// goApplicationsRoot is the managed tree of published generated modules.
+var goApplicationsRoot = filepath.Join("dist", "go", "apps")
+
+// buildJS writes the JavaScript module and its declarations. With measure, it
+// also returns the application receipt of the written module.
+func buildJS(r *compiler.Result, source, output, declaration receipt.Location, entry, measure bool) (*receipt.Application, error) {
+	module, err := r.EmitModule(entry)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if output == "" {
-		output = filepath.Join("dist", sourceBase(source)+".mjs")
+	if err = os.MkdirAll(filepath.Dir(output.Path()), 0755); err != nil {
+		return nil, err
 	}
-	if filepath.Ext(output) != ".mjs" {
-		return "", fmt.Errorf("JavaScript output must have .mjs extension")
+	if err = writeChanged(output.Path(), []byte(module.Source)); err != nil {
+		return nil, err
 	}
-	if err = os.MkdirAll(filepath.Dir(output), 0755); err != nil {
-		return "", err
+	if err = writeChanged(declaration.Path(), []byte(module.Declaration)); err != nil {
+		return nil, err
 	}
-	if err = writeChanged(output, []byte(js)); err != nil {
-		return "", err
+	if !measure {
+		return nil, nil
 	}
-	declaration := strings.TrimSuffix(output, ".mjs") + ".d.mts"
-	if err = writeChanged(declaration, []byte(decl)); err != nil {
-		return "", err
+	mode := "library"
+	if entry {
+		mode = "entry"
 	}
-	return output, nil
+	measured, err := receipt.JavaScript(r, source, mode, module, output, declaration)
+	if err != nil {
+		return nil, fmt.Errorf("receipt: %w", err)
+	}
+	return measured, nil
 }
 func writeChanged(path string, content []byte) error {
 	old, err := os.ReadFile(path)
@@ -774,7 +887,7 @@ func replaceEnv(environment []string, key, value string) []string {
 	return result
 }
 
-func runTests(r *compiler.Result, source, origin string, timeoutMillis int) error {
+func runTests(r *compiler.Result, source receipt.Location, timeoutMillis int) error {
 	var path string
 	if timeoutMillis == 0 {
 		timeoutMillis = 30000
@@ -784,16 +897,24 @@ func runTests(r *compiler.Result, source, origin string, timeoutMillis int) erro
 		if err != nil {
 			return err
 		}
-		path, err = buildGoApplication(r, source, origin, filepath.Join("dist", sourceBase(source)+".tests"), application)
+		output, err := receipt.Locate(filepath.Join("dist", sourceBase(source.String())+".tests"))
 		if err != nil {
 			return err
 		}
+		if _, err = buildGoApplication(r, source, output, application); err != nil {
+			return err
+		}
+		path = output.Path()
 	} else {
 		js, decl, err := r.EmitJSTests()
 		if err != nil {
 			return err
 		}
-		path = filepath.Join("dist", sourceBase(source)+".tests.mjs")
+		module, err := receipt.Locate(filepath.Join("dist", sourceBase(source.String())+".tests.mjs"))
+		if err != nil {
+			return err
+		}
+		path = module.Path()
 		if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			return err
 		}
@@ -804,11 +925,8 @@ func runTests(r *compiler.Result, source, origin string, timeoutMillis int) erro
 			return err
 		}
 	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
-	runtime, args := absolute, []string{}
+	runtime, args := path, []string{}
+	var err error
 	if r.Target == "js" {
 		runtime, err = exec.LookPath("bun")
 		if err != nil {
@@ -817,7 +935,7 @@ func runTests(r *compiler.Result, source, origin string, timeoutMillis int) erro
 		if err != nil {
 			return fmt.Errorf("JavaScript tests require Bun or Node")
 		}
-		args = []string{absolute}
+		args = []string{path}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMillis)*time.Millisecond)
 	defer cancel()

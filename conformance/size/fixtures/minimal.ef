@@ -1,0 +1,4 @@
+// Pure minimal entry: the checked effect main is the only root.
+effect fn main() -> string {
+    "minimal"
+}

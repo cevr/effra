@@ -230,6 +230,38 @@ The runtime result should distinguish `Success(A)` from failure causes containin
 
 Recoverable Go panics can be captured at managed task boundaries as defects and trigger cleanup. Fatal runtime failures, process termination, and arbitrary unmanaged goroutine panics cannot receive the same guarantee.
 
+### Entry failure report
+
+When `main`'s exit is a failure, the program entry writes an [entry failure report](../GLOSSARY.md) to stderr and exits; stdout receives nothing more. The Go executable (`runtime/effra/report.go`) and the JavaScript entry (`internal/compiler/prelude/entry.mjs`) produce the same bytes for every failure in `main`'s checked failure row that both targets can raise, including built-in, codec and HTTP listener failures. There is one exception. An HTTP listener failure outside the classified set (see [HTTP server](runtime.md#http-server)) keeps the host's text, because hosts describe it in their own words. Failures of Go-only services, such as `Files`, never reach JavaScript, which refuses those services with EF110. `cmd/ef/entry_failure_process_test.go` compares both targets' stderr and status through `ef run`. `internal/compiler/entry_report_test.go` runs each generated entry with only its computation replaced by one that exits with a fixed composite cause; mutants of the entry's rendering and exit status make it fail. `ef run` forwards SIGINT and SIGTERM to the program and passes its report and status through unchanged.
+
+The report has one line per cause reason, in cause order. A scope's cause lists its body's reasons, then unobserved children in fork order, then cleanup.
+
+```text
+failure: Bad
+failure: Invalid { code: 42, message: "bad \"input\"" }
+defect: "live scheduler cannot advance"
+interrupt
+```
+
+- A named failure prints its tag, then its payload fields in braces when it has any. A built-in failure that carries diagnostic text, such as `AssertionFailed` or `JsonDecodeFailure`, reports it as its `message` field. `Timeout` has no payload on either target.
+- A defect prints its message as a quoted string. Interruption prints `interrupt` with no host detail.
+- Payload values use one grammar on both targets. Strings are double-quoted: `"` and `\` are escaped, newline, carriage return and tab use `\n`, `\r` and `\t`, other C0 controls and DEL use `\u00XX`, every other character (U+2028, characters outside the BMP) is literal, and invalid text (invalid UTF-8 on Go, a lone surrogate on JavaScript) is replaced by U+FFFD. `i64` is decimal, `bool` is `true` or `false`, and `void` is `void`. A record prints as `{ field: value, ... }`, or `{}` with no fields. An enum alternative prints its variant name, followed by its fields when it has any, such as `Some { value: "h" }`. Bytes print as `<bytes len=N>`, a callable as `<fn>`, and any other value, such as a handle or host value, as `<opaque>`.
+- Fields are listed in byte order of their source names. The JavaScript representation keeps construction order, not declaration order, so byte order is the only order both targets reproduce from the same plan.
+- The exit status is 130 when every reason is an interruption, and 1 otherwise.
+- Built-in diagnostic text is built the same way on both targets. Text it embeds, such as the two sides of `Assert.equalText`, uses the same quoting rule (`QuoteText` in Go, `__ef_quoteText` in JavaScript), and each test-provider defect has one message.
+
+**Rendering is driven by checked types.** The compiler builds an entry report plan from `main`'s failure row (`internal/compiler/entry_report.go`). For each failure label the plan records whether it is a declared failure with fields, a built-in failure with diagnostic text, or a label with no payload. For each field type it records one node: a primitive kind, a record with its sorted fields, an enum with its variants, a callable, or opaque. Nodes are keyed by checked type identity, so a recursive type refers back to its own node. Each target lowers the plan to a table its runtime interprets. On Go, field reads are typed accessors on the generated structs, and a variant is matched by a type assertion on its generated type. On JavaScript, a variant is selected by its emitted discriminator only where the checked type is an enum. A record field named `_tag` is therefore ordinary data: `{ _tag: "a\nb" }` prints as a record on both targets, and the newline is escaped. The runtimes never classify a value by its shape or decode generated identifiers. The plan follows the codec plan's precedent (`internal/compiler/codec_plan.go`): the compiler builds one target-neutral, type-directed plan, and each runtime consumes it.
+
+Prior art: Effect's `runMain` uses `defaultTeardown` (`Runtime.ts`), which exits 130 for interruption-only causes and 1 otherwise. Go's convention for a failed `main` is to print the error to stderr and exit 1, and 130 is the shell's status for SIGINT (128 + 2). Rejected alternatives:
+
+- **Effect `Cause.pretty`** (`Cause.ts`, `causePrettyErrors` in `internal/effect.ts`) converts each reason to an `Error` and joins their stack traces, with span annotations and interrupting fiber ids. Stack frames and fiber ids are host-specific, so the Go executable cannot reproduce them. Node's `console.error` object dump has the same problem.
+- **Effect Schema-driven formatting** (`SchemaIssue` formatters and `Formatter.format`) walks a runtime schema value or the JavaScript object graph. Effra types are checked at compile time and there is no runtime schema on Go. The entry report plan is the compile-time form of the same idea, built once from checked types for both targets.
+- **Elixir `inspect` and the `Inspect` protocol** (`lib/elixir/lib/inspect.ex` at 91ee75bb) dispatch on the runtime value's type to a per-type implementation. `@derive {Inspect, only: ...}` can hide fields, and the default lists struct fields alphabetically. Effra borrows the alphabetical field order. It rejects user-overridable implementations here: a custom renderer could make the two targets diverge, and Effra has no protocol dispatch on Go values.
+- **MoonBit `derive(Show)`** (`builtin/traits.mbt` and `String::escape` in `builtin/show.mbt` at e96ede8; deprecated in favor of `derive(Debug)`) generates a per-type `output` method at compile time. Generating a renderer function for every type and target would also be typed. It was rejected because it adds code for each failure type on each target, while one interpreted plan keeps the emitted hunks small. MoonBit's escape rules (`\n`, `\r`, `\t`, `\u{hex}` for other controls) informed the string grammar; Effra uses `\u00XX` so the escapes read the same as JSON.
+- **Runtime shape inspection** (sniffing `_tag` on JavaScript objects, reflecting over Go struct and generated field names) was the first implementation. It misreported records with a `_tag` field and tied the report to generated naming.
+- Go's `Cause.Error()` text was rejected because it keeps only the tags and drops the payload.
+- Printing nothing for interruption, as Effect does, was rejected because a reported interruption tells an operator or agent why the process stopped.
+
 ## Compiler and Go runtime
 
 Effect typing and an Effect runtime are different design layers. Error/service rows and nominal capability identities can be checked and erased; they do not intrinsically require GC, fibers, boxed instructions, or a scheduler. First-class lazy computations do require a concrete representation for captures and execution, whose allocation and dispatch costs depend on lowering. For server workloads, managed memory and the existing JS/Go runtimes are appropriate, but they remain visible operational constraints rather than hidden implications of a type signature.

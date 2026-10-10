@@ -26,6 +26,6 @@
     {"name": "limit.read-body-timeout-closes", "kind": "stalled-body", "request": {"raw": "POST /echo HTTP/1.1\r\nHost: effra\r\nContent-Type: application/octet-stream\r\nContent-Length: 4\r\n\r\nx"}, "withinMillis": 3000},
     {"name": "admission.disconnect-releases-slot", "kind": "disconnect-releases-admission", "hold": "/slow", "probe": "/health"},
     {"name": "framing.malformed-held-open-does-not-block-shutdown", "kind": "malformed-held-open", "request": {"raw": "POST /echo HTTP/1.1\r\nHost: effra\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nab\r\n0\r\n\r\n"}},
-    {"name": "shutdown.active-work-503-then-interrupt", "kind": "shutdown-with-active-work", "hold": "/slow", "probe": "/health", "response": {"status": 503, "close": true}, "exitCode": 1, "stderrContains": "interrupt", "withinMillis": 5000}
+    {"name": "shutdown.active-work-503-then-interrupt", "kind": "shutdown-with-active-work", "hold": "/slow", "probe": "/health", "response": {"status": 503, "close": true}, "exitCode": 130, "stderr": "interrupt\n", "withinMillis": 5000}
   ]
 }
