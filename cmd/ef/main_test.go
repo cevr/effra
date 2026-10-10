@@ -201,7 +201,12 @@ effect fn main() -> string { "ok" }`
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(source), 0711); err != nil {
+	// The formatter preserves the original mode; set it explicitly because
+	// WriteFile's permission is filtered by the process umask.
+	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0711); err != nil {
 		t.Fatal(err)
 	}
 
@@ -447,7 +452,10 @@ func TestFormatCLIResolvesOSPathsAndPreservesFilesystemPolicy(t *testing.T) {
 	}
 
 	readOnly := filepath.Join(root, "readonly.ef")
-	if err := os.WriteFile(readOnly, []byte(source), 0444); err != nil {
+	if err := os.WriteFile(readOnly, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(readOnly, 0444); err != nil {
 		t.Fatal(err)
 	}
 	output, stderr, code = runTestCLIDir(t, binary, root, "", "fmt", "--json", "readonly.ef")

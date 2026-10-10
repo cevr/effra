@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -309,8 +310,18 @@ func writeResponse(w http.ResponseWriter, response HTTPResponse) {
 // context, and completes only after every request handler has returned.
 func serveManaged(address string, server *http.Server, handler func(context.Context) http.Handler, onListen func(string)) Effect[Unit] {
 	return func(fc *FiberContext) Exit[Unit] {
+		hostPort, err := parseHTTPAddress(address)
+		if err != nil {
+			return Fail[Unit]("IoError", err)
+		}
 		server.Handler = handler(fc.Context())
-		listener := Invoke(fc, AcquireRelease("http:"+address, func(context.Context) (net.Listener, error) { return net.Listen("tcp", address) }, func(listener net.Listener, ctx context.Context) error {
+		listener := Invoke(fc, AcquireRelease("http:"+address, func(context.Context) (net.Listener, error) {
+			listener, err := net.Listen("tcp", hostPort)
+			if err != nil {
+				return nil, httpListenError(address, err)
+			}
+			return listener, nil
+		}, func(listener net.Listener, ctx context.Context) error {
 			// Shutdown closes admission and waits for request handlers, including cleanup.
 			err := server.Shutdown(ctx)
 			closeErr := listener.Close()
@@ -352,4 +363,78 @@ func serveManaged(address string, server *http.Server, handler func(context.Cont
 		}
 		return Invoke(fc, child.Value.Join())
 	}
+}
+
+// HTTP listen addresses and listener failures are Effra-owned text, the same
+// bytes on Go and JavaScript (internal/compiler/prelude/http.mjs). The
+// address grammar is `host:port`: the port is 0..65535 in decimal, the host
+// is empty (every interface), a name or IPv4 address without a colon, or a
+// bracketed IPv6 address. docs/runtime.md lists the listener failure classes.
+func parseHTTPAddress(address string) (string, error) {
+	invalid := func(reason string) (string, error) {
+		return "", errors.New("invalid HTTP address " + QuoteText(address) + ": " + reason)
+	}
+	var host, port string
+	if strings.HasPrefix(address, "[") {
+		end := strings.IndexByte(address, ']')
+		if end < 0 {
+			return invalid("unbalanced brackets")
+		}
+		host, port = address[1:end], address[end+1:]
+		if !strings.HasPrefix(port, ":") {
+			return invalid("missing port")
+		}
+		port = port[1:]
+		if host == "" || strings.ContainsAny(host, "[]") || !strings.Contains(host, ":") {
+			return invalid("brackets must enclose an IPv6 address")
+		}
+	} else {
+		colon := strings.LastIndexByte(address, ':')
+		if colon < 0 {
+			return invalid("missing port")
+		}
+		host, port = address[:colon], address[colon+1:]
+		if strings.ContainsAny(host, "[]") {
+			return invalid("unbalanced brackets")
+		}
+		if strings.Contains(host, ":") {
+			return invalid("an IPv6 host must be in brackets")
+		}
+	}
+	if !httpPortText(port) {
+		return invalid("port must be a decimal number from 0 to 65535")
+	}
+	return net.JoinHostPort(host, port), nil
+}
+
+func httpPortText(port string) bool {
+	if port == "" || len(port) > 5 {
+		return false
+	}
+	for _, digit := range port {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	value, err := strconv.Atoi(port)
+	return err == nil && value <= 65535
+}
+
+// httpListenError classifies a host listener failure, as Erlang's :inet
+// reports a POSIX atom rather than host text. An unclassified failure keeps
+// the host's text, the one documented exception to byte-identical reports.
+func httpListenError(address string, err error) error {
+	prefix := "HTTP listen on " + QuoteText(address) + ": "
+	var lookup *net.DNSError
+	switch {
+	case errors.As(err, &lookup):
+		return errors.New(prefix + "host lookup failed")
+	case errors.Is(err, syscall.EADDRINUSE):
+		return errors.New(prefix + "address in use")
+	case errors.Is(err, syscall.EADDRNOTAVAIL):
+		return errors.New(prefix + "address not available")
+	case errors.Is(err, syscall.EACCES), errors.Is(err, syscall.EPERM):
+		return errors.New(prefix + "permission denied")
+	}
+	return errors.New(prefix + err.Error())
 }

@@ -5,7 +5,7 @@ import (
 	"errors"
 )
 
-var errInvalidLatch = errors.New("invalid latch handle: construct with NewLatch")
+var errInvalidLatch = errors.New("invalid latch handle")
 
 // Latch is a portable, one-shot synchronization handle. Completion is
 // idempotent and is shared by every waiter; waiting never consumes it.

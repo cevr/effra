@@ -66,12 +66,96 @@ const __ef_http_guard = (res, publish) => {
     }
   }
 };
+// HTTP listen addresses and listener failures are Effra-owned text, the same
+// bytes as runtime/effra/http.go (parseHTTPAddress, httpListenError). The
+// result is the listen host and port, or the IoError message.
 const __ef_http_address = address => {
-  const colon = address.lastIndexOf(':');
-  if (colon < 0) throw new Error('invalid HTTP address ' + address);
-  let host = address.slice(0, colon);
-  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
-  return { host: host === '' ? undefined : host, port: Number(address.slice(colon + 1)) };
+  const invalid = reason => ({ error: 'invalid HTTP address ' + __ef_quoteText(address) + ': ' + reason });
+  let host, port;
+  if (address.startsWith('[')) {
+    const end = address.indexOf(']');
+    if (end < 0) return invalid('unbalanced brackets');
+    host = address.slice(1, end);
+    port = address.slice(end + 1);
+    if (!port.startsWith(':')) return invalid('missing port');
+    port = port.slice(1);
+    if (host === '' || /[[\]]/.test(host) || !host.includes(':')) return invalid('brackets must enclose an IPv6 address');
+  } else {
+    const colon = address.lastIndexOf(':');
+    if (colon < 0) return invalid('missing port');
+    host = address.slice(0, colon);
+    port = address.slice(colon + 1);
+    if (/[[\]]/.test(host)) return invalid('unbalanced brackets');
+    if (host.includes(':')) return invalid('an IPv6 host must be in brackets');
+  }
+  if (!/^[0-9]{1,5}$/.test(port) || Number(port) > 65535) return invalid('port must be a decimal number from 0 to 65535');
+  return { host: host === '' ? undefined : host, port: Number(port) };
+};
+// __ef_http_parse_addr mirrors Go's netip.ParseAddr, the one place a listen
+// host or a lookup answer is read as a numeric address: the zone is split
+// off first, the address part is classified, and the zone is valid only when
+// non-empty and on an IPv6 address. The result is { family, address, zone },
+// or undefined for anything that is not a numeric address.
+const __ef_http_parse_addr = (isIP, text) => {
+  if (typeof text !== 'string') return undefined;
+  const percent = text.indexOf('%');
+  const address = percent < 0 ? text : text.slice(0, percent);
+  const zone = percent < 0 ? '' : text.slice(percent + 1);
+  const family = isIP(address);
+  if (family === 0) return undefined;
+  if (percent >= 0 && (family !== 6 || zone === '')) return undefined;
+  return { family, address, zone };
+};
+// __ef_http_ipv4 is the dotted IPv4 form of a parsed address that Go's
+// IP.To4 accepts: an IPv4 address or an IPv4-mapped IPv6 address
+// (::ffff:a.b.c.d). Go listens on the 4-byte form of such an address and
+// ignores the zone for the IPv4 socket. Anything else is undefined.
+const __ef_http_ipv4 = parsed => {
+  if (parsed.family === 4) return parsed.address;
+  let canonical;
+  try { canonical = new URL('http://[' + parsed.address + ']/').hostname; } catch { return undefined; }
+  const mapped = /^\[::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/.exec(canonical);
+  if (mapped === null) return undefined;
+  const high = parseInt(mapped[1], 16), low = parseInt(mapped[2], 16);
+  return [high >> 8, high & 255, low >> 8, low & 255].join('.');
+};
+// __ef_http_bind_host is the host a parsed address binds: its IPv4 form when
+// it has one, else the IPv6 address with its zone.
+const __ef_http_bind_host = parsed => __ef_http_ipv4(parsed) ?? (parsed.zone === '' ? parsed.address : parsed.address + '%' + parsed.zone);
+// __ef_http_select is the host a listener binds for a name's answers, as Go's
+// net.Listen binds: the first answer IP.To4 accepts, in its IPv4 form, else
+// the first numeric answer. Undefined when no answer is numeric.
+const __ef_http_select = (isIP, answers) => {
+  const numeric = answers.map(answer => __ef_http_parse_addr(isIP, answer?.address)).filter(parsed => parsed !== undefined);
+  const selected = numeric.find(parsed => __ef_http_ipv4(parsed) !== undefined) ?? numeric[0];
+  return selected === undefined ? undefined : __ef_http_bind_host(selected);
+};
+// __ef_http_listen_target is the listen host and port. A numeric host binds
+// directly. A name is looked up exactly once, here, and the listener binds
+// the selected numeric answer, so listen() never resolves again and binds
+// what the lookup returned. Any lookup failure, or no numeric answer, is
+// `host lookup failed`, because hosts report it differently (Node:
+// getaddrinfo ENOTFOUND; Bun: listen ENOENT or EAGAIN).
+const __ef_http_listen_target = (address, isIP, lookup) => Effect.gen(function* () {
+  const parsed = __ef_http_address(address);
+  if (parsed.error !== undefined) return yield* Effect.fail({ _tag: 'IoError', message: parsed.error });
+  const { host, port } = parsed;
+  if (host === undefined) return { host, port };
+  const literal = __ef_http_parse_addr(isIP, host);
+  if (literal !== undefined) return { host: __ef_http_bind_host(literal), port };
+  const answers = yield* Effect.promise(() => Promise.resolve().then(() => lookup(host, { all: true })).then(found => Array.isArray(found) ? found : [], () => []));
+  const selected = __ef_http_select(isIP, answers);
+  if (selected === undefined) return yield* Effect.fail({ _tag: 'IoError', message: 'HTTP listen on ' + __ef_quoteText(address) + ': host lookup failed' });
+  return { host: selected, port };
+});
+const __ef_http_listen_error = (address, error) => {
+  const prefix = 'HTTP listen on ' + __ef_quoteText(address) + ': ';
+  switch (error?.code) {
+    case 'EADDRINUSE': return prefix + 'address in use';
+    case 'EADDRNOTAVAIL': return prefix + 'address not available';
+    case 'EACCES': case 'EPERM': return prefix + 'permission denied';
+  }
+  return prefix + String(error?.message ?? error);
 };
 const __ef_http_bound = server => {
   const bound = server.address();
@@ -86,9 +170,9 @@ const __ef_http_bound = server => {
 // the listener's services and, once that scope has closed, publishes its exit
 // through respond unless the client is gone.
 const __ef_http_serve = (address, timeouts, onRequest) => Effect.gen(function* () {
-  const { createServer } = yield* Effect.promise(__ef_host_node_http);
+  const [{ createServer }, { isIP }, { lookup }] = yield* Effect.promise(() => Promise.all([__ef_host_node_http(), __ef_host_node_net(), __ef_host_node_dns_promises()]));
+  const { host, port } = yield* __ef_http_listen_target(address, isIP, lookup);
   const context = yield* Effect.context();
-  const { host, port } = __ef_http_address(address);
   const transport = { closing: false, fibers: new Map(), exchanges: new Set(), reading: new WeakMap() };
   transport.exchange = (res, release = () => {}) => {
     let settle;
@@ -147,7 +231,7 @@ const __ef_http_serve = (address, timeouts, onRequest) => Effect.gen(function* (
   server.requestTimeout = 0;
   server.keepAliveTimeout = timeouts.idleMillis;
   const listen = Effect.callback(resume => {
-    const failed = error => resume(Effect.fail({ _tag: 'IoError', message: String(error?.message ?? error) }));
+    const failed = error => resume(Effect.fail({ _tag: 'IoError', message: __ef_http_listen_error(address, error) }));
     server.once('error', failed);
     server.listen(port, host, () => { server.off('error', failed); resume(Effect.void); });
   });
