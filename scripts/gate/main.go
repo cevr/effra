@@ -727,6 +727,16 @@ func (g *gate) toolVersion(tool string) string {
 			version += fmt.Sprintf("\x00%s\x00%t\x00%s", name, set, value)
 		}
 	}
+	if tool == "bun" {
+		for _, config := range bunGlobalConfigs() {
+			// Dotfile managers link these; key the bytes Bun reads.
+			resolved, err := filepath.EvalSymlinks(config)
+			if err != nil {
+				resolved = config
+			}
+			version += fmt.Sprintf("\x00%s\x00%s", config, fileDigest(resolved))
+		}
+	}
 	g.tools[tool] = version
 	return version
 }

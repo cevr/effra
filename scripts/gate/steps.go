@@ -31,7 +31,7 @@ var testTools = []string{"node", "bun", "tsc", "git"}
 
 // testToolEnvironment are variables those tools read but Go tests do not, so
 // Go's test cache cannot see them; they join the tool digest.
-var testToolEnvironment = []string{"NODE_OPTIONS", "NODE_PATH", "BUN_CONFIG_REGISTRY"}
+var testToolEnvironment = []string{"BUN_CONFIG_REGISTRY"}
 
 // goRuntimeEnvironment are variables every Go-built program reads at startup.
 // They change what a program prints without changing its bytes: GODEBUG=
@@ -40,11 +40,27 @@ var testToolEnvironment = []string{"NODE_OPTIONS", "NODE_PATH", "BUN_CONFIG_REGI
 // the "go" tool fingerprint or the test tool digest.
 var goRuntimeEnvironment = []string{"GODEBUG", "GOGC", "GOMEMLIMIT", "GOMAXPROCS", "GOTRACEBACK"}
 
-// unpinnedToolEnvironment are variables that make a tool load an executable
-// outside every keyed input. The gate removes them from every step rather
-// than key arbitrary files: ESBUILD_BINARY_PATH replaces the esbuild binary
-// installed in node_modules, which the installed-tree digests cover.
-var unpinnedToolEnvironment = []string{"ESBUILD_BINARY_PATH"}
+// unpinnedToolEnvironment are variables that make a tool load code from
+// outside every keyed input. Their string names files whose bytes no key
+// sees, so the gate removes them from every step rather than key arbitrary
+// files: ESBUILD_BINARY_PATH replaces the esbuild binary installed in
+// node_modules; NODE_OPTIONS and BUN_OPTIONS can preload any module; NODE_PATH
+// resolves imports from any directory.
+var unpinnedToolEnvironment = []string{"ESBUILD_BINARY_PATH", "NODE_OPTIONS", "NODE_PATH", "BUN_OPTIONS"}
+
+// bunGlobalConfigs are the user-wide bunfig files Bun merges into every run
+// (one can preload modules); their bytes join the bun fingerprint. Bun reads
+// one of XDG_CONFIG_HOME's and HOME's; both are keyed.
+func bunGlobalConfigs() []string {
+	var configs []string
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		configs = append(configs, filepath.Join(dir, ".bunfig.toml"))
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		configs = append(configs, filepath.Join(home, ".bunfig.toml"))
+	}
+	return configs
+}
 
 // testInstalled are installed dependency trees Go tests run Node and Bun
 // over; their content digest joins the tool digest.
