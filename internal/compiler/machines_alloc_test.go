@@ -84,11 +84,16 @@ type machineShape struct {
 	failures       int  // failures declared by an effect step
 	declarations   int  // machine declarations sharing the step
 	payload        int  // depth of the output record chain
+	failureName    int  // extra bytes on every failure name
+	failBody       bool // the effect step body only fails: no transition
+	lets           int  // let bindings after the step's first statement
+	generic        bool // output Outer<i64> through generic records
+	genericName    int  // extra bytes on the generic inner record's name
 }
 
 func (s machineShape) String() string {
-	return fmt.Sprintf("states=%d events=%d name=%d machineName=%d variantName=%d helpers=%d tails=%d distinct=%d wideArm=%t keepPaths=%t keeps=%d literalStay=%t failures=%d declarations=%d payload=%d",
-		s.states, s.events, s.name, s.machineName, s.variantName, s.helpers, s.tails, s.distinct, s.wideArm, s.keepPaths, s.keeps, s.literalStay, s.failures, s.declarations, s.payload)
+	return fmt.Sprintf("states=%d events=%d name=%d machineName=%d variantName=%d helpers=%d tails=%d distinct=%d wideArm=%t keepPaths=%t keeps=%d literalStay=%t failures=%d declarations=%d payload=%d failureName=%d failBody=%t lets=%d generic=%t genericName=%d",
+		s.states, s.events, s.name, s.machineName, s.variantName, s.helpers, s.tails, s.distinct, s.wideArm, s.keepPaths, s.keeps, s.literalStay, s.failures, s.declarations, s.payload, s.failureName, s.failBody, s.lets, s.generic, s.genericName)
 }
 
 // nestedTails renders count tails selected by n as nested ifs.
@@ -108,10 +113,15 @@ func (s machineShape) source() string {
 	output := "void"
 	var b strings.Builder
 	b.WriteString("import Machines \"effra/machines\"\n")
+	failure := func(i int) string { return fmt.Sprintf("F%d%s", i, strings.Repeat("f", s.failureName)) }
 	for i := 0; i < s.failures; i++ {
-		fmt.Fprintf(&b, "error F%d\n", i)
+		fmt.Fprintf(&b, "error %s\n", failure(i))
 	}
-	if s.payload > 0 {
+	if s.generic {
+		inner := long("L", s.genericName)
+		fmt.Fprintf(&b, "record %s<T: type> { value: T }\nrecord Outer<T: type> { inner: %s<T> }\n", inner, inner)
+		output = "Outer<i64>"
+	} else if s.payload > 0 {
 		field := long("f", s.name)
 		fmt.Fprintf(&b, "record P%d { leaf: i64 }\n", s.payload)
 		for i := s.payload - 1; i >= 0; i-- {
@@ -156,23 +166,35 @@ func (s machineShape) source() string {
 	if s.failures > 0 {
 		labels := make([]string, s.failures)
 		for i := range labels {
-			labels[i] = fmt.Sprintf("F%d", i)
+			labels[i] = failure(i)
 		}
 		signature = "effect " + signature + " raises { " + strings.Join(labels, ", ") + " }"
+		if s.failBody {
+			first = "fail " + failure(0)
+		}
 	}
 	n := ""
 	if s.helpers == 0 {
 		n = "    let n = 0\n"
 	}
+	body := "    " + first + "\n"
 	if s.wideArm && s.states > 1 {
 		most := make([]string, s.states-1)
 		for i := range most {
 			most[i] = enum + "." + variant(i)
 		}
-		fmt.Fprintf(&b, "%s {\n%s    match state {\n        %s => %s\n        %s.%s => %s.Ignore {}\n    }\n}\n", signature, n, strings.Join(most, " | "), first, enum, variant(s.states-1), step)
-	} else {
-		fmt.Fprintf(&b, "%s {\n%s    %s\n}\n", signature, n, first)
+		body = fmt.Sprintf("    match state {\n        %s => %s\n        %s.%s => %s.Ignore {}\n    }\n", strings.Join(most, " | "), first, enum, variant(s.states-1), step)
 	}
+	// Statements after the first: the walk reaches them after any refusal
+	// the first statement caused.
+	if s.lets > 0 {
+		var lets strings.Builder
+		for i := 0; i < s.lets; i++ {
+			fmt.Fprintf(&lets, "    let l%d = %d\n", i, i)
+		}
+		body += lets.String() + "    " + step + ".Ignore {}\n"
+	}
+	fmt.Fprintf(&b, "%s {\n%s%s}\n", signature, n, body)
 	// The last level has distinct copies, so tails reaching different copies
 	// are distinct transitions rather than one deduplicated span.
 	copies := max(1, s.distinct)
@@ -249,10 +271,21 @@ func randomMachineShape(rng *rand.Rand) machineShape {
 		failures:     pick(0, 0, 3, 300, 4000),
 		declarations: pick(1, 1, 4, 64, 256),
 		payload:      pick(0, 0, 3, 30),
+		failureName:  pick(0, 0, 64, 4096, 1<<17),
+		failBody:     rng.Intn(4) == 0,
+		lets:         pick(0, 0, 100, 5000),
+		generic:      rng.Intn(4) == 0,
+		genericName:  pick(0, 64, 4096, 1<<17),
 	}
 	if s.states <= 40 {
 		s.variantName = pick(0, 64, 4096)
 	}
+	// Keep generated sources in the tens of megabytes: the cost under test is
+	// analysis, not lexing.
+	if s.failures*s.failureName > 2<<20 {
+		s.failureName = 64
+	}
+	s.machineName = min(s.machineName, (16<<20)/s.declarations)
 	return s
 }
 
@@ -271,6 +304,10 @@ func TestMachineAnalysisAllocationIsCharged(t *testing.T) {
 		{states: 2, events: 1, name: 4096, payload: 30, declarations: 256},
 		// Wide events and states over the transition limit.
 		{states: 2000, events: 600, helpers: 3, tails: 20, wideArm: true},
+		// The three round-5 residuals at their reviewed shapes.
+		machineRefusalThenLets,
+		machineLongFailureLabels,
+		machineGenericPayloadLayouts,
 	}
 	seed := int64(46)
 	if text := os.Getenv("EFFRA_MACHINE_ALLOC_SEED"); text != "" {
@@ -396,5 +433,148 @@ func TestMachineGraphChargesIdentityBytes(t *testing.T) {
 	}
 	if _, err := Compile(small.source()).GraphView(request); err != nil {
 		t.Fatalf("ordinary graph refused: %v", err)
+	}
+}
+
+// allocated measures the heap bytes and allocations of f.
+func allocated(f func()) (uint64, uint64) {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	f()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc, after.Mallocs - before.Mallocs
+}
+
+// The public boundaries project plans after analysis: CheckResponse,
+// MachineInspection and the machine GraphView. Each is measured on the
+// compiled result and again on a copy whose plans keep only their identity;
+// what the plans add must stay within the same per-unit bound as the units
+// that paid for it: the analysis units, plus for GraphView the graph work its
+// own budget charged (the whole limit when the view is refused). The full
+// projection runs first, so the identity-only run reuses its warm caches and
+// the difference is not understated.
+func TestMachineProjectionAllocationIsCharged(t *testing.T) {
+	shapes := []machineShape{
+		machineLongFailureLabels,
+		machineGenericPayloadLayouts,
+		{states: 2, events: 1, failures: 4000, declarations: 256},
+		{states: 2, events: 1, name: 4096, payload: 30, declarations: 256},
+		{states: 40, events: 2, name: 4096, variantName: 4096, helpers: 2, tails: 7, wideArm: true},
+		{states: 4000, events: 1, tails: 20, wideArm: true, keepPaths: true, keeps: 2},
+		{states: 2, events: 1, machineName: 1 << 16, helpers: 2, tails: 20, distinct: 20, declarations: 4},
+	}
+	rng := rand.New(rand.NewSource(46))
+	for len(shapes) < 9 {
+		shapes = append(shapes, randomMachineShape(rng))
+	}
+	request, err := ParseGraphRequest(map[string]any{"kind": "machine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// project runs one boundary and returns the units it charged itself.
+	boundaries := []struct {
+		name    string
+		project func(*Result) int
+	}{
+		{"CheckResponse", func(r *Result) int { r.CheckResponse(); return 0 }},
+		{"MachineInspection", func(r *Result) int {
+			for _, plan := range r.Machines {
+				_, _ = r.MachineInspection(plan.Name, "machines.ef")
+			}
+			return 0
+		}},
+		{"GraphView", func(r *Result) int {
+			view, err := r.GraphView(request)
+			if err != nil {
+				return request.viewLimits(r).Work
+			}
+			return view.Data.Effra.Usage.Work
+		}},
+	}
+	projected := 0
+	for i, shape := range shapes {
+		for _, boundary := range boundaries {
+			r, measures := measureMachineAnalysis(t, shape.source())
+			if len(r.Machines) == 0 {
+				continue
+			}
+			units := 0
+			for _, m := range measures {
+				units += m.units
+			}
+			fullBytes, fullMallocs := allocated(func() { units += boundary.project(r) })
+			identity := *r
+			identity.Machines = make([]MachinePlan, len(r.Machines))
+			for j, plan := range r.Machines {
+				identity.Machines[j] = MachinePlan{ID: plan.ID, Ordinal: plan.Ordinal, Name: plan.Name, Span: plan.Span, Functions: []MachineFunction{}, Transitions: []MachineTransition{}, States: []MachineStateFacts{}, TerminalFailures: []MachineRowContribution{}, Requirements: []MachineRowContribution{}, Evidence: plan.Evidence, Limitations: plan.Limitations}
+			}
+			baseBytes, baseMallocs := allocated(func() { boundary.project(&identity) })
+			projected++
+			measure := machineMeasure{units: units}
+			if fullBytes > baseBytes {
+				measure.bytes = fullBytes - baseBytes
+			}
+			if fullMallocs > baseMallocs {
+				measure.mallocs = fullMallocs - baseMallocs
+			}
+			assertMachineAllocationCharged(t, fmt.Sprintf("%s of shape %d (%s)", boundary.name, i, shape), []machineMeasure{measure})
+		}
+	}
+	if projected == 0 {
+		t.Fatal("no shape published a plan")
+	}
+}
+
+// The round-5 residuals at their reviewed shapes.
+var (
+	// A five-helper chain forwarding the state refuses with EF142 inside the
+	// first statement; 20,000 let bindings follow it.
+	machineRefusalThenLets = machineShape{states: 1, events: 1, helpers: 5, tails: 1, lets: 20000}
+	// Two 131,072-byte failure labels declared by a step that only fails.
+	machineLongFailureLabels = machineShape{states: 1, events: 1, failures: 2, failureName: 1 << 17, failBody: true}
+	// Outer<i64> through a generic record with a 131,072-byte name, the
+	// output of 256 declarations.
+	machineGenericPayloadLayouts = machineShape{states: 1, events: 1, generic: true, genericName: 1 << 17, declarations: 256}
+)
+
+// Round-5 residual 1: a refusal ends the block. The walker charges each
+// statement's scope entry before inserting it and stops at the refusal, so
+// the bindings after it are neither walked nor retained.
+func TestMachineRefusalStopsTheBlock(t *testing.T) {
+	r, measures := measureMachineAnalysis(t, machineRefusalThenLets.source())
+	assertMachineAllocationCharged(t, "refusal then lets", measures)
+	if !slices.Equal(machineCodes(r), []string{machineBudgetCode}) {
+		t.Fatalf("codes = %v", machineCodes(r))
+	}
+}
+
+// Round-5 residual 2: projecting a function reuses its rows' retained
+// canonical IDs and charges the contract's text, labels included, before the
+// checker builds its public ID.
+func TestMachineLongFailureLabelsAreCharged(t *testing.T) {
+	r, measures := measureMachineAnalysis(t, machineLongFailureLabels.source())
+	assertMachineAllocationCharged(t, "long failure labels", measures)
+	// The labels are shared and their row ID retained, so the analysis never
+	// copies one, whatever it charged for them.
+	if bytes := measures[len(measures)-1].bytes; bytes >= 1<<17 {
+		t.Fatalf("analysis allocated %d bytes: a 131,072-byte label was copied", bytes)
+	}
+	plan := r.FindMachine(fmt.Sprintf("M%d", 0))
+	if plan == nil || len(plan.Transitions) != 0 || len(plan.TerminalFailures) != 2 {
+		t.Fatalf("zero-transition failing plan: %v", machineCodes(r))
+	}
+	if contract := plan.Functions[0].Contract; contract.FailureRow == "" || contract.FailureRow != rowNodeIDForLabels(contract.Errors) {
+		t.Fatalf("failure row ID %q is not the canonical ID of its labels", contract.FailureRow)
+	}
+}
+
+// Round-5 residual 3: an application's layout is resolved once per module,
+// charged by the interning keys substitution builds for its declared field
+// types, so 256 declarations do not rebuild a 131,072-byte key each.
+func TestMachineGenericLayoutsAreChargedAndShared(t *testing.T) {
+	r, measures := measureMachineAnalysis(t, machineGenericPayloadLayouts.source())
+	assertMachineAllocationCharged(t, "generic payload layouts", measures)
+	if len(r.Machines) != 256 {
+		t.Fatalf("%d of 256 declarations planned: %v", len(r.Machines), machineCodes(r))
 	}
 }

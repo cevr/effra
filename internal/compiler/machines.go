@@ -752,6 +752,11 @@ func (m *machineCheck) block(s *machineScope, b *Block, n machineNarrowing, tail
 		return
 	}
 	for index, statement := range b.Statements {
+		// Each statement pays for its scope entry before it is inserted, and a
+		// refusal ends the block: nothing after it is walked or retained.
+		if !m.spend() {
+			return
+		}
 		if statement.Kind == "let" && statement.Value != nil && statement.binding != nil {
 			s.lets[statement.binding] = statement.Value
 		}
@@ -856,6 +861,9 @@ func (m *machineCheck) expr(s *machineScope, e *Expr, n machineNarrowing, tail, 
 			m.expr(s, subject, n, false, guarded)
 		}
 		for _, arm := range e.Arms {
+			if m.refused {
+				return
+			}
 			narrowed, exact, reachable := m.arm(s, e, arm, n)
 			if reachable {
 				m.block(s, arm.Body, narrowed, tail, guarded || !exact)
@@ -1043,6 +1051,9 @@ func (m *machineCheck) paths(s *machineScope, e *Expr, n machineNarrowing, out [
 		return m.blockPaths(s, e.Else, n, out)
 	case "match":
 		for _, arm := range e.Arms {
+			if m.refused {
+				return out
+			}
 			narrowed, _, reachable := m.arm(s, e, arm, n)
 			if reachable {
 				out = m.blockPaths(s, arm.Body, narrowed, out)

@@ -44,6 +44,8 @@ type machineBudget struct {
 	exhausted bool
 
 	displays      map[TypeID]string
+	texts         map[TypeID]int
+	layouts       map[TypeID]machineLayout
 	dataRefs      map[*Enum]MachineDataRef
 	values        map[TypeID]ValueType
 	functions     map[machineFunctionKey]MachineFunction
@@ -120,7 +122,8 @@ func (m *machineCheck) reportf(code string, span Span, format string, args ...an
 }
 
 // display is the checker's type display, memoized for the module and charged
-// by its bytes the first time. A refused analysis displays nothing.
+// by the type's text bound before it is built. A refused analysis displays
+// nothing.
 func (m *machineCheck) display(id TypeID) string {
 	if m.refused {
 		return ""
@@ -128,10 +131,10 @@ func (m *machineCheck) display(id TypeID) string {
 	if text, ok := m.shared.displays[id]; ok {
 		return text
 	}
-	text := m.c.displayTypeID(id)
-	if !m.charge(machineTextUnits(len(text))) {
+	if !m.chargeTypeText(id) {
 		return ""
 	}
+	text := m.c.displayTypeID(id)
 	if m.shared.displays == nil {
 		m.shared.displays = map[TypeID]string{}
 	}
@@ -139,43 +142,171 @@ func (m *machineCheck) display(id TypeID) string {
 	return text
 }
 
-// layoutCharge pays for what the checker allocates to resolve the fields or
-// variants of a type: the declaration qualifier it rebuilds for a nominal
-// record or enum, and the instantiated copy of an application's template.
-func (m *machineCheck) layoutCharge(id TypeID) bool {
+// Per-node text bound: the fixed fields of an interning key or public-ID key,
+// and the bytes each name, argument and row label adds to one.
+const (
+	machineNodeText  = 128
+	machineArgText   = 24
+	machineLabelText = 24
+	// machineTextCap is more text than the module budget can buy, so a capped
+	// bound is still refused.
+	machineTextCap = (maxMachineModuleWork + 1) * machineTextUnit
+)
+
+// typeText bounds the text the checker builds from the type under id: its
+// display, its public-ID key and the interning keys a template substitution
+// rebuilds. Display and keys unfold a shared DAG into a tree, so the bound
+// sums children as often as they occur; each distinct node is walked once,
+// charged one unit and memoized for the module, so an exponential unfolding
+// is refused by its charge rather than walked.
+func (m *machineCheck) typeText(id TypeID) (int, bool) {
+	if bytes, ok := m.shared.texts[id]; ok {
+		return bytes, true
+	}
+	if !m.spend() {
+		return 0, false
+	}
+	if m.shared.texts == nil {
+		m.shared.texts = map[TypeID]int{}
+	}
+	// A back edge measures nothing; the checker displays it as a cycle. A
+	// refused walk removes its partial bounds, so no later declaration of the
+	// module reads one.
+	m.shared.texts[id] = 0
+	bytes, ok := m.nodeText(id)
+	if !ok {
+		delete(m.shared.texts, id)
+		return 0, false
+	}
+	m.shared.texts[id] = bytes
+	return bytes, true
+}
+
+func (m *machineCheck) nodeText(id TypeID) (int, bool) {
 	n := m.c.node(id)
+	bytes := machineNodeText
 	if n == nil {
-		return true
+		return bytes, true
 	}
-	switch n.Kind {
-	case "record", "enum":
-		return m.charge(machineTextUnits(len(n.Declaration) + 64))
-	case "application":
-		template := m.c.templates[n.Declaration]
-		if template == nil {
-			return m.charge(1)
+	bytes += 2*(len(n.Kind)+len(n.Name)+len(n.Declaration)+len(n.Mode)) + machineArgText*len(n.Args)
+	for _, row := range [2]RowID{n.FailureRow, n.ServiceRow} {
+		for _, label := range m.c.retainedRowLabels(row) {
+			bytes = min(bytes+2*len(label)+machineLabelText, machineTextCap)
 		}
-		width := len(template.Fields) + len(template.Variants)
-		for _, variant := range template.Variants {
-			width += len(variant.Fields)
-		}
-		return m.charge(1 + 4*width)
 	}
-	return true
+	for i := 0; i <= len(n.Args); i++ {
+		child := n.Result
+		if i < len(n.Args) {
+			child = n.Args[i]
+		} else if child == invalidTypeID {
+			break
+		}
+		text, ok := m.typeText(child)
+		if !ok {
+			return 0, false
+		}
+		bytes = min(bytes+text, machineTextCap)
+	}
+	return bytes, true
+}
+
+// chargeTypeText charges the text bound of each type before the checker
+// builds text from them.
+func (m *machineCheck) chargeTypeText(ids ...TypeID) bool {
+	total := 0
+	for _, id := range ids {
+		bytes, ok := m.typeText(id)
+		if !ok {
+			return false
+		}
+		total = min(total+bytes, machineTextCap)
+	}
+	return m.charge(machineTextUnits(total))
+}
+
+// machineLayout is the resolved fields or variants of one data type, shared
+// by every declaration of the module.
+type machineLayout struct {
+	enum     *Enum
+	fields   []Field
+	variants []Variant
+	record   bool
+	sum      bool
+}
+
+// layout resolves the fields or variants of a record, enum or application
+// once per module. Resolution is charged first: the declaration qualifier the
+// checker rebuilds for a nominal type, and for an application the instantiated
+// copy of its template plus the interning keys substitution builds for every
+// declared field type.
+func (m *machineCheck) layout(id TypeID) (machineLayout, bool) {
+	if layout, ok := m.shared.layouts[id]; ok {
+		return layout, true
+	}
+	n := m.c.node(id)
+	if n == nil || n.Kind != "record" && n.Kind != "enum" && n.Kind != "application" {
+		return machineLayout{}, false
+	}
+	units := 1 + machineTextUnits(len(n.Declaration)+64)
+	if n.Kind == "application" {
+		if template := m.c.templates[n.Declaration]; template != nil {
+			text := 0
+			declared := func(fields []Field) bool {
+				units += 1 + 4*len(fields)
+				for _, field := range fields {
+					if field.typeID == invalidTypeID {
+						continue
+					}
+					bytes, ok := m.typeText(field.typeID)
+					if !ok {
+						return false
+					}
+					text = min(text+bytes, machineTextCap)
+				}
+				return true
+			}
+			if !declared(template.Fields) {
+				return machineLayout{}, false
+			}
+			for _, variant := range template.Variants {
+				if !declared(variant.Fields) {
+					return machineLayout{}, false
+				}
+			}
+			units += machineTextUnits(text)
+		}
+	}
+	if !m.charge(units) {
+		return machineLayout{}, false
+	}
+	var layout machineLayout
+	if n.Kind != "enum" {
+		layout.fields, layout.record = m.c.checkedFields(id)
+	}
+	if !layout.record && n.Kind != "record" {
+		layout.enum, layout.variants, layout.sum = m.c.checkedVariants(id)
+	}
+	if m.shared.layouts == nil {
+		m.shared.layouts = map[TypeID]machineLayout{}
+	}
+	m.shared.layouts[id] = layout
+	return layout, true
 }
 
 func (m *machineCheck) variantsOf(id TypeID) (*Enum, []Variant, bool) {
-	if n := m.c.node(id); n == nil || n.Kind != "enum" && n.Kind != "application" || !m.layoutCharge(id) {
+	layout, ok := m.layout(id)
+	if !ok || !layout.sum {
 		return nil, nil, false
 	}
-	return m.c.checkedVariants(id)
+	return layout.enum, layout.variants, true
 }
 
 func (m *machineCheck) fieldsOf(id TypeID) ([]Field, bool) {
-	if n := m.c.node(id); n == nil || n.Kind != "record" && n.Kind != "application" || !m.layoutCharge(id) {
+	layout, ok := m.layout(id)
+	if !ok || !layout.record {
 		return nil, false
 	}
-	return m.c.checkedFields(id)
+	return layout.fields, true
 }
 
 // machineSet is a canonical narrowing of one enum: the sorted declaration
@@ -369,7 +500,11 @@ func (m *machineCheck) dataRef(id TypeID, enum *Enum) (MachineDataRef, bool) {
 	if !m.charge(1 + len(enum.Variants) + machineTextUnits(2*len(enum.Name)+2*len(currentModuleIdentity)+192)) {
 		return MachineDataRef{}, false
 	}
-	ref := MachineDataRef{Name: enum.Name, Identity: m.c.declarationQualifier("enum", enum.Name), Variants: (*machineSet)(nil).names(enum), Type: m.c.projectCheckedBase(m.c.checkedDataID(id, nil, nil))}
+	projected, ok := m.project(m.c.checkedDataID(id, nil, nil))
+	if !ok {
+		return MachineDataRef{}, false
+	}
+	ref := MachineDataRef{Name: enum.Name, Identity: m.c.declarationQualifier("enum", enum.Name), Variants: (*machineSet)(nil).names(enum), Type: projected}
 	if m.shared.dataRefs == nil {
 		m.shared.dataRefs = map[*Enum]MachineDataRef{}
 	}
@@ -377,16 +512,26 @@ func (m *machineCheck) dataRef(id TypeID, enum *Enum) (MachineDataRef, bool) {
 	return ref, true
 }
 
-// value projects a data type once per module, charged by its display.
+// project is the checker's compact projection of a checked value, charged
+// first by the text bound of its contract and result: the display and the
+// public-ID keys it builds. Row IDs are the rows' retained canonical IDs and
+// row labels are shared, so neither is rebuilt.
+func (m *machineCheck) project(e checkedExpression) (ValueType, bool) {
+	if !m.charge(1+machineTextUnits(len(e.identity)+len(currentModuleIdentity))) || !m.chargeTypeText(e.contractID(), e.resultID()) {
+		return ValueType{}, false
+	}
+	return m.c.projectCheckedBase(e), true
+}
+
+// value projects a data type once per module.
 func (m *machineCheck) value(id TypeID) (ValueType, bool) {
 	if value, ok := m.shared.values[id]; ok {
 		return value, true
 	}
-	display := m.display(id)
-	if m.refused || !m.charge(machineTextUnits(len(display)+len(currentModuleIdentity)+192)) {
+	value, ok := m.project(m.c.checkedDataID(id, nil, nil))
+	if !ok {
 		return ValueType{}, false
 	}
-	value := m.c.projectCheckedBase(m.c.checkedDataID(id, nil, nil))
 	if m.shared.values == nil {
 		m.shared.values = map[TypeID]ValueType{}
 	}
@@ -396,7 +541,7 @@ func (m *machineCheck) value(id TypeID) (ValueType, bool) {
 
 // function projects one bound function once per module. Its failure and
 // service rows are charged by width before they are copied, and its contract
-// by the display of its type.
+// value by its parameters before the checker interns it.
 func (m *machineCheck) function(role string, f *Function) (MachineFunction, bool) {
 	key := machineFunctionKey{role: role, function: f}
 	if projected, ok := m.shared.functions[key]; ok {
@@ -412,12 +557,14 @@ func (m *machineCheck) function(role string, f *Function) (MachineFunction, bool
 		}
 		failures, services = normalized(failureRow), normalized(serviceRow)
 	}
-	contract := m.c.checkedFunction(f, true, false)
-	display := m.display(contract.resultID())
-	if m.refused || !m.charge(machineTextUnits(len(display)+len(f.Identity)+192)) {
+	if !m.charge(1 + len(f.Params) + machineTextUnits(machineNodeText+machineArgText*len(f.Params))) {
 		return MachineFunction{}, false
 	}
-	projected := MachineFunction{Role: role, Name: f.Name, Identity: f.Identity, Span: f.Span, Kind: kind, Failures: failures, Services: services, Contract: m.c.projectCheckedBase(contract)}
+	contract, ok := m.project(m.c.checkedFunction(f, true, false))
+	if !ok {
+		return MachineFunction{}, false
+	}
+	projected := MachineFunction{Role: role, Name: f.Name, Identity: f.Identity, Span: f.Span, Kind: kind, Failures: failures, Services: services, Contract: contract}
 	if m.shared.functions == nil {
 		m.shared.functions = map[machineFunctionKey]MachineFunction{}
 	}

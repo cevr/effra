@@ -3107,11 +3107,16 @@ func rowNodeIDForLabels(labels []string) string {
 	return "r:" + hex.EncodeToString(sum[:8])
 }
 
+// rowNodeID is the canonical ID internRow retained for the row, so projecting
+// a row neither copies nor rehashes its labels.
 func (c *checker) rowNodeID(id RowID) string {
 	if id == emptyRowID {
 		return ""
 	}
-	return rowNodeIDForLabels(c.rowLabels(id))
+	if int(id) > len(c.rows) {
+		return rowNodeIDForLabels(nil)
+	}
+	return c.rows[id-1].ID
 }
 
 func (c *checker) node(id TypeID) *semanticTypeNode {

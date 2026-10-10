@@ -471,8 +471,10 @@ func TestMachinePlanFinalizationIsCharged(t *testing.T) {
 // value and are enumerated once, even when each path refines the state again;
 // distinct narrowings are each charged, so repeated enumeration of different
 // wide narrowings is refused. pick fans out to 4 groups of 17 tails (68
-// paths); each tail ends in keep<k>, which re-matches the state.
-func currentTargetsSource(distinct bool) string {
+// paths); each tail ends in keep<k mod keeps>, which re-matches the state.
+// decision is Go, which enumerates the targets, or Stay, which refines the
+// same narrowings without enumerating them.
+func currentTargetsSource(keeps int, decision string) string {
 	const width, groups, tails = 1000, 4, 17
 	var b strings.Builder
 	b.WriteString("import Machines \"effra/machines\"\nenum W {")
@@ -483,7 +485,7 @@ func currentTargetsSource(distinct bool) string {
 	for i := range most {
 		most[i] = fmt.Sprintf("W.V%d", i)
 	}
-	fmt.Fprintf(&b, " }\nenum E { Ping }\nfn step(state: W, event: E) -> Machines.Step<W, void> {\n    match state {\n        %s => Machines.Step<W, void>.Go(pick(state, 0))\n        W.V%d => Machines.Step<W, void>.Ignore {}\n    }\n}\n", strings.Join(most, " | "), width-1)
+	fmt.Fprintf(&b, " }\nenum E { Ping }\nfn step(state: W, event: E) -> Machines.Step<W, void> {\n    match state {\n        %s => Machines.Step<W, void>.%s(pick(state, 0))\n        W.V%d => Machines.Step<W, void>.Ignore {}\n    }\n}\n", strings.Join(most, " | "), decision, width-1)
 	nested := func(call func(int) string, count int) string {
 		var body strings.Builder
 		for i := 0; i < count-1; i++ {
@@ -493,10 +495,6 @@ func currentTargetsSource(distinct bool) string {
 		return body.String()
 	}
 	fmt.Fprintf(&b, "fn pick(state: W, n: i64) -> W {\n%s}\n", nested(func(g int) string { return fmt.Sprintf("group%d(state, n)", g) }, groups))
-	keeps := 1
-	if distinct {
-		keeps = groups * tails
-	}
 	for g := 0; g < groups; g++ {
 		fmt.Fprintf(&b, "fn group%d(state: W, n: i64) -> W {\n%s}\n", g, nested(func(i int) string { return fmt.Sprintf("keep%d(state)", (g*tails+i)%keeps) }, tails))
 	}
@@ -511,7 +509,7 @@ func currentTargetsSource(distinct bool) string {
 }
 
 func TestMachineCurrentTargetsAreDeduplicatedAndCharged(t *testing.T) {
-	r := Compile(currentTargetsSource(false))
+	r := Compile(currentTargetsSource(1, "Go"))
 	plan := r.FindMachine("M")
 	if plan == nil {
 		t.Fatalf("68 equal narrowings refused: %v", machineCodes(r))
@@ -521,7 +519,13 @@ func TestMachineCurrentTargetsAreDeduplicatedAndCharged(t *testing.T) {
 	}) {
 		t.Fatal("current-state targets lost")
 	}
-	if r := Compile(currentTargetsSource(true)); !slices.Equal(machineCodes(r), []string{"EF142"}) || r.FindMachine("M") != nil {
-		t.Fatalf("68 distinct 998-state enumerations codes = %v: %v", machineCodes(r), r.Diagnostics)
+	// 22 distinct narrowings: refining them fits the budget, as the Stay
+	// control shows, and enumerating them for Go does not, so the refusal is
+	// the enumeration charge alone.
+	if r := Compile(currentTargetsSource(22, "Stay")); r.FindMachine("M") == nil {
+		t.Fatalf("22 distinct refinements refused: %v", machineCodes(r))
+	}
+	if r := Compile(currentTargetsSource(22, "Go")); !slices.Equal(machineCodes(r), []string{"EF142"}) || r.FindMachine("M") != nil {
+		t.Fatalf("22 distinct 998-state enumerations codes = %v: %v", machineCodes(r), r.Diagnostics)
 	}
 }
