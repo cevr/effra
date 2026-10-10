@@ -93,6 +93,26 @@ Every port was checked in three ways:
 - The pipe-equivalence regex masking: about 3 CPU-s.
 - cmd/ef process tests now carry the ported smokes, about 30 CPU-s.
 
+## Phase 2: framework-port verification keyed on emitted artifacts
+
+Phase 2 split the counter-domain control into emission (runs the `bin/ef` this run built, always runs, about 1.3 s) and verification (keyed on the emitted bytes), batched the strict-consumer `tsc` runs into one program, and built native counters with `-buildvcs=false` so identical sources give identical bytes. A compiler edit that emits identical artifacts now replays `framework-port references` instead of rerunning it.
+
+A key that replays a pass must name every input that can change the outcome. The review of `a38c7af9` found four gaps, each now a test in `go test ./scripts/gate` that fails on `a38c7af9`:
+
+- Verification asserts the native programs' exact standard error, and `GODEBUG=inittrace=1` adds lines there without changing a byte of the program. The references step keys on the `go` fingerprint again, and that fingerprint and the Go test tool digest carry `GODEBUG`, `GOGC`, `GOMEMLIMIT`, `GOMAXPROCS` and `GOTRACEBACK` as steps see them. Go's own test cache already keys `GODEBUG` (measured: setting it reran a cached package) but not the other four.
+- `ESBUILD_BINARY_PATH` would make esbuild load an executable outside every digest. The gate removes it from every step's environment.
+- `clean=` ignored submodule changes hidden by `submodule.<name>.ignore=all`; it now uses `--ignore-submodules=none`.
+- A failure in either leaf runner exited while a started child still ran. Both runners now wait for every started child and exit with the first failure.
+
+| Run | Wall | Notes |
+| --- | ---: | --- |
+| `a38c7af9`, first run | 72.4 s | author's receipt |
+| `a38c7af9`, no-op | 2.8 s | author's receipt |
+| `93f9a281` (main `0f13612a` merged, repairs), first run | 66.6 s | the merge changed compiler sources, so compiler and CLI tests reran; 1-minute load about 8–30 over these runs, 1377 sessions on 16 cores |
+| `93f9a281`, no-ops | 15.3 s, 8.4 s | 15.3 s reran four `internal/compiler` shards (Go's cache, cause not isolated) and `scripts/gate`; `scripts/gate` reran every time because a test digested the repository's emitted artifacts, which emission rewrites each run. Fixed in the next commit |
+| `f707b63a`, first run | 6.6 s | only `scripts/gate` tests changed |
+| `f707b63a`, no-ops | 2.2 s, 2.0 s | every keyed step cached; emission ran (about 1.3 s) |
+
 ## Turborepo, rejected
 
 turbo 2.11.7 was evaluated, installed only in a scratch directory. A cache hit costs 40–120 ms, against about 1.3 s for this runner's no-op, almost all of which is Go's own test-cache checks. Turbo was rejected for these reasons:
