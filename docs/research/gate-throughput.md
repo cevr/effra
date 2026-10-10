@@ -100,9 +100,11 @@ Phase 2 split the counter-domain control into emission (runs the `bin/ef` this r
 A key that replays a pass must name every input that can change the outcome. The review of `a38c7af9` found four gaps, each now a test in `go test ./scripts/gate` that fails on `a38c7af9`:
 
 - Verification asserts the native programs' exact standard error, and `GODEBUG=inittrace=1` adds lines there without changing a byte of the program. The references step keys on the `go` fingerprint again, and that fingerprint and the Go test tool digest carry `GODEBUG`, `GOGC`, `GOMEMLIMIT`, `GOMAXPROCS` and `GOTRACEBACK` as steps see them. Go's own test cache already keys `GODEBUG` (measured: setting it reran a cached package) but not the other four.
-- `ESBUILD_BINARY_PATH` would make esbuild load an executable outside every digest. The gate removes it from every step's environment.
+- `ESBUILD_BINARY_PATH` would make esbuild load an executable outside every digest. The gate removes it from every step's environment, as it does `NODE_OPTIONS`, `NODE_PATH` and `BUN_OPTIONS`. Keying their strings was not enough: an unchanged `NODE_OPTIONS=--require=/outside/preload.cjs` names a file whose bytes no key saw, so editing it could replay a pass it would fail (review round 1). The user-wide `.bunfig.toml`, which can preload too, joins the `bun` fingerprint by content.
 - `clean=` ignored submodule changes hidden by `submodule.<name>.ignore=all`; it now uses `--ignore-submodules=none`.
-- A failure in either leaf runner exited while a started child still ran. Both runners now wait for every started child and exit with the first failure.
+- A failure in either leaf runner exited while a started child still ran. Both runners now wait for every started child and exit with the first failure. The counter control joins before it writes its failure evidence, so an unwritable record can neither skip the join nor replace the original failure.
+
+**The first no-op after a run that executes Go tests is not always a no-op.** On three occasions the first rerun repeated four to five Go test processes (15–44 s), and the next rerun cached everything. Run alone, the same shard caches at once (`GODEBUG=gocachetest=1` shows a save and then a hit). The input that Go's test cache refuses inside the gate is not identified yet. Go does not cache a result whose input file changed too recently, and other gate steps write files while the tests run, which makes that refusal the likely cause. The next unit (`gatecpu`) owns this.
 
 | Run | Wall | Notes |
 | --- | ---: | --- |
