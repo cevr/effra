@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"effra.local/prototype/internal/compiler"
@@ -24,7 +26,7 @@ import (
 
 func main() {
 	if err := command(os.Args[1:]); err != nil {
-		if exit, ok := err.(formatExitError); ok {
+		if exit, ok := err.(exitStatusError); ok {
 			if !exit.handled && exit.message != "" {
 				fmt.Fprintln(os.Stderr, exit.message)
 			}
@@ -42,13 +44,13 @@ type usageError struct{ message string }
 
 func (e usageError) Error() string { return e.message }
 
-type formatExitError struct {
+type exitStatusError struct {
 	code    int
 	message string
 	handled bool
 }
 
-func (e formatExitError) Error() string { return e.message }
+func (e exitStatusError) Error() string { return e.message }
 
 func invalidInvocation(err error) error {
 	if err == nil {
@@ -641,9 +643,36 @@ func command(args []string) error {
 		child.Stdout = os.Stdout
 		child.Stderr = os.Stderr
 		child.Stdin = os.Stdin
-		return child.Run()
+		return runEntryProcess(child)
 	default:
 		return fmt.Errorf("unknown command %s", args[0])
+	}
+}
+
+// runEntryProcess runs a built program as `ef run`'s child. SIGINT and SIGTERM
+// are forwarded so the program's entry interrupts main and reports, and the
+// program's exit status passes through without an extra message: the entry
+// failure report is the program's own output.
+func runEntryProcess(child *exec.Cmd) error {
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	if err := child.Start(); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- child.Wait() }()
+	for {
+		select {
+		case received := <-signals:
+			_ = child.Process.Signal(received)
+		case err := <-done:
+			var exited *exec.ExitError
+			if errors.As(err, &exited) && exited.ExitCode() > 0 {
+				return exitStatusError{code: exited.ExitCode(), handled: true}
+			}
+			return err
+		}
 	}
 }
 

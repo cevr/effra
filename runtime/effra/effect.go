@@ -516,7 +516,7 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 			if timer.IsFailure() {
 				return FromCause[A](append(timer.Cause(), retained...))
 			}
-			return FromCause[A](append(Cause{{Kind: "failure", Failure: &Failure{Tag: "Timeout", Payload: context.DeadlineExceeded}}}, append(retained, timerRetained...)...))
+			return FromCause[A](append(Cause{{Kind: "failure", Failure: &Failure{Tag: "Timeout"}}}, append(retained, timerRetained...)...))
 		case <-fc.ctx.Done():
 			suspend()
 			finishWait := prepareWait()
