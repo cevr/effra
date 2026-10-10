@@ -178,7 +178,7 @@ func TestGoApplicationEmitsExactlyPlannedDeclarations(t *testing.T) {
 	}
 
 	directory := writeGoApplication(t, r, application)
-	if got, want := runtimeDirectoryFiles(t, directory), []string{"effect.go", "fiber.go", "interop.go", "layers.go", "managed.go", "scheduler.go", "scope.go"}; !slices.Equal(got, want) {
+	if got, want := runtimeDirectoryFiles(t, directory), []string{"effect.go", "fiber.go", "interop.go", "layers.go", "managed.go", "report.go", "scheduler.go", "scope.go"}; !slices.Equal(got, want) {
 		t.Fatalf("written runtime = %v, want %v", got, want)
 	}
 	if output, err := runGoCommand(directory, "run", "."); err != nil || string(output) != "recovered\n" {

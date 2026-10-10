@@ -12,6 +12,9 @@ type GoError struct {
 	Partial any
 }
 
+// Error reports the native error, which is the failure's diagnostic message.
+func (e GoError) Error() string { return e.Err.Error() }
+
 // FromGo defers a context-aware Go call and preserves both native return values.
 // The adapter is responsible for honestly documenting whether the call observes ctx.
 func FromGo[A any](call func(context.Context) (A, error)) Effect[GoResult[A]] {

@@ -226,7 +226,7 @@ func TestGoBuildSelectsRuntimeAndReconcilesShrinkingRebuild(t *testing.T) {
 	}
 	httpCommit, httpGeneration := newGeneration(t, application, map[string]string{})
 	httpFiles := generationFileStates(t, httpGeneration)
-	if got, want := generationRuntimeFiles(t, httpGeneration), []string{"effect.go", "fiber.go", "http.go", "managed.go", "scheduler.go", "scope.go"}; !slices.Equal(got, want) {
+	if got, want := generationRuntimeFiles(t, httpGeneration), []string{"effect.go", "fiber.go", "http.go", "managed.go", "report.go", "scheduler.go", "scope.go"}; !slices.Equal(got, want) {
 		t.Fatalf("HTTP runtime = %v, want %v", got, want)
 	}
 	if !slices.Contains(generationDependencies(t, httpGeneration), "net/http") {
@@ -243,7 +243,7 @@ func TestGoBuildSelectsRuntimeAndReconcilesShrinkingRebuild(t *testing.T) {
 	before := generationCommits(t, application)
 	build(root, source, filepath.Join("dist", "app-minimal"))
 	minimalCommit, minimalGeneration := newGeneration(t, application, before)
-	if got, want := generationRuntimeFiles(t, minimalGeneration), []string{"effect.go", "fiber.go", "managed.go", "scheduler.go", "scope.go"}; !slices.Equal(got, want) {
+	if got, want := generationRuntimeFiles(t, minimalGeneration), []string{"effect.go", "fiber.go", "managed.go", "report.go", "scheduler.go", "scope.go"}; !slices.Equal(got, want) {
 		t.Fatalf("minimal runtime after HTTP = %v, want the core selection %v", got, want)
 	}
 	if imports := generationImports(t, minimalGeneration); slices.Contains(imports, "net/http") {
