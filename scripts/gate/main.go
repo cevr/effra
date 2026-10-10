@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -50,7 +51,8 @@ type Step struct {
 	Inputs *Inputs
 	// ToolEnv names executables the step's own cache cannot see, such as the
 	// JavaScript tools Go tests spawn. Their versions, with the environment
-	// they read (testToolEnvironment), reach the step as one digest in
+	// they and the Go programs a test runs read (testToolEnvironment,
+	// goRuntimeEnvironment), reach the step as one digest in
 	// EFFRA_TOOL_VERSIONS; a test that reads it keys Go's test cache on it.
 	ToolEnv []string
 }
@@ -209,7 +211,9 @@ func checkoutIdentity(root string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	status, err := git("status", "--porcelain=v1", "-z", "--untracked-files=normal")
+	// Submodule ignore settings in .gitmodules or config cannot hide a
+	// change: the reported cleanliness covers every submodule.
+	status, err := git("status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=none")
 	if err != nil {
 		return "", err
 	}
@@ -339,18 +343,7 @@ func (g *gate) execute(step *Step) *result {
 	command.Dir = g.root
 	command.Env = stepEnvironment()
 	if len(step.ToolEnv) > 0 {
-		digest := sha256.New()
-		for _, tool := range step.ToolEnv {
-			fmt.Fprintf(digest, "%s\x00%s\x00", tool, g.toolVersion(tool))
-		}
-		for _, name := range testToolEnvironment {
-			value, set := os.LookupEnv(name)
-			fmt.Fprintf(digest, "env\x00%s\x00%t\x00%s\x00", name, set, value)
-		}
-		for _, dir := range testInstalled {
-			fmt.Fprintf(digest, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
-		}
-		command.Env = append(command.Env, "EFFRA_TOOL_VERSIONS="+hex.EncodeToString(digest.Sum(nil))[:16])
+		command.Env = append(command.Env, "EFFRA_TOOL_VERSIONS="+g.toolDigest(step))
 	}
 	var output bytes.Buffer
 	command.Stdout = &output
@@ -379,12 +372,51 @@ func (g *gate) execute(step *Step) *result {
 // more peak memory; no test depends on collection frequency.
 const gcPercent = "400"
 
+// toolDigest identifies, for a step's own cache, the tools it names in
+// ToolEnv, the environment they and the Go programs they run read, and the
+// installed trees they load.
+func (g *gate) toolDigest(step *Step) string {
+	digest := sha256.New()
+	for _, tool := range step.ToolEnv {
+		fmt.Fprintf(digest, "%s\x00%s\x00", tool, g.toolVersion(tool))
+	}
+	for _, name := range append(testToolEnvironment, goRuntimeEnvironment...) {
+		value, set := stepVariable(name)
+		fmt.Fprintf(digest, "env\x00%s\x00%t\x00%s\x00", name, set, value)
+	}
+	for _, dir := range testInstalled {
+		fmt.Fprintf(digest, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
+	}
+	return hex.EncodeToString(digest.Sum(nil))[:16]
+}
+
+// stepEnvironment is the environment every step runs with: the caller's,
+// without the variables that would select an unkeyed executable, and with
+// the gate's collector target unless the caller sets one.
 func stepEnvironment() []string {
-	environment := os.Environ()
+	var environment []string
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if !slices.Contains(unpinnedToolEnvironment, name) {
+			environment = append(environment, entry)
+		}
+	}
 	if _, set := os.LookupEnv("GOGC"); !set {
 		environment = append(environment, "GOGC="+gcPercent)
 	}
 	return environment
+}
+
+// stepVariable reads a variable as steps see it, so a key names the value a
+// step runs with rather than the caller's.
+func stepVariable(name string) (string, bool) {
+	environment := stepEnvironment()
+	for i := len(environment) - 1; i >= 0; i-- {
+		if value, ok := strings.CutPrefix(environment[i], name+"="); ok {
+			return value, true
+		}
+	}
+	return "", false
 }
 
 // loadFiles hashes every tracked and untracked (non-ignored) file once.
@@ -495,7 +527,7 @@ func (g *gate) key(step *Step) (string, error) {
 		fmt.Fprintf(hash, "tool\x00%s\x00%s\x00", tool, g.toolVersion(tool))
 	}
 	for _, name := range inputs.Env {
-		value, set := os.LookupEnv(name)
+		value, set := stepVariable(name)
 		fmt.Fprintf(hash, "env\x00%s\x00%t\x00%s\x00", name, set, value)
 	}
 	if inputs.Submodule != "" {
@@ -672,10 +704,27 @@ func (g *gate) toolVersion(tool string) string {
 	}
 	version := "absent"
 	if _, err := exec.LookPath(argv[0]); err == nil {
-		output, err := exec.Command(argv[0], argv[1:]...).CombinedOutput()
+		command := exec.Command(argv[0], argv[1:]...)
+		command.Env = stepEnvironment()
+		var output []byte
+		if tool == "go" {
+			// Standard output only: GODEBUG=inittrace=1 makes go itself
+			// write timings to standard error.
+			output, err = command.Output()
+		} else {
+			output, err = command.CombinedOutput()
+		}
 		version = strings.TrimSpace(string(output))
 		if err != nil {
 			version = "failed: " + version
+		}
+	}
+	if tool == "go" {
+		// Programs the toolchain builds read these at startup, and a step
+		// that runs one asserts what it prints.
+		for _, name := range goRuntimeEnvironment {
+			value, set := stepVariable(name)
+			version += fmt.Sprintf("\x00%s\x00%t\x00%s", name, set, value)
 		}
 	}
 	g.tools[tool] = version

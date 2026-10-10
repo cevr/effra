@@ -33,6 +33,19 @@ var testTools = []string{"node", "bun", "tsc", "git"}
 // Go's test cache cannot see them; they join the tool digest.
 var testToolEnvironment = []string{"NODE_OPTIONS", "NODE_PATH", "BUN_CONFIG_REGISTRY"}
 
+// goRuntimeEnvironment are variables every Go-built program reads at startup.
+// They change what a program prints without changing its bytes: GODEBUG=
+// inittrace=1 writes to standard error, GOTRACEBACK shapes a crash report. A
+// step that runs Go programs and asserts their output keys on them, through
+// the "go" tool fingerprint or the test tool digest.
+var goRuntimeEnvironment = []string{"GODEBUG", "GOGC", "GOMEMLIMIT", "GOMAXPROCS", "GOTRACEBACK"}
+
+// unpinnedToolEnvironment are variables that make a tool load an executable
+// outside every keyed input. The gate removes them from every step rather
+// than key arbitrary files: ESBUILD_BINARY_PATH replaces the esbuild binary
+// installed in node_modules, which the installed-tree digests cover.
+var unpinnedToolEnvironment = []string{"ESBUILD_BINARY_PATH"}
+
 // testInstalled are installed dependency trees Go tests run Node and Bun
 // over; their content digest joins the tool digest.
 var testInstalled = []string{"node_modules"}
@@ -62,11 +75,14 @@ func gateSteps(root string) ([]*Step, error) {
 	// The counter-domain control's emission half runs the compiler this run
 	// builds. The rest of the reference check, including the control's
 	// verification half, reads only the leaf and the emitted bytes, so a
-	// compiler change that emits identical artifacts replays its pass.
+	// compiler change that emits identical artifacts replays its pass. The
+	// verification runs the emitted native programs and asserts their exact
+	// output, so the Go fingerprint, which carries the Go runtime
+	// environment, is an input.
 	add(&Step{Name: "framework-port counter emission", Needs: []string{"build bin/ef"}, Argv: []string{"node", frameworkPorts + "scripts/check-counter-domain.mjs", "--compiler", "bin/ef", "--emit", counterArtifacts}})
 	add(&Step{Name: "framework-port references", Needs: []string{"framework-port counter emission"}, Argv: []string{"node", frameworkPorts + "scripts/check-references.mjs", "--counter-domain-artifacts", counterArtifacts}, Inputs: &Inputs{
 		Paths:     []string{frameworkPorts},
-		Tools:     []string{"node", "bun", "git"},
+		Tools:     []string{"node", "bun", "go", "git"},
 		Env:       testToolEnvironment,
 		Installed: []string{frameworkPorts + "node_modules"},
 		Generated: []string{counterArtifacts},
