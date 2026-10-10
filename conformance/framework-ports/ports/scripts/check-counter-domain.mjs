@@ -381,11 +381,18 @@ try {
     console.log("COUNTER_DOMAIN_CONTROLS_EXIT=0 (Go/Bun/Node production trace+wrap; three causal authored-domain mutants RED; no mounted Effra ports)");
   }
 } catch (error) {
-  evidence.error = error instanceof Error ? error.stack : String(error); save();
-  // The first failure decides the outcome; a started child still runs to its end, so none outlives the control.
+  // The first failure decides the outcome. Every started child runs to its end before anything else can fail, so
+  // none outlives the control; a failure to record the evidence is reported beside the original, never instead of it.
+  const joined = [];
   for (const [label, exited] of pending) {
     const { status, signal } = await exited;
-    console.log(`COUNTER_${label}_JOINED_AFTER_FAILURE_EXIT=${status}${signal ? ` signal ${signal}` : ""}`);
+    joined.push(`COUNTER_${label}_JOINED_AFTER_FAILURE_EXIT=${status}${signal ? ` signal ${signal}` : ""}`);
+  }
+  try {
+    for (const line of joined) console.log(line);
+    evidence.error = error instanceof Error ? error.stack : String(error); save();
+  } catch (reportError) {
+    process.stderr.write(`COUNTER_EVIDENCE_NOT_RECORDED=${reportError instanceof Error ? reportError.message : String(reportError)}\n`);
   }
   throw error;
 }

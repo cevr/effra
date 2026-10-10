@@ -53,16 +53,16 @@ func runnerLeaf(t *testing.T, runner string, files map[string]string) (string, s
 	return leaf, bin
 }
 
-// runRunner runs a leaf runner with a marker every descendant inherits, and
+// runRunner runs node with argv in the leaf, with a marker every descendant inherits, and
 // returns its exit code, output and the descendants still alive after it.
-func runRunner(t *testing.T, leaf, bin, runner string, args ...string) (int, string, []string) {
+func runRunner(t *testing.T, leaf, bin string, argv ...string) (int, string, []string) {
 	t.Helper()
 	token := make([]byte, 8)
 	if _, err := rand.Read(token); err != nil {
 		t.Fatal(err)
 	}
 	marker := "EFFRA_RUNNER_PROBE=" + hex.EncodeToString(token)
-	command := exec.Command("node", append([]string{filepath.Join(leaf, "scripts", runner)}, args...)...)
+	command := exec.Command("node", argv...)
 	command.Dir = leaf
 	command.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), marker)
 	var output bytes.Buffer
@@ -98,7 +98,7 @@ func TestReferencesRunnerJoinsTheCounterControlAfterAVendorFailure(t *testing.T)
 		"vendor/solid-yield/scripts/build.mjs": `console.error("INJECTED_VENDOR_FAILURE"); process.exit(3);
 `,
 	})
-	code, out, survivors := runRunner(t, leaf, bin, "check-references.mjs")
+	code, out, survivors := runRunner(t, leaf, bin, "scripts/check-references.mjs")
 	if len(survivors) > 0 {
 		t.Errorf("descendants outlived the runner: %q", survivors)
 	}
@@ -161,11 +161,31 @@ func TestCounterControlJoinsTheTypeCheckAfterANativeFailure(t *testing.T) {
 	if err := os.Chmod(filepath.Join(artifacts, "counter-go"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	code, out, survivors := runRunner(t, leaf, bin, "check-counter-domain.mjs", "--verify", artifacts)
-	if len(survivors) > 0 {
-		t.Errorf("descendants outlived the control: %q", survivors)
-	}
-	if code != 1 || !strings.Contains(out, "INJECTED_NATIVE_FAILURE") || !strings.Contains(out, "GO_PRODUCTION_RUN must succeed") || strings.Contains(out, "LATE_CHILD_FAILURE") {
-		t.Errorf("exit %d, want the native failure's assertion and its output only:\n%s", code, out)
+	// The second case also fails the write of the failure evidence, which must
+	// neither skip the join nor replace the original failure.
+	preload := filepath.Join(t.TempDir(), "evidence-enospc.cjs")
+	write(t, filepath.Dir(preload), filepath.Base(preload), `const fs = require("node:fs");
+const write = fs.writeFileSync;
+fs.writeFileSync = (file, data, ...rest) => {
+  if (String(file).endsWith("counter-domain-evidence.json") && String(data).includes('"error"')) throw Object.assign(new Error("INJECTED_EVIDENCE_ENOSPC"), { code: "ENOSPC" });
+  return write(file, data, ...rest);
+};
+require("node:module").syncBuiltinESMExports();
+`)
+	for _, run := range []struct {
+		name     string
+		node     []string
+		reported string
+	}{
+		{"native failure", nil, ""},
+		{"native failure, evidence unwritable", []string{"--require=" + preload}, "COUNTER_EVIDENCE_NOT_RECORDED=INJECTED_EVIDENCE_ENOSPC"},
+	} {
+		code, out, survivors := runRunner(t, leaf, bin, append(run.node, "scripts/check-counter-domain.mjs", "--verify", artifacts)...)
+		if len(survivors) > 0 {
+			t.Errorf("%s: descendants outlived the control: %q", run.name, survivors)
+		}
+		if code != 1 || !strings.Contains(out, "INJECTED_NATIVE_FAILURE") || !strings.Contains(out, "GO_PRODUCTION_RUN must succeed") || strings.Contains(out, "LATE_CHILD_FAILURE") || !strings.Contains(out, run.reported) {
+			t.Errorf("%s: exit %d, want the native failure's assertion and its output only:\n%s", run.name, code, out)
+		}
 	}
 }
