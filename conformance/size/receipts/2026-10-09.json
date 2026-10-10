@@ -1,0 +1,7722 @@
+{
+ "schema": "effra.size-conformance/2",
+ "identity": {
+  "commit": "b6cd35057678ccd7e0f21d89817d9e30191643dd",
+  "dirty": false,
+  "toolchain": {
+   "env": {
+    "AR": "ar",
+    "CC": "gcc",
+    "CGO_CFLAGS": "-O2 -g",
+    "CGO_CPPFLAGS": "",
+    "CGO_CXXFLAGS": "-O2 -g",
+    "CGO_ENABLED": "0",
+    "CGO_FFLAGS": "-O2 -g",
+    "CGO_LDFLAGS": "-O2 -g",
+    "CXX": "g++",
+    "FC": "",
+    "GO386": "",
+    "GOAMD64": "v1",
+    "GOARCH": "amd64",
+    "GOARM": "",
+    "GOARM64": "",
+    "GOEXPERIMENT": "",
+    "GOFLAGS": "",
+    "GOOS": "linux",
+    "GOTOOLCHAIN": "auto",
+    "GOVERSION": "go1.27.0",
+    "PKG_CONFIG": "pkg-config"
+   },
+   "flags": [
+    "-trimpath",
+    "-mod=readonly",
+    "-buildvcs=false"
+   ]
+  },
+  "stripFlags": [
+   "-ldflags=-s -w"
+  ],
+  "bun": "1.4.2",
+  "bundle": "bun build --minify --target=node [--external effect]",
+  "node": "v24.11.1",
+  "effect": "4.0.1",
+  "tsc": "Version 7.0.2+effect-tsgo.0.47.2",
+  "symbolTool": "go tool nm -size -type, run from the module that built the executable",
+  "sizeMethod": "file size in bytes; stripped companions add only -ldflags=-s -w",
+  "fixtures": {
+   "codec.ef": "44a461c4361b4a17973f910b8121da881565b18c5d42c3e38feb8ff66f83dd3f",
+   "direct.ef": "d5c1569bd824737db431bcc27c29c0a6450d30082a0ed81655469f0dcf70125a",
+   "http.ef": "2fb955a6676b346ac318508a93a343cb16892ba1c74be65a45801562ba087525",
+   "managed.ef": "4ac7a88dfd715041b8b31b00912348d706671d3ef9b20e5aa79a5e45f2f25be8",
+   "minimal-unused.ef": "0c2958f53908f71b971f1956475578917253f6d5a038f0a080e376ae8ad3d1e5",
+   "minimal.ef": "9a93707d284522deb1467d8716e74bdb298f31bd61c4e71db3dfec6a74a276cf",
+   "pipe.ef": "80e47bb5bc8d5b6281137e895b86e1eccdd0423b32e0b2c1e43148ff1713eabf"
+  },
+  "controls": {
+   "go/managed/main.go": "bd5ce789941e6c63f9e730c8c89defc2252764065d2bba02e7c17e9ddc9b9668",
+   "go/minimal-floor/main.go": "cd2533f2d2ca17730877b3ab7cc1435744f1e5673fdf5fbdebdd0d2e88bd084c",
+   "go/minimal/main.go": "6de2966f4162baa8a3bd15a2ea184bdb7b45ee5fe66815d79d8508cbbb9b55fa",
+   "ts/host.d.ts": "aa2bc097d357c3928e63bddaaed7fb1c7fb3122bd18e86bf8d8f6c3b326e0a87",
+   "ts/managed.ts": "b525c6bf071cfb32f79996e02ac61c48f7d826cac8189af19c1c0f52c7213d07",
+   "ts/minimal.ts": "fa1cddbf74f891806d79facee5f2a4fedb78ba2e8c7c7dfe24e5c301f5fcb491"
+  },
+  "runtimeSources": {
+   "codec.go": "4fbe84f34519754f83f41d19f1635a82346b57fa4d8491dbd1c6075d8590f6b0",
+   "codec_json.go": "4116e9e6b8bde24f5cf03a8d15edeedb693e237d8bea1cab77d6b47206db7cde",
+   "console.go": "ca3ff1d53ed9c1847edf1b4c4fa967c88469d9330fc606aabcf69a1135c63918",
+   "effect.go": "04ce7d6eb833aab928913fa12607144231bff964544526fc04ae2c319d023de6",
+   "env.go": "4903cda8568f8f6ecf10f433be0b28fb64dae8878494d34f4f7b56b66fb8e93a",
+   "fiber.go": "1a58a66ee526fa69f245f4b28a6d587d51d5821408604e4f9d95ea75af9eb8f1",
+   "files.go": "8c3050b25815d71d5a49221f67fb061c6db30c2399b78b14aa7aebdeeb69cb9b",
+   "http.go": "d865b26f24b44931ac85202cb76fd72a93571e0e2260f7c30ae38b1f891034d0",
+   "inspect.go": "958bd0c8cb80dd7407af4a6f83b3c19fadd4672d9083ddf371bc117f7bfc5a9b",
+   "interop.go": "2e493b1c8a6de639f7a8421707b4f1c76cfc2d0a33253b96a68f95c65f66b3c6",
+   "latch.go": "23cbef06242f4a420df4164b037b6740df4a526ba376b07d00faed127c1b72ef",
+   "layers.go": "c438fffbb7ba7e973fa6e16878092c2ae2646587bfa56e260469faf500b57ce7",
+   "managed.go": "4be0f11dcc5263a265d1506168869df6934e3ba2349ecca8260a842d90ad3951",
+   "report.go": "c19d7b0526833d4ca711e8e4b7c0dda709523833ac3898f201d3646504f2bcb8",
+   "scheduler.go": "1ddf46593f1b676419587cdcbf54a97e0b55223fdb0c49314839b6a077f9c21c",
+   "scope.go": "a50fa5e346aee027583f41601db6e18c5bd1f76f403ad36f20bfdeb611acaf3d"
+  }
+ },
+ "distribution": {
+  "producer": "effra/checker-abi-10/bundled-interface-5",
+  "executableBytes": 17887896,
+  "runtimeModules": 10,
+  "runtimeSourceFiles": 16,
+  "runtimeSourceBytes": 119300
+ },
+ "fixtures": {
+  "codec": {
+   "expectedOutput": "{\"id\":\"7\",\"name\":\"Ada\"}\n",
+   "go": {
+    "runtimeModules": [
+     "codec",
+     "core"
+    ],
+    "requirements": {
+     "codec-plan": 1,
+     "declaration": 1,
+     "function": 3,
+     "helper": 1,
+     "runtime-module": 2
+    },
+    "mainBytes": 4172,
+    "runtimeBytes": 82905,
+    "runtimeFiles": [
+     "codec.go",
+     "codec_json.go",
+     "effect.go",
+     "fiber.go",
+     "managed.go",
+     "report.go",
+     "scheduler.go",
+     "scope.go"
+    ],
+    "imports": {
+     "effra.generated": [
+      "context",
+      "effra.generated/runtime",
+      "fmt",
+      "os",
+      "os/signal",
+      "syscall"
+     ],
+     "effra.generated/runtime": [
+      "context",
+      "errors",
+      "fmt",
+      "math",
+      "sort",
+      "strconv",
+      "strings",
+      "sync",
+      "sync/atomic",
+      "time",
+      "unicode/utf8"
+     ]
+    },
+    "dependencies": {
+     "count": 65,
+     "standard": 63,
+     "nonStandard": [
+      "effra.generated",
+      "effra.generated/runtime"
+     ],
+     "platform": []
+    },
+    "binary": {
+     "bytes": 2817788,
+     "sha256": "d1d280d37e5c01de29492cbb8c26726edd2f2405e327caaee721ee8c61abd852",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "symbols": {
+     "tool": "go tool nm -size -type",
+     "count": 2920,
+     "listingSha256": "7f6dc79cbf296aae5af45ccd06c942cdf3907d233208e683da9bd288f4359b19",
+     "packages": [
+      {
+       "package": "(constant)",
+       "symbols": 21,
+       "textBytes": 0,
+       "dataBytes": 168
+      },
+      {
+       "package": "(unqualified)",
+       "symbols": 40,
+       "textBytes": 3475,
+       "dataBytes": 712
+      },
+      {
+       "package": "_",
+       "symbols": 1,
+       "textBytes": 50,
+       "dataBytes": 0
+      },
+      {
+       "package": "cmp",
+       "symbols": 2,
+       "textBytes": 0,
+       "dataBytes": 24
+      },
+      {
+       "package": "context",
+       "symbols": 75,
+       "textBytes": 9350,
+       "dataBytes": 180
+      },
+      {
+       "package": "effra.generated/runtime",
+       "symbols": 89,
+       "textBytes": 66763,
+       "dataBytes": 464
+      },
+      {
+       "package": "errors",
+       "symbols": 9,
+       "textBytes": 988,
+       "dataBytes": 104
+      },
+      {
+       "package": "fmt",
+       "symbols": 61,
+       "textBytes": 39760,
+       "dataBytes": 192
+      },
+      {
+       "package": "go",
+       "symbols": 1,
+       "textBytes": 0,
+       "dataBytes": 0
+      },
+      {
+       "package": "go:",
+       "symbols": 16,
+       "textBytes": 2,
+       "dataBytes": 148214
+      },
+      {
+       "package": "internal/abi",
+       "symbols": 12,
+       "textBytes": 2455,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/bytealg",
+       "symbols": 11,
+       "textBytes": 567,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/chacha8rand",
+       "symbols": 4,
+       "textBytes": 2060,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/cpu",
+       "symbols": 12,
+       "textBytes": 4220,
+       "dataBytes": 208
+      },
+      {
+       "package": "internal/fmtsort",
+       "symbols": 4,
+       "textBytes": 5185,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/godebugs",
+       "symbols": 4,
+       "textBytes": 84,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/oserror",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 80
+      },
+      {
+       "package": "internal/poll",
+       "symbols": 37,
+       "textBytes": 5547,
+       "dataBytes": 156
+      },
+      {
+       "package": "internal/reflectlite",
+       "symbols": 5,
+       "textBytes": 459,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/atomic",
+       "symbols": 4,
+       "textBytes": 138,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/cgroup",
+       "symbols": 25,
+       "textBytes": 9953,
+       "dataBytes": 112
+      },
+      {
+       "package": "internal/runtime/exithook",
+       "symbols": 10,
+       "textBytes": 479,
+       "dataBytes": 60
+      },
+      {
+       "package": "internal/runtime/gc",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 854
+      },
+      {
+       "package": "internal/runtime/gc/scan",
+       "symbols": 236,
+       "textBytes": 4321,
+       "dataBytes": 13553
+      },
+      {
+       "package": "internal/runtime/maps",
+       "symbols": 54,
+       "textBytes": 16573,
+       "dataBytes": 177
+      },
+      {
+       "package": "internal/runtime/sys",
+       "symbols": 2,
+       "textBytes": 110,
+       "dataBytes": 1
+      },
+      {
+       "package": "internal/runtime/syscall/linux",
+       "symbols": 6,
+       "textBytes": 537,
+       "dataBytes": 8
+      },
+      {
+       "package": "internal/strconv",
+       "symbols": 34,
+       "textBytes": 16767,
+       "dataBytes": 11321
+      },
+      {
+       "package": "internal/sync",
+       "symbols": 22,
+       "textBytes": 4448,
+       "dataBytes": 1768
+      },
+      {
+       "package": "internal/synctest",
+       "symbols": 3,
+       "textBytes": 126,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/syscall/unix",
+       "symbols": 4,
+       "textBytes": 688,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/testlog",
+       "symbols": 3,
+       "textBytes": 223,
+       "dataBytes": 12
+      },
+      {
+       "package": "io",
+       "symbols": 3,
+       "textBytes": 0,
+       "dataBytes": 48
+      },
+      {
+       "package": "io/fs",
+       "symbols": 9,
+       "textBytes": 447,
+       "dataBytes": 96
+      },
+      {
+       "package": "iter",
+       "symbols": 3,
+       "textBytes": 85,
+       "dataBytes": 32
+      },
+      {
+       "package": "main",
+       "symbols": 11,
+       "textBytes": 7045,
+       "dataBytes": 88
+      },
+      {
+       "package": "math",
+       "symbols": 3,
+       "textBytes": 27,
+       "dataBytes": 17
+      },
+      {
+       "package": "os",
+       "symbols": 33,
+       "textBytes": 5407,
+       "dataBytes": 249
+      },
+      {
+       "package": "os/signal",
+       "symbols": 34,
+       "textBytes": 6083,
+       "dataBytes": 620
+      },
+      {
+       "package": "reflect",
+       "symbols": 79,
+       "textBytes": 24872,
+       "dataBytes": 160
+      },
+      {
+       "package": "runtime",
+       "symbols": 1633,
+       "textBytes": 444097,
+       "dataBytes": 235187
+      },
+      {
+       "package": "runtime/debug",
+       "symbols": 1,
+       "textBytes": 293,
+       "dataBytes": 0
+      },
+      {
+       "package": "slices",
+       "symbols": 31,
+       "textBytes": 8976,
+       "dataBytes": 392
+      },
+      {
+       "package": "strconv",
+       "symbols": 18,
+       "textBytes": 6414,
+       "dataBytes": 152
+      },
+      {
+       "package": "strings",
+       "symbols": 9,
+       "textBytes": 3640,
+       "dataBytes": 0
+      },
+      {
+       "package": "sync",
+       "symbols": 46,
+       "textBytes": 5900,
+       "dataBytes": 144
+      },
+      {
+       "package": "sync/atomic",
+       "symbols": 14,
+       "textBytes": 544,
+       "dataBytes": 385
+      },
+      {
+       "package": "syscall",
+       "symbols": 50,
+       "textBytes": 6153,
+       "dataBytes": 2816
+      },
+      {
+       "package": "time",
+       "symbols": 61,
+       "textBytes": 41488,
+       "dataBytes": 412
+      },
+      {
+       "package": "type:",
+       "symbols": 45,
+       "textBytes": 5085,
+       "dataBytes": 0
+      },
+      {
+       "package": "unicode",
+       "symbols": 13,
+       "textBytes": 714,
+       "dataBytes": 104
+      },
+      {
+       "package": "unicode/utf8",
+       "symbols": 7,
+       "textBytes": 1872,
+       "dataBytes": 288
+      }
+     ]
+    },
+    "stripped": {
+     "bytes": 1839264,
+     "sha256": "afe1a8a0b94a728d93c1c2183592c512ba3d01a6a577c331a54f793a7cd039fb",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "allSourceCounterfactual": {
+     "dependencies": {
+      "count": 200,
+      "standard": 198,
+      "nonStandard": [
+       "effra.generated",
+       "effra.generated/runtime"
+      ],
+      "platform": [
+       "crypto/tls",
+       "encoding/json",
+       "net",
+       "net/http"
+      ]
+     },
+     "binary": {
+      "bytes": 5707104,
+      "sha256": "9a86c38542e0f3dddef85f575764d3b358ade4457d5d24f0aefde8abbcf7fb80",
+      "build": {
+       "goVersion": "go1.27.0",
+       "settings": {
+        "-buildmode": "exe",
+        "-compiler": "gc",
+        "-trimpath": "true",
+        "CGO_ENABLED": "0",
+        "GOAMD64": "v1",
+        "GOARCH": "amd64",
+        "GOOS": "linux"
+       }
+      }
+     },
+     "symbols": {
+      "tool": "go tool nm -size -type",
+      "count": 5445,
+      "listingSha256": "c5f58ef923ab59772d39bbdf96c5250d2782569feb705b6c0b52a3b4dd4e80f4",
+      "packages": [
+       {
+        "package": "(constant)",
+        "symbols": 36,
+        "textBytes": 0,
+        "dataBytes": 288
+       },
+       {
+        "package": "(unqualified)",
+        "symbols": 67,
+        "textBytes": 4781,
+        "dataBytes": 1744
+       },
+       {
+        "package": "_",
+        "symbols": 1,
+        "textBytes": 50,
+        "dataBytes": 0
+       },
+       {
+        "package": "bufio",
+        "symbols": 7,
+        "textBytes": 2583,
+        "dataBytes": 80
+       },
+       {
+        "package": "bytes",
+        "symbols": 1,
+        "textBytes": 504,
+        "dataBytes": 0
+       },
+       {
+        "package": "cmp",
+        "symbols": 4,
+        "textBytes": 0,
+        "dataBytes": 48
+       },
+       {
+        "package": "compress/flate",
+        "symbols": 14,
+        "textBytes": 3866,
+        "dataBytes": 40
+       },
+       {
+        "package": "compress/gzip",
+        "symbols": 2,
+        "textBytes": 1,
+        "dataBytes": 16
+       },
+       {
+        "package": "context",
+        "symbols": 107,
+        "textBytes": 12176,
+        "dataBytes": 196
+       },
+       {
+        "package": "crypto",
+        "symbols": 4,
+        "textBytes": 107,
+        "dataBytes": 64
+       },
+       {
+        "package": "crypto/ecdh",
+        "symbols": 18,
+        "textBytes": 2130,
+        "dataBytes": 32
+       },
+       {
+        "package": "crypto/ecdsa",
+        "symbols": 3,
+        "textBytes": 98,
+        "dataBytes": 24
+       },
+       {
+        "package": "crypto/fips140",
+        "symbols": 4,
+        "textBytes": 112,
+        "dataBytes": 17
+       },
+       {
+        "package": "crypto/hpke",
+        "symbols": 8,
+        "textBytes": 777,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/internal/boring/sig",
+        "symbols": 1,
+        "textBytes": 32,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/internal/entropy/v1%2e0%2e0",
+        "symbols": 9,
+        "textBytes": 2334,
+        "dataBytes": 704
+       },
+       {
+        "package": "crypto/internal/fips140",
+        "symbols": 12,
+        "textBytes": 1425,
+        "dataBytes": 42
+       },
+       {
+        "package": "crypto/internal/fips140/aes",
+        "symbols": 45,
+        "textBytes": 13390,
+        "dataBytes": 8753
+       },
+       {
+        "package": "crypto/internal/fips140/aes/gcm",
+        "symbols": 10,
+        "textBytes": 2118,
+        "dataBytes": 49
+       },
+       {
+        "package": "crypto/internal/fips140/bigmod",
+        "symbols": 28,
+        "textBytes": 19928,
+        "dataBytes": 25
+       },
+       {
+        "package": "crypto/internal/fips140/check",
+        "symbols": 4,
+        "textBytes": 895,
+        "dataBytes": 49
+       },
+       {
+        "package": "crypto/internal/fips140/drbg",
+        "symbols": 18,
+        "textBytes": 4040,
+        "dataBytes": 33554544
+       },
+       {
+        "package": "crypto/internal/fips140/ecdh",
+        "symbols": 43,
+        "textBytes": 9399,
+        "dataBytes": 552
+       },
+       {
+        "package": "crypto/internal/fips140/ecdsa",
+        "symbols": 48,
+        "textBytes": 16171,
+        "dataBytes": 400
+       },
+       {
+        "package": "crypto/internal/fips140/ed25519",
+        "symbols": 9,
+        "textBytes": 4776,
+        "dataBytes": 24
+       },
+       {
+        "package": "crypto/internal/fips140/edwards25519",
+        "symbols": 53,
+        "textBytes": 20529,
+        "dataBytes": 38536
+       },
+       {
+        "package": "crypto/internal/fips140/edwards25519/field",
+        "symbols": 19,
+        "textBytes": 7204,
+        "dataBytes": 40
+       },
+       {
+        "package": "crypto/internal/fips140/hkdf",
+        "symbols": 13,
+        "textBytes": 2942,
+        "dataBytes": 120
+       },
+       {
+        "package": "crypto/internal/fips140/hmac",
+        "symbols": 21,
+        "textBytes": 4122,
+        "dataBytes": 184
+       },
+       {
+        "package": "crypto/internal/fips140/mldsa",
+        "symbols": 60,
+        "textBytes": 39710,
+        "dataBytes": 1312
+       },
+       {
+        "package": "crypto/internal/fips140/mlkem",
+        "symbols": 33,
+        "textBytes": 24177,
+        "dataBytes": 552
+       },
+       {
+        "package": "crypto/internal/fips140/nistec",
+        "symbols": 91,
+        "textBytes": 54749,
+        "dataBytes": 88264
+       },
+       {
+        "package": "crypto/internal/fips140/nistec/fiat",
+        "symbols": 29,
+        "textBytes": 45992,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/internal/fips140/rsa",
+        "symbols": 19,
+        "textBytes": 12433,
+        "dataBytes": 120
+       },
+       {
+        "package": "crypto/internal/fips140/sha256",
+        "symbols": 22,
+        "textBytes": 10252,
+        "dataBytes": 290
+       },
+       {
+        "package": "crypto/internal/fips140/sha3",
+        "symbols": 20,
+        "textBytes": 25103,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/internal/fips140/sha512",
+        "symbols": 20,
+        "textBytes": 9549,
+        "dataBytes": 673
+       },
+       {
+        "package": "crypto/internal/fips140/subtle",
+        "symbols": 3,
+        "textBytes": 877,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/internal/fips140/tls12",
+        "symbols": 9,
+        "textBytes": 1833,
+        "dataBytes": 88
+       },
+       {
+        "package": "crypto/internal/fips140/tls13",
+        "symbols": 19,
+        "textBytes": 3459,
+        "dataBytes": 216
+       },
+       {
+        "package": "crypto/internal/fips140deps/cpu",
+        "symbols": 28,
+        "textBytes": 339,
+        "dataBytes": 42
+       },
+       {
+        "package": "crypto/internal/fips140deps/time",
+        "symbols": 1,
+        "textBytes": 27,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/internal/impl",
+        "symbols": 2,
+        "textBytes": 453,
+        "dataBytes": 24
+       },
+       {
+        "package": "crypto/internal/rand",
+        "symbols": 3,
+        "textBytes": 197,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/internal/sysrand",
+        "symbols": 12,
+        "textBytes": 1279,
+        "dataBytes": 41
+       },
+       {
+        "package": "crypto/md5",
+        "symbols": 12,
+        "textBytes": 4770,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/mlkem",
+        "symbols": 4,
+        "textBytes": 764,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/rand",
+        "symbols": 3,
+        "textBytes": 75,
+        "dataBytes": 32
+       },
+       {
+        "package": "crypto/rsa",
+        "symbols": 3,
+        "textBytes": 165,
+        "dataBytes": 24
+       },
+       {
+        "package": "crypto/sha1",
+        "symbols": 19,
+        "textBytes": 11804,
+        "dataBytes": 34
+       },
+       {
+        "package": "crypto/sha256",
+        "symbols": 4,
+        "textBytes": 277,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/sha3",
+        "symbols": 13,
+        "textBytes": 4528,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/sha512",
+        "symbols": 6,
+        "textBytes": 581,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/tls",
+        "symbols": 9,
+        "textBytes": 666,
+        "dataBytes": 37
+       },
+       {
+        "package": "crypto/tls/internal/fips140tls",
+        "symbols": 3,
+        "textBytes": 87,
+        "dataBytes": 20
+       },
+       {
+        "package": "crypto/x509",
+        "symbols": 43,
+        "textBytes": 5381,
+        "dataBytes": 1352
+       },
+       {
+        "package": "crypto/x509/pkix",
+        "symbols": 2,
+        "textBytes": 24,
+        "dataBytes": 16
+       },
+       {
+        "package": "effra.generated/runtime",
+        "symbols": 90,
+        "textBytes": 67121,
+        "dataBytes": 464
+       },
+       {
+        "package": "encoding/asn1",
+        "symbols": 14,
+        "textBytes": 1289,
+        "dataBytes": 224
+       },
+       {
+        "package": "encoding/base32",
+        "symbols": 14,
+        "textBytes": 4046,
+        "dataBytes": 32
+       },
+       {
+        "package": "encoding/base64",
+        "symbols": 16,
+        "textBytes": 5425,
+        "dataBytes": 48
+       },
+       {
+        "package": "encoding/json",
+        "symbols": 24,
+        "textBytes": 5848,
+        "dataBytes": 112
+       },
+       {
+        "package": "encoding/json/internal",
+        "symbols": 8,
+        "textBytes": 0,
+        "dataBytes": 88
+       },
+       {
+        "package": "encoding/json/internal/jsonopts",
+        "symbols": 4,
+        "textBytes": 128,
+        "dataBytes": 16
+       },
+       {
+        "package": "encoding/json/internal/jsonwire",
+        "symbols": 8,
+        "textBytes": 8452,
+        "dataBytes": 40
+       },
+       {
+        "package": "encoding/json/jsontext",
+        "symbols": 22,
+        "textBytes": 2380,
+        "dataBytes": 148
+       },
+       {
+        "package": "encoding/json/v2",
+        "symbols": 46,
+        "textBytes": 4003,
+        "dataBytes": 520
+       },
+       {
+        "package": "errors",
+        "symbols": 10,
+        "textBytes": 1123,
+        "dataBytes": 104
+       },
+       {
+        "package": "fmt",
+        "symbols": 65,
+        "textBytes": 40126,
+        "dataBytes": 192
+       },
+       {
+        "package": "go",
+        "symbols": 1,
+        "textBytes": 0,
+        "dataBytes": 0
+       },
+       {
+        "package": "go:",
+        "symbols": 18,
+        "textBytes": 163,
+        "dataBytes": 244630
+       },
+       {
+        "package": "hash",
+        "symbols": 1,
+        "textBytes": 67,
+        "dataBytes": 0
+       },
+       {
+        "package": "hash/crc32",
+        "symbols": 26,
+        "textBytes": 4246,
+        "dataBytes": 108
+       },
+       {
+        "package": "internal/abi",
+        "symbols": 20,
+        "textBytes": 2466,
+        "dataBytes": 153
+       },
+       {
+        "package": "internal/bisect",
+        "symbols": 8,
+        "textBytes": 7998,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/bytealg",
+        "symbols": 20,
+        "textBytes": 1806,
+        "dataBytes": 88
+       },
+       {
+        "package": "internal/chacha8rand",
+        "symbols": 4,
+        "textBytes": 2060,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/cpu",
+        "symbols": 16,
+        "textBytes": 4220,
+        "dataBytes": 774
+       },
+       {
+        "package": "internal/filepathlite",
+        "symbols": 1,
+        "textBytes": 134,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/fmtsort",
+        "symbols": 4,
+        "textBytes": 5185,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/godebug",
+        "symbols": 23,
+        "textBytes": 4142,
+        "dataBytes": 96
+       },
+       {
+        "package": "internal/godebugs",
+        "symbols": 5,
+        "textBytes": 84,
+        "dataBytes": 48
+       },
+       {
+        "package": "internal/oserror",
+        "symbols": 5,
+        "textBytes": 0,
+        "dataBytes": 80
+       },
+       {
+        "package": "internal/poll",
+        "symbols": 55,
+        "textBytes": 9394,
+        "dataBytes": 156
+       },
+       {
+        "package": "internal/reflectlite",
+        "symbols": 7,
+        "textBytes": 680,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/runtime/atomic",
+        "symbols": 4,
+        "textBytes": 138,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/runtime/cgroup",
+        "symbols": 25,
+        "textBytes": 9953,
+        "dataBytes": 112
+       },
+       {
+        "package": "internal/runtime/exithook",
+        "symbols": 10,
+        "textBytes": 479,
+        "dataBytes": 60
+       },
+       {
+        "package": "internal/runtime/gc",
+        "symbols": 5,
+        "textBytes": 0,
+        "dataBytes": 854
+       },
+       {
+        "package": "internal/runtime/gc/scan",
+        "symbols": 236,
+        "textBytes": 4321,
+        "dataBytes": 13553
+       },
+       {
+        "package": "internal/runtime/maps",
+        "symbols": 54,
+        "textBytes": 16573,
+        "dataBytes": 177
+       },
+       {
+        "package": "internal/runtime/sys",
+        "symbols": 2,
+        "textBytes": 110,
+        "dataBytes": 1
+       },
+       {
+        "package": "internal/runtime/syscall/linux",
+        "symbols": 6,
+        "textBytes": 537,
+        "dataBytes": 8
+       },
+       {
+        "package": "internal/singleflight",
+        "symbols": 5,
+        "textBytes": 1743,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/strconv",
+        "symbols": 35,
+        "textBytes": 17043,
+        "dataBytes": 11321
+       },
+       {
+        "package": "internal/stringslite",
+        "symbols": 3,
+        "textBytes": 1386,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/sync",
+        "symbols": 39,
+        "textBytes": 9196,
+        "dataBytes": 3536
+       },
+       {
+        "package": "internal/synctest",
+        "symbols": 4,
+        "textBytes": 186,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/syscall/unix",
+        "symbols": 6,
+        "textBytes": 953,
+        "dataBytes": 4
+       },
+       {
+        "package": "internal/testlog",
+        "symbols": 7,
+        "textBytes": 532,
+        "dataBytes": 20
+       },
+       {
+        "package": "io",
+        "symbols": 19,
+        "textBytes": 774,
+        "dataBytes": 96
+       },
+       {
+        "package": "io/fs",
+        "symbols": 15,
+        "textBytes": 1132,
+        "dataBytes": 152
+       },
+       {
+        "package": "iter",
+        "symbols": 3,
+        "textBytes": 85,
+        "dataBytes": 32
+       },
+       {
+        "package": "log",
+        "symbols": 16,
+        "textBytes": 7959,
+        "dataBytes": 72
+       },
+       {
+        "package": "log/internal",
+        "symbols": 1,
+        "textBytes": 0,
+        "dataBytes": 8
+       },
+       {
+        "package": "main",
+        "symbols": 11,
+        "textBytes": 7045,
+        "dataBytes": 88
+       },
+       {
+        "package": "maps",
+        "symbols": 2,
+        "textBytes": 150,
+        "dataBytes": 56
+       },
+       {
+        "package": "math",
+        "symbols": 6,
+        "textBytes": 724,
+        "dataBytes": 17
+       },
+       {
+        "package": "math/big",
+        "symbols": 94,
+        "textBytes": 59074,
+        "dataBytes": 2793
+       },
+       {
+        "package": "mime",
+        "symbols": 31,
+        "textBytes": 15363,
+        "dataBytes": 336
+       },
+       {
+        "package": "mime/multipart",
+        "symbols": 4,
+        "textBytes": 428,
+        "dataBytes": 32
+       },
+       {
+        "package": "net",
+        "symbols": 357,
+        "textBytes": 121258,
+        "dataBytes": 1358
+       },
+       {
+        "package": "net/http",
+        "symbols": 36,
+        "textBytes": 3510,
+        "dataBytes": 341
+       },
+       {
+        "package": "net/http/internal",
+        "symbols": 5,
+        "textBytes": 0,
+        "dataBytes": 80
+       },
+       {
+        "package": "net/http/internal/http2",
+        "symbols": 25,
+        "textBytes": 1208,
+        "dataBytes": 245
+       },
+       {
+        "package": "net/http/internal/httpcommon",
+        "symbols": 1,
+        "textBytes": 0,
+        "dataBytes": 16
+       },
+       {
+        "package": "net/netip",
+        "symbols": 25,
+        "textBytes": 11599,
+        "dataBytes": 40
+       },
+       {
+        "package": "net/url",
+        "symbols": 22,
+        "textBytes": 9820,
+        "dataBytes": 312
+       },
+       {
+        "package": "os",
+        "symbols": 55,
+        "textBytes": 9028,
+        "dataBytes": 273
+       },
+       {
+        "package": "os/signal",
+        "symbols": 36,
+        "textBytes": 6248,
+        "dataBytes": 620
+       },
+       {
+        "package": "path/filepath",
+        "symbols": 4,
+        "textBytes": 138,
+        "dataBytes": 48
+       },
+       {
+        "package": "reflect",
+        "symbols": 80,
+        "textBytes": 25037,
+        "dataBytes": 160
+       },
+       {
+        "package": "runtime",
+        "symbols": 1753,
+        "textBytes": 464001,
+        "dataBytes": 240079
+       },
+       {
+        "package": "runtime/debug",
+        "symbols": 1,
+        "textBytes": 293,
+        "dataBytes": 0
+       },
+       {
+        "package": "slices",
+        "symbols": 90,
+        "textBytes": 29288,
+        "dataBytes": 1248
+       },
+       {
+        "package": "strconv",
+        "symbols": 18,
+        "textBytes": 6414,
+        "dataBytes": 152
+       },
+       {
+        "package": "strings",
+        "symbols": 46,
+        "textBytes": 22713,
+        "dataBytes": 280
+       },
+       {
+        "package": "sync",
+        "symbols": 64,
+        "textBytes": 7819,
+        "dataBytes": 336
+       },
+       {
+        "package": "sync/atomic",
+        "symbols": 23,
+        "textBytes": 558,
+        "dataBytes": 1153
+       },
+       {
+        "package": "syscall",
+        "symbols": 90,
+        "textBytes": 15191,
+        "dataBytes": 2825
+       },
+       {
+        "package": "time",
+        "symbols": 93,
+        "textBytes": 48948,
+        "dataBytes": 448
+       },
+       {
+        "package": "type:",
+        "symbols": 83,
+        "textBytes": 10933,
+        "dataBytes": 0
+       },
+       {
+        "package": "unicode",
+        "symbols": 25,
+        "textBytes": 2084,
+        "dataBytes": 416
+       },
+       {
+        "package": "unicode/utf8",
+        "symbols": 8,
+        "textBytes": 2156,
+        "dataBytes": 288
+       },
+       {
+        "package": "unique",
+        "symbols": 27,
+        "textBytes": 5367,
+        "dataBytes": 960
+       },
+       {
+        "package": "vendor/golang.org/x/crypto/chacha20poly1305",
+        "symbols": 3,
+        "textBytes": 36,
+        "dataBytes": 17
+       },
+       {
+        "package": "vendor/golang.org/x/crypto/cryptobyte",
+        "symbols": 3,
+        "textBytes": 165,
+        "dataBytes": 24
+       },
+       {
+        "package": "vendor/golang.org/x/net/dns/dnsmessage",
+        "symbols": 45,
+        "textBytes": 16318,
+        "dataBytes": 328
+       },
+       {
+        "package": "vendor/golang.org/x/net/http/httpguts",
+        "symbols": 2,
+        "textBytes": 24,
+        "dataBytes": 16
+       },
+       {
+        "package": "vendor/golang.org/x/net/http/httpproxy",
+        "symbols": 19,
+        "textBytes": 6321,
+        "dataBytes": 24
+       },
+       {
+        "package": "vendor/golang.org/x/net/http2/hpack",
+        "symbols": 2,
+        "textBytes": 330,
+        "dataBytes": 16
+       },
+       {
+        "package": "vendor/golang.org/x/net/idna",
+        "symbols": 30,
+        "textBytes": 15766,
+        "dataBytes": 31992
+       },
+       {
+        "package": "vendor/golang.org/x/sys/cpu",
+        "symbols": 12,
+        "textBytes": 3784,
+        "dataBytes": 230
+       },
+       {
+        "package": "vendor/golang.org/x/text/secure/bidirule",
+        "symbols": 7,
+        "textBytes": 909,
+        "dataBytes": 320
+       },
+       {
+        "package": "vendor/golang.org/x/text/transform",
+        "symbols": 2,
+        "textBytes": 0,
+        "dataBytes": 32
+       },
+       {
+        "package": "vendor/golang.org/x/text/unicode/bidi",
+        "symbols": 6,
+        "textBytes": 1322,
+        "dataBytes": 20736
+       },
+       {
+        "package": "vendor/golang.org/x/text/unicode/norm",
+        "symbols": 63,
+        "textBytes": 25981,
+        "dataBytes": 49850
+       },
+       {
+        "package": "weak",
+        "symbols": 5,
+        "textBytes": 685,
+        "dataBytes": 72
+       }
+      ]
+     },
+     "stripped": {
+      "bytes": 3850400,
+      "sha256": "c84770c108322c704b55493383b3d2bbd968c9cb43356c19d8ca54f50680a1ba",
+      "build": {
+       "goVersion": "go1.27.0",
+       "settings": {
+        "-buildmode": "exe",
+        "-compiler": "gc",
+        "-trimpath": "true",
+        "CGO_ENABLED": "0",
+        "GOAMD64": "v1",
+        "GOARCH": "amd64",
+        "GOOS": "linux"
+       }
+      }
+     }
+    }
+   },
+   "js": {
+    "moduleBytes": 31113,
+    "applicationMinified": {
+     "bytes": 14627,
+     "sha256": "b60f2ab778a556facffa715cecd0cbd86aef177a4147e2f2ca1f4d70851eb484"
+    },
+    "deploymentMinified": {
+     "bytes": 43605,
+     "sha256": "4656c82e4285eed6ed4a278eca6936c2aebefaa32c3fd3c2cc4e7390b49fb55e"
+    },
+    "deploymentDeltaBytes": 28978,
+    "externalRuntime": [
+     {
+      "specifier": "effect",
+      "names": [
+       "Context",
+       "Effect",
+       "Fiber",
+       "Scope",
+       "Exit",
+       "Cause",
+       "Option"
+      ]
+     }
+    ],
+    "declarationBytes": 3124,
+    "moduleSha256": "14cf6af56b9125cf33192e260a76b939efac10438765705538b781782d70ac71",
+    "requirements": {
+     "codec-plan": 1,
+     "declaration": 1,
+     "function": 3,
+     "helper": 1
+    }
+   }
+  },
+  "direct": {
+   "expectedOutput": "Hello, \u003cada!\u003e\n",
+   "go": {
+    "runtimeModules": [
+     "core"
+    ],
+    "requirements": {
+     "function": 4,
+     "runtime-module": 1
+    },
+    "mainBytes": 2311,
+    "runtimeBytes": 54516,
+    "runtimeFiles": [
+     "effect.go",
+     "fiber.go",
+     "managed.go",
+     "report.go",
+     "scheduler.go",
+     "scope.go"
+    ],
+    "imports": {
+     "effra.generated": [
+      "context",
+      "effra.generated/runtime",
+      "fmt",
+      "os",
+      "os/signal",
+      "syscall"
+     ],
+     "effra.generated/runtime": [
+      "context",
+      "errors",
+      "fmt",
+      "math",
+      "sort",
+      "strconv",
+      "strings",
+      "sync",
+      "sync/atomic",
+      "time"
+     ]
+    },
+    "dependencies": {
+     "count": 65,
+     "standard": 63,
+     "nonStandard": [
+      "effra.generated",
+      "effra.generated/runtime"
+     ],
+     "platform": []
+    },
+    "binary": {
+     "bytes": 2709562,
+     "sha256": "7d7e2fa27a2991c5c6bf1ffe57ce0cbecc8d3f49a80f0565db64c253f33fab18",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "symbols": {
+     "tool": "go tool nm -size -type",
+     "count": 2866,
+     "listingSha256": "b570525e0b4a1422f6d2565d41b4d00e4b62bea68216cfc898e63d85b82f83f5",
+     "packages": [
+      {
+       "package": "(constant)",
+       "symbols": 21,
+       "textBytes": 0,
+       "dataBytes": 168
+      },
+      {
+       "package": "(unqualified)",
+       "symbols": 39,
+       "textBytes": 2694,
+       "dataBytes": 712
+      },
+      {
+       "package": "_",
+       "symbols": 1,
+       "textBytes": 50,
+       "dataBytes": 0
+      },
+      {
+       "package": "cmp",
+       "symbols": 2,
+       "textBytes": 0,
+       "dataBytes": 24
+      },
+      {
+       "package": "context",
+       "symbols": 75,
+       "textBytes": 9350,
+       "dataBytes": 180
+      },
+      {
+       "package": "effra.generated/runtime",
+       "symbols": 58,
+       "textBytes": 30044,
+       "dataBytes": 328
+      },
+      {
+       "package": "errors",
+       "symbols": 9,
+       "textBytes": 988,
+       "dataBytes": 104
+      },
+      {
+       "package": "fmt",
+       "symbols": 61,
+       "textBytes": 39760,
+       "dataBytes": 192
+      },
+      {
+       "package": "go",
+       "symbols": 1,
+       "textBytes": 0,
+       "dataBytes": 0
+      },
+      {
+       "package": "go:",
+       "symbols": 16,
+       "textBytes": 2,
+       "dataBytes": 141294
+      },
+      {
+       "package": "internal/abi",
+       "symbols": 12,
+       "textBytes": 2455,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/bytealg",
+       "symbols": 10,
+       "textBytes": 534,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/chacha8rand",
+       "symbols": 4,
+       "textBytes": 2060,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/cpu",
+       "symbols": 12,
+       "textBytes": 4220,
+       "dataBytes": 208
+      },
+      {
+       "package": "internal/fmtsort",
+       "symbols": 4,
+       "textBytes": 5185,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/godebugs",
+       "symbols": 4,
+       "textBytes": 84,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/oserror",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 80
+      },
+      {
+       "package": "internal/poll",
+       "symbols": 37,
+       "textBytes": 5547,
+       "dataBytes": 156
+      },
+      {
+       "package": "internal/reflectlite",
+       "symbols": 5,
+       "textBytes": 459,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/atomic",
+       "symbols": 4,
+       "textBytes": 138,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/cgroup",
+       "symbols": 25,
+       "textBytes": 9953,
+       "dataBytes": 112
+      },
+      {
+       "package": "internal/runtime/exithook",
+       "symbols": 10,
+       "textBytes": 479,
+       "dataBytes": 60
+      },
+      {
+       "package": "internal/runtime/gc",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 854
+      },
+      {
+       "package": "internal/runtime/gc/scan",
+       "symbols": 236,
+       "textBytes": 4321,
+       "dataBytes": 13553
+      },
+      {
+       "package": "internal/runtime/maps",
+       "symbols": 54,
+       "textBytes": 16573,
+       "dataBytes": 177
+      },
+      {
+       "package": "internal/runtime/sys",
+       "symbols": 2,
+       "textBytes": 110,
+       "dataBytes": 1
+      },
+      {
+       "package": "internal/runtime/syscall/linux",
+       "symbols": 6,
+       "textBytes": 537,
+       "dataBytes": 8
+      },
+      {
+       "package": "internal/strconv",
+       "symbols": 34,
+       "textBytes": 16767,
+       "dataBytes": 11321
+      },
+      {
+       "package": "internal/sync",
+       "symbols": 22,
+       "textBytes": 4448,
+       "dataBytes": 1768
+      },
+      {
+       "package": "internal/synctest",
+       "symbols": 3,
+       "textBytes": 126,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/syscall/unix",
+       "symbols": 4,
+       "textBytes": 688,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/testlog",
+       "symbols": 3,
+       "textBytes": 223,
+       "dataBytes": 12
+      },
+      {
+       "package": "io",
+       "symbols": 3,
+       "textBytes": 0,
+       "dataBytes": 48
+      },
+      {
+       "package": "io/fs",
+       "symbols": 9,
+       "textBytes": 447,
+       "dataBytes": 96
+      },
+      {
+       "package": "iter",
+       "symbols": 3,
+       "textBytes": 85,
+       "dataBytes": 32
+      },
+      {
+       "package": "main",
+       "symbols": 5,
+       "textBytes": 3289,
+       "dataBytes": 48
+      },
+      {
+       "package": "math",
+       "symbols": 3,
+       "textBytes": 27,
+       "dataBytes": 17
+      },
+      {
+       "package": "os",
+       "symbols": 33,
+       "textBytes": 5407,
+       "dataBytes": 249
+      },
+      {
+       "package": "os/signal",
+       "symbols": 34,
+       "textBytes": 6083,
+       "dataBytes": 620
+      },
+      {
+       "package": "reflect",
+       "symbols": 79,
+       "textBytes": 24872,
+       "dataBytes": 160
+      },
+      {
+       "package": "runtime",
+       "symbols": 1633,
+       "textBytes": 444097,
+       "dataBytes": 234957
+      },
+      {
+       "package": "runtime/debug",
+       "symbols": 1,
+       "textBytes": 293,
+       "dataBytes": 0
+      },
+      {
+       "package": "slices",
+       "symbols": 31,
+       "textBytes": 8976,
+       "dataBytes": 392
+      },
+      {
+       "package": "strconv",
+       "symbols": 10,
+       "textBytes": 3731,
+       "dataBytes": 120
+      },
+      {
+       "package": "strings",
+       "symbols": 6,
+       "textBytes": 2129,
+       "dataBytes": 0
+      },
+      {
+       "package": "sync",
+       "symbols": 46,
+       "textBytes": 5900,
+       "dataBytes": 144
+      },
+      {
+       "package": "sync/atomic",
+       "symbols": 14,
+       "textBytes": 544,
+       "dataBytes": 385
+      },
+      {
+       "package": "syscall",
+       "symbols": 50,
+       "textBytes": 6153,
+       "dataBytes": 2816
+      },
+      {
+       "package": "time",
+       "symbols": 61,
+       "textBytes": 41488,
+       "dataBytes": 412
+      },
+      {
+       "package": "type:",
+       "symbols": 42,
+       "textBytes": 4753,
+       "dataBytes": 0
+      },
+      {
+       "package": "unicode",
+       "symbols": 13,
+       "textBytes": 714,
+       "dataBytes": 104
+      },
+      {
+       "package": "unicode/utf8",
+       "symbols": 6,
+       "textBytes": 1313,
+       "dataBytes": 288
+      }
+     ]
+    },
+    "stripped": {
+     "bytes": 1761440,
+     "sha256": "aca73bbf9c3686bef6e70a33df4cc088e42e39e4083ff29d1c3d6a6f1c84d047",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    }
+   },
+   "js": {
+    "moduleBytes": 9779,
+    "applicationMinified": {
+     "bytes": 4065,
+     "sha256": "1ee9e1fdc1779c86b8c3e6318e1cf13a5ab192dbcf7056de168ea48e7e22f58a"
+    },
+    "deploymentMinified": {
+     "bytes": 32576,
+     "sha256": "134bc986426d5f03c09baa9e7393a30b2aedb2f7cc49efa48029a42f82060780"
+    },
+    "deploymentDeltaBytes": 28511,
+    "externalRuntime": [
+     {
+      "specifier": "effect",
+      "names": [
+       "Context",
+       "Effect",
+       "Fiber",
+       "Scope",
+       "Exit",
+       "Cause",
+       "Option"
+      ]
+     }
+    ],
+    "declarationBytes": 2928,
+    "moduleSha256": "b861ed49a162653b064ad0bbb2f5c44017275459b158c3a050235926a1abc731",
+    "requirements": {
+     "function": 4
+    }
+   }
+  },
+  "http": {
+   "go": {
+    "runtimeModules": [
+     "core",
+     "http"
+    ],
+    "requirements": {
+     "callable-value": 1,
+     "declaration": 4,
+     "function": 2,
+     "operation": 2,
+     "provider": 1,
+     "runtime-module": 2,
+     "service": 1
+    },
+    "mainBytes": 6768,
+    "runtimeBytes": 70458,
+    "runtimeFiles": [
+     "effect.go",
+     "fiber.go",
+     "http.go",
+     "managed.go",
+     "report.go",
+     "scheduler.go",
+     "scope.go"
+    ],
+    "imports": {
+     "effra.generated": [
+      "context",
+      "effra.generated/runtime",
+      "fmt",
+      "os",
+      "os/signal",
+      "syscall"
+     ],
+     "effra.generated/runtime": [
+      "context",
+      "errors",
+      "fmt",
+      "io",
+      "math",
+      "net",
+      "net/http",
+      "sort",
+      "strconv",
+      "strings",
+      "sync",
+      "sync/atomic",
+      "syscall",
+      "time"
+     ]
+    },
+    "dependencies": {
+     "count": 191,
+     "standard": 189,
+     "nonStandard": [
+      "effra.generated",
+      "effra.generated/runtime"
+     ],
+     "platform": [
+      "crypto/tls",
+      "net",
+      "net/http"
+     ]
+    },
+    "binary": {
+     "bytes": 8874475,
+     "sha256": "96bfa6643cf3a0ff27ddb1a04637205f4b58a094d8ca080ba9a04f48ee15e160",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "symbols": {
+     "tool": "go tool nm -size -type",
+     "count": 8502,
+     "listingSha256": "048d420bb787b5da562878a09dcdfcb84d5da2ab99e7d623c56bfa3bb5e95254",
+     "packages": [
+      {
+       "package": "(constant)",
+       "symbols": 36,
+       "textBytes": 0,
+       "dataBytes": 288
+      },
+      {
+       "package": "(unqualified)",
+       "symbols": 71,
+       "textBytes": 5296,
+       "dataBytes": 2016
+      },
+      {
+       "package": "_",
+       "symbols": 1,
+       "textBytes": 50,
+       "dataBytes": 0
+      },
+      {
+       "package": "bufio",
+       "symbols": 33,
+       "textBytes": 9228,
+       "dataBytes": 256
+      },
+      {
+       "package": "bytes",
+       "symbols": 43,
+       "textBytes": 13836,
+       "dataBytes": 304
+      },
+      {
+       "package": "cmp",
+       "symbols": 4,
+       "textBytes": 0,
+       "dataBytes": 48
+      },
+      {
+       "package": "compress/flate",
+       "symbols": 14,
+       "textBytes": 3866,
+       "dataBytes": 40
+      },
+      {
+       "package": "compress/gzip",
+       "symbols": 2,
+       "textBytes": 1,
+       "dataBytes": 16
+      },
+      {
+       "package": "context",
+       "symbols": 107,
+       "textBytes": 12176,
+       "dataBytes": 196
+      },
+      {
+       "package": "crypto",
+       "symbols": 16,
+       "textBytes": 1491,
+       "dataBytes": 88
+      },
+      {
+       "package": "crypto/aes",
+       "symbols": 3,
+       "textBytes": 339,
+       "dataBytes": 0
+      },
+      {
+       "package": "crypto/cipher",
+       "symbols": 11,
+       "textBytes": 3727,
+       "dataBytes": 48
+      },
+      {
+       "package": "crypto/des",
+       "symbols": 22,
+       "textBytes": 4285,
+       "dataBytes": 2724
+      },
+      {
+       "package": "crypto/ecdh",
+       "symbols": 34,
+       "textBytes": 7351,
+       "dataBytes": 80
+      },
+      {
+       "package": "crypto/ecdsa",
+       "symbols": 45,
+       "textBytes": 9607,
+       "dataBytes": 248
+      },
+      {
+       "package": "crypto/ed25519",
+       "symbols": 1,
+       "textBytes": 767,
+       "dataBytes": 0
+      },
+      {
+       "package": "crypto/elliptic",
+       "symbols": 53,
+       "textBytes": 17614,
+       "dataBytes": 1004
+      },
+      {
+       "package": "crypto/fips140",
+       "symbols": 7,
+       "textBytes": 343,
+       "dataBytes": 17
+      },
+      {
+       "package": "crypto/hkdf",
+       "symbols": 6,
+       "textBytes": 1157,
+       "dataBytes": 56
+      },
+      {
+       "package": "crypto/hmac",
+       "symbols": 2,
+       "textBytes": 350,
+       "dataBytes": 24
+      },
+      {
+       "package": "crypto/hpke",
+       "symbols": 94,
+       "textBytes": 17586,
+       "dataBytes": 216
+      },
+      {
+       "package": "crypto/internal/boring",
+       "symbols": 1,
+       "textBytes": 45,
+       "dataBytes": 0
+      },
+      {
+       "package": "crypto/internal/boring/sig",
+       "symbols": 1,
+       "textBytes": 32,
+       "dataBytes": 0
+      },
+      {
+       "package": "crypto/internal/entropy/v1%2e0%2e0",
+       "symbols": 9,
+       "textBytes": 2334,
+       "dataBytes": 704
+      },
+      {
+       "package": "crypto/internal/fips140",
+       "symbols": 12,
+       "textBytes": 1425,
+       "dataBytes": 42
+      },
+      {
+       "package": "crypto/internal/fips140/aes",
+       "symbols": 51,
+       "textBytes": 14362,
+       "dataBytes": 8753
+      },
+      {
+       "package": "crypto/internal/fips140/aes/gcm",
+       "symbols": 43,
+       "textBytes": 24026,
+       "dataBytes": 49
+      },
+      {
+       "package": "crypto/internal/fips140/bigmod",
+       "symbols": 28,
+       "textBytes": 19928,
+       "dataBytes": 25
+      },
+      {
+       "package": "crypto/internal/fips140/check",
+       "symbols": 4,
+       "textBytes": 895,
+       "dataBytes": 49
+      },
+      {
+       "package": "crypto/internal/fips140/drbg",
+       "symbols": 18,
+       "textBytes": 4040,
+       "dataBytes": 33554544
+      },
+      {
+       "package": "crypto/internal/fips140/ecdh",
+       "symbols": 45,
+       "textBytes": 9431,
+       "dataBytes": 552
+      },
+      {
+       "package": "crypto/internal/fips140/ecdsa",
+       "symbols": 86,
+       "textBytes": 27574,
+       "dataBytes": 856
+      },
+      {
+       "package": "crypto/internal/fips140/ed25519",
+       "symbols": 12,
+       "textBytes": 6053,
+       "dataBytes": 24
+      },
+      {
+       "package": "crypto/internal/fips140/edwards25519",
+       "symbols": 53,
+       "textBytes": 20529,
+       "dataBytes": 38536
+      },
+      {
+       "package": "crypto/internal/fips140/edwards25519/field",
+       "symbols": 20,
+       "textBytes": 7447,
+       "dataBytes": 40
+      },
+      {
+       "package": "crypto/internal/fips140/hkdf",
+       "symbols": 13,
+       "textBytes": 2942,
+       "dataBytes": 120
+      },
+      {
+       "package": "crypto/internal/fips140/hmac",
+       "symbols": 30,
+       "textBytes": 5089,
+       "dataBytes": 280
+      },
+      {
+       "package": "crypto/internal/fips140/mldsa",
+       "symbols": 66,
+       "textBytes": 41457,
+       "dataBytes": 1440
+      },
+      {
+       "package": "crypto/internal/fips140/mlkem",
+       "symbols": 55,
+       "textBytes": 35567,
+       "dataBytes": 552
+      },
+      {
+       "package": "crypto/internal/fips140/nistec",
+       "symbols": 119,
+       "textBytes": 67778,
+       "dataBytes": 88324
+      },
+      {
+       "package": "crypto/internal/fips140/nistec/fiat",
+       "symbols": 46,
+       "textBytes": 54159,
+       "dataBytes": 0
+      },
+      {
+       "package": "crypto/internal/fips140/rsa",
+       "symbols": 24,
+       "textBytes": 15817,
+       "dataBytes": 120
+      },
+      {
+       "package": "crypto/internal/fips140/sha256",
+       "symbols": 23,
+       "textBytes": 10417,
+       "dataBytes": 290
+      },
+      {
+       "package": "crypto/internal/fips140/sha3",
+       "symbols": 27,
+       "textBytes": 26676,
+       "dataBytes": 16
+      },
+      {
+       "package": "crypto/internal/fips140/sha512",
+       "symbols": 21,
+       "textBytes": 9701,
+       "dataBytes": 673
+      },
+      {
+       "package": "crypto/internal/fips140/subtle",
+       "symbols": 3,
+       "textBytes": 877,
+       "dataBytes": 0
+      },
+      {
+       "package": "crypto/internal/fips140/tls12",
+       "symbols": 15,
+       "textBytes": 3305,
+       "dataBytes": 160
+      },
+      {
+       "package": "crypto/internal/fips140/tls13",
+       "symbols": 23,
+       "textBytes": 4288,
+       "dataBytes": 248
+      },
+      {
+       "package": "crypto/internal/fips140deps/cpu",
+       "symbols": 28,
+       "textBytes": 339,
+       "dataBytes": 42
+      },
+      {
+       "package": "crypto/internal/fips140deps/time",
+       "symbols": 1,
+       "textBytes": 27,
+       "dataBytes": 0
+      },
+      {
+       "package": "crypto/internal/fips140hash",
+       "symbols": 6,
+       "textBytes": 899,
+       "dataBytes": 24
+      },
+      {
+       "package": "crypto/internal/fips140only",
+       "symbols": 2,
+       "textBytes": 133,
+       "dataBytes": 0
+      },
+      {
+       "package": "crypto/internal/impl",
+       "symbols": 2,
+       "textBytes": 453,
+       "dataBytes": 24
+      },
+      {
+       "package": "crypto/internal/rand",
+       "symbols": 7,
+       "textBytes": 494,
+       "dataBytes": 64
+      },
+      {
+       "package": "crypto/internal/randutil",
+       "symbols": 1,
+       "textBytes": 134,
+       "dataBytes": 0
+      },
+      {
+       "package": "crypto/internal/sysrand",
+       "symbols": 12,
+       "textBytes": 1279,
+       "dataBytes": 41
+      },
+      {
+       "package": "crypto/md5",
+       "symbols": 13,
+       "textBytes": 4904,
+       "dataBytes": 16
+      },
+      {
+       "package": "crypto/mldsa",
+       "symbols": 6,
+       "textBytes": 1624,
+       "dataBytes": 16
+      },
+      {
+       "package": "crypto/mlkem",
+       "symbols": 16,
+       "textBytes": 2200,
+       "dataBytes": 0
+      },
+      {
+       "package": "crypto/rand",
+       "symbols": 6,
+       "textBytes": 521,
+       "dataBytes": 56
+      },
+      {
+       "package": "crypto/rc4",
+       "symbols": 5,
+       "textBytes": 857,
+       "dataBytes": 0
+      },
+      {
+       "package": "crypto/rsa",
+       "symbols": 17,
+       "textBytes": 5511,
+       "dataBytes": 80
+      },
+      {
+       "package": "crypto/sha1",
+       "symbols": 22,
+       "textBytes": 12993,
+       "dataBytes": 34
+      },
+      {
+       "package": "crypto/sha256",
+       "symbols": 5,
+       "textBytes": 558,
+       "dataBytes": 16
+      },
+      {
+       "package": "crypto/sha3",
+       "symbols": 22,
+       "textBytes": 7937,
+       "dataBytes": 16
+      },
+      {
+       "package": "crypto/sha512",
+       "symbols": 6,
+       "textBytes": 581,
+       "dataBytes": 16
+      },
+      {
+       "package": "crypto/tls",
+       "symbols": 509,
+       "textBytes": 249176,
+       "dataBytes": 3100
+      },
+      {
+       "package": "crypto/tls/internal/fips140tls",
+       "symbols": 3,
+       "textBytes": 87,
+       "dataBytes": 20
+      },
+      {
+       "package": "crypto/x509",
+       "symbols": 202,
+       "textBytes": 101119,
+       "dataBytes": 2471
+      },
+      {
+       "package": "crypto/x509/pkix",
+       "symbols": 19,
+       "textBytes": 10325,
+       "dataBytes": 240
+      },
+      {
+       "package": "effra.generated/runtime",
+       "symbols": 192,
+       "textBytes": 79867,
+       "dataBytes": 1608
+      },
+      {
+       "package": "encoding/asn1",
+       "symbols": 85,
+       "textBytes": 38128,
+       "dataBytes": 280
+      },
+      {
+       "package": "encoding/base64",
+       "symbols": 10,
+       "textBytes": 3401,
+       "dataBytes": 48
+      },
+      {
+       "package": "encoding/pem",
+       "symbols": 11,
+       "textBytes": 3276,
+       "dataBytes": 124
+      },
+      {
+       "package": "errors",
+       "symbols": 18,
+       "textBytes": 3544,
+       "dataBytes": 232
+      },
+      {
+       "package": "fmt",
+       "symbols": 69,
+       "textBytes": 40945,
+       "dataBytes": 192
+      },
+      {
+       "package": "go",
+       "symbols": 1,
+       "textBytes": 0,
+       "dataBytes": 0
+      },
+      {
+       "package": "go:",
+       "symbols": 20,
+       "textBytes": 323,
+       "dataBytes": 378334
+      },
+      {
+       "package": "hash",
+       "symbols": 1,
+       "textBytes": 67,
+       "dataBytes": 0
+      },
+      {
+       "package": "hash/crc32",
+       "symbols": 26,
+       "textBytes": 4246,
+       "dataBytes": 108
+      },
+      {
+       "package": "internal/abi",
+       "symbols": 43,
+       "textBytes": 2615,
+       "dataBytes": 385
+      },
+      {
+       "package": "internal/bisect",
+       "symbols": 8,
+       "textBytes": 7998,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/bytealg",
+       "symbols": 27,
+       "textBytes": 2999,
+       "dataBytes": 152
+      },
+      {
+       "package": "internal/chacha8rand",
+       "symbols": 4,
+       "textBytes": 2060,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/cpu",
+       "symbols": 16,
+       "textBytes": 4220,
+       "dataBytes": 774
+      },
+      {
+       "package": "internal/filepathlite",
+       "symbols": 2,
+       "textBytes": 2891,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/fmtsort",
+       "symbols": 4,
+       "textBytes": 5185,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/godebug",
+       "symbols": 23,
+       "textBytes": 4142,
+       "dataBytes": 96
+      },
+      {
+       "package": "internal/godebugs",
+       "symbols": 5,
+       "textBytes": 84,
+       "dataBytes": 48
+      },
+      {
+       "package": "internal/oserror",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 80
+      },
+      {
+       "package": "internal/poll",
+       "symbols": 91,
+       "textBytes": 18962,
+       "dataBytes": 212
+      },
+      {
+       "package": "internal/reflectlite",
+       "symbols": 43,
+       "textBytes": 8916,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/atomic",
+       "symbols": 6,
+       "textBytes": 140,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/cgroup",
+       "symbols": 25,
+       "textBytes": 9953,
+       "dataBytes": 112
+      },
+      {
+       "package": "internal/runtime/exithook",
+       "symbols": 10,
+       "textBytes": 479,
+       "dataBytes": 60
+      },
+      {
+       "package": "internal/runtime/gc",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 854
+      },
+      {
+       "package": "internal/runtime/gc/scan",
+       "symbols": 236,
+       "textBytes": 4321,
+       "dataBytes": 13553
+      },
+      {
+       "package": "internal/runtime/maps",
+       "symbols": 57,
+       "textBytes": 18035,
+       "dataBytes": 177
+      },
+      {
+       "package": "internal/runtime/sys",
+       "symbols": 2,
+       "textBytes": 110,
+       "dataBytes": 1
+      },
+      {
+       "package": "internal/runtime/syscall/linux",
+       "symbols": 6,
+       "textBytes": 537,
+       "dataBytes": 8
+      },
+      {
+       "package": "internal/singleflight",
+       "symbols": 5,
+       "textBytes": 1743,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/strconv",
+       "symbols": 34,
+       "textBytes": 16767,
+       "dataBytes": 11321
+      },
+      {
+       "package": "internal/stringslite",
+       "symbols": 3,
+       "textBytes": 1386,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/sync",
+       "symbols": 46,
+       "textBytes": 13282,
+       "dataBytes": 3536
+      },
+      {
+       "package": "internal/synctest",
+       "symbols": 4,
+       "textBytes": 186,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/syscall/unix",
+       "symbols": 8,
+       "textBytes": 1368,
+       "dataBytes": 4
+      },
+      {
+       "package": "internal/testlog",
+       "symbols": 7,
+       "textBytes": 532,
+       "dataBytes": 20
+      },
+      {
+       "package": "io",
+       "symbols": 37,
+       "textBytes": 5068,
+       "dataBytes": 272
+      },
+      {
+       "package": "io/fs",
+       "symbols": 20,
+       "textBytes": 1841,
+       "dataBytes": 152
+      },
+      {
+       "package": "iter",
+       "symbols": 3,
+       "textBytes": 85,
+       "dataBytes": 32
+      },
+      {
+       "package": "log",
+       "symbols": 19,
+       "textBytes": 8284,
+       "dataBytes": 72
+      },
+      {
+       "package": "log/internal",
+       "symbols": 1,
+       "textBytes": 0,
+       "dataBytes": 8
+      },
+      {
+       "package": "main",
+       "symbols": 19,
+       "textBytes": 9918,
+       "dataBytes": 88
+      },
+      {
+       "package": "maps",
+       "symbols": 7,
+       "textBytes": 538,
+       "dataBytes": 168
+      },
+      {
+       "package": "math",
+       "symbols": 6,
+       "textBytes": 724,
+       "dataBytes": 17
+      },
+      {
+       "package": "math/big",
+       "symbols": 109,
+       "textBytes": 65739,
+       "dataBytes": 2825
+      },
+      {
+       "package": "math/rand/v2",
+       "symbols": 4,
+       "textBytes": 281,
+       "dataBytes": 8
+      },
+      {
+       "package": "mime",
+       "symbols": 31,
+       "textBytes": 15363,
+       "dataBytes": 336
+      },
+      {
+       "package": "mime/multipart",
+       "symbols": 5,
+       "textBytes": 764,
+       "dataBytes": 32
+      },
+      {
+       "package": "net",
+       "symbols": 477,
+       "textBytes": 136030,
+       "dataBytes": 1406
+      },
+      {
+       "package": "net/http",
+       "symbols": 356,
+       "textBytes": 93918,
+       "dataBytes": 1821
+      },
+      {
+       "package": "net/http/internal",
+       "symbols": 87,
+       "textBytes": 3933,
+       "dataBytes": 607
+      },
+      {
+       "package": "net/http/internal/http2",
+       "symbols": 468,
+       "textBytes": 125993,
+       "dataBytes": 1700
+      },
+      {
+       "package": "net/http/internal/httpcommon",
+       "symbols": 9,
+       "textBytes": 2675,
+       "dataBytes": 44
+      },
+      {
+       "package": "net/http/internal/httpsfv",
+       "symbols": 15,
+       "textBytes": 4864,
+       "dataBytes": 0
+      },
+      {
+       "package": "net/netip",
+       "symbols": 25,
+       "textBytes": 11599,
+       "dataBytes": 40
+      },
+      {
+       "package": "net/textproto",
+       "symbols": 20,
+       "textBytes": 6964,
+       "dataBytes": 86
+      },
+      {
+       "package": "net/url",
+       "symbols": 30,
+       "textBytes": 15381,
+       "dataBytes": 312
+      },
+      {
+       "package": "os",
+       "symbols": 146,
+       "textBytes": 24025,
+       "dataBytes": 345
+      },
+      {
+       "package": "os/signal",
+       "symbols": 36,
+       "textBytes": 6248,
+       "dataBytes": 620
+      },
+      {
+       "package": "path",
+       "symbols": 1,
+       "textBytes": 2104,
+       "dataBytes": 0
+      },
+      {
+       "package": "path/filepath",
+       "symbols": 5,
+       "textBytes": 282,
+       "dataBytes": 48
+      },
+      {
+       "package": "reflect",
+       "symbols": 175,
+       "textBytes": 61405,
+       "dataBytes": 528
+      },
+      {
+       "package": "runtime",
+       "symbols": 1777,
+       "textBytes": 470235,
+       "dataBytes": 246143
+      },
+      {
+       "package": "runtime/debug",
+       "symbols": 1,
+       "textBytes": 293,
+       "dataBytes": 0
+      },
+      {
+       "package": "slices",
+       "symbols": 218,
+       "textBytes": 73334,
+       "dataBytes": 3168
+      },
+      {
+       "package": "strconv",
+       "symbols": 24,
+       "textBytes": 10376,
+       "dataBytes": 152
+      },
+      {
+       "package": "strings",
+       "symbols": 48,
+       "textBytes": 19967,
+       "dataBytes": 280
+      },
+      {
+       "package": "sync",
+       "symbols": 69,
+       "textBytes": 9225,
+       "dataBytes": 304
+      },
+      {
+       "package": "sync/atomic",
+       "symbols": 26,
+       "textBytes": 570,
+       "dataBytes": 1153
+      },
+      {
+       "package": "syscall",
+       "symbols": 100,
+       "textBytes": 17633,
+       "dataBytes": 2825
+      },
+      {
+       "package": "time",
+       "symbols": 118,
+       "textBytes": 66446,
+       "dataBytes": 632
+      },
+      {
+       "package": "type:",
+       "symbols": 119,
+       "textBytes": 15641,
+       "dataBytes": 0
+      },
+      {
+       "package": "unicode",
+       "symbols": 21,
+       "textBytes": 1760,
+       "dataBytes": 136
+      },
+      {
+       "package": "unicode/utf16",
+       "symbols": 1,
+       "textBytes": 471,
+       "dataBytes": 0
+      },
+      {
+       "package": "unicode/utf8",
+       "symbols": 10,
+       "textBytes": 3017,
+       "dataBytes": 288
+      },
+      {
+       "package": "unique",
+       "symbols": 27,
+       "textBytes": 5367,
+       "dataBytes": 960
+      },
+      {
+       "package": "vendor/golang.org/x/crypto/chacha20",
+       "symbols": 4,
+       "textBytes": 4504,
+       "dataBytes": 0
+      },
+      {
+       "package": "vendor/golang.org/x/crypto/chacha20poly1305",
+       "symbols": 25,
+       "textBytes": 29081,
+       "dataBytes": 465
+      },
+      {
+       "package": "vendor/golang.org/x/crypto/cryptobyte",
+       "symbols": 32,
+       "textBytes": 12434,
+       "dataBytes": 24
+      },
+      {
+       "package": "vendor/golang.org/x/crypto/internal/poly1305",
+       "symbols": 5,
+       "textBytes": 1351,
+       "dataBytes": 0
+      },
+      {
+       "package": "vendor/golang.org/x/net/dns/dnsmessage",
+       "symbols": 45,
+       "textBytes": 16318,
+       "dataBytes": 328
+      },
+      {
+       "package": "vendor/golang.org/x/net/http/httpguts",
+       "symbols": 8,
+       "textBytes": 1863,
+       "dataBytes": 536
+      },
+      {
+       "package": "vendor/golang.org/x/net/http/httpproxy",
+       "symbols": 19,
+       "textBytes": 6321,
+       "dataBytes": 24
+      },
+      {
+       "package": "vendor/golang.org/x/net/http2/hpack",
+       "symbols": 46,
+       "textBytes": 14480,
+       "dataBytes": 1428
+      },
+      {
+       "package": "vendor/golang.org/x/net/idna",
+       "symbols": 30,
+       "textBytes": 15766,
+       "dataBytes": 31992
+      },
+      {
+       "package": "vendor/golang.org/x/sys/cpu",
+       "symbols": 12,
+       "textBytes": 3784,
+       "dataBytes": 230
+      },
+      {
+       "package": "vendor/golang.org/x/text/secure/bidirule",
+       "symbols": 7,
+       "textBytes": 909,
+       "dataBytes": 320
+      },
+      {
+       "package": "vendor/golang.org/x/text/transform",
+       "symbols": 2,
+       "textBytes": 0,
+       "dataBytes": 32
+      },
+      {
+       "package": "vendor/golang.org/x/text/unicode/bidi",
+       "symbols": 6,
+       "textBytes": 1322,
+       "dataBytes": 20736
+      },
+      {
+       "package": "vendor/golang.org/x/text/unicode/norm",
+       "symbols": 63,
+       "textBytes": 25981,
+       "dataBytes": 49850
+      },
+      {
+       "package": "weak",
+       "symbols": 7,
+       "textBytes": 819,
+       "dataBytes": 112
+      }
+     ]
+    },
+    "stripped": {
+     "bytes": 6029472,
+     "sha256": "ca27a04f7af36501911a38871ff9a346cc7411a21bc0a49ae727caf2d788778f",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    }
+   },
+   "js": {
+    "moduleBytes": 27505,
+    "applicationMinified": {
+     "bytes": 11378,
+     "sha256": "1ddea45622bf2dca1ff769ef82d1746e73d5721e248e45df636a5bf44a3724bd"
+    },
+    "deploymentMinified": {
+     "bytes": 40460,
+     "sha256": "33945ce44487a4ca67380d1067102a86f11370133c4db183107c2a1ee5417cc7"
+    },
+    "deploymentDeltaBytes": 29082,
+    "externalRuntime": [
+     {
+      "specifier": "effect",
+      "names": [
+       "Context",
+       "Effect",
+       "Fiber",
+       "Scope",
+       "Exit",
+       "Cause",
+       "Option"
+      ]
+     },
+     {
+      "specifier": "node:dns/promises",
+      "names": [],
+      "dynamic": true
+     },
+     {
+      "specifier": "node:http",
+      "names": [],
+      "dynamic": true
+     },
+     {
+      "specifier": "node:net",
+      "names": [],
+      "dynamic": true
+     }
+    ],
+    "declarationBytes": 5565,
+    "moduleSha256": "08c3875b6f033527de836d00f1369f2bfdf3e8caca9fafe2e7d70e9b38f756bc",
+    "requirements": {
+     "callable-value": 1,
+     "declaration": 4,
+     "function": 2,
+     "operation": 2,
+     "provider": 1,
+     "service": 1
+    }
+   }
+  },
+  "managed": {
+   "expectedOutput": "child joined; interrupted; timed out; recovered\n",
+   "go": {
+    "runtimeModules": [
+     "core"
+    ],
+    "requirements": {
+     "declaration": 1,
+     "function": 5,
+     "helper": 6,
+     "operation": 1,
+     "provider": 2,
+     "runtime-module": 1,
+     "service": 2
+    },
+    "mainBytes": 8607,
+    "runtimeBytes": 54516,
+    "runtimeFiles": [
+     "effect.go",
+     "fiber.go",
+     "managed.go",
+     "report.go",
+     "scheduler.go",
+     "scope.go"
+    ],
+    "imports": {
+     "effra.generated": [
+      "context",
+      "effra.generated/runtime",
+      "fmt",
+      "os",
+      "os/signal",
+      "syscall"
+     ],
+     "effra.generated/runtime": [
+      "context",
+      "errors",
+      "fmt",
+      "math",
+      "sort",
+      "strconv",
+      "strings",
+      "sync",
+      "sync/atomic",
+      "time"
+     ]
+    },
+    "dependencies": {
+     "count": 65,
+     "standard": 63,
+     "nonStandard": [
+      "effra.generated",
+      "effra.generated/runtime"
+     ],
+     "platform": []
+    },
+    "binary": {
+     "bytes": 2859343,
+     "sha256": "ffb24d9918d153d45a2f21879c829987b351f600a6f3e42188c0365b41fc046c",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "symbols": {
+     "tool": "go tool nm -size -type",
+     "count": 3033,
+     "listingSha256": "bee5489839fe32670b58f22879aa90e3fe00ea419ca29ebd7808ce770865dd30",
+     "packages": [
+      {
+       "package": "(constant)",
+       "symbols": 21,
+       "textBytes": 0,
+       "dataBytes": 168
+      },
+      {
+       "package": "(unqualified)",
+       "symbols": 39,
+       "textBytes": 2694,
+       "dataBytes": 712
+      },
+      {
+       "package": "_",
+       "symbols": 1,
+       "textBytes": 50,
+       "dataBytes": 0
+      },
+      {
+       "package": "cmp",
+       "symbols": 2,
+       "textBytes": 0,
+       "dataBytes": 24
+      },
+      {
+       "package": "context",
+       "symbols": 75,
+       "textBytes": 9350,
+       "dataBytes": 180
+      },
+      {
+       "package": "effra.generated/runtime",
+       "symbols": 177,
+       "textBytes": 69804,
+       "dataBytes": 1312
+      },
+      {
+       "package": "errors",
+       "symbols": 9,
+       "textBytes": 988,
+       "dataBytes": 104
+      },
+      {
+       "package": "fmt",
+       "symbols": 62,
+       "textBytes": 39957,
+       "dataBytes": 192
+      },
+      {
+       "package": "go",
+       "symbols": 1,
+       "textBytes": 0,
+       "dataBytes": 0
+      },
+      {
+       "package": "go:",
+       "symbols": 16,
+       "textBytes": 2,
+       "dataBytes": 146918
+      },
+      {
+       "package": "internal/abi",
+       "symbols": 12,
+       "textBytes": 2455,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/bytealg",
+       "symbols": 10,
+       "textBytes": 534,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/chacha8rand",
+       "symbols": 4,
+       "textBytes": 2060,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/cpu",
+       "symbols": 12,
+       "textBytes": 4220,
+       "dataBytes": 208
+      },
+      {
+       "package": "internal/fmtsort",
+       "symbols": 4,
+       "textBytes": 5185,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/godebugs",
+       "symbols": 4,
+       "textBytes": 84,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/oserror",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 80
+      },
+      {
+       "package": "internal/poll",
+       "symbols": 37,
+       "textBytes": 5547,
+       "dataBytes": 156
+      },
+      {
+       "package": "internal/reflectlite",
+       "symbols": 5,
+       "textBytes": 459,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/atomic",
+       "symbols": 4,
+       "textBytes": 138,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/cgroup",
+       "symbols": 25,
+       "textBytes": 9953,
+       "dataBytes": 112
+      },
+      {
+       "package": "internal/runtime/exithook",
+       "symbols": 10,
+       "textBytes": 479,
+       "dataBytes": 60
+      },
+      {
+       "package": "internal/runtime/gc",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 854
+      },
+      {
+       "package": "internal/runtime/gc/scan",
+       "symbols": 236,
+       "textBytes": 4321,
+       "dataBytes": 13553
+      },
+      {
+       "package": "internal/runtime/maps",
+       "symbols": 54,
+       "textBytes": 16573,
+       "dataBytes": 177
+      },
+      {
+       "package": "internal/runtime/sys",
+       "symbols": 2,
+       "textBytes": 110,
+       "dataBytes": 1
+      },
+      {
+       "package": "internal/runtime/syscall/linux",
+       "symbols": 6,
+       "textBytes": 537,
+       "dataBytes": 8
+      },
+      {
+       "package": "internal/strconv",
+       "symbols": 34,
+       "textBytes": 16767,
+       "dataBytes": 11321
+      },
+      {
+       "package": "internal/sync",
+       "symbols": 22,
+       "textBytes": 4448,
+       "dataBytes": 1768
+      },
+      {
+       "package": "internal/synctest",
+       "symbols": 3,
+       "textBytes": 126,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/syscall/unix",
+       "symbols": 4,
+       "textBytes": 688,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/testlog",
+       "symbols": 3,
+       "textBytes": 223,
+       "dataBytes": 12
+      },
+      {
+       "package": "io",
+       "symbols": 3,
+       "textBytes": 0,
+       "dataBytes": 48
+      },
+      {
+       "package": "io/fs",
+       "symbols": 9,
+       "textBytes": 447,
+       "dataBytes": 96
+      },
+      {
+       "package": "iter",
+       "symbols": 3,
+       "textBytes": 85,
+       "dataBytes": 32
+      },
+      {
+       "package": "main",
+       "symbols": 42,
+       "textBytes": 15352,
+       "dataBytes": 464
+      },
+      {
+       "package": "math",
+       "symbols": 3,
+       "textBytes": 27,
+       "dataBytes": 17
+      },
+      {
+       "package": "os",
+       "symbols": 33,
+       "textBytes": 5407,
+       "dataBytes": 249
+      },
+      {
+       "package": "os/signal",
+       "symbols": 34,
+       "textBytes": 6083,
+       "dataBytes": 620
+      },
+      {
+       "package": "reflect",
+       "symbols": 79,
+       "textBytes": 24872,
+       "dataBytes": 160
+      },
+      {
+       "package": "runtime",
+       "symbols": 1633,
+       "textBytes": 444097,
+       "dataBytes": 235231
+      },
+      {
+       "package": "runtime/debug",
+       "symbols": 1,
+       "textBytes": 293,
+       "dataBytes": 0
+      },
+      {
+       "package": "slices",
+       "symbols": 31,
+       "textBytes": 8976,
+       "dataBytes": 392
+      },
+      {
+       "package": "strconv",
+       "symbols": 10,
+       "textBytes": 3731,
+       "dataBytes": 120
+      },
+      {
+       "package": "strings",
+       "symbols": 6,
+       "textBytes": 2129,
+       "dataBytes": 0
+      },
+      {
+       "package": "sync",
+       "symbols": 47,
+       "textBytes": 5967,
+       "dataBytes": 144
+      },
+      {
+       "package": "sync/atomic",
+       "symbols": 14,
+       "textBytes": 544,
+       "dataBytes": 385
+      },
+      {
+       "package": "syscall",
+       "symbols": 50,
+       "textBytes": 6153,
+       "dataBytes": 2816
+      },
+      {
+       "package": "time",
+       "symbols": 70,
+       "textBytes": 42989,
+       "dataBytes": 412
+      },
+      {
+       "package": "type:",
+       "symbols": 42,
+       "textBytes": 4753,
+       "dataBytes": 0
+      },
+      {
+       "package": "unicode",
+       "symbols": 13,
+       "textBytes": 714,
+       "dataBytes": 104
+      },
+      {
+       "package": "unicode/utf8",
+       "symbols": 6,
+       "textBytes": 1313,
+       "dataBytes": 288
+      }
+     ]
+    },
+    "stripped": {
+     "bytes": 1872032,
+     "sha256": "89cf4723b1aeac8b433ff98edeccfcbd0c16d222f5ece36608e680aefa1b2110",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "allSourceCounterfactual": {
+     "dependencies": {
+      "count": 200,
+      "standard": 198,
+      "nonStandard": [
+       "effra.generated",
+       "effra.generated/runtime"
+      ],
+      "platform": [
+       "crypto/tls",
+       "encoding/json",
+       "net",
+       "net/http"
+      ]
+     },
+     "binary": {
+      "bytes": 5738613,
+      "sha256": "83cff90908f9df3881225acdd167e91fe2c0d727026090d9c7dcba9f927f1067",
+      "build": {
+       "goVersion": "go1.27.0",
+       "settings": {
+        "-buildmode": "exe",
+        "-compiler": "gc",
+        "-trimpath": "true",
+        "CGO_ENABLED": "0",
+        "GOAMD64": "v1",
+        "GOARCH": "amd64",
+        "GOOS": "linux"
+       }
+      }
+     },
+     "symbols": {
+      "tool": "go tool nm -size -type",
+      "count": 5554,
+      "listingSha256": "1ec8864c8e4de6ed6e3771e647814177c6b6f14dea2bc47e15d5fc3df68de91d",
+      "packages": [
+       {
+        "package": "(constant)",
+        "symbols": 36,
+        "textBytes": 0,
+        "dataBytes": 288
+       },
+       {
+        "package": "(unqualified)",
+        "symbols": 67,
+        "textBytes": 4781,
+        "dataBytes": 1744
+       },
+       {
+        "package": "_",
+        "symbols": 1,
+        "textBytes": 50,
+        "dataBytes": 0
+       },
+       {
+        "package": "bufio",
+        "symbols": 7,
+        "textBytes": 2583,
+        "dataBytes": 80
+       },
+       {
+        "package": "bytes",
+        "symbols": 1,
+        "textBytes": 504,
+        "dataBytes": 0
+       },
+       {
+        "package": "cmp",
+        "symbols": 4,
+        "textBytes": 0,
+        "dataBytes": 48
+       },
+       {
+        "package": "compress/flate",
+        "symbols": 14,
+        "textBytes": 3866,
+        "dataBytes": 40
+       },
+       {
+        "package": "compress/gzip",
+        "symbols": 2,
+        "textBytes": 1,
+        "dataBytes": 16
+       },
+       {
+        "package": "context",
+        "symbols": 107,
+        "textBytes": 12176,
+        "dataBytes": 196
+       },
+       {
+        "package": "crypto",
+        "symbols": 4,
+        "textBytes": 107,
+        "dataBytes": 64
+       },
+       {
+        "package": "crypto/ecdh",
+        "symbols": 18,
+        "textBytes": 2130,
+        "dataBytes": 32
+       },
+       {
+        "package": "crypto/ecdsa",
+        "symbols": 3,
+        "textBytes": 98,
+        "dataBytes": 24
+       },
+       {
+        "package": "crypto/fips140",
+        "symbols": 4,
+        "textBytes": 112,
+        "dataBytes": 17
+       },
+       {
+        "package": "crypto/hpke",
+        "symbols": 8,
+        "textBytes": 777,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/internal/boring/sig",
+        "symbols": 1,
+        "textBytes": 32,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/internal/entropy/v1%2e0%2e0",
+        "symbols": 9,
+        "textBytes": 2334,
+        "dataBytes": 704
+       },
+       {
+        "package": "crypto/internal/fips140",
+        "symbols": 12,
+        "textBytes": 1425,
+        "dataBytes": 42
+       },
+       {
+        "package": "crypto/internal/fips140/aes",
+        "symbols": 45,
+        "textBytes": 13390,
+        "dataBytes": 8753
+       },
+       {
+        "package": "crypto/internal/fips140/aes/gcm",
+        "symbols": 10,
+        "textBytes": 2118,
+        "dataBytes": 49
+       },
+       {
+        "package": "crypto/internal/fips140/bigmod",
+        "symbols": 28,
+        "textBytes": 19928,
+        "dataBytes": 25
+       },
+       {
+        "package": "crypto/internal/fips140/check",
+        "symbols": 4,
+        "textBytes": 895,
+        "dataBytes": 49
+       },
+       {
+        "package": "crypto/internal/fips140/drbg",
+        "symbols": 18,
+        "textBytes": 4040,
+        "dataBytes": 33554544
+       },
+       {
+        "package": "crypto/internal/fips140/ecdh",
+        "symbols": 43,
+        "textBytes": 9399,
+        "dataBytes": 552
+       },
+       {
+        "package": "crypto/internal/fips140/ecdsa",
+        "symbols": 48,
+        "textBytes": 16171,
+        "dataBytes": 400
+       },
+       {
+        "package": "crypto/internal/fips140/ed25519",
+        "symbols": 9,
+        "textBytes": 4776,
+        "dataBytes": 24
+       },
+       {
+        "package": "crypto/internal/fips140/edwards25519",
+        "symbols": 53,
+        "textBytes": 20529,
+        "dataBytes": 38536
+       },
+       {
+        "package": "crypto/internal/fips140/edwards25519/field",
+        "symbols": 19,
+        "textBytes": 7204,
+        "dataBytes": 40
+       },
+       {
+        "package": "crypto/internal/fips140/hkdf",
+        "symbols": 13,
+        "textBytes": 2942,
+        "dataBytes": 120
+       },
+       {
+        "package": "crypto/internal/fips140/hmac",
+        "symbols": 21,
+        "textBytes": 4122,
+        "dataBytes": 184
+       },
+       {
+        "package": "crypto/internal/fips140/mldsa",
+        "symbols": 60,
+        "textBytes": 39710,
+        "dataBytes": 1312
+       },
+       {
+        "package": "crypto/internal/fips140/mlkem",
+        "symbols": 33,
+        "textBytes": 24177,
+        "dataBytes": 552
+       },
+       {
+        "package": "crypto/internal/fips140/nistec",
+        "symbols": 91,
+        "textBytes": 54749,
+        "dataBytes": 88264
+       },
+       {
+        "package": "crypto/internal/fips140/nistec/fiat",
+        "symbols": 29,
+        "textBytes": 45992,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/internal/fips140/rsa",
+        "symbols": 19,
+        "textBytes": 12433,
+        "dataBytes": 120
+       },
+       {
+        "package": "crypto/internal/fips140/sha256",
+        "symbols": 22,
+        "textBytes": 10252,
+        "dataBytes": 290
+       },
+       {
+        "package": "crypto/internal/fips140/sha3",
+        "symbols": 20,
+        "textBytes": 25103,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/internal/fips140/sha512",
+        "symbols": 20,
+        "textBytes": 9549,
+        "dataBytes": 673
+       },
+       {
+        "package": "crypto/internal/fips140/subtle",
+        "symbols": 3,
+        "textBytes": 877,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/internal/fips140/tls12",
+        "symbols": 9,
+        "textBytes": 1833,
+        "dataBytes": 88
+       },
+       {
+        "package": "crypto/internal/fips140/tls13",
+        "symbols": 19,
+        "textBytes": 3459,
+        "dataBytes": 216
+       },
+       {
+        "package": "crypto/internal/fips140deps/cpu",
+        "symbols": 28,
+        "textBytes": 339,
+        "dataBytes": 42
+       },
+       {
+        "package": "crypto/internal/fips140deps/time",
+        "symbols": 1,
+        "textBytes": 27,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/internal/impl",
+        "symbols": 2,
+        "textBytes": 453,
+        "dataBytes": 24
+       },
+       {
+        "package": "crypto/internal/rand",
+        "symbols": 3,
+        "textBytes": 197,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/internal/sysrand",
+        "symbols": 12,
+        "textBytes": 1279,
+        "dataBytes": 41
+       },
+       {
+        "package": "crypto/md5",
+        "symbols": 12,
+        "textBytes": 4770,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/mlkem",
+        "symbols": 4,
+        "textBytes": 764,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/rand",
+        "symbols": 3,
+        "textBytes": 75,
+        "dataBytes": 32
+       },
+       {
+        "package": "crypto/rsa",
+        "symbols": 3,
+        "textBytes": 165,
+        "dataBytes": 24
+       },
+       {
+        "package": "crypto/sha1",
+        "symbols": 19,
+        "textBytes": 11804,
+        "dataBytes": 34
+       },
+       {
+        "package": "crypto/sha256",
+        "symbols": 4,
+        "textBytes": 277,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/sha3",
+        "symbols": 13,
+        "textBytes": 4528,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/sha512",
+        "symbols": 6,
+        "textBytes": 581,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/tls",
+        "symbols": 9,
+        "textBytes": 666,
+        "dataBytes": 37
+       },
+       {
+        "package": "crypto/tls/internal/fips140tls",
+        "symbols": 3,
+        "textBytes": 87,
+        "dataBytes": 20
+       },
+       {
+        "package": "crypto/x509",
+        "symbols": 43,
+        "textBytes": 5381,
+        "dataBytes": 1352
+       },
+       {
+        "package": "crypto/x509/pkix",
+        "symbols": 2,
+        "textBytes": 24,
+        "dataBytes": 16
+       },
+       {
+        "package": "effra.generated/runtime",
+        "symbols": 178,
+        "textBytes": 70162,
+        "dataBytes": 1312
+       },
+       {
+        "package": "encoding/asn1",
+        "symbols": 14,
+        "textBytes": 1289,
+        "dataBytes": 224
+       },
+       {
+        "package": "encoding/base32",
+        "symbols": 14,
+        "textBytes": 4046,
+        "dataBytes": 32
+       },
+       {
+        "package": "encoding/base64",
+        "symbols": 16,
+        "textBytes": 5425,
+        "dataBytes": 48
+       },
+       {
+        "package": "encoding/json",
+        "symbols": 24,
+        "textBytes": 5848,
+        "dataBytes": 112
+       },
+       {
+        "package": "encoding/json/internal",
+        "symbols": 8,
+        "textBytes": 0,
+        "dataBytes": 88
+       },
+       {
+        "package": "encoding/json/internal/jsonopts",
+        "symbols": 4,
+        "textBytes": 128,
+        "dataBytes": 16
+       },
+       {
+        "package": "encoding/json/internal/jsonwire",
+        "symbols": 8,
+        "textBytes": 8452,
+        "dataBytes": 40
+       },
+       {
+        "package": "encoding/json/jsontext",
+        "symbols": 22,
+        "textBytes": 2380,
+        "dataBytes": 148
+       },
+       {
+        "package": "encoding/json/v2",
+        "symbols": 46,
+        "textBytes": 4003,
+        "dataBytes": 520
+       },
+       {
+        "package": "errors",
+        "symbols": 10,
+        "textBytes": 1123,
+        "dataBytes": 104
+       },
+       {
+        "package": "fmt",
+        "symbols": 66,
+        "textBytes": 40323,
+        "dataBytes": 192
+       },
+       {
+        "package": "go",
+        "symbols": 1,
+        "textBytes": 0,
+        "dataBytes": 0
+       },
+       {
+        "package": "go:",
+        "symbols": 18,
+        "textBytes": 163,
+        "dataBytes": 243374
+       },
+       {
+        "package": "hash",
+        "symbols": 1,
+        "textBytes": 67,
+        "dataBytes": 0
+       },
+       {
+        "package": "hash/crc32",
+        "symbols": 26,
+        "textBytes": 4246,
+        "dataBytes": 108
+       },
+       {
+        "package": "internal/abi",
+        "symbols": 20,
+        "textBytes": 2466,
+        "dataBytes": 153
+       },
+       {
+        "package": "internal/bisect",
+        "symbols": 8,
+        "textBytes": 7998,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/bytealg",
+        "symbols": 20,
+        "textBytes": 1806,
+        "dataBytes": 88
+       },
+       {
+        "package": "internal/chacha8rand",
+        "symbols": 4,
+        "textBytes": 2060,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/cpu",
+        "symbols": 16,
+        "textBytes": 4220,
+        "dataBytes": 774
+       },
+       {
+        "package": "internal/filepathlite",
+        "symbols": 1,
+        "textBytes": 134,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/fmtsort",
+        "symbols": 4,
+        "textBytes": 5185,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/godebug",
+        "symbols": 23,
+        "textBytes": 4142,
+        "dataBytes": 96
+       },
+       {
+        "package": "internal/godebugs",
+        "symbols": 5,
+        "textBytes": 84,
+        "dataBytes": 48
+       },
+       {
+        "package": "internal/oserror",
+        "symbols": 5,
+        "textBytes": 0,
+        "dataBytes": 80
+       },
+       {
+        "package": "internal/poll",
+        "symbols": 55,
+        "textBytes": 9394,
+        "dataBytes": 156
+       },
+       {
+        "package": "internal/reflectlite",
+        "symbols": 7,
+        "textBytes": 680,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/runtime/atomic",
+        "symbols": 4,
+        "textBytes": 138,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/runtime/cgroup",
+        "symbols": 25,
+        "textBytes": 9953,
+        "dataBytes": 112
+       },
+       {
+        "package": "internal/runtime/exithook",
+        "symbols": 10,
+        "textBytes": 479,
+        "dataBytes": 60
+       },
+       {
+        "package": "internal/runtime/gc",
+        "symbols": 5,
+        "textBytes": 0,
+        "dataBytes": 854
+       },
+       {
+        "package": "internal/runtime/gc/scan",
+        "symbols": 236,
+        "textBytes": 4321,
+        "dataBytes": 13553
+       },
+       {
+        "package": "internal/runtime/maps",
+        "symbols": 54,
+        "textBytes": 16573,
+        "dataBytes": 177
+       },
+       {
+        "package": "internal/runtime/sys",
+        "symbols": 2,
+        "textBytes": 110,
+        "dataBytes": 1
+       },
+       {
+        "package": "internal/runtime/syscall/linux",
+        "symbols": 6,
+        "textBytes": 537,
+        "dataBytes": 8
+       },
+       {
+        "package": "internal/singleflight",
+        "symbols": 5,
+        "textBytes": 1743,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/strconv",
+        "symbols": 35,
+        "textBytes": 17043,
+        "dataBytes": 11321
+       },
+       {
+        "package": "internal/stringslite",
+        "symbols": 3,
+        "textBytes": 1386,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/sync",
+        "symbols": 39,
+        "textBytes": 9196,
+        "dataBytes": 3536
+       },
+       {
+        "package": "internal/synctest",
+        "symbols": 4,
+        "textBytes": 186,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/syscall/unix",
+        "symbols": 6,
+        "textBytes": 953,
+        "dataBytes": 4
+       },
+       {
+        "package": "internal/testlog",
+        "symbols": 7,
+        "textBytes": 532,
+        "dataBytes": 20
+       },
+       {
+        "package": "io",
+        "symbols": 19,
+        "textBytes": 774,
+        "dataBytes": 96
+       },
+       {
+        "package": "io/fs",
+        "symbols": 15,
+        "textBytes": 1132,
+        "dataBytes": 152
+       },
+       {
+        "package": "iter",
+        "symbols": 3,
+        "textBytes": 85,
+        "dataBytes": 32
+       },
+       {
+        "package": "log",
+        "symbols": 16,
+        "textBytes": 7959,
+        "dataBytes": 72
+       },
+       {
+        "package": "log/internal",
+        "symbols": 1,
+        "textBytes": 0,
+        "dataBytes": 8
+       },
+       {
+        "package": "main",
+        "symbols": 42,
+        "textBytes": 15352,
+        "dataBytes": 464
+       },
+       {
+        "package": "maps",
+        "symbols": 2,
+        "textBytes": 150,
+        "dataBytes": 56
+       },
+       {
+        "package": "math",
+        "symbols": 6,
+        "textBytes": 724,
+        "dataBytes": 17
+       },
+       {
+        "package": "math/big",
+        "symbols": 94,
+        "textBytes": 59074,
+        "dataBytes": 2793
+       },
+       {
+        "package": "mime",
+        "symbols": 31,
+        "textBytes": 15363,
+        "dataBytes": 336
+       },
+       {
+        "package": "mime/multipart",
+        "symbols": 4,
+        "textBytes": 428,
+        "dataBytes": 32
+       },
+       {
+        "package": "net",
+        "symbols": 357,
+        "textBytes": 121258,
+        "dataBytes": 1358
+       },
+       {
+        "package": "net/http",
+        "symbols": 36,
+        "textBytes": 3510,
+        "dataBytes": 341
+       },
+       {
+        "package": "net/http/internal",
+        "symbols": 5,
+        "textBytes": 0,
+        "dataBytes": 80
+       },
+       {
+        "package": "net/http/internal/http2",
+        "symbols": 25,
+        "textBytes": 1208,
+        "dataBytes": 245
+       },
+       {
+        "package": "net/http/internal/httpcommon",
+        "symbols": 1,
+        "textBytes": 0,
+        "dataBytes": 16
+       },
+       {
+        "package": "net/netip",
+        "symbols": 25,
+        "textBytes": 11599,
+        "dataBytes": 40
+       },
+       {
+        "package": "net/url",
+        "symbols": 22,
+        "textBytes": 9820,
+        "dataBytes": 312
+       },
+       {
+        "package": "os",
+        "symbols": 55,
+        "textBytes": 9028,
+        "dataBytes": 273
+       },
+       {
+        "package": "os/signal",
+        "symbols": 36,
+        "textBytes": 6248,
+        "dataBytes": 620
+       },
+       {
+        "package": "path/filepath",
+        "symbols": 4,
+        "textBytes": 138,
+        "dataBytes": 48
+       },
+       {
+        "package": "reflect",
+        "symbols": 80,
+        "textBytes": 25037,
+        "dataBytes": 160
+       },
+       {
+        "package": "runtime",
+        "symbols": 1753,
+        "textBytes": 464001,
+        "dataBytes": 240122
+       },
+       {
+        "package": "runtime/debug",
+        "symbols": 1,
+        "textBytes": 293,
+        "dataBytes": 0
+       },
+       {
+        "package": "slices",
+        "symbols": 90,
+        "textBytes": 29288,
+        "dataBytes": 1248
+       },
+       {
+        "package": "strconv",
+        "symbols": 12,
+        "textBytes": 3731,
+        "dataBytes": 152
+       },
+       {
+        "package": "strings",
+        "symbols": 44,
+        "textBytes": 22103,
+        "dataBytes": 280
+       },
+       {
+        "package": "sync",
+        "symbols": 64,
+        "textBytes": 7819,
+        "dataBytes": 336
+       },
+       {
+        "package": "sync/atomic",
+        "symbols": 23,
+        "textBytes": 558,
+        "dataBytes": 1153
+       },
+       {
+        "package": "syscall",
+        "symbols": 90,
+        "textBytes": 15191,
+        "dataBytes": 2825
+       },
+       {
+        "package": "time",
+        "symbols": 93,
+        "textBytes": 48948,
+        "dataBytes": 448
+       },
+       {
+        "package": "type:",
+        "symbols": 81,
+        "textBytes": 10689,
+        "dataBytes": 0
+       },
+       {
+        "package": "unicode",
+        "symbols": 25,
+        "textBytes": 2084,
+        "dataBytes": 416
+       },
+       {
+        "package": "unicode/utf8",
+        "symbols": 7,
+        "textBytes": 1597,
+        "dataBytes": 288
+       },
+       {
+        "package": "unique",
+        "symbols": 27,
+        "textBytes": 5367,
+        "dataBytes": 960
+       },
+       {
+        "package": "vendor/golang.org/x/crypto/chacha20poly1305",
+        "symbols": 3,
+        "textBytes": 36,
+        "dataBytes": 17
+       },
+       {
+        "package": "vendor/golang.org/x/crypto/cryptobyte",
+        "symbols": 3,
+        "textBytes": 165,
+        "dataBytes": 24
+       },
+       {
+        "package": "vendor/golang.org/x/net/dns/dnsmessage",
+        "symbols": 45,
+        "textBytes": 16318,
+        "dataBytes": 328
+       },
+       {
+        "package": "vendor/golang.org/x/net/http/httpguts",
+        "symbols": 2,
+        "textBytes": 24,
+        "dataBytes": 16
+       },
+       {
+        "package": "vendor/golang.org/x/net/http/httpproxy",
+        "symbols": 19,
+        "textBytes": 6321,
+        "dataBytes": 24
+       },
+       {
+        "package": "vendor/golang.org/x/net/http2/hpack",
+        "symbols": 2,
+        "textBytes": 330,
+        "dataBytes": 16
+       },
+       {
+        "package": "vendor/golang.org/x/net/idna",
+        "symbols": 30,
+        "textBytes": 15766,
+        "dataBytes": 31992
+       },
+       {
+        "package": "vendor/golang.org/x/sys/cpu",
+        "symbols": 12,
+        "textBytes": 3784,
+        "dataBytes": 230
+       },
+       {
+        "package": "vendor/golang.org/x/text/secure/bidirule",
+        "symbols": 7,
+        "textBytes": 909,
+        "dataBytes": 320
+       },
+       {
+        "package": "vendor/golang.org/x/text/transform",
+        "symbols": 2,
+        "textBytes": 0,
+        "dataBytes": 32
+       },
+       {
+        "package": "vendor/golang.org/x/text/unicode/bidi",
+        "symbols": 6,
+        "textBytes": 1322,
+        "dataBytes": 20736
+       },
+       {
+        "package": "vendor/golang.org/x/text/unicode/norm",
+        "symbols": 63,
+        "textBytes": 25981,
+        "dataBytes": 49850
+       },
+       {
+        "package": "weak",
+        "symbols": 5,
+        "textBytes": 685,
+        "dataBytes": 72
+       }
+      ]
+     },
+     "stripped": {
+      "bytes": 3874976,
+      "sha256": "a1329496759754b22d08a22c62cb1e188aa7a12cbeda90b2c4b996885306f973",
+      "build": {
+       "goVersion": "go1.27.0",
+       "settings": {
+        "-buildmode": "exe",
+        "-compiler": "gc",
+        "-trimpath": "true",
+        "CGO_ENABLED": "0",
+        "GOAMD64": "v1",
+        "GOARCH": "amd64",
+        "GOOS": "linux"
+       }
+      }
+     }
+    }
+   },
+   "js": {
+    "moduleBytes": 16053,
+    "applicationMinified": {
+     "bytes": 7209,
+     "sha256": "290134df5abe1183f09fde75c8d5756fab1715bb97fdc482efccc7407e61ff98"
+    },
+    "deploymentMinified": {
+     "bytes": 37189,
+     "sha256": "8ef3c6ce032fd901480ac7a88271d96477c145675f758b4dded3baf0225d7b9a"
+    },
+    "deploymentDeltaBytes": 29980,
+    "externalRuntime": [
+     {
+      "specifier": "effect",
+      "names": [
+       "Context",
+       "Effect",
+       "Fiber",
+       "Scope",
+       "Exit",
+       "Cause",
+       "Option"
+      ]
+     }
+    ],
+    "declarationBytes": 4304,
+    "moduleSha256": "4763aeb7d48bb1b6a641383681410b69de8d546340b3a094e9c44b902227c451",
+    "requirements": {
+     "declaration": 1,
+     "function": 5,
+     "helper": 6,
+     "operation": 1,
+     "provider": 2,
+     "service": 2
+    }
+   }
+  },
+  "minimal": {
+   "expectedOutput": "minimal\n",
+   "go": {
+    "runtimeModules": [
+     "core"
+    ],
+    "requirements": {
+     "function": 1,
+     "runtime-module": 1
+    },
+    "mainBytes": 1406,
+    "runtimeBytes": 54516,
+    "runtimeFiles": [
+     "effect.go",
+     "fiber.go",
+     "managed.go",
+     "report.go",
+     "scheduler.go",
+     "scope.go"
+    ],
+    "imports": {
+     "effra.generated": [
+      "context",
+      "effra.generated/runtime",
+      "fmt",
+      "os",
+      "os/signal",
+      "syscall"
+     ],
+     "effra.generated/runtime": [
+      "context",
+      "errors",
+      "fmt",
+      "math",
+      "sort",
+      "strconv",
+      "strings",
+      "sync",
+      "sync/atomic",
+      "time"
+     ]
+    },
+    "dependencies": {
+     "count": 65,
+     "standard": 63,
+     "nonStandard": [
+      "effra.generated",
+      "effra.generated/runtime"
+     ],
+     "platform": []
+    },
+    "binary": {
+     "bytes": 2703440,
+     "sha256": "99643af0378d3013eaadb5faad3671c8b217f0adbce54cfc50dbf38909defd02",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "symbols": {
+     "tool": "go tool nm -size -type",
+     "count": 2864,
+     "listingSha256": "df806def990f6f4bfaaa0c81837ae333d94cc351e6e4a7ddcdf7dabaad565145",
+     "packages": [
+      {
+       "package": "(constant)",
+       "symbols": 21,
+       "textBytes": 0,
+       "dataBytes": 168
+      },
+      {
+       "package": "(unqualified)",
+       "symbols": 39,
+       "textBytes": 2694,
+       "dataBytes": 712
+      },
+      {
+       "package": "_",
+       "symbols": 1,
+       "textBytes": 50,
+       "dataBytes": 0
+      },
+      {
+       "package": "cmp",
+       "symbols": 2,
+       "textBytes": 0,
+       "dataBytes": 24
+      },
+      {
+       "package": "context",
+       "symbols": 75,
+       "textBytes": 9350,
+       "dataBytes": 180
+      },
+      {
+       "package": "effra.generated/runtime",
+       "symbols": 56,
+       "textBytes": 28708,
+       "dataBytes": 296
+      },
+      {
+       "package": "errors",
+       "symbols": 9,
+       "textBytes": 988,
+       "dataBytes": 104
+      },
+      {
+       "package": "fmt",
+       "symbols": 61,
+       "textBytes": 39760,
+       "dataBytes": 192
+      },
+      {
+       "package": "go",
+       "symbols": 1,
+       "textBytes": 0,
+       "dataBytes": 0
+      },
+      {
+       "package": "go:",
+       "symbols": 16,
+       "textBytes": 2,
+       "dataBytes": 141054
+      },
+      {
+       "package": "internal/abi",
+       "symbols": 12,
+       "textBytes": 2455,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/bytealg",
+       "symbols": 10,
+       "textBytes": 534,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/chacha8rand",
+       "symbols": 4,
+       "textBytes": 2060,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/cpu",
+       "symbols": 12,
+       "textBytes": 4220,
+       "dataBytes": 208
+      },
+      {
+       "package": "internal/fmtsort",
+       "symbols": 4,
+       "textBytes": 5185,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/godebugs",
+       "symbols": 4,
+       "textBytes": 84,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/oserror",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 80
+      },
+      {
+       "package": "internal/poll",
+       "symbols": 37,
+       "textBytes": 5547,
+       "dataBytes": 156
+      },
+      {
+       "package": "internal/reflectlite",
+       "symbols": 5,
+       "textBytes": 459,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/atomic",
+       "symbols": 4,
+       "textBytes": 138,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/cgroup",
+       "symbols": 25,
+       "textBytes": 9953,
+       "dataBytes": 112
+      },
+      {
+       "package": "internal/runtime/exithook",
+       "symbols": 10,
+       "textBytes": 479,
+       "dataBytes": 60
+      },
+      {
+       "package": "internal/runtime/gc",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 854
+      },
+      {
+       "package": "internal/runtime/gc/scan",
+       "symbols": 236,
+       "textBytes": 4321,
+       "dataBytes": 13553
+      },
+      {
+       "package": "internal/runtime/maps",
+       "symbols": 54,
+       "textBytes": 16573,
+       "dataBytes": 177
+      },
+      {
+       "package": "internal/runtime/sys",
+       "symbols": 2,
+       "textBytes": 110,
+       "dataBytes": 1
+      },
+      {
+       "package": "internal/runtime/syscall/linux",
+       "symbols": 6,
+       "textBytes": 537,
+       "dataBytes": 8
+      },
+      {
+       "package": "internal/strconv",
+       "symbols": 34,
+       "textBytes": 16767,
+       "dataBytes": 11321
+      },
+      {
+       "package": "internal/sync",
+       "symbols": 22,
+       "textBytes": 4448,
+       "dataBytes": 1768
+      },
+      {
+       "package": "internal/synctest",
+       "symbols": 3,
+       "textBytes": 126,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/syscall/unix",
+       "symbols": 4,
+       "textBytes": 688,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/testlog",
+       "symbols": 3,
+       "textBytes": 223,
+       "dataBytes": 12
+      },
+      {
+       "package": "io",
+       "symbols": 3,
+       "textBytes": 0,
+       "dataBytes": 48
+      },
+      {
+       "package": "io/fs",
+       "symbols": 9,
+       "textBytes": 447,
+       "dataBytes": 96
+      },
+      {
+       "package": "iter",
+       "symbols": 3,
+       "textBytes": 85,
+       "dataBytes": 32
+      },
+      {
+       "package": "main",
+       "symbols": 5,
+       "textBytes": 2361,
+       "dataBytes": 48
+      },
+      {
+       "package": "math",
+       "symbols": 3,
+       "textBytes": 27,
+       "dataBytes": 17
+      },
+      {
+       "package": "os",
+       "symbols": 33,
+       "textBytes": 5407,
+       "dataBytes": 249
+      },
+      {
+       "package": "os/signal",
+       "symbols": 34,
+       "textBytes": 6083,
+       "dataBytes": 620
+      },
+      {
+       "package": "reflect",
+       "symbols": 79,
+       "textBytes": 24872,
+       "dataBytes": 160
+      },
+      {
+       "package": "runtime",
+       "symbols": 1633,
+       "textBytes": 444097,
+       "dataBytes": 234944
+      },
+      {
+       "package": "runtime/debug",
+       "symbols": 1,
+       "textBytes": 293,
+       "dataBytes": 0
+      },
+      {
+       "package": "slices",
+       "symbols": 31,
+       "textBytes": 8976,
+       "dataBytes": 392
+      },
+      {
+       "package": "strconv",
+       "symbols": 10,
+       "textBytes": 3731,
+       "dataBytes": 120
+      },
+      {
+       "package": "strings",
+       "symbols": 6,
+       "textBytes": 2129,
+       "dataBytes": 0
+      },
+      {
+       "package": "sync",
+       "symbols": 46,
+       "textBytes": 5900,
+       "dataBytes": 144
+      },
+      {
+       "package": "sync/atomic",
+       "symbols": 14,
+       "textBytes": 544,
+       "dataBytes": 385
+      },
+      {
+       "package": "syscall",
+       "symbols": 50,
+       "textBytes": 6153,
+       "dataBytes": 2816
+      },
+      {
+       "package": "time",
+       "symbols": 61,
+       "textBytes": 41488,
+       "dataBytes": 412
+      },
+      {
+       "package": "type:",
+       "symbols": 42,
+       "textBytes": 4753,
+       "dataBytes": 0
+      },
+      {
+       "package": "unicode",
+       "symbols": 13,
+       "textBytes": 714,
+       "dataBytes": 104
+      },
+      {
+       "package": "unicode/utf8",
+       "symbols": 6,
+       "textBytes": 1313,
+       "dataBytes": 288
+      }
+     ]
+    },
+    "stripped": {
+     "bytes": 1757344,
+     "sha256": "80925b99294aae44e7321523617fead13de4a504fdf4e844791e038a6beee0fb",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "allSourceCounterfactual": {
+     "dependencies": {
+      "count": 200,
+      "standard": 198,
+      "nonStandard": [
+       "effra.generated",
+       "effra.generated/runtime"
+      ],
+      "platform": [
+       "crypto/tls",
+       "encoding/json",
+       "net",
+       "net/http"
+      ]
+     },
+     "binary": {
+      "bytes": 5596034,
+      "sha256": "c944c1da120b2ccd7ab856cafbb71eae842a339b3aefb733a964b403c8ab0719",
+      "build": {
+       "goVersion": "go1.27.0",
+       "settings": {
+        "-buildmode": "exe",
+        "-compiler": "gc",
+        "-trimpath": "true",
+        "CGO_ENABLED": "0",
+        "GOAMD64": "v1",
+        "GOARCH": "amd64",
+        "GOOS": "linux"
+       }
+      }
+     },
+     "symbols": {
+      "tool": "go tool nm -size -type",
+      "count": 5395,
+      "listingSha256": "68faed4f345460dd8040181878ff2fad6c10c4ccbf85d137265783e8089eb6bb",
+      "packages": [
+       {
+        "package": "(constant)",
+        "symbols": 36,
+        "textBytes": 0,
+        "dataBytes": 288
+       },
+       {
+        "package": "(unqualified)",
+        "symbols": 67,
+        "textBytes": 4781,
+        "dataBytes": 1744
+       },
+       {
+        "package": "_",
+        "symbols": 1,
+        "textBytes": 50,
+        "dataBytes": 0
+       },
+       {
+        "package": "bufio",
+        "symbols": 7,
+        "textBytes": 2583,
+        "dataBytes": 80
+       },
+       {
+        "package": "bytes",
+        "symbols": 1,
+        "textBytes": 504,
+        "dataBytes": 0
+       },
+       {
+        "package": "cmp",
+        "symbols": 4,
+        "textBytes": 0,
+        "dataBytes": 48
+       },
+       {
+        "package": "compress/flate",
+        "symbols": 14,
+        "textBytes": 3866,
+        "dataBytes": 40
+       },
+       {
+        "package": "compress/gzip",
+        "symbols": 2,
+        "textBytes": 1,
+        "dataBytes": 16
+       },
+       {
+        "package": "context",
+        "symbols": 107,
+        "textBytes": 12176,
+        "dataBytes": 196
+       },
+       {
+        "package": "crypto",
+        "symbols": 4,
+        "textBytes": 107,
+        "dataBytes": 64
+       },
+       {
+        "package": "crypto/ecdh",
+        "symbols": 18,
+        "textBytes": 2130,
+        "dataBytes": 32
+       },
+       {
+        "package": "crypto/ecdsa",
+        "symbols": 3,
+        "textBytes": 98,
+        "dataBytes": 24
+       },
+       {
+        "package": "crypto/fips140",
+        "symbols": 4,
+        "textBytes": 112,
+        "dataBytes": 17
+       },
+       {
+        "package": "crypto/hpke",
+        "symbols": 8,
+        "textBytes": 777,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/internal/boring/sig",
+        "symbols": 1,
+        "textBytes": 32,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/internal/entropy/v1%2e0%2e0",
+        "symbols": 9,
+        "textBytes": 2334,
+        "dataBytes": 704
+       },
+       {
+        "package": "crypto/internal/fips140",
+        "symbols": 12,
+        "textBytes": 1425,
+        "dataBytes": 42
+       },
+       {
+        "package": "crypto/internal/fips140/aes",
+        "symbols": 45,
+        "textBytes": 13390,
+        "dataBytes": 8753
+       },
+       {
+        "package": "crypto/internal/fips140/aes/gcm",
+        "symbols": 10,
+        "textBytes": 2118,
+        "dataBytes": 49
+       },
+       {
+        "package": "crypto/internal/fips140/bigmod",
+        "symbols": 28,
+        "textBytes": 19928,
+        "dataBytes": 25
+       },
+       {
+        "package": "crypto/internal/fips140/check",
+        "symbols": 4,
+        "textBytes": 895,
+        "dataBytes": 49
+       },
+       {
+        "package": "crypto/internal/fips140/drbg",
+        "symbols": 18,
+        "textBytes": 4040,
+        "dataBytes": 33554544
+       },
+       {
+        "package": "crypto/internal/fips140/ecdh",
+        "symbols": 43,
+        "textBytes": 9399,
+        "dataBytes": 552
+       },
+       {
+        "package": "crypto/internal/fips140/ecdsa",
+        "symbols": 48,
+        "textBytes": 16171,
+        "dataBytes": 400
+       },
+       {
+        "package": "crypto/internal/fips140/ed25519",
+        "symbols": 9,
+        "textBytes": 4776,
+        "dataBytes": 24
+       },
+       {
+        "package": "crypto/internal/fips140/edwards25519",
+        "symbols": 53,
+        "textBytes": 20529,
+        "dataBytes": 38536
+       },
+       {
+        "package": "crypto/internal/fips140/edwards25519/field",
+        "symbols": 19,
+        "textBytes": 7204,
+        "dataBytes": 40
+       },
+       {
+        "package": "crypto/internal/fips140/hkdf",
+        "symbols": 13,
+        "textBytes": 2942,
+        "dataBytes": 120
+       },
+       {
+        "package": "crypto/internal/fips140/hmac",
+        "symbols": 21,
+        "textBytes": 4122,
+        "dataBytes": 184
+       },
+       {
+        "package": "crypto/internal/fips140/mldsa",
+        "symbols": 60,
+        "textBytes": 39710,
+        "dataBytes": 1312
+       },
+       {
+        "package": "crypto/internal/fips140/mlkem",
+        "symbols": 33,
+        "textBytes": 24177,
+        "dataBytes": 552
+       },
+       {
+        "package": "crypto/internal/fips140/nistec",
+        "symbols": 91,
+        "textBytes": 54749,
+        "dataBytes": 88264
+       },
+       {
+        "package": "crypto/internal/fips140/nistec/fiat",
+        "symbols": 29,
+        "textBytes": 45992,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/internal/fips140/rsa",
+        "symbols": 19,
+        "textBytes": 12433,
+        "dataBytes": 120
+       },
+       {
+        "package": "crypto/internal/fips140/sha256",
+        "symbols": 22,
+        "textBytes": 10252,
+        "dataBytes": 290
+       },
+       {
+        "package": "crypto/internal/fips140/sha3",
+        "symbols": 20,
+        "textBytes": 25103,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/internal/fips140/sha512",
+        "symbols": 20,
+        "textBytes": 9549,
+        "dataBytes": 673
+       },
+       {
+        "package": "crypto/internal/fips140/subtle",
+        "symbols": 3,
+        "textBytes": 877,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/internal/fips140/tls12",
+        "symbols": 9,
+        "textBytes": 1833,
+        "dataBytes": 88
+       },
+       {
+        "package": "crypto/internal/fips140/tls13",
+        "symbols": 19,
+        "textBytes": 3459,
+        "dataBytes": 216
+       },
+       {
+        "package": "crypto/internal/fips140deps/cpu",
+        "symbols": 28,
+        "textBytes": 339,
+        "dataBytes": 42
+       },
+       {
+        "package": "crypto/internal/fips140deps/time",
+        "symbols": 1,
+        "textBytes": 27,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/internal/impl",
+        "symbols": 2,
+        "textBytes": 453,
+        "dataBytes": 24
+       },
+       {
+        "package": "crypto/internal/rand",
+        "symbols": 3,
+        "textBytes": 197,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/internal/sysrand",
+        "symbols": 12,
+        "textBytes": 1279,
+        "dataBytes": 41
+       },
+       {
+        "package": "crypto/md5",
+        "symbols": 12,
+        "textBytes": 4770,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/mlkem",
+        "symbols": 4,
+        "textBytes": 764,
+        "dataBytes": 0
+       },
+       {
+        "package": "crypto/rand",
+        "symbols": 3,
+        "textBytes": 75,
+        "dataBytes": 32
+       },
+       {
+        "package": "crypto/rsa",
+        "symbols": 3,
+        "textBytes": 165,
+        "dataBytes": 24
+       },
+       {
+        "package": "crypto/sha1",
+        "symbols": 19,
+        "textBytes": 11804,
+        "dataBytes": 34
+       },
+       {
+        "package": "crypto/sha256",
+        "symbols": 4,
+        "textBytes": 277,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/sha3",
+        "symbols": 13,
+        "textBytes": 4528,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/sha512",
+        "symbols": 6,
+        "textBytes": 581,
+        "dataBytes": 16
+       },
+       {
+        "package": "crypto/tls",
+        "symbols": 9,
+        "textBytes": 666,
+        "dataBytes": 37
+       },
+       {
+        "package": "crypto/tls/internal/fips140tls",
+        "symbols": 3,
+        "textBytes": 87,
+        "dataBytes": 20
+       },
+       {
+        "package": "crypto/x509",
+        "symbols": 43,
+        "textBytes": 5381,
+        "dataBytes": 1352
+       },
+       {
+        "package": "crypto/x509/pkix",
+        "symbols": 2,
+        "textBytes": 24,
+        "dataBytes": 16
+       },
+       {
+        "package": "effra.generated/runtime",
+        "symbols": 57,
+        "textBytes": 29066,
+        "dataBytes": 296
+       },
+       {
+        "package": "encoding/asn1",
+        "symbols": 14,
+        "textBytes": 1289,
+        "dataBytes": 224
+       },
+       {
+        "package": "encoding/base32",
+        "symbols": 14,
+        "textBytes": 4046,
+        "dataBytes": 32
+       },
+       {
+        "package": "encoding/base64",
+        "symbols": 16,
+        "textBytes": 5425,
+        "dataBytes": 48
+       },
+       {
+        "package": "encoding/json",
+        "symbols": 24,
+        "textBytes": 5848,
+        "dataBytes": 112
+       },
+       {
+        "package": "encoding/json/internal",
+        "symbols": 8,
+        "textBytes": 0,
+        "dataBytes": 88
+       },
+       {
+        "package": "encoding/json/internal/jsonopts",
+        "symbols": 4,
+        "textBytes": 128,
+        "dataBytes": 16
+       },
+       {
+        "package": "encoding/json/internal/jsonwire",
+        "symbols": 8,
+        "textBytes": 8452,
+        "dataBytes": 40
+       },
+       {
+        "package": "encoding/json/jsontext",
+        "symbols": 22,
+        "textBytes": 2380,
+        "dataBytes": 148
+       },
+       {
+        "package": "encoding/json/v2",
+        "symbols": 46,
+        "textBytes": 4003,
+        "dataBytes": 520
+       },
+       {
+        "package": "errors",
+        "symbols": 10,
+        "textBytes": 1123,
+        "dataBytes": 104
+       },
+       {
+        "package": "fmt",
+        "symbols": 65,
+        "textBytes": 40126,
+        "dataBytes": 192
+       },
+       {
+        "package": "go",
+        "symbols": 1,
+        "textBytes": 0,
+        "dataBytes": 0
+       },
+       {
+        "package": "go:",
+        "symbols": 18,
+        "textBytes": 163,
+        "dataBytes": 237710
+       },
+       {
+        "package": "hash",
+        "symbols": 1,
+        "textBytes": 67,
+        "dataBytes": 0
+       },
+       {
+        "package": "hash/crc32",
+        "symbols": 26,
+        "textBytes": 4246,
+        "dataBytes": 108
+       },
+       {
+        "package": "internal/abi",
+        "symbols": 20,
+        "textBytes": 2466,
+        "dataBytes": 153
+       },
+       {
+        "package": "internal/bisect",
+        "symbols": 8,
+        "textBytes": 7998,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/bytealg",
+        "symbols": 20,
+        "textBytes": 1806,
+        "dataBytes": 88
+       },
+       {
+        "package": "internal/chacha8rand",
+        "symbols": 4,
+        "textBytes": 2060,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/cpu",
+        "symbols": 16,
+        "textBytes": 4220,
+        "dataBytes": 774
+       },
+       {
+        "package": "internal/filepathlite",
+        "symbols": 1,
+        "textBytes": 134,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/fmtsort",
+        "symbols": 4,
+        "textBytes": 5185,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/godebug",
+        "symbols": 23,
+        "textBytes": 4142,
+        "dataBytes": 96
+       },
+       {
+        "package": "internal/godebugs",
+        "symbols": 5,
+        "textBytes": 84,
+        "dataBytes": 48
+       },
+       {
+        "package": "internal/oserror",
+        "symbols": 5,
+        "textBytes": 0,
+        "dataBytes": 80
+       },
+       {
+        "package": "internal/poll",
+        "symbols": 55,
+        "textBytes": 9394,
+        "dataBytes": 156
+       },
+       {
+        "package": "internal/reflectlite",
+        "symbols": 7,
+        "textBytes": 680,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/runtime/atomic",
+        "symbols": 4,
+        "textBytes": 138,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/runtime/cgroup",
+        "symbols": 25,
+        "textBytes": 9953,
+        "dataBytes": 112
+       },
+       {
+        "package": "internal/runtime/exithook",
+        "symbols": 10,
+        "textBytes": 479,
+        "dataBytes": 60
+       },
+       {
+        "package": "internal/runtime/gc",
+        "symbols": 5,
+        "textBytes": 0,
+        "dataBytes": 854
+       },
+       {
+        "package": "internal/runtime/gc/scan",
+        "symbols": 236,
+        "textBytes": 4321,
+        "dataBytes": 13553
+       },
+       {
+        "package": "internal/runtime/maps",
+        "symbols": 54,
+        "textBytes": 16573,
+        "dataBytes": 177
+       },
+       {
+        "package": "internal/runtime/sys",
+        "symbols": 2,
+        "textBytes": 110,
+        "dataBytes": 1
+       },
+       {
+        "package": "internal/runtime/syscall/linux",
+        "symbols": 6,
+        "textBytes": 537,
+        "dataBytes": 8
+       },
+       {
+        "package": "internal/singleflight",
+        "symbols": 5,
+        "textBytes": 1743,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/strconv",
+        "symbols": 35,
+        "textBytes": 17043,
+        "dataBytes": 11321
+       },
+       {
+        "package": "internal/stringslite",
+        "symbols": 3,
+        "textBytes": 1386,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/sync",
+        "symbols": 39,
+        "textBytes": 9196,
+        "dataBytes": 3536
+       },
+       {
+        "package": "internal/synctest",
+        "symbols": 4,
+        "textBytes": 186,
+        "dataBytes": 0
+       },
+       {
+        "package": "internal/syscall/unix",
+        "symbols": 6,
+        "textBytes": 953,
+        "dataBytes": 4
+       },
+       {
+        "package": "internal/testlog",
+        "symbols": 7,
+        "textBytes": 532,
+        "dataBytes": 20
+       },
+       {
+        "package": "io",
+        "symbols": 19,
+        "textBytes": 774,
+        "dataBytes": 96
+       },
+       {
+        "package": "io/fs",
+        "symbols": 15,
+        "textBytes": 1132,
+        "dataBytes": 152
+       },
+       {
+        "package": "iter",
+        "symbols": 3,
+        "textBytes": 85,
+        "dataBytes": 32
+       },
+       {
+        "package": "log",
+        "symbols": 16,
+        "textBytes": 7959,
+        "dataBytes": 72
+       },
+       {
+        "package": "log/internal",
+        "symbols": 1,
+        "textBytes": 0,
+        "dataBytes": 8
+       },
+       {
+        "package": "main",
+        "symbols": 5,
+        "textBytes": 2361,
+        "dataBytes": 48
+       },
+       {
+        "package": "maps",
+        "symbols": 2,
+        "textBytes": 150,
+        "dataBytes": 56
+       },
+       {
+        "package": "math",
+        "symbols": 6,
+        "textBytes": 724,
+        "dataBytes": 17
+       },
+       {
+        "package": "math/big",
+        "symbols": 94,
+        "textBytes": 59074,
+        "dataBytes": 2793
+       },
+       {
+        "package": "mime",
+        "symbols": 31,
+        "textBytes": 15363,
+        "dataBytes": 336
+       },
+       {
+        "package": "mime/multipart",
+        "symbols": 4,
+        "textBytes": 428,
+        "dataBytes": 32
+       },
+       {
+        "package": "net",
+        "symbols": 357,
+        "textBytes": 121258,
+        "dataBytes": 1358
+       },
+       {
+        "package": "net/http",
+        "symbols": 36,
+        "textBytes": 3510,
+        "dataBytes": 341
+       },
+       {
+        "package": "net/http/internal",
+        "symbols": 5,
+        "textBytes": 0,
+        "dataBytes": 80
+       },
+       {
+        "package": "net/http/internal/http2",
+        "symbols": 25,
+        "textBytes": 1208,
+        "dataBytes": 245
+       },
+       {
+        "package": "net/http/internal/httpcommon",
+        "symbols": 1,
+        "textBytes": 0,
+        "dataBytes": 16
+       },
+       {
+        "package": "net/netip",
+        "symbols": 25,
+        "textBytes": 11599,
+        "dataBytes": 40
+       },
+       {
+        "package": "net/url",
+        "symbols": 22,
+        "textBytes": 9820,
+        "dataBytes": 312
+       },
+       {
+        "package": "os",
+        "symbols": 55,
+        "textBytes": 9028,
+        "dataBytes": 273
+       },
+       {
+        "package": "os/signal",
+        "symbols": 36,
+        "textBytes": 6248,
+        "dataBytes": 620
+       },
+       {
+        "package": "path/filepath",
+        "symbols": 4,
+        "textBytes": 138,
+        "dataBytes": 48
+       },
+       {
+        "package": "reflect",
+        "symbols": 80,
+        "textBytes": 25037,
+        "dataBytes": 160
+       },
+       {
+        "package": "runtime",
+        "symbols": 1753,
+        "textBytes": 464001,
+        "dataBytes": 239845
+       },
+       {
+        "package": "runtime/debug",
+        "symbols": 1,
+        "textBytes": 293,
+        "dataBytes": 0
+       },
+       {
+        "package": "slices",
+        "symbols": 90,
+        "textBytes": 29288,
+        "dataBytes": 1248
+       },
+       {
+        "package": "strconv",
+        "symbols": 12,
+        "textBytes": 3731,
+        "dataBytes": 152
+       },
+       {
+        "package": "strings",
+        "symbols": 44,
+        "textBytes": 22103,
+        "dataBytes": 280
+       },
+       {
+        "package": "sync",
+        "symbols": 64,
+        "textBytes": 7819,
+        "dataBytes": 336
+       },
+       {
+        "package": "sync/atomic",
+        "symbols": 23,
+        "textBytes": 558,
+        "dataBytes": 1153
+       },
+       {
+        "package": "syscall",
+        "symbols": 90,
+        "textBytes": 15191,
+        "dataBytes": 2825
+       },
+       {
+        "package": "time",
+        "symbols": 93,
+        "textBytes": 48948,
+        "dataBytes": 448
+       },
+       {
+        "package": "type:",
+        "symbols": 81,
+        "textBytes": 10689,
+        "dataBytes": 0
+       },
+       {
+        "package": "unicode",
+        "symbols": 25,
+        "textBytes": 2084,
+        "dataBytes": 416
+       },
+       {
+        "package": "unicode/utf8",
+        "symbols": 7,
+        "textBytes": 1597,
+        "dataBytes": 288
+       },
+       {
+        "package": "unique",
+        "symbols": 27,
+        "textBytes": 5367,
+        "dataBytes": 960
+       },
+       {
+        "package": "vendor/golang.org/x/crypto/chacha20poly1305",
+        "symbols": 3,
+        "textBytes": 36,
+        "dataBytes": 17
+       },
+       {
+        "package": "vendor/golang.org/x/crypto/cryptobyte",
+        "symbols": 3,
+        "textBytes": 165,
+        "dataBytes": 24
+       },
+       {
+        "package": "vendor/golang.org/x/net/dns/dnsmessage",
+        "symbols": 45,
+        "textBytes": 16318,
+        "dataBytes": 328
+       },
+       {
+        "package": "vendor/golang.org/x/net/http/httpguts",
+        "symbols": 2,
+        "textBytes": 24,
+        "dataBytes": 16
+       },
+       {
+        "package": "vendor/golang.org/x/net/http/httpproxy",
+        "symbols": 19,
+        "textBytes": 6321,
+        "dataBytes": 24
+       },
+       {
+        "package": "vendor/golang.org/x/net/http2/hpack",
+        "symbols": 2,
+        "textBytes": 330,
+        "dataBytes": 16
+       },
+       {
+        "package": "vendor/golang.org/x/net/idna",
+        "symbols": 30,
+        "textBytes": 15766,
+        "dataBytes": 31992
+       },
+       {
+        "package": "vendor/golang.org/x/sys/cpu",
+        "symbols": 12,
+        "textBytes": 3784,
+        "dataBytes": 230
+       },
+       {
+        "package": "vendor/golang.org/x/text/secure/bidirule",
+        "symbols": 7,
+        "textBytes": 909,
+        "dataBytes": 320
+       },
+       {
+        "package": "vendor/golang.org/x/text/transform",
+        "symbols": 2,
+        "textBytes": 0,
+        "dataBytes": 32
+       },
+       {
+        "package": "vendor/golang.org/x/text/unicode/bidi",
+        "symbols": 6,
+        "textBytes": 1322,
+        "dataBytes": 20736
+       },
+       {
+        "package": "vendor/golang.org/x/text/unicode/norm",
+        "symbols": 63,
+        "textBytes": 25981,
+        "dataBytes": 49850
+       },
+       {
+        "package": "weak",
+        "symbols": 5,
+        "textBytes": 685,
+        "dataBytes": 72
+       }
+      ]
+     },
+     "stripped": {
+      "bytes": 3768480,
+      "sha256": "c6672534bfcabc770bb1435285e2d9768166594ba5bfc0f9da9b59b961fc4af5",
+      "build": {
+       "goVersion": "go1.27.0",
+       "settings": {
+        "-buildmode": "exe",
+        "-compiler": "gc",
+        "-trimpath": "true",
+        "CGO_ENABLED": "0",
+        "GOAMD64": "v1",
+        "GOARCH": "amd64",
+        "GOOS": "linux"
+       }
+      }
+     }
+    }
+   },
+   "js": {
+    "moduleBytes": 9154,
+    "applicationMinified": {
+     "bytes": 3915,
+     "sha256": "d0c6ce6865e410d1be16ec20fe40ac0661c00acb0cc60dbe9b665f7d8f7204b1"
+    },
+    "deploymentMinified": {
+     "bytes": 32419,
+     "sha256": "518da6aebb2e47e850dc6beb41a1a715aa69234b3e618fe67ac9723892637b1f"
+    },
+    "deploymentDeltaBytes": 28504,
+    "externalRuntime": [
+     {
+      "specifier": "effect",
+      "names": [
+       "Context",
+       "Effect",
+       "Fiber",
+       "Scope",
+       "Exit",
+       "Cause",
+       "Option"
+      ]
+     }
+    ],
+    "declarationBytes": 2547,
+    "moduleSha256": "ae83a660da129d0ec750485777b6e4926ab59974e2922a8fb0ddc60263768cc4",
+    "requirements": {
+     "function": 1
+    }
+   }
+  },
+  "minimal-unused": {
+   "expectedOutput": "minimal\n",
+   "go": {
+    "runtimeModules": [
+     "core"
+    ],
+    "requirements": {
+     "function": 1,
+     "runtime-module": 1
+    },
+    "mainBytes": 1406,
+    "runtimeBytes": 54516,
+    "runtimeFiles": [
+     "effect.go",
+     "fiber.go",
+     "managed.go",
+     "report.go",
+     "scheduler.go",
+     "scope.go"
+    ],
+    "imports": {
+     "effra.generated": [
+      "context",
+      "effra.generated/runtime",
+      "fmt",
+      "os",
+      "os/signal",
+      "syscall"
+     ],
+     "effra.generated/runtime": [
+      "context",
+      "errors",
+      "fmt",
+      "math",
+      "sort",
+      "strconv",
+      "strings",
+      "sync",
+      "sync/atomic",
+      "time"
+     ]
+    },
+    "dependencies": {
+     "count": 65,
+     "standard": 63,
+     "nonStandard": [
+      "effra.generated",
+      "effra.generated/runtime"
+     ],
+     "platform": []
+    },
+    "binary": {
+     "bytes": 2703440,
+     "sha256": "ff9181397d354f4dcd1291f2237aed5c0808bc27d98384b6d152a02d59374cb4",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "symbols": {
+     "tool": "go tool nm -size -type",
+     "count": 2864,
+     "listingSha256": "df806def990f6f4bfaaa0c81837ae333d94cc351e6e4a7ddcdf7dabaad565145",
+     "packages": [
+      {
+       "package": "(constant)",
+       "symbols": 21,
+       "textBytes": 0,
+       "dataBytes": 168
+      },
+      {
+       "package": "(unqualified)",
+       "symbols": 39,
+       "textBytes": 2694,
+       "dataBytes": 712
+      },
+      {
+       "package": "_",
+       "symbols": 1,
+       "textBytes": 50,
+       "dataBytes": 0
+      },
+      {
+       "package": "cmp",
+       "symbols": 2,
+       "textBytes": 0,
+       "dataBytes": 24
+      },
+      {
+       "package": "context",
+       "symbols": 75,
+       "textBytes": 9350,
+       "dataBytes": 180
+      },
+      {
+       "package": "effra.generated/runtime",
+       "symbols": 56,
+       "textBytes": 28708,
+       "dataBytes": 296
+      },
+      {
+       "package": "errors",
+       "symbols": 9,
+       "textBytes": 988,
+       "dataBytes": 104
+      },
+      {
+       "package": "fmt",
+       "symbols": 61,
+       "textBytes": 39760,
+       "dataBytes": 192
+      },
+      {
+       "package": "go",
+       "symbols": 1,
+       "textBytes": 0,
+       "dataBytes": 0
+      },
+      {
+       "package": "go:",
+       "symbols": 16,
+       "textBytes": 2,
+       "dataBytes": 141054
+      },
+      {
+       "package": "internal/abi",
+       "symbols": 12,
+       "textBytes": 2455,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/bytealg",
+       "symbols": 10,
+       "textBytes": 534,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/chacha8rand",
+       "symbols": 4,
+       "textBytes": 2060,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/cpu",
+       "symbols": 12,
+       "textBytes": 4220,
+       "dataBytes": 208
+      },
+      {
+       "package": "internal/fmtsort",
+       "symbols": 4,
+       "textBytes": 5185,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/godebugs",
+       "symbols": 4,
+       "textBytes": 84,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/oserror",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 80
+      },
+      {
+       "package": "internal/poll",
+       "symbols": 37,
+       "textBytes": 5547,
+       "dataBytes": 156
+      },
+      {
+       "package": "internal/reflectlite",
+       "symbols": 5,
+       "textBytes": 459,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/atomic",
+       "symbols": 4,
+       "textBytes": 138,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/cgroup",
+       "symbols": 25,
+       "textBytes": 9953,
+       "dataBytes": 112
+      },
+      {
+       "package": "internal/runtime/exithook",
+       "symbols": 10,
+       "textBytes": 479,
+       "dataBytes": 60
+      },
+      {
+       "package": "internal/runtime/gc",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 854
+      },
+      {
+       "package": "internal/runtime/gc/scan",
+       "symbols": 236,
+       "textBytes": 4321,
+       "dataBytes": 13553
+      },
+      {
+       "package": "internal/runtime/maps",
+       "symbols": 54,
+       "textBytes": 16573,
+       "dataBytes": 177
+      },
+      {
+       "package": "internal/runtime/sys",
+       "symbols": 2,
+       "textBytes": 110,
+       "dataBytes": 1
+      },
+      {
+       "package": "internal/runtime/syscall/linux",
+       "symbols": 6,
+       "textBytes": 537,
+       "dataBytes": 8
+      },
+      {
+       "package": "internal/strconv",
+       "symbols": 34,
+       "textBytes": 16767,
+       "dataBytes": 11321
+      },
+      {
+       "package": "internal/sync",
+       "symbols": 22,
+       "textBytes": 4448,
+       "dataBytes": 1768
+      },
+      {
+       "package": "internal/synctest",
+       "symbols": 3,
+       "textBytes": 126,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/syscall/unix",
+       "symbols": 4,
+       "textBytes": 688,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/testlog",
+       "symbols": 3,
+       "textBytes": 223,
+       "dataBytes": 12
+      },
+      {
+       "package": "io",
+       "symbols": 3,
+       "textBytes": 0,
+       "dataBytes": 48
+      },
+      {
+       "package": "io/fs",
+       "symbols": 9,
+       "textBytes": 447,
+       "dataBytes": 96
+      },
+      {
+       "package": "iter",
+       "symbols": 3,
+       "textBytes": 85,
+       "dataBytes": 32
+      },
+      {
+       "package": "main",
+       "symbols": 5,
+       "textBytes": 2361,
+       "dataBytes": 48
+      },
+      {
+       "package": "math",
+       "symbols": 3,
+       "textBytes": 27,
+       "dataBytes": 17
+      },
+      {
+       "package": "os",
+       "symbols": 33,
+       "textBytes": 5407,
+       "dataBytes": 249
+      },
+      {
+       "package": "os/signal",
+       "symbols": 34,
+       "textBytes": 6083,
+       "dataBytes": 620
+      },
+      {
+       "package": "reflect",
+       "symbols": 79,
+       "textBytes": 24872,
+       "dataBytes": 160
+      },
+      {
+       "package": "runtime",
+       "symbols": 1633,
+       "textBytes": 444097,
+       "dataBytes": 234944
+      },
+      {
+       "package": "runtime/debug",
+       "symbols": 1,
+       "textBytes": 293,
+       "dataBytes": 0
+      },
+      {
+       "package": "slices",
+       "symbols": 31,
+       "textBytes": 8976,
+       "dataBytes": 392
+      },
+      {
+       "package": "strconv",
+       "symbols": 10,
+       "textBytes": 3731,
+       "dataBytes": 120
+      },
+      {
+       "package": "strings",
+       "symbols": 6,
+       "textBytes": 2129,
+       "dataBytes": 0
+      },
+      {
+       "package": "sync",
+       "symbols": 46,
+       "textBytes": 5900,
+       "dataBytes": 144
+      },
+      {
+       "package": "sync/atomic",
+       "symbols": 14,
+       "textBytes": 544,
+       "dataBytes": 385
+      },
+      {
+       "package": "syscall",
+       "symbols": 50,
+       "textBytes": 6153,
+       "dataBytes": 2816
+      },
+      {
+       "package": "time",
+       "symbols": 61,
+       "textBytes": 41488,
+       "dataBytes": 412
+      },
+      {
+       "package": "type:",
+       "symbols": 42,
+       "textBytes": 4753,
+       "dataBytes": 0
+      },
+      {
+       "package": "unicode",
+       "symbols": 13,
+       "textBytes": 714,
+       "dataBytes": 104
+      },
+      {
+       "package": "unicode/utf8",
+       "symbols": 6,
+       "textBytes": 1313,
+       "dataBytes": 288
+      }
+     ]
+    },
+    "stripped": {
+     "bytes": 1757344,
+     "sha256": "4b4172b1ed5401ee3b0390d8d7a5f0c36753d9f12e6309a5234ffe59bd4e41a3",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    }
+   },
+   "js": {
+    "moduleBytes": 9154,
+    "applicationMinified": {
+     "bytes": 3915,
+     "sha256": "d0c6ce6865e410d1be16ec20fe40ac0661c00acb0cc60dbe9b665f7d8f7204b1"
+    },
+    "deploymentMinified": {
+     "bytes": 32419,
+     "sha256": "518da6aebb2e47e850dc6beb41a1a715aa69234b3e618fe67ac9723892637b1f"
+    },
+    "deploymentDeltaBytes": 28504,
+    "externalRuntime": [
+     {
+      "specifier": "effect",
+      "names": [
+       "Context",
+       "Effect",
+       "Fiber",
+       "Scope",
+       "Exit",
+       "Cause",
+       "Option"
+      ]
+     }
+    ],
+    "declarationBytes": 4785,
+    "moduleSha256": "083cc9cf36c7dd6b25b900077ef5d66e50722009bfa83a46d0f0719c3c069fff",
+    "requirements": {
+     "function": 1
+    }
+   }
+  },
+  "pipe": {
+   "expectedOutput": "Hello, \u003cada!\u003e\n",
+   "go": {
+    "runtimeModules": [
+     "core"
+    ],
+    "requirements": {
+     "function": 4,
+     "runtime-module": 1
+    },
+    "mainBytes": 2311,
+    "runtimeBytes": 54516,
+    "runtimeFiles": [
+     "effect.go",
+     "fiber.go",
+     "managed.go",
+     "report.go",
+     "scheduler.go",
+     "scope.go"
+    ],
+    "imports": {
+     "effra.generated": [
+      "context",
+      "effra.generated/runtime",
+      "fmt",
+      "os",
+      "os/signal",
+      "syscall"
+     ],
+     "effra.generated/runtime": [
+      "context",
+      "errors",
+      "fmt",
+      "math",
+      "sort",
+      "strconv",
+      "strings",
+      "sync",
+      "sync/atomic",
+      "time"
+     ]
+    },
+    "dependencies": {
+     "count": 65,
+     "standard": 63,
+     "nonStandard": [
+      "effra.generated",
+      "effra.generated/runtime"
+     ],
+     "platform": []
+    },
+    "binary": {
+     "bytes": 2709562,
+     "sha256": "a8b01aedc0b11d2aa116bc1979bb4265fc6d77d1bc44d36f7072245731123076",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "symbols": {
+     "tool": "go tool nm -size -type",
+     "count": 2866,
+     "listingSha256": "b570525e0b4a1422f6d2565d41b4d00e4b62bea68216cfc898e63d85b82f83f5",
+     "packages": [
+      {
+       "package": "(constant)",
+       "symbols": 21,
+       "textBytes": 0,
+       "dataBytes": 168
+      },
+      {
+       "package": "(unqualified)",
+       "symbols": 39,
+       "textBytes": 2694,
+       "dataBytes": 712
+      },
+      {
+       "package": "_",
+       "symbols": 1,
+       "textBytes": 50,
+       "dataBytes": 0
+      },
+      {
+       "package": "cmp",
+       "symbols": 2,
+       "textBytes": 0,
+       "dataBytes": 24
+      },
+      {
+       "package": "context",
+       "symbols": 75,
+       "textBytes": 9350,
+       "dataBytes": 180
+      },
+      {
+       "package": "effra.generated/runtime",
+       "symbols": 58,
+       "textBytes": 30044,
+       "dataBytes": 328
+      },
+      {
+       "package": "errors",
+       "symbols": 9,
+       "textBytes": 988,
+       "dataBytes": 104
+      },
+      {
+       "package": "fmt",
+       "symbols": 61,
+       "textBytes": 39760,
+       "dataBytes": 192
+      },
+      {
+       "package": "go",
+       "symbols": 1,
+       "textBytes": 0,
+       "dataBytes": 0
+      },
+      {
+       "package": "go:",
+       "symbols": 16,
+       "textBytes": 2,
+       "dataBytes": 141294
+      },
+      {
+       "package": "internal/abi",
+       "symbols": 12,
+       "textBytes": 2455,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/bytealg",
+       "symbols": 10,
+       "textBytes": 534,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/chacha8rand",
+       "symbols": 4,
+       "textBytes": 2060,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/cpu",
+       "symbols": 12,
+       "textBytes": 4220,
+       "dataBytes": 208
+      },
+      {
+       "package": "internal/fmtsort",
+       "symbols": 4,
+       "textBytes": 5185,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/godebugs",
+       "symbols": 4,
+       "textBytes": 84,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/oserror",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 80
+      },
+      {
+       "package": "internal/poll",
+       "symbols": 37,
+       "textBytes": 5547,
+       "dataBytes": 156
+      },
+      {
+       "package": "internal/reflectlite",
+       "symbols": 5,
+       "textBytes": 459,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/atomic",
+       "symbols": 4,
+       "textBytes": 138,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/cgroup",
+       "symbols": 25,
+       "textBytes": 9953,
+       "dataBytes": 112
+      },
+      {
+       "package": "internal/runtime/exithook",
+       "symbols": 10,
+       "textBytes": 479,
+       "dataBytes": 60
+      },
+      {
+       "package": "internal/runtime/gc",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 854
+      },
+      {
+       "package": "internal/runtime/gc/scan",
+       "symbols": 236,
+       "textBytes": 4321,
+       "dataBytes": 13553
+      },
+      {
+       "package": "internal/runtime/maps",
+       "symbols": 54,
+       "textBytes": 16573,
+       "dataBytes": 177
+      },
+      {
+       "package": "internal/runtime/sys",
+       "symbols": 2,
+       "textBytes": 110,
+       "dataBytes": 1
+      },
+      {
+       "package": "internal/runtime/syscall/linux",
+       "symbols": 6,
+       "textBytes": 537,
+       "dataBytes": 8
+      },
+      {
+       "package": "internal/strconv",
+       "symbols": 34,
+       "textBytes": 16767,
+       "dataBytes": 11321
+      },
+      {
+       "package": "internal/sync",
+       "symbols": 22,
+       "textBytes": 4448,
+       "dataBytes": 1768
+      },
+      {
+       "package": "internal/synctest",
+       "symbols": 3,
+       "textBytes": 126,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/syscall/unix",
+       "symbols": 4,
+       "textBytes": 688,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/testlog",
+       "symbols": 3,
+       "textBytes": 223,
+       "dataBytes": 12
+      },
+      {
+       "package": "io",
+       "symbols": 3,
+       "textBytes": 0,
+       "dataBytes": 48
+      },
+      {
+       "package": "io/fs",
+       "symbols": 9,
+       "textBytes": 447,
+       "dataBytes": 96
+      },
+      {
+       "package": "iter",
+       "symbols": 3,
+       "textBytes": 85,
+       "dataBytes": 32
+      },
+      {
+       "package": "main",
+       "symbols": 5,
+       "textBytes": 3289,
+       "dataBytes": 48
+      },
+      {
+       "package": "math",
+       "symbols": 3,
+       "textBytes": 27,
+       "dataBytes": 17
+      },
+      {
+       "package": "os",
+       "symbols": 33,
+       "textBytes": 5407,
+       "dataBytes": 249
+      },
+      {
+       "package": "os/signal",
+       "symbols": 34,
+       "textBytes": 6083,
+       "dataBytes": 620
+      },
+      {
+       "package": "reflect",
+       "symbols": 79,
+       "textBytes": 24872,
+       "dataBytes": 160
+      },
+      {
+       "package": "runtime",
+       "symbols": 1633,
+       "textBytes": 444097,
+       "dataBytes": 234957
+      },
+      {
+       "package": "runtime/debug",
+       "symbols": 1,
+       "textBytes": 293,
+       "dataBytes": 0
+      },
+      {
+       "package": "slices",
+       "symbols": 31,
+       "textBytes": 8976,
+       "dataBytes": 392
+      },
+      {
+       "package": "strconv",
+       "symbols": 10,
+       "textBytes": 3731,
+       "dataBytes": 120
+      },
+      {
+       "package": "strings",
+       "symbols": 6,
+       "textBytes": 2129,
+       "dataBytes": 0
+      },
+      {
+       "package": "sync",
+       "symbols": 46,
+       "textBytes": 5900,
+       "dataBytes": 144
+      },
+      {
+       "package": "sync/atomic",
+       "symbols": 14,
+       "textBytes": 544,
+       "dataBytes": 385
+      },
+      {
+       "package": "syscall",
+       "symbols": 50,
+       "textBytes": 6153,
+       "dataBytes": 2816
+      },
+      {
+       "package": "time",
+       "symbols": 61,
+       "textBytes": 41488,
+       "dataBytes": 412
+      },
+      {
+       "package": "type:",
+       "symbols": 42,
+       "textBytes": 4753,
+       "dataBytes": 0
+      },
+      {
+       "package": "unicode",
+       "symbols": 13,
+       "textBytes": 714,
+       "dataBytes": 104
+      },
+      {
+       "package": "unicode/utf8",
+       "symbols": 6,
+       "textBytes": 1313,
+       "dataBytes": 288
+      }
+     ]
+    },
+    "stripped": {
+     "bytes": 1761440,
+     "sha256": "1ba4417cf934ead6e996692c0f8eb2d166b66a44392e7f0fe0f20244c05f4f4a",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    }
+   },
+   "js": {
+    "moduleBytes": 9779,
+    "applicationMinified": {
+     "bytes": 4065,
+     "sha256": "1ee9e1fdc1779c86b8c3e6318e1cf13a5ab192dbcf7056de168ea48e7e22f58a"
+    },
+    "deploymentMinified": {
+     "bytes": 32576,
+     "sha256": "134bc986426d5f03c09baa9e7393a30b2aedb2f7cc49efa48029a42f82060780"
+    },
+    "deploymentDeltaBytes": 28511,
+    "externalRuntime": [
+     {
+      "specifier": "effect",
+      "names": [
+       "Context",
+       "Effect",
+       "Fiber",
+       "Scope",
+       "Exit",
+       "Cause",
+       "Option"
+      ]
+     }
+    ],
+    "declarationBytes": 2928,
+    "moduleSha256": "820238e1b51fb9c89c987bbd0998e0eff1ec436ab55d519d195caefc1760169e",
+    "requirements": {
+     "function": 4
+    }
+   }
+  }
+ },
+ "controls": {
+  "managed": {
+   "fixture": "managed",
+   "matched": true,
+   "go": {
+    "dependencies": {
+     "count": 62,
+     "standard": 61,
+     "nonStandard": [
+      "effra.local/prototype/conformance/size/controls/go/managed"
+     ],
+     "platform": []
+    },
+    "binary": {
+     "bytes": 2584698,
+     "sha256": "16002287b08f3f0e8c35a9fd17801b6e86e073a92f870874650beb81b99d31d8",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "symbols": {
+     "tool": "go tool nm -size -type",
+     "count": 2784,
+     "listingSha256": "2ab6159609fde3b95e0a943a51d83a347a705b93b1492be9a19e1e4aaaa44f01",
+     "packages": [
+      {
+       "package": "(constant)",
+       "symbols": 21,
+       "textBytes": 0,
+       "dataBytes": 168
+      },
+      {
+       "package": "(unqualified)",
+       "symbols": 39,
+       "textBytes": 2694,
+       "dataBytes": 712
+      },
+      {
+       "package": "_",
+       "symbols": 1,
+       "textBytes": 50,
+       "dataBytes": 0
+      },
+      {
+       "package": "context",
+       "symbols": 72,
+       "textBytes": 9105,
+       "dataBytes": 172
+      },
+      {
+       "package": "errors",
+       "symbols": 9,
+       "textBytes": 988,
+       "dataBytes": 104
+      },
+      {
+       "package": "fmt",
+       "symbols": 44,
+       "textBytes": 30897,
+       "dataBytes": 144
+      },
+      {
+       "package": "go",
+       "symbols": 1,
+       "textBytes": 0,
+       "dataBytes": 0
+      },
+      {
+       "package": "go:",
+       "symbols": 16,
+       "textBytes": 2,
+       "dataBytes": 135318
+      },
+      {
+       "package": "internal/abi",
+       "symbols": 14,
+       "textBytes": 2455,
+       "dataBytes": 41
+      },
+      {
+       "package": "internal/bytealg",
+       "symbols": 9,
+       "textBytes": 229,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/chacha8rand",
+       "symbols": 4,
+       "textBytes": 2060,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/cpu",
+       "symbols": 12,
+       "textBytes": 4220,
+       "dataBytes": 208
+      },
+      {
+       "package": "internal/fmtsort",
+       "symbols": 4,
+       "textBytes": 5185,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/godebugs",
+       "symbols": 4,
+       "textBytes": 84,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/oserror",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 80
+      },
+      {
+       "package": "internal/poll",
+       "symbols": 37,
+       "textBytes": 5547,
+       "dataBytes": 156
+      },
+      {
+       "package": "internal/reflectlite",
+       "symbols": 5,
+       "textBytes": 459,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/atomic",
+       "symbols": 4,
+       "textBytes": 138,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/cgroup",
+       "symbols": 25,
+       "textBytes": 9953,
+       "dataBytes": 112
+      },
+      {
+       "package": "internal/runtime/exithook",
+       "symbols": 10,
+       "textBytes": 479,
+       "dataBytes": 60
+      },
+      {
+       "package": "internal/runtime/gc",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 854
+      },
+      {
+       "package": "internal/runtime/gc/scan",
+       "symbols": 236,
+       "textBytes": 4321,
+       "dataBytes": 13553
+      },
+      {
+       "package": "internal/runtime/maps",
+       "symbols": 54,
+       "textBytes": 16573,
+       "dataBytes": 177
+      },
+      {
+       "package": "internal/runtime/sys",
+       "symbols": 2,
+       "textBytes": 110,
+       "dataBytes": 1
+      },
+      {
+       "package": "internal/runtime/syscall/linux",
+       "symbols": 6,
+       "textBytes": 537,
+       "dataBytes": 8
+      },
+      {
+       "package": "internal/strconv",
+       "symbols": 34,
+       "textBytes": 16767,
+       "dataBytes": 11321
+      },
+      {
+       "package": "internal/sync",
+       "symbols": 22,
+       "textBytes": 4448,
+       "dataBytes": 1768
+      },
+      {
+       "package": "internal/synctest",
+       "symbols": 4,
+       "textBytes": 186,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/syscall/unix",
+       "symbols": 4,
+       "textBytes": 688,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/testlog",
+       "symbols": 3,
+       "textBytes": 223,
+       "dataBytes": 12
+      },
+      {
+       "package": "io",
+       "symbols": 3,
+       "textBytes": 0,
+       "dataBytes": 48
+      },
+      {
+       "package": "io/fs",
+       "symbols": 9,
+       "textBytes": 447,
+       "dataBytes": 96
+      },
+      {
+       "package": "iter",
+       "symbols": 3,
+       "textBytes": 85,
+       "dataBytes": 32
+      },
+      {
+       "package": "main",
+       "symbols": 17,
+       "textBytes": 3343,
+       "dataBytes": 64
+      },
+      {
+       "package": "math",
+       "symbols": 3,
+       "textBytes": 27,
+       "dataBytes": 17
+      },
+      {
+       "package": "os",
+       "symbols": 33,
+       "textBytes": 5407,
+       "dataBytes": 249
+      },
+      {
+       "package": "os/signal",
+       "symbols": 36,
+       "textBytes": 6248,
+       "dataBytes": 620
+      },
+      {
+       "package": "reflect",
+       "symbols": 79,
+       "textBytes": 24872,
+       "dataBytes": 160
+      },
+      {
+       "package": "runtime",
+       "symbols": 1632,
+       "textBytes": 444011,
+       "dataBytes": 234790
+      },
+      {
+       "package": "runtime/debug",
+       "symbols": 1,
+       "textBytes": 293,
+       "dataBytes": 0
+      },
+      {
+       "package": "slices",
+       "symbols": 8,
+       "textBytes": 5363,
+       "dataBytes": 120
+      },
+      {
+       "package": "strconv",
+       "symbols": 10,
+       "textBytes": 3731,
+       "dataBytes": 120
+      },
+      {
+       "package": "sync",
+       "symbols": 48,
+       "textBytes": 6551,
+       "dataBytes": 144
+      },
+      {
+       "package": "sync/atomic",
+       "symbols": 14,
+       "textBytes": 544,
+       "dataBytes": 385
+      },
+      {
+       "package": "syscall",
+       "symbols": 50,
+       "textBytes": 6153,
+       "dataBytes": 2816
+      },
+      {
+       "package": "time",
+       "symbols": 75,
+       "textBytes": 43900,
+       "dataBytes": 412
+      },
+      {
+       "package": "type:",
+       "symbols": 38,
+       "textBytes": 4171,
+       "dataBytes": 0
+      },
+      {
+       "package": "unicode",
+       "symbols": 13,
+       "textBytes": 714,
+       "dataBytes": 104
+      },
+      {
+       "package": "unicode/utf8",
+       "symbols": 6,
+       "textBytes": 1313,
+       "dataBytes": 288
+      }
+     ]
+    },
+    "stripped": {
+     "bytes": 1675424,
+     "sha256": "7835524eed739a4c4505b61dc3cb9ebcbc63a0a54df4939611c4d63fc402a94b",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    }
+   },
+   "typescript": {
+    "moduleBytes": 1442,
+    "applicationMinified": {
+     "bytes": 765,
+     "sha256": "9e219e07709c813e25bc4897271a6173c1925a199f31378a0ab4ef7d99f5121b"
+    },
+    "deploymentMinified": {
+     "bytes": 40796,
+     "sha256": "93aee111f7196314ebe6583ba122a55eead679128bf48804b551badd634073c1"
+    },
+    "deploymentDeltaBytes": 40031
+   }
+  },
+  "minimal": {
+   "fixture": "minimal",
+   "matched": true,
+   "go": {
+    "dependencies": {
+     "count": 62,
+     "standard": 61,
+     "nonStandard": [
+      "effra.local/prototype/conformance/size/controls/go/minimal"
+     ],
+     "platform": []
+    },
+    "binary": {
+     "bytes": 2548908,
+     "sha256": "7630704ce4d5efcc8b5ef04cb108e84f4a16cde10bb53bb90a92d1c9130560b4",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "symbols": {
+     "tool": "go tool nm -size -type",
+     "count": 2724,
+     "listingSha256": "eb71ce72154eb9f58b77bf55f0c796edba17472059bcce4848a37d897ba0ec47",
+     "packages": [
+      {
+       "package": "(constant)",
+       "symbols": 21,
+       "textBytes": 0,
+       "dataBytes": 168
+      },
+      {
+       "package": "(unqualified)",
+       "symbols": 39,
+       "textBytes": 2694,
+       "dataBytes": 712
+      },
+      {
+       "package": "_",
+       "symbols": 1,
+       "textBytes": 50,
+       "dataBytes": 0
+      },
+      {
+       "package": "context",
+       "symbols": 49,
+       "textBytes": 6454,
+       "dataBytes": 156
+      },
+      {
+       "package": "errors",
+       "symbols": 9,
+       "textBytes": 988,
+       "dataBytes": 104
+      },
+      {
+       "package": "fmt",
+       "symbols": 44,
+       "textBytes": 30897,
+       "dataBytes": 144
+      },
+      {
+       "package": "go",
+       "symbols": 1,
+       "textBytes": 0,
+       "dataBytes": 0
+      },
+      {
+       "package": "go:",
+       "symbols": 16,
+       "textBytes": 2,
+       "dataBytes": 134086
+      },
+      {
+       "package": "internal/abi",
+       "symbols": 12,
+       "textBytes": 2455,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/bytealg",
+       "symbols": 9,
+       "textBytes": 229,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/chacha8rand",
+       "symbols": 4,
+       "textBytes": 2060,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/cpu",
+       "symbols": 12,
+       "textBytes": 4220,
+       "dataBytes": 208
+      },
+      {
+       "package": "internal/fmtsort",
+       "symbols": 4,
+       "textBytes": 5185,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/godebugs",
+       "symbols": 4,
+       "textBytes": 84,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/oserror",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 80
+      },
+      {
+       "package": "internal/poll",
+       "symbols": 37,
+       "textBytes": 5547,
+       "dataBytes": 156
+      },
+      {
+       "package": "internal/reflectlite",
+       "symbols": 5,
+       "textBytes": 459,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/atomic",
+       "symbols": 4,
+       "textBytes": 138,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/cgroup",
+       "symbols": 25,
+       "textBytes": 9953,
+       "dataBytes": 112
+      },
+      {
+       "package": "internal/runtime/exithook",
+       "symbols": 10,
+       "textBytes": 479,
+       "dataBytes": 60
+      },
+      {
+       "package": "internal/runtime/gc",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 854
+      },
+      {
+       "package": "internal/runtime/gc/scan",
+       "symbols": 236,
+       "textBytes": 4321,
+       "dataBytes": 13553
+      },
+      {
+       "package": "internal/runtime/maps",
+       "symbols": 54,
+       "textBytes": 16573,
+       "dataBytes": 177
+      },
+      {
+       "package": "internal/runtime/sys",
+       "symbols": 2,
+       "textBytes": 110,
+       "dataBytes": 1
+      },
+      {
+       "package": "internal/runtime/syscall/linux",
+       "symbols": 6,
+       "textBytes": 537,
+       "dataBytes": 8
+      },
+      {
+       "package": "internal/strconv",
+       "symbols": 34,
+       "textBytes": 16767,
+       "dataBytes": 11321
+      },
+      {
+       "package": "internal/sync",
+       "symbols": 22,
+       "textBytes": 4448,
+       "dataBytes": 1768
+      },
+      {
+       "package": "internal/synctest",
+       "symbols": 3,
+       "textBytes": 126,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/syscall/unix",
+       "symbols": 4,
+       "textBytes": 688,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/testlog",
+       "symbols": 3,
+       "textBytes": 223,
+       "dataBytes": 12
+      },
+      {
+       "package": "io",
+       "symbols": 3,
+       "textBytes": 0,
+       "dataBytes": 48
+      },
+      {
+       "package": "io/fs",
+       "symbols": 9,
+       "textBytes": 447,
+       "dataBytes": 96
+      },
+      {
+       "package": "iter",
+       "symbols": 3,
+       "textBytes": 85,
+       "dataBytes": 32
+      },
+      {
+       "package": "main",
+       "symbols": 4,
+       "textBytes": 847,
+       "dataBytes": 0
+      },
+      {
+       "package": "math",
+       "symbols": 3,
+       "textBytes": 27,
+       "dataBytes": 17
+      },
+      {
+       "package": "os",
+       "symbols": 33,
+       "textBytes": 5407,
+       "dataBytes": 249
+      },
+      {
+       "package": "os/signal",
+       "symbols": 34,
+       "textBytes": 6083,
+       "dataBytes": 620
+      },
+      {
+       "package": "reflect",
+       "symbols": 79,
+       "textBytes": 24872,
+       "dataBytes": 160
+      },
+      {
+       "package": "runtime",
+       "symbols": 1632,
+       "textBytes": 444011,
+       "dataBytes": 234740
+      },
+      {
+       "package": "runtime/debug",
+       "symbols": 1,
+       "textBytes": 293,
+       "dataBytes": 0
+      },
+      {
+       "package": "slices",
+       "symbols": 8,
+       "textBytes": 5363,
+       "dataBytes": 120
+      },
+      {
+       "package": "strconv",
+       "symbols": 10,
+       "textBytes": 3731,
+       "dataBytes": 120
+      },
+      {
+       "package": "sync",
+       "symbols": 46,
+       "textBytes": 5900,
+       "dataBytes": 144
+      },
+      {
+       "package": "sync/atomic",
+       "symbols": 14,
+       "textBytes": 544,
+       "dataBytes": 385
+      },
+      {
+       "package": "syscall",
+       "symbols": 50,
+       "textBytes": 6153,
+       "dataBytes": 2816
+      },
+      {
+       "package": "time",
+       "symbols": 58,
+       "textBytes": 40134,
+       "dataBytes": 412
+      },
+      {
+       "package": "type:",
+       "symbols": 38,
+       "textBytes": 4171,
+       "dataBytes": 0
+      },
+      {
+       "package": "unicode",
+       "symbols": 13,
+       "textBytes": 714,
+       "dataBytes": 104
+      },
+      {
+       "package": "unicode/utf8",
+       "symbols": 6,
+       "textBytes": 1313,
+       "dataBytes": 288
+      }
+     ]
+    },
+    "stripped": {
+     "bytes": 1650848,
+     "sha256": "e0c2f4fcc52dbae59f2c1133597d1ded35b3cffc8e72663b0ea26b21fa32d6de",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    }
+   },
+   "typescript": {
+    "moduleBytes": 651,
+    "applicationMinified": {
+     "bytes": 326,
+     "sha256": "a9946e5ea00f13e2ad49f90d294c64443c40ec87ef83d2bdbccaa2eab8f86d32"
+    },
+    "deploymentMinified": {
+     "bytes": 27292,
+     "sha256": "b3d746e770a5b5500739f6f8076af87c55b4abb4ad77ae310f38b73fe67ded63"
+    },
+    "deploymentDeltaBytes": 26966
+   }
+  },
+  "minimal-floor": {
+   "fixture": "minimal",
+   "matched": false,
+   "go": {
+    "dependencies": {
+     "count": 60,
+     "standard": 59,
+     "nonStandard": [
+      "effra.local/prototype/conformance/size/controls/go/minimal-floor"
+     ],
+     "platform": []
+    },
+    "binary": {
+     "bytes": 2337985,
+     "sha256": "a972afafa59e0a3e88f14f8ab1087687fffbdc2ac38551c83960e85a4931b0f5",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    },
+    "symbols": {
+     "tool": "go tool nm -size -type",
+     "count": 2519,
+     "listingSha256": "8219cbb659110fcb62384991825a047e63bb4c23fda7eae7cf0fd2e99d491934",
+     "packages": [
+      {
+       "package": "(constant)",
+       "symbols": 21,
+       "textBytes": 0,
+       "dataBytes": 168
+      },
+      {
+       "package": "(unqualified)",
+       "symbols": 39,
+       "textBytes": 2694,
+       "dataBytes": 712
+      },
+      {
+       "package": "_",
+       "symbols": 1,
+       "textBytes": 50,
+       "dataBytes": 0
+      },
+      {
+       "package": "errors",
+       "symbols": 9,
+       "textBytes": 988,
+       "dataBytes": 104
+      },
+      {
+       "package": "fmt",
+       "symbols": 44,
+       "textBytes": 30897,
+       "dataBytes": 144
+      },
+      {
+       "package": "go",
+       "symbols": 1,
+       "textBytes": 0,
+       "dataBytes": 0
+      },
+      {
+       "package": "go:",
+       "symbols": 16,
+       "textBytes": 2,
+       "dataBytes": 126926
+      },
+      {
+       "package": "internal/abi",
+       "symbols": 12,
+       "textBytes": 2455,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/bytealg",
+       "symbols": 9,
+       "textBytes": 229,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/chacha8rand",
+       "symbols": 4,
+       "textBytes": 2060,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/cpu",
+       "symbols": 12,
+       "textBytes": 4220,
+       "dataBytes": 208
+      },
+      {
+       "package": "internal/fmtsort",
+       "symbols": 4,
+       "textBytes": 5185,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/godebugs",
+       "symbols": 4,
+       "textBytes": 84,
+       "dataBytes": 24
+      },
+      {
+       "package": "internal/oserror",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 80
+      },
+      {
+       "package": "internal/poll",
+       "symbols": 37,
+       "textBytes": 5547,
+       "dataBytes": 156
+      },
+      {
+       "package": "internal/reflectlite",
+       "symbols": 5,
+       "textBytes": 459,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/atomic",
+       "symbols": 4,
+       "textBytes": 138,
+       "dataBytes": 0
+      },
+      {
+       "package": "internal/runtime/cgroup",
+       "symbols": 25,
+       "textBytes": 9953,
+       "dataBytes": 112
+      },
+      {
+       "package": "internal/runtime/exithook",
+       "symbols": 10,
+       "textBytes": 479,
+       "dataBytes": 60
+      },
+      {
+       "package": "internal/runtime/gc",
+       "symbols": 5,
+       "textBytes": 0,
+       "dataBytes": 854
+      },
+      {
+       "package": "internal/runtime/gc/scan",
+       "symbols": 236,
+       "textBytes": 4321,
+       "dataBytes": 13553
+      },
+      {
+       "package": "internal/runtime/maps",
+       "symbols": 50,
+       "textBytes": 14950,
+       "dataBytes": 177
+      },
+      {
+       "package": "internal/runtime/sys",
+       "symbols": 2,
+       "textBytes": 110,
+       "dataBytes": 1
+      },
+      {
+       "package": "internal/runtime/syscall/linux",
+       "symbols": 6,
+       "textBytes": 537,
+       "dataBytes": 8
+      },
+      {
+       "package": "internal/strconv",
+       "symbols": 34,
+       "textBytes": 16767,
+       "dataBytes": 11321
+      },
+      {
+       "package": "internal/sync",
+       "symbols": 22,
+       "textBytes": 4448,
+       "dataBytes": 1768
+      },
+      {
+       "package": "internal/syscall/unix",
+       "symbols": 4,
+       "textBytes": 688,
+       "dataBytes": 0
+      },
+      {
+       "package": "io",
+       "symbols": 3,
+       "textBytes": 0,
+       "dataBytes": 48
+      },
+      {
+       "package": "io/fs",
+       "symbols": 9,
+       "textBytes": 447,
+       "dataBytes": 96
+      },
+      {
+       "package": "iter",
+       "symbols": 3,
+       "textBytes": 85,
+       "dataBytes": 32
+      },
+      {
+       "package": "main",
+       "symbols": 1,
+       "textBytes": 82,
+       "dataBytes": 0
+      },
+      {
+       "package": "math",
+       "symbols": 3,
+       "textBytes": 27,
+       "dataBytes": 17
+      },
+      {
+       "package": "os",
+       "symbols": 30,
+       "textBytes": 5264,
+       "dataBytes": 233
+      },
+      {
+       "package": "reflect",
+       "symbols": 79,
+       "textBytes": 24872,
+       "dataBytes": 160
+      },
+      {
+       "package": "runtime",
+       "symbols": 1604,
+       "textBytes": 434207,
+       "dataBytes": 234326
+      },
+      {
+       "package": "runtime/debug",
+       "symbols": 1,
+       "textBytes": 293,
+       "dataBytes": 0
+      },
+      {
+       "package": "slices",
+       "symbols": 8,
+       "textBytes": 5363,
+       "dataBytes": 120
+      },
+      {
+       "package": "strconv",
+       "symbols": 10,
+       "textBytes": 3731,
+       "dataBytes": 120
+      },
+      {
+       "package": "sync",
+       "symbols": 39,
+       "textBytes": 5182,
+       "dataBytes": 144
+      },
+      {
+       "package": "sync/atomic",
+       "symbols": 10,
+       "textBytes": 239,
+       "dataBytes": 384
+      },
+      {
+       "package": "syscall",
+       "symbols": 39,
+       "textBytes": 4426,
+       "dataBytes": 2280
+      },
+      {
+       "package": "time",
+       "symbols": 5,
+       "textBytes": 329,
+       "dataBytes": 24
+      },
+      {
+       "package": "type:",
+       "symbols": 35,
+       "textBytes": 3778,
+       "dataBytes": 0
+      },
+      {
+       "package": "unicode",
+       "symbols": 13,
+       "textBytes": 714,
+       "dataBytes": 104
+      },
+      {
+       "package": "unicode/utf8",
+       "symbols": 6,
+       "textBytes": 1313,
+       "dataBytes": 288
+      }
+     ]
+    },
+    "stripped": {
+     "bytes": 1507488,
+     "sha256": "509888b58156e226838ba365beb3e935227c98006156e9042118dddc6552b882",
+     "build": {
+      "goVersion": "go1.27.0",
+      "settings": {
+       "-buildmode": "exe",
+       "-compiler": "gc",
+       "-trimpath": "true",
+       "CGO_ENABLED": "0",
+       "GOAMD64": "v1",
+       "GOARCH": "amd64",
+       "GOOS": "linux"
+      }
+     }
+    }
+   }
+  }
+ }
+}

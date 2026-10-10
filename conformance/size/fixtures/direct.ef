@@ -1,0 +1,17 @@
+// Direct spelling; pipe.ef is the same program in left-to-right form.
+fn shout(text: string) -> string {
+    text + "!"
+}
+
+fn wrap(text: string, open: string, close: string) -> string {
+    open + text + close
+}
+
+effect fn greet(name: string) -> string {
+    "Hello, " + name
+}
+
+effect fn main() -> string {
+    let framed = wrap(shout("ada"), "<", ">")
+    run greet(framed)
+}

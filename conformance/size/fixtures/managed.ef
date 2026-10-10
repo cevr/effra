@@ -1,0 +1,34 @@
+// Managed effect without platform I/O: owned children, join, interruption,
+// a deadline and typed recovery inside one scope. No Console, Files, Env or
+// HTTP provider is reachable; the entry prints main's result.
+error Bad
+
+effect fn immediate() -> string {
+    "child joined"
+}
+
+effect fn pending() -> string uses { Clock } {
+    run Clock.sleep(10000);
+    "late"
+}
+
+effect fn bad() -> string raises { Bad } {
+    fail Bad
+}
+
+effect fn program() -> string raises { Bad } uses { Clock, Scheduler } {
+    scope {
+        let child = fork immediate()
+        let joined = run child.join()
+        let stopped = fork pending()
+        run stopped.interrupt()
+        let deadline = run pending().timeout(1).catch<Timeout>("timed out")
+        let failed = fork bad()
+        let recovered = run failed.join().catch<Bad>("recovered")
+        joined + "; interrupted; " + deadline + "; " + recovered
+    }
+}
+
+effect fn main() -> string raises { Bad } {
+    run program().provide<Clock>(LiveClock).provide<Scheduler>(LiveScheduler)
+}

@@ -1,0 +1,14 @@
+// Codec-only consumer: one derived JSON codec plan, no transport.
+import Json "effra/json"
+
+record Customer {
+    id: i64
+    name: string
+}
+
+derive customerJson = Json.codec<Customer>(maxBodyBytes: 1024, maxDepth: 1)
+
+effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
+    let customer = run customerJson.decode("{\"id\":\"7\",\"name\":\"Ada\"}")
+    run customerJson.encode(customer)
+}
