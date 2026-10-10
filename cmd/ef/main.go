@@ -164,59 +164,38 @@ func printProjectionJSON(v any) error {
 	return json.NewEncoder(os.Stdout).Encode(v)
 }
 func load(path, target string) (*compiler.Result, error) {
-	r, _, err := loadWithSource(path, target)
+	source, err := locateSource(path)
+	if err != nil {
+		return nil, err
+	}
+	r, _, err := loadSource(source, target)
 	return r, err
 }
 
-func loadWithSource(path, target string) (*compiler.Result, compiler.SourceSnapshot, error) {
+// locateSource admits a source path once. Every command loads, builds,
+// tests and measures through the returned location, so no step reads,
+// protects or records a different file by interpreting the spelling again.
+func locateSource(path string) (receipt.Location, error) {
 	if filepath.Ext(path) != ".ef" {
-		return nil, compiler.SourceSnapshot{}, fmt.Errorf("source file must have .ef extension")
+		return receipt.Location{}, fmt.Errorf("source file must have .ef extension")
 	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return nil, compiler.SourceSnapshot{}, err
-	}
-	uri, err := compiler.FileURI(absolute)
-	if err != nil {
-		return nil, compiler.SourceSnapshot{}, err
-	}
-	source, err := sourcefile.ReadRegularFile(absolute, 0)
-	if err != nil {
-		return nil, compiler.SourceSnapshot{}, err
-	}
-	snapshot := compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: string(source)}
-	return compiler.CompileAt(snapshot.Text, target, filepath.Dir(absolute)), snapshot, nil
+	return receipt.LocateSource(path)
 }
 
-// loadWithOrigin keeps the established source admission and semantic module
-// resolution path, while returning the physical origin for generated output.
-// The origin is derived from the same absolute path that loadWithSource read;
-// it never describes a different file selected from the raw caller spelling.
-func loadWithOrigin(path, target string) (*compiler.Result, string, error) {
-	r, _, err := loadWithSource(path, target)
+// loadSource reads and checks the located source. Diagnostics name the
+// admitted path and module imports resolve beside it; the bytes come from
+// the file it reaches.
+func loadSource(source receipt.Location, target string) (*compiler.Result, compiler.SourceSnapshot, error) {
+	uri, err := compiler.FileURI(source.Admitted())
 	if err != nil {
-		return nil, "", err
+		return nil, compiler.SourceSnapshot{}, err
 	}
-	absolute, err := filepath.Abs(path)
+	text, err := sourcefile.ReadRegularFile(source.Path(), 0)
 	if err != nil {
-		return nil, "", err
+		return nil, compiler.SourceSnapshot{}, err
 	}
-	origin, err := resolveSourceOrigin(absolute)
-	if err != nil {
-		return nil, "", err
-	}
-	return r, origin, nil
-}
-
-// resolveSourceOrigin follows the operating system's path walk for the
-// already-admitted absolute source path. Diagnostics retain the established
-// lexical URI and source admission policy above.
-func resolveSourceOrigin(absolutePath string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(absolutePath)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Abs(resolved)
+	snapshot := compiler.SourceSnapshot{URI: uri, Origin: "disk", Text: string(text)}
+	return compiler.CompileAt(snapshot.Text, target, filepath.Dir(source.Admitted())), snapshot, nil
 }
 
 type options struct {
@@ -477,16 +456,11 @@ func command(args []string) error {
 			return err
 		}
 	}
-	var r *compiler.Result
-	var snapshot compiler.SourceSnapshot
-	var sourceOrigin string
-	if args[0] == "diagnostics" || args[0] == "lint" {
-		r, snapshot, err = loadWithSource(opts.positional[0], opts.target)
-	} else if opts.target == "go" && (args[0] == "build" || args[0] == "run" || args[0] == "test") {
-		r, sourceOrigin, err = loadWithOrigin(opts.positional[0], opts.target)
-	} else {
-		r, err = load(opts.positional[0], opts.target)
+	source, err := locateSource(opts.positional[0])
+	if err != nil {
+		return err
 	}
+	r, snapshot, err := loadSource(source, opts.target)
 	if err != nil {
 		return err
 	}
@@ -510,7 +484,7 @@ func command(args []string) error {
 				return err
 			}
 		} else {
-			printDiagnosticText(report, opts.positional[0])
+			printDiagnosticText(report, source.String())
 		}
 		if !report.PolicyPassed {
 			return fmt.Errorf("diagnostics failed policy")
@@ -570,7 +544,7 @@ func command(args []string) error {
 		symbol := r.Find(opts.positional[1])
 		if symbol == nil {
 			if r.FindLayer(opts.positional[1]) != nil {
-				response, err := r.LayerInspection(opts.positional[1], opts.positional[0])
+				response, err := r.LayerInspection(opts.positional[1], source.String())
 				if err != nil {
 					return err
 				}
@@ -615,9 +589,9 @@ func command(args []string) error {
 		if err := r.TestMode(opts.live); err != nil {
 			return err
 		}
-		return runTests(r, opts.positional[0], sourceOrigin, opts.timeoutMillis)
+		return runTests(r, source, opts.timeoutMillis)
 	case "build", "run":
-		paths, err := locateBuild(opts)
+		paths, err := locateBuild(source, opts)
 		if err != nil {
 			return err
 		}
@@ -630,9 +604,9 @@ func command(args []string) error {
 			defer destination.Close()
 		}
 		if opts.target == "go" {
-			measured, err = buildGo(r, opts.positional[0], sourceOrigin, paths.output, opts.receipt != "")
+			measured, err = buildGo(r, paths.source, paths.output, opts.receipt != "")
 		} else {
-			measured, err = buildJS(r, opts.positional[0], paths.output, paths.declaration, opts.entry || args[0] == "run", opts.receipt != "")
+			measured, err = buildJS(r, paths.source, paths.output, paths.declaration, opts.entry || args[0] == "run", opts.receipt != "")
 		}
 		if err != nil {
 			if !r.Checked {
@@ -748,15 +722,11 @@ type buildPaths struct {
 	managed     []receipt.Location
 }
 
-func locateBuild(opts options) (buildPaths, error) {
-	var paths buildPaths
+func locateBuild(source receipt.Location, opts options) (buildPaths, error) {
+	paths := buildPaths{source: source}
 	var err error
-	source := opts.positional[0]
-	if paths.source, err = receipt.Locate(source); err != nil {
-		return paths, err
-	}
 	if opts.target == "go" {
-		if paths.output, err = receipt.Locate(goOutputPath(source, opts.output)); err != nil {
+		if paths.output, err = locateArtifact(goOutputPath(source.String(), opts.output)); err != nil {
 			return paths, err
 		}
 		root, err := receipt.Locate(goApplicationsRoot)
@@ -766,15 +736,33 @@ func locateBuild(opts options) (buildPaths, error) {
 		paths.managed = []receipt.Location{root}
 		return paths, nil
 	}
-	module, declaration := jsOutputPaths(source, opts.output)
+	module, declaration := jsOutputPaths(source.String(), opts.output)
 	if filepath.Ext(module) != ".mjs" {
 		return paths, fmt.Errorf("JavaScript output must have .mjs extension")
 	}
-	if paths.output, err = receipt.Locate(module); err != nil {
+	if paths.output, err = locateArtifact(module); err != nil {
 		return paths, err
 	}
-	paths.declaration, err = receipt.Locate(declaration)
+	paths.declaration, err = locateArtifact(declaration)
 	return paths, err
+}
+
+// locateArtifact locates a file the build writes. A directory is refused
+// before anything is built: the go command would write a child executable
+// named after the package into it, a file no other step addresses, so the
+// spelling must name the file itself.
+func locateArtifact(path string) (receipt.Location, error) {
+	if strings.HasSuffix(path, string(filepath.Separator)) {
+		return receipt.Location{}, fmt.Errorf("output %s names a directory; name the file to write", path)
+	}
+	location, err := receipt.Locate(path)
+	if err != nil {
+		return receipt.Location{}, err
+	}
+	if info, err := os.Stat(location.Path()); err == nil && info.IsDir() {
+		return receipt.Location{}, fmt.Errorf("output %s is a directory; name the file to write", path)
+	}
+	return location, nil
 }
 
 // protected are the paths a receipt must never replace: the source and
@@ -790,12 +778,12 @@ func (p buildPaths) protected() []receipt.Location {
 // buildGo builds the ordinary native application at output. With measure,
 // it also returns the application receipt of the published generation and
 // executable.
-func buildGo(r *compiler.Result, source, origin string, output receipt.Location, measure bool) (*receipt.Application, error) {
+func buildGo(r *compiler.Result, source, output receipt.Location, measure bool) (*receipt.Application, error) {
 	application, err := goApplication(r, compiler.GoGenerationBuild)
 	if err != nil {
 		return nil, err
 	}
-	generation, err := buildGoApplication(r, origin, output, application)
+	generation, err := buildGoApplication(r, source, output, application)
 	if err != nil || !measure {
 		return nil, err
 	}
@@ -817,8 +805,8 @@ func goApplication(r *compiler.Result, mode compiler.GoGenerationMode) (*compile
 	return application, err
 }
 
-func buildGoApplication(r *compiler.Result, origin string, output receipt.Location, application *compiler.GoApplication) (compiler.GoGeneration, error) {
-	snapshot, err := r.GoSourceSnapshot(origin, application)
+func buildGoApplication(r *compiler.Result, source receipt.Location, output receipt.Location, application *compiler.GoApplication) (compiler.GoGeneration, error) {
+	snapshot, err := r.GoSourceSnapshot(source.Path(), application)
 	if err != nil {
 		return compiler.GoGeneration{}, err
 	}
@@ -844,7 +832,7 @@ var goApplicationsRoot = filepath.Join("dist", "go", "apps")
 
 // buildJS writes the JavaScript module and its declarations. With measure, it
 // also returns the application receipt of the written module.
-func buildJS(r *compiler.Result, source string, output, declaration receipt.Location, entry, measure bool) (*receipt.Application, error) {
+func buildJS(r *compiler.Result, source, output, declaration receipt.Location, entry, measure bool) (*receipt.Application, error) {
 	module, err := r.EmitModule(entry)
 	if err != nil {
 		return nil, err
@@ -899,7 +887,7 @@ func replaceEnv(environment []string, key, value string) []string {
 	return result
 }
 
-func runTests(r *compiler.Result, source, origin string, timeoutMillis int) error {
+func runTests(r *compiler.Result, source receipt.Location, timeoutMillis int) error {
 	var path string
 	if timeoutMillis == 0 {
 		timeoutMillis = 30000
@@ -909,11 +897,11 @@ func runTests(r *compiler.Result, source, origin string, timeoutMillis int) erro
 		if err != nil {
 			return err
 		}
-		output, err := receipt.Locate(filepath.Join("dist", sourceBase(source)+".tests"))
+		output, err := receipt.Locate(filepath.Join("dist", sourceBase(source.String())+".tests"))
 		if err != nil {
 			return err
 		}
-		if _, err = buildGoApplication(r, origin, output, application); err != nil {
+		if _, err = buildGoApplication(r, source, output, application); err != nil {
 			return err
 		}
 		path = output.Path()
@@ -922,7 +910,11 @@ func runTests(r *compiler.Result, source, origin string, timeoutMillis int) erro
 		if err != nil {
 			return err
 		}
-		path = filepath.Join("dist", sourceBase(source)+".tests.mjs")
+		module, err := receipt.Locate(filepath.Join("dist", sourceBase(source.String())+".tests.mjs"))
+		if err != nil {
+			return err
+		}
+		path = module.Path()
 		if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			return err
 		}
@@ -933,11 +925,8 @@ func runTests(r *compiler.Result, source, origin string, timeoutMillis int) erro
 			return err
 		}
 	}
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
-	runtime, args := absolute, []string{}
+	runtime, args := path, []string{}
+	var err error
 	if r.Target == "js" {
 		runtime, err = exec.LookPath("bun")
 		if err != nil {
@@ -946,7 +935,7 @@ func runTests(r *compiler.Result, source, origin string, timeoutMillis int) erro
 		if err != nil {
 			return fmt.Errorf("JavaScript tests require Bun or Node")
 		}
-		args = []string{absolute}
+		args = []string{path}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMillis)*time.Millisecond)
 	defer cancel()

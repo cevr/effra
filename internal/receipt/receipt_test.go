@@ -340,15 +340,49 @@ func TestAdmitRefusesUnresolvablePaths(t *testing.T) {
 	}
 }
 
+// A source is admitted as the loader admits it: `..` applies to the spelled
+// name, and links in the admitted path are then resolved. An artifact path
+// is walked as the file system walks it, and a `..` below a missing
+// directory is refused rather than cleaned away.
+func TestLocateSourceAndArtifactPaths(t *testing.T) {
+	root := physicalRoot(t)
+	mkdir(t, filepath.Join(root, "parent", "sub"))
+	mkdir(t, filepath.Join(root, "real"))
+	symlink(t, filepath.Join("parent", "sub"), filepath.Join(root, "jump"))
+	symlink(t, "real", filepath.Join(root, "dir-link"))
+	t.Chdir(root)
+
+	spelled := "dir-link/../dir-link/main.ef"
+	source, err := receipt.LocateSource("jump/../" + spelled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.String() != "jump/../"+spelled || source.Admitted() != filepath.Join(root, "dir-link", "main.ef") || source.Path() != filepath.Join(root, "real", "main.ef") {
+		t.Fatalf("source located as spelled=%q admitted=%q path=%q", source, source.Admitted(), source.Path())
+	}
+	artifact, err := receipt.Locate("jump/../main.ef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Path() != filepath.Join(root, "parent", "main.ef") || artifact.Admitted() != "" {
+		t.Fatalf("artifact located at %q (admitted %q)", artifact.Path(), artifact.Admitted())
+	}
+	for _, path := range []string{"missing/../out", "missing/./out", "missing/.."} {
+		if location, err := receipt.Locate(path); err == nil {
+			t.Errorf("%s located at %s", path, location.Path())
+		}
+	}
+}
+
 // The declared imports describe the emitted text, so the measured module
 // must be exactly that text. A same-length substitution changes the bytes
 // but not the length, and is refused.
 func TestJavaScriptMeasuresOnlyTheEmittedModule(t *testing.T) {
-	source, err := os.ReadFile("../../conformance/size/fixtures/http.ef")
+	text, err := os.ReadFile("../../conformance/size/fixtures/http.ef")
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := compiler.CompileAt(string(source), "js", "../../conformance/size/fixtures")
+	r := compiler.CompileAt(string(text), "js", "../../conformance/size/fixtures")
 	if !r.Checked {
 		t.Fatalf("check failed: %+v", r.Diagnostics)
 	}
@@ -370,18 +404,29 @@ func TestJavaScriptMeasuresOnlyTheEmittedModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	locations := at(t, modulePath, declarationPath)
-	if _, err := receipt.JavaScript(r, "http.ef", "entry", module, locations[0], locations[1]); err == nil || !strings.Contains(err.Error(), "does not hold the emitted module") {
+	source, err := receipt.LocateSource("../../conformance/size/fixtures/http.ef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := receipt.JavaScript(r, source, "entry", module, locations[0], locations[1]); err == nil || !strings.Contains(err.Error(), "does not hold the emitted module") {
 		t.Fatalf("same-length substitute measured: %v", err)
 	}
 
 	if err := os.WriteFile(modulePath, []byte(module.Source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	measured, err := receipt.JavaScript(r, "http.ef", "entry", module, locations[0], locations[1])
+	measured, err := receipt.JavaScript(r, source, "entry", module, locations[0], locations[1])
 	if err != nil {
 		t.Fatal(err)
 	}
-	if measured.Module.Bytes != int64(len(module.Source)) || len(measured.External) != 2 || measured.External[1].Specifier != "node:http" {
+	specifiers := []string{}
+	for _, external := range measured.External {
+		specifiers = append(specifiers, external.Specifier)
+	}
+	if measured.Module.Bytes != int64(len(module.Source)) || !slices.Equal(specifiers, []string{"effect", "node:dns/promises", "node:http", "node:net"}) {
 		t.Fatalf("unexpected measurement: module %+v external %+v", measured.Module, measured.External)
+	}
+	if measured.Source.Path != source.String() {
+		t.Fatalf("receipt names source %q, want %q", measured.Source.Path, source.String())
 	}
 }

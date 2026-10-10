@@ -171,6 +171,104 @@ func TestBuildReceiptRefusesInputsArtifactsAndAliases(t *testing.T) {
 	}
 }
 
+// The source is admitted once, and the loader, receipt admission, the build
+// and the receipt all use that one location. With jump -> parent/sub, the
+// loader admits jump/../main.ef as the top-level main.ef, as the go command
+// cleans its file arguments, so a receipt named main.ef would replace the
+// compiled source and is refused, while parent/main.ef is a different file.
+func TestBuildReceiptProtectsTheSourceTheLoaderAdmitted(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := t.TempDir()
+	compiled := "effect fn main() -> string {\n    \"top level\"\n}\n"
+	other := "effect fn main() -> string {\n    \"parent\"\n}\n"
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(compiled), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "parent", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "parent", "main.ef"), []byte(other), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("parent", "sub"), filepath.Join(root, "jump")); err != nil {
+		t.Fatal(err)
+	}
+	spelled := "jump" + string(filepath.Separator) + ".." + string(filepath.Separator) + "main.ef"
+	for _, target := range []string{"go", "js"} {
+		_, stderr, code := runTestCLIDir(t, binary, root, "", "build", spelled, "--target", target, "--receipt", "main.ef")
+		if code == 0 || !strings.Contains(string(stderr), "receipt path") {
+			t.Fatalf("%s: receipt replacing the compiled source accepted: code=%d stderr=%q", target, code, stderr)
+		}
+		if data, err := os.ReadFile(filepath.Join(root, "main.ef")); err != nil || string(data) != compiled {
+			t.Fatalf("%s: compiled source changed: %v %q", target, err, data)
+		}
+		if _, err := os.Stat(filepath.Join(root, "dist")); !os.IsNotExist(err) {
+			t.Fatalf("%s: refused build wrote output: %v", target, err)
+		}
+	}
+
+	// The file the link walk reaches is not the compiled source: a receipt
+	// there is admitted, and it records the bytes the loader read.
+	if stdout, stderr, code := runTestCLIDir(t, binary, root, "", "build", spelled, "-o", "app", "--receipt", filepath.Join("parent", "main.ef")); code != 0 {
+		t.Fatalf("build failed: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	written := readReceipt(t, filepath.Join(root, "parent", "main.ef"))
+	if written.Source.Path != spelled || written.Source.Revision != revisionForSource(compiled) {
+		t.Fatalf("receipt records source %+v, want %s at revision %s", written.Source, spelled, revisionForSource(compiled))
+	}
+	if output, err := exec.Command(filepath.Join(root, "app")).Output(); err != nil || !strings.Contains(string(output), "top level") {
+		t.Fatalf("built executable did not run the compiled source: %v %q", err, output)
+	}
+}
+
+// An output that names a directory is refused before anything is built.
+// The go command would write a child executable inside it, a file neither
+// receipt admission nor measurement addresses.
+func TestBuildRefusesDirectoryOutputs(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(minimalApplicationSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{"existing", "existing.mjs", filepath.Join("dist", "main")} {
+		if err := os.MkdirAll(filepath.Join(root, directory), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink("existing", filepath.Join(root, "existing-link")); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"existing directory", []string{"-o", "existing"}},
+		{"link to a directory", []string{"-o", "existing-link"}},
+		{"trailing separator", []string{"-o", "fresh" + string(filepath.Separator)}},
+		{"default output is a directory", nil},
+		{"js module directory", []string{"--target", "js", "-o", "existing.mjs"}},
+	}
+	for _, c := range cases {
+		for _, receiptArgs := range [][]string{nil, {"--receipt", "receipt.json"}} {
+			args := append(append([]string{"build", "main.ef"}, c.args...), receiptArgs...)
+			_, stderr, code := runTestCLIDir(t, binary, root, "", args...)
+			if code == 0 || !strings.Contains(string(stderr), "name the file to write") {
+				t.Fatalf("%s %v: directory output accepted: code=%d stderr=%q", c.name, receiptArgs, code, stderr)
+			}
+		}
+	}
+	for _, directory := range []string{"existing", "existing.mjs", filepath.Join("dist", "main")} {
+		if entries, err := os.ReadDir(filepath.Join(root, directory)); err != nil || len(entries) != 0 {
+			t.Errorf("refused build wrote into %s: %v %v", directory, err, entries)
+		}
+	}
+	for _, absent := range []string{"fresh", "receipt.json", filepath.Join("dist", "go")} {
+		if _, err := os.Stat(filepath.Join(root, absent)); !os.IsNotExist(err) {
+			t.Errorf("refused build wrote %s: %v", absent, err)
+		}
+	}
+}
+
 // The JavaScript receipt lists the imports emission declared: program text
 // that spells an import adds nothing and refuses nothing, and the HTTP
 // transport's host module is listed.
@@ -197,7 +295,7 @@ func TestJSReceiptListsDeclaredImportsOnly(t *testing.T) {
 		}
 		want := "effect"
 		if name == "http.ef" {
-			want = "effect node:http"
+			want = "effect node:dns/promises node:http node:net"
 		}
 		if got := strings.Join(specifiers, " "); got != want {
 			t.Errorf("%s: external modules %q, want %q", name, got, want)

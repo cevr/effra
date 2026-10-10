@@ -202,12 +202,12 @@ func (s *Symbols) Package(name string) (SymbolPackage, bool) {
 	return s.Packages[index], true
 }
 
-func newApplication(r *compiler.Result, source, target, mode string) (*Application, error) {
+func newApplication(r *compiler.Result, source Location, target, mode string) (*Application, error) {
 	distribution, err := distribution()
 	if err != nil {
 		return nil, err
 	}
-	return &Application{Schema: Schema, Target: target, Mode: mode, Source: Source{Path: source, Revision: r.Revision}, Compiler: distribution}, nil
+	return &Application{Schema: Schema, Target: target, Mode: mode, Source: Source{Path: source.String(), Revision: r.Revision}, Compiler: distribution}, nil
 }
 
 func distribution() (Compiler, error) {
@@ -243,7 +243,7 @@ func planOf(plan *compiler.ApplicationPlan) (Plan, error) {
 // Native measures one published generation and the executable built from
 // it, running the go command from the generated module so it selects the
 // toolchain that built the executable.
-func Native(r *compiler.Result, source string, application *compiler.GoApplication, generation compiler.GoGeneration, binary Location) (*Application, error) {
+func Native(r *compiler.Result, source Location, application *compiler.GoApplication, generation compiler.GoGeneration, binary Location) (*Application, error) {
 	receipt, err := newApplication(r, source, "go", string(application.Plan.Mode))
 	if err != nil {
 		return nil, err
@@ -594,7 +594,7 @@ func symbolPackage(name string) string {
 // JavaScript records an emitted module and its declaration file. External
 // modules are the imports emission declared for the module, so program text
 // that spells an import is never mistaken for one.
-func JavaScript(r *compiler.Result, source, mode string, module compiler.JSModule, modulePath, declarationPath Location) (*Application, error) {
+func JavaScript(r *compiler.Result, source Location, mode string, module compiler.JSModule, modulePath, declarationPath Location) (*Application, error) {
 	receipt, err := newApplication(r, source, "js", mode)
 	if err != nil {
 		return nil, err
@@ -644,6 +644,7 @@ func JavaScript(r *compiler.Result, source, mode string, module compiler.JSModul
 // differently.
 type Location struct {
 	spelled  string
+	admitted string
 	resolved string
 }
 
@@ -659,8 +660,35 @@ func Locate(spelled string) (Location, error) {
 	return Location{spelled: spelled, resolved: resolved}, nil
 }
 
+// LocateSource locates a source file as the loader admits it. The spelling
+// is made absolute once, which cleans it lexically as the go command does
+// with its file arguments, so a `..` applies to the spelled name rather
+// than to a link's target. That admitted path is then resolved as Locate
+// resolves paths. Every consumer of the source uses this one value: the
+// loader reads Path, diagnostics name Admitted and module imports resolve
+// beside it, the generated module records Path as its origin, receipt
+// admission protects it and the receipt records String.
+func LocateSource(spelled string) (Location, error) {
+	if spelled == "" {
+		return Location{}, fmt.Errorf("empty path")
+	}
+	admitted, err := filepath.Abs(spelled)
+	if err != nil {
+		return Location{}, fmt.Errorf("%s: %w", spelled, err)
+	}
+	resolved, err := resolveFull(admitted)
+	if err != nil {
+		return Location{}, fmt.Errorf("%s: %w", spelled, err)
+	}
+	return Location{spelled: spelled, admitted: admitted, resolved: resolved}, nil
+}
+
 // Path is the absolute resolved path a writer opens.
 func (l Location) Path() string { return l.resolved }
+
+// Admitted is the absolute path a source was admitted under, before its
+// links were resolved; it is empty for a Location that is not a source.
+func (l Location) Admitted() string { return l.admitted }
 
 // String is the path as it was spelled, for messages and records.
 func (l Location) String() string { return l.spelled }
@@ -711,11 +739,6 @@ func Admit(path string, protected []Location, managed []Location) (*Destination,
 	directory, missing, err := physical(parentSpelling)
 	if err != nil {
 		return nil, fmt.Errorf("receipt path %s: %w", path, err)
-	}
-	for _, component := range missing {
-		if component == "." || component == ".." {
-			return nil, fmt.Errorf("receipt path %s steps through %q below a missing directory", path, component)
-		}
 	}
 	base, err := os.OpenRoot(directory)
 	if err != nil {
@@ -998,7 +1021,10 @@ func physicalWorkingDirectory() (string, error) {
 // directory. The path is never cleaned lexically before resolution, which
 // would apply `..` to a link's own name instead of its target. A
 // component that exists but cannot be walked, such as a dangling link or
-// a file, is an error: it is never replayed as a missing directory.
+// a file, is an error: it is never replayed as a missing directory. A `.`
+// or `..` below a missing directory is an error too, because joining it
+// would clean the spelling lexically where the file system would refuse
+// to walk it.
 func physical(path string) (string, []string, error) {
 	separator := string(filepath.Separator)
 	if !filepath.IsAbs(path) {
@@ -1020,7 +1046,13 @@ func physical(path string) (string, []string, error) {
 				return "", nil, fmt.Errorf("%s exists but cannot be resolved (a dangling link or a non-directory)", separator+strings.Join(components[:count+1], separator))
 			}
 		}
-		return resolved, components[count:], nil
+		missing := components[count:]
+		for _, component := range missing {
+			if component == "." || component == ".." {
+				return "", nil, fmt.Errorf("%s steps through %q below a missing directory", path, component)
+			}
+		}
+		return resolved, missing, nil
 	}
 	return "", nil, fmt.Errorf("cannot resolve %s", path)
 }
