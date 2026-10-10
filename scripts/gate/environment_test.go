@@ -119,26 +119,6 @@ func TestAnExternalNodePreloadCannotReachACachedStep(t *testing.T) {
 	}
 }
 
-// A user-wide bunfig can preload modules into every Bun run, so its bytes
-// are part of the bun fingerprint.
-func TestBunGlobalConfigIsPartOfTheBunFingerprint(t *testing.T) {
-	config := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", config)
-	t.Setenv("HOME", t.TempDir())
-	g := &gate{}
-	version := func() string {
-		g.tools = nil
-		return g.toolVersion("bun")
-	}
-	absent := version()
-	write(t, config, ".bunfig.toml", "preload = [\"./one.ts\"]\n")
-	first := version()
-	write(t, config, ".bunfig.toml", "preload = [\"./two.ts\"]\n")
-	if first == absent || version() == first {
-		t.Fatal("a global bunfig edit left the bun fingerprint unchanged")
-	}
-}
-
 // A submodule configured with ignore=all still makes the checkout unclean
 // when its contents change.
 func TestCheckoutIdentitySeesIgnoredSubmoduleChanges(t *testing.T) {

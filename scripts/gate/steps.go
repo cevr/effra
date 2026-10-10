@@ -48,20 +48,6 @@ var goRuntimeEnvironment = []string{"GODEBUG", "GOGC", "GOMEMLIMIT", "GOMAXPROCS
 // resolves imports from any directory.
 var unpinnedToolEnvironment = []string{"ESBUILD_BINARY_PATH", "NODE_OPTIONS", "NODE_PATH", "BUN_OPTIONS"}
 
-// bunGlobalConfigs are the user-wide bunfig files Bun merges into every run
-// (one can preload modules); their bytes join the bun fingerprint. Bun reads
-// one of XDG_CONFIG_HOME's and HOME's; both are keyed.
-func bunGlobalConfigs() []string {
-	var configs []string
-	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
-		configs = append(configs, filepath.Join(dir, ".bunfig.toml"))
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		configs = append(configs, filepath.Join(home, ".bunfig.toml"))
-	}
-	return configs
-}
-
 // testInstalled are installed dependency trees Go tests run Node and Bun
 // over; their content digest joins the tool digest.
 var testInstalled = []string{"node_modules"}
