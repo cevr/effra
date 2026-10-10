@@ -170,7 +170,7 @@ const __ef_http_bound = server => {
 // the listener's services and, once that scope has closed, publishes its exit
 // through respond unless the client is gone.
 const __ef_http_serve = (address, timeouts, onRequest) => Effect.gen(function* () {
-  const [{ createServer }, { isIP }, { lookup }] = yield* Effect.promise(() => Promise.all([import('node:http'), import('node:net'), import('node:dns/promises')]));
+  const [{ createServer }, { isIP }, { lookup }] = yield* Effect.promise(() => Promise.all([__ef_host_node_http(), __ef_host_node_net(), __ef_host_node_dns_promises()]));
   const { host, port } = yield* __ef_http_listen_target(address, isIP, lookup);
   const context = yield* Effect.context();
   const transport = { closing: false, fibers: new Map(), exchanges: new Set(), reading: new WeakMap() };
