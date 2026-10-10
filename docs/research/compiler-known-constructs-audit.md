@@ -271,5 +271,5 @@ Result: `Jobs.cancel` checks, because fiber dispatch is type-directed (S10). `Jo
 - `docs/design.md`: construct admission no longer prefers a checker rule over syntax when that rule would be keyed on a library identity. The visible-construct refinement cites the 2026-10-09 direction. The receiver-method member no longer moves compiler-known forms into `effra/effect`.
 - `docs/specs/language-abstractions.md`: updated construct-status rows 12-16, 20, 28 and 29 and the pipe exception, including the recorded test migration. These forms are now called "postfix constructs", not "intrinsics".
 - `docs/specs/machine-provider-contract.md`: corrected the `.catch`/`.provide` analogy.
-- PRIOR_ARTS: added the comparison section. GLOSSARY: added the new terms.
+- PRIOR_ART: added the comparison section. GLOSSARY: added the new terms.
 - Not edited, because other owners hold them: `docs/wayfinder/**` (the #3 ticket text still says "non-parser ownership"), `docs/specs/state-machines.md` (1-P1, statecharts lane) and `docs/specs/actors.md` (1-P3).

@@ -1,6 +1,6 @@
 # Declarative layer composition
 
-Source comparison, 2026-10-06. This records adoption decisions and finite acceptance cases; first-class layers are not implemented yet. Exact application pins and primary-source pointers live in [the prior-art index](../../PRIOR_ARTS.md); private source pointers remain in local research notes. No production application tests were run for this comparison.
+Source comparison, 2026-10-06. This records adoption decisions and finite acceptance cases; first-class layers are not implemented yet. Exact application pins and primary-source pointers live in [the prior-art index](../../PRIOR_ART.md); private source pointers remain in local research notes. No production application tests were run for this comparison.
 
 Production servers repeatedly compose intermediate provider bundles, choose output-retaining versus output-hiding provision, and reinject already constructed application services into connection or request graphs. Resource hosts separately implement node traversal, replacement, cycle paths, compatible-input sharing and disposal. Test roots carry fixture options through constructor helpers or wrap plans to obtain fresh acquisition. Those are recurring contracts a small language surface can expose directly.
 
