@@ -149,7 +149,7 @@ Decisions and rejected alternatives:
 - Rejected, for now: a per-fixture byte budget in the gate. Budgets come from measured baselines, and the matched baselines are not complete yet (see below). The gate asserts retention facts that do not depend on the toolchain.
 - Rejected, for now: an MCP build receipt. MCP `project.check` already reports each entry mode's closed modules and requirement counts. Building executables from MCP is a separate capability decision.
 
-Recorded run `conformance/size/receipts/2026-10-09.json` (`effra.size-conformance/2`). Commit `afdf746` with a clean tree, on main `0e10baee`, go1.27.0 linux/amd64, `CGO_ENABLED=0`, Bun 1.4.2, Node v24.11.1, Effect 4.0.1.
+Recorded run `conformance/size/receipts/2026-10-09.json` (`effra.size-conformance/2`). Commit `b6cd350` with a clean tree, on main `0f13612a`, go1.27.0 linux/amd64, `CGO_ENABLED=0`, Bun 1.4.2, Node v24.11.1, Effect 4.0.1.
 
 History of this record:
 
@@ -159,35 +159,36 @@ History of this record:
 - It was re-recorded after rebasing onto `bdbbecf` (the record is now `650145e`). Every application row kept its bytes. Only the compiler executable changed, from 17,056,908 to 17,125,397 bytes.
 - It was re-recorded after the admission and compiler-command repair (now `53044af`). Every application row kept its bytes. Only the compiler executable changed, to 17,140,576 bytes.
 - It was re-recorded after rebasing onto main `dd3a002` and the build-path repair (the code commit is now `4a35caf`). Main's typed recovery and cancellation-aborted owners (`9926036`) grew the bundled runtime sources from 107,840 to 110,726 bytes and moved the checker from `checker-abi-9` to `checker-abi-10`. Every application row grew. For example, the minimal native executable went from 2,668,552 to 2,669,360 bytes and the managed one from 2,813,732 to 2,824,163. The minimal JavaScript module went from 3,467 to 5,408 bytes. Controls kept their bytes. The compiler executable grew to 17,784,453 bytes. The repair itself changes no application bytes, since it touches only the CLI and `internal/receipt`.
-- It was re-recorded at `afdf746` after rebasing onto main `0e10baee`, which adds only documentation. Only the recorded commit changed.
+- It was re-recorded after rebasing onto main `0e10baee`, which adds only documentation (the record is now `4e44468`). Only the recorded commit changed.
+- It was re-recorded at `b6cd350` after merging main `0f13612a` and the source-location repair. Main's entry failure reports (`runtime/effra/report.go`) grew the bundled runtime sources from 15 files and 110,726 bytes to 16 files and 119,300 bytes, and its HTTP listener now loads `node:net` and `node:dns/promises` as well as `node:http`. Every application row grew. For example, the minimal native executable went from 2,669,360 to 2,703,440 bytes and the managed one from 2,824,163 to 2,859,343. The minimal JavaScript module went from 5,408 to 9,154 bytes and the HTTP one from 18,416 to 27,505. Controls kept their bytes. The compiler executable grew to 17,887,896 bytes. The repair itself changes no application bytes, since it touches only the CLI and `internal/receipt`.
 
 Raw bytes:
 
 | Row | Go | Go stripped | Go deps | JS module | JS app (min) | JS deploy (min) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| minimal | 2,669,360 | 1,732,768 | 65 | 5,408 | 2,162 | 31,044 |
-| minimal, all-source | 5,566,699 | 3,748,000 | 200 | | | |
-| minimal-unused | 2,669,360 | 1,732,768 | 65 | 5,408 | 2,162 | 31,044 |
-| managed | 2,824,163 | 1,847,456 | 65 | 12,263 | 5,416 | 35,785 |
-| managed, all-source | 5,709,198 | 3,854,496 | 200 | | | |
-| codec | 2,788,461 | 1,818,784 | 65 | 27,252 | 12,767 | 42,131 |
-| codec, all-source | 5,678,210 | 3,829,920 | 200 | | | |
-| http | 8,835,591 | 6,000,800 | 191 | 18,416 | 7,597 | 37,076 |
-| direct / pipe | 2,678,394 | 1,740,960 | 65 | 6,033 | 2,312 | 31,201 |
+| minimal | 2,703,440 | 1,757,344 | 65 | 9,154 | 3,915 | 32,419 |
+| minimal, all-source | 5,596,034 | 3,768,480 | 200 | | | |
+| minimal-unused | 2,703,440 | 1,757,344 | 65 | 9,154 | 3,915 | 32,419 |
+| managed | 2,859,343 | 1,872,032 | 65 | 16,053 | 7,209 | 37,189 |
+| managed, all-source | 5,738,613 | 3,874,976 | 200 | | | |
+| codec | 2,817,788 | 1,839,264 | 65 | 31,113 | 14,627 | 43,605 |
+| codec, all-source | 5,707,104 | 3,850,400 | 200 | | | |
+| http | 8,874,475 | 6,029,472 | 191 | 27,505 | 11,378 | 40,460 |
+| direct / pipe | 2,709,562 | 1,761,440 | 65 | 9,779 | 4,065 | 32,576 |
 | Go control, minimal (matched) | 2,548,908 | 1,650,848 | 62 | | | |
 | Go control, minimal floor (unmatched) | 2,337,985 | 1,507,488 | 60 | | | |
 | Go control, managed (matched) | 2,584,698 | 1,675,424 | 62 | | | |
 | TS/Effect control, minimal (matched) | | | | 651 (source) | 326 | 27,292 |
 | TS/Effect control, managed (matched) | | | | 1,442 (source) | 765 | 40,796 |
 
-The compiler executable is reported separately from these application rows. It was 17,784,453 bytes in the recorded run, and the bundled runtime sources were 15 files and 110,726 bytes.
+The compiler executable is reported separately from these application rows. It was 17,887,896 bytes in the recorded run, and the bundled runtime sources were 16 files and 119,300 bytes.
 
 Retention observations, not claims:
 
 Attribution comes from the symbol table only. Sized symbols cover part of each file-size gap. The rest (section padding, headers, metadata that `nm` does not size) is unexplained.
 
-- A pure minimal entry retains the `core` module: scopes, fibers, the scheduler, and signal-driven cancellation through `os/signal`. It is 120,452 bytes over the matched Go control, and sized symbols account for 43,962 of them. The largest per-package symbol deltas (text plus data) are the generated runtime (+18.8 KB), `fmt` (+7.9 KB), linker-synthesized `go:` symbols (+5.3 KB), `slices` (+3.9 KB) and `context` (+2.9 KB). Only the generated runtime, `cmp` and `strings` are packages the control lacks. Against the unmatched floor the gap is 331,375 bytes, with 121,434 in sized symbols, led by `time` (+41.5 KB), which the matched control also retains.
-- The managed row is 239,465 bytes over its matched Go control, and sized symbols account for 96,249 of them. The generated runtime (+60.9 KB) and generated `main` (+12.1 KB) together are 73,019 bytes. Apart from the generated runtime, `cmp` and `strings`, both executables retain symbols from the same packages.
+- A pure minimal entry retains the `core` module: scopes, fibers, the scheduler, and signal-driven cancellation through `os/signal`. It is 154,532 bytes over the matched Go control, and sized symbols account for 57,934 of them. The largest per-package symbol deltas (text plus data) are the generated runtime (+29.0 KB), `fmt` (+8.9 KB), linker-synthesized `go:` symbols (+7.0 KB), `slices` (+3.9 KB) and `context` (+2.9 KB). Only the generated runtime, `cmp` and `strings` are packages the control lacks. Against the unmatched floor the gap is 365,455 bytes, with 135,406 in sized symbols, led by `time` (+41.5 KB), which the matched control also retains.
+- The managed row is 274,645 bytes over its matched Go control, and sized symbols account for 110,201 of them. The generated runtime (+71.1 KB) and generated `main` (+12.4 KB) together are 83,525 bytes. Apart from the generated runtime, `cmp` and `strings`, both executables retain symbols from the same packages.
 - Splitting `core` so that an entry without forks, sleeps or deadlines does not retain the scheduler is a candidate transformation. It must preserve entry cancellation, and it remains unmeasured.
 
 Delivered for #14: the application plan's source selection and stale-generation reconciliation (above); `ef build --receipt` with admission against the build's own paths and atomic publication into a pinned directory; receipts that record effective Go and C toolchain inputs; the `internal/receipt` measurement owner; the gate's retention checks; the Go matrix; matched minimal and managed controls on both targets; and the recorded run.
