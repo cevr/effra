@@ -125,10 +125,12 @@ function run(label, executable, args, expectedFailure = false, cwd = leaf) {
   const result = spawnSync(executable, args, { cwd, env, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
   return settle(label, [executable, ...args], cwd, result, expectedFailure);
 }
+// Children started alongside the synchronous ones; a failure joins them before the control exits.
+const pending = new Map();
 // start runs a command alongside the synchronous ones; finish reports it exactly as run would, in the order the
 // caller awaits it, so the log stays deterministic.
 function start(label, executable, args, cwd = leaf) {
-  return new Promise(resolve => {
+  const exited = new Promise(resolve => {
     const child = spawn(executable, args, { cwd, env });
     const stdout = [];
     const stderr = [];
@@ -137,10 +139,13 @@ function start(label, executable, args, cwd = leaf) {
     child.stderr.on("data", chunk => stderr.push(chunk));
     child.on("error", error => resolve({ status: null, signal: null, error, stdout: text(stdout), stderr: text(stderr) }));
     child.on("close", (status, signal) => resolve({ status, signal, error: null, stdout: text(stdout), stderr: text(stderr) }));
-  }).then(result => ({ label, argv: [executable, ...args], cwd, result }));
+  });
+  pending.set(label, exited);
+  return exited.then(result => ({ label, argv: [executable, ...args], cwd, result }));
 }
-async function finish(pending, expectedFailure = false) {
-  const { label, argv, cwd, result } = await pending;
+async function finish(started, expectedFailure = false) {
+  const { label, argv, cwd, result } = await started;
+  pending.delete(label);
   return settle(label, argv, cwd, result, expectedFailure);
 }
 function settle(label, argv, cwd, result, expectedFailure) {
@@ -376,5 +381,11 @@ try {
     console.log("COUNTER_DOMAIN_CONTROLS_EXIT=0 (Go/Bun/Node production trace+wrap; three causal authored-domain mutants RED; no mounted Effra ports)");
   }
 } catch (error) {
-  evidence.error = error instanceof Error ? error.stack : String(error); save(); throw error;
+  evidence.error = error instanceof Error ? error.stack : String(error); save();
+  // The first failure decides the outcome; a started child still runs to its end, so none outlives the control.
+  for (const [label, exited] of pending) {
+    const { status, signal } = await exited;
+    console.log(`COUNTER_${label}_JOINED_AFTER_FAILURE_EXIT=${status}${signal ? ` signal ${signal}` : ""}`);
+  }
+  throw error;
 }

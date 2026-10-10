@@ -18,9 +18,11 @@ console.log("reference profile: React development act (NODE_ENV=test); Solid/yie
 function run(label, executable, args) {
   return settle(label, executable, args, spawnSync(executable, args, { cwd: root, env, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }));
 }
+// Children started alongside others; a failure joins them before the runner exits.
+const pending = new Map();
 // start runs a command alongside others; its output is reported, as run reports it, when the caller awaits it.
 function start(label, executable, args) {
-  return new Promise(resolve => {
+  const exited = new Promise(resolve => {
     const child = spawn(executable, args, { cwd: root, env });
     const stdout = [];
     const stderr = [];
@@ -29,7 +31,19 @@ function start(label, executable, args) {
     child.stderr.on("data", chunk => stderr.push(chunk));
     child.on("error", error => resolve({ status: null, signal: null, error, stdout: text(stdout), stderr: text(stderr) }));
     child.on("close", (status, signal) => resolve({ status, signal, error: null, stdout: text(stdout), stderr: text(stderr) }));
-  }).then(result => () => settle(label, executable, args, result));
+  });
+  pending.set(label, exited);
+  return exited.then(result => () => {
+    pending.delete(label);
+    return settle(label, executable, args, result);
+  });
+}
+// A failed command is reported where it fails; its exit status becomes the runner's once started children are joined.
+class CommandFailed extends Error {
+  constructor(label, status) {
+    super(`${label} failed`);
+    this.status = status;
+  }
 }
 function settle(label, executable, args, result) {
   console.log(`${label}_COMMAND=${JSON.stringify([executable, ...args])}`);
@@ -39,35 +53,48 @@ function settle(label, executable, args, result) {
   if (result.error) throw result.error;
   if (result.status !== 0) {
     if (result.signal) console.error(`${label}_SIGNAL=${result.signal}`);
-    process.exit(result.status ?? 1);
+    throw new CommandFailed(label, result.status ?? 1);
   }
   return `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
 }
-const bunVersion = run("BUN_VERSION", "bun", ["--version"]).trim();
-assert.equal(bunVersion, "1.4.2", "references require Bun1.4.2");
-run("CAPTURE", process.execPath, ["scripts/check-yield-capture.mjs"]);
-run("DEPENDENCIES", process.execPath, ["scripts/check-dependency-profile.mjs"]);
-// The counter-domain control and the vendor build share nothing, so they run together; the consumer check needs
-// both. Emitting the vendor declarations type-checks the same program a separate --noEmit pass would.
-const counterDomain = start("COUNTER_DOMAIN", process.execPath, ["scripts/check-counter-domain.mjs", ...(counterArtifacts ? ["--verify", path.resolve(counterArtifacts)] : [])]);
-run("VENDOR_BUILD", process.execPath, ["vendor/solid-yield/scripts/build.mjs"]);
-run("VENDOR_DECLARATIONS", process.execPath, [compiler, "-p", "tsconfig.yield.json"]);
-(await counterDomain)();
-run("CONSUMER_NOEMIT", process.execPath, [compiler, "--noEmit", "-p", "tsconfig.json"]);
-run("PUBLIC_EXPORTS", process.execPath, ["--conditions=browser", "--conditions=production", "scripts/check-dependency-profile.mjs", "--built"]);
-// Bun hides per-test pass lines when it detects an AI agent caller, so per-host results come from its JUnit record.
-const junit = path.join(root, ".generated/framework-references.junit.xml");
-mkdirSync(path.dirname(junit), { recursive: true });
-rmSync(junit, { force: true });
-const mounted = run("MOUNTED", "bun", ["--conditions=browser", "--conditions=production", "test", "--preload", "./tests/process-dom-preload.ts", "--reporter=junit", `--reporter-outfile=${junit}`, "tests/framework-references.test.tsx"]);
-assert.match(mounted, /^\s*3 pass\s*$/m, "all three mounted cases must execute");
-assert.match(mounted, /^\s*0 fail\s*$/m, "mounted failures cannot pass");
-assert.doesNotMatch(mounted, /^\s*[1-9][0-9]* (?:skip|todo)\s*$/m, "skipped mounted cases cannot pass");
-const report = readFileSync(junit, "utf8");
-assert.match(report, /<testsuites name="bun test" tests="3" assertions="[1-9][0-9]*" failures="0" skipped="0"/, "JUnit record: three executed cases, no failures or skips");
-assert.equal((report.match(/<testcase /g) ?? []).length, 3, "JUnit record lists exactly three cases");
-for (const host of ["react-atom", "solid-effect", "solid-yield"]) {
-  const name = `${host} reference mounts, applies source events below zero, resets from nonzero and releases its subscriptions`;
-  assert.match(report, new RegExp(`<testcase name="${name}"[^>]* assertions="[1-9][0-9]*" />`), `missing executed host: ${host}`);
+try {
+  await references();
+} catch (error) {
+  // The first failure decides the outcome; a started child still runs to its end, so none outlives the runner.
+  for (const [label, exited] of pending) {
+    const { status, signal } = await exited;
+    console.log(`${label}_JOINED_AFTER_FAILURE_EXIT=${status}${signal ? ` signal ${signal}` : ""}`);
+  }
+  if (!(error instanceof CommandFailed)) throw error;
+  process.exitCode = error.status;
 }
-console.log("FRAMEWORK_REFERENCES_EXIT=0 (three mounted Number-reference hosts; no compiled Effra ports)");
+async function references() {
+  const bunVersion = run("BUN_VERSION", "bun", ["--version"]).trim();
+  assert.equal(bunVersion, "1.4.2", "references require Bun1.4.2");
+  run("CAPTURE", process.execPath, ["scripts/check-yield-capture.mjs"]);
+  run("DEPENDENCIES", process.execPath, ["scripts/check-dependency-profile.mjs"]);
+  // The counter-domain control and the vendor build share nothing, so they run together; the consumer check needs
+  // both. Emitting the vendor declarations type-checks the same program a separate --noEmit pass would.
+  const counterDomain = start("COUNTER_DOMAIN", process.execPath, ["scripts/check-counter-domain.mjs", ...(counterArtifacts ? ["--verify", path.resolve(counterArtifacts)] : [])]);
+  run("VENDOR_BUILD", process.execPath, ["vendor/solid-yield/scripts/build.mjs"]);
+  run("VENDOR_DECLARATIONS", process.execPath, [compiler, "-p", "tsconfig.yield.json"]);
+  (await counterDomain)();
+  run("CONSUMER_NOEMIT", process.execPath, [compiler, "--noEmit", "-p", "tsconfig.json"]);
+  run("PUBLIC_EXPORTS", process.execPath, ["--conditions=browser", "--conditions=production", "scripts/check-dependency-profile.mjs", "--built"]);
+  // Bun hides per-test pass lines when it detects an AI agent caller, so per-host results come from its JUnit record.
+  const junit = path.join(root, ".generated/framework-references.junit.xml");
+  mkdirSync(path.dirname(junit), { recursive: true });
+  rmSync(junit, { force: true });
+  const mounted = run("MOUNTED", "bun", ["--conditions=browser", "--conditions=production", "test", "--preload", "./tests/process-dom-preload.ts", "--reporter=junit", `--reporter-outfile=${junit}`, "tests/framework-references.test.tsx"]);
+  assert.match(mounted, /^\s*3 pass\s*$/m, "all three mounted cases must execute");
+  assert.match(mounted, /^\s*0 fail\s*$/m, "mounted failures cannot pass");
+  assert.doesNotMatch(mounted, /^\s*[1-9][0-9]* (?:skip|todo)\s*$/m, "skipped mounted cases cannot pass");
+  const report = readFileSync(junit, "utf8");
+  assert.match(report, /<testsuites name="bun test" tests="3" assertions="[1-9][0-9]*" failures="0" skipped="0"/, "JUnit record: three executed cases, no failures or skips");
+  assert.equal((report.match(/<testcase /g) ?? []).length, 3, "JUnit record lists exactly three cases");
+  for (const host of ["react-atom", "solid-effect", "solid-yield"]) {
+    const name = `${host} reference mounts, applies source events below zero, resets from nonzero and releases its subscriptions`;
+    assert.match(report, new RegExp(`<testcase name="${name}"[^>]* assertions="[1-9][0-9]*" />`), `missing executed host: ${host}`);
+  }
+  console.log("FRAMEWORK_REFERENCES_EXIT=0 (three mounted Number-reference hosts; no compiled Effra ports)");
+}
