@@ -522,10 +522,13 @@ func randomMachineShape(rng *rand.Rand) machineShape {
 	return capMachineSource(s)
 }
 
-// machineSourceCap bounds a generated source. Of seeds 1-1000, 18 drew more
-// than 128 MiB (none of 1-64, the gate's), and seed 486's 455 MB took 3-6
-// minutes in the checker before analysis started. A shape over the cap has
-// its long names cut to a quarter, then its declarations, until it fits.
+// machineSourceCap bounds a generated source, and with it a seed's memory. Of
+// seeds 1-1000, 18 drew more than 128 MiB (none of 1-64, the gate's), up to
+// seed 486's 455 MB. A shape over the cap has its long names cut to a
+// quarter, then its declarations, until it fits. The cap does not bound the
+// checker's time: seed 486, cut to 114 MB, still spends minutes in ordinary
+// checking before analysis starts, most of it in templateByName, which scans
+// every data declaration for each template lookup.
 const machineSourceCap = 128 << 20
 
 func capMachineSource(s machineShape) machineShape {
