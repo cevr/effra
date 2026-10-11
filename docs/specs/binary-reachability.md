@@ -107,7 +107,7 @@ The deterministic part runs in the gate:
   - the closed runtime modules and the generated runtime files;
   - that `net`, `net/http`, `crypto/tls`, `encoding/json` and `os/exec` are absent from both the dependencies and the symbol table;
   - both targets' output;
-  - that unused declarations and pipe spelling leave unchanged the generated runtime, the tokens the generated main compiles, imports, dependencies, the symbol table by name, kind and size, and the emitted JavaScript.
+  - that unused declarations and pipe spelling leave unchanged the generated runtime, the generated main's parsed syntax tree (comments and positions aside), imports, dependencies, the complete symbol list by name, kind and size (`go tool nm -size -type` without addresses), and the emitted JavaScript.
 
   Source positions are the only difference left. Since `//line` directives (2026-10-11), the generated main and the executable's position tables name each source file and line. So equivalent fixtures differ in main bytes, symbol addresses and executable size.
 
@@ -188,10 +188,10 @@ The compiler executable is reported separately from these application rows. It w
 The recorded rows predate source positions. Generated Go now carries `//line` directives, so Go reports user code at `.ef` lines. [Source positions in generated Go](../research/go-line-directives.md) measures their cost on every example with `go run ./scripts/residual`:
 
 - unstripped executables changed by -0.004% in total, and by at most 0.07% for any one example;
-- cold builds were within noise;
-- generated `main.go` grew 38.3%.
+- no cold-build difference was resolvable on the shared host (3 samples per example, about 0.1 s resolution);
+- generated `main.go` grew 38.2%, and lowering took 1.5 to 4.7 times as long.
 
-As a result, `minimal` and `minimal-unused` no longer share one executable size, and neither do `direct` and `pipe`; their symbols still match by name, kind and size (checked by hand) and by per-package count and size (checked in the gate). The next matrix recording will show it.
+As a result, `minimal` and `minimal-unused` no longer share one executable size, and neither do `direct` and `pipe`. The gate checks that their symbols still match by name, kind and size. The next matrix recording will show it.
 
 Retention observations, not claims:
 
