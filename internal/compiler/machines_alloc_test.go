@@ -87,13 +87,57 @@ type machineShape struct {
 	failureName    int  // extra bytes on every failure name
 	failBody       bool // the effect step body only fails: no transition
 	lets           int  // let bindings after the step's first statement
-	generic        bool // output Outer<i64> through generic records
+	generic        bool // output Outer<Arg> through generic records
 	genericName    int  // extra bytes on the generic inner record's name
+	genericFields  int  // Outer<T>'s fields of type Inner<T> (0 means one)
+	genericArg     int  // depth of a 7-ary tree of distinct records as Arg (0 means i64)
+	recipe         int  // Effect<...> layers around the output (refused, EF141)
+	recipeName     int  // extra bytes on the record the recipe output wraps
 }
 
 func (s machineShape) String() string {
-	return fmt.Sprintf("states=%d events=%d name=%d machineName=%d variantName=%d helpers=%d tails=%d distinct=%d wideArm=%t keepPaths=%t keeps=%d literalStay=%t failures=%d declarations=%d payload=%d failureName=%d failBody=%t lets=%d generic=%t genericName=%d",
-		s.states, s.events, s.name, s.machineName, s.variantName, s.helpers, s.tails, s.distinct, s.wideArm, s.keepPaths, s.keeps, s.literalStay, s.failures, s.declarations, s.payload, s.failureName, s.failBody, s.lets, s.generic, s.genericName)
+	return fmt.Sprintf("states=%d events=%d name=%d machineName=%d variantName=%d helpers=%d tails=%d distinct=%d wideArm=%t keepPaths=%t keeps=%d literalStay=%t failures=%d declarations=%d payload=%d failureName=%d failBody=%t lets=%d generic=%t genericName=%d genericFields=%d genericArg=%d recipe=%d recipeName=%d",
+		s.states, s.events, s.name, s.machineName, s.variantName, s.helpers, s.tails, s.distinct, s.wideArm, s.keepPaths, s.keeps, s.literalStay, s.failures, s.declarations, s.payload, s.failureName, s.failBody, s.lets, s.generic, s.genericName, s.genericFields, s.genericArg, s.recipe, s.recipeName)
+}
+
+// genericArgument returns a 7-ary tree of distinct applications P<…> with
+// depth levels, (7^depth-1)/6 nodes in all: each bottom application takes a
+// distinct combination of four records, so every node of the tree is a
+// distinct type and the module declares only five records.
+func genericArgument(b *strings.Builder, depth int) string {
+	const branch, leaves = 7, 4
+	if depth == 0 {
+		return "i64"
+	}
+	params := make([]string, branch)
+	for i := range params {
+		params[i] = fmt.Sprintf("T%d: type", i)
+	}
+	fmt.Fprintf(b, "record P<%s> { x: T0 }\n", strings.Join(params, ", "))
+	for i := 0; i < leaves; i++ {
+		fmt.Fprintf(b, "record R%d { x: i64 }\n", i)
+	}
+	bottom := 0
+	var tree func(int) string
+	tree = func(level int) string {
+		children := make([]string, branch)
+		for i := range children {
+			if level == depth-1 {
+				digit := bottom
+				for range i {
+					digit /= leaves
+				}
+				children[i] = fmt.Sprintf("R%d", digit%leaves)
+			} else {
+				children[i] = tree(level + 1)
+			}
+		}
+		if level == depth-1 {
+			bottom++
+		}
+		return "P<" + strings.Join(children, ", ") + ">"
+	}
+	return tree(0)
 }
 
 // nestedTails renders count tails selected by n as nested ifs.
@@ -117,10 +161,18 @@ func (s machineShape) source() string {
 	for i := 0; i < s.failures; i++ {
 		fmt.Fprintf(&b, "error %s\n", failure(i))
 	}
-	if s.generic {
+	if s.recipe > 0 {
+		leaf := long("R", s.recipeName)
+		fmt.Fprintf(&b, "record %s { x: i64 }\n", leaf)
+		output = strings.Repeat("Effect<", s.recipe) + leaf + strings.Repeat(">", s.recipe)
+	} else if s.generic {
 		inner := long("L", s.genericName)
-		fmt.Fprintf(&b, "record %s<T: type> { value: T }\nrecord Outer<T: type> { inner: %s<T> }\n", inner, inner)
-		output = "Outer<i64>"
+		fmt.Fprintf(&b, "record %s<T: type> { value: T }\nrecord Outer<T: type> { inner: %s<T>", inner, inner)
+		for i := 1; i < s.genericFields; i++ {
+			fmt.Fprintf(&b, ", a%d: %s<T>", i, inner)
+		}
+		b.WriteString(" }\n")
+		output = "Outer<" + genericArgument(&b, s.genericArg) + ">"
 	} else if s.payload > 0 {
 		field := long("f", s.name)
 		fmt.Fprintf(&b, "record P%d { leaf: i64 }\n", s.payload)
@@ -276,6 +328,12 @@ func randomMachineShape(rng *rand.Rand) machineShape {
 		lets:         pick(0, 0, 100, 5000),
 		generic:      rng.Intn(4) == 0,
 		genericName:  pick(0, 64, 4096, 1<<17),
+		// Structured arguments across many fields: substitution validates
+		// the argument once per field.
+		genericFields: pick(0, 0, 64, 3000),
+		genericArg:    pick(0, 0, 2, 3),
+		recipe:        pick(0, 0, 0, 1, 30, 60),
+		recipeName:    pick(0, 64, 4096, 32767),
 	}
 	if s.states <= 40 {
 		s.variantName = pick(0, 64, 4096)
@@ -286,6 +344,11 @@ func randomMachineShape(rng *rand.Rand) machineShape {
 		s.failureName = 64
 	}
 	s.machineName = min(s.machineName, (16<<20)/s.declarations)
+	// The parser nests at most 64 levels: helper tails and Effect<…> layers
+	// share them.
+	if s.recipe > 0 {
+		s.recipe = max(1, min(s.recipe, 56-2*s.tails))
+	}
 	return s
 }
 
@@ -304,10 +367,8 @@ func TestMachineAnalysisAllocationIsCharged(t *testing.T) {
 		{states: 2, events: 1, name: 4096, payload: 30, declarations: 256},
 		// Wide events and states over the transition limit.
 		{states: 2000, events: 600, helpers: 3, tails: 20, wideArm: true},
-		// The three round-5 residuals at their reviewed shapes.
-		machineRefusalThenLets,
-		machineLongFailureLabels,
-		machineGenericPayloadLayouts,
+		// The round-5 and later residuals have dedicated regressions below;
+		// the generator draws their axes.
 	}
 	seed := int64(46)
 	if text := os.Getenv("EFFRA_MACHINE_ALLOC_SEED"); text != "" {
@@ -445,14 +506,24 @@ func allocated(f func()) (uint64, uint64) {
 	return after.TotalAlloc - before.TotalAlloc, after.Mallocs - before.Mallocs
 }
 
-// The public boundaries project plans after analysis: CheckResponse,
-// MachineInspection and the machine GraphView. Each is measured on the
-// compiled result and again on a copy whose plans keep only their identity;
-// what the plans add must stay within the same per-unit bound as the units
-// that paid for it: the analysis units, plus for GraphView the graph work its
-// own budget charged (the whole limit when the view is refused). The full
-// projection runs first, so the identity-only run reuses its warm caches and
-// the difference is not understated.
+// identityPlans is r with every plan reduced to its identity: what a boundary
+// allocates for r beyond identityPlans(r) is what the plans' contents add.
+func identityPlans(r *Result) *Result {
+	identity := *r
+	identity.Machines = make([]MachinePlan, len(r.Machines))
+	for j, plan := range r.Machines {
+		identity.Machines[j] = MachinePlan{ID: plan.ID, Ordinal: plan.Ordinal, Name: plan.Name, Span: plan.Span, Functions: []MachineFunction{}, Transitions: []MachineTransition{}, States: []MachineStateFacts{}, TerminalFailures: []MachineRowContribution{}, Requirements: []MachineRowContribution{}, Evidence: plan.Evidence, Limitations: plan.Limitations}
+	}
+	return &identity
+}
+
+// The public boundaries project plans after analysis: CheckResponse and
+// MachineInspection here, the machine GraphView below. Each is measured on
+// the compiled result and again on a copy whose plans keep only their
+// identity; what the plans add must stay within the same per-unit bound as
+// the analysis units that paid for it. The full projection runs first, so the
+// identity-only run reuses its warm caches and the difference is not
+// understated.
 func TestMachineProjectionAllocationIsCharged(t *testing.T) {
 	shapes := []machineShape{
 		machineLongFailureLabels,
@@ -467,28 +538,15 @@ func TestMachineProjectionAllocationIsCharged(t *testing.T) {
 	for len(shapes) < 9 {
 		shapes = append(shapes, randomMachineShape(rng))
 	}
-	request, err := ParseGraphRequest(map[string]any{"kind": "machine"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// project runs one boundary and returns the units it charged itself.
 	boundaries := []struct {
 		name    string
-		project func(*Result) int
+		project func(*Result)
 	}{
-		{"CheckResponse", func(r *Result) int { r.CheckResponse(); return 0 }},
-		{"MachineInspection", func(r *Result) int {
+		{"CheckResponse", func(r *Result) { r.CheckResponse() }},
+		{"MachineInspection", func(r *Result) {
 			for _, plan := range r.Machines {
 				_, _ = r.MachineInspection(plan.Name, "machines.ef")
 			}
-			return 0
-		}},
-		{"GraphView", func(r *Result) int {
-			view, err := r.GraphView(request)
-			if err != nil {
-				return request.viewLimits(r).Work
-			}
-			return view.Data.Effra.Usage.Work
 		}},
 	}
 	projected := 0
@@ -502,26 +560,97 @@ func TestMachineProjectionAllocationIsCharged(t *testing.T) {
 			for _, m := range measures {
 				units += m.units
 			}
-			fullBytes, fullMallocs := allocated(func() { units += boundary.project(r) })
-			identity := *r
-			identity.Machines = make([]MachinePlan, len(r.Machines))
-			for j, plan := range r.Machines {
-				identity.Machines[j] = MachinePlan{ID: plan.ID, Ordinal: plan.Ordinal, Name: plan.Name, Span: plan.Span, Functions: []MachineFunction{}, Transitions: []MachineTransition{}, States: []MachineStateFacts{}, TerminalFailures: []MachineRowContribution{}, Requirements: []MachineRowContribution{}, Evidence: plan.Evidence, Limitations: plan.Limitations}
-			}
-			baseBytes, baseMallocs := allocated(func() { boundary.project(&identity) })
+			fullBytes, fullMallocs := allocated(func() { boundary.project(r) })
+			identity := identityPlans(r)
+			baseBytes, baseMallocs := allocated(func() { boundary.project(identity) })
 			projected++
-			measure := machineMeasure{units: units}
-			if fullBytes > baseBytes {
-				measure.bytes = fullBytes - baseBytes
-			}
-			if fullMallocs > baseMallocs {
-				measure.mallocs = fullMallocs - baseMallocs
-			}
-			assertMachineAllocationCharged(t, fmt.Sprintf("%s of shape %d (%s)", boundary.name, i, shape), []machineMeasure{measure})
+			assertMachineAllocationCharged(t, fmt.Sprintf("%s of shape %d (%s)", boundary.name, i, shape), []machineMeasure{allocationDelta(units, fullBytes, fullMallocs, baseBytes, baseMallocs)})
 		}
 	}
 	if projected == 0 {
 		t.Fatal("no shape published a plan")
+	}
+}
+
+func allocationDelta(units int, fullBytes, fullMallocs, baseBytes, baseMallocs uint64) machineMeasure {
+	measure := machineMeasure{units: units}
+	if fullBytes > baseBytes {
+		measure.bytes = fullBytes - baseBytes
+	}
+	if fullMallocs > baseMallocs {
+		measure.mallocs = fullMallocs - baseMallocs
+	}
+	return measure
+}
+
+// The machine GraphView, measured the same way, is paid for by the analysis
+// units plus the graph work its own budget charged. Each shape asserts its
+// outcome. A view refused at the work limit charged exactly that limit; a
+// view refused after its facts were built (the edge or response limit) is
+// credited the work those facts charged, read from the same view with that
+// one limit lifted. Validation and the response check serialise nothing, so
+// a published view and a response refusal stay within the bound.
+func TestMachineGraphViewAllocationIsCharged(t *testing.T) {
+	cases := []struct {
+		shape   machineShape
+		refusal string
+	}{
+		{machineShape{states: 2, events: 1}, ""},
+		{machineShape{states: 2, events: 1, failures: 300}, ""},
+		{machineShape{states: 2, events: 1, failures: 3, failureName: 4096}, ""},
+		{machineShape{states: 2, events: 1, name: 4096, payload: 3}, ""},
+		{machineShape{states: 1, events: 1, generic: true, genericName: 4096, declarations: 4}, ""},
+		{machineShape{states: 2, events: 1, failures: 3, declarations: 64}, ""},
+		{machineShape{states: 400, events: 1, tails: 2, wideArm: true}, ""},
+		{machineShape{states: 40, events: 2, helpers: 2, tails: 7, wideArm: true}, GraphRefusalEdgeLimit},
+		{machineShape{states: 2, events: 1, machineName: 4096, helpers: 2, tails: 20, distinct: 20}, GraphRefusalResponseLimit},
+		{machineShape{states: 4000, events: 1, tails: 20, wideArm: true, keepPaths: true, keeps: 2}, GraphRefusalWorkLimit},
+	}
+	request, err := ParseGraphRequest(map[string]any{"kind": "machine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Warm the reflection caches the response check and validation use, so a
+	// one-time cost is not measured as the plans'.
+	if _, err := Compile(cases[0].shape.source()).GraphView(request); err != nil {
+		t.Fatal(err)
+	}
+	for i, c := range cases {
+		label := fmt.Sprintf("GraphView of case %d (%s)", i, c.shape)
+		r, measures := measureMachineAnalysis(t, c.shape.source())
+		if len(r.Machines) == 0 {
+			t.Fatalf("%s: no plan: %v", label, machineCodes(r))
+		}
+		units := 0
+		for _, m := range measures {
+			units += m.units
+		}
+		var view *GraphView
+		fullBytes, fullMallocs := allocated(func() { view, err = r.GraphView(request) })
+		limits := request.viewLimits(r)
+		switch c.refusal {
+		case "":
+			if err != nil {
+				t.Fatalf("%s: %v", label, err)
+			}
+			units += view.Data.Effra.Usage.Work
+		case GraphRefusalWorkLimit:
+			requireGraphRefusal(t, err, c.refusal)
+			units += limits.Work
+		default:
+			requireGraphRefusal(t, err, c.refusal)
+			lifted := limits
+			lifted.Edges, lifted.ResponseBytes = 1<<30, 1<<30
+			liftedRequest := request
+			liftedRequest.limits = &lifted
+			view, err := r.GraphView(liftedRequest)
+			if err != nil {
+				t.Fatalf("%s: lifted view: %v", label, err)
+			}
+			units += view.Data.Effra.Usage.Work
+		}
+		baseBytes, baseMallocs := allocated(func() { _, _ = identityPlans(r).GraphView(request) })
+		assertMachineAllocationCharged(t, label, []machineMeasure{allocationDelta(units, fullBytes, fullMallocs, baseBytes, baseMallocs)})
 	}
 }
 
@@ -535,6 +664,12 @@ var (
 	// Outer<i64> through a generic record with a 131,072-byte name, the
 	// output of 256 declarations.
 	machineGenericPayloadLayouts = machineShape{states: 1, events: 1, generic: true, genericName: 1 << 17, declarations: 256}
+	// Outer<P<…>> over a 400-node argument tree, with 3,000 fields of type
+	// L<T>: substitution validates the argument once per field.
+	machineTemplateArgumentWalks = machineShape{states: 1, events: 1, generic: true, genericFields: 3000, genericArg: 4}
+	// Effect<…> nested 60 deep around a 32,768-byte record name: every layer
+	// of the display copies the text below it.
+	machineNestedRecipeDisplay = machineShape{states: 1, events: 1, recipe: 60, recipeName: 32767}
 )
 
 // Round-5 residual 1: a refusal ends the block. The walker charges each
@@ -576,5 +711,37 @@ func TestMachineGenericLayoutsAreChargedAndShared(t *testing.T) {
 	assertMachineAllocationCharged(t, "generic payload layouts", measures)
 	if len(r.Machines) != 256 {
 		t.Fatalf("%d of 256 declarations planned: %v", len(r.Machines), machineCodes(r))
+	}
+}
+
+// Round-1 review M1: substitution validates the template argument afresh for
+// every field (templateDataArgument builds a memo over the argument's nodes),
+// so the layout charges the argument's distinct nodes once per field before
+// the checker instantiates them. 3,000 fields over a 400-node argument are
+// refused before the walks; a modest layout is still planned.
+func TestMachineTemplateArgumentWalksAreCharged(t *testing.T) {
+	r, measures := measureMachineAnalysis(t, machineTemplateArgumentWalks.source())
+	assertMachineAllocationCharged(t, "template argument walks", measures)
+	if !slices.Equal(machineCodes(r), []string{machineBudgetCode}) {
+		t.Fatalf("codes = %v", machineCodes(r))
+	}
+	modest := machineShape{states: 1, events: 1, generic: true, genericFields: 64, genericArg: 3}
+	r, measures = measureMachineAnalysis(t, modest.source())
+	assertMachineAllocationCharged(t, "modest template argument walks", measures)
+	if len(r.Machines) != 1 {
+		t.Fatalf("64 fields over a 57-node argument refused: %v", machineCodes(r))
+	}
+}
+
+// Round-1 review M3: a recipe output is refused (EF141) after its display is
+// built for the diagnostic, and every Effect<…> layer copies the display
+// below it. The display is charged by that build cost before it is built, so
+// 60 layers over a 32,768-byte name pay for the copies and are still
+// reported.
+func TestMachineNestedRecipeDisplayIsCharged(t *testing.T) {
+	r, measures := measureMachineAnalysis(t, machineNestedRecipeDisplay.source())
+	assertMachineAllocationCharged(t, "nested recipe display", measures)
+	if !slices.Equal(machineCodes(r), []string{machineAdmissionCode}) {
+		t.Fatalf("codes = %v", machineCodes(r))
 	}
 }

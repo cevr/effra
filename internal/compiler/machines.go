@@ -543,8 +543,10 @@ func (w *machinePayloadWalk) visit(id TypeID) (behavior bool, at TypeID, refused
 // plan identity records its tag; evaluating it constructs data only.
 func (m *machineCheck) checkInitial(binding *MachineBinding) {
 	value := binding.Value
-	// Checking the initial expression allocates in proportion to its source.
-	if !m.charge(1 + machineTextUnits(value.Span.Length)) {
+	// Checking the initial expression allocates in proportion to its source,
+	// and rebuilds the state type's interning key and declaration qualifier.
+	state, ok := m.typeText(m.state)
+	if !ok || !m.charge(1+machineTextUnits(value.Span.Length+state.bytes)) {
 		return
 	}
 	previous := m.c.recordFacts
