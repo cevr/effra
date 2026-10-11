@@ -1,8 +1,10 @@
 package testinputs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -283,6 +285,20 @@ func TestRecorderResolvesDotDotBeforeSkipping(t *testing.T) {
 	r.stat("/dev/../" + logical + "/src/x")
 	if got, want := parse(t, r.lines()), [][2]string{{"stat", logical + "/src/x"}}; !slices.Equal(got, want) {
 		t.Fatalf("entries:\n got %q\nwant %q", got, want)
+	}
+	if runtime.GOOS != "linux" {
+		return
+	}
+	// A descriptor link before a "..": the kernel goes to the parent of the
+	// directory the descriptor holds, which cleaning by name would skip.
+	src, err := os.Open(filepath.Join(logical, "src"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	path := fmt.Sprintf("/tmp/../proc/%d/fd/%d/../go.mod", os.Getpid(), src.Fd())
+	if virtual(path) {
+		t.Errorf("virtual(%q) = true, want false: it leads into the module", path)
 	}
 }
 

@@ -199,11 +199,15 @@ func (r *recorder) record(path string, key entryKey) {
 // cannot recheck and whose links resolve differently in each process. A
 // ".." is resolved first, as the kernel would, so /proc/../root/file is
 // recorded: the directory a path ends in is looked up where it exists, and
-// a path whose directory is missing is cleaned by name.
+// a path whose directory is missing is cleaned by name. That directory is
+// cut off the path as written, not cleaned: cleaning would drop a link
+// before a "..", such as /tmp/../proc/<pid>/fd/<n>/../go.mod, which leads
+// wherever descriptor n's parent is.
 func virtual(path string) bool {
 	if hasDotDot(path) {
-		dir, base := filepath.Dir(path), filepath.Base(path)
-		if base == ".." {
+		cut := strings.LastIndexByte(path, '/') + 1
+		dir, base := path[:cut], path[cut:]
+		if base == ".." || base == "." {
 			dir, base = path, ""
 		}
 		if physical, ok := physicalDir(dir); ok {
