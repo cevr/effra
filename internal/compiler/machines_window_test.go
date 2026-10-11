@@ -96,3 +96,25 @@ func TestMachineWindowIgnoresCheckerStateAtCapacity(t *testing.T) {
 		}
 	}
 }
+
+// Preparation is checker work outside the window, bounded by mirroring the
+// analysis budget: a layout or display analysis could never afford is refused
+// before the checker builds it (measureMachineAnalysis checks every prepared
+// one). 3,000 fields over a 400-node template argument would instantiate an
+// exponential layout, and a display copied through 56 recipe layers around a
+// 65,535-byte name costs more than a declaration's budget; both are refused.
+func TestMachinePreparationStaysWithinTheAnalysisBudget(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		shape machineShape
+	}{
+		{"template argument walks", machineTemplateArgumentWalks},
+		{"nested recipe display over the budget", machineShape{states: 1, events: 1, recipe: 56, recipeName: 65535}},
+	} {
+		r, measures := c.shape.measure(t)
+		assertMachineAllocationCharged(t, c.name, measures)
+		if codes := machineCodes(r); len(codes) != 1 || codes[0] != machineBudgetCode {
+			t.Fatalf("%s: codes = %v", c.name, codes)
+		}
+	}
+}

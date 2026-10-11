@@ -83,10 +83,11 @@ type (
 
 // machineAnalysisProbe, when a test sets it, brackets one module's machine
 // analysis so the test can compare measured allocation with the units the
-// analysis charged. The opening call receives the checker after preparation,
+// analysis credited. The opening call receives the checker after preparation,
 // so a test can put checker state at its worst (slices at capacity, maps at
-// their size) before the window opens. It is nil in production.
-var machineAnalysisProbe func(c *checker, done bool, units int)
+// their size) before the window opens, and the prepared input, so it can check
+// what preparation built. It is nil in production.
+var machineAnalysisProbe func(c *checker, in *machineInput, done bool, units int)
 
 func machineID(name string) string { return "machine:" + currentModuleIdentity + ":" + name }
 
@@ -133,11 +134,11 @@ func (c *checker) checkMachines() {
 	in := c.prepareMachines(initials)
 	// Analyse: the measured window reads only in.
 	if machineAnalysisProbe != nil {
-		machineAnalysisProbe(c, false, 0)
+		machineAnalysisProbe(c, in, false, 0)
 	}
 	result := machineplan.Analyse(in)
 	if machineAnalysisProbe != nil {
-		machineAnalysisProbe(c, true, result.Units)
+		machineAnalysisProbe(c, in, true, result.Units)
 	}
 	// Commit: the analysis diagnostics in report order, then the plans.
 	for _, d := range result.Diagnostics {

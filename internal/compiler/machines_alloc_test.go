@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"effra.local/prototype/internal/compiler/machineplan"
 )
 
 // Resource closure of machine analysis. The analysis phase (package
@@ -60,7 +62,7 @@ func measureMachineAnalysisAfter(t *testing.T, source string, setup func(*checke
 	var measures []machineMeasure
 	var before runtime.MemStats
 	var verify func(*checker) string
-	machineAnalysisProbe = func(c *checker, done bool, units int) {
+	machineAnalysisProbe = func(c *checker, in *machineInput, done bool, units int) {
 		if !done {
 			if setup != nil {
 				verify = setup(c)
@@ -76,10 +78,42 @@ func measureMachineAnalysisAfter(t *testing.T, source string, setup func(*checke
 				t.Errorf("the analysis window changed checker state: %s", changed)
 			}
 		}
+		if over := preparedOverBudget(in); over != "" {
+			t.Errorf("preparation exceeded the analysis budget: %s", over)
+		}
 	}
 	defer func() { machineAnalysisProbe = nil }()
 	r := Compile(source)
 	return r, measures
+}
+
+// preparedOverBudget reports a layout or display preparation built although
+// analysis could never afford it: one costing more than a declaration's
+// budget, or all of them together more than the module's. Preparation is
+// checker work outside the window, so this is what keeps it bounded by the
+// analysis budget rather than by the program (an exponential template
+// instantiation, a display copied through 60 recipe layers).
+func preparedOverBudget(in *machineInput) string {
+	var costs machineplan.Costs
+	total := 0
+	for id := range in.Types.Layouts {
+		units, ok := costs.LayoutUnits(&in.Types, id)
+		if !ok || units > maxMachineWork {
+			return fmt.Sprintf("layout of type %d costs %d units (data type %t)", id, units, ok)
+		}
+		total += units
+	}
+	for id := range in.Types.Displays {
+		units := costs.DisplayUnits(&in.Types, id)
+		if units > maxMachineWork {
+			return fmt.Sprintf("display of type %d costs %d units", id, units)
+		}
+		total += units
+	}
+	if total > maxMachineModuleWork {
+		return fmt.Sprintf("prepared layouts and displays cost %d units", total)
+	}
+	return ""
 }
 
 func assertMachineAllocationCharged(t *testing.T, label string, measures []machineMeasure) {
