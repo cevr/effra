@@ -18,9 +18,10 @@ import (
 // A tool fingerprint keys what a tool prints about itself and every byte the
 // gate can locate that running it executes or loads: the file PATH resolves it
 // to, and the rest of its installation (installation). Every fingerprint is
-// computed afresh each run. Hashing every keyed tool's installation costs
-// about 0.3 s at a load of 30 on this host's 16 CPUs, so there is no memo
-// across runs, and nothing a filesystem's timestamps miss can serve old bytes.
+// computed afresh each run. Fingerprinting every keyed tool costs 0.6–1.0 s
+// with the tools in parallel at a load of about 39 on this host's 16 CPUs
+// (docs/tooling.md), so there is no memo across runs, and nothing a
+// filesystem's timestamps miss can serve old bytes.
 
 // maxInterpreterDepth bounds a chain of scripts naming script interpreters.
 // Linux runs at most four levels.
