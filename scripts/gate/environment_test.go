@@ -14,14 +14,7 @@ import (
 // environment: cached steps through their key, Go test steps through the tool
 // digest their tests read.
 func TestGoRuntimeEnvironmentKeysEveryStepThatRunsGoPrograms(t *testing.T) {
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	steps, err := gateSteps(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, steps := repositorySteps(t)
 	// The steps' declared tools and environment are evaluated over a fixture:
 	// the repository's own files, which the emission step rewrites every run,
 	// would keep Go's test cache from ever replaying this test.

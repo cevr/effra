@@ -125,14 +125,7 @@ if (strays.length > 0) { console.error("STRAY_VISIBLE " + strays.join(",")); pro
 // emission's record, before any reader runs. The real step declaration runs
 // the real runner over stub collaborators, warm.
 func TestReferencesReplayHoldsWhateverIsLeftInGenerated(t *testing.T) {
-	repository, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	steps, err := gateSteps(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
+	repository, steps := repositorySteps(t)
 	var declared *Step
 	for _, step := range steps {
 		if step.Name == "framework-port references" {
