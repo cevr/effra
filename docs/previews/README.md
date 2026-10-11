@@ -8,7 +8,7 @@ This directory is the record. A rendered copy, such as a Sideshow post, is a vie
 
 - One file per preview, named `YYYY-MM-DD-<slug>.md`, added to the index below.
 - `.ef` text is authoritative. Every snippet carries one label:
-  - **Available baseline**: the snippet checks with `ef check` at a recorded commit, and the preview names the command and the commit.
+  - **Checked**: the snippet checks with `ef check` at a recorded commit, and the preview names the command and the commit.
   - **Tested candidate**: the snippet depends on an unmerged branch under review; name the branch and its head commit.
   - **Proposed**: not admitted. Say so, and name the spec, research record or map item that would admit it.
 - Each preview states what it does not claim, such as a benchmark result, framework port or construct that has not been admitted.
@@ -20,7 +20,7 @@ This directory is the record. A rendered copy, such as a Sideshow post, is a vie
 
 | Date | Preview | Labels |
 | --- | --- | --- |
-| 2026-10-08 | [Explicit failure and service contracts](2026-10-08-effect-contracts.md) | Available baseline |
+| 2026-10-08 | [Explicit failure and service contracts](2026-10-08-effect-contracts.md) | Checked |
 
 ## Earlier sketches
 

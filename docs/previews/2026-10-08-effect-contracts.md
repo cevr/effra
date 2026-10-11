@@ -1,6 +1,6 @@
 # 2026-10-08: explicit failure and service contracts
 
-Label: **Available baseline.** Source: the Effra snippet in the 2026-10-08 language-evolution sketch, copied without changes. Checked again on 2026-10-11 with `ef check <file>` at commit `6b349af8`: zero diagnostics.
+Label: **Checked** (the sketch called it "Available baseline"). Source: the Effra snippet in the 2026-10-08 language-evolution sketch, copied without changes. Checked again on 2026-10-11 with `ef check <file>` at commit `6b349af8`: zero diagnostics.
 
 ```rust
 error NotFound
