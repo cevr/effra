@@ -55,8 +55,7 @@ func (g *gate) toolVersion(tool string) string {
 		var argv []string
 		switch tool {
 		case "go":
-			// GOROOT comes last: it locates the toolchain this go runs.
-			argv = []string{"go", "env", "GOVERSION", "GOOS", "GOARCH", "GOAMD64", "CGO_ENABLED", "GOEXPERIMENT", "GOFLAGS", "GOTOOLCHAIN", "GOWORK", "GODEBUG", "GOROOT"}
+			argv = append([]string{"go", "env", "-json"}, goEnvironmentNames...)
 		default:
 			argv = []string{tool, "--version"}
 		}
@@ -85,15 +84,30 @@ func (g *gate) toolVersion(tool string) string {
 				value, set := stepVariable(name)
 				version += fmt.Sprintf("\x00%s\x00%t\x00%s", name, set, value)
 			}
-			goroot := ""
-			if err == nil {
-				lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-				goroot = strings.TrimSpace(lines[len(lines)-1])
+			if err != nil {
+				return version + "\x00" + unlocated("go env failed")
+			}
+			goroot, err := reportedGoroot(output)
+			if err != nil {
+				return version + "\x00" + unlocated(err.Error())
 			}
 			return version + "\x00" + g.goInstallation(goroot)
 		}
 		return version + "\x00" + g.installation(tool, 0)
 	})
+}
+
+// goEnvironmentNames are the go env variables a go fingerprint keys. GOROOT
+// also locates the toolchain this go runs.
+var goEnvironmentNames = []string{"GOVERSION", "GOOS", "GOARCH", "GOAMD64", "CGO_ENABLED", "GOEXPERIMENT", "GOFLAGS", "GOTOOLCHAIN", "GOWORK", "GODEBUG", "GOROOT"}
+
+// reportedGoroot reads GOROOT, by name, from go env -json output.
+func reportedGoroot(output []byte) (string, error) {
+	var environment map[string]string
+	if err := json.Unmarshal(output, &environment); err != nil {
+		return "", fmt.Errorf("go env -json: %w", err)
+	}
+	return environment["GOROOT"], nil
 }
 
 // goInstallation keys the go command PATH resolves to and the GOROOT it
@@ -119,10 +133,10 @@ func (g *gate) goInstallation(goroot string) string {
 //     transitively, as Node resolves them from it, plus its interpreter's
 //     installation. A script outside a package execs nothing the gate can
 //     locate, so its fingerprint never matches a recorded pass.
-//   - node: the binary and the global folders Node's require searches,
-//     <prefix>/lib/node, ~/.node_modules and ~/.node_libraries.
+//   - node and bun: the file PATH resolves to, which may be a version
+//     manager's launcher, and the runtime it runs (runtimeInstallation).
 //   - git: the binary and its exec path, whose helpers git runs.
-//   - Any other executable, such as bun: its file.
+//   - Any other executable: its file.
 //
 // The path keys the installation as well as the bytes: the same build under
 // another prefix resolves global modules from another place.
@@ -139,14 +153,33 @@ func (g *gate) installation(command string, depth int) string {
 		return unlocated(err.Error())
 	}
 	rule := filepath.Base(command)
-	if interpreter == nil {
+	var runtime string
+	if rule == "node" || rule == "bun" {
+		var reported string
+		reported, runtime = g.runtimeInstallation(command, rule, resolved)
+		if reported == resolved && interpreter == nil {
+			// The file PATH finds is the runtime itself.
+			return runtime
+		}
+	}
+	var launcher string
+	switch {
+	case interpreter == nil:
 		// A file that runs no other file is a leaf; memoising it by path
 		// for the run lets a launcher and a step share one digest.
-		return g.fact("binary\x00"+rule+"\x00"+resolved, func() string { return g.binaryInstallation(rule, resolved) })
+		launcher = g.fact("binary\x00"+rule+"\x00"+resolved, func() string { return g.binaryInstallation(rule, resolved) })
+	case depth >= maxInterpreterDepth:
+		launcher = unlocated("interpreter chain deeper than " + fmt.Sprint(maxInterpreterDepth))
+	default:
+		launcher = g.scriptInstallation(resolved, interpreter, depth)
 	}
-	if depth >= maxInterpreterDepth {
-		return unlocated("interpreter chain deeper than " + fmt.Sprint(maxInterpreterDepth))
+	if runtime != "" {
+		return launcher + "\x00" + runtime
 	}
+	return launcher
+}
+
+func (g *gate) scriptInstallation(resolved string, interpreter []string, depth int) string {
 	pkg := packageRoot(filepath.Dir(resolved))
 	if pkg == "" {
 		return unlocated(resolved + " is a script outside an npm package")
@@ -163,20 +196,53 @@ func (g *gate) installation(command string, depth int) string {
 	return strings.Join(parts, "\x00")
 }
 
-func (g *gate) binaryInstallation(rule, resolved string) string {
-	parts := [][2]string{{"file", resolved}}
-	switch rule {
-	case "node":
-		home, err := homeDirectory()
+// runtimeExecPath prints the executable a Node or Bun process runs as.
+const runtimeExecPath = "process.stdout.write(process.execPath)"
+
+// runtimeInstallation asks node or bun, run as PATH runs it, which executable
+// it runs as, the way go is asked for its GOROOT. The file PATH finds may be a
+// version manager's launcher (mise dispatches on its name, volta copies one
+// shim) that execs a runtime elsewhere; the launcher's bytes never change when
+// that runtime is reinstalled. It keys the runtime's file and, for node, the
+// global folders Node's require searches: <prefix>/lib/node beside the
+// runtime, ~/.node_modules and ~/.node_libraries. A runtime that cannot say
+// where it is keys as unlocated. It returns the runtime's resolved path too.
+func (g *gate) runtimeInstallation(command, rule, resolved string) (reported, keyed string) {
+	keyed = g.fact("runtime\x00"+rule+"\x00"+resolved, func() string {
+		query := exec.Command(command, "-e", runtimeExecPath)
+		query.Env = stepEnvironment()
+		output, err := query.Output()
+		path := string(output)
+		if err != nil || !filepath.IsAbs(path) {
+			return unlocated(fmt.Sprintf("%s -e printed %q: %v", command, path, err))
+		}
+		real, err := filepath.EvalSymlinks(path)
 		if err != nil {
 			return unlocated(err.Error())
 		}
-		prefix := filepath.Dir(filepath.Dir(resolved))
-		parts = append(parts,
-			[2]string{"global", filepath.Join(prefix, "lib", "node")},
-			[2]string{"global", filepath.Join(home, ".node_modules")},
-			[2]string{"global", filepath.Join(home, ".node_libraries")})
-	case "git":
+		parts := [][2]string{{"runtime", real}}
+		if rule == "node" {
+			home, err := homeDirectory()
+			if err != nil {
+				return unlocated(err.Error())
+			}
+			prefix := filepath.Dir(filepath.Dir(real))
+			parts = append(parts,
+				[2]string{"global", filepath.Join(prefix, "lib", "node")},
+				[2]string{"global", filepath.Join(home, ".node_modules")},
+				[2]string{"global", filepath.Join(home, ".node_libraries")})
+		}
+		return g.digestAll(parts)
+	})
+	if after, ok := strings.CutPrefix(keyed, "runtime\x00"); ok {
+		reported, _, _ = strings.Cut(after, "\x00")
+	}
+	return reported, keyed
+}
+
+func (g *gate) binaryInstallation(rule, resolved string) string {
+	parts := [][2]string{{"file", resolved}}
+	if rule == "git" {
 		command := exec.Command(resolved, "--exec-path")
 		command.Env = stepEnvironment()
 		output, err := command.Output()
@@ -327,15 +393,18 @@ func scriptInterpreter(resolved string) ([]string, error) {
 	}
 	commands := []string{fields[0]}
 	if filepath.Base(fields[0]) == "env" {
-		for _, field := range fields[1:] {
-			if !strings.HasPrefix(field, "-") && !strings.Contains(field, "=") {
-				commands = append(commands, field)
-				break
-			}
+		// env runs the command it names, looked up on PATH. With -S the
+		// rest of the line is split into that command and its arguments.
+		// Any other option or an assignment can change which command env
+		// finds (PATH=..., -C, -u, -i), so such a line is not resolved.
+		arguments := fields[1:]
+		if len(arguments) > 0 && arguments[0] == "-S" {
+			arguments = arguments[1:]
 		}
-		if len(commands) == 1 {
-			return nil, fmt.Errorf("%s: env names no command", resolved)
+		if len(arguments) == 0 || strings.HasPrefix(arguments[0], "-") || strings.Contains(arguments[0], "=") {
+			return nil, fmt.Errorf("%s: env line %q is not env [-S] <command>", resolved, line)
 		}
+		commands = append(commands, arguments[0])
 	}
 	return commands, nil
 }
