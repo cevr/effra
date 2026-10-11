@@ -15,7 +15,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -553,8 +552,9 @@ func (g *gate) queryTool(dir string, combined bool, name string, args ...string)
 	return output.Bytes(), err
 }
 
-// catchInterrupts gives the run a context that SIGINT or SIGTERM cancels.
-// A query runs in its own process group, which a terminal's interrupt does
+// catchInterrupts gives the run a context that a stop signal cancels
+// (stopSignals: on Unix SIGINT, SIGTERM, SIGHUP and SIGQUIT). A query runs in
+// its own process group, which a terminal's Ctrl-C, Ctrl-\ or hangup does
 // not reach, so on a signal the gate cancels the context, kills every
 // running query's group, and then lets the signal take its default effect.
 // The returned function stops catching.
@@ -562,18 +562,21 @@ func (g *gate) catchInterrupts() func() {
 	ctx, cancel := context.WithCancel(context.Background())
 	g.ctx = ctx
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(signals, stopSignals...)
 	done := make(chan struct{})
 	go func() {
 		select {
 		case caught := <-signals:
+			// Reset first: should killing the queries stall (a query
+			// whose start hangs holds queriesMu), a second signal still
+			// takes its default effect.
+			signal.Reset(stopSignals...)
 			g.queriesMu.Lock()
 			cancel()
 			for command := range g.queries {
 				endQuery(command)
 			}
 			g.queriesMu.Unlock()
-			signal.Reset(os.Interrupt, syscall.SIGTERM)
 			reraise(caught)
 		case <-done:
 		}

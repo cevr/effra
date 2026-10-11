@@ -60,50 +60,67 @@ func TestToolQueryLeavesNothingInItsGroup(t *testing.T) {
 	assertGone(t, recordedPids(t, pids))
 }
 
-// TestInterruptKillsRunningQueries interrupts a gate whose tool query hangs,
-// as Ctrl-C would: a terminal signals its foreground process group, which
-// holds the gate but not the query's own group. The gate kills the query's
-// group before the interrupt ends it.
+// TestInterruptKillsRunningQueries stops a gate whose tool query hangs with
+// each signal a terminal or a supervisor sends: Ctrl-C, kill, a hangup and
+// Ctrl-\. A terminal signals its foreground process group, which holds the
+// gate but not the query's own group. The gate kills the query's group and
+// then ends by the signal's default effect: death by that signal, or for
+// SIGQUIT, Go's goroutine dump and exit status 2.
 func TestInterruptKillsRunningQueries(t *testing.T) {
 	if os.Getenv("GATE_INTERRUPT_HELPER") != "" {
 		t.Skip("the helper runs as a subprocess of this test")
 	}
-	pids := filepath.Join(t.TempDir(), "pids")
-	killRecorded(t, pids)
-	bin := t.TempDir()
-	write(t, bin, "package.json", `{"name": "probe"}`)
-	executable(t, bin, "probe-tool", "#!/bin/sh\necho $$ >> "+pids+"\nexec sleep 30\n")
-	helper := exec.Command(os.Args[0], "-test.run=^TestInterruptHelper$", "-test.count=1")
-	helper.Env = append(os.Environ(), "GATE_INTERRUPT_HELPER="+t.TempDir(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	var output bytes.Buffer
-	helper.Stdout, helper.Stderr = &output, &output
-	if err := helper.Start(); err != nil {
-		t.Fatal(err)
+	for _, stop := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT} {
+		t.Run(stop.String(), func(t *testing.T) {
+			pids := filepath.Join(t.TempDir(), "pids")
+			killRecorded(t, pids)
+			bin := t.TempDir()
+			write(t, bin, "package.json", `{"name": "probe"}`)
+			executable(t, bin, "probe-tool", "#!/bin/sh\necho $$ >> "+pids+"\nexec sleep 30\n")
+			helper := exec.Command(os.Args[0], "-test.run=^TestInterruptHelper$", "-test.count=1")
+			helper.Env = append(os.Environ(), "GATE_INTERRUPT_HELPER="+t.TempDir(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			var output bytes.Buffer
+			helper.Stdout, helper.Stderr = &output, &output
+			if err := helper.Start(); err != nil {
+				t.Fatal(err)
+			}
+			exited := make(chan error, 1)
+			go func() { exited <- helper.Wait() }()
+			deadline := time.Now().Add(5 * time.Second)
+			for len(recordedPids(t, pids)) == 0 {
+				if time.Now().After(deadline) {
+					helper.Process.Kill()
+					<-exited
+					t.Fatalf("the helper's query never started:\n%s", output.String())
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			if err := helper.Process.Signal(stop); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			select {
+			case err = <-exited:
+			case <-time.After(5 * time.Second):
+				helper.Process.Kill()
+				<-exited
+				t.Fatalf("the gate did not end on %v:\n%s", stop, output.String())
+			}
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) {
+				t.Fatalf("the gate ended on %v with %v:\n%s", stop, err, output.String())
+			}
+			status := exit.Sys().(syscall.WaitStatus)
+			if stop == syscall.SIGQUIT {
+				if status.Signaled() || status.ExitStatus() != 2 || !strings.Contains(output.String(), "SIGQUIT") {
+					t.Fatalf("the gate did not end by Go's SIGQUIT dump (status %v):\n%s", status, output.String())
+				}
+			} else if !status.Signaled() || status.Signal() != stop {
+				t.Fatalf("the gate did not die by %v (status %v):\n%s", stop, status, output.String())
+			}
+			assertGone(t, recordedPids(t, pids))
+		})
 	}
-	exited := make(chan error, 1)
-	go func() { exited <- helper.Wait() }()
-	deadline := time.Now().Add(5 * time.Second)
-	for len(recordedPids(t, pids)) == 0 {
-		if time.Now().After(deadline) {
-			helper.Process.Kill()
-			t.Fatalf("the helper's query never started:\n%s", output.String())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if err := helper.Process.Signal(os.Interrupt); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case err := <-exited:
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) {
-			t.Fatalf("the interrupted gate ended with %v:\n%s", err, output.String())
-		}
-	case <-time.After(5 * time.Second):
-		helper.Process.Kill()
-		t.Fatalf("the interrupted gate did not end:\n%s", output.String())
-	}
-	assertGone(t, recordedPids(t, pids))
 }
 
 // TestInterruptHelper is the gate TestInterruptKillsRunningQueries

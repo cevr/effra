@@ -27,12 +27,18 @@ func endQuery(command *exec.Cmd) {
 	}
 }
 
+// stopSignals are the signals that end the gate: Ctrl-C, kill, a terminal
+// hangup and Ctrl-\, each of which reaches the gate's process group but not a
+// query's own.
+var stopSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT}
+
 // reraise gives a caught signal its default effect.
 func reraise(caught os.Signal) {
 	if number, ok := caught.(syscall.Signal); ok {
 		_ = syscall.Kill(os.Getpid(), number)
 		// Delivery to this process is asynchronous.
 		time.Sleep(time.Second)
+		os.Exit(128 + int(number))
 	}
 	os.Exit(130)
 }
