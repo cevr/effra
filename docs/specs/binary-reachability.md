@@ -107,7 +107,9 @@ The deterministic part runs in the gate:
   - the closed runtime modules and the generated runtime files;
   - that `net`, `net/http`, `crypto/tls`, `encoding/json` and `os/exec` are absent from both the dependencies and the symbol table;
   - both targets' output;
-  - that unused declarations and pipe spelling leave the generated runtime, imports, dependencies, symbol listing, executable size and emitted JavaScript unchanged.
+  - that unused declarations and pipe spelling leave unchanged the generated runtime, the generated main's parsed syntax tree up to layout and comments, imports, dependencies, the complete symbol list by name, kind and size (`go tool nm -size -type` without addresses), and the emitted JavaScript.
+
+  Source positions are the only difference left. Since `//line` directives (2026-10-11), the generated main and the executable's position tables name each source file and line. So equivalent fixtures differ in main bytes, symbol addresses and executable size.
 
   The HTTP row is the negative control: it must show the transport in the same fields. With all-source emission substituted, the test fails on every row with retained files, dependencies and `net`/`net/http`/`crypto/tls` symbols.
 - `cmd/ef/receipt_process_test.go` covers the flag's parsing, refused builds, every protected path and alias (including an absent executable reached through a link and `..` on either side), the executable landing at its located path when `-o` steps through a link and `..`, the source admitted once (with `jump` linked to `parent/sub`, `ef build jump/../main.ef --receipt main.ef` is refused on both targets, and a receipt at `parent/main.ef` records the compiled source), directory outputs refused before building (an existing directory, a link to one, a trailing separator, a directory at the default output and a JavaScript module), atomic replacement of a symbolic link, the recorded build settings and the absence of VCS stamping inside a Git repository. It builds the HTTP program with cgo under two different `CGO_CFLAGS` and without cgo: the flags differ in the receipts, the cgo packages and C compiler appear only with cgo, and embedded build information lacks the flags. A quoted `CC="gcc"` identifies the same compiler, and `CC=env gcc` records `env` with its argument and gcc's version line. It also checks that program strings spelling `import()` add no external module while the HTTP program lists its declared host modules `node:dns/promises`, `node:http` and `node:net`.
@@ -182,6 +184,14 @@ Raw bytes:
 | TS/Effect control, managed (matched) | | | | 1,442 (source) | 765 | 40,796 |
 
 The compiler executable is reported separately from these application rows. It was 17,887,896 bytes in the recorded run, and the bundled runtime sources were 16 files and 119,300 bytes.
+
+The recorded rows predate source positions. Generated Go now carries `//line` directives, so Go reports user code at `.ef` lines. [Source positions in generated Go](../research/go-line-directives.md) measures their cost on every example with `go run ./scripts/residual`:
+
+- unstripped executables changed by -0.004% in total, and by at most 0.07% for any one example;
+- no cold-build difference was resolvable on the shared host (3 samples per example, about 0.1 s resolution);
+- generated `main.go` grew 38.2%, and lowering took 1.5 to 4.7 times as long.
+
+As a result, `minimal` and `minimal-unused` no longer share one executable size, and neither do `direct` and `pipe`. The gate checks that their symbols still match by name, kind and size. The next matrix recording will show it.
 
 Retention observations, not claims:
 
