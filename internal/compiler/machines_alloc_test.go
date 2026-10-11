@@ -84,6 +84,14 @@ func measureMachineAnalysisAfter(t *testing.T, source string, setup func(*checke
 	}
 	defer func() { machineAnalysisProbe = nil }()
 	r := Compile(source)
+	// Preparation charges at every point a subset of what analysis charges,
+	// so analysis refuses at its own budget before it can reach a fact the
+	// checker did not prepare. An unprepared refusal means the two diverged.
+	for _, d := range r.Diagnostics {
+		if d.Code == machineBudgetCode && strings.Contains(d.Message, "did not prepare") {
+			t.Errorf("analysis reached an unprepared fact: %s", d.Message)
+		}
+	}
 	return r, measures
 }
 
