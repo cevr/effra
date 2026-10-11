@@ -260,19 +260,29 @@ impl Gate(arrival: Latch, reached: Latch) for Probe {
     effect fn reached() -> Latch { reached }
 }
 
+// Only a request for /arrive signals the fixture; any other path is a
+// plain 404.
 effect fn arrive(request: HttpRequest) -> HttpReply uses { Probe, Sync } {
-    let arrival = run Probe.arrived()
-    run Sync.signal(arrival)
+    if request.path == "/arrive" {
+        let arrival = run Probe.arrived()
+        run Sync.signal(arrival)
+    } else {
+        void
+    }
     HttpReply.NotFound {}
 }
 
+// A request body may stall for 30 seconds before the transport drops it,
+// and shutdown waits as long for it, so a client holding a body open holds
+// the listener's finalizer (see the latched control). Two requests may be
+// active at once.
 fn limits() -> HttpLimits {
     HttpLimits {
         maxBodyBytes: 16,
         readHeaderMillis: 1000,
-        readBodyMillis: 1000,
-        idleMillis: 1000,
-        maxActive: 1
+        readBodyMillis: 30000,
+        idleMillis: 30000,
+        maxActive: 2
     }
 }
 
@@ -428,6 +438,99 @@ func codecFinalizerArrive(t *testing.T, address string) {
 	}
 }
 
+// codecFinalizerStall opens a connection and sends a request for path whose
+// four-byte body stops after two bytes, so the transport keeps reading it.
+func codecFinalizerStall(t *testing.T, address, path string) net.Conn {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	if _, err := conn.Write([]byte("POST " + path + " HTTP/1.1\r\nHost: probe\r\nContent-Length: 4\r\n\r\nab")); err != nil {
+		t.Fatal(err)
+	}
+	return conn
+}
+
+// codecFinalizerSaturated returns once both admission slots are held, which
+// a probe request observes as a 503 the transport sends before any handler
+// runs: admission covers a request's body read on every target, so both
+// stalled requests are then being read.
+func codecFinalizerSaturated(t *testing.T, address string) {
+	t.Helper()
+	client := http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		response, err := client.Get("http://" + address + "/probe")
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		switch {
+		case response.StatusCode == http.StatusServiceUnavailable:
+			return
+		case response.StatusCode != http.StatusNotFound:
+			t.Fatalf("probe answered %d", response.StatusCode)
+		case time.Now().After(deadline):
+			t.Fatal("the stalled requests were not admitted within 10s")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// codecFinalizerFinish sends the rest of a stalled body and returns the
+// status line of the response.
+func codecFinalizerFinish(t *testing.T, conn net.Conn) string {
+	t.Helper()
+	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write([]byte("cd")); err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		t.Fatalf("no response after the body completed: %v", err)
+	}
+	return strings.TrimSpace(line)
+}
+
+// codecFinalizerLatched holds the transformation's finalizer on a latch the
+// test owns. The listener's finalizer is server shutdown, which waits for
+// every request the transport is still reading, so a request whose body
+// stalls keeps it from completing; the latch opens when the test sends the
+// rest of that body. The test stalls one request on /hold and one on
+// /arrive, waits until both are admitted, then completes /arrive, whose
+// handler signals the fixture to interrupt the direction. The interrupt
+// must not return, so the fixture prints nothing, for as long as /hold
+// stalls; once /hold completes it is refused with 503, as every request
+// admitted after shutdown began, and only then does the interrupt return.
+// The fixture then rebinds the address as in the unlatched control. A
+// finalizer that was not awaited would let the fixture print
+// "<direction> interrupted" while /hold was still open.
+func codecFinalizerLatched(t *testing.T, workspace, address, direction string, argv []string) {
+	t.Helper()
+	process := startCodecFinalizer(t, workspace, address, direction, argv...)
+	process.expect(t, "listening http://"+address)
+	held := codecFinalizerStall(t, address, "/hold")
+	trigger := codecFinalizerStall(t, address, "/arrive")
+	codecFinalizerSaturated(t, address)
+	if status := codecFinalizerFinish(t, trigger); !strings.HasPrefix(status, "HTTP/1.1 404 ") && !strings.HasPrefix(status, "HTTP/1.1 503 ") {
+		t.Fatalf("/arrive answered %q", status)
+	}
+	select {
+	case line, ok := <-process.lines:
+		t.Fatalf("the interrupt returned while the finalizer was latched: %q (open %v)", line, ok)
+	case <-time.After(time.Second):
+	}
+	if status := codecFinalizerFinish(t, held); !strings.HasPrefix(status, "HTTP/1.1 503 ") {
+		t.Fatalf("/hold answered %q after shutdown began", status)
+	}
+	process.expect(t, direction+" interrupted")
+	process.expect(t, "listening http://"+address)
+	codecFinalizerArrive(t, address)
+}
+
 // A transformation interrupted mid-stream completes its scope's cleanup
 // before the interrupt returns, on Go, Bun and Node and in both directions:
 // the first transformation of a Batch holds a listener that its scope owns,
@@ -435,6 +538,10 @@ func codecFinalizerArrive(t *testing.T, address string) {
 // listener's address, which succeeds only if the listener was released.
 // Negative control: rebinding while the transformation still holds the
 // listener is refused with IoError on every target, and the fixture says so.
+// A rebind proves only that the socket was released, which Go's
+// cancellation hook does before the finalizer finishes, so the latched
+// variants (codecFinalizerLatched) also hold the finalizer itself open and
+// show the interrupt waiting for it.
 func TestCodecTransformationInterruptReleasesItsScopedResource(t *testing.T) {
 	t.Parallel()
 	binary := buildTestCLI(t)
@@ -454,7 +561,7 @@ func TestCodecTransformationInterruptReleasesItsScopedResource(t *testing.T) {
 	module := httpSmokeArtifact(workspace, stdout)
 	cohorts := map[string][]string{"go": {native}, "bun": {"bun", module}, "node": {"node", module}}
 	for cohort, argv := range cohorts {
-		for _, direction := range []string{"decode", "encode", "held"} {
+		for _, direction := range []string{"decode", "encode", "held", "decode-latched", "encode-latched"} {
 			t.Run(cohort+"/"+direction, func(t *testing.T) {
 				t.Parallel()
 				if cohort != "go" {
@@ -468,6 +575,10 @@ func TestCodecTransformationInterruptReleasesItsScopedResource(t *testing.T) {
 				}
 				address := listener.Addr().String()
 				listener.Close()
+				if base, latched := strings.CutSuffix(direction, "-latched"); latched {
+					codecFinalizerLatched(t, workspace, address, base, argv)
+					return
+				}
 				process := startCodecFinalizer(t, workspace, address, direction, argv...)
 				process.expect(t, "listening http://"+address)
 				codecFinalizerArrive(t, address)
