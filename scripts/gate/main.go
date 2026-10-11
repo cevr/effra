@@ -32,6 +32,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"effra.local/prototype/internal/testinputs/testenv"
 )
 
 // cacheVersion is part of every key; bump it when a step's meaning changes in
@@ -297,6 +299,9 @@ func (g *gate) run(out io.Writer) int {
 		fmt.Fprintln(out, "gate:", err)
 		return 2
 	}
+	if slices.ContainsFunc(g.steps, runsGoTest) {
+		fmt.Fprintf(out, "gate: go test steps receive only %s\n", strings.Join(testenv.Names, " "))
+	}
 
 	results := make([]*result, len(g.steps))
 	done := make([]chan struct{}, len(g.steps))
@@ -370,8 +375,11 @@ func (g *gate) execute(step *Step) *result {
 	command := exec.CommandContext(context.Background(), step.Argv[0], step.Argv[1:]...)
 	command.Dir = g.root
 	command.Env = stepEnvironment()
+	if runsGoTest(step) {
+		command.Env = goTestEnvironment()
+	}
 	if len(step.ToolEnv) > 0 {
-		command.Env = append(command.Env, "EFFRA_TOOL_VERSIONS="+g.toolDigest(step))
+		command.Env = append(command.Env, testenv.ToolDigest+"="+g.toolDigest(step))
 	}
 	var output bytes.Buffer
 	command.Stdout = &output
@@ -401,14 +409,19 @@ func (g *gate) execute(step *Step) *result {
 const gcPercent = "400"
 
 // toolDigest identifies, for a step's own cache, the tools it names in
-// ToolEnv, the environment they and the Go programs they run read, and the
-// installed trees they load.
+// ToolEnv, the whole environment a Go test step receives (testenv.Names,
+// whose values the tools and the Go programs a test runs may read whether
+// or not they were set when a result was cached), and the installed trees
+// they load.
 func (g *gate) toolDigest(step *Step) string {
 	digest := sha256.New()
 	for _, tool := range step.ToolEnv {
 		fmt.Fprintf(digest, "%s\x00%s\x00", tool, g.toolVersion(tool))
 	}
-	for _, name := range append(testToolEnvironment, goRuntimeEnvironment...) {
+	for _, name := range testenv.Names {
+		if name == testenv.ToolDigest {
+			continue
+		}
 		value, set := stepVariable(name)
 		fmt.Fprintf(digest, "env\x00%s\x00%t\x00%s\x00", name, set, value)
 	}
@@ -433,6 +446,21 @@ func stepEnvironment() []string {
 		environment = append(environment, "GOGC="+gcPercent)
 	}
 	return environment
+}
+
+// runsGoTest reports whether a step runs go test, which runs test binaries
+// whose results Go's test cache replays.
+func runsGoTest(step *Step) bool {
+	return len(step.Argv) >= 2 && step.Argv[0] == "go" && step.Argv[1] == "test"
+}
+
+// goTestEnvironment is the environment of a step that runs go test: the step
+// environment's entries that testenv allows, so a variable the gate does not
+// key cannot reach a cached test. Every step that runs go test gets the same
+// environment, so the test binaries "go test build" compiles are the ones
+// the test steps run.
+func goTestEnvironment() []string {
+	return testenv.Environment(stepEnvironment())
 }
 
 // stepVariable reads a variable as steps see it, so a key names the value a

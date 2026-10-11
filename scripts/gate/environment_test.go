@@ -4,8 +4,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"effra.local/prototype/internal/testinputs/testenv"
 )
 
 // GODEBUG=inittrace=1 leaves a Go program's bytes unchanged but adds lines to
@@ -68,6 +71,65 @@ func TestGoRuntimeEnvironmentKeysEveryStepThatRunsGoPrograms(t *testing.T) {
 			}
 		}
 		os.Unsetenv(change.name)
+	}
+}
+
+// A variable the gate does not key must not reach a cached Go test: a program
+// the test runs may read it, and if it was unset when the result was cached
+// nothing names it, so exporting it later would replay a stale pass. A Go
+// test step receives only testenv's variables, whose values the tool digest
+// keys whether they are set or not, and the gate log names them.
+func TestGoTestStepsReceiveOnlyKeyedVariables(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Fatal("go is required")
+	}
+	root := fixture(t)
+	write(t, root, "probe/go.mod", "module probe\n\ngo 1.24\n")
+	write(t, root, "probe/probe_test.go", `package probe
+
+import (
+	"os"
+	"testing"
+)
+
+func TestProbe(t *testing.T) {
+	t.Logf("unknown=%s path=%t", os.Getenv("EFFRA_GATE_UNKEYED_PROBE"), os.Getenv("PATH") != "")
+}
+`)
+	t.Setenv("EFFRA_GATE_UNKEYED_PROBE", "leaked")
+	steps := []*Step{
+		{Name: "go test probe", Argv: []string{"go", "test", "-C", "probe", "-count=1", "-v", "."}, ToolEnv: []string{"sh"}},
+		{Name: "plain step", Argv: []string{"sh", "-c", `echo "plain=${EFFRA_GATE_UNKEYED_PROBE-unset}"`}},
+	}
+	code, out := runGate(t, root, t.TempDir(), steps)
+	if code != 0 || !strings.Contains(out, "unknown= path=true") {
+		t.Fatalf("exit %d; the go test step saw an unkeyed variable, or no PATH:\n%s", code, out)
+	}
+	if !strings.Contains(out, "gate: go test steps receive only "+strings.Join(testenv.Names, " ")+"\n") {
+		t.Fatalf("the gate log does not name the variables go test steps receive:\n%s", out)
+	}
+	if !strings.Contains(out, "plain=leaked") {
+		t.Fatalf("a step that runs no go test lost the caller's environment:\n%s", out)
+	}
+	for _, entry := range goTestEnvironment() {
+		name, _, _ := strings.Cut(entry, "=")
+		if !slices.Contains(testenv.Names, name) {
+			t.Errorf("go test steps receive %s", name)
+		}
+	}
+
+	// Setting a variable a Go test step receives changes the tool digest,
+	// though no result named it.
+	step := &Step{Name: "go test probe", ToolEnv: []string{"sh"}}
+	g := &gate{root: root}
+	for _, name := range []string{"XDG_CONFIG_HOME", "GOEXPERIMENT", "TMPDIR"} {
+		t.Setenv(name, "")
+		os.Unsetenv(name)
+		unset := g.toolDigest(step)
+		t.Setenv(name, "/nonexistent/loop-probe-x")
+		if g.toolDigest(step) == unset {
+			t.Errorf("setting %s left the tool digest unchanged", name)
+		}
 	}
 }
 
