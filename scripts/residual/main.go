@@ -140,7 +140,7 @@ func measure(pattern, work string, samples, lowerings int) (*Report, error) {
 		return nil, fmt.Errorf("go version: %w", err)
 	}
 	report := &Report{GoVersion: strings.TrimSpace(string(version)), Flags: receipt.GoBuildFlags, Started: time.Now().UTC().Format(time.RFC3339)}
-	if err := os.MkdirAll(work, 0o755); err != nil {
+	if work, err = workDirectory(work); err != nil {
 		return nil, err
 	}
 	for _, path := range files {
@@ -152,6 +152,17 @@ func measure(pattern, work string, samples, lowerings int) (*Report, error) {
 		report.Examples = append(report.Examples, example)
 	}
 	return report, nil
+}
+
+// workDirectory creates the -work directory and returns its absolute path.
+// Go commands run inside the generated modules, so a relative path handed to
+// them would resolve against the module, not against this process.
+func workDirectory(work string) (string, error) {
+	absolute, err := filepath.Abs(work)
+	if err != nil {
+		return "", err
+	}
+	return absolute, os.MkdirAll(absolute, 0o755)
 }
 
 func measureExample(path, work string, samples, lowerings int) (Example, error) {

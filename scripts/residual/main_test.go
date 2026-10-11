@@ -1,9 +1,32 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// A relative -work names the same directory after the process, or a go
+// command it starts inside a generated module, changes directory.
+func TestWorkDirectoryIsAbsolute(t *testing.T) {
+	start := t.TempDir()
+	t.Chdir(start)
+	work, err := workDirectory(filepath.Join("relative", "work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(work) {
+		t.Fatalf("work directory %q is relative", work)
+	}
+	t.Chdir(t.TempDir())
+	if info, err := os.Stat(work); err != nil || !info.IsDir() {
+		t.Fatalf("work directory %q is not found from another directory: %v", work, err)
+	}
+	if info, err := os.Stat(filepath.Join(start, "relative", "work")); err != nil || !info.IsDir() {
+		t.Fatalf("work directory was not created under the starting directory: %v", err)
+	}
+}
 
 // The compiler's diagnostic lines are attributed by the file they name: the
 // source as Go reports it under -trimpath, the generated main, the generated
