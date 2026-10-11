@@ -46,7 +46,7 @@ func runnerLeaf(t *testing.T, runner string, files map[string]string) (string, s
 		write(t, leaf, name, content)
 	}
 	bin := t.TempDir()
-	write(t, bin, "bun", "#!/bin/sh\necho 1.4.2\n")
+	write(t, bin, "bun", "#!/bin/sh\necho 1.4.3\n")
 	if err := os.Chmod(filepath.Join(bin, "bun"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestReferencesReplayHoldsWhateverIsLeftInGenerated(t *testing.T) {
 		junit += `<testcase name="` + host + ` reference mounts, applies source events below zero, resets from nonzero and releases its subscriptions" assertions="1" />`
 	}
 	write(t, bin, "bun", `#!/bin/sh
-[ "$1" = --version ] && { echo 1.4.2; exit 0; }
+[ "$1" = --version ] && { echo 1.4.3; exit 0; }
 for argument in "$@"; do case "$argument" in --reporter-outfile=*) out="${argument#--reporter-outfile=}" ;; esac; done
 printf '%s\n' '`+junit+`' > "$out"
 printf ' 3 pass\n 0 fail\n'
