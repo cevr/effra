@@ -184,6 +184,23 @@ fn keep(value: Data.Option<Box<string>>) -> Data.Option<Box<string>> { value }
 	}
 }
 
+// A callable annotation's uses row admits a service the program declares,
+// before or after the annotation, and refuses an undeclared one.
+func TestCallableUsesRowsKnowDeclaredServices(t *testing.T) {
+	const declared = `record Early { run: effect fn() -> string uses {Users} }
+service Users { effect fn name() -> string }
+record Late { run: effect fn() -> string uses {Users} }
+fn call(value: Early) -> effect fn() -> string uses {Users} { value.run }
+`
+	if r := Compile(declared); !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	missing := Compile(strings.Replace(declared, "record Late { run: effect fn() -> string uses {Users} }", "record Late { run: effect fn() -> string uses {Missing} }", 1))
+	if missing.Checked || !hasCode(missing, "EF102") {
+		t.Fatal("an undeclared service entered a callable uses row", missing.Diagnostics)
+	}
+}
+
 // templateLookupSource is issue #109's reproduction: n one-field records and
 // one record whose n fields name them, so checking asks for a template by
 // name about twice per field.

@@ -465,6 +465,7 @@ type checker struct {
 	admittedSummaries map[string]interfaceSummary
 	templates         map[string]*Record
 	templateNames     *templateNames
+	serviceNames      *declaredServices
 	typeContext       map[string]TemplateParameter
 	variableOwners    map[string]TemplateParameter
 	lexicalOwner      *Function
