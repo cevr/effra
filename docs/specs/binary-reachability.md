@@ -107,7 +107,7 @@ The deterministic part runs in the gate:
   - the closed runtime modules and the generated runtime files;
   - that `net`, `net/http`, `crypto/tls`, `encoding/json` and `os/exec` are absent from both the dependencies and the symbol table;
   - both targets' output;
-  - that unused declarations and pipe spelling leave unchanged the generated runtime, the generated main's parsed syntax tree (comments and positions aside), imports, dependencies, the complete symbol list by name, kind and size (`go tool nm -size -type` without addresses), and the emitted JavaScript.
+  - that unused declarations and pipe spelling leave unchanged the generated runtime, the generated main's parsed syntax tree up to layout and comments, imports, dependencies, the complete symbol list by name, kind and size (`go tool nm -size -type` without addresses), and the emitted JavaScript.
 
   Source positions are the only difference left. Since `//line` directives (2026-10-11), the generated main and the executable's position tables name each source file and line. So equivalent fixtures differ in main bytes, symbol addresses and executable size.
 
