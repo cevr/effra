@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -286,6 +287,154 @@ func TestInstalledTreeContentsAreInputs(t *testing.T) {
 	if keyOf(t, root, inputs) == moded {
 		t.Fatal("removing the installed tree did not change the key")
 	}
+}
+
+// A tree input is the directory as a step walks it: files Git ignores are
+// inputs, every permission bit is, and only the excluded paths are not.
+func TestTreeInputsCoverIgnoredFilesAndExactPermissions(t *testing.T) {
+	root := fixture(t)
+	write(t, root, ".gitignore", "/runs/\nnode_modules/\n/leaf/out/\n")
+	write(t, root, "leaf/src/index.js", "export const one = 1\n")
+	inputs := &Inputs{Paths: []string{"leaf/"}, Trees: []string{"leaf/"}, TreeExclude: []string{"leaf/out"}}
+	before := keyOf(t, root, inputs)
+	write(t, root, "leaf/src/node_modules/probe.js", "ignored\n")
+	ignored := keyOf(t, root, inputs)
+	if ignored == before {
+		t.Fatal("an ignored file in a tree input left the key unchanged")
+	}
+	write(t, root, "leaf/out/built.js", "this step's output\n")
+	if keyOf(t, root, inputs) != ignored {
+		t.Fatal("an excluded output changed the key")
+	}
+	file := filepath.Join(root, "leaf/src/index.js")
+	keys := map[string]os.FileMode{ignored: 0o644}
+	for _, mode := range []os.FileMode{0o654, 0o754, 0o640} {
+		if err := os.Chmod(file, mode); err != nil {
+			t.Fatal(err)
+		}
+		key := keyOf(t, root, inputs)
+		if earlier, seen := keys[key]; seen {
+			t.Fatalf("mode %o replayed the key of mode %o", mode, earlier)
+		}
+		keys[key] = mode
+	}
+	// A repository path's digest carries its exact permissions too.
+	if err := os.Chmod(file, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	paths := &Inputs{Paths: []string{"leaf/"}}
+	group := keyOf(t, root, paths)
+	if err := os.Chmod(file, 0o654); err != nil {
+		t.Fatal(err)
+	}
+	owner := keyOf(t, root, paths)
+	if err := os.Chmod(file, 0o754); err != nil {
+		t.Fatal(err)
+	}
+	if owner == group || keyOf(t, root, paths) == owner {
+		t.Fatal("a permission change left a repository path's key unchanged")
+	}
+}
+
+// The framework-port capture check walks the vendored tree on disk and
+// asserts each file's owner executable bit. A recorded pass must not replay
+// once either changes: the real step declaration runs the real check over a
+// copy of the capture, warm.
+func TestReferencesKeyCoversWhatTheCaptureCheckReads(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Fatal("node is required: the gate runs Node steps")
+	}
+	repository, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, err := gateSteps(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var declared *Inputs
+	for _, step := range steps {
+		if step.Name == "framework-port references" {
+			declared = step.Inputs
+		}
+	}
+	if declared == nil {
+		t.Fatal("no framework-port references step")
+	}
+	root := fixture(t)
+	copyLeaf := func(name string) {
+		t.Helper()
+		content, err := os.ReadFile(filepath.Join(repository, frameworkPorts, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, root, frameworkPorts+name, string(content))
+	}
+	for _, name := range []string{".gitignore", "scripts/check-yield-capture.mjs", "vendor/solid-yield.provenance.json"} {
+		copyLeaf(name)
+	}
+	var provenance struct {
+		Files []struct{ Path, GitMode string }
+	}
+	content, err := os.ReadFile(filepath.Join(root, frameworkPorts, "vendor/solid-yield.provenance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(content, &provenance); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range provenance.Files {
+		copyLeaf(file.Path)
+		if file.GitMode == "100755" {
+			if err := os.Chmod(filepath.Join(root, frameworkPorts, file.Path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	git := func(args ...string) string {
+		t.Helper()
+		command := exec.Command("git", append([]string{"-c", "user.name=gate", "-c", "user.email=gate@invalid", "-c", "commit.gpgsign=false"}, args...)...)
+		command.Dir = root
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+		return string(output)
+	}
+	git("add", ".")
+	git("commit", "-qm", "capture")
+	cache := t.TempDir()
+	step := []*Step{{Name: "framework-port references", Argv: []string{"node", frameworkPorts + "scripts/check-yield-capture.mjs"}, Inputs: declared}}
+	expect := func(when string, pass, cached bool, message string) {
+		t.Helper()
+		code, out := runGate(t, root, cache, step)
+		if (code == 0) != pass || strings.Contains(out, "ok, cached") != cached || !strings.Contains(out, message) {
+			t.Fatalf("%s: exit %d, want pass=%t cached=%t and %q:\n%s", when, code, pass, cached, message, out)
+		}
+	}
+	expect("first run", true, false, "yield capture: 25 exact licensed source paths")
+	expect("unchanged", true, true, "yield capture: 25 exact licensed source paths")
+
+	probe := frameworkPorts + "vendor/solid-yield/src/node_modules/probe.js"
+	write(t, root, probe, "export {};\n")
+	git("check-ignore", "-q", probe)
+	expect("ignored file added", false, false, "unexpected captured path: vendor/solid-yield/src/node_modules/probe.js")
+	if err := os.RemoveAll(filepath.Join(root, frameworkPorts, "vendor/solid-yield/src/node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	expect("ignored file removed", true, true, "yield capture")
+
+	// Only the owner's bit decides the check, so a group bit already set must
+	// not stand in for it.
+	captured := filepath.Join(root, frameworkPorts, provenance.Files[0].Path)
+	if err := os.Chmod(captured, 0o654); err != nil {
+		t.Fatal(err)
+	}
+	expect("group executable bit set", true, false, "yield capture: 25 exact licensed source paths")
+	if err := os.Chmod(captured, 0o754); err != nil {
+		t.Fatal(err)
+	}
+	expect("owner executable bit set", false, false, "executable bit: "+provenance.Files[0].Path)
 }
 
 func TestToolDigestCoversInstalledTestDependencies(t *testing.T) {

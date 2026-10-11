@@ -73,6 +73,9 @@ async function references() {
   assert.equal(bunVersion, "1.4.2", "references require Bun1.4.2");
   run("CAPTURE", process.execPath, ["scripts/check-yield-capture.mjs"]);
   run("DEPENDENCIES", process.execPath, ["scripts/check-dependency-profile.mjs"]);
+  // The vendor build writes into dist without clearing it. Starting from none makes every built file this run's own
+  // output, so no stale file there can reach the checks below, and the gate's key leaves dist out.
+  rmSync(path.join(root, "vendor/solid-yield/dist"), { recursive: true, force: true });
   // The counter-domain control and the vendor build share nothing, so they run together; the consumer check needs
   // both. Emitting the vendor declarations type-checks the same program a separate --noEmit pass would.
   const counterDomain = start("COUNTER_DOMAIN", process.execPath, ["scripts/check-counter-domain.mjs", ...(counterArtifacts ? ["--verify", path.resolve(counterArtifacts)] : [])]);

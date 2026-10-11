@@ -80,6 +80,14 @@ type Inputs struct {
 	// like Installed, but when this step's key is computed: Installed trees
 	// are digested once per run because nothing writes them.
 	Generated []string
+	// Trees names directories a step walks on disk itself, as the
+	// framework-port capture check walks its vendored tree, so every entry
+	// there is an input, files Git ignores included. Each is digested like
+	// Generated, when this step's key is computed. TreeExclude names
+	// repository paths under them that are not inputs: the step's own
+	// outputs and trees declared separately.
+	Trees       []string
+	TreeExclude []string
 }
 
 type outcome int
@@ -458,8 +466,10 @@ func (g *gate) loadFiles() error {
 	return nil
 }
 
-// fileDigest identifies a file's content and kind. Missing tracked files,
-// directories (submodule gitlinks) and symlinks hash distinctly from content.
+// fileDigest identifies a file's content, kind and exact permission bits: a
+// check can read any of them, as the capture check reads the owner's
+// executable bit. Missing tracked files, directories (submodule gitlinks) and
+// symlinks hash distinctly from content.
 func fileDigest(name string) string {
 	info, err := os.Lstat(name)
 	switch {
@@ -481,11 +491,7 @@ func fileDigest(name string) string {
 		return "error:" + err.Error()
 	}
 	sum := sha256.Sum256(content)
-	mode := "file"
-	if info.Mode()&0111 != 0 {
-		mode = "executable"
-	}
-	return mode + ":" + hex.EncodeToString(sum[:])
+	return fmt.Sprintf("file:%v:%s", info.Mode().Perm(), hex.EncodeToString(sum[:]))
 }
 
 func selected(name string, inputs *Inputs) bool {
@@ -547,6 +553,19 @@ func (g *gate) key(step *Step) (string, error) {
 		}
 		fmt.Fprintf(hash, "generated\x00%s\x00%s\x00", name, digest)
 	}
+	for _, tree := range inputs.Trees {
+		var skip []string
+		for _, excluded := range inputs.TreeExclude {
+			if relative, ok := strings.CutPrefix(excluded, strings.TrimSuffix(tree, "/")+"/"); ok {
+				skip = append(skip, strings.TrimSuffix(relative, "/"))
+			}
+		}
+		digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(tree)), g.root, skip...)
+		if err != nil {
+			return "", fmt.Errorf("digest tree %s: %w", tree, err)
+		}
+		fmt.Fprintf(hash, "tree\x00%s\x00%q\x00%s\x00", tree, skip, digest)
+	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
@@ -572,9 +591,10 @@ func (g *gate) installed(dir string) string {
 // installedDigest hashes a tree's contents, following symbolic links (each
 // directory once, by its resolved path) and hashing files concurrently. A
 // link from the tree back into the repository, such as a workspace package,
-// contributes only its target: the files there are repository inputs, and
-// outputs Git ignores there are not inputs.
-func installedDigest(root, repository string) (string, error) {
+// contributes only its target: a step whose outcome depends on the files
+// there declares them, through Paths or, when it reads files Git ignores,
+// Trees. skip names paths relative to root that the walk leaves out.
+func installedDigest(root, repository string, skip ...string) (string, error) {
 	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
 		return "absent", nil
 	}
@@ -596,6 +616,9 @@ func installedDigest(root, repository string) (string, error) {
 	visited := map[string]bool{}
 	var walk func(relative, name string) error
 	walk = func(relative, name string) error {
+		if slices.Contains(skip, relative) {
+			return nil
+		}
 		info, err := os.Lstat(name)
 		if err != nil {
 			return err

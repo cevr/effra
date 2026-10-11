@@ -80,14 +80,22 @@ func gateSteps(root string) ([]*Step, error) {
 	// compiler change that emits identical artifacts replays its pass. The
 	// verification runs the emitted native programs and asserts their exact
 	// output, so the Go fingerprint, which carries the Go runtime
-	// environment, is an input.
+	// environment, is an input. The capture check walks the vendored tree on
+	// disk and asserts each file's owner executable bit, and TypeScript and
+	// Bun glob and resolve the leaf without Git, so the whole leaf is a tree
+	// input, files Git ignores included. Left out are the installed
+	// node_modules (keyed as Installed), .generated (this step's outputs and
+	// the emitted artifacts, keyed as Generated) and the vendor build output,
+	// which the step removes before building it.
 	add(&Step{Name: "framework-port counter emission", Needs: []string{"build bin/ef"}, Argv: []string{"node", frameworkPorts + "scripts/check-counter-domain.mjs", "--compiler", "bin/ef", "--emit", counterArtifacts}})
 	add(&Step{Name: "framework-port references", Needs: []string{"framework-port counter emission"}, Argv: []string{"node", frameworkPorts + "scripts/check-references.mjs", "--counter-domain-artifacts", counterArtifacts}, Inputs: &Inputs{
-		Paths:     []string{frameworkPorts},
-		Tools:     []string{"node", "bun", "go", "git"},
-		Env:       testToolEnvironment,
-		Installed: []string{frameworkPorts + "node_modules"},
-		Generated: []string{counterArtifacts},
+		Paths:       []string{frameworkPorts},
+		Tools:       []string{"node", "bun", "go", "git"},
+		Env:         testToolEnvironment,
+		Installed:   []string{frameworkPorts + "node_modules"},
+		Generated:   []string{counterArtifacts},
+		Trees:       []string{frameworkPorts},
+		TreeExclude: []string{frameworkPorts + "node_modules", frameworkPorts + ".generated", frameworkPorts + "vendor/solid-yield/dist"},
 	}})
 	add(&Step{Name: "effect conformance mapping", Argv: []string{"go", "run", "./scripts/conformance", "check"}, Inputs: conformance})
 
