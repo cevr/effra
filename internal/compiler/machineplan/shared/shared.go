@@ -5,10 +5,11 @@
 // analysis input shares them instead of copying a row per type and function
 // that carries it (a copy per distinct row is not bounded by the source). A
 // Row keeps the labels in an unexported field of this package, and nothing
-// here returns that slice or writes it, so code outside the package, the
-// analysis included, can read a row and copy it but has no way to write it:
-// the Go compiler refuses a slice, conversion, index assignment or append on a
-// Row.
+// here returns that slice or writes it. Code outside the package can read a
+// row and copy it; the Go compiler refuses a slice, conversion, index
+// assignment or append on a Row. Only reflect or unsafe could reach the field,
+// and machineplan's boundary test keeps both out of machineplan and of this
+// package.
 package shared
 
 import (
@@ -52,7 +53,8 @@ func (r Row) Bytes() int {
 	return n
 }
 
-// Join is the labels joined by separator, in a new string.
+// Join is the joined string: the labels joined by separator. For a single
+// label it is that label's own, immutable, string.
 func (r Row) Join(separator string) string { return strings.Join(r.labels, separator) }
 
 // AppendTo appends a copy of the labels to dst.

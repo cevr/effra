@@ -12,7 +12,9 @@ package machineplan
 import "effra.local/prototype/internal/compiler/machineplan/shared"
 
 // Row is a failure or service row: the checker's interned labels, shared
-// read-only. Analysis can read and copy a row but cannot write it.
+// read-only. Analysis can read and copy a row but cannot write it: the field
+// is unexported, and the package imports neither reflect nor unsafe
+// (boundary_test.go).
 type Row = shared.Row
 
 // TypeRef is the checker's canonical type ID. 0 is invalid. Analysis compares
@@ -30,6 +32,10 @@ type Input[V any] struct {
 	// Contracts those of bound functions.
 	Data      map[TypeRef]Projection[V]
 	Contracts map[*Function]Projection[V]
+	// PlanBytes is the size of a Plan[V], which holds V by value. Analysis
+	// imports no reflect or unsafe, so the caller, which knows V, measures it;
+	// each declaration's fixed charge (DeclarationUnits) includes it.
+	PlanBytes int
 }
 
 // Machine is one declaration.

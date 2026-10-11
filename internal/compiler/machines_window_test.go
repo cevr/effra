@@ -136,7 +136,7 @@ func TestMachineRefusalQuotesABoundedName(t *testing.T) {
 // declarations of 800 states each publish exactly 209 plans before the shared
 // 1,048,576-unit budget refuses the rest (211 at the earlier charge).
 func TestMachineModuleAdmissionFollowsTheFixedCharge(t *testing.T) {
-	if units := machineplan.DeclarationUnits[ValueType](); units != 171 {
+	if units := machineplan.DeclarationUnits(machinePlanBytes); units != 171 {
 		t.Errorf("a declaration's fixed charge is %d units, want 171", units)
 	}
 	r, measures := machineShape{states: 800, events: 1, tails: 2, wideArm: true, declarations: 256}.measure(t)

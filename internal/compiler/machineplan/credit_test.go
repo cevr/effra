@@ -114,5 +114,5 @@ func TestDeclarationMapBytesCoverTheRuntime(t *testing.T) {
 	if total != declarationMapBytes {
 		t.Fatalf("declarationMapBytes = %d, the table sums to %d", declarationMapBytes, total)
 	}
-	t.Logf("declarationMapBytes = %d; DeclarationUnits = %d", declarationMapBytes, DeclarationUnits[struct{}]())
+	t.Logf("declarationMapBytes = %d; DeclarationUnits = %d", declarationMapBytes, DeclarationUnits(PlanBaseBytes))
 }

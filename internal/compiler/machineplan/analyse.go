@@ -21,8 +21,12 @@ type Result[V any] struct {
 
 // Analyse checks every declaration of in and plans the ones that pass. It
 // reads only in and writes only its result: the checker commits the
-// diagnostics, in order, after analysis returns.
+// diagnostics, in order, after analysis returns. in.PlanBytes must be the
+// size of a Plan[V]; anything less than PlanBaseBytes is a caller error.
 func Analyse[V any](in *Input[V]) Result[V] {
+	if in.PlanBytes < PlanBaseBytes {
+		panic(fmt.Sprintf("machineplan: Input.PlanBytes is %d, less than a Plan's %d bytes", in.PlanBytes, PlanBaseBytes))
+	}
 	shared := &budget[V]{in: in}
 	plans := make([]*Plan[V], 0, len(in.Machines))
 	for ordinal, machine := range in.Machines {
@@ -84,7 +88,7 @@ type reportKey struct {
 
 // diagnosticUnits is what recording one diagnostic allocates: its slot in the
 // result buffer, which doubles as it grows, and its deduplication entry.
-var diagnosticUnits = (2*sizeOf[Diagnostic]() + 2*(sizeOf[reportKey]()+1) + textUnit - 1) / textUnit
+const diagnosticUnits = (2*diagnosticBytes + 2*(reportKeyBytes+1) + textUnit - 1) / textUnit
 
 // report records a diagnostic in the analysis' own buffer. After an analysis
 // refusal only EF142 is reported for the declaration: the refusal already
@@ -228,7 +232,7 @@ func (m *check[V]) run() *Plan[V] {
 		return nil
 	}
 	// The declaration's fixed state is charged before the plan exists.
-	if !m.charge(DeclarationUnits[V]()) {
+	if !m.charge(DeclarationUnits(m.in.PlanBytes)) {
 		return nil
 	}
 	machine := m.machine

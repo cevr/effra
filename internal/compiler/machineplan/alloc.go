@@ -19,23 +19,37 @@ package machineplan
 import (
 	"encoding/binary"
 	"fmt"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 )
 
-// sizeOf is the size in bytes of a value of type T, as unsafe.Sizeof reports it.
-// The package reads sizes through reflect so that it need not import unsafe.
-func sizeOf[T any]() int { return int(reflect.TypeFor[T]().Size()) }
+// The sizes of the analysis' own fixed values, as unsafe.Sizeof reports them.
+// The package imports neither unsafe nor reflect, so it cannot measure them;
+// they are counted in machine words (one word is a pointer or an int, a string
+// header is two and a slice header three), and sizes_test.go checks each
+// against reflect. Plan[V] holds V by value, so its size is the caller's to
+// measure (Input.PlanBytes); PlanBaseBytes is its size for a zero-size V.
+const (
+	word             = strconv.IntSize / 8
+	checkBytes       = 22 * word
+	scopeBytes       = 15 * word
+	payloadWalkBytes = 5 * word
+	diagnosticBytes  = 8 * word
+	reportKeyBytes   = 6 * word
+	// PlanBaseBytes is the size of a Plan[V] whose V has size zero, the least
+	// Input.PlanBytes can be.
+	PlanBaseBytes = 52 * word
+)
 
 // DeclarationUnits is a declaration's fixed state, charged as bytes before the
-// plan is allocated: the plan, its copy into the result, the declaration's
-// check, its two role scopes and three payload walks, and the first group of
-// every map run creates (declarationMapBytes). Everything that grows with the
-// program is charged where it is built.
-func DeclarationUnits[V any]() int {
-	fixed := 2*sizeOf[Plan[V]]() + sizeOf[check[V]]() + 2*sizeOf[scope]() + 3*sizeOf[payloadWalk[V]]()
+// plan is allocated: the plan (planBytes, the size of a Plan[V]), its copy
+// into the result, the declaration's check, its two role scopes and three
+// payload walks, and the first group of every map run creates
+// (declarationMapBytes). Everything that grows with the program is charged
+// where it is built.
+func DeclarationUnits(planBytes int) int {
+	fixed := 2*planBytes + checkBytes + 2*scopeBytes + 3*payloadWalkBytes
 	return TextUnits(fixed + declarationMapBytes)
 }
 
@@ -56,55 +70,24 @@ func mapBytes(slot int) int {
 }
 
 // declarationMaps are the maps one declaration's analysis can create before
-// its program-sized content: how many of each, and its slot size.
+// its program-sized content: how many of each, and its slot size (a key and an
+// element, padded to the slot's alignment). sizes_test.go checks each slot
+// against reflect over the key and element types named in its comment.
 var declarationMaps = []struct {
 	name  string
 	count int
 	slot  int
 }{
-	{"reports seen", 1, sizeOf[struct {
-		k reportKey
-		v bool
-	}]()},
-	{"transition keys", 1, sizeOf[struct {
-		k string
-		v bool
-	}]()},
-	{"helper ordinals", 1, sizeOf[struct {
-		k string
-		v int
-	}]()},
-	// indexes and sets, and one table each for the state, event and outcome.
-	{"enum tables", 2, sizeOf[struct {
-		k *Enum
-		v map[string]int
-	}]()},
-	{"variant indexes", 3, sizeOf[struct {
-		k string
-		v int
-	}]()},
-	{"narrowing tables", 3, sizeOf[struct {
-		k string
-		v *set
-	}]()},
-	{"refinements", 1, sizeOf[struct {
-		k refinement
-		v *set
-	}]()},
-	{"subsets", 1, sizeOf[struct {
-		k [2]*set
-		v bool
-	}]()},
-	// The step and complete scopes: states, triggers, lets and alias roots.
-	{"role scopes", 8, sizeOf[struct {
-		k *Local
-		v *Local
-	}]()},
-	// The state, event and output payload walks.
-	{"payload visits", 3, sizeOf[struct {
-		k TypeRef
-		v bool
-	}]()},
+	{"reports seen", 1, reportKeyBytes + word}, // reportKey, bool
+	{"transition keys", 1, 3 * word},           // string, bool
+	{"helper ordinals", 1, 3 * word},           // string, int
+	{"enum tables", 2, 2 * word},               // *Enum, map[string]*set: indexes and sets
+	{"variant indexes", 3, 3 * word},           // string, int: state, event and outcome
+	{"narrowing tables", 3, 3 * word},          // string, *set
+	{"refinements", 1, 5 * word},               // refinement, *set
+	{"subsets", 1, 3 * word},                   // [2]*set, bool
+	{"role scopes", 8, 2 * word},               // *Local, *Expr: states, triggers, lets, alias roots
+	{"payload visits", 3, 8},                   // TypeRef, bool: state, event, output walks
 }
 
 // declarationMapBytes is the estimated first-group bytes of declarationMaps.

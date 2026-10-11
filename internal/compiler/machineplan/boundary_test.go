@@ -2,7 +2,7 @@ package machineplan
 
 import (
 	"encoding/json"
-	"go/ast"
+	"fmt"
 	"go/parser"
 	"go/token"
 	"os"
@@ -20,20 +20,49 @@ const sharedPath = "effra.local/prototype/internal/compiler/machineplan/shared"
 
 // The analysis boundary is structural. The package imports only these
 // standard packages and the row view, so it cannot name the checker, its
-// arenas, its intern maps or its diagnostics; the Go compiler enforces it. It
-// does not import unsafe, so it cannot forge a pointer into checker memory,
-// and it uses reflect only to read type sizes (reflect.TypeFor), never to
-// reach a value.
-var allowedImports = []string{"encoding/binary", "fmt", "reflect", "slices", "strconv", "strings", "unicode/utf8", sharedPath}
+// arenas, its intern maps or its diagnostics; the Go compiler enforces it.
+// Neither it nor the row view imports reflect or unsafe, the two packages
+// that can reach memory past Go's export and type rules: unsafe by pointer,
+// reflect through a Value's UnsafePointer or settable fields. The fixed sizes
+// analysis charges are counted in words and checked against reflect by a
+// test (sizes_test.go), and the size of a Plan[V] comes in Input.PlanBytes.
+var allowedImports = []string{"encoding/binary", "fmt", "slices", "strconv", "strings", "unicode/utf8", sharedPath}
 
-// sharedImports are what the row view may import: nothing that reaches
-// another package's state, and neither reflect nor unsafe.
+// sharedImports are what the row view may import.
 var sharedImports = []string{"iter", "strings"}
 
-// allowedReflect is the only reflect identifier the package may name.
-const allowedReflect = "TypeFor"
+// forbiddenImports reach memory past the export rule; no allowlist may hold
+// them.
+var forbiddenImports = []string{"reflect", "unsafe"}
+
+// importViolations lists what source, a file of the given directory's
+// package, imports beyond allowed.
+func importViolations(name string, source any, allowed []string) ([]string, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), name, source, parser.ImportsOnly)
+	if err != nil {
+		return nil, err
+	}
+	var violations []string
+	for _, spec := range file.Imports {
+		path, _ := strconv.Unquote(spec.Path.Value)
+		switch {
+		case slices.Contains(forbiddenImports, path):
+			violations = append(violations, fmt.Sprintf("%s imports %s, which reaches memory past the export rule", name, path))
+		case !slices.Contains(allowed, path):
+			violations = append(violations, fmt.Sprintf("%s imports %s; it may import only %v", name, path, allowed))
+		}
+	}
+	return violations, nil
+}
 
 func TestAnalysisImportsNoCheckerState(t *testing.T) {
+	for _, list := range [][]string{allowedImports, sharedImports} {
+		for _, path := range forbiddenImports {
+			if slices.Contains(list, path) {
+				t.Fatalf("%s is in an allowlist", path)
+			}
+		}
+	}
 	for _, dir := range []struct {
 		path    string
 		allowed []string
@@ -46,36 +75,76 @@ func TestAnalysisImportsNoCheckerState(t *testing.T) {
 		files := 0
 		for _, entry := range entries {
 			name := entry.Name()
+			// Assembly, C or object files could write memory without an import.
+			if !entry.IsDir() && !strings.HasSuffix(name, ".go") {
+				t.Errorf("%s holds %s; the package holds only Go files", dir.path, name)
+			}
 			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 				continue
 			}
 			files++
-			name = filepath.Join(dir.path, name)
-			file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+			violations, err := importViolations(filepath.Join(dir.path, name), nil, dir.allowed)
 			if err != nil {
 				t.Fatal(err)
 			}
-			ast.Inspect(file, func(node ast.Node) bool {
-				if selector, ok := node.(*ast.SelectorExpr); ok {
-					if pkg, ok := selector.X.(*ast.Ident); ok && pkg.Name == "reflect" && selector.Sel.Name != allowedReflect {
-						t.Errorf("%s uses reflect.%s; analysis may use only reflect.%s", name, selector.Sel.Name, allowedReflect)
-					}
-				}
-				return true
-			})
-			for _, spec := range file.Imports {
-				path, _ := strconv.Unquote(spec.Path.Value)
-				if !slices.Contains(dir.allowed, path) {
-					t.Errorf("%s imports %s; it may import only %v", name, path, dir.allowed)
-				}
-				// The identifier check above sees reflect only by its own name.
-				if path == "reflect" && spec.Name != nil {
-					t.Errorf("%s imports reflect as %s; analysis imports it only under its own name", name, spec.Name.Name)
-				}
+			for _, violation := range violations {
+				t.Error(violation)
 			}
 		}
 		if files < dir.least {
 			t.Fatalf("found %d package files in %s", files, dir.path)
+		}
+	}
+}
+
+// reviewR8ReflectWrite is review round 8's control, verbatim: it writes a
+// shared row's label naming only reflect.TypeFor, reaching a reflect.Value
+// through a method chain and its UnsafePointer, with no import of unsafe. It
+// compiles; the import rule is what refuses it.
+const reviewR8ReflectWrite = `package machineplan
+
+import "reflect"
+
+var reviewR8Stash Row
+
+type reviewR8Getter func(reviewR8Getter) Row
+
+func (reviewR8Getter) Get() Row { return reviewR8Stash }
+
+func reviewR8One[T any](x T) []T { return []T{x} }
+
+func reviewR8Write(r Row) {
+	if r.Len() == 0 {
+		return
+	}
+	reviewR8Stash = r
+	fn := reflect.TypeFor[reviewR8Getter]().Method(0).Func
+	receiver := fn.Convert(reflect.TypeFor[reviewR8Getter]())
+	got := fn.Call(reviewR8One(receiver))[0]
+	data := got.Field(0).UnsafePointer()
+	*(*string)(data) = "written"
+}
+`
+
+func TestBoundaryRefusesTheReflectWrite(t *testing.T) {
+	for _, probe := range []struct {
+		name, source, refused string
+	}{
+		{"review r8 reflect write", reviewR8ReflectWrite, "imports reflect"},
+		{"renamed reflect", "package machineplan\n\nimport r \"reflect\"\n\nvar _ = r.TypeFor[int]\n", "imports reflect"},
+		{"unsafe", "package machineplan\n\nimport \"unsafe\"\n\nvar _ = unsafe.Sizeof(0)\n", "imports unsafe"},
+	} {
+		for _, dir := range []struct {
+			path    string
+			allowed []string
+		}{{".", allowedImports}, {"shared", sharedImports}} {
+			violations, err := importViolations(filepath.Join(dir.path, "zz_probe.go"), probe.source, dir.allowed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(violations) != 1 || !strings.Contains(violations[0], probe.refused) {
+				t.Errorf("%s in %s: violations %q, want one that %s", probe.name, dir.path, violations, probe.refused)
+			}
 		}
 	}
 }
@@ -120,13 +189,18 @@ func TestInputAndResultArePlainData(t *testing.T) {
 // distinct row, which the source does not bound). Analysis sees each as a Row,
 // a shared.Row: its slice is an unexported field of package shared, and
 // shared exposes only the reads and copies below, none of which writes the
-// labels or returns their slice. So no code in this package can write a row
-// label or append into a row's backing array, whatever alias, conversion or
-// container it goes through: the Go compiler refuses it. TestSharedRowIsReadOnly
-// pins the view's shape, and TestRowWritesDoNotCompile builds probes that try.
-// The checker side, that nothing writes an interned label after internRow, is
-// held by convention and checked by the window's row digest
-// (clipCheckerState in the compiler's tests).
+// labels or returns their slice. Go code reaches another package's unexported
+// field only through reflect or unsafe (or assembly, cgo or linkname, which
+// need a non-Go file, import "C" or import unsafe), and the import and file
+// rules above keep all of them out of this package and of shared. So the
+// package's non-test code cannot write a row label or append into a row's
+// backing array, whatever alias, conversion or container it goes through: a
+// direct write does not compile (TestRowWritesDoNotCompile), and the reflect
+// route fails the import rule (TestBoundaryRefusesTheReflectWrite).
+// TestSharedRowIsReadOnly pins the view's shape. Test files may import
+// reflect; they are not analysis. The checker side, that nothing writes an
+// interned label after internRow, is held by convention and checked by the
+// window's row digest (clipCheckerState in the compiler's tests).
 var rowMethods = []string{"All", "AppendTo", "At", "Bytes", "Join", "Len"}
 
 func TestSharedRowIsReadOnly(t *testing.T) {

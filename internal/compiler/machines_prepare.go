@@ -26,6 +26,7 @@ package compiler
 
 import (
 	"math"
+	"reflect"
 	"slices"
 
 	"effra.local/prototype/internal/compiler/machineplan"
@@ -33,6 +34,11 @@ import (
 )
 
 type machineInput = machineplan.Input[ValueType]
+
+// machinePlanBytes is the size of a plan over the checker's value type, which
+// analysis charges per declaration but cannot measure: machineplan imports
+// neither reflect nor unsafe.
+var machinePlanBytes = int(reflect.TypeFor[machineplan.Plan[ValueType]]().Size())
 
 type machinePrep struct {
 	c     *checker
@@ -83,6 +89,7 @@ func (c *checker) prepareMachines(initials []checkedExpression) (*machineInput, 
 			Types:     machineplan.Types{Nodes: map[machineplan.TypeRef]*machineplan.TypeNode{}, Templates: map[string]*machineplan.Template{}, Layouts: map[machineplan.TypeRef]*machineplan.Layout{}, Displays: map[machineplan.TypeRef]string{}},
 			Data:      map[machineplan.TypeRef]machineplan.Projection[ValueType]{},
 			Contracts: map[*machineplan.Function]machineplan.Projection[ValueType]{},
+			PlanBytes: machinePlanBytes,
 		},
 		functions:     map[*Function]*machineplan.Function{},
 		locals:        map[*localBinding]*machineplan.Local{},
@@ -447,12 +454,16 @@ func (p *machinePrep) enum(enum *Enum) *machineplan.Enum {
 // calls interns n rows of up to n labels each from O(n) bytes.
 //
 // What holds: machineplan sees the labels only as a shared.Row, whose slice
-// is unexported in package shared and which exposes reads and copies only, so
-// no code in machineplan can write a label or append into the backing array;
-// the Go compiler refuses it (boundary_test.go builds probes that try). The
-// checker side is held by convention: this file and the checker do not write
-// interned labels after internRow, and clipCheckerState's row digest checks
-// that the window leaves every interned label as it found it.
+// is unexported in package shared and which exposes reads and copies only.
+// Without reflect or unsafe, Go code cannot reach another package's unexported
+// field, and machineplan's boundary test refuses both imports (and non-Go
+// files) in machineplan and shared. So machineplan's code cannot write a label
+// or append into the backing array: a direct write does not compile, and the
+// reflect route fails the boundary test (machineplan/boundary_test.go holds
+// both kinds of probe). The checker side is held by convention: this file and
+// the checker do not write interned labels after internRow, and
+// clipCheckerState's row digest checks that the window leaves every interned
+// label as it found it.
 func (p *machinePrep) row(id RowID) machineplan.Row {
 	return shared.Of(p.c.retainedRowLabels(id))
 }
