@@ -464,6 +464,7 @@ type checker struct {
 	functionModule    string
 	admittedSummaries map[string]interfaceSummary
 	templates         map[string]*Record
+	templateNames     *templateNames
 	typeContext       map[string]TemplateParameter
 	variableOwners    map[string]TemplateParameter
 	lexicalOwner      *Function
