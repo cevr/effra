@@ -16,13 +16,13 @@ package compiler
 // generic payload that would instantiate exponentially, or rebuild a long
 // key once per instantiation, is refused by its cost before the checker
 // builds it (machines_prepare_test.go measures this). The input copies the
-// slices it would otherwise share with the checker (row labels, a call's
-// label binding), so nothing analysis holds aliases checker memory.
+// slices it would otherwise share with the checker (a call's label binding),
+// except row labels: those it shares, read-only (see row).
 //
 // Work over data the module shares is done once per module, not once per
-// declaration that reads it: each canonical row is copied once, and each type
-// whose reachable payload has been walked and found admissible is not walked
-// again. A declaration that reuses either pays a fixed charge for it.
+// declaration that reads it: each type whose reachable payload has been
+// walked and found admissible is not walked again, and each row's display is
+// paid once. A declaration that reuses either pays a fixed charge for it.
 
 import (
 	"math"
@@ -48,10 +48,7 @@ type machinePrep struct {
 	// declaration is not costed again by the next.
 	layoutCosts map[machineplan.TypeRef]layoutCost
 
-	// rows holds the input's one copy of each canonical row, shared by every
-	// type node and initial that carries it; displayedRows are the rows an
-	// initial's display has already paid for.
-	rows          map[RowID][]string
+	// displayedRows are the rows an initial's display has already paid for.
 	displayedRows map[RowID]bool
 
 	// clean holds the types whose whole reachable payload a walk has finished
@@ -91,7 +88,6 @@ func (c *checker) prepareMachines(initials []checkedExpression) (*machineInput, 
 		enums:         map[*Enum]*machineplan.Enum{},
 		arms:          map[*MatchArm]*machineplan.Arm{},
 		layoutCosts:   map[machineplan.TypeRef]layoutCost{},
-		rows:          map[RowID][]string{},
 		displayedRows: map[RowID]bool{},
 		clean:         map[TypeID]bool{},
 	}
@@ -443,17 +439,16 @@ func (p *machinePrep) enum(enum *Enum) *machineplan.Enum {
 	return lowered
 }
 
-// row is the input's copy of a canonical row, made the first time the module
-// reads it and shared from then on. The checker interned the row before
-// preparation, building at least the labels' bytes, so one copy per distinct
-// row is a fraction of what the checker already did for it.
+// row is a canonical row's labels as the checker interned them: sorted,
+// distinct, and never written after internRow made them. The input shares
+// them rather than copying, as the checker's own projections do, because a
+// copy per distinct row is not bounded by the source: a chain of n `.catch`
+// calls interns n rows of up to n labels each from O(n) bytes. The slice's
+// capacity is clipped, so an append in analysis copies instead of writing
+// past it, and analysis writes no row element (boundary_test.go).
 func (p *machinePrep) row(id RowID) []string {
-	if labels, ok := p.rows[id]; ok {
-		return labels
-	}
-	labels := slices.Clone(p.c.retainedRowLabels(id))
-	p.rows[id] = labels
-	return labels
+	labels := p.c.retainedRowLabels(id)
+	return labels[:len(labels):len(labels)]
 }
 
 // displayRows mirrors what analysis charges to show an effectful initial's
@@ -601,8 +596,8 @@ func (p *machinePrep) function(f *Function) *machineplan.Function {
 		lowered.Params[i] = machineplan.Param{Type: p.typeRef(parameter.typeID), Span: machineplan.Span(parameter.Span), Source: parameter.Type, Binding: p.local(parameter.binding)}
 	}
 	if f.Effect {
-		lowered.Failures = normalized(p.c.retainedRowLabels(f.failureID))
-		lowered.Services = normalized(p.c.retainedRowLabels(f.serviceID))
+		lowered.Failures = p.row(f.failureID)
+		lowered.Services = p.row(f.serviceID)
 	}
 	p.functions[f] = lowered
 	if f.Body != nil {

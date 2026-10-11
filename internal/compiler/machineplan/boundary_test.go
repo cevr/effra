@@ -96,3 +96,76 @@ func TestInputAndResultArePlainData(t *testing.T) {
 		visit(root.Name(), root)
 	}
 }
+
+// rowFields name the input's row labels. They are the checker's interned
+// rows, shared read-only rather than copied (the input would otherwise hold
+// a copy of every distinct row, which the source does not bound), so analysis
+// may read them and copy them but never write an element. Their capacity is
+// clipped, so an append copies. This check is syntactic: it sees writes
+// through a row field, not through a local alias of one, and the window's
+// row digest (clipCheckerState) covers what it cannot see.
+var rowFields = []string{"Failures", "Services"}
+
+// rowWriters are the calls that write into their first argument.
+var rowWriters = []string{"Sort", "Strings", "Stable", "SortFunc", "SortStableFunc", "Reverse", "Compact", "CompactFunc", "Delete", "DeleteFunc", "Insert", "Replace"}
+
+func TestAnalysisWritesNoInputRow(t *testing.T) {
+	isRow := func(expr ast.Expr) bool {
+		for {
+			switch e := expr.(type) {
+			case *ast.ParenExpr:
+				expr = e.X
+			case *ast.SliceExpr:
+				expr = e.X
+			case *ast.SelectorExpr:
+				return slices.Contains(rowFields, e.Sel.Name)
+			default:
+				return false
+			}
+		}
+	}
+	element := func(expr ast.Expr) bool {
+		index, ok := expr.(*ast.IndexExpr)
+		return ok && isRow(index.X)
+	}
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			var written bool
+			switch n := node.(type) {
+			case *ast.AssignStmt:
+				written = slices.ContainsFunc(n.Lhs, element)
+			case *ast.IncDecStmt:
+				written = element(n.X)
+			case *ast.UnaryExpr:
+				written = n.Op == token.AND && element(n.X)
+			case *ast.CallExpr:
+				if len(n.Args) > 0 && isRow(n.Args[0]) {
+					switch fun := n.Fun.(type) {
+					case *ast.Ident:
+						written = fun.Name == "copy" || fun.Name == "clear"
+					case *ast.SelectorExpr:
+						pkg, ok := fun.X.(*ast.Ident)
+						written = ok && (pkg.Name == "slices" || pkg.Name == "sort") && slices.Contains(rowWriters, fun.Sel.Name)
+					}
+				}
+			}
+			if written {
+				t.Errorf("%s writes into a shared input row", fset.Position(node.Pos()))
+			}
+			return true
+		})
+	}
+}

@@ -531,7 +531,8 @@ func (m *check[V]) function(role string, f *Function) (BoundFunction[V], bool) {
 		if !m.charge(2 + 2*(len(f.Failures)+len(f.Services))) {
 			return BoundFunction[V]{}, false
 		}
-		failures, services = slices.Clone(f.Failures), slices.Clone(f.Services)
+		// Copies: the input's rows are the checker's, shared read-only.
+		failures, services = append(failures, f.Failures...), append(services, f.Services...)
 	}
 	if !m.charge(1 + len(f.Params) + TextUnits(nodeTextBytes+argTextBytes*len(f.Params))) {
 		return BoundFunction[V]{}, false

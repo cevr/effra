@@ -12,7 +12,10 @@ import (
 // budget. Every layout and display it builds is charged by the analysis cost
 // model first, and the rest of what it does (lowering the declarations and the
 // bodies the walk reads, the type table, projections of published values) is
-// linear in the source. So each module's preparation must allocate at most
+// linear in the source. The type table is linear because it shares the
+// checker's interned rows instead of copying them: rows are not linear in the
+// source (TestMachinePreparationSharesInternedRows). So each module's
+// preparation must allocate at most
 // preparationBytesPerUnit per unit its mirrored charges accepted, plus
 // preparationBytesPerSourceByte per source byte, plus a fixed allowance. The
 // accepted units never exceed the module's analysis budget, so the bound is
@@ -280,5 +283,45 @@ func TestMachinePreparationRowChargeIsPinned(t *testing.T) {
 	_, large := prepareModule(t, effectInitialSource(5000, 1))
 	if got := large.units - small.units; got != 373 {
 		t.Errorf("5,000 labels add %d preparation units over 3, want 373", got)
+	}
+}
+
+// catchChainSource is the round-6 review's m1 shape: all() raises n errors and
+// start()'s body catches them one at a time, so the chain's n expressions
+// carry n distinct rows of n, n-1, …, 1 labels, n²/2 labels from O(n) source
+// bytes. The initial calls start(), so its body is lowered and its types
+// prepared; analysis then refuses the effectful initial (EF140).
+func catchChainSource(n int) string {
+	var b strings.Builder
+	b.WriteString("import Machines \"effra/machines\"\n")
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "error G%d\n", i)
+	}
+	b.WriteString("enum S { A }\nenum E { P }\neffect fn all() -> i64 raises {")
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, " G%d", i)
+	}
+	b.WriteString(" } { 1 }\neffect fn start() -> S {\n    let x = run all()")
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, ".catch<G%d>(0)", i)
+	}
+	b.WriteString("\n    S.A {}\n}\n")
+	b.WriteString("fn step(state: S, event: E) -> Machines.Step<S, void> { Machines.Step<S, void>.Ignore {} }\n")
+	b.WriteString("machine M { initial start(); step step }\n")
+	return b.String()
+}
+
+// Round-6 review m1: the input shares the checker's interned rows. A copy per
+// distinct row is quadratic in this source (at 500 errors, 2.6 MB against a
+// 1.1 MB bound, and 16× the bound at 4,000), while sharing keeps preparation
+// within its linear bound. The checker's own cost on the chain is quadratic
+// too, and is not preparation's.
+func TestMachinePreparationSharesInternedRows(t *testing.T) {
+	r, _ := prepareModule(t, catchChainSource(500))
+	if codes := machineCodes(r); len(codes) != 1 || codes[0] != "EF140" {
+		t.Errorf("codes %v, want [EF140]", codes)
 	}
 }

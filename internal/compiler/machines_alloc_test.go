@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"hash/fnv"
 	"maps"
 	"math/rand"
 	"runtime"
@@ -534,7 +535,7 @@ func clipCheckerState(c *checker) func(*checker) string {
 	if lexical := c.result.lexical; lexical != nil {
 		lexical.references = refit(lexical.references)
 	}
-	before := checkerStateSizes(c)
+	before, rows := checkerStateSizes(c), rowLabelsDigest(c)
 	return func(c *checker) string {
 		after := checkerStateSizes(c)
 		for name, size := range before {
@@ -542,8 +543,25 @@ func clipCheckerState(c *checker) func(*checker) string {
 				return fmt.Sprintf("%s from %d to %d", name, size, after[name])
 			}
 		}
+		if rowLabelsDigest(c) != rows {
+			return "an interned row's labels"
+		}
 		return ""
 	}
+}
+
+// rowLabelsDigest hashes every interned row's labels. The analysis input
+// shares them read-only, so the window must leave them as they were.
+func rowLabelsDigest(c *checker) uint64 {
+	h := fnv.New64a()
+	for _, row := range c.rows {
+		for _, label := range row.Labels {
+			h.Write([]byte(label))
+			h.Write([]byte{0})
+		}
+		h.Write([]byte{1})
+	}
+	return h.Sum64()
 }
 
 // checkerStateSizes is the length of every piece of checker state
