@@ -519,6 +519,31 @@ func randomMachineShape(rng *rand.Rand) machineShape {
 		s.declarations = 256
 		s.machineName = min(s.machineName, (16<<20)/s.declarations)
 	}
+	return capMachineSource(s)
+}
+
+// machineSourceCap bounds a generated source. Of seeds 1-1000, 18 drew more
+// than 128 MiB (none of 1-64, the gate's), and seed 486's 455 MB took 3-6
+// minutes in the checker before analysis started. A shape over the cap has
+// its long names cut to a quarter, then its declarations, until it fits.
+const machineSourceCap = 128 << 20
+
+func capMachineSource(s machineShape) machineShape {
+	for range 16 {
+		if len(s.source()) <= machineSourceCap {
+			break
+		}
+		names := []*int{&s.name, &s.machineName, &s.variantName, &s.failureName, &s.genericName, &s.recipeName}
+		cut := false
+		for _, name := range names {
+			if *name > 64 {
+				*name, cut = *name/4, true
+			}
+		}
+		if !cut {
+			s.declarations = max(1, s.declarations/4)
+		}
+	}
 	return s
 }
 
@@ -683,12 +708,37 @@ func TestMachineAnalysisAllocationIsCharged(t *testing.T) {
 		_, measures := shape.measure(t)
 		assertMachineAllocationCharged(t, fmt.Sprintf("shape %d (%s)", i, shape), measures)
 	}
-	// The sweep: one generated shape per seed, measured at the analysis and
-	// at every public boundary its plans reach.
+}
+
+// The sweep: one generated shape per seed, measured at the analysis and at
+// every public boundary its plans reach. The gate's 64 seeds run as four
+// top-level tests of 16, so the gate can put them in different shards; each
+// block draws modules on both sides of the budget. -machine.seeds=N runs a
+// deeper sweep of N seeds from -machine.seed in TestMachineAllocationSweepDeep.
+func TestMachineAllocationSweepSeeds1To16(t *testing.T)  { sweepMachineSeeds(t, 1, 16, true) }
+func TestMachineAllocationSweepSeeds17To32(t *testing.T) { sweepMachineSeeds(t, 17, 16, true) }
+func TestMachineAllocationSweepSeeds33To48(t *testing.T) { sweepMachineSeeds(t, 33, 16, true) }
+func TestMachineAllocationSweepSeeds49To64(t *testing.T) { sweepMachineSeeds(t, 49, 16, true) }
+
+func TestMachineAllocationSweepDeep(t *testing.T) {
+	if *machineSeeds == 0 {
+		t.Skip("set -machine.seeds=N (and -machine.seed) for a deeper sweep")
+	}
+	sweepMachineSeeds(t, *machineSeedStart, *machineSeeds, *machineSeeds >= 64)
+}
+
+// sweepMachineSeeds measures seeds from first to first+n-1. With bothSides,
+// the shapes must include a module with plans and one refused for its budget.
+func sweepMachineSeeds(t *testing.T, first int64, n int, bothSides bool) {
+	request, err := ParseGraphRequest(map[string]any{"kind": "machine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	warmMachineBoundaries(t, request)
 	var worst machineWorst
 	admitted, refused := 0, 0
-	for k := 0; k < *machineSeeds; k++ {
-		seed := *machineSeedStart + int64(k)
+	for k := 0; k < n; k++ {
+		seed := first + int64(k)
 		shape := machineSeedShape(seed)
 		label := fmt.Sprintf("seed %d (%s)", seed, shape)
 		started := time.Now()
@@ -708,18 +758,18 @@ func TestMachineAnalysisAllocationIsCharged(t *testing.T) {
 			refused++
 		}
 	}
-	t.Logf("%d seeds from %d: worst %.1f B/unit at %s", *machineSeeds, *machineSeedStart, worst.ratio, worst.label)
+	t.Logf("%d seeds from %d: admitted %d, refused %d, worst %.1f B/unit at %s", n, first, admitted, refused, worst.ratio, worst.label)
 	// The generator must exercise both sides of the budget.
-	if *machineSeeds >= 64 && (admitted == 0 || refused == 0) {
+	if bothSides && (admitted == 0 || refused == 0) {
 		t.Fatalf("generated shapes admitted %d and refused %d modules", admitted, refused)
 	}
 }
 
-// The sweep's seeds: -machine.seeds=N draws N shapes, one per seed from
-// -machine.seed, for a deeper local sweep than the default.
+// The deep sweep's seeds: -machine.seeds=N draws N shapes, one per seed from
+// -machine.seed.
 var (
-	machineSeeds     = flag.Int("machine.seeds", 64, "generated machine shapes the allocation sweep measures, one per seed")
-	machineSeedStart = flag.Int64("machine.seed", 1, "first seed of the machine allocation sweep")
+	machineSeeds     = flag.Int("machine.seeds", 0, "generated machine shapes TestMachineAllocationSweepDeep measures, one per seed")
+	machineSeedStart = flag.Int64("machine.seed", 65, "first seed of TestMachineAllocationSweepDeep")
 )
 
 // machineSeedShape is the shape one seed draws.
