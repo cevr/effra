@@ -274,6 +274,21 @@ func (g *gate) run(out io.Writer) int {
 			break
 		}
 	}
+	// Start every tool fingerprint while files load; each is computed once
+	// per run, so a step that names a tool finds it ready or waits for it.
+	prefetched := map[string]bool{}
+	for _, step := range g.steps {
+		tools := step.ToolEnv
+		if step.Inputs != nil {
+			tools = append(slices.Clone(step.Inputs.Tools), tools...)
+		}
+		for _, tool := range tools {
+			if !prefetched[tool] {
+				prefetched[tool] = true
+				go g.toolVersion(tool)
+			}
+		}
+	}
 	if err := g.loadFiles(); err != nil {
 		fmt.Fprintln(out, "gate:", err)
 		return 2
