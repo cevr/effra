@@ -89,7 +89,7 @@ Every example's bounds-check and escape totals are identical before and after, s
 
 Lowering time also rose. Median lowering went from 0.35-16.9 ms to 1.0-58.4 ms per example, 1.7 to 4.3 times slower, because placement scans and reformats the program at least once more. It stays under 60 ms against cold builds of 0.34 s and more, but it is real frontend cost (see Follow-ups).
 
-The size fixtures `minimal` / `minimal-unused` and `direct` / `pipe` no longer build byte-identical executables. Their position tables name different files and lines. Their symbols by name, kind and size, and their generated mains' compiled tokens, are still identical, and the gate now checks exactly that (`cmd/ef/size_process_test.go`).
+The size fixtures `minimal` / `minimal-unused` and `direct` / `pipe` no longer build byte-identical executables. Their position tables name different files and lines. Their generated mains compile identical tokens and their symbols match by name, kind and size (checked by hand with `go tool nm`). The gate now checks the tokens and the receipt's per-package symbol counts and sizes (`cmd/ef/size_process_test.go`).
 
 ## Prior art
 

@@ -191,7 +191,7 @@ The recorded rows predate source positions. Generated Go now carries `//line` di
 - cold builds were within noise;
 - generated `main.go` grew 38.3%.
 
-As a result, `minimal` and `minimal-unused` no longer share one executable size, and neither do `direct` and `pipe`; their symbols by name, kind and size still match. The next matrix recording will show it.
+As a result, `minimal` and `minimal-unused` no longer share one executable size, and neither do `direct` and `pipe`; their symbols still match by name, kind and size (checked by hand) and by per-package count and size (checked in the gate). The next matrix recording will show it.
 
 Retention observations, not claims:
 
