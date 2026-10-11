@@ -3,18 +3,16 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"go/ast"
-	goparser "go/parser"
-	gotoken "go/token"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"effra.local/prototype/internal/compiler"
+	"effra.local/prototype/internal/gosyntax"
 	"effra.local/prototype/internal/receipt"
 	rt "effra.local/prototype/runtime/effra"
 )
@@ -99,16 +97,11 @@ func generatedMainTree(t *testing.T, measured receipt.Application) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	file, err := goparser.ParseFile(gotoken.NewFileSet(), "main.go", source, goparser.SkipObjectResolution)
+	tree, err := gosyntax.Tree(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var tree strings.Builder
-	position := reflect.TypeFor[gotoken.Pos]()
-	if err := ast.Fprint(&tree, nil, file, func(_ string, value reflect.Value) bool { return value.Type() != position }); err != nil {
-		t.Fatal(err)
-	}
-	return tree.String()
+	return tree
 }
 
 // symbolsWithoutAddresses lists an executable's symbols by name, kind and
@@ -123,12 +116,57 @@ func symbolsWithoutAddresses(t *testing.T, measured receipt.Application, executa
 		t.Fatalf("go tool nm %s: %v", executable, err)
 	}
 	symbols := []string{}
-	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-		if fields := strings.Fields(line); len(fields) > 1 {
-			symbols = append(symbols, strings.Join(fields[1:], " "))
+	for _, line := range strings.Split(strings.TrimRight(string(output), "\n"), "\n") {
+		// nm prints address, size, kind, name and type, but leaves the
+		// address blank for an undefined symbol (kind U).
+		fields := strings.Fields(line)
+		if len(fields) > 1 && fields[1] != "U" {
+			fields = fields[1:]
+		}
+		if len(fields) > 0 {
+			symbols = append(symbols, strings.Join(fields, " "))
 		}
 	}
 	return symbols
+}
+
+// symbolDifference lists the symbols of each sorted listing that the other
+// lacks, counting repeats.
+func symbolDifference(a, b []string) (onlyA, onlyB []string) {
+	count := map[string]int{}
+	for _, symbol := range a {
+		count[symbol]++
+	}
+	for _, symbol := range b {
+		count[symbol]--
+	}
+	for _, symbol := range a {
+		if count[symbol] > 0 {
+			onlyA, count[symbol] = append(onlyA, symbol), count[symbol]-1
+		}
+	}
+	for _, symbol := range b {
+		if count[symbol] < 0 {
+			onlyB, count[symbol] = append(onlyB, symbol), count[symbol]+1
+		}
+	}
+	return onlyA, onlyB
+}
+
+// firstSymbols renders up to ten symbols of a difference.
+func firstSymbols(symbols []string) string {
+	if len(symbols) > 10 {
+		return fmt.Sprintf("%s, and %d more", strings.Join(symbols[:10], "; "), len(symbols)-10)
+	}
+	return strings.Join(symbols, "; ")
+}
+
+// A symbol-list mismatch names the symbols each side lacks, repeats counted.
+func TestSymbolDifferenceNamesEachSidesExtraSymbols(t *testing.T) {
+	onlyA, onlyB := symbolDifference([]string{"8 T a", "8 T a", "4 D b", "2 T c"}, []string{"8 T a", "4 D b", "3 T c"})
+	if !slices.Equal(onlyA, []string{"8 T a", "2 T c"}) || !slices.Equal(onlyB, []string{"3 T c"}) {
+		t.Errorf("difference %q / %q", onlyA, onlyB)
+	}
 }
 
 func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
@@ -267,8 +305,11 @@ func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
 		if !slices.Equal(a.native.Deps.Transitive, b.native.Deps.Transitive) {
 			t.Errorf("%s/%s: dependencies differ", pair[0], pair[1])
 		}
-		if !slices.Equal(a.native.Symbols.Packages, b.native.Symbols.Packages) || !slices.Equal(symbolsWithoutAddresses(t, a.native, filepath.Join(root, "bin", pair[0])), symbolsWithoutAddresses(t, b.native, filepath.Join(root, "bin", pair[1]))) {
-			t.Errorf("%s/%s: executables retain different symbols: %+v vs %+v", pair[0], pair[1], a.native.Symbols.Packages, b.native.Symbols.Packages)
+		if !slices.Equal(a.native.Symbols.Packages, b.native.Symbols.Packages) {
+			t.Errorf("%s/%s: receipts retain different symbols per package: %+v vs %+v", pair[0], pair[1], a.native.Symbols.Packages, b.native.Symbols.Packages)
+		}
+		if onlyA, onlyB := symbolDifference(symbolsWithoutAddresses(t, a.native, filepath.Join(root, "bin", pair[0])), symbolsWithoutAddresses(t, b.native, filepath.Join(root, "bin", pair[1]))); len(onlyA) > 0 || len(onlyB) > 0 {
+			t.Errorf("%s/%s: executables retain different symbols (size kind name type)\nonly in %s: %s\nonly in %s: %s", pair[0], pair[1], pair[0], firstSymbols(onlyA), pair[1], firstSymbols(onlyB))
 		}
 		if !bytes.Equal(withoutHeader(t, a.module), withoutHeader(t, b.module)) {
 			t.Errorf("%s/%s: emitted JavaScript differs", pair[0], pair[1])

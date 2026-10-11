@@ -3,18 +3,17 @@ package compiler
 import (
 	"bufio"
 	"fmt"
-	"go/ast"
 	"go/format"
-	goparser "go/parser"
 	goscanner "go/scanner"
 	gotoken "go/token"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+
+	"effra.local/prototype/internal/gosyntax"
 )
 
 // lineDirectiveProbe reaches two stack traces the Go runtime prints itself:
@@ -286,36 +285,15 @@ func TestGoLineDirectivesRefuseUnnameableOrigins(t *testing.T) {
 	}
 }
 
-// syntaxTree prints the syntax tree Go parses from src, without positions or
-// comments: two programs print alike exactly when they differ only in layout
-// and comments. Unlike a token stream, the tree keeps the semicolons that
-// carry meaning, such as the one in switch f(); { ... }.
+// syntaxTree prints src's syntax tree up to layout and comments
+// (gosyntax.Tree).
 func syntaxTree(t *testing.T, src []byte) string {
 	t.Helper()
-	file, err := goparser.ParseFile(gotoken.NewFileSet(), "main.go", src, goparser.SkipObjectResolution)
+	tree, err := gosyntax.Tree(src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var tree strings.Builder
-	position := reflect.TypeFor[gotoken.Pos]()
-	if err := ast.Fprint(&tree, nil, file, func(_ string, value reflect.Value) bool { return value.Type() != position }); err != nil {
-		t.Fatal(err)
-	}
-	return tree.String()
-}
-
-// The comparison sees a semicolon that changes meaning and ignores comments
-// and layout.
-func TestSyntaxTreeComparesProgramsNotLayout(t *testing.T) {
-	withInit := syntaxTree(t, []byte("package p\nfunc f() bool { return false }\nfunc g() { switch f(); { case true: } }\n"))
-	tag := syntaxTree(t, []byte("package p\nfunc f() bool { return false }\nfunc g() { switch f() { case true: } }\n"))
-	commented := syntaxTree(t, []byte("package p\n\nfunc f() bool {\n//line a.ef:3\n\treturn false\n}\nfunc g() { switch f(); {\n//line a.ef:9\ncase true:\n} }\n"))
-	if withInit == tag {
-		t.Error("switch f(); and switch f() compare equal")
-	}
-	if withInit != commented {
-		t.Error("comments and layout change the compared program")
-	}
+	return tree
 }
 
 // Every example's generated main, built and test entries alike:
