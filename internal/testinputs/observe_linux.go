@@ -88,15 +88,13 @@ const (
 	sockaddrUnSize            = 110 // struct sockaddr_un: a u16 family and a 108-byte path
 	mmsghdrSize               = 64  // struct mmsghdr: a struct msghdr (56 bytes) and a u32, padded
 	maxMessages               = 1024
-	// handoverDescriptor is the child's end of the socket to the observer,
-	// and msgCmsgCloexec the flag the child sends the listener with. The
-	// filter lets that one sendmsg through unnotified, since no one reads
-	// the listener before it arrives; a second filter then fails any later
-	// call of that shape, so no process can use it to pass a socket address
-	// by the observer. MSG_CMSG_CLOEXEC is a receive flag, which sendmsg
-	// ignores.
-	handoverDescriptor = 3
-	msgCmsgCloexec     = 0x40000000
+	// childSocket is the child's end of the socket to the observer, its
+	// first extra file.
+	childSocket = 3
+	// System calls from 424 (Linux 5.1) on have one number on every
+	// architecture.
+	sysPidfdOpen  = 434
+	sysPidfdGetfd = 438
 	// namespaceFlags are the clone flags that make a namespace: CLONE_NEWNS,
 	// NEWCGROUP, NEWUTS, NEWIPC, NEWUSER, NEWPID and NEWNET.
 	namespaceFlags = 0x00020000 | 0x02000000 | 0x04000000 | 0x08000000 | 0x10000000 | 0x20000000 | 0x40000000
@@ -112,8 +110,8 @@ const listenerVariable = "EFFRA_TESTINPUTS_LISTENER"
 // across the exec as proof that the observer is there.
 const filteredVariable = "EFFRA_TESTINPUTS_FILTERED"
 
-// armedPath is the path the test process looks up once its listener is
-// handed over. The parent sees the lookup only if the filter reports it.
+// armedPath is the path the test process looks up once the observer holds
+// its listener. The parent sees the lookup only if the filter reports it.
 const armedPath = "/nonexistent/effra-testinputs/armed"
 
 // observed is true in the observed test process, which runs the tests itself.
@@ -125,11 +123,23 @@ var observed bool
 // result.
 var impostor string
 
-// init runs in the child the observer starts. It installs the filter, hands
-// its listener over, and runs the test binary again by exec: the filter
-// survives exec, so the package initializers that Go ran before this one
-// run again observed. Only the exec'd process reports itself armed; if the
-// exec fails, the observer finds no armed report and refuses the result.
+// init runs in the child the observer starts. It installs the filter, lets
+// the observer take its listener, and runs the test binary again by exec:
+// the filter survives exec, so the package initializers that Go ran before
+// this one run again observed. Only the exec'd process reports itself
+// armed; if the exec fails, the observer finds no armed report and refuses
+// the result.
+//
+// The observer takes the listener itself, with pidfd_getfd, once the child
+// writes its number on the socket. Sending it by SCM_RIGHTS would need a
+// sendmsg the filter lets through unnotified, since no one serves the
+// listener before it arrives, and every process the child started before a
+// second filter closed that gap could pass a socket address by the
+// observer. write and read are not filtered, so the filter has no exception.
+// The observer first takes a descriptor it knows the child holds, and says
+// whether it can before the child installs anything: where it may not
+// (Yama's ptrace_scope 2 or 3, an undumpable binary), the tests run
+// unfiltered and the result is refused, as on a kernel without seccomp.
 //
 // Both variables are trusted only once the process proves its observer
 // exists: the descriptor a variable names is a socket whose peer is this
@@ -138,6 +148,7 @@ var impostor string
 func init() {
 	if value, ok := os.LookupEnv(filteredVariable); ok {
 		os.Unsetenv(filteredVariable)
+		os.Unsetenv(listenerVariable) // a runner that set both leaves neither to the tests
 		socket, err := observerSocket(value)
 		if err == nil && !filtered() {
 			err = errors.New("no seccomp filter")
@@ -156,37 +167,58 @@ func init() {
 		return
 	}
 	os.Unsetenv(listenerVariable)
-	number, err := observerSocket(value)
-	if err == nil && number != handoverDescriptor {
-		err = fmt.Errorf("descriptor %d is not the observer's %d", number, handoverDescriptor)
-	}
+	socket, err := observerSocket(value)
 	if err != nil {
 		impostor = listenerVariable + " is set, but " + err.Error()
 		return
 	}
 	observed = true
-	socket := os.NewFile(uintptr(number), "testinputs")
-	listener, err := installFilter(filter(), true)
+	defer syscall.Close(socket) // reached only if the tests run here, unobserved
+	if verdict, _ := receive(socket); verdict != "go" {
+		return // the observer cannot take a descriptor from this process, and says why itself
+	}
+	listener, err := installFilter(filter())
 	if err != nil {
-		socket.Write([]byte(err.Error()))
-		socket.Close()
+		syscall.Write(socket, []byte(noFilter+err.Error()))
 		return
 	}
-	rights := syscall.UnixRights(listener)
-	err = syscall.Sendmsg(number, []byte("ok"), rights, nil, msgCmsgCloexec)
-	syscall.Close(listener)
-	if err == nil {
-		// Notified, as a seccomp call, now that the observer has the listener.
-		_, err = installFilter(handoverFilter(), false)
-	}
-	if err != nil {
-		socket.Close()
-		return
+	syscall.Write(socket, []byte(listenerMessage+strconv.Itoa(listener)))
+	reply, _ := receive(socket)
+	syscall.Close(listener) // the observer holds its own copy
+	if reply != "go" {
+		// The filter waits on a listener no one serves: every filtered call
+		// of this process would fail or hang.
+		fmt.Fprintln(os.Stderr, "testinputs: the observer did not take the filter's listener: "+reply)
+		os.Exit(1)
 	}
 	if executable, err := os.Executable(); err == nil {
 		syscall.Exec(executable, os.Args, append(os.Environ(), filteredVariable+"="+value))
 	}
-	socket.Close()
+}
+
+// The messages on the socket between the observer and its child. The
+// observer sends "go", or the reason it refuses, before the child installs
+// its filter and again once it holds the listener; the child sends
+// listenerMessage and its listener's number, or noFilter and the reason.
+const (
+	listenerMessage = "listener "
+	noFilter        = "no filter: "
+)
+
+// receive reads one message from the socket; the empty string means the
+// peer closed it.
+func receive(socket int) (string, error) {
+	message := make([]byte, 512)
+	for {
+		n, err := syscall.Read(socket, message)
+		if err == syscall.EINTR {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		return string(message[:n]), nil
+	}
 }
 
 // observerSocket returns the descriptor a variable names if it is a socket
@@ -287,16 +319,6 @@ func filter() []sockFilter {
 				sockFilter{code: bpfJeqK, jf: 1, k: 0},
 				sockFilter{code: bpfRetK, k: seccompRetAllow},
 				sockFilter{code: bpfRetK, k: seccompRetUserNotif})
-		case c.nr == sysSendmsg:
-			// Let the listener's handover through (handoverDescriptor).
-			program = append(program,
-				sockFilter{code: bpfJeqK, jf: 6, k: c.nr},
-				sockFilter{code: bpfLdAbs, k: offArg},
-				sockFilter{code: bpfJeqK, jf: 3, k: handoverDescriptor},
-				sockFilter{code: bpfLdAbs, k: offArg + 2*argLength},
-				sockFilter{code: bpfJsetK, jf: 1, k: msgCmsgCloexec},
-				sockFilter{code: bpfRetK, k: seccompRetAllow},
-				sockFilter{code: bpfRetK, k: seccompRetUserNotif})
 		default:
 			program = append(program,
 				sockFilter{code: bpfJeqK, jf: 1, k: c.nr},
@@ -309,45 +331,16 @@ func filter() []sockFilter {
 		sockFilter{code: bpfRetK, k: seccompRetAllow})
 }
 
-// handoverFilter fails the one call shape the first filter lets through, the
-// listener's handover, from the moment the handover is done. An error
-// outranks a notification, whichever filter returns it.
-func handoverFilter() []sockFilter {
-	return []sockFilter{
-		{code: bpfLdAbs, k: offArc},
-		{code: bpfJeqK, jt: 1, k: auditArch},
-		{code: bpfRetK, k: seccompRetAllow}, // the first filter notifies
-		{code: bpfLdAbs, k: offNr},
-		{code: bpfJeqK, jf: 4, k: sysSendmsg},
-		{code: bpfLdAbs, k: offArg},
-		{code: bpfJeqK, jf: 2, k: handoverDescriptor},
-		{code: bpfLdAbs, k: offArg + 2*argLength},
-		{code: bpfJsetK, jt: 1, k: msgCmsgCloexec},
-		{code: bpfRetK, k: seccompRetAllow},
-		{code: bpfRetK, k: seccompRetErrno | uint32(syscall.EPERM)},
-	}
-}
-
 // installFilter installs a filter on every thread of this process and
-// returns its listener, if listen asks for one.
-func installFilter(program []sockFilter, listen bool) (int, error) {
+// returns its listener.
+func installFilter(program []sockFilter) (int, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if _, _, errno := syscall.RawSyscall6(syscall.SYS_PRCTL, prSetNoNewPrivs, 1, 0, 0, 0, 0); errno != 0 {
 		return -1, fmt.Errorf("prctl(PR_SET_NO_NEW_PRIVS): %w", errno)
 	}
 	prog := sockFprog{len: uint16(len(program)), filter: &program[0]}
-	flags := uintptr(seccompFlagTsync | seccompFlagTsyncESRCH)
-	if !listen {
-		// The first filter notifies this call, so it waits on the observer.
-		_, _, errno := syscall.Syscall(sysSeccomp, seccompModeFilter, flags, uintptr(unsafe.Pointer(&prog)))
-		runtime.KeepAlive(program)
-		if errno != 0 {
-			return -1, fmt.Errorf("seccomp(SECCOMP_SET_MODE_FILTER): %w", errno)
-		}
-		return -1, nil
-	}
-	flags |= seccompFlagNewListener
+	flags := uintptr(seccompFlagTsync | seccompFlagTsyncESRCH | seccompFlagNewListener)
 	// A thread waiting on the parent then ignores all but fatal signals, so
 	// the runtime's preemption signals do not restart every call; kernels
 	// before 5.19 lack the flag.
@@ -378,7 +371,7 @@ func observe(root string) (int, *recorder, error) {
 	defer parent.Close()
 	command := exec.Command(executable, os.Args[1:]...)
 	command.Args[0] = os.Args[0]
-	command.Env = append(os.Environ(), listenerVariable+"=3")
+	command.Env = append(os.Environ(), listenerVariable+"="+strconv.Itoa(childSocket))
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
 	command.ExtraFiles = []*os.File{child}
 	// The test process dies with this one: cmd/go kills only the process it
@@ -406,7 +399,7 @@ func observe(root string) (int, *recorder, error) {
 	}()
 	o := newObserver(root)
 	o.child, o.executable = command.Process.Pid, executable
-	listener, err := receiveListener(parent)
+	listener, err := takeListener(int(parent.Fd()), command.Process.Pid)
 	if err != nil {
 		o.rec.fail(err.Error())
 	} else {
@@ -429,30 +422,65 @@ func observe(root string) (int, *recorder, error) {
 	return state.ExitCode(), o.rec, nil
 }
 
-// receiveListener reads the listener the child sends, or the reason it has
-// none.
-func receiveListener(socket *os.File) (int, error) {
-	message := make([]byte, 512)
-	control := make([]byte, syscall.CmsgSpace(4))
-	n, controlLength, _, _, err := syscall.Recvmsg(int(socket.Fd()), message, control, 0)
+// takeListener takes the child's filter listener with pidfd_getfd (Linux
+// 5.6), which needs the access ptrace would (PTRACE_MODE_ATTACH_REALCREDS):
+// the same user, a dumpable child, and Yama's consent, which ptrace_scope 1
+// gives a parent. It first takes the child's end of the socket, which the
+// child holds from its start, and tells the child whether to install its
+// filter, so a refusal leaves the child unfiltered instead of waiting on a
+// listener no one serves. The child is this process's unreaped child, so
+// its pid names it until Wait.
+func takeListener(socket, pid int) (int, error) {
+	refuse := func(err error) (int, error) {
+		syscall.Write(socket, []byte(err.Error()))
+		return -1, err
+	}
+	pidfd, _, errno := syscall.Syscall(sysPidfdOpen, uintptr(pid), 0, 0)
+	if errno != 0 {
+		return refuse(fmt.Errorf("pidfd_open on the test process: %w", errno))
+	}
+	defer syscall.Close(int(pidfd))
+	probe, err := takeDescriptor(int(pidfd), childSocket)
+	if err != nil {
+		return refuse(err)
+	}
+	syscall.Close(probe) // its end of the socket would hide the child's exit
+	if _, err := syscall.Write(socket, []byte("go")); err != nil {
+		return -1, fmt.Errorf("start the test process's filter: %w", err)
+	}
+	message, err := receive(socket)
 	if err != nil {
 		return -1, fmt.Errorf("receive the filter listener: %w", err)
 	}
-	if string(message[:n]) != "ok" {
-		if n == 0 {
-			return -1, errors.New("the test process sent no filter listener")
+	number, ok := strings.CutPrefix(message, listenerMessage)
+	if !ok {
+		if reason, ok := strings.CutPrefix(message, noFilter); ok {
+			return -1, errors.New("the test process installed no filter: " + reason)
 		}
-		return -1, errors.New("the test process installed no filter: " + string(message[:n]))
-	}
-	messages, err := syscall.ParseSocketControlMessage(control[:controlLength])
-	if err != nil || len(messages) != 1 {
 		return -1, errors.New("the test process sent no filter listener")
 	}
-	fds, err := syscall.ParseUnixRights(&messages[0])
-	if err != nil || len(fds) != 1 {
-		return -1, errors.New("the test process sent no filter listener")
+	descriptor, err := strconv.Atoi(number)
+	if err != nil {
+		return refuse(fmt.Errorf("the test process sent no filter listener, but %q", message))
 	}
-	return fds[0], nil
+	listener, err := takeDescriptor(int(pidfd), descriptor)
+	if err != nil {
+		return refuse(err)
+	}
+	if _, err := syscall.Write(socket, []byte("go")); err != nil {
+		syscall.Close(listener)
+		return -1, fmt.Errorf("release the test process: %w", err)
+	}
+	return listener, nil
+}
+
+// takeDescriptor copies one of the child's descriptors into this process.
+func takeDescriptor(pidfd, descriptor int) (int, error) {
+	fd, _, errno := syscall.Syscall(sysPidfdGetfd, uintptr(pidfd), uintptr(descriptor), 0)
+	if errno != 0 {
+		return -1, fmt.Errorf("take descriptor %d from the test process (pidfd_getfd): %w", descriptor, errno)
+	}
+	return int(fd), nil
 }
 
 // An observer serves the listener's notifications.

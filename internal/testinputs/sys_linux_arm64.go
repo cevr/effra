@@ -4,7 +4,6 @@ const (
 	auditArch           = 0xc00000b7 // AUDIT_ARCH_AARCH64
 	sysSeccomp          = 277
 	sysProcessVMReadv   = 270
-	sysSendmsg          = 211
 	x32SyscallBit       = 0
 	checkX32SyscallBits = false
 	// highestKnownCall is the last system call of Linux 6.12 (mseal; numbers
@@ -51,7 +50,7 @@ var calls = []call{
 	{nr: 203, kind: kindSocket, path: 1, flags: 2},                                  // connect
 	{nr: 200, kind: kindSocket, path: 1, flags: 2},                                  // bind
 	{nr: 206, kind: kindSocket, path: 4, flags: 5},                                  // sendto
-	{nr: sysSendmsg, kind: kindSocketMsg, path: 1},                                  // sendmsg
+	{nr: 211, kind: kindSocketMsg, path: 1},                                         // sendmsg
 	{nr: 269, kind: kindSocketMsgs, path: 1, flags: 2},                              // sendmmsg
 	{nr: 221, kind: kindExec, dirfd: -1, path: 0, env: 2},                           // execve
 	{nr: 281, kind: kindExec, dirfd: 0, path: 1, env: 3, atFlags: 4},                // execveat

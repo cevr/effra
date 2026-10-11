@@ -90,33 +90,20 @@ func TestFilter(t *testing.T) {
 			}
 			continue
 		}
-		if c.nr == sysSendmsg {
-			if got := run(t, program, auditArch, c.nr, handoverDescriptor, 0, msgCmsgCloexec); got != allow {
-				t.Errorf("the listener's handover: action %#x, want allow", got)
-			}
-			for _, args := range [][]uint64{{handoverDescriptor, 0, 0}, {handoverDescriptor + 1, 0, msgCmsgCloexec}, {0, 0, msgCmsgCloexec}} {
+		if c.kind == kindSocketMsg || c.kind == kindSocketMsgs {
+			// No descriptor or flag is let through: the observer takes the
+			// listener with pidfd_getfd, so no call carries it. The shape the
+			// old handover exempted (descriptor 3, MSG_CMSG_CLOEXEC), with or
+			// without high halves, is notified like any other.
+			for _, args := range [][]uint64{{3, 0, 0x40000000}, {1<<32 | 3, 0, 1<<32 | 0x40000000}, {3, 0, 0}} {
 				if got := run(t, program, auditArch, c.nr, args...); got != notify {
-					t.Errorf("sendmsg%v: action %#x, want notify", args, got)
+					t.Errorf("%d%v: action %#x, want notify", c.nr, args, got)
 				}
 			}
 		}
 		if got := run(t, program, auditArch, c.nr, 0); got != want {
 			t.Errorf("%d (kind %d): action %#x, want %#x", c.nr, c.kind, got, want)
 		}
-	}
-	// The second filter fails the handover's shape once the handover is done
-	// and lets everything else through to the first.
-	second := handoverFilter()
-	if got := run(t, second, auditArch, sysSendmsg, handoverDescriptor, 0, msgCmsgCloexec); got != seccompRetErrno|uint32(syscall.EPERM) {
-		t.Errorf("a handover after the handover: action %#x, want EPERM", got)
-	}
-	for _, args := range [][]uint64{{handoverDescriptor, 0, 0}, {handoverDescriptor + 1, 0, msgCmsgCloexec}} {
-		if got := run(t, second, auditArch, sysSendmsg, args...); got != allow {
-			t.Errorf("second filter, sendmsg%v: action %#x, want allow", args, got)
-		}
-	}
-	if got := run(t, second, 0x40000003, sysSendmsg, handoverDescriptor, 0, msgCmsgCloexec); got != allow {
-		t.Errorf("second filter, foreign architecture: action %#x, want allow", got)
 	}
 	for _, nr := range []uint32{0, 1, 3, 9, 60, 63, 231, highestKnownCall} { // read, write, close, mmap, exit... on amd64; others on arm64
 		if _, ok := callsByNumber[int32(nr)]; ok {

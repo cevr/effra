@@ -790,6 +790,55 @@ func init() {
 		want:   "connection refused",
 	},
 	{
+		// Review c2-3 O-1: the call shape the listener's old handover let
+		// through unnotified, and a second filter then failed with EPERM, from
+		// a process the test starts. With the listener taken by pidfd_getfd
+		// there is one filter and no exception, so no process forked between
+		// two filters can use the shape; it is observed like any sendmsg.
+		name: "c2-3 O-1 sendmsg on descriptor 3 with MSG_CMSG_CLOEXEC from a child",
+		files: map[string]string{
+			"run/keep.txt": "keep\n",
+			"sendmsg3/sendmsg3.go": `package sendmsg3
+
+import (
+	"fmt"
+	"os"
+	"syscall"
+)
+
+// Variable names the socket path to send to; a process started with it
+// set sends one datagram from descriptor 3 and exits.
+const Variable = "SENDMSG3_PATH"
+
+func init() {
+	path := os.Getenv(Variable)
+	if path == "" {
+		return
+	}
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_DGRAM, 0)
+	if err == nil && fd != 3 {
+		err = syscall.Dup3(fd, 3, 0)
+	}
+	if err == nil {
+		err = syscall.Sendmsg(3, []byte("x"), nil, &syscall.SockaddrUnix{Name: path}, 0x40000000)
+	}
+	fmt.Print(err)
+	os.Exit(0)
+}
+`,
+		},
+		imports: []string{"fixture/sendmsg3"},
+		// The path is relative: sun_path holds 108 bytes, less than a long
+		// temporary directory needs, and Go refuses a longer one with EINVAL.
+		run: `child := exec.Command(os.Args[0])
+	child.Dir = root()
+	child.Env = append(os.Environ(), sendmsg3.Variable+"="+filepath.Join("run", "agent.sock"))
+	return child.Output()`,
+		before: "no such file",
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "run/agent.sock", "") },
+		want:   "connection refused",
+	},
+	{
 		name:       "c2-2 N5 inherited EFFRA_TESTINPUTS_FILTERED",
 		files:      map[string]string{"data/value.txt": "v-1\n"},
 		env:        []string{"EFFRA_TESTINPUTS_FILTERED=1"},
