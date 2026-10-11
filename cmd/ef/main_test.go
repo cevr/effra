@@ -48,7 +48,7 @@ func buildTestCLI(t *testing.T) string {
 			return
 		}
 		testCLI.path = filepath.Join(testCLI.dir, "ef")
-		command := exec.Command("go", "build", "-o", testCLI.path, ".")
+		command := exec.Command("go", "build", "-buildvcs=false", "-o", testCLI.path, ".")
 		command.Env = testCLI.environment
 		testCLI.output, testCLI.err = command.CombinedOutput()
 	})

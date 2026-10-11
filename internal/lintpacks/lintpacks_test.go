@@ -57,7 +57,7 @@ func packs(t *testing.T) string {
 			if runtime.GOOS == "windows" {
 				name += ".exe" // the manifests' extensionless paths resolve to it
 			}
-			if output, err := exec.Command("go", "build", "-o", filepath.Join(built.dir, "bin", name), pkg).CombinedOutput(); err != nil {
+			if output, err := exec.Command("go", "build", "-buildvcs=false", "-o", filepath.Join(built.dir, "bin", name), pkg).CombinedOutput(); err != nil {
 				built.err = errors.New(string(output))
 				return
 			}

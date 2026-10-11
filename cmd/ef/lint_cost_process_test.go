@@ -23,7 +23,7 @@ import (
 func TestLintReceiptCLIProcess(t *testing.T) {
 	binary := buildTestCLI(t)
 	dir := t.TempDir()
-	if output, err := exec.Command("go", "build", "-o", filepath.Join(dir, executableName("policy-lint")), "../../examples/lintpack/cmd/policy-lint").CombinedOutput(); err != nil {
+	if output, err := exec.Command("go", "build", "-buildvcs=false", "-o", filepath.Join(dir, executableName("policy-lint")), "../../examples/lintpack/cmd/policy-lint").CombinedOutput(); err != nil {
 		t.Fatal(string(output))
 	}
 	manifest, _ := lintpack.Pack.Manifest(lint.Executable{Path: "policy-lint"})

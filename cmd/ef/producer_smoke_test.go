@@ -343,7 +343,7 @@ func producerSmokeOverlays(t *testing.T, root, directory, source string, replace
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			command := exec.Command("go", "build", "-overlay", overlay, "-o", binary, "./cmd/ef")
+			command := exec.Command("go", "build", "-buildvcs=false", "-overlay", overlay, "-o", binary, "./cmd/ef")
 			command.Dir = root
 			stdout, stderr, code, err := runSmokeDeadline(command, producerSmokeRunTimeout)
 			if err != nil || code != 0 {

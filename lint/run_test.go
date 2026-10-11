@@ -52,7 +52,7 @@ func fixturePack(t *testing.T) string {
 			return
 		}
 		fixture.path = filepath.Join(fixture.dir, executableName("fixturepack"))
-		if output, err := exec.Command("go", "build", "-o", fixture.path, "./testdata/fixturepack").CombinedOutput(); err != nil {
+		if output, err := exec.Command("go", "build", "-buildvcs=false", "-o", fixture.path, "./testdata/fixturepack").CombinedOutput(); err != nil {
 			fixture.err = errors.New(string(output))
 		}
 	})
