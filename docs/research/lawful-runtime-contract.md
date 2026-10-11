@@ -181,11 +181,14 @@ lawful runtime goes with the ghost of departed proofs and bend findings
 right?"). The domain/opaque ingress column is the Ghosts of Departed Proofs
 work in [opaque values and checked evidence](opaque-values-and-evidence.md):
 trusted modules mint evidence about a named subject, and sensitive operations
-require matching evidence. The runtime and service columns apply Bend's laws as typed
-obligations, and the categories below keep Bend's split between a trusted
-predicate and a tested law. Effra has no proof checker, so Bend's verified
-propositions have no category here and finite tests stay evidence, not proof.
-Both sources are pinned in [PRIOR_ART.md](../../PRIOR_ART.md#language-and-library-references).
+require matching evidence. The runtime and service columns treat laws as
+typed obligations, as Bend does. Bend discharges its laws with proof terms;
+Effra only tests them. The categories below therefore follow the conclusion
+of Effra's Bend comparison, which separates trusted predicates, tested laws,
+verified propositions and translation/runtime assumptions. Effra has no proof
+checker, so verified propositions have no category here, and finite tests
+stay evidence, not proof. Both sources are pinned in
+[PRIOR_ART.md](../../PRIOR_ART.md#language-and-library-references).
 
 The five categories have the same meaning at each boundary:
 
