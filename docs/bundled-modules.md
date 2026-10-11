@@ -123,11 +123,12 @@ nodes and 65536 fields and variants.
 `ef check` and MCP `project.check` report each witness under `codecs`, with
 its domain and wire types and each direction's function, failures and
 requirements, and its plan under `codecPlans` with stable node identities. A
-native application retains a plan, its adapters, its generated writer and
-the runtime `codec` module only through an executed direction. Decoding runs
+native application retains a plan, its adapters and the runtime `codec`
+module only through an executed direction, and a transformed plan's
+generated writer only through an executed encode direction. Decoding runs
 on the plan; encoding runs the plan's generated writer, one Go function per
 record, union and transform node, which reads the value in place and calls
-each encode transformation with its typed domain value. A generated JS entry follows the
+each witness's encode function directly with its typed domain value. A generated JS entry follows the
 same selection: it compiles one codec per plan an executed direction reaches
 and includes the shared engine once, only when such a plan exists, so an idle
 entry has no witness and no engine and an encode-only entry omits the decode
