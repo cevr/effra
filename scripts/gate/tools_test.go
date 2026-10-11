@@ -8,6 +8,58 @@ import (
 	"testing"
 )
 
+// TestMain puts small stand-ins for go, git and tsc first on PATH. Go's test
+// cache records every file a test opens or stats, and on each lookup of this
+// package it stats every one of them again. Tests here fingerprint the tools
+// on PATH, and the real installations are large: under go test, go is the
+// real toolchain (go test puts GOROOT/bin first), whose GOROOT holds about
+// 12,000 files, and git's exec path and the tsc package add thousands of
+// entries more. With them a cached lookup took 20–32 s at load, against
+// 0.5–0.7 s before tools were fingerprinted. Each stand-in is a script in an
+// npm package that runs the real tool, so tests see the same behaviour; the
+// go stand-in answers go env, which only fingerprinting asks, with a one-file
+// GOROOT. node and bun stay real: each is one file. Tests of the fingerprint
+// rules install their own tools.
+// realTools are the tools PATH named before TestMain put its stand-ins first.
+var realTools = map[string]string{}
+
+func TestMain(m *testing.M) {
+	os.Exit(func() int {
+		stub, err := os.MkdirTemp("", "gate-tools-")
+		if err != nil {
+			panic(err)
+		}
+		defer os.RemoveAll(stub)
+		bin, goroot := filepath.Join(stub, "bin"), filepath.Join(stub, "goroot")
+		files := map[string]string{
+			filepath.Join(bin, "package.json"): `{"name": "gate-test-tools"}`,
+			filepath.Join(goroot, "VERSION"):   "go1.0.0-stub\n",
+		}
+		for _, tool := range []string{"go", "git", "tsc"} {
+			real, err := exec.LookPath(tool)
+			if err != nil {
+				continue
+			}
+			realTools[tool] = real
+			script := "#!/bin/sh\n"
+			if tool == "go" {
+				script += "if [ \"$1\" = env ]; then echo go1.0.0-stub; echo " + goroot + "; exit 0; fi\n"
+			}
+			files[filepath.Join(bin, tool)] = script + "exec " + real + " \"$@\"\n"
+		}
+		for path, content := range files {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				panic(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+				panic(err)
+			}
+		}
+		os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+		return m.Run()
+	}())
+}
+
 // fingerprint is a tool's fingerprint as a fresh gate run computes it.
 func fingerprint(t *testing.T, tool string) string {
 	t.Helper()
@@ -166,14 +218,16 @@ func TestToolFingerprintKeysAScriptsInterpreter(t *testing.T) {
 // file's size, inode, modification and change times on a coarse-clock
 // filesystem (ext4 here: 199 of 200 attempts in review). The next fingerprint
 // still sees it, because the gate hashes every installation on every run and
-// keeps no memo a timestamp could vouch for.
+// keeps no memo a timestamp could vouch for. A memo keyed on (inode, size,
+// change time) fails the first attempt; twenty keep the test cheap for Go's
+// test cache, which re-stats every file a cached test opened.
 func TestToolFingerprintSeesAnInPlaceRewriteWithinOneTimestampTick(t *testing.T) {
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	launcher, payload := installTypeScript(t, t.TempDir())
 	link(t, bin, "tsc", launcher)
 	offset := int64(len("#!/bin/sh\n# build "))
-	for attempt := range 100 {
+	for attempt := range 20 {
 		before := fingerprint(t, "tsc")
 		rewriteInPlace(t, payload, offset, "b")
 		after := fingerprint(t, "tsc")
@@ -295,9 +349,10 @@ func TestExecutableFingerprintsKeyTheirInstallations(t *testing.T) {
 		}
 	}
 
-	if _, err := exec.LookPath("git"); err != nil {
+	if realTools["git"] == "" {
 		t.Skip("no git")
 	}
+	link(t, bin, "git", realTools["git"])
 	execPath := t.TempDir()
 	write(t, execPath, "git-probe", "#!/bin/sh\n")
 	t.Setenv("GIT_EXEC_PATH", execPath)
