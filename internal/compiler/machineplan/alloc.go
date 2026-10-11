@@ -19,19 +19,23 @@ package machineplan
 import (
 	"encoding/binary"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
-	"unsafe"
 )
 
-// declarationUnits is a declaration's fixed state, charged as bytes before the
+// sizeOf is the size in bytes of a value of type T, as unsafe.Sizeof reports it.
+// The package reads sizes through reflect so that it need not import unsafe.
+func sizeOf[T any]() int { return int(reflect.TypeFor[T]().Size()) }
+
+// DeclarationUnits is a declaration's fixed state, charged as bytes before the
 // plan is allocated: the plan, its copy into the result, the declaration's
 // check, its two role scopes and three payload walks, and the first group of
 // every map run creates (declarationMapBytes). Everything that grows with the
 // program is charged where it is built.
-func declarationUnits[V any]() int {
-	fixed := 2*int(unsafe.Sizeof(Plan[V]{})) + int(unsafe.Sizeof(check[V]{})) + 2*int(unsafe.Sizeof(scope{})) + 3*int(unsafe.Sizeof(payloadWalk[V]{}))
+func DeclarationUnits[V any]() int {
+	fixed := 2*sizeOf[Plan[V]]() + sizeOf[check[V]]() + 2*sizeOf[scope]() + 3*sizeOf[payloadWalk[V]]()
 	return TextUnits(fixed + declarationMapBytes)
 }
 
@@ -47,8 +51,8 @@ const (
 
 // mapBytes is what a map with the given slot size allocates up to its first
 // group.
-func mapBytes(slot uintptr) int {
-	return mapHeaderBytes + (mapGroupCtrl+mapGroupSlots*int(slot))*9/8
+func mapBytes(slot int) int {
+	return mapHeaderBytes + (mapGroupCtrl+mapGroupSlots*slot)*9/8
 }
 
 // declarationMaps are the maps one declaration's analysis can create before
@@ -56,51 +60,51 @@ func mapBytes(slot uintptr) int {
 var declarationMaps = []struct {
 	name  string
 	count int
-	slot  uintptr
+	slot  int
 }{
-	{"reports seen", 1, unsafe.Sizeof(struct {
+	{"reports seen", 1, sizeOf[struct {
 		k reportKey
 		v bool
-	}{})},
-	{"transition keys", 1, unsafe.Sizeof(struct {
+	}]()},
+	{"transition keys", 1, sizeOf[struct {
 		k string
 		v bool
-	}{})},
-	{"helper ordinals", 1, unsafe.Sizeof(struct {
+	}]()},
+	{"helper ordinals", 1, sizeOf[struct {
 		k string
 		v int
-	}{})},
+	}]()},
 	// indexes and sets, and one table each for the state, event and outcome.
-	{"enum tables", 2, unsafe.Sizeof(struct {
+	{"enum tables", 2, sizeOf[struct {
 		k *Enum
 		v map[string]int
-	}{})},
-	{"variant indexes", 3, unsafe.Sizeof(struct {
+	}]()},
+	{"variant indexes", 3, sizeOf[struct {
 		k string
 		v int
-	}{})},
-	{"narrowing tables", 3, unsafe.Sizeof(struct {
+	}]()},
+	{"narrowing tables", 3, sizeOf[struct {
 		k string
 		v *set
-	}{})},
-	{"refinements", 1, unsafe.Sizeof(struct {
+	}]()},
+	{"refinements", 1, sizeOf[struct {
 		k refinement
 		v *set
-	}{})},
-	{"subsets", 1, unsafe.Sizeof(struct {
+	}]()},
+	{"subsets", 1, sizeOf[struct {
 		k [2]*set
 		v bool
-	}{})},
+	}]()},
 	// The step and complete scopes: states, triggers, lets and alias roots.
-	{"role scopes", 8, unsafe.Sizeof(struct {
+	{"role scopes", 8, sizeOf[struct {
 		k *Local
 		v *Local
-	}{})},
+	}]()},
 	// The state, event and output payload walks.
-	{"payload visits", 3, unsafe.Sizeof(struct {
+	{"payload visits", 3, sizeOf[struct {
 		k TypeRef
 		v bool
-	}{})},
+	}]()},
 }
 
 // declarationMapBytes is the estimated first-group bytes of declarationMaps.

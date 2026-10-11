@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"effra.local/prototype/internal/compiler/machineplan"
 )
 
 // Round-3 review M1: the analysis window must not depend on checker state
@@ -94,6 +96,46 @@ func TestMachineWindowIgnoresCheckerStateAtCapacity(t *testing.T) {
 		if len(r.Machines) != c.plans {
 			t.Fatalf("%s: %d plans, want %d: %v", c.name, len(r.Machines), c.plans, machineCodes(r))
 		}
+	}
+}
+
+// Round-4 review M2: the EF142 that exhausts a declaration's budget is
+// recorded uncharged, after the budget is gone, so its message must not copy
+// a program-sized name. A 40 MiB machine name refuses its plan-ID charge, and
+// the refusal used to quote the whole name: 83.9 MB in the window for 65,541
+// units.
+func TestMachineRefusalQuotesABoundedName(t *testing.T) {
+	size := 40 << 20
+	name := "M" + strings.Repeat("x", size)
+	r, measures := measureMachineAnalysis(t, machineWindowPrelude+"machine "+name+" { initial S.A {}; step step }\n")
+	assertMachineAllocationCharged(t, "40 MiB machine name", measures)
+	if codes := machineCodes(r); len(codes) != 1 || codes[0] != machineBudgetCode {
+		t.Fatalf("codes = %v", codes)
+	}
+	message := r.Diagnostics[len(r.Diagnostics)-1].Message
+	want := fmt.Sprintf("machine %s… (%d bytes) analysis exceeds", name[:64], len(name))
+	if !strings.HasPrefix(message, want) || len(message) > 256 {
+		t.Fatalf("refusal message (%d bytes) = %.200q", len(message), message)
+	}
+}
+
+// Round-4 review m1: each declaration's fixed state is charged at its
+// measured size (machineplan.DeclarationUnits), which since b07b96c1 is 171
+// units for the checker's value type, up from about 114. A fixed charge sets
+// how many declarations a module admits, so the limit is pinned: 256
+// declarations of 800 states each publish exactly 209 plans before the shared
+// 1,048,576-unit budget refuses the rest (211 at the earlier charge).
+func TestMachineModuleAdmissionFollowsTheFixedCharge(t *testing.T) {
+	if units := machineplan.DeclarationUnits[ValueType](); units != 171 {
+		t.Errorf("a declaration's fixed charge is %d units, want 171", units)
+	}
+	r, measures := machineShape{states: 800, events: 1, tails: 2, wideArm: true, declarations: 256}.measure(t)
+	assertMachineAllocationCharged(t, "256 declarations of 800 states", measures)
+	if len(r.Machines) != 209 {
+		t.Errorf("%d of 256 declarations admitted, want 209", len(r.Machines))
+	}
+	if codes := machineCodes(r); len(codes) != 1 || codes[0] != machineBudgetCode || !strings.Contains(r.Diagnostics[len(r.Diagnostics)-1].Message, "shared 1048576-unit") {
+		t.Errorf("codes = %v", codes)
 	}
 }
 

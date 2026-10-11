@@ -91,7 +91,7 @@ func machineGraphPlan(facts *graphFacts, plan *MachinePlan) bool {
 	// The node's fixed copies (its facts, three values and each bound
 	// function's record and contract) are sized once. They are a constant per
 	// plan and per function, within what the plan's analysis charged for its
-	// declaration (machineplan declarationUnits) and its functions.
+	// declaration (machineplan DeclarationUnits) and its functions.
 	span := Span(plan.Span)
 	functions := make([]GraphMachineFunction, 0, len(plan.Functions))
 	values := make([]ValueType, 0, 3+len(plan.Functions))

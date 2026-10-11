@@ -15,9 +15,15 @@ package compiler
 // budget of its own, so the mirror is what keeps preparation bounded: a
 // generic payload that would instantiate exponentially, or rebuild a long
 // key once per instantiation, is refused by its cost before the checker
-// builds it (machines_prepare_test.go measures this).
+// builds it (machines_prepare_test.go measures this). The input copies the
+// slices it would otherwise share with the checker (row labels, a call's
+// label binding), so nothing analysis holds aliases checker memory.
 
-import "effra.local/prototype/internal/compiler/machineplan"
+import (
+	"slices"
+
+	"effra.local/prototype/internal/compiler/machineplan"
+)
 
 type machineInput = machineplan.Input[ValueType]
 
@@ -93,8 +99,8 @@ func (p *machinePrep) declaration(machine *Machine, initial checkedExpression) *
 	}
 	out.Initial = machineplan.InitialValue{Effect: initial.isEffect(), Value: p.typeRef(initial.valueID()), Result: p.typeRef(initial.resultID())}
 	if out.Initial.Effect {
-		out.Initial.Failures = c.retainedRowLabels(initial.failureRow())
-		out.Initial.Services = c.retainedRowLabels(initial.serviceRow())
+		out.Initial.Failures = slices.Clone(c.retainedRowLabels(initial.failureRow()))
+		out.Initial.Services = slices.Clone(c.retainedRowLabels(initial.serviceRow()))
 	}
 	// The step and complete names resolve to module functions; each resolved
 	// name is a lexical reference to its function.
@@ -424,7 +430,7 @@ func (p *machinePrep) typeRef(id TypeID) machineplan.TypeRef {
 		if n == nil {
 			continue
 		}
-		node := &machineplan.TypeNode{Kind: n.Kind, Name: n.Name, Declaration: n.Declaration, Mode: n.Mode, Args: make([]machineplan.TypeRef, len(n.Args)), Result: ref(n.Result), Failures: c.retainedRowLabels(n.FailureRow), Services: c.retainedRowLabels(n.ServiceRow)}
+		node := &machineplan.TypeNode{Kind: n.Kind, Name: n.Name, Declaration: n.Declaration, Mode: n.Mode, Args: make([]machineplan.TypeRef, len(n.Args)), Result: ref(n.Result), Failures: slices.Clone(c.retainedRowLabels(n.FailureRow)), Services: slices.Clone(c.retainedRowLabels(n.ServiceRow))}
 		for i, arg := range n.Args {
 			node.Args[i] = ref(arg)
 		}
@@ -514,7 +520,7 @@ func (p *machinePrep) expr(e *Expr) *machineplan.Expr {
 	if e == nil {
 		return nil
 	}
-	out := &machineplan.Expr{Kind: e.Kind, Name: e.Name, Text: e.Text, Span: machineplan.Span(e.Span), Left: p.expr(e.Left), Right: p.expr(e.Right), ArgumentParameters: e.ArgumentParameters, Then: p.block(e.Then), Else: p.block(e.Else), Binding: p.local(e.binding), Resolved: e.ResolvedFunction != nil, StepTemplate: e.ResolvedTemplate != nil && e.ResolvedTemplate.Identity == machineplan.StepTemplate}
+	out := &machineplan.Expr{Kind: e.Kind, Name: e.Name, Text: e.Text, Span: machineplan.Span(e.Span), Left: p.expr(e.Left), Right: p.expr(e.Right), ArgumentParameters: slices.Clone(e.ArgumentParameters), Then: p.block(e.Then), Else: p.block(e.Else), Binding: p.local(e.binding), Resolved: e.ResolvedFunction != nil, StepTemplate: e.ResolvedTemplate != nil && e.ResolvedTemplate.Identity == machineplan.StepTemplate}
 	out.Value = p.typeRef(e.checked.valueID())
 	if f := e.ResolvedFunction; f != nil && f.Module == currentModuleIdentity {
 		out.Function = p.function(f)

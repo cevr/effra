@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unsafe"
+	"unicode/utf8"
 )
 
 // Result is one module's analysis: the published plans, sorted by ID, and the
@@ -31,7 +31,7 @@ func Analyse[V any](in *Input[V]) Result[V] {
 			plans = append(plans, plan)
 		}
 	}
-	// Every published plan paid for its slot (declarationUnits).
+	// Every published plan paid for its slot (DeclarationUnits).
 	out := make([]Plan[V], len(plans))
 	for i, plan := range plans {
 		out[i] = *plan
@@ -84,7 +84,7 @@ type reportKey struct {
 
 // diagnosticUnits is what recording one diagnostic allocates: its slot in the
 // result buffer, which doubles as it grows, and its deduplication entry.
-const diagnosticUnits = (2*int(unsafe.Sizeof(Diagnostic{})) + 2*(int(unsafe.Sizeof(reportKey{}))+1) + textUnit - 1) / textUnit
+var diagnosticUnits = (2*sizeOf[Diagnostic]() + 2*(sizeOf[reportKey]()+1) + textUnit - 1) / textUnit
 
 // report records a diagnostic in the analysis' own buffer. After an analysis
 // refusal only EF142 is reported for the declaration: the refusal already
@@ -92,7 +92,9 @@ const diagnosticUnits = (2*int(unsafe.Sizeof(Diagnostic{})) + 2*(int(unsafe.Size
 // contract violation.
 //
 // Recording is counted, not gated: the EF142 refusal that exhausts the budget
-// must itself be recorded, so its slot cannot wait on the budget. Every other
+// must itself be recorded, so its slot cannot wait on the budget. Its message
+// is therefore built uncharged, and quotes the machine name through
+// quotedName, so its size is fixed whatever the program. Every other
 // diagnostic's message was charged before it was built, so the diagnostics a
 // declaration records never outnumber the units it paid.
 func (m *check[V]) report(code, message string, span Span) {
@@ -109,6 +111,24 @@ func (m *check[V]) report(code, message string, span Span) {
 	m.shared.work += diagnosticUnits
 	m.shared.credit += diagnosticUnits
 	m.shared.diagnostics = append(m.shared.diagnostics, Diagnostic{Code: code, Message: message, Span: span})
+}
+
+// maxQuotedName is the most of a machine name an uncharged message quotes.
+const maxQuotedName = 64
+
+// quotedName is the machine name as an uncharged message quotes it: whole up
+// to maxQuotedName bytes, otherwise its first maxQuotedName bytes (cut at a
+// rune boundary), an ellipsis and the name's length. A refusal message is
+// built after the budget is gone, so it must not copy a program-sized name.
+func quotedName(name string) string {
+	if len(name) <= maxQuotedName {
+		return name
+	}
+	cut := maxQuotedName
+	for cut > 0 && !utf8.RuneStart(name[cut]) {
+		cut--
+	}
+	return fmt.Sprintf("%s… (%d bytes)", name[:cut], len(name))
 }
 
 // spend charges one unit of the declaration's analysis budget. Exhaustion is a
@@ -140,7 +160,7 @@ func (m *check[V]) charge(units int) bool {
 	}
 	if m.work > MaxWork {
 		m.refused = true
-		m.report(BudgetCode, fmt.Sprintf("machine %s analysis exceeds its %d-unit budget; no plan is published", m.machine.Name, MaxWork), m.machine.Span)
+		m.report(BudgetCode, fmt.Sprintf("machine %s analysis exceeds its %d-unit budget; no plan is published", quotedName(m.machine.Name), MaxWork), m.machine.Span)
 		return false
 	}
 	return true
@@ -154,7 +174,7 @@ func (m *check[V]) unprepared() {
 		return
 	}
 	m.refused = true
-	m.report(BudgetCode, fmt.Sprintf("machine %s analysis reaches a type the checker did not prepare within the analysis budget; no plan is published", m.machine.Name), m.machine.Span)
+	m.report(BudgetCode, fmt.Sprintf("machine %s analysis reaches a type the checker did not prepare within the analysis budget; no plan is published", quotedName(m.machine.Name)), m.machine.Span)
 }
 
 func (m *check[V]) binding(kind string) *Binding {
@@ -208,7 +228,7 @@ func (m *check[V]) run() *Plan[V] {
 		return nil
 	}
 	// The declaration's fixed state is charged before the plan exists.
-	if !m.charge(declarationUnits[V]()) {
+	if !m.charge(DeclarationUnits[V]()) {
 		return nil
 	}
 	machine := m.machine
@@ -1048,7 +1068,7 @@ func (m *check[V]) qualified(narrowed *set) (string, bool) {
 func (m *check[V]) transition(s *scope, span Span, n narrowing, decision string, targets *set, precision string, guarded bool) {
 	if len(m.plan.Transitions) >= MaxTransitions {
 		if !m.refused {
-			m.report(BudgetCode, fmt.Sprintf("machine %s exceeds %d possible transitions; no plan is published", m.machine.Name, MaxTransitions), m.machine.Span)
+			m.report(BudgetCode, fmt.Sprintf("machine %s exceeds %d possible transitions; no plan is published", quotedName(m.machine.Name), MaxTransitions), m.machine.Span)
 			m.refused = true
 		}
 		return

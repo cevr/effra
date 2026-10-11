@@ -1,6 +1,7 @@
 package machineplan
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -13,8 +14,13 @@ import (
 
 // The analysis boundary is structural. The package imports only these
 // standard packages, so it cannot name the checker, its arenas, its intern
-// maps or its diagnostics; the Go compiler enforces it.
-var allowedImports = []string{"encoding/binary", "fmt", "slices", "strconv", "strings", "unsafe"}
+// maps or its diagnostics; the Go compiler enforces it. It does not import
+// unsafe, so it cannot forge a pointer into checker memory, and it uses reflect
+// only to read type sizes (reflect.TypeFor), never to reach a value.
+var allowedImports = []string{"encoding/binary", "fmt", "reflect", "slices", "strconv", "strings", "unicode/utf8"}
+
+// allowedReflect is the only reflect identifier the package may name.
+const allowedReflect = "TypeFor"
 
 func TestAnalysisImportsNoCheckerState(t *testing.T) {
 	entries, err := os.ReadDir(".")
@@ -28,10 +34,18 @@ func TestAnalysisImportsNoCheckerState(t *testing.T) {
 			continue
 		}
 		files++
-		file, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.ImportsOnly)
+		file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			if selector, ok := node.(*ast.SelectorExpr); ok {
+				if pkg, ok := selector.X.(*ast.Ident); ok && pkg.Name == "reflect" && selector.Sel.Name != allowedReflect {
+					t.Errorf("%s uses reflect.%s; analysis may use only reflect.%s", name, selector.Sel.Name, allowedReflect)
+				}
+			}
+			return true
+		})
 		for _, spec := range file.Imports {
 			path, _ := strconv.Unquote(spec.Path.Value)
 			if !slices.Contains(allowedImports, path) {

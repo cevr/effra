@@ -131,7 +131,7 @@ func TestMachineInitialCheckIsOutsideTheAnalysis(t *testing.T) {
 // Round-2 review M2: seed 26, shape 18 of the round-2 generator (256
 // declarations of a failing step with no transitions) and the neighbours that
 // isolate its axes. Each declaration's fixed state is charged before its plan
-// is allocated (machineplan declarationUnits).
+// is allocated (machineplan DeclarationUnits).
 var machineSeed26Shape18 = machineShape{states: 2, events: 2, name: 64, helpers: 3, tails: 7, distinct: 20, failures: 3, declarations: 256, failureName: 64, failBody: true, genericName: 131072, genericFields: 64, genericArg: 2, recipeName: 64}
 
 func TestMachineDeclarationStateIsCharged(t *testing.T) {
