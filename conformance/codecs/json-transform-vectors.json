@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "profile": "effra/json-structural-1",
+  "comparator": {"script": "conformance/codecs/effect-transform-comparator.mjs", "output": "conformance/codecs/effect-transform-comparator.out.jsonl"},
+  "behaviors": {
+    "email": "decode: a non-empty string, lower-cased, else fails \"empty\"; encode: the string, except \"blocked\" fails \"blocked\"",
+    "status": "decode: the Active/Enabled/Suspended union to the string Active or Suspended (Enabled normalizes to Active); encode: the canonical variant",
+    "box": "decode: the Box record to its value; encode: a Box holding the value"
+  },
+  "plans": {
+    "profile": {"bounds": {"maxBodyBytes": 128, "maxDepth": 2}, "root": 1, "nodes": [
+      {"kind": "string"},
+      {"kind": "record", "type": "Profile", "fields": [{"name": "id", "node": 0}, {"name": "email", "node": 2}, {"name": "contact", "node": 3}, {"name": "active", "node": 4}]},
+      {"kind": "transform", "type": "witness:email", "child": 0, "step": 0, "behavior": "email"},
+      {"kind": "record", "type": "Contact", "fields": [{"name": "email", "node": 2}]},
+      {"kind": "bool"}
+    ]},
+    "status": {"bounds": {"maxBodyBytes": 64, "maxDepth": 1}, "root": 0, "nodes": [
+      {"kind": "transform", "type": "witness:status", "child": 1, "step": 0, "behavior": "status"},
+      {"kind": "union", "type": "StatusWire", "variants": [{"tag": "Active", "domainTag": "StatusWire.Active", "fields": []}, {"tag": "Enabled", "domainTag": "StatusWire.Enabled", "fields": []}, {"tag": "Suspended", "domainTag": "StatusWire.Suspended", "fields": []}]}
+    ]},
+    "email": {"bounds": {"maxBodyBytes": 64, "maxDepth": 1}, "root": 0, "nodes": [
+      {"kind": "transform", "type": "witness:email", "child": 1, "step": 0, "behavior": "email"},
+      {"kind": "string"}
+    ]},
+    "boxed": {"bounds": {"maxBodyBytes": 64, "maxDepth": 1}, "root": 0, "nodes": [
+      {"kind": "transform", "type": "witness:box", "child": 1, "step": 0, "behavior": "box"},
+      {"kind": "record", "type": "Box", "fields": [{"name": "value", "node": 2}]},
+      {"kind": "transform", "type": "witness:email", "child": 3, "step": 1, "behavior": "email"},
+      {"kind": "string"}
+    ]}
+  },
+  "vectors": [
+    {"id": "decode.normalizes", "plan": "profile", "direction": "decode", "body": "{\"active\":true,\"contact\":{\"email\":\"B@X\"},\"email\":\"A@X\",\"id\":\"7\"}", "expect": {"ok": true, "encoded": "{\"id\":\"7\",\"email\":\"a@x\",\"contact\":{\"email\":\"b@x\"},\"active\":true}"}, "comparison": "matched"},
+    {"id": "decode.step-failure", "plan": "profile", "direction": "decode", "body": "{\"id\":\"7\",\"email\":\"\",\"contact\":{\"email\":\"b\"},\"active\":true}", "expect": {"ok": false, "step": "email", "message": "empty"}, "comparison": "matched"},
+    {"id": "decode.first-step-failure-in-declared-order", "plan": "profile", "direction": "decode", "body": "{\"id\":\"7\",\"email\":\"a\",\"contact\":{\"email\":\"\"},\"active\":true}", "expect": {"ok": false, "step": "email", "message": "empty"}, "comparison": "matched"},
+    {"id": "decode.structure-before-transformation", "plan": "profile", "direction": "decode", "body": "{\"id\":\"7\",\"email\":\"\",\"contact\":{\"email\":\"b\"},\"active\":\"yes\"}", "expect": {"ok": false, "reason": "type", "path": ["active"], "offset": -1}, "comparison": "difference", "note": "Effra decodes the whole structure before any transformation, so malformed input never reaches one; pinned Schema decodes field by field and reports the earlier transformation failure."},
+    {"id": "decode.missing-before-transformation", "plan": "profile", "direction": "decode", "body": "{\"id\":\"7\",\"email\":\"\",\"active\":true}", "expect": {"ok": false, "reason": "missing", "path": ["contact"], "offset": -1}, "comparison": "difference", "note": "Structure first: the missing key is reported although the earlier email transformation would fail."},
+    {"id": "decode.root-transformation", "plan": "email", "direction": "decode", "body": "\"ADA@X\"", "expect": {"ok": true, "encoded": "\"ada@x\""}, "comparison": "matched"},
+    {"id": "decode.root-step-failure", "plan": "email", "direction": "decode", "body": "\"\"", "expect": {"ok": false, "step": "email", "message": "empty"}, "comparison": "matched"},
+    {"id": "decode.root-structure", "plan": "email", "direction": "decode", "body": "7", "expect": {"ok": false, "reason": "type", "path": [], "offset": -1}, "comparison": "matched"},
+    {"id": "decode.normalizes-legacy-variant", "plan": "status", "direction": "decode", "body": "{\"_tag\":\"Enabled\"}", "expect": {"ok": true, "encoded": "{\"_tag\":\"Active\"}"}, "comparison": "matched"},
+    {"id": "decode.unknown-variant", "plan": "status", "direction": "decode", "body": "{\"_tag\":\"Lost\"}", "expect": {"ok": false, "reason": "tag", "path": [], "offset": -1}, "comparison": "matched"},
+    {"id": "decode.nested-transformations", "plan": "boxed", "direction": "decode", "body": "{\"value\":\"ADA\"}", "expect": {"ok": true, "encoded": "{\"value\":\"ada\"}"}, "comparison": "matched"},
+    {"id": "decode.nested-inner-failure", "plan": "boxed", "direction": "decode", "body": "{\"value\":\"\"}", "expect": {"ok": false, "step": "email", "message": "empty"}, "comparison": "matched"},
+    {"id": "encode.transforms", "plan": "profile", "direction": "encode", "value": {"id": "1", "email": "a", "contact": {"email": "b"}, "active": false}, "expect": {"ok": true, "encoded": "{\"id\":\"1\",\"email\":\"a\",\"contact\":{\"email\":\"b\"},\"active\":false}"}, "comparison": "matched"},
+    {"id": "encode.step-failure", "plan": "profile", "direction": "encode", "value": {"id": "1", "email": "a", "contact": {"email": "blocked"}, "active": false}, "expect": {"ok": false, "step": "email", "message": "blocked"}, "comparison": "matched"},
+    {"id": "encode.bounded-representation", "plan": "profile", "direction": "encode", "value": {"id": "1", "email": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "contact": {"email": "b"}, "active": false}, "expect": {"ok": false, "reason": "body-too-large", "path": [], "offset": -1}, "comparison": "difference", "note": "Transformed output is bounded by maxBodyBytes like any other; pinned Schema has no body bound."},
+    {"id": "encode.canonical-variant", "plan": "status", "direction": "encode", "value": "Active", "expect": {"ok": true, "encoded": "{\"_tag\":\"Active\"}"}, "comparison": "matched"},
+    {"id": "encode.nested-transformations", "plan": "boxed", "direction": "encode", "value": "ada", "expect": {"ok": true, "encoded": "{\"value\":\"ada\"}"}, "comparison": "matched"},
+    {"id": "encode.nested-inner-failure", "plan": "boxed", "direction": "encode", "value": "blocked", "expect": {"ok": false, "step": "email", "message": "blocked"}, "comparison": "matched"}
+  ],
+  "planErrors": [
+    {"id": "plan.missing-child", "expect": "missing node 9", "plan": {"bounds": {"maxBodyBytes": 64, "maxDepth": 1}, "root": 0, "nodes": [{"kind": "transform", "type": "witness:email", "child": 9, "step": 0, "behavior": "email"}, {"kind": "string"}]}},
+    {"id": "plan.sparse-steps", "expect": "not dense", "plan": {"bounds": {"maxBodyBytes": 64, "maxDepth": 1}, "root": 0, "nodes": [{"kind": "transform", "type": "witness:email", "child": 1, "step": 1, "behavior": "email"}, {"kind": "string"}]}},
+    {"id": "plan.shared-step", "expect": "share step", "plan": {"bounds": {"maxBodyBytes": 64, "maxDepth": 1}, "root": 1, "nodes": [{"kind": "string"}, {"kind": "record", "type": "Pair", "fields": [{"name": "a", "node": 2}, {"name": "b", "node": 3}]}, {"kind": "transform", "type": "witness:a", "child": 0, "step": 0, "behavior": "email"}, {"kind": "transform", "type": "witness:b", "child": 0, "step": 0, "behavior": "email"}]}},
+    {"id": "plan.recursive-witness", "expect": "recursive layout", "plan": {"bounds": {"maxBodyBytes": 64, "maxDepth": 2}, "root": 0, "nodes": [{"kind": "transform", "type": "witness:box", "child": 1, "step": 0, "behavior": "box"}, {"kind": "record", "type": "Box", "fields": [{"name": "value", "node": 0}]}]}},
+    {"id": "plan.repeated-witness", "expect": "repeat witness", "plan": {"bounds": {"maxBodyBytes": 64, "maxDepth": 1}, "root": 1, "nodes": [{"kind": "string"}, {"kind": "record", "type": "Pair", "fields": [{"name": "a", "node": 2}, {"name": "b", "node": 3}]}, {"kind": "transform", "type": "witness:a", "child": 0, "step": 0, "behavior": "email"}, {"kind": "transform", "type": "witness:a", "child": 0, "step": 1, "behavior": "email"}]}}
+  ]
+}

@@ -428,7 +428,7 @@ func TestMachineFormattingIsCanonical(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if FormatterIdentity != "effra/formatter-13" || !strings.Contains(first.Text, "machine Lights {\n    initial Light.Green {\n        cars: 1\n    }\n    step lightStep\n}") {
+	if FormatterIdentity != "effra/formatter-15" || !strings.Contains(first.Text, "machine Lights {\n    initial Light.Green {\n        cars: 1\n    }\n    step lightStep\n}") {
 		t.Fatalf("formatted:\n%s", first.Text)
 	}
 	second, err := FormatSource(first.Text)

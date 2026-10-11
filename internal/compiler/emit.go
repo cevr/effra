@@ -609,6 +609,8 @@ func jsExpr(e *Expr, effect bool) string {
 		return jsCodecOperation(e)
 	case "intrinsic":
 		return jsIntrinsicOperation(e)
+	case "endpoint", "routes":
+		return jsEndpointOperation(e)
 	case "member":
 		if e.ResolvedFunction != nil {
 			return e.ResolvedFunction.jsEmissionName()

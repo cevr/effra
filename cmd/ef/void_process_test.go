@@ -131,7 +131,7 @@ func TestVoidContractsAcrossCLIAndMCPProcesses(t *testing.T) {
 	}
 	formatReport := readProcessJSON(t, stdout)
 	if formatReport["schemaVersion"] != float64(compiler.FormatterSchemaVersion) || formatReport["formatterVersion"] != compiler.FormatterIdentity {
-		t.Fatalf("CLI formatter did not expose formatter-13: %v", formatReport)
+		t.Fatalf("CLI formatter did not expose formatter-15: %v", formatReport)
 	}
 	formattedSource, err := os.ReadFile(formatPath)
 	if err != nil || !strings.Contains(string(formattedSource), `fn pure(required required: string, suffix: string = "!") -> void {`) || !strings.Contains(string(formattedSource), "\n    void\n}") {

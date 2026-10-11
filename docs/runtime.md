@@ -122,4 +122,16 @@ A request holds its admission from body read until its response has been handed 
 
 The Content-Type policy (visible ASCII, space and horizontal tab) is the intersection of what Go and Node publish unchanged; validation precedes any byte of the response, and a host rejection during publication becomes a 500 (or aborts a response already started) instead of escaping the transport.
 
-Routing, method selection and media-type policy belong to the handler; the example answers a wrong method on a known path with 404, matching the selected profile. Every response is written only after the request scope, including handler resources and children, has closed, so a cleanup failure is never published as success. On JS the transport uses `node:http` (Node or Bun) with Effect fibers; the generated entry interrupts `main` on SIGINT/SIGTERM. General headers, query parameters, streaming bodies, typed endpoints and codecs remain future work.
+Routing, method selection and media-type policy belong to the handler; the example answers a wrong method on a known path with 404, matching the selected profile. Every response is written only after the request scope, including handler resources and children, has closed, so a cleanup failure is never published as success. On JS the transport uses `node:http` (Node or Bun) with Effect fibers; the generated entry interrupts `main` on SIGINT/SIGTERM. General headers, query parameters and streaming bodies remain future work.
+
+### Typed endpoints
+
+An endpoint derived with `Http.endpoint` ([declaration](bundled-modules.md#failure-witnesses-and-typed-endpoints)) applies one shared buffered JSON profile, implemented once per target (`goEndpointHelpers`, `prelude/endpoint.mjs`) over the transport above:
+
+- another method or path answers 404; a route table (`Http.routes`) dispatches on exact method and path, so a wrong method also answers 404, the pinned Effect profile;
+- with input, a Content-Type whose media type is not `application/json` (case-insensitive, parameters admitted) answers 415; an absent Content-Type reads as JSON, as pinned Effect's `HttpApiBuilder` does. The body is decoded once by the input witness, structure first; a structural failure, including a body that is not UTF-8, answers an empty 400 before any transformation or handler runs;
+- success encodes the handler's result with the output witness, `Content-Type: application/json`, at the declared status; an endpoint without output answers its status with no body;
+- a mapped failure answers its status, with a body from its failure witness if one is named. It is mapped only when it is the whole cause: a compound cause, such as another mapped failure from an unobserved child, a defect, an interruption or a cleanup cause beside it, propagates complete, so the endpoint's row keeps every mapped failure;
+- a failed success encoding propagates `JsonEncodeFailure` and a failed failure-body encoding is terminal: it is never mapped again and its cause keeps the mapped failure after the encoding failure (`JsonEncodeFailure; Unpublishable`). The transport answers either with its generic 500, after request-scope cleanup like any response.
+
+The shared wire corpus `conformance/http/endpoint-vectors.json` records these exchanges and runs on Go, Bun and Node.

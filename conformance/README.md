@@ -9,6 +9,7 @@ Effra owns the metadata beside it:
 | `effect-upstream.manifest.json` | The selected 746 reference files and their 26 licenses, the nearest-license mapping and a sha256 per file, plus the canonical integrity root. `go run ./scripts/conformance import` recomputes it from the pinned commit's git objects and refuses any difference. |
 | `effect-cases.json` | Selected upstream cases mapped to existing Effra acceptance tests, with status and limits. |
 | `codecs/` | Codec policy vectors compared against the pinned Effect runtime. |
+| `http/` | Shared HTTP wire vectors: exact status/body/content-type exchanges, the limits each program declares, and lifecycle cases (body timeout, disconnect, shutdown with active work). `cmd/ef` `TestHTTPWireVectors` runs every `*-vectors.json` over real sockets on Go, Bun and Node. |
 | `size/` | Size-conformance fixtures, the Go and TypeScript/Effect controls, and recorded application receipts; see [size/README.md](size/README.md). |
 
 [docs/conformance.md](../docs/conformance.md) explains the statuses, commands and pin-update procedure.

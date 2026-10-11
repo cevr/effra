@@ -56,6 +56,7 @@ var jsPrelude = []jsPreludeChunk{
 	{name: "codec", imports: []string{"Effect"}, source: codecEngineJS + jsCodecAdapters},
 	{name: i64FormatOp, source: jsI64FormatHelper},
 	{name: i64ParseOp, imports: []string{"Effect"}, source: jsI64ParseHelper},
+	{name: "endpoint", imports: []string{"Cause", "Effect", "Exit"}, source: preludeFile("endpoint.mjs")},
 	{name: "quote", source: preludeFile("quote.mjs")},
 	{name: "entry", requires: []string{"quote"}, imports: []string{"Effect", "Exit"}, source: preludeFile("entry.mjs")},
 	{name: "harness-slot", source: "let __ef_test_harness=null;\n"},
@@ -86,6 +87,7 @@ var jsPreludeChunkFor = map[string]string{
 	"codec":           "codec",
 	i64FormatOp:       i64FormatOp,
 	i64ParseOp:        i64ParseOp,
+	"endpoint":        "endpoint",
 }
 
 // jsSelection is the set of chunks and `effect` imports one module emits.
