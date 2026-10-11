@@ -176,6 +176,22 @@ receipt and a visible justifier when execution is unavailable. This is a
 receipt schema and ownership rule, not an admission of `law` or `contract`
 syntax; that construct remains a separate owner decision.
 
+The owner places this contract with two earlier findings (2026-10-08: "the
+lawful runtime goes with the ghost of departed proofs and bend findings
+right?"). The domain/opaque ingress column is the Ghosts of Departed Proofs
+work in [opaque values and checked evidence](opaque-values-and-evidence.md):
+trusted modules mint evidence about a named subject, and sensitive operations
+require matching evidence. The runtime and service columns treat laws as
+typed obligations, as Bend does. Bend discharges its laws with proof terms;
+Effra only tests them. The categories below therefore follow the conclusion
+of Effra's Bend comparison, which separates trusted predicates, tested laws,
+verified propositions and translation/runtime assumptions. Trusted predicates
+and translation/runtime assumptions both land in **Trusted decision**, whose
+runtime column accepts the shipped Go host or the pinned Effect adapter.
+Effra has no proof checker, so verified propositions have no category here,
+and finite tests stay evidence, not proof. Both sources are pinned in
+[PRIOR_ART.md](../../PRIOR_ART.md#language-and-library-references).
+
 The five categories have the same meaning at each boundary:
 
 | Category | Domain/opaque ingress | Service | Runtime |

@@ -466,6 +466,7 @@ Native builds lower checked source into typed Go closures and run `go build`. Th
 - Tooling: [CLI](docs/tooling.md), [MCP](docs/mcp.md), [LSP](docs/lsp.md)
 - [Showcases](docs/showcases.md): real application patterns, with proposals clearly labelled
 - [Design sketch](docs/design.md) and [contender roadmap](docs/contender-roadmap.md)
+- [Language evolution previews](docs/previews/README.md): dated snapshots of how constructs and syntax read over time
 - [North star](NORTH_STAR.md), [prior art](PRIOR_ART.md) (Effect, Go, Gleam, ReScript, Elixir, Borgo, Bend and others) and [glossary](GLOSSARY.md)
 - [Upstream conformance](docs/conformance.md): pinned Effect behavior mapped to Go/JS acceptance tests
 

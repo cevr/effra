@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -50,7 +51,8 @@ type Step struct {
 	Inputs *Inputs
 	// ToolEnv names executables the step's own cache cannot see, such as the
 	// JavaScript tools Go tests spawn. Their versions, with the environment
-	// they read (testToolEnvironment), reach the step as one digest in
+	// they and the Go programs a test runs read (testToolEnvironment,
+	// goRuntimeEnvironment), reach the step as one digest in
 	// EFFRA_TOOL_VERSIONS; a test that reads it keys Go's test cache on it.
 	ToolEnv []string
 }
@@ -73,6 +75,20 @@ type Inputs struct {
 	// permissions and content and every symlink's target, following links
 	// as Node and Bun resolve them. An absent directory is a distinct input.
 	Installed []string
+	// Generated names files or directories that a step this one Needs
+	// writes during the run, such as emitted artifacts. Each is digested
+	// like Installed, but when this step's key is computed: Installed trees
+	// are digested once per run because nothing writes them.
+	Generated []string
+	// Trees names directories a step walks on disk itself, as the
+	// framework-port capture check walks its vendored tree, so every entry
+	// there is an input, files Git ignores included. Each is digested like
+	// Generated, when this step's key is computed, and a link out of it into
+	// the repository is followed. TreeExclude names repository paths under
+	// them that are not inputs: trees declared separately, and directories
+	// the step empties before it reads them.
+	Trees       []string
+	TreeExclude []string
 }
 
 type outcome int
@@ -89,7 +105,10 @@ type result struct {
 	output   []byte
 	duration time.Duration
 	cpu      time.Duration
-	note     string
+	// begun is when the step started, from the start of the run, so a
+	// log shows the critical path and not only each step's own time.
+	begun time.Duration
+	note  string
 }
 
 type receipt struct {
@@ -101,6 +120,7 @@ type receipt struct {
 }
 
 type gate struct {
+	started  time.Time
 	root     string
 	cacheDir string
 	noCache  bool
@@ -155,6 +175,13 @@ func main() {
 	} else {
 		fmt.Printf("typescript: strict (%s)\n", tsc)
 	}
+	// The second line binds the log to the checkout it checked. A dirty
+	// checkout still runs, and says so.
+	identity, err := checkoutIdentity(root)
+	if err != nil {
+		fatal(err)
+	}
+	fmt.Println(identity)
 	g := &gate{root: root, cacheDir: cacheDirectory(), noCache: *noCache, steps: steps}
 	os.Exit(g.run(os.Stdout))
 }
@@ -170,6 +197,36 @@ func repositoryRoot() (string, error) {
 		return "", fmt.Errorf("locate repository root: %w", err)
 	}
 	return strings.TrimSpace(string(executable)), nil
+}
+
+// checkoutIdentity names the commit and tree the gate starts from, and
+// whether the checkout matches them: no staged, unstaged or untracked
+// (non-ignored) changes, submodules included.
+func checkoutIdentity(root string) (string, error) {
+	git := func(args ...string) (string, error) {
+		command := exec.Command("git", args...)
+		command.Dir = root
+		output, err := command.Output()
+		if err != nil {
+			return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		}
+		return string(output), nil
+	}
+	head, err := git("rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	tree, err := git("rev-parse", "HEAD^{tree}")
+	if err != nil {
+		return "", err
+	}
+	// Submodule ignore settings in .gitmodules or config cannot hide a
+	// change: the reported cleanliness covers every submodule.
+	status, err := git("status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=none")
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("gate: head %s tree %s clean=%t", strings.TrimSpace(head), strings.TrimSpace(tree), status == ""), nil
 }
 
 func cacheDirectory() string {
@@ -190,6 +247,7 @@ func cacheDirectory() string {
 // run executes the graph and returns the process exit code.
 func (g *gate) run(out io.Writer) int {
 	started := time.Now()
+	g.started = started
 	index := map[string]int{}
 	for i, step := range g.steps {
 		if _, duplicate := index[step.Name]; duplicate {
@@ -250,11 +308,11 @@ func (g *gate) run(out io.Writer) int {
 		r := results[i]
 		switch r.outcome {
 		case passed:
-			fmt.Fprintf(out, "== %s: ok (%.1fs, cpu %.1fs)\n", step.Name, r.duration.Seconds(), r.cpu.Seconds())
+			fmt.Fprintf(out, "== %s: ok (%.1fs, cpu %.1fs, from %.1fs)\n", step.Name, r.duration.Seconds(), r.cpu.Seconds(), r.begun.Seconds())
 		case cached:
 			fmt.Fprintf(out, "== %s: ok, cached (%s)\n", step.Name, r.note)
 		case failed:
-			fmt.Fprintf(out, "== %s: FAILED (%.1fs, cpu %.1fs)\n", step.Name, r.duration.Seconds(), r.cpu.Seconds())
+			fmt.Fprintf(out, "== %s: FAILED (%.1fs, cpu %.1fs, from %.1fs)\n", step.Name, r.duration.Seconds(), r.cpu.Seconds(), r.begun.Seconds())
 			failures = append(failures, step.Name)
 		case blocked:
 			fmt.Fprintf(out, "== %s: not run (%s)\n", step.Name, r.note)
@@ -294,24 +352,13 @@ func (g *gate) execute(step *Step) *result {
 	command.Dir = g.root
 	command.Env = stepEnvironment()
 	if len(step.ToolEnv) > 0 {
-		digest := sha256.New()
-		for _, tool := range step.ToolEnv {
-			fmt.Fprintf(digest, "%s\x00%s\x00", tool, g.toolVersion(tool))
-		}
-		for _, name := range testToolEnvironment {
-			value, set := os.LookupEnv(name)
-			fmt.Fprintf(digest, "env\x00%s\x00%t\x00%s\x00", name, set, value)
-		}
-		for _, dir := range testInstalled {
-			fmt.Fprintf(digest, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
-		}
-		command.Env = append(command.Env, "EFFRA_TOOL_VERSIONS="+hex.EncodeToString(digest.Sum(nil))[:16])
+		command.Env = append(command.Env, "EFFRA_TOOL_VERSIONS="+g.toolDigest(step))
 	}
 	var output bytes.Buffer
 	command.Stdout = &output
 	command.Stderr = &output
 	err := command.Run()
-	r := &result{outcome: passed, output: output.Bytes(), duration: time.Since(started)}
+	r := &result{outcome: passed, output: output.Bytes(), duration: time.Since(started), begun: started.Sub(g.started)}
 	if command.ProcessState != nil {
 		// A reaped child's usage includes the descendants it reaped.
 		r.cpu = command.ProcessState.UserTime() + command.ProcessState.SystemTime()
@@ -334,12 +381,51 @@ func (g *gate) execute(step *Step) *result {
 // more peak memory; no test depends on collection frequency.
 const gcPercent = "400"
 
+// toolDigest identifies, for a step's own cache, the tools it names in
+// ToolEnv, the environment they and the Go programs they run read, and the
+// installed trees they load.
+func (g *gate) toolDigest(step *Step) string {
+	digest := sha256.New()
+	for _, tool := range step.ToolEnv {
+		fmt.Fprintf(digest, "%s\x00%s\x00", tool, g.toolVersion(tool))
+	}
+	for _, name := range append(testToolEnvironment, goRuntimeEnvironment...) {
+		value, set := stepVariable(name)
+		fmt.Fprintf(digest, "env\x00%s\x00%t\x00%s\x00", name, set, value)
+	}
+	for _, dir := range testInstalled {
+		fmt.Fprintf(digest, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
+	}
+	return hex.EncodeToString(digest.Sum(nil))[:16]
+}
+
+// stepEnvironment is the environment every step runs with: the caller's,
+// without the variables that would select an unkeyed executable, and with
+// the gate's collector target unless the caller sets one.
 func stepEnvironment() []string {
-	environment := os.Environ()
+	var environment []string
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if !slices.Contains(unpinnedToolEnvironment, name) {
+			environment = append(environment, entry)
+		}
+	}
 	if _, set := os.LookupEnv("GOGC"); !set {
 		environment = append(environment, "GOGC="+gcPercent)
 	}
 	return environment
+}
+
+// stepVariable reads a variable as steps see it, so a key names the value a
+// step runs with rather than the caller's.
+func stepVariable(name string) (string, bool) {
+	environment := stepEnvironment()
+	for i := len(environment) - 1; i >= 0; i-- {
+		if value, ok := strings.CutPrefix(environment[i], name+"="); ok {
+			return value, true
+		}
+	}
+	return "", false
 }
 
 // loadFiles hashes every tracked and untracked (non-ignored) file once.
@@ -381,8 +467,20 @@ func (g *gate) loadFiles() error {
 	return nil
 }
 
-// fileDigest identifies a file's content and kind. Missing tracked files,
-// directories (submodule gitlinks) and symlinks hash distinctly from content.
+// keyedPermissions are the permission bits that can change a step's result.
+// Steps run as the user who owns the checkout, so the kernel grants their
+// access from the owner bits alone: owner-read decides whether a step can
+// read an input. A cached step never writes its inputs, so owner-write cannot
+// change what it reads. The three executable bits are data a check can read,
+// as the capture check reads the owner's, and they decide what a step can
+// execute. Group and other read and write bits are consulted for no process
+// a step starts and asserted by no check, so keying them would only split
+// receipts between checkouts made under different umasks.
+const keyedPermissions os.FileMode = 0o511
+
+// fileDigest identifies a file's content, kind and keyed permission bits.
+// Missing tracked files, directories (submodule gitlinks) and symlinks hash
+// distinctly from content.
 func fileDigest(name string) string {
 	info, err := os.Lstat(name)
 	switch {
@@ -404,11 +502,7 @@ func fileDigest(name string) string {
 		return "error:" + err.Error()
 	}
 	sum := sha256.Sum256(content)
-	mode := "file"
-	if info.Mode()&0111 != 0 {
-		mode = "executable"
-	}
-	return mode + ":" + hex.EncodeToString(sum[:])
+	return fmt.Sprintf("file:%v:%s", info.Mode().Perm()&keyedPermissions, hex.EncodeToString(sum[:]))
 }
 
 func selected(name string, inputs *Inputs) bool {
@@ -450,7 +544,7 @@ func (g *gate) key(step *Step) (string, error) {
 		fmt.Fprintf(hash, "tool\x00%s\x00%s\x00", tool, g.toolVersion(tool))
 	}
 	for _, name := range inputs.Env {
-		value, set := os.LookupEnv(name)
+		value, set := stepVariable(name)
 		fmt.Fprintf(hash, "env\x00%s\x00%t\x00%s\x00", name, set, value)
 	}
 	if inputs.Submodule != "" {
@@ -462,6 +556,26 @@ func (g *gate) key(step *Step) (string, error) {
 	}
 	for _, dir := range inputs.Installed {
 		fmt.Fprintf(hash, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
+	}
+	for _, name := range inputs.Generated {
+		digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(name)), g.root, false)
+		if err != nil {
+			return "", fmt.Errorf("digest generated %s: %w", name, err)
+		}
+		fmt.Fprintf(hash, "generated\x00%s\x00%s\x00", name, digest)
+	}
+	for _, tree := range inputs.Trees {
+		var skip []string
+		for _, excluded := range inputs.TreeExclude {
+			if relative, ok := strings.CutPrefix(excluded, strings.TrimSuffix(tree, "/")+"/"); ok {
+				skip = append(skip, strings.TrimSuffix(relative, "/"))
+			}
+		}
+		digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(tree)), g.root, true, skip...)
+		if err != nil {
+			return "", fmt.Errorf("digest tree %s: %w", tree, err)
+		}
+		fmt.Fprintf(hash, "tree\x00%s\x00%q\x00%s\x00", tree, skip, digest)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
@@ -476,7 +590,7 @@ func (g *gate) installed(dir string) string {
 	if digest, ok := g.installedDigests[dir]; ok {
 		return digest
 	}
-	digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(dir)), g.root)
+	digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(dir)), g.root, false)
 	if err != nil {
 		// An unreadable tree never matches a recorded pass.
 		digest = fmt.Sprintf("error:%v:%d", err, time.Now().UnixNano())
@@ -487,10 +601,14 @@ func (g *gate) installed(dir string) string {
 
 // installedDigest hashes a tree's contents, following symbolic links (each
 // directory once, by its resolved path) and hashing files concurrently. A
-// link from the tree back into the repository, such as a workspace package,
-// contributes only its target: the files there are repository inputs, and
-// outputs Git ignores there are not inputs.
-func installedDigest(root, repository string) (string, error) {
+// link from an installed tree back into the repository, such as a workspace
+// package, contributes only its target: a step whose outcome depends on the
+// files there declares them, through Paths or, when it reads files Git
+// ignores, Trees. With followRepository, as for a tree input, the walk
+// follows such a link too, so editing its target changes the digest. skip
+// names paths relative to root that the walk leaves out. A file contributes
+// its keyed permission bits.
+func installedDigest(root, repository string, followRepository bool, skip ...string) (string, error) {
 	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
 		return "absent", nil
 	}
@@ -512,6 +630,9 @@ func installedDigest(root, repository string) (string, error) {
 	visited := map[string]bool{}
 	var walk func(relative, name string) error
 	walk = func(relative, name string) error {
+		if slices.Contains(skip, relative) {
+			return nil
+		}
 		info, err := os.Lstat(name)
 		if err != nil {
 			return err
@@ -527,7 +648,7 @@ func installedDigest(root, repository string) (string, error) {
 				entries = append(entries, "dangling\x00"+relative)
 				return nil
 			}
-			if within(resolved, resolvedRepository) && !within(resolved, resolvedRoot) {
+			if !followRepository && within(resolved, resolvedRepository) && !within(resolved, resolvedRoot) {
 				return nil
 			}
 			if info, err = os.Stat(name); err != nil {
@@ -556,7 +677,7 @@ func installedDigest(root, repository string) (string, error) {
 				}
 			}
 		case info.Mode().IsRegular():
-			entries = append(entries, fmt.Sprintf("file\x00%s\x00%v", relative, info.Mode().Perm()))
+			entries = append(entries, fmt.Sprintf("file\x00%s\x00%v", relative, info.Mode().Perm()&keyedPermissions))
 			files = append(files, file{relative, name})
 		default:
 			entries = append(entries, fmt.Sprintf("other\x00%s\x00%v", relative, info.Mode()))
@@ -620,10 +741,27 @@ func (g *gate) toolVersion(tool string) string {
 	}
 	version := "absent"
 	if _, err := exec.LookPath(argv[0]); err == nil {
-		output, err := exec.Command(argv[0], argv[1:]...).CombinedOutput()
+		command := exec.Command(argv[0], argv[1:]...)
+		command.Env = stepEnvironment()
+		var output []byte
+		if tool == "go" {
+			// Standard output only: GODEBUG=inittrace=1 makes go itself
+			// write timings to standard error.
+			output, err = command.Output()
+		} else {
+			output, err = command.CombinedOutput()
+		}
 		version = strings.TrimSpace(string(output))
 		if err != nil {
 			version = "failed: " + version
+		}
+	}
+	if tool == "go" {
+		// Programs the toolchain builds read these at startup, and a step
+		// that runs one asserts what it prints.
+		for _, name := range goRuntimeEnvironment {
+			value, set := stepVariable(name)
+			version += fmt.Sprintf("\x00%s\x00%t\x00%s", name, set, value)
 		}
 	}
 	g.tools[tool] = version
