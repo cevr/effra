@@ -3,6 +3,7 @@ package compiler
 import (
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -323,5 +324,105 @@ func TestMachinePreparationSharesInternedRows(t *testing.T) {
 	r, _ := prepareModule(t, catchChainSource(500))
 	if codes := machineCodes(r); len(codes) != 1 || codes[0] != "EF140" {
 		t.Errorf("codes %v, want [EF140]", codes)
+	}
+}
+
+// wideRecordSource declares, for each name, a record of records records
+// whose own fields are fields i64s each.
+func wideRecordSource(b *strings.Builder, name string, records, fields int) {
+	for i := 0; i < records; i++ {
+		fmt.Fprintf(b, "record %sq%d {", name, i)
+		for j := 0; j < fields; j++ {
+			if j > 0 {
+				b.WriteString(",")
+			}
+			fmt.Fprintf(b, " x%d: i64", j)
+		}
+		b.WriteString(" }\n")
+	}
+	fmt.Fprintf(b, "record %s {", name)
+	for i := 0; i < records; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(b, " f%d: %sq%d", i, name, i)
+	}
+	b.WriteString(" }\n")
+}
+
+// machinesOver declares one machine per state, each with its own state and
+// event enums; state is the fields of the state's first variant.
+func machinesOver(b *strings.Builder, states ...string) {
+	for i, state := range states {
+		fmt.Fprintf(b, "enum S%d { A { %s } B }\nenum E%d { P Q }\n", i, state, i)
+		fmt.Fprintf(b, "fn step%d(state: S%d, event: E%d) -> Machines.Step<S%d, void> { Machines.Step<S%d, void>.Ignore {} }\n", i, i, i, i, i)
+		fmt.Fprintf(b, "machine M%d { initial S%d.B {}; step step%d }\n", i, i, i)
+	}
+}
+
+// diagnosticSummary is each diagnostic's code and message, in order.
+func diagnosticSummary(r *Result) []string {
+	out := make([]string, len(r.Diagnostics))
+	for i, d := range r.Diagnostics {
+		out[i] = d.Code + " " + d.Message
+	}
+	return out
+}
+
+// Round-6 review m2: the clean set's two soundness guards, each witnessed by
+// the plan or refusal it protects. Only two declarations each: all of them
+// are prepared before any is analysed, so a third that walked the same types
+// would prepare what the first skipped and hide the fault.
+//
+//   - A walk the budget stops marks nothing clean. M0's state carries P0 and
+//     P1, about 40,000 units each, so its walk stops inside P1; M1 carries P1
+//     alone and is admitted. Marking P1 clean when the walk stopped would
+//     stop M1's preparation at P1 for one unit, and analysis would refuse M1
+//     for a fact the checker did not prepare.
+//   - A type is clean only once its whole strongly connected component is.
+//     B and A are mutually recursive (EF119); M0 walks P, then A, then B and
+//     back to A, which is still on the walk's stack, and the budget stops it
+//     inside H, after B has returned. M1 carries B; its walk must reach A's
+//     function field and refuse it (EF141). A per-type memo would mark B
+//     clean when its frame returned, and M1 would reach H's unprepared
+//     layouts instead.
+func TestMachinePreparationCleanSetIsSound(t *testing.T) {
+	var stop strings.Builder
+	stop.WriteString("import Machines \"effra/machines\"\n")
+	wideRecordSource(&stop, "P0", 600, 30)
+	wideRecordSource(&stop, "P1", 600, 30)
+	machinesOver(&stop, "p0: P0, p1: P1", "p1: P1")
+	var cycle strings.Builder
+	cycle.WriteString("import Machines \"effra/machines\"\n")
+	wideRecordSource(&cycle, "P", 800, 30)
+	wideRecordSource(&cycle, "H", 400, 30)
+	cycle.WriteString("enum B { Y { a: A } N }\nenum A { X { b: B, h: H, f: fn() -> i64 } N }\n")
+	machinesOver(&cycle, "p: P, a: A", "b: B")
+	for _, c := range []struct {
+		name   string
+		source string
+		plans  []string
+		want   []string
+	}{
+		{"budget stop", stop.String(), []string{"M1"}, []string{
+			"EF142 machine M0 analysis exceeds its 65536-unit budget; no plan is published",
+		}},
+		{"component", cycle.String(), nil, []string{
+			"EF119 recursive data layout is unsupported: B->A->B",
+			"EF127 recursive or excessive field occurrence layout",
+			"EF127 recursive or excessive field occurrence layout",
+			"EF142 machine M0 analysis exceeds its 65536-unit budget; no plan is published",
+			"EF141 machine data S1.A.b.Y.a.X.f carries a function or effect recipe; machine state, event and output values are not yet admitted to carry behavior: portable machine payloads need checked actor ownership",
+		}},
+	} {
+		r, _ := prepareModule(t, c.source)
+		var plans []string
+		for _, m := range r.Machines {
+			plans = append(plans, m.Name)
+		}
+		got := diagnosticSummary(r)
+		if !slices.Equal(plans, c.plans) || !slices.Equal(got, c.want) {
+			t.Errorf("%s: plans %v, diagnostics %q; want plans %v, diagnostics %q", c.name, plans, got, c.plans, c.want)
+		}
 	}
 }
