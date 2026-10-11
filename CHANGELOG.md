@@ -44,6 +44,7 @@ Entries describe user-visible changes and are true at the commit that carries th
 
 ### Tooling
 
+- The framework-port references now require Bun 1.4.3 (was 1.4.2), and the ports pin `bun-types` 1.4.3 to match. `check:references` and `check:counter-domain` refuse any other Bun version.
 - Run `scripts/init_upstream.sh` once after every clone, Rift or worktree, before the gate. The pinned Effect 4.0.1 reference tests are now a git submodule at `conformance/upstream/effect` instead of a vendored copy. Offline, set `EFFRA_UPSTREAM_MIRROR` to a local Effect clone that contains the pinned commit. The conformance verifier and mapping checker read the corpus only from the pinned commit's git objects (so working-tree tricks such as `core.ignoreStat`, `skip-worktree` or `git replace` cannot change what is verified), compare line by line under `core.autocrlf`, and print repair commands that work from any directory. [`docs/conformance.md`](docs/conformance.md) has the pin-update procedure.
 - `scripts/gate.sh` prints a loud `typescript: unchecked` line when `tsc` is not on PATH, and `typescript: strict` otherwise. It does not fail, so contributors without `tsc` can still gate; see [tooling](docs/tooling.md#gate-prerequisites).
 - Admitted builtin Http data (`HttpRequest` and the other builtin types) is reported by `ef check` and inspection with source `builtin:http` and a zero span, since it has no source location.

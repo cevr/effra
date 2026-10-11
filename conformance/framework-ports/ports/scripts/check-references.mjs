@@ -87,7 +87,7 @@ function clearGenerated() {
 async function references() {
   clearGenerated();
   const bunVersion = run("BUN_VERSION", "bun", ["--version"]).trim();
-  assert.equal(bunVersion, "1.4.2", "references require Bun1.4.2");
+  assert.equal(bunVersion, "1.4.3", "references require Bun1.4.3");
   run("CAPTURE", process.execPath, ["scripts/check-yield-capture.mjs"]);
   run("DEPENDENCIES", process.execPath, ["scripts/check-dependency-profile.mjs"]);
   // The vendor build writes into dist without clearing it. Starting from none makes every built file this run's own

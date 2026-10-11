@@ -344,7 +344,7 @@ try {
     const tsPackage = JSON.parse(readFileSync(path.join(leaf, "node_modules/typescript/package.json"), "utf8"));
     assert.equal(tsPackage.version, "6.0.3");
     assert.ok(realpathSync(localTS).startsWith(`${path.join(leaf, "node_modules")}/`), "leaf TypeScript owner, no root fallback");
-    assert.equal(run("BUN_VERSION", "bun", ["--version"]).stdout.trim(), "1.4.2");
+    assert.equal(run("BUN_VERSION", "bun", ["--version"]).stdout.trim(), "1.4.3");
     assert.equal(run("LEAF_TS_VERSION", process.execPath, [localTS, "--version"]).stdout.trim(), "Version 6.0.3");
   }
   evidence.parent = { head: run("SOURCE_HEAD", "git", ["rev-parse", "HEAD"], false, repository).stdout.trim(), headTree: run("SOURCE_TREE", "git", ["rev-parse", "HEAD^{tree}"], false, repository).stdout.trim() };

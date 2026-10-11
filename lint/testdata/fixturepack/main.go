@@ -73,6 +73,28 @@ func main() {
 		// while the pack exits without reading its request.
 		child := spawn(true, os.Stdin, nil)
 		writePIDs(args[1], os.Getpid(), child)
+	case "exit-at-once":
+		// Exits before its request arrives, as a pack failing at startup.
+		os.Exit(4)
+	case "limits":
+		// Reports the data-segment limit it runs under (Linux's
+		// /proc/self/limits), once its request has arrived.
+		rule := *pack.Rules[0]
+		rule.Check = func(pass *lint.Pass) error {
+			data, err := os.ReadFile("/proc/self/limits")
+			if err != nil {
+				return err
+			}
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.HasPrefix(line, "Max data size") {
+					pass.Reportf(pass.Snapshot.FunctionNamed("main").Span, "%s", strings.Join(strings.Fields(line), " "))
+				}
+			}
+			return nil
+		}
+		limits := *pack
+		limits.Rules = []*lint.Rule{&rule}
+		lint.Main(&limits)
 	case "sleep":
 		time.Sleep(time.Hour)
 	case "memory":
