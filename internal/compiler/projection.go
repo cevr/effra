@@ -480,10 +480,9 @@ func stringBytes(value any, limit int) int {
 				walk(iter.Value())
 			}
 		case reflect.Struct:
-			for i := 0; i < v.NumField() && total <= limit; i++ {
-				field := v.Type().Field(i)
-				if field.PkgPath != "" || strings.Split(field.Tag.Get("json"), ",")[0] == "-" {
-					continue
+			for _, i := range visibleStringFields(v.Type()) {
+				if total > limit {
+					break
 				}
 				walk(v.Field(i))
 			}
@@ -491,6 +490,30 @@ func stringBytes(value any, limit int) int {
 	}
 	walk(reflect.ValueOf(value))
 	return total
+}
+
+// stringFieldsByType caches visibleStringFields per struct type.
+var stringFieldsByType sync.Map
+
+// visibleStringFields lists the fields of a struct type that stringBytes
+// counts: exported, and not tagged json:"-". The list is computed once per
+// type, so counting a value allocates nothing per field it visits (round-4
+// review M3: splitting each field's tag was 27,000 allocations for one
+// machine graph view).
+func visibleStringFields(typ reflect.Type) []int {
+	if fields, ok := stringFieldsByType.Load(typ); ok {
+		return fields.([]int)
+	}
+	fields := make([]int, 0, typ.NumField())
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		if name, _, _ := strings.Cut(field.Tag.Get("json"), ","); field.PkgPath != "" || name == "-" {
+			continue
+		}
+		fields = append(fields, i)
+	}
+	stringFieldsByType.Store(typ, fields)
+	return fields
 }
 
 // ValidateProjectionResponse charges an envelope even when its type view was

@@ -70,6 +70,11 @@ func TestMachineGraphViewAllocationIsCharged(t *testing.T) {
 		// Found by the round-3 sweep (seed 872): 300 failure labels of 66 bytes
 		// publish 300 error types, each checked against every declaration.
 		{machineShape{states: 2, events: 50, name: 4096, variantName: 64, tails: 2, keepPaths: true, failures: 300, declarations: 1, failureName: 64, generic: true, genericFields: 64, recipeName: 64, records: 2000}, ""},
+		// Found by the round-4 review's sweep (seed 1025): an explicit generic
+		// initial argument publishes a deep value, and counting its strings
+		// split every struct field's JSON tag (34,909 allocations for 2,588
+		// units).
+		{machineShape{states: 3, events: 600, helpers: 4, tails: 1, wideArm: true, keepPaths: true, literalStay: true, failures: 3, declarations: 1, payload: 30, lets: 100, genericName: 4096, genericFields: 3000, recipeName: 4096, initialArg: 3, clip: true}, ""},
 		{machineShape{states: 40, events: 2, helpers: 2, tails: 7, wideArm: true}, GraphRefusalEdgeLimit},
 		{machineShape{states: 2, events: 1, machineName: 4096, helpers: 2, tails: 20, distinct: 20}, GraphRefusalResponseLimit},
 		{machineShape{states: 4000, events: 1, tails: 20, wideArm: true, keepPaths: true, keeps: 2}, GraphRefusalWorkLimit},
