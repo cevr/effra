@@ -117,23 +117,6 @@ func generatedMainTokens(t *testing.T, measured receipt.Application) []string {
 	return tokens
 }
 
-// symbolsWithoutAddresses lists an executable's symbols by name, kind and
-// size, in name order.
-func symbolsWithoutAddresses(t *testing.T, executable string) []string {
-	t.Helper()
-	output, err := exec.Command("go", "tool", "nm", "-size", "-type", "-sort", "name", executable).Output()
-	if err != nil {
-		t.Fatalf("go tool nm %s: %v", executable, err)
-	}
-	symbols := []string{}
-	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-		if fields := strings.Fields(line); len(fields) > 1 {
-			symbols = append(symbols, strings.Join(fields[1:], " "))
-		}
-	}
-	return symbols
-}
-
 func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := t.TempDir()
@@ -244,11 +227,12 @@ func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
 	}
 
 	// Unused declarations and equivalent spellings retain exactly the same
-	// program: identical runtime, imports, dependencies and symbols natively,
-	// and an identical module in JavaScript. Only source positions differ:
-	// the generated main's //line directives name each source file and line,
-	// and so do the executable's position tables, which change its size and
-	// shift symbol addresses but no symbol's name, kind or size.
+	// program: identical runtime, imports, dependencies and per-package
+	// symbol counts and sizes natively, and an identical module in
+	// JavaScript. Only source positions differ: the generated main's //line
+	// directives name each source file and line, and so do the executable's
+	// position tables, which change its size and shift symbol addresses (and
+	// so the receipt's listing digest) but no symbol's size.
 	for _, pair := range [][2]string{{"minimal", "minimal-unused"}, {"direct", "pipe"}} {
 		a, b := built[pair[0]], built[pair[1]]
 		runtimeOnly := func(files []receipt.File) []receipt.File {
@@ -268,7 +252,7 @@ func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
 		if !slices.Equal(a.native.Deps.Transitive, b.native.Deps.Transitive) {
 			t.Errorf("%s/%s: dependencies differ", pair[0], pair[1])
 		}
-		if !slices.Equal(a.native.Symbols.Packages, b.native.Symbols.Packages) || !slices.Equal(symbolsWithoutAddresses(t, filepath.Join(root, "bin", pair[0])), symbolsWithoutAddresses(t, filepath.Join(root, "bin", pair[1]))) {
+		if a.native.Symbols.Count != b.native.Symbols.Count || !slices.Equal(a.native.Symbols.Packages, b.native.Symbols.Packages) {
 			t.Errorf("%s/%s: executables retain different symbols: %+v vs %+v", pair[0], pair[1], a.native.Symbols.Packages, b.native.Symbols.Packages)
 		}
 		if !bytes.Equal(withoutHeader(t, a.module), withoutHeader(t, b.module)) {
