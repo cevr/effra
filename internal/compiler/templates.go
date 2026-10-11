@@ -144,6 +144,14 @@ func (c *checker) templateDeclaration(r *Record) Declaration {
 func (c *checker) resolveDataTemplateLayouts() {
 	declarations := append(append([]*DataDeclaration{}, c.program.Records...), c.program.Enums...)
 	declarations = append(declarations, c.program.BundledTemplates...)
+	// Each template's published declaration is replaced once its layout
+	// resolves. checkTemplates published them all, and resolving publishes
+	// none, so their positions are indexed once rather than searched per
+	// template.
+	published := map[string][]int{}
+	for i, d := range c.result.Declarations {
+		published[d.Identity] = append(published[d.Identity], i)
+	}
 	for _, declaration := range declarations {
 		if len(declaration.Parameters) == 0 {
 			continue
@@ -175,10 +183,8 @@ func (c *checker) resolveDataTemplateLayouts() {
 		}
 		c.typeContext = previous
 		c.functionModule = previousModule
-		for i := range c.result.Declarations {
-			if c.result.Declarations[i].Identity == declaration.Identity {
-				c.result.Declarations[i] = c.templateDeclaration(declaration)
-			}
+		for _, i := range published[declaration.Identity] {
+			c.result.Declarations[i] = c.templateDeclaration(declaration)
 		}
 	}
 	c.validateTemplateLayoutCycles(declarations)

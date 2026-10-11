@@ -147,6 +147,43 @@ func TestTemplateLookupFollowsGrowingDeclarations(t *testing.T) {
 	}
 }
 
+// Every published template declaration carries its resolved layout, including
+// fields whose type is not a template parameter.
+func TestTemplateLayoutsReachEveryPublishedDeclaration(t *testing.T) {
+	r := Compile(`import Data "effra/data"
+record A { x: i64 }
+record Box<T: type> { value: T, count: i64 }
+enum Choice<T: type> { Neither, Left { value: T, tag: string } }
+record B { y: string }
+record Pair<L: type, R: type> { left: L, right: R, label: string }
+fn keep(value: Data.Option<Box<string>>) -> Data.Option<Box<string>> { value }
+`)
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	templates := map[string]bool{}
+	for _, d := range r.Declarations {
+		if d.Kind != "template" {
+			continue
+		}
+		templates[d.Name] = true
+		fields := append([]Field{}, d.Fields...)
+		for _, variant := range d.Variants {
+			fields = append(fields, variant.Fields...)
+		}
+		for _, field := range fields {
+			if field.TypeRef.Kind == "" {
+				t.Fatalf("template %s field %s was published before its layout resolved", d.Name, field.Name)
+			}
+		}
+	}
+	for _, name := range []string{"Box", "Choice", "Pair", "Option"} {
+		if !templates[name] {
+			t.Fatalf("template %s was not published: %v", name, templates)
+		}
+	}
+}
+
 // templateLookupSource is issue #109's reproduction: n one-field records and
 // one record whose n fields name them, so checking asks for a template by
 // name about twice per field.
