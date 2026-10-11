@@ -121,7 +121,7 @@ func (g *goEmitter) endpointOperation(e *Expr, ret string, out *strings.Builder)
 	for _, mapping := range endpoint.mappings {
 		encoder := "nil"
 		if mapping.codec != nil {
-			encoder = "func(payload any)efExit[string]{encoded,err:=" + goCodecEncodeName(mapping.codec.plan) + "(&payload," + goCodecStepsName(mapping.codec.plan) + "{});return efCodecEncoded(" + strconv.Quote(jsonCodecDerivation.EncodeFailure) + ",encoded,err)}"
+			encoder = "func(payload any)efExit[string]{encoded,err:=" + goCodecEncodeName(mapping.codec.plan) + "(&payload);return efCodecEncoded(" + strconv.Quote(jsonCodecDerivation.EncodeFailure) + ",encoded,err)}"
 		}
 		failures = append(failures, strconv.Quote(mapping.failure)+":{status:"+strconv.FormatInt(mapping.status, 10)+",encode:"+encoder+"}")
 	}

@@ -52,8 +52,12 @@ type codecTestHalt struct{ tag string }
 
 func (h *codecTestHalt) Error() string { return "halted: " + h.tag }
 
-// codecTestProfileSteps is the typed encode step a generated writer for
-// codecTestProfilePlan takes.
+// codecTestProfileSteps stands in for the witness encode function that a
+// generated writer for codecTestProfilePlan would call directly; these
+// hand-written writers take it as a value so a test can record and refuse
+// calls. Its field is non-nil only because each test supplies it: that is
+// a property of the caller, as a generated writer's direct call is of
+// trusted lowering, not something Go's types enforce here.
 type codecTestProfileSteps struct {
 	email func(codecTestEmail) (string, error)
 }
@@ -203,6 +207,12 @@ func TestCodecEncodeTransformsPrecedeStructuralEncoding(t *testing.T) {
 	}
 }
 
+// Decoding takes its steps as a slice, so a missing or extra step is
+// representable in Go; supplying exactly one non-nil step per transform node
+// is a trusted-lowering invariant, and the engine panics on a count mismatch
+// as a compiler defect rather than returning a codec failure. Encoding has
+// no step values: a generated writer calls each witness's encode function
+// directly.
 func TestCodecStepCountIsACompilerContract(t *testing.T) {
 	codec := mustCompileCodec(t, codecTestProfilePlan())
 	for name, run := range map[string]func(){

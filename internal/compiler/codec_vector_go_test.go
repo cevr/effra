@@ -107,10 +107,10 @@ func compile(plan er.CodecPlan) *er.Codec {
 		root := codecVectorGoType(position, plan, plan.Root)
 		encode := "efCodecEncode_" + strconv.Itoa(position)
 		if job.decode {
-			fmt.Fprintf(&program, "{\nvalue, err := %s_plan.DecodeSteps([]byte(%s), %s_decode)\nif err != nil {\nsettle(%q, \"\", nil, err)\n} else {\ndecoded := value.(%s)\noutput, err := %s(&decoded, %s_encode)\nsettle(%q, \"re-encode \", output, err)\n}\n}\n", prefix, strconv.Quote(string(job.body)), prefix, job.id, root, encode, prefix, job.id)
+			fmt.Fprintf(&program, "{\nvalue, err := %s_plan.DecodeSteps([]byte(%s), %s_decode)\nif err != nil {\nsettle(%q, \"\", nil, err)\n} else {\ndecoded := value.(%s)\noutput, err := %s(&decoded)\nsettle(%q, \"re-encode \", output, err)\n}\n}\n", prefix, strconv.Quote(string(job.body)), prefix, job.id, root, encode, job.id)
 			continue
 		}
-		fmt.Fprintf(&program, "{\nvalue := %s(%s)\noutput, err := %s(&value, %s_encode)\nsettle(%q, \"\", output, err)\n}\n", root, codecVectorGoLiteral(t, position, plan, plan.Root, job.value), encode, prefix, job.id)
+		fmt.Fprintf(&program, "{\nvalue := %s(%s)\noutput, err := %s(&value)\nsettle(%q, \"\", output, err)\n}\n", root, codecVectorGoLiteral(t, position, plan, plan.Root, job.value), encode, job.id)
 	}
 	program.WriteString("}\n")
 
@@ -253,15 +253,20 @@ func codecVectorGoDeclarations(t *testing.T, profile string, position int, plan 
 		writers = append(writers, writer)
 	}
 	fmt.Fprintf(&out, "var %s_plan = compile(er.CodecPlan{Profile: %q, Bounds: er.CodecBounds{MaxBodyBytes: %d, MaxDepth: %d}, Root: %d, Nodes: []er.CodecNode{\n%s,\n}})\n", prefix, profile, plan.Bounds.MaxBodyBytes, plan.Bounds.MaxDepth, plan.Root, strings.Join(nodes, ",\n"))
-	decode, encode := "[]er.CodecStep(nil)", []string{}
+	decode := "[]er.CodecStep(nil)"
 	if len(steps["decode"]) > 0 {
 		decode = "[]er.CodecStep{\n" + strings.Join(steps["decode"], ",\n") + ",\n}"
 	}
+	fmt.Fprintf(&out, "var %s_decode = %s\n", prefix, decode)
+	// Each encode behavior is a named function the writer calls directly,
+	// as a generated writer calls its witness's encode function.
+	encode := []goCodecWriterStep{}
 	for step, code := range steps["encode"] {
-		encode = append(encode, fmt.Sprintf("S%d: %s,\n", step, code))
+		function := fmt.Sprintf("%s_encode%d", prefix, step)
+		fmt.Fprintf(&out, "func %s%s\n", function, strings.TrimPrefix(code, "func"))
+		encode = append(encode, goCodecWriterStep{Function: function, Form: goCodecStepFallible})
 	}
-	fmt.Fprintf(&out, "var %s_decode = %s\nvar %s_encode = efCodecSteps_%d{\n%s}\n", prefix, decode, prefix, position, strings.Join(encode, ""))
-	out.WriteString(goCodecWriters(prefix+"_plan", strconv.Itoa(position), plan.Root, writers))
+	out.WriteString(goCodecWriters(prefix+"_plan", strconv.Itoa(position), plan.Root, writers, encode))
 	return out.String()
 }
 
