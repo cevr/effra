@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -453,29 +456,67 @@ func codecFinalizerStall(t *testing.T, address, path string) net.Conn {
 	return conn
 }
 
-// codecFinalizerSaturated returns once both admission slots are held, which
-// a probe request observes as a 503 the transport sends before any handler
-// runs: admission covers a request's body read on every target, so both
-// stalled requests are then being read.
-func codecFinalizerSaturated(t *testing.T, address string) {
+// codecFinalizerSaturate stalls one request on each path and returns their
+// connections once both hold an admission slot. A probe request observes
+// that as a 503 the transport sends before any handler runs: admission
+// covers a request's body read on every target, and probes run one at a
+// time, so a refused probe means both stalled requests are being read.
+// A probe holds a slot itself while it runs, so a stalled request whose
+// headers the transport parses only then is refused with 503; such a
+// request is stalled again on a fresh connection. A timeout reports what
+// each stalled connection last received.
+func codecFinalizerSaturate(t *testing.T, address string, paths ...string) []net.Conn {
 	t.Helper()
+	stalled := make([]net.Conn, len(paths))
+	for i, path := range paths {
+		stalled[i] = codecFinalizerStall(t, address, path)
+	}
+	// refused reports whether conn has received a response, which for a
+	// request whose body has not completed is only an admission refusal.
+	refused := func(conn net.Conn, wait time.Duration) (string, bool) {
+		_ = conn.SetReadDeadline(time.Now().Add(wait))
+		defer conn.SetReadDeadline(time.Time{})
+		buffer := make([]byte, 256)
+		n, err := conn.Read(buffer)
+		var network net.Error
+		if n == 0 && errors.As(err, &network) && network.Timeout() {
+			return "", false
+		}
+		return strconv.Quote(string(buffer[:n])) + " " + fmt.Sprint(err), true
+	}
 	client := http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
-	for deadline := time.Now().Add(10 * time.Second); ; {
+	var probeErr error
+	received := make([]string, len(paths))
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		response, err := client.Get("http://" + address + "/probe")
 		if err != nil {
-			t.Fatal(err)
+			probeErr = err
+			continue
 		}
 		response.Body.Close()
-		switch {
-		case response.StatusCode == http.StatusServiceUnavailable:
-			return
-		case response.StatusCode != http.StatusNotFound:
+		switch response.StatusCode {
+		case http.StatusServiceUnavailable:
+			return stalled
+		case http.StatusNotFound:
+		default:
 			t.Fatalf("probe answered %d", response.StatusCode)
-		case time.Now().After(deadline):
-			t.Fatal("the stalled requests were not admitted within 10s")
 		}
-		time.Sleep(10 * time.Millisecond)
+		for i, conn := range stalled {
+			if reply, ok := refused(conn, time.Millisecond); ok {
+				received[i] = reply
+				t.Logf("stalling %s again after it received %s", paths[i], reply)
+				conn.Close()
+				stalled[i] = codecFinalizerStall(t, address, paths[i])
+			}
+		}
 	}
+	for i, conn := range stalled {
+		if reply, ok := refused(conn, 200*time.Millisecond); ok {
+			received[i] = reply
+		}
+	}
+	t.Fatalf("the stalled requests %v were not both admitted within 20s (last probe error %v); they last received %q", paths, probeErr, received)
+	return nil
 }
 
 // codecFinalizerFinish sends the rest of a stalled body and returns the
@@ -512,9 +553,8 @@ func codecFinalizerLatched(t *testing.T, workspace, address, direction string, a
 	t.Helper()
 	process := startCodecFinalizer(t, workspace, address, direction, argv...)
 	process.expect(t, "listening http://"+address)
-	held := codecFinalizerStall(t, address, "/hold")
-	trigger := codecFinalizerStall(t, address, "/arrive")
-	codecFinalizerSaturated(t, address)
+	stalled := codecFinalizerSaturate(t, address, "/hold", "/arrive")
+	held, trigger := stalled[0], stalled[1]
 	if status := codecFinalizerFinish(t, trigger); !strings.HasPrefix(status, "HTTP/1.1 404 ") && !strings.HasPrefix(status, "HTTP/1.1 503 ") {
 		t.Fatalf("/arrive answered %q", status)
 	}
