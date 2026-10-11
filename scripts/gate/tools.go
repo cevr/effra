@@ -215,12 +215,23 @@ func (g *gate) runtimeInstallation(command, rule, resolved string) (reported, ke
 		// from a fresh directory under each distinct temporary base;
 		// differing answers key as unlocated.
 		dirs := []string{g.root}
-		var bases []string
+		// Each base is used as the steps see it, so a link or ".." in it
+		// resolves as theirs does; cleaning only removes a duplicate. A
+		// relative base resolves from each test's package directory, which
+		// one query cannot stand for.
+		var bases, cleaned []string
+		candidates := []string{os.TempDir()}
 		if base, set := stepVariable("GOTMPDIR"); set && base != "" {
-			bases = append(bases, filepath.Clean(base))
+			candidates = []string{base, os.TempDir()}
 		}
-		if base := filepath.Clean(os.TempDir()); !slices.Contains(bases, base) {
-			bases = append(bases, base)
+		for _, base := range candidates {
+			if !filepath.IsAbs(base) {
+				return unlocated(fmt.Sprintf("temporary base %q is relative", base))
+			}
+			if !slices.Contains(cleaned, filepath.Clean(base)) {
+				cleaned = append(cleaned, filepath.Clean(base))
+				bases = append(bases, base)
+			}
 		}
 		for _, base := range bases {
 			dir, err := os.MkdirTemp(base, "gate-runtime-")
@@ -494,7 +505,11 @@ func queryTool(dir string, combined bool, name string, args ...string) ([]byte, 
 	command := exec.CommandContext(ctx, name, args...)
 	command.Env = stepEnvironment()
 	command.Dir = dir
-	// A descendant left holding the output pipes cannot hold the query.
+	// The query runs in its own process group, killed whole on timeout and
+	// after the tool exits, so no descendant outlives it. A descendant that
+	// leaves the group still holding the output pipes cannot hold the query
+	// past WaitDelay.
+	isolateQuery(command)
 	command.WaitDelay = time.Second
 	var output []byte
 	var err error
@@ -503,6 +518,7 @@ func queryTool(dir string, combined bool, name string, args ...string) ([]byte, 
 	} else {
 		output, err = command.Output()
 	}
+	endQuery(command)
 	if ctx.Err() != nil {
 		return output, fmt.Errorf("%s %s: %w after %v", name, strings.Join(args, " "), errQueryTimeout, toolQueryTimeout)
 	}

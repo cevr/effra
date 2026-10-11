@@ -7,8 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -640,21 +642,83 @@ func TestRuntimeFingerprintOfADirectorySelectedRuntimeNeverRepeats(t *testing.T)
 }
 
 // A tool that does not answer a fingerprint's question in time keys as
-// unlocated rather than holding the gate.
+// unlocated rather than holding the gate, whether it execs the process that
+// hangs, forks it, or forks one that leaves its process group still holding
+// the output pipes. Nothing the query started inside its group survives it.
 func TestToolFingerprintOfAHungToolNeverRepeats(t *testing.T) {
 	previous := toolQueryTimeout
 	toolQueryTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { toolQueryTimeout = previous })
-	bin := t.TempDir()
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	write(t, bin, "package.json", `{"name": "probe"}`)
-	executable(t, bin, "probe-tool", "#!/bin/sh\nexec sleep 30\n")
-	start := time.Now()
-	first := fingerprint(t, "probe-tool")
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Fatalf("a hung tool held its fingerprint for %v", elapsed)
+	pids := filepath.Join(t.TempDir(), "pids")
+	escaped := filepath.Join(t.TempDir(), "escaped")
+	t.Cleanup(func() {
+		for _, pid := range recordedPids(t, escaped) {
+			syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	cases := map[string]string{
+		"execs":  "exec sleep 30\n",
+		"forks":  "sleep 30 &\necho $! >> " + pids + "\nwait\n",
+		"escape": "setsid sh -c 'echo $$ >> " + escaped + "; exec sleep 30' &\nsleep 30 &\necho $! >> " + pids + "\nwait\n",
 	}
-	if !strings.Contains(first, "unlocated") || fingerprint(t, "probe-tool") == first {
-		t.Fatalf("a hung tool repeated its fingerprint: %q", first)
+	if _, err := exec.LookPath("setsid"); err != nil {
+		delete(cases, "escape")
 	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			bin := t.TempDir()
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			write(t, bin, "package.json", `{"name": "probe"}`)
+			executable(t, bin, "probe-tool", "#!/bin/sh\n"+body)
+			start := time.Now()
+			first := fingerprint(t, "probe-tool")
+			if elapsed := time.Since(start); elapsed > 5*time.Second {
+				t.Fatalf("a hung tool held its fingerprint for %v", elapsed)
+			}
+			if !strings.Contains(first, "unlocated") || fingerprint(t, "probe-tool") == first {
+				t.Fatalf("a hung tool repeated its fingerprint: %q", first)
+			}
+		})
+	}
+	// Every forked holder that stayed in the query's group is gone.
+	deadline := time.Now().Add(2 * time.Second)
+	for _, pid := range recordedPids(t, pids) {
+		for running(pid) {
+			if time.Now().After(deadline) {
+				t.Fatalf("process %d a timed-out query forked survived it", pid)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+// recordedPids reads the process IDs a fixture appended to path.
+func recordedPids(t *testing.T, path string) []int {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pids []int
+	for _, field := range strings.Fields(string(content)) {
+		pid, err := strconv.Atoi(field)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pids = append(pids, pid)
+	}
+	return pids
+}
+
+// running reports whether a process exists and has not exited.
+func running(pid int) bool {
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return false
+	}
+	_, after, _ := strings.Cut(string(stat), ") ")
+	return !strings.HasPrefix(after, "Z")
 }
