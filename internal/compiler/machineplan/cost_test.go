@@ -53,10 +53,12 @@ func costTypes() *Types {
 
 // The cost model is what admits or refuses a declaration, and what bounds
 // the checker's preparation. Its value for a fixed table is pinned, so
-// dropping or changing any term (the qualifier, the per-field copy, the key
-// text with its per-node, name, argument and label bytes, the template
-// argument walks, or a display's copies) fails here even where the term only
-// sets the refusal point.
+// dropping any term (the qualifier, the per-field copy, the key text with its
+// per-node, name, argument and label bytes, the template argument walks, or a
+// display's copies) fails here even where the term only sets the refusal
+// point. Values are whole units of 64 bytes or 8 nodes, so a change to a
+// term's constant that stays within the same unit is not seen: the tuple
+// slot at 15 bytes instead of 16 still makes Fiber<(i64, i64)> 2 units.
 func TestLayoutUnitsPinEveryTerm(t *testing.T) {
 	var c Costs
 	types := costTypes()
