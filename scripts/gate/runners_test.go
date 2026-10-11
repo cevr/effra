@@ -46,6 +46,9 @@ func runnerLeaf(t *testing.T, runner string, files map[string]string) (string, s
 		write(t, leaf, name, content)
 	}
 	bin := t.TempDir()
+	// The stub Bun is a script; inside a package, its fingerprint is that
+	// package and its interpreter, so a gate over it can replay a pass.
+	write(t, bin, "package.json", `{"name": "stub-bun"}`)
 	write(t, bin, "bun", "#!/bin/sh\necho 1.4.3\n")
 	if err := os.Chmod(filepath.Join(bin, "bun"), 0755); err != nil {
 		t.Fatal(err)
