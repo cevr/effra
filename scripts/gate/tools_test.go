@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestMain puts small stand-ins for go, git and tsc first on PATH. Go's test
@@ -77,8 +78,8 @@ var testScratch string
 // version manager's launcher in front of them. Beside a file <self>.target
 // naming another executable it is a launcher, execing that executable with
 // its arguments, as a volta shim or mise does; a file probe-runtime in the
-// working directory overrides that target, as a mise.toml or a package.json
-// volta field selects by directory. Otherwise it is the runtime:
+// working directory or an ancestor overrides that target, as a mise.toml or
+// a package.json volta field selects by directory. Otherwise it is the runtime:
 // asked for its execPath (-e) it prints its own path; else it prints a
 // version that never changes.
 const probeSource = `package main
@@ -86,6 +87,7 @@ const probeSource = `package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 )
@@ -98,8 +100,16 @@ func main() {
 		os.Exit(2)
 	}
 	if target, err := os.ReadFile(self + ".target"); err == nil {
-		if pinned, err := os.ReadFile("probe-runtime"); err == nil {
-			target = pinned
+		for dir, _ := os.Getwd(); dir != ""; {
+			if pinned, err := os.ReadFile(filepath.Join(dir, "probe-runtime")); err == nil {
+				target = pinned
+				break
+			}
+			if parent := filepath.Dir(dir); parent != dir {
+				dir = parent
+			} else {
+				dir = ""
+			}
 		}
 		path := strings.TrimSpace(string(target))
 		syscall.Exec(path, append([]string{path}, os.Args[1:]...), os.Environ())
@@ -597,26 +607,54 @@ func TestScriptInterpreterResolvesOnlyPlainEnvLines(t *testing.T) {
 }
 
 // A version manager can select the runtime by working directory, and steps
-// run node and bun both in the repository and in temporary workspaces. A
-// launcher that answers differently in the repository than in a neutral
-// directory keys as unlocated.
+// run node and bun in the repository, in Go test workspaces under GOTMPDIR
+// and in the system temporary directory. A launcher that answers differently
+// in any of them keys as unlocated.
 func TestRuntimeFingerprintOfADirectorySelectedRuntimeNeverRepeats(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	goTemporary, systemTemporary := t.TempDir(), t.TempDir()
+	t.Setenv("GOTMPDIR", goTemporary)
+	t.Setenv("TMPDIR", systemTemporary)
 	launcher := probe(t, filepath.Join(t.TempDir(), "bin", "shim"))
 	link(t, bin, "node", launcher)
 	installs := t.TempDir()
 	global := probe(t, filepath.Join(installs, "global", "bin", "node"))
 	write(t, filepath.Dir(launcher), "shim.target", global)
+	pinned := probe(t, filepath.Join(installs, "pinned", "bin", "node"))
 	root := t.TempDir()
 	if first := fingerprintIn(t, root, "node"); strings.Contains(first, "unlocated") || fingerprintIn(t, root, "node") != first {
 		t.Fatalf("a launcher that selects one runtime everywhere has no stable fingerprint: %q", first)
 	}
-	pinned := probe(t, filepath.Join(installs, "pinned", "bin", "node"))
-	write(t, root, "probe-runtime", pinned)
-	first := fingerprintIn(t, root, "node")
-	if !strings.Contains(first, "unlocated") || fingerprintIn(t, root, "node") == first {
-		t.Fatalf("a runtime selected by the repository's directory repeated its fingerprint: %q", first)
+	for name, base := range map[string]string{"the repository": root, "GOTMPDIR": goTemporary, "the system temporary directory": systemTemporary} {
+		write(t, base, "probe-runtime", pinned)
+		first := fingerprintIn(t, root, "node")
+		if !strings.Contains(first, "unlocated") || fingerprintIn(t, root, "node") == first {
+			t.Errorf("a runtime selected for %s repeated its fingerprint: %q", name, first)
+		}
+		if err := os.Remove(filepath.Join(base, "probe-runtime")); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A tool that does not answer a fingerprint's question in time keys as
+// unlocated rather than holding the gate.
+func TestToolFingerprintOfAHungToolNeverRepeats(t *testing.T) {
+	previous := toolQueryTimeout
+	toolQueryTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { toolQueryTimeout = previous })
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	write(t, bin, "package.json", `{"name": "probe"}`)
+	executable(t, bin, "probe-tool", "#!/bin/sh\nexec sleep 30\n")
+	start := time.Now()
+	first := fingerprint(t, "probe-tool")
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("a hung tool held its fingerprint for %v", elapsed)
+	}
+	if !strings.Contains(first, "unlocated") || fingerprint(t, "probe-tool") == first {
+		t.Fatalf("a hung tool repeated its fingerprint: %q", first)
 	}
 }

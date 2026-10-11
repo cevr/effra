@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,16 +64,11 @@ func (g *gate) toolVersion(tool string) string {
 		if _, err := exec.LookPath(argv[0]); err != nil {
 			return "absent"
 		}
-		command := exec.Command(argv[0], argv[1:]...)
-		command.Env = stepEnvironment()
-		var output []byte
-		var err error
-		if tool == "go" {
-			// Standard output only: GODEBUG=inittrace=1 makes go itself
-			// write timings to standard error.
-			output, err = command.Output()
-		} else {
-			output, err = command.CombinedOutput()
+		// Standard output only for go: GODEBUG=inittrace=1 makes go itself
+		// write timings to standard error.
+		output, err := queryTool("", tool != "go", argv[0], argv[1:]...)
+		if errors.Is(err, errQueryTimeout) {
+			return unlocated(err.Error())
 		}
 		version := strings.TrimSpace(string(output))
 		if err != nil {
@@ -211,26 +207,38 @@ const runtimeExecPath = "process.stdout.write(process.execPath)"
 func (g *gate) runtimeInstallation(command, rule, resolved string) (reported, keyed string) {
 	keyed = g.fact("runtime\x00"+rule+"\x00"+resolved, func() string {
 		// A version manager may select by working directory (mise.toml,
-		// .tool-versions, a package.json volta field), and steps start
-		// node and bun in the repository and in temporary workspaces. The
-		// runtime is asked from both; differing answers key as unlocated.
-		neutral, err := os.MkdirTemp("", "gate-runtime-")
-		if err != nil {
-			return unlocated(err.Error())
+		// .tool-versions, a package.json volta field, in the directory or
+		// an ancestor), and steps start node and bun in the repository and
+		// in temporary workspaces: Go tests under GOTMPDIR when it is set
+		// (gate.sh sets it), other programs under the system temporary
+		// directory. The runtime is asked from the repository root and
+		// from a fresh directory under each distinct temporary base;
+		// differing answers key as unlocated.
+		dirs := []string{g.root}
+		var bases []string
+		if base, set := stepVariable("GOTMPDIR"); set && base != "" {
+			bases = append(bases, filepath.Clean(base))
 		}
-		defer os.RemoveAll(neutral)
+		if base := filepath.Clean(os.TempDir()); !slices.Contains(bases, base) {
+			bases = append(bases, base)
+		}
+		for _, base := range bases {
+			dir, err := os.MkdirTemp(base, "gate-runtime-")
+			if err != nil {
+				return unlocated(err.Error())
+			}
+			defer os.RemoveAll(dir)
+			dirs = append(dirs, dir)
+		}
 		var path string
-		for i, dir := range []string{g.root, neutral} {
-			query := exec.Command(command, "-e", runtimeExecPath)
-			query.Env = stepEnvironment()
-			query.Dir = dir
-			output, err := query.Output()
+		for i, dir := range dirs {
+			output, err := queryTool(dir, false, command, "-e", runtimeExecPath)
 			answer := string(output)
 			if err != nil || !filepath.IsAbs(answer) {
 				return unlocated(fmt.Sprintf("%s -e in %s printed %q: %v", command, dir, answer, err))
 			}
 			if i > 0 && answer != path {
-				return unlocated(fmt.Sprintf("%s runs %s in %s but %s in %s", command, path, g.root, answer, dir))
+				return unlocated(fmt.Sprintf("%s runs %s in %s but %s in %s", command, path, dirs[0], answer, dir))
 			}
 			path = answer
 		}
@@ -261,9 +269,7 @@ func (g *gate) runtimeInstallation(command, rule, resolved string) (reported, ke
 func (g *gate) binaryInstallation(rule, resolved string) string {
 	parts := [][2]string{{"file", resolved}}
 	if rule == "git" {
-		command := exec.Command(resolved, "--exec-path")
-		command.Env = stepEnvironment()
-		output, err := command.Output()
+		output, err := queryTool("", false, resolved, "--exec-path")
 		execPath := strings.TrimSpace(string(output))
 		if err != nil || !filepath.IsAbs(execPath) {
 			return unlocated(fmt.Sprintf("git --exec-path printed %q: %v", execPath, err))
@@ -469,6 +475,38 @@ func homeDirectory() (string, error) {
 		return "", err
 	}
 	return account.HomeDir, nil
+}
+
+// toolQueryTimeout bounds each question a fingerprint asks a tool (its
+// version, go env, execPath, git's exec path). A tool that does not answer
+// in time keys as unlocated, so a hung tool cannot hold the gate; every
+// answer here takes well under a second.
+var toolQueryTimeout = 10 * time.Second
+
+var errQueryTimeout = errors.New("no answer in time")
+
+// queryTool runs a tool in the steps' environment, in dir (the gate's own
+// directory when empty), and returns its standard output, or its combined
+// output when combined is set.
+func queryTool(dir string, combined bool, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), toolQueryTimeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, name, args...)
+	command.Env = stepEnvironment()
+	command.Dir = dir
+	// A descendant left holding the output pipes cannot hold the query.
+	command.WaitDelay = time.Second
+	var output []byte
+	var err error
+	if combined {
+		output, err = command.CombinedOutput()
+	} else {
+		output, err = command.Output()
+	}
+	if ctx.Err() != nil {
+		return output, fmt.Errorf("%s %s: %w after %v", name, strings.Join(args, " "), errQueryTimeout, toolQueryTimeout)
+	}
+	return output, err
 }
 
 // unlocated is the fingerprint of an installation the gate cannot key: it
