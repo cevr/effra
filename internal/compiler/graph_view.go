@@ -1540,8 +1540,12 @@ func qualifiedDeclarationPublished(qualifier string, declarations []Declaration)
 	if cut < 0 {
 		return false
 	}
+	// qualifier[:cut] ends with ":"+name, compared in place: building the
+	// suffix allocated once per declaration for every unpublished type.
+	prefix := qualifier[:cut]
 	for _, declaration := range declarations {
-		if declaration.Kind == kind && strings.HasSuffix(qualifier[:cut], ":"+declaration.Name) {
+		name := declaration.Name
+		if declaration.Kind == kind && len(prefix) > len(name) && prefix[len(prefix)-len(name)-1] == ':' && prefix[len(prefix)-len(name):] == name {
 			return true
 		}
 	}
