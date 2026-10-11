@@ -131,16 +131,46 @@ func TestTemplateLookupPrecedence(t *testing.T) {
 	}
 }
 
+// The index is derived from all three declaration lists, so growing any one
+// of them is visible to the next lookup. Production fixes the lists before
+// checking; this pins the derivation rule, one list at a time.
 func TestTemplateLookupFollowsGrowingDeclarations(t *testing.T) {
 	r := Compile(templateShadowing)
-	c := r.Program.semantic
-	if templateInScope(c, "", "Late") != nil {
-		t.Fatal("undeclared template resolved")
+	p, c := r.Program, r.Program.semantic
+	parameters := []TemplateParameter{{Name: "T", Kind: "type"}}
+	for _, name := range []string{"LateEnum", "LateBundled", "Late"} {
+		if templateInScope(c, "", name) != nil || templateInScope(c, "effra/late", name) != nil {
+			t.Fatalf("undeclared template %s resolved", name)
+		}
 	}
-	late := &DataDeclaration{Kind: "record", Name: "Late", Parameters: []TemplateParameter{{Name: "T", Kind: "type"}}}
-	r.Program.Records = append(r.Program.Records, late)
+
+	// Enums alone grow.
+	lateEnum := &DataDeclaration{Kind: "enum", Name: "LateEnum", Parameters: parameters}
+	p.Enums = append(p.Enums, lateEnum)
+	if got := templateInScope(c, "", "LateEnum"); got != lateEnum {
+		t.Fatalf("index missed an enum appended after it was built: %+v", got)
+	}
+
+	// BundledTemplates alone grow.
+	lateBundled := &DataDeclaration{Kind: "record", Name: "LateBundled", Module: "effra/late", Parameters: parameters}
+	p.BundledTemplates = append(p.BundledTemplates, lateBundled)
+	if got := templateInScope(c, "effra/late", "LateBundled"); got != lateBundled {
+		t.Fatalf("index missed a bundled template appended after it was built: %+v", got)
+	}
+	if got := templateInScope(c, "", "LateBundled"); got != nil {
+		t.Fatalf("a bundled template leaked into the file scope: %+v", got)
+	}
+
+	// Records grow with plain data of a generic enum's name, which must not
+	// mask it, and then with a generic record.
+	p.Records = append(p.Records, &DataDeclaration{Kind: "record", Name: "LateEnum"})
+	if got := templateInScope(c, "", "LateEnum"); got != lateEnum {
+		t.Fatalf("plain data masked a generic enum: %+v", got)
+	}
+	late := &DataDeclaration{Kind: "record", Name: "Late", Parameters: parameters}
+	p.Records = append(p.Records, late)
 	if got := templateInScope(c, "", "Late"); got != late {
-		t.Fatalf("index answered from a stale declaration set: %+v", got)
+		t.Fatalf("index missed a record appended after it was built: %+v", got)
 	}
 	if got := templateInScope(c, "effra/data", "Late"); got != nil {
 		t.Fatalf("a local template leaked into a bundled scope: %+v", got)
@@ -181,6 +211,34 @@ fn keep(value: Data.Option<Box<string>>) -> Data.Option<Box<string>> { value }
 		if !templates[name] {
 			t.Fatalf("template %s was not published: %v", name, templates)
 		}
+	}
+}
+
+// Two generic declarations of one name share an identity and are published
+// twice (the program is refused with EF101). The layout pass replaces every
+// published copy, as the search it replaced did, so neither keeps fields
+// that never resolved.
+func TestTemplateLayoutsReachDuplicatePublishedIdentities(t *testing.T) {
+	r := Compile(`record Pair<T: type> { first: T, count: i64 }
+record Pair<T: type> { first: T, label: string }
+`)
+	if r.Checked || !hasCode(r, "EF101") {
+		t.Fatal("duplicate generic declarations must be refused", r.Diagnostics)
+	}
+	copies := 0
+	for _, d := range r.Declarations {
+		if d.Kind != "template" || d.Name != "Pair" {
+			continue
+		}
+		copies++
+		for _, field := range d.Fields {
+			if field.TypeRef.Kind == "" {
+				t.Fatalf("published copy %d of Pair kept unresolved field %s", copies, field.Name)
+			}
+		}
+	}
+	if copies != 2 {
+		t.Fatalf("Pair published %d times, want 2", copies)
 	}
 }
 
