@@ -51,6 +51,10 @@ func TestAnalysisImportsNoCheckerState(t *testing.T) {
 			if !slices.Contains(allowedImports, path) {
 				t.Errorf("%s imports %s; analysis may import only %v", name, path, allowedImports)
 			}
+			// The identifier check above sees reflect only by its own name.
+			if path == "reflect" && spec.Name != nil {
+				t.Errorf("%s imports reflect as %s; analysis imports it only under its own name", name, spec.Name.Name)
+			}
 		}
 	}
 	if files < 4 {
