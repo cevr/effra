@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -1310,11 +1311,14 @@ func (r *Result) GraphView(request GraphRequest) (*GraphView, error) {
 		Limitations: append([]string{}, facts.limitations...),
 	}
 	view.ID = graphViewID(view.Data.Effra)
-	if err := ValidateGraphView(view); err != nil {
-		return nil, graphRefusal(GraphRefusalInvalidView, "%v", err)
-	}
+	// Size the response before validating it, so an oversized view is
+	// refused before any work proportional to its contents. Neither step
+	// serialises the view.
 	if _, err := encodedSize(view, limits.ResponseBytes); err != nil {
 		return nil, graphRefusal(GraphRefusalResponseLimit, "graph view response: %v", err)
+	}
+	if err := ValidateGraphView(view); err != nil {
+		return nil, graphRefusal(GraphRefusalInvalidView, "%v", err)
 	}
 	return view, nil
 }
@@ -1557,16 +1561,11 @@ func portExists(node *GraphViewNode, port string) bool {
 }
 
 // validateGraphViewReferences resolves every published reference against the
-// view's own fact tables, over the encoded interchange itself.
+// view's own fact tables, over the interchange as encoding/json publishes it:
+// the same JSON names and omissions (cachedProjectionJSONFields, as
+// encodedSize uses), walked over the typed view, so validation serialises
+// nothing.
 func validateGraphViewReferences(view *GraphView) error {
-	encoded, err := json.Marshal(view)
-	if err != nil {
-		return err
-	}
-	var wire map[string]any
-	if err := json.Unmarshal(encoded, &wire); err != nil {
-		return err
-	}
 	facts := view.Data.Effra.Facts
 	types, rows, declarations, sources, parameters := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, node := range facts.Types {
@@ -1589,36 +1588,56 @@ func validateGraphViewReferences(view *GraphView) error {
 			return fmt.Errorf("type %s references unpublished declaration %s", node.ID, node.Declaration)
 		}
 	}
-	var walk func(key string, value any) error
-	walk = func(key string, value any) error {
-		switch value := value.(type) {
-		case []any:
-			for _, item := range value {
-				if err := walk(key, item); err != nil {
+	// walk visits one encoded value under the JSON key it appears at; array
+	// items carry their array's key, as the decoded interchange does.
+	var walk func(key string, value reflect.Value) error
+	walk = func(key string, value reflect.Value) error {
+		for value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
+			if value.IsNil() {
+				return nil
+			}
+			value = value.Elem()
+		}
+		switch value.Kind() {
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < value.Len(); i++ {
+				if err := walk(key, value.Index(i)); err != nil {
 					return err
 				}
 			}
-			if key == "args" {
-				for _, item := range value {
-					if id, ok := item.(string); ok && !types[id] {
-						return fmt.Errorf("unpublished type reference args=%q", id)
-					}
+			for i := 0; i < value.Len() && (key == "args" || key == "labels"); i++ {
+				id, ok := graphJSONString(value.Index(i))
+				if !ok {
+					continue
+				}
+				if key == "args" && !types[id] {
+					return fmt.Errorf("unpublished type reference args=%q", id)
+				}
+				if key == "labels" && strings.HasPrefix(id, "row-parameter:") && !parameters[id] {
+					return fmt.Errorf("unpublished row parameter %q", id)
 				}
 			}
-			if key == "labels" {
-				for _, item := range value {
-					if id, ok := item.(string); ok && strings.HasPrefix(id, "row-parameter:") && !parameters[id] {
-						return fmt.Errorf("unpublished row parameter %q", id)
-					}
+		case reflect.Map:
+			iter := value.MapRange()
+			for iter.Next() {
+				child := ""
+				if iter.Key().Kind() == reflect.String {
+					child = iter.Key().String()
 				}
-			}
-		case map[string]any:
-			for child, item := range value {
-				if err := walk(child, item); err != nil {
+				if err := walk(child, iter.Value()); err != nil {
 					return err
 				}
 			}
-		case string:
+		case reflect.Struct:
+			for _, field := range cachedProjectionJSONFields(value.Type()) {
+				if child, present := graphJSONField(value, field); present {
+					if err := walk(field.name, child); err != nil {
+						return err
+					}
+				}
+			}
+		case reflect.String:
+			value := value.String()
 			if value == "" {
 				return nil
 			}
@@ -1639,27 +1658,60 @@ func validateGraphViewReferences(view *GraphView) error {
 		}
 		return nil
 	}
-	data := wire["data"].(map[string]any)["effra"].(map[string]any)
-	tables := data["facts"].(map[string]any)
-	if err := walk("types", tables["types"]); err != nil {
+	if err := walk("types", reflect.ValueOf(facts.Types)); err != nil {
 		return err
 	}
-	if err := walk("rows", tables["rows"]); err != nil {
+	if err := walk("rows", reflect.ValueOf(facts.Rows)); err != nil {
 		return err
 	}
-	for _, collection := range []string{"nodes", "edges"} {
-		items, _ := wire[collection].([]any)
-		for _, item := range items {
-			entity := item.(map[string]any)["data"].(map[string]any)["effra"].(map[string]any)
-			if source, ok := entity["source"].(string); ok && source != "" && !sources[source] {
-				return fmt.Errorf("unpublished source reference %q", source)
-			}
-			if err := walk(collection, entity); err != nil {
-				return err
-			}
+	for i := range view.Nodes {
+		entity := &view.Nodes[i].Data.Effra
+		if entity.Source != "" && !sources[entity.Source] {
+			return fmt.Errorf("unpublished source reference %q", entity.Source)
+		}
+		if err := walk("nodes", reflect.ValueOf(entity)); err != nil {
+			return err
+		}
+	}
+	for i := range view.Edges {
+		if err := walk("edges", reflect.ValueOf(&view.Edges[i].Data.Effra)); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// graphJSONField resolves one published field of a struct value, reporting
+// false where encoding/json omits it: a nil embedded pointer on its path, or
+// an empty value under omitempty or omitzero.
+func graphJSONField(value reflect.Value, field projectionJSONField) (reflect.Value, bool) {
+	for _, index := range field.index {
+		if value.Kind() == reflect.Pointer {
+			if value.IsNil() {
+				return reflect.Value{}, false
+			}
+			value = value.Elem()
+		}
+		value = value.Field(index)
+	}
+	if (field.omitEmpty && projectionEmptyJSONValue(value)) || (field.omitZero && value.IsZero()) {
+		return reflect.Value{}, false
+	}
+	return value, true
+}
+
+// graphJSONString is an array item that encodes as a JSON string.
+func graphJSONString(value reflect.Value) (string, bool) {
+	for value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return "", false
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.String {
+		return "", false
+	}
+	return value.String(), true
 }
 
 func applicationNodeID(kind ApplicationRequirementKind, identity string) string {
