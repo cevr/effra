@@ -107,6 +107,103 @@ func TestReferencesRunnerJoinsTheCounterControlAfterAVendorFailure(t *testing.T)
 	}
 }
 
+// strayCheck stands in for a reader that resolves the domain through
+// .generated, as the consumers' TypeScript and the counter control's Node do:
+// it fails if any name there is neither an emitted input nor this run's own.
+const strayCheck = `const fs = process.getBuiltinModule("node:fs");
+const owned = ["counter-domain-artifacts", "counter-domain-emit-evidence.json"];
+const strays = fs.existsSync(".generated") ? fs.readdirSync(".generated").filter(name => !owned.includes(name)) : [];
+if (strays.length > 0) { console.error("STRAY_VISIBLE " + strays.join(",")); process.exit(5); }
+`
+
+// A file placed by hand in .generated, such as a counter.mts that TypeScript
+// would read before the fresh counter.d.mts, is outside the references key.
+// A replayed pass is sound only if executing the step reaches the same pass:
+// the leaf runner empties .generated, except the keyed artifacts and the
+// emission's record, before any reader runs. The real step declaration runs
+// the real runner over stub collaborators, warm.
+func TestReferencesReplayHoldsWhateverIsLeftInGenerated(t *testing.T) {
+	repository, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, err := gateSteps(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var declared *Step
+	for _, step := range steps {
+		if step.Name == "framework-port references" {
+			declared = step
+		}
+	}
+	if declared == nil {
+		t.Fatal("no framework-port references step")
+	}
+	ignore, err := os.ReadFile(filepath.Join(repository, frameworkPorts, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	succeed := "process.exit(0);\n"
+	leaf, bin := runnerLeaf(t, "check-references.mjs", map[string]string{
+		".gitignore":                                        string(ignore),
+		"node_modules/typescript/bin/tsc":                   strayCheck,
+		"scripts/check-yield-capture.mjs":                   succeed,
+		"scripts/check-dependency-profile.mjs":              succeed,
+		"scripts/check-counter-domain.mjs":                  strayCheck,
+		"vendor/solid-yield/scripts/build.mjs":              succeed,
+		".generated/counter-domain-artifacts/manifest.json": "{}\n",
+		".generated/counter-domain-emit-evidence.json":      "{}\n",
+	})
+	root := filepath.Join(leaf, "../../..")
+	gitFixture(t, root)
+	// The stub Bun reports the three mounted cases and writes their JUnit record.
+	junit := `<testsuites name="bun test" tests="3" assertions="3" failures="0" skipped="0">`
+	for _, host := range []string{"react-atom", "solid-effect", "solid-yield"} {
+		junit += `<testcase name="` + host + ` reference mounts, applies source events below zero, resets from nonzero and releases its subscriptions" assertions="1" />`
+	}
+	write(t, bin, "bun", `#!/bin/sh
+[ "$1" = --version ] && { echo 1.4.2; exit 0; }
+for argument in "$@"; do case "$argument" in --reporter-outfile=*) out="${argument#--reporter-outfile=}" ;; esac; done
+printf '%s\n' '`+junit+`' > "$out"
+printf ' 3 pass\n 0 fail\n'
+`)
+	if err := os.Chmod(filepath.Join(bin, "bun"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cache := t.TempDir()
+	run := func(when string, noCache, cached bool) {
+		t.Helper()
+		var out bytes.Buffer
+		g := &gate{root: root, cacheDir: cache, noCache: noCache, steps: []*Step{{Name: declared.Name, Argv: declared.Argv, Inputs: declared.Inputs}}}
+		code := g.run(&out)
+		if code != 0 || strings.Contains(out.String(), "ok, cached") != cached || !strings.Contains(out.String(), "FRAMEWORK_REFERENCES_EXIT=0") {
+			t.Fatalf("%s: exit %d, want a pass with cached=%t:\n%s", when, code, cached, out.String())
+		}
+	}
+	run("first run", false, false)
+	run("unchanged", false, true)
+
+	generated := filepath.Join(leaf, ".generated")
+	strays := []string{"counter.mts", "node_modules/effect/index.js", "package.json", "counter-domain-a1b2c3/consumer.ts", "counter.mjs/index.js"}
+	for _, name := range strays {
+		write(t, generated, name, "export const count: string = \"\";\n")
+	}
+	run("strays left in .generated", false, true)
+	run("strays left in .generated, executed", true, false)
+	for _, name := range strays {
+		if _, err := os.Stat(filepath.Join(generated, strings.Split(name, "/")[0])); err == nil {
+			t.Errorf("the runner left %s in .generated", name)
+		}
+	}
+	for _, name := range []string{"counter-domain-artifacts/manifest.json", "counter-domain-emit-evidence.json"} {
+		if _, err := os.Stat(filepath.Join(generated, name)); err != nil {
+			t.Errorf("the runner removed the keyed or unread %s: %v", name, err)
+		}
+	}
+}
+
 // The gate runs counter emission on every run, no-ops included, so a passing
 // emission must not leave its scratch workspace behind.
 func TestCounterEmissionRemovesItsWorkspaceOnSuccess(t *testing.T) {

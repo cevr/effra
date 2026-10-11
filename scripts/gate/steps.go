@@ -84,9 +84,12 @@ func gateSteps(root string) ([]*Step, error) {
 	// disk and asserts each file's owner executable bit, and TypeScript and
 	// Bun glob and resolve the leaf without Git, so the whole leaf is a tree
 	// input, files Git ignores included. Left out are the installed
-	// node_modules (keyed as Installed), .generated (this step's outputs and
-	// the emitted artifacts, keyed as Generated) and the vendor build output,
-	// which the step removes before building it.
+	// node_modules (keyed as Installed) and two directories the leaf runner
+	// empties before anything reads them, so nothing left there can reach
+	// the result: the vendor build output, and .generated, where the
+	// consumers resolve the domain. The runner keeps only the emitted
+	// artifacts (keyed as Generated) and the emission's record, which no
+	// check reads.
 	add(&Step{Name: "framework-port counter emission", Needs: []string{"build bin/ef"}, Argv: []string{"node", frameworkPorts + "scripts/check-counter-domain.mjs", "--compiler", "bin/ef", "--emit", counterArtifacts}})
 	add(&Step{Name: "framework-port references", Needs: []string{"framework-port counter emission"}, Argv: []string{"node", frameworkPorts + "scripts/check-references.mjs", "--counter-domain-artifacts", counterArtifacts}, Inputs: &Inputs{
 		Paths:       []string{frameworkPorts},

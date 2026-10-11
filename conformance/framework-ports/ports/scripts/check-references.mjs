@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -68,7 +68,24 @@ try {
   if (!(error instanceof CommandFailed)) throw error;
   process.exitCode = error.status;
 }
+// .generated is the run's own: the consumers resolve the domain through it (TypeScript tries counter.mts before
+// counter.d.mts; Node resolves effect from .generated/node_modules first), so a name nobody keyed could decide the
+// outcome. Before anything reads it, the runner removes every entry except the emitted artifacts it verifies and the
+// emission's record, which nothing here reads. A failing control's workspace is kept until this next run.
+function clearGenerated() {
+  const generated = path.join(root, ".generated");
+  if (!existsSync(generated)) return;
+  const kept = new Set(["counter-domain-emit-evidence.json"]);
+  if (counterArtifacts) {
+    const relative = path.relative(generated, path.resolve(counterArtifacts));
+    if (relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative)) kept.add(relative.split(path.sep)[0]);
+  }
+  for (const name of readdirSync(generated)) {
+    if (!kept.has(name)) rmSync(path.join(generated, name), { recursive: true, force: true });
+  }
+}
 async function references() {
+  clearGenerated();
   const bunVersion = run("BUN_VERSION", "bun", ["--version"]).trim();
   assert.equal(bunVersion, "1.4.2", "references require Bun1.4.2");
   run("CAPTURE", process.execPath, ["scripts/check-yield-capture.mjs"]);
