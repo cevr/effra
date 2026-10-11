@@ -237,14 +237,18 @@ func (p *machinePrep) charge(units int) bool {
 	return true
 }
 
-// payload mirrors the analysis' payload walk from one root: the same order,
-// visited set and charges, stopping at the first refused type, whose display
-// it prepares.
+// payload follows the analysis' payload walk from one root, in the same order
+// and with the same visited set, preparing each layout it reaches and the
+// display of the first refused type. It charges only what it builds (the
+// layouts and the display); the walk's own charges are analysis work, and
+// leaving them out keeps preparation a subset of analysis. Preparation may
+// therefore build layouts past the point where analysis stops, but only
+// within the same budget, which charges each of them.
 func (p *machinePrep) payload(root TypeID) {
 	visited := map[TypeID]bool{}
 	var visit func(id TypeID) (bool, TypeID, bool)
 	visit = func(id TypeID) (bool, TypeID, bool) {
-		if visited[id] || !p.charge(1) {
+		if visited[id] || p.stopped {
 			return false, invalidTypeID, false
 		}
 		visited[id] = true
@@ -261,9 +265,6 @@ func (p *machinePrep) payload(root TypeID) {
 				return false, invalidTypeID, false
 			}
 			if layout.Record {
-				if !p.charge(2 * len(layout.Fields)) {
-					return false, invalidTypeID, false
-				}
 				for _, field := range layout.Fields {
 					if behavior, at, refused := visit(TypeID(field.Type)); refused {
 						return behavior, at, true
@@ -273,9 +274,6 @@ func (p *machinePrep) payload(root TypeID) {
 			}
 			if layout.Sum {
 				for _, variant := range layout.Variants {
-					if len(variant.Fields) > 0 && !p.charge(4*len(variant.Fields)) {
-						return false, invalidTypeID, false
-					}
 					for _, field := range variant.Fields {
 						if behavior, at, refused := visit(TypeID(field.Type)); refused {
 							return behavior, at, true
