@@ -31,7 +31,22 @@ var testTools = []string{"node", "bun", "tsc", "git"}
 
 // testToolEnvironment are variables those tools read but Go tests do not, so
 // Go's test cache cannot see them; they join the tool digest.
-var testToolEnvironment = []string{"NODE_OPTIONS", "NODE_PATH", "BUN_CONFIG_REGISTRY"}
+var testToolEnvironment = []string{"BUN_CONFIG_REGISTRY"}
+
+// goRuntimeEnvironment are variables every Go-built program reads at startup.
+// They change what a program prints without changing its bytes: GODEBUG=
+// inittrace=1 writes to standard error, GOTRACEBACK shapes a crash report. A
+// step that runs Go programs and asserts their output keys on them, through
+// the "go" tool fingerprint or the test tool digest.
+var goRuntimeEnvironment = []string{"GODEBUG", "GOGC", "GOMEMLIMIT", "GOMAXPROCS", "GOTRACEBACK"}
+
+// unpinnedToolEnvironment are variables that make a tool load code from
+// outside every keyed input. Their string names files whose bytes no key
+// sees, so the gate removes them from every step rather than key arbitrary
+// files: ESBUILD_BINARY_PATH replaces the esbuild binary installed in
+// node_modules; NODE_OPTIONS and BUN_OPTIONS can preload any module; NODE_PATH
+// resolves imports from any directory.
+var unpinnedToolEnvironment = []string{"ESBUILD_BINARY_PATH", "NODE_OPTIONS", "NODE_PATH", "BUN_OPTIONS"}
 
 // testInstalled are installed dependency trees Go tests run Node and Bun
 // over; their content digest joins the tool digest.
@@ -55,16 +70,36 @@ func gateSteps(root string) ([]*Step, error) {
 	conformance := &Inputs{Paths: []string{"scripts/conformance/", "conformance/", ".gitmodules", "scripts/init_upstream.sh", "internal/compiler/*_test.go", "go.mod"}, Tools: []string{"go", "git"}, Submodule: "conformance/upstream/effect"}
 	add(&Step{Name: "effect conformance import", Argv: []string{"go", "run", "./scripts/conformance", "import"}, Inputs: conformance})
 	// The Foldkit checks walk the snapshot directory, so files Git ignores
-	// there are inputs too.
 	// there are inputs too. The importer's controls run with the other Go
 	// packages.
 	foldkit := &Inputs{Paths: []string{"scripts/conformance/", "conformance/", "go.mod"}, Tools: []string{"go"}, Installed: []string{"conformance/upstream/foldkit-d21db423"}}
 	add(&Step{Name: "foldkit corpus self-check", Argv: []string{"go", "run", "./scripts/conformance", "foldkit", "--self-check"}, Inputs: foldkit})
-	references, err := frameworkReferenceInputs(root)
-	if err != nil {
-		return nil, err
-	}
-	add(&Step{Name: "framework-port references", Argv: []string{"node", frameworkPorts + "scripts/check-references.mjs"}, Inputs: references})
+	// The counter-domain control's emission half runs the compiler this run
+	// builds. The rest of the reference check, including the control's
+	// verification half, reads only the leaf and the emitted bytes, so a
+	// compiler change that emits identical artifacts replays its pass. The
+	// verification runs the emitted native programs and asserts their exact
+	// output, so the Go fingerprint, which carries the Go runtime
+	// environment, is an input. The capture check walks the vendored tree on
+	// disk and asserts each file's owner executable bit, and TypeScript and
+	// Bun glob and resolve the leaf without Git, so the whole leaf is a tree
+	// input, files Git ignores included. Left out are the installed
+	// node_modules (keyed as Installed) and two directories the leaf runner
+	// empties before anything reads them, so nothing left there can reach
+	// the result: the vendor build output, and .generated, where the
+	// consumers resolve the domain. The runner keeps only the emitted
+	// artifacts (keyed as Generated) and the emission's record, which no
+	// check reads.
+	add(&Step{Name: "framework-port counter emission", Needs: []string{"build bin/ef"}, Argv: []string{"node", frameworkPorts + "scripts/check-counter-domain.mjs", "--compiler", "bin/ef", "--emit", counterArtifacts}})
+	add(&Step{Name: "framework-port references", Needs: []string{"framework-port counter emission"}, Argv: []string{"node", frameworkPorts + "scripts/check-references.mjs", "--counter-domain-artifacts", counterArtifacts}, Inputs: &Inputs{
+		Paths:       []string{frameworkPorts},
+		Tools:       []string{"node", "bun", "go", "git"},
+		Env:         testToolEnvironment,
+		Installed:   []string{frameworkPorts + "node_modules"},
+		Generated:   []string{counterArtifacts},
+		Trees:       []string{frameworkPorts},
+		TreeExclude: []string{frameworkPorts + "node_modules", frameworkPorts + ".generated", frameworkPorts + "vendor/solid-yield/dist"},
+	}})
 	add(&Step{Name: "effect conformance mapping", Argv: []string{"go", "run", "./scripts/conformance", "check"}, Inputs: conformance})
 
 	add(&Step{Name: "gofmt", Argv: append([]string{"sh", "-c", `unformatted=$(gofmt -l "$@"); if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi`, "gofmt"}, gofmtDirectories...)})
@@ -140,36 +175,9 @@ func wayfinderSnapshotInputs() *Inputs {
 // installed node_modules, which Git ignores.
 const frameworkPorts = "conformance/framework-ports/ports/"
 
-// frameworkReferenceInputs keys the framework-port reference check. Beyond
-// its leaf, the counter-domain control builds ./cmd/ef from source and runs
-// the compiled Go and JavaScript programs, so every non-test file of the
-// compiler's main-module packages is an input, with the Go and JavaScript
-// toolchains and the environment they read.
-func frameworkReferenceInputs(root string) (*Inputs, error) {
-	command := exec.Command("go", "list", "-deps", "-f", "{{if .Module}}{{if .Module.Main}}{{.Dir}}{{end}}{{end}}", "./cmd/ef")
-	command.Dir = root
-	output, err := command.Output()
-	if err != nil {
-		return nil, fmt.Errorf("go list -deps ./cmd/ef: %w", err)
-	}
-	inputs := &Inputs{
-		Paths:     []string{frameworkPorts, "go.mod", "go.sum"},
-		Tools:     []string{"node", "bun", "go", "git"},
-		Env:       append([]string{"GOFLAGS", "GOOS", "GOARCH", "CGO_ENABLED", "GOEXPERIMENT"}, testToolEnvironment...),
-		Installed: []string{frameworkPorts + "node_modules"},
-	}
-	for _, dir := range strings.Fields(string(output)) {
-		relative, err := filepath.Rel(root, dir)
-		if err != nil || strings.HasPrefix(relative, "..") {
-			return nil, fmt.Errorf("compiler package %s is outside %s", dir, root)
-		}
-		relative = filepath.ToSlash(relative)
-		inputs.Paths = append(inputs.Paths, relative+"/")
-		// Test files are not build inputs.
-		inputs.Exclude = append(inputs.Exclude, relative+"/*_test.go")
-	}
-	return inputs, nil
-}
+// counterArtifacts is where the counter-domain emission writes the bytes its
+// verification reads; Git ignores it.
+const counterArtifacts = frameworkPorts + ".generated/counter-domain-artifacts"
 
 func goPackages(root string) ([]string, error) {
 	command := exec.Command("go", "list", "./...")
