@@ -786,7 +786,7 @@ func (p buildPaths) protected() []receipt.Location {
 // it also returns the application receipt of the published generation and
 // executable.
 func buildGo(r *compiler.Result, source, output receipt.Location, measure bool) (*receipt.Application, error) {
-	application, err := goApplication(r, compiler.GoGenerationBuild)
+	application, err := goApplication(r, source, compiler.GoGenerationBuild)
 	if err != nil {
 		return nil, err
 	}
@@ -801,10 +801,12 @@ func buildGo(r *compiler.Result, source, output receipt.Location, measure bool) 
 	return measured, nil
 }
 
-// goApplication plans and lowers one native entry mode. A plan refusal is a
-// compiler diagnostic: it is reported as JSON on stdout like a failed check.
-func goApplication(r *compiler.Result, mode compiler.GoGenerationMode) (*compiler.GoApplication, error) {
-	application, err := r.GoApplication(mode)
+// goApplication plans and lowers one native entry mode of source, whose
+// generated main names the source's admitted file in //line directives. A
+// plan refusal is a compiler diagnostic: it is reported as JSON on stdout
+// like a failed check.
+func goApplication(r *compiler.Result, source receipt.Location, mode compiler.GoGenerationMode) (*compiler.GoApplication, error) {
+	application, err := r.GoApplicationFrom(mode, source.Admitted())
 	var refusal *compiler.ApplicationPlanError
 	if errors.As(err, &refusal) {
 		_ = printJSON(map[string]any{"schemaVersion": r.SchemaVersion, "revision": r.Revision, "target": r.Target, "checked": r.Checked, "mode": mode, "diagnostics": []compiler.Diagnostic{refusal.Diagnostic()}})
@@ -900,7 +902,7 @@ func runTests(r *compiler.Result, source receipt.Location, timeoutMillis int) er
 		timeoutMillis = 30000
 	}
 	if r.Target == "go" {
-		application, err := goApplication(r, compiler.GoGenerationTest)
+		application, err := goApplication(r, source, compiler.GoGenerationTest)
 		if err != nil {
 			return err
 		}
