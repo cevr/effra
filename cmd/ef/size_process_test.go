@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	goscanner "go/scanner"
+	"go/ast"
+	goparser "go/parser"
 	gotoken "go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -89,32 +91,44 @@ func withoutHeader(t *testing.T, module []byte) []byte {
 	return rest
 }
 
-// generatedMainTokens lists the tokens Go compiles from an application's
-// generated main. Comments, among them //line directives, and semicolons,
-// which formatting moves between explicit and automatic, are left out.
-func generatedMainTokens(t *testing.T, measured receipt.Application) []string {
+// generatedMainTree prints the syntax tree of an application's generated
+// main without positions or comments, among them its //line directives.
+func generatedMainTree(t *testing.T, measured receipt.Application) string {
 	t.Helper()
 	source, err := os.ReadFile(filepath.Join(measured.Generation.Directory, "main.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := gotoken.NewFileSet()
-	var scanner goscanner.Scanner
-	scanner.Init(files.AddFile("main.go", -1, len(source)), source, nil, 0)
-	tokens := []string{}
-	for {
-		_, token, literal := scanner.Scan()
-		if token == gotoken.EOF {
-			break
-		}
-		if token != gotoken.SEMICOLON {
-			tokens = append(tokens, token.String()+" "+literal)
+	file, err := goparser.ParseFile(gotoken.NewFileSet(), "main.go", source, goparser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tree strings.Builder
+	position := reflect.TypeFor[gotoken.Pos]()
+	if err := ast.Fprint(&tree, nil, file, func(_ string, value reflect.Value) bool { return value.Type() != position }); err != nil {
+		t.Fatal(err)
+	}
+	return tree.String()
+}
+
+// symbolsWithoutAddresses lists an executable's symbols by name, kind and
+// size, in name order. nm runs from the generated module, as the receipt's
+// measurement does, so the module's toolchain reads its executable.
+func symbolsWithoutAddresses(t *testing.T, measured receipt.Application, executable string) []string {
+	t.Helper()
+	command := exec.Command("go", "tool", "nm", "-size", "-type", "-sort", "name", executable)
+	command.Dir = measured.Generation.Directory
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("go tool nm %s: %v", executable, err)
+	}
+	symbols := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if fields := strings.Fields(line); len(fields) > 1 {
+			symbols = append(symbols, strings.Join(fields[1:], " "))
 		}
 	}
-	if scanner.ErrorCount > 0 {
-		t.Fatalf("generated main of %s does not scan", measured.Generation.Directory)
-	}
-	return tokens
+	return symbols
 }
 
 func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
@@ -227,12 +241,13 @@ func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
 	}
 
 	// Unused declarations and equivalent spellings retain exactly the same
-	// program: identical runtime, imports, dependencies and per-package
-	// symbol counts and sizes natively, and an identical module in
-	// JavaScript. Only source positions differ: the generated main's //line
-	// directives name each source file and line, and so do the executable's
-	// position tables, which change its size and shift symbol addresses (and
-	// so the receipt's listing digest) but no symbol's size.
+	// program: identical runtime, generated syntax tree, imports,
+	// dependencies and symbols by name, kind and size natively, and an
+	// identical module in JavaScript. Only source positions differ: the
+	// generated main's //line directives name each source file and line, and
+	// so do the executable's position tables, which change its size and shift
+	// symbol addresses (and so the receipt's listing digest) but no symbol's
+	// name, kind or size.
 	for _, pair := range [][2]string{{"minimal", "minimal-unused"}, {"direct", "pipe"}} {
 		a, b := built[pair[0]], built[pair[1]]
 		runtimeOnly := func(files []receipt.File) []receipt.File {
@@ -241,8 +256,8 @@ func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
 		if !slices.Equal(runtimeOnly(a.native.Generation.Files), runtimeOnly(b.native.Generation.Files)) {
 			t.Errorf("%s/%s: generated runtime differs", pair[0], pair[1])
 		}
-		if !slices.Equal(generatedMainTokens(t, a.native), generatedMainTokens(t, b.native)) {
-			t.Errorf("%s/%s: generated mains compile different Go", pair[0], pair[1])
+		if generatedMainTree(t, a.native) != generatedMainTree(t, b.native) {
+			t.Errorf("%s/%s: generated mains parse to different programs", pair[0], pair[1])
 		}
 		for pkg, imports := range a.native.Imports {
 			if !slices.Equal(imports, b.native.Imports[pkg]) {
@@ -252,7 +267,7 @@ func TestSizeFixturesRetainOnlyReachableRuntime(t *testing.T) {
 		if !slices.Equal(a.native.Deps.Transitive, b.native.Deps.Transitive) {
 			t.Errorf("%s/%s: dependencies differ", pair[0], pair[1])
 		}
-		if a.native.Symbols.Count != b.native.Symbols.Count || !slices.Equal(a.native.Symbols.Packages, b.native.Symbols.Packages) {
+		if !slices.Equal(a.native.Symbols.Packages, b.native.Symbols.Packages) || !slices.Equal(symbolsWithoutAddresses(t, a.native, filepath.Join(root, "bin", pair[0])), symbolsWithoutAddresses(t, b.native, filepath.Join(root, "bin", pair[1]))) {
 			t.Errorf("%s/%s: executables retain different symbols: %+v vs %+v", pair[0], pair[1], a.native.Symbols.Packages, b.native.Symbols.Packages)
 		}
 		if !bytes.Equal(withoutHeader(t, a.module), withoutHeader(t, b.module)) {
