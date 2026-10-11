@@ -676,9 +676,13 @@ type codecEncoder struct {
 	failure *CodecError
 }
 
+// write and writeText build the body-too-large failure (the root path,
+// empty) as a literal rather than through codecFailure: a call would put
+// them, and so CodecWriter.Raw, over Go's inlining budget, and every key,
+// brace and separator a generated writer spells goes through Raw.
 func (e *codecEncoder) write(bytes ...byte) *CodecError {
 	if len(e.out)+len(bytes) > e.limit {
-		return codecFailure(CodecEncode, CodecBodyTooLarge, nil)
+		return &CodecError{Direction: CodecEncode, Reason: CodecBodyTooLarge, Path: []string{}, Offset: -1}
 	}
 	e.out = append(e.out, bytes...)
 	return nil
@@ -686,7 +690,7 @@ func (e *codecEncoder) write(bytes ...byte) *CodecError {
 
 func (e *codecEncoder) writeText(text string) *CodecError {
 	if len(e.out)+len(text) > e.limit {
-		return codecFailure(CodecEncode, CodecBodyTooLarge, nil)
+		return &CodecError{Direction: CodecEncode, Reason: CodecBodyTooLarge, Path: []string{}, Offset: -1}
 	}
 	e.out = append(e.out, text...)
 	return nil
