@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unsafe"
 )
 
 // Result is one module's analysis: the published plans, sorted by ID, and the
@@ -18,9 +19,10 @@ type Result[V any] struct {
 }
 
 // Analyse checks every declaration of in and plans the ones that pass. It
-// reads only in. Diagnostics are reported through report.
-func Analyse[V any](in *Input[V], report func(Diagnostic)) Result[V] {
-	shared := &budget[V]{in: in, report: report}
+// reads only in and writes only its result: the checker commits the
+// diagnostics, in order, after analysis returns.
+func Analyse[V any](in *Input[V]) Result[V] {
+	shared := &budget[V]{in: in}
 	plans := make([]*Plan[V], 0, len(in.Machines))
 	for ordinal, machine := range in.Machines {
 		check := &check[V]{in: in, machine: machine, ordinal: ordinal, seen: map[reportKey]bool{}, shared: shared}
@@ -34,7 +36,7 @@ func Analyse[V any](in *Input[V], report func(Diagnostic)) Result[V] {
 		out[i] = *plan
 	}
 	slices.SortFunc(out, func(a, b Plan[V]) int { return strings.Compare(a.ID, b.ID) })
-	return Result[V]{Plans: out, Units: shared.work}
+	return Result[V]{Plans: out, Diagnostics: shared.diagnostics, Units: shared.work}
 }
 
 // check holds one declaration's analysis. Every program-sized value it builds
@@ -79,9 +81,19 @@ type reportKey struct {
 	offset, length int
 }
 
-// report records a diagnostic. After an analysis refusal only EF142 is
-// reported for the declaration: the refusal already rejects the source, and a
-// check the budget cut short is not evidence of a contract violation.
+// diagnosticUnits is what recording one diagnostic allocates: its slot in the
+// result buffer, which doubles as it grows, and its deduplication entry.
+const diagnosticUnits = (2*int(unsafe.Sizeof(Diagnostic{})) + 2*(int(unsafe.Sizeof(reportKey{}))+1) + textUnit - 1) / textUnit
+
+// report records a diagnostic in the analysis' own buffer. After an analysis
+// refusal only EF142 is reported for the declaration: the refusal already
+// rejects the source, and a check the budget cut short is not evidence of a
+// contract violation.
+//
+// Recording is counted, not gated: the EF142 refusal that exhausts the budget
+// must itself be recorded, so its slot cannot wait on the budget. Every other
+// diagnostic's message was charged before it was built, so the diagnostics a
+// declaration records never outnumber the units it paid.
 func (m *check[V]) report(code, message string, span Span) {
 	m.failed = true
 	if m.refused && code != BudgetCode {
@@ -92,7 +104,9 @@ func (m *check[V]) report(code, message string, span Span) {
 		return
 	}
 	m.seen[key] = true
-	m.shared.report(Diagnostic{Code: code, Message: message, Span: span})
+	m.work += diagnosticUnits
+	m.shared.work += diagnosticUnits
+	m.shared.diagnostics = append(m.shared.diagnostics, Diagnostic{Code: code, Message: message, Span: span})
 }
 
 // spend charges one unit of the declaration's analysis budget. Exhaustion is a

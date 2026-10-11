@@ -127,15 +127,19 @@ func (c *checker) checkMachines() {
 			c.recordFacts = previous
 		}
 	}
+	// Prepare: checker work, outside the analysis window.
 	in := c.prepareMachines(initials)
+	// Analyse: the measured window reads only in.
 	if machineAnalysisProbe != nil {
 		machineAnalysisProbe(false, 0)
 	}
-	result := machineplan.Analyse(in, func(d machineplan.Diagnostic) {
-		c.diagnostic(d.Code, d.Message, Span(d.Span))
-	})
+	result := machineplan.Analyse(in)
 	if machineAnalysisProbe != nil {
 		machineAnalysisProbe(true, result.Units)
+	}
+	// Commit: the analysis diagnostics in report order, then the plans.
+	for _, d := range result.Diagnostics {
+		c.diagnostic(d.Code, d.Message, Span(d.Span))
 	}
 	c.result.Machines = result.Plans
 }

@@ -41,10 +41,11 @@ const declarationMapBytes = 8 * 256
 // module-wide memo of projections that do not depend on the declaration: a
 // function, enum or type bound by many declarations is projected once.
 type budget[V any] struct {
-	in        *Input[V]
-	report    func(Diagnostic)
-	work      int
-	exhausted bool
+	in *Input[V]
+	// diagnostics is the analysis' own diagnostic buffer, in report order.
+	diagnostics []Diagnostic
+	work        int
+	exhausted   bool
 
 	costs         costs
 	displays      map[TypeRef]string
