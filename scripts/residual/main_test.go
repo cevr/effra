@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The compiler's diagnostic lines are attributed by the file they name: the
 // source as Go reports it under -trimpath, the generated main, the generated
@@ -25,6 +28,33 @@ slices/zsortanyfunc.go:20:6: Found IsInBounds
 	}
 	if want := (Attribution{Source: 1, Main: 1, Runtime: 1}); escapes != want {
 		t.Errorf("escapes %+v, want %+v", escapes, want)
+	}
+}
+
+// A source name may contain colons; it is matched whole, and a name that
+// merely starts like it is not the source.
+func TestAttributeMatchesSourceNamesWithColons(t *testing.T) {
+	output := []byte(`effra.generated/probe:v2.ef:4: x escapes to heap
+effra.generated/probe:v2.ef.bak:4: y escapes to heap
+effra.generated/probe:v2.ef:7: Found IsInBounds
+`)
+	bounds, escapes := attribute(output, "probe:v2.ef")
+	if want := (Attribution{Source: 1}); bounds != want {
+		t.Errorf("bounds checks %+v, want %+v", bounds, want)
+	}
+	if want := (Attribution{Source: 1, Other: 1}); escapes != want {
+		t.Errorf("escapes %+v, want %+v", escapes, want)
+	}
+}
+
+// A report from a host without load averages renders.
+func TestMarkdownRendersUnavailableLoad(t *testing.T) {
+	variant := func() *Variant {
+		return &Variant{GeneratedBytes: 10, LoweringMicros: []int64{5}, BinaryBytes: 100, Samples: []Sample{{Seconds: 1, Load: "unavailable"}, {Seconds: 2, Load: ""}}, Vet: "ok"}
+	}
+	table := markdown(&Report{GoVersion: "go", Examples: []Example{{Name: "a.ef", Before: variant(), After: variant()}}})
+	if !strings.Contains(table, "unavailable") {
+		t.Errorf("table does not record the unavailable load:\n%s", table)
 	}
 }
 
