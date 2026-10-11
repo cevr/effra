@@ -210,6 +210,80 @@ func TestRecorderRemembersOnlySealedDirectories(t *testing.T) {
 		}
 		return true
 	})
+	// A lookup in a sealed directory is remembered.
+	sealed := ""
+	for _, dir := range []string{"/usr/lib", "/usr/bin", "/usr", "/etc"} {
+		if physical, ok := physicalDir(dir); ok && physical == dir && r.sealedDir(dir) {
+			sealed = dir
+			break
+		}
+	}
+	if sealed == "" {
+		t.Skip("no sealed directory on this host")
+	}
+	missing := filepath.Join(sealed, "effra-testinputs-missing")
+	r.open(missing, true)
+	if e, ok := r.fixed.Load(missing); !ok || !e.(entry).missing {
+		t.Fatalf("the lookup of %s in the sealed %s was not remembered as missing: %v", missing, sealed, e)
+	}
+	if s, ok := r.sealed.Load(sealed); !ok || !s.(bool) {
+		t.Fatalf("%s is not remembered as sealed", sealed)
+	}
+}
+
+// TestRecorderStatsLinksAlongPaths checks that a link inside the root on
+// the way to a recorded path is looked up too, so retargeting it to a
+// look-alike file changes the key, and that a missing component ends the
+// search.
+func TestRecorderStatsLinksAlongPaths(t *testing.T) {
+	logical, physical, _ := linkedModule(t)
+	if err := os.MkdirAll(filepath.Join(physical, "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(physical, "dirs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../a", filepath.Join(physical, "dirs", "current")); err != nil {
+		t.Fatal(err)
+	}
+	r := newRecorder(logical)
+	r.open(filepath.Join(logical, "dirs/current/value.txt"), true)
+	r.stat(filepath.Join(logical, "src/missing/x"))
+	r.stop()
+	got := parse(t, r.lines())
+	want := [][2]string{
+		{"open", logical + "/dirs/current/value.txt"},
+		{"stat", logical + "/dirs/current"},
+		{"stat", logical + "/src/missing/x"},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("entries:\n got %q\nwant %q", got, want)
+	}
+}
+
+// TestRecorderResolvesDotDotBeforeSkipping checks that /proc, /dev and /sys
+// are skipped by where a path leads, not by how it starts.
+func TestRecorderResolvesDotDotBeforeSkipping(t *testing.T) {
+	logical, _, _ := linkedModule(t)
+	for path, want := range map[string]bool{
+		"/proc/self/status":      true,
+		"/dev/null":              true,
+		"/sys":                   true,
+		"/proc/../" + logical:    false,
+		"/dev/../" + logical:     false,
+		"/tmp/../proc/self":      true,
+		"/nonexistent/../dev/x":  true,
+		"/nonexistent/../tmp/..": false,
+	} {
+		if got := virtual(path); got != want {
+			t.Errorf("virtual(%q) = %v, want %v", path, got, want)
+		}
+	}
+	r := newRecorder(logical)
+	r.stat("/dev/../" + logical + "/src/x")
+	if got, want := parse(t, r.lines()), [][2]string{{"stat", logical + "/src/x"}}; !slices.Equal(got, want) {
+		t.Fatalf("entries:\n got %q\nwant %q", got, want)
+	}
 }
 
 // TestRecorderKeysAListingOnItsEntries checks that a directory read is

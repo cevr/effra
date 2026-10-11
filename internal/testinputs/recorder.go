@@ -177,10 +177,8 @@ func shebang(path string) string {
 
 // record keeps one access to a path inside the module root.
 func (r *recorder) record(path string, key entryKey) {
-	for _, prefix := range []string{"/proc", "/dev", "/sys"} {
-		if path == prefix || strings.HasPrefix(path, prefix+"/") {
-			return
-		}
+	if virtual(path) {
+		return
 	}
 	if strings.ContainsRune(path, '\n') {
 		r.fail("a path holds a newline, which the test log cannot carry")
@@ -195,6 +193,41 @@ func (r *recorder) record(path string, key entryKey) {
 	if !r.stopped {
 		r.paths[inside] |= key
 	}
+}
+
+// virtual reports whether a path lies in /proc, /dev or /sys, which cmd/go
+// cannot recheck and whose links resolve differently in each process. A
+// ".." is resolved first, as the kernel would, so /proc/../root/file is
+// recorded: the directory a path ends in is looked up where it exists, and
+// a path whose directory is missing is cleaned by name.
+func virtual(path string) bool {
+	if hasDotDot(path) {
+		dir, base := filepath.Dir(path), filepath.Base(path)
+		if base == ".." {
+			dir, base = path, ""
+		}
+		if physical, ok := physicalDir(dir); ok {
+			path = filepath.Join(physical, base)
+		} else {
+			path = filepath.Clean(path)
+		}
+	}
+	for _, prefix := range []string{"/proc", "/dev", "/sys"} {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasDotDot reports whether a path has a ".." component.
+func hasDotDot(path string) bool {
+	for element := range strings.SplitSeq(path, "/") {
+		if element == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 // inside returns path under the logical root, if the kernel's lookup of it
@@ -363,10 +396,8 @@ func under(path, root string) (string, bool) {
 // clean removes "." components and repeated or trailing slashes. It keeps
 // ".." components, which the kernel resolves after following links.
 func clean(path string) string {
-	for element := range strings.SplitSeq(path, "/") {
-		if element == ".." {
-			return path
-		}
+	if hasDotDot(path) {
+		return path
 	}
 	return filepath.Clean(path)
 }
@@ -382,6 +413,7 @@ func (r *recorder) lines() []string {
 	if r.execs > 0 {
 		r.env[ToolDigest] = true
 	}
+	r.statLinksLocked()
 	for name := range r.env {
 		lines = append(lines, "getenv "+name+"\n")
 	}
@@ -395,4 +427,52 @@ func (r *recorder) lines() []string {
 	}
 	slices.Sort(lines)
 	return lines
+}
+
+// statLinksLocked adds a lookup of every link inside the root along a
+// recorded path. cmd/go rechecks an "open" path by what it leads to, and
+// the file a retargeted link now leads to may have the same metadata as the
+// old one; the link's own Lstat changes with it. The links are read once
+// the tree has exited, as they are when cmd/go rechecks the key.
+func (r *recorder) statLinksLocked() {
+	const (
+		plain = iota + 1
+		link
+		missing
+	)
+	seen := map[string]int{} // prefix → what it is
+	var found []string
+	for path := range r.paths {
+		rest, ok := under(path, r.logical)
+		if !ok {
+			continue
+		}
+		prefix := r.logical
+		for element := range strings.SplitSeq(rest, "/") {
+			if element == "" {
+				continue
+			}
+			prefix = strings.TrimSuffix(prefix, "/") + "/" + element
+			what := seen[prefix]
+			if what == 0 {
+				info, err := os.Lstat(prefix)
+				switch {
+				case err != nil:
+					what = missing
+				case info.Mode()&fs.ModeSymlink != 0:
+					what = link
+					found = append(found, prefix)
+				default:
+					what = plain
+				}
+				seen[prefix] = what
+			}
+			if what == missing {
+				break // nothing below it exists
+			}
+		}
+	}
+	for _, link := range found {
+		r.paths[link] |= keyStat
+	}
 }
