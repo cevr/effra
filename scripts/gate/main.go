@@ -764,8 +764,62 @@ func (g *gate) toolVersion(tool string) string {
 			version += fmt.Sprintf("\x00%s\x00%t\x00%s", name, set, value)
 		}
 	}
+	version += "\x00" + g.executableIdentity(argv[0])
 	g.tools[tool] = version
 	return version
+}
+
+// executableIdentity names the file a tool resolves to and a digest of its
+// bytes. A version string alone would let two builds that print the same
+// version share a key, and so would the same build installed under another
+// prefix, from which Node and Bun resolve global modules. Hashing a large
+// runtime costs about half a second, so the digest is recorded under the
+// file's change identity and reused while that identity holds.
+func (g *gate) executableIdentity(name string) string {
+	found, err := exec.LookPath(name)
+	if err != nil {
+		return "absent"
+	}
+	resolved, err := filepath.EvalSymlinks(found)
+	if err != nil {
+		return "error:" + err.Error()
+	}
+	resolved, err = filepath.Abs(resolved)
+	if err != nil {
+		return "error:" + err.Error()
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "error:" + err.Error()
+	}
+	var recorded string
+	if change, ok := changeIdentity(info); ok && g.cacheDir != "" {
+		sum := sha256.Sum256([]byte(resolved + "\x00" + change))
+		recorded = filepath.Join(g.cacheDir, cacheVersion, "executables", hex.EncodeToString(sum[:]))
+		if digest, err := os.ReadFile(recorded); err == nil && len(digest) == sha256.Size*2 {
+			return resolved + "\x00" + string(digest)
+		}
+	}
+	file, err := os.Open(resolved)
+	if err != nil {
+		return "error:" + err.Error()
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "error:" + err.Error()
+	}
+	digest := hex.EncodeToString(hash.Sum(nil))
+	if recorded != "" {
+		// A failed record costs only the next run's hashing.
+		if err := os.MkdirAll(filepath.Dir(recorded), 0o755); err == nil {
+			temporary := fmt.Sprintf("%s.%d.tmp", recorded, os.Getpid())
+			if os.WriteFile(temporary, []byte(digest), 0o644) == nil {
+				os.Rename(temporary, recorded)
+			}
+		}
+	}
+	return resolved + "\x00" + digest
 }
 
 func (g *gate) submoduleState(dir string) (string, error) {

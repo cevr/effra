@@ -78,6 +78,62 @@ func TestGoRuntimeEnvironmentKeysEveryStepThatRunsGoPrograms(t *testing.T) {
 	}
 }
 
+// A tool's fingerprint names the executable it resolves to and its bytes, not
+// only the version it prints: a different build that prints the same version
+// must not replay a pass. The recorded digest must follow every write, even
+// one that restores the size and modification time.
+func TestToolFingerprintCoversTheResolvedExecutable(t *testing.T) {
+	bin := t.TempDir()
+	other := t.TempDir()
+	cache := t.TempDir()
+	tool := filepath.Join(bin, "probe-tool")
+	script := func(dir, comment string) {
+		t.Helper()
+		write(t, dir, "probe-tool", "#!/bin/sh\n# "+comment+"\necho probe 1.0.0\n")
+		if err := os.Chmod(filepath.Join(dir, "probe-tool"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script(bin, "build a")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	fingerprint := func() string {
+		t.Helper()
+		g := &gate{root: t.TempDir(), cacheDir: cache}
+		version := g.toolVersion("probe-tool")
+		if !strings.HasPrefix(version, "probe 1.0.0") {
+			t.Fatalf("fingerprint %q lacks the printed version", version)
+		}
+		return version
+	}
+	first := fingerprint()
+	if fingerprint() != first {
+		t.Fatal("an unchanged executable changed its fingerprint")
+	}
+	info, err := os.Stat(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script(bin, "build b")
+	if err := os.Chtimes(tool, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt := fingerprint()
+	if rebuilt == first {
+		t.Fatal("another build printing the same version, with the same size and modification time, kept the fingerprint")
+	}
+	// The same bytes under another prefix are another installation.
+	script(other, "build b")
+	if err := os.Rename(tool, tool+".moved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(other, "probe-tool"), tool); err != nil {
+		t.Fatal(err)
+	}
+	if fingerprint() == rebuilt {
+		t.Fatal("the same build under another prefix kept the fingerprint")
+	}
+}
+
 // ESBUILD_BINARY_PATH would replace the installed esbuild, a keyed input,
 // with an arbitrary executable, and NODE_OPTIONS, NODE_PATH and BUN_OPTIONS
 // would load modules no key sees; no step ever sees them.
