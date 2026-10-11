@@ -210,12 +210,29 @@ const runtimeExecPath = "process.stdout.write(process.execPath)"
 // where it is keys as unlocated. It returns the runtime's resolved path too.
 func (g *gate) runtimeInstallation(command, rule, resolved string) (reported, keyed string) {
 	keyed = g.fact("runtime\x00"+rule+"\x00"+resolved, func() string {
-		query := exec.Command(command, "-e", runtimeExecPath)
-		query.Env = stepEnvironment()
-		output, err := query.Output()
-		path := string(output)
-		if err != nil || !filepath.IsAbs(path) {
-			return unlocated(fmt.Sprintf("%s -e printed %q: %v", command, path, err))
+		// A version manager may select by working directory (mise.toml,
+		// .tool-versions, a package.json volta field), and steps start
+		// node and bun in the repository and in temporary workspaces. The
+		// runtime is asked from both; differing answers key as unlocated.
+		neutral, err := os.MkdirTemp("", "gate-runtime-")
+		if err != nil {
+			return unlocated(err.Error())
+		}
+		defer os.RemoveAll(neutral)
+		var path string
+		for i, dir := range []string{g.root, neutral} {
+			query := exec.Command(command, "-e", runtimeExecPath)
+			query.Env = stepEnvironment()
+			query.Dir = dir
+			output, err := query.Output()
+			answer := string(output)
+			if err != nil || !filepath.IsAbs(answer) {
+				return unlocated(fmt.Sprintf("%s -e in %s printed %q: %v", command, dir, answer, err))
+			}
+			if i > 0 && answer != path {
+				return unlocated(fmt.Sprintf("%s runs %s in %s but %s in %s", command, path, g.root, answer, dir))
+			}
+			path = answer
 		}
 		real, err := filepath.EvalSymlinks(path)
 		if err != nil {
@@ -402,12 +419,29 @@ func scriptInterpreter(resolved string) ([]string, error) {
 		if len(arguments) > 0 && arguments[0] == "-S" {
 			arguments = arguments[1:]
 		}
-		if len(arguments) == 0 || strings.HasPrefix(arguments[0], "-") || strings.Contains(arguments[0], "=") {
+		if len(arguments) == 0 || !literalCommand(arguments[0]) {
 			return nil, fmt.Errorf("%s: env line %q is not env [-S] <command>", resolved, line)
 		}
 		commands = append(commands, arguments[0])
 	}
 	return commands, nil
+}
+
+// literalCommand reports whether token names a command as written: a plain
+// name or an absolute path, of letters, digits and . _ + - /. env -S expands
+// ${VAR} and removes quotes and backslashes before looking a command up, and
+// an option or an assignment can change where it looks; any of those is not
+// literal.
+func literalCommand(token string) bool {
+	if token == "" || strings.HasPrefix(token, "-") || (strings.Contains(token, "/") && !filepath.IsAbs(token)) {
+		return false
+	}
+	for _, r := range token {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("._+-/", r)) {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveCommand is the absolute, symlink-free path of the file command

@@ -76,7 +76,9 @@ var testScratch string
 // probeSource is a small executable standing in for node or bun and for a
 // version manager's launcher in front of them. Beside a file <self>.target
 // naming another executable it is a launcher, execing that executable with
-// its arguments, as a volta shim or mise does. Otherwise it is the runtime:
+// its arguments, as a volta shim or mise does; a file probe-runtime in the
+// working directory overrides that target, as a mise.toml or a package.json
+// volta field selects by directory. Otherwise it is the runtime:
 // asked for its execPath (-e) it prints its own path; else it prints a
 // version that never changes.
 const probeSource = `package main
@@ -96,6 +98,9 @@ func main() {
 		os.Exit(2)
 	}
 	if target, err := os.ReadFile(self + ".target"); err == nil {
+		if pinned, err := os.ReadFile("probe-runtime"); err == nil {
+			target = pinned
+		}
 		path := strings.TrimSpace(string(target))
 		syscall.Exec(path, append([]string{path}, os.Args[1:]...), os.Environ())
 		os.Exit(3)
@@ -171,7 +176,14 @@ func rebuildProbe(t *testing.T, path, replacement string) {
 // fingerprint is a tool's fingerprint as a fresh gate run computes it.
 func fingerprint(t *testing.T, tool string) string {
 	t.Helper()
-	return (&gate{root: t.TempDir(), cacheDir: t.TempDir()}).toolVersion(tool)
+	return fingerprintIn(t, t.TempDir(), tool)
+}
+
+// fingerprintIn is a tool's fingerprint as a fresh gate run over root
+// computes it.
+func fingerprintIn(t *testing.T, root, tool string) string {
+	t.Helper()
+	return (&gate{root: root, cacheDir: t.TempDir()}).toolVersion(tool)
 }
 
 func executable(t *testing.T, dir, name, content string) string {
@@ -555,7 +567,14 @@ func TestScriptInterpreterResolvesOnlyPlainEnvLines(t *testing.T) {
 		"#!/usr/bin/env -C /opt node":            "",
 		"#!/usr/bin/env -u PATH node":            "",
 		"#!/usr/bin/env -i node":                 "",
-		"#!/usr/bin/env":                         "",
+		"#!/usr/bin/env":                         "", "#!/usr/bin/env -S ${X}": "",
+		"#!/usr/bin/env -S $X":                         "",
+		"#!/usr/bin/env -S 'node'":                     "",
+		"#!/usr/bin/env -S \"node\"":                   "",
+		"#!/usr/bin/env -S no\\de":                     "",
+		"#!/usr/bin/env -S ${Y} node":                  "",
+		"#!/usr/bin/env -S bin/node":                   "",
+		"#!/usr/bin/env -S /usr/local/bin/node --flag": "/usr/local/bin/node",
 	} {
 		path := filepath.Join(dir, "script")
 		write(t, dir, "script", line+"\n")
@@ -574,5 +593,30 @@ func TestScriptInterpreterResolvesOnlyPlainEnvLines(t *testing.T) {
 	link(t, bin, "probe-tool", executable(t, pkg, "bin/probe-tool", "#!/usr/bin/env -S PATH=/nonexistent sh\necho probe 1.0.0\n"))
 	if first := fingerprint(t, "probe-tool"); !strings.Contains(first, "unlocated") || fingerprint(t, "probe-tool") == first {
 		t.Fatalf("a script whose env line assigns PATH repeated its fingerprint: %q", first)
+	}
+}
+
+// A version manager can select the runtime by working directory, and steps
+// run node and bun both in the repository and in temporary workspaces. A
+// launcher that answers differently in the repository than in a neutral
+// directory keys as unlocated.
+func TestRuntimeFingerprintOfADirectorySelectedRuntimeNeverRepeats(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	launcher := probe(t, filepath.Join(t.TempDir(), "bin", "shim"))
+	link(t, bin, "node", launcher)
+	installs := t.TempDir()
+	global := probe(t, filepath.Join(installs, "global", "bin", "node"))
+	write(t, filepath.Dir(launcher), "shim.target", global)
+	root := t.TempDir()
+	if first := fingerprintIn(t, root, "node"); strings.Contains(first, "unlocated") || fingerprintIn(t, root, "node") != first {
+		t.Fatalf("a launcher that selects one runtime everywhere has no stable fingerprint: %q", first)
+	}
+	pinned := probe(t, filepath.Join(installs, "pinned", "bin", "node"))
+	write(t, root, "probe-runtime", pinned)
+	first := fingerprintIn(t, root, "node")
+	if !strings.Contains(first, "unlocated") || fingerprintIn(t, root, "node") == first {
+		t.Fatalf("a runtime selected by the repository's directory repeated its fingerprint: %q", first)
 	}
 }

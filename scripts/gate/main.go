@@ -266,10 +266,14 @@ func (g *gate) run(out io.Writer) int {
 	}
 	// Digest the test dependency trees while files load and early steps run;
 	// the first Go test step then finds the digest ready.
+	// The prefetches below are joined before run returns, so no digest or
+	// fingerprint work outlives the run that started it.
+	var prefetch sync.WaitGroup
+	defer prefetch.Wait()
 	for _, step := range g.steps {
 		if len(step.ToolEnv) > 0 {
 			for _, dir := range testInstalled {
-				go g.installed(dir)
+				prefetch.Go(func() { g.installed(dir) })
 			}
 			break
 		}
@@ -285,7 +289,7 @@ func (g *gate) run(out io.Writer) int {
 		for _, tool := range tools {
 			if !prefetched[tool] {
 				prefetched[tool] = true
-				go g.toolVersion(tool)
+				prefetch.Go(func() { g.toolVersion(tool) })
 			}
 		}
 	}
