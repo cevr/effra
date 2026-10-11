@@ -2,10 +2,15 @@ package compiler
 
 import (
 	"bufio"
+	"fmt"
+	"go/ast"
 	"go/format"
+	goparser "go/parser"
+	goscanner "go/scanner"
 	gotoken "go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -134,6 +139,126 @@ func TestGoLineDirectivesAttributeStackTracesToSource(t *testing.T) {
 	}
 }
 
+// sourcePosition is the file and line a token is meant to have, or that Go
+// assigns it.
+type sourcePosition struct {
+	file string
+	line int
+}
+
+// intendedPositions reads the emitter's marks in a marked lowering and lists,
+// for every compiled token, the position the emitter means it to have: the
+// user source line of the mark before it, or the zero position for glue,
+// which must keep its own main.go line.
+func intendedPositions(t *testing.T, marked []byte) []sourcePosition {
+	t.Helper()
+	positions, current := []sourcePosition{}, sourcePosition{}
+	if err := scanGoTokens(marked, func(_, _ int, token gotoken.Token, literal string) error {
+		switch {
+		case token == gotoken.COMMENT && literal == goLineReset:
+			current = sourcePosition{}
+		case token == gotoken.COMMENT && strings.HasPrefix(literal, "//line "):
+			colon := strings.LastIndexByte(literal, ':')
+			line, err := strconv.Atoi(literal[colon+1:])
+			if err != nil {
+				t.Fatalf("malformed mark %q", literal)
+			}
+			current = sourcePosition{literal[len("//line "):colon], line}
+		case token != gotoken.COMMENT && token != gotoken.SEMICOLON:
+			positions = append(positions, current)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return positions
+}
+
+// assignedPositions lists, for every compiled token of src, the position Go
+// assigns it after applying src's line directives, the line it actually
+// occupies in src, and the token itself.
+func assignedPositions(t *testing.T, src []byte) ([]sourcePosition, []int, []string) {
+	t.Helper()
+	file := gotoken.NewFileSet().AddFile("main.go", -1, len(src))
+	var scanner goscanner.Scanner
+	scanner.Init(file, src, func(position gotoken.Position, message string) { t.Fatalf("%s: %s", position, message) }, goscanner.ScanComments)
+	positions, raw, tokens := []sourcePosition{}, []int{}, []string{}
+	for {
+		at, token, literal := scanner.Scan()
+		if token == gotoken.EOF {
+			return positions, raw, tokens
+		}
+		if token == gotoken.COMMENT || token == gotoken.SEMICOLON {
+			continue
+		}
+		assigned := file.PositionFor(at, true)
+		positions = append(positions, sourcePosition{assigned.Filename, assigned.Line})
+		raw = append(raw, file.PositionFor(at, false).Line)
+		tokens = append(tokens, strings.TrimSpace(token.String()+" "+literal))
+	}
+}
+
+// Every compiled token of every example's generated main, in both entry
+// modes, sits exactly where the emitter meant it: a user token at the .ef
+// line of its declaration or statement, a glue token at its own main.go line.
+func TestGoLineDirectivesPutEveryTokenAtItsIntendedPosition(t *testing.T) {
+	files, err := filepath.Glob("../../examples/*.ef")
+	if err != nil || len(files) == 0 {
+		t.Fatal("no authored examples", err)
+	}
+	checked := 0
+	for _, path := range files {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := CompileAt(string(source), "go", "../..")
+		if !r.Checked {
+			continue
+		}
+		name := filepath.Base(path)
+		for _, mode := range []GoGenerationMode{GoGenerationBuild, GoGenerationTest} {
+			plan, err := r.ApplicationPlan(mode)
+			if err != nil {
+				continue
+			}
+			marked, err := r.emitMarkedGo(plan, name)
+			if err != nil {
+				t.Fatalf("%s %s: %v", name, mode, err)
+			}
+			application, err := r.GoApplicationFrom(mode, filepath.Join("/nonexistent/loop-probe-x", name))
+			if err != nil {
+				t.Fatalf("%s %s: %v", name, mode, err)
+			}
+			intended := intendedPositions(t, marked)
+			assigned, raw, tokens := assignedPositions(t, application.Main)
+			if len(intended) != len(assigned) {
+				t.Errorf("%s %s: %d marked tokens, %d generated", name, mode, len(intended), len(assigned))
+				continue
+			}
+			wrong, examples := 0, []string{}
+			for index, want := range intended {
+				if want == (sourcePosition{}) {
+					want = sourcePosition{"main.go", raw[index]}
+				}
+				if assigned[index] != want {
+					wrong++
+					if len(examples) < 3 {
+						examples = append(examples, fmt.Sprintf("%q at %s:%d, want %s:%d", tokens[index], assigned[index].file, assigned[index].line, want.file, want.line))
+					}
+				}
+			}
+			if wrong > 0 {
+				t.Errorf("%s %s: %d of %d tokens misplaced: %s", name, mode, wrong, len(assigned), strings.Join(examples, "; "))
+			}
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no example lowered")
+	}
+}
+
 // An origin whose name Go would misread in a directive is refused rather
 // than attributed to the wrong file or line.
 func TestGoLineDirectivesRefuseUnnameableOrigins(t *testing.T) {
@@ -141,36 +266,62 @@ func TestGoLineDirectivesRefuseUnnameableOrigins(t *testing.T) {
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-	for _, origin := range []string{"", "/", "/nonexistent/loop-probe-x/main.go", "/nonexistent/loop-probe-x/probe:12", "/nonexistent/loop-probe-x/probe:", "/nonexistent/loop-probe-x/a\nb.ef"} {
+	for _, origin := range []string{"", "/", "/nonexistent/loop-probe-x/probe:12", "/nonexistent/loop-probe-x/probe:0", "/nonexistent/loop-probe-x/a\nb.ef", "/nonexistent/loop-probe-x/a\rb.ef"} {
 		if _, err := r.GoApplicationFrom(GoGenerationBuild, origin); err == nil {
 			t.Errorf("origin %q was admitted", origin)
 		}
 	}
-	if _, err := r.GoApplicationFrom(GoGenerationBuild, "/nonexistent/loop-probe-x/probe:v2.ef"); err != nil {
-		t.Errorf("a colon inside the name is unambiguous: %v", err)
+	// Go reads these names whole: the text after the last colon is not a
+	// number (cmd/compile/internal/syntax/parser.go updateBase).
+	for _, name := range []string{"probe:v2.ef", "probe:12.ef", "probe:", "probe:-1", "main.go"} {
+		application, err := r.GoApplicationFrom(GoGenerationBuild, filepath.Join("/nonexistent/loop-probe-x", name))
+		if err != nil {
+			t.Errorf("%q was refused: %v", name, err)
+			continue
+		}
+		assigned, _, _ := assignedPositions(t, application.Main)
+		if !slices.Contains(assigned, sourcePosition{name, 8}) {
+			t.Errorf("Go does not read %q:8 from the directives", name)
+		}
 	}
 }
 
-// goTokens lists the tokens Go compiles from src: comments and semicolons,
-// which formatting moves between explicit and automatic, are left out.
-func goTokens(t *testing.T, src []byte) []string {
+// syntaxTree prints the syntax tree Go parses from src, without positions or
+// comments: two programs print alike exactly when they differ only in layout
+// and comments. Unlike a token stream, the tree keeps the semicolons that
+// carry meaning, such as the one in switch f(); { ... }.
+func syntaxTree(t *testing.T, src []byte) string {
 	t.Helper()
-	tokens := []string{}
-	if err := scanGoTokens(src, func(_, _ int, token gotoken.Token, literal string) error {
-		if token != gotoken.COMMENT && token != gotoken.SEMICOLON {
-			tokens = append(tokens, token.String()+" "+literal)
-		}
-		return nil
-	}); err != nil {
+	file, err := goparser.ParseFile(gotoken.NewFileSet(), "main.go", src, goparser.SkipObjectResolution)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return tokens
+	var tree strings.Builder
+	position := reflect.TypeFor[gotoken.Pos]()
+	if err := ast.Fprint(&tree, nil, file, func(_ string, value reflect.Value) bool { return value.Type() != position }); err != nil {
+		t.Fatal(err)
+	}
+	return tree.String()
+}
+
+// The comparison sees a semicolon that changes meaning and ignores comments
+// and layout.
+func TestSyntaxTreeComparesProgramsNotLayout(t *testing.T) {
+	withInit := syntaxTree(t, []byte("package p\nfunc f() bool { return false }\nfunc g() { switch f(); { case true: } }\n"))
+	tag := syntaxTree(t, []byte("package p\nfunc f() bool { return false }\nfunc g() { switch f() { case true: } }\n"))
+	commented := syntaxTree(t, []byte("package p\n\nfunc f() bool {\n//line a.ef:3\n\treturn false\n}\nfunc g() { switch f(); {\n//line a.ef:9\ncase true:\n} }\n"))
+	if withInit == tag {
+		t.Error("switch f(); and switch f() compare equal")
+	}
+	if withInit != commented {
+		t.Error("comments and layout change the compared program")
+	}
 }
 
 // Every example's generated main, built and test entries alike:
 //   - is byte-identical from two different absolute checkouts;
-//   - compiles exactly the tokens of the unnamed lowering, so only comments
-//     and layout change;
+//   - parses to the unnamed lowering's syntax tree, so only comments and
+//     layout change;
 //   - is gofmt-formatted, with its directives intact;
 //   - carries only well-formed directives at column 1, each naming a line
 //     of the source or the true next line of main.go.
@@ -208,8 +359,8 @@ func TestGoLineDirectivesAreDeterministicCommentOnlyAndWellFormed(t *testing.T) 
 			if code != string(second.Main) {
 				t.Errorf("%s %s: generated Go depends on the checkout path", name, mode)
 			}
-			if !slices.Equal(goTokens(t, first.Main), goTokens(t, unnamed.Main)) {
-				t.Errorf("%s %s: generated Go compiles different tokens from the unnamed lowering", name, mode)
+			if syntaxTree(t, first.Main) != syntaxTree(t, unnamed.Main) {
+				t.Errorf("%s %s: generated Go parses to a different program from the unnamed lowering", name, mode)
 			}
 			if formatted, err := format.Source(first.Main); err != nil || string(formatted) != code {
 				t.Errorf("%s %s: generated Go is not gofmt-formatted (%v)", name, mode, err)

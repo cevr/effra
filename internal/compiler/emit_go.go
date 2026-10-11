@@ -1,13 +1,13 @@
 package compiler
 
 import (
+	"bytes"
 	"fmt"
 	"go/format"
 	goscanner "go/scanner"
 	gotoken "go/token"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -284,11 +284,13 @@ func (r *Result) GoApplicationFrom(mode GoGenerationMode, origin string) (*GoApp
 	if origin == "" || name == "." || name == string(filepath.Separator) || strings.ContainsAny(name, "\n\r") {
 		return nil, fmt.Errorf("Go source origin %q names no file", origin)
 	}
-	// Go reads a trailing :N of a directive's file name as a position, and
-	// main.go names the generated main itself.
-	colon := strings.LastIndexByte(name, ':')
-	if name == goMainFile || colon >= 0 && strings.Trim(name[colon+1:], "0123456789") == "" {
-		return nil, fmt.Errorf("Go source origin %q cannot name a //line directive", origin)
+	// Go's directive grammar has no escape: it reads the text after a file
+	// name's last colon as a line number whenever it parses as one
+	// (trailingDigits in cmd/compile/internal/syntax and go/scanner).
+	if colon := strings.LastIndexByte(name, ':'); colon >= 0 {
+		if _, err := strconv.ParseUint(name[colon+1:], 10, 0); err == nil {
+			return nil, fmt.Errorf("Go source origin %q ends in :<number>, which a //line directive would read as a position", origin)
+		}
 	}
 	return r.goApplication(mode, name)
 }
@@ -389,14 +391,29 @@ func goServiceDeclaration(program *Program, s *Service) string {
 // checked identity: the emitter never decides reachability itself. A
 // non-empty source names the user source in //line directives.
 func (r *Result) emitGo(plan *ApplicationPlan, source string) (string, error) {
+	marked, err := r.emitMarkedGo(plan, source)
+	if err != nil {
+		return "", err
+	}
+	if source == "" {
+		return string(marked), nil
+	}
+	return placeLineDirectives(marked)
+}
+
+// emitMarkedGo is the formatted lowering before line directives are placed.
+// With a named source, a mark line gives the source position of the code
+// after it, up to the next mark: //line <source>:<line> for a user
+// declaration or statement, goLineReset for generated glue.
+func (r *Result) emitMarkedGo(plan *ApplicationPlan, source string) ([]byte, error) {
 	if plan == nil || plan.Revision != r.Revision || plan.Target != r.Target {
-		return "", fmt.Errorf("Go emission requires this result's application plan")
+		return nil, fmt.Errorf("Go emission requires this result's application plan")
 	}
 	var tests []*Symbol
 	if plan.Mode == GoGenerationTest {
 		var err error
 		if tests, err = r.Tests(); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 	g := &goEmitter{program: r.Program, plan: plan, source: source}
@@ -510,23 +527,21 @@ func efFromRuntime[A any](program er.Effect[A]) efEffect[A] {return func(ctx efC
 	}
 	formatted, err := format.Source([]byte(out.String()))
 	if err != nil {
-		return "", fmt.Errorf("Go lowering generated invalid syntax: %w", err)
+		return nil, fmt.Errorf("Go lowering generated invalid syntax: %w", err)
 	}
-	if source == "" {
-		return string(formatted), nil
-	}
-	return placeLineDirectives(formatted)
+	return formatted, nil
 }
 
-// goPosition is a file and line Go attributes generated code to.
+// goPosition is a file and line Go attributes generated code to. The zero
+// position is generated glue, which keeps its own line in main.go.
 type goPosition struct {
 	file string
 	line int
 }
 
-// placeLineDirectives replaces the line marks of formatted generated Go with
-// the //line directives Go reads. A mark assigns the code after it a user
-// source position; a reset returns it to generated glue.
+// placeLineDirectives replaces the marks of a marked lowering with the
+// //line directives Go reads, so that every compiled token gets the position
+// its mark gives it: a user source line, or its own main.go line for glue.
 //
 // A directive positions only the line after it, and every later line counts
 // on from there, so one directive per statement would attribute the second
@@ -536,95 +551,137 @@ type goPosition struct {
 // the file's own positions hold everywhere else. Directives are whole lines
 // at column 1, as Go requires, and never start inside a multi-line raw string
 // or comment. Only comment lines, and the blank line gofmt keeps before a
-// top-level declaration's comment, are added: the token stream Go compiles
-// is the program's own.
+// top-level declaration's comment, are added: the program Go compiles is the
+// unnamed lowering's.
 //
-// The result is formatted again so it stays gofmt-formatted. Comments can
-// make gofmt break a line it kept whole, which would put a directive's code
-// on a different line; placement then runs again over the reformatted
-// program, whose directives serve as its marks, until formatting moves no
-// directive.
-func placeLineDirectives(formatted []byte) (string, error) {
+// The intended position belongs to each compiled token, not to a line:
+// markedPositions reads it once from the marks, and every placement derives
+// the directives from those positions alone, never from an earlier
+// placement's directives. The result is formatted again so it stays
+// gofmt-formatted. Comments can make gofmt split a line it kept whole; the
+// next placement gives the new line its own directive. The result is the
+// first formatted program that placement leaves unchanged, so its directives
+// are exactly the ones its tokens' positions require.
+func placeLineDirectives(marked []byte) (string, error) {
+	positions, err := markedPositions(marked)
+	if err != nil {
+		return "", err
+	}
+	program := marked
 	for attempt := 0; attempt < 4; attempt++ {
-		placed, err := placeLineDirectivesOnce(formatted)
+		placed, err := placeLineDirectivesOnce(program, positions)
 		if err != nil {
 			return "", err
 		}
-		reformatted, err := format.Source([]byte(placed))
-		if err != nil {
+		if bytes.Equal(placed, program) {
+			return string(program), nil
+		}
+		if program, err = format.Source(placed); err != nil {
 			return "", fmt.Errorf("Go lowering placed line directives that do not format: %w", err)
 		}
-		if slices.Equal(lineDirectiveLayout(placed), lineDirectiveLayout(string(reformatted))) {
-			return string(reformatted), nil
-		}
-		formatted = reformatted
 	}
 	return "", fmt.Errorf("Go lowering placed line directives that formatting keeps moving")
 }
 
-// lineDirectiveLayout lists each directive with its line number, and the
-// total line count last.
-func lineDirectiveLayout(code string) []string {
-	layout := []string{}
-	lines := strings.Split(code, "\n")
-	for index, line := range lines {
-		if strings.HasPrefix(line, "//line ") {
-			layout = append(layout, strconv.Itoa(index+1)+" "+line)
-		}
+// lineMark reads a mark or a placed directive: a comment line that is
+// goLineReset or //line <file>:<line>.
+func lineMark(literal string) (goPosition, bool, error) {
+	if literal == goLineReset {
+		return goPosition{}, true, nil
 	}
-	return append(layout, strconv.Itoa(len(lines)))
+	text, found := strings.CutPrefix(literal, "//line ")
+	if !found {
+		return goPosition{}, false, nil
+	}
+	colon := strings.LastIndexByte(text, ':')
+	line, err := strconv.Atoi(text[colon+1:])
+	if colon <= 0 || err != nil || line <= 0 {
+		return goPosition{}, false, fmt.Errorf("Go lowering emitted malformed line mark %q", literal)
+	}
+	return goPosition{text[:colon], line}, true, nil
 }
 
-// placeLineDirectivesOnce is one placement over formatted Go. Besides the
-// emitter's marks it reads the directives of an earlier placement: one
-// naming main.go is a reset.
-func placeLineDirectivesOnce(formatted []byte) (string, error) {
-	marks, code, interior := map[int]goPosition{}, map[int]bool{}, map[int]bool{}
-	err := scanGoTokens(formatted, func(start, end int, token gotoken.Token, literal string) error {
-		for line := start + 1; line <= end; line++ {
-			interior[line] = true
+// markedPositions lists the intended position of every compiled token of a
+// marked lowering, in order: the position of the mark before it.
+func markedPositions(marked []byte) ([]goPosition, error) {
+	positions, current := []goPosition{}, goPosition{}
+	err := scanGoTokens(marked, func(_, _ int, token gotoken.Token, literal string) error {
+		if token == gotoken.COMMENT {
+			mark, ok, err := lineMark(literal)
+			if ok {
+				current = mark
+			}
+			return err
 		}
-		switch {
-		case token == gotoken.COMMENT && literal == goLineReset:
-			marks[start] = goPosition{}
-		case token == gotoken.COMMENT && strings.HasPrefix(literal, "//line "):
-			colon := strings.LastIndexByte(literal, ':')
-			number, err := strconv.Atoi(literal[colon+1:])
-			if colon <= len("//line ") || err != nil || number <= 0 {
-				return fmt.Errorf("Go lowering emitted malformed line mark %q", literal)
-			}
-			marks[start] = goPosition{literal[len("//line "):colon], number}
-			if marks[start].file == goMainFile {
-				marks[start] = goPosition{}
-			}
-		case token != gotoken.COMMENT && token != gotoken.SEMICOLON:
-			code[start] = true
+		if token != gotoken.SEMICOLON {
+			positions = append(positions, current)
 		}
 		return nil
 	})
+	return positions, err
+}
+
+// placeLineDirectivesOnce drops the marks or directives of a program and
+// places the directives that give its compiled tokens their positions, the
+// i-th token taking positions[i]. Every token that starts on one line must
+// share a position, since a directive positions whole lines; a token on a
+// line that starts inside a multi-line string or comment, where no directive
+// can go, must already have the position Go counts for it.
+func placeLineDirectivesOnce(program []byte, positions []goPosition) ([]byte, error) {
+	marks, interior, wanted := map[int]bool{}, map[int]bool{}, map[int]goPosition{}
+	code, tokens := map[int]bool{}, 0
+	err := scanGoTokens(program, func(start, end int, token gotoken.Token, literal string) error {
+		for line := start + 1; line <= end; line++ {
+			interior[line] = true
+		}
+		if token == gotoken.COMMENT {
+			_, ok, err := lineMark(literal)
+			marks[start] = marks[start] || ok
+			return err
+		}
+		if token == gotoken.SEMICOLON {
+			return nil
+		}
+		if tokens >= len(positions) {
+			return fmt.Errorf("Go lowering formatted into more tokens than it marked")
+		}
+		position := positions[tokens]
+		tokens++
+		if previous, ok := wanted[start]; ok && previous != position {
+			return fmt.Errorf("Go lowering put code of %s:%d and %s:%d on one line", previous.file, previous.line, position.file, position.line)
+		}
+		wanted[start], code[start] = position, true
+		return nil
+	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	var out strings.Builder
-	out.Grow(len(formatted) * 2)
+	if tokens != len(positions) {
+		return nil, fmt.Errorf("Go lowering formatted into %d tokens, marked %d", tokens, len(positions))
+	}
+	var out bytes.Buffer
+	out.Grow(len(program) * 2)
 	// written counts output lines and blank tells whether the last was
 	// empty; effective is the position Go assigns to the next line.
-	written, blank, effective, current := 0, true, goPosition{goMainFile, 1}, goPosition{}
-	for index, line := range strings.SplitAfter(string(formatted), "\n") {
+	written, blank, effective := 0, true, goPosition{goMainFile, 1}
+	for index, line := range strings.SplitAfter(string(program), "\n") {
 		number := index + 1
-		if mark, ok := marks[number]; ok {
+		if marks[number] {
 			if code[number] || interior[number] {
-				return "", fmt.Errorf("Go lowering placed line mark %q beside code on line %d", strings.TrimSpace(line), number)
+				return nil, fmt.Errorf("Go lowering placed line mark %q beside code on line %d", strings.TrimSpace(line), number)
 			}
-			current = mark
 			continue
 		}
-		if code[number] && !interior[number] {
-			wanted := current
-			if current.file == "" {
-				wanted = goPosition{goMainFile, written + 1}
+		if position, ok := wanted[number]; ok {
+			glue := position == goPosition{}
+			if glue {
+				position = goPosition{goMainFile, written + 1}
 			}
-			if effective != wanted {
+			switch {
+			case effective == position:
+			case interior[number]:
+				return nil, fmt.Errorf("Go lowering put code of %s:%d where Go counts %s:%d", position.file, position.line, effective.file, effective.line)
+			default:
 				// A comment directly above a top-level declaration is its doc
 				// comment, which gofmt separates from the code before it.
 				if !blank && topLevelDeclaration(line) {
@@ -632,13 +689,13 @@ func placeLineDirectivesOnce(formatted []byte) (string, error) {
 					written++
 					effective.line++
 				}
-				if current.file == "" {
+				if glue {
 					// The directive takes the line glue would have had.
-					wanted = goPosition{goMainFile, written + 2}
+					position = goPosition{goMainFile, written + 2}
 				}
-				out.WriteString("//line " + wanted.file + ":" + strconv.Itoa(wanted.line) + "\n")
+				out.WriteString("//line " + position.file + ":" + strconv.Itoa(position.line) + "\n")
 				written++
-				effective = wanted
+				effective = position
 			}
 		}
 		out.WriteString(line)
@@ -648,7 +705,7 @@ func placeLineDirectivesOnce(formatted []byte) (string, error) {
 			blank = strings.TrimSpace(line) == ""
 		}
 	}
-	return out.String(), nil
+	return out.Bytes(), nil
 }
 
 // topLevelDeclaration reports whether a formatted line starts a top-level
