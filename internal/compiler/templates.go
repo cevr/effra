@@ -144,6 +144,14 @@ func (c *checker) templateDeclaration(r *Record) Declaration {
 func (c *checker) resolveDataTemplateLayouts() {
 	declarations := append(append([]*DataDeclaration{}, c.program.Records...), c.program.Enums...)
 	declarations = append(declarations, c.program.BundledTemplates...)
+	// Each template's published declaration is replaced once its layout
+	// resolves. checkTemplates published them all, and resolving publishes
+	// none, so their positions are indexed once rather than searched per
+	// template.
+	published := map[string][]int{}
+	for i, d := range c.result.Declarations {
+		published[d.Identity] = append(published[d.Identity], i)
+	}
 	for _, declaration := range declarations {
 		if len(declaration.Parameters) == 0 {
 			continue
@@ -175,10 +183,8 @@ func (c *checker) resolveDataTemplateLayouts() {
 		}
 		c.typeContext = previous
 		c.functionModule = previousModule
-		for i := range c.result.Declarations {
-			if c.result.Declarations[i].Identity == declaration.Identity {
-				c.result.Declarations[i] = c.templateDeclaration(declaration)
-			}
+		for _, i := range published[declaration.Identity] {
+			c.result.Declarations[i] = c.templateDeclaration(declaration)
 		}
 	}
 	c.validateTemplateLayoutCycles(declarations)
@@ -287,23 +293,67 @@ func (c *checker) validateTemplateLayoutCycles(declarations []*DataDeclaration) 
 	}
 }
 
+// templateByName resolves a data template name as the current function's
+// module sees it. An alias-qualified name is a bundled type binding. An
+// unqualified name in the checked file is its first generic record, then its
+// first generic enum, then a bundled template of the file's module; in a
+// bundled module it is that module's first template of the name.
 func (c *checker) templateByName(name string) *Record {
 	if alias, member, qualified := strings.Cut(name, "."); qualified {
 		return c.program.BundledTypeBindings[alias][member]
 	}
+	index := c.templateNameIndex()
 	if c.functionModule == "" || c.functionModule == currentModuleIdentity {
-		for _, r := range append(append([]*DataDeclaration{}, c.program.Records...), c.program.Enums...) {
-			if len(r.Parameters) > 0 && r.Name == name {
-				return r
-			}
-		}
-	}
-	for _, r := range c.program.BundledTemplates {
-		if r.Module == c.functionModule && r.Name == name {
+		if r := index.local[name]; r != nil {
 			return r
 		}
 	}
-	return nil
+	return index.bundled[c.functionModule][name]
+}
+
+// templateNames indexes the program's templates by unqualified name, once per
+// module scope: local holds the checked file's generic records and enums,
+// bundled each module's bundled templates. The first declaration of a name
+// wins, as the declaration order did for a scan. Checking every type name
+// therefore costs one map probe instead of a pass over every declaration.
+type templateNames struct {
+	// lists records the lengths of Records, Enums and BundledTemplates the
+	// index was derived from.
+	lists   [3]int
+	local   map[string]*Record
+	bundled map[string]map[string]*Record
+}
+
+// templateNameIndex derives the index from the program's declaration lists.
+// They are complete before checking starts (builtin data and bundled imports
+// enter first) and only ever grow, so the index is rebuilt only when a list's
+// length has changed since it was derived.
+func (c *checker) templateNameIndex() *templateNames {
+	p := c.program
+	lists := [3]int{len(p.Records), len(p.Enums), len(p.BundledTemplates)}
+	if c.templateNames != nil && c.templateNames.lists == lists {
+		return c.templateNames
+	}
+	index := &templateNames{lists: lists, local: map[string]*Record{}, bundled: map[string]map[string]*Record{}}
+	for _, declarations := range [2][]*DataDeclaration{p.Records, p.Enums} {
+		for _, r := range declarations {
+			if _, seen := index.local[r.Name]; !seen && len(r.Parameters) > 0 {
+				index.local[r.Name] = r
+			}
+		}
+	}
+	for _, r := range p.BundledTemplates {
+		names := index.bundled[r.Module]
+		if names == nil {
+			names = map[string]*Record{}
+			index.bundled[r.Module] = names
+		}
+		if _, seen := names[r.Name]; !seen {
+			names[r.Name] = r
+		}
+	}
+	c.templateNames = index
+	return index
 }
 
 func (c *checker) templateDataArgument(id TypeID) bool {

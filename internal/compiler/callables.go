@@ -188,13 +188,7 @@ func (c *checker) sourceRowsKnown(labels []string, kind string) bool {
 				return false
 			}
 		case "uses":
-			known := c.services[name] != nil
-			if c.program != nil {
-				for _, service := range c.program.Services {
-					known = known || service.Name == name
-				}
-			}
-			if !known {
+			if c.services[name] == nil && !c.declaresService(name) {
 				return false
 			}
 		default:
@@ -202,6 +196,30 @@ func (c *checker) sourceRowsKnown(labels []string, kind string) bool {
 		}
 	}
 	return true
+}
+
+// declaredServices are the service names a program declares, derived from
+// the length of Program.Services they were indexed from.
+type declaredServices struct {
+	from  int
+	names map[string]bool
+}
+
+// declaresService reports whether the program declares a service of this
+// name, registered yet or not. The names are indexed once rather than
+// scanned for every row label; only parsing grows the service list, and the
+// index is rebuilt if its length has changed.
+func (c *checker) declaresService(name string) bool {
+	if c.program == nil {
+		return false
+	}
+	if c.serviceNames == nil || c.serviceNames.from != len(c.program.Services) {
+		c.serviceNames = &declaredServices{from: len(c.program.Services), names: map[string]bool{}}
+		for _, service := range c.program.Services {
+			c.serviceNames.names[service.Name] = true
+		}
+	}
+	return c.serviceNames.names[name]
 }
 
 // Row variables are qualified by their declaration, never matched by the
