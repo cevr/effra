@@ -681,18 +681,27 @@ func (o *observer) names(tid int, l located) []string {
 func (o *observer) socket(listener int, n *notification, c call, buffer []byte) {
 	tid := int(n.pid)
 	var addresses [][2]uint64 // pointer and length
+	var headers []uint64      // struct msghdr addresses
 	switch c.kind {
 	case kindSocket:
 		addresses = append(addresses, [2]uint64{n.args[c.path], uint64(uint32(n.args[c.flags]))})
 	case kindSocketMsg:
-		if address, ok := messageAddress(tid, n.args[c.path]); ok {
-			addresses = append(addresses, address)
-		}
+		headers = append(headers, n.args[c.path])
 	case kindSocketMsgs:
 		for i := range min(uint64(uint32(n.args[c.flags])), maxMessages) {
-			if address, ok := messageAddress(tid, n.args[c.path]+i*mmsghdrSize); ok {
-				addresses = append(addresses, address)
+			headers = append(headers, n.args[c.path]+i*mmsghdrSize)
+		}
+	}
+	for _, header := range headers {
+		address, ok, err := messageAddress(tid, header)
+		if err != nil {
+			if valid(listener, n.id) {
+				o.rec.fail(err.Error())
 			}
+			return
+		}
+		if ok {
+			addresses = append(addresses, address)
 		}
 	}
 	a := access{tid: tid, args: n.args, call: c, buffer: buffer}
@@ -720,15 +729,26 @@ func (o *observer) socket(listener int, n *notification, c call, buffer []byte) 
 	}
 }
 
-// messageAddress reads the address and its length from a struct msghdr.
-func messageAddress(tid int, header uint64) ([2]uint64, bool) {
+// messageAddress reads the address and its length from a struct msghdr, or
+// false if it names none. Memory the kernel cannot read either, or a thread
+// that died, names none: the call faults or never happens. Any other error,
+// such as EPERM from a process that made itself undumpable, leaves the
+// header unread while the kernel reads it, so it is returned.
+func messageAddress(tid int, header uint64) ([2]uint64, bool, error) {
 	var raw [16]byte // msg_name, then the u32 msg_namelen
-	if got, err := readMemory(tid, header, raw[:]); err != nil || got < len(raw) {
-		return [2]uint64{}, false // the kernel faults the call too
+	got, err := readMemory(tid, header, raw[:])
+	if err != nil {
+		if errors.Is(err, errFault) || errors.Is(err, syscall.ESRCH) {
+			return [2]uint64{}, false, nil
+		}
+		return [2]uint64{}, false, fmt.Errorf("read a message header: %w", err)
+	}
+	if got < len(raw) {
+		return [2]uint64{}, false, nil // the header runs into unmapped memory: the call faults
 	}
 	pointer := *(*uint64)(unsafe.Pointer(&raw[0]))
 	length := uint64(*(*uint32)(unsafe.Pointer(&raw[8])))
-	return [2]uint64{pointer, length}, pointer != 0
+	return [2]uint64{pointer, length}, pointer != 0, nil
 }
 
 // socketPath returns the path an AF_UNIX struct sockaddr_un names, or "".

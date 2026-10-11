@@ -303,9 +303,15 @@ func TestSocketPath(t *testing.T) {
 	header := make([]byte, 56)
 	binary.LittleEndian.PutUint64(header, 0x1234)
 	binary.LittleEndian.PutUint32(header[8:], 17)
-	got, ok := messageAddress(tid, uint64(uintptr(unsafe.Pointer(&header[0]))))
-	if !ok || got != [2]uint64{0x1234, 17} {
-		t.Errorf("messageAddress = %v, %v", got, ok)
+	got, ok, err := messageAddress(tid, uint64(uintptr(unsafe.Pointer(&header[0]))))
+	if !ok || err != nil || got != [2]uint64{0x1234, 17} {
+		t.Errorf("messageAddress = %v, %v, %v", got, ok, err)
 	}
 	runtime.KeepAlive(header)
+	// Memory the kernel faults on too names no address; the e2e case "fail
+	// closed: undumpable sendmsg" covers a header the kernel can read but
+	// the observer cannot.
+	if got, ok, err := messageAddress(tid, 0); ok || err != nil {
+		t.Errorf("messageAddress(NULL) = %v, %v, %v; want no address, no error", got, ok, err)
+	}
 }

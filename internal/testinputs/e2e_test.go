@@ -755,6 +755,30 @@ func init() {
 		unobserved: "result not cacheable, inputs unobserved: bpf",
 	},
 	{
+		// Review c2-3 probe C1: an undumpable process refuses the observer's
+		// memory reads, but the kernel still reads its struct msghdr and looks
+		// the socket path up. Only the sendmsg runs undumpable, so its header
+		// is the one read that fails. The path is relative: sun_path holds 108
+		// bytes, less than a long temporary directory needs.
+		name:    "c2-3 C1 fail closed: sendmsg from an undumpable process",
+		imports: []string{"syscall"},
+		run: `address := &syscall.SockaddrUnix{Name: filepath.Join("run", "agent.sock")}
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_DGRAM|syscall.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer syscall.Close(fd)
+	syscall.RawSyscall(syscall.SYS_PRCTL, syscall.PR_SET_DUMPABLE, 0, 0)
+	err = syscall.Sendmsg(fd, []byte("x"), nil, address, 0)
+	syscall.RawSyscall(syscall.SYS_PRCTL, syscall.PR_SET_DUMPABLE, 1, 0)
+	if err != nil {
+		return []byte(err.Error()), nil
+	}
+	return []byte("sent"), nil`,
+		files:      map[string]string{"run/keep.txt": "keep\n"},
+		unobserved: "result not cacheable, inputs unobserved: read a message header: operation not permitted",
+	},
+	{
 		name:       "fail closed: a system call newer than the table",
 		imports:    []string{"syscall"},
 		run:        `_, _, errno := syscall.RawSyscall(463, 0, 0, 0); return []byte(errno.Error()), nil`,
