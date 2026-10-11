@@ -702,6 +702,15 @@ func TestMachineGenericLayoutsAreChargedAndShared(t *testing.T) {
 	if len(r.Machines) != 256 {
 		t.Fatalf("%d of 256 declarations planned: %v", len(r.Machines), machineCodes(r))
 	}
+	// One declaration: the shared layout's substituted key text is the only
+	// large allocation, with no other declaration's charges to cover it.
+	single := machineGenericPayloadLayouts
+	single.declarations = 1
+	r, measures = measureMachineAnalysis(t, single.source())
+	assertMachineAllocationCharged(t, "one generic payload layout", measures)
+	if len(r.Machines) != 1 {
+		t.Fatalf("one generic payload layout refused: %v", machineCodes(r))
+	}
 }
 
 // Round-1 review M1: substitution validates the template argument afresh for
