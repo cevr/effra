@@ -129,6 +129,8 @@ A key that replays a pass must name every input that can change the outcome. The
 | `1724ca6f`, no-ops | 31.2 s, 2.0 s | load 9.6→25.7; the first reran the Go packages that recorded the root before the cleanup-provenance control moved its time (above); framework-port references replayed in both |
 | `6eab105a` (emptied `.generated`, keyed permission bits, and executable fingerprints, since reverted), first run | 91.9 s, failed | load 73→72; every key and `EFFRA_TOOL_VERSIONS` changed, so every Go test reran and framework-port references executed (32.6 s). `lint`'s `TestRunBoundsTheRequestWriteHeldByAnEscapedDescendant` failed once under this load and passed on the next run. The cause is a race in `lint/run.go`, outside this runner: the pack can be reaped before its memory limit is applied |
 | `6eab105a`, no-ops | 10.4 s, 3.1 s | load 72→58; the first reran `lint` after its failure; framework-port references replayed in both |
+| `ccb6ca9e` (executable fingerprints reverted, main `6b349af8` merged), first run | 95.4 s | load 17.9→46.0; `EFFRA_TOOL_VERSIONS` and the tool fingerprints changed back and the merge changed compiler sources, so the Go tests reran and framework-port references executed (27.8 s) |
+| `ccb6ca9e`, no-ops | 2.5 s, 3.8 s | load 48.7→48.0; every keyed step cached |
 
 ## Turborepo, rejected
 
