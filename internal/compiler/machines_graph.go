@@ -3,21 +3,12 @@ package compiler
 import (
 	"slices"
 	"strings"
-	"unsafe"
 )
 
 // GraphKindMachine projects checked machine plans: one node per declaration,
 // its states and terminal output, and one edge per possible decision. The
 // projection reads MachinePlan only; it never re-derives transitions and never
 // executes a step.
-
-// A plan node's fixed copies: its facts record, the node fact and its map
-// slot, and the three values every plan projects; each bound function adds
-// its record and its contract value.
-const (
-	machineGraphPlanBytes     = int(unsafe.Sizeof(GraphMachineFacts{})+unsafe.Sizeof(graphFactNode{})+unsafe.Sizeof(GraphViewNode{})+3*unsafe.Sizeof(ValueType{})) + 256
-	machineGraphFunctionBytes = int(unsafe.Sizeof(GraphMachineFunction{}) + unsafe.Sizeof(ValueType{}))
-)
 
 var machineGraphRelations = []string{"any", "contains", "done", "go", "ignore", "initial", "reject", "stay"}
 
@@ -97,11 +88,10 @@ func (r *Result) machineGraphFacts(limits GraphViewLimits) (*graphFacts, error) 
 // quadratic in the state count, so continuing past the work limit would do
 // unbounded work for a view that is already refused.
 func machineGraphPlan(facts *graphFacts, plan *MachinePlan) bool {
-	// The plan node copies the plan's values and functions: charged as bytes
-	// before they are allocated, so a plan with no transitions pays for them.
-	if !facts.spend(machineTextUnits(machineGraphPlanBytes + len(plan.Functions)*machineGraphFunctionBytes)) {
-		return false
-	}
+	// The node's fixed copies (its facts, three values and each bound
+	// function's record and contract) are sized once. They are a constant per
+	// plan and per function, within what the plan's analysis charged for its
+	// declaration (machineDeclarationUnits) and its functions.
 	span := plan.Span
 	functions := make([]GraphMachineFunction, 0, len(plan.Functions))
 	values := make([]ValueType, 0, 3+len(plan.Functions))
