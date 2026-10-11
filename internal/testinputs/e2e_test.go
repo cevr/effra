@@ -666,6 +666,95 @@ func init() {
 		want:    "init-2",
 	},
 	{
+		// Both files have the same size, mode and time, so only the link's
+		// own Lstat tells them apart.
+		name:   "c2-2 N3 read through an in-root link retargeted to a look-alike file",
+		tools:  []string{"cat"},
+		files:  map[string]string{"a/value.txt": "a-1\n", "b/value.txt": "b-1\n"},
+		links:  map[string]string{"dirs/current": "../a"},
+		run:    `return command("cat", "dirs/current/value.txt")`,
+		before: "a-1",
+		edit:   func(t *testing.T, f *fixture) { f.relink(t, "dirs/current", "../b") },
+		want:   "b-1",
+	},
+	{
+		// The shell that changed directory exits before its background
+		// reader looks anything up, so the reader is reparented. The relink
+		// keeps the link's and the directories' times, so the chdir's lookup
+		// of the link does not change the key; only the reader's name under
+		// the link does.
+		name:  "c2-2 N2b cd through a link relinked with its time kept, reparented reader",
+		tools: []string{"sh", "cat", "sleep", "touch"},
+		files: map[string]string{"a/value.txt": "a-1\n", "b/value.txt": "b-22\n"},
+		links: map[string]string{"dirs/current": "../a"},
+		setup: func(t *testing.T, f *fixture) {
+			for _, dir := range []string{"a", "b", "dirs"} {
+				f.backdate(t, dir, f.base)
+			}
+			f.backdateLink(t, "dirs/current", f.base)
+		},
+		imports: []string{"time"},
+		run: `dir, err := os.MkdirTemp("", "n2b-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	out := filepath.Join(dir, "out")
+	if _, err := command("sh", "-c", "cd dirs/current && { (sleep 1; cat value.txt > \"$1\") >/dev/null 2>&1 & }", "sh", out); err != nil {
+		return nil, err
+	}
+	for range 200 {
+		if data, err := os.ReadFile(out); err == nil && len(data) > 0 {
+			return data, nil
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return nil, os.ErrDeadlineExceeded`,
+		before: "a-1",
+		edit: func(t *testing.T, f *fixture) {
+			f.relink(t, "dirs/current", "../b")
+			f.backdateLink(t, "dirs/current", f.base)
+			f.backdate(t, "dirs", f.base)
+		},
+		want: "b-22",
+	},
+	{
+		// connect looks the socket's path up: a file added there changes
+		// the call's outcome.
+		name:    "o1 unix socket path added",
+		imports: []string{"net"},
+		run: `conn, err := net.Dial("unix", filepath.Join(root(), "run", "agent.sock"))
+	if err != nil {
+		return []byte(err.Error()), nil
+	}
+	conn.Close()
+	return []byte("connected"), nil`,
+		files:  map[string]string{"run/keep.txt": "keep\n"},
+		before: "no such file",
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "run/agent.sock", "") },
+		want:   "connection refused",
+	},
+	{
+		name:       "c2-2 N5 inherited EFFRA_TESTINPUTS_FILTERED",
+		files:      map[string]string{"data/value.txt": "v-1\n"},
+		env:        []string{"EFFRA_TESTINPUTS_FILTERED=1"},
+		run:        `return os.ReadFile(filepath.Join(root(), "data", "value.txt"))`,
+		unobserved: "result not cacheable, inputs unobserved: EFFRA_TESTINPUTS_FILTERED is set, but ",
+	},
+	{
+		name:       "c2-2 N5 inherited EFFRA_TESTINPUTS_LISTENER",
+		files:      map[string]string{"data/value.txt": "v-1\n"},
+		env:        []string{"EFFRA_TESTINPUTS_LISTENER=3"},
+		run:        `return os.ReadFile(filepath.Join(root(), "data", "value.txt"))`,
+		unobserved: "result not cacheable, inputs unobserved: EFFRA_TESTINPUTS_LISTENER is set, but ",
+	},
+	{
+		name:       "fail closed: bpf",
+		imports:    []string{"runtime", "syscall"},
+		run:        `_, _, errno := syscall.RawSyscall(map[string]uintptr{"amd64": 321, "arm64": 280}[runtime.GOARCH], 0, 0, 0); return []byte(errno.Error()), nil`,
+		unobserved: "result not cacheable, inputs unobserved: bpf",
+	},
+	{
 		name:       "fail closed: a system call newer than the table",
 		imports:    []string{"syscall"},
 		run:        `_, _, errno := syscall.RawSyscall(463, 0, 0, 0); return []byte(errno.Error()), nil`,
@@ -848,6 +937,14 @@ func (f *fixture) backdate(t *testing.T, rel string, date time.Time) {
 	}
 }
 
+// backdateLink dates a link itself, as touch -h does; os.Chtimes follows it.
+func (f *fixture) backdateLink(t *testing.T, rel string, date time.Time) {
+	t.Helper()
+	if output, err := exec.Command("touch", "-h", "-d", fmt.Sprintf("@%d", date.Unix()), f.path(rel)).CombinedOutput(); err != nil {
+		t.Fatalf("touch -h %s: %v\n%s", rel, err, output)
+	}
+}
+
 // backdateTree dates every file below rel, as backdate does one.
 func (f *fixture) backdateTree(t *testing.T, rel string, date time.Time) {
 	t.Helper()
@@ -866,7 +963,8 @@ func (f *fixture) git(t *testing.T, args ...string) {
 	t.Helper()
 	command := exec.Command("git", args...)
 	command.Dir = f.root
-	command.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	command.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=fixture", "GIT_AUTHOR_EMAIL=fixture@example.invalid", "GIT_COMMITTER_NAME=fixture", "GIT_COMMITTER_EMAIL=fixture@example.invalid")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
 	}
@@ -1112,6 +1210,122 @@ func TestCacheCases(t *testing.T) {
 			t.Logf("receipt: after the edit the plain control replayed (cached) %q; the observed probe reran and printed %q", probeOutput(edited["control"].output), probeOutput(edited["probe"].output))
 		})
 	}
+}
+
+// TestGuardSeesNewTestPackages runs the coverage guard in a module copied
+// from this one, in a linked worktree (whose Git index lies outside the
+// module root) and in a plain checkout, and adds a test package without
+// TestMain: untracked, then committed in the worktree. The guard must rerun
+// and fail each time, never replay its earlier pass.
+func TestGuardSeesNewTestPackages(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over fixture modules")
+	}
+	for _, tool := range []string{"git", "go"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s is not on PATH", tool)
+		}
+	}
+	for _, worktree := range []bool{true, false} {
+		name := "plain checkout, untracked package"
+		if worktree {
+			name = "linked worktree, untracked then committed package"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := guardFixture(t)
+			if worktree {
+				linked := filepath.Join(t.TempDir(), "linked")
+				f.git(t, "worktree", "add", "--quiet", "-b", "linked", linked)
+				f.root = linked
+				// cmd/go caches no result that read a file changed in the
+				// last two seconds.
+				f.backdateTree(t, ".", f.base)
+			}
+			const guard = "internal/testinputs/guard"
+			if r := f.goTestPackage(t, guard); !r.ok || r.cached {
+				t.Fatalf("prime: want an uncached pass:\n%s", r.output)
+			}
+			if r := f.goTestPackage(t, guard); !r.ok || !r.cached {
+				t.Fatalf("unchanged: want a cached pass:\n%s", r.output)
+			}
+			f.write(t, "internal/reviewnew/new_test.go", "package reviewnew\n\nimport \"testing\"\n\nfunc TestNew(t *testing.T) {}\n")
+			steps := []string{"untracked"}
+			if worktree {
+				steps = append(steps, "committed")
+			}
+			for _, step := range steps {
+				if step == "committed" {
+					f.git(t, "add", "internal/reviewnew/new_test.go")
+					f.git(t, "commit", "--quiet", "-m", "add a test package without TestMain")
+				}
+				r := f.goTestPackage(t, guard)
+				if r.ok || r.cached || !strings.Contains(r.output, "internal/reviewnew: no TestMain") {
+					t.Fatalf("%s: want an uncached failure naming internal/reviewnew (ok %v, cached %v):\n%s", step, r.ok, r.cached, r.output)
+				}
+			}
+			t.Logf("receipt: the guard reran and failed after the package was added (%s)", strings.Join(steps, ", then "))
+		})
+	}
+}
+
+// guardFixture makes a Git repository holding a module named as this one,
+// with this package's code and its guard, committed.
+func guardFixture(t *testing.T) *fixture {
+	t.Helper()
+	now := time.Now()
+	f := &fixture{root: t.TempDir(), base: now.Add(-2 * time.Hour), edited: now.Add(-time.Hour)}
+	if resolved, err := filepath.EvalSymlinks(f.root); err == nil {
+		f.root = resolved
+	}
+	f.put(t, "go.mod", "module effra.local/prototype\n\ngo 1.24\n", f.base)
+	var sources []string
+	for _, pattern := range []string{"*.go", "testenv/*.go", "guard/*.go"} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources = append(sources, matches...)
+	}
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") && !strings.HasPrefix(source, "guard/") {
+			continue
+		}
+		data, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.put(t, "internal/testinputs/"+source, string(data), f.base)
+	}
+	// cmd/go keeps one test log per test binary, and -trimpath would make
+	// every fixture's guard the same binary; a logged constant makes each
+	// distinct.
+	f.put(t, "internal/testinputs/guard/fixture_test.go", "package guard\n\nimport \"testing\"\n\nfunc TestFixture(t *testing.T) { t.Log("+fmt.Sprintf("%q", f.root)+") }\n", f.base)
+	var err error
+	if f.goTool, err = exec.LookPath("go"); err != nil {
+		t.Skip("go is not on PATH")
+	}
+	f.runner = f.goTool
+	f.git(t, "init", "--quiet", "-b", "main")
+	f.git(t, "add", "-A")
+	f.git(t, "commit", "--quiet", "-m", "fixture")
+	return f
+}
+
+// goTestPackage runs go test on one package of a module and returns its
+// result, by its full import path.
+func (f *fixture) goTestPackage(t *testing.T, pkg string) result {
+	t.Helper()
+	command := exec.Command(f.goTool, "test", "-trimpath", "./"+pkg)
+	command.Dir = f.root
+	command.Env = f.environment()
+	output, _ := command.CombinedOutput()
+	text := string(output)
+	line := regexp.MustCompile(`(?m)^(ok|FAIL)\s+\S+/` + regexp.QuoteMeta(pkg) + `(\s.*)?$`).FindStringSubmatch(text)
+	if line == nil {
+		t.Fatalf("go test ./%s: no result:\n%s", pkg, text)
+	}
+	return result{ok: line[1] == "ok", cached: strings.Contains(line[2], "(cached)"), output: text}
 }
 
 func TestCacheCasesAreNamedOnce(t *testing.T) {
