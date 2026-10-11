@@ -175,8 +175,8 @@ func TestMagicLinks(t *testing.T) {
 }
 
 // TestWorkdirs checks that a name relative to a working directory reached
-// through a link is also recorded under the link, in the thread group that
-// changed to it and in a child that inherited it, until an fchdir.
+// through a link is also recorded under the link, whichever process makes
+// the call, and under every link that led there.
 func TestWorkdirs(t *testing.T) {
 	base := t.TempDir()
 	target := filepath.Join(base, "a")
@@ -192,35 +192,37 @@ func TestWorkdirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := newObserver(base)
-	tid := syscall.Gettid()
-	if got := o.dirs.logical(tid, physical); got != "" {
+	if got := o.dirs.logical(physical); got != nil {
 		t.Fatalf("before any chdir: %q", got)
 	}
-	o.dirs.change(tid, filepath.Join(base, "missing")) // fails: nothing to remember
-	o.dirs.change(tid, target)                         // crosses no link
+	o.dirs.change(filepath.Join(base, "missing")) // fails: nothing to remember
+	o.dirs.change(target)                         // crosses no link
+	o.dirs.change("/proc/self/cwd")               // a magic link, which resolves in the observer
 	if o.dirs.active.Load() {
 		t.Fatal("a chdir through no link was remembered")
 	}
-	o.dirs.change(tid, link)
-	if got := o.dirs.logical(tid, physical); got != link {
+	o.dirs.change(link)
+	o.dirs.change(link) // remembered once
+	if got := o.dirs.logical(physical); !slices.Equal(got, []string{link}) {
 		t.Fatalf("after chdir: %q, want %q", got, link)
 	}
-	if got := o.dirs.logical(tid, base); got != "" {
+	if got := o.dirs.logical(base); got != nil {
 		t.Fatalf("at another physical location: %q", got)
 	}
-	got := o.names(tid, located{path: physical + "/value.txt", base: physical, name: "value.txt"})
-	if want := []string{physical + "/value.txt", link + "/value.txt"}; !slices.Equal(got, want) {
-		t.Fatalf("names %q, want %q", got, want)
-	}
-	// A child process inherits its parent's working directory.
+	// Any thread, a reparented child's included: nothing is kept per process.
 	const child = 1 << 30 // no such thread
-	group := o.dirs.processes[tid].group
-	o.dirs.processes[child] = processIDs{group: child, parent: group}
-	if got := o.dirs.logical(child, physical); got != link {
-		t.Fatalf("in a child: %q, want %q", got, link)
+	for _, tid := range []int{syscall.Gettid(), child} {
+		got := o.names(tid, located{path: physical + "/value.txt", base: physical, name: "value.txt"})
+		if want := []string{physical + "/value.txt", link + "/value.txt"}; !slices.Equal(got, want) {
+			t.Fatalf("names in %d: %q, want %q", tid, got, want)
+		}
 	}
-	o.dirs.forget(tid)
-	if got := o.dirs.logical(tid, physical); got != "" {
-		t.Fatalf("after fchdir: %q", got)
+	other := filepath.Join(base, "other")
+	if err := os.Symlink(target, other); err != nil {
+		t.Fatal(err)
+	}
+	o.dirs.change(other)
+	if got, want := o.dirs.logical(physical), []string{link, other}; !slices.Equal(got, want) {
+		t.Fatalf("after a second link: %q, want %q", got, want)
 	}
 }

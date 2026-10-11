@@ -7,8 +7,12 @@ import (
 	"runtime"
 )
 
-// observed is never set: no process here is traced.
-var observed bool
+// observed and impostor are never set: no process here is traced, and the
+// observer's variables mean nothing.
+var (
+	observed bool
+	impostor string
+)
 
 // observe reports that this platform cannot observe, so Main runs the tests
 // unobserved and leaves the result uncached.

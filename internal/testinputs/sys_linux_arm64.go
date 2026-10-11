@@ -47,7 +47,6 @@ var calls = []call{
 	{nr: 14, kind: kindStat, dirfd: -1, path: 0},                                    // removexattr
 	{nr: 15, kind: kindStat, dirfd: -1, path: 0},                                    // lremovexattr
 	{nr: 49, kind: kindChdir, dirfd: -1, path: 0},                                   // chdir
-	{nr: 50, kind: kindFchdir},                                                      // fchdir
 	{nr: 221, kind: kindExec, dirfd: -1, path: 0, env: 2},                           // execve
 	{nr: 281, kind: kindExec, dirfd: 0, path: 1, env: 3, atFlags: 4},                // execveat
 	{nr: 435, kind: kindClone3},                                                     // clone3

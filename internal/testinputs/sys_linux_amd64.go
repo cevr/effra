@@ -66,7 +66,6 @@ var calls = []call{
 	{nr: 197, kind: kindStat, dirfd: -1, path: 0},                                    // removexattr
 	{nr: 198, kind: kindStat, dirfd: -1, path: 0},                                    // lremovexattr
 	{nr: 80, kind: kindChdir, dirfd: -1, path: 0},                                    // chdir
-	{nr: 81, kind: kindFchdir},                                                       // fchdir
 	{nr: 59, kind: kindExec, dirfd: -1, path: 0, env: 2},                             // execve
 	{nr: 322, kind: kindExec, dirfd: 0, path: 1, env: 3, atFlags: 4},                 // execveat
 	{nr: 435, kind: kindClone3},                                                      // clone3: its flags are in memory

@@ -16,11 +16,13 @@
 //     mode and modification time, and for a directory listed, which it
 //     rechecks by the name and metadata of every entry;
 //   - "stat" for a lookup, a failed one included, so a file added later is an
-//     input too, and for a working directory changed to;
+//     input too, for a working directory changed to, and for every link
+//     inside the root on the way to a recorded path;
 //   - "getenv" for every variable in the environment of every program run.
 //
 // When it cannot observe (another operating system, no seccomp listener, a
-// call that would hide later accesses, a path the log cannot carry), Main
+// call that would hide later accesses, a path the log cannot carry, an
+// observer variable inherited without an observer), Main
 // leaves the log without its final newline. cmd/go then
 // refuses to cache the result (saveOutput), so an unobserved result is never
 // replayed, only rerun.
@@ -54,6 +56,10 @@ func MainFunc(m *testing.M, run func() int) int {
 	log := testLog(os.Args[1:])
 	if observed || log == "" {
 		return run() // the observed test process, or cmd/go is not caching
+	}
+	if impostor != "" {
+		// An inherited observer variable with no observer behind it.
+		return unobserved(log, run(), impostor)
 	}
 	root, err := moduleRoot()
 	if err != nil {

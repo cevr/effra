@@ -36,7 +36,6 @@ const (
 	kindOpenat2                        // openat with its flags in a struct open_how
 	kindStat                           // consults a path's existence or metadata
 	kindChdir                          // looks a directory up and makes it the working directory
-	kindFchdir                         // makes a descriptor's directory the working directory
 	kindExec                           // runs a file with an environment
 	kindClone3                         // may create namespaces; its flags are in memory
 	kindSeccomp                        // may install a listener that takes calls from this one
@@ -90,7 +89,9 @@ const (
 const listenerVariable = "EFFRA_TESTINPUTS_LISTENER"
 
 // filteredVariable marks the test process that the filtered child started
-// by exec, with the filter in place from its first instruction.
+// by exec, with the filter in place from its first instruction. Its value is
+// the descriptor of the child's end of the socket to the observer, kept open
+// across the exec as proof that the observer is there.
 const filteredVariable = "EFFRA_TESTINPUTS_FILTERED"
 
 // armedPath is the path the test process looks up once its listener is
@@ -100,28 +101,49 @@ const armedPath = "/nonexistent/effra-testinputs/armed"
 // observed is true in the observed test process, which runs the tests itself.
 var observed bool
 
+// impostor, when not empty, says why this process carries one of the
+// observer's variables without an observer behind it: inherited from a shell
+// or a runner, say. Such a process is not observed, and MainFunc refuses its
+// result.
+var impostor string
+
 // init runs in the child the observer starts. It installs the filter, hands
 // its listener over, and runs the test binary again by exec: the filter
 // survives exec, so the package initializers that Go ran before this one
 // run again observed. Only the exec'd process reports itself armed; if the
 // exec fails, the observer finds no armed report and refuses the result.
+//
+// Both variables are trusted only once the process proves its observer
+// exists: the descriptor a variable names is a socket whose peer is this
+// process's parent, which created the pair (SO_PEERCRED), and the exec'd
+// process also runs under a seccomp filter.
 func init() {
-	if _, ok := os.LookupEnv(filteredVariable); ok {
+	if value, ok := os.LookupEnv(filteredVariable); ok {
 		os.Unsetenv(filteredVariable)
+		socket, err := observerSocket(value)
+		if err == nil && !filtered() {
+			err = errors.New("no seccomp filter")
+		}
+		if err != nil {
+			impostor = filteredVariable + " is set, but " + err.Error()
+			return
+		}
+		syscall.Close(socket)
 		observed = true
 		syscall.Access(armedPath, 0)
 		return
 	}
-	fd, ok := os.LookupEnv(listenerVariable)
+	value, ok := os.LookupEnv(listenerVariable)
 	if !ok {
 		return
 	}
 	os.Unsetenv(listenerVariable)
-	observed = true
-	number, err := strconv.Atoi(fd)
+	number, err := observerSocket(value)
 	if err != nil {
+		impostor = listenerVariable + " is set, but " + err.Error()
 		return
 	}
+	observed = true
 	socket := os.NewFile(uintptr(number), "testinputs")
 	listener, err := installFilter()
 	if err != nil {
@@ -130,15 +152,47 @@ func init() {
 		return
 	}
 	rights := syscall.UnixRights(listener)
-	err = syscall.Sendmsg(int(socket.Fd()), []byte("ok"), rights, nil, 0)
+	err = syscall.Sendmsg(number, []byte("ok"), rights, nil, 0)
 	syscall.Close(listener)
-	socket.Close()
 	if err != nil {
+		socket.Close()
 		return
 	}
 	if executable, err := os.Executable(); err == nil {
-		syscall.Exec(executable, os.Args, append(os.Environ(), filteredVariable+"=1"))
+		syscall.Exec(executable, os.Args, append(os.Environ(), filteredVariable+"="+value))
 	}
+	socket.Close()
+}
+
+// observerSocket returns the descriptor a variable names if it is a socket
+// whose peer is this process's parent.
+func observerSocket(value string) (int, error) {
+	fd, err := strconv.Atoi(value)
+	if err != nil || fd < 0 {
+		return -1, fmt.Errorf("%q names no descriptor", value)
+	}
+	cred, err := syscall.GetsockoptUcred(fd, syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+	if err != nil {
+		return -1, fmt.Errorf("descriptor %d is no socket to an observer: %v", fd, err)
+	}
+	if int(cred.Pid) != os.Getppid() {
+		return -1, fmt.Errorf("descriptor %d leads to process %d, not to the parent %d", fd, cred.Pid, os.Getppid())
+	}
+	return fd, nil
+}
+
+// filtered reports whether this process runs under a seccomp filter.
+func filtered() bool {
+	status, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return false
+	}
+	for line := range strings.SplitSeq(string(status), "\n") {
+		if value, ok := strings.CutPrefix(line, "Seccomp:"); ok {
+			return strings.TrimSpace(value) == "2"
+		}
+	}
+	return false
 }
 
 type sockFilter struct {
@@ -340,10 +394,7 @@ type observer struct {
 }
 
 func newObserver(root string) *observer {
-	return &observer{rec: newRecorder(root), dirs: workdirs{
-		processes: map[int]processIDs{},
-		places:    map[int][]place{},
-	}}
+	return &observer{rec: newRecorder(root), dirs: workdirs{aliases: map[string][]string{}}}
 }
 
 // notification is struct seccomp_notif.
@@ -429,9 +480,6 @@ func (o *observer) handle(listener int, n *notification, buffer []byte) {
 	case kindUnobservable, kindNamespaceClone:
 		o.rec.fail(c.name)
 		return
-	case kindFchdir:
-		o.dirs.forget(tid)
-		return
 	case kindSeccomp:
 		// seccomp(SECCOMP_SET_MODE_FILTER, flags) with a new listener.
 		if n.args[0] == seccompModeFilter && n.args[1]&seccompFlagNewListener != 0 {
@@ -516,8 +564,8 @@ func (o *observer) handle(listener int, n *notification, buffer []byte) {
 		for _, path := range paths {
 			o.rec.stat(path)
 		}
-		if len(paths) > 0 {
-			o.dirs.change(tid, paths[len(paths)-1])
+		for _, path := range paths {
+			o.dirs.change(path)
 		}
 	case kindExec:
 		for i, path := range paths {
@@ -539,7 +587,7 @@ func (o *observer) handle(listener int, n *notification, buffer []byte) {
 func (o *observer) names(tid int, l located) []string {
 	paths := []string{magic(tid, l.path)}
 	if l.base != "" {
-		if logical := o.dirs.logical(tid, l.base); logical != "" {
+		for _, logical := range o.dirs.logical(l.base) {
 			paths = append(paths, strings.TrimSuffix(logical, "/")+"/"+l.name)
 		}
 	}
@@ -817,13 +865,20 @@ func physicalDir(dir string) (string, bool) {
 	return physical, err == nil
 }
 
+// privilegedCaps are the capabilities that let a process write or chmod a
+// directory regardless of its owner and mode, or become another user who
+// may: CAP_CHOWN, CAP_DAC_OVERRIDE, CAP_FOWNER, CAP_SETGID, CAP_SETUID and
+// CAP_SYS_ADMIN (bits 0, 1, 3, 6, 7 and 21).
+const privilegedCaps = 1<<0 | 1<<1 | 1<<3 | 1<<6 | 1<<7 | 1<<21
+
 // privileged reports whether this process, and so the tree it observes, may
-// write or chmod a directory regardless of its owner and mode: it runs as
-// root or holds CAP_CHOWN, CAP_DAC_OVERRIDE or CAP_FOWNER (bits 0, 1 and 3)
-// in its permitted or effective set. An unreadable status counts as
-// privileged.
+// change a directory another user owns and this user cannot write: it runs
+// as root, its user or group IDs (real, effective, saved, file system)
+// differ, so it may switch between them, or it holds one of
+// privilegedCaps in its permitted or effective set. An unreadable status
+// counts as privileged.
 func privileged() bool {
-	if os.Geteuid() == 0 {
+	if os.Geteuid() == 0 || os.Getuid() != os.Geteuid() || os.Getgid() != os.Getegid() {
 		return true
 	}
 	status, err := os.ReadFile("/proc/self/status")
@@ -833,49 +888,55 @@ func privileged() bool {
 	seen := 0
 	for line := range strings.SplitSeq(string(status), "\n") {
 		name, value, ok := strings.Cut(line, ":")
-		if !ok || (name != "CapPrm" && name != "CapEff") {
+		if !ok {
 			continue
 		}
-		caps, err := strconv.ParseUint(strings.TrimSpace(value), 16, 64)
-		if err != nil || caps&(1<<0|1<<1|1<<3) != 0 {
-			return true
+		switch name {
+		case "Uid", "Gid":
+			ids := strings.Fields(value)
+			if len(ids) != 4 || slices.ContainsFunc(ids, func(id string) bool { return id != ids[0] }) {
+				return true
+			}
+		case "CapPrm", "CapEff":
+			caps, err := strconv.ParseUint(strings.TrimSpace(value), 16, 64)
+			if err != nil || caps&privilegedCaps != 0 {
+				return true
+			}
+		default:
+			continue
 		}
 		seen++
 	}
-	return seen != 2
+	return seen != 4
 }
 
 // workdirs follows the working directories processes changed to through a
 // link. /proc shows a working directory by its physical location, so a name
 // relative to it would be recorded there, and retargeting the link would go
-// unseen. A chdir is notified before it runs, and may fail; the directory
-// it names is remembered with its physical location, and a later relative
-// name uses it only while /proc still shows that location. A working
-// directory is shared by a thread group and inherited across fork and exec,
-// so the places are kept per thread group, and a group with none takes its
-// parent's. A chdir that crosses no link, and every fchdir, leaves a process
-// at its physical location, which needs no place.
+// unseen. A chdir is notified before it runs, and may fail; a directory it
+// names through a link is remembered under its physical location, for the
+// rest of the run. A later name relative to a working directory at that
+// physical location is recorded under each remembered name too, whichever
+// process makes the call.
+//
+// fabricate.py copies a process's working directory to its child at clone,
+// fork and vfork, which strace reports with the child's pid. A seccomp
+// notification comes before the call, so the observer never learns the
+// child's pid at the fork, and by the child's first lookup its parent may
+// have exited and the child been reparented. Keying the names on the
+// physical directory instead of on the process needs no pid: it covers a
+// reparented child, and any process that reaches the directory otherwise,
+// at the cost of an extra entry for a name a process did not use, which can
+// only make a result rerun.
 type workdirs struct {
-	active atomic.Bool // a place was ever remembered; until then nothing reads /proc
+	active atomic.Bool // a name was ever remembered; until then nothing is looked up
 
-	mu        sync.Mutex
-	processes map[int]processIDs // thread → its group and the group's parent
-	places    map[int][]place    // thread group → recent places, newest first; empty after fchdir
+	mu      sync.Mutex
+	aliases map[string][]string // physical directory → the names chdir reached it by
 }
 
-type processIDs struct{ group, parent int }
-
-// A place is a working directory by the name a chdir gave and by its
-// physical location.
-type place struct{ logical, physical string }
-
-// maxPlaces bounds the places kept per thread group: a child inherits the
-// working directory its parent had at the fork, which may be one of the
-// parent's earlier places.
-const maxPlaces = 4
-
 // change remembers a chdir to a directory named through a link.
-func (w *workdirs) change(tid int, logical string) {
+func (w *workdirs) change(logical string) {
 	for _, prefix := range []string{"/proc/", "/dev/"} {
 		if strings.HasPrefix(logical, prefix) {
 			return // still a magic link, which would resolve in this process
@@ -885,130 +946,21 @@ func (w *workdirs) change(tid int, logical string) {
 	if err != nil || physical == clean(logical) {
 		return // the chdir fails, or crosses no link
 	}
-	ids, ok := w.ids(tid)
-	if !ok {
-		return
-	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	places, found := w.places[ids.group]
-	if !found {
-		places = w.inheritLocked(ids)
+	if !slices.Contains(w.aliases[physical], logical) {
+		w.aliases[physical] = append(w.aliases[physical], logical)
 	}
-	places = append([]place{{logical, physical}}, places...)
-	w.places[ids.group] = places[:min(len(places), maxPlaces)]
 	w.active.Store(true)
 }
 
-// forget records an fchdir: the process is now at a physical location.
-func (w *workdirs) forget(tid int) {
+// logical returns the names through which a chdir reached a physical
+// working directory.
+func (w *workdirs) logical(physical string) []string {
 	if !w.active.Load() {
-		return
-	}
-	ids, ok := w.ids(tid)
-	if !ok {
-		return
-	}
-	w.mu.Lock()
-	w.places[ids.group] = []place{}
-	w.mu.Unlock()
-}
-
-// logical returns the name of a thread's working directory if it reached
-// its physical location, which /proc shows, through a link; otherwise "".
-func (w *workdirs) logical(tid int, physical string) string {
-	if !w.active.Load() {
-		return ""
-	}
-	ids, ok := w.ids(tid)
-	if !ok {
-		return ""
+		return nil
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	places, found := w.places[ids.group]
-	if !found {
-		places = w.inheritLocked(ids)
-		w.places[ids.group] = places
-	}
-	for _, p := range places {
-		if p.physical == physical {
-			return p.logical
-		}
-	}
-	return ""
-}
-
-// inheritLocked returns the places of the nearest ancestor that has any. It
-// reads /proc only for processes not yet seen, and only while w.mu is held,
-// which serializes these rare reads.
-func (w *workdirs) inheritLocked(ids processIDs) []place {
-	for range 16 {
-		if ids.parent <= 1 {
-			break
-		}
-		if places, ok := w.places[ids.parent]; ok {
-			return slices.Clone(places)
-		}
-		next, ok := w.processes[ids.parent]
-		if !ok {
-			if next, ok = readProcessIDs(ids.parent); !ok {
-				break
-			}
-			w.processes[ids.parent] = next
-		}
-		ids = next
-	}
-	return []place{}
-}
-
-// ids returns a thread's group and the group's parent.
-func (w *workdirs) ids(tid int) (processIDs, bool) {
-	w.mu.Lock()
-	ids, ok := w.processes[tid]
-	w.mu.Unlock()
-	if ok {
-		return ids, true
-	}
-	if ids, ok = readProcessIDs(tid); !ok {
-		return ids, false
-	}
-	w.mu.Lock()
-	w.processes[tid] = ids
-	w.mu.Unlock()
-	return ids, true
-}
-
-// readProcessIDs reads a thread's group and the group's parent from /proc.
-func readProcessIDs(tid int) (processIDs, bool) {
-	status, err := os.ReadFile("/proc/" + strconv.Itoa(tid) + "/status")
-	if err != nil {
-		return processIDs{}, false
-	}
-	var ids processIDs
-	seen := 0
-	for line := range strings.SplitSeq(string(status), "\n") {
-		name, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		var into *int
-		switch name {
-		case "Tgid":
-			into = &ids.group
-		case "PPid":
-			into = &ids.parent
-		default:
-			continue
-		}
-		n, err := strconv.Atoi(strings.TrimSpace(value))
-		if err != nil {
-			return processIDs{}, false
-		}
-		*into = n
-		if seen++; seen == 2 {
-			return ids, true
-		}
-	}
-	return processIDs{}, false
+	return slices.Clone(w.aliases[physical])
 }
