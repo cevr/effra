@@ -144,15 +144,15 @@ type httpWireResponse struct {
 }
 
 type httpWireLifecycle struct {
-	Name           string           `json:"name"`
-	Kind           string           `json:"kind"`
-	Request        httpWireRequest  `json:"request"`
-	Response       httpWireResponse `json:"response"`
-	Hold           string           `json:"hold"`
-	Probe          string           `json:"probe"`
-	WithinMillis   int              `json:"withinMillis"`
-	ExitCode       int              `json:"exitCode"`
-	Stderr         string           `json:"stderr"`
+	Name         string           `json:"name"`
+	Kind         string           `json:"kind"`
+	Request      httpWireRequest  `json:"request"`
+	Response     httpWireResponse `json:"response"`
+	Hold         string           `json:"hold"`
+	Probe        string           `json:"probe"`
+	WithinMillis int              `json:"withinMillis"`
+	ExitCode     int              `json:"exitCode"`
+	Stderr       string           `json:"stderr"`
 }
 
 // httpWireVectorsLoad decodes one vector file and requires its program to
