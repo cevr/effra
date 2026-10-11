@@ -1,6 +1,6 @@
 # Effra
 
-Claude orchestrates. Opus native subagents implement, one writer per isolated lane, running in parallel as far as the work DAG allows. After each implementation, get an independent review with the counsel-review skill (`okra counsel --deep`, Sol at max reasoning), continuing past two rounds while findings remain. This is the owner's choice of 2026-10-09; older handoffs naming other models, Herdr panes or Codex panes are superseded.
+Claude orchestrates. Opus native subagents implement, one writer per isolated lane, running in parallel as far as the work DAG allows. After each implementation, get an independent review with the counsel-review skill (`okra counsel --deep`, Sol at max reasoning), continuing past two rounds while findings remain. This is the owner's choice of 2026-10-09; older handoffs naming other models, Herdr panes or Codex panes are superseded. Every review includes a prior-art section: how Gleam, ReScript, Elixir and the other compile-to-host languages in PRIOR_ART.md handle the same problem, and which optimizations and lowering paths they use (owner, 2026-10-07: "remember to look at lang prior arts as well as part of the review, gleam, rescript, elixir - they all compile downto another language, what optimizations and paths have they used?").
 
 Read README.md, docs/design.md, and docs/wayfinder/README.md before changing the language.
 
