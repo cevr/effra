@@ -2,10 +2,16 @@
 
 package main
 
-import "os/exec"
+import (
+	"os"
+	"os/exec"
+)
 
 // isolateQuery leaves a query in the gate's process group where Unix
 // process groups do not exist; WaitDelay still bounds it.
 func isolateQuery(command *exec.Cmd) {}
 
 func endQuery(command *exec.Cmd) {}
+
+// reraise ends the gate as an interrupt would.
+func reraise(caught os.Signal) { os.Exit(130) }
