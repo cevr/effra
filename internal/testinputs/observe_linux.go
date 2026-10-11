@@ -36,6 +36,9 @@ const (
 	kindOpenat2                        // openat with its flags in a struct open_how
 	kindStat                           // consults a path's existence or metadata
 	kindChdir                          // looks a directory up and makes it the working directory
+	kindSocket                         // looks up the AF_UNIX socket a struct sockaddr names
+	kindSocketMsg                      // kindSocket with the address in a struct msghdr
+	kindSocketMsgs                     // kindSocket with addresses in an array of struct mmsghdr
 	kindExec                           // runs a file with an environment
 	kindClone3                         // may create namespaces; its flags are in memory
 	kindSeccomp                        // may install a listener that takes calls from this one
@@ -49,6 +52,9 @@ const (
 // flags (or struct open_how), the AT_* flags (0 for none) and the
 // environment. A call that names two paths (rename, link) has second set,
 // with the second path's directory descriptor and path in dirfd2 and path2.
+// A socket call has its address (kindSocket), struct msghdr
+// (kindSocketMsg) or array of struct mmsghdr (kindSocketMsgs) in path, and
+// the address's length or the array's length in flags.
 type call struct {
 	nr                               uint32
 	kind                             kind
@@ -79,6 +85,19 @@ const (
 	resolveInRoot             = 0x10
 	pageSize                  = 4096
 	pathMax                   = 4096
+	afUnix                    = 1
+	sockaddrUnSize            = 110 // struct sockaddr_un: a u16 family and a 108-byte path
+	mmsghdrSize               = 64  // struct mmsghdr: a struct msghdr (56 bytes) and a u32, padded
+	maxMessages               = 1024
+	// handoverDescriptor is the child's end of the socket to the observer,
+	// and msgCmsgCloexec the flag the child sends the listener with. The
+	// filter lets that one sendmsg through unnotified, since no one reads
+	// the listener before it arrives; a second filter then fails any later
+	// call of that shape, so no process can use it to pass a socket address
+	// by the observer. MSG_CMSG_CLOEXEC is a receive flag, which sendmsg
+	// ignores.
+	handoverDescriptor = 3
+	msgCmsgCloexec     = 0x40000000
 	// namespaceFlags are the clone flags that make a namespace: CLONE_NEWNS,
 	// NEWCGROUP, NEWUTS, NEWIPC, NEWUSER, NEWPID and NEWNET.
 	namespaceFlags = 0x00020000 | 0x02000000 | 0x04000000 | 0x08000000 | 0x10000000 | 0x20000000 | 0x40000000
@@ -139,21 +158,28 @@ func init() {
 	}
 	os.Unsetenv(listenerVariable)
 	number, err := observerSocket(value)
+	if err == nil && number != handoverDescriptor {
+		err = fmt.Errorf("descriptor %d is not the observer's %d", number, handoverDescriptor)
+	}
 	if err != nil {
 		impostor = listenerVariable + " is set, but " + err.Error()
 		return
 	}
 	observed = true
 	socket := os.NewFile(uintptr(number), "testinputs")
-	listener, err := installFilter()
+	listener, err := installFilter(filter(), true)
 	if err != nil {
 		socket.Write([]byte(err.Error()))
 		socket.Close()
 		return
 	}
 	rights := syscall.UnixRights(listener)
-	err = syscall.Sendmsg(number, []byte("ok"), rights, nil, 0)
+	err = syscall.Sendmsg(number, []byte("ok"), rights, nil, msgCmsgCloexec)
 	syscall.Close(listener)
+	if err == nil {
+		// Notified, as a seccomp call, now that the observer has the listener.
+		_, err = installFilter(handoverFilter(), false)
+	}
 	if err != nil {
 		socket.Close()
 		return
@@ -206,72 +232,123 @@ type sockFprog struct {
 	filter *sockFilter
 }
 
+// Classic BPF instructions and struct seccomp_data offsets.
+const (
+	bpfLdAbs  = 0x20 // BPF_LD | BPF_W | BPF_ABS
+	bpfJeqK   = 0x15 // BPF_JMP | BPF_JEQ | BPF_K
+	bpfJgtK   = 0x25 // BPF_JMP | BPF_JGT | BPF_K
+	bpfJgeK   = 0x35 // BPF_JMP | BPF_JGE | BPF_K
+	bpfJsetK  = 0x45 // BPF_JMP | BPF_JSET | BPF_K
+	bpfRetK   = 0x06 // BPF_RET | BPF_K
+	offNr     = 0
+	offArc    = 4
+	offArg    = 16 // args[0], its low half on a little-endian machine
+	argLength = 8
+)
+
 // filter is the seccomp program: notify each call in calls; notify calls of
 // another architecture or ABI, which the observer cannot decode, and calls
 // newer than the table, which it cannot classify; fail io_uring_setup;
-// allow the rest.
+// allow the rest. Every branch that loads an argument ends in a return, so
+// the number stays loaded for the comparisons after it.
 func filter() []sockFilter {
-	const (
-		ldAbs  = 0x20 // BPF_LD | BPF_W | BPF_ABS
-		jeqK   = 0x15 // BPF_JMP | BPF_JEQ | BPF_K
-		jgtK   = 0x25 // BPF_JMP | BPF_JGT | BPF_K
-		jgeK   = 0x35 // BPF_JMP | BPF_JGE | BPF_K
-		jsetK  = 0x45 // BPF_JMP | BPF_JSET | BPF_K
-		retK   = 0x06 // BPF_RET | BPF_K
-		offNr  = 0
-		offArc = 4
-		offArg = 16 // args[0], its low half on a little-endian machine
-	)
 	program := []sockFilter{
-		{code: ldAbs, k: offArc},
-		{code: jeqK, jt: 1, k: auditArch},
-		{code: retK, k: seccompRetUserNotif},
-		{code: ldAbs, k: offNr},
+		{code: bpfLdAbs, k: offArc},
+		{code: bpfJeqK, jt: 1, k: auditArch},
+		{code: bpfRetK, k: seccompRetUserNotif},
+		{code: bpfLdAbs, k: offNr},
 	}
 	if checkX32SyscallBits {
 		program = append(program,
-			sockFilter{code: jgeK, jf: 1, k: x32SyscallBit},
-			sockFilter{code: retK, k: seccompRetUserNotif})
+			sockFilter{code: bpfJgeK, jf: 1, k: x32SyscallBit},
+			sockFilter{code: bpfRetK, k: seccompRetUserNotif})
 	}
 	for _, c := range calls {
-		switch c.kind {
-		case kindRefused:
+		switch {
+		case c.kind == kindRefused:
 			program = append(program,
-				sockFilter{code: jeqK, jf: 1, k: c.nr},
-				sockFilter{code: retK, k: seccompRetErrno | uint32(syscall.ENOSYS)})
-		case kindNamespaceClone:
-			// Load args[0]; notify if it asks for a namespace; reload the
-			// number for the remaining comparisons.
+				sockFilter{code: bpfJeqK, jf: 1, k: c.nr},
+				sockFilter{code: bpfRetK, k: seccompRetErrno | uint32(syscall.ENOSYS)})
+		case c.kind == kindNamespaceClone:
+			// Notify if args[0] asks for a namespace.
 			program = append(program,
-				sockFilter{code: jeqK, jf: 5, k: c.nr},
-				sockFilter{code: ldAbs, k: offArg},
-				sockFilter{code: jsetK, jf: 1, k: namespaceFlags},
-				sockFilter{code: retK, k: seccompRetUserNotif},
-				sockFilter{code: retK, k: seccompRetAllow},
-				sockFilter{code: ldAbs, k: offNr})
+				sockFilter{code: bpfJeqK, jf: 4, k: c.nr},
+				sockFilter{code: bpfLdAbs, k: offArg},
+				sockFilter{code: bpfJsetK, jf: 1, k: namespaceFlags},
+				sockFilter{code: bpfRetK, k: seccompRetUserNotif},
+				sockFilter{code: bpfRetK, k: seccompRetAllow})
+		case c.kind == kindSocket:
+			// Notify only if the address pointer is not NULL: sendto on a
+			// connected socket names no address.
+			program = append(program,
+				sockFilter{code: bpfJeqK, jf: 6, k: c.nr},
+				sockFilter{code: bpfLdAbs, k: offArg + uint32(c.path)*argLength},
+				sockFilter{code: bpfJeqK, jf: 3, k: 0},
+				sockFilter{code: bpfLdAbs, k: offArg + uint32(c.path)*argLength + 4},
+				sockFilter{code: bpfJeqK, jf: 1, k: 0},
+				sockFilter{code: bpfRetK, k: seccompRetAllow},
+				sockFilter{code: bpfRetK, k: seccompRetUserNotif})
+		case c.nr == sysSendmsg:
+			// Let the listener's handover through (handoverDescriptor).
+			program = append(program,
+				sockFilter{code: bpfJeqK, jf: 6, k: c.nr},
+				sockFilter{code: bpfLdAbs, k: offArg},
+				sockFilter{code: bpfJeqK, jf: 3, k: handoverDescriptor},
+				sockFilter{code: bpfLdAbs, k: offArg + 2*argLength},
+				sockFilter{code: bpfJsetK, jf: 1, k: msgCmsgCloexec},
+				sockFilter{code: bpfRetK, k: seccompRetAllow},
+				sockFilter{code: bpfRetK, k: seccompRetUserNotif})
 		default:
 			program = append(program,
-				sockFilter{code: jeqK, jf: 1, k: c.nr},
-				sockFilter{code: retK, k: seccompRetUserNotif})
+				sockFilter{code: bpfJeqK, jf: 1, k: c.nr},
+				sockFilter{code: bpfRetK, k: seccompRetUserNotif})
 		}
 	}
 	return append(program,
-		sockFilter{code: jgtK, jf: 1, k: highestKnownCall},
-		sockFilter{code: retK, k: seccompRetUserNotif},
-		sockFilter{code: retK, k: seccompRetAllow})
+		sockFilter{code: bpfJgtK, jf: 1, k: highestKnownCall},
+		sockFilter{code: bpfRetK, k: seccompRetUserNotif},
+		sockFilter{code: bpfRetK, k: seccompRetAllow})
 }
 
-// installFilter installs the filter on every thread of this process and
-// returns its listener.
-func installFilter() (int, error) {
+// handoverFilter fails the one call shape the first filter lets through, the
+// listener's handover, from the moment the handover is done. An error
+// outranks a notification, whichever filter returns it.
+func handoverFilter() []sockFilter {
+	return []sockFilter{
+		{code: bpfLdAbs, k: offArc},
+		{code: bpfJeqK, jt: 1, k: auditArch},
+		{code: bpfRetK, k: seccompRetAllow}, // the first filter notifies
+		{code: bpfLdAbs, k: offNr},
+		{code: bpfJeqK, jf: 4, k: sysSendmsg},
+		{code: bpfLdAbs, k: offArg},
+		{code: bpfJeqK, jf: 2, k: handoverDescriptor},
+		{code: bpfLdAbs, k: offArg + 2*argLength},
+		{code: bpfJsetK, jt: 1, k: msgCmsgCloexec},
+		{code: bpfRetK, k: seccompRetAllow},
+		{code: bpfRetK, k: seccompRetErrno | uint32(syscall.EPERM)},
+	}
+}
+
+// installFilter installs a filter on every thread of this process and
+// returns its listener, if listen asks for one.
+func installFilter(program []sockFilter, listen bool) (int, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if _, _, errno := syscall.RawSyscall6(syscall.SYS_PRCTL, prSetNoNewPrivs, 1, 0, 0, 0, 0); errno != 0 {
 		return -1, fmt.Errorf("prctl(PR_SET_NO_NEW_PRIVS): %w", errno)
 	}
-	program := filter()
 	prog := sockFprog{len: uint16(len(program)), filter: &program[0]}
-	flags := uintptr(seccompFlagTsync | seccompFlagTsyncESRCH | seccompFlagNewListener)
+	flags := uintptr(seccompFlagTsync | seccompFlagTsyncESRCH)
+	if !listen {
+		// The first filter notifies this call, so it waits on the observer.
+		_, _, errno := syscall.Syscall(sysSeccomp, seccompModeFilter, flags, uintptr(unsafe.Pointer(&prog)))
+		runtime.KeepAlive(program)
+		if errno != 0 {
+			return -1, fmt.Errorf("seccomp(SECCOMP_SET_MODE_FILTER): %w", errno)
+		}
+		return -1, nil
+	}
+	flags |= seccompFlagNewListener
 	// A thread waiting on the parent then ignores all but fatal signals, so
 	// the runtime's preemption signals do not restart every call; kernels
 	// before 5.19 lack the flag.
@@ -480,6 +557,9 @@ func (o *observer) handle(listener int, n *notification, buffer []byte) {
 	case kindUnobservable, kindNamespaceClone:
 		o.rec.fail(c.name)
 		return
+	case kindSocket, kindSocketMsg, kindSocketMsgs:
+		o.socket(listener, n, c, buffer)
+		return
 	case kindSeccomp:
 		// seccomp(SECCOMP_SET_MODE_FILTER, flags) with a new listener.
 		if n.args[0] == seccompModeFilter && n.args[1]&seccompFlagNewListener != 0 {
@@ -594,6 +674,86 @@ func (o *observer) names(tid int, l located) []string {
 	return paths
 }
 
+// socket records the AF_UNIX socket file a call connects to, binds or sends
+// to, as a lookup: the kernel resolves the address's path like any other,
+// relative to the working directory. An abstract or unnamed address, or
+// another family, names no file.
+func (o *observer) socket(listener int, n *notification, c call, buffer []byte) {
+	tid := int(n.pid)
+	var addresses [][2]uint64 // pointer and length
+	switch c.kind {
+	case kindSocket:
+		addresses = append(addresses, [2]uint64{n.args[c.path], uint64(uint32(n.args[c.flags]))})
+	case kindSocketMsg:
+		if address, ok := messageAddress(tid, n.args[c.path]); ok {
+			addresses = append(addresses, address)
+		}
+	case kindSocketMsgs:
+		for i := range min(uint64(uint32(n.args[c.flags])), maxMessages) {
+			if address, ok := messageAddress(tid, n.args[c.path]+i*mmsghdrSize); ok {
+				addresses = append(addresses, address)
+			}
+		}
+	}
+	a := access{tid: tid, args: n.args, call: c, buffer: buffer}
+	for _, address := range addresses {
+		name, err := socketPath(tid, address[0], address[1])
+		if err == nil && name == "" {
+			continue
+		}
+		var l located
+		ok := true
+		if err == nil {
+			l, ok, err = a.locate(name, atFdcwd, false)
+		}
+		if err != nil {
+			if valid(listener, n.id) {
+				o.rec.fail(err.Error())
+			}
+			return
+		}
+		if ok {
+			for _, path := range o.names(tid, l) {
+				o.rec.stat(path)
+			}
+		}
+	}
+}
+
+// messageAddress reads the address and its length from a struct msghdr.
+func messageAddress(tid int, header uint64) ([2]uint64, bool) {
+	var raw [16]byte // msg_name, then the u32 msg_namelen
+	if got, err := readMemory(tid, header, raw[:]); err != nil || got < len(raw) {
+		return [2]uint64{}, false // the kernel faults the call too
+	}
+	pointer := *(*uint64)(unsafe.Pointer(&raw[0]))
+	length := uint64(*(*uint32)(unsafe.Pointer(&raw[8])))
+	return [2]uint64{pointer, length}, pointer != 0
+}
+
+// socketPath returns the path an AF_UNIX struct sockaddr_un names, or "".
+func socketPath(tid int, address, length uint64) (string, error) {
+	if address == 0 || length <= 2 {
+		return "", nil
+	}
+	var raw [sockaddrUnSize]byte
+	got, err := readMemory(tid, address, raw[:min(length, sockaddrUnSize)])
+	if err != nil {
+		if errors.Is(err, errFault) || errors.Is(err, syscall.ESRCH) {
+			return "", nil // the kernel faults the call too, or the thread died
+		}
+		return "", err
+	}
+	if got <= 2 || raw[0] != afUnix || raw[1] != 0 { // a little-endian u16 family
+		return "", nil
+	}
+	path := raw[2:got]
+	if end := bytes.IndexByte(path, 0); end >= 0 {
+		path = path[:end] // empty for an abstract address
+	}
+	return string(path), nil
+}
+
 var callsByNumber = func() map[int32]call {
 	byNumber := make(map[int32]call, len(calls))
 	for _, c := range calls {
@@ -656,6 +816,14 @@ func (a *access) path() (located, bool, error) {
 		path, ok, err := a.link("fd/" + strconv.Itoa(dirfd))
 		return located{path: path}, ok, err
 	}
+	return a.locate(name, dirfd, inRoot)
+}
+
+// locate returns the absolute path a name means for the thread: as it is
+// if absolute, otherwise relative to a directory descriptor, or to the
+// working directory for atFdcwd. With inRoot an absolute name is relative
+// too (RESOLVE_IN_ROOT).
+func (a *access) locate(name string, dirfd int, inRoot bool) (located, bool, error) {
 	if name[0] == '/' && !inRoot {
 		return located{path: name}, true, nil
 	}

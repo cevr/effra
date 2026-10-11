@@ -4,6 +4,7 @@ const (
 	auditArch           = 0xc00000b7 // AUDIT_ARCH_AARCH64
 	sysSeccomp          = 277
 	sysProcessVMReadv   = 270
+	sysSendmsg          = 211
 	x32SyscallBit       = 0
 	checkX32SyscallBits = false
 	// highestKnownCall is the last system call of Linux 6.12 (mseal; numbers
@@ -47,6 +48,11 @@ var calls = []call{
 	{nr: 14, kind: kindStat, dirfd: -1, path: 0},                                    // removexattr
 	{nr: 15, kind: kindStat, dirfd: -1, path: 0},                                    // lremovexattr
 	{nr: 49, kind: kindChdir, dirfd: -1, path: 0},                                   // chdir
+	{nr: 203, kind: kindSocket, path: 1, flags: 2},                                  // connect
+	{nr: 200, kind: kindSocket, path: 1, flags: 2},                                  // bind
+	{nr: 206, kind: kindSocket, path: 4, flags: 5},                                  // sendto
+	{nr: sysSendmsg, kind: kindSocketMsg, path: 1},                                  // sendmsg
+	{nr: 269, kind: kindSocketMsgs, path: 1, flags: 2},                              // sendmmsg
 	{nr: 221, kind: kindExec, dirfd: -1, path: 0, env: 2},                           // execve
 	{nr: 281, kind: kindExec, dirfd: 0, path: 1, env: 3, atFlags: 4},                // execveat
 	{nr: 435, kind: kindClone3},                                                     // clone3
@@ -64,6 +70,10 @@ var calls = []call{
 	{nr: 433, kind: kindUnobservable, name: "fspick"},
 	{nr: 442, kind: kindUnobservable, name: "mount_setattr"},
 	{nr: 265, kind: kindUnobservable, name: "open_by_handle_at"},
+	{nr: 263, kind: kindUnobservable, name: "fanotify_mark"}, // watches a path by events, not lookups
+	{nr: 60, kind: kindUnobservable, name: "quotactl"},       // opens the quota file a path names
+	{nr: 443, kind: kindUnobservable, name: "quotactl_fd"},
+	{nr: 280, kind: kindUnobservable, name: "bpf"}, // opens pinned objects by path
 	{nr: 425, kind: kindRefused, name: "io_uring_setup"},
 	{nr: 220, kind: kindNamespaceClone, name: "clone"},
 }

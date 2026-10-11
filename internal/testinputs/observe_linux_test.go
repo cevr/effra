@@ -6,21 +6,25 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 // run interprets the filter for one call, as the kernel's classic BPF
 // interpreter would on struct seccomp_data, and returns the action.
-func run(t *testing.T, program []sockFilter, arch, nr uint32, arg0 uint64) uint32 {
+func run(t *testing.T, program []sockFilter, arch, nr uint32, args ...uint64) uint32 {
 	t.Helper()
 	var data [64]byte
 	binary.LittleEndian.PutUint32(data[0:], nr)
 	binary.LittleEndian.PutUint32(data[4:], arch)
-	binary.LittleEndian.PutUint64(data[16:], arg0)
+	for i, arg := range args {
+		binary.LittleEndian.PutUint64(data[16+8*i:], arg)
+	}
 	var a uint32
 	for pc := 0; pc < len(program); pc++ {
 		in := program[pc]
@@ -73,10 +77,46 @@ func TestFilter(t *testing.T) {
 				t.Errorf("clone(CLONE_NEWUSER): action %#x, want notify", got)
 			}
 			continue
+		case kindSocket:
+			if got := run(t, program, auditArch, c.nr); got != allow {
+				t.Errorf("%d with no address: action %#x, want allow", c.nr, got)
+			}
+			args := make([]uint64, 6)
+			for _, address := range []uint64{0x7fff0000_00001000, 0x00001000, 0x7fff0000_00000000} {
+				args[c.path] = address
+				if got := run(t, program, auditArch, c.nr, args...); got != notify {
+					t.Errorf("%d with address %#x: action %#x, want notify", c.nr, address, got)
+				}
+			}
+			continue
+		}
+		if c.nr == sysSendmsg {
+			if got := run(t, program, auditArch, c.nr, handoverDescriptor, 0, msgCmsgCloexec); got != allow {
+				t.Errorf("the listener's handover: action %#x, want allow", got)
+			}
+			for _, args := range [][]uint64{{handoverDescriptor, 0, 0}, {handoverDescriptor + 1, 0, msgCmsgCloexec}, {0, 0, msgCmsgCloexec}} {
+				if got := run(t, program, auditArch, c.nr, args...); got != notify {
+					t.Errorf("sendmsg%v: action %#x, want notify", args, got)
+				}
+			}
 		}
 		if got := run(t, program, auditArch, c.nr, 0); got != want {
 			t.Errorf("%d (kind %d): action %#x, want %#x", c.nr, c.kind, got, want)
 		}
+	}
+	// The second filter fails the handover's shape once the handover is done
+	// and lets everything else through to the first.
+	second := handoverFilter()
+	if got := run(t, second, auditArch, sysSendmsg, handoverDescriptor, 0, msgCmsgCloexec); got != seccompRetErrno|uint32(syscall.EPERM) {
+		t.Errorf("a handover after the handover: action %#x, want EPERM", got)
+	}
+	for _, args := range [][]uint64{{handoverDescriptor, 0, 0}, {handoverDescriptor + 1, 0, msgCmsgCloexec}} {
+		if got := run(t, second, auditArch, sysSendmsg, args...); got != allow {
+			t.Errorf("second filter, sendmsg%v: action %#x, want allow", args, got)
+		}
+	}
+	if got := run(t, second, 0x40000003, sysSendmsg, handoverDescriptor, 0, msgCmsgCloexec); got != allow {
+		t.Errorf("second filter, foreign architecture: action %#x, want allow", got)
 	}
 	for _, nr := range []uint32{0, 1, 3, 9, 60, 63, 231, highestKnownCall} { // read, write, close, mmap, exit... on amd64; others on arm64
 		if _, ok := callsByNumber[int32(nr)]; ok {
@@ -225,4 +265,47 @@ func TestWorkdirs(t *testing.T) {
 	if got, want := o.dirs.logical(physical), []string{link, other}; !slices.Equal(got, want) {
 		t.Fatalf("after a second link: %q, want %q", got, want)
 	}
+}
+
+// TestSocketPath checks the decoding of the addresses socket calls name, read
+// from this process's memory as from a notified thread's.
+func TestSocketPath(t *testing.T) {
+	tid := syscall.Gettid()
+	address := func(family uint16, path string) []byte {
+		raw := make([]byte, 2, sockaddrUnSize)
+		binary.LittleEndian.PutUint16(raw, family)
+		return append(raw, path...)
+	}
+	for _, c := range []struct {
+		raw    []byte
+		length uint64
+		want   string
+	}{
+		{address(syscall.AF_UNIX, "run/agent.sock\x00"), 17, "run/agent.sock"},
+		{address(syscall.AF_UNIX, "/abs/x.sock"), 13, "/abs/x.sock"},          // no NUL: the length ends it
+		{address(syscall.AF_UNIX, "/abs/x.sock\x00junk"), 999, "/abs/x.sock"}, // read up to the struct's size
+		{address(syscall.AF_UNIX, "\x00abstract"), 11, ""},
+		{address(syscall.AF_UNIX, ""), 2, ""}, // unnamed
+		{address(syscall.AF_INET, "\x00\x50\x7f\x00\x00\x01"), 16, ""},
+	} {
+		buffer := make([]byte, sockaddrUnSize)
+		copy(buffer, c.raw)
+		got, err := socketPath(tid, uint64(uintptr(unsafe.Pointer(&buffer[0]))), c.length)
+		if err != nil || got != c.want {
+			t.Errorf("socketPath(%q, %d) = %q, %v; want %q", c.raw, c.length, got, err, c.want)
+		}
+		runtime.KeepAlive(buffer)
+	}
+	if got, err := socketPath(tid, 0, 16); got != "" || err != nil {
+		t.Errorf("a NULL address: %q, %v", got, err)
+	}
+	// struct msghdr: msg_name, then msg_namelen.
+	header := make([]byte, 56)
+	binary.LittleEndian.PutUint64(header, 0x1234)
+	binary.LittleEndian.PutUint32(header[8:], 17)
+	got, ok := messageAddress(tid, uint64(uintptr(unsafe.Pointer(&header[0]))))
+	if !ok || got != [2]uint64{0x1234, 17} {
+		t.Errorf("messageAddress = %v, %v", got, ok)
+	}
+	runtime.KeepAlive(header)
 }

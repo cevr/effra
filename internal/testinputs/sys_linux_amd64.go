@@ -4,6 +4,7 @@ const (
 	auditArch           = 0xc000003e // AUDIT_ARCH_X86_64
 	sysSeccomp          = 317
 	sysProcessVMReadv   = 310
+	sysSendmsg          = 46
 	x32SyscallBit       = 0x40000000
 	checkX32SyscallBits = true
 	// highestKnownCall is the last system call of Linux 6.12 (mseal). A
@@ -66,6 +67,11 @@ var calls = []call{
 	{nr: 197, kind: kindStat, dirfd: -1, path: 0},                                    // removexattr
 	{nr: 198, kind: kindStat, dirfd: -1, path: 0},                                    // lremovexattr
 	{nr: 80, kind: kindChdir, dirfd: -1, path: 0},                                    // chdir
+	{nr: 42, kind: kindSocket, path: 1, flags: 2},                                    // connect
+	{nr: 49, kind: kindSocket, path: 1, flags: 2},                                    // bind
+	{nr: 44, kind: kindSocket, path: 4, flags: 5},                                    // sendto
+	{nr: sysSendmsg, kind: kindSocketMsg, path: 1},                                   // sendmsg
+	{nr: 307, kind: kindSocketMsgs, path: 1, flags: 2},                               // sendmmsg
 	{nr: 59, kind: kindExec, dirfd: -1, path: 0, env: 2},                             // execve
 	{nr: 322, kind: kindExec, dirfd: 0, path: 1, env: 3, atFlags: 4},                 // execveat
 	{nr: 435, kind: kindClone3},                                                      // clone3: its flags are in memory
@@ -84,6 +90,10 @@ var calls = []call{
 	{nr: 442, kind: kindUnobservable, name: "mount_setattr"},
 	{nr: 304, kind: kindUnobservable, name: "open_by_handle_at"}, // opens a file no path names
 	{nr: 134, kind: kindUnobservable, name: "uselib"},
+	{nr: 301, kind: kindUnobservable, name: "fanotify_mark"}, // watches a path by events, not lookups
+	{nr: 179, kind: kindUnobservable, name: "quotactl"},      // opens the quota file a path names
+	{nr: 443, kind: kindUnobservable, name: "quotactl_fd"},
+	{nr: 321, kind: kindUnobservable, name: "bpf"},       // opens pinned objects by path
 	{nr: 425, kind: kindRefused, name: "io_uring_setup"}, // a ring opens files without system calls
 	{nr: 56, kind: kindNamespaceClone, name: "clone"},    // stops only when it makes a namespace
 }

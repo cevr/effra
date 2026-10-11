@@ -16,8 +16,8 @@
 //     mode and modification time, and for a directory listed, which it
 //     rechecks by the name and metadata of every entry;
 //   - "stat" for a lookup, a failed one included, so a file added later is an
-//     input too, for a working directory changed to, and for every link
-//     inside the root on the way to a recorded path;
+//     input too, for a working directory changed to, for an AF_UNIX socket
+//     path, and for every link inside the root on the way to a recorded path;
 //   - "getenv" for every variable in the environment of every program run.
 //
 // When it cannot observe (another operating system, no seccomp listener, a
