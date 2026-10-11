@@ -50,7 +50,7 @@ type Step struct {
 	// here captures, such as Git history.
 	Inputs *Inputs
 	// ToolEnv names executables the step's own cache cannot see, such as the
-	// JavaScript tools Go tests spawn. Their versions, with the environment
+	// JavaScript tools Go tests spawn. Their fingerprints, with the environment
 	// they and the Go programs a test runs read (testToolEnvironment,
 	// goRuntimeEnvironment), reach the step as one digest in
 	// EFFRA_TOOL_VERSIONS; a test that reads it keys Go's test cache on it.
@@ -64,7 +64,7 @@ type Inputs struct {
 	// selects every file.
 	Paths   []string
 	Exclude []string
-	// Tools names executables whose version is an input.
+	// Tools names executables whose fingerprint (toolVersion) is an input.
 	Tools []string
 	// Env names environment variables whose values are inputs.
 	Env []string
@@ -127,7 +127,7 @@ type gate struct {
 	steps    []*Step
 	files    []string
 	digests  map[string]string
-	tools    map[string]string
+	tools    map[string]*toolFact
 	toolsMu  sync.Mutex
 	modules  map[string]string
 	factsMu  sync.Mutex
@@ -266,12 +266,31 @@ func (g *gate) run(out io.Writer) int {
 	}
 	// Digest the test dependency trees while files load and early steps run;
 	// the first Go test step then finds the digest ready.
+	// The prefetches below are joined before run returns, so no digest or
+	// fingerprint work outlives the run that started it.
+	var prefetch sync.WaitGroup
+	defer prefetch.Wait()
 	for _, step := range g.steps {
 		if len(step.ToolEnv) > 0 {
 			for _, dir := range testInstalled {
-				go g.installed(dir)
+				prefetch.Go(func() { g.installed(dir) })
 			}
 			break
+		}
+	}
+	// Start every tool fingerprint while files load; each is computed once
+	// per run, so a step that names a tool finds it ready or waits for it.
+	prefetched := map[string]bool{}
+	for _, step := range g.steps {
+		tools := step.ToolEnv
+		if step.Inputs != nil {
+			tools = append(slices.Clone(step.Inputs.Tools), tools...)
+		}
+		for _, tool := range tools {
+			if !prefetched[tool] {
+				prefetched[tool] = true
+				prefetch.Go(func() { g.toolVersion(tool) })
+			}
 		}
 	}
 	if err := g.loadFiles(); err != nil {
@@ -718,54 +737,6 @@ func installedDigest(root, repository string, followRepository bool, skip ...str
 		fmt.Fprintf(hash, "%s\x00%s\x00", f.relative, sums[index])
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-// toolVersion fingerprints an executable on PATH; an absent tool is a
-// distinct input, so a step that degrades without it never reuses a pass
-// recorded with it.
-func (g *gate) toolVersion(tool string) string {
-	g.toolsMu.Lock()
-	defer g.toolsMu.Unlock()
-	if g.tools == nil {
-		g.tools = map[string]string{}
-	}
-	if version, ok := g.tools[tool]; ok {
-		return version
-	}
-	var argv []string
-	switch tool {
-	case "go":
-		argv = []string{"go", "env", "GOVERSION", "GOOS", "GOARCH", "GOAMD64", "CGO_ENABLED", "GOEXPERIMENT", "GOFLAGS", "GOTOOLCHAIN", "GOWORK", "GODEBUG"}
-	default:
-		argv = []string{tool, "--version"}
-	}
-	version := "absent"
-	if _, err := exec.LookPath(argv[0]); err == nil {
-		command := exec.Command(argv[0], argv[1:]...)
-		command.Env = stepEnvironment()
-		var output []byte
-		if tool == "go" {
-			// Standard output only: GODEBUG=inittrace=1 makes go itself
-			// write timings to standard error.
-			output, err = command.Output()
-		} else {
-			output, err = command.CombinedOutput()
-		}
-		version = strings.TrimSpace(string(output))
-		if err != nil {
-			version = "failed: " + version
-		}
-	}
-	if tool == "go" {
-		// Programs the toolchain builds read these at startup, and a step
-		// that runs one asserts what it prints.
-		for _, name := range goRuntimeEnvironment {
-			value, set := stepVariable(name)
-			version += fmt.Sprintf("\x00%s\x00%t\x00%s", name, set, value)
-		}
-	}
-	g.tools[tool] = version
-	return version
 }
 
 func (g *gate) submoduleState(dir string) (string, error) {

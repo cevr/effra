@@ -46,7 +46,11 @@ func runnerLeaf(t *testing.T, runner string, files map[string]string) (string, s
 		write(t, leaf, name, content)
 	}
 	bin := t.TempDir()
-	write(t, bin, "bun", "#!/bin/sh\necho 1.4.3\n")
+	// The stub Bun is a script inside a package that names itself when asked
+	// for its execPath; its fingerprint is that package, its interpreter and
+	// itself, so a gate over it can replay a pass.
+	write(t, bin, "package.json", `{"name": "stub-bun"}`)
+	write(t, bin, "bun", "#!/bin/sh\nif [ \"$1\" = -e ]; then printf %s \"$0\"; exit 0; fi\necho 1.4.3\n")
 	if err := os.Chmod(filepath.Join(bin, "bun"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -164,6 +168,7 @@ func TestReferencesReplayHoldsWhateverIsLeftInGenerated(t *testing.T) {
 	}
 	write(t, bin, "bun", `#!/bin/sh
 [ "$1" = --version ] && { echo 1.4.3; exit 0; }
+[ "$1" = -e ] && { printf %s "$0"; exit 0; }
 for argument in "$@"; do case "$argument" in --reporter-outfile=*) out="${argument#--reporter-outfile=}" ;; esac; done
 printf '%s\n' '`+junit+`' > "$out"
 printf ' 3 pass\n 0 fail\n'
