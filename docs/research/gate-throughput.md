@@ -135,6 +135,10 @@ A key that replays a pass must name every input that can change the outcome. The
 | `85cfda7e`, no-ops | not receipted | the logs of this series were lost when the disk filled, so its times are withdrawn. Re-measured instead: the gate's own tests at this commit fingerprinted the real `go`, whose GOROOT under `go test` holds about 12,000 files, and a cached `go test ./scripts/gate` took 17.4, 19.9 and 33.2 s (base `4cecf8fe`: 0.73–1.07 s; load 33–45). On each cached lookup go resolves the symlinks of every path the test logged opening (`search.InDir`), to tell module files from outside ones. Fixed in the next commit |
 | `130c8cb4` (stand-in tools in the gate's own tests), first run | not receipted | log lost when the disk filled. Re-measured: a cached `go test ./scripts/gate` took 1.08–1.10 s at load 38 |
 | `130c8cb4`, no-ops | not receipted | logs lost when the disk filled |
+| `ca29cd94` (runtime behind a `node` or `bun` launcher keyed, plain `env` shebangs only, `go env -json`), first run | 57.6 s | load 28.1→46.4, after 32 min queued on the validation lock; every tool fingerprint and `EFFRA_TOOL_VERSIONS` changed, so the Go tests reran |
+| `ca29cd94`, no-ops | 14.2 s, 2.7 s, 2.6 s | load 46–54; the first reran nine Go packages (the first-no-op effect below), then every step cached |
+| `986fb4c9` (every tool fingerprint started when the gate starts), first run | 15.2 s | load 35.0→35.5; `scripts/gate` tests reran |
+| `986fb4c9`, no-ops | 2.6 s, 2.5 s, 2.4 s, 2.4 s | load 35–37; every step cached. Against `ca29cd94`'s cached no-ops (2.7 s, 2.6 s at load 54) the difference is within noise at this load; starting the fingerprints early is kept because it takes the serial `node`, `bun`, `tsc` and `git` fingerprints of the Go test digest off the critical path under higher load |
 
 ## Turborepo, rejected
 
