@@ -5,9 +5,8 @@ import (
 	"go/build/constraint"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
-	"os/exec"
-	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -111,48 +110,59 @@ func moduleRoot(t *testing.T) string {
 }
 
 // testDirectories returns the directories holding test files of every
-// package `go test ./...` can run, under any build tags: the directories of
-// the _test.go files in Git's index, minus those cmd/go's pattern skips (a
-// directory named testdata or starting with "." or "_", and nested modules).
-// It reads the index, not the tree: walking the tree would key this result
-// on every directory's entries, build outputs included. A test package
-// still untracked is checked once it is added. go list is not used: it
-// omits a directory whose files are all excluded by build constraints.
+// package `go test ./...` can run, under any build tags. It walks the tree
+// as cmd/go's pattern does (modload.matchPackages): it skips a directory
+// named testdata or starting with "." or "_", a nested module (a directory
+// with a go.mod file) and a link to a directory. It lists each directory
+// with an ordinary read, which Main records as an input: a test package
+// added anywhere, tracked or not, in any clone or worktree, changes a
+// listing and so reruns the guard. go list is not used: it omits a
+// directory whose files are all excluded by build constraints.
 func testDirectories(t *testing.T, root string) []string {
 	t.Helper()
-	listed := func(patterns ...string) []string {
-		t.Helper()
-		command := exec.Command("git", append([]string{"ls-files", "-z", "--cached", "--"}, patterns...)...)
-		command.Dir = root
-		output, err := command.Output()
-		if err != nil {
-			t.Fatalf("git ls-files %s: %v", strings.Join(patterns, " "), err)
-		}
-		return strings.FieldsFunc(string(output), func(r rune) bool { return r == 0 })
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	var nested []string
-	for _, file := range listed("go.mod", "*/go.mod") {
-		if dir := path.Dir(file); dir != "." {
-			nested = append(nested, dir)
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if fields := strings.Fields(line); len(fields) > 0 && (fields[0] == "ignore" || strings.HasPrefix(fields[0], "ignore(")) {
+			t.Fatal("go.mod has an ignore directive, which this walk does not apply")
 		}
 	}
 	var dirs []string
-	for _, file := range listed("*_test.go") {
-		dir := path.Dir(file)
-		skipped := slices.ContainsFunc(strings.Split(dir, "/"), func(element string) bool {
-			return element == "testdata" || strings.HasPrefix(element, ".") || strings.HasPrefix(element, "_")
-		})
-		inNested := slices.ContainsFunc(nested, func(module string) bool { return dir == module || strings.HasPrefix(dir, module+"/") })
-		base := path.Base(file)
-		if skipped || inNested || strings.HasPrefix(base, ".") || strings.HasPrefix(base, "_") {
-			continue
+	var walk func(dir string)
+	walk = func(dir string) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if full := filepath.Join(root, filepath.FromSlash(dir)); !slices.Contains(dirs, full) {
-			dirs = append(dirs, full)
+		if dir != root && slices.ContainsFunc(entries, func(entry fs.DirEntry) bool { return entry.Name() == "go.mod" }) {
+			if info, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil && !info.IsDir() {
+				return // a nested module
+			}
+		}
+		tests := false
+		for _, entry := range entries {
+			name := entry.Name()
+			if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+				continue
+			}
+			switch {
+			case entry.IsDir():
+				if name != "testdata" {
+					walk(filepath.Join(dir, name))
+				}
+			case strings.HasSuffix(name, "_test.go"):
+				tests = true
+			}
+		}
+		if tests {
+			dirs = append(dirs, dir)
 		}
 	}
+	walk(root)
 	if len(dirs) == 0 {
-		t.Fatal("git lists no test files")
+		t.Fatal("the module has no test files")
 	}
 	return dirs
 }
