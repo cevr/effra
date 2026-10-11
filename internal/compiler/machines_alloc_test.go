@@ -61,7 +61,16 @@ func measureMachineAnalysis(t *testing.T, source string) (*Result, []machineMeas
 // any, runs as the window closes and reports what the window changed.
 func measureMachineAnalysisAfter(t *testing.T, source string, setup func(*checker) func(*checker) string) (*Result, []machineMeasure) {
 	t.Helper()
+	r, measures, _ := measureMachineCompile(t, source, setup)
+	return r, measures
+}
+
+// measureMachineCompile is measureMachineAnalysisAfter that also returns each
+// module's preparation, in compile order.
+func measureMachineCompile(t *testing.T, source string, setup func(*checker) func(*checker) string) (*Result, []machineMeasure, []preparationMeasure) {
+	t.Helper()
 	var measures []machineMeasure
+	var preparations []preparationMeasure
 	var before runtime.MemStats
 	var verify func(*checker) string
 	machineAnalysisProbe = func(c *checker, in *machineInput, done bool, units int) {
@@ -93,7 +102,9 @@ func measureMachineAnalysisAfter(t *testing.T, source string, setup func(*checke
 		}
 		var after runtime.MemStats
 		runtime.ReadMemStats(&after)
-		assertMachinePreparationCharged(t, len(source), preparationMeasure{bytes: after.TotalAlloc - prepareBefore.TotalAlloc, units: units})
+		preparation := preparationMeasure{bytes: after.TotalAlloc - prepareBefore.TotalAlloc, units: units}
+		preparations = append(preparations, preparation)
+		assertMachinePreparationCharged(t, len(source), preparation)
 	}
 	defer func() { machinePreparationProbe = nil }()
 	r := Compile(source)
@@ -105,7 +116,7 @@ func measureMachineAnalysisAfter(t *testing.T, source string, setup func(*checke
 			t.Errorf("analysis reached an unprepared fact: %s", d.Message)
 		}
 	}
-	return r, measures
+	return r, measures, preparations
 }
 
 // preparedOverBudget reports a layout or display preparation built although
@@ -501,6 +512,13 @@ func randomMachineShape(rng *rand.Rand) machineShape {
 	// the ordinary checker's own cost on it (not preparation) is small.
 	s.shared = pick(0, 0, 0, 0, 0, 0, 64, 500, 2000)
 	s.initialLabels = pick(0, 0, 0, 0, 0, 0, 0, 0, 64, 5000)
+	// What these axes test is work repeated per declaration, so they come
+	// with the most declarations, except beside an explicit generic initial,
+	// whose checking is superlinear.
+	if (s.shared > 0 || s.initialLabels > 0) && s.initialArg == 0 {
+		s.declarations = 256
+		s.machineName = min(s.machineName, (16<<20)/s.declarations)
+	}
 	return s
 }
 
@@ -508,10 +526,50 @@ func randomMachineShape(rng *rand.Rand) machineShape {
 // state clipped first when the shape asks.
 func (s machineShape) measure(t *testing.T) (*Result, []machineMeasure) {
 	t.Helper()
+	r, measures, _ := s.measureCompile(t)
+	return r, measures
+}
+
+// measureCompile is measure that also returns each module's preparation.
+func (s machineShape) measureCompile(t *testing.T) (*Result, []machineMeasure, []preparationMeasure) {
+	t.Helper()
+	var setup func(*checker) func(*checker) string
 	if s.clip {
-		return measureMachineAnalysisAfter(t, s.source(), clipCheckerState)
+		setup = clipCheckerState
 	}
-	return measureMachineAnalysis(t, s.source())
+	return measureMachineCompile(t, s.source(), setup)
+}
+
+// assertSharedAxesCharged holds what the shared axes' width adds to a
+// module's preparation to the preparation bound of what it adds: the units
+// its charges accepted and the source bytes it wrote. The bound on the whole
+// module cannot see a declaration repeating work over shared data when the
+// other axes make the source large, since 64 bytes per source byte of a long
+// name excuse megabytes. The difference against the same shape with each
+// drawn axis one wide (the same declarations, variants and initial) cancels
+// them. It runs where the axes bring their 256 declarations, not beside an
+// explicit generic initial, whose checking is superlinear.
+func assertSharedAxesCharged(t *testing.T, label string, s machineShape, with []preparationMeasure) (ratio float64) {
+	t.Helper()
+	if (s.shared == 0 && s.initialLabels == 0) || s.declarations < 256 {
+		return 0
+	}
+	base := s
+	base.shared, base.initialLabels = min(s.shared, 1), min(s.initialLabels, 1)
+	_, _, without := base.measureCompile(t)
+	if len(with) == 0 || len(without) == 0 {
+		t.Fatalf("%s: no preparation measured", label)
+	}
+	a, b := with[len(with)-1], without[len(without)-1]
+	added := preparationMeasure{units: max(0, a.units-b.units)}
+	bound := added.bound(len(s.source()) - len(base.source()))
+	if a.bytes <= b.bytes {
+		return 0
+	}
+	if bytes := a.bytes - b.bytes; bytes > bound {
+		t.Errorf("%s: the shared axes add %d preparation bytes for %d accepted units and %d source bytes (bound %d)", label, bytes, added.units, len(s.source())-len(base.source()), bound)
+	}
+	return float64(a.bytes-b.bytes) / float64(bound)
 }
 
 // clipCheckerState puts the checker's shared state at its worst for the
@@ -631,9 +689,11 @@ func TestMachineAnalysisAllocationIsCharged(t *testing.T) {
 		shape := machineSeedShape(seed)
 		label := fmt.Sprintf("seed %d (%s)", seed, shape)
 		started := time.Now()
-		r, measures := shape.measure(t)
+		r, measures, preparations := shape.measureCompile(t)
+		compiled := time.Since(started)
+		shared := assertSharedAxesCharged(t, label, shape, preparations)
 		if testing.Verbose() {
-			t.Logf("seed %d compiled in %s: %d plans, codes %v, shared=%d initialLabels=%d", seed, time.Since(started).Round(time.Millisecond), len(r.Machines), slices.Compact(machineCodes(r)), shape.shared, shape.initialLabels)
+			t.Logf("seed %d compiled in %s: %d plans, codes %v, shared=%d initialLabels=%d declarations=%d, shared axes at %.3f of their bound", seed, compiled.Round(time.Millisecond), len(r.Machines), slices.Compact(machineCodes(r)), shape.shared, shape.initialLabels, shape.declarations, shared)
 		}
 		worst.observe(label, measures)
 		assertMachineAllocationCharged(t, label, measures)
