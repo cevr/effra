@@ -104,7 +104,7 @@ A key that replays a pass must name every input that can change the outcome. The
 - `clean=` ignored submodule changes hidden by `submodule.<name>.ignore=all`; it now uses `--ignore-submodules=none`.
 - A failure in either leaf runner exited while a started child still ran. Both runners now wait for every started child and exit with the first failure. The counter control joins before it writes its failure evidence, so an unwritable record can neither skip the join nor replace the original failure.
 
-**The first no-op after a run that executes Go tests is not always a no-op.** On three occasions the first rerun repeated four to five Go test processes (15–44 s), and the next rerun cached everything. Run alone, the same shard caches at once (`GODEBUG=gocachetest=1` shows a save and then a hit). The input that Go's test cache refuses inside the gate is not identified yet. Go does not cache a result whose input file changed too recently, and other gate steps write files while the tests run, which makes that refusal the likely cause. The next unit (`gatecpu`) owns this.
+**The first no-op after a run that executes Go tests is not always a no-op.** On four occasions the first rerun repeated one to five Go test processes (6–44 s), and the next rerun cached everything. The cause is the repository root directory's modification time. Go's test cache records every path a test stats inside the module, and for a `stat` it keys size, mode and modification time, directories included (`hashStat` in `cmd/go/internal/test`). Most Go tests here stat the root while resolving paths. `internal/compiler`'s cleanup-provenance control creates and removes a `.cleanup-provenance-*` directory in the root partway through the run. A package that finished before that moment recorded the old time, so its next lookup misses. Measured on `6094a94a`: creating and removing an empty directory in the root turned a 2.1 s no-op into 38.9 s. Thirteen of the fifteen compiler shards, one CLI shard and the unsharded packages reran. Paths outside the module, such as `$HOME`, are not rechecked. The repair belongs in that test: it should create its probe in a subdirectory that no other test stats. It is outside this runner, and a runner that restored the root's time would hide real changes from Go's cache.
 
 | Run | Wall | Notes |
 | --- | ---: | --- |
@@ -114,6 +114,10 @@ A key that replays a pass must name every input that can change the outcome. The
 | `93f9a281`, no-ops | 15.3 s, 8.4 s | 15.3 s reran four `internal/compiler` shards (Go's cache, cause not isolated) and `scripts/gate`; `scripts/gate` reran every time because a test digested the repository's emitted artifacts, which emission rewrites each run. Fixed in the next commit |
 | `f707b63a`, first run | 6.6 s | only `scripts/gate` tests changed |
 | `f707b63a`, no-ops | 2.2 s, 2.0 s | every keyed step cached; emission ran (about 1.3 s) |
+| `6094a94a` (main `497ab408` merged, review rounds 1–2), first run | 123.1 s | every Go test reran because the tool digest's variable list changed; 1-minute load 46.6 before, 100.6 after |
+| `6094a94a`, no-ops right after it | 10.5 s, 5.2 s, 3.9 s | load 97→83 from the first run; the 10.5 s rerun repeated `internal/receipt` and `scripts/conformance` (root modification time, above) |
+| `6094a94a`, no-ops at low load | 2.4 s, 2.3 s, 2.1 s | load 8.1–14.9; every step cached |
+| `6094a94a`, no-op after a root entry was created and removed | 38.9 s | load 13.1→31.0; the root-time control above. The next two no-ops: 6.2 s (load 30.8, unsharded packages reran) and 9.9 s (load 28.9→52.2, every step cached) |
 
 ## Turborepo, rejected
 
