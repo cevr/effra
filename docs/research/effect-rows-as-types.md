@@ -1,8 +1,21 @@
 # Effect rows as types: catch, provide and timeout as library functions
 
-**Status:** design note for the spike in [#115](https://github.com/cevr/effra/issues/115), phase 1, revision 2, 2026-10-11. It changes no compiler behavior. Every line reference is at `main` `f900240c`; paths are under `internal/compiler/` unless stated otherwise. Phase 2 implements only what a review of this note accepts.
+**Status:** design note for the spike in [#115](https://github.com/cevr/effra/issues/115), phase 1, revision 3, 2026-10-11. It changes no compiler behavior. Every line reference is at `main` `f900240c`; paths are under `internal/compiler/` unless stated otherwise. Phase 2 implements only what a review of this note accepts.
 
-Revision 2 applies the round-2 rulings on the first review:
+Revision 3 applies the round-3 rulings on the second review:
+
+| Ruling | What this revision does |
+| --- | --- |
+| B1 | The F3b equation `ρ - L = ρ` is deleted; only `ρ - L ⊆ ρ` remains, with composition rules and the reviewer's `leak<F>` counterexample as a negative control of the provide unit (§2.3). |
+| M1, Q9 | User type parameters may be instantiated with callable types used as whole values. `examples/callables-factory.ef` is a mandatory gate-1 program; the only listed probe artefacts are `host-types.ef` and `callables-state.ef` (§2.6.3, §3, §7). |
+| M2, Q6 | A reference body where one exists (catch, over recover); otherwise a declared contract in the inferred vocabulary, pinned by the ownership matrix and a wrapper-parity test (§2.6.5, §2.12). |
+| M3 | The contract gains a provision clause; graph and lint provision edges derive from it, never from signature shape (§2.6.2, §2.11). |
+| M4 | The TypeScript guard also refuses a widened `string` tag; the reviewer's `extra.mts` case is a negative control (§2.8, probe C2). |
+| M5 | F6 moves into unit 4b, before gate 2, as a coercion on direct call arguments (§2.12, §7). |
+| Minors m1-m8 | Summary transport in unit 4a; F3b clients and positions; the owner-vector in-place test with negative controls; span parity in gate 1; F6 as a coercion; the B1 test counts; open questions reconciled with the rulings; "closed at the edge" marked as not yet shown. |
+| Split | Note r3, F3, F1 plus receivers, 4a, 4b, catch, provide, recover; re-costed (§8). |
+
+Revision 2 applied the round-2 rulings on the first review:
 
 | Ruling | What this revision does |
 | --- | --- |
@@ -46,15 +59,16 @@ So a library function whose behaviour comes from general type machinery is ordin
     - provide: 162 of 164;
     - timeout: 29 of 29.
 
-    The remaining differences are probe artefacts, not contract gaps (§3). In round 1 the same wrappers matched 1, 4 and 11 programs.
-  - **Callback parameters are not yet covered.** The same prototype matches 20 of 44 `.recover` programs through a wrapper. The gaps are three named clauses for callbacks (§2.6.6). Recover is therefore conditional.
+    In round 1 the same wrappers matched 1, 4 and 11 programs. Of the remaining differences, two are artefacts of the textual rewrite (`host-types.ef`, `callables-state.ef`). The third, `examples/callables-factory.ef`, is a real gap: its catch fallbacks are callable values, so a library `catch<A: type, …>` must accept callable type arguments. Unit 4a closes it (Q9 extended) and must pass it in gate 1; otherwise an accepted example would become refused.
+  - **In place: shown. Closed at the edge: not yet shown.** The contract's in-place half carries catch, provide and timeout's intrinsic. A user wrapper whose body closes its own `scope` around the parameter (a scope-bodied timeout model) still scores 0 of 29; it is a named follow-up, not needed by catch, provide or recover (§3).
+  - **Callback parameters are not yet covered.** The same prototype matches 20 of 44 `.recover` programs through a wrapper. The gaps are two callback clauses and the pure-to-effect coercion F6 (§2.6.6). Recover is therefore conditional on gate 2.
 - **Recommendation:**
 
   | Form | Phase 2 |
   | --- | --- |
-  | `.catch<E>(v)` | GO, once the edge-contract unit passes its gate (unit 4) |
-  | `.provide<S>(p)` | GO, after catch (unit 5) |
-  | `.recover<E>(h)` | CONDITIONAL. GO only if the edge-contract unit also brings the recover wrapper corpus to identity; otherwise recover stays a construct (D1 for recover alone). |
+  | `.catch<E>(v)` | GO, once unit 4a passes gate 1 (unit 5) |
+  | `.provide<S>(p)` | GO, after catch (unit 6) |
+  | `.recover<E>(h)` | CONDITIONAL. GO only if unit 4b brings the recover wrapper corpus to identity with the single `recover` signature (gate 2); otherwise recover stays a construct (D1 for recover alone). |
   | `.timeout(ms)` | NO-GO. Its rows and its owner are expressible; its first-completion race and the abandonment of the losing work are control (rung 4). |
   | `.provide(Layer)` | NO-GO. Tooling reads the static layer plan (rung 4). |
   | `.orFail()` | Stays syntax until `GoResult` is ordinary data (audit S8). |
@@ -269,9 +283,23 @@ Rows without a variable keep today's upper-bound meaning. This is the standard r
 **Feature F3b, the row difference.** A result row may write `{ ρ - L }`: ρ with the label `L` removed if present. It is removal without presence.
 
 - At a call, ρ is bound to a concrete row, so `ρ - L` is computed by `remove`.
-- In a generic body, `ρ - L` stays symbolic as one interned label, `row-difference:<ρ>:<L>`, with two rules: `ρ - L ⊆ ρ`, and `ρ - L = ρ` when ρ was bound by an extension pattern that listed `L` (set semantics make that ρ lack `L`).
-- TypeScript: `Exclude<R, I>` with `I` unconstrained, which is exactly Effect's `provideService` (§2.8).
-- **Clients:** `provide` (§2.12); user test helpers that provide a test service whether or not the work uses it (`fn withTestClock<…>(work: Effect<A, { E }, { R }>) -> Effect<A, { E }, { R - Clock }>`); and ignore-style failure helpers that drop a label if present (`fn quiet<…>(work: Effect<A, { F }, { R }>) -> Effect<A, { F - Denied }, { R }>`). That is two unrelated families beyond provide.
+- In a generic body, `ρ - L` stays symbolic as one interned label, `row-difference:<ρ>:<L>`. Its rules:
+  - `ρ - L ⊆ ρ`. This is the only relation to ρ. In particular `{ ρ }` is not assignable to `{ ρ - L }`.
+  - `(ρ - L) - L = ρ - L`, and `(ρ - L) - M = (ρ - M) - L`: differences are kept as a sorted label set per variable.
+  - An extension pattern that requires `L` in `{ ρ - L }` is refused, because `L` is not literally present (conservative).
+  - There is no absence rule. Round 2 claimed `ρ - L = ρ` when ρ was bound beside `L`; that is unsound, because `inferRows` unions a variable's bindings across every argument (`callables.go:345`), so a pattern listing `L` in one position does not make ρ lack `L`. If absence is ever needed, it must be an explicit constraint checked at every binding contribution and explicit instantiation, as PureScript's `Lacks` is, never derived from one pattern.
+- **Positions.** `{ ρ - L }` is admitted only in result positions (a function's result type and the result type of a callable it returns). In a parameter or callback-parameter row it is refused with a diagnostic, "a row difference may appear only in a result".
+- TypeScript: `Exclude<R, I>` with `I` unconstrained, which is exactly Effect's `provideService` (§2.8). It claims no absence either.
+- **Clients:** `provide` (§2.12), and user provision helpers that write `{ R - S }` in their own signatures, as Effect users write `Exclude<R, X>` (`fn withTestClock<A: type, E: raises, R: uses>(work: Effect<A, { E }, { R }>) -> Effect<A, { E }, { R - Clock }>`). That meets rung 2 under the owner's TypeScript-counterpart reading ("kind of like its counterpart in typescript"): it is the TypeScript feature itself. Round 2's "ignore-style" failure helper is withdrawn: its body would need catch or recover, which require the label to be present.
+- **Negative control (provide unit).** The reviewer's counterexample must be refused:
+
+  ```ef
+  fn leak<F: raises>(first: Effect<string, { Denied, F }, {}>, raw: Effect<string, { F }, {}>) -> Effect<string, { F - Denied }, {}> {
+      raw
+  }
+  ```
+
+  The body returns `{ F }` where `{ F - Denied }` is declared, and `{ F }` is not within `{ F - Denied }`, so the body is refused with the row mismatch. Its TypeScript projection is refused the same way.
 
 **The unused-provide case (amended Q4).** Providing a service the work does not use is safe: the provider is installed and never read. `examples/causal.ef:47` does it today, and it runs correctly. It is not unsound, so it stays accepted, and the negative control "providing a service the effect doesn't use" is dropped from acceptance item 3. `provide` therefore uses F3b, not F3. `examples/causal.ef` is unchanged, and the name-keyed scheduler injection (§1.5) is not disturbed. Catch keeps presence: catching an absent label is the existing EF107 refusal.
 
@@ -324,8 +352,13 @@ For each recipe parameter `p` of a function `f`, the summary records, relative t
 3. **Failure flow.** For each label of a row variable in `p`'s type, the payload evidence of the actual labels it stands for.
 4. **Observations.** Whether executing `f`'s result executes `p`, so the fork instances `p`'s argument observes count as observed at the call. For an effect function, running `f`'s body counts too, because the body runs in the call's layer 0.
 5. **Pending.** If `f`'s result recipe executes `p` in place, the pending children of `p`'s argument stay pending on the call's result, and their labels stay in the call's row. This is exactly what `handledRow` does in the direct form. Composite-cause companions are rewritten as `handleWith` does: a label the result no longer raises is replaced by what the result raises instead.
+6. **Provision.** Which arguments are installed as the provider of which service around the execution of `p`: "argument `q` provides `S` to the in-place execution of `p`". It is inferred where the body's provision (the provide construct today, the provide primitive later) takes a provider derived from a parameter `q` over a recipe derived from `p`, and is substituted at the call like the other clauses (the actual provider binding of `q`'s argument). A body that ignores its provider argument records no provision, whatever its signature says.
 
 The contract values are inferred, not declared, for ordinary bodies. "Executes `p` in place" is clause 1 with an identity owner vector; "executes `p` under an owner closed at the edge" is clause 1 with a closed owner. Neither names a construct.
+
+**The in-place test is the owner vector.** The prototype approximated "in place" by "`param:p` reaches the result's observations" (§3). Production decides it from clause 1's owner vector alone, and unit 4a's acceptance carries negative controls for work that is run under `scope`, run under timeout, forked and not joined, never run, run twice, and run in one branch only. Each must get the contract value its owner vector says (closed, closed, not in place, absent, in place with both occurrences joined, joined with the absent branch) and the same verdict as the direct form.
+
+**What is shown.** The in-place half is evidenced by probe D. The closed-at-the-edge half is not yet shown: the scope-bodied timeout model scores 0 of 29 (§3). It is a named follow-up of unit 4a; catch, provide and recover do not need it.
 
 #### 2.6.3 Inference
 
@@ -340,7 +373,9 @@ Whatever the body does to the deferred execution (run it, close it under a scope
 
 **Whole-value type parameters.** A value of a type-variable type is one whole value: its facts are kept at the root path, not merged into a bounded wildcard (`normalizeFacts`, `mergeKey`, `semantic.go:1330`). Inside a generic body no field layout is needed, which retires EF127 "field layout of an unresolved type parameter is unavailable" on this path (`field_occurrences.go:175`).
 
-**User type parameters.** The go/no-go test needs a user wrapper with the library's signature, and that signature has `A: type`. Today user type parameters are refused (EF127, `semantic.go:2938-2939`). The contract unit therefore admits user type parameters that the body uses only as whole values (passed, returned, joined, carried in a recipe), and keeps EF127 for anything that needs a layout (a field read, a template instantiation). Go generics erase them as `[T any]`, as bundled functions already do (`emit_go.go:815-816`); JS erases them. This admits user generics in that narrow form; it is listed as Q9.
+**User type parameters.** The go/no-go test needs a user wrapper with the library's signature, and that signature has `A: type`. Today user type parameters are refused (EF127, `semantic.go:2938-2939`). Ruling Q9 (round 2, extended in round 3) admits user type parameters that the body uses only as whole values (passed, returned, joined, carried in a recipe), and keeps EF127 for anything that needs a layout (a field read, a template instantiation). Go generics erase them as `[T any]`, as bundled functions already do (`emit_go.go:815-816`); JS erases them, and `jsRowFunctionSignature` already projects type parameters (`callables.go:612-630`).
+
+**Callable type arguments.** A type parameter, user or bundled, may be instantiated with a callable type, such as `effect fn(string) -> string raises { Broken } uses { Directory }`. The value is carried as a whole value together with its callable contract (its callable evidence and its relation atoms), as a callable local is today. This is required, not optional: `examples/callables-factory.ef:63-68` catches with callable fallbacks (pure, effectful with rows, nested), and once catch is the generic receiver function of §2.12 its `A` is that callable type. Today the bundled path refuses it (`templateDataArgument`, `templates.go:350,955-980`; pinned by `templates_test.go:127-141`), and the probe's relaxed user generics refuse it the same way (EF103, EF106, EF127 in probe D). Unit 4a closes the gap, `callables-factory.ef` is a mandatory gate-1 program, and the `templates_test.go:127` assertion is rewritten to keep EF127 only for layout use.
 
 #### 2.6.4 Instantiation at a call
 
@@ -358,35 +393,43 @@ At a call of `f`, the existing instantiation (`instantiateCallbackFacts`, `callb
 
 #### 2.6.5 Intrinsics declare the same contract
 
-A bundled intrinsic has no body to infer from, so it declares its contract in the summary form the checker infers. Two candidate formats, decided in the edge-contract unit (Q6):
+Ruling Q6, as amended in round 3, fixes the form:
 
-- (a) a summary record in the compiler-private interface-summary transport, which already carries relations and owner vectors (`interface_summary.go`, schema 5), checked into the bundled module;
-- (b) a reference body in ordinary Effra whose inferred contract is the declaration, where one exists (catch over recover, once recover is library).
+- **A reference body where one exists.** catch's reference body is recover with a constant handler: `work.recover<E>(const(fallback))`, where the handler returns the captured `fallback`. Its contract is inferred from that body exactly as for user code, and the compiler only chooses its backend. The body works in both gate-2 outcomes: over the library recover if gate 2 passes, over the recover construct if it fails.
 
-Either way the intrinsic gains nothing beyond its contract, and two tests pin it:
+  **One precondition is missing today.** The constant handler captures `fallback`, and Effra admits named functions as values but not closures: "closures require explicit capture checking before admission" (`docs/specs/language-abstractions.md:124`). So the reference body can be written only once closures, or another way to bind a value into a callable, are admitted. Until then catch takes the second form below, with exactly the contract its reference body will infer, and the wrapper-parity test compares the two when the body becomes writable. This note does not propose admitting closures; that is a separate design.
+- **Otherwise a declared contract in the inferred vocabulary.** catch until closures exist, and recover and provide permanently for now, have no reference body: Effra has no operation that inspects a failed execution's cause (`Exit` is not exposed), and the provide construct requires a static provider node whose name matches the service (`semantic.go:5054-5066`), so `provider: Provider<S>` cannot be passed to it. Writing `work.recover<E>(h)` inside `effra/effect` would resolve to the function itself. These two primitives declare their contract using only what inference produces:
+  - relation atoms with owner vectors (clause 1 and 2);
+  - payload atoms (clause 3);
+  - `param:` observation tokens (clause 4);
+  - pending transfer (clause 5);
+  - the provision clause (clause 6);
+  - for recover, the callback clauses of §2.6.6.
 
-- the ownership matrix runs it on Go and JS (`docs/specs/language-abstractions.md`, ownership verdicts held to runtime truth);
-- the wrapper test: a user function with the same signature, whose body calls the intrinsic, infers the identical summary and gives identical verdicts and diagnostics on the corpus.
+  The declaration claims nothing that vocabulary cannot express; there is no free-form trusted summary. It is carried in the bundled interface-summary transport (`interface_summary.go`, schema 5 at `:15`; admitted through `interface_admission.go:21` and following), which unit 4a extends (§7). The trust boundary, "a primitive's declared contract", is recorded in the audit's D4 text.
+- **Two tests pin every declared contract:**
+  - the ownership matrix runs the primitive on Go and JS (`docs/specs/language-abstractions.md`, ownership verdicts held to runtime truth);
+  - the wrapper-parity test: a user function with the same signature, whose body calls the primitive, infers the identical summary and gives identical verdicts, diagnostics and spans on the corpus.
 
-The intrinsic then selects only its backend (§2.9).
+So the intrinsic gains nothing that a body with the same contract would not get, and it selects only its backend (§2.9). A lower primitive pair (a fold over a failed execution's cause, as Effect's `matchCause`, and a local-context operation, as Effect's `provideContext`) would later let recover and provide have reference bodies too; that is the long-term route recorded in §2.13.
 
 The contracts of the three library functions:
 
 | Function | Recipe parameter `work` | Callback parameter |
 | --- | --- | --- |
-| `catch` | executed in place; result joins the fallback value; `E`'s raised payload dropped; observations and pending kept | none |
-| `provide` | executed in place; captures union the provider's; observations and pending kept | none |
+| `catch` (declared now; reference body once closures exist) | executed in place; result joins the fallback value; `E`'s raised payload dropped; observations and pending kept | none (its reference body passes a constant handler to recover) |
+| `provide` | executed in place; captures union the provider's; observations and pending kept; provision: `provider` provides `S` to `work` | none |
 | `recover` | executed in place; `E`'s raised payload dropped; observations and pending kept | `handler` invoked on a solitary `E` failure of `work`, with `work`'s layer 0 still open, given `E`'s payload |
 
 #### 2.6.6 Callback parameters: what is still missing
 
-Callable parameters already have relation atoms; they lack three clauses that recover's handler needs, measured in probe D:
+Callable parameters already have relation atoms; recover's handler needs two more clauses and one coercion, measured in probe D:
 
 1. **Pending through an in-place callback.** A handler with an unjoined child is refused at the argument by `requireObservedChildren` (`semantic.go:4290-4300`), where the direct form keeps the label pending on the result. This affects 6 programs, one of which (`ownership_sweep/i2_handler_declared.ef`) is accepted today.
 2. **The payload a callback is given.** The direct form refuses a handler that dereferences a payload owned by a closed owner (`recovery.go:60-63`), and accepts one that does not. Through a wrapper, the payload reaches the handler as an atom over `work`'s failure, and the check fires later as "recipe holds a value owned by a closed scope". 15 programs move their refusal; 2 accepted programs (`ownership_sweep/k2_forward_inside.ef`, `p1_code_only.ef`) are refused.
-3. **User generics over callable-typed `T`.** One example (`recovery-codec.ef`) needs a template argument the probe's relaxed user generics do not support; the same gap appears in catch and provide (§3).
+3. **Mixed handler modes, which need F6.** `examples/recovery-codec.ef` passes an effect handler (`invalid`, line 38) and a pure handler (`explain`, line 45) to recover in one program. Round 2 misfiled it as a callable-`T` case; its success type is `string`. The probe chooses one handler mode per program, so no single wrapper fits it. With the single `recover` signature, it needs F6 (§2.12).
 
-Each clause is the recipe contract applied to callback parameters ("invoked in place", "given the payload of `p`'s failure `E`"). None names recover. Whether they infer generally is the edge-contract unit's second gate (§7).
+The two clauses are the recipe contract applied to callback parameters ("invoked in place", "given the payload of `p`'s failure `E`"). None names recover. F6 is a general coercion. All three belong to unit 4b, and gate 2 runs the recover wrapper corpus with the single `recover` signature, not with per-program mode variants (§7).
 
 ### 2.7 Diagnostics
 
@@ -401,6 +444,8 @@ The rule: same code, same text where the fact is the same, and a better anchor w
 | A non-Effect receiver | EF105 "catch requires an Effect value", "provide requires …", "recover requires …" (`semantic.go:5076`, `:5059`; `recovery.go:30`; `recovery_test.go:162`) | The receiver-method resolution failure: the receiver's type has no method `catch`. The code is chosen in the receiver-method unit; the test at `recovery_test.go:162` changes with it. |
 | Wrong fallback or handler type | EF106 "prototype catch fallback must be a pure string" at the fallback (`semantic.go:5083`) | **Must not regress** to the generic EF106 "argument has incompatible instantiated callback contract" at the call (`callables.go:357`). Phase 2 replaces that message for every generic call with "argument `fallback` must be `string`", using the instantiated parameter type at the argument's span. This is a general improvement. |
 | A label argument that is not one name | Not expressible | New: "label parameter E takes one failure name" |
+| A row difference in a parameter row | Not expressible | New: "a row difference may appear only in a result" (§2.3) |
+| A body that returns `{ F }` where `{ F - L }` is declared (`leak<F>`, §2.3) | Not expressible | The existing row mismatch for a result, naming `L` |
 | Providing a service the effect doesn't use | Accepted | Accepted (F3b, §2.3). Not a negative control. |
 | Wrong provider | EF104 "provider must implement S" (`semantic.go:5066`) | The argument type mismatch against `Provider<S>`. Keep EF104 by mapping provider-typed parameter mismatches to it. |
 | Removing from a closed row versus an open row | Closed: EF107 presence. Open: EF125 "recovery of an abstract row requires an unsupported row difference constraint" | Closed: EF107 presence. Open with the label literally present: accepted. Open without it: EF107 presence. The EF125 text disappears. |
@@ -417,9 +462,9 @@ The intended `.d.mts` for `effra/effect`. Probe C2 checks it with strict `tsc` 6
 ```ts
 import type { Context, Effect } from 'effect';
 type __ef_tag = { readonly _tag: string };
-// A label parameter admits exactly one label: a union-typed tag is refused.
+// A label parameter admits exactly one literal label: a union-typed or widened (string) tag is refused.
 type __ef_union<T, U = T> = T extends unknown ? ([U] extends [T] ? false : true) : never;
-type __ef_single<K> = true extends __ef_union<K> ? { readonly __ef_single_label_required: K } : unknown;
+type __ef_single<K> = string extends K ? { readonly __ef_single_label_required: K } : true extends __ef_union<K> ? { readonly __ef_single_label_required: K } : unknown;
 
 // fn (work: Effect<A, {E, F}, {R}>) catch<E: error, A: type, F: raises, R: uses>(fallback: A) -> Effect<A, {F}, {R}>
 export declare const catch_: <A, F extends __ef_tag, R, K extends F["_tag"]>(arg_work: Effect.Effect<A, F, R>, tag: K & __ef_single<K>, arg_fallback: A) => Effect.Effect<A, Exclude<F, { readonly _tag: K }>, R>;
@@ -454,7 +499,7 @@ export const provide = (work, service, provider) => Effect.provideService(work, 
   - `tag: K & __ef_single<K>` with `K extends F["_tag"]`;
   - `service: Context.Service<I, P> & __ef_single<I>`.
 
-  This is Effect's `catchTag`/`provideService` shape, with one correction: Effect admits a union `K` and removes every member, while its runtime catches one (review counterexample `union.mts`). The `__ef_single` guard refuses a union, matching Effra's one-label rule. The `extends` constraint is the presence check. The witness is also why TypeScript callers need no partial type arguments, which TypeScript lacks.
+  This is Effect's `catchTag`/`provideService` shape, with one correction: Effect admits a union `K` and removes every member, while its runtime catches one (review counterexample `union.mts`). The `__ef_single` guard refuses a union, matching Effra's one-label rule. It also refuses a widened tag (`string extends K`): on a row with a member typed `{ readonly _tag: string }`, a `string` tag would otherwise `Exclude` every failure while the runtime compares one tag by equality (review case `extra.mts`). Effra-emitted errors always have literal tags, but the `.d.mts` is public API and hand-written Effect errors with `_tag: string` are common. The `extends` constraint is the presence check. The witness is also why TypeScript callers need no partial type arguments, which TypeScript lacks.
 - **Extension patterns with fixed labels.**
   - The argument row becomes a single variable.
   - Each fixed label adds a presence guard intersected onto the parameter, `__ef_present<Row, Label> = [Label] extends [Row] ? unknown : { readonly __ef_absent_label: Label }`. Intersecting with `unknown` is the identity, so inference is unaffected.
@@ -480,7 +525,7 @@ export const provide = (work, service, provider) => Effect.provideService(work, 
 | JS call site | `__ef_catch(left, "E", () => (right))` | `__ef_catch(left, "E", right)` |
 | JS helper | `__ef_recover(program, tag, () => Effect.sync(fallback))` | `__ef_recover(program, tag, () => Effect.succeed(fallback))` |
 
-**Behaviour.** A fallback is a pure value of the result type (`semantic.go:5083`), and division by zero is unrepresentable (`divisor.go:14`). The only observable difference is a fallback that does not terminate: today it is never evaluated unless the failure is caught; under B1 it is evaluated once, when the recipe is built. Review probe `lazy2.ef` (`ok().catch<Boom>(spin(0))`) prints `ok` today and spins under B1. Laziness stays available through `recover`, whose handler is a function: `ok().recover<Boom>(fn(e: Boom) -> string { spin(0) })`. A by-name parameter feature is rejected (§4).
+**Behaviour.** A fallback is a pure value of the result type (`semantic.go:5083`), and division by zero is unrepresentable (`divisor.go:14`). The only observable difference is a fallback that does not terminate: today it is never evaluated unless the failure is caught; under B1 it is evaluated once, when the recipe is built. Review probe `lazy2.ef` (`ok().catch<Boom>(spin(0))`) prints `ok` today and spins under B1. Laziness stays available through `recover`, whose handler is a named function: with `fn late(e: Boom) -> string { spin(0) }`, write `ok().recover<Boom>(late)` (Effra admits named functions as values, not closures; `docs/specs/language-abstractions.md:124`). A by-name parameter feature is rejected (§4).
 
 **Every affected file.** Every catch site changes its bytes for that one reason. Every fallback in the examples and conformance programs is total and pure (literals, string concatenations, record constructors, function values and `void`), so no program's output changes.
 
@@ -509,7 +554,7 @@ export const provide = (work, service, provider) => Effect.provideService(work, 
 
 That is 45 lines in 19 example files and 2 in one conformance fixture. Beyond those:
 
-- 199 lines in 128 compiler testdata programs and 41 Go test files spell `.catch<`. None compares emitted bytes for a catch except the JS helper tests in `layer_causal_test.go:34-192`, which call `__ef_catch` with a lazy fallback (a recovery counter and a fallback that throws). The catch unit moves those assertions to `__ef_recover` with a handler and adds a strict-value case.
+- At `f900240c`, `.catch<` also appears in 161 lines of 128 compiler testdata programs, 147 lines of 41 `internal/compiler` Go test files, and 9 lines of 6 `cmd/ef` tests (including `readme_smoke_test.go:207` and `lsp_smoke_test.go:549`). None compares emitted bytes for a catch except the JS helper tests in `layer_causal_test.go:34-192`, which call `__ef_catch` with a lazy fallback (a recovery counter and a fallback that throws). The catch unit moves those assertions to `__ef_recover` with a handler and adds a strict-value case.
 - The size receipts (`conformance/size/receipts/`) record a hash of the emitted `managed` program; the catch unit re-records them and lists the change.
 
 ### 2.10 Spelling: receiver methods
@@ -529,7 +574,7 @@ Receiver methods are admitted but not implemented (`docs/specs/language-abstract
 
 These facts derive from signatures and the contract, never from the identity of an intrinsic (audit D2).
 
-- **Provision edges** (`graph.go:204`, `lint_facts.go:309-311,364`). A call provides `S` when its function's signature has a `Provider<S>` parameter and its result row removes `S` from the receiver row (`{ R - S }`). The provider identity is the binding of that argument. Any user function with that signature shape yields the same edge, for example a test helper that provides `Clock`.
+- **Provision edges** (`graph.go:204`, `lint_facts.go:309-311,364`). A call provides `S` exactly when its contract's provision clause (§2.6.2, clause 6) says that an argument is installed as the provider of `S` around an in-place recipe argument. The provider identity is the binding of that argument at the call. Signature shape alone never yields an edge: `fn fake<S: service, …>(work: Effect<A, { E }, { R }>, p: Provider<S>) -> Effect<A, { E }, { R - S }>` that ignores `p` and returns a constant recipe is legal (rows are upper bounds), and it records no provision. A user helper that does provide, through any signature, gets the edge from its inferred clause. The provide primitive declares the clause (§2.6.5).
 - **Provider origin** (`graph.go:474`, today a look-through on provide, catch and recover). The origin of a call's result is the origin of each recipe argument the contract says the result executes in place (§2.6.2, clause 1). It covers any in-place wrapper, not three kinds.
 - **Reachability** (`reachability.go:852-861`).
   - Helper retention is a backend fact of the intrinsic (`RequiresHelper`, `reachability.go:848-849`), as D4 allows.
@@ -541,19 +586,24 @@ These facts derive from signatures and the contract, never from the identity of 
 
 ```ef
 // effra/effect, the owner module of Effect.
-// The body is an intrinsic with a declared contract (§2.6.5): it runs work
-// in place and, on a solitary typed failure E, succeeds with the fallback.
+// The body is an intrinsic whose declared contract (§2.6.5) is exactly what
+// its reference body, work.recover<E>(const(fallback)), will infer once
+// closures are admitted: work runs in place and, on a solitary typed
+// failure E, the result is the fallback.
 fn (work: Effect<A, { E, F }, { R }>) catch<E: error, A: type, F: raises, R: uses>(fallback: A) -> Effect<A, { F }, { R }> {
     "effra:intrinsic effect.catch"
 }
 
 // The one named recovery callback (language-abstractions.md:147). A pure
-// handler fn(E) -> A is an effect handler with empty rows (F6).
+// handler fn(E) -> A is coerced to an effect handler with empty rows (F6).
+// A primitive: its contract is declared in the inferred vocabulary.
 fn (work: Effect<A, { E, F }, { R }>) recover<E: error, A: type, F: raises, R: uses, G: raises, S: uses>(handler: effect fn(E) -> A raises { G } uses { S }) -> Effect<A, { F, G }, { R, S }> {
     "effra:intrinsic effect.recover"
 }
 
 // Removal without presence (F3b): providing an unused service is accepted.
+// A primitive: its declared contract includes the provision clause
+// "provider provides S to work" (§2.6.2, clause 6).
 fn (work: Effect<A, { E }, { R }>) provide<S: service, A: type, E: raises, R: uses>(provider: Provider<S>) -> Effect<A, { E }, { R - S }> {
     "effra:intrinsic effect.provide"
 }
@@ -561,9 +611,12 @@ fn (work: Effect<A, { E }, { R }>) provide<S: service, A: type, E: raises, R: us
 
 **One `recover` (ruling Q2).** `docs/specs/language-abstractions.md:147` already specifies one `recover<E>(handler)` whose handler is "a pure `fn(E) -> T` or an `effect fn(E) -> T raises {F} uses {S}`", and `catch<E>(value)` as the constant fallback. A single library signature needs:
 
-- **Feature F6, pure-to-effect callable subsumption at argument positions.** A pure callable `fn(P) -> T` is accepted where `effect fn(P) -> T raises { G } uses { S }` is expected, binding `G` and `S` to empty rows; the emitter adapts it with the succeed adapter that recover's Go emission already uses for pure handlers (`recovery.go:213-233`).
-- It reverses "Pure/effect callable modes are never implicitly lifted" (`callables.go:401`) for arguments only. Assignment and return positions keep today's rule. This is the one rule change that needs owner confirmation (Q4 below).
-- **Clients:** recover, and any user combinator that takes a callback and may receive a pure one (a retry predicate, a map over a recipe). It reads with Go's simplicity (a pure function is a function that raises nothing) and projects to TypeScript directly: a function returning `Effect.Effect<A, never, never>` is the adapted form.
+- **Feature F6, the pure-to-effect coercion on direct call arguments** (ruling Q4/F6). It is a coercion, not a subtyping rule, because it changes representation (a value result becomes a recipe):
+  - **Where.** Only a direct argument of a function or method call whose parameter type is an effect callable `effect fn(P) -> T raises { G } uses { S }`. Constructor fields, provider configuration, stored values, nested callable slots (a callable inside a record or another callable's parameter or result) and returns keep today's rule, and the recursive `assignable` (`callables.go:399-440`, including "Pure/effect callable modes are never implicitly lifted" at `:401`) is unchanged.
+  - **What.** A pure callable `fn(P) -> T` is accepted there; `G` and `S` bind to empty rows; the argument is wrapped in the succeed adapter that recover's Go emission already uses for pure handlers (`recovery.go:221-231`), and in `Effect.succeed` on JS.
+  - **Clients:** recover, and any user combinator with an effect-callback parameter that callers may serve with a pure function (a retry predicate, a map over a recipe). Kotlin's SAM conversion and Scala's eta-expansion are the same kind of call-site coercion.
+  - **TypeScript.** The projection describes the adapted ABI: the parameter is a function returning `Effect.Effect<A, G, S>`, and a TypeScript caller writes `Effect.succeed` itself.
+- F6 belongs to unit 4b, before gate 2, because gate 2's single `recover` signature cannot pass `recovery-codec.ef` without it (§2.6.6).
 
 Recover on a builtin label becomes ordinary (§2.2).
 
@@ -587,6 +640,9 @@ Under the contract, "executes the parameter under a fresh owner closed at the ed
 - Its owner is a contract value.
 - What no type feature carries is the race: the timed work and a timer run concurrently, the first to complete decides the result, and the losing work is abandoned and interrupted (`semantic.go:4993-5004`; `TimeoutWithEffect`, `runtime/effra/effect.go:376`; `prelude/timeout.mjs`). That is control (rung 4).
 - **The route by which it could later become library:** a general first-completion construct, a Go-`select`-like race over fibers. `timeout` would then be ordinary `.ef` over `scope`, `fork` and that construct, with an inferred contract. That is a separate design. The `Scheduler` charge stays audit 1-G either way.
+- The closed-at-the-edge owner of such a body is not yet shown to infer (§2.6.2), which is a second reason this route is future work.
+
+**The long-term route for recover and provide.** Both are primitives with declared contracts (§2.6.5). A lower general pair would let them have reference bodies: a fold over a failed execution's cause (Effect's `matchCause`, over `Exit`) and a local-context operation (Effect's `provideContext`, Koka's handler). Those primitives would need declared contracts of their own, so the pair moves the trust boundary rather than removing it; it is recorded here, not proposed.
 
 **`.provide(Layer)`: the static layer plan (tooling reads the structure).**
 
@@ -648,12 +704,14 @@ Same corpus and rewrite as probe B, type-generic wrappers with the library-shape
 
 | Form | Programs | Identical | Different |
 | --- | --- | --- | --- |
-| catch | 147 | 145 | 2: `examples/callables-factory.ef`, where `T` is bound to a callable type that the probe's relaxed user generics cannot instantiate (EF103, EF127); `examples/host-types.ef`, where the rewrite put a pipe beside `+` (EF002) |
-| provide | 164 | 162 | 2: `examples/callables-factory.ef` as above; `examples/callables-state.ef`, where the wrapper names a provider local to a function (EF102) |
+| catch | 147 | 145 | 2: `examples/callables-factory.ef`, a **real gap**: `T` is bound to a callable type, which generic instantiation refuses (EF103, EF106, EF127), exactly as the bundled path does today; `examples/host-types.ef`, a rewrite artefact (EF002, a pipe beside `+`) |
+| provide | 164 | 162 | 2: `examples/callables-factory.ef`, the same real gap; `examples/callables-state.ef`, a rewrite artefact (EF102, the wrapper names a provider local to a function) |
 | timeout | 29 | 29 | none |
-| recover | 44 | 20 | 24: the three missing callback clauses of §2.6.6 (6 pending, 17 payload, 1 user generics) |
+| recover | 44 | 20 | 24: 6 pending through a callback, 17 payload given to a callback, 1 mixed handler modes (`recovery-codec.ef`, needs F6); §2.6.6 |
 
-None of the catch, provide or timeout differences comes from the contract; each is a gap in the probe's relaxed user generics or an artefact of the textual rewrite. Every program that is identical is identical in verdict and in its full diagnostic multiset, so ownership, observations and failure evidence agree.
+The only listed probe artefacts are `host-types.ef` and `callables-state.ef`, each with its reason. `callables-factory.ef` is accepted today, so a library catch that refuses it would break ruling M1/Q4; it is closed by callable type arguments (§2.6.3) and mandatory in gate 1. Every program counted identical is identical in verdict and in its full sorted multiset of codes and messages. **Spans are not compared:** the metric says nothing about anchors, so gate 1 adds span parity, with spans mapped relative to the call and only the anchor move of §2.7 allowed.
+
+**The in-place test in the prototype is a proxy.** It treats a parameter as executed in place when `param:p` reaches the result's observations. Production uses clause 1's owner vector, with the negative controls of §2.6.2.
 
 **How the catch count grew,** which shows which clause carries what:
 
@@ -669,9 +727,9 @@ Separate checks:
 - **m3, m4 (M1).** `ownership_sweep/m3_nonrec.ef` and `m4_rec_simple.ef` are identical through the wrapper and stay accepted.
 - **j1.** Review probe `j1.ef` routes `g.join()` through an effect-function wrapper `wrapBoom(w, fallback) { run w.catch<Boom>(fallback) }`. Today it is refused with "undeclared failures: Boom"; with the contract it is accepted, exactly like the direct form `j2.ef`.
 - **r1_arg.** An effect function that runs a recipe parameter with a pending child keeps today's argument refusal (§2.6.4).
-- **A scope-bodied timeout model** (`effect fn …{ scope { run work } }`) is refused inside the wrapper body (12 programs) with "value owned by closing scope cannot escape". Clause 1 records a body-closed owner, but the prototype does not yet show that a deferred whole value holds no scope-owned handle. Neither catch, provide nor recover needs it; the edge-contract unit closes it or lists it.
+- **A scope-bodied timeout model** (`effect fn …{ scope { run work } }`) scores 0 of 29: 12 programs are refused inside the wrapper body with "value owned by closing scope cannot escape", and 17 differ. Clause 1 records a body-closed owner, but the prototype does not yet show that a deferred whole value holds no scope-owned handle. So the closed-at-the-edge half of the contract is **not yet shown**. Neither catch, provide nor recover needs it; it is a named follow-up of unit 4a, not part of gate 1.
 - **The compiler test suite with the contract on for every function:** see §3, suite run.
-- **Timing.** Checking the wrapped corpora took about as long as the direct corpora (catch 8.1 s direct and 11.2 s wrapped in the last run, provide 3.5 s and 3.8 s, timeout 0.5 s and 0.7 s), at load 50 to 86. The load dominates; this is not a measurement.
+- **Timing.** These are not measurements: the host load was 38 to 86, set by other sessions. For the record, the last run took catch 8.1 s direct and 11.2 s wrapped, provide 3.5 s and 3.8 s, timeout 0.5 s and 0.7 s. Each unit's acceptance-5 measurement replaces them.
 
 **Suite run.** The whole compiler package test suite (`go test ./internal/compiler`, including the ownership matrix, the ownership sweep, the emission and conformance tests) ran twice on the probe binary: once with the contract off, once with it inferred for every function in every test program.
 
@@ -690,15 +748,20 @@ Strict `tsc` 6.0.3 with `effect` 4.0.1 accepted the round-1 declarations and a c
 - **Input:** the §2.8 `effect.d.mts`, the `effect.mjs` beside it, a consumer that imports and runs them, and a negative consumer.
 - **Command:** `tsc --noEmit --strict --module NodeNext --moduleResolution NodeNext --target ES2022`, with TypeScript 6.0.3 and `effect` 4.0.1; then `node` on the consumer.
 - **The consumer** type-checks and runs. It pins the remaining row of catch, recover and provide by reciprocal assignment, and prints `catch fallback`, `recover recovered missing` and `catch-other failed Denied`: catch and recover remove exactly the named label, and an unhandled label still fails.
-- **The negative consumer** has eight `@ts-expect-error` lines, each refused for the intended reason:
-  1. a union-typed tag for catch (the single-label guard);
-  2. a union-typed tag for recover;
-  3. catching an absent label;
-  4. a fallback of the wrong type;
-  5. a handler that does not accept the payload;
-  6. a provider of the wrong shape;
-  7. a service key that stands for two services;
-  8. a remaining row that still contains a sibling.
+- **The negative consumer** has eleven `@ts-expect-error` lines (round 3 added the first three), each refused for the intended reason:
+  1. a widened `string` tag for catch on a row with a `{ readonly _tag: string }` member (the reviewer's `extra.mts` case);
+  2. the same for recover;
+  3. a widened `string` tag on a literal row;
+  4. a union-typed tag for catch (the single-label guard);
+  5. a union-typed tag for recover;
+  6. catching an absent label;
+  7. a fallback of the wrong type;
+  8. a handler that does not accept the payload;
+  9. a provider of the wrong shape;
+  10. a service key that stands for two services;
+  11. a remaining row that still contains a sibling.
+
+  With round 2's guard, cases 1 and 2 are accepted (TS2578, unused directive), which confirms the guard change is what refuses them.
 - **Providing an unused service is accepted** and removes nothing, matching §2.3.
 - `grep -c '\bany\b'` on all files: 0.
 
@@ -714,8 +777,9 @@ Pinned sources were read through okra repo caches or shallow clones. The questio
 | **MoonBit** (Wasm, JS, C) | `raise`, `try`/`catch` as syntax; a catch does not narrow (`next/language/error-handling.md:119-146,222-227`) | Strict | `%` intrinsics behind declared signatures change only the implementation; `with_timeout` is library over async (`moonbitlang/async@e72901a` `src/async.mbt:96-100`) because MoonBit tracks no ownership | Intrinsics lower per backend | D4's reading: an intrinsic swaps the implementation, never the checking or evaluation. Its library timeout shows the timeout residue is Effra's own (race plus ownership checking) |
 | **Koka** (C, JS) | `try` is a library function over handler syntax and rows: `handle/try(hndl, action : () -> <exn\|e> a)` (`koka@9c55695` `lib/std/core/exn.kk:54-56`); duplicates allowed; auto-opening (`src/Type/Operations.hs:83-98`) | The action is an explicit thunk | Evidence passing; the compiler still names `exn` (`src/Common/NamePrim.hs:316`) | Evidence-passing translation to C and JS | Borrowed: the extension pattern (F3). Not borrowed: duplicates or auto-opening, which defeat presence |
 | **Effect-TS** (TS) | `catchTag`: `K extends Tags<E>`, `ExcludeTag` (`effect@66257d29` `Effect.ts:2812-2858`, `Types.ts:165`); `provideService`: `Exclude<R, I>`, no presence (`:6456-6472`) | `orElseSucceed(f: (e) => A2)`, a callback (`Effect.ts:8366` in 4.0.1) | Tags and `Context.Key` witness values | A library over a fiber runtime | The projection target (F2, F3b). Its union-`K` hole is closed, not copied (M4) |
-| **PureScript** (JS) | `Prim.Row` `Cons`, `Lacks` (`Docs/Prim.hs:510-531`); `Record.delete` needs `Lacks` (`purescript-record@c89cd1a` `src/Record.purs:117-124`); `Run.catch` over higher-kinded rows (`purescript-run@abec7c3` `src/Run/Except.purs:126`) | Strict | Type classes resolved by dictionary passing | Dictionary passing to JS | F3 takes `Cons` with `Lacks` free under sets; tag witnesses are dictionary passing (F2) |
-| **Scala** (JVM, JS) / **Swift** / **Kotlin** | Library combinators | By-name `=> A` and `@autoclosure` (`??`, `assert`) are general declared features; Kotlin `inline` takes explicit lambdas | Kotlin `inline` is visible in the signature | Scala.js and Swift lower a by-name argument to a thunk at every call | Rejected for Effra (ruling B1): a by-name parameter adds an evaluation rule Go readers do not expect; `recover` already gives explicit laziness |
+| **PureScript** (JS) | `Prim.Row` `Cons`, `Lacks` (`Docs/Prim.hs:510-531`); `Record.delete` needs `Lacks` (`purescript-record@c89cd1a` `src/Record.purs:117-124`); `Run.catch` over higher-kinded rows (`purescript-run@abec7c3` `src/Run/Except.purs:126`) | Strict | Type classes resolved by dictionary passing | Dictionary passing to JS | F3 takes `Cons`; tag witnesses are dictionary passing (F2). `Lacks` is an explicit constraint, never inferred from one pattern: the reason F3b claims no absence (§2.3) |
+| **GHC** (native, via STG and Cmm) | Library `catch` over a primop | Lazy by default | Primops declare demand and strictness signatures (`primops.txt.pp`) that the optimiser trusts and tests pin | STG, Cmm | The closest analogue to a primitive's declared contract (§2.6.5): no body in the source language, a declared contract in the vocabulary the analysis infers |
+| **Scala** (JVM, JS) / **Swift** / **Kotlin** | Library combinators | By-name `=> A` and `@autoclosure` (`??`, `assert`) are general declared features; Kotlin `inline` takes explicit lambdas | Kotlin `inline` is visible in the signature; Kotlin SAM conversion and Scala eta-expansion are call-site coercions | Scala.js and Swift lower a by-name argument to a thunk at every call | By-name is rejected for Effra (ruling B1): it adds an evaluation rule Go readers do not expect, and `recover` already gives explicit laziness. The call-site coercions are the model for F6 (§2.12) |
 | **Rust** (native) | `?` through lang items | Strict; closures | Ownership facts crossing a call are in the signature (lifetimes), the same for std and user code, inferred within a body and declared at the boundary | Monomorphization | The model for §2.6: edge facts are one contract that user and library functions share, never granted to library bodies alone |
 | **Links** | Rémy rows with presence variables (`links@7100e28` `core/types.mli:150-154`); handlers are a special form | n/a | n/a | n/a | Presence variables are a second kind with no TypeScript analogue: not borrowed |
 | **Unison** | Set abilities; `handle` is a special form; `pruneWanted` subtracts once (`unison@a1652e3a` `Typechecker/Context.hs:2789-2808`) | Delayed computations `'a` are explicit | n/a | n/a | The same set semantics as Effra; Effra adds presence |
@@ -726,7 +790,7 @@ Pinned sources were read through okra repo caches or shallow clones. The questio
 - **Unison's set semantics** for rows;
 - **PureScript's `Cons` extension pattern** for removal, with `Lacks` implicit, and dictionary passing for the tag witness;
 - **Effect's `catchTag`/`provideService` shape** as the TypeScript meaning, with the union hole closed;
-- **Rust's discipline for edge facts:** one contract for user and library functions, inferred in bodies and declared at intrinsic boundaries;
+- **Rust's discipline for edge facts:** one contract for user and library functions, inferred in bodies and declared at intrinsic boundaries. No compile-to-host language requires every primitive to have a body in the source language (Gleam `@external`, ReScript and Koka `extern`, MoonBit `%` primitives, GHC primops, Rust intrinsics); all trust a declared signature at the primitive boundary and test it, which is the amended Q6;
 - **Gleam's and ReScript's strict library arguments,** with laziness as an explicit function (`recover`).
 
 Like Koka and Elixir, Effra keeps a construct for what is control or tooling structure rather than type: timeout's race and the layer plan. Unlike Koka, removal needs no handler syntax, because the runtime helpers are the handlers.
@@ -740,10 +804,11 @@ The recipe-parameter contract is treated the same way in every row: it is checke
 | F1 explicit type arguments | Yes: the library functions, `witness`, generic member calls | Yes: Go `f[T](x)` with prefix lists | Yes: a witness where TypeScript cannot take partial lists | Yes: Go generics | 2 |
 | F2 label parameters with tag witnesses | Yes: catch, recover, provide, user combinators | Yes: one kind word, `E: error` | Yes: `K extends F["_tag"]` plus a single-label guard | Yes: a hidden string or accessor, the payload as a Go type parameter | 2 |
 | F3 extension patterns with presence | Yes: every removal with presence, plus user functions such as `recoverAll` | Yes: "a label beside a row variable must be present" | Yes: `Exclude` plus a presence guard | Yes: rows erase | 2 |
-| F3b row difference | Yes: provide, test-provider helpers, ignore-style helpers | Yes: "R without S" | Yes: `Exclude<R, I>` | Yes: rows erase | 2 |
-| F6 pure-to-effect callable subsumption at arguments | Yes: recover, callback-taking user combinators | Yes: a pure function raises nothing | Yes: an `Effect<A, never, never>`-returning function | Yes: the existing succeed adapter | 2, pending owner confirmation (Q4) |
+| F3b row difference (result positions only, no absence rule) | Yes: provide and user provision helpers that write `{ R - S }`, as Effect users write `Exclude<R, X>` | Yes: "R without S" | Yes: `Exclude<R, I>`, which claims no absence either | Yes: rows erase | 2, under the owner's TypeScript-counterpart reading |
+| F6 pure-to-effect coercion on direct call arguments | Yes: recover, callback-taking user combinators | Yes: a pure function raises nothing | The projection describes the adapted ABI; TypeScript callers write `Effect.succeed` | Yes: the existing succeed adapter | 2 (ruling Q4/F6; a coercion, not subtyping) |
+| Provision clause of the contract | Yes: provide, user provision helpers | Yes: inferred | Not applicable: checker and tooling evidence | Not applicable | 2 (part of the contract) |
 | Recipe-parameter contract, in place | Yes: catch, provide, recover, every user wrapper | Yes: invisible in source, inferred | Not applicable: checker-only evidence | Not applicable: checker-only | 2 (general checker rule over every function) |
-| Recipe-parameter contract, owner closed at the edge | Yes: user `scope` wrappers, timeout's owner, layer provision's owner | Yes: inferred | Not applicable | Not applicable | 2. It is not why timeout or provideLayer stay constructs. |
+| Recipe-parameter contract, owner closed at the edge | Yes: user `scope` wrappers, timeout's owner, layer provision's owner | Yes: inferred | Not applicable | Not applicable | 2 in design, **not yet shown** (the scope-bodied model scores 0 of 29). It is not why timeout or provideLayer stay constructs. |
 | Pending evidence through an in-place parameter | Yes: every in-place wrapper | Yes: "the label stays, as with the direct form" | Not applicable: checker-only, as `handledRow`'s pending label is today | Not applicable | 2 (part of the contract) |
 | First-completion race (timeout) | No general construct exists yet | – | – | – | 4: keep the construct |
 | Static layer plan (`provide(Layer)`) | Tooling reads it | Yes | Rows only (Effect's `provide(Layer)`) | Not carried | 4: keep the construct |
@@ -754,10 +819,16 @@ The recipe-parameter contract is treated the same way in every row: it is checke
 
 **GO for phase 2,** as the unit sequence in §7, with two gates.
 
-- **Rows.** GO. F3 alone is useful even if everything after it stops, and probe A shows the solver already does most of the work.
-- **The recipe-parameter contract.** GO. It is inferable for ordinary bodies by extending existing machinery: the prototype brings catch, provide and timeout wrappers to identity on every program except probe artefacts, keeps `m3`/`m4` accepted, and accepts j1 like the direct form. The edge-contract unit is the go/no-go point: its gate is the same wrapper corpus at identity with a production implementation, plus the compiler suite green with the contract on for every function.
-- **Callback clauses.** Not yet shown. The prototype matches 20 of 44 recover programs. If the edge-contract unit cannot bring the recover wrapper corpus to identity, recover stays a construct (D1 for recover alone), and catch and provide still go ahead.
-- **If the contract unit fails its first gate,** the recorded outcome is "rows general, evidence not": D1 stands for catch, provide and recover, and F1, F3 and F3b stay for user combinators over abstract rows.
+- **Rows.** GO. F3 alone is useful even if everything after it stops, and probe A shows the solver already does most of the work. F3b is sound only as `ρ - L ⊆ ρ` with the composition rules of §2.3; the deleted equation `ρ - L = ρ` admitted `leak<F>`.
+- **The recipe-parameter contract, in place.** GO. It is inferable for ordinary bodies by extending existing machinery: the prototype brings catch, provide and timeout wrappers to identity on every program except two probe artefacts (`host-types.ef`, `callables-state.ef`), keeps `m3`/`m4` accepted, and accepts j1 like the direct form. `callables-factory.ef` is not an artefact: it needs callable type arguments (Q9 extended), so it is a real gap that unit 4a closes.
+- **Unit 4a is the go/no-go point. Gate 1:**
+  - the catch, provide and timeout wrapper corpus identical to the direct form with the production contract, `callables-factory.ef` included, and only `host-types.ef` and `callables-state.ef` excluded, by name;
+  - identical means verdict, codes, messages and spans mapped relative to the call, allowing only the anchor move listed in §2.7 (the prototype compared no spans);
+  - `m3`, `m4` and j1 accepted;
+  - the compiler suite green with the contract on for every function, `TestEvidenceSchemaIsClassified` included.
+- **Callback clauses and F6.** Not yet shown: the prototype matches 20 of 44 recover programs. Unit 4b owns both. **Gate 2:** the recover wrapper corpus identical, by the same measure, under the single receiver signature, `recovery-codec.ef` included, with i2, k2 and p1 accepted. If gate 2 fails, recover stays a construct (D1 for recover alone), and catch and provide still go ahead.
+- **If unit 4a fails gate 1,** the recorded outcome is "rows general, evidence not": D1 stands for catch, provide and recover, and F1, F3 and F3b stay for user combinators over abstract rows.
+- **The contract, closed at the edge.** Not yet shown: the scope-bodied timeout model scores 0 of 29 (§3). It is a named follow-up of unit 4a, not a gate. catch, provide and recover run their work in place and do not need it, and it is not why timeout or provideLayer stay constructs (§2.13).
 
 **The residue that cannot be general,** with the exact fact for each (§2.13):
 
@@ -772,68 +843,91 @@ The postfix-word reservation (T1) becomes the ordinary receiver-method rule for 
 - **Strict fallback** (B1): every catch site's emitted bytes (§2.9), and a non-terminating fallback now diverges at construction.
 - **Anchors** move from the method span to the argument span on CLI, MCP and LSP (§2.7).
 - **EF105** becomes the receiver-method resolution failure.
-- **Refused programs that become accepted:** `recovery_test.go:165`; recover on a builtin label; a pure-handler argument where an effect callable is expected (F6); j1-shaped programs, where a join passes through a function edge; user functions with whole-value type parameters (Q9).
-- **No accepted program becomes refused.** The unused provide stays accepted, and pending children keep today's behaviour.
+- **Refused programs that become accepted:**
+  - `recovery_test.go:165`;
+  - recover on a builtin label;
+  - a pure function passed directly where an effect callback is expected (F6, unit 4b). It is a coercion through the succeed adapter on direct call arguments only. The recursive `assignable` is unchanged, so a pure callable in a constructor field, provider configuration, stored value, nested callable slot or result is still refused (§2.12);
+  - j1-shaped programs, where a join passes through a function edge;
+  - user functions with whole-value type parameters, including callable type arguments (Q9 extended, unit 4a). `templates_test.go:127-141` changes from a refusal to an acceptance.
+- **New refusals, of new syntax only:** a row difference outside a result position, and an extension pattern that requires a label the difference removed (§2.3, §2.7). Neither is writable today.
+- **No accepted program becomes refused.** This holds only with Q9's callable extension in unit 4a: without it, a library `catch` or `provide` wrapper over `callables-factory.ef` would be refused where the construct is accepted. The unused provide stays accepted, and pending children keep today's behaviour.
 - **The generic EF106 argument message improves** for every generic call.
 
 ## 7. Phase-2 units
 
-The reviewer's split, adopted by ruling. Each unit is its own branch and review, compiles, passes the gate, carries its own acceptance-5 measurement (checker cost on the examples and on the #109 wide-record shape, before and after, at recorded load), and updates its own docs (GLOSSARY terms, CHANGELOG, and the NORTH_STAR and D1 text the unit makes true).
+The split adopted by the round-3 ruling: note r3, then F3, then F1 plus receivers, then 4a, then 4b, then catch, provide and recover. Each negative control this note introduces is listed in the acceptance of the unit that owns it. Each unit is its own branch and review, compiles, passes the gate, carries its own acceptance-5 measurement (checker cost on the examples and on the #109 wide-record shape, before and after, at recorded load), and updates its own docs (GLOSSARY terms, CHANGELOG, and the NORTH_STAR and D1 text the unit makes true).
 
-1. **Revised note.** This revision.
-2. **Rows-presence (F3 alone).**
+- **Unit 1. Revised note.** This revision.
+- **Unit 2. Rows-presence (F3 alone).**
    - Presence in `inferRows`; the abstract-subtraction refusal removed for literally present labels (`callables.go:337-343`); the EF125 refusals dropped where the label is present (`semantic.go:5055,5072`, `recovery.go:21`, `layers.go:615`).
    - Source-name rendering for row parameters.
    - Tests: `recovery_test.go:165` positive; presence and closed-versus-open negatives; a callback presence example (§2.3); the `Exclude` projection exercised by a strict consumer.
    - Catch stays a construct.
-3. **Explicit type arguments and receiver methods.**
+- **Unit 3. Explicit type arguments and receiver methods.**
    - F1: parser lookahead, formatter and LSP spans, prefix binding, the comparison-chain disambiguation, and the `witness<T, W>`/`witness<T>` fixtures.
    - The receiver-method rule: receiver declarations, owner modules, generic member calls, and `effra/effect` named as the owner module of `Effect`.
    - Tests: an unrelated user type with a `catch` field and one with a `catch` receiver method are unaffected.
-4. **Edge contract (the go/no-go point).**
-   - The recipe-parameter contract for every function (§2.6.2-2.6.4): deferred executions, whole-value type parameters in bundled and user functions (EF127 kept only where a layout is needed; Q9), observations including effect bodies, pending pass-through with companions, call-site owner qualification.
-   - The callback clauses of §2.6.6.
-   - The declared-contract format for intrinsics (Q6).
-   - **Gate 1:** the wrapper corpus for catch, provide and timeout identical to the direct form, apart from listed probe artefacts; `m3`/`m4` accepted; j1 accepted; the compiler suite green with the contract on.
-   - **Gate 2:** the recover wrapper corpus identical. If it fails, record it, and recover stays a construct.
-5. **Catch library.**
+- **Unit 4a. Edge contract (the go/no-go point).**
+   - **The recipe-parameter contract for every function** (§2.6.2-2.6.4): clauses 1 to 5, deferred executions, observations including effect bodies, pending pass-through with companions, call-site owner qualification.
+     - "In place" is decided from clause 1's owner vector, not from the prototype's observation proxy.
+     - Negative controls: work run under `scope`, run under timeout, forked and not joined, never run, run twice, and run in one branch only. Each gets the contract value its owner vector says and the direct form's verdict (§2.6.2).
+   - **Q9 extended** (§2.6.3): whole-value type parameters in bundled and user functions, including callable type arguments carried with their callable contract. EF127 stays only where a layout is needed. `templates_test.go:127-141` is rewritten as an acceptance, with a refusal kept for a type parameter whose body needs a layout.
+   - **Summary transport** (§2.6.5, m1): the interface-summary schema bump (`interface_summary.go`, schema 5 today) carrying `param:` observation tokens, in-place and pending transfer, payload atoms and provision; round-trip tests; classification in `TestEvidenceSchemaIsClassified`.
+   - **The provision clause** (clause 6, §2.6.2) and the graph and lint edges derived from it (§2.11). Negative control: `fake<S>`, which ignores its provider but has provide's signature, yields no provision edge and no lint fact.
+   - **The declared contracts of the primitives** (amended Q6, §2.6.5): catch, provide and recover in the inferred vocabulary, each pinned by the ownership matrix and by a wrapper-parity test (identical summary, verdicts, diagnostics and spans).
+   - **Gate 1** as in §6.
+   - **Named follow-up, not a gate:** the closed-at-the-edge owner model, measured by the scope-bodied timeout corpus (0 of 29 today).
+- **Unit 4b. Callback clauses and F6.**
+   - The two callback clauses of §2.6.6 (pending through an in-place callback, and the payload a callback is given), with `recovery-codec.ef` treated as mixed handler modes.
+   - F6 as a coercion on direct call arguments through the succeed adapter (§2.12). Negative controls: a pure callable in a constructor field, provider configuration, stored value, nested callable slot and result each stays refused; the TypeScript projection describes the adapted ABI.
+   - **Gate 2** as in §6.
+- **Unit 5. Catch library.**
    - F2: label parameters, tag witnesses and their placement, the single-label rule, builtin payloads.
-   - `effra/effect` with the receiver `catch` as an intrinsic with a declared contract; call-site lowering; n-parameter `admitBundledIntrinsic`.
-   - B1 strict emission with the listed difference, and the `layer_causal_test.go` helper tests moved.
-   - `effra/effect.mjs` and `effra/effect.d.mts` with the single-label guard, and a strict consumer that imports and runs them.
+   - `effra/effect` with the receiver `catch` as an intrinsic carrying its declared contract (a reference body replaces it once closures are admitted, Q10); call-site lowering; n-parameter `admitBundledIntrinsic`.
+   - B1 strict emission with the listed difference, and the `layer_causal_test.go` helper tests moved. The B1 inventory is 161 lines in 128 testdata programs, 147 lines in 41 `internal/compiler` tests, and 9 lines in 6 `cmd/ef` tests (§2.9).
+   - `effra/effect.mjs` and `effra/effect.d.mts` with the single-label guard, which refuses both a union and a widened `string` tag, and a strict consumer that imports and runs them. Negative controls: the 11 refusals of probe C2, including the review's `extra.mts` case.
    - Diagnostics: EF105 and the generic EF106 argument message.
    - The catch parser form, checker case, emitter cases and `graph.go:474` look-through deleted; the grep test; Go and JS equivalence over every example and conformance program, apart from the listed B1 difference.
-6. **Provide library.**
+- **Unit 6. Provide library.**
    - First, a monomorphic provide probe with a provider parameter, modelling the two-argument `Provider<S>` ABI.
-   - F3b; `Provider<S>` source type and witness; the receiver `provide`.
-   - Graph, lint and reachability facts from signatures and the contract (§2.11).
+   - F3b: `ρ - L ⊆ ρ` and the composition rules, with no equation and no absence rule. Negative controls: `leak<F>` refused with the result row mismatch; a row difference in a parameter or callback-parameter position refused with "a row difference may appear only in a result"; an extension pattern requiring a removed label refused (§2.3, §2.7).
+   - `Provider<S>` source type and witness; the receiver `provide` with its declared contract, provision clause included.
+   - Graph, lint and reachability facts from the provision clause (§2.11), never from signature shape.
    - `examples/causal.ef` unchanged.
-7. **Recover library** (only if gate 2 passed).
-   - F6, with owner confirmation; the single receiver `recover`; builtin payloads; `recovery.go` deleted except helpers the contract reuses.
-   - Optionally, catch re-expressed over recover in ordinary Effra, if its emission is acceptable.
+- **Unit 7. Recover library** (only if gate 2 passed).
+   - The single receiver `recover` with its declared contract; builtin payloads; `recovery.go` deleted except helpers the contract reuses. F6 is already in place from unit 4b.
+   - Optionally, catch re-expressed over recover in ordinary Effra once closures are admitted, if its emission is acceptable.
 
 ## 8. Cost estimate
 
-Redone after B1 and B2, per unit.
+Redone for round 3 under the adopted split, per unit. The new items are callable type arguments, the summary transport and the provision clause in 4a, and F6 moving from recover into 4b.
 
 | Unit | Scope | Estimate |
 | --- | --- | --- |
 | 2 | F3 | S, 0.5 to 1 day |
 | 3 | F1 and receiver methods | M, about 2 days (parser, resolver, formatter, LSP) |
-| 4 | Edge contract | L, 4 to 6 days. The prototype is the plan for gate 1; productionizing it, the callback clauses and the full suite under the contract are where the risk sits. |
+| 4a | Edge contract, Q9 with callables, summary transport, provision clause | L, 5 to 7 days. The contract and its owner-vector controls are about 3 to 4; callable type arguments about 1; the schema bump, round-trip and classification about 1; the provision clause and edges about 0.5 to 1. Productionizing the prototype and the full suite under the contract are where the risk sits. |
+| 4b | Callback clauses and F6 | M, about 3 days (the clauses about 2, the coercion and its negatives about 1) |
 | 5 | Catch library | M to L, about 3 days (F2 on two targets, B1 emission, the runtime module, equivalence tests) |
 | 6 | Provide library | M, about 2 days |
-| 7 | Recover library | M, about 2 days, conditional on gate 2 |
+| 7 | Recover library | S to M, about 1.5 days, conditional on gate 2 (F6 has moved to 4b) |
 
-The total is about 13.5 to 16 implementor-days plus review rounds, up from round 1's 8 to 10. The general contract (unit 4) is larger than an intrinsic-only summary, as the review predicted, and the strict emission adds a listed byte change to unit 5.
+The total is about 17 to 19.5 implementor-days plus review rounds, up from round 2's 13.5 to 16 and round 1's 8 to 10. The growth is in 4a: a general contract that crosses module boundaries needs the transport, and an honest provision edge needs its own clause.
 
 ## 9. Open questions
 
-- **Q1.** Settled by ruling: `effra/effect` owns `Effect`, and dot calls go through the receiver-method rule (§2.10).
-- **Q3.** Settled by ruling, with M4: one `.d.mts` per bundled module, with a real `.mjs` beside it (§2.8).
-- **Q4.** F6 reverses "Pure/effect callable modes are never implicitly lifted" (`callables.go:401`) for argument positions. Ruling Q2 implies it; it needs explicit owner confirmation before unit 7.
+Settled by ruling, recorded here so the note does not ask again:
+
+- **Q1.** `effra/effect` owns `Effect`, and dot calls go through the receiver-method rule (§2.10).
+- **Q3.** One `.d.mts` per bundled module, with a real `.mjs` beside it (§2.8).
+- **Q4/F6.** A pure function is admitted where an effect callback is expected, as a coercion on direct call arguments only (§2.12). It narrows "Pure/effect callable modes are never implicitly lifted" (`callables.go:401`) for that one position. Unit 4b.
+- **Q6, amended.** A reference body where one exists; otherwise a declared contract in the inferred vocabulary, pinned by the ownership matrix and a wrapper-parity test; never a free-form trusted summary (§2.6.5). Unit 4a.
+- **Q7.** "Providing a service the effect doesn't use" is no longer a negative control, and F3b is a rung-2 feature.
+- **Q8.** Folded into Q9: callable-typed `T` (`callables-factory.ef`) is now in scope for unit 4a.
+- **Q9, extended.** Whole-value user type parameters are admitted where the body needs no layout, including callable type arguments (§2.6.3). Unit 4a.
+
+Still open:
+
 - **Q5.** Should `Scheduler` stop being charged by timeout (audit 1-G) when timeout is next taken up? Effect charges no service for timeout.
-- **Q6.** The format of an intrinsic's declared contract: a summary record in the interface-summary transport, or a reference body in Effra where one exists (§2.6.5). Decided in unit 4.
-- **Q7.** Acceptance item 3 loses "providing a service the effect doesn't use" as a negative control (amended Q4, §2.3), and F3b joins the rung-2 features. The spec's acceptance list should be updated to match.
-- **Q8.** User generics over a callable-typed `T` (`examples/callables-factory.ef`, `recovery-codec.ef` in probe D) are outside the contract. They belong to the user-generics work, not to this spike, but a library `catch` used on such a value inherits the gap until then.
-- **Q9.** The go/no-go test needs whole-value user type parameters (§2.6.3), so the edge-contract unit admits `T: type` in user functions where the body needs no layout. This narrows today's EF127 refusal of user type parameters; it needs owner confirmation before unit 4 lands.
+- **Q10.** catch's reference body `work.recover<E>(const(fallback))` needs a closure, and closures wait for explicit capture checking (`docs/specs/language-abstractions.md:124`). Until closures are admitted, catch carries a declared contract equal to what that body would infer, and its wrapper-parity test guards the equality. This note does not propose closure admission; when it lands, the declared contract is replaced by the body and the same tests must still pass.
+- **Q11.** The closed-at-the-edge owner model (§6) is a named follow-up. Should it be scheduled with timeout's next change, or with the first user `scope` wrapper that needs it?
