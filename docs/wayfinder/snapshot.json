@@ -12,7 +12,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Effra language, runtimes, and interoperability map",
-      "updatedAt": "2026-10-09T19:46:25Z",
+      "updatedAt": "2026-10-11T16:44:52Z",
       "url": "https://github.com/cevr/effra/issues/1"
     },
     {
@@ -242,7 +242,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Reachable runtime modules and small executable receipts",
-      "updatedAt": "2026-10-08T18:37:05Z",
+      "updatedAt": "2026-10-11T16:44:53Z",
       "url": "https://github.com/cevr/effra/issues/14"
     },
     {
@@ -829,7 +829,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Canonical machine plans and transition checks",
-      "updatedAt": "2026-10-09T15:48:56Z",
+      "updatedAt": "2026-10-10T23:05:59Z",
       "url": "https://github.com/cevr/effra/issues/46"
     },
     {
@@ -870,7 +870,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Retained measurement ledger and benchmark-last closure",
-      "updatedAt": "2026-10-08T18:39:58Z",
+      "updatedAt": "2026-10-11T16:44:49Z",
       "url": "https://github.com/cevr/effra/issues/48"
     },
     {
@@ -890,7 +890,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Checked nominal JSON codecs",
-      "updatedAt": "2026-10-08T20:42:57Z",
+      "updatedAt": "2026-10-11T16:44:50Z",
       "url": "https://github.com/cevr/effra/issues/49"
     },
     {
@@ -908,7 +908,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Direct native execution and matched build-cost receipts",
-      "updatedAt": "2026-10-09T15:48:57Z",
+      "updatedAt": "2026-10-11T16:44:47Z",
       "url": "https://github.com/cevr/effra/issues/50"
     },
     {
@@ -926,7 +926,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Managed HTTP and typed endpoint composition",
-      "updatedAt": "2026-10-08T18:40:08Z",
+      "updatedAt": "2026-10-11T16:44:51Z",
       "url": "https://github.com/cevr/effra/issues/51"
     },
     {
@@ -1128,7 +1128,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Matched server performance against TypeScript and optimized Go",
-      "updatedAt": "2026-10-08T18:41:36Z",
+      "updatedAt": "2026-10-11T16:44:48Z",
       "url": "https://github.com/cevr/effra/issues/62"
     },
     {
@@ -1441,7 +1441,9 @@
     },
     {
       "assignees": [],
-      "blockedBy": [],
+      "blockedBy": [
+        108
+      ],
       "bodySha256": "053fdd392c932112fe49c216d3944e7e63dca5e25b4cc081f5a273612cd0d50c",
       "labels": [
         "implementation:task",
@@ -1452,7 +1454,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Unsigned and host-width integers, explicit conversions and checked overflow",
-      "updatedAt": "2026-10-09T18:01:29Z",
+      "updatedAt": "2026-10-11T16:44:54Z",
       "url": "https://github.com/cevr/effra/issues/81"
     },
     {
@@ -1468,7 +1470,7 @@
       "state": "open",
       "stateReason": null,
       "title": "Gate: compiler edit to green in under 10 s",
-      "updatedAt": "2026-10-09T19:44:14Z",
+      "updatedAt": "2026-10-11T17:06:31Z",
       "url": "https://github.com/cevr/effra/issues/82"
     },
     {
@@ -1802,6 +1804,177 @@
       "title": "Specify the predeclared Foreign protocol and reserved names; decide Scheduler with row 15",
       "updatedAt": "2026-10-09T20:06:14Z",
       "url": "https://github.com/cevr/effra/issues/102"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "3b37ef633e28f2c91d7657f180925e87683cfe23bfe797cc7b26567eca83b0bf",
+      "labels": [
+        "wayfinder:task"
+      ],
+      "number": 103,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Zoned IPv6 listen binding: Go and Node resolve interface zones differently",
+      "updatedAt": "2026-10-10T23:06:01Z",
+      "url": "https://github.com/cevr/effra/issues/103"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "82e5fdb802df3388902fa864de3490619f22017e20553d1cc65c57cebb98abbf",
+      "labels": [
+        "wayfinder:task"
+      ],
+      "number": 104,
+      "parent": 50,
+      "state": "closed",
+      "stateReason": "completed",
+      "title": "Spike: //line source attribution in emitted Go (record)",
+      "updatedAt": "2026-10-11T16:07:59Z",
+      "url": "https://github.com/cevr/effra/issues/104"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "9823cc7846091e337cf060cba701cca8f149de3af28f15dc4e3315a03496d0f3",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 105,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Position-carrying Go printing and a residualChecks receipt",
+      "updatedAt": "2026-10-11T16:05:06Z",
+      "url": "https://github.com/cevr/effra/issues/105"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "a23d8126cc07d357b5b0190a17569549e20c8a37478b11db50bece598cb48a1b",
+      "labels": [
+        "wayfinder:task"
+      ],
+      "number": 106,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Spike: non-escaping block closures as the first closure profile",
+      "updatedAt": "2026-10-11T16:44:58Z",
+      "url": "https://github.com/cevr/effra/issues/106"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "dda6a40b4c7e52e7d9e643de8134598e745e8b13bc14c230f67f5e560cd88db3",
+      "labels": [
+        "wayfinder:task"
+      ],
+      "number": 107,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Spike: classified repair applicability and a safe-fix closure test",
+      "updatedAt": "2026-10-11T16:44:59Z",
+      "url": "https://github.com/cevr/effra/issues/107"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "da88ac285440f64cb013c1a9c4146b0faf2ca2d5e0faecdcf1aa68d17efd8aa7",
+      "labels": [
+        "wayfinder:task"
+      ],
+      "number": 108,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Spike: cost of checked i64 overflow on Go and JS",
+      "updatedAt": "2026-10-11T16:44:57Z",
+      "url": "https://github.com/cevr/effra/issues/108"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "1f65826f5d1a26d3dde2906537901914388f7fba6f1763710191c3d9756ab726",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 109,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Checker time is quadratic in record fields (8.6 s to check a 787 KB program)",
+      "updatedAt": "2026-10-11T16:45:02Z",
+      "url": "https://github.com/cevr/effra/issues/109"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "b41dec47c9dee379da2b51dabbc8b29a8fcbbe718ffd4dd4352379f726df3d7a",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 110,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Gate tool questions: orphan wording, early-exit keys and fixture hardening",
+      "updatedAt": "2026-10-11T17:06:33Z",
+      "url": "https://github.com/cevr/effra/issues/110"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "8b586180f48945d0aa992966d160b30997dab6ae8ab664c76a72f48b690cdfd1",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 111,
+      "parent": 1,
+      "state": "open",
+      "stateReason": null,
+      "title": "Lint pack memory limit atomic at spawn and covering descendants",
+      "updatedAt": "2026-10-11T16:05:13Z",
+      "url": "https://github.com/cevr/effra/issues/111"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "6bcd305fdf950ababb3b1107d5cbf531e190aee27f71576e37a3a19b2ef4a1e0",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 112,
+      "parent": 55,
+      "state": "open",
+      "stateReason": null,
+      "title": "Port race in the codec finalizer tests (encode-latched flake)",
+      "updatedAt": "2026-10-11T16:45:01Z",
+      "url": "https://github.com/cevr/effra/issues/112"
+    },
+    {
+      "assignees": [],
+      "blockedBy": [],
+      "bodySha256": "aa9d6ec488d3f8561ec2dfbc266400d14e03ac39a2604938c7bb1f9e95377484",
+      "labels": [
+        "implementation:task",
+        "wayfinder:task"
+      ],
+      "number": 113,
+      "parent": 14,
+      "state": "open",
+      "stateReason": null,
+      "title": "Shared source and output location for the test runner and the LSP/MCP loaders; executed case-alias refusal",
+      "updatedAt": "2026-10-11T17:06:34Z",
+      "url": "https://github.com/cevr/effra/issues/113"
     }
   ],
   "map": 1,
