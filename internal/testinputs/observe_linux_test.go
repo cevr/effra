@@ -214,17 +214,27 @@ func TestMagicLinks(t *testing.T) {
 	}
 }
 
-// TestWorkdirs checks that a name relative to a working directory reached
-// through a link is also recorded under the link, whichever process makes
-// the call, and under every link that led there.
-func TestWorkdirs(t *testing.T) {
+// TestLinkedDirs checks that a name relative to a directory reached through
+// a link inside the root, by chdir or by opening it, is also recorded under
+// the link, whichever process makes the call, and under every link that led
+// there; and that nothing else is remembered.
+func TestLinkedDirs(t *testing.T) {
 	base := t.TempDir()
 	target := filepath.Join(base, "a")
 	link := filepath.Join(base, "current")
 	if err := os.Mkdir(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("a", link); err != nil {
+	if err := os.WriteFile(filepath.Join(target, "value.txt"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, to := range map[string]string{"current": "a", "file": "a/value.txt"} {
+		if err := os.Symlink(to, filepath.Join(base, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outside := filepath.Join(t.TempDir(), "into")
+	if err := os.Symlink(target, outside); err != nil {
 		t.Fatal(err)
 	}
 	physical, err := filepath.EvalSymlinks(link)
@@ -233,23 +243,27 @@ func TestWorkdirs(t *testing.T) {
 	}
 	o := newObserver(base)
 	if got := o.dirs.logical(physical); got != nil {
-		t.Fatalf("before any chdir: %q", got)
+		t.Fatalf("before any call: %q", got)
 	}
-	o.dirs.change(filepath.Join(base, "missing")) // fails: nothing to remember
-	o.dirs.change(target)                         // crosses no link
-	o.dirs.change("/proc/self/cwd")               // a magic link, which resolves in the observer
+	o.enter(filepath.Join(base, "missing"), false) // fails: nothing to remember
+	o.enter(target, false)                         // crosses no link
+	o.enter(target, true)
+	o.enter("/proc/self/cwd", false)           // a magic link, which resolves in the observer
+	o.enter(outside, false)                    // a link outside the root, which cmd/go does not recheck
+	o.enter(filepath.Join(base, "file"), true) // an open of a file, through a link
 	if o.dirs.active.Load() {
-		t.Fatal("a chdir through no link was remembered")
+		t.Fatalf("remembered: %q", o.dirs.aliases)
 	}
-	o.dirs.change(link)
-	o.dirs.change(link) // remembered once
+	o.enter(link, true) // an open of the directory, without O_DIRECTORY
+	o.enter(link, false)
 	if got := o.dirs.logical(physical); !slices.Equal(got, []string{link}) {
-		t.Fatalf("after chdir: %q, want %q", got, link)
+		t.Fatalf("after open and chdir: %q, want %q", got, link)
 	}
 	if got := o.dirs.logical(base); got != nil {
 		t.Fatalf("at another physical location: %q", got)
 	}
-	// Any thread, a reparented child's included: nothing is kept per process.
+	// Any thread, a reparented child's included: nothing is kept per process
+	// or per descriptor.
 	const child = 1 << 30 // no such thread
 	for _, tid := range []int{syscall.Gettid(), child} {
 		got := o.names(tid, located{path: physical + "/value.txt", base: physical, name: "value.txt"})
@@ -261,9 +275,31 @@ func TestWorkdirs(t *testing.T) {
 	if err := os.Symlink(target, other); err != nil {
 		t.Fatal(err)
 	}
-	o.dirs.change(other)
+	o.enter(other, false)
 	if got, want := o.dirs.logical(physical), []string{link, other}; !slices.Equal(got, want) {
 		t.Fatalf("after a second link: %q, want %q", got, want)
+	}
+}
+
+// TestLocateKeepsTheDirectory checks that a name relative to a descriptor
+// keeps the descriptor's directory, as one relative to the working directory
+// does, so names can add the links that led there.
+func TestLocateKeepsTheDirectory(t *testing.T) {
+	dir := t.TempDir()
+	d, err := os.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	physical, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := access{tid: syscall.Gettid()}
+	got, ok, err := a.locate("sub/value.txt", int(d.Fd()), false)
+	want := located{path: physical + "/sub/value.txt", base: physical, name: "sub/value.txt"}
+	if !ok || err != nil || got != want {
+		t.Fatalf("locate = %+v, %v, %v; want %+v", got, ok, err, want)
 	}
 }
 

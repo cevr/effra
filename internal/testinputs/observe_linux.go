@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -459,7 +458,7 @@ func receiveListener(socket *os.File) (int, error) {
 // An observer serves the listener's notifications.
 type observer struct {
 	rec   *recorder
-	dirs  workdirs
+	dirs  linkedDirs
 	armed atomic.Bool
 
 	// The child's exec of the test binary from its init (see init) is not
@@ -471,7 +470,7 @@ type observer struct {
 }
 
 func newObserver(root string) *observer {
-	return &observer{rec: newRecorder(root), dirs: workdirs{aliases: map[string][]string{}}}
+	return &observer{rec: newRecorder(root), dirs: linkedDirs{aliases: map[string][]string{}}}
 }
 
 // notification is struct seccomp_notif.
@@ -636,6 +635,11 @@ func (o *observer) handle(listener int, n *notification, buffer []byte) {
 		for _, path := range paths {
 			o.rec.open(path, read)
 		}
+		if read { // a directory opens for reading only
+			for _, path := range paths {
+				o.enter(path, true)
+			}
+		}
 	case kindStat:
 		for _, path := range append(paths, second...) {
 			o.rec.stat(path)
@@ -645,7 +649,7 @@ func (o *observer) handle(listener int, n *notification, buffer []byte) {
 			o.rec.stat(path)
 		}
 		for _, path := range paths {
-			o.dirs.change(path)
+			o.enter(path, false)
 		}
 	case kindExec:
 		for i, path := range paths {
@@ -660,10 +664,10 @@ func (o *observer) handle(listener int, n *notification, buffer []byte) {
 
 // names returns the paths under which to record a located path: the path
 // with /proc and /dev/fd magic links read, and, for a name relative to a
-// working directory the process reached through a link, the same name under
-// that link too. The kernel resolved the name against the directory itself,
-// which the first path records; the second records the link, so retargeting
-// it changes the key.
+// working directory or a directory descriptor a process reached through a
+// link (linkedDirs), the same name under that link too. The kernel resolved
+// the name against the directory itself, which the first path records; the
+// second records the link, so retargeting it changes the key.
 func (o *observer) names(tid int, l located) []string {
 	paths := []string{magic(tid, l.path)}
 	if l.base != "" {
@@ -799,8 +803,8 @@ type access struct {
 var errFault = errors.New("unreadable process memory")
 
 // A located path is the absolute path a call names. A name relative to the
-// working directory also keeps that directory, as /proc shows it (its
-// physical location), and the name.
+// working directory or a directory descriptor also keeps that directory, as
+// /proc shows it (its physical location), and the name.
 type located struct {
 	path       string
 	base, name string
@@ -855,11 +859,8 @@ func (a *access) locate(name string, dirfd int, inRoot bool) (located, bool, err
 	if !ok || err != nil {
 		return located{}, false, err
 	}
-	l := located{path: strings.TrimSuffix(base, "/") + "/" + strings.TrimPrefix(name, "/")}
-	if dirfd == atFdcwd {
-		l.base, l.name = base, name
-	}
-	return l, true, nil
+	name = strings.TrimPrefix(name, "/")
+	return located{path: strings.TrimSuffix(base, "/") + "/" + name, base: base, name: name}, true, nil
 }
 
 // link reads the thread's working directory or one of its descriptors.
@@ -1098,57 +1099,80 @@ func privileged() bool {
 	return seen != 4
 }
 
-// workdirs follows the working directories processes changed to through a
-// link. /proc shows a working directory by its physical location, so a name
+// linkedDirs follows the directories processes reached through a link
+// inside the root: by chdir, or by opening the directory, whose descriptor
+// later calls name paths relative to (openat, fchdir to it). /proc shows a
+// working directory or a descriptor by its physical location, so a name
 // relative to it would be recorded there, and retargeting the link would go
-// unseen. A chdir is notified before it runs, and may fail; a directory it
-// names through a link is remembered under its physical location, for the
-// rest of the run. A later name relative to a working directory at that
-// physical location is recorded under each remembered name too, whichever
-// process makes the call.
+// unseen. Each such directory is remembered under its physical location,
+// for the rest of the run. A later name relative to a working directory or
+// a descriptor at that physical location is recorded under each remembered
+// name too, whichever process makes the call. fchdir needs no notification:
+// it changes to a directory the open already remembered.
 //
 // fabricate.py copies a process's working directory to its child at clone,
 // fork and vfork, which strace reports with the child's pid. A seccomp
 // notification comes before the call, so the observer never learns the
 // child's pid at the fork, and by the child's first lookup its parent may
 // have exited and the child been reparented. Keying the names on the
-// physical directory instead of on the process needs no pid: it covers a
-// reparented child, and any process that reaches the directory otherwise,
-// at the cost of an extra entry for a name a process did not use, which can
-// only make a result rerun.
-type workdirs struct {
+// physical directory instead of on the process or the descriptor needs no
+// pid: it covers a reparented child, a descriptor passed to another
+// process, and any process that reaches the directory otherwise, at the
+// cost of an extra entry for a name a process did not use, which can only
+// make a result rerun.
+type linkedDirs struct {
 	active atomic.Bool // a name was ever remembered; until then nothing is looked up
 
 	mu      sync.Mutex
-	aliases map[string][]string // physical directory → the names chdir reached it by
+	aliases map[string][]string // physical directory → the names it was reached by
 }
 
-// change remembers a chdir to a directory named through a link.
-func (w *workdirs) change(logical string) {
+// enter remembers a directory a process changes to (chdir) or opens, named
+// by an absolute path, if a link inside the root leads to it. The call is
+// notified before it runs and may fail, so the directory is looked up here;
+// remembering a name the call did not reach costs only an extra entry. An
+// open's path is first checked to name a directory, by the file it leads
+// to, since a directory opens without O_DIRECTORY too.
+func (o *observer) enter(path string, opened bool) {
 	for _, prefix := range []string{"/proc/", "/dev/"} {
-		if strings.HasPrefix(logical, prefix) {
+		if strings.HasPrefix(path, prefix) {
 			return // still a magic link, which would resolve in this process
 		}
 	}
-	physical, err := filepath.EvalSymlinks(logical)
-	if err != nil || physical == clean(logical) {
-		return // the chdir fails, or crosses no link
+	name, ok := o.rec.inside(clean(path))
+	if !ok {
+		return // a link outside the root is not an input cmd/go rechecks
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if !slices.Contains(w.aliases[physical], logical) {
-		w.aliases[physical] = append(w.aliases[physical], logical)
+	rest, _ := under(name, o.rec.logical)
+	if opened {
+		if info, err := os.Stat(name); err != nil || !info.IsDir() {
+			return
+		}
 	}
-	w.active.Store(true)
+	physical, ok := physicalDir(name)
+	if !ok || physical == clean(o.rec.physical+rest) {
+		return // the call fails, or crosses no link inside the root
+	}
+	o.dirs.add(physical, name)
 }
 
-// logical returns the names through which a chdir reached a physical
-// working directory.
-func (w *workdirs) logical(physical string) []string {
-	if !w.active.Load() {
+// add remembers that a name leads to a physical directory.
+func (d *linkedDirs) add(physical, name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !slices.Contains(d.aliases[physical], name) {
+		d.aliases[physical] = append(d.aliases[physical], name)
+	}
+	d.active.Store(true)
+}
+
+// logical returns the names through which a link reached a physical
+// directory.
+func (d *linkedDirs) logical(physical string) []string {
+	if !d.active.Load() {
 		return nil
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return slices.Clone(w.aliases[physical])
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.aliases[physical])
 }

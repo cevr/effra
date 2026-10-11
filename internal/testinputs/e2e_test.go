@@ -719,6 +719,61 @@ func init() {
 		want: "b-22",
 	},
 	{
+		// Review c2-3 probe D1: a directory opened through a link, without
+		// O_DIRECTORY, then a name looked up relative to its descriptor. The
+		// relink keeps every time, and the opened directory lists the same
+		// entry (sub) either way, so only the name under the link changes the
+		// key.
+		name:    "c2-3 D1 openat on a directory opened through a link relinked with its time kept",
+		tools:   []string{"touch"},
+		files:   map[string]string{"a/sub/value.txt": "a-1\n", "b/sub/value.txt": "b-22\n"},
+		links:   map[string]string{"dirs/current": "../a"},
+		setup:   backdateLinkedDirs,
+		imports: []string{"io", "syscall"},
+		run: `d, err := syscall.Open(filepath.Join(root(), "dirs", "current"), syscall.O_RDONLY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer syscall.Close(d)
+	fd, err := syscall.Openat(d, "sub/value.txt", syscall.O_RDONLY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), "value.txt")
+	defer file.Close()
+	return io.ReadAll(file)`,
+		before: "a-1",
+		edit:   relinkLinkedDirs,
+		want:   "b-22",
+	},
+	{
+		// Review c2-3 probe D2: as D1, but fchdir to the descriptor, then a
+		// name relative to the working directory.
+		name:  "c2-3 D2 fchdir to a directory opened through a link relinked with its time kept",
+		tools: []string{"touch"},
+		files: map[string]string{"a/sub/value.txt": "a-1\n", "b/sub/value.txt": "b-22\n"},
+		links: map[string]string{"dirs/current": "../a"},
+		setup: backdateLinkedDirs,
+		run: `back, err := os.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	defer back.Close()
+	defer back.Chdir()
+	d, err := os.Open(filepath.Join(root(), "dirs", "current"))
+	if err != nil {
+		return nil, err
+	}
+	defer d.Close()
+	if err := d.Chdir(); err != nil {
+		return nil, err
+	}
+	return os.ReadFile("sub/value.txt")`,
+		before: "a-1",
+		edit:   relinkLinkedDirs,
+		want:   "b-22",
+	},
+	{
 		// connect looks the socket's path up: a file added there changes
 		// the call's outcome.
 		name:    "o1 unix socket path added",
@@ -967,6 +1022,23 @@ func (f *fixture) backdateLink(t *testing.T, rel string, date time.Time) {
 	if output, err := exec.Command("touch", "-h", "-d", fmt.Sprintf("@%d", date.Unix()), f.path(rel)).CombinedOutput(); err != nil {
 		t.Fatalf("touch -h %s: %v\n%s", rel, err, output)
 	}
+}
+
+// backdateLinkedDirs dates the directories of the D1 and D2 cases and their
+// link alike, so a relink with its time kept leaves them as they were.
+func backdateLinkedDirs(t *testing.T, f *fixture) {
+	for _, dir := range []string{"a", "a/sub", "b", "b/sub", "dirs"} {
+		f.backdate(t, dir, f.base)
+	}
+	f.backdateLink(t, "dirs/current", f.base)
+}
+
+// relinkLinkedDirs points the D1 and D2 cases' link at b, keeping the
+// link's and its directory's times.
+func relinkLinkedDirs(t *testing.T, f *fixture) {
+	f.relink(t, "dirs/current", "../b")
+	f.backdateLink(t, "dirs/current", f.base)
+	f.backdate(t, "dirs", f.base)
 }
 
 // backdateTree dates every file below rel, as backdate does one.
