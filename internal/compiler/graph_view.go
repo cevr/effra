@@ -1561,10 +1561,15 @@ func portExists(node *GraphViewNode, port string) bool {
 }
 
 // validateGraphViewReferences resolves every published reference against the
-// view's own fact tables, over the interchange as encoding/json publishes it:
-// the same JSON names and omissions (cachedProjectionJSONFields, as
-// encodedSize uses), walked over the typed view, so validation serialises
-// nothing.
+// view's own fact tables. It walks the typed view by its struct fields' JSON
+// names and omissions (cachedProjectionJSONFields, as encodedSize uses), so
+// validation serialises nothing. That is the published interchange except
+// where a type marshals itself: ValueType.MarshalJSON publishes its ownership
+// facts as PublicOwnership, which the walk sees as OwnershipFact. Neither
+// form carries a key this walk checks, and
+// TestGraphViewReferenceWalkSeesEveryPublishedKey pins that ValueType is the
+// only marshaler reachable from GraphView and that its published form adds no
+// checked key.
 func validateGraphViewReferences(view *GraphView) error {
 	facts := view.Data.Effra.Facts
 	types, rows, declarations, sources, parameters := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
