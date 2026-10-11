@@ -1,0 +1,18 @@
+{"id":"decode.normalizes","ok":true,"encoded":"{\"id\":\"7\",\"email\":\"a@x\",\"contact\":{\"email\":\"b@x\"},\"active\":true}"}
+{"id":"decode.step-failure","ok":false,"path":["email"],"message":"empty"}
+{"id":"decode.first-step-failure-in-declared-order","ok":false,"path":["contact","email"],"message":"empty"}
+{"id":"decode.structure-before-transformation","ok":false,"path":["email"],"message":"empty"}
+{"id":"decode.missing-before-transformation","ok":false,"path":["email"],"message":"empty"}
+{"id":"decode.root-transformation","ok":true,"encoded":"\"ada@x\""}
+{"id":"decode.root-step-failure","ok":false,"path":[],"message":"empty"}
+{"id":"decode.root-structure","ok":false,"path":[],"message":"Expected string"}
+{"id":"decode.normalizes-legacy-variant","ok":true,"encoded":"{\"_tag\":\"Active\"}"}
+{"id":"decode.unknown-variant","ok":false,"path":[],"message":"Expected { readonly \"_tag\": \"Active\", ... } | { readonly \"_tag\": \"Enabled\", ... } | { readonly \"_tag\": \"Suspended\", ... }"}
+{"id":"decode.nested-transformations","ok":true,"encoded":"{\"value\":\"ada\"}"}
+{"id":"decode.nested-inner-failure","ok":false,"path":["value"],"message":"empty"}
+{"id":"encode.transforms","ok":true,"encoded":"{\"id\":\"1\",\"email\":\"a\",\"contact\":{\"email\":\"b\"},\"active\":false}"}
+{"id":"encode.step-failure","ok":false,"path":["contact","email"],"message":"blocked"}
+{"id":"encode.bounded-representation","ok":true,"encoded":"{\"id\":\"1\",\"email\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"contact\":{\"email\":\"b\"},\"active\":false}"}
+{"id":"encode.canonical-variant","ok":true,"encoded":"{\"_tag\":\"Active\"}"}
+{"id":"encode.nested-transformations","ok":true,"encoded":"{\"value\":\"ada\"}"}
+{"id":"encode.nested-inner-failure","ok":false,"path":["value"],"message":"blocked"}

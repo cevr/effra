@@ -52,3 +52,22 @@ For codecs, Elixir's `JSON` module decodes objects into string-keyed maps with n
 ## Validation still required
 
 These comparisons settle the initial design direction. Implementation must supply executable negative checks, Go/JS behavior, cancellation and completed cleanup, CLI/MCP parity, and bounded compiler-cost receipts. Copied reference tests remain reference material until each applicable behavior is mapped to a passing Effra test.
+
+## Transforming codec implementation decision (2026-10-09)
+
+The admitted surface is `derive w = Json.codec<T>(..., decode: f, encode: g)`, where `f: R -> T` and `g: T -> R` are ordinary one-parameter functions (pure or effect) and `R` is derived structurally, plus a trailing `with w1, w2` on a parent. Serde's `#[serde(try_from = "R", into = "R")]` is the closest shape: a whole-type conversion through a structurally derived proxy. Effect's `Schema.decodeTo(to, { decode, encode })` supplies the directional getters with their own requirements. Effra keeps the function names visible in source and inspection instead of field attributes.
+
+| Alternative | Decision and reason |
+| --- | --- |
+| Interleave transformations with structural decoding, as pinned Schema does | Reject. Effra decodes the whole structure first, so malformed input never reaches a transformation's services; the engines stay effect-free and the difference is executed evidence in `conformance/codecs/json-transform-vectors.json`. |
+| Implicit witness lookup by domain type (Serde's per-type impl, a global registry) | Reject. Several witnesses may transform one type; `with` makes the choice explicit, and unused or ambiguous entries are refused. |
+| Inherit the parent's `with` list inside a witness's representation | Reject. A witness's behavior must not depend on who composes it; its representation uses only its own list. |
+| Report transformation failures as path-carrying codec issues | Reject. The declared failure type would be erased; inspection reports the plan paths instead. |
+| One bidirectional conversion value or a codec-specific function form | Defer. Two ordinary functions reuse the existing function/row model; a combined form needs an independent consumer. |
+
+Elixir and MoonBit comparison (standing comparison languages, read 2026-10-09):
+
+- Elixir 1.18+ `JSON` (`~/.cache/repo/elixir-lang/elixir` at `91ee75b`): encoding is opt-in per struct with `@derive {JSON.Encoder, only: [...]}`/`except:` (`lib/elixir/lib/json.ex:4-21`), the same explicit-derivation stance as Effra's witnesses. Decoding is untyped: `JSON.decode/1` returns `{:ok, term}` or `{:error, reason}` with a byte offset (`json.ex:356-377`), and conversion to domain structs is hand-written application code with no declared failure or service rows. Effra keeps Elixir's offset-bearing structural errors but types both directions.
+- MoonBit `derive(ToJson, FromJson)` (`~/.cache/repo/moonbitlang/core` at `e96ede8`, `json/derive_json_test.mbt:16-20`) gives one canonical trait implementation per type, the global uniqueness Effra rejects in favor of named witnesses and `with`. `FromJson::from_json` raises `JsonDecodeError((JsonPath, String))` (`json/from_json.mbt:21-28`): every decode failure, including a hand-written conversion's, is a path-carrying string. Effra's structural failures carry a path as MoonBit's do, but a transformation's failure keeps its own declared type and carries no path (recorded gap).
+
+Validation status: Go/JS behavior, negative checks, cancellation that stops at the interrupted transformation's closed scope, and CLI/MCP parity are tested. The HTTP-boundary witness landed with typed endpoints (`examples/http-endpoints.ef`: the input witness's Directory-backed transformation answers its mapped 422, distinct from malformed input's 400, and the same witness serves a stored-data caller). Finalizer-level cleanup is observed too: a transformation whose scope owns a bound `Http.listen` listener is interrupted mid-stream in each direction, and the caller rebinds the listener's address only after the interrupt returns, which succeeds on Go, Bun and Node only because the listener was released; rebinding while the transformation still holds it fails with IoError, and a fixture that cancels without awaiting cleanup fails the Go rebind (`TestCodecTransformationInterruptReleasesItsScopedResource`).

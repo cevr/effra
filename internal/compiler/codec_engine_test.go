@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -54,6 +53,11 @@ type codecVectorPlan struct {
 			DomainTag string             `json:"domainTag"`
 			Fields    []codecVectorField `json:"fields"`
 		} `json:"variants"`
+		// Transform nodes name their representation node, step index and
+		// the target-neutral behavior each harness implements.
+		Child    int    `json:"child"`
+		Step     int    `json:"step"`
+		Behavior string `json:"behavior"`
 	} `json:"nodes"`
 }
 
@@ -76,18 +80,24 @@ type codecVector struct {
 }
 
 // codecOutcome is one Effra engine result: encoded output on success (for
-// decode vectors, the decoded value re-encoded), or the typed failure.
+// decode vectors, the decoded value re-encoded), the typed codec failure, or
+// a transformation step's own failure, returned unchanged.
 type codecOutcome struct {
 	OK      bool     `json:"ok"`
 	Encoded string   `json:"encoded"`
 	Reason  string   `json:"reason"`
 	Path    []string `json:"path"`
 	Offset  int      `json:"offset"`
+	Step    string   `json:"step"`
+	Message string   `json:"message"`
 }
 
 func (o codecOutcome) String() string {
 	if o.OK {
 		return "ok " + strconv.Quote(o.Encoded)
+	}
+	if o.Step != "" {
+		return fmt.Sprintf("step %s failed %q", o.Step, o.Message)
 	}
 	return fmt.Sprintf("%s at byte %d path %q", o.Reason, o.Offset, o.Path)
 }
@@ -287,19 +297,10 @@ func codecComparison(expect codecOutcome, effect codecEffectLine, parseFailure s
 	return "difference"
 }
 
-// codecVectorCarrier stands in for compiler-generated record and union
-// carriers: the variant index and declared-order field values.
-type codecVectorCarrier struct {
-	variant int
-	fields  []any
-}
-
+// codecVectorGoPlan is a vector plan for the runtime engine's validator,
+// with inert Construct adapters: plan errors never reach a carrier.
 func codecVectorGoPlan(plan codecVectorPlan, profile string) rt.CodecPlan {
-	construct := func(variant int, fields []any) any { return codecVectorCarrier{variant: variant, fields: fields} }
-	project := func(value any) (int, []any) {
-		carrier := value.(codecVectorCarrier)
-		return carrier.variant, carrier.fields
-	}
+	construct := func(int, []any) any { panic("plan errors construct no carrier") }
 	fields := func(list []codecVectorField) []rt.CodecField {
 		out := []rt.CodecField{}
 		for _, field := range list {
@@ -313,88 +314,27 @@ func codecVectorGoPlan(plan codecVectorPlan, profile string) rt.CodecPlan {
 		switch compiled.Kind {
 		case rt.CodecRecord:
 			compiled.Fields = fields(node.Fields)
-			compiled.Construct, compiled.Project = construct, project
+			compiled.Construct = construct
 		case rt.CodecUnion:
 			compiled.Variants = []rt.CodecVariant{}
 			for _, variant := range node.Variants {
 				compiled.Variants = append(compiled.Variants, rt.CodecVariant{Tag: variant.Tag, Fields: fields(variant.Fields)})
 			}
-			compiled.Construct, compiled.Project = construct, project
+			compiled.Construct = construct
+		case rt.CodecTransform:
+			compiled.Child, compiled.Step = node.Child, node.Step
 		}
 		out.Nodes = append(out.Nodes, compiled)
 	}
 	return out
 }
 
-// codecVectorGoValue builds a Go carrier from a neutral encode value.
-func codecVectorGoValue(t *testing.T, plan codecVectorPlan, index int, value any) any {
-	node := plan.Nodes[index]
-	marker, _ := value.(map[string]any)
-	fields := func(list []codecVectorField, source map[string]any) []any {
-		out := []any{}
-		for _, field := range list {
-			out = append(out, codecVectorGoValue(t, plan, field.Node, source[field.Name]))
-		}
-		return out
-	}
-	switch node.Kind {
-	case "string":
-		if text, ok := value.(string); ok {
-			return text
-		}
-		raw, err := hex.DecodeString(marker["$hex"].(string))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(raw)
-	case "bool":
-		return value.(bool)
-	case "void":
-		return struct{}{}
-	case "i64":
-		number, err := strconv.ParseInt(marker["$i64"].(string), 10, 64)
-		if err != nil {
-			t.Fatalf("Go cannot carry i64 %v: %v", marker, err)
-		}
-		return number
-	case "record":
-		return codecVectorCarrier{fields: fields(node.Fields, marker)}
-	case "union":
-		for position, variant := range node.Variants {
-			if variant.Tag == marker["$variant"] {
-				return codecVectorCarrier{variant: position, fields: fields(variant.Fields, marker["fields"].(map[string]any))}
-			}
-		}
-	}
-	t.Fatalf("neutral value %v does not fit node %d", value, index)
-	return nil
-}
-
-// runCodecVectorsGo returns outcomes by vector id, and plan-error messages
-// (as Reason) by plan-error id.
+// runCodecVectorsGo returns outcomes by vector id, from the generated Go
+// path, and plan-error messages (as Reason) by plan-error id.
 func runCodecVectorsGo(t *testing.T, document codecVectorDocument) map[string]codecOutcome {
 	t.Helper()
-	settle := func(output []byte, err error) codecOutcome {
-		var failure *rt.CodecError
-		if errors.As(err, &failure) {
-			return codecOutcome{Reason: string(failure.Reason), Path: failure.Path, Offset: failure.Offset}
-		}
-		if err != nil {
-			t.Fatalf("untyped codec failure: %v", err)
-		}
-		return codecOutcome{OK: true, Encoded: string(output)}
-	}
-	codecs := map[string]*rt.Codec{}
-	for name, plan := range document.Plans {
-		codec, err := rt.CompileCodec(codecVectorGoPlan(plan, document.Profile))
-		if err != nil {
-			t.Fatalf("plan %s: %v", name, err)
-		}
-		codecs[name] = codec
-	}
-	results := map[string]codecOutcome{}
+	jobs := []codecVectorJob{}
 	for _, vector := range document.Vectors {
-		codec := codecs[vector.Plan]
 		switch {
 		case vector.Direction == "decode":
 			body := []byte{}
@@ -405,27 +345,16 @@ func runCodecVectorsGo(t *testing.T, document codecVectorDocument) map[string]co
 			} else {
 				t.Fatalf("%s: %v", vector.ID, err)
 			}
-			value, err := codec.Decode(body)
-			if err != nil {
-				results[vector.ID] = settle(nil, err)
-				continue
-			}
-			// A decoded value must re-encode; a failure here is reported
-			// apart from decode failures so encode checks cannot mask them.
-			outcome := settle(codec.Encode(value))
-			if !outcome.OK {
-				outcome.Reason = "re-encode " + outcome.Reason
-			}
-			results[vector.ID] = outcome
+			jobs = append(jobs, codecVectorJob{id: vector.ID, plan: vector.Plan, body: body, decode: true})
 		case slices.Contains(vector.Targets, "go"):
 			var value any
 			if err := json.Unmarshal(vector.Value, &value); err != nil {
 				t.Fatalf("%s: %v", vector.ID, err)
 			}
-			plan := document.Plans[vector.Plan]
-			results[vector.ID] = settle(codec.Encode(codecVectorGoValue(t, plan, plan.Root, value)))
+			jobs = append(jobs, codecVectorJob{id: vector.ID, plan: vector.Plan, value: value})
 		}
 	}
+	results := runCodecVectorsGenerated(t, document.Profile, document.Plans, jobs)
 	for _, planError := range document.PlanErrors {
 		profile := document.Profile
 		if planError.Profile != "" {
@@ -615,5 +544,61 @@ console.log("bounded: done");
 `)
 	if strings.TrimSpace(string(output)) != "bounded: done" {
 		t.Fatalf("JS encode constructed output beyond the bound:\n%s", output)
+	}
+}
+
+// The JS engine's encode retains nothing beyond its bounded output: a value
+// of 40 small objects whose shared children expand to 2^20 transformed
+// leaves runs every step in order and fails body-too-large under a 64-byte
+// budget, while the heap measured at the last step, after a full
+// collection, stays near its starting size (preparing a full tree first
+// held a copy of every expanded record there). A failing last step still
+// takes precedence over the deferred body-too-large, and the same plan over
+// three levels fits a 128-byte budget and encodes exactly.
+func TestCodecJSEngineEncodeRetainsNoPreparedTree(t *testing.T) {
+	_, root := readCodecVectors(t)
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("Bun is required for codec conformance vectors")
+	}
+	output := runCodecJS(t, bun, root, `
+const shared = (levels, maxBodyBytes) => {
+  const nodes = [{ kind: "string" }, { kind: "transform", type: "witness:leafJson", child: 0, step: 0 }];
+  let value = "x";
+  for (let level = 1; level <= levels; level++) {
+    nodes.push({ kind: "record", type: "Level" + level, fields: [{ name: "a", node: nodes.length - 1 }, { name: "b", node: nodes.length - 1 }] });
+    value = { a: value, b: value };
+  }
+  return { codec: __ef_codecCompile({ profile: "effra/json-structural-1", bounds: { maxBodyBytes, maxDepth: levels + 1 }, root: nodes.length - 1, nodes }), value };
+};
+const drive = (requests, step) => {
+  let next = requests.next();
+  while (!next.done) next = requests.next(step(next.value.value));
+  return next.value;
+};
+const levels = 20, leaves = 2 ** levels;
+const { codec, value } = shared(levels, 64);
+Bun.gc(true);
+const before = process.memoryUsage().heapUsed;
+let calls = 0, retained = 0;
+const result = drive(codec.stream(value), leaf => {
+  if (++calls === leaves) { Bun.gc(true); retained = process.memoryUsage().heapUsed - before; }
+  return leaf;
+});
+if (result.ok || result.issue.reason !== "body-too-large" || calls !== leaves) throw new Error("shared value: " + JSON.stringify(result) + " after " + calls + " steps");
+if (retained > 8 * 1024 * 1024) throw new Error("encoding a 64-byte budget retained " + retained + " bytes for " + leaves + " leaves");
+calls = 0;
+try {
+  drive(codec.stream(value), leaf => { if (++calls === leaves) throw new Error("rejected"); return leaf; });
+  throw new Error("a failed last step was not reported");
+} catch (error) { if (error.message !== "rejected") throw error; }
+const small = shared(3, 128);
+const fitted = drive(small.codec.stream(small.value), leaf => leaf);
+const leaf = '{"a":"x","b":"x"}', pair = '{"a":' + leaf + ',"b":' + leaf + '}';
+if (!fitted.ok || new TextDecoder().decode(fitted.bytes) !== '{"a":' + pair + ',"b":' + pair + '}') throw new Error("fitting control " + JSON.stringify(fitted));
+console.log("bounded");
+`)
+	if string(output) != "bounded\n" {
+		t.Fatalf("JS engine: %s", output)
 	}
 }

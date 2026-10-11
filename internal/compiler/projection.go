@@ -1019,6 +1019,9 @@ func (r *Result) CheckResponse() map[string]any {
 			response["codecs"] = r.Codecs
 			response["codecPlans"] = r.CodecPlans
 		}
+		if len(r.Endpoints) > 0 {
+			response["endpoints"] = r.Endpoints
+		}
 		usage, err := r.ValidateProjectionResponse(projection, response)
 		if err != nil {
 			projection = refusedProjection(projection.Limits, usage, err.Error())

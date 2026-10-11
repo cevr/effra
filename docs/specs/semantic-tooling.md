@@ -128,7 +128,12 @@ Function-like targets carry their declared signature by canonical references,
 and fields their declared type. A `codec` target is the retained `derive`
 namespace/declaration; generated direction functions keep their callable
 identity and rows while pointing back to that declaration name and full extent.
-This target does not admit `Codec<T>` as a first-class value. The checker
+This target does not admit `Codec<T>` as a first-class value. An endpoint's
+or route table's `derive` name, and every call of it, select its synthesized
+handler as an ordinary `function` target (identity, signature and rows) whose
+location is that derive name and full declaration extent; its synthetic
+`request` parameter has no location, and a refused endpoint has no target.
+The checker
 records each target at the point
 it resolves a name, from original syntax only: callees, service qualifiers and
 operations, provider values and constructors, constructor heads, explicit

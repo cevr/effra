@@ -22,7 +22,8 @@ func derivePlanOf(t *testing.T, source, typeName string, bounds CodecPlanBounds)
 		t.Fatal(r.Diagnostics)
 	}
 	c := r.Program.semantic
-	return c.deriveCodecPlan(rt.CodecProfileJSON, c.canonicalRef(c.typeRef(typeName)), typeName, bounds)
+	codec := &CodecDeclaration{Name: "probe", Type: typeName, derivation: jsonCodecDerivation, domainID: c.canonicalRef(c.typeRef(typeName))}
+	return c.deriveCodecPlan(codec, bounds)
 }
 
 const codecPlanSource = `record User {
@@ -266,7 +267,6 @@ func runtimeCodecPlanOf(plan *CodecPlan) rt.CodecPlan {
 		if node.data != nil {
 			converted.Type = node.ID
 			converted.Construct = func(int, []any) any { return nil }
-			converted.Project = func(any) (int, []any) { return 0, nil }
 			converted.Fields = fields(node.Fields)
 			for _, variant := range node.Variants {
 				converted.Variants = append(converted.Variants, rt.CodecVariant{Tag: variant.Tag, Fields: fields(variant.Fields)})

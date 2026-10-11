@@ -368,9 +368,9 @@ Each row states what has landed on this branch, what is in flight and what is on
 | --- | --- |
 | Payload-aware recovery: `.recover<E>(handler)` passes the error's fields to an effectful handler | Landed on Go and JS ([`recovery-outcome.ef`](examples/recovery-outcome.ef), [`recovery-codec.ef`](examples/recovery-codec.ef)); reified `Exit` is not exposed |
 | Layer runtime: concurrent shared acquisition, rollback and cleanup in reverse order | Shared build-owned acquisition with individually cancellable waiters landed on Go and JS; the remaining units are in progress |
-| Codecs derived from records and enums, with explicit wire ↔ domain transformations | Structural JSON derivation through [`effra/json`](docs/bundled-modules.md) runs on Go and JS; transformations in progress |
+| Codecs derived from records and enums, with explicit wire ↔ domain transformations | Structural JSON derivation through [`effra/json`](docs/bundled-modules.md) and explicit transformed witnesses composed with `with` run on Go and JS, including at typed HTTP endpoints |
 | Graph views: `ef graph --kind layers --format mermaid\|dot`, plus MCP and editor views | In progress |
-| HTTP server with bounded, owned shutdown (`Http.listen`) | Landed on Go and JS ([`http-transport.ef`](examples/http-transport.ef)); typed endpoints, streaming bodies and codecs are not built |
+| HTTP server with bounded, owned shutdown (`Http.listen`) | Landed on Go and JS with typed endpoints and route tables ([`http-transport.ef`](examples/http-transport.ef), [`http-endpoints.ef`](examples/http-endpoints.ef)) and a shared wire corpus; streaming bodies are not built |
 | Rich Go interop: host types, methods, `io.Reader`/`io.Writer`, `context` | Host types, methods, interface assignment, checked I/O and `context` forwarding landed; owned resources and callbacks in progress |
 | Library modules: `pub` exports and module-qualified identity | Designed |
 | State machines: ordinary step functions run by an owned runtime | [Specified](docs/specs/state-machines.md); not built |

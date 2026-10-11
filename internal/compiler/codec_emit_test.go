@@ -101,12 +101,12 @@ func TestCodecPlansAreSelectedOnlyThroughExecutedDirections(t *testing.T) {
 	if _, found := sources["codec_json.go"]; !found {
 		t.Fatalf("application runtime omits the codec engine: %v", slices.Sorted(maps.Keys(sources)))
 	}
-	for _, want := range []string{"var " + goCodecPlanName(user), "var " + goCodecPlanName(event), "func efCodecConstruct_User(", "func efCodecProject_Event("} {
+	for _, want := range []string{"var " + goCodecPlanName(user), "var " + goCodecPlanName(event), "func efCodecConstruct_User(", "func " + goCodecEncodeName(event) + "("} {
 		if strings.Count(goSource, want) != 1 {
 			t.Fatalf("Go emission has %d of %q", strings.Count(goSource, want), want)
 		}
 	}
-	for _, unwanted := range []string{goCodecPlanName(archive), "efCodecConstruct_Archive", "efCodecFunction_archiveJson"} {
+	for _, unwanted := range []string{goCodecPlanName(archive), goCodecEncodeName(archive), "efCodecConstruct_Archive", "efCodecFunction_archiveJson"} {
 		if strings.Contains(goSource, unwanted) {
 			t.Fatalf("Go emission retains unexecuted %s", unwanted)
 		}

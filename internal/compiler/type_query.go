@@ -187,6 +187,9 @@ func (r *Result) selectSymbol(symbol *Symbol, selected *SelectedType) {
 	if r.lexical != nil {
 		if _, original := r.lexical.functions[f]; original {
 			selected.Extent, selected.LocationAvailable = f.Extent, true
+		} else if f.endpoint != nil && selected.Target != nil && selected.Target.LocationAvailable {
+			// A synthesized endpoint handler is declared by its derive.
+			selected.Extent, selected.LocationAvailable = selected.Target.Extent, true
 		}
 	}
 }
@@ -228,7 +231,8 @@ func (r *Result) selectDeclaration(declaration *Declaration, selected *SelectedT
 
 // selectNamedItem selects an original top-level declaration that has no
 // public symbol or nominal declaration view by its declared name: a service,
-// provider, layer, derive or local generic data declaration, or
+// provider, layer, derive (codec, endpoint or route table) or local generic
+// data declaration, or
 // `Owner.member` for a service operation or provider method. This is the
 // declaration namespace a named query addresses, not a search of tokens.
 func (r *Result) selectNamedItem(name string, selected *SelectedType) bool {
@@ -274,6 +278,8 @@ func namedItem(items []*SyntaxItem, name string) lexicalTarget {
 			return lexicalTarget{kind: "layer", layer: item.Layer}
 		case item.Codec != nil && item.Codec.Name == name:
 			return lexicalTarget{kind: "codec", codec: item.Codec}
+		case item.Endpoint != nil && item.Endpoint.Name == name:
+			return lexicalTarget{kind: "function", endpoint: item.Endpoint}
 		case item.Record != nil && item.Record.Name == name && len(item.Record.Parameters) > 0:
 			return lexicalTarget{kind: item.Record.Kind, data: item.Record}
 		case item.Enum != nil && item.Enum.Name == name && len(item.Enum.Parameters) > 0:
@@ -298,7 +304,11 @@ func (r *Result) selectOffset(offset int, selected *SelectedType) error {
 		if !within(name.Span, offset) {
 			continue
 		}
-		if f := name.Target.function; name.Target.kind == "function" {
+		f := name.Target.function
+		if name.Target.endpoint != nil {
+			f = name.Target.endpoint.function
+		}
+		if name.Target.kind == "function" && f != nil {
 			if symbol := r.Find(f.Name); symbol != nil && r.checkedSymbols[symbol.Identity].declaration == f {
 				r.selectSymbol(symbol, selected)
 				return nil
@@ -399,6 +409,14 @@ func (r *Result) declarationTarget(t lexicalTarget) (*DeclarationTarget, *Declar
 	if c == nil || facts == nil {
 		return nil, nil
 	}
+	if t.endpoint != nil {
+		// An endpoint's derive name denotes its synthesized handler
+		// function; a refused endpoint synthesizes none and has no target.
+		if t.endpoint.function == nil {
+			return nil, nil
+		}
+		t.function = t.endpoint.function
+	}
 	target := &DeclarationTarget{Kind: t.kind}
 	located := func(original bool, source, module string, span, extent Span) {
 		if original {
@@ -483,6 +501,11 @@ func (r *Result) declarationTarget(t lexicalTarget) (*DeclarationTarget, *Declar
 			// extent for CLI, MCP and LSP alike.
 			item := facts.items[f.codec]
 			located(item != nil, "", "", f.codec.Span, itemExtent(item, f.codec.Span))
+		} else if f.endpoint != nil {
+			// An endpoint's or route table's handler is synthesized: its
+			// origin is the derive declaration's name and full extent.
+			item := facts.items[f.endpoint]
+			located(item != nil, "", "", f.endpoint.Span, itemExtent(item, f.endpoint.Span))
 		} else {
 			located(original, f.SourceID, f.Module, f.Span, f.Extent)
 		}

@@ -1,0 +1,26 @@
+{
+  "schema": "effra-http-wire-vectors/1",
+  "program": "examples/http-endpoints.ef",
+  "profile": "HTTP/1.1 buffered JSON endpoints, exact static paths, wrong method 404, application/json input media type (absent Content-Type reads as JSON), failure bodies tagged with the failure name, terminal failure-body encoding answers 500",
+  "targets": ["go", "js-bun", "js-node"],
+  "limits": {"maxBodyBytes": 256, "readHeaderMillis": 1000, "readBodyMillis": 1000, "idleMillis": 1000, "maxActive": 8},
+  "exchanges": [
+    {"name": "endpoint.success-status-and-body", "request": {"method": "POST", "target": "/orders", "body": {"text": "{\"member\":\"m-1\",\"item\":\"tea\",\"quantity\":\"2\"}"}, "contentType": "application/json"}, "response": {"status": 201, "body": {"text": "{\"item\":\"tea\",\"total\":\"252\"}"}, "contentType": "application/json"}},
+    {"name": "media.json-with-parameters", "request": {"method": "POST", "target": "/orders", "body": {"text": "{\"member\":\"m-1\",\"item\":\"tea\",\"quantity\":\"1\"}"}, "contentType": "Application/JSON; charset=utf-8"}, "response": {"status": 201, "body": {"text": "{\"item\":\"tea\",\"total\":\"251\"}"}, "contentType": "application/json"}},
+    {"name": "media.unsupported-415", "request": {"method": "POST", "target": "/orders", "body": {"text": "{}"}, "contentType": "text/plain"}, "response": {"status": 415}},
+    {"name": "media.absent-reads-as-json", "request": {"method": "POST", "target": "/orders", "body": {"text": "{\"member\":\"m-1\",\"item\":\"tea\",\"quantity\":\"2\"}"}}, "response": {"status": 201, "body": {"text": "{\"item\":\"tea\",\"total\":\"252\"}"}, "contentType": "application/json"}},
+    {"name": "input.structurally-malformed-400", "request": {"method": "POST", "target": "/orders", "body": {"text": "{\"member\":\"m-1\"}"}, "contentType": "application/json"}, "response": {"status": 400}},
+    {"name": "input.invalid-json-400", "request": {"method": "POST", "target": "/orders", "body": {"text": "{\"member\":"}, "contentType": "application/json"}, "response": {"status": 400}},
+    {"name": "input.invalid-utf8-400", "request": {"method": "POST", "target": "/orders", "body": {"hex": "ff"}, "contentType": "application/json"}, "response": {"status": 400}},
+    {"name": "input.oversized-413", "request": {"method": "POST", "target": "/orders", "body": {"repeat": " ", "count": 257}, "contentType": "application/json"}, "response": {"status": 413, "close": true}},
+    {"name": "input.transformation-failure-mapped-422", "request": {"method": "POST", "target": "/orders", "body": {"text": "{\"member\":\"m-9\",\"item\":\"tea\",\"quantity\":\"2\"}"}, "contentType": "application/json"}, "response": {"status": 422, "body": {"text": "{\"_tag\":\"UnknownMember\",\"id\":\"m-9\"}"}, "contentType": "application/json"}},
+    {"name": "handler.failure-mapped-409", "request": {"method": "POST", "target": "/orders", "body": {"text": "{\"member\":\"m-1\",\"item\":\"tea\",\"quantity\":\"9\"}"}, "contentType": "application/json"}, "response": {"status": 409, "body": {"text": "{\"_tag\":\"OutOfStock\",\"item\":\"tea\"}"}, "contentType": "application/json"}},
+    {"name": "output.failed-failure-body-is-terminal-500", "request": {"method": "POST", "target": "/orders", "body": {"text": "{\"member\":\"m-1\",\"item\":\"tea\",\"quantity\":\"3\"}"}, "contentType": "application/json"}, "response": {"status": 500}},
+    {"name": "failure.mapped-without-body-409", "request": {"method": "DELETE", "target": "/orders"}, "response": {"status": 409}},
+    {"name": "endpoint.no-output-204", "request": {"method": "GET", "target": "/health"}, "response": {"status": 204}},
+    {"name": "route.query-is-not-path", "request": {"method": "GET", "target": "/health?probe=1"}, "response": {"status": 204}},
+    {"name": "route.wrong-method-404", "request": {"method": "GET", "target": "/orders"}, "response": {"status": 404}},
+    {"name": "route.unknown-path-404", "request": {"method": "GET", "target": "/orders/1"}, "response": {"status": 404}},
+    {"name": "route.path-is-case-sensitive-404", "request": {"method": "GET", "target": "/Health"}, "response": {"status": 404}}
+  ]
+}

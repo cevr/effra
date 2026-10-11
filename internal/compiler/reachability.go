@@ -847,6 +847,8 @@ func (p *applicationPlanner) expr(e *Expr, owner applicationOrigin) {
 		p.codecOperation(e, owner)
 	case "intrinsic":
 		p.helper(e.Name, owner)
+	case "endpoint", "routes":
+		p.endpointOperation(e, owner)
 	case "scope", "fork", "catch", "recover", "orFail":
 		p.helper(e.Kind, owner)
 	case "timeout":

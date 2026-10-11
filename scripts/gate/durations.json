@@ -37,7 +37,7 @@
     "TestGraphViewRefusalsAgreeAcrossCLIAndMCP": 1.25,
     "TestGraphViewsAgreeAcrossCLIAndMCPWithoutExecution": 0.68,
     "TestHTTPSmokeServesRoutesBoundariesAndSIGTERMShutdown": 2.33,
-    "TestHTTPTransportSmokeStatusesLimitsDisconnectAndShutdown": 2.3,
+    "TestHTTPWireVectors": 2.3,
     "TestHostTypeInspectionCLIAndMCPParity": 1.51,
     "TestLSPSmokeFramedProcesses": 1.29,
     "TestLargeCheckedProgramBuildsBothTargetsAfterProjectionRefusal": 6.33,

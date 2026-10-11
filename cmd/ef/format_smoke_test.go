@@ -208,7 +208,7 @@ func TestFormatSmokeCLIAndMCPProcessAdapters(t *testing.T) {
 	}
 	writeReport := smokeJSON(t, stdout)
 	writeFiles, _ := writeReport["files"].([]any)
-	if writeReport["formatterVersion"] != "effra/formatter-12" || writeReport["schemaVersion"] != float64(1) || len(writeFiles) == 0 {
+	if writeReport["formatterVersion"] != "effra/formatter-14" || writeReport["schemaVersion"] != float64(1) || len(writeFiles) == 0 {
 		t.Fatalf("write report: %v", writeReport)
 	}
 	if file, _ := writeFiles[0].(map[string]any); file["written"] != true {

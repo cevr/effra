@@ -99,6 +99,12 @@ func resolveBindings(program *Program) {
 		r.global(f.Name)
 		r.function(f, empty)
 	}
+	// An endpoint or route table derives a handler over the builtin Http
+	// data, so it refers to Http like a spelled reference does.
+	for _, endpoint := range program.Endpoints {
+		r.global("Http")
+		r.global(endpoint.Name)
+	}
 	for _, f := range program.BundledFunctions {
 		r.function(f, empty)
 	}

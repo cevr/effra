@@ -64,7 +64,7 @@ Every check the old gate ran still runs. `go run ./scripts/gate --list` prints t
 | `format_smoke.py` | `TestFormatSmokeCLIAndMCPProcessAdapters`. Not repeated, because `TestFormatCLIProcessModesAndAtomicWrites` already asserts them at the same process boundary: mixed invalid files, symlink refusal, the 20000-line stdin output limit, invalid UTF-8 on stdin. |
 | `mcp_text_smoke.py` | `TestCompiledMCPAdmitsTextLosslesslyAndAnswersQueuedPing` |
 | `layer_smoke.py`, `type_smoke.py` | `TestLayerSmokeProvisionCLIMCPAndFormatter`, `TestTypeSmokeSelectedFactsAndCanonicalDefinitions` |
-| `http_smoke.py`, `http_transport_smoke.py` | `TestHTTPSmokeServesRoutesBoundariesAndSIGTERMShutdown`, `TestHTTPTransportSmokeStatusesLimitsDisconnectAndShutdown`. The bounded 503 retry policy is unchanged. |
+| `http_smoke.py`, `http_transport_smoke.py` | `TestHTTPSmokeServesRoutesBoundariesAndSIGTERMShutdown`, `TestHTTPWireVectors` (driven by `conformance/http/*-vectors.json`). The bounded 503 retry policy is unchanged. |
 
 Every port was checked in three ways:
 

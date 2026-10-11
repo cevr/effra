@@ -114,20 +114,133 @@ declaration that omits either bound is refused with EF138.
 Functions, effect recipes, host and runtime types, bytes, generic
 applications and empty enums are refused with EF138 and the field path at
 which representation fails. A failure (`error`) declaration is not a value
-type, so naming one as the derived type is refused earlier with EF102, like
-an unknown type. Plans are limited to 4096 nodes and 65536 fields and
-variants.
+type: as a field or element of a value codec it is refused with EF138 at that
+path (its field declaration is already EF102), and it is the derived type
+only of a [failure witness](#failure-witnesses-and-typed-endpoints), which
+must name a failure declared in its own module. Plans are limited to 4096
+nodes and 65536 fields and variants.
 
 `ef check` and MCP `project.check` report each witness under `codecs`, with
 its domain and wire types and each direction's function, failures and
 requirements, and its plan under `codecPlans` with stable node identities. A
 native application retains a plan, its adapters and the runtime `codec`
-module only through an executed direction. A generated JS entry follows the
+module only through an executed direction, and a transformed plan's
+generated writer only through an executed encode direction. Decoding runs
+on the plan; encoding runs the plan's generated writer, one Go function per
+record, union and transform node, which reads the value in place and calls
+each witness's encode function directly with its typed domain value. A generated JS entry follows the
 same selection: it compiles one codec per plan an executed direction reaches
 and includes the shared engine once, only when such a plan exists, so an idle
 entry has no witness and no engine and an encode-only entry omits the decode
 witness. A library surface roots every direction of every witness: it exports
 each witness as a frozen `{ decode, encode }` object and carries the engine
-once whenever it derives any codec. Transformations, arrays, payload-failure
-codecs, error accumulation and stricter excess-property profiles are not yet
-supported.
+once whenever it derives any codec. Arrays, payload-failure codecs, error
+accumulation and stricter excess-property profiles are not yet supported.
+
+### Transformed witnesses
+
+A witness may state a transformation between its derived type and a
+distinct representation, and a parent witness composes transformed
+witnesses explicitly:
+
+```
+derive emailJson = Json.codec<Email>(maxBodyBytes: 256, maxDepth: 1, decode: parseEmail, encode: renderEmail)
+derive accountJson = Json.codec<Account>(maxBodyBytes: 4096, maxDepth: 3) with emailJson
+```
+
+`decode` and `encode` name ordinary first-order module functions of one
+parameter, pure or effect, and are required together: `decode` takes the
+representation and returns the derived type, `encode` takes the derived type
+and returns the same representation. The representation's plan is derived
+structurally, so the conversion is the only hand-written part. The two
+directions need not be inverses; a normalizing witness may accept a legacy
+spelling and always write the canonical one. The derived type itself must be
+plain data: primitives, records, enums and generic data over them. A domain
+that is or holds a resource (`File`, `Latch`, a fiber), a function or effect
+recipe value is refused with EF138 at its path, because a decoded value
+carries no ownership facts and must never smuggle a scope-owned resource
+past the EF123 escape check. The check walks the domain's layout once per
+type and charges one unit per type occurrence against a 4096-unit budget,
+the plan node ceiling; a layout that needs more is refused with EF127.
+
+Each direction function's rows are its structural failure plus the declared
+failures and services of every transformation that direction runs, so a
+decode-only service never appears on `encode`. A transformation's failure,
+defect or interruption propagates unchanged and is never a
+`JsonDecodeFailure`/`JsonEncodeFailure`.
+
+Decoding validates the whole structure first and only then runs decode
+transformations depth first in declared field order, each after the
+transformations nested in its representation, so malformed input never
+reaches a transformation or its services. Encoding runs each encode
+transformation before those nested in its representation, as the bounded
+writer reaches it, and retains nothing beyond the bounded output: once the
+output exceeds `maxBodyBytes` it stops writing but still runs the remaining
+transformations, so every transformation runs before a structural failure
+is reported and a transformation's failure takes precedence over it.
+
+### Failure witnesses and typed endpoints
+
+A derive declaration of a failure declared in the module is a *failure
+witness*. It is structural only (bounds, no transformations, no `with`),
+has no `decode`/`encode` functions, and encodes the failure as
+`{"_tag": "<Failure>", ...fields}`, the shape of a pinned Effect
+`TaggedError` schema. It is used only as an endpoint's failure body.
+
+`Http.endpoint` and `Http.routes` derive typed HTTP handlers over the
+managed transport ([runtime contract](runtime.md#typed-endpoints)):
+
+```
+derive outOfStockJson = Json.codec<OutOfStock>(maxBodyBytes: 128, maxDepth: 1)
+derive placeOrder = Http.endpoint(method: "POST", path: "/orders", input: orderJson, handler: place, output: receiptJson, status: 201) raises { OutOfStock: 409 outOfStockJson, Unknown: 422 }
+derive api = Http.routes(placeOrder, health)
+run Http.listen(address, limits, api)
+```
+
+Each declaration synthesizes an ordinary effect function of its name from
+`HttpRequest` to `HttpReply`, so it is passed to `Http.listen`, called and
+inspected like any handler. `method` (GET, POST, PUT, PATCH, DELETE),
+`path` (an exact static path), `handler` and `status` (2xx) are required;
+`input` and `output` name data witnesses. The handler takes the input's
+domain type (or nothing) and returns the output's (or `void`); it may be
+pure or effectful. `raises` maps every named failure the input's decode
+transformations, the handler and the output's encode transformations can
+raise to a 4xx/5xx status and optionally a failure witness of that failure.
+An unmapped failure is `EF107`; mapping an unreachable failure, mapping one
+twice, or mapping `JsonDecodeFailure`/`JsonEncodeFailure` is `EF138`.
+
+The synthesized function's rows are every service those functions need,
+every mapped failure and, when it encodes any body, the terminal
+`JsonEncodeFailure`. A mapped failure is answered only when it is the whole
+cause; a compound cause (a handler failure beside an unobserved failed child
+or a cleanup defect) propagates complete, so a direct caller declares the
+mapped failures, and `Http.listen` absorbs them as its generic 500. Inspection
+(`endpoints` in CLI/MCP) lists each endpoint's method, path, status,
+witnesses, handler, mapped responses with the stage and function that raise
+them, its input profile and its terminal encoding policy.
+Cancellation during a transformation stops the boundary after that
+transformation's own scope closes; no later transformation runs.
+
+`with` lists transformed witnesses of record and enum types. A listed
+witness applies wherever its domain type occurs in the parent's
+representation; its own representation uses only its own `with` list.
+Selection is explicit: there is no global or implicit witness. A repeated,
+self, structural, primitive-domain, ambiguous (two witnesses for one type),
+unused or recursive entry is refused with EF138; an unknown witness or
+function with EF102. A transform node adds no nesting of its own; its
+representation's nesting counts against `maxDepth`.
+
+Inspection reports a transformed witness's `representation`, its `with`
+list, and each direction's `transformations`: each witness once, in the
+direction's static plan order (decoding lists a nested witness before its
+parent, encoding after it; fields and variants in declared order), with
+the first plan path at which it applies, its function and that function's
+own failures and requirements. The order describes the plan, not a run: a
+value invokes only the witnesses on the union variants it holds, so one
+selecting a later variant can invoke that variant's witness before a
+witness listed earlier on another branch. Plans carry `transform` nodes
+with the witness, child node, step index and both function identities;
+structural nodes under a `with` scope have a scoped identity, so equal
+scopes share a plan. [`examples/codec-transforms.ef`](../examples/codec-transforms.ef)
+exercises pure, normalizing, refining and effectful witnesses, nested
+composition and a configuration caller on Go and JS.

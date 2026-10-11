@@ -207,6 +207,9 @@ type Function struct {
 	// codec is set on the direction functions a derive declaration
 	// synthesizes; their body is one compiler-owned codec operation.
 	codec *CodecDeclaration
+	// endpoint is set on the handler function an endpoint or route table
+	// derives; its body is one compiler-owned endpoint operation.
+	endpoint *EndpointDeclaration
 
 	// ReturnAnnotation, ErrorLabels and ServiceLabels are the declared
 	// result annotation and row label tokens.
@@ -289,6 +292,7 @@ type Program struct {
 	Functions               []*Function
 	Constants               []*Constant
 	Codecs                  []*CodecDeclaration
+	Endpoints               []*EndpointDeclaration
 	DerivedFunctions        []*Function
 	DerivedBindings         map[string]map[string]*Function
 	BundledDerivations      map[string]map[string]*codecDerivation
@@ -311,6 +315,7 @@ type SyntaxItem struct {
 	Function      *Function
 	Constant      *Constant
 	Codec         *CodecDeclaration
+	Endpoint      *EndpointDeclaration
 	Span          Span
 	Extent        Span `json:"-"`
 }
@@ -429,6 +434,9 @@ type Expr struct {
 	matchPlan *matchPlan
 	// codec is the derive declaration a synthesized codec operation runs.
 	codec *CodecDeclaration
+	// endpoint is the endpoint or route table a synthesized endpoint
+	// operation serves.
+	endpoint *EndpointDeclaration
 	// Evaluation is the work incurred while evaluating this expression now.
 	// Deferred effect rows remain on Type. Keeping the two facts beside the
 	// checked node lets callers reuse the result without walking the subtree.
@@ -878,9 +886,15 @@ func parseSyntax(source string) (program *Program, tokens []token, comments []Co
 			program.Items = append(program.Items, &SyntaxItem{Kind: "layer", Layer: layer, Span: start})
 		case "derive":
 			start := p.take().span
-			codec := p.codecDeclaration()
-			program.Codecs = append(program.Codecs, codec)
-			program.Items = append(program.Items, &SyntaxItem{Kind: "derive", Codec: codec, Span: start})
+			if p.isEndpointDeclaration() {
+				endpoint := p.endpointDeclaration()
+				program.Endpoints = append(program.Endpoints, endpoint)
+				program.Items = append(program.Items, &SyntaxItem{Kind: "derive", Endpoint: endpoint, Span: start})
+			} else {
+				codec := p.codecDeclaration()
+				program.Codecs = append(program.Codecs, codec)
+				program.Items = append(program.Items, &SyntaxItem{Kind: "derive", Codec: codec, Span: start})
+			}
 			p.accept(";")
 		default:
 			if head := p.peek(); head.kind == "name" {
