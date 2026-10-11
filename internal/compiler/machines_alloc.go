@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unsafe"
 )
 
 // machineTextUnit is the number of generated text bytes one budget unit buys.
@@ -30,6 +31,16 @@ import (
 const machineTextUnit = 64
 
 func machineTextUnits(bytes int) int { return (bytes + machineTextUnit - 1) / machineTextUnit }
+
+// machineDeclarationUnits is a declaration's fixed state, charged as bytes
+// before the plan is allocated: the plan, its copy into the result, the
+// declaration's machineCheck and the empty maps run allocates.
+const machineDeclarationUnits = (2*int(unsafe.Sizeof(MachinePlan{})) + int(unsafe.Sizeof(machineCheck{})) + machineDeclarationMapBytes + machineTextUnit - 1) / machineTextUnit
+
+// machineDeclarationMapBytes bounds the maps every declaration creates (its
+// report set, transition keys, indexes and narrowing memos) before they hold
+// an entry: a runtime map header and its first bucket each.
+const machineDeclarationMapBytes = 8 * 256
 
 // machineAnalysisProbe, when a test sets it, brackets one module's machine
 // analysis so the test can compare measured allocation with the units the

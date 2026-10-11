@@ -190,6 +190,8 @@ type machineCheck struct {
 	machine *Machine
 	ordinal int
 	plan    *MachinePlan
+	// initial is the initial binding's value, checked before analysis.
+	initial checkedExpression
 	state   TypeID
 	enum    *Enum
 	output  TypeID
@@ -234,16 +236,34 @@ func (c *checker) checkMachines() {
 		return
 	}
 	c.result.Machines = []MachinePlan{}
+	// An initial value is an ordinary expression: it is checked here, in the
+	// checking pass that checks function bodies, before machine analysis
+	// starts. Analysis reads the checked value and charges only its own work.
+	initials := make([]checkedExpression, len(c.program.Machines))
+	for ordinal, machine := range c.program.Machines {
+		if binding := machine.binding(machineInitial); binding != nil && binding.Value != nil {
+			previous := c.recordFacts
+			c.recordFacts = true
+			initials[ordinal] = c.expr(binding.Value, localEnv{}, false)
+			c.recordFacts = previous
+		}
+	}
 	shared := &machineBudget{}
 	if machineAnalysisProbe != nil {
 		machineAnalysisProbe(false, 0)
 		defer func() { machineAnalysisProbe(true, shared.work) }()
 	}
+	plans := make([]*MachinePlan, 0, len(c.program.Machines))
 	for ordinal, machine := range c.program.Machines {
-		check := &machineCheck{c: c, machine: machine, ordinal: ordinal, seen: map[machineReport]bool{}, shared: shared}
+		check := &machineCheck{c: c, machine: machine, ordinal: ordinal, initial: initials[ordinal], seen: map[machineReport]bool{}, shared: shared}
 		if plan := check.run(); plan != nil {
-			c.result.Machines = append(c.result.Machines, *plan)
+			plans = append(plans, plan)
 		}
+	}
+	// Every published plan paid for its slot (machineDeclarationUnits).
+	c.result.Machines = make([]MachinePlan, len(plans))
+	for i, plan := range plans {
+		c.result.Machines[i] = *plan
 	}
 	slices.SortFunc(c.result.Machines, func(a, b MachinePlan) int { return strings.Compare(a.ID, b.ID) })
 }
@@ -334,6 +354,10 @@ func (m *machineCheck) userEnum(id TypeID) *Enum {
 func (m *machineCheck) run() *MachinePlan {
 	if m.shared.exhausted {
 		// The module refusal is already reported; no further plan publishes.
+		return nil
+	}
+	// The declaration's fixed state is charged before the plan exists.
+	if !m.charge(machineDeclarationUnits) {
 		return nil
 	}
 	machine := m.machine
@@ -543,16 +567,13 @@ func (w *machinePayloadWalk) visit(id TypeID) (behavior bool, at TypeID, refused
 // plan identity records its tag; evaluating it constructs data only.
 func (m *machineCheck) checkInitial(binding *MachineBinding) {
 	value := binding.Value
-	// Checking the initial expression allocates in proportion to its source,
-	// and rebuilds the state type's interning key and declaration qualifier.
-	state, ok := m.typeText(m.state)
-	if !ok || !m.charge(1+machineTextUnits(value.Span.Length+state.bytes)) {
+	// The value was checked before analysis (checkMachines); comparing its
+	// type allocates nothing, and the diagnostic display and the literal walk
+	// below charge their own work.
+	if value == nil || !m.spend() {
 		return
 	}
-	previous := m.c.recordFacts
-	m.c.recordFacts = true
-	checked := m.c.expr(value, localEnv{}, false)
-	m.c.recordFacts = previous
+	checked := m.initial
 	if checked.isEffect() || checked.valueID() != m.state {
 		m.reportf(machineContractCode, value.Span, "machine initial state must be a %s value; found %s", m.enum.Name, m.displayChecked(checked))
 		return
