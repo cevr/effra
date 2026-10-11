@@ -226,5 +226,25 @@ require("node:module").syncBuiltinESMExports();
 		if code != 1 || !strings.Contains(out, "INJECTED_NATIVE_FAILURE") || !strings.Contains(out, "GO_PRODUCTION_RUN must succeed") || strings.Contains(out, "LATE_CHILD_FAILURE") || !strings.Contains(out, run.reported) {
 			t.Errorf("%s: exit %d, want the native failure's assertion and its output only:\n%s", run.name, code, out)
 		}
+		if run.reported == "" {
+			// A failing control keeps its workspace: the evidence names paths inside it.
+			var evidence struct {
+				Error string `json:"error"`
+				Work  string `json:"work"`
+			}
+			content, err := os.ReadFile(filepath.Join(leaf, ".generated", "counter-domain-evidence.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(content, &evidence); err != nil {
+				t.Fatal(err)
+			}
+			if evidence.Error == "" {
+				t.Errorf("%s: the evidence records no error", run.name)
+			}
+			if info, err := os.Stat(evidence.Work); err != nil || !info.IsDir() {
+				t.Errorf("%s: the failing control removed the workspace %q its evidence names", run.name, evidence.Work)
+			}
+		}
 	}
 }

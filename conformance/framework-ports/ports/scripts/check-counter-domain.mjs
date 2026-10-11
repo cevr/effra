@@ -371,6 +371,10 @@ try {
   assert.equal(fileHash(domainPath), hash(domain));
   assert.equal(fileHash(harnessPath), hash(harness));
   if (evidence.compilerInputs) for (const input of evidence.compilerInputs) assert.equal(fileHash(path.join(repository, input.path)), input.sha256, "compiler input PREPOST");
+  // The gate emits on every run, so a passing control removes its fresh workspace; a failing one keeps it for the
+  // paths its evidence names. Removal precedes the recorded and printed success, so a failed removal fails the run
+  // before either claims it.
+  rmSync(work, { recursive: true, force: true });
   if (mode === "emit") {
     evidence.result = "DOMAIN_HARNESS_AND_MUTANTS_CHECKED_AND_EMITTED";
     save();
@@ -380,9 +384,6 @@ try {
     save();
     console.log("COUNTER_DOMAIN_CONTROLS_EXIT=0 (Go/Bun/Node production trace+wrap; three causal authored-domain mutants RED; no mounted Effra ports)");
   }
-  // The gate emits on every run, so a passing control removes its fresh workspace; a failing one keeps it for the
-  // paths its evidence names.
-  rmSync(work, { recursive: true, force: true });
 } catch (error) {
   // The first failure decides the outcome. Every started child runs to its end before anything else can fail, so
   // none outlives the control; a failure to record the evidence is reported beside the original, never instead of it.
