@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"effra.local/prototype/internal/compiler/machineplan/shared"
 )
 
 // costTypes is a hand-built type table: Outer<R>, where
@@ -23,8 +25,8 @@ func costTypes() *Types {
 		2: {Kind: "record", Name: "R", Declaration: "R"},
 		3: {Kind: "parameter", Name: "T"},
 		4: {Kind: "application", Name: inner, Declaration: inner, Args: []TypeRef{3}},
-		5: {Kind: "recipe", Name: "Effect", Result: 3, Failures: []string{boom}, Services: []string{"Console"}},
-		6: {Kind: "recipe", Name: "Effect", Result: 7, Failures: []string{boom}},
+		5: {Kind: "recipe", Name: "Effect", Result: 3, Failures: shared.Of([]string{boom}), Services: shared.Of([]string{"Console"})},
+		6: {Kind: "recipe", Name: "Effect", Result: 7, Failures: shared.Of([]string{boom})},
 		7: {Kind: "recipe", Name: "Effect", Result: 2},
 		// Outer<Wide>: an argument of 65 nodes, so Inner<T>'s type walk covers
 		// a substituted argument wide enough to cross units.

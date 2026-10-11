@@ -92,8 +92,8 @@ func (c *costs) nodeText(t *Types, id TypeRef, spend func() bool) (typeText, boo
 		return text, true
 	}
 	text.bytes += 2*(len(n.Kind)+len(n.Name)+len(n.Declaration)+len(n.Mode)) + argTextBytes*len(n.Args)
-	for _, row := range [2][]string{n.Failures, n.Services} {
-		for _, label := range row {
+	for _, row := range [2]Row{n.Failures, n.Services} {
+		for label := range row.All() {
 			text.bytes = min(text.bytes+2*len(label)+labelTextBytes, textCap)
 		}
 	}
@@ -247,13 +247,13 @@ func (c *costs) nodeDisplay(t *Types, id TypeRef) display {
 		// joins it, and concatenates the growing text: twice without rows, up
 		// to four times with them.
 		length, labels, copies := len("Effect<>")+child.length, 0, 2
-		for _, row := range [2][]string{n.Failures, n.Services} {
-			if len(n.Failures) == 0 && len(n.Services) == 0 {
+		for _, row := range [2]Row{n.Failures, n.Services} {
+			if n.Failures.Len() == 0 && n.Services.Len() == 0 {
 				break
 			}
 			copies = 5
 			length += len(", {}")
-			for _, label := range row {
+			for label := range row.All() {
 				length = min(length+len(label)+2, textCap)
 				labels++
 			}

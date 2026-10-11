@@ -9,6 +9,12 @@ package machineplan
 // prepare (because preparing it would have exceeded what analysis could
 // afford) is refused with EF142 when analysis reaches it, never guessed.
 
+import "effra.local/prototype/internal/compiler/machineplan/shared"
+
+// Row is a failure or service row: the checker's interned labels, shared
+// read-only. Analysis can read and copy a row but cannot write it.
+type Row = shared.Row
+
 // TypeRef is the checker's canonical type ID. 0 is invalid. Analysis compares
 // refs and looks them up in Types; it never creates one.
 type TypeRef uint32
@@ -53,8 +59,8 @@ type InitialValue struct {
 	Effect   bool
 	Value    TypeRef
 	Result   TypeRef
-	Failures []string
-	Services []string
+	Failures Row
+	Services Row
 }
 
 // Function is a module function the walk can read: a bound function or a
@@ -71,8 +77,8 @@ type Function struct {
 	Body    *Block
 	// Failures and Services are the function's failure and service rows,
 	// normalized, for an effect function.
-	Failures []string
-	Services []string
+	Failures Row
+	Services Row
 }
 
 type Param struct {
@@ -189,8 +195,8 @@ type TypeNode struct {
 	Mode        string
 	Args        []TypeRef
 	Result      TypeRef
-	Failures    []string
-	Services    []string
+	Failures    Row
+	Services    Row
 }
 
 // Template is a generic data declaration: its parameters and declared field

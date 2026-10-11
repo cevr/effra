@@ -17,7 +17,7 @@ package compiler
 // key once per instantiation, is refused by its cost before the checker
 // builds it (machines_prepare_test.go measures this). The input copies the
 // slices it would otherwise share with the checker (a call's label binding),
-// except row labels: those it shares, read-only (see row).
+// except row labels: those it shares as read-only shared.Row views (see row).
 //
 // Work over data the module shares is done once per module, not once per
 // declaration that reads it: each type whose reachable payload has been
@@ -29,6 +29,7 @@ import (
 	"slices"
 
 	"effra.local/prototype/internal/compiler/machineplan"
+	"effra.local/prototype/internal/compiler/machineplan/shared"
 )
 
 type machineInput = machineplan.Input[ValueType]
@@ -443,12 +444,17 @@ func (p *machinePrep) enum(enum *Enum) *machineplan.Enum {
 // distinct, and never written after internRow made them. The input shares
 // them rather than copying, as the checker's own projections do, because a
 // copy per distinct row is not bounded by the source: a chain of n `.catch`
-// calls interns n rows of up to n labels each from O(n) bytes. The slice's
-// capacity is clipped, so an append in analysis copies instead of writing
-// past it, and analysis writes no row element (boundary_test.go).
-func (p *machinePrep) row(id RowID) []string {
-	labels := p.c.retainedRowLabels(id)
-	return labels[:len(labels):len(labels)]
+// calls interns n rows of up to n labels each from O(n) bytes.
+//
+// What holds: machineplan sees the labels only as a shared.Row, whose slice
+// is unexported in package shared and which exposes reads and copies only, so
+// no code in machineplan can write a label or append into the backing array;
+// the Go compiler refuses it (boundary_test.go builds probes that try). The
+// checker side is held by convention: this file and the checker do not write
+// interned labels after internRow, and clipCheckerState's row digest checks
+// that the window leaves every interned label as it found it.
+func (p *machinePrep) row(id RowID) machineplan.Row {
+	return shared.Of(p.c.retainedRowLabels(id))
 }
 
 // displayRows mirrors what analysis charges to show an effectful initial's
@@ -462,11 +468,7 @@ func (p *machinePrep) displayRows(rows ...RowID) {
 		if p.displayedRows[id] {
 			continue
 		}
-		bytes := 0
-		for _, label := range p.row(id) {
-			bytes += len(label)
-		}
-		units += machineplan.TextUnits(bytes)
+		units += machineplan.TextUnits(p.row(id).Bytes())
 	}
 	if !p.charge(max(units, 1)) {
 		return

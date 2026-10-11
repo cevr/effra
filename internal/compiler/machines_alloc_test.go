@@ -609,7 +609,10 @@ func clipCheckerState(c *checker) func(*checker) string {
 }
 
 // rowLabelsDigest hashes every interned row's labels. The analysis input
-// shares them read-only, so the window must leave them as they were.
+// shares them as shared.Row views, which machineplan cannot write (the
+// compiler refuses it; machineplan/boundary_test.go builds probes that try).
+// The digest is the backstop: it checks, for the windows a test runs, that
+// nothing the window reaches, the view's own methods included, changed one.
 func rowLabelsDigest(c *checker) uint64 {
 	h := fnv.New64a()
 	for _, row := range c.rows {

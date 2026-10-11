@@ -464,8 +464,8 @@ func (m *check[V]) displayInitial(checked InitialValue) string {
 	if !checked.Effect {
 		return m.display(checked.Result)
 	}
-	failures, _ := m.join(", ", checked.Failures)
-	services, _ := m.join(", ", checked.Services)
+	failures, _ := m.joinRow(", ", checked.Failures)
+	services, _ := m.joinRow(", ", checked.Services)
 	text, _ := m.text("Effect<", m.display(checked.Result), ", {", failures, "}, {", services, "}>")
 	return text
 }

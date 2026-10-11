@@ -185,6 +185,18 @@ func (m *check[V]) join(separator string, parts []string) (string, bool) {
 	return strings.Join(parts, separator), true
 }
 
+// joinRow is join over a shared row: the same charge, then a new string.
+func (m *check[V]) joinRow(separator string, row Row) (string, bool) {
+	n := row.Bytes()
+	if row.Len() > 1 {
+		n += (row.Len() - 1) * len(separator)
+	}
+	if !m.charge(TextUnits(n)) {
+		return "", false
+	}
+	return row.Join(separator), true
+}
+
 // textf is fmt.Sprintf after charging an upper bound of its output. Arguments
 // are strings and integers only; anything else is a programming error.
 func (m *check[V]) textf(format string, args ...any) (string, bool) {
@@ -528,11 +540,11 @@ func (m *check[V]) function(role string, f *Function) (BoundFunction[V], bool) {
 	failures, services := []string{}, []string{}
 	if f.Effect {
 		kind = "effect"
-		if !m.charge(2 + 2*(len(f.Failures)+len(f.Services))) {
+		if !m.charge(2 + 2*(f.Failures.Len()+f.Services.Len())) {
 			return BoundFunction[V]{}, false
 		}
-		// Copies: the input's rows are the checker's, shared read-only.
-		failures, services = append(failures, f.Failures...), append(services, f.Services...)
+		// The plan owns copies; the input's rows are the checker's.
+		failures, services = f.Failures.AppendTo(failures), f.Services.AppendTo(services)
 	}
 	if !m.charge(1 + len(f.Params) + TextUnits(nodeTextBytes+argTextBytes*len(f.Params))) {
 		return BoundFunction[V]{}, false
