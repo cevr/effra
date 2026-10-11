@@ -91,8 +91,8 @@ func machineGraphPlan(facts *graphFacts, plan *MachinePlan) bool {
 	// The node's fixed copies (its facts, three values and each bound
 	// function's record and contract) are sized once. They are a constant per
 	// plan and per function, within what the plan's analysis charged for its
-	// declaration (machineDeclarationUnits) and its functions.
-	span := plan.Span
+	// declaration (machineplan declarationUnits) and its functions.
+	span := Span(plan.Span)
 	functions := make([]GraphMachineFunction, 0, len(plan.Functions))
 	values := make([]ValueType, 0, 3+len(plan.Functions))
 	values = append(values, plan.State.Type, plan.Event.Type, plan.Output)
@@ -119,7 +119,7 @@ func machineGraphPlan(facts *graphFacts, plan *MachinePlan) bool {
 			return false
 		}
 	}
-	initialSpan := plan.Initial.Span
+	initialSpan := Span(plan.Initial.Span)
 	initial, ok := machineGraphID(facts, "machine-state", plan.ID, plan.Initial.Variant)
 	if !ok {
 		return false
@@ -136,7 +136,7 @@ func machineGraphPlan(facts *graphFacts, plan *MachinePlan) bool {
 		return false
 	}
 	for _, t := range plan.Transitions {
-		at := t.Span
+		at := Span(t.Span)
 		transition := &GraphMachineTransitionFacts{Transition: t.ID, Role: t.Role, On: t.On, Precision: t.Precision, Guarded: t.Guarded, Via: t.Via}
 		labelBytes := len(t.Decision) + 2
 		for _, on := range t.On {

@@ -408,17 +408,11 @@ func TestMachineTriggerListsAreCharged(t *testing.T) {
 }
 
 // Transition keys are narrowing and helper ordinals: their size never
-// follows the length of an identifier or the width of a narrowing.
+// follows the length of an identifier or the width of a narrowing (the key
+// itself is tested in package machineplan). End to end: a 64 KiB state
+// variant and helper name over many tails still plans, and the published
+// names are the source names.
 func TestMachineTransitionKeysIgnoreIdentifierLength(t *testing.T) {
-	m := &machineCheck{role: machineStep}
-	long := strings.Repeat("h", 1<<20)
-	wide := &machineSet{id: 7, positions: make([]int32, 1<<16)}
-	key := m.transitionKey(Span{Offset: 1 << 20, Length: 9}, machineDecisionGo, machineTargetLiteral, true, wide, &machineSet{id: 2}, nil, []string{long, long + "x", long})
-	if len(key) > 64 {
-		t.Fatalf("key for three 1 MiB helper names is %d bytes", len(key))
-	}
-	// End to end: a 64 KiB state variant and helper name over many tails
-	// still plans, and the published names are the source names.
 	name := "V" + strings.Repeat("x", 1<<16)
 	helper := "h" + strings.Repeat("y", 1<<16)
 	var b strings.Builder
