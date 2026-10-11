@@ -100,12 +100,11 @@ func (s machineShape) String() string {
 		s.states, s.events, s.name, s.machineName, s.variantName, s.helpers, s.tails, s.distinct, s.wideArm, s.keepPaths, s.keeps, s.literalStay, s.failures, s.declarations, s.payload, s.failureName, s.failBody, s.lets, s.generic, s.genericName, s.genericFields, s.genericArg, s.recipe, s.recipeName)
 }
 
-// genericArgument returns a 7-ary tree of distinct applications P<…> with
-// depth levels, (7^depth-1)/6 nodes in all: each bottom application takes a
-// distinct combination of four records, so every node of the tree is a
-// distinct type and the module declares only five records.
+// genericArgument declares the records of a 7-ary tree of the given depth
+// over distinct leaf records, and returns the tree as a type: P<P<R0, …>, …>.
+// Every node is distinct: depth 3 has 57 applications and 343 records.
 func genericArgument(b *strings.Builder, depth int) string {
-	const branch, leaves = 7, 4
+	const branch = 7
 	if depth == 0 {
 		return "i64"
 	}
@@ -114,26 +113,17 @@ func genericArgument(b *strings.Builder, depth int) string {
 		params[i] = fmt.Sprintf("T%d: type", i)
 	}
 	fmt.Fprintf(b, "record P<%s> { x: T0 }\n", strings.Join(params, ", "))
-	for i := 0; i < leaves; i++ {
-		fmt.Fprintf(b, "record R%d { x: i64 }\n", i)
-	}
-	bottom := 0
+	leaves := 0
 	var tree func(int) string
 	tree = func(level int) string {
+		if level == depth {
+			fmt.Fprintf(b, "record R%d { x: i64 }\n", leaves)
+			leaves++
+			return fmt.Sprintf("R%d", leaves-1)
+		}
 		children := make([]string, branch)
 		for i := range children {
-			if level == depth-1 {
-				digit := bottom
-				for range i {
-					digit /= leaves
-				}
-				children[i] = fmt.Sprintf("R%d", digit%leaves)
-			} else {
-				children[i] = tree(level + 1)
-			}
-		}
-		if level == depth-1 {
-			bottom++
+			children[i] = tree(level + 1)
 		}
 		return "P<" + strings.Join(children, ", ") + ">"
 	}
@@ -666,7 +656,7 @@ var (
 	machineGenericPayloadLayouts = machineShape{states: 1, events: 1, generic: true, genericName: 1 << 17, declarations: 256}
 	// Outer<P<…>> over a 400-node argument tree, with 3,000 fields of type
 	// L<T>: substitution validates the argument once per field.
-	machineTemplateArgumentWalks = machineShape{states: 1, events: 1, generic: true, genericFields: 3000, genericArg: 4}
+	machineTemplateArgumentWalks = machineShape{states: 1, events: 1, generic: true, genericFields: 3000, genericArg: 3}
 	// Effect<…> nested 60 deep around a 32,768-byte record name: every layer
 	// of the display copies the text below it.
 	machineNestedRecipeDisplay = machineShape{states: 1, events: 1, recipe: 60, recipeName: 32767}
@@ -725,7 +715,7 @@ func TestMachineTemplateArgumentWalksAreCharged(t *testing.T) {
 	if !slices.Equal(machineCodes(r), []string{machineBudgetCode}) {
 		t.Fatalf("codes = %v", machineCodes(r))
 	}
-	modest := machineShape{states: 1, events: 1, generic: true, genericFields: 64, genericArg: 3}
+	modest := machineShape{states: 1, events: 1, generic: true, genericFields: 64, genericArg: 2}
 	r, measures = measureMachineAnalysis(t, modest.source())
 	assertMachineAllocationCharged(t, "modest template argument walks", measures)
 	if len(r.Machines) != 1 {
