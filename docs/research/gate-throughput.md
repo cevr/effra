@@ -122,6 +122,8 @@ A key that replays a pass must name every input that can change the outcome. The
 | `6094a94a`, no-op after a root entry was created and removed | 38.9 s | load 13.1→31.0; the root-time control above. The next two no-ops: 6.2 s (load 30.8, unsharded packages reran) and 9.9 s (load 28.9→52.2, every step cached) |
 | `0e51469b` (passing counter control removes its workspace), first run | 12.5 s | load 7.1→11.5; the leaf runner changed, so framework-port references re-executed (8.1 s) |
 | `0e51469b`, no-ops | 2.6 s, 3.5 s, 2.8 s | load 11.9–16.4; every step cached |
+| `1724ca6f` (leaf keyed as a tree, exact permissions), first run | 19.1 s | load 9.2→11.8; the new key re-executed framework-port references (11.6 s); two compiler shards reran (Go's cache) |
+| `1724ca6f`, no-ops | 31.2 s, 2.0 s | load 9.6→25.7; the first reran the Go packages that recorded the root before the cleanup-provenance control moved its time (above); framework-port references replayed in both |
 
 ## Turborepo, rejected
 
