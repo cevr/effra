@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"effra.local/prototype/internal/testinputs"
 )
 
 // TestMain puts small stand-ins for go, git and tsc first on PATH. Go's test
@@ -25,9 +27,10 @@ import (
 // in an npm package that runs the real tool, so tests see the same behaviour;
 // the go stand-in answers go env, which only fingerprinting asks, with a
 // one-file GOROOT. node and bun stay real: each is one file. Tests of the
-// fingerprint rules install their own tools.
+// fingerprint rules install their own tools. The stand-ins exist only in the
+// process that runs the tests, under observation (testinputs.MainFunc).
 func TestMain(m *testing.M) {
-	os.Exit(func() int {
+	os.Exit(testinputs.MainFunc(m, func() int {
 		stub, err := os.MkdirTemp("", "gate-tools-")
 		if err != nil {
 			panic(err)
@@ -62,7 +65,7 @@ func TestMain(m *testing.M) {
 		}
 		os.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 		return m.Run()
-	}())
+	}))
 }
 
 // realTools are the tools PATH named before TestMain put its stand-ins first.

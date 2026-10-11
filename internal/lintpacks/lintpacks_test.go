@@ -25,6 +25,7 @@ import (
 	"effra.local/prototype/internal/lsp"
 	"effra.local/prototype/internal/mcp"
 	"effra.local/prototype/internal/producer"
+	"effra.local/prototype/internal/testinputs"
 	"effra.local/prototype/lint"
 )
 
@@ -35,7 +36,7 @@ var built struct {
 }
 
 func TestMain(m *testing.M) {
-	code := m.Run()
+	code := testinputs.Main(m)
 	if built.dir != "" {
 		os.RemoveAll(built.dir)
 	}

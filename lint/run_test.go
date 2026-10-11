@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"effra.local/prototype/internal/testinputs"
 )
 
 var fixture struct {
@@ -24,7 +26,7 @@ var fixture struct {
 }
 
 func TestMain(m *testing.M) {
-	code := m.Run()
+	code := testinputs.Main(m)
 	if fixture.dir != "" {
 		os.RemoveAll(fixture.dir)
 	}
