@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"maps"
 	"math/rand"
 	"runtime"
@@ -205,7 +206,7 @@ func (s machineShape) String() string {
 // genericArgument declares the records of a 7-ary tree of the given depth
 // over distinct leaf records, and returns the tree as a type: P<P<R0, …>, …>.
 // Every node is distinct: depth 3 has 57 applications and 343 records.
-func genericArgument(b *strings.Builder, prefix string, depth int) string {
+func genericArgument(b sourceWriter, prefix string, depth int) string {
 	const branch = 7
 	if depth == 0 {
 		return "i64"
@@ -242,22 +243,52 @@ func nestedTails(count int, tail func(int) string) string {
 	return b.String()
 }
 
+// sourceWriter is what the generator writes a source into: a builder, or a
+// byteCounter that measures it without holding it.
+type sourceWriter interface {
+	io.Writer
+	io.StringWriter
+}
+
+// byteCounter counts the bytes written to it.
+type byteCounter int
+
+func (c *byteCounter) Write(p []byte) (int, error) { *c += byteCounter(len(p)); return len(p), nil }
+
+func (c *byteCounter) WriteString(s string) (int, error) {
+	*c += byteCounter(len(s))
+	return len(s), nil
+}
+
+// source is the shape's program.
 func (s machineShape) source() string {
+	var b strings.Builder
+	s.write(&b)
+	return b.String()
+}
+
+// sourceLen is len(s.source()), counted without building the source.
+func (s machineShape) sourceLen() int {
+	var c byteCounter
+	s.write(&c)
+	return int(c)
+}
+
+func (s machineShape) write(b sourceWriter) {
 	long := func(base string, extra int) string { return base + strings.Repeat("x", extra) }
 	enum, event := long("S", s.name), long("E", s.name)
 	variant := func(i int) string { return fmt.Sprintf("V%d%s", i, strings.Repeat("v", s.variantName)) }
 	output := "void"
-	var b strings.Builder
 	b.WriteString("import Machines \"effra/machines\"\n")
 	failure := func(i int) string { return fmt.Sprintf("F%d%s", i, strings.Repeat("f", s.failureName)) }
 	for i := 0; i < s.failures; i++ {
-		fmt.Fprintf(&b, "error %s\n", failure(i))
+		fmt.Fprintf(b, "error %s\n", failure(i))
 	}
 	for i := 0; i < s.records; i++ {
-		fmt.Fprintf(&b, "record Rec%d { x: i64 }\n", i)
+		fmt.Fprintf(b, "record Rec%d { x: i64 }\n", i)
 	}
 	for i := 0; i < s.errors; i++ {
-		fmt.Fprintf(&b, "fn ordinaryError%d() -> i64 { true }\n", i)
+		fmt.Fprintf(b, "fn ordinaryError%d() -> i64 { true }\n", i)
 	}
 	// An explicit generic initial: S.Vi { x: Presence<tree>.None {} }, with Vi
 	// matched wherever the step matches every variant.
@@ -265,7 +296,7 @@ func (s machineShape) source() string {
 	initial, extra, eventExtra := fmt.Sprintf("%s.%s {}", enum, variant(0)), "", ""
 	var added []string
 	if s.initialArg > 0 {
-		tree := genericArgument(&b, "I", s.initialArg)
+		tree := genericArgument(b, "I", s.initialArg)
 		b.WriteString("enum Presence<T: type> { None; Some { value: T } }\n")
 		initial = fmt.Sprintf("%s.Vi { x: Presence<%s>.None {} }", enum, tree)
 		extra = fmt.Sprintf(" Vi { x: Presence<%s> }", tree)
@@ -275,14 +306,14 @@ func (s machineShape) source() string {
 	// effectful initial with a wide row every declaration displays.
 	if s.shared > 0 {
 		for i := 0; i < s.shared; i++ {
-			fmt.Fprintf(&b, "record Wr%d { x: i64 }\n", i)
+			fmt.Fprintf(b, "record Wr%d { x: i64 }\n", i)
 		}
 		b.WriteString("record W {")
 		for i := 0; i < s.shared; i++ {
 			if i > 0 {
 				b.WriteString(",")
 			}
-			fmt.Fprintf(&b, " f%d: Wr%d", i, i)
+			fmt.Fprintf(b, " f%d: Wr%d", i, i)
 		}
 		b.WriteString(" }\n")
 		extra += " Vw { w: W }"
@@ -293,40 +324,40 @@ func (s machineShape) source() string {
 		labels := make([]string, s.initialLabels)
 		for i := range labels {
 			labels[i] = fmt.Sprintf("G%d", i)
-			fmt.Fprintf(&b, "error %s\n", labels[i])
+			fmt.Fprintf(b, "error %s\n", labels[i])
 		}
-		fmt.Fprintf(&b, "effect fn start() -> %s raises { %s } { %s.%s {} }\n", enum, strings.Join(labels, ", "), enum, variant(0))
+		fmt.Fprintf(b, "effect fn start() -> %s raises { %s } { %s.%s {} }\n", enum, strings.Join(labels, ", "), enum, variant(0))
 		initial = "start()"
 	}
 	if s.recipe > 0 {
 		leaf := long("R", s.recipeName)
-		fmt.Fprintf(&b, "record %s { x: i64 }\n", leaf)
+		fmt.Fprintf(b, "record %s { x: i64 }\n", leaf)
 		output = strings.Repeat("Effect<", s.recipe) + leaf + strings.Repeat(">", s.recipe)
 	} else if s.generic {
 		inner := long("L", s.genericName)
-		fmt.Fprintf(&b, "record %s<T: type> { value: T }\nrecord Outer<T: type> { inner: %s<T>", inner, inner)
+		fmt.Fprintf(b, "record %s<T: type> { value: T }\nrecord Outer<T: type> { inner: %s<T>", inner, inner)
 		for i := 1; i < s.genericFields; i++ {
-			fmt.Fprintf(&b, ", a%d: %s<T>", i, inner)
+			fmt.Fprintf(b, ", a%d: %s<T>", i, inner)
 		}
 		b.WriteString(" }\n")
-		output = "Outer<" + genericArgument(&b, "", s.genericArg) + ">"
+		output = "Outer<" + genericArgument(b, "", s.genericArg) + ">"
 	} else if s.payload > 0 {
 		field := long("f", s.name)
-		fmt.Fprintf(&b, "record P%d { leaf: i64 }\n", s.payload)
+		fmt.Fprintf(b, "record P%d { leaf: i64 }\n", s.payload)
 		for i := s.payload - 1; i >= 0; i-- {
-			fmt.Fprintf(&b, "record P%d { %s: P%d  other%s: P%d }\n", i, field, i+1, field, i+1)
+			fmt.Fprintf(b, "record P%d { %s: P%d  other%s: P%d }\n", i, field, i+1, field, i+1)
 		}
 		output = "P0"
 	}
 	step := fmt.Sprintf("Machines.Step<%s, %s>", enum, output)
-	fmt.Fprintf(&b, "enum %s {", enum)
+	fmt.Fprintf(b, "enum %s {", enum)
 	for i := 0; i < s.states; i++ {
 		b.WriteString(" " + variant(i))
 	}
 	b.WriteString(extra)
-	fmt.Fprintf(&b, " }\nenum %s {", event)
+	fmt.Fprintf(b, " }\nenum %s {", event)
 	for i := 0; i < s.events; i++ {
-		fmt.Fprintf(&b, " P%d", i)
+		fmt.Fprintf(b, " P%d", i)
 	}
 	b.WriteString(eventExtra + " }\n")
 	helper := func(i int) string { return fmt.Sprintf("%s%d", long("h", s.name), i) }
@@ -385,7 +416,7 @@ func (s machineShape) source() string {
 		}
 		body += lets.String() + "    " + step + ".Ignore {}\n"
 	}
-	fmt.Fprintf(&b, "%s {\n%s%s}\n", signature, n, body)
+	fmt.Fprintf(b, "%s {\n%s%s}\n", signature, n, body)
 	// The last level has distinct copies, so tails reaching different copies
 	// are distinct transitions rather than one deduplicated span.
 	copies := max(1, s.distinct)
@@ -399,7 +430,7 @@ func (s machineShape) source() string {
 			if h == s.helpers-1 && c > 0 {
 				name = fmt.Sprintf("%s_%d", helper(h), c)
 			}
-			fmt.Fprintf(&b, "fn %s(state: %s, event: %s, n: i64) -> %s {\n", name, enum, event, step)
+			fmt.Fprintf(b, "fn %s(state: %s, event: %s, n: i64) -> %s {\n", name, enum, event, step)
 			b.WriteString(nestedTails(s.tails, func(i int) string {
 				if h < s.helpers-1 {
 					next := helper(h + 1)
@@ -419,7 +450,7 @@ func (s machineShape) source() string {
 			depth = s.keeps
 		}
 		for k := 0; k < depth; k++ {
-			fmt.Fprintf(&b, "fn %s(state: %s, n: i64) -> %s {\n", keep(k), enum, enum)
+			fmt.Fprintf(b, "fn %s(state: %s, n: i64) -> %s {\n", keep(k), enum, enum)
 			b.WriteString(nestedTails(s.tails, func(int) string {
 				if k < depth-1 {
 					return keep(k+1) + "(state, n)"
@@ -437,12 +468,11 @@ func (s machineShape) source() string {
 		if s.states > 1 {
 			last = fmt.Sprintf("        %s.%s => state\n", enum, variant(s.states-1))
 		}
-		fmt.Fprintf(&b, "fn %s(state: %s) -> %s {\n    match state {\n        %s => state\n%s    }\n}\n", long("wide", s.name), enum, enum, strings.Join(alternatives, " | "), last)
+		fmt.Fprintf(b, "fn %s(state: %s) -> %s {\n    match state {\n        %s => state\n%s    }\n}\n", long("wide", s.name), enum, enum, strings.Join(alternatives, " | "), last)
 	}
 	for d := 0; d < max(1, s.declarations); d++ {
-		fmt.Fprintf(&b, "machine %s%d { initial %s; step step }\n", long("M", s.name+s.machineName), d, initial)
+		fmt.Fprintf(b, "machine %s%d { initial %s; step step }\n", long("M", s.name+s.machineName), d, initial)
 	}
-	return b.String()
 }
 
 // randomMachineShape draws one shape. Sizes stay small enough to compile
@@ -525,7 +555,9 @@ func randomMachineShape(rng *rand.Rand) machineShape {
 // machineSourceCap bounds a generated source, and with it a seed's memory. Of
 // seeds 1-1000, 18 drew more than 128 MiB (none of 1-64, the gate's), up to
 // seed 486's 455 MB. A shape over the cap has its long names cut to a
-// quarter, then its declarations, until it fits. The cap does not bound the
+// quarter, then its declarations, until it fits. The cap is checked on the
+// counted length (sourceLen), so an oversized source is never built. It does
+// not bound the
 // checker's time: seed 486, cut to 114 MB, still spends minutes in ordinary
 // checking before analysis starts, most of it in templateByName, which scans
 // every data declaration for each template lookup.
@@ -533,7 +565,7 @@ const machineSourceCap = 128 << 20
 
 func capMachineSource(s machineShape) machineShape {
 	for range 16 {
-		if len(s.source()) <= machineSourceCap {
+		if s.sourceLen() <= machineSourceCap {
 			break
 		}
 		names := []*int{&s.name, &s.machineName, &s.variantName, &s.failureName, &s.genericName, &s.recipeName}
@@ -548,6 +580,19 @@ func capMachineSource(s machineShape) machineShape {
 		}
 	}
 	return s
+}
+
+// The cap reads the counted length, so the count must be the source's length.
+func TestMachineSourceLenCountsTheSource(t *testing.T) {
+	shapes := []machineShape{{states: 2, events: 1}, {states: 3, events: 2, helpers: 2, tails: 7, failures: 3, generic: true, genericFields: 4, genericArg: 2, initialArg: 2, shared: 4, initialLabels: 3, declarations: 4}}
+	for seed := int64(1); seed <= 8; seed++ {
+		shapes = append(shapes, machineSeedShape(seed))
+	}
+	for _, s := range shapes {
+		if counted, built := s.sourceLen(), len(s.source()); counted != built {
+			t.Errorf("%s: counted %d bytes, the source has %d", s, counted, built)
+		}
+	}
 }
 
 // measure compiles the shape and measures its analysis windows, with checker
@@ -590,12 +635,13 @@ func assertSharedAxesCharged(t *testing.T, label string, s machineShape, with []
 	}
 	a, b := with[len(with)-1], without[len(without)-1]
 	added := preparationMeasure{units: max(0, a.units-b.units)}
-	bound := added.bound(len(s.source()) - len(base.source()))
+	source := s.sourceLen() - base.sourceLen()
+	bound := added.bound(source)
 	if a.bytes <= b.bytes {
 		return 0
 	}
 	if bytes := a.bytes - b.bytes; bytes > bound {
-		t.Errorf("%s: the shared axes add %d preparation bytes for %d accepted units and %d source bytes (bound %d)", label, bytes, added.units, len(s.source())-len(base.source()), bound)
+		t.Errorf("%s: the shared axes add %d preparation bytes for %d accepted units and %d source bytes (bound %d)", label, bytes, added.units, source, bound)
 	}
 	return float64(a.bytes-b.bytes) / float64(bound)
 }
@@ -637,8 +683,9 @@ func clipCheckerState(c *checker) func(*checker) string {
 }
 
 // rowLabelsDigest hashes every interned row's labels. The analysis input
-// shares them as shared.Row views, which machineplan cannot write (the
-// compiler refuses it; machineplan/boundary_test.go builds probes that try).
+// shares them as shared.Row views, which machineplan cannot write: a direct
+// write does not compile, and reflect and unsafe fail its boundary test
+// (machineplan/boundary_test.go holds probes of both).
 // The digest is the backstop: it checks, for the windows a test runs, that
 // nothing the window reaches, the view's own methods included, changed one.
 func rowLabelsDigest(c *checker) uint64 {
