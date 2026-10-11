@@ -392,10 +392,6 @@ func runProcess(ctx context.Context, path string, args, env []string, dir string
 		return processAnswer{}, &ExecutionFailure{Code: FailureSpawn, Message: err.Error()}
 	}
 	trace.Started = true
-	pid := cmd.Process.Pid
-	waited := make(chan error, 1)
-	go func() { waited <- cmd.Wait() }()
-
 	stderr := &headBuffer{limit: limits.MaxStderrBytes}
 	stderrDone := make(chan struct{})
 	go func() {
@@ -403,11 +399,17 @@ func runProcess(ctx context.Context, path string, args, env []string, dir string
 		close(stderrDone)
 	}()
 
+	// The limit applies before anything waits on the pack. Until it is
+	// reaped, a pack that already exited is a zombie that keeps its pid, so
+	// the limit lands on the pack and never on a process that reused the pid.
 	var stopped *ExecutionFailure
-	if err := limitMemory(pid, limits.MaxMemoryBytes); err != nil {
+	packStarted(cmd.Process.Pid)
+	if err := limitMemory(cmd.Process.Pid, limits.MaxMemoryBytes); err != nil {
 		stopped = &ExecutionFailure{Code: FailureSpawn, Message: "cannot limit pack memory: " + err.Error()}
 		killProcessGroup(cmd.Process)
 	}
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
 
 	// The request is written only after limits apply, so a pack that
 	// follows the protocol does no work outside them.
@@ -502,6 +504,11 @@ func runProcess(ctx context.Context, path string, args, env []string, dir string
 	}
 	return processAnswer{response: response, size: len(output.payload), exit: cmd.ProcessState.String(), stderr: retained}, nil
 }
+
+// packStarted runs between the pack's spawn and its memory limit. It is a
+// test seam: a test lets the pack exit there, to prove that an exited pack
+// is still unreaped, and so still the same process, when the limit applies.
+var packStarted = func(pid int) {}
 
 // firstByteReader records when the first byte arrived.
 type firstByteReader struct {
