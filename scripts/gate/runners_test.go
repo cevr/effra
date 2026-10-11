@@ -107,6 +107,52 @@ func TestReferencesRunnerJoinsTheCounterControlAfterAVendorFailure(t *testing.T)
 	}
 }
 
+// The gate runs counter emission on every run, no-ops included, so a passing
+// emission must not leave its scratch workspace behind.
+func TestCounterEmissionRemovesItsWorkspaceOnSuccess(t *testing.T) {
+	leaf, bin := runnerLeaf(t, "check-counter-domain.mjs", map[string]string{
+		"fixtures/counter.ef":             "module counter\nCounterEvent.ClickedIncrement => CounterState {\n            count: state.count + 1\n        }\n",
+		"fixtures/counter-native.ef":      "harness\n",
+		"tests/types/counter-positive.ts": "export {};\n",
+	})
+	gitFixture(t, filepath.Join(leaf, "../../.."))
+	// The stub compiler checks everything and writes each requested output;
+	// a native build publishes its snapshots under the build directory.
+	write(t, bin, "ef", `#!/bin/sh
+[ "$1" = check ] && exit 0
+while [ $# -gt 0 ]; do [ "$1" = -o ] && out="$2"; shift; done
+: > "$out"
+case "$out" in *.mjs) : > "${out%.mjs}.d.mts" ;; *) mkdir -p dist/go/apps ;; esac
+`)
+	if err := os.Chmod(filepath.Join(bin, "ef"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	code, out, survivors := runRunner(t, leaf, bin, "scripts/check-counter-domain.mjs", "--compiler", filepath.Join(bin, "ef"), "--emit", filepath.Join(t.TempDir(), "artifacts"))
+	if code != 0 || len(survivors) > 0 || !strings.Contains(out, "COUNTER_DOMAIN_EMIT_EXIT=0") {
+		t.Fatalf("exit %d, survivors %q; want a passing emission:\n%s", code, survivors, out)
+	}
+	left, err := filepath.Glob(filepath.Join(leaf, ".generated", "counter-domain-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range left {
+		if info, err := os.Stat(name); err == nil && info.IsDir() {
+			t.Errorf("a passing emission left its workspace %s", name)
+		}
+	}
+}
+
+func gitFixture(t *testing.T, repository string) {
+	t.Helper()
+	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=gate", "-c", "user.email=gate@invalid", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "fixture"}} {
+		command := exec.Command("git", args...)
+		command.Dir = repository
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+}
+
 func TestCounterControlJoinsTheTypeCheckAfterANativeFailure(t *testing.T) {
 	const mutation = "CounterEvent.ClickedIncrement => CounterState {\n            count: state.count + 1\n        }"
 	domain := "module counter\n" + mutation + "\n"
@@ -125,14 +171,7 @@ func TestCounterControlJoinsTheTypeCheckAfterANativeFailure(t *testing.T) {
 		"tests/types/counter-state-negative.ts":  consumer,
 		"tests/types/counter-event-negative.ts":  consumer,
 	})
-	repository := filepath.Join(leaf, "../../..")
-	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=gate", "-c", "user.email=gate@invalid", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "fixture"}} {
-		command := exec.Command("git", args...)
-		command.Dir = repository
-		if output, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, output)
-		}
-	}
+	gitFixture(t, filepath.Join(leaf, "../../.."))
 	sum := func(text string) string {
 		digest := sha256.Sum256([]byte(text))
 		return hex.EncodeToString(digest[:])
