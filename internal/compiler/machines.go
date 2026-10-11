@@ -89,6 +89,11 @@ type (
 // what preparation built. It is nil in production.
 var machineAnalysisProbe func(c *checker, in *machineInput, done bool, units int)
 
+// machinePreparationProbe, when a test sets it, brackets one module's
+// preparation, so the test can hold what preparing allocates to the source it
+// prepares. It is nil in production.
+var machinePreparationProbe func(done bool, units int)
+
 func machineID(name string) string { return "machine:" + currentModuleIdentity + ":" + name }
 
 // machineNamed finds a declaration by name; the profile bounds the count.
@@ -131,7 +136,13 @@ func (c *checker) checkMachines() {
 		}
 	}
 	// Prepare: checker work, outside the analysis window.
-	in := c.prepareMachines(initials)
+	if machinePreparationProbe != nil {
+		machinePreparationProbe(false, 0)
+	}
+	in, prepared := c.prepareMachines(initials)
+	if machinePreparationProbe != nil {
+		machinePreparationProbe(true, prepared)
+	}
 	// Analyse: the measured window reads only in.
 	if machineAnalysisProbe != nil {
 		machineAnalysisProbe(c, in, false, 0)

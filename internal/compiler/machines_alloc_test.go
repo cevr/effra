@@ -23,7 +23,8 @@ import (
 // brackets: heap bytes (runtime.MemStats.TotalAlloc) and allocation count
 // (Mallocs) against the credited units (accepted charges, refused charges up
 // to their room plus one, recorded diagnostics). Preparation is checker work
-// before the window, and its growth is the checker's.
+// before the window, and every measured compile holds it to its own bound
+// (machines_prepare_test.go).
 //
 // It is a sampling property, not a proof: it finds an allocation site that
 // escapes the budget wherever the generator reaches it. The generator draws
@@ -83,6 +84,17 @@ func measureMachineAnalysisAfter(t *testing.T, source string, setup func(*checke
 		}
 	}
 	defer func() { machineAnalysisProbe = nil }()
+	var prepareBefore runtime.MemStats
+	machinePreparationProbe = func(done bool, units int) {
+		if !done {
+			runtime.ReadMemStats(&prepareBefore)
+			return
+		}
+		var after runtime.MemStats
+		runtime.ReadMemStats(&after)
+		assertMachinePreparationCharged(t, len(source), preparationMeasure{bytes: after.TotalAlloc - prepareBefore.TotalAlloc, units: units})
+	}
+	defer func() { machinePreparationProbe = nil }()
 	r := Compile(source)
 	// Preparation charges at every point a subset of what analysis charges,
 	// so analysis refuses at its own budget before it can reach a fact the
@@ -912,15 +924,18 @@ func TestMachineLongFailureLabelsAreCharged(t *testing.T) {
 
 // Round-5 residual 3: an application's layout is resolved once per module,
 // charged by the interning keys substitution builds for its declared field
-// types, so 256 declarations do not rebuild a 131,072-byte key each.
+// types, so 256 declarations do not rebuild a 131,072-byte key each. The
+// checker builds those keys while preparing, outside the window, and the
+// preparation bound (measureMachineAnalysisAfter) holds them to the charge;
+// the window reads the shared layout once per module.
 func TestMachineGenericLayoutsAreChargedAndShared(t *testing.T) {
 	r, measures := measureMachineAnalysis(t, machineGenericPayloadLayouts.source())
 	assertMachineAllocationCharged(t, "generic payload layouts", measures)
 	if len(r.Machines) != 256 {
 		t.Fatalf("%d of 256 declarations planned: %v", len(r.Machines), machineCodes(r))
 	}
-	// One declaration: the shared layout's substituted key text is the only
-	// large allocation, with no other declaration's charges to cover it.
+	// One declaration: its layout charge, not other declarations' charges,
+	// pays for preparing the 131,072-byte keys.
 	single := machineGenericPayloadLayouts
 	single.declarations = 1
 	r, measures = measureMachineAnalysis(t, single.source())

@@ -11,9 +11,11 @@ package compiler
 // same cost model (machineplan.Costs) and the same per-declaration and module
 // limits. Preparation charges a subset of what analysis charges at every
 // point of that order, so whatever analysis can afford is prepared, and
-// analysis refuses (EF142) whatever is not. The mirror keeps preparation
-// bounded: a generic payload that would instantiate exponentially is refused
-// by its cost before the checker instantiates it.
+// analysis refuses (EF142) whatever is not. The checker has no allocation
+// budget of its own, so the mirror is what keeps preparation bounded: a
+// generic payload that would instantiate exponentially, or rebuild a long
+// key once per instantiation, is refused by its cost before the checker
+// builds it (machines_prepare_test.go measures this).
 
 import "effra.local/prototype/internal/compiler/machineplan"
 
@@ -30,6 +32,10 @@ type machinePrep struct {
 	enums     map[*Enum]*machineplan.Enum
 	arms      map[*MatchArm]*machineplan.Arm
 
+	// layoutCosts memoizes each layout's cost, so a layout refused by one
+	// declaration is not costed again by the next.
+	layoutCosts map[machineplan.TypeRef]layoutCost
+
 	// work and moduleWork mirror the analysis budgets for the declaration
 	// being prepared and for the module; stopped is set once the declaration
 	// would exceed either, and nothing more is prepared for it.
@@ -37,11 +43,18 @@ type machinePrep struct {
 	stopped          bool
 }
 
+// layoutCost is a memoized layout cost; data is false when the type has no layout.
+type layoutCost struct {
+	units int
+	data  bool
+}
+
 func ref(id TypeID) machineplan.TypeRef { return machineplan.TypeRef(id) }
 
 // prepareMachines builds the analysis input. initials are the checked initial
-// values, by declaration ordinal.
-func (c *checker) prepareMachines(initials []checkedExpression) *machineInput {
+// values, by declaration ordinal. It also returns the units its mirrored
+// charges accepted across the module.
+func (c *checker) prepareMachines(initials []checkedExpression) (*machineInput, int) {
 	p := &machinePrep{
 		c: c,
 		in: &machineInput{
@@ -51,10 +64,11 @@ func (c *checker) prepareMachines(initials []checkedExpression) *machineInput {
 			Data:      map[machineplan.TypeRef]machineplan.Projection[ValueType]{},
 			Contracts: map[*machineplan.Function]machineplan.Projection[ValueType]{},
 		},
-		functions: map[*Function]*machineplan.Function{},
-		locals:    map[*localBinding]*machineplan.Local{},
-		enums:     map[*Enum]*machineplan.Enum{},
-		arms:      map[*MatchArm]*machineplan.Arm{},
+		functions:   map[*Function]*machineplan.Function{},
+		locals:      map[*localBinding]*machineplan.Local{},
+		enums:       map[*Enum]*machineplan.Enum{},
+		arms:        map[*MatchArm]*machineplan.Arm{},
+		layoutCosts: map[machineplan.TypeRef]layoutCost{},
 	}
 	for ordinal, machine := range c.program.Machines {
 		p.in.Machines[ordinal] = p.declaration(machine, initials[ordinal])
@@ -66,7 +80,7 @@ func (c *checker) prepareMachines(initials []checkedExpression) *machineInput {
 		p.bodies = p.bodies[:len(p.bodies)-1]
 		p.functions[f].Body = p.block(f.Body)
 	}
-	return p.in
+	return p.in, p.moduleWork
 }
 
 // declaration lowers one declaration and prepares, in analysis order, the
@@ -282,8 +296,17 @@ func (p *machinePrep) layout(id TypeID) *machineplan.Layout {
 	if layout, ok := p.in.Types.Layouts[key]; ok {
 		return layout
 	}
-	units, ok := p.costs.LayoutUnits(&p.in.Types, key)
-	if !ok || !p.charge(units) {
+	// A stopped declaration prepares nothing more; the cost of a layout one
+	// declaration could not afford is kept for the next.
+	if p.stopped {
+		return nil
+	}
+	cost, ok := p.layoutCosts[key]
+	if !ok {
+		cost.units, cost.data = p.costs.LayoutUnits(&p.in.Types, key)
+		p.layoutCosts[key] = cost
+	}
+	if !cost.data || !p.charge(cost.units) {
 		return nil
 	}
 	c := p.c
