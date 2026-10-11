@@ -131,6 +131,10 @@ A key that replays a pass must name every input that can change the outcome. The
 | `6eab105a`, no-ops | 10.4 s, 3.1 s | load 72→58; the first reran `lint` after its failure; framework-port references replayed in both |
 | `ccb6ca9e` (executable fingerprints reverted, main `6b349af8` merged), first run | 95.4 s | load 17.9→46.0; `EFFRA_TOOL_VERSIONS` and the tool fingerprints changed back and the merge changed compiler sources, so the Go tests reran and framework-port references executed (27.8 s) |
 | `ccb6ca9e`, no-ops | 2.5 s, 3.8 s | load 48.7→48.0; every keyed step cached |
+| `85cfda7e` (tool fingerprints key whole installations), first run | 91.1 s | load 8.9→36.5; `EFFRA_TOOL_VERSIONS` and every tool fingerprint changed, so every Go test reran and framework-port references executed (18.7 s) |
+| `85cfda7e`, no-ops | 22.7 s, 23.3 s, 22.9 s | load 35–48; every step cached, but Go's cached lookup of `scripts/gate` took about 20 s. Its tests fingerprinted the real `go`, whose GOROOT under `go test` holds about 12,000 files, and Go's test cache stats every file a cached test opened again on each lookup. Fixed in the next commit: the gate's own tests fingerprint small stand-ins for go, git and tsc (cached lookup 0.7–1.0 s, against 0.4–0.7 s on main) |
+| `130c8cb4` (stand-in tools in the gate's own tests), first run | 15.6 s | load 32.0→29.2; `scripts/gate` tests reran |
+| `130c8cb4`, no-ops | 6.1 s, 3.0 s, 3.6 s | load 28.9–31.2; every step cached. In the first, the Go test shards started at 1.4 s instead of 0.7 s and each cached lookup took about 2 s |
 
 ## Turborepo, rejected
 
