@@ -185,9 +185,11 @@ require matching evidence. The runtime and service columns treat laws as
 typed obligations, as Bend does. Bend discharges its laws with proof terms;
 Effra only tests them. The categories below therefore follow the conclusion
 of Effra's Bend comparison, which separates trusted predicates, tested laws,
-verified propositions and translation/runtime assumptions. Effra has no proof
-checker, so verified propositions have no category here, and finite tests
-stay evidence, not proof. Both sources are pinned in
+verified propositions and translation/runtime assumptions. Trusted predicates
+and translation/runtime assumptions both land in **Trusted decision**, whose
+runtime column accepts the shipped Go host or the pinned Effect adapter.
+Effra has no proof checker, so verified propositions have no category here,
+and finite tests stay evidence, not proof. Both sources are pinned in
 [PRIOR_ART.md](../../PRIOR_ART.md#language-and-library-references).
 
 The five categories have the same meaning at each boundary:
