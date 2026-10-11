@@ -83,9 +83,10 @@ type Inputs struct {
 	// Trees names directories a step walks on disk itself, as the
 	// framework-port capture check walks its vendored tree, so every entry
 	// there is an input, files Git ignores included. Each is digested like
-	// Generated, when this step's key is computed. TreeExclude names
-	// repository paths under them that are not inputs: the step's own
-	// outputs and trees declared separately.
+	// Generated, when this step's key is computed, and a link out of it into
+	// the repository is followed. TreeExclude names repository paths under
+	// them that are not inputs: trees declared separately, and directories
+	// the step empties before it reads them.
 	Trees       []string
 	TreeExclude []string
 }
@@ -466,10 +467,20 @@ func (g *gate) loadFiles() error {
 	return nil
 }
 
-// fileDigest identifies a file's content, kind and exact permission bits: a
-// check can read any of them, as the capture check reads the owner's
-// executable bit. Missing tracked files, directories (submodule gitlinks) and
-// symlinks hash distinctly from content.
+// keyedPermissions are the permission bits that can change a step's result.
+// Steps run as the user who owns the checkout, so the kernel grants their
+// access from the owner bits alone: owner-read decides whether a step can
+// read an input. A cached step never writes its inputs, so owner-write cannot
+// change what it reads. The three executable bits are data a check can read,
+// as the capture check reads the owner's, and they decide what a step can
+// execute. Group and other read and write bits are consulted for no process
+// a step starts and asserted by no check, so keying them would only split
+// receipts between checkouts made under different umasks.
+const keyedPermissions os.FileMode = 0o511
+
+// fileDigest identifies a file's content, kind and keyed permission bits.
+// Missing tracked files, directories (submodule gitlinks) and symlinks hash
+// distinctly from content.
 func fileDigest(name string) string {
 	info, err := os.Lstat(name)
 	switch {
@@ -491,7 +502,7 @@ func fileDigest(name string) string {
 		return "error:" + err.Error()
 	}
 	sum := sha256.Sum256(content)
-	return fmt.Sprintf("file:%v:%s", info.Mode().Perm(), hex.EncodeToString(sum[:]))
+	return fmt.Sprintf("file:%v:%s", info.Mode().Perm()&keyedPermissions, hex.EncodeToString(sum[:]))
 }
 
 func selected(name string, inputs *Inputs) bool {
@@ -547,7 +558,7 @@ func (g *gate) key(step *Step) (string, error) {
 		fmt.Fprintf(hash, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
 	}
 	for _, name := range inputs.Generated {
-		digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(name)), g.root)
+		digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(name)), g.root, false)
 		if err != nil {
 			return "", fmt.Errorf("digest generated %s: %w", name, err)
 		}
@@ -560,7 +571,7 @@ func (g *gate) key(step *Step) (string, error) {
 				skip = append(skip, strings.TrimSuffix(relative, "/"))
 			}
 		}
-		digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(tree)), g.root, skip...)
+		digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(tree)), g.root, true, skip...)
 		if err != nil {
 			return "", fmt.Errorf("digest tree %s: %w", tree, err)
 		}
@@ -579,7 +590,7 @@ func (g *gate) installed(dir string) string {
 	if digest, ok := g.installedDigests[dir]; ok {
 		return digest
 	}
-	digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(dir)), g.root)
+	digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(dir)), g.root, false)
 	if err != nil {
 		// An unreadable tree never matches a recorded pass.
 		digest = fmt.Sprintf("error:%v:%d", err, time.Now().UnixNano())
@@ -590,11 +601,14 @@ func (g *gate) installed(dir string) string {
 
 // installedDigest hashes a tree's contents, following symbolic links (each
 // directory once, by its resolved path) and hashing files concurrently. A
-// link from the tree back into the repository, such as a workspace package,
-// contributes only its target: a step whose outcome depends on the files
-// there declares them, through Paths or, when it reads files Git ignores,
-// Trees. skip names paths relative to root that the walk leaves out.
-func installedDigest(root, repository string, skip ...string) (string, error) {
+// link from an installed tree back into the repository, such as a workspace
+// package, contributes only its target: a step whose outcome depends on the
+// files there declares them, through Paths or, when it reads files Git
+// ignores, Trees. With followRepository, as for a tree input, the walk
+// follows such a link too, so editing its target changes the digest. skip
+// names paths relative to root that the walk leaves out. A file contributes
+// its keyed permission bits.
+func installedDigest(root, repository string, followRepository bool, skip ...string) (string, error) {
 	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
 		return "absent", nil
 	}
@@ -634,7 +648,7 @@ func installedDigest(root, repository string, skip ...string) (string, error) {
 				entries = append(entries, "dangling\x00"+relative)
 				return nil
 			}
-			if within(resolved, resolvedRepository) && !within(resolved, resolvedRoot) {
+			if !followRepository && within(resolved, resolvedRepository) && !within(resolved, resolvedRoot) {
 				return nil
 			}
 			if info, err = os.Stat(name); err != nil {
@@ -663,7 +677,7 @@ func installedDigest(root, repository string, skip ...string) (string, error) {
 				}
 			}
 		case info.Mode().IsRegular():
-			entries = append(entries, fmt.Sprintf("file\x00%s\x00%v", relative, info.Mode().Perm()))
+			entries = append(entries, fmt.Sprintf("file\x00%s\x00%v", relative, info.Mode().Perm()&keyedPermissions))
 			files = append(files, file{relative, name})
 		default:
 			entries = append(entries, fmt.Sprintf("other\x00%s\x00%v", relative, info.Mode()))

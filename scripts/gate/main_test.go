@@ -289,9 +289,10 @@ func TestInstalledTreeContentsAreInputs(t *testing.T) {
 	}
 }
 
-// A tree input is the directory as a step walks it: files Git ignores are
-// inputs, every permission bit is, and only the excluded paths are not.
-func TestTreeInputsCoverIgnoredFilesAndExactPermissions(t *testing.T) {
+// A tree input is the directory as a step walks it: files Git ignores and
+// the targets of links out of it are inputs, and only the excluded paths are
+// not.
+func TestTreeInputsCoverIgnoredFilesLinksAndKeyedPermissions(t *testing.T) {
 	root := fixture(t)
 	write(t, root, ".gitignore", "/runs/\nnode_modules/\n/leaf/out/\n")
 	write(t, root, "leaf/src/index.js", "export const one = 1\n")
@@ -306,33 +307,47 @@ func TestTreeInputsCoverIgnoredFilesAndExactPermissions(t *testing.T) {
 	if keyOf(t, root, inputs) != ignored {
 		t.Fatal("an excluded output changed the key")
 	}
+	// A link out of the tree into the repository is followed: editing its
+	// target changes the key.
+	if err := os.Symlink("../docs", filepath.Join(root, "leaf/shared")); err != nil {
+		t.Fatal(err)
+	}
+	linked := keyOf(t, root, inputs)
+	write(t, root, "docs/notes.md", "edited notes\n")
+	if keyOf(t, root, inputs) == linked {
+		t.Fatal("editing the target of a link out of the tree left the key unchanged")
+	}
+	// Tree and repository-path digests key the executable bits and
+	// owner-read, the bits a step's result can depend on, and no other.
 	file := filepath.Join(root, "leaf/src/index.js")
-	keys := map[string]os.FileMode{ignored: 0o644}
-	for _, mode := range []os.FileMode{0o654, 0o754, 0o640} {
+	keyAt := func(inputs *Inputs, mode os.FileMode) string {
+		t.Helper()
 		if err := os.Chmod(file, mode); err != nil {
 			t.Fatal(err)
 		}
-		key := keyOf(t, root, inputs)
-		if earlier, seen := keys[key]; seen {
-			t.Fatalf("mode %o replayed the key of mode %o", mode, earlier)
+		return keyOf(t, root, inputs)
+	}
+	for _, inputs := range []*Inputs{inputs, {Paths: []string{"leaf/"}}} {
+		base := keyAt(inputs, 0o644)
+		for _, mode := range []os.FileMode{0o600, 0o666, 0o604, 0o620, 0o622} {
+			if keyAt(inputs, mode) != base {
+				t.Errorf("trees %v: mode %o, differing from 0644 only in group and other read and write bits, changed the key", inputs.Trees, mode)
+			}
 		}
-		keys[key] = mode
-	}
-	// A repository path's digest carries its exact permissions too.
-	if err := os.Chmod(file, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	paths := &Inputs{Paths: []string{"leaf/"}}
-	group := keyOf(t, root, paths)
-	if err := os.Chmod(file, 0o654); err != nil {
-		t.Fatal(err)
-	}
-	owner := keyOf(t, root, paths)
-	if err := os.Chmod(file, 0o754); err != nil {
-		t.Fatal(err)
-	}
-	if owner == group || keyOf(t, root, paths) == owner {
-		t.Fatal("a permission change left a repository path's key unchanged")
+		keys := map[string]os.FileMode{base: 0o644}
+		// Without owner-read a tree cannot be digested at all, which fails the
+		// step, so only a repository path keys that bit as a value.
+		distinct := []os.FileMode{0o744, 0o654, 0o645}
+		if len(inputs.Trees) == 0 {
+			distinct = append(distinct, 0o244)
+		}
+		for _, mode := range distinct {
+			key := keyAt(inputs, mode)
+			if earlier, seen := keys[key]; seen {
+				t.Errorf("trees %v: mode %o replayed the key of mode %o", inputs.Trees, mode, earlier)
+			}
+			keys[key] = mode
+		}
 	}
 }
 
