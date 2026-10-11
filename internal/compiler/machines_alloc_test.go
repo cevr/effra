@@ -180,11 +180,14 @@ type machineShape struct {
 	// Checker state before machines: the analysis window must not depend on it.
 	errors int  // ordinary type errors reported before the machines
 	clip   bool // put checker slices at capacity and maps at their size as the window opens
+	// Data every declaration shares: preparation must not repeat its work per declaration.
+	shared        int // fields of a record W, each its own record, carried by a state and an event variant
+	initialLabels int // the initial is an effect raising this many errors (EF140 for every declaration)
 }
 
 func (s machineShape) String() string {
-	return fmt.Sprintf("states=%d events=%d name=%d machineName=%d variantName=%d helpers=%d tails=%d distinct=%d wideArm=%t keepPaths=%t keeps=%d literalStay=%t failures=%d declarations=%d payload=%d failureName=%d failBody=%t lets=%d generic=%t genericName=%d genericFields=%d genericArg=%d recipe=%d recipeName=%d records=%d initialArg=%d errors=%d clip=%t",
-		s.states, s.events, s.name, s.machineName, s.variantName, s.helpers, s.tails, s.distinct, s.wideArm, s.keepPaths, s.keeps, s.literalStay, s.failures, s.declarations, s.payload, s.failureName, s.failBody, s.lets, s.generic, s.genericName, s.genericFields, s.genericArg, s.recipe, s.recipeName, s.records, s.initialArg, s.errors, s.clip)
+	return fmt.Sprintf("states=%d events=%d name=%d machineName=%d variantName=%d helpers=%d tails=%d distinct=%d wideArm=%t keepPaths=%t keeps=%d literalStay=%t failures=%d declarations=%d payload=%d failureName=%d failBody=%t lets=%d generic=%t genericName=%d genericFields=%d genericArg=%d recipe=%d recipeName=%d records=%d initialArg=%d errors=%d clip=%t shared=%d initialLabels=%d",
+		s.states, s.events, s.name, s.machineName, s.variantName, s.helpers, s.tails, s.distinct, s.wideArm, s.keepPaths, s.keeps, s.literalStay, s.failures, s.declarations, s.payload, s.failureName, s.failBody, s.lets, s.generic, s.genericName, s.genericFields, s.genericArg, s.recipe, s.recipeName, s.records, s.initialArg, s.errors, s.clip, s.shared, s.initialLabels)
 }
 
 // genericArgument declares the records of a 7-ary tree of the given depth
@@ -246,12 +249,42 @@ func (s machineShape) source() string {
 	}
 	// An explicit generic initial: S.Vi { x: Presence<tree>.None {} }, with Vi
 	// matched wherever the step matches every variant.
-	initial, extra := fmt.Sprintf("%s.%s {}", enum, variant(0)), ""
+	// added are the state variants beyond V0…, which a wide arm matches too.
+	initial, extra, eventExtra := fmt.Sprintf("%s.%s {}", enum, variant(0)), "", ""
+	var added []string
 	if s.initialArg > 0 {
 		tree := genericArgument(&b, "I", s.initialArg)
 		b.WriteString("enum Presence<T: type> { None; Some { value: T } }\n")
 		initial = fmt.Sprintf("%s.Vi { x: Presence<%s>.None {} }", enum, tree)
 		extra = fmt.Sprintf(" Vi { x: Presence<%s> }", tree)
+		added = append(added, enum+".Vi")
+	}
+	// A wide record every declaration's state and event reach, and an
+	// effectful initial with a wide row every declaration displays.
+	if s.shared > 0 {
+		for i := 0; i < s.shared; i++ {
+			fmt.Fprintf(&b, "record Wr%d { x: i64 }\n", i)
+		}
+		b.WriteString("record W {")
+		for i := 0; i < s.shared; i++ {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			fmt.Fprintf(&b, " f%d: Wr%d", i, i)
+		}
+		b.WriteString(" }\n")
+		extra += " Vw { w: W }"
+		eventExtra = " Pw { w: W }"
+		added = append(added, enum+".Vw")
+	}
+	if s.initialLabels > 0 {
+		labels := make([]string, s.initialLabels)
+		for i := range labels {
+			labels[i] = fmt.Sprintf("G%d", i)
+			fmt.Fprintf(&b, "error %s\n", labels[i])
+		}
+		fmt.Fprintf(&b, "effect fn start() -> %s raises { %s } { %s.%s {} }\n", enum, strings.Join(labels, ", "), enum, variant(0))
+		initial = "start()"
 	}
 	if s.recipe > 0 {
 		leaf := long("R", s.recipeName)
@@ -283,7 +316,7 @@ func (s machineShape) source() string {
 	for i := 0; i < s.events; i++ {
 		fmt.Fprintf(&b, " P%d", i)
 	}
-	b.WriteString(" }\n")
+	b.WriteString(eventExtra + " }\n")
 	helper := func(i int) string { return fmt.Sprintf("%s%d", long("h", s.name), i) }
 	keep := func(i int) string { return fmt.Sprintf("%s%d", long("k", s.name), i) }
 	leaf := func(i int) string {
@@ -328,9 +361,7 @@ func (s machineShape) source() string {
 		for i := range most {
 			most[i] = enum + "." + variant(i)
 		}
-		if s.initialArg > 0 {
-			most = append(most, enum+".Vi")
-		}
+		most = append(most, added...)
 		body = fmt.Sprintf("    match state {\n        %s => %s\n        %s.%s => %s.Ignore {}\n    }\n", strings.Join(most, " | "), first, enum, variant(s.states-1), step)
 	}
 	// Statements after the first: the walk reaches them after any refusal
@@ -389,9 +420,7 @@ func (s machineShape) source() string {
 		for i := range alternatives {
 			alternatives[i] = enum + "." + variant(i)
 		}
-		if s.initialArg > 0 {
-			alternatives = append(alternatives, enum+".Vi")
-		}
+		alternatives = append(alternatives, added...)
 		last := ""
 		if s.states > 1 {
 			last = fmt.Sprintf("        %s.%s => state\n", enum, variant(s.states-1))
@@ -465,6 +494,12 @@ func randomMachineShape(rng *rand.Rand) machineShape {
 	// slice at capacity and map at its size as the window opens.
 	s.errors = pick(0, 0, 0, 1000, 20000)
 	s.clip = rng.Intn(3) == 0
+	// Data shared by every declaration, drawn after the rest for the same
+	// reason: a wide record reached from each declaration's state and event,
+	// and an effectful initial with a wide row. W stays at 2,000 fields, where
+	// the ordinary checker's own cost on it (not preparation) is small.
+	s.shared = pick(0, 0, 0, 0, 0, 0, 64, 500, 2000)
+	s.initialLabels = pick(0, 0, 0, 0, 0, 0, 0, 0, 64, 5000)
 	return s
 }
 
@@ -580,7 +615,7 @@ func TestMachineAnalysisAllocationIsCharged(t *testing.T) {
 		started := time.Now()
 		r, measures := shape.measure(t)
 		if testing.Verbose() {
-			t.Logf("seed %d compiled in %s: %d plans, codes %v", seed, time.Since(started).Round(time.Millisecond), len(r.Machines), slices.Compact(machineCodes(r)))
+			t.Logf("seed %d compiled in %s: %d plans, codes %v, shared=%d initialLabels=%d", seed, time.Since(started).Round(time.Millisecond), len(r.Machines), slices.Compact(machineCodes(r)), shape.shared, shape.initialLabels)
 		}
 		worst.observe(label, measures)
 		assertMachineAllocationCharged(t, label, measures)
