@@ -32,8 +32,6 @@ func runnerLeaf(t *testing.T, runner string, files map[string]string) (string, s
 	if runtime.GOOS != "linux" {
 		t.Skip("descendant scan reads /proc")
 	}
-	// Go tests reading the tool digest key their cached result on node's version.
-	_ = os.Getenv("EFFRA_TOOL_VERSIONS")
 	source, err := os.ReadFile(leafScripts + runner)
 	if err != nil {
 		t.Fatal(err)
