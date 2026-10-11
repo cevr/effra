@@ -27,15 +27,93 @@ import (
 
 // declarationUnits is a declaration's fixed state, charged as bytes before the
 // plan is allocated: the plan, its copy into the result, the declaration's
-// check and the empty maps run allocates.
+// check, its two role scopes and three payload walks, and the first group of
+// every map run creates (declarationMapBytes). Everything that grows with the
+// program is charged where it is built.
 func declarationUnits[V any]() int {
-	return (2*int(unsafe.Sizeof(Plan[V]{})) + int(unsafe.Sizeof(check[V]{})) + declarationMapBytes + textUnit - 1) / textUnit
+	fixed := 2*int(unsafe.Sizeof(Plan[V]{})) + int(unsafe.Sizeof(check[V]{})) + 2*int(unsafe.Sizeof(scope{})) + 3*int(unsafe.Sizeof(payloadWalk[V]{}))
+	return TextUnits(fixed + declarationMapBytes)
 }
 
-// declarationMapBytes bounds the maps every declaration creates (its report
-// set, transition keys, indexes and narrowing memos) before they hold an
-// entry: a runtime map header and its first bucket each.
-const declarationMapBytes = 8 * 256
+// Go's swiss maps (Go 1.24 and later) allocate a 48-byte header, and on the
+// first insert one group of 8 slots behind an 8-byte control word. The group
+// is rounded up to a malloc size class, which is at most 1/8 larger in this
+// range. A slot holds one key and one element.
+const (
+	mapHeaderBytes = 48
+	mapGroupSlots  = 8
+	mapGroupCtrl   = 8
+)
+
+// mapBytes is what a map with the given slot size allocates up to its first
+// group.
+func mapBytes(slot uintptr) int {
+	return mapHeaderBytes + (mapGroupCtrl+mapGroupSlots*int(slot))*9/8
+}
+
+// declarationMaps are the maps one declaration's analysis can create before
+// its program-sized content: how many of each, and its slot size.
+var declarationMaps = []struct {
+	name  string
+	count int
+	slot  uintptr
+}{
+	{"reports seen", 1, unsafe.Sizeof(struct {
+		k reportKey
+		v bool
+	}{})},
+	{"transition keys", 1, unsafe.Sizeof(struct {
+		k string
+		v bool
+	}{})},
+	{"helper ordinals", 1, unsafe.Sizeof(struct {
+		k string
+		v int
+	}{})},
+	// indexes and sets, and one table each for the state, event and outcome.
+	{"enum tables", 2, unsafe.Sizeof(struct {
+		k *Enum
+		v map[string]int
+	}{})},
+	{"variant indexes", 3, unsafe.Sizeof(struct {
+		k string
+		v int
+	}{})},
+	{"narrowing tables", 3, unsafe.Sizeof(struct {
+		k string
+		v *set
+	}{})},
+	{"refinements", 1, unsafe.Sizeof(struct {
+		k refinement
+		v *set
+	}{})},
+	{"subsets", 1, unsafe.Sizeof(struct {
+		k [2]*set
+		v bool
+	}{})},
+	// The step and complete scopes: states, triggers, lets and alias roots.
+	{"role scopes", 8, unsafe.Sizeof(struct {
+		k *Local
+		v *Local
+	}{})},
+	// The state, event and output payload walks.
+	{"payload visits", 3, unsafe.Sizeof(struct {
+		k TypeRef
+		v bool
+	}{})},
+}
+
+// declarationMapBytes is the estimated first-group bytes of declarationMaps.
+// It is derived from the map layout above and measured against the runtime by
+// TestDeclarationMapBytesCoverTheRuntime; it is an estimate, not a bound, and
+// the property test holds the whole declaration to the per-unit bound.
+var declarationMapBytes = func() int {
+	total := 0
+	for _, m := range declarationMaps {
+		total += m.count * mapBytes(m.slot)
+	}
+	return total
+}()
 
 // budget is the module-wide budget every declaration also charges, and the
 // module-wide memo of projections that do not depend on the declaration: a
@@ -46,6 +124,12 @@ type budget[V any] struct {
 	diagnostics []Diagnostic
 	work        int
 	exhausted   bool
+	// credit is the work the allocation property test may credit: accepted
+	// charges in full, a refused charge only up to the room it found plus
+	// one, and every recorded diagnostic. An allocation made before a refused
+	// charge is therefore measured against what the analysis could afford,
+	// not against what it asked for.
+	credit int
 
 	costs         costs
 	displays      map[TypeRef]string

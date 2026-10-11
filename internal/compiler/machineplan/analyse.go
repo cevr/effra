@@ -13,8 +13,9 @@ import (
 type Result[V any] struct {
 	Plans       []Plan[V]
 	Diagnostics []Diagnostic
-	// Units is the work charged across the module, for the allocation
-	// property test.
+	// Units is the work the allocation property test credits across the
+	// module: accepted charges, refused charges up to the room they found
+	// plus one, and recorded diagnostics (budget.credit).
 	Units int
 }
 
@@ -36,7 +37,7 @@ func Analyse[V any](in *Input[V]) Result[V] {
 		out[i] = *plan
 	}
 	slices.SortFunc(out, func(a, b Plan[V]) int { return strings.Compare(a.ID, b.ID) })
-	return Result[V]{Plans: out, Diagnostics: shared.diagnostics, Units: shared.work}
+	return Result[V]{Plans: out, Diagnostics: shared.diagnostics, Units: shared.credit}
 }
 
 // check holds one declaration's analysis. Every program-sized value it builds
@@ -106,6 +107,7 @@ func (m *check[V]) report(code, message string, span Span) {
 	m.seen[key] = true
 	m.work += diagnosticUnits
 	m.shared.work += diagnosticUnits
+	m.shared.credit += diagnosticUnits
 	m.shared.diagnostics = append(m.shared.diagnostics, Diagnostic{Code: code, Message: message, Span: span})
 }
 
@@ -118,6 +120,11 @@ func (m *check[V]) charge(units int) bool {
 	if m.refused {
 		return false
 	}
+	// A refused charge allocates nothing it asked for, so it is credited only
+	// up to the room it found plus one: whatever was allocated before it is
+	// measured against what the analysis could afford.
+	room := max(min(MaxWork-m.work, MaxModuleWork-m.shared.work), 0)
+	m.shared.credit += min(units, room+1)
 	m.work += units
 	m.shared.work += units
 	if m.shared.work > MaxModuleWork {

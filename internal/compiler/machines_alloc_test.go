@@ -13,15 +13,24 @@ import (
 	"time"
 )
 
-// Resource closure as a class. Machine analysis builds every program-sized
-// value through charged builders, so what it allocates stays within a constant
-// factor of the units it charged, whatever the program. The property test
-// below generates adversarial machines (wide enums, long names, deep helpers,
-// wide rows, wide match arms, many declarations, deep payloads) and measures
-// each module's analysis between the analysis probe's brackets: heap bytes
-// (runtime.MemStats.TotalAlloc) and allocation count (Mallocs) against the
-// charged units. A new allocation site that escapes the budget fails it as a
-// class, without a hand-built counterexample.
+// Resource closure of machine analysis. The analysis phase (package
+// machineplan) reads only its prepared input and builds every program-sized
+// value through charged builders, so what it allocates should stay within a
+// constant factor of the units it charged, whatever the program. The property
+// test below measures exactly that phase, between the analysis probe's
+// brackets: heap bytes (runtime.MemStats.TotalAlloc) and allocation count
+// (Mallocs) against the credited units (accepted charges, refused charges up
+// to their room plus one, recorded diagnostics). Preparation is checker work
+// before the window, and its growth is the checker's.
+//
+// It is a sampling property, not a proof: it finds an allocation site that
+// escapes the budget wherever the generator reaches it. The generator draws
+// adversarial machines (wide enums, long names, deep helpers, wide rows, wide
+// match arms, many declarations, deep payloads, generic layouts) and checker
+// state before the machines (ordinary diagnostics, and every checker arena
+// and intern map at capacity as the window opens, verified unchanged when it
+// closes). That the window cannot reach checker state at all is structural:
+// the analysis package cannot import the checker.
 
 // Bounds per charged unit, plus a fixed allowance for per-module setup.
 const (
