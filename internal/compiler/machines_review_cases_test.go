@@ -150,7 +150,7 @@ func TestMachineDeclarationStateIsCharged(t *testing.T) {
 	for _, v := range variants {
 		shape := machineSeed26Shape18
 		v.edit(&shape)
-		_, measures := measureMachineAnalysis(t, shape.source())
+		_, measures := shape.measure(t)
 		assertMachineAllocationCharged(t, "seed 26 shape 18, "+v.label, measures)
 	}
 	// The cheapest declarations: no step binding, so each allocates its plan

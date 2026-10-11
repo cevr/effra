@@ -32,7 +32,7 @@ func TestMachineProjectionAllocationIsCharged(t *testing.T) {
 	warmMachineBoundaries(t, request)
 	projected := 0
 	for i, shape := range shapes {
-		r, measures := measureMachineAnalysis(t, shape.source())
+		r, measures := shape.measure(t)
 		if len(r.Machines) == 0 {
 			continue
 		}
@@ -109,7 +109,7 @@ func TestMachineGraphViewAllocationIsCharged(t *testing.T) {
 	warmMachineBoundaries(t, request)
 	for i, c := range cases {
 		label := fmt.Sprintf("case %d (%s)", i, c.shape)
-		r, measures := measureMachineAnalysis(t, c.shape.source())
+		r, measures := c.shape.measure(t)
 		if len(r.Machines) == 0 {
 			t.Fatalf("%s: no plan: %v", label, machineCodes(r))
 		}
@@ -124,7 +124,7 @@ func TestMachineGraphViewAllocationIsCharged(t *testing.T) {
 	}
 	graphed := 0
 	for i, shape := range reviewed {
-		r, measures := measureMachineAnalysis(t, shape.source())
+		r, measures := shape.measure(t)
 		if len(r.Machines) == 0 {
 			continue
 		}

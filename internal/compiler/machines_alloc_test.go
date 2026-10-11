@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"math/rand"
 	"runtime"
 	"slices"
@@ -39,16 +40,33 @@ type machineMeasure struct {
 // analysis the compile ran.
 func measureMachineAnalysis(t *testing.T, source string) (*Result, []machineMeasure) {
 	t.Helper()
+	return measureMachineAnalysisAfter(t, source, nil)
+}
+
+// measureMachineAnalysisAfter is measureMachineAnalysis with setup applied to
+// the checker just before each window opens. The verifier setup returns, if
+// any, runs as the window closes and reports what the window changed.
+func measureMachineAnalysisAfter(t *testing.T, source string, setup func(*checker) func(*checker) string) (*Result, []machineMeasure) {
+	t.Helper()
 	var measures []machineMeasure
 	var before runtime.MemStats
-	machineAnalysisProbe = func(done bool, units int) {
+	var verify func(*checker) string
+	machineAnalysisProbe = func(c *checker, done bool, units int) {
 		if !done {
+			if setup != nil {
+				verify = setup(c)
+			}
 			runtime.ReadMemStats(&before)
 			return
 		}
 		var after runtime.MemStats
 		runtime.ReadMemStats(&after)
 		measures = append(measures, machineMeasure{units: units, bytes: after.TotalAlloc - before.TotalAlloc, mallocs: after.Mallocs - before.Mallocs})
+		if verify != nil {
+			if changed := verify(c); changed != "" {
+				t.Errorf("the analysis window changed checker state: %s", changed)
+			}
+		}
 	}
 	defer func() { machineAnalysisProbe = nil }()
 	r := Compile(source)
@@ -96,11 +114,14 @@ type machineShape struct {
 	recipeName     int  // extra bytes on the record the recipe output wraps
 	records        int  // unrelated one-field records in the program
 	initialArg     int  // the initial spells Presence<tree of this depth> explicitly (0 means a plain initial)
+	// Checker state before machines: the analysis window must not depend on it.
+	errors int  // ordinary type errors reported before the machines
+	clip   bool // put checker slices at capacity and maps at their size as the window opens
 }
 
 func (s machineShape) String() string {
-	return fmt.Sprintf("states=%d events=%d name=%d machineName=%d variantName=%d helpers=%d tails=%d distinct=%d wideArm=%t keepPaths=%t keeps=%d literalStay=%t failures=%d declarations=%d payload=%d failureName=%d failBody=%t lets=%d generic=%t genericName=%d genericFields=%d genericArg=%d recipe=%d recipeName=%d records=%d initialArg=%d",
-		s.states, s.events, s.name, s.machineName, s.variantName, s.helpers, s.tails, s.distinct, s.wideArm, s.keepPaths, s.keeps, s.literalStay, s.failures, s.declarations, s.payload, s.failureName, s.failBody, s.lets, s.generic, s.genericName, s.genericFields, s.genericArg, s.recipe, s.recipeName, s.records, s.initialArg)
+	return fmt.Sprintf("states=%d events=%d name=%d machineName=%d variantName=%d helpers=%d tails=%d distinct=%d wideArm=%t keepPaths=%t keeps=%d literalStay=%t failures=%d declarations=%d payload=%d failureName=%d failBody=%t lets=%d generic=%t genericName=%d genericFields=%d genericArg=%d recipe=%d recipeName=%d records=%d initialArg=%d errors=%d clip=%t",
+		s.states, s.events, s.name, s.machineName, s.variantName, s.helpers, s.tails, s.distinct, s.wideArm, s.keepPaths, s.keeps, s.literalStay, s.failures, s.declarations, s.payload, s.failureName, s.failBody, s.lets, s.generic, s.genericName, s.genericFields, s.genericArg, s.recipe, s.recipeName, s.records, s.initialArg, s.errors, s.clip)
 }
 
 // genericArgument declares the records of a 7-ary tree of the given depth
@@ -156,6 +177,9 @@ func (s machineShape) source() string {
 	}
 	for i := 0; i < s.records; i++ {
 		fmt.Fprintf(&b, "record Rec%d { x: i64 }\n", i)
+	}
+	for i := 0; i < s.errors; i++ {
+		fmt.Fprintf(&b, "fn ordinaryError%d() -> i64 { true }\n", i)
 	}
 	// An explicit generic initial: S.Vi { x: Presence<tree>.None {} }, with Vi
 	// matched wherever the step matches every variant.
@@ -373,7 +397,86 @@ func randomMachineShape(rng *rand.Rand) machineShape {
 	if s.recipe > 0 {
 		s.recipe = max(1, min(s.recipe, 56-2*s.tails))
 	}
+	// Checker state before machines, drawn last so the axes above draw the
+	// same shapes per seed as before: ordinary diagnostics, and every checker
+	// slice at capacity and map at its size as the window opens.
+	s.errors = pick(0, 0, 0, 1000, 20000)
+	s.clip = rng.Intn(3) == 0
 	return s
+}
+
+// measure compiles the shape and measures its analysis windows, with checker
+// state clipped first when the shape asks.
+func (s machineShape) measure(t *testing.T) (*Result, []machineMeasure) {
+	t.Helper()
+	if s.clip {
+		return measureMachineAnalysisAfter(t, s.source(), clipCheckerState)
+	}
+	return measureMachineAnalysis(t, s.source())
+}
+
+// clipCheckerState puts the checker's shared state at its worst for the
+// analysis window: every arena and the diagnostics at len == cap, so one more
+// element copies the whole slice, and every intern map rebuilt at exactly its
+// size, so one more entry regrows it. Analysis reads none of it; a window
+// that touched it would pay for the whole program. The verifier it returns
+// reports any of that state the window changed, whatever the allocation
+// bound would have excused.
+func clipCheckerState(c *checker) func(*checker) string {
+	c.result.Diagnostics = slices.Clip(c.result.Diagnostics)
+	c.typeNodes = slices.Clip(c.typeNodes)
+	c.rows = slices.Clip(c.rows)
+	c.reasons = slices.Clip(c.reasons)
+	c.ownershipReports = slices.Clip(c.ownershipReports)
+	c.typeIntern = refit(c.typeIntern)
+	c.rowIntern = refit(c.rowIntern)
+	c.typePublicIDs = refit(c.typePublicIDs)
+	c.typePublicToID = refit(c.typePublicToID)
+	c.declarationFingerprints = refit(c.declarationFingerprints)
+	if lexical := c.result.lexical; lexical != nil {
+		lexical.references = refit(lexical.references)
+	}
+	before := checkerStateSizes(c)
+	return func(c *checker) string {
+		after := checkerStateSizes(c)
+		for name, size := range before {
+			if after[name] != size {
+				return fmt.Sprintf("%s from %d to %d", name, size, after[name])
+			}
+		}
+		return ""
+	}
+}
+
+// checkerStateSizes is the length of every piece of checker state
+// clipCheckerState puts at capacity.
+func checkerStateSizes(c *checker) map[string]int {
+	sizes := map[string]int{
+		"diagnostics":              len(c.result.Diagnostics),
+		"type arena":               len(c.typeNodes),
+		"row arena":                len(c.rows),
+		"reasons":                  len(c.reasons),
+		"ownership reports":        len(c.ownershipReports),
+		"type intern map":          len(c.typeIntern),
+		"row intern map":           len(c.rowIntern),
+		"type public IDs":          len(c.typePublicIDs),
+		"type public ID keys":      len(c.typePublicToID),
+		"declaration fingerprints": len(c.declarationFingerprints),
+	}
+	if lexical := c.result.lexical; lexical != nil {
+		sizes["lexical references"] = len(lexical.references)
+	}
+	return sizes
+}
+
+// refit copies m into a map sized for exactly its entries.
+func refit[K comparable, V any](m map[K]V) map[K]V {
+	if m == nil {
+		return nil
+	}
+	out := make(map[K]V, len(m))
+	maps.Copy(out, m)
+	return out
 }
 
 func TestMachineAnalysisAllocationIsCharged(t *testing.T) {
@@ -400,7 +503,7 @@ func TestMachineAnalysisAllocationIsCharged(t *testing.T) {
 	}
 	warmMachineBoundaries(t, request)
 	for i, shape := range shapes {
-		_, measures := measureMachineAnalysis(t, shape.source())
+		_, measures := shape.measure(t)
 		assertMachineAllocationCharged(t, fmt.Sprintf("shape %d (%s)", i, shape), measures)
 	}
 	// The sweep: one generated shape per seed, measured at the analysis and
@@ -412,7 +515,7 @@ func TestMachineAnalysisAllocationIsCharged(t *testing.T) {
 		shape := machineSeedShape(seed)
 		label := fmt.Sprintf("seed %d (%s)", seed, shape)
 		started := time.Now()
-		r, measures := measureMachineAnalysis(t, shape.source())
+		r, measures := shape.measure(t)
 		if testing.Verbose() {
 			t.Logf("seed %d compiled in %s: %d plans, codes %v", seed, time.Since(started).Round(time.Millisecond), len(r.Machines), slices.Compact(machineCodes(r)))
 		}
@@ -508,7 +611,7 @@ func assertMachineBoundariesCharged(t *testing.T, label string, shape machineSha
 	var out []machineMeasure
 	for i, boundary := range machineBoundaries {
 		if i > 0 {
-			r, measures = measureMachineAnalysis(t, shape.source())
+			r, measures = shape.measure(t)
 		}
 		fullBytes, fullMallocs := allocated(func() { boundary.project(r) })
 		identity := identityPlans(r)
@@ -517,7 +620,7 @@ func assertMachineBoundariesCharged(t *testing.T, label string, shape machineSha
 		assertMachineAllocationCharged(t, boundary.name+" of "+label, []machineMeasure{m})
 		out = append(out, m)
 	}
-	r, measures = measureMachineAnalysis(t, shape.source())
+	r, measures = shape.measure(t)
 	m, _ := measureMachineGraphView(t, label, r, machineUnits(measures), request)
 	return append(out, m)
 }
@@ -580,7 +683,7 @@ func graphRefusalCode(err error) string {
 // 3,999 entries before any charge.
 func TestMachineNarrowingsAreSharedAcrossPaths(t *testing.T) {
 	shape := machineShape{states: 4000, events: 1, tails: 20, wideArm: true, keepPaths: true, keeps: 3}
-	r, measures := measureMachineAnalysis(t, shape.source())
+	r, measures := shape.measure(t)
 	assertMachineAllocationCharged(t, "shared narrowings", measures)
 	if measures[len(measures)-1].bytes > 64<<20 {
 		t.Fatalf("8,000 equal narrowings allocated %d bytes", measures[len(measures)-1].bytes)
@@ -604,7 +707,7 @@ func TestMachineNarrowingsAreSharedAcrossPaths(t *testing.T) {
 // stored once in the plan instead of being copied into every transition ID.
 func TestMachineTransitionIDsDoNotCopyTheMachineName(t *testing.T) {
 	shape := machineShape{states: 2, events: 1, machineName: 1 << 20, helpers: 2, tails: 20, distinct: 20}
-	r, measures := measureMachineAnalysis(t, shape.source())
+	r, measures := shape.measure(t)
 	assertMachineAllocationCharged(t, "long machine name", measures)
 	if len(r.Machines) != 1 {
 		t.Fatalf("long machine name refused: %v", machineCodes(r))
@@ -625,7 +728,7 @@ func TestMachineTransitionIDsDoNotCopyTheMachineName(t *testing.T) {
 // contributions shared, instead of copying every row into every plan.
 func TestMachineWideRowsAreProjectedOncePerModule(t *testing.T) {
 	shape := machineShape{states: 2, events: 1, failures: 4000, declarations: 256}
-	r, measures := measureMachineAnalysis(t, shape.source())
+	r, measures := shape.measure(t)
 	assertMachineAllocationCharged(t, "wide rows", measures)
 	if len(r.Machines) != 256 {
 		t.Fatalf("%d of 256 declarations planned: %v", len(r.Machines), machineCodes(r))
