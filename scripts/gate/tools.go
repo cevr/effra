@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"os/user"
 	"path/filepath"
 	"slices"
@@ -68,7 +66,7 @@ func (g *gate) toolVersion(tool string) string {
 		}
 		// Standard output only for go: GODEBUG=inittrace=1 makes go itself
 		// write timings to standard error.
-		output, err := g.queryTool("", tool != "go", argv[0], argv[1:]...)
+		output, err := queryTool("", tool != "go", argv[0], argv[1:]...)
 		if errors.Is(err, errQueryTimeout) {
 			return unlocated(err.Error())
 		}
@@ -245,7 +243,7 @@ func (g *gate) runtimeInstallation(command, rule, resolved string) (reported, ke
 		}
 		var path string
 		for i, dir := range dirs {
-			output, err := g.queryTool(dir, false, command, "-e", runtimeExecPath)
+			output, err := queryTool(dir, false, command, "-e", runtimeExecPath)
 			answer := string(output)
 			if err != nil || !filepath.IsAbs(answer) {
 				return unlocated(fmt.Sprintf("%s -e in %s printed %q: %v", command, dir, answer, err))
@@ -282,7 +280,7 @@ func (g *gate) runtimeInstallation(command, rule, resolved string) (reported, ke
 func (g *gate) binaryInstallation(rule, resolved string) string {
 	parts := [][2]string{{"file", resolved}}
 	if rule == "git" {
-		output, err := g.queryTool("", false, resolved, "--exec-path")
+		output, err := queryTool("", false, resolved, "--exec-path")
 		execPath := strings.TrimSpace(string(output))
 		if err != nil || !filepath.IsAbs(execPath) {
 			return unlocated(fmt.Sprintf("git --exec-path printed %q: %v", execPath, err))
@@ -500,92 +498,30 @@ var errQueryTimeout = errors.New("no answer in time")
 
 // queryTool runs a tool in the steps' environment, in dir (the gate's own
 // directory when empty), and returns its standard output, or its combined
-// output when combined is set. Its deadline derives from the run's context,
-// which an interrupt cancels (catchInterrupts).
-func (g *gate) queryTool(dir string, combined bool, name string, args ...string) ([]byte, error) {
-	parent := g.ctx
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, cancel := context.WithTimeout(parent, toolQueryTimeout)
+// output when combined is set. The query runs in the gate's own process
+// group, so terminal signals reach it as they reach the gate. It never
+// holds the gate longer than toolQueryTimeout plus WaitDelay: at the
+// deadline the tool itself is killed, and a descendant still holding the
+// output pipes is cut off WaitDelay later. Such a descendant may outlive the
+// query.
+func queryTool(dir string, combined bool, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), toolQueryTimeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, name, args...)
 	command.Env = stepEnvironment()
 	command.Dir = dir
-	// On Unix the query runs in its own process group, killed whole on
-	// timeout, on interrupt and after the tool exits, so no process that
-	// stays in the group outlives it. A descendant that leaves the group
-	// (setsid) still holding the output pipes cannot hold the query past
-	// WaitDelay.
-	isolateQuery(command)
 	command.WaitDelay = time.Second
-	var output bytes.Buffer
-	command.Stdout = &output
+	var output []byte
+	var err error
 	if combined {
-		command.Stderr = &output
+		output, err = command.CombinedOutput()
+	} else {
+		output, err = command.Output()
 	}
-	// Starting under queriesMu, once the run's context is live, means an
-	// interrupt that has taken the lock sees every query it must kill.
-	g.queriesMu.Lock()
-	if err := parent.Err(); err != nil {
-		g.queriesMu.Unlock()
-		return nil, err
+	if ctx.Err() != nil {
+		return output, fmt.Errorf("%s %s: %w after %v", name, strings.Join(args, " "), errQueryTimeout, toolQueryTimeout)
 	}
-	err := command.Start()
-	if err == nil {
-		if g.queries == nil {
-			g.queries = map[*exec.Cmd]bool{}
-		}
-		g.queries[command] = true
-	}
-	g.queriesMu.Unlock()
-	if err == nil {
-		err = command.Wait()
-		endQuery(command)
-		g.queriesMu.Lock()
-		delete(g.queries, command)
-		g.queriesMu.Unlock()
-	}
-	if ctx.Err() != nil && parent.Err() == nil {
-		return output.Bytes(), fmt.Errorf("%s %s: %w after %v", name, strings.Join(args, " "), errQueryTimeout, toolQueryTimeout)
-	}
-	return output.Bytes(), err
-}
-
-// catchInterrupts gives the run a context that a stop signal cancels
-// (stopSignals: on Unix SIGINT, SIGTERM, SIGHUP and SIGQUIT). A query runs in
-// its own process group, which a terminal's Ctrl-C, Ctrl-\ or hangup does
-// not reach, so on a signal the gate cancels the context, kills every
-// running query's group, and then lets the signal take its default effect.
-// The returned function stops catching.
-func (g *gate) catchInterrupts() func() {
-	ctx, cancel := context.WithCancel(context.Background())
-	g.ctx = ctx
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, stopSignals...)
-	done := make(chan struct{})
-	go func() {
-		select {
-		case caught := <-signals:
-			// Reset first: should killing the queries stall (a query
-			// whose start hangs holds queriesMu), a second signal still
-			// takes its default effect.
-			signal.Reset(stopSignals...)
-			g.queriesMu.Lock()
-			cancel()
-			for command := range g.queries {
-				endQuery(command)
-			}
-			g.queriesMu.Unlock()
-			reraise(caught)
-		case <-done:
-		}
-	}()
-	return func() {
-		signal.Stop(signals)
-		close(done)
-		cancel()
-	}
+	return output, err
 }
 
 // unlocated is the fingerprint of an installation the gate cannot key: it

@@ -134,12 +134,6 @@ type gate struct {
 
 	installedDigests map[string]string
 	installedMu      sync.Mutex
-
-	// ctx is the run's context, cancelled by an interrupt; queries holds
-	// the tool queries running under it.
-	ctx       context.Context
-	queries   map[*exec.Cmd]bool
-	queriesMu sync.Mutex
 }
 
 func main() {
@@ -274,7 +268,6 @@ func (g *gate) run(out io.Writer) int {
 	// the first Go test step then finds the digest ready.
 	// The prefetches below are joined before run returns, so no digest or
 	// fingerprint work outlives the run that started it.
-	defer g.catchInterrupts()()
 	var prefetch sync.WaitGroup
 	defer prefetch.Wait()
 	for _, step := range g.steps {

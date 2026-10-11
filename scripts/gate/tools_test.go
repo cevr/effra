@@ -640,8 +640,8 @@ func TestRuntimeFingerprintOfADirectorySelectedRuntimeNeverRepeats(t *testing.T)
 }
 
 // A tool that does not answer a fingerprint's question in time keys as
-// unlocated rather than holding the gate. What a timed-out or finished
-// query leaves running is tested on Linux (tools_linux_test.go).
+// unlocated rather than holding the gate. Tools that fork a pipe holder,
+// and a gate under nohup, are tested on Linux (tools_linux_test.go).
 func TestToolFingerprintOfAHungToolNeverRepeats(t *testing.T) {
 	shortQueryTimeout(t)
 	bin := t.TempDir()
