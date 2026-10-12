@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -43,6 +45,28 @@ func write(t *testing.T, root, name, content string) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// repositorySteps returns the repository root and its gate steps, declared
+// over the packages the durations file shards rather than over `go list
+// ./...`: the test needs the declarations, not the package list, and listing
+// the packages walks every directory in the module, including the ones the
+// gate rewrites, so Go's test cache would never replay the test in a gate.
+func repositorySteps(t *testing.T) (string, []*Step) {
+	t.Helper()
+	repository, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	durations, err := readDurations(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, err := declareSteps(repository, slices.Sorted(maps.Keys(durations)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return repository, steps
 }
 
 func count(name string) []string {
@@ -359,14 +383,7 @@ func TestReferencesKeyCoversWhatTheCaptureCheckReads(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Fatal("node is required: the gate runs Node steps")
 	}
-	repository, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	steps, err := gateSteps(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
+	repository, steps := repositorySteps(t)
 	var declared *Inputs
 	for _, step := range steps {
 		if step.Name == "framework-port references" {

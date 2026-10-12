@@ -306,8 +306,11 @@ console.log(JSON.stringify(results));
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := filepath.Join("..", "..")
-	dir, err := os.MkdirTemp(root, ".cleanup-provenance-")
+	// Below the repository root, so the probe resolves effect from its
+	// node_modules, but not in the root itself: making a directory there
+	// moves the root's modification time, which nearly every test package
+	// records, and they would all rerun on the next gate.
+	dir, err := os.MkdirTemp(filepath.Join("testdata", "cleanup-provenance"), "probe-")
 	if err != nil {
 		t.Fatal(err)
 	}

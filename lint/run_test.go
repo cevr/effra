@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"effra.local/prototype/internal/testinputs"
 )
 
 var fixture struct {
@@ -24,7 +26,7 @@ var fixture struct {
 }
 
 func TestMain(m *testing.M) {
-	code := m.Run()
+	code := testinputs.Main(m)
 	if fixture.dir != "" {
 		os.RemoveAll(fixture.dir)
 	}
@@ -50,7 +52,7 @@ func fixturePack(t *testing.T) string {
 			return
 		}
 		fixture.path = filepath.Join(fixture.dir, executableName("fixturepack"))
-		if output, err := exec.Command("go", "build", "-o", fixture.path, "./testdata/fixturepack").CombinedOutput(); err != nil {
+		if output, err := exec.Command("go", "build", "-buildvcs=false", "-o", fixture.path, "./testdata/fixturepack").CombinedOutput(); err != nil {
 			fixture.err = errors.New(string(output))
 		}
 	})

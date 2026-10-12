@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -55,7 +57,20 @@ var testInstalled = []string{"node_modules"}
 // gofmtDirectories are the Go trees the gate requires to be gofmt-clean.
 var gofmtDirectories = []string{"cmd", "internal", "runtime", "lint", "scripts/gate", "scripts/conformance", "examples/go-interop", "examples/sdk", "examples/compare", "examples/hosttypes", "examples/lintpack"}
 
+// gateSteps declares the gate's steps over the module's Go packages.
 func gateSteps(root string) ([]*Step, error) {
+	packages, err := goPackages(root)
+	if err != nil {
+		return nil, err
+	}
+	return declareSteps(root, packages)
+}
+
+// declareSteps declares the gate's steps, testing the given Go packages. A
+// test that inspects a declaration passes the packages itself: listing them
+// walks the whole module, so Go's test cache would key that test on every
+// directory's entries, including the ones the gate's own steps rewrite.
+func declareSteps(root string, packages []string) ([]*Step, error) {
 	var steps []*Step
 	add := func(step *Step) *Step {
 		steps = append(steps, step)
@@ -108,10 +123,6 @@ func gateSteps(root string) ([]*Step, error) {
 	add(&Step{Name: "go test build", Argv: []string{"go", "test", "-run", "^$", "./..."}})
 	add(&Step{Name: "go vet", Needs: []string{"go test build"}, Argv: []string{"go", "vet", "./..."}})
 
-	packages, err := goPackages(root)
-	if err != nil {
-		return nil, err
-	}
 	durations, err := readDurations(root)
 	if err != nil {
 		return nil, err
@@ -146,7 +157,7 @@ func gateSteps(root string) ([]*Step, error) {
 	// new revision. The gate's bin/ef therefore declares no vcs.revision in
 	// its producer identity, while its artifact digest still identifies the
 	// executing bytes.
-	add(&Step{Name: "build bin/ef", Needs: []string{"go test build"}, Argv: []string{"go", "build", "-buildvcs=false", "-o", "bin/ef", "./cmd/ef"}})
+	add(&Step{Name: "build bin/ef", Needs: []string{"go test build"}, Argv: stagedBuild(root, "bin/ef", "./cmd/ef")})
 
 	examples, err := authoredExamples(root)
 	if err != nil {
@@ -155,6 +166,23 @@ func gateSteps(root string) ([]*Step, error) {
 	add(&Step{Name: "ef fmt --check", Needs: []string{"build bin/ef"}, Argv: append([]string{"./bin/ef", "fmt", "--check"}, examples...)})
 
 	return steps, nil
+}
+
+// stagedBuild returns a command that builds a package's executable to a
+// staging file beside the gate's cache and renames it onto out only when its
+// bytes differ. go build touches its output even when it relinks nothing,
+// and Go's test cache keys a test that listed a directory on every entry's
+// modification time, so rewriting an unchanged bin/ef would rerun every test
+// that lists bin/. Without a cache directory it builds in place.
+func stagedBuild(root, out, pkg string) []string {
+	cache := cacheDirectory()
+	if cache == "" {
+		return []string{"go", "build", "-buildvcs=false", "-o", out, pkg}
+	}
+	sum := sha256.Sum256([]byte(root))
+	staging := filepath.Join(cache, "build", hex.EncodeToString(sum[:8]), filepath.Base(out))
+	script := `mkdir -p "$(dirname "$1")" "$(dirname "$2")" && go build -buildvcs=false -o "$1" "$3" && { cmp -s "$1" "$2" || mv -f "$1" "$2"; }`
+	return []string{"sh", "-c", script, "sh", staging, out, pkg}
 }
 
 // wayfinderSnapshotInputs keys the check that the committed Wayfinder snapshot

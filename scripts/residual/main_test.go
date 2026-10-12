@@ -5,7 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"effra.local/prototype/internal/testinputs"
 )
+
+// TestMain runs the tests under observation, so the files and variables
+// any process they start reads are inputs of Go's test cache.
+func TestMain(m *testing.M) { os.Exit(testinputs.Main(m)) }
 
 // A relative -work names the same directory after the process, or a go
 // command it starts inside a generated module, changes directory.
