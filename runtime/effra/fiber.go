@@ -132,18 +132,13 @@ func (f *Fiber[A]) Join() Effect[A] {
 				return Interrupt[A](fc.ctx.Err())
 			}
 		}
-		resume := fc.suspendSchedulerCancellable()
-		select {
-		case <-waiter.done:
-			resume()
-			f.completed.consume(waiter)
-			f.observed.Store(true)
-			return f.exit
-		case <-fc.ctx.Done():
-			resume()
+		if interrupted := waitCancellable(fc, waiter.done); interrupted != nil {
 			f.completed.cancel(waiter)
-			return Interrupt[A](fc.ctx.Err())
+			return FromCause[A](interrupted)
 		}
+		f.completed.consume(waiter)
+		f.observed.Store(true)
+		return f.exit
 	}
 }
 

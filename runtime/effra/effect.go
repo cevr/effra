@@ -171,16 +171,40 @@ func (f *FiberContext) suspendSchedulerWithoutContinuation() func() {
 	return f.suspendSchedulerWith(nil)
 }
 
-// suspendSchedulerCancellable is suspendScheduler for a wait that also
-// selects on f.ctx.Done. Cancellation from any source, an interrupt, a scope
-// close or an ancestor's cancellation, then keeps the scheduler from looking
-// idle until this fiber resumes. Every managed wait that observes its context
-// must park through it.
-func (f *FiberContext) suspendSchedulerCancellable() func() {
-	if f == nil {
-		return func() {}
+// parkCancellable is the one managed wait that also observes the fiber's
+// cancellation; every such wait goes through it. It hands off the scheduler
+// turn, runs wait, and takes the turn back before it returns. wait blocks
+// until its own event, reporting true, or until cancelled closes, reporting
+// false.
+//
+// Two rules live here and nowhere else:
+//   - Quiescence: cancellation from any source (an interrupt, a scope close,
+//     an ancestor's cancellation) wakes the wait with no wake reservation, so
+//     from the moment the context is done until this fiber has its turn back
+//     the parked wait counts as runnable (TestScheduler.idleLocked).
+//   - Cause: a wait woken by cancellation ends in an ordinary interruption
+//     carrying the context's error, never a defect. The result is that cause,
+//     or nil when wait's event happened.
+func (f *FiberContext) parkCancellable(wait func(cancelled <-chan struct{}) bool) Cause {
+	resume := f.suspendSchedulerOn(f.continuation, f.ctx)
+	woke := wait(f.ctx.Done())
+	resume()
+	if woke {
+		return nil
 	}
-	return f.suspendSchedulerOn(f.continuation, f.ctx)
+	return Cause{{Kind: "interrupt", Err: f.ctx.Err()}}
+}
+
+// waitCancellable is parkCancellable for one ready channel.
+func waitCancellable[T any](f *FiberContext, ready <-chan T) Cause {
+	return f.parkCancellable(func(cancelled <-chan struct{}) bool {
+		select {
+		case <-ready:
+			return true
+		case <-cancelled:
+			return false
+		}
+	})
 }
 
 func (f *FiberContext) suspendSchedulerWith(continuation *schedulerContinuation) func() {
@@ -357,22 +381,15 @@ func sleepWithDriver(resolve func(*FiberContext) timerDriver, milliseconds int64
 		driver := normalizeTimerDriver(resolve(fc))
 		timer := driver.newTimer(time.Duration(milliseconds) * time.Millisecond)
 		defer timer.Stop()
-		resume := fc.suspendSchedulerCancellable()
-		select {
-		case <-timer.C():
-			resume()
-			if scheduler, ok := driver.(*TestScheduler); ok {
-				scheduler.resumeWait(timer.(*virtualTimer))
-			}
-			timer.acknowledge()
-			return Succeed(Unit{})
-		case <-fc.ctx.Done():
-			resume()
-			if scheduler, ok := driver.(*TestScheduler); ok {
-				scheduler.resumeWait(timer.(*virtualTimer))
-			}
-			return Interrupt[Unit](fc.ctx.Err())
+		interrupted := waitCancellable(fc, timer.C())
+		if scheduler, ok := driver.(*TestScheduler); ok {
+			scheduler.resumeWait(timer.(*virtualTimer))
 		}
+		if interrupted != nil {
+			return FromCause[Unit](interrupted)
+		}
+		timer.acknowledge()
+		return Succeed(Unit{})
 	}
 }
 
@@ -419,7 +436,6 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 		if timerWaiter != nil {
 			timerReady = timerWaiter.done
 		}
-		suspend := fc.suspendSchedulerCancellable()
 		nonInterrupt := func(c Cause) Cause {
 			retained := Cause{}
 			for _, reason := range c {
@@ -494,9 +510,20 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 				scheduler.completeContinuation(continuation)
 			}
 		}
-		select {
-		case <-childReady:
-			suspend()
+		childFirst := false
+		interrupted := fc.parkCancellable(func(cancelled <-chan struct{}) bool {
+			select {
+			case <-childReady:
+				childFirst = true
+				return true
+			case <-timerReady:
+				return true
+			case <-cancelled:
+				return false
+			}
+		})
+		switch {
+		case interrupted == nil && childFirst:
 			childDone.signal.consume(childWaiter)
 			finishWait := prepareWait()
 			defer finishWait()
@@ -509,8 +536,7 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 			child := childDone.get()
 			timer := timerDone.get()
 			return withCleanup(child, nonInterrupt(timer.Cause()))
-		case <-timerReady:
-			suspend()
+		case interrupted == nil:
 			timerDone.signal.consume(timerWaiter)
 			finishWait := prepareWait()
 			defer finishWait()
@@ -533,8 +559,7 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 				return FromCause[A](append(timer.Cause(), retained...))
 			}
 			return FromCause[A](append(Cause{{Kind: "failure", Failure: &Failure{Tag: "Timeout"}}}, append(retained, timerRetained...)...))
-		case <-fc.ctx.Done():
-			suspend()
+		default:
 			finishWait := prepareWait()
 			defer finishWait()
 			childContinuation := bindProducer(childScope)
@@ -555,7 +580,7 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 			child := childDone.get()
 			timer := timerDone.get()
 			retained := append(nonInterrupt(child.Cause().withoutFailures()), nonInterrupt(timer.Cause())...)
-			return FromCause[A](append(Cause{{Kind: "interrupt", Err: fc.ctx.Err()}}, retained...))
+			return FromCause[A](append(interrupted, retained...))
 		}
 	}
 }

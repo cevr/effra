@@ -304,14 +304,9 @@ func (b *layerBuild[S]) awaitEntry(fc *FiberContext, index int) Exit[Unit] {
 	entry := &b.entries[index]
 	waiter, complete := entry.outcome.register(fc.turnScheduler())
 	if !complete {
-		resume := fc.suspendSchedulerCancellable()
-		select {
-		case <-waiter.done:
-			resume()
-		case <-fc.ctx.Done():
-			resume()
+		if interrupted := waitCancellable(fc, waiter.done); interrupted != nil {
 			entry.outcome.cancel(waiter)
-			return Interrupt[Unit](fc.ctx.Err())
+			return FromCause[Unit](interrupted)
 		}
 	}
 	entry.outcome.consume(waiter)
@@ -382,17 +377,14 @@ func (b *layerBuild[S]) await() {
 		b.settled.consume(waiter)
 		return
 	}
-	resume := fc.suspendSchedulerCancellable()
-	select {
-	case <-waiter.done:
-		resume()
+	if waitCancellable(fc, waiter.done) == nil {
 		b.settled.consume(waiter)
-	case <-fc.ctx.Done():
-		// The cancelled caller is runnable: it takes its turn back to abort the
+	} else {
+		// The cancelled caller is runnable: it has its turn back to abort the
 		// build, then parks on the producers alone. Staying parked on the
 		// cancelled context would hold idleness, and partial adjustment, until
 		// producers that may need that adjustment have finished.
-		resume()
+		//
 		// Settle cancellation under the same mutex as successful publication.
 		b.mu.Lock()
 		if !b.settled.isComplete() {

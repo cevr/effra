@@ -69,22 +69,15 @@ func AwaitLatch(latch *Latch) Effect[Unit] {
 				latch.consumeManaged(waiter)
 				return Succeed(Unit{})
 			}
-			resume := fc.suspendSchedulerCancellable()
-			select {
-			case <-waiter.done:
-				resume()
-				latch.consumeManaged(waiter)
-				return Succeed(Unit{})
-			case <-fc.Context().Done():
-				resume()
+			if interrupted := waitCancellable(fc, waiter.done); interrupted != nil {
 				latch.cancelManaged(waiter)
-				return Interrupt[Unit](fc.Context().Err())
+				return FromCause[Unit](interrupted)
 			}
+			latch.consumeManaged(waiter)
+			return Succeed(Unit{})
 		}
-		resume := fc.suspendSchedulerCancellable()
-		err := latch.Await(fc.Context())
-		resume()
-		if err != nil {
+		// Without a test scheduler there is no turn to hand off.
+		if err := latch.Await(fc.Context()); err != nil {
 			return Interrupt[Unit](err)
 		}
 		return Succeed(Unit{})

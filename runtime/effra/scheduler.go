@@ -68,9 +68,25 @@ type TestScheduler struct {
 	// a parked wait as runnable from the moment its context is done until the
 	// fiber has its turn back.
 	cancellable map[*cancellableWait]struct{}
+	// hooks are ordering points for runtime tests. They are nil otherwise and
+	// are set before the scheduler runs any fiber.
+	hooks *schedulerHooks
 }
 
 type cancellableWait struct{ ctx context.Context }
+
+// schedulerHooks let a runtime test hold a scheduler window open instead of
+// racing for it.
+type schedulerHooks struct {
+	// cancelledResume runs in a fiber whose cancellable wait was woken by its
+	// cancelled context, before the fiber reclaims the turn.
+	cancelledResume func()
+	// idleChecked runs under the scheduler mutex each time awaitIdle decides.
+	// window reports the state only the cancellation rule makes non-idle:
+	// every counter is idle and a parked wait's context is done. idle is the
+	// barrier's verdict.
+	idleChecked func(window, idle bool)
+}
 
 type continuationState uint8
 
@@ -254,6 +270,9 @@ func (s *TestScheduler) suspendWait(ctx context.Context) func() {
 	s.mu.Unlock()
 	s.turn <- struct{}{}
 	return func() {
+		if wait != nil && s.hooks != nil && s.hooks.cancelledResume != nil && wait.ctx.Err() != nil {
+			s.hooks.cancelledResume()
+		}
 		<-s.turn
 		s.mu.Lock()
 		if wait != nil {
@@ -375,15 +394,24 @@ func (s *TestScheduler) Now() int64 {
 // timer that managed work can register without outside input is registered.
 // Adjust and the managed barrier share this one predicate.
 func (s *TestScheduler) idleLocked() bool {
-	if s.active != 0 || s.pendingWakes != 0 || s.continuations != 0 {
-		return false
-	}
+	return s.countersIdleLocked() && !s.cancelledWaitLocked()
+}
+
+// countersIdleLocked reports that no fiber holds or awaits the turn, no wake
+// is reserved and no cleanup boundary is runnable.
+func (s *TestScheduler) countersIdleLocked() bool {
+	return s.active == 0 && s.pendingWakes == 0 && s.continuations == 0
+}
+
+// cancelledWaitLocked reports a parked cancellable wait whose context is done:
+// a fiber woken by cancellation that has not had its turn back.
+func (s *TestScheduler) cancelledWaitLocked() bool {
 	for wait := range s.cancellable {
 		if wait.ctx.Err() != nil {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 // AwaitNextRegistration is the host controller's edge-triggered handshake: it
@@ -422,24 +450,29 @@ func (s *TestScheduler) AwaitNextRegistration(ctx context.Context) error {
 // level-triggered: forked work that already completed, or whose timeout timer
 // was cancelled, registers nothing and still passes. It is sound only for a
 // caller inside a managed fiber, where every fiber is admitted before it
-// starts, so an unstarted fork cannot look idle.
-func (s *TestScheduler) awaitIdle(ctx context.Context) error {
+// starts, so an unstarted fork cannot look idle. It reports false if
+// cancelled closes first, and errSchedulerClosed once the scheduler is closed.
+func (s *TestScheduler) awaitIdle(cancelled <-chan struct{}) (bool, error) {
 	for {
 		s.mu.Lock()
 		if s.closed {
 			s.mu.Unlock()
-			return errSchedulerClosed
+			return true, errSchedulerClosed
 		}
-		if s.idleLocked() {
+		idle := s.idleLocked()
+		if s.hooks != nil && s.hooks.idleChecked != nil {
+			s.hooks.idleChecked(s.countersIdleLocked() && s.cancelledWaitLocked(), idle)
+		}
+		if idle {
 			s.mu.Unlock()
-			return nil
+			return true, nil
 		}
 		signal := s.stateChanged
 		s.mu.Unlock()
 		select {
 		case <-signal:
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-cancelled:
+			return false, nil
 		}
 	}
 }
@@ -535,18 +568,6 @@ func (s *TestScheduler) adjustInFiber(fc *FiberContext, milliseconds int64) erro
 	return s.Adjust(milliseconds)
 }
 
-// awaitRegistrationInFiber parks the calling managed fiber, including any
-// cleanup boundary it runs under, so the barrier does not wait on its own
-// caller, then waits for idleness.
-func (s *TestScheduler) awaitRegistrationInFiber(fc *FiberContext) error {
-	if fc == nil || fc.turnScheduler() != s {
-		return errors.New("test scheduler is not active for this fiber")
-	}
-	resume := fc.suspendSchedulerCancellable()
-	defer resume()
-	return s.awaitIdle(fc.Context())
-}
-
 // AdjustTestScheduler is the managed runtime boundary for the built-in
 // Scheduler provider. It suspends the caller's turn while the controller
 // drains virtual time, then resumes the caller before returning.
@@ -562,11 +583,27 @@ func AdjustTestScheduler(fc *FiberContext, scheduler *TestScheduler, millisecond
 
 // AwaitTestSchedulerRegistration is the managed registration barrier for the
 // built-in Scheduler provider: it returns once no managed fiber is runnable.
+// The caller parks its turn, and any cleanup boundary it runs under, as a
+// cancellable wait, so the barrier does not wait on its own caller and an
+// interrupted barrier ends in an ordinary interruption. A nil, closed or
+// inactive scheduler is a defect.
 func AwaitTestSchedulerRegistration(fc *FiberContext, scheduler *TestScheduler) Exit[Unit] {
 	if scheduler == nil {
 		return Die[Unit](errors.New("nil test scheduler"))
 	}
-	if err := scheduler.awaitRegistrationInFiber(fc); err != nil {
+	if fc == nil || fc.turnScheduler() != scheduler {
+		return Die[Unit](errors.New("test scheduler is not active for this fiber"))
+	}
+	var err error
+	interrupted := fc.parkCancellable(func(cancelled <-chan struct{}) bool {
+		var woke bool
+		woke, err = scheduler.awaitIdle(cancelled)
+		return woke
+	})
+	if interrupted != nil {
+		return FromCause[Unit](interrupted)
+	}
+	if err != nil {
 		return Die[Unit](err)
 	}
 	return Succeed(Unit{})
