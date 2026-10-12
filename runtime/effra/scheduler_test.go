@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1474,57 +1475,77 @@ func TestManagedRegistrationBarrierReturnsAtIdle(t *testing.T) {
 // reservation, and the canceller then parks on the woken fiber's completion.
 // Until the woken fiber has its turn back it is runnable, so the managed
 // barrier must not return in that window. Each case forks a worker that parks
-// a victim, gives it a turn by joining an immediate fork, cancels it and then
-// marks completion; the barrier must observe the mark. The window is narrow,
-// so run it at a high -count.
+// a victim, waits at its own barrier until the victim is parked, releases the
+// root, cancels the victim and then marks completion. The root's barrier,
+// entered after that release, must observe the mark.
+//
+// The window is held open, not raced for: the woken victim waits in the
+// cancelledResume hook until a barrier has decided once inside the window,
+// every counter idle while the victim's context is done. Without the
+// cancellation rule that decision is idle and the root's barrier returns
+// before the mark, every run.
 func TestManagedBarrierCountsCancellationWakes(t *testing.T) {
-	immediate := func(*FiberContext) Exit[Unit] { return Succeed(Unit{}) }
-	park := func(fc *FiberContext, victim Effect[Unit]) (*Fiber[Unit], Exit[Unit]) {
-		parked := Invoke(fc, Fork(victim))
-		if parked.IsFailure() {
-			return nil, Propagate[Unit](parked)
-		}
-		turn := Invoke(fc, Fork(immediate))
-		if turn.IsFailure() {
-			return nil, Propagate[Unit](turn)
-		}
-		return parked.Value, Invoke(fc, turn.Value.Join())
-	}
 	for _, test := range []struct {
 		name   string
-		cancel func(fc *FiberContext, latch *Latch) Exit[Unit]
+		cancel func(fc *FiberContext, park func(*FiberContext, Effect[Unit]) (*Fiber[Unit], Exit[Unit])) Exit[Unit]
+		victim func(latch *Latch) Effect[Unit]
 	}{
-		{"interrupt sleeper", func(fc *FiberContext, _ *Latch) Exit[Unit] {
-			victim, out := park(fc, Sleep(1000))
-			if out.IsFailure() {
-				return out
-			}
-			return Invoke(fc, victim.Interrupt())
-		}},
-		{"interrupt latch waiter", func(fc *FiberContext, latch *Latch) Exit[Unit] {
-			victim, out := park(fc, AwaitLatch(latch))
-			if out.IsFailure() {
-				return out
-			}
-			return Invoke(fc, victim.Interrupt())
-		}},
-		{"scope close", func(fc *FiberContext, _ *Latch) Exit[Unit] {
+		{"interrupt sleeper", nil, func(*Latch) Effect[Unit] { return Sleep(1000) }},
+		{"interrupt latch waiter", nil, func(latch *Latch) Effect[Unit] { return AwaitLatch(latch) }},
+		{"scope close", func(fc *FiberContext, park func(*FiberContext, Effect[Unit]) (*Fiber[Unit], Exit[Unit])) Exit[Unit] {
 			return Invoke(fc, Scoped(func(inner *FiberContext) Exit[Unit] {
 				_, out := park(inner, Sleep(1000))
 				return out
 			}))
-		}},
+		}, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			scheduler := NewTestScheduler()
+			release := make(chan struct{})
+			verdict := make(chan bool, 1)
+			var decided sync.Once
+			scheduler.hooks = &schedulerHooks{
+				cancelledResume: func() { <-release },
+				idleChecked: func(window, idle bool) {
+					if window {
+						decided.Do(func() {
+							verdict <- idle
+							close(release)
+						})
+					}
+				},
+			}
 			latch := NewLatch()
+			ready := NewLatch()
+			// park forks the victim and returns once it is parked: the worker's
+			// own barrier is the ordering point. It then releases the root.
+			park := func(fc *FiberContext, victim Effect[Unit]) (*Fiber[Unit], Exit[Unit]) {
+				parked := Invoke(fc, Fork(victim))
+				if parked.IsFailure() {
+					return nil, Propagate[Unit](parked)
+				}
+				if out := AwaitTestSchedulerRegistration(fc, scheduler); out.IsFailure() {
+					return nil, out
+				}
+				return parked.Value, Invoke(fc, SignalLatch(ready))
+			}
+			cancel := test.cancel
+			if cancel == nil {
+				cancel = func(fc *FiberContext, park func(*FiberContext, Effect[Unit]) (*Fiber[Unit], Exit[Unit])) Exit[Unit] {
+					victim, out := park(fc, test.victim(latch))
+					if out.IsFailure() {
+						return out
+					}
+					return Invoke(fc, victim.Interrupt())
+				}
+			}
 			marked := make(chan struct{})
 			observed := make(chan bool, 1)
 			done := make(chan Exit[Unit], 1)
 			go func() {
 				done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
 					worker := Invoke(fc, Fork(func(child *FiberContext) Exit[Unit] {
-						if out := test.cancel(child, latch); out.IsFailure() {
+						if out := cancel(child, park); out.IsFailure() {
 							return out
 						}
 						close(marked)
@@ -1532,6 +1553,9 @@ func TestManagedBarrierCountsCancellationWakes(t *testing.T) {
 					}))
 					if worker.IsFailure() {
 						return Propagate[Unit](worker)
+					}
+					if out := Invoke(fc, AwaitLatch(ready)); out.IsFailure() {
+						return out
 					}
 					if out := AwaitTestSchedulerRegistration(fc, scheduler); out.IsFailure() {
 						return out
@@ -1545,6 +1569,14 @@ func TestManagedBarrierCountsCancellationWakes(t *testing.T) {
 					return Invoke(fc, worker.Value.Join())
 				})
 			}()
+			select {
+			case idle := <-verdict:
+				if idle {
+					t.Fatal("barrier judged idle while a fiber woken by cancellation had not run again")
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("no barrier decided inside the cancellation window")
+			}
 			select {
 			case settled := <-observed:
 				if !settled {
@@ -1562,5 +1594,41 @@ func TestManagedBarrierCountsCancellationWakes(t *testing.T) {
 				t.Fatal("cancellation root did not finish")
 			}
 		})
+	}
+}
+
+// Interrupting a fiber parked in the managed barrier is an ordinary
+// interruption: the barrier's cancelled wait ends in an interrupt cause, not a
+// defect, so Interrupt succeeds. The waiter signals before it enters the
+// barrier and keeps the turn until it parks there, so the interrupt always
+// reaches it parked.
+func TestInterruptingABarrierWaiterIsAnInterruption(t *testing.T) {
+	scheduler := NewTestScheduler()
+	entered := NewLatch()
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+			waiter := Invoke(fc, Fork(func(child *FiberContext) Exit[Unit] {
+				if out := Invoke(child, SignalLatch(entered)); out.IsFailure() {
+					return out
+				}
+				return AwaitTestSchedulerRegistration(child, scheduler)
+			}))
+			if waiter.IsFailure() {
+				return Propagate[Unit](waiter)
+			}
+			if out := Invoke(fc, AwaitLatch(entered)); out.IsFailure() {
+				return out
+			}
+			return Invoke(fc, waiter.Value.Interrupt())
+		})
+	}()
+	select {
+	case out := <-done:
+		if out.IsFailure() {
+			t.Fatalf("interrupting a barrier waiter failed: %+v", out.Cause())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("interrupting a barrier waiter did not finish")
 	}
 }
