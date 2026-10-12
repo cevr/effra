@@ -2,7 +2,9 @@
 
 **Go's directness and native binaries. Effect's typed failures, explicit dependencies and owned lifetimes. Algebraic data types with exhaustive matching. One small language.**
 
-Effra is an experimental language for servers. You write `.ef` files and `ef` compiles them to a single static Go executable, or to JavaScript built on [Effect](https://effect.website). Every function signature states what it returns, every way it can fail and every service it needs, and the compiler checks all three.
+Effra is an experimental application language. You write `.ef` files and `ef` compiles them to a single static Go executable, or to JavaScript built on [Effect](https://effect.website). Every function signature states what it returns, every way it can fail and every service it needs, and the compiler checks all three.
+
+The aim is application code of every kind, on servers and in front-ends: anything JavaScript can run, with more guardrails and with I/O handled by checked effects instead of promises. What runs today is server-focused. Front-end support, including canvas and WebGL rendering, is [direction](NORTH_STAR.md) and not built yet ([#117](https://github.com/cevr/effra/issues/117)).
 
 > **Status: runnable prototype.** Everything in the first two sections compiles and runs today. The gate checks every Effra snippet that isn't labelled as a sketch. Syntax and APIs will still change.
 
@@ -376,6 +378,9 @@ Each row states what has landed on this branch, what is in flight and what is on
 | State machines: ordinary step functions run by an owned runtime | [Specified](docs/specs/state-machines.md); not built |
 | Actors with explicit mailbox budgets and owned behavior | [Specified](docs/specs/actors.md); not built |
 | Evidence and proofs: values that carry what was checked | [Designed](docs/research/opaque-values-and-evidence.md) |
+| Front-end application code: floating point, loops, numeric buffers and a canvas/WebGL render loop on the JS target | Direction; not built ([#117](https://github.com/cevr/effra/issues/117)) |
+| Swappable effect runtimes: a userland provider admitted by the runtime laws, with pinned Effect as the JS default | [Specified research](docs/research/lawful-runtime-contract.md); neither the RS1 law suite ([#124](https://github.com/cevr/effra/issues/124)) nor the Effect-suite harness ([#123](https://github.com/cevr/effra/issues/123)) runs yet |
+| Laws as a general construct for behavior types can't state | Admitted, not built; shape open ([#125](https://github.com/cevr/effra/issues/125)) |
 
 ### Proofs you can't forget to check
 
@@ -481,4 +486,4 @@ go test -race ./...
 
 The gate also verifies the pinned Effect reference tests, which live in a submodule: run `scripts/init_upstream.sh` once per clone or worktree first.
 
-Fast compilation is a design constraint; see the [measurement receipts](docs/prototype.md#baseline). Effra is a server language. Kernels, hard real-time and no-GC execution are out of scope.
+Fast compilation is a design constraint; see the [measurement receipts](docs/prototype.md#baseline). Effra is an application language for servers and front-ends. Kernels, hard real-time and no-GC execution are out of scope.
