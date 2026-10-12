@@ -1,0 +1,19 @@
+// expect: accepted (a) keyed by a record wrapping a function, with explicit functions
+fn keyedBy<K: type>(key: K, hash: fn(K) -> i64, equals: fn(K, K) -> bool) -> i64 {
+    if equals(key, key) { hash(key) } else { 0 }
+}
+record FnKey {
+    f: fn(i64) -> i64
+}
+fn double(n: i64) -> i64 {
+    n * 2
+}
+fn fnKeyHash(k: FnKey) -> i64 {
+    0
+}
+fn fnKeyEquals(a: FnKey, b: FnKey) -> bool {
+    true
+}
+effect fn main() -> i64 {
+    keyedBy(FnKey { f: double }, fnKeyHash, fnKeyEquals)
+}

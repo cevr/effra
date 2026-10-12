@@ -1,0 +1,19 @@
+// expect: accepted (b) keyed by a record wrapping a function, with owner methods (review-1 probe p2)
+fn keyed<K: type>(key: K) -> i64 where K.hash: fn(K) -> i64, K.equals: fn(K, K) -> bool {
+    if K.equals(key, key) { K.hash(key) } else { 0 }
+}
+record FnKey {
+    f: fn(i64) -> i64
+}
+fn double(n: i64) -> i64 {
+    n * 2
+}
+fn (k: FnKey) hash() -> i64 {
+    0
+}
+fn (a: FnKey) equals(b: FnKey) -> bool {
+    true
+}
+effect fn main() -> i64 {
+    keyed(FnKey { f: double })
+}

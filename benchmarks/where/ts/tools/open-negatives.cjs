@@ -1,7 +1,8 @@
 // For each @ts-expect-error in the given files, reports the diagnostics TypeScript gives
 // on the guarded statement once the directive is removed (in memory; files are not changed).
+// Exits 1 when a directive suppresses nothing, or when the files hold no directive.
 // Usage: node open-negatives.cjs <dir> <file>...
-const ts = require('/home/exedev/Developer/personal/effect-oxlint/node_modules/typescript');
+const ts = require(require('path').resolve(__dirname, '../../../../conformance/framework-ports/ports/node_modules/typescript'));
 const path = require('path');
 const fs = require('fs');
 const dir = process.argv[2];
@@ -43,3 +44,4 @@ for (const l of labels) {
   }
 }
 console.log('directives=' + labels.length + ' without a diagnostic=' + missing);
+if (missing > 0 || labels.length === 0) process.exitCode = 1;

@@ -1,5 +1,6 @@
-// Counts `any` type keywords (AST AnyKeyword nodes) and \bany\b word matches per file.
-const ts = require('/home/exedev/Developer/personal/effect-oxlint/node_modules/typescript');
+// Counts `any` type keywords (AST AnyKeyword nodes) and \bany\b word matches per file;
+// exits 1 when any file has an `any` keyword.
+const ts = require(require('path').resolve(__dirname, '../../../../conformance/framework-ports/ports/node_modules/typescript'));
 const fs = require('fs');
 for (const f of process.argv.slice(2)) {
   const text = fs.readFileSync(f, 'utf8');
@@ -10,4 +11,5 @@ for (const f of process.argv.slice(2)) {
   visit(sf);
   const words = (text.match(/\bany\b/g) || []).length;
   console.log(f + ': any keywords=' + keywords + (lines.length ? ' (lines ' + lines.join(',') + ')' : '') + ', word matches=' + words);
+  if (keywords > 0) process.exitCode = 1;
 }
