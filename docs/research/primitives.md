@@ -6,7 +6,7 @@ Appendices:
 - [primitives/effect-study.md](primitives/effect-study.md): Effect 4 kernel and derived operations, with file:line.
 - [primitives/prior-art.md](primitives/prior-art.md): the wider prior art.
 - `primitives/corpus/<option>/`: the corpus rewritten per option (H, P, A–E, and today).
-- `primitives/corpus-main/<option>/`: the examples main added after the corpus froze (machine decisions, scheduler quiescence), for today and H only (§8.1).
+- `primitives/corpus-main/<option>/`: the examples main added after the corpus froze (machine decisions, scheduler quiescence, latch handoff), for today and H only (§8.1).
 - `primitives/blind-reader/<option>/`: blind-reader packets; the answer key is [primitives/blind-reader-key.md](primitives/blind-reader-key.md).
 - `benchmarks/syntax/measure.ts`: the corpus metrics and the one classification of forms that every option is scored against.
 - The prototype lives on branch `wf10/spike-syntax-proto`, under `docs/research/primitives/prototype/`. Head `110fa3da` prototypes option H after review 4; `96155c4f` was round 4's head, `0ef605b2` round 3's, `bc263cf8` round 2's H, `073de983` round 1's option P, and `e11047a3` adds the baseline probes run with the main compiler. That branch is never merged.
@@ -622,16 +622,16 @@ Reading the table:
 
 H replaced C's two helpers with `.provideService` on a fork (`corpus/H/causal.ef`, `testing.ef`). Since that is library awaiting F3b, today's checker would still need the helpers. The corpus scopes mostly span whole function bodies, so the inline nested-lifetime count may understate real code. That costs P a helper per site and costs H nothing, because `scope` is inline.
 
-**Main moved on after the corpus froze** (round 4). Merging main brought two changes:
+**Main moved on after the corpus froze** (rounds 4 and 5). Merging main brought these changes:
 - Main reserved the machine decision words (`enter`, `stay`, `ignore`, `reject`, `done`), so `let done` in `recovery-outcome.ef` became `let settled` in every option, as main did in its own example. The totals above are unchanged by it.
-- Main added three examples that touch the #134 surface: `machine-breaker.ef` (a provided effectful machine step) and `quiescence.ef` and `quiescence-wakes.ef` (scheduler quiescence, 25 fork sites: 10 and 15). They are rewritten for today and H only, under `primitives/corpus-main/`, because the losing options are recorded as of their round and not maintained. `measure.ts` reports the extension separately and fails on an H lookalike or an ownerless H fork there too.
+- Main added three examples that touch the #134 surface: `machine-breaker.ef` (a provided effectful machine step) and `quiescence.ef` and `quiescence-wakes.ef` (scheduler quiescence, 25 fork sites: 10 and 15). In round 5, main added `latch-handoff.ef` (latch handoff under serialized execution, 16 fork sites; main `fb762763`). All four are rewritten for today and H only, under `primitives/corpus-main/`, because the losing options are recorded as of their round and not maintained. `measure.ts` reports the extension separately and fails on an H lookalike or an ownerless H fork there too.
 
 | Option | Files | Tokens | vs today | Code lines | Distinct keywords | Punct/line | Lookalikes (#134) | Keyed today |
 |---|---|---|---|---|---|---|---|---|
-| today | 3 | 1875 | 0 | 261 | 24 | 3.46 | 35 (`.join` 21, `.interrupt` 14) | 41 |
-| **H** | 3 | **1765** | **-5.9%** | 295 | 26 | 2.77 | **0** | 3 |
+| today | 4 | 2795 | 0 | 366 | 24 | 3.65 | 52 (`.join` 33, `.interrupt` 19) | 64 |
+| **H** | 4 | **2638** | **-5.6%** | 414 | 26 | 2.93 | **0** | 9 |
 
-In the two quiescence examples every fork but two (in one existing scope) is ownerless today. H wraps 16 function bodies in `scope { }` (7 and 9), which is why its line count rises. These examples are not in the prototype's forced inventory, whose base predates them (§8.3), so they add to U4's migration.
+Round 4's three files alone measured today 1875 tokens and 35 lookalikes, H 1765 (−5.9%) and 0. In the two quiescence examples every fork but two (in one existing scope) is ownerless today, and in `latch-handoff.ef` every fork outside its two existing scopes is. H wraps 23 function bodies in `scope { }` (7, 9 and 7), which is why its line count rises. These examples are not in the prototype's forced inventory, whose base predates them (§8.3), so they add to U4's migration.
 
 ### 8.2 Blind readers
 
@@ -796,7 +796,7 @@ The inline cases add a pure fallback (`catch<Bad>("caught")`), a handler on the 
 
 Most of the reported sources are the compiler suite's own generated fixtures, which fork into the caller's owner on purpose to test R9 and composite causes. Their migration is a decision about which owner each child should have, so it cannot be automatic.
 
-`examples/causal.ef`, the only affected example on the prototype base, is now reported for manual migration: its regions run test `Scheduler` steps between the fork and the join, which round 4's allowlist admitted and the structural rule does not. Main's later quiescence examples (§8.1) are not in this inventory; they run `Scheduler` and `Sync` steps between forks and joins too, so they are manual under the same rule.
+`examples/causal.ef`, the only affected example on the prototype base, is now reported for manual migration: its regions run test `Scheduler` steps between the fork and the join, which round 4's allowlist admitted and the structural rule does not. Main's later examples (`quiescence.ef`, `quiescence-wakes.ef`, `latch-handoff.ef`; §8.1) are not in this inventory; they run `Scheduler` and `Sync` steps between forks and joins too, so they are manual under the same rule.
 
 ## 9. Decision record
 
@@ -837,7 +837,7 @@ Most of the reported sources are the compiler suite's own generated fixtures, wh
 | U1 | P13 race kernel: n-ary race block in both runtimes, the symmetric policy classified at selection, K1–K5 law tests including the latch arm-reversal test; amend `lawful-runtime-contract.md:63` | 3 | now; the prototype exists |
 | U2 | Duration literals plus a nominal `Duration`; the formatter prints literals | 2 | now |
 | U3 | Provide block, replacing `.provide(App)`, always an owner of its body and of forks in it (K17), with any block body for both header shapes; graph, lint and inspection read the header | 4 | now |
-| U4 | Owned fork, `run child` read by type in the checker and `interrupt child`, behind an explicit edition (O13). `ef fix` wraps only regions where nothing in the new scope runs except owned forks of pure operands, their plain joins and pure local values, and reports the rest (§8.3), with the behaviour proof in CI: per-target counts, emission failures fatal, cancellation cases, and the owner-tree difference documented to users. Migrate by hand the 33 tests, `examples/causal.ef`, main's quiescence examples (§8.1) and the 1113 reported sources. Drop `.cancel()`. | 7 | after O1, O13 |
+| U4 | Owned fork, `run child` read by type in the checker and `interrupt child`, behind an explicit edition (O13). `ef fix` wraps only regions where nothing in the new scope runs except owned forks of pure operands, their plain joins and pure local values, and reports the rest (§8.3), with the behaviour proof in CI: per-target counts, emission failures fatal, cancellation cases, and the owner-tree difference documented to users. Migrate by hand the 33 tests, `examples/causal.ef`, main's later examples (§8.1) and the 1113 reported sources. Drop `.cancel()`. | 7 | after O1, O13 |
 | U5 | Formatter and LSP for the new blocks (hover, including "joins child `c`" for O10; folding; completion of plan entries) | 2 | with U3, U4 |
 | U6 | Library timeout family, `either`, `delay`, `retry`/`Schedule` in `.ef`; K14 and K15 probes | 3 | after #127, #128 Q9 |
 | U7 | `.provideService<S>` as library | 1 | after F3b (#126, #132) |
@@ -950,7 +950,7 @@ The six minors are fixed in place:
 
 The three optionals are taken as text: K9's revisit with P5 (U-K9), O10's two halves, and the AST rewrite contract (U-AST).
 
-Main was merged into the note branch without conflicts. Main's reserved decision words renamed `let done` in one corpus file, and main's three new examples on the #134 surface are measured for today and H (§8.1).
+Main was merged into the note branch without conflicts (and again in round 5, also without conflicts, bringing `latch-handoff.ef` into `corpus-main`). Main's reserved decision words renamed `let done` in one corpus file, and main's three new examples on the #134 surface are measured for today and H (§8.1).
 
 **Round 5 (2026-10-12, after review 4).** Review 4 returned changes: 0 Blocker, 1 Major, 3 Minor and 4 Optional findings. It found decisions 1 and 3 met, and the Effect corrections, the race wording, the main merge and the decision record sound.
 - **Major 1, `ef fix`.** Round 4's claim was stronger than its rule: an admitted `recover` handler or an allowlisted service operation ran user code under the new scope (r1, r2, r8). The orchestrator fixed a structural rule: a region is wrapped only when nothing in the new scope runs except the owned forks of pure operands, their plain joins and pure local values. The allowlist is gone, handlers are reported, r1, r2 and r8 are refused tests, and the inventory was re-run: 16 sources wrapped in full and 3 in part, 1113 manual. The claim in §0 and §8.3 now covers exactly those regions, and U4 rose to 7 days on a stated per-generator assumption.

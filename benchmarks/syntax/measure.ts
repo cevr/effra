@@ -406,7 +406,7 @@ if (!chosenReport) {
 
 // The corpus-main extension: examples that main added after the shared
 // corpus was frozen (main at ec4a5a9e: machine decisions and scheduler
-// quiescence), rewritten for the baseline and the chosen option only. It is
+// quiescence; main at fb762763: latch handoff), rewritten for the baseline and the chosen option only. It is
 // reported apart so the shared comparison stays like for like, and the
 // chosen option's checks (no lookalike, every fork owned) apply to it.
 const extension = join(root, "docs", "research", "primitives", "corpus-main");
