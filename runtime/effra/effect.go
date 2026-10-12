@@ -171,12 +171,28 @@ func (f *FiberContext) suspendSchedulerWithoutContinuation() func() {
 	return f.suspendSchedulerWith(nil)
 }
 
+// suspendSchedulerCancellable is suspendScheduler for a wait that also
+// selects on f.ctx.Done. Cancellation from any source, an interrupt, a scope
+// close or an ancestor's cancellation, then keeps the scheduler from looking
+// idle until this fiber resumes. Every managed wait that observes its context
+// must park through it.
+func (f *FiberContext) suspendSchedulerCancellable() func() {
+	if f == nil {
+		return func() {}
+	}
+	return f.suspendSchedulerOn(f.continuation, f.ctx)
+}
+
 func (f *FiberContext) suspendSchedulerWith(continuation *schedulerContinuation) func() {
+	return f.suspendSchedulerOn(continuation, nil)
+}
+
+func (f *FiberContext) suspendSchedulerOn(continuation *schedulerContinuation, cancellation context.Context) func() {
 	if f == nil || f.turn == nil {
 		return func() {}
 	}
 	f.turn.parkContinuation(continuation)
-	resume := f.turn.suspend()
+	resume := f.turn.suspendWait(cancellation)
 	return func() {
 		resume()
 		f.turn.unparkContinuation(continuation)
@@ -341,7 +357,7 @@ func sleepWithDriver(resolve func(*FiberContext) timerDriver, milliseconds int64
 		driver := normalizeTimerDriver(resolve(fc))
 		timer := driver.newTimer(time.Duration(milliseconds) * time.Millisecond)
 		defer timer.Stop()
-		resume := fc.suspendScheduler()
+		resume := fc.suspendSchedulerCancellable()
 		select {
 		case <-timer.C():
 			resume()
@@ -403,7 +419,7 @@ func TimeoutWithEffect[A any](program Effect[A], deadline Effect[Unit]) Effect[A
 		if timerWaiter != nil {
 			timerReady = timerWaiter.done
 		}
-		suspend := fc.suspendScheduler()
+		suspend := fc.suspendSchedulerCancellable()
 		nonInterrupt := func(c Cause) Cause {
 			retained := Cause{}
 			for _, reason := range c {

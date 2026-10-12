@@ -132,7 +132,7 @@ func (f *Fiber[A]) Join() Effect[A] {
 				return Interrupt[A](fc.ctx.Err())
 			}
 		}
-		resume := fc.suspendScheduler()
+		resume := fc.suspendSchedulerCancellable()
 		select {
 		case <-waiter.done:
 			resume()

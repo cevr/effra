@@ -69,7 +69,7 @@ func AwaitLatch(latch *Latch) Effect[Unit] {
 				latch.consumeManaged(waiter)
 				return Succeed(Unit{})
 			}
-			resume := fc.suspendScheduler()
+			resume := fc.suspendSchedulerCancellable()
 			select {
 			case <-waiter.done:
 				resume()
@@ -81,7 +81,7 @@ func AwaitLatch(latch *Latch) Effect[Unit] {
 				return Interrupt[Unit](fc.Context().Err())
 			}
 		}
-		resume := fc.suspendScheduler()
+		resume := fc.suspendSchedulerCancellable()
 		err := latch.Await(fc.Context())
 		resume()
 		if err != nil {

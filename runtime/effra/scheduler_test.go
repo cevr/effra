@@ -42,7 +42,7 @@ func TestTestSchedulerControlsSleepAndRegistration(t *testing.T) {
 		})
 	}()
 	waitSchedulerSignal(t, started)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("sleep registration: %v", err)
 	}
 	if err := scheduler.Advance(99); err != nil {
@@ -87,7 +87,7 @@ func TestTestSchedulerAdvancesSequentialSleepAtIntermediateDeadlines(t *testing.
 			return Succeed(Unit{})
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("first registration: %v", err)
 	}
 	if err := scheduler.Adjust(50); err != nil {
@@ -130,7 +130,7 @@ func TestTestSchedulerWaitsForHeldManagedTurnBeforeAdvancing(t *testing.T) {
 			return out
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("first registration: %v", err)
 	}
 	adjusted := make(chan error, 1)
@@ -199,7 +199,7 @@ func TestTestSchedulerWaitsForLatchContinuationBeforeAdvancing(t *testing.T) {
 			return Invoke(fc, second.Value.Join())
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("first registration: %v", err)
 	}
 	if err := scheduler.Adjust(50); err != nil {
@@ -248,7 +248,7 @@ func TestTestSchedulerWaitsForJoinContinuationBeforeAdvancing(t *testing.T) {
 			return Invoke(fc, second.Value.Join())
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("first registration: %v", err)
 	}
 	if err := scheduler.Adjust(50); err != nil {
@@ -296,7 +296,7 @@ func TestTestSchedulerStrongAdjustPreservesCausalIntermediateTimes(t *testing.T)
 				return Invoke(fc, joiner.Value.Join())
 			})
 		}()
-		if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 			t.Fatalf("iteration %d first registration: %v", iteration, err)
 		}
 		if err := scheduler.Adjust(50); err != nil {
@@ -336,7 +336,7 @@ func TestTestSchedulerDeadlineCleanupPreservesIntermediateTime(t *testing.T) {
 				return Invoke(fc, Sleep(30))
 			})
 		}()
-		if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 			t.Fatalf("iteration %d first registration: %v", iteration, err)
 		}
 		if err := scheduler.Adjust(50); err != nil {
@@ -392,7 +392,7 @@ func TestTestSchedulerDoesNotObserveIndependentTimerBeforeJoinPublication(t *tes
 				return Invoke(fc, joiner.Value.Join())
 			})
 		}()
-		if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 			t.Fatalf("iteration %d first registration: %v", iteration, err)
 		}
 		if err := scheduler.Adjust(100); err != nil {
@@ -441,7 +441,7 @@ func TestTestSchedulerWaitsForScopeCleanupContinuationBeforeAdvancing(t *testing
 			return Invoke(fc, Sleep(30))
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("cleanup registration: %v", err)
 	}
 	if err := scheduler.Adjust(50); err != nil {
@@ -486,7 +486,7 @@ func TestTestSchedulerPartialScopeCleanupCanAdvanceAndThenDrain(t *testing.T) {
 		})
 	}()
 	waitSchedulerSignal(t, releaseStarted)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("cleanup registration: %v", err)
 	}
 	adjustWithin(t, scheduler, 0)
@@ -666,7 +666,7 @@ func TestTestSchedulerWaitsForTimeoutContinuationBeforeAdvancing(t *testing.T) {
 			return Invoke(fc, Sleep(30))
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("timeout registration: %v", err)
 	}
 	if err := scheduler.Adjust(50); err != nil {
@@ -713,7 +713,7 @@ func TestTimeoutUsesSchedulerAndWaitsForCancelledCleanup(t *testing.T) {
 		})
 	}()
 	waitSchedulerSignal(t, started)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("timeout registration: %v", err)
 	}
 	if err := scheduler.Advance(49); err != nil {
@@ -762,7 +762,7 @@ func TestTestSchedulerPartialTimeoutCleanupCanAdvance(t *testing.T) {
 			}, 10))
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("timeout registration: %v", err)
 	}
 	adjustWithin(t, scheduler, 10)
@@ -861,7 +861,7 @@ func TestTestSchedulerForkedCleanupUsesIndependentContinuations(t *testing.T) {
 			}()
 
 			waitSchedulerSignal(t, releaseStarted)
-			if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+			if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 				t.Fatalf("forked cleanup registration: %v", err)
 			}
 			adjustWithin(t, scheduler, 10)
@@ -906,7 +906,7 @@ func TestTestSchedulerTimeoutInsideCleanupCanAdvanceToDeadline(t *testing.T) {
 	}()
 
 	waitSchedulerSignal(t, releaseStarted)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("nested timeout registration: %v", err)
 	}
 	adjustWithin(t, scheduler, 5)
@@ -968,7 +968,7 @@ func TestTestSchedulerPartialWorkWinnerCleanupCanAdvance(t *testing.T) {
 		})
 	}()
 	waitSchedulerSignal(t, deadlineReady)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("work/deadline registration: %v", err)
 	}
 	adjustWithin(t, scheduler, 10)
@@ -1072,7 +1072,7 @@ func TestTestSchedulerDeadlineWinnerWithAlreadyClosingWorkCleanupCanAdvance(t *t
 	}()
 
 	waitSchedulerSignal(t, releaseStarted)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("deadline/cleanup registration: %v", err)
 	}
 	adjustWithin(t, scheduler, 10)
@@ -1356,7 +1356,7 @@ func TestCancelledSleepUnregistersItsTimer(t *testing.T) {
 		})
 	}()
 	waitSchedulerSignal(t, started)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("sleep registration: %v", err)
 	}
 	cancel()
@@ -1368,7 +1368,7 @@ func TestCancelledSleepUnregistersItsTimer(t *testing.T) {
 	}
 	barrierCtx, barrierCancel := context.WithTimeout(context.Background(), time.Millisecond)
 	defer barrierCancel()
-	if err := scheduler.AwaitRegistration(barrierCtx); !errors.Is(err, context.DeadlineExceeded) {
+	if err := scheduler.AwaitNextRegistration(barrierCtx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("stale timer remained registered: %v", err)
 	}
 }
@@ -1467,5 +1467,100 @@ func TestManagedRegistrationBarrierReturnsAtIdle(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("barrier root did not finish")
+	}
+}
+
+// A cancelled context wakes a parked sleeper or latch waiter with no wake
+// reservation, and the canceller then parks on the woken fiber's completion.
+// Until the woken fiber has its turn back it is runnable, so the managed
+// barrier must not return in that window. Each case forks a worker that parks
+// a victim, gives it a turn by joining an immediate fork, cancels it and then
+// marks completion; the barrier must observe the mark. The window is narrow,
+// so run it at a high -count.
+func TestManagedBarrierCountsCancellationWakes(t *testing.T) {
+	immediate := func(*FiberContext) Exit[Unit] { return Succeed(Unit{}) }
+	park := func(fc *FiberContext, victim Effect[Unit]) (*Fiber[Unit], Exit[Unit]) {
+		parked := Invoke(fc, Fork(victim))
+		if parked.IsFailure() {
+			return nil, Propagate[Unit](parked)
+		}
+		turn := Invoke(fc, Fork(immediate))
+		if turn.IsFailure() {
+			return nil, Propagate[Unit](turn)
+		}
+		return parked.Value, Invoke(fc, turn.Value.Join())
+	}
+	for _, test := range []struct {
+		name   string
+		cancel func(fc *FiberContext, latch *Latch) Exit[Unit]
+	}{
+		{"interrupt sleeper", func(fc *FiberContext, _ *Latch) Exit[Unit] {
+			victim, out := park(fc, Sleep(1000))
+			if out.IsFailure() {
+				return out
+			}
+			return Invoke(fc, victim.Interrupt())
+		}},
+		{"interrupt latch waiter", func(fc *FiberContext, latch *Latch) Exit[Unit] {
+			victim, out := park(fc, AwaitLatch(latch))
+			if out.IsFailure() {
+				return out
+			}
+			return Invoke(fc, victim.Interrupt())
+		}},
+		{"scope close", func(fc *FiberContext, _ *Latch) Exit[Unit] {
+			return Invoke(fc, Scoped(func(inner *FiberContext) Exit[Unit] {
+				_, out := park(inner, Sleep(1000))
+				return out
+			}))
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			scheduler := NewTestScheduler()
+			latch := NewLatch()
+			marked := make(chan struct{})
+			observed := make(chan bool, 1)
+			done := make(chan Exit[Unit], 1)
+			go func() {
+				done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+					worker := Invoke(fc, Fork(func(child *FiberContext) Exit[Unit] {
+						if out := test.cancel(child, latch); out.IsFailure() {
+							return out
+						}
+						close(marked)
+						return Succeed(Unit{})
+					}))
+					if worker.IsFailure() {
+						return Propagate[Unit](worker)
+					}
+					if out := AwaitTestSchedulerRegistration(fc, scheduler); out.IsFailure() {
+						return out
+					}
+					select {
+					case <-marked:
+						observed <- true
+					default:
+						observed <- false
+					}
+					return Invoke(fc, worker.Value.Join())
+				})
+			}()
+			select {
+			case settled := <-observed:
+				if !settled {
+					t.Fatal("barrier returned while the cancelled fiber was still runnable")
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("managed barrier did not return")
+			}
+			select {
+			case out := <-done:
+				if out.IsFailure() {
+					t.Fatalf("cancellation root failed: %+v", out)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("cancellation root did not finish")
+			}
+		})
 	}
 }

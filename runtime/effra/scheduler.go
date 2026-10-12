@@ -61,7 +61,16 @@ type TestScheduler struct {
 	// token but is omitted from this count, so partial adjustment can reach the
 	// wait's deadline.
 	continuations int
+	// cancellable holds the contexts of managed fibers parked in a wait that
+	// also selects on that context. A cancelled context wakes its fiber without
+	// a wake reservation, and cancellation reaches every descendant context at
+	// once, so no canceller can reserve those wakes. idleLocked instead counts
+	// a parked wait as runnable from the moment its context is done until the
+	// fiber has its turn back.
+	cancellable map[*cancellableWait]struct{}
 }
+
+type cancellableWait struct{ ctx context.Context }
 
 type continuationState uint8
 
@@ -124,6 +133,7 @@ func NewTestScheduler() *TestScheduler {
 		registration: make(chan struct{}),
 		turn:         turn,
 		stateChanged: make(chan struct{}),
+		cancellable:  map[*cancellableWait]struct{}{},
 	}
 }
 
@@ -222,10 +232,23 @@ func (s *TestScheduler) finish() {
 // suspend releases the scheduler turn while the current managed fiber waits
 // on an external event. The returned function reacquires the turn before the
 // caller continues, keeping adjustment quiescence observable.
-func (s *TestScheduler) suspend() func() {
+func (s *TestScheduler) suspend() func() { return s.suspendWait(nil) }
+
+// suspendWait is suspend for a wait that also selects on ctx.Done. Until the
+// caller has its turn back, a done ctx makes the parked wait runnable for
+// idleLocked. The wait leaves the set in the same critical section that
+// counts the fiber active again, so its wake is never unaccounted. A wait
+// that does not observe ctx passes nil: counting it would hold idleness, and
+// with it partial adjustment, on a fiber that is not runnable.
+func (s *TestScheduler) suspendWait(ctx context.Context) func() {
+	var wait *cancellableWait
 	s.mu.Lock()
 	if s.active > 0 {
 		s.active--
+	}
+	if ctx != nil {
+		wait = &cancellableWait{ctx: ctx}
+		s.cancellable[wait] = struct{}{}
 	}
 	s.signalStateLocked()
 	s.mu.Unlock()
@@ -233,6 +256,9 @@ func (s *TestScheduler) suspend() func() {
 	return func() {
 		<-s.turn
 		s.mu.Lock()
+		if wait != nil {
+			delete(s.cancellable, wait)
+		}
 		s.active++
 		s.signalStateLocked()
 		s.mu.Unlock()
@@ -341,23 +367,32 @@ func (s *TestScheduler) Now() int64 {
 	return s.now
 }
 
-// idleLocked reports whether no managed fiber is runnable: none holds or
-// awaits the turn, no timer or signal wake is in flight, and no cleanup
-// boundary is runnable. A managed fiber registers its timer before it parks,
-// so in this state every timer that managed work can register without
-// outside input is registered. Adjust and the managed registration barrier
-// share this one predicate.
+// idleLocked reports quiescence: no managed fiber is running or runnable. No
+// fiber holds the turn or is admitted and waiting for it, no timer or signal
+// wake is reserved, no cleanup boundary is runnable, and no parked wait has
+// been woken by its cancelled context. A wake in flight is not idle. A
+// managed fiber registers its timer before it parks, so in this state every
+// timer that managed work can register without outside input is registered.
+// Adjust and the managed barrier share this one predicate.
 func (s *TestScheduler) idleLocked() bool {
-	return s.active == 0 && s.pendingWakes == 0 && s.continuations == 0
+	if s.active != 0 || s.pendingWakes != 0 || s.continuations != 0 {
+		return false
+	}
+	for wait := range s.cancellable {
+		if wait.ctx.Err() != nil {
+			return false
+		}
+	}
+	return true
 }
 
-// AwaitRegistration is the host controller's edge-triggered handshake: it
-// waits until a timer has been registered since the last observed scheduler
-// advance/barrier. A host goroutine may start a managed root that is not yet
+// AwaitNextRegistration is the host controller's edge-triggered handshake: it
+// waits until a timer has been registered since the last adjustment or host
+// handshake. A host goroutine may start a managed root that is not yet
 // admitted, so it cannot judge idleness and waits for the registration
 // instead. Managed code uses the level-triggered awaitIdle barrier, which is
 // what Scheduler.awaitRegistration means on every target.
-func (s *TestScheduler) AwaitRegistration(ctx context.Context) error {
+func (s *TestScheduler) AwaitNextRegistration(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -396,7 +431,6 @@ func (s *TestScheduler) awaitIdle(ctx context.Context) error {
 			return errSchedulerClosed
 		}
 		if s.idleLocked() {
-			s.observed = s.registered
 			s.mu.Unlock()
 			return nil
 		}
@@ -508,7 +542,7 @@ func (s *TestScheduler) awaitRegistrationInFiber(fc *FiberContext) error {
 	if fc == nil || fc.turnScheduler() != s {
 		return errors.New("test scheduler is not active for this fiber")
 	}
-	resume := fc.suspendScheduler()
+	resume := fc.suspendSchedulerCancellable()
 	defer resume()
 	return s.awaitIdle(fc.Context())
 }
