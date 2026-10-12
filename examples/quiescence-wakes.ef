@@ -1,0 +1,121 @@
+// Scheduler quiescence with wakes in flight, on both targets.
+//
+// A wake in flight is not idle. A fiber woken by cancellation, or resumed
+// inline by a latch signal while its signaller is still mid-turn, is
+// runnable until it runs again, so Scheduler.awaitRegistration and each
+// deadline selection of Scheduler.advance must wait for it.
+
+effect fn ready(latch: Latch) -> string uses { Sync } {
+    run Sync.await(latch)
+    "reached"
+}
+effect fn immediate() -> string {
+    "immediate"
+}
+
+// A cancelled wait wakes its fiber with no wake reservation, and the
+// canceller then parks on that fiber's completion. Until the woken fiber
+// runs again it is runnable, so the barrier must wait for it. Each worker
+// parks a victim, gives it a turn by joining an immediate fork, then cancels
+// it by interrupt or by closing its scope.
+
+effect fn sleeper() -> void uses { Clock } {
+    run Clock.sleep(1000)
+}
+effect fn interruptOwnSleeper() -> string uses { Clock } {
+    let victim = fork sleeper()
+    let turn = fork immediate()
+    let given = run turn.join()
+    run victim.interrupt()
+    given + " marked"
+}
+effect fn interruptOwnWaiter(latch: Latch) -> string uses { Sync } {
+    let victim = fork ready(latch)
+    let turn = fork immediate()
+    let given = run turn.join()
+    run victim.interrupt()
+    given + " marked"
+}
+effect fn closeOverSleeper() -> string uses { Clock } {
+    let given = scope {
+        let victim = fork sleeper()
+        let turn = fork immediate()
+        run turn.join()
+    }
+    given + " marked"
+}
+
+effect fn test_barrier_after_interrupting_a_sleeper() -> void raises { AssertionFailed } uses { Assert, Clock, Scheduler } {
+    let worker = fork interruptOwnSleeper()
+    run Scheduler.awaitRegistration()
+    run worker.interrupt()
+    run Assert.equalText(run worker.join(), "immediate marked")
+}
+
+effect fn test_barrier_after_interrupting_a_latch_waiter() -> void raises { AssertionFailed } uses { Assert, Scheduler, Sync } {
+    let latch = run Sync.latch()
+    let worker = fork interruptOwnWaiter(latch)
+    run Scheduler.awaitRegistration()
+    run worker.interrupt()
+    run Assert.equalText(run worker.join(), "immediate marked")
+}
+
+effect fn test_barrier_after_scope_close() -> void raises { AssertionFailed } uses { Assert, Clock, Scheduler } {
+    let worker = fork closeOverSleeper()
+    run Scheduler.awaitRegistration()
+    run worker.interrupt()
+    run Assert.equalText(run worker.join(), "immediate marked")
+}
+
+// A latch signal resumes its waiter while the signaller is still mid-turn.
+// Readiness is not registration: the barrier and each deadline selection of
+// advance wait until the signaller has parked on its next timer too.
+
+effect fn signalThenSleep(ready: Latch) -> string uses { Clock, Sync } {
+    run Sync.signal(ready)
+    run Clock.sleep(10)
+    "woke"
+}
+
+effect fn test_barrier_after_readiness_then_advance() -> void raises { AssertionFailed } uses { Assert, Clock, Scheduler, Sync } {
+    let ready = run Sync.latch()
+    let worker = fork signalThenSleep(ready)
+    run Sync.await(ready)
+    run Scheduler.awaitRegistration()
+    run Scheduler.advance(10)
+    run Assert.equalText(run worker.join(), "woke")
+}
+
+effect fn test_advance_after_readiness() -> void raises { AssertionFailed } uses { Assert, Clock, Scheduler, Sync } {
+    let ready = run Sync.latch()
+    let worker = fork signalThenSleep(ready)
+    run Sync.await(ready)
+    run Scheduler.advance(10)
+    run Assert.equalText(run worker.join(), "woke")
+}
+
+// The resumed waiter can itself resume another and advance. The releaser
+// signals the relay, which signals the test and then advances, all while the
+// releaser is still inside its signal.
+
+effect fn relay(released: Latch, ready: Latch) -> void uses { Scheduler, Sync } {
+    run Sync.await(released)
+    run Sync.signal(ready)
+    run Scheduler.advance(0)
+}
+effect fn release(released: Latch) -> string uses { Sync } {
+    run Sync.signal(released)
+    "released"
+}
+
+effect fn test_barrier_after_nested_resumption() -> void raises { AssertionFailed } uses { Assert, Scheduler, Sync } {
+    let released = run Sync.latch()
+    let ready = run Sync.latch()
+    let relayer = fork relay(released, ready)
+    let releaser = fork release(released)
+    run Sync.await(ready)
+    run Scheduler.awaitRegistration()
+    run releaser.interrupt()
+    run Assert.equalText(run releaser.join(), "released")
+    run relayer.join()
+}
