@@ -239,6 +239,51 @@ fn outputIs(d: decision<S, i64>, want: i64) -> string {
 	requireDecisionRefusalOnBothTargets(t, refused, "EF002", "end a bare `done` with `,` or start the next arm on a new line")
 }
 
+// Round 3 O1: the missing-separator repair also covers a next arm that is an
+// or-pattern or a product arm. The repair is diagnostic recovery: it fires
+// only where the match is already ill-formed, and operand detection is
+// unchanged.
+func TestDecisionMissingSeparatorRepairCoversOrAndProductArms(t *testing.T) {
+	for _, tc := range []struct{ name, body, result string }{
+		{"arrow", `match event { E.Ping => done E.Pong => stay state }`, "void"},
+		{"or-pattern", `match event { E.Ping => done E.Pong | E.Ping => stay state }`, "void"},
+		{"product", `match state, event { S.Idle, E.Ping => done S.Idle, E.Pong => stay state, _, _ => ignore }`, "S"},
+		{"product or-pattern", `match state, event { S.Idle, E.Ping => done S.Idle, E.Pong | E.Ping => stay state, _, _ => ignore }`, "S"},
+		{"three subjects", `match state, event, event { S.Idle, E.Ping, E.Ping => done S.Idle, E.Pong, E.Pong => stay state, _, _, _ => ignore }`, "S"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := decisionPrelude + `fn step(state: S, event: E) -> decision<S, ` + tc.result + `> {
+    ` + tc.body + `
+}
+`
+			requireDecisionRefusalOnBothTargets(t, source, "EF002", "so the next arm lost its first pattern; end a bare `done` with `,` or start the next arm on a new line")
+		})
+	}
+
+	// A short product arm that does not follow `done X,` on its line keeps the
+	// ordinary arity diagnostic, and so does one after `done X,` and a newline.
+	for _, body := range []string{
+		`match state, event { S.Idle, E.Ping => ignore, E.Pong => stay state, _, _ => ignore }`,
+		"match state, event {\n        S.Idle, E.Ping => done S.Idle,\n        E.Pong => stay state\n        _, _ => ignore\n    }",
+	} {
+		source := decisionPrelude + `fn step(state: S, event: E) -> decision<S, S> {
+    ` + body + `
+}
+`
+		for _, target := range decisionTargets {
+			r := CompileFor(source, target)
+			if _, ok := findDecisionDiagnostic(r, "EF118"); !ok {
+				t.Fatalf("%s: want EF118 for %q, got %+v", target, body, r.Diagnostics)
+			}
+			for _, d := range r.Diagnostics {
+				if strings.Contains(d.Message, "lost its first pattern") {
+					t.Fatalf("%s: repair fired outside a same-line `done X,`: %+v", target, d)
+				}
+			}
+		}
+	}
+}
+
 // o5: formatter-16 pins decision patterns, bare `done` and a multi-line
 // constructor operand as a canonical fixed point.
 func TestDecisionPatternsAndOperandsAreCanonical(t *testing.T) {

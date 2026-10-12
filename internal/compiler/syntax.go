@@ -1534,13 +1534,19 @@ func (p *parser) expr(min int) *Expr {
 		// match nested in another header parse constructors unprotected.
 		protected := p.noConstruct
 		p.noConstruct, p.subjectList = 0, false
+		// afterDone records that the previous arm ended with `done X,` on the
+		// line where this arm starts; it only selects a repair hint.
+		afterDone := false
 		for !p.accept("}") {
 			cells := [][]*MatchPattern{p.patternCell()}
 			for p.accept(",") {
 				cells = append(cells, p.patternCell())
 			}
+			p.decisionArmCellsHint(afterDone, len(cells), len(e.Args))
+			afterDone = false
 			pattern := cells[0][0]
 			p.expect("=>")
+			var value *Expr
 			var body *Block
 			if p.peek().text == "fail" {
 				start := p.take()
@@ -1561,12 +1567,14 @@ func (p *parser) expr(min int) *Expr {
 			} else if p.peek().text == "{" {
 				body = p.block()
 			} else {
-				value := p.expr(0)
+				value = p.expr(0)
 				p.decisionArmSeparatorHint(value)
 				body = &Block{Statements: []*Statement{{Kind: "expr", Value: value, Span: value.Span, Extent: value.Extent}}, Extent: value.Extent}
 			}
 			e.Arms = append(e.Arms, &MatchArm{Patterns: cells, Body: body, Span: pattern.Span, Extent: p.extent(pattern.Span)})
-			p.accept(",")
+			if separator := p.peek(); p.accept(",") {
+				afterDone = doneTookOperand(value) && p.peek().span.Line == separator.span.Line
+			}
 			p.accept(";")
 		}
 		p.noConstruct, p.subjectList = protected, subjectList

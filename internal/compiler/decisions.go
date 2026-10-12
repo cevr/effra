@@ -46,8 +46,9 @@ func reservedDecisionWordMessage(word string) string {
 // an operand. done takes one exactly when the next token is on the same line
 // and can start an expression; an arm separator (`,`, a newline, `}`) or
 // `else` ends a bare `done`. This is a grammar rule, not a lookahead: in
-// `E.Ping => done E.Pong => stay s` the operand is `E.Pong`, and the match
-// refuses the arrow that follows (decisionArmSeparatorHint).
+// `E.Ping => done E.Pong => stay s` the operand is `E.Pong`. The repair for a
+// missing separator lives in diagnostic recovery (decisionArmSeparatorHint,
+// decisionArmCellsHint), which runs only once the match is already ill-formed.
 func (p *parser) decision(word token) *Expr {
 	e := &Expr{Kind: "decision", Name: word.text, Span: word.span}
 	field := decisionWords[word.text]
@@ -78,13 +79,32 @@ func (p *parser) expressionStartsOnLine(line int) bool {
 	return next.text == "(" || next.text == "-"
 }
 
-// decisionArmSeparatorHint refuses an arm body followed directly by `=>`
-// when that body is a `done` that took the next arm's pattern as its output.
+// doneSeparatorRepair is the one repair for a `done` that took the first
+// pattern of the next arm as its output.
+const doneSeparatorRepair = "`done` took the expression after it on the same line as its output, so the next arm lost its first pattern; end a bare `done` with `,` or start the next arm on a new line"
+
+// doneTookOperand reports an arm body that is a `done` with an output.
+func doneTookOperand(body *Expr) bool {
+	return body != nil && body.Kind == "decision" && body.Name == "done" && len(body.Fields) > 0
+}
+
+// decisionArmSeparatorHint refuses a `done X` arm body followed directly by
+// `=>` or by the `|` of an or-pattern: no arm body can be followed by either,
+// so X was the next arm's first pattern.
 func (p *parser) decisionArmSeparatorHint(body *Expr) {
-	if body == nil || body.Kind != "decision" || body.Name != "done" || len(body.Fields) == 0 || p.peek().text != "=>" {
-		return
+	if next := p.peek().text; doneTookOperand(body) && (next == "=>" || next == "|") {
+		p.fail(p.peek(), doneSeparatorRepair)
 	}
-	p.fail(p.peek(), "`done` took the expression after it on the same line as its output, so this `=>` has no pattern; end a bare `done` with `,` or start the next arm on a new line")
+}
+
+// decisionArmCellsHint refuses an arm of a product match that starts on the
+// line where the previous arm ended with `done X,` and has fewer pattern cells
+// than the match has subjects: X was its first cell, and the `,` after it was
+// read as the arm separator. Without the hint the short arm is EF118.
+func (p *parser) decisionArmCellsHint(afterDone bool, cells, subjects int) {
+	if afterDone && cells < subjects && p.peek().text == "=>" {
+		p.fail(p.peek(), doneSeparatorRepair)
+	}
 }
 
 // decisionPattern parses `enter next`, `stay next`, `ignore`, `reject`,
