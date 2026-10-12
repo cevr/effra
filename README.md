@@ -373,7 +373,7 @@ Each row states what has landed on this branch, what is in flight and what is on
 | HTTP server with bounded, owned shutdown (`Http.listen`) | Landed on Go and JS with typed endpoints and route tables ([`http-transport.ef`](examples/http-transport.ef), [`http-endpoints.ef`](examples/http-endpoints.ef)) and a shared wire corpus; streaming bodies are not built |
 | Rich Go interop: host types, methods, `io.Reader`/`io.Writer`, `context` | Host types, methods, interface assignment, checked I/O and `context` forwarding landed; owned resources and callbacks in progress |
 | Library modules: `pub` exports and module-qualified identity | Designed |
-| State machines: ordinary step functions run by an owned runtime | The `machine` declaration, its static `Stay` check and inspectable plans landed ([`machine-search.ef`](examples/machine-search.ef)); the runtime is specified, not built |
+| State machines: ordinary step functions run by an owned runtime | The `machine` declaration, decision syntax (`enter`, `stay`, `ignore`, `reject`, `done`), its static `stay` check and inspectable plans landed ([`machine-search.ef`](examples/machine-search.ef)); the runtime is specified, not built |
 | Actors with explicit mailbox budgets and owned behavior | [Specified](docs/specs/actors.md); not built |
 | Evidence and proofs: values that carry what was checked | [Designed](docs/research/opaque-values-and-evidence.md) |
 
@@ -405,7 +405,7 @@ Service laws, such as "decode after encode returns the input", become obligation
 
 The transition table in [the tour](#matching-several-values-at-once) already compiles: a multi-subject match whose every state and event pair is checked. Running it as a machine is specified; the declaration and its checks have landed, the runtime has not. In [the machine spec](docs/specs/state-machines.md), an owned runtime admits events, runs each step and owns the work each state starts, as one form of [actor](docs/specs/actors.md) behavior. A step can be a pure function or an effect with its own failures and services.
 
-A machine is a small `machine` declaration that names its initial state and its ordinary step functions. The declaration earns its place because the compiler checks something no library can: a `Stay` decision must keep the state's variant. Behavior stays in ordinary functions.
+A machine is a small `machine` declaration that names its initial state and its ordinary step functions. The declaration earns its place because the compiler checks something no library can: a `stay` decision must keep the state's variant. A step returns the predeclared `decision<S, O>` and writes `enter next`, `stay next`, `ignore`, `reject` or `done output`; [`machine-search.ef`](examples/machine-search.ef) shows each form. Behavior stays in ordinary functions.
 
 ## Try it
 

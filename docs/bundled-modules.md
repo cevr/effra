@@ -245,14 +245,11 @@ scopes share a plan. [`examples/codec-transforms.ef`](../examples/codec-transfor
 exercises pure, normalizing, refining and effectful witnesses, nested
 composition and a configuration caller on Go and JS.
 
-## Machine decisions
+## Machine decisions (removed)
 
-The distributed `effra/machines` module provides the generic `Step<S, O>`
-decision enum that a [`machine`](specs/state-machines.md) step or completion
-function returns: `Go { next }` re-enters the next state, `Stay { next }`
-keeps the current entry and must keep its variant, `Ignore` and `Reject`
-leave the state unchanged, and `Done { output }` finishes with the terminal
-output. It is ordinary data; construct it as `Machines.Step<S, O>.Go(next)`
-and match it as `Machines.Step.Go { next }`. The machine checker recognizes
-it by its bundled template identity, never by spelling, so a user enum with
-the same name and variants is not a decision.
+The `effra/machines` module and its `Step<S, O>` enum are removed. Machine
+decisions are syntax: a step or completion function returns the predeclared
+`decision<S, O>` and writes `enter e`, `stay e`, `ignore`, `reject` or
+`done e` (see [decisions](specs/state-machines.md#decisions)). Importing
+`effra/machines` is the ordinary unknown-bundled-module diagnostic (EF126),
+with a help that names the rewrite. A user enum named `Step` is ordinary data.

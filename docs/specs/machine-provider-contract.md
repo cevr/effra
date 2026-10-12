@@ -45,19 +45,19 @@ A provider receives two layers. Neither layer gives access to the compiler.
 2. **Plan values.** These are the typed callable values and the initial value that execution needs. The lowered value has a bundled generic type whose parameters the declaration instantiates. The type covers the admitted step profile:
 
    ```
-   // sketch: bundled effra/machines surface, not yet admitted
+   // sketch: bundled provider surface (module not chosen), not yet admitted
    record Plan<S: type, E: type, O: type, F: raises, R: uses> {
        facts: PlanFacts
        initial: S
-       step: effect fn(S, E) -> Step<S, O> raises { F } uses { R }
+       step: effect fn(S, E) -> decision<S, O> raises { F } uses { R }
    }
    ```
 
-   A pure step is the same callable with empty rows, so one provider serves both kinds. When `enter` is admitted (#19, #52, #11 and #47), `Plan` gains `Outcome`, the entry recipe and `complete` with their own rows. That is a versioned change to the bundled type, never a silent widening.
+   A pure step is the same callable with empty rows, so one provider serves both kinds. When the `enter` binding is admitted (#19, #52, #11 and #47), `Plan` gains `Outcome`, the entry recipe and `complete` with their own rows. That is a versioned change to the bundled type, never a silent widening.
 
 ### Why explicit parameters, and who writes them
 
-The decision a step returns is a closed protocol that every provider matches as data and never extends. Today it is the bundled `Step` enum; the owner has directed that it become syntax. [How `Step` is recognised](state-machines.md#how-step-is-recognised) records the current implementation, that direction, and where provider-specific behaviour goes.
+The decision a step returns is a closed protocol that every provider matches as data and never extends. It is decision syntax: the predeclared `decision<S, O>`, written `enter e`, `stay e`, `ignore`, `reject` and `done e` and matched with the same words. Plan transition kinds keep the protocol words `go`, `stay`, `ignore`, `reject`, `done` and `any`, so source `enter` arrives as `go`. [Decisions](state-machines.md#decisions) records the syntax and its migration from the bundled `Step` enum, and the [closed-protocol notes](state-machines.md#closed-protocol) record where provider-specific behaviour goes.
 
 
 Provider code is generic library code. It must preserve each machine's rows without whole-program inference, so it takes the finite type and row parameters that the [language abstraction contract](language-abstractions.md) already provides, and solves them from the plan argument at a direct call. Authors of machines and their callers never write those parameters. The declaration name, used where a `Plan` is expected, lowers to its plan value, just as a function name is a function value. Until lowering lands, that use is EF141 rather than a passthrough. `Actor<Session>` stays the caller-facing handle that names the declaration (#11). This separates two jobs. The spike's six-argument structural handle was rejected as a caller's type, and it survives only as the provider's internal signature.
@@ -86,12 +86,12 @@ Each obligation reuses the [lawful runtime](../research/lawful-runtime-contract.
 | Serial evaluation: at most one step at a time, at most one invocation per admitted event, exactly one per event dequeued while running | P2, P6, P7 | Tested law |
 | Bounded admission and reserved stop/completion capacity | P9 (RS2 public wait), R10 | Unresolved until RS2 |
 | Cleanup before commit: evaluation and entry cleanup finish before a state or output is published | P4, P5, R1, R2, R5 | Tested law |
-| `Go` re-enters a new epoch, `Stay` keeps the entry, and the runtime defect fires when a dynamic `Stay` changes the tag | P1 (defect), R15 | Tested law |
+| `enter` re-enters a new epoch, `stay` keeps the entry, and the runtime defect fires when a dynamic `stay` changes the tag | P1 (defect), R15 | Tested law |
 | Entry-epoch fencing: a stale completion is discarded | P8, R4 | Unresolved until entry work is admitted |
 | Exact causes: typed failures, defects and cleanup failures keep their identity, and a terminal failure reaches waiters | P1, P3, R3, R6 | Tested law |
 | Inspection reads plan facts and the last committed snapshot, and never waits for or runs evaluation | (plan facts only) | Nominally checked |
 
-A refuted obligation refuses the provider for that target. An unresolved one stays visible in inspection and receipts with its justifier. A provider can never upgrade a compiler fact. Exhaustive decisions, the static `Stay` rule and declared rows are compiler-proved and are not provider claims.
+A refuted obligation refuses the provider for that target. An unresolved one stays visible in inspection and receipts with its justifier. A provider can never upgrade a compiler fact. Exhaustive decisions, the static `stay` rule and declared rows are compiler-proved and are not provider claims.
 
 ### Negative controls
 
@@ -108,15 +108,15 @@ These hold once lowering lands, all through ordinary diagnostics:
 The engine loop in `gen_statem` (OTP `516126e9`, `lib/stdlib/src/gen_statem.erl`, the *state transition* sequence) is the closest existing provider. It shows which duties belong to the provider and which this contract moves elsewhere:
 
 - *Serial evaluation and queueing* are the engine's in `gen_statem`: one process, one callback at a time, `next_event` insertion ahead of the queue. The provider owns these here too, plus bounded admission, which `gen_statem` leaves to the mailbox.
-- *State change detection* is a runtime term comparison in `gen_statem`. Here the plan's decision says it, `Go` or `Stay`, and the static `Stay` rule is a compiler fact the provider must not re-derive. A provider still owes the runtime defect for a dynamic `Stay` that changes the tag.
+- *State change detection* is a runtime term comparison in `gen_statem`. Here the plan's decision says it, `go` (source `enter`) or `stay`, and the static `stay` rule is a compiler fact the provider must not re-derive. A provider still owes the runtime defect for a dynamic `stay` that changes the tag.
 - *State enter calls* run after a state change and may not change state (`enter_action()`). Entry work here is the same shape, but the provider also owns the entry's scope and cleans it up before committing the next state. `gen_statem` has no per-state ownership, so this obligation is new.
 - *Postpone and time-outs* (`postpone`, `event_timeout`, `state_timeout` and generic time-outs) are engine features in `gen_statem`. They are outside the first profile. When added, a state time-out should be entry-owned work, so the entry epoch cancels it, rather than a provider-private timer that bypasses the plan.
-- *Termination* in `gen_statem` is `{stop, Reason}` plus `terminate/3`. Here it is `Done(output)` after cleanup, or a terminal typed failure that waiting observations receive, and a provider must keep the complete cause.
+- *Termination* in `gen_statem` is `{stop, Reason}` plus `terminate/3`. Here it is `done output` after cleanup, or a terminal typed failure that waiting observations receive, and a provider must keep the complete cause.
 
 ### Prior art
 
-- *XState v6.* `ActorLogic` with `transition`/`getInitialSnapshot` and `createActor(logic)` separates logic from the runtime with many type parameters that users rarely write. Effra's split is the same, except that the decision is a checked `Step` value rather than a snapshot.
-- *Erlang gen_statem.* A callback module supplies `init` and the state functions, the `gen_statem` behaviour owns the process, and `keep_state` corresponds to `Stay`. The provider here plays the behaviour's part. See the comparison below.
+- *XState v6.* `ActorLogic` with `transition`/`getInitialSnapshot` and `createActor(logic)` separates logic from the runtime with many type parameters that users rarely write. Effra's split is the same, except that the decision is a checked `decision<S, O>` value rather than a snapshot.
+- *Erlang gen_statem.* A callback module supplies `init` and the state functions, the `gen_statem` behaviour owns the process, and `keep_state` corresponds to `stay`. The provider here plays the behaviour's part. See the comparison below.
 - *Elixir.* There is no machine abstraction in core; Elixir programs use `:gen_statem` directly or a wrapper library. `GenServer` shows the same split between behaviour and process.
 - *effect-machine and Effect.* `Machine<State, Event, R>` keeps services in the type, which is the model for `uses { R }` as the spawn charge.
 - *Akka Typed.* `Behavior[T]` is a value that a separate `ActorSystem` runs, and `Behaviors.same` is a runtime keep-state marker. Effra checks the narrowed case statically.
@@ -135,7 +135,7 @@ The units remain independently reviewable and have no cyclic ownership:
 | First provider | Planned Effra provider using the shared owned actor core for execution, admission and cleanup laws | A delivered provider, universal provider behavior or external transactions |
 | Cross-provider conformance | Two unrelated programs on two providers with unchanged source/compiler selection | Durability, exactly-once delivery or rollback |
 
-Adoption requires two unrelated machine programs, such as search/reload and timed lease/session or circuit breaker, executed by the planned first provider and a separately authored provider on the same target. Declarations and compiler configuration stay unchanged. Tests cover pure and effectful steps/completions, identity and rows, entry cleanup before commit, Go reentry versus Stay, stale completion fencing, bounded admission, stop/waiter control and composite causes. CLI/MCP inspection must observe the canonical plan and snapshots without running behavior. Missing requirements, incompatible identities, unsupported bindings and contract-erasing providers are causal negative controls.
+Adoption requires two unrelated machine programs, such as search/reload and timed lease/session or circuit breaker, executed by the planned first provider and a separately authored provider on the same target. Declarations and compiler configuration stay unchanged. Tests cover pure and effectful steps/completions, identity and rows, entry cleanup before commit, `enter` re-entry versus `stay`, stale completion fencing, bounded admission, stop/waiter control and composite causes. CLI/MCP inspection must observe the canonical plan and snapshots without running behavior. Missing requirements, incompatible identities, unsupported bindings and contract-erasing providers are causal negative controls.
 
 Source sketches, copied fixtures and a plan snapshot are reference data. They become execution evidence only with actual target/host versions, strict ABI consumers where applicable, raw full-gate receipts and an independent frozen review. Advanced statecharts, durable execution and external transactional rollback remain separate capabilities.
 
