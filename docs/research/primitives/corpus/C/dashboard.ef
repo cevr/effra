@@ -1,0 +1,52 @@
+service Store {
+    effect fn label() -> string
+}
+service Account {
+    effect fn label() -> string
+}
+service Invoice {
+    effect fn label() -> string
+}
+impl Memory(label: string) for Store {
+    effect fn label() -> string {
+        label
+    }
+}
+impl AccountLive for Account uses { Store } {
+    effect fn label() -> string {
+        run Store.label()
+    }
+}
+impl InvoiceLive for Invoice uses { Store } {
+    effect fn label() -> string {
+        run Store.label()
+    }
+}
+layer App provides { Account, Invoice } {
+    Store = Memory("live");
+    Account = AccountLive;
+    Invoice = InvoiceLive
+}
+
+// One unit of work: fork one lookup, race the other against a timer, join, all inside a scope.
+effect fn dashboard() -> string uses { Account, Invoice, Clock } {
+    scope {
+        let account = fork Account.label()
+        let invoice = race {
+            run Invoice.label()
+        } or {
+            run Clock.sleep(500ms)
+            "invoice: slow"
+        }
+        let name = run account.join()
+        name + " / " + invoice
+    }
+}
+
+// The whole thing: provide the layer and the clock, then a deadline on the unit.
+// timeoutOr is an ordinary library method (see library.ef).
+effect fn main() -> string {
+    provide App, Clock = LiveClock {
+        run dashboard().timeoutOr(2s, "gave up")
+    }
+}

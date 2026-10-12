@@ -1,0 +1,313 @@
+// Transformed JSON codecs: a pure nominal conversion, a normalizing codec,
+// a refinement that rejects on both directions, and an effectful conversion
+// whose decode and encode directions need different services. Two unrelated
+// callers share the same witnesses: stored order records and a settings
+// value read through Env.
+import Json "effra/json"
+
+error InvalidQuantity {
+    units: i64
+}
+error UnknownMember {
+    handle: string
+}
+error DirectoryDown
+error AuditRefused {
+    handle: string
+}
+
+// A nominal identifier: the wire carries a plain string.
+record UserId {
+    value: string
+}
+
+fn toUserId(text: string) -> UserId {
+    UserId {
+        value: text
+    }
+}
+
+fn fromUserId(id: UserId) -> string {
+    id.value
+}
+
+derive userIdJson = Json.codec<UserId>(maxBodyBytes: 256, maxDepth: 1, decode: toUserId, encode: fromUserId)
+
+// A normalizing codec: the legacy Enabled spelling decodes as Active, and
+// encoding always writes the canonical spelling. decode(encode(s)) == s,
+// but encode(decode(w)) canonicalizes w.
+enum Status {
+    Active
+    Suspended
+}
+
+enum StatusWire {
+    Active
+    Enabled
+    Suspended
+}
+
+fn readStatus(wire: StatusWire) -> Status {
+    match wire {
+        StatusWire.Active | StatusWire.Enabled => Status.Active {}
+        StatusWire.Suspended => Status.Suspended {}
+    }
+}
+
+fn writeStatus(status: Status) -> StatusWire {
+    match status {
+        Status.Active => StatusWire.Active {}
+        Status.Suspended => StatusWire.Suspended {}
+    }
+}
+
+derive statusJson = Json.codec<Status>(maxBodyBytes: 256, maxDepth: 1, decode: readStatus, encode: writeStatus)
+
+// A refinement: a quantity is never negative. Records are not opaque, so a
+// negative value can still be built in memory; encoding rejects it.
+record Quantity {
+    units: i64
+}
+
+effect fn checkedQuantity(units: i64) -> Quantity raises { InvalidQuantity } {
+    if units < 0 {
+        fail InvalidQuantity {
+            units: units
+        }
+    } else {
+        Quantity {
+            units: units
+        }
+    }
+}
+
+effect fn quantityUnits(quantity: Quantity) -> i64 raises { InvalidQuantity } {
+    if quantity.units < 0 {
+        fail InvalidQuantity {
+            units: quantity.units
+        }
+    } else {
+        quantity.units
+    }
+}
+
+derive quantityJson = Json.codec<Quantity>(maxBodyBytes: 256, maxDepth: 1, decode: checkedQuantity, encode: quantityUnits)
+
+// An effectful conversion with direction-specific services: decoding
+// resolves a member through Directory, encoding records it with Audit. Its
+// representation itself composes the nominal identifier witness.
+record Member {
+    handle: string
+    sponsor: UserId
+}
+
+record MemberWire {
+    handle: string
+    sponsor: UserId
+}
+
+service Directory {
+    effect fn known(handle: string) -> bool raises { DirectoryDown }
+}
+
+service Audit {
+    effect fn note(handle: string) -> void raises { AuditRefused }
+}
+
+effect fn resolveMember(wire: MemberWire) -> Member raises { UnknownMember, DirectoryDown } uses { Directory } {
+    if run Directory.known(wire.handle) {
+        Member {
+            handle: wire.handle,
+            sponsor: wire.sponsor
+        }
+    } else {
+        fail UnknownMember {
+            handle: wire.handle
+        }
+    }
+}
+
+effect fn recordMember(member: Member) -> MemberWire raises { AuditRefused } uses { Audit } {
+    run Audit.note(member.handle)
+    MemberWire {
+        handle: member.handle,
+        sponsor: member.sponsor
+    }
+}
+
+derive memberJson = Json.codec<Member>(maxBodyBytes: 1024, maxDepth: 2, decode: resolveMember, encode: recordMember) with userIdJson
+
+// A derived parent composing every transformed witness. It inherits each
+// one's behavior: its round trip is only as lawful as theirs.
+record Order {
+    buyer: UserId
+    member: Member
+    quantity: Quantity
+    status: Status
+}
+
+derive orderJson = Json.codec<Order>(maxBodyBytes: 4096, maxDepth: 3) with userIdJson, memberJson, quantityJson, statusJson
+
+// Settings are configuration, not stored data, and reuse the same witnesses.
+record Settings {
+    owner: UserId
+    defaultStatus: Status
+}
+
+derive settingsJson = Json.codec<Settings>(maxBodyBytes: 512, maxDepth: 2) with userIdJson, statusJson
+
+impl Members for Directory {
+    effect fn known(handle: string) -> bool raises { DirectoryDown } {
+        if handle == "ghost" {
+            false
+        } else {
+            true
+        }
+    }
+}
+
+impl Outage for Directory {
+    effect fn known(handle: string) -> bool raises { DirectoryDown } {
+        fail DirectoryDown {}
+    }
+}
+
+impl Ledger for Audit {
+    effect fn note(handle: string) -> void raises { AuditRefused } {
+        if handle == "sealed" {
+            fail AuditRefused {
+                handle: handle
+            }
+        } else {
+            void
+        }
+    }
+}
+
+impl StoredSettings for Env {
+    effect fn get(name: string) -> string {
+        "{\"owner\":\"u-1\",\"defaultStatus\":{\"_tag\":\"Enabled\"}}"
+    }
+}
+
+effect fn reencodeOrder(stored: string) -> string raises { JsonDecodeFailure, JsonEncodeFailure, InvalidQuantity, UnknownMember, DirectoryDown, AuditRefused } uses { Directory, Audit } {
+    let order = run orderJson.decode(stored)
+    run orderJson.encode(order)
+}
+
+effect fn loadSettings() -> Settings raises { JsonDecodeFailure } uses { Env } {
+    let text = run Env.get("ORDER_SETTINGS")
+    run settingsJson.decode(text)
+}
+
+effect fn test_pure_nominal_conversion_round_trips() -> void raises { AssertionFailed, JsonDecodeFailure, JsonEncodeFailure } uses { Assert } {
+    let id = run userIdJson.decode("\"u-42\"")
+    run Assert.equalText(id.value, "u-42")
+    run Assert.equalText(run userIdJson.encode(id), "\"u-42\"")
+}
+
+effect fn test_normalizing_codec_canonicalizes() -> void raises { AssertionFailed, JsonDecodeFailure, JsonEncodeFailure } uses { Assert } {
+    let legacy = run statusJson.decode("{\"_tag\":\"Enabled\"}")
+    run Assert.equalText(run statusJson.encode(legacy), "{\"_tag\":\"Active\"}")
+    let suspended = run statusJson.decode(run statusJson.encode(Status.Suspended {}))
+    let label = match suspended {
+        Status.Active => "active"
+        Status.Suspended => "suspended"
+    }
+    run Assert.equalText(label, "suspended")
+}
+
+effect fn test_refinement_rejects_on_decode() -> void raises { AssertionFailed, JsonDecodeFailure } uses { Assert } {
+    let refused = run quantityJson.decode("\"-1\"")
+        .catch<InvalidQuantity>(Quantity {
+            units: 99
+        })
+    run Assert.check(refused.units == 99, "a negative quantity is refused while decoding")
+}
+
+effect fn test_encode_side_rejection() -> void raises { AssertionFailed, JsonEncodeFailure } uses { Assert } {
+    let written = run quantityJson.encode(Quantity {
+            units: -5
+        })
+        .catch<InvalidQuantity>("refused")
+    run Assert.equalText(written, "refused")
+}
+
+effect fn test_nested_composition_round_trips() -> void raises { AssertionFailed, JsonDecodeFailure, JsonEncodeFailure, InvalidQuantity, UnknownMember, DirectoryDown, AuditRefused } uses { Assert } {
+    let stored = "{\"buyer\":\"u-7\",\"member\":{\"handle\":\"ada\",\"sponsor\":\"u-1\"},\"quantity\":\"03\",\"status\":{\"_tag\":\"Enabled\"}}"
+    let written = provide Directory = Members, Audit = Ledger {
+        run reencodeOrder(stored)
+    }
+    run Assert.equalText(written, "{\"buyer\":\"u-7\",\"member\":{\"handle\":\"ada\",\"sponsor\":\"u-1\"},\"quantity\":\"3\",\"status\":{\"_tag\":\"Active\"}}")
+}
+
+effect fn test_nested_transformation_failure_keeps_its_type() -> void raises { AssertionFailed, JsonDecodeFailure, JsonEncodeFailure, InvalidQuantity, DirectoryDown, AuditRefused } uses { Assert } {
+    let stored = "{\"buyer\":\"u-7\",\"member\":{\"handle\":\"ghost\",\"sponsor\":\"u-1\"},\"quantity\":\"1\",\"status\":{\"_tag\":\"Active\"}}"
+    let outcome = provide Directory = Members, Audit = Ledger {
+        run reencodeOrder(stored)
+            .catch<UnknownMember>("unknown member")
+    }
+    run Assert.equalText(outcome, "unknown member")
+}
+
+effect fn test_malformed_input_never_reaches_a_service() -> void raises { AssertionFailed, JsonEncodeFailure, InvalidQuantity, UnknownMember, DirectoryDown, AuditRefused } uses { Assert } {
+    // The Directory is down, but the later quantity is malformed, so the
+    // whole structure fails before any transformation runs.
+    let stored = "{\"buyer\":\"u-7\",\"member\":{\"handle\":\"ada\",\"sponsor\":\"u-1\"},\"quantity\":3,\"status\":{\"_tag\":\"Active\"}}"
+    let outcome = provide Directory = Outage, Audit = Ledger {
+        run reencodeOrder(stored)
+            .catch<JsonDecodeFailure>("malformed")
+    }
+    run Assert.equalText(outcome, "malformed")
+}
+
+effect fn test_service_failure_is_not_malformed_input() -> void raises { AssertionFailed, JsonDecodeFailure, JsonEncodeFailure, InvalidQuantity, UnknownMember, AuditRefused } uses { Assert } {
+    let stored = "{\"buyer\":\"u-7\",\"member\":{\"handle\":\"ada\",\"sponsor\":\"u-1\"},\"quantity\":\"3\",\"status\":{\"_tag\":\"Active\"}}"
+    let outcome = provide Directory = Outage, Audit = Ledger {
+        run reencodeOrder(stored)
+            .catch<DirectoryDown>("directory down")
+    }
+    run Assert.equalText(outcome, "directory down")
+}
+
+effect fn test_encode_runs_only_encode_services() -> void raises { AssertionFailed, JsonEncodeFailure, InvalidQuantity } uses { Assert } {
+    // Encoding needs Audit and never Directory.
+    let order = Order {
+        buyer: UserId {
+            value: "u-7"
+        },
+        member: Member {
+            handle: "sealed",
+            sponsor: UserId {
+                value: "u-1"
+            }
+        },
+        quantity: Quantity {
+            units: 1
+        },
+        status: Status.Active {}
+    }
+    let outcome = provide Audit = Ledger {
+        run orderJson.encode(order)
+            .catch<AuditRefused>("audit refused")
+    }
+    run Assert.equalText(outcome, "audit refused")
+}
+
+effect fn test_configuration_caller_shares_the_witnesses() -> void raises { AssertionFailed, JsonDecodeFailure, JsonEncodeFailure } uses { Assert } {
+    let settings = provide Env = StoredSettings {
+        run loadSettings()
+    }
+    run Assert.equalText(run settingsJson.encode(settings), "{\"owner\":\"u-1\",\"defaultStatus\":{\"_tag\":\"Active\"}}")
+}
+
+effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure, InvalidQuantity, UnknownMember, DirectoryDown, AuditRefused } {
+    let stored = "{\"buyer\":\"u-7\",\"member\":{\"handle\":\"ada\",\"sponsor\":\"u-1\"},\"quantity\":\"3\",\"status\":{\"_tag\":\"Enabled\"}}"
+    let order = provide Directory = Members, Audit = Ledger {
+        run reencodeOrder(stored)
+    }
+    let settings = provide Env = StoredSettings {
+        run loadSettings()
+    }
+    order + " " + run settingsJson.encode(settings)
+}

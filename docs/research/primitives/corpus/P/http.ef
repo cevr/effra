@@ -1,0 +1,44 @@
+import go strings "strings"
+import go sdk "effra.local/prototype/examples/sdk"
+
+effect fn page(path: string) -> string raises { GoError } uses { Foreign, Files, Clock } {
+    if path == "/health" {
+        "ok"
+    } else {
+        if path == "/file" {
+            run Files.readFile("examples/fixture.txt").catch<IoError>("file unavailable")
+        } else {
+            let id = run strings.TrimPrefix(path, "/users/")
+            let user = run sdk.Lookup(id).orFail().timeoutOr(100ms, "timed out")
+            "Hello, " + user
+        }
+    }
+}
+
+effect fn route(request: HttpRequest) -> HttpReply raises { GoError } uses { Http, Foreign, Files, Clock } {
+    let message = run page(request.path)
+    let body = run Http.text(message)
+    HttpReply.Respond {
+        response: HttpResponse {
+            status: 200,
+            contentType: "text/plain; charset=utf-8",
+            body: body
+        }
+    }
+}
+
+effect fn main() -> void raises { IoError } {
+    // Routes take no request body; SDK lookups time out after 100 ms.
+    let limits = HttpLimits {
+        maxBodyBytes: 0,
+        readHeaderMillis: 5000,
+        readBodyMillis: 5000,
+        idleMillis: 5000,
+        maxActive: 64
+    }
+    run Http.listen("127.0.0.1:0", limits, route)
+        .provide<Http>(LiveHttp)
+        .provide<Foreign>(Host)
+        .provide<Files>(LiveFiles)
+        .provide<Clock>(LiveClock)
+}

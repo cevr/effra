@@ -1,0 +1,52 @@
+service Store {
+    effect fn label() -> string
+}
+service Account {
+    effect fn label() -> string
+}
+service Invoice {
+    effect fn label() -> string
+}
+impl Memory(label: string) for Store {
+    effect fn label() -> string {
+        label
+    }
+}
+impl AccountLive for Account uses { Store } {
+    effect fn label() -> string {
+        run Store.label()
+    }
+}
+impl InvoiceLive for Invoice uses { Store } {
+    effect fn label() -> string {
+        run Store.label()
+    }
+}
+layer App provides { Account, Invoice } {
+    Store = Memory("live");
+    Account = AccountLive;
+    Invoice = InvoiceLive
+}
+
+// One unit of work: fork one lookup, time-box the other, join, all inside a scope.
+effect fn dashboard() -> string uses { Account, Invoice, Scheduler } {
+    scope {
+        let account = fork Account.label()
+        let invoice = scope within 500ms {
+            run Invoice.label()
+        } otherwise {
+            "invoice: slow"
+        }
+        let name = run account.join()
+        name + " / " + invoice
+    }
+}
+
+// The whole thing: provide the layer and the scheduler, then a deadline on the unit.
+effect fn main() -> string {
+    scope provide App, Scheduler = LiveScheduler within 2s {
+        run dashboard()
+    } otherwise {
+        "gave up"
+    }
+}

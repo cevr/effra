@@ -1,0 +1,89 @@
+error Unavailable {
+    reason: string
+}
+
+effect fn text(status: i64, message: string) -> HttpReply uses { Http } {
+    let body = run Http.text(message)
+    HttpReply.Respond {
+        response: HttpResponse {
+            status: status,
+            contentType: "text/plain; charset=utf-8",
+            body: body
+        }
+    }
+}
+
+effect fn echo(request: HttpRequest) -> HttpReply {
+    if request.contentType == "application/octet-stream" {
+        HttpReply.Respond {
+            response: HttpResponse {
+                status: 200,
+                contentType: "application/octet-stream",
+                body: request.body
+            }
+        }
+    } else {
+        HttpReply.UnsupportedMediaType {}
+    }
+}
+
+effect fn route(request: HttpRequest) -> HttpReply raises { Unavailable } uses { Http, Clock } {
+    if request.path == "/health" {
+        if request.method == "GET" {
+            run text(200, "ok")
+        } else {
+            HttpReply.NotFound {}
+        }
+    } else {
+        if request.path == "/echo" {
+            if request.method == "POST" {
+                run echo(request)
+            } else {
+                HttpReply.NotFound {}
+            }
+        } else {
+            if request.path == "/slow" {
+                run Clock.sleep(60s)
+                run text(200, "late")
+            } else {
+                if request.path == "/unavailable" {
+                    fail Unavailable {
+                        reason: "dependency down"
+                    }
+                } else {
+                    if request.path == "/malformed" {
+                        HttpReply.BadRequest {}
+                    } else {
+                        if request.path == "/invalid" {
+                            // Not a header value every target can publish:
+                            // the transport answers an empty 500.
+                            let body = run Http.text("never")
+                            HttpReply.Respond {
+                                response: HttpResponse {
+                                    status: 200,
+                                    contentType: "text/λ",
+                                    body: body
+                                }
+                            }
+                        } else {
+                            HttpReply.NotFound {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+effect fn main() -> void raises { IoError } {
+    let limits = HttpLimits {
+        maxBodyBytes: 16,
+        readHeaderMillis: 1000,
+        readBodyMillis: 300,
+        idleMillis: 1000,
+        maxActive: 1
+    }
+    scope provide Http = LiveHttp, Clock = LiveClock {
+        run Http.listen("127.0.0.1:0", limits, route)
+    }
+}

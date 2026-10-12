@@ -1,0 +1,217 @@
+// Typed HTTP endpoints over the managed transport. Each endpoint declares
+// its method, exact path, input and output witnesses, success status and the
+// response of every named failure its input decoding, handler and output
+// encoding can raise; a route table composes them into the one handler
+// Http.listen serves. The witnesses are the same transformed codecs a
+// stored-data caller uses outside HTTP.
+import Json "effra/json"
+
+error UnknownMember {
+    id: string
+}
+error OutOfStock {
+    item: string
+}
+error Unpublishable {
+    cents: i64
+}
+error NothingToCancel
+
+// A member is resolved through Directory while decoding: the wire carries
+// only its identifier.
+record Member {
+    id: string
+    name: string
+}
+
+service Directory {
+    effect fn find(id: string) -> Member raises { UnknownMember }
+}
+
+effect fn findMember(id: string) -> Member raises { UnknownMember } uses { Directory } {
+    run Directory.find(id)
+}
+
+fn memberId(member: Member) -> string {
+    member.id
+}
+
+derive memberJson = Json.codec<Member>(maxBodyBytes: 64, maxDepth: 1, decode: findMember, encode: memberId)
+
+record Order {
+    member: Member
+    item: string
+    quantity: i64
+}
+
+derive orderJson = Json.codec<Order>(maxBodyBytes: 256, maxDepth: 2) with memberJson
+
+// A total is published through Ledger while encoding, which refuses large
+// totals: the success encoder itself can fail with a named failure.
+record Total {
+    cents: i64
+}
+
+service Ledger {
+    effect fn publish(cents: i64) -> i64 raises { Unpublishable }
+}
+
+fn total(cents: i64) -> Total {
+    Total {
+        cents: cents
+    }
+}
+
+effect fn publishedCents(total: Total) -> i64 raises { Unpublishable } uses { Ledger } {
+    run Ledger.publish(total.cents)
+}
+
+derive totalJson = Json.codec<Total>(maxBodyBytes: 64, maxDepth: 1, decode: total, encode: publishedCents)
+
+record Receipt {
+    item: string
+    total: Total
+}
+
+derive receiptJson = Json.codec<Receipt>(maxBodyBytes: 256, maxDepth: 2) with totalJson
+
+service Inventory {
+    effect fn reserve(item: string, quantity: i64) -> i64 raises { OutOfStock }
+}
+
+effect fn place(order: Order) -> Receipt raises { OutOfStock } uses { Inventory } {
+    let cents = run Inventory.reserve(order.item, order.quantity)
+    Receipt {
+        item: order.item,
+        total: total(cents)
+    }
+}
+
+effect fn cancel() -> void raises { NothingToCancel } {
+    fail NothingToCancel {}
+}
+
+fn ping() -> void {
+}
+
+// Failure witnesses encode a failure as {"_tag": name, ...fields}. The
+// Unpublishable body is deliberately bounded below its size: its failed
+// encoding is terminal, so the transport answers its generic 500.
+derive unknownMemberJson = Json.codec<UnknownMember>(maxBodyBytes: 128, maxDepth: 1)
+derive outOfStockJson = Json.codec<OutOfStock>(maxBodyBytes: 128, maxDepth: 1)
+derive unpublishableJson = Json.codec<Unpublishable>(maxBodyBytes: 8, maxDepth: 1)
+
+derive placeOrder = Http.endpoint(method: "POST", path: "/orders", input: orderJson, handler: place, output: receiptJson, status: 201) raises { UnknownMember: 422 unknownMemberJson, OutOfStock: 409 outOfStockJson, Unpublishable: 502 unpublishableJson }
+derive cancelOrder = Http.endpoint(method: "DELETE", path: "/orders", handler: cancel, status: 204) raises { NothingToCancel: 409 }
+derive health = Http.endpoint(method: "GET", path: "/health", handler: ping, status: 204)
+derive api = Http.routes(placeOrder, cancelOrder, health)
+
+impl Members for Directory {
+    effect fn find(id: string) -> Member raises { UnknownMember } {
+        if id == "m-1" {
+            Member {
+                id: id,
+                name: "Ada"
+            }
+        } else {
+            fail UnknownMember {
+                id: id
+            }
+        }
+    }
+}
+
+impl Stock for Inventory {
+    effect fn reserve(item: string, quantity: i64) -> i64 raises { OutOfStock } {
+        if quantity > 4 {
+            fail OutOfStock {
+                item: item
+            }
+        } else {
+            quantity + 250
+        }
+    }
+}
+
+impl Books for Ledger {
+    effect fn publish(cents: i64) -> i64 raises { Unpublishable } {
+        if cents > 252 {
+            fail Unpublishable {
+                cents: cents
+            }
+        } else {
+            cents
+        }
+    }
+}
+
+// A stored-data caller decodes with the same witness outside HTTP.
+effect fn restoreOrder(stored: string) -> Order raises { JsonDecodeFailure, UnknownMember } uses { Directory } {
+    run orderJson.decode(stored)
+}
+
+fn status(reply: HttpReply) -> i64 {
+    match reply {
+        HttpReply.Respond { response } => response.status
+        HttpReply.BadRequest => 400
+        HttpReply.NotFound => 404
+        HttpReply.UnsupportedMediaType => 415
+    }
+}
+
+// Calling a route table directly keeps every mapped failure in its row: a
+// lone mapped failure is answered with its status, but a compound cause
+// (say, a handler failure beside an unobserved child's failure) propagates
+// complete, so the caller declares them. Http.listen absorbs them as 500.
+effect fn order(contentType: string, body: string) -> i64 raises { JsonEncodeFailure, NothingToCancel, OutOfStock, UnknownMember, Unpublishable } uses { Http, Directory, Inventory, Ledger } {
+    let bytes = run Http.text(body)
+    let request = HttpRequest {
+        method: "POST",
+        path: "/orders",
+        contentType: contentType,
+        body: bytes
+    }
+    status(run api(request))
+}
+
+effect fn test_order_is_created() -> void raises { AssertionFailed, JsonEncodeFailure, NothingToCancel, OutOfStock, UnknownMember, Unpublishable } uses { Assert } {
+    let code = run order("application/json", "{\"member\":\"m-1\",\"item\":\"tea\",\"quantity\":\"2\"}").provide<Http>(LiveHttp).provide<Directory>(Members).provide<Inventory>(Stock).provide<Ledger>(Books)
+    run Assert.check(code == 201, "a valid order is created")
+}
+
+effect fn test_unknown_member_is_not_malformed_input() -> void raises { AssertionFailed, JsonEncodeFailure, NothingToCancel, OutOfStock, UnknownMember, Unpublishable } uses { Assert } {
+    let unknown = run order("application/json", "{\"member\":\"m-9\",\"item\":\"tea\",\"quantity\":\"2\"}").provide<Http>(LiveHttp).provide<Directory>(Members).provide<Inventory>(Stock).provide<Ledger>(Books)
+    let malformed = run order("application/json", "{\"member\":\"m-1\"}").provide<Http>(LiveHttp).provide<Directory>(Members).provide<Inventory>(Stock).provide<Ledger>(Books)
+    run Assert.check(unknown == 422, "the decode transformation's failure answers its mapped status")
+    run Assert.check(malformed == 400, "structurally malformed input answers 400")
+}
+
+effect fn test_handler_failure_answers_its_status() -> void raises { AssertionFailed, JsonEncodeFailure, NothingToCancel, OutOfStock, UnknownMember, Unpublishable } uses { Assert } {
+    let code = run order("application/json", "{\"member\":\"m-1\",\"item\":\"tea\",\"quantity\":\"9\"}").provide<Http>(LiveHttp).provide<Directory>(Members).provide<Inventory>(Stock).provide<Ledger>(Books)
+    run Assert.check(code == 409, "the handler's failure answers its mapped status")
+}
+
+effect fn test_unsupported_media_type() -> void raises { AssertionFailed, JsonEncodeFailure, NothingToCancel, OutOfStock, UnknownMember, Unpublishable } uses { Assert } {
+    let code = run order("text/plain", "{}").provide<Http>(LiveHttp).provide<Directory>(Members).provide<Inventory>(Stock).provide<Ledger>(Books)
+    run Assert.check(code == 415, "an endpoint with input requires JSON")
+}
+
+effect fn test_stored_order_shares_the_witness() -> void raises { AssertionFailed, JsonDecodeFailure, UnknownMember } uses { Assert } {
+    let order = run restoreOrder("{\"member\":\"m-1\",\"item\":\"tea\",\"quantity\":\"1\"}").provide<Directory>(Members)
+    run Assert.equalText(order.member.name, "Ada")
+}
+
+effect fn main() -> void raises { IoError } {
+    with provideService<Http>(LiveHttp)
+    with provideService<Directory>(Members)
+    with provideService<Inventory>(Stock)
+    with provideService<Ledger>(Books)
+    let limits = HttpLimits {
+        maxBodyBytes: 256,
+        readHeaderMillis: 1000,
+        readBodyMillis: 1000,
+        idleMillis: 1000,
+        maxActive: 8
+    }
+    run Http.listen("127.0.0.1:0", limits, api)
+}

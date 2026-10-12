@@ -1,0 +1,43 @@
+// Option D library: everything is a function, and `with f(args)` passes the
+// rest of the enclosing block to `f` as a final block argument (Koka `with`,
+// Gleam `use`). `with timeoutOr(2s, "gave up")` followed by statements S is
+// exactly `timeoutOr(2s, "gave up", effect { S })`.
+//
+// Depends on features that are designed but not built: non-escaping block
+// closures (#106), whole-value type parameters (#128, Q9), label parameters
+// (#131), and a `Duration` type with unit literals.
+//
+// `provide` and `provideService` cannot be ordinary library: the layer plan is
+// read by graph, lint and inspection (rows note §2.13), so the checker would
+// have to recognise `provide` by name. That is the lang-item pattern the
+// owner's 2026-10-09 direction forbids; D keeps it only to be measured.
+
+pub error Timeout
+
+pub effect fn scoped<A: type, E: raises, R: uses>(body: effect block() -> A raises { E } uses { R }) -> A raises { E } uses { R } {
+    scope {
+        run body()
+    }
+}
+
+pub effect fn timeoutOr<A: type, E: raises, R: uses>(limit: Duration, fallback: A, body: effect block() -> A raises { E } uses { R }) -> A raises { E } uses { R, Clock } {
+    race {
+        run body()
+    } or {
+        run Clock.sleep(limit)
+        fallback
+    }
+}
+
+pub effect fn (work: Effect<A, { E }, { R }>) timeoutOr<A: type, E: raises, R: uses>(limit: Duration, fallback: A) -> A raises { E } uses { R, Clock } {
+    race {
+        run work
+    } or {
+        run Clock.sleep(limit)
+        fallback
+    }
+}
+
+// Compiler-known by name (the violation D carries):
+//   provide(L)                 builds layer L around the block
+//   provideService<S>(p)       installs provider p for service S around the block

@@ -1,0 +1,23 @@
+import go strings "strings"
+import go strconv "strconv"
+import go sdk "effra.local/prototype/examples/sdk"
+
+effect fn program() -> void uses { Foreign, Console, Clock } {
+    let name = run strings.ToUpper("ada")
+    run Console.log(name)
+    let raw = run strconv.ParseBool("invalid")
+    if raw.hasError {
+        run Console.log("partial result retained")
+    } else {
+        void
+    }
+    let fallback = run strconv.ParseBool("invalid").orFail().catch<GoError>(false)
+    let slow = run sdk.Lookup("slow").orFail().timeoutOr(1ms, "timed out")
+        .catch<GoError>("failed")
+    run Console.log(slow)
+}
+
+effect fn main() -> void {
+    run program().provide<Foreign>(Host).provide<Console>(Stdout)
+        .provide<Clock>(LiveClock)
+}

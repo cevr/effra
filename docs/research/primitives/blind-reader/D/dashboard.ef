@@ -1,0 +1,44 @@
+service Store {
+    effect fn label() -> string
+}
+service Account {
+    effect fn label() -> string
+}
+service Invoice {
+    effect fn label() -> string
+}
+impl Memory(label: string) for Store {
+    effect fn label() -> string {
+        label
+    }
+}
+impl AccountLive for Account uses { Store } {
+    effect fn label() -> string {
+        run Store.label()
+    }
+}
+impl InvoiceLive for Invoice uses { Store } {
+    effect fn label() -> string {
+        run Store.label()
+    }
+}
+layer App provides { Account, Invoice } {
+    Store = Memory("live");
+    Account = AccountLive;
+    Invoice = InvoiceLive
+}
+
+effect fn dashboard() -> string uses { Account, Invoice, Clock } {
+    with scoped()
+    let account = fork Account.label()
+    let invoice = run Invoice.label().timeoutOr(500ms, "invoice: slow")
+    let name = run account.join()
+    name + " / " + invoice
+}
+
+effect fn main() -> string {
+    with provide(App)
+    with provideService<Clock>(LiveClock)
+    with timeoutOr(2s, "gave up")
+    run dashboard()
+}
