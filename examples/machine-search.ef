@@ -2,8 +2,6 @@
 // ordinary pure step function. `ef inspect examples/machine-search.ef Search`
 // and `ef graph examples/machine-search.ef --kind machine` project its plan
 // without running the step.
-import Machines "effra/machines"
-
 enum Query {
     Idle
     Loading {
@@ -36,21 +34,21 @@ fn loading(text: string) -> Query {
     }
 }
 
-fn searchStep(state: Query, event: QueryEvent) -> Machines.Step<Query, i64> {
+fn searchStep(state: Query, event: QueryEvent) -> decision<Query, i64> {
     match state, event {
-        Query.Idle | Query.Ready | Query.Failed, QueryEvent.Submit { text } => Machines.Step<Query, i64>.Go(loading(text))
+        Query.Idle | Query.Ready | Query.Failed, QueryEvent.Submit { text } => enter loading(text)
         Query.Loading { text: current }, QueryEvent.Submit { text } => if text == current {
-            Machines.Step<Query, i64>.Stay(state)
+            stay state
         } else {
-            Machines.Step<Query, i64>.Go(loading(text))
+            enter loading(text)
         }
-        Query.Loading { text }, QueryEvent.Results { hits } => Machines.Step<Query, i64>.Go(Query.Ready(text, hits))
-        Query.Loading { text }, QueryEvent.Errored => Machines.Step<Query, i64>.Go(Query.Failed(text))
-        Query.Ready { text } | Query.Failed { text }, QueryEvent.Reload => Machines.Step<Query, i64>.Go(loading(text))
-        Query.Idle | Query.Loading, QueryEvent.Reload => Machines.Step<Query, i64>.Ignore {}
-        Query.Idle | Query.Ready | Query.Failed, QueryEvent.Results | QueryEvent.Errored => Machines.Step<Query, i64>.Ignore {}
-        Query.Ready { hits }, QueryEvent.Close => Machines.Step<Query, i64>.Done(hits)
-        Query.Idle | Query.Loading | Query.Failed, QueryEvent.Close => Machines.Step<Query, i64>.Reject {}
+        Query.Loading { text }, QueryEvent.Results { hits } => enter Query.Ready(text, hits)
+        Query.Loading { text }, QueryEvent.Errored => enter Query.Failed(text)
+        Query.Ready { text } | Query.Failed { text }, QueryEvent.Reload => enter loading(text)
+        Query.Idle | Query.Loading, QueryEvent.Reload => ignore
+        Query.Idle | Query.Ready | Query.Failed, QueryEvent.Results | QueryEvent.Errored => ignore
+        Query.Ready { hits }, QueryEvent.Close => done hits
+        Query.Idle | Query.Loading | Query.Failed, QueryEvent.Close => reject
     }
 }
 
@@ -61,13 +59,13 @@ machine Search {
 
 // The demo applies decisions by hand; executing a machine belongs to a
 // runtime provider, which this profile does not admit yet.
-fn describe(decision: Machines.Step<Query, i64>) -> string {
+fn describe(decision: decision<Query, i64>) -> string {
     match decision {
-        Machines.Step.Go { next } => "go " + label(next)
-        Machines.Step.Stay { next } => "stay " + label(next)
-        Machines.Step.Ignore => "ignore"
-        Machines.Step.Reject => "reject"
-        Machines.Step.Done => "done"
+        enter next => "go " + label(next)
+        stay next => "stay " + label(next)
+        ignore => "ignore"
+        reject => "reject"
+        done => "done"
     }
 }
 

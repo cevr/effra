@@ -71,7 +71,6 @@ func measureMachinePreparation(t *testing.T, source string) (*Result, []preparat
 func machineLayoutTextSource(k, fields, nameBytes int) string {
 	var b strings.Builder
 	inner := "I" + strings.Repeat("n", nameBytes)
-	b.WriteString("import Machines \"effra/machines\"\n")
 	fmt.Fprintf(&b, "record %s<T: type> { value: T }\nrecord Outer<T: type> {", inner)
 	for i := 0; i < fields; i++ {
 		if i > 0 {
@@ -91,7 +90,7 @@ func machineLayoutTextSource(k, fields, nameBytes int) string {
 		fmt.Fprintf(&b, " o%d: Outer<R%d>", i, i)
 	}
 	b.WriteString(" }\nenum S { A }\nenum E { P }\n")
-	b.WriteString("fn step(state: S, event: E) -> Machines.Step<S, Payload> { Machines.Step<S, Payload>.Ignore {} }\nmachine M { initial S.A {}; step step }\n")
+	b.WriteString("fn step(state: S, event: E) -> decision<S, Payload> { ignore }\nmachine M { initial S.A {}; step step }\n")
 	return b.String()
 }
 
@@ -107,7 +106,6 @@ func TestMachinePreparationAllocationIsCharged(t *testing.T) {
 	} {
 		source := machineLayoutTextSource(c.k, c.fields, c.name)
 		r, measures := measureMachinePreparation(t, source)
-		// The imported Machines module is prepared too, with nothing to prepare.
 		if len(measures) == 0 {
 			t.Fatalf("k=%d F=%d N=%d: nothing prepared", c.k, c.fields, c.name)
 		}
@@ -135,7 +133,6 @@ type sharedPayloadShape struct {
 
 func (s sharedPayloadShape) source() string {
 	var b strings.Builder
-	b.WriteString("import Machines \"effra/machines\"\n")
 	for i := 0; i < s.records; i++ {
 		fmt.Fprintf(&b, "record R%d { x: i64 }\n", i)
 	}
@@ -157,7 +154,7 @@ func (s sharedPayloadShape) source() string {
 	}
 	for i := 0; i < steps; i++ {
 		fmt.Fprintf(&b, "enum S%d { A { w: W } B }\nenum E%d { P { w: W%s } Q }\n", i, i, extra)
-		fmt.Fprintf(&b, "fn step%d(state: S%d, event: E%d) -> Machines.Step<S%d, W> { Machines.Step<S%d, W>.Ignore {} }\n", i, i, i, i, i)
+		fmt.Fprintf(&b, "fn step%d(state: S%d, event: E%d) -> decision<S%d, W> { ignore }\n", i, i, i, i)
 	}
 	for i := 0; i < s.declarations; i++ {
 		step := 0
@@ -174,7 +171,6 @@ func (s sharedPayloadShape) source() string {
 // and displays the initial's type, rows included.
 func effectInitialSource(labels, declarations int) string {
 	var b strings.Builder
-	b.WriteString("import Machines \"effra/machines\"\n")
 	for i := 0; i < labels; i++ {
 		fmt.Fprintf(&b, "error E%d\n", i)
 	}
@@ -186,7 +182,7 @@ func effectInitialSource(labels, declarations int) string {
 		fmt.Fprintf(&b, " E%d", i)
 	}
 	b.WriteString(" } { S.A {} }\n")
-	b.WriteString("fn step(state: S, event: E) -> Machines.Step<S, void> { Machines.Step<S, void>.Ignore {} }\n")
+	b.WriteString("fn step(state: S, event: E) -> decision<S, void> { ignore }\n")
 	for i := 0; i < declarations; i++ {
 		fmt.Fprintf(&b, "machine M%d { initial start(); step step }\n", i)
 	}
@@ -194,7 +190,7 @@ func effectInitialSource(labels, declarations int) string {
 }
 
 // prepareModule compiles source and returns its module's preparation: the
-// last one, after the imported Machines module's.
+// last one.
 func prepareModule(t *testing.T, source string) (*Result, preparationMeasure) {
 	t.Helper()
 	r, measures := measureMachinePreparation(t, source)
@@ -294,7 +290,6 @@ func TestMachinePreparationRowChargeIsPinned(t *testing.T) {
 // prepared; analysis then refuses the effectful initial (EF140).
 func catchChainSource(n int) string {
 	var b strings.Builder
-	b.WriteString("import Machines \"effra/machines\"\n")
 	for i := 0; i < n; i++ {
 		fmt.Fprintf(&b, "error G%d\n", i)
 	}
@@ -310,7 +305,7 @@ func catchChainSource(n int) string {
 		fmt.Fprintf(&b, ".catch<G%d>(0)", i)
 	}
 	b.WriteString("\n    S.A {}\n}\n")
-	b.WriteString("fn step(state: S, event: E) -> Machines.Step<S, void> { Machines.Step<S, void>.Ignore {} }\n")
+	b.WriteString("fn step(state: S, event: E) -> decision<S, void> { ignore }\n")
 	b.WriteString("machine M { initial start(); step step }\n")
 	return b.String()
 }
@@ -355,7 +350,7 @@ func wideRecordSource(b *strings.Builder, name string, records, fields int) {
 func machinesOver(b *strings.Builder, states ...string) {
 	for i, state := range states {
 		fmt.Fprintf(b, "enum S%d { A { %s } B }\nenum E%d { P Q }\n", i, state, i)
-		fmt.Fprintf(b, "fn step%d(state: S%d, event: E%d) -> Machines.Step<S%d, void> { Machines.Step<S%d, void>.Ignore {} }\n", i, i, i, i, i)
+		fmt.Fprintf(b, "fn step%d(state: S%d, event: E%d) -> decision<S%d, void> { ignore }\n", i, i, i, i)
 		fmt.Fprintf(b, "machine M%d { initial S%d.B {}; step step%d }\n", i, i, i)
 	}
 }
@@ -388,12 +383,10 @@ func diagnosticSummary(r *Result) []string {
 //     layouts instead.
 func TestMachinePreparationCleanSetIsSound(t *testing.T) {
 	var stop strings.Builder
-	stop.WriteString("import Machines \"effra/machines\"\n")
 	wideRecordSource(&stop, "P0", 600, 30)
 	wideRecordSource(&stop, "P1", 600, 30)
 	machinesOver(&stop, "p0: P0, p1: P1", "p1: P1")
 	var cycle strings.Builder
-	cycle.WriteString("import Machines \"effra/machines\"\n")
 	wideRecordSource(&cycle, "P", 800, 30)
 	wideRecordSource(&cycle, "H", 400, 30)
 	cycle.WriteString("enum B { Y { a: A } N }\nenum A { X { b: B, h: H, f: fn() -> i64 } N }\n")

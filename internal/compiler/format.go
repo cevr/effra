@@ -12,7 +12,7 @@ const FormatterSchemaVersion = 1
 
 // FormatterIdentity names the syntax producer independently from semantic
 // revisions. Adapters must report this identity without querying Git.
-const FormatterIdentity = "effra/formatter-15"
+const FormatterIdentity = "effra/formatter-16"
 
 // FormatResult is the pure, syntax-only formatting snapshot. Its digest is
 // intentionally independent from a checked semantic revision: formatting
@@ -327,7 +327,8 @@ func collectExpressionBreaks(layout *formatLayout, expression *Expr) {
 	}
 	collectBlockBreaks(layout, expression.Then)
 	collectBlockBreaks(layout, expression.Else)
-	if expression.Kind != "call" {
+	// A decision form's operand follows its word on the same line.
+	if expression.Kind != "call" && expression.Kind != "decision" {
 		for _, field := range expression.Fields {
 			if !layout.preserve[field.Span.Line] {
 				layout.breaks[field.Span.Offset] = true
@@ -658,7 +659,7 @@ func (p *formatPrinter) unaryMinus(index int) bool {
 		return false
 	case "-", "+", "==", "<", "<=", ">", ">=", "*", "/", "%", "|>", "->", "=>", "(", "[", "{", ",", ":", ";":
 		return true
-	case "if", "match", "run", "fork":
+	case "if", "match", "run", "fork", "enter", "stay", "done":
 		return true
 	default:
 		return previous.kind != "name" && previous.kind != "integer" && previous.kind != "string"
@@ -667,7 +668,7 @@ func (p *formatPrinter) unaryMinus(index int) bool {
 
 func groupedCallKeyword(text string) bool {
 	switch text {
-	case "if", "match", "run", "fork":
+	case "if", "match", "run", "fork", "enter", "stay", "done":
 		return true
 	default:
 		return false

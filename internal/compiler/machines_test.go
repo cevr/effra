@@ -17,19 +17,22 @@ func machineCodes(r *Result) []string {
 	return codes
 }
 
-// The static Stay same-tag rule, ported from the 2026-10-07 machine admission
+// The static `stay` same-tag rule, ported from the 2026-10-07 machine admission
 // probes onto the declaration. Each program is real .ef source; the
 // expectation is the exact diagnostic code list.
 func TestMachineStaySameTagRule(t *testing.T) {
 	expected := map[string][]string{
-		"stay-a01-reject-idle-stay-active.ef":    {"EF139"},
-		"stay-a02-accept-stay-state.ef":          {},
-		"stay-a03-accept-same-variant.ef":        {},
-		"stay-a04-reject-helper-literal.ef":      {"EF139"},
-		"stay-a05-accept-helper-normalize.ef":    {},
-		"stay-a06-accept-dynamic-payload.ef":     {},
-		"stay-a07-reject-step-helper.ef":         {"EF139"},
-		"stay-a08-reject-aliased-import.ef":      {"EF139"},
+		"stay-a01-reject-idle-stay-active.ef": {"EF139"},
+		"stay-a02-accept-stay-state.ef":       {},
+		"stay-a03-accept-same-variant.ef":     {},
+		"stay-a04-reject-helper-literal.ef":   {"EF139"},
+		"stay-a05-accept-helper-normalize.ef": {},
+		"stay-a06-accept-dynamic-payload.ef":  {},
+		"stay-a07-reject-step-helper.ef":      {"EF139"},
+		// A stale import of the removed effra/machines module is the ordinary
+		// unknown-module diagnostic (with a migration hint); the decision-syntax
+		// body is still checked.
+		"stay-a08-refuse-stale-step-import.ef":   {"EF126", "EF139"},
 		"stay-a09-reject-user-step-lookalike.ef": {"EF140"},
 		"stay-a10-alias-state.ef":                {"EF139"},
 		"stay-a11-shadowed-state-name.ef":        {},
@@ -65,8 +68,8 @@ func TestMachineStaySameTagRule(t *testing.T) {
 			if got := machineCodes(r); !slices.Equal(got, want) {
 				t.Fatalf("codes = %v, want %v: %+v", got, want, r.Diagnostics)
 			}
-			// Every Stay finding is anchored at the Stay variant token, or at
-			// the caller's call of the first helper that contains the Stay.
+			// Every `stay` finding is anchored at the `stay` variant token, or at
+			// the caller's call of the first helper that contains the `stay`.
 			for _, d := range r.Diagnostics {
 				if d.Code != "EF139" {
 					continue
@@ -74,13 +77,13 @@ func TestMachineStaySameTagRule(t *testing.T) {
 				anchor := string(source)[d.Span.Offset : d.Span.Offset+d.Span.Length]
 				if _, chain, ok := strings.Cut(d.Message, "(through helper "); ok {
 					helper, _, _ := strings.Cut(strings.TrimSuffix(chain, ")"), " -> ")
-					// A Stay in the step whose value comes from a helper stays
-					// at the Stay; a Stay inside a helper anchors at its call.
-					if anchor != helper && anchor != "Stay" {
-						t.Fatalf("helper finding anchored at %q, want %q or Stay", anchor, helper)
+					// A `stay` in the step whose value comes from a helper stays
+					// at the `stay`; a `stay` inside a helper anchors at its call.
+					if anchor != helper && anchor != "stay" {
+						t.Fatalf("helper finding anchored at %q, want %q or stay", anchor, helper)
 					}
-				} else if anchor != "Stay" {
-					t.Fatalf("Stay finding anchored at %q", anchor)
+				} else if anchor != "stay" {
+					t.Fatalf("stay finding anchored at %q", anchor)
 				}
 			}
 			if len(want) == 0 && strings.Contains(string(source), "machine Session") && r.FindMachine("Session") == nil {
@@ -100,7 +103,7 @@ func TestMachineStayDiagnosticNamesTheNarrowingAndHelper(t *testing.T) {
 		t.Fatalf("diagnostics = %+v", r.Diagnostics)
 	}
 	d := r.Diagnostics[0]
-	if !strings.Contains(d.Message, "narrows the state to SessionState.Idle but Stay constructs SessionState.Active") || !strings.Contains(d.Message, "through helper stayActive") {
+	if !strings.Contains(d.Message, "narrows the state to SessionState.Idle but `stay` constructs SessionState.Active") || !strings.Contains(d.Message, "through helper stayActive") {
 		t.Fatalf("message = %q", d.Message)
 	}
 	// The finding is reported at the call inside the bound step, not inside
@@ -110,16 +113,15 @@ func TestMachineStayDiagnosticNamesTheNarrowingAndHelper(t *testing.T) {
 	}
 }
 
-const machinePrelude = `import Machines "effra/machines"
-enum Light { Red  Green { cars: i64 } }
+const machinePrelude = `enum Light { Red  Green { cars: i64 } }
 enum Press { Walk  Wait }
 `
 
-const lightStepSource = `fn lightStep(state: Light, event: Press) -> Machines.Step<Light, void> {
+const lightStepSource = `fn lightStep(state: Light, event: Press) -> decision<Light, void> {
     match state, event {
-        Light.Red, Press.Walk => Machines.Step<Light, void>.Go(Light.Green { cars: 0 })
-        Light.Green, Press.Walk => Machines.Step<Light, void>.Go(Light.Red {})
-        Light.Red | Light.Green, Press.Wait => Machines.Step<Light, void>.Ignore {}
+        Light.Red, Press.Walk => enter Light.Green { cars: 0 }
+        Light.Green, Press.Walk => enter Light.Red {}
+        Light.Red | Light.Green, Press.Wait => ignore
     }
 }
 `
@@ -137,11 +139,11 @@ func TestMachineDeclarationDiagnostics(t *testing.T) {
 		{"missing step", machinePrelude + "machine Lights { initial Light.Red {} }", []string{"EF140"}, "requires a step binding"},
 		{"missing initial", machinePrelude + lightStepSource + "machine Lights { step lightStep }", []string{"EF140"}, "requires an initial state"},
 		{"unknown step", machinePrelude + "machine Lights { initial Light.Red {}; step nowhere }", []string{"EF140"}, "unknown module function nowhere"},
-		{"step arity", machinePrelude + "fn one(state: Light) -> Machines.Step<Light, void> { Machines.Step<Light, void>.Ignore {} }\nmachine Lights { initial Light.Red {}; step one }", []string{"EF140"}, "must take (state, event) parameters"},
-		{"step result", machinePrelude + "fn plain(state: Light, event: Press) -> Light { state }\nmachine Lights { initial Light.Red {}; step plain }", []string{"EF140"}, "must return the bundled effra/machines Step"},
-		{"state first", machinePrelude + "fn flipped(event: Press, state: Light) -> Machines.Step<Light, void> { Machines.Step<Light, void>.Ignore {} }\nmachine Lights { initial Light.Red {}; step flipped }", []string{"EF140"}, "takes the current state first"},
-		{"event is state", machinePrelude + "fn same(state: Light, other: Light) -> Machines.Step<Light, void> { Machines.Step<Light, void>.Ignore {} }\nmachine Lights { initial Light.Red {}; step same }", []string{"EF140"}, "must be distinct types"},
-		{"event not enum", machinePrelude + "fn text(state: Light, event: string) -> Machines.Step<Light, void> { Machines.Step<Light, void>.Ignore {} }\nmachine Lights { initial Light.Red {}; step text }", []string{"EF140"}, "must be a closed, non-generic enum"},
+		{"step arity", machinePrelude + "fn one(state: Light) -> decision<Light, void> { ignore }\nmachine Lights { initial Light.Red {}; step one }", []string{"EF140"}, "must take (state, event) parameters"},
+		{"step result", machinePrelude + "fn plain(state: Light, event: Press) -> Light { state }\nmachine Lights { initial Light.Red {}; step plain }", []string{"EF140"}, "must return decision<State, Output>"},
+		{"state first", machinePrelude + "fn flipped(event: Press, state: Light) -> decision<Light, void> { ignore }\nmachine Lights { initial Light.Red {}; step flipped }", []string{"EF140"}, "takes the current state first"},
+		{"event is state", machinePrelude + "fn same(state: Light, other: Light) -> decision<Light, void> { ignore }\nmachine Lights { initial Light.Red {}; step same }", []string{"EF140"}, "must be distinct types"},
+		{"event not enum", machinePrelude + "fn text(state: Light, event: string) -> decision<Light, void> { ignore }\nmachine Lights { initial Light.Red {}; step text }", []string{"EF140"}, "must be a closed, non-generic enum"},
 		{"initial wrong type", machinePrelude + lightStepSource + "machine Lights { initial Press.Walk {}; step lightStep }", []string{"EF140"}, "must be a Light value"},
 		{"initial not literal", machinePrelude + lightStepSource + "fn start() -> Light { Light.Red {} }\nmachine Lights { initial start(); step lightStep }", []string{"EF140"}, "literal Light constructor"},
 		{"initial dynamic payload", machinePrelude + lightStepSource + "fn count() -> i64 { 3 }\nmachine Lights { initial Light.Green { cars: count() }; step lightStep }", []string{"EF140"}, "static payload"},
@@ -149,10 +151,9 @@ func TestMachineDeclarationDiagnostics(t *testing.T) {
 		{"complete without enter", machinePrelude + lightStepSource + "machine Lights { initial Light.Red {}; step lightStep; complete lightStep }", []string{"EF140", "EF140"}, "requires an enter binding"},
 		{"outcome forging", machinePrelude + lightStepSource + "fn enterLight(state: Light) -> Light { state }\nmachine Lights { initial Light.Red {}; step lightStep; enter enterLight; complete lightStep }", []string{"EF141", "EF140"}, "cannot forge work completion"},
 		{"machine as value", machinePrelude + lightStepSource + "machine Lights { initial Light.Red {}; step lightStep }\nfn spawn() -> void { let handle = Lights\nvoid }", []string{"EF141"}, "is a declaration, not a value"},
-		{"callable payload", `import Machines "effra/machines"
-enum Job { Idle  Queued { work: fn() -> i64 } }
+		{"callable payload", `enum Job { Idle  Queued { work: fn() -> i64 } }
 enum Cmd { Run }
-fn jobStep(state: Job, event: Cmd) -> Machines.Step<Job, void> { Machines.Step<Job, void>.Ignore {} }
+fn jobStep(state: Job, event: Cmd) -> decision<Job, void> { ignore }
 machine Jobs { initial Job.Idle {}; step jobStep }`, []string{"EF141"}, "carries a function or effect recipe"},
 		{"duplicate name", machinePrelude + lightStepSource + "machine lightStep { initial Light.Red {}; step lightStep }", []string{"EF101"}, "duplicate declaration lightStep"},
 		{"statechart word", machinePrelude + lightStepSource + "machine Lights { initial Light.Red {}; states { } }", []string{"EF002"}, "machine states is unsupported"},
@@ -162,26 +163,26 @@ machine Jobs { initial Job.Idle {}; step jobStep }`, []string{"EF141"}, "carries
 		{"type parameters", machinePrelude + lightStepSource + "machine Lights<T> { initial Light.Red {}; step lightStep }", []string{"EF002"}, "take no type parameters"},
 		// Ordinary checking owns the step body: a missing pair, a pure step
 		// executing an effect and an undeclared failure stay ordinary diagnostics.
-		{"missing pair", machinePrelude + `fn lightStep(state: Light, event: Press) -> Machines.Step<Light, void> {
+		{"missing pair", machinePrelude + `fn lightStep(state: Light, event: Press) -> decision<Light, void> {
     match state, event {
-        Light.Red, Press.Walk => Machines.Step<Light, void>.Go(Light.Green { cars: 0 })
-        Light.Red | Light.Green, Press.Wait => Machines.Step<Light, void>.Ignore {}
+        Light.Red, Press.Walk => enter Light.Green { cars: 0 }
+        Light.Red | Light.Green, Press.Wait => ignore
     }
 }
 machine Lights { initial Light.Red {}; step lightStep }`, []string{"EF117"}, "missing match arm for Light.Green, Press.Walk"},
 		{"pure step executes", machinePrelude + `service Sensor { effect fn busy() -> bool }
-fn lightStep(state: Light, event: Press) -> Machines.Step<Light, void> {
-    if run Sensor.busy() { Machines.Step<Light, void>.Reject {} } else { Machines.Step<Light, void>.Ignore {} }
+fn lightStep(state: Light, event: Press) -> decision<Light, void> {
+    if run Sensor.busy() { reject } else { ignore }
 }
 machine Lights { initial Light.Red {}; step lightStep }`, nil, ""},
 		{"undeclared failure", machinePrelude + `error Jammed
-effect fn lightStep(state: Light, event: Press) -> Machines.Step<Light, void> {
+effect fn lightStep(state: Light, event: Press) -> decision<Light, void> {
     fail Jammed
 }
 machine Lights { initial Light.Red {}; step lightStep }`, nil, ""},
 		{"missing service", machinePrelude + `service Sensor { effect fn busy() -> bool }
-effect fn lightStep(state: Light, event: Press) -> Machines.Step<Light, void> raises { } uses { } {
-    if run Sensor.busy() { Machines.Step<Light, void>.Reject {} } else { Machines.Step<Light, void>.Ignore {} }
+effect fn lightStep(state: Light, event: Press) -> decision<Light, void> raises { } uses { } {
+    if run Sensor.busy() { reject } else { ignore }
 }
 machine Lights { initial Light.Red {}; step lightStep }`, []string{"EF108"}, "missing service requirements: Sensor"},
 	}
@@ -296,14 +297,13 @@ func TestMachinePlansForUnrelatedPrograms(t *testing.T) {
 // edge is reported, a dynamic Go target makes every state possible, and the
 // fact never claims reachability.
 func TestMachinePlanEnterableAndConservativeTargets(t *testing.T) {
-	base := `import Machines "effra/machines"
-enum Door { Shut  Open  Broken }
+	base := `enum Door { Shut  Open  Broken }
 enum Push { In  Out { to: Door } }
-fn doorStep(state: Door, event: Push) -> Machines.Step<Door, void> {
+fn doorStep(state: Door, event: Push) -> decision<Door, void> {
     match state, event {
-        Door.Shut, Push.In => Machines.Step<Door, void>.Go(Door.Open {})
-        Door.Open, Push.In => Machines.Step<Door, void>.Go(Door.Shut {})
-        Door.Broken, Push.In => Machines.Step<Door, void>.Ignore {}
+        Door.Shut, Push.In => enter Door.Open {}
+        Door.Open, Push.In => enter Door.Shut {}
+        Door.Broken, Push.In => ignore
         Door.Shut | Door.Open | Door.Broken, Push.Out { to } => OUT
     }
 }
@@ -321,11 +321,11 @@ machine Doors { initial Door.Shut {}; step doorStep }
 		}
 		return out
 	}
-	literal := enterable(strings.Replace(base, "OUT", "Machines.Step<Door, void>.Reject {}", 1))
+	literal := enterable(strings.Replace(base, "OUT", "reject", 1))
 	if !literal["Shut"] || !literal["Open"] || literal["Broken"] {
 		t.Fatalf("literal enterable = %v", literal)
 	}
-	r := Compile(strings.Replace(base, "OUT", "Machines.Step<Door, void>.Go(to)", 1))
+	r := Compile(strings.Replace(base, "OUT", "enter to", 1))
 	plan := r.FindMachine("Doors")
 	if plan == nil {
 		t.Fatalf("dynamic: %+v", r.Diagnostics)
@@ -334,11 +334,11 @@ machine Doors { initial Door.Shut {}; step doorStep }
 	if last.Decision != "go" || last.Precision != "conservative" || strings.Join(last.Targets, "|") != "Shut|Open|Broken" {
 		t.Fatalf("dynamic target = %+v", last)
 	}
-	if dynamic := enterable(strings.Replace(base, "OUT", "Machines.Step<Door, void>.Go(to)", 1)); !dynamic["Broken"] {
+	if dynamic := enterable(strings.Replace(base, "OUT", "enter to", 1)); !dynamic["Broken"] {
 		t.Fatalf("dynamic enterable = %v", dynamic)
 	}
 	// A Step value the walk cannot see into is an "any" decision.
-	opaque := strings.Replace(base, "OUT", "pick(to)", 1) + "fn pick(to: Door) -> Machines.Step<Door, void> { pickAgain(to) }\nfn pickAgain(to: Door) -> Machines.Step<Door, void> { pick(to) }\n"
+	opaque := strings.Replace(base, "OUT", "pick(to)", 1) + "fn pick(to: Door) -> decision<Door, void> { pickAgain(to) }\nfn pickAgain(to: Door) -> decision<Door, void> { pick(to) }\n"
 	r = Compile(opaque)
 	if r.FindMachine("Doors") == nil {
 		t.Fatalf("opaque: %+v", r.Diagnostics)
@@ -411,7 +411,7 @@ func TestMachineInspectionAndGraphView(t *testing.T) {
 // Inspection is static: a step whose evaluation would never terminate is
 // still planned, because planning never evaluates it.
 func TestMachinePlanningNeverEvaluatesSteps(t *testing.T) {
-	r := Compile(machinePrelude + `fn spin(state: Light, event: Press) -> Machines.Step<Light, void> { spin(state, event) }
+	r := Compile(machinePrelude + `fn spin(state: Light, event: Press) -> decision<Light, void> { spin(state, event) }
 machine Lights { initial Light.Red {}; step spin }`)
 	plan := r.FindMachine("Lights")
 	if plan == nil {
@@ -428,7 +428,7 @@ func TestMachineFormattingIsCanonical(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if FormatterIdentity != "effra/formatter-15" || !strings.Contains(first.Text, "machine Lights {\n    initial Light.Green {\n        cars: 1\n    }\n    step lightStep\n}") {
+	if FormatterIdentity != "effra/formatter-16" || !strings.Contains(first.Text, "machine Lights {\n    initial Light.Green {\n        cars: 1\n    }\n    step lightStep\n}") {
 		t.Fatalf("formatted:\n%s", first.Text)
 	}
 	second, err := FormatSource(first.Text)

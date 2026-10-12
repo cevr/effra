@@ -60,7 +60,7 @@ func (c *checker) checkTemplates() {
 			r.EmissionName = r.Name
 		}
 	}
-	declarations = append(declarations, c.program.BundledTemplates...)
+	declarations = append(declarations, c.program.compilerTemplates()...)
 	for _, r := range declarations {
 		if len(r.Parameters) == 0 {
 			continue
@@ -143,7 +143,7 @@ func (c *checker) templateDeclaration(r *Record) Declaration {
 // occurrence keeps its checked ID; nested applications use the same arena.
 func (c *checker) resolveDataTemplateLayouts() {
 	declarations := append(append([]*DataDeclaration{}, c.program.Records...), c.program.Enums...)
-	declarations = append(declarations, c.program.BundledTemplates...)
+	declarations = append(declarations, c.program.compilerTemplates()...)
 	// Each template's published declaration is replaced once its layout
 	// resolves. checkTemplates published them all, and resolving publishes
 	// none, so their positions are indexed once rather than searched per
@@ -308,7 +308,15 @@ func (c *checker) templateByName(name string) *Record {
 			return r
 		}
 	}
-	return index.bundled[c.functionModule][name]
+	if r := index.bundled[c.functionModule][name]; r != nil {
+		return r
+	}
+	// The predeclared decision type is in every module's scope; it exists
+	// only when no source declaration named decision shadows it.
+	if name == decisionTypeName {
+		return c.program.decisionTemplate
+	}
+	return nil
 }
 
 // templateNames indexes the program's templates by unqualified name, once per
@@ -712,6 +720,10 @@ func (c *checker) templateConstruct(e *Expr, env localEnv, inEffect bool) (check
 	}
 	if r == nil {
 		return checkedExpression{}, false
+	}
+	if c.isDecisionTemplate(r) {
+		c.diagnostic(decisionCode, "a decision is written with its forms "+decisionForms+", not constructed", e.Span)
+		return c.checkedData("invalid"), true
 	}
 	if variant != "" && e.Left.constructorType != nil {
 		c.diagnostic("EF127", "constructor arguments belong to the data declaration before its variant", e.Span)

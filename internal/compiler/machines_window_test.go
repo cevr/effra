@@ -16,7 +16,7 @@ import (
 // its own buffer; the checker commits them after the window, so what the
 // window allocates is what the analysis charged.
 
-const machineWindowPrelude = "import Machines \"effra/machines\"\nenum S { A }\nenum E { P }\nfn step(state: S, event: E) -> Machines.Step<S, void> { Machines.Step<S, void>.Ignore {} }\n"
+const machineWindowPrelude = "enum S { A }\nenum E { P }\nfn step(state: S, event: E) -> decision<S, void> { ignore }\n"
 
 // ordinaryErrorsThenStepless is errors ordinary type errors, then a machine
 // with no step binding (EF140).
@@ -83,11 +83,11 @@ func TestMachineWindowIgnoresCheckerStateAtCapacity(t *testing.T) {
 	// A state whose payload applies a template with a function-typed field: the
 	// field's type node carries a failure row and a service row, which the
 	// layout's cost model reads through the shared row view.
-	rowedNode := "import Machines \"effra/machines\"\nerror Broken\nerror Lost\n" +
+	rowedNode := "error Broken\nerror Lost\n" +
 		"service Directory { effect fn get(key: string) -> string raises { Broken } }\n" +
 		"record Box<T: type> { run: effect fn(T) -> T raises { Broken, Lost } uses { Directory } }\n" +
 		"enum S { A { box: Box<string> } B }\nenum E { P }\n" +
-		"fn step(state: S, event: E) -> Machines.Step<S, void> { Machines.Step<S, void>.Ignore {} }\n" +
+		"fn step(state: S, event: E) -> decision<S, void> { ignore }\n" +
 		"machine M { initial S.B {}; step step }\n"
 	cases := []struct {
 		name   string

@@ -4,7 +4,7 @@ package compiler
 // initial state and ordinary named step, entry and completion functions into a
 // canonical checked plan. Behavior stays in those functions; the declaration
 // has no transition, guard, action or timer sub-language. It exists because the
-// static Stay same-tag rule needs compiler knowledge of which parameter is the
+// static `stay` same-tag rule needs compiler knowledge of which parameter is the
 // current state (docs/specs/state-machines.md#construct-admission-gate).
 type Machine struct {
 	Name     string

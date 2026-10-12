@@ -1,8 +1,6 @@
 // A circuit breaker whose step is an effect function: it consults a probe
 // service before half-opening. The machine plan records the step's failure
 // and service rows as the declaration's terminal row and requirements.
-import Machines "effra/machines"
-
 error ProbeUnavailable
 
 service Probe {
@@ -42,27 +40,27 @@ fn tripped(endpoint: string) -> Breaker {
     }
 }
 
-effect fn breakerStep(state: Breaker, signal: Signal) -> Machines.Step<Breaker, string>
+effect fn breakerStep(state: Breaker, signal: Signal) -> decision<Breaker, string>
     raises { ProbeUnavailable }
     uses { Probe }
 {
     match state, signal {
         Breaker.Closed { failures }, Signal.Failure { endpoint } => if failures >= 2 {
-            Machines.Step<Breaker, string>.Go(tripped(endpoint))
+            enter tripped(endpoint)
         } else {
-            Machines.Step<Breaker, string>.Stay(Breaker.Closed(failures + 1))
+            stay Breaker.Closed(failures + 1)
         }
-        Breaker.Closed, Signal.Success => Machines.Step<Breaker, string>.Stay(Breaker.Closed(0))
-        Breaker.Closed | Breaker.HalfOpen, Signal.Retry => Machines.Step<Breaker, string>.Ignore {}
+        Breaker.Closed, Signal.Success => stay Breaker.Closed(0)
+        Breaker.Closed | Breaker.HalfOpen, Signal.Retry => ignore
         Breaker.Open { endpoint }, Signal.Retry => if run Probe.healthy(endpoint) {
-            Machines.Step<Breaker, string>.Go(Breaker.HalfOpen(endpoint))
+            enter Breaker.HalfOpen(endpoint)
         } else {
-            Machines.Step<Breaker, string>.Stay(state)
+            stay state
         }
-        Breaker.Open | Breaker.HalfOpen, Signal.Failure { endpoint } => Machines.Step<Breaker, string>.Go(tripped(endpoint))
-        Breaker.HalfOpen, Signal.Success => Machines.Step<Breaker, string>.Go(Breaker.Closed(0))
-        Breaker.Open, Signal.Success => Machines.Step<Breaker, string>.Reject {}
-        Breaker.Closed | Breaker.Open | Breaker.HalfOpen, Signal.Retire => Machines.Step<Breaker, string>.Done("retired")
+        Breaker.Open | Breaker.HalfOpen, Signal.Failure { endpoint } => enter tripped(endpoint)
+        Breaker.HalfOpen, Signal.Success => enter Breaker.Closed(0)
+        Breaker.Open, Signal.Success => reject
+        Breaker.Closed | Breaker.Open | Breaker.HalfOpen, Signal.Retire => done "retired"
     }
 }
 
@@ -73,13 +71,13 @@ machine CircuitBreaker {
     step breakerStep
 }
 
-fn describe(decision: Machines.Step<Breaker, string>) -> string {
+fn describe(decision: decision<Breaker, string>) -> string {
     match decision {
-        Machines.Step.Go { next } => "go " + label(next)
-        Machines.Step.Stay { next } => "stay " + label(next)
-        Machines.Step.Ignore => "ignore"
-        Machines.Step.Reject => "reject"
-        Machines.Step.Done { output } => "done " + output
+        enter next => "go " + label(next)
+        stay next => "stay " + label(next)
+        ignore => "ignore"
+        reject => "reject"
+        done output => "done " + output
     }
 }
 

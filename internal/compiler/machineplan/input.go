@@ -23,6 +23,19 @@ type TypeRef uint32
 
 // Input is one module's machine declarations and everything their analysis
 // reads.
+//
+// V is the checker's value projection, opaque here: analysis copies and
+// stores a V but cannot name its fields. The allowed libraries still reflect
+// over what they are handed. fmt.Sscan and encoding/binary.Read write through
+// the pointer they receive into fixed-size kinds, and fmt calls a value's
+// Scan, Format, String, GoString and Error methods. So that no allowed
+// library can write checker memory through V, the checker's V must be a
+// struct held by value (never a pointer, slice, map, channel, function or
+// interface, whose referent the checker shares) and neither V nor *V may
+// declare any of those fmt methods. Passing &v then reaches only analysis's
+// own copy, and binary.Read refuses a struct with string, slice or pointer
+// fields before writing it. The checker's ValueType meets this; a test in
+// the compiler package keeps it so (TestMachineProjectionIsInertToReflection).
 type Input[V any] struct {
 	// Module is the current module identity used in plan and data IDs.
 	Module   string
@@ -130,8 +143,6 @@ type Expr struct {
 	// with a body.
 	Resolved bool
 	Function *Function
-	// StepTemplate is set when the expression constructs the bundled Step.
-	StepTemplate bool
 	// Value is the checked value's type.
 	Value TypeRef
 }
@@ -199,10 +210,12 @@ type TypeNode struct {
 	Name        string
 	Declaration string
 	Mode        string
-	Args        []TypeRef
-	Result      TypeRef
-	Failures    Row
-	Services    Row
+	// Decision is set on an application of the predeclared decision<S, O>.
+	Decision bool
+	Args     []TypeRef
+	Result   TypeRef
+	Failures Row
+	Services Row
 }
 
 // Template is a generic data declaration: its parameters and declared field

@@ -1,18 +1,16 @@
-import Machines "effra/machines"
-
 enum SessionState { Idle  Active { key: string }  Closed }
 enum SessionEvent { Open { key: string }  Close  Touch  Restore { snapshot: SessionState } }
-fn merge(incoming: SessionState, current: SessionState) -> Machines.Step<SessionState, void> {
+fn merge(incoming: SessionState, current: SessionState) -> decision<SessionState, void> {
     match current, incoming {
-        SessionState.Idle, SessionState.Active => Machines.Step<SessionState, void>.Stay { next: SessionState.Active { key: "k" } }
-        SessionState.Idle, SessionState.Idle | SessionState.Closed => Machines.Step<SessionState, void>.Ignore {}
-        SessionState.Active | SessionState.Closed, SessionState.Idle | SessionState.Active | SessionState.Closed => Machines.Step<SessionState, void>.Ignore {}
+        SessionState.Idle, SessionState.Active => stay SessionState.Active { key: "k" }
+        SessionState.Idle, SessionState.Idle | SessionState.Closed => ignore
+        SessionState.Active | SessionState.Closed, SessionState.Idle | SessionState.Active | SessionState.Closed => ignore
     }
 }
-fn sessionStep(state: SessionState, event: SessionEvent) -> Machines.Step<SessionState, void> {
+fn sessionStep(state: SessionState, event: SessionEvent) -> decision<SessionState, void> {
     match event {
         SessionEvent.Restore { snapshot } => merge(snapshot, state)
-        SessionEvent.Open | SessionEvent.Close | SessionEvent.Touch => Machines.Step<SessionState, void>.Ignore {}
+        SessionEvent.Open | SessionEvent.Close | SessionEvent.Touch => ignore
     }
 }
 

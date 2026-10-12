@@ -279,7 +279,6 @@ func (s machineShape) write(b sourceWriter) {
 	enum, event := long("S", s.name), long("E", s.name)
 	variant := func(i int) string { return fmt.Sprintf("V%d%s", i, strings.Repeat("v", s.variantName)) }
 	output := "void"
-	b.WriteString("import Machines \"effra/machines\"\n")
 	failure := func(i int) string { return fmt.Sprintf("F%d%s", i, strings.Repeat("f", s.failureName)) }
 	for i := 0; i < s.failures; i++ {
 		fmt.Fprintf(b, "error %s\n", failure(i))
@@ -349,7 +348,7 @@ func (s machineShape) write(b sourceWriter) {
 		}
 		output = "P0"
 	}
-	step := fmt.Sprintf("Machines.Step<%s, %s>", enum, output)
+	step := fmt.Sprintf("decision<%s, %s>", enum, output)
 	fmt.Fprintf(b, "enum %s {", enum)
 	for i := 0; i < s.states; i++ {
 		b.WriteString(" " + variant(i))
@@ -365,19 +364,19 @@ func (s machineShape) write(b sourceWriter) {
 	leaf := func(i int) string {
 		switch {
 		case s.keepPaths && i%2 == 0:
-			return fmt.Sprintf("%s.Go(%s(state, n))", step, keep(0))
+			return fmt.Sprintf("enter %s(state, n)", keep(0))
 		case s.literalStay && i%3 == 0:
-			return fmt.Sprintf("%s.Stay(%s.%s {})", step, enum, variant(i%s.states))
+			return fmt.Sprintf("stay %s.%s {}", enum, variant(i%s.states))
 		}
 		switch i % 4 {
 		case 0:
-			return step + ".Ignore {}"
+			return "ignore"
 		case 1:
-			return step + ".Stay(state)"
+			return "stay state"
 		case 2:
-			return fmt.Sprintf("%s.Go(%s.%s {})", step, enum, variant(i%s.states))
+			return fmt.Sprintf("enter %s.%s {}", enum, variant(i%s.states))
 		}
-		return step + ".Reject {}"
+		return "reject"
 	}
 	first := leaf(0)
 	if s.helpers > 0 {
@@ -405,7 +404,7 @@ func (s machineShape) write(b sourceWriter) {
 			most[i] = enum + "." + variant(i)
 		}
 		most = append(most, added...)
-		body = fmt.Sprintf("    match state {\n        %s => %s\n        %s.%s => %s.Ignore {}\n    }\n", strings.Join(most, " | "), first, enum, variant(s.states-1), step)
+		body = fmt.Sprintf("    match state {\n        %s => %s\n        %s.%s => ignore\n    }\n", strings.Join(most, " | "), first, enum, variant(s.states-1))
 	}
 	// Statements after the first: the walk reaches them after any refusal
 	// the first statement caused.
@@ -414,7 +413,7 @@ func (s machineShape) write(b sourceWriter) {
 		for i := 0; i < s.lets; i++ {
 			fmt.Fprintf(&lets, "    let l%d = %d\n", i, i)
 		}
-		body += lets.String() + "    " + step + ".Ignore {}\n"
+		body += lets.String() + "    ignore\n"
 	}
 	fmt.Fprintf(b, "%s {\n%s%s}\n", signature, n, body)
 	// The last level has distinct copies, so tails reaching different copies
@@ -740,7 +739,7 @@ func TestMachineAnalysisAllocationIsCharged(t *testing.T) {
 		{states: 4000, events: 1, tails: 20, wideArm: true, keepPaths: true, keeps: 3},
 		{states: 2, events: 1, machineName: 1 << 20, helpers: 2, tails: 20, distinct: 20},
 		{states: 2, events: 1, failures: 4000, declarations: 256},
-		// Long variant and enum names under wide literal-Stay diagnostics.
+		// Long variant and enum names under wide literal-`stay` diagnostics.
 		{states: 40, events: 2, name: 4096, variantName: 4096, helpers: 4, tails: 7, wideArm: true, literalStay: true},
 		// Deep payload with long field names across every declaration.
 		{states: 2, events: 1, name: 4096, payload: 30, declarations: 256},
@@ -971,7 +970,7 @@ func TestMachineNarrowingsAreSharedAcrossPaths(t *testing.T) {
 		t.Fatalf("codes = %v", codes)
 	}
 	// 400 such paths fit the budget: every one keeps the step's own
-	// narrowing, so the Go decision enters exactly those 3,999 states.
+	// narrowing, so the `enter` decision enters exactly those 3,999 states.
 	small := machineShape{states: 4000, events: 1, tails: 20, wideArm: true, keepPaths: true, keeps: 2}
 	r, measures = measureMachineAnalysis(t, small.source())
 	assertMachineAllocationCharged(t, "400 shared narrowings", measures)

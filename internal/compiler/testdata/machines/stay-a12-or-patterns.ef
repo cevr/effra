@@ -1,14 +1,12 @@
-import Machines "effra/machines"
-
 enum SessionState { Idle  Active { key: string }  Closed }
 enum SessionEvent { Open { key: string }  Close  Touch  Restore { snapshot: SessionState } }
-fn sessionStep(state: SessionState, event: SessionEvent) -> Machines.Step<SessionState, void> {
+fn sessionStep(state: SessionState, event: SessionEvent) -> decision<SessionState, void> {
     match state, event {
-        SessionState.Idle | SessionState.Closed, SessionEvent.Open { key } => Machines.Step<SessionState, void>.Stay { next: SessionState.Active { key: key } }
-        SessionState.Idle | SessionState.Closed, SessionEvent.Touch => Machines.Step<SessionState, void>.Stay { next: SessionState.Idle {} }
-        SessionState.Idle | SessionState.Closed, SessionEvent.Close => match state { SessionState.Idle => Machines.Step<SessionState, void>.Stay { next: SessionState.Idle {} } SessionState.Closed => Machines.Step<SessionState, void>.Stay { next: SessionState.Closed {} } SessionState.Active => Machines.Step<SessionState, void>.Stay { next: SessionState.Idle {} } }
-        SessionState.Idle | SessionState.Closed, SessionEvent.Restore => Machines.Step<SessionState, void>.Ignore {}
-        SessionState.Active, SessionEvent.Open | SessionEvent.Close | SessionEvent.Touch | SessionEvent.Restore => Machines.Step<SessionState, void>.Ignore {}
+        SessionState.Idle | SessionState.Closed, SessionEvent.Open { key } => stay SessionState.Active { key: key }
+        SessionState.Idle | SessionState.Closed, SessionEvent.Touch => stay SessionState.Idle {}
+        SessionState.Idle | SessionState.Closed, SessionEvent.Close => match state { SessionState.Idle => stay SessionState.Idle {} SessionState.Closed => stay SessionState.Closed {} SessionState.Active => stay SessionState.Idle {} }
+        SessionState.Idle | SessionState.Closed, SessionEvent.Restore => ignore
+        SessionState.Active, SessionEvent.Open | SessionEvent.Close | SessionEvent.Touch | SessionEvent.Restore => ignore
     }
 }
 

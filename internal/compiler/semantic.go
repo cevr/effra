@@ -2253,6 +2253,7 @@ func newChecker(program *Program, r *Result) *checker {
 	c.values = newCheckedValueArena(c)
 	resolveBindings(program)
 	addBuiltinData(program)
+	addPredeclaredDecision(program)
 	program.semantic = c
 	r.checkedSymbols = map[string]checkedSymbol{}
 	r.checkedFunctions = map[*Function]checkedSymbol{}
@@ -4459,6 +4460,9 @@ func (c *checker) blockValue(b *Block, env localEnv, effect bool, result blockRe
 			out.evaluation = previousEvaluation
 		} else {
 			last := index == len(b.Statements)-1
+			if !last && s.Value != nil && s.Value.Kind == "decision" && !c.poisoned(t) {
+				c.diagnostic(decisionCode, "`"+s.Value.Name+"` as a statement discards its decision; make it the block's result", s.Value.Span)
+			}
 			switch {
 			case !t.isEffect() || last && result == blockSelected:
 			case last && result == blockScope:
@@ -5117,6 +5121,8 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		t = c.recoverFailure(e, env, inEffect)
 	case "construct":
 		t = c.construct(e, env, inEffect)
+	case "decision":
+		t = c.decisionForm(e, env)
 	case "match":
 		t = c.match(e, env, inEffect)
 	case "unary":
@@ -5207,7 +5213,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	}
 	if e.Kind == "run" || e.Kind == "if" || e.Kind == "match" || e.Kind == "scope" || e.Kind == "fork" {
 		t.executed = t.evaluation
-	} else if e.Kind == "construct" || e.Kind == "payload" {
+	} else if e.Kind == "construct" || e.Kind == "payload" || e.Kind == "decision" {
 		// Constructor payloads are required to be pure. Keep their invalid child
 		// evaluation facts available for tooling without admitting those rows
 		// into the enclosing body contract after the purity diagnostic.
@@ -5221,7 +5227,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	e.Identity = t.identity
 	if e.Kind == "run" || e.Kind == "if" || e.Kind == "match" || e.Kind == "scope" || e.Kind == "fork" {
 		e.Executed = c.projectEvaluation(t.executed)
-	} else if e.Kind == "construct" || e.Kind == "payload" {
+	} else if e.Kind == "construct" || e.Kind == "payload" || e.Kind == "decision" {
 		e.Executed = EvaluationRows{}
 	} else {
 		e.Executed = e.Evaluation

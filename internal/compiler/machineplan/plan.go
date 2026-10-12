@@ -5,9 +5,10 @@
 // entry and completion functions. Analysis owns three things no library could
 // (docs/specs/state-machines.md#construct-admission-gate):
 //
-//   - the static Stay same-tag rule (EF139), keyed on the bundled
-//     effra/machines Step identity and on binder identity. The declaration
-//     names the current state: the first parameter of step and complete;
+//   - the static `stay` same-tag rule (EF139), keyed on decision syntax
+//     (`enter`, `stay`, `ignore`, `reject`, `done` over the predeclared
+//     decision<S, O>) and on binder identity. The declaration names the
+//     current state: the first parameter of step and complete;
 //   - the nominal home of the step/completion rows; and
 //   - the plan identity that tooling projects through a bounded,
 //     non-executing walk of the bound functions.
@@ -32,9 +33,6 @@ const (
 	BudgetCode    = "EF142"
 )
 
-// StepTemplate is the bundled Step template identity the checker resolves.
-const StepTemplate = "template:effra/machines:module:Step"
-
 // Binding kinds, as the parser spells them.
 const (
 	BindInitial  = "initial"
@@ -46,7 +44,7 @@ const (
 const (
 	MaxDeclarations = 256
 	MaxHelperDepth  = 4
-	// MaxWork bounds one declaration's analysis: visited expressions, Stay
+	// MaxWork bounds one declaration's analysis: visited expressions, `stay`
 	// argument paths, helper bodies and the text and lists it builds.
 	// Exhausting it refuses the plan.
 	MaxWork        = 1 << 16
@@ -56,8 +54,9 @@ const (
 	MaxModuleWork = 1 << 20
 )
 
-// Step decisions as published in plans and graphs. "any" is a conservative
-// decision produced by a Step value the bounded walk cannot see into.
+// Decisions as published in plans and graphs. The source form `enter` is
+// published as "go"; the other words are unchanged. "any" is a conservative
+// decision produced by a decision value the bounded walk cannot see into.
 const (
 	DecisionGo     = "go"
 	DecisionStay   = "stay"

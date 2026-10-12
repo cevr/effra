@@ -13,7 +13,7 @@ import (
 // This index is compiler-distributed. It never resolves paths through the
 // filesystem, Go importer, network or an untrusted user interface file.
 //
-//go:embed bundled/functions/*.ef bundled/conversions/*.ef bundled/data/*.ef bundled/constants/*.ef bundled/i64/*.ef bundled/machines/*.ef
+//go:embed bundled/functions/*.ef bundled/conversions/*.ef bundled/data/*.ef bundled/constants/*.ef bundled/i64/*.ef
 var bundledSources embed.FS
 
 type bundledDeclaration struct {
@@ -35,9 +35,6 @@ var bundledIndex = map[string]map[string]bundledDeclaration{
 	"effra/constants":   {"defaultSuffix": {Source: "bundled/constants/default-suffix.ef"}},
 	"effra/json":        {"codec": {Derivation: jsonCodecDerivation}},
 	i64TextModule:       {"format": {Source: "bundled/i64/format.ef", Intrinsic: i64FormatOp}, "parse": {Source: "bundled/i64/parse.ef", Intrinsic: i64ParseOp}},
-	// Step is the transition decision a machine declaration binds; see
-	// machines.go. It is ordinary bundled data with no hidden fulfilment.
-	"effra/machines": {"Step": {Source: "bundled/machines/step.ef"}},
 }
 
 const bundledInterfaceVersion = "1"
@@ -147,7 +144,11 @@ func (r *Result) loadBundledImports(source string) {
 	aliases := map[string]string{}
 	for _, imp := range p.BundledImports {
 		if _, exists := bundledIndex[imp.Path]; !exists {
-			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "unsupported bundled module " + imp.Path + "; user package resolution is unavailable", Span: imp.Span})
+			diagnostic := Diagnostic{Code: "EF126", Message: "unsupported bundled module " + imp.Path + "; user package resolution is unavailable", Span: imp.Span}
+			if imp.Path == removedMachinesModule {
+				diagnostic.Help = stepTemplateMigration
+			}
+			r.Diagnostics = append(r.Diagnostics, diagnostic)
 			continue
 		}
 		aliases[imp.Alias] = imp.Path

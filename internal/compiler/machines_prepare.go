@@ -230,7 +230,7 @@ func (p *machinePrep) signature(f *Function, stepState, stepOutput TypeID, stepE
 
 func (p *machinePrep) stepArguments(id TypeID) (TypeID, TypeID, bool) {
 	n := p.c.node(id)
-	if n == nil || n.Kind != "application" || n.Declaration != machineplan.StepTemplate || len(n.Args) != 2 {
+	if n == nil || n.Kind != "application" || !p.c.isDecisionTemplate(p.c.templates[n.Declaration]) || len(n.Args) != 2 {
 		return invalidTypeID, invalidTypeID, false
 	}
 	return n.Args[0], n.Args[1], true
@@ -559,7 +559,7 @@ func (p *machinePrep) typeRef(id TypeID) machineplan.TypeRef {
 		if n == nil {
 			continue
 		}
-		node := &machineplan.TypeNode{Kind: n.Kind, Name: n.Name, Declaration: n.Declaration, Mode: n.Mode, Args: make([]machineplan.TypeRef, len(n.Args)), Result: ref(n.Result), Failures: p.row(n.FailureRow), Services: p.row(n.ServiceRow)}
+		node := &machineplan.TypeNode{Kind: n.Kind, Name: n.Name, Declaration: n.Declaration, Mode: n.Mode, Decision: n.Kind == "application" && c.isDecisionTemplate(c.templates[n.Declaration]), Args: make([]machineplan.TypeRef, len(n.Args)), Result: ref(n.Result), Failures: p.row(n.FailureRow), Services: p.row(n.ServiceRow)}
 		for i, arg := range n.Args {
 			node.Args[i] = ref(arg)
 		}
@@ -649,7 +649,7 @@ func (p *machinePrep) expr(e *Expr) *machineplan.Expr {
 	if e == nil {
 		return nil
 	}
-	out := &machineplan.Expr{Kind: e.Kind, Name: e.Name, Text: e.Text, Span: machineplan.Span(e.Span), Left: p.expr(e.Left), Right: p.expr(e.Right), ArgumentParameters: slices.Clone(e.ArgumentParameters), Then: p.block(e.Then), Else: p.block(e.Else), Binding: p.local(e.binding), Resolved: e.ResolvedFunction != nil, StepTemplate: e.ResolvedTemplate != nil && e.ResolvedTemplate.Identity == machineplan.StepTemplate}
+	out := &machineplan.Expr{Kind: e.Kind, Name: e.Name, Text: e.Text, Span: machineplan.Span(e.Span), Left: p.expr(e.Left), Right: p.expr(e.Right), ArgumentParameters: slices.Clone(e.ArgumentParameters), Then: p.block(e.Then), Else: p.block(e.Else), Binding: p.local(e.binding), Resolved: e.ResolvedFunction != nil}
 	out.Value = p.typeRef(e.checked.valueID())
 	if f := e.ResolvedFunction; f != nil && f.Module == currentModuleIdentity {
 		out.Function = p.function(f)

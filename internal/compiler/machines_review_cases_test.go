@@ -19,7 +19,6 @@ import (
 func reviewTemplateArgumentSource(fields, depth int) string {
 	const branch = 7
 	var b strings.Builder
-	b.WriteString("import Machines \"effra/machines\"\n")
 	leaves := 1
 	for i := 0; i < depth; i++ {
 		leaves *= branch
@@ -55,25 +54,24 @@ func reviewTemplateArgumentSource(fields, depth int) string {
 	b.WriteString(" }\n")
 	out := "Outer<" + tree(0) + ">"
 	b.WriteString("enum S { A }\nenum E { Ping }\n")
-	fmt.Fprintf(&b, "fn step(state: S, event: E) -> Machines.Step<S, %s> {\n    Machines.Step<S, %s>.Ignore {}\n}\n", out, out)
+	fmt.Fprintf(&b, "fn step(state: S, event: E) -> decision<S, %s> {\n    ignore\n}\n", out)
 	b.WriteString("machine M { initial S.A {}; step step }\n")
 	return b.String()
 }
 
 // reviewOutputSource is one machine whose step outputs output.
 func reviewOutputSource(declarations, output string) string {
-	return fmt.Sprintf("import Machines \"effra/machines\"\n%senum S { A }\nenum E { Ping }\nfn step(state: S, event: E) -> Machines.Step<S, %s> { Machines.Step<S, %s>.Ignore {} }\nmachine M { initial S.A {}; step step }\n", declarations, output, output)
+	return fmt.Sprintf("%senum S { A }\nenum E { Ping }\nfn step(state: S, event: E) -> decision<S, %s> { ignore }\nmachine M { initial S.A {}; step step }\n", declarations, output)
 }
 
 // Round 2: an initial value spelling Presence<tree> explicitly, checked by
 // the ordinary checker before analysis starts.
 func reviewInitialSource(depth, declarations int) string {
 	var b strings.Builder
-	b.WriteString("import Machines \"effra/machines\"\n")
 	tree := genericArgument(&b, "", depth)
 	b.WriteString("enum Presence<T: type> { None; Some { value: T } }\n")
 	fmt.Fprintf(&b, "enum S { V0 { x: Presence<%s> }; V1 }\nenum E { Ping }\n", tree)
-	b.WriteString("fn step(state: S, event: E) -> Machines.Step<S, void> { Machines.Step<S, void>.Ignore {} }\n")
+	b.WriteString("fn step(state: S, event: E) -> decision<S, void> { ignore }\n")
 	for d := 0; d < declarations; d++ {
 		fmt.Fprintf(&b, "machine M%d { initial S.V0 { x: Presence<%s>.None {} }; step step }\n", d, tree)
 	}
@@ -84,12 +82,11 @@ func reviewInitialSource(depth, declarations int) string {
 // initial check pays for.
 func reviewManyRecordsSource(records, declarations int, payload bool) string {
 	var b strings.Builder
-	b.WriteString("import Machines \"effra/machines\"\n")
 	for i := 0; i < max(1, records); i++ {
 		fmt.Fprintf(&b, "record R%d { x: i64 }\n", i)
 	}
 	b.WriteString("enum S { V0 { x: R0 }; V1 }\nenum E { Ping }\n")
-	b.WriteString("fn step(state: S, event: E) -> Machines.Step<S, void> { Machines.Step<S, void>.Ignore {} }\n")
+	b.WriteString("fn step(state: S, event: E) -> decision<S, void> { ignore }\n")
 	initial := "S.V1 {}"
 	if payload {
 		initial = "S.V0 { x: R0 { x: 1 } }"
@@ -159,7 +156,7 @@ func TestMachineDeclarationStateIsCharged(t *testing.T) {
 	// about 4 KB each against about 5 units.
 	for _, step := range []bool{false, true} {
 		var b strings.Builder
-		b.WriteString("import Machines \"effra/machines\"\nenum S { A }\nenum E { P }\nfn step(state: S, event: E) -> Machines.Step<S, void> { Machines.Step<S, void>.Ignore {} }\n")
+		b.WriteString("enum S { A }\nenum E { P }\nfn step(state: S, event: E) -> decision<S, void> { ignore }\n")
 		for d := 0; d < maxMachineDeclarations; d++ {
 			binding := ""
 			if step {

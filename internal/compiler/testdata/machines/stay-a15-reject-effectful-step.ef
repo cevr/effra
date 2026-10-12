@@ -1,16 +1,14 @@
-import Machines "effra/machines"
-
 enum SessionState { Idle  Active { key: string }  Closed }
 enum SessionEvent { Open { key: string }  Close  Touch  Restore { snapshot: SessionState } }
 error AccessUnavailable
 service Access {
     effect fn mayOpen(key: string) -> bool raises { AccessUnavailable }
 }
-effect fn sessionStep(state: SessionState, event: SessionEvent) -> Machines.Step<SessionState, void> raises { AccessUnavailable } uses { Access } {
+effect fn sessionStep(state: SessionState, event: SessionEvent) -> decision<SessionState, void> raises { AccessUnavailable } uses { Access } {
     match state, event {
-        SessionState.Idle, SessionEvent.Open { key } => if run Access.mayOpen(key) { Machines.Step<SessionState, void>.Stay { next: SessionState.Active { key: key } } } else { Machines.Step<SessionState, void>.Reject {} }
-        SessionState.Active | SessionState.Closed, SessionEvent.Open | SessionEvent.Close | SessionEvent.Touch | SessionEvent.Restore => Machines.Step<SessionState, void>.Ignore {}
-        SessionState.Idle, SessionEvent.Close | SessionEvent.Touch | SessionEvent.Restore => Machines.Step<SessionState, void>.Ignore {}
+        SessionState.Idle, SessionEvent.Open { key } => if run Access.mayOpen(key) { stay SessionState.Active { key: key } } else { reject }
+        SessionState.Active | SessionState.Closed, SessionEvent.Open | SessionEvent.Close | SessionEvent.Touch | SessionEvent.Restore => ignore
+        SessionState.Idle, SessionEvent.Close | SessionEvent.Touch | SessionEvent.Restore => ignore
     }
 }
 

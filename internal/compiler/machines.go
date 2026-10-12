@@ -4,7 +4,7 @@ package compiler
 //
 // A `machine` declaration binds an initial state and ordinary named step,
 // entry and completion functions. Checking owns three things no library could
-// (docs/specs/state-machines.md#construct-admission-gate): the static Stay
+// (docs/specs/state-machines.md#construct-admission-gate): the static `stay`
 // same-tag rule (EF139), the nominal home of the step/completion rows, and the
 // plan identity tooling projects through a bounded, non-executing walk.
 //

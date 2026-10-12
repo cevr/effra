@@ -204,10 +204,10 @@ func (m *check[V]) boundFunction(binding *Binding) *Function {
 	return f
 }
 
-// stepArguments returns S and O when id applies the bundled Step template.
+// stepArguments returns S and O when id is the predeclared decision<S, O>.
 func (m *check[V]) stepArguments(id TypeRef) (TypeRef, TypeRef, bool) {
 	n := m.in.Types.Nodes[id]
-	if n == nil || n.Kind != "application" || n.Declaration != StepTemplate || len(n.Args) != 2 {
+	if n == nil || n.Kind != "application" || !n.Decision || len(n.Args) != 2 {
 		return 0, 0, false
 	}
 	return n.Args[0], n.Args[1], true
@@ -291,7 +291,7 @@ func (m *check[V]) run() *Plan[V] {
 	return m.plan
 }
 
-// decisionSignature checks (S, Trigger) -> Step<S, O> for step and complete.
+// decisionSignature checks (S, Trigger) -> decision<S, O> for step and complete.
 // The first parameter is the current state by declaration, never by a
 // "the only S-typed parameter" heuristic. It returns the trigger enum.
 func (m *check[V]) decisionSignature(f *Function, binding *Binding, role string, event *Enum) *Enum {
@@ -306,11 +306,11 @@ func (m *check[V]) decisionSignature(f *Function, binding *Binding, role string,
 	}
 	state, output, ok := m.stepArguments(f.Return)
 	if !ok {
-		m.reportf(ContractCode, at, "machine %s %s must return the bundled effra/machines Step<State, Output>; it returns %s", role, f.Name, m.display(f.Return))
+		m.reportf(ContractCode, at, "machine %s %s must return decision<State, Output>; it returns %s", role, f.Name, m.display(f.Return))
 		return nil
 	}
 	if f.Params[0].Type != state {
-		m.reportf(ContractCode, f.Params[0].Span, "machine %s %s takes the current state first: its first parameter is %s but it returns Step<%s, …>", role, f.Name, f.Params[0].Source, m.display(state))
+		m.reportf(ContractCode, f.Params[0].Span, "machine %s %s takes the current state first: its first parameter is %s but it returns decision<%s, …>", role, f.Name, f.Params[0].Source, m.display(state))
 		return nil
 	}
 	enum := m.userEnum(state)
@@ -517,14 +517,11 @@ func (m *check[V]) literalVariant(e *Expr) (string, bool) {
 	return "", false
 }
 
-// stepDecision reports a constructor of the bundled Step for this machine's
-// state: its variant and its next/output argument. Identity comes from the
-// resolved template, never from the spelling or the import alias.
+// stepDecision reports a decision form (`enter e`, `stay e`, `ignore`,
+// `reject`, `done e`) for this machine's state: its word and its next or
+// output operand. The form is syntax, so no library declaration is consulted.
 func (m *check[V]) stepDecision(e *Expr) (string, *Expr, bool) {
-	if e == nil || e.Left == nil || e.Left.Kind != "member" || !e.StepTemplate {
-		return "", nil, false
-	}
-	if e.Kind != "construct" && !(e.Kind == "call" && e.Text == "data") {
+	if e == nil || e.Kind != "decision" {
 		return "", nil, false
 	}
 	state, _, ok := m.stepArguments(e.Value)
@@ -537,7 +534,7 @@ func (m *check[V]) stepDecision(e *Expr) (string, *Expr, bool) {
 			argument = field.Value
 		}
 	}
-	return e.Left.Name, argument, true
+	return e.Name, argument, true
 }
 
 // narrowing is the narrowing of the current state and trigger: the variants
@@ -547,7 +544,7 @@ type narrowing struct {
 }
 
 // visit is the context one function body is walked under: the narrowing of
-// the current state and trigger, and which parameters receive them. The Stay
+// the current state and trigger, and which parameters receive them. The `stay`
 // rule's verdict depends on all three, so a recursive call is reused only when
 // an active visit of the same function covers its context.
 type visit struct {
@@ -559,7 +556,7 @@ type visit struct {
 // covers reports whether checking under v already discharges w. A non-nil
 // state narrowing is checked strictly, and narrowing further only removes
 // alternatives, so a non-nil superset covers a non-nil subset. nil
-// (unnarrowed) is lenient for Stay (the runtime defect applies) yet refines to
+// (unnarrowed) is lenient for `stay` (the runtime defect applies) yet refines to
 // every alternative a match names, so it covers only itself. Triggers only
 // decide which arms are reachable, so nil (every trigger) covers any trigger
 // narrowing.
@@ -669,7 +666,7 @@ func (m *check[V]) block(s *scope, b *Block, n narrowing, tail, guarded bool) {
 // aliases. Alias chains have no depth cutoff: each binder resolves once per
 // scope to its root (memoized in s.roots), each resolution step costs one
 // budget unit, and exhaustion refuses the declaration with EF142. A cutoff that
-// answered "unrelated" would silently drop narrowing and admit a wrong-tag Stay.
+// answered "unrelated" would silently drop narrowing and admit a wrong-tag `stay`.
 func (m *check[V]) denotes(set map[*Local]bool, s *scope, e *Expr) bool {
 	if e == nil || e.Kind != "name" || e.Binding == nil {
 		return false
@@ -736,14 +733,14 @@ func (m *check[V]) arm(s *scope, match *Expr, arm *Arm, n narrowing) (narrowing,
 	return out, exact, true
 }
 
-// expr visits every expression for the Stay rule and, in tail position,
+// expr visits every expression for the `stay` rule and, in tail position,
 // records the transition decision the expression produces.
 func (m *check[V]) expr(s *scope, e *Expr, n narrowing, tail, guarded bool) {
 	if e == nil || !m.spend() {
 		return
 	}
 	if variant, argument, ok := m.stepDecision(e); ok {
-		if variant == "Stay" {
+		if variant == "stay" {
 			m.checkStay(s, e, argument, n)
 		}
 		for _, field := range e.Fields {
@@ -809,7 +806,7 @@ func (m *check[V]) expr(s *scope, e *Expr, n narrowing, tail, guarded bool) {
 	}
 }
 
-// follow reads a Step-returning helper under the caller's narrowing. The
+// follow reads a decision-returning helper under the caller's narrowing. The
 // helper parameters that receive the current state or trigger denote them
 // inside its body, so a helper whose S parameter is some other state is not
 // misjudged. It reports false when the call is not a followable helper.
@@ -845,9 +842,9 @@ func (m *check[V]) follow(s *scope, call *Expr, n narrowing, tail, guarded bool)
 
 // helperDepthExhausted decides a followable helper call beyond the helper
 // depth. When the current state is narrowed here, or the call passes the
-// current state, the helper could produce a Stay the rule must judge, so the
+// current state, the helper could produce a `stay` the rule must judge, so the
 // declaration is refused with EF142 rather than admitted unread. Otherwise
-// every Stay inside it is unnarrowed, which the rule leaves to the runtime
+// every `stay` inside it is unnarrowed, which the rule leaves to the runtime
 // defect, and the conservative decision the caller records is exact. It
 // reports whether the call was refused.
 func (m *check[V]) helperDepthExhausted(s *scope, call *Expr, n narrowing) bool {
@@ -863,7 +860,7 @@ func (m *check[V]) helperDepthExhausted(s *scope, call *Expr, n narrowing) bool 
 		at = s.site
 	}
 	if chain, ok := m.join(" -> ", append(slices.Clone(s.via), call.Function.Name)); ok {
-		if message, ok := m.textf("machine %s cannot check Step.Stay through helper %s: the chain exceeds %d helpers while the current state is narrowed or passed; no plan is published", m.machine.Name, chain, MaxHelperDepth); ok {
+		if message, ok := m.textf("machine %s cannot check `stay` through helper %s: the chain exceeds %d helpers while the current state is narrowed or passed; no plan is published", m.machine.Name, chain, MaxHelperDepth); ok {
 			m.report(BudgetCode, message, at)
 		}
 	}
@@ -1006,7 +1003,7 @@ func (m *check[V]) blockPaths(s *scope, b *Block, n narrowing, out []statePath) 
 }
 
 // checkStay is the static same-tag rule. Inside an arm narrowing the current
-// state to one variant, a literal Stay argument must construct that variant;
+// state to one variant, a literal `stay` argument must construct that variant;
 // an arm admitting several variants accepts only the unchanged state. An
 // unnarrowed or dynamic value keeps the runtime defect.
 func (m *check[V]) checkStay(s *scope, e, argument *Expr, n narrowing) {
@@ -1020,9 +1017,9 @@ func (m *check[V]) checkStay(s *scope, e, argument *Expr, n narrowing) {
 		if !ok {
 			return
 		}
-		format := "Step.Stay keeps the current entry, so it cannot change the state tag: this arm narrows the state to %s but Stay constructs %s.%s; use Step.Go%s"
+		format := "`stay` keeps the current entry, so it cannot change the state tag: this arm narrows the state to %s but `stay` constructs %s.%s; use `enter`%s"
 		if path.narrowed.admits(path.variant) {
-			format = "Step.Stay keeps the current entry, so it cannot change the state tag: this arm admits %s, so the literal %s.%s changes the tag for another alternative; split the arm or use Stay with the current state%s"
+			format = "`stay` keeps the current entry, so it cannot change the state tag: this arm admits %s, so the literal %s.%s changes the tag for another alternative; split the arm or `stay` with the current state%s"
 		}
 		at, helper := e.Span, ""
 		if len(path.via) > 0 {
@@ -1033,9 +1030,9 @@ func (m *check[V]) checkStay(s *scope, e, argument *Expr, n narrowing) {
 			if helper, ok = m.text(" (through helper ", chain, ")"); !ok {
 				return
 			}
-			// A Stay inside a helper reports at the caller's call of it; one in
+			// A `stay` inside a helper reports at the caller's call of it; one in
 			// the step body itself, reached again through recursion, reports
-			// at the Stay.
+			// at the `stay`.
 			if s.site.Length > 0 && s.function != m.roleFunction {
 				at = s.site
 			}
@@ -1133,18 +1130,18 @@ func (m *check[V]) transitionKey(span Span, decision, precision string, guarded 
 
 func (m *check[V]) decision(s *scope, e *Expr, variant string, argument *Expr, n narrowing, guarded bool) {
 	switch variant {
-	case "Go":
+	case "enter":
 		if targets, precision, ok := m.targets(s, argument, n); ok {
 			m.transition(s, e.Span, n, DecisionGo, targets, precision, guarded)
 		}
-	case "Stay":
+	case "stay":
 		m.transition(s, e.Span, n, DecisionStay, n.states, TargetCurrent, guarded)
-	case "Ignore", "Reject", "Done":
+	case "ignore", "reject", "done":
 		decision := DecisionDone
 		switch variant {
-		case "Ignore":
+		case "ignore":
 			decision = DecisionIgnore
-		case "Reject":
+		case "reject":
 			decision = DecisionReject
 		}
 		if none, ok := m.empty(m.enum); ok {
@@ -1153,7 +1150,7 @@ func (m *check[V]) decision(s *scope, e *Expr, variant string, argument *Expr, n
 	}
 }
 
-// targets resolves the states a Go decision enters, as a narrowing (nil means
+// targets resolves the states a `enter` decision enters, as a narrowing (nil means
 // every state). Paths that keep the current state carry canonical narrowings,
 // so equal narrowings are enumerated once, and each distinct enumeration is
 // charged before it runs.
@@ -1196,7 +1193,7 @@ func (m *check[V]) targets(s *scope, argument *Expr, n narrowing) (*set, string,
 	return interned, precision, ok
 }
 
-// conservative records a Step value the walk cannot see into: any decision to
+// conservative records a decision value the walk cannot see into: any decision to
 // any state.
 func (m *check[V]) conservative(s *scope, e *Expr, n narrowing, guarded bool) {
 	state, _, ok := m.stepArguments(e.Value)

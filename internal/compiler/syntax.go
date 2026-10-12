@@ -262,10 +262,13 @@ type LayerEntry struct {
 	Continuation bool
 }
 type Program struct {
-	interfaceProducer       bool
-	references              map[string]bool
-	semantic                *checker
-	BundledTemplates        []*Record
+	interfaceProducer bool
+	references        map[string]bool
+	semantic          *checker
+	BundledTemplates  []*Record
+	// decisionTemplate is the predeclared decision<S, O> (decisions.go),
+	// present when the program spells the type.
+	decisionTemplate        *Record
 	BundledTypeBindings     map[string]map[string]*Record
 	BundledConstantBindings map[string]map[string]*Constant
 	typeExpressions         map[string]*sourceType
@@ -380,6 +383,9 @@ type MatchPattern struct {
 	// recognize pattern punctuation without re-deriving it from tokens.
 	Payload      Span  `json:"-"`
 	ResolvedEnum *Enum `json:"-"`
+	// decision marks a decision-word pattern (`enter next`, `ignore`); its
+	// owner is the predeclared decision type and it has no dotted segments.
+	decision bool
 }
 
 // PatternName retains source order and the alias token independently of the
@@ -1000,6 +1006,9 @@ func (p *parser) name() token {
 	if v.text == "void" {
 		p.fail(v, "void is reserved for the no-value type and expression")
 	}
+	if isDecisionWord(v.text) {
+		p.fail(v, reservedDecisionWordMessage(v.text))
+	}
 	return v
 }
 
@@ -1234,6 +1243,9 @@ func (p *parser) fieldValues() []FieldValue {
 	for !p.accept("}") {
 		name := p.name()
 		field := FieldValue{Name: name.text, Span: name.span}
+		if p.regionUpdateAhead() {
+			p.fail(p.peek(), "region updates (`"+name.text+" <- decision`) are not admitted; region bindings are a later milestone")
+		}
 		if p.accept(":") {
 			// Payload braces delimit their values, so constructor braces
 			// inside an if/match header are unambiguous again.
@@ -1462,6 +1474,9 @@ func (p *parser) expr(min int) *Expr {
 	case start.text == "run":
 		e.Kind = "run"
 		e.Left = p.expr(prefixPrecedence)
+		chainPipe = p.lastPipe
+	case start.kind == "name" && isDecisionWord(start.text):
+		e = p.decision(start)
 		chainPipe = p.lastPipe
 	case start.text == "if":
 		e.Kind = "if"
@@ -1767,7 +1782,7 @@ const prefixPrecedence = 4
 
 // pipeHeadReserved are the words that start another expression form, so they
 // cannot name the function on the right of a |>.
-var pipeHeadReserved = map[string]bool{"run": true, "fork": true, "if": true, "match": true, "scope": true, "true": true, "false": true, "void": true}
+var pipeHeadReserved = map[string]bool{"run": true, "fork": true, "if": true, "match": true, "scope": true, "true": true, "false": true, "void": true, "enter": true, "stay": true, "ignore": true, "reject": true, "done": true}
 
 func pipeBesideOperator(op string) string {
 	return "a |> chain beside " + op + " is ambiguous; parenthesise: (a |> f()) " + op + " b or a " + op + " (b |> f())"
@@ -1868,16 +1883,19 @@ func (p *parser) patternCell() []*MatchPattern {
 }
 
 func (p *parser) pattern() *MatchPattern {
+	if word := p.peek(); word.kind == "name" && isDecisionWord(word.text) {
+		return p.decisionPattern(p.take())
+	}
 	first := p.name()
 	pattern := &MatchPattern{TypeName: first.text, Bindings: map[string]string{}, Span: first.span, Segments: []Span{first.span}}
 	if p.accept(".") {
-		variant := p.name()
+		variant := p.memberName()
 		pattern.VariantName = variant.text
 		pattern.Span.Length = variant.span.Offset + variant.span.Length - pattern.Span.Offset
 		pattern.Segments = append(pattern.Segments, variant.span)
 		if p.accept(".") {
 			pattern.TypeName += "." + variant.text
-			variant = p.name()
+			variant = p.memberName()
 			pattern.VariantName = variant.text
 			pattern.Span.Length = variant.span.Offset + variant.span.Length - pattern.Span.Offset
 			pattern.Segments = append(pattern.Segments, variant.span)
