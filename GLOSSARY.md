@@ -1,6 +1,6 @@
 # Effra
 
-Effra describes server programs using explicit, inspectable effect contracts.
+Effra describes application programs, for servers and front-ends, using explicit, inspectable effect contracts.
 
 ## Language
 
@@ -59,7 +59,13 @@ overhead or a fixed speedup multiplier.
 
 **Callback-result relation**: Retained evidence relating a callback invocation's returned handles to its resolved named callee and input ownership. It is separate from ownership of the callable value; an unresolved relation remains potential ownership.
 
-**Construct admission**: The rule that a language construct, meaning syntax or a checker rule, exists only to make bad code unrepresentable where a library cannot.
+**Construct admission**: The rule that a language construct, meaning syntax or a checker rule, exists only to make bad code unrepresentable where a library cannot. Since 2026-10-12 a construct must pass both the guardrail test and the portability test.
+
+**Guardrail test**: The first construct admission test. A construct passes when it makes an illegal state unrepresentable that neither a library function nor a general type feature can. Behaviour that fails it is a primitive function plus library.
+
+**Portability test**: The second construct admission test. A construct passes when its meaning is a protocol, a canonical plan or operations plus laws, that any lawful provider can implement.
+
+**Lawful provider** (direction): A userland implementation of a construct's protocol that is admitted because it passes that protocol's laws. It need not be an Effect runtime or share Effect's API. An effect runtime provider and a machine provider are two kinds.
 
 **Notation exception**: A syntax form admitted without an unrepresentability argument because it desugars one-to-one, at parse time, into ordinary calls and adds no checking, typing, evaluation order or runtime behavior.
 
@@ -67,7 +73,7 @@ overhead or a fixed speedup multiplier.
 
 **Predeclared language identifier**: A name the language specification defines in every module without an import or library declaration, such as `Fiber` or `Timeout`, following Go's predeclared `len` and `error`. Capability services are not predeclared language identifiers, even when the compiler currently declares them.
 
-**Postfix construct**: A compiler-known construct written after a receiver with `.`, such as `.catch<E>(h)`, `.provide<S>(p)` or `.timeout(ms)`. The parser claims its word after any receiver. Declaring that word as a member name is proposed to become a diagnostic, but it is not one yet.
+**Postfix construct**: A compiler-known construct written after a receiver with `.`, such as `.catch<E>(h)`, `.provide<S>(p)` or `.timeout(ms)`. The parser claims its word after any receiver. Declaring that word as a member name is proposed to become a diagnostic, but it is not one yet. The 2026-10-12 construct bar no longer admits this spelling for constructs, and #134 is deciding keyword or block replacements.
 
 **Special-cased library item** (rejected pattern): A bundled, prelude or library declaration that the compiler recognises by identity or name to produce a semantic fact about it (a diagnostic, checked type, row or ownership fact), also called a lang item. An item stops being one only by losing every such branch or by becoming syntax. Backend retention or emission keyed on the item does not by itself make it one.
 
@@ -85,7 +91,7 @@ overhead or a fixed speedup multiplier.
 
 **Construction authority** (admitted, not implemented): The right to construct values of a nominal type. A `pub readonly` type lets other modules read and match its values while only its owner module constructs them.
 
-**Law** (admitted, not implemented): A named obligation declared in a service or contract and checked by a law suite. A refuted law refuses the build.
+**Law** (admitted, not implemented): A named behavioural obligation that types cannot state, declared in a service, contract or other declaration and checked by a law suite. A refuted law refuses the build. Laws are a general construct; #125 decides their shape.
 
 **JSX pragma** (admitted, not implemented): A user-defined selection of the factory, fragment and result types to which JSX notation desugars.
 
