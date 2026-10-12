@@ -1,5 +1,13 @@
-class __ef_latch {
-  constructor(){this.done=false;this.waiters=new Set();}
-  await(){return Effect.callback((resume,signal)=>{if(this.done){resume(Effect.succeed(undefined));return;}const waiter={resume};this.waiters.add(waiter);const abort=()=>this.waiters.delete(waiter);signal.addEventListener('abort',abort,{once:true});return Effect.sync(()=>{this.waiters.delete(waiter);signal.removeEventListener('abort',abort);});});}
-  signal(){return Effect.sync(()=>{if(this.done)return;this.done=true;const waiters=[...this.waiters];this.waiters.clear();for(const waiter of waiters)waiter.resume(Effect.succeed(undefined));});}
-}
+// Effra's Latch is Effect's Latch. Its effectful `open` completes the latch,
+// moves every parked waiter to one task on the signaller's dispatcher and
+// returns, so the signaller keeps its turn and each waiter resumes on that
+// task, never inline inside the signaller's turn. A waiter interrupted before
+// that task runs leaves the queue and is interrupted; the latch stays open.
+// `openUnsafe` resumes inline and is never used.
+const __ef_latch={
+  make:Effect.sync(()=>Latch.makeUnsafe(false)),
+  valid:latch=>latch!==null&&typeof latch==='object'&&typeof latch.openUnsafe==='function',
+  invalid:()=>Effect.die(new Error('invalid latch handle')),
+  await:latch=>__ef_latch.valid(latch)?latch.await:__ef_latch.invalid(),
+  signal:latch=>__ef_latch.valid(latch)?Effect.asVoid(latch.open):__ef_latch.invalid()
+};

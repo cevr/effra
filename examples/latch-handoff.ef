@@ -1,0 +1,149 @@
+// Latch handoff under the serialized test scheduler, on both targets.
+//
+// Sync.signal completes the latch and makes every parked waiter runnable,
+// then returns; the signaller keeps its turn. Each waiter resumes later, on
+// its own turn, never inline inside the signaller's turn. So:
+//   - interrupting the signaller after its signal returns cannot undo the
+//     signal, and cannot affect a waiter it does not own;
+//   - a signalled waiter is runnable until it runs (quiescence waits for it);
+//   - interrupting a waiter after it was signalled but before it ran
+//     interrupts it; the latch stays signalled for everyone else.
+// Release order among several waiters is unspecified.
+
+effect fn ready(latch: Latch) -> string uses { Sync } {
+    run Sync.await(latch)
+    "reached"
+}
+effect fn signalAndFinish(latch: Latch) -> string uses { Sync } {
+    run Sync.signal(latch)
+    "signalled"
+}
+effect fn sleeper() -> void uses { Clock } {
+    run Clock.sleep(1000)
+}
+
+// The #142 repro. The test parks on the latch, the signaller signals and
+// finishes its turn, and only then does the test resume. The interrupt finds
+// the signaller complete.
+effect fn test_interrupting_the_signaller_after_signal() -> void raises { AssertionFailed } uses { Assert, Sync } {
+    let latch = run Sync.latch()
+    let signaller = fork signalAndFinish(latch)
+    run Sync.await(latch)
+    run signaller.interrupt()
+    run Assert.equalText(run signaller.join(), "signalled")
+}
+
+// Awaiting a signalled latch returns at once and keeps the turn. A competitor
+// is forked first and is runnable during the await. Had the await given up
+// the turn, the competitor would have run and signalled `other`; instead the
+// test interrupts it before its first turn, so it never runs and the probe on
+// `other` times out. A later waiter on the signalled latch passes at once.
+effect fn test_signal_before_wait() -> void raises { AssertionFailed, Timeout } uses { Assert, Clock, Scheduler, Sync } {
+    let latch = run Sync.latch()
+    let other = run Sync.latch()
+    run Sync.signal(latch)
+    let competitor = fork signalAndFinish(other)
+    run Sync.await(latch)
+    run competitor.interrupt()
+    let probe = fork ready(other).timeout(10)
+    let waiter = fork ready(latch)
+    run Scheduler.awaitRegistration()
+    run Scheduler.advance(10)
+    run Assert.equalText(run probe.join().catch<Timeout>("still pending"), "still pending")
+    run Assert.equalText(run waiter.join(), "reached")
+}
+
+// One signal releases both parked waiters, and the signaller still finishes
+// its own turn before either resumes.
+effect fn test_two_waiters() -> void raises { AssertionFailed } uses { Assert, Scheduler, Sync } {
+    let latch = run Sync.latch()
+    let first = fork ready(latch)
+    let second = fork ready(latch)
+    run Scheduler.awaitRegistration()
+    let signaller = fork signalAndFinish(latch)
+    run Assert.equalText(run first.join(), "reached")
+    run Assert.equalText(run second.join(), "reached")
+    run signaller.interrupt()
+    run Assert.equalText(run signaller.join(), "signalled")
+}
+
+// The waiter resumes, reports that it is entering the barrier and parks
+// there. The test interrupts the signaller while the waiter is parked in
+// awaitRegistration: the signaller already finished, and the waiter passes
+// the barrier once the test parks on its join.
+effect fn waitThenBarrier(latch: Latch, entered: Latch) -> string uses { Scheduler, Sync } {
+    run Sync.await(latch)
+    run Sync.signal(entered)
+    run Scheduler.awaitRegistration()
+    "passed"
+}
+
+effect fn test_interrupting_the_signaller_while_the_waiter_is_at_the_barrier() -> void raises { AssertionFailed } uses { Assert, Scheduler, Sync } {
+    let latch = run Sync.latch()
+    let entered = run Sync.latch()
+    let waiter = fork waitThenBarrier(latch, entered)
+    let signaller = fork signalAndFinish(latch)
+    run Sync.await(entered)
+    run signaller.interrupt()
+    run Assert.equalText(run signaller.join(), "signalled")
+    run Assert.equalText(run waiter.join(), "passed")
+}
+
+// The signal is the last effect in a scope whose close cancels a sibling.
+// The close cannot undo the signal: the outside waiter still resumes.
+effect fn signalInClosingScope(latch: Latch) -> string uses { Clock, Sync } {
+    scope {
+        let victim = fork sleeper()
+        run Sync.signal(latch)
+    }
+    "closed"
+}
+
+effect fn test_signal_inside_a_scope_that_closes_after() -> void raises { AssertionFailed } uses { Assert, Clock, Scheduler, Sync } {
+    let latch = run Sync.latch()
+    let waiter = fork ready(latch)
+    run Scheduler.awaitRegistration()
+    let closer = fork signalInClosingScope(latch)
+    run Assert.equalText(run closer.join(), "closed")
+    run Assert.equalText(run waiter.join(), "reached")
+}
+
+// A signalled waiter that is interrupted before its turn is interrupted: it
+// performs no further effect, so it never reports. The latch stays signalled,
+// so a later await returns at once. The probe times out instead of seeing the
+// report.
+effect fn report(latch: Latch, reached: Latch) -> void uses { Sync } {
+    run Sync.await(latch)
+    run Sync.signal(reached)
+}
+
+effect fn test_interrupting_a_signalled_waiter_before_it_runs() -> void raises { AssertionFailed, Timeout } uses { Assert, Clock, Scheduler, Sync } {
+    let latch = run Sync.latch()
+    let reached = run Sync.latch()
+    let probe = fork ready(reached).timeout(10)
+    let waiter = fork report(latch, reached)
+    run Scheduler.awaitRegistration()
+    run Sync.signal(latch)
+    run waiter.interrupt()
+    run Sync.await(latch)
+    run Scheduler.advance(10)
+    let result = run probe.join().catch<Timeout>("never reported")
+    run Assert.equalText(result, "never reported")
+}
+
+// The same through a scope: the signal is the scope's last effect, and the
+// close interrupts the waiter inside it before the waiter's turn.
+effect fn test_scope_close_interrupts_a_signalled_waiter_before_it_runs() -> void raises { AssertionFailed, Timeout } uses { Assert, Clock, Scheduler, Sync } {
+    let latch = run Sync.latch()
+    let reached = run Sync.latch()
+    let probe = fork ready(reached).timeout(10)
+    scope {
+        let waiter = fork report(latch, reached)
+        run Scheduler.awaitRegistration()
+        run Sync.signal(latch)
+    }
+    run Sync.await(latch)
+    run Scheduler.advance(10)
+    let result = run probe.join().catch<Timeout>("never reported")
+    run Assert.equalText(result, "never reported")
+}

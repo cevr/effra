@@ -86,6 +86,9 @@ type schedulerHooks struct {
 	// every counter is idle and a parked wait's context is done. idle is the
 	// barrier's verdict.
 	idleChecked func(window, idle bool)
+	// closeHandoff runs in a managed closer of scope right after it hands off
+	// the turn and before it waits for the scope's shutdown.
+	closeHandoff func(scope *Scope)
 }
 
 type continuationState uint8

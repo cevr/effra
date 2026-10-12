@@ -454,7 +454,8 @@ Native builds lower checked source into typed Go closures and run `go build`. Th
 | [concurrency.ef](examples/concurrency.ef) | Child join/interrupt and deadline recovery | Go / JS |
 | [causal.ef](examples/causal.ef) | Managed virtual time, shared latches and causal cleanup tests | Go / JS |
 | [quiescence.ef](examples/quiescence.ef) | The quiescence barrier for forked work that registers no new timer | Go / JS |
-| [quiescence-wakes.ef](examples/quiescence-wakes.ef) | The barrier and `advance` with wakes in flight: cancellation and inline resumption | Go / JS |
+| [quiescence-wakes.ef](examples/quiescence-wakes.ef) | The barrier and `advance` with wakes in flight: cancellation and signalled waiters | Go / JS |
+| [latch-handoff.ef](examples/latch-handoff.ef) | Latch handoff: a signal makes waiters runnable, and interrupting the signaller afterwards cannot affect a waiter it does not own | Go / JS |
 | [callables-service.ef](examples/callables-service.ef) | Callbacks that are generic over failure and service rows | Go / JS |
 | [testing.ef](examples/testing.ef) | Fixture providers, typed recovery and owned children in tests | Go / JS |
 | [imports.ef](examples/imports.ef) | Automatic native signatures, partial results and context forwarding | Go |

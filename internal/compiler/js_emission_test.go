@@ -19,7 +19,7 @@ import (
 
 var (
 	jsEffectImportLine = regexp.MustCompile(`(?m)^import \{ ([A-Za-z, ]+) \} from 'effect';$`)
-	jsEffectUse        = regexp.MustCompile(`\b(Context|Clock|Duration|Effect|Fiber|Scope|Scheduler|Exit|Cause|Option|Queue)\.`)
+	jsEffectUse        = regexp.MustCompile(`\b(Context|Clock|Duration|Effect|Fiber|Scope|Scheduler|Exit|Cause|Option|Queue|Latch)\.`)
 	jsGeneratedName    = regexp.MustCompile(`__ef_[A-Za-z0-9_]+`)
 	jsGeneratedBinding = regexp.MustCompile(`\b(?:const|let|class) (__ef_[A-Za-z0-9_]+)`)
 	jsValueExport      = regexp.MustCompile(`export \{ ?[A-Za-z0-9_]+ as ([A-Za-z0-9_]+) ?\};`)
