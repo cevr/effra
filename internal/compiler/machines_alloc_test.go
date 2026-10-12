@@ -975,7 +975,7 @@ func TestMachineNarrowingsAreSharedAcrossPaths(t *testing.T) {
 	r, measures = measureMachineAnalysis(t, small.source())
 	assertMachineAllocationCharged(t, "400 shared narrowings", measures)
 	if len(r.Machines) != 1 || !slices.ContainsFunc(r.Machines[0].Transitions, func(tr MachineTransition) bool {
-		return tr.Decision == machineDecisionGo && tr.Precision == machineTargetCurrent && len(tr.Targets) == 3999
+		return tr.Decision == machineDecisionEnter && tr.Precision == machineTargetCurrent && len(tr.Targets) == 3999
 	}) {
 		t.Fatalf("400 shared narrowings: codes %v", machineCodes(r))
 	}

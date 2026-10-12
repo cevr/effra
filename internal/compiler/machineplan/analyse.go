@@ -1132,7 +1132,7 @@ func (m *check[V]) decision(s *scope, e *Expr, variant string, argument *Expr, n
 	switch variant {
 	case "enter":
 		if targets, precision, ok := m.targets(s, argument, n); ok {
-			m.transition(s, e.Span, n, DecisionGo, targets, precision, guarded)
+			m.transition(s, e.Span, n, DecisionEnter, targets, precision, guarded)
 		}
 	case "stay":
 		m.transition(s, e.Span, n, DecisionStay, n.states, TargetCurrent, guarded)
@@ -1254,7 +1254,7 @@ func (m *check[V]) finishPlan(step *Function, event *Enum, complete *Function) b
 			if t.Decision == DecisionDone || t.Decision == DecisionAny {
 				plan.Terminal = true
 			}
-			if t.Decision != DecisionGo && t.Decision != DecisionStay && t.Decision != DecisionAny {
+			if t.Decision != DecisionEnter && t.Decision != DecisionStay && t.Decision != DecisionAny {
 				continue
 			}
 			for _, from := range t.From {

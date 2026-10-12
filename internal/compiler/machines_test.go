@@ -248,12 +248,12 @@ func TestMachinePlansForUnrelatedPrograms(t *testing.T) {
 		t.Fatalf("search functions = %+v", search.Functions)
 	}
 	wantSearch := []transitionKey{
-		{"go", "Idle|Ready|Failed", "Submit", "Loading", "literal", false},
+		{"enter", "Idle|Ready|Failed", "Submit", "Loading", "literal", false},
 		{"stay", "Loading", "Submit", "Loading", "current", true},
-		{"go", "Loading", "Submit", "Loading", "literal", true},
-		{"go", "Loading", "Results", "Ready", "literal", false},
-		{"go", "Loading", "Errored", "Failed", "literal", false},
-		{"go", "Ready|Failed", "Reload", "Loading", "literal", false},
+		{"enter", "Loading", "Submit", "Loading", "literal", true},
+		{"enter", "Loading", "Results", "Ready", "literal", false},
+		{"enter", "Loading", "Errored", "Failed", "literal", false},
+		{"enter", "Ready|Failed", "Reload", "Loading", "literal", false},
 		{"ignore", "Idle|Loading", "Reload", "", "literal", false},
 		{"ignore", "Idle|Ready|Failed", "Results|Errored", "", "literal", false},
 		{"done", "Ready", "Close", "", "literal", false},
@@ -277,8 +277,8 @@ func TestMachinePlansForUnrelatedPrograms(t *testing.T) {
 	// A Go target built by a helper is still a literal tag; the decision under
 	// the effectful probe condition is guarded.
 	for _, want := range []transitionKey{
-		{"go", "Closed", "Failure", "Open", "literal", true},
-		{"go", "Open", "Retry", "HalfOpen", "literal", true},
+		{"enter", "Closed", "Failure", "Open", "literal", true},
+		{"enter", "Open", "Retry", "HalfOpen", "literal", true},
 		{"stay", "Open", "Retry", "Open", "current", true},
 		{"done", "Closed|Open|HalfOpen", "Retire", "", "literal", false},
 	} {
@@ -331,7 +331,7 @@ machine Doors { initial Door.Shut {}; step doorStep }
 		t.Fatalf("dynamic: %+v", r.Diagnostics)
 	}
 	last := plan.Transitions[len(plan.Transitions)-1]
-	if last.Decision != "go" || last.Precision != "conservative" || strings.Join(last.Targets, "|") != "Shut|Open|Broken" {
+	if last.Decision != "enter" || last.Precision != "conservative" || strings.Join(last.Targets, "|") != "Shut|Open|Broken" {
 		t.Fatalf("dynamic target = %+v", last)
 	}
 	if dynamic := enterable(strings.Replace(base, "OUT", "enter to", 1)); !dynamic["Broken"] {
@@ -384,7 +384,7 @@ func TestMachineInspectionAndGraphView(t *testing.T) {
 	}
 	// Search: 4 states contained; 1 initial; ignore/reject are self-loops on
 	// every source state; done goes to the output node.
-	want := map[string]int{"contains": 4, "initial": 1, "go": 8, "stay": 1, "ignore": 5, "reject": 3, "done": 1}
+	want := map[string]int{"contains": 4, "initial": 1, "enter": 8, "stay": 1, "ignore": 5, "reject": 3, "done": 1}
 	encodedWant, _ := json.Marshal(want)
 	encodedGot, _ := json.Marshal(relations)
 	if string(encodedWant) != string(encodedGot) {
@@ -393,7 +393,7 @@ func TestMachineInspectionAndGraphView(t *testing.T) {
 	if view.Data.Effra.Completeness.Semantics != machinePlanEvidence || len(view.Nodes) != 6 {
 		t.Fatalf("view = %+v nodes=%d", view.Data.Effra.Completeness, len(view.Nodes))
 	}
-	focused, err := ParseGraphRequest(map[string]any{"kind": "machine", "focus": graphTupleID("machine-state", r.FindMachine("Search").ID, "Ready"), "edgeKinds": []any{"go"}})
+	focused, err := ParseGraphRequest(map[string]any{"kind": "machine", "focus": graphTupleID("machine-state", r.FindMachine("Search").ID, "Ready"), "edgeKinds": []any{"enter"}})
 	if err != nil {
 		t.Fatal(err)
 	}

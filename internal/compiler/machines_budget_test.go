@@ -503,7 +503,7 @@ func TestMachineCurrentTargetsAreDeduplicatedAndCharged(t *testing.T) {
 		t.Fatalf("68 equal narrowings refused: %v", machineCodes(r))
 	}
 	if !slices.ContainsFunc(plan.Transitions, func(tr MachineTransition) bool {
-		return tr.Decision == "go" && tr.Precision == machineTargetCurrent && len(tr.Targets) == 999
+		return tr.Decision == machineDecisionEnter && tr.Precision == machineTargetCurrent && len(tr.Targets) == 999
 	}) {
 		t.Fatal("current-state targets lost")
 	}

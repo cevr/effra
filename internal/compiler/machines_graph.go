@@ -10,7 +10,7 @@ import (
 // projection reads MachinePlan only; it never re-derives transitions and never
 // executes a step.
 
-var machineGraphRelations = []string{"any", "contains", "done", "go", "ignore", "initial", "reject", "stay"}
+var machineGraphRelations = []string{"any", "contains", "done", "enter", "ignore", "initial", "reject", "stay"}
 
 // GraphMachineFacts are the declaration-level facts of one machine node.
 type GraphMachineFacts struct {

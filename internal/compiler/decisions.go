@@ -7,9 +7,8 @@ package compiler
 // reads decision forms structurally, never through the identity of a library
 // declaration (docs/specs/state-machines.md#decisions).
 //
-// Source `enter` is the plan transition kind "go": the source word names the
-// lifecycle (close the current entry, start a new one) and avoids Go's
-// goroutine statement; the plan protocol keeps its established word.
+// Plans and graphs publish each transition under the source word of its form,
+// so source, plan and provider share one word per decision.
 
 // decisionCode refuses a decision form outside a decision context and a
 // decision written through the template rather than its forms.

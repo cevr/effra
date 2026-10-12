@@ -48,7 +48,7 @@ const (
 )
 
 const (
-	machineDecisionGo     = machineplan.DecisionGo
+	machineDecisionEnter  = machineplan.DecisionEnter
 	machineDecisionStay   = machineplan.DecisionStay
 	machineDecisionIgnore = machineplan.DecisionIgnore
 	machineDecisionReject = machineplan.DecisionReject

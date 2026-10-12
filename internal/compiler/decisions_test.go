@@ -313,7 +313,7 @@ func TestDecisionParserControls(t *testing.T) {
 }
 
 // The plan reads decision forms structurally: every plan transition kind is
-// produced by its source word, with source `enter` published as "go".
+// produced by its source word and published as that same word.
 func TestDecisionWordsProducePlanTransitions(t *testing.T) {
 	source := decisionPrelude + `fn step(state: S, event: E) -> decision<S, i64> {
     match state, event {
@@ -330,11 +330,11 @@ machine M { initial S.Idle {}; step step }
 	if plan == nil {
 		t.Fatalf("no plan: %+v", r.Diagnostics)
 	}
-	words := map[string]string{"go": "enter", "stay": "stay", "ignore": "ignore", "reject": "reject", "done": "done"}
+	words := []string{"enter", "stay", "ignore", "reject", "done"}
 	seen := map[string]bool{}
 	for _, transition := range plan.Transitions {
 		word := source[transition.Span.Offset : transition.Span.Offset+transition.Span.Length]
-		if words[transition.Decision] != word {
+		if transition.Decision != word || !slices.Contains(words, word) {
 			t.Fatalf("transition %s anchored at %q", transition.Decision, word)
 		}
 		seen[transition.Decision] = true

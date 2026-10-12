@@ -54,11 +54,12 @@ const (
 	MaxModuleWork = 1 << 20
 )
 
-// Decisions as published in plans and graphs. The source form `enter` is
-// published as "go"; the other words are unchanged. "any" is a conservative
-// decision produced by a decision value the bounded walk cannot see into.
+// Decisions as published in plans and graphs: each is the source word of its
+// decision form, so source, plan and graph use one word per concept. "any"
+// is a conservative decision produced by a decision value the bounded walk
+// cannot see into.
 const (
-	DecisionGo     = "go"
+	DecisionEnter  = "enter"
 	DecisionStay   = "stay"
 	DecisionIgnore = "ignore"
 	DecisionReject = "reject"
