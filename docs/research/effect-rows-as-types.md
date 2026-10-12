@@ -1,6 +1,6 @@
 # Effect rows as types: catch, provide and timeout as library functions
 
-**Status:** design note for the spike in [#115](https://github.com/cevr/effra/issues/115), phase 1, revision 6, 2026-10-12. It changes no compiler behavior. Every line reference is at `main` `f900240c`, unless stated otherwise; the branch has since merged `main` `dfbdbd58`, which changes none of the cited behaviour. Paths are under `internal/compiler/` unless stated otherwise. Phase 2 implements only what a review of this note accepts.
+**Status:** design note for the spike in [#115](https://github.com/cevr/effra/issues/115), phase 1, revision 6, 2026-10-12. It changes no compiler behavior. Every line reference is at `main` `f900240c`, unless stated otherwise; the branch has since merged `main` `dfbdbd58` and then `13e62ad4`, which change none of the cited behaviour. Paths are under `internal/compiler/` unless stated otherwise. Phase 2 implements only what a review of this note accepts.
 
 Revision 6 applies the rulings of re-plan 1, round 3, after the fifth review:
 
@@ -628,7 +628,7 @@ export const provide = (work, service, provider) => Effect.provideService(work, 
       - `T` assignable to `V` is included, so every member that removal takes is also handed to the handler;
       - `T` that is not a single literal key is included. That covers `string`, a template or mapping with a hole, anything branded, and a template whose hole is branded. The test is the guard's own `{} extends Record<…>`;
       - a single literal or enum member is included exactly when its value type ``${T}`` is `V`;
-      - `never` is left out, which is sound because no value has it. The unchecked type distributes to both branches, so its member is included.
+      - `never` is left out, which is sound because no honest value has it. A `never`-typed value, for example from `Object.assign`'s `T & U` over two conflicting tags, is boundary 3 (§2.8.1). The unchecked type distributes to both branches, so its member is included.
 
       Removal being a subset of the payload is not enough. A template whose hole is branded is kept by removal, which is sound, and the runtime still hands it to the handler (A10, §2.8.1).
     - **The precision guarantee.** Effra-generated errors always have plain literal tags, and for them the payload is exact: the members whose tag is `V`. Only a hand-written tag that is not a single plain literal costs precision, by being in payloads it cannot match (§2.8.1).
@@ -743,7 +743,7 @@ Every row is a line in probe C2 r6 (`probes-r6/ts/`). The last column holds the 
 | Branded enum member `Tag.NotFound & B` | yes | yes. **New (r6):** r5's overlap test left it out while catch removed it, and a handler typed for the plain member died with `TypeError` (A7). | P06; payload-run A7 |
 | Template with a branded hole: `` `Not${"Found" & B}` ``, `` `${Tag.NotFound & B}` `` | no (sound: the type is not within the label) | yes. **New (r6):** r5 left both out, and the runtime handed them to a handler typed for the plain member, which died (A10). | P12, P14; payload-run A10a, A10b |
 | Branded string | no | yes | M07 |
-| `never` | yes | no | uninhabited, so either is sound |
+| `never` | yes | no | no honest value has it, so either is sound. A `never`-typed value is boundary 3 |
 | The unchecked type | yes, by every tag | yes | M08: boundary 1, below |
 | Requirement brand `string` or a union (provide) | no | – | M09 |
 
@@ -773,7 +773,7 @@ Every row is a line in probe C2 r6 (`probes-r6/ts/`). The last column holds the 
 | Branded template or mapping | `` `Not${string}` & B ``; `Lowercase<string> & B` | in; in (precision cost) | not a single literal key | P36; P37 (A8 M4, M5) |
 | Union | `"NotFound" \| "Other"`; `"Denied" \| "Other"`; `("NotFound" \| "Other") & B` | in; out; in | per constituent: one is the label; each is another plain value; branded constituents | P22; P23; P24 (A8 M3) |
 | `string`, `string & {}` | `string` | in | not a literal key | P25, P26 |
-| `never` | `never` | out | no value has it. Removal takes it by assignability: the one member removed and not in the payload, which is sound | P28 |
+| `never` | `never` | out | no honest value has it. A `never`-typed value, for example from `Object.assign`'s `T & U` over two conflicting tags, is boundary 3. Removal takes it by assignability: the one member removed and not in the payload, which is sound | P28 |
 | The unchecked type | `ReturnType<typeof JSON.parse>` | in | it distributes to both branches | P29 |
 
 - **Self-attack.** `tools/gen-payload.cjs` composes 15 atoms (plain literals, enum members, the whole enum, `string` and `` `${number}` ``) with the operators a hand-written tag can use: a brand, `& {}`, three template wrappings, a union and the four intrinsic mappings, to depth 2. That gives 1065 forms. For each, it models the possible run-time strings, and it checks with the TypeScript API that every form whose value may be `"NotFound"` is in the payload.
@@ -810,6 +810,7 @@ Every row is a line in probe C2 r6 (`probes-r6/ts/`). The last column holds the 
 3. **TypeScript's own unsound rules: value-type lies and rest arity.** TypeScript accepts these for every function, with no Effra declaration involved.
    - **Value-type lies.** Each of these puts a value of another type into a typed slot:
      - a literal-typed slot holding another value, such as an empty `"Denied"[]` element or a `never[]` element (review `h6-value-lie.mts`, E3a, E3b). The check holds for the declared type `"Denied"`, the type removes Denied, and the runtime keeps it;
+     - a `never`-typed value from TypeScript's own signatures, with no cast. `Object.assign({}, denied, found)` returns `T & U`, so two conflicting tags give `_tag: never`. A member built from it is removed by every label and left out of every payload. At run time, recover's handler dies with `TypeError`, and catch fails with the value's real tag (review `review-6/attack/b3-assign-never.mts`). This is E3b's class, and Effect's `ExcludeTag` shares it. **New (review 6).**
      - control-flow narrowing across a mutating call. After `let t: "NotFound" | "Denied" = "NotFound"; flip()`, where `flip` assigns `"Denied"`, TypeScript keeps `t` narrowed to `"NotFound"` (TypeScript #9998). So `catch_(work, t, …)` is typed as removing NotFound, and at run time it fails with NotFound (review `a3-narrowing.mts`). **New (r6).**
      - mutable aliasing of a readonly `_tag`;
      - calls through `Function`, `Reflect.apply` or `.apply.call`;
@@ -1272,13 +1273,13 @@ None of these languages lets a non-literal tag select a failure at the type leve
 | **PureScript** (JS) | `Record.delete` takes `IsSymbol`, `Cons` and an explicit `Lacks`, and the reflected symbol selects the runtime key (`purescript-record@c89cd1a`, `Record.purs:110-124`). FFI types are assigned at a trusted boundary. | The runtime key is derived from the same symbol as the type. Effra derives a service's brand and key from one name in the same way (`emit.go:254,259-260`), which is why a hand-made mismatch is the only service boundary (E2). |
 | **Effect-TS** | Works inside TypeScript's deliberately unsound compatibility rules. Effect 4.0.1 admits a union `K`, a never filler and a `JSON.parse` service with no cast (`effect-baseline.mts`). Its `catchTag` payload leaves out a branded or interpolated member that the runtime hands over (A12). | The r4 guard closed Effect's direct spellings but inherited its bypass routes, because removal stayed unconditional. Gated removal keeps Effect's shape and is strictly stronger. Effect's payload hole is the one Effra's r5 payload shared; r6 over-includes instead. |
 
-Every inspected language enforces its label discipline in its own compiler. The projection to the host is either conservative (Gleam's hidden constructors, ReScript's opaque fallback) or sits behind an explicit trust contract (MoonBit and PureScript FFI). Revisions 5 and 6 follow that path:
+Every inspected language that compiles its own tags enforces its label discipline in its own compiler. The projection to the host is either conservative or sits behind an explicit trust contract. The conservative ones are Gleam's hidden constructors, with structural declarations as an accepted boundary, and ReScript's opaque fallback. The trust contracts are MoonBit's and PureScript's FFI. Revisions 5 and 6 follow that path:
 - TypeScript's refusal is a diagnostic;
 - the declared types claim no removal that the check does not back;
 - a handler's payload leaves out no member that the runtime might hand over;
 - §2.8.1 writes down the host trust envelope.
 
-**A tag's run-time value against its payload type** (the fifth review's question, revision 6). No inspected language can let the two drift apart:
+**A tag's run-time value against its payload type** (the fifth review's question, revision 6). No inspected language that compiles its own tags lets the two drift apart, under its stated trust contract. Effect-TS, a TypeScript library, does (A12). The others avoid drift in one of two ways:
 - **One compiler-owned source.** Gleam matches constructors by class (`javascript/decision.rs:1667-1709`), and users never write tag strings. ReScript genType derives the discriminant and the payload from one variant description. Elixir expands a `rescue` alias to its literal module atom when compiling (`elixir_clauses.erl:466-494`), and compares `__struct__` with that atom at run time (`elixir_erl_try.erl:119-120`), so nominal identity is normalized before any comparison. PureScript's `Record.delete` takes the run-time key from the same `IsSymbol` witness that `Cons` and `Lacks` use (`Record.purs:110-124`).
 - **No tag strings.** Koka's `try` selects by operation through a handler (`lib/std/core/exn.kk:54-56`). MoonBit's `catch` matches declared constructors (`next/language/error-handling.md:31-46`).
 - TypeScript can do neither for a hand-written, branded `_tag`: it cannot normalize a brand the way Elixir normalizes an alias. So Effra's payload over-includes what it cannot prove distinct, and generated tags, which are plain literals, keep the exact payload. Inclusion uses the guard's own literal test, which echoes ReScript's single source for the tag and the payload.
