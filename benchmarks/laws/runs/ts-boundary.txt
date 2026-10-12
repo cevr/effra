@@ -25,6 +25,7 @@ refused A3-mutate-evidence: TypeError: Cannot assign to read only property 'age'
 refused G1-getter: TypeError: EF186 xs .first is not an own data property
 correct G1-getter-reads = 0
 correct A3-read-count = true first:1 second:1 third:1
+correct A3-nested-read-count = true bob.age:1 bob.name:1 cy.age:1 cy.name:1 ada.age:1 ada.name:1
 refused R10-namespace-patch: TypeError: Cannot assign to read only property 'compareUsers' of object '[object Module]'
 correct R10b-function-property-patch = true
 refused N1-never-filler: TypeError: EF186 xs is not a Trio
@@ -42,17 +43,17 @@ directives=1 without a diagnostic=0 with a code mismatch=0
 exit=0
 attacks.mts:47  L1 a sortTrioBy result is not SortedBy  [expects TS2322]
     TS2322 Type 'Trio' is not assignable to type 'SortedBy<Trio, "compareUsers">'.   Property '__ef_evidence' is missing in type 'Trio' but required in type 'EfEvidence<"SortedBy", Trio, "compareUsers">'.  ['__ef_evidence' is declared here.]
-attacks.mts:158  F1 a plain trio is not SortedBy  [expects TS2322]
+attacks.mts:186  F1 a plain trio is not SortedBy  [expects TS2322]
     TS2322 Type 'Trio' is not assignable to type 'SortedBy<Trio, "compareUsers">'.   Property '__ef_evidence' is missing in type 'Trio' but required in type 'EfEvidence<"SortedBy", Trio, "compareUsers">'.  ['__ef_evidence' is declared here.]
-attacks.mts:161  F2 evidence for one comparator is not evidence for another  [expects TS2322]
+attacks.mts:189  F2 evidence for one comparator is not evidence for another  [expects TS2322]
     TS2322 Type 'SortedBy<Trio, "compareUsers">' is not assignable to type 'SortedBy<Trio, "reversed">'.   Type 'SortedBy<Trio, "compareUsers">' is not assignable to type 'EfEvidence<"SortedBy", Trio, "reversed">'.     Type at position 2 in source is not compatible with 
-attacks.mts:164  F3 an effect export's recipe is not itself evidence; only its success value is  [expects TS2322]
+attacks.mts:192  F3 an effect export's recipe is not itself evidence; only its success value is  [expects TS2322]
     TS2322 Type 'Effect<SortedBy<Trio, "compareUsers">, never, never>' is not assignable to type 'SortedBy<Trio, "compareUsers">'.   Type 'Effect<SortedBy<Trio, "compareUsers">, never, never>' is missing the following properties from type 'Trio': first, second, third, [_
 directives=4 without a diagnostic=0 with a code mismatch=0
 exit=0
 == any
 ./attacks-augment.mts: any keywords=0, word matches=0
-./attacks.mts: any keywords=0, word matches=5
+./attacks.mts: any keywords=0, word matches=6
 ./consumer.mts: any keywords=0, word matches=1
 ./lib.d.mts: any keywords=0, word matches=0
 ./lib.mjs: any keywords=0, word matches=1

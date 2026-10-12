@@ -1,4 +1,4 @@
-# examples/laws/probes.sh (from 63164e8a) with ef built from 5f428883 (round 1, before the fixes); exit 1 expected
+# examples/laws/probes.sh (from 63164e8a) with ef built from 5f428883 (round 1, before the review-1 fixes); exit 1 expected. Kept as the round-1 receipt; probes-before-r2.txt is round 2's.
 PASS M1-control: without the total law the 0/1 compare is tested on all three laws and its build is admitted (the hole)
 PASS M1: with the total law: go=tested,tested,tested,refuted js=tested,tested,tested,refuted agree=true, counterexample a = User { age: 0, name: "" }, b = User { age: -1, name: "" }
 PASS M1-build: go: EF170 refuted laws refuse the build: Order.total@User at a = User { age: 0, name: "" }, b = User { age: -1, name: "" }

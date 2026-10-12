@@ -8,8 +8,8 @@
 #   order    `ef test` per target on examples/laws/order.ef (eight laws).
 #   build    `ef build` per target on the law program and its control: laws
 #            are erased, so the two should cost the same.
-#   adapter  per-call cost of the host adapters in ts/proto/lib.mjs against an
-#            export with no adapter (ts/adapter-cost.mjs).
+#   adapter  cost per exported call in ts/proto/lib.mjs, body included, and the
+#            same body with no adapter, whose difference is the adapter (ts/adapter-cost.mjs).
 # The prototype lives on wf10/spike-laws-proto, which is never merged, so pass
 # a checkout of that branch. Exits 1 when a run fails, 2 when a tool is missing.
 # Usage: benchmarks/laws/proto-cost.sh <proto-checkout> [scratch-dir] [samples]
@@ -99,6 +99,6 @@ for target in go js; do
 done
 echo "# load average at end: $(cut -d' ' -f1-3 /proc/loadavg)" >> "$out"
 
-echo "== adapter (node, ts/adapter-cost.mjs, 200000 calls per sample, $samples samples after one warm-up)" >> "$out"
+echo "== exported call and adapter (node, ts/adapter-cost.mjs, 200000 calls per sample, $samples samples after one warm-up)" >> "$out"
 node "$here/ts/adapter-cost.mjs" 200000 "$samples" >> "$out"
 echo "proto cost: ok ($head)"

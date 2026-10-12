@@ -1,4 +1,4 @@
-// Built by the laws prototype (wf10/spike-laws-proto 63164e8a) from examples/laws/sorted.ef with `ef test --target both sorted.ef` then `ef build --target js sorted.ef` (EF174 refuses the build until a current passing receipt exists). Checked in so this probe runs without the prototype.
+// Built by the laws prototype (wf10/spike-laws-proto 8b02919b) from examples/laws/sorted.ef with `ef test --target both sorted.ef` then `ef build --target js sorted.ef` (EF174 refuses the build until a current passing receipt exists). Checked in so this probe runs without the prototype.
 import type { Context, Effect, Fiber } from 'effect';
 export interface File {readonly _effraFile: "File"}
 export interface Latch {readonly _effraLatch: "Latch"}

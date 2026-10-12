@@ -133,6 +133,34 @@ correct("A3-read-count", "true first:1 second:1 third:1", () => {
   const found = search(proxy as never as Trio, bob);
   return String(found) + " " + fields.map((k) => k + ":" + String(counts[k] ?? 0)).join(" ");
 });
+// A3 nested read count (review 2, o2): sortedness is decided one level down,
+// by each User's age, so the count covers the nested fields too. Every read
+// after the first answers a hostile value; the adapter must read each nested
+// field once, into the snapshot, by any route (descriptor or get).
+correct("A3-nested-read-count", "true bob.age:1 bob.name:1 cy.age:1 cy.name:1 ada.age:1 ada.name:1", () => {
+  const counts: Record<string, number> = {};
+  const nested = ["age", "name"];
+  const counted = (label: string, user: User): User => {
+    const target: Record<string, unknown> = { name: user.name, age: user.age };
+    const read = (key: string | symbol): { hit: boolean; value?: unknown } => {
+      if (typeof key !== "string" || !nested.includes(key)) return { hit: false };
+      const k = label + "." + key;
+      counts[k] = (counts[k] ?? 0) + 1;
+      return { hit: true, value: counts[k] === 1 ? target[key] : key === "age" ? 99n : "zed" };
+    };
+    return new Proxy(target, {
+      get: (t, key) => { const r = read(key); return r.hit ? r.value : Reflect.get(t, key); },
+      getOwnPropertyDescriptor: (t, key) => {
+        const r = read(key);
+        return r.hit ? { value: r.value, writable: true, enumerable: true, configurable: true } : Reflect.getOwnPropertyDescriptor(t, key);
+      },
+    }) as never as User;
+  };
+  const hostile = { first: counted("bob", bob), second: counted("cy", cy), third: counted("ada", ada) };
+  const found = search(hostile as never as Trio, bob);
+  const order = ["bob", "cy", "ada"].flatMap((u) => nested.map((k) => u + "." + k));
+  return String(found) + " " + order.map((k) => k + ":" + String(counts[k] ?? 0)).join(" ");
+});
 
 // Canonical-binding rule: adapters call module-private bindings, the module
 // namespace is frozen, and exported functions do not reach the adapters.
