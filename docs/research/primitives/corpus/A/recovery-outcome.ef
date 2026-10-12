@@ -77,8 +77,8 @@ effect fn main() -> void {
         run Console.log("constructed")
         let first = run report(bad)
         let again = run report(bad)
-        let done = run report(ok)
+        let settled = run report(ok)
         let waiting = run report(busy)
-        run Console.log(first + "; " + again + "; " + done + "; " + waiting)
+        run Console.log(first + "; " + again + "; " + settled + "; " + waiting)
     }
 }

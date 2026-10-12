@@ -36,7 +36,7 @@ Fork, interrupt and context update are not nodes; they are methods of the fiber 
 | scope close | LIFO finalizers | `:3982` |
 | `forkChild` | attaches the child to the parent fiber, not to a scope: `forkUnsafe` adds it to `parentRuntime.children()`; the parent's `interruptChildren` middleware interrupts children when the parent ends | `:5532-5535` (attachment); `:599-603` (middleware); `:784-789`, `:5506` |
 | `forkDetach` | daemon | `:5566`, `:5534` |
-| `forkIn`, `forkScoped` | attach to a given scope | `:5623-5663` |
+| `forkIn`, `forkScoped` | bind a child's lifetime to a given scope: an interrupt finalizer added at spawn and removed when the child completes; no resources transfer | `:5594-5663` |
 | `join`, `await` | fiber observers | `:839-846`, `:792-801` |
 | `interrupt` (of a fiber) | interrupt then await | `:915` |
 | `race` | `raceAll([self, that])`, first success; `raceAll` is `withFiber` + `callback` + `forkUnsafe` (no `raceWith` in v4) | `:1696`, `:1603` |

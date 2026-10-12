@@ -76,7 +76,7 @@ effect fn main() -> void {
     run Console.log("constructed").provide<Console>(Stdout)
     let first = run report(bad).provide<Console>(Stdout)
     let again = run report(bad).provide<Console>(Stdout)
-    let done = run report(ok).provide<Console>(Stdout)
+    let settled = run report(ok).provide<Console>(Stdout)
     let waiting = run report(busy).provide<Console>(Stdout)
-    run Console.log(first + "; " + again + "; " + done + "; " + waiting).provide<Console>(Stdout)
+    run Console.log(first + "; " + again + "; " + settled + "; " + waiting).provide<Console>(Stdout)
 }

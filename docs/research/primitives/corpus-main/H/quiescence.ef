@@ -1,0 +1,99 @@
+// Scheduler quiescence for work that registers no new timer, on both targets.
+//
+// Scheduler.awaitRegistration returns at quiescence: no managed fiber is
+// running or runnable, and a wake in flight is not idle. It does not wait for
+// a new timer, so forked work that already completed, or whose timeout timer
+// was cancelled or never started, passes the barrier. Interrupting after the
+// barrier proves the work settled before it returned: without the barrier the
+// interrupt reaches unfinished work. quiescence-wakes.ef covers wakes in
+// flight.
+
+effect fn ready(latch: Latch) -> string uses { Sync } {
+    run Sync.await(latch)
+    "reached"
+}
+effect fn immediate() -> string {
+    "immediate"
+}
+effect fn nestedImmediate() -> string {
+    scope {
+        let inner = fork immediate()
+        run inner
+    }
+}
+
+effect fn sleeper() -> void uses { Clock } {
+    run Clock.sleep(1000)
+}
+
+effect fn test_barrier_after_immediately_completed_timeout() -> void raises { AssertionFailed, Timeout } uses { Assert, Clock, Scheduler, Sync } {
+    scope {
+        let latch = run Sync.latch()
+        run Sync.signal(latch)
+        let probe = fork ready(latch).timeout(10ms)
+        run Scheduler.awaitRegistration()
+        run Scheduler.advance(10)
+        run Assert.equalText(run probe, "reached")
+    }
+}
+
+effect fn test_barrier_after_latch_signalled_before_fork() -> void raises { AssertionFailed } uses { Assert, Scheduler, Sync } {
+    scope {
+        let latch = run Sync.latch()
+        run Sync.signal(latch)
+        let probe = fork ready(latch)
+        run Scheduler.awaitRegistration()
+        interrupt probe
+        run Assert.equalText(run probe, "reached")
+    }
+}
+
+effect fn test_barrier_after_pure_fork_then_interrupt() -> void raises { AssertionFailed } uses { Assert, Scheduler } {
+    scope {
+        let probe = fork immediate()
+        run Scheduler.awaitRegistration()
+        interrupt probe
+        run Assert.equalText(run probe, "immediate")
+    }
+}
+
+effect fn test_barrier_after_completion_cancels_timeout() -> void raises { AssertionFailed, Timeout } uses { Assert, Clock, Scheduler, Sync } {
+    scope {
+        let latch = run Sync.latch()
+        let probe = fork ready(latch).timeout(10ms)
+        run Scheduler.awaitRegistration()
+        run Sync.signal(latch)
+        run Scheduler.awaitRegistration()
+        interrupt probe
+        run Assert.equalText(run probe, "reached")
+    }
+}
+
+effect fn test_barrier_after_nested_fork() -> void raises { AssertionFailed } uses { Assert, Scheduler } {
+    scope {
+        let probe = fork nestedImmediate()
+        run Scheduler.awaitRegistration()
+        interrupt probe
+        run Assert.equalText(run probe, "immediate")
+    }
+}
+
+effect fn test_barrier_settles_mixed_sibling_forks() -> void raises { AssertionFailed, Timeout } uses { Assert, Clock, Scheduler, Sync } {
+    scope {
+        let latch = run Sync.latch()
+        run Sync.signal(latch)
+        let pure = fork immediate()
+        let timed = fork ready(latch).timeout(10ms)
+        let nested = fork nestedImmediate()
+        let sleeping = fork sleeper()
+        run Scheduler.awaitRegistration()
+        interrupt pure
+        interrupt timed
+        interrupt nested
+        run Assert.equalText(run pure, "immediate")
+        run Assert.equalText(run timed, "reached")
+        run Assert.equalText(run nested, "immediate")
+        run Scheduler.advance(1000)
+        run sleeping
+    }
+}

@@ -47,6 +47,10 @@ const baseKeywords = new Set([
   "layer", "provides", "derive", "effect", "fn", "let", "run", "fail", "scope",
   "fork", "if", "else", "match", "uses", "raises", "host", "as", "true", "false",
   "void", "type", "with",
+  // Main at ec4a5a9e reserves the machine declaration and its decision words
+  // (internal/compiler/decisions.go). No file of the shared corpus uses them;
+  // the corpus-main extension does (machine-breaker.ef).
+  "machine", "decision", "enter", "stay", "ignore", "reject", "done",
 ]);
 const optionKeywords: Record<string, string[]> = {
   today: [],
@@ -60,7 +64,10 @@ const optionKeywords: Record<string, string[]> = {
 };
 
 // Options whose design requires every `fork` to sit inside an owner block in
-// the same function (review 1, M6): `scope { }` or a `race { }` arm.
+// the same function (review 1, M6): `scope { }`, a `race { }` arm, or a
+// `provide … { }` body, since every provide block owns its body (review 3,
+// Minor 2). A `fork` entry in a `layer` is outside every owner block, so the
+// split-out worker entry (U-workers) fails this check too.
 const ownedFork = new Set(["H"]);
 
 // The one classification of dot and call forms. `carrier` says what lets the
@@ -205,8 +212,8 @@ type Metrics = {
   ownerless: string[];
 };
 
-function measure(option: string, file: string): Metrics {
-  const path = join(corpus, option, file);
+function measure(option: string, file: string, base: string = corpus): Metrics {
+  const path = join(base, option, file);
   const source = readFileSync(path, "utf8");
   const tokens = lex(source, `${option}/${file}`);
   const keywordSet = new Set([...baseKeywords, ...optionKeywords[option]]);
@@ -224,6 +231,11 @@ function measure(option: string, file: string): Metrics {
   const ownerless: string[] = [];
   let keyedToday = 0;
   let punct = 0;
+  // A provide header (`provide App, S = p`) runs until its block opens at the
+  // header's own nesting depth (a brace inside a provider's parentheses is
+  // not the block).
+  let provideHeader = false;
+  let provideDepth = 0;
 
   tokens.forEach((t, index) => {
     const previous = tokens[index - 1];
@@ -231,8 +243,12 @@ function measure(option: string, file: string): Metrics {
     if (t.kind === "punct") {
       punct++;
       if (t.text === "{" || t.text === "(" || t.text === "[") {
-        // An owner block is a `{` opened directly by `scope` or `race`.
-        const owner = t.text === "{" && previous?.kind === "word" && (previous.text === "scope" || previous.text === "race");
+        // An owner block is a `{` opened directly by `scope` or `race`, or
+        // the block that ends a provide header.
+        const opener = previous?.kind === "word" && (previous.text === "scope" || previous.text === "race");
+        const block = provideHeader && stack.length === provideDepth;
+        const owner = t.text === "{" && (opener || block);
+        if (t.text === "{" && block) provideHeader = false;
         stack.push({ text: t.text, line: t.line, owner });
         if (t.text === "{") maxDepth = Math.max(maxDepth, ++depth);
       } else if (t.text in pairs) {
@@ -260,6 +276,10 @@ function measure(option: string, file: string): Metrics {
     }
     if (!member && t.text === "fork" && ownedFork.has(option) && !stack.some((s) => s.owner)) {
       ownerless.push(`${t.line}`);
+    }
+    if (!member && !called && t.text === "provide" && optionKeywords[option]?.includes("provide")) {
+      provideHeader = true;
+      provideDepth = stack.length;
     }
     if (member || !keywordSet.has(t.text)) return;
     if (t.text === "provide" && called) return;
@@ -384,8 +404,37 @@ if (!chosenReport) {
   }
 }
 
+// The corpus-main extension: examples that main added after the shared
+// corpus was frozen (main at ec4a5a9e: machine decisions and scheduler
+// quiescence), rewritten for the baseline and the chosen option only. It is
+// reported apart so the shared comparison stays like for like, and the
+// chosen option's checks (no lookalike, every fork owned) apply to it.
+const extension = join(root, "docs", "research", "primitives", "corpus-main");
+const extensionReports: Report[] = [];
+if (existsSync(extension)) {
+  const extensionFiles = readdirSync(join(extension, baseline)).filter((f) => f.endsWith(".ef")).sort();
+  for (const option of [baseline, chosen]) {
+    const report: Report = { option, files: [] };
+    for (const file of extensionFiles) {
+      if (!existsSync(join(extension, option, file))) {
+        failures.push(`corpus-main/${option}: missing ${file}`);
+        continue;
+      }
+      try {
+        const m = measure(option, file, extension);
+        report.files.push(m);
+        for (const line of m.ownerless) failures.push(`corpus-main/${option}: ${file}:${line}: fork outside an owner block`);
+        if (option === chosen) for (const site of m.lookalikes) failures.push(`corpus-main/${chosen}: ${file}:${site} is a construct spelled like a call`);
+      } catch (error) {
+        failures.push((error as Error).message);
+      }
+    }
+    extensionReports.push(report);
+  }
+}
+
 if (asJson) {
-  console.log(JSON.stringify({ chosen, forms, reports: reports.map((r) => ({ ...r, totals: totals(r) })), failures }, null, 2));
+  console.log(JSON.stringify({ chosen, forms, reports: reports.map((r) => ({ ...r, totals: totals(r) })), extension: extensionReports.map((r) => ({ ...r, totals: totals(r) })), failures }, null, 2));
 } else {
   const fixed = (n: number) => n.toFixed(2);
   console.log(`# Syntax corpus metrics (chosen option: ${chosen})\n`);
@@ -398,6 +447,17 @@ if (asJson) {
     const t = totals(report);
     const delta = baseTokens === 0 ? "" : `${t.tokens - baseTokens >= 0 ? "+" : ""}${(((t.tokens - baseTokens) / baseTokens) * 100).toFixed(1)}%`;
     console.log(`| ${report.option} | ${report.files.length} | ${t.tokens} | ${delta} | ${t.lines} | ${t.depth} | ${t.keywords.length} | ${fixed(t.lines ? t.punct / t.lines : 0)} | ${t.lookalikes} | ${t.otherKeyed} | ${t.awaitingQ11} | ${t.awaitingRows} | ${t.keyedToday} |`);
+  }
+  if (extensionReports.length > 0) {
+    console.log("\n## corpus-main extension (examples main added after the corpus froze; baseline and chosen option only)\n");
+    console.log("| option | files | tokens | vs today | code lines | max depth | distinct keywords | punct/line | lookalikes (#134) | awaiting Q11 | awaiting rows units | keyed today |");
+    console.log("|---|---|---|---|---|---|---|---|---|---|---|---|");
+    const extensionBase = totals(extensionReports[0]).tokens;
+    for (const report of extensionReports) {
+      const t = totals(report);
+      const delta = extensionBase === 0 ? "" : `${t.tokens - extensionBase >= 0 ? "+" : ""}${(((t.tokens - extensionBase) / extensionBase) * 100).toFixed(1)}%`;
+      console.log(`| ${report.option} | ${report.files.length} | ${t.tokens} | ${delta} | ${t.lines} | ${t.depth} | ${t.keywords.length} | ${fixed(t.lines ? t.punct / t.lines : 0)} | ${t.lookalikes} | ${t.awaitingQ11} | ${t.awaitingRows} | ${t.keyedToday} |`);
+    }
   }
   console.log("\n## Classification (one table for every option)\n");
   console.log("| form | carrier | surface | keyed today |");
