@@ -10,7 +10,12 @@ import (
 // A signalled waiter that has not run yet is cancelled by its owner's close
 // before it can take the turn (docs/runtime.md, latch handoff rule 4). The
 // closer signals a waiter it owns and then closes its scope, by leaving a
-// scope block or by exiting the fiber that forked the waiter.
+// scope block or by exiting the fiber that forked the waiter. The third case
+// has the shape of layer shutdown (layerBuild.close): the owner is a separate
+// node scope and the closer is another fiber context sharing the turn. The
+// layer API itself cannot reach this precondition, because every path from a
+// signal to a node close passes a turn handoff that legitimately lets the
+// unowned waiter run first.
 //
 // The window is held open, not raced for: the closeHandoff hook keeps the
 // closer, which has just handed off the turn, from going on until the waiter
@@ -34,6 +39,13 @@ func TestScopeCloseCancelsASignalledWaiterBeforeItRuns(t *testing.T) {
 			}
 			return Invoke(fc, closer.Value.Join())
 		}},
+		{"foreign closer (layer shutdown shape)", func(fc *FiberContext, owned func(*FiberContext) Exit[Unit]) Exit[Unit] {
+			base := withoutSchedulerContinuation(context.WithoutCancel(fc.ctx))
+			owner := newScopeWithDriver(base, fc.scope, fc.timerDriver())
+			node := &FiberContext{ctx: owner.ctx, scope: owner, driver: owner.driver, turn: fc.turn, continuation: fc.continuation}
+			out := owned(node)
+			return withCleanup(out, owner.closeWithContext(fc, false))
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			scheduler := NewTestScheduler()
@@ -52,6 +64,7 @@ func TestScopeCloseCancelsASignalledWaiterBeforeItRuns(t *testing.T) {
 					case <-reported:
 					case <-finished:
 					case <-time.After(3 * time.Second):
+						t.Errorf("close handoff timed out: the waiter neither reported nor finished")
 					}
 				},
 			}
