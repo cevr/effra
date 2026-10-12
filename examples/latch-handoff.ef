@@ -1,10 +1,10 @@
-// Latch handoff, on both targets.
+// Latch handoff under the serialized test scheduler, on both targets.
 //
 // Sync.signal completes the latch and makes every parked waiter runnable,
 // then returns; the signaller keeps its turn. Each waiter resumes later, on
 // its own turn, never inline inside the signaller's turn. So:
-//   - interrupting the signaller after its signal returns cannot reach or
-//     undo the signal, and cannot affect a waiter;
+//   - interrupting the signaller after its signal returns cannot undo the
+//     signal, and cannot affect a waiter it does not own;
 //   - a signalled waiter is runnable until it runs (quiescence waits for it);
 //   - interrupting a waiter after it was signalled but before it ran
 //     interrupts it; the latch stays signalled for everyone else.
@@ -33,12 +33,23 @@ effect fn test_interrupting_the_signaller_after_signal() -> void raises { Assert
     run Assert.equalText(run signaller.join(), "signalled")
 }
 
-// Awaiting a signalled latch returns at once and keeps the turn.
-effect fn test_signal_before_wait() -> void raises { AssertionFailed } uses { Assert, Sync } {
+// Awaiting a signalled latch returns at once and keeps the turn. A competitor
+// is forked first and is runnable during the await. Had the await given up
+// the turn, the competitor would have run and signalled `other`; instead the
+// test interrupts it before its first turn, so it never runs and the probe on
+// `other` times out. A later waiter on the signalled latch passes at once.
+effect fn test_signal_before_wait() -> void raises { AssertionFailed, Timeout } uses { Assert, Clock, Scheduler, Sync } {
     let latch = run Sync.latch()
+    let other = run Sync.latch()
     run Sync.signal(latch)
+    let competitor = fork signalAndFinish(other)
     run Sync.await(latch)
+    run competitor.interrupt()
+    let probe = fork ready(other).timeout(10)
     let waiter = fork ready(latch)
+    run Scheduler.awaitRegistration()
+    run Scheduler.advance(10)
+    run Assert.equalText(run probe.join().catch<Timeout>("still pending"), "still pending")
     run Assert.equalText(run waiter.join(), "reached")
 }
 

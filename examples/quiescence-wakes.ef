@@ -125,9 +125,11 @@ effect fn test_barrier_after_nested_resumption() -> void raises { AssertionFaile
 
 // Interrupting a fiber parked in the barrier is an ordinary interruption,
 // never a defect. The waiter signals that it is entering the barrier and,
-// keeping its turn, parks there before the test resumes, so the interrupt
-// reaches a parked barrier waiter on both targets. The case asserts only
-// that the interrupt succeeds.
+// keeping its turn, parks there before the test resumes. The test also joins
+// an immediate fork before the interrupt, so the case reaches a parked
+// barrier waiter on both targets even without that handoff order
+// (latch-handoff.ef pins the order). The case asserts only that the
+// interrupt succeeds.
 
 effect fn enterBarrier(entered: Latch) -> string uses { Scheduler, Sync } {
     run Sync.signal(entered)
@@ -139,5 +141,7 @@ effect fn test_interrupting_a_barrier_waiter() -> void uses { Scheduler, Sync } 
     let entered = run Sync.latch()
     let waiter = fork enterBarrier(entered)
     run Sync.await(entered)
+    let turn = fork immediate()
+    run turn.join()
     run waiter.interrupt()
 }
