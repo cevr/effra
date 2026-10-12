@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"effra.local/prototype/internal/testport"
 )
 
 var testLimits = HTTPLimits{MaxBodyBytes: 4, ReadHeaderTimeout: time.Second, ReadBodyTimeout: 200 * time.Millisecond, IdleTimeout: time.Second, MaxActive: 4}
@@ -367,11 +369,14 @@ func TestHTTPTransportCancelsHandlerOnClientDisconnect(t *testing.T) {
 func TestHTTPTransportShutdownCancelsActiveWorkAndReports503AfterCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// The port stays reserved for the closing rebind, which therefore fails
+	// only if the server did not release its listener.
+	address := testport.Reserve(t)
 	bound := make(chan string, 1)
 	started, cleanupStarted, finish := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	done := make(chan Exit[Unit], 1)
 	go func() {
-		done <- RunContext(ctx, ServeHTTPRequests("127.0.0.1:0", testLimits, func(HTTPRequest) Effect[HTTPResponse] {
+		done <- RunContext(ctx, ServeHTTPRequests(address, testLimits, func(HTTPRequest) Effect[HTTPResponse] {
 			return func(fc *FiberContext) Exit[HTTPResponse] {
 				resource := Invoke(fc, AcquireRelease("request", func(context.Context) (Unit, error) { return Unit{}, nil }, func(Unit, context.Context) error {
 					close(cleanupStarted)
@@ -387,7 +392,9 @@ func TestHTTPTransportShutdownCancelsActiveWorkAndReports503AfterCleanup(t *test
 			}
 		}, func(address string) { bound <- address }))
 	}()
-	address := wait(t, bound)
+	if listening := wait(t, bound); listening != address {
+		t.Fatalf("listening on %s, want %s", listening, address)
+	}
 	received := make(chan *http.Response, 1)
 	go func() {
 		response, body := exchange(t, address, "GET /work HTTP/1.1\r\nHost: x\r\n\r\n")
@@ -429,11 +436,14 @@ func TestHTTPTransportShutdownAbortsAStalledResponseAfterCleanup(t *testing.T) {
 	limits.IdleTimeout = 200 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// The port stays reserved for the closing rebind, which therefore fails
+	// only if the server did not release its listener.
+	address := testport.Reserve(t)
 	bound, cleaned := make(chan string, 1), make(chan struct{})
 	done := make(chan Exit[Unit], 1)
 	large := bytes.Repeat([]byte("s"), 32<<20)
 	go func() {
-		done <- RunContext(ctx, ServeHTTPRequests("127.0.0.1:0", limits, func(HTTPRequest) Effect[HTTPResponse] {
+		done <- RunContext(ctx, ServeHTTPRequests(address, limits, func(HTTPRequest) Effect[HTTPResponse] {
 			return func(fc *FiberContext) Exit[HTTPResponse] {
 				resource := Invoke(fc, AcquireRelease("request", func(context.Context) (Unit, error) { return Unit{}, nil }, func(Unit, context.Context) error { close(cleaned); return nil }))
 				if resource.IsFailure() {
@@ -443,7 +453,9 @@ func TestHTTPTransportShutdownAbortsAStalledResponseAfterCleanup(t *testing.T) {
 			}
 		}, func(address string) { bound <- address }))
 	}()
-	address := wait(t, bound)
+	if listening := wait(t, bound); listening != address {
+		t.Fatalf("listening on %s, want %s", listening, address)
+	}
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
 		t.Fatal(err)

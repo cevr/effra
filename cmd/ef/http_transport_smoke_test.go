@@ -532,7 +532,13 @@ func httpWireVectorsRun(t *testing.T, vectors httpWireVectors, dir string, comma
 		t.Fatalf("%s: exit %d stderr %q, want %d and %q", c.Name, exit, stderr, c.ExitCode, c.Stderr)
 	}
 	// Client connections may linger in TIME_WAIT; a live listener would still
-	// refuse this bind. Go listeners set SO_REUSEADDR.
+	// refuse this bind. Go listeners set SO_REUSEADDR. The server's side of
+	// the held malformed connection, which this test keeps open, outlives
+	// the server in FIN_WAIT and holds the port, so the kernel assigns it to
+	// no other socket before this bind (#112).
+	if held == nil {
+		t.Fatalf("%s: the release check needs the malformed-held-open case, whose connection holds the port until the check", c.Name)
+	}
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		t.Fatalf("%s: server still holds %s after shutdown: %v", c.Name, address, err)
