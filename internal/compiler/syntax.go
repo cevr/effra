@@ -763,7 +763,7 @@ func parseSyntax(source string) (program *Program, tokens []token, comments []Co
 				} else if p.accept("(") {
 					variant.Parenthesized = true
 					for !p.accept(")") {
-						field := p.name()
+						field := p.label()
 						p.expect(":")
 						typ, typeSpan := p.typeAnnotation()
 						variant.Fields = append(variant.Fields, Field{Name: field.text, Type: typ, sourceType: p.types[typ], Span: field.span, TypeSpan: typeSpan, Annotation: p.lastType})
@@ -1562,6 +1562,7 @@ func (p *parser) expr(min int) *Expr {
 				body = p.block()
 			} else {
 				value := p.expr(0)
+				p.decisionArmSeparatorHint(value)
 				body = &Block{Statements: []*Statement{{Kind: "expr", Value: value, Span: value.Span, Extent: value.Extent}}, Extent: value.Extent}
 			}
 			e.Arms = append(e.Arms, &MatchArm{Patterns: cells, Body: body, Span: pattern.Span, Extent: p.extent(pattern.Span)})
@@ -1665,7 +1666,7 @@ func (p *parser) expr(min int) *Expr {
 			p.noConstruct = 0
 			for !p.accept(")") {
 				if p.peek().kind == "name" && p.at+1 < len(p.tokens) && p.tokens[p.at+1].text == ":" {
-					field := p.name()
+					field := p.label()
 					p.expect(":")
 					value := p.expr(0)
 					call.Fields = append(call.Fields, FieldValue{Name: field.text, Value: value, Span: field.span, Label: field.span})

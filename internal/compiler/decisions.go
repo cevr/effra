@@ -43,15 +43,18 @@ func reservedDecisionWordMessage(word string) string {
 }
 
 // decision parses a decision form after its word. enter and stay always take
-// an operand. done takes one only when an expression starts on the same line,
-// so a bare `done` can end a match arm or a block.
+// an operand. done takes one exactly when the next token is on the same line
+// and can start an expression; an arm separator (`,`, a newline, `}`) or
+// `else` ends a bare `done`. This is a grammar rule, not a lookahead: in
+// `E.Ping => done E.Pong => stay s` the operand is `E.Pong`, and the match
+// refuses the arrow that follows (decisionArmSeparatorHint).
 func (p *parser) decision(word token) *Expr {
 	e := &Expr{Kind: "decision", Name: word.text, Span: word.span}
 	field := decisionWords[word.text]
 	if field == "" {
 		return e
 	}
-	if word.text == "done" && !p.decisionOperandAhead(word) {
+	if word.text == "done" && !p.expressionStartsOnLine(word.span.Line) {
 		return e
 	}
 	operand := p.expr(prefixPrecedence)
@@ -59,77 +62,29 @@ func (p *parser) decision(word token) *Expr {
 	return e
 }
 
-func (p *parser) decisionOperandAhead(word token) bool {
+// expressionStartsOnLine reports that the next token is on the given line and
+// is one that p.expr accepts as the first token of an expression.
+func (p *parser) expressionStartsOnLine(line int) bool {
 	next := p.peek()
-	if next.span.Line != word.span.Line {
+	if next.span.Line != line {
 		return false
 	}
 	switch next.kind {
 	case "integer", "string":
+		return true
 	case "name":
-		if next.text == "else" {
-			return false
-		}
-	default:
-		if next.text != "(" && next.text != "-" {
-			return false
-		}
+		return next.text != "else"
 	}
-	return !p.matchArmAhead(word.span.Line)
+	return next.text == "(" || next.text == "-"
 }
 
-// matchArmAhead reports that the tokens after a bare `done` are the next
-// match arm on the same line (`E.Ping => done E.Pong => stay s`): a pattern
-// cell followed by `=>`, not an operand. A pattern cell is one or more
-// patterns joined by `|` or `,`; each is a dotted name with an optional
-// braced payload, a decision word with an optional binder, or a literal.
-func (p *parser) matchArmAhead(line int) bool {
-	i := p.at
-	at := func(text string) bool {
-		return i < len(p.tokens) && p.tokens[i].span.Line == line && p.tokens[i].text == text
+// decisionArmSeparatorHint refuses an arm body followed directly by `=>`
+// when that body is a `done` that took the next arm's pattern as its output.
+func (p *parser) decisionArmSeparatorHint(body *Expr) {
+	if body == nil || body.Kind != "decision" || body.Name != "done" || len(body.Fields) == 0 || p.peek().text != "=>" {
+		return
 	}
-	for {
-		if i >= len(p.tokens) || p.tokens[i].span.Line != line {
-			return false
-		}
-		first := p.tokens[i]
-		switch first.kind {
-		case "integer", "string":
-			i++
-		case "name":
-			i++
-			if isDecisionWord(first.text) {
-				if i < len(p.tokens) && p.tokens[i].span.Line == line && p.tokens[i].kind == "name" && !isDecisionWord(p.tokens[i].text) {
-					i++
-				}
-				break
-			}
-			for at(".") && i+1 < len(p.tokens) && p.tokens[i+1].kind == "name" {
-				i += 2
-			}
-			if at("{") {
-				for depth := 0; i < len(p.tokens); i++ {
-					if p.tokens[i].text == "{" {
-						depth++
-					} else if p.tokens[i].text == "}" {
-						if depth--; depth == 0 {
-							i++
-							break
-						}
-					}
-				}
-			}
-		default:
-			return false
-		}
-		if at("=>") {
-			return true
-		}
-		if !at("|") && !at(",") {
-			return false
-		}
-		i++
-	}
+	p.fail(p.peek(), "`done` took the expression after it on the same line as its output, so this `=>` has no pattern; end a bare `done` with `,` or start the next arm on a new line")
 }
 
 // decisionPattern parses `enter next`, `stay next`, `ignore`, `reject`,

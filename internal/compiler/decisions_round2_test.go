@@ -125,11 +125,17 @@ func TestDecisionWordsAreExplicitFieldLabels(t *testing.T) {
 
 record Todo { title: string  done: bool  enter: i64 }
 enum Step { Finished { done: bool } }
+enum Mark { Finished(done: bool, enter: i64) }
 
 derive todoJson = Json.codec<Todo>(maxBodyBytes: 256, maxDepth: 4)
 
 fn flip(t: Todo) -> Todo {
     Todo { title: t.title, done: if t.done { false } else { true }, enter: t.enter - 1 }
+}
+fn marked(m: Mark) -> string {
+    match m {
+        Mark.Finished { done: d, enter: e } => if d { "marked " } else { "open " }
+    }
 }
 fn finished(s: Step) -> bool {
     match s {
@@ -140,9 +146,11 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
     let todo = run todoJson.decode("{\"title\":\"a\",\"done\":true,\"enter\":\"3\"}")
     let wire = run todoJson.encode(flip(todo))
     let step = Step.Finished { done: todo.done }
-    wire + "|" + (if finished(step) { "done" } else { "open" })
+    let named = Todo(title: "b", done: false, enter: 0)
+    let mark = Mark.Finished(done: named.done, enter: named.enter)
+    wire + "|" + (if finished(step) { "done" } else { "open" }) + "|" + marked(mark) + named.title
 }`
-	runDecisionOnBothTargets(t, source, `{"title":"a","done":false,"enter":"2"}|done`+"\n")
+	runDecisionOnBothTargets(t, source, `{"title":"a","done":false,"enter":"2"}|done|open b`+"\n")
 
 	for _, c := range []struct{ name, source, message string }{
 		{"constructor shorthand", "record Todo { done: bool }\nfn f(x: bool) -> Todo { Todo { done } }\n", "done is a decision word, so it cannot be shorthand for a local; write `done: value`"},
@@ -162,26 +170,73 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
 	}
 }
 
-// m1: a bare `done` before another arm on the same line takes no operand,
-// while a same-line operand that holds its own arrows inside braces still
-// belongs to `done`.
-func TestDecisionBareDoneBeforeASameLineArm(t *testing.T) {
-	source := decisionLabelSource(`fn step(state: S, event: E) -> decision<S, void> {
-    match event { E.Ping => done E.Pong => stay state }
+// m1/N1: `done` takes an operand exactly when the next token on its line can
+// start an expression. An arm separator (`,`, a newline, `}`) ends a bare
+// `done`; comma-separated single-line arms keep their operands, including
+// in a product match; a nested match and a multi-line operand belong to
+// `done`. Formatting the program is a fixed point that runs the same.
+func TestDecisionDoneOperandFollowsTheGrammarRule(t *testing.T) {
+	source := decisionLabelSource(`fn bare(state: S, event: E) -> decision<S, void> {
+    match event { E.Ping => done, E.Pong => stay state }
 }
-fn other(state: S, event: E) -> decision<S, i64> {
-    match event { E.Ping => done match state { S.Idle => 1, S.Active => 2 } E.Pong => stay state }
+fn unit(state: S, event: E) -> decision<S, void> {
+    match event { E.Ping => done void, E.Pong => stay state }
 }
-fn count(d: decision<S, i64>) -> i64 {
+fn valued(state: S, event: E) -> decision<S, i64> {
+    let n = 1
+    match event { E.Ping => done n, E.Pong => stay state }
+}
+fn literal(state: S, event: E) -> decision<S, i64> {
+    match event { E.Ping => done 1, E.Pong => stay state }
+}
+fn product(state: S, event: E) -> decision<S, i64> {
+    match state, event { S.Idle, E.Ping => done 1, S.Idle, E.Pong => stay state, S.Active, E.Ping | E.Pong => done 2 }
+}
+fn nested(state: S, event: E) -> decision<S, i64> {
+    match event { E.Ping => done match state { S.Idle => 1, S.Active => 2 }, E.Pong => stay state }
+}
+fn multiline(state: S, event: E) -> decision<S, i64> {
+    match event {
+        E.Ping => done (1 +
+            2)
+        E.Pong => stay state
+    }
+}
+fn outputIs(d: decision<S, i64>, want: i64) -> string {
     match d {
-        done n => n
-        enter _ | stay _ | ignore | reject => 0
+        done n => if n == want { "y" } else { "n" }
+        enter _ | stay _ | ignore | reject => "-"
     }
 }
 `) + `effect fn main() -> string {
-    label(step(S.Idle {}, E.Ping {})) + ";" + label(step(S.Idle {}, E.Pong {})) + ";" + (if count(other(S.Idle {}, E.Ping {})) == 1 { "one" } else { "other" })
+    let idle = S.Idle {}
+    label(bare(idle, E.Ping {})) + ";" + label(bare(idle, E.Pong {})) + ";" + label(unit(idle, E.Ping {})) + ";" + outputIs(valued(idle, E.Ping {}), 1) + outputIs(literal(idle, E.Ping {}), 1) + outputIs(product(idle, E.Ping {}), 1) + outputIs(product(S.Active { n: 1 }, E.Pong {}), 2) + outputIs(nested(idle, E.Ping {}), 1) + outputIs(multiline(idle, E.Ping {}), 3)
 }`
-	runDecisionOnBothTargets(t, source, "done;stay idle;one\n")
+	const want = "done;stay idle;done;yyyyyy\n"
+	runDecisionOnBothTargets(t, source, want)
+
+	formatted, err := FormatSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := FormatSource(formatted.Text)
+	if err != nil || again.Text != formatted.Text {
+		t.Fatalf("formatting is not a fixed point: %v\n%s", err, again.Text)
+	}
+	for _, kept := range []string{"E.Ping => done,\n", "E.Ping => done n,\n", "E.Ping => done 1,\n", "E.Ping => done void,\n", "S.Idle, E.Ping => done 1,\n"} {
+		if !strings.Contains(formatted.Text, kept) {
+			t.Fatalf("formatted program lacks %q:\n%s", kept, formatted.Text)
+		}
+	}
+	runDecisionOnBothTargets(t, formatted.Text, want)
+
+	// Without a separator, the next arm's pattern is the operand and the arrow
+	// after it is refused with the repair.
+	refused := decisionPrelude + `fn step(state: S, event: E) -> decision<S, void> {
+    match event { E.Ping => done E.Pong => stay state }
+}
+`
+	requireDecisionRefusalOnBothTargets(t, refused, "EF002", "end a bare `done` with `,` or start the next arm on a new line")
 }
 
 // o5: formatter-16 pins decision patterns, bare `done` and a multi-line
