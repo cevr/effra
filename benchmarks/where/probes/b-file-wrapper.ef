@@ -1,0 +1,20 @@
+// expect: accepted (b) keyed by a record wrapping a File, with owner methods (review-1 probe p1)
+fn keyed<K: type>(key: K) -> i64 where K.hash: fn(K) -> i64, K.equals: fn(K, K) -> bool {
+    if K.equals(key, key) { K.hash(key) } else { 0 }
+}
+record FileKey {
+    file: File;
+    n: i64
+}
+fn (k: FileKey) hash() -> i64 {
+    k.n
+}
+fn (a: FileKey) equals(b: FileKey) -> bool {
+    a.n == b.n
+}
+fn fileKey(file: File) -> i64 {
+    keyed(FileKey { file: file; n: 1 })
+}
+effect fn main() -> i64 {
+    0
+}
