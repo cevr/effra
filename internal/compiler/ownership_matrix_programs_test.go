@@ -902,12 +902,12 @@ effect fn f1() -> string raises { WithFile, IoError } {
     run rejected(file)
 }
 effect fn read(failure: WithFile) -> string raises { IoError } { run readFile(failure.file).catch<IoError>("closed") }
-fn ignore(failure: WithFile) -> string { "fixture-ok" }
+fn discard(failure: WithFile) -> string { "fixture-ok" }
 `
 	var out []ownershipMatrixProgram
 	for _, boundary := range []string{"run", "timeout", "fork", "scope", "provision"} {
 		for _, pos := range ownershipMatrixPositions(boundary) {
-			for _, h := range []string{"read", "ignore"} {
+			for _, h := range []string{"read", "discard"} {
 				rec := ".recover<WithFile>(" + h + ")"
 				var pre []string
 				extra, tail := "", ""
@@ -1056,23 +1056,23 @@ effect fn job() -> string raises { WithFile, IoError } {
     run rejected(file)
 }
 effect fn read(failure: WithFile) -> string raises { IoError } { run readFile(failure.file).catch<IoError>("closed") }
-fn ignore(failure: WithFile) -> string { "fixture-ok" }
+fn discard(failure: WithFile) -> string { "fixture-ok" }
 effect fn readV(failure: WithFile) -> void raises { IoError } {
     let text = run readFile(failure.file).catch<IoError>("closed")
     run Console.log(text).provide<Console>(Stdout)
 }
-fn ignoreV(failure: WithFile) -> void { void }
+fn discardV(failure: WithFile) -> void { void }
 `
-		e, handlers, jrow = "WithFile", []string{"read", "ignore"}, "IoError"
+		e, handlers, jrow = "WithFile", []string{"read", "discard"}, "IoError"
 	} else {
 		head = `error Boom { code: i64 }
 effect fn job() -> string raises { Boom } {
     fail Boom { code: 7 }
 }
-fn ignore(failure: Boom) -> string { "fixture-ok" }
-fn ignoreV(failure: Boom) -> void { void }
+fn discard(failure: Boom) -> string { "fixture-ok" }
+fn discardV(failure: Boom) -> void { void }
 `
-		e, handlers, jrow = "Boom", []string{"ignore"}, ""
+		e, handlers, jrow = "Boom", []string{"discard"}, ""
 	}
 	var out []ownershipMatrixProgram
 	for _, observe := range []string{"join", "interrupt", "none"} {
@@ -1153,11 +1153,11 @@ func ownershipMatrixFactoryFamily(fix string) []ownershipMatrixProgram {
     fail WithFile { file: file }
 }
 effect fn read(failure: WithFile) -> string raises { IoError } { run readFile(failure.file).catch<IoError>("closed") }
-fn ignore(failure: WithFile) -> string { "fixture-ok" }
+fn discard(failure: WithFile) -> string { "fixture-ok" }
 `
 	var out []ownershipMatrixProgram
 	for _, form := range []string{"inside", "param"} {
-		for _, h := range []string{"read", "ignore"} {
+		for _, h := range []string{"read", "discard"} {
 			var fac string
 			if form == "inside" {
 				fac = "effect fn w2() -> Effect<string, { IoError }> raises { IoError } {\n" +

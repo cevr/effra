@@ -330,7 +330,7 @@ effect fn work() -> void raises { Rejected } {
         reason: "x"
     }
 }
-fn ignore(failure: Rejected) -> void {
+fn discard(failure: Rejected) -> void {
     void
 }
 effect fn guard(handler: fn(Rejected) -> void) -> void {
@@ -338,11 +338,11 @@ effect fn guard(handler: fn(Rejected) -> void) -> void {
 }
 effect fn main() -> void {
     let policy = Policy {
-        handler: ignore
+        handler: discard
     }
     run work().recover<Rejected>(policy.handler)
-    run guard(ignore)
-    run work().recover<Rejected>(ignore)
+    run guard(discard)
+    run work().recover<Rejected>(discard)
     run Console.log("void handled").provide<Console>(Stdout)
 }
 `
@@ -403,7 +403,7 @@ func TestRecoveryPayloadHandlesAreOwnedByTheRunner(t *testing.T) {
 	}
 	path := strconv.Quote(fixture)
 	prefix := `error WithFile { file: File }
-effect fn reject(file: File) -> File raises { WithFile } {
+effect fn refuse(file: File) -> File raises { WithFile } {
     fail WithFile { file: file }
 }
 `
@@ -416,7 +416,7 @@ effect fn reject(file: File) -> File raises { WithFile } {
 				declarations := []string{handler, `effect fn escape() -> File raises { IoError } {
     scope {
         let file = run Files.openRead(` + path + `).provide<Files>(LiveFiles)
-        run reject(file).recover<WithFile>(retrieve)
+        run refuse(file).recover<WithFile>(retrieve)
     }
 }`, `effect fn main() -> void { void }`}
 				if reverse {
@@ -431,7 +431,7 @@ effect fn reject(file: File) -> File raises { WithFile } {
 	}
 	safe := prefix + `fn retrieve(failure: WithFile) -> File { failure.file }
 effect fn read(file: File) -> string raises { IoError } {
-    let recovered = run reject(file).recover<WithFile>(retrieve)
+    let recovered = run refuse(file).recover<WithFile>(retrieve)
     run Files.readText(recovered).provide<Files>(LiveFiles)
 }
 effect fn main() -> void raises { IoError } {

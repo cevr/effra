@@ -461,12 +461,12 @@ error Nope { code: i64 }
 effect fn job() -> string raises { Boom } {
     fail Boom { code: 7 }
 }
-effect fn reject() -> void raises { Nope } {
+effect fn refuse() -> void raises { Nope } {
     fail Nope { code: 2 }
 }
 effect fn sequel() -> string raises { Boom, Nope } uses { Scheduler } {
     let a = fork job()
-    run reject()
+    run refuse()
     run a.join()
 }
 effect fn main() -> void { void }`
