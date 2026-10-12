@@ -1,0 +1,215 @@
+== versions
+tsc Version 6.0.3
+node v24.11.1
+effect 4.0.1
+
+==== a-dict
+== tsc attacks.mts (2 directives)
+tsc exit=0
+== tsc consumer.mts (0 directives)
+tsc exit=0
+== tsc negatives.mts (7 directives)
+tsc exit=0
+== node consumer.mts
+abc 123 ada2,bob,none cba
+node exit=0
+== node attacks.mts
+A1 method bivariance: threw TypeError: Cannot mix BigInt and other types, use explicit conversions
+A1b key bivariance: returned UserId.org is undefined
+A2 augmentation: threw TypeError: Cannot read properties of undefined (reading 'compare')
+A3 never rest: threw TypeError: Cannot read properties of undefined (reading 'compare')
+A4 never filler: threw TypeError: Cannot read properties of undefined (reading 'compare')
+A4 never filler map: threw TypeError: Cannot read properties of undefined (reading 'hash')
+node exit=0
+== each directive opened
+attacks.mts:17  A1 bivariant dictionary slot (templates are invariant)
+    TS2322 Type '<T>(xs: Three<T>, order: Order<T>) => Three<T>' is not assignable to type '(xs: Three<User | UserId>, order: Order<User>) => Three<User | UserId>'.   Types of parameters 'order' and 'order' are incompatible.     Type 'Order<User>' is not assignable to ty  [The expected type comes from property 'sortMixed' which is declared here on type 'SortLib']
+attacks.mts:28  A2 augmentation does not supply a dictionary
+    TS2554 Expected 2 arguments, but got 1.  [An argument for 'order' was not provided.]
+directives=2 without a diagnostic=0
+negatives.mts:7  N1 missing dictionary
+    TS2554 Expected 2 arguments, but got 1.  [An argument for 'order' was not provided.]
+negatives.mts:9  N2 a dictionary for a different type
+    TS2345 Argument of type 'Order<bigint>' is not assignable to parameter of type 'Order<User>'.   Types of property 'compare' are incompatible.     Type '(self: bigint, other: bigint) => bigint' is not assignable to type '(self: User, other: User) => bigint'.       Typ
+negatives.mts:11  N3 a hashing dictionary where an order is required
+    TS2345 Argument of type 'Hash<UserId>' is not assignable to parameter of type 'Order<UserId>'.   Type 'Hash<UserId>' is missing the following properties from type 'Order<UserId>': compare, [__ef_brand_template_Order]
+negatives.mts:13  N4 elements of two record types with one type's dictionary
+    TS2345 Argument of type 'Order<User>' is not assignable to parameter of type 'Order<User | UserId>'.   Types of property 'compare' are incompatible.     Type '(self: User, other: User) => bigint' is not assignable to type '(self: User | UserId, other: User | UserId) 
+negatives.mts:15  N5 a forged dictionary (the template brand is unexported)
+    TS2741 Property '[__ef_brand_template_Order]' is missing in type '{ compare: (self: User, other: User) => bigint; }' but required in type 'Order<User>'.  ['[__ef_brand_template_Order]' is declared here.]
+negatives.mts:18  N6 a key of another type
+    TS2345 Argument of type 'User' is not assignable to parameter of type 'UserId'.   Type 'User' is missing the following properties from type 'UserId': org, n, [__ef_brand_UserId]
+negatives.mts:20  N7 a float ordering where the dictionary requires i64 (bigint)
+    TS2345 Argument of type '(self: number, other: number) => number' is not assignable to parameter of type '(self: number, other: number) => bigint'.   Type 'number' is not assignable to type 'bigint'.
+directives=7 without a diagnostic=0
+== any
+./attacks.mts: any keywords=0, word matches=1
+./consumer.mts: any keywords=0, word matches=1
+./lib.d.mts: any keywords=0, word matches=0
+./lib.mjs: any keywords=0, word matches=0
+./negatives.mts: any keywords=0, word matches=1
+
+==== b-witness
+== tsc attacks.mts (2 directives)
+tsc exit=0
+== tsc consumer.mts (0 directives)
+tsc exit=0
+== tsc negatives.mts (8 directives)
+tsc exit=0
+== node consumer.mts
+abc 123 ada2,bob,none abc
+node exit=0
+== node attacks.mts
+A1 method bivariance: threw TypeError: Cannot mix BigInt and other types, use explicit conversions
+A1b key bivariance: returned UserId.org is undefined
+A2 augmentation: threw TypeError: compare is not a function
+A3 never rest: threw TypeError: compare is not a function
+A4 never filler: threw TypeError: compare is not a function
+A4 never filler map: threw TypeError: map.hash is not a function
+A5 shorter witness: returned cab
+node exit=0
+== each directive opened
+attacks.mts:19  A1 bivariant witness slot (Three<T> is invariant)
+    TS2322 Type '<T>(xs: Three<T>, compare: (self: T, other: T) => bigint) => Three<T>' is not assignable to type '(xs: Three<User | UserId>, compare: (self: User, other: User) => bigint) => Three<User | UserId>'.   Types of parameters 'xs' and 'xs' are incompatible.      [The expected type comes from property 'sortMixed' which is declared here on type 'SortLib']
+attacks.mts:35  A2 augmentation does not supply a witness argument
+    TS2554 Expected 2 arguments, but got 1.  [An argument for 'compare' was not provided.]
+directives=2 without a diagnostic=0
+negatives.mts:8  N1 missing witness
+    TS2554 Expected 2 arguments, but got 1.  [An argument for 'compare' was not provided.]
+negatives.mts:10  N2 a witness for a different type
+    TS2345 Argument of type 'Three<User>' is not assignable to parameter of type 'Three<UserId>'.   Types of property 'a' are incompatible.     Type 'User' is missing the following properties from type 'UserId': org, n, [__ef_brand_UserId]
+negatives.mts:12  N3 a witness of the wrong shape (equals returns bool, compare returns i64)
+    TS2345 Argument of type '(self: UserId, other: UserId) => boolean' is not assignable to parameter of type '(self: UserId, other: UserId) => bigint'.   Type 'boolean' is not assignable to type 'bigint'.
+negatives.mts:14  N4 elements of two record types with one type's method
+    TS2345 Argument of type 'Three<User | UserId>' is not assignable to parameter of type 'Three<User>'.   Types of property 'a' are incompatible.     Type 'User | UserId' is not assignable to type 'User'.       Type 'UserId' is missing the following properties from type
+negatives.mts:16  N5 a forged record (the brand is an unexported unique symbol)
+    TS2741 Property '[__ef_brand_User]' is missing in type '{ name: string; age: bigint; }' but required in type 'User'.  ['[__ef_brand_User]' is declared here.]
+negatives.mts:19  N6 a key of another type
+    TS2345 Argument of type 'User' is not assignable to parameter of type 'UserId'.   Type 'User' is missing the following properties from type 'UserId': org, n, [__ef_brand_UserId]
+negatives.mts:21  N7 a map whose witnesses disagree on the key type
+    TS2345 Argument of type '(self: bigint, other: bigint) => boolean' is not assignable to parameter of type '(self: UserId, other: UserId) => boolean'.   Types of parameters 'self' and 'self' are incompatible.     Type 'UserId' is not assignable to type 'bigint'.
+negatives.mts:23  N8 a float ordering where the witness requires i64 (bigint)
+    TS2345 Argument of type '(self: number, other: number) => number' is not assignable to parameter of type '(self: number, other: number) => bigint'.   Type 'number' is not assignable to type 'bigint'.
+directives=8 without a diagnostic=0
+== any
+./attacks.mts: any keywords=0, word matches=1
+./consumer.mts: any keywords=0, word matches=1
+./lib.d.mts: any keywords=0, word matches=0
+./lib.mjs: any keywords=0, word matches=0
+./negatives.mts: any keywords=0, word matches=0
+
+==== b-struct
+== tsc attacks.mts (0 directives)
+tsc exit=0
+== tsc consumer.mts (0 directives)
+tsc exit=0
+== tsc negatives.mts (5 directives)
+tsc exit=0
+== node consumer.mts
+abc ada2,bob,none
+node exit=0
+== node attacks.mts
+A1 method bivariance: threw TypeError: y.compare is not a function
+A1b constraint bivariance: threw TypeError: Cannot convert undefined to a BigInt
+A2 augmentation sort: threw TypeError: y.compare is not a function
+A2 augmentation fn key: threw TypeError: key.hash is not a function
+A2 augmentation bigint: threw TypeError: y.compare is not a function
+A3 never rest: threw TypeError: y.compare is not a function
+A4 never filler: threw TypeError: Cannot read properties of undefined (reading 'compare')
+A4 never filler key: threw TypeError: Cannot read properties of undefined (reading 'hash')
+node exit=0
+== each directive opened
+negatives.mts:6  N1 a type without the method
+    TS2345 Argument of type 'Three<UserId>' is not assignable to parameter of type 'Three<Comparable<UserId>>'.   Types of property 'a' are incompatible.     Property 'compare' is missing in type 'UserId' but required in type 'Comparable<UserId>'.  ['compare' is declared here.]
+negatives.mts:8  N2 a predeclared type (bigint has no compare method)
+    TS2345 Argument of type 'Three<bigint>' is not assignable to parameter of type 'Three<Comparable<bigint>>'.   Types of property 'a' are incompatible.     Type 'bigint' is not assignable to type 'Comparable<bigint>'.
+negatives.mts:10  N3 a callable element
+    TS2345 Argument of type 'Three<() => number>' is not assignable to parameter of type 'Three<Comparable<() => number>>'.   Types of property 'a' are incompatible.     Type '() => number' is not assignable to type 'Comparable<() => number>'.
+negatives.mts:12  N4 a function-keyed map
+    TS2322 Type 'HashMap<Hashable<() => void>, string>' is not assignable to type 'HashMap<() => void, string>'.   Type at position 0 in source is not compatible with type at position 0 in target.     The types of '[__ef_brand_template_HashMap]' are incompatible between 
+negatives.mts:15  N5 a key of another type
+    TS2345 Argument of type 'User' is not assignable to parameter of type 'UserId'.   Type 'User' is missing the following properties from type 'UserId': org, n, hash, equals, [__ef_brand_UserId]
+directives=5 without a diagnostic=0
+== any
+./attacks.mts: any keywords=0, word matches=1
+./consumer.mts: any keywords=0, word matches=1
+./lib.d.mts: any keywords=0, word matches=0
+./lib.mjs: any keywords=0, word matches=0
+./negatives.mts: any keywords=0, word matches=0
+
+==== c-comparable
+== tsc attacks-augment.mts (3 directives)
+tsc exit=0
+== tsc attacks.mts (2 directives)
+tsc exit=0
+== tsc consumer.mts (0 directives)
+tsc exit=0
+== tsc negatives.mts (7 directives)
+tsc exit=0
+== node consumer.mts
+123 abc abc ada2,bob,none yes native Map record key: miss
+node exit=0
+== node attacks-augment.mts
+A2 augmentation record key: returned v
+A2 callable key: threw TypeError: runtime error: hash of unhashable type function
+node exit=0
+== node attacks.mts
+A1a fn-keyed factory: returned 0
+A1b key bivariance fn key: threw TypeError: runtime error: hash of unhashable type function
+A1b key bivariance file key: threw TypeError: runtime error: hash of unhashable type symbol
+A1c record sort slot: returned c
+A3 never rest: threw TypeError: runtime error: hash of unhashable type undefined
+A4 never filler key: threw TypeError: runtime error: hash of unhashable type undefined
+NaN ordering: returned 2,NaN,1
+NaN key: returned v (Go: a NaN key is never found)
+node exit=0
+== each directive opened
+attacks-augment.mts:15  A2 every record now looks like a File handle
+    TS2322 Type 'HashMap<never, string>' is not assignable to type 'HashMap<UserId, string>'.   Type at position 0 in source is not compatible with type at position 0 in target.     The types of '[__ef_brand_template_HashMap]' are incompatible between these types.       
+    TS2345 Argument of type 'UserId' is not assignable to parameter of type 'never'.
+    TS2345 Argument of type 'UserId' is not assignable to parameter of type 'never'.
+attacks-augment.mts:17  A2 the key type collapsed to never
+    TS2345 Argument of type 'UserId' is not assignable to parameter of type 'never'.
+    TS2345 Argument of type 'UserId' is not assignable to parameter of type 'never'.
+attacks-augment.mts:20  A2 a callable key is still refused under the augmentation
+    TS2345 Argument of type '() => void' is not assignable to parameter of type 'never'.
+directives=3 without a diagnostic=0
+attacks.mts:19  A1a function-keyed factory slot
+    TS2322 Type '<K, V>() => HashMap<Key<K>, V>' is not assignable to type '() => HashMap<() => void, string>'.   Call signature return types 'HashMap<never, string>' and 'HashMap<() => void, string>' are incompatible.     Type at position 0 in source is not compatible w  [The expected type comes from property 'make' which is declared here on type 'MakeLib']
+attacks.mts:30  A1c record sort slot
+    TS2322 Type '<T extends Ordered>(xs: Three<T>) => Three<T>' is not assignable to type '(xs: Three<UserId>) => Three<UserId>'.   Types of parameters 'xs' and 'xs' are incompatible.     Type 'Three<UserId>' is not assignable to type 'Three<Ordered>'.       Types of pro  [The expected type comes from property 'sortIds' which is declared here on type 'SortLib']
+directives=2 without a diagnostic=0
+negatives.mts:6  N1 a record is not Ordered
+    TS2345 Argument of type 'Three<User>' is not assignable to parameter of type 'Three<Ordered>'.   Types of property 'a' are incompatible.     Type 'User' is not assignable to type 'Ordered'.
+negatives.mts:8  N2 a function-keyed map
+    TS2345 Argument of type '() => void' is not assignable to parameter of type 'never'.
+negatives.mts:10  N3 a resource-handle key (File, #96)
+    TS2345 Argument of type 'File' is not assignable to parameter of type 'never'.
+negatives.mts:12  N4 a record with a callable field
+    TS2345 Argument of type '{ id: bigint; run: () => void; }' is not assignable to parameter of type 'never'.
+negatives.mts:15  N5 a key of another type
+    TS2345 Argument of type 'User' is not assignable to parameter of type 'UserId'.   Type 'User' is missing the following properties from type 'UserId': org, n, [__ef_brand_UserId]
+negatives.mts:17  N6 a generic caller that does not restate the constraint
+    TS2589 Type instantiation is excessively deep and possibly infinite.
+    TS2345 Argument of type 'K' is not assignable to parameter of type 'Key<Key<K>>'.
+negatives.mts:19  N7 a generic caller that forwards the check as Key<K>
+    TS2589 Type instantiation is excessively deep and possibly infinite.
+    TS2345 Argument of type 'HashMap<Key<K>, string>' is not assignable to parameter of type 'HashMap<K, string>'.   Type at position 0 in source is not compatible with type at position 0 in target.     The types of '[__ef_brand_template_HashMap]' are incompatible betwee
+directives=7 without a diagnostic=0
+== any
+./attacks-augment.mts: any keywords=0, word matches=0
+./attacks.mts: any keywords=0, word matches=1
+./consumer.mts: any keywords=0, word matches=1
+./lib.d.mts: any keywords=0, word matches=0
+./lib.mjs: any keywords=0, word matches=0
+./negatives.mts: any keywords=0, word matches=0
+
+==== baseline-effect
+== tsc consumer.mts (0 directives)
+tsc exit=0
+== node consumer.mts
+abc plain:ada Data.Class:ada fn key:f NaN:NaN,1,2 native Map A1b: UserId.org is undefined
+node exit=0
+== each directive opened
+== any
+./consumer.mts: any keywords=0, word matches=2
