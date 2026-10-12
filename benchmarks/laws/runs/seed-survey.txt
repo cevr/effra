@@ -1,0 +1,10 @@
+# ef test --target both order-broken.ef per EFFRA_LAW_SEED (proto 5f428883); cases = cases run before the verdict (budget 200)
+seed=1 agree=true reflexive:tested/200 antisymmetric:refuted/2 transitive:refuted/69
+seed=2 agree=true reflexive:tested/200 antisymmetric:refuted/1 transitive:tested/200
+seed=3 agree=true reflexive:tested/200 antisymmetric:refuted/2 transitive:tested/200
+seed=4 agree=true reflexive:tested/200 antisymmetric:refuted/7 transitive:tested/200
+seed=5 agree=true reflexive:tested/200 antisymmetric:refuted/4 transitive:tested/200
+seed=6 agree=true reflexive:tested/200 antisymmetric:refuted/12 transitive:refuted/141
+seed=7 agree=true reflexive:tested/200 antisymmetric:refuted/7 transitive:refuted/80
+seed=8 agree=true reflexive:tested/200 antisymmetric:refuted/2 transitive:refuted/3
+seed=default agree=true reflexive:tested/200 antisymmetric:refuted/2 transitive:refuted/53

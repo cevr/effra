@@ -1,0 +1,75 @@
+== versions
+tsc Version 6.0.3 (<repo>/conformance/framework-ports/ports/node_modules/typescript)
+node v24.11.1
+effect 4.0.1
+
+==== proto
+== tsc attacks-augment.mts (1 directives)
+exit=0
+== tsc attacks.mts (4 directives)
+exit=0
+== tsc consumer.mts (0 directives)
+exit=0
+== node attacks-augment.mts
+refused O1-augmentation: EF186 at runtime; TS2322 at compile time
+exit=0
+== node attacks.mts
+refused L1-laundering-through-search: TypeError: EF186 search: xs is not SortedBy<Trio, compareUsers>; host evidence is re-established on entry and this value fails sortedTrio
+refused R1-spread-override: TypeError: EF186 search: xs is not SortedBy<Trio, compareUsers>; host evidence is re-established on entry and this value fails sortedTrio
+refused R2-array-covariance: TypeError: EF186 search: xs is not SortedBy<Trio, compareUsers>; host evidence is re-established on entry and this value fails sortedTrio
+refused R3-method-bivariance: TypeError: EF186 search: xs is not SortedBy<Trio, compareUsers>; host evidence is re-established on entry and this value fails sortedTrio
+refused X2-property-covariance: TypeError: EF186 search: xs is not SortedBy<Trio, compareUsers>; host evidence is re-established on entry and this value fails sortedTrio
+correct A1-recheck-alias = true
+correct A2-element-alias = true
+refused A3-mutate-evidence: TypeError: Cannot assign to read only property 'age' of object '#<Object>'
+refused G1-getter: TypeError: EF186 xs .first is not an own data property
+refused R10-namespace-patch: TypeError: Cannot assign to read only property 'compareUsers' of object '[object Module]'
+correct R10b-function-property-patch = true
+refused N1-never-filler: TypeError: EF186 xs is not a Trio
+refused N2-never-rest: TypeError: EF186 xs is not a Trio
+refused N3-json-any: TypeError: EF186 xs.first.age is not an i64
+attacks ok: every attack refused or harmless
+exit=0
+== node consumer.mts
+consumer ok
+exit=0
+== each directive opened
+attacks-augment.mts:15  O1 augmentation cannot supply the private brand  [expects TS2322]
+    TS2322 Type 'Trio' is not assignable to type 'SortedBy<Trio, "compareUsers">'.   Type 'Trio' is not assignable to type 'EfEvidence<"SortedBy", Trio, "compareUsers">'.     Property '__ef_evidence' is private in type 'EfEvidence<"SortedBy", Trio, "compareUsers">' but n
+directives=1 without a diagnostic=0 with a code mismatch=0
+exit=0
+attacks.mts:47  L1 a sortTrioBy result is not SortedBy  [expects TS2322]
+    TS2322 Type 'Trio' is not assignable to type 'SortedBy<Trio, "compareUsers">'.   Property '__ef_evidence' is missing in type 'Trio' but required in type 'EfEvidence<"SortedBy", Trio, "compareUsers">'.  ['__ef_evidence' is declared here.]
+attacks.mts:129  F1 a plain trio is not SortedBy  [expects TS2322]
+    TS2322 Type 'Trio' is not assignable to type 'SortedBy<Trio, "compareUsers">'.   Property '__ef_evidence' is missing in type 'Trio' but required in type 'EfEvidence<"SortedBy", Trio, "compareUsers">'.  ['__ef_evidence' is declared here.]
+attacks.mts:132  F2 evidence for one comparator is not evidence for another  [expects TS2322]
+    TS2322 Type 'SortedBy<Trio, "compareUsers">' is not assignable to type 'SortedBy<Trio, "reversed">'.   Type 'SortedBy<Trio, "compareUsers">' is not assignable to type 'EfEvidence<"SortedBy", Trio, "reversed">'.     Type at position 2 in source is not compatible with 
+directives=3 without a diagnostic=0 with a code mismatch=0
+exit=0
+== any
+./attacks-augment.mts: any keywords=0, word matches=0
+./attacks.mts: any keywords=0, word matches=5
+./consumer.mts: any keywords=0, word matches=1
+./lib.d.mts: any keywords=0, word matches=0
+./lib.mjs: any keywords=0, word matches=0
+exit=0
+
+==== counterfactual
+== tsc attacks.mts (1 directives)
+exit=0
+== node attacks.mts
+R2-array-covariance=false R3-method-bivariance=false X2-property-covariance=false
+counterfactual: 3 routes reach a trusting export with an unsorted trio and get a wrong answer
+exit=0
+== each directive opened
+attacks.mts:34  L1 the naive projection still refuses a plain trio  [expects TS2345]
+    TS2345 Argument of type 'Trio' is not assignable to parameter of type 'SortedBy<Trio, "compareUsers">'.   Property '__ef_evidence' is missing in type 'Trio' but required in type 'EfEvidence<"SortedBy", Trio, "compareUsers">'.  ['__ef_evidence' is declared here.]
+directives=1 without a diagnostic=0 with a code mismatch=0
+exit=0
+== any
+./attacks.mts: any keywords=0, word matches=1
+./lib.d.mts: any keywords=0, word matches=0
+./lib.mjs: any keywords=0, word matches=1
+exit=0
+
+== result: all checks passed
