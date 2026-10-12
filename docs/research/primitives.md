@@ -9,7 +9,7 @@ Appendices:
 - `primitives/corpus-main/<option>/`: the examples main added after the corpus froze (machine decisions, scheduler quiescence), for today and H only (§8.1).
 - `primitives/blind-reader/<option>/`: blind-reader packets; the answer key is [primitives/blind-reader-key.md](primitives/blind-reader-key.md).
 - `benchmarks/syntax/measure.ts`: the corpus metrics and the one classification of forms that every option is scored against.
-- The prototype lives on branch `wf10/spike-syntax-proto`, under `docs/research/primitives/prototype/`. Head `96155c4f` prototypes option H after review 3; `0ef605b2` was round 3's head, `bc263cf8` round 2's H, `073de983` round 1's option P, and `e11047a3` adds the baseline probes run with the main compiler. That branch is never merged.
+- The prototype lives on branch `wf10/spike-syntax-proto`, under `docs/research/primitives/prototype/`. Head `110fa3da` prototypes option H after review 4; `96155c4f` was round 4's head, `0ef605b2` round 3's, `bc263cf8` round 2's H, `073de983` round 1's option P, and `e11047a3` adds the baseline probes run with the main compiler. That branch is never merged.
 
 ## 0. Decision in one page
 
@@ -69,11 +69,11 @@ Three guarantees are new:
 **Cost.**
 - H adds three keywords (`race`, `provide`, `interrupt`), giving 31 against today's 28.
 - It is 4.5% fewer tokens than today, with zero construct lookalikes on the #134 surface. `.as<T>()`, a host type assertion outside #134, stays compiler-known in every option and is counted apart (§8.1).
-- **Migration (§8.3).** Forcing the owned-fork rule on every file makes 33 existing top-level tests fail, every one because a fixture forks outside a scope (EF002). The `ef fix` prototype wraps only fork-to-join regions it can prove inert, including the fork's operand, and reports the rest with a reason. What it preserves is stated exactly:
-  - **preserved:** outputs, exits, failures and the owner's close order;
+- **Migration (§8.3).** Forcing the owned-fork rule on every file makes 33 existing top-level tests fail, every one because a fixture forks outside a scope (EF002). The `ef fix` prototype wraps a fork-to-join region only when nothing inside the new scope runs except the owned forks of pure operands, their plain joins (`run h.join()`, `run h.interrupt()`) and pure local values. It never trusts a call by its name or by the purity of its operands: a handler (`catch`, `recover`, `orFail`) or a `run` of any service or function in the region, `Console.log` and `Clock.sleep` included, sends the region to manual migration with a reason (review 4, Major 1). For exactly those regions it preserves:
+  - **preserved:** outputs, exits, failures, the owner's close order and the resources each owner holds, because the only code that runs in the new scope is the forked recipes, each in its own child owner as before, and the joins;
   - **not preserved:** the owner tree that `Runtime.inspect` reports after the region, where a joined child moves from the enclosing owner to the new, closed scope (review 3, f2; asserted by a test).
-  
-  On the 1126 distinct sources the forced suite compiles, it changes no legacy diagnostic, and every program it wraps fully or partly that has a `main` runs the same original against fixed: 82 on Go (63 wrapped fully, one of them with the documented owner-tree difference, and 19 partly) and 57 on JavaScript (38 and 19). The 25 sources that bind Go natives (EF110) are counted on Go only, and one wrapped source that neither version can emit is counted as not runnable. Most sources fork into the caller's owner on purpose, so they need a manual migration, which `ef fix` reports (1028 sources).
+
+  On the 1132 distinct sources the forced suite compiles, it changes no legacy diagnostic, and every program it wraps fully or partly that has a `main` runs the same original against fixed: 18 on Go (15 wrapped fully, one of them with the documented owner-tree difference, and 3 partly) and 13 on JavaScript (10 and 3). The 5 wrapped sources that bind Go natives (EF110) are counted on Go only. The rule is narrow on purpose: it wraps 16 sources in full and 3 in part, and reports the other 1113 for manual migration, since most sources fork into the caller's owner deliberately or run other work between a fork and its join.
 
 **Portability.** Each construct lowers to a protocol: the host primitives P1–P12, the new race primitive P13, and laws K1–K17 (§6.8), each with a probe or a stated reason why not. The Effect runtime and the Go runtime are two providers. A deterministic test runtime, a UI frame runtime, a request-scoped server runtime and an embedded tick loop are further providers that need no source change (follow-up U11).
 
@@ -133,7 +133,7 @@ The detail and pins are in [prior-art.md](primitives/prior-art.md); §5 there co
 These bound a task by **the owner it was handed**, not by the function that spawned it: a helper given a nursery, switch or scope can start a task that outlives the helper (review 2, M4). Swift's `async let` is the construct form, where the child is bound to its block and awaited or cancelled at block exit. Go's `go` and Effect's `forkChild` are the outliers, where a child can outlive its caller.
 
 **H's owned fork** is the construct form and is stricter than the owner-value libraries. Owners cannot be passed (an owner value would be #106's second-class value, O4), so a child is bounded by its function. The longer lifetimes that owner values buy are not part of H. They come back as two separate units:
-- provision-lifetime workers, as in Elixir supervision trees and Effect's `Layer.scoped` plus `forkScoped`, are the U-workers unit (§6.5, §9);
+- provision-lifetime workers, as in Elixir supervision trees and Effect's `Layer.effect`/`Layer.effectDiscard` with `forkScoped` (v3: `Layer.scoped`), are the U-workers unit (§6.5, §9);
 - owner parameters later (O4).
 
 **Deadlines are library over first completion or a cancel scope:**
@@ -246,7 +246,7 @@ PlanEntry    = LayerName | ServiceName "=" ProviderExpr
 
 ### 6.2 Owned fork (review 1, M6)
 
-**The rule.** A `fork` is legal only lexically inside an owner block (`scope`, `race`, `provide`, or the proposed `all`) of the same function. A fork directly in a provide body is owned by the provide block (review 3, Minor 2; `TestSpike134ProvideBodyOwnsAFork` prints `tick,joined ticked,ticked,after` on both targets). A fork outside every owner block is a syntax error: "fork needs an owner: put it inside scope { } or make it a race arm" (prototype EF002). Because the owner block closes before the function returns, no child outlives its function. A fork inside an `if` or a loop inside a scope is still owned.
+**The rule.** A `fork` is legal only lexically inside an owner block (`scope`, `race`, `provide`, or the proposed `all`) of the same function. A fork directly in a provide body is owned by the provide block (review 3, Minor 2; `TestSpike134ProvideBodyOwnsAFork` prints `tick,joined ticked,ticked,after` on both targets). On the prototype this holds for service-only headers; for a layer header it is design only, because the prototype's layer-header block still takes one `run` statement (§6.5). A fork outside every owner block is a syntax error: "fork needs an owner: put it inside scope { } or make it a race arm" (prototype EF002). Because the owner block closes before the function returns, no child outlives its function. A fork inside an `if` or a loop inside a scope is still owned.
 
 **The guardrail test.**
 - *Illegal state:* a child still running after the function that started it has returned. Today `fork` outside a scope uses the dynamic owner (R9), and probe `g1-today.ef` shows the child outliving its caller. P's corpus made this more common by moving lifetimes to callers (`corpus/P/latest-task.ef:18`, `lifecycle.ef:23`, `causal.ef:34`).
@@ -255,13 +255,13 @@ PlanEntry    = LayerName | ServiceName "=" ProviderExpr
 
 **What the lexical rule gives up** (review 2, M4). A child cannot be bounded by an owner its function was handed. Two cases matter:
 - **A helper that forks into its caller's owner.** The workaround is to return the recipe and let the caller fork it. Owner parameters are O4.
-- **A provision-lifetime worker.** H does not cover it. Round 3's layer worker entry was withdrawn after review 3 (B1, Major 3), and the case is the U-workers unit (§6.5). Until it lands, a long-lived worker is a fork in the provide body, which the provide block owns, written at each site rather than in the layer.
+- **A provision-lifetime worker.** H does not cover it. Round 3's layer worker entry was withdrawn after review 3 (B1, Major 3), and the case is the U-workers unit (§6.5). Until it lands, a long-lived worker is a fork in the provide body, which the provide block owns, written at each site rather than in the layer. For a layer header that stop-gap is design only on the prototype (one `run` statement, §6.5).
 
 **What stays dynamic.** Resource acquisition (`Files.openRead`) keeps the dynamic owner. A resource is inert data owned by the current owner, and EF123 already stops it escaping. Making resource acquisition lexical too would need an owner for every acquiring call (O7).
 
 **Edition** (review 2, m1). On the prototype, the owned-fork rule and the handle reading of §6.3 apply to a file that uses H's syntax (a race block, or the `provide` or `interrupt` keyword), or to every file with `EFFRA_SPIKE134_OWNED=all`. This inference is prototype-only: adding an unrelated provide block to a legacy file turns an untouched fork into EF002 (review 2, probe p2-spooky).
 - **Production switch:** an explicit edition per package, declared once, never inferred from content. Precedents: Go's `go` directive in `go.mod`, Rust's per-crate edition, Kotlin's `-language-version`, and Swift's and Java's explicit selection (prior-art.md §5).
-- **Migration:** `ef fix` moves a package to the new edition. It wraps what it can prove inert and reports the rest (§8.3, U4). Effra has no package manifest yet, so where the edition is declared is O13.
+- **Migration:** `ef fix` moves a package to the new edition. It wraps only regions in which nothing but owned forks and their joins runs, and reports the rest (§8.3, U4). Effra has no package manifest yet, so where the edition is declared is O13.
 
 ### 6.3 Fork handles: `run` joins, `interrupt` raises (review 1, M2; review 2, M2, m2, m3)
 
@@ -321,12 +321,12 @@ Laws K5 and K12 state these side conditions (§6.8).
 - it records parent cancellation at the moment of selection, in both branches;
 - if the parent was already cancelled then, both sides are abandoned alike;
 - otherwise a **failing** winner's failure is published, whatever happens to the parent during the loser's cleanup;
-- a **successful** winner of a parent cancelled during the loser's cleanup is observed as interruption, not success (review 3, Minor 4). Go's `Invoke` turns a successful exit into `Interrupt` when the fiber's checkpoint shows cancellation after the program returns (`runtime/effra/effect.go:216-219`), and Counsel observed the same on JavaScript in both arm orders. The race keeps the classification fixed at selection and symmetric; it does not promise to publish a success the parent can no longer receive.
+- a **successful** winner of a parent cancelled during the loser's cleanup is observed as interruption, not success (review 3, Minor 4). Go's `Invoke` turns a successful exit into `Interrupt` when the fiber's checkpoint shows cancellation after the program returns (`runtime/effra/effect.go:216-219`), Review 3's Counsel run observed the same on JavaScript in both arm orders; that half is an observation, not tested here, because the prototype surface cannot cancel a parent during a loser's cleanup. The race keeps the classification fixed at selection and symmetric; it does not promise to publish a success the parent can no longer receive.
 
 The timeout keeps its timer policy. `runtime/effra/race_test.go` drives this with a latch, in both arm orders for each case:
 - `TestRaceClassifiesItsOutcomeAtSelection`: a failing arm wins, the loser's cleanup waits on the latch, the parent is cancelled during that cleanup, and the result is the winner's failure. The arm-reversed case fails on round 2's code.
 - `TestRaceSuccessfulWinnerOfACancelledParentIsObservedAsInterruption`: the same with a successful winner, observed as interruption.
-- `TestRaceCancelledBeforeSelectionAbandonsBothArms`: a parent cancelled before selection abandons both arms, over seven arm combinations (gated success, gated failure, `never`).
+- `TestRaceCancelledBeforeSelectionAbandonsBothArms`: the race is entered and both arms are running (an ordering point on arm-entry signals), then the parent is cancelled before either completes. The result is an interruption, over seven arm combinations (gated success, gated failure, `never`), and the race publishes only after both arms have finished: every case logs race entered 1, arms started 2, arms finished 2 (review 4, Minor 1). Round 4's version cancelled the context before the run, so `Invoke`'s first checkpoint refused it before the race was entered, and every case tested the same guard.
 
 The JS race applies one code path to both arms (`prelude/race.mjs`), so it has no arm asymmetry.
 
@@ -360,13 +360,13 @@ A body that needs a resource after the block acquires it outside, in the caller'
 
 **MemoMap.** Effect shares builds across nested non-local provides (§2). H's provide block builds each named layer once per block (R13). Sharing across nested blocks is a separate optimisation that no current law requires.
 
-**Lowering of a service-only header.** K17 is the lowering itself, not only a law about it: `provide S = p { body }` becomes `scope { body' }`, where `body'` is the written body with `.provideService<S>(p)` applied to every recipe it runs or forks, at any depth (`provideToBody` in `syntax.go`). A service entry is a pure implementation value with no build and no release, so providing it per recipe is the same as providing it once. A nested inner block is lowered first, so its provider sits closer to the recipe and wins (K10). Handle operations (`run c`, `interrupt c`) run no recipe a provision could reach and are not wrapped. So a service-only provide block admits any block body, including `let` statements and forks the block owns.
+**Lowering of a service-only header.** K17 is the lowering itself, not only a law about it. `provide S = p { body }` resolves `p` once, at the header, into a binding no source name can spell, and becomes `scope { let x = p  body' }`, where `body'` is the written body with `.provideService<S>(x)` applied to every recipe it runs or forks, at any depth (`provideToBody` in `syntax.go`). Because the provider is bound before the body, a body local spelled like the provider cannot capture it (review 4, Minor 2: `let Stdout = Silent` in the body leaves `Console = Stdout` in force; `TestSpike134ProvideBlockResolvesItsProviderAtTheHeader`, both targets). A service entry is a pure implementation value with no build and no release, so providing it per recipe is the same as providing it once. A nested inner block is lowered first, so its provider sits closer to the recipe and wins (K10). Handle operations are not wrapped: `interrupt c`, today's `c.join()`, and a bare `run c` whose name the body binds with `let c = fork …`, since a join runs no recipe a provision could reach. If such a name is rebound to a recipe in a nested block, that recipe is not provided and the checker refuses its missing service, so the approximation fails closed. Lint sees one provision per block and service: the generated provisions fold into one fact whose receiver is everything the block's recipes require, so EFL002 `redundant-provision` fires once, and only when no recipe in the block needs the service (`TestSpike134ProvideBlockIsOneProvisionForLint`). A service-only provide block therefore admits any block body, including `let` statements and forks the block owns.
 
 **Prototype limits** (review 2, o2). A provide block with a **layer** header still takes one `run` statement, lowered to the provision chain. Providers are named without arguments. The design admits any block body and any provider expression for both header shapes, and the block is an expression (`let r = provide … { … }`, used across the corpus).
 
 **Provision-lifetime workers: split out to U-workers** (review 2, M4; review 3, B1, Major 3, m5, O12; re-plan decision 1).
 
-*The gap.* Review 2 (M4) asked how a worker can live as long as a provision, as an Elixir application's supervised children or Effect's `Layer.scoped` with `forkScoped` do. Under H's lexical rule a child is bounded by its function, and the provide block's own body is the longest owner a function can write. A worker that should live as long as the provision and be declared once, in the layer, has no form in H.
+*The gap.* Review 2 (M4) asked how a worker can live as long as a provision, as an Elixir application's supervised children or Effect's `Layer.effect`/`Layer.effectDiscard` with `forkScoped` (v3: `Layer.scoped`) do. Under H's lexical rule a child is bounded by its function, and the provide block's own body is the longest owner a function can write. A worker that should live as long as the provision and be declared once, in the layer, has no form in H.
 
 *The proposed form, not adopted.* Round 3 added a layer entry `fork w(args)`, owned by the provision body, started after every node of the plan and stopped before any node is released. Review 3 found it unsound:
 - **B1, composite failure.** A worker failure during the body is a retained child of the provision owner, so a worker failure and a body failure close together into a composite cause that no row declares and no handler matches. Two failing workers do the same. The checker had no rule for it, unlike two forks in a scope, which are EF107 (R6).
@@ -451,7 +451,7 @@ Each construct lowers to a provider-independent protocol: P1–P12, plus P13 rac
 - **K2 loser cleanup precedes publication.** Every loser is interrupted, and its cleanup completes before the block publishes (generalises R8).
 - **K3 abandonment.** The winner's exit is the primary outcome. Losers' ordinary typed body failures are discarded. R6 may add the losers' retained cleanup causes (defects and typed cleanup failures) to it (review 2, m6).
 - **K4 symmetry.** Reordering the arms does not change the result whenever completion order is determined. The outcome is classified when the winner is selected, so a parent cancellation after selection does not depend on which arm won (review 2, m7). A failing winner's failure is published; a successful winner of a parent cancelled during loser cleanup is observed as interruption, in either arm order (§6.4, review 3 Minor 4). No tie guarantee is made across targets (`docs/runtime.md:21`).
-- **K5 identity.** `race { fork w  fork never() }`, where `never()` never completes, needs no cleanup and has **empty rows** (`raises { }` and `uses { }`), behaves as `run w` (the same success value, failure and rows). A race's rows are the union of its arms' rows (review 3, Minor 1), so a never-completing arm with a non-empty row adds that row: with the prototype's `hang()`, which sleeps on `Clock`, the race needs `Clock` where `run w` does not. The law has two further conditions:
+- **K5 identity.** `race { fork w  fork never() }`, where `never()` never completes, needs no cleanup and has **empty rows** (`raises { }` and `uses { }`), behaves as `run w` (the same success value, failure and rows). A race's rows are the union of its arms' rows (review 3, Minor 1), so a never-completing arm with a non-empty row adds that row: with the prototype's `hang()`, which sleeps on `Clock`, the race needs `Clock` where `run w` does not. The law's main clause cannot be probed today: every blocking primitive the surface has charges a row (`hang()` sleeps on `Clock`), so no empty-row `never` exists. Effect has one, `Effect.never` with `R = never`; #125 needs an equivalent primitive (or a `never` in the prelude) before the identity can be probed rather than only its union of rows (review 4, optional). The law has two further conditions:
   - `w`'s result holds no owned value. An owned result cannot leave the arm, and that is refused statically (EF123).
   - The difference in resource lifetime is accepted: resources that `w` acquires and does not return are released when the arm completes, before the block yields, where under `run w` they stay with the caller's owner (§6.3).
 - **K6 timeout derivation.** For the library form, `w.timeout(d)` behaves as `race { fork w  fork expire(d) }`, and likewise `timeoutOr` with `after` (definitional in `library.ef`). It does not hold for today's keyed `.timeout` until U9 (§6.7).
@@ -472,7 +472,7 @@ Each construct lowers to a provider-independent protocol: P1–P12, plus P13 rac
 - **K14 schedules do not preempt.** `retry` consults the schedule only after an attempt has completed.
 - **K15 placement.** `w.timeout(d).retry(s)` bounds each attempt; `w.retry(s).timeout(d)` bounds the whole loop.
 - **K16 owned fork.** A child never outlives the innermost owner block that lexically contains its `fork`. At block exit, unjoined children are interrupted and their cleanup completes (R2, R8). Joining governs observation, not ownership.
-- **K17 provide entry.** `provide S = p { body }` behaves as `scope { body' }`, where `body'` is `body` with `.provideService<S>(p)` applied to every recipe it runs or forks. For one run statement, `provide S = p { run w }` behaves as `scope { run w.provideService<S>(p) }`. The block is an owner for every header, and a fork directly in its body is owned by it (§6.5). On the prototype K17 is the lowering of a service-only header, so it holds by construction there; the probes check that the lowering agrees with the layer-header shape and the library form.
+- **K17 provide entry.** `provide S = p { body }` behaves as `let x = p; scope { body' }`, where `x` is fresh (no name in `body` can refer to it) and `body'` is `body` with `.provideService<S>(x)` applied to every recipe it runs or forks. So `p` is resolved at the header, a capture-avoiding substitution, and the block is one provision boundary over its body. For one run statement, `provide S = p { run w }` behaves as `scope { run w.provideService<S>(p) }`, since a single statement binds no local before `w`. The block is an owner for every header, and a fork directly in its body is owned by it (§6.5). On the prototype K17 is the lowering of a service-only header, so it holds by construction there, header resolution included; the probes check that the lowering agrees with the layer-header shape and the library form, and that a body local cannot capture the provider.
 
 Round 3's **K18 provision worker** is withdrawn with the worker entry (re-plan decision 1). Its clauses (start after the build, stop before release, failure at the provide edge, rows) are input to U-workers, which must add what review 3 found missing: the composite rule, identity under merge and a failure policy (§6.5, §9).
 
@@ -481,7 +481,7 @@ Round 3's **K18 provision worker** is withdrawn with the worker entry (re-plan d
 | Law | Probe | Targets |
 |---|---|---|
 | K1, K3, K4 | `TestSpike134LawsRaceK1K3K4`: success and failure first, abandoned loser, each in both arm orders; the loser's row stays declared (EF107 without it) | both |
-| K2, K4 | `runtime/effra/race_test.go`: `TestRaceClassifiesItsOutcomeAtSelection` (the race does not complete before the latched loser cleanup, and the failing winner survives a parent cancellation in both arm orders); `TestRaceSuccessfulWinnerOfACancelledParentIsObservedAsInterruption` (both orders); `TestRaceCancelledBeforeSelectionAbandonsBothArms` (seven arm combinations) | Go runtime; JS by construction (`race.mjs` awaits both fibers) |
+| K2, K4 | `runtime/effra/race_test.go`: `TestRaceClassifiesItsOutcomeAtSelection` (the race does not complete before the latched loser cleanup, and the failing winner survives a parent cancellation in both arm orders); `TestRaceSuccessfulWinnerOfACancelledParentIsObservedAsInterruption` (both orders); `TestRaceCancelledBeforeSelectionAbandonsBothArms` (race entered and both arms started before the cancellation; seven arm combinations; entry and completion counts asserted) | Go runtime. JS: K2 by construction (`race.mjs` awaits both fibers); the successful-winner observation is untested on JS |
 | K5 | `TestSpike134LawK5Identity`: equal success and failure, equal failure rows (EF107 on both sides), requirement rows a union (`run w` needs nothing, the race over `hang()` without `Clock` is EF108 `Clock`), owned result EF123 | both |
 | K6 | definitional: `deadline` in `race-library.ef` runs | both |
 | K7 | `TestSpike134LawK7NestedDeadlines`: the earlier deadline wins in either nesting | both |
@@ -493,7 +493,7 @@ Round 3's **K18 provision worker** is withdrawn with the worker entry (re-plan d
 | K13 | `TestSpike134LawK13Interrupt`: no-op after success, interruption normalised, retained failure raised | both |
 | K14, K15 | library laws over `retry`, which is not prototyped; probes land with U6 | — |
 | K16 | `TestSpike134LawK16OwnedFork` (an unjoined child never prints after its block); `TestSpike134ForkNeedsAnOwnerBlock` | both |
-| K17 | `TestSpike134ProvideBlockIsAlwaysAnOwner`: both header shapes refuse an escaping `File` (EF123) and agree with the scoped library form (today's `.provide<S>` stands in for `.provideService<S>`); `TestSpike134ProvideBodyOwnsAFork`: a general body with `let` statements, a joined fork and an unjoined 600 s fork, both owned by the block; the unjoined child is interrupted at the block's close and never prints (`tick,joined ticked,ticked,after`) | Go (Files); fork probe both |
+| K17 | `TestSpike134ProvideBlockResolvesItsProviderAtTheHeader` (a body local spelled like the provider, its control, nesting, and an inner local spelled like the outer provider; both targets); `TestSpike134ProvideBlockIsOneProvisionForLint` (no spurious EFL002, one EFL002 for a block no recipe of which needs the service, the handle join unwrapped); `TestSpike134ProvideBlockIsAlwaysAnOwner`: both header shapes refuse an escaping `File` (EF123) and agree with the scoped library form (today's `.provide<S>` stands in for `.provideService<S>`); `TestSpike134ProvideBodyOwnsAFork`: a general body with `let` statements, a joined fork and an unjoined 600 s fork, both owned by the block; the unjoined child is interrupted at the block's close and never prints (`tick,joined ticked,ticked,after`) | Go (Files); fork probe both |
 | K18 (withdrawn) | `TestSpike134WorkerEntryIsNotPartOfOptionH` (EF002); recorded under the flag: `TestSpike134RecordedWorkerPrototype`, and the known-failing probes `TestSpike134KnownFailingW1WorkerCompositeIsUncaught` and `TestSpike134KnownFailingW5WorkerDiamondStartsTwice`, which U-workers inverts | both |
 
 **Drift control.** F# builders and `RebindableSyntax` let a library change what syntax means. H fixes the meaning in three ways:
@@ -624,7 +624,7 @@ H replaced C's two helpers with `.provideService` on a fork (`corpus/H/causal.ef
 
 **Main moved on after the corpus froze** (round 4). Merging main brought two changes:
 - Main reserved the machine decision words (`enter`, `stay`, `ignore`, `reject`, `done`), so `let done` in `recovery-outcome.ef` became `let settled` in every option, as main did in its own example. The totals above are unchanged by it.
-- Main added three examples that touch the #134 surface: `machine-breaker.ef` (a provided effectful machine step) and `quiescence.ef` and `quiescence-wakes.ef` (scheduler quiescence, 26 fork sites). They are rewritten for today and H only, under `primitives/corpus-main/`, because the losing options are recorded as of their round and not maintained. `measure.ts` reports the extension separately and fails on an H lookalike or an ownerless H fork there too.
+- Main added three examples that touch the #134 surface: `machine-breaker.ef` (a provided effectful machine step) and `quiescence.ef` and `quiescence-wakes.ef` (scheduler quiescence, 25 fork sites: 10 and 15). They are rewritten for today and H only, under `primitives/corpus-main/`, because the losing options are recorded as of their round and not maintained. `measure.ts` reports the extension separately and fails on an H lookalike or an ownerless H fork there too.
 
 | Option | Files | Tokens | vs today | Code lines | Distinct keywords | Punct/line | Lookalikes (#134) | Keyed today |
 |---|---|---|---|---|---|---|---|---|
@@ -672,16 +672,17 @@ Review 2 rejected the finding as a keyword reuse (C5): `run` executes one recipe
 
 ### 8.3 Prototype
 
-Branch `wf10/spike-syntax-proto`, head `96155c4f`, "feat(spike): close #134 review 3 on the option H prototype", on top of round 3's `0ef605b2` (round 2's `bc263cf8`, then `e906c9bf` and `0ef605b2`). The prototype base is main at `effb24d4`, so it predates main's machine decisions and quiescence examples; §8.1 measures those separately.
+Branch `wf10/spike-syntax-proto`, head `110fa3da`, "feat(spike): close #134 review 4 on the option H prototype", on top of round 4's `96155c4f` (round 2's `bc263cf8`, then round 3's `e906c9bf` and `0ef605b2`, and round 4's `96155c4f`). The prototype base is main at `effb24d4`, so it predates main's machine decisions and quiescence examples; §8.1 measures those separately.
 
 - **Parser** (`syntax.go`):
   - `race { fork a  fork b }` lowers to the race kernel; a non-fork arm is EF002 "each arm of a race block is a fork".
   - Every provide block is an owner block, so a `fork` directly in its body is owned (review 3, Minor 2).
-  - A service-only header lowers through K17: `scope { body' }` with each service provided to every recipe the body runs or forks (`provideToBody`), so any block body is admitted. A layer header still takes one `run` statement and lowers to today's provision (§6.5).
+  - A service-only header lowers through K17: each provider is bound at the header to a name no source can spell, and the block becomes `scope { let x = p  body' }` with the service provided by `x` to every recipe the body runs or forks (`provideToBody`), except joins of the body's own handles, so any block body is admitted. A layer header still takes one `run` statement and lowers to today's provision (§6.5).
   - `interrupt child` lowers to today's interrupt.
   - A `fork` outside every owner block is EF002 "fork needs an owner".
   - A `fork` entry in a `layer` is EF002 "layer worker entries are not part of option H", unless `EFFRA_SPIKE134_WORKERS=1` keeps round 3's worker code for U-workers (§6.5).
   - The parser does not rewrite names. It only marks the positions where a handle is moved rather than joined (§6.3).
+- **Lint facts** (`lint_facts.go`): the provisions a service-only provide block generates fold into one provision fact per block and service (§6.5).
 - **Checker** (`semantic.go`, `layers.go`): in an H file, a read of a `Fiber`-typed local outside those positions becomes its join. The original syntax entry is moved to the handle, so type queries keep the binding.
 - **Runtime** (`runtime/effra/effect.go`): `raceWithPolicy` with the symmetric race policy (§6.4, m7), plus `race_test.go`, widened in round 4 (§6.4).
 - **`ef fix` prototype** (`spike134_fix.go`): §8.3's migration below.
@@ -706,12 +707,12 @@ Branch `wf10/spike-syntax-proto`, head `96155c4f`, "feat(spike): close #134 revi
   - interrupt carries the child's row;
   - race arm shape, arm result type and union row;
   - the provide block with EF108 for a missing service.
-- `spike134_laws_test.go`: one probe per law (§6.8), plus m2 and m3; the provide-body fork; the refused worker entry; the recorded worker prototype and the two known-failing worker probes (w1, w5) under the flag.
-- `spike134_fix_test.go`: the `ef fix` outcomes, f1 and f2, the cancellation cases, and the inventory proof below.
-- `runtime/effra/race_test.go`: the latch tests in both arm orders and the seven-combination pre-selection test.
+- `spike134_laws_test.go`: one probe per law (§6.8), plus m2 and m3; the provide-body fork; header resolution of the provider and the one-provision lint fact (review 4, Minor 2); the refused worker entry; the recorded worker prototype and the two known-failing worker probes (w1, w5) under the flag.
+- `spike134_fix_test.go`: the `ef fix` outcomes, f1 and f2, review 4's r1, r2 and r8, the cancellation cases, and the inventory proof below.
+- `runtime/effra/race_test.go`: the latch tests in both arm orders and the seven-combination cancellation test, which enters the race with both arms running before it cancels (review 4, Minor 1).
 - `determinism_test.go`: the helper now fails with "compilation refused before checking" and the diagnostics when a source is refused, instead of dereferencing a missing program (review 3, Minor 6).
 
-**Suite.** `go test ./internal/compiler ./runtime/... -count=1` passes in full on the prototype head in default mode (compiler 159 s, runtime 8 s; receipt in `round-4-request.md`).
+**Suite.** `go test ./internal/compiler ./runtime/... -count=1` passes in full on the prototype head in default mode (compiler 162 s, runtime 9 s; receipt in `round-5-request.md`).
 
 **Migration inventory** (review 2, M1). The owned-fork rule was forced on every file with `EFFRA_SPIKE134_OWNED=all`.
 
@@ -720,6 +721,7 @@ Branch `wf10/spike-syntax-proto`, head `96155c4f`, "feat(spike): close #134 revi
 | Round 2, `bc263cf8` (reproduced) | 34 existing + `TestSpike134ForkNeedsAnOwnerBlock`; the determinism test panics first | EF002, plus two non-EF002 causes from the name-keyed handle rewrite: typing (`TestOwnershipMatrixMatchesTruth` cells `s1_fork@1_plain_if/match`, EF106 + EF107; `TestPipeFormCompilesToTheSameOutputAsNestedCalls`, 4 programs compiled differently in pipe form) and tooling (`TestSelectedFiberOperationReceiversRetainTheirOwnedBinding`) |
 | Round 3, `0ef605b2` | 33 existing + `TestSpike134ForkNeedsAnOwnerBlock`, with the determinism test run separately | EF002 only |
 | Round 4, `96155c4f` | 33 existing + `TestSpike134ForkNeedsAnOwnerBlock`, in one run, the determinism test included | EF002 only. The determinism test now fails on `causal.ef` with the EF002 diagnostic instead of panicking. |
+| Round 5, `110fa3da` | the same 33 existing + `TestSpike134ForkNeedsAnOwnerBlock` | EF002 only, no panic |
 
 The 33 existing tests, by category:
 
@@ -734,29 +736,37 @@ The 33 existing tests, by category:
 
 The prototype's own spike tests pass under the forced rule except `TestSpike134ForkNeedsAnOwnerBlock`, whose legacy-file case is the forced rule's point. The fix tests run their legacy side under today's rules and their fixed side under the owned rule, so they hold in either mode.
 
-**`ef fix` and its proof.** U4's autofix must never change behaviour (review 2, M1). The prototype `Spike134Fix` wraps in `scope { }` only the region from a `let h = fork …` to the statement-level observations of `h` (`run h.join()` or `run h.interrupt()`, optionally followed by `catch`, `recover` or `orFail`) in the same block. Overlapping regions merge. It wraps a region only when all of these hold:
-- **the fork's operand only builds a recipe** (review 3, Major 1a): a name, or a call whose arguments are names, literals and constructors of declared records and enums. On Go the operand is evaluated under the caller's owner before the fork, so an operand that runs, acquires or fails would move its effects into the new scope. A computed argument (`"a" + "b"`) is refused too, because the prototype proves only these shapes;
-- the recovery and fallback operands of the observations are pure in the same sense;
+**`ef fix` and its proof.** U4's autofix must never change behaviour (review 2, M1). The prototype `Spike134Fix` wraps in `scope { }` only the region from a `let h = fork …` to the statement-level observations of `h` in the same block. Overlapping regions merge. Its rule is structural (review 4, Major 1, as decided by the orchestrator): **nothing inside the new scope may run anything except the owned forks of pure operands and their joins, plus pure local computation.** It never trusts a call by its name or by the purity of its operands. Concretely, it wraps a region only when all of these hold:
+- **the fork's operand only builds a recipe** (review 3, Major 1a): a name, or a call whose arguments are names, literals and constructors of declared records and enums, optionally under the `timeout` and `provide` postfixes. On Go the operand is evaluated under the caller's owner before the fork, so an operand that runs, acquires or fails would move its effects into the new scope. A computed argument (`"a" + "b"`) is refused too;
+- **no handler anywhere in the region**: a `catch`, `recover` or `orFail`, on an observation or on a fork operand, is reported, because a handler's code runs under whichever owner runs it (review 4, r1 and r2: a `recover` handler that acquires a file or forks a child would do so under the new scope);
+- **every observation is a whole statement**: `run h.join()`, `run h.interrupt()` or `let v = run h.join()`;
+- **every other statement is a `let` of a pure local value**: names, literals, constructors, comparisons and boolean operators. No `run` of any service or function, whatever its name: round 4's allowlist of `Console.log`, `Clock.sleep`, the test `Scheduler` steps and `Sync.signal` is gone, because any of those services can be provided by a user `impl` that acquires (review 4, r8). Arithmetic is excluded because it can fail at run time;
 - the handle is used nowhere else;
-- every other statement in the region is inert: it runs nothing but builtins with an empty failure row that acquire nothing (`Console.log`, `Clock.sleep`, the test `Scheduler` steps, `Sync.signal`), forks nothing and fails nothing;
 - only the region's last statement can fail;
 - no name bound in the region is used after it, except the last statement's own `let`, which becomes `let v = scope { … }`;
 - the joined value is not itself a recipe, which a scope cannot yield.
 
-*What it preserves, exactly* (review 3, Major 1b). Under those conditions the children are the last things registered with the dynamic owner when they start, and they are done when the region ends. At every exit of the region, every child it started has been observed. So the fix preserves:
+*What it preserves, exactly* (review 3, Major 1b; review 4, Major 1). For regions that satisfy the rule, the only code that executes inside the new scope is the forked recipes, each under its own child owner exactly as before the fix, and the joins, which wait. Nothing else registers with any owner, so the children are the last things registered with the dynamic owner when they start, and they are done when the region ends. At every exit of the region, every child it started has been observed. So, for those regions only, the fix preserves:
 - outputs and exits;
 - failures, including the failure a deadline or an interrupt produces while the region runs;
 - the owner's LIFO close order, and the resources each owner holds.
 
-It does not preserve the owner tree that `Runtime.inspect` reports after the region. A joined child stays listed under the enclosing owner today; after the fix it is listed under the new scope, which has closed. `TestSpike134FixOwnerTreeDifferenceIsDocumented` asserts exactly this on review 3's f2: the same output before the inspection, `resourceCount` 0 on both sides, and `children` 1 against 0.
+The claim says nothing about any other region, and the fix does not touch one. It does not preserve the owner tree that `Runtime.inspect` reports after the region. A joined child stays listed under the enclosing owner today; after the fix it is listed under the new scope, which has closed. `TestSpike134FixOwnerTreeDifferenceIsDocumented` asserts exactly this on review 3's f2: the same output before the inspection, `resourceCount` 0 on both sides, and `children` 1 against 0.
 
 *Review 3's counterexamples are tests.*
 - **f1** (an operand that acquires a file under the caller's owner): refused with "an operand of the fork may run, acquire or fail when it is evaluated" and the manual migration "bind the operand first … in the owner that should hold what it acquires" (`TestSpike134FixRefusesAnActingForkOperand`).
 - **f2** (a pure operand, followed by an inspection): wrapped, with the documented owner-tree difference asserted.
 
-*Cancellation* (review 3, Major 2). `TestSpike134FixPreservesBehaviourUnderCancellation` runs four programs whose wrapped region is cancelled, legacy against fixed, on Go and JavaScript: a deadline during the region; a deadline over two children, one of which fails late; an interrupt of the function that owns the region; and a deadline that fires after the region has completed. Each prints the same and exits the same on both sides and both targets.
+*Review 4's counterexamples are tests* (`TestSpike134FixRefusesReviewFourCounterexamples`; each checks under today's rules, is refused and is left unchanged):
+- **r1**, a `recover` handler that opens a file: refused, "the region contains a handler";
+- **r2**, a `recover` handler that forks a child: refused, "the region contains a handler";
+- **r8**, `Clock.sleep` in the region with `Clock` provided by an impl that acquires: refused, "a statement inside the fork-to-join region runs something other than the forks and their joins".
 
-*Inventory proof* (review 3, Major 2 and the per-target counts). `TestSpike134FixPreservesBehaviourOnTheInventory` runs the fix over every source the forced rule refused anywhere in the compiler suite, collected with `EFFRA_SPIKE134_DUMP`: **1126 distinct sources**, which include the spike tests' own sources (f1, f2 and the inline fix cases). For each source:
+The inline cases add a pure fallback (`catch<Bad>("caught")`), a handler on the fork operand, `Console.log` and `Clock.sleep` in the region, arithmetic in the region and an observation nested in a call, all refused, and a pure local and two children, both wrapped.
+
+*Cancellation* (review 3, Major 2). `TestSpike134FixPreservesBehaviourUnderCancellation` runs four programs whose wrapped region is cancelled, legacy against fixed, on Go and JavaScript: a deadline during the region; a deadline over two children, one of which fails late; an interrupt of the function that owns the region; and a deadline that fires after the region has completed. Round 5 removed the `Console.log` lines from the regions, which the new rule refuses, and put the interrupting program's own fork in a written scope. Each prints the same and exits the same on both sides and both targets.
+
+*Inventory proof* (review 3, Major 2 and the per-target counts). `TestSpike134FixPreservesBehaviourOnTheInventory` runs the fix over every source the forced rule refused anywhere in the compiler suite, collected with `EFFRA_SPIKE134_DUMP` on prototype `110fa3da`: **1132 distinct sources**, which include the spike tests' own sources (f1, f2, r1, r2, r8 and the inline fix cases). For each source:
 - the fixed source, under today's rules, keeps today's diagnostics;
 - the owned rule either admits the fixed source with exactly today's diagnostics, or the fix reported a fork;
 - a source that does not emit under the legacy rules must fail to emit identically after the fix; any other emission, build or deadline failure fails the test;
@@ -764,29 +774,29 @@ It does not preserve the owner tree that `Runtime.inspect` reports after the reg
 
 | Outcome | Sources | Go runs | JS runs |
 |---|---|---|---|
-| Wrapped in full; owned-rule diagnostics equal today's | 75 | 63 same (one of them same except the documented owner tree: f2) | 38 same |
-| … binding Go natives (EF110 on JS), counted on Go only | 25 of the 75 | included above | excluded |
-| … not runnable: neither the legacy nor the fixed source emits for Go | 1 of the 75 | — | — |
-| … without a `main` | 11 of the 75 | — | — |
-| Partly wrapped, the rest reported | 23 | 19 same | 19 same |
-| Reported for manual migration | 1028 | | |
+| Wrapped in full; owned-rule diagnostics equal today's | 16 | 15 same (one of them same except the documented owner tree: f2) | 10 same |
+| … binding Go natives (EF110 on JS), counted on Go only | 5 of the 16 | included above | excluded |
+| … without a `main` | 1 of the 16 | — | — |
+| Partly wrapped, the rest reported | 3 | 3 same | 3 same |
+| Reported for manual migration | 1113 | | |
 | Changed legacy diagnostics, outputs or exits | **0** | **0** | **0** |
 
-82 programs run original against fixed: 82 on Go and 57 on JavaScript.
+18 programs run original against fixed: 18 on Go and 13 on JavaScript. Round 4's rule wrapped 75 sources in full and 23 in part; the 59 full and 20 partial wraps it loses ran a service operation (mostly `Console.log` and the test `Scheduler` steps) or a handler inside the region. They were correct as measured, but the rule could not prove them, so they move to manual migration.
 
 | Reported fork sites, by reason | Sites |
 |---|---|
-| Fire-and-forget child (never joined or interrupted in its block) | 5673 |
-| A statement in the region runs, acquires or fails | 27 |
+| Fire-and-forget child (never joined or interrupted in its block) | 5669 |
+| A statement in the region runs something other than the forks and their joins, forks, opens a block or fails | 118 |
+| The region contains a handler (`catch`, `recover`, `orFail`) | 31 |
 | The fork's operand may run, acquire or fail (all four are spike-test sources, f1 among them) | 4 |
-| The handle is used other than at a join or interrupt (returned, passed, raced, cancelled) | 60 |
-| The joined value is a recipe | 62 |
+| The handle is used other than at a join or interrupt (returned, passed, raced, cancelled) | 58 |
+| The joined value is a recipe | 39 |
 | The fork is not a `let` value | 2 |
 | Legacy source does not check, or does not parse | 6 + 4 |
 
 Most of the reported sources are the compiler suite's own generated fixtures, which fork into the caller's owner on purpose to test R9 and composite causes. Their migration is a decision about which owner each child should have, so it cannot be automatic.
 
-`examples/causal.ef`, the only affected example on the prototype base, is wrapped in full. Its five tests pass unchanged on both targets after the fix under the owned rule. Main's later quiescence examples (§8.1) are not in this inventory.
+`examples/causal.ef`, the only affected example on the prototype base, is now reported for manual migration: its regions run test `Scheduler` steps between the fork and the join, which round 4's allowlist admitted and the structural rule does not. Main's later quiescence examples (§8.1) are not in this inventory; they run `Scheduler` and `Sync` steps between forks and joins too, so they are manual under the same rule.
 
 ## 9. Decision record
 
@@ -827,7 +837,7 @@ Most of the reported sources are the compiler suite's own generated fixtures, wh
 | U1 | P13 race kernel: n-ary race block in both runtimes, the symmetric policy classified at selection, K1–K5 law tests including the latch arm-reversal test; amend `lawful-runtime-contract.md:63` | 3 | now; the prototype exists |
 | U2 | Duration literals plus a nominal `Duration`; the formatter prints literals | 2 | now |
 | U3 | Provide block, replacing `.provide(App)`, always an owner of its body and of forks in it (K17), with any block body for both header shapes; graph, lint and inspection read the header | 4 | now |
-| U4 | Owned fork, `run child` read by type in the checker and `interrupt child`, behind an explicit edition (O13). `ef fix` wraps only inert fork-to-join regions with pure fork operands and reports the rest (§8.3), with the behaviour proof in CI: per-target counts, emission failures fatal, cancellation cases, and the owner-tree difference documented to users. Include main's quiescence examples (§8.1). Migrate the 33 tests and the generated fixtures by hand where the fix reports. Drop `.cancel()`. | 6 | after O1, O13 |
+| U4 | Owned fork, `run child` read by type in the checker and `interrupt child`, behind an explicit edition (O13). `ef fix` wraps only regions where nothing in the new scope runs except owned forks of pure operands, their plain joins and pure local values, and reports the rest (§8.3), with the behaviour proof in CI: per-target counts, emission failures fatal, cancellation cases, and the owner-tree difference documented to users. Migrate by hand the 33 tests, `examples/causal.ef`, main's quiescence examples (§8.1) and the 1113 reported sources. Drop `.cancel()`. | 7 | after O1, O13 |
 | U5 | Formatter and LSP for the new blocks (hover, including "joins child `c`" for O10; folding; completion of plan entries) | 2 | with U3, U4 |
 | U6 | Library timeout family, `either`, `delay`, `retry`/`Schedule` in `.ef`; K14 and K15 probes | 3 | after #127, #128 Q9 |
 | U7 | `.provideService<S>` as library | 1 | after F3b (#126, #132) |
@@ -842,10 +852,12 @@ Most of the reported sources are the compiler suite's own generated fixtures, wh
 **U-workers acceptance** (re-plan decision 1; review 2 M4, review 3 B1, Major 3, Minor 5, O12). Title: "U-workers: provision-lifetime workers for layers (split from #134)". Scope: design and prototype a worker owned by a provision, declared once in the layer (round 3's proposed form is the layer entry `fork w(args)`), lowered on Go and JavaScript. It is accepted when:
 - **Composite rule.** A worker failure is registered as a pending child of the provision owner, and the R6/EF107 composite rule applies to worker plus body and to worker plus worker, including two failures with the same label; or the design states an explicit alternative (infallible workers, or a fail-fast policy that makes the body's failure and the worker's exclusive).
 - **Identity.** A worker has a declaration-qualified identity; a diamond merge starts it once, merged by identity as nodes are, and it is charged to the layer's construction work.
-- **Failure policy.** Deferred surfacing (round 3), fail-fast and supervision are compared against Erlang/OTP supervisors, Elixir `Task.Supervisor`, Effect `Layer.scoped` with `forkScoped`, Trio's nursery held in context, Kotlin `coroutineScope` and `supervisorScope`, and Loom's `Joiner`; the chosen policy is a law with a probe, and the note says that lifetime-owned does not mean supervised.
+- **Failure policy.** Deferred surfacing (round 3), fail-fast and supervision are compared against Erlang/OTP supervisors, Elixir `Task.Supervisor`, Effect `Layer.effect`/`Layer.effectDiscard` with `forkScoped` (v3: `Layer.scoped`), Trio's nursery held in context, Kotlin `coroutineScope` and `supervisorScope`, and Loom's `Joiner`; the chosen policy is a law with a probe, and the note says that lifetime-owned does not mean supervised.
 - **Start and progress.** The design states whether a worker is guaranteed a start or progress, and decides the start handshake (Trio `nursery.start`, Elixir `init/1`, Gleam `actor.start`) and node-scoped workers (today's R13) that round 3 left to O12.
 - **Ordering evidence.** Observable traces order worker start and stop against node build and release, on both targets.
 - **Probes.** `TestSpike134KnownFailingW1WorkerCompositeIsUncaught` and `TestSpike134KnownFailingW5WorkerDiamondStartsTwice` are inverted (w1 refused or declared; w5 one start) on both targets.
+
+**U4's estimate** (review 4, optional). The 7 days assume that the reported sources are migrated per generator, not per source: most of the 1113 come from the compiler suite's fixture generators behind the 33 failing tests, so one edit to a generator moves many sources. The structural rule (round 5) moved 85 more sources to manual, mostly hand-written tests that log or step the test scheduler between a fork and its join, which is why the estimate rose from 6 to 7 days. If the fixtures must be migrated source by source, the estimate does not hold.
 
 **Open owner questions** (each with a recommendation):
 
@@ -939,3 +951,11 @@ The six minors are fixed in place:
 The three optionals are taken as text: K9's revisit with P5 (U-K9), O10's two halves, and the AST rewrite contract (U-AST).
 
 Main was merged into the note branch without conflicts. Main's reserved decision words renamed `let done` in one corpus file, and main's three new examples on the #134 surface are measured for today and H (§8.1).
+
+**Round 5 (2026-10-12, after review 4).** Review 4 returned changes: 0 Blocker, 1 Major, 3 Minor and 4 Optional findings. It found decisions 1 and 3 met, and the Effect corrections, the race wording, the main merge and the decision record sound.
+- **Major 1, `ef fix`.** Round 4's claim was stronger than its rule: an admitted `recover` handler or an allowlisted service operation ran user code under the new scope (r1, r2, r8). The orchestrator fixed a structural rule: a region is wrapped only when nothing in the new scope runs except the owned forks of pure operands, their plain joins and pure local values. The allowlist is gone, handlers are reported, r1, r2 and r8 are refused tests, and the inventory was re-run: 16 sources wrapped in full and 3 in part, 1113 manual. The claim in §0 and §8.3 now covers exactly those regions, and U4 rose to 7 days on a stated per-generator assumption.
+- **Minor 1, race probe.** The cancellation test now enters the race with both arms running before it cancels and asserts the entry and completion counts. The JavaScript half of the successful-winner wording is labelled an untested observation.
+- **Minor 2, K17 hygiene.** The provider is resolved at the header into a binding no source can spell; handle joins are not wrapped; lint sees one provision per block. K17 is restated as a capture-avoiding substitution.
+- **Minor 3.** Effect 4 has no `Layer.scoped`; the note, prior-art.md and the U-workers acceptance name `Layer.effect`/`Layer.effectDiscard`.
+- **Optionals**, all taken: 25 quiescence fork sites, K5's unprobed main clause, U4's per-generator assumption, and the layer-header limit stated beside the provide-body fork rule and the worker stop-gap.
+
