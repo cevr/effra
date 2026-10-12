@@ -57,13 +57,23 @@ effect fn test_advance_admits_unstarted_fork() -> void raises {AssertionFailed} 
 	}
 }
 
-// Scheduler.awaitRegistration has one meaning on both targets: it returns once
-// no managed fiber is runnable. Each barrier case forks work that registers no
-// new timer before the barrier (the #80 repro, a latch signalled before the
-// fork, a pure fork, a completion that cancels its timeout timer, a nested
-// fork); a barrier waiting for a registration hangs until the watchdog. The
-// interrupt after a barrier must find the work already complete, so a barrier
-// that returned before the work settled fails the join instead.
+// Scheduler.awaitRegistration has one meaning on both targets: it returns at
+// quiescence, when no managed fiber is running or runnable. The interrupt
+// after a barrier must find the work already complete, so a barrier that
+// returned early fails the join, and a barrier waiting for a new registration
+// hangs until the watchdog. The cases cover:
+//   - work that registers no new timer: the #80 repro, a latch signalled
+//     before the fork, a pure fork, a completion that cancels its timeout
+//     timer, a nested fork, and mixed sibling forks;
+//   - wakes by cancellation, which carry no wake reservation on Go: an
+//     interrupted sleeper or latch waiter and a closed scope;
+//   - inline resumption on JavaScript, where a signalled waiter runs on top of
+//     its signaller's turn: readiness then registration, with and without the
+//     barrier before advance, and a resumed waiter that resumes another and
+//     advances.
+//
+// The cancellation cases are timing-dependent on Go; the receipts for #80
+// record their failure rates without the fix at high counts.
 func TestCausalExampleSchedulerBarrierAcrossTargets(t *testing.T) {
 	barrierCases := []string{
 		"test_barrier_after_immediately_completed_timeout",
@@ -71,6 +81,13 @@ func TestCausalExampleSchedulerBarrierAcrossTargets(t *testing.T) {
 		"test_barrier_after_pure_fork_then_interrupt",
 		"test_barrier_after_completion_cancels_timeout",
 		"test_barrier_after_nested_fork",
+		"test_barrier_settles_mixed_sibling_forks",
+		"test_barrier_after_interrupting_a_sleeper",
+		"test_barrier_after_interrupting_a_latch_waiter",
+		"test_barrier_after_scope_close",
+		"test_barrier_after_readiness_then_advance",
+		"test_advance_after_readiness",
+		"test_barrier_after_nested_resumption",
 	}
 	source, err := os.ReadFile(filepath.Join("..", "..", "examples", "causal.ef"))
 	if err != nil {
