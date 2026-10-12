@@ -2,7 +2,9 @@
 
 **Go's directness and native binaries. Effect's typed failures, explicit dependencies and owned lifetimes. Algebraic data types with exhaustive matching. One small language.**
 
-Effra is an experimental language for servers. You write `.ef` files and `ef` compiles them to a single static Go executable, or to JavaScript built on [Effect](https://effect.website). Every function signature states what it returns, every way it can fail and every service it needs, and the compiler checks all three.
+Effra is an experimental application language. You write `.ef` files and `ef` compiles them to a single static Go executable, or to JavaScript built on [Effect](https://effect.website). Every function signature states what it returns, every way it can fail and every service it needs, and the compiler checks all three.
+
+The aim is application code of every kind, on servers and in front-ends: anything JavaScript can run, with more guardrails and with I/O handled by checked effects instead of promises. What runs today is server-focused. Front-end support, including canvas and WebGL rendering, is [direction](NORTH_STAR.md) and not built yet ([#117](https://github.com/cevr/effra/issues/117)).
 
 > **Status: runnable prototype.** Everything in the first two sections compiles and runs today. The gate checks every Effra snippet that isn't labelled as a sketch. Syntax and APIs will still change.
 
@@ -369,13 +371,16 @@ Each row states what has landed on this branch, what is in flight and what is on
 | Payload-aware recovery: `.recover<E>(handler)` passes the error's fields to an effectful handler | Landed on Go and JS ([`recovery-outcome.ef`](examples/recovery-outcome.ef), [`recovery-codec.ef`](examples/recovery-codec.ef)); reified `Exit` is not exposed |
 | Layer runtime: concurrent shared acquisition, rollback and cleanup in reverse order | Shared build-owned acquisition with individually cancellable waiters landed on Go and JS; the remaining units are in progress |
 | Codecs derived from records and enums, with explicit wire ↔ domain transformations | Structural JSON derivation through [`effra/json`](docs/bundled-modules.md) and explicit transformed witnesses composed with `with` run on Go and JS, including at typed HTTP endpoints |
-| Graph views: `ef graph --kind layers --format mermaid\|dot`, plus MCP and editor views | In progress |
+| Graph views: `ef graph --kind layers\|machine --format mermaid\|dot`, plus MCP and editor views | In progress |
 | HTTP server with bounded, owned shutdown (`Http.listen`) | Landed on Go and JS with typed endpoints and route tables ([`http-transport.ef`](examples/http-transport.ef), [`http-endpoints.ef`](examples/http-endpoints.ef)) and a shared wire corpus; streaming bodies are not built |
 | Rich Go interop: host types, methods, `io.Reader`/`io.Writer`, `context` | Host types, methods, interface assignment, checked I/O and `context` forwarding landed; owned resources and callbacks in progress |
 | Library modules: `pub` exports and module-qualified identity | Designed |
-| State machines: ordinary step functions run by an owned runtime | [Specified](docs/specs/state-machines.md); not built |
+| State machines: ordinary step functions run by an owned runtime | The `machine` declaration, decision syntax (`enter`, `stay`, `ignore`, `reject`, `done`), its static `stay` check and inspectable plans landed ([`machine-search.ef`](examples/machine-search.ef)); the runtime is specified, not built |
 | Actors with explicit mailbox budgets and owned behavior | [Specified](docs/specs/actors.md); not built |
 | Evidence and proofs: values that carry what was checked | [Designed](docs/research/opaque-values-and-evidence.md) |
+| Front-end application code: floating point, loops, numeric buffers and a canvas/WebGL render loop on the JS target | Direction; not built ([#117](https://github.com/cevr/effra/issues/117)) |
+| Swappable effect runtimes: a userland provider admitted by the runtime laws, with pinned Effect as the JS default | [Specified research](docs/research/lawful-runtime-contract.md); neither the RS1 law suite ([#124](https://github.com/cevr/effra/issues/124)) nor the Effect-suite harness ([#123](https://github.com/cevr/effra/issues/123)) runs yet |
+| Laws as a general construct for behavior types can't state | Admitted, not built; shape open ([#125](https://github.com/cevr/effra/issues/125)) |
 
 ### Proofs you can't forget to check
 
@@ -403,9 +408,9 @@ Service laws, such as "decode after encode returns the input", become obligation
 
 ### State machines from ordinary functions
 
-The transition table in [the tour](#matching-several-values-at-once) already compiles: a multi-subject match whose every state and event pair is checked. Running it as a machine is specified but not built. In [the machine spec](docs/specs/state-machines.md), an owned runtime admits events, runs each step and owns the work each state starts, as one form of [actor](docs/specs/actors.md) behavior. A step can be a pure function or an effect with its own failures and services.
+The transition table in [the tour](#matching-several-values-at-once) already compiles: a multi-subject match whose every state and event pair is checked. Running it as a machine is specified; the declaration and its checks have landed, the runtime has not. In [the machine spec](docs/specs/state-machines.md), an owned runtime admits events, runs each step and owns the work each state starts, as one form of [actor](docs/specs/actors.md) behavior. A step can be a pure function or an effect with its own failures and services.
 
-A machine will be a small `machine` declaration that names its initial state and its ordinary step functions. The declaration earns its place because the compiler checks something no library can: a `Stay` decision must keep the state's variant. Behavior stays in ordinary functions.
+A machine is a small `machine` declaration that names its initial state and its ordinary step functions. The declaration earns its place because the compiler checks something no library can: a `stay` decision must keep the state's variant. A step returns the predeclared `decision<S, O>` and writes `enter next`, `stay next`, `ignore`, `reject` or `done output`; [`machine-search.ef`](examples/machine-search.ef) shows each form. Behavior stays in ordinary functions.
 
 ## Try it
 
@@ -448,6 +453,8 @@ Native builds lower checked source into typed Go closures and run `go build`. Th
 | [recovery-codec.ef](examples/recovery-codec.ef) | Effectful recovery handler converting a decode failure into a domain failure | Go / JS |
 | [concurrency.ef](examples/concurrency.ef) | Child join/interrupt and deadline recovery | Go / JS |
 | [causal.ef](examples/causal.ef) | Managed virtual time, shared latches and causal cleanup tests | Go / JS |
+| [quiescence.ef](examples/quiescence.ef) | The quiescence barrier for forked work that registers no new timer | Go / JS |
+| [quiescence-wakes.ef](examples/quiescence-wakes.ef) | The barrier and `advance` with wakes in flight: cancellation and inline resumption | Go / JS |
 | [callables-service.ef](examples/callables-service.ef) | Callbacks that are generic over failure and service rows | Go / JS |
 | [testing.ef](examples/testing.ef) | Fixture providers, typed recovery and owned children in tests | Go / JS |
 | [imports.ef](examples/imports.ef) | Automatic native signatures, partial results and context forwarding | Go |
@@ -481,4 +488,4 @@ go test -race ./...
 
 The gate also verifies the pinned Effect reference tests, which live in a submodule: run `scripts/init_upstream.sh` once per clone or worktree first.
 
-Fast compilation is a design constraint; see the [measurement receipts](docs/prototype.md#baseline). Effra is a server language. Kernels, hard real-time and no-GC execution are out of scope.
+Fast compilation is a design constraint; see the [measurement receipts](docs/prototype.md#baseline). Effra is an application language for servers and front-ends. Kernels, hard real-time and no-GC execution are out of scope.

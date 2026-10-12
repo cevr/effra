@@ -491,7 +491,7 @@ func runJSOnHTTPHosts(t *testing.T, source, assertions string) map[string]string
 // sibling data names.
 func TestHttpHandlerIsAdmittedOnlyWithHttp(t *testing.T) {
 	for _, target := range []string{"go", "js"} {
-		r := CompileFor(`fn ignore(h: HttpHandler) -> void { void }
+		r := CompileFor(`fn discard(h: HttpHandler) -> void { void }
 effect fn main() -> void { void }`, target)
 		if r.Checked {
 			t.Fatalf("%s: unadmitted HttpHandler was accepted", target)

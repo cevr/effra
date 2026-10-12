@@ -1,6 +1,6 @@
 # Effra
 
-Effra describes server programs using explicit, inspectable effect contracts.
+Effra describes application programs, for servers and front-ends, using explicit, inspectable effect contracts.
 
 ## Language
 
@@ -59,7 +59,15 @@ overhead or a fixed speedup multiplier.
 
 **Callback-result relation**: Retained evidence relating a callback invocation's returned handles to its resolved named callee and input ownership. It is separate from ownership of the callable value; an unresolved relation remains potential ownership.
 
-**Construct admission**: The rule that a language construct, meaning syntax or a checker rule, exists only to make bad code unrepresentable where a library cannot.
+**Construct admission** (owner rule, 2026-10-07; the 2026-10-12 tests and checks are direction, a recorded synthesis and elaboration of owner direction, not owner words): The rule that a language construct, meaning syntax or a checker rule, exists only to make bad code unrepresentable where a library cannot. Since 2026-10-12 a construct must also pass the guardrail test, the portability test and the composability checks.
+
+**Guardrail test** (direction; recorded synthesis of owner direction, 2026-10-12, not owner words): The first construct admission test. A construct passes when it makes an illegal state unrepresentable that neither a library function nor a general type feature can. Behavior that fails it is a primitive function plus library.
+
+**Portability test** (direction; recorded synthesis of owner direction, 2026-10-12, not owner words): The second construct admission test. A construct passes when its meaning is a protocol, a canonical plan or operations plus laws, that any lawful provider can implement, including a userland provider that is not an Effect runtime.
+
+**Composability checks** (direction; recorded elaboration of owner direction, 2026-10-12, not owner words): The five checks every construct and primitive decision passes with evidence. Lossless wrapping: an ordinary function abstracts the construct without losing ownership, rows or observations. Nesting: it nests inside every other construct and library combinator with defined meaning. First-class recipes: effects stay values that library combinators can take. Orthogonality: the primitive set stays small, and derived behavior is library. Composition laws: the construct's algebra is stated as laws.
+
+**Lawful provider** (direction): A userland implementation of a construct's protocol that is admitted because it passes that protocol's laws. It need not be an Effect runtime or share Effect's API. An effect runtime provider and a machine provider are two kinds.
 
 **Notation exception**: A syntax form admitted without an unrepresentability argument because it desugars one-to-one, at parse time, into ordinary calls and adds no checking, typing, evaluation order or runtime behavior.
 
@@ -67,7 +75,7 @@ overhead or a fixed speedup multiplier.
 
 **Predeclared language identifier**: A name the language specification defines in every module without an import or library declaration, such as `Fiber` or `Timeout`, following Go's predeclared `len` and `error`. Capability services are not predeclared language identifiers, even when the compiler currently declares them.
 
-**Postfix construct**: A compiler-known construct written after a receiver with `.`, such as `.catch<E>(h)`, `.provide<S>(p)` or `.timeout(ms)`. The parser claims its word after any receiver. Declaring that word as a member name is proposed to become a diagnostic, but it is not one yet.
+**Postfix construct**: A compiler-known construct written after a receiver with `.`, such as `.catch<E>(h)`, `.provide<S>(p)` or `.timeout(ms)`. The parser claims its word after any receiver. Declaring that word as a member name is proposed to become a diagnostic, but it is not one yet. The 2026-10-12 construct bar no longer admits this spelling for constructs; #134 decides, per form, a keyword or block construct or ordinary library.
 
 **Special-cased library item** (rejected pattern): A bundled, prelude or library declaration that the compiler recognises by identity or name to produce a semantic fact about it (a diagnostic, checked type, row or ownership fact), also called a lang item. An item stops being one only by losing every such branch or by becoming syntax. Backend retention or emission keyed on the item does not by itself make it one.
 
@@ -85,7 +93,7 @@ overhead or a fixed speedup multiplier.
 
 **Construction authority** (admitted, not implemented): The right to construct values of a nominal type. A `pub readonly` type lets other modules read and match its values while only its owner module constructs them.
 
-**Law** (admitted, not implemented): A named obligation declared in a service or contract and checked by a law suite. A refuted law refuses the build.
+**Law** (admitted, not implemented): A named behavioral obligation that types cannot state, declared in a service, contract or other declaration and checked by a law suite. A refuted law refuses the build. Laws are a general construct; #125 decides their shape.
 
 **JSX pragma** (admitted, not implemented): A user-defined selection of the factory, fragment and result types to which JSX notation desugars.
 
@@ -181,6 +189,14 @@ overhead or a fixed speedup multiplier.
 
 **Entry epoch** (specified): An identity distinguishing a state entry from prior entries so obsolete work cannot update a later entry.
 
+**Transition decision** (implemented syntax): The value a machine step produces for one admitted event: `enter` (re-enter), `stay` (keep the entry, same tag), `ignore`, `reject` (observable, state unchanged) or `done` (terminal output). Its type is the predeclared `decision<S, O>`.
+
+**Region** (proposed): A payload field of one state variant, bound by the machine declaration to a separately declared child machine whose state it holds. Several regions on a variant are orthogonal; one region is a nested (hierarchical) child.
+
+**Region entry** (proposed): The state entry of one active region, nested in its parent's entry with its own epoch, so re-entering one region leaves its siblings' work untouched.
+
+**Machine history** (proposed pattern): A remembered child state kept as ordinary data in an inactive variant and restored by a later `enter`; deep history restores the value, shallow history keeps only its top-level variant. Restoring always starts fresh entries.
+
 **Binding contract**: Supplemental behavioral facts attached to a host declaration, including its cancellation, failure, resource, and trust policy.
 
 **Request scope**: A fresh owning scope for one HTTP request, linked to connection and server cancellation. Completed shutdown includes its handler cleanup.
@@ -212,3 +228,5 @@ overhead or a fixed speedup multiplier.
 **Unmatched floor** (size conformance): A control program that does less than the fixture it accompanies, such as printing a result without the entry's cancellation and scope. It is recorded only as a lower bound and is never compared as a member of a semantic equivalence baseline.
 
 **Program time**: The time authority under which managed sleeps and deadlines execute. Test program time can advance independently of the watchdog's wall clock.
+
+**Quiescence**: The scheduler state in which no managed fiber is running or runnable. A wake in flight is not idle: a fiber that has been signalled, fired or cancelled but has not run again is runnable. At quiescence, every pending timer that managed work can register without outside input is registered. `Scheduler.awaitRegistration()` returns at quiescence, and `Scheduler.advance` selects each deadline only at quiescence. When several fibers wait for quiescence at once, the order in which they are released is unspecified. Interrupting a waiter is an ordinary interruption. Unmanaged goroutines, host promises and foreign blocking calls are outside it.

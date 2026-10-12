@@ -65,6 +65,10 @@ func TestCLISmoke(t *testing.T) {
 		{"workflow-js", []string{"run", "examples/workflow.ef", "--target", "js"}, "queued: Welcome, Ada\naccess denied\n"},
 		{"latest-task-go", []string{"run", "examples/latest-task.ef", "--target", "go"}, "result: new\n"},
 		{"latest-task-js", []string{"run", "examples/latest-task.ef", "--target", "js"}, "result: new\n"},
+		{"machine-search-go", []string{"run", "examples/machine-search.ef", "--target", "go"}, "enter loading ada; stay loading ada; enter ready ada; reject\n"},
+		{"machine-search-js", []string{"run", "examples/machine-search.ef", "--target", "js"}, "enter loading ada; stay loading ada; enter ready ada; reject\n"},
+		{"machine-breaker-go", []string{"run", "examples/machine-breaker.ef", "--target", "go"}, "enter half-open primary; enter open primary; done retired\n"},
+		{"machine-breaker-js", []string{"run", "examples/machine-breaker.ef", "--target", "js"}, "enter half-open primary; enter open primary; done retired\n"},
 	} {
 		t.Run("run/"+c.name, func(t *testing.T) {
 			t.Parallel()
@@ -123,6 +127,21 @@ func TestCLISmoke(t *testing.T) {
 		workflow := cliSmokeJSON(t, binary, workspace, true, "inspect", "examples/workflow.ef", "welcome")
 		cliSmokeEqual(t, cliSmokeAt(t, workflow, "symbol", "contract", "requirements"), []any{"Access", "Delivery", "Directory"})
 		cliSmokeEqual(t, cliSmokeAt(t, workflow, "symbol", "contract", "failures"), []any{"DeliveryFailed", "Denied", "UserMissing"})
+	})
+
+	t.Run("inspect-machine-plan", func(t *testing.T) {
+		t.Parallel()
+		workspace := cliSmokeExamples(t)
+		plan := cliSmokeJSON(t, binary, workspace, true, "inspect", "examples/machine-breaker.ef", "CircuitBreaker")
+		cliSmokeEqual(t, cliSmokeAt(t, plan, "machine", "initial", "variant"), "Closed")
+		cliSmokeEqual(t, cliSmokeAt(t, plan, "machine", "terminalFailures"), []any{map[string]any{"name": "ProbeUnavailable", "roles": []any{"step"}}})
+	})
+
+	t.Run("graph-machine-semantics", func(t *testing.T) {
+		t.Parallel()
+		workspace := cliSmokeExamples(t)
+		graph := cliSmokeJSON(t, binary, workspace, true, "graph", "examples/machine-search.ef", "--kind", "machine")
+		cliSmokeEqual(t, cliSmokeAt(t, graph, "data", "effra", "completeness", "semantics"), "checked-static-machine-plan")
 	})
 
 	t.Run("inspect-imports-bindings", func(t *testing.T) {

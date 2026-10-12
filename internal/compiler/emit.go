@@ -317,7 +317,7 @@ func (r *Result) emitJSModule(surface jsSurface) (JSModule, error) {
 		}
 	}
 	r.jsCodecExports(plan, &out, &decl, declarations)
-	for _, r := range r.Program.BundledTemplates {
+	for _, r := range r.Program.compilerTemplates() {
 		decl.WriteString(jsTemplateDeclaration(r))
 	}
 	for _, data := range append(append([]*DataDeclaration{}, r.Program.Records...), r.Program.Enums...) {
@@ -644,6 +644,12 @@ func jsExpr(e *Expr, effect bool) string {
 		return "undefined"
 	case "construct":
 		return jsConstruct(e, effect)
+	case "decision":
+		// A decision form is a construction of the predeclared template's
+		// variant named by its word.
+		form := *e
+		form.Fields = decisionFields(e)
+		return jsConstruct(&form, effect)
 	case "name":
 		if e.Text == "function" {
 			return e.ResolvedFunction.jsEmissionName()
@@ -774,7 +780,7 @@ func jsConstruct(e *Expr, effect bool) string {
 	}
 	if e.ResolvedTemplate != nil {
 		if e.ResolvedTemplate.Kind == "enum" {
-			return "({ _tag: " + quoted(e.ResolvedTemplate.Identity+"."+e.Left.Name) + ", " + strings.Join(parts, ", ") + " })"
+			return "({ _tag: " + quoted(e.ResolvedTemplate.Identity+"."+constructVariant(e)) + ", " + strings.Join(parts, ", ") + " })"
 		}
 		return "({ " + strings.Join(parts, ", ") + " })"
 	}

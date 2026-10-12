@@ -643,7 +643,7 @@ func TestGraphRequestRefusals(t *testing.T) {
 		code   string
 	}{
 		{map[string]any{"kind": "graph"}, GraphRefusalKind},
-		{map[string]any{"kind": "machine"}, GraphRefusalKindUnavailable},
+		{map[string]any{"kind": "machine", "mode": "build"}, GraphRefusalIncompatible},
 		{map[string]any{"kind": "actor"}, GraphRefusalKindUnavailable},
 		{map[string]any{"kind": 3}, GraphRefusalInvocation},
 		{map[string]any{"format": "svg"}, GraphRefusalFormat},

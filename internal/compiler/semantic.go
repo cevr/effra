@@ -293,6 +293,7 @@ type Result struct {
 	Diagnostics            []Diagnostic           `json:"diagnostics"`
 	Symbols                []Symbol               `json:"symbols"`
 	Layers                 []LayerPlan            `json:"layers,omitempty"`
+	Machines               []MachinePlan          `json:"machines,omitempty"`
 	Declarations           []Declaration          `json:"declarations,omitempty"`
 	Codecs                 []CodecInspection      `json:"codecs,omitempty"`
 	CodecPlans             []*CodecPlan           `json:"codecPlans,omitempty"`
@@ -2252,6 +2253,7 @@ func newChecker(program *Program, r *Result) *checker {
 	c.values = newCheckedValueArena(c)
 	resolveBindings(program)
 	addBuiltinData(program)
+	addPredeclaredDecision(program)
 	program.semantic = c
 	r.checkedSymbols = map[string]checkedSymbol{}
 	r.checkedFunctions = map[*Function]checkedSymbol{}
@@ -2502,6 +2504,9 @@ func (c *checker) check() {
 	for _, layer := range c.program.Layers {
 		claim(layer.Name, layer.Span)
 	}
+	for _, machine := range c.program.Machines {
+		claim(machine.Name, machine.Span)
+	}
 	// Builtin operations resolve their signatures like declared ones, so the
 	// application plan retains the builtin data their types name.
 	for _, s := range builtinServicesFor(c.program) {
@@ -2592,6 +2597,7 @@ func (c *checker) check() {
 	for _, f := range c.program.checkedFunctions() {
 		c.function(f, true)
 	}
+	c.checkMachines()
 	for module, admitted := range c.admittedSummaries {
 		functions := []*Function{}
 		for _, f := range c.program.BundledFunctions {
@@ -3026,7 +3032,7 @@ func (c *checker) parameterTypeKnown(name string) bool {
 }
 
 func (c *checker) requiresTemplateArguments(name string) bool {
-	template := c.templateByName(name)
+	template := c.typeTemplateByName(name)
 	return template != nil && len(template.Parameters) > 0
 }
 func (c *checker) typeNodeID(id TypeID) string {
@@ -3107,11 +3113,16 @@ func rowNodeIDForLabels(labels []string) string {
 	return "r:" + hex.EncodeToString(sum[:8])
 }
 
+// rowNodeID is the canonical ID internRow retained for the row, so projecting
+// a row neither copies nor rehashes its labels.
 func (c *checker) rowNodeID(id RowID) string {
 	if id == emptyRowID {
 		return ""
 	}
-	return rowNodeIDForLabels(c.rowLabels(id))
+	if int(id) > len(c.rows) {
+		return rowNodeIDForLabels(nil)
+	}
+	return c.rows[id-1].ID
 }
 
 func (c *checker) node(id TypeID) *semanticTypeNode {
@@ -4449,6 +4460,9 @@ func (c *checker) blockValue(b *Block, env localEnv, effect bool, result blockRe
 			out.evaluation = previousEvaluation
 		} else {
 			last := index == len(b.Statements)-1
+			if !last && s.Value != nil && !c.poisoned(t) {
+				c.refuseDiscardedDecision(s.Value, t)
+			}
 			switch {
 			case !t.isEffect() || last && result == blockSelected:
 			case last && result == blockScope:
@@ -4530,6 +4544,8 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			e.ResolvedFunction = f
 			e.Text = "function"
 			c.observeReference(e, e.Span, lexicalTarget{kind: "function", function: f})
+		} else if machine := c.machineNamed(e.Name); machine != nil {
+			t = c.machineValueRefusal(e, machine)
 		} else if !c.absentName(absentInValue, e.Name, e.Span) {
 			c.diagnostic("EF102", "unknown value "+e.Name, e.Span)
 		}
@@ -4629,7 +4645,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			}
 		}
 		if f == nil {
-			if !unresolvedName || !c.absentName(absentInValue, e.Left.Name, e.Left.Span) {
+			if !c.refuseDecisionTypeAsValue(e.Left, e.Span) && (!unresolvedName || !c.absentName(absentInValue, e.Left.Name, e.Left.Span)) {
 				c.diagnostic("EF102", "unknown function or service method", e.Span)
 			}
 			for _, a := range e.Args {
@@ -5105,6 +5121,8 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		t = c.recoverFailure(e, env, inEffect)
 	case "construct":
 		t = c.construct(e, env, inEffect)
+	case "decision":
+		t = c.decisionForm(e, env)
 	case "match":
 		t = c.match(e, env, inEffect)
 	case "unary":
@@ -5133,7 +5151,11 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 				valid = false
 			}
 		}
-		if c.expect(valid, "EF106", "operator requires matching primitive values; + accepts strings or i64, and -, *, /, % and ordered comparisons accept i64", e.Span, left, right) && (e.Name == "/" || e.Name == "%") && !c.divisorProof(e.Right) {
+		message := "operator requires matching primitive values; + accepts strings or i64, and -, *, /, % and ordered comparisons accept i64"
+		if !valid {
+			message += decisionPrecedenceHint(e)
+		}
+		if c.expect(valid, "EF106", message, e.Span, left, right) && (e.Name == "/" || e.Name == "%") && !c.divisorProof(e.Right) {
 			c.diagnostic("EF150", divisorRefusal(e), e.Right.Span)
 		}
 		if valid {
@@ -5195,7 +5217,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	}
 	if e.Kind == "run" || e.Kind == "if" || e.Kind == "match" || e.Kind == "scope" || e.Kind == "fork" {
 		t.executed = t.evaluation
-	} else if e.Kind == "construct" || e.Kind == "payload" {
+	} else if e.Kind == "construct" || e.Kind == "payload" || e.Kind == "decision" {
 		// Constructor payloads are required to be pure. Keep their invalid child
 		// evaluation facts available for tooling without admitting those rows
 		// into the enclosing body contract after the purity diagnostic.
@@ -5209,7 +5231,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 	e.Identity = t.identity
 	if e.Kind == "run" || e.Kind == "if" || e.Kind == "match" || e.Kind == "scope" || e.Kind == "fork" {
 		e.Executed = c.projectEvaluation(t.executed)
-	} else if e.Kind == "construct" || e.Kind == "payload" {
+	} else if e.Kind == "construct" || e.Kind == "payload" || e.Kind == "decision" {
 		e.Executed = EvaluationRows{}
 	} else {
 		e.Executed = e.Evaluation
@@ -5351,7 +5373,7 @@ func (c *checker) construct(e *Expr, env localEnv, inEffect bool) checkedExpress
 	if !ok {
 		if variantName != "" && c.enums[typeName] != nil {
 			c.diagnostic("EF116", "unknown variant "+typeName+"."+variantName, e.Span)
-		} else if variantName != "" || !c.absentName(absentInBlock, typeName, e.Left.Span) {
+		} else if !c.refuseDecisionTypeAsValue(e.Left, e.Span) && (variantName != "" || !c.absentName(absentInBlock, typeName, e.Left.Span)) {
 			c.diagnostic("EF102", "unknown data declaration "+typeName, e.Span)
 		}
 		return c.checkedData("invalid")

@@ -480,10 +480,9 @@ func stringBytes(value any, limit int) int {
 				walk(iter.Value())
 			}
 		case reflect.Struct:
-			for i := 0; i < v.NumField() && total <= limit; i++ {
-				field := v.Type().Field(i)
-				if field.PkgPath != "" || strings.Split(field.Tag.Get("json"), ",")[0] == "-" {
-					continue
+			for _, i := range visibleStringFields(v.Type()) {
+				if total > limit {
+					break
 				}
 				walk(v.Field(i))
 			}
@@ -491,6 +490,30 @@ func stringBytes(value any, limit int) int {
 	}
 	walk(reflect.ValueOf(value))
 	return total
+}
+
+// stringFieldsByType caches visibleStringFields per struct type.
+var stringFieldsByType sync.Map
+
+// visibleStringFields lists the fields of a struct type that stringBytes
+// counts: exported, and not tagged json:"-". The list is computed once per
+// type, so counting a value allocates nothing per field it visits (round-4
+// review M3: splitting each field's tag was 27,000 allocations for one
+// machine graph view).
+func visibleStringFields(typ reflect.Type) []int {
+	if fields, ok := stringFieldsByType.Load(typ); ok {
+		return fields.([]int)
+	}
+	fields := make([]int, 0, typ.NumField())
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		if name, _, _ := strings.Cut(field.Tag.Get("json"), ","); field.PkgPath != "" || name == "-" {
+			continue
+		}
+		fields = append(fields, i)
+	}
+	stringFieldsByType.Store(typ, fields)
+	return fields
 }
 
 // ValidateProjectionResponse charges an envelope even when its type view was
@@ -1006,18 +1029,23 @@ func (r *Result) CheckResponse() map[string]any {
 	}
 	r.AddProducer(response)
 	if projection.Complete {
-		response["symbols"] = r.Symbols
-		response["layers"] = r.Layers
-		response["declarations"] = r.Declarations
-		response["bindings"] = r.Bindings
-		response["types"] = projection.Types
-		response["rows"] = projection.Rows
-		response["sources"] = r.Sources
-		response["bundledBindings"] = r.BundledBindings
-		response["bundledInterfaces"] = r.BundledInterfaces
+		// Every table that references the projected types, rows or
+		// declarations lives in this one map, so a refusal removes all of them
+		// together and a new table cannot be left behind with dangling refs.
+		metadata := map[string]any{
+			"symbols": r.Symbols, "layers": r.Layers, "declarations": r.Declarations, "bindings": r.Bindings,
+			"types": projection.Types, "rows": projection.Rows, "sources": r.Sources,
+			"bundledBindings": r.BundledBindings, "bundledInterfaces": r.BundledInterfaces,
+		}
+		if len(r.Machines) > 0 {
+			metadata["machines"] = r.Machines
+		}
 		if len(r.Codecs) > 0 {
-			response["codecs"] = r.Codecs
-			response["codecPlans"] = r.CodecPlans
+			metadata["codecs"] = r.Codecs
+			metadata["codecPlans"] = r.CodecPlans
+		}
+		for key, value := range metadata {
+			response[key] = value
 		}
 		if len(r.Endpoints) > 0 {
 			response["endpoints"] = r.Endpoints
@@ -1025,7 +1053,7 @@ func (r *Result) CheckResponse() map[string]any {
 		usage, err := r.ValidateProjectionResponse(projection, response)
 		if err != nil {
 			projection = refusedProjection(projection.Limits, usage, err.Error())
-			for _, key := range []string{"symbols", "layers", "declarations", "bindings", "types", "rows", "sources", "bundledBindings", "bundledInterfaces", "codecs", "codecPlans"} {
+			for key := range metadata {
 				delete(response, key)
 			}
 			response["typeProjectionComplete"] = false

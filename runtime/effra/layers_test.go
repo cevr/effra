@@ -487,7 +487,7 @@ func TestLayerSchedulerMasksProducerContinuationsAndDrainsOrderedClose(t *testin
 			return nil
 		}))
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	adjustWithin(t, scheduler, 42)

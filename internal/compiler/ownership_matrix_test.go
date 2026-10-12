@@ -457,7 +457,7 @@ func TestOwnershipMatrixReportsDistinctRoots(t *testing.T) {
 func TestOwnershipMatrixNativeTruth(t *testing.T) {
 	fixture := ownershipFixture(t)
 	m := loadOwnershipMatrix(t, fixture, false)
-	sample := []string{"matrix/s1_run@1_plain", "probe/h2-final-run-control", "probe/rv2-rows-nested-scope-join", "matrix/rw_join_observer_ignore"}
+	sample := []string{"matrix/s1_run@1_plain", "probe/h2-final-run-control", "probe/rv2-rows-nested-scope-join", "matrix/rw_join_observer_discard"}
 	for _, key := range sample {
 		truth := m.truths[key+"/go"]
 		r := CompileFor(m.sources[key], "go")

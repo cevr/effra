@@ -928,6 +928,13 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 			}
 			return response, nil
 		}
+		if r.FindMachine(args.Symbol) != nil {
+			response, err := r.MachineInspection(args.Symbol, args.File)
+			if err != nil {
+				return nil, err
+			}
+			return response, nil
+		}
 		if declaration := r.FindDeclaration(args.Symbol); declaration != nil {
 			if err := checkDeclarationMetadata(*declaration); err != nil {
 				return nil, err

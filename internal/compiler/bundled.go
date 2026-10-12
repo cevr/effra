@@ -144,7 +144,11 @@ func (r *Result) loadBundledImports(source string) {
 	aliases := map[string]string{}
 	for _, imp := range p.BundledImports {
 		if _, exists := bundledIndex[imp.Path]; !exists {
-			r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF126", Message: "unsupported bundled module " + imp.Path + "; user package resolution is unavailable", Span: imp.Span})
+			diagnostic := Diagnostic{Code: "EF126", Message: "unsupported bundled module " + imp.Path + "; user package resolution is unavailable", Span: imp.Span}
+			if imp.Path == removedMachinesModule {
+				diagnostic.Help = stepTemplateMigration
+			}
+			r.Diagnostics = append(r.Diagnostics, diagnostic)
 			continue
 		}
 		aliases[imp.Alias] = imp.Path

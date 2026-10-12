@@ -1,0 +1,17 @@
+enum SessionState { Idle  Active { key: string }  Closed }
+enum SessionEvent { Open { key: string }  Close  Touch  Restore { snapshot: SessionState } }
+fn sessionStep(state: SessionState, event: SessionEvent) -> decision<SessionState, void> {
+    let current = state
+    let kept = current
+    match event, current {
+        SessionEvent.Open { key }, SessionState.Idle => stay SessionState.Active { key: key }
+        SessionEvent.Touch, SessionState.Active => stay kept
+        SessionEvent.Open | SessionEvent.Close | SessionEvent.Touch | SessionEvent.Restore, SessionState.Active | SessionState.Closed => ignore
+        SessionEvent.Close | SessionEvent.Touch | SessionEvent.Restore, SessionState.Idle => ignore
+    }
+}
+
+machine Session {
+    initial SessionState.Idle {}
+    step sessionStep
+}

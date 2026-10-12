@@ -50,7 +50,7 @@ The test: if the construct's checked contract could be written as ordinary code 
    - the `Scheduler` dependency of `.timeout`;
    - test-harness policy keyed on provider names.
 4. **Planned class-1 designs:**
-   - the machine `Stay` rule "keyed on the bundled `Step` identity" (`docs/specs/state-machines.md:130`);
+   - the machine `Stay` rule "keyed on the bundled `Step` identity" (`docs/specs/state-machines.md:130`), resolved 2026-10-12 by decision syntax (row 1-P1);
    - the `Actor<P>` projection and `actors.post` operation references (`docs/specs/actors.md:13,29`);
    - the earlier receiver-method plan to move `.catch`, `.provide`, `.timeout` and `.orFail` into `effra/effect` methods.
 5. **`main` now has one general library-intrinsic mechanism, and it conforms to D4.** The `effra/i64` members `format` and `parse` have real `.ef` signatures with compiler-owned bodies (2-L1). The remaining former "intrinsics" are either implementations of syntax (class S) or providers of capability services (2-L2).
@@ -96,7 +96,7 @@ Line numbers are at `515d49b` and identify evidence, not permanent anchors. All 
 
 | # | Item | Where | Risk |
 | --- | --- | --- | --- |
-| 1-P1 | Machine `Stay` rule keyed on the bundled `Step` enum | `docs/specs/state-machines.md:76-79,130-141` | A bundled enum the checker recognises by identity. The statecharts design lane owns the decision syntax; this audit lists it as a dependency only. |
+| 1-P1 | Machine `Stay` rule keyed on the bundled `Step` enum | `docs/specs/state-machines.md` [Decisions](../specs/state-machines.md#decisions) | **Resolved 2026-10-12 (M1).** The bundled `Step` enum and `effra/machines` are removed. Decisions are syntax over the predeclared `decision<S, O>` (`enter`, `stay`, `ignore`, `reject`, `done`); the `stay` rule and the plan read the forms, and no checker branch keys on a library declaration. |
 | 1-P2 | Receiver-method plan for `.catch`, `.provide`, `.timeout` and `.orFail` | earlier `docs/design.md:33`; `docs/specs/language-abstractions.md:57-61,148` | Moving forms the checker must still know into `effra/effect` methods recreates the failure mode. Superseded by D1. |
 | 1-P3 | `Actor<P>` client projection, `actors.post` operation references and spawn row charging | `docs/specs/actors.md:13,29`; audit row 29 | A bundled `Actor` type and `actors` functions whose typing the compiler derives. |
 | 1-P4 | Generalized `run` binding and Result `?` | `docs/research/generalized-run-binding.md:42`; audit row 33 | A binder protocol keyed on `Option` or `Result` identity would be Rust's `Try` lang item (`rust@69bccf03` `compiler/rustc_attr_ir/src/lang_items.rs:372`). The current recommendation (explicit `flatMap`) carries no such risk. Guard only. |
