@@ -14,42 +14,47 @@ Appendix to [primitives.md](../primitives.md). Each entry gives what the system 
 **Kotlin coroutines (1.10.2).**
 - `coroutineScope { }` is fail-fast: a child failure cancels its siblings.
 - `withTimeout` is a `ScopeCoroutine`; `withTimeoutOrNull` is the fallback variant.
-- All of these are library functions taking a trailing lambda.
-- *Right:* structured scopes as ordinary functions.
+- All of these are library functions taking a trailing lambda. `launch` and `async` are extensions on the `CoroutineScope` receiver, so a spawn needs an owner in scope. The compiler supplies the CPS transform and the state machines for `suspend` functions.
+- *Right:* structured scopes as ordinary functions, and an owner required to spawn.
 - *Don't copy:* constructs and library are indistinguishable (a trailing lambda looks like a block). Fail-fast interacts badly with fork + join + catch: catching a child's failure at its join is too late, because the scope has already cancelled the siblings.
 
 **Swift.**
 - `async let` (SE-0304/0317, 0317 lines 295, 313) binds a child task to the enclosing scope implicitly, and the task is awaited or cancelled at scope exit.
-- `withDeadline` (SE-0526) takes the minimum of nested deadlines (lines 167–172), waits for the body (129–131), and makes deadlines lexically visible (842–857).
+- `withDeadline` (SE-0526, status "Accepted with modifications", `0526-deadline.md:5`) takes the minimum of nested deadlines (lines 167–172) and makes deadlines lexically visible (842–857). It "cancels the operation when the deadline expires, but waits for the operation to return", so it may run past the deadline (127–131). That is H's restated K7: the deadline bounds the cancellation request, not publication.
 - SE-0311 task-locals bind for the rest of a scope (1172–1188).
-- *Right:* cleanup is awaited before the deadline is published.
-- *Don't copy:* implicit task lifetimes tied to syntax nesting that the reader cannot see.
+- *Right:* cleanup is awaited before the deadline is published. `async let` is the construct precedent for H's owned fork: a guardrail that bounds a child to its block.
+- *Don't copy:* an `async let` child that is never awaited is cancelled implicitly at scope exit with no visible statement. In H the owner block is written out.
 
 **Trio.**
 - Nurseries and cancel scopes (`open_nursery`, `move_on_after`, `fail_after`) are library context managers.
-- The effective deadline is the minimum of the enclosing ones.
+- Spawning needs a nursery value: `nursery.start_soon(f)`. No ownerless spawn exists.
+- The effective deadline is the minimum of the enclosing ones, except across a shielded scope (`shield=True`), which ignores outer cancellation.
 - After a `move_on_after` block, a flag says whether the block was cancelled.
-- *Right:* a cancel scope is a value with a protocol (`with`), and deadlines nest by minimum.
+- *Right:* a cancel scope is a value with a protocol (`with`), deadlines nest by minimum, and a spawn requires an owner.
 - *Don't copy:* the "was it cancelled?" flag read after the block, instead of a typed result.
 
-**Java Loom** (JEP 505/525). `StructuredTaskScope` went through a long series of Joiner policies across previews.
-- *Lesson:* group failure policy is the hard part. Effra defers it (O3) rather than guess.
+**Java Loom** (JDK 26, JEP 525, sixth preview). `fork` is a method of `StructuredTaskScope`, so a subtask needs a scope value. Structure violations (forking from a thread outside the scope, closing out of order) are detected at run time with `StructureViolationException`, not by the compiler. The group policy is a `Joiner` (for example `allSuccessfulOrThrow` and `awaitAll`), reached after a long series of preview changes.
+- *Right:* an owner is required to spawn.
+- *Lesson:* group failure policy is the hard part. H proposes one, the fail-fast `all { }` block (primitives.md §6.6), and asks the owner (O3).
 
 **OCaml Eio** (`7fe3513d`).
 - `Switch.run` owns fibers and resources; `on_release` is LIFO and protected (`eio__core.mli:81-95`).
+- `Fiber.fork : sw:Switch.t -> (unit -> unit) -> unit` (`eio__core.mli:258`): a fork needs a switch.
 - `Fiber.first` awaits the loser (`fiber.ml:147`).
 - `with_timeout` is `Fiber.first` against a sleep (`time.ml:64-65`).
-- *Right:* exactly P's derivation: timeout is library over first-completion.
+- *Right:* the derivation H's library follows (timeout is library over first completion), and an owner required to spawn.
 
 **Erlang and Elixir.**
 - `receive … after` (`expressions.md:728-748`) is the only construct-level timeout in the survey, and it exists because `receive` binds a mailbox pattern.
 - `Task.await(task, timeout)` takes a timeout argument, and its default timeout exits the caller (`task.ex:776-781`). `Task.yield || Task.shutdown` is the cooperative alternative (`:1092-1118`).
 - `with … else` flattens matching (`special_forms.ex:1690`).
 - *Don't copy:* a timeout that kills the caller by default.
+- *Don't copy:* constructs and library that look the same. `if`, `unless` and `|>` are macros in `Kernel`, while `with`, `for` and `case` are special forms. A reader cannot tell which by the syntax, which is what Effra's visual rule forbids.
 
 **Gleam.**
 - `process.receive(subject, within)` takes a timeout argument.
-- `use` (`ast.rs:4480-4510`) passes the rest of the block as a callback. It replaced `try`, and its readability is criticised in the v0.25 post, the language tour and the v1.10 changelog (`v1.10.md:473`; `expression.rs:829-835`).
+- `use` (`ast.rs:4480-4510`) passes the rest of the block as a callback. It replaced `try`. The v0.25 release post that introduced it acknowledges the added complexity for newcomers (gleam.run/news/v0.25-introducing-use-expressions/), and the language tour warns against overusing it (tour.gleam.run/advanced-features/use/).
+- Lowering: Gleam compiles self-tail recursion to a JavaScript loop (`compiler-core/src/javascript/expression.rs:1877`), so the host language gets no new construct.
 - *Lesson for D:* "the rest of the block is an argument" hides where control returns.
 
 **tokio.**
@@ -65,14 +70,14 @@ Appendix to [primitives.md](../primitives.md). Each entry gives what the system 
 - **cats-effect 3.**
   - `timeoutTo` is derived from `racePair` (`IO.scala:850-859`), and `Resource` is a library data type.
   - Behaviour is pinned by law files: `MonadCancelLaws`, `GenSpawnLaws` and `GenTemporalLaws`, the last including a sleep-race-minimum law. `raceCanceledIdentity` was deprecated.
-  - *Right:* laws as the contract. This is the model for K1–K15.
+  - *Right:* laws as the contract. This is the model for K1–K17.
 - **Koka** (`9c55695d`).
   - `with` desugars to passing the rest of the block (`tour.kk.md:205-245`, minimum generality `269-271`).
   - Timeout is `firstof` (`interleave.kk:57-61`), and `finally` is library (`hnd.kk:485`).
   - *Right:* handlers give a fixed syntax a pluggable meaning.
-- **Effekt.** Blocks are second-class (they cannot escape), the same idea as #106.
+- **Effekt.** Blocks are second-class (they cannot escape), the same idea as #106. Capability presence is checked statically, like Koka's handlers.
 - **Unison.** The pretty-printed libraries warn that `bracket` can leak (`pretty-print-libraries.output.md:11403-11414`).
-  - *Lesson:* resource safety needs a lifetime discipline, not just a bracket function. That is the owner rule (Q11).
+  - *Lesson:* resource safety needs a lifetime discipline, not just a bracket function. That is the owner rule (EF123), which H keeps in its owner blocks.
 - **Roc.** Purity is inferred, and there is no effect polymorphism (`functions.md:121`).
   - *Don't copy:* Effra needs row polymorphism (F3b) for library wrappers.
 - **MoonBit async** (`e72901a1`).
@@ -80,11 +85,12 @@ Appendix to [primitives.md](../primitives.md). Each entry gives what the system 
   - `defer` and `errdefer` are keywords (`fundamentals.md:1177-1235`).
   - A child error cancels its siblings (`task_group.mbt:27-34`).
   - *Right:* time as library over the scope.
+  - Its compiler paths (async elimination, contification, dead-code elimination, monomorphisation) target Wasm GC, so they are not evidence for a JavaScript lowering.
 - **Elm** (`Cmd`/`Sub`). Effects are data that a runtime interprets.
   - *Right:* a non-Effect runtime driven by its own loop (the model for a UI frame provider).
 - **React context.** The default value of a Provider is an anti-pattern: a missing provider silently uses the default.
   - *Lesson:* static presence checking (Effra rows) is the point.
-- **ReScript.** `async` passes straight through to JavaScript, and inlining bugs show the cost of a construct whose lowering differs by target.
+- **ReScript.** It emits native `async`/`await` (`compiler/core/js_dump.ml:392`, `:1042`), with its own transforms around them. A construct that has a host equivalent lowers to it directly.
 
 ## 3. Fixed syntax, pluggable meaning (the portability test)
 
@@ -109,7 +115,7 @@ The owner's portability test asks whether a construct's meaning can be a protoco
   - *Failure:* "Values returned from [withTimeout] will typically be lost if the caller is cancelled" (`Timeout.kt:128-131`). Cancellation semantics leak through the library.
 - **Koka and OCaml 5 effect handlers.**
   - Koka's `async` is four library effects (`lib/std/async/async.kk:70-75`), and timeout is `firstof { wait(secs); Nothing } { Just(action()) }` (`interleave.kk:60-61`).
-  - Eio's core performs three effects, `Fork` (`lib_eio/core/fiber.ml:1`), `Suspend` (`suspend.ml:2`) and `Get_context` (`cancel.ml:32`). Three schedulers handle them: Linux (`lib_eio_linux/sched.ml:327-351`), POSIX (`lib_eio_posix/sched.ml:364-370`) and a mock (`lib_eio/mock/backend.ml:72-98`; commit `7fe3513`). **This is the closest match to option P: a small protocol, several providers, one of them a test provider.**
+  - Eio's core performs three effects, `Fork` (`lib_eio/core/fiber.ml:1`), `Suspend` (`suspend.ml:2`) and `Get_context` (`cancel.ml:32`). Three schedulers handle them: Linux (`lib_eio_linux/sched.ml:327-351`), POSIX (`lib_eio_posix/sched.ml:364-370`) and a mock (`lib_eio/mock/backend.ml:72-98`; commit `7fe3513`). **This is the closest match to H's protocol: a small set of operations, several providers, one of them a test provider.**
   - *Failure:* the OCaml 5 scheduler split (Eio, Miou, others). Picos exists to bridge it, and Miou's README says its maintainers no longer build bridges.
 - **Scala for-comprehensions** (2.13 spec §6.19) are a purely syntactic translation to `flatMap`/`map`/`withFilter`, with no laws.
 - **Haskell `RebindableSyntax`** (GHC User's Guide §6.2.10): "Do notation is translated using whatever functions (>>=), (>>), and fail, are in scope … Be warned: this is an experimental facility, with fewer checks than usual." This is unrestricted rebinding, the purest form of meaning drift.
@@ -132,15 +138,18 @@ The owner's portability test asks whether a construct's meaning can be a protoco
   - Foldkit (commit `d21db42`) models a command as data (`packages/foldkit/src/command/index.ts:12-23`), coalesces renders per `requestAnimationFrame` (`runtime/renderer.ts:708-724`), and swaps Effect's scheduler service for a browser one (`runtime/browserScheduler.ts:22-30`). It is the frame-provider shape, though built on Effect.
 
 **Effra's position.** Take the shape of Eio and cats-effect, and avoid the failures of F#, Rust and Haskell:
-- **Closed operations.** Six kernel operations (fork, join, interrupt, race, scoped, acquireRelease) plus `Clock.sleep`. A provider cannot add or rename one.
-- **Fixed types.** The bundled module declares the signatures. A provider implements them; it does not supply them.
-- **Laws as admission.** K1–K15 and R1–R15 run as the provider suite (#124 RS1). A provider that fails a law is refused, as an incompatible machine provider is (`docs/specs/machine-provider-contract.md:45`).
-- **Everything a runtime needs is inside the protocol** (spawn, first-completion, time, scope). This is what avoids Rust's runtime split.
+- **Closed operations.** Host primitives P1–P12 plus P13 race (and P14 all, if admitted). A provider cannot add or rename one.
+- **Fixed types.** The checker types the constructs. A provider implements them; it does not supply their types.
+- **A conformance suite, not an admission proof.** K1–K17, A1–A4 and R1–R15 run as the provider suite (#124 RS1). Passing a finite suite is evidence, not proof, so the checker cannot refuse a provider for failing it. An incompatible machine provider is different: that is a static diagnostic (`docs/specs/machine-provider-contract.md:45`).
+- **Everything a runtime needs is inside the protocol** (spawn, first completion, time, owner close). This is what avoids Rust's runtime split.
+
+**Resilience pipelines.** Polly v8's `ResiliencePipeline` (pollydocs.org, "Resilience pipelines") and resilience4j's decorators (resilience4j.readme.io, "Getting started") compose Timeout and Retry as values, and the order of composition decides whether the timeout bounds each attempt or the whole loop. That supports the owner's "time policy" framing while keeping preemption and recurrence separate (primitives.md §5, K15).
 
 ## 4. Cross-cutting conclusions
 
 1. Every scoped deadline in the survey is library over a cancel scope or a first-completion race. The only construct-level timeouts (Erlang `receive … after`, Go `select` with a timer channel) exist because the construct also binds a message or a channel.
-2. A fallback arm attached to the deadline reads best (Trio's flag reads worst). In P that arm is the argument of `timeoutOr`, or a `catch<Timeout>`.
+2. A fallback arm attached to the deadline reads best (Trio's flag reads worst). In H that arm is the argument of `timeoutOr`, the `after` arm of a race block, or a `catch<Timeout>`.
 3. `Timeout` is a typed outcome, not a cancellation subtype (Kotlin's `TimeoutCancellationException` is the confusing counterexample).
-4. No surveyed system with lexical provision checks service presence statically. Effra's rows do, whichever surface is chosen.
+4. Koka handlers and Effekt capabilities check presence statically; React context, Go `context.Value` and Kotlin `CoroutineContext` do not. Effra's rows do, whichever surface is chosen.
 5. Systems that give syntax a pluggable meaning drift unless the meaning is fixed by types and laws. cats-effect's law files are the strongest existing answer.
+6. Every structured-concurrency library that guards lifetime makes a spawn require an owner value or type: Trio's nursery, Loom's scope, Eio's switch, Kotlin's `CoroutineScope` receiver. Swift's `async let` is the construct form. Effra's owned `fork` is the construct form too, because an owner value needs #106's second-class values (primitives.md §6.2, O4).

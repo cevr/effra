@@ -1,420 +1,599 @@
 # Primitives and constructs (#134)
 
-Status: research note and decision record for wayfinder ticket #134 (run wf10, unit spike-syntax), 2026-10-12. Owner decisions are still open where marked **O*n***.
+Status: research note and decision record for wayfinder ticket #134 (run wf10, unit spike-syntax), 2026-10-12, round 2 after review 1. Owner decisions are still open where marked **O*n***.
 
 Appendices:
 - [primitives/effect-study.md](primitives/effect-study.md): Effect 4 kernel and derived operations, with file:line.
 - [primitives/prior-art.md](primitives/prior-art.md): the wider prior art.
-- `primitives/corpus/<option>/`: the corpus rewritten per option.
+- `primitives/corpus/<option>/`: the corpus rewritten per option (H, P, A–E, and today).
 - `primitives/blind-reader/<option>/`: blind-reader packets; the answer key is [primitives/blind-reader-key.md](primitives/blind-reader-key.md).
-- `benchmarks/syntax/measure.ts`: the corpus metrics.
-- The prototype lives on branch `wf10/spike-syntax-proto` (code at `073de983`, head `e11047a3` with the baseline probes), under `docs/research/primitives/prototype/`. That branch is never merged.
+- `benchmarks/syntax/measure.ts`: the corpus metrics and the one classification of forms that every option is scored against.
+- The prototype lives on branch `wf10/spike-syntax-proto`, under `docs/research/primitives/prototype/`. Head `bc263cf8` prototypes option H; `073de983` is round 1's option P and `e11047a3` adds the baseline probes run with the main compiler. That branch is never merged.
 
 ## 0. Decision in one page
 
-**Chosen: option P, a small kernel plus library.** The constructs are the forms whose meaning is evaluation, control or a declaration's static plan: `effect fn`, `run`, `fail`, and the declarations `service`, `impl`, `layer`, plus machines (outside this ticket). Duration literals such as `500ms` and `2s` are notation. Everything else is an ordinary method in a bundled module:
+**Chosen: option H, owner blocks plus library.** A form is a construct when it passes the guardrail test (§1): it makes an illegal state unrepresentable, and neither a library function nor a general type feature can do the same. Everything else is ordinary library. Every construct is a keyword or block form. Every dot form is honest library: a function written in Effra, or a primitive whose contract the accepted vocabulary can state.
 
-- Kernel methods: `.fork()`, `.join()`, `.interrupt()`, `.race(other)`, `.scoped()` and `acquireRelease`. These are the lawful runtime contract's P4–P8, plus one new primitive, P13 `race`. Their types are honest in the general type system, and laws pin their behaviour.
-- Library over the kernel: the timeout family, `retry` with a `Schedule` value, `.provide(App)`, `.provide<S>(p)`, `.catch`, `.recover` and `.orFail`.
+**Constructs**
+- Evaluation and control: `effect fn`, `run`, `fail`.
+- Declarations: `service`, `impl`, `layer` (and machines, outside this ticket).
+- `scope { … }`: an owner block. Whatever it owns closes when the block ends.
+- `fork recipe`: starts a child. It is legal only inside an owner block of the same function, so there is no ownerless spawn and no child outlives the function that forked it.
+- `run child`: running a fork handle waits for the child and gives its result (the join).
+- `interrupt child`: cancels the child, waits for its cleanup, and raises the child's retained failure, so its row is the child's `raises { E }`.
+- `race { fork a  fork b … }`: an owner block whose value is the first arm to complete. The losers are cancelled and cleaned up before the block yields.
+- `provide App, Clock = LiveClock { … }`: a provision block whose header is a static plan, read by graph, lint and inspection at each site.
+- Proposed, not prototyped: `all { fork a  fork b … }`, a fail-fast group owner (P14, §6.6).
 
-Under P, every dot form is library. No checker branch is keyed on a name.
+**Notation:** duration literals (`500ms`, `2s`, `1m`).
+
+**Library:** the timeout family (`timeout`, `timeoutOr`, `timeoutOption`, `timeoutTo`), `after`, `expire`, `either`, `delay`, `retry` with a `Schedule` value, `.provideService<S>(p)`, `.catch`, `.recover` and `.orFail`. All of it is written in `corpus/H/library.ef`, the timeout family over race blocks.
 
 ```effra
 effect fn dashboard() -> string uses { Account, Invoice, Clock } {
-    let account = run Account.label().fork()
-    let invoice = run Invoice.label().timeoutOr(500ms, "invoice: slow")
-    let name = run account.join()
-    name + " / " + invoice
+    scope {
+        let account = fork Account.label()
+        let invoice = race {
+            fork Invoice.label()
+            fork after(500ms, "invoice: slow")
+        }
+        let name = run account
+        name + " / " + invoice
+    }
 }
 
 effect fn main() -> string {
-    run dashboard().scoped().timeoutOr(2s, "gave up").provide(App)
-        .provide<Clock>(LiveClock)
+    provide App, Clock = LiveClock {
+        run dashboard().timeoutOr(2s, "gave up")
+    }
 }
 ```
 
-That program parses, checks and runs on Go and JavaScript on the prototype branch, and prints the same as today's version (§8.3).
+The prototype runs this program on Go and JavaScript and prints the same as today's version (§8.3). It is monomorphic there, because generic `timeoutOr` needs #127 and #128 Q9.
 
-**Why P.** The owner's bar (§1) asks each construct to name an illegal state that it makes unrepresentable and that no library function or general type feature could rule out.
+**Why H.** Review 1 found that P's guarantees did not survive the bar (§7.1):
+- P put fork, join and interrupt in dot form, but no clause of the accepted contract vocabulary can create a pending-child obligation or observe one (B1).
+- P's owner guarantee rested on the closed-at-the-edge contract (#128 Q11), which the rows note records as not yet shown, scoring 0 of 29 (M1).
+- P let a child outlive its function, where Trio, Loom, Eio and Swift make that unrepresentable (M6).
 
-- Every candidate guarantee for scope, fork, race, timeout and provide comes from **one** mechanism: owners. An owner closes what it owns, and nothing it owns escapes. Today's checker already treats four owner kinds (child, timeout, scope, provision) as one rule (`semantic.go:160-161`).
-- One mechanism with five or more clients is a general type feature: the closed-at-the-edge recipe-parameter contract (#128, rows note Q11). It is not a set of keywords.
-- The only guarantee that needs a declaration-level construct is the static layer plan. It already lives on the `layer` declaration, which stays a construct.
+H keeps each guarantee in a direct construct that today's checker already enforces. It moves only what really is library into library.
 
-The blocks lose (§7) for three reasons:
+Three guarantees are new:
+- **No ownerless child.** A `fork` outside every owner block is a syntax error (EF002 on the prototype).
+- **The deadline is library, and nothing is lost if the library is late.** `timeoutOr` is a function over a race block. If the general features it needs slip, users write the race block inline, and every guarantee holds.
+- **Each provide site has a checked plan.** The plan is written at the site, so tooling never meets a provide whose plan it cannot read.
 
-- They add three to five keywords.
-- They cannot wrap a recipe without a helper function, which they needed in four places.
-- Under the owner's 2026-10-12 rule they cannot use `else`, so each needs a new word.
+**Cost.** H adds three keywords (`race`, `provide`, `interrupt`), giving 31 against today's 28. It is 4.3% fewer tokens than today, with zero construct lookalikes on the shared classification (§8.1). The owned-fork rule refuses 33 of today's top-level tests (63 subtests) and `examples/causal.ef` until they are wrapped in `scope` (§8.3).
 
-**Portability.** The kernel is a protocol: six operations plus laws (§6). The Effect runtime and the Go runtime are two providers. A deterministic test runtime, a UI frame runtime, a request-scoped server runtime and an embedded tick loop are further lawful providers that need no source change. Today only `Clock` and `Scheduler` are pluggable, so making the whole kernel pluggable is follow-up U11.
+**Portability.** Each construct lowers to a protocol: the host primitives P1–P12, the new race primitive P13, and laws K1–K17 (§6.8). The Effect runtime and the Go runtime are two providers. A deterministic test runtime, a UI frame runtime, a request-scoped server runtime and an embedded tick loop are further providers that need no source change (follow-up U11).
 
-**What blocks P today.** Writing the kernel signatures and the library in `.ef` needs receiver methods (#127), whole-value type parameters (#128 Q9), row difference (F3b, #126) and the closed-at-the-edge contract (#128 Q11). The prototype receipt `walls.ef` reproduces each wall: EF127, EF125 and EF123. Until those land, the surface can change, but the checker still keys owners on the parse kinds (**O4**).
+**What still depends on unbuilt features.** Only the library layer does:
+- The generic timeout family needs receiver methods (#127) and whole-value type parameters (#128 Q9). The prototype's `walls.ef` reproduces EF127.
+- `.provideService` needs row difference (F3b, #126).
+- Lossless wrapping (K11) of resource-producing recipes needs Q11.
+
+When Q11 is missing, the checker refuses such a wrapper conservatively (the rows note's 12 of 29 refusals are of this kind), and the program writes the race block inline. No guarantee rests on Q11.
 
 ## 1. The question and the bar
 
 #134 asks which concurrency, lifetime, time and provision operations Effra builds in, and in what syntax. Three owner directions set the bar.
 
-1. Standing (memory, 2026-10-09): constructs look distinct (keyword or block forms), and any dot or pipe form is ordinary library. The ladder runs: library → library plus a general type feature → 1:1 notation → construct. A construct is justified only when its meaning is evaluation, lifetime or control, or a single-client type feature, or a structure that tooling must read. General type features (TS-like) are not special-casing and are preferred.
-2. 2026-10-12 (a): "else is overloading if else … scope and all these things are actually just normal methods in typescript effect. Time out, I look at it as just part of a schedule … why they need to be Language constructs." So `else` and other reused keywords are dropped from every option, the default hypothesis flips to primitive plus library, and the owner's schedule idea gets an evaluation (§5).
-3. 2026-10-12 (b): "enough guardrails so that bad code or illegal states cannot be represented … layers … portable across different domains … useland implementations." Two tests follow:
+1. Standing (memory, 2026-10-09): constructs look distinct (keyword or block forms), and any dot or pipe form is ordinary library. The ladder runs: library → library plus a general type feature → 1:1 notation → construct. A construct is justified only when its meaning is evaluation, lifetime or control, or a single-client type feature, or a structure that tooling must read. "Only when" is a necessary condition. Since direction 3, the guardrail test decides whether that condition is met.
+2. 2026-10-12 (a): "else is overloading if else … scope and all these things are actually just normal methods in typescript effect. Time out, I look at it as just part of a schedule … why they need to be Language constructs." So `else` and other reused keywords are dropped from every option, primitive plus library is the default hypothesis, and the owner's schedule idea gets an evaluation (§5).
+3. 2026-10-12 (b): "enough guardrails so that bad code or illegal states cannot be represented … if we can make these language constructs and they make sense, then I think we should … layers … portable across different domains … useland implementations." Two tests follow:
    - **Guardrail.** Name the illegal state or static check, and show that no library function or general type feature can provide it.
    - **Portability.** The construct's meaning is a protocol: operations plus laws (#125) that any lawful provider, including userland, can implement.
 
-   Blocks and primitives may coexist. P wins only where the guardrail test fails.
+   Blocks and primitives may coexist. Round 1 read direction (a) as "P unless the guardrail test fails", and then did not run the test on fork ownership (review 1, M6). Round 2 runs it on every candidate (§4).
+
+Two further checks apply to every option:
+- **The five composability checks:** constructs wrap losslessly, nest, keep recipes first-class, stay orthogonal and state their composition laws (§6.9).
+- **Readability** for Go and TypeScript readers, measured by blind readers (§8.2).
 
 ## 2. Effect-TS, in short
 
 The full study with file:line is in [effect-study.md](primitives/effect-study.md). Facts that decide this ticket:
 
-- **Effect's kernel is small.** About fifteen interpreter nodes (`internal/core.ts:435,467`; `internal/effect.ts:622`) plus three fiber-runtime methods: fork (`internal/effect.ts:5517-5539`), interrupt (`:4547`) and context update (`:2175-2200`).
+- **Effect's kernel is small.** About fifteen interpreter nodes (`internal/core.ts:435,467`; `internal/effect.ts:622`) plus three fiber-runtime methods: fork (`forkUnsafe`, `internal/effect.ts:5517-5539`, which attaches the child to the parent at `:5532-5535`), interrupt (`:4547`) and context update (`:2175-2200`).
 - **Timeout is derived:** `timeout → timeoutOrElse → timeoutOption → raceFirst(asSome(self), as(sleep(d), none))` (`internal/effect.ts:3875-3903`). Race losers are interrupted and awaited (`:1620`, `:1673`, `:930`; tests `Effect.test.ts:1347,1366,1385`).
-- **Scope, acquireRelease and provide are library.** `Effect.scoped` is a root scope that removes `Scope` from R (`:4100-4110`). `acquireRelease` adds `Scope` (`:4134-4150`). `Effect.provide(layer)` is `scopedWith` + `buildWithScope`, with a fresh MemoMap per call (`internal/layer.ts:8-22`; `Layer.ts:769-775`).
+- **Scope, acquireRelease and provide are library.** `Effect.scoped` is a root scope that removes `Scope` from R (`:4100-4110`). `acquireRelease` adds `Scope` (`:4134-4150`). `Effect.provide(layer)` is `scopedWith` plus `buildWithScope` (`internal/layer.ts:8-22`). `buildWithScope` reuses the current MemoMap through `CurrentMemoMap.forkOrCreate` (`Layer.ts:582-586`, `:765-775`); only `{ local: true }` gets a fresh map (`internal/layer.ts:17-18`). So nested non-local provides share builds, and separate root runs build twice (test "subsequent calls share MemoMap", `Effect.test.ts:4644-4660`).
+- **A fiber is not an effect in v4.** `Fiber` extends only `Pipeable` (`Fiber.ts:71`), and you join with `Fiber.join`.
 - **Schedule is an inert value** (`Schedule.ts:53`). `retry` runs an attempt to completion and only then consults the schedule (`internal/schedule.ts:66-79`).
-- **What hurts:** there are no static lifetimes, so handles and resources can escape their scope. Two provides build a layer twice, guarded only by a lint (`Effect.test.ts:4653`). The catch zoo churned (v4 removed `catchAll`, `orElse`, `either`, `timeoutFail`, `timeoutTo`, `forkDaemon`). Effect documents no laws.
+- **What hurts:**
+  - There are no static lifetimes: handles and resources can escape their scope, and `forkChild` makes the child outlive the forking function.
+  - The catch zoo churned: v4 removed `catchAll`, `orElse`, `either`, `timeoutFail`, `timeoutTo` and `forkDaemon`.
+  - Effect documents no laws.
 
-Effra already matches the kernel shape: the lawful runtime contract lists host primitives P1–P12 and states that "Timeout, race, latch composition and layers are derived library behavior. They must not become extra primitive syntax" (`docs/research/lawful-runtime-contract.md:63`). Today's language contradicts that sentence: `.timeout` and `.provide(Layer)` are parser and checker constructs (`syntax.go:1640-1675`; `semantic.go:4979`, `:5047`).
+Effra already matches the kernel shape. The lawful runtime contract lists host primitives P1–P12 and says: "Timeout, race, latch composition and layers are derived library behavior. They must not become extra primitive syntax" (`docs/research/lawful-runtime-contract.md:63`). H amends that sentence in two places, flagged for U1 and U7:
+- race becomes host primitive P13 and gets block syntax;
+- provision gets block syntax, because its plan is static.
+
+Timeout stays derived library, as the contract says. Today's language contradicts the sentence for timeout: `.timeout` and `.provide(Layer)` are parser and checker constructs (`syntax.go:1640-1675`; `semantic.go:4979`, `:5047`).
 
 ## 3. Prior art, in short
 
 The detail and pins are in [prior-art.md](primitives/prior-art.md).
 
-**Mainstream systems ship these as functions over a small runtime kernel:**
-- Effect, ZIO and cats-effect put timeout, race and Resource/Scope in libraries; cats-effect derives `timeoutTo` from `racePair`.
-- Kotlin's `withTimeout` and `coroutineScope` are library functions.
-- Trio's cancel scopes and nurseries are library context managers.
-- Go's `context.WithTimeout` is a function, though `select` is a statement.
-- Elixir's `Task.await` and Gleam's `process.receive` take a timeout argument.
+**Structured concurrency makes an ownerless spawn unrepresentable.** Every library in the survey that guards lifetimes requires an owner value or type to spawn:
+- Trio's `nursery.start_soon`;
+- Loom's `StructuredTaskScope.fork` (JDK 26, JEP 525), with structure violations checked at run time;
+- Eio's `Fiber.fork ~sw` (`eio__core.mli:258`);
+- Kotlin's `launch`, an extension on the `CoroutineScope` receiver.
+
+Swift's `async let` is the construct form of the same guarantee: the child is bound to its block, and it is awaited or cancelled at block exit. Go's `go` and Effect's `forkChild` are the outliers, where a child can outlive its caller. **H's owned fork** is the construct form. Effra cannot use the owner-value form yet, because an owner value would be a second-class value (#106).
+
+**Deadlines are library over first completion or a cancel scope:**
+- Effect, ZIO and cats-effect (where `timeoutTo` is derived from `racePair`);
+- Kotlin `withTimeout`, Trio `move_on_after` and `fail_after`, Go `context.WithTimeout`;
 - Eio derives `with_timeout` from `Fiber.first` (`time.ml:64-65`), Koka derives timeout from `firstof` (`interleave.kk:57-61`), and MoonBit derives `with_timeout` from a task group (`async.mbt:96-108`).
 
+The construct-level first-completion forms (Go `select`, Erlang `receive … after`) bind a channel or mailbox. H follows the derivation: race is the construct, timeout is library.
+
 **The constructs that do exist give a fixed syntax a pluggable meaning:**
-- F# computation expressions (a builder supplies `Bind` and `Using`).
-- C#'s awaitable pattern.
-- Rust `async`/`await` with pluggable executors (tokio, embassy).
-- Python's `with` protocol.
-- Go 1.23 range-over-func.
-- Kotlin dispatchers.
-- Koka and OCaml 5 handlers (Eio is one scheduler among several).
+- F# computation expressions (a builder supplies `Bind` and `Using`);
+- C#'s awaitable pattern;
+- Rust `async`/`await` with pluggable executors (tokio, embassy);
+- Python's `with` protocol;
+- Go 1.23 range-over-func;
+- Kotlin dispatchers;
+- Koka and OCaml 5 handlers (Eio is one scheduler among several);
 - Scala's for-comprehension desugaring.
 
-Their known failure is meaning drift: F# builders and Haskell `RebindableSyntax` let the same syntax mean anything. Effra's answer is a closed operation set with fixed types plus a law suite that a provider must pass (§6.3).
+Their known failure is meaning drift: F# builders and Haskell `RebindableSyntax` let the same syntax mean anything. Effra's answer is a closed operation set with fixed types plus a conformance suite (§6.8).
 
-**No lexical-provide system checks service presence statically** (React context, Go `context.Value`, Kotlin `CoroutineContext`). Effra's rows already do, whether provide is a construct or a library call.
+**Static presence of provided capabilities.** Koka `with` handlers and Effekt check handler or capability presence statically. React context, Go `context.Value` and Kotlin `CoroutineContext` do not. Effra's rows already check it.
+
+**Compile-to-host languages and the visual rule:**
+- Gleam keeps its constructs few and distinct. `use` passes the rest of the block as a callback, and the v0.25 release post and the language tour both warn about overusing it. That is the "rest of the block is an argument" problem, which D shares.
+- ReScript emits native `async`/`await` (`js_dump.ml:392`, `:1042`).
+- Elixir is the "don't copy". `if`, `unless` and `|>` are Kernel macros, while `with`, `for` and `case` are special forms. A reader cannot tell a construct from library by its shape, which is exactly what Effra's visual rule forbids.
 
 ## 4. The bar, construct by construct
 
 For each candidate:
-- (a) the static guarantee the compiler gives today, or the illegal state a construct would rule out;
-- (b) whether a general type feature or a runtime law can carry it;
-- (c) whether the loss matters to users;
+- (a) the illegal state that a construct rules out, or the static check it enables;
+- (b) whether a library function or a general type feature can do the same;
 - the verdict.
 
-| Candidate | (a) Guarantee today | (b) General carrier | (c) Loss matters? | Verdict |
-|---|---|---|---|---|
-| `run` | Evaluation is explicit. Constructing a recipe runs nothing (R11), and a discarded effect is diagnosed. | None. `run` *is* the bind (Effect `yield*`, F# `let!`, Rust `.await`); a library function cannot sequence its caller. | Yes | **Construct.** It lowers to the protocol's sequencing, so it is portable to any provider. |
-| `fail` | Exit control with a typed label in `raises`. | `run fail(E)` would work, but `fail` reads like `return` and `throw`. | Minor | **Construct** (control) |
-| `effect fn` | Declares a recipe-producing function, with explicit rows. | none | Yes | **Construct** (declaration) |
-| `scope { }` | An owned value cannot escape the closing scope (EF123). The scope raises unobserved children's failures at close (rows) and releases in LIFO order (R1, R2). | The closed-at-the-edge parameter contract (#128 Q11) on `scoped`'s recipe parameter, the same rule the checker applies to all four owner kinds (`semantic.go:160-161`). Laws R1–R3 cover behaviour. | Yes: resource and handle safety | **Library `.scoped()` + Q11.** The guarantee is real but not scope-specific; it is the owner mechanism, which has at least five clients (scoped, race, timeout, provide(Layer), acquireUseRelease, user wrappers). |
-| `fork` | The handle is owned by the current owner and cannot escape it. Child failures are live, then pending, in rows. A forgotten join is not illegal: it surfaces at owner close. | A declared ownership contract in inferred vocabulary (#130) on the kernel signature: "the result is owned by the caller's owner". Law R9. | Yes | **Kernel method `.fork()`** (P6) |
-| `.join()`, `.interrupt()` | An observed child does not re-raise at close (R4). A timed-out join observes nothing (`semantic.go:4994-4999`). | A declared contract with an observation clause (#130). Laws R4 and R5. | Yes | **Kernel methods** (P7, P8) |
-| race (none today; hidden inside `.timeout`) | none | The prototype race rule joins two closed owners (§8.3), the same owner rule again. Laws K1–K5. | | **Kernel method `.race(other)`** (new P13) |
-| `.timeout(d)` | It adds `Timeout`, charges `Scheduler` (1-G), and runs the work under a timeout owner. | Derivable: `work.race(failAfter(d))`. Every guarantee comes from race (the owner rule) and from Clock (rows). Law K6. | No | **Library.** It re-tests the rows note's NO-GO; see below. |
-| `.provide(Layer)` | Missing services caught at build time. The static layer plan is read at the site by graph, lint and inspection (`graph.go:474`, `lint_facts.go:309`). A provision owner (R12). | Missing services are caught by rows through F3b: `uses { R - Out, In }`. The plan moves to the `layer` declaration, whose type is `Layer<Out, E, In>`. The owner comes from Q11. Laws R12, R13. | Partly: a layer chosen at run time makes the graph show a set of plans | **Library over a typed `Layer` value.** The `layer` **declaration** stays a construct and holds the plan. |
-| `.provide<S>(p)` | The service leaves the row. | F3b | No | **Library** (#132, already decided) |
-| `.catch`, `.recover` | The label leaves the row. | F2, F3b | No | **Library** (#131, #133) |
-| `.orFail()` | GoResult to typed failure. | ordinary data once GoResult is | No | **Library** (rows note) |
-| `acquireRelease` | Release runs exactly once, masked (R10, P5). | A kernel operation with a `Scope` row | Yes | **Kernel function** (P5) |
-| `all`, `both`, `forEach` | n/a | Not writable as library today: the checker refuses the composite cause (probe receipt: EF107 at `prototype/baseline/both.ef:14:11` on the prototype branch). It needs a group failure policy (**O3**). | | **Library intrinsic** with a declared contract, until O3 |
-| `defer e` (Go-like) | n/a | `acquireRelease` and `onExit` cover it | | Not proposed |
-| duration literal `2s` | n/a | 1:1 notation for `Duration.ms(2000)`; a second client is byte sizes | | **Notation** (rung 3) |
-| `layer` declaration | The static plan: construction graph, `merge`/`replace`, missing and duplicate services inside the layer. | None: tooling must read the structure. | Yes | **Construct** (unchanged; matches the owner's "layers … earn keep") |
+| Candidate | (a) Illegal state or static check | (b) Library or general carrier? | Verdict |
+|---|---|---|---|
+| `run` | A recipe that runs without being asked to. Constructing a recipe runs nothing (R11), and a discarded effect is diagnosed. | No. `run` *is* the bind (Effect `yield*`, F# `let!`, Rust `.await`); a function cannot sequence its caller. | **Construct** |
+| `fail` | none (control with a typed label) | `run fail(E)` would work, but `fail` reads like `return` and `throw`. | **Construct** (control) |
+| `effect fn` | none (declaration with explicit rows) | none | **Construct** (declaration) |
+| `scope { }` | An owned value escaping its owner (EF123). Children and resources that are not closed in LIFO order (R1, R2). | The closed-at-the-edge contract (Q11) would carry it for a library `scoped(work)`, but it is not shown: 0 of 29 (rows note `effect-rows-as-types.md:428`, `:1041`). | **Construct.** It is also the only inline nested lifetime without closures (#106). |
+| `fork` | **A child that outlives the function that forked it.** H makes it unrepresentable: `fork` is legal only inside an owner block. | An owner value (Trio, Loom, Eio, Kotlin) needs a second-class value type (#106). No clause of the contract vocabulary creates a pending-child obligation (`effect-rows-as-types.md:395-424`, `:461-480`; review 1, B1). | **Construct, owned** (§6.2) |
+| `run child` (join) | A child's failure that nobody observes and nobody declares. Join observes it (R4). | No clause observes a `Fiber` value (B1). A dot form `.join()` would be a compiler-known name. | **Construct:** `run` applied to a fork handle (§6.3) |
+| `interrupt child` | A retained child failure dropped by cancellation (M2). | As for join. | **Construct**, row `raises { E }` (§6.3) |
+| `.cancel()` (today) | none beyond interrupt | n/a | **Dropped** (O8) |
+| `race { }` | A loser that keeps running after the race yields. A loser's abandoned typed failure leaking into the owner's outcome (K3). | Not over `scope` + `fork`: a scope keeps an unobserved child's failure on a normal close (R3), and race must discard it; first completion needs a host primitive (P13). Not a function: its arms are forks, which must be lexically owned. | **Construct** (§6.4) |
+| `.timeout(d)` (today) | none of its own: its guarantees are race's (owner) and Clock's (rows) | Library over a race block, as in Effect, Eio, Koka, cats-effect and MoonBit. | **Library** (§6.7) |
+| `provide Plan { }` | **A provide site with no checked plan.** Graph, lint and inspection read the plan at each site (`graph.go:474`, `lint_facts.go:311-319`). A missing service at build time (EF108). | No. A first-class `Layer<Out, E, In>` value carries rows, not the plan (`effect-rows-as-types.md:961`; review 1, M4). | **Construct** (§6.5) |
+| `.provideService<S>(p)` | none beyond rows | F3b: `uses { R - S }` (#132) | **Library** |
+| `.catch`, `.recover` | none beyond rows | F2, F3b (#131, #133) | **Library** |
+| `.orFail()` | none beyond rows | ordinary data once GoResult is | **Library** |
+| `acquireRelease` | Release that runs zero times or twice (R10, P5). | A host primitive with a `Scope` row. | **Host primitive** (P5), library-shaped |
+| `all { }` | A sibling that keeps running after the group has failed. A composite of the first failure and sibling failures that no handler can match. | Not as library: the composite cause cannot be declared (`docs/runtime.md:17`; `baseline/both.ef` EF107 on the main compiler). | **Construct, proposed** (P14, §6.6, O3) |
+| `defer e` (Go-like) | n/a | `acquireRelease` and `onExit` cover it | Not proposed |
+| duration literal `2s` | none | 1:1 notation for `Duration.ms(2000)`; a second client is byte sizes | **Notation** |
+| `layer` declaration | The static plan: construction graph, `merge`/`replace`, missing and duplicate services inside the layer. | None: tooling must read the structure. | **Construct** (unchanged) |
 
 **The illegal states the owner named:**
-- **A fiber handle used after its owner ends; a resource escaping its lifetime.** Ruled out today by EF123. Under P, the closed-at-the-edge contract (Q11) keeps the rule. The rule is per owner, not per keyword.
-- **A forgotten join.** Not ruled out by any option. It surfaces as a pending failure at owner close, and a lint can flag an unjoined handle. A construct would not change this.
-- **A missing service caught at build time.** Rows catch it in every option, including library `provide` with an F3b signature.
-- **A deadline that silently fails to cover acquisition.** Not an illegal state: both orders are legitimate intents. Chain order says which one is meant. The prototype checks both `run S.timeoutOr(2s, …).provide(App)` (acquisition outside) and `run S.provide(App).timeoutOr(2s, …)` (acquisition inside) (`walls.ef`). Option A's clause order expresses the same thing, so a construct does not remove the choice. It only moves it into header order.
+- **A fiber handle used after its owner ends; a resource escaping its lifetime.** Ruled out today by EF123 for every owner block. H keeps it with the same checker, with no new feature needed (prototype test `TestSpike134OwnedHandlesKeepTodaysOwnershipRules`).
+- **A child that outlives its function.** Not ruled out today (review 1, probe `g1-today.ef`). Ruled out by H's owned fork. P made it worse by moving lifetimes to callers (M6).
+- **A forgotten join.** Not illegal. The failure surfaces at owner close and must be declared (EF107), and the child is cancelled at close. A lint can flag an unjoined handle.
+- **A missing service at build time.** Rows catch it in every option (EF108; prototype `TestSpike134ProvideBlockChecksServices`).
+- **A deadline that silently fails to cover acquisition.** Not an illegal state: both placements are legitimate intents. H spells the choice by nesting. `provide App { run w.timeoutOr(2s, v) }` leaves the build outside the deadline. To include it, the provide block goes inside a function that the deadline wraps (`walls.ef`, `outside` against `inside`).
 
 **The rows note's NO-GO claims, re-tested:**
-- **timeout**, claimed NO-GO because "first-completion race and abandonment of the losing work are control". The premise is true, and the control lives in race. Once race is a kernel operation, timeout is library. Effect (`internal/effect.ts:3875-3903`), Eio (`time.ml:64-65`), Koka (`interleave.kk:57-61`), cats-effect (`IO.scala:850-859`) and MoonBit (`async.mbt:96-108`) all derive it. The prototype derives it as well (`race-library.ef`, §8.3). **Overturned.**
-- **provide(Layer)**, claimed NO-GO because "tooling reads the static layer plan". The plan is a property of the `layer` declaration, not of the provide site. With `Layer<Out, E, In>` as the declaration's type, graph, lint and inspection read the plan from the argument's declaration. When the argument is not statically one declaration (a parameter, or an `if` between two layers), tooling shows the set of plans the type admits. **Overturned conditionally** on the typed `Layer` value and F3b (§9, U7).
+- **timeout**, NO-GO because "first-completion race and abandonment of the losing work are control". The premise is true, and the control lives in race. With race as a construct, timeout is library. **Overturned**, and the prototype shows it (`race-library.ef`).
+- **provide(Layer)**, NO-GO because "tooling reads the static layer plan". **Upheld.** Round 1 overturned it conditionally on a typed `Layer` value; review 1 (M4) showed that such a value carries rows, not plans. H keeps provision as a construct and moves the plan into the block header.
 
 ## 5. Timeout and Schedule
 
 The owner suggested treating a deadline as part of a schedule. Concretely: a time-policy value would compose with `Schedule` (`upTo`, `during`, recurrence limits), and `work.retry(policy)` would carry both the retry and the deadline.
 
-**What breaks.** A schedule acts between attempts. Effect's `retry` runs an attempt to completion, then asks the schedule whether and when to run the next one (`internal/schedule.ts:66-79`); `Schedule` is inert data (`Schedule.ts:53`). `Schedule.upTo(2s)` therefore bounds when the *next* attempt may start. It cannot stop an attempt that hangs. Effect's own documentation says so: "Long-running effects can cause the duration limit to be detected on the following schedule step" (`Schedule.ts:1271-1273`; `during` at `:750` checks elapsed time only when stepped). Stopping a running attempt is preemption: a race against a timer. That is why Effect keeps `timeout` (a race, `internal/effect.ts:3875-3903`) separate from `Schedule` (data). cats-effect, ZIO and Kotlin draw the same line.
+**What breaks.** A schedule acts between attempts. Effect's `retry` runs an attempt to completion, then asks the schedule whether and when to run the next one (`internal/schedule.ts:66-79`); `Schedule` is inert data (`Schedule.ts:53`). So `Schedule.upTo(2s)` bounds when the *next* attempt may start. It cannot stop an attempt that hangs. Effect's own documentation says so: "Long-running effects can cause the duration limit to be detected on the following schedule step" (`Schedule.ts:1271-1273`; `during` at `:750` checks elapsed time only when stepped). Stopping a running attempt is preemption: a race against a timer. That is why Effect keeps `timeout` (a race, `internal/effect.ts:3875-3903`) separate from `Schedule` (data). cats-effect, ZIO and Kotlin draw the same line.
 
-**What survives of the idea.** Both are time policy, and they compose by order, as ordinary library:
+**What survives of the idea.** Both are time policy, and they compose by order, as ordinary library. Polly v8's `ResiliencePipeline` and resilience4j compose Timeout and Retry as values in the same way, with order fixing placement.
 - `work.timeout(500ms).retry<Timeout>(policy)`: each attempt gets 500 ms, and timed-out attempts are retried.
 - `work.retry<E>(policy).timeout(2s)`: the whole retry loop gets 2 s.
-- `Schedule` stays a plain enum, with `Spaced`, `Times` and later `Exponential` and `UpTo`. A `Deadline`/`Duration` value is the preemption policy.
+- `Schedule` stays a plain enum, with `Spaced`, `Times` and later `Exponential` and `UpTo`. A `Duration` value is the preemption policy.
 
-Laws K14 and K15 (§6.3) state the difference, so a reader and a provider cannot confuse the two.
+Laws K14 and K15 (§6.8) state the difference, so a reader and a provider cannot confuse the two.
 
-## 6. Option P design
+## 6. Option H design
 
-### 6.1 Kernel
+### 6.1 Syntax
 
-The kernel is the lawful runtime contract's host primitives, unchanged, plus one:
+```
+OwnerBlock   = "scope" Block
+             | "race" "{" ForkArm ForkArm { ForkArm } "}"
+             | "all"  "{" ForkArm ForkArm { ForkArm } "}"        (proposed, §6.6)
+ForkArm      = "fork" Expr
+Fork         = "fork" Expr                       (only inside an OwnerBlock of the same function)
+Join         = "run" Ident                       (Ident is bound to a fork handle)
+Interrupt    = "interrupt" Ident                 (a statement)
+Provide      = "provide" PlanEntry { "," PlanEntry } Block
+PlanEntry    = LayerName | ServiceName "=" ProviderExpr
+```
 
-| Kernel | Spelling | Contract row | Signature (needs #127, #128, F3b, #130) |
-|---|---|---|---|
-| fork | `work.fork()` | P6 | `-> Fiber<A, { E }> uses { R }`; the result is owned by the caller's owner (#130) |
-| join | `child.join()` | P7 | `-> A raises { E }`; observes the child |
-| interrupt | `child.interrupt()` | P8 | `-> void`; awaits cleanup |
-| race | `left.race(right)` | **P13 (new)** | `-> A raises { E, F } uses { R, S }`; each side runs under a closed owner |
-| scoped | `work.scoped()` | P4 | `-> A raises { E } uses { R - Scope }`; the parameter is closed at the edge (Q11) |
-| acquireRelease | `acquireRelease(acquire, release)` | P5 | `-> A raises { E } uses { R, Scope }` |
-| sleep | `Clock.sleep(d)` | P10 | an ordinary service operation |
+- `race`, `provide` and `interrupt` are new reserved words. None appears as an identifier in `examples/`, and after a dot (`x.provide`) they remain ordinary member names.
+- Durations are literals: `ms`, `s` and `m` (O5).
+- No block reuses a keyword. `else`, `or`, `with` and `after` stay free.
 
-P13 is new because today's timeout runtime is already a hidden race. Effect does not need race as a primitive: it derives `raceAll` from `withFiber`, the general `callback` primitive and `forkUnsafe` (`internal/effect.ts:1603`, `:1657`). Effra has no general callback or mutable cell in the language, so first-completion is the one operation it must add to the host kernel. Go `select` and cats-effect `racePair` (`GenSpawn.scala:354`, with `race` derived at `:401`) make the same choice. The prototype refactors Go's `TimeoutWithEffect` into a generic `raceWith`, with `Timeout` and `Race` as two clients of it (`runtime/effra/effect.go` on the prototype branch).
+### 6.2 Owned fork (review 1, M6)
 
-The library over the kernel is written out in `corpus/P/library.ef`:
-- the timeout family: `timeout`, `timeoutOr`, `timeoutOption`, `timeoutTo`;
-- `either`, `delay`, and `retry` over a `Schedule` value;
-- `provide(Layer)` and `provide<S>`.
+**The rule.** A `fork` is legal only lexically inside an owner block (`scope`, `race`, or the proposed `all`) of the same function. A fork outside every owner block is a syntax error: "fork needs an owner: put it inside scope { } or make it a race arm" (prototype EF002). Because the owner block closes before the function returns, no child outlives its function. A fork inside an `if` or a loop inside a scope is still owned.
 
-### 6.2 Fork ownership and `Scope` (O2)
+**The guardrail test.**
+- *Illegal state:* a child still running after the function that started it has returned. Today `fork` outside a scope uses the dynamic owner (R9), and probe `g1-today.ef` shows the child outliving its caller. P's corpus made this more common by moving lifetimes to callers (`corpus/P/latest-task.ef:18`, `lifecycle.ef:23`, `causal.ef:34`).
+- *Library alternative:* the owner-value form (Trio, Loom, Eio, Kotlin). In Effra it needs an owner value that cannot escape, which is #106's second-class value. A `Scope` row on `fork`, discharged by `.scoped()`, makes ownership visible in the row but does not stop a caller from choosing a longer lifetime. It also needs Q11 to discharge the row losslessly.
+- *Verdict:* construct. Swift's `async let` is the precedent: the child is bound to its block.
 
-Effect's `forkChild` attaches the child to the parent fiber (`internal/effect.ts:599-603`), and only `acquireRelease` charges `Scope`. P follows Effect: `acquireRelease` charges `Scope`, `.scoped()` removes it, and `fork` charges no row. The child belongs to the dynamic owner (R9), and its failures are live or pending in rows exactly as today. A function whose whole body was `scope { … }` becomes an ordinary body, and its callers decide the lifetime with `.scoped()`. The corpus shows the cost:
-- 10 scope sites became 8 call-site `.scoped()` calls;
-- 2 entry-point unwraps, where the root scope already owns everything;
-- 1 extracted helper, for the one nested scope in 26 files (`corpus/P/causal.ef`, `interruptOneWaiter`).
+**What stays dynamic.** Resource acquisition (`Files.openRead`) keeps the dynamic owner. A resource is inert data owned by the current owner, and EF123 already stops it escaping. Making resource acquisition lexical too would need an owner for every acquiring call (O7).
 
-### 6.3 Protocol and portability
+**Edition.** On the prototype, the owned-fork rule and the handle reading of §6.3 apply to files that use H's syntax (a race block, or the `provide` or `interrupt` keyword), so legacy fixtures keep passing. With the rule forced on for every file, 33 top-level tests (63 subtests) and `examples/causal.ef` are refused. That migration is follow-up U4.
 
-The construct-like meaning of P lives in the kernel. That meaning is a protocol: the operations in §6.1, their types, and the laws below. Effra already works this way for machines, where a checked declaration lowers to a provider-independent plan that any userland provider executes (`docs/specs/machine-provider-contract.md:7`, `:45`), and for time (`uses { Scheduler }`, `TestScheduler`).
+### 6.3 Fork handles: `run` joins, `interrupt` raises (review 1, M2)
 
-Providers that pass the same law suite, with source unchanged and only the `provide` differing:
+A fork handle is the child's eventual result. **`run child` joins**: it waits for the child and gives its result, or raises its failure. This is the reading of Rust tokio's `JoinHandle` (a `Future`), a JavaScript `Promise` and Swift's `async let`. Effect 4 is the exception: its `Fiber` is not an effect (`Fiber.ts:71`).
 
-| Provider | fork | race | scoped / close | sleep | Use |
+Because a joined handle is a recipe, recovery works on it in place: `run child.catch<Bad>("recovered")` (prototype test; rows note clause 4, in-place half shown).
+
+**`interrupt child`** is a statement. It requests cancellation, waits for the child's cleanup, and raises the child's retained failure. Its row is the child's `raises { E }`, matching what both runtimes and today's checker already do:
+- Go returns the cause when it is more than interrupts (`runtime/effra/fiber.go:171-176`).
+- JS `__ef_interrupt` re-raises it (`prelude/interrupt.mjs:6`).
+- The checker gives interrupt the child's failures (`semantic.go:5513-5515`).
+
+Prototype receipt: without `raises { Bad }`, an interrupt of a failing child is EF107.
+
+**The handle cannot escape its owner** (EF123; prototype test). It cannot be passed as a parameter, stored in a payload or returned past its owner (`docs/runtime.md:17`).
+
+### 6.4 The race block
+
+`race { fork a  fork b … }` is an owner block with n fork arms. Its value is the exit of the first arm to complete, success or failure. Its row is the union of the arms' rows, because any arm may win (prototype test). Every loser is interrupted, and its cleanup completes before the block yields (K2).
+
+**Why it is not library over `scope` + `fork`.** Inside a scope, an unobserved child's typed failure is raised at a normal close (R3). A race must discard a loser's typed failure even when the loser fails between the winner's completion and the close (K3). That needs its own owner policy and a first-completion primitive. Effect derives `raceAll` from `withFiber`, `callback` and `forkUnsafe` (`internal/effect.ts:1603`, `:1657`), but Effra has no general callback or mutable cell in the language, so first completion is host primitive P13. Go `select` and cats-effect `racePair` (`GenSpawn.scala:354`) make the same choice.
+
+**Why it is not a function `either(a, b)`.** The arms are forks, and forks must be lexically owned. A library `either` over the block is still possible, and `corpus/H/library.ef` defines one.
+
+**Not associative.** Under K2, `race { fork race { fork a  fork b }  fork c }` and `race { fork a  fork race { fork b  fork c } }` can publish different winners when a loser's cleanup is slow (review 1, M3). So the block is n-ary, and K1 is stated over its n arms, not by nesting binary races. The prototype accepts exactly two arms; n-ary is follow-up U1.
+
+### 6.5 The provide block (review 1, M4)
+
+`provide App, Clock = LiveClock { body }` builds the named layers and providers under a provision owner (R12, R13), runs the body, and closes them.
+
+**Why it is a construct.** The header is a static plan: a list of `layer` declaration names and `Service = provider` entries. Graph, lint and inspection read it at each site. Lint already fails without a checked plan: "layer provision … has no checked plan" (`lint_facts.go:311-319`). A library `provide(layer)` over a `Layer<Out, E, In>` value would carry rows, not the plan (`effect-rows-as-types.md:961`). A parameter of that type has no unique declaration, and no set of plans can be enumerated across modules.
+
+**No layer values.** H admits no `Layer`-typed parameter. Choosing a layer at run time is written as an `if` with two provide blocks, so every site keeps one plan, and inspection has no unresolved node to mark (`docs/specs/layers.md:110-114`).
+
+**`provideService`.** The entry `S = p` in a header and the library form `work.provideService<S>(p)` mean the same thing (K17). The library form exists so that a recipe can be provided where it is built, for example `fork greeting("42").provideService<Directory>(FixtureDirectory)`, without a helper function (`corpus/H/testing.ef`). It is a primitive with a declared contract (#132), needing F3b for `uses { R - S }`. It was renamed from `.provide<S>` so that it never shares a word with the `provide` keyword. Effect uses the same name.
+
+**MemoMap.** Effect shares builds across nested non-local provides (§2). H's provide block builds each named layer once per block (R13). Sharing across nested blocks is a separate optimisation that no current law requires.
+
+### 6.6 The `all` block, proposed (review 1, M5; O3)
+
+`all { fork a  fork b … }` runs its arms in parallel and yields their results in arm order. **Fail-fast:** the first failing arm's failure becomes the block's outcome. The block interrupts its siblings, waits for their cleanup, and discards their ordinary typed failures. Defects and cleanup failures are kept.
+
+**Why it is a construct.** Under today's rule, two forks in a scope where the first fails leave the second as an unobserved child. Its failure joins the first at a normal close as a composite cause, which no handler matches and no row can declare (EF107 at `prototype/baseline/both.ef:14:11` on the main compiler; `docs/runtime.md:17`). The fix is an owner whose close counts as cancellation-aborted once an arm fails. Its abandoned siblings' typed failures are then discarded, as a cancellation-aborted owner already does (R3; `docs/runtime.md:19`). That is an owner policy, not a function contract.
+
+Prior art: Kotlin `coroutineScope`, Go `errgroup`, and Loom's `Joiner.allSuccessfulOrThrow` (JDK 26).
+
+Laws (P14, handed to #125):
+- **A1.** If every arm succeeds, the block yields the results in arm order.
+- **A2.** The first arm failure is the block's failure. Siblings are interrupted and cleaned up before the block publishes.
+- **A3.** Siblings' ordinary typed failures are discarded, so no composite of typed failures arises. Defects and cleanup failures are kept (R3, R6).
+- **A4.** The row is the union of the arms' rows.
+
+`all` is not prototyped. It is follow-up U10, after O3.
+
+### 6.7 Library over the constructs, and what Q11 carries (review 1, M1)
+
+`corpus/H/library.ef` writes every library function in Effra:
+- the timeout family, over race blocks with `after` and `expire` as timer arms;
+- `either`, `delay`, and `retry` over a `Schedule` enum;
+- the `provideService` signature.
+
+The prototype's `race-library.ef` runs monomorphic `after`, `expire`, `deadlineOr` and `deadline` on both targets, and `deadlineOr` nests inside itself.
+
+**What each piece needs.**
+- Receiver methods (#127), for the dot spelling.
+- Whole-value type parameters (#128 Q9), for the generic family (`walls.ef`, EF127).
+- Label parameters (#131), for `retry<E>`.
+- Row difference (F3b, #126), for `provideService`.
+- Forking a recipe parameter as a race arm, which the prototype admits today.
+- The closed-at-the-edge contract (Q11), for K11 lossless wrapping of a recipe that returns an owned value.
+
+**Q11's status.** The rows note records the closed-at-the-edge half as not yet shown: the scope-bodied timeout model scores 0 of 29 (`effect-rows-as-types.md:428`, `:1041`, `:1300`, `:1320`). Of those, 12 programs are refused inside the wrapper body with "value owned by closing scope cannot escape", and 17 differ in output. So the failure is conservative: a wrapper may be refused, but nothing unsound is admitted.
+
+**Gate and fallback.**
+- *Gate:* retiring today's name-keyed `.timeout` (U9) waits for the generic library (#127, Q9) and for parity of the library `timeout` with today's on the timeout corpus, including the 29 Q11 programs.
+- *Fallback:* if Q11 does not land, resource-returning work is timed with an inline race block, and `.timeout` stays keyed until U9 can use the library for everything else.
+
+No owner guarantee depends on Q11: owned fork, EF123, the race owner, provision and interrupt's row are all direct constructs.
+
+### 6.8 Protocol, laws and portability
+
+Each construct lowers to a provider-independent protocol: P1–P12, plus P13 race (and P14 all, when admitted). Effra already works this way for machines, where a checked declaration lowers to a plan that any userland provider executes (`docs/specs/machine-provider-contract.md:7`, `:45`), and for time (`uses { Scheduler }`, `TestScheduler`).
+
+| Provider | fork | race | owner close | sleep | Use |
 |---|---|---|---|---|---|
-| Effect runtime (JS) | `Effect.forkChild` adapter | `Effect.raceFirst` + interrupt + await (prototype `race.mjs`) | `Scope` | `Clock` | today |
-| Go runtime | goroutine + `Scope` | `er.Race` (prototype) | `er.Scoped` | `SleepWithDriver` | today |
+| Effect runtime (JS) | `Effect.forkChild` adapter | `Effect.raceFirst`, then interrupt and await (prototype `race.mjs`) | `Scope` | `Clock` | today |
+| Go runtime | goroutine + `Scope` | `er.Race` over `raceWith` (prototype) | `er.Scoped` | `SleepWithDriver` | today |
 | Deterministic test runtime | a queued task | decided by virtual time (R14), ties broken by a seed | LIFO close | `TestClock` | today, partly (`TestScheduler`) |
-| UI frame runtime (#121, cf. Foldkit and Elm `Cmd`/`Sub`) | a task stepped once per frame | first of an event or a frame-clock deadline | component mount/unmount is the owner; unmount interrupts | frame clock | U11 |
-| Request-scoped server runtime | a goroutine bounded by the request | as Go | the request is the root owner; client disconnect interrupts | the deadline from the request budget (Go `context.WithDeadline`) | U11 |
+| UI frame runtime (#121; cf. Foldkit, Elm `Cmd`/`Sub`) | a task stepped once per frame | first of an event or a frame-clock deadline | mount/unmount is the owner | frame clock | U11 |
+| Request-scoped server runtime | a goroutine bounded by the request | as Go | the request is the root owner; client disconnect interrupts | the request budget (Go `context.WithDeadline`) | U11 |
 | Embedded or game tick loop (cf. embassy) | a cooperative task | first completion per tick | static owner tree | tick counter | U11 |
 
-**Kernel laws** (handed to #125; generalising R1–R15 of `lawful-runtime-contract.md:76-90`):
+**Laws** (handed to #125; they generalise R1–R15 of `lawful-runtime-contract.md:76-90`):
 
-- **K1 first completion.** `left.race(right)` publishes the exit of whichever side completes first, success or failure (Effect `raceFirst`, `internal/effect.ts:1736`).
-- **K2 loser cleanup precedes publication.** The loser is interrupted and its cleanup completes before the race publishes. This generalises R8.
-- **K3 abandonment.** The loser's ordinary typed failures are discarded; its defects and cleanup failures are kept (R3, R6).
-- **K4 symmetry.** `a.race(b)` and `b.race(a)` agree whenever completion order is determined.
-- **K5 identity.** `a.race(never)` behaves as `a`.
-- **K6 timeout derivation.** `w.timeout(d)` behaves as `w.race(failAfter(d))`; likewise `timeoutOr` and `timeoutOption`.
-- **K7 nested deadlines.** `w.timeout(d1).timeout(d2)` publishes no later than `min(d1, d2)` (one clock, R14).
-- **K8 scope nesting.** `w.scoped().scoped()` behaves as `w.scoped()`. Owners nest associatively.
-- **K9 provide/catch commute.** `w.provide(L).catch<E>(v)` behaves as `w.catch<E>(v).provide(L)` when building L cannot raise E.
-- **K10 shadowing.** The inner provider wins: `w.provide<S>(p).provide<S>(q)` uses `p`.
-- **K11 lossless wrapping.** For `effect fn wrap(x: Effect<…>) { run x.op(args) }`, `run wrap(r)` behaves as `run r.op(args)`, with the same rows and the same ownership evidence. This needs Q11.
-- **K12 fork/join.** `run w.fork().join()` behaves as `run w`.
-- **K13 interrupt after completion** is a no-op that observes the child.
+- **K1 first completion.** A race block publishes the exit of whichever of its n arms completes first, success or failure (Effect `raceFirst`, `internal/effect.ts:1736`).
+- **K2 loser cleanup precedes publication.** Every loser is interrupted, and its cleanup completes before the block publishes (generalises R8).
+- **K3 abandonment.** Losers' ordinary typed failures are discarded. Their defects and cleanup failures are kept (R3, R6).
+- **K4 symmetry.** Reordering the arms does not change the result whenever completion order is determined. No tie guarantee is made across targets (`docs/runtime.md:21`).
+- **K5 identity.** An arm that never completes and needs no cleanup can be removed: `race { fork w  fork never() }` behaves as `run w`.
+- **K6 timeout derivation.** `w.timeout(d)` behaves as `race { fork w  fork expire(d) }`, and likewise `timeoutOr` with `after` (definitional in `library.ef`).
+- **K7 nested deadlines.** For `w.timeout(d1).timeout(d2)`, cancellation of `w` is requested no later than `min(d1, d2)` on one clock (R14). The bound covers deadline selection and the cancellation request, not publication: publication waits for cleanup (K2) and may come later. Swift SE-0526 states the same (`0526-deadline.md:127-131`).
+- **K8 scope nesting.** `scope { scope { body } }` behaves as `scope { body }`.
+- **K9 provide/catch commute.** Moving `.catch<E>(v)` across a provision boundary preserves behaviour only when building, releasing and cleaning up the plan raise no failure and no defect. Otherwise the outer catch sees a composite cause it cannot match (R6). Stated with that condition, or not at all.
+- **K10 shadowing.** The inner provider wins: `provide S = p { provide S = q { run w } }` uses `q`.
+- **K11 lossless wrapping.** For a library wrapper `effect fn wrap(x) { race { fork x  fork … } }`, `run wrap(r)` behaves as the inline block, with the same rows and the same ownership evidence. This needs Q11 when `r` returns an owned value (§6.7).
+- **K12 fork/join.** `scope { let c = fork w; run c }` behaves as `run w`, with the same result and rows.
+- **K13 interrupt.** Three cases:
+  - after a successful completion, interrupt is a no-op that observes the child;
+  - for a running child whose shutdown is interruption only, interrupt waits for cleanup, and the interruption is normalised away;
+  - for a child that retained a failure (completed with one, or failed in cleanup), interrupt raises it.
 - **K14 schedules do not preempt.** `retry` consults the schedule only after an attempt has completed.
 - **K15 placement.** `w.timeout(d).retry(s)` bounds each attempt; `w.retry(s).timeout(d)` bounds the whole loop.
+- **K16 owned fork.** A child never outlives the innermost owner block that lexically contains its `fork`. At block exit, unjoined children are interrupted and their cleanup completes (R2, R8). Joining governs observation, not ownership.
+- **K17 provide entry.** `provide S = p { run w }` behaves as `run w.provideService<S>(p)`.
 
-**Drift control.** F# builders and `RebindableSyntax` let a library change what syntax means. P fixes the meaning in three ways:
-- The operation set is closed: six kernel operations.
-- Their types are fixed by the bundled module.
-- The law suite (#124, RS1) is the admission test. A provider that fails a law is refused, the same way an incompatible machine provider is a checked diagnostic (`machine-provider-contract.md:45`).
+**Drift control.** F# builders and `RebindableSyntax` let a library change what syntax means. H fixes the meaning in three ways:
+- The operation set is closed: P1–P13 (and P14).
+- Their types are fixed by the checker, not by the provider.
+- The laws run as a **conformance suite** (#124 RS1). Passing it is evidence, not proof: the checker cannot refuse a provider for failing a finite suite. This differs from an incompatible machine provider, which is a static diagnostic (`machine-provider-contract.md:45`).
 
 Providers choose an implementation. They cannot choose a meaning.
 
-### 6.4 Typing
+### 6.9 Typing and composability
 
-- **No name-keyed branch.** Each kernel and library operation is an ordinary declaration in a bundled module. Its rows are expressed with F3b (`{ R - Scope }`, `{ R - Out, In }`) and recipe parameters (#128 4a, in-place half shown). Its ownership comes from the closed-at-the-edge half (Q11) and declared contracts in inferred vocabulary (#130).
-- **TypeScript projection is fail-safe.** `{ R - S }` projects to `Exclude<R, S>`, which is Effect's own type for `Effect.scoped`. A row the projector cannot express projects to an opaque nominal type, never `any`.
-- **Go lowering.** Rows erase. Kernel operations become runtime calls (`er.Fork`, `er.Race`, `er.Scoped`), with the same R1–R15 laws on both targets.
+**Typing.**
+- Constructs use the checker's existing owner kinds: child, timeout (reused for race), scope and provision (`semantic.go:160-161`).
+- Library functions are ordinary declarations, and no checker branch is keyed on their names.
+- TypeScript projection: `{ R - S }` projects to `Exclude<R, S>`, Effect's own type. A row the projector cannot express projects to an opaque nominal type, never `any`.
+- Go lowering: rows erase; owner blocks become `er.Scoped`, `er.Race` and provision calls, with the same laws on both targets.
 
-### 6.5 Composability
+**The five composability checks.**
+1. **Wrap losslessly.**
+   - Direct use needs nothing.
+   - A library wrapper over a race block is an ordinary `effect fn`, and `race-library.ef` nests one inside itself.
+   - Wrappers of owned-value recipes need Q11 (K11).
+   - A block itself is wrapped by a named function. Including the App build inside a deadline is the one case (`walls.ef` `inside`).
+2. **Nest.** Every pair composes (the matrix below). Race does not flatten (§6.4).
+3. **Keep recipes first-class.** Every library function takes and returns recipes. A block yields a value, so turning a block into a recipe takes a named `effect fn`. The H corpus needed none: `.provideService` on a fork replaced C's two helpers (§8.1).
+4. **Stay orthogonal.**
+   - scope: lifetime; fork: start; `run child`: observe; interrupt: cancel; race: first completion; provide: context.
+   - Time (Clock), recurrence (Schedule) and recovery (catch) are library.
+   - Nothing fuses a deadline with a scope, so Go's `context` problem (cancellation, deadline and values in one bag) does not arise.
+5. **State composition laws.** K1–K17 and A1–A4.
 
-**Lossless wrapping.** A wrapper is an ordinary `effect fn` over a recipe parameter, so wrappers nest freely. Receipts:
-- `prototype/baseline/p1.ef` (a monomorphic `timeoutOr` over today's `.timeout`, run with the main compiler) runs on Go and JS.
-- `race-library.ef`'s `deadlineOr` nests inside itself and inside the kernel, on both targets.
+**Nesting matrix.** The outer form is the row, the inner one is the column.
 
-The generic version is blocked only by #128 Q9 (EF127), F3b (EF125) and Q11 (EF123) (`walls.ef`).
-
-**First-class recipes.** `retry`, `either`, the timeout family, `.provide` and `.scoped` are values you can pass, store and return, because they are functions over recipes. A block (options A, B, C, E) yields a value, not a recipe: wrapping one needs a helper function. The corpus needed 2–3 such helpers per block option and none in P or D.
-
-**Orthogonality.** Each kernel operation does one thing:
-- fork: start;
-- join: observe;
-- interrupt: cancel;
-- race: first completion;
-- scoped: lifetime;
-- acquireRelease: finalise.
-
-Provide (context), time (Clock), recurrence (Schedule) and recovery (catch) do not overlap. Nothing fuses a deadline with a scope, so Go's `context` problem (cancellation, deadline and values in one bag) does not arise.
-
-**Nesting matrix.** The outer operation is the row, the inner one is the column. Every cell composes; the cell names the law that pins it or the note that applies.
-
-| outer \ inner | scoped | fork | race | timeout | provide(L) | catch | retry |
+| outer \ inner | scope | fork | race | timeout (library) | provide | catch | retry |
 |---|---|---|---|---|---|---|---|
-| **scoped** | K8 | the scope owns the child (R2) | each side's owner nests in the scope | ditto | the layer closes before the scope (R12, R2) | as written | as written |
-| **fork** | the child owns its scope | grandchild (R9) | the race runs in the child | ditto | the child has its own provision | the child's failure is caught inside | as written |
-| **race** | each side closes (K2) | forks inside a side are owned by it (K2) | flattens (K1) | K7 | per side | per side | per side |
-| **timeout** | covers the scope's close (K2) | covers the forked child's lifetime only if it is joined inside | K7 | K7 | covers the build (§4) | K15 | K15 |
-| **provide(L)** | the scope sees L | the child inherits L | both sides see L | the build is outside the deadline (§4) | K10 | K9 | as written |
-| **catch** | catches the scope's failures | catches the join's failures | catches the winner's failure | catches `Timeout` | K9 | ordered | the last attempt's failure |
-| **retry** | re-runs the scope | re-runs the fork | re-runs the race | K15 | rebuilds L per attempt (as Effect does, `Layer.ts:769-775`) | as written | nested policies |
+| **scope** | K8 | the scope owns the child (K16) | the race owner nests in the scope | as race | the plan closes before the scope (R12, R2) | as written | as written |
+| **fork** (arm or child) | the child owns its scope | grandchild, owned by the child's block (K16) | the race runs in the child | as race | the child has its own provision | the child's failure is caught inside | as written |
+| **race** | each arm's scope closes before publication (K2) | forks inside an arm are owned by it (K2) | does **not** flatten; n-ary instead (§6.4) | K7 | per arm | per arm | per arm |
+| **timeout** | covers the scope's close (K2) | the timeout owner closes the child at the deadline without a join (K16, R8) | K7 | K7 | covers the build only when the provide is inside the wrapped function (§4) | K15 | K15 |
+| **provide** | the scope sees the plan | the child inherits the provision lexically | every arm sees it | the build is outside the deadline | K10 | K9 with its condition | builds once; the attempts reuse it |
+| **catch** | catches the scope's failures, if a lone typed failure | catches a joined child's failure (`run c.catch<E>(v)`) | catches the winner's failure | catches `Timeout` | K9 | ordered | the last attempt's failure |
+| **retry** | re-runs the scope | re-runs the fork | re-runs the race | K15 | a provide inside the retried recipe builds per attempt | as written | nested policies |
 
 ## 7. Losing options
 
-Each option was measured on the same 26-file corpus (§8). `else` is removed everywhere, per the owner.
+Each option was measured on the same 26-file corpus (§8.1). `else` is removed everywhere, per the owner.
+
+### 7.1 P, kernel methods plus library (round 1's choice)
+
+P spelled fork, join, interrupt, race and scoped as dot methods (`.fork()`, `.join()`, `.interrupt()`, `.race(x)`, `.scoped()`), with the timeout family and `.provide(App)` as library. It loses on four counts:
+- **B1, construct in dot form.** fork mints a pending-child obligation, and join and interrupt observe a `Fiber` value. No clause of the accepted vocabulary (`effect-rows-as-types.md:395-424`) covers either, so `.fork()`, `.join()` and `.interrupt()` have no carrier. They are compiler-known names in dot form, and the prototype keyed them on `method.text`, reserving the names on every receiver (#95's problem). On the shared classification P has **29 lookalikes**, against H's 0 and today's 17 (§8.1). Round 1's "0" came from setting P's list to empty by assertion.
+- **M1, Q11.** P's owner guarantee for `.scoped()`, `.race()` and every library owner rested on Q11, which scores 0 of 29. P's `.race` and `.scoped` could become declared-contract primitives after Q11, because a closed owner publishes nothing pending. Until then they are compiler-known too.
+- **M4, provide(Layer).** The conditional overturn rested on a typed `Layer` carrying the plan, which it cannot.
+- **M6, lifetimes.** P moved scope decisions from forking functions to their callers, so a child could outlive its function.
+
+P also scored lowest with round 1's blind readers: 10.5 of 12, and 3.5 of 5 on the weighted questions. P's reader hedged Q1 and named "method-chain order semantics … which dot-forms are magic vs library" as confusing (n = 1, weak; §8.2).
+
+What P got right survives in H: timeout and retry as library over race, duration literals, the Schedule analysis, the protocol framing and the laws.
+
+### 7.2 Block options A–E
 
 - **A, clauses on `scope`:** `scope provide App, Clock = LiveClock within 2s { … } otherwise { … }`.
-  - It adds 3 keywords (`provide`, `within`, `otherwise`) and keeps the 1-G debt (the deadline charges `Scheduler` by name).
-  - Clause order *is* nesting order, which readers must learn. That is the risk blind-reader question 1 tests.
-  - It needs 3 helpers for forked or stored recipes.
-  - The A agent reported a semantic trap in `ownership.ef`: `let file = scope provide Files = LiveFiles { … }` makes a resource-acquiring call escape a scope owner.
-- **B, separate blocks:** `provide … { within 2s { … } otherwise { … } }`.
-  - It has the same keyword cost and helpers as A, and one more nesting level.
-  - `otherwise` is a new word the owner has not seen.
-- **C, a race construct with time as library:** `race { … } or { … }`.
-  - Its time handling is P's (library over race). The difference is that C spells race and provide as blocks.
-  - `or` is the boolean operator in Python and SQL: a reused word, against the owner's rule.
-  - Blocks cannot be wrapped without helpers.
-  - It is the best of the block options by tokens (-3.7%).
+  - It adds 3 keywords (`provide`, `within`, `otherwise`), and the deadline charges `Scheduler` by name (1-G).
+  - Clause order *is* nesting order, which readers must learn. Round 1's A reader found the header "ambiguous".
+  - It needs 3 recipe-wrapping helpers.
+  - It has a semantic trap in `ownership.ef`: `let file = scope provide Files = LiveFiles { … }` makes a resource-acquiring call escape a scope owner.
+- **B, separate blocks:** `provide … { within 2s { … } otherwise { … } }`. It has the same keyword cost and helpers as A, plus one more nesting level. `otherwise` is a word the owner has not seen.
+- **C, race with a fallback block:** `race { … } or { … }`.
+  - C is H's closest relative: time handled as library, provide as a block.
+  - It loses three ways: `or` is a reused word (boolean `or` in Python and SQL), its arms are blocks rather than forks so race is not an owner of forks, and it needed 2 recipe-wrapping helpers.
 - **D, `with` block sugar (Koka `with`, Gleam `use`):**
-  - It keeps 99 compiler-known call forms (`provide(…)`, `provideService<…>(…)`, `.provide`). That is the lang-item pattern the owner rejected on 2026-10-09.
-  - It overloads the existing `derive … with` keyword (`codec-transforms.ef`, `http-endpoints.ef`).
-  - "The rest of the block is an argument" is the Gleam `use` criticism (prior-art.md).
-- **E, race with an `after` arm:** `race { … } after 2s { … }`.
-  - `after` is a new word (Erlang `receive … after` is the precedent).
-  - It is a deadline construct that charges `Scheduler` by name (1-G), and it still needs helpers.
+  - It keeps compiler-known calls (`provide(App)`): 17 lookalikes.
+  - It overloads the existing `derive … with` keyword.
+  - "The rest of the block is an argument" is the Gleam `use` criticism.
+- **E, race with an `after` arm:** `race { … } after 2s { … }`. `after` is a new keyword (after Erlang's `receive … after`). It is a deadline construct that charges `Scheduler` by name (1-G), and it needs 3 helpers.
+
+A, B, C and E keep `.join()` and `.interrupt()` as dot forms: 12 lookalikes each.
 
 ## 8. Evidence
 
 ### 8.1 Corpus metrics
 
-The 25 examples that use `.timeout`, `.provide` or `.orFail`, plus the worked example, are rewritten per option under `primitives/corpus/<option>/`. Rewrites were done by one agent per option from a shared rules file, with deterministic hoisting. The metrics come from `bun benchmarks/syntax/measure.ts`, which exits non-zero on lex failure, unbalanced braces, a missing file, or any construct lookalike in the chosen option.
+The 25 examples that use `.timeout`, `.provide` or `.orFail`, plus the worked example, are rewritten per option under `primitives/corpus/<option>/`. The metrics come from `bun benchmarks/syntax/measure.ts`, which exits non-zero on any of:
+- a lex failure, unbalanced braces or a missing file;
+- a construct lookalike in the chosen option;
+- for H, a `fork` outside a `scope` or `race` block.
 
-| Option | Tokens | vs today | Code lines | Distinct keywords | Punct/line | Construct lookalikes | Dot forms awaiting general features |
-|---|---|---|---|---|---|---|---|
-| today | 11090 | 0 | 1664 | 28 | 3.31 | 187 | n/a |
-| **P** | 11104 | +0.1% | 1646 | **26** | 3.36 | **0** | 198 |
-| A | 10772 | -2.9% | 1771 | 31 | 2.93 | 0 | 57 |
-| B | 10710 | -3.4% | 1773 | 31 | 2.93 | 0 | 57 |
-| C | 10678 | -3.7% | 1746 | 31 | 2.97 | 0 | 64 |
-| D | 10922 | -1.5% | 1670 | 28 | 3.21 | 99 | 64 |
-| E | 10720 | -3.3% | 1777 | 31 | 2.93 | 0 | 57 |
+**One classification for every option.** The `forms` table gives each dot or call form a carrier:
+- `none`: no general feature can make it library, so it is compiler-known, a **lookalike**. These are `.fork`, `.join`, `.interrupt`, `.cancel`, `.provide(` with a layer argument, and D's `provide(`.
+- `q11`: library only after Q11. These are `.race`, `.scoped`, `scoped`, and the timeout family (`timeout`, `timeoutOr`, `timeoutOption`, `timeoutTo`).
+- `rows`: library after the rows units, #127, #128 Q9, F3b, #131 and #133. These are `.catch`, `.recover`, `.orFail`, `.provide<S>`, `.provideService` and the like.
+
+"Keyed today" counts forms that today's checker recognises by name.
+
+| Option | Tokens | vs today | Code lines | Distinct keywords | Punct/line | Lookalikes | Awaiting Q11 | Awaiting rows units | Keyed today |
+|---|---|---|---|---|---|---|---|---|---|
+| today | 11090 | 0 | 1664 | 28 | 3.31 | 17 | 8 | 162 | 187 |
+| **H** | **10609** | **-4.3%** | 1740 | 31 | 2.96 | **0** | 7 | 48 | 47 |
+| P | 11104 | +0.1% | 1646 | 26 | 3.36 | 29 | 15 | 154 | 173 |
+| A | 10772 | -2.9% | 1771 | 31 | 2.93 | 12 | 0 | 45 | 57 |
+| B | 10710 | -3.4% | 1773 | 31 | 2.93 | 12 | 0 | 45 | 57 |
+| C | 10678 | -3.7% | 1746 | 31 | 2.97 | 12 | 7 | 45 | 59 |
+| D | 10922 | -1.5% | 1670 | 28 | 3.21 | 17 | 16 | 139 | 123 |
+| E | 10720 | -3.3% | 1777 | 31 | 2.93 | 12 | 0 | 45 | 57 |
 
 Reading the table:
-- **P has the fewest keywords.** `scope` and `fork` retire, and nothing is added.
-- **P has zero lookalikes.** Every dot form is library.
-- **P has the fewest lines.** It costs about the same tokens as today. Its punctuation per line is the highest because chains carry more dots and parentheses on one line.
-- **The block options save 3–4% of tokens, almost entirely from hoisting.** `recipes-queue`, `recipes-retry` and `recovery-outcome` repeat `.provide<Console>(Stdout)` on each statement today. P keeps that repetition only because the rewrite was mechanical; idiomatic P provides once at the entry point, as `concurrency.ef` does.
-- **Max nesting depth** (9 in every option, set by `http-transport.ef`) does not discriminate. In the files that change, P's depth is lowest or tied lowest: `causal`, `concurrency`, `lifecycle` and `ownership` drop to 1. The block options raise `dashboard` to 3, and A, B and E raise `concurrency` to 3 as well.
-- **The last column counts dot forms that are ordinary library only after #127, #128, F3b, #131 and #133 land.** It is the dependency, made visible. P's count is the largest because P moves the most onto general features.
+- **H is the only option with zero lookalikes.** Today's 17 are `.join` (8), `.interrupt` (4) and `.provide(App)` (5); P adds `.fork` (12).
+- **H is the shortest by tokens.** It hoists provision into one block per entry point, and `run child` and `interrupt child` are shorter than `.join()` and `.interrupt()`. Its line count is higher than today's because blocks take lines.
+- **H's 7 forms awaiting Q11** are library deadline calls: 5 `.timeoutOr` and 2 `.timeout`. They are library, and the fallback is an inline race block (§6.7).
+- **Max nesting depth** is 9 in every option, set by `http-transport.ef`, so it does not discriminate.
+
+**Helpers, one count per option.** These are functions that a rewrite had to add, by category:
+
+| Option | Recipe-wrapping | Nested lifetime | Total |
+|---|---|---|---|
+| **H** | 0 | 0 | **0** |
+| P | 0 | 1 (`interruptOneWaiter`) | 1 |
+| A, B, E | 3 (`delayedWithin`, `explicitVirtualSleepWithClockScheduler`, `greetingWithDirectory`) | 0 | 3 |
+| C | 2 | 0 | 2 |
+| D | 0 | 0 | 0 |
+
+H replaced C's two helpers with `.provideService` on a fork (`corpus/H/causal.ef`, `testing.ef`). Since that is library awaiting F3b, today's checker would still need the helpers. The corpus scopes mostly span whole function bodies, so the inline nested-lifetime count may understate real code. That costs P a helper per site and costs H nothing, because `scope` is inline.
 
 ### 8.2 Blind readers
 
-Packets are in `primitives/blind-reader/<option>/` for today, P and A–E. Each holds the three programs with comments removed, plus the option's `library.ef` for P, C and D, and the same 12 questions. The answer key is separate (`blind-reader-key.md`). The orchestrator runs the readers. Question 1, "does the 2 s include building App?", is the one the owner flagged for P. Results are pending.
+Packets are in `primitives/blind-reader/<option>/` for today, H, P and A–E. Each holds the three programs with comments removed, plus the option's `library.ef` for H, P, C and D, and the same 12 questions. The answer key is `blind-reader-key.md`. Its Q11 scoring now uses the §8.1 classification rather than each option's own claim (review 1, m1).
+
+**Round 1** (n = 1 per option, Sonnet, scored by review 1):
+
+| Option | Total /12 | Weighted (Q1, 4, 7, 11, 12) /5 | Notes |
+|---|---|---|---|
+| today | 11 | 4 | Q11: read the compiler-known dots as library |
+| P | 10.5 | 3.5 | Q1 hedged; Q11: read `.provide`/`.scoped`/`.fork`/`.catch` as "probably built in" |
+| A | 12 | 5 | found the clause header ambiguous |
+| B, C, E | 12 | 5 | |
+| D | 11 | 4 | Q11: read `provide()`/`provideService()` as library |
+
+Pattern (weak evidence): readers who saw a keyword or block form classified it correctly, and readers who saw a dot or call form could not tell compiler-known from library, in either direction. That is the pattern H is built on. **Round 2** (n = 3 per option, including H) is run by the orchestrator; results are pending.
 
 ### 8.3 Prototype
 
-Branch `wf10/spike-syntax-proto`, code commit `073de983` (head `e11047a3` adds the baseline probes in `prototype/baseline/`), cut from `wf10/spike-syntax`. It lowers P onto existing machinery:
-- duration literals, as millisecond integers in the lexer;
-- `run X.fork()` → today's fork;
-- `X.scoped()` → a recipe-level scope owner (a checker case like timeout's, without rows);
-- `X.race(Y)` → a new kernel. The checker joins two closed owners. Go `er.Race` shares the timeout runtime through a generic `raceWith`. JS `__ef_race` uses `Effect.raceFirst`, then interrupts and awaits both fibers;
-- `timeoutOr` → timeout + catch, until #127/#128 let it be written in `.ef`.
+Branch `wf10/spike-syntax-proto`, head `bc263cf8` ("feat(spike): prototype option H owner blocks for #134"), cut from `wf10/spike-syntax` at `effb24d4`. It replaces round 1's P keys:
 
-`timeout` charges `Clock` instead of `Scheduler` (1-G, rows note Q5).
+- **Parser** (`syntax.go`):
+  - `race { fork a  fork b }` lowers to the race kernel; a non-fork arm is EF002 "each arm of a race block is a fork".
+  - `provide L, S = p { run X }` lowers to today's provision.
+  - `interrupt child` lowers to today's interrupt.
+  - A fork-bound name under `run` lowers to today's join.
+  - A `fork` outside every owner block is EF002 "fork needs an owner".
+  - The P method keys (`.fork()`, `.scoped()`, `.race()`, `.timeoutOr()`) are removed.
+- **Runtime** (`runtime/effra/effect.go`): `raceWith` takes an `otherAbandoned` flag. Under external cancellation, race now strips ordinary failures from both sides, while timeout keeps its timer policy (review 1, m11).
+- **Clock change reverted.** Timeout charges `Scheduler` again, as today (`timeout.mjs`, `emit_go.go`, `reachability.go`, `semantic.go`). The library deadlines charge `Clock` because they sleep on it (O6).
 
 | File (prototype dir) | Go | JS | Output equals today's |
 |---|---|---|---|
-| `dashboard.ef` (P worked example) | exit 0, `live / live` | exit 0, `live / live` | yes |
-| `concurrency.ef` (P rewrite) | exit 0, `child joined` / `timed out` / `recovered` | same | yes |
-| `layers.ef` (unchanged in P) | exit 0, `fixture:fixture` | same | yes |
-| `race-library.ef` (race kernel; `deadlineOr` written in `.ef` over race + `Clock.sleep`) | exit 0, `fast` / `failure won` / `abandoned loser` / `gave up` / `work` / `outer` | same | n/a (new) |
-| `walls.ef` | `ef check`: EF127 (user generic functions), EF125 (row difference), EF123 (owned value escapes a closing scope, i.e. Q11), EF105 (stored fork recipe) | | the walls are the evidence |
+| `dashboard.ef` (worked example; provide block, race block, `run account`) | `live / live` | same | yes |
+| `concurrency.ef` (scope, `run child`, `interrupt`, library deadline) | `child joined` / `timed out` / `recovered` | same | yes |
+| `layers.ef` (provide block in `main`) | `fixture:fixture` | same | yes |
+| `race-library.ef` (race block; `after`, `expire`, `deadlineOr`, `deadline` in `.ef`) | `fast` / `failure won` / `abandoned loser` / `gave up` / `work` / `deadline` / `outer` | same | n/a (new) |
+| `walls.ef` | `ef check`: EF127 for generic `timeoutOr` (#128 Q9). `outside` and `inside` check, showing both deadline placements. | | the wall is the evidence |
 
-**Test status on the prototype branch.** One run of `go test ./internal/compiler ./runtime/...`:
-- `runtime/effra` passes. The `raceWith` refactor keeps every timeout runtime test green.
-- `internal/compiler` reports 150 failing top-level tests. About 127 of them fail only because the prototype worktree has no `node_modules` ("pinned JavaScript packages: stat …/node_modules").
-- The remaining ~23 are the deliberate Scheduler→Clock change: EF108 "missing service requirements: Clock" in fixtures that provide `Scheduler`, the custom-Scheduler authority tests in `causal_test.go`, and ownership-matrix and cascade expectations for timeout.
+**Tests** (`internal/compiler/spike134_test.go`):
+- the four programs on both targets;
+- fork needs an owner, with a legacy file still admitted;
+- an escaping handle is EF123;
+- an unobserved child is EF107;
+- catch on a joined child is admitted;
+- interrupt carries the child's row (EF107 without `raises { Bad }`);
+- race arm shape, arm result type and union row;
+- the provide block with EF108 for a missing service.
 
-None of the failures points at the new kernel cases. The branch is evidence, not a mergeable change.
+**Suite.** `go test ./internal/compiler ./runtime/... -count=1` passes in full on the prototype branch (compiler 343 s). Round 1's 22 Clock failures are gone with the revert, so the ownership truth matrix runs again. Round 1 had no prototype tests of its own (review 1, m10).
+
+**Migration measurement.** With the owned-fork rule forced on for every file, 33 top-level tests (63 subtests) and `examples/causal.ef` are refused, each a fork outside a scope.
 
 ## 9. Decision record
 
-**Chosen set and syntax.**
-- **Constructs:** `effect fn`, `run`, `fail`; the declarations `service`, `impl`, `layer` (and machines).
+**Chosen set and syntax (H).**
+- **Constructs:** `effect fn`, `run`, `fail`; `service`, `impl`, `layer` (and machines); `scope { }`; owned `fork`; `run child` as join; `interrupt child`; `race { fork … }`; `provide Plan { }`.
+- **Proposed construct:** `all { fork … }` (P14, after O3).
 - **Notation:** duration literals (`ms`, `s`, `m`).
-- **Kernel methods:** `.fork()`, `.join()`, `.interrupt()`, `.race(x)`, `.scoped()`, `acquireRelease(a, r)`.
-- **Library:** the timeout family, `retry`/`Schedule`, `either`, `delay`, `.provide(Layer)`, `.provide<S>(p)`, `.catch`, `.recover`, `.orFail`.
-- **Library intrinsic until O3:** `all`/`both`/`forEach`.
-- **Retired:** the `scope { }` and `fork` keywords.
+- **Library:** the timeout family, `after`, `expire`, `either`, `delay`, `retry`/`Schedule`, `.provideService<S>(p)`, `.catch`, `.recover`, `.orFail`.
+- **Host primitives:** P1–P12 unchanged, with P13 race added.
+- **Retired:** `.timeout` as a keyed form (after U9), `.provide(Layer)` and `.provide<S>` as dot forms, `.join()`, `.interrupt()` and `.cancel()`.
 
-**Losing options:** A, B, C, D, E for the reasons in §7. In short: more keywords, helpers for every wrapped recipe, reused or new words for the fallback arm, and (A, B, E) the `Scheduler` named by syntax. D keeps a compiler-known call surface.
+**Losing options:** P (§7.1); A, B, C, D, E (§7.2).
 
 **Effect on tickets:**
-- **#95** (reserve postfix words): **superseded.** Postfix words are ordinary methods (#127); nothing is reserved.
-- **#132** (provide as library): **re-scoped** to cover `.provide(Layer)` as well as `.provide<S>`, with `Layer<Out, E, In>` as the declaration's type and the plan read from the declaration. This conditionally overturns the rows note's NO-GO.
-- **#126** (F3, row difference): **priority raised.** `scoped` and both provides depend on F3b.
-- **#127** (F1 + receiver methods): **priority raised.** Every P spelling is a receiver method.
-- **#128** (4a): Q9 is needed for the generic library, and **Q11 becomes load-bearing**: it carries the owner guarantee for every library owner (`walls.ef` EF123). It is the main risk.
-- **#129** (4b): unchanged.
-- **#130** (4c): fork's and join's declared ownership and observation contracts use its vocabulary.
-- **#131, #133** (catch, recover): unchanged. `catch<Timeout>` is just catch.
-- **#106** (non-escaping block closures): no longer required by #134. It would only make inline sub-scopes nicer (1 site in 26 files).
-- **#124, #125:** receive K1–K15 and P13.
-- **#121:** a UI frame runtime is a named provider client (§6.3).
+- **#95** (reserve postfix words): **superseded.** Nothing is reserved after a dot. The keywords are leading words.
+- **#132** (provide as library): **re-scoped** to `.provideService<S>` only. `provide(Layer)` stays a construct as the provide block, and the rows note's NO-GO is upheld.
+- **#126** (F3, row difference): needed for `.provideService` only.
+- **#127** (receiver methods), **#128 Q9**: needed for the generic library.
+- **#128 Q11**: no longer load-bearing for any guarantee; it affects only lossless wrapping of owned-value recipes.
+- **#130** (4c): not needed by #134.
+- **#131, #133** (catch, recover): unchanged.
+- **#106** (non-escaping block closures): would allow owner values as parameters (O4).
+- **#124, #125:** receive K1–K17, A1–A4, P13 and P14.
+- **#121:** a UI frame runtime is a named provider client (§6.8).
+- **`lawful-runtime-contract.md:63`:** to amend in U1, since race becomes P13 with block syntax and provision has block syntax.
 
-**Follow-up units** (implementor-days are estimates; the order is relative to rows phase 2, which delivers F3b, #127 and #128):
+**Follow-up units** (implementor-days are estimates):
 
 | Unit | Work | Days | Order |
 |---|---|---|---|
-| U1 | P13 race kernel in both runtimes, with K1–K5 law tests | 2 | now; the prototype exists |
-| U2 | Duration literals + nominal `Duration`; the formatter prints literals | 2 | now |
-| U3 | timeout charges `Clock` (1-G); migrate tests and examples | 1–2 | now (decides Q5) |
-| U4 | Parser, formatter and LSP for `.fork()`/`.scoped()`/`.race()`; `ef fix` migration of `scope { }`/`fork` | 3 | after O4 |
-| U5 | Bundled kernel module with declared signatures | 5 | after rows phase 2 (#127, #128 Q9, F3b, #130) |
-| U6 | Library over the kernel: timeout family, retry/`Schedule`, either, delay | 3 | after U5 |
-| U7 | `Layer<Out, E, In>` typed value; `.provide(Layer)` as library; graph, lint and inspection read the plan from the declaration | 5 | after F3b |
-| U8 | Q11 closed-at-the-edge contract | 5–8 | inside #128; critical path |
-| U9 | Remove the name-keyed checker branches (`timeout`, `provide`, `provideLayer`, `scope`, `fork`) | 3 | after U5–U8 |
-| U10 | `all`/`both`/`forEach` after O3 | 3 | after O3 |
-| U11 | Kernel as a provider protocol (a `Runtime` provider interface plus the RS1 law suite), first non-Effect provider: the deterministic test runtime | 8–10 | after U9; with #124 |
+| U1 | P13 race kernel: n-ary race block in both runtimes, symmetric abandonment, K1–K5 law tests; amend `lawful-runtime-contract.md:63` | 3 | now; the prototype exists |
+| U2 | Duration literals plus a nominal `Duration`; the formatter prints literals | 2 | now |
+| U3 | Provide block, replacing `.provide(App)`; graph, lint and inspection read the header | 3 | now |
+| U4 | Owned fork, `run child` and `interrupt child`; `ef fix` wraps the 33 tests, `causal.ef` and user code in `scope`; drop `.cancel()` | 3 | after O1 |
+| U5 | Formatter and LSP for the new blocks (hover, folding, completion of plan entries) | 2 | with U3, U4 |
+| U6 | Library timeout family, `either`, `delay`, `retry`/`Schedule` in `.ef` | 3 | after #127, #128 Q9 |
+| U7 | `.provideService<S>` as library | 1 | after F3b (#126, #132) |
+| U8 | Q11 closed-at-the-edge contract, measured on the 29 programs | 5–8 | inside #128; not on H's critical path |
+| U9 | Retire keyed `.timeout` | 1–2 | after U6 and the §6.7 gate |
+| U10 | `all { }` block (P14) with A1–A4 law tests | 3 | after O3 |
+| U11 | Constructs as a provider protocol (a `Runtime` provider interface plus the RS1 conformance suite); first non-Effect provider is the deterministic test runtime | 8–10 | after U1, with #124 |
 
 **Open owner questions** (each with a recommendation):
 
-- **O1. Adopt P?** The constructs are `effect fn`/`run`/`fail`/declarations, everything else is kernel methods or library, and the `scope`/`fork` keywords retire. *Recommend yes.*
-- **O2. Fork ownership.**
-  - Effect parity: fork charges no row, and the child belongs to the dynamic owner.
-  - The alternative: fork charges `Scope`, and `.scoped()` removes it, so every forking function shows `Scope` in `uses`.
+- **O1. Adopt H?** Owner blocks (`scope`, `race`, `provide`), owned `fork`, `run child` and `interrupt child` as constructs, with timeout, retry and `provideService` as library. *Recommend yes.*
+- **O2. Superseded.** Round 1 asked whether fork charges a row. Owned fork replaces the question.
+- **O3. Group failure policy.** *Recommend* the fail-fast `all { }` block (P14, §6.6) rather than a library intrinsic.
+- **O4. Owner values as parameters** (Trio nursery, Loom scope, Eio switch), so a helper can fork into its caller's owner. *Recommend deferring* to #106, since the value must be second-class. H stays lexical-only.
+- **O5. Duration units.** *Recommend* `ms`, `s` and `m` only.
+- **O6. Clock or Scheduler for deadlines.** *Recommend:* today's keyed `.timeout` keeps charging `Scheduler` until U9, and the library deadlines charge `Clock` because they sleep on it. U9 then decides Q5 by retiring the keyed form.
+- **O7. Resources keep the dynamic owner.** *Recommend yes.* EF123 already keeps them from escaping, and a lexical rule would need an owner at every acquisition.
+- **O8. Drop `.cancel()`** (request cancellation without waiting). *Recommend folding it* into `interrupt` and owner close. No corpus program needs it, and a cancel without waiting leaves a child whose cleanup nobody observes.
+- **O9. Rename `.provide<S>` to `.provideService<S>`.** *Recommend yes,* so the keyword and the library function never share a word.
 
-  *Recommend Effect parity:* `acquireRelease` charges `Scope`, fork does not. The rows stay small, and R9 already defines the owner.
-- **O3. Group failure policy for `all`/`both`.**
-  - Fail-fast: interrupt siblings, wait for them, and combine later failures (Effect concurrent `forEach`, `internal/effect.ts:5132-5169`; Kotlin; errgroup).
-  - Wait-all.
+## 10. Direction changes
 
-  *Recommend fail-fast*, as a library intrinsic with a declared contract, and note the Kotlin pitfall for fork+join+catch.
-- **O4. Interim before Q11.**
-  - Switch the surface early, with the checker keyed on the kernel module's declarations as temporary lang items.
-  - Keep today's surface until U5–U8.
+**Round 1 (2026-10-12).** The spike started with a block-construct hypothesis, leading option C. Two owner directions changed it:
+- (a) no reused keywords such as `else`, and primitives plus library by default;
+- (b) a guardrail test and a portability test.
 
-  *Recommend keeping today's surface* and shipping U1–U3 now. No interim lang items, per the 2026-10-09 direction.
-- **O5. Duration units.** *Recommend* `ms`, `s` and `m` only, with no `h` or `d` in source until a client needs them.
-- **O6. Timeout charges `Clock`, not `Scheduler` (1-G, rows note Q5).** *Recommend yes.* `Scheduler` keeps test control (`advance`, `awaitRegistration`).
-- **O7. Inline sub-scopes need a helper function under P.** *Recommend accepting this.* Revisit with #106 if the corpus grows more than the 1 site in 26 files seen here.
+So `else` became `otherwise` in A and B, option P was added and chosen, the schedule idea was evaluated, and the kernel was framed as a protocol.
 
-## 10. Direction change (2026-10-12)
+**Round 2 (2026-10-12, after review 1).** Review 1 returned changes: 1 Blocker, 6 Major, 11 Minor and 5 Optional findings. Three of them reversed the choice:
+- B1: P's dot forms for fork, join and interrupt have no carrier;
+- M1: Q11 is not shown;
+- M6: the guardrail test was not run on fork ownership.
 
-The spike started with a block-construct hypothesis, leading option C. Two owner directions on 2026-10-12 changed it:
+The coordinator asked for a hybrid. Option H keeps P's library layer (timeout, retry, provideService, catch) and P's laws. It puts each guarantee in a construct: owned fork, `run child`, `interrupt`, race and provide. H was then measured on the corpus, prototyped on both targets with tests, and given blind-reader packets.
 
-- **(a)** No reused keywords such as `else`, and primitives plus library by default.
-- **(b)** Constructs must pass a guardrail test and a portability test, with meaning as a protocol plus laws that userland providers implement.
+The other findings are fixed in place:
+- M2: interrupt's row and K13;
+- M3: K7 and K9 restated, race flattening removed;
+- M4: provide upheld as a construct;
+- M5: the `all` block;
+- the minors and optionals.
 
-What changed as a result:
-- `else` became `otherwise` in A and B.
-- Option P was added and made the leading candidate.
-- The bar in §4 was applied to each construct.
-- The schedule idea was evaluated (§5).
-- The kernel was framed as a protocol, with providers and laws (§6.3).
-- The prototype was rebuilt for P.
-
-The block corpus (A–E) is kept as the losing comparison.
+P and A–E are kept as the losing comparison.
