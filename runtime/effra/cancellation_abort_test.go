@@ -29,6 +29,25 @@ func onlyReason(t *testing.T, exit Exit[string], kind string) {
 	}
 }
 
+// A joiner cancelled outside any test scheduler ends in an ordinary
+// interruption, through the same cancellable wait as a managed joiner. The
+// joined fiber ignores cancellation, so only the joiner's own wait can end it.
+func TestUnmanagedJoinerCancellationIsAnInterruption(t *testing.T) {
+	release := make(chan struct{})
+	out := Run(func(fc *FiberContext) Exit[string] {
+		stubborn := Invoke(fc, Fork(func(*FiberContext) Exit[string] {
+			<-release
+			return Succeed("late")
+		}))
+		joiner := Invoke(fc, Fork(stubborn.Value.Join()))
+		joiner.Value.Cancel()
+		joined := Invoke(fc, joiner.Value.Join())
+		close(release)
+		return joined
+	})
+	onlyReason(t, out, "interrupt")
+}
+
 func TestNormalCloseRaisesUnobservedChildFailure(t *testing.T) {
 	out := Run(func(fc *FiberContext) Exit[string] {
 		child := Invoke(fc, Fork(failingChild("Boom")))
