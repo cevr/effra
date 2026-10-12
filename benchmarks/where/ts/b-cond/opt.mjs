@@ -1,5 +1,5 @@
 // Runtime for the conditional-method projection: each conditional method is
-// a function of its method arguments returning the method (note §2.6).
+// a function of its method arguments returning the method (note §2.9).
 export const Option = {
   some: (value) => Object.freeze({ _tag: "Some", value }),
   none: () => Object.freeze({ _tag: "None" }),

@@ -1,4 +1,4 @@
-// A TypeScript caller of conditional methods (note §2.6). The caller composes
+// A TypeScript caller of conditional methods (note §2.9). The caller composes
 // what Effra's checker resolves: Option<User>.compare is
 // Option.compare(User.compare). Adapted from the review-1 probe.
 import { User, UserId, I64, three, sort3, empty, insert, lookup } from '../b-witness/lib.mjs';

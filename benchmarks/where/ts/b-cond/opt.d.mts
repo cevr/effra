@@ -1,4 +1,4 @@
-// Conditional methods (note §2.6), projected onto companion objects. Adapted
+// Conditional methods (note §2.9), projected onto companion objects. Adapted
 // from the review-1 probe. A receiver method on a generic type whose own
 // where clause constrains the type's parameters,
 //
@@ -22,7 +22,7 @@ export declare const Option: {
   readonly hash: <T>(T_hash: (self: T) => bigint) => (self: Option<T>) => bigint;
 };
 
-// A generic record with derived methods (note §2.8): one method argument per
+// A generic record with derived methods (note §2.7): one method argument per
 // constrained parameter.
 declare const __ef_brand_template_Pair: unique symbol;
 export type Pair<A, B> = {
