@@ -73,7 +73,8 @@ effect fn test_advance_admits_unstarted_fork() -> void raises {AssertionFailed} 
 //     closed scope), and inline resumption on JavaScript, where a signalled
 //     waiter runs on top of its signaller's turn (readiness then registration,
 //     with and without the barrier before advance, and a resumed waiter that
-//     resumes another and advances).
+//     resumes another and advances); and interrupting a fiber parked at the
+//     barrier, which must be an ordinary interruption, never a defect.
 //
 // The cancellation cases are timing-dependent on Go; the receipts for #80
 // record their failure rates without the fix at high counts.
@@ -102,6 +103,7 @@ func TestSchedulerExamplesAcrossTargets(t *testing.T) {
 			"test_barrier_after_readiness_then_advance",
 			"test_advance_after_readiness",
 			"test_barrier_after_nested_resumption",
+			"test_interrupting_a_barrier_waiter",
 		}},
 	}
 	for _, example := range examples {
