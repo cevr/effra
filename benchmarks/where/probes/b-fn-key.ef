@@ -1,0 +1,10 @@
+// expect: EF127 (b) keyed by a bare function: callable type arguments wait for spike-rows unit 4a
+fn keyed<K: type>(key: K) -> i64 where K.hash: fn(K) -> i64, K.equals: fn(K, K) -> bool {
+    if K.equals(key, key) { K.hash(key) } else { 0 }
+}
+fn double(n: i64) -> i64 {
+    n * 2
+}
+effect fn main() -> i64 {
+    keyed(double)
+}

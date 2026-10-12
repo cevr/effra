@@ -1,0 +1,16 @@
+// expect: accepted (a) keyed by a bare effect value
+fn keyedBy<K: type>(key: K, hash: fn(K) -> i64, equals: fn(K, K) -> bool) -> i64 {
+    if equals(key, key) { hash(key) } else { 0 }
+}
+fn effectHash(e: Effect<i64>) -> i64 {
+    0
+}
+fn effectEquals(a: Effect<i64>, b: Effect<i64>) -> bool {
+    true
+}
+effect fn work() -> i64 {
+    1
+}
+effect fn main() -> i64 {
+    keyedBy(work(), effectHash, effectEquals)
+}

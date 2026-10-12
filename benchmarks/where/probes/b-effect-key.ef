@@ -1,0 +1,10 @@
+// expect: EF160 (b) keyed by a bare effect value: effra/effect declares no hash or equals
+fn keyed<K: type>(key: K) -> i64 where K.hash: fn(K) -> i64, K.equals: fn(K, K) -> bool {
+    if K.equals(key, key) { K.hash(key) } else { 0 }
+}
+effect fn work() -> i64 {
+    1
+}
+effect fn main() -> i64 {
+    keyed(work())
+}

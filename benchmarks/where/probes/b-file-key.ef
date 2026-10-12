@@ -1,0 +1,10 @@
+// expect: EF160 (b) keyed by a bare File: File'\''s owner declares no hash or equals
+fn keyed<K: type>(key: K) -> i64 where K.hash: fn(K) -> i64, K.equals: fn(K, K) -> bool {
+    if K.equals(key, key) { K.hash(key) } else { 0 }
+}
+fn fileKey(file: File) -> i64 {
+    keyed(file)
+}
+effect fn main() -> i64 {
+    0
+}

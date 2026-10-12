@@ -1,0 +1,16 @@
+// expect: accepted (a) keyed by a bare File: any module can write the two functions
+fn keyedBy<K: type>(key: K, hash: fn(K) -> i64, equals: fn(K, K) -> bool) -> i64 {
+    if equals(key, key) { hash(key) } else { 0 }
+}
+fn fileHash(f: File) -> i64 {
+    0
+}
+fn fileEquals(a: File, b: File) -> bool {
+    true
+}
+fn fileKey(file: File) -> i64 {
+    keyedBy(file, fileHash, fileEquals)
+}
+effect fn main() -> i64 {
+    0
+}
