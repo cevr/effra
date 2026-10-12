@@ -1,6 +1,6 @@
 # Where-clause dispatch: equality, ordering, hashing and derive
 
-**Status:** design note and decision record for the spike in [#116](https://github.com/cevr/effra/issues/116), revision 2, 2026-10-12 (after review 1). It changes no compiler behaviour. Line references are at `main` `13e62ad4` unless stated otherwise; paths are under `internal/compiler/` unless stated otherwise. The prototype is on branch `wf10/spike-where-proto`, head `30f80104` (two commits on `13e62ad4`: `034df57d` the prototype, `30f80104` a crash fix). That branch is never merged. The measurement scripts and their receipts are under [`benchmarks/where/`](../../benchmarks/where/).
+**Status:** design note and decision record for the spike in [#116](https://github.com/cevr/effra/issues/116), revision 3, 2026-10-12 (after reviews 1 and 2). It changes no compiler behaviour. Line references are at `main` `13e62ad4` unless stated otherwise; paths are under `internal/compiler/` unless stated otherwise. The prototype is on branch `wf10/spike-where-proto`, head `30f80104` (two commits on `13e62ad4`: `034df57d` the prototype, `30f80104` a crash fix). That branch is never merged. The measurement scripts and their receipts are under [`benchmarks/where/`](../../benchmarks/where/).
 
 ## Owner direction
 
@@ -15,6 +15,7 @@
   - limit coherence to the `where` path, with unconditional capture, Q6, and ReScript's identity-in-the-type weighed;
   - specify conditional methods against SH1;
   - add the laws section, with the syntax reserved to #125.
+- **2026-10-12, round 2 rulings.** The evidence boundary rule is binding: an exported evidence-minting function binds the canonical methods or drops the evidence in its projection, and generic forwarding obeys the same rule; the mechanism stays with #125 (§2.10). Polymorphic recursion is rescoped to generic functions, and Q6 states its cost and equality semantics.
 
 ## Verdict
 
@@ -38,8 +39,8 @@ The deciding evidence:
 
 - **(a) alone** projects to TypeScript exactly as (b) does, but it has no lookup.
   - Every call names its dictionary.
-  - A hard type is accepted by default.
-  - Two dictionaries for one key type can coexist on the default path.
+  - A hard type is admitted whenever the caller supplies the functions.
+  - Two dictionaries for one key type can coexist, because nothing designates one as canonical.
   - A general derive needs per-field dictionaries or a lookup of its own.
 
   (a) survives inside (b) as the explicit form: every constrained library function is written over an explicit `…By(xs, compare)`, and the `where` form calls it.
@@ -254,7 +255,10 @@ fn (p: Pair<A, B>) compare(other: Pair<A, B>) -> i64 where A.compare: fn(A, A) -
 **Resolution and termination.** A conditional method's `where` entries may constrain only the receiver's type parameters. They may not constrain `Option<T>` itself or an unrelated type. Resolving `C<A1, …, An>.m` therefore creates obligations only on `A1 … An`, which are strict subterms of the type being resolved.
 - Type terms are finite, so the recursion ends. Its depth is at most the depth of the type term: `Option<Option<User>>` resolves `Option.compare`, then `Option.compare`, then `User.compare`.
 - A method body that calls the same method on the same type uses its own method argument, so it starts no resolution.
-- *Polymorphic recursion* is a body of `C<T>.m` that needs `C<Option<T>>.m`. Each site still resolves finitely, but the chain of run-time adapters grows with the recursion depth. Effra refuses recursive generic data today. When such data is admitted, polymorphic recursion is refused, as Go's checker refuses an instantiation cycle (`src/cmd/compile/internal/types2/mono.go:142`, go1.27.0).
+- *Polymorphic recursion* is a generic function, or a conditional method body, that calls itself, directly or through a mutually recursive group, at a type that grows: `depth<T>` calling `depth<Box<T>>`, or `C<T>.m` needing `C<Option<T>>.m`. It needs no recursive data. Each resolution site still terminates, but the instantiations do not.
+  - Review 2's probe `review-2/probes/q1-polyrec-fn.ef` (a generic `depth` over a non-recursive `Box`) gets `checked=true` from the prototype on both targets.
+  - It then fails Go's build with "instantiation cycle: T instantiated as efTemplate_Box[T]" (`src/cmd/compile/internal/types2/mono.go:142`, go1.27.0), while JavaScript prints `3`. That is an unchecked passthrough.
+  - So the refusal belongs wherever user generic functions are admitted (spike-rows unit 4a and W1). It covers conditional method bodies and mutually recursive growth, and it is refused with a diagnostic, as Go's checker refuses the cycle.
 - The shared substitution budget (4096 nodes, depth 64, `bundled-interfaces.md`) remains the backstop.
 
 **Lowering: one generic body, with method arguments.** A conditional method has two entry points.
@@ -351,7 +355,27 @@ Who may mint it:
 - **Contract path.** Only a function whose clause is satisfied through a contract (`where T: Ordering`) may mint lawful-order evidence.
 - **Bare clause.** A bare `where T.compare` mints none.
 - **`…By` closures.** A closure has no declaration identity, so evidence about it must name the actual comparator value, through GDP's fresh-name mechanism. Until #125 and the opaque-values design provide that, `sortBy` mints no evidence.
-- **TypeScript-passed methods.** A function that arrives from TypeScript mints no evidence. Evidence types project as opaque branded types that only Effra constructs, so a TypeScript caller cannot claim one.
+- **Methods that arrive from TypeScript.** Branding alone does not stop them. An exported `sort … where T: Ordering` receives `T_compare` from its caller as an ordinary argument, and it cannot tell a method Effra resolved from one a TypeScript caller wrote. Without a rule, a TypeScript caller passes a reversed compare, receives a genuine Effra-built `SortedBy`, and hands it to a trusting Effra `merge` (review 2, N1). No forgery is needed. The opaque-values design already warns that "Exported host APIs need their own checked boundary; target-language privacy alone does not establish this contract" (`docs/research/opaque-values-and-evidence.md:38`).
+
+**The evidence boundary rule.** This extends the fail-safe projection principle to evidence. #125 owns the mechanism; this note fixes the rule. An exported function that mints evidence takes one of two forms:
+- **(i) Canonical binding.** It binds the canonical methods on the Effra side. Its TypeScript signature has no method parameter, so the caller cannot choose the comparator, and the evidence it returns crosses outward. This form exists only where the type is known on the Effra side: a concrete instantiation such as `sortUsers(xs: Seq<User>)`, or a re-establishment function that checks with the canonical method and then mints.
+- **(ii) Dropped evidence.** It accepts its methods from the caller. That covers any exported function whose `where` entries become parameters, which is every exported generic one. Its `.d.mts` returns the carried type without the brand. Before Effra trusts such a value again, it re-establishes the evidence through a form (i) function.
+
+Evidence minted from methods a caller supplied never crosses outward as evidence. Generic forwarding follows the same rule. A generic Effra function whose method argument may come from a TypeScript caller mints nothing that reaches TypeScript, even when it forwards to a minting function inside Effra, because that inner evidence depends on the outer caller's method. Inside Effra, every `where` argument is resolved, so evidence flows freely. The rule only governs what an export's projection may claim.
+
+`benchmarks/where/ts/b-evidence/` checks both forms with the repository's tsc 6.0.3 strict:
+- **Both forms.** Form (i) `sortUsers` takes no method argument, and `checkSortedUsers` returns `SortedBy<…> | undefined`. Form (ii) `sort` and its generic forwarder `sortTwice` return the unbranded `Three<T>`.
+- **Directives.** All eight fire:
+  - the laundering route through `sort` and through `sortTwice` (TS2345, in both the consumer and the attacks);
+  - passing a method to form (i) (TS2554);
+  - an unchecked value;
+  - a re-establishment result used unchecked;
+  - forging from an object literal;
+  - a never filler into form (i).
+- **Runs.** The consumer prints `form(i) smallest=a form(ii) order=cba recheck sorted=a recheck reversed=refused`.
+- **Rejected projection.** `rejected.d.mts` is the projection the round-2 sketch implied: a generic minting function with a method parameter. The same laundering route type-checks there with no cast, and the trusting consumer returns `c`, the largest user, as the smallest (`L2` in `ts/runs/ts-view.txt`).
+
+**Evidence for conditional methods.** The name in `SortedBy<S, By>` is the canonical resolved key: the outer declaration plus the keys of its method arguments. For example, `Option.compare(User.compare)` is the key (`Option.compare`, [`User.compare`]). Computing it is a finite identity calculation over the resolution tree of §2.9, not a type-level language, and it is the same key Q6's fast path would use. Conditional contract satisfaction (`Option<T>` satisfies `Ordering` when `T` does) is a #125 acceptance case.
 
 The same naming would let a future `HashMapBy<K, V, name>` carry witness identity in its type (Q6), so that question also waits on #125.
 
@@ -386,6 +410,7 @@ Every option has a projection, a runtime, a consumer, negatives and attacks unde
 | b-witness | 0, 0, 0 | 8 + 2 | 0 | `abc 123 ada2,bob,none abc` |
 | b-struct | 0, 0, 0 | 5 | 0 | `abc ada2,bob,none` |
 | b-cond (conditional methods, §2.9) | 0, 0 | 7 + 1 | 0 | `none,a,c none,none,b y,z,x ada,nobody` |
+| b-evidence (boundary rule, §2.10) | 0, 0 | 6 + 2 | 0 | `form(i) smallest=a form(ii) order=cba recheck sorted=a recheck reversed=refused` |
 | c-comparable | 0, 0, 0, 0 | 7 + 2 + 3 | 0 | `123 abc abc ada2,bob,none yes native Map record key: miss` |
 | proto (generated by `30f80104`) | 0, 0 | 3 | 0 | `abc ada2,bob` |
 | baseline-effect (Effect 4.0.1) | 0 | 0 | 0 | `abc plain:ada Data.Class:ada fn key:f NaN:NaN,1,2 native Map A1b: UserId.org is undefined` |
@@ -647,7 +672,7 @@ The deviations from those pins:
 
 ## 7. Decision record
 
-**Decided 2026-10-12 (spike #116, revision 2 after review 1).**
+**Decided 2026-10-12 (spike #116, revision 3 after reviews 1 and 2).**
 
 - **Chosen: (b).** Equality, ordering and hashing are receiver methods declared in each type's owner module.
   - Generic code requires them with `where T.m: fn(…) -> R` and calls them as `T.m(…)`.
@@ -658,9 +683,10 @@ The deviations from those pins:
   - f64 declares none of the three, as library policy.
   - derive targets receiver methods through one field-fold rule that uses the same lookup. JSON stays a #100 profile, and codecs stay explicit witnesses.
   - Laws attach to a named contract that groups `where` entries, with the syntax reserved to #125 (§2.10).
+  - Evidence obeys the boundary rule (§2.10): an exported minting function binds the canonical methods (no method parameter) or drops the evidence in its projection, and generic forwarding mints nothing that reaches TypeScript.
 - **Rejected: (a) as the mechanism.** The reasons kept:
   - it has no type-directed lookup. Every call names its dictionary, and a hard type such as File or an effect value is accepted wherever someone writes one (§3.4, probes);
-  - on the default path, two dictionaries for one key type can coexist;
+  - two dictionaries for one key type can coexist, because nothing designates one as canonical;
   - a general derive needs per-field dictionaries in every derive, or a lookup private to derive (§3.5);
   - its missing-instance message names nothing (§3.8).
 
@@ -687,9 +713,9 @@ The units below start after both; W2 and W6 can run beside W1.
 
 | Unit | What lands | Tests and acceptance | Estimate |
 | --- | --- | --- | --- |
-| **W1. `where` clauses** | Parser, formatter (the receiver spacing) and LSP spans. Elaboration to method parameters. Resolution: cases 1-3 of §2.2, plus conditional methods (§2.9): the (constructor identity, name) index and uniqueness check, the receiver-shape rule, the subterm-only `where` rule, the body and curried entry points, and static adapters hoisted per module. EF160 family diagnostics anchored on the binding argument. Interface-summary transport of receiver methods and `where` clauses (schema bump, round trip, `TestEvidenceSchemaIsClassified`). Reachability of resolved methods. | The prototype's fixtures and negatives, with messages asserted. A cross-module resolution test. `Option<User>`, `Option<Option<User>>` and `Pair<i64, User>` sorting on both targets. Refusal of a receiver on one instantiation, of a duplicate (constructor, name), of a `where` entry on a non-parameter, and of polymorphic recursion. The review-1 defects fixed (§4.1): an accurate owner message for `Option`, no false orphan for `Pair<A, B>`, effects kept in the reconstructed signature, and EF160 for function keys after 4a. Behavioural dispatch tests rather than a source grep. A substring screen for method-name literals. Go and JavaScript equivalence. Checker cost at N = 1k to 8k against this note's receipts. | L, 5.5 to 6.5 days |
+| **W1. `where` clauses** | Parser, formatter (the receiver spacing) and LSP spans. Elaboration to method parameters. Resolution: cases 1-3 of §2.2, plus conditional methods (§2.9): the (constructor identity, name) index and uniqueness check, the receiver-shape rule, the subterm-only `where` rule, the body and curried entry points, and static adapters hoisted per module. EF160 family diagnostics anchored on the binding argument. Interface-summary transport of receiver methods and `where` clauses (schema bump, round trip, `TestEvidenceSchemaIsClassified`). Reachability of resolved methods. | The prototype's fixtures and negatives, with messages asserted. A cross-module resolution test. `Option<User>`, `Option<Option<User>>` and `Pair<i64, User>` sorting on both targets. Refusal of a receiver on one instantiation, of a duplicate (constructor, name), of a `where` entry on a non-parameter, and of polymorphic recursion in generic functions and conditional method bodies, including mutual recursion (review 2's `q1-polyrec-fn.ef` must be refused by the checker, not by Go's build). The review-1 defects fixed (§4.1): an accurate owner message for `Option`, no false orphan for `Pair<A, B>`, effects kept in the reconstructed signature, and EF160 for function keys after 4a. Behavioural dispatch tests rather than a source grep. A substring screen for method-name literals. Go and JavaScript equivalence. Checker cost at N = 1k to 8k against this note's receipts. | L, 5.5 to 6.5 days |
 | **W2. Predeclared owner modules** | Bundled owner modules for `i64`, `string` (code-point order on both targets) and `bool`, each with `compare`, `equals` and `hash`, loaded through an ordinary bundled import rather than the prototype's name list. f64 declares none (coordinated with #118). Orphan refusal for predeclared types. | Go/JavaScript pairs for string order on non-ASCII input; f64 refusal once #118 lands. | S, 1 day |
-| **W3. TypeScript projection** | Method parameters named after their method. Companion objects per type exposing owner methods (value plus interface merge), with the curried form for conditional methods (§2.9). Optional boundary check of method arguments (§9 Q3). | `benchmarks/where/ts/b-witness` and `b-cond` promoted to generated-consumer fixtures: consumers, negatives, attacks A1-A5 with their pinned outcomes; 0 `any`. | M, 2 to 2.5 days |
+| **W3. TypeScript projection** | Method parameters named after their method. Companion objects per type exposing owner methods (value plus interface merge), with the curried form for conditional methods (§2.9). Optional boundary check of method arguments (§9 Q3). | `benchmarks/where/ts/b-witness` and `b-cond` promoted to generated-consumer fixtures: consumers, negatives, attacks A1-A5 with their pinned outcomes; 0 `any`. When #125 lands evidence, `b-evidence` becomes the fixture for the boundary rule (§2.10). | M, 2 to 2.5 days |
 | **W4. derive by field fold** | The rule of §2.7 inside #100's `derive` construct: records in field order, enums by variant order, generic records as conditional methods, library combinators named by the deriving module. | Derived `compare`/`equals`/`hash` equal hand-written ones on Go and JavaScript; a refusal for a field type without the method; no profile word for them. | M, 2.5 to 3 days, after #100's syntax |
 | **W5. Collections** | `HashMap<K, V>` capturing `hash`/`equals` at construction for every map (§2.6). Cross-collection operations that reinsert under the receiver's methods (Q6). `sort`/`sortBy` over a sequence type. | Union of a `where`-built map and an `emptyBy` map with a different hash finds every key under the receiver's hash; blocked on recursive generic data or a sequence type (#120). | M, 2 to 3 days once unblocked |
 | **W6. Docs** | `docs/design.md:33` (predeclared types' owner modules) and `:300` (owner-module lookup is not instance search); `bundled-interfaces.md:39` (codecs stay explicit witnesses, ordering/equality do not); PRIOR_ART's Roc row open question closed; GLOSSARY "Where clause", "Method argument", "Owner module"; CHANGELOG. | Docs review. | S, 0.5 day |
@@ -704,7 +730,10 @@ Total: about 13.5 to 16.5 implementor-days plus review rounds, excluding the spi
 - **Q4. Should codecs get a default witness through `where`** (`where T.codec: …`) while keeping explicit witnesses for alternatives? Recommendation: **defer**. `bundled-interfaces.md:39`'s several-witnesses argument stands, and #100 lands first.
 - **Q5. Which f64 names?** Recommendation: `totalCompare`, `ieeeEquals` and `equalsBits`, decided in #118. None is named `compare`, `equals` or `hash`. Consequences, as in Rust: f64 is not a default map key, and a record with an f64 field gets no derived `hash`, `equals` or `compare` unless the deriving module names the f64 function for that field explicitly.
 - **Q6. How does an operation over two collections behave** (union, merge, equality, difference), when their captured methods may differ? The candidates:
-  1. **Reinsert** the incoming collection's entries under the receiver's methods. The result keeps the receiver's methods. It is always correct with respect to the receiver and costs O(m) hashing or comparisons for m incoming entries.
+  1. **Reinsert** the incoming collection's entries under the receiver's methods. The result keeps the receiver's methods, and it is always correct with respect to the receiver.
+     - **Cost**, for m incoming entries into a receiver of n: a hashed collection takes O(m) hash evaluations, plus equality calls that depend on collisions. An ordered tree takes O(m log(n+m)) comparisons.
+     - **Semantics.** Membership and normalisation follow the receiver's methods, so cross-collection equality is receiver-relative and not symmetric. A case-insensitive `{"A"}` equals a case-sensitive `{"a"}` when the case-insensitive set receives, but not the other way round.
+     - **Which key and value win.** When the receiver's equality merges an incoming key with an existing one, the receiver's existing key is kept. Union keeps the receiver's value, and an explicit `unionWith(f)` combines the two values as `f(receiverValue, incomingValue)`. Among several incoming keys that collapse to one receiver key, the first in the incoming collection's iteration order wins. W5 tests each rule.
   2. **Put witness identity in the type** (ReScript's `Belt.Id`, `Belt_Id.resi:41-53`), so collections with different methods do not type-check together.
      - On the `where` path the key type already fixes the method, so the brand would only separate `…By` and TypeScript collections.
      - Naming a comparator value in a type is the per-value naming of §2.10, which belongs to #125 and the opaque-values design.
@@ -715,4 +744,8 @@ Total: about 13.5 to 16.5 implementor-days plus review rounds, excluding the spi
      - So the check cannot be made sound on Go.
 
   Recommendation: **(1) as the semantics, in W5.** A later fast path may tag methods resolved on the `where` path with a compile-time key (the declaration identity plus the keys of its method arguments). Two equal, known keys would then allow bucket reuse, while `…By` and TypeScript methods carry no key and always reinsert. That fast path is an optimization to adopt only with measurements. Revisit (2) when #125 delivers named comparators.
-- **Q7. Where do laws attach?** Recommendation: on a named **contract** that groups `where` entries with their laws, satisfied by an owner-module declaration (§2.10). The syntax is reserved to #125. Evidence such as `SortedBy<…, User.compare>` is minted only through a contract-satisfied clause. `…By` closures and TypeScript-passed methods mint none until per-value naming exists.
+- **Q7. Where do laws attach?** Recommendation: on a named **contract** that groups `where` entries with their laws, satisfied by an owner-module declaration (§2.10). The syntax is reserved to #125. Evidence such as `SortedBy<…, User.compare>` is minted only through a contract-satisfied clause, and `…By` closures mint none until per-value naming exists.
+  - **The evidence boundary rule is binding** (§2.10; `opaque-values-and-evidence.md:38`). An exported minting function either (i) binds the canonical methods on the Effra side, with no method parameter in its TypeScript signature, or (ii) drops the evidence in its `.d.mts` and returns the unbranded type, which Effra re-establishes before trusting.
+  - Evidence minted from methods a caller supplied never crosses outward, and generic forwarding follows the same rule.
+  - `ts/b-evidence` shows both forms, and review 2's laundering route fails to type-check.
+  - The mechanism is #125's.
