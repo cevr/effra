@@ -26,14 +26,11 @@ import (
 
 // smokeWorkspace returns a temporary workspace holding copies of the named
 // repository files and directories (relative to the repository root), with
-// node_modules linked to the pinned install. The copies are read in this
-// process, so Go's test cache sees every input and reruns the test when one
-// changes; the CLI's own reads in a subprocess would be invisible to it.
+// node_modules linked to the pinned install, so no smoke writes into the
+// repository or sees another's files. Go's test cache sees the copies and,
+// through observation (testinputs.Main), everything the CLI reads.
 func smokeWorkspace(t *testing.T, paths ...string) string {
 	t.Helper()
-	// The gate names the external tool versions (Node, Bun, tsc) here, so a
-	// cached pass never survives a tool upgrade.
-	_ = os.Getenv("EFFRA_TOOL_VERSIONS")
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)

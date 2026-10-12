@@ -22,7 +22,7 @@ import (
 func TestLintPackSelectionCLIProcess(t *testing.T) {
 	binary := buildTestCLI(t)
 	dir := t.TempDir()
-	if output, err := exec.Command("go", "build", "-o", filepath.Join(dir, "packs", executableName("policy-lint")), "../../examples/lintpack/cmd/policy-lint").CombinedOutput(); err != nil {
+	if output, err := exec.Command("go", "build", "-buildvcs=false", "-o", filepath.Join(dir, "packs", executableName("policy-lint")), "../../examples/lintpack/cmd/policy-lint").CombinedOutput(); err != nil {
 		t.Fatal(string(output))
 	}
 	manifest, err := lintpack.Pack.Manifest(lint.Executable{Path: "policy-lint"})
@@ -116,7 +116,7 @@ func TestLintPackSelectionCLIProcess(t *testing.T) {
 func TestLintFixtureCommandProcess(t *testing.T) {
 	binary := buildTestCLI(t)
 	dir := t.TempDir()
-	if output, err := exec.Command("go", "build", "-o", filepath.Join(dir, executableName("policy-lint")), "../../examples/lintpack/cmd/policy-lint").CombinedOutput(); err != nil {
+	if output, err := exec.Command("go", "build", "-buildvcs=false", "-o", filepath.Join(dir, executableName("policy-lint")), "../../examples/lintpack/cmd/policy-lint").CombinedOutput(); err != nil {
 		t.Fatal(string(output))
 	}
 	manifest, _ := lintpack.Pack.Manifest(lint.Executable{Path: "policy-lint"})
@@ -245,7 +245,7 @@ func canonicalNames(names []string) []string {
 func TestLintPackEnvironmentCLIProcess(t *testing.T) {
 	binary := buildTestCLI(t)
 	dir := t.TempDir()
-	if output, err := exec.Command("go", "build", "-o", filepath.Join(dir, executableName("fixturepack")), "../../lint/testdata/fixturepack").CombinedOutput(); err != nil {
+	if output, err := exec.Command("go", "build", "-buildvcs=false", "-o", filepath.Join(dir, executableName("fixturepack")), "../../lint/testdata/fixturepack").CombinedOutput(); err != nil {
 		t.Fatal(string(output))
 	}
 	manifest := lint.Manifest{

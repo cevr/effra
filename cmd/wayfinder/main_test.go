@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"effra.local/prototype/internal/testinputs"
 )
 
 const testRepo = "acme/widgets"
@@ -27,7 +29,7 @@ func TestMain(m *testing.M) {
 	if os.Getenv("WAYFINDER_TEST_CLI") == "1" {
 		os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 	}
-	os.Exit(m.Run())
+	os.Exit(testinputs.Main(m))
 }
 
 // fakeGH serves read-only GraphQL from the JSON state named by FAKE_GH_STATE and logs each call.

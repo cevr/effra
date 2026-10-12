@@ -422,27 +422,13 @@ func TestMissingGitIsAStructuredCLIRefusal(t *testing.T) {
 }
 
 // releaseCorpus verifies the repository's own submodule at the Effect 4.0.1
-// release pin. Go's test cache cannot see files that only git reads, so it
-// also stats the checkout's selected files and index state in-process.
+// release pin. What git reads to answer is an input of Go's test cache
+// through observation (testinputs.Main).
 func releaseCorpus(t *testing.T) pinnedCorpus {
 	t.Helper()
-	root := repoRoot(t)
-	corpus, err := verify(root, pinnedCommit, pinnedTag)
+	corpus, err := verify(repoRoot(t), pinnedCommit, pinnedTag)
 	if err != nil {
 		t.Fatalf("verify: %v", err)
-	}
-	checkout := filepath.Join(root, checkoutRelative)
-	for path := range corpus.contents {
-		os.Stat(filepath.Join(checkout, path))
-	}
-	if link, err := os.ReadFile(filepath.Join(checkout, ".git")); err == nil {
-		gitdir := strings.TrimSpace(strings.TrimPrefix(string(link), "gitdir:"))
-		if !filepath.IsAbs(gitdir) {
-			gitdir = filepath.Join(checkout, gitdir)
-		}
-		for _, name := range []string{"HEAD", "index", "config"} {
-			os.Stat(filepath.Join(gitdir, name))
-		}
 	}
 	return corpus
 }

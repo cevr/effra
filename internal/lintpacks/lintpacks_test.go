@@ -25,6 +25,7 @@ import (
 	"effra.local/prototype/internal/lsp"
 	"effra.local/prototype/internal/mcp"
 	"effra.local/prototype/internal/producer"
+	"effra.local/prototype/internal/testinputs"
 	"effra.local/prototype/lint"
 )
 
@@ -35,7 +36,7 @@ var built struct {
 }
 
 func TestMain(m *testing.M) {
-	code := m.Run()
+	code := testinputs.Main(m)
 	if built.dir != "" {
 		os.RemoveAll(built.dir)
 	}
@@ -56,7 +57,7 @@ func packs(t *testing.T) string {
 			if runtime.GOOS == "windows" {
 				name += ".exe" // the manifests' extensionless paths resolve to it
 			}
-			if output, err := exec.Command("go", "build", "-o", filepath.Join(built.dir, "bin", name), pkg).CombinedOutput(); err != nil {
+			if output, err := exec.Command("go", "build", "-buildvcs=false", "-o", filepath.Join(built.dir, "bin", name), pkg).CombinedOutput(); err != nil {
 				built.err = errors.New(string(output))
 				return
 			}

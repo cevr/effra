@@ -27,7 +27,7 @@ func TestPolicyPackProcessMatchesInProcessEvaluation(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	if output, err := exec.Command("go", "build", "-o", filepath.Join(dir, name), "./cmd/policy-lint").CombinedOutput(); err != nil {
+	if output, err := exec.Command("go", "build", "-buildvcs=false", "-o", filepath.Join(dir, name), "./cmd/policy-lint").CombinedOutput(); err != nil {
 		t.Fatal(string(output))
 	}
 	program, err := os.ReadFile(filepath.Join(dir, name))

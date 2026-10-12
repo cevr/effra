@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"effra.local/prototype/internal/testinputs"
 )
 
 // cliEnv makes the test binary act as the conformance command, so process
@@ -20,7 +22,7 @@ func TestMain(m *testing.M) {
 	// developer's global and system configuration.
 	os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	os.Exit(m.Run())
+	os.Exit(testinputs.Main(m))
 }
 
 // repoRoot is the Effra repository holding this package.
