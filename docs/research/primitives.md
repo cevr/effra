@@ -63,7 +63,7 @@ Three guarantees are new:
 - **The deadline is library, and nothing is lost if the library is late.** `timeoutOr` is a function over a race block. If the general features it needs slip, users write the race block inline, and every guarantee holds.
 - **Each provide site has a checked plan.** The plan is written at the site, so tooling never meets a provide whose plan it cannot read.
 
-**Cost.** H adds three keywords (`race`, `provide`, `interrupt`), giving 31 against today's 28. It is 4.3% fewer tokens than today, with zero construct lookalikes on the shared classification (§8.1). The owned-fork rule refuses 33 of today's top-level tests (63 subtests) and `examples/causal.ef` until they are wrapped in `scope` (§8.3).
+**Cost.** H adds three keywords (`race`, `provide`, `interrupt`), giving 31 against today's 28. It is 4.3% fewer tokens than today, with zero construct lookalikes on the shared classification (§8.1). The owned-fork rule refuses 32 of today's top-level compiler tests (61 subtests, one of them checking `examples/causal.ef`) until they are wrapped in `scope` (§8.3).
 
 **Portability.** Each construct lowers to a protocol: the host primitives P1–P12, the new race primitive P13, and laws K1–K17 (§6.8). The Effect runtime and the Go runtime are two providers. A deterministic test runtime, a UI frame runtime, a request-scoped server runtime and an embedded tick loop are further providers that need no source change (follow-up U11).
 
@@ -72,7 +72,7 @@ Three guarantees are new:
 - `.provideService` needs row difference (F3b, #126).
 - Lossless wrapping (K11) of resource-producing recipes needs Q11.
 
-When Q11 is missing, the checker refuses such a wrapper conservatively (the rows note's 12 of 29 refusals are of this kind), and the program writes the race block inline. No guarantee rests on Q11.
+Without Q11 such a wrapper does not reach parity with the inline form: on the rows note's 29 programs, 12 are refused inside the wrapper and 17 get a different verdict. Those programs write the race block inline. No guarantee rests on Q11.
 
 ## 1. The question and the bar
 
@@ -232,7 +232,7 @@ PlanEntry    = LayerName | ServiceName "=" ProviderExpr
 
 **What stays dynamic.** Resource acquisition (`Files.openRead`) keeps the dynamic owner. A resource is inert data owned by the current owner, and EF123 already stops it escaping. Making resource acquisition lexical too would need an owner for every acquiring call (O7).
 
-**Edition.** On the prototype, the owned-fork rule and the handle reading of §6.3 apply to files that use H's syntax (a race block, or the `provide` or `interrupt` keyword), so legacy fixtures keep passing. With the rule forced on for every file, 33 top-level tests (63 subtests) and `examples/causal.ef` are refused. That migration is follow-up U4.
+**Edition.** On the prototype, the owned-fork rule and the handle reading of §6.3 apply to files that use H's syntax (a race block, or the `provide` or `interrupt` keyword), so legacy fixtures keep passing. With the rule forced on for every file, 32 existing top-level tests (61 subtests) fail with EF002, one of them because `examples/causal.ef` no longer checks. That migration is follow-up U4.
 
 ### 6.3 Fork handles: `run` joins, `interrupt` raises (review 1, M2)
 
@@ -304,7 +304,7 @@ The prototype's `race-library.ef` runs monomorphic `after`, `expire`, `deadlineO
 - Forking a recipe parameter as a race arm, which the prototype admits today.
 - The closed-at-the-edge contract (Q11), for K11 lossless wrapping of a recipe that returns an owned value.
 
-**Q11's status.** The rows note records the closed-at-the-edge half as not yet shown: the scope-bodied timeout model scores 0 of 29 (`effect-rows-as-types.md:428`, `:1041`, `:1300`, `:1320`). Of those, 12 programs are refused inside the wrapper body with "value owned by closing scope cannot escape", and 17 differ in output. So the failure is conservative: a wrapper may be refused, but nothing unsound is admitted.
+**Q11's status.** The rows note records the closed-at-the-edge half as not yet shown: the scope-bodied timeout model scores 0 of 29 (`effect-rows-as-types.md:428`, `:1041`, `:1300`, `:1320`). Of those, 12 programs are refused inside the wrapper body with "value owned by closing scope cannot escape", and 17 get a different verdict from the direct form. The rows note does not say whether any of the 17 admits more than the direct form, so U8 must settle that before a wrapper of owned-value recipes is admitted.
 
 **Gate and fallback.**
 - *Gate:* retiring today's name-keyed `.timeout` (U9) waits for the generic library (#127, Q9) and for parity of the library `timeout` with today's on the timeout corpus, including the 29 Q11 programs.
@@ -519,7 +519,7 @@ Branch `wf10/spike-syntax-proto`, head `bc263cf8` ("feat(spike): prototype optio
 
 **Suite.** `go test ./internal/compiler ./runtime/... -count=1` passes in full on the prototype branch (compiler 343 s). Round 1's 22 Clock failures are gone with the revert, so the ownership truth matrix runs again. Round 1 had no prototype tests of its own (review 1, m10).
 
-**Migration measurement.** With the owned-fork rule forced on for every file, 33 top-level tests (63 subtests) and `examples/causal.ef` are refused, each a fork outside a scope.
+**Migration measurement.** With the owned-fork rule forced on for every file, 32 existing top-level tests (61 subtests) fail, every one with EF002 "fork needs an owner" on a fork outside a scope. One of them checks `examples/causal.ef`, the only example file affected.
 
 ## 9. Decision record
 
@@ -553,7 +553,7 @@ Branch `wf10/spike-syntax-proto`, head `bc263cf8` ("feat(spike): prototype optio
 | U1 | P13 race kernel: n-ary race block in both runtimes, symmetric abandonment, K1–K5 law tests; amend `lawful-runtime-contract.md:63` | 3 | now; the prototype exists |
 | U2 | Duration literals plus a nominal `Duration`; the formatter prints literals | 2 | now |
 | U3 | Provide block, replacing `.provide(App)`; graph, lint and inspection read the header | 3 | now |
-| U4 | Owned fork, `run child` and `interrupt child`; `ef fix` wraps the 33 tests, `causal.ef` and user code in `scope`; drop `.cancel()` | 3 | after O1 |
+| U4 | Owned fork, `run child` and `interrupt child`; `ef fix` wraps the forks in the 32 tests, `causal.ef` and user code in `scope`; drop `.cancel()` | 3 | after O1 |
 | U5 | Formatter and LSP for the new blocks (hover, folding, completion of plan entries) | 2 | with U3, U4 |
 | U6 | Library timeout family, `either`, `delay`, `retry`/`Schedule` in `.ef` | 3 | after #127, #128 Q9 |
 | U7 | `.provideService<S>` as library | 1 | after F3b (#126, #132) |
