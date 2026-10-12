@@ -70,11 +70,17 @@ effect fn test_advance_admits_unstarted_fork() -> void raises {AssertionFailed} 
 //     timeout timer, a nested fork, and mixed sibling forks;
 //   - quiescence-wakes.ef, wakes in flight: wakes by cancellation, which carry
 //     no wake reservation on Go (an interrupted sleeper or latch waiter and a
-//     closed scope), and inline resumption on JavaScript, where a signalled
-//     waiter runs on top of its signaller's turn (readiness then registration,
-//     with and without the barrier before advance, and a resumed waiter that
-//     resumes another and advances); and interrupting a fiber parked at the
-//     barrier, which must be an ordinary interruption, never a defect.
+//     closed scope), and a signalled waiter that has not run yet (readiness
+//     then registration, with and without the barrier before advance, and a
+//     resumed waiter that resumes another and advances); and interrupting a
+//     fiber parked at the barrier, which must be an ordinary interruption,
+//     never a defect;
+//   - latch-handoff.ef, the latch handoff (#142): a signal makes its waiters
+//     runnable and returns, the signaller keeps its turn, and each waiter
+//     resumes on its own turn. Interrupting the signaller after its signal
+//     cannot affect a waiter, and a signalled waiter interrupted before it
+//     runs is interrupted. A waiter resumed inside its signaller's turn fails
+//     the interrupt-after-signal cases.
 //
 // The cancellation cases are timing-dependent on Go; the receipts for #80
 // record their failure rates without the fix at high counts.
@@ -104,6 +110,15 @@ func TestSchedulerExamplesAcrossTargets(t *testing.T) {
 			"test_advance_after_readiness",
 			"test_barrier_after_nested_resumption",
 			"test_interrupting_a_barrier_waiter",
+		}},
+		{file: "latch-handoff.ef", required: []string{
+			"test_interrupting_the_signaller_after_signal",
+			"test_signal_before_wait",
+			"test_two_waiters",
+			"test_interrupting_the_signaller_while_the_waiter_is_at_the_barrier",
+			"test_signal_inside_a_scope_that_closes_after",
+			"test_interrupting_a_signalled_waiter_before_it_runs",
+			"test_scope_close_interrupts_a_signalled_waiter_before_it_runs",
 		}},
 	}
 	for _, example := range examples {

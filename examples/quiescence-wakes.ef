@@ -1,9 +1,10 @@
 // Scheduler quiescence with wakes in flight, on both targets.
 //
-// A wake in flight is not idle. A fiber woken by cancellation, or resumed
-// inline by a latch signal while its signaller is still mid-turn, is
-// runnable until it runs again, so Scheduler.awaitRegistration and each
-// deadline selection of Scheduler.advance must wait for it.
+// A wake in flight is not idle. A fiber woken by cancellation, or signalled
+// through a latch, is runnable until it runs again, so
+// Scheduler.awaitRegistration and each deadline selection of
+// Scheduler.advance must wait for it. latch-handoff.ef pins the handoff
+// itself.
 
 effect fn ready(latch: Latch) -> string uses { Sync } {
     run Sync.await(latch)
@@ -67,9 +68,10 @@ effect fn test_barrier_after_scope_close() -> void raises { AssertionFailed } us
     run Assert.equalText(run worker.join(), "immediate marked")
 }
 
-// A latch signal resumes its waiter while the signaller is still mid-turn.
-// Readiness is not registration: the barrier and each deadline selection of
-// advance wait until the signaller has parked on its next timer too.
+// A latch signal makes its waiter runnable while the signaller keeps its
+// turn. Readiness is not registration: the barrier and each deadline
+// selection of advance wait until the signaller has parked on its next timer
+// too.
 
 effect fn signalThenSleep(ready: Latch) -> string uses { Clock, Sync } {
     run Sync.signal(ready)
@@ -94,9 +96,10 @@ effect fn test_advance_after_readiness() -> void raises { AssertionFailed } uses
     run Assert.equalText(run worker.join(), "woke")
 }
 
-// The resumed waiter can itself resume another and advance. The releaser
-// signals the relay, which signals the test and then advances, all while the
-// releaser is still inside its signal.
+// The resumed waiter can itself wake another and advance. The releaser
+// signals the relay and finishes its turn; the relay then signals the test
+// and advances. Before #142, JavaScript ran all of this inside the releaser's
+// signal.
 
 effect fn relay(released: Latch, ready: Latch) -> void uses { Scheduler, Sync } {
     run Sync.await(released)
@@ -121,12 +124,10 @@ effect fn test_barrier_after_nested_resumption() -> void raises { AssertionFaile
 }
 
 // Interrupting a fiber parked in the barrier is an ordinary interruption,
-// never a defect. The waiter signals that it is entering the barrier. On Go
-// the signaller keeps the turn until it parks there. On JavaScript the signal
-// resumes the test inline, so the test joins an immediate fork first: that
-// suspends it, and the waiter's turn unwinds into the barrier and parks. The
-// interrupt therefore reaches a parked barrier waiter on both targets. The
-// case asserts only that the interrupt succeeds.
+// never a defect. The waiter signals that it is entering the barrier and,
+// keeping its turn, parks there before the test resumes, so the interrupt
+// reaches a parked barrier waiter on both targets. The case asserts only
+// that the interrupt succeeds.
 
 effect fn enterBarrier(entered: Latch) -> string uses { Scheduler, Sync } {
     run Sync.signal(entered)
@@ -138,7 +139,5 @@ effect fn test_interrupting_a_barrier_waiter() -> void uses { Scheduler, Sync } 
     let entered = run Sync.latch()
     let waiter = fork enterBarrier(entered)
     run Sync.await(entered)
-    let turn = fork immediate()
-    run turn.join()
     run waiter.interrupt()
 }
