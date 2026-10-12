@@ -220,3 +220,5 @@ overhead or a fixed speedup multiplier.
 **Unmatched floor** (size conformance): A control program that does less than the fixture it accompanies, such as printing a result without the entry's cancellation and scope. It is recorded only as a lower bound and is never compared as a member of a semantic equivalence baseline.
 
 **Program time**: The time authority under which managed sleeps and deadlines execute. Test program time can advance independently of the watchdog's wall clock.
+
+**Quiescence**: The scheduler state in which no managed fiber is running or runnable. A wake in flight is not idle: a fiber that has been signalled, fired or cancelled but has not run again is runnable. At quiescence, every pending timer that managed work can register without outside input is registered. `Scheduler.awaitRegistration()` returns at quiescence, and `Scheduler.advance` selects each deadline only at quiescence. Unmanaged goroutines, host promises and foreign blocking calls are outside it.
