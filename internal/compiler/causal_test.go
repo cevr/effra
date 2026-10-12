@@ -2,10 +2,12 @@ package compiler
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -52,6 +54,83 @@ effect fn test_advance_admits_unstarted_fork() -> void raises {AssertionFailed} 
 	jsOutput, err := runWithWatchdog(bun, writeGeneratedJS(t, "explicit-scheduler-", jsSource))
 	if err != nil || !strings.Contains(string(jsOutput), `"passed":true`) {
 		t.Fatalf("generated JS explicit test providers: %v\n%s", err, jsOutput)
+	}
+}
+
+// Scheduler.awaitRegistration has one meaning on both targets: it returns once
+// no managed fiber is runnable. Each barrier case forks work that registers no
+// new timer before the barrier (the #80 repro, a latch signalled before the
+// fork, a pure fork, a completion that cancels its timeout timer, a nested
+// fork); a barrier waiting for a registration hangs until the watchdog. The
+// interrupt after a barrier must find the work already complete, so a barrier
+// that returned before the work settled fails the join instead.
+func TestCausalExampleSchedulerBarrierAcrossTargets(t *testing.T) {
+	barrierCases := []string{
+		"test_barrier_after_immediately_completed_timeout",
+		"test_barrier_after_latch_signalled_before_fork",
+		"test_barrier_after_pure_fork_then_interrupt",
+		"test_barrier_after_completion_cancels_timeout",
+		"test_barrier_after_nested_fork",
+	}
+	source, err := os.ReadFile(filepath.Join("..", "..", "examples", "causal.ef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := CompileAt(string(source), "go", filepath.Join("..", "..", "examples"))
+	if !r.Checked {
+		t.Fatal(r.Diagnostics)
+	}
+	tests, err := r.Tests()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{}
+	for _, test := range tests {
+		names = append(names, test.Name)
+	}
+	for _, name := range barrierCases {
+		if !slices.Contains(names, name) {
+			t.Fatalf("examples/causal.ef lost barrier case %s (cases: %v)", name, names)
+		}
+	}
+	jsSource, _, err := r.EmitJSTests()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("Bun is required for generated scheduler tests")
+	}
+	runs := map[string]func() ([]byte, error){
+		"go": func() ([]byte, error) { return runWithWatchdog(buildGeneratedGo(t, r, GoGenerationTest)) },
+		"js": func() ([]byte, error) { return runWithWatchdog(bun, writeGeneratedJS(t, "causal-barrier-", jsSource)) },
+	}
+	for _, target := range []string{"go", "js"} {
+		output, err := runs[target]()
+		if err != nil {
+			t.Fatalf("%s causal suite: %v\n%s", target, err, output)
+		}
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		var report struct {
+			Passed bool `json:"passed"`
+			Tests  []struct {
+				Name   string `json:"name"`
+				Passed bool   `json:"passed"`
+			} `json:"tests"`
+		}
+		if err := json.Unmarshal([]byte(lines[len(lines)-1]), &report); err != nil {
+			t.Fatalf("%s causal suite report: %v\n%s", target, err, output)
+		}
+		reported := []string{}
+		for _, test := range report.Tests {
+			if !test.Passed {
+				t.Errorf("%s: %s failed\n%s", target, test.Name, output)
+			}
+			reported = append(reported, test.Name)
+		}
+		if !report.Passed || !slices.Equal(reported, names) {
+			t.Fatalf("%s causal suite: passed=%v reported %v, want %v\n%s", target, report.Passed, reported, names, output)
+		}
 	}
 }
 

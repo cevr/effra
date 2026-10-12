@@ -3,6 +3,7 @@ package effra
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 )
@@ -1369,5 +1370,102 @@ func TestCancelledSleepUnregistersItsTimer(t *testing.T) {
 	defer barrierCancel()
 	if err := scheduler.AwaitRegistration(barrierCtx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("stale timer remained registered: %v", err)
+	}
+}
+
+// The managed barrier behind Scheduler.awaitRegistration returns once no
+// managed fiber is runnable, whether or not a timer was registered since the
+// last barrier. Before it returns, forked work that completes immediately, a
+// timeout whose already-signalled work cancels its timer, and a nested fork
+// have all run, and a sleeping fork has registered its timer, which is then
+// the only pending one.
+func TestManagedRegistrationBarrierReturnsAtIdle(t *testing.T) {
+	scheduler := NewTestScheduler()
+	latch := NewLatch()
+	type observation struct {
+		settled []bool
+		timers  int
+	}
+	observed := make(chan observation, 1)
+	done := make(chan Exit[Unit], 1)
+	settle := func(ran chan struct{}) Effect[Unit] {
+		return func(*FiberContext) Exit[Unit] {
+			close(ran)
+			return Succeed(Unit{})
+		}
+	}
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+			if out := Invoke(fc, SignalLatch(latch)); out.IsFailure() {
+				return out
+			}
+			immediate, timed, nested := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			forks := []Effect[*Fiber[Unit]]{
+				Fork(settle(immediate)),
+				Fork(Timeout(func(child *FiberContext) Exit[Unit] {
+					if out := Invoke(child, AwaitLatch(latch)); out.IsFailure() {
+						return out
+					}
+					return Invoke(child, settle(timed))
+				}, 10)),
+				Fork(func(child *FiberContext) Exit[Unit] {
+					inner := Invoke(child, Fork(settle(nested)))
+					if inner.IsFailure() {
+						return Propagate[Unit](inner)
+					}
+					return Invoke(child, inner.Value.Join())
+				}),
+				Fork(Sleep(20)),
+			}
+			fibers := []*Fiber[Unit]{}
+			for _, fork := range forks {
+				out := Invoke(fc, fork)
+				if out.IsFailure() {
+					return Propagate[Unit](out)
+				}
+				fibers = append(fibers, out.Value)
+			}
+			if out := AwaitTestSchedulerRegistration(fc, scheduler); out.IsFailure() {
+				return out
+			}
+			settled := []bool{}
+			for _, ran := range []chan struct{}{immediate, timed, nested} {
+				select {
+				case <-ran:
+					settled = append(settled, true)
+				default:
+					settled = append(settled, false)
+				}
+			}
+			scheduler.mu.Lock()
+			timers := len(scheduler.timers)
+			scheduler.mu.Unlock()
+			observed <- observation{settled: settled, timers: timers}
+			if out := AdjustTestScheduler(fc, scheduler, 20); out.IsFailure() {
+				return out
+			}
+			for _, fiber := range fibers {
+				if out := Invoke(fc, fiber.Join()); out.IsFailure() {
+					return out
+				}
+			}
+			return Succeed(Unit{})
+		})
+	}()
+	select {
+	case got := <-observed:
+		if !slices.Equal(got.settled, []bool{true, true, true}) || got.timers != 1 {
+			t.Fatalf("barrier returned before idle: settled (immediate, timed, nested) = %v, pending timers = %d, want the sleep's alone", got.settled, got.timers)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("managed barrier did not return at idle")
+	}
+	select {
+	case out := <-done:
+		if out.IsFailure() {
+			t.Fatalf("barrier root failed: %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("barrier root did not finish")
 	}
 }

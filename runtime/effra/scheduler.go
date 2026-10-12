@@ -341,10 +341,22 @@ func (s *TestScheduler) Now() int64 {
 	return s.now
 }
 
-// AwaitRegistration waits until a timer has been registered since the last
-// observed scheduler advance/barrier. It is the explicit handshake needed to
-// distinguish readiness of a worker from registration of its subsequent
-// timer.
+// idleLocked reports whether no managed fiber is runnable: none holds or
+// awaits the turn, no timer or signal wake is in flight, and no cleanup
+// boundary is runnable. A managed fiber registers its timer before it parks,
+// so in this state every timer that managed work can register without
+// outside input is registered. Adjust and the managed registration barrier
+// share this one predicate.
+func (s *TestScheduler) idleLocked() bool {
+	return s.active == 0 && s.pendingWakes == 0 && s.continuations == 0
+}
+
+// AwaitRegistration is the host controller's edge-triggered handshake: it
+// waits until a timer has been registered since the last observed scheduler
+// advance/barrier. A host goroutine may start a managed root that is not yet
+// admitted, so it cannot judge idleness and waits for the registration
+// instead. Managed code uses the level-triggered awaitIdle barrier, which is
+// what Scheduler.awaitRegistration means on every target.
 func (s *TestScheduler) AwaitRegistration(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -361,6 +373,34 @@ func (s *TestScheduler) AwaitRegistration(ctx context.Context) error {
 			return nil
 		}
 		signal := s.registration
+		s.mu.Unlock()
+		select {
+		case <-signal:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// awaitIdle is the quiescence barrier behind Scheduler.awaitRegistration. It
+// returns once no managed fiber is runnable (idleLocked). It is
+// level-triggered: forked work that already completed, or whose timeout timer
+// was cancelled, registers nothing and still passes. It is sound only for a
+// caller inside a managed fiber, where every fiber is admitted before it
+// starts, so an unstarted fork cannot look idle.
+func (s *TestScheduler) awaitIdle(ctx context.Context) error {
+	for {
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return errSchedulerClosed
+		}
+		if s.idleLocked() {
+			s.observed = s.registered
+			s.mu.Unlock()
+			return nil
+		}
+		signal := s.stateChanged
 		s.mu.Unlock()
 		select {
 		case <-signal:
@@ -397,7 +437,7 @@ func (s *TestScheduler) Adjust(milliseconds int64) error {
 		// Quiescence, deadline selection, and target publication are one
 		// synchronized decision. A continuation may be absent from this count
 		// only while parked on a registered managed wait.
-		if s.active != 0 || s.pendingWakes != 0 || s.continuations != 0 {
+		if !s.idleLocked() {
 			signal := s.stateChanged
 			s.mu.Unlock()
 			<-signal
@@ -461,13 +501,16 @@ func (s *TestScheduler) adjustInFiber(fc *FiberContext, milliseconds int64) erro
 	return s.Adjust(milliseconds)
 }
 
+// awaitRegistrationInFiber parks the calling managed fiber, including any
+// cleanup boundary it runs under, so the barrier does not wait on its own
+// caller, then waits for idleness.
 func (s *TestScheduler) awaitRegistrationInFiber(fc *FiberContext) error {
 	if fc == nil || fc.turnScheduler() != s {
 		return errors.New("test scheduler is not active for this fiber")
 	}
-	resume := s.suspend()
+	resume := fc.suspendScheduler()
 	defer resume()
-	return s.AwaitRegistration(fc.Context())
+	return s.awaitIdle(fc.Context())
 }
 
 // AdjustTestScheduler is the managed runtime boundary for the built-in
@@ -484,7 +527,7 @@ func AdjustTestScheduler(fc *FiberContext, scheduler *TestScheduler, millisecond
 }
 
 // AwaitTestSchedulerRegistration is the managed registration barrier for the
-// built-in Scheduler provider.
+// built-in Scheduler provider: it returns once no managed fiber is runnable.
 func AwaitTestSchedulerRegistration(fc *FiberContext, scheduler *TestScheduler) Exit[Unit] {
 	if scheduler == nil {
 		return Die[Unit](errors.New("nil test scheduler"))

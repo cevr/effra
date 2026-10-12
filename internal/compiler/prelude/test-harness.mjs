@@ -1,37 +1,29 @@
 const __ef_makeTestHarness=()=>{
   let now=0;
   let sequence=0;
-  let registrations=0;
-  let observed=0;
-  const registrationWaiters=new Set();
   const timers=[];
   const invalidDuration=()=>Effect.die(new Error('invalid millisecond duration'));
   const remove=(timer)=>{const index=timers.indexOf(timer);if(index>=0)timers.splice(index,1);};
-  const register=()=>{registrations++;const waiters=[...registrationWaiters];registrationWaiters.clear();for(const wake of waiters)wake();};
   const queued=[];let flushScheduled=false;
   const dispatcher={
     scheduleTask:(task,priority)=>{let index=queued.length;for(let i=0;i<queued.length;i++){if(queued[i].priority>priority){index=i;break;}}queued.splice(index,0,{task,priority});if(!flushScheduled){flushScheduled=true;queueMicrotask(()=>{flushScheduled=false;dispatcher.flush();});}},
     flush:()=>{flushScheduled=false;while(queued.length>0){queued.shift().task();}}
   };
   const effectScheduler={executionMode:'sync',shouldYield:fiber=>fiber.currentOpCount>=2048,makeDispatcher:()=>dispatcher};
+  // A flush runs managed fibers until none is runnable. Every managed fiber
+  // runs on this dispatcher: a fork, a yield and a preempted continuation are
+  // queued tasks, and a callback resume (a latch signal, a fired timer, an
+  // interruption) re-enters its fiber synchronously in the resumer's turn.
+  // When the queue is empty, each live managed fiber is parked on a
+  // registered timer, a latch or a join, or has exited.
   const flush=Effect.sync(()=>dispatcher.flush());
-  const awaitRegistration=Effect.callback((resume,signal)=>{
-    if(registrations>observed){observed=registrations;resume(Effect.succeed(undefined));return;}
-    const wake=()=>{observed=registrations;resume(Effect.succeed(undefined));};
-    registrationWaiters.add(wake);
-    signal.addEventListener('abort',()=>registrationWaiters.delete(wake),{once:true});
-    return Effect.sync(()=>registrationWaiters.delete(wake));
-  });
-  const awaitReady=Effect.gen(function*(){
-    while(true){
-      yield* flush;
-      const before=registrations;
-      if(before===observed)yield* awaitRegistration;else observed=before;
-      yield* flush;
-      if(registrations===observed)return;
-      observed=registrations;
-    }
-  });
+  // Scheduler.awaitRegistration is the quiescence barrier: it returns once no
+  // managed fiber is runnable, so every timer a managed fiber can register
+  // without outside input is registered. It is level-triggered on that state,
+  // never on a new registration: forked work that completed, or whose timer
+  // was cancelled or never started (Effect runs no body of a fiber interrupted
+  // before its first turn), registers nothing and must still pass.
+  const awaitIdle=flush;
   const sleep=(duration)=>Effect.callback((resume,signal)=>{
     const millis=Duration.toMillis(duration);
     if(!Number.isFinite(millis)||millis<0||millis>2147483647){resume(invalidDuration());return;}
@@ -40,7 +32,6 @@ const __ef_makeTestHarness=()=>{
     timer.abort=()=>{if(timer.cancelled)return;timer.cancelled=true;remove(timer);};
     timers.push(timer);
     timers.sort((left,right)=>left.deadline-right.deadline||left.sequence-right.sequence);
-    register();
     signal.addEventListener('abort',timer.abort,{once:true});
     return Effect.sync(()=>{timer.abort();signal.removeEventListener('abort',timer.abort);});
   });
@@ -63,7 +54,6 @@ const __ef_makeTestHarness=()=>{
       // reservation; without this flush an unstarted fork can register its
       // timer after the controller has committed the target.
       yield* flush;
-      observed=registrations;
       while(true){
         // Each selection is made only after queued managed continuations have
         // had a turn to register their next wait.
@@ -85,5 +75,5 @@ const __ef_makeTestHarness=()=>{
       }
     });
   };
-  return{clock:{sleep:ms=>{if(ms<0n||ms>2147483647n)return invalidDuration();return Effect.sleep(Number(ms));}},effectClock,effectScheduler,scheduler:{sleep:ms=>{if(ms<0n||ms>2147483647n)return invalidDuration();return Effect.sleep(Number(ms));},advance:ms=>adjust(Number(ms)),awaitRegistration:()=>awaitReady},sync:__ef_provider_TestSync};
+  return{clock:{sleep:ms=>{if(ms<0n||ms>2147483647n)return invalidDuration();return Effect.sleep(Number(ms));}},effectClock,effectScheduler,scheduler:{sleep:ms=>{if(ms<0n||ms>2147483647n)return invalidDuration();return Effect.sleep(Number(ms));},advance:ms=>adjust(Number(ms)),awaitRegistration:()=>awaitIdle},sync:__ef_provider_TestSync};
 };
