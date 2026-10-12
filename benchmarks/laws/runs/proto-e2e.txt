@@ -1,53 +1,97 @@
+# examples/laws/run.sh on wf10/spike-laws-proto 63164e8a (includes examples/laws/probes.sh)
 == order.ef (lawful compare, one trusted law)
-{"agree":true,"disagreements":[],"laws":6,"rootSeed":"0","source":"1f181d6afe9f5db8d63f7ab852d2506cac47e53ed81429080edc1ab4b88644dd"}
+{"agree":true,"disagreements":[],"gating":true,"laws":8,"providers":[],"rootSeed":"0","source":"c19d7b1ee9b6a50d7e86902b74c661e43021618acd73d46419eb3c505bfb3d95"}
 -- order.ef on go
-{"id":"Order.reflexive@User","status":"tested","cases":200,"digest":"5b7e1eea","counterexample":null,"failure":null,"justifier":null}
-{"id":"Order.antisymmetric@User","status":"tested","cases":200,"digest":"038ffad4","counterexample":null,"failure":null,"justifier":null}
-{"id":"Order.transitive@User","status":"tested","cases":200,"digest":"74b44f4f","counterexample":null,"failure":null,"justifier":null}
-{"id":"Order.reflexive@Trio","status":"tested","cases":100,"digest":"d75a6abf","counterexample":null,"failure":null,"justifier":null}
-{"id":"Order.antisymmetric@Trio","status":"tested","cases":100,"digest":"ea87a6bb","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.reflexive@User","status":"tested","cases":200,"digest":"00491737","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.antisymmetric@User","status":"tested","cases":200,"digest":"5ce0e49e","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.transitive@User","status":"tested","cases":200,"digest":"a68be510","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.total@User","status":"tested","cases":200,"digest":"22b07559","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.reflexive@Trio","status":"tested","cases":100,"digest":"53ca5cf1","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.antisymmetric@Trio","status":"tested","cases":100,"digest":"1ced50c9","counterexample":null,"failure":null,"justifier":null}
 {"id":"Order.transitive@Trio","status":"trusted","cases":0,"digest":"-","counterexample":null,"failure":null,"justifier":"lexicographic composition of Order@User, whose transitivity is tested"}
+{"id":"Order.total@Trio","status":"tested","cases":100,"digest":"ddf07996","counterexample":null,"failure":null,"justifier":null}
 -- order.ef on js
-{"id":"Order.reflexive@User","status":"tested","cases":200,"digest":"5b7e1eea","counterexample":null,"failure":null,"justifier":null}
-{"id":"Order.antisymmetric@User","status":"tested","cases":200,"digest":"038ffad4","counterexample":null,"failure":null,"justifier":null}
-{"id":"Order.transitive@User","status":"tested","cases":200,"digest":"74b44f4f","counterexample":null,"failure":null,"justifier":null}
-{"id":"Order.reflexive@Trio","status":"tested","cases":100,"digest":"d75a6abf","counterexample":null,"failure":null,"justifier":null}
-{"id":"Order.antisymmetric@Trio","status":"tested","cases":100,"digest":"ea87a6bb","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.reflexive@User","status":"tested","cases":200,"digest":"00491737","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.antisymmetric@User","status":"tested","cases":200,"digest":"5ce0e49e","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.transitive@User","status":"tested","cases":200,"digest":"a68be510","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.total@User","status":"tested","cases":200,"digest":"22b07559","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.reflexive@Trio","status":"tested","cases":100,"digest":"53ca5cf1","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.antisymmetric@Trio","status":"tested","cases":100,"digest":"1ced50c9","counterexample":null,"failure":null,"justifier":null}
 {"id":"Order.transitive@Trio","status":"trusted","cases":0,"digest":"-","counterexample":null,"failure":null,"justifier":"lexicographic composition of Order@User, whose transitivity is tested"}
+{"id":"Order.total@Trio","status":"tested","cases":100,"digest":"ddf07996","counterexample":null,"failure":null,"justifier":null}
 == order-broken.ef (broken compare)
-{"agree":true,"disagreements":[],"laws":3,"rootSeed":"0","source":"9c9ec457377347839c5d060bb25bb2bc22d862eb7876fe88e1a3c6f510ae761e"}
+{"agree":true,"disagreements":[],"gating":true,"laws":4,"providers":[],"rootSeed":"0","source":"d7d21aa9f25aa0efde1c256b3f8b9a1c175904d50d8021b7fcb069b4bea0e1a5"}
 -- order-broken.ef on go
-{"id":"Order.reflexive@User","status":"tested","cases":200,"digest":"5b7e1eea","counterexample":null,"failure":null,"justifier":null}
-{"id":"Order.antisymmetric@User","status":"refuted","cases":2,"digest":"fc398e3b","counterexample":"a = User { age: -1, name: \"\" }, b = User { age: 0, name: \"\" }","failure":"returned false","justifier":null}
-{"id":"Order.transitive@User","status":"refuted","cases":53,"digest":"796ca8a3","counterexample":"a = User { age: 0, name: \"\" }, b = User { age: -1, name: \"\" }, c = User { age: -2, name: \"\" }","failure":"returned false","justifier":null}
+{"id":"Order.reflexive@User","status":"tested","cases":200,"digest":"00491737","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.antisymmetric@User","status":"refuted","cases":2,"digest":"474dbd6c","counterexample":"a = User { age: -1, name: \"\" }, b = User { age: 0, name: \"\" }","failure":"returned false","justifier":null}
+{"id":"Order.transitive@User","status":"refuted","cases":172,"digest":"6069a168","counterexample":"a = User { age: 0, name: \"\" }, b = User { age: -1, name: \"\" }, c = User { age: -2, name: \"\" }","failure":"returned false","justifier":null}
+{"id":"Order.total@User","status":"refuted","cases":18,"digest":"84c73671","counterexample":"a = User { age: 9223372036854775807, name: \"\" }, b = User { age: 0, name: \"\" }","failure":"returned false","justifier":null}
 -- order-broken.ef on js
-{"id":"Order.reflexive@User","status":"tested","cases":200,"digest":"5b7e1eea","counterexample":null,"failure":null,"justifier":null}
-{"id":"Order.antisymmetric@User","status":"refuted","cases":2,"digest":"fc398e3b","counterexample":"a = User { age: -1, name: \"\" }, b = User { age: 0, name: \"\" }","failure":"returned false","justifier":null}
-{"id":"Order.transitive@User","status":"refuted","cases":53,"digest":"796ca8a3","counterexample":"a = User { age: 0, name: \"\" }, b = User { age: -1, name: \"\" }, c = User { age: -2, name: \"\" }","failure":"returned false","justifier":null}
-EF170 law Order.antisymmetric@User refuted after 2 cases (seed 3747600544): returned false at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }
-EF170 law Order.transitive@User refuted after 53 cases (seed 224550084): returned false at a = User { age: 0, name: "" }, b = User { age: -1, name: "" }, c = User { age: -2, name: "" }
+{"id":"Order.reflexive@User","status":"tested","cases":200,"digest":"00491737","counterexample":null,"failure":null,"justifier":null}
+{"id":"Order.antisymmetric@User","status":"refuted","cases":2,"digest":"474dbd6c","counterexample":"a = User { age: -1, name: \"\" }, b = User { age: 0, name: \"\" }","failure":"returned false","justifier":null}
+{"id":"Order.transitive@User","status":"refuted","cases":172,"digest":"6069a168","counterexample":"a = User { age: 0, name: \"\" }, b = User { age: -1, name: \"\" }, c = User { age: -2, name: \"\" }","failure":"returned false","justifier":null}
+{"id":"Order.total@User","status":"refuted","cases":18,"digest":"84c73671","counterexample":"a = User { age: 9223372036854775807, name: \"\" }, b = User { age: 0, name: \"\" }","failure":"returned false","justifier":null}
+EF170 law Order.antisymmetric@User refuted after 2 cases (seed 582938622): returned false at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }
+EF170 law Order.total@User refuted after 18 cases (seed 1344773583): returned false at a = User { age: 9223372036854775807, name: "" }, b = User { age: 0, name: "" }
+EF170 law Order.transitive@User refuted after 172 cases (seed 1953339788): returned false at a = User { age: 0, name: "" }, b = User { age: -1, name: "" }, c = User { age: -2, name: "" }
 == codec.ef (lossless and lossy JSON codecs)
-{"agree":true,"disagreements":[],"laws":2,"rootSeed":"0","source":"fccba7f84481c972175cb4d0456542f8db2e380675be0559a125d893e05e42bb"}
+{"agree":true,"disagreements":[],"gating":true,"laws":2,"providers":[],"rootSeed":"0","source":"fccba7f84481c972175cb4d0456542f8db2e380675be0559a125d893e05e42bb"}
 -- codec.ef on go
-{"id":"RoundTrip.roundTrip@accountJson","status":"tested","cases":200,"digest":"3333374f","counterexample":null,"failure":null,"justifier":null}
-{"id":"RoundTrip.roundTrip@halfJson","status":"refuted","cases":2,"digest":"60e410b1","counterexample":"value = Profile { active: false, name: \"\", score: -1 }","failure":"returned false","justifier":null}
+{"id":"RoundTrip.roundTrip@accountJson","status":"tested","cases":200,"digest":"0109b916","counterexample":null,"failure":null,"justifier":null}
+{"id":"RoundTrip.roundTrip@halfJson","status":"refuted","cases":2,"digest":"417fb0d8","counterexample":"value = Profile { active: false, name: \"\", score: -1 }","failure":"returned false","justifier":null}
 -- codec.ef on js
-{"id":"RoundTrip.roundTrip@accountJson","status":"tested","cases":200,"digest":"3333374f","counterexample":null,"failure":null,"justifier":null}
-{"id":"RoundTrip.roundTrip@halfJson","status":"refuted","cases":2,"digest":"60e410b1","counterexample":"value = Profile { active: false, name: \"\", score: -1 }","failure":"returned false","justifier":null}
+{"id":"RoundTrip.roundTrip@accountJson","status":"tested","cases":200,"digest":"0109b916","counterexample":null,"failure":null,"justifier":null}
+{"id":"RoundTrip.roundTrip@halfJson","status":"refuted","cases":2,"digest":"417fb0d8","counterexample":"value = Profile { active: false, name: \"\", score: -1 }","failure":"returned false","justifier":null}
 == build reads the receipt
-EF170 refuted laws refuse the build: Order.antisymmetric@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }; Order.transitive@User at a = User { age: 0, name: "" }, b = User { age: -1, name: "" }, c = User { age: -2, name: "" }
+EF170 refuted laws refuse the build: Order.antisymmetric@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }; Order.transitive@User at a = User { age: 0, name: "" }, b = User { age: -1, name: "" }, c = User { age: -2, name: "" }; Order.total@User at a = User { age: 9223372036854775807, name: "" }, b = User { age: 0, name: "" }
 ef build order.ef: admitted
 true
 true
-== root seed override
-{"agree":true,"disagreements":[],"laws":3,"rootSeed":"7","source":"9c9ec457377347839c5d060bb25bb2bc22d862eb7876fe88e1a3c6f510ae761e"}
+== root seed override (exploration: its own receipt, never gating)
+{"rootSeed":"7","gating":false,"agree":true}
 == host boundary library (benchmarks/laws/ts/lib.mjs on wf10/spike-laws)
 dist/sorted.mjs
-4
+6
 export type SortedBy<S, I extends string> = S & EfEvidence<"SortedBy", S, I>;
 declare const __ef_export_sortTrio: (arg_t: Trio) => SortedBy<Trio, "compareUsers">;
 export { __ef_export_sortTrio as sortTrio };
+declare const __ef_export_sortTrioLater: (arg_t: Trio) => Effect.Effect<SortedBy<Trio, "compareUsers">, never, never>;
+export { __ef_export_sortTrioLater as sortTrioLater };
 declare const __ef_export_search: (arg_xs: Trio, arg_x: User) => boolean;
 export { __ef_export_search as search };
+== review-1 probes (examples/laws/probes.sh)
+PASS M1-control: without the total law the 0/1 compare is tested on all three laws and its build is admitted (the hole)
+PASS M1: with the total law: go=tested,tested,tested,refuted js=tested,tested,tested,refuted agree=true, counterexample a = User { age: -1, name: "" }, b = User { age: 0, name: "" }
+PASS M1-build: go: EF170 refuted laws refuse the build: Order.total@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }
+PASS M1-build: js: EF170 refuted laws refuse the build: Order.total@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }
+PASS M2-mint: refused on go and js: EF181 ... compareUsers here is the parameter compareUsers of sortTrioByShadow
+PASS M2-signature: refused on go and js: EF181 ... in the signature of sortTrioByShadow resolves to its parameter compareUsers
+PASS M2-forward: refused on go and js: EF181 ... in the signature of sortForward resolves to its parameter compareUsers
+PASS M2-control: a method parameter with another spelling does not block canonical evidence obtained from sortTrio
+PASS M3: refused on go and js: EF188 ... firstAge carries evidence across the host boundary, and its parameter h: Holder<Trio> has no snapshot plan
+PASS M4-apply: refused on go and js: EF189 ... search requires SortedBy<Trio, compareUsers> for xs, so it cannot be used as a function value
+PASS M4-let: both routes refused: apply(search, ...) and let f = search
+PASS M4-scope: refused on go and js: EF184 ... search requires SortedBy<Trio, compareUsers> for xs, but the argument is the carrier Trio
+PASS M4-binder: refused on go and js for the binder spelled xs and for the binder under a renamed parameter
+PASS M4-run: let xs = run sortTrioLater(t); search(xs, bob) is accepted and prints true on go and js
+PASS M4-effect-export: Effect.Effect<SortedBy<Trio, "compareUsers">, never, never>, and the adapter freezes the success value
+PASS M5: go: EF174 evidence rests on laws with no current passing receipt on go (no receipt): User satisfies Order (for a mint of SortedBy<Trio, compareUsers>, the admission of Sorted
+PASS M5: js: EF174 evidence rests on laws with no current passing receipt on js (no receipt): User satisfies Order (for a mint of SortedBy<Trio, compareUsers>, the admission of Sorted
+PASS M6-cwd: a build from another directory reads the refuted receipt: EF170 refuted laws refuse the build: Order.antisymmetric@User at a = User { age: -1, name: "" }, b = User { age: 0, name
+PASS M6-seed: gating receipt keeps tested,tested,refuted,tested; exploration seed 14 wrote its own receipt (tested,tested,tested,tested); build refused
+PASS M6-disagree: EF172 recorded: go=refuted js=refuted, go failure: cross-target disagreement (EF172): status differs (go "tested", js "refuted"); cases differs (go "50", js "20"); digest differs (go "e522bba
+PASS M6-disagree-build: go: EF170 refuted laws refuse the build: Depth.finite@i64 at (none on go; the other target refuted it)
+PASS M6-disagree-build: js: EF170 refuted laws refuse the build: Depth.finite@i64 at n = 9223372036854775807
+PASS M7-runtime: go [["Runtime.constructionRunsNothing","GoRuntime","go","tested",990390378,"03b4fb56"]]; js [["Runtime.constructionRunsNothing","EffectRuntime","js","tested",990390378,"03b4fb56"]]; sameScenarios=true
+PASS M7-observer: the observation channel is live: running the recipe refutes on both providers (raised AssertionFailed)
+PASS M7-providers: ["RoundTrip<Account>.roundTrip",true,["accountJson:go:607786003:0109b916","accountJsonAgain:go:607786003:0109b916","accountJson:js:607786003:0109b916","accountJsonAgain:js:607786003:0109b916"]]
+PASS m1: EFFRA_LAW_SEED=010 refused before any harness runs
+PASS m1: EFFRA_LAW_SEED=-1 refused before any harness runs
+PASS m1: EFFRA_LAW_SEED=abc refused before any harness runs
+PASS m1: EFFRA_LAW_SEED=4294967296 refused before any harness runs
+PASS m2: refused on go and js: EF177 ... entry label has type fn(User)->string, but sortedTrio has type fn(Trio)->bool
+PASS m3-call: refused on go and js: EF178 ... is the law Order.reflexive@User, and a law is not a value
+PASS m3-mint: refused on go and js: EF181 ... a law body states an obligation and is never a construction site
+PASS Q2: refused on go and js: EF175 ... User satisfies Order with laws to run and no case budget
+laws probes: ok
 laws run: ok
-exit=0

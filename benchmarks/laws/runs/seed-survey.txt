@@ -1,10 +1,30 @@
-# ef test --target both order-broken.ef per EFFRA_LAW_SEED (proto 5f428883); cases = cases run before the verdict (budget 200)
-seed=1 agree=true reflexive:tested/200 antisymmetric:refuted/2 transitive:refuted/69
-seed=2 agree=true reflexive:tested/200 antisymmetric:refuted/1 transitive:tested/200
-seed=3 agree=true reflexive:tested/200 antisymmetric:refuted/2 transitive:tested/200
-seed=4 agree=true reflexive:tested/200 antisymmetric:refuted/7 transitive:tested/200
-seed=5 agree=true reflexive:tested/200 antisymmetric:refuted/4 transitive:tested/200
-seed=6 agree=true reflexive:tested/200 antisymmetric:refuted/12 transitive:refuted/141
-seed=7 agree=true reflexive:tested/200 antisymmetric:refuted/7 transitive:refuted/80
-seed=8 agree=true reflexive:tested/200 antisymmetric:refuted/2 transitive:refuted/3
-seed=default agree=true reflexive:tested/200 antisymmetric:refuted/2 transitive:refuted/53
+# ef test --target both <program> per EFFRA_LAW_SEED (proto 63164e8a); cases = cases run before the verdict (budget 200).
+# The default run writes the gating receipt dist/<name>.laws.<target>.json; an exploration seed writes dist/<name>.laws.<target>.seed-N.json and never gates.
+== order-broken.ef
+seed=1 agree=true gating=false reflexive:tested/200 antisymmetric:refuted/6 transitive:refuted/56 total:refuted/21
+seed=2 agree=true gating=false reflexive:tested/200 antisymmetric:refuted/24 transitive:refuted/57 total:refuted/37
+seed=3 agree=true gating=false reflexive:tested/200 antisymmetric:refuted/2 transitive:refuted/50 total:refuted/35
+seed=4 agree=true gating=false reflexive:tested/200 antisymmetric:refuted/1 transitive:tested/200 total:refuted/32
+seed=5 agree=true gating=false reflexive:tested/200 antisymmetric:refuted/2 transitive:refuted/19 total:refuted/21
+seed=6 agree=true gating=false reflexive:tested/200 antisymmetric:refuted/3 transitive:tested/200 total:refuted/48
+seed=7 agree=true gating=false reflexive:tested/200 antisymmetric:refuted/2 transitive:refuted/105 total:refuted/58
+seed=8 agree=true gating=false reflexive:tested/200 antisymmetric:refuted/6 transitive:refuted/80 total:refuted/40
+seed=default agree=true gating=true reflexive:tested/200 antisymmetric:refuted/2 transitive:refuted/172 total:refuted/18
+== near.ef
+seed=default agree=true gating=true reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/172 total:tested/200
+seed=1 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/56 total:tested/200
+seed=2 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/57 total:tested/200
+seed=3 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/50 total:tested/200
+seed=4 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/169 total:tested/200
+seed=5 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/19 total:tested/200
+seed=6 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/56 total:tested/200
+seed=7 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/32 total:tested/200
+seed=8 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/80 total:tested/200
+seed=9 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/134 total:tested/200
+seed=10 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/120 total:tested/200
+seed=11 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/15 total:tested/200
+seed=12 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/68 total:tested/200
+seed=13 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/134 total:tested/200
+seed=14 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:tested/200 total:tested/200
+seed=15 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:tested/200 total:tested/200
+seed=16 agree=true gating=false reflexive:tested/200 antisymmetric:tested/200 transitive:refuted/67 total:tested/200

@@ -1,0 +1,65 @@
+# examples/laws/probes.sh (from 63164e8a) with ef built from 5f428883 (round 1, before the fixes); exit 1 expected
+PASS M1-control: without the total law the 0/1 compare is tested on all three laws and its build is admitted (the hole)
+PASS M1: with the total law: go=tested,tested,tested,refuted js=tested,tested,tested,refuted agree=true, counterexample a = User { age: 0, name: "" }, b = User { age: -1, name: "" }
+PASS M1-build: go: EF170 refuted laws refuse the build: Order.total@User at a = User { age: 0, name: "" }, b = User { age: -1, name: "" }
+PASS M1-build: js: EF170 refuted laws refuse the build: Order.total@User at a = User { age: 0, name: "" }, b = User { age: -1, name: "" }
+FAIL M2-mint: go: no EF181 containing 'compareUsers here is the parameter compareUsers of sortTrioByShadow'; got: checked
+FAIL M2-mint: js: no EF181 containing 'compareUsers here is the parameter compareUsers of sortTrioByShadow'; got: checked
+FAIL M2-signature: go: no EF181 containing 'in the signature of sortTrioByShadow resolves to its parameter compareUsers'; got: checked
+FAIL M2-signature: js: no EF181 containing 'in the signature of sortTrioByShadow resolves to its parameter compareUsers'; got: checked
+FAIL M2-forward: go: no EF181 containing 'in the signature of sortForward resolves to its parameter compareUsers'; got: checked
+FAIL M2-forward: js: no EF181 containing 'in the signature of sortForward resolves to its parameter compareUsers'; got: checked
+PASS M2-control: a method parameter with another spelling does not block canonical evidence obtained from sortTrio
+FAIL M3: go: no EF188 containing 'firstAge carries evidence across the host boundary, and its parameter h: Holder<Trio> has no snapshot plan'; got: checked
+FAIL M3: js: no EF188 containing 'firstAge carries evidence across the host boundary, and its parameter h: Holder<Trio> has no snapshot plan'; got: checked
+FAIL M4-apply: go: no EF189 containing 'search requires SortedBy<Trio, compareUsers> for xs, so it cannot be used as a function value'; got: checked
+FAIL M4-apply: js: no EF189 containing 'search requires SortedBy<Trio, compareUsers> for xs, so it cannot be used as a function value'; got: checked
+FAIL M4-let: expected two EF189: 
+FAIL M4-scope: go: no EF184 containing 'search requires SortedBy<Trio, compareUsers> for xs, but the argument is the carrier Trio'; got: checked
+FAIL M4-scope: js: no EF184 containing 'search requires SortedBy<Trio, compareUsers> for xs, but the argument is the carrier Trio'; got: checked
+FAIL M4-binder: expected two EF184 per target: EF184 search requires SortedBy<Trio, compareUsers> for xs, but the argument is the carrier Trio with no evidence
+FAIL M4-run: go={
+  "sources": [
+    {
+      "id": "source:user",
+      "module": "module:file",
+      "digest": "4af35ca0faa691a02884c7cb41bcd3f0b6c9f18ac1a895a92208365f29f2a7a4"
+    }
+  ],
+  "producerIdentity": "ef js={
+  "sources": [
+    {
+      "id": "source:user",
+      "module": "module:file",
+      "digest": "4af35ca0faa691a02884c7cb41bcd3f0b6c9f18ac1a895a92208365f29f2a7a4"
+    }
+  ],
+  "producerIdentity": "ef
+FAIL M4-effect-export: 
+FAIL M5: go: EF173 laws are unresolved for this revision on go: run ef test to discharge them
+entry requires an effect fn main
+FAIL M5: js: admitted with no receipt: EF173 laws are unresolved for this revision on js: run ef test to discharge them
+FAIL M6-cwd: a build from another directory was admitted: EF173 laws are unresolved for this revision on go: run ef test to discharge them
+FAIL M6-seed: gating=tested,tested,refuted,tested explored= now=tested,tested,refuted,tested: EF170 refuted laws refuse the build: Order.transitive@User at a = User { age: 0, name: "" }, b = User { age: -1, name: "" }, c = User { age: -2, name: "" }
+FAIL M6-disagree: exit=1 agree=false go=tested js=refuted
+FAIL M6-disagree-build: go: admitted
+PASS M6-disagree-build: js: EF170 refuted laws refuse the build: Depth.finite@i64 at n = 4294967296
+FAIL M7-runtime: exit=1 agree= same= go= js=
+FAIL M7-observer: exit=1 go= js=
+FAIL M7-providers: no provider comparison
+FAIL m1: EFFRA_LAW_SEED=010: EF172 Go and JavaScript disagree on 15 law observations; a cross-target disagreement refutes the suite
+FAIL m1: EFFRA_LAW_SEED=-1: EF172 Go and JavaScript disagree on 15 law observations; a cross-target disagreement refutes the suite
+FAIL m1: EFFRA_LAW_SEED=abc: EF172 Go and JavaScript disagree on 1 law observations; a cross-target disagreement refutes the suite
+FAIL m1: EFFRA_LAW_SEED=4294967296 admitted
+FAIL m2: go: no EF177 containing 'entry label has type fn(User)->string, but sortedTrio has type fn(Trio)->bool'; got: checked
+FAIL m2: js: no EF177 containing 'entry label has type fn(User)->string, but sortedTrio has type fn(Trio)->bool'; got: checked
+FAIL m3-call: go: no EF178 containing 'is the law Order.reflexive@User, and a law is not a value'; got: checked
+FAIL m3-call: js: no EF178 containing 'is the law Order.reflexive@User, and a law is not a value'; got: checked
+FAIL m3-mint: go: no EF181 containing 'a law body states an obligation and is never a construction site'; got: checked
+FAIL m3-mint: js: no EF181 containing 'a law body states an obligation and is never a construction site'; got: checked
+FAIL Q2: go: no EF175 containing 'User satisfies Order with laws to run and no case budget'; got: EF181 cannot mint SortedBy<Trio, compareUsers>: User satisfies Order with law reflexive unresolved (no case budget: add `cases N` to the satisfaction); evidence cannot rest on an unresolved law
+EF187 cannot admit SortedBy<Trio, compareUsers>: User satisfies Order with law reflexive unresolved (no ca
+FAIL Q2: js: no EF175 containing 'User satisfies Order with laws to run and no case budget'; got: EF181 cannot mint SortedBy<Trio, compareUsers>: User satisfies Order with law reflexive unresolved (no case budget: add `cases N` to the satisfaction); evidence cannot rest on an unresolved law
+EF187 cannot admit SortedBy<Trio, compareUsers>: User satisfies Order with law reflexive unresolved (no ca
+laws probes: FAILED
+exit=1

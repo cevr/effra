@@ -1,4 +1,4 @@
-// Built by the laws prototype (wf10/spike-laws-proto 5f428883) from examples/laws/sorted.ef with `ef build --target js sorted.ef` (examples/laws/run.sh). Checked in so this probe runs without the prototype.
+// Built by the laws prototype (wf10/spike-laws-proto 63164e8a) from examples/laws/sorted.ef with `ef test --target both sorted.ef` then `ef build --target js sorted.ef` (EF174 refuses the build until a current passing receipt exists). Checked in so this probe runs without the prototype.
 import type { Context, Effect, Fiber } from 'effect';
 export interface File {readonly _effraFile: "File"}
 export interface Latch {readonly _effraLatch: "Latch"}
@@ -70,6 +70,8 @@ declare class EfEvidence<E extends string, S, I extends string> { private readon
 export type SortedBy<S, I extends string> = S & EfEvidence<"SortedBy", S, I>;
 declare const __ef_export_sortTrio: (arg_t: Trio) => SortedBy<Trio, "compareUsers">;
 export { __ef_export_sortTrio as sortTrio };
+declare const __ef_export_sortTrioLater: (arg_t: Trio) => Effect.Effect<SortedBy<Trio, "compareUsers">, never, never>;
+export { __ef_export_sortTrioLater as sortTrioLater };
 declare const __ef_function_sortTrioBy: (arg_t: Trio, arg_compare: (arg0: User, arg1: User) => bigint) => Trio;
 export { __ef_function_sortTrioBy as sortTrioBy };
 declare const __ef_function_sortedTrio: (arg_t: Trio) => boolean;

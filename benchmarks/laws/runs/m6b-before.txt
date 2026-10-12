@@ -1,0 +1,7 @@
+# M6b reproduced by hand with the round-1 binary (5f428883) on examples/laws/probes/near.ef: an exploration seed overwrote the gating receipt, and the build was admitted although the canonical seed refutes transitivity
+$ ef test --target both near.ef   # round-1 binary 5f428883, canonical seed
+["0",["Order.reflexive@User=tested","Order.antisymmetric@User=tested","Order.transitive@User=refuted","Order.total@User=tested"]]
+$ EFFRA_LAW_SEED=3 ef test --target both near.ef   # exploration run
+["3",["Order.reflexive@User=tested","Order.antisymmetric@User=tested","Order.transitive@User=tested","Order.total@User=tested"]]
+$ ef build near.ef
+exit=0 

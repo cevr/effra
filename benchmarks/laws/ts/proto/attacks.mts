@@ -5,7 +5,7 @@
 // at runtime with EF186 or give the correct answer. The script exits 1 when
 // an attack yields a wrong answer.
 import * as lib from './lib.mjs';
-import { makeUser, makeTrio, sortTrio, sortTrioBy, search } from './lib.mjs';
+import { makeUser, makeTrio, sortTrio, sortTrioBy, sortTrioLater, search } from './lib.mjs';
 import type { SortedBy, Trio, User } from './lib.mjs';
 
 const ada = makeUser("ada", 36n);
@@ -98,11 +98,40 @@ refused("A3-mutate-evidence", "TypeError", () => {
   (out.first as { age: bigint }).age = 99n;
   return out.first.age;
 });
-// G1 getter: an accessor that answers differently on each read is refused.
+// G1 getter: an accessor that answers differently on each read is refused
+// before it is ever called.
+let getterReads = 0;
 refused("G1-getter", "EF186", () => {
-  let reads = 0;
-  const tricky = { second: cy, third: ada, get first() { reads++; return reads === 1 ? bob : makeUser("zed", 99n); } };
+  const tricky = { second: cy, third: ada, get first() { getterReads++; return getterReads === 1 ? bob : makeUser("zed", 99n); } };
   return search(tricky as never as Trio, bob);
+});
+correct("G1-getter-reads", 0, () => getterReads);
+// A3 read count (spike-where r5-n1): a proxy whose data properties answer
+// differently on every read. The output alone cannot show requirement 3,
+// because an extra entry check over the caller's object can still return the
+// right answer; so the acceptance counts how often each field of the
+// argument is read. The adapter must read each field once, into the
+// snapshot, and run the admission check and the body on that snapshot.
+correct("A3-read-count", "true first:1 second:1 third:1", () => {
+  const fields = ["first", "second", "third"];
+  const honest: Record<string, User> = { first: bob, second: cy, third: ada };
+  const hostile: Record<string, User> = { first: makeUser("zed", 99n), second: bob, third: bob };
+  const counts: Record<string, number> = {};
+  const read = (key: string | symbol): User | undefined => {
+    if (typeof key !== "string" || !fields.includes(key)) return undefined;
+    counts[key] = (counts[key] ?? 0) + 1;
+    return counts[key] === 1 ? honest[key] : hostile[key];
+  };
+  const target = { first: bob, second: cy, third: ada };
+  const proxy = new Proxy(target, {
+    get: (t, key) => read(key) ?? Reflect.get(t, key),
+    getOwnPropertyDescriptor: (t, key) => {
+      const v = read(key);
+      return v === undefined ? Reflect.getOwnPropertyDescriptor(t, key) : { value: v, writable: true, enumerable: true, configurable: true };
+    },
+  });
+  const found = search(proxy as never as Trio, bob);
+  return String(found) + " " + fields.map((k) => k + ":" + String(counts[k] ?? 0)).join(" ");
 });
 
 // Canonical-binding rule: adapters call module-private bindings, the module
@@ -131,6 +160,9 @@ void forged;
 // @ts-expect-error TS2322 F2 evidence for one comparator is not evidence for another
 const otherIndex: SortedBy<Trio, "reversed"> = sorted;
 void otherIndex;
+// @ts-expect-error TS2322 F3 an effect export's recipe is not itself evidence; only its success value is
+const recipeAsEvidence: SortedBy<Trio, "compareUsers"> = sortTrioLater(trio);
+void recipeAsEvidence;
 
 console.log(results.join("\n"));
 if (wrong > 0) { console.log(wrong + " attack(s) produced a wrong answer"); throw new Error("probe failed"); }
