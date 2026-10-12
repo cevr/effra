@@ -11,10 +11,10 @@ const attempt = (name: string, run: () => string) => {
   try { console.log(name + ": returned " + run()); } catch (e) { console.log(name + ": threw " + String(e).split("\n")[0]); }
 };
 attempt("A2 augmentation record key", () => {
-  // @ts-expect-error A2 every record now looks like a File handle
+  // @ts-expect-error TS2322,TS2345 A2 every record now looks like a File handle
   const m: HashMap<UserId, string> = empty<UserId, string>();
-  // @ts-expect-error A2 the key type collapsed to never
+  // @ts-expect-error TS2345 A2 the key type collapsed to never
   return lookup(insert(m, makeUserId("a", 1n), "v"), makeUserId("a", 1n), "none");
 });
-// @ts-expect-error A2 a callable key is still refused under the augmentation
+// @ts-expect-error TS2345 A2 a callable key is still refused under the augmentation
 attempt("A2 callable key", () => String(insert(empty<() => void, string>(), () => {}, "v")));

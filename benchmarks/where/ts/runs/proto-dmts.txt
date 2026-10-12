@@ -18,13 +18,13 @@ exit=0
 abc ada2,bob
 exit=0
 == each directive opened
-negatives.mts:6  P1 missing witness
+negatives.mts:6  P1 missing witness  [expects TS2554]
     TS2554 Expected 2 arguments, but got 1.  [An argument for 'arg1' was not provided.]
-negatives.mts:8  P2 another type's method as the witness
+negatives.mts:8  P2 another type's method as the witness  [expects TS2345]
     TS2345 Argument of type '__ef_template_Three<User>' is not assignable to parameter of type '__ef_template_Three<UserId>'.   Types of property '"a"' are incompatible.     Type 'User' is missing the following properties from type 'UserId': org, n, [__ef_brand_UserId]
-negatives.mts:11  P3 the compare method of another type as the hash witness
+negatives.mts:11  P3 the compare method of another type as the hash witness  [expects TS2345]
     TS2345 Argument of type '(arg_u: User, arg_other: User) => bigint' is not assignable to parameter of type '(arg0: UserId) => bigint'.   Target signature provides too few arguments. Expected 2 or more, but got 1.
-directives=3 without a diagnostic=0
+directives=3 without a diagnostic=0 with a code mismatch=0
 exit=0
 == any
 out/sample.d.mts: any keywords=0, word matches=0

@@ -15,7 +15,7 @@ const ids = (): HashMap<UserId, string> => empty<UserId, string>();
 // A1a a factory slot for a function-keyed map: refused, because Key<K> is in
 // the instantiated return type.
 interface MakeLib { make(): HashMap<() => void, string>; }
-// @ts-expect-error A1a function-keyed factory slot
+// @ts-expect-error TS2322 A1a function-keyed factory slot
 const maker: MakeLib = { make: empty };
 attempt("A1a fn-keyed factory", () => String(keys(maker.make()).length));
 // A1b a put slot whose key parameter is wider than the map's key: K comes from
@@ -26,7 +26,7 @@ attempt("A1b key bivariance fn key", () => String(keys(putter.put(ids(), () => {
 attempt("A1b key bivariance file key", () => { const p: { put(map: HashMap<UserId, string>, key: UserId | ReturnType<typeof openFile>, value: string): HashMap<UserId, string> } = { put: insert }; return String(keys(p.put(ids(), openFile("a"), "v")).length); });
 // A1c a sort slot for a record: refused (T extends Ordered is checked).
 interface SortLib { sortIds(xs: Three<UserId>): Three<UserId>; }
-// @ts-expect-error A1c record sort slot
+// @ts-expect-error TS2322 A1c record sort slot
 const sorter: SortLib = { sortIds: sort3 };
 attempt("A1c record sort slot", () => sorter.sortIds(three(makeUserId("c", 3n), makeUserId("a", 1n), makeUserId("b", 2n))).a.org);
 

@@ -15,7 +15,7 @@ const mixed = three<User | UserId>(User.make("a", 1n), UserId.make("b", 2n), Use
 // template brand makes Three<T> invariant, so neither direction of the
 // bivariant parameter check holds.
 interface SortLib { sortMixed(xs: Three<User | UserId>, compare: (self: User, other: User) => bigint): Three<User | UserId>; }
-// @ts-expect-error A1 bivariant witness slot (Three<T> is invariant)
+// @ts-expect-error TS2322 A1 bivariant witness slot (Three<T> is invariant)
 const lib: SortLib = { sortMixed: sort3 };
 attempt("A1 method bivariance", () => { const r = lib.sortMixed(mixed, User.compare); return [r.a, r.b, r.c].map(v => "name" in v ? v.name : v.org).join(""); });
 
@@ -31,7 +31,7 @@ attempt("A1b key bivariance", () => { const m = mapLib.put(empty(UserId.hash, Us
 // A2 global Object augmentation: there is no structural constraint for it to
 // satisfy. The witness parameter is still required and still typed.
 declare global { interface Object { compare(other: unknown): bigint } }
-// @ts-expect-error A2 augmentation does not supply a witness argument
+// @ts-expect-error TS2554 A2 augmentation does not supply a witness argument
 attempt("A2 augmentation", () => sort3(three(() => 1, () => 2, () => 3)).a.toString());
 
 // A3 a never[] rest drops the witness parameter.

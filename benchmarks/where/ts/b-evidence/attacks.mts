@@ -14,7 +14,7 @@ const reversed = (self: User, other: User) => other.age - self.age;
 
 // L1, boundary rule: the exported where-clause sort drops the evidence, so
 // its result cannot reach the trusting consumer.
-// @ts-expect-error L1 laundering through form (ii) is refused
+// @ts-expect-error TS2345 L1 laundering through form (ii) is refused
 attempt("L1 launder via form (ii)", () => smallest(sort(users, reversed)).name);
 
 // L2, the rejected projection: the same route type-checks with no cast, and
@@ -24,5 +24,5 @@ attempt("L2 launder via rejected minting form", () => smallest(sortMinting<User,
 // L3, the never-filler and never-rest routes against form (i) have no method
 // argument to drop; the evidence is built from Effra's own method.
 const none: never[] = [];
-// @ts-expect-error L3 form (i) has no method parameter to fill
+// @ts-expect-error TS2554 L3 form (i) has no method parameter to fill
 attempt("L3 filler into form (i)", () => smallest(sortUsers(users, none[0])).name);

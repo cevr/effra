@@ -6,8 +6,13 @@
 # needed because the main compiler refuses user generic functions (EF127).
 # Checks every probe on Go and JavaScript; exits 1 when an outcome differs,
 # a first line is missing or malformed, or a result cannot be parsed.
+# Requires GNU sed: the expect-line parser uses `\|` alternation in a basic
+# regular expression, which BSD sed (macOS) does not accept. The script checks
+# for GNU sed first and exits 2 without it, rather than reporting every probe
+# INVALID.
 # Usage: run.sh EF_PROTO
 set -u
+sed --version 2>/dev/null | grep -q GNU || { echo "run.sh needs GNU sed (on macOS: gsed, first on PATH as sed)" >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
 EF=${1:?usage: run.sh EF_PROTO}
 failures=0

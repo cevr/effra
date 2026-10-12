@@ -13,7 +13,7 @@ const mixed = three<User | UserId>(makeUser("a", 1n), makeUserId("b", 2n), makeU
 // A1 method-parameter bivariance on the dictionary: refused (Three<T> and
 // Order<T> are invariant through their template brands).
 interface SortLib { sortMixed(xs: Three<User | UserId>, order: Order<User>): Three<User | UserId>; }
-// @ts-expect-error A1 bivariant dictionary slot (templates are invariant)
+// @ts-expect-error TS2322 A1 bivariant dictionary slot (templates are invariant)
 const lib: SortLib = { sortMixed: sort3 };
 attempt("A1 method bivariance", () => { const r = lib.sortMixed(mixed, userOrder); return [r.a, r.b, r.c].map(v => "name" in v ? v.name : v.org).join(""); });
 
@@ -24,7 +24,7 @@ attempt("A1b key bivariance", () => { const m = mapLib.put(empty(userIdHash), ma
 
 // A2 global Object augmentation: no structural constraint to satisfy.
 declare global { interface Object { compare(other: unknown): bigint } }
-// @ts-expect-error A2 augmentation does not supply a dictionary
+// @ts-expect-error TS2554 A2 augmentation does not supply a dictionary
 attempt("A2 augmentation", () => sort3(three(() => 1, () => 2, () => 3)).a.toString());
 
 // A3 a never[] rest drops the dictionary parameter.

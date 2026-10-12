@@ -1,5 +1,8 @@
-// The evidence boundary rule (note §2.10): an exported function that mints
-// evidence takes one of two forms in the .d.mts.
+// #125 INPUT EVIDENCE, NOT ACCEPTANCE (note §2.10). The evidence mechanism is
+// #125's; this fixture models only the outward boundary rule, under which an
+// exported function that mints evidence takes one of two forms in the .d.mts.
+// It does not model inward admission, a stable payload or a private canonical
+// method: attacks-expected-fail.mts records those routes as expected failures.
 //
 //   (i)  It binds the canonical methods on the Effra side. Its signature has
 //        no method parameter, so a TypeScript caller cannot choose the

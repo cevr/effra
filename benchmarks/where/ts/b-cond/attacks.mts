@@ -16,7 +16,7 @@ const first = (r: Three<Option<User>>) => (r.a._tag === "Some" && r.a.value ? r.
 
 // A2 global Object augmentation supplies no method argument.
 declare global { interface Object { compare(other: unknown): bigint } }
-// @ts-expect-error A2 augmentation does not supply the inner method argument
+// @ts-expect-error TS2554 A2 augmentation does not supply the inner method argument
 attempt("A2 augmentation", () => first(sort3(xs, Option.compare())));
 
 // A3 a never[] rest drops the inner method argument.

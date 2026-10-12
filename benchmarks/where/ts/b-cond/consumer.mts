@@ -27,21 +27,21 @@ console.log([
   lookup(byId, Option.some(UserId.make("acme", 7n)), "miss") + "," + lookup(byId, Option.none<UserId>(), "miss"),
 ].join(" "));
 
-// @ts-expect-error C1 the inner method of another type
+// @ts-expect-error TS2345 C1 the inner method of another type
 sort3(xs, Option.compare(UserId.hash));
-// @ts-expect-error C2 the outer method without its method argument
+// @ts-expect-error TS2345 C2 the outer method without its method argument
 sort3(xs, Option.compare);
-// @ts-expect-error C3 Option<User> compare on Option<UserId>
+// @ts-expect-error TS2345 C3 Option<User> compare on Option<UserId>
 sort3(three(Option.some(UserId.make("a", 1n)), Option.none<UserId>(), Option.none<UserId>()), Option.compare(User.compare));
-// @ts-expect-error C4 one level too few for Option<Option<User>>
+// @ts-expect-error TS2345 C4 one level too few for Option<Option<User>>
 sort3(nested, Option.compare(User.compare));
-// @ts-expect-error C5 Pair's method arguments swapped
+// @ts-expect-error TS2345 C5 Pair's method arguments swapped
 sort3(pairs, Pair.compare(User.compare, I64.compare));
-// @ts-expect-error C6 a compare where the map needs a hash
+// @ts-expect-error TS2345 C6 a compare where the map needs a hash
 empty<Option<UserId>, string>(Option.compare(UserId.equals), Option.equals(UserId.equals));
 
 // A1 method bivariance on the conditional slot: refused, Three<T> is invariant.
 interface L { s(xs: Three<Option<User | UserId>>, c: (a: Option<User>, b: Option<User>) => bigint): Three<Option<User | UserId>> }
-// @ts-expect-error A1 invariant Three<T>
+// @ts-expect-error TS2322 A1 invariant Three<T>
 const l: L = { s: sort3 };
 export { l };
