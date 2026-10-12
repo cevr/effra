@@ -139,7 +139,12 @@ func captureOriginalSyntax(program *Program) *lexicalFacts {
 					if !facts.complete {
 						break
 					}
-					patternID := add("pattern", p.TypeName+"."+p.VariantName, p.Span, p.Extent, Span{})
+					label := p.TypeName + "." + p.VariantName
+					if p.decision {
+						// A decision pattern is labelled as source writes it.
+						label = p.VariantName
+					}
+					patternID := add("pattern", label, p.Span, p.Extent, Span{})
 					if patternID < 0 {
 						break
 					}

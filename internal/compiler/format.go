@@ -599,10 +599,20 @@ func (p *formatPrinter) regularSpacing(current string, currentIndex int) {
 	if previous.text == "-" && p.unaryMinus(p.lastToken) {
 		return
 	}
-	if !formatNeedsSpace(previous, currentToken) {
+	if !formatNeedsSpace(previous, currentToken, p.prefixKeyword(p.lastToken)) {
 		return
 	}
 	p.space()
+}
+
+// prefixKeyword reports a keyword that takes a spaced operand (if, match,
+// run, fork and the decision forms enter, stay, done). After a dot the same
+// spelling is a member or field label (`todo.done`), an ordinary name.
+func (p *formatPrinter) prefixKeyword(index int) bool {
+	if index < 0 || index >= len(p.tokens) || !groupedCallKeyword(p.tokens[index].text) {
+		return false
+	}
+	return index == 0 || p.tokens[index-1].text != "."
 }
 
 func (p *formatPrinter) comparisonAngle(index int) bool {
@@ -613,7 +623,7 @@ func (p *formatPrinter) comparisonAngle(index int) bool {
 	return (text == "<" || text == ">") && !p.layout.genericAngles[index]
 }
 
-func formatNeedsSpace(previous, current token) bool {
+func formatNeedsSpace(previous, current token, previousKeyword bool) bool {
 	previousText, currentText := previous.text, current.text
 	if currentText == ")" || currentText == "]" || currentText == "," || currentText == ";" || currentText == "." || currentText == ":" || currentText == ">" {
 		return false
@@ -634,7 +644,7 @@ func formatNeedsSpace(previous, current token) bool {
 		case ")", "]", ">", "(":
 			return false
 		default:
-			if previous.kind == "name" && !groupedCallKeyword(previousText) {
+			if previous.kind == "name" && !previousKeyword {
 				return false
 			}
 			return true
@@ -659,9 +669,10 @@ func (p *formatPrinter) unaryMinus(index int) bool {
 		return false
 	case "-", "+", "==", "<", "<=", ">", ">=", "*", "/", "%", "|>", "->", "=>", "(", "[", "{", ",", ":", ";":
 		return true
-	case "if", "match", "run", "fork", "enter", "stay", "done":
-		return true
 	default:
+		if p.prefixKeyword(index - 1) {
+			return true
+		}
 		return previous.kind != "name" && previous.kind != "integer" && previous.kind != "string"
 	}
 }

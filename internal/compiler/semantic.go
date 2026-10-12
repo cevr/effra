@@ -3032,7 +3032,7 @@ func (c *checker) parameterTypeKnown(name string) bool {
 }
 
 func (c *checker) requiresTemplateArguments(name string) bool {
-	template := c.templateByName(name)
+	template := c.typeTemplateByName(name)
 	return template != nil && len(template.Parameters) > 0
 }
 func (c *checker) typeNodeID(id TypeID) string {
@@ -4460,8 +4460,8 @@ func (c *checker) blockValue(b *Block, env localEnv, effect bool, result blockRe
 			out.evaluation = previousEvaluation
 		} else {
 			last := index == len(b.Statements)-1
-			if !last && s.Value != nil && s.Value.Kind == "decision" && !c.poisoned(t) {
-				c.diagnostic(decisionCode, "`"+s.Value.Name+"` as a statement discards its decision; make it the block's result", s.Value.Span)
+			if !last && s.Value != nil && !c.poisoned(t) {
+				c.refuseDiscardedDecision(s.Value, t)
 			}
 			switch {
 			case !t.isEffect() || last && result == blockSelected:
@@ -4645,7 +4645,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			}
 		}
 		if f == nil {
-			if !unresolvedName || !c.absentName(absentInValue, e.Left.Name, e.Left.Span) {
+			if !c.refuseDecisionTypeAsValue(e.Left, e.Span) && (!unresolvedName || !c.absentName(absentInValue, e.Left.Name, e.Left.Span)) {
 				c.diagnostic("EF102", "unknown function or service method", e.Span)
 			}
 			for _, a := range e.Args {
@@ -5151,7 +5151,11 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 				valid = false
 			}
 		}
-		if c.expect(valid, "EF106", "operator requires matching primitive values; + accepts strings or i64, and -, *, /, % and ordered comparisons accept i64", e.Span, left, right) && (e.Name == "/" || e.Name == "%") && !c.divisorProof(e.Right) {
+		message := "operator requires matching primitive values; + accepts strings or i64, and -, *, /, % and ordered comparisons accept i64"
+		if !valid {
+			message += decisionPrecedenceHint(e)
+		}
+		if c.expect(valid, "EF106", message, e.Span, left, right) && (e.Name == "/" || e.Name == "%") && !c.divisorProof(e.Right) {
 			c.diagnostic("EF150", divisorRefusal(e), e.Right.Span)
 		}
 		if valid {
@@ -5369,7 +5373,7 @@ func (c *checker) construct(e *Expr, env localEnv, inEffect bool) checkedExpress
 	if !ok {
 		if variantName != "" && c.enums[typeName] != nil {
 			c.diagnostic("EF116", "unknown variant "+typeName+"."+variantName, e.Span)
-		} else if variantName != "" || !c.absentName(absentInBlock, typeName, e.Left.Span) {
+		} else if !c.refuseDecisionTypeAsValue(e.Left, e.Span) && (variantName != "" || !c.absentName(absentInBlock, typeName, e.Left.Span)) {
 			c.diagnostic("EF102", "unknown data declaration "+typeName, e.Span)
 		}
 		return c.checkedData("invalid")

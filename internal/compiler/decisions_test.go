@@ -111,7 +111,7 @@ func TestDecisionNegativeControls(t *testing.T) {
 	}{
 		{"a form where no decision is expected", `fn label() -> string { enter "x" }
 `, "EF143", "needs an enclosing function that returns decision<S, O>"},
-		{"a form in a constant-free context", decisionPrelude + `fn pick(state: S) -> S { stay state }
+		{"a form in a function that does not return a decision", decisionPrelude + `fn pick(state: S) -> S { stay state }
 `, "EF143", "`stay` is a decision form"},
 		{"a form as a statement", decisionPrelude + `fn step(state: S, event: E) -> decision<S, void> {
     ignore
@@ -265,14 +265,32 @@ func TestDecisionParserControls(t *testing.T) {
 			t.Fatalf("diagnostics = %+v", r.Diagnostics)
 		}
 	})
-	t.Run("a construct operand in an if header stays protected", func(t *testing.T) {
-		// `stay state` inside the branch blocks; the header brace is a block.
-		r := Compile(decisionPrelude + `fn step(state: S, event: E) -> decision<S, void> {
-    if state == state { stay state } else { enter S.Active { n: 2 } }
+	t.Run("a constructor operand in a match header leaves the arm block", func(t *testing.T) {
+		// In a header, `enter S.Active { n: 1 }` keeps its payload braces and
+		// the next brace opens the arms: the design's constructor-vs-block
+		// control.
+		source := decisionPrelude + `fn step(state: S, event: E) -> decision<S, void> {
+    match enter S.Active { n: 1 } {
+        enter next => stay next
+        stay next => stay next
+        ignore | reject | done => ignore
+    }
 }
-`)
-		if d, ok := findDecisionDiagnostic(r, "EF002"); ok {
-			t.Fatalf("parse error %+v", d)
+`
+		program, diagnostics := parse(source)
+		if len(diagnostics) != 0 {
+			t.Fatalf("diagnostics = %+v", diagnostics)
+		}
+		match := program.Functions[0].Body.Statements[0].Value
+		if match.Kind != "match" || len(match.Args) != 1 || len(match.Arms) != 3 {
+			t.Fatalf("match parsed as %+v", match)
+		}
+		subject := match.Args[0]
+		if subject.Kind != "decision" || subject.Name != "enter" || subject.Fields[0].Value.Kind != "construct" || len(subject.Fields[0].Value.Fields) != 1 {
+			t.Fatalf("subject parsed as %+v", subject)
+		}
+		if r := Compile(source); len(r.Diagnostics) != 0 {
+			t.Fatalf("diagnostics = %+v", r.Diagnostics)
 		}
 	})
 	t.Run("bare done ends an arm and a block", func(t *testing.T) {

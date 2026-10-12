@@ -407,8 +407,10 @@ func (s machineShape) write(b sourceWriter) {
 		body = fmt.Sprintf("    match state {\n        %s => %s\n        %s.%s => ignore\n    }\n", strings.Join(most, " | "), first, enum, variant(s.states-1))
 	}
 	// Statements after the first: the walk reaches them after any refusal
-	// the first statement caused.
+	// the first statement caused. The first decision is bound, since a
+	// statement that discards a decision is EF143.
 	if s.lets > 0 {
+		body = "    let first = " + strings.TrimPrefix(body, "    ")
 		var lets strings.Builder
 		for i := 0; i < s.lets; i++ {
 			fmt.Fprintf(&lets, "    let l%d = %d\n", i, i)

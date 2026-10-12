@@ -33,9 +33,20 @@ type matchPlanSubject struct {
 	value    checkedExpression
 	enum     *Enum
 	variants []string
+	// decision marks the predeclared decision<S, O>, whose variants are
+	// spelled as bare words in diagnostics.
+	decision bool
 	// tested is false when every arm admits every variant of this subject, so
 	// lowering need not decode its variant at all.
 	tested bool
+}
+
+// label spells a variant of this subject the way source writes it.
+func (s matchPlanSubject) label(variant string) string {
+	if s.decision {
+		return variant
+	}
+	return s.enum.Name + "." + variant
 }
 
 type matchPlanArm struct {
@@ -81,7 +92,7 @@ func (c *checker) match(e *Expr, env localEnv, inEffect bool) checkedExpression 
 			continue
 		}
 		names := map[string]Variant{}
-		planned := matchPlanSubject{value: value, enum: enum}
+		planned := matchPlanSubject{value: value, enum: enum, decision: c.isDecisionTemplate(enum)}
 		for _, variant := range variants {
 			names[variant.Name] = variant
 			planned.variants = append(planned.variants, variant.Name)
@@ -142,7 +153,7 @@ func (c *checker) match(e *Expr, env localEnv, inEffect bool) checkedExpression 
 		for _, witness := range missing {
 			parts := make([]string, len(witness))
 			for index, variant := range witness {
-				parts[index] = variantLabel(plan.subjects[index].enum, plan.subjects[index].variants[variant])
+				parts[index] = plan.subjects[index].label(plan.subjects[index].variants[variant])
 			}
 			coverage.claim("EF117", "missing match arm for "+strings.Join(parts, ", "), e.Span)
 		}
@@ -195,7 +206,7 @@ func (c *checker) matchArmCells(arm *MatchArm, plan *matchPlan, declared []map[s
 					ok = false
 					continue
 				}
-			} else if owner := c.templateByName(pattern.TypeName); c.isDecisionTemplate(owner) {
+			} else if owner := c.typeTemplateByName(pattern.TypeName); c.isDecisionTemplate(owner) {
 				c.diagnostic(decisionCode, "a decision pattern is written with its word ("+decisionForms+"), not "+pattern.TypeName+"."+pattern.VariantName, pattern.Span)
 				ok = false
 				continue
@@ -212,13 +223,13 @@ func (c *checker) matchArmCells(arm *MatchArm, plan *matchPlan, declared []map[s
 				continue
 			}
 			if _, exists := declared[subject][pattern.VariantName]; !exists {
-				c.diagnostic("EF116", "unknown variant "+variantLabel(enum, pattern.VariantName), pattern.Span)
+				c.diagnostic("EF116", "unknown variant "+c.variantLabel(enum, pattern.VariantName), pattern.Span)
 				ok = false
 				continue
 			}
 			variant := plan.subjects[subject].index(pattern.VariantName)
 			if row[subject].has(variant) {
-				c.diagnostic("EF117", "duplicate alternative "+variantLabel(enum, pattern.VariantName), pattern.Span)
+				c.diagnostic("EF117", "duplicate alternative "+c.variantLabel(enum, pattern.VariantName), pattern.Span)
 				ok = false
 				continue
 			}
@@ -232,7 +243,7 @@ func (c *checker) matchArmCells(arm *MatchArm, plan *matchPlan, declared []map[s
 func (m *matchCoverage) unreachableArm(arm *MatchArm, plan *matchPlan) {
 	if len(arm.Patterns) == 1 && len(arm.Patterns[0]) == 1 {
 		pattern := arm.Patterns[0][0]
-		m.claim("EF117", "duplicate match arm for "+variantLabel(plan.subjects[0].enum, pattern.VariantName), pattern.Span)
+		m.claim("EF117", "duplicate match arm for "+plan.subjects[0].label(pattern.VariantName), pattern.Span)
 		return
 	}
 	m.claim("EF117", "unreachable match arm; earlier arms cover every combination it names", arm.Span)
@@ -255,7 +266,7 @@ func (m *matchCoverage) unreachableAlternatives(arm *MatchArm, row []variantSet,
 			if m.exhausted {
 				return
 			}
-			m.claim("EF117", "unreachable alternative "+variantLabel(plan.subjects[subject].enum, pattern.VariantName)+"; earlier arms cover it", pattern.Span)
+			m.claim("EF117", "unreachable alternative "+plan.subjects[subject].label(pattern.VariantName)+"; earlier arms cover it", pattern.Span)
 		}
 	}
 }
@@ -343,7 +354,7 @@ func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []ma
 				// bound value, so a row present in only one alternative would be
 				// silently dropped or invented by whichever alternative is first.
 				if joined.valueID() != bound.valueID() {
-					c.diagnostic("EF121", "alternative binding "+binding+" has a different type in "+variantLabel(plan.subjects[subject].enum, pattern.VariantName)+" than in "+variantLabel(plan.subjects[subject].enum, first.VariantName)+c.callableRowDifference(bound.valueID(), joined.valueID()), pattern.Span)
+					c.diagnostic("EF121", "alternative binding "+binding+" has a different type in "+plan.subjects[subject].label(pattern.VariantName)+" than in "+plan.subjects[subject].label(first.VariantName)+c.callableRowDifference(bound.valueID(), joined.valueID()), pattern.Span)
 					continue
 				}
 				// One occurrence join keeps every evidence slot of both
@@ -356,7 +367,7 @@ func (c *checker) matchArmBindings(arm *MatchArm, plan *matchPlan, declared []ma
 			if alternative == 0 {
 				first, firstNames = pattern, names
 			} else if !slices.Equal(names, firstNames) {
-				c.diagnostic("EF121", "alternatives must bind the same names: "+variantLabel(plan.subjects[subject].enum, first.VariantName)+" binds "+bindingList(firstNames)+", "+variantLabel(plan.subjects[subject].enum, pattern.VariantName)+" binds "+bindingList(names), pattern.Span)
+				c.diagnostic("EF121", "alternatives must bind the same names: "+plan.subjects[subject].label(first.VariantName)+" binds "+bindingList(firstNames)+", "+plan.subjects[subject].label(pattern.VariantName)+" binds "+bindingList(names), pattern.Span)
 			}
 		}
 	}

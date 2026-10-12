@@ -1012,6 +1012,30 @@ func (p *parser) name() token {
 	return v
 }
 
+// label reads an explicit field label: a record or variant field
+// declaration, a constructor `name: value` or a pattern `name: binder`. A
+// label never starts an expression, so the decision words stay legal here and
+// a derived codec can carry wire keys such as "done". Shorthand, which reads
+// or binds a local of the label's name, refuses them at its own site.
+func (p *parser) label() token {
+	v := p.take()
+	if v.kind != "name" {
+		p.fail(v, "expected identifier")
+	}
+	if v.text == "void" {
+		p.fail(v, "void is reserved for the no-value type and expression")
+	}
+	return v
+}
+
+// shorthandLabel refuses `{ done }` shorthand: it would read or bind a local
+// named by a reserved decision word.
+func (p *parser) shorthandLabel(label token, explicit string) {
+	if isDecisionWord(label.text) {
+		p.fail(label, label.text+" is a decision word, so it cannot be shorthand for a local; write `"+label.text+": "+explicit+"`")
+	}
+}
+
 // memberName admits a qualified host member without making the source
 // keyword available as a local/declaration name. Host interop keeps its
 // existing qualified-name rules; `sdk.void` is therefore parsed as a member
@@ -1223,7 +1247,7 @@ func (p *parser) fields() []Field {
 	p.expect("{")
 	var fields []Field
 	for !p.accept("}") {
-		name := p.name()
+		name := p.label()
 		p.expect(":")
 		typ, typeSpan := p.typeAnnotation()
 		fields = append(fields, Field{Name: name.text, Type: typ, sourceType: p.types[typ], Span: name.span, TypeSpan: typeSpan, Annotation: p.lastType})
@@ -1241,7 +1265,7 @@ func (p *parser) fieldValues() []FieldValue {
 	p.expect("{")
 	var fields []FieldValue
 	for !p.accept("}") {
-		name := p.name()
+		name := p.label()
 		field := FieldValue{Name: name.text, Span: name.span}
 		if p.regionUpdateAhead() {
 			p.fail(p.peek(), "region updates (`"+name.text+" <- decision`) are not admitted; region bindings are a later milestone")
@@ -1255,6 +1279,7 @@ func (p *parser) fieldValues() []FieldValue {
 			p.noConstruct = protected
 		} else {
 			// Record construction permits shorthand `{name}` for `{name: name}`.
+			p.shorthandLabel(name, "value")
 			field.Value = &Expr{Kind: "name", Name: name.text, Span: name.span, Extent: name.span}
 		}
 		fields = append(fields, field)
@@ -1905,7 +1930,7 @@ func (p *parser) pattern() *MatchPattern {
 		payloadStart := p.take().span
 		seen := map[string]bool{}
 		for !p.accept("}") {
-			field := p.name()
+			field := p.label()
 			if seen[field.text] {
 				p.fail(field, "duplicate pattern field "+field.text)
 			}
@@ -1913,6 +1938,8 @@ func (p *parser) pattern() *MatchPattern {
 			binding := field
 			if p.accept(":") {
 				binding = p.name()
+			} else {
+				p.shorthandLabel(field, "binder")
 			}
 			pattern.Bindings[field.text] = binding.text
 			pattern.Names = append(pattern.Names, PatternName{Field: field.text, Name: binding.text, FieldSpan: field.span, NameSpan: binding.span})

@@ -311,8 +311,19 @@ func (c *checker) templateByName(name string) *Record {
 	if r := index.bundled[c.functionModule][name]; r != nil {
 		return r
 	}
-	// The predeclared decision type is in every module's scope; it exists
-	// only when no source declaration named decision shadows it.
+	return nil
+}
+
+// typeTemplateByName resolves a template name in type position: a source or
+// bundled template first, then the predeclared decision<S, O>, which is in
+// every module's type scope when no source record or enum named decision
+// shadows it. Constructor and call heads use templateByName and never reach
+// the predeclared type, so a function or local named decision still resolves
+// as a value.
+func (c *checker) typeTemplateByName(name string) *Record {
+	if r := c.templateByName(name); r != nil {
+		return r
+	}
 	if name == decisionTypeName {
 		return c.program.decisionTemplate
 	}
@@ -488,7 +499,7 @@ func (c *checker) sourceApplication(t *sourceType) TypeID {
 }
 
 func (c *checker) sourceApplicationCanonical(t *sourceType) TypeID {
-	r := c.templateByName(t.Application)
+	r := c.typeTemplateByName(t.Application)
 	if r == nil {
 		return invalidTypeID
 	}
@@ -720,10 +731,6 @@ func (c *checker) templateConstruct(e *Expr, env localEnv, inEffect bool) (check
 	}
 	if r == nil {
 		return checkedExpression{}, false
-	}
-	if c.isDecisionTemplate(r) {
-		c.diagnostic(decisionCode, "a decision is written with its forms "+decisionForms+", not constructed", e.Span)
-		return c.checkedData("invalid"), true
 	}
 	if variant != "" && e.Left.constructorType != nil {
 		c.diagnostic("EF127", "constructor arguments belong to the data declaration before its variant", e.Span)

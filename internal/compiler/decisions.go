@@ -66,11 +66,70 @@ func (p *parser) decisionOperandAhead(word token) bool {
 	}
 	switch next.kind {
 	case "integer", "string":
-		return true
 	case "name":
-		return next.text != "else"
+		if next.text == "else" {
+			return false
+		}
+	default:
+		if next.text != "(" && next.text != "-" {
+			return false
+		}
 	}
-	return next.text == "(" || next.text == "-"
+	return !p.matchArmAhead(word.span.Line)
+}
+
+// matchArmAhead reports that the tokens after a bare `done` are the next
+// match arm on the same line (`E.Ping => done E.Pong => stay s`): a pattern
+// cell followed by `=>`, not an operand. A pattern cell is one or more
+// patterns joined by `|` or `,`; each is a dotted name with an optional
+// braced payload, a decision word with an optional binder, or a literal.
+func (p *parser) matchArmAhead(line int) bool {
+	i := p.at
+	at := func(text string) bool {
+		return i < len(p.tokens) && p.tokens[i].span.Line == line && p.tokens[i].text == text
+	}
+	for {
+		if i >= len(p.tokens) || p.tokens[i].span.Line != line {
+			return false
+		}
+		first := p.tokens[i]
+		switch first.kind {
+		case "integer", "string":
+			i++
+		case "name":
+			i++
+			if isDecisionWord(first.text) {
+				if i < len(p.tokens) && p.tokens[i].span.Line == line && p.tokens[i].kind == "name" && !isDecisionWord(p.tokens[i].text) {
+					i++
+				}
+				break
+			}
+			for at(".") && i+1 < len(p.tokens) && p.tokens[i+1].kind == "name" {
+				i += 2
+			}
+			if at("{") {
+				for depth := 0; i < len(p.tokens); i++ {
+					if p.tokens[i].text == "{" {
+						depth++
+					} else if p.tokens[i].text == "}" {
+						if depth--; depth == 0 {
+							i++
+							break
+						}
+					}
+				}
+			}
+		default:
+			return false
+		}
+		if at("=>") {
+			return true
+		}
+		if !at("|") && !at(",") {
+			return false
+		}
+		i++
+	}
 }
 
 // decisionPattern parses `enter next`, `stay next`, `ignore`, `reject`,
@@ -155,6 +214,53 @@ func (p *Program) compilerTemplates() []*Record {
 // isDecisionTemplate reports the predeclared decision template.
 func (c *checker) isDecisionTemplate(r *Record) bool {
 	return r != nil && r == c.program.decisionTemplate
+}
+
+// isDecisionType reports an application of the predeclared decision<S, O>.
+func (c *checker) isDecisionType(id TypeID) bool {
+	template := c.program.decisionTemplate
+	if template == nil || id == invalidTypeID {
+		return false
+	}
+	n := c.node(id)
+	return n != nil && n.Kind == "application" && n.Declaration == template.Identity
+}
+
+// refuseDiscardedDecision refuses a non-final expression statement whose
+// checked value is a decision, whatever its syntax: a bare form, an if or
+// match whose arms decide, or a helper call. A decision is a value, never an
+// early exit, so dropping one is always a misreading of the forms as control
+// flow. A let binding or an argument consumes the value and stays legal.
+func (c *checker) refuseDiscardedDecision(statement *Expr, value checkedExpression) {
+	if value.isEffect() || !c.isDecisionType(value.valueID()) {
+		return
+	}
+	if statement.Kind == "decision" {
+		c.diagnostic(decisionCode, "`"+statement.Name+"` as a statement discards its decision; make it the block's result", statement.Span)
+		return
+	}
+	c.diagnostic(decisionCode, "this statement discards its decision; a decision is a value, not an early exit: make it the block's result", statement.Span)
+}
+
+// refuseDecisionTypeAsValue runs only after ordinary value resolution found
+// nothing for a call or constructor head: `decision(x)`, `decision.enter(x)`
+// or `decision.enter { next: x }`. The predeclared type is in type position
+// only, so a function, service, provider or local named decision has already
+// resolved before this point. What is left is an attempt to build a decision
+// through its type, which EF143 refuses with the forms to write instead.
+func (c *checker) refuseDecisionTypeAsValue(head *Expr, span Span) bool {
+	if c.program.decisionTemplate == nil || head == nil {
+		return false
+	}
+	root := head
+	if root.Kind == "member" {
+		root = root.Left
+	}
+	if root == nil || root.Kind != "name" || root.Name != decisionTypeName || root.binding != nil {
+		return false
+	}
+	c.diagnostic(decisionCode, "a decision is written with its forms "+decisionForms+", not constructed", span)
+	return true
 }
 
 // decisionApplication returns the decision type expected at a form: the
@@ -252,8 +358,8 @@ func decisionVariantIndex(template *Record, word string) int {
 
 // variantLabel spells a variant the way source writes it: a decision variant
 // is its bare word, any other is Owner.Variant.
-func variantLabel(owner *Enum, variant string) string {
-	if owner != nil && owner.Identity == decisionIdentity {
+func (c *checker) variantLabel(owner *Enum, variant string) string {
+	if c.isDecisionTemplate(owner) {
 		return variant
 	}
 	return owner.Name + "." + variant
@@ -266,6 +372,16 @@ func decisionFields(e *Expr) []FieldValue {
 		return []FieldValue{{Name: "output", Value: &Expr{Kind: "void", Span: e.Span}, Span: e.Span}}
 	}
 	return e.Fields
+}
+
+// decisionPrecedenceHint names the repair when a decision form is the left
+// operand of a binary operator: the form binds tighter, so `done a + b` is
+// `(done a) + b`.
+func decisionPrecedenceHint(e *Expr) string {
+	if e.Left == nil || e.Left.Kind != "decision" || len(e.Left.Fields) == 0 {
+		return ""
+	}
+	return "; `" + e.Left.Name + "` binds tighter than " + e.Name + ", so write `" + e.Left.Name + " (a " + e.Name + " b)`"
 }
 
 // constructVariant is the variant a generic enum construction selects.
