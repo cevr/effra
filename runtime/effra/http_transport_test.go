@@ -366,17 +366,34 @@ func TestHTTPTransportCancelsHandlerOnClientDisconnect(t *testing.T) {
 	}
 }
 
+// requireReleased binds address again to prove the server released its
+// listener. It runs only on a reserved address: elsewhere the released port
+// could be assigned to another socket before the rebind (#112), so off Linux
+// the step is skipped and the rest of the test still runs.
+func requireReleased(t *testing.T, address string, reserved bool) {
+	t.Helper()
+	if !reserved {
+		t.Log("release rebind skipped: no port reservation on this platform")
+		return
+	}
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatalf("listener was not released: %v", err)
+	}
+	listener.Close()
+}
+
 func TestHTTPTransportShutdownCancelsActiveWorkAndReports503AfterCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// The port stays reserved for the closing rebind, which therefore fails
-	// only if the server did not release its listener.
-	address := testport.Reserve(t)
+	// Where the port can be reserved, it stays reserved for the closing
+	// rebind, which therefore fails only if the server kept its listener.
+	served, reserved := testport.TryReserve(t)
 	bound := make(chan string, 1)
 	started, cleanupStarted, finish := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	done := make(chan Exit[Unit], 1)
 	go func() {
-		done <- RunContext(ctx, ServeHTTPRequests(address, testLimits, func(HTTPRequest) Effect[HTTPResponse] {
+		done <- RunContext(ctx, ServeHTTPRequests(served, testLimits, func(HTTPRequest) Effect[HTTPResponse] {
 			return func(fc *FiberContext) Exit[HTTPResponse] {
 				resource := Invoke(fc, AcquireRelease("request", func(context.Context) (Unit, error) { return Unit{}, nil }, func(Unit, context.Context) error {
 					close(cleanupStarted)
@@ -392,8 +409,9 @@ func TestHTTPTransportShutdownCancelsActiveWorkAndReports503AfterCleanup(t *test
 			}
 		}, func(address string) { bound <- address }))
 	}()
-	if listening := wait(t, bound); listening != address {
-		t.Fatalf("listening on %s, want %s", listening, address)
+	address := wait(t, bound)
+	if reserved && address != served {
+		t.Fatalf("listening on %s, want %s", address, served)
 	}
 	received := make(chan *http.Response, 1)
 	go func() {
@@ -421,11 +439,7 @@ func TestHTTPTransportShutdownCancelsActiveWorkAndReports503AfterCleanup(t *test
 	if !wait(t, done).Interrupted {
 		t.Fatal("shutdown did not preserve cancellation")
 	}
-	listener, err := net.Listen("tcp", address)
-	if err != nil {
-		t.Fatalf("listener was not released: %v", err)
-	}
-	listener.Close()
+	requireReleased(t, address, reserved)
 }
 
 // A client that stops reading a large response must not hold shutdown open:
@@ -436,14 +450,14 @@ func TestHTTPTransportShutdownAbortsAStalledResponseAfterCleanup(t *testing.T) {
 	limits.IdleTimeout = 200 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// The port stays reserved for the closing rebind, which therefore fails
-	// only if the server did not release its listener.
-	address := testport.Reserve(t)
+	// Where the port can be reserved, it stays reserved for the closing
+	// rebind, which therefore fails only if the server kept its listener.
+	served, reserved := testport.TryReserve(t)
 	bound, cleaned := make(chan string, 1), make(chan struct{})
 	done := make(chan Exit[Unit], 1)
 	large := bytes.Repeat([]byte("s"), 32<<20)
 	go func() {
-		done <- RunContext(ctx, ServeHTTPRequests(address, limits, func(HTTPRequest) Effect[HTTPResponse] {
+		done <- RunContext(ctx, ServeHTTPRequests(served, limits, func(HTTPRequest) Effect[HTTPResponse] {
 			return func(fc *FiberContext) Exit[HTTPResponse] {
 				resource := Invoke(fc, AcquireRelease("request", func(context.Context) (Unit, error) { return Unit{}, nil }, func(Unit, context.Context) error { close(cleaned); return nil }))
 				if resource.IsFailure() {
@@ -453,8 +467,9 @@ func TestHTTPTransportShutdownAbortsAStalledResponseAfterCleanup(t *testing.T) {
 			}
 		}, func(address string) { bound <- address }))
 	}()
-	if listening := wait(t, bound); listening != address {
-		t.Fatalf("listening on %s, want %s", listening, address)
+	address := wait(t, bound)
+	if reserved && address != served {
+		t.Fatalf("listening on %s, want %s", address, served)
 	}
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
@@ -474,11 +489,7 @@ func TestHTTPTransportShutdownAbortsAStalledResponseAfterCleanup(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("shutdown waited on a client that stopped reading")
 	}
-	listener, err := net.Listen("tcp", address)
-	if err != nil {
-		t.Fatalf("listener was not released: %v", err)
-	}
-	listener.Close()
+	requireReleased(t, address, reserved)
 }
 
 // The write grace is a transport-drain phase: it starts once every request
