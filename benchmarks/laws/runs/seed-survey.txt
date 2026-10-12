@@ -1,4 +1,4 @@
-# ef test --target both <program> per EFFRA_LAW_SEED (proto 8b02919b); cases = cases run before the verdict (budget 200).
+# ef test --target both <program> per EFFRA_LAW_SEED (proto ad08a82e); cases = cases run before the verdict (budget 200).
 # The default run writes the gating receipt dist/<name>.laws.<target>.json; an exploration seed writes dist/<name>.laws.<target>.seed-N.json and never gates.
 == order-broken.ef
 seed=1 agree=true gating=false reflexive:tested/200 antisymmetric:refuted/6 transitive:refuted/56 total:refuted/21

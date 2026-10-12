@@ -1,4 +1,4 @@
-# examples/laws/run.sh on wf10/spike-laws-proto 8b02919b (includes examples/laws/probes.sh)
+# examples/laws/run.sh on wf10/spike-laws-proto ad08a82e (includes examples/laws/probes.sh)
 == order.ef (lawful compare, one trusted law)
 {"agree":true,"disagreements":[],"gating":true,"laws":8,"providers":[],"rootSeed":"0","source":"c19d7b1ee9b6a50d7e86902b74c661e43021618acd73d46419eb3c505bfb3d95"}
 -- order.ef on go
@@ -43,7 +43,7 @@ EF170 law Order.transitive@User refuted after 172 cases (seed 1953339788): retur
 {"id":"RoundTrip.roundTrip@accountJson","status":"tested","cases":200,"digest":"0109b916","counterexample":null,"failure":null,"justifier":null}
 {"id":"RoundTrip.roundTrip@halfJson","status":"refuted","cases":2,"digest":"417fb0d8","counterexample":"value = Profile { active: false, name: \"\", score: -1 }","failure":"returned false","justifier":null}
 == build reads the receipt
-EF170 refuted laws refuse the build: Order.antisymmetric@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }; Order.transitive@User at a = User { age: 0, name: "" }, b = User { age: -1, name: "" }, c = User { age: -2, name: "" }; Order.total@User at a = User { age: 9223372036854775807, name: "" }, b = User { age: 0, name: "" }; the refutation stands for this revision until an agreeing ef test --target both on the same inputs
+EF170 refuted laws refuse the build: Order.antisymmetric@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }; Order.transitive@User at a = User { age: 0, name: "" }, b = User { age: -1, name: "" }, c = User { age: -2, name: "" }; Order.total@User at a = User { age: 9223372036854775807, name: "" }, b = User { age: 0, name: "" }; the refutation stands for this source digest until an agreeing ef test --target both on the same inputs
 ef build order.ef: admitted
 true
 true
@@ -62,8 +62,8 @@ export { __ef_export_search as search };
 == review-1 probes (examples/laws/probes.sh)
 PASS M1-control: without the total law the 0/1 compare is tested on all three laws and its build is admitted (the hole)
 PASS M1: with the total law: go=tested,tested,tested,refuted js=tested,tested,tested,refuted agree=true, counterexample a = User { age: -1, name: "" }, b = User { age: 0, name: "" }
-PASS M1-build: go: EF170 refuted laws refuse the build: Order.total@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }; the refutation stands for this revision 
-PASS M1-build: js: EF170 refuted laws refuse the build: Order.total@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }; the refutation stands for this revision 
+PASS M1-build: go: EF170 refuted laws refuse the build: Order.total@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }; the refutation stands for this source di
+PASS M1-build: js: EF170 refuted laws refuse the build: Order.total@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }; the refutation stands for this source di
 PASS M2-mint: refused on go and js: EF181 ... compareUsers here is the parameter compareUsers of sortTrioByShadow
 PASS M2-signature: refused on go and js: EF181 ... in the signature of sortTrioByShadow resolves to its parameter compareUsers
 PASS M2-forward: refused on go and js: EF181 ... in the signature of sortForward resolves to its parameter compareUsers
@@ -92,13 +92,23 @@ PASS N2-type: refused on go and js: EF190 ... User satisfies Order target go, bu
 PASS N2-provider: js: EF181 cannot mint SortedBy<Trio, compareUsers>: compareUsers is bound to Order.compare only on go, by GoOrder satisfies Order target go; on js no satisfaction binds it, i; no .d.mts
 PASS N2-provider-control: go: the provider's own target mints, and the build after ef test --target go is admitted
 PASS N2-refuted: js refused with EF181, go receipt tested,tested,tested,refuted; no .d.mts
+PASS N2-generic-record: refused on go and js: EF190 ... Box is a type with one representation on both targets
+PASS N2-generic-enum: refused on go and js: EF190 ... Box is a type with one representation on both targets
+PASS q1-after: refused on go and js: EF181 ... Twin satisfies Order with law total unresolved
+PASS q1-before: refused on go and js: EF181 ... Twin satisfies Order with law total unresolved
+PASS q2-live: the --live receipt records live: true and its build is refused (EF174 evidence rests on laws with no current passing receipt on js (the receipt is from ef test --live, whose live capab); an ordinary run then admits it
 PASS M6-cwd: a build from another directory reads the refuted receipt: EF170 refuted laws refuse the build: Order.antisymmetric@User at a = User { age: -1, name: "" }, b = User { age: 0, name
 PASS M6-seed: gating receipt keeps tested,tested,refuted,tested; exploration seed 14 wrote its own receipt (tested,tested,tested,tested); build refused
 PASS M6-disagree: EF172 recorded: go=refuted js=refuted, go failure: cross-target disagreement (EF172): status differs (go "tested", js "refuted")
-PASS M6-disagree-build: go: EF172 a cross-target refutation stands for this revision: Depth<i64>.finite@i64 (cross-target disagreement (EF172): stat
-PASS M6-disagree-build: js: EF172 a cross-target refutation stands for this revision: Depth<i64>.finite@i64 (cross-target disagreement (EF172): stat
-PASS N1: after ef test --target go the go receipt still says refuted and both builds are refused: EF172 a cross-target refutation stands for this revision: Depth<i64>.finite@i64 (cross-target disagreement (EF172): status differs (go "tested", js "r
-PASS N1-revision: a new revision is new inputs: its own go run is tested and its go build is admitted
+PASS M6-disagree-build: go: EF172 a cross-target refutation stands for this source digest: Depth<i64>.finite@i64 (cross-target disagreement (EF172):
+PASS M6-disagree-build: js: EF172 a cross-target refutation stands for this source digest: Depth<i64>.finite@i64 (cross-target disagreement (EF172):
+PASS N1: after ef test --target go the go receipt still says refuted and both builds are refused: EF172 a cross-target refutation stands for this source digest: Depth<i64>.finite@i64 (cross-target disagreement (EF172): status differs (go "tested", 
+PASS p1-ledger-malformed: a ledger of '{': ef test --target go refused and wrote nothing, both builds refused: EF191 the refutation ledger dist/deep.laws.refutations.json is unreadable (unexpected EOF): it is refused, never read as absent, because it may hold a
+PASS p1-ledger-schema: a ledger that is JSON but not a ledger is refused: EF191 the refutation ledger dist/deep.laws.refutations.json is unreadable (no source digest): it is refused, never read as absent, because i
+PASS p1-receipt-malformed: refused: EF191 the law receipt dist/codec.laws.go.json is unreadable (unexpected end of JSON input): it is refused, never read as absent, because it may hold a
+PASS p1-both-malformed: refused: EF191 the refutation ledger dist/codec.laws.refutations.json is unreadable (unexpected EOF): it is refused, never read as absent, because it may hold 
+PASS N1-revision: a changed source digest is new inputs: its own go run is tested and its go build is admitted
+PASS p1-fresh-checkout: with dist/ deleted, ef test --target go alone admits the go build (local history is gone); ef test --target both re-derives the disagreement and refuses both builds
 PASS M7-runtime: go [["Runtime.constructionRunsNothing","GoRuntime","go","tested",990390378,"03b4fb56"]]; js [["Runtime.constructionRunsNothing","EffectRuntime","js","tested",990390378,"03b4fb56"]]; sameScenarios=true
 PASS M7-observer: the observation channel is live: running the recipe refutes on both providers (raised AssertionFailed)
 PASS M7-providers: ["RoundTrip<Account>.roundTrip",true,["accountJson:go:607786003:0109b916","accountJsonAgain:go:607786003:0109b916","accountJson:js:607786003:0109b916","accountJsonAgain:js:607786003:0109b916"]]
@@ -109,9 +119,19 @@ PASS m1: EFFRA_LAW_SEED=4294967296 refused before any harness runs
 PASS m2: refused on go and js: EF177 ... entry label has type fn(User)->string, but sortedTrio has type fn(Trio)->bool
 PASS m3-call: refused on go and js: EF178 ... is the law Order.reflexive@User, and a law is not a value
 PASS m3-mint: refused on go and js: EF181 ... a law body states an obligation and is never a construction site
-PASS hygiene-parameter: refused on go and js: EF103 ... local value is not callable
-PASS hygiene-local: refused on go and js: EF103 ... local value is not callable
-PASS hygiene-binder: refused on go and js: EF103 ... local value is not callable
+PASS P1-callable: go and js: refuted at a = 0
+PASS P1-callable-control: go and js: refuted at a = 0
+PASS P1-callable-evidence: the build that mints Same<i64, sameI> is refused on go and js (EF170), and no .d.mts brands it
+PASS P1-parameter: go and js: refuted at sameI = 0
+PASS P1-local: go and js: refuted at a = 0
+PASS P1-binder: go and js: refuted at a = 0, b = Box.Value { sameI: 0 }
+PASS P1-record-label: go and js: refuted at a = 0
+PASS P1-nested: go and js: refuted at a = 0, b = Box.Value { sameI: 0 }
+PASS P1-type-parameter: go and js: refuted at a = 0
+PASS P1-named-argument: go and js: tested
+PASS P1-entry-let: refused on go and js: EF101 ... same is the contract entry Eq.same, which this law's satisfaction binds to sameI
+PASS P1-law-call: refused on go and js: EF178 ... law__Eq__i64__reflexive is the law Eq.reflexive@i64, and a law is not a value
 PASS Q2: refused on go and js: EF175 ... User satisfies Order with laws to run and no case budget
 laws probes: ok
 laws run: ok
+exit=0
