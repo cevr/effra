@@ -181,6 +181,14 @@ overhead or a fixed speedup multiplier.
 
 **Entry epoch** (specified): An identity distinguishing a state entry from prior entries so obsolete work cannot update a later entry.
 
+**Transition decision** (proposed syntax): The value a machine step produces for one admitted event: `go` (re-enter), `stay` (keep the entry, same tag), `ignore`, `reject` (observable, state unchanged) or `done` (terminal output). Its type is the predeclared `decision<S, O>`.
+
+**Region** (proposed): A payload field of one state variant, bound by the machine declaration to a separately declared child machine whose state it holds. Several regions on a variant are orthogonal; one region is a nested (hierarchical) child.
+
+**Region entry** (proposed): The state entry of one active region, nested in its parent's entry with its own epoch, so re-entering one region leaves its siblings' work untouched.
+
+**Machine history** (proposed pattern): A remembered child state kept as ordinary data in an inactive variant and restored by a later `go`; deep history restores the value, shallow history keeps only its top-level variant. Restoring always starts fresh entries.
+
 **Binding contract**: Supplemental behavioral facts attached to a host declaration, including its cancellation, failure, resource, and trust policy.
 
 **Request scope**: A fresh owning scope for one HTTP request, linked to connection and server cancellation. Completed shutdown includes its handler cleanup.
