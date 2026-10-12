@@ -379,8 +379,8 @@ Each row states what has landed on this branch, what is in flight and what is on
 | Actors with explicit mailbox budgets and owned behavior | [Specified](docs/specs/actors.md); not built |
 | Evidence and proofs: values that carry what was checked | [Designed](docs/research/opaque-values-and-evidence.md) |
 | Front-end application code: floating point, loops, numeric buffers and a canvas/WebGL render loop on the JS target | Direction; not built ([#117](https://github.com/cevr/effra/issues/117)) |
-| Swappable effect runtimes: a userland provider admitted by the runtime laws, with pinned Effect as the JS default | [Specified research](docs/research/lawful-runtime-contract.md); the law suite does not run yet ([#124](https://github.com/cevr/effra/issues/124), [#123](https://github.com/cevr/effra/issues/123)) |
-| Laws as a general construct for behaviour types can't state | Direction; design spike open ([#125](https://github.com/cevr/effra/issues/125)) |
+| Swappable effect runtimes: a userland provider admitted by the runtime laws, with pinned Effect as the JS default | [Specified research](docs/research/lawful-runtime-contract.md); neither the RS1 law suite ([#124](https://github.com/cevr/effra/issues/124)) nor the Effect-suite harness ([#123](https://github.com/cevr/effra/issues/123)) runs yet |
+| Laws as a general construct for behavior types can't state | Admitted, not built; shape open ([#125](https://github.com/cevr/effra/issues/125)) |
 
 ### Proofs you can't forget to check
 
