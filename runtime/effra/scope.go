@@ -113,15 +113,53 @@ func (s *Scope) bindCleanupContinuation(continuation *schedulerContinuation) boo
 	return bound
 }
 
-// closeWithScheduler closes the owner. aborted reports that its body ended by
-// interruption; an owner whose context already carries a cancellation request
-// is aborted too. The classification is fixed here, before close requests the
-// cancellation of the children, and a cancellation-aborted owner discards the
-// ordinary typed failures of children nobody observed (defects and cleanup
-// failures stay). A close that is not aborted raises them.
-func (s *Scope) closeWithScheduler(scheduler *TestScheduler, continuation *schedulerContinuation, aborted bool) Cause {
+// closeRequest is the first half of a close: the owner moved from Open to
+// Closing, its abort classification and its children at that moment. started
+// is false when another close already owns the transition.
+type closeRequest struct {
+	started  bool
+	aborted  bool
+	children []ownedFiber
+}
+
+// requestClose moves the owner from Open to Closing, fixes its abort
+// classification and requests the cancellation of the owner and every child.
+// aborted reports that its body ended by interruption; an owner whose context
+// already carries a cancellation request is aborted too, so the context is
+// read before the owner cancels it. Every step is non-blocking, so a managed
+// closer runs it while it still holds the turn: no fiber the close cancels can
+// take the turn and act before its cancellation is visible.
+func (s *Scope) requestClose(aborted bool) closeRequest {
 	s.mu.Lock()
 	if s.state != Open {
+		s.mu.Unlock()
+		return closeRequest{}
+	}
+	s.state = Closing
+	children := append([]ownedFiber{}, s.children...)
+	aborted = aborted || s.ctx.Err() != nil
+	s.mu.Unlock()
+	s.cancel()
+	for _, child := range children {
+		child.requestCancel()
+	}
+	return closeRequest{started: true, aborted: aborted, children: children}
+}
+
+// closeWithScheduler closes the owner: requestClose, then awaitClose.
+func (s *Scope) closeWithScheduler(scheduler *TestScheduler, continuation *schedulerContinuation, aborted bool) Cause {
+	return s.awaitClose(scheduler, continuation, s.requestClose(aborted))
+}
+
+// awaitClose is the second half of a close, and the part that waits: hook
+// completion, late acquisitions, child shutdown and resource release. A
+// cancellation-aborted owner discards the ordinary typed failures of children
+// nobody observed (defects and cleanup failures stay); a close that is not
+// aborted raises them. When another close owns the transition, it waits for
+// that close and returns its outcome.
+func (s *Scope) awaitClose(scheduler *TestScheduler, continuation *schedulerContinuation, request closeRequest) Cause {
+	if !request.started {
+		s.mu.Lock()
 		done := s.done
 		s.mu.Unlock()
 		waiter, _ := s.completed.register(scheduler)
@@ -142,14 +180,7 @@ func (s *Scope) closeWithScheduler(scheduler *TestScheduler, continuation *sched
 		s.mu.Unlock()
 		return out
 	}
-	s.state = Closing
-	children := append([]ownedFiber{}, s.children...)
-	aborted = aborted || s.ctx.Err() != nil
-	s.mu.Unlock()
-	s.cancel()
-	for _, child := range children {
-		child.requestCancel()
-	}
+	children, aborted := request.children, request.aborted
 	outcome := Cause{}
 	<-s.hooksDone
 	// No new Add is possible after Closing. Successful late acquisitions finish release before Done.
@@ -220,6 +251,11 @@ func (s *Scope) closeWithContext(fc *FiberContext, aborted bool) Cause {
 		}
 	}
 	s.mu.Unlock()
+	// Cancel while this fiber still holds the turn, and hand the turn off only
+	// for the waits. A child already woken by a signal, a timer or a join
+	// completion then finds its context cancelled when it takes the turn, and
+	// ends interrupted before any further effect.
+	request := s.requestClose(aborted)
 	resume := fc.suspendSchedulerWithoutContinuation()
 	defer func() {
 		resume()
@@ -227,7 +263,10 @@ func (s *Scope) closeWithContext(fc *FiberContext, aborted bool) Cause {
 			scheduler.completeContinuation(continuation)
 		}
 	}()
-	return s.closeWithScheduler(scheduler, continuation, aborted)
+	if scheduler.hooks != nil && scheduler.hooks.closeHandoff != nil {
+		scheduler.hooks.closeHandoff(s)
+	}
+	return s.awaitClose(scheduler, continuation, request)
 }
 
 func AcquireRelease[A any](name string, acquire func(context.Context) (A, error), release func(A, context.Context) error) Effect[A] {
