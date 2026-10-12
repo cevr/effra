@@ -1,8 +1,20 @@
 # Effect rows as types: catch, provide and timeout as library functions
 
-**Status:** design note for the spike in [#115](https://github.com/cevr/effra/issues/115), phase 1, revision 5, 2026-10-12. It changes no compiler behavior. Every line reference is at `main` `f900240c`, unless stated otherwise; the branch has since merged `main` `dfbdbd58`, which changes none of the cited behaviour. Paths are under `internal/compiler/` unless stated otherwise. Phase 2 implements only what a review of this note accepts.
+**Status:** design note for the spike in [#115](https://github.com/cevr/effra/issues/115), phase 1, revision 6, 2026-10-12. It changes no compiler behavior. Every line reference is at `main` `f900240c`, unless stated otherwise; the branch has since merged `main` `dfbdbd58`, which changes none of the cited behaviour. Paths are under `internal/compiler/` unless stated otherwise. Phase 2 implements only what a review of this note accepts.
 
-Revision 5 applies the rulings of re-plan 1, round 2, after the fourth review:
+Revision 6 applies the rulings of re-plan 1, round 3, after the fifth review:
+
+| Item | What this revision does |
+| --- | --- |
+| M1 | **The handler payload is fail-safe too.** A member is left out of a handler's payload only when its tag is provably a different single plain value; every other member is included. The payload is the fifth review's verified repair (`__ef_may_equal`). It closes A7, a branded enum member that catch removed while recover's payload left it out, and A10, a template tag whose hole is branded. Two precision pins flip to included, M03 and F09. Generated Effra tags are plain literals, so their payloads stay exact (§2.8). §2.8.1 adds a member-tag form table, and a generated self-attack over 1065 forms finds no form left out whose run-time tag can be the label. Probe C2 r6 has 102 directives (§3). |
+| m1 | H2d is named as TypeScript's rest-arity unsoundness, separately from value lies (§2.8.1, §3). |
+| m2 | The Gleam row of §4.1 is corrected. Gleam hides opaque constructors, but its declared classes stay structural, so a TypeScript user can build a value without a cast. |
+| o1 | Boundary 3 adds control-flow narrowing across a mutating call (TypeScript #9998) (§2.8.1). |
+| o2 | The probe's unit tagger takes the highest unit among the functions a statement uses, as its comment says (§3). |
+| Prior art | §4 and §4.1 cite Effect 4.0.1's `catchTag` as having the same payload hole (A12), not as having closed it. §4.1 adds how compile-to-host languages keep a tag's run-time value and its payload type from drifting apart. |
+| Cost | About 0.1 day more inside unit 7; the total stays at about 18 to 21 (§8). |
+
+Revision 5 applied the rulings of re-plan 1, round 2, after the fourth review:
 
 | Item | What this revision does |
 | --- | --- |
@@ -79,7 +91,7 @@ So a library function whose behaviour comes from general type machinery is ordin
     - a row difference in result positions (F3b), for removal without presence;
     - label parameters (F2);
     - explicit type arguments (F1).
-  - The `.d.mts` projection is valid strict TypeScript with `Exclude` and no `any`, backed by a runtime module that a strict consumer imports and runs. It is fail-safe: removal and payload narrowing happen only when the literal-only check holds, and refusal is a diagnostic. Probes C and C2 back it; the guard case table, §2.8.1, has 99 directives in C2 r5, and every review-4 route is refused or fail-safe.
+  - The `.d.mts` projection is valid strict TypeScript with `Exclude` and no `any`, backed by a runtime module that a strict consumer imports and runs. It is fail-safe: removal and payload narrowing happen only when the literal-only check holds, and refusal is a diagnostic. Probes C and C2 back it; the guard case table, §2.8.1, has 102 directives in C2 r6. Every review-4 route is refused or fail-safe, and a handler's payload includes every member whose tag may equal the label at run time.
 - **Evidence through a function edge is the obstacle, and for recipe parameters a general contract removes it.**
   - Today an ordinary function edge treats a recipe parameter as opaque (`semantic.go:4057-4060`), so wrapping `.catch` in a user function loses ownership, failure and observation evidence (probe B).
   - The recipe-parameter contract (§2.6) records, for every function, what its body does with each recipe parameter. It reuses the relation atoms that callable parameters already use. A caller substitutes the actual recipe.
@@ -514,7 +526,7 @@ The risk named in the spec ("expected row … found row" noise) does not arise: 
 
 ### 2.8 TypeScript projection
 
-**The principle: the projection is fail-safe, not refuse-only.** A declared type removes a label, or narrows a handler's payload, only when the guard's own check holds for the tag or brand type. When the check fails, nothing is removed, and the handler sees the whole row.
+**The principle: the projection is fail-safe, not refuse-only.** A declared type removes a label, or narrows a handler's payload, only when the guard's own check holds for the tag or brand type. When the check fails, nothing is removed, and the handler sees the whole row. When it holds, the payload still leaves out a member only when that member's tag is provably a different single plain value.
 
 The refusals are diagnostics. Soundness never depends on TypeScript refusing a call, because TypeScript cannot be made to guarantee a refusal. The fourth review got four refused forms past the r4 guard, each with no cast and no `any`, and each type-checked to a row with labels missing:
 - method-signature bivariance;
@@ -522,11 +534,11 @@ The refusals are diagnostics. Soundness never depends on TypeScript refusing a c
 - a `never[]` rest;
 - never-typed filler arguments.
 
-Under this revision each of them either is refused or keeps the whole row, and the runtime outcome matches the row (probe C2 r5, §3).
+Under this revision each of them either is refused or keeps the whole row, and the runtime outcome matches the row (probe C2 r6, §3).
 
-**The claim, narrowed:** no declared type removes a label unless the guard's check holds for the tag type, or for the brand type of a service. A value that lies about its own type is outside this claim, because no declared type can see it. §2.8.1 lists the three such boundaries.
+**The claim, narrowed:** no declared type removes a label unless the guard's check holds for the tag type, or for the brand type of a service, and no handler payload leaves out a member unless its tag is provably a different single plain value. A value that lies about its own type is outside this claim, because no declared type can see it. §2.8.1 lists the three such boundaries.
 
-The intended `.d.mts` for `effra/effect`, revision 5. It is the fourth review's verified repair (`review-4/fix/effect.d.mts`), with comments. Probe C2 r5 checks it with strict `tsc` 6.0.3 against `effect` 4.0.1, together with the runtime module that implements it (§3):
+The intended `.d.mts` for `effra/effect`, revision 6. It is the fourth review's verified repair (`review-4/fix/effect.d.mts`), with the payload replaced by the fifth review's verified repair (`review-5/fix2`), and with comments. Probe C2 r6 checks it with strict `tsc` 6.0.3 against `effect` 4.0.1, together with the runtime module that implements it (§3):
 
 ```ts
 import type { Context, Effect } from 'effect';
@@ -549,10 +561,14 @@ type __ef_single<K> = true extends __ef_label_ok<K> ? unknown : { readonly __ef_
 type __ef_label_guard<K> = true extends __ef_label_ok<K> ? [] : [never];
 type __ef_single_service<I> = true extends __ef_service_ok<I> ? unknown : { readonly __ef_single_service_required: I };
 type __ef_service_guard<I> = true extends __ef_service_ok<I> ? [] : [never];
-// The runtime compares tag values, so removal and payload use the tag's value type `${K}`.
-// The payload is every member whose tag may equal that value at run time: its tag overlaps
-// V directly (a branded tag) or through its value type (an enum member).
-type __ef_payload<F extends __ef_tag, V extends string> = F extends unknown ? ([F["_tag"] & V] extends [never] ? ([`${F["_tag"]}` & V] extends [never] ? never : F) : F) : never;
+// The runtime compares tag values, so removal and payload use the tag's value type V = `${K}`.
+// The payload is fail-safe too: a member is left out only when its tag is provably a different
+// single value. Per tag constituent T: assignable to V, in (so removal implies payload); not a
+// single literal key (string, a template or mapping with a hole, anything branded, a template with
+// a branded hole), in; a single literal or enum member, in exactly when its value `${T}` is V.
+// never is left out (uninhabited); the unchecked type distributes to both branches, so it is in.
+type __ef_may_equal<T, V extends string> = T extends unknown ? ([T] extends [V] ? true : {} extends Record<T & string, 1> ? true : [`${T & string}`] extends [V] ? true : false) : never;
+type __ef_payload<F extends __ef_tag, V extends string> = F extends unknown ? (true extends __ef_may_equal<F["_tag"], V> ? F : never) : never;
 // Soundness: what a label removes and what the handler receives, gated on the same check.
 // Check fails: nothing is removed (never), and the handler receives the whole row F.
 type __ef_removed<K> = true extends __ef_label_ok<K> ? { readonly _tag: `${K & string}` } : never;
@@ -608,7 +624,14 @@ export const provide = (work, service, provider) => Effect.provideService(work, 
     - Round 4's `Exclude<R, I>` removed every requirement there.
   - **Fail-safe removal and payload.** The runtime compares tag values. So when the check holds:
     - removal is ``Exclude<F, { readonly _tag: `${K}` }>``;
-    - the handler's payload is ``__ef_payload<F, `${K}`>``: every member whose tag may have that value at run time, through a direct overlap (a branded tag) or through its value type (an enum member).
+    - the handler's payload is ``__ef_payload<F, `${K}`>``. It is fail-safe in the same way: a member is left out only when its tag is provably a different single plain value. With `V` = ``${K}``, `__ef_may_equal` decides each constituent `T` of a member's tag:
+      - `T` assignable to `V` is included, so every member that removal takes is also handed to the handler;
+      - `T` that is not a single literal key is included. That covers `string`, a template or mapping with a hole, anything branded, and a template whose hole is branded. The test is the guard's own `{} extends Record<…>`;
+      - a single literal or enum member is included exactly when its value type ``${T}`` is `V`;
+      - `never` is left out, which is sound because no value has it. The unchecked type distributes to both branches, so its member is included.
+
+      Removal being a subset of the payload is not enough. A template whose hole is branded is kept by removal, which is sound, and the runtime still hands it to the handler (A10, §2.8.1).
+    - **The precision guarantee.** Effra-generated errors always have plain literal tags, and for them the payload is exact: the members whose tag is `V`. Only a hand-written tag that is not a single plain literal costs precision, by being in payloads it cannot match (§2.8.1).
 
     When the check fails, removal is `Exclude<F, never>`, which is `F`, and the payload is `F`. A route that gets a refused form past TypeScript therefore only loses precision.
 
@@ -616,7 +639,7 @@ export const provide = (work, service, provider) => Effect.provideService(work, 
   - The intersection on the witness parameter gives the argument-site message that names the requirement. It also refuses assigning the function to a function type whose tag parameter is a union.
   - The trailing rest tuple names `tag_must_be_one_literal_label` or `service_must_have_one_literal_brand` for an argument of the unchecked type, which absorbs any intersection.
   - A valid call supplies no extra argument, and the runtime functions take exactly their declared parameters, so the rest tuple is invisible to correct callers.
-  - Probe C2 r5's `failsafe-only` variant removes both mechanisms. Every false claim is still refused, by the result type, and only the diagnostics are lost (§3).
+  - Probe C2's `failsafe-only` variant (r5, and r6 with the r6 payload) removes both mechanisms. Every false claim is still refused, by the result type, and only the diagnostics are lost (§3).
 
   **Presence** is the same `__ef_present` guard the projection already uses for a fixed label beside a row variable (below), so a missing label reads `"Busy" & { readonly __ef_absent_label: "Busy" }`. Bypassing presence is harmless: removing an absent label removes nothing.
 
@@ -644,11 +667,11 @@ export const provide = (work, service, provider) => Effect.provideService(work, 
 The guard failed in rounds 2, 3 and 4. Each time it failed on a form, or on a route around refusal, that nobody had listed. Since revision 5, the table's verdicts describe diagnostics. Soundness is the fail-safe rule of §2.8, and the table records it in three places:
 - **"Refuse"** means `tsc` reports a diagnostic. Where the reason is the check (`__ef_label_ok` or `__ef_service_ok`), the check fails. So if a route gets the form past TypeScript, nothing is removed and the handler sees the whole row.
 - **"Refuse (presence)"** means the check holds but the label is absent from the row. Bypassing it removes nothing, because nothing in the row has that label.
-- **The bypass table** lists the routes that get refused forms past TypeScript, with their outcome under revision 5.
+- **The bypass table** lists the routes that get refused forms past TypeScript, with their outcome under revision 5, which revision 6 leaves unchanged.
 
 This table lists every TypeScript type form that can occupy a tag position (`K`) or a brand position: the identifier `I` and its brand `I["_effraService"]`. It also lists the forms of a row member's own tag. That is not a guard position, but removal and payload must stay sound for every one of them.
 
-Every row is a line in probe C2 r5 (`probes-r5/ts/`). The last column holds the case label in `cases.mts`, `indirect.mts`, `forms.mts`, `bypass.mts`, `augment.mts` or `boundary.mts`, or a file and negative number.
+Every row is a line in probe C2 r6 (`probes-r6/ts/`). The last column holds the case label in `cases.mts`, `indirect.mts`, `forms.mts`, `bypass.mts`, `augment.mts`, `boundary.mts`, `payload.mts` or `payload-run.mts`, or a file and negative number.
 - A refusal is a `@ts-expect-error` line. When opened, every directive fires for its stated reason (§3).
 - An admission is a plain line, pinned with an exact-type assertion wherever it removes something.
 - "New" marks a form that an earlier guard mishandled; the round is named.
@@ -706,21 +729,59 @@ Every row is a line in probe C2 r5 (`probes-r5/ts/`). The last column holds the 
 
 **A row member's own tag** (not a guard position):
 - When the check holds, removal removes the members whose tag type lies within `K`'s one value.
-- The payload holds the members whose tag may have that value.
+- The payload holds every member whose tag is not provably a different single plain value (§2.8). Every removed member is in it, apart from a `never` tag, which no value has.
 - When the check fails, neither applies: nothing is removed and the payload is the whole row.
 
 | Member tag | Removed by `"NotFound"` | In the payload | Probe |
 | --- | --- | --- | --- |
 | Literal `"NotFound"` / `"Denied"` | yes / no | yes / no | T01 |
 | `string` | no | yes. **New (r4):** round 3 omitted it, and `holes.mts` printed a `TypeError` from a handler typed for `NotFoundError`. | M02, M02b; holes |
-| Template `` `Not${string}` ``, `Lowercase<string>`, `` `${number}` ``, `` `${boolean}` `` | no | when the value may match | M03; F09 |
-| Union `"NotFound" \| "Other"` | no | yes. **New (r4).** | M04, M04b |
-| Enum `Tag.NotFound`, or `` `${Tag.NotFound}` `` | yes (an enum literal is assignable to its value) | yes, through ``${…}`` | M05, M05b; F09. A plain literal on a row whose only match is enum-tagged is refused by presence (conservative), M05c |
-| Branded literal | yes | yes, through the direct overlap; refused by presence when no plain member matches (conservative) | M06, M06b |
+| Template with a hole, or a mapping of `string`: `` `Not${string}` ``, `Lowercase<string>`, `` `${number}` `` | no | yes (conservative), for every label. **Changed (r6):** r5 included it only when its pattern could match, which a branded hole defeated (A10). Two precision pins flip: M03's `recover(tmpl, "Denied")` and F09's `recover(lowerRow, "Denied")` now also hand over the template member, which cannot be `"Denied"` but is not a single plain literal. | M03; F09 |
+| Union `"NotFound" \| "Other"`; `` `${boolean}` `` | no | per constituent: yes for the first (one constituent is the label); no for `` `${boolean}` `` (`"true" \| "false"`, two other plain literals). **New (r4)** for the union. | M04, M04b; P39 |
+| Enum `Tag.NotFound`, or `` `${Tag.NotFound}` `` | yes (an enum literal is assignable to its value) | yes: it is assignable to the label | M05, M05b; F09. A plain literal on a row whose only match is enum-tagged is refused by presence (conservative), M05c |
+| Branded literal | yes | yes: a branded tag is not a single literal key, so it is included whatever its value. Refused by presence when no plain member matches (conservative). | M06, M06b |
+| Branded enum member `Tag.NotFound & B` | yes | yes. **New (r6):** r5's overlap test left it out while catch removed it, and a handler typed for the plain member died with `TypeError` (A7). | P06; payload-run A7 |
+| Template with a branded hole: `` `Not${"Found" & B}` ``, `` `${Tag.NotFound & B}` `` | no (sound: the type is not within the label) | yes. **New (r6):** r5 left both out, and the runtime handed them to a handler typed for the plain member, which died (A10). | P12, P14; payload-run A10a, A10b |
 | Branded string | no | yes | M07 |
 | `never` | yes | no | uninhabited, so either is sound |
 | The unchecked type | yes, by every tag | yes | M08: boundary 1, below |
 | Requirement brand `string` or a union (provide) | no | – | M09 |
+
+**The payload form table** (revision 6). The fifth review found two kinds of tag that r5's payload left out while the runtime handed them to the handler. So the payload is attacked here as the guard was: every TypeScript form that a hand-written member tag can take, with the label `"NotFound"`. Every row is pinned in `payload.mts` (P01-P39, type-check only). The reproduced holes run in `payload-run.mts` (A7, A10a, A10b), where a handler typed for the plain member alone is a refused claim and a handler written for the payload runs. "Precision cost" marks a member that cannot be `"NotFound"` at run time and is still included, because TypeScript cannot prove it distinct.
+
+| Form | Example | In the payload for `"NotFound"` | Why | Probe |
+| --- | --- | --- | --- | --- |
+| Plain literal, the label | `"NotFound"` | in | assignable to the label | NF; Gen1 |
+| Plain literal, another value | `"Denied"`, `""` | out | a different single plain value | P01, P38; Gen2 (exact) |
+| Branded literal | `"NotFound" & B` | in | not a single literal key | P02 |
+| Branded literal, another value | `"Denied" & B` | in (precision cost) | not a single literal key: the brand hides the value from the literal test | P03 |
+| Literal with `{}` | `"NotFound" & {}` | in | reduces to the literal | P30 (A11 X7) |
+| Enum member | `Tag.NotFound` | in | assignable to the label | P04 |
+| Another enum member | `Tag.Denied` | out | its value type ``${T}`` is a different single value | P05 |
+| Branded enum member | `Tag.NotFound & B` | in. **New (r6)** (A7) | not a single literal key | P06; payload-run A7 |
+| Branded enum member, another value | `Tag.Denied & B` | in (precision cost) | not a single literal key | P07 |
+| Whole enum; branded whole enum | `Tag`; `Tag & B` | in; in. **New (r6)** for the branded one (A8 M2) | it distributes: `Tag.NotFound` is assignable; the branded members are not literal keys | P08, P09 |
+| Template, plain hole | `` `Not${"Found"}` ``; `` `Not${"Here"}` `` | in; out | it resolves to `"NotFound"`; to the plain `"NotHere"` | P10; P11 |
+| Template, enum hole | `` `Not${Part.Found}` `` | in | it resolves to `"NotFound"` | P13 (A11 X3) |
+| Template, branded hole | `` `Not${"Found" & B}` ``; `` `${Tag.NotFound & B}` `` | in; in. **New (r6)** (A10) | not a single literal key | P12, P14; payload-run A10a, A10b |
+| Template with `{}`, branded or nested holes | `` `${Tag.NotFound & {}}` ``, `` `Not${"Found" & {}}` ``, `` `${Part.Not}${Part.Found & O}` ``, `` `${`Not${"Found" & O}`}` ``, `` `${"Not" & O}Found` `` | in. **New (r6):** r5 left 4 of the review's 8 A11 forms out | each either resolves to `"NotFound"` or is not a single literal key | P31-P35 (A11 X1, X2, X4, X6, X8); `originals/a11` |
+| Template, `string` hole | `` `Not${string}` ``; `` `Den${string}` `` | in; in (precision cost) | a pattern, not a literal key | P15; P16 |
+| Number and boolean patterns | `` `${number}` ``; `` `${boolean}` `` | in (precision cost); out | a pattern; the union `"true" \| "false"` of plain literals, neither the label | P27; P39 |
+| Intrinsic on a literal | `Capitalize<"notFound">`; `Uppercase<"notfound">` | in; out | it resolves to `"NotFound"`; to the plain `"NOTFOUND"` | P17; P18 |
+| Intrinsic on `string` | `Capitalize<string>`; `Lowercase<string>` | in; in (precision cost) | a pattern | P20; P19 |
+| Intrinsic on a branded literal | `Capitalize<"notFound" & O>` | in | not a single literal key | P21 (A11 X5) |
+| Branded template or mapping | `` `Not${string}` & B ``; `Lowercase<string> & B` | in; in (precision cost) | not a single literal key | P36; P37 (A8 M4, M5) |
+| Union | `"NotFound" \| "Other"`; `"Denied" \| "Other"`; `("NotFound" \| "Other") & B` | in; out; in | per constituent: one is the label; each is another plain value; branded constituents | P22; P23; P24 (A8 M3) |
+| `string`, `string & {}` | `string` | in | not a literal key | P25, P26 |
+| `never` | `never` | out | no value has it. Removal takes it by assignability: the one member removed and not in the payload, which is sound | P28 |
+| The unchecked type | `ReturnType<typeof JSON.parse>` | in | it distributes to both branches | P29 |
+
+- **Self-attack.** `tools/gen-payload.cjs` composes 15 atoms (plain literals, enum members, the whole enum, `string` and `` `${number}` ``) with the operators a hand-written tag can use: a brand, `& {}`, three template wrappings, a union and the four intrinsic mappings, to depth 2. That gives 1065 forms. For each, it models the possible run-time strings, and it checks with the TypeScript API that every form whose value may be `"NotFound"` is in the payload.
+  - Under r6, 236 forms may equal the label, and all 236 are in the payload. Of the 829 that cannot, 619 are left out and 210 are kept in (the precision cost).
+  - Every form left out is a finite set of plain or enum values that contains no `"NotFound"` and carries no brand.
+  - Under the r5 payload, 79 of the 236 are left out, so the attack reports r5 unsound.
+- **Removal is a subset of the payload**, apart from a `never` tag (P28). `payload.mts` pins both facts.
+- **The precision guarantee.** Generated Effra tags are plain literals, and the payload is exact for them: `recover(…, "Denied")` on a generated row hands over exactly the Denied member (Gen1-Gen3). The cost falls only on hand-written tags that TypeScript cannot prove distinct.
 
 **Indirect use, and the routes that get past refusal** (bypass, H, rows are revision 5; the r4 guard admitted each H claim):
 
@@ -735,24 +796,27 @@ Every row is a line in probe C2 r5 (`probes-r5/ts/`). The last column holds the 
 | `satisfies` a function type whose tag is a union | Refuse; the satisfied object keeps the generic signature and refuses a union at the call | – | F06, F06b |
 | A function type whose tag parameter the consumer typed as the unchecked type | The claim is refused: the check fails, so nothing is removed. A slot whose result is the whole row is admitted. **New (r5):** r4 admitted the claim as a boundary. | – | I14, I14b |
 | **Method-signature slot** (bivariant parameters), catch or recover, with a union tag | The claim is refused; an honest slot is admitted and removes nothing (fail-safe). **New (r5):** r4 removed every failure (review `h1b-method.mts`). | `FAILED Fail(Denied)`, which the type keeps | H1a, H1b |
-| **A `never[]` rest**, catch or provide | Fail-safe: the claim is refused and the honest type removes nothing. **New (r5):** r4's provide removed every requirement (review `h2-never.mts` d). | catch: `FAILED Fail(Denied)`. provide: no argument reaches it, so it dies with `TypeError` (a defect, boundary 3) | H2b, H2d |
-| **A never-typed filler** for the rest slot: a `JSON.parse` tag or service, or an explicit union `K` or two-service `I` with `none[0]` | Fail-safe: the claim is refused and the call removes nothing. **New (r5):** r4 removed every failure or requirement (review `h2b-never.mts`, `h5-explicit-never.mts`). | catch and recover: `FAILED Fail(Denied)`. provide with a `JSON.parse` service: runs once both services are provided. provide with `none[0]` as the service: dies with `TypeError` (boundary 3) | H2a, H2c, H5a-c |
+| **A `never[]` rest**, catch or provide | Fail-safe: the claim is refused and the honest type removes nothing. **New (r5):** r4's provide removed every requirement (review `h2-never.mts` d). | catch: `FAILED Fail(Denied)`. provide: no argument reaches it, so it dies with `TypeError`. That is a defect from TypeScript's rest-arity unsoundness (boundary 3), not a removed label: the type keeps both requirements. | H2b, H2d |
+| **A never-typed filler** for the rest slot: a `JSON.parse` tag or service, or an explicit union `K` or two-service `I` with `none[0]` | Fail-safe: the claim is refused and the call removes nothing. **New (r5):** r4 removed every failure or requirement (review `h2b-never.mts`, `h5-explicit-never.mts`). | catch and recover: `FAILED Fail(Denied)`. provide with a `JSON.parse` service: runs once both services are provided. provide with `none[0]` as the service: dies with `TypeError` (a value lie, boundary 3) | H2a, H2c, H5a-c |
 | **Object augmentation** | See the brand table: removes only the augmented brand | runs once Clock is provided | H3 |
 
 **What the check accepts:** exactly the single string-literal types. That includes a single enum member, and a template or mapping that resolves to one literal. Only those types remove anything or narrow a payload.
 
-**The claim.** No declared type removes a label unless the check holds for the declared tag type, or for the brand type of a service. Refusal is a diagnostic. Probe C2 r5 shows every review-4 route refused or fail-safe, with its runtime outcome (§3).
+**The claim.** No declared type removes a label unless the check holds for the declared tag type, or for the brand type of a service. No handler payload leaves out a member unless its tag is provably a different single plain value. Refusal is a diagnostic. Probe C2 r6 shows every review-4 route refused or fail-safe, with its runtime outcome, and every review-5 payload form included (§3).
 
 **The host trust envelope: three boundaries.** In each, a value's own type is false, so no declaration can see it. Effect's `catchTag` and `provideService` share all three (`boundary.mts`).
 1. **The consumer's own unchecked type on a row member.** A member typed `{ _tag: any }` is removed by every tag (M08, E1). The false claim is the consumer's annotation. Guarding it would need a helper in every generated removal, including in user functions.
 2. **A hand-made service whose identifier type and key disagree.** For example, `Context.Service<ClockRequirement, P>("effra/probe/Console")`: providing it removes Clock while the runtime installs Console's key, and the run prints `Service not found: effra/probe/Clock` (review `h4-key.mts`, E2). Generated services derive brand and key from one service name (`internal/compiler/emit.go:254`, `:259-260`), so only services the consumer builds by hand are affected.
-3. **Value-type lies.** Each of these puts a value of another type into a typed slot:
-   - a literal-typed slot holding another value, such as an empty `"Denied"[]` element or a `never[]` element (review `h6-value-lie.mts`, E3a, E3b). The check holds for the declared type `"Denied"`, the type removes Denied, and the runtime keeps it;
-   - mutable aliasing of a readonly `_tag`;
-   - calls through `Function`, `Reflect.apply` or `.apply.call`;
-   - a `never[]` rest that supplies no arguments (H2d).
+3. **TypeScript's own unsound rules: value-type lies and rest arity.** TypeScript accepts these for every function, with no Effra declaration involved.
+   - **Value-type lies.** Each of these puts a value of another type into a typed slot:
+     - a literal-typed slot holding another value, such as an empty `"Denied"[]` element or a `never[]` element (review `h6-value-lie.mts`, E3a, E3b). The check holds for the declared type `"Denied"`, the type removes Denied, and the runtime keeps it;
+     - control-flow narrowing across a mutating call. After `let t: "NotFound" | "Denied" = "NotFound"; flip()`, where `flip` assigns `"Denied"`, TypeScript keeps `t` narrowed to `"NotFound"` (TypeScript #9998). So `catch_(work, t, …)` is typed as removing NotFound, and at run time it fails with NotFound (review `a3-narrowing.mts`). **New (r6).**
+     - mutable aliasing of a readonly `_tag`;
+     - calls through `Function`, `Reflect.apply` or `.apply.call`;
+     - a never-typed filler as the service value, `none[0]` (H5c).
+   - **Rest-arity unsoundness.** A function assigned to a type whose remaining parameters are a `never[]` rest can be called with no arguments. `const viaRest: (...rest: never[]) => number = (s: string) => s.length; viaRest()` type-checks and throws (review `a9-rest-baseline.mts`). H2d is this rule applied to provide: its type keeps both requirements, which is honest, and the `TypeError` is a defect, not a removed label. **Changed (r6):** r5 listed H2d as a value lie.
 
-   This is TypeScript's own value-type boundary. It is the same for every function with a literal-typed parameter.
+   These are TypeScript's own boundaries, the same for every function with a literal-typed parameter or a required parameter.
 
 Everything else in the declarations contains no `any`. The guard positions (`K`, `I` and the brand) fail the check on the unchecked type, including one that arrives with no cast from `JSON.parse`.
 
@@ -991,18 +1055,18 @@ Strict `tsc` 6.0.3 with `effect` 4.0.1 accepted the round-1 declarations and a c
 
 ### Probe C2: the declarations with the runtime module
 
-**The one documented command.** Every C2 run, in rounds 3 to 5 and in unit 5's fixture, uses these flags. Without `--lib`, `effect` 4.0.1's declarations do not type-check.
+**The one documented command.** Every C2 run, in rounds 3 to 6 and in unit 5's fixture, uses these flags. Without `--lib`, `effect` 4.0.1's declarations do not type-check.
 
 ```sh
-cd probes-r5/ts    # effect 4.0.1 resolves through ts/node_modules
+cd probes-r6/ts    # effect 4.0.1 resolves through ts/node_modules
 node $TSC --noEmit --strict --module NodeNext --moduleResolution NodeNext --target ES2022 \
   --lib ES2022,DOM,ESNext.Disposable consumer.mts consumer-neg.mts extra4.mts cases.mts indirect.mts \
-  forms.mts bypass.mts boundary.mts && node consumer.mts
+  forms.mts bypass.mts boundary.mts payload.mts payload-run.mts && node consumer.mts
 ```
 
-- `$TSC` is TypeScript 6.0.3's `lib/tsc.js`, and node 24 runs `.mts` directly.
+- `$TSC` is TypeScript 6.0.3's `lib/tsc.js`, and node 24 runs `.mts` directly. `payload-run.mts` declares an enum, so node runs it with `--experimental-transform-types`.
 - `augment.mts` augments the global `Object`, so it runs as its own program with the same flags.
-- `probes-r5/run.sh` runs this command and everything below, and writes `runs/probe-c2-r5.txt`. It exits 0 only when every expectation holds.
+- `probes-r6/run.sh` runs this command and everything below, and writes `runs/probe-c2-r6.txt`. It exits 0 only when every expectation holds. Rounds 3 to 5 ran the same command without the two payload files, in `probes-r5/` and before.
 
 #### C2 r3 (round 3)
 
@@ -1081,7 +1145,7 @@ node $TSC --noEmit --strict --module NodeNext --moduleResolution NodeNext --targ
   | H2a: `JSON.parse` tag plus never filler | refused | keeps `NotFound \| Denied` | `FAILED Fail(Denied)` |
   | H2b: `never[]` rest, catch | refused | keeps `NotFound \| Denied` | `FAILED Fail(Denied)` |
   | H2c: `JSON.parse` service plus never filler | refused | keeps `Console \| Clock` | `done` once both are provided |
-  | H2d: `never[]` rest, provide | refused | keeps `Console \| Clock` | dies with `TypeError … reading 'key'`: no argument reached provide (E3, a defect) |
+  | H2d: `never[]` rest, provide | refused | keeps `Console \| Clock` | dies with `TypeError … reading 'key'`: no argument reached provide (a defect; r6 names it TypeScript's rest-arity unsoundness, boundary 3) |
   | H5a, H5b: explicit union `K` plus fillers | refused | keeps `NotFound \| Denied` | `FAILED Fail(Denied)` |
   | H5c: explicit two-service `I` plus fillers | refused | keeps `Console \| Clock` | dies with `TypeError`: the service value is `none[0]` (E3) |
   | H3: `Object` augmentation | refused | keeps `Clock` (Console removed) | `done` once Clock is provided |
@@ -1110,6 +1174,46 @@ node $TSC --noEmit --strict --module NodeNext --moduleResolution NodeNext --targ
 - that every Effra-generated declaration with a label parameter uses these aliases: catch in unit 5, provide in unit 6, recover in unit 7;
 - that each unit's fixture is its own share of these directives.
 
+#### C2 r6 (re-plan 1, round 3)
+
+**Inputs** (`probes-r6/`, a copy of `probes-r5/` with these changes):
+- `ts/effect.d.mts` and `variants/failsafe-only/effect.d.mts` carry the r6 payload, `__ef_may_equal`. This is the fifth review's `fix2`, and `ts/effect.d.mts` is the §2.8 block.
+- `ts/payload.mts` is §2.8.1's payload form table, P01-P39. Each row is pinned in, out, or in at a precision cost. The file also pins removal as a subset of the payload, and the exact payload of a generated row. It is type-check only.
+- `ts/payload-run.mts` runs A7 and both A10 holes, with tags built by `Brand.nominal` and a plain generic template function, and no casts. Each handler typed for the plain member alone is a refused claim, 3 directives in all. A handler written for the payload runs.
+- The two precision pins that flip are changed in place, each with a comment that says why: M03 (`cases.mts:165`) and F09 (`forms.mts:137`).
+- `tools/gen-payload.cjs` is the generated payload self-attack (§2.8.1).
+- `tools/open-negatives.cjs`, the unit tagger, now takes the highest unit among the functions a statement uses, as its comment says (o2). No statement uses two of them, so the counts are unchanged.
+- `originals/`, renamed from `r5-original/`, adds the review-5 attack files unchanged: a7, a10, a11, a12, a3 and a9.
+- `r5-decl/` holds the r5 declarations, with a7, a10, a11 and the self-attack, to show the holes.
+
+**Results** (`probes-r6/runs/probe-c2-r6.txt`; `run.sh` exit 0, `fail=0`):
+- **Type checks.** The fixture, now with `payload.mts` and `payload-run.mts`, type-checks (exit 0). `augment.mts` type-checks as its own program (exit 0).
+- **102 directives:** 11 + 4 + 39 + 13 + 22 + 9 + 3 + 1. These are r5's 99 and the 3 payload claims.
+  - Opened one by one, all 102 have a diagnostic for their stated reason.
+  - The 3 new ones are TS2339, for example `Property 'id' does not exist on type 'NF | Legacy'`: the payload includes the branded member.
+- **The fixture split by owning unit:** catch (unit 5) 60; provide (unit 6) 29, that is 28 plus the augment program's 1; recover (unit 7) 13.
+- **`payload-run.mts`** prints:
+  - `A7 catch (type: no failures): fallback`;
+  - `A7 recover, payload NF | Legacy: legacy 7`;
+  - `A10 branded-literal hole, payload NF | Legacy1: legacy 8`;
+  - `A10 branded-enum hole, payload NF | Legacy2: legacy 9`.
+- **The payload self-attack.** Under r6: 1065 forms, no diagnostics; all 236 forms that may equal the label are in the payload; of the 829 that cannot, 619 are left out and 210 kept in. Under the r5 declarations it reports 79 diagnostics, only 157 of the 236 in the payload, `UNSOUND`, and exit 1.
+- **The review-5 attack files, unchanged:**
+
+  | File | Under r6 | Under r5 (`r5-decl/`) |
+  | --- | --- | --- |
+  | a7: branded enum member | refused, TS2339 at 21 | type-checks; `FAILED Cause([Die(TypeError: … reading 'length')])` |
+  | a10: template with a branded hole, both forms | refused, TS2339 at 22 and 23 | type-checks; `FAILED Cause([Die(TypeError: … reading 'toUpperCase')])` |
+  | a11: the 8 hole forms | every pin holds (exit 0) | 4 pins fail (TS2322 at 22) |
+  | a12: Effect 4.0.1's own `catchTag` on A10's row | type-checks (Effect's baseline, prior art for the hole); `FAILED Cause([Die(TypeError: … reading 'toUpperCase')])` | – (no Effra declaration) |
+  | a3: narrowing across a mutating call | type-checks (boundary 3); `FAILED Cause([Fail({"_tag":"NotFound","id":"x"})])` with NotFound removed from the type | – |
+  | a9: rest arity | type-checks (boundary 3); `threw: TypeError: … reading 'length'` | – (no Effra declaration) |
+
+- **Every r5 result holds unchanged.** That covers the review-4 attack files under r6 and under the r4 guard, the trust envelope, `consumer.mts`, and the `failsafe-only` variant with the r6 payload.
+- **`any`, counted as AST keywords:** 0 in `effect.d.mts`, `effect.mjs`, `payload.mts` and `payload-run.mts`. The payload table writes the unchecked type as `ReturnType<typeof JSON.parse>`, so it needs no `any` keyword.
+
+**What the probe does not show** is as in r5. Recover's share of the fixture is now 13 directives, which unit 7 takes with the payload table and the self-attack (§7).
+
 ## 4. Prior art
 
 Pinned sources were read through okra repo caches or shallow clones. The question for each language is how it handles the three problems this note meets: removal in a library signature, laziness of a library argument, and facts that cross a function edge. For the compile-to-host languages (Gleam, ReScript, Elixir, MoonBit, Koka, PureScript, Scala.js, Effect-TS on TypeScript), the table also names the lowering path.
@@ -1121,7 +1225,7 @@ Pinned sources were read through okra repo caches or shallow clones. The questio
 | **Elixir** (BEAM) | `try` is a special form (`lib/elixir/lib/kernel/special_forms.ex:2343`); set-theoretic types put no raised rows in signatures (`lib/elixir/lib/module/types/expr.ex:520-557`) | `&&`, `\|\|` and `if` are lazy only as **macros**; `\\` defaults are evaluated per call | No edge summaries | Macros expand before lowering | Laziness needs a construct, so by-name is not ordinary (B1); a fixed form for control fits timeout's race (§2.13) |
 | **MoonBit** (Wasm, JS, C) | `raise`, `try`/`catch` as syntax; a catch does not narrow (`next/language/error-handling.md:119-146,222-227`) | Strict | `%` intrinsics behind declared signatures change only the implementation; `with_timeout` is library over async (`moonbitlang/async@e72901a` `src/async.mbt:96-100`) because MoonBit tracks no ownership | Intrinsics lower per backend | D4's reading: an intrinsic swaps the implementation, never the checking or evaluation. Its library timeout shows the timeout residue is Effra's own (race plus ownership checking) |
 | **Koka** (C, JS) | `try` is a library function over handler syntax and rows: `handle/try(hndl, action : () -> <exn\|e> a)` (`koka@9c55695` `lib/std/core/exn.kk:54-56`); duplicates allowed; auto-opening (`src/Type/Operations.hs:83-98`) | The action is an explicit thunk | Evidence passing; the compiler still names `exn` (`src/Common/NamePrim.hs:316`) | Evidence-passing translation to C and JS | Borrowed: the extension pattern (F3). Not borrowed: duplicates or auto-opening, which defeat presence |
-| **Effect-TS** (TS) | `catchTag`: `K extends Tags<E>`, `ExcludeTag` (`effect@66257d29` `Effect.ts:2812-2858`, `Types.ts:165`); `provideService`: `Exclude<R, I>`, no presence (`:6456-6472`) | `orElseSucceed(f: (e) => A2)`, a callback (`Effect.ts:8366` in 4.0.1) | Tags and `Context.Key` witness values | A library over a fiber runtime | The projection target (F2, F3b). Its holes are closed, not copied: a union, widened or template `K`, an unbranded service identifier, and a payload that omits a member whose tag is not a literal. Removal is gated on the literal check, so the routes around refusal that Effect also admits lose precision only (§2.8, §2.8.1) |
+| **Effect-TS** (TS) | `catchTag`: `K extends Tags<E>`, `ExcludeTag` (`effect@66257d29` `Effect.ts:2812-2858`, `Types.ts:165`); `provideService`: `Exclude<R, I>`, no presence (`:6456-6472`) | `orElseSucceed(f: (e) => A2)`, a callback (`Effect.ts:8366` in 4.0.1) | Tags and `Context.Key` witness values | A library over a fiber runtime | The projection target (F2, F3b). Its holes are closed, not copied: a union, widened or template `K`, and an unbranded service identifier. Removal is gated on the literal check, so the routes around refusal that Effect also admits lose precision only. Effect 4.0.1's `catchTag` is also prior art for a payload hole: `ExtractTag` keeps a member only when `K extends T`, so a member whose tag is branded or interpolated is left out of the handler's type while the runtime's `===` hands it over, and the handler dies (`a12-effect-baseline-hole.mts`, A12). Effra's revision 5 payload had the same hole; revision 6 includes every member not provably distinct (§2.8, §2.8.1) |
 | **PureScript** (JS) | `Prim.Row` `Cons`, `Lacks` (`Docs/Prim.hs:510-531`); `Record.delete` needs `Lacks` (`purescript-record@c89cd1a` `src/Record.purs:117-124`); `Run.catch` over higher-kinded rows (`purescript-run@abec7c3` `src/Run/Except.purs:126`) | Strict | Type classes resolved by dictionary passing | Dictionary passing to JS | F3 takes `Cons`; tag witnesses are dictionary passing (F2). `Lacks` is an explicit constraint, never inferred from one pattern: the reason F3b claims no absence (§2.3) |
 | **GHC** (native, via STG and Cmm) | Library `catch` over a primop | Lazy by default | Primops declare demand and strictness signatures (`primops.txt.pp`) that the optimiser trusts and tests pin | STG, Cmm | The closest analogue to a primitive's declared contract (§2.6.5): no body in the source language, a declared contract in the vocabulary the analysis infers |
 | **Scala** (JVM, JS) / **Swift** / **Kotlin** | Library combinators | By-name `=> A` and `@autoclosure` (`??`, `assert`) are general declared features; Kotlin `inline` takes explicit lambdas | Kotlin `inline` is visible in the signature; Kotlin SAM conversion and Scala eta-expansion are call-site coercions | Scala.js and Swift lower a by-name argument to a thunk at every call | By-name is rejected for Effra (ruling B1): it adds an evaluation rule Go readers do not expect, and `recover` already gives explicit laziness. The call-site coercions are the model for F6 (§2.12) |
@@ -1134,7 +1238,7 @@ Pinned sources were read through okra repo caches or shallow clones. The questio
 
 - **Unison's set semantics** for rows;
 - **PureScript's `Cons` extension pattern** for removal, with no absence fact at all (F3 checks presence only, and F3b claims no absence), and dictionary passing for the tag witness;
-- **Effect's `catchTag`/`provideService` shape** as the TypeScript meaning, with removal gated on the literal-only check (fail-safe), and refusal kept as a diagnostic, as Gleam and ReScript project conservatively (§4.1);
+- **Effect's `catchTag`/`provideService` shape** as the TypeScript meaning, with removal gated on the literal-only check (fail-safe), a payload that leaves out only members provably distinct (where Effect's `ExtractTag` has a hole, A12), and refusal kept as a diagnostic, as Gleam and ReScript project conservatively (§4.1);
 - **Rust's discipline for edge facts:** one contract for user and library functions, inferred in bodies and declared at intrinsic boundaries. No compile-to-host language requires every primitive to have a body in the source language (Gleam `@external`, ReScript and Koka `extern`, MoonBit `%` primitives, GHC primops, Rust intrinsics); all trust a declared signature at the primitive boundary and test it, which is the amended Q6;
 - **Gleam's and ReScript's strict library arguments,** with laziness as an explicit function (`recover`).
 
@@ -1146,7 +1250,7 @@ The question here is whether the tag that selects a failure to catch, or a requi
 
 | Language | What a tag is, and what the runtime compares | Bearing on the guard |
 | --- | --- | --- |
-| **Effect 4** (`effect-smol@3a1128c7`) | `Tags<E> = E extends { _tag: string } ? E["_tag"] : never` (`packages/effect/src/Types.ts:120`). `ExcludeTag` is `Exclude<E, { readonly _tag: K }>` and `ExtractTag` keeps `E` when `K extends T` (`:154`, `:187`). `catchTag` takes `const K extends Tags<E> \| NonEmptyReadonlyArray<Tags<E>>` (`Effect.ts:2705`, flattened by `K[number]` at `:2715`, `:2725`). At run time an array is matched by `k.includes(e._tag)` and a single tag by `self["_tag"] === tag` (`internal/effect.ts:2861-2863`, `Predicate.ts:1171`). `provideService` returns `Effect<A, E, Exclude<R, I>>` (`Effect.ts:6221-6236`). | Effect's array form is a set of literals, matched by membership. A single union `K`, or a `string` or template `K` drawn from a member typed `_tag: string`, is matched by equality while `ExcludeTag` removes every member it covers. Effra has no array form (one label), so the guard demands one literal, which is the only case where `Exclude` and `===` agree. |
+| **Effect 4** (`effect-smol@3a1128c7`) | `Tags<E> = E extends { _tag: string } ? E["_tag"] : never` (`packages/effect/src/Types.ts:120`). `ExcludeTag` is `Exclude<E, { readonly _tag: K }>` and `ExtractTag` keeps `E` when `K extends T` (`:154`, `:187`). `catchTag` takes `const K extends Tags<E> \| NonEmptyReadonlyArray<Tags<E>>` (`Effect.ts:2705`, flattened by `K[number]` at `:2715`, `:2725`). At run time an array is matched by `k.includes(e._tag)` and a single tag by `self["_tag"] === tag` (`internal/effect.ts:2861-2863`, `Predicate.ts:1171`). `provideService` returns `Effect<A, E, Exclude<R, I>>` (`Effect.ts:6221-6236`). | Effect's array form is a set of literals, matched by membership. A single union `K`, or a `string` or template `K` drawn from a member typed `_tag: string`, is matched by equality while `ExcludeTag` removes every member it covers. Effra has no array form (one label), so the guard demands one literal, which is the only case where `Exclude` and `===` agree. `ExtractTag` is not the payload's mirror of `ExcludeTag` either: a member whose tag is branded or interpolated, such as `` `Not${"Found" & Brand}` ``, is kept by `ExcludeTag`, left out by `ExtractTag`, and matched by `===` (A12). So Effra's payload does not use `ExtractTag`'s test (§2.8). |
 | **TypeScript** (`microsoft/typescript@a1ef42b9e`, the Go port) | `type Exclude<T, U> = T extends U ? never : T` (`tsc/internal/bundled/libs/lib.es5.d.ts:1618`), so removal is assignability. `isTypeUsableAsPropertyName` holds only for string, number and unique-symbol literals (`tsc/internal/checker/utilities.go:922-923`). `isValidIndexKeyType` accepts `string`, `number`, `symbol`, pattern template literals and non-generic intersections such as `string & {}` (`checker.go:20174-20177`, `27033-27037`). A mapped key that is not a literal becomes an index signature (`checker.go:21338-21350`). | This is why `{} extends Record<K, 1>` is the literal test. A literal key gives a required property; every non-literal string form gives an index signature or nothing. |
 | **ReScript** (`rescript-lang.org@a62233b`) | Polymorphic variant bounds are sets of literal tags: closed `[#Red]`, lower `[> #Red]`, upper `[< #Red \| #Blue]` (`apps/docs/markdown-pages/docs/manual/polymorphic-variant.mdx:330-342`, `361-391`). A payload-free tag compiles to a string, and a payload tag to `{ NAME, VAL }` (`:256-258`). Coercion to `string` is allowed only for closed types (`:397-420`). | No type lets a tag be "any string", so no guard is needed. Effra's checker is in the same position: a label parameter is bound by an explicit nominal type argument. Only the TypeScript surface, where a host user supplies the tag, needs the guard. |
 | **Elixir** (`elixir@7a40579`) | `atom(as)` is a finite union of singleton atoms, and `atom()` is the infinite top (`lib/elixir/lib/module/types/descr.ex:49,98-99`). A literal atom pattern gets `atom([atom])`, while a variable pattern only binds (`pattern.ex:643-644`, `838-842`). `rescue e in …` must expand to literal module atoms, or compilation fails (`elixir_clauses.erl:466-494`, `:603`). At run time, rescue compares `__struct__` with the alias (`elixir_erl_try.erl:119-120`). | It has the same split: only a literal narrows, and the catch form demands literals. The guard is the TypeScript statement of Elixir's `rescue` rule. |
@@ -1160,18 +1264,24 @@ None of these languages lets a non-literal tag select a failure at the type leve
 
 | Language | How it projects to the host | Bearing on the fail-safe rule |
 | --- | --- | --- |
-| **Gleam** (Erlang, JS) | Generates `.d.mts` (`compiler-core/src/javascript/typescript.rs`). Opaque and private types do not export their constructors (`:443-447`), so a TypeScript user cannot forge a value. | It projects conservatively and hides what TypeScript cannot check. When the projection cannot prove a fact, the type claims less. |
+| **Gleam** (Erlang, JS) | Generates `.d.mts` (`compiler-core/src/javascript/typescript.rs`). Opaque and private types do not export their constructors (`:443-447`). The declared classes stay structural, though. At `d799dc7`, the opaque `Animal$ = Cat \| Dog` declares `Cat` with a public field and no private marker (`compiler-core/src/javascript/tests/snapshots/gleam_core__javascript__tests__custom_types__opaque_types_typescript.snap`), and `CustomType` has only `withFields` (`compiler-core/templates/prelude.d.mts:2-5`). So a TypeScript user can build a value without a cast, for example `Object.assign(new CustomType(), { goes_outside: true })`. **Corrected (r6):** revision 5 said a value could not be forged. | It hides what it can, and accepts the host's structural typing as a boundary, as §2.8.1's trust envelope does. |
 | **ReScript** (JS) | genType exports a type it cannot express faithfully, such as a GADT or an abstract type, as **opaque**: an abstract class with a `protected opaque!` field (`compiler/gentype/emit_type.ml:363-374`, `emit_js.ml:88-97`). It does not export a precise but forgeable type. | A conservative fallback when the host cannot express the fact. Gating `Exclude` on the check is the same rule applied to removal. |
 | **Elixir** (BEAM) | No TypeScript projection. `rescue` literals are enforced by Elixir's own compiler (`elixir_clauses.erl:466-494`). | The discipline lives in the language's compiler, never in a host checker. |
 | **MoonBit** (Wasm, JS, C) | FFI signatures are trusted declarations that must match the implementation (`next/language/ffi.md:102`). | An explicit foreign trust contract, like §2.8.1's trust envelope. |
 | **Koka** (C, JS) | Library `try` removes `exn` by installing a handler (`koka@9c55695`, `lib/std/core/exn.kk:54-56`), lowered by evidence passing. There is no TypeScript surface. | The effect proof lives in Koka's own checker. |
 | **PureScript** (JS) | `Record.delete` takes `IsSymbol`, `Cons` and an explicit `Lacks`, and the reflected symbol selects the runtime key (`purescript-record@c89cd1a`, `Record.purs:110-124`). FFI types are assigned at a trusted boundary. | The runtime key is derived from the same symbol as the type. Effra derives a service's brand and key from one name in the same way (`emit.go:254,259-260`), which is why a hand-made mismatch is the only service boundary (E2). |
-| **Effect-TS** | Works inside TypeScript's deliberately unsound compatibility rules. Effect 4.0.1 admits a union `K`, a never filler and a `JSON.parse` service with no cast (`effect-baseline.mts`). | The r4 guard closed Effect's direct spellings but inherited its bypass routes, because removal stayed unconditional. Gated removal keeps Effect's shape and is strictly stronger. |
+| **Effect-TS** | Works inside TypeScript's deliberately unsound compatibility rules. Effect 4.0.1 admits a union `K`, a never filler and a `JSON.parse` service with no cast (`effect-baseline.mts`). Its `catchTag` payload leaves out a branded or interpolated member that the runtime hands over (A12). | The r4 guard closed Effect's direct spellings but inherited its bypass routes, because removal stayed unconditional. Gated removal keeps Effect's shape and is strictly stronger. Effect's payload hole is the one Effra's r5 payload shared; r6 over-includes instead. |
 
-Every inspected language enforces its label discipline in its own compiler. The projection to the host is either conservative (Gleam's hidden constructors, ReScript's opaque fallback) or sits behind an explicit trust contract (MoonBit and PureScript FFI). Revision 5 follows that path:
+Every inspected language enforces its label discipline in its own compiler. The projection to the host is either conservative (Gleam's hidden constructors, ReScript's opaque fallback) or sits behind an explicit trust contract (MoonBit and PureScript FFI). Revisions 5 and 6 follow that path:
 - TypeScript's refusal is a diagnostic;
 - the declared types claim no removal that the check does not back;
+- a handler's payload leaves out no member that the runtime might hand over;
 - §2.8.1 writes down the host trust envelope.
+
+**A tag's run-time value against its payload type** (the fifth review's question, revision 6). No inspected language can let the two drift apart:
+- **One compiler-owned source.** Gleam matches constructors by class (`javascript/decision.rs:1667-1709`), and users never write tag strings. ReScript genType derives the discriminant and the payload from one variant description. Elixir expands a `rescue` alias to its literal module atom when compiling (`elixir_clauses.erl:466-494`), and compares `__struct__` with that atom at run time (`elixir_erl_try.erl:119-120`), so nominal identity is normalized before any comparison. PureScript's `Record.delete` takes the run-time key from the same `IsSymbol` witness that `Cons` and `Lacks` use (`Record.purs:110-124`).
+- **No tag strings.** Koka's `try` selects by operation through a handler (`lib/std/core/exn.kk:54-56`). MoonBit's `catch` matches declared constructors (`next/language/error-handling.md:31-46`).
+- TypeScript can do neither for a hand-written, branded `_tag`: it cannot normalize a brand the way Elixir normalizes an alias. So Effra's payload over-includes what it cannot prove distinct, and generated tags, which are plain literals, keep the exact payload. Inclusion uses the guard's own literal test, which echoes ReScript's single source for the tag and the payload.
 
 ## 5. Ladder check
 
@@ -1311,7 +1421,7 @@ The wrapper-parity test proves composition only.
    - B1 strict emission with the listed difference, and the `layer_causal_test.go` helper tests moved. The B1 inventory is 161 lines in 128 testdata programs, 147 lines in 41 `internal/compiler` tests, and 9 lines in 6 `cmd/ef` tests (§2.9).
    - `effra/effect.mjs`, and `effra/effect.d.mts` declaring `catch_` under the §2.8 rule: presence, the literal check, fail-safe removal through `__ef_removed`, and the two refusal mechanisms as diagnostics.
      - The label aliases are exported, and every generated declaration with a label parameter imports them.
-     - Negative controls: **catch's share of probe C2 r5** as a fixture. That is 60 directives; `run.sh` tags each with its owning unit. It includes catch's exact-type pins, its bypass routes (H1a, H2a, H2b, H5a) with their fail-safe pins, and I14/I14b.
+     - Negative controls: **catch's share of probe C2 r6** as a fixture. That is 60 directives; `run.sh` tags each with its owning unit. It includes catch's exact-type pins, its bypass routes (H1a, H2a, H2b, H5a) with their fail-safe pins, and I14/I14b.
      - Provide's and recover's controls are not in this fixture. They land with the declarations they test, in units 6 and 7.
    - Diagnostics: EF105 and the generic EF106 argument message.
    - **Corpus parity against the catch construct**, then the catch parser form, checker case, emitter cases and the `graph.go:474` look-through are deleted.
@@ -1325,7 +1435,7 @@ The wrapper-parity test proves composition only.
    - Clause 6 for providers derived from a parameter. Graph, lint and reachability facts come from the provision clause (§2.11), never from signature shape.
      - Negative control: **`fake<S: service, …>(…, p: Provider<S>)`**, which ignores `p` but has provide's signature, yields no provision edge and no lint fact.
    - `provide` added to `effra/effect.d.mts`, with `__ef_service_ok` and removal by identifier and brand (`__ef_removed_service`).
-     - Negative controls: **provide's share of probe C2 r5**, 29 directives: B05-B19, `extra4` 3 and 4, consumer-neg 9 and 10, I07, I10, F08, H2c, H2d, H5c, and H3 in its own program.
+     - Negative controls: **provide's share of probe C2 r6**, 29 directives: B05-B19, `extra4` 3 and 4, consumer-neg 9 and 10, I07, I10, F08, H2c, H2d, H5c, and H3 in its own program.
      - The brand pins: B07, B17, B18 and F08c.
      - The trust-envelope record E2, a hand-made identifier and key that disagree.
      - The user projection of `{ R - S }` with a label-parameter `S` uses the same gated alias (§2.8).
@@ -1333,8 +1443,9 @@ The wrapper-parity test proves composition only.
 - **Unit 7. Recover library** (only if gate 2 passed).
    - The single receiver `recover` with **recover's declared contract**, including the callback clauses from 4b, and its wrapper-parity test.
    - `recover` added to `effra/effect.d.mts`, with the gated payload `__ef_handled`.
-     - Negative controls: **recover's share of probe C2 r5**, 10 directives: consumer-neg 2, 5 and 8, `extra4` 2, M02b, M04b, I06, I09, H1b and H5b.
-     - Recover's payload pins: T10's recover line, M02-M07 and F09.
+     - Negative controls: **recover's share of probe C2 r6**, 13 directives: consumer-neg 2, 5 and 8, `extra4` 2, M02b, M04b, I06, I09, H1b and H5b, and the payload claims A7, A10a and A10b (`payload-run.mts`).
+     - Recover's payload pins: T10's recover line, M02-M07, F09, and the payload form table (`payload.mts`, P01-P39, with removal as a subset of the payload and the exact payload of generated rows). M03 and F09 are pinned to their r6 values: the template member is in the payload for `"Denied"` too.
+     - The payload self-attack, `gen-payload.cjs`, runs in the fixture and must report every may-equal form in the payload.
      - If gate 2 fails, recover stays a construct. `effra/effect.d.mts` then exports no `recover`, and `effect.mjs` keeps it as the internal helper that `catch_` uses.
    - Builtin payloads. `recovery.go` is deleted except for helpers the contract reuses. F6 is already in place from unit 4b.
    - **Corpus parity against the recover construct** before it is deleted.
@@ -1347,7 +1458,8 @@ Redone for re-plan 1, per unit. The changes since round 3:
 - the declarations move to the units that own them;
 - unit 4c is new;
 - unit 5 carries catch's share of the guard fixture, and revision 5 adds about 0.25 day there for fail-safe removal and the review-4 routes;
-- unit 6 carries distribution and `fake<S>`.
+- unit 6 carries distribution and `fake<S>`;
+- unit 7 carries recover's share of the fixture, and revision 6 adds about 0.1 day there for the payload form table and its self-attack.
 
 | Unit | Scope | Estimate |
 | --- | --- | --- |
@@ -1356,11 +1468,11 @@ Redone for re-plan 1, per unit. The changes since round 3:
 | 4a | Edge contract, Q9 with callables, contract format and transport, clause 6 for constant providers | L, 5.5 to 7 days. The contract and its owner-vector controls are about 3 to 4; callable type arguments 1 to 1.5 (`templateDataArgument` and instantiated callback contracts); the schema bump, round-trip and classification about 1; clause 6 for constant providers about 0.5. Productionizing the prototype and running the full suite under the contract are where the risk sits. |
 | 4b | Callback clauses and F6 | M, about 3 days (the clauses about 2, the coercion and its negatives about 1) |
 | 4c | D4 and GLOSSARY amendment | S, about 0.25 day (docs) |
-| 5 | Catch library | M to L, 3.25 to 3.75 days (F2 on two targets, catch's declaration, B1 emission, the runtime module with fail-safe removal and catch's share of the C2 r5 fixture, corpus parity, equivalence tests) |
+| 5 | Catch library | M to L, 3.25 to 3.75 days (F2 on two targets, catch's declaration, B1 emission, the runtime module with fail-safe removal and catch's share of the C2 r6 fixture, corpus parity, equivalence tests) |
 | 6 | Provide library | M, 2 to 2.5 days (F3b with distribution, `Provider<S>`, provide's declaration, `fake<S>`, corpus parity) |
-| 7 | Recover library | S to M, about 1.5 days, conditional on gate 2 |
+| 7 | Recover library | S to M, about 1.6 days, conditional on gate 2 (recover's declaration with the fail-safe payload, its 13 directives, the payload form table and self-attack, corpus parity) |
 
-The total is about 18 to 21 implementor-days plus review rounds; the rows sum to 18 to 21. The third review's planning range was about 17 to 20. Revision 4 added about one day: half for the guard fixture and distribution, and a quarter each for unit 4c and the honest sum of 4a. Revision 5 adds about 0.25 day inside unit 5, which the fourth review costed. Earlier estimates were round 3's 17 to 19.5, round 2's 13.5 to 16 and round 1's 8 to 10. The growth is in 4a: a general contract that crosses module boundaries needs the transport, and an honest provision edge needs its own clause.
+The total is about 18 to 21 implementor-days plus review rounds; the rows sum to 18.1 to 21.1. The third review's planning range was about 17 to 20. Revision 4 added about one day: half for the guard fixture and distribution, and a quarter each for unit 4c and the honest sum of 4a. Revision 5 adds about 0.25 day inside unit 5, which the fourth review costed. Revision 6 adds about 0.1 day inside unit 7, which the fifth review costed. Earlier estimates were round 3's 17 to 19.5, round 2's 13.5 to 16 and round 1's 8 to 10. The growth is in 4a: a general contract that crosses module boundaries needs the transport, and an honest provision edge needs its own clause.
 
 ## 9. Open questions
 
