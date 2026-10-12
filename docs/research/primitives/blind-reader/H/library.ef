@@ -1,0 +1,139 @@
+// Option H library: deadlines, retry and race helpers as ordinary Effra over
+// the H constructs (run, fail, scope, fork, race, provide, interrupt). Nothing
+// here is compiler-known. Every function is an `effect fn`, so calling it
+// builds a recipe, and `work.timeout(2s)` is exactly `timeout(work, 2s)`.
+//
+// Depends on features that are designed but not built:
+//   - receiver methods (#127) for the dot spelling;
+//   - whole-value type parameters `A: type` (#128, Q9);
+//   - label parameters `E: error` (#131, F2) for `retry<E>`;
+//   - the recipe-parameter contract (#128 4a), including forking a recipe
+//     parameter as a race arm and the closed-at-the-edge half (rows note
+//     Q11, not yet shown): each function below runs `work` only inside a
+//     `race` that closes before the function returns;
+//   - a `Duration` type with unit literals (`2s`, notation, see the note).
+// None of the guarantees depends on these features: a program that cannot
+// use the library yet writes the `race` block inline (dashboard.ef does).
+import Data "effra/data"
+
+// A deadline is an ordinary failure declared by the library, not a builtin.
+pub error Timeout
+
+// The timer arms. `after` returns `value` once `limit` has passed; `expire`
+// fails with Timeout. Both are ordinary effect functions over Clock.
+pub effect fn after<A: type>(limit: Duration, value: A) -> A uses { Clock } {
+    run Clock.sleep(limit)
+    value
+}
+
+pub effect fn expire<A: type>(limit: Duration) -> A raises { Timeout } uses { Clock } {
+    run Clock.sleep(limit)
+    fail Timeout
+}
+
+// Fail with Timeout if `work` has not completed within `limit`. The losing
+// arm is interrupted and its cleanup awaited before the race completes (K2),
+// so Timeout is published only after cleanup, and possibly after `limit`.
+pub effect fn (work: Effect<A, { E }, { R }>) timeout<A: type, E: raises, R: uses>(limit: Duration) -> A raises { E, Timeout } uses { R, Clock } {
+    race {
+        fork work
+        fork expire<A>(limit)
+    }
+}
+
+// Return `fallback` if `work` has not completed within `limit`.
+pub effect fn (work: Effect<A, { E }, { R }>) timeoutOr<A: type, E: raises, R: uses>(limit: Duration, fallback: A) -> A raises { E } uses { R, Clock } {
+    race {
+        fork work
+        fork after(limit, fallback)
+    }
+}
+
+effect fn someOf<A: type, E: raises, R: uses>(work: Effect<A, { E }, { R }>) -> Data.Option<A> raises { E } uses { R } {
+    Data.Option.Some { value: run work }
+}
+
+// Some(result), or None when the deadline wins.
+pub effect fn (work: Effect<A, { E }, { R }>) timeoutOption<A: type, E: raises, R: uses>(limit: Duration) -> Data.Option<A> raises { E } uses { R, Clock } {
+    race {
+        fork someOf(work)
+        fork after(limit, Data.Option<A>.None {})
+    }
+}
+
+// Run `fallback` only after the deadline has won and `work` has been
+// interrupted and cleaned up (Effect's timeoutOrElse).
+pub effect fn (work: Effect<A, { E }, { R }>) timeoutTo<A: type, E: raises, R: uses, F: raises, S: uses>(limit: Duration, fallback: Effect<A, { F }, { S }>) -> A raises { E, F } uses { R, S, Clock } {
+    match run work.timeoutOption(limit) {
+        Data.Option.Some { value } => value
+        Data.Option.None => run fallback
+    }
+}
+
+// First completion of two recipes, as a value-level helper.
+pub effect fn either<A: type, E: raises, R: uses, F: raises, S: uses>(left: Effect<A, { E }, { R }>, right: Effect<A, { F }, { S }>) -> A raises { E, F } uses { R, S } {
+    race {
+        fork left
+        fork right
+    }
+}
+
+// Delay a recipe.
+pub effect fn (work: Effect<A, { E }, { R }>) delay<A: type, E: raises, R: uses>(by: Duration) -> A raises { E } uses { R, Clock } {
+    run Clock.sleep(by)
+    run work
+}
+
+// A schedule is plain data (Effect's Schedule is an inert value too). It acts
+// between attempts and cannot stop a running one (K14); a deadline is a race.
+pub enum Schedule {
+    Times { count: i64 }
+    Spaced { every: Duration, count: i64 }
+}
+
+fn remaining(policy: Schedule) -> i64 {
+    match policy {
+        Schedule.Times { count } => count
+        Schedule.Spaced { count } => count
+    }
+}
+
+fn pause(policy: Schedule) -> Duration {
+    match policy {
+        Schedule.Times => 0ms
+        Schedule.Spaced { every } => every
+    }
+}
+
+fn less(policy: Schedule) -> Schedule {
+    match policy {
+        Schedule.Times { count } => Schedule.Times { count: count - 1 }
+        Schedule.Spaced { every, count } => Schedule.Spaced { every, count: count - 1 }
+    }
+}
+
+// Retry on failure E only; other failures pass through untouched. The last
+// attempt lets E escape, so E stays in the row.
+pub effect fn (work: Effect<A, { E, F }, { R }>) retry<E: error, A: type, F: raises, R: uses>(policy: Schedule) -> A raises { E, F } uses { R, Clock } {
+    if remaining(policy) <= 0 {
+        run work
+    } else {
+        match run someOf(work).catch<E>(Data.Option<A>.None {}) {
+            Data.Option.Some { value } => value
+            Data.Option.None => run work.delay(pause(policy)).retry<E>(less(policy))
+        }
+    }
+}
+
+// Provide one service from a provider value. A primitive with a declared
+// contract in the inferred vocabulary (rows note §2.6.5, #132): its rows are
+// `{ R - S }`, so it needs row difference (F3b, #126) and `Provider<S>`. It is
+// spelled `provideService` so that it never shares a word with the
+// `provide Plan { }` construct, which reads a static plan.
+pub effect fn (work: Effect<A, { E }, { R }>) provideService<S: service, A: type, E: raises, R: uses>(provider: Provider<S>) -> A raises { E } uses { R - S }
+
+// Two recipes in parallel is NOT library in H. When `first` fails, `second`
+// is an unobserved child that may also fail, and the checker refuses the
+// composite cause (EF107; probe receipt in the note). The group needs an
+// owner whose close discards abandoned typed failures: the proposed `all`
+// block (note §6.6, open question O3), not a function.

@@ -1,7 +1,9 @@
-// Option P: a small kernel of built-in operations, exposed as ordinary
-// methods in a bundled module, and everything else as library over it.
-// No checker branch is keyed on these names: each signature is honest in the
-// general type system, and each behaviour is pinned by laws (#125, #124).
+// Option P (losing option after review 1): a small kernel of built-in
+// operations, exposed as methods in a bundled module, and everything else as
+// library over it. Review 1 (B1) showed that fork, join and interrupt have no
+// clause in the declared-contract vocabulary, so they would stay
+// compiler-known: constructs in dot form. The signatures are kept here as the
+// record of what P proposed; see primitives.md section 7.
 //
 // The kernel is a protocol. A provider of `Runtime` implements the six
 // operations below and passes the law suite; the Effect runtime (JS), the Go
@@ -27,8 +29,10 @@ pub effect fn (work: Effect<A, { E }, { R }>) fork<A: type, E: raises, R: uses>(
 // Wait for the child; its failures surface here.
 pub effect fn (child: Fiber<A, { E }>) join<A: type, E: raises>() -> A raises { E }
 
-// Cancel the child and wait for its cleanup.
-pub effect fn (child: Fiber<A, { E }>) interrupt<A: type, E: raises>() -> void
+// Cancel the child and wait for its cleanup. A child that already completed
+// with a failure re-raises it here (runtime.md; fiber.go, interrupt.mjs), so
+// the row is the child's (review 1, M2).
+pub effect fn (child: Fiber<A, { E }>) interrupt<A: type, E: raises>() -> void raises { E }
 
 // First completion wins (success or failure). The loser is interrupted and its
 // cleanup awaited before the result is published; its ordinary failures are

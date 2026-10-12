@@ -1,0 +1,204 @@
+import go host "effra.local/prototype/examples/hosttypes"
+import go io "io"
+import go fs "io/fs"
+import go strconv "strconv"
+import Data "effra/data"
+
+fn same(point: host.Point) -> host.Point {
+    point
+}
+
+effect fn counter(name: string) -> string uses { Foreign } {
+    let found = run host.Find(name)
+    match found {
+        Data.Option.None => "absent",
+        Data.Option.Some { value: present } => {
+            let count = run host.Count(present)
+            run strconv.Itoa(count)
+        }
+    }
+}
+
+effect fn shape(kind: string) -> string uses { Foreign } {
+    let made = run host.MakeShape(kind)
+    match made {
+        Data.Option.None => "nil interface",
+        Data.Option.Some { value: present } => run host.ShapeKind(present)
+    }
+}
+
+effect fn failure(typed: bool) -> string uses { Foreign } {
+    let result = if typed {
+        run host.Typed()
+    } else {
+        run host.Untyped()
+    }
+    let partial = run strconv.Itoa(result.value)
+    let described = match result.error {
+        Data.Option.None => "no error",
+        Data.Option.Some { value: native } => run host.DescribeError(native)
+    }
+    if result.hasError {
+        partial + " with " + described
+    } else {
+        partial + " " + described
+    }
+}
+
+effect fn wrapped() -> string uses { Foreign } {
+    let result = run host.Missing()
+    match result.error {
+        Data.Option.None => "no error",
+        Data.Option.Some { value: native } => run host.DescribeError(native)
+    }
+}
+
+effect fn strict() -> string raises { GoError } uses { Foreign } {
+    let count = run host.Typed().orFail()
+    run strconv.Itoa(count)
+}
+
+effect fn split(text: string) -> string uses { Foreign } {
+    let parts = run host.Split(text)
+    let length = run strconv.Itoa(parts.value.v1)
+    let found = if parts.value.v2 {
+        "found"
+    } else {
+        "missing"
+    }
+    parts.value.v0 + " " + length + " " + found
+}
+
+effect fn names(present: bool) -> string uses { Foreign } {
+    let listed = run host.Names(present)
+    match listed {
+        Data.Option.None => "nil slice",
+        Data.Option.Some { value: present } => run strconv.Itoa(run host.NameCount(present))
+    }
+}
+
+effect fn raw(present: bool) -> string uses { Foreign } {
+    match run host.Bytes(present) {
+        Data.Option.None => "nil bytes",
+        Data.Option.Some { value: data } => run host.BytesClass(data)
+    }
+}
+
+effect fn rawText(text: string) -> string uses { Foreign } {
+    match run host.RawText(text) {
+        Data.Option.None => "nil bytes",
+        Data.Option.Some { value: data } => run host.BytesClass(data)
+    }
+}
+
+effect fn buffered(text: string) -> string uses { Foreign } {
+    match run host.NewBuffer(text) {
+        Data.Option.None => "no buffer",
+        Data.Option.Some { value: buffer } => run buffer.String()
+    }
+}
+
+effect fn incremented(name: string) -> string uses { Foreign } {
+    match run host.Find(name) {
+        Data.Option.None => "absent",
+        Data.Option.Some { value: found } => run strconv.Itoa(run found.Increment())
+    }
+}
+
+effect fn copied(text: string) -> string uses { Foreign } {
+    match run host.NewSource(text) {
+        Data.Option.None => "no source",
+        Data.Option.Some { value: source } => match run host.NewSink() {
+            Data.Option.None => "no sink",
+            Data.Option.Some { value: sink } => {
+                let result = run io.Copy(sink, source)
+                run strconv.FormatInt(result.value, 10) + " " + run source.Report() + " " + run sink.Report()
+            }
+        }
+    }
+}
+
+effect fn read(text: string) -> string uses { Foreign } {
+    match run host.NewPlain(text) {
+        Data.Option.None => "no reader",
+        Data.Option.Some { value: reader } => {
+            let first = run reader.Read(2)
+            let rest = run reader.Read(8)
+            run host.BytesClass(first.value) + " " + run host.BytesClass(rest.value) + " " + run strconv.FormatBool(rest.hasError)
+        }
+    }
+}
+
+effect fn short(text: string) -> string uses { Foreign } {
+    match run host.RawText(text) {
+        Data.Option.None => "nil bytes",
+        Data.Option.Some { value: data } => match run host.NewShortWriter(2) {
+            Data.Option.None => "no writer",
+            Data.Option.Some { value: writer } => {
+                let written = run writer.Write(data)
+                let reported = match written.error {
+                    Data.Option.None => "nil",
+                    Data.Option.Some { value: err } => run strconv.FormatBool(run host.IsShortWrite(err))
+                }
+                run strconv.Itoa(written.value) + " short=" + reported + " " + run writer.Text()
+            }
+        }
+    }
+}
+
+effect fn listed(names: string) -> string uses { Foreign } {
+    match run host.NewTree(names) {
+        Data.Option.None => "no tree",
+        Data.Option.Some { value: tree } => {
+            let entries = run fs.ReadDir(tree, ".")
+            let text = match entries.value {
+                Data.Option.None => "nil",
+                Data.Option.Some { value } => run host.EntryNames(value)
+            }
+            text + " " + run tree.Report()
+        }
+    }
+}
+
+fn problem(err: error) -> string {
+    let asserted = err.as<*host.Problem>()
+    let payload = match asserted.v0 {
+        Data.Option.None => "nil",
+        Data.Option.Some { value } => "present"
+    }
+    if asserted.v1 {
+        "*Problem " + payload
+    } else {
+        "not *Problem"
+    }
+}
+
+effect fn asserted() -> string uses { Foreign } {
+    let result = run host.Typed()
+    match result.error {
+        Data.Option.None => "no error",
+        Data.Option.Some { value: native } => problem(native)
+    }
+}
+
+effect fn program() -> void uses { Foreign, Console } {
+    run Console.log(run host.DescribePoint(same(run host.Offset(run host.Origin(), 4))))
+    run Console.log(run counter("known") + " " + run counter("other"))
+    run Console.log(run shape("none") + "; " + run shape("typed-nil") + "; " + run shape("square"))
+    run Console.log(run failure(true))
+    run Console.log(run failure(false))
+    run Console.log(run wrapped() + "; " + run strict().catch<GoError>("typed-nil error failed"))
+    run Console.log(run split("ab:cde") + "; " + run split("abc"))
+    run Console.log(run names(false) + "; " + run names(true))
+    run Console.log(run raw(false) + "; " + run raw(true) + "; " + run rawText("alias"))
+    run Console.log(run buffered("native buffer"))
+    run Console.log(run incremented("known") + "; " + run copied("abc") + "; " + run asserted())
+    run Console.log(run read("abc") + "; " + run short("hello") + "; " + run listed("b,a"))
+    run Console.log(run strconv.Itoa(42))
+}
+
+effect fn main() -> void {
+    provide Foreign = Host, Console = Stdout {
+        run program()
+    }
+}

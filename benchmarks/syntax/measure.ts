@@ -1,6 +1,6 @@
 // Corpus metrics for the #134 syntax spike (docs/research/primitives.md).
 //
-// Usage: bun benchmarks/syntax/measure.ts [--chosen P] [--json]
+// Usage: bun benchmarks/syntax/measure.ts [--chosen H] [--json]
 //
 // Reads docs/research/primitives/corpus/<option>/*.ef for the baseline
 // `today` and each option, and prints per option and per file:
@@ -8,14 +8,20 @@
 //   depth         maximum brace nesting depth
 //   keywords      distinct keywords used
 //   punct/line    punctuation tokens per non-blank code line
-//   lookalikes    compiler-known constructs spelled like a method or
-//                 function call (must be 0 for the chosen option)
+//   lookalikes    dot or call forms whose meaning has no general carrier, so
+//                 the checker must recognise them by name: constructs in
+//                 dot form (must be 0 for the chosen option)
+//   awaiting      dot or call forms that become ordinary library only when a
+//                 general feature lands, split by that feature
+//   keyed today   dot forms that today's checker recognises by name
 //
-// `library.ef` (the option's own library source) is reported separately and
-// is not part of the totals, because user programs do not contain it.
+// Every option is measured against ONE classification (`forms` below), so no
+// option can define its own lookalikes away. `library.ef` (the option's own
+// library source) is reported separately and is not part of the totals.
 //
 // Exits non-zero when a file cannot be lexed, braces do not balance, an
-// option is missing a corpus file, or the chosen option has a lookalike.
+// option is missing a corpus file, the chosen option has a lookalike, or an
+// option that requires owned forks has a `fork` outside an owner block.
 
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -23,11 +29,11 @@ import { join, dirname } from "node:path";
 const root = join(dirname(new URL(import.meta.url).pathname), "..", "..");
 const corpus = join(root, "docs", "research", "primitives", "corpus");
 const baseline = "today";
-const options = ["P", "A", "B", "C", "D", "E"];
+const options = ["H", "P", "A", "B", "C", "D", "E"];
 
 const args = process.argv.slice(2);
 const chosenIndex = args.indexOf("--chosen");
-const chosen = chosenIndex >= 0 ? args[chosenIndex + 1] : "P";
+const chosen = chosenIndex >= 0 ? args[chosenIndex + 1] : "H";
 const asJson = args.includes("--json");
 
 type Token = { kind: "word" | "number" | "string" | "punct"; text: string; line: number };
@@ -44,6 +50,7 @@ const baseKeywords = new Set([
 ]);
 const optionKeywords: Record<string, string[]> = {
   today: [],
+  H: ["provide", "race", "interrupt"],
   P: [],
   A: ["provide", "within", "otherwise"],
   B: ["provide", "within", "otherwise"],
@@ -52,45 +59,54 @@ const optionKeywords: Record<string, string[]> = {
   E: ["provide", "race", "after"],
 };
 
-// Constructs that are compiler-known but read like a method or call.
-// today: every dot form the parser special-cases or the checker treats as a
-//   construct (syntax.go postfix forms; fork handles' join/interrupt).
-// A, B, E: `.timeout` and `.provide` no longer exist; any left is a miss.
-// P: every dot form is an ordinary library function over the kernel
-//   (`.fork`, `.scoped`, `.timeout*`, `.provide`); nothing is name-keyed.
-// C: `.provide` no longer exists; `.timeout*` are ordinary library methods.
-// D: provision stays compiler-known while spelled as calls (`.provide`,
-//   `provide(L)`, `provideService<S>(p)`): the lang-item pattern.
-const dotConstructs: Record<string, string[]> = {
-  today: ["timeout", "provide", "catch", "recover", "orFail", "join", "interrupt", "cancel"],
-  P: [],
-  A: ["timeout", "provide"],
-  B: ["timeout", "provide"],
-  C: ["provide"],
-  D: ["provide"],
-  E: ["timeout", "provide"],
-};
-const callConstructs: Record<string, string[]> = {
-  today: [],
-  P: [],
-  A: [],
-  B: [],
-  C: [],
-  D: ["provide", "provideService"],
-  E: [],
-};
-// Dot forms that are compiler-known today and become ordinary library only
-// when the rows units land (#131 catch, #133 recover, fiber methods with a
-// declared contract). Reported, not failed, so the dependency stays visible.
-const pendingLibraryBase = ["catch", "recover", "orFail", "join", "interrupt", "cancel"];
-// Library that additionally waits on receiver methods (#127), whole-value type
-// parameters (#128) and row difference (F3b) before it can be written in .ef.
-const pendingLibraryExtra: Record<string, string[]> = {
-  P: ["fork", "scoped", "timeout", "timeoutOr", "provide"],
-  C: ["timeout", "timeoutOr"],
-  D: ["timeout", "timeoutOr"],
-};
-const pendingFor = (option: string) => [...pendingLibraryBase, ...(pendingLibraryExtra[option] ?? [])];
+// Options whose design requires every `fork` to sit inside an owner block in
+// the same function (review 1, M6): `scope { }` or a `race { }` arm.
+const ownedFork = new Set(["H"]);
+
+// The one classification of dot and call forms. `carrier` says what lets the
+// form be an ordinary function:
+//   none      no general type feature carries its checking; the checker must
+//             recognise it by name, so in dot form it is a construct wearing
+//             method syntax (review 1: B1 for fiber handles, M4 for a layer
+//             argument, whose plan no row type carries).
+//   q11       library once receiver methods (#127), whole-value type
+//             parameters (#128 Q9) and the closed-at-the-edge recipe-parameter
+//             contract (#128 Q11, not yet shown: 0 of 29) land, as ordinary
+//             Effra over a construct or as a declared-contract primitive.
+//   rows      library once the rows units land (#126 F3b, #131 catch,
+//             #132 provide, #133 recover), using the shown in-place half of
+//             the recipe-parameter contract.
+// `keyedToday` marks names that today's checker recognises (syntax.go postfix
+// forms; the fiber methods in semantic.go).
+type Carrier = "none" | "q11" | "rows";
+type Form = { name: string; dot: boolean; next?: "(" | "<"; carrier: Carrier; keyedToday: boolean };
+const forms: Form[] = [
+  { name: "fork", dot: true, carrier: "none", keyedToday: false },
+  { name: "join", dot: true, carrier: "none", keyedToday: true },
+  { name: "interrupt", dot: true, carrier: "none", keyedToday: true },
+  { name: "cancel", dot: true, carrier: "none", keyedToday: true },
+  { name: "provide", dot: true, next: "(", carrier: "none", keyedToday: true },
+  { name: "provide", dot: false, next: "(", carrier: "none", keyedToday: false },
+  { name: "race", dot: true, carrier: "q11", keyedToday: false },
+  { name: "scoped", dot: true, carrier: "q11", keyedToday: false },
+  { name: "scoped", dot: false, carrier: "q11", keyedToday: false },
+  { name: "timeout", dot: true, carrier: "q11", keyedToday: true },
+  { name: "timeout", dot: false, carrier: "q11", keyedToday: false },
+  { name: "timeoutOr", dot: true, carrier: "q11", keyedToday: false },
+  { name: "timeoutOr", dot: false, carrier: "q11", keyedToday: false },
+  { name: "timeoutOption", dot: true, carrier: "q11", keyedToday: false },
+  { name: "timeoutTo", dot: true, carrier: "q11", keyedToday: false },
+  { name: "provide", dot: true, next: "<", carrier: "rows", keyedToday: true },
+  { name: "provideService", dot: true, carrier: "rows", keyedToday: false },
+  { name: "provideService", dot: false, carrier: "rows", keyedToday: false },
+  { name: "catch", dot: true, carrier: "rows", keyedToday: true },
+  { name: "recover", dot: true, carrier: "rows", keyedToday: true },
+  { name: "orFail", dot: true, carrier: "rows", keyedToday: true },
+];
+
+function classify(name: string, dot: boolean, next: string): Form | undefined {
+  return forms.find((f) => f.name === name && f.dot === dot && (f.next === undefined || f.next === next));
+}
 
 const multiPunct = ["->", "=>", "==", "!=", "<=", ">=", "&&", "||", "::", "..."];
 
@@ -173,7 +189,10 @@ type Metrics = {
   punctPerLine: number;
   punct: number;
   lookalikes: string[];
-  pending: number;
+  awaitingQ11: string[];
+  awaitingRows: string[];
+  keyedToday: number;
+  ownerless: string[];
 };
 
 function measure(option: string, file: string): Metrics {
@@ -186,10 +205,13 @@ function measure(option: string, file: string): Metrics {
   let depth = 0;
   let maxDepth = 0;
   const pairs: Record<string, string> = { "}": "{", ")": "(", "]": "[" };
-  const stack: { text: string; line: number }[] = [];
+  const stack: { text: string; line: number; owner: boolean }[] = [];
   const keywords = new Set<string>();
   const lookalikes: string[] = [];
-  let pending = 0;
+  const awaitingQ11: string[] = [];
+  const awaitingRows: string[] = [];
+  const ownerless: string[] = [];
+  let keyedToday = 0;
   let punct = 0;
 
   tokens.forEach((t, index) => {
@@ -198,7 +220,9 @@ function measure(option: string, file: string): Metrics {
     if (t.kind === "punct") {
       punct++;
       if (t.text === "{" || t.text === "(" || t.text === "[") {
-        stack.push(t);
+        // An owner block is a `{` opened directly by `scope` or `race`.
+        const owner = t.text === "{" && previous?.kind === "word" && (previous.text === "scope" || previous.text === "race");
+        stack.push({ text: t.text, line: t.line, owner });
         if (t.text === "{") maxDepth = Math.max(maxDepth, ++depth);
       } else if (t.text in pairs) {
         const open = stack.pop();
@@ -212,12 +236,19 @@ function measure(option: string, file: string): Metrics {
     if (t.kind !== "word") return;
     const member = previous?.kind === "punct" && previous.text === ".";
     const called = next?.kind === "punct" && (next.text === "(" || next.text === "<");
-    if (member && called && dotConstructs[option].includes(t.text)) {
-      lookalikes.push(`${t.line}:.${t.text}`);
-    } else if (!member && called && callConstructs[option].includes(t.text)) {
-      lookalikes.push(`${t.line}:${t.text}()`);
+    if (called) {
+      const form = classify(t.text, member, next.text);
+      const site = `${t.line}:${member ? "." : ""}${t.text}${next.text}`;
+      if (form) {
+        if (form.carrier === "none") lookalikes.push(site);
+        else if (form.carrier === "q11") awaitingQ11.push(site);
+        else awaitingRows.push(site);
+        if (form.keyedToday) keyedToday++;
+      }
     }
-    if (member && called && option !== baseline && pendingFor(option).includes(t.text)) pending++;
+    if (!member && t.text === "fork" && ownedFork.has(option) && !stack.some((s) => s.owner)) {
+      ownerless.push(`${t.line}`);
+    }
     if (member || !keywordSet.has(t.text)) return;
     if (t.text === "provide" && called) return;
     if ((t.text === "or" || t.text === "after") && !(previous?.text === "}")) return;
@@ -236,7 +267,10 @@ function measure(option: string, file: string): Metrics {
     punctPerLine: codeLines.size === 0 ? 0 : punct / codeLines.size,
     punct,
     lookalikes,
-    pending,
+    awaitingQ11,
+    awaitingRows,
+    keyedToday,
+    ownerless,
   };
 }
 
@@ -282,21 +316,32 @@ for (const option of [baseline, ...options]) {
 }
 
 function totals(report: Report) {
-  const tokens = report.files.reduce((sum, m) => sum + m.tokens, 0);
-  const lines = report.files.reduce((sum, m) => sum + m.lines, 0);
-  const punct = report.files.reduce((sum, m) => sum + m.punct, 0);
-  const depth = Math.max(0, ...report.files.map((m) => m.depth));
-  const keywords = new Set(report.files.flatMap((m) => m.keywords));
-  const lookalikes = report.files.reduce((sum, m) => sum + m.lookalikes.length, 0);
-  const pending = report.files.reduce((sum, m) => sum + m.pending, 0);
-  return { tokens, lines, punct, depth, keywords: [...keywords].sort(), lookalikes, pending };
+  const sum = (f: (m: Metrics) => number) => report.files.reduce((s, m) => s + f(m), 0);
+  return {
+    tokens: sum((m) => m.tokens),
+    lines: sum((m) => m.lines),
+    punct: sum((m) => m.punct),
+    depth: Math.max(0, ...report.files.map((m) => m.depth)),
+    keywords: [...new Set(report.files.flatMap((m) => m.keywords))].sort(),
+    lookalikes: sum((m) => m.lookalikes.length),
+    awaitingQ11: sum((m) => m.awaitingQ11.length),
+    awaitingRows: sum((m) => m.awaitingRows.length),
+    keyedToday: sum((m) => m.keyedToday),
+  };
 }
 
+for (const report of reports) {
+  for (const m of [...report.files, ...(report.library ? [report.library] : [])]) {
+    for (const line of m.ownerless) {
+      failures.push(`${report.option}: ${m.file}:${line}: fork outside an owner block (scope or race)`);
+    }
+  }
+}
 const chosenReport = reports.find((r) => r.option === chosen);
 if (!chosenReport) {
   failures.push(`chosen option ${chosen} not measured`);
 } else {
-  for (const m of chosenReport.files) {
+  for (const m of [...chosenReport.files, ...(chosenReport.library ? [chosenReport.library] : [])]) {
     for (const site of m.lookalikes) {
       failures.push(`chosen option ${chosen}: ${m.file}:${site} is a construct spelled like a call`);
     }
@@ -304,20 +349,24 @@ if (!chosenReport) {
 }
 
 if (asJson) {
-  console.log(JSON.stringify({ chosen, reports: reports.map((r) => ({ ...r, totals: totals(r) })), failures }, null, 2));
+  console.log(JSON.stringify({ chosen, forms, reports: reports.map((r) => ({ ...r, totals: totals(r) })), failures }, null, 2));
 } else {
   const fixed = (n: number) => n.toFixed(2);
   console.log(`# Syntax corpus metrics (chosen option: ${chosen})\n`);
   console.log("## Totals over the shared corpus (library.ef excluded)\n");
-  console.log("| option | files | tokens | vs today | code lines | max depth | distinct keywords | punct/line | lookalikes | pending-library dot forms |");
-  console.log("|---|---|---|---|---|---|---|---|---|---|");
+  console.log("| option | files | tokens | vs today | code lines | max depth | distinct keywords | punct/line | lookalikes | awaiting Q11 | awaiting rows units | keyed today |");
+  console.log("|---|---|---|---|---|---|---|---|---|---|---|---|");
   const base = reports.find((r) => r.option === baseline);
   const baseTokens = base ? totals(base).tokens : 0;
   for (const report of reports) {
     const t = totals(report);
     const delta = baseTokens === 0 ? "" : `${t.tokens - baseTokens >= 0 ? "+" : ""}${(((t.tokens - baseTokens) / baseTokens) * 100).toFixed(1)}%`;
-    console.log(`| ${report.option} | ${report.files.length} | ${t.tokens} | ${delta} | ${t.lines} | ${t.depth} | ${t.keywords.length} | ${fixed(t.lines ? t.punct / t.lines : 0)} | ${t.lookalikes} | ${report.option === baseline ? "n/a" : t.pending} |`);
+    console.log(`| ${report.option} | ${report.files.length} | ${t.tokens} | ${delta} | ${t.lines} | ${t.depth} | ${t.keywords.length} | ${fixed(t.lines ? t.punct / t.lines : 0)} | ${t.lookalikes} | ${t.awaitingQ11} | ${t.awaitingRows} | ${t.keyedToday} |`);
   }
+  console.log("\n## Classification (one table for every option)\n");
+  console.log("| form | carrier | keyed today |");
+  console.log("|---|---|---|");
+  for (const f of forms) console.log(`| ${f.dot ? "." : ""}${f.name}${f.next ?? ""} | ${f.carrier} | ${f.keyedToday ? "yes" : "no"} |`);
   console.log("\n## Keywords per option\n");
   for (const report of reports) console.log(`- ${report.option}: ${totals(report).keywords.join(", ")}`);
   console.log("\n## Per file\n");
@@ -334,15 +383,18 @@ if (asJson) {
   for (const report of reports) {
     if (!report.library) continue;
     const m = report.library;
-    console.log(`- ${report.option}/library.ef: ${m.tokens} tokens, depth ${m.depth}, ${m.keywords.length} keywords, ${fixed(m.punctPerLine)} punct/line, ${m.lookalikes.length} lookalikes`);
+    console.log(`- ${report.option}/library.ef: ${m.tokens} tokens, depth ${m.depth}, ${m.keywords.length} keywords, ${fixed(m.punctPerLine)} punct/line, ${m.lookalikes.length} lookalikes, ${m.awaitingQ11.length} awaiting Q11, ${m.awaitingRows.length} awaiting rows units`);
   }
-  const listed = reports.filter((r) => r.option !== baseline && r.files.some((m) => m.lookalikes.length > 0));
-  if (listed.length > 0) {
-    console.log("\n## Lookalike sites in options\n");
-    for (const report of listed) {
-      const sites = report.files.flatMap((m) => m.lookalikes.map((s) => `${m.file}:${s}`));
-      console.log(`- ${report.option}: ${sites.length} (${sites.slice(0, 8).join(", ")}${sites.length > 8 ? ", ..." : ""})`);
+  console.log("\n## Lookalike sites per option\n");
+  for (const report of reports) {
+    const sites = report.files.flatMap((m) => m.lookalikes.map((s) => `${m.file}:${s}`));
+    const kinds = new Map<string, number>();
+    for (const s of sites) {
+      const kind = s.slice(s.lastIndexOf(":") + 1);
+      kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
     }
+    const summary = [...kinds.entries()].map(([k, n]) => `${k} ${n}`).join(", ");
+    console.log(`- ${report.option}: ${sites.length}${sites.length > 0 ? ` (${summary})` : ""}`);
   }
 }
 
