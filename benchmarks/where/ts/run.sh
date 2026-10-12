@@ -8,13 +8,14 @@
 # TypeScript is the repository's pinned copy (tools/lib.sh); node >= 22.6 runs
 # .mts directly. The Effect baseline resolves `effect` from the repository's
 # node_modules (4.0.1). Exits 1 when any tsc or node run fails, a directive
-# suppresses nothing, or an `any` keyword appears.
+# suppresses nothing, an `any` keyword appears, or an option directory has no
+# .mts to check or no consumer.mts.
 # Usage: benchmarks/where/ts/run.sh [option-dir...]   (default: all)
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/tools/lib.sh"
 options=("$@")
-[ ${#options[@]} -eq 0 ] && options=(a-dict b-witness b-struct b-cond c-comparable baseline-effect)
+[ ${#options[@]} -eq 0 ] && options=(a-dict b-witness b-struct b-cond b-evidence c-comparable baseline-effect)
 echo "== versions"
 echo "tsc $(node "$TSC" --version) (<repo>/$TS_DIR)"
 echo "node $(node --version)"
@@ -23,7 +24,10 @@ for option in "${options[@]}"; do
   echo
   echo "==== $option"
   cd "$here/$option" || { fail "missing option directory $option"; continue; }
-  for f in $(ls *.mts | grep -v "\.d\.mts$"); do
+  sources=$(ls *.mts 2>/dev/null | grep -v "\.d\.mts$")
+  [ -n "$sources" ] || fail "no .mts to check in $option"
+  [ -f consumer.mts ] || fail "no consumer.mts in $option"
+  for f in $sources; do
     echo "== tsc $f ($(grep -c '@ts-expect-error' "$f") directives)"
     node "$TSC" "${FLAGS[@]}" "$f"
     check "tsc $option/$f"

@@ -187,6 +187,49 @@ exit=0
 ./opt.mjs: any keywords=0, word matches=0
 exit=0
 
+==== b-evidence
+== tsc attacks.mts (2 directives)
+exit=0
+== tsc consumer.mts (6 directives)
+exit=0
+== node consumer.mts
+form(i) smallest=a form(ii) order=cba recheck sorted=a recheck reversed=refused
+exit=0
+== node attacks.mts
+L1 launder via form (ii): returned c
+L2 launder via rejected minting form: returned c
+L3 filler into form (i): returned a
+exit=0
+== each directive opened
+attacks.mts:18  L1 laundering through form (ii) is refused
+    TS2345 Argument of type 'Three<User>' is not assignable to parameter of type 'SortedBy<Three<User>, unique symbol>'.   Property '[__ef_brand_evidence_SortedBy]' is missing in type 'Three<User>' but required in type '{ readonly [__ef_brand_evidence_SortedBy]: readonly  ['[__ef_brand_evidence_SortedBy]' is declared here.]
+attacks.mts:28  L3 form (i) has no method parameter to fill
+    TS2554 Expected 1 arguments, but got 2.
+directives=2 without a diagnostic=0
+exit=0
+consumer.mts:23  E1 form (i) takes no method argument: the caller cannot choose the comparator
+    TS2554 Expected 1 arguments, but got 2.
+consumer.mts:25  E2 laundering: form (ii) returns the unbranded Three<User>, which a trusting consumer refuses
+    TS2345 Argument of type 'Three<User>' is not assignable to parameter of type 'SortedBy<Three<User>, unique symbol>'.   Property '[__ef_brand_evidence_SortedBy]' is missing in type 'Three<User>' but required in type '{ readonly [__ef_brand_evidence_SortedBy]: readonly  ['[__ef_brand_evidence_SortedBy]' is declared here.]
+consumer.mts:27  E3 laundering through generic forwarding: also unbranded
+    TS2345 Argument of type 'Three<User>' is not assignable to parameter of type 'SortedBy<Three<User>, unique symbol>'.   Property '[__ef_brand_evidence_SortedBy]' is missing in type 'Three<User>' but required in type '{ readonly [__ef_brand_evidence_SortedBy]: readonly  ['[__ef_brand_evidence_SortedBy]' is declared here.]
+consumer.mts:29  E4 an unchecked value is not evidence
+    TS2345 Argument of type 'Three<User>' is not assignable to parameter of type 'SortedBy<Three<User>, unique symbol>'.   Property '[__ef_brand_evidence_SortedBy]' is missing in type 'Three<User>' but required in type '{ readonly [__ef_brand_evidence_SortedBy]: readonly  ['[__ef_brand_evidence_SortedBy]' is declared here.]
+consumer.mts:31  E5 a re-establishment result must be checked before use
+    TS2345 Argument of type 'SortedBy<Three<User>, unique symbol> | undefined' is not assignable to parameter of type 'SortedBy<Three<User>, unique symbol>'.   Type 'undefined' is not assignable to type 'SortedBy<Three<User>, unique symbol>'.     Type 'undefined' is not 
+consumer.mts:33  E6 evidence cannot be forged from an object literal: the brand key is an unexported unique symbol
+    TS2345 Argument of type '{ a: User; b: User; c: User; [__ef_brand_template_Three]: readonly [(value: User) => User]; }' is not assignable to parameter of type 'SortedBy<Three<User>, unique symbol>'.   Property '[__ef_brand_evidence_SortedBy]' is missing in type '{ a:  ['[__ef_brand_evidence_SortedBy]' is declared here.]
+directives=6 without a diagnostic=0
+exit=0
+== any
+./attacks.mts: any keywords=0, word matches=1
+./consumer.mts: any keywords=0, word matches=0
+./lib.d.mts: any keywords=0, word matches=0
+./lib.mjs: any keywords=0, word matches=0
+./rejected.d.mts: any keywords=0, word matches=0
+./rejected.mjs: any keywords=0, word matches=0
+exit=0
+
 ==== c-comparable
 == tsc attacks-augment.mts (3 directives)
 exit=0
