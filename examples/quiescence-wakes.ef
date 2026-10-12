@@ -121,9 +121,12 @@ effect fn test_barrier_after_nested_resumption() -> void raises { AssertionFaile
 }
 
 // Interrupting a fiber parked in the barrier is an ordinary interruption,
-// never a defect. The waiter signals that it is entering the barrier; on Go
-// the signaller keeps the turn until it parks there, so the interrupt reaches
-// it parked. The case asserts only that the interrupt succeeds.
+// never a defect. The waiter signals that it is entering the barrier. On Go
+// the signaller keeps the turn until it parks there. On JavaScript the signal
+// resumes the test inline, so the test joins an immediate fork first: that
+// suspends it, and the waiter's turn unwinds into the barrier and parks. The
+// interrupt therefore reaches a parked barrier waiter on both targets. The
+// case asserts only that the interrupt succeeds.
 
 effect fn enterBarrier(entered: Latch) -> string uses { Scheduler, Sync } {
     run Sync.signal(entered)
@@ -135,5 +138,7 @@ effect fn test_interrupting_a_barrier_waiter() -> void uses { Scheduler, Sync } 
     let entered = run Sync.latch()
     let waiter = fork enterBarrier(entered)
     run Sync.await(entered)
+    let turn = fork immediate()
+    run turn.join()
     run waiter.interrupt()
 }
