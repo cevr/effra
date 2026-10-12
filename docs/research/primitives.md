@@ -8,7 +8,7 @@ Appendices:
 - `primitives/corpus/<option>/`: the corpus rewritten per option.
 - `primitives/blind-reader/<option>/`: blind-reader packets; the answer key is [primitives/blind-reader-key.md](primitives/blind-reader-key.md).
 - `benchmarks/syntax/measure.ts`: the corpus metrics.
-- The prototype lives on branch `wf10/spike-syntax-proto` at `073de983`, under `docs/research/primitives/prototype/`. That branch is never merged.
+- The prototype lives on branch `wf10/spike-syntax-proto` (code at `073de983`, head `e11047a3` with the baseline probes), under `docs/research/primitives/prototype/`. That branch is never merged.
 
 ## 0. Decision in one page
 
@@ -124,7 +124,7 @@ For each candidate:
 | `.catch`, `.recover` | The label leaves the row. | F2, F3b | No | **Library** (#131, #133) |
 | `.orFail()` | GoResult to typed failure. | ordinary data once GoResult is | No | **Library** (rows note) |
 | `acquireRelease` | Release runs exactly once, masked (R10, P5). | A kernel operation with a `Scope` row | Yes | **Kernel function** (P5) |
-| `all`, `both`, `forEach` | n/a | Not writable as library today: the checker refuses the composite cause (probe receipt: EF107 at `both.ef:14:11`). It needs a group failure policy (**O3**). | | **Library intrinsic** with a declared contract, until O3 |
+| `all`, `both`, `forEach` | n/a | Not writable as library today: the checker refuses the composite cause (probe receipt: EF107 at `prototype/baseline/both.ef:14:11` on the prototype branch). It needs a group failure policy (**O3**). | | **Library intrinsic** with a declared contract, until O3 |
 | `defer e` (Go-like) | n/a | `acquireRelease` and `onExit` cover it | | Not proposed |
 | duration literal `2s` | n/a | 1:1 notation for `Duration.ms(2000)`; a second client is byte sizes | | **Notation** (rung 3) |
 | `layer` declaration | The static plan: construction graph, `merge`/`replace`, missing and duplicate services inside the layer. | None: tooling must read the structure. | Yes | **Construct** (unchanged; matches the owner's "layers … earn keep") |
@@ -231,7 +231,7 @@ Providers choose an implementation. They cannot choose a meaning.
 ### 6.5 Composability
 
 **Lossless wrapping.** A wrapper is an ordinary `effect fn` over a recipe parameter, so wrappers nest freely. Receipts:
-- `probes/p1.ef` (a monomorphic `timeoutOr` over today's `.timeout`) runs on Go and JS.
+- `prototype/baseline/p1.ef` (a monomorphic `timeoutOr` over today's `.timeout`, run with the main compiler) runs on Go and JS.
 - `race-library.ef`'s `deadlineOr` nests inside itself and inside the kernel, on both targets.
 
 The generic version is blocked only by #128 Q9 (EF127), F3b (EF125) and Q11 (EF123) (`walls.ef`).
@@ -315,7 +315,7 @@ Packets are in `primitives/blind-reader/<option>/` for today, P and A–E. Each 
 
 ### 8.3 Prototype
 
-Branch `wf10/spike-syntax-proto`, head `073de983`, cut from `wf10/spike-syntax`. It lowers P onto existing machinery:
+Branch `wf10/spike-syntax-proto`, code commit `073de983` (head `e11047a3` adds the baseline probes in `prototype/baseline/`), cut from `wf10/spike-syntax`. It lowers P onto existing machinery:
 - duration literals, as millisecond integers in the lexer;
 - `run X.fork()` → today's fork;
 - `X.scoped()` → a recipe-level scope owner (a checker case like timeout's, without rows);
