@@ -1,4 +1,4 @@
-// A File acquired in a nested scope is consumed before that scope closes.
+// A File acquired in a nested owner is consumed before that owner closes.
 // borrowOuter shows the separate borrowed-handle case.
 effect fn borrowOuter(file: File) -> File {
     scope {
@@ -7,17 +7,15 @@ effect fn borrowOuter(file: File) -> File {
     }
 }
 
-effect fn scopedRead() -> string raises { IoError } uses { Files } {
-    scope {
-        let file = provide Files = LiveFiles {
-            run Files.openRead("examples/fixture.txt")
-        }
+effect fn scopedRead() -> string raises { IoError } {
+    // A provide block owns what its body acquires (note §6.5), so the File
+    // is read inside the block and closes with it.
+    provide Files = LiveFiles {
+        let file = run Files.openRead("examples/fixture.txt")
         run Files.readText(file)
     }
 }
 
 effect fn main() -> string raises { IoError } {
-    provide Files = LiveFiles {
-        run scopedRead()
-    }
+    run scopedRead()
 }

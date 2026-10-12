@@ -77,9 +77,14 @@ const ownedFork = new Set(["H"]);
 //             #132 provide, #133 recover), using the shown in-place half of
 //             the recipe-parameter contract.
 // `keyedToday` marks names that today's checker recognises (syntax.go postfix
-// forms; the fiber methods in semantic.go).
+// forms; the fiber methods in semantic.go). The script checks it against the
+// compiler source (review 2, o3), so the column cannot drift.
+// `surface` is "134" for the concurrency, lifetime, time and provision forms
+// this ticket decides, and "host" for forms outside it (review 2, m5). Only a
+// #134 lookalike fails the chosen option; the others are reported apart.
 type Carrier = "none" | "q11" | "rows";
-type Form = { name: string; dot: boolean; next?: "(" | "<"; carrier: Carrier; keyedToday: boolean };
+type Surface = "134" | "host";
+type Form = { name: string; dot: boolean; next?: "(" | "<"; carrier: Carrier; keyedToday: boolean; surface?: Surface };
 const forms: Form[] = [
   { name: "fork", dot: true, carrier: "none", keyedToday: false },
   { name: "join", dot: true, carrier: "none", keyedToday: true },
@@ -102,6 +107,10 @@ const forms: Form[] = [
   { name: "catch", dot: true, carrier: "rows", keyedToday: true },
   { name: "recover", dot: true, carrier: "rows", keyedToday: true },
   { name: "orFail", dot: true, carrier: "rows", keyedToday: true },
+  // value.as<T>(): Go's v, ok := value.(T) for a native host value
+  // (syntax.go hostAssert). No general feature carries it, so it is
+  // compiler-known, but it is host interop, outside #134's surface.
+  { name: "as", dot: true, next: "<", carrier: "none", keyedToday: true, surface: "host" },
 ];
 
 function classify(name: string, dot: boolean, next: string): Form | undefined {
@@ -189,6 +198,7 @@ type Metrics = {
   punctPerLine: number;
   punct: number;
   lookalikes: string[];
+  otherKeyed: string[];
   awaitingQ11: string[];
   awaitingRows: string[];
   keyedToday: number;
@@ -208,6 +218,7 @@ function measure(option: string, file: string): Metrics {
   const stack: { text: string; line: number; owner: boolean }[] = [];
   const keywords = new Set<string>();
   const lookalikes: string[] = [];
+  const otherKeyed: string[] = [];
   const awaitingQ11: string[] = [];
   const awaitingRows: string[] = [];
   const ownerless: string[] = [];
@@ -240,7 +251,8 @@ function measure(option: string, file: string): Metrics {
       const form = classify(t.text, member, next.text);
       const site = `${t.line}:${member ? "." : ""}${t.text}${next.text}`;
       if (form) {
-        if (form.carrier === "none") lookalikes.push(site);
+        if (form.carrier === "none" && form.surface === "host") otherKeyed.push(site);
+        else if (form.carrier === "none") lookalikes.push(site);
         else if (form.carrier === "q11") awaitingQ11.push(site);
         else awaitingRows.push(site);
         if (form.keyedToday) keyedToday++;
@@ -267,6 +279,7 @@ function measure(option: string, file: string): Metrics {
     punctPerLine: codeLines.size === 0 ? 0 : punct / codeLines.size,
     punct,
     lookalikes,
+    otherKeyed,
     awaitingQ11,
     awaitingRows,
     keyedToday,
@@ -275,6 +288,28 @@ function measure(option: string, file: string): Metrics {
 }
 
 const failures: string[] = [];
+
+// Review 2, o3: `keyedToday` must match the names today's compiler keys on:
+// the postfix method names in syntax.go and the fiber operations in
+// semantic.go's fiberCall.
+function compilerKeyedNames(): Set<string> {
+  const compiler = join(root, "internal", "compiler");
+  const names = new Set<string>();
+  const syntax = readFileSync(join(compiler, "syntax.go"), "utf8");
+  for (const m of syntax.matchAll(/method\.text == "([A-Za-z]+)"/g)) names.add(m[1]);
+  const semantic = readFileSync(join(compiler, "semantic.go"), "utf8");
+  const start = semantic.indexOf("func (c *checker) fiberCall(");
+  const end = semantic.indexOf("\nfunc ", start + 1);
+  if (start < 0 || end < 0) failures.push("keyedToday: fiberCall not found in semantic.go");
+  else for (const m of semantic.slice(start, end).matchAll(/case "([A-Za-z]+)"/g)) names.add(m[1]);
+  return names;
+}
+{
+  const keyed = compilerKeyedNames();
+  const marked = new Set(forms.filter((f) => f.keyedToday).map((f) => f.name));
+  for (const name of keyed) if (!marked.has(name)) failures.push(`keyedToday: the compiler keys .${name} but no form marks it`);
+  for (const name of marked) if (!keyed.has(name)) failures.push(`keyedToday: .${name} is marked but the compiler does not key it`);
+}
 const baselineFiles = readdirSync(join(corpus, baseline))
   .filter((f) => f.endsWith(".ef"))
   .sort();
@@ -324,6 +359,7 @@ function totals(report: Report) {
     depth: Math.max(0, ...report.files.map((m) => m.depth)),
     keywords: [...new Set(report.files.flatMap((m) => m.keywords))].sort(),
     lookalikes: sum((m) => m.lookalikes.length),
+    otherKeyed: sum((m) => m.otherKeyed.length),
     awaitingQ11: sum((m) => m.awaitingQ11.length),
     awaitingRows: sum((m) => m.awaitingRows.length),
     keyedToday: sum((m) => m.keyedToday),
@@ -354,19 +390,19 @@ if (asJson) {
   const fixed = (n: number) => n.toFixed(2);
   console.log(`# Syntax corpus metrics (chosen option: ${chosen})\n`);
   console.log("## Totals over the shared corpus (library.ef excluded)\n");
-  console.log("| option | files | tokens | vs today | code lines | max depth | distinct keywords | punct/line | lookalikes | awaiting Q11 | awaiting rows units | keyed today |");
-  console.log("|---|---|---|---|---|---|---|---|---|---|---|---|");
+  console.log("| option | files | tokens | vs today | code lines | max depth | distinct keywords | punct/line | lookalikes (#134) | other compiler-known | awaiting Q11 | awaiting rows units | keyed today |");
+  console.log("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
   const base = reports.find((r) => r.option === baseline);
   const baseTokens = base ? totals(base).tokens : 0;
   for (const report of reports) {
     const t = totals(report);
     const delta = baseTokens === 0 ? "" : `${t.tokens - baseTokens >= 0 ? "+" : ""}${(((t.tokens - baseTokens) / baseTokens) * 100).toFixed(1)}%`;
-    console.log(`| ${report.option} | ${report.files.length} | ${t.tokens} | ${delta} | ${t.lines} | ${t.depth} | ${t.keywords.length} | ${fixed(t.lines ? t.punct / t.lines : 0)} | ${t.lookalikes} | ${t.awaitingQ11} | ${t.awaitingRows} | ${t.keyedToday} |`);
+    console.log(`| ${report.option} | ${report.files.length} | ${t.tokens} | ${delta} | ${t.lines} | ${t.depth} | ${t.keywords.length} | ${fixed(t.lines ? t.punct / t.lines : 0)} | ${t.lookalikes} | ${t.otherKeyed} | ${t.awaitingQ11} | ${t.awaitingRows} | ${t.keyedToday} |`);
   }
   console.log("\n## Classification (one table for every option)\n");
-  console.log("| form | carrier | keyed today |");
-  console.log("|---|---|---|");
-  for (const f of forms) console.log(`| ${f.dot ? "." : ""}${f.name}${f.next ?? ""} | ${f.carrier} | ${f.keyedToday ? "yes" : "no"} |`);
+  console.log("| form | carrier | surface | keyed today |");
+  console.log("|---|---|---|---|");
+  for (const f of forms) console.log(`| ${f.dot ? "." : ""}${f.name}${f.next ?? ""} | ${f.carrier} | ${f.surface ?? "134"} | ${f.keyedToday ? "yes" : "no"} |`);
   console.log("\n## Keywords per option\n");
   for (const report of reports) console.log(`- ${report.option}: ${totals(report).keywords.join(", ")}`);
   console.log("\n## Per file\n");

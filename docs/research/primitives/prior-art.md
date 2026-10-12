@@ -70,7 +70,7 @@ Appendix to [primitives.md](../primitives.md). Each entry gives what the system 
 - **cats-effect 3.**
   - `timeoutTo` is derived from `racePair` (`IO.scala:850-859`), and `Resource` is a library data type.
   - Behaviour is pinned by law files: `MonadCancelLaws`, `GenSpawnLaws` and `GenTemporalLaws`, the last including a sleep-race-minimum law. `raceCanceledIdentity` was deprecated.
-  - *Right:* laws as the contract. This is the model for K1–K17.
+  - *Right:* laws as the contract. This is the model for K1–K18.
 - **Koka** (`9c55695d`).
   - `with` desugars to passing the rest of the block (`tour.kk.md:205-245`, minimum generality `269-271`).
   - Timeout is `firstof` (`interleave.kk:57-61`), and `finally` is library (`hnd.kk:485`).
@@ -140,7 +140,7 @@ The owner's portability test asks whether a construct's meaning can be a protoco
 **Effra's position.** Take the shape of Eio and cats-effect, and avoid the failures of F#, Rust and Haskell:
 - **Closed operations.** Host primitives P1–P12 plus P13 race (and P14 all, if admitted). A provider cannot add or rename one.
 - **Fixed types.** The checker types the constructs. A provider implements them; it does not supply their types.
-- **A conformance suite, not an admission proof.** K1–K17, A1–A4 and R1–R15 run as the provider suite (#124 RS1). Passing a finite suite is evidence, not proof, so the checker cannot refuse a provider for failing it. An incompatible machine provider is different: that is a static diagnostic (`docs/specs/machine-provider-contract.md:45`).
+- **A conformance suite, not an admission proof.** K1–K18, A1–A4 and R1–R15 run as the provider suite (#124 RS1). Passing a finite suite is evidence, not proof, so the checker cannot refuse a provider for failing it. An incompatible machine provider is different: that is a static diagnostic (`docs/specs/machine-provider-contract.md:45`).
 - **Everything a runtime needs is inside the protocol** (spawn, first completion, time, owner close). This is what avoids Rust's runtime split.
 
 **Resilience pipelines.** Polly v8's `ResiliencePipeline` (pollydocs.org, "Resilience pipelines") and resilience4j's decorators (resilience4j.readme.io, "Getting started") compose Timeout and Retry as values, and the order of composition decides whether the timeout bounds each attempt or the whole loop. That supports the owner's "time policy" framing while keeping preemption and recurrence separate (primitives.md §5, K15).
@@ -153,3 +153,37 @@ The owner's portability test asks whether a construct's meaning can be a protoco
 4. Koka handlers and Effekt capabilities check presence statically; React context, Go `context.Value` and Kotlin `CoroutineContext` do not. Effra's rows do, whichever surface is chosen.
 5. Systems that give syntax a pluggable meaning drift unless the meaning is fixed by types and laws. cats-effect's law files are the strongest existing answer.
 6. Every structured-concurrency library that guards lifetime makes a spawn require an owner value or type: Trio's nursery, Loom's scope, Eio's switch, Kotlin's `CoroutineScope` receiver. Swift's `async let` is the construct form. Effra's owned `fork` is the construct form too, because an owner value needs #106's second-class values (primitives.md §6.2, O4).
+7. Systems that guard lifetimes bound a task by the owner it was handed, not by the function that spawned it. Effra's owned fork is stricter, and it gets the longer lifetimes back through the provision worker (§5).
+
+## 5. Child lifetimes, resource handoff and provision workers (round 3)
+
+Review 2 (M2, M4, m1) asked three questions: what a child owns, how a worker can live as long as a provision, and how a language switches rules without inferring them from content. Pins are given only where a checkout was read for this round; other entries name the documentation section.
+
+**What a finished child owns.**
+- **Trio.** A task's resources are its own: `async with` blocks inside the task close when the task returns, before the nursery sees it finish. A nursery bounds a task by the nursery object passed to it, so a helper given a nursery can start a task that outlives the helper (Trio docs, "Tasks let you do multiple things at once", nursery semantics).
+- **Kotlin.** `Job.join()` waits until the coroutine has completed, which includes its `finally` blocks and its children (kotlinx.coroutines docs, `Job.join`, "Cancellation and timeouts"). Resources acquired in the coroutine close before `join` returns.
+- **Swift.** A `TaskGroup` child's resources follow its body. `withTaskGroup` awaits every child before it returns, and a value cannot leave a child except as its result (Swift Evolution SE-0304, "Structured concurrency").
+- **Eio.** Resources attach to the switch they are created with. A fiber that opens a file on its own `Switch.run` releases it when that switch finishes; a resource attached to a switch passed in lives as long as that switch (Eio README, "Switches").
+- **Elixir.** A process owns its ETS tables and ports, and they are released when the process exits (Erlang `ets` docs, table ownership; "Ports and port drivers"). Links and monitors report the exit to others but transfer nothing, unless the owner explicitly hands a table over with `:ets.give_away/3`.
+- **Effect** is the exception: `forkScoped` and `forkIn(scope)` attach a child to a scope other than its parent's, and `Scope.extend` moves a scoped effect's resources into a scope the caller supplies (effect-study.md). This is the declared handoff that primitives.md §6.3 rejects. It needs the target scope as a value (O4), and it gives a second release path to children that are interrupted rather than joined.
+
+Effra chooses the majority rule (O11): a child owns what it acquires, an owned result cannot leave it (EF123), and laws K5 and K12 hold only for results without owned values.
+
+**Provision-lifetime workers.**
+- **Elixir supervisors.** A supervisor starts its children in the order they are defined and shuts them down in reverse (`lib/elixir/lib/supervisor.ex:458-470`, Elixir `7a40579`); an application shuts down its applications in reverse start order (`application.ex:284`). `GenServer.start_link/3` blocks until `init/1` returns (`gen_server.ex:534-535`). That is a synchronous start handshake: the next child starts only after this one is initialised, so a later child can use an earlier one during its own initialisation.
+- **Gleam OTP.** `actor.start` returns once the actor's initialiser has run, the same handshake in typed form (gleam_otp, `gleam/otp/actor` docs). Gleam's lowering is to the BEAM's processes and supervisors, as library; on its JavaScript target there are no processes, so no worker construct exists there.
+- **Trio `nursery.start`.** `await nursery.start(fn)` runs `fn` in the nursery and returns once `fn` calls `task_status.started(value)`, so the caller can rely on the task being ready (Trio docs, `Nursery.start`).
+- **Effect.** `Layer.scoped` with `Effect.forkScoped` gives a worker the layer's lifetime; a node that needs it initialised waits on it explicitly (effect-study.md, Layer).
+- **ReScript** compiles to promises (`js_dump.ml:392`, `:1042`), which have no owner at all; a long-lived worker is a promise that nothing awaits. It is the baseline Effra's construct improves on, not a model.
+- **MoonBit** has a task group bounded by its block (`async.mbt:96-108`), the Swift shape; a worker longer than its block needs the group as a value.
+
+Effra's layer entry `fork w(args)` follows the supervisor's reverse-order rule (the worker starts after every node, stops before any node). It does not yet have the handshake that lets a dependent node use the worker during initialisation; O12 records the Trio/Elixir form for U12.
+
+**Lowering paths.** Gleam (OTP over BEAM processes), Elixir (supervisors as library over links) and Effect (`Layer.scoped` + `forkScoped`) all implement provision-lifetime workers as library over a process or fiber primitive. Effra lowers the worker entry the same way: a fork inside the provision body's scope (`prelude/layers.mjs:231` on JS, `runtime/effra/layers.go:490` on Go), with no new host primitive.
+
+**Switching rules without inference (m1).**
+- **Go:** the `go` directive in `go.mod` selects language semantics per module; Go 1.22 changed loop-variable scoping only for modules declaring `go 1.22` or later (Go blog, "Fixing For Loops in Go 1.22").
+- **Rust:** the `edition` key in `Cargo.toml` selects the edition per crate; `cargo fix --edition` migrates code and reports what it cannot fix (Rust Edition Guide).
+- **Kotlin** (`-language-version`), **Swift** (`-swift-version`, Swift 6 language mode) and **Java** (`--release`) select the language explicitly too.
+
+None infers the rules from what syntax a file happens to use. Effra's prototype gate does, which is why primitives.md §6.2 calls it prototype-only and O13 asks for an explicit per-package edition.
