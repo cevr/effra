@@ -12,3 +12,7 @@ export const checkSortedUsers = (xs) => (ordered(xs, User.compare) ? xs : undefi
 export const sort = (xs, compare) => sort3(xs, compare);
 export const sortTwice = (xs, compare) => sort(sort(xs, compare), compare);
 export const smallest = (xs) => xs.a;
+export const smallestChecked = (xs) => {
+  const evidence = checkSortedUsers(xs);
+  return evidence === undefined ? undefined : smallest(evidence);
+};

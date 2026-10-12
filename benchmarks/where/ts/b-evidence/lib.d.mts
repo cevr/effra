@@ -44,3 +44,9 @@ export declare const sortTwice: <T>(xs: Three<T>, compare: (self: T, other: T) =
 
 // A consumer that trusts the evidence: returns the smallest without checking.
 export declare const smallest: (xs: SortedBy<Three<User>, User_compare>) => User;
+
+// Requirement 2's shape (inward admission): the parameter is unbranded, and
+// the body trusts the value only after re-establishing the evidence on entry
+// through form (i). It takes no snapshot first (requirement 3), which the
+// expected-fail case A3 exploits.
+export declare const smallestChecked: (xs: Three<User>) => User | undefined;

@@ -204,9 +204,10 @@ XFAIL reproduced  R3 inward, method bivariance: smallest=c true-min=a (recorded 
 XFAIL reproduced  X2 inward, property covariance: smallest=c true-min=a (recorded c)
 XFAIL reproduced  A1 payload, re-establishment alias: smallest=c true-min=b (recorded c)
 XFAIL reproduced  A2 payload, element alias: smallest=a true-min=b (recorded a)
+XFAIL reproduced  A3 payload, accessor after re-check: smallest=c true-min=b (recorded c)
 XFAIL reproduced  R10 canonical, companion patch, form (i): smallest=c true-min=a (recorded c)
 XFAIL reproduced  R10 canonical, companion patch, re-establishment: smallest=c true-min=a (recorded c)
-expected-fail: 8 reproduced, 0 not reproduced (#125 input; not acceptance)
+expected-fail: 9 reproduced, 0 not reproduced (#125 input; not acceptance)
 exit=0
 == node attacks.mts
 L1 launder via form (ii): returned c
