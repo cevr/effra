@@ -1,4 +1,4 @@
-# examples/laws/probes.sh with ef built from wf10/spike-laws-proto ad08a82e (after the review-3 fixes)
+# examples/laws/probes.sh with ef built from wf10/spike-laws-proto fc5eb83e (after the review-4 fixes)
 PASS M1-control: without the total law the 0/1 compare is tested on all three laws and its build is admitted (the hole)
 PASS M1: with the total law: go=tested,tested,tested,refuted js=tested,tested,tested,refuted agree=true, counterexample a = User { age: -1, name: "" }, b = User { age: 0, name: "" }
 PASS M1-build: go: EF170 refuted laws refuse the build: Order.total@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }; the refutation stands for this source di
@@ -44,7 +44,7 @@ PASS M6-disagree-build: js: EF172 a cross-target refutation stands for this sour
 PASS N1: after ef test --target go the go receipt still says refuted and both builds are refused: EF172 a cross-target refutation stands for this source digest: Depth<i64>.finite@i64 (cross-target disagreement (EF172): status differs (go "tested", 
 PASS p1-ledger-malformed: a ledger of '{': ef test --target go refused and wrote nothing, both builds refused: EF191 the refutation ledger dist/deep.laws.refutations.json is unreadable (unexpected EOF): it is refused, never read as absent, because it may hold a
 PASS p1-ledger-schema: a ledger that is JSON but not a ledger is refused: EF191 the refutation ledger dist/deep.laws.refutations.json is unreadable (no source digest): it is refused, never read as absent, because i
-PASS p1-receipt-malformed: refused: EF191 the law receipt dist/codec.laws.go.json is unreadable (unexpected end of JSON input): it is refused, never read as absent, because it may hold a
+PASS p1-receipt-malformed: refused: EF191 the law receipt dist/codec.laws.go.json is unreadable (unexpected EOF): it is refused, never read as absent, because it may hold a refutation th
 PASS p1-both-malformed: refused: EF191 the refutation ledger dist/codec.laws.refutations.json is unreadable (unexpected EOF): it is refused, never read as absent, because it may hold 
 PASS N1-revision: a changed source digest is new inputs: its own go run is tested and its go build is admitted
 PASS p1-fresh-checkout: with dist/ deleted, ef test --target go alone admits the go build (local history is gone); ef test --target both re-derives the disagreement and refuses both builds
@@ -56,7 +56,8 @@ PASS m1: EFFRA_LAW_SEED=-1 refused before any harness runs
 PASS m1: EFFRA_LAW_SEED=abc refused before any harness runs
 PASS m1: EFFRA_LAW_SEED=4294967296 refused before any harness runs
 PASS m2: refused on go and js: EF177 ... entry label has type fn(User)->string, but sortedTrio has type fn(Trio)->bool
-PASS m3-call: refused on go and js: EF178 ... is the law Order.reflexive@User, and a law is not a value
+PASS m3-call: refused on go and js: EF178 ... mints is the law Minty.mints, and a law is not a value
+PASS m3-spelling: refused on go and js: EF102 ... unknown function or service method
 PASS m3-mint: refused on go and js: EF181 ... a law body states an obligation and is never a construction site
 PASS P1-callable: go and js: refuted at a = 0
 PASS P1-callable-control: go and js: refuted at a = 0
@@ -68,8 +69,24 @@ PASS P1-record-label: go and js: refuted at a = 0
 PASS P1-nested: go and js: refuted at a = 0, b = Box.Value { sameI: 0 }
 PASS P1-type-parameter: go and js: refuted at a = 0
 PASS P1-named-argument: go and js: tested
-PASS P1-entry-let: refused on go and js: EF101 ... same is the contract entry Eq.same, which this law's satisfaction binds to sameI
-PASS P1-law-call: refused on go and js: EF178 ... law__Eq__i64__reflexive is the law Eq.reflexive@i64, and a law is not a value
+PASS P1-entry-let: refused on go and js: EF101 ... same is the contract entry Eq.same, a binder of every law of its contract
+PASS P1-law-call: refused on go and js: EF178 ... reflexive is the law Eq.reflexive, and a law is not a value
+PASS R4-M1-labels: refused on go and js: EF106 ... callable values take positional arguments; remove label x
+PASS R4-M1-arity: refused on go and js: EF106 ... incorrect callback argument count
+PASS R4-M1-control: go and js: refuted at a = 0; refuted at a = 0, b = 0; tested; tested
+PASS R4-M2-bool: refused on go and js: EF106 ... body returns i64; expected bool
+PASS R4-M2-control: refused on go and js: EF106 ... body returns i64; expected bool
+PASS R4-m1: refused on go and js: EF002 ... T is a contract type parameter in this law
+PASS R4-m2: refused on go and js: EF171 ... quantifies s: Same<i64, nope>, which has no generator
+PASS R4-m2-test: ef test refuses on go and js before any harness runs: no receipt, no panic
+PASS R4-o3: go and js: tested; tested; tested
+PASS R4-o3-run: user functions spelled law__Eq__i64__reflexive and law__A__B__C__l check and run beside the laws on go and js
+PASS R4-o1-live: after an agreeing ef test --live --target both and an ordinary ef test --target go, the ledger still holds the standing refutation and the go build is refused: EF172 a cross-target refutation stands for this source digest: * (standing refutation from a non-live run); a 
+PASS R4-m3-receipt-null: ledger deleted, receipt null refused: EF191 the law receipt dist/strict.laws.go.json is unreadable (schemaVersion 0, want 2): it is refused, never read as absent, because it may hold a ref
+PASS R4-m3-receipt-{}: ledger deleted, receipt {} refused: EF191 the law receipt dist/strict.laws.go.json is unreadable (schemaVersion 0, want 2): it is refused, never read as absent, because it may hold a ref
+PASS R4-m3-receipt-extra: ledger deleted, receipt extra refused: EF191 the law receipt dist/strict.laws.go.json is unreadable (json: unknown field "extra"): it is refused, never read as absent, because it may hold a
+PASS R4-m4-ledger-}: a ledger followed by '}' is refused: EF191 the refutation ledger dist/strict.laws.refutations.json is unreadable (data after the ledger object): it is refused, never read as absent, becau
+PASS R4-m4-ledger-]: a ledger followed by ']' is refused: EF191 the refutation ledger dist/strict.laws.refutations.json is unreadable (data after the ledger object): it is refused, never read as absent, becau
 PASS Q2: refused on go and js: EF175 ... User satisfies Order with laws to run and no case budget
 laws probes: ok
 exit=0
