@@ -424,8 +424,11 @@ func (p *codecFinalizerProcess) next(t *testing.T) (string, bool) {
 }
 
 // expect fails unless the next stdout line is want. Once output has ended
-// it reports how the fixture exited, which tells a refused bind (IoError,
-// exit 1) from a fixture that ended without failing (#151).
+// it reports the fixture's exit status and stderr. In this fixture an
+// uncaught rebind failure (decode or encode) exits 1 with IoError. A refused
+// first bind is a forked listener whose failure stays pending while main
+// awaits a latch: on JS it currently exits 0 with empty stderr (#151), and
+// on Go it hangs, which next reports as no output within 10s.
 func (p *codecFinalizerProcess) expect(t *testing.T, want string) {
 	t.Helper()
 	line, ok := p.next(t)
@@ -490,9 +493,10 @@ func codecFinalizerSaturate(t *testing.T, address string, paths ...string) []net
 	}
 	// refusal returns the status line a stalled request received, or "" if
 	// nothing arrived within wait. Once a byte has arrived, the rest of the
-	// line must follow within five seconds, however the reads split it. A
-	// request whose body has not completed may receive only an admission
-	// refusal, so EOF, a reset or any other status fails the test.
+	// line must follow, however the reads split it, with no more than five
+	// seconds between reads. A request whose body has not completed may
+	// receive only an admission refusal, so EOF, a reset or any other status
+	// fails the test.
 	refusal := func(path string, conn net.Conn, wait time.Duration) string {
 		defer conn.SetReadDeadline(time.Time{})
 		_ = conn.SetReadDeadline(time.Now().Add(wait))
