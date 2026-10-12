@@ -61,7 +61,7 @@ machine Search {
 // runtime provider, which this profile does not admit yet.
 fn describe(decision: decision<Query, i64>) -> string {
     match decision {
-        enter next => "go " + label(next)
+        enter next => "enter " + label(next)
         stay next => "stay " + label(next)
         ignore => "ignore"
         reject => "reject"
