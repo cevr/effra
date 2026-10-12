@@ -423,10 +423,22 @@ func (p *codecFinalizerProcess) next(t *testing.T) (string, bool) {
 	}
 }
 
+// expect fails unless the next stdout line is want. Once output has ended
+// it reports how the fixture exited, which tells a refused bind (IoError,
+// exit 1) from a fixture that ended without failing (#151).
 func (p *codecFinalizerProcess) expect(t *testing.T, want string) {
 	t.Helper()
-	if line, ok := p.next(t); !ok || line != want {
-		t.Fatalf("stdout %q (open %v), want %q", line, ok, want)
+	line, ok := p.next(t)
+	if !ok {
+		select {
+		case <-p.done:
+			t.Fatalf("stdout ended, want %q; exit %d, stderr %q", want, p.command.ProcessState.ExitCode(), p.stderr.String())
+		case <-time.After(10 * time.Second):
+			t.Fatalf("stdout ended, want %q; not reaped within 10s", want)
+		}
+	}
+	if line != want {
+		t.Fatalf("stdout %q, want %q", line, want)
 	}
 }
 
