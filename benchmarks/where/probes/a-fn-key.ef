@@ -1,0 +1,16 @@
+// expect: EF127 (a) keyed by a bare function: callable type arguments wait for spike-rows unit 4a
+fn keyedBy<K: type>(key: K, hash: fn(K) -> i64, equals: fn(K, K) -> bool) -> i64 {
+    if equals(key, key) { hash(key) } else { 0 }
+}
+fn fnHash(f: fn(i64) -> i64) -> i64 {
+    0
+}
+fn fnEquals(a: fn(i64) -> i64, b: fn(i64) -> i64) -> bool {
+    true
+}
+fn double(n: i64) -> i64 {
+    n * 2
+}
+effect fn main() -> i64 {
+    keyedBy(double, fnHash, fnEquals)
+}

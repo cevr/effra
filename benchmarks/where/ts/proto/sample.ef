@@ -1,0 +1,251 @@
+// spike-where prototype (#116), option (b): where-clause dispatch.
+// One generic sort and one map key, as ordinary library code. Nothing here
+// is known to the compiler by name: `compare`, `hash` and `equals` are the
+// method names this library's where clauses ask for.
+import Data "effra/data"
+import I64 "effra/i64"
+
+record Three<T: type> {
+    a: T;
+    b: T;
+    c: T
+}
+
+fn sort2<T: type>(x: T, y: T) -> Three<T> where T.compare: fn(T, T) -> i64 {
+    if T.compare(y, x) < 0 {
+        Three {
+            a: y;
+            b: x;
+            c: x
+        }
+    } else {
+        Three {
+            a: x;
+            b: y;
+            c: y
+        }
+    }
+}
+
+// A three-element sorting network. Effra has no sequence type yet (no
+// recursive generic data, EF127; typed buffers are #120), so the sort is
+// fixed-size; the dispatch is what the prototype measures.
+fn sort3<T: type>(xs: Three<T>) -> Three<T> where T.compare: fn(T, T) -> i64 {
+    let ab = sort2(xs.a, xs.b)
+    let bc = sort2(ab.b, xs.c)
+    let lo = sort2(ab.a, bc.a)
+    Three {
+        a: lo.a;
+        b: lo.b;
+        c: bc.b
+    }
+}
+
+// A fixed-capacity hash table standing in for a map, for the same reason.
+enum Slot<K: type, V: type> {
+    Empty,
+    Full {
+        hash: i64;
+        key: K;
+        value: V
+    }
+}
+record Table<K: type, V: type> {
+    s1: Slot<K, V>;
+    s2: Slot<K, V>;
+    s3: Slot<K, V>
+}
+
+fn empty<K: type, V: type>(k: K, v: V) -> Table<K, V> {
+    Table {
+        s1: Slot<K, V>.Empty {};
+        s2: Slot<K, V>.Empty {};
+        s3: Slot<K, V>.Empty {}
+    }
+}
+
+fn matches<K: type, V: type>(slot: Slot<K, V>, hash: i64, key: K) -> bool where K.equals: fn(K, K) -> bool {
+    match slot {
+        Slot.Empty => false,
+        Slot.Full { hash: h, key: k, value: v } => if h == hash {
+            K.equals(k, key)
+        } else {
+            false
+        }
+    }
+}
+
+fn vacant<K: type, V: type>(slot: Slot<K, V>) -> bool {
+    match slot {
+        Slot.Empty => true,
+        Slot.Full { hash: h, key: k, value: v } => false
+    }
+}
+
+fn insert<K: type, V: type>(t: Table<K, V>, key: K, value: V) -> Table<K, V> where K.hash: fn(K) -> i64, K.equals: fn(K, K) -> bool {
+    let h = K.hash(key)
+    let full = Slot.Full {
+        hash: h;
+        key: key;
+        value: value
+    }
+    if matches(t.s1, h, key) {
+        Table {
+            s1: full;
+            s2: t.s2;
+            s3: t.s3
+        }
+    } else {
+        if matches(t.s2, h, key) {
+            Table {
+                s1: t.s1;
+                s2: full;
+                s3: t.s3
+            }
+        } else {
+            if matches(t.s3, h, key) {
+                Table {
+                    s1: t.s1;
+                    s2: t.s2;
+                    s3: full
+                }
+            } else {
+                if vacant(t.s1) {
+                    Table {
+                        s1: full;
+                        s2: t.s2;
+                        s3: t.s3
+                    }
+                } else {
+                    if vacant(t.s2) {
+                        Table {
+                            s1: t.s1;
+                            s2: full;
+                            s3: t.s3
+                        }
+                    } else {
+                        Table {
+                            s1: t.s1;
+                            s2: t.s2;
+                            s3: full
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn value<K: type, V: type>(slot: Slot<K, V>, fallback: V) -> V {
+    match slot {
+        Slot.Empty => fallback,
+        Slot.Full { hash: h, key: k, value: v } => v
+    }
+}
+
+fn lookup<K: type, V: type>(t: Table<K, V>, key: K, fallback: V) -> V where K.hash: fn(K) -> i64, K.equals: fn(K, K) -> bool {
+    let h = K.hash(key)
+    if matches(t.s1, h, key) {
+        value(t.s1, fallback)
+    } else {
+        if matches(t.s2, h, key) {
+            value(t.s2, fallback)
+        } else {
+            if matches(t.s3, h, key) {
+                value(t.s3, fallback)
+            } else {
+                fallback
+            }
+        }
+    }
+}
+
+// The application's own types declare their methods in their owner module.
+record User {
+    name: string;
+    age: i64
+}
+fn(u: User) compare(other: User) -> i64 {
+    u.age - other.age
+}
+
+record UserId {
+    org: string;
+    n: i64
+}
+fn(id: UserId) hash() -> i64 {
+    id.n
+}
+fn(a: UserId) equals(b: UserId) -> bool {
+    if a.n == b.n {
+        a.org == b.org
+    } else {
+        false
+    }
+}
+
+// Constructors for TypeScript callers (records are branded in the .d.mts).
+fn user(name: string, age: i64) -> User {
+    User {
+        name: name;
+        age: age
+    }
+}
+fn userId(org: string, n: i64) -> UserId {
+    UserId {
+        org: org;
+        n: n
+    }
+}
+fn three<T: type>(a: T, b: T, c: T) -> Three<T> {
+    Three {
+        a: a;
+        b: b;
+        c: c
+    }
+}
+effect fn main() -> string {
+    let users = sort3(Three {
+            a: User {
+                name: "c";
+                age: 30
+            };
+            b: User {
+                name: "a";
+                age: 10
+            };
+            c: User {
+                name: "b";
+                age: 20
+            }
+        })
+    // i64 resolves through its bundled owner module.
+    let numbers = sort3(Three {
+            a: 3;
+            b: 1;
+            c: 2
+        })
+    let key = UserId {
+        org: "acme";
+        n: 7
+    }
+    let t1 = insert(insert(empty(key, ""), UserId {
+                org: "acme";
+                n: 7
+            }, "ada"), UserId {
+            org: "zeta";
+            n: 7
+        }, "bob")
+    let t2 = insert(t1, UserId {
+            org: "acme";
+            n: 7
+        }, "ada2")
+    let counts = insert(empty(1, ""), 42, "answer")
+    users.a.name + users.b.name + users.c.name + " " + I64.format(numbers.a) + I64.format(numbers.b) + I64.format(numbers.c) + " " + lookup(t2, key, "none") + "," + lookup(t2, UserId {
+            org: "zeta";
+            n: 7
+        }, "none") + "," + lookup(t2, UserId {
+            org: "x";
+            n: 1
+        }, "none") + " " + lookup(counts, 42, "none")
+}

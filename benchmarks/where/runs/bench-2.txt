@@ -1,0 +1,37 @@
+== environment
+date 2026-10-12T00:23:12Z
+host Linux 6.12.93 x86_64, 16 cpus
+go on PATH: go version go1.26.5 linux/amd64
+ef 84ddc2088440efc0
+
+== checker time (types=16, distinct layouts; microseconds; median of 3)
+N      style      check      total      parse      bytes  load
+1000   a         266816     379205      60477     142991  14.96 15.60 16.61  runs=264792 302891 266816
+1000   b         285136     349353      41383     130507  14.96 15.60 16.61  runs=263997 286390 285136
+2000   a         533685     694970     132650     283879  14.08 15.40 16.55  runs=533685 545019 478407
+2000   b         506471     666960      83905     258954  14.08 15.40 16.55  runs=506471 499079 548199
+4000   a        1012400    1353613     247769     565599  13.92 15.35 16.52  runs=978225 1141164 1012400
+4000   b        1218486    1518795     176678     515799  13.92 15.35 16.52  runs=1218486 1248947 1106466
+8000   a        2133606    2702657     339267    1129159  12.93 15.09 16.42  runs=2184033 2133606 1734797
+8000   b        2058000    2633939     410334    1029609  12.93 15.09 16.42  runs=2623065 2058000 1666545
+
+== Go binary (one call site per type; stencils = text symbols main.efFunction_sort{2,3}[go.shape.*];
+   dicts = main..dict.efFunction_sort* instantiation dictionaries; runtime = SH1's runtime stencil count)
+types  layout    style      bytes stencils  dicts  runtime   stencilB
+16     distinct  a        2773597       32     32        7      23712
+16     distinct  b        2773517       32     32        7      23712
+16     shared    a        2731575        2     32        7       1482
+16     shared    b        2731399        2     32        7       1482
+64     distinct  a        2972212      128    128        7      94848
+64     distinct  b        2972132      128    128        7      94848
+64     shared    a        2810422        2    128        7       1482
+64     shared    b        2810438        2    128        7       1482
+
+Go binaries built by ef with go1.27.0
+
+== JavaScript output (types=16; bytes of the .mjs, raw and gzip -9)
+N      style        mjs       gzip      d.mts
+16     a          18111       4103      12070
+16     b          18159       4108      12070
+1000   a         263152      11031      13867
+1000   b         263200      11039      13867
