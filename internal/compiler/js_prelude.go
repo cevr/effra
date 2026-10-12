@@ -13,7 +13,7 @@ var jsPreludeSources embed.FS
 // jsEffectImports is the canonical order of the `effect` named imports a
 // generated module may use. A module imports only the names its emitted
 // chunks and declarations declare.
-var jsEffectImports = []string{"Context", "Clock", "Duration", "Effect", "Fiber", "Scope", "Scheduler", "Exit", "Cause", "Option", "Queue"}
+var jsEffectImports = []string{"Context", "Clock", "Duration", "Effect", "Fiber", "Scope", "Scheduler", "Exit", "Cause", "Option", "Queue", "Latch"}
 
 // jsPreludeChunk is one fixed piece of generated JavaScript: a lowering
 // helper, a builtin provider implementation or the test harness. It names
@@ -60,7 +60,7 @@ var jsPrelude = []jsPreludeChunk{
 	{name: "quote", source: preludeFile("quote.mjs")},
 	{name: "entry", requires: []string{"quote"}, imports: []string{"Effect", "Exit"}, source: preludeFile("entry.mjs")},
 	{name: "harness-slot", source: "let __ef_test_harness=null;\n"},
-	{name: "latch", imports: []string{"Effect"}, source: preludeFile("latch.mjs")},
+	{name: "latch", imports: []string{"Effect", "Latch"}, source: preludeFile("latch.mjs")},
 	{name: "provider:Stdout", imports: []string{"Effect"}, source: "const __ef_provider_Stdout = { log: (message) => Effect.sync(() => console.log(message)) };\n"},
 	{name: "provider:Assertions", requires: []string{"quote"}, imports: []string{"Effect"}, source: "const __ef_provider_Assertions={check:(condition,message)=>condition?Effect.succeed(undefined):Effect.fail({_tag:'AssertionFailed',message}),equalText:(actual,expected)=>actual===expected?Effect.succeed(undefined):Effect.fail({_tag:'AssertionFailed',message:'expected '+__ef_quoteText(expected)+'; received '+__ef_quoteText(actual)})};\n"},
 	{name: "provider:LiveClock", imports: []string{"Effect"}, source: "const __ef_provider_LiveClock={sleep:ms=> ms<0n || ms>2147483647n ? Effect.die(new Error('invalid millisecond duration')) : Effect.callback((resume,signal)=>{const timer=setTimeout(()=>resume(Effect.succeed(undefined)),Number(ms));const abort=()=>{clearTimeout(timer);resume(Effect.interrupt);};signal.addEventListener('abort',abort,{once:true});return Effect.sync(()=>{clearTimeout(timer);signal.removeEventListener('abort',abort);});})};\n"},
@@ -68,7 +68,7 @@ var jsPrelude = []jsPreludeChunk{
 	{name: "provider:LiveEnv", imports: []string{"Effect"}, source: "const __ef_provider_LiveEnv={get:name=>Effect.sync(()=>process.env[name] ?? '')};\n"},
 	{name: "provider:LiveScheduler", requires: []string{"provider:LiveClock"}, imports: []string{"Effect"}, source: "const __ef_provider_LiveScheduler={sleep:ms=>__ef_provider_LiveClock.sleep(ms),advance:()=>Effect.die(new Error('live scheduler cannot advance')),awaitRegistration:()=>Effect.die(new Error('live scheduler has no registration barrier'))};\n"},
 	{name: "provider:TestScheduler", requires: []string{"harness-slot"}, imports: []string{"Effect"}, source: "const __ef_provider_TestScheduler={sleep:ms=>__ef_test_harness?__ef_test_harness.scheduler.sleep(ms):Effect.die(new Error('test scheduler requires the ef test harness')),advance:ms=>__ef_test_harness?__ef_test_harness.scheduler.advance(ms):Effect.die(new Error('test scheduler adjustment is only available in the ef test harness')),awaitRegistration:()=>__ef_test_harness?__ef_test_harness.scheduler.awaitRegistration():Effect.die(new Error('test scheduler registration barrier is only available in the ef test harness'))};\n"},
-	{name: "provider:TestSync", requires: []string{"latch"}, imports: []string{"Effect"}, source: "const __ef_provider_TestSync={latch:()=>Effect.sync(()=>new __ef_latch()),await:latch=>latch?.await?.()??Effect.die(new Error('invalid latch handle')),signal:latch=>latch?.signal?.()??Effect.die(new Error('invalid latch handle'))};\n"},
+	{name: "provider:TestSync", requires: []string{"latch"}, imports: []string{"Effect"}, source: "const __ef_provider_TestSync={latch:()=>__ef_latch.make,await:latch=>__ef_latch.await(latch),signal:latch=>__ef_latch.signal(latch)};\n"},
 	{name: "test-harness", requires: []string{"harness-slot", "provider:Assertions", "provider:TestSync"}, imports: []string{"Cause", "Clock", "Duration", "Effect", "Exit", "Scheduler"}, source: preludeFile("test-harness.mjs")},
 }
 

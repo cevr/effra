@@ -4,11 +4,12 @@ const __ef_makeTestHarness=()=>{
   const timers=[];
   const invalidDuration=()=>Effect.die(new Error('invalid millisecond duration'));
   const remove=(timer)=>{const index=timers.indexOf(timer);if(index>=0)timers.splice(index,1);};
-  // Every managed fiber runs on this dispatcher: a fork, a yield and a
-  // preempted continuation are queued tasks. A callback resume (a latch
-  // signal, a fired timer, an interruption, a fiber's completion) instead runs
-  // its fiber inline, on top of the resumer's still-running turn. An empty
-  // queue therefore says nothing while any fiber is mid-turn.
+  // Every managed fiber runs on this dispatcher: a fork, a yield, a
+  // preempted continuation and a latch handoff (the `open` of Effect's latch) are
+  // queued tasks. A callback resume (a fired timer, an interruption, a fiber's
+  // completion) instead runs its fiber inline, on top of the resumer's
+  // still-running turn. An empty queue therefore says nothing while any fiber
+  // is mid-turn.
   //
   // Quiescence (Scheduler.awaitRegistration and each deadline selection of
   // Scheduler.advance) is decided only by the top-level drain, which runs from
