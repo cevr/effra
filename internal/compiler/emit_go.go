@@ -1300,6 +1300,12 @@ func (g *goEmitter) lower(e *Expr, effect bool, ret string, out *strings.Builder
 		return "struct{}{}"
 	case "construct":
 		return g.construct(e, effect, ret, out)
+	case "decision":
+		// A decision form is a construction of the predeclared template's
+		// variant named by its word.
+		form := *e
+		form.Fields = decisionFields(e)
+		return g.construct(&form, effect, ret, out)
 	case "name":
 		if e.Text == "function" {
 			return e.ResolvedFunction.goEmissionName()
@@ -1465,7 +1471,7 @@ func goTemplateDeclaration(r *Record) string {
 // dataTypes emits the data, error and template declarations the plan
 // retains through canonical type nodes or reachable fail statements.
 func (g *goEmitter) dataTypes(out *strings.Builder) {
-	for _, r := range g.program.BundledTemplates {
+	for _, r := range g.program.compilerTemplates() {
 		if g.plan.Requires(RequiresDeclaration, r.Identity) {
 			out.WriteString(goTemplateDeclaration(r))
 		}
@@ -1568,7 +1574,7 @@ func (g *goEmitter) construct(e *Expr, effect bool, ret string, out *strings.Bui
 	}
 	if e.ResolvedTemplate != nil {
 		if e.ResolvedTemplate.Kind == "enum" {
-			return canonicalGoType(g.program.semantic, e.checked.resultID(), map[TypeID]bool{}) + "(" + g.variantType(e.checked.resultID(), e.ResolvedTemplate, e.Left.Name) + "{" + strings.Join(parts, ",") + "})"
+			return canonicalGoType(g.program.semantic, e.checked.resultID(), map[TypeID]bool{}) + "(" + g.variantType(e.checked.resultID(), e.ResolvedTemplate, constructVariant(e)) + "{" + strings.Join(parts, ",") + "})"
 		}
 		return canonicalGoType(g.program.semantic, e.checked.resultID(), map[TypeID]bool{}) + "{" + strings.Join(parts, ",") + "}"
 	}
@@ -1586,7 +1592,7 @@ func (g *goEmitter) constructedFieldLayout(e *Expr, field string) (goLayout, boo
 	if e.ResolvedTemplate == nil {
 		return goLayout{}, false
 	}
-	return g.templateFieldLayout(canonicalLayout(e.checked.resultID()), e.Left.Name, field)
+	return g.templateFieldLayout(canonicalLayout(e.checked.resultID()), constructVariant(e), field)
 }
 func (g *goEmitter) constructCall(e *Expr, effect bool, ret string, out *strings.Builder) string {
 	return g.construct(e, effect, ret, out)

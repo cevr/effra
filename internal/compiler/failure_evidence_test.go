@@ -25,7 +25,7 @@ effect fn read(failure: WithFile) -> File raises {IoError} uses {Files} {
  let text = run Files.readText(failure.file)
  failure.file
 }
-fn ignore(failure: WithFile) -> File { failure.file }
+fn discard(failure: WithFile) -> File { failure.file }
 fn keep(failure: WithFile) -> File { failure.file }
 effect fn main() -> void { void }
 `
@@ -52,9 +52,9 @@ func TestFailureEvidenceRecoverChecksTheHandlerUses(t *testing.T) {
 		refused        bool
 	}{
 		{"dereferencing handler", `run bad(fallback).recover<WithFile>(read)`, true},
-		// ignore and keep never dereference the payload: recovery that
+		// discard and keep never dereference the payload: recovery that
 		// discards or stores a dead handle is admitted.
-		{"discarding handler", `let kept = run bad(fallback).recover<WithFile>(ignore)
+		{"discarding handler", `let kept = run bad(fallback).recover<WithFile>(discard)
  fallback`, false},
 		{"keeping handler", `let kept = run bad(fallback).recover<WithFile>(keep)
  fallback`, false},
@@ -97,7 +97,7 @@ effect fn job() -> string raises {WithFile, IoError} {
 effect fn readV(failure: WithFile) -> void raises {IoError} {
  let text = run Files.readText(failure.file).provide<Files>(LiveFiles)
 }
-fn ignoreV(failure: WithFile) -> void { void }
+fn discardV(failure: WithFile) -> void { void }
 effect fn stage() -> string raises {WithFile, IoError} {
  let fiber = fork job()
  run fiber.interrupt().recover<WithFile>(` + handler + `)
@@ -107,7 +107,7 @@ effect fn main() -> void { void }
 `
 	}
 	requireOwnershipRejected(t, stage("readV"))
-	requireOwnershipAccepted(t, stage("ignoreV"))
+	requireOwnershipAccepted(t, stage("discardV"))
 }
 
 // A handle-carrying label without evidence is unknown, never proven empty:

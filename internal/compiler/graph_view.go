@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -86,7 +87,10 @@ type GraphNodeFacts struct {
 	Binding   *GraphBindingFacts   `json:"binding,omitempty"`
 	Retention *GraphRetentionFacts `json:"retention,omitempty"`
 	Collapsed *GraphCollapsedFacts `json:"collapsed,omitempty"`
-	Frontier  bool                 `json:"frontier,omitempty"`
+	// Machine and MachineState are filled by the machine kind only.
+	Machine      *GraphMachineFacts      `json:"machine,omitempty"`
+	MachineState *GraphMachineStateFacts `json:"machineState,omitempty"`
+	Frontier     bool                    `json:"frontier,omitempty"`
 	// Closure marks a node published only because a selected edge names it
 	// in metadata (a plan or a replacement site); it was not traversed.
 	Closure bool `json:"closure,omitempty"`
@@ -101,6 +105,8 @@ type GraphEdgeFacts struct {
 	Selection    *GraphLayerSelectFacts `json:"selection,omitempty"`
 	Reason       string                 `json:"reason,omitempty"`
 	FirstWitness bool                   `json:"firstWitness,omitempty"`
+	// Transition is filled by the machine kind only.
+	Transition *GraphMachineTransitionFacts `json:"transition,omitempty"`
 }
 
 // GraphCollapsedFacts records the members a collapse hid. Hidden members are
@@ -297,7 +303,7 @@ const maxGraphOptionItems = 64
 const maxGraphOptionBytes = 1024
 
 var graphOptions = []GraphOption{
-	{Field: "kind", Flag: "--kind", Values: []string{"dependency", "layers", "application"}, Description: "Graph view kind; selecting kind or format requests GraphViewV1"},
+	{Field: "kind", Flag: "--kind", Values: []string{"dependency", "layers", "application", "machine"}, Description: "Graph view kind; selecting kind or format requests GraphViewV1"},
 	{Field: "format", Flag: "--format", Values: []string{"json", "mermaid", "dot"}, Description: "Rendering of the one selected view; json is the complete interchange"},
 	{Field: "focus", Flag: "--focus", Description: "Exact node ID to select around; requires a checked node of the kind"},
 	{Field: "depth", Flag: "--depth", Description: "Hops from the focus; requires focus; default 1"},
@@ -360,6 +366,7 @@ var graphKindRelations = map[GraphKind][]string{
 	GraphKindDependency:  {"adapts", "calls", "constructs", "contains", "implements", "materializes", "originates", "provides", "provides-layer", "references", "requires"},
 	GraphKindLayers:      {"consumes-input", "depends-on", "merges", "replaces", "requires-input", "selects"},
 	GraphKindApplication: {"retains", "runtime-requires", "selects"},
+	GraphKindMachine:     machineGraphRelations,
 }
 
 // graphKindContainment names the forest relation collapse groups follow. A
@@ -367,6 +374,7 @@ var graphKindRelations = map[GraphKind][]string{
 var graphKindContainment = map[GraphKind]string{
 	GraphKindDependency:  "contains",
 	GraphKindApplication: "retains",
+	GraphKindMachine:     "contains",
 }
 
 // graphApplicationModes maps the public entry modes, named after the `ef
@@ -428,12 +436,12 @@ func ParseGraphRequest(fields map[string]any) (GraphRequest, error) {
 		return request, err
 	} else if present {
 		switch GraphKind(kind) {
-		case GraphKindDependency, GraphKindLayers, GraphKindApplication:
+		case GraphKindDependency, GraphKindLayers, GraphKindApplication, GraphKindMachine:
 			request.Kind = GraphKind(kind)
-		case GraphKindMachine, GraphKindActor:
+		case GraphKindActor:
 			return request, graphRefusal(GraphRefusalKindUnavailable, "graph kind %s is not implemented; its checked plan owner has not landed", kind)
 		default:
-			return request, graphRefusal(GraphRefusalKind, "unknown graph kind %q; use dependency, layers or application", kind)
+			return request, graphRefusal(GraphRefusalKind, "unknown graph kind %q; use dependency, layers, application or machine", kind)
 		}
 	}
 	if format, present, err := text("format"); err != nil {
@@ -744,6 +752,9 @@ type graphFacts struct {
 	work        int
 	workLimit   int
 	err         error
+	// refusals counts admissions attempted after the work limit; a producer
+	// that stops at the first refusal keeps it at one.
+	refusals int
 }
 
 func newGraphFacts(kind GraphKind, limits GraphViewLimits) *graphFacts {
@@ -752,9 +763,11 @@ func newGraphFacts(kind GraphKind, limits GraphViewLimits) *graphFacts {
 
 func (f *graphFacts) spend(units int) bool {
 	if f.err != nil {
+		f.refusals++
 		return false
 	}
 	if units > f.workLimit-f.work {
+		f.refusals++
 		f.err = graphRefusal(GraphRefusalWorkLimit, "graph view work exceeds its %d-unit limit", f.workLimit)
 		return false
 	}
@@ -1209,6 +1222,8 @@ func (r *Result) GraphView(request GraphRequest) (*GraphView, error) {
 		facts, err = r.layerGraphFacts(limits)
 	case GraphKindApplication:
 		facts, err = r.applicationGraphFacts(request, limits)
+	case GraphKindMachine:
+		facts, err = r.machineGraphFacts(limits)
 	default:
 		return nil, graphRefusal(GraphRefusalKind, "unknown graph kind %q", request.Kind)
 	}
@@ -1296,11 +1311,14 @@ func (r *Result) GraphView(request GraphRequest) (*GraphView, error) {
 		Limitations: append([]string{}, facts.limitations...),
 	}
 	view.ID = graphViewID(view.Data.Effra)
-	if err := ValidateGraphView(view); err != nil {
-		return nil, graphRefusal(GraphRefusalInvalidView, "%v", err)
-	}
+	// Size the response before validating it, so an oversized view is
+	// refused before any work proportional to its contents. Neither step
+	// serialises the view.
 	if _, err := encodedSize(view, limits.ResponseBytes); err != nil {
 		return nil, graphRefusal(GraphRefusalResponseLimit, "graph view response: %v", err)
+	}
+	if err := ValidateGraphView(view); err != nil {
+		return nil, graphRefusal(GraphRefusalInvalidView, "%v", err)
 	}
 	return view, nil
 }
@@ -1522,8 +1540,12 @@ func qualifiedDeclarationPublished(qualifier string, declarations []Declaration)
 	if cut < 0 {
 		return false
 	}
+	// qualifier[:cut] ends with ":"+name, compared in place: building the
+	// suffix allocated once per declaration for every unpublished type.
+	prefix := qualifier[:cut]
 	for _, declaration := range declarations {
-		if declaration.Kind == kind && strings.HasSuffix(qualifier[:cut], ":"+declaration.Name) {
+		name := declaration.Name
+		if declaration.Kind == kind && len(prefix) > len(name) && prefix[len(prefix)-len(name)-1] == ':' && prefix[len(prefix)-len(name):] == name {
 			return true
 		}
 	}
@@ -1543,16 +1565,16 @@ func portExists(node *GraphViewNode, port string) bool {
 }
 
 // validateGraphViewReferences resolves every published reference against the
-// view's own fact tables, over the encoded interchange itself.
+// view's own fact tables. It walks the typed view by its struct fields' JSON
+// names and omissions (cachedProjectionJSONFields, as encodedSize uses), so
+// validation serialises nothing. That is the published interchange except
+// where a type marshals itself: ValueType.MarshalJSON publishes its ownership
+// facts as PublicOwnership, which the walk sees as OwnershipFact. Neither
+// form carries a key this walk checks, and
+// TestGraphViewReferenceWalkSeesEveryPublishedKey pins that ValueType is the
+// only marshaler reachable from GraphView and that its published form adds no
+// checked key.
 func validateGraphViewReferences(view *GraphView) error {
-	encoded, err := json.Marshal(view)
-	if err != nil {
-		return err
-	}
-	var wire map[string]any
-	if err := json.Unmarshal(encoded, &wire); err != nil {
-		return err
-	}
 	facts := view.Data.Effra.Facts
 	types, rows, declarations, sources, parameters := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, node := range facts.Types {
@@ -1575,36 +1597,56 @@ func validateGraphViewReferences(view *GraphView) error {
 			return fmt.Errorf("type %s references unpublished declaration %s", node.ID, node.Declaration)
 		}
 	}
-	var walk func(key string, value any) error
-	walk = func(key string, value any) error {
-		switch value := value.(type) {
-		case []any:
-			for _, item := range value {
-				if err := walk(key, item); err != nil {
+	// walk visits one encoded value under the JSON key it appears at; array
+	// items carry their array's key, as the decoded interchange does.
+	var walk func(key string, value reflect.Value) error
+	walk = func(key string, value reflect.Value) error {
+		for value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
+			if value.IsNil() {
+				return nil
+			}
+			value = value.Elem()
+		}
+		switch value.Kind() {
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < value.Len(); i++ {
+				if err := walk(key, value.Index(i)); err != nil {
 					return err
 				}
 			}
-			if key == "args" {
-				for _, item := range value {
-					if id, ok := item.(string); ok && !types[id] {
-						return fmt.Errorf("unpublished type reference args=%q", id)
-					}
+			for i := 0; i < value.Len() && (key == "args" || key == "labels"); i++ {
+				id, ok := graphJSONString(value.Index(i))
+				if !ok {
+					continue
+				}
+				if key == "args" && !types[id] {
+					return fmt.Errorf("unpublished type reference args=%q", id)
+				}
+				if key == "labels" && strings.HasPrefix(id, "row-parameter:") && !parameters[id] {
+					return fmt.Errorf("unpublished row parameter %q", id)
 				}
 			}
-			if key == "labels" {
-				for _, item := range value {
-					if id, ok := item.(string); ok && strings.HasPrefix(id, "row-parameter:") && !parameters[id] {
-						return fmt.Errorf("unpublished row parameter %q", id)
-					}
+		case reflect.Map:
+			iter := value.MapRange()
+			for iter.Next() {
+				child := ""
+				if iter.Key().Kind() == reflect.String {
+					child = iter.Key().String()
 				}
-			}
-		case map[string]any:
-			for child, item := range value {
-				if err := walk(child, item); err != nil {
+				if err := walk(child, iter.Value()); err != nil {
 					return err
 				}
 			}
-		case string:
+		case reflect.Struct:
+			for _, field := range cachedProjectionJSONFields(value.Type()) {
+				if child, present := graphJSONField(value, field); present {
+					if err := walk(field.name, child); err != nil {
+						return err
+					}
+				}
+			}
+		case reflect.String:
+			value := value.String()
 			if value == "" {
 				return nil
 			}
@@ -1625,27 +1667,60 @@ func validateGraphViewReferences(view *GraphView) error {
 		}
 		return nil
 	}
-	data := wire["data"].(map[string]any)["effra"].(map[string]any)
-	tables := data["facts"].(map[string]any)
-	if err := walk("types", tables["types"]); err != nil {
+	if err := walk("types", reflect.ValueOf(facts.Types)); err != nil {
 		return err
 	}
-	if err := walk("rows", tables["rows"]); err != nil {
+	if err := walk("rows", reflect.ValueOf(facts.Rows)); err != nil {
 		return err
 	}
-	for _, collection := range []string{"nodes", "edges"} {
-		items, _ := wire[collection].([]any)
-		for _, item := range items {
-			entity := item.(map[string]any)["data"].(map[string]any)["effra"].(map[string]any)
-			if source, ok := entity["source"].(string); ok && source != "" && !sources[source] {
-				return fmt.Errorf("unpublished source reference %q", source)
-			}
-			if err := walk(collection, entity); err != nil {
-				return err
-			}
+	for i := range view.Nodes {
+		entity := &view.Nodes[i].Data.Effra
+		if entity.Source != "" && !sources[entity.Source] {
+			return fmt.Errorf("unpublished source reference %q", entity.Source)
+		}
+		if err := walk("nodes", reflect.ValueOf(entity)); err != nil {
+			return err
+		}
+	}
+	for i := range view.Edges {
+		if err := walk("edges", reflect.ValueOf(&view.Edges[i].Data.Effra)); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// graphJSONField resolves one published field of a struct value, reporting
+// false where encoding/json omits it: a nil embedded pointer on its path, or
+// an empty value under omitempty or omitzero.
+func graphJSONField(value reflect.Value, field projectionJSONField) (reflect.Value, bool) {
+	for _, index := range field.index {
+		if value.Kind() == reflect.Pointer {
+			if value.IsNil() {
+				return reflect.Value{}, false
+			}
+			value = value.Elem()
+		}
+		value = value.Field(index)
+	}
+	if (field.omitEmpty && projectionEmptyJSONValue(value)) || (field.omitZero && value.IsZero()) {
+		return reflect.Value{}, false
+	}
+	return value, true
+}
+
+// graphJSONString is an array item that encodes as a JSON string.
+func graphJSONString(value reflect.Value) (string, bool) {
+	for value.Kind() == reflect.Interface || value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return "", false
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.String {
+		return "", false
+	}
+	return value.String(), true
 }
 
 func applicationNodeID(kind ApplicationRequirementKind, identity string) string {

@@ -244,3 +244,12 @@ structural nodes under a `with` scope have a scoped identity, so equal
 scopes share a plan. [`examples/codec-transforms.ef`](../examples/codec-transforms.ef)
 exercises pure, normalizing, refining and effectful witnesses, nested
 composition and a configuration caller on Go and JS.
+
+## Machine decisions (removed)
+
+The `effra/machines` module and its `Step<S, O>` enum are removed. Machine
+decisions are syntax: a step or completion function returns the predeclared
+`decision<S, O>` and writes `enter e`, `stay e`, `ignore`, `reject` or
+`done e` (see [decisions](specs/state-machines.md#decisions)). Importing
+`effra/machines` is the ordinary unknown-bundled-module diagnostic (EF126),
+with a help that names the rewrite. A user enum named `Step` is ordinary data.

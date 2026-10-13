@@ -550,6 +550,13 @@ func command(args []string) error {
 				}
 				return printProjectionJSON(response)
 			}
+			if r.FindMachine(opts.positional[1]) != nil {
+				response, err := r.MachineInspection(opts.positional[1], opts.positional[0])
+				if err != nil {
+					return err
+				}
+				return printProjectionJSON(response)
+			}
 			if declaration := r.FindDeclaration(opts.positional[1]); declaration != nil {
 				projection := r.ProjectDeclaration(declaration)
 				if !projection.Complete {

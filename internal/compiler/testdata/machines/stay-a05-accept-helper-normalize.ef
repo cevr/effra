@@ -1,0 +1,21 @@
+enum SessionState { Idle  Active { key: string }  Closed }
+enum SessionEvent { Open { key: string }  Close  Touch  Restore { snapshot: SessionState } }
+fn normalize(s: SessionState) -> SessionState {
+    match s {
+        SessionState.Idle => SessionState.Idle {}
+        SessionState.Active { key } => SessionState.Active { key: key + "!" }
+        SessionState.Closed => SessionState.Closed {}
+    }
+}
+fn sessionStep(state: SessionState, event: SessionEvent) -> decision<SessionState, void> {
+    match state, event {
+        SessionState.Active, SessionEvent.Touch => stay normalize(state)
+        SessionState.Active, SessionEvent.Open | SessionEvent.Close | SessionEvent.Restore => ignore
+        SessionState.Idle | SessionState.Closed, SessionEvent.Open | SessionEvent.Close | SessionEvent.Touch | SessionEvent.Restore => ignore
+    }
+}
+
+machine Session {
+    initial SessionState.Idle {}
+    step sessionStep
+}

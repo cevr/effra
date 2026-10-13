@@ -248,9 +248,10 @@ func TestEndpointDeclarationsFormat(t *testing.T) {
 	source := "fn ping() -> void {\n}\nderive health=Http.endpoint( method:\"GET\",path : \"/health\",handler:ping,status:204 )\nderive api = Http.routes( health )\n"
 	want := "fn ping() -> void {\n}\nderive health = Http.endpoint(method: \"GET\", path: \"/health\", handler: ping, status: 204)\nderive api = Http.routes(health)\n"
 	assertFormat(t, source, want)
-	// Endpoint and route-table declarations are a syntax admission, so the
-	// formatter identity that formats them is formatter-14.
-	if FormatterIdentity != "effra/formatter-14" {
+	// Endpoint and route-table declarations are a syntax admission (from
+	// formatter-14); the current identity, formatter-16, also admits machine
+	// declarations.
+	if FormatterIdentity != "effra/formatter-16" {
 		t.Fatalf("formatter identity %s does not name the endpoint admission", FormatterIdentity)
 	}
 }

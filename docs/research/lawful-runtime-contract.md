@@ -174,7 +174,9 @@ P1–P12 fulfilment and R1–R15 obligations. The mechanism records contract and
 law identity, source revision, target, provider, fixture, toolchain, outcome
 receipt and a visible justifier when execution is unavailable. This is a
 receipt schema and ownership rule, not an admission of `law` or `contract`
-syntax; that construct remains a separate owner decision.
+syntax. The owner settled the placement on 2026-10-12: "laws is for sure a
+construct." The [#125](https://github.com/cevr/effra/issues/125) spike decides
+its shape ([NORTH_STAR](../../NORTH_STAR.md)).
 
 The owner places this contract with two earlier findings (2026-10-08: "the
 lawful runtime goes with the ghost of departed proofs and bend findings

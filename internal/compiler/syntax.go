@@ -262,10 +262,13 @@ type LayerEntry struct {
 	Continuation bool
 }
 type Program struct {
-	interfaceProducer       bool
-	references              map[string]bool
-	semantic                *checker
-	BundledTemplates        []*Record
+	interfaceProducer bool
+	references        map[string]bool
+	semantic          *checker
+	BundledTemplates  []*Record
+	// decisionTemplate is the predeclared decision<S, O> (decisions.go),
+	// present when the program spells the type.
+	decisionTemplate        *Record
 	BundledTypeBindings     map[string]map[string]*Record
 	BundledConstantBindings map[string]map[string]*Constant
 	typeExpressions         map[string]*sourceType
@@ -289,6 +292,7 @@ type Program struct {
 	Services                []*Service
 	Providers               []*Provider
 	Layers                  []*Layer
+	Machines                []*Machine // machine declarations; see machines_syntax.go
 	Functions               []*Function
 	Constants               []*Constant
 	Codecs                  []*CodecDeclaration
@@ -312,6 +316,7 @@ type SyntaxItem struct {
 	Service       *Service
 	Provider      *Provider
 	Layer         *Layer
+	Machine       *Machine
 	Function      *Function
 	Constant      *Constant
 	Codec         *CodecDeclaration
@@ -378,6 +383,9 @@ type MatchPattern struct {
 	// recognize pattern punctuation without re-deriving it from tokens.
 	Payload      Span  `json:"-"`
 	ResolvedEnum *Enum `json:"-"`
+	// decision marks a decision-word pattern (`enter next`, `ignore`); its
+	// owner is the predeclared decision type and it has no dotted segments.
+	decision bool
 }
 
 // PatternName retains source order and the alias token independently of the
@@ -755,7 +763,7 @@ func parseSyntax(source string) (program *Program, tokens []token, comments []Co
 				} else if p.accept("(") {
 					variant.Parenthesized = true
 					for !p.accept(")") {
-						field := p.name()
+						field := p.label()
 						p.expect(":")
 						typ, typeSpan := p.typeAnnotation()
 						variant.Fields = append(variant.Fields, Field{Name: field.text, Type: typ, sourceType: p.types[typ], Span: field.span, TypeSpan: typeSpan, Annotation: p.lastType})
@@ -884,6 +892,12 @@ func parseSyntax(source string) (program *Program, tokens []token, comments []Co
 			}
 			program.Layers = append(program.Layers, layer)
 			program.Items = append(program.Items, &SyntaxItem{Kind: "layer", Layer: layer, Span: start})
+		case "machine":
+			start := p.take().span
+			machine := p.machineDeclaration()
+			program.Machines = append(program.Machines, machine)
+			program.Items = append(program.Items, &SyntaxItem{Kind: "machine", Machine: machine, Span: start})
+			p.accept(";")
 		case "derive":
 			start := p.take().span
 			if p.isEndpointDeclaration() {
@@ -902,7 +916,7 @@ func parseSyntax(source string) (program *Program, tokens []token, comments []Co
 					p.failAbsent(absentInDeclaration, head.text, head.span)
 				}
 			}
-			p.fail(p.peek(), "expected error, record, enum, service, impl, layer, derive, or function declaration")
+			p.fail(p.peek(), "expected error, record, enum, service, impl, layer, machine, derive, or function declaration")
 		}
 		item := program.Items[len(program.Items)-1]
 		item.Extent = p.extent(item.Span)
@@ -992,7 +1006,34 @@ func (p *parser) name() token {
 	if v.text == "void" {
 		p.fail(v, "void is reserved for the no-value type and expression")
 	}
+	if isDecisionWord(v.text) {
+		p.fail(v, reservedDecisionWordMessage(v.text))
+	}
 	return v
+}
+
+// label reads an explicit field label: a record or variant field
+// declaration, a constructor `name: value` or a pattern `name: binder`. A
+// label never starts an expression, so the decision words stay legal here and
+// a derived codec can carry wire keys such as "done". Shorthand, which reads
+// or binds a local of the label's name, refuses them at its own site.
+func (p *parser) label() token {
+	v := p.take()
+	if v.kind != "name" {
+		p.fail(v, "expected identifier")
+	}
+	if v.text == "void" {
+		p.fail(v, "void is reserved for the no-value type and expression")
+	}
+	return v
+}
+
+// shorthandLabel refuses `{ done }` shorthand: it would read or bind a local
+// named by a reserved decision word.
+func (p *parser) shorthandLabel(label token, explicit string) {
+	if isDecisionWord(label.text) {
+		p.fail(label, label.text+" is a decision word, so it cannot be shorthand for a local; write `"+label.text+": "+explicit+"`")
+	}
 }
 
 // memberName admits a qualified host member without making the source
@@ -1206,7 +1247,7 @@ func (p *parser) fields() []Field {
 	p.expect("{")
 	var fields []Field
 	for !p.accept("}") {
-		name := p.name()
+		name := p.label()
 		p.expect(":")
 		typ, typeSpan := p.typeAnnotation()
 		fields = append(fields, Field{Name: name.text, Type: typ, sourceType: p.types[typ], Span: name.span, TypeSpan: typeSpan, Annotation: p.lastType})
@@ -1224,8 +1265,11 @@ func (p *parser) fieldValues() []FieldValue {
 	p.expect("{")
 	var fields []FieldValue
 	for !p.accept("}") {
-		name := p.name()
+		name := p.label()
 		field := FieldValue{Name: name.text, Span: name.span}
+		if p.regionUpdateAhead() {
+			p.fail(p.peek(), "region updates (`"+name.text+" <- decision`) are not admitted; region bindings are a later milestone")
+		}
 		if p.accept(":") {
 			// Payload braces delimit their values, so constructor braces
 			// inside an if/match header are unambiguous again.
@@ -1235,6 +1279,7 @@ func (p *parser) fieldValues() []FieldValue {
 			p.noConstruct = protected
 		} else {
 			// Record construction permits shorthand `{name}` for `{name: name}`.
+			p.shorthandLabel(name, "value")
 			field.Value = &Expr{Kind: "name", Name: name.text, Span: name.span, Extent: name.span}
 		}
 		fields = append(fields, field)
@@ -1455,6 +1500,9 @@ func (p *parser) expr(min int) *Expr {
 		e.Kind = "run"
 		e.Left = p.expr(prefixPrecedence)
 		chainPipe = p.lastPipe
+	case start.kind == "name" && isDecisionWord(start.text):
+		e = p.decision(start)
+		chainPipe = p.lastPipe
 	case start.text == "if":
 		e.Kind = "if"
 		p.noConstruct++
@@ -1486,13 +1534,19 @@ func (p *parser) expr(min int) *Expr {
 		// match nested in another header parse constructors unprotected.
 		protected := p.noConstruct
 		p.noConstruct, p.subjectList = 0, false
+		// afterDone records that the previous arm ended with `done X,` on the
+		// line where this arm starts; it only selects a repair hint.
+		afterDone := false
 		for !p.accept("}") {
 			cells := [][]*MatchPattern{p.patternCell()}
 			for p.accept(",") {
 				cells = append(cells, p.patternCell())
 			}
+			p.decisionArmCellsHint(afterDone, len(cells), len(e.Args))
+			afterDone = false
 			pattern := cells[0][0]
 			p.expect("=>")
+			var value *Expr
 			var body *Block
 			if p.peek().text == "fail" {
 				start := p.take()
@@ -1513,11 +1567,14 @@ func (p *parser) expr(min int) *Expr {
 			} else if p.peek().text == "{" {
 				body = p.block()
 			} else {
-				value := p.expr(0)
+				value = p.expr(0)
+				p.decisionArmSeparatorHint(value)
 				body = &Block{Statements: []*Statement{{Kind: "expr", Value: value, Span: value.Span, Extent: value.Extent}}, Extent: value.Extent}
 			}
 			e.Arms = append(e.Arms, &MatchArm{Patterns: cells, Body: body, Span: pattern.Span, Extent: p.extent(pattern.Span)})
-			p.accept(",")
+			if separator := p.peek(); p.accept(",") {
+				afterDone = doneTookOperand(value) && p.peek().span.Line == separator.span.Line
+			}
 			p.accept(";")
 		}
 		p.noConstruct, p.subjectList = protected, subjectList
@@ -1617,7 +1674,7 @@ func (p *parser) expr(min int) *Expr {
 			p.noConstruct = 0
 			for !p.accept(")") {
 				if p.peek().kind == "name" && p.at+1 < len(p.tokens) && p.tokens[p.at+1].text == ":" {
-					field := p.name()
+					field := p.label()
 					p.expect(":")
 					value := p.expr(0)
 					call.Fields = append(call.Fields, FieldValue{Name: field.text, Value: value, Span: field.span, Label: field.span})
@@ -1759,7 +1816,7 @@ const prefixPrecedence = 4
 
 // pipeHeadReserved are the words that start another expression form, so they
 // cannot name the function on the right of a |>.
-var pipeHeadReserved = map[string]bool{"run": true, "fork": true, "if": true, "match": true, "scope": true, "true": true, "false": true, "void": true}
+var pipeHeadReserved = map[string]bool{"run": true, "fork": true, "if": true, "match": true, "scope": true, "true": true, "false": true, "void": true, "enter": true, "stay": true, "ignore": true, "reject": true, "done": true}
 
 func pipeBesideOperator(op string) string {
 	return "a |> chain beside " + op + " is ambiguous; parenthesise: (a |> f()) " + op + " b or a " + op + " (b |> f())"
@@ -1860,16 +1917,19 @@ func (p *parser) patternCell() []*MatchPattern {
 }
 
 func (p *parser) pattern() *MatchPattern {
+	if word := p.peek(); word.kind == "name" && isDecisionWord(word.text) {
+		return p.decisionPattern(p.take())
+	}
 	first := p.name()
 	pattern := &MatchPattern{TypeName: first.text, Bindings: map[string]string{}, Span: first.span, Segments: []Span{first.span}}
 	if p.accept(".") {
-		variant := p.name()
+		variant := p.memberName()
 		pattern.VariantName = variant.text
 		pattern.Span.Length = variant.span.Offset + variant.span.Length - pattern.Span.Offset
 		pattern.Segments = append(pattern.Segments, variant.span)
 		if p.accept(".") {
 			pattern.TypeName += "." + variant.text
-			variant = p.name()
+			variant = p.memberName()
 			pattern.VariantName = variant.text
 			pattern.Span.Length = variant.span.Offset + variant.span.Length - pattern.Span.Offset
 			pattern.Segments = append(pattern.Segments, variant.span)
@@ -1879,7 +1939,7 @@ func (p *parser) pattern() *MatchPattern {
 		payloadStart := p.take().span
 		seen := map[string]bool{}
 		for !p.accept("}") {
-			field := p.name()
+			field := p.label()
 			if seen[field.text] {
 				p.fail(field, "duplicate pattern field "+field.text)
 			}
@@ -1887,6 +1947,8 @@ func (p *parser) pattern() *MatchPattern {
 			binding := field
 			if p.accept(":") {
 				binding = p.name()
+			} else {
+				p.shorthandLabel(field, "binder")
 			}
 			pattern.Bindings[field.text] = binding.text
 			pattern.Names = append(pattern.Names, PatternName{Field: field.text, Name: binding.text, FieldSpan: field.span, NameSpan: binding.span})

@@ -2,10 +2,12 @@ package compiler
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -52,6 +54,134 @@ effect fn test_advance_admits_unstarted_fork() -> void raises {AssertionFailed} 
 	jsOutput, err := runWithWatchdog(bun, writeGeneratedJS(t, "explicit-scheduler-", jsSource))
 	if err != nil || !strings.Contains(string(jsOutput), `"passed":true`) {
 		t.Fatalf("generated JS explicit test providers: %v\n%s", err, jsOutput)
+	}
+}
+
+// The scheduler examples run on both targets, and every discovered case must
+// pass on each, in source order.
+//
+// Scheduler.awaitRegistration has one meaning on both targets: it returns at
+// quiescence, when no managed fiber is running or runnable. The interrupt
+// after a barrier must find the work already complete, so a barrier that
+// returned early fails the join, and a barrier waiting for a new registration
+// hangs until the watchdog. The required cases cover:
+//   - quiescence.ef, work that registers no new timer: the #80 repro, a latch
+//     signalled before the fork, a pure fork, a completion that cancels its
+//     timeout timer, a nested fork, and mixed sibling forks;
+//   - quiescence-wakes.ef, wakes in flight: wakes by cancellation, which carry
+//     no wake reservation on Go (an interrupted sleeper or latch waiter and a
+//     closed scope), and a signalled waiter that has not run yet (readiness
+//     then registration, with and without the barrier before advance, and a
+//     resumed waiter that resumes another and advances); and interrupting a
+//     fiber parked at the barrier, which must be an ordinary interruption,
+//     never a defect;
+//   - latch-handoff.ef, the latch handoff (#142): a signal makes its waiters
+//     runnable and returns, the signaller keeps its turn, and each waiter
+//     resumes on its own turn. Interrupting the signaller after its signal
+//     cannot affect a waiter, and a signalled waiter interrupted before it
+//     runs is interrupted. A waiter resumed inside its signaller's turn fails
+//     the interrupt-after-signal cases.
+//
+// The cancellation cases are timing-dependent on Go; the receipts for #80
+// record their failure rates without the fix at high counts.
+func TestSchedulerExamplesAcrossTargets(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("Bun is required for generated scheduler tests")
+	}
+	examples := []struct {
+		file     string
+		required []string
+	}{
+		{file: "causal.ef"},
+		{file: "quiescence.ef", required: []string{
+			"test_barrier_after_immediately_completed_timeout",
+			"test_barrier_after_latch_signalled_before_fork",
+			"test_barrier_after_pure_fork_then_interrupt",
+			"test_barrier_after_completion_cancels_timeout",
+			"test_barrier_after_nested_fork",
+			"test_barrier_settles_mixed_sibling_forks",
+		}},
+		{file: "quiescence-wakes.ef", required: []string{
+			"test_barrier_after_interrupting_a_sleeper",
+			"test_barrier_after_interrupting_a_latch_waiter",
+			"test_barrier_after_scope_close",
+			"test_barrier_after_readiness_then_advance",
+			"test_advance_after_readiness",
+			"test_barrier_after_nested_resumption",
+			"test_interrupting_a_barrier_waiter",
+		}},
+		{file: "latch-handoff.ef", required: []string{
+			"test_interrupting_the_signaller_after_signal",
+			"test_signal_before_wait",
+			"test_two_waiters",
+			"test_interrupting_the_signaller_while_the_waiter_is_at_the_barrier",
+			"test_signal_inside_a_scope_that_closes_after",
+			"test_interrupting_a_signalled_waiter_before_it_runs",
+			"test_scope_close_interrupts_a_signalled_waiter_before_it_runs",
+		}},
+	}
+	for _, example := range examples {
+		t.Run(example.file, func(t *testing.T) {
+			source, err := os.ReadFile(filepath.Join("..", "..", "examples", example.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := CompileAt(string(source), "go", filepath.Join("..", "..", "examples"))
+			if !r.Checked {
+				t.Fatal(r.Diagnostics)
+			}
+			tests, err := r.Tests()
+			if err != nil {
+				t.Fatal(err)
+			}
+			names := []string{}
+			for _, test := range tests {
+				names = append(names, test.Name)
+			}
+			for _, name := range example.required {
+				if !slices.Contains(names, name) {
+					t.Fatalf("examples/%s lost case %s (cases: %v)", example.file, name, names)
+				}
+			}
+			jsSource, _, err := r.EmitJSTests()
+			if err != nil {
+				t.Fatal(err)
+			}
+			runs := map[string]func() ([]byte, error){
+				"go": func() ([]byte, error) { return runWithWatchdog(buildGeneratedGo(t, r, GoGenerationTest)) },
+				"js": func() ([]byte, error) {
+					return runWithWatchdog(bun, writeGeneratedJS(t, "scheduler-example-", jsSource))
+				},
+			}
+			for _, target := range []string{"go", "js"} {
+				output, err := runs[target]()
+				if err != nil {
+					t.Fatalf("%s suite: %v\n%s", target, err, output)
+				}
+				lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+				var report struct {
+					Passed bool `json:"passed"`
+					Tests  []struct {
+						Name   string `json:"name"`
+						Passed bool   `json:"passed"`
+					} `json:"tests"`
+				}
+				if err := json.Unmarshal([]byte(lines[len(lines)-1]), &report); err != nil {
+					t.Fatalf("%s suite report: %v\n%s", target, err, output)
+				}
+				reported := []string{}
+				for _, test := range report.Tests {
+					if !test.Passed {
+						t.Errorf("%s: %s failed\n%s", target, test.Name, output)
+					}
+					reported = append(reported, test.Name)
+				}
+				if !report.Passed || !slices.Equal(reported, names) {
+					t.Fatalf("%s suite: passed=%v reported %v, want %v\n%s", target, report.Passed, reported, names, output)
+				}
+			}
+		})
 	}
 }
 

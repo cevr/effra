@@ -60,7 +60,7 @@ func (c *checker) checkTemplates() {
 			r.EmissionName = r.Name
 		}
 	}
-	declarations = append(declarations, c.program.BundledTemplates...)
+	declarations = append(declarations, c.program.compilerTemplates()...)
 	for _, r := range declarations {
 		if len(r.Parameters) == 0 {
 			continue
@@ -143,7 +143,7 @@ func (c *checker) templateDeclaration(r *Record) Declaration {
 // occurrence keeps its checked ID; nested applications use the same arena.
 func (c *checker) resolveDataTemplateLayouts() {
 	declarations := append(append([]*DataDeclaration{}, c.program.Records...), c.program.Enums...)
-	declarations = append(declarations, c.program.BundledTemplates...)
+	declarations = append(declarations, c.program.compilerTemplates()...)
 	// Each template's published declaration is replaced once its layout
 	// resolves. checkTemplates published them all, and resolving publishes
 	// none, so their positions are indexed once rather than searched per
@@ -308,7 +308,26 @@ func (c *checker) templateByName(name string) *Record {
 			return r
 		}
 	}
-	return index.bundled[c.functionModule][name]
+	if r := index.bundled[c.functionModule][name]; r != nil {
+		return r
+	}
+	return nil
+}
+
+// typeTemplateByName resolves a template name in type position: a source or
+// bundled template first, then the predeclared decision<S, O>, which is in
+// every module's type scope when no source record or enum named decision
+// shadows it. Constructor and call heads use templateByName and never reach
+// the predeclared type, so a function or local named decision still resolves
+// as a value.
+func (c *checker) typeTemplateByName(name string) *Record {
+	if r := c.templateByName(name); r != nil {
+		return r
+	}
+	if name == decisionTypeName {
+		return c.program.decisionTemplate
+	}
+	return nil
 }
 
 // templateNames indexes the program's templates by unqualified name, once per
@@ -480,7 +499,7 @@ func (c *checker) sourceApplication(t *sourceType) TypeID {
 }
 
 func (c *checker) sourceApplicationCanonical(t *sourceType) TypeID {
-	r := c.templateByName(t.Application)
+	r := c.typeTemplateByName(t.Application)
 	if r == nil {
 		return invalidTypeID
 	}

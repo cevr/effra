@@ -601,7 +601,7 @@ enum Choice {
     First
     Second
 }
-effect fn done() -> Outcome uses { Console } {
+effect fn finish() -> Outcome uses { Console } {
     run Console.log("done ran")
     Outcome.Done { value: "ok" }
 }
@@ -610,11 +610,11 @@ effect fn failed() -> Outcome uses { Console } {
     Outcome.Failed { reason: "bad" }
 }
 fn pick(flag: bool) -> Effect<Outcome, {}, { Console }> {
-    if flag { done() } else { failed() }
+    if flag { finish() } else { failed() }
 }
 fn choose(choice: Choice) -> Effect<Outcome, {}, { Console }> {
     match choice {
-        Choice.First => done(),
+        Choice.First => finish(),
         Choice.Second => failed()
     }
 }

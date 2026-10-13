@@ -268,8 +268,8 @@ fn pick(first: Data.Option<string>, second: Data.Option<string>, again: bool) ->
         pick(second, first, true)
     }
 }
-fn settle(done: bool) -> void {
-    if done {
+fn settle(finished: bool) -> void {
+    if finished {
         void
     } else {
         settle(true)
@@ -386,8 +386,8 @@ func TestParametersCannotBeShadowed(t *testing.T) {
 	}
 }
 
-const tailGoldenSource = `fn settle(a: string, b: string, done: bool) -> string {
-    if done {
+const tailGoldenSource = `fn settle(a: string, b: string, finished: bool) -> string {
+    if finished {
         a + b
     } else {
         settle(b, a + b, true)
@@ -398,21 +398,21 @@ effect fn main() -> string {
 }
 `
 
-const tailGoldenJS = `const __ef_function_settle = (__ef_arg_a, __ef_arg_b, __ef_arg_done) => {
+const tailGoldenJS = `const __ef_function_settle = (__ef_arg_a, __ef_arg_b, __ef_arg_finished) => {
 while (true) {
 const __ef_local_a = __ef_arg_a;
 const __ef_local_b = __ef_arg_b;
-const __ef_local_done = __ef_arg_done;
-if (__ef_local_done) {
+const __ef_local_finished = __ef_arg_finished;
+if (__ef_local_finished) {
 return (__ef_local_a + __ef_local_b);
 } else {
 {
 const __ef_next_a = __ef_local_b;
 const __ef_next_b = (__ef_local_a + __ef_local_b);
-const __ef_next_done = true;
+const __ef_next_finished = true;
 __ef_arg_a = __ef_next_a;
 __ef_arg_b = __ef_next_b;
-__ef_arg_done = __ef_next_done;
+__ef_arg_finished = __ef_next_finished;
 continue;
 }
 }
@@ -420,15 +420,15 @@ continue;
 };
 `
 
-const tailGoldenGo = `func efFunction_settle(efArg_a string, efArg_b string, efArg_done bool) string {
+const tailGoldenGo = `func efFunction_settle(efArg_a string, efArg_b string, efArg_finished bool) string {
 	for {
 		efLocal_a := efArg_a
 		_ = efLocal_a
 		efLocal_b := efArg_b
 		_ = efLocal_b
-		efLocal_done := efArg_done
-		_ = efLocal_done
-		if efLocal_done {
+		efLocal_finished := efArg_finished
+		_ = efLocal_finished
+		if efLocal_finished {
 			efTemp1 := efLocal_a
 			return (efTemp1 + efLocal_b)
 		} else {
@@ -438,7 +438,7 @@ const tailGoldenGo = `func efFunction_settle(efArg_a string, efArg_b string, efA
 			efTemp5 := true
 			efArg_a = efTemp2
 			efArg_b = efTemp4
-			efArg_done = efTemp5
+			efArg_finished = efTemp5
 			continue
 		}
 	}

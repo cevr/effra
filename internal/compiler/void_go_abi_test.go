@@ -160,8 +160,8 @@ effect fn main() -> void { choose(Mode.Run()); choose(Mode.Skip()); void }`},
 	{"nested-callable-result", `fn finish() -> void { void }
 fn factory() -> fn() -> void { finish }
 fn use(make: fn() -> fn() -> void) -> void {
-    let done = make();
-    done()
+    let finished = make();
+    finished()
 }
 effect fn main() -> void { use(factory); void }`},
 	{"record-field-extraction", `record Holder<T: type> { callback: fn() -> T }
@@ -169,14 +169,14 @@ fn finish() -> void { void }
 fn selected() -> Holder<void> { Holder<void> { callback: finish } }
 fn extract(h: Holder<void>) -> fn() -> void { h.callback }
 effect fn main() -> void {
-    let done = extract(selected());
-    done();
+    let finished = extract(selected());
+    finished();
     void
 }`},
 	{"enum-match-extraction", `enum Hooks<T: type> { Some { callback: fn() -> T }; Empty }
 fn skip() -> void {}
 fn pick(hooks: Hooks<void>) -> fn() -> void { match hooks { Hooks.Some { callback } => callback; Hooks.Empty => skip } }
-effect fn main() -> void { let done = pick(Hooks<void>.Empty {}); done(); void }`},
+effect fn main() -> void { let finished = pick(Hooks<void>.Empty {}); finished(); void }`},
 	{"enum-payload-construction", `enum Hooks<T: type> { Some { callback: fn() -> T } }
 fn finish() -> void { void }
 fn selected() -> Hooks<void> {
@@ -198,8 +198,8 @@ effect fn make() -> fn() -> void { finish }
 fn selected() -> Deferred<void> { Deferred<void> { make: make } }
 effect fn main() -> void {
     let deferred = selected();
-    let done = run deferred.make();
-    done();
+    let finished = run deferred.make();
+    finished();
     void
 }`},
 	{"nested-enum-application-construction", `enum Action<F: callable fn() -> A, A: type> { Some { operation: F } }

@@ -3,6 +3,8 @@ package effra
 import (
 	"context"
 	"errors"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 )
@@ -41,7 +43,7 @@ func TestTestSchedulerControlsSleepAndRegistration(t *testing.T) {
 		})
 	}()
 	waitSchedulerSignal(t, started)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("sleep registration: %v", err)
 	}
 	if err := scheduler.Advance(99); err != nil {
@@ -86,7 +88,7 @@ func TestTestSchedulerAdvancesSequentialSleepAtIntermediateDeadlines(t *testing.
 			return Succeed(Unit{})
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("first registration: %v", err)
 	}
 	if err := scheduler.Adjust(50); err != nil {
@@ -129,7 +131,7 @@ func TestTestSchedulerWaitsForHeldManagedTurnBeforeAdvancing(t *testing.T) {
 			return out
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("first registration: %v", err)
 	}
 	adjusted := make(chan error, 1)
@@ -198,7 +200,7 @@ func TestTestSchedulerWaitsForLatchContinuationBeforeAdvancing(t *testing.T) {
 			return Invoke(fc, second.Value.Join())
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("first registration: %v", err)
 	}
 	if err := scheduler.Adjust(50); err != nil {
@@ -247,7 +249,7 @@ func TestTestSchedulerWaitsForJoinContinuationBeforeAdvancing(t *testing.T) {
 			return Invoke(fc, second.Value.Join())
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("first registration: %v", err)
 	}
 	if err := scheduler.Adjust(50); err != nil {
@@ -295,7 +297,7 @@ func TestTestSchedulerStrongAdjustPreservesCausalIntermediateTimes(t *testing.T)
 				return Invoke(fc, joiner.Value.Join())
 			})
 		}()
-		if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 			t.Fatalf("iteration %d first registration: %v", iteration, err)
 		}
 		if err := scheduler.Adjust(50); err != nil {
@@ -335,7 +337,7 @@ func TestTestSchedulerDeadlineCleanupPreservesIntermediateTime(t *testing.T) {
 				return Invoke(fc, Sleep(30))
 			})
 		}()
-		if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 			t.Fatalf("iteration %d first registration: %v", iteration, err)
 		}
 		if err := scheduler.Adjust(50); err != nil {
@@ -391,7 +393,7 @@ func TestTestSchedulerDoesNotObserveIndependentTimerBeforeJoinPublication(t *tes
 				return Invoke(fc, joiner.Value.Join())
 			})
 		}()
-		if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+		if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 			t.Fatalf("iteration %d first registration: %v", iteration, err)
 		}
 		if err := scheduler.Adjust(100); err != nil {
@@ -440,7 +442,7 @@ func TestTestSchedulerWaitsForScopeCleanupContinuationBeforeAdvancing(t *testing
 			return Invoke(fc, Sleep(30))
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("cleanup registration: %v", err)
 	}
 	if err := scheduler.Adjust(50); err != nil {
@@ -485,7 +487,7 @@ func TestTestSchedulerPartialScopeCleanupCanAdvanceAndThenDrain(t *testing.T) {
 		})
 	}()
 	waitSchedulerSignal(t, releaseStarted)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("cleanup registration: %v", err)
 	}
 	adjustWithin(t, scheduler, 0)
@@ -665,7 +667,7 @@ func TestTestSchedulerWaitsForTimeoutContinuationBeforeAdvancing(t *testing.T) {
 			return Invoke(fc, Sleep(30))
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("timeout registration: %v", err)
 	}
 	if err := scheduler.Adjust(50); err != nil {
@@ -712,7 +714,7 @@ func TestTimeoutUsesSchedulerAndWaitsForCancelledCleanup(t *testing.T) {
 		})
 	}()
 	waitSchedulerSignal(t, started)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("timeout registration: %v", err)
 	}
 	if err := scheduler.Advance(49); err != nil {
@@ -761,7 +763,7 @@ func TestTestSchedulerPartialTimeoutCleanupCanAdvance(t *testing.T) {
 			}, 10))
 		})
 	}()
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("timeout registration: %v", err)
 	}
 	adjustWithin(t, scheduler, 10)
@@ -860,7 +862,7 @@ func TestTestSchedulerForkedCleanupUsesIndependentContinuations(t *testing.T) {
 			}()
 
 			waitSchedulerSignal(t, releaseStarted)
-			if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+			if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 				t.Fatalf("forked cleanup registration: %v", err)
 			}
 			adjustWithin(t, scheduler, 10)
@@ -905,7 +907,7 @@ func TestTestSchedulerTimeoutInsideCleanupCanAdvanceToDeadline(t *testing.T) {
 	}()
 
 	waitSchedulerSignal(t, releaseStarted)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("nested timeout registration: %v", err)
 	}
 	adjustWithin(t, scheduler, 5)
@@ -967,7 +969,7 @@ func TestTestSchedulerPartialWorkWinnerCleanupCanAdvance(t *testing.T) {
 		})
 	}()
 	waitSchedulerSignal(t, deadlineReady)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("work/deadline registration: %v", err)
 	}
 	adjustWithin(t, scheduler, 10)
@@ -1071,7 +1073,7 @@ func TestTestSchedulerDeadlineWinnerWithAlreadyClosingWorkCleanupCanAdvance(t *t
 	}()
 
 	waitSchedulerSignal(t, releaseStarted)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("deadline/cleanup registration: %v", err)
 	}
 	adjustWithin(t, scheduler, 10)
@@ -1355,7 +1357,7 @@ func TestCancelledSleepUnregistersItsTimer(t *testing.T) {
 		})
 	}()
 	waitSchedulerSignal(t, started)
-	if err := scheduler.AwaitRegistration(context.Background()); err != nil {
+	if err := scheduler.AwaitNextRegistration(context.Background()); err != nil {
 		t.Fatalf("sleep registration: %v", err)
 	}
 	cancel()
@@ -1367,7 +1369,266 @@ func TestCancelledSleepUnregistersItsTimer(t *testing.T) {
 	}
 	barrierCtx, barrierCancel := context.WithTimeout(context.Background(), time.Millisecond)
 	defer barrierCancel()
-	if err := scheduler.AwaitRegistration(barrierCtx); !errors.Is(err, context.DeadlineExceeded) {
+	if err := scheduler.AwaitNextRegistration(barrierCtx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("stale timer remained registered: %v", err)
+	}
+}
+
+// The managed barrier behind Scheduler.awaitRegistration returns once no
+// managed fiber is runnable, whether or not a timer was registered since the
+// last barrier. Before it returns, forked work that completes immediately, a
+// timeout whose already-signalled work cancels its timer, and a nested fork
+// have all run, and a sleeping fork has registered its timer, which is then
+// the only pending one.
+func TestManagedRegistrationBarrierReturnsAtIdle(t *testing.T) {
+	scheduler := NewTestScheduler()
+	latch := NewLatch()
+	type observation struct {
+		settled []bool
+		timers  int
+	}
+	observed := make(chan observation, 1)
+	done := make(chan Exit[Unit], 1)
+	settle := func(ran chan struct{}) Effect[Unit] {
+		return func(*FiberContext) Exit[Unit] {
+			close(ran)
+			return Succeed(Unit{})
+		}
+	}
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+			if out := Invoke(fc, SignalLatch(latch)); out.IsFailure() {
+				return out
+			}
+			immediate, timed, nested := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			forks := []Effect[*Fiber[Unit]]{
+				Fork(settle(immediate)),
+				Fork(Timeout(func(child *FiberContext) Exit[Unit] {
+					if out := Invoke(child, AwaitLatch(latch)); out.IsFailure() {
+						return out
+					}
+					return Invoke(child, settle(timed))
+				}, 10)),
+				Fork(func(child *FiberContext) Exit[Unit] {
+					inner := Invoke(child, Fork(settle(nested)))
+					if inner.IsFailure() {
+						return Propagate[Unit](inner)
+					}
+					return Invoke(child, inner.Value.Join())
+				}),
+				Fork(Sleep(20)),
+			}
+			fibers := []*Fiber[Unit]{}
+			for _, fork := range forks {
+				out := Invoke(fc, fork)
+				if out.IsFailure() {
+					return Propagate[Unit](out)
+				}
+				fibers = append(fibers, out.Value)
+			}
+			if out := AwaitTestSchedulerRegistration(fc, scheduler); out.IsFailure() {
+				return out
+			}
+			settled := []bool{}
+			for _, ran := range []chan struct{}{immediate, timed, nested} {
+				select {
+				case <-ran:
+					settled = append(settled, true)
+				default:
+					settled = append(settled, false)
+				}
+			}
+			scheduler.mu.Lock()
+			timers := len(scheduler.timers)
+			scheduler.mu.Unlock()
+			observed <- observation{settled: settled, timers: timers}
+			if out := AdjustTestScheduler(fc, scheduler, 20); out.IsFailure() {
+				return out
+			}
+			for _, fiber := range fibers {
+				if out := Invoke(fc, fiber.Join()); out.IsFailure() {
+					return out
+				}
+			}
+			return Succeed(Unit{})
+		})
+	}()
+	select {
+	case got := <-observed:
+		if !slices.Equal(got.settled, []bool{true, true, true}) || got.timers != 1 {
+			t.Fatalf("barrier returned before idle: settled (immediate, timed, nested) = %v, pending timers = %d, want the sleep's alone", got.settled, got.timers)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("managed barrier did not return at idle")
+	}
+	select {
+	case out := <-done:
+		if out.IsFailure() {
+			t.Fatalf("barrier root failed: %+v", out)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("barrier root did not finish")
+	}
+}
+
+// A cancelled context wakes a parked sleeper or latch waiter with no wake
+// reservation, and the canceller then parks on the woken fiber's completion.
+// Until the woken fiber has its turn back it is runnable, so the managed
+// barrier must not return in that window. Each case forks a worker that parks
+// a victim, waits at its own barrier until the victim is parked, releases the
+// root, cancels the victim and then marks completion. The root's barrier,
+// entered after that release, must observe the mark.
+//
+// The window is held open, not raced for: the woken victim waits in the
+// cancelledResume hook until a barrier has decided once inside the window,
+// every counter idle while the victim's context is done. Without the
+// cancellation rule that decision is idle and the root's barrier returns
+// before the mark, every run.
+func TestManagedBarrierCountsCancellationWakes(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		cancel func(fc *FiberContext, park func(*FiberContext, Effect[Unit]) (*Fiber[Unit], Exit[Unit])) Exit[Unit]
+		victim func(latch *Latch) Effect[Unit]
+	}{
+		{"interrupt sleeper", nil, func(*Latch) Effect[Unit] { return Sleep(1000) }},
+		{"interrupt latch waiter", nil, func(latch *Latch) Effect[Unit] { return AwaitLatch(latch) }},
+		{"scope close", func(fc *FiberContext, park func(*FiberContext, Effect[Unit]) (*Fiber[Unit], Exit[Unit])) Exit[Unit] {
+			return Invoke(fc, Scoped(func(inner *FiberContext) Exit[Unit] {
+				_, out := park(inner, Sleep(1000))
+				return out
+			}))
+		}, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			scheduler := NewTestScheduler()
+			release := make(chan struct{})
+			verdict := make(chan bool, 1)
+			var decided sync.Once
+			scheduler.hooks = &schedulerHooks{
+				cancelledResume: func() { <-release },
+				idleChecked: func(window, idle bool) {
+					if window {
+						decided.Do(func() {
+							verdict <- idle
+							close(release)
+						})
+					}
+				},
+			}
+			latch := NewLatch()
+			ready := NewLatch()
+			// park forks the victim and returns once it is parked: the worker's
+			// own barrier is the ordering point. It then releases the root.
+			park := func(fc *FiberContext, victim Effect[Unit]) (*Fiber[Unit], Exit[Unit]) {
+				parked := Invoke(fc, Fork(victim))
+				if parked.IsFailure() {
+					return nil, Propagate[Unit](parked)
+				}
+				if out := AwaitTestSchedulerRegistration(fc, scheduler); out.IsFailure() {
+					return nil, out
+				}
+				return parked.Value, Invoke(fc, SignalLatch(ready))
+			}
+			cancel := test.cancel
+			if cancel == nil {
+				cancel = func(fc *FiberContext, park func(*FiberContext, Effect[Unit]) (*Fiber[Unit], Exit[Unit])) Exit[Unit] {
+					victim, out := park(fc, test.victim(latch))
+					if out.IsFailure() {
+						return out
+					}
+					return Invoke(fc, victim.Interrupt())
+				}
+			}
+			marked := make(chan struct{})
+			observed := make(chan bool, 1)
+			done := make(chan Exit[Unit], 1)
+			go func() {
+				done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+					worker := Invoke(fc, Fork(func(child *FiberContext) Exit[Unit] {
+						if out := cancel(child, park); out.IsFailure() {
+							return out
+						}
+						close(marked)
+						return Succeed(Unit{})
+					}))
+					if worker.IsFailure() {
+						return Propagate[Unit](worker)
+					}
+					if out := Invoke(fc, AwaitLatch(ready)); out.IsFailure() {
+						return out
+					}
+					if out := AwaitTestSchedulerRegistration(fc, scheduler); out.IsFailure() {
+						return out
+					}
+					select {
+					case <-marked:
+						observed <- true
+					default:
+						observed <- false
+					}
+					return Invoke(fc, worker.Value.Join())
+				})
+			}()
+			select {
+			case idle := <-verdict:
+				if idle {
+					t.Fatal("barrier judged idle while a fiber woken by cancellation had not run again")
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("no barrier decided inside the cancellation window")
+			}
+			select {
+			case settled := <-observed:
+				if !settled {
+					t.Fatal("barrier returned while the cancelled fiber was still runnable")
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("managed barrier did not return")
+			}
+			select {
+			case out := <-done:
+				if out.IsFailure() {
+					t.Fatalf("cancellation root failed: %+v", out)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("cancellation root did not finish")
+			}
+		})
+	}
+}
+
+// Interrupting a fiber parked in the managed barrier is an ordinary
+// interruption: the barrier's cancelled wait ends in an interrupt cause, not a
+// defect, so Interrupt succeeds. The waiter signals before it enters the
+// barrier and keeps the turn until it parks there, so the interrupt always
+// reaches it parked.
+func TestInterruptingABarrierWaiterIsAnInterruption(t *testing.T) {
+	scheduler := NewTestScheduler()
+	entered := NewLatch()
+	done := make(chan Exit[Unit], 1)
+	go func() {
+		done <- RunContextWithScheduler(context.Background(), scheduler, func(fc *FiberContext) Exit[Unit] {
+			waiter := Invoke(fc, Fork(func(child *FiberContext) Exit[Unit] {
+				if out := Invoke(child, SignalLatch(entered)); out.IsFailure() {
+					return out
+				}
+				return AwaitTestSchedulerRegistration(child, scheduler)
+			}))
+			if waiter.IsFailure() {
+				return Propagate[Unit](waiter)
+			}
+			if out := Invoke(fc, AwaitLatch(entered)); out.IsFailure() {
+				return out
+			}
+			return Invoke(fc, waiter.Value.Interrupt())
+		})
+	}()
+	select {
+	case out := <-done:
+		if out.IsFailure() {
+			t.Fatalf("interrupting a barrier waiter failed: %+v", out.Cause())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("interrupting a barrier waiter did not finish")
 	}
 }

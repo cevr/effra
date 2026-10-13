@@ -226,6 +226,7 @@ func TestGraphViewsAgreeAcrossCLIAndMCPWithoutExecution(t *testing.T) {
 	root := t.TempDir()
 	copyExample(t, root, "layers.ef")
 	copyExample(t, root, "testing.ef")
+	copyExample(t, root, "machine-breaker.ef")
 	before := listDirectory(t, root)
 	cases := []graphProcessCase{
 		{"dependency-json", "layers.ef", []string{"--format", "json"}, map[string]any{"format": "json"}},
@@ -237,6 +238,9 @@ func TestGraphViewsAgreeAcrossCLIAndMCPWithoutExecution(t *testing.T) {
 		{"layers-dot", "layers.ef", []string{"--kind", "layers", "--format", "dot"}, map[string]any{"kind": "layers", "format": "dot"}},
 		{"application-json", "layers.ef", []string{"--kind", "application"}, map[string]any{"kind": "application"}},
 		{"application-mermaid", "layers.ef", []string{"--kind", "application", "--mode", "build", "--format", "mermaid"}, map[string]any{"kind": "application", "mode": "build", "format": "mermaid"}},
+		{"machine-json", "machine-breaker.ef", []string{"--kind", "machine"}, map[string]any{"kind": "machine"}},
+		{"machine-mermaid", "machine-breaker.ef", []string{"--kind", "machine", "--format", "mermaid"}, map[string]any{"kind": "machine", "format": "mermaid"}},
+		{"machine-dot-focus", "machine-breaker.ef", []string{"--kind", "machine", "--format", "dot", "--focus", "machine:module:file:CircuitBreaker", "--edge-kind", "initial"}, map[string]any{"kind": "machine", "format": "dot", "focus": "machine:module:file:CircuitBreaker", "edgeKinds": []any{"initial"}}},
 		{"application-test-dot", "testing.ef", []string{"--kind", "application", "--mode", "test", "--format", "dot"}, map[string]any{"kind": "application", "mode": "test", "format": "dot"}},
 	}
 	calls := []map[string]any{}
@@ -336,7 +340,7 @@ func TestGraphViewRefusalsAgreeAcrossCLIAndMCP(t *testing.T) {
 		args  map[string]any
 	}{
 		{compiler.GraphRefusalKind, 2, "layers.ef", []string{"--kind", "flow"}, map[string]any{"kind": "flow"}},
-		{compiler.GraphRefusalKindUnavailable, 2, "layers.ef", []string{"--kind", "machine"}, map[string]any{"kind": "machine"}},
+		{compiler.GraphRefusalKindUnavailable, 2, "layers.ef", []string{"--kind", "actor"}, map[string]any{"kind": "actor"}},
 		{compiler.GraphRefusalFormatUnavailable, 2, "layers.ef", []string{"--format", "html"}, map[string]any{"format": "html"}},
 		{compiler.GraphRefusalFormat, 2, "layers.ef", []string{"--format", "svg"}, map[string]any{"format": "svg"}},
 		{compiler.GraphRefusalIncompatible, 2, "layers.ef", []string{"--depth", "1"}, map[string]any{"depth": 1}},

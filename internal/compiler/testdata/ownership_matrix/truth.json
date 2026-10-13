@@ -5548,7 +5548,7 @@
 "go": "safe"
 },
 {
-"name": "hd_run_in_ignore",
+"name": "hd_run_in_discard",
 "go": "safe"
 },
 {
@@ -5556,7 +5556,7 @@
 "go": "safe"
 },
 {
-"name": "hd_timeout_in_ignore",
+"name": "hd_timeout_in_discard",
 "go": "safe"
 },
 {
@@ -5564,7 +5564,7 @@
 "go": "unsafe"
 },
 {
-"name": "hd_timeout_out_ignore",
+"name": "hd_timeout_out_discard",
 "go": "safe"
 },
 {
@@ -5572,7 +5572,7 @@
 "go": "safe"
 },
 {
-"name": "hd_fork_in_ignore",
+"name": "hd_fork_in_discard",
 "go": "safe"
 },
 {
@@ -5580,7 +5580,7 @@
 "go": "unsafe"
 },
 {
-"name": "hd_fork_out_ignore",
+"name": "hd_fork_out_discard",
 "go": "safe"
 },
 {
@@ -5588,7 +5588,7 @@
 "go": "safe"
 },
 {
-"name": "hd_scope_in_ignore",
+"name": "hd_scope_in_discard",
 "go": "safe"
 },
 {
@@ -5596,7 +5596,7 @@
 "go": "unsafe"
 },
 {
-"name": "hd_scope_out_ignore",
+"name": "hd_scope_out_discard",
 "go": "safe"
 },
 {
@@ -5604,7 +5604,7 @@
 "go": "safe"
 },
 {
-"name": "hd_provision_in_ignore",
+"name": "hd_provision_in_discard",
 "go": "safe"
 },
 {
@@ -5612,7 +5612,7 @@
 "go": "unsafe"
 },
 {
-"name": "hd_provision_out_ignore",
+"name": "hd_provision_out_discard",
 "go": "safe"
 },
 {
@@ -5656,7 +5656,7 @@
 "go": "safe"
 },
 {
-"name": "ch_join_child_ignore",
+"name": "ch_join_child_discard",
 "go": "safe"
 },
 {
@@ -5664,7 +5664,7 @@
 "go": "unsafe"
 },
 {
-"name": "ch_join_observer_ignore",
+"name": "ch_join_observer_discard",
 "go": "safe"
 },
 {
@@ -5672,7 +5672,7 @@
 "go": "unsafe"
 },
 {
-"name": "ch_join_stage_ignore",
+"name": "ch_join_stage_discard",
 "go": "safe"
 },
 {
@@ -5680,7 +5680,7 @@
 "go": "unsafe"
 },
 {
-"name": "ch_join_outside_ignore",
+"name": "ch_join_outside_discard",
 "go": "safe"
 },
 {
@@ -5688,7 +5688,7 @@
 "go": "safe"
 },
 {
-"name": "ch_interrupt_child_ignore",
+"name": "ch_interrupt_child_discard",
 "go": "safe"
 },
 {
@@ -5696,7 +5696,7 @@
 "go": "unsafe"
 },
 {
-"name": "ch_interrupt_observer_ignore",
+"name": "ch_interrupt_observer_discard",
 "go": "safe"
 },
 {
@@ -5704,7 +5704,7 @@
 "go": "unsafe"
 },
 {
-"name": "ch_interrupt_stage_ignore",
+"name": "ch_interrupt_stage_discard",
 "go": "safe"
 },
 {
@@ -5712,7 +5712,7 @@
 "go": "unsafe"
 },
 {
-"name": "ch_interrupt_outside_ignore",
+"name": "ch_interrupt_outside_discard",
 "go": "safe"
 },
 {
@@ -5720,7 +5720,7 @@
 "go": "safe"
 },
 {
-"name": "ch_none_child_ignore",
+"name": "ch_none_child_discard",
 "go": "safe"
 },
 {
@@ -5728,7 +5728,7 @@
 "go": "row-unsafe"
 },
 {
-"name": "ch_none_stage_ignore",
+"name": "ch_none_stage_discard",
 "go": "row-unsafe"
 },
 {
@@ -5736,61 +5736,61 @@
 "go": "unsafe"
 },
 {
-"name": "ch_none_outside_ignore",
+"name": "ch_none_outside_discard",
 "go": "safe"
 },
 {
-"name": "rw_join_child_ignore",
+"name": "rw_join_child_discard",
 "go": "safe",
 "js": "safe"
 },
 {
-"name": "rw_join_observer_ignore",
+"name": "rw_join_observer_discard",
 "go": "safe",
 "js": "safe"
 },
 {
-"name": "rw_join_stage_ignore",
+"name": "rw_join_stage_discard",
 "go": "safe",
 "js": "safe"
 },
 {
-"name": "rw_join_outside_ignore",
+"name": "rw_join_outside_discard",
 "go": "safe",
 "js": "safe"
 },
 {
-"name": "rw_interrupt_child_ignore",
+"name": "rw_interrupt_child_discard",
 "go": "safe",
 "js": "safe"
 },
 {
-"name": "rw_interrupt_observer_ignore",
+"name": "rw_interrupt_observer_discard",
 "go": "safe",
 "js": "safe"
 },
 {
-"name": "rw_interrupt_stage_ignore",
+"name": "rw_interrupt_stage_discard",
 "go": "safe",
 "js": "safe"
 },
 {
-"name": "rw_interrupt_outside_ignore",
+"name": "rw_interrupt_outside_discard",
 "go": "safe",
 "js": "safe"
 },
 {
-"name": "rw_none_child_ignore",
+"name": "rw_none_child_discard",
 "go": "safe",
 "js": "safe"
 },
 {
-"name": "rw_none_stage_ignore",
+"name": "rw_none_stage_discard",
 "go": "row-unsafe",
 "js": "row-unsafe"
 },
 {
-"name": "rw_none_outside_ignore",
+"name": "rw_none_outside_discard",
 "go": "safe",
 "js": "safe"
 },
@@ -5811,19 +5811,19 @@
 "go": "unsafe"
 },
 {
-"name": "fr_run_inside_ignore",
+"name": "fr_run_inside_discard",
 "go": "safe"
 },
 {
-"name": "fr_timeout_inside_ignore",
+"name": "fr_timeout_inside_discard",
 "go": "safe"
 },
 {
-"name": "fr_fork_inside_ignore",
+"name": "fr_fork_inside_discard",
 "go": "safe"
 },
 {
-"name": "fr_provision_inside_ignore",
+"name": "fr_provision_inside_discard",
 "go": "safe"
 },
 {
@@ -5843,19 +5843,19 @@
 "go": "unsafe"
 },
 {
-"name": "fr_run_param_ignore",
+"name": "fr_run_param_discard",
 "go": "safe"
 },
 {
-"name": "fr_timeout_param_ignore",
+"name": "fr_timeout_param_discard",
 "go": "safe"
 },
 {
-"name": "fr_fork_param_ignore",
+"name": "fr_fork_param_discard",
 "go": "safe"
 },
 {
-"name": "fr_provision_param_ignore",
+"name": "fr_provision_param_discard",
 "go": "safe"
 },
 {
@@ -6580,7 +6580,7 @@
 "go": "unsafe"
 },
 {
-"name": "ff_join_inner-left_ignore",
+"name": "ff_join_inner-left_discard",
 "go": "safe"
 },
 {
@@ -6588,7 +6588,7 @@
 "go": "unsafe"
 },
 {
-"name": "ff_join_inner-right_ignore",
+"name": "ff_join_inner-right_discard",
 "go": "safe"
 },
 {
@@ -6600,7 +6600,7 @@
 "go": "unsafe"
 },
 {
-"name": "ff_helper_pure_ignore",
+"name": "ff_helper_pure_discard",
 "go": "safe"
 },
 {
@@ -6608,7 +6608,7 @@
 "go": "unsafe"
 },
 {
-"name": "ff_helper_effect_ignore",
+"name": "ff_helper_effect_discard",
 "go": "safe"
 },
 {
@@ -6616,7 +6616,7 @@
 "go": "unsafe"
 },
 {
-"name": "ff_helper_nested_ignore",
+"name": "ff_helper_nested_discard",
 "go": "safe"
 },
 {
@@ -6624,7 +6624,7 @@
 "go": "unsafe"
 },
 {
-"name": "ff_helper_twice_ignore",
+"name": "ff_helper_twice_discard",
 "go": "safe"
 },
 {
@@ -6632,7 +6632,7 @@
 "go": "unsafe"
 },
 {
-"name": "ff_helper_inline_ignore",
+"name": "ff_helper_inline_discard",
 "go": "safe"
 },
 {

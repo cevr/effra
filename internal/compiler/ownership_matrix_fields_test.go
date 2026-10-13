@@ -20,13 +20,13 @@ effect fn rejected(file: File) -> string raises { WithFile } {
     fail WithFile { file: file }
 }
 effect fn retrieve(failure: WithFile) -> string raises { IoError } { run readFile(failure.file) }
-fn ignore(failure: WithFile) -> string { "fixture-ok" }
+fn discard(failure: WithFile) -> string { "fixture-ok" }
 `
 
 // ownershipMatrixFieldCatch handles the IoError a reading handler can raise;
 // an ignoring handler raises none, and catching an absent label is refused.
 func ownershipMatrixFieldCatch(handler string) string {
-	if handler == "ignore" {
+	if handler == "discard" {
 		return ""
 	}
 	return `.catch<IoError>("closed")`
@@ -48,7 +48,7 @@ func ownershipMatrixFieldPayloadPrograms(fix string) []ownershipMatrixProgram {
 	// Joins: the scope-owned alternative executes, so its payload's file
 	// is closed when the handler dispatches.
 	for _, order := range []string{"inner-left", "inner-right"} {
-		for _, h := range []string{"retrieve", "ignore"} {
+		for _, h := range []string{"retrieve", "discard"} {
 			left, right, flag := "inner", "outer", "true"
 			if order == "inner-right" {
 				left, right, flag = "outer", "inner", "false"
@@ -93,7 +93,7 @@ effect fn main() -> void raises { IoError } {
 		"twice":  "fn pack1(file: File) -> Holder {\n    Holder { task: rejected(file) }\n}\nfn pack(file: File) -> Holder {\n    pack1(file)\n}\n",
 	}
 	for _, kind := range []string{"pure", "effect", "nested", "twice", "inline"} {
-		for _, h := range []string{"retrieve", "ignore"} {
+		for _, h := range []string{"retrieve", "discard"} {
 			helper, call, field := helpers[kind], "pack(file)", "h.task"
 			switch kind {
 			case "effect":

@@ -916,7 +916,7 @@ func lspSmokeFormattingCase(t *testing.T, cli lspSmokeCLI) {
 					if shared["text"] != formatted || shared["changed"] != (formatted != c.source) {
 						t.Fatalf("MCP format %v, CLI %q", shared, formatted)
 					}
-					if shared["formatterVersion"] != "effra/formatter-14" {
+					if shared["formatterVersion"] != "effra/formatter-16" {
 						t.Fatalf("formatter version: %v", shared)
 					}
 					if formatted == c.source {
