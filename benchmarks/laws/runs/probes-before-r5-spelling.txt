@@ -1,0 +1,17 @@
+# The review-5 probe programs in revision 5's witness spelling (sed 's/Json\.Codec</Codec</'), checked and tested with ef built from wf10/spike-laws-proto fc5eb83e.
+# probes.sh spells the witness Json.Codec, which fc5eb83e does not declare, so its before receipt refuses these programs at check (EF126).
+== c1.ef build --target go: checked
+== c1.ef build --target js: checked
+== c1.ef test --target both: exit=1 tested; refuted at value = Profile { active: false, name: "", score: -1 }|tested; refuted at value = Profile { active: false, name: "", score: -1 }| tests failed 
+== c2.ef build --target go: EF106 operator requires matching primitive values; + accepts strings or i64, and -, *, /, % and ordered comparisons accept i64|
+== c2.ef build --target js: EF106 operator requires matching primitive values; + accepts strings or i64, and -, *, /, % and ordered comparisons accept i64|
+== c2.ef test --target both: exit=1 no laws tests require checked source 
+== c3.ef build --target go: EF106 argument must be string|EF106 argument must be string|
+== c3.ef build --target js: EF106 argument must be string|EF106 argument must be string|
+== c3.ef test --target both: exit=1 no laws tests require checked source 
+== c4.ef build --target go: EF106 callback argument has incompatible type|
+== c4.ef build --target js: EF106 callback argument has incompatible type|
+== c4.ef test --target both: exit=1 no laws tests require checked source 
+== always.ef build --target go: checked
+== always.ef build --target js: checked
+== always.ef test --target both: exit=0 tested; tested|tested; tested| 

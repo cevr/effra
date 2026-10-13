@@ -1,4 +1,4 @@
-# examples/laws/run.sh on wf10/spike-laws-proto fc5eb83e (includes examples/laws/probes.sh)
+# examples/laws/run.sh on wf10/spike-laws-proto 74cab99f (includes examples/laws/probes.sh)
 == order.ef (lawful compare, one trusted law)
 {"agree":true,"disagreements":[],"gating":true,"laws":8,"providers":[],"rootSeed":"0","source":"c19d7b1ee9b6a50d7e86902b74c661e43021618acd73d46419eb3c505bfb3d95"}
 -- order.ef on go
@@ -35,7 +35,7 @@ EF170 law Order.antisymmetric@User refuted after 2 cases (seed 582938622): retur
 EF170 law Order.total@User refuted after 18 cases (seed 1344773583): returned false at a = User { age: 9223372036854775807, name: "" }, b = User { age: 0, name: "" }
 EF170 law Order.transitive@User refuted after 172 cases (seed 1953339788): returned false at a = User { age: 0, name: "" }, b = User { age: -1, name: "" }, c = User { age: -2, name: "" }
 == codec.ef (lossless and lossy JSON codecs)
-{"agree":true,"disagreements":[],"gating":true,"laws":2,"providers":[],"rootSeed":"0","source":"fccba7f84481c972175cb4d0456542f8db2e380675be0559a125d893e05e42bb"}
+{"agree":true,"disagreements":[],"gating":true,"laws":2,"providers":[],"rootSeed":"0","source":"2a2723fdce0511fb0dbf44dacaab3ccee116fa619261d81d4b82f45fdad96e8f"}
 -- codec.ef on go
 {"id":"RoundTrip.roundTrip@accountJson","status":"tested","cases":200,"digest":"0109b916","counterexample":null,"failure":null,"justifier":null}
 {"id":"RoundTrip.roundTrip@halfJson","status":"refuted","cases":2,"digest":"417fb0d8","counterexample":"value = Profile { active: false, name: \"\", score: -1 }","failure":"returned false","justifier":null}
@@ -116,7 +116,7 @@ PASS m1: EFFRA_LAW_SEED=010 refused before any harness runs
 PASS m1: EFFRA_LAW_SEED=-1 refused before any harness runs
 PASS m1: EFFRA_LAW_SEED=abc refused before any harness runs
 PASS m1: EFFRA_LAW_SEED=4294967296 refused before any harness runs
-PASS m2: refused on go and js: EF177 ... entry label has type fn(User)->string, but sortedTrio has type fn(Trio)->bool
+PASS m2: refused on go and js: EF177 ... entry label has type fn(User) -> string, but sortedTrio has type fn(Trio) -> bool
 PASS m3-call: refused on go and js: EF178 ... mints is the law Minty.mints, and a law is not a value
 PASS m3-spelling: refused on go and js: EF102 ... unknown function or service method
 PASS m3-mint: refused on go and js: EF181 ... a law body states an obligation and is never a construction site
@@ -148,6 +148,20 @@ PASS R4-m3-receipt-{}: ledger deleted, receipt {} refused: EF191 the law receipt
 PASS R4-m3-receipt-extra: ledger deleted, receipt extra refused: EF191 the law receipt dist/strict.laws.go.json is unreadable (json: unknown field "extra"): it is refused, never read as absent, because it may hold a
 PASS R4-m4-ledger-}: a ledger followed by '}' is refused: EF191 the refutation ledger dist/strict.laws.refutations.json is unreadable (data after the ledger object): it is refused, never read as absent, becau
 PASS R4-m4-ledger-]: a ledger followed by ']' is refused: EF191 the refutation ledger dist/strict.laws.refutations.json is unreadable (data after the ledger object): it is refused, never read as absent, becau
+PASS R5-M1-b03: refused once on go and js: EF177 ... entry box has type Codec<i64>, but sameI has type fn(i64, i64) -> bool
+PASS R5-M1-b03b: refused once on go and js: EF177 ... entry box has type Container<i64>, but sameI has type fn(i64, i64) -> bool
+PASS R5-M1-alias: go and js: tested; refuted at value = Profile { active: false, name: "", score: -1 }
+PASS R5-M1-outside: refused on go and js: EF126 ... effra/json.Codec is the witness type of effra/json.codec: it names only a contract entry's type
+PASS R5-m1-b06: refused once on go and js: EF177 ... entry unit has type i64, but Name is a const of type string: a parameter default, not a value
+PASS R5-m1-b06c: refused once on go and js: EF177 ... entry unit has type i64, but DoesNotExist names no declaration
+PASS R5-m1-b06d: refused once on go and js: EF177 ... entry unit has type i64, but Name is a const of type i64: a parameter default, not a value
+PASS R5-m1-control: go and js: tested
+PASS R5-m1-control-wrong: refused once on go and js: EF177 ... entry unit has type fn(i64) -> bool, but inc has type fn(i64) -> i64
+PASS R5-m2-c1: go and js: tested; refuted at value = Profile { active: false, name: "", score: -1 }
+PASS R5-m2-c2: go and js: tested; refuted at value = Profile { active: false, name: "", score: -1 }
+PASS R5-m2-c3: refused once on go and js: EF106 ... callback argument has incompatible type
+PASS R5-m2-c4: refused once on go and js: EF106 ... callback argument has incompatible type
+PASS R5-o1-always-true: go and js: tested; tested
 PASS Q2: refused on go and js: EF175 ... User satisfies Order with laws to run and no case budget
 laws probes: ok
 laws run: ok

@@ -1,6 +1,6 @@
 # Laws: obligations types cannot state, their discharge and their evidence
 
-**Status:** design note and decision record for the spike in [#125](https://github.com/cevr/effra/issues/125), revision 5, 2026-10-12. It changes no compiler behaviour.
+**Status:** design note and decision record for the spike in [#125](https://github.com/cevr/effra/issues/125), revision 6, 2026-10-13. It changes no compiler behaviour.
 - **Revision 2** answered review 1 (seven Major and seven Minor findings), adopted the coordinator's decisions on Q2 and Q8, and added the owner's 2026-10-12 directions on guardrails, portable providers and readability.
 - **Revision 3** answers review 2. Its four Major findings were paths that revision 2 called closed and that were still open:
   - a single-target run erased a cross-target refutation (N1, §2.2);
@@ -35,8 +35,14 @@
   - law names are collision-free by construction (o3);
   - the overclaiming test comment is fixed (o4).
 
+- **Revision 6** answers review 5. Review 5 found the check-once model sound against every attack, and one Major in what the check knows about a library type.
+  - **Major 1.** The law check recognised the codec witness by spelling: an entry type whose head was the text `Codec` became the `effra/json` witness. A user `record Codec<X>` used as an entry type was captured and refused as if it were the witness, and §5.3 presented moving the literal into `codecs.go` as name-neutrality. **The witness is now known by declaration identity** (§5.3): the entry is written `codec: Json.Codec<T>`, and the law check resolves `Json.Codec` through the program's imports to the bundled declaration that marks its derivation, as Rust maps a lang item to its resolved `DefId`. A user type of any spelling stays the user's type (probes R5-M1-b03 and R5-M1-b03b). This is still a compiler-known library identity, so the compiler-known constructs audit records it as 1-P5, owned by #100 / T4.
+  - **m1.** Entries that were not callable were never checked, so a binding to a const of the wrong type, or to a name that does not exist, was accepted while unused. **Every entry binding is now resolved and typed, whatever the entry's kind** (§1.8), as Rust's `compare_impl_item` compares every associated item kind.
+  - **m2.** The codec operations' wire type was a synthesized `string` token, which a contract parameter spelled `string` captured. **Nothing in the law check's header is a token any more**: the result `bool` and the codec operations' types are typed nodes built outside the substitution (§1.8), which pulls L1's "typed nodes" item forward (§12). The claims that each refusal is reported once are restated in contract terms.
+  - **Optionals.** RoundTrip proves preservation only under the satisfaction's own equality (o1, §1.5); the unused `lawOrigin` field is removed (o2); EF177 prints a type in its declared spelling, and its unreachable `effectfn(` branch is deleted (o3).
+
 - **Line references** are at `main` `13e62ad4` unless stated otherwise. This branch has merged `main` at `8dca628a`.
-- **The prototype** is on branch `wf10/spike-laws-proto`, head `fc5eb83e`, nine commits on `13e62ad4`:
+- **The prototype** is on branch `wf10/spike-laws-proto`, head `74cab99f`, ten commits on `13e62ad4`:
   - `8e781dc3`: the construct, runner and evidence;
   - `e239e708`: the host evidence boundary;
   - `5f428883`: the end-to-end run (revision 1's head);
@@ -45,7 +51,8 @@
   - `ad08a82e`: the review-3 fixes and their probes (revision 4's head);
   - `8e7571c5`: the review-4 fixes and their probes;
   - `95282d1a`: the o1 probe on a fixture that every head checks;
-  - `fc5eb83e`: the codec witness type read from its derivation (§5.3).
+  - `fc5eb83e`: the codec witness type read from its derivation (revision 5's head);
+  - `74cab99f`: the review-5 fixes and their probes (§6.1).
 
   That branch is never merged.
 - **Receipts.** The TypeScript boundary probe and every receipt quoted here are under [`benchmarks/laws/`](../../benchmarks/laws/). A dated [language evolution preview](../previews/2026-10-12-laws.md) shows the surface.
@@ -83,7 +90,7 @@ Two inputs are cited by section, not linked:
 The deciding evidence:
 
 1. **The categories need no second vocabulary.** A receipt's `status` is `tested`, `refuted`, `trusted` or `unresolved`. These are the spellings of lawful-runtime-contract's tested law, refuted, trusted decision and unresolved. A law that type-checks is nominally checked. `verified` is reserved, has no category, and is refused until the owner amends the five (§2.1, §2.9).
-2. **The prototype discharges two unrelated clients on both targets, with identical receipts** (§6). Go and JavaScript agree on every status, case count, case digest and counterexample (`agree:true`). The compiler holds no `Order`, `compare`, `RoundTrip` or `Codec` literal (§5.3).
+2. **The prototype discharges two unrelated clients on both targets, with identical receipts** (§6). Go and JavaScript agree on every status, case count, case digest and counterexample (`agree:true`). The law code holds no `Order`, `compare`, `RoundTrip` or `Codec` literal, and the one library type the law check knows, the codec witness, is resolved by declaration identity, never by spelling (§5.3).
    - **A four-law `Order`** (reflexive, antisymmetric, transitive, total):
      - a lawful compare: 7 laws tested, 1 trusted;
      - a broken compare: antisymmetry, transitivity and totality refuted, each with a shrunk counterexample;
@@ -93,8 +100,12 @@ The deciding evidence:
    - With and without laws, the Go program, the JavaScript module and the `.d.mts` are byte-identical apart from the source-revision header (§5.1).
    - With and without evidence, the Go program is identical. The JavaScript differs only by the boundary adapters and the brand declarations.
    - An exported call that carries evidence costs about 0.8 µs, measured, and the adapter is almost all of it: the same bodies without the adapter take 9 and 29 ns (§5.1).
-4. **Every evidence, receipt, provider and hygiene hole that reviews 1 to 4 found has a probe** (§6.1). Each probe fails on the prototype before its fix and is refused or correct after it, on Go and on JavaScript where both apply.
-   - **Now.** At `fc5eb83e`, 89 of 89 probe lines pass.
+4. **Every evidence, receipt, provider and hygiene hole that reviews 1 to 5 found has a probe** (§6.1). Each probe fails on the prototype before its fix and is refused or correct after it, on Go and on JavaScript where both apply.
+   - **Now.** At `74cab99f`, 103 of 103 probe lines pass.
+   - **Before revision 6** (`fc5eb83e`), 22 of revision 6's probes fail, on 32 FAIL lines; the other 81 lines pass. The 22 are:
+     - six for the findings: b03 and its `Container` control b03b (Major 1), the witness type outside an entry (Major 1), and b06, b06c and b06d (m1);
+     - two whose EF177 now prints types in their declared spelling (o3): m2 and R5-m1-control-wrong;
+     - fourteen programs that spell the witness `Json.Codec`, which `fc5eb83e` does not declare, so it refuses them at check: p1-receipt-malformed, p1-both-malformed, M7-providers, the three R4-m3 receipts, the two R4-m4 ledgers, R5-M1-alias, R5-m2-c1 to c4, and R5-o1-always-true. For c1 to c4 and the always-true control, `benchmarks/laws/runs/probes-before-r5-spelling.txt` runs the same programs in revision 5's spelling at `fc5eb83e`: c2 is refused with EF106 "operator requires matching primitive values" and c3 with EF106 "argument must be string" twice, both from the captured wire type (§6.1).
    - **Before revision 5** (`ad08a82e`), 18 of revision 5's probes fail, on 27 FAIL lines, since a refusal probe fails once per target. The other 71 lines pass. The 18 are:
      - two for Major 1 (labels, arity) and one for Major 2 (`bool`);
      - one for m1 and two for m2 (the refusal, and `ef test` with no harness);
@@ -121,16 +132,22 @@ The deciding evidence:
    - law bodies whose binders, labels or nested scopes are spelled like the bound function or a contract type parameter;
    - calls through an entry with labels, or with fewer arguments than the entry takes;
    - a contract type parameter spelled like the synthesized result type, or used as a constructor;
-   - evidence-typed law parameters, and user functions spelled like generated law names.
+   - evidence-typed law parameters, and user functions spelled like generated law names;
+   - a user type spelled like the codec witness, the witness under another import alias or outside an entry, value entries bound to a const, a type or a missing name, and a contract parameter spelled like the wire type.
 
    **What hygiene now rests on.** Revision 3 said each capture case was "refused at check, never miscompiled", and review 3 showed that was false. Revision 4 replaced spelling substitution with binder resolution and claimed that capture "cannot be expressed". Review 4 showed that claim was too broad. Labels, arity and the synthesized `bool` were still resolved in the provider's or the parser's naming context, because each law was checked once per satisfaction against that satisfaction's declarations.
 
-   Revision 5 changes what is checked. A law is checked once, against its contract, before any satisfaction is involved. What follows is true of the prototype at `fc5eb83e`:
+   Revision 5 changes what is checked. A law is checked once, against its contract, before any satisfaction is involved. Revision 6 removes the last two places where the check read a spelling (review 5). What follows is true of the prototype at `74cab99f`:
    - **Names.** In the check, the only names a law body sees are its parameters, its locals, the contract's entries, the contract's other laws (as non-values, EF178), the contract's type parameters (as abstract types) and the program's globals. No satisfaction or provider declaration is in scope.
    - **Calls.** A provider's labels, defaults and parameter names cannot reach the law. A call through an entry is a call of a callable value of the entry's declared type, so labels and missing arguments are refused (EF106), as for every callable value in Effra.
-   - **Specialization.** It happens only after the check succeeds, and its diagnostics are dropped whenever the check or an entry binding failed. A defect is therefore reported once, in the contract's terms.
+   - **Types.** The check's header contains no synthesized token. The law's result, the builtin `bool`, is set as a typed node, and a codec entry's operations are typed nodes built from its derivation's wire type and failure rows and from the entry's own domain. The contract's type parameters are substituted only in tokens the author wrote, so no parameter spelling (`bool`, `string`, a failure name) can capture anything the law did not write (probes R4-M2-bool, R5-m2-c2, R5-m2-c3).
+   - **Library types.** The only library type the check knows is the codec witness, and it knows it by the declaration its qualified name resolves to, never by a spelling (§5.3).
+   - **Specialization.** It happens only after the check succeeds and every entry binding conforms. Its diagnostics are dropped otherwise, so each refusal is reported once, by the check that owns it:
+     - a defect in a law body, or an entry type that names no type, by the law check, in the contract's terms (EF106, EF002, EF102, EF171, EF178);
+     - a binding that does not conform to its entry, by EF177, once per binding, in the satisfaction's terms;
+     - a type argument that names no type, by EF102, once per satisfaction, not once per entry that uses it.
 
-   The review-3 and review-4 programs are refuted or refused accordingly (§6.1). What is not claimed: L1 must carry the same model to #135's spelling, the formatter, LSP spans and cross-module satisfactions (§12).
+   The review-3, review-4 and review-5 programs are refuted or refused accordingly (§6.1). What is not claimed: L1 must carry the same model to #135's spelling, the formatter, LSP spans and cross-module satisfactions (§12).
 5. **The host boundary is fail-safe under every listed attack** (§5.2). Under strict tsc 6.0.3, with 0 `any` keywords, each of these is refused or harmless:
    - laundering a reversed compare;
    - spread override, array covariance, method bivariance and property covariance;
@@ -277,9 +294,9 @@ MemoryUsers satisfies Users cases 200
 ### 1.5 On a codec: round trip
 
 ```
-// prototype spelling, examples/laws/codec.ef
+// prototype spelling, examples/laws/codec.ef (import Json "effra/json")
 contract RoundTrip<T> {
-    codec: Codec<T>
+    codec: Json.Codec<T>
     same: fn(T, T) -> bool
     effect law roundTrip(value: T) raises { JsonDecodeFailure, JsonEncodeFailure } {
         let text = run codec.encode(value)
@@ -292,6 +309,8 @@ halfJson satisfies RoundTrip<Profile> cases 200 { codec = halfJson  same = sameP
 
 - The subject is a derived codec witness (`derive accountJson = Json.codec<Account>(…)`), not a type, so the law attaches to the value that `derive` made. A codec witness is a declaration, so it has an identity a satisfaction can bind.
 - A failure the law raises refutes it, with the failure recorded. The lossy `halfJson` returns `false` instead: it halves the score on the wire, so `score: -1` comes back as `0`.
+- **The law states preservation under the satisfaction's own equality** (review 5, o1). Equality on an abstract `T` must come as an entry, because `==` on `T` is refused (§1.8), so RoundTrip proves only what `same` distinguishes. A satisfaction that binds an always-true `same` makes even the lossy `halfJson` `tested`, and its build is admitted (probe R5-o1-always-true). That is a limit of the predicate, not a checker defect, and Haskell's `===` and hedgehog-classes' `eqLaws` behave the same way through the chosen `Eq` dictionary. The stronger form ties the supplied equality to logical equality, as Lean's `LawfulBEq` does with `eq_of_beq : a == b → a = b` (`db7f10e9`, `src/Init/Core.lean:800-802`). Effra's analogue would be a derived structural-equality bound on the `same` entry, a later unit beside L3.
+- **The entry type is the derivation's witness type**, `Json.Codec<T>`, written through the import alias like any bundled member. The law check knows it by the declaration that name resolves to (§5.3).
 - Under #100, a derived codec's satisfaction could be emitted with the derive. It stays a written declaration here so the budget is visible.
 
 ### 1.6 On a machine: an invariant over reachable states
@@ -357,15 +376,15 @@ contract Runtime {
 - **A pure law** (`law`) is an ordinary checked pure body returning `bool`. `false` refutes it. A defect (a managed panic) refutes it, with the defect recorded.
 - **A law is checked once against its contract, then specialized per satisfaction (revision 5, review 4).** The model is dictionary passing followed by monomorphization (§9). There are two steps.
   - **The check.** Each contract law elaborates into one checked function, `law Eq.reflexive`.
-    - **Its parameters.** It takes one hidden parameter per contract entry, ahead of the law's own parameters, typed with the entry's declared type: `Eq.same: fn(T, T) -> bool`.
+    - **Its parameters.** It takes one hidden parameter per contract entry, ahead of the law's own parameters, typed with the entry's declared type: `Eq.same: fn(T, T) -> bool`. Since revision 6 the hidden parameters are typed nodes added to the parsed function, built from the entry type's own tokens; no parameter list is spliced into the law's tokens.
     - **The contract's type parameters** are abstract types, one per contract. They are not the satisfaction's type arguments, and they own no handles.
-    - **The result** is the builtin `bool`. The parser marks the synthesized token as builtin, so no contract parameter can rebind it.
+    - **The result** is the builtin `bool`. Since revision 6 the parser sets it directly, as a typed node, so there is no result token for a contract parameter to rebind (review 5, m2). Revision 5 synthesized a `-> bool` token and marked it builtin.
     - **Entry binders.** The resolver opens the function with one binder per entry, and each resolves to its hidden parameter.
 
     So the body is checked against the contract alone. No satisfaction and no provider declaration is in scope. The check runs even when nothing satisfies the contract.
   - **The specialization.** Only when the check succeeds, each satisfaction elaborates the law again into `law Eq.reflexive@i64`.
     - **Bindings.** The entry binders resolve to the declarations the satisfaction names (`same = sameI`), and the contract's type parameters become the satisfaction's type arguments.
-    - **Diagnostics.** Its diagnostics are dropped when the check or one of the satisfaction's entry bindings failed (EF177). A defect is therefore reported once, in the contract's terms.
+    - **Diagnostics.** Its diagnostics are dropped when the check failed, when one of the satisfaction's entry bindings does not conform (EF177), or when a type argument names no type (EF102). So a defect in a law body is reported once, by the check, in the contract's terms, and a defect in a satisfaction once, by EF177 or EF102, in the satisfaction's terms; neither is repeated in the specialization's terms (probes R4-M1-arity, R5-m1-b06d, R5-m2-c3).
     - **Emission.** The harness calls the bound declaration directly, as Rust calls a monomorphized function directly.
   - **The generated names contain a space and a dot,** so no Effra identifier can spell them. They are emitted by index, as `efLaw_<n>` in Go and `__ef_law_<n>` in the JavaScript test module. A user function spelled `law__Eq__i64__reflexive`, which revision 4 generated, now checks and runs beside the laws (probes R4-o3, R4-o3-run; review 4, o3).
 
@@ -381,12 +400,18 @@ contract Runtime {
   - **The result is the builtin `bool`.** `contract C<bool> { same: fn(bool, bool) -> i64; law reflexive(a: bool) { same(a, a) } }` is EF106 "body returns i64; expected bool" on both targets, as is its control with the parameter renamed `T` (probes R4-M2-bool, R4-M2-control). Revision 4 let the contract parameter rebind the synthesized `bool` to `i64`. JavaScript then tested truthiness and reported `tested`, and Go failed to compile the generated harness.
   - **A binder or label cannot capture an entry.** A parameter, local, pattern binder or nested binder spelled like the bound function (`sameI`) is unrelated, because the check has no `sameI` in scope. A record field or named argument spelled like the entry (`same`) is an unrelated label. The specialization still calls the bound `sameI` (probes P1-callable, P1-parameter, P1-local, P1-binder, P1-nested, P1-record-label, P1-named-argument).
   - **Shadowing an entry is ordinary scoping.** A parameter or pattern binder spelled like the entry (`same`) shadows it. A `let` cannot redeclare a visible binder, as everywhere in Effra, and the message names the entry: EF101 "duplicate local same: same is the contract entry Eq.same, a binder of every law of its contract; a let cannot redeclare a visible binder" (probe P1-entry-let). Revision 4's message named the bound declaration; the check has none to name.
-  - **A satisfaction entry binds one declaration, named on its own.** `same = sameI` is accepted; an expression in that position is EF002 "entry same binds a declaration, named on its own". EF177 checks the declaration's type against the entry's, with the contract's parameters substituted. A failed binding marks the satisfaction so that its specializations report nothing more.
-  - **A codec entry** (`codec: Codec<T>`) is the `effra/json` derived witness of its type. In the check it is two hidden parameters, typed as the witness's operations:
+  - **A satisfaction entry binds one declaration, named on its own.** `same = sameI` is accepted; an expression in that position is EF002 "entry same binds a declaration, named on its own". A failed binding marks the satisfaction so that its specializations report nothing more.
+  - **Every entry binding is resolved and typed, whatever the entry's kind** (revision 6, review 5 m1). This is what Rust's `compare_impl_item` does for an `impl`: it matches every associated item kind, `Fn`, `Type` and `Const`, against the trait's (`rust-lang/rust@69bccf03`, `compiler/rustc_hir_analysis/src/check/compare_impl_item.rs:36-53`). Revision 5 checked only function-typed and codec entries, so a value entry such as `unit: T` accepted any binding while no law used it. Now EF177 runs for every entry, used or not, with the entry type substituted and resolved to a canonical type, never compared as text:
+    - **A value entry** (any entry that is not a witness, function types included) takes a declaration that is a value of the entry type. In Effra today only a function is a value declaration: its value type is its declared callable type, rows included, so `compare = sortedTrio` is EF177 "entry compare has type fn(User, User) -> i64, but sortedTrio has type fn(Trio) -> bool", and `unit: T` at `T = fn(i64) -> i64` accepts `inc` (probe R5-m1-control) and refuses it at `fn(i64) -> bool` (R5-m1-control-wrong).
+    - **Every other declaration is refused by kind.** A `const` is a scalar parameter default, not a value, even in an ordinary function (review 5's b06e), so `unit = Name` with `const Name: string` is EF177 "entry unit has type i64, but Name is a const of type string: a parameter default, not a value" (probe R5-m1-b06), and so is a `const Name: i64` that the law uses (R5-m1-b06d), where revision 5 reported EF102 "unknown value Name" twice from the specialization. A missing name is "DoesNotExist names no declaration" (R5-m1-b06c). A type, a failure, a service, a provider and a derived codec bound to a value entry are each named as such.
+    - **Value entries other than functions** therefore have no satisfying binding until a value declaration form exists. That is the correct reading of today's language, and it is L1's to widen if #135 adds module-level values.
+  - **A codec entry** (`codec: Json.Codec<T>`) names the witness type of the `effra/json` derivation, written through the import alias. The law check knows it by the declaration that name resolves to (§5.3). In the check it is two hidden parameters, typed as the witness's operations and built as typed nodes from the derivation's wire type and failure rows and the entry's domain:
     - `codec.encode: effect fn(T) -> string raises {JsonEncodeFailure}`;
     - `codec.decode: effect fn(string) -> T raises {JsonDecodeFailure}`.
 
-    A law uses it only through `codec.encode` and `codec.decode`, and a bare `codec` is EF177. Its binding must be a derived codec of the substituted type, whose rows are exactly those failures with no service. A swapped codec is EF177 "entry codec has type Codec<Account>, but halfJson is a Codec<Profile>". A codec whose decode raises a further failure is EF177 "… halfJson.decode raises {Bad, JsonDecodeFailure}", with no second diagnostic from the specialization.
+    No token is synthesized, so a contract parameter spelled `string` captures neither wire occurrence (review 5, m2). Comparing the encoded text with `""` checks under the parameter `T` and under the parameter spelled `string` (probes R5-m2-c1, R5-m2-c2), and passing a domain value to `codec.decode` is refused once, in the check, under either spelling (R5-m2-c3, R5-m2-c4). Revision 5 made the wire type the abstract `string@RoundTrip` under that spelling, so c2 was refused and c3 was accepted by the check and refused twice by the specializations.
+
+    A law uses the entry only through `codec.encode` and `codec.decode`, and a bare `codec` is EF177. Its binding must be a codec derived by the same derivation, compared by identity, of the substituted domain type, compared canonically, whose rows are exactly those failures with no service. A swapped codec is EF177 "entry codec has type Json.Codec<Account>, but halfJson is a Json.Codec<Profile>". A codec whose decode raises a further failure is EF177 "… halfJson.decode raises {Bad, JsonDecodeFailure}", with no second diagnostic from the specialization. `Json.Codec<T, T>` is EF002 "expected the end of Json.Codec's one type argument", and the witness type named anywhere but a contract entry is EF126 (probe R5-M1-outside).
   - **Revision 3's and revision 4's mechanisms, for the record.**
     - **Revision 3** replaced every name token spelled like an entry with the bound function's spelling, then resolved lexically, so a binder with that spelling captured the reference (review 3, P1).
     - **Revision 4** resolved entries by binding, but it still checked each law once per satisfaction, against that satisfaction's declarations and type arguments. So the provider's labels and defaults, and a type-parameter spelling, reached the law (review 4, Majors 1 and 2, m1).
@@ -601,7 +626,7 @@ A missing budget was a fifth source in revision 1; it is now the error EF175 (§
 
 ### 2.11 What tested means
 
-A finite run is evidence, not proof (lawful-runtime-contract). `benchmarks/laws/runs/seed-survey.txt` (from `benchmarks/laws/proto-receipts.sh`, at `fc5eb83e`; unchanged below its header since `ad08a82e`) runs two programs under the default and exploration root seeds with a 200-case budget. Each exploration run writes its own receipt, and the script fails if the gating receipt ever stops carrying root seed `0`.
+A finite run is evidence, not proof (lawful-runtime-contract). `benchmarks/laws/runs/seed-survey.txt` (from `benchmarks/laws/proto-receipts.sh`, at `74cab99f`; unchanged below its header since `ad08a82e`) runs two programs under the default and exploration root seeds with a 200-case budget. Each exploration run writes its own receipt, and the script fails if the gating receipt ever stops carrying root seed `0`.
 
 The broken compare, `order-broken.ef`:
 
@@ -836,7 +861,7 @@ The four rules are spike-where §2.10's requirements, made concrete:
 ```
 == diff codec.ef Go main.go
 1c1
-< // Generated by the Effra prototype. Source revision: a779285a…
+< // Generated by the Effra prototype. Source revision: 289c243e…
 ---
 > // Generated by the Effra prototype. Source revision: f5396905…
 == diff codec.ef JavaScript mjs
@@ -853,7 +878,7 @@ The four rules are spike-where §2.10's requirements, made concrete:
 
 `TestEvidenceErasesExceptAtTheHostBoundary` strips evidence from `order.ef` (evidence types become carriers, the mint becomes its operand). The Go build is identical. The JavaScript and `.d.mts` differ only in the adapter lines (`__ef_export_*`, `__ef_snapshot`, `__ef_deepFreeze`) and the brand declarations.
 
-Run time with laws is therefore zero by construction. The diff above is regenerated at `fc5eb83e`, where its revision headers are unchanged from revision 1 because `codec.ef` did not change.
+Run time with laws is therefore zero by construction. The diff above is regenerated at `74cab99f`. Revision 6 changed `codec.ef`'s witness entry to `Json.Codec<T>`, so the with-laws revision headers of `codec.ef` changed; the without-laws program and every line below the headers are unchanged.
 
 **The host adapter's cost, measured.** The adapter makes one deep copy of the arguments per call of an evidence-carrying export, plus the admission check inward or a deep freeze outward. `benchmarks/laws/ts/adapter-cost.mjs` makes 200 000 calls per sample, with 11 samples after a warm-up, on node 24.11.1.
 - **Revision 2's numbers are per exported call, not adapter overhead (review 2, m4).** `runs/cost.txt`, at load 9 to 24, gave these medians:
@@ -874,7 +899,7 @@ So an evidence-carrying export pays about 0.75 to 0.8 µs per call for a 7-objec
 ### 5.2 `.d.mts` under attack
 
 `benchmarks/laws/ts/run.sh` checks the prototype's emitted library with the repository's TypeScript 6.0.3, `--strict`, and runs each probe on node 24.11.1.
-- **The library.** `ts/proto/lib.mjs` and `lib.d.mts`, built from `examples/laws/sorted.ef` at `8b02919b` by `ef test --target both`, then `ef build --target js`. A fresh build at `fc5eb83e` is byte-identical below the provenance comment, since neither revision 4 nor revision 5 changes emission outside law harnesses. The build is refused with EF174 until the test has written a passing receipt.
+- **The library.** `ts/proto/lib.mjs` and `lib.d.mts`, built from `examples/laws/sorted.ef` at `8b02919b` by `ef test --target both`, then `ef build --target js`. A fresh build at `74cab99f` is byte-identical below the provenance comment, since no revision since 3 changes emission outside law harnesses. The build is refused with EF174 until the test has written a passing receipt.
 - **The receipt** is `benchmarks/laws/runs/ts-boundary.txt`:
   - every tsc run exits 0;
   - 6 of 6 directives fire with their declared codes, 5 in `proto/` and 1 in `counterfactual/`;
@@ -914,20 +939,32 @@ Each row of spike-where's expected-failure table (where-dispatch §2.10) is now 
 
 ### 5.3 Name-neutrality
 
-The prototype's law, evidence, receipt and boundary code (`internal/compiler/laws*.go` and `cmd/ef/laws.go` on `fc5eb83e`, tests excluded) contains no string literal `"Order`, `"RoundTrip`, `"compare`, `"SortedBy`, `"Codec` or `"codec`: `grep` over the five files finds none. Contract, law, entry and evidence names are read from the source, and an entry is resolved by its binding, never compared by spelling.
-- **Other files.** Revisions 4 and 5 also touch `resolution.go`, `semantic.go`, `syntax.go`, `bundled.go`, `emit.go`, `field_occurrences.go`, `reachability.go` and `codecs.go`. Their added lines hold no contract, entry or probe name either, `Eq`, `same` and `sameI` included.
-- **The one library type the law check knows** is the derived codec witness, because revision 5 gives a codec entry the witness's two operations (§1.8). Its spelling, `Codec`, is not in the law code. It is a field of `jsonCodecDerivation` in `codecs.go`, beside the module, member, wire type and failures that the `derive` construct already owns, and `laws.go` reads it from there.
-  - At `8e7571c5`, `laws.go` held three `"Codec` literals. `fc5eb83e` moves them, and the `grep` above is again empty.
-  - `"encode"` and `"decode"` remain in `laws.go`, as they are in `codec_emit.go`. They name the derived witness's operations, not a contract's entries.
+**What the law code reads from the source.** Contract, law, entry and evidence names are read from the source. A law body's reference to an entry is resolved by its binding, never compared by spelling (§1.8), and every entry binding is compared with its entry by canonical type, never as text (revision 6). The prototype's law, evidence, receipt and boundary code (`internal/compiler/laws*.go` and `cmd/ef/laws.go` on `74cab99f`, tests excluded) contains no string literal `"Order`, `"RoundTrip`, `"compare`, `"SortedBy`, `"Codec` or `"codec`. Revisions 4 to 6 also touch `resolution.go`, `semantic.go`, `syntax.go`, `bundled.go`, `emit.go`, `field_occurrences.go`, `reachability.go` and `codecs.go`, and their added lines hold no contract, entry or probe name either, `Eq`, `same` and `sameI` included. The `grep` is a screen, not the argument: what matters is which branch decides, and the next paragraph says what decides the one library type the law check knows.
+
+**The one library type the law check knows: the codec witness, by declaration identity** (revision 6, review 5 Major 1). A codec entry gets the derivation's two operations (§1.8), so the check must recognise the entry type as a derivation's witness. How it recognises it is the whole question.
+- **What revision 5 did, and why it was wrong.** It compared the entry type's head token with the text `Codec`, read from a field of `jsonCodecDerivation`. Moving that literal from `laws.go` into `codecs.go` emptied the `grep` above, and revision 5 presented that as name-neutrality. It was not: the branch still decided by spelling, so a user `record Codec<X: type>` used as `box: Codec<T>` became the JSON witness, and was refused with EF102 on a synthesized operation type and EF177 "must be bound to a derived codec" (review 5's b03). The same record spelled `Container` checked, though only because value entries went unchecked (review 5, m1). NORTH_STAR.md says an item becomes library "by losing every compiler branch, not by moving its declaration", and a moved literal loses no branch.
+- **What decides now.** `effra/json` has a bundled declaration `Codec` beside its `codec` derivation. It has no source, and its index entry carries a `Witness` field pointing at the derivation it is the witness type of (`bundled.go`). A contract entry names it through the import alias, `codec: Json.Codec<T>`. The law check resolves the qualified name through the program's bundled imports, alias to module to declaration, and an entry is a witness entry exactly when that declaration's `Witness` is set; the derivation pointer is what the binding check then compares with the derived codec's (`resolveEntryWitnesses`, `checkWitnessEntry` in `laws.go`). This is how Rust treats a lang item: a `#[lang = "…"]` attribute on a library declaration, and a table that maps each lang item to its resolved `DefId` (`rust-lang/rust@69bccf03`, `compiler/rustc_attr_ir/src/lang_items.rs:19-23`), so that the compiler compares identities, never paths or names.
+- **What follows.**
+  - **No spelling captures it.** A user type of any spelling, `Codec` included, is not qualified by an import alias of `effra/json`, so it stays the user's type, an ordinary value entry, typed like any other: b03 is EF177 "entry box has type Codec<i64>, but sameI has type fn(i64, i64) -> bool", and its control spelled `Container` answers identically (probes R5-M1-b03, R5-M1-b03b). A qualified bundled type that is not a witness, such as `Data.Option<T>`, is a value entry of that type (`TestLawWitnessIdentityAndEntryBindings`).
+  - **Any alias is the same witness.** `import J "effra/json"` with `codec: J.Codec<T>` checks and discharges exactly as `Json` does (probe R5-M1-alias).
+  - **It names nothing else.** The witness type has no values: a value of it is a `derive` declaration. Named anywhere but a contract entry, for example `fn held(c: Json.Codec<Account>)`, it is EF126 "effra/json.Codec is the witness type of effra/json.codec: it names only a contract entry's type" (probe R5-M1-outside).
+  - `"encode"` and `"decode"` remain in `laws.go`, as they are in `codec_emit.go`. They name the derived witness's operations, which the `derive` construct defines, not a contract's entries.
+- **What it still is.** Identity resolution removes capture, but `Json.Codec` remains a compiler-known library identity that grants semantics, the Rust lang-item pattern that NORTH_STAR.md excludes for language constructs. The compiler-known constructs audit records it as 1-P5 and assigns it to #100 / T4: when derive profiles become syntax (audit 1-F), the entry names the profile (for example `codec: json<T>`) and the `Witness` declaration is deleted. That is in T4's acceptance, with probes R5-M1-b03 and R5-M1-b03b kept (§12).
+- **Prior art for this exact problem.**
+  - **Rust** connects syntax to library items by lang items, as above, and resolves them by `DefId`.
+  - **Elixir** (`91ee75bb`) has no compiler-known codec at all. `@derive Jason.Encoder` names a protocol module through ordinary alias expansion, and derivation is the protocol's own business: Elixir calls the protocol's `__deriving__/2` callback if it has one, and otherwise points at the protocol's `Any` implementation (`lib/elixir/lib/kernel.ex:5550-5574`, `lib/elixir/lib/protocol.ex:437-441`). That is the fully library-owned end state, which needs protocols with derivation callbacks; Effra has neither yet.
+  - **ReScript** (`30ce3698`) keeps derivation in syntax: `@deriving(…)` is an attribute the frontend recognises by name with a closed set of derivers (`compiler/frontend/ast_attributes.ml:90-105`), which is T4's direction.
+  - **Gleam** (`52e735c8`) has no derive construct in its compiler; JSON codecs are ordinary library functions written per type (the `gleam_json` package, not verified locally), so nothing in its compiler knows a codec.
+  - **MoonBit** addresses builtin derivers by trait path (`derive(ToJson)`, audit 1-F), an ordinary library interface whose implementation the compiler writes.
 
 ## 6. Prototype
 
-**Files on `wf10/spike-laws-proto`.** 69 files changed on `13e62ad4`, with 6 572 lines added and 27 removed, the probes included. Revision 4's commit alone changed 21 files, adding 914 lines and removing 109. Revision 5's three commits change 29 files, adding 1 198 lines and removing 124.
+**Files on `wf10/spike-laws-proto`.** 72 files changed on `13e62ad4`, with 7 003 lines added and 32 removed, the probes included. Revision 4's commit alone changed 21 files, adding 914 lines and removing 109. Revision 5's three commits change 29 files, adding 1 198 lines and removing 124. Revision 6's commit changes 12 files, adding 588 lines and removing 162.
 - `internal/compiler/laws.go`:
   - declarations;
-  - the law check (revision 5): one checked function per contract law, over hidden entry parameters of the entries' declared types, with abstract contract type parameters and a builtin `bool` result;
+  - the law check (revision 5): one checked function per contract law, over hidden entry parameters of the entries' declared types, with abstract contract type parameters and a `bool` result; since revision 6 the hidden parameters and the codec operations are typed nodes, built from types parsed out of the author's tokens and from the derivation;
   - specialization per satisfaction once the check succeeds, with the specialization's diagnostics dropped after a failed check or entry binding;
-  - the codec entry's two operations, and its binding check (EF177);
+  - the codec entry's two operations, and its binding check (EF177); since revision 6 the witness is resolved through the program's bundled imports (`resolveEntryWitnesses`), and every entry binding is checked whatever its kind (`checkWitnessEntry`, `checkValueEntry`);
   - the refusals of a type-parameter constructor (EF002), an evidence-typed law parameter (EF171) and a law used as a value (EF178);
   - mint authority over every satisfaction that binds an index (q1), and EF190 by declaration kind (p3);
   - logical-ID seeds, and the optional `target` clause, refused on a type (EF190);
@@ -940,20 +977,21 @@ The prototype's law, evidence, receipt and boundary code (`internal/compiler/law
   - in a specialization, an entry resolves to a global reference to the bound declaration;
   - EF101 names an entry that a `let` redeclares;
   - the checker records each law's diagnostics, so a specialization's can be dropped;
-  - the parser keeps the synthesized `bool` builtin, and annotations in a specialization parse contract type parameters through the satisfaction's type arguments.
+  - the parser sets a law's `bool` result as a typed node (`lawHeader`, revision 6; it replaced revision 5's synthesized `bool` builtin token), and annotations in a specialization parse contract type parameters through the satisfaction's type arguments;
+  - the unused `lawOrigin` field is removed (revision 6, o2).
 - `internal/compiler/bundled.go`, `emit.go`, `field_occurrences.go`, `reachability.go` and `codecs.go` (revision 5):
   - law specializations are emitted by index (`efLaw_<n>`, `__ef_law_<n>`), and the law check is never emitted;
   - abstract contract type parameters own no handles;
-  - the derived codec witness's type spelling lives on `jsonCodecDerivation`.
+  - the witness type is a bundled declaration: `effra/json` declares `Codec` beside `codec`, with a `Witness` field pointing at `jsonCodecDerivation`, and a use of it outside a contract entry is EF126 (revision 6; revision 5's spelling field on the derivation and `witnessType` are removed).
 - `internal/compiler/laws_receipt.go`: the receipt (with `live`), its comparison by logical law and provider, the refutation ledger, the strict decoders of both receipt and ledger (revision 5 adds the receipt's and the end-of-input check), the provider comparison, and the build verdict (EF170, EF172, EF173, EF174).
 - `internal/compiler/laws_boundary.go`: `admit`, EF185, EF187 and EF188 over every reachable node, and the JavaScript adapter and brand, including the recipe rule and the refusing snapshot default.
-- `internal/compiler/laws_test.go`: elaboration, accepted flows (including `run`), every refusal, the receipt comparison and disagreement controls, the ledger's transitions, target-scoped authority, the build verdict, the effect-export brand, the snapshot default, both erasure tests, and (revision 5) the law check against entries (`TestLawCheckedOnceAgainstEntries`) and strict receipt decoding (`TestLawReceiptsDecodeStrictly`).
+- `internal/compiler/laws_test.go`: elaboration, accepted flows (including `run`), every refusal, the receipt comparison and disagreement controls, the ledger's transitions, target-scoped authority, the build verdict, the effect-export brand, the snapshot default, both erasure tests, and (revision 5) the law check against entries (`TestLawCheckedOnceAgainstEntries`) and strict receipt decoding (`TestLawReceiptsDecodeStrictly`), and (revision 6) witness identity and entry bindings (`TestLawWitnessIdentityAndEntryBindings`).
 - `cmd/ef/laws.go`: `ef test --target both`, location-keyed and exploration receipt and ledger paths, seed validation, build verdicts, EF191 for an unreadable receipt or ledger, and (revision 5) no ledger replacement by a live run.
 - `examples/laws/{order,order-broken,codec,sorted}.ef`, `examples/laws/run.sh`, `examples/laws/probes.sh`, and `examples/laws/probes/`.
 
 **How to run.** On the proto branch:
 - `examples/laws/run.sh <scratch>` builds `ef` and runs every example on both targets. It checks the expected statuses and counterexamples, asserts `agree:true` for every program whatever its expected exit code (review 1, m6), then runs the probes. It exits non-zero on any mismatch.
-- The full Go suite (`go test ./internal/... ./cmd/...`) passes at `fc5eb83e`. The law tests, with their subtests, are listed in `benchmarks/laws/runs/proto-law-tests.txt`.
+- The full Go suite (`go test ./internal/... ./cmd/...`) passes at `74cab99f`. The law tests, with their subtests, are listed in `benchmarks/laws/runs/proto-law-tests.txt`.
 
 **Results** (`benchmarks/laws/runs/proto-e2e.txt`). Go and JavaScript are identical, with `agree:true` for every program:
 
@@ -984,14 +1022,41 @@ Then:
 ### 6.1 Review probes, before and after
 
 `examples/laws/probes.sh <ef>` runs every probe on Go and on JavaScript and prints PASS or FAIL with the observation. It exits non-zero on any failure. The receipts are:
-- `benchmarks/laws/runs/probes-after.txt`: `ef` built from `fc5eb83e`, 89 of 89 lines pass;
-- `benchmarks/laws/runs/probes-before-r4.txt`: the same script with `ef` built from `ad08a82e` (revision 4), 18 probes fail (27 FAIL lines) and 71 lines pass;
+- `benchmarks/laws/runs/probes-after.txt`: `ef` built from `74cab99f`, 103 of 103 lines pass;
+- `benchmarks/laws/runs/probes-before-r5.txt`: the same script with `ef` built from `fc5eb83e` (revision 5), 22 probes fail (32 FAIL lines) and 81 lines pass;
+- `benchmarks/laws/runs/probes-before-r5-spelling.txt`: c1 to c4 and the always-true control rewritten to revision 5's witness spelling `Codec<T>`, built and tested with `ef` from `fc5eb83e`;
+- `benchmarks/laws/runs/probes-before-r4.txt`: revision 5's script with `ef` built from `ad08a82e` (revision 4), 18 probes fail (27 FAIL lines) and 71 lines pass;
 - `benchmarks/laws/runs/probes-before-r3.txt`: revision 4's script with `ef` built from `8b02919b` (revision 3), 19 probes fail (24 FAIL lines, since a refusal probe fails once per target) and 53 pass;
 - `benchmarks/laws/runs/probes-before-r2.txt`: revision 3's script with `ef` built from `63164e8a` (revision 2), 12 lines fail and 45 pass;
 - `benchmarks/laws/runs/probes-before.txt`: revision 2's script with `ef` built from `5f428883` (revision 1), 37 lines fail and 6 pass;
 - `benchmarks/laws/runs/m6b-before.txt`: the seed-overwrite hole, reproduced by hand with the old binary.
 
-**Review 4's findings.** Each has a probe that fails on `ad08a82e` and passes on `fc5eb83e`, on Go and on JavaScript.
+**Review 5's findings.** Each has a probe that fails on `fc5eb83e` and passes on `74cab99f`, on Go and on JavaScript. A refusal probe asserts that the refusal is the only diagnostic on each target. Where the probe program spells the witness `Json.Codec`, which `fc5eb83e` does not declare, the before column gives the same program in revision 5's spelling, from `probes-before-r5-spelling.txt`.
+
+| Finding | Probe | Before (`fc5eb83e`) | After (`74cab99f`) |
+| --- | --- | --- | --- |
+| Major 1 | `probes/witness-spelling.ef`: a user `record Codec<X>`, the entry `box: Codec<i64>` bound to `sameI` (R5-M1-b03) | EF102 twice, "unknown or unsupported value type effect fn(T@Holds) -> string raises {JsonEncodeFailure}" and its decode twin, then EF177 "entry box has type Codec<i64>, which must be bound to a derived codec, not sameI": the user's record was taken for the witness | EF177 only: "entry box has type Codec<i64>, but sameI has type fn(i64, i64) -> bool" |
+| Major 1 | control: the same program with the record spelled `Container` (R5-M1-b03b) | checked: the entry was never typed (m1) | EF177 only: "entry box has type Container<i64>, but sameI has type fn(i64, i64) -> bool", the same answer as b03 |
+| Major 1 | `codec.ef` with the import aliased `J`, the entry `codec: J.Codec<T>` (R5-M1-alias) | refused at check (no `Codec` declaration) | `tested`; refuted at `value = Profile { active: false, name: "", score: -1 }`, as `codec.ef` |
+| Major 1 | `codec.ef` plus `fn held(c: Json.Codec<Account>)` (R5-M1-outside) | EF126 "unknown bundled declaration effra/json/Codec" | EF126 "effra/json.Codec is the witness type of effra/json.codec: it names only a contract entry's type, …" |
+| m1 | `probes/value-entry.ef`: the entry `unit: i64`, used by no law, bound to `const Name: string` (R5-m1-b06) | checked | EF177 only: "entry unit has type i64, but Name is a const of type string: a parameter default, not a value" |
+| m1 | the same bound to `DoesNotExist` (R5-m1-b06c) | checked | EF177 only: "… but DoesNotExist names no declaration" |
+| m1 | `const Name: i64`, and the law uses `unit` (R5-m1-b06d) | EF102 "unknown value Name", twice | EF177 only: "… but Name is a const of type i64: a parameter default, not a value" |
+| m1 | control: `probes/value-entry-function.ef`, the entry `unit: fn(i64) -> i64` bound to `inc` (R5-m1-control), then typed `fn(i64) -> bool` (R5-m1-control-wrong) | `tested`; EF177 printed as `fn(i64)->bool` | `tested`; EF177 only: "entry unit has type fn(i64) -> bool, but inc has type fn(i64) -> i64" |
+| m2 | c1: `codec.ef` with `let isEmpty = text == ""` (R5-m2-c1) | (revision 5's spelling) checked; `tested`, refuted at the same `value` | the same |
+| m2 | c2: c1 with the contract parameter spelled `string` (R5-m2-c2) | (revision 5's spelling) EF106 "operator requires matching primitive values …": the wire's synthesized `string` token was captured | as c1 |
+| m2 | c3: `let back = run codec.decode(value)` under the parameter spelled `string` (R5-m2-c3) | (revision 5's spelling) the check accepted it; EF106 "argument must be string" twice, once per specialization | EF106 only: "callback argument has incompatible type", from the check |
+| m2 | c4: c3 under `T` (R5-m2-c4) | (revision 5's spelling) EF106 "callback argument has incompatible type" | the same |
+| o1 | control: `halfJson` with an always-true `same` (R5-o1-always-true) | (revision 5's spelling) `tested`; `tested` | the same: a limit of the predicate, stated in §1.5, not a checker defect |
+| o3 | m2: an entry `label: fn(T) -> string` bound to a `fn(Trio) -> bool` | EF177 "… entry label has type fn(User)->string, but sortedTrio has type fn(Trio)->bool" | EF177 "… entry label has type fn(User) -> string, but sortedTrio has type fn(Trio) -> bool" |
+
+`TestLawWitnessIdentityAndEntryBindings` covers the same programs, each refusal asserted as the only diagnostic. It adds these cases:
+- `Data.Option<T>`, a qualified bundled type that is not a witness, stays a value entry;
+- bindings to the contract's own name (`Unital`, which names no value declaration), to `main` at the wrong type, and to a type (`Plan`);
+- an unknown entry type, reported once by the law check, and an unknown satisfaction type argument, reported once by EF102;
+- `Json.Codec` with two type arguments (EF002).
+
+**Review 4's findings.** Each has a probe that fails on `ad08a82e` and passes on `fc5eb83e`, on Go and on JavaScript. They still pass on `74cab99f`.
 
 | Finding | Probe | Before (`ad08a82e`) | After (`fc5eb83e`) |
 | --- | --- | --- | --- |
@@ -1104,7 +1169,7 @@ Then:
 - generic carriers at the host boundary, at any depth (refused with EF188);
 - the variance rule (EF189 refuses every function value with an evidence parameter instead);
 - law elaboration in #135's spelling, through the formatter and LSP spans, and across modules through interface summaries. The core, checking once against the contract's entries and then specializing, is done (§1.8). L1 carries it to those surfaces;
-- the law check works on token ranges that the parser reparses, with a builtin mark on the synthesized `bool`. L1 should build the check's header as typed nodes, so no synthesized token is left to resolve (review 4's Racket row, §9);
+- the law check's body still works on token ranges that the parser reparses. Its header no longer does: since revision 6 the hidden parameters, the codec operations and the `bool` result are typed nodes, so no synthesized token is left to resolve (review 4's Racket row and review 5's m2, §9). Moving the body to a typed tree is part of L1's carry to the formatter and LSP spans;
 - evidence in law parameters, refused with EF171 until a checked construction or fixture path exists (L2 with L4);
 - toolchain, dependency, provider and live provenance in the refutation ledger's inputs (Q7, q2). The receipt records `live`, a live receipt never gates, and a live run never replaces the ledger (o1, §2.2);
 - a declared provider subject: `target` accepts any subject that is not a declared type, so a misspelled type is a provider (§2.10);
@@ -1124,7 +1189,7 @@ Then:
 - **The failure this prevents.** F# computation-expression builders and Haskell's `RebindableSyntax` let a library rebind the meaning of a construct (`let!`, `do`, `>>=`) with no laws checked (F# language specification, "Computation Expressions"; GHC User's Guide, `RebindableSyntax`; neither verified locally). In both, a builder can make `do` or `let!` mean anything that type-checks, and nothing tells the reader that a familiar block no longer obeys the monad laws.
 - **What Effra keeps.** Effra keeps the substitution, since a provider is chosen by `satisfies` and by provision. It does not keep the drift, since a provider that changes meaning fails a law and its build is refused.
 
-**The protocol's parts**, each in the prototype at `fc5eb83e`:
+**The protocol's parts**, each in the prototype at `74cab99f`:
 
 | Part | Rule | Prototype receipt |
 | --- | --- | --- |
@@ -1150,7 +1215,7 @@ effect fn explode(n: i64) -> bool raises { AssertionFailed } uses { Assert } {
 }
 ```
 
-Tested candidate, `examples/laws/probes/runtime.ef` on `fc5eb83e` (unchanged since `ad08a82e`):
+Tested candidate, `examples/laws/probes/runtime.ef` on `74cab99f` (unchanged since `ad08a82e`):
 - **How it observes.** The law builds a recipe and never runs it. If construction ran the recipe, `Assert.check(false, …)` would raise `AssertionFailed`, which refutes the law. The `Assert` provider is the harness's, not the runtime's.
 - **The negative control.** `probes/runtime-control.ef` runs the recipe instead, and both providers refute it. So the channel is live.
 - **The full form.** lawful-runtime-contract (`:86`) asks for a "construction-only fixture plus a side-effect counter". In RS1, the observer is a harness-owned counter service: the law builds the recipe and reads the counter as zero. The trace service is not the observer for this law.
@@ -1299,9 +1364,11 @@ Sources were read on 2026-10-12 from local clones at the pins below; nothing was
 - **ML functors.** OCaml's `Set.Make (Ord : OrderedType)` is checked once against a signature in which `type t` is abstract and `val compare : t -> t -> int` is the only operation (`6471927d`, `stdlib/set.mli:50-63`, `:332`). Its ordering law is prose in that signature ("a total ordering function"), stated and never checked, as in Effect's `Order`.
 - **MoonBit traits** (docs `8d9f3ba2`). "Traits declare a list of operations, which must be supplied when a type wants to implement the trait" (`next/language/methods.md:155`). An `impl`'s type "can be omitted …: MoonBit will automatically infer the type based on the signature of `Trait::method`" (`:186`). So the trait's signature is the type, not the implementation's. Its generics are monomorphized (review 4, Counsel; not verified locally).
 - **Lean structure fields** (`db7f10e9`). `class LawfulBEq (α : Type u) [BEq α] : Prop` states `eq_of_beq : {a b : α} → a == b → a = b` once, over an abstract `α` and its `BEq` operation, and each instance supplies its proof (`src/Init/Core.lean:800-802`). Bend's template laws are the same shape (§9 table).
+- **Rust's `compare_impl_item`** (`69bccf03`, `compiler/rustc_hir_analysis/src/check/compare_impl_item.rs:36-53`) checks every item of an `impl` against the trait's item, whatever its kind: functions, consts and associated types each have their own comparison. An item that is never used is still compared. Revision 6 does the same for entries (review 5, m1): every entry binding is resolved and typed, a value entry against its declared type and a witness entry against its derivation and domain, used by a law or not.
+- **Rust's lang items** (`69bccf03`, `compiler/rustc_attr_ir/src/lang_items.rs:19-23`) connect syntax the compiler knows to a library item by the item's resolved `DefId`, never by its path or spelling. The codec witness is resolved the same way since revision 6 (review 5, Major 1, §5.3).
 
 **Effra takes the same shape.**
-- **The check is the dictionary-passing form.** A law's check is a function over hidden entry parameters of the entries' declared types, with abstract type parameters and a builtin `bool` result (§1.8).
+- **The check is the dictionary-passing form.** A law's check is a function over hidden entry parameters of the entries' declared types, with abstract type parameters and a `bool` result, all typed nodes (§1.8).
 - **The specialization is the monomorphized form.** It binds each entry to its declaration for a direct call, and it is emitted only after the check succeeds.
 
 The model is also what makes labels and defaults irrelevant. In every system above, an instance's labels and defaults are absent from the class or trait method's type, so no call through the abstraction can bind them. Revision 4 checked the specialization alone, which is what let `ltBad`'s labels in.
@@ -1314,7 +1381,7 @@ The model is also what makes labels and defaults irrelevant. In every system abo
   - **Choice.** `resolve` picks the candidate with the largest scope set.
   - **Ambiguity.** Two candidates that are not subsets of each other make the reference ambiguous, which returns `ambiguous-value` or an error.
   - **Synthesized identifiers** carry the macro's scopes, so a use-site binder, which lacks them, is never a candidate.
-  - **Expansion hands the compiler resolved bindings, never spellings.** Effra's check now does the same for entries. Its one synthesized token, `bool`, carries a builtin mark instead of a scope; L1 should build that header as a typed node (§6.1).
+  - **Expansion hands the compiler resolved bindings, never spellings.** Effra's check now does the same for entries. Since revision 6 it synthesizes no token at all: the `bool` result, the hidden entry parameters and the codec operations are typed nodes, built outside the source's scopes, so no use-site binder can be a candidate for them (review 5, m2; §1.8).
 - **Scheme's `syntax-rules`** (R7RS §4.3; not verified locally): identifiers that a template introduces bind, or refer, at the definition site.
 - **Rust** `69bccf03`, `compiler/rustc_span/src/hygiene.rs:168-188`, read from the local object store. `Transparency` has three levels:
   - **Transparent:** "always resolved at call-site".
@@ -1348,7 +1415,7 @@ The model is also what makes labels and defaults irrelevant. In every system abo
 | Question | Answer |
 | --- | --- |
 | Rung | 4: a visible construct, because discharge, receipts, build refusal, generator derivation and mint authority are compiler-special (`docs/design.md:27`). |
-| Keyed on a name? | Only on the words `contract`, `law`, `satisfies`, `evidence` and the satisfaction's contextual `trusted`, `unresolved`, `cases`, `target`; never on Order, compare or a contract's entry names. A codec entry's operations come from the `derive` construct's own definition (`jsonCodecDerivation`), not from a literal in the law code (§5.3). |
+| Keyed on a name? | Only on the words `contract`, `law`, `satisfies`, `evidence` and the satisfaction's contextual `trusted`, `unresolved`, `cases`, `target`; never on Order, compare or a contract's entry names. A codec entry is recognised by declaration identity: its type resolves through the program's imports to `effra/json`'s bundled `Codec` declaration, which marks its derivation, so no spelling of a user type, `Codec` included, is captured. Its operations come from the derivation (§5.3). That identity is still compiler-known library knowledge, recorded in the compiler-known constructs audit as 1-P5 and owned by #100 / T4. |
 | Readable with Go's simplicity | Contracts read like a Go interface with laws. Law bodies are ordinary boolean code, with no combinator helpers; `and`/`or`/`not` and a `when` guard are proposed to #135 (§1.1, preview). |
 | Same meaning in TypeScript, no `any` | Laws erase; evidence projects to a private-member brand outward and to the carrier inward, with 0 `any` (§5.2). |
 | Erases into Go | Byte-identical without laws; evidence erases (§5.1). |
@@ -1357,7 +1424,7 @@ The model is also what makes labels and defaults irrelevant. In every system abo
 
 ## 11. Decision record
 
-**Decided 2026-10-12 (spike #125, revision 1; amended in revision 2 after review 1, in revision 3 after review 2, in revision 4 after review 3, and in revision 5 after review 4).**
+**Decided 2026-10-12 (spike #125, revision 1; amended in revision 2 after review 1, in revision 3 after review 2, in revision 4 after review 3, in revision 5 after review 4, and in revision 6 after review 5).**
 
 - **Chosen.**
   - Laws are declared in a `contract`, a `service` or a `machine`, with typed universally quantified parameters. A law body is pure, or an `effect law` with explicit `raises` and `uses` over deterministic providers. A law is not a value, and no law body mints.
@@ -1371,7 +1438,9 @@ The model is also what makes labels and defaults irrelevant. In every system abo
     - **Types.** The contract's type parameters are abstract, with no constructor (EF002). The result is the builtin `bool`.
     - **Specialization** happens only after the check succeeds, binding each entry to the declaration its satisfaction names. Its diagnostics are dropped when the check or an entry binding failed.
     - **Equality and every other operation on `T`** must come as an entry, as `Eq` does for a Haskell class law.
-    - **Codec entries.** A codec entry is the derived witness of its type, used only through its two operations, and bound only to a derived codec with exactly the witness's rows (EF177).
+    - **Codec entries.** A codec entry is the derived witness of its type, used only through its two operations, and bound only to a derived codec of that derivation and domain, with exactly the witness's rows (EF177). It is written `codec: Json.Codec<T>` and recognised by declaration identity: the qualified name resolves through the program's imports to `effra/json`'s bundled `Codec`, which marks its derivation (revision 6, §5.3). The witness type names nothing outside a contract entry (EF126). The identity is compiler-known library knowledge, audit row 1-P5, which #100 / T4 replaces with a declared derive profile.
+    - **Every entry binding is resolved and typed, whatever the entry's kind** (revision 6). A value entry takes a declaration whose value type is the substituted entry type; a const, a type, a contract or a missing name is refused with EF177 naming what it is, even when no law uses the entry.
+    - **The check's header is typed nodes** (revision 6). The `bool` result, the hidden entry parameters and the codec operations are built as typed nodes, outside the substitution, so no synthesized token can be rebound by a contract parameter's spelling. Each refusal is reported once, by the check that owns it.
   - **Law names are identities, not spellings** (revision 5). A law is `law C.l` in the check and `law C.l@S` in a specialization, names no identifier can spell. Specializations are emitted by index. Outside its contract a law has no spelling (EF102).
   - **Evidence is not quantified** (revision 5). An evidence-typed law parameter is EF171 until a checked construction or fixture path exists.
   - **`Order` has four laws:** reflexive, antisymmetric, transitive and total (revision 2).
@@ -1436,6 +1505,10 @@ The model is also what makes labels and defaults irrelevant. In every system abo
 - **Rejected: law names concatenated from user spellings** (revision 5). `law__` + C + `__` + S + `__` + l collided for `(A__B, C)` and `(A, B__C)`, and with a user function of that spelling (review 4, o3).
 - **Rejected: generating values of an evidence type in a law** (revision 5). A generated value forges evidence, and its index was never resolved (review 4, m2).
 - **Rejected: letting a live run replace the ledger** (revision 5). A live run could clear a non-live refutation, after which an ordinary single-target run admitted the build (review 4, o1).
+- **Rejected: recognising the codec witness by spelling** (revision 6). An entry type whose head was the text `Codec` became the witness, so a user `record Codec<X>` was captured (review 5, Major 1). The declaration a qualified name resolves to decides instead, as Rust's lang items resolve to a `DefId`.
+- **Rejected: moving the literal as name-neutrality** (revision 6). Reading `"Codec"` from a field of `jsonCodecDerivation` rather than from `laws.go` moved the spelling without removing it; revision 5's §5.3 presented the move as neutrality (review 5, Major 1).
+- **Rejected: leaving value entries unchecked until a law uses them** (revision 6). A binding to a const of the wrong type, or to a name that does not exist, was accepted (review 5, m1). Refusing value entries outright was the other repair offered; typing every binding keeps them and matches Rust's `compare_impl_item`.
+- **Rejected: synthesized header tokens through the substitution** (revision 6). Revision 5's builtin `bool` mark and synthesized wire `string` each lived in the token stream the substitution rewrites, and a contract parameter spelled `string` captured the wire type (review 5, m2). Typed nodes leave nothing to capture, where a mark per token would be one more entry on a refusal list.
 
 ## 12. Follow-up units
 
@@ -1449,7 +1522,7 @@ Every probe in §6.1 is acceptance for the unit named beside it. Each must be re
 
 | Unit | What lands | Tests and acceptance | After | Estimate |
 | --- | --- | --- | --- | --- |
-| **L1. Contracts, laws and satisfactions** | Parser, formatter and LSP spans in #135's spelling (including its choice on `and`/`or`/`not` and `when`); contracts as groups of `where` entries; **the law check and its specialization** (§1.8), carried from the prototype to #135's spelling, the formatter, LSP spans and cross-module satisfactions: one check per contract law against the entries' declared types (positional, exact-arity entry calls, abstract type parameters, a builtin `bool` result built as a typed node rather than a token), then specialization per satisfaction after the check succeeds, with law identities allocated by stamp or index; satisfactions in the owner module with a required `cases` (EF175), `target`, `trusted` and `unresolved`; **entry types checked against the contract** (EF177); laws not values (EF178); EF002-family diagnostics; interface-summary transport (schema bump, round trip, `TestEvidenceSchemaIsClassified`); inspection facts in CLI and MCP; reachability in test mode. | The prototype's declaration tests and refusals with messages; probes m2, m3 and Q2; the four-law `Order` with the 0/1 compare as a negative control (probe M1); **hygiene: every P1 probe** (a callable or non-callable local, a parameter, a pattern binder or a nested binder spelled like the bound function, a record field or named argument spelled like the entry, a binder spelled like a contract type parameter) checks and runs the bound function, and P1-entry-let and P1-law-call keep their pinned EF101 and EF178; **the law check**: probes R4-M1-labels and R4-M1-arity refused with EF106 and R4-M1-control accepted, R4-M2-bool and R4-M2-control refused, R4-m1 refused with EF002, R4-o3 and R4-o3-run accepted, `==` on an abstract `T` refused, a failed check reported once, and a contract with no satisfaction still checked; the same cases in #135's spelling, through the formatter, and with the contract, the satisfaction and the bound function in three modules; a cross-module satisfaction; inherited laws run once; the name-neutrality screen; check time with laws measured on a quiet machine (§3). | rows 3, W1, #135 | L, 4.5 to 5.5 days |
+| **L1. Contracts, laws and satisfactions** | Parser, formatter and LSP spans in #135's spelling (including its choice on `and`/`or`/`not` and `when`); contracts as groups of `where` entries; **the law check and its specialization** (§1.8), carried from the prototype to #135's spelling, the formatter, LSP spans and cross-module satisfactions: one check per contract law against the entries' declared types (positional, exact-arity entry calls, abstract type parameters, and a header of typed nodes, the hidden entry parameters, the codec operations and the `bool` result, as the prototype builds it since revision 6), **every entry binding resolved and typed whatever its kind**, and **the codec witness resolved by declaration identity** through the imports (§5.3), then specialization per satisfaction after the check succeeds, with law identities allocated by stamp or index; satisfactions in the owner module with a required `cases` (EF175), `target`, `trusted` and `unresolved`; **entry types checked against the contract** (EF177); laws not values (EF178); EF002-family diagnostics; interface-summary transport (schema bump, round trip, `TestEvidenceSchemaIsClassified`); inspection facts in CLI and MCP; reachability in test mode. | The prototype's declaration tests and refusals with messages; probes m2, m3 and Q2; the four-law `Order` with the 0/1 compare as a negative control (probe M1); **hygiene: every P1 probe** (a callable or non-callable local, a parameter, a pattern binder or a nested binder spelled like the bound function, a record field or named argument spelled like the entry, a binder spelled like a contract type parameter) checks and runs the bound function, and P1-entry-let and P1-law-call keep their pinned EF101 and EF178; **the law check**: probes R4-M1-labels and R4-M1-arity refused with EF106 and R4-M1-control accepted, R4-M2-bool and R4-M2-control refused, R4-m1 refused with EF002, R4-o3 and R4-o3-run accepted, `==` on an abstract `T` refused, a failed check reported once, and a contract with no satisfaction still checked; **witness identity and entry bindings** (review 5): R5-M1-b03 and R5-M1-b03b refused once each, with the same message shape, R5-M1-alias discharged as `codec.ef` is, R5-M1-outside refused with EF126, R5-m1-b06, R5-m1-b06c, R5-m1-b06d and R5-m1-control-wrong refused once with EF177, R5-m1-control accepted, R5-m2-c1 and R5-m2-c2 discharged alike, and R5-m2-c3 and R5-m2-c4 refused once with EF106; the same cases in #135's spelling, through the formatter, and with the contract, the satisfaction and the bound function in three modules; the codec witness resolved with the contract, the `derive` and the satisfaction in different modules, each importing `effra/json` under its own alias; a cross-module satisfaction; inherited laws run once; the name-neutrality screen; check time with laws measured on a quiet machine (§3). Replacing the witness declaration with a declared derive profile is T4's acceptance, not L1's (audit 1-F, 1-P5). | rows 3, W1, #135 | L, 4.5 to 5 days |
 | **L2. The runner and receipts** | Generators for scalars, records, enums, generic data (after 4a) and recursive data; the choice-sequence shrinker; logical-ID seeds; the canonical seed parse (EF176); Go and JavaScript harnesses sharing one algorithm; `ef test --target both`; **canonical gating receipts** (location-keyed, revision- and seed-bound, exploration on its own path); **persisted disagreement** (EF172); **the refutation ledger**, under which a refutation stands until an agreeing run on both targets over the same inputs or a changed input identity (§2.2), with its strict decoder and EF191 for an unreadable ledger or receipt; **the full input identity**, source, dependencies, toolchain, provider revision and live mode, in receipts, staleness and the ledger's inputs (Q7, q2); gate integration. | The prototype's results on both targets, with byte-identical receipts; a generic `Option[User]` and a recursive list law; the seed survey, including the near-order defect; probes M6a, M6b, M6c and m1; **the three-command sequence** of §3, `ef test --target both`, then `ef test --target go`, then `ef build` on each target, refused at the end (probe N1), with the changed-source control (probe N1-revision); an incomplete run on both targets clears nothing; a deleted receipt does not clear a standing refutation; **an unreadable or malformed ledger or receipt is refused by `ef test` and `ef build`, never read as absent** (probes p1-ledger-malformed, p1-ledger-schema, p1-receipt-malformed, p1-both-malformed), **including a receipt that is JSON but not a receipt and a ledger with trailing data** (probes R4-m3-receipt-null, R4-m3-receipt-{}, R4-m3-receipt-extra, R4-m4-ledger-}, R4-m4-ledger-]); **an evidence-typed law parameter refused with EF171 before any harness runs** (probes R4-m2, R4-m2-test); **the live sequence** of §2.2 refused at the end (probe R4-o1-live), with live mode in the ledger's inputs replacing the interim no-replace rule; a deleted `dist/` is re-derived by the both-target run (p1-fresh-checkout); a dependency-only change and a toolchain change each make a receipt stale and the ledger's inputs new; a `--live` receipt never gates (q2-live); deep.ef's case count and counterexample never asserted. | L1, 4a | L, 5.5 to 6.5 days |
 | **L3. Effect, service and provider-protocol laws** | `effect law` with `uses`; refusal of live providers; service satisfactions per provider with `using`; **target-bound providers and the provider comparison** by logical law; harness-owned observers (an `Assert`-style channel and a counter fixture); one fresh scope per case. | The codec law; a service law over two providers, one deliberately lossy; probes M7-runtime, M7-observer and M7-providers; **target-scoped authority**: probes N2-type, N2-generic-record, N2-generic-enum, N2-provider, N2-provider-control and N2-refuted, with a declared provider subject in place of the prototype's "any subject that is not a declared type", so a misspelled type (`Usr satisfies Order<User> … target go`) is refused; **duplicate bindings** of one function to one entry either refused or each required lawful, with probes q1-after and q1-before kept; a live provider refused; a failure raised in a law shows in the counterexample. | L2, 4a | M, 3.5 to 4.5 days |
 | **L4. Evidence** | Evidence kinds as nominal wrapper types (generic-transparent after 4a), **covariant in results and contravariant in parameters** (replacing EF189's blanket refusal); construction private to the kind's owner module; **index resolution by binding identity** to declarations and canonical keys; evidence through `run` and recipes; admissions; EF180-EF187; the build verdict (EF174); the mint-soundness law (§13 Q4). | The prototype's evidence tests; probes M2, M4-apply, M4-let, M4-scope, M4-binder and M5 as refusals, and **M4-run and the o1 scope pair as acceptances**; **arguments by the call's binding**: probe N4 refused and N4-control accepted, plus reordered named arguments with and without omitted defaults, in both directions, on a function and a method; a mint through a target-bound satisfaction on its own target accepted and on the other refused (N2); a variance pair (result accepted, parameter refused); cross-module minting refused; `Option[SortedBy[…]]` through a generic; nested evidence in a record; **every `m2-nested-*` form tracked or refused with its own pinned code**, never the generic EF102; **evidence indices in law annotations resolved through the same entry binders**, with a checked construction or fixture path for evidence in laws, or the EF171 refusal kept (review 4, m2). | L1, 4a, W1 | L, 5.5 to 6.5 days |
@@ -1458,7 +1531,7 @@ Every probe in §6.1 is acceptance for the unit named beside it. Each must be re
 | **L7. Conditional satisfaction** | Per-instantiation discharge with composed generators; verdict composition from parts; library-declared instantiations; canonical keys in receipts. | `Pair[i64, User]` and `Option[Option[User]]` discharged; an unresolved part makes the composite unresolved; Trio's trusted transitivity replaced by a tested composite. | W1 conditional methods, L2 | M, 2 to 3 days |
 | **L8. Docs** | `docs/design.md:42` extended; GLOSSARY "Contract", "Satisfaction", "Evidence kind", "Admission", "Law receipt", "Provider protocol"; lawful-runtime-contract cross-reference; CHANGELOG; a new preview, superseding `docs/previews/2026-10-12-laws.md`, once #135 picks the spelling. | Docs review. | L1 | S, 0.5 day |
 
-**Total:** about 27 to 33 implementor-days plus review rounds.
+**Total:** about 27 to 32.5 implementor-days plus review rounds.
 - Revision 1's estimate was 22 to 27.5 days.
 - Revision 2's was 25.5 to 31.5 days, adding the review-1 scope in L1, L2, L3, L4 and L5.
 - Revision 3's was 27.5 to 33.5 days. It added half a day to each of four units, for the review-2 scope:
@@ -1472,7 +1545,8 @@ Every probe in §6.1 is acceptance for the unit named beside it. Each must be re
   - **L1 shrinks by a day.** Binding-aware elaboration, the hard part of hygiene, landed in the prototype with its probes, so L1 carries a working resolver rule to new surfaces instead of designing one.
   - **L2 is unchanged.** The strict decoder, EF191 and the `live` field exist in the prototype; adding dependencies and live mode to the inputs rides on Q7's work.
   - **L3 grows by half a day,** for duplicate bindings and declared providers.
-- **Revision 5 keeps every estimate,** for review 4. Review 4 made L1's one-day reduction conditional: Majors 1 and 2 and m1 belong to the hygiene core, and L1 would stay at 5 to 6 days unless they landed in the spike's prototype. They landed at `8e7571c5`, with their probes, so L1 stays at 4.5 to 5.5 days and its acceptance lists the new probes. m2 to m4 and o1 extend L2's and L4's acceptance. Each is already implemented in the prototype, or is a refusal L2 carries over, so neither estimate moves.
+- **Revision 5 keeps every estimate,** for review 4. Review 4 made L1's one-day reduction conditional: Majors 1 and 2 and m1 belong to the hygiene core, and L1 would stay at 5 to 6 days unless they landed in the spike's prototype. They landed at `8e7571c5`, with their probes, so L1 stays at 4.5 to 5.5 days and its acceptance lists the new probes. m2 to m4 and o1 extend L2's and L4's acceptance. Each is already implemented in the prototype, or is a refusal L2 carries over, so neither estimate moves. The total was 27 to 33 days.
+- **Revision 6 trims L1 to 4.5 to 5 days,** for review 5. Two items L1 carried landed in the prototype at `74cab99f` with their probes: the typed-node header, which revision 5 listed as L1 work, and whole-entry conformance. That takes about a day off the upper bound. Two items add acceptance: witness identity across modules, and the value-entry kinds (const, type, contract, missing name), each with a pinned message. Together they cost about half a day, so the upper bound falls by half a day and the lower bound stays. The witness migration to a declared derive profile is costed in T4, not here.
 
 **Order against spike-rows phase 2 and spike-where W1-W6:**
 1. rows unit 3, then 4a (#128), as spike-rows plans;
@@ -1507,6 +1581,12 @@ Diagnostics added or changed in revision 5 (prototype numbering, pinned in L1 an
 - **EF178, reworded:** "mints is the law Minty.mints, and a law is not a value: it cannot be called, passed or stored, a law body included". A law is named by its contract, and outside its contract it has no spelling (EF102).
 - **EF101, reworded:** "duplicate local same: same is the contract entry Eq.same, a binder of every law of its contract; a let cannot redeclare a visible binder".
 - **EF191, extended:** a receipt that is JSON but not a receipt ("schemaVersion 0, want 2", an unknown field, a missing header field or law field) and a ledger or receipt with data after its object ("data after the ledger object").
+
+Diagnostics added or changed in revision 6 (prototype numbering, pinned in L1):
+- **EF177, extended to every entry kind:** a binding is compared with its entry whatever the entry's kind, used by a law or not. A value entry reports the binding's type in its declared spelling ("entry label has type fn(User) -> string, but sortedTrio has type fn(Trio) -> bool"), or what the binding is instead: "is a const of type string: a parameter default, not a value", "names no declaration", "is a type, not a value". A witness entry requires a derived codec of its derivation and domain.
+- **EF126, extended:** the witness type used outside a contract entry, "effra/json.Codec is the witness type of effra/json.codec: it names only a contract entry's type, qualified by an import alias of effra/json; a value of it is a derive declaration".
+- **EF102, reported once:** an unknown satisfaction type argument is "X satisfies C with type argument Foo, which names no known type", once for the argument rather than once per entry that uses it. An unknown entry type is reported once, by the law check, and suppresses the EF177 it would otherwise cause.
+- **EF002, extended:** a witness entry with the wrong number of type arguments, "expected the end of Json.Codec's one type argument, found …".
 
 Open:
 - **Q3. Which functions does EF185 cover?** The prototype refuses every function with an evidence parameter and no admission, because it has no `pub`. Recommendation: only `pub` functions reachable from the host boundary, once `pub` exists; private functions take evidence freely.
