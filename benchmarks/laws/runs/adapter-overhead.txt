@@ -1,0 +1,9 @@
+# node benchmarks/laws/ts/adapter-cost.mjs 200000 11 (review 2 m4): each evidence export measured with its adapter and with the same body and no adapter; ts/proto/lib.mjs from wf10/spike-laws-proto 8b02919b
+# node v24.11.1, 16 cores, loadavg before: 2.51 8.47 12.66, 2026-10-12T06:09Z
+oldest ns/call median=4.2 raw=9.0,4.2,4.0,14.0,4.6,4.5,4.4,4.2,4.1,4.2,4.1
+sortTrio ns/call median=763.4 raw=904.1,799.2,757.3,760.4,759.4,764.5,762.9,763.4,760.5,770.5,767.9
+sortTrio-unadapted ns/call median=29.1 raw=29.5,29.2,29.2,29.0,29.1,28.9,29.1,29.0,29.1,28.9,29.2
+search ns/call median=825.5 raw=788.6,793.2,825.5,856.4,1017.2,828.2,817.6,826.7,805.9,817.9,829.1
+search-unadapted ns/call median=9.3 raw=9.5,9.1,9.2,9.4,9.3,8.9,9.2,9.5,9.5,8.9,9.7
+sortTrio adapter ns/call (median difference) = 734.3
+search adapter ns/call (median difference) = 816.1

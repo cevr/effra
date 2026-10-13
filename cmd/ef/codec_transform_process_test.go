@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -13,10 +12,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"effra.local/prototype/internal/testport"
 )
 
 // codecTransformCancellation interrupts a decode while its first
@@ -323,9 +323,11 @@ derive batchJson = Json.codec<Batch>(maxBodyBytes: 256, maxDepth: 2) with ticket
 // its listener holds. With direction "decode" or "encode" the
 // transformation is interrupted first, so the rebind succeeds only if the
 // interrupt returned after the transformation's scope released the
-// listener. The "held" control rebinds before interrupting, which must be
-// refused with IoError; it interrupts only after observing the refusal, so
-// no failure of its body meets a pending failure of the child.
+// listener. Each prints "<direction> interrupting" as it starts the
+// interrupt and "<direction> interrupted" once it returned. The "held"
+// control rebinds before interrupting, which must be refused with IoError;
+// it interrupts only after observing the refusal, so no failure of its body
+// meets a pending failure of the child.
 effect fn interrupted(direction: string) -> void raises { IoError, JsonDecodeFailure, JsonEncodeFailure } uses { Sync, Http, Env, Console } {
     let address = run Env.get("EFFRA_PROBE_ADDRESS")
     let arrival = run Sync.latch()
@@ -335,6 +337,7 @@ effect fn interrupted(direction: string) -> void raises { IoError, JsonDecodeFai
         if direction == "encode" {
             let working = fork batchJson.encode(Batch { first: Ticket { code: "held" }, second: Ticket { code: "fast" } }).provide<Probe>(gate)
             run Sync.await(arrival)
+            run Console.log(direction + " interrupting")
             run working.interrupt()
             run Console.log(direction + " interrupted")
             run Http.listen(address, limits(), arrive).provide<Probe>(gate)
@@ -342,6 +345,7 @@ effect fn interrupted(direction: string) -> void raises { IoError, JsonDecodeFai
             let working = fork batchJson.decode("{\"first\":\"held\",\"second\":\"fast\"}").provide<Probe>(gate)
             run Sync.await(arrival)
             if direction == "decode" {
+                run Console.log(direction + " interrupting")
                 run working.interrupt()
                 run Console.log(direction + " interrupted")
                 run Http.listen(address, limits(), arrive).provide<Probe>(gate)
@@ -419,10 +423,25 @@ func (p *codecFinalizerProcess) next(t *testing.T) (string, bool) {
 	}
 }
 
+// expect fails unless the next stdout line is want. Once output has ended
+// it reports the fixture's exit status and stderr. In this fixture an
+// uncaught rebind failure (decode or encode) exits 1 with IoError. A refused
+// first bind is a forked listener whose failure stays pending while main
+// awaits a latch: on JS it currently exits 0 with empty stderr (#151), and
+// on Go it hangs, which next reports as no output within 10s.
 func (p *codecFinalizerProcess) expect(t *testing.T, want string) {
 	t.Helper()
-	if line, ok := p.next(t); !ok || line != want {
-		t.Fatalf("stdout %q (open %v), want %q", line, ok, want)
+	line, ok := p.next(t)
+	if !ok {
+		select {
+		case <-p.done:
+			t.Fatalf("stdout ended, want %q; exit %d, stderr %q", want, p.command.ProcessState.ExitCode(), p.stderr.String())
+		case <-time.After(10 * time.Second):
+			t.Fatalf("stdout ended, want %q; not reaped within 10s", want)
+		}
+	}
+	if line != want {
+		t.Fatalf("stdout %q, want %q", line, want)
 	}
 }
 
@@ -463,30 +482,49 @@ func codecFinalizerStall(t *testing.T, address, path string) net.Conn {
 // time, so a refused probe means both stalled requests are being read.
 // A probe holds a slot itself while it runs, so a stalled request whose
 // headers the transport parses only then is refused with 503; such a
-// request is stalled again on a fresh connection. A timeout reports what
-// each stalled connection last received.
+// request is stalled again on a fresh connection. Any other reply to a
+// stalled request fails the test. A timeout reports the last refusal of
+// each stalled request.
 func codecFinalizerSaturate(t *testing.T, address string, paths ...string) []net.Conn {
 	t.Helper()
 	stalled := make([]net.Conn, len(paths))
 	for i, path := range paths {
 		stalled[i] = codecFinalizerStall(t, address, path)
 	}
-	// refused reports whether conn has received a response, which for a
-	// request whose body has not completed is only an admission refusal.
-	refused := func(conn net.Conn, wait time.Duration) (string, bool) {
-		_ = conn.SetReadDeadline(time.Now().Add(wait))
+	// refusal returns the status line a stalled request received, or "" if
+	// nothing arrived within wait. Once a byte has arrived, the rest of the
+	// line must follow, however the reads split it, with no more than five
+	// seconds between reads. A request whose body has not completed may
+	// receive only an admission refusal, so EOF, a reset or any other status
+	// fails the test.
+	refusal := func(path string, conn net.Conn, wait time.Duration) string {
 		defer conn.SetReadDeadline(time.Time{})
+		_ = conn.SetReadDeadline(time.Now().Add(wait))
+		var received []byte
 		buffer := make([]byte, 256)
-		n, err := conn.Read(buffer)
-		var network net.Error
-		if n == 0 && errors.As(err, &network) && network.Timeout() {
-			return "", false
+		for {
+			n, err := conn.Read(buffer)
+			received = append(received, buffer[:n]...)
+			if line, _, complete := bytes.Cut(received, []byte("\n")); complete {
+				status := strings.TrimSpace(string(line))
+				if !strings.HasPrefix(status, "HTTP/1.1 503 ") {
+					t.Fatalf("stalled %s answered %q before its body completed", path, status)
+				}
+				return status
+			}
+			var network net.Error
+			if len(received) == 0 && errors.As(err, &network) && network.Timeout() {
+				return ""
+			}
+			if err != nil {
+				t.Fatalf("stalled %s received %q, then %v", path, received, err)
+			}
+			_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		}
-		return strconv.Quote(string(buffer[:n])) + " " + fmt.Sprint(err), true
 	}
 	client := http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
 	var probeErr error
-	received := make([]string, len(paths))
+	refused := make([]string, len(paths))
 	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		response, err := client.Get("http://" + address + "/probe")
 		if err != nil {
@@ -502,20 +540,20 @@ func codecFinalizerSaturate(t *testing.T, address string, paths ...string) []net
 			t.Fatalf("probe answered %d", response.StatusCode)
 		}
 		for i, conn := range stalled {
-			if reply, ok := refused(conn, time.Millisecond); ok {
-				received[i] = reply
-				t.Logf("stalling %s again after it received %s", paths[i], reply)
+			if status := refusal(paths[i], conn, time.Millisecond); status != "" {
+				refused[i] = status
+				t.Logf("stalling %s again after admission refused it: %s", paths[i], status)
 				conn.Close()
 				stalled[i] = codecFinalizerStall(t, address, paths[i])
 			}
 		}
 	}
 	for i, conn := range stalled {
-		if reply, ok := refused(conn, 200*time.Millisecond); ok {
-			received[i] = reply
+		if status := refusal(paths[i], conn, 200*time.Millisecond); status != "" {
+			refused[i] = status
 		}
 	}
-	t.Fatalf("the stalled requests %v were not both admitted within 20s (last probe error %v); they last received %q", paths, probeErr, received)
+	t.Fatalf("the stalled requests %v were not both admitted within 20s (last probe error %v); their last refusals were %q", paths, probeErr, refused)
 	return nil
 }
 
@@ -542,13 +580,15 @@ func codecFinalizerFinish(t *testing.T, conn net.Conn) string {
 // stalls keeps it from completing; the latch opens when the test sends the
 // rest of that body. The test stalls one request on /hold and one on
 // /arrive, waits until both are admitted, then completes /arrive, whose
-// handler signals the fixture to interrupt the direction. The interrupt
-// must not return, so the fixture prints nothing, for as long as /hold
-// stalls; once /hold completes it is refused with 503, as every request
-// admitted after shutdown began, and only then does the interrupt return.
-// The fixture then rebinds the address as in the unlatched control. A
-// finalizer that was not awaited would let the fixture print
-// "<direction> interrupted" while /hold was still open.
+// handler signals the fixture to interrupt the direction. Once the fixture
+// says it is interrupting, the interrupt must not return, so the fixture
+// prints nothing, for as long as /hold stalls; once /hold completes it is
+// refused with 503, as every request admitted after shutdown began, and
+// only then does the interrupt return. The fixture then rebinds the address
+// as in the unlatched control. A finalizer that was not awaited would let
+// the fixture print "<direction> interrupted" while /hold was still open.
+// The silent second starts when the interrupt does, so a fixture slow to
+// start it cannot use up the second before the finalizer is reached.
 func codecFinalizerLatched(t *testing.T, workspace, address, direction string, argv []string) {
 	t.Helper()
 	process := startCodecFinalizer(t, workspace, address, direction, argv...)
@@ -558,6 +598,7 @@ func codecFinalizerLatched(t *testing.T, workspace, address, direction string, a
 	if status := codecFinalizerFinish(t, trigger); !strings.HasPrefix(status, "HTTP/1.1 404 ") && !strings.HasPrefix(status, "HTTP/1.1 503 ") {
 		t.Fatalf("/arrive answered %q", status)
 	}
+	process.expect(t, direction+" interrupting")
 	select {
 	case line, ok := <-process.lines:
 		t.Fatalf("the interrupt returned while the finalizer was latched: %q (open %v)", line, ok)
@@ -576,6 +617,10 @@ func codecFinalizerLatched(t *testing.T, workspace, address, direction string, a
 // the first transformation of a Batch holds a listener that its scope owns,
 // the fixture interrupts the direction, and only then rebinds the
 // listener's address, which succeeds only if the listener was released.
+// The fixture is told that address, since it rebinds it and cannot learn a
+// port it was given, so each subtest reserves it (testport.Reserve): no
+// other socket can take the port before the fixture binds it or between
+// the release and the rebind.
 // Negative control: rebinding while the transformation still holds the
 // listener is refused with IoError on every target, and the fixture says so.
 // A rebind proves only that the socket was released, which Go's
@@ -609,12 +654,7 @@ func TestCodecTransformationInterruptReleasesItsScopedResource(t *testing.T) {
 						t.Fatalf("%s is required", argv[0])
 					}
 				}
-				listener, err := net.Listen("tcp", "127.0.0.1:0")
-				if err != nil {
-					t.Fatal(err)
-				}
-				address := listener.Addr().String()
-				listener.Close()
+				address := testport.Reserve(t)
 				if base, latched := strings.CutSuffix(direction, "-latched"); latched {
 					codecFinalizerLatched(t, workspace, address, base, argv)
 					return
@@ -622,6 +662,9 @@ func TestCodecTransformationInterruptReleasesItsScopedResource(t *testing.T) {
 				process := startCodecFinalizer(t, workspace, address, direction, argv...)
 				process.expect(t, "listening http://"+address)
 				codecFinalizerArrive(t, address)
+				if direction != "held" {
+					process.expect(t, direction+" interrupting")
+				}
 				process.expect(t, direction+" interrupted")
 				if direction == "held" {
 					process.expect(t, "rebind refused: IoError")

@@ -100,6 +100,7 @@ Line numbers are at `515d49b` and identify evidence, not permanent anchors. All 
 | 1-P2 | Receiver-method plan for `.catch`, `.provide`, `.timeout` and `.orFail` | earlier `docs/design.md:33`; `docs/specs/language-abstractions.md:57-61,148` | Moving forms the checker must still know into `effra/effect` methods recreates the failure mode. Superseded by D1. |
 | 1-P3 | `Actor<P>` client projection, `actors.post` operation references and spawn row charging | `docs/specs/actors.md:13,29`; audit row 29 | A bundled `Actor` type and `actors` functions whose typing the compiler derives. |
 | 1-P4 | Generalized `run` binding and Result `?` | `docs/research/generalized-run-binding.md:42`; audit row 33 | A binder protocol keyed on `Option` or `Result` identity would be Rust's `Try` lang item (`rust@69bccf03` `compiler/rustc_attr_ir/src/lang_items.rs:372`). The current recommendation (explicit `flatMap`) carries no such risk. Guard only. |
+| 1-P5 | The codec witness type of a law contract entry, `codec: Json.Codec<T>` | the laws spike's prototype (`wf10/spike-laws-proto`, never merged): `bundled.go` (a `Witness` declaration in `effra/json` beside the `codec` derivation), `laws.go` (`resolveEntryWitnesses`, `checkWitnessEntry`); `docs/research/laws.md` §5.3 | A bundled type the law check recognises by the identity its qualified name resolves to, and to which it gives the derivation's two operations. It is a Rust lang item: resolved by declaration, never by spelling, so a user `Codec<X>` is never captured, but still a library identity that grants semantics. Owned by #100 / T4: when derive profiles become syntax (1-F), the entry names the profile (for example `codec: json<T>`) and the `Witness` declaration is deleted. |
 
 ### 2: library intrinsics
 
@@ -156,7 +157,8 @@ Priorities: P1 means decide or fix before more code depends on it. P2 means fix 
 - Spell the format as part of `derive`, for example `derive userJson = json<User>(maxBodyBytes: 4096, maxDepth: 2)` with `json` as a closed profile word, and make its failures predeclared failures of that profile.
 - Prior art: Rust, MoonBit (`derive(ToJson)`, `moonbit-docs@8d9f3ba2` `derive.md:121`) and Haskell address builtin derivers by trait path. In those languages the trait is an ordinary library interface whose implementation the compiler writes. Effra has no traits, so `Json.codec` names nothing ordinary.
 - Migration impact: parser, formatter, LSP definition target, 10 Go test files, 1 `.ef` file, and codec documentation.
-- Depends on #49 and #55.
+- **The codec witness of a law contract entry (1-P5) moves with it.** A contract entry that takes a derived witness names the profile's syntax, for example `codec: json<T>`, instead of the bundled `Json.Codec<T>` that the laws prototype resolves by declaration identity. Acceptance: the prototype's `Witness` bundled declaration and its `resolveEntryWitnesses` resolution are deleted; the laws spike's probes R5-M1-b03 and R5-M1-b03b still pass (a user record spelled `Codec`, or any other spelling, is an ordinary value entry); and the codec round trip of `examples/laws/codec.ef` is still tested and refuted as before (`docs/research/laws.md` §5.3 and §12).
+- Depends on #49 and #55; the derive-profile syntax itself is #100.
 
 **1-G. Split by the language-protocol criterion.**
 - *`Foreign` (P3, resolved).* `import go` charges `Foreign` on every host call because the construct's trust contract requires it. No declared operation charges it, and `Foreign` has no operations. It is therefore a language protocol. Specify it as predeclared: the name is not declarable, and the `Host` discharge stays an ordinary layer provider. This matches Go's predeclared `error`, a protocol the language itself names. Migration impact: documentation and a reserved-name diagnostic.
@@ -226,7 +228,7 @@ These are proposals for the map owner. An edge "A blocks B" means B must not sta
 | T2b | Http as an ordinary bundled service; remove `emit_http.go` identity knowledge (1-B, 1-C) | #51, #15 | — |
 | T2c | Declared target capability and the test harness as an ordinary layer (1-E, 1-H) | #15 | — |
 | T3 | Predeclared `Option` (1-D) | #32 | — |
-| T4 | Derive profiles owned by the derive construct (1-F) | #49, #55 | — |
+| T4 | Derive profiles owned by the derive construct (1-F, #100), and with them the codec witness of law contract entries (1-P5) | #49, #55 | — |
 | T5 | `Actor<P>` projection design gate (1-P3) | Design input only: the statecharts lane's machine decision spelling (1-P1), so a syntax route does not collide with it | The `Actor<P>` projection units of #11 and #57 |
 | T6 | Specify the predeclared `Foreign` protocol and reserved names; decide `Scheduler` with row 15 (1-G) | — | — |
 

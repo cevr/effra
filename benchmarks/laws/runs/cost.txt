@@ -1,0 +1,27 @@
+# laws prototype cost (proto 63164e8a), 11 samples per series, seconds of wall time
+# date 2026-10-12T04:48:41Z host Linux 6.12.93 x86_64 cpus 16
+# go go1.27.0 node v24.11.1
+# load average at start: 9.24 17.89 23.39
+# law program: examples/laws/probes/providers.ef (two RoundTrip<Account> satisfactions, 200 cases each) plus one test_ function
+# control: the same file with its contract and satisfies blocks blanked, plus the same test_ function
+test laws go cold median=0.473s raw=0.450 0.458 0.443 0.453 0.473 0.473 0.448 0.513 0.478 0.526 0.508
+test control go cold median=0.370s raw=0.385 0.370 0.485 0.375 0.372 0.339 0.348 0.332 0.383 0.318 0.333
+test laws go warm median=0.109s raw=0.108 0.101 0.096 0.129 0.116 0.143 0.110 0.109 0.122 0.099 0.097
+test control go warm median=0.083s raw=0.083 0.069 0.094 0.074 0.072 0.088 0.089 0.122 0.100 0.083 0.070
+order test go cold median=0.479s raw=0.388 0.431 0.534 0.472 0.479 0.379 0.676 0.646 0.540 0.589 0.453
+order test go warm median=0.140s raw=0.151 0.150 0.146 0.157 0.103 0.147 0.133 0.098 0.140 0.117 0.122
+build laws go cold median=0.413s raw=0.369 0.345 0.352 0.642 0.413 0.450 0.316 0.450 0.686 0.644 0.344
+build control go cold median=0.304s raw=0.366 0.304 0.248 0.258 0.322 0.336 0.253 0.333 0.298 0.323 0.299
+test laws js cold median=0.162s raw=0.171 0.178 0.161 0.160 0.151 0.147 0.140 0.167 0.162 0.163 0.173
+test control js cold median=0.122s raw=0.116 0.099 0.116 0.107 0.131 0.125 0.122 0.160 0.113 0.131 0.127
+test laws js warm median=0.188s raw=0.176 0.199 0.223 0.188 0.180 0.206 0.176 0.195 0.157 0.191 0.169
+test control js warm median=0.124s raw=0.122 0.108 0.113 0.108 0.124 0.128 0.139 0.140 0.121 0.137 0.137
+order test js cold median=0.156s raw=0.168 0.148 0.160 0.152 0.142 0.201 0.132 0.156 0.175 0.195 0.147
+order test js warm median=0.170s raw=0.165 0.170 0.208 0.162 0.163 0.171 0.172 0.148 0.196 0.184 0.150
+build laws js cold median=0.018s raw=0.020 0.015 0.015 0.017 0.018 0.020 0.016 0.018 0.024 0.023 0.021
+build control js cold median=0.021s raw=0.020 0.021 0.017 0.021 0.035 0.032 0.020 0.024 0.019 0.021 0.025
+# load average at end: 10.54 17.09 22.88
+== adapter (node, ts/adapter-cost.mjs, 200000 calls per sample, 11 samples after one warm-up)
+oldest ns/call median=4.7 raw=4.7,4.0,7.9,11.3,6.9,4.1,4.5,4.4,4.3,5.0,5.7
+sortTrio ns/call median=1209.4 raw=1889.4,2737.6,2721.6,2515.3,1409.2,1106.0,1128.0,1209.4,1016.6,1092.9,1195.3
+search ns/call median=1267.5 raw=1267.5,1085.4,1508.8,1441.0,1203.3,1975.1,1759.8,1481.5,1203.3,1230.6,1209.8

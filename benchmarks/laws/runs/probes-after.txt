@@ -1,0 +1,106 @@
+# examples/laws/probes.sh with ef built from wf10/spike-laws-proto 74cab99f (after the review-5 fixes)
+PASS M1-control: without the total law the 0/1 compare is tested on all three laws and its build is admitted (the hole)
+PASS M1: with the total law: go=tested,tested,tested,refuted js=tested,tested,tested,refuted agree=true, counterexample a = User { age: -1, name: "" }, b = User { age: 0, name: "" }
+PASS M1-build: go: EF170 refuted laws refuse the build: Order.total@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }; the refutation stands for this source di
+PASS M1-build: js: EF170 refuted laws refuse the build: Order.total@User at a = User { age: -1, name: "" }, b = User { age: 0, name: "" }; the refutation stands for this source di
+PASS M2-mint: refused on go and js: EF181 ... compareUsers here is the parameter compareUsers of sortTrioByShadow
+PASS M2-signature: refused on go and js: EF181 ... in the signature of sortTrioByShadow resolves to its parameter compareUsers
+PASS M2-forward: refused on go and js: EF181 ... in the signature of sortForward resolves to its parameter compareUsers
+PASS M2-control: a method parameter with another spelling does not block canonical evidence obtained from sortTrio
+PASS M3: refused on go and js: EF188 ... firstAge carries evidence across the host boundary, and its parameter h: Holder<Trio> has no snapshot plan
+PASS N3-record: refused on go and js: EF188 ... envelopeFind carries evidence across the host boundary, and its parameter e reaches e.held: Holder<Trio>, which has no snapshot plan
+PASS N3-enum: refused on go and js: EF188 ... parcelFirstAge carries evidence across the host boundary, and its parameter p reaches p.held: Holder<Trio>, which has no snapshot plan
+PASS m2-nested-field: refused on go and js: EF102 ... unknown or unsupported field type
+PASS m2-nested-container: refused on go and js: EF102 ... unknown or unsupported value type
+PASS m2-nested-callback: refused on go and js: EF102 ... unknown or unsupported value type
+PASS m2-nested-callback-result: refused on go and js: EF102 ... unknown or unsupported value type
+PASS m2-nested-async: refused on go and js: EF102 ... unknown or unsupported value type
+PASS M4-apply: refused on go and js: EF189 ... search requires SortedBy<Trio, compareUsers> for xs, so it cannot be used as a function value
+PASS M4-let: both routes refused: apply(search, ...) and let f = search
+PASS M4-scope: refused on go and js: EF184 ... search requires SortedBy<Trio, compareUsers> for xs, but the argument is the carrier Trio
+PASS o1-scope-result: let s = scope { sortTrio(t) }; search(s, bob) is accepted and prints true on go and js
+PASS o1-scope-plain: refused on go and js: EF184 ... search requires SortedBy<Trio, compareUsers> for xs, but the argument is the carrier Trio
+PASS M4-binder: refused on go and js for the binder spelled xs and for the binder under a renamed parameter
+PASS M4-run: let xs = run sortTrioLater(t); search(xs, bob) is accepted and prints true on go and js
+PASS M4-effect-export: Effect.Effect<SortedBy<Trio, "compareUsers">, never, never>, and the adapter freezes the success value
+PASS N4: refused on go and js: EF184 ... wrapped requires SortedBy<Trio, compareUsers> for xs, but the argument is the carrier Trio
+PASS N4-control: wrapped(other: t, xs: sortTrio(t)) is accepted and prints true on go and js
+PASS M5: go: EF174 evidence rests on laws with no current passing receipt on go (no receipt): User satisfies Order (for a mint of SortedBy<Trio, compareUsers>, the admission of Sorted
+PASS M5: js: EF174 evidence rests on laws with no current passing receipt on js (no receipt): User satisfies Order (for a mint of SortedBy<Trio, compareUsers>, the admission of Sorted
+PASS N2-type: refused on go and js: EF190 ... User satisfies Order target go, but User is a type with one representation on both targets
+PASS N2-provider: js: EF181 cannot mint SortedBy<Trio, compareUsers>: compareUsers is bound to Order.compare only on go, by GoOrder satisfies Order target go; on js no satisfaction binds it, i; no .d.mts
+PASS N2-provider-control: go: the provider's own target mints, and the build after ef test --target go is admitted
+PASS N2-refuted: js refused with EF181, go receipt tested,tested,tested,refuted; no .d.mts
+PASS N2-generic-record: refused on go and js: EF190 ... Box is a type with one representation on both targets
+PASS N2-generic-enum: refused on go and js: EF190 ... Box is a type with one representation on both targets
+PASS q1-after: refused on go and js: EF181 ... Twin satisfies Order with law total unresolved
+PASS q1-before: refused on go and js: EF181 ... Twin satisfies Order with law total unresolved
+PASS q2-live: the --live receipt records live: true and its build is refused (EF174 evidence rests on laws with no current passing receipt on js (the receipt is from ef test --live, whose live capab); an ordinary run then admits it
+PASS M6-cwd: a build from another directory reads the refuted receipt: EF170 refuted laws refuse the build: Order.antisymmetric@User at a = User { age: -1, name: "" }, b = User { age: 0, name
+PASS M6-seed: gating receipt keeps tested,tested,refuted,tested; exploration seed 14 wrote its own receipt (tested,tested,tested,tested); build refused
+PASS M6-disagree: EF172 recorded: go=refuted js=refuted, go failure: cross-target disagreement (EF172): status differs (go "tested", js "refuted")
+PASS M6-disagree-build: go: EF172 a cross-target refutation stands for this source digest: Depth<i64>.finite@i64 (cross-target disagreement (EF172):
+PASS M6-disagree-build: js: EF172 a cross-target refutation stands for this source digest: Depth<i64>.finite@i64 (cross-target disagreement (EF172):
+PASS N1: after ef test --target go the go receipt still says refuted and both builds are refused: EF172 a cross-target refutation stands for this source digest: Depth<i64>.finite@i64 (cross-target disagreement (EF172): status differs (go "tested", 
+PASS p1-ledger-malformed: a ledger of '{': ef test --target go refused and wrote nothing, both builds refused: EF191 the refutation ledger dist/deep.laws.refutations.json is unreadable (unexpected EOF): it is refused, never read as absent, because it may hold a
+PASS p1-ledger-schema: a ledger that is JSON but not a ledger is refused: EF191 the refutation ledger dist/deep.laws.refutations.json is unreadable (no source digest): it is refused, never read as absent, because i
+PASS p1-receipt-malformed: refused: EF191 the law receipt dist/codec.laws.go.json is unreadable (unexpected EOF): it is refused, never read as absent, because it may hold a refutation th
+PASS p1-both-malformed: refused: EF191 the refutation ledger dist/codec.laws.refutations.json is unreadable (unexpected EOF): it is refused, never read as absent, because it may hold 
+PASS N1-revision: a changed source digest is new inputs: its own go run is tested and its go build is admitted
+PASS p1-fresh-checkout: with dist/ deleted, ef test --target go alone admits the go build (local history is gone); ef test --target both re-derives the disagreement and refuses both builds
+PASS M7-runtime: go [["Runtime.constructionRunsNothing","GoRuntime","go","tested",990390378,"03b4fb56"]]; js [["Runtime.constructionRunsNothing","EffectRuntime","js","tested",990390378,"03b4fb56"]]; sameScenarios=true
+PASS M7-observer: the observation channel is live: running the recipe refutes on both providers (raised AssertionFailed)
+PASS M7-providers: ["RoundTrip<Account>.roundTrip",true,["accountJson:go:607786003:0109b916","accountJsonAgain:go:607786003:0109b916","accountJson:js:607786003:0109b916","accountJsonAgain:js:607786003:0109b916"]]
+PASS m1: EFFRA_LAW_SEED=010 refused before any harness runs
+PASS m1: EFFRA_LAW_SEED=-1 refused before any harness runs
+PASS m1: EFFRA_LAW_SEED=abc refused before any harness runs
+PASS m1: EFFRA_LAW_SEED=4294967296 refused before any harness runs
+PASS m2: refused on go and js: EF177 ... entry label has type fn(User) -> string, but sortedTrio has type fn(Trio) -> bool
+PASS m3-call: refused on go and js: EF178 ... mints is the law Minty.mints, and a law is not a value
+PASS m3-spelling: refused on go and js: EF102 ... unknown function or service method
+PASS m3-mint: refused on go and js: EF181 ... a law body states an obligation and is never a construction site
+PASS P1-callable: go and js: refuted at a = 0
+PASS P1-callable-control: go and js: refuted at a = 0
+PASS P1-callable-evidence: the build that mints Same<i64, sameI> is refused on go and js (EF170), and no .d.mts brands it
+PASS P1-parameter: go and js: refuted at sameI = 0
+PASS P1-local: go and js: refuted at a = 0
+PASS P1-binder: go and js: refuted at a = 0, b = Box.Value { sameI: 0 }
+PASS P1-record-label: go and js: refuted at a = 0
+PASS P1-nested: go and js: refuted at a = 0, b = Box.Value { sameI: 0 }
+PASS P1-type-parameter: go and js: refuted at a = 0
+PASS P1-named-argument: go and js: tested
+PASS P1-entry-let: refused on go and js: EF101 ... same is the contract entry Eq.same, a binder of every law of its contract
+PASS P1-law-call: refused on go and js: EF178 ... reflexive is the law Eq.reflexive, and a law is not a value
+PASS R4-M1-labels: refused on go and js: EF106 ... callable values take positional arguments; remove label x
+PASS R4-M1-arity: refused on go and js: EF106 ... incorrect callback argument count
+PASS R4-M1-control: go and js: refuted at a = 0; refuted at a = 0, b = 0; tested; tested
+PASS R4-M2-bool: refused on go and js: EF106 ... body returns i64; expected bool
+PASS R4-M2-control: refused on go and js: EF106 ... body returns i64; expected bool
+PASS R4-m1: refused on go and js: EF002 ... T is a contract type parameter in this law
+PASS R4-m2: refused on go and js: EF171 ... quantifies s: Same<i64, nope>, which has no generator
+PASS R4-m2-test: ef test refuses on go and js before any harness runs: no receipt, no panic
+PASS R4-o3: go and js: tested; tested; tested
+PASS R4-o3-run: user functions spelled law__Eq__i64__reflexive and law__A__B__C__l check and run beside the laws on go and js
+PASS R4-o1-live: after an agreeing ef test --live --target both and an ordinary ef test --target go, the ledger still holds the standing refutation and the go build is refused: EF172 a cross-target refutation stands for this source digest: * (standing refutation from a non-live run); a 
+PASS R4-m3-receipt-null: ledger deleted, receipt null refused: EF191 the law receipt dist/strict.laws.go.json is unreadable (schemaVersion 0, want 2): it is refused, never read as absent, because it may hold a ref
+PASS R4-m3-receipt-{}: ledger deleted, receipt {} refused: EF191 the law receipt dist/strict.laws.go.json is unreadable (schemaVersion 0, want 2): it is refused, never read as absent, because it may hold a ref
+PASS R4-m3-receipt-extra: ledger deleted, receipt extra refused: EF191 the law receipt dist/strict.laws.go.json is unreadable (json: unknown field "extra"): it is refused, never read as absent, because it may hold a
+PASS R4-m4-ledger-}: a ledger followed by '}' is refused: EF191 the refutation ledger dist/strict.laws.refutations.json is unreadable (data after the ledger object): it is refused, never read as absent, becau
+PASS R4-m4-ledger-]: a ledger followed by ']' is refused: EF191 the refutation ledger dist/strict.laws.refutations.json is unreadable (data after the ledger object): it is refused, never read as absent, becau
+PASS R5-M1-b03: refused once on go and js: EF177 ... entry box has type Codec<i64>, but sameI has type fn(i64, i64) -> bool
+PASS R5-M1-b03b: refused once on go and js: EF177 ... entry box has type Container<i64>, but sameI has type fn(i64, i64) -> bool
+PASS R5-M1-alias: go and js: tested; refuted at value = Profile { active: false, name: "", score: -1 }
+PASS R5-M1-outside: refused on go and js: EF126 ... effra/json.Codec is the witness type of effra/json.codec: it names only a contract entry's type
+PASS R5-m1-b06: refused once on go and js: EF177 ... entry unit has type i64, but Name is a const of type string: a parameter default, not a value
+PASS R5-m1-b06c: refused once on go and js: EF177 ... entry unit has type i64, but DoesNotExist names no declaration
+PASS R5-m1-b06d: refused once on go and js: EF177 ... entry unit has type i64, but Name is a const of type i64: a parameter default, not a value
+PASS R5-m1-control: go and js: tested
+PASS R5-m1-control-wrong: refused once on go and js: EF177 ... entry unit has type fn(i64) -> bool, but inc has type fn(i64) -> i64
+PASS R5-m2-c1: go and js: tested; refuted at value = Profile { active: false, name: "", score: -1 }
+PASS R5-m2-c2: go and js: tested; refuted at value = Profile { active: false, name: "", score: -1 }
+PASS R5-m2-c3: refused once on go and js: EF106 ... callback argument has incompatible type
+PASS R5-m2-c4: refused once on go and js: EF106 ... callback argument has incompatible type
+PASS R5-o1-always-true: go and js: tested; tested
+PASS Q2: refused on go and js: EF175 ... User satisfies Order with laws to run and no case budget
+laws probes: ok
+exit=0
