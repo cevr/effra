@@ -75,17 +75,15 @@ func declareSteps(root string, packages []string) ([]*Step, error) {
 	add(&Step{Name: "no tracked python bytecode", Argv: []string{"sh", "-c", `tracked=$(git ls-files '*.pyc'); if [ -n "$tracked" ]; then echo "tracked Python bytecode (git rm it; __pycache__/ is ignored):"; echo "$tracked"; exit 1; fi`}})
 	add(&Step{Name: "wayfinder snapshot check", Argv: []string{"go", "run", "./cmd/wayfinder", "check", "--snapshot"}, Inputs: wayfinderSnapshotInputs()})
 
-	// The corpus verifier reads the pinned submodule's git objects and the
-	// mapping names evidence tests in internal/compiler. Its own tests run with
-	// the other Go packages.
-	conformance := &Inputs{Paths: []string{"scripts/conformance/", "conformance/", ".gitmodules", "scripts/init_upstream.sh", "internal/compiler/*_test.go", "go.mod"}, Tools: []string{"go", "git"}, Submodule: "conformance/upstream/effect"}
-	add(&Step{Name: "effect conformance import", Argv: []string{"go", "run", "./scripts/conformance", "import"}, Inputs: conformance})
 	// The Foldkit checks walk the snapshot directory, so files Git ignores
 	// there are inputs too. The importer's controls run with the other Go
 	// packages.
 	foldkit := &Inputs{Paths: []string{"scripts/conformance/", "conformance/", "go.mod"}, Tools: []string{"go"}, Installed: []string{"conformance/upstream/foldkit-d21db423"}}
 	add(&Step{Name: "foldkit corpus self-check", Argv: []string{"go", "run", "./scripts/conformance", "foldkit", "--self-check"}, Inputs: foldkit})
-	add(&Step{Name: "effect conformance mapping", Argv: []string{"go", "run", "./scripts/conformance", "check"}, Inputs: conformance})
+	// The mapping check reads the mapping and the evidence tests it names in
+	// internal/compiler. Its own tests run with the other Go packages.
+	mapping := &Inputs{Paths: []string{"scripts/conformance/", "conformance/effect-cases.json", "internal/compiler/*_test.go", "go.mod"}, Tools: []string{"go"}}
+	add(&Step{Name: "effect conformance mapping", Argv: []string{"go", "run", "./scripts/conformance", "check"}, Inputs: mapping})
 
 	add(&Step{Name: "gofmt", Argv: append([]string{"sh", "-c", `unformatted=$(gofmt -l "$@"); if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi`, "gofmt"}, gofmtDirectories...)})
 	// Building every test binary once lets vet, the shards and the CLI build

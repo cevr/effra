@@ -487,6 +487,4 @@ bun run gate          # formatting, vet, tests, real Go and JS programs, CLI/MCP
 go test -race ./...
 ```
 
-The gate also verifies the pinned Effect reference tests, which live in a submodule: run `scripts/init_upstream.sh` once per clone or worktree first.
-
 Fast compilation is a design constraint; see the [measurement receipts](docs/prototype.md#baseline). Effra is an application language for servers and front-ends. Kernels, hard real-time and no-GC execution are out of scope.

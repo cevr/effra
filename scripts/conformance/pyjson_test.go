@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 )
 
@@ -36,40 +35,9 @@ func TestEncodingMatchesPythonJSON(t *testing.T) {
 	}
 }
 
-// TestCommittedManifestCanonicalIdentity recomputes the Python-produced
-// integrity block and rendering of the committed manifest without git.
-func TestCommittedManifestCanonicalIdentity(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(repoRoot(t), manifestRelative)
-	text, err := readText(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifest := readJSONObject(t, path)
-	if got := renderManifest(manifest); got != text {
-		t.Fatal("rendering the committed manifest does not reproduce its bytes")
-	}
-	integrity := integrityForManifest(manifest)
-	if _, differs := firstDifference(integrity, object(manifest, "integrity"), ""); differs {
-		t.Fatalf("recomputed integrity %v differs from committed %v", integrity, manifest["integrity"])
-	}
-	if integrity["rootSha256"] != releaseRootIdentitySHA256 || integrity["referenceIdentitySha256"] != releaseReferenceIdentitySHA256 || integrity["licenseIdentitySha256"] != releaseLicenseIdentitySHA256 {
-		t.Fatalf("recomputed integrity %v is not the pinned release identity", integrity)
-	}
-	if err := validateReleaseIdentity(manifest); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // TestPythonTextHelpers pins the helpers against values Python printed.
 func TestPythonTextHelpers(t *testing.T) {
 	t.Parallel()
-	if got, want := pySplitlines("a\x1cb\u0085c d\r\ne\rf\vg\fh\n\n"), []string{"a", "b", "c", "d", "e", "f", "g", "h", ""}; !slices.Equal(got, want) {
-		t.Errorf("splitlines = %q, want %q", got, want)
-	}
-	if got, want := shlexJoin("/tmp/a b", "it's", "", "ok-path/x.sh", "--force", `a\$b`), `'/tmp/a b' 'it'"'"'s' '' ok-path/x.sh --force 'a\$b'`; got != want {
-		t.Errorf("shlex.join = %s, want %s", got, want)
-	}
 	for _, check := range []struct {
 		value any
 		want  string
@@ -85,9 +53,6 @@ func TestPythonTextHelpers(t *testing.T) {
 	}
 	if got := pyStrip(" \x1f　 x "); got != "x" {
 		t.Errorf("strip = %q", got)
-	}
-	if !anchorMatches("\t   it.effect(\"label\", () =>", "label") || anchorMatches("  it.only(\"label\",", "label") || anchorMatches("it(\"label\")", "label") {
-		t.Error("anchor matching differs from the Python pattern")
 	}
 	if _, err := safeRelativePath("a/./b"); err != nil {
 		t.Errorf("pathlib collapses '.' segments, so a/./b is safe: %v", err)

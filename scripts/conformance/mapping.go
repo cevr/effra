@@ -1,6 +1,10 @@
 package main
 
-// Validate selected upstream behavior mappings against the verified corpus.
+// Validate the selected Effect behavior mapping. Each case records where its
+// behavior is specified upstream (file, line and test label at the pinned
+// commit) as provenance text; Effra keeps no copy of the upstream corpus, so
+// the record is checked for shape, and its evidence must be an existing Go
+// test in internal/compiler.
 
 import (
 	"encoding/json"
@@ -16,11 +20,14 @@ import (
 const mappingRelative = "conformance/effect-cases.json"
 
 var (
-	mappingStatuses   = []string{"covered", "difference", "pending", "unsupported"}
-	mappingCaseID     = regexp.MustCompile(`^effect\.[a-z0-9.-]+$`)
-	mappingTestName   = regexp.MustCompile(`^Test[A-Za-z0-9_]+$`)
-	upstreamCallHeads = []string{`it("`, `it.effect("`, `it.live("`}
+	mappingStatuses = []string{"covered", "difference", "pending", "unsupported"}
+	mappingCaseID   = regexp.MustCompile(`^effect\.[a-z0-9.-]+$`)
+	mappingTestName = regexp.MustCompile(`^Test[A-Za-z0-9_]+$`)
 )
+
+// upstreamTestComponents are the path components that mark an upstream file
+// as a test, as the pinned selection rule chose them.
+var upstreamTestComponents = []string{"test", "tests", "typetest", "test-dts"}
 
 func readMapping(path string) (map[string]any, error) {
 	text, err := readText(path)
@@ -69,44 +76,15 @@ func positiveLine(value any) (int, bool) {
 	return int(line.Int64()), true
 }
 
-// anchorMatches is re.match(r'\s*it(?:\.(?:effect|live))?\("' + re.escape(label) + r'",', line)
-// with Python's Unicode \s.
-func anchorMatches(line, label string) bool {
-	rest := strings.TrimLeftFunc(line, pyIsSpace)
-	for _, head := range upstreamCallHeads {
-		if strings.HasPrefix(rest, head+label+`",`) {
-			return true
-		}
-	}
-	return false
-}
-
-// validateMapping verifies the pinned corpus under root, then validates the
-// mapping against it and returns the sorted evidence test names.
+// validateMapping validates the mapping and its evidence tests under root and
+// returns the sorted evidence test names.
 func validateMapping(mapping map[string]any, root string) ([]string, error) {
-	pinned, err := verify(root, pinnedCommit, pinnedTag)
-	if err != nil {
-		return nil, err
-	}
-	return validateMappingAgainst(mapping, root, pinned)
-}
-
-func validateMappingAgainst(mapping map[string]any, root string, pinned pinnedCorpus) ([]string, error) {
 	if !hasExactKeys(mapping, "schemaVersion", "sourceCommit", "cases") || pyType(mapping["schemaVersion"]) != "int" || !isPyInt(mapping["schemaVersion"], 1) || mapping["sourceCommit"] != pinnedCommit {
 		return nil, errors.New("mapping schema or upstream pin is invalid")
 	}
 	cases, ok := mapping["cases"].([]any)
 	if !ok || len(cases) == 0 {
 		return nil, errors.New("mapping cases must be a nonempty list")
-	}
-	references := map[string]bool{}
-	files, _ := pinned.manifest["files"].([]any)
-	for _, value := range files {
-		if entry, ok := value.(map[string]any); ok && entry["kind"] == "reference" {
-			if path, ok := entry["path"].(string); ok {
-				references[path] = true
-			}
-		}
 	}
 	ids := map[string]bool{}
 	type upstreamCase struct {
@@ -144,17 +122,8 @@ func validateMappingAgainst(mapping map[string]any, root string, pinned pinnedCo
 		}
 		line, lineOK := positiveLine(upstream["line"])
 		label, labelOK := upstream["label"].(string)
-		if !references[path] || !lineOK || !labelOK || label == "" {
+		if !isUpstreamTest(path) || !lineOK || !labelOK || pyStrip(label) == "" {
 			return nil, fmt.Errorf("upstream target is invalid for %s", identity)
-		}
-		// Anchors come from the verified pinned objects, never from the checkout's working files.
-		text, err := pinned.text(path)
-		if err != nil {
-			return nil, err
-		}
-		lines := pySplitlines(text)
-		if line > len(lines) || !anchorMatches(lines[line-1], label) {
-			return nil, fmt.Errorf("upstream case anchor does not match for %s", identity)
 		}
 		key := upstreamCase{path, line}
 		if upstreamCases[key] {
@@ -195,6 +164,21 @@ func validateMappingAgainst(mapping map[string]any, root string, pinned pinnedCo
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+// isUpstreamTest reports whether an upstream path names a test file: a path
+// with a test component below it.
+func isUpstreamTest(path string) bool {
+	parts := pathParts(path)
+	if len(parts) < 2 {
+		return false
+	}
+	for _, part := range parts[:len(parts)-1] {
+		if slices.Contains(upstreamTestComponents, part) {
+			return true
+		}
+	}
+	return false
 }
 
 // isGoJSTargets is Python's value == ["go", "js"].

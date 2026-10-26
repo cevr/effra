@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"effra.local/prototype/internal/testinputs"
@@ -53,4 +55,65 @@ func runCLI(t *testing.T, dir string, env []string, args ...string) (int, string
 		t.Fatalf("run conformance CLI: %v", err)
 	}
 	return command.ProcessState.ExitCode(), stdout.String(), stderr.String()
+}
+
+var fixtureGitConfig = []string{
+	"-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + os.DevNull, "-c", "init.templateDir=",
+	"-c", "protocol.file.allow=always", "-c", "user.name=Snapshot Test", "-c", "user.email=test@example.invalid",
+}
+
+// hermeticGitEnv is the fixture environment: the process environment without
+// global or system git configuration.
+func hermeticGitEnv(extra ...string) []string {
+	return append(os.Environ(), append([]string{"GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_CONFIG_NOSYSTEM=1"}, extra...)...)
+}
+
+func fixtureGit(t *testing.T, repository string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", append(append(slices.Clone(fixtureGitConfig), "-C", repository), args...)...)
+	command.Env = hermeticGitEnv()
+	output, err := command.Output()
+	if err != nil {
+		stderr := ""
+		if exit, ok := err.(*exec.ExitError); ok {
+			stderr = string(exit.Stderr)
+		}
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, stderr)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func writeFiles(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for relative, contents := range files {
+		path := filepath.Join(root, relative)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func assertContains(t *testing.T, text string, fragments ...string) {
+	t.Helper()
+	for _, fragment := range fragments {
+		if !strings.Contains(text, fragment) {
+			t.Fatalf("%q\ndoes not contain\n%q", text, fragment)
+		}
+	}
+}
+
+func readJSONObject(t *testing.T, path string) map[string]any {
+	t.Helper()
+	text, err := readText(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := decodeJSON(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value.(map[string]any)
 }

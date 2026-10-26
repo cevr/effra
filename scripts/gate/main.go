@@ -70,8 +70,6 @@ type Inputs struct {
 	Tools []string
 	// Env names environment variables whose values are inputs.
 	Env []string
-	// Submodule makes a submodule's checked-out commit and status an input.
-	Submodule string
 	// Installed names directories outside Git's view, such as an installed
 	// node_modules, whose contents are an input: every file's path,
 	// permissions and content and every symlink's target, following links
@@ -130,8 +128,6 @@ type gate struct {
 	digests  map[string]string
 	tools    map[string]*toolFact
 	toolsMu  sync.Mutex
-	modules  map[string]string
-	factsMu  sync.Mutex
 
 	installedDigests map[string]string
 	installedMu      sync.Mutex
@@ -593,13 +589,6 @@ func (g *gate) key(step *Step) (string, error) {
 		value, set := stepVariable(name)
 		fmt.Fprintf(hash, "env\x00%s\x00%t\x00%s\x00", name, set, value)
 	}
-	if inputs.Submodule != "" {
-		state, err := g.submoduleState(inputs.Submodule)
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprintf(hash, "submodule\x00%s\x00%s\x00", inputs.Submodule, state)
-	}
 	for _, dir := range inputs.Installed {
 		fmt.Fprintf(hash, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
 	}
@@ -764,34 +753,6 @@ func installedDigest(root, repository string, followRepository bool, skip ...str
 		fmt.Fprintf(hash, "%s\x00%s\x00", f.relative, sums[index])
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-func (g *gate) submoduleState(dir string) (string, error) {
-	g.factsMu.Lock()
-	defer g.factsMu.Unlock()
-	if g.modules == nil {
-		g.modules = map[string]string{}
-	}
-	if state, ok := g.modules[dir]; ok {
-		return state, nil
-	}
-	checkout := filepath.Join(g.root, filepath.FromSlash(dir))
-	state := "absent"
-	if head, err := exec.Command("git", "-C", checkout, "rev-parse", "HEAD").Output(); err == nil {
-		status, err := exec.Command("git", "-C", checkout, "status", "--porcelain=v1", "-z", "--untracked-files=no", "--ignore-submodules=all").Output()
-		if err != nil {
-			return "", fmt.Errorf("submodule %s status: %w", dir, err)
-		}
-		ignoreStat, _ := exec.Command("git", "-C", checkout, "config", "--get-all", "core.ignoreStat").Output()
-		flags, err := exec.Command("git", "-C", checkout, "ls-files", "-z", "-v").Output()
-		if err != nil {
-			return "", fmt.Errorf("submodule %s index flags: %w", dir, err)
-		}
-		sum := sha256.Sum256(bytes.Join([][]byte{head, status, ignoreStat, flags}, []byte{0}))
-		state = hex.EncodeToString(sum[:])
-	}
-	g.modules[dir] = state
-	return state, nil
 }
 
 func (g *gate) git(args ...string) ([]byte, error) {

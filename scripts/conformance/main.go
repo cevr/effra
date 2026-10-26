@@ -1,14 +1,11 @@
 // Command conformance verifies Effra's reference-only Effect and Foldkit
 // conformance data.
 //
-//	go run ./scripts/conformance import [--root DIR] [--refresh]
 //	go run ./scripts/conformance check [--mapping FILE] [--run]
 //	go run ./scripts/conformance foldkit [SOURCE] (--capture | --check | --self-check) [--root DIR]
 //
-// import verifies (or, with --refresh, rewrites) the pinned upstream corpus
-// manifest from the submodule's immutable git objects. check validates the
-// selected behavior mapping against that verified corpus and, with --run,
-// executes its shared Go/JS evidence tests. foldkit verifies the committed
+// check validates the selected Effect behavior mapping and its evidence tests
+// and, with --run, executes those tests. foldkit verifies the committed
 // Foldkit snapshot offline (--self-check), verifies it against a read-only
 // pinned Foldkit checkout (--check), or captures it from one into an empty
 // root (--capture).
@@ -28,8 +25,7 @@ import (
 const usage = `usage: conformance <command> [flags]
 
 commands:
-  import [--root DIR] [--refresh]   verify or refresh the pinned Effect corpus manifest
-  check [--mapping FILE] [--run]    validate conformance/effect-cases.json; --run executes its Go/JS evidence
+  check [--mapping FILE] [--run]    validate conformance/effect-cases.json; --run executes its evidence tests
   foldkit [SOURCE] (--capture | --check | --self-check) [--root DIR]
                                     capture or verify the pinned Foldkit snapshot
 `
@@ -44,8 +40,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
-	case "import":
-		return runImport(args[1:], stdout, stderr)
 	case "check":
 		return runCheck(args[1:], stdout, stderr)
 	case "foldkit":
@@ -95,43 +89,11 @@ func parseFlags(flags *flag.FlagSet, args []string, stderr io.Writer) (code int,
 	return 0, false
 }
 
-func runImport(args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("conformance import", flag.ContinueOnError)
-	root := flags.String("root", "", "Effra repository root (default: the enclosing Go module)")
-	refreshManifest := flags.Bool("refresh", false, "rewrite the manifest from the pinned checkout")
-	if code, done := parseFlags(flags, args, stderr); done {
-		return code
-	}
-	if *root == "" {
-		*root = repositoryRoot()
-	}
-	fail := func(err error) int {
-		fmt.Fprintf(stderr, "import_effect_conformance: %v\n", err)
-		return 1
-	}
-	resolved := resolvePath(*root)
-	if *refreshManifest {
-		manifest, err := refresh(resolved, pinnedCommit, pinnedTag)
-		if err != nil {
-			return fail(err)
-		}
-		fmt.Fprintln(stdout, indentedJSON(manifest["integrity"]))
-		return 0
-	}
-	corpus, err := verify(resolved, pinnedCommit, pinnedTag)
-	if err != nil {
-		return fail(err)
-	}
-	integrity, selection := object(corpus.manifest, "integrity"), object(corpus.manifest, "selection")
-	fmt.Fprintf(stdout, "effect upstream: %s reference files at %s match %s (root %s)\n", pyStr(selection["count"]), pinnedCommit[:12], manifestRelative, pyStr(integrity["rootSha256"]))
-	return 0
-}
-
 func runCheck(args []string, stdout, stderr io.Writer) int {
 	root := repositoryRoot()
 	flags := flag.NewFlagSet("conformance check", flag.ContinueOnError)
 	mappingPath := flags.String("mapping", filepath.Join(root, mappingRelative), "selected behavior mapping")
-	runEvidence := flags.Bool("run", false, "execute the existing selected tests, including real generated Go and JS")
+	runEvidence := flags.Bool("run", false, "execute the selected evidence tests")
 	if code, done := parseFlags(flags, args, stderr); done {
 		return code
 	}
@@ -159,7 +121,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	cases := mapping["cases"].([]any)
-	fmt.Fprintf(stdout, "effect mapping: %d selected behaviors; %d shared Go/JS evidence tests; %d files remain reference-only\n", len(cases), len(tests), releaseReferenceCount)
+	fmt.Fprintf(stdout, "effect mapping: %d selected behaviors at %s; %d shared Go/JS evidence tests\n", len(cases), pinnedCommit[:12], len(tests))
 	return 0
 }
 

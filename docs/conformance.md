@@ -1,8 +1,8 @@
 # Upstream behavioral conformance
 
-Effra pins Effect 4.0.1 at commit `460272d30457f4697d8b8c52cad41caccbcace08` as the git submodule [conformance/upstream/effect](../conformance/README.md). The repository carries only the gitlink and Effra's manifest, never a copy of upstream. The manifest selects **746 reference files and 26 license files; they are not 746 passing Effra tests**. The ordinary gate requires the checkout at exactly the pinned commit with no modified tracked files. It recomputes the selection, license mapping and per-file hashes from the commit's git objects, compares them with the manifest, and checks the independently pinned integrity root. It never executes the upstream TypeScript suite or its shell fixtures. Future native fixtures belong to their own Effra test owner.
+Effra's selected cases cite Effect 4.0.1 at commit `460272d30457f4697d8b8c52cad41caccbcace08`. The repository keeps no checkout or copy of upstream: each case records its upstream file, line and test label as provenance text (see [conformance/README.md](../conformance/README.md)). Effra never executes the upstream TypeScript suite or its shell fixtures. Future native fixtures belong to their own Effra test owner.
 
-[effect-cases.json](../conformance/effect-cases.json) is the maintained authority for selected behavioral comparisons. Each stable ID points to an exact pinned test file, declaration line and label, states its behavior and limits, and names the existing Effra test that exercises both Go and JS when applicable. The manifest authenticates the entire referenced file. Line anchors distinguish identical labels in different suites. IDs stay stable when a future upstream pin changes; review the behavior and update the anchor deliberately.
+[effect-cases.json](../conformance/effect-cases.json) is the maintained authority for selected behavioral comparisons. Each stable ID records an upstream test file, declaration line and label at the pinned commit, states its behavior and limits, and names the existing Effra test that exercises both Go and JS when applicable. Line anchors distinguish identical labels in different suites. IDs stay stable when a future upstream pin changes; review the behavior and update the anchor deliberately.
 
 | Status | Meaning |
 | --- | --- |
@@ -11,16 +11,10 @@ Effra pins Effect 4.0.1 at commit `460272d30457f4697d8b8c52cad41caccbcace08` as 
 | `pending` | A relevant behavior is planned but lacks admitted source-level acceptance. Internal runtime helpers do not count. |
 | `unsupported` | The current admitted profile excludes the behavior. No passing pointer is permitted. |
 
-Unlisted cases remain **reference-only, unassessed**. A source pointer records where evidence lives, not a stored result that stays passing forever. The validator checks pin, corpus integrity, exact upstream anchors, duplicate IDs/cases, status/evidence structure and named Go test declarations. It cannot prove semantic equivalence or infer from a Go function name that its assertions cover a claim; reviewing those assertions and executing them remain required. Arbitrary extra “passed” metadata is refused.
+Unlisted cases remain **reference-only, unassessed**. A source pointer records where evidence lives, not a stored result that stays passing forever. The validator checks the pin, the shape of each upstream record (a test file path, a positive line, a nonempty label), duplicate IDs/cases, status/evidence structure and named Go test declarations. It has no upstream copy, so it cannot check that a recorded line still holds its label; review the anchors when the pin moves. It cannot prove semantic equivalence or infer from a Go function name that its assertions cover a claim; reviewing those assertions and executing them remain required. Arbitrary extra “passed” metadata is refused.
 
 ```sh
-# Once per clone, worktree or Rift: shallow checkout of the pinned submodule
-scripts/init_upstream.sh
-# Offline: fetch the pinned commit from a local Effect clone instead of GitHub
-EFFRA_UPSTREAM_MIRROR=/path/to/effect-clone scripts/init_upstream.sh
-
-# Offline reference and mapping admission
-go run ./scripts/conformance import
+# Mapping admission, offline
 go run ./scripts/conformance check
 
 # Execute the selected existing acceptance tests: real generated Go and JS
@@ -30,15 +24,11 @@ go run ./scripts/conformance check --run
 ./scripts/gate.sh
 ```
 
-A missing checkout, a checkout at another commit or a modified tracked file fails with one message naming `scripts/init_upstream.sh`; `scripts/init_upstream.sh --force` restores modified files. Git status cannot see an edit behind an index flag, so the verifier also refuses a checkout that enables `core.ignoreStat` and any selected file marked assume-unchanged or skip-worktree. Git cannot open the checkout at all while any `core.ignoreStat` entry is not a boolean, so that refusal names each configuration file that sets it instead of initialization. Each refusal prints its repair with absolute paths, so it also runs from outside the repository when the verifier was given `--root`; `git -C conformance/upstream/effect read-tree HEAD` clears the flags before `--force` can restore the files. Every hash and every mapped anchor is read from the pinned commit's git objects, never from the checkout's working files, so a local edit or line-ending conversion cannot change what is verified.
-
 To move the pin:
 
-1. Fetch and check out the new commit in the submodule, then stage it with `git add conformance/upstream/effect`. The verifier compares the checkout with the gitlink in the index, so `--refresh` refuses a pin that is not staged.
-2. Update `pinnedCommit` and `pinnedTag` in `scripts/conformance/corpus.go`, and `sourceCommit` in `conformance/effect-cases.json`.
-3. Run `go run ./scripts/conformance import --refresh`. Review the printed integrity identities and the new counts before copying them into the independently pinned `release*` constants in `scripts/conformance/corpus.go`.
-4. Review every mapped anchor.
-5. Update the prose that states the pin and counts: the first paragraph of this page, the pin and the manifest row's counts in `conformance/README.md`, and the Effect and Effect Cluster rows of `PRIOR_ART.md`. Other citations of the old commit, such as the source comparison below and those in `docs/research` and `docs/specs`, record what was read at that commit; change one only when its source is re-read at the new pin.
+1. Update `pinnedCommit` in `scripts/conformance/shared.go` and `sourceCommit` in `conformance/effect-cases.json`.
+2. Re-read every mapped case at the new commit and update its file, line and label deliberately.
+3. Update the prose that states the pin: the first paragraph of this page, `conformance/README.md`, and the Effect and Effect Cluster rows of `PRIOR_ART.md`. Other citations of the old commit, such as the source comparison below and those in `docs/research` and `docs/specs`, record what was read at that commit; change one only when its source is re-read at the new pin.
 
 The first selection covers child interruption and completed child-before-parent cleanup, preservation of an expected failure plus cleanup defect, and virtual-time admission of an unstarted fork. Timeout has an explicit difference row: Effra's nominal `Timeout` and required `Scheduler` differ from upstream `Cause.TimeoutError`; a supplemental timer-defect test ensures defects are not rewritten as timeouts. Existing lifecycle acceptance also checks unobserved child failure, but that assertion has no selected upstream case mapping yet and is not counted as another port.
 

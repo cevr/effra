@@ -14,7 +14,6 @@ import (
 	"math"
 	"math/big"
 	"os"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -428,45 +427,4 @@ func pyIsSpace(r rune) bool {
 // pyStrip is Python's str.strip().
 func pyStrip(value string) string {
 	return strings.TrimFunc(value, pyIsSpace)
-}
-
-// pySplitlines is Python's str.splitlines(): it splits on every Unicode line
-// boundary, treats \r\n as one, and drops a final empty line.
-func pySplitlines(value string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(value); {
-		r, size := utf8.DecodeRuneInString(value[i:])
-		switch r {
-		case '\n', '\r', '\v', '\f', 0x1c, 0x1d, 0x1e, 0x85, 0x2028, 0x2029:
-			lines = append(lines, value[start:i])
-			if r == '\r' && i+1 < len(value) && value[i+1] == '\n' {
-				size++
-			}
-			start = i + size
-		}
-		i += size
-	}
-	if start < len(value) {
-		lines = append(lines, value[start:])
-	}
-	return lines
-}
-
-var shlexUnsafe = regexp.MustCompile(`[^\w@%+=:,./-]`)
-
-// shlexJoin is Python's shlex.join.
-func shlexJoin(args ...string) string {
-	quoted := make([]string, len(args))
-	for i, arg := range args {
-		switch {
-		case arg == "":
-			quoted[i] = "''"
-		case !shlexUnsafe.MatchString(arg):
-			quoted[i] = arg
-		default:
-			quoted[i] = "'" + strings.ReplaceAll(arg, "'", `'"'"'`) + "'"
-		}
-	}
-	return strings.Join(quoted, " ")
 }
