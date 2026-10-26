@@ -33,7 +33,7 @@ type emitter struct {
 	depth   int
 	tmp     int
 	frames  []frame
-	envVal  string // expression for the env struct: env_ or a with copy
+	envVal  string // expression for the env struct: env__ or a with copy
 	envPtr  string
 	useTime bool
 	useFmt  bool
@@ -46,9 +46,9 @@ func Emit(c *Checked) (string, error) {
 	e.env()
 	// main comes before the first //line directive, so its lines stay main.go's.
 	e.line("func main() {")
-	e.line("\tt_ := rt.Root()")
+	e.line("\tt__ := rt.Root()")
 	e.line("\tdefer rt.Recover()")
-	e.line("\tsketchMain(&env{Console: rt.Stdout{}}, t_)")
+	e.line("\tmain__(&Env__{Console: rt.Stdout{}}, t__)")
 	e.line("}")
 	e.line("")
 	for _, fn := range c.File.Funcs {
@@ -85,15 +85,19 @@ func (e *emitter) directive(p Pos) {
 	fmt.Fprintf(&e.b, "//line %s:%d\n", e.src, p.Line)
 }
 
-// temp names end in an underscore, which no source name may (S109), so they
-// cannot collide with or shadow a source binding.
+// Every generated name contains "__", which no source name may (S109), and
+// every source value is emitted as name__l (see goLocal), so generated names,
+// source values, types and functions never capture each other.
 func (e *emitter) temp(prefix string) string {
 	e.tmp++
-	return fmt.Sprintf("%s%d_", prefix, e.tmp)
+	return fmt.Sprintf("%s__%d", prefix, e.tmp)
 }
 
 // isTemp reports whether v names a temporary, which Go requires to be read.
-func isTemp(v string) bool { return strings.HasSuffix(v, "_") }
+func isTemp(v string) bool { return strings.HasPrefix(v, "v__") }
+
+// goLocal is the Go name of a source local, parameter or receiver.
+func goLocal(name string) string { return name + "__l" }
 
 func (e *emitter) goType(t string) string {
 	switch t {
@@ -137,19 +141,19 @@ func (e *emitter) types() {
 			e.line("}")
 			if e.c.ErrorTypes[d.Name] {
 				e.useFmt = true
-				e.line("func (e %s) Error() string {", d.Name)
-				e.line("\ttype plain %s // no Error method, so Sprintf cannot recurse", d.Name)
-				e.line("\treturn fmt.Sprintf(\"%s%%+v\", plain(e))", d.Name)
+				e.line("func (e__ %s) Error() string {", d.Name)
+				e.line("\ttype plain__ %s // no Error method, so Sprintf cannot recurse", d.Name)
+				e.line("\treturn fmt.Sprintf(\"%s%%+v\", plain__(e__))", d.Name)
 				e.line("}")
 			}
 		case kindCapability:
 			e.line("type %s interface {", d.Name)
 			for _, m := range d.Methods {
-				e.line("\t%s%s", m.Name, e.signature(m, "t_ *rt.Task"))
+				e.line("\t%s%s", m.Name, e.signature(m, "t__ *rt.Task"))
 			}
 			e.line("}")
 		case kindUnion:
-			e.line("type %s interface{ is%s_() }", d.Name, d.Name)
+			e.line("type %s interface{ is__%s() }", d.Name, d.Name)
 			for _, v := range d.Variants {
 				unions[v] = append(unions[v], d.Name)
 			}
@@ -163,7 +167,7 @@ func (e *emitter) types() {
 	sort.Strings(variants)
 	for _, v := range variants {
 		for _, u := range unions[v] {
-			e.line("func (%s) is%s_() {}", v, u)
+			e.line("func (%s) is__%s() {}", v, u)
 		}
 	}
 	e.line("")
@@ -171,7 +175,7 @@ func (e *emitter) types() {
 
 // env holds one field per capability. with copies it.
 func (e *emitter) env() {
-	e.line("type env struct {")
+	e.line("type Env__ struct {")
 	for _, cap := range e.c.Caps {
 		e.line("\t%s %s", cap, e.goType(cap))
 	}
@@ -185,7 +189,7 @@ func (e *emitter) signature(s *Sig, hidden string) string {
 		params = append(params, hidden)
 	}
 	for _, p := range s.Params {
-		params = append(params, p.Name+" "+e.goType(p.Type))
+		params = append(params, goLocal(p.Name)+" "+e.goType(p.Type))
 	}
 	res := ""
 	switch {
@@ -205,23 +209,23 @@ func (e *emitter) function(fn *FuncDecl) {
 	e.directive(fn.Pos)
 	name := fn.Name
 	if fn.Recv == nil && name == "main" {
-		name = "sketchMain"
+		name = "main__"
 	}
 	if fn.Recv != nil {
 		recv := fn.Recv.Type
 		if fn.Recv.Name != "" {
-			recv = fn.Recv.Name + " " + recv
+			recv = goLocal(fn.Recv.Name) + " " + recv
 		}
-		e.line("func (%s) %s%s {", recv, name, e.signature(&fn.Sig, "t_ *rt.Task"))
+		e.line("func (%s) %s%s {", recv, name, e.signature(&fn.Sig, "t__ *rt.Task"))
 	} else {
-		e.line("func %s%s {", name, e.signature(&fn.Sig, "env_ *env, t_ *rt.Task"))
+		e.line("func %s%s {", name, e.signature(&fn.Sig, "env__ *Env__, t__ *rt.Task"))
 	}
 	e.frames = []frame{{result: fn.Result, fallible: fn.Fallible}}
-	e.envVal, e.envPtr = "env_", "env_"
+	e.envVal, e.envPtr = "env__", "env__"
 	if fn.Recv != nil {
 		// Provider methods require no capabilities (S102), so the functions they
 		// call get an empty env.
-		e.envVal, e.envPtr = "env{}", "&env{}"
+		e.envVal, e.envPtr = "Env__{}", "&Env__{}"
 	}
 	e.depth++
 	e.stmts(fn.Body.Stmts)
@@ -253,7 +257,7 @@ func goTerminates(b *Block) bool {
 	return false
 }
 
-func wireFunc(name string) string { return "wire" + name + "_" }
+func wireFunc(name string) string { return "wire__" + name }
 
 // wire emits a named wire as a function that sets its providers on an env. Its
 // initializers require no capability and cannot fail (S102, S101), so it runs
@@ -261,13 +265,13 @@ func wireFunc(name string) string { return "wire" + name + "_" }
 // with becomes ordinary recursion, not endless emission.
 func (e *emitter) wire(w *WireDecl) {
 	e.directive(w.Pos)
-	e.line("func %s(envc *env, t_ *rt.Task) {", wireFunc(w.Name))
+	e.line("func %s(envc__ *Env__, t__ *rt.Task) {", wireFunc(w.Name))
 	e.frames = []frame{{}}
-	e.envVal, e.envPtr = "env{}", "&env{}"
+	e.envVal, e.envPtr = "Env__{}", "&Env__{}"
 	e.depth++
 	for _, en := range w.Entries {
 		v, _ := e.expr(en.Value)
-		e.line("envc.%s = %s", en.Cap, v)
+		e.line("envc__.%s = %s", en.Cap, v)
 	}
 	e.depth--
 	e.line("}")
@@ -305,7 +309,7 @@ func (e *emitter) stmt(s Stmt) {
 		// The checked type is spelled out, so an untyped Go constant cannot pick
 		// a different type than the checker did.
 		v, _ := e.expr(s.Value)
-		e.line("var %s %s = %s", s.Name, e.goType(e.c.Info[s.Value].typ), v)
+		e.line("var %s %s = %s", goLocal(s.Name), e.goType(e.c.Info[s.Value].typ), v)
 	case *ReturnStmt:
 		e.ret(s)
 	case *IfStmt:
@@ -319,7 +323,7 @@ func (e *emitter) stmt(s Stmt) {
 		e.line("}")
 	case *TypeSwitchStmt:
 		subj, _ := e.expr(s.Subject)
-		e.line("switch %s := %s.(type) {", s.Bind, subj)
+		e.line("switch %s := %s.(type) {", goLocal(s.Bind), subj)
 		for _, cs := range s.Cases {
 			names := make([]string, len(cs.Types))
 			for i, q := range cs.Types {
@@ -377,9 +381,13 @@ func (e *emitter) expr(x Expr) (val, err string) {
 		if x.Kind == tDuration {
 			return e.duration(x.Text), ""
 		}
+		if x.Kind == tInt {
+			// Typed, so a variadic any argument stays int64 on every GOARCH.
+			return "int64(" + x.Text + ")", ""
+		}
 		return x.Text, ""
 	case *Ident:
-		return x.Name, ""
+		return goLocal(x.Name), ""
 	case *Selector:
 		v, _ := e.expr(x.X)
 		return v + "." + x.Sel, ""
@@ -503,14 +511,14 @@ func (e *emitter) call(x *Call) (val, err string) {
 		if fun.Name == "with" {
 			return e.with(x, in)
 		}
-		args := append([]string{e.envPtr, "t_"}, e.args(x.Args)...)
+		args := append([]string{e.envPtr, "t__"}, e.args(x.Args)...)
 		return e.bindCall(fun.Name+"("+strings.Join(args, ", ")+")", in)
 	case *Selector:
 		recv := fun.X.(*Ident).Name
 		if recv == "timeout" {
 			return e.after(x, in)
 		}
-		args := append([]string{"t_"}, e.args(x.Args)...)
+		args := append([]string{"t__"}, e.args(x.Args)...)
 		e.interruptCheck()
 		return e.bindCall(e.envVal+"."+recv+"."+fun.Sel+"("+strings.Join(args, ", ")+")", in)
 	}
@@ -519,10 +527,10 @@ func (e *emitter) call(x *Call) (val, err string) {
 
 func (e *emitter) interruptCheck() {
 	if !e.top().fallible {
-		e.line("t_.Check()")
+		e.line("t__.Check()")
 		return
 	}
-	e.line("if t_.Stopped() {")
+	e.line("if t__.Stopped() {")
 	e.depth++
 	e.fail("rt.Interrupted")
 	e.depth--
@@ -538,8 +546,8 @@ func (e *emitter) with(x *Call, in info) (val, err string) {
 	savedVal, savedPtr := e.envVal, e.envPtr
 	copyEnv := func() string {
 		cp := e.temp("envc")
-		if e.envPtr == "&env{}" {
-			e.line("%s := env{}", cp)
+		if e.envPtr == "&Env__{}" {
+			e.line("%s := Env__{}", cp)
 		} else {
 			e.line("%s := *%s", cp, e.envPtr)
 		}
@@ -550,7 +558,7 @@ func (e *emitter) with(x *Call, in info) (val, err string) {
 		// A named wire is built by its own Go function, so the caller's local
 		// names cannot capture its initializers.
 		cp := copyEnv()
-		e.line("%s(&%s, t_)", wireFunc(w.Name), cp)
+		e.line("%s(&%s, t__)", wireFunc(w.Name), cp)
 		e.envVal, e.envPtr = cp, "&"+cp
 	case *WireLit:
 		// An empty wire provides nothing; the block keeps the enclosing env.
@@ -613,7 +621,7 @@ func (e *emitter) blockLast(b *Block) (val, err string) {
 func (e *emitter) after(x *Call, in info) (val, err string) {
 	d, _ := e.expr(x.Args[0])
 	last := e.c.Info[x.Block.Stmts[len(x.Block.Stmts)-1].(*ExprStmt).X]
-	call := fmt.Sprintf("rt.After(%s.Scheduler, t_, %s, func(t_ *rt.Task) (%s, error) {", e.envVal, d, e.goType(in.typ))
+	call := fmt.Sprintf("rt.After(%s.Scheduler, t__, %s, func(t__ *rt.Task) (%s, error) {", e.envVal, d, e.goType(in.typ))
 	if in.typ != "" {
 		val, err = e.temp("v"), e.temp("e")
 		e.line("%s, %s := %s", val, err, call)

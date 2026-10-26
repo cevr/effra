@@ -24,7 +24,7 @@ const (
 
 // reserved names would collide with names the emitter generates or with Go.
 var reserved = map[string]bool{
-	"env": true, "rt": true, "time": true, "fmt": true, "sketchMain": true, "Error": true,
+	"rt": true, "time": true, "fmt": true, "init": true, "Error": true,
 	// Go's predeclared identifiers: a source binding would shadow them in the output.
 	"any": true, "append": true, "bool": true, "byte": true, "cap": true, "clear": true,
 	"close": true, "comparable": true, "complex": true, "complex64": true, "complex128": true,
@@ -37,7 +37,7 @@ var reserved = map[string]bool{
 }
 
 func (c *checker) checkLocalName(pos Pos, name string) {
-	if reserved[name] || strings.HasSuffix(name, "_") {
+	if reserved[name] || strings.HasSuffix(name, "_") || strings.Contains(name, "__") {
 		c.errorf(pos, codeUnsupported, "%s is reserved by the prototype's Go output", name)
 	}
 }
@@ -140,12 +140,20 @@ func (c *checker) declare() {
 		c.Types[d.Name] = d
 	}
 	for _, w := range f.Wires {
+		c.checkLocalName(w.Pos, w.Name)
+		if c.Wires[w.Name] != nil {
+			c.errorf(w.Pos, codeType, "wire %s is declared twice", w.Name)
+		}
 		c.Wires[w.Name] = w
 	}
 	for _, fn := range f.Funcs {
+		// Go puts types and functions in one package namespace.
 		if fn.Recv == nil {
 			if fn.Name != "main" {
 				c.checkLocalName(fn.Pos, fn.Name)
+			}
+			if c.Funcs[fn.Name] != nil || c.Types[fn.Name] != nil {
+				c.errorf(fn.Pos, codeType, "%s is declared twice", fn.Name)
 			}
 			c.Funcs[fn.Name] = fn
 			continue
@@ -154,7 +162,20 @@ func (c *checker) declare() {
 		if c.Methods[fn.Recv.Type] == nil {
 			c.Methods[fn.Recv.Type] = map[string]*FuncDecl{}
 		}
+		if c.Methods[fn.Recv.Type][fn.Name] != nil {
+			c.errorf(fn.Pos, codeType, "%s.%s is declared twice", fn.Recv.Type, fn.Name)
+		}
+		if d := c.Types[fn.Recv.Type]; d != nil {
+			for _, fd := range d.Fields {
+				if fd.Name == fn.Name {
+					c.errorf(fn.Pos, codeType, "%s has both a field and a method named %s", d.Name, fn.Name)
+				}
+			}
+		}
 		c.Methods[fn.Recv.Type][fn.Name] = fn
+	}
+	for _, fn := range f.Funcs {
+		c.checkParams(&fn.Sig, fn.Recv)
 	}
 	if m := c.Funcs["main"]; m == nil {
 		c.errorf(Pos{1, 1}, codeUnsupported, "a program needs func main")
@@ -181,8 +202,19 @@ func (c *checker) declare() {
 	}
 	for _, d := range f.Types {
 		sigs = append(sigs, d.Methods...)
+		methods := map[string]bool{}
 		for _, m := range d.Methods {
 			c.checkLocalName(m.Pos, m.Name)
+			if methods[m.Name] {
+				c.errorf(m.Pos, codeType, "%s.%s is declared twice", d.Name, m.Name)
+			}
+			methods[m.Name] = true
+			c.checkParams(m, nil)
+			// M5 (round 3): a provider method gets only the task, so a capability
+			// method cannot carry its own requirements.
+			if len(m.Uses) > 0 {
+				c.errorf(m.Pos, codeUnsupported, "a capability method with a uses clause is outside this prototype")
+			}
 		}
 		fields := map[string]bool{}
 		for _, fd := range d.Fields {
@@ -204,7 +236,7 @@ func (c *checker) declare() {
 			}
 			variants[v] = true
 		}
-		if d.Kind == kindStruct && c.layoutCycle(d.Name, map[string]bool{}) {
+		if d.Kind == kindStruct && c.layoutCycle(d.Name, map[string]int{}) {
 			c.errorf(d.Pos, codeType, "%s contains itself by value; put the recursion behind a union", d.Name)
 		}
 	}
@@ -330,6 +362,24 @@ func (c *checker) reaches(exprs []Expr, stmts []Stmt, target string, seen map[st
 					}
 				}
 			}
+			// M4 (round 3): a capability call runs whichever provider is wired, so
+			// follow every method of that name. This over-approximates: it may
+			// reject a wire that only an unrelated provider would cycle through.
+			if sel, ok := e.Fun.(*Selector); ok {
+				if id, ok := sel.X.(*Ident); ok {
+					if d := c.Types[id.Name]; d != nil && d.Kind == kindCapability {
+						for typ, ms := range c.Methods {
+							key := "method " + typ + "." + sel.Sel
+							if m := ms[sel.Sel]; m != nil && !seen[key] {
+								seen[key] = true
+								if c.reaches(nil, m.Body.Stmts, target, seen) {
+									return true
+								}
+							}
+						}
+					}
+				}
+			}
 			sub := append([]Expr{}, e.Args...)
 			if c.reaches(sub, nil, target, seen) {
 				return true
@@ -340,6 +390,49 @@ func (c *checker) reaches(exprs []Expr, stmts []Stmt, target string, seen map[st
 		}
 	}
 	return false
+}
+
+// checkParams checks parameter and receiver names in one signature scope.
+func (c *checker) checkParams(s *Sig, recv *Param) {
+	names := map[string]bool{}
+	if recv != nil && recv.Name != "" {
+		names[recv.Name] = true
+	}
+	for _, p := range s.Params {
+		c.checkLocalName(p.Pos, p.Name)
+		if names[p.Name] {
+			c.errorf(p.Pos, codeType, "%s is declared twice in this signature", p.Name)
+		}
+		names[p.Name] = true
+	}
+}
+
+// intLiteral decodes a decimal int64 literal. A leading zero is rejected:
+// Go would read it as octal.
+func (c *checker) intLiteral(pos Pos, text string) (int64, bool) {
+	if len(text) > 1 && text[0] == '0' {
+		c.errorf(pos, codeType, "integer literal %s has a leading zero", text)
+		return 0, false
+	}
+	n, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		c.errorf(pos, codeType, "integer literal %s overflows int64", text)
+		return 0, false
+	}
+	return n, true
+}
+
+var durationUnits = map[string]int64{
+	"ns": 1, "us": 1e3, "ms": 1e6, "s": 1e9, "m": 60e9, "h": 3600e9,
+}
+
+// durationLiteral checks that a duration literal fits in int64 nanoseconds.
+func (c *checker) durationLiteral(pos Pos, text string) {
+	i := strings.IndexFunc(text, func(r rune) bool { return r < '0' || r > '9' })
+	n, ok := c.intLiteral(pos, text[:i])
+	if unit := durationUnits[text[i:]]; ok && n > (1<<63-1)/unit {
+		c.errorf(pos, codeType, "duration %s overflows int64 nanoseconds", text)
+	}
 }
 
 // local reports whether a type is declared in the source file, not the prelude.
@@ -354,21 +447,23 @@ func (c *checker) local(t string) bool {
 
 // layoutCycle reports whether struct t reaches itself through by-value struct
 // fields. A union or capability field is an interface in Go, so it breaks the cycle.
-func (c *checker) layoutCycle(t string, onPath map[string]bool) bool {
+// state is 1 while t is on the walk's path and 2 once t is finished, so each
+// type is walked once.
+func (c *checker) layoutCycle(t string, state map[string]int) bool {
 	d := c.Types[t]
-	if d == nil || d.Kind != kindStruct {
+	if d == nil || d.Kind != kindStruct || state[t] == 2 {
 		return false
 	}
-	if onPath[t] {
+	if state[t] == 1 {
 		return true
 	}
-	onPath[t] = true
-	defer delete(onPath, t)
+	state[t] = 1
 	for _, f := range d.Fields {
-		if c.layoutCycle(f.Type, onPath) {
+		if c.layoutCycle(f.Type, state) {
 			return true
 		}
 	}
+	state[t] = 2
 	return false
 }
 
@@ -473,7 +568,6 @@ func (c *checker) funcBody(fn *FuncDecl) {
 		}
 	}
 	for _, p := range fn.Params {
-		c.checkLocalName(p.Pos, p.Name)
 		fc.bind(&local{pos: p.Pos, name: p.Name, typ: p.Type, used: true})
 	}
 	c.stmts(fn.Body.Stmts, fc)
@@ -694,15 +788,13 @@ func (c *checker) expr1(e Expr, fc *fnCtx) info {
 		case tString:
 			return info{typ: "string"}
 		case tDuration:
+			c.durationLiteral(e.Pos, e.Text)
 			return info{typ: "duration"}
 		}
 		// M7 (round 2): Go folds constant arithmetic at compile time and rejects
 		// overflow, so the checker does too.
-		n, err := strconv.ParseInt(e.Text, 10, 64)
-		if err != nil {
-			c.errorf(e.Pos, codeType, "integer literal %s overflows int64", e.Text)
-		}
-		return info{typ: "int64", konst: err == nil, cval: n}
+		n, ok := c.intLiteral(e.Pos, e.Text)
+		return info{typ: "int64", konst: ok, cval: n}
 	case *Ident:
 		if t, ok := fc.lookup(e.Name); ok {
 			return info{typ: t}

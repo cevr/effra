@@ -160,3 +160,19 @@ Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-2-findings.md` (9 M
 | O1 | Still deferred. |
 
 The 27 round-2 witnesses join `testdata/probes/` (56 in all), and the reviewer's task-tree stress test is `sketch/rt/task_tree_test.go`. `go test -race ./...` passes. `accept.sh` exit 0 (`accept-r3.log`). Lines: prototype Go without tests 2951, tests 487, total 3438.
+
+# Round 4: review round 3 repairs
+
+Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-3-findings.md` (5 Major, 1 Minor, 1 Optional, no blocker).
+
+| Finding | Repair |
+| --- | --- |
+| M1 generated scopes and name positions (third repeat) | Fixed by construction. Source names may not contain `__` (S109). Every generated name does: temporaries `v__1`, `env__`, `t__`, `Env__`, `e__`, `plain__`, `is__X`, `wire__W`, `envc__`, `main__`. Every source local, parameter and receiver is emitted as `name__l`, so it cannot shadow a type, a function or a generated name. `init` is reserved. Capability parameter names are checked. |
+| M2 numeric literals | Literals are decoded once. A leading zero is S108 (Go reads it as octal). A duration must fit int64 nanoseconds. Integer literals are emitted as `int64(n)`, so a variadic argument stays int64 on every GOARCH (`portable-integer` builds for GOARCH=386). |
+| M3 declaration namespaces | Duplicate functions, wires, methods and capability methods; a type and a function with one name; a field and a method with one name; repeated parameters and a parameter that repeats the receiver are all S108. |
+| M4 wire cycle through methods | A capability call in a wire initializer follows every provider method of that name. This over-approximates and is documented in the code. |
+| M5 capability method uses | A uses clause on a capability method is S109. |
+| N1 exponential layout walk | The walk keeps on-path and finished states, so each type is walked once. |
+| O1 | Still deferred. |
+
+The 23 round-3 witnesses join `testdata/probes/` (78 in all). The reviewer's walk and Go-universe tests are `sketch/review_walk_test.go`. `go test -race ./...` passes. `accept.sh` exit 0 (`accept-r4.log`). Lines: prototype Go without tests 3051, tests 592, total 3643.

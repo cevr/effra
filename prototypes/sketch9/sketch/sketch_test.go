@@ -133,8 +133,8 @@ func main() uses Console { Console.Println("x") }`, "S102"},
 func main() uses Console, Store { Console.Println("x") }`, "S102"},
 		{"a reserved name", `
 func main() uses Console {
-	env := "x"
-	Console.Println(env)
+	string := "x"
+	Console.Println(string)
 }`, "S109"},
 		{"a parse error", `
 func main() uses Console { for }`, "S001"},
