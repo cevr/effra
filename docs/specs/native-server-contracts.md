@@ -120,7 +120,7 @@ The [benchmark contract](server-benchmarks.md) governs workload equivalence, res
 
 ## Upstream implementation and test provenance
 
-The owner explicitly requested the Effect source and test suite as implementation inputs. Use the repository-cache workflow to inspect the upstream implementation and real application usage before adding library behavior. Cite reference tests at one pinned Effect release; record the upstream commit and each case's file, line and label (`conformance/effect-cases.json`), without a checkout. Reference the full upstream test/type-test corpus unchanged through a pinned submodule, not a copy.
+The owner explicitly requested the Effect source and test suite as implementation inputs. Use the repository-cache workflow to inspect the upstream implementation and real application usage before adding library behavior. Cite reference tests at one pinned Effect release; record the upstream commit and each case's file, line and label (`conformance/effect-cases.json`), without a checkout.
 
 Copying a test is not porting it. Maintain a mapping from upstream behavior/test identifiers to runnable Effra Go acceptance cases, deliberate semantic differences and unavailable facilities. Port applicable codec, HTTP/RPC, cancellation, scope and scheduling assertions at public seams. A copied TypeScript test that only exercises Effect cannot establish native Effra conformance. Public fixtures and documentation remain generic; application source and private test data are not copied into this repository.
 
