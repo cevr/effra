@@ -1163,7 +1163,7 @@ func (c *checker) timeoutAfter(e *Call, fc *fnCtx) info {
 		c.errorf(e.Pos, codeType, "timeout.After takes a duration and a block")
 		return info{typ: "?"}
 	}
-	if d := c.expr(e.Args[0], fc); d.typ != "duration" {
+	if d := c.value(e.Args[0], fc); d.typ != "duration" {
 		c.errorf(e.Pos, codeType, "timeout.After needs a duration, not %s", d.typ)
 	}
 	fc.use(e.Pos, "Scheduler")

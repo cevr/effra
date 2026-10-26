@@ -6,6 +6,7 @@ import (
 	"go/format"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -385,7 +386,11 @@ func (e *emitter) expr(x Expr) (val, err string) {
 			// Typed, so a variadic any argument stays int64 on every GOARCH.
 			return "int64(" + x.Text + ")", ""
 		}
-		return x.Text, ""
+		// A string's value is what Go's rules decode from the source spelling
+		// (checked, S108). Re-quoting it escapes bytes Go source cannot hold
+		// raw: a byte order mark, NUL, invalid UTF-8.
+		v, _ := strconv.Unquote(x.Text)
+		return strconv.Quote(v), ""
 	case *Ident:
 		return goLocal(x.Name), ""
 	case *Selector:

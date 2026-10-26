@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -231,8 +232,9 @@ func buildRun(t *testing.T, src string) string {
 }
 
 // TestProbes runs the review witnesses in testdata/probes. The first line of
-// each says what it must do: "// want CODE" (rejected with that code) or
-// "// out: a|b" (builds, passes go vet, and prints those lines).
+// each says what it must do: "// want CODE" (rejected with that code),
+// "// out: a|b" (builds, passes go vet, and prints those lines), or
+// "// out-quoted: "..."" (the same, with the output as a Go string literal).
 func TestProbes(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("no go tool")
@@ -256,6 +258,15 @@ func TestProbes(t *testing.T) {
 				got := codes(t, src)
 				if len(got) == 0 || !slices.Contains(got, want) {
 					t.Fatalf("got %v, want %s", got, want)
+				}
+			case strings.HasPrefix(head, "// out-quoted: "):
+				// For output with bytes a header cannot spell, as a Go string literal.
+				want, err := strconv.Unquote(strings.TrimPrefix(head, "// out-quoted: "))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := buildRun(t, src); got != want {
+					t.Fatalf("got %q, want %q", got, want)
 				}
 			case strings.HasPrefix(head, "// out: "):
 				want := strings.ReplaceAll(strings.TrimPrefix(head, "// out: "), "|", "\n")

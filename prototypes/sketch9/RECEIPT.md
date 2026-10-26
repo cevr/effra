@@ -190,3 +190,14 @@ Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-4-findings.md` (5 M
 | M5 invalid string escapes | String literals are decoded with Go's rules (`strconv.Unquote`); an invalid one is S108. |
 
 The 14 round-4 programs join `testdata/probes/` (92 in all). The reviewer's name-position matrix is `sketch/review_names_test.go`. `go test -race ./...` passes. `accept.sh` exit 0 (`accept-r5.log`). Lines: prototype Go without tests 3068, tests 662, total 3730.
+
+# Round 6: review round 5 repairs
+
+Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-5-findings.md` (2 Major, no blocker).
+
+| Finding | Repair |
+| --- | --- |
+| M1 duration argument drops a failure | The `timeout.After` duration goes through the value check (S105), like every other value position. |
+| M2 string bytes Go source cannot hold | A string's value is what Go's rules decode from its spelling, and the emitter re-quotes that value (`strconv.Quote`). A raw byte order mark, NUL or invalid UTF-8 in a literal now builds and prints the same bytes as its escaped spelling. |
+
+The 9 round-5 programs join `testdata/probes/` (101 in all); probe headers gain `// out-quoted: "..."` for output a header cannot spell. The reviewer's intrinsic-name tests are `sketch/review_intrinsics_test.go`. `go test -race ./...` passes. `accept.sh` exit 0 (`accept-r6.log`).
