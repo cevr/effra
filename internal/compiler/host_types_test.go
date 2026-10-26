@@ -353,16 +353,16 @@ effect fn program() -> void uses { Console, Foreign } { run Console.log(run left
 	}
 }
 
-// Go-only host types never reach the JavaScript target: the program is
-// refused before any Go tool runs, rather than emitted with unknown types.
-func TestHostTypesRefuseJavaScriptBeforeGoTools(t *testing.T) {
+// An unsupported target (here the removed js target) is refused with EF110
+// before any Go tool loads the program's host types.
+func TestUnsupportedTargetRefusesHostTypesBeforeGoTools(t *testing.T) {
 	source, err := os.ReadFile("../../examples/host-types.ef")
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := CompileAt(string(source), "js", "../..")
 	if r.Checked || !hasCode(r, "EF110") || r.Timings.ImportMicros != 0 || len(r.Bindings) != 0 {
-		t.Fatalf("JS target admitted Go host types: checked=%v import=%d %+v", r.Checked, r.Timings.ImportMicros, r.Diagnostics)
+		t.Fatalf("an unsupported target admitted Go host types: checked=%v import=%d %+v", r.Checked, r.Timings.ImportMicros, r.Diagnostics)
 	}
 }
 

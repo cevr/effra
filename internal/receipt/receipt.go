@@ -54,8 +54,7 @@ func GoBuildCommand(directory, output, pkg string, extra ...string) *exec.Cmd {
 
 // Application records what one build retained and what it measured. The
 // compiler distribution (the ef executable and every bundled runtime
-// source) is reported separately from the application, and a JavaScript
-// module's imports are listed rather than counted as application bytes.
+// source) is reported separately from the application.
 type Application struct {
 	Schema     string              `json:"schema"`
 	Target     string              `json:"target"`
@@ -69,9 +68,6 @@ type Application struct {
 	Deps       *Dependencies       `json:"dependencies,omitempty"`
 	Binary     *Artifact           `json:"binary,omitempty"`
 	Symbols    *Symbols            `json:"symbols,omitempty"`
-	Module     *Artifact           `json:"module,omitempty"`
-	Decl       *Artifact           `json:"declaration,omitempty"`
-	External   []compiler.JSImport `json:"externalRuntime,omitempty"`
 }
 
 type Source struct {
@@ -589,49 +585,6 @@ func symbolPackage(name string) string {
 		return name[:slash+dot]
 	}
 	return "(unqualified)"
-}
-
-// JavaScript records an emitted module and its declaration file. External
-// modules are the imports emission declared for the module, so program text
-// that spells an import is never mistaken for one.
-func JavaScript(r *compiler.Result, source Location, mode string, module compiler.JSModule, modulePath, declarationPath Location) (*Application, error) {
-	receipt, err := newApplication(r, source, "js", mode)
-	if err != nil {
-		return nil, err
-	}
-	var plan *compiler.ApplicationPlan
-	if mode == "entry" {
-		plan, err = r.ApplicationPlan(compiler.GoGenerationBuild)
-	} else {
-		plan, err = r.LibraryPlan()
-	}
-	if err != nil {
-		return nil, err
-	}
-	if receipt.Plan, err = planOf(plan); err != nil {
-		return nil, err
-	}
-	// Native runtime source modules do not apply to JavaScript: its runtime
-	// is the external dependency listed below.
-	receipt.Plan.RuntimeModules = []rt.RuntimeModule{}
-	delete(receipt.Plan.Requirements, compiler.RequiresRuntimeModule)
-	// The declared imports belong to the emitted text, so the measured file
-	// must be exactly that text: the same bytes are compared and hashed.
-	written, err := os.ReadFile(modulePath.Path())
-	if err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(written, []byte(module.Source)) {
-		return nil, fmt.Errorf("%s does not hold the emitted module", modulePath)
-	}
-	receipt.Module = measureBytes(written)
-	receipt.Module.Path = modulePath.String()
-	if receipt.Decl, err = MeasureFile(declarationPath.Path()); err != nil {
-		return nil, err
-	}
-	receipt.Decl.Path = declarationPath.String()
-	receipt.External = slices.Clone(module.Imports)
-	return receipt, nil
 }
 
 // Location is a path resolved once, as the file system walks it: the

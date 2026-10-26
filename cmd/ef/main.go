@@ -126,7 +126,7 @@ func graphError(err error) error {
 // graphUsage lists the graph view options from the table MCP also advertises.
 func graphUsage() string {
 	var b strings.Builder
-	b.WriteString("graph views: ef graph FILE [--target go|js]")
+	b.WriteString("graph views: ef graph FILE [--target go]")
 	for _, option := range compiler.GraphOptions() {
 		value := strings.ToUpper(option.Field)
 		if len(option.Values) > 0 {
@@ -200,7 +200,6 @@ func loadSource(source receipt.Location, target string) (*compiler.Result, compi
 
 type options struct {
 	target, output string
-	entry          bool
 	strict         bool
 	json           bool
 	timeoutMillis  int
@@ -256,8 +255,6 @@ func parseOptions(args []string) (options, error) {
 			} else {
 				opts.output = args[i]
 			}
-		case "--entry":
-			opts.entry = true
 		case "--live":
 			opts.live = true
 		case "--strict":
@@ -298,15 +295,24 @@ func parseOptions(args []string) (options, error) {
 			opts.positional = append(opts.positional, args[i])
 		}
 	}
-	if opts.target != "go" && opts.target != "js" {
-		return opts, fmt.Errorf("unsupported target %s; use go or js", opts.target)
+	if err := targetError(opts.target); err != nil {
+		return opts, err
 	}
 	return opts, nil
 }
+
+// targetError reports a target other than Go as the compiler's EF110
+// diagnostic, so every command refuses it the same way.
+func targetError(target string) error {
+	if diagnostic, unsupported := compiler.UnsupportedTarget(target); unsupported {
+		return fmt.Errorf("%s: %s", diagnostic.Code, diagnostic.Message)
+	}
+	return nil
+}
 func command(args []string) error {
 	if len(args) == 0 || (len(args) == 1 && (args[0] == "--help" || args[0] == "help" || args[0] == "-h")) {
-		fmt.Println("Effra prototype\nusage: ef check FILE [--target go|js] | diagnostics FILE [--strict] [--json] [--target go|js] [LINT] | lint FILE [--strict] [--target go|js] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | lint receipt FILE [--runs N] [--target go|js] [LINT] | test FILE [--target go|js] [--timeout-ms 30000] [--live] | graph FILE [--target go|js] [GRAPH VIEW OPTIONS] | query FILE BYTE_OFFSET [--target go|js] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go|js] [-o PATH] [--entry] [--receipt PATH] | run FILE [--target go|js] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go|js] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
-		fmt.Println("type: ef type FILE (--symbol NAME | --offset BYTE | --definition TYPE_ID --revision REVISION) [--target go|js] [--json]")
+		fmt.Println("Effra prototype\nusage: ef check FILE [--target go] | diagnostics FILE [--strict] [--json] [--target go] [LINT] | lint FILE [--strict] [--target go] [LINT] | lint rules [LINT] | lint test PATH... [--update] [LINT] | lint receipt FILE [--runs N] [--target go] [LINT] | test FILE [--target go] [--timeout-ms 30000] [--live] | graph FILE [--target go] [GRAPH VIEW OPTIONS] | query FILE BYTE_OFFSET [--target go] | inspect FILE SYMBOL | explain FILE SYMBOL | build FILE [--target go] [-o PATH] [--receipt PATH] | run FILE [--target go] | fmt FILE... [--check] [--json] | fmt --stdin | mcp [ROOT] [LINT] | lsp [--target go] [LINT]\nLINT: [--lint-config FILE] [--rules MANIFEST]... selects custom rule packs; a lint configuration error exits 2.")
+		fmt.Println("type: ef type FILE (--symbol NAME | --offset BYTE | --definition TYPE_ID --revision REVISION) [--target go] [--json]")
 		fmt.Println(graphUsage())
 		return nil
 	}
@@ -315,7 +321,7 @@ func command(args []string) error {
 	}
 	if args[0] == "lsp" {
 		if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
-			fmt.Println("usage: ef lsp [--target go|js] [--lint-config FILE] [--rules MANIFEST]...\nContent-Length framed JSON-RPC on stdio. Full-document synchronization and UTF-16 diagnostics only.\nThe lint configuration loads once at startup; a rule pack failure is published as an EFL000 error at the document start.")
+			fmt.Println("usage: ef lsp [--target go] [--lint-config FILE] [--rules MANIFEST]...\nContent-Length framed JSON-RPC on stdio. Full-document synchronization and UTF-16 diagnostics only.\nThe lint configuration loads once at startup; a rule pack failure is published as an EFL000 error at the document start.")
 			return nil
 		}
 		selection, rest, err := lintSelection(args[1:])
@@ -326,10 +332,10 @@ func command(args []string) error {
 		if len(rest) == 2 && rest[0] == "--target" {
 			target = rest[1]
 		} else if len(rest) != 0 {
-			return invalidInvocation(fmt.Errorf("usage: ef lsp [--target go|js] [--lint-config FILE] [--rules MANIFEST]..."))
+			return invalidInvocation(fmt.Errorf("usage: ef lsp [--target go] [--lint-config FILE] [--rules MANIFEST]..."))
 		}
-		if target != "go" && target != "js" {
-			return invalidInvocation(fmt.Errorf("LSP target must be go or js"))
+		if err := targetError(target); err != nil {
+			return invalidInvocation(err)
 		}
 		session, err := loadLint(selection)
 		if err != nil {
@@ -379,7 +385,7 @@ func command(args []string) error {
 	}
 	if len(args) == 2 && (args[1] == "--help" || args[1] == "-h") {
 		if args[0] == "diagnostics" {
-			fmt.Println("usage: ef diagnostics FILE [--strict] [--json] [--target go|js] [--lint-config FILE] [--rules MANIFEST]...\nLocations: one-based UTF-16 lines/columns in text; zero-based UTF-16 ranges and original UTF-8 byte spans in JSON.\nExit codes: 0 policy passed; 1 failed policy or source/operational failure; 2 invalid invocation.\nWith --json, source findings produce a report on stdout even when policy fails; operational failures produce no report and explain the error on stderr.")
+			fmt.Println("usage: ef diagnostics FILE [--strict] [--json] [--target go] [--lint-config FILE] [--rules MANIFEST]...\nLocations: one-based UTF-16 lines/columns in text; zero-based UTF-16 ranges and original UTF-8 byte spans in JSON.\nExit codes: 0 policy passed; 1 failed policy or source/operational failure; 2 invalid invocation.\nWith --json, source findings produce a report on stdout even when policy fails; operational failures produce no report and explain the error on stderr.")
 			return nil
 		}
 		return command([]string{"--help"})
@@ -436,9 +442,6 @@ func command(args []string) error {
 	}
 	if opts.receipt != "" && args[0] != "build" {
 		return usage(fmt.Errorf("--receipt is only supported by build"))
-	}
-	if opts.entry && (args[0] != "build" || opts.target != "js") {
-		return usage(fmt.Errorf("--entry is only needed for JavaScript builds"))
 	}
 	want := 1
 	if args[0] == "inspect" || args[0] == "explain" || args[0] == "query" {
@@ -610,11 +613,7 @@ func command(args []string) error {
 			}
 			defer destination.Close()
 		}
-		if opts.target == "go" {
-			measured, err = buildGo(r, paths.source, paths.output, opts.receipt != "")
-		} else {
-			measured, err = buildJS(r, paths.source, paths.output, paths.declaration, opts.entry || args[0] == "run", opts.receipt != "")
-		}
+		measured, err = buildGo(r, paths.source, paths.output, opts.receipt != "")
 		if err != nil {
 			if !r.Checked {
 				_ = printJSON(r)
@@ -630,20 +629,7 @@ func command(args []string) error {
 			fmt.Println(paths.output)
 			return nil
 		}
-		absolute := paths.output.Path()
-		runtime := absolute
-		arguments := []string{}
-		if opts.target == "js" {
-			runtime, err = exec.LookPath("bun")
-			if err != nil {
-				runtime, err = exec.LookPath("node")
-			}
-			if err != nil {
-				return fmt.Errorf("JavaScript run requires Bun or Node")
-			}
-			arguments = []string{absolute}
-		}
-		child := exec.Command(runtime, arguments...)
+		child := exec.Command(paths.output.Path())
 		child.Stdout = os.Stdout
 		child.Stderr = os.Stderr
 		child.Stdin = os.Stdin
@@ -711,47 +697,27 @@ func goOutputPath(source, output string) string {
 	return output
 }
 
-// jsOutputPaths are the module and declaration file a JavaScript build writes.
-func jsOutputPaths(source, output string) (string, string) {
-	if output == "" {
-		output = filepath.Join("dist", sourceBase(source)+".mjs")
-	}
-	return output, strings.TrimSuffix(output, ".mjs") + ".d.mts"
-}
-
 // buildPaths are a build's source and artifact locations. Each is
 // resolved once, and the same value is handed to receipt admission, to the
 // build that writes it and to measurement.
 type buildPaths struct {
-	source      receipt.Location
-	output      receipt.Location
-	declaration receipt.Location
-	managed     []receipt.Location
+	source  receipt.Location
+	output  receipt.Location
+	managed []receipt.Location
 }
 
 func locateBuild(source receipt.Location, opts options) (buildPaths, error) {
 	paths := buildPaths{source: source}
 	var err error
-	if opts.target == "go" {
-		if paths.output, err = locateArtifact(goOutputPath(source.String(), opts.output)); err != nil {
-			return paths, err
-		}
-		root, err := receipt.Locate(goApplicationsRoot)
-		if err != nil {
-			return paths, err
-		}
-		paths.managed = []receipt.Location{root}
-		return paths, nil
-	}
-	module, declaration := jsOutputPaths(source.String(), opts.output)
-	if filepath.Ext(module) != ".mjs" {
-		return paths, fmt.Errorf("JavaScript output must have .mjs extension")
-	}
-	if paths.output, err = locateArtifact(module); err != nil {
+	if paths.output, err = locateArtifact(goOutputPath(source.String(), opts.output)); err != nil {
 		return paths, err
 	}
-	paths.declaration, err = locateArtifact(declaration)
-	return paths, err
+	root, err := receipt.Locate(goApplicationsRoot)
+	if err != nil {
+		return paths, err
+	}
+	paths.managed = []receipt.Location{root}
+	return paths, nil
 }
 
 // locateArtifact locates a file the build writes. A directory is refused
@@ -775,11 +741,7 @@ func locateArtifact(path string) (receipt.Location, error) {
 // protected are the paths a receipt must never replace: the source and
 // every artifact the build writes.
 func (p buildPaths) protected() []receipt.Location {
-	protected := []receipt.Location{p.source, p.output}
-	if p.declaration.Path() != "" {
-		protected = append(protected, p.declaration)
-	}
-	return protected
+	return []receipt.Location{p.source, p.output}
 }
 
 // buildGo builds the ordinary native application at output. With measure,
@@ -839,43 +801,6 @@ func buildGoApplication(r *compiler.Result, source receipt.Location, output rece
 // goApplicationsRoot is the managed tree of published generated modules.
 var goApplicationsRoot = filepath.Join("dist", "go", "apps")
 
-// buildJS writes the JavaScript module and its declarations. With measure, it
-// also returns the application receipt of the written module.
-func buildJS(r *compiler.Result, source, output, declaration receipt.Location, entry, measure bool) (*receipt.Application, error) {
-	module, err := r.EmitModule(entry)
-	if err != nil {
-		return nil, err
-	}
-	if err = os.MkdirAll(filepath.Dir(output.Path()), 0755); err != nil {
-		return nil, err
-	}
-	if err = writeChanged(output.Path(), []byte(module.Source)); err != nil {
-		return nil, err
-	}
-	if err = writeChanged(declaration.Path(), []byte(module.Declaration)); err != nil {
-		return nil, err
-	}
-	if !measure {
-		return nil, nil
-	}
-	mode := "library"
-	if entry {
-		mode = "entry"
-	}
-	measured, err := receipt.JavaScript(r, source, mode, module, output, declaration)
-	if err != nil {
-		return nil, fmt.Errorf("receipt: %w", err)
-	}
-	return measured, nil
-}
-func writeChanged(path string, content []byte) error {
-	old, err := os.ReadFile(path)
-	if err == nil && string(old) == string(content) {
-		return nil
-	}
-	return os.WriteFile(path, content, 0644)
-}
-
 func replaceEnv(environment []string, key, value string) []string {
 	prefix := key + "="
 	result := make([]string, 0, len(environment)+1)
@@ -897,58 +822,23 @@ func replaceEnv(environment []string, key, value string) []string {
 }
 
 func runTests(r *compiler.Result, source receipt.Location, timeoutMillis int) error {
-	var path string
 	if timeoutMillis == 0 {
 		timeoutMillis = 30000
 	}
-	if r.Target == "go" {
-		application, err := goApplication(r, source, compiler.GoGenerationTest)
-		if err != nil {
-			return err
-		}
-		output, err := receipt.Locate(filepath.Join("dist", sourceBase(source.String())+".tests"))
-		if err != nil {
-			return err
-		}
-		if _, err = buildGoApplication(r, source, output, application); err != nil {
-			return err
-		}
-		path = output.Path()
-	} else {
-		js, decl, err := r.EmitJSTests()
-		if err != nil {
-			return err
-		}
-		module, err := receipt.Locate(filepath.Join("dist", sourceBase(source.String())+".tests.mjs"))
-		if err != nil {
-			return err
-		}
-		path = module.Path()
-		if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			return err
-		}
-		if err = writeChanged(path, []byte(js)); err != nil {
-			return err
-		}
-		if err = writeChanged(strings.TrimSuffix(path, ".mjs")+".d.mts", []byte(decl)); err != nil {
-			return err
-		}
+	application, err := goApplication(r, source, compiler.GoGenerationTest)
+	if err != nil {
+		return err
 	}
-	runtime, args := path, []string{}
-	var err error
-	if r.Target == "js" {
-		runtime, err = exec.LookPath("bun")
-		if err != nil {
-			runtime, err = exec.LookPath("node")
-		}
-		if err != nil {
-			return fmt.Errorf("JavaScript tests require Bun or Node")
-		}
-		args = []string{path}
+	executable, err := receipt.Locate(filepath.Join("dist", sourceBase(source.String())+".tests"))
+	if err != nil {
+		return err
+	}
+	if _, err = buildGoApplication(r, source, executable, application); err != nil {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMillis)*time.Millisecond)
 	defer cancel()
-	child := exec.CommandContext(ctx, runtime, args...)
+	child := exec.CommandContext(ctx, executable.Path())
 	var stdout, stderr testOutput
 	child.Stdout = &stdout
 	child.Stderr = &stderr

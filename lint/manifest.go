@@ -220,8 +220,9 @@ func (r ManifestRule) validate() error {
 			return fmt.Errorf("duplicate fact family %q", family)
 		}
 	}
+	// Go is the only compilation target.
 	for _, target := range r.Targets {
-		if target != "go" && target != "js" {
+		if target != "go" {
 			return fmt.Errorf("unsupported target %q", target)
 		}
 	}

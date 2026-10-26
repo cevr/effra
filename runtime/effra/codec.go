@@ -8,8 +8,8 @@ import (
 	"unicode/utf8"
 )
 
-// CodecProfileJSON identifies the structural JSON rules shared by this engine,
-// the JavaScript engine and the pinned Effect Schema comparator vectors:
+// CodecProfileJSON identifies the structural JSON rules shared by this engine
+// and the frozen pinned Effect Schema comparator vectors:
 // required declared keys, ignored excess keys, void as null, i64 as a signed
 // decimal string, "_tag" union discriminators, declared-order first failure
 // and output, and bounded admission that rejects duplicate keys, invalid

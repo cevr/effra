@@ -53,26 +53,6 @@ func (r *Result) EmitGoTests() (string, error) {
 	}
 	return string(application.Main), nil
 }
-func (r *Result) EmitJSTests() (string, string, error) {
-	tests, err := r.Tests()
-	if err != nil {
-		return "", "", err
-	}
-	js, decl, err := r.emitJS(jsTests)
-	if err != nil {
-		return "", "", err
-	}
-	js += "const __ef_tests = ["
-	for _, test := range tests {
-		js += "[" + quoted(test.Name) + ",__ef_function_" + test.Name + "],"
-	}
-	js += `];
-const __ef_results=[];let __ef_passed=true;
-for(const [name,program] of __ef_tests){const __ef_harness=__ef_makeTestHarness();__ef_test_harness=__ef_harness;let __ef_case=Effect.provideService(program(),__ef_service_Assert,__ef_provider_Assertions);__ef_case=Effect.provideService(__ef_case,__ef_service_Clock,__ef_harness.clock);__ef_case=Effect.provideService(__ef_case,__ef_service_Scheduler,__ef_harness.scheduler);__ef_case=Effect.provideService(__ef_case,__ef_service_Sync,__ef_harness.sync);const __ef_clocked=Effect.provideService(__ef_case,Clock.Clock,__ef_harness.effectClock);const __ef_scheduled=Effect.provideService(__ef_clocked,Scheduler.Scheduler,__ef_harness.effectScheduler);const exit=await Effect.runPromiseExit(__ef_scheduled);__ef_test_harness=null;const passed=Exit.isSuccess(exit);__ef_passed&&=passed;__ef_results.push(passed?{name,passed}:{name,passed,cause:Cause.pretty(exit.cause),reasons:exit.cause.reasons.map(reason=>reason._tag==="Fail"?{kind:"failure",tag:reason.error?._tag??"Unknown",message:reason.error?.message??String(reason.error)}:reason._tag==="Die"?{kind:"defect",message:String(reason.defect)}:{kind:"interrupt",message:String(reason.fiberId??"interrupted")})});}
-console.log(JSON.stringify({schemaVersion:1,passed:__ef_passed,tests:__ef_results}));if(!__ef_passed)process.exitCode=1;
-`
-	return js, decl, nil
-}
 
 func isLiveTestProvider(name string) bool {
 	switch name {
@@ -91,7 +71,7 @@ func (r *Result) TestMode(live bool) error {
 	if live {
 		return nil
 	}
-	if r.Program.GoOnly {
+	if r.Program.NativeHost {
 		return fmt.Errorf("native host capabilities require test --live")
 	}
 	var block func(*Block) bool

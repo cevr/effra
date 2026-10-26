@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -223,30 +222,24 @@ func TestSessionReportsAPackFailureAsALintRunnerError(t *testing.T) {
 	}
 }
 
-// A rule that supports only go, under go and js analyses on one MCP
-// server, and in the LSP under js. Enabled by its pack's default, it does
-// not apply to js: the js analysis is complete and passes, with the skip
-// reported. Enabled by the project's configuration, it is a guarantee js
-// cannot give: js lint fails with a lint-runner error. Either way the go
-// analysis runs it.
+// A rule that supports only go, analysed through one MCP server. Whether its
+// pack's default or the project's configuration enabled it, the go analysis
+// runs it: the rule completes with its finding and lint passes.
 func TestSessionAppliesATargetRestrictedRuleByWhoEnabledIt(t *testing.T) {
 	dir := packs(t)
 	manifest := filepath.Join(dir, "fixture-go", "manifest.json")
 	root, _ := filepath.Abs("../../examples/lintpack/testdata")
-	_, snapshot := compile(t)
-	lintTargets := func(session *lintpacks.Session) map[string]compiler.LintResult {
+	lintGo := func(session *lintpacks.Session) compiler.LintResult {
 		t.Helper()
 		messages := []string{
 			`{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"` + mcp.ProtocolVersion + `","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`,
 			`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 			`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"project.lint","arguments":{"file":"provider_boundary.ef","target":"go"}}}`,
-			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"project.lint","arguments":{"file":"provider_boundary.ef","target":"js"}}}`,
 		}
 		var output bytes.Buffer
 		if err := mcp.Serve(root, session, strings.NewReader(strings.Join(messages, "\n")+"\n"), &output); err != nil {
 			t.Fatal(err)
 		}
-		results := map[string]compiler.LintResult{}
 		for _, line := range strings.Split(strings.TrimSpace(output.String()), "\n") {
 			var reply struct {
 				ID     int `json:"id"`
@@ -259,49 +252,24 @@ func TestSessionAppliesATargetRestrictedRuleByWhoEnabledIt(t *testing.T) {
 			if err := json.Unmarshal([]byte(line), &reply); err != nil {
 				t.Fatal(output.String())
 			}
-			if reply.ID > 0 {
-				results[reply.Result.StructuredContent.Lint.Target] = reply.Result.StructuredContent.Lint
+			if reply.ID == 1 {
+				return reply.Result.StructuredContent.Lint
 			}
 		}
-		return results
-	}
-	runnerError := func(diagnostics []compiler.LintDiagnostic) bool {
-		for _, diagnostic := range diagnostics {
-			if diagnostic.Code == "EFL000" && strings.HasSuffix(diagnostic.Message, "was skipped: target-unsupported: js") {
-				return true
-			}
-		}
-		return false
+		t.Fatalf("no project.lint reply: %s", output.String())
+		return compiler.LintResult{}
 	}
 	for _, c := range []struct {
-		name     string
-		session  *lintpacks.Session
-		jsPasses bool
+		name    string
+		session *lintpacks.Session
 	}{
-		{"pack default", load(t, lintpacks.Selection{Manifests: []string{manifest}}), true},
-		{"project configuration", load(t, lintpacks.Selection{Config: writeConfig(t, `{"version":1,"packs":[{"manifest":`+strconv.Quote(manifest)+`}],"rules":{"fixture/rename-main":"warning"}}`)}), false},
+		{"pack default", load(t, lintpacks.Selection{Manifests: []string{manifest}})},
+		{"project configuration", load(t, lintpacks.Selection{Config: writeConfig(t, `{"version":1,"packs":[{"manifest":`+strconv.Quote(manifest)+`}],"rules":{"fixture/rename-main":"warning"}}`)})},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			results := lintTargets(c.session)
-			goLint, jsLint := results["go"], results["js"]
-			if !goLint.Complete || !goLint.LintPassed || goLint.Packs[0].Rules[0].Status != lint.StatusCompleted || goLint.Packs[0].Rules[0].Findings != 1 {
+			goLint := lintGo(c.session)
+			if goLint.Target != "go" || !goLint.Complete || !goLint.LintPassed || goLint.Packs[0].Rules[0].Status != lint.StatusCompleted || goLint.Packs[0].Rules[0].Findings != 1 {
 				t.Fatalf("go: %+v", goLint)
-			}
-			status := jsLint.Packs[0].Rules[0]
-			if status.Status != lint.StatusSkipped || status.Reason != "target-unsupported: js" || jsLint.Packs[0].Analysis.Execution != nil {
-				t.Fatalf("js status: %+v", jsLint.Packs[0])
-			}
-			if jsLint.Complete != c.jsPasses || jsLint.LintPassed != c.jsPasses || runnerError(jsLint.LintDiagnostics) == c.jsPasses {
-				t.Fatalf("js: %+v", jsLint)
-			}
-			if status.Inapplicable != c.jsPasses {
-				t.Fatalf("js inapplicable: %+v", status)
-			}
-			published := publishFor(t, "js", c.session, snapshot)
-			if published := slices.ContainsFunc(published, func(d compiler.LSPDiagnostic) bool {
-				return d.Code == "EFL000" && d.Range == (compiler.DiagnosticRange{})
-			}); published == c.jsPasses {
-				t.Fatalf("LSP published a lint-runner error: %v", published)
 			}
 		})
 	}

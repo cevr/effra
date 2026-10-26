@@ -621,6 +621,18 @@ effect fn main() -> string { "ok" }`
 	}
 }
 
+// Go is the only target: any other target argument is the compiler's EF110.
+func TestToolsRefuseTheJavaScriptTarget(t *testing.T) {
+	_, err := decodeArguments("project.check", json.RawMessage(`{"file":"main.ef","target":"js"}`))
+	if err == nil || err.Error() != "EF110: unsupported target js; the only target is go" {
+		t.Fatalf("js target argument: %v", err)
+	}
+	args, err := decodeArguments("project.check", json.RawMessage(`{"file":"main.ef","target":"go"}`))
+	if err != nil || args.Target != "go" {
+		t.Fatalf("go target argument: %+v %v", args, err)
+	}
+}
+
 func TestFormatRejectsStaleAndInvalidOrigins(t *testing.T) {
 	for _, raw := range []string{
 		`{"file":"main.ef","source":""}`,

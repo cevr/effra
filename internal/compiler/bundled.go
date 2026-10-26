@@ -87,16 +87,6 @@ func (f *Function) goEmissionName() string {
 	return "efFunction_" + f.Name
 }
 
-func (f *Function) jsEmissionName() string {
-	if f.codec != nil {
-		return "__ef_codec_function_" + f.EmissionName
-	}
-	if f.EmissionName != "" {
-		return "__ef_bundled_function_" + f.EmissionName
-	}
-	return "__ef_function_" + f.Name
-}
-
 func (p *Program) checkedFunctions() []*Function {
 	return append(append(append([]*Function{}, p.Functions...), p.BundledFunctions...), p.DerivedFunctions...)
 }
@@ -255,7 +245,7 @@ func (r *Result) loadBundledImports(source string) {
 			root(f, provider.Params, false)
 		}
 	}
-	if len(p.Imports) > 0 && r.Target == "go" {
+	if len(p.Imports) > 0 {
 		// Nullable native values and native errors adapt through bundled
 		// Option; there is no host-only nullable type.
 		queue = append(queue, request{module: hostOptionModule, member: hostOptionMember})

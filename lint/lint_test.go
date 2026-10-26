@@ -309,8 +309,9 @@ func TestTargetApplicabilityFollowsWhoEnabledTheRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	js := testSnapshot()
-	js.Semantic.Target = "js"
+	// No second target exists, so the other target is a constructed snapshot.
+	other := testSnapshot()
+	other.Semantic.Target = "wasm"
 	cases := []struct {
 		name, document         string
 		snapshot               *Snapshot
@@ -318,11 +319,11 @@ func TestTargetApplicabilityFollowsWhoEnabledTheRule(t *testing.T) {
 		complete, inapplicable bool
 	}{
 		{"default under go", `{"version":1}`, testSnapshot(), StatusCompleted, true, false},
-		{"default under js", `{"version":1}`, js, StatusSkipped, true, true},
-		{"preset under js", `{"version":1,"extends":["acme/on"]}`, js, StatusSkipped, true, true},
-		{"configured severity under js", `{"version":1,"rules":{"acme/no-op":"warning"}}`, js, StatusSkipped, false, false},
-		{"configured options over a preset under js", `{"version":1,"extends":["acme/on"],"rules":{"acme/no-op":{"options":{"label":"b"}}}}`, js, StatusSkipped, false, false},
-		{"configured off under js", `{"version":1,"rules":{"acme/no-op":"off"}}`, js, StatusOff, true, false},
+		{"default under another target", `{"version":1}`, other, StatusSkipped, true, true},
+		{"preset under another target", `{"version":1,"extends":["acme/on"]}`, other, StatusSkipped, true, true},
+		{"configured severity under another target", `{"version":1,"rules":{"acme/no-op":"warning"}}`, other, StatusSkipped, false, false},
+		{"configured options over a preset under another target", `{"version":1,"extends":["acme/on"],"rules":{"acme/no-op":{"options":{"label":"b"}}}}`, other, StatusSkipped, false, false},
+		{"configured off under another target", `{"version":1,"rules":{"acme/no-op":"off"}}`, other, StatusOff, true, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -337,7 +338,7 @@ func TestTargetApplicabilityFollowsWhoEnabledTheRule(t *testing.T) {
 			if status.Inapplicable != c.inapplicable {
 				t.Fatalf("inapplicable: %+v", status)
 			}
-			if c.status == StatusSkipped && (status.Reason != "target-unsupported: js" || len(report.Findings) != 0) {
+			if c.status == StatusSkipped && (status.Reason != "target-unsupported: wasm" || len(report.Findings) != 0) {
 				t.Fatalf("skip: %+v", report)
 			}
 		})

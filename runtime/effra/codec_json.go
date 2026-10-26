@@ -64,7 +64,7 @@ func (v *codecJSON) addMember(key string, value codecJSON) bool {
 // codecParser is the profile's single admission pass: RFC 8259 grammar with
 // no byte-order mark, well-formed UTF-8, paired surrogate escapes, unique
 // object keys and bounded nesting. Every failure reports the byte offset
-// where admission stopped; the JavaScript engine reports identical offsets.
+// where admission stopped.
 type codecParser struct {
 	data     []byte
 	pos      int

@@ -1,12 +1,10 @@
 package compiler
 
-// Post-check lowering shared by both emitters.
+// Post-check lowering for the Go emitter.
 //
 // Effra has no loop construct, so a self-recursive function is the only way to
-// iterate. Goroutine stacks grow, but a V8 stack does not: the same program
-// that runs on Go overflows on Node. The pass finds the self tail calls of a
-// pure function so each emitter can turn them into a loop (Go `for`, JS
-// `while (true)`) with the same meaning on both targets.
+// iterate. The pass finds the self tail calls of a pure function so the
+// emitter can turn them into a Go `for` loop that runs in constant stack.
 //
 // The pass only reads the checked tree and returns annotations; nothing is
 // rewritten in place and no intermediate tree is built. A second consumer,

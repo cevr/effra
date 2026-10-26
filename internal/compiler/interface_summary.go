@@ -263,11 +263,7 @@ func exportInterfaceSummary(c *checker, module, sourceInput string, functions []
 	for _, d := range x.dto.Templates {
 		r := c.templates[d.Ref]
 		implementation.WriteString("\x00" + r.Identity + "\x00")
-		if c.result.Target == "go" {
-			implementation.WriteString(goTemplateDeclaration(r))
-		} else {
-			implementation.WriteString(jsTemplateDeclaration(r))
-		}
+		implementation.WriteString(goTemplateDeclaration(r))
 	}
 	g := &goEmitter{program: c.program}
 	for _, f := range ordered {
@@ -281,11 +277,7 @@ func exportInterfaceSummary(c *checker, module, sourceInput string, functions []
 		}
 		x.dto.Declarations = append(x.dto.Declarations, d)
 		implementation.WriteString("\x00" + f.Identity + "\x00")
-		if c.result.Target == "go" {
-			implementation.WriteString(g.functionDeclaration(f))
-		} else {
-			implementation.WriteString(jsFunction(f))
-		}
+		implementation.WriteString(g.functionDeclaration(f))
 	}
 	x.dto.Implementation = formatDigest(implementation.String())
 	if x.err != nil {

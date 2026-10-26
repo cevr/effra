@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -121,6 +122,19 @@ func TestGoBackendRefusesInvalidEntry(t *testing.T) {
 	}
 	if CompileFor(`effect fn main() -> void {}`, "llvm").Checked {
 		t.Fatal("unsupported target accepted")
+	}
+}
+
+// Go is the only target: the removed js target, like any other, is the
+// EF110 diagnostic, never an accepted compilation.
+func TestJavaScriptTargetIsUnsupported(t *testing.T) {
+	r := CompileFor(`effect fn main() -> void {}`, "js")
+	want := Diagnostic{Code: "EF110", Message: "unsupported target js; the only target is go"}
+	if r.Checked || len(r.Diagnostics) != 1 || !reflect.DeepEqual(r.Diagnostics[0], want) {
+		t.Fatalf("js target: checked=%v %+v", r.Checked, r.Diagnostics)
+	}
+	if diagnostic, ok := UnsupportedTarget(Target); ok {
+		t.Fatalf("the Go target is unsupported: %+v", diagnostic)
 	}
 }
 

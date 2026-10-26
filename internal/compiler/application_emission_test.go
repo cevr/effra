@@ -322,7 +322,7 @@ func TestApplicationPlanRefusalIsADiagnosticAndEmitsNothing(t *testing.T) {
 		t.Fatal("check response omitted native application inspection")
 	}
 	if inspections := CompileFor(applicationDAGSource(4), "js").ApplicationInspections(); len(inspections) != 0 {
-		t.Fatalf("JavaScript target reported native applications: %+v", inspections)
+		t.Fatalf("an unsupported target reported native applications: %+v", inspections)
 	}
 }
 

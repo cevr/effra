@@ -95,12 +95,16 @@ func TestCLISmoke(t *testing.T) {
 		}
 	})
 
-	t.Run("lifecycle-js-refused", func(t *testing.T) {
+	// Go is the only target: the removed js target is refused with EF110 by
+	// every command, before any source is read.
+	t.Run("js-target-refused", func(t *testing.T) {
 		t.Parallel()
 		workspace := cliSmokeExamples(t)
-		report := cliSmokeJSON(t, binary, workspace, false, "check", "examples/lifecycle.ef", "--target", "js")
-		if !cliSmokeHasCode(t, report, "EF110") {
-			t.Fatalf("Go-only lifecycle is not EF110 on JS: %s", mustJSON(t, report))
+		for _, command := range []string{"check", "build", "run", "test"} {
+			stdout, stderr, code := runTestCLIDir(t, binary, workspace, "", command, "examples/lifecycle.ef", "--target", "js")
+			if code == 0 || len(stdout) != 0 || !strings.Contains(string(stderr), "EF110: unsupported target js; the only target is go") {
+				t.Fatalf("%s --target js: code=%d stdout=%q stderr=%q", command, code, stdout, stderr)
+			}
 		}
 	})
 
@@ -205,7 +209,7 @@ func TestCLISmoke(t *testing.T) {
 		cliSmokeEqual(t, cliSmokeAt(t, imported, "bindings"), bindings["bindings"])
 		cliSmokeEqual(t, cliSmokeAt(t, imported, "revision"), bindings["revision"])
 		capabilities, _ := cliSmokeAt(t, responses[6], "result", "structuredContent", "guardrails", "targetCapabilities").(string)
-		if !strings.Contains(capabilities, "Go imports") {
+		if !strings.Contains(capabilities, "Go is the only target") {
 			t.Fatalf("target capabilities = %q", capabilities)
 		}
 		catalog := cliSmokeAt(t, responses[7], "result", "structuredContent")

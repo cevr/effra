@@ -99,9 +99,6 @@ func TestBuildReceiptRefusesInputsArtifactsAndAliases(t *testing.T) {
 		{"source symlink", nil, "source-link"},
 		{"source hard link", nil, "source-hardlink"},
 		{"managed generations", nil, "dist/go/apps/receipt.json"},
-		{"js module", []string{"--target", "js", "-o", "out/app.mjs"}, "out/app.mjs"},
-		{"js declaration", []string{"--target", "js", "-o", "out/app.mjs"}, "out/app.d.mts"},
-		{"js default module", []string{"--target", "js"}, "dist/main.mjs"},
 	}
 	for _, c := range cases {
 		args := append([]string{"build", source}, c.args...)
@@ -226,7 +223,7 @@ func TestBuildRefusesDirectoryOutputs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(minimalApplicationSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, directory := range []string{"existing", "existing.mjs", filepath.Join("dist", "main")} {
+	for _, directory := range []string{"existing", filepath.Join("dist", "main")} {
 		if err := os.MkdirAll(filepath.Join(root, directory), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -242,7 +239,6 @@ func TestBuildRefusesDirectoryOutputs(t *testing.T) {
 		{"link to a directory", []string{"-o", "existing-link"}},
 		{"trailing separator", []string{"-o", "fresh" + string(filepath.Separator)}},
 		{"default output is a directory", nil},
-		{"js module directory", []string{"--target", "js", "-o", "existing.mjs"}},
 	}
 	for _, c := range cases {
 		for _, receiptArgs := range [][]string{nil, {"--receipt", "receipt.json"}} {
@@ -253,7 +249,7 @@ func TestBuildRefusesDirectoryOutputs(t *testing.T) {
 			}
 		}
 	}
-	for _, directory := range []string{"existing", "existing.mjs", filepath.Join("dist", "main")} {
+	for _, directory := range []string{"existing", filepath.Join("dist", "main")} {
 		if entries, err := os.ReadDir(filepath.Join(root, directory)); err != nil || len(entries) != 0 {
 			t.Errorf("refused build wrote into %s: %v %v", directory, err, entries)
 		}

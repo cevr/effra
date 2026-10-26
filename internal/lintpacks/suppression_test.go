@@ -160,7 +160,6 @@ func TestSuppressionStatesAgreeAcrossSurfaces(t *testing.T) {
 		{"rule off", "go", directive + main, load(t, lintpacks.Selection{Config: writeConfig(t, `{"version":1,"packs":[{"manifest":`+strconv.Quote(serve)+`}],"rules":{"fixture/rename-main":"off"}}`)}), compiler.SuppressionNotEvaluated, compiler.NotEvaluatedRuleOff, false},
 		{"pack failed", "go", directive + main, load(t, lintpacks.Selection{Manifests: []string{filepath.Join(dir, "fixture-crash", "manifest.json")}}), compiler.SuppressionNotEvaluated, compiler.NotEvaluatedPackFailed, false},
 		{"facts unavailable", "go", exhausted, load(t, lintpacks.Selection{Manifests: []string{bindingsManifest}}), compiler.SuppressionNotEvaluated, compiler.NotEvaluatedFactsUnavailable, false},
-		{"target unsupported", "js", directive + main, load(t, lintpacks.Selection{Manifests: []string{filepath.Join(dir, "fixture-go", "manifest.json")}}), compiler.SuppressionNotEvaluated, compiler.NotEvaluatedTargetUnsupported, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

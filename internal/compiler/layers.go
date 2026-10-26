@@ -520,7 +520,7 @@ func (c *checker) checkLayerProvider(entry *LayerEntry) *Provider {
 		}
 	}
 	if provider.Service == "Files" || provider.Service == "Runtime" || provider.Service == "Foreign" {
-		c.requireGo(expr.Span, "native provider "+provider.Service)
+		c.markNativeHost()
 	}
 	return provider
 }

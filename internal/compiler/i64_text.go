@@ -102,27 +102,3 @@ func (g *goEmitter) intrinsicOperation(e *Expr, ret string, out *strings.Builder
 	out.WriteString(name + " := efI64Parse(" + operand + ")\n" + g.failed(name, ret))
 	return name + ".Value"
 }
-
-const jsI64FormatHelper = "const __ef_i64Format = value => String(value);\n"
-
-// jsI64ParseHelper decides range on the decimal text itself and calls
-// BigInt only on at most 20 characters. BigInt over unbounded text is
-// super-linear and engine-limited (a thrown RangeError would become a
-// defect), while Go's ParseInt stops at the first overflowing digit.
-const jsI64ParseHelper = `const __ef_i64Parse = text => Effect.suspend(() => {
-  if (!/^[+-]?[0-9]+$/.test(text)) return Effect.fail({ _tag: "` + i64ParseFailure + `", message: "` + i64SyntaxMessage + `" });
-  const negative = text.charCodeAt(0) === 45;
-  const digits = text.replace(/^[+-]?0*/, "");
-  const limit = negative ? "9223372036854775808" : "9223372036854775807";
-  if (digits.length > limit.length || (digits.length === limit.length && digits > limit)) return Effect.fail({ _tag: "` + i64ParseFailure + `", message: "` + i64RangeMessage + `" });
-  return Effect.succeed(BigInt((negative ? "-" : "") + (digits === "" ? "0" : digits)));
-});
-`
-
-func jsIntrinsicOperation(e *Expr) string {
-	operand := jsExpr(e.Left, false)
-	if e.Name == i64FormatOp {
-		return "__ef_i64Format(" + operand + ")"
-	}
-	return "(yield* __ef_i64Parse(" + operand + "))"
-}

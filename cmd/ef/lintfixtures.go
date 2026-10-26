@@ -14,7 +14,7 @@ import (
 	sourcefile "effra.local/prototype/internal/source"
 )
 
-const lintTestUsage = "usage: ef lint test PATH... [--update] [--target go|js] [--lint-config FILE] [--rules MANIFEST]..."
+const lintTestUsage = "usage: ef lint test PATH... [--update] [--target go] [--lint-config FILE] [--rules MANIFEST]..."
 
 // lintTestCommand checks rule-pack source fixtures. Each PATH is a .ef
 // fixture or a directory of them; name.ef expects name.lint.json. Every
@@ -49,8 +49,8 @@ func lintTestCommand(args []string) error {
 			paths = append(paths, rest[i])
 		}
 	}
-	if target != "go" && target != "js" {
-		return invalidInvocation(fmt.Errorf("unsupported target %s; use go or js", target))
+	if err := targetError(target); err != nil {
+		return invalidInvocation(err)
 	}
 	if len(paths) == 0 {
 		return invalidInvocation(fmt.Errorf("%s", lintTestUsage))

@@ -11,7 +11,7 @@ import (
 	sourcefile "effra.local/prototype/internal/source"
 )
 
-const lintReceiptUsage = "usage: ef lint receipt FILE [--runs N] [--target go|js] [--lint-config FILE] [--rules MANIFEST]..."
+const lintReceiptUsage = "usage: ef lint receipt FILE [--runs N] [--target go] [--lint-config FILE] [--rules MANIFEST]..."
 
 // lintReceiptCommand prints a raw lint cost receipt for one source under the
 // selected lint configuration: per run, the frontend, fact extraction, each
@@ -49,8 +49,8 @@ func lintReceiptCommand(args []string) error {
 			paths = append(paths, rest[i])
 		}
 	}
-	if target != "go" && target != "js" {
-		return invalidInvocation(fmt.Errorf("unsupported target %s; use go or js", target))
+	if err := targetError(target); err != nil {
+		return invalidInvocation(err)
 	}
 	if len(paths) != 1 || filepath.Ext(paths[0]) != ".ef" {
 		return invalidInvocation(fmt.Errorf("%s", lintReceiptUsage))

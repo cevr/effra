@@ -251,7 +251,6 @@ const (
 	GraphRefusalEdgeKind          = "EFGRAPH_EDGE_KIND"
 	GraphRefusalMode              = "EFGRAPH_MODE"
 	GraphRefusalUnchecked         = "EFGRAPH_UNCHECKED"
-	GraphRefusalTarget            = "EFGRAPH_TARGET"
 	GraphRefusalFocus             = "EFGRAPH_FOCUS"
 	GraphRefusalCollapse          = "EFGRAPH_COLLAPSE"
 	GraphRefusalPlan              = "EFGRAPH_PLAN"
@@ -1733,9 +1732,6 @@ func applicationNodeID(kind ApplicationRequirementKind, identity string) string 
 // included) with the effective replacement, and the runtime catalog closure.
 // It plans; it never builds or emits.
 func (r *Result) applicationGraphFacts(request GraphRequest, limits GraphViewLimits) (*graphFacts, error) {
-	if r.Target != "go" {
-		return nil, graphRefusal(GraphRefusalTarget, "application graphs plan native Go applications; target %s has no application plan", r.Target)
-	}
 	plan, err := r.ApplicationPlan(graphApplicationModes[request.Mode])
 	if err != nil {
 		return nil, graphRefusal(GraphRefusalPlan, "%s application plan unavailable: %v", request.Mode, err)
@@ -1747,7 +1743,7 @@ func (r *Result) applicationGraphFacts(request GraphRequest, limits GraphViewLim
 		"provenance is the first checked witness of each requirement, not every path that retains it",
 		"callable-value requirements are the conservative target set of every dynamic call",
 		"a layer node shared by several retained plans is one node; each plan's effective selection lives on its selects edge",
-		"a retained requirement is a planned emission obligation; the view makes no JavaScript retention or bundler tree-shaking claim",
+		"a retained requirement is a planned emission obligation, not a claim about what the Go linker keeps",
 		"runtime-closure nodes are catalog dependencies the selected runtime roots close over",
 	}
 	layers := map[string]*LayerPlan{}

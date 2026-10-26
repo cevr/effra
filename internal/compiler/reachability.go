@@ -250,7 +250,7 @@ func (r *Result) goInitialization(plan *ApplicationPlan) []GoInitializationInspe
 // neither has no native application to inspect.
 func (r *Result) ApplicationInspections() []ApplicationInspection {
 	inspections := []ApplicationInspection{}
-	if r == nil || !r.Checked || r.Target != "go" {
+	if r == nil || !r.Checked {
 		return inspections
 	}
 	if r.Entry() == nil {
@@ -291,27 +291,9 @@ func (r *Result) inspectApplication(mode GoGenerationMode, limit int) Applicatio
 // ApplicationPlan computes the emission closure for a concrete generated
 // entry mode: GoGenerationBuild roots the checked effect main, and
 // GoGenerationTest roots the selected test cases plus the harness fixture
-// providers bound to every case. JavaScript library exports are a separate
-// public surface and are not application roots.
+// providers bound to every case.
 func (r *Result) ApplicationPlan(mode GoGenerationMode) (*ApplicationPlan, error) {
 	return r.applicationPlan(mode, maxApplicationPlanWork)
-}
-
-// LibrarySurface roots a JavaScript library module at its exported
-// surface. A library is not an application: it has no entry or harness, and
-// its roots never widen an entry closure. It shares the planner, so library
-// emission selects through the same checked edges as an entry.
-const LibrarySurface GoGenerationMode = "library"
-
-// LibraryPlan computes the closure of every value a library module exports.
-// ApplicationPlan refuses LibrarySurface: only this entry point roots it.
-func (r *Result) LibraryPlan() (*ApplicationPlan, error) {
-	if r == nil || !r.Checked || r.Program == nil || r.Program.semantic == nil {
-		return nil, fmt.Errorf("library plans require checked source")
-	}
-	planner := newApplicationPlanner(r, LibrarySurface, maxApplicationPlanWork)
-	planner.librarySurface()
-	return planner.finish()
 }
 
 // applicationHostRoot names one checked declaration that Go host code calls
@@ -474,29 +456,6 @@ func (p *applicationPlanner) root(symbol *Symbol, reason string) {
 		return
 	}
 	p.function(checked.declaration, applicationOrigin{}, reason)
-}
-
-// librarySurface roots every value a JavaScript library exports: the
-// module's functions and providers, the builtin service tags and the builtin
-// providers with a JavaScript implementation. Data, error and template
-// declarations are type-only in JavaScript and need no value root.
-func (p *applicationPlanner) librarySurface() {
-	for _, f := range p.r.Program.checkedFunctions() {
-		if f.Module == currentModuleIdentity {
-			p.function(f, applicationOrigin{}, "export")
-		}
-	}
-	for _, s := range append(builtinServicesFor(p.r.Program), p.r.Program.Services...) {
-		p.service(p.c.services[s.Name], applicationOrigin{}, "export")
-	}
-	for _, provider := range builtinProvidersFor(p.r.Program) {
-		if jsExportsBuiltinProvider(provider.Name) && !builtinProviderByReference(provider) {
-			p.provider(p.r.checkedProviders[provider.Name], applicationOrigin{}, "export")
-		}
-	}
-	for _, provider := range p.r.Program.Providers {
-		p.provider(provider, applicationOrigin{}, "export")
-	}
 }
 
 func (p *applicationPlanner) hostRoot(root applicationHostRoot) {

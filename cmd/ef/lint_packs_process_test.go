@@ -294,19 +294,12 @@ func TestLintPackEnvironmentCLIProcess(t *testing.T) {
 	if _, stderr, code := lintWith(`{"version":1,"packs":[{"manifest":"manifest.json","env":["NOT-A-NAME"]}]}`); code != 2 || !strings.Contains(stderr, "invalid-environment") {
 		t.Fatalf("invalid selection: exit %d %s", code, stderr)
 	}
-	// A js-only rule under the go target. Enabled by its pack's default it
-	// does not apply: lint passes and is complete, reporting the skip.
-	// Enabled by the project's configuration, the skip fails policy with a
-	// lint-runner error (exit 1).
+	// Go is the only target: a manifest whose rule names another target is a
+	// lint configuration error (exit 2).
 	manifest.Rules[0].Targets = []string{"js"}
 	data, _ = json.Marshal(manifest)
 	os.WriteFile(filepath.Join(dir, "manifest-js.json"), data, 0o644)
-	result, stderr, code = lintWith(`{"version":1,"packs":[{"manifest":"manifest-js.json"}]}`)
-	if status := result.Packs[0].Rules[0]; code != 0 || !result.Complete || len(result.LintDiagnostics) != 0 || status.Status != lint.StatusSkipped || status.Reason != "target-unsupported: go" || !status.Inapplicable {
-		t.Fatalf("default-enabled rule: exit %d %s %+v", code, stderr, result)
-	}
-	result, stderr, code = lintWith(`{"version":1,"packs":[{"manifest":"manifest-js.json"}],"rules":{"fixture/rename-main":"warning"}}`)
-	if code != 1 || result.Complete || len(result.LintDiagnostics) != 1 || result.LintDiagnostics[0].Code != "EFL000" || !strings.Contains(result.LintDiagnostics[0].Message, "was skipped: target-unsupported: go") {
-		t.Fatalf("configured rule: exit %d %s %+v", code, stderr, result)
+	if _, stderr, code := lintWith(`{"version":1,"packs":[{"manifest":"manifest-js.json"}]}`); code != 2 || !strings.Contains(stderr, "unsupported target") {
+		t.Fatalf("js rule target: exit %d %s", code, stderr)
 	}
 }

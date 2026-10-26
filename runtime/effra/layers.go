@@ -70,8 +70,7 @@ func NewPlan[In, S, Out any](id PlanID, nodes []Node[S], init func(In) S, expose
 		return invalid("more than 1000 nodes")
 	}
 	// Identity text must be well-formed Unicode before it is measured or
-	// ordered, so byte order is code point order and the JS seam, which sees
-	// UTF-16, reaches the same refusal, bounds and canonical order.
+	// ordered, so byte order is code point order.
 	const malformed = "identity is not well-formed Unicode"
 	if !utf8.ValidString(string(id)) {
 		return invalid(malformed)

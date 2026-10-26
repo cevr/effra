@@ -1,7 +1,6 @@
 package compiler
 
 import (
-	"encoding/json"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,7 +34,6 @@ type entryReportNode struct {
 
 type entryReportVariant struct {
 	name   string
-	jsTag  string
 	goType string
 	fields []entryReportField
 }
@@ -139,7 +137,7 @@ func (b *entryReportBuilder) describe(id TypeID) entryReportNode {
 		if e := c.enums[n.Name]; e != nil && len(e.Parameters) == 0 {
 			variants := []entryReportVariant{}
 			for _, variant := range e.Variants {
-				variants = append(variants, entryReportVariant{name: variant.Name, jsTag: e.Name + "." + variant.Name, goType: goVariantType(e.Name, variant.Name), fields: b.fields(variant.Fields)})
+				variants = append(variants, entryReportVariant{name: variant.Name, goType: goVariantType(e.Name, variant.Name), fields: b.fields(variant.Fields)})
 			}
 			return entryReportNode{kind: "enum", variants: variants}
 		}
@@ -165,7 +163,7 @@ func (b *entryReportBuilder) describe(id TypeID) entryReportNode {
 		}
 		out := []entryReportVariant{}
 		for _, variant := range variants {
-			out = append(out, entryReportVariant{name: variant.Name, jsTag: template.Identity + "." + variant.Name, goType: goVariantType("template_"+template.EmissionName, variant.Name) + "[" + strings.Join(args, ",") + "]", fields: b.fields(variant.Fields)})
+			out = append(out, entryReportVariant{name: variant.Name, goType: goVariantType("template_"+template.EmissionName, variant.Name) + "[" + strings.Join(args, ",") + "]", fields: b.fields(variant.Fields)})
 		}
 		return entryReportNode{kind: "enum", variants: out}
 	}
@@ -212,71 +210,4 @@ func (r *Result) goEntryReport(retained func(string) bool) string {
 	}
 	out.WriteString("}}\n")
 	return out.String()
-}
-
-type jsEntryReportField struct {
-	Name string `json:"name"`
-	Node int    `json:"node"`
-}
-
-type jsEntryReportVariant struct {
-	Tag    string               `json:"tag"`
-	Name   string               `json:"name"`
-	Fields []jsEntryReportField `json:"fields"`
-}
-
-// A record node always carries its field list and an enum node its variant
-// list, possibly empty; the other kinds carry neither. An absent list never
-// stands for an empty one.
-type jsEntryReportNode struct {
-	Kind     string                  `json:"kind"`
-	Fields   *[]jsEntryReportField   `json:"fields,omitempty"`
-	Variants *[]jsEntryReportVariant `json:"variants,omitempty"`
-}
-
-type jsEntryReportFailure struct {
-	Tag        string               `json:"tag"`
-	Diagnostic bool                 `json:"diagnostic"`
-	Fields     []jsEntryReportField `json:"fields"`
-}
-
-// jsEntryReport lowers the plan to the JavaScript entry's table. A variant
-// is found by its discriminator only where the checked type is an enum, so a
-// record field named `_tag` stays ordinary data.
-func (r *Result) jsEntryReport() string {
-	plan := r.entryReportPlan(nil)
-	fields := func(fields []entryReportField) []jsEntryReportField {
-		out := []jsEntryReportField{}
-		for _, field := range fields {
-			out = append(out, jsEntryReportField{field.name, field.node})
-		}
-		return out
-	}
-	table := struct {
-		Failures []jsEntryReportFailure `json:"failures"`
-		Nodes    []jsEntryReportNode    `json:"nodes"`
-	}{Failures: []jsEntryReportFailure{}, Nodes: []jsEntryReportNode{}}
-	for _, failure := range plan.failures {
-		table.Failures = append(table.Failures, jsEntryReportFailure{failure.tag, failure.diagnostic, fields(failure.fields)})
-	}
-	for _, node := range plan.nodes {
-		lowered := jsEntryReportNode{Kind: node.kind}
-		switch node.kind {
-		case "record":
-			declared := fields(node.fields)
-			lowered.Fields = &declared
-		case "enum":
-			variants := []jsEntryReportVariant{}
-			for _, variant := range node.variants {
-				variants = append(variants, jsEntryReportVariant{variant.jsTag, variant.name, fields(variant.fields)})
-			}
-			lowered.Variants = &variants
-		}
-		table.Nodes = append(table.Nodes, lowered)
-	}
-	data, err := json.Marshal(table)
-	if err != nil {
-		panic(err)
-	}
-	return "const __ef_entryReport = " + string(data) + ";\n"
 }

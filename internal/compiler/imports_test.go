@@ -71,10 +71,11 @@ func TestGoImportGuardrails(t *testing.T) {
 			t.Fatalf("expected %s: %+v", tc.code, r.Diagnostics)
 		}
 	}
-	// JavaScript refuses even an uncalled Go import before host loading.
+	// An unsupported target refuses even an uncalled Go import before host
+	// loading.
 	js := CompileFor(`import go strings "strings" effect fn main() -> void {void}`, "js")
 	if js.Checked || !hasCode(js, "EF110") || js.Timings.ImportMicros != 0 {
-		t.Fatal("JS check attempted a Go import")
+		t.Fatal("an unsupported target attempted a Go import")
 	}
 }
 

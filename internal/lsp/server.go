@@ -66,8 +66,8 @@ type session struct {
 // so do the selected lint rule packs, each bounded by its own limits. lint is
 // the lint configuration loaded at startup; nil is the default one.
 func Serve(target string, lint *lintpacks.Session, in io.Reader, out io.Writer) error {
-	if target != "go" && target != "js" {
-		return fmt.Errorf("LSP target must be go or js")
+	if diagnostic, unsupported := compiler.UnsupportedTarget(target); unsupported {
+		return fmt.Errorf("%s: %s", diagnostic.Code, diagnostic.Message)
 	}
 	s := session{out: out, target: target, lint: lint, documents: make(map[string]document)}
 	defer func() { clear(s.documents); s.bytes = 0 }()

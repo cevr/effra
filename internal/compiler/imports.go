@@ -144,11 +144,7 @@ func (r *Result) loadImports(dir string) {
 	if len(r.Program.Imports) == 0 {
 		return
 	}
-	r.Program.GoOnly = true
-	if r.Target != "go" {
-		r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF110", Message: "Go imports require the Go target"})
-		return
-	}
+	r.Program.NativeHost = true
 	start := time.Now()
 	defer func() { r.Timings.ImportMicros = time.Since(start).Microseconds() }()
 	args := []string{"list", "-deps", "-export", "-json", "--"}

@@ -365,8 +365,7 @@ func serveManaged(address string, server *http.Server, handler func(context.Cont
 	}
 }
 
-// HTTP listen addresses and listener failures are Effra-owned text, the same
-// bytes on Go and JavaScript (internal/compiler/prelude/http.mjs). The
+// HTTP listen addresses and listener failures are Effra-owned text. The
 // address grammar is `host:port`: the port is 0..65535 in decimal, the host
 // is empty (every interface), a name or IPv4 address without a colon, or a
 // bracketed IPv6 address. docs/runtime.md lists the listener failure classes.

@@ -2177,6 +2177,18 @@ func CompileAt(source, target, dir string) *Result {
 	return checkParsed(r, program, dir, source)
 }
 
+// Target is Effra's only compilation target.
+const Target = "go"
+
+// UnsupportedTarget returns the EF110 diagnostic for any target other than
+// Target. The compiler and every adapter that accepts a target report it.
+func UnsupportedTarget(target string) (Diagnostic, bool) {
+	if target == Target {
+		return Diagnostic{}, false
+	}
+	return Diagnostic{Code: "EF110", Message: "unsupported target " + target + "; the only target is " + Target}, true
+}
+
 // parseSource is the parse phase of CompileAt. It returns the result and the
 // parsed program, or a nil program when the target is unsupported or the source
 // has syntax diagnostics: the result is then final.
@@ -2184,8 +2196,8 @@ func parseSource(source, target string) (*Result, *Program) {
 	start := time.Now()
 	hash := sha256.Sum256([]byte(source))
 	r := &Result{SchemaVersion: SemanticSchemaVersion, Revision: hex.EncodeToString(hash[:]), Target: target, Diagnostics: []Diagnostic{}, Symbols: []Symbol{}, TypeProjectionBudget: maxTypeProjectionNodes, TypeProjectionLimits: defaultProjectionLimits, facts: map[*Expr]ExpressionFacts{}, sourceBytes: len(source)}
-	if target != "go" && target != "js" {
-		r.Diagnostics = append(r.Diagnostics, Diagnostic{Code: "EF110", Message: "unsupported target " + target})
+	if diagnostic, ok := UnsupportedTarget(target); ok {
+		r.Diagnostics = append(r.Diagnostics, diagnostic)
 		return r, nil
 	}
 	program, _, comments, diagnostics := parseSyntax(source)
@@ -2615,7 +2627,6 @@ func (c *checker) check() {
 	slices.SortFunc(c.result.BundledInterfaces, func(a, b BundledInterfaceInfo) int { return strings.Compare(a.Module, b.Module) })
 	c.publishCodecs()
 	c.publishEndpoints()
-	c.validateJSDeclarationNames()
 }
 
 // implementsOperation compares an implementation method with its operation up
@@ -2875,68 +2886,6 @@ func (c *checker) providerFunction(p *Provider, f *Function) {
 	c.recordFacts = previousFacts
 }
 
-func (c *checker) validateJSDeclarationNames() {
-	if c.result.Target != "js" {
-		return
-	}
-	reserved := map[string]bool{
-		"as": true, "asserts": true, "async": true, "await": true, "break": true,
-		"case": true, "catch": true, "class": true, "const": true, "continue": true,
-		"debugger": true, "default": true, "delete": true, "do": true, "else": true,
-		"enum": true, "export": true, "extends": true, "finally": true, "for": true,
-		"false": true, "from": true, "function": true, "get": true, "if": true, "implements": true,
-		"import": true, "in": true, "infer": true, "instanceof": true, "interface": true,
-		"is": true, "keyof": true, "let": true, "module": true, "namespace": true,
-		"new": true, "null": true, "number": true, "object": true, "of": true, "package": true, "private": true, "protected": true,
-		"public": true, "readonly": true, "return": true, "satisfies": true, "set": true,
-		"static": true, "string": true, "super": true, "switch": true, "symbol": true, "throw": true, "this": true, "true": true, "try": true,
-		"type": true, "typeof": true, "undefined": true, "unknown": true, "using": true, "var": true,
-		"any": true, "bigint": true, "boolean": true, "never": true, "void": true, "while": true, "with": true, "yield": true,
-	}
-	validateIdentifier := func(name, owner string, span Span) {
-		if reserved[name] {
-			c.diagnostic("EF110", "JavaScript declaration name "+name+" is reserved by TypeScript for "+owner, span)
-		}
-	}
-	occupied := map[string]string{}
-	claim := func(name, owner string, span Span) {
-		if previous, exists := occupied[name]; exists {
-			c.diagnostic("EF110", "JavaScript declaration name "+name+" collides between "+previous+" and "+owner, span)
-			return
-		}
-		occupied[name] = owner
-	}
-	for _, declaration := range c.result.Declarations {
-		if declaration.Kind == "error" {
-			// The raw error name is exported as its payload type alias.
-			validateIdentifier(declaration.Name, "error payload type", declaration.Span)
-			validateIdentifier(declaration.Name+"Error", "error payload declaration", declaration.Span)
-		} else {
-			validateIdentifier(declaration.Name, "data declaration", declaration.Span)
-		}
-		claim(declaration.Name, "data declaration", declaration.Span)
-	}
-	for _, declaration := range c.result.Declarations {
-		if declaration.Kind == "error" {
-			claim(declaration.Name+"Error", "error payload declaration", declaration.Span)
-		}
-	}
-	services := append(append([]*Service{}, builtinServicesFor(c.program)...), c.program.Services...)
-	for _, service := range services {
-		validateIdentifier(service.Name, "service export", service.Span)
-		claim(service.Name+"Requirement", "service requirement declaration", service.Span)
-		claim(service.Name+"Provider", "service provider declaration", service.Span)
-	}
-	for _, provider := range c.program.Providers {
-		validateIdentifier(provider.Name, "provider export", provider.Span)
-	}
-	for _, function := range c.program.Functions {
-		validateIdentifier(function.Name, "function export", function.Span)
-	}
-	for _, codec := range c.program.Codecs {
-		validateIdentifier(codec.Name, "codec witness export", codec.Span)
-	}
-}
 func (c *checker) signature(f *Function) {
 	previousTypes, previousModule := c.typeContext, c.functionModule
 	c.typeContext, c.functionModule = c.templateContext(f.TypeParameters, f.Identity), f.Module
@@ -4529,7 +4478,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 			}
 			t = c.checkedProvider(p, false)
 			if p.Service == "Files" || p.Service == "Runtime" || p.Service == "Foreign" {
-				c.requireGo(e.Span, "native provider "+p.Service)
+				c.markNativeHost()
 			}
 			e.Text = "provider"
 		} else if f := c.namedFunction(e.Name); f != nil {
@@ -4628,7 +4577,7 @@ func (c *checker) expr(e *Expr, env localEnv, inEffect bool) checkedExpression {
 		} else if e.Left.Kind == "member" && e.Left.Left.Kind == "name" {
 			key := e.Left.Left.Name
 			if key == "Files" || key == "Runtime" {
-				c.requireGo(e.Span, "native service "+key)
+				c.markNativeHost()
 			}
 			if e.Left.Left.binding != nil {
 				c.diagnostic("EF103", "a local shadows service "+key, e.Span)
@@ -5552,11 +5501,10 @@ func (c *checker) fiberCall(e *Expr, env localEnv, inEffect bool) bool {
 	return true
 }
 
-func (c *checker) requireGo(span Span, feature string) {
-	c.program.GoOnly = true
-	if c.result.Target != "go" {
-		c.diagnostic("EF110", feature+" is currently implemented only for Go", span)
-	}
+// markNativeHost records that the program uses a native host capability,
+// which only a live test run admits (TestMode).
+func (c *checker) markNativeHost() {
+	c.program.NativeHost = true
 }
 
 // builtinCallback returns a builtin callback contract only where the program

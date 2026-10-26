@@ -90,9 +90,6 @@ func (r *Result) GoSourceSnapshot(origin string, application *GoApplication) (Go
 	if r == nil {
 		return GoSourceSnapshot{}, fmt.Errorf("Go source snapshot requires a compiler result")
 	}
-	if r.Target != "go" {
-		return GoSourceSnapshot{}, fmt.Errorf("Go source snapshot requires the Go target")
-	}
 	if application == nil || application.result != r || application.Plan == nil {
 		return GoSourceSnapshot{}, fmt.Errorf("Go source snapshot requires an application planned from this result")
 	}

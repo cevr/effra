@@ -356,7 +356,6 @@ func TestGraphViewRefusalsAgreeAcrossCLIAndMCP(t *testing.T) {
 		{compiler.GraphRefusalFocus, 1, "layers.ef", []string{"--focus", "function:absent"}, map[string]any{"focus": "function:absent"}},
 		{compiler.GraphRefusalIncompatible, 2, "layers.ef", []string{"--kind", "layers", "--collapse", "x"}, map[string]any{"kind": "layers", "collapse": []any{"x"}}},
 		{compiler.GraphRefusalCollapse, 1, "layers.ef", []string{"--collapse", "function:absent"}, map[string]any{"collapse": []any{"function:absent"}}},
-		{compiler.GraphRefusalTarget, 1, "layers.ef", []string{"--kind", "application", "--target", "js"}, map[string]any{"kind": "application", "target": "js"}},
 		{compiler.GraphRefusalPlan, 1, "layers.ef", []string{"--kind", "application", "--mode", "test"}, map[string]any{"kind": "application", "mode": "test"}},
 		{compiler.GraphRefusalUnchecked, 1, "unchecked.ef", []string{"--kind", "layers"}, map[string]any{"kind": "layers"}},
 		{compiler.GraphRefusalNodeLimit, 1, "wide.ef", []string{"--format", "json"}, map[string]any{"format": "json"}},

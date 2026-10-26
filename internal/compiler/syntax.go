@@ -220,9 +220,6 @@ type Service struct {
 	Name    string
 	Methods []*Function
 	Span    Span
-	// byReference marks a builtin contract admitted only when the program
-	// refers to it, whose providers are retained only through checked use.
-	byReference bool
 	// native lists builtin runtime modules referenced by the service's
 	// operation signatures. Source services leave it empty.
 	native []rt.RuntimeModule
@@ -282,7 +279,7 @@ type Program struct {
 	host                    *hostImports
 	Modules                 []*goModule
 	UsedImports             map[string]bool
-	GoOnly                  bool
+	NativeHost              bool // Go imports, native providers or services: tests need --live
 	Errors                  map[string]Span
 	genericAngles           map[int]bool
 	multiplications         map[int]bool

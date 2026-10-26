@@ -284,9 +284,9 @@ func TestGraphViewApplicationShowsCallbacks(t *testing.T) {
 }
 
 func TestGraphViewApplicationRefusals(t *testing.T) {
-	js := checkedGraphSource(t, applicationModeSource, "js")
+	js := CompileFor(applicationModeSource, "js")
 	_, err := js.GraphView(graphRequest(t, map[string]any{"kind": "application"}))
-	requireGraphRefusal(t, err, GraphRefusalTarget)
+	requireGraphRefusal(t, err, GraphRefusalUnchecked)
 	noTests := checkedGraphSource(t, applicationLayerSource, "go")
 	_, err = noTests.GraphView(graphRequest(t, map[string]any{"kind": "application", "mode": "test"}))
 	requireGraphRefusal(t, err, GraphRefusalPlan)

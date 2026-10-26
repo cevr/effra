@@ -8,8 +8,7 @@ import (
 
 // Entry failure report: the target-neutral text a program entry writes to
 // stderr when main's exit is a failure. docs/design.md ("Entry failure
-// report") is the contract, and the JavaScript entry
-// (internal/compiler/prelude/entry.mjs) renders the same bytes.
+// report") is the contract.
 //
 //	failure: Tag
 //	failure: Tag { field: value, ... }
@@ -205,12 +204,10 @@ func (p EntryReportPlan) value(out *strings.Builder, value any, index int) {
 	out.WriteString("<opaque>")
 }
 
-// QuoteText is the one quoting rule for text in diagnostics and reports,
-// shared byte for byte with the JavaScript runtime (__ef_quoteText): `"` and
-// `\` are escaped, newline, carriage return and tab use their short escapes,
-// other C0 controls and DEL use \u00XX, and every other character is
-// literal. Invalid UTF-8 is replaced by U+FFFD, as JavaScript replaces lone
-// surrogates.
+// QuoteText is the one quoting rule for text in diagnostics and reports:
+// `"` and `\` are escaped, newline, carriage return and tab use their short
+// escapes, other C0 controls and DEL use \u00XX, and every other character
+// is literal. Invalid UTF-8 is replaced by U+FFFD.
 func QuoteText(text string) string {
 	var out strings.Builder
 	out.WriteByte('"')

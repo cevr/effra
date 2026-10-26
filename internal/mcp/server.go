@@ -399,7 +399,7 @@ func writeMCPError(output io.Writer, id json.RawMessage, code int, message strin
 
 func tools() []tool {
 	schema := func(symbol bool) map[string]any {
-		properties := map[string]any{"target": map[string]any{"type": "string", "enum": []string{"go", "js"}, "default": "go"}, "file": map[string]string{"type": "string", "description": "Workspace-relative .ef source file"}, "expectedRevision": map[string]string{"type": "string", "description": "Optional source hash; reject a stale snapshot"}}
+		properties := map[string]any{"target": map[string]any{"type": "string", "enum": []string{compiler.Target}, "default": compiler.Target}, "file": map[string]string{"type": "string", "description": "Workspace-relative .ef source file"}, "expectedRevision": map[string]string{"type": "string", "description": "Optional source hash; reject a stale snapshot"}}
 		properties["expectedProducer"] = map[string]any{"type": "string", "maxLength": 256, "description": "Optional snapshot producer qualifier; reject stale cross-build or cross-process facts"}
 		required := []string{"file"}
 		if symbol {
@@ -779,14 +779,14 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 	if name == "project.describe" {
 		return map[string]any{
 			"schemaVersion": compiler.SemanticSchemaVersion, "compilerVersion": CompilerVersion,
-			"runtimes": map[string]string{"go": "typed lazy closures; managed scopes and fibers; Go standard library", "js": "effect@4.0.1"},
-			"targets":  []string{"go", "js"}, "defaultTarget": "go", "sourceExtension": ".ef", "workspace": root,
+			"runtimes": map[string]string{"go": "typed lazy closures; managed scopes and fibers; Go standard library"},
+			"targets":  []string{compiler.Target}, "defaultTarget": compiler.Target, "sourceExtension": ".ef", "workspace": root,
 			"operations": []string{"project.describe", "code.format", "project.check", "project.diagnostics", "code.inspect", "code.explain", "project.lint", "lint.rules", "code.typeAt", "code.type", "project.graph", "project.tests"}, "scope": "single-file disk snapshots or one explicit source buffer for code.format",
 			"guardrails": map[string]string{
 				"failures": "checked closed rows", "requirements": "checked nominal services",
-				"resourceOwnership":  "Both targets join owned fibers before releasing scope resources; Go File guards closed handles",
+				"resourceOwnership":  "owned fibers join before scope resources are released; Go File guards closed handles",
 				"cancellation":       "cooperative Go context; timeout waits for shutdown; arbitrary foreign calls may delay it",
-				"targetCapabilities": "scope, fork and timeout support Go and JS; Go imports, Files, Runtime and Http require Go (EF110)",
+				"targetCapabilities": "Go is the only target; any other target is EF110",
 				"foreignInterop":     "Go exports supply canonical host types and complete result tuples; nullable values adapt through Option; Foreign required; GoResult preserves partial values and native error identity; context/cancellation metadata are reviewed assertions",
 				"runtimeInspection":  "Go Runtime.inspect: current scope metadata, up to 100 resources/child states; no MCP runtime endpoint",
 				"mutableAliases":     "not implemented", "openRows": "not implemented",
@@ -818,7 +818,7 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 	}
 	target := args.Target
 	if target == "" {
-		target = "go"
+		target = compiler.Target
 	}
 	r := compiler.CompileAt(string(source), target, filepath.Dir(filepath.Join(root, args.File)))
 	if err := r.Qualify(producer.Current()); err != nil {
@@ -1088,8 +1088,8 @@ func decodeArguments(name string, raw json.RawMessage) (arguments, error) {
 			if !ok || name == "project.describe" || name == "lint.rules" || name == "code.format" {
 				return args, fmt.Errorf("invalid tool argument %s", key)
 			}
-			if text != "go" && text != "js" {
-				return args, fmt.Errorf("unsupported target %s", text)
+			if diagnostic, unsupported := compiler.UnsupportedTarget(text); unsupported {
+				return args, fmt.Errorf("%s: %s", diagnostic.Code, diagnostic.Message)
 			}
 			args.Target = text
 		case "expectedRevision":

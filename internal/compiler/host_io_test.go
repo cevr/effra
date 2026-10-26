@@ -442,7 +442,7 @@ func TestHostIOProtocolBindingsAndRefusals(t *testing.T) {
     void
 }`, "js", "../..")
 	if js.Checked || !hasCode(js, "EF110") || js.Timings.ImportMicros != 0 || len(js.Bindings) != 0 {
-		t.Fatalf("JS target admitted Go I/O protocols: %+v", js.Diagnostics)
+		t.Fatalf("an unsupported target admitted Go I/O protocols: %+v", js.Diagnostics)
 	}
 }
 

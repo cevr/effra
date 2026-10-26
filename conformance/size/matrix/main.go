@@ -1,8 +1,8 @@
 // Command matrix runs the size-conformance matrix: raw byte, symbol and
-// dependency receipts for every fixture in conformance/size/fixtures on both
-// targets, an all-source counterfactual of selected fixtures, and the Go and
-// TypeScript/Effect controls in conformance/size/controls, all under one
-// matched toolchain configuration.
+// dependency receipts for every fixture in conformance/size/fixtures, an
+// all-source counterfactual of selected fixtures, and the idiomatic Go
+// controls in conformance/size/controls, all under one matched toolchain
+// configuration.
 //
 // Effra rows are measured by `ef build --receipt`; controls, stripped
 // companions and counterfactuals are measured by the same internal/receipt
@@ -35,7 +35,7 @@ import (
 )
 
 // Schema versions the recorded matrix.
-const Schema = "effra.size-conformance/2"
+const Schema = "effra.size-conformance/3"
 
 type fixture struct {
 	name string
@@ -65,13 +65,12 @@ type control struct {
 	fixture string
 	matched bool
 	goDir   string
-	ts      string
 }
 
 var controls = []control{
-	{name: "minimal", fixture: "minimal", matched: true, goDir: "minimal", ts: "minimal.ts"},
+	{name: "minimal", fixture: "minimal", matched: true, goDir: "minimal"},
 	{name: "minimal-floor", fixture: "minimal", matched: false, goDir: "minimal-floor"},
-	{name: "managed", fixture: "managed", matched: true, goDir: "managed", ts: "managed.ts"},
+	{name: "managed", fixture: "managed", matched: true, goDir: "managed"},
 }
 
 var platformPackages = []string{"crypto/tls", "encoding/json", "net", "net/http", "os/exec"}
@@ -101,32 +100,15 @@ type effraNative struct {
 	AllSource *nativeMeasure `json:"allSourceCounterfactual,omitempty"`
 }
 
-// bundles reports a JavaScript program three ways: its source or emitted
-// module, the minified application with effect external, and the minified
-// deployment with effect inlined. The difference is the bundled Effect
-// runtime the deployment carries.
-type bundles struct {
-	ModuleBytes      int64                                       `json:"moduleBytes"`
-	Application      *receipt.Artifact                           `json:"applicationMinified"`
-	Deployment       *receipt.Artifact                           `json:"deploymentMinified"`
-	DeploymentDelta  int64                                       `json:"deploymentDeltaBytes"`
-	External         []compiler.JSImport                         `json:"externalRuntime,omitempty"`
-	DeclarationBytes int64                                       `json:"declarationBytes,omitempty"`
-	ModuleSHA256     string                                      `json:"moduleSha256,omitempty"`
-	Requirements     map[compiler.ApplicationRequirementKind]int `json:"requirements,omitempty"`
-}
-
 type fixtureRow struct {
 	ExpectedOutput string      `json:"expectedOutput,omitempty"`
 	Go             effraNative `json:"go"`
-	JS             bundles     `json:"js"`
 }
 
 type controlRow struct {
-	Fixture    string        `json:"fixture"`
-	Matched    bool          `json:"matched"`
-	Go         nativeMeasure `json:"go"`
-	TypeScript *bundles      `json:"typescript,omitempty"`
+	Fixture string        `json:"fixture"`
+	Matched bool          `json:"matched"`
+	Go      nativeMeasure `json:"go"`
 }
 
 type matrix struct {
@@ -142,11 +124,6 @@ type identity struct {
 	Dirty      bool               `json:"dirty"`
 	Toolchain  *receipt.Toolchain `json:"toolchain"`
 	StripFlags []string           `json:"stripFlags"`
-	Bun        string             `json:"bun"`
-	Bundle     string             `json:"bundle"`
-	Node       string             `json:"node"`
-	Effect     string             `json:"effect"`
-	TSC        string             `json:"tsc,omitempty"`
 	SymbolTool string             `json:"symbolTool"`
 	SizeMethod string             `json:"sizeMethod"`
 	Fixtures   map[string]string  `json:"fixtures"`
@@ -161,7 +138,7 @@ type runner struct {
 }
 
 func main() {
-	out := flag.String("out", "", "directory for binaries, bundles and full receipts (default: a temporary directory)")
+	out := flag.String("out", "", "directory for binaries and full receipts (default: a temporary directory)")
 	record := flag.String("record", "", "write the matrix JSON here")
 	flag.Parse()
 	if err := run(*out, *record); err != nil {
@@ -171,10 +148,8 @@ func main() {
 }
 
 func run(outDir, record string) error {
-	for _, tool := range []string{"go", "bun", "node"} {
-		if _, err := exec.LookPath(tool); err != nil {
-			return fmt.Errorf("requires %s on PATH", tool)
-		}
+	if _, err := exec.LookPath("go"); err != nil {
+		return fmt.Errorf("requires go on PATH")
 	}
 	root, err := repositoryRoot()
 	if err != nil {
@@ -188,15 +163,10 @@ func run(outDir, record string) error {
 	if outDir, err = filepath.Abs(outDir); err != nil {
 		return err
 	}
-	for _, directory := range []string{"bin", "js", "receipts", "counterfactual", "controls"} {
+	for _, directory := range []string{"bin", "receipts", "counterfactual", "controls"} {
 		if err := os.MkdirAll(filepath.Join(outDir, directory), 0o755); err != nil {
 			return err
 		}
-	}
-	link := filepath.Join(outDir, "node_modules")
-	_ = os.Remove(link)
-	if err := os.Symlink(filepath.Join(root, "node_modules"), link); err != nil {
-		return err
 	}
 	// One matched configuration for every build, measurement and child: the
 	// shared receipt functions read the process environment as well.
@@ -227,9 +197,6 @@ func run(outDir, record string) error {
 		}
 		row.Go.AllSource = measured
 		result.Fixtures[name] = row
-	}
-	if err := r.typecheckControls(); err != nil {
-		return err
 	}
 	for _, c := range controls {
 		measured, err := r.control(c, result.Fixtures[c.fixture].ExpectedOutput)
@@ -394,64 +361,7 @@ func (r runner) fixture(ef string, row fixture) (fixtureRow, error) {
 		nativeMeasure:  nativeMeasure{Dependencies: summarizeDependencies(native.Deps), Binary: native.Binary, Symbols: native.Symbols, Stripped: strippedMeasure},
 	}}
 	measured.Go.Binary.Path = ""
-
-	module := filepath.Join(r.out, "js", row.name+".mjs")
-	jsPath := filepath.Join(r.out, "receipts", row.name+".js.json")
-	if _, err := output(r.command(r.out, ef, "build", source, "--target", "js", "--entry", "-o", module, "--receipt", jsPath)); err != nil {
-		return fixtureRow{}, err
-	}
-	var js receipt.Application
-	if err := readJSON(jsPath, &js); err != nil {
-		return fixtureRow{}, err
-	}
-	bundled, err := r.bundle(module, filepath.Join(r.out, "js", row.name), r.out, row.output)
-	if err != nil {
-		return fixtureRow{}, err
-	}
-	if row.output != "" {
-		if err := r.expect(module, r.command(r.out, "node", module), row.output); err != nil {
-			return fixtureRow{}, err
-		}
-	}
-	bundled.ModuleBytes = js.Module.Bytes
-	bundled.ModuleSHA256 = js.Module.SHA256
-	bundled.DeclarationBytes = js.Decl.Bytes
-	bundled.External = js.External
-	bundled.Requirements = js.Plan.Requirements
-	measured.JS = bundled
 	return measured, nil
-}
-
-// bundle minifies entry twice with bun: with effect external (the
-// application) and with effect inlined (the deployment), and runs the
-// deployment when an output is expected.
-func (r runner) bundle(entry, prefix, directory, want string) (bundles, error) {
-	application := prefix + ".app.min.mjs"
-	deployment := prefix + ".deploy.min.mjs"
-	if _, err := output(r.command(directory, "bun", "build", entry, "--minify", "--target=node", "--external", "effect", "--outfile", application)); err != nil {
-		return bundles{}, err
-	}
-	if _, err := output(r.command(directory, "bun", "build", entry, "--minify", "--target=node", "--outfile", deployment)); err != nil {
-		return bundles{}, err
-	}
-	if want != "" {
-		if err := r.expect(deployment, r.command(directory, "node", deployment), want); err != nil {
-			return bundles{}, err
-		}
-	}
-	app, err := receipt.MeasureFile(application)
-	if err != nil {
-		return bundles{}, err
-	}
-	deploy, err := receipt.MeasureFile(deployment)
-	if err != nil {
-		return bundles{}, err
-	}
-	source, err := receipt.MeasureFile(entry)
-	if err != nil {
-		return bundles{}, err
-	}
-	return bundles{ModuleBytes: source.Bytes, Application: app, Deployment: deploy, DeploymentDelta: deploy.Bytes - app.Bytes}, nil
 }
 
 // allSource rebuilds a fixture's published generation with every runtime
@@ -495,21 +405,6 @@ func (r runner) allSource(name, want string) (*nativeMeasure, error) {
 	return &measured, nil
 }
 
-func (r runner) typecheckControls() error {
-	tsc, err := exec.LookPath("tsc")
-	if err != nil {
-		return nil
-	}
-	args := []string{"--noEmit", "--strict", "--exactOptionalPropertyTypes", "--module", "nodenext", "--moduleResolution", "nodenext", "--target", "es2022", "--lib", "es2022,dom,esnext.disposable", "conformance/size/controls/ts/host.d.ts"}
-	for _, c := range controls {
-		if c.ts != "" {
-			args = append(args, "conformance/size/controls/ts/"+c.ts)
-		}
-	}
-	_, err = output(r.command(r.root, tsc, args...))
-	return err
-}
-
 func (r runner) control(c control, want string) (controlRow, error) {
 	pkg := "./conformance/size/controls/go/" + c.goDir
 	binary := filepath.Join(r.out, "controls", "go-"+c.name)
@@ -523,16 +418,7 @@ func (r runner) control(c control, want string) (controlRow, error) {
 	if err != nil {
 		return controlRow{}, err
 	}
-	row := controlRow{Fixture: c.fixture, Matched: c.matched, Go: measured}
-	if c.ts != "" {
-		source := filepath.Join(r.root, "conformance", "size", "controls", "ts", c.ts)
-		bundled, err := r.bundle(source, filepath.Join(r.out, "controls", "ts-"+c.name), r.root, want)
-		if err != nil {
-			return controlRow{}, err
-		}
-		row.TypeScript = &bundled
-	}
-	return row, nil
+	return controlRow{Fixture: c.fixture, Matched: c.matched, Go: measured}, nil
 }
 
 func (r runner) identity() (identity, error) {
@@ -554,25 +440,6 @@ func (r runner) identity() (identity, error) {
 		return result, err
 	}
 	result.StripFlags = receipt.StripFlags
-	if result.Bun, err = text("bun", "--version"); err != nil {
-		return result, err
-	}
-	result.Bundle = "bun build --minify --target=node [--external effect]"
-	if result.Node, err = text("node", "--version"); err != nil {
-		return result, err
-	}
-	var effect struct {
-		Version string `json:"version"`
-	}
-	if err := readJSON(filepath.Join(r.root, "node_modules", "effect", "package.json"), &effect); err != nil {
-		return result, err
-	}
-	result.Effect = effect.Version
-	if tsc, err := exec.LookPath("tsc"); err == nil {
-		if result.TSC, err = text(tsc, "--version"); err != nil {
-			return result, err
-		}
-	}
 	result.SymbolTool = "go tool nm -size -type, run from the module that built the executable"
 	result.SizeMethod = "file size in bytes; stripped companions add only " + strings.Join(receipt.StripFlags, " ")
 	if result.Fixtures, err = digests(filepath.Join(r.root, "conformance", "size", "fixtures")); err != nil {
@@ -616,10 +483,10 @@ func readJSON(path string, value any) error {
 
 func summarize(result matrix, out string) {
 	fmt.Printf("size conformance: %d fixtures, %d controls, %d all-source counterfactuals\n", len(result.Fixtures), len(result.Controls), len(counterfactual))
-	fmt.Printf("%-22s%11s%11s%6s%11s%11s%11s\n", "row", "go bytes", "stripped", "deps", "js module", "js app.min", "js deploy")
+	fmt.Printf("%-22s%11s%11s%6s\n", "row", "go bytes", "stripped", "deps")
 	for _, row := range fixtures {
 		measured := result.Fixtures[row.name]
-		fmt.Printf("%-22s%11d%11d%6d%11d%11d%11d\n", row.name, measured.Go.Binary.Bytes, measured.Go.Stripped.Bytes, measured.Go.Dependencies.Count, measured.JS.ModuleBytes, measured.JS.Application.Bytes, measured.JS.Deployment.Bytes)
+		fmt.Printf("%-22s%11d%11d%6d\n", row.name, measured.Go.Binary.Bytes, measured.Go.Stripped.Bytes, measured.Go.Dependencies.Count)
 		if all := measured.Go.AllSource; all != nil {
 			fmt.Printf("%-22s%11d%11d%6d\n", "  all-source", all.Binary.Bytes, all.Stripped.Bytes, all.Dependencies.Count)
 		}
@@ -631,9 +498,6 @@ func summarize(result matrix, out string) {
 			label += " (unmatched)"
 		}
 		fmt.Printf("%-22s%11d%11d%6d\n", label, measured.Go.Binary.Bytes, measured.Go.Stripped.Bytes, measured.Go.Dependencies.Count)
-		if ts := measured.TypeScript; ts != nil {
-			fmt.Printf("%-22s%11s%11s%6s%11d%11d%11d\n", "ts "+c.name, "", "", "", ts.ModuleBytes, ts.Application.Bytes, ts.Deployment.Bytes)
-		}
 	}
 	fmt.Println("out:", out)
 }
