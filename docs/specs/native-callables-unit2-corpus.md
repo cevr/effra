@@ -1,5 +1,7 @@
 # Native callable source corpus
 
+> **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
+
 Proposed finite Unit 2 syntax, retained before implementation. These examples are acceptance inputs, not a claim that the base compiler admits them. Ordinary calls do not supply row arguments. Library authors name finite row parameters using existing `raises` and `uses` vocabulary.
 
 The service-composition pattern preserves callback execution rows:
@@ -41,7 +43,7 @@ Finite row parameters are argument-driven. Several callbacks sharing a row param
 
 Ownership controls pair a callback returning its borrowed File input with one acquiring a new File under the invocation owner. They pass through multiple forwarding helpers, declaration orders and conditional callback choices. Unresolved callback results retain a deferred relation or conservative potential ownership; they cannot become harmless unknown. Scoped helpers may reject unresolved results conservatively. Record/provider placements must preserve complete contracts or diagnose explicitly.
 
-Verification uses Compile/TypeAt/Find, actual Go and JS execution, and actual CLI/MCP inspection. Existing unsupported-source controls remain independent from admitted-source public projection refusal. No runtime factory/invoke optimization or performance claim belongs to this unit.
+Verification uses Compile/TypeAt/Find, actual Go execution, and actual CLI/MCP inspection. Existing unsupported-source controls remain independent from admitted-source public projection refusal. No runtime factory/invoke optimization or performance claim belongs to this unit.
 
 The row slice admits up to eight explicitly named `raises`/`uses` parameters on module functions. Each inferred callback row contains at most one variable; repeated uses collect the least union of actual argument rows. Distinct helpers may rename their row parameters while forwarding callbacks. Variables must occur in a direct callback argument row. Module function application infers them; first-class polymorphic functions and abstract row subtraction diagnose `EF125`. Closed recovery and provision retain their existing behavior. Canonical row tables expose qualified variable labels with their name, kind, declaring function and span, and application facts expose the inferred row bindings. Public projection limits charge these fields before materialization. Go erases row parameters from executable function signatures; JS declarations retain named generic error and service types.
 

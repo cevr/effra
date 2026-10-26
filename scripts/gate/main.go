@@ -51,8 +51,8 @@ type Step struct {
 	// cache, the step is cheaper than hashing, or it reads inputs no digest
 	// here captures, such as Git history.
 	Inputs *Inputs
-	// ToolEnv names executables the step's own cache cannot see, such as the
-	// JavaScript tools Go tests spawn. Their fingerprints, with the environment
+	// ToolEnv names executables the step's own cache cannot see, such as git
+	// and sh, which Go tests spawn. Their fingerprints, with the environment
 	// they and the Go programs a test runs read (testenv.Names, which
 	// include goRuntimeEnvironment), reach the step as one digest in
 	// EFFRA_TOOL_VERSIONS; a test that reads it keys Go's test cache on it.
@@ -70,24 +70,13 @@ type Inputs struct {
 	Tools []string
 	// Env names environment variables whose values are inputs.
 	Env []string
-	// Installed names directories outside Git's view, such as an installed
-	// node_modules, whose contents are an input: every file's path,
-	// permissions and content and every symlink's target, following links
-	// as Node and Bun resolve them. An absent directory is a distinct input.
+	// Installed names directories a step walks on disk itself, such as a
+	// committed snapshot, whose contents are an input, files Git ignores
+	// included: every file's path, permissions and content and every
+	// symlink's target, following links (installedDigest). An absent
+	// directory is a distinct input. Each is digested once per run, because
+	// no step writes it.
 	Installed []string
-	// Generated names files or directories that a step this one Needs
-	// writes during the run, such as emitted artifacts. Each is digested
-	// like Installed, but when this step's key is computed: Installed trees
-	// are digested once per run because nothing writes them.
-	Generated []string
-	// Trees names directories a step walks on disk itself, so every entry
-	// there is an input, files Git ignores included. Each is digested like
-	// Generated, when this step's key is computed, and a link out of it into
-	// the repository is followed. TreeExclude names repository paths under
-	// them that are not inputs: trees declared separately, and directories
-	// the step empties before it reads them.
-	Trees       []string
-	TreeExclude []string
 }
 
 type outcome int
@@ -165,14 +154,7 @@ func main() {
 		}
 		return
 	}
-	// The first line states whether the README comparison program is
-	// strictly type-checked; TestReadmeSmoke skips that check without tsc.
-	if tsc, err := exec.LookPath("tsc"); err != nil {
-		fmt.Fprintln(os.Stderr, "typescript: unchecked (no tsc on PATH); the README comparison program is not strictly type-checked")
-	} else {
-		fmt.Printf("typescript: strict (%s)\n", tsc)
-	}
-	// The second line binds the log to the checkout it checked. A dirty
+	// The first line binds the log to the checkout it checked. A dirty
 	// checkout still runs, and says so.
 	identity, err := checkoutIdentity(root)
 	if err != nil {
@@ -261,22 +243,12 @@ func (g *gate) run(out io.Writer) int {
 			}
 		}
 	}
-	// Digest the test dependency trees while files load and early steps run;
-	// the first Go test step then finds the digest ready.
-	// The prefetches below are joined before run returns, so no digest or
-	// fingerprint work outlives the run that started it.
-	var prefetch sync.WaitGroup
-	defer prefetch.Wait()
-	for _, step := range g.steps {
-		if len(step.ToolEnv) > 0 {
-			for _, dir := range testInstalled {
-				prefetch.Go(func() { g.installed(dir) })
-			}
-			break
-		}
-	}
 	// Start every tool fingerprint while files load; each is computed once
 	// per run, so a step that names a tool finds it ready or waits for it.
+	// The prefetches are joined before run returns, so no fingerprint work
+	// outlives the run that started it.
+	var prefetch sync.WaitGroup
+	defer prefetch.Wait()
 	prefetched := map[string]bool{}
 	for _, step := range g.steps {
 		tools := step.ToolEnv
@@ -404,10 +376,9 @@ func (g *gate) execute(step *Step) *result {
 const gcPercent = "400"
 
 // toolDigest identifies, for a step's own cache, the tools it names in
-// ToolEnv, the whole environment a Go test step receives (testenv.Names,
+// ToolEnv and the whole environment a Go test step receives (testenv.Names,
 // whose values the tools and the Go programs a test runs may read whether
-// or not they were set when a result was cached), and the installed trees
-// they load.
+// or not they were set when a result was cached).
 func (g *gate) toolDigest(step *Step) string {
 	digest := sha256.New()
 	for _, tool := range step.ToolEnv {
@@ -420,23 +391,13 @@ func (g *gate) toolDigest(step *Step) string {
 		value, set := stepVariable(name)
 		fmt.Fprintf(digest, "env\x00%s\x00%t\x00%s\x00", name, set, value)
 	}
-	for _, dir := range testInstalled {
-		fmt.Fprintf(digest, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
-	}
 	return hex.EncodeToString(digest.Sum(nil))[:16]
 }
 
 // stepEnvironment is the environment every step runs with: the caller's,
-// without the variables that would select an unkeyed executable, and with
-// the gate's collector target unless the caller sets one.
+// with the gate's collector target unless the caller sets one.
 func stepEnvironment() []string {
-	var environment []string
-	for _, entry := range os.Environ() {
-		name, _, _ := strings.Cut(entry, "=")
-		if !slices.Contains(unpinnedToolEnvironment, name) {
-			environment = append(environment, entry)
-		}
-	}
+	environment := os.Environ()
 	if _, set := os.LookupEnv("GOGC"); !set {
 		environment = append(environment, "GOGC="+gcPercent)
 	}
@@ -592,26 +553,6 @@ func (g *gate) key(step *Step) (string, error) {
 	for _, dir := range inputs.Installed {
 		fmt.Fprintf(hash, "installed\x00%s\x00%s\x00", dir, g.installed(dir))
 	}
-	for _, name := range inputs.Generated {
-		digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(name)), g.root, false)
-		if err != nil {
-			return "", fmt.Errorf("digest generated %s: %w", name, err)
-		}
-		fmt.Fprintf(hash, "generated\x00%s\x00%s\x00", name, digest)
-	}
-	for _, tree := range inputs.Trees {
-		var skip []string
-		for _, excluded := range inputs.TreeExclude {
-			if relative, ok := strings.CutPrefix(excluded, strings.TrimSuffix(tree, "/")+"/"); ok {
-				skip = append(skip, strings.TrimSuffix(relative, "/"))
-			}
-		}
-		digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(tree)), g.root, true, skip...)
-		if err != nil {
-			return "", fmt.Errorf("digest tree %s: %w", tree, err)
-		}
-		fmt.Fprintf(hash, "tree\x00%s\x00%q\x00%s\x00", tree, skip, digest)
-	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
@@ -625,7 +566,7 @@ func (g *gate) installed(dir string) string {
 	if digest, ok := g.installedDigests[dir]; ok {
 		return digest
 	}
-	digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(dir)), g.root, false)
+	digest, err := installedDigest(filepath.Join(g.root, filepath.FromSlash(dir)), g.root)
 	if err != nil {
 		// An unreadable tree never matches a recorded pass.
 		digest = fmt.Sprintf("error:%v:%d", err, time.Now().UnixNano())
@@ -636,14 +577,10 @@ func (g *gate) installed(dir string) string {
 
 // installedDigest hashes a tree's contents, following symbolic links (each
 // directory once, by its resolved path) and hashing files concurrently. A
-// link from an installed tree back into the repository, such as a workspace
-// package, contributes only its target: a step whose outcome depends on the
-// files there declares them, through Paths or, when it reads files Git
-// ignores, Trees. With followRepository, as for a tree input, the walk
-// follows such a link too, so editing its target changes the digest. skip
-// names paths relative to root that the walk leaves out. A file contributes
-// its keyed permission bits.
-func installedDigest(root, repository string, followRepository bool, skip ...string) (string, error) {
+// link from an installed tree back into the repository contributes only its
+// target: a step whose outcome depends on the files there declares them
+// through Paths. A file contributes its keyed permission bits.
+func installedDigest(root, repository string) (string, error) {
 	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
 		return "absent", nil
 	}
@@ -665,9 +602,6 @@ func installedDigest(root, repository string, followRepository bool, skip ...str
 	visited := map[string]bool{}
 	var walk func(relative, name string) error
 	walk = func(relative, name string) error {
-		if slices.Contains(skip, relative) {
-			return nil
-		}
 		info, err := os.Lstat(name)
 		if err != nil {
 			return err
@@ -683,7 +617,7 @@ func installedDigest(root, repository string, followRepository bool, skip ...str
 				entries = append(entries, "dangling\x00"+relative)
 				return nil
 			}
-			if !followRepository && within(resolved, resolvedRepository) && !within(resolved, resolvedRoot) {
+			if within(resolved, resolvedRepository) && !within(resolved, resolvedRoot) {
 				return nil
 			}
 			if info, err = os.Stat(name); err != nil {

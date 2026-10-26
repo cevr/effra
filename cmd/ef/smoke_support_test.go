@@ -25,9 +25,8 @@ import (
 // package's test CLI in a private workspace instead.
 
 // smokeWorkspace returns a temporary workspace holding copies of the named
-// repository files and directories (relative to the repository root), with
-// node_modules linked to the pinned install, so no smoke writes into the
-// repository or sees another's files. Go's test cache sees the copies and,
+// repository files and directories (relative to the repository root), so no
+// smoke writes into the repository or sees another's files. Go's test cache sees the copies and,
 // through observation (testinputs.Main), everything the CLI reads.
 func smokeWorkspace(t *testing.T, paths ...string) string {
 	t.Helper()
@@ -66,13 +65,6 @@ func smokeWorkspace(t *testing.T, paths ...string) string {
 		if err != nil {
 			t.Fatalf("copy %s into the smoke workspace: %v", path, err)
 		}
-	}
-	modules := filepath.Join(root, "node_modules")
-	if _, err := os.Stat(modules); err != nil {
-		t.Fatalf("pinned JavaScript packages: %v", err)
-	}
-	if err := os.Symlink(modules, filepath.Join(workspace, "node_modules")); err != nil {
-		t.Fatal(err)
 	}
 	return workspace
 }

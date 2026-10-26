@@ -47,7 +47,7 @@ func pipeCorpus(t *testing.T) []pipeCorpusSource {
 			if err != nil {
 				return err
 			}
-			if entry.IsDir() && (entry.Name() == "node_modules" || entry.Name() == ".git" || entry.Name() == "upstream") {
+			if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == "upstream") {
 				return filepath.SkipDir
 			}
 			switch {

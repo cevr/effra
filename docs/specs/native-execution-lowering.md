@@ -1,6 +1,8 @@
 # Direct native execution and build cost
 
-Status: authorized performance follow-up, not an implemented optimization. The [retained backend diagnostic](../research/generated-go-build-cost.md) separates a 47.754-second Go build from a 3.894-millisecond executable run for 1024 sequential managed operations. A separate compiler profile attributes 77.61% cumulative sampled CPU to `ir.Reassigned`. These shared-host observations identify a lowering experiment; they do not establish a comparative speedup or a cold-build baseline. Native acceptance uses optimized idiomatic Go with the same contract; JS acceptance pursues every material measurable lowering while preserving the pinned default ABI and userland runtime contract.
+> **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
+
+Status: authorized performance follow-up, not an implemented optimization. The [retained backend diagnostic](../research/generated-go-build-cost.md) separates a 47.754-second Go build from a 3.894-millisecond executable run for 1024 sequential managed operations. A separate compiler profile attributes 77.61% cumulative sampled CPU to `ir.Reassigned`. These shared-host observations identify a lowering experiment; they do not establish a comparative speedup or a cold-build baseline. Native acceptance uses optimized idiomatic Go with the same contract and pursues every material measurable lowering while preserving the userland runtime contract.
 
 The canonical function model must distinguish constructing a deferred recipe, forwarding that value, and executing it. Use that distinction to avoid repeated recipe-factory creation followed by immediate invocation in native code when the compiler knows the callee and the executed contract. One candidate is a direct execution entry shared with a thin lazy recipe constructor. Unknown function values, stored recipes and combinators retain their required dynamic execution path. A general helper boundary is also a valid measured alternative; no operation-specific benchmark shortcut is authorized.
 
@@ -43,18 +45,18 @@ emitted ordered `if` branches uniformly. That archived baseline remains
 separate from the current emitter carried from accepted LOW donor
 `0a1c8b4768f3d82475d39f2ab0f5ee4d22259cb0`.
 
-The current JavaScript [`jsMatchStatements`](../../internal/compiler/emit.go#L757)
+The removed JavaScript [`jsMatchStatements`](https://github.com/cevr/effra/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go#L813)
 path evaluates each subject once in source order and keeps branches lazy.
-[`jsCanSwitchMatch`](../../internal/compiler/emit.go#L830) admits a tag `switch`
+[`jsCanSwitchMatch`](https://github.com/cevr/effra/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go#L886) admits a tag `switch`
 only for checked eligible single-subject plans with explicit, non-total variant
 cells. Product matches, total cells and other general plans retain the ordered
 condition chain; constrained cells compare tags and wholly total arms use a
-`true` condition. At [discarded, returned and admitted self-tail sites](../../internal/compiler/emit.go#L489),
+`true` condition. At [discarded, returned and admitted self-tail sites](https://github.com/cevr/effra/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go),
 `if` and `match` emit direct statements: discarded branches continue with the
 following statement, while tail branches return, fail or continue an admitted
 self-tail loop. Expression-valued subpositions retain their value-producing
-`yield* Effect.gen` or pure IIFE wrapper ([`jsExpr`](../../internal/compiler/emit.go#L676),
-[`jsMatch`](../../internal/compiler/emit.go#L742)). The outer automatic scope and
+`yield* Effect.gen` or pure IIFE wrapper ([`jsExpr`](https://github.com/cevr/effra/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go#L606),
+[`jsMatch`](https://github.com/cevr/effra/blob/9e80874af13a23858fb674a0a83d66fe20fe1e79/internal/compiler/emit.go#L798)). The outer automatic scope and
 explicit scope/cleanup boundaries remain, along with the pinned default
 Effect-compatible JS ABI. These are current emitted shapes, not measured
 allocation reductions or speedups. Further dispatch and generated/specialized
@@ -64,7 +66,7 @@ semantics and lifecycle laws.
 Deliver after the [ordinary function/interface seam](language-abstractions.md), in compiling and gated units:
 
 1. Retain an exact current baseline: source, compiler artifact, emitted files, executable, toolchain, commands, cache policy, host observations and separate frontend/emission/backend/execution timings. Use the long-body fixture (1024 straight-line signals, retired from the gated test at `0170be3` and preserved at `f4c16b05afe931706f6afc58842345fb87cb743b:internal/compiler/causal_test.go` as `TestSchedulerDrainsLongManagedContinuationAcrossTargets`), a small equivalent case, many short functions, stored and forwarded recipes, provider/catch/timeout/fork cases, and an ordinary managed server. Preserve historical receipts rather than replacing their source spelling or timings.
-2. Implement the general lowering selected by source and profile evidence. Add focused semantic regressions that distinguish construction from execution and cover the obligations above on Go and JavaScript. For JavaScript, measure each material admitted lowering/specialization candidate, including match dispatch and a generated effect-runtime path where applicable; retaining the pinned ABI and userland contract is mandatory. Check emitted dependencies and executable size alongside build cost; a faster compiler is not permission to retain unused standard-library modules.
+2. Implement the general lowering selected by source and profile evidence. Add focused semantic regressions that distinguish construction from execution and cover the obligations above on Go. For JavaScript, measure each material admitted lowering/specialization candidate, including match dispatch and a generated effect-runtime path where applicable; retaining the pinned ABI and userland contract is mandatory. Check emitted dependencies and executable size alongside build cost; a faster compiler is not permission to retain unused standard-library modules.
 3. Measure old/new on matched source and toolchain with explicitly controlled cold, warm and edit scenarios. Distinguish frontend-only work, backend compilation, linking and execution. Compare a handwritten Go control with the same runtime operations and dependencies where that isolates lowering cost. Retain emitted source and raw repeated samples, including regressions. Profile again to show whether the identified hotspot changed. Admit no performance result while competing builds contaminate the comparison.
 
 Acceptance requires identical observable conformance, full gates, race checks for changed ownership/runtime paths, and independently reviewed emitted-code behavior. The problematic general code shape needs a repeatable build-cost improvement. Each accepted lowering candidate separately needs a repeatable matched improvement without unexplained regressions in its controls. Native Go must meet or exceed optimized same-contract Go before a native performance claim. JS must retain receipts for every material candidate and its cold/warm engine behavior; if no candidate improves matched cost, retain the measurement and leave the path unresolved. Continue investigating rather than claiming success from a smaller fixture, disabled optimizer, removed checks or a longer watchdog. Public performance statements name the measured stage and workload. General incremental package checking and host-import session caching remain separate work. Benchmark execution remains last under the measurement ledger after functional and lifecycle gates.

@@ -1,5 +1,7 @@
 # Runtime-independent machine plans and providers
 
+> **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
+
 Status: owner-directed design, 2026-10-08; the contract is specified here but is not implemented language or runtime support. A [draft plan interface](#draft-plan-interface-2026-10-09) against the checked plan was added on 2026-10-09. The machine declaration and lifecycle laws remain in [checked state machines](state-machines.md). This document defines the boundary between their checked plan and an ordinary userland runtime provider.
 
 ## Boundary
@@ -130,7 +132,7 @@ The units remain independently reviewable and have no cyclic ownership:
 | Unit | Owns | Does not claim |
 | --- | --- | --- |
 | Declaration and checking | State/event declarations, callable rows, finite transition checking and diagnostics | Runtime execution or provider choice |
-| Plan lowering | Provider-independent canonical plan representation for Go/JS and inspection | A builtin machine engine |
+| Plan lowering | Provider-independent canonical plan representation for Go and inspection | A builtin machine engine |
 | Provider contract | Typed plan/provider boundary and negative controls | A completed provider or lifecycle conformance |
 | First provider | Planned Effra provider using the shared owned actor core for execution, admission and cleanup laws | A delivered provider, universal provider behavior or external transactions |
 | Cross-provider conformance | Two unrelated programs on two providers with unchanged source/compiler selection | Durability, exactly-once delivery or rollback |

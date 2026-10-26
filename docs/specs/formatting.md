@@ -1,10 +1,12 @@
 # Canonical Effra formatting
 
+> **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
+
 Status: pure formatter core integrated at45b43d2 and CLI/MCP adapters at e2d6161, 2026-10-06. `ef fmt` and read-only MCP `code.format` share the syntax-only formatter; twelve authored examples are adopted and checked by the gate at19a450b. LSP `textDocument/formatting` adapts the same formatter to versioned editor buffers (2026-10-07; [adapter profile](../lsp.md#document-formatting)), pending independent review. Formatting keeps Go-like predictability: one style per formatter version, no configurable indentation, quote style or plugin-defined layout.
 
 ## Syntax and preservation
 
-Format `.ef` directly using the compiler lexer/parser and a comment-preserving syntax representation. Do not format generated Go/JavaScript or reconstruct source from semantic inspection. The current Program groups declarations by kind and loses interleaving; extend the shared syntax representation to retain lexical declaration order and comment attachment rather than printing those grouped slices. Keep the printer separate from checking and lowering.
+Format `.ef` directly using the compiler lexer/parser and a comment-preserving syntax representation. Do not format generated Go or reconstruct source from semantic inspection. The current Program groups declarations by kind and loses interleaving; extend the shared syntax representation to retain lexical declaration order and comment attachment rather than printing those grouped slices. Keep the printer separate from checking and lowering.
 
 Formatting requires valid supported syntax, not valid types, resolved imports, provided services or an entry point. It must not load host packages, execute effects, start custom lint packs, build a backend or contact the network. Syntax errors and unsupported syntax produce diagnostics with no replacement text or file writes. Source line endings support LF and CRLF; a standalone raw CR receives the shared lexer diagnostic rather than being silently rewritten or reinterpreted. Escaped `\r` in a string remains literal content. Initial whole-document formatting does not promise recovery or range formatting for incomplete syntax.
 

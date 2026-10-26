@@ -43,8 +43,7 @@ Usage:
   scripts/ownership_sweep.py --base BIN --head BIN --erased BIN --dump DIR [--extra DIR ...] [--expect FILE]
 (--extra and --expect default to internal/compiler/testdata/ownership_sweep) [--jobs N]
 
-DIR holds programs.json (see scripts/ownership_truth.py) and a node_modules link
-for JS runs. --extra adds every *.ef file below a directory (hand probes,
+DIR holds programs.json (see scripts/ownership_truth.py). --extra adds every *.ef file below a directory (hand probes,
 examples). Exit status is 1 when there is a regression or an unsound program.
 """
 import argparse
@@ -98,19 +97,14 @@ def main():
     work = os.path.join(a.dump, "sweep")
     os.makedirs(tmp, exist_ok=True)
     os.makedirs(work, exist_ok=True)
-    link = os.path.join(a.dump, "node_modules")
-    if os.path.exists(link) and not os.path.exists(os.path.join(work, "node_modules")):
-        os.symlink(os.path.realpath(link), os.path.join(work, "node_modules"))
     corpus = []
     for r in json.load(open(os.path.join(a.dump, "programs.json"))):
         path = os.path.join(work, r["set"] + "__" + r["name"].replace("@", "_") + ".ef")
         open(path, "w").write(r["source"])
-        corpus.append((r["set"] + "/" + r["name"], path, {t: r[t] for t in ("go", "js") if t in r}))
+        corpus.append((r["set"] + "/" + r["name"], path, {t: r[t] for t in ("go",) if t in r}))
     fixture = os.path.join(os.path.realpath(a.dump), "fixture.txt")
     for extra in a.extra:
         for root, _, files in os.walk(extra):
-            if "node_modules" in root:
-                continue
             for f in sorted(files):
                 if f.endswith(".ef"):
                     source = os.path.join(root, f)
@@ -118,7 +112,7 @@ def main():
                     # A program names the fixture file as @FIXTURE@.
                     path = os.path.join(work, "extra__" + key.replace(os.sep, "_"))
                     open(path, "w").write(open(source).read().replace("@FIXTURE@", fixture))
-                    corpus.append(("extra/" + key, path, {"go": None, "js": None}))
+                    corpus.append(("extra/" + key, path, {"go": None}))
 
     corpus_targets = {key: targets for key, _, targets in corpus}
     expect = json.load(open(a.expect)) if a.expect else {}
@@ -141,11 +135,11 @@ def main():
         decided = list(pool.map(one, corpus))
     different = []
     for row, path in decided:
-        for target in [t for t in ("go", "js") if t in row]:
+        for target in [t for t in ("go",) if t in row]:
             base, head = row[target]
             if bool(base) != bool(head) and "ERR" not in base + head:
                 different.append((row["key"], path, target, bool(base), corpus_targets[row["key"]][target]))
-    skipped = sorted({row["key"] + " [" + t + "]" for row, _ in decided for t in ("go", "js") if t in row and "ERR" in row[t][0] + row[t][1]})
+    skipped = sorted({row["key"] + " [" + t + "]" for row, _ in decided for t in ("go",) if t in row and "ERR" in row[t][0] + row[t][1]})
     print(f"{len(decided)} programs, {len(different)} decisions differ, {len(skipped)} skipped as ill-typed or unsupported on a target")
     for item in skipped:
         print(f"skipped      {item}")

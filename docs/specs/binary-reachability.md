@@ -1,5 +1,7 @@
 # Small executables and reachable library code
 
+> **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
+
 Status: owner-established north star and authorized implementation requirement, 2026-10-06. This is a delivery contract, not a claim about the current prototype's binary size.
 
 ## Outcome
@@ -17,7 +19,7 @@ Keep language guarantees intact: size optimizations cannot remove cancellation c
 - Lower statically resolved fluent calls to ordinary functions. Do not create a universal runtime object, method registry, reflective dispatch table or blanket init solely to support fluent syntax. This requirement does not introduce fluent syntax by itself.
 - Keep conservative roots explicit when dynamic/foreign behavior needs them. Never drop callable behavior merely because a closed-world walk cannot see a call. Diagnose unsupported behavior or retain the documented finite implementation set; do not quietly retain the whole library as a default fallback.
 - Use module/contract identity to share reusable codec/runtime implementations rather than copying them at every call site. Generic specialization needs code-size evidence as well as checking-time bounds.
-- The JS target should preserve tree-shakable module boundaries and static imports. Report emitted module size, bundled/minified application size and external runtime dependencies separately; a tiny wrapper with an uncounted Effect dependency is not a small complete deployment.
+- Report emitted size and external runtime dependencies separately; a tiny wrapper with an uncounted runtime dependency is not a small complete deployment. (Until 2026-10-26 the JS target also had to preserve tree-shakable module boundaries and static imports.)
 
 Abstraction retention is part of this reachability contract. Compare an Effra
 candidate with semantically equivalent explicit Go and TypeScript/Effect

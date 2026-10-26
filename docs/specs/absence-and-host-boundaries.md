@@ -1,5 +1,7 @@
 # Absence without nil language values
 
+> **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
+
 Owner requirement, 2026-10-06: do not represent nil in Effra. This contract also excludes a bare null language value, nullable ordinary types and observable uninitialized fields. It sharpens [generic data](language-abstractions.md), [Go protocols](go-protocol-interop.md) and future TypeScript interop. It does not prohibit target runtime internals, protocol JSON null or explicitly tagged wire data.
 
 ## Ordinary values

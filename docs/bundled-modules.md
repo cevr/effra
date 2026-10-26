@@ -75,13 +75,12 @@ fn label(count: i64) -> string {
 `I64.format` is pure and total. `I64.parse` is an effect operation: text must
 match Go's base-10 grammar `[+-]?[0-9]+` (leading zeros admitted, no
 whitespace, prefixes or separators) and fit the signed 64-bit range. Syntax is
-classified before range on both targets, and the failure message is
+classified before range, and the failure message is
 `invalid i64 syntax` or `i64 out of range`; it never echoes the input. Both
 members have ordinary source signatures in the distribution, and only their
 bodies are compiler-owned operations, so inspection, rows and interface
 summaries treat them as ordinary bundled functions. Native output imports
-`strconv` and JS output includes a helper only for the operations an
-application reaches. There are no implicit `i64`/`string` conversions; see
+`strconv` only when an application reaches one of the operations. There are no implicit `i64`/`string` conversions; see
 [portable i64 arithmetic](research/numeric-arithmetic.md).
 
 ## Structural JSON codecs
@@ -128,13 +127,7 @@ module only through an executed direction, and a transformed plan's
 generated writer only through an executed encode direction. Decoding runs
 on the plan; encoding runs the plan's generated writer, one Go function per
 record, union and transform node, which reads the value in place and calls
-each witness's encode function directly with its typed domain value. A generated JS entry follows the
-same selection: it compiles one codec per plan an executed direction reaches
-and includes the shared engine once, only when such a plan exists, so an idle
-entry has no witness and no engine and an encode-only entry omits the decode
-witness. A library surface roots every direction of every witness: it exports
-each witness as a frozen `{ decode, encode }` object and carries the engine
-once whenever it derives any codec. Arrays, payload-failure codecs, error
+each witness's encode function directly with its typed domain value. Arrays, payload-failure codecs, error
 accumulation and stricter excess-property profiles are not yet supported.
 
 ### Transformed witnesses
@@ -243,7 +236,7 @@ with the witness, child node, step index and both function identities;
 structural nodes under a `with` scope have a scoped identity, so equal
 scopes share a plan. [`examples/codec-transforms.ef`](../examples/codec-transforms.ef)
 exercises pure, normalizing, refining and effectful witnesses, nested
-composition and a configuration caller on Go and JS.
+composition and a configuration caller.
 
 ## Machine decisions (removed)
 

@@ -13,7 +13,7 @@ Host: shared exe workbox, 16 cores, load average 11–14 during the runs; go1.27
 The acceptance and gate logs are in `/home/exedev/.cache/baton/wf10/sketch-proto/accept-r1.log` and `gate-r1.log` to `gate-r3.log`.
 
 The gate failure is independent of this change, which touches only `prototypes/sketch9/`:
-- r1: the worktree had no `conformance/framework-ports/ports/node_modules`. A hard-link copy from the warm source fixed that (the lockfile is identical).
+- r1: the worktree had no `node_modules` copy in the then-present framework-port leaf (removed 2026-10-26). A hard-link copy from the warm source fixed that (the lockfile is identical).
 - r3: `check-references.mjs` requires Bun 1.4.3, and the host now has 1.4.4.
 
 The owner then decided to remove JS interop and that version requirement (plan.md, js-removal). This branch re-gates after that change reaches main.

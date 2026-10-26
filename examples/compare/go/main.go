@@ -1,6 +1,7 @@
 // Command checkout is the checkout example in plain Go, for the README comparison.
 // The gate vets it with the rest of the module, and TestReadmeSmoke (cmd/ef) runs it and
-// compares its output with the Effra and TypeScript versions.
+// compares its output with the Effra version. checkout.ts beside it is text
+// for the README comparison only; nothing runs it.
 package main
 
 import (

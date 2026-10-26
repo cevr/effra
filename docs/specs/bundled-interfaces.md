@@ -1,6 +1,8 @@
 # Bundled interfaces and initialized witnesses
 
-The compiler distributes finite `.ef` declarations under explicit module paths. `import Fns "effra/functions"` selects ordinary callable helpers; `import Convert "effra/conversions"` selects an ordinary first-order product and factory. Named functions, record fields, rows and ownership use the shared semantic model on Go and JavaScript. Import aliases are bindings, while declarations and template variables have qualified owners.
+> **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
+
+The compiler distributes finite `.ef` declarations under explicit module paths. `import Fns "effra/functions"` selects ordinary callable helpers; `import Convert "effra/conversions"` selects an ordinary first-order product and factory. Named functions, record fields, rows and ownership use the shared semantic model on Go. Import aliases are bindings, while declarations and template variables have qualified owners.
 
 For a User/string conversion, a caller supplies both actual functions:
 

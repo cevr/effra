@@ -22,18 +22,18 @@ Effra describes application programs, for servers and front-ends, using explicit
 
 **Failure payload**: The declared data carried by a named failure, separate from an ordinary success value.
 
-**Entry failure report**: The deterministic stderr text and exit status a program entry produces when `main` fails. It lists each cause reason in order, as a named failure with its payload, a defect message or an interruption. Payloads are rendered from the checked types of `main`'s failure row, so the report is identical on every target for every failure in that row that both targets can raise, including built-in, codec and HTTP listener failures. The one exception is an unclassified HTTP listener failure, which keeps the host's text.
+**Entry failure report**: The deterministic stderr text and exit status a program entry produces when `main` fails. It lists each cause reason in order, as a named failure with its payload, a defect message or an interruption. Payloads are rendered from the checked types of `main`'s failure row, so the report is deterministic for every failure in that row, including built-in, codec and HTTP listener failures. The one exception is an unclassified HTTP listener failure, which keeps the host's text.
 
 **Effect contract**: The success value, named failures, and required services of a deferred Effra program.
 
-**Semantic equivalence baseline** (acceptance term): A matched Effra, explicit
-Go and TypeScript/Effect program pair that performs the same validation and
-observable work while preserving the same failure/service rows, ownership,
-cancellation and completed-cleanup behavior. The native Go member is an
-optimized idiomatic Go control with the same contract. The JS member may use
-the pinned Effect userland runtime or a generated/specialized implementation
-behind the same default ABI. The baseline makes an abstraction's generated and
-runtime costs attributable rather than inferred from unequal examples.
+**Semantic equivalence baseline** (acceptance term): A matched Effra and
+explicit Go program pair that performs the same validation and observable work
+while preserving the same failure/service rows, ownership, cancellation and
+completed-cleanup behavior. The Go member is an optimized idiomatic Go control
+with the same contract. The baseline makes an abstraction's generated and
+runtime costs attributable rather than inferred from unequal examples. Until
+2026-10-26 the baseline also had a TypeScript/Effect member; it went with the
+JavaScript target.
 
 **Zero-cost abstraction obligation** (destination, not current support): A
 candidate abstraction must make the illegal states and invalid operations
@@ -43,9 +43,9 @@ directly lower without an abstraction-induced executable size/runtime penalty
 against a semantic equivalence baseline. Retained allocation, dispatch, module,
 byte and residual-check costs must be visible in matched receipts. Native output
 targets parity with or better performance than the optimized idiomatic Go
-member. JS work must pursue every material measured lowering or specialization
-opportunity, including match dispatch and generated effect-runtime paths, while
-preserving the pinned default ABI and userland runtime contract. This obligation
+member, and Go lowering pursues every material measured lowering or
+specialization opportunity, including match dispatch and generated
+effect-runtime paths, while preserving the userland runtime contract. This obligation
 never removes a required guardrail and does not promise universally zero
 overhead or a fixed speedup multiplier.
 
@@ -127,7 +127,7 @@ overhead or a fixed speedup multiplier.
 
 **Owning scope**: The lifetime that owns managed fibers and resource releases. Its closure establishes their completed shutdown and cleanup.
 
-**Host declaration**: A Go or TypeScript declaration supplying the native shape and identity of an imported value or callable.
+**Host declaration**: A Go declaration supplying the native shape and identity of an imported value or callable.
 
 **Initialization root**: A declared foreign Go import's package initialization, retained in a native application independently of reachable calls and lowered as a named or blank Go import. Module availability, export-data discovery and metadata lookup are not initialization roots.
 
@@ -163,7 +163,7 @@ overhead or a fixed speedup multiplier.
 
 **Provider conformance** (specified): Evidence that independently authored machine providers execute the same checked plans on the same target with unchanged declarations/compiler selection while preserving the declared observable contracts and recording their separate runtime obligations.
 
-**Effect runtime provider** (direction): An implementation of the lawful runtime contract that executes Effra effects on a target. Pinned Effect is the default and reference JavaScript provider, and `runtime/effra` is the native Go provider.
+**Effect runtime provider** (direction): An implementation of the lawful runtime contract that executes Effra effects on a target. `runtime/effra` is the native Go provider, Effra's first. Pinned Effect as the JavaScript provider went with the JavaScript target on 2026-10-26.
 
 **Lawful runtime contract** (specified research): The host operations and laws an effect runtime provider must satisfy, with each obligation's evidence classified as nominally checked, trusted decision, tested law, refuted or unresolved/unavailable.
 
@@ -231,4 +231,4 @@ overhead or a fixed speedup multiplier.
 
 **Quiescence**: The scheduler state in which no managed fiber is running or runnable. A wake in flight is not idle: a fiber that has been signalled, fired or cancelled but has not run again is runnable. At quiescence, every pending timer that managed work can register without outside input is registered. `Scheduler.awaitRegistration()` returns at quiescence, and `Scheduler.advance` selects each deadline only at quiescence. When several fibers wait for quiescence at once, the order in which they are released is unspecified. Interrupting a waiter is an ordinary interruption. Unmanaged goroutines, host promises and foreign blocking calls are outside it.
 
-**Latch handoff**: What `Sync.signal` does to the fibers parked on a latch. It completes the latch, makes each waiter runnable and returns. Wherever execution is serialized into turns (every JavaScript execution, and Go under the managed test scheduler), the signaller keeps its turn and each waiter resumes later on a turn of its own, never inside the signaller's turn. Interrupting the signaller after `signal` returns cannot undo the signal or affect a waiter it does not own. A waiter interrupted after it is signalled but before it runs, directly or by its owner's close, ends interrupted, and the latch stays signalled. Live Go has no turns: a waiter runs on its own goroutine, possibly in parallel with the signaller, so an interrupt after `signal` races with it.
+**Latch handoff**: What `Sync.signal` does to the fibers parked on a latch. It completes the latch, makes each waiter runnable and returns. Wherever execution is serialized into turns (Go under the managed test scheduler), the signaller keeps its turn and each waiter resumes later on a turn of its own, never inside the signaller's turn. Interrupting the signaller after `signal` returns cannot undo the signal or affect a waiter it does not own. A waiter interrupted after it is signalled but before it runs, directly or by its owner's close, ends interrupted, and the latch stays signalled. Live Go has no turns: a waiter runs on its own goroutine, possibly in parallel with the signaller, so an interrupt after `signal` races with it.

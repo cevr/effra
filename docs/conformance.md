@@ -2,11 +2,11 @@
 
 Effra's selected cases cite Effect 4.0.1 at commit `460272d30457f4697d8b8c52cad41caccbcace08`. The repository keeps no checkout or copy of upstream: each case records its upstream file, line and test label as provenance text (see [conformance/README.md](../conformance/README.md)). Effra never executes the upstream TypeScript suite or its shell fixtures. Future native fixtures belong to their own Effra test owner.
 
-[effect-cases.json](../conformance/effect-cases.json) is the maintained authority for selected behavioral comparisons. Each stable ID records an upstream test file, declaration line and label at the pinned commit, states its behavior and limits, and names the existing Effra test that exercises both Go and JS when applicable. Line anchors distinguish identical labels in different suites. IDs stay stable when a future upstream pin changes; review the behavior and update the anchor deliberately.
+[effect-cases.json](../conformance/effect-cases.json) is the maintained authority for selected behavioral comparisons. Each stable ID records an upstream test file, declaration line and label at the pinned commit, states its behavior and limits, and names the existing Effra Go test that exercises it when applicable. Line anchors distinguish identical labels in different suites. IDs stay stable when a future upstream pin changes; review the behavior and update the anchor deliberately.
 
 | Status | Meaning |
 | --- | --- |
-| `covered` | Named behavior has an existing shared Go/JS acceptance test. Read its limits; it is not a claim that the entire upstream case/API was ported. |
+| `covered` | Named behavior has an existing Go acceptance test. Read its limits; it is not a claim that the entire upstream case/API was ported. |
 | `difference` | Existing acceptance exercises an explicit Effra policy that differs from the cited upstream case. The difference must stay described. |
 | `pending` | A relevant behavior is planned but lacks admitted source-level acceptance. Internal runtime helpers do not count. |
 | `unsupported` | The current admitted profile excludes the behavior. No passing pointer is permitted. |
@@ -17,7 +17,7 @@ Unlisted cases remain **reference-only, unassessed**. A source pointer records w
 # Mapping admission, offline
 go run ./scripts/conformance check
 
-# Execute the selected existing acceptance tests: real generated Go and JS
+# Execute the selected existing acceptance tests: real generated Go
 go run ./scripts/conformance check --run
 
 # Full gate also runs all Go tests, including the selected acceptance tests
@@ -32,7 +32,7 @@ To move the pin:
 
 The first selection covers child interruption and completed child-before-parent cleanup, preservation of an expected failure plus cleanup defect, and virtual-time admission of an unstarted fork. Timeout has an explicit difference row: Effra's nominal `Timeout` and required `Scheduler` differ from upstream `Cause.TimeoutError`; a supplemental timer-defect test ensures defects are not rewritten as timeouts. Existing lifecycle acceptance also checks unobserved child failure, but that assertion has no selected upstream case mapping yet and is not counted as another port.
 
-Layer acquisition maps five `Layer.test.ts` cases to shared traces over the emitted Go runtime and the JavaScript layer runtime. Four are covered: parallel acquisition under build cancellation, a failure preserved while a shared acquisition is abandoned, release of every acquired resource after interruption, and dependent-first finalization. Cross-build memoization is a difference row: separate Effra provisions are separate builds with independent acquisition tables, so a failed build is retried only by a new explicit build. The first-requester interruption row is also a difference, because producers belong to the build rather than to their first waiter.
+Layer acquisition maps five `Layer.test.ts` cases to traces over the emitted Go runtime. Four are covered: parallel acquisition under build cancellation, a failure preserved while a shared acquisition is abandoned, release of every acquired resource after interruption, and dependent-first finalization. Cross-build memoization is a difference row: separate Effra provisions are separate builds with independent acquisition tables, so a failed build is retried only by a new explicit build. The first-requester interruption row is also a difference, because producers belong to the build rather than to their first waiter.
 
 Generic acquisition, Deferred, Ref and fixed-capacity semaphore cases remain pending. Parallel scope finalization and detached child lifetime remain unsupported. Scheduler duration/precision and the rest of the corpus are not implied by the selected virtual-time fixture. Each later library, codec, server or machine family can add its own selected cases to the same mapping instead of creating another parity table.
 
@@ -40,7 +40,7 @@ Generic acquisition, Deferred, Ref and fixed-capacity semaphore cases remain pen
 
 Pinned `packages/effect/src/internal/effect.ts` was read from the same immutable Git object, not the newer cache working tree. [scopeClose:3929–3994](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/internal/effect.ts#L3929) marks a scope closed, removes it from its parent and executes finalizers under protected close; sequential finalizers run in reverse registration order, while parallel finalization is an explicit separate policy. [acquireRelease:4134–4150](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/internal/effect.ts#L4134) protects acquisition/registration by default, with an explicit interruptible option and captured release context. [acquireUseRelease:4396–4408](https://github.com/Effect-TS/effect/blob/460272d30457f4697d8b8c52cad41caccbcace08/packages/effect/src/internal/effect.ts#L4396) masks acquisition, restores interruptibility for use and registers release at the exit boundary.
 
-The mapped interrupted-acquisition case asserts acquired=true, use=false, release=true. Effra's existing lifecycle fixture proves release ordering and composite causes through native/Effect providers; it does **not** exercise that interrupted-acquisition window through a generic Effra callback API. A future port must add causal acquisition/register/use interruption controls and ownership/error/service admission rather than mark the row covered because both runtimes have acquire/release functions.
+The mapped interrupted-acquisition case asserts acquired=true, use=false, release=true. Effra's existing lifecycle fixture proves release ordering and composite causes through the native Go provider; it does **not** exercise that interrupted-acquisition window through a generic Effra callback API. A future port must add causal acquisition/register/use interruption controls and ownership/error/service admission rather than mark the row covered because both runtimes have acquire/release functions.
 
 Deferred first completion is distinct from recipe-storage `completeWith` or producer single-flight. Ref callback purity and resource-free payload placement need source admission tests beyond upstream mutable cell behavior. Ordinary Semaphore queued-cancellation cases must not be confused with PartitionedSemaphore or mutable-capacity cases in the same upstream file. These differences remain visible as later acceptance is added.
 

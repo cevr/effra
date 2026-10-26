@@ -18,7 +18,7 @@ import (
 
 // sizeFixture is one row of the size-conformance matrix in
 // conformance/size/fixtures. The deterministic retention facts are checked
-// here, in the gate; byte comparisons against the Go and TypeScript/Effect
+// here, in the gate; byte comparisons against the plain Go
 // controls belong to the matrix in conformance/size/matrix.
 type sizeFixture struct {
 	name    string
@@ -27,7 +27,7 @@ type sizeFixture struct {
 	// the executable's symbol table; present packages appear in both.
 	absent  []string
 	present []string
-	// output is the program's stdout on both targets; empty means build only.
+	// output is the program's stdout on the Go target; empty means build only.
 	output string
 }
 

@@ -1,10 +1,12 @@
 # Matched server benchmarks
 
+> **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
+
 Status: implementation authorized by the owner on 2026-10-05. This extends the production foundation work with measured server comparisons; it does not predeclare a performance advantage.
 
 ## Question and scope
 
-How does an Effra native server compare with equivalent TypeScript/Effect, native TypeScript and optimized Go servers? The native target is accepted only when a matched Effra application meets or exceeds optimized idiomatic Go with the same guarantees; measure the cost of those guarantees separately from host runtime differences. The JS target must pursue every material measurable lowering or specialization opportunity, including match dispatch and generated effect-runtime paths, while retaining the pinned default Effect-compatible ABI and userland contract. Use generic original fixtures; public documentation must not name inspected application projects.
+How does an Effra native server compare with equivalent TypeScript/Effect, native TypeScript and optimized Go servers? The native target is accepted only when a matched Effra application meets or exceeds optimized idiomatic Go with the same guarantees; measure the cost of those guarantees separately from host runtime differences. Go lowering must pursue every material measurable lowering or specialization opportunity, including match dispatch and generated effect-runtime paths, while retaining the userland contract. TypeScript/Effect and native TypeScript cohorts may stay as external reference measurements; they are no longer Effra targets. Use generic original fixtures; public documentation must not name inspected application projects.
 
 The path-routing server remains a transport control. The required framework receipt follows the [native server contract](native-server-contracts.md): checked JSON codecs, actual Effect HttpApi HTTP endpoints and RpcServer unary RPC, matched typed failures, limits, cancellation and completed shutdown. External databases and streams remain subsequent workloads. A constant response or transport-only control cannot establish framework-level benefits.
 

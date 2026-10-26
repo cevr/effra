@@ -13,7 +13,7 @@ import "strings"
 // format is pure and total. parse is an effect operation: text that does not
 // match [+-]?[0-9]+ (Go's base-10 strconv grammar) is a syntax failure, and
 // a value outside the signed 64-bit range is a range failure. Syntax is
-// classified before range on both targets, and the failure message never
+// classified before range, and the failure message never
 // echoes the input.
 
 const (

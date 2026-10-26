@@ -4,7 +4,7 @@
 // Go's test cache keys a package's result on the files and environment
 // variables the test process consulted through package os, which the testing
 // package records in a log for cmd/go (cmd/go/internal/test.computeTestInputsID).
-// It cannot see what a child process reads: Bun, Node, tsc, git, sh or a
+// It cannot see what a child process reads: git, sh, a C compiler or a
 // go build started by the test or by the code under test. Main closes that
 // gap by observation rather than declaration. From TestMain, it runs the test
 // binary again as a child that installs a seccomp filter. The filter

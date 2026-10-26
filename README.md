@@ -2,9 +2,9 @@
 
 **Go's directness and native binaries. Effect's typed failures, explicit dependencies and owned lifetimes. Algebraic data types with exhaustive matching. One small language.**
 
-Effra is an experimental application language. You write `.ef` files and `ef` compiles them to a single static Go executable, or to JavaScript built on [Effect](https://effect.website). Every function signature states what it returns, every way it can fail and every service it needs, and the compiler checks all three.
+Effra is an experimental application language. You write `.ef` files and `ef` compiles them to a single static Go executable. Go is the only target; [Effect](https://effect.website) is the model for the guarantees, not a runtime. Every function signature states what it returns, every way it can fail and every service it needs, and the compiler checks all three.
 
-The aim is application code of every kind, on servers and in front-ends: anything JavaScript can run, with more guardrails and with I/O handled by checked effects instead of promises. What runs today is server-focused. Front-end support, including canvas and WebGL rendering, is [direction](NORTH_STAR.md) and not built yet ([#117](https://github.com/cevr/effra/issues/117)).
+The aim is Effect for Go: application code with Go's simplicity, Effect's guarantees and a standard library covering what Effect does, in Effra's own idioms ([north star](NORTH_STAR.md)). What runs today is server-focused.
 
 > **Status: runnable prototype.** Everything in the first two sections compiles and runs today. The gate checks every Effra snippet that isn't labelled as a sketch. Syntax and APIs will still change.
 
@@ -194,7 +194,7 @@ Each row makes one mistake in the program above and records what happens. The Ef
 | Control flow | Plain statements | Generators, `yield*`, `pipe` | Plain statements; `run` marks each effect |
 | Concurrency | Goroutines plus `context`; you own cleanup | Fibers with structured interruption | `scope`, `fork`, `join`, `interrupt`; a scope waits for its children's cleanup |
 | Dependency wiring | Constructors written by hand | `Layer` values | `layer` declarations the compiler checks and can graph |
-| Output | Static native binary | JavaScript on Node, Bun or a browser | Static native Go binary, or JavaScript on Effect |
+| Output | Static native binary | JavaScript on Node, Bun or a browser | Static native Go binary |
 
 ## A tour of what works today
 
@@ -308,7 +308,7 @@ layer Fixture {
 
 ### Structured concurrency
 
-Children belong to a scope. Interrupting one waits for its cleanup to finish before the next line runs, on both targets:
+Children belong to a scope. Interrupting one waits for its cleanup to finish before the next line runs:
 
 ```rust
 // From examples/latest-task.ef
@@ -336,7 +336,7 @@ effect fn parse(text: string) -> bool raises { GoError } uses { Foreign } {
 
 ### Tests are ordinary effects
 
-Tests are effect functions whose names start with `test_`. A fixture is just another provider, and each test gets a fresh owning scope. `ef test` runs them on Go, and `ef test --target js` runs them on JavaScript:
+Tests are effect functions whose names start with `test_`. A fixture is just another provider, and each test gets a fresh owning scope. `ef test` runs them:
 
 ```rust
 // From examples/testing.ef
@@ -364,22 +364,22 @@ Line 33 is `run Orders.find(id)`; line 34 is the gateway call with its timeout. 
 
 ## Where it's going
 
-Each row states what has landed on this branch, what is in flight and what is only specified or designed. A feature ships only when it runs on its advertised targets, with diagnostics and tooling support.
+Each row states what has landed on this branch, what is in flight and what is only specified or designed. A feature ships only when it runs on Go, with diagnostics and tooling support.
 
 | Capability | Status |
 | --- | --- |
-| Payload-aware recovery: `.recover<E>(handler)` passes the error's fields to an effectful handler | Landed on Go and JS ([`recovery-outcome.ef`](examples/recovery-outcome.ef), [`recovery-codec.ef`](examples/recovery-codec.ef)); reified `Exit` is not exposed |
-| Layer runtime: concurrent shared acquisition, rollback and cleanup in reverse order | Shared build-owned acquisition with individually cancellable waiters landed on Go and JS; the remaining units are in progress |
-| Codecs derived from records and enums, with explicit wire ↔ domain transformations | Structural JSON derivation through [`effra/json`](docs/bundled-modules.md) and explicit transformed witnesses composed with `with` run on Go and JS, including at typed HTTP endpoints |
+| Payload-aware recovery: `.recover<E>(handler)` passes the error's fields to an effectful handler | Landed ([`recovery-outcome.ef`](examples/recovery-outcome.ef), [`recovery-codec.ef`](examples/recovery-codec.ef)); reified `Exit` is not exposed |
+| Layer runtime: concurrent shared acquisition, rollback and cleanup in reverse order | Shared build-owned acquisition with individually cancellable waiters landed; the remaining units are in progress |
+| Codecs derived from records and enums, with explicit wire ↔ domain transformations | Structural JSON derivation through [`effra/json`](docs/bundled-modules.md) and explicit transformed witnesses composed with `with` run, including at typed HTTP endpoints |
 | Graph views: `ef graph --kind layers\|machine --format mermaid\|dot`, plus MCP and editor views | In progress |
-| HTTP server with bounded, owned shutdown (`Http.listen`) | Landed on Go and JS with typed endpoints and route tables ([`http-transport.ef`](examples/http-transport.ef), [`http-endpoints.ef`](examples/http-endpoints.ef)) and a shared wire corpus; streaming bodies are not built |
+| HTTP server with bounded, owned shutdown (`Http.listen`) | Landed with typed endpoints and route tables ([`http-transport.ef`](examples/http-transport.ef), [`http-endpoints.ef`](examples/http-endpoints.ef)) and a shared wire corpus; streaming bodies are not built |
 | Rich Go interop: host types, methods, `io.Reader`/`io.Writer`, `context` | Host types, methods, interface assignment, checked I/O and `context` forwarding landed; owned resources and callbacks in progress |
 | Library modules: `pub` exports and module-qualified identity | Designed |
 | State machines: ordinary step functions run by an owned runtime | The `machine` declaration, decision syntax (`enter`, `stay`, `ignore`, `reject`, `done`), its static `stay` check and inspectable plans landed ([`machine-search.ef`](examples/machine-search.ef)); the runtime is specified, not built |
 | Actors with explicit mailbox budgets and owned behavior | [Specified](docs/specs/actors.md); not built |
 | Evidence and proofs: values that carry what was checked | [Designed](docs/research/opaque-values-and-evidence.md) |
-| Front-end application code: floating point, loops, numeric buffers and a canvas/WebGL render loop on the JS target | Direction; not built ([#117](https://github.com/cevr/effra/issues/117)) |
-| Swappable effect runtimes: a userland provider admitted by the runtime laws, with pinned Effect as the JS default | [Specified research](docs/research/lawful-runtime-contract.md); neither the RS1 law suite ([#124](https://github.com/cevr/effra/issues/124)) nor the Effect-suite harness ([#123](https://github.com/cevr/effra/issues/123)) runs yet |
+| Numeric application code: floating point, loops and numeric buffers | Direction; not built ([#117](https://github.com/cevr/effra/issues/117)) |
+| Swappable effect runtimes: a userland provider admitted by the runtime laws, beside Effra's own Go runtime | [Specified research](docs/research/lawful-runtime-contract.md); neither the RS1 law suite ([#124](https://github.com/cevr/effra/issues/124)) nor the Effect-suite harness ([#123](https://github.com/cevr/effra/issues/123)) runs yet |
 | Laws as a general construct for behavior types can't state | Admitted, not built; shape open ([#125](https://github.com/cevr/effra/issues/125)) |
 
 ### Proofs you can't forget to check
@@ -414,16 +414,14 @@ A machine is a small `machine` declaration that names its initial state and its 
 
 ## Try it
 
-You need Go 1.27+ and Bun; the full gate also needs Python 3.
+You need Go 1.27+ and Git.
 
 ```sh
 git clone https://github.com/cevr/effra.git
 cd effra
-bun install --frozen-lockfile
 go build -o bin/ef ./cmd/ef
 
 ./bin/ef run examples/checkout.ef               # paid auth-7 / no such order
-./bin/ef run examples/checkout.ef --target js   # same output, on Effect
 ./bin/ef build examples/checkout.ef             # static executable in dist/
 ./bin/ef diagnostics examples/missing-service.ef  # expected failure: EF108
 ./bin/ef inspect examples/checkout.ef checkout  # the checked contract as JSON
@@ -433,36 +431,36 @@ go build -o bin/ef ./cmd/ef
 ./bin/ef lsp                                    # diagnostics, hover, definition and formatting over LSP
 ```
 
-Native builds lower checked source into typed Go closures and run `go build`. The executable needs no Effra, Bun, Node or Effect installation to run, and contains only the declarations and runtime modules its entry point reaches. The JavaScript target emits code on pinned Effect 4.0.1, and a JavaScript entry likewise carries only the declarations and prelude helpers it reaches.
+Native builds lower checked source into typed Go closures and run `go build`. The executable needs no Effra installation to run, and contains only the declarations and runtime modules its entry point reaches. `--target js` is the EF110 diagnostic: since 2026-10-26 Go is the only target.
 
 ## Runnable examples
 
-| Example | What it demonstrates | Target |
-| --- | --- | --- |
-| [checkout.ef](examples/checkout.ef) | The program from the top of this page | Go / JS |
-| [main.ef](examples/main.ef) | Nominal services, explicit provision and typed recovery | Go / JS |
-| [workflow.ef](examples/workflow.ef) | Authorization, lookup and delivery with three service contracts | Go / JS |
-| [data.ef](examples/data.ef) | Records, enums and exhaustive matching | Go / JS |
-| [generic-users.ef](examples/generic-users.ef) | Generic records with `Option` and `Result` | Go / JS |
-| [layers.ef](examples/layers.ef) | Shared construction, hidden dependencies and whole-graph fixture replacement | Go / JS |
-| [layers-workflow.ef](examples/layers-workflow.ef) | Configured layer provision and retained operation failures | Go / JS |
-| [latest-task.ef](examples/latest-task.ef) | Replace an owned child after interruption and cleanup finish | Go / JS |
-| [recipes-retry.ef](examples/recipes-retry.ef) | Lazy typed recipes stored in generic records and Option; each retry runs again | Go / JS |
-| [recipes-queue.ef](examples/recipes-queue.ef) | Recipe enum payloads, Result slots and recipe-returning callable fields | Go / JS |
-| [recovery-outcome.ef](examples/recovery-outcome.ef) | Payload-binding recovery of a stored job recipe into an Outcome | Go / JS |
-| [recovery-codec.ef](examples/recovery-codec.ef) | Effectful recovery handler converting a decode failure into a domain failure | Go / JS |
-| [concurrency.ef](examples/concurrency.ef) | Child join/interrupt and deadline recovery | Go / JS |
-| [causal.ef](examples/causal.ef) | Managed virtual time, shared latches and causal cleanup tests | Go / JS |
-| [quiescence.ef](examples/quiescence.ef) | The quiescence barrier for forked work that registers no new timer | Go / JS |
-| [quiescence-wakes.ef](examples/quiescence-wakes.ef) | The barrier and `advance` with wakes in flight: cancellation and signalled waiters | Go / JS |
-| [latch-handoff.ef](examples/latch-handoff.ef) | Latch handoff: a signal makes waiters runnable, and interrupting the signaller afterwards cannot affect a waiter it does not own | Go / JS |
-| [callables-service.ef](examples/callables-service.ef) | Callbacks that are generic over failure and service rows | Go / JS |
-| [testing.ef](examples/testing.ef) | Fixture providers, typed recovery and owned children in tests | Go / JS |
-| [imports.ef](examples/imports.ef) | Automatic native signatures, partial results and context forwarding | Go |
-| [http-transport.ef](examples/http-transport.ef) | Bounded buffered HTTP/1.1 with explicit limits, typed handler failures and owned shutdown | Go / JS |
-| [http.ef](examples/http.ef) | HTTP routes over `Http.listen`, SDK calls, file scopes and managed shutdown | Go |
-| [lifecycle.ef](examples/lifecycle.ef) | Scoped files, cancellation and runtime snapshots | Go |
-| [ownership.ef](examples/ownership.ef) | Borrowed outer handles and checked scoped file ownership | Go |
+| Example | What it demonstrates |
+| --- | --- |
+| [checkout.ef](examples/checkout.ef) | The program from the top of this page |
+| [main.ef](examples/main.ef) | Nominal services, explicit provision and typed recovery |
+| [workflow.ef](examples/workflow.ef) | Authorization, lookup and delivery with three service contracts |
+| [data.ef](examples/data.ef) | Records, enums and exhaustive matching |
+| [generic-users.ef](examples/generic-users.ef) | Generic records with `Option` and `Result` |
+| [layers.ef](examples/layers.ef) | Shared construction, hidden dependencies and whole-graph fixture replacement |
+| [layers-workflow.ef](examples/layers-workflow.ef) | Configured layer provision and retained operation failures |
+| [latest-task.ef](examples/latest-task.ef) | Replace an owned child after interruption and cleanup finish |
+| [recipes-retry.ef](examples/recipes-retry.ef) | Lazy typed recipes stored in generic records and Option; each retry runs again |
+| [recipes-queue.ef](examples/recipes-queue.ef) | Recipe enum payloads, Result slots and recipe-returning callable fields |
+| [recovery-outcome.ef](examples/recovery-outcome.ef) | Payload-binding recovery of a stored job recipe into an Outcome |
+| [recovery-codec.ef](examples/recovery-codec.ef) | Effectful recovery handler converting a decode failure into a domain failure |
+| [concurrency.ef](examples/concurrency.ef) | Child join/interrupt and deadline recovery |
+| [causal.ef](examples/causal.ef) | Managed virtual time, shared latches and causal cleanup tests |
+| [quiescence.ef](examples/quiescence.ef) | The quiescence barrier for forked work that registers no new timer |
+| [quiescence-wakes.ef](examples/quiescence-wakes.ef) | The barrier and `advance` with wakes in flight: cancellation and signalled waiters |
+| [latch-handoff.ef](examples/latch-handoff.ef) | Latch handoff: a signal makes waiters runnable, and interrupting the signaller afterwards cannot affect a waiter it does not own |
+| [callables-service.ef](examples/callables-service.ef) | Callbacks that are generic over failure and service rows |
+| [testing.ef](examples/testing.ef) | Fixture providers, typed recovery and owned children in tests |
+| [imports.ef](examples/imports.ef) | Automatic native signatures, partial results and context forwarding |
+| [http-transport.ef](examples/http-transport.ef) | Bounded buffered HTTP/1.1 with explicit limits, typed handler failures and owned shutdown |
+| [http.ef](examples/http.ef) | HTTP routes over `Http.listen`, SDK calls, file scopes and managed shutdown |
+| [lifecycle.ef](examples/lifecycle.ef) | Scoped files, cancellation and runtime snapshots |
+| [ownership.ef](examples/ownership.ef) | Borrowed outer handles and checked scoped file ownership |
 
 ## Learn more
 
@@ -476,15 +474,15 @@ Native builds lower checked source into typed Go closures and run `go build`. Th
 - [Design sketch](docs/design.md) and [contender roadmap](docs/contender-roadmap.md)
 - [Language evolution previews](docs/previews/README.md): dated snapshots of how constructs and syntax read over time
 - [North star](NORTH_STAR.md), [prior art](PRIOR_ART.md) (Effect, Go, Gleam, ReScript, Elixir, Borgo, Bend and others) and [glossary](GLOSSARY.md)
-- [Upstream conformance](docs/conformance.md): pinned Effect behavior mapped to Go/JS acceptance tests
+- [Upstream conformance](docs/conformance.md): Effect behavior mapped to Go acceptance tests
 
 Open design questions are tracked in the [Wayfinder map](https://github.com/cevr/effra/issues/1) on GitHub (`go run ./cmd/wayfinder frontier`; see [docs/wayfinder](docs/wayfinder/README.md)).
 
 ## Development
 
 ```sh
-bun run gate          # formatting, vet, tests, real Go and JS programs, CLI/MCP/LSP parity, live HTTP
+./scripts/gate.sh     # formatting, vet, tests, real Go programs, CLI/MCP/LSP parity, live HTTP
 go test -race ./...
 ```
 
-Fast compilation is a design constraint; see the [measurement receipts](docs/prototype.md#baseline). Effra is an application language for servers and front-ends. Kernels, hard real-time and no-GC execution are out of scope.
+Fast compilation is a design constraint; see the [measurement receipts](docs/prototype.md#baseline). Effra is an application language. Kernels, hard real-time and no-GC execution are out of scope.

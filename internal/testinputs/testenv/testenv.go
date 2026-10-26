@@ -18,8 +18,7 @@ import (
 )
 
 // ToolDigest is the variable through which the gate passes a digest of the
-// test tools (Node, Bun, tsc, git), the installed dependencies and the
-// values of the variables in Names. cmd/go rechecks only files inside the
+// test tools (git, sh) and the values of the variables in Names. cmd/go rechecks only files inside the
 // module root, so it stands for the programs and libraries outside the root
 // that observed processes run, and for variables they read.
 const ToolDigest = "EFFRA_TOOL_VERSIONS"
@@ -38,8 +37,6 @@ var Names = []string{
 	"GOTELEMETRYDIR", "GOTMPDIR", "GOTOOLCHAIN", "GOVCS", "GOWORK",
 	// The Go runtime's, which every Go program reads at startup.
 	"GODEBUG", "GOGC", "GOMAXPROCS", "GOMEMLIMIT", "GOTRACEBACK",
-	// The registry Bun resolves packages from.
-	"BUN_CONFIG_REGISTRY",
 	ToolDigest,
 }
 

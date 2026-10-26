@@ -16,8 +16,8 @@ import (
 // relaxation), and not to an outgoing connection's implicit bind
 // (__inet_hash_connect skips every port that bind(2) holds). It still lets a
 // server bind the address and listen on it, and lets the test bind it again
-// once the server has released it, because Go, Node (libuv) and Bun
-// (uSockets) set SO_REUSEADDR, and such sockets may share an address while at
+// once the server has released it, because Go sets SO_REUSEADDR (as do
+// libuv and uSockets), and such sockets may share an address while at
 // most one of them listens. A second listener on the address is refused as
 // before, so a rebind still detects a listener that was not released.
 func reserve(t testing.TB) (string, bool) {

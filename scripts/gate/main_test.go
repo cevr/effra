@@ -312,37 +312,21 @@ func TestInstalledTreeContentsAreInputs(t *testing.T) {
 	}
 }
 
-// A tree input is the directory as a step walks it: files Git ignores and
-// the targets of links out of it are inputs, and only the excluded paths are
-// not.
-func TestTreeInputsCoverIgnoredFilesLinksAndKeyedPermissions(t *testing.T) {
+// An installed directory is the directory as a step walks it: files Git
+// ignores there are inputs. Installed and repository-path digests key the
+// executable bits and owner-read, the bits a step's result can depend on,
+// and no other.
+func TestInstalledAndPathDigestsKeyOnlyTheKeyedPermissionBits(t *testing.T) {
 	root := fixture(t)
-	write(t, root, ".gitignore", "/runs/\nnode_modules/\n/leaf/out/\n")
-	write(t, root, "leaf/src/index.js", "export const one = 1\n")
-	inputs := &Inputs{Paths: []string{"leaf/"}, Trees: []string{"leaf/"}, TreeExclude: []string{"leaf/out"}}
-	before := keyOf(t, root, inputs)
-	write(t, root, "leaf/src/node_modules/probe.js", "ignored\n")
-	ignored := keyOf(t, root, inputs)
-	if ignored == before {
-		t.Fatal("an ignored file in a tree input left the key unchanged")
+	write(t, root, ".gitignore", "/runs/\nignored/\n")
+	write(t, root, "leaf/src/index.txt", "one\n")
+	installed := &Inputs{Paths: []string{"leaf/"}, Installed: []string{"leaf/"}}
+	before := keyOf(t, root, installed)
+	write(t, root, "leaf/src/ignored/probe.txt", "ignored\n")
+	if keyOf(t, root, installed) == before {
+		t.Fatal("an ignored file in an installed directory left the key unchanged")
 	}
-	write(t, root, "leaf/out/built.js", "this step's output\n")
-	if keyOf(t, root, inputs) != ignored {
-		t.Fatal("an excluded output changed the key")
-	}
-	// A link out of the tree into the repository is followed: editing its
-	// target changes the key.
-	if err := os.Symlink("../docs", filepath.Join(root, "leaf/shared")); err != nil {
-		t.Fatal(err)
-	}
-	linked := keyOf(t, root, inputs)
-	write(t, root, "docs/notes.md", "edited notes\n")
-	if keyOf(t, root, inputs) == linked {
-		t.Fatal("editing the target of a link out of the tree left the key unchanged")
-	}
-	// Tree and repository-path digests key the executable bits and
-	// owner-read, the bits a step's result can depend on, and no other.
-	file := filepath.Join(root, "leaf/src/index.js")
+	file := filepath.Join(root, "leaf/src/index.txt")
 	keyAt := func(inputs *Inputs, mode os.FileMode) string {
 		t.Helper()
 		if err := os.Chmod(file, mode); err != nil {
@@ -350,85 +334,27 @@ func TestTreeInputsCoverIgnoredFilesLinksAndKeyedPermissions(t *testing.T) {
 		}
 		return keyOf(t, root, inputs)
 	}
-	for _, inputs := range []*Inputs{inputs, {Paths: []string{"leaf/"}}} {
+	for _, inputs := range []*Inputs{installed, {Paths: []string{"leaf/"}}} {
 		base := keyAt(inputs, 0o644)
 		for _, mode := range []os.FileMode{0o600, 0o666, 0o604, 0o620, 0o622} {
 			if keyAt(inputs, mode) != base {
-				t.Errorf("trees %v: mode %o, differing from 0644 only in group and other read and write bits, changed the key", inputs.Trees, mode)
+				t.Errorf("installed %v: mode %o, differing from 0644 only in group and other read and write bits, changed the key", inputs.Installed, mode)
 			}
 		}
 		keys := map[string]os.FileMode{base: 0o644}
-		// Without owner-read a tree cannot be digested at all, which fails the
-		// step, so only a repository path keys that bit as a value.
+		// Without owner-read an installed directory is keyed as an error that
+		// never repeats, so only a repository path keys that bit as a value.
 		distinct := []os.FileMode{0o744, 0o654, 0o645}
-		if len(inputs.Trees) == 0 {
+		if len(inputs.Installed) == 0 {
 			distinct = append(distinct, 0o244)
 		}
 		for _, mode := range distinct {
 			key := keyAt(inputs, mode)
 			if earlier, seen := keys[key]; seen {
-				t.Errorf("trees %v: mode %o replayed the key of mode %o", inputs.Trees, mode, earlier)
+				t.Errorf("installed %v: mode %o replayed the key of mode %o", inputs.Installed, mode, earlier)
 			}
 			keys[key] = mode
 		}
-	}
-}
-
-func TestToolDigestCoversInstalledTestDependencies(t *testing.T) {
-	root := fixture(t)
-	write(t, root, ".gitignore", "/runs/\n/node_modules/\n")
-	write(t, root, "node_modules/effect/index.js", "export const one = 1\n")
-	steps := func() []*Step {
-		return []*Step{{Name: "digest", Argv: []string{"sh", "-c", `echo "tools=$EFFRA_TOOL_VERSIONS"`}, ToolEnv: []string{"sh"}}}
-	}
-	digest := func() string {
-		t.Helper()
-		code, out := runGate(t, root, t.TempDir(), steps())
-		if code != 0 {
-			t.Fatalf("exit %d\n%s", code, out)
-		}
-		match := regexp.MustCompile(`tools=([0-9a-f]{16})`).FindStringSubmatch(out)
-		if match == nil {
-			t.Fatalf("no tool digest in\n%s", out)
-		}
-		return match[1]
-	}
-	before := digest()
-	file := filepath.Join(root, "node_modules/effect/index.js")
-	info, err := os.Stat(file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	write(t, root, "node_modules/effect/index.js", "export const one = 2\n")
-	if err := os.Chtimes(file, info.ModTime(), info.ModTime()); err != nil {
-		t.Fatal(err)
-	}
-	if digest() == before {
-		t.Fatal("an installed dependency edit left EFFRA_TOOL_VERSIONS unchanged")
-	}
-}
-
-// A step that consumes another step's output keys on that output as it is
-// when the consumer starts, not as it was when the run began.
-func TestGeneratedInputsAreDigestedWhenTheKeyIsComputed(t *testing.T) {
-	root := fixture(t)
-	write(t, root, "out/artifact", "first emission\n")
-	g := &gate{root: root, cacheDir: t.TempDir()}
-	if err := g.loadFiles(); err != nil {
-		t.Fatal(err)
-	}
-	step := &Step{Name: "consumer", Argv: []string{"true"}, Inputs: &Inputs{Paths: []string{"src/"}, Generated: []string{"out"}}}
-	first, err := g.key(step)
-	if err != nil {
-		t.Fatal(err)
-	}
-	write(t, root, "out/artifact", "second emission\n")
-	second, err := g.key(step)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first == second {
-		t.Fatal("a generated input rewritten during the run kept its earlier digest")
 	}
 }
 

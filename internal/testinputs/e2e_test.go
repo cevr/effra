@@ -28,7 +28,11 @@ import (
 // The cases are the counterexamples of review rounds 1 to 4 of the declared
 // (modelled) design that observation replaces, plus a subprocess started by
 // production code, a variable change, names that need no quoting and the
-// fail-closed paths.
+// fail-closed paths. The rounds found them with Bun, Node and tsc; since
+// 2026-10-26 Go is Effra's only target, so each case whose mechanism is not
+// specific to a JavaScript resolver runs on sh, cat or go instead, and the
+// resolver-specific ones (bunfig preloads, tsconfig paths, package exports,
+// bunx and npx) are gone with the tools.
 
 type e2eCase struct {
 	name  string
@@ -62,73 +66,38 @@ type e2eCase struct {
 
 var e2eCases = []e2eCase{
 	{
-		name:  "comparator script and its import",
-		tools: []string{"node"},
+		name:  "script and the file it sources",
+		tools: []string{"sh"},
 		files: map[string]string{
-			"scripts/compare.mjs": "import { codec } from './codec.mjs'\nconsole.log(codec)\n",
-			"scripts/codec.mjs":   "export const codec = 'codec-1'\n",
+			"scripts/compare.sh": ". ./scripts/codec.sh\necho \"$codec\"\n",
+			"scripts/codec.sh":   "codec=codec-1\n",
 		},
-		run:    `return command("node", "scripts/compare.mjs")`,
+		run:    `return command("sh", "scripts/compare.sh")`,
 		before: "codec-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "scripts/codec.mjs", "export const codec = 'codec-2'\n") },
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "scripts/codec.sh", "codec=codec-2\n") },
 		want:   "codec-2",
 	},
 	{
-		name:  "R1-M1 nested node_modules added",
-		tools: []string{"bun"},
+		name:  "R1-M1 transitively sourced file edited",
+		tools: []string{"sh"},
 		files: map[string]string{
-			"src/main.ts":                   "import { v } from 'pkg'\nconsole.log(v)\n",
-			"node_modules/pkg/package.json": `{"name": "pkg", "main": "index.js"}`,
-			"node_modules/pkg/index.js":     "export const v = 'outer'\n",
+			"src/main.sh": ". ./src/a.sh\necho \"$v\"\n",
+			"src/a.sh":    ". ./src/b.sh\n",
+			"src/b.sh":    "v=b-1\n",
 		},
-		run:    `return command("bun", "src/main.ts")`,
-		before: "outer",
-		edit: func(t *testing.T, f *fixture) {
-			f.write(t, "src/node_modules/pkg/package.json", `{"name": "pkg", "main": "index.js"}`)
-			f.write(t, "src/node_modules/pkg/index.js", "export const v = 'nested'\n")
-		},
-		want: "nested",
-	},
-	{
-		name:  "R1-M1 tsconfig paths added",
-		tools: []string{"bun"},
-		files: map[string]string{
-			"src/main.ts":                        "import { v } from '@alias/x'\nconsole.log(v)\n",
-			"node_modules/@alias/x/index.js":     "export const v = 'package'\n",
-			"node_modules/@alias/x/package.json": `{"name": "@alias/x", "main": "index.js"}`,
-		},
-		run:    `return command("bun", "src/main.ts")`,
-		before: "package",
-		edit: func(t *testing.T, f *fixture) {
-			f.write(t, "src/alt/x.ts", "export const v = 'paths'\n")
-			f.write(t, "src/tsconfig.json", `{"compilerOptions": {"baseUrl": ".", "paths": {"@alias/*": ["./alt/*"]}}}`)
-		},
-		want: "paths",
-	},
-	{
-		name:  "R1-M1 extensionless transitive import edited",
-		tools: []string{"bun"},
-		files: map[string]string{
-			"src/main.ts": "import { v } from './a'\nconsole.log(v)\n",
-			"src/a.ts":    "export { v } from './b'\n",
-			"src/b.ts":    "export const v = 'b-1'\n",
-		},
-		run:    `return command("bun", "src/main.ts")`,
+		run:    `return command("sh", "src/main.sh")`,
 		before: "b-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "src/b.ts", "export const v = 'b-2'\n") },
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "src/b.sh", "v=b-2\n") },
 		want:   "b-2",
 	},
 	{
-		name:  "R1-m3 symlink target edited",
-		tools: []string{"bun"},
-		files: map[string]string{
-			"src/main.ts":    "import { v } from './link'\nconsole.log(v)\n",
-			"real/target.ts": "export const v = 'target-1'\n",
-		},
-		links:  map[string]string{"src/link.ts": "../real/target.ts"},
-		run:    `return command("bun", "src/main.ts")`,
+		name:   "R1-m3 symlink target edited",
+		tools:  []string{"cat"},
+		files:  map[string]string{"real/target.txt": "target-1\n"},
+		links:  map[string]string{"src/link.txt": "../real/target.txt"},
+		run:    `return command("cat", "src/link.txt")`,
 		before: "target-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "real/target.ts", "export const v = 'target-2'\n") },
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "real/target.txt", "target-2\n") },
 		want:   "target-2",
 	},
 	{
@@ -150,135 +119,39 @@ var e2eCases = []e2eCase{
 		want:   "linked-2",
 	},
 	{
-		name:  "R2-1 bunfig preload edited",
-		tools: []string{"bun"},
-		files: map[string]string{
-			"bunfig.toml": "preload = [\"./preload.ts\"]\n",
-			"preload.ts":  "console.log('preload-1')\n",
-			"main.ts":     "console.log('main')\n",
-		},
-		run:    `return command("bun", "main.ts")`,
-		before: "preload-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "preload.ts", "console.log('preload-2')\n") },
-		want:   "preload-2",
-	},
-	{
-		name:  "R2-N1 bridge.ts added beside bridge.js",
-		tools: []string{"bun"},
-		files: map[string]string{
-			"src/main.ts":   "import { v } from './bridge'\nconsole.log(v)\n",
-			"src/bridge.js": "export const v = 'bridge-js'\n",
-		},
-		run:    `return command("bun", "src/main.ts")`,
-		before: "bridge-js",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "src/bridge.ts", "export const v = 'bridge-ts'\n") },
-		want:   "bridge-ts",
-	},
-	{
-		name:  "R2-N2 bun --conditions=custom",
-		tools: []string{"bun"},
-		files: map[string]string{
-			"main.ts":                       "import { v } from 'pkg'\nconsole.log(v)\n",
-			"node_modules/pkg/package.json": `{"name": "pkg", "exports": {"custom": "./custom.js", "default": "./index.js"}}`,
-			"node_modules/pkg/index.js":     "export const v = 'default'\n",
-			"node_modules/pkg/custom.js":    "export const v = 'custom-1'\n",
-		},
-		run:    `return command("bun", "--conditions=custom", "main.ts")`,
-		before: "custom-1",
-		edit: func(t *testing.T, f *fixture) {
-			f.write(t, "node_modules/pkg/custom.js", "export const v = 'custom-2'\n")
-		},
-		want: "custom-2",
-	},
-	{
-		name:   "R2-N2 bun --eval",
-		tools:  []string{"bun"},
-		files:  map[string]string{"mod.ts": "export const v = 'eval-1'\n"},
-		run:    `return command("bun", "--eval", "const m = await import('./mod.ts'); console.log(m.v)")`,
-		before: "eval-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "mod.ts", "export const v = 'eval-2'\n") },
-		want:   "eval-2",
-	},
-	{
-		name:  "R3-N1 quoted bunfig preload key",
-		tools: []string{"bun"},
-		files: map[string]string{
-			"bunfig.toml": "'preload' = [\"./p.ts\"]\n",
-			"p.ts":        "console.log('quoted-1')\n",
-			"main.ts":     "console.log('main')\n",
-		},
-		run:    `return command("bun", "main.ts")`,
-		before: "quoted-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "p.ts", "console.log('quoted-2')\n") },
-		want:   "quoted-2",
-	},
-	{
-		name:  "R3-N2 file URL preload",
-		tools: []string{"bun"},
-		files: map[string]string{
-			"bunfig.toml": "preload = [\"file://{{root}}/p.ts\"]\n",
-			"p.ts":        "console.log('url-1')\n",
-			"main.ts":     "console.log('main')\n",
-		},
-		run:    `return command("bun", "main.ts")`,
-		before: "url-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "p.ts", "console.log('url-2')\n") },
-		want:   "url-2",
-	},
-	{
 		name:  "R3-1 shebang script run directly",
-		tools: []string{"bun"},
+		tools: []string{"sh"},
 		files: map[string]string{
-			"scripts/run.ts": "#!/usr/bin/env bun\nimport { v } from './dep.ts'\nconsole.log(v)\n",
-			"scripts/dep.ts": "export const v = 'shebang-1'\n",
+			"scripts/run.sh": "#!/bin/sh\n. \"$(dirname \"$0\")/dep.sh\"\necho \"$v\"\n",
+			"scripts/dep.sh": "v=shebang-1\n",
 		},
-		exec:   []string{"scripts/run.ts"},
-		run:    `return command(root() + "/scripts/run.ts")`,
+		exec:   []string{"scripts/run.sh"},
+		run:    `return command(root() + "/scripts/run.sh")`,
 		before: "shebang-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "scripts/dep.ts", "export const v = 'shebang-2'\n") },
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "scripts/dep.sh", "v=shebang-2\n") },
 		want:   "shebang-2",
 	},
 	{
-		name:   "R3-1 env bun",
-		tools:  []string{"bun", "env"},
-		files:  map[string]string{"main.ts": "console.log('env-1')\n"},
-		run:    `return command("env", "bun", "main.ts")`,
+		name:   "R3-1 env cat",
+		tools:  []string{"env", "cat"},
+		files:  map[string]string{"main.txt": "env-1\n"},
+		run:    `return command("env", "cat", "main.txt")`,
 		before: "env-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "main.ts", "console.log('env-2')\n") },
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "main.txt", "env-2\n") },
 		want:   "env-2",
 	},
 	{
-		name:  "R3-1 bunx and npx local binaries",
-		tools: []string{"bunx", "npx", "node"},
-		files: map[string]string{
-			"node_modules/tool/package.json": `{"name": "tool", "version": "1.0.0", "bin": {"tool": "cli.js"}}`,
-			"node_modules/tool/cli.js":       "#!/usr/bin/env node\nconsole.log(require('./lib.js'))\n",
-			"node_modules/tool/lib.js":       "module.exports = 'tool-1'\n",
-		},
-		exec:  []string{"node_modules/tool/cli.js"},
-		links: map[string]string{"node_modules/.bin/tool": "../tool/cli.js"},
-		run: `bunx, err := command("bunx", "tool")
-	if err != nil {
-		return bunx, err
-	}
-	npx, err := command("npx", "--offline", "tool")
-	return append(bunx, npx...), err`,
-		before: "tool-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "node_modules/tool/lib.js", "module.exports = 'tool-2'\n") },
-		want:   "tool-2 | tool-2",
-	},
-	{
-		name:   "R3-1 sh -c bun",
-		tools:  []string{"bun", "sh"},
-		files:  map[string]string{"main.ts": "console.log('sh-1')\n"},
-		run:    `return command("sh", "-c", "bun main.ts")`,
+		name:   "R3-1 sh -c cat",
+		tools:  []string{"sh", "cat"},
+		files:  map[string]string{"main.txt": "sh-1\n"},
+		run:    `return command("sh", "-c", "cat main.txt")`,
 		before: "sh-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "main.ts", "console.log('sh-2')\n") },
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "main.txt", "sh-2\n") },
 		want:   "sh-2",
 	},
 	{
 		name:  "R3-2 function values, method expressions and opaque results",
-		tools: []string{"bun"},
+		tools: []string{"cat"},
 		files: map[string]string{
 			"lib/lib.go": `package lib
 
@@ -288,34 +161,34 @@ type Runner struct{ Tool string }
 
 func (r Runner) Command(args ...string) *exec.Cmd { return exec.Command(r.Tool, args...) }
 
-var Make = func(args ...string) *exec.Cmd { return Runner{Tool: "bun"}.Command(args...) }
+var Make = func(args ...string) *exec.Cmd { return Runner{Tool: "cat"}.Command(args...) }
 
 func Opaque() any { return Make }
 `,
-			"a.ts": "console.log('method-1')\n",
-			"b.ts": "console.log('opaque-1')\n",
+			"a.txt": "method-1\n",
+			"b.txt": "opaque-1\n",
 		},
 		imports: []string{"fixture/lib"},
-		run: `method := lib.Runner.Command(lib.Runner{Tool: "bun"}, "a.ts")
+		run: `method := lib.Runner.Command(lib.Runner{Tool: "cat"}, "a.txt")
 	method.Dir = root()
 	a, err := method.CombinedOutput()
 	if err != nil {
 		return a, err
 	}
-	opaque := lib.Opaque().(func(...string) *exec.Cmd)("b.ts")
+	opaque := lib.Opaque().(func(...string) *exec.Cmd)("b.txt")
 	opaque.Dir = root()
 	b, err := opaque.CombinedOutput()
 	return append(a, b...), err`,
 		before: "method-1 | opaque-1",
 		edit: func(t *testing.T, f *fixture) {
-			f.write(t, "a.ts", "console.log('method-2')\n")
-			f.write(t, "b.ts", "console.log('opaque-2')\n")
+			f.write(t, "a.txt", "method-2\n")
+			f.write(t, "b.txt", "opaque-2\n")
 		},
 		want: "method-2 | opaque-2",
 	},
 	{
 		name:  "production code starts the process",
-		tools: []string{"node"},
+		tools: []string{"sh"},
 		files: map[string]string{
 			"lib/version.go": `package lib
 
@@ -324,67 +197,61 @@ import "os/exec"
 // Version reports the fixture's version, as production code that shells
 // out would.
 func Version(root string) ([]byte, error) {
-	command := exec.Command("node", "scripts/version.mjs")
+	command := exec.Command("sh", "scripts/version.sh")
 	command.Dir = root
 	return command.CombinedOutput()
 }
 `,
-			"scripts/version.mjs": "console.log('version-1')\n",
+			"scripts/version.sh": "echo version-1\n",
 		},
 		imports: []string{"fixture/lib"},
 		run:     `return lib.Version(root())`,
 		before:  "version-1",
-		edit:    func(t *testing.T, f *fixture) { f.write(t, "scripts/version.mjs", "console.log('version-2')\n") },
+		edit:    func(t *testing.T, f *fixture) { f.write(t, "scripts/version.sh", "echo version-2\n") },
 		want:    "version-2",
 	},
 	{
-		name:  "R3-3 tsc -p include set",
-		tools: []string{"tsc"},
-		files: map[string]string{
-			"tsconfig.json": `{"compilerOptions": {"strict": true, "noEmit": true}, "include": ["src"]}`,
-			"src/a.ts":      "export const a: number = 1\n",
-		},
-		run:    `out, _ := command("tsc", "-p", ".", "--pretty", "false"); return append(out, "tsc done"...), nil`,
-		before: "tsc done",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "src/b.ts", "export const b: number = 'added'\n") },
-		want:   "src/b.ts",
+		name:   "R3-3 file added to a globbed directory",
+		tools:  []string{"sh", "cat"},
+		files:  map[string]string{"src/a.txt": "listed-a\n"},
+		run:    `return command("sh", "-c", "cat src/*.txt")`,
+		before: "listed-a",
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "src/b.txt", "listed-b\n") },
+		want:   "listed-a | listed-b",
 	},
 	{
-		name:  "R4-1 inherited BUN_INSPECT_PRELOAD",
-		tools: []string{"bun"},
-		files: map[string]string{
-			"pre.ts":  "console.log('inspect-1')\n",
-			"main.ts": "console.log('main')\n",
-		},
-		env:    []string{"BUN_INSPECT_PRELOAD={{root}}/pre.ts"},
-		run:    `return command("bun", "main.ts")`,
-		before: "inspect-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "pre.ts", "console.log('inspect-2')\n") },
-		want:   "inspect-2",
+		name:   "R4-1 inherited variable names the file read",
+		tools:  []string{"sh", "cat"},
+		files:  map[string]string{"pre.txt": "named-1\n"},
+		env:    []string{"FIXTURE_FILE={{root}}/pre.txt"},
+		run:    `return command("sh", "-c", "cat \"$FIXTURE_FILE\"")`,
+		before: "named-1",
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "pre.txt", "named-2\n") },
+		want:   "named-2",
 	},
 	{
 		name:  "R4-2 sh wrapper in a temporary directory",
-		tools: []string{"bun", "sh"},
-		files: map[string]string{"main.ts": "console.log('wrapper-1')\n"},
+		tools: []string{"sh", "cat"},
+		files: map[string]string{"main.txt": "wrapper-1\n"},
 		run: `dir, err := os.MkdirTemp("", "wrapper-")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
-	wrapper := filepath.Join(dir, "js")
-	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nexec bun \"$@\"\n"), 0o755); err != nil {
+	wrapper := filepath.Join(dir, "show")
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nexec cat \"$@\"\n"), 0o755); err != nil {
 		return nil, err
 	}
-	return command(wrapper, "main.ts")`,
+	return command(wrapper, "main.txt")`,
 		before: "wrapper-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "main.ts", "console.log('wrapper-2')\n") },
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "main.txt", "wrapper-2\n") },
 		want:   "wrapper-2",
 	},
 	{
-		name:  "R4-2 renamed bun",
-		tools: []string{"bun"},
-		files: map[string]string{"main.ts": "console.log('renamed-1')\n"},
-		run: `bun, err := exec.LookPath("bun")
+		name:  "R4-2 renamed cat",
+		tools: []string{"cat"},
+		files: map[string]string{"main.txt": "renamed-1\n"},
+		run: `cat, err := exec.LookPath("cat")
 	if err != nil {
 		return nil, err
 	}
@@ -393,93 +260,46 @@ func Version(root string) ([]byte, error) {
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
-	runtime := filepath.Join(dir, "runtime")
-	if err := os.Symlink(bun, runtime); err != nil {
+	renamed := filepath.Join(dir, "show")
+	if err := os.Symlink(cat, renamed); err != nil {
 		return nil, err
 	}
-	return command(runtime, "main.ts")`,
+	return command(renamed, "main.txt")`,
 		before: "renamed-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "main.ts", "console.log('renamed-2')\n") },
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "main.txt", "renamed-2\n") },
 		want:   "renamed-2",
 	},
 	{
-		name:  "R4-3 bun run package script",
-		tools: []string{"bun"},
+		name:  "R4-4 go generate runs cat",
+		tools: []string{"cat", "go"},
 		files: map[string]string{
-			"package.json": `{"name": "fixture", "scripts": {"gen": "bun gen.ts"}}`,
-			"gen.ts":       "console.log('script-1')\n",
-		},
-		run:    `return command("bun", "run", "gen")`,
-		before: "script-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "gen.ts", "console.log('script-2')\n") },
-		want:   "script-2",
-	},
-	{
-		name:  "R4-4 go generate runs bun",
-		tools: []string{"bun", "go"},
-		files: map[string]string{
-			"gen/gen.go":  "package gen\n\n//go:generate bun gen.mjs\n",
-			"gen/gen.mjs": "console.log('generate-1')\n",
+			"gen/gen.go":  "package gen\n\n//go:generate cat gen.txt\n",
+			"gen/gen.txt": "generate-1\n",
 		},
 		run:    `return command("go", "generate", "./gen")`,
 		before: "generate-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "gen/gen.mjs", "console.log('generate-2')\n") },
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "gen/gen.txt", "generate-2\n") },
 		want:   "generate-2",
 	},
 	{
-		name:   "R4-5 missing dynamic import added",
-		tools:  []string{"bun"},
-		files:  map[string]string{"src/main.ts": "try {\n  const m = await import('./later.ts')\n  console.log(m.v)\n} catch {\n  console.log('none')\n}\n"},
-		run:    `return command("bun", "src/main.ts")`,
+		name:   "R4-5 missing file added",
+		tools:  []string{"sh", "cat"},
+		files:  map[string]string{"src/keep.txt": "keep\n"},
+		run:    `return command("sh", "-c", "cat src/later.txt 2>/dev/null || echo none")`,
 		before: "none",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "src/later.ts", "export const v = 'later'\n") },
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "src/later.txt", "later\n") },
 		want:   "later",
 	},
 	{
-		name:  "R4-6 node runs the TypeScript compiler's tsc.js",
-		tools: []string{"node", "tsc"},
-		files: map[string]string{
-			"tsconfig.json": `{"compilerOptions": {"strict": true, "noEmit": true}, "include": ["src"]}`,
-			"src/a.ts":      "export const a: number = 1\n",
-		},
-		run: `tsc, err := exec.LookPath("tsc")
-	if err != nil {
-		return nil, err
-	}
-	if tsc, err = filepath.EvalSymlinks(tsc); err != nil {
-		return nil, err
-	}
-	out, _ := command("node", filepath.Join(filepath.Dir(tsc), "..", "lib", "tsc.js"), "-p", ".", "--pretty", "false")
-	return append(out, "tsc done"...), nil`,
-		before: "tsc done",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "src/a.ts", "export const a: number = 'edited'\n") },
-		want:   "src/a.ts",
-	},
-	{
-		name:  "R4-7 tsc reference path",
-		tools: []string{"tsc"},
-		files: map[string]string{
-			"tsconfig.json":      `{"compilerOptions": {"strict": true, "noEmit": true}, "files": ["src/main.ts"]}`,
-			"src/main.ts":        "/// <reference path=\"../types/globals.d.ts\" />\nexport const n: number = fixtureValue\n",
-			"types/globals.d.ts": "declare const fixtureValue: number\n",
-		},
-		run:    `out, _ := command("tsc", "-p", ".", "--pretty", "false"); return append(out, "tsc done"...), nil`,
-		before: "tsc done",
-		edit: func(t *testing.T, f *fixture) {
-			f.write(t, "types/globals.d.ts", "declare const fixtureValue: string\n")
-		},
-		want: "src/main.ts",
-	},
-	{
 		name:    "R4-8 JSON-decoded exec.Cmd",
-		tools:   []string{"bun"},
-		files:   map[string]string{"main.ts": "console.log('decoded-1')\n"},
+		tools:   []string{"cat"},
+		files:   map[string]string{"main.txt": "decoded-1\n"},
 		imports: []string{"encoding/json"},
-		run: `bun, err := exec.LookPath("bun")
+		run: `cat, err := exec.LookPath("cat")
 	if err != nil {
 		return nil, err
 	}
-	spec, err := json.Marshal(map[string]any{"Path": bun, "Args": []string{"bun", "main.ts"}, "Dir": root()})
+	spec, err := json.Marshal(map[string]any{"Path": cat, "Args": []string{"cat", "main.txt"}, "Dir": root()})
 	if err != nil {
 		return nil, err
 	}
@@ -489,7 +309,7 @@ func Version(root string) ([]byte, error) {
 	}
 	return decoded.CombinedOutput()`,
 		before: "decoded-1",
-		edit:   func(t *testing.T, f *fixture) { f.write(t, "main.ts", "console.log('decoded-2')\n") },
+		edit:   func(t *testing.T, f *fixture) { f.write(t, "main.txt", "decoded-2\n") },
 		want:   "decoded-2",
 	},
 	{

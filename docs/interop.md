@@ -1,21 +1,18 @@
 # Host interop proposal
 
-Binding boilerplate is a central adoption risk. Effra should consume existing host declarations automatically while making behavioral trust explicit. The wider host representation design remains open. The prototype now imports Go package functions automatically, with canonical native host types, explicit absence adaptation and complete result tuples; TypeScript imports remain a proposal.
+Binding boilerplate is a central adoption risk. Effra should consume existing host declarations automatically while making behavioral trust explicit. The wider host representation design remains open. The prototype imports Go package functions automatically, with canonical native host types, explicit absence adaptation and complete result tuples. Go is the only host: TypeScript imports were proposed until 2026-10-26, when the owner removed the JavaScript interop ("we're removing the js interop id say").
 
-The [Gleam, ReScript and TypeScript source comparison](research/host-language-compilation.md) records implementation lessons and acceptance cases for target capabilities, host declarations, source maps and separate compilation. It does not imply these wider facilities are already shipped.
+The [Gleam, ReScript and TypeScript source comparison](research/host-language-compilation.md) records implementation lessons for target capabilities, host declarations, source maps and separate compilation; its TypeScript cases are a research record. It does not imply these wider facilities are already shipped.
 
 ## Proposed default
 
 Import host packages and their existing type declarations automatically. Retain their native values, named identities, methods, and data representations where appropriate. Generated calls and wrappers belong to the compiler. Avoid requiring users to restate every function/type in handwritten Effra declarations.
 
-Go syntax is implemented; TS syntax is illustrative:
-
 ```rust
 import go users "example.com/users"
-import ts { createClient } from "@acme/sdk"
 ```
 
-The two examples belong in modules for their respective targets. A Go import constrains that module to Go; a TS import constrains it to JS. Portable Effra services may have separate target providers. Imported Go and TS objects are not automatically interchangeable.
+A Go import names the host package; Go is the only target.
 
 This requires host-aware representation and type compatibility to inform the language design. A closed set of Effra-only record/list/enum representations would otherwise force conversions at every foreign call. Portable user-defined ADTs still need an explicit host representation; efficient native use and portable serialization are separate concerns.
 
@@ -33,29 +30,21 @@ Sources: [go/types](https://pkg.go.dev/go/types), [go/importer module-aware guid
 
 ## TypeScript integration
 
-Resolve .ts source and .d.ts declarations with TypeScript's checker and module resolution. Effra should consume a focused foreign type view, preserving object shapes, methods, overloads, null/undefined, generic instantiations, and host type identities where representable. Unsupported types should remain explicit foreign/opaque types or give targeted diagnostics; converting them to unchecked any would hide the boundary.
-
-A TypeScript type-query bridge and content-mapper projection have distinct jobs. The projection allows TypeScript to check generated call shapes, report mapped diagnostics, and supply editor features. The bridge must expose enough structured resolved type information for Effra's own checking and inspection. The content-mapper protocol alone does not implement that bridge or define Effra semantics. Reimplementing all TypeScript conditional/mapped type computation inside Effra is not a credible fast-compiler plan.
-
-Foreign declarations are trust inputs. Typed package declarations do not prove runtime value validity, absence of exceptions, cancellation behavior, purity, or callback lifetime. Declarations can support ergonomic automatic imports with visible provenance; a runtime decoder validates external data where a real value guarantee is required. Validation cannot prove an arbitrary callback's behavioral contract. Untyped/any results become unknown at a checked boundary; explicit unchecked access remains a visible escape hatch.
-
-Emit native JS objects/arrays/functions for host-facing values where the representation contract allows it. Preserve class instances and receiver semantics. Avoid copying data merely to wrap it in an Effra-specific container. Changes to foreign mutable objects can invalidate refinements, so immutable views, conservative invalidation, copying, or a trusted boundary will still be needed; automatic structural typing alone does not solve aliasing.
-
-Sources: [TypeScript structural compatibility and intentional unsoundness](https://www.typescriptlang.org/docs/handbook/type-compatibility.html), [content mappers](https://github.com/microsoft/typescript-go/pull/4712), [declaration-map follow-up](https://github.com/microsoft/TypeScript/pull/63936).
+Superseded 2026-10-26: Go is the only target, so Effra plans no TypeScript imports, type-query bridge, content-mapper projection or JS host-value representation. The proposal that stood here is kept in Git history; its sources were [TypeScript structural compatibility](https://www.typescriptlang.org/docs/handbook/type-compatibility.html), [content mappers](https://github.com/microsoft/typescript-go/pull/4712) and the [declaration-map follow-up](https://github.com/microsoft/TypeScript/pull/63936).
 
 ## Behavior contracts without signature duplication
 
 A foreign signature describes callable/value shape, not whether calling it is pure, throws, honors cancellation, releases resources, retains a callback, or is safe to share across tasks. Import those shapes automatically; keep supplemental behavioral facts in versioned package contracts attached to symbol identities.
 
-The conservative default should defer an unclassified foreign call and mark its foreign capability/trust boundary. JavaScript throws/rejections need an honest ForeignFailure or defect policy rather than a fabricated narrow error row. Go returned errors remain values until an explicit adaptation. Curated contracts can expose common APIs as pure functions or precise managed services. These contracts are reviewed trust assertions unless validated by stronger analysis; calling them compiler-proven would misstate the guarantee.
+The conservative default should defer an unclassified foreign call and mark its foreign capability/trust boundary. Go returned errors remain values until an explicit adaptation. Curated contracts can expose common APIs as pure functions or precise managed services. These contracts are reviewed trust assertions unless validated by stronger analysis; calling them compiler-proven would misstate the guarantee.
 
-The initial target is one real Go package and one real TS package, used without hand-redeclaring their signatures, with direct field/method access, an honest failure boundary, and a test showing how dependency type changes surface. A design that only works for toy declarations does not establish the adoption story.
+The initial target is real Go packages, used without hand-redeclaring their signatures, with direct field/method access, an honest failure boundary, and a test showing how dependency type changes surface. A design that only works for toy declarations does not establish the adoption story.
 
 ## Agent inspection and speed
 
 Foreign inspection should report source package/version, host signature, the adapted Effra contract, target availability, representation/conversions, and which facts are checked, validated, assumed, or unknown. The same answers must be available through CLI and MCP.
 
-Go-only compilation must not start a TypeScript checker. Cache host type summaries and reuse checker sessions for JS interop; editor projections should not force whole-project work on each build. Import/type-query cost belongs in compiler performance measurements.
+Cache host type summaries; editor projections should not force whole-project work on each build. Import/type-query cost belongs in compiler performance measurements.
 
 ## Declaration trust
 
@@ -101,6 +90,6 @@ A promoted method carries the contract of the method it promotes; an interface m
 
 A declared Go import also initializes its package, following Go's ordering and once-per-package semantics, before `main` or the test harness runs, whether or not a reachable call uses it. Pruning removes unreachable callers and bindings, never that initialization: a package no retained code names keeps a blank `_` import. Initialization is not a managed effect; it needs no `Foreign` provision, has no typed failure row and is not owned by a scope. Remove the import to remove its startup dependency. See [binary reachability](specs/binary-reachability.md#foreign-go-package-initialization).
 
-CLI and MCP inspect/check report used binding signatures, forwarding, cancellation, provenance and each native parameter/result with its adaptation (`direct`, `present`, `option`, `error`, `context`, `receiver`); a method binding is named by its receiver, such as `(*sdk.Client).Close`. That display name is presentation only: each binding also carries its `identity`, the package-path-qualified receiver type plus the selected method (`go:(*example.com/sdk.Client).Close`, or `go:` plus the full name of a function), so two receivers that display alike stay distinct bindings; host types appear in the shared canonical type table with kind `host`. The application plan roots every reachable host type and its declaring package, including a method receiver's package that source never imports. Imported export bytes and normalized contracts participate in semantic revisions, conservatively including dependency changes; there is no persistent Effra import cache. `importMicros` exposes loader cost separately. Go builds never start a TS checker; JS rejects Go imports before invoking Go tools.
+CLI and MCP inspect/check report used binding signatures, forwarding, cancellation, provenance and each native parameter/result with its adaptation (`direct`, `present`, `option`, `error`, `context`, `receiver`); a method binding is named by its receiver, such as `(*sdk.Client).Close`. That display name is presentation only: each binding also carries its `identity`, the package-path-qualified receiver type plus the selected method (`go:(*example.com/sdk.Client).Close`, or `go:` plus the full name of a function), so two receivers that display alike stay distinct bindings; host types appear in the shared canonical type table with kind `host`. The application plan roots every reachable host type and its declaring package, including a method receiver's package that source never imports. Imported export bytes and normalized contracts participate in semantic revisions, conservatively including dependency changes; there is no persistent Effra import cache. `importMicros` exposes loader cost separately. Builds never start a TypeScript checker, and an unsupported target is refused (EF110) before Go tools run.
 
-`examples/imports.ef` uses standard-library declarations and a real compiled local SDK fixture; `examples/host-types.ef` exercises nominal, nullable, typed-nil error and tuple results, methods, `io.Copy` and `fs.ReadDir` dispatch, reads and a short write over `examples/hosttypes`. Tests prove partial-value retention, context forwarding, replaced module resolution, and rejection after an imported return type changes. This fixture does not establish adoption of a complex third-party SDK. Full host object representation and TypeScript declaration consumption remain the next interop questions.
+`examples/imports.ef` uses standard-library declarations and a real compiled local SDK fixture; `examples/host-types.ef` exercises nominal, nullable, typed-nil error and tuple results, methods, `io.Copy` and `fs.ReadDir` dispatch, reads and a short write over `examples/hosttypes`. Tests prove partial-value retention, context forwarding, replaced module resolution, and rejection after an imported return type changes. This fixture does not establish adoption of a complex third-party SDK. Full host object representation remains the next interop question.

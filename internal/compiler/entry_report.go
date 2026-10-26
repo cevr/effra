@@ -9,8 +9,8 @@ import (
 // The entry report plan is the checked rendering schema for the entry
 // failure report (docs/design.md, "Entry failure report"). It is built once
 // from main's failure row and the checked types of each failure's fields, and
-// both targets render a failed entry from it, keyed by type rather than by
-// the runtime shape of a value. Like a codec plan, it is target-neutral; each
+// the Go target renders a failed entry from it, keyed by type rather than by
+// the runtime shape of a value. Like a codec plan, it is target-neutral; the
 // target lowers it to a table its runtime interprets.
 type entryReportPlan struct {
 	failures []entryReportFailure

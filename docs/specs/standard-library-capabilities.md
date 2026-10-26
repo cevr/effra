@@ -1,8 +1,10 @@
 # Bundled library capability contracts
 
+> **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
+
 Status: authorized implementation plan, not implemented parity. This finite plan follows the [library direction](../standard-library.md), [language abstractions](language-abstractions.md), [native server contract](native-server-contracts.md) and [binary reachability](binary-reachability.md). Existing interface, codec, server and machine tasks keep their scope. New library algorithms use ordinary checked interfaces; adding an operation must not require a compiler branch named after it.
 
-The reference is Effect4.0.1 at `460272d30457f4697d8b8c52cad41caccbcace08`. Source and test comparisons are inputs, not passing Effra tests. Every delivered row records Go/JS support, explicit differences, source/test anchors and executable receipts. Copied tests remain licensed reference inputs until a native behavior case actually runs.
+The reference is Effect4.0.1 at `460272d30457f4697d8b8c52cad41caccbcace08`. Source and test comparisons are inputs, not passing Effra tests. Every delivered row records Go support, explicit differences, source/test anchors and executable receipts. Copied tests remain licensed reference inputs until a native behavior case actually runs.
 
 ## Contracts shared by every family
 
@@ -58,7 +60,7 @@ Configuration distinguishes `ConfigMissing`, `ConfigInvalid`, and `ConfigSource`
 
 Caches expose success-only retention and explicit failure-retaining construction/policies; no API silently replays interruption. Resource leases and ordinary cached data remain distinct. First keyed interfaces may support string/integer keys while diagnosing unsupported nominal/composite keys. Sharing low-level waiter machinery is an implementation choice demonstrated by real consumers, not a requirement for one universal cache/pool abstraction.
 
-Go process/client support can land before JS support only with explicit target diagnostics and matrix entries. Native process work must research group signalling, descendant ownership and reaping before promising more than confirmed owned-child exit. Host capabilities are not an OS sandbox. General SQL/storage transactions, authorization and durability remain application/service contracts.
+Unsupported targets are diagnosed (EF110). Native process work must research group signalling, descendant ownership and reaping before promising more than confirmed owned-child exit. Host capabilities are not an OS sandbox. General SQL/storage transactions, authorization and durability remain application/service contracts.
 
 ## Adoption fixtures
 
@@ -78,7 +80,7 @@ Each batch is delivered in compiling, gated commits with independent review. Its
 
 | Batch | Scope and first reviewable slice | Dependencies and closure gate |
 | --- | --- | --- |
-| Owned core | Acquire/finalization, Deferred and Ref; then fixed semaphore, budgeted concurrency, Duration/clock | Canonical interfaces, generic data and recovery. Go/JS ownership, cancellation, race and mutable-payload negative tests; per-family reachability receipts |
+| Owned core | Acquire/finalization, Deferred and Ref; then fixed semaphore, budgeted concurrency, Duration/clock | Canonical interfaces, generic data and recovery. Go ownership, cancellation, race and mutable-payload negative tests; per-family reachability receipts |
 | Services | First-class layers and fallible provider construction; then configuration/redaction and structured logs | Owned core and reviewed layer construction. Real construction-path diagnostics, shared-value lifetime, Missing-only defaults, secret-safe inspection and log flush |
 | Flow | Finite-capacity queue/subscriptions and owned pull; then streams/sinks, retry and drainable workers; then the `unbounded` capacity and retry values with their justifier rules | Owned core. Item/byte/in-flight capacity, cancellation/no-loss, full terminal causes and deterministic virtual schedules |
 | Shared/platform | Memo/Cache/shared lease/Pool; then files, process and HTTP client adapters | Flow and services. Generic sharing fixtures plus actual host resource cleanup; target exclusions remain visible |

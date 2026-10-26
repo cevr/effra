@@ -1,12 +1,14 @@
 # Production foundation contracts
 
+> **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
+
 Status: finite foundation stage implemented and reviewed through `a9da03a`, with combined race/tool receipts at `8debbc2`, 2026-10-06. See [retained evidence and limits](../receipts/foundations-2026-10-06/README.md). Implementation was authorized by the owner on 2026-10-05 through Wayfinder + implement-spec. Integration branch: `integration/production-foundations`. The [implementation graph](https://github.com/cevr/effra/issues/26) is separate from existing HITL decision tickets; completing code does not close those decisions.
 
 This first complete foundation spec addresses the load-bearing gaps surfaced by generic service, orchestration, lifecycle, lint and testing patterns. Broader host-object, wire-codec, bounded-stream, database and deployment facilities remain subsequent stages in the [map](https://github.com/cevr/effra/issues/1), rather than fabricated guarantees of this stage.
 
 ## Standing constraints and acceptance seams
 
-`.ef` source is authoritative. Public effect contracts remain explicit and locally checked; unsupported representations are diagnosed. Go is the primary executable target; portable facilities also run on pinned JS/Effect. The compiler's semantic model owns CLI/MCP facts. Use the already established public seams: admitted `.ef` source, compiler Result/runtime exported APIs, compiled CLI and real stdio MCP. Build meaningful red/green acceptance cases at these seams, never a second analyzer or implementation-shaped snapshots.
+`.ef` source is authoritative. Public effect contracts remain explicit and locally checked; unsupported representations are diagnosed. Go is the only executable target (2026-10-26). The compiler's semantic model owns CLI/MCP facts. Use the already established public seams: admitted `.ef` source, compiler Result/runtime exported APIs, compiled CLI and real stdio MCP. Build meaningful red/green acceptance cases at these seams, never a second analyzer or implementation-shaped snapshots.
 
 Use isolated Rifts from the integration branch, no package install without lock changes, no push, and conventional compiling/gated commits. Implementer agents use the prescribed implementation model and TDD skill; integration/review use the prescribed review model. Root serializes ticket claims and resolutions on the GitHub [map](https://github.com/cevr/effra/issues/1). Do not close HITL decision tickets without owner feedback.
 
@@ -23,7 +25,7 @@ Use isolated Rifts from the integration branch, no package install without lock 
 - Provider construction dependencies and configuration are explicit and checked; supplying a provider adds its unresolved requirements to the composition contract. No silent row enlargement or blanket ambient dependency lookup.
 - Provider methods capture the dependencies supplied at the lexical provision/construction boundary. Later inner overrides must not change the captured dependency. Methods use the current invocation fiber/owner, never a retained construction runtime.
 - Graphs represent provider dependency and provision edges and expose incoming dependents. Unsupported fallible acquisition/sharing/cycle behavior remains diagnosed or explicitly unavailable, never implied by a pure dependency graph.
-- Acceptance: a configured service consumes a supplied port, two consumers use the intended shared provider value, an inner override cannot retarget its captured dependency, missing requirements fail checking, and Go/JS observations agree.
+- Acceptance: a configured service consumes a supplied port, two consumers use the intended shared provider value, an inner override cannot retarget its captured dependency, missing requirements fail checking, and Go observations match the contract.
 
 ## Causal synchronization and test scheduling
 
@@ -38,7 +40,7 @@ Use isolated Rifts from the integration branch, no package install without lock 
 - Track proven owner provenance through local aliases, conditionals, scopes, data payloads and deferred captures. A value/capture proved owned by a closing inner scope cannot escape it.
 - Borrowed outer handles remain usable; do not reject every File/Fiber return. Unknown foreign/function summaries are kept distinct from checked proof. Runtime guards remain in force.
 - Bounded analysis retains all ownership alternatives for a selected path or explicitly preserves uncertainty. A complete retained leaf is not proof that an enclosing record/enum subtree is complete. Wrapping, successive projections and helper/capture substitution must not discard potential inner ownership merely because another descendant has evidence. Exhausted proof must diagnose an unsafe escape, never become ordinary unknown foreign provenance; independently complete borrowed siblings remain usable.
-- Acceptance: reject direct, aliased and payload-contained inner-owned handle escape; allow borrowing an outer handle through an inner scope; preserve prior lifecycle behavior on both targets. This is deliberately bounded provenance checking, not a complete ownership/type system.
+- Acceptance: reject direct, aliased and payload-contained inner-owned handle escape; allow borrowing an outer handle through an inner scope; preserve prior lifecycle behavior. This is deliberately bounded provenance checking, not a complete ownership/type system.
 
 ## Reasoned lint suppression
 

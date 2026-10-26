@@ -6,13 +6,13 @@ The [finite capability contracts](specs/standard-library-capabilities.md) turn t
 
 ## Distribution and compiler boundary
 
-Ship the standard library with the compiler and managed runtime, under one compatible release. A Go application should not need a second language toolchain or handwritten wrappers for the basic concurrency, configuration, observability and platform facilities. JS can implement portable contracts using pinned Effect, while Go has native implementations.
+Ship the standard library with the compiler and managed runtime, under one compatible release. A Go application should not need a second language toolchain or handwritten wrappers for the basic concurrency, configuration, observability and platform facilities. Go is the only target: the library covers what Effect does, restated in Effra's idioms, with native Go implementations (owner, 2026-10-26).
 
 The compiler owns effect rows, nominal type identity, checked provision, target restrictions and enforceable ownership rules. Bundled libraries own algorithms and policies: retry schedules, bounded queues, streams, pools, caches and adapters. A facility needs compiler support only when its contract requires new language semantics. Keep the implicit prelude small; ordinary library modules still expose explicit contracts and remain inspectable through the same CLI/MCP model.
 
 The [Effect-to-language partition](research/effect-language-boundary.md) records the owner's 2026-10-06 direction: make contracts, sequencing, data and ownership regular language constructs; preserve runtime primitives where behavior needs them and keep facility policies in modules. Standard Go protocols and native host values must cross the interop seam automatically, with ownership/cancellation trust distinguished from method-set compatibility.
 
-Versioned library contracts participate in semantic revisions. Describe target support and limitations alongside signatures. Unsupported capabilities must diagnose or remain unavailable; a familiar API name cannot imply unverified Effect parity. Public Go/JS facilities need shared behavior tests for cancellation, cleanup, causes and boundary cases.
+Versioned library contracts participate in semantic revisions. Describe target support and limitations alongside signatures. Unsupported capabilities must diagnose or remain unavailable; a familiar API name cannot imply unverified Effect parity. Public facilities need behavior tests for cancellation, cleanup, causes and boundary cases.
 
 Small application binaries are an explicit north star. Bundled availability does not imply retention: select only reachable runtime modules, keep unused initialization and registration out, and lower any fluent calls as ordinary statically resolved operations. The [binary reachability contract](specs/binary-reachability.md) requires minimal/core/codec/HTTP receipts and separates compiler distribution size from application and external runtime costs.
 
@@ -22,14 +22,14 @@ Library functions put the value they transform first, so they read under the [pi
 
 ## Capability parity map
 
-Reference families were inspected in the installed pinned Effect source, including its core, concurrency, data, scheduling and service modules. This map tracks behavioral families rather than reproducing every TypeScript overload.
+Reference families were inspected in the pinned Effect source, including its core, concurrency, data, scheduling and service modules. This map tracks behavioral families rather than reproducing every TypeScript overload.
 
 | Family | Current Effra receipt | Required library contract |
 | --- | --- | --- |
 | Core effects, failures and recovery | Lazy recipes, explicit rows, execution, pure fallback catch | Payload-aware effectful handlers, typed effect-function values, composable row contracts |
 | Data and interpretation | Nominal records, payload enums, exhaustive match | Option/Result, collections, iteration and constrained generics |
-| Scope, fibers and causes | Owned forks, joins, interruption and waited cleanup on Go/JS | Public acquisition/release, finalization combinators, supervision and bounded concurrency |
-| Synchronization | One-shot latch with shared Go/JS causal lifecycle tests | Typed Deferred, Ref, semaphore, bounded queue and publish/subscribe with cancellation-aware admission |
+| Scope, fibers and causes | Owned forks, joins, interruption and waited cleanup | Public acquisition/release, finalization combinators, supervision and bounded concurrency |
+| Synchronization | One-shot latch with causal lifecycle tests | Typed Deferred, Ref, semaphore, bounded queue and publish/subscribe with cancellation-aware admission |
 | Time and schedules | Sleep/timeouts and scheduler-backed virtual test time | Clock/time representations, retry/repeat schedules, jitter and explicit deadline policy |
 | Providers | Checked configuration, dependency capture and reusable materialized values | Fallible scoped construction, shared acquisition policy, release ordering and cycle diagnostics |
 | Streams and sinks | Proposed | Backpressure, bounded retained items/bytes, resource ownership, interruption and terminal failure |
@@ -50,7 +50,7 @@ The detailed dependency graph is now [owned core → services/flow → shared/pl
 2. Build scoped provider acquisition, synchronization and bounded concurrency primitives. Gate: producer/waiter cancellation, sharing, shutdown and cleanup failures have public causal tests, and missing dependencies explain their construction path.
 3. Add codecs/configuration and the server/platform adapters needed by an actual application port. Gate: malformed external input is rejected; native handles, processes and response bodies close under cancellation; automatic host signatures remain the default.
 4. Add streams/sinks, pools/caches/batching, schedules and observability on those foundations. Gate: published capacity, failure, lifecycle and runtime-inspection contracts hold under overload and failure injection.
-5. Expand parity by real adoption fixtures, with explicit target matrices and version compatibility. Gate: supported Go/JS behavior agrees; genuine target restrictions and unresolved application policies remain visible.
+5. Expand coverage by real adoption fixtures, with explicit version compatibility. Gate: supported behavior matches its contract; genuine target restrictions and unresolved application policies remain visible.
 
 Develop tooling and measurements throughout. Library signatures should be shipped as reusable checked interfaces; importing one facility must not require parsing or checking the whole standard library on every edit. Generate/link only required native modules, avoid hidden initialization work, and report import/check/emission/build/runtime costs separately. Full library availability must preserve the fast iteration north star.
 
@@ -60,4 +60,4 @@ The finite foundation stage is integrated and reviewed; its [retained receipts](
 
 ## Upstream conformance inputs
 
-Use pinned Effect implementations and their tests as direct inputs to each library family. Pin the licensed upstream test suite by commit, verify the selected files' hashes and map its behavior cases to executable Effra tests. Distinguish reference-only, ported/passing, deliberately different and not-yet-supported cases; unsupported families cannot disappear from a parity report. Real application usage should constrain composition and operational fixtures, while public examples stay generic. The [native server contract](specs/native-server-contracts.md) applies this requirement to the first codec and HTTP/RPC slice.
+Use pinned Effect implementations and their tests as direct inputs to each library family. Record selected upstream behavior cases with their pinned file, line and label (`conformance/effect-cases.json`) and map them to executable Effra tests; the repository keeps no upstream checkout (owner, 2026-10-26). Distinguish reference-only, ported/passing, deliberately different and not-yet-supported cases; unsupported families cannot disappear from a parity report. Real application usage should constrain composition and operational fixtures, while public examples stay generic. The [native server contract](specs/native-server-contracts.md) applies this requirement to the first codec and HTTP/RPC slice.

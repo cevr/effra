@@ -17,8 +17,8 @@ Usage:
   DIR holds programs.json, written by
     EFFRA_OWNERSHIP_DUMP=DIR EFFRA_OWNERSHIP_FIXTURE=DIR/fixture.txt \\
       go test ./internal/compiler -run TestOwnershipMatrixDump -count=1
-  and a node_modules link for JS runs. Without --erased, BIN is built from the
-  current tree with the two refusals erased (scripts/ownership_truth.py --build).
+  Without --erased, BIN is built from the current tree with the two refusals
+  erased (scripts/ownership_truth.py --build).
 
 A matrix row records one of those classes, or "declared-row-policy": a row
 refused for what its declared rows admit, whose recorded schedule executes
@@ -38,10 +38,8 @@ the recorded class of every matrix row, in generator order. It needs an
 unfiltered run without drift, so every row is either executed truth, a policy
 row with its twin, or a known mismatch.
 
-Each program is executed once per target (the sweep repeats the programs it executes itself). The
-raising twins of the policy rows need Files, which the JS host lacks, so the 64 policy programs and
-their twins are Go-only; the shape is executed on both targets by the portable controls
-(cc_joins_in_order, cc_joins_in_order_first_caught and the cc_alt_* rows).
+Each program is executed once on the Go target, the only target since 2026-10-26 (the sweep
+repeats the programs it executes itself).
 
 A probe with a "witness" in probes.json is not executed itself: its source
 never runs the shape, or its failure races the exit. The named twin (the
@@ -100,9 +98,8 @@ def discard_build(directory, path):
 
 
 def execute(binary, path, target, tmp):
-    """Run one program on one target in a directory of its own: the Go and the JS
-    run of a program (and its repeats) never share a dist directory, so one
-    cannot discard the other's build output."""
+    """Run one program on one target in a directory of its own, so a run never
+    discards another run's build output."""
     import shutil
     directory = os.path.join(os.path.dirname(path), "target-" + target)
     os.makedirs(directory, exist_ok=True)
@@ -176,9 +173,6 @@ def main():
     pat = re.compile(a.only) if a.only else None
     work = os.path.join(a.dump, "src")
     os.makedirs(work, exist_ok=True)
-    link = os.path.join(a.dump, "node_modules")
-    if os.path.exists(link) and not os.path.exists(os.path.join(work, "node_modules")):
-        os.symlink(os.path.realpath(link), os.path.join(work, "node_modules"))
 
     def one(r):
         key = r["set"] + "/" + r["name"]
@@ -186,15 +180,13 @@ def main():
             return None
         path = os.path.join(work, r["set"] + "__" + r["name"].replace("@", "_") + ".ef")
         open(path, "w").write(r["source"])
-        res = {"key": key, "recorded": {"go": r["go"], "js": r.get("js", "")}}
+        res = {"key": key, "recorded": {"go": r["go"]}}
         if r.get("witness"):
             # Witnessed by another probe's execution; resolved after the pool.
             res["witness"] = r["witness"]
             return res
         labels = failure_labels(path)
         res["go"] = classify(*execute(erased, path, "go", tmp), labels)
-        if r.get("js"):
-            res["js"] = classify(*execute(erased, path, "js", tmp), labels)
         return res
 
     with cf.ThreadPoolExecutor(a.jobs) as pool:
@@ -207,13 +199,11 @@ def main():
         if twin is None:
             sys.exit(f"{x['key']}: witness {x['witness']} was not executed (filtered out?)")
         x["go"] = twin["go"]
-        if x["recorded"]["js"]:
-            x["js"] = twin.get("js", "")
     # A policy row is executed safe by design; its raising twin executes the shape.
     policy, bad = 0, 0
     mismatches = {}
     for x in results:
-        for target in ("go", "js"):
+        for target in ("go",):
             want = x["recorded"][target]
             if not want:
                 continue
@@ -259,8 +249,6 @@ def main():
         for x in results:
             if x["key"].startswith("matrix/"):
                 row = {"name": x["key"][len("matrix/"):], "go": x["recorded"]["go"]}
-                if x["recorded"]["js"]:
-                    row["js"] = x["recorded"]["js"]
                 truth.append(row)
         with open(a.write_truth, "w") as f:
             f.write("[\n" + ",\n".join("{\n" + ",\n".join('"%s": "%s"' % kv for kv in row.items()) + "\n}" for row in truth) + "\n]\n")

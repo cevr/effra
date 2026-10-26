@@ -2,7 +2,7 @@
 
 Assessment prepared 2026-10-05 against the checked prototype and the [real-world source review](research/effect-native-showcases.md). This is a proposed build order and set of acceptance gates, not implemented features or a production-readiness claim.
 
-Effra has a credible semantic core: lazy execution, explicit failure/service contracts, native Go artifacts, owned child/resource cleanup, a shared Go/JS lifecycle corpus and compiler-backed inspection. Practical adoption now depends on representing real application data, using real host libraries, constructing real providers and preserving the operational policies those applications need.
+Effra has a credible semantic core: lazy execution, explicit failure/service contracts, native Go artifacts, owned child/resource cleanup, a lifecycle corpus and compiler-backed inspection. Go is the only target (owner, 2026-10-26). Practical adoption now depends on representing real application data, using real host libraries, constructing real providers and preserving the operational policies those applications need.
 
 Records, closed ADTs and match now cover the first application-data slice. The source review shows why they are insufficient by themselves: notification providers need dependent initialization; SDKs return named objects; event consumers need decoding and bounded replay; command services need transactions and stable identity.
 
@@ -33,7 +33,7 @@ Extend the existing structured canonical type representation as these types arri
 
 Add modules and package-qualified nominal identities so services and types can be shared across files without collisions. Resolve the representation seam with Go interop while designing records/sums: a language-only representation that forces copying every SDK object would repeat the interop adoption problem. Efficient host values and portable wire encodings are separate contracts.
 
-**Exit gate:** a multi-file state/decision example runs on Go and JS. Codec rejection, incompatible identifiers and undeclared failures produce focused diagnostics. CLI/MCP inspect variant payloads and point to their declarations. A representative codec fixture has measured frontend time and memory.
+**Exit gate:** a multi-file state/decision example runs on Go. Codec rejection, incompatible identifiers and undeclared failures produce focused diagnostics. CLI/MCP inspect variant payloads and point to their declarations. A representative codec fixture has measured frontend time and memory.
 
 ### 2. Real host objects and managed adapters
 
@@ -45,7 +45,7 @@ Automatic signatures should remain the default. Supplemental metadata should des
 
 **Exit gate:** use an actual Go HTTP client and SQL client from `.ef`, including native options/handles and methods, without handwritten signatures for each symbol. Verify partial values, nil cases, cancellation, resource closure, and changed dependency declarations. Run the Go race detector around shared-handle cases. Record the required conversions and behavioral annotations rather than claiming universal transparent interop.
 
-The JS target can remain a clearly defined portable subset during this Go adoption gate. TypeScript declaration consumption is a separate host bridge with its own acceptance tests; content mapping alone does not supply it.
+Superseded 2026-10-26: there is no JS target and no TypeScript host bridge.
 
 ### 3. Providers that can run a real application
 
@@ -93,12 +93,12 @@ These fixtures are acceptance criteria, not claims that the corresponding compil
 
 SQL transactions, migrations, command receipts, correlation and outbox protocols can use existing databases and libraries behind explicit services. Effra needs to express and inspect their contracts; it does not need a new database or a universal durable workflow engine.
 
-Deployment state and deferred output graphs remain framework responsibilities. Native `output` syntax is an optional experiment after the application gates pass; a library interface can first preserve its phase semantics. The Go server path should not require a TypeScript checker, a deployment framework or complete JS host parity.
+Deployment state and deferred output graphs remain framework responsibilities. Native `output` syntax is an optional experiment after the application gates pass; a library interface can first preserve its phase semantics. The Go server path should not require a deployment framework.
 
 The next concrete compiler unit is external codec support for records/closed ADTs, designed together with native representation. In parallel as a development discipline, establish the package/import measurements that prevent this richer type system from sacrificing the Go-like iteration speed that motivated the project.
 
 ## Implemented first tooling and testing slice
 
-Native lint, a rule catalog, byte-anchor type queries, static dependency graphs and checked test discovery now share the compiler model through CLI/MCP. `ef test` supplies assertions and executes each case with a fresh owning scope on both targets. The process watchdog reports unconfirmed cleanup honestly. See [tooling](tooling.md) and [testing](testing.md).
+Native lint, a rule catalog, byte-anchor type queries, static dependency graphs and checked test discovery now share the compiler model through CLI/MCP. `ef test` supplies assertions and executes each case with a fresh owning scope. The process watchdog reports unconfirmed cleanup honestly. See [tooling](tooling.md) and [testing](testing.md).
 
 The next testing slice needs causal latches, scheduler-backed virtual time and scoped scratch fixtures. The next ownership slice needs source-level provenance for handles: runtime rejection of a closed File/Fiber is currently stronger than static escape checking. Neither is replaced by more lint rules.

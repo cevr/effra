@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -33,7 +32,7 @@ func TestGoRuntimeEnvironmentKeysEveryStepThatRunsGoPrograms(t *testing.T) {
 		for _, step := range steps {
 			if step.Inputs != nil && step.Argv[0] == "go" {
 				declared := *step.Inputs
-				declared.Paths, declared.Exclude, declared.Installed, declared.Generated = []string{"src/"}, nil, nil, nil
+				declared.Paths, declared.Exclude, declared.Installed = []string{"src/"}, nil, nil
 				key, err := g.key(&Step{Name: step.Name, Argv: step.Argv, Inputs: &declared})
 				if err != nil {
 					t.Fatal(err)
@@ -130,47 +129,6 @@ func TestProbe(t *testing.T) {
 		if g.toolDigest(step) == unset {
 			t.Errorf("setting %s left the tool digest unchanged", name)
 		}
-	}
-}
-
-// ESBUILD_BINARY_PATH would replace the installed esbuild, a keyed input,
-// with an arbitrary executable, and NODE_OPTIONS, NODE_PATH and BUN_OPTIONS
-// would load modules no key sees; no step ever sees them.
-func TestStepsNeverSeeAnUnpinnedToolOverride(t *testing.T) {
-	root := fixture(t)
-	for _, name := range []string{"ESBUILD_BINARY_PATH", "NODE_OPTIONS", "NODE_PATH", "BUN_OPTIONS"} {
-		t.Setenv(name, "/nonexistent/loop-probe-x")
-		code, out := runGate(t, root, t.TempDir(), []*Step{{Name: "probe", Argv: []string{"sh", "-c", `echo "override=${` + name + `-unset}"`}}})
-		if code != 0 || !strings.Contains(out, "override=unset") {
-			t.Fatalf("exit %d; the step saw %s:\n%s", code, name, out)
-		}
-		if _, set := stepVariable(name); set {
-			t.Fatalf("a key would name a %s no step runs with", name)
-		}
-	}
-}
-
-// A preload named by an unchanged NODE_OPTIONS can change its bytes between
-// runs. A cached Node step must never replay a pass that a changed preload
-// would fail: the preload never runs, so the pass holds for any bytes.
-func TestAnExternalNodePreloadCannotReachACachedStep(t *testing.T) {
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Fatal("node is required: the gate runs Node steps")
-	}
-	root := fixture(t)
-	preload := filepath.Join(t.TempDir(), "preload.cjs")
-	t.Setenv("NODE_OPTIONS", "--require="+preload)
-	step := func() []*Step {
-		return []*Step{{Name: "node", Argv: []string{"node", "-e", `console.log("node ran")`}, Inputs: &Inputs{Paths: []string{"src/"}, Tools: []string{"node"}}}}
-	}
-	cache := t.TempDir()
-	write(t, filepath.Dir(preload), "preload.cjs", `console.log("PRELOAD_RAN");`)
-	if code, out := runGate(t, root, cache, step()); code != 0 || strings.Contains(out, "PRELOAD_RAN") {
-		t.Fatalf("exit %d; the external preload ran:\n%s", code, out)
-	}
-	write(t, filepath.Dir(preload), "preload.cjs", `throw new Error("INJECTED_PRELOAD_FAILURE");`)
-	if code, out := runGate(t, root, t.TempDir(), step()); code != 0 {
-		t.Fatalf("exit %d; a changed external preload changed an executed result:\n%s", code, out)
 	}
 }
 

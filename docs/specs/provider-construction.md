@@ -1,5 +1,7 @@
 # Dependency-capturing provider construction
 
+> **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
+
 Implementation detail of [production foundations](production-foundations.md), not a separate architectural decision resolution.
 
 Providers that need configuration or services must expose construction as an effect. A constructor captures the supplied dependency service values at execution, while its methods retain the invocation's fiber, cancellation and owner. A stored constructor recipe remains lazy: each `run` materializes a distinct provider value. A materialized provider value can be explicitly reused by multiple consumers; declaration names alone are not sharing keys.

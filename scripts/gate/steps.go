@@ -28,8 +28,9 @@ const shardTargetSeconds = 12.0
 const testTimeout = "-timeout=15m"
 
 // testTools are the executables Go tests spawn besides the Go toolchain,
-// whose binary and version Go's test cache already keys on.
-var testTools = []string{"node", "bun", "tsc", "git"}
+// whose binary and version Go's test cache already keys on: git, and sh,
+// which runs the shell scripts tests write.
+var testTools = []string{"git", "sh"}
 
 // goRuntimeEnvironment are variables every Go-built program reads at startup.
 // They change what a program prints without changing its bytes: GODEBUG=
@@ -37,18 +38,6 @@ var testTools = []string{"node", "bun", "tsc", "git"}
 // step that runs Go programs and asserts their output keys on them, through
 // the "go" tool fingerprint or the test tool digest.
 var goRuntimeEnvironment = []string{"GODEBUG", "GOGC", "GOMEMLIMIT", "GOMAXPROCS", "GOTRACEBACK"}
-
-// unpinnedToolEnvironment are variables that make a tool load code from
-// outside every keyed input. Their string names files whose bytes no key
-// sees, so the gate removes them from every step rather than key arbitrary
-// files: ESBUILD_BINARY_PATH replaces the esbuild binary installed in
-// node_modules; NODE_OPTIONS and BUN_OPTIONS can preload any module; NODE_PATH
-// resolves imports from any directory.
-var unpinnedToolEnvironment = []string{"ESBUILD_BINARY_PATH", "NODE_OPTIONS", "NODE_PATH", "BUN_OPTIONS"}
-
-// testInstalled are installed dependency trees Go tests run Node and Bun
-// over; their content digest joins the tool digest.
-var testInstalled = []string{"node_modules"}
 
 // gofmtDirectories are the Go trees the gate requires to be gofmt-clean.
 var gofmtDirectories = []string{"cmd", "internal", "runtime", "lint", "scripts/gate", "scripts/conformance", "examples/go-interop", "examples/sdk", "examples/compare", "examples/hosttypes", "examples/lintpack"}

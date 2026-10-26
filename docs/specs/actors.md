@@ -1,5 +1,7 @@
 # Owned actors through ordinary protocols
 
+> **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
+
 Status: owner-directed design, 2026-10-06; not implemented language or library support. Actor execution is primarily a runtime/standard-library capability. Read [the source comparison](../research/actor-model-and-durability.md), [ordinary abstractions](language-abstractions.md), [owned library contracts](standard-library-capabilities.md), [Go boundaries](go-protocol-interop.md) and the [machine specialization](state-machines.md).
 
 An actor is an owned, addressable instance of behavior with typed messages/replies and explicit admission/concurrency policy. It need not be a state machine. Reuse ordinary `service`, `impl`, effect functions, `uses`, `raises` and scope ownership. An owned effect without a message interface remains a fiber. A machine adds checked transitions and state-entry lifetimes to one form of actor behavior.

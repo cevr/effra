@@ -8,9 +8,9 @@ The [contender roadmap](contender-roadmap.md) turns those patterns into concrete
 
 | Showcase | Status |
 | --- | --- |
-| Service workflow and explicit composition | Runnable on Go and JS |
-| Replacing an owned task | Runnable on Go and JS |
-| Records, closed ADTs, exhaustive matching and payload errors | Runnable on Go and JS; external decoding remains explicit |
+| Service workflow and explicit composition | Runnable on Go |
+| Replacing an owned task | Runnable on Go |
+| Records, closed ADTs, exhaustive matching and payload errors | Runnable on Go; external decoding remains explicit |
 | Decoded event types and codecs | Proposed; runtime validation remains essential |
 | Owned replay/live streams | Proposed library and stream support |
 | Durable command processing | Proposed application services, not an automatic language guarantee |
@@ -48,7 +48,6 @@ The full example supplies three demo providers at the entry point, handles each 
 
 ```sh
 ./bin/ef run examples/workflow.ef
-./bin/ef run examples/workflow.ef --target js
 ./bin/ef inspect examples/workflow.ef welcome
 # queued: Welcome, Ada
 # access denied
@@ -141,7 +140,7 @@ effect fn replacement() -> string uses {Clock} {
 }
 ```
 
-A production latest-work adapter has to connect host calls to a scope, replace a fiber and dispose that scope. Native syntax can make one replacement's ownership visible: interrupt the previous child, wait for its cleanup, then admit its replacement. The example's search function uses cancellation-aware Clock.sleep and prints `result: new` on both targets.
+A production latest-work adapter has to connect host calls to a scope, replace a fiber and dispose that scope. Native syntax can make one replacement's ownership visible: interrupt the previous child, wait for its cleanup, then admit its replacement. The example's search function uses cancellation-aware Clock.sleep and prints `result: new`.
 
 This chooses to wait for prior cleanup before replacement starts. A lower-latency policy may overlap generations under a surviving owner; it then needs generation checks before publishing results. This snippet does not claim to replicate a host adapter's concurrent admission or deduplication behavior. Duplicate-key handling, UI lifetime and stale-result publication remain explicit application policies.
 
@@ -209,13 +208,13 @@ This is deliberately separate from ordinary `run`: running an effect inside a se
 
 ## What to build next
 
-The strongest next language slice is explicit codec derivation for records and closed ADTs. It makes boundary validation clear without requiring higher-order row inference or a new scheduler. Match checking uses declared variants and local payload types; Go lowering uses tagged data and switches, with JS lowering preserving the same discriminator and coverage.
+The strongest next language slice is explicit codec derivation for records and closed ADTs. It makes boundary validation clear without requiring higher-order row inference or a new scheduler. Match checking uses declared variants and local payload types; Go lowering uses tagged data and switches.
 
 An implementation receipt should include both-target examples, rejection of missing branches and wrong payloads, imported/public type inspection, and a decode test rejecting malformed external data. Keep compile-stage measurements separate and measure representative ADT/match fixtures before adding inference complexity. Scoped provider graphs and streams can then build on that data model. Infrastructure phase syntax needs a separate design decision.
 
 ## 8. Testing through the same service contract
 
-**Runnable on Go and JS.** [testing.ef](../examples/testing.ef) supplies a fixture `Directory`, exercises success and typed recovery, and joins an owned child. The test runner supplies only `Assert`; fixture provision is ordinary checked language code.
+**Runnable on Go.** [testing.ef](../examples/testing.ef) supplies a fixture `Directory`, exercises success and typed recovery, and joins an owned child. The test runner supplies only `Assert`; fixture provision is ordinary checked language code.
 
 ```rust
 effect fn test_greeting() -> void raises {AssertionFailed, Missing} uses {Assert} {
@@ -224,7 +223,7 @@ effect fn test_greeting() -> void raises {AssertionFailed, Missing} uses {Assert
 }
 ```
 
-Run `ef test examples/testing.ef`, or add `--target js`. Each case gets a fresh scope and completes child shutdown and cleanup before its result is reported. Assertions report actual/expected values; a failed case does not prevent the next case from running. See [testing contracts](testing.md) for the watchdog and current limits.
+Run `ef test examples/testing.ef`. Each case gets a fresh scope and completes child shutdown and cleanup before its result is reported. Assertions report actual/expected values; a failed case does not prevent the next case from running. See [testing contracts](testing.md) for the watchdog and current limits.
 
 ## 9. Explain a composition without reading generated code
 
