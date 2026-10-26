@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Pos is a 1-based source position.
@@ -37,6 +38,12 @@ var keywords = map[string]bool{
 	"break": true, "chan": true, "const": true, "continue": true, "default": true,
 	"defer": true, "fallthrough": true, "for": true, "go": true, "goto": true,
 	"map": true, "range": true, "select": true, "var": true,
+}
+
+// identRune applies Go's identifier rule to one decoded rune: a letter or '_'
+// anywhere, and a decimal digit after the first rune.
+func identRune(r rune, first bool) bool {
+	return r == '_' || unicode.IsLetter(r) || !first && unicode.IsDigit(r)
 }
 
 // lex splits src into tokens, inserting semicolons at line ends with Go's rule.
@@ -108,14 +115,18 @@ func lex(src string) ([]token, error) {
 			}
 			toks = append(toks, token{tString, src[i : i+j+2], pos})
 			advance(j + 2)
-		case unicode.IsDigit(rune(c)):
+		case '0' <= c && c <= '9':
 			j := i
-			for j < len(src) && unicode.IsDigit(rune(src[j])) {
+			for j < len(src) && '0' <= src[j] && src[j] <= '9' {
 				j++
 			}
 			k := j
-			for k < len(src) && unicode.IsLetter(rune(src[k])) {
-				k++
+			for k < len(src) {
+				r, size := utf8.DecodeRuneInString(src[k:])
+				if !unicode.IsLetter(r) {
+					break
+				}
+				k += size
 			}
 			kind := tInt
 			if k > j {
@@ -128,10 +139,25 @@ func lex(src string) ([]token, error) {
 			}
 			toks = append(toks, token{kind, src[i:k], pos})
 			advance(k - i)
-		case c == '_' || unicode.IsLetter(rune(c)):
-			j := i
-			for j < len(src) && (src[j] == '_' || unicode.IsLetter(rune(src[j])) || unicode.IsDigit(rune(src[j]))) {
-				j++
+		case c == '_' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || c >= utf8.RuneSelf:
+			// Identifiers are tested on decoded code points, never on single
+			// bytes: the bytes of a multi-byte symbol can each look like a
+			// Latin-1 letter. A non-ASCII rune that cannot start an identifier
+			// is rejected here, including one that ends the previous identifier.
+			r, size := utf8.DecodeRuneInString(src[i:])
+			if r == utf8.RuneError && size == 1 {
+				return nil, fmt.Errorf("%d:%d: invalid UTF-8 byte %#x", pos.Line, pos.Col, c)
+			}
+			if !identRune(r, true) {
+				return nil, fmt.Errorf("%d:%d: unexpected character %q", pos.Line, pos.Col, r)
+			}
+			j := i + size
+			for j < len(src) {
+				r, size := utf8.DecodeRuneInString(src[j:])
+				if !identRune(r, false) { // U+FFFD, as for invalid UTF-8, is no letter
+					break
+				}
+				j += size
 			}
 			toks = append(toks, token{tIdent, src[i:j], pos})
 			advance(j - i)

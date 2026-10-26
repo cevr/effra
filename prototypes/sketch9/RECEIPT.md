@@ -201,3 +201,13 @@ Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-5-findings.md` (2 M
 | M2 string bytes Go source cannot hold | A string's value is what Go's rules decode from its spelling, and the emitter re-quotes that value (`strconv.Quote`). A raw byte order mark, NUL or invalid UTF-8 in a literal now builds and prints the same bytes as its escaped spelling. |
 
 The 9 round-5 programs join `testdata/probes/` (101 in all); probe headers gain `// out-quoted: "..."` for output a header cannot spell. The reviewer's intrinsic-name tests are `sketch/review_intrinsics_test.go`. `go test -race ./...` passes. `accept.sh` exit 0 (`accept-r6.log`).
+
+# Round 7: review round 6 repair
+
+Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-6-findings.md` (1 Major, no blocker).
+
+| Finding | Repair |
+| --- | --- |
+| M1 identifier tested one byte at a time | The lexer decodes each code point (`utf8.DecodeRuneInString`) and applies Go's identifier rule to the rune: a letter or `_` to start, and a letter, digit or `_` after that. A non-identifier rune or invalid UTF-8 in identifier position is S001. Number suffixes are decoded the same way. String literals keep their own path. |
+
+The 2 round-6 programs join `testdata/probes/` (103 in all): `nonletter-name` (`x⪪`, S001) and `letter-name` (`xª`, builds and prints `ok`). `sketch/lex_test.go` sweeps every non-ASCII code point, first and later in a name, against `go/token.IsIdentifier`, and rejects four invalid UTF-8 names with S001. These tests fail on the round-6 lexer. The sweep also shows that the old lexer rejected valid letters such as `À`. `accept.sh` exit 0 (`accept-r7.log`).
