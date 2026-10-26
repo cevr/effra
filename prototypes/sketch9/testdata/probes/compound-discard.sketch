@@ -1,0 +1,4 @@
+// out: 
+package demo
+func word() string { return "ok" }
+func main() { with(wire{}) { "prefix" + word() } }

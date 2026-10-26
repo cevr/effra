@@ -515,7 +515,7 @@ func (e *emitter) call(x *Call) (val, err string) {
 		return e.bindCall(fun.Name+"("+strings.Join(args, ", ")+")", in)
 	case *Selector:
 		recv := fun.X.(*Ident).Name
-		if recv == "timeout" {
+		if e.c.Afters[x] {
 			return e.after(x, in)
 		}
 		args := append([]string{"t__"}, e.args(x.Args)...)

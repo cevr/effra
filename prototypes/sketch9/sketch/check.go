@@ -25,6 +25,8 @@ const (
 // reserved names would collide with names the emitter generates or with Go.
 var reserved = map[string]bool{
 	"rt": true, "time": true, "fmt": true, "init": true, "Error": true,
+	// The prototype's intrinsic package and type names.
+	"timeout": true, "duration": true,
 	// Go's predeclared identifiers: a source binding would shadow them in the output.
 	"any": true, "append": true, "bool": true, "byte": true, "cap": true, "clear": true,
 	"close": true, "comparable": true, "complex": true, "complex64": true, "complex128": true,
@@ -62,6 +64,7 @@ type Checked struct {
 	Wires      map[string]*WireDecl
 	ErrorTypes map[string]bool
 	Info       map[Expr]info
+	Afters     map[*Call]bool // the timeout.After calls, as the checker resolved them
 	Caps       []string // every capability type, sorted: the emitted env fields
 }
 
@@ -94,6 +97,7 @@ func Check(f *File) (*Checked, []Diagnostic) {
 		Wires:      map[string]*WireDecl{},
 		ErrorTypes: map[string]bool{expiredType: true},
 		Info:       map[Expr]info{},
+		Afters:     map[*Call]bool{},
 	}}
 	c.declare()
 	for _, fn := range f.Funcs {
@@ -190,7 +194,9 @@ func (c *checker) declare() {
 	sort.Strings(c.Caps)
 	for _, d := range f.Types {
 		for _, fd := range d.Fields {
-			if fd.Name == "Error" || strings.HasSuffix(fd.Name, "_") {
+			// Fields keep their source names, so they follow the generated-name
+			// rule; Go's predeclared names are fine as fields.
+			if fd.Name == "Error" || strings.HasSuffix(fd.Name, "_") || strings.Contains(fd.Name, "__") {
 				c.errorf(fd.Pos, codeUnsupported, "field %s is reserved by the prototype's Go output", fd.Name)
 			}
 		}
@@ -786,6 +792,11 @@ func (c *checker) expr1(e Expr, fc *fnCtx) info {
 	case *BasicLit:
 		switch e.Kind {
 		case tString:
+			// M5 (round 4): decode once with Go's rules, so the emitted spelling
+			// is one Go accepts.
+			if _, err := strconv.Unquote(e.Text); err != nil {
+				c.errorf(e.Pos, codeType, "invalid string literal %s", e.Text)
+			}
 			return info{typ: "string"}
 		case tDuration:
 			c.durationLiteral(e.Pos, e.Text)
@@ -1032,6 +1043,7 @@ func (c *checker) call(e *Call, fc *fnCtx) info {
 	case *Selector:
 		id, ok := fun.X.(*Ident)
 		if ok && id.Name == "timeout" && fun.Sel == "After" && slices.Contains(c.File.Imports, "timeout") {
+			c.Afters[e] = true
 			return c.timeoutAfter(e, fc)
 		}
 		if ok {

@@ -176,3 +176,17 @@ Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-3-findings.md` (5 M
 | O1 | Still deferred. |
 
 The 23 round-3 witnesses join `testdata/probes/` (78 in all). The reviewer's walk and Go-universe tests are `sketch/review_walk_test.go`. `go test -race ./...` passes. `accept.sh` exit 0 (`accept-r4.log`). Lines: prototype Go without tests 3051, tests 592, total 3643.
+
+# Round 5: review round 4 repairs
+
+Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-4-findings.md` (5 Major, no blocker).
+
+| Finding | Repair |
+| --- | --- |
+| M1 fields and union markers | Field names follow the generated-name rule too: no `__`, no trailing `_`, not `Error`. Go's predeclared names stay allowed as fields. |
+| M2 a capability named `timeout` | The emitter lowers only the `timeout.After` calls the checker resolved (`Checked.Afters`). `timeout` is reserved as a source name. |
+| M3 a type named `duration` | `duration` is reserved as a source name, so it cannot alias the intrinsic type. |
+| M4 mixed keyed and positional fields | S001 at parse time. |
+| M5 invalid string escapes | String literals are decoded with Go's rules (`strconv.Unquote`); an invalid one is S108. |
+
+The 14 round-4 programs join `testdata/probes/` (92 in all). The reviewer's name-position matrix is `sketch/review_names_test.go`. `go test -race ./...` passes. `accept.sh` exit 0 (`accept-r5.log`). Lines: prototype Go without tests 3068, tests 662, total 3730.

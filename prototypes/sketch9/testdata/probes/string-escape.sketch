@@ -1,0 +1,3 @@
+// want S108
+package demo
+func main() uses Console { Console.Println("\q") }
