@@ -86,40 +86,38 @@ func viewEdges(view *GraphView, relation string) []GraphViewEdge {
 // identical node identities, contracts and relation occurrences.
 func TestGraphViewDependencySerializesLegacyFacts(t *testing.T) {
 	for _, name := range []string{"workflow", "layers", "callables-factory", "latest-task"} {
-		for _, target := range []string{"go", "js"} {
-			r := checkedGraphExample(t, name, target)
-			legacy, err := r.Graph()
-			if err != nil {
-				t.Fatal(err)
+		r := checkedGraphExample(t, name, "go")
+		legacy, err := r.Graph()
+		if err != nil {
+			t.Fatal(err)
+		}
+		view := graphView(t, r, map[string]any{"kind": "dependency"})
+		if len(view.Nodes) != len(legacy.Nodes) {
+			t.Fatalf("%s/go: view has %d nodes, legacy %d", name, len(view.Nodes), len(legacy.Nodes))
+		}
+		for _, node := range legacy.Nodes {
+			published := viewNode(view, node.ID)
+			if published == nil || published.Data.Effra.Kind != node.Kind || published.Data.Effra.Source != node.Source || !reflect.DeepEqual(published.Data.Effra.Contract, node.Contract) {
+				t.Fatalf("%s/go: node %s differs from the legacy fact", name, node.ID)
 			}
-			view := graphView(t, r, map[string]any{"kind": "dependency"})
-			if len(view.Nodes) != len(legacy.Nodes) {
-				t.Fatalf("%s/%s: view has %d nodes, legacy %d", name, target, len(view.Nodes), len(legacy.Nodes))
+		}
+		occurrences := map[[3]string]int{}
+		for _, edge := range legacy.Edges {
+			occurrences[[3]string{edge.From, edge.To, edge.Kind}]++
+		}
+		for _, edge := range view.Edges {
+			occurrences[[3]string{edge.SourceID, edge.TargetID, edge.Data.Effra.Relation}]--
+		}
+		for key, count := range occurrences {
+			if count != 0 {
+				t.Fatalf("%s/go: relation %v differs by %d", name, key, count)
 			}
-			for _, node := range legacy.Nodes {
-				published := viewNode(view, node.ID)
-				if published == nil || published.Data.Effra.Kind != node.Kind || published.Data.Effra.Source != node.Source || !reflect.DeepEqual(published.Data.Effra.Contract, node.Contract) {
-					t.Fatalf("%s/%s: node %s differs from the legacy fact", name, target, node.ID)
-				}
-			}
-			occurrences := map[[3]string]int{}
-			for _, edge := range legacy.Edges {
-				occurrences[[3]string{edge.From, edge.To, edge.Kind}]++
-			}
-			for _, edge := range view.Edges {
-				occurrences[[3]string{edge.SourceID, edge.TargetID, edge.Data.Effra.Relation}]--
-			}
-			for key, count := range occurrences {
-				if count != 0 {
-					t.Fatalf("%s/%s: relation %v differs by %d", name, target, key, count)
-				}
-			}
-			if !reflect.DeepEqual(view.Data.Effra.Facts.Types, nonNilTypes(legacy.Types)) {
-				t.Fatalf("%s/%s: whole-kind type closure differs from the legacy closure", name, target)
-			}
-			if view.Data.Effra.Completeness.Scope != "kind" || view.Data.Effra.Completeness.FactNodes != len(view.Nodes) {
-				t.Fatalf("%s/%s: whole-kind completeness %+v", name, target, view.Data.Effra.Completeness)
-			}
+		}
+		if !reflect.DeepEqual(view.Data.Effra.Facts.Types, nonNilTypes(legacy.Types)) {
+			t.Fatalf("%s/go: whole-kind type closure differs from the legacy closure", name)
+		}
+		if view.Data.Effra.Completeness.Scope != "kind" || view.Data.Effra.Completeness.FactNodes != len(view.Nodes) {
+			t.Fatalf("%s/go: whole-kind completeness %+v", name, view.Data.Effra.Completeness)
 		}
 	}
 }
@@ -158,198 +156,194 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure, Ledger
 		"function:parcelJson.decode": 2,
 		"function:parcelJson.encode": 1,
 	}
-	for _, target := range []string{"go", "js"} {
-		t.Run(target, func(t *testing.T) {
-			r := checkedGraphSource(t, source, target)
-			view := graphView(t, r, map[string]any{"kind": "dependency", "edgeKinds": []any{"calls"}})
-			counts := map[string]int{}
-			for _, edge := range viewEdges(view, "calls") {
-				if viewNode(view, edge.SourceID) == nil || viewNode(view, edge.TargetID) == nil {
-					t.Fatalf("call edge has an unresolved endpoint: %+v", edge)
-				}
-				counts[edge.TargetID]++
+	r := checkedGraphSource(t, source, "go")
+	view := graphView(t, r, map[string]any{"kind": "dependency", "edgeKinds": []any{"calls"}})
+	counts := map[string]int{}
+	for _, edge := range viewEdges(view, "calls") {
+		if viewNode(view, edge.SourceID) == nil || viewNode(view, edge.TargetID) == nil {
+			t.Fatalf("call edge has an unresolved endpoint: %+v", edge)
+		}
+		counts[edge.TargetID]++
+	}
+	for target, count := range want {
+		if counts[target] != count {
+			t.Fatalf("call topology for %s: got %d occurrences, want %d (all=%v)", target, counts[target], count, counts)
+		}
+	}
+	selectedResult := checkedGraphSource(t, source, "go")
+	selected := graphView(t, selectedResult, map[string]any{
+		"kind": "dependency", "focus": "function:transfer", "direction": "outgoing", "depth": 3,
+		"edgeKinds": []any{"contains", "calls"},
+	})
+	if err := ValidateGraphView(selected); err != nil {
+		t.Fatalf("selected checked calls view is invalid: %v", err)
+	}
+	requireReferenceClosure(t, view, selected)
+	selectedTargets := map[string]int{}
+	for _, edge := range viewEdges(selected, "calls") {
+		selectedTargets[edge.TargetID]++
+	}
+	for _, callee := range []string{"function:normalize", "function:parcelJson.decode", "function:parcelJson.encode"} {
+		if selectedTargets[callee] != 1 {
+			t.Fatalf("focused transfer view omits checked call to %s: %v", callee, selectedTargets)
+		}
+	}
+	typesByID, rowsByID := map[string]TypeNode{}, map[string]RowNode{}
+	for _, typeNode := range selected.Data.Effra.Facts.Types {
+		typesByID[typeNode.ID] = typeNode
+	}
+	for _, row := range selected.Data.Effra.Facts.Rows {
+		rowsByID[row.ID] = row
+	}
+	requireRowRef := func(owner, id string) {
+		if id != "" {
+			if _, found := rowsByID[id]; !found {
+				t.Fatalf("%s row reference %s is absent from selected row closure", owner, id)
 			}
-			for target, count := range want {
-				if counts[target] != count {
-					t.Fatalf("call topology for %s: got %d occurrences, want %d (all=%v)", target, counts[target], count, counts)
-				}
+		}
+	}
+	var requireTypeRef func(string, TypeRef)
+	requireTypeRef = func(owner string, ref TypeRef) {
+		if ref.ID != "" {
+			if _, found := typesByID[ref.ID]; !found {
+				t.Fatalf("%s type reference %s is absent from selected type closure", owner, ref.ID)
 			}
-			selectedResult := checkedGraphSource(t, source, target)
-			selected := graphView(t, selectedResult, map[string]any{
-				"kind": "dependency", "focus": "function:transfer", "direction": "outgoing", "depth": 3,
-				"edgeKinds": []any{"contains", "calls"},
-			})
-			if err := ValidateGraphView(selected); err != nil {
-				t.Fatalf("selected checked calls view is invalid: %v", err)
+		}
+		for _, id := range ref.ArgIDs {
+			if _, found := typesByID[id]; !found {
+				t.Fatalf("%s argument type reference %s is absent from selected type closure", owner, id)
 			}
-			requireReferenceClosure(t, view, selected)
-			selectedTargets := map[string]int{}
-			for _, edge := range viewEdges(selected, "calls") {
-				selectedTargets[edge.TargetID]++
+		}
+		if ref.Result != "" {
+			if _, found := typesByID[ref.Result]; !found {
+				t.Fatalf("%s result type reference %s is absent from selected type closure", owner, ref.Result)
 			}
-			for _, callee := range []string{"function:normalize", "function:parcelJson.decode", "function:parcelJson.encode"} {
-				if selectedTargets[callee] != 1 {
-					t.Fatalf("focused transfer view omits checked call to %s: %v", callee, selectedTargets)
-				}
+		}
+		requireRowRef(owner, ref.FailureRow)
+		requireRowRef(owner, ref.ServiceRow)
+		for _, arg := range ref.Args {
+			requireTypeRef(owner+" argument", arg)
+		}
+	}
+	var parcel *Declaration
+	for i := range selected.Data.Effra.Facts.Declarations {
+		declaration := &selected.Data.Effra.Facts.Declarations[i]
+		if declaration.Kind == "record" && declaration.Name == "Parcel" {
+			parcel = declaration
+		}
+	}
+	if parcel == nil {
+		t.Fatal("focused transfer view lost the Parcel declaration")
+	}
+	parcelType := TypeNode{}
+	parcelQualifier := parcel.Kind + ":" + currentModuleIdentity + ":" + parcel.Name + ":"
+	for _, typeNode := range typesByID {
+		if typeNode.Kind == parcel.Kind && typeNode.Name == parcel.Name && strings.HasPrefix(typeNode.Declaration, parcelQualifier) && qualifiedDeclarationPublished(typeNode.Declaration, selected.Data.Effra.Facts.Declarations) {
+			if parcelType.ID != "" {
+				t.Fatalf("Parcel declaration has multiple published nominal type nodes: %+v and %+v", parcelType, typeNode)
 			}
-			typesByID, rowsByID := map[string]TypeNode{}, map[string]RowNode{}
-			for _, typeNode := range selected.Data.Effra.Facts.Types {
-				typesByID[typeNode.ID] = typeNode
+			parcelType = typeNode
+		}
+	}
+	if parcelType.ID == "" || parcel.Identity == "" {
+		t.Fatalf("focused transfer view lost the qualified Parcel type/declaration: type=%+v declaration=%+v", parcelType, parcel)
+	}
+	fieldType := ""
+	for _, field := range parcel.Fields {
+		if field.Name == "id" {
+			if field.TypeRef.Name != "i64" {
+				t.Fatalf("Parcel.id declaration has wrong type reference: %+v", field.TypeRef)
 			}
-			for _, row := range selected.Data.Effra.Facts.Rows {
-				rowsByID[row.ID] = row
+			fieldType = field.TypeRef.ID
+		}
+	}
+	i64, hasI64 := typesByID[fieldType]
+	if fieldType == "" || !hasI64 || i64.Kind != "primitive" || i64.Name != "i64" {
+		t.Fatalf("Parcel.id does not reach its published primitive i64 type: fieldRef=%q node=%+v", fieldType, i64)
+	}
+	for callee, want := range map[string]struct {
+		argument, result   string
+		failures, services []string
+	}{
+		"function:normalize":         {argument: "Parcel", result: "Parcel", failures: []string{"LedgerFailure"}, services: []string{"Ledger"}},
+		"function:parcelJson.decode": {argument: "string", result: "Parcel", failures: []string{"JsonDecodeFailure"}},
+		"function:parcelJson.encode": {argument: "Parcel", result: "string", failures: []string{"JsonEncodeFailure"}},
+	} {
+		node := viewNode(selected, callee)
+		if node == nil || node.Data.Effra.Contract == nil || node.Data.Effra.Contract.Callable == nil || node.Data.Effra.Source == "" || node.Data.Effra.Span == nil {
+			t.Fatalf("focused view lost callable contract for %s: %+v", callee, node)
+		}
+		contract := node.Data.Effra.Contract.Callable
+		valueContract := node.Data.Effra.Contract
+		for _, ref := range []TypeRef{valueContract.Type, valueContract.Contract} {
+			requireTypeRef(callee+" signature", ref)
+		}
+		requireRowRef(callee+" value failure", valueContract.FailureRow)
+		requireRowRef(callee+" value service", valueContract.ServiceRow)
+		if len(contract.Parameters) != 1 || contract.Parameters[0].TypeRef.Name != want.argument || contract.Result.Name != want.result {
+			t.Fatalf("focused view has wrong parameter/result for %s: %+v", callee, contract)
+		}
+		for _, typeRef := range []TypeRef{contract.Parameters[0].TypeRef, contract.Result} {
+			if typeRef.ID == "" {
+				t.Fatalf("%s has an unqualified parameter/result type: %+v", callee, typeRef)
 			}
-			requireRowRef := func(owner, id string) {
+			requireTypeRef(callee+" parameter/result", typeRef)
+		}
+		if !slices.Equal(contract.Failures, want.failures) || !slices.Equal(contract.Requirements, want.services) {
+			t.Fatalf("%s inline failure/service labels differ from the checked contract: failures=%v services=%v want failures=%v services=%v", callee, contract.Failures, contract.Requirements, want.failures, want.services)
+		}
+		if contract.Signature == "" || valueContract.Contract.ID != contract.Signature {
+			t.Fatalf("%s callable signature does not match its canonical contract reference: callable=%+v value=%+v", callee, contract, valueContract)
+		}
+		signature, found := typesByID[contract.Signature]
+		if !found || signature.Kind != "callable" || signature.Mode != "effect" {
+			t.Fatalf("%s signature does not resolve to a published effect callable type: ref=%q node=%+v found=%t", callee, contract.Signature, signature, found)
+		}
+		if len(signature.Args) != len(contract.Parameters) || signature.Result != contract.Result.ID {
+			t.Fatalf("%s canonical signature arguments/result differ from the callable contract: signature=%+v callable=%+v", callee, signature, contract)
+		}
+		for i, argument := range signature.Args {
+			if _, found := typesByID[argument]; !found || argument != contract.Parameters[i].TypeRef.ID {
+				t.Fatalf("%s canonical signature argument %d does not resolve to its published parameter type: ref=%q parameter=%+v found=%t", callee, i, argument, contract.Parameters[i], found)
+			}
+		}
+		if _, found := typesByID[signature.Result]; !found {
+			t.Fatalf("%s canonical signature result %s is absent from the selected type closure", callee, signature.Result)
+		}
+		// Compatibility callable rows publish labels; the canonical signature owns row IDs.
+		if valueContract.FailureRow != signature.FailureRow || valueContract.ServiceRow != signature.ServiceRow || valueContract.Contract.FailureRow != signature.FailureRow || valueContract.Contract.ServiceRow != signature.ServiceRow {
+			t.Fatalf("%s callable and canonical signature row references disagree: value=%+v typeRef=%+v signature=%+v", callee, valueContract, valueContract.Contract, signature)
+		}
+		checkPublishedRow := func(owner, id string, labels []string) {
+			if len(labels) == 0 {
 				if id != "" {
-					if _, found := rowsByID[id]; !found {
-						t.Fatalf("%s row reference %s is absent from selected row closure", owner, id)
-					}
+					t.Fatalf("%s unexpectedly publishes row %s for empty labels", owner, id)
 				}
+				return
 			}
-			var requireTypeRef func(string, TypeRef)
-			requireTypeRef = func(owner string, ref TypeRef) {
-				if ref.ID != "" {
-					if _, found := typesByID[ref.ID]; !found {
-						t.Fatalf("%s type reference %s is absent from selected type closure", owner, ref.ID)
-					}
-				}
-				for _, id := range ref.ArgIDs {
-					if _, found := typesByID[id]; !found {
-						t.Fatalf("%s argument type reference %s is absent from selected type closure", owner, id)
-					}
-				}
-				if ref.Result != "" {
-					if _, found := typesByID[ref.Result]; !found {
-						t.Fatalf("%s result type reference %s is absent from selected type closure", owner, ref.Result)
-					}
-				}
-				requireRowRef(owner, ref.FailureRow)
-				requireRowRef(owner, ref.ServiceRow)
-				for _, arg := range ref.Args {
-					requireTypeRef(owner+" argument", arg)
-				}
+			requireRowRef(owner, id)
+			row, found := rowsByID[id]
+			if id == "" || !found || !slices.Equal(row.Labels, labels) {
+				t.Fatalf("%s row %s does not resolve to exact published labels %v: row=%+v found=%t", owner, id, labels, row, found)
 			}
-			var parcel *Declaration
-			for i := range selected.Data.Effra.Facts.Declarations {
-				declaration := &selected.Data.Effra.Facts.Declarations[i]
-				if declaration.Kind == "record" && declaration.Name == "Parcel" {
-					parcel = declaration
-				}
+		}
+		checkPublishedRow(callee+" signature failure", signature.FailureRow, want.failures)
+		checkPublishedRow(callee+" signature service", signature.ServiceRow, want.services)
+		for _, typeRef := range []TypeRef{contract.Parameters[0].TypeRef, contract.Result} {
+			if typeRef.Name != "Parcel" {
+				continue
 			}
-			if parcel == nil {
-				t.Fatal("focused transfer view lost the Parcel declaration")
+			nodeType := typesByID[typeRef.ID]
+			if typeRef.ID != parcelType.ID || typeRef.Declaration != parcelType.Declaration || nodeType.Declaration != parcelType.Declaration {
+				t.Fatalf("%s Parcel signature reference %s does not resolve through its declaration: %+v", callee, typeRef.ID, nodeType)
 			}
-			parcelType := TypeNode{}
-			parcelQualifier := parcel.Kind + ":" + currentModuleIdentity + ":" + parcel.Name + ":"
-			for _, typeNode := range typesByID {
-				if typeNode.Kind == parcel.Kind && typeNode.Name == parcel.Name && strings.HasPrefix(typeNode.Declaration, parcelQualifier) && qualifiedDeclarationPublished(typeNode.Declaration, selected.Data.Effra.Facts.Declarations) {
-					if parcelType.ID != "" {
-						t.Fatalf("Parcel declaration has multiple published nominal type nodes: %+v and %+v", parcelType, typeNode)
-					}
-					parcelType = typeNode
-				}
-			}
-			if parcelType.ID == "" || parcel.Identity == "" {
-				t.Fatalf("focused transfer view lost the qualified Parcel type/declaration: type=%+v declaration=%+v", parcelType, parcel)
-			}
-			fieldType := ""
-			for _, field := range parcel.Fields {
-				if field.Name == "id" {
-					if field.TypeRef.Name != "i64" {
-						t.Fatalf("Parcel.id declaration has wrong type reference: %+v", field.TypeRef)
-					}
-					fieldType = field.TypeRef.ID
-				}
-			}
-			i64, hasI64 := typesByID[fieldType]
-			if fieldType == "" || !hasI64 || i64.Kind != "primitive" || i64.Name != "i64" {
-				t.Fatalf("Parcel.id does not reach its published primitive i64 type: fieldRef=%q node=%+v", fieldType, i64)
-			}
-			for callee, want := range map[string]struct {
-				argument, result   string
-				failures, services []string
-			}{
-				"function:normalize":         {argument: "Parcel", result: "Parcel", failures: []string{"LedgerFailure"}, services: []string{"Ledger"}},
-				"function:parcelJson.decode": {argument: "string", result: "Parcel", failures: []string{"JsonDecodeFailure"}},
-				"function:parcelJson.encode": {argument: "Parcel", result: "string", failures: []string{"JsonEncodeFailure"}},
-			} {
-				node := viewNode(selected, callee)
-				if node == nil || node.Data.Effra.Contract == nil || node.Data.Effra.Contract.Callable == nil || node.Data.Effra.Source == "" || node.Data.Effra.Span == nil {
-					t.Fatalf("focused view lost callable contract for %s: %+v", callee, node)
-				}
-				contract := node.Data.Effra.Contract.Callable
-				valueContract := node.Data.Effra.Contract
-				for _, ref := range []TypeRef{valueContract.Type, valueContract.Contract} {
-					requireTypeRef(callee+" signature", ref)
-				}
-				requireRowRef(callee+" value failure", valueContract.FailureRow)
-				requireRowRef(callee+" value service", valueContract.ServiceRow)
-				if len(contract.Parameters) != 1 || contract.Parameters[0].TypeRef.Name != want.argument || contract.Result.Name != want.result {
-					t.Fatalf("focused view has wrong parameter/result for %s: %+v", callee, contract)
-				}
-				for _, typeRef := range []TypeRef{contract.Parameters[0].TypeRef, contract.Result} {
-					if typeRef.ID == "" {
-						t.Fatalf("%s has an unqualified parameter/result type: %+v", callee, typeRef)
-					}
-					requireTypeRef(callee+" parameter/result", typeRef)
-				}
-				if !slices.Equal(contract.Failures, want.failures) || !slices.Equal(contract.Requirements, want.services) {
-					t.Fatalf("%s inline failure/service labels differ from the checked contract: failures=%v services=%v want failures=%v services=%v", callee, contract.Failures, contract.Requirements, want.failures, want.services)
-				}
-				if contract.Signature == "" || valueContract.Contract.ID != contract.Signature {
-					t.Fatalf("%s callable signature does not match its canonical contract reference: callable=%+v value=%+v", callee, contract, valueContract)
-				}
-				signature, found := typesByID[contract.Signature]
-				if !found || signature.Kind != "callable" || signature.Mode != "effect" {
-					t.Fatalf("%s signature does not resolve to a published effect callable type: ref=%q node=%+v found=%t", callee, contract.Signature, signature, found)
-				}
-				if len(signature.Args) != len(contract.Parameters) || signature.Result != contract.Result.ID {
-					t.Fatalf("%s canonical signature arguments/result differ from the callable contract: signature=%+v callable=%+v", callee, signature, contract)
-				}
-				for i, argument := range signature.Args {
-					if _, found := typesByID[argument]; !found || argument != contract.Parameters[i].TypeRef.ID {
-						t.Fatalf("%s canonical signature argument %d does not resolve to its published parameter type: ref=%q parameter=%+v found=%t", callee, i, argument, contract.Parameters[i], found)
-					}
-				}
-				if _, found := typesByID[signature.Result]; !found {
-					t.Fatalf("%s canonical signature result %s is absent from the selected type closure", callee, signature.Result)
-				}
-				// Compatibility callable rows publish labels; the canonical signature owns row IDs.
-				if valueContract.FailureRow != signature.FailureRow || valueContract.ServiceRow != signature.ServiceRow || valueContract.Contract.FailureRow != signature.FailureRow || valueContract.Contract.ServiceRow != signature.ServiceRow {
-					t.Fatalf("%s callable and canonical signature row references disagree: value=%+v typeRef=%+v signature=%+v", callee, valueContract, valueContract.Contract, signature)
-				}
-				checkPublishedRow := func(owner, id string, labels []string) {
-					if len(labels) == 0 {
-						if id != "" {
-							t.Fatalf("%s unexpectedly publishes row %s for empty labels", owner, id)
-						}
-						return
-					}
-					requireRowRef(owner, id)
-					row, found := rowsByID[id]
-					if id == "" || !found || !slices.Equal(row.Labels, labels) {
-						t.Fatalf("%s row %s does not resolve to exact published labels %v: row=%+v found=%t", owner, id, labels, row, found)
-					}
-				}
-				checkPublishedRow(callee+" signature failure", signature.FailureRow, want.failures)
-				checkPublishedRow(callee+" signature service", signature.ServiceRow, want.services)
-				for _, typeRef := range []TypeRef{contract.Parameters[0].TypeRef, contract.Result} {
-					if typeRef.Name != "Parcel" {
-						continue
-					}
-					nodeType := typesByID[typeRef.ID]
-					if typeRef.ID != parcelType.ID || typeRef.Declaration != parcelType.Declaration || nodeType.Declaration != parcelType.Declaration {
-						t.Fatalf("%s Parcel signature reference %s does not resolve through its declaration: %+v", callee, typeRef.ID, nodeType)
-					}
-				}
-			}
-			for _, target := range []string{"function:parcelJson.decode", "function:parcelJson.encode"} {
-				node := viewNode(view, target)
-				if node == nil || node.Data.Effra.Contract == nil || node.Data.Effra.Source == "" || node.Data.Effra.Span == nil {
-					t.Fatalf("derived codec node lost checked contract/source/span closure: %+v", node)
-				}
-			}
-		})
+		}
+	}
+	for _, target := range []string{"function:parcelJson.decode", "function:parcelJson.encode"} {
+		node := viewNode(view, target)
+		if node == nil || node.Data.Effra.Contract == nil || node.Data.Effra.Source == "" || node.Data.Effra.Span == nil {
+			t.Fatalf("derived codec node lost checked contract/source/span closure: %+v", node)
+		}
 	}
 }
 
@@ -1045,47 +1039,45 @@ func TestGraphViewFocusedViewsValidateOnEveryExample(t *testing.T) {
 	var focused atomic.Int64
 	t.Run("examples", func(t *testing.T) {
 		for _, file := range files {
-			for _, target := range []string{"go", "js"} {
-				t.Run(filepath.Base(file)+"/"+target, func(t *testing.T) {
-					t.Parallel()
-					raw, err := os.ReadFile(file)
+			t.Run(filepath.Base(file)+"/go", func(t *testing.T) {
+				t.Parallel()
+				raw, err := os.ReadFile(file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				r := CompileAt(string(raw), "go", filepath.Dir(file))
+				if !r.Checked {
+					return
+				}
+				for _, kind := range []GraphKind{GraphKindDependency, GraphKindLayers, GraphKindApplication} {
+					whole, err := r.GraphView(graphRequest(t, map[string]any{"kind": string(kind)}))
 					if err != nil {
-						t.Fatal(err)
+						continue
 					}
-					r := CompileAt(string(raw), target, filepath.Dir(file))
-					if !r.Checked {
-						return
+					relations := [][]any{nil}
+					for _, relation := range graphKindRelations[kind] {
+						if kind != GraphKindDependency {
+							relations = append(relations, []any{relation})
+						}
 					}
-					for _, kind := range []GraphKind{GraphKindDependency, GraphKindLayers, GraphKindApplication} {
-						whole, err := r.GraphView(graphRequest(t, map[string]any{"kind": string(kind)}))
-						if err != nil {
-							continue
-						}
-						relations := [][]any{nil}
-						for _, relation := range graphKindRelations[kind] {
-							if kind != GraphKindDependency {
-								relations = append(relations, []any{relation})
-							}
-						}
-						for _, node := range whole.Nodes {
-							for _, direction := range []string{"outgoing", "incoming", "both"} {
-								for _, edgeKinds := range relations {
-									fields := map[string]any{"kind": string(kind), "focus": node.ID, "direction": direction, "depth": 1}
-									if edgeKinds != nil {
-										fields["edgeKinds"] = edgeKinds
-									}
-									view, err := r.GraphView(graphRequest(t, fields))
-									if err != nil {
-										t.Fatalf("%s %s %v: %v", filepath.Base(file), target, fields, err)
-									}
-									requireReferenceClosure(t, whole, view)
-									focused.Add(1)
+					for _, node := range whole.Nodes {
+						for _, direction := range []string{"outgoing", "incoming", "both"} {
+							for _, edgeKinds := range relations {
+								fields := map[string]any{"kind": string(kind), "focus": node.ID, "direction": direction, "depth": 1}
+								if edgeKinds != nil {
+									fields["edgeKinds"] = edgeKinds
 								}
+								view, err := r.GraphView(graphRequest(t, fields))
+								if err != nil {
+									t.Fatalf("%s go %v: %v", filepath.Base(file), fields, err)
+								}
+								requireReferenceClosure(t, whole, view)
+								focused.Add(1)
 							}
 						}
 					}
-				})
-			}
+				}
+			})
 		}
 	})
 	if focused.Load() == 0 {

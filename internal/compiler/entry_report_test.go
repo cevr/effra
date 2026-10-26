@@ -17,7 +17,7 @@ import (
 // runs with one that exits with a fixed composite cause; the generated entry
 // (signal context, report plan, renderer and exit status) is unchanged. The
 // payload mismatch and the label outside main's row are negative controls:
-// neither target guesses a rendering from a value's shape. Each mutant
+// the entry never guesses a rendering from a value's shape. Each mutant
 // breaks the generated entry and must make the test fail.
 const entryReportCompositeSource = `error Bad
 error Worse {
@@ -54,33 +54,18 @@ func (m entryMutant) apply(t *testing.T, program string) string {
 }
 
 func TestEntryReportRendersACompositeCauseIdenticallyOnBothTargets(t *testing.T) {
-	targets := []struct {
-		name    string
-		run     func(*testing.T, []entryMutant) (string, int)
-		mutants []entryMutant
-	}{
-		{"go", runGoEntryReportComposite, []entryMutant{
-			{"truncated cause", "efEntryReport.Report(cause)", "efEntryReport.Report(cause[:1])"},
-			{"wrong mixed-cause status", "os.Exit(er.EntryExitCode(cause))", "os.Exit(130)"},
-		}},
-		{"js", runJSEntryReportComposite, []entryMutant{
-			{"truncated cause", "reasons.map(reason => __ef_reportReason(plan, reason)", "reasons.slice(0, 1).map(reason => __ef_reportReason(plan, reason)"},
-			{"wrong mixed-cause status", "reason._tag === 'Interrupt') ? 130 : 1;", "reason._tag === 'Interrupt') ? 130 : 130;"},
-		}},
+	stderr, code := runGoEntryReportComposite(t, nil)
+	if stderr != entryReportCompositeWant || code != 1 {
+		t.Fatalf("code=%d stderr=%q\nwant code=1 stderr=%q", code, stderr, entryReportCompositeWant)
 	}
-	for _, target := range targets {
-		t.Run(target.name, func(t *testing.T) {
-			stderr, code := target.run(t, nil)
-			if stderr != entryReportCompositeWant || code != 1 {
-				t.Fatalf("code=%d stderr=%q\nwant code=1 stderr=%q", code, stderr, entryReportCompositeWant)
-			}
-			for _, mutant := range target.mutants {
-				stderr, code := target.run(t, []entryMutant{mutant})
-				if stderr == entryReportCompositeWant && code == 1 {
-					t.Errorf("mutant %q survived: the test does not observe the generated entry", mutant.name)
-				}
-			}
-		})
+	for _, mutant := range []entryMutant{
+		{"truncated cause", "efEntryReport.Report(cause)", "efEntryReport.Report(cause[:1])"},
+		{"wrong mixed-cause status", "os.Exit(er.EntryExitCode(cause))", "os.Exit(130)"},
+	} {
+		stderr, code := runGoEntryReportComposite(t, []entryMutant{mutant})
+		if stderr == entryReportCompositeWant && code == 1 {
+			t.Errorf("mutant %q survived: the test does not observe the generated entry", mutant.name)
+		}
 	}
 }
 
@@ -124,38 +109,6 @@ func efProbeComposite() er.Exit[struct{}] {
 		}
 	}
 	return entryReportOutcome(t, exec.Command(buildGoModule(t, dir)))
-}
-
-// runJSEntryReportComposite runs the generated entry module with main's
-// computation replaced by one failing with the composite cause.
-func runJSEntryReportComposite(t *testing.T, mutants []entryMutant) (string, int) {
-	t.Helper()
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("Bun is required for backend conformance tests")
-	}
-	r := CompileFor(entryReportCompositeSource, "js")
-	if !r.Checked {
-		t.Fatal(r.Diagnostics)
-	}
-	js, _, err := r.Emit(true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	inject := entryMutant{"composite computation", "__ef_runEntry(__ef_function_main(), __ef_entryReport);", `__ef_runEntry(Effect.failCause(__probe_Cause.fromReasons([
-  __probe_Cause.makeFailReason({ _tag: "Bad" }),
-  __probe_Cause.makeFailReason({ _tag: "Worse", reason: "second" }),
-  __probe_Cause.makeFailReason({ _tag: "Worse", reason: 5n }),
-  __probe_Cause.makeFailReason({ _tag: "Stranger" }),
-  ...__probe_Cause.die(new Error("boom\nline")).reasons,
-  ...__probe_Cause.interrupt().reasons,
-])), __ef_entryReport);`}
-	js = inject.apply(t, js)
-	for _, mutant := range mutants {
-		js = mutant.apply(t, js)
-	}
-	js = "import { Cause as __probe_Cause } from 'effect';\n" + js
-	return entryReportOutcome(t, exec.Command(bun, writeGeneratedJS(t, "entry-report-", js)))
 }
 
 func entryReportOutcome(t *testing.T, command *exec.Cmd) (string, int) {

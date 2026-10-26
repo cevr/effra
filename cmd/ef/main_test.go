@@ -31,8 +31,8 @@ func TestMain(m *testing.M) {
 	// The CLI builds in the process's own environment, before any test
 	// overrides Go variables with t.Setenv.
 	testCLI.environment = os.Environ()
-	// Process tests run the CLI, Node and Bun, which Go's test cache sees only
-	// through observation.
+	// Process tests run the CLI and the programs it builds, which Go's test
+	// cache sees only through observation.
 	code := testinputs.Main(m)
 	if testCLI.dir != "" {
 		_ = os.RemoveAll(testCLI.dir)

@@ -44,9 +44,6 @@ func TestGenericDataPresenceAndAliasExecution(t *testing.T) {
 		{genericAliasShadow, "local:missing"},
 	} {
 		runGenericDataNative(t, fixture.source, fixture.output+"\n")
-		if output := runJSForTarget(t, "js", fixture.source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != fixture.output+"\n" {
-			t.Fatal(output)
-		}
 	}
 	const sameName = `import Data "effra/data"
 enum Option<T:type>{Missing; Present {value:T}}
@@ -68,37 +65,32 @@ effect fn main()->string {
 }`
 	for _, source := range []string{sameName, sameResult} {
 		runGenericDataNative(t, source, "local:missing\n")
-		if r := CompileFor(source, "js"); r.Checked || !hasCode(r, "EF110") {
-			t.Fatal("JS declaration collision must retain honest target refusal", r.Diagnostics)
-		}
 	}
 }
 
 func TestGenericDataAbsenceAndOwnerControls(t *testing.T) {
 	const declarations = `import Data "effra/data" record User {name:string}`
-	for _, target := range []string{"go", "js"} {
-		for _, source := range []string{
-			`fn bad()->Data.Option<User>{nil}`,
-			`fn bad()->Data.Option<User>{null}`,
-			`fn bad()->Data.Option<User?>{Data.Option.Some {value:User {name:"x"}}}`,
-			`fn bad()->Data.Option<User>{Data.Option.Some {}}`,
-			`fn bad()->Data.Option<User>{Data.Option.Some {value:null}}`,
-			`fn bad()->Data.Option<User>{}`,
-			`fn bad(value:Data.Option<User>)->User{value.value}`,
-			`fn bad()->Data.Option<User>{Foreign.Option<User>.None {}}`,
-		} {
-			r := CompileFor(declarations+source, target)
-			if r.Checked || len(r.Diagnostics) == 0 {
-				t.Fatal(target, "absence/owner control admitted", source, r.Diagnostics)
-			}
+	for _, source := range []string{
+		`fn bad()->Data.Option<User>{nil}`,
+		`fn bad()->Data.Option<User>{null}`,
+		`fn bad()->Data.Option<User?>{Data.Option.Some {value:User {name:"x"}}}`,
+		`fn bad()->Data.Option<User>{Data.Option.Some {}}`,
+		`fn bad()->Data.Option<User>{Data.Option.Some {value:null}}`,
+		`fn bad()->Data.Option<User>{}`,
+		`fn bad(value:Data.Option<User>)->User{value.value}`,
+		`fn bad()->Data.Option<User>{Foreign.Option<User>.None {}}`,
+	} {
+		r := CompileFor(declarations+source, "go")
+		if r.Checked || len(r.Diagnostics) == 0 {
+			t.Fatal("go", "absence/owner control admitted", source, r.Diagnostics)
 		}
-		borrowed := CompileFor(`import Data "effra/data"
+	}
+	borrowed := CompileFor(`import Data "effra/data"
 fn wrap(file:File)->Data.Option<File>{Data.Option.Some {value:file}}
 fn unwrap(value:Data.Option<File>,fallback:File)->File{match value {Data.Option.None => fallback; Data.Option.Some {value:file} => file}}
-effect fn outer(file:File)->File{scope {unwrap(wrap(file),file)}}`, target)
-		if !borrowed.Checked {
-			t.Fatal(target, "borrowed present file rejected", borrowed.Diagnostics)
-		}
+effect fn outer(file:File)->File{scope {unwrap(wrap(file),file)}}`, "go")
+	if !borrowed.Checked {
+		t.Fatal("go", "borrowed present file rejected", borrowed.Diagnostics)
 	}
 	acquired := CompileFor(`import Data "effra/data"
 fn wrap(file:File)->Data.Option<File>{Data.Option.Some {value:file}}
@@ -107,28 +99,6 @@ effect fn outer(file:File)->File raises {IoError}{scope {let owned = run Files.o
 	if acquired.Checked || !hasCode(acquired, "EF123") {
 		t.Fatal("acquired Option payload escaped closing owner", acquired.Diagnostics)
 	}
-}
-
-func TestGenericDataPhantomCallableApplicationIdentity(t *testing.T) {
-	const source = `error Trouble
-enum Phantom<F:callable effect fn(A)->A,A:type>{None}
-fn narrow()->Phantom<effect fn(string)->string,string>{Phantom<effect fn(string)->string,string>.None {}}
-fn wide()->Phantom<effect fn(string)->string raises {Trouble},string>{Phantom<effect fn(string)->string raises {Trouble},string>.None {}}`
-	r := CompileFor(source, "js")
-	if !r.Checked {
-		t.Fatal(r.Diagnostics)
-	}
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkStrictTypeScript(t, declaration, `import type { narrow, wide } from "./generated.d.mts";
-declare const narrower: ReturnType<typeof narrow>;
-const same: ReturnType<typeof narrow> = narrower;
-// @ts-expect-error phantom callable arguments retain exact application identity
-const different: ReturnType<typeof wide> = narrower;
-void same; void different;
-`)
 }
 
 func TestGenericDataUnrelatedCallerExecutionAndSharedSources(t *testing.T) {
@@ -142,30 +112,13 @@ func TestGenericDataUnrelatedCallerExecutionAndSharedSources(t *testing.T) {
 		}
 		source := string(data)
 		runGenericDataNative(t, source, fixture.output+"\n")
-		if output := runJSForTarget(t, "js", source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != fixture.output+"\n" {
-			t.Fatal(fixture.path, output)
+		r := CompileFor(source, "go")
+		if !r.Checked || len(r.BundledInterfaces) != 1 || len(r.Program.BundledTemplates) != 2 {
+			t.Fatal(fixture.path, "go", r.Diagnostics)
 		}
-		for _, target := range []string{"go", "js"} {
-			r := CompileFor(source, target)
-			if !r.Checked || len(r.BundledInterfaces) != 1 || len(r.Program.BundledTemplates) != 2 {
-				t.Fatal(fixture.path, target, r.Diagnostics)
-			}
-			for _, declaration := range r.Program.BundledTemplates {
-				if declaration.Module != "effra/data" || declaration.SourceID != "source:effra/data/"+declaration.Name {
-					t.Fatal(declaration)
-				}
-			}
-			if target == "js" {
-				_, declaration, err := r.Emit(false)
-				if err != nil {
-					t.Fatal(err)
-				}
-				checkStrictTypeScript(t, declaration, `import type { main } from "./generated.d.mts";
-import type { Effect } from "effect";
-declare const execution: ReturnType<typeof main>;
-const success: Effect.Effect<string, unknown, never> = execution;
-void success;
-`)
+		for _, declaration := range r.Program.BundledTemplates {
+			if declaration.Module != "effra/data" || declaration.SourceID != "source:effra/data/"+declaration.Name {
+				t.Fatal(declaration)
 			}
 		}
 	}

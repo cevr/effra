@@ -56,36 +56,34 @@ func codecPlanJSON(t *testing.T, r *Result) string {
 }
 
 func TestCodecDeriveSynthesizesCheckedDirectionFunctions(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(codecDomainSource, target)
-		if !r.Checked {
-			t.Fatalf("%s: %+v", target, r.Diagnostics)
+	r := CompileFor(codecDomainSource, "go")
+	if !r.Checked {
+		t.Fatalf("go: %+v", r.Diagnostics)
+	}
+	if len(r.Codecs) != 3 {
+		t.Fatalf("go: want three derived witnesses: %+v", r.Codecs)
+	}
+	user := r.Codecs[0]
+	if user.Name != "userJson" || user.Derivation != "effra/json.codec" || user.Profile != "effra/json-structural-1" || user.Domain != "User" || user.Wire != "string" || user.DomainType == "" {
+		t.Fatalf("go: user witness: %+v", user)
+	}
+	if !slices.Equal(user.Decode.Failures, []string{"JsonDecodeFailure"}) || !slices.Equal(user.Encode.Failures, []string{"JsonEncodeFailure"}) || len(user.Decode.Requirements) != 0 || len(user.Encode.Requirements) != 0 {
+		t.Fatalf("go: direction rows must be independent and service-free: %+v", user)
+	}
+	for _, name := range []string{"userJson.decode", "userJson.encode", "eventJson.decode", "eventArchive.encode"} {
+		symbol := r.Find(name)
+		if symbol == nil || symbol.Contract.Callable == nil || symbol.Contract.Callable.Kind != "effect" {
+			t.Fatalf("go: %s is not an ordinary checked effect function: %+v", name, symbol)
 		}
-		if len(r.Codecs) != 3 {
-			t.Fatalf("%s: want three derived witnesses: %+v", target, r.Codecs)
-		}
-		user := r.Codecs[0]
-		if user.Name != "userJson" || user.Derivation != "effra/json.codec" || user.Profile != "effra/json-structural-1" || user.Domain != "User" || user.Wire != "string" || user.DomainType == "" {
-			t.Fatalf("%s: user witness: %+v", target, user)
-		}
-		if !slices.Equal(user.Decode.Failures, []string{"JsonDecodeFailure"}) || !slices.Equal(user.Encode.Failures, []string{"JsonEncodeFailure"}) || len(user.Decode.Requirements) != 0 || len(user.Encode.Requirements) != 0 {
-			t.Fatalf("%s: direction rows must be independent and service-free: %+v", target, user)
-		}
-		for _, name := range []string{"userJson.decode", "userJson.encode", "eventJson.decode", "eventArchive.encode"} {
-			symbol := r.Find(name)
-			if symbol == nil || symbol.Contract.Callable == nil || symbol.Contract.Callable.Kind != "effect" {
-				t.Fatalf("%s: %s is not an ordinary checked effect function: %+v", target, name, symbol)
-			}
-		}
-		decode := r.Find("userJson.decode").Contract.Callable
-		if len(decode.Parameters) != 1 || decode.Parameters[0].Type != "string" || !slices.Equal(decode.Failures, []string{"JsonDecodeFailure"}) || len(decode.Requirements) != 0 {
-			t.Fatalf("%s: decode contract: %+v", target, decode)
-		}
-		// Two witnesses for one domain type with the same bounds share one
-		// plan; different bounds are distinct plans.
-		if r.Codecs[1].Plan != r.Codecs[2].Plan || r.Codecs[0].Plan == r.Codecs[1].Plan || len(r.CodecPlans) != 2 {
-			t.Fatalf("%s: plan sharing: %+v", target, r.Codecs)
-		}
+	}
+	decode := r.Find("userJson.decode").Contract.Callable
+	if len(decode.Parameters) != 1 || decode.Parameters[0].Type != "string" || !slices.Equal(decode.Failures, []string{"JsonDecodeFailure"}) || len(decode.Requirements) != 0 {
+		t.Fatalf("go: decode contract: %+v", decode)
+	}
+	// Two witnesses for one domain type with the same bounds share one
+	// plan; different bounds are distinct plans.
+	if r.Codecs[1].Plan != r.Codecs[2].Plan || r.Codecs[0].Plan == r.Codecs[1].Plan || len(r.CodecPlans) != 2 {
+		t.Fatalf("go: plan sharing: %+v", r.Codecs)
 	}
 }
 
@@ -144,7 +142,7 @@ func TestCodecDerivationRefusals(t *testing.T) {
 					t.Fatalf("want %s %q: %+v", tc.code, message, r.Diagnostics)
 				}
 			}
-			if _, _, err := r.Emit(false); err == nil {
+			if _, err := r.EmitGo(); err == nil {
 				t.Fatal("refused source emitted")
 			}
 		})

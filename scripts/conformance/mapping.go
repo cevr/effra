@@ -144,8 +144,8 @@ func validateMapping(mapping map[string]any, root string) ([]string, error) {
 				return nil, err
 			}
 			test, testOK := pointer["test"].(string)
-			if !strings.HasPrefix(file, "internal/compiler/") || !strings.HasSuffix(file, "_test.go") || !testOK || !mappingTestName.MatchString(test) || !isGoJSTargets(pointer["targets"]) {
-				return nil, fmt.Errorf("evidence must name an existing shared Go/JS test for %s", identity)
+			if !strings.HasPrefix(file, "internal/compiler/") || !strings.HasSuffix(file, "_test.go") || !testOK || !mappingTestName.MatchString(test) || !isGoTargets(pointer["targets"]) {
+				return nil, fmt.Errorf("evidence must name an existing Go test for %s", identity)
 			}
 			contents, err := readText(filepath.Join(root, file))
 			if err != nil {
@@ -181,8 +181,8 @@ func isUpstreamTest(path string) bool {
 	return false
 }
 
-// isGoJSTargets is Python's value == ["go", "js"].
-func isGoJSTargets(value any) bool {
+// isGoTargets reports whether value is exactly ["go"].
+func isGoTargets(value any) bool {
 	targets, ok := value.([]any)
-	return ok && len(targets) == 2 && targets[0] == "go" && targets[1] == "js"
+	return ok && len(targets) == 1 && targets[0] == "go"
 }

@@ -525,19 +525,17 @@ func lspSmokeDocuments(t *testing.T, cli lspSmokeCLI) {
 		lspSmokeExpectError(t, lspSmokeReply(t, messages, "rename"), -32601)
 		lspSmokeSame(t, cli.diagnostics(t, path)["diagnostics"], []any{}, "disk changed while analyzing buffer")
 	})
-	for _, target := range []string{"go", "js"} {
-		t.Run("never-created/"+target, func(t *testing.T) {
-			t.Parallel()
-			lspSmokeAbsent(t, newPath)
-			published := lspSmokePublications(cli.exchange(t, lspSmokeSession{target: target, calls: []map[string]any{
-				lspSmokeInit, lspSmokeReady, lspSmokeOpened(newURI, good, 1), lspSmokeStop, lspSmokeExit}}))
-			if len(published) == 0 {
-				t.Fatal("no publication")
-			}
-			lspSmokeSame(t, published[0]["diagnostics"], []any{}, "unsaved new document")
-			lspSmokeAbsent(t, newPath)
-		})
-	}
+	t.Run("never-created/go", func(t *testing.T) {
+		t.Parallel()
+		lspSmokeAbsent(t, newPath)
+		published := lspSmokePublications(cli.exchange(t, lspSmokeSession{target: "go", calls: []map[string]any{
+			lspSmokeInit, lspSmokeReady, lspSmokeOpened(newURI, good, 1), lspSmokeStop, lspSmokeExit}}))
+		if len(published) == 0 {
+			t.Fatal("no publication")
+		}
+		lspSmokeSame(t, published[0]["diagnostics"], []any{}, "unsaved new document")
+		lspSmokeAbsent(t, newPath)
+	})
 	// The compiler used to panic on a valid effect factory carrying a pure
 	// callback. A real document must publish, accept the next edit, and
 	// recover.
@@ -550,29 +548,27 @@ func lspSmokeDocuments(t *testing.T, cli lspSmokeCLI) {
 	if invalidTimeout == factories {
 		t.Fatal("factory example no longer holds the replaced line")
 	}
-	for _, target := range []string{"go", "js"} {
-		t.Run("factory-recovery/"+target, func(t *testing.T) {
-			t.Parallel()
-			reports := lspSmokePublications(cli.exchange(t, lspSmokeSession{target: target, calls: []map[string]any{
-				lspSmokeInit, lspSmokeReady, lspSmokeOpened(newURI, factories, 1), lspSmokeChanged(newURI, invalidTimeout, 2),
-				lspSmokeChanged(newURI, factories, 3), lspSmokeStop, lspSmokeExit}}))
-			versions := []any{}
-			for _, report := range reports {
-				versions = append(versions, report["version"])
-			}
-			lspSmokeSame(t, versions, []any{1, 2, 3}, "factory versions")
-			lspSmokeSame(t, reports[0]["diagnostics"], []any{}, "valid factory")
-			lspSmokeSame(t, reports[2]["diagnostics"], []any{}, "recovered factory")
-			found := false
-			diagnostics, _ := reports[1]["diagnostics"].([]any)
-			for _, diagnostic := range diagnostics {
-				found = found || lspSmokeMap(diagnostic)["code"] == "EF106"
-			}
-			if !found {
-				t.Fatalf("invalid timeout lacks EF106: %v", reports[1])
-			}
-		})
-	}
+	t.Run("factory-recovery/go", func(t *testing.T) {
+		t.Parallel()
+		reports := lspSmokePublications(cli.exchange(t, lspSmokeSession{target: "go", calls: []map[string]any{
+			lspSmokeInit, lspSmokeReady, lspSmokeOpened(newURI, factories, 1), lspSmokeChanged(newURI, invalidTimeout, 2),
+			lspSmokeChanged(newURI, factories, 3), lspSmokeStop, lspSmokeExit}}))
+		versions := []any{}
+		for _, report := range reports {
+			versions = append(versions, report["version"])
+		}
+		lspSmokeSame(t, versions, []any{1, 2, 3}, "factory versions")
+		lspSmokeSame(t, reports[0]["diagnostics"], []any{}, "valid factory")
+		lspSmokeSame(t, reports[2]["diagnostics"], []any{}, "recovered factory")
+		found := false
+		diagnostics, _ := reports[1]["diagnostics"].([]any)
+		for _, diagnostic := range diagnostics {
+			found = found || lspSmokeMap(diagnostic)["code"] == "EF106"
+		}
+		if !found {
+			t.Fatalf("invalid timeout lacks EF106: %v", reports[1])
+		}
+	})
 }
 
 var lspSmokeNavigationText = strings.Join([]string{
@@ -717,108 +713,103 @@ func lspSmokeNavigation(t *testing.T, cli lspSmokeCLI) {
 	astral := lspSmokeOffset(t, text, lspSmokeToken{`"𐐀é"`, "𐐀"})
 	surrogate := lspSmokePosition(t, text, astral)
 	surrogate["character"] = surrogate["character"].(int) + 1
-	for _, target := range []string{"go", "js"} {
-		t.Run(target, func(t *testing.T) {
-			t.Parallel()
-			requests := []map[string]any{lspSmokeInit, lspSmokeReady, lspSmokeOpened(uri, text, 5)}
-			for index, offset := range offsets {
-				requests = append(requests,
-					lspSmokeLocated(t, "textDocument/hover", fmt.Sprintf("hover-%d", index), uri, text, offset),
-					lspSmokeLocated(t, "textDocument/definition", fmt.Sprintf("definition-%d", index), uri, text, offset))
-			}
-			requests = append(requests,
-				lspSmokeCall("textDocument/hover", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": surrogate}, "surrogate"),
-				lspSmokeCall("textDocument/definition", map[string]any{"textDocument": map[string]any{"uri": uri},
-					"position": map[string]any{"line": 99, "character": 0}}, "beyond"),
-				lspSmokeCall("textDocument/hover", map[string]any{"textDocument": map[string]any{"uri": uri}}, "no-position"),
-				lspSmokeLocated(t, "textDocument/hover", "after-refusals", uri, text, named[0]),
-				lspSmokeStop, lspSmokeExit)
-			messages := cli.exchange(t, lspSmokeSession{target: target, calls: requests})
-			replies := lspSmokeReplies(messages)
-			reply := func(id string) map[string]any {
-				t.Helper()
-				value, ok := replies[id]
-				if !ok {
-					t.Fatalf("no reply %q", id)
-				}
-				return value
-			}
-			for _, id := range []string{"surrogate", "beyond", "no-position"} {
-				lspSmokeExpectError(t, reply(id), -32602)
-			}
-			lspSmokeSame(t, lspSmokeResult(t, reply("after-refusals")), lspSmokeResult(t, reply("hover-0")), "hover after refusals")
-			arguments := make([]map[string]any, len(offsets))
-			for index, offset := range offsets {
-				arguments[index] = map[string]any{"file": "navigation.ef", "target": target, "offset": offset}
-			}
-			remote := cli.mcpTools(t, directory, "code.type", arguments)
-			locals := cli.lspSmokeTypes(t, path, target, offsets)
-			for index, offset := range offsets {
-				local := locals[index]
-				var shared map[string]any
-				if remote[index]["isError"] != true {
-					shared = lspSmokeMap(remote[index]["structuredContent"])
-				}
-				if (local == nil) != (shared == nil) {
-					t.Fatalf("offset %d: CLI %v, MCP %v", offset, local, shared)
-				}
-				hover, definition := reply(fmt.Sprintf("hover-%d", index)), reply(fmt.Sprintf("definition-%d", index))
-				if _, failed := hover["error"]; failed {
-					t.Fatalf("offset %d hover refused: %v", offset, hover)
-				}
-				if _, failed := definition["error"]; failed {
-					t.Fatalf("offset %d definition refused: %v", offset, definition)
-				}
-				var selection map[string]any
-				if local != nil {
-					lspSmokeSame(t, shared["selection"], local["selection"], fmt.Sprintf("offset %d MCP/CLI selection", offset))
-					selection = lspSmokeMap(local["selection"])
-				}
-				span := lspSmokeMap(selection["span"])
-				_, hasTarget := selection["target"]
-				names := selection != nil && hasTarget &&
-					lspSmokeInt(t, span["offset"]) <= offset && offset < lspSmokeInt(t, span["offset"])+lspSmokeInt(t, span["length"])
-				if names != (index < len(named)) {
-					t.Fatalf("index %d offset %d names=%v: %v", index, offset, names, selection)
-				}
-				if !names {
-					if lspSmokeResult(t, hover) != nil || lspSmokeResult(t, definition) != nil {
-						t.Fatalf("offset %d names nothing yet answered: %v %v", offset, hover, definition)
-					}
-					continue
-				}
-				lspSmokeSame(t, lspSmokeResult(t, hover), map[string]any{
-					"contents": map[string]any{"kind": "plaintext", "value": selection["presentation"]},
-					"range":    lspSmokeSpanRange(t, text, span)}, fmt.Sprintf("offset %d hover", offset))
-				declared := lspSmokeMap(selection["target"])
-				if declared["locationAvailable"] == true {
-					lspSmokeSame(t, lspSmokeResult(t, definition), map[string]any{
-						"uri": uri, "range": lspSmokeSpanRange(t, text, lspSmokeMap(declared["span"]))}, fmt.Sprintf("offset %d definition", offset))
-				} else if lspSmokeResult(t, definition) != nil || declared["source"] == "source:user" {
-					t.Fatalf("offset %d: unlocated target %v answered %v", offset, declared, definition)
-				}
-			}
-			// Bundled targets have no location in this buffer; local ones do.
-			for _, key := range []lspSmokeToken{{"Fns.identity", "identity"}, {"Data.Option.Some { value: v }", "Some"}} {
-				if result := lspSmokeResult(t, reply(fmt.Sprintf("definition-%d", lspSmokeNamedIndex(t, key.context, key.name)))); result != nil {
-					t.Fatalf("bundled %v located: %v", key, result)
-				}
-			}
-			// Every or-pattern binder token is the one joined binding,
-			// declared by the first alternative's token.
-			firstBinder := lspSmokeRange(t, text, lspSmokeOffset(t, text, lspSmokeToken{"Cold { level: degrees }", "degrees"}), 7)
-			for _, key := range []lspSmokeToken{{"Cold { level: degrees }", "degrees"}, {"Hot { level: degrees }", "degrees"}, {"=> degrees", "degrees"}} {
-				index := lspSmokeNamedIndex(t, key.context, key.name)
-				lspSmokeSame(t, lspSmokeMap(lspSmokeResult(t, reply(fmt.Sprintf("definition-%d", index))))["range"], firstBinder, fmt.Sprintf("%v definition", key))
-				hover := lspSmokeMap(lspSmokeResult(t, reply(fmt.Sprintf("hover-%d", index))))
-				if value := lspSmokeMap(hover["contents"])["value"]; value != "pattern degrees: i64" {
-					t.Fatalf("%v hover = %v", key, hover)
-				}
-			}
-			shadowed := lspSmokeMap(lspSmokeResult(t, reply(fmt.Sprintf("definition-%d", lspSmokeNamedIndex(t, "mark + helper", "helper")))))["range"]
-			lspSmokeSame(t, shadowed, lspSmokeRange(t, text, lspSmokeOffset(t, text, lspSmokeToken{"fn shadow(helper", "helper"}), 6), "shadowed parameter definition")
-		})
+	requests := []map[string]any{lspSmokeInit, lspSmokeReady, lspSmokeOpened(uri, text, 5)}
+	for index, offset := range offsets {
+		requests = append(requests,
+			lspSmokeLocated(t, "textDocument/hover", fmt.Sprintf("hover-%d", index), uri, text, offset),
+			lspSmokeLocated(t, "textDocument/definition", fmt.Sprintf("definition-%d", index), uri, text, offset))
 	}
+	requests = append(requests,
+		lspSmokeCall("textDocument/hover", map[string]any{"textDocument": map[string]any{"uri": uri}, "position": surrogate}, "surrogate"),
+		lspSmokeCall("textDocument/definition", map[string]any{"textDocument": map[string]any{"uri": uri},
+			"position": map[string]any{"line": 99, "character": 0}}, "beyond"),
+		lspSmokeCall("textDocument/hover", map[string]any{"textDocument": map[string]any{"uri": uri}}, "no-position"),
+		lspSmokeLocated(t, "textDocument/hover", "after-refusals", uri, text, named[0]),
+		lspSmokeStop, lspSmokeExit)
+	messages := cli.exchange(t, lspSmokeSession{target: "go", calls: requests})
+	replies := lspSmokeReplies(messages)
+	reply := func(id string) map[string]any {
+		t.Helper()
+		value, ok := replies[id]
+		if !ok {
+			t.Fatalf("no reply %q", id)
+		}
+		return value
+	}
+	for _, id := range []string{"surrogate", "beyond", "no-position"} {
+		lspSmokeExpectError(t, reply(id), -32602)
+	}
+	lspSmokeSame(t, lspSmokeResult(t, reply("after-refusals")), lspSmokeResult(t, reply("hover-0")), "hover after refusals")
+	arguments := make([]map[string]any, len(offsets))
+	for index, offset := range offsets {
+		arguments[index] = map[string]any{"file": "navigation.ef", "target": "go", "offset": offset}
+	}
+	remote := cli.mcpTools(t, directory, "code.type", arguments)
+	locals := cli.lspSmokeTypes(t, path, "go", offsets)
+	for index, offset := range offsets {
+		local := locals[index]
+		var shared map[string]any
+		if remote[index]["isError"] != true {
+			shared = lspSmokeMap(remote[index]["structuredContent"])
+		}
+		if (local == nil) != (shared == nil) {
+			t.Fatalf("offset %d: CLI %v, MCP %v", offset, local, shared)
+		}
+		hover, definition := reply(fmt.Sprintf("hover-%d", index)), reply(fmt.Sprintf("definition-%d", index))
+		if _, failed := hover["error"]; failed {
+			t.Fatalf("offset %d hover refused: %v", offset, hover)
+		}
+		if _, failed := definition["error"]; failed {
+			t.Fatalf("offset %d definition refused: %v", offset, definition)
+		}
+		var selection map[string]any
+		if local != nil {
+			lspSmokeSame(t, shared["selection"], local["selection"], fmt.Sprintf("offset %d MCP/CLI selection", offset))
+			selection = lspSmokeMap(local["selection"])
+		}
+		span := lspSmokeMap(selection["span"])
+		_, hasTarget := selection["target"]
+		names := selection != nil && hasTarget &&
+			lspSmokeInt(t, span["offset"]) <= offset && offset < lspSmokeInt(t, span["offset"])+lspSmokeInt(t, span["length"])
+		if names != (index < len(named)) {
+			t.Fatalf("index %d offset %d names=%v: %v", index, offset, names, selection)
+		}
+		if !names {
+			if lspSmokeResult(t, hover) != nil || lspSmokeResult(t, definition) != nil {
+				t.Fatalf("offset %d names nothing yet answered: %v %v", offset, hover, definition)
+			}
+			continue
+		}
+		lspSmokeSame(t, lspSmokeResult(t, hover), map[string]any{
+			"contents": map[string]any{"kind": "plaintext", "value": selection["presentation"]},
+			"range":    lspSmokeSpanRange(t, text, span)}, fmt.Sprintf("offset %d hover", offset))
+		declared := lspSmokeMap(selection["target"])
+		if declared["locationAvailable"] == true {
+			lspSmokeSame(t, lspSmokeResult(t, definition), map[string]any{
+				"uri": uri, "range": lspSmokeSpanRange(t, text, lspSmokeMap(declared["span"]))}, fmt.Sprintf("offset %d definition", offset))
+		} else if lspSmokeResult(t, definition) != nil || declared["source"] == "source:user" {
+			t.Fatalf("offset %d: unlocated target %v answered %v", offset, declared, definition)
+		}
+	}
+	// Bundled targets have no location in this buffer; local ones do.
+	for _, key := range []lspSmokeToken{{"Fns.identity", "identity"}, {"Data.Option.Some { value: v }", "Some"}} {
+		if result := lspSmokeResult(t, reply(fmt.Sprintf("definition-%d", lspSmokeNamedIndex(t, key.context, key.name)))); result != nil {
+			t.Fatalf("bundled %v located: %v", key, result)
+		}
+	}
+	// Every or-pattern binder token is the one joined binding,
+	// declared by the first alternative's token.
+	firstBinder := lspSmokeRange(t, text, lspSmokeOffset(t, text, lspSmokeToken{"Cold { level: degrees }", "degrees"}), 7)
+	for _, key := range []lspSmokeToken{{"Cold { level: degrees }", "degrees"}, {"Hot { level: degrees }", "degrees"}, {"=> degrees", "degrees"}} {
+		index := lspSmokeNamedIndex(t, key.context, key.name)
+		lspSmokeSame(t, lspSmokeMap(lspSmokeResult(t, reply(fmt.Sprintf("definition-%d", index))))["range"], firstBinder, fmt.Sprintf("%v definition", key))
+		hover := lspSmokeMap(lspSmokeResult(t, reply(fmt.Sprintf("hover-%d", index))))
+		if value := lspSmokeMap(hover["contents"])["value"]; value != "pattern degrees: i64" {
+			t.Fatalf("%v hover = %v", key, hover)
+		}
+	}
+	shadowed := lspSmokeMap(lspSmokeResult(t, reply(fmt.Sprintf("definition-%d", lspSmokeNamedIndex(t, "mark + helper", "helper")))))["range"]
+	lspSmokeSame(t, shadowed, lspSmokeRange(t, text, lspSmokeOffset(t, text, lspSmokeToken{"fn shadow(helper", "helper"}), 6), "shadowed parameter definition")
 	// The buffer, not the disk file, is navigated: a rename in an unsaved
 	// change moves the definition while the file still holds the old text.
 	t.Run("unsaved-buffer", func(t *testing.T) {
@@ -879,58 +870,56 @@ func lspSmokeFormattingCase(t *testing.T, cli lspSmokeCLI) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, target := range []string{"go", "js"} {
-				t.Run(target, func(t *testing.T) {
-					t.Parallel()
-					messages := cli.exchange(t, lspSmokeSession{target: target, calls: []map[string]any{
-						lspSmokeInit, lspSmokeReady, lspSmokeOpened(uri, stale, 1), lspSmokeChanged(uri, c.source, 3),
-						lspSmokeChanged(uri, stale, 2), formatRequest("format"), lspSmokeUnknown("after"), lspSmokeStop, lspSmokeExit}})
-					reply := lspSmokeReply(t, messages, "format")
-					lspSmokeExpectError(t, lspSmokeReply(t, messages, "after"), -32601)
-					if c.code != "" {
-						_, detail, found := strings.Cut(string(stderr), "source cannot be formatted: ")
-						if !found {
-							t.Fatalf("fmt stderr lacks the formatting refusal: %q", stderr)
-						}
-						detail = strings.TrimSpace(detail)
-						if code != 2 || len(stdout) != 0 || !strings.Contains(string(stderr), "EFMT_SYNTAX") {
-							t.Fatalf("fmt exit %d stdout=%q stderr=%q", code, stdout, stderr)
-						}
-						content, _ := remote[index]["content"].([]any)
-						if remote[index]["isError"] != true || len(content) == 0 ||
-							!strings.Contains(fmt.Sprint(lspSmokeMap(content[0])["text"]), detail) {
-							t.Fatalf("MCP refusal lacks %q: %v", detail, remote[index])
-						}
-						lspSmokeExpectError(t, reply, -32803)
-						message, _ := lspSmokeMap(reply["error"])["message"].(string)
-						if !strings.Contains(message, fmt.Sprintf("cannot format: %s: %s", c.code, detail)) || !strings.Contains(message, "version 3") {
-							t.Fatalf("LSP refusal message: %v", reply)
-						}
-						return
+			t.Run("go", func(t *testing.T) {
+				t.Parallel()
+				messages := cli.exchange(t, lspSmokeSession{target: "go", calls: []map[string]any{
+					lspSmokeInit, lspSmokeReady, lspSmokeOpened(uri, stale, 1), lspSmokeChanged(uri, c.source, 3),
+					lspSmokeChanged(uri, stale, 2), formatRequest("format"), lspSmokeUnknown("after"), lspSmokeStop, lspSmokeExit}})
+				reply := lspSmokeReply(t, messages, "format")
+				lspSmokeExpectError(t, lspSmokeReply(t, messages, "after"), -32601)
+				if c.code != "" {
+					_, detail, found := strings.Cut(string(stderr), "source cannot be formatted: ")
+					if !found {
+						t.Fatalf("fmt stderr lacks the formatting refusal: %q", stderr)
 					}
-					if code != 0 {
-						t.Fatalf("fmt exit %d stderr=%q", code, stderr)
+					detail = strings.TrimSpace(detail)
+					if code != 2 || len(stdout) != 0 || !strings.Contains(string(stderr), "EFMT_SYNTAX") {
+						t.Fatalf("fmt exit %d stdout=%q stderr=%q", code, stdout, stderr)
 					}
-					formatted := string(stdout)
-					shared := lspSmokeMap(remote[index]["structuredContent"])
-					if shared["text"] != formatted || shared["changed"] != (formatted != c.source) {
-						t.Fatalf("MCP format %v, CLI %q", shared, formatted)
+					content, _ := remote[index]["content"].([]any)
+					if remote[index]["isError"] != true || len(content) == 0 ||
+						!strings.Contains(fmt.Sprint(lspSmokeMap(content[0])["text"]), detail) {
+						t.Fatalf("MCP refusal lacks %q: %v", detail, remote[index])
 					}
-					if shared["formatterVersion"] != "effra/formatter-16" {
-						t.Fatalf("formatter version: %v", shared)
+					lspSmokeExpectError(t, reply, -32803)
+					message, _ := lspSmokeMap(reply["error"])["message"].(string)
+					if !strings.Contains(message, fmt.Sprintf("cannot format: %s: %s", c.code, detail)) || !strings.Contains(message, "version 3") {
+						t.Fatalf("LSP refusal message: %v", reply)
 					}
-					if formatted == c.source {
-						lspSmokeSame(t, lspSmokeResult(t, reply), []any{}, "canonical source edits")
-					} else {
-						whole := map[string]any{"start": map[string]any{"line": 0, "character": 0}, "end": lspSmokePosition(t, c.source, len(c.source))}
-						lspSmokeSame(t, lspSmokeResult(t, reply), []any{map[string]any{"range": whole, "newText": formatted}}, "whole-document edit")
-					}
-					// The formatted buffer is already canonical: no edits.
-					again := cli.exchange(t, lspSmokeSession{target: target, calls: []map[string]any{
-						lspSmokeInit, lspSmokeReady, lspSmokeOpened(uri, formatted, 1), formatRequest("again"), lspSmokeStop, lspSmokeExit}})
-					lspSmokeSame(t, lspSmokeResult(t, lspSmokeReply(t, again, "again")), []any{}, "formatted buffer edits")
-				})
-			}
+					return
+				}
+				if code != 0 {
+					t.Fatalf("fmt exit %d stderr=%q", code, stderr)
+				}
+				formatted := string(stdout)
+				shared := lspSmokeMap(remote[index]["structuredContent"])
+				if shared["text"] != formatted || shared["changed"] != (formatted != c.source) {
+					t.Fatalf("MCP format %v, CLI %q", shared, formatted)
+				}
+				if shared["formatterVersion"] != "effra/formatter-16" {
+					t.Fatalf("formatter version: %v", shared)
+				}
+				if formatted == c.source {
+					lspSmokeSame(t, lspSmokeResult(t, reply), []any{}, "canonical source edits")
+				} else {
+					whole := map[string]any{"start": map[string]any{"line": 0, "character": 0}, "end": lspSmokePosition(t, c.source, len(c.source))}
+					lspSmokeSame(t, lspSmokeResult(t, reply), []any{map[string]any{"range": whole, "newText": formatted}}, "whole-document edit")
+				}
+				// The formatted buffer is already canonical: no edits.
+				again := cli.exchange(t, lspSmokeSession{target: "go", calls: []map[string]any{
+					lspSmokeInit, lspSmokeReady, lspSmokeOpened(uri, formatted, 1), formatRequest("again"), lspSmokeStop, lspSmokeExit}})
+				lspSmokeSame(t, lspSmokeResult(t, lspSmokeReply(t, again, "again")), []any{}, "formatted buffer edits")
+			})
 		})
 	}
 }

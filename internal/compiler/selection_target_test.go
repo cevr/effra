@@ -97,41 +97,37 @@ func TestSelectedNamesPublishCheckerResolvedDeclarationTargets(t *testing.T) {
 		{": v }", "v", "bindingDeclaration", "pattern", "", ": v }", "v", "pattern v: string"},
 		{"=> v,", "v", "bindingUse", "pattern", "", ": v }", "v", "pattern v: string"},
 	}
-	for _, target := range []string{"go", "js"} {
-		t.Run(target, func(t *testing.T) {
-			r := CompileFor(targetFixture, target)
-			if !r.Checked {
-				t.Fatalf("fixture: %+v", r.Diagnostics)
+	r := CompileFor(targetFixture, "go")
+	if !r.Checked {
+		t.Fatalf("fixture: %+v", r.Diagnostics)
+	}
+	for _, want := range expectations {
+		offset := at(t, targetFixture, want.context, want.name)
+		// Every byte of the selected token selects the same target.
+		for _, probe := range []int{offset, offset + len(want.name) - 1} {
+			response, err := r.SelectType(TypeSelection{Offset: &probe})
+			if err != nil {
+				t.Fatalf("%s %q: %v", want.context, want.name, err)
 			}
-			for _, want := range expectations {
-				offset := at(t, targetFixture, want.context, want.name)
-				// Every byte of the selected token selects the same target.
-				for _, probe := range []int{offset, offset + len(want.name) - 1} {
-					response, err := r.SelectType(TypeSelection{Offset: &probe})
-					if err != nil {
-						t.Fatalf("%s %q: %v", want.context, want.name, err)
-					}
-					selected := response["selection"].(SelectedType)
-					label := fmt.Sprintf("%q in %q at %d", want.name, want.context, probe)
-					if selected.Kind != want.kind || selected.Target == nil || selected.Target.Kind != want.targetKind || selected.Target.Name != want.name || selected.Target.Owner != want.owner {
-						t.Fatalf("%s: selection %+v target %+v", label, selected, selected.Target)
-					}
-					if selected.Span.Offset != offset || selected.Span.Length != len(want.name) || !selected.LocationAvailable {
-						t.Fatalf("%s: selected token span %+v", label, selected.Span)
-					}
-					if want.declaration == "" {
-						if selected.Target.LocationAvailable || selected.Target.Source == userSourceID {
-							t.Fatalf("%s: bundled target claimed a location in this snapshot: %+v", label, selected.Target)
-						}
-					} else if declared := at(t, targetFixture, want.declaration, want.declarationName); !selected.Target.LocationAvailable || selected.Target.Source != userSourceID || selected.Target.Span.Offset != declared || selected.Target.Span.Length != len(want.declarationName) {
-						t.Fatalf("%s: target %+v, want declaration at %d", label, selected.Target, declared)
-					}
-					if selected.Presentation != want.presentation {
-						t.Fatalf("%s: presentation %q, want %q", label, selected.Presentation, want.presentation)
-					}
+			selected := response["selection"].(SelectedType)
+			label := fmt.Sprintf("%q in %q at %d", want.name, want.context, probe)
+			if selected.Kind != want.kind || selected.Target == nil || selected.Target.Kind != want.targetKind || selected.Target.Name != want.name || selected.Target.Owner != want.owner {
+				t.Fatalf("%s: selection %+v target %+v", label, selected, selected.Target)
+			}
+			if selected.Span.Offset != offset || selected.Span.Length != len(want.name) || !selected.LocationAvailable {
+				t.Fatalf("%s: selected token span %+v", label, selected.Span)
+			}
+			if want.declaration == "" {
+				if selected.Target.LocationAvailable || selected.Target.Source == userSourceID {
+					t.Fatalf("%s: bundled target claimed a location in this snapshot: %+v", label, selected.Target)
 				}
+			} else if declared := at(t, targetFixture, want.declaration, want.declarationName); !selected.Target.LocationAvailable || selected.Target.Source != userSourceID || selected.Target.Span.Offset != declared || selected.Target.Span.Length != len(want.declarationName) {
+				t.Fatalf("%s: target %+v, want declaration at %d", label, selected.Target, declared)
 			}
-		})
+			if selected.Presentation != want.presentation {
+				t.Fatalf("%s: presentation %q, want %q", label, selected.Presentation, want.presentation)
+			}
+		}
 	}
 }
 
@@ -222,40 +218,38 @@ record Box<T: type> { value: T }
 enum Choice<T: type> { Left { value: T }, Right }
 fn pick(o: Data.Option<string>) -> string { match o { Data.Option.Some { value: v } => v, Data.Option.None => "none" } }
 `
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(source, target)
-		if !r.Checked {
-			t.Fatalf("%s fixture: %+v", target, r.Diagnostics)
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("go fixture: %+v", r.Diagnostics)
+	}
+	for _, probe := range []struct {
+		context, name, presentation string
+		local                       bool
+	}{
+		{"record Box", "Box", "record Box<T: type> { value: T }", true},
+		{"enum Choice", "Choice", "enum Choice<T: type> { Left { value: T }, Right }", true},
+		{"Data.Option.Some { value: v }", "Option", "enum Option<T: type> { None, Some { value: T } }", false},
+	} {
+		label := fmt.Sprintf("go %s", probe.name)
+		offset := at(t, source, probe.context, probe.name)
+		token, err := r.QueryType(TypeSelection{Offset: &offset})
+		if err != nil || token.Selection.Target == nil || token.Selection.Declaration == nil {
+			t.Fatalf("%s: token selection %+v: %v", label, token.Selection, err)
 		}
-		for _, probe := range []struct {
-			context, name, presentation string
-			local                       bool
-		}{
-			{"record Box", "Box", "record Box<T: type> { value: T }", true},
-			{"enum Choice", "Choice", "enum Choice<T: type> { Left { value: T }, Right }", true},
-			{"Data.Option.Some { value: v }", "Option", "enum Option<T: type> { None, Some { value: T } }", false},
-		} {
-			label := fmt.Sprintf("%s %s", target, probe.name)
-			offset := at(t, source, probe.context, probe.name)
-			token, err := r.QueryType(TypeSelection{Offset: &offset})
-			if err != nil || token.Selection.Target == nil || token.Selection.Declaration == nil {
-				t.Fatalf("%s: token selection %+v: %v", label, token.Selection, err)
-			}
-			identity := token.Selection.Declaration.Identity
-			byIdentity, err := r.QueryType(TypeSelection{Symbol: identity})
-			if err != nil {
-				t.Fatalf("%s: identity %q: %v", label, identity, err)
-			}
-			got, want := byIdentity.Selection, token.Selection
-			if got.Presentation != probe.presentation || want.Presentation != probe.presentation {
-				t.Fatalf("%s: identity presentation %q, token presentation %q, want %q", label, got.Presentation, want.Presentation, probe.presentation)
-			}
-			if got.Target == nil || *got.Target != *want.Target {
-				t.Fatalf("%s: identity target %+v, token target %+v", label, got.Target, want.Target)
-			}
-			if got.Target.LocationAvailable != probe.local || (got.Target.Source == userSourceID) != probe.local {
-				t.Fatalf("%s: target location %+v", label, got.Target)
-			}
+		identity := token.Selection.Declaration.Identity
+		byIdentity, err := r.QueryType(TypeSelection{Symbol: identity})
+		if err != nil {
+			t.Fatalf("%s: identity %q: %v", label, identity, err)
+		}
+		got, want := byIdentity.Selection, token.Selection
+		if got.Presentation != probe.presentation || want.Presentation != probe.presentation {
+			t.Fatalf("%s: identity presentation %q, token presentation %q, want %q", label, got.Presentation, want.Presentation, probe.presentation)
+		}
+		if got.Target == nil || *got.Target != *want.Target {
+			t.Fatalf("%s: identity target %+v, token target %+v", label, got.Target, want.Target)
+		}
+		if got.Target.LocationAvailable != probe.local || (got.Target.Source == userSourceID) != probe.local {
+			t.Fatalf("%s: target location %+v", label, got.Target)
 		}
 	}
 }
@@ -266,39 +260,37 @@ fn pick(o: Data.Option<string>) -> string { match o { Data.Option.Some { value: 
 func TestNamedDeclarationQueriesMatchDeclarationTokens(t *testing.T) {
 	source := targetFixture + `layer App { Users = Fixed }
 `
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(source, target)
-		if !r.Checked {
-			t.Fatalf("%s fixture: %+v", target, r.Diagnostics)
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("go fixture: %+v", r.Diagnostics)
+	}
+	for _, probe := range []struct{ symbol, context, name string }{
+		{"Users", "service Users", "Users"},
+		{"Fixed", "impl Fixed", "Fixed"},
+		{"Prefix", "impl Prefix", "Prefix"},
+		{"Users.get", "service Users { effect fn get", "get"},
+		{"Fixed.get", "Fixed for Users { effect fn get", "get"},
+		{"Pair", "record Pair", "Pair"},
+		{"App", "layer App", "App"},
+	} {
+		label := "go" + " " + probe.symbol
+		offset := at(t, source, probe.context, probe.name)
+		token, err := r.QueryType(TypeSelection{Offset: &offset})
+		if err != nil || token.Selection.Kind != "declaration" || token.Selection.Target == nil {
+			t.Fatalf("%s: token selection %+v: %v", label, token.Selection, err)
 		}
-		for _, probe := range []struct{ symbol, context, name string }{
-			{"Users", "service Users", "Users"},
-			{"Fixed", "impl Fixed", "Fixed"},
-			{"Prefix", "impl Prefix", "Prefix"},
-			{"Users.get", "service Users { effect fn get", "get"},
-			{"Fixed.get", "Fixed for Users { effect fn get", "get"},
-			{"Pair", "record Pair", "Pair"},
-			{"App", "layer App", "App"},
-		} {
-			label := target + " " + probe.symbol
-			offset := at(t, source, probe.context, probe.name)
-			token, err := r.QueryType(TypeSelection{Offset: &offset})
-			if err != nil || token.Selection.Kind != "declaration" || token.Selection.Target == nil {
-				t.Fatalf("%s: token selection %+v: %v", label, token.Selection, err)
-			}
-			named, err := r.QueryType(TypeSelection{Symbol: probe.symbol})
-			if err != nil {
-				t.Fatalf("%s: %v", label, err)
-			}
-			got, want := named.Selection, token.Selection
-			if got.Kind != "declaration" || !reflect.DeepEqual(got.Target, want.Target) || got.Presentation != want.Presentation || got.Span != want.Span || got.Extent != want.Extent || !got.LocationAvailable {
-				t.Fatalf("%s: named %+v target %+v, token %+v target %+v", label, got, got.Target, want, want.Target)
-			}
+		named, err := r.QueryType(TypeSelection{Symbol: probe.symbol})
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
 		}
-		for _, missing := range []string{"Users.missing", "Missing.id", "Users.get.id", "Nope", "Data.Option.Some"} {
-			if _, err := r.QueryType(TypeSelection{Symbol: missing}); err == nil || err.Error() != "named type declaration unavailable" {
-				t.Fatalf("%s %q: %v", target, missing, err)
-			}
+		got, want := named.Selection, token.Selection
+		if got.Kind != "declaration" || !reflect.DeepEqual(got.Target, want.Target) || got.Presentation != want.Presentation || got.Span != want.Span || got.Extent != want.Extent || !got.LocationAvailable {
+			t.Fatalf("%s: named %+v target %+v, token %+v target %+v", label, got, got.Target, want, want.Target)
+		}
+	}
+	for _, missing := range []string{"Users.missing", "Missing.id", "Users.get.id", "Nope", "Data.Option.Some"} {
+		if _, err := r.QueryType(TypeSelection{Symbol: missing}); err == nil || err.Error() != "named type declaration unavailable" {
+			t.Fatalf("go %q: %v", missing, err)
 		}
 	}
 }

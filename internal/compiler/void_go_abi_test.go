@@ -140,7 +140,7 @@ func TestConcreteVoidExecution(t *testing.T) {
 
 // voidGoBoundaryPrograms are admitted programs whose void completions and
 // declared callable layouts meet at distinct Go lowering boundaries. Each one
-// must build and execute natively, and execute identically on JavaScript.
+// must build and execute natively.
 var voidGoBoundaryPrograms = []struct{ name, source string }{
 	{"empty-body", `fn empty() -> void {}
 effect fn main() -> void { empty(); void }`},
@@ -244,9 +244,6 @@ func TestVoidGoBoundaryProgramsExecuteOnBothTargets(t *testing.T) {
 		t.Run(program.name, func(t *testing.T) {
 			t.Parallel()
 			runGenericDataNative(t, program.source, "")
-			if output := runJSForTarget(t, "js", program.source, `await Effect.runPromise(__ef_function_main());`); output != "" {
-				t.Fatalf("void JavaScript program was not silent: %q", output)
-			}
 		})
 	}
 }
@@ -269,7 +266,7 @@ fn runWith(selected: Runner<void>, callback: fn() -> void) -> void { selected.ru
 fn factory(make: fn() -> fn() -> void) -> Factory<void> { Factory<void> { make: make } }
 fn produce(selected: Factory<void>) -> fn() -> void { selected.make() }
 effect fn main() -> void {
- // The Go and JavaScript probes call these functions directly.
+ // The Go probe calls these functions directly.
  let probeHold = hold
  let probeRehold = rehold
  let probeRelease = release
@@ -339,32 +336,6 @@ func TestVoidLayoutAdapterCounts(t *testing.T) {
 }
 `
 
-const voidJSAdapterProbe = `
-let calls = 0;
-const count = () => { calls++; };
-const recaptured = __ef_function_rehold(__ef_function_hold(count));
-const released = __ef_function_release(recaptured);
-if (calls !== 0) throw new Error("record capture invoked " + calls);
-recaptured.callback();
-released();
-if (calls !== 2) throw new Error("record calls " + calls);
-calls = 0;
-const unhooked = __ef_function_unhook(__ef_function_hook(count));
-if (calls !== 0) throw new Error("enum capture invoked " + calls);
-unhooked();
-unhooked();
-if (calls !== 2) throw new Error("enum calls " + calls);
-let runs = 0, callbacks = 0;
-__ef_function_runWith(__ef_function_runner((callback) => { runs++; callback(); }), () => { callbacks++; });
-if (runs !== 1 || callbacks !== 1) throw new Error("runner " + runs + "/" + callbacks);
-let makes = 0, finishes = 0;
-const produced = __ef_function_produce(__ef_function_factory(() => { makes++; return () => { finishes++; }; }));
-produced();
-produced();
-if (makes !== 1 || finishes !== 2) throw new Error("factory " + makes + "/" + finishes);
-console.log("counted");
-`
-
 func TestVoidGoCallableLayoutAdaptersCaptureOnceAndInvokeLazily(t *testing.T) {
 	r := CompileFor(voidGoAdapterSource, "go")
 	if !r.Checked {
@@ -403,9 +374,6 @@ func TestVoidGoCallableLayoutAdaptersCaptureOnceAndInvokeLazily(t *testing.T) {
 	if output, err := runGoCommand(dir, "test", "."); err != nil {
 		t.Fatalf("generated callable layout adapters failed: %v\n%s\n%s", err, output, generated)
 	}
-	if output := runJSForTarget(t, "js", voidGoAdapterSource, voidJSAdapterProbe); output != "counted\n" {
-		t.Fatalf("JavaScript callback counts changed: %q", output)
-	}
 }
 
 // voidGoNestedApplicationSource stores concrete callbacks inside generic data
@@ -423,7 +391,7 @@ fn action(e: Envelope<void>) -> Action<fn() -> void, void> { e.action }
 fn perform(a: Action<fn() -> void, void>) -> void { match a { Action.Some { operation } => operation(); Action.Idle => void } }
 fn fire(e: Envelope<void>) -> void { e.call.operation() }
 effect fn main() -> void {
- // The Go and JavaScript probes call these functions directly.
+ // The Go probe calls these functions directly.
  let probeEnvelop = envelop
  let probeReenvelop = reenvelop
  let probeCall = call
@@ -452,19 +420,6 @@ func TestVoidNestedApplicationAdapterCounts(t *testing.T) {
 		t.Fatalf("nested application adapters did not invoke the callback exactly once per call: %d", calls)
 	}
 }
-`
-
-const voidJSNestedApplicationProbe = `
-let calls = 0;
-const envelope = __ef_function_reenvelop(__ef_function_envelop(() => { calls++; }));
-const call = __ef_function_call(envelope);
-const action = __ef_function_action(envelope);
-if (calls !== 0) throw new Error("nested capture invoked " + calls);
-call.operation();
-__ef_function_perform(action);
-__ef_function_fire(envelope);
-if (calls !== 3) throw new Error("nested calls " + calls);
-console.log("counted");
 `
 
 func TestVoidGoNestedApplicationAdaptersPreserveIdentityAndCounts(t *testing.T) {
@@ -503,9 +458,6 @@ func TestVoidGoNestedApplicationAdaptersPreserveIdentityAndCounts(t *testing.T) 
 	}
 	if output, err := runGoCommand(dir, "test", "."); err != nil {
 		t.Fatalf("generated nested application adapters failed: %v\n%s\n%s", err, output, generated)
-	}
-	if output := runJSForTarget(t, "js", voidGoNestedApplicationSource, voidJSNestedApplicationProbe); output != "counted\n" {
-		t.Fatalf("JavaScript nested application counts changed: %q", output)
 	}
 }
 
@@ -557,9 +509,6 @@ func TestProviderConfigurationKeepsCheckedGenericTypeAcrossTargets(t *testing.T)
 				expected = program.output + "\n"
 			}
 			runGenericDataNative(t, program.source, expected)
-			if output := runJSForTarget(t, "js", program.source, `const value = await Effect.runPromise(__ef_function_main()); if (value !== undefined) console.log(value);`); output != expected {
-				t.Fatalf("JavaScript provider configuration output changed: %q", output)
-			}
 		})
 	}
 }
@@ -637,15 +586,9 @@ effect fn main() -> void {
 func TestVoidProductMatchValuesExecuteOnBothTargets(t *testing.T) {
 	const output = "kept kept\n"
 	runGenericDataNative(t, voidProductMatchValueSource, output)
-	if got := runJSForTarget(t, "js", voidProductMatchValueSource, `await Effect.runPromise(__ef_function_main());`); got != output {
-		t.Fatalf("JavaScript void product match values: %q", got)
-	}
 }
 
 func TestVoidProductMatchTailsExecuteOnBothTargets(t *testing.T) {
 	const output = "red stop\ngo\nwait\n"
 	runGenericDataNative(t, voidProductMatchSource, output)
-	if got := runJSForTarget(t, "js", voidProductMatchSource, `await Effect.runPromise(__ef_function_main());`); got != output {
-		t.Fatalf("JavaScript void product match: %q", got)
-	}
 }

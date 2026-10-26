@@ -14,30 +14,15 @@ fn consume(value:Phantom<effect fn(string)->string raises {Trouble},string>)->st
 `
 
 func TestGenericDataApplicationArgumentsAreInvariant(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		for _, source := range []string{
-			phantomCallableIdentitySource + `fn bad()->string{consume(narrow())}`,
-			phantomCallableIdentitySource + `fn bad()->Phantom<effect fn(string)->string raises {Trouble},string>{narrow()}`,
-		} {
-			r := CompileFor(source, target)
-			if r.Checked || !hasCode(r, "EF106") {
-				t.Fatalf("%s widened a complete generic application: checked=%v diagnostics=%+v", target, r.Checked, r.Diagnostics)
-			}
+	for _, source := range []string{
+		phantomCallableIdentitySource + `fn bad()->string{consume(narrow())}`,
+		phantomCallableIdentitySource + `fn bad()->Phantom<effect fn(string)->string raises {Trouble},string>{narrow()}`,
+	} {
+		r := CompileFor(source, "go")
+		if r.Checked || !hasCode(r, "EF106") {
+			t.Fatalf("go widened a complete generic application: checked=%v diagnostics=%+v", r.Checked, r.Diagnostics)
 		}
 	}
-	r := CompileFor(phantomCallableIdentitySource, "js")
-	if !r.Checked {
-		t.Fatal(r.Diagnostics)
-	}
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkStrictTypeScript(t, declaration, `import { consume, narrow, wide } from "./generated.mjs";
-consume(wide());
-// @ts-expect-error Complete generic application arguments remain invariant.
-consume(narrow());
-`)
 }
 
 func TestGenericDataExplicitCodecConstructionKeepsCallableFieldVariance(t *testing.T) {
@@ -51,10 +36,8 @@ fn make()->Convert.Codec<User,string,effect fn(string)->User raises {DecodeFailu
  Convert.Codec<User,string,effect fn(string)->User raises {DecodeFailure},effect fn(User)->string raises {EncodeFailure}>{decode:decode,encode:encode}
 }
 `
-	for _, target := range []string{"go", "js"} {
-		if r := CompileFor(source, target); !r.Checked {
-			t.Fatalf("%s explicit exact Codec application rejected narrower field callbacks: %+v", target, r.Diagnostics)
-		}
+	if r := CompileFor(source, "go"); !r.Checked {
+		t.Fatalf("go explicit exact Codec application rejected narrower field callbacks: %+v", r.Diagnostics)
 	}
 }
 
@@ -79,122 +62,102 @@ effect fn useView(file:File)->File raises {Trouble} uses {Audit}{let view=fileVi
 	source := prefix + `fn widened()->` + wider + `{factory()}
 effect fn orderedMake()->` + wider + ` raises {SetupFailure} uses {Setup}{let status=run Setup.ping();factory()}
 effect fn main()->string{let pipe=widened();run pipe.run("Ada").provide<Audit>(Memory).catch<Trouble>("fallback")+pipe.anchor}`
-	for _, target := range []string{"go", "js"} {
-		good := CompileFor(source, target)
-		if !good.Checked {
-			t.Fatalf("%s direct factory construction should satisfy checked callable field upper bound: %+v", target, good.Diagnostics)
+	good := CompileFor(source, "go")
+	if !good.Checked {
+		t.Fatalf("go direct factory construction should satisfy checked callable field upper bound: %+v", good.Diagnostics)
+	}
+	factoryCall, err := good.TypeAt(strings.Index(source, "{factory()}") + 1)
+	if err != nil || factoryCall.Type.Contract.Kind != "application" || factoryCall.Type.Application == nil || factoryCall.Type.Application.ProducedResult == nil || factoryCall.Type.Application.Result.ID != factoryCall.Type.Contract.ID || factoryCall.Type.Application.ProducedResult.ID == factoryCall.Type.Application.Result.ID {
+		t.Fatalf("go factory boundary did not publish its checked result and produced identity: info=%+v err=%v", factoryCall, err)
+	}
+	projection := good.ProjectExpression(factoryCall)
+	if !projection.Complete {
+		t.Fatalf("go factory expression projection was refused: %+v", projection)
+	}
+	projected := map[string]TypeNode{}
+	for _, node := range projection.Types {
+		projected[node.ID] = node
+	}
+	producedPublicID := factoryCall.Type.Application.ProducedResult.ID
+	if _, ok := projected[producedPublicID]; !ok {
+		t.Fatalf("go selected expression projection omitted produced result %s", producedPublicID)
+	}
+	projectedProduced := projected[producedPublicID]
+	for _, childID := range projectedProduced.Args {
+		if _, ok := projected[childID]; !ok {
+			t.Fatalf("go produced result projection omitted argument %s", childID)
 		}
-		factoryCall, err := good.TypeAt(strings.Index(source, "{factory()}") + 1)
-		if err != nil || factoryCall.Type.Contract.Kind != "application" || factoryCall.Type.Application == nil || factoryCall.Type.Application.ProducedResult == nil || factoryCall.Type.Application.Result.ID != factoryCall.Type.Contract.ID || factoryCall.Type.Application.ProducedResult.ID == factoryCall.Type.Application.Result.ID {
-			t.Fatalf("%s factory boundary did not publish its checked result and produced identity: info=%+v err=%v", target, factoryCall, err)
+	}
+	producedID := good.projector.typePublicToID[factoryCall.Type.Application.ProducedResult.ID]
+	resultID := good.projector.typePublicToID[factoryCall.Type.Application.Result.ID]
+	producedNode, resultNode := good.projector.node(producedID), good.projector.node(resultID)
+	if producedNode == nil || resultNode == nil || len(producedNode.Args) != 2 || len(resultNode.Args) != 2 || slices.Equal(producedNode.Args, resultNode.Args) {
+		t.Fatalf("go produced and exposed application rows were not distinct canonical identities: produced=%+v exposed=%+v", producedNode, resultNode)
+	}
+	producedCallable, exposedCallable := good.projector.node(producedNode.Args[0]), good.projector.node(resultNode.Args[0])
+	if producedCallable == nil || exposedCallable == nil || len(good.projector.rowLabels(producedCallable.FailureRow)) != 0 || !slices.Equal(good.projector.rowLabels(exposedCallable.FailureRow), []string{"Trouble"}) || !slices.Equal(good.projector.rowLabels(exposedCallable.ServiceRow), []string{"Audit"}) {
+		t.Fatalf("go produced and exposed callable rows differ from checked factory contract: produced=%+v exposed=%+v", producedCallable, exposedCallable)
+	}
+	callable, err := good.TypeAt(strings.Index(source, `run("Ada")`))
+	if err != nil || !slices.Equal(callable.Type.Errors, []string{"Trouble"}) || !slices.Equal(callable.Type.Services, []string{"Audit"}) {
+		t.Fatalf("go application caller lost exposed failure/service rows: info=%+v err=%v", callable, err)
+	}
+	ordered := good.Find("orderedMake")
+	if ordered == nil || !slices.Equal(ordered.Actual.Errors, []string{"SetupFailure"}) || !slices.Equal(ordered.Actual.Services, []string{"Setup"}) {
+		t.Fatalf("go preceding execution rows were lost at factory return: %+v", ordered)
+	}
+	orderedCall, err := good.TypeAt(strings.Index(source[strings.Index(source, "orderedMake"):], "factory()") + strings.Index(source, "orderedMake") + 1)
+	if err != nil || len(orderedCall.Evaluation.Failures) != 0 || len(orderedCall.Evaluation.Requirements) != 0 {
+		t.Fatalf("go earlier block evaluation leaked onto the returned factory occurrence: info=%+v err=%v", orderedCall, err)
+	}
+	fileView := good.checkedFunctions[functionNamed(good.Program.Functions, "fileView")].body
+	if !slices.ContainsFunc(fileView.ownershipFacts(), func(fact OwnershipFact) bool { return fact.Path == "anchor" && fact.Status == "borrowed" }) {
+		t.Fatalf("go re-contract discarded borrowed field ownership: %+v", fileView.ownershipFacts())
+	}
+	capturedCall, err := good.TypeAt(strings.Index(source, "view.run(file)") + len("view."))
+	// echo returns its argument without dereferencing it: the run
+	// result is owned by the argument's owner and the recipe holds
+	// no use obligation (held = dereference obligations).
+	if err != nil || !slices.Equal(capturedCall.Type.Errors, []string{"Trouble"}) || !slices.Equal(capturedCall.Type.Services, []string{"Audit"}) || !slices.ContainsFunc(capturedCall.Type.Ownership, func(fact OwnershipFact) bool { return fact.Region == "parameter:file" && fact.Status == "borrowed" }) || len(capturedCall.Type.Captures) != 0 {
+		t.Fatalf("go callable invocation after re-contract lost rows or argument owner evidence: info=%+v err=%v", capturedCall, err)
+	}
+	field := fileView.fields["run"]
+	fileFactory := good.checkedFunctions[functionNamed(good.Program.Functions, "fileFactory")].body.fields["run"]
+	if field.valueID() == invalidTypeID || !slices.Equal(field.captureFacts(), fileFactory.captureFacts()) {
+		t.Fatalf("go re-contract discarded callable field capture facts: %+v", field.captureFacts())
+	}
+	dto, err := exportInterfaceSummary(good.projector, currentModuleIdentity, good.Revision, good.Program.Functions)
+	if err != nil {
+		t.Fatalf("go private summary export: %v", err)
+	}
+	fresh := CompileFor(source, "go")
+	if !fresh.Checked || fresh.projector.values == good.projector.values {
+		t.Fatalf("go fresh receiver arena: checked=%v diagnostics=%+v", fresh.Checked, fresh.Diagnostics)
+	}
+	if err := fresh.projector.admitInterfaceSummary(dto, fresh.Program.Functions); err != nil {
+		t.Fatalf("go private summary roundtrip: %v", err)
+	}
+	freshView := fresh.Program.Functions[functionIndex(fresh.Program.Functions, "fileView")]
+	fieldContracts, ok := fresh.projector.applicationFields(freshView.returnID)
+	var fieldContract TypeID
+	for _, declared := range fieldContracts {
+		if declared.Name == "run" {
+			fieldContract = declared.typeID
 		}
-		projection := good.ProjectExpression(factoryCall)
-		if !projection.Complete {
-			t.Fatalf("%s factory expression projection was refused: %+v", target, projection)
-		}
-		projected := map[string]TypeNode{}
-		for _, node := range projection.Types {
-			projected[node.ID] = node
-		}
-		producedPublicID := factoryCall.Type.Application.ProducedResult.ID
-		if _, ok := projected[producedPublicID]; !ok {
-			t.Fatalf("%s selected expression projection omitted produced result %s", target, producedPublicID)
-		}
-		projectedProduced := projected[producedPublicID]
-		for _, childID := range projectedProduced.Args {
-			if _, ok := projected[childID]; !ok {
-				t.Fatalf("%s produced result projection omitted argument %s", target, childID)
-			}
-		}
-		producedID := good.projector.typePublicToID[factoryCall.Type.Application.ProducedResult.ID]
-		resultID := good.projector.typePublicToID[factoryCall.Type.Application.Result.ID]
-		producedNode, resultNode := good.projector.node(producedID), good.projector.node(resultID)
-		if producedNode == nil || resultNode == nil || len(producedNode.Args) != 2 || len(resultNode.Args) != 2 || slices.Equal(producedNode.Args, resultNode.Args) {
-			t.Fatalf("%s produced and exposed application rows were not distinct canonical identities: produced=%+v exposed=%+v", target, producedNode, resultNode)
-		}
-		producedCallable, exposedCallable := good.projector.node(producedNode.Args[0]), good.projector.node(resultNode.Args[0])
-		if producedCallable == nil || exposedCallable == nil || len(good.projector.rowLabels(producedCallable.FailureRow)) != 0 || !slices.Equal(good.projector.rowLabels(exposedCallable.FailureRow), []string{"Trouble"}) || !slices.Equal(good.projector.rowLabels(exposedCallable.ServiceRow), []string{"Audit"}) {
-			t.Fatalf("%s produced and exposed callable rows differ from checked factory contract: produced=%+v exposed=%+v", target, producedCallable, exposedCallable)
-		}
-		callable, err := good.TypeAt(strings.Index(source, `run("Ada")`))
-		if err != nil || !slices.Equal(callable.Type.Errors, []string{"Trouble"}) || !slices.Equal(callable.Type.Services, []string{"Audit"}) {
-			t.Fatalf("%s application caller lost exposed failure/service rows: info=%+v err=%v", target, callable, err)
-		}
-		ordered := good.Find("orderedMake")
-		if ordered == nil || !slices.Equal(ordered.Actual.Errors, []string{"SetupFailure"}) || !slices.Equal(ordered.Actual.Services, []string{"Setup"}) {
-			t.Fatalf("%s preceding execution rows were lost at factory return: %+v", target, ordered)
-		}
-		orderedCall, err := good.TypeAt(strings.Index(source[strings.Index(source, "orderedMake"):], "factory()") + strings.Index(source, "orderedMake") + 1)
-		if err != nil || len(orderedCall.Evaluation.Failures) != 0 || len(orderedCall.Evaluation.Requirements) != 0 {
-			t.Fatalf("%s earlier block evaluation leaked onto the returned factory occurrence: info=%+v err=%v", target, orderedCall, err)
-		}
-		fileView := good.checkedFunctions[functionNamed(good.Program.Functions, "fileView")].body
-		if !slices.ContainsFunc(fileView.ownershipFacts(), func(fact OwnershipFact) bool { return fact.Path == "anchor" && fact.Status == "borrowed" }) {
-			t.Fatalf("%s re-contract discarded borrowed field ownership: %+v", target, fileView.ownershipFacts())
-		}
-		capturedCall, err := good.TypeAt(strings.Index(source, "view.run(file)") + len("view."))
-		// echo returns its argument without dereferencing it: the run
-		// result is owned by the argument's owner and the recipe holds
-		// no use obligation (held = dereference obligations).
-		if err != nil || !slices.Equal(capturedCall.Type.Errors, []string{"Trouble"}) || !slices.Equal(capturedCall.Type.Services, []string{"Audit"}) || !slices.ContainsFunc(capturedCall.Type.Ownership, func(fact OwnershipFact) bool { return fact.Region == "parameter:file" && fact.Status == "borrowed" }) || len(capturedCall.Type.Captures) != 0 {
-			t.Fatalf("%s callable invocation after re-contract lost rows or argument owner evidence: info=%+v err=%v", target, capturedCall, err)
-		}
-		field := fileView.fields["run"]
-		fileFactory := good.checkedFunctions[functionNamed(good.Program.Functions, "fileFactory")].body.fields["run"]
-		if field.valueID() == invalidTypeID || !slices.Equal(field.captureFacts(), fileFactory.captureFacts()) {
-			t.Fatalf("%s re-contract discarded callable field capture facts: %+v", target, field.captureFacts())
-		}
-		dto, err := exportInterfaceSummary(good.projector, currentModuleIdentity, good.Revision, good.Program.Functions)
-		if err != nil {
-			t.Fatalf("%s private summary export: %v", target, err)
-		}
-		fresh := CompileFor(source, target)
-		if !fresh.Checked || fresh.projector.values == good.projector.values {
-			t.Fatalf("%s fresh receiver arena: checked=%v diagnostics=%+v", target, fresh.Checked, fresh.Diagnostics)
-		}
-		if err := fresh.projector.admitInterfaceSummary(dto, fresh.Program.Functions); err != nil {
-			t.Fatalf("%s private summary roundtrip: %v", target, err)
-		}
-		freshView := fresh.Program.Functions[functionIndex(fresh.Program.Functions, "fileView")]
-		fieldContracts, ok := fresh.projector.applicationFields(freshView.returnID)
-		var fieldContract TypeID
-		for _, declared := range fieldContracts {
-			if declared.Name == "run" {
-				fieldContract = declared.typeID
-			}
-		}
-		field = freshView.returnFields["run"]
-		if !ok || fieldContract == invalidTypeID || field.contractID() != fieldContract || field.callableEvidence.count != 1 || field.callableEvidence.callees[0] != fresh.Program.Functions[functionIndex(fresh.Program.Functions, "echo")] || !slices.ContainsFunc(freshView.Ownership, func(fact OwnershipFact) bool { return fact.Path == "anchor" && fact.Status == "borrowed" }) {
-			t.Fatalf("%s private transport lost exposed field contract, actual callee, or ownership: field=%+v ownership=%+v", target, field, freshView.Ownership)
-		}
-		if target == "go" {
-			runGenericDataNative(t, source, "Ada\n")
-		} else {
-			_, declaration, err := good.Emit(false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			checkStrictTypeScript(t, declaration, `import { widened } from "./generated.mjs";
-import type { AuditRequirement } from "./generated.mjs";
-import type { Effect } from "effect";
-const operation = widened().run("Ada");
-const exposed: Effect.Effect<string, { readonly _tag: "Trouble" }, AuditRequirement> = operation;
-// @ts-expect-error Re-contracting cannot erase the declared callable rows.
-const narrower: Effect.Effect<string, never, never> = operation;
-void exposed; void narrower;`)
-			if output := runJSForTarget(t, "js", source, `if (await Effect.runPromise(__ef_function_main()) !== "Ada") throw new Error("re-contracted factory result"); console.log("Ada");`); output != "Ada\n" {
-				t.Fatalf("JS target factory execution: %q", output)
-			}
-		}
-		for _, source := range []string{
-			prefix + `fn bad(value:Pipe<effect fn(string)->string,string>)->` + wider + `{forward(value)}`,
-			prefix + `fn bad(value:Pipe<effect fn(string)->string,string>)->` + wider + `{alias(value)}`,
-			prefix + `fn bad(value:Pipe<effect fn(string)->string,string>,flag:bool)->` + wider + `{conditional(value,flag)}`,
-		} {
-			bad := CompileFor(source, target)
-			if bad.Checked || !hasCode(bad, "EF106") {
-				t.Fatalf("%s forwarding complete fields must not widen invariant application identity: checked=%v diagnostics=%+v", target, bad.Checked, bad.Diagnostics)
-			}
+	}
+	field = freshView.returnFields["run"]
+	if !ok || fieldContract == invalidTypeID || field.contractID() != fieldContract || field.callableEvidence.count != 1 || field.callableEvidence.callees[0] != fresh.Program.Functions[functionIndex(fresh.Program.Functions, "echo")] || !slices.ContainsFunc(freshView.Ownership, func(fact OwnershipFact) bool { return fact.Path == "anchor" && fact.Status == "borrowed" }) {
+		t.Fatalf("go private transport lost exposed field contract, actual callee, or ownership: field=%+v ownership=%+v", field, freshView.Ownership)
+	}
+	runGenericDataNative(t, source, "Ada\n")
+	for _, source := range []string{
+		prefix + `fn bad(value:Pipe<effect fn(string)->string,string>)->` + wider + `{forward(value)}`,
+		prefix + `fn bad(value:Pipe<effect fn(string)->string,string>)->` + wider + `{alias(value)}`,
+		prefix + `fn bad(value:Pipe<effect fn(string)->string,string>,flag:bool)->` + wider + `{conditional(value,flag)}`,
+	} {
+		bad := CompileFor(source, "go")
+		if bad.Checked || !hasCode(bad, "EF106") {
+			t.Fatalf("go forwarding complete fields must not widen invariant application identity: checked=%v diagnostics=%+v", bad.Checked, bad.Diagnostics)
 		}
 	}
 }

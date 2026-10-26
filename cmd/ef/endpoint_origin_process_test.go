@@ -68,18 +68,14 @@ func TestEndpointOriginAcrossCLIMCPAndLSP(t *testing.T) {
 		{"api", "expression", strings.Index(text, "run api(request)") + len("run ")},
 	}
 	cli := []map[string]any{}
-	for _, target := range []string{"go", "js"} {
-		for _, p := range probes {
-			stdout, stderr, code := runTestCLI(t, binary, "type", filepath.Join(root, "endpoints.ef"), "--offset", strconv.Itoa(p.offset), "--target", target, "--json")
-			if code != 0 || len(stderr) != 0 {
-				t.Fatalf("%s %s query: code=%d stderr=%q", target, p.name, code, stderr)
-			}
-			response := readProcessJSON(t, stdout)
-			endpointOriginTarget(t, response, text, p.name, p.kind)
-			if target == "go" {
-				cli = append(cli, response)
-			}
+	for _, p := range probes {
+		stdout, stderr, code := runTestCLI(t, binary, "type", filepath.Join(root, "endpoints.ef"), "--offset", strconv.Itoa(p.offset), "--target", "go", "--json")
+		if code != 0 || len(stderr) != 0 {
+			t.Fatalf("go %s query: code=%d stderr=%q", p.name, code, stderr)
 		}
+		response := readProcessJSON(t, stdout)
+		endpointOriginTarget(t, response, text, p.name, p.kind)
+		cli = append(cli, response)
 	}
 	requests := []map[string]any{
 		{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "endpoint-origin", "version": "1"}}},

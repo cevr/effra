@@ -18,7 +18,7 @@
 // (run | timeout | fork | scope | provision) at layer b, wrappers, callback/helper
 // producers and if/match branches. The explicit families add recovery handler
 // variants, a handler returning the payload handle, forked-child failures and
-// handle-free row-soundness programs that also execute on JS.
+// handle-free row-soundness programs.
 
 package compiler
 
@@ -30,7 +30,6 @@ import (
 
 type ownershipMatrixProgram struct {
 	Name, Source, Oracle string
-	JSRunnable           bool
 }
 
 const (
@@ -868,7 +867,7 @@ func ownershipMatrixCases(fix string) []*ownershipMatrixCase {
 // ---------------------------------------------------------------------------
 // Explicit families (review M7): recovery handler variants, a handler that
 // returns the payload handle, forked-child failure through join / interrupt /
-// owner closure, and handle-free row-soundness programs runnable on JS.
+// owner closure, and handle-free row-soundness programs.
 
 const ownershipMatrixBaseErrors = `error WithFile { file: File }
 effect fn readFile(file: File) -> string raises { IoError } {
@@ -1138,7 +1137,7 @@ fn discardV(failure: Boom) -> void { void }
 				if file {
 					prefix = "ch"
 				}
-				out = append(out, ownershipMatrixProgram{Name: prefix + "_" + observe + "_" + pos + "_" + h, Source: src, Oracle: oracle, JSRunnable: !file})
+				out = append(out, ownershipMatrixProgram{Name: prefix + "_" + observe + "_" + pos + "_" + h, Source: src, Oracle: oracle})
 			}
 		}
 	}
@@ -1233,7 +1232,7 @@ var ownershipMatrixExitShapes = []struct {
 `, []string{`run stage().catch<E>("joined")`}, "safe"},
 }
 
-// ownershipMatrixExitPrograms: NB2 shapes on a handle-free payload (Go and JS) and on a File payload (Go).
+// ownershipMatrixExitPrograms: NB2 shapes on a handle-free payload and on a File payload.
 func ownershipMatrixExitPrograms(fix string) []ownershipMatrixProgram {
 	open := ownershipMatrixOpen(fix)
 	boom := `error Boom { code: i64 }
@@ -1260,7 +1259,7 @@ effect fn bail() -> string raises { Nope } {
 			body[i] = strings.ReplaceAll(l, "<E>", "<Boom>")
 		}
 		src := boom + stage + ownershipMatrixConsumeMain(body, "{}")
-		out = append(out, ownershipMatrixProgram{Name: "rw_" + s.shape, Source: src, Oracle: s.oracle, JSRunnable: true})
+		out = append(out, ownershipMatrixProgram{Name: "rw_" + s.shape, Source: src, Oracle: s.oracle})
 	}
 	// the File form of the early exit: the unobserved child's payload reaches a reading handler
 	src := ownershipMatrixBaseErrors + "error Nope { code: i64 }\n" + `effect fn rejected(file: File) -> string raises { WithFile } {

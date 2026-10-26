@@ -340,8 +340,7 @@ type pipeArtifact struct {
 }
 
 // pipeOutput holds every artifact one program compiles to, keyed by
-// "<target>/<mode>": js/check, js/entry, js/entry.d.mts, js/library,
-// js/library.d.mts, js/tests, js/tests.d.mts, go/check, go/build, go/test.
+// "<target>/<mode>": go/check, go/build, go/test.
 type pipeOutput map[string]pipeArtifact
 
 func (o pipeOutput) record(key, status, text string) {
@@ -369,58 +368,31 @@ func compilePipeOutputWithRawMutation(t *testing.T, source, dir string, transfor
 		}
 		out.record(key, status, text)
 	}
-	for _, target := range []string{"js", "go"} {
-		r := compileTransformed(source, target, dir, transform)
-		if !r.Checked {
-			codes := []string{}
-			for _, d := range r.Diagnostics {
-				codes = append(codes, d.Code)
-			}
-			out[target+"/check"] = pipeArtifact{Status: pipeRejected, Codes: codes}
-			continue
+	r := compileTransformed(source, "go", dir, transform)
+	if !r.Checked {
+		codes := []string{}
+		for _, d := range r.Diagnostics {
+			codes = append(codes, d.Code)
 		}
-		out[target+"/check"] = pipeArtifact{Status: pipeEmitted}
-		_, testsErr := r.Tests()
-		entryErr := r.Entry()
-		if target == "js" {
-			emitJS := func(mode string, emit func() (string, string, error)) {
-				text, declarations, err := emit()
-				if err != nil {
-					record("js/"+mode, pipeEmissionFailed, "")
-					record("js/"+mode+".d.mts", pipeEmissionFailed, "")
-					return
-				}
-				record("js/"+mode, pipeEmitted, text)
-				record("js/"+mode+".d.mts", pipeEmitted, declarations)
-			}
-			if entryErr != nil {
-				record("js/entry", pipeNoEntry, "")
-				record("js/entry.d.mts", pipeNoEntry, "")
-			} else {
-				emitJS("entry", func() (string, string, error) { return r.Emit(true) })
-			}
-			emitJS("library", func() (string, string, error) { return r.Emit(false) })
-			if testsErr != nil {
-				record("js/tests", pipeNoTests, "")
-			} else {
-				emitJS("tests", r.EmitJSTests)
-			}
-			continue
-		}
-		if entryErr != nil {
-			record("go/build", pipeNoEntry, "")
-		} else if app, err := r.GoApplication(GoGenerationBuild); err != nil {
-			record("go/build", pipeEmissionFailed, "")
-		} else {
-			record("go/build", pipeEmitted, string(app.Main))
-		}
-		if testsErr != nil {
-			record("go/test", pipeNoTests, "")
-		} else if text, err := r.EmitGoTests(); err != nil {
-			record("go/test", pipeEmissionFailed, "")
-		} else {
-			record("go/test", pipeEmitted, text)
-		}
+		out["go/check"] = pipeArtifact{Status: pipeRejected, Codes: codes}
+		return out
+	}
+	out["go/check"] = pipeArtifact{Status: pipeEmitted}
+	_, testsErr := r.Tests()
+	entryErr := r.Entry()
+	if entryErr != nil {
+		record("go/build", pipeNoEntry, "")
+	} else if app, err := r.GoApplication(GoGenerationBuild); err != nil {
+		record("go/build", pipeEmissionFailed, "")
+	} else {
+		record("go/build", pipeEmitted, string(app.Main))
+	}
+	if testsErr != nil {
+		record("go/test", pipeNoTests, "")
+	} else if text, err := r.EmitGoTests(); err != nil {
+		record("go/test", pipeEmissionFailed, "")
+	} else {
+		record("go/test", pipeEmitted, text)
 	}
 	return out
 }
@@ -429,7 +401,7 @@ func compilePipeOutputWithRawMutation(t *testing.T, source, dir string, transfor
 // and is anchored to exactly these two patterns:
 //
 //   - `binding:<Name>:<digits>`, the byte offset that ends a layer binding's
-//     node id in both targets (the digits are masked, the name is not);
+//     node id in generated Go (the digits are masked, the name is not);
 //   - `Offset: N, Length: N, Line: N, Column: N`, the source location in a Go
 //     NodeSpec.
 //
@@ -468,12 +440,6 @@ type pipeDifferential struct {
 	mismatches []string
 }
 
-// both is the number of programs whose JavaScript entry and Go build were both
-// emitted and compared.
-func (d pipeDifferential) both() int {
-	return d.compared["both"]
-}
-
 // report is one line per artifact: how many programs reached each status and
 // how many had their emitted text compared.
 func (d pipeDifferential) report() string {
@@ -495,7 +461,7 @@ func (d pipeDifferential) report() string {
 }
 
 // runPipeDifferential rewrites each corpus program and compares every
-// artifact on both targets, with its status and diagnostic codes, to the
+// artifact, with its status and diagnostic codes, to the
 // original's. transform is applied to the rewritten program only, which lets a
 // control inject a wrong desugaring.
 func runPipeDifferential(t *testing.T, corpus []pipeCorpusSource, transform func(*Program)) pipeDifferential {
@@ -555,12 +521,9 @@ func runPipeDifferential(t *testing.T, corpus []pipeCorpusSource, transform func
 				result.status[key] = map[string]int{}
 			}
 			result.status[key][artifact.Status]++
-			if artifact.Status == pipeEmitted && after[key].Status == pipeEmitted && key != "js/check" && key != "go/check" {
+			if artifact.Status == pipeEmitted && after[key].Status == pipeEmitted && key != "go/check" {
 				result.compared[key]++
 			}
-		}
-		if before["js/entry"].Status == pipeEmitted && before["go/build"].Status == pipeEmitted {
-			result.compared["both"]++
 		}
 		if !pipeOutputsEqual(before, after) {
 			result.mismatches = append(result.mismatches, entry.name)
@@ -584,12 +547,12 @@ func safeParse(source string) (program *Program, diagnostics []Diagnostic) {
 func TestPipeFormCompilesToTheSameOutputAsNestedCalls(t *testing.T) {
 	corpus := pipeCorpus(t)
 	result := runPipeDifferential(t, corpus, nil)
-	t.Logf("%d corpus programs, %d rewritten, %d calls piped, %d emitted on both targets (JS entry and Go build)%s", len(corpus), result.programs, result.calls, result.both(), result.report())
-	if result.programs < 200 || result.calls < 500 || result.both() < 50 {
-		t.Fatalf("corpus too small to prove equivalence: %d programs, %d calls, %d emitted on both targets", result.programs, result.calls, result.both())
+	t.Logf("%d corpus programs, %d rewritten, %d calls piped%s", len(corpus), result.programs, result.calls, result.report())
+	if result.programs < 200 || result.calls < 500 {
+		t.Fatalf("corpus too small to prove equivalence: %d programs, %d calls", result.programs, result.calls)
 	}
 	// Every compared artifact must be exercised, or its claim is empty.
-	for _, key := range []string{"js/entry", "js/entry.d.mts", "js/library", "js/library.d.mts", "js/tests", "js/tests.d.mts", "go/build", "go/test"} {
+	for _, key := range []string{"go/build", "go/test"} {
 		if result.compared[key] < pipeMinimumCompared[key] {
 			t.Fatalf("only %d programs compared %s, want at least %d", result.compared[key], key, pipeMinimumCompared[key])
 		}
@@ -604,8 +567,7 @@ func TestPipeFormCompilesToTheSameOutputAsNestedCalls(t *testing.T) {
 // today (see the test log) so that a corpus change does not trip them, and
 // above zero so that a mode silently dropping out of the comparison does.
 var pipeMinimumCompared = map[string]int{
-	"js/entry": 80, "js/entry.d.mts": 80, "js/library": 100, "js/library.d.mts": 100,
-	"js/tests": 5, "js/tests.d.mts": 5, "go/build": 100, "go/test": 5,
+	"go/build": 100, "go/test": 5,
 }
 
 // The statuses the differential records stay distinct: a rejected program, a
@@ -619,45 +581,19 @@ func TestPipeDifferentialRecordsPerTargetStatus(t *testing.T) {
 		}
 	}
 	rejected := status("fn bad() -> string { 1 }\n")
-	want(rejected, "js/check", pipeRejected)
 	want(rejected, "go/check", pipeRejected)
-	if got := rejected["js/check"].Codes; len(got) == 0 {
+	if got := rejected["go/check"].Codes; len(got) == 0 {
 		t.Error("a rejected program records no diagnostic codes")
 	}
-	if _, ok := rejected["js/library"]; ok {
+	if _, ok := rejected["go/build"]; ok {
 		t.Error("a rejected program records an emission")
 	}
 	library := status("fn shout(text: string) -> string { text + \"!\" }\n")
-	want(library, "js/entry", pipeNoEntry)
 	want(library, "go/build", pipeNoEntry)
-	want(library, "js/library", pipeEmitted)
-	want(library, "js/library.d.mts", pipeEmitted)
-	want(library, "js/tests", pipeNoTests)
 	want(library, "go/test", pipeNoTests)
 	full := status("effect fn main() -> string { \"ok\" }\neffect fn test_ok() -> void raises { AssertionFailed } uses { Assert } {\n    run Assert.check(true, \"holds\")\n}\n")
-	for _, key := range []string{"js/entry", "js/entry.d.mts", "js/library", "js/library.d.mts", "js/tests", "js/tests.d.mts", "go/build", "go/test"} {
+	for _, key := range []string{"go/build", "go/test"} {
 		want(full, key, pipeEmitted)
-	}
-}
-
-func TestPipeDifferentialRecordsEmissionFailure(t *testing.T) {
-	source := `fn shout(text: string) -> string { text + "!" }
-effect fn main() -> string { shout("ok") }
-effect fn test_ok() -> void raises { AssertionFailed } uses { Assert } {
-    run Assert.check(true, "holds")
-}
-`
-	goOnly := func(program *Program) { program.GoOnly = true }
-	out := compilePipeOutput(t, source, ".", goOnly)
-	for _, key := range []string{"js/entry", "js/entry.d.mts", "js/library", "js/library.d.mts", "js/tests", "js/tests.d.mts"} {
-		if got := out[key].Status; got != pipeEmissionFailed {
-			t.Errorf("%s status = %q, want reachable %q", key, got, pipeEmissionFailed)
-		}
-	}
-	for _, key := range []string{"go/check", "go/build", "go/test"} {
-		if got := out[key].Status; got != pipeEmitted {
-			t.Errorf("%s status = %q, want %q", key, got, pipeEmitted)
-		}
 	}
 }
 
@@ -668,7 +604,7 @@ effect fn test_ok() -> void raises { AssertionFailed } uses { Assert } {
 }
 `
 	out := compilePipeOutput(t, source, ".", nil)
-	for _, key := range []string{"js/entry", "js/entry.d.mts", "js/library", "js/library.d.mts", "js/tests", "js/tests.d.mts", "go/build", "go/test"} {
+	for _, key := range []string{"go/build", "go/test"} {
 		artifact := out[key]
 		if artifact.Status != pipeEmitted {
 			t.Fatalf("%s status = %q, want %q", key, artifact.Status, pipeEmitted)
@@ -686,9 +622,7 @@ effect fn test_ok() -> void raises { AssertionFailed } uses { Assert } {
 }
 
 // mutateFirstRawArtifactLine changes the first meaningful raw line while
-// retaining a recognized generated revision header. Declaration artifacts do
-// not have that header: their first line is a real import and must remain part
-// of the comparison.
+// retaining a recognized generated revision header.
 func mutateFirstRawArtifactLine(t *testing.T, key, text string) string {
 	t.Helper()
 	firstEnd := strings.IndexByte(text, '\n')
@@ -707,12 +641,6 @@ func mutateFirstRawArtifactLine(t *testing.T, key, text string) string {
 	}
 	if start >= lineEnd {
 		t.Fatalf("%s has no first meaningful raw line", key)
-	}
-	line := text[start:lineEnd]
-	if key == "js/library.d.mts" {
-		if !strings.HasPrefix(line, "import type ") || !strings.Contains(line, "from 'effect';") {
-			t.Fatalf("%s first line is not the real declaration import: %q", key, line)
-		}
 	}
 	return text[:lineEnd] + " /* first raw-line change: " + key + " */" + text[lineEnd:]
 }
@@ -738,63 +666,61 @@ func TestPipeEquivalenceCatchesAppendingTheSubjectLast(t *testing.T) {
 // byte outside the masked digits must change the compared text, and changing
 // a masked digit must not.
 func TestPipeDifferentialMaskIsAnchored(t *testing.T) {
-	for _, target := range []string{"js", "go"} {
-		source, err := os.ReadFile(filepath.Join("..", "..", "examples", "layers.ef"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		text := emittedProgram(t, compileTransformed(string(source), target, filepath.Join("..", "..", "examples"), nil))
-		if !strings.HasPrefix(text, pipeRevisionHeader) {
-			t.Fatalf("%s: emitted source has no revision header", target)
-		}
-		text = stripPipeRevisionHeader(text)
-		// The permitted mask is spelled out here, independently of the one
-		// under test, so widening that one is caught.
-		masks := regexp.MustCompile(`binding:\w+:\d+|Offset: \d+, Length: \d+, Line: \d+, Column: \d+`).FindAllStringIndex(text, -1)
-		if len(masks) == 0 {
-			t.Fatalf("%s: the program has no layer positions to mask", target)
-		}
-		maskedDigit := func(i int) bool {
-			if text[i] < '0' || text[i] > '9' {
-				return false
-			}
-			for _, m := range masks {
-				if i >= m[0] && i < m[1] {
-					match := text[m[0]:m[1]]
-					return !strings.HasPrefix(match, "binding:") || i > m[0]+strings.LastIndexByte(match, ':')
-				}
-			}
+	source, err := os.ReadFile(filepath.Join("..", "..", "examples", "layers.ef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := emittedProgram(t, compileTransformed(string(source), "go", filepath.Join("..", "..", "examples"), nil))
+	if !strings.HasPrefix(text, pipeRevisionHeader) {
+		t.Fatal("go: emitted source has no revision header")
+	}
+	text = stripPipeRevisionHeader(text)
+	// The permitted mask is spelled out here, independently of the one
+	// under test, so widening that one is caught.
+	masks := regexp.MustCompile(`binding:\w+:\d+|Offset: \d+, Length: \d+, Line: \d+, Column: \d+`).FindAllStringIndex(text, -1)
+	if len(masks) == 0 {
+		t.Fatal("go: the program has no layer positions to mask")
+	}
+	maskedDigit := func(i int) bool {
+		if text[i] < '0' || text[i] > '9' {
 			return false
 		}
-		nearMask := func(i int) bool {
-			for _, m := range masks {
-				if i >= m[0]-3 && i < m[1]+3 {
-					return true
-				}
+		for _, m := range masks {
+			if i >= m[0] && i < m[1] {
+				match := text[m[0]:m[1]]
+				return !strings.HasPrefix(match, "binding:") || i > m[0]+strings.LastIndexByte(match, ':')
 			}
-			return false
 		}
-		controlHeader := pipeRevisionHeader + "mask-control\n"
-		want := afterFirstLine(controlHeader + text)
-		for i := 0; i < len(text); i++ {
-			if text[i] == '\n' {
-				continue
+		return false
+	}
+	nearMask := func(i int) bool {
+		for _, m := range masks {
+			if i >= m[0]-3 && i < m[1]+3 {
+				return true
 			}
-			if i%11 != 0 && !maskedDigit(i) && !nearMask(i) {
-				continue
-			}
-			mutated := []byte(text)
-			if c := text[i]; c >= '0' && c <= '9' {
-				mutated[i] = '0' + (c-'0'+1)%10
-			} else {
-				mutated[i] = '~'
-			}
-			same := afterFirstLine(controlHeader+string(mutated)) == want
-			if masked := maskedDigit(i); masked && !same {
-				t.Fatalf("%s: a masked digit at byte %d changed the compared text", target, i)
-			} else if !masked && same {
-				t.Fatalf("%s: changing byte %d (%q) went unnoticed by the differential", target, i, text[i])
-			}
+		}
+		return false
+	}
+	controlHeader := pipeRevisionHeader + "mask-control\n"
+	want := afterFirstLine(controlHeader + text)
+	for i := 0; i < len(text); i++ {
+		if text[i] == '\n' {
+			continue
+		}
+		if i%11 != 0 && !maskedDigit(i) && !nearMask(i) {
+			continue
+		}
+		mutated := []byte(text)
+		if c := text[i]; c >= '0' && c <= '9' {
+			mutated[i] = '0' + (c-'0'+1)%10
+		} else {
+			mutated[i] = '~'
+		}
+		same := afterFirstLine(controlHeader+string(mutated)) == want
+		if masked := maskedDigit(i); masked && !same {
+			t.Fatalf("go: a masked digit at byte %d changed the compared text", i)
+		} else if !masked && same {
+			t.Fatalf("go: changing byte %d (%q) went unnoticed by the differential", i, text[i])
 		}
 	}
 }

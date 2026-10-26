@@ -512,52 +512,30 @@ func assertCheckedBuildsAfterRefusal(t *testing.T, binary, source, selected stri
 	if ping := readProcessJSON(t, lines[3]); ping["result"] == nil || ping["error"] != nil {
 		t.Fatalf("aggregate queued ping failed: %v", ping)
 	}
-	for _, target := range []string{"go", "js"} {
-		stdout, stderr, code := runTestCLI(t, binary, "check", file, "--target", target)
-		if code != 0 {
-			t.Fatalf("%s check rejected valid large source: %s", target, stderr)
+	stdout, stderr, code = runTestCLI(t, binary, "check", file, "--target", "go")
+	if code != 0 {
+		t.Fatalf("go check rejected valid large source: %s", stderr)
+	}
+	response := readProcessJSON(t, stdout)
+	if response["checked"] != true || response["typeProjectionComplete"] != false || response["typeProjectionError"] == nil {
+		t.Fatalf("go check conflated validity and projection: %v", response)
+	}
+	for _, key := range []string{"symbols", "declarations", "types", "rows", "bindings"} {
+		if response[key] != nil {
+			t.Fatalf("refused check retained %s authority", key)
 		}
-		response := readProcessJSON(t, stdout)
-		if response["checked"] != true || response["typeProjectionComplete"] != false || response["typeProjectionError"] == nil {
-			t.Fatalf("%s check conflated validity and projection: %v", target, response)
-		}
-		for _, key := range []string{"symbols", "declarations", "types", "rows", "bindings"} {
-			if response[key] != nil {
-				t.Fatalf("refused check retained %s authority", key)
-			}
-		}
-		output := filepath.Join(root, "large-"+target)
-		if target == "js" {
-			output += ".mjs"
-		}
-		args := []string{"build", file, "--target", target, "-o", output}
-		if target == "js" {
-			args = append(args, "--entry")
-		}
-		command := exec.Command(binary, args...)
-		command.Dir = root
-		if result, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("%s large build failed: %v\n%s", target, err, result)
-		}
-		if stat, err := os.Stat(output); err != nil || stat.Size() == 0 {
-			t.Fatalf("%s build has no artifact: %v", target, err)
-		}
-		if target == "go" {
-			if result, err := exec.Command(output).CombinedOutput(); err != nil || string(result) != "ok\n" {
-				t.Fatalf("large native execution: %v %s", err, result)
-			}
-		}
-		if target == "js" {
-			modules, err := filepath.Abs("../../node_modules")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Symlink(modules, filepath.Join(root, "node_modules")); err != nil {
-				t.Fatal(err)
-			}
-			if result, err := exec.Command("bun", output).CombinedOutput(); err != nil || string(result) != "ok\n" {
-				t.Fatalf("large JS execution: %v %s", err, result)
-			}
-		}
+	}
+	artifact := filepath.Join(root, "large-go")
+	args := []string{"build", file, "--target", "go", "-o", artifact}
+	command = exec.Command(binary, args...)
+	command.Dir = root
+	if result, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("go large build failed: %v\n%s", err, result)
+	}
+	if stat, err := os.Stat(artifact); err != nil || stat.Size() == 0 {
+		t.Fatalf("go build has no artifact: %v", err)
+	}
+	if result, err := exec.Command(artifact).CombinedOutput(); err != nil || string(result) != "ok\n" {
+		t.Fatalf("large native execution: %v %s", err, result)
 	}
 }

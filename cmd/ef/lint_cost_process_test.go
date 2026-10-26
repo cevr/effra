@@ -128,24 +128,19 @@ func TestBuildAndRunNeverStartRulePacksProcess(t *testing.T) {
 		return err == nil
 	}
 
-	native, javascript := filepath.Join(dir, "main"), filepath.Join(dir, "main.mjs")
+	native := filepath.Join(dir, "main")
 	for _, args := range [][]string{
 		{"build", source, "--lint-config", config, "-o", native},
 		{"build", source, "--rules", filepath.Join(dir, "zqxpack.json"), "-o", native},
 		{"run", source, "--lint-config", config},
-		{"run", source, "--target", "js", "--rules", filepath.Join(dir, "zqxpack.json")},
+		{"run", source, "--rules", filepath.Join(dir, "zqxpack.json")},
 	} {
 		if _, stderr, code := runTestCLIDir(t, binary, dir, "", args...); code == 0 || !strings.Contains(string(stderr), "only supported by lint and diagnostics") {
 			t.Fatalf("%v accepted a lint selection: exit %d %s", args, code, stderr)
 		}
 	}
-	for _, args := range [][]string{
-		{"build", source, "-o", native},
-		{"build", source, "--target", "js", "--entry", "-o", javascript},
-	} {
-		if _, stderr, code := runTestCLIDir(t, binary, dir, "", args...); code != 0 {
-			t.Fatalf("%v: exit %d %s", args, code, stderr)
-		}
+	if _, stderr, code := runTestCLIDir(t, binary, dir, "", "build", source, "-o", native); code != 0 {
+		t.Fatalf("build: exit %d %s", code, stderr)
 	}
 	// ef run keeps its build products under its working directory.
 	if stdout, stderr, code := runTestCLIDir(t, binary, dir, "", "run", source); code != 0 || string(stdout) != "ok\n" {
@@ -154,15 +149,13 @@ func TestBuildAndRunNeverStartRulePacksProcess(t *testing.T) {
 	if started() {
 		t.Fatal("building or running started the rule pack")
 	}
-	for _, artifact := range []string{native, javascript} {
-		emitted, err := os.ReadFile(artifact)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, code := range []string{"effra.local/prototype/lint", "zqxpack", packCode, "effra-lint-disable"} {
-			if bytes.Contains(emitted, []byte(code)) {
-				t.Fatalf("%s contains %q", artifact, code)
-			}
+	emitted, err := os.ReadFile(native)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"effra.local/prototype/lint", "zqxpack", packCode, "effra-lint-disable"} {
+		if bytes.Contains(emitted, []byte(code)) {
+			t.Fatalf("%s contains %q", native, code)
 		}
 	}
 	if output, err := exec.Command(native).CombinedOutput(); err != nil || string(output) != "ok\n" {

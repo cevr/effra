@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "profile": "effra/json-structural-1",
-  "comparator": {"script": "conformance/codecs/effect-comparator.mjs", "output": "conformance/codecs/effect-comparator.out.jsonl", "parseFailure": "Expected a valid JSON string"},
+  "comparator": {"output": "conformance/codecs/effect-comparator.out.jsonl", "parseFailure": "Expected a valid JSON string"},
   "plans": {
     "account": {"bounds": {"maxBodyBytes": 1024, "maxDepth": 4}, "root": 4, "nodes": [
       {"kind": "string"},

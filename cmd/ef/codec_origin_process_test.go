@@ -130,18 +130,16 @@ func TestCodecOriginAcrossCLIAndMCPProcesses(t *testing.T) {
 		{file: "settings.ef", source: codecOriginProcessSettingsSource, witness: "Effect", direction: "encode", needle: "Effect.encode()"},
 	}
 	cli := map[string]map[string]any{}
-	for _, target := range []string{"go", "js"} {
-		for _, p := range probes {
-			offset := strings.Index(p.source, p.needle) + len(p.witness) + 1
-			stdout, stderr, code := runTestCLI(t, binary, "type", filepath.Join(root, p.file), "--offset", strconv.Itoa(offset), "--target", target, "--json")
-			if code != 0 || len(stderr) != 0 {
-				t.Fatalf("%s %s type query failed: code=%d stderr=%q", target, p.file, code, stderr)
-			}
-			response := readProcessJSON(t, stdout)
-			key := target + ":" + p.file
-			cli[key] = response
-			codecOriginSelection(t, response, p.source, p.witness, p.direction)
+	for _, p := range probes {
+		offset := strings.Index(p.source, p.needle) + len(p.witness) + 1
+		stdout, stderr, code := runTestCLI(t, binary, "type", filepath.Join(root, p.file), "--offset", strconv.Itoa(offset), "--target", "go", "--json")
+		if code != 0 || len(stderr) != 0 {
+			t.Fatalf("go %s type query failed: code=%d stderr=%q", p.file, code, stderr)
 		}
+		response := readProcessJSON(t, stdout)
+		key := "go" + ":" + p.file
+		cli[key] = response
+		codecOriginSelection(t, response, p.source, p.witness, p.direction)
 	}
 
 	requests := []map[string]any{

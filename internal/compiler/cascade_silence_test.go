@@ -61,11 +61,9 @@ func TestConsumersAreSilentOnInvalidOperands(t *testing.T) {
 	for _, consumer := range cascadeSilenceConsumers {
 		lines := append([]string{"let s = scope { tick() }"}, consumer.body...)
 		source := cascadeSilenceHeader + "effect fn main() -> string raises { Oops, Timeout } uses { Scheduler } {\n    " + strings.Join(lines, "\n    ") + "\n}\n"
-		for _, target := range []string{"go", "js"} {
-			diagnostics := CompileFor(source, target).Diagnostics
-			if len(diagnostics) != 1 || diagnostics[0].Code != "EF105" || diagnostics[0].Span.Line != 14 {
-				t.Errorf("%s/%s: want only the originating EF105 on line 14, got %v", consumer.name, target, diagnostics)
-			}
+		diagnostics := CompileFor(source, "go").Diagnostics
+		if len(diagnostics) != 1 || diagnostics[0].Code != "EF105" || diagnostics[0].Span.Line != 14 {
+			t.Errorf("%s/go: want only the originating EF105 on line 14, got %v", consumer.name, diagnostics)
 		}
 	}
 }

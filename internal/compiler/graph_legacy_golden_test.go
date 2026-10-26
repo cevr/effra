@@ -115,26 +115,24 @@ func TestLegacyGraphPublishesCheckedParameterFactsAndProducerEpoch(t *testing.T)
 
 func TestLegacyGraphJSONGolden(t *testing.T) {
 	for _, fixture := range legacyGraphFixtures {
-		for _, target := range []string{"go", "js"} {
-			t.Run(fixture.name+"-"+target, func(t *testing.T) {
-				source, dir := fixture.source, "."
-				if fixture.file != "" {
-					raw, err := os.ReadFile(fixture.file)
-					if err != nil {
-						t.Fatal(err)
-					}
-					source, dir = string(raw), filepath.Dir(fixture.file)
-				}
-				actual := legacyGraphBytes(t, source, dir, target)
-				golden := filepath.Join("testdata", "graph", "legacy", fixture.name+"-"+target+".json")
-				expected, err := os.ReadFile(golden)
+		t.Run(fixture.name+"-go", func(t *testing.T) {
+			source, dir := fixture.source, "."
+			if fixture.file != "" {
+				raw, err := os.ReadFile(fixture.file)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !bytes.Equal(actual, expected) {
-					t.Fatalf("legacy graph JSON changed for %s", golden)
-				}
-			})
-		}
+				source, dir = string(raw), filepath.Dir(fixture.file)
+			}
+			actual := legacyGraphBytes(t, source, dir, "go")
+			golden := filepath.Join("testdata", "graph", "legacy", fixture.name+"-go.json")
+			expected, err := os.ReadFile(golden)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(actual, expected) {
+				t.Fatalf("legacy graph JSON changed for %s", golden)
+			}
+		})
 	}
 }

@@ -440,25 +440,23 @@ func TestGraphViewsCoverEveryExample(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, target := range []string{"go", "js"} {
-			r := CompileAt(string(raw), target, filepath.Dir(file))
-			if !r.Checked {
+		r := CompileAt(string(raw), "go", filepath.Dir(file))
+		if !r.Checked {
+			continue
+		}
+		for _, kind := range []string{"dependency", "layers", "application"} {
+			view, err := r.GraphView(graphRequest(t, map[string]any{"kind": kind}))
+			var refusal *GraphRefusal
+			if errors.As(err, &refusal) && kind == "application" && refusal.Code == GraphRefusalPlan {
 				continue
 			}
-			for _, kind := range []string{"dependency", "layers", "application"} {
-				view, err := r.GraphView(graphRequest(t, map[string]any{"kind": kind}))
-				var refusal *GraphRefusal
-				if errors.As(err, &refusal) && kind == "application" && (refusal.Code == GraphRefusalTarget && target == "js" || refusal.Code == GraphRefusalPlan) {
-					continue
-				}
-				if err != nil {
-					t.Fatalf("%s %s %s: %v", filepath.Base(file), target, kind, err)
-				}
-				views++
-				for _, format := range []GraphFormat{GraphFormatMermaid, GraphFormatDOT} {
-					if _, _, err := GraphViewPayload(view, format); err != nil {
-						t.Fatalf("%s %s %s %s: %v", filepath.Base(file), target, kind, format, err)
-					}
+			if err != nil {
+				t.Fatalf("%s %s: %v", filepath.Base(file), kind, err)
+			}
+			views++
+			for _, format := range []GraphFormat{GraphFormatMermaid, GraphFormatDOT} {
+				if _, _, err := GraphViewPayload(view, format); err != nil {
+					t.Fatalf("%s go %s %s: %v", filepath.Base(file), kind, format, err)
 				}
 			}
 		}

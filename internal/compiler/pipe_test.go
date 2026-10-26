@@ -19,7 +19,7 @@ effect fn load() -> string { "l" }
 // pipeProbe compiles one function body after the shared declarations.
 func pipeProbe(body string) (string, *Result) {
 	source := pipeDeclarations + "fn probe() -> string { " + body + " }\n"
-	return source, CompileFor(source, "js")
+	return source, CompileFor(source, "go")
 }
 
 // callText renders a call tree the way the hand-written nested program reads,
@@ -234,7 +234,7 @@ func TestPipeDiagnosticsNameThePipe(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			source := pipeDeclarations + "effect fn probe() -> string { " + test.body + " }\n"
-			r := CompileFor(source, "js")
+			r := CompileFor(source, "go")
 			assertPipeDiagnostics(t, source, r.Diagnostics, test.want...)
 		})
 	}
@@ -242,13 +242,13 @@ func TestPipeDiagnosticsNameThePipe(t *testing.T) {
 
 func TestPipeOfAWrongTypedStepAnchorsAtThePipe(t *testing.T) {
 	source := pipeDeclarations + "fn probe() -> string { \"x\" |> shout() |> wrap(\"<\", \">\") |> takesCard() }\nfn takesCard(card: Card) -> string { card.title }\n"
-	r := CompileFor(source, "js")
+	r := CompileFor(source, "go")
 	assertPipeDiagnostics(t, source, r.Diagnostics, expectedDiagnostic{"argument must be Card; piped from wrap(...): string", `|> takesCard`, "|>"})
 }
 
 func TestPipeIntoRunHintsAtParentheses(t *testing.T) {
 	source := pipeDeclarations + "effect fn probe() -> string { run load() |> shout() }\n"
-	r := CompileFor(source, "js")
+	r := CompileFor(source, "go")
 	if len(r.Diagnostics) != 2 {
 		t.Fatalf("diagnostics = %+v", r.Diagnostics)
 	}
@@ -261,7 +261,7 @@ func TestPipeIntoRunHintsAtParentheses(t *testing.T) {
 	}
 	// The parenthesised spelling is the repair the hint names.
 	repaired := pipeDeclarations + "effect fn probe() -> string { (run load()) |> shout() }\n"
-	if r := CompileFor(repaired, "js"); !r.Checked {
+	if r := CompileFor(repaired, "go"); !r.Checked {
 		t.Fatalf("repaired source rejected: %+v", r.Diagnostics)
 	}
 }
@@ -320,44 +320,35 @@ func TestPipeSpanNeverDecidesCompilation(t *testing.T) {
 	for _, body := range bodies {
 		// main runs probe, so entry emission keeps the piped calls on both targets.
 		source := pipeDeclarations + "effect fn takesCard(card: Card) -> string { card.title }\neffect fn probe() -> string { " + body + " }\neffect fn main() -> void {\n    let _ = run probe()\n}\n"
-		for _, target := range []string{"go", "js"} {
-			with := CompileAt(source, target, ".")
-			without := compileTransformed(source, target, ".", clearPipeSpans)
-			if with.Checked != without.Checked || len(with.Diagnostics) != len(without.Diagnostics) {
-				t.Fatalf("%s [%s]: checked %v/%v, diagnostics %+v / %+v", body, target, with.Checked, without.Checked, with.Diagnostics, without.Diagnostics)
+		with := CompileAt(source, "go", ".")
+		without := compileTransformed(source, "go", ".", clearPipeSpans)
+		if with.Checked != without.Checked || len(with.Diagnostics) != len(without.Diagnostics) {
+			t.Fatalf("%s [go]: checked %v/%v, diagnostics %+v / %+v", body, with.Checked, without.Checked, with.Diagnostics, without.Diagnostics)
+		}
+		for i := range with.Diagnostics {
+			if with.Diagnostics[i].Code != without.Diagnostics[i].Code {
+				t.Fatalf("%s [go]: code %s became %s", body, with.Diagnostics[i].Code, without.Diagnostics[i].Code)
 			}
-			for i := range with.Diagnostics {
-				if with.Diagnostics[i].Code != without.Diagnostics[i].Code {
-					t.Fatalf("%s [%s]: code %s became %s", body, target, with.Diagnostics[i].Code, without.Diagnostics[i].Code)
-				}
-			}
-			if !with.Checked {
-				continue
-			}
-			a, b := emittedProgram(t, with), emittedProgram(t, without)
-			if a != b {
-				t.Fatalf("%s [%s]: emitted bytes differ", body, target)
-			}
-			// The comparison is empty unless the piped code was emitted.
-			for _, callee := range pipeCalleeNames.FindAllStringSubmatch(body, -1) {
-				if !strings.Contains(a, callee[1]) {
-					t.Fatalf("%s [%s]: the emitted program never mentions %s, so the comparison saw no pipe code", body, target, callee[1])
-				}
+		}
+		if !with.Checked {
+			continue
+		}
+		a, b := emittedProgram(t, with), emittedProgram(t, without)
+		if a != b {
+			t.Fatalf("%s [go]: emitted bytes differ", body)
+		}
+		// The comparison is empty unless the piped code was emitted.
+		for _, callee := range pipeCalleeNames.FindAllStringSubmatch(body, -1) {
+			if !strings.Contains(a, callee[1]) {
+				t.Fatalf("%s [go]: the emitted program never mentions %s, so the comparison saw no pipe code", body, callee[1])
 			}
 		}
 	}
 }
 
-// emittedProgram returns the target output of a checked result.
+// emittedProgram returns the generated Go main of a checked result.
 func emittedProgram(t *testing.T, r *Result) string {
 	t.Helper()
-	if r.Target == "js" {
-		text, _, err := r.Emit(true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return text
-	}
 	app, err := r.GoApplication(GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
@@ -373,7 +364,7 @@ func TestPipeOffsetsSelectTheWholeCall(t *testing.T) {
 	const call = `x |> f()`
 	source := `fn apply(f: fn(string) -> string, x: string) -> string { ` + call + ` }
 `
-	r := CompileFor(source, "js")
+	r := CompileFor(source, "go")
 	if !r.Checked {
 		t.Fatalf("source rejected: %+v", r.Diagnostics)
 	}
@@ -440,7 +431,7 @@ const pipeIntrinsicNames = `service S {
 // intrinsics and the exception with them.
 func TestPipeIntrinsicNamesAreOrdinaryMembersAfterThePipe(t *testing.T) {
 	check := func(body string) *Result {
-		return CompileFor(pipeIntrinsicNames+"effect fn probe() -> string uses { S } { "+body+" }\n", "js")
+		return CompileFor(pipeIntrinsicNames+"effect fn probe() -> string uses { S } { "+body+" }\n", "go")
 	}
 	for _, op := range []string{"timeout", "orFail", "get"} {
 		if r := check(`run "x" |> S.` + op + `()`); !r.Checked {

@@ -113,7 +113,7 @@ func TestInvalidNativeEvidenceTargetsFail(t *testing.T) {
 		field string
 		value any
 	}{
-		{"file", "internal/compiler/missing_test.go"}, {"file", "../outside"}, {"test", "TestImaginaryConformance"}, {"targets", []any{"go"}},
+		{"file", "internal/compiler/missing_test.go"}, {"file", "../outside"}, {"test", "TestImaginaryConformance"}, {"targets", []any{"go", "js"}}, {"targets", []any{"js"}}, {"targets", []any{}},
 	} {
 		t.Run(change.field+"="+pyStr(change.value), func(t *testing.T) {
 			t.Parallel()

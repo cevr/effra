@@ -68,18 +68,16 @@ effect fn test_layer() -> void { void }`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			for _, target := range []string{"go", "js"} {
-				r := CompileFor(test.source, target)
-				if !r.Checked {
-					t.Fatalf("%s target: %+v", target, r.Diagnostics)
-				}
-				wantLive := test.name != "test providers"
-				if gotLive := r.TestMode(false) != nil; gotLive != wantLive {
-					t.Fatalf("%s target: TestMode(false) live=%v, want %v", target, gotLive, wantLive)
-				}
-				if err := r.TestMode(true); err != nil {
-					t.Fatalf("%s target explicit live mode: %v", target, err)
-				}
+			r := CompileFor(test.source, "go")
+			if !r.Checked {
+				t.Fatalf("go target: %+v", r.Diagnostics)
+			}
+			wantLive := test.name != "test providers"
+			if gotLive := r.TestMode(false) != nil; gotLive != wantLive {
+				t.Fatalf("go target: TestMode(false) live=%v, want %v", gotLive, wantLive)
+			}
+			if err := r.TestMode(true); err != nil {
+				t.Fatalf("go target explicit live mode: %v", err)
 			}
 		})
 	}

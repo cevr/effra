@@ -71,7 +71,7 @@ func TestLegacyGraphCLIBytesMatchFrozenGolden(t *testing.T) {
 		flags        []string
 	}{
 		{name: "workflow", target: "go"},
-		{name: "layers", target: "js", flags: []string{"--target", "js"}},
+		{name: "layers", target: "go"},
 		{name: "layers-workflow", target: "go", flags: []string{"--target", "go"}},
 		{name: "callables-factory", target: "go"},
 	} {

@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -22,8 +21,8 @@ import (
 
 // The shared HTTP wire vectors (conformance/http/*-vectors.json) each name a
 // public program, the exact limits it declares, plain exchanges and
-// lifecycle cases. Every file runs over real sockets on each cohort it lists:
-// the Go executable and the JS entry under Bun and Node. Every exchange
+// lifecycle cases. Every file runs over real sockets on each cohort it lists
+// (the Go executable). Every exchange
 // observes the exact status, body and Content-Type, and Connection: close
 // when the vector records it.
 //
@@ -52,49 +51,20 @@ func TestHTTPWireVectors(t *testing.T) {
 		t.Run(filepath.Base(file), func(t *testing.T) {
 			t.Parallel()
 			inputs := []string{vectors.Program, "go.mod", "effra.bindings.json"}
-			var hosts []string
 			for _, target := range vectors.Targets {
-				switch target {
-				case "go":
-					t.Run("go", func(t *testing.T) {
-						t.Parallel()
-						workspace := smokeWorkspace(t, inputs...)
-						stdout, stderr, code := runTestCLIDir(t, binary, workspace, "", "build", vectors.Program)
-						if code != 0 {
-							t.Fatalf("build: exit %d\n%s%s", code, stdout, stderr)
-						}
-						httpWireVectorsRun(t, vectors, workspace, httpSmokeArtifact(workspace, stdout))
-					})
-				case "js-bun", "js-node":
-					hosts = append(hosts, strings.TrimPrefix(target, "js-"))
-				default:
+				if target != "go" {
 					t.Fatalf("unknown wire cohort %q", target)
 				}
+				t.Run("go", func(t *testing.T) {
+					t.Parallel()
+					workspace := smokeWorkspace(t, inputs...)
+					stdout, stderr, code := runTestCLIDir(t, binary, workspace, "", "build", vectors.Program)
+					if code != 0 {
+						t.Fatalf("build: exit %d\n%s%s", code, stdout, stderr)
+					}
+					httpWireVectorsRun(t, vectors, workspace, httpSmokeArtifact(workspace, stdout))
+				})
 			}
-			if len(hosts) == 0 {
-				return
-			}
-			t.Run("js", func(t *testing.T) {
-				t.Parallel()
-				// The module runs beside the workspace's link to the pinned
-				// node_modules, so Node and Bun resolve the same Effect.
-				workspace := smokeWorkspace(t, inputs...)
-				stdout, stderr, code := runTestCLIDir(t, binary, workspace, "", "build", vectors.Program, "--target", "js", "--entry")
-				if code != 0 {
-					t.Fatalf("build: exit %d\n%s%s", code, stdout, stderr)
-				}
-				module := httpSmokeArtifact(workspace, stdout)
-				for _, host := range hosts {
-					t.Run(host, func(t *testing.T) {
-						t.Parallel()
-						path, err := exec.LookPath(host)
-						if err != nil {
-							t.Fatalf("%s is required", host)
-						}
-						httpWireVectorsRun(t, vectors, workspace, path, module)
-					})
-				}
-			})
 		})
 	}
 }

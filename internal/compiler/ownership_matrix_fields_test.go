@@ -143,11 +143,11 @@ effect fn ordinary() -> string raises { Boom } uses { Scheduler } {
 `
 
 // ownershipMatrixFieldRowPrograms: a stored recipe's forked-child failures
-// and observations survive a field join. Handle-free, so they also run on JS.
+// and observations survive a field join.
 func ownershipMatrixFieldRowPrograms() []ownershipMatrixProgram {
 	var out []ownershipMatrixProgram
 	add := func(name, src, oracle string) {
-		out = append(out, ownershipMatrixProgram{Name: "fj_" + name, Source: src, Oracle: oracle, JSRunnable: true})
+		out = append(out, ownershipMatrixProgram{Name: "fj_" + name, Source: src, Oracle: oracle})
 	}
 	// Pending: the stored recipe forks a failing child and leaves it
 	// unobserved; the alternative which executes is the one that does.

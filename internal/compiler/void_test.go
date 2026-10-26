@@ -17,32 +17,23 @@ fn absent() -> Data.Option<void> { Data.Option<void>.None {}
 }
 effect fn main() -> void { void }`
 
-	for _, target := range []string{"go", "js"} {
-		t.Run(target, func(t *testing.T) {
-			r := CompileFor(source, target)
-			if !r.Checked {
-				t.Fatalf("void source rejected: %+v", r.Diagnostics)
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("void source rejected: %+v", r.Diagnostics)
+	}
+	for _, name := range []string{"pure", "invoke", "effectInvoke", "present", "absent", "main"} {
+		symbol := r.Find(name)
+		if symbol == nil {
+			t.Fatalf("missing symbol %s", name)
+		}
+		if name == "pure" || name == "invoke" || name == "effectInvoke" || name == "main" {
+			if symbol.Contract.Success != voidTypeName || symbol.Contract.Type.Name != voidTypeName {
+				t.Fatalf("%s lost canonical void result: %+v", name, symbol.Contract)
 			}
-			for _, name := range []string{"pure", "invoke", "effectInvoke", "present", "absent", "main"} {
-				symbol := r.Find(name)
-				if symbol == nil {
-					t.Fatalf("missing symbol %s", name)
-				}
-				if name == "pure" || name == "invoke" || name == "effectInvoke" || name == "main" {
-					if symbol.Contract.Success != voidTypeName || symbol.Contract.Type.Name != voidTypeName {
-						t.Fatalf("%s lost canonical void result: %+v", name, symbol.Contract)
-					}
-				}
-			}
-			if _, _, err := r.Emit(false); err != nil {
-				t.Fatalf("void library emission failed: %v", err)
-			}
-			if target == "go" {
-				if _, err := r.EmitGo(); err != nil {
-					t.Fatalf("void native emission failed: %v", err)
-				}
-			}
-		})
+		}
+	}
+	if _, err := r.EmitGo(); err != nil {
+		t.Fatalf("void native emission failed: %v", err)
 	}
 }
 

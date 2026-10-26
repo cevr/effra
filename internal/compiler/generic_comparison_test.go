@@ -14,13 +14,9 @@ effect fn main() -> string {
         if greater(1) { "ok" } else { "bad" }
     } else { "bad" }
 }`
-	for _, target := range []string{"go", "js"} {
-		t.Run(target, func(t *testing.T) {
-			r := CompileFor(source, target)
-			if !r.Checked {
-				t.Fatalf("independent comparison functions were rejected: %+v", r.Diagnostics)
-			}
-		})
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("independent comparison functions were rejected: %+v", r.Diagnostics)
 	}
 }
 

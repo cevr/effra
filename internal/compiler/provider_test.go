@@ -121,82 +121,6 @@ func TestProviderInvocationUsesCurrentOwnerAndCancellation(t *testing.T) {
 	if err != nil || string(output) != "A: A\n" {
 		t.Fatalf("Go provider executable: %v %q\n%s", err, output, goSource)
 	}
-
-	outputJS := runJS(t, providerConstructionProbe, `
-const value = await Effect.runPromise(__ef_function_main());
-if (value !== "A: A") throw new Error("provider capture: " + value);
-let startedResolve;
-const started = new Promise(resolve => startedResolve = resolve);
-let constructionOwner;
-let invocationOwner;
-const blockingNames = {
-  get: () => Effect.gen(function* () {
-    invocationOwner = yield* __ef_owner;
-    startedResolve();
-    yield* Effect.never;
-  })
-};
-await Effect.runPromise(__ef_scoped(Effect.gen(function* () {
-  constructionOwner = yield* __ef_owner;
-  const built = yield* Effect.provideService(__ef_provider_Prefixed("A: "), __ef_service_Names, blockingNames);
-  const pending = Effect.provideService(__ef_call(__ef_service_Greeting, "hello", ["42"]), __ef_service_Greeting, built);
-  const child = yield* __ef_fork(pending);
-  yield* Effect.promise(() => started);
-  yield* __ef_interrupt(child);
-})));
-if (!invocationOwner || invocationOwner === constructionOwner) throw new Error("provider retained construction owner");
-console.log(value);
-`)
-	if outputJS != "A: A\n" {
-		t.Fatalf("JS provider capture: %q", outputJS)
-	}
-}
-
-func TestConfigOnlyProviderRecipeMaterializesFreshJSValues(t *testing.T) {
-	source := `service Greeting { effect fn hello(id: string) -> string }
-impl Configured(prefix: string) for Greeting {
- effect fn hello(id: string) -> string { prefix + id }
-}
-effect fn main() -> string {
- let recipe = Configured("cfg: ")
- let greeting = run recipe
- run Greeting.hello("42").provide<Greeting>(greeting)
-}`
-	output := runJS(t, source, `
-const recipe = __ef_provider_Configured("cfg: ");
-const first = await Effect.runPromise(recipe);
-const second = await Effect.runPromise(recipe);
-if (first === second) throw new Error("replaying a provider recipe reused its materialized object");
-const result = await Effect.runPromise(Effect.provideService(__ef_call(__ef_service_Greeting, "hello", ["42"]), __ef_service_Greeting, first));
-if (result !== "cfg: 42") throw new Error("config-only provider invocation failed: " + result);
-`)
-	if output != "" {
-		t.Fatalf("config-only provider identity: %q", output)
-	}
-}
-
-func TestProviderTypeScriptShapeHidesCapturedRequirements(t *testing.T) {
-	r := CompileFor(providerConstructionProbe, "js")
-	if !r.Checked {
-		t.Fatal(r.Diagnostics)
-	}
-	js, declarations, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	constructor := `declare const __ef_provider_Prefixed: (arg_prefix: string) => Effect.Effect<GreetingProvider, never, NamesRequirement>;`
-	if !strings.Contains(declarations, constructor) {
-		t.Fatalf("constructor declaration lost construction row:\n%s", declarations)
-	}
-	if strings.Contains(declarations, `readonly "hello": (arg_id: string) => Effect.Effect<string, never, NamesRequirement>`) {
-		t.Fatalf("captured requirement leaked from provider method shape:\n%s", declarations)
-	}
-	if !strings.Contains(js, `Effect.provideService(__ef_autoScope`) || !strings.Contains(js, `__ef_service_Names`) {
-		t.Fatalf("JS provider did not overlay captured service key:\n%s", js)
-	}
-	if strings.Contains(js, `Effect.provide(__ef_provider_Prefixed`) {
-		t.Fatalf("JS provider replayed an entire context")
-	}
 }
 
 func TestProviderGraphShowsConstructionAndProvisionEdges(t *testing.T) {
@@ -438,9 +362,6 @@ effect fn main() -> string {
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
-	}
-	if output := runJS(t, source, `if (await Effect.runPromise(__ef_function_main()) !== "cfg: 42") throw new Error("wrong record configuration");`); output != "" {
-		t.Fatalf("unexpected JS output: %s", output)
 	}
 	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {

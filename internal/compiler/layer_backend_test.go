@@ -16,7 +16,7 @@ effect fn names() -> string uses {Accounts,Invoice} {
 layer Open { Accounts=AccountsLive }
 effect fn borrowed() -> string uses {Database} { run Accounts.name().provide(Open) }
 effect fn main() -> string {
- // The Go and JS probes run borrowed directly.
+ // The Go probe runs borrowed directly.
  let probeBorrowed = borrowed
  run names().provide(TestApp)
 }
@@ -72,28 +72,5 @@ func TestLayerSource(t *testing.T){
 	}
 	if output, err := exec.Command(binary).CombinedOutput(); err != nil || string(output) != "fixture:fixture\n" {
 		t.Fatal(err, string(output))
-	}
-	js := runJS(t, layerApplicationSource, `
-const recipe=__ef_function_main();
-for(let index=0;index<2;index++){
- const result=await Effect.runPromise(recipe);
- if(result!=='fixture:fixture')throw new Error('shared replacement '+result);
-}
-const order=[];
-const provider={name:()=>Effect.gen(function*(){
- yield* Effect.acquireRelease(Effect.void,()=>Effect.sync(()=>order.push('program')));
- return 'borrowed';
-})};
-const value=await Effect.runPromise(__ef_scoped(Effect.gen(function*(){
- yield* Effect.acquireRelease(Effect.void,()=>Effect.sync(()=>order.push('outer')));
- const result=yield* Effect.provideService(__ef_function_borrowed(),__ef_service_Database,provider);
- if(result!=='borrowed'||JSON.stringify(order)!=='["program"]')throw new Error('borrowed owner closed or program escaped');
- return result;
-})));
-if(value!=='borrowed'||JSON.stringify(order)!=='["program","outer"]')throw new Error('program close '+order);
-console.log('layer source provision');
-`)
-	if js != "layer source provision\n" {
-		t.Fatal(js)
 	}
 }

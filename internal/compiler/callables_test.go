@@ -23,13 +23,10 @@ effect fn main() -> string {
     let next = advance(renamed, State { name: "old" }, "new")
     next.name
 }`
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(source, target)
-		if !r.Checked {
-			t.Fatalf("%s ordinary callback rejected: %+v", target, r.Diagnostics)
-		}
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("go ordinary callback rejected: %+v", r.Diagnostics)
 	}
-	r := Compile(source)
 	generated, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
@@ -45,9 +42,6 @@ effect fn main() -> string {
 	}
 	if output, err := runGoCommand(dir, "run", "."); err != nil || string(output) != "new\n" {
 		t.Fatalf("native callback execution: %v %s", err, output)
-	}
-	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != "new\n" {
-		t.Fatalf("JS callback execution: %s", output)
 	}
 }
 
@@ -67,39 +61,33 @@ effect fn pureEmpty()->(fn(string)->string){keep}
 		{"recipe invalid duration", `effect fn main()->void{pureEmpty().timeout("wrong");void}`},
 		{"recipe deferred duration", `effect fn main()->void{pureEmpty().timeout(pureEmpty());void}`},
 	} {
-		for _, target := range []string{"go", "js"} {
-			t.Run(test.name+"/"+target, func(t *testing.T) {
-				r := CompileFor(prefix+test.body, target)
-				if r.Checked || !hasCode(r, "EF106") {
-					t.Fatalf("invalid timeout admitted: %+v", r.Diagnostics)
-				}
-			})
-		}
+		t.Run(test.name+"/go", func(t *testing.T) {
+			r := CompileFor(prefix+test.body, "go")
+			if r.Checked || !hasCode(r, "EF106") {
+				t.Fatalf("invalid timeout admitted: %+v", r.Diagnostics)
+			}
+		})
 	}
 	// A validity refusal must still account for eager child evaluation. The
 	// duration is the wrong value type, but its failures/services still execute.
 	invalidDuration := prefix + `error Missing
 effect fn duration()->string raises {Missing} uses {Clock}{run Clock.sleep(1);if true {fail Missing} else {"wrong"}}
 effect fn main()->void{pureEmpty().timeout(run duration());void}`
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(invalidDuration, target)
-		if r.Checked || !hasCode(r, "EF106") || !hasCode(r, "EF107") || !hasCode(r, "EF108") {
-			t.Fatalf("invalid duration evaluation erased: %+v", r.Diagnostics)
-		}
+	r := CompileFor(invalidDuration, "go")
+	if r.Checked || !hasCode(r, "EF106") || !hasCode(r, "EF107") || !hasCode(r, "EF108") {
+		t.Fatalf("invalid duration evaluation erased: %+v", r.Diagnostics)
 	}
 	source := prefix + `effect fn main()->string{let f=run pureEmpty().timeout(1000).catch<Timeout>(keep).provide<Scheduler>(LiveScheduler);f("ok")}`
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(source, target)
-		if !r.Checked {
-			t.Fatalf("valid callable recipe: %+v", r.Diagnostics)
-		}
-		info, err := r.TypeAt(strings.Index(source, "pureEmpty().timeout"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Type.Contract.Kind != "recipe" || info.Type.Type.Kind != "callable" {
-			t.Fatalf("timeout stripped callable result: %+v", info.Type)
-		}
+	r = CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("valid callable recipe: %+v", r.Diagnostics)
+	}
+	info, err := r.TypeAt(strings.Index(source, "pureEmpty().timeout"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Type.Contract.Kind != "recipe" || info.Type.Type.Kind != "callable" {
+		t.Fatalf("timeout stripped callable result: %+v", info.Type)
 	}
 }
 
@@ -132,28 +120,6 @@ effect fn main() -> void { void }`
 	if len(info.Type.Application.RowArguments) != 2 {
 		t.Fatalf("row bindings missing: %+v", info.Type.Application)
 	}
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(declaration, `__ef_row_0_E extends { readonly _tag: string }`) || !strings.Contains(declaration, `Effect.Effect<string, __ef_row_0_E | __ef_row_1_E, __ef_row_0_R | __ef_row_1_R>`) {
-		t.Fatalf("row declaration erased: %s", declaration)
-	}
-	t.Run("strict TypeScript consumer", func(t *testing.T) {
-		checkStrictTypeScript(t, declaration, `import { chain, first, second } from "./generated.mjs";
-import type { Effect } from "effect";
-import type { DirectoryRequirement, AuditRequirement } from "./generated.mjs";
-const recipe = chain(first,second,"42");
-type Expected = Effect.Effect<string, {readonly _tag:"Missing"}|{readonly _tag:"Broken"}, DirectoryRequirement|AuditRequirement>;
-const rows: Expected = recipe;
-declare const expected: Expected;
-const reciprocal: typeof recipe = expected;
-// @ts-expect-error Both callback rows must remain visible.
-const erased: Effect.Effect<string, never, never> = recipe;
-// @ts-expect-error Pure callbacks are not lifted implicitly.
-chain((x: string) => x, second, "42");
-void rows; void reciprocal; void erased;`)
-	})
 	projection := r.ProjectSymbol(r.Find("chain"))
 	if !projection.Complete {
 		t.Fatal(projection.Error)
@@ -271,13 +237,10 @@ func TestRowForwardingRecoveryAndProvisionAcrossTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(fixture)
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(source, target)
-		if !r.Checked {
-			t.Fatalf("%s: %+v", target, r.Diagnostics)
-		}
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("go: %+v", r.Diagnostics)
 	}
-	r := Compile(source)
 	generated, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
@@ -294,9 +257,6 @@ func TestRowForwardingRecoveryAndProvisionAcrossTargets(t *testing.T) {
 	if output, err := runGoCommand(dir, "run", "."); err != nil || string(output) != "name:42:logged\n" {
 		t.Fatalf("native row forwarding: %v %s", err, output)
 	}
-	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != "name:42:logged\n" {
-		t.Fatalf("JS row forwarding: %s", output)
-	}
 }
 
 func TestCallableContractsInRecordsAndProvidersAcrossTargets(t *testing.T) {
@@ -305,13 +265,10 @@ func TestCallableContractsInRecordsAndProvidersAcrossTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(fixture)
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(source, target)
-		if !r.Checked {
-			t.Fatalf("%s placement: %+v", target, r.Diagnostics)
-		}
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("go placement: %+v", r.Diagnostics)
 	}
-	r := Compile(source)
 	generated, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
@@ -327,8 +284,5 @@ func TestCallableContractsInRecordsAndProvidersAcrossTargets(t *testing.T) {
 	}
 	if output, err := runGoCommand(dir, "run", "."); err != nil || string(output) != "record:provider\n" {
 		t.Fatalf("native callback placement: %v %s", err, output)
-	}
-	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != "record:provider\n" {
-		t.Fatalf("JS callback placement: %s", output)
 	}
 }

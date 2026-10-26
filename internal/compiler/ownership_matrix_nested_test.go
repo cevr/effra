@@ -67,7 +67,7 @@ effect fn main() -> void {
     run Console.log(run consume(` + string(rune('0'+s.m)) + `, Pick.` + s.p + ` {}).provide<Scheduler>(LiveScheduler)).provide<Console>(Stdout)
 }
 `
-		out = append(out, ownershipMatrixProgram{Name: "nj_" + s.name, Source: src, Oracle: s.oracle, JSRunnable: true})
+		out = append(out, ownershipMatrixProgram{Name: "nj_" + s.name, Source: src, Oracle: s.oracle})
 	}
 	return out
 }

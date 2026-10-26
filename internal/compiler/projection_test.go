@@ -111,9 +111,6 @@ func TestSelectedTestCatalogKeepsWholeRefusalAndExecutionIndependent(t *testing.
 	if _, err := r.EmitGoTests(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.EmitJSTests(); err != nil {
-		t.Fatal(err)
-	}
 	// A tiny budget must refuse publication while executable roots stay valid.
 	r.TypeProjectionLimits = defaultProjectionLimits
 	r.TypeProjectionLimits.CompatibilityBytes = 1
@@ -121,9 +118,6 @@ func TestSelectedTestCatalogKeepsWholeRefusalAndExecutionIndependent(t *testing.
 		t.Fatal("catalog budget refusal retained partial authority")
 	}
 	if _, err := r.EmitGoTests(); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := r.EmitJSTests(); err != nil {
 		t.Fatal(err)
 	}
 	pair := Compile("effect fn test_one() -> void { void }\neffect fn test_two() -> void { void }")
@@ -282,9 +276,6 @@ func TestAggregateCompatibilityRefusesBeforeMaterializingLaterSymbols(t *testing
 	if _, err := r.EmitGo(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.Emit(true); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestSelectedCanonicalProjectionContainsOnlyReachableDefinitions(t *testing.T) {
@@ -423,8 +414,5 @@ func TestWholeSourceProjectionRefusalDoesNotInvalidateSemanticCheck(t *testing.T
 	}
 	if _, err := r.EmitGo(); err != nil {
 		t.Fatalf("Go emission changed when whole-source projection refused: %v", err)
-	}
-	if _, _, err := r.Emit(true); err != nil {
-		t.Fatalf("JS emission changed when whole-source projection refused: %v", err)
 	}
 }

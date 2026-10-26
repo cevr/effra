@@ -114,7 +114,7 @@ func ownershipMatrixCompositePrograms() []ownershipMatrixProgram {
 		{"provision_one_child", "let a = fork job()\n    run Scheduler.sleep(50)\n    \"done\"", "run stage(flag).provide(Clocked)", "Boom", "safe", true},
 		// Sequential joins: a failure of the first leaves the second child
 		// unobserved (the shape of the declared-row policy rows, with children
-		// that really fail; the rows themselves need Files, which JS lacks).
+		// that really fail).
 		{"joins_in_order", "let a = fork job()\n    let b = fork job2()\n    run Scheduler.sleep(30)\n    let x = run a.join()\n    let y = run b.join()\n    y", scoped, "Nope, Boom", "row-unsafe", true},
 		{"joins_in_order_first_caught", "let a = fork job()\n    let b = fork job2()\n    run Scheduler.sleep(30)\n    let x = run a.join().catch<Boom>(\"j\")\n    let y = run b.join()\n    y", scoped, "Nope, Boom", "safe", true},
 		{"alt_arm_joined_then_fork", "if flag {\n        let a = fork job()\n        let j = run a.join().catch<Boom>(\"j\")\n    } else {\n        let b = fork job()\n    }\n    let c = fork job()\n    run Scheduler.sleep(50)\n    \"done\"", scoped, "Boom", "row-unsafe", false},
@@ -161,7 +161,7 @@ func ownershipMatrixCompositePrograms() []ownershipMatrixProgram {
 		src := ownershipMatrixCompositeHead + extra + "effect fn stage(flag: bool) -> string" + ownershipMatrixRaisesClause(s.raises) + " uses { Scheduler } {\n    " + s.stage + "\n}\n" +
 			"effect fn consume(flag: bool) -> string" + ownershipMatrixRaisesClause(s.raises) + " uses { Scheduler } {\n    " + s.wrap + "\n}\n" +
 			"effect fn main() -> void {\n    let r = run consume(" + strconv.FormatBool(s.flag) + ")" + ownershipMatrixCompositeCatches(s.raises) + ".provide<Scheduler>(LiveScheduler)\n    run Console.log(r).provide<Console>(Stdout)\n}\n"
-		out = append(out, ownershipMatrixProgram{Name: "cc_" + s.name, Source: src, Oracle: s.oracle, JSRunnable: true})
+		out = append(out, ownershipMatrixProgram{Name: "cc_" + s.name, Source: src, Oracle: s.oracle})
 	}
 	return out
 }

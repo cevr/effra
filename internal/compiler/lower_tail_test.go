@@ -2,15 +2,13 @@ package compiler
 
 import (
 	"fmt"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
 // The 19-bit pure self-tail counter reaches its terminal state after more
 // than a million transitions. Reordered labels exercise the checked argument
-// mapping on the same deep path as the Go/JavaScript stack boundary.
+// mapping on the same deep path as the Go stack boundary.
 
 // rippleCounter lowers one increment of an n-bit counter named b0..b(n-1) into
 // nested ifs. call receives the next bit values (source expressions) and
@@ -81,70 +79,10 @@ effect fn main() -> string {
 `, counterParams(bits), tick, labelledSpinCall("Phase.Tick {}", names), counterZero(bits))
 }
 
-const jsPrintMain = `console.log(await Effect.runPromise(__ef_function_main()));`
-
-// jsHosts are the JavaScript engines a generated library module must behave
-// the same on. Bun (JavaScriptCore) implements proper tail calls in strict
-// code, so only Node (V8) exposes a missing loop as a stack overflow.
-var jsHosts = []string{"bun", "node"}
-
-// runJSHost runs a library module's probe under one host and reports the
-// failure instead of ending the test, so a limit can be asserted.
-func runJSHost(t *testing.T, host, source, assertions string) (string, error) {
-	t.Helper()
-	r := CompileFor(source, "js")
-	if !r.Checked {
-		t.Fatalf("js target: %+v", r.Diagnostics)
-	}
-	js, _, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runJSHostModule(t, host, js, assertions)
-}
-
-func runJSHostModule(t *testing.T, host, js, assertions string) (string, error) {
-	t.Helper()
-	path, err := exec.LookPath(host)
-	if err != nil {
-		t.Fatalf("%s is required for backend conformance tests", host)
-	}
-	dir := writeJSModule(t, map[string]string{"probe.mjs": withProbeImports(js) + "\n" + assertions})
-	main, err := filepath.Abs(filepath.Join(dir, "probe.mjs"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	args := []string{main}
-	if host == "node" {
-		args = []string{"--preserve-symlinks", "--preserve-symlinks-main", main}
-	}
-	output, err := exec.Command(path, args...).CombinedOutput()
-	return string(output), err
-}
-
 func TestDeepSelfTailRecursionRunsOnBothTargets(t *testing.T) {
 	// 2^19-1 increments, two calls each: more than 10^6 nested calls.
 	source := deepTailSource(19)
 	runGenericDataNative(t, source, "done\n")
-	for _, host := range jsHosts {
-		output, err := runJSHost(t, host, source, jsPrintMain)
-		if err != nil || output != "done\n" {
-			t.Fatalf("%s deep tail recursion: %v\n%.400s", host, err, output)
-		}
-	}
-}
-
-// runOnEveryHost runs source's main on native Go and on each JavaScript host
-// and requires the same output from all of them.
-func runOnEveryHost(t *testing.T, source, want string) {
-	t.Helper()
-	runGenericDataNative(t, source, want)
-	for _, host := range jsHosts {
-		output, err := runJSHost(t, host, source, jsPrintMain)
-		if err != nil || output != want {
-			t.Fatalf("%s: %v\n%.400s", host, err, output)
-		}
-	}
 }
 
 // rotationSource rotates three strings through an n-bit counter. Each call
@@ -195,7 +133,7 @@ func rotationExpected(bits int) string {
 func TestTailCallArgumentsAreEvaluatedBeforeParametersChange(t *testing.T) {
 	for _, bits := range []int{1, 2, 4} {
 		t.Run(fmt.Sprint(bits), func(t *testing.T) {
-			runOnEveryHost(t, rotationSource(bits), rotationExpected(bits)+"\n")
+			runGenericDataNative(t, rotationSource(bits), rotationExpected(bits)+"\n")
 		})
 	}
 }
@@ -217,17 +155,10 @@ effect fn main() -> string {
 
 func TestNonTailSelfCallStaysRecursive(t *testing.T) {
 	small := nonTailSource(3)
-	runOnEveryHost(t, small, strings.Repeat("x", 7)+"done\n")
-	r := CompileFor(small, "js")
+	runGenericDataNative(t, small, strings.Repeat("x", 7)+"done\n")
+	r := CompileFor(small, "go")
 	if lowerTail(r.Find("deep").function(t, r)) != nil {
 		t.Fatal("a call whose result is used was planned as a tail call")
-	}
-	js, _, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(js, "while (true)") {
-		t.Fatalf("non-tail recursion was lowered to a loop:\n%s", js)
 	}
 	native, _, err := emitGoApplication(CompileFor(small, "go"), GoGenerationBuild)
 	if err != nil {
@@ -235,12 +166,6 @@ func TestNonTailSelfCallStaysRecursive(t *testing.T) {
 	}
 	if strings.Contains(native, "for {") {
 		t.Fatalf("non-tail recursion was lowered to a loop:\n%s", native)
-	}
-	// Known limit, not a bug: the pass does not turn general recursion into
-	// iteration, so a deep non-tail recursion still exhausts a V8 stack.
-	output, err := runJSHost(t, "node", nonTailSource(19), jsPrintMain)
-	if err == nil || !strings.Contains(output, "Maximum call stack size exceeded") {
-		t.Fatalf("expected the documented stack limit on Node, got %v\n%.300s", err, output)
 	}
 }
 
@@ -284,7 +209,7 @@ effect fn main() -> string {
 `
 
 func TestTailLoopsHandleVoidResultsAndGenericDataParameters(t *testing.T) {
-	runOnEveryHost(t, tailVoidAndDataSource, "kept none\n")
+	runGenericDataNative(t, tailVoidAndDataSource, "kept none\n")
 	for _, name := range []string{"pick", "settle"} {
 		r := CompileFor(tailVoidAndDataSource, "go")
 		if lowerTail(r.Find(name).function(t, r)) == nil {
@@ -361,13 +286,6 @@ func TestOnlyPureDirectSelfTailCallsArePlanned(t *testing.T) {
 	if got := strings.Count(native, "for {"); got != 1 {
 		t.Fatalf("expected exactly one generated loop (branches), got %d:\n%s", got, native)
 	}
-	js, _, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.Count(js, "while (true)"); got != 1 {
-		t.Fatalf("expected exactly one generated loop (branches), got %d", got)
-	}
 }
 
 func TestParametersCannotBeShadowed(t *testing.T) {
@@ -396,28 +314,6 @@ const tailGoldenSource = `fn settle(a: string, b: string, finished: bool) -> str
 effect fn main() -> string {
     settle("x", "y", false)
 }
-`
-
-const tailGoldenJS = `const __ef_function_settle = (__ef_arg_a, __ef_arg_b, __ef_arg_finished) => {
-while (true) {
-const __ef_local_a = __ef_arg_a;
-const __ef_local_b = __ef_arg_b;
-const __ef_local_finished = __ef_arg_finished;
-if (__ef_local_finished) {
-return (__ef_local_a + __ef_local_b);
-} else {
-{
-const __ef_next_a = __ef_local_b;
-const __ef_next_b = (__ef_local_a + __ef_local_b);
-const __ef_next_finished = true;
-__ef_arg_a = __ef_next_a;
-__ef_arg_b = __ef_next_b;
-__ef_arg_finished = __ef_next_finished;
-continue;
-}
-}
-}
-};
 `
 
 const tailGoldenGo = `func efFunction_settle(efArg_a string, efArg_b string, efArg_finished bool) string {
@@ -449,13 +345,6 @@ const tailGoldenGo = `func efFunction_settle(efArg_a string, efArg_b string, efA
 // evaluated into a temporary, left to right, before any parameter is
 // reassigned, and the body reads per-iteration bindings.
 func TestTailLoopEmissionGolden(t *testing.T) {
-	js, _, err := CompileFor(tailGoldenSource, "js").Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if start := strings.Index(js, "const __ef_function_settle"); start < 0 || !strings.HasPrefix(js[start:], tailGoldenJS) {
-		t.Fatalf("JavaScript loop changed:\n%s", js)
-	}
 	native, _, err := emitGoApplication(CompileFor(tailGoldenSource, "go"), GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
@@ -481,7 +370,7 @@ effect fn main() -> string {
 
 // Pure argument expressions cannot expose their evaluation order through a
 // side effect. This control checks the emitted source-ordered, once-only calls,
-// then exercises labelled slot mapping and signed wrap on Go, Bun and Node.
+// then exercises labelled slot mapping and signed wrap on Go.
 // Existing LOW0 positional tails and numeric ordinary calls do not combine
 // these contracts; the control fails if tail lowering reorders or duplicates an
 // argument, uses source indexes as parameter slots, or drops i64 normalization.
@@ -513,64 +402,11 @@ func TestLabelledNumericSelfTailLoopPreservesOrderSlotsAndWrap(t *testing.T) {
 		t.Fatalf("canonical tail arguments do not follow the checked label map: %v", canonical)
 	}
 
-	runOnEveryHost(t, labelledNumericTailSource, "ok\n")
+	runGenericDataNative(t, labelledNumericTailSource, "ok\n")
 
-	jsResult := CompileFor(labelledNumericTailSource, "js")
-	if !jsResult.Checked {
-		t.Fatalf("JavaScript target rejected labelled numeric self-tail source: %+v", jsResult.Diagnostics)
-	}
-	walk = jsResult.Find("walk").function(t, jsResult)
-	decrement := jsResult.Find("decrement").function(t, jsResult)
-	carry := jsResult.Find("carry").function(t, jsResult)
-	main := jsResult.Find("main").function(t, jsResult)
+	decrement := result.Find("decrement").function(t, result)
+	carry := result.Find("carry").function(t, result)
 	paramName := func(index int) string { return walk.Params[index].Name }
-	js, _, err := jsResult.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	jsMarker := "const " + walk.jsEmissionName() + " ="
-	jsStart := strings.Index(js, jsMarker)
-	if jsStart < 0 {
-		t.Fatalf("JavaScript omitted the walk function:\n%s", js)
-	}
-	jsRest := js[jsStart+len(jsMarker):]
-	jsEnd := strings.Index(jsRest, "\n};\n")
-	if jsEnd < 0 {
-		t.Fatalf("could not isolate generated walk function:\n%s", js)
-	}
-	walkJS := js[jsStart : jsStart+len(jsMarker)+jsEnd+len("\n};")]
-	jsArguments := []string{
-		decrement.jsEmissionName() + "(__ef_local_" + paramName(0) + ")",
-		fmt.Sprintf("BigInt.asIntN(64, (__ef_local_%s + __ef_local_%s))", paramName(1), paramName(2)),
-		carry.jsEmissionName() + "(__ef_local_" + paramName(2) + ")",
-	}
-	jsPositions := make([]int, len(jsArguments))
-	for index, argument := range jsArguments {
-		if count := strings.Count(walkJS, argument); count != 1 {
-			t.Fatalf("JavaScript tail argument %q occurs %d times, want once:\n%s", argument, count, walkJS)
-		}
-		jsPositions[index] = strings.Index(walkJS, argument)
-	}
-	if !(jsPositions[0] < jsPositions[1] && jsPositions[1] < jsPositions[2]) {
-		t.Fatalf("JavaScript did not evaluate labelled tail arguments in authored order:\n%s", walkJS)
-	}
-	jsAssignments := []string{
-		"__ef_arg_" + paramName(0) + " = __ef_next_" + paramName(0) + ";",
-		"__ef_arg_" + paramName(1) + " = __ef_next_" + paramName(1) + ";",
-		"__ef_arg_" + paramName(2) + " = __ef_next_" + paramName(2) + ";",
-	}
-	lastArgument := jsPositions[len(jsPositions)-1]
-	lastAssignment := lastArgument
-	for _, assignment := range jsAssignments {
-		position := strings.Index(walkJS, assignment)
-		if position < 0 || position <= lastAssignment {
-			t.Fatalf("JavaScript tail slots were not assigned in canonical order after evaluation:\n%s", walkJS)
-		}
-		lastAssignment = position
-	}
-	if lastAssignment <= lastArgument {
-		t.Fatalf("JavaScript updated loop state before evaluating every argument:\n%s", walkJS)
-	}
 
 	native, _, err := emitGoApplication(result, GoGenerationBuild)
 	if err != nil {
@@ -672,37 +508,5 @@ func TestLabelledNumericSelfTailLoopPreservesOrderSlotsAndWrap(t *testing.T) {
 	}
 	if lastGoAssignment <= lastGoEvaluation {
 		t.Fatalf("Go updated loop state before evaluating every argument:\n%s", walkGo)
-	}
-
-	assertion := fmt.Sprintf(`if (await Effect.runPromise(%s()) !== "ok") throw new Error("labelled numeric tail result changed");`, main.jsEmissionName())
-	for _, assignment := range []string{
-		"__ef_arg_" + paramName(1) + " = __ef_next_" + paramName(1) + ";",
-		"__ef_arg_" + paramName(2) + " = __ef_next_" + paramName(2) + ";",
-	} {
-		if strings.Count(js, assignment) != 1 {
-			t.Fatalf("expected one canonical slot assignment %q", assignment)
-		}
-	}
-	slotMutant := strings.NewReplacer(
-		"__ef_arg_"+paramName(1)+" = __ef_next_"+paramName(1)+";", "__ef_arg_"+paramName(1)+" = __ef_next_"+paramName(2)+";",
-		"__ef_arg_"+paramName(2)+" = __ef_next_"+paramName(2)+";", "__ef_arg_"+paramName(2)+" = __ef_next_"+paramName(1)+";",
-	).Replace(js)
-	if slotMutant == js {
-		t.Fatal("canonical slot mutant did not alter emitted JavaScript")
-	}
-	if output, err := runJSHostModule(t, "node", slotMutant, assertion); err == nil || !strings.Contains(output, "labelled numeric tail result changed") {
-		t.Fatalf("canonical-slot mutant did not fail at the intended runtime assertion: %v\n%s", err, output)
-	}
-
-	wrapExpression := fmt.Sprintf("BigInt.asIntN(64, (__ef_local_%s + __ef_local_%s))", paramName(1), paramName(2))
-	if strings.Count(js, wrapExpression) != 1 {
-		t.Fatalf("expected one signed-wrap operation in the tail operand; output:\n%s", js)
-	}
-	wrapMutant := strings.Replace(js, wrapExpression, fmt.Sprintf("(__ef_local_%s + __ef_local_%s)", paramName(1), paramName(2)), 1)
-	if wrapMutant == js {
-		t.Fatal("signed-wrap mutant did not alter emitted JavaScript")
-	}
-	if output, err := runJSHostModule(t, "node", wrapMutant, assertion); err == nil || !strings.Contains(output, "labelled numeric tail result changed") {
-		t.Fatalf("signed-wrap mutant did not fail at the intended runtime assertion: %v\n%s", err, output)
 	}
 }

@@ -13,10 +13,9 @@ func TestBundledTransportConcurrentCacheConsumers(t *testing.T) {
 	for i := 0; i < 16; i++ {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			t.Parallel()
-			target := []string{"go", "js"}[i%2]
 			source := []string{bundledGreeting, bundledConfiguration}[i%2]
 			source = strings.ReplaceAll(source, "Fns", fmt.Sprintf("Consumer%d", i))
-			r := CompileFor(source, target)
+			r := CompileFor(source, "go")
 			if !r.Checked || len(r.BundledInterfaces) != 1 {
 				t.Fatal(r.Diagnostics)
 			}
@@ -177,31 +176,24 @@ func TestLocalAndDistributedSummarySourceVersionsStayDistinct(t *testing.T) {
 }
 
 func TestBundledManagedCallbackControlsAcrossOrders(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		for _, alias := range []string{"Fns", "Other"} {
-			for _, acquired := range []bool{false, true} {
-				body := `file`
-				if acquired {
-					body = `run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`
-				}
-				callback := `effect fn chosen(file:File)->File raises {IoError}{` + body + `}`
-				caller := `effect fn relay(file:File)->File raises {IoError}{run ` + alias + `.forwardFile(chosen,file)}
+	for _, alias := range []string{"Fns", "Other"} {
+		for _, acquired := range []bool{false, true} {
+			body := `file`
+			if acquired {
+				body = `run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`
+			}
+			callback := `effect fn chosen(file:File)->File raises {IoError}{` + body + `}`
+			caller := `effect fn relay(file:File)->File raises {IoError}{run ` + alias + `.forwardFile(chosen,file)}
 effect fn outer(file:File)->File raises {IoError}{scope {run relay(file)}}`
-				for _, reverse := range []bool{false, true} {
-					source := `import ` + alias + ` "effra/functions" ` + callback + caller
-					if reverse {
-						source = `import ` + alias + ` "effra/functions" ` + caller + callback
-					}
-					source += ` effect fn main()->void{void}`
-					r := CompileFor(source, target)
-					// Files is a native-only builtin. The borrowed case is portable;
-					// the acquired case is an ownership control on the native target.
-					if acquired && target == "js" {
-						continue
-					}
-					if r.Checked == acquired || (acquired && !hasCode(r, "EF123")) {
-						t.Fatalf("%s/%s/acquired=%t/reverse=%t: %+v", target, alias, acquired, reverse, r.Diagnostics)
-					}
+			for _, reverse := range []bool{false, true} {
+				source := `import ` + alias + ` "effra/functions" ` + callback + caller
+				if reverse {
+					source = `import ` + alias + ` "effra/functions" ` + caller + callback
+				}
+				source += ` effect fn main()->void{void}`
+				r := CompileFor(source, "go")
+				if r.Checked == acquired || (acquired && !hasCode(r, "EF123")) {
+					t.Fatalf("go/%s/acquired=%t/reverse=%t: %+v", alias, acquired, reverse, r.Diagnostics)
 				}
 			}
 		}

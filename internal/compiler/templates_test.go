@@ -32,36 +32,27 @@ effect fn main() -> string {
 }`
 
 func TestBundledWitnessInitializesActualFunctions(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(bundledUserWitness, target)
-		if !r.Checked {
-			t.Fatalf("%s: %+v", target, r.Diagnostics)
-		}
-		if len(r.Program.BundledTemplates) != 1 || len(r.Program.BundledFunctions) != 1 {
-			t.Fatal("incorrect selected closure", r.BundledBindings)
-		}
-		factory := r.Program.BundledFunctions[0]
-		if len(factory.returnFields) != 2 {
-			t.Fatal("factory omitted initialized fields")
-		}
-		info, err := r.TypeAt(strings.Index(bundledUserWitness, "Convert.witness") + len("Convert."))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Type.Contract.Kind != "application" || len(info.Type.Contract.ArgIDs) != 4 {
-			t.Fatal("application slots omitted", info.Type)
-		}
-		if target == "go" {
-			code, err := r.EmitGo()
-			if err != nil || !strings.Contains(code, "efTemplate_") || !strings.Contains(code, "[T any, W any]") {
-				t.Fatal(err, code)
-			}
-		} else {
-			code, _, err := r.Emit(false)
-			if err != nil || !strings.Contains(code, `["decode"]: __ef_local_decode`) || !strings.Contains(code, `["encode"]: __ef_local_encode`) {
-				t.Fatal(err, code)
-			}
-		}
+	r := CompileFor(bundledUserWitness, "go")
+	if !r.Checked {
+		t.Fatalf("go: %+v", r.Diagnostics)
+	}
+	if len(r.Program.BundledTemplates) != 1 || len(r.Program.BundledFunctions) != 1 {
+		t.Fatal("incorrect selected closure", r.BundledBindings)
+	}
+	factory := r.Program.BundledFunctions[0]
+	if len(factory.returnFields) != 2 {
+		t.Fatal("factory omitted initialized fields")
+	}
+	info, err := r.TypeAt(strings.Index(bundledUserWitness, "Convert.witness") + len("Convert."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Type.Contract.Kind != "application" || len(info.Type.Contract.ArgIDs) != 4 {
+		t.Fatal("application slots omitted", info.Type)
+	}
+	code, err := r.EmitGo()
+	if err != nil || !strings.Contains(code, "efTemplate_") || !strings.Contains(code, "[T any, W any]") {
+		t.Fatal(err, code)
 	}
 }
 
@@ -100,26 +91,24 @@ effect fn main() -> string {
 }`
 
 func TestBundledWitnessCompleteBoundaryAndShapeDiagnostics(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		for _, source := range []string{bundledAnnotatedWitness, strings.Replace(bundledAnnotatedWitness, "Convert.witness(decode, encode)", "Convert.Codec { decode: decode, encode: encode }", 1)} {
-			r := CompileFor(source, target)
-			if !r.Checked || r.CheckResponse()["typeProjectionComplete"] != true {
-				t.Fatalf("%s: %v", target, r.Diagnostics)
-			}
+	for _, source := range []string{bundledAnnotatedWitness, strings.Replace(bundledAnnotatedWitness, "Convert.witness(decode, encode)", "Convert.Codec { decode: decode, encode: encode }", 1)} {
+		r := CompileFor(source, "go")
+		if !r.Checked || r.CheckResponse()["typeProjectionComplete"] != true {
+			t.Fatalf("go: %v", r.Diagnostics)
 		}
-		for _, mutation := range []struct{ before, after string }{
-			{"Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string>", "Convert.Codec<User>"},
-			{"effect fn encode(user: User) -> string { user.name }", "effect fn encode(user: string) -> string { user }"},
-			{"Convert.witness(decode, encode)", "Convert.Codec { decode: decode }"},
-			{"Convert.witness(decode, encode)", "Convert.Codec { decode: encode, encode: decode }"},
-			{"Convert.witness(decode, encode)", "Convert.witness(nil, encode)"},
-			{"converter.decode(\"Ada\")", "converter.decode(true)"},
-			{"converter.encode(user)", "converter.encode(\"Ada\")"},
-		} {
-			r := CompileFor(strings.Replace(bundledAnnotatedWitness, mutation.before, mutation.after, 1), target)
-			if r.Checked {
-				t.Fatalf("%s admitted malformed product: %s", target, mutation.after)
-			}
+	}
+	for _, mutation := range []struct{ before, after string }{
+		{"Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string>", "Convert.Codec<User>"},
+		{"effect fn encode(user: User) -> string { user.name }", "effect fn encode(user: string) -> string { user }"},
+		{"Convert.witness(decode, encode)", "Convert.Codec { decode: decode }"},
+		{"Convert.witness(decode, encode)", "Convert.Codec { decode: encode, encode: decode }"},
+		{"Convert.witness(decode, encode)", "Convert.witness(nil, encode)"},
+		{"converter.decode(\"Ada\")", "converter.decode(true)"},
+		{"converter.encode(user)", "converter.encode(\"Ada\")"},
+	} {
+		r := CompileFor(strings.Replace(bundledAnnotatedWitness, mutation.before, mutation.after, 1), "go")
+		if r.Checked {
+			t.Fatalf("go admitted malformed product: %s", mutation.after)
 		}
 	}
 }
@@ -133,11 +122,9 @@ effect fn encode(value: fn(string) -> string) -> string { value("x") }
 effect fn main() -> void { let converter = Convert.witness(decode, encode); void }`,
 		`fn keep<T: type>(value: T) -> T { value } effect fn main() -> void { void }`,
 	} {
-		for _, target := range []string{"go", "js"} {
-			r := CompileFor(source, target)
-			if r.Checked || !hasCode(r, "EF127") {
-				t.Fatalf("%s unsupported layout accepted: %v", target, r.Diagnostics)
-			}
+		r := CompileFor(source, "go")
+		if r.Checked || !hasCode(r, "EF127") {
+			t.Fatalf("go unsupported layout accepted: %v", r.Diagnostics)
 		}
 	}
 }
@@ -161,132 +148,69 @@ effect fn main() -> string {
 }`
 
 func TestBundledWitnessIndependentDirectionalRows(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(bundledDirectionalWitness, target)
-		if !r.Checked {
-			t.Fatalf("%s: %v", target, r.Diagnostics)
+	r := CompileFor(bundledDirectionalWitness, "go")
+	if !r.Checked {
+		t.Fatalf("go: %v", r.Diagnostics)
+	}
+	for _, expected := range []struct{ name, failure, service string }{{"read", "DecodeFailure", "Names"}, {"write", "EncodeFailure", "Labels"}} {
+		f := r.Find(expected.name)
+		if strings.Join(f.Actual.Errors, ",") != expected.failure || strings.Join(f.Actual.Services, ",") != expected.service {
+			t.Fatal("directional rows changed", f)
 		}
-		for _, expected := range []struct{ name, failure, service string }{{"read", "DecodeFailure", "Names"}, {"write", "EncodeFailure", "Labels"}} {
-			f := r.Find(expected.name)
-			if strings.Join(f.Actual.Errors, ",") != expected.failure || strings.Join(f.Actual.Services, ",") != expected.service {
-				t.Fatal("directional rows changed", f)
+		for _, removal := range []struct{ text, code string }{{" raises {" + expected.failure + "}", "EF107"}, {" uses {" + expected.service + "}", "EF108"}} {
+			parameter := "input:"
+			if expected.name == "write" {
+				parameter = "user:"
 			}
-			for _, removal := range []struct{ text, code string }{{" raises {" + expected.failure + "}", "EF107"}, {" uses {" + expected.service + "}", "EF108"}} {
-				parameter := "input:"
-				if expected.name == "write" {
-					parameter = "user:"
-				}
-				start := strings.Index(bundledDirectionalWitness, "effect fn "+expected.name+"("+parameter)
-				source := bundledDirectionalWitness[:start] + strings.Replace(bundledDirectionalWitness[start:], removal.text, "", 1)
-				bad := CompileFor(source, target)
-				if bad.Checked || !hasCode(bad, removal.code) {
-					t.Fatalf("%s %s lost %s: %v", target, expected.name, removal.code, bad.Diagnostics)
-				}
+			start := strings.Index(bundledDirectionalWitness, "effect fn "+expected.name+"("+parameter)
+			source := bundledDirectionalWitness[:start] + strings.Replace(bundledDirectionalWitness[start:], removal.text, "", 1)
+			bad := CompileFor(source, "go")
+			if bad.Checked || !hasCode(bad, removal.code) {
+				t.Fatalf("go %s lost %s: %v", expected.name, removal.code, bad.Diagnostics)
 			}
 		}
 	}
-}
-
-func TestBundledWitnessStrictTypeScript(t *testing.T) {
-	r := CompileFor(bundledDirectionalWitness, "js")
-	_, declarations, err := r.Emit(true)
-	if err != nil {
-		t.Fatal(err, r.Diagnostics)
-	}
-	checkStrictTypeScript(t, declarations, `import type { make, User, NamesRequirement, LabelsRequirement } from "./generated.d.mts";
-import type { Effect } from "effect";
-declare const codec: ReturnType<typeof make>;
-declare const user: User;
-const decoded: Effect.Effect<User, { readonly _tag: "DecodeFailure" }, NamesRequirement> = codec.decode("42");
-const encoded: Effect.Effect<string, { readonly _tag: "EncodeFailure" }, LabelsRequirement> = codec.encode(user);
-void decoded; void encoded;
-// @ts-expect-error wrong directional row
-const swapped: Effect.Effect<User, { readonly _tag: "EncodeFailure" }, LabelsRequirement> = codec.decode("42");
-void swapped;
-// @ts-expect-error wrong wire
-codec.decode(42);
-// @ts-expect-error wrong domain
-codec.encode("Ada");`)
-}
-
-func TestBundledWitnessPayloadAnnotationsStrictTypeScript(t *testing.T) {
-	r := CompileFor(bundledPayloadWitness, "js")
-	_, declarations, err := r.Emit(true)
-	if err != nil {
-		t.Fatal(err, r.Diagnostics)
-	}
-	checkStrictTypeScript(t, declarations, `import type { Holder, Bundle, BrokenError, User } from "./generated.d.mts";
-import type { Effect } from "effect";
-declare const holder: Holder;
-declare const bundle: Bundle;
-declare const failure: BrokenError;
-declare const user: User;
-const recordDecode: Effect.Effect<User, never, never> = holder.converter.decode("Ada");
-const variantDecode: Effect.Effect<User, never, never> = bundle.converter.decode("Ada");
-const failureDecode: Effect.Effect<User, never, never> = failure.converter.decode("Ada");
-const recordEncode: Effect.Effect<string, never, never> = holder.converter.encode(user);
-const variantEncode: Effect.Effect<string, never, never> = bundle.converter.encode(user);
-const failureEncode: Effect.Effect<string, never, never> = failure.converter.encode(user);
-void recordDecode; void variantDecode; void failureDecode;
-void recordEncode; void variantEncode; void failureEncode;
-// @ts-expect-error wrong variant wire
-bundle.converter.decode(true);
-// @ts-expect-error wrong failure domain
-failure.converter.encode("Ada");`)
 }
 
 func TestBundledWitnessFieldEvidencePreservesManagedOwnership(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		for _, direction := range []string{"decode", "encode"} {
-			for _, acquired := range []bool{false, true} {
-				if acquired && target == "js" {
-					continue // Files acquisition is a native builtin.
-				}
-				body := "file"
-				if acquired {
-					body = `run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`
-				}
-				source := `import Convert "effra/conversions"
+	for _, direction := range []string{"decode", "encode"} {
+		for _, acquired := range []bool{false, true} {
+			body := "file"
+			if acquired {
+				body = `run Files.openRead("examples/fixture.txt").provide<Files>(LiveFiles)`
+			}
+			source := `import Convert "effra/conversions"
 effect fn chosen(file: File) -> File raises {IoError} { ` + body + ` }
 effect fn keep(file: File) -> File raises {IoError} { file }
 fn forward(value: Convert.Codec<File, File, effect fn(File) -> File raises {IoError}, effect fn(File) -> File raises {IoError}>) -> Convert.Codec<File, File, effect fn(File) -> File raises {IoError}, effect fn(File) -> File raises {IoError}> { value }
 effect fn outer(file: File) -> File raises {IoError} {
  scope { let converter = forward(Convert.witness(`
-				if direction == "decode" {
-					source += "chosen, keep"
-				} else {
-					source += "keep, chosen"
-				}
-				source += `)); run converter.` + direction + `(file) }
+			if direction == "decode" {
+				source += "chosen, keep"
+			} else {
+				source += "keep, chosen"
+			}
+			source += `)); run converter.` + direction + `(file) }
 }
 effect fn main() -> void { void }`
-				r := CompileFor(source, target)
-				if r.Checked == acquired || (acquired && !hasCode(r, "EF123")) {
-					t.Fatalf("%s %s acquire=%v: %v", target, direction, acquired, r.Diagnostics)
-				}
-				plain := strings.ReplaceAll(source, "Convert.Codec<File, File, effect fn(File) -> File raises {IoError}, effect fn(File) -> File raises {IoError}>", "Local")
-				plain = strings.Replace(plain, `import Convert "effra/conversions"`, `record Local { decode: effect fn(File) -> File raises {IoError}, encode: effect fn(File) -> File raises {IoError} }`, 1)
-				plain = strings.ReplaceAll(plain, "Convert.witness(chosen, keep)", "Local { decode: chosen, encode: keep }")
-				plain = strings.ReplaceAll(plain, "Convert.witness(keep, chosen)", "Local { decode: keep, encode: chosen }")
-				ordinary := CompileFor(plain, target)
-				if ordinary.Checked == acquired || (acquired && !hasCode(ordinary, "EF123")) {
-					t.Fatalf("%s ordinary record %s acquire=%v: %v", target, direction, acquired, ordinary.Diagnostics)
-				}
-				conditional := strings.Replace(source, "forward(Convert.witness(", "forward(if true { Convert.witness(keep, keep) } else { Convert.witness(", 1)
-				conditional = strings.Replace(conditional, ")); run converter.", ") }); run converter.", 1)
-				joined := CompileFor(conditional, target)
-				if joined.Checked == acquired || (acquired && !hasCode(joined, "EF123")) {
-					t.Fatalf("%s conditional %s acquire=%v: %v", target, direction, acquired, joined.Diagnostics)
-				}
+			r := CompileFor(source, "go")
+			if r.Checked == acquired || (acquired && !hasCode(r, "EF123")) {
+				t.Fatalf("go %s acquire=%v: %v", direction, acquired, r.Diagnostics)
 			}
-		}
-	}
-}
-
-func TestBundledWitnessJSExecution(t *testing.T) {
-	for _, fixture := range []struct{ source, output string }{{bundledAnnotatedWitness, "Ada\n"}, {bundledDirectionalWitness, "label:Ada:42\n"}, {bundledSwitchWitness, "enabled\n"}, {bundledPayloadWitness, "Ada\n"}} {
-		if output := runJSForTarget(t, "js", fixture.source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != fixture.output {
-			t.Fatalf("actual witness fields: got %q, want %q", output, fixture.output)
+			plain := strings.ReplaceAll(source, "Convert.Codec<File, File, effect fn(File) -> File raises {IoError}, effect fn(File) -> File raises {IoError}>", "Local")
+			plain = strings.Replace(plain, `import Convert "effra/conversions"`, `record Local { decode: effect fn(File) -> File raises {IoError}, encode: effect fn(File) -> File raises {IoError} }`, 1)
+			plain = strings.ReplaceAll(plain, "Convert.witness(chosen, keep)", "Local { decode: chosen, encode: keep }")
+			plain = strings.ReplaceAll(plain, "Convert.witness(keep, chosen)", "Local { decode: keep, encode: chosen }")
+			ordinary := CompileFor(plain, "go")
+			if ordinary.Checked == acquired || (acquired && !hasCode(ordinary, "EF123")) {
+				t.Fatalf("go ordinary record %s acquire=%v: %v", direction, acquired, ordinary.Diagnostics)
+			}
+			conditional := strings.Replace(source, "forward(Convert.witness(", "forward(if true { Convert.witness(keep, keep) } else { Convert.witness(", 1)
+			conditional = strings.Replace(conditional, ")); run converter.", ") }); run converter.", 1)
+			joined := CompileFor(conditional, "go")
+			if joined.Checked == acquired || (acquired && !hasCode(joined, "EF123")) {
+				t.Fatalf("go conditional %s acquire=%v: %v", direction, acquired, joined.Diagnostics)
+			}
 		}
 	}
 }
@@ -378,11 +302,9 @@ func TestBundledWitnessClassOnlyClosure(t *testing.T) {
 record User { name: string }
 fn pass(value: Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string>) -> Convert.Codec<User, string, effect fn(string) -> User, effect fn(User) -> string> { value }
 effect fn main() -> void { void }`
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(source, target)
-		if !r.Checked || len(r.Program.BundledFunctions) != 0 || len(r.Program.BundledTemplates) != 1 || len(r.BundledInterfaces) != 1 {
-			t.Fatalf("%s class-only closure: %v %v", target, r.Diagnostics, r.BundledInterfaces)
-		}
+	r := CompileFor(source, "go")
+	if !r.Checked || len(r.Program.BundledFunctions) != 0 || len(r.Program.BundledTemplates) != 1 || len(r.BundledInterfaces) != 1 {
+		t.Fatalf("go class-only closure: %v %v", r.Diagnostics, r.BundledInterfaces)
 	}
 }
 
@@ -405,36 +327,32 @@ error EncodeFailure
 record User { name: string }`, 1)
 	source = strings.ReplaceAll(source, "effect fn(string) -> User", "effect fn(string) -> User raises {DecodeFailure}")
 	source = strings.ReplaceAll(source, "effect fn(User) -> string", "effect fn(User) -> string raises {EncodeFailure}")
-	for _, target := range []string{"go", "js"} {
-		bad := CompileFor(source, target)
-		if bad.Checked || !hasCode(bad, "EF107") {
-			t.Fatalf("%s erased explicit field rows: %v", target, bad.Diagnostics)
-		}
-		good := CompileFor(strings.Replace(source, "effect fn main() -> string", "effect fn main() -> string raises {DecodeFailure, EncodeFailure}", 1), target)
-		if !good.Checked {
-			t.Fatalf("%s narrower implementations must satisfy wider explicit contracts: %v", target, good.Diagnostics)
-		}
+	bad := CompileFor(source, "go")
+	if bad.Checked || !hasCode(bad, "EF107") {
+		t.Fatalf("go erased explicit field rows: %v", bad.Diagnostics)
+	}
+	good := CompileFor(strings.Replace(source, "effect fn main() -> string", "effect fn main() -> string raises {DecodeFailure, EncodeFailure}", 1), "go")
+	if !good.Checked {
+		t.Fatalf("go narrower implementations must satisfy wider explicit contracts: %v", good.Diagnostics)
 	}
 }
 
 func TestBundledWitnessCacheKeepsReceiverOwnersSeparate(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		first := CompileFor(bundledUserWitness, target)
-		second := CompileFor(`record Unrelated { count: i64 } `+strings.ReplaceAll(strings.ReplaceAll(bundledUserWitness, "Convert", "Other"), "User", "Customer"), target)
-		if !first.Checked || !second.Checked {
-			t.Fatal(first.Diagnostics, second.Diagnostics)
-		}
-		a, b := first.Program.BundledFunctions[0], second.Program.BundledFunctions[0]
-		if a == b || first.projector.values == second.projector.values || !reflect.DeepEqual(first.projector.admittedSummaries[a.Module], second.projector.admittedSummaries[b.Module]) {
-			t.Fatal("caller/alias affected immutable interface or receiving arena was shared")
-		}
-		for _, receiver := range []*Result{first, second} {
-			factory := receiver.Program.BundledFunctions[0]
-			for _, name := range []string{"decode", "encode"} {
-				field := factory.returnFields[name]
-				if field.callableEvidence.parameter != factory || field.callableEvidence.parameterName != name {
-					t.Fatal("field evidence rebound outside receiving declaration")
-				}
+	first := CompileFor(bundledUserWitness, "go")
+	second := CompileFor(`record Unrelated { count: i64 } `+strings.ReplaceAll(strings.ReplaceAll(bundledUserWitness, "Convert", "Other"), "User", "Customer"), "go")
+	if !first.Checked || !second.Checked {
+		t.Fatal(first.Diagnostics, second.Diagnostics)
+	}
+	a, b := first.Program.BundledFunctions[0], second.Program.BundledFunctions[0]
+	if a == b || first.projector.values == second.projector.values || !reflect.DeepEqual(first.projector.admittedSummaries[a.Module], second.projector.admittedSummaries[b.Module]) {
+		t.Fatal("caller/alias affected immutable interface or receiving arena was shared")
+	}
+	for _, receiver := range []*Result{first, second} {
+		factory := receiver.Program.BundledFunctions[0]
+		for _, name := range []string{"decode", "encode"} {
+			field := factory.returnFields[name]
+			if field.callableEvidence.parameter != factory || field.callableEvidence.parameterName != name {
+				t.Fatal("field evidence rebound outside receiving declaration")
 			}
 		}
 	}

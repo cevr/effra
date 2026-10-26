@@ -70,48 +70,46 @@ func TestProducerSmoke(t *testing.T) {
 		cliSmokeEqual(t, originalProducer["digest"], firstDigest)
 		cliSmokeEqual(t, originalProducer["strength"], "executing-artifact")
 		key, revision := cliSmokeAt(t, originalProducer, "qualifier"), cliSmokeAt(t, originalFacts, "revision")
-		for _, target := range []string{"go", "js"} {
-			selected := producerSmokeFacts(t, old, "code.type", map[string]any{"target": target, "symbol": "main", "expectedRevision": revision, "expectedProducer": key})
-			cliSmokeEqual(t, selected["producer"], originalProducer)
-			cliSmokeEqual(t, selected["snapshot"], map[string]any{"schemaVersion": selected["schemaVersion"], "revision": revision, "target": target, "producer": key, "reuseScope": "artifact"})
-			for _, c := range []struct {
-				name string
-				args map[string]any
-			}{
-				{"project.check", map[string]any{}}, {"code.inspect", map[string]any{"symbol": "main"}},
-				{"code.typeAt", map[string]any{"offset": ok}}, {"project.graph", map[string]any{}},
-				{"project.diagnostics", map[string]any{}}, {"project.lint", map[string]any{}},
-			} {
-				c.args["target"], c.args["expectedRevision"], c.args["expectedProducer"] = target, revision, key
-				value := producerSmokeFacts(t, old, c.name, c.args)
-				if c.name == "project.lint" {
-					value = cliSmokeAt(t, value, "lint").(map[string]any)
-				}
-				cliSmokeEqual(t, value["producer"], originalProducer)
-				cliSmokeEqual(t, value["snapshot"], map[string]any{"revision": revision, "target": target, "schemaVersion": originalFacts["schemaVersion"], "producer": key, "reuseScope": "artifact"})
+		selected := producerSmokeFacts(t, old, "code.type", map[string]any{"target": "go", "symbol": "main", "expectedRevision": revision, "expectedProducer": key})
+		cliSmokeEqual(t, selected["producer"], originalProducer)
+		cliSmokeEqual(t, selected["snapshot"], map[string]any{"schemaVersion": selected["schemaVersion"], "revision": revision, "target": "go", "producer": key, "reuseScope": "artifact"})
+		for _, c := range []struct {
+			name string
+			args map[string]any
+		}{
+			{"project.check", map[string]any{}}, {"code.inspect", map[string]any{"symbol": "main"}},
+			{"code.typeAt", map[string]any{"offset": ok}}, {"project.graph", map[string]any{}},
+			{"project.diagnostics", map[string]any{}}, {"project.lint", map[string]any{}},
+		} {
+			c.args["target"], c.args["expectedRevision"], c.args["expectedProducer"] = "go", revision, key
+			value := producerSmokeFacts(t, old, c.name, c.args)
+			if c.name == "project.lint" {
+				value = cliSmokeAt(t, value, "lint").(map[string]any)
 			}
-			// CLI acquisition is an independent process of the same artifact;
-			// adapter parity must follow content identity, not process ID.
-			for _, c := range []struct {
-				command string
-				args    []string
-			}{
-				{"check", nil}, {"inspect", []string{"main"}}, {"query", []string{strconv.Itoa(ok)}},
-				{"type", []string{"--symbol", "main"}}, {"graph", nil}, {"diagnostics", []string{"--json"}}, {"lint", nil},
-			} {
-				args := append(append([]string{c.command, file}, c.args...), "--target", target)
-				encoded := producerSmokeRun(t, directory, first, args...)
-				cli := smokeJSON(t, []byte(encoded))
-				cliSmokeEqual(t, cli["producer"], originalProducer)
-				cliSmokeEqual(t, cliSmokeAt(t, cli, "snapshot", "producer"), key)
-				if c.command == "graph" {
-					cliSmokeEqual(t, cliSmokeAt(t, cli, "typeProjectionUsage", "responseBytes"), float64(len(strings.TrimRight(encoded, "\n"))))
-				}
-				if c.command == "type" {
-					cliSmokeEqual(t, cli["snapshot"], selected["snapshot"])
-					cliSmokeEqual(t, cliSmokeAt(t, cli, "querySchemaVersion"), float64(4))
-					cliSmokeEqual(t, cliSmokeAt(t, selected, "querySchemaVersion"), float64(4))
-				}
+			cliSmokeEqual(t, value["producer"], originalProducer)
+			cliSmokeEqual(t, value["snapshot"], map[string]any{"revision": revision, "target": "go", "schemaVersion": originalFacts["schemaVersion"], "producer": key, "reuseScope": "artifact"})
+		}
+		// CLI acquisition is an independent process of the same artifact;
+		// adapter parity must follow content identity, not process ID.
+		for _, c := range []struct {
+			command string
+			args    []string
+		}{
+			{"check", nil}, {"inspect", []string{"main"}}, {"query", []string{strconv.Itoa(ok)}},
+			{"type", []string{"--symbol", "main"}}, {"graph", nil}, {"diagnostics", []string{"--json"}}, {"lint", nil},
+		} {
+			args := append(append([]string{c.command, file}, c.args...), "--target", "go")
+			encoded := producerSmokeRun(t, directory, first, args...)
+			cli := smokeJSON(t, []byte(encoded))
+			cliSmokeEqual(t, cli["producer"], originalProducer)
+			cliSmokeEqual(t, cliSmokeAt(t, cli, "snapshot", "producer"), key)
+			if c.command == "graph" {
+				cliSmokeEqual(t, cliSmokeAt(t, cli, "typeProjectionUsage", "responseBytes"), float64(len(strings.TrimRight(encoded, "\n"))))
+			}
+			if c.command == "type" {
+				cliSmokeEqual(t, cli["snapshot"], selected["snapshot"])
+				cliSmokeEqual(t, cliSmokeAt(t, cli, "querySchemaVersion"), float64(4))
+				cliSmokeEqual(t, cliSmokeAt(t, selected, "querySchemaVersion"), float64(4))
 			}
 		}
 
@@ -121,18 +119,16 @@ service Profiles { effect fn name(id: string) -> string raises {MissingProfile} 
 effect fn load(id: string) -> string raises {MissingProfile} uses {Profiles} { run Profiles.name(id) }
 effect fn greeting(id: string) -> string raises {MissingProfile} uses {Profiles} { run Fns.call(load, id) }
 `)
-		for _, target := range []string{"go", "js"} {
-			remote := cliSmokeAt(t, old.tool("code.inspect", map[string]any{"file": "profile.ef", "symbol": "greeting", "target": target, "expectedProducer": key}), "structuredContent").(map[string]any)
-			cli := smokeJSON(t, []byte(producerSmokeRun(t, directory, first, "inspect", profile, "greeting", "--target", target)))
-			assertReportParity(t, remote, cli, parityOptions{target: target, ignored: []string{"file", "timings"}, project: adapterSemantic})
-			if remote["revision"] == revision {
-				t.Fatalf("profile shares main's revision %v", revision)
-			}
-			if interfaces, _ := cliSmokeAt(t, remote, "bundledInterfaces").([]any); len(interfaces) == 0 {
-				t.Fatalf("profile inspection lacks bundled interfaces: %s", mustJSON(t, remote))
-			}
-			cliSmokeEqual(t, cliSmokeAt(t, remote, "symbol", "contract", "requirements"), []any{"Profiles"})
+		remote := cliSmokeAt(t, old.tool("code.inspect", map[string]any{"file": "profile.ef", "symbol": "greeting", "target": "go", "expectedProducer": key}), "structuredContent").(map[string]any)
+		cli := smokeJSON(t, []byte(producerSmokeRun(t, directory, first, "inspect", profile, "greeting", "--target", "go")))
+		assertReportParity(t, remote, cli, parityOptions{target: "go", ignored: []string{"file", "timings"}, project: adapterSemantic})
+		if remote["revision"] == revision {
+			t.Fatalf("profile shares main's revision %v", revision)
 		}
+		if interfaces, _ := cliSmokeAt(t, remote, "bundledInterfaces").([]any); len(interfaces) == 0 {
+			t.Fatalf("profile inspection lacks bundled interfaces: %s", mustJSON(t, remote))
+		}
+		cliSmokeEqual(t, cliSmokeAt(t, remote, "symbol", "contract", "requirements"), []any{"Profiles"})
 		formatted := cliSmokeAt(t, old.tool("code.format", map[string]any{"source": source, "expectedProducer": key}), "structuredContent").(map[string]any)
 		cliSmokeEqual(t, formatted["producer"], originalProducer)
 		if version := cliSmokeAt(t, formatted, "formatterVersion"); version == nil || version == "" {
@@ -151,16 +147,14 @@ effect fn greeting(id: string) -> string raises {MissingProfile} uses {Profiles}
 		cliSmokeEqual(t, cliSmokeAt(t, current, "producer", "declaration"), cliSmokeAt(t, originalProducer, "declaration"))
 		cliSmokeEqual(t, cliSmokeAt(t, current, "producerIdentity"), cliSmokeAt(t, originalFacts, "producerIdentity"))
 		var queued []int
-		for _, target := range []string{"go", "js"} {
-			staleID, pingID := fresh.index+1, fresh.index+2
-			fresh.index = pingID
-			fresh.send(map[string]any{"jsonrpc": "2.0", "id": staleID, "method": "tools/call", "params": map[string]any{"name": "code.type", "arguments": map[string]any{
-				"file": "main.ef", "target": target, "symbol": "main", "expectedRevision": current["revision"], "expectedProducer": key}}})
-			fresh.send(map[string]any{"jsonrpc": "2.0", "id": pingID, "method": "ping"})
-			queued = append(queued, staleID, pingID)
-		}
+		staleID, pingID := fresh.index+1, fresh.index+2
+		fresh.index = pingID
+		fresh.send(map[string]any{"jsonrpc": "2.0", "id": staleID, "method": "tools/call", "params": map[string]any{"name": "code.type", "arguments": map[string]any{
+			"file": "main.ef", "target": "go", "symbol": "main", "expectedRevision": current["revision"], "expectedProducer": key}}})
+		fresh.send(map[string]any{"jsonrpc": "2.0", "id": pingID, "method": "ping"})
+		queued = append(queued, staleID, pingID)
 		responses := map[float64]map[string]any{}
-		for range 4 {
+		for range len(queued) {
 			response := fresh.receive()
 			id, _ := response["id"].(float64)
 			responses[id] = response
@@ -243,13 +237,11 @@ func main(){json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"pr
 		cliSmokeEqual(t, same["producer"], before["producer"])
 		cliSmokeEqual(t, same["snapshot"], before["snapshot"])
 		assertReportParity(t, same, before, semantic("go"))
-		for _, target := range []string{"go", "js"} {
-			firstReport := producerSmokeFacts(t, processes[0], "project.check", map[string]any{"target": target})
-			secondReport := producerSmokeFacts(t, processes[1], "project.check", map[string]any{"target": target})
-			assertReportParity(t, firstReport, secondReport, semantic(target))
-			cliReport := smokeJSON(t, []byte(producerSmokeRun(t, directory, fallback, "check", file, "--target", target)))
-			assertReportParity(t, cliReport, firstReport, semantic(target))
-		}
+		firstReport := producerSmokeFacts(t, processes[0], "project.check", map[string]any{"target": "go"})
+		secondReport := producerSmokeFacts(t, processes[1], "project.check", map[string]any{"target": "go"})
+		assertReportParity(t, firstReport, secondReport, semantic("go"))
+		cliReport := smokeJSON(t, []byte(producerSmokeRun(t, directory, fallback, "check", file, "--target", "go")))
+		assertReportParity(t, cliReport, firstReport, semantic("go"))
 		refused := processes[1].tool("project.check", map[string]any{"file": "main.ef", "expectedProducer": idBefore["qualifier"]})
 		cliSmokeEqual(t, cliSmokeAt(t, refused, "isError"), true)
 		cliSmokeEqual(t, processes[1].request("ping", nil), map[string]any{})
@@ -267,7 +259,7 @@ func main(){json.NewEncoder(os.Stdout).Encode(map[string]any{"marker":marker,"pr
 			t.Fatal("identity owner Current anchor is missing")
 		}
 		lazy := producerSmokeOverlays(t, root, directory, ownerPath, map[string]string{"lazy": lazySource})["lazy"]
-		producerSmokeRun(t, directory, lazy, "build", file, "--target", "js", "-o", filepath.Join(directory, "app.mjs"))
+		producerSmokeRun(t, directory, lazy, "build", file, "-o", filepath.Join(directory, "app"))
 		cliSmokeEqual(t, producerSmokeRun(t, directory, lazy, "run", file, "--target", "go"), "ok\n")
 		_, stderr, code := runSmokeCLI(t, producerSmokeCheckTimeout, lazy, directory, "", "check", file)
 		if code == 0 || !strings.Contains(string(stderr), "producer acquisition forbidden") {

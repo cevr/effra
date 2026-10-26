@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -100,18 +101,11 @@ func codecVectorValue(plan string, raw json.RawMessage) (string, bool) {
 }
 
 // The U3a policy vectors run through derived witnesses in real .ef test
-// programs on both targets: identical outcomes, encoded bytes and failure
-// messages, each equal to the vector's expectation.
+// programs on Go: outcomes, encoded bytes and failure messages each equal
+// the vector's expectation.
 func TestDerivedCodecPolicyVectorsMatchAcrossGoAndJS(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := t.TempDir()
-	modules, err := filepath.Abs("../../node_modules")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(modules, filepath.Join(root, "node_modules")); err != nil {
-		t.Fatal(err)
-	}
 	data, err := os.ReadFile("../../conformance/codecs/json-structural-vectors.json")
 	if err != nil {
 		t.Fatal(err)
@@ -132,13 +126,13 @@ func TestDerivedCodecPolicyVectorsMatchAcrossGoAndJS(t *testing.T) {
 	for _, name := range names {
 		source.WriteString("derive " + name + "Json = " + codecVectorWitnesses[name] + "\n")
 	}
-	// A vector is selected when both targets apply, its plan is derivable
+	// A vector is selected when the Go target applies, its plan is derivable
 	// from declarations, and source can spell its input: a decode body is
 	// text, and an encode value is constructible.
 	expected := map[string]codecVector{}
 	unspelled := []string{}
 	for index, vector := range file.Vectors {
-		if _, derived := codecVectorWitnesses[vector.Plan]; !derived || len(vector.Targets) == 1 {
+		if _, derived := codecVectorWitnesses[vector.Plan]; !derived || (len(vector.Targets) > 0 && !slices.Contains(vector.Targets, "go")) {
 			continue
 		}
 		if bytes, err := hex.DecodeString(vector.BodyHex); vector.BodyHex != "" && err == nil && utf8.Valid(bytes) {
@@ -166,7 +160,7 @@ func TestDerivedCodecPolicyVectorsMatchAcrossGoAndJS(t *testing.T) {
 		source.WriteString("    let value = " + input + "\n    let encoded = run " + vector.Plan + "Json.encode(value)\n    run Assert.equalText(encoded, " + string(encoded) + ")\n}\n")
 		expected[test] = vector
 	}
-	if want := []string{"encode.order-and-tag"}; !reflect.DeepEqual(unspelled, want) || len(expected) < 80 {
+	if want := []string{"encode.order-and-tag", "encode.invalid-utf8", "encode.invalid-utf8-before-bound", "encode.bound-before-later-invalid-utf8"}; !reflect.DeepEqual(unspelled, want) || len(expected) < 80 {
 		t.Fatalf("selected %d vectors; unspelled %v", len(expected), unspelled)
 	}
 	path := filepath.Join(root, "vectors.ef")
@@ -183,26 +177,19 @@ func TestDerivedCodecPolicyVectorsMatchAcrossGoAndJS(t *testing.T) {
 		Passed  bool     `json:"passed"`
 		Reasons []reason `json:"reasons"`
 	}
-	reports := map[string]map[string]outcome{}
-	for _, target := range []string{"go", "js"} {
-		stdout, stderr, _ := runTestCLIDir(t, binary, root, "", "test", path, "--target", target)
-		var report struct {
-			Tests []outcome `json:"tests"`
-		}
-		if err := json.Unmarshal(stdout, &report); err != nil || len(report.Tests) != len(expected) {
-			t.Fatalf("%s vector report: %v (%d tests)\nstdout=%s\nstderr=%s", target, err, len(report.Tests), stdout, stderr)
-		}
-		reports[target] = map[string]outcome{}
-		for _, test := range report.Tests {
-			reports[target][test.Name] = test
-		}
+	stdout, stderr, _ := runTestCLIDir(t, binary, root, "", "test", path, "--target", "go")
+	var report struct {
+		Tests []outcome `json:"tests"`
+	}
+	if err := json.Unmarshal(stdout, &report); err != nil || len(report.Tests) != len(expected) {
+		t.Fatalf("go vector report: %v (%d tests)\nstdout=%s\nstderr=%s", err, len(report.Tests), stdout, stderr)
+	}
+	outcomes := map[string]outcome{}
+	for _, test := range report.Tests {
+		outcomes[test.Name] = test
 	}
 	for test, vector := range expected {
-		goOutcome, jsOutcome := reports["go"][test], reports["js"][test]
-		if !reflect.DeepEqual(goOutcome, jsOutcome) {
-			t.Errorf("%s: Go and JS differ:\n%+v\n%+v", vector.ID, goOutcome, jsOutcome)
-			continue
-		}
+		goOutcome := outcomes[test]
 		if vector.Expect.OK {
 			if !goOutcome.Passed {
 				t.Errorf("%s: want success %s, got %+v", vector.ID, vector.Expect.Encoded, goOutcome)

@@ -59,55 +59,51 @@ func TestTypeAnnotationsAndRowLabelsSelectCheckedDeclarations(t *testing.T) {
 		// A provider's captured construction services.
 		{"for Labels uses {Users}", "Users", "reference", "service", "", "service Users", "Users", "service Users"},
 	}
-	for _, target := range []string{"go", "js"} {
-		t.Run(target, func(t *testing.T) {
-			r := CompileFor(annotationFixture, target)
-			if !r.Checked {
-				t.Fatalf("fixture: %+v", r.Diagnostics)
+	r := CompileFor(annotationFixture, "go")
+	if !r.Checked {
+		t.Fatalf("fixture: %+v", r.Diagnostics)
+	}
+	for _, want := range expectations {
+		offset := at(t, annotationFixture, want.context, want.name)
+		for _, probe := range []int{offset, offset + len(want.name) - 1} {
+			query, err := r.QueryType(TypeSelection{Offset: &probe})
+			label := fmt.Sprintf("%q in %q at %d", want.name, want.context, probe)
+			if err != nil {
+				t.Fatalf("%s: %v", label, err)
 			}
-			for _, want := range expectations {
-				offset := at(t, annotationFixture, want.context, want.name)
-				for _, probe := range []int{offset, offset + len(want.name) - 1} {
-					query, err := r.QueryType(TypeSelection{Offset: &probe})
-					label := fmt.Sprintf("%q in %q at %d", want.name, want.context, probe)
-					if err != nil {
-						t.Fatalf("%s: %v", label, err)
-					}
-					selected := query.Selection
-					if selected.Kind != want.kind || selected.Target == nil || selected.Target.Kind != want.targetKind || selected.Target.Name != want.name || selected.Target.Owner != want.owner {
-						t.Fatalf("%s: selection %+v target %+v", label, selected, selected.Target)
-					}
-					if selected.Span.Offset != offset || selected.Span.Length != len(want.name) || !selected.LocationAvailable {
-						t.Fatalf("%s: selected token span %+v", label, selected.Span)
-					}
-					if want.declaration == "" {
-						if selected.Target.LocationAvailable || selected.Target.Source == userSourceID {
-							t.Fatalf("%s: bundled target claimed a location: %+v", label, selected.Target)
-						}
-					} else if declared := at(t, annotationFixture, want.declaration, want.declarationName); !selected.Target.LocationAvailable || selected.Target.Source != userSourceID || selected.Target.Span.Offset != declared || selected.Target.Span.Length != len(want.declarationName) {
-						t.Fatalf("%s: target %+v, want declaration at %d", label, selected.Target, declared)
-					}
-					if selected.Presentation != want.presentation {
-						t.Fatalf("%s: presentation %q, want %q", label, selected.Presentation, want.presentation)
-					}
+			selected := query.Selection
+			if selected.Kind != want.kind || selected.Target == nil || selected.Target.Kind != want.targetKind || selected.Target.Name != want.name || selected.Target.Owner != want.owner {
+				t.Fatalf("%s: selection %+v target %+v", label, selected, selected.Target)
+			}
+			if selected.Span.Offset != offset || selected.Span.Length != len(want.name) || !selected.LocationAvailable {
+				t.Fatalf("%s: selected token span %+v", label, selected.Span)
+			}
+			if want.declaration == "" {
+				if selected.Target.LocationAvailable || selected.Target.Source == userSourceID {
+					t.Fatalf("%s: bundled target claimed a location: %+v", label, selected.Target)
 				}
+			} else if declared := at(t, annotationFixture, want.declaration, want.declarationName); !selected.Target.LocationAvailable || selected.Target.Source != userSourceID || selected.Target.Span.Offset != declared || selected.Target.Span.Length != len(want.declarationName) {
+				t.Fatalf("%s: target %+v, want declaration at %d", label, selected.Target, declared)
 			}
-			// Primitives, keywords and punctuation inside annotations name no
-			// declaration and remain unselectable.
-			for _, probe := range []struct{ context, name string }{
-				{"Square(side: i64)", "i64"},
-				{"get(id: string)", "string"},
-				{"cb: effect fn(Box)", "effect"},
-				{"cb: effect fn(Box)", "fn"},
-				{"string raises {E}) ->", "raises"},
-				{"string raises {E}) ->", "{"},
-			} {
-				offset := at(t, annotationFixture, probe.context, probe.name)
-				if _, err := r.QueryType(TypeSelection{Offset: &offset}); !errors.Is(err, ErrNoSelection) {
-					t.Fatalf("%q in %q: %v", probe.name, probe.context, err)
-				}
+			if selected.Presentation != want.presentation {
+				t.Fatalf("%s: presentation %q, want %q", label, selected.Presentation, want.presentation)
 			}
-		})
+		}
+	}
+	// Primitives, keywords and punctuation inside annotations name no
+	// declaration and remain unselectable.
+	for _, probe := range []struct{ context, name string }{
+		{"Square(side: i64)", "i64"},
+		{"get(id: string)", "string"},
+		{"cb: effect fn(Box)", "effect"},
+		{"cb: effect fn(Box)", "fn"},
+		{"string raises {E}) ->", "raises"},
+		{"string raises {E}) ->", "{"},
+	} {
+		offset := at(t, annotationFixture, probe.context, probe.name)
+		if _, err := r.QueryType(TypeSelection{Offset: &offset}); !errors.Is(err, ErrNoSelection) {
+			t.Fatalf("%q in %q: %v", probe.name, probe.context, err)
+		}
 	}
 }
 
@@ -216,41 +212,39 @@ record Outside { box: Box }
 		{"-> Box, Box: type", "Box", "Act", "Box: type> { Idle", "type parameter Act.Box: type"},
 		{"f: F", "F", "Act", "Act<F", "type parameter Act.F: callable"},
 	}
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(source, target)
-		if !r.Checked {
-			t.Fatalf("%s fixture: %+v", target, r.Diagnostics)
-		}
-		for _, want := range expectations {
-			offset := at(t, source, want.context, want.name)
-			label := fmt.Sprintf("%s %q in %q", target, want.name, want.context)
-			query, err := r.QueryType(TypeSelection{Offset: &offset})
-			if err != nil {
-				t.Fatalf("%s: %v", label, err)
-			}
-			selected := query.Selection
-			if selected.Kind != "reference" || selected.Target == nil || selected.Target.Kind != "typeParameter" || selected.Target.Owner != want.owner || selected.Target.Name != want.name || selected.Span.Offset != offset {
-				t.Fatalf("%s: selection %+v target %+v", label, selected, selected.Target)
-			}
-			if declared := at(t, source, want.declaration, want.name); !selected.Target.LocationAvailable || selected.Target.Span.Offset != declared {
-				t.Fatalf("%s: target %+v, want declaration at %d", label, selected.Target, declared)
-			}
-			if selected.Presentation != want.presentation {
-				t.Fatalf("%s: presentation %q, want %q", label, selected.Presentation, want.presentation)
-			}
-		}
-		// Negative control: outside the owners, Box is the module record.
-		offset := at(t, source, "box: Box", "Box")
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("go fixture: %+v", r.Diagnostics)
+	}
+	for _, want := range expectations {
+		offset := at(t, source, want.context, want.name)
+		label := fmt.Sprintf("go %q in %q", want.name, want.context)
 		query, err := r.QueryType(TypeSelection{Offset: &offset})
-		if err != nil || query.Selection.Target == nil || query.Selection.Target.Kind != "record" || query.Selection.Target.Span.Offset != at(t, source, "record Box", "Box") {
-			t.Fatalf("%s outside owner: %+v (%v)", target, query.Selection, err)
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
 		}
-		// The constraint's keywords stay unselectable.
-		for _, probe := range []struct{ context, name string }{{"F: callable fn(Box) -> Box> {", "callable"}, {"callable fn(Box) -> Box> {", "fn"}} {
-			offset := at(t, source, probe.context, probe.name)
-			if _, err := r.QueryType(TypeSelection{Offset: &offset}); !errors.Is(err, ErrNoSelection) {
-				t.Fatalf("%s %q: %v", target, probe.name, err)
-			}
+		selected := query.Selection
+		if selected.Kind != "reference" || selected.Target == nil || selected.Target.Kind != "typeParameter" || selected.Target.Owner != want.owner || selected.Target.Name != want.name || selected.Span.Offset != offset {
+			t.Fatalf("%s: selection %+v target %+v", label, selected, selected.Target)
+		}
+		if declared := at(t, source, want.declaration, want.name); !selected.Target.LocationAvailable || selected.Target.Span.Offset != declared {
+			t.Fatalf("%s: target %+v, want declaration at %d", label, selected.Target, declared)
+		}
+		if selected.Presentation != want.presentation {
+			t.Fatalf("%s: presentation %q, want %q", label, selected.Presentation, want.presentation)
+		}
+	}
+	// Negative control: outside the owners, Box is the module record.
+	offset := at(t, source, "box: Box", "Box")
+	query, err := r.QueryType(TypeSelection{Offset: &offset})
+	if err != nil || query.Selection.Target == nil || query.Selection.Target.Kind != "record" || query.Selection.Target.Span.Offset != at(t, source, "record Box", "Box") {
+		t.Fatalf("go outside owner: %+v (%v)", query.Selection, err)
+	}
+	// The constraint's keywords stay unselectable.
+	for _, probe := range []struct{ context, name string }{{"F: callable fn(Box) -> Box> {", "callable"}, {"callable fn(Box) -> Box> {", "fn"}} {
+		offset := at(t, source, probe.context, probe.name)
+		if _, err := r.QueryType(TypeSelection{Offset: &offset}); !errors.Is(err, ErrNoSelection) {
+			t.Fatalf("go %q: %v", probe.name, err)
 		}
 	}
 }

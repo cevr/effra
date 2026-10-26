@@ -161,13 +161,6 @@ effect fn main() -> void {
 func entryFailureRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	modules, err := filepath.Abs("../../node_modules")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(modules, filepath.Join(root, "node_modules")); err != nil {
-		t.Fatal(err)
-	}
 	return root
 }
 
@@ -180,11 +173,9 @@ func TestEntryFailureReportIsIdenticalOnBothTargets(t *testing.T) {
 			if err := os.WriteFile(file, []byte(test.source), 0600); err != nil {
 				t.Fatal(err)
 			}
-			for _, target := range []string{"go", "js"} {
-				stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", target)
-				if string(stderr) != test.stderr || code != test.code || len(stdout) != 0 {
-					t.Errorf("%s: entry report differs:\ncode=%d want %d\nstderr=%q\nwant   %q\nstdout=%q", target, code, test.code, stderr, test.stderr, stdout)
-				}
+			stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", "go")
+			if string(stderr) != test.stderr || code != test.code || len(stdout) != 0 {
+				t.Errorf("go: entry report differs:\ncode=%d want %d\nstderr=%q\nwant   %q\nstdout=%q", code, test.code, stderr, test.stderr, stdout)
 			}
 		})
 	}
@@ -230,11 +221,9 @@ func TestEntryFailureReportForHTTPListenFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := `failure: IoError { message: "HTTP listen on \"` + test.address + `\": ` + test.class + `" }` + "\n"
-		for _, target := range []string{"go", "js"} {
-			stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", target)
-			if string(stderr) != want || code != 1 || len(stdout) != 0 {
-				t.Errorf("%s %s: code=%d stderr=%q stdout=%q; want 1 and %q", target, test.address, code, stderr, stdout, want)
-			}
+		stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", "go")
+		if string(stderr) != want || code != 1 || len(stdout) != 0 {
+			t.Errorf("go %s: code=%d stderr=%q stdout=%q; want 1 and %q", test.address, code, stderr, stdout, want)
 		}
 	}
 }

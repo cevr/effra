@@ -137,22 +137,20 @@ func TestCodecTransformationTestsPassOnGoAndJS(t *testing.T) {
 		cancellation: {"test_interrupted_decode_runs_no_later_transformation", "test_uninterrupted_decode_reaches_every_transformation"},
 	}
 	for path, want := range suites {
-		for _, target := range []string{"go", "js"} {
-			stdout, stderr, code := runTestCLIDir(t, binary, root, "", "test", path, "--target", target)
-			var report codecTransformReport
-			if err := json.Unmarshal(stdout, &report); err != nil || code != 0 || !report.Passed {
-				t.Fatalf("%s %s: code %d %v\nstdout=%s\nstderr=%s", filepath.Base(path), target, code, err, stdout, stderr)
+		stdout, stderr, code := runTestCLIDir(t, binary, root, "", "test", path, "--target", "go")
+		var report codecTransformReport
+		if err := json.Unmarshal(stdout, &report); err != nil || code != 0 || !report.Passed {
+			t.Fatalf("%s go: code %d %v\nstdout=%s\nstderr=%s", filepath.Base(path), code, err, stdout, stderr)
+		}
+		var ran []string
+		for _, test := range report.Tests {
+			if !test.Passed {
+				t.Fatalf("%s go: %s failed", filepath.Base(path), test.Name)
 			}
-			var ran []string
-			for _, test := range report.Tests {
-				if !test.Passed {
-					t.Fatalf("%s %s: %s failed", filepath.Base(path), target, test.Name)
-				}
-				ran = append(ran, test.Name)
-			}
-			if !slices.Equal(ran, want) {
-				t.Fatalf("%s %s ran %q, want %q", filepath.Base(path), target, ran, want)
-			}
+			ran = append(ran, test.Name)
+		}
+		if !slices.Equal(ran, want) {
+			t.Fatalf("%s go ran %q, want %q", filepath.Base(path), ran, want)
 		}
 	}
 }
@@ -427,8 +425,8 @@ func (p *codecFinalizerProcess) next(t *testing.T) (string, bool) {
 // it reports the fixture's exit status and stderr. In this fixture an
 // uncaught rebind failure (decode or encode) exits 1 with IoError. A refused
 // first bind is a forked listener whose failure stays pending while main
-// awaits a latch: on JS it currently exits 0 with empty stderr (#151), and
-// on Go it hangs, which next reports as no output within 10s.
+// awaits a latch: it hangs (#151), which next reports as no output within
+// 10s.
 func (p *codecFinalizerProcess) expect(t *testing.T, want string) {
 	t.Helper()
 	line, ok := p.next(t)
@@ -613,7 +611,7 @@ func codecFinalizerLatched(t *testing.T, workspace, address, direction string, a
 }
 
 // A transformation interrupted mid-stream completes its scope's cleanup
-// before the interrupt returns, on Go, Bun and Node and in both directions:
+// before the interrupt returns, in both directions:
 // the first transformation of a Batch holds a listener that its scope owns,
 // the fixture interrupts the direction, and only then rebinds the
 // listener's address, which succeeds only if the listener was released.
@@ -622,7 +620,7 @@ func codecFinalizerLatched(t *testing.T, workspace, address, direction string, a
 // other socket can take the port before the fixture binds it or between
 // the release and the rebind.
 // Negative control: rebinding while the transformation still holds the
-// listener is refused with IoError on every target, and the fixture says so.
+// listener is refused with IoError, and the fixture says so.
 // A rebind proves only that the socket was released, which Go's
 // cancellation hook does before the finalizer finishes, so the latched
 // variants (codecFinalizerLatched) also hold the finalizer itself open and
@@ -638,48 +636,35 @@ func TestCodecTransformationInterruptReleasesItsScopedResource(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("go build: %s%s", stdout, stderr)
 	}
-	native := httpSmokeArtifact(workspace, stdout)
-	stdout, stderr, code = runTestCLIDir(t, binary, workspace, "", "build", "finalizer.ef", "--target", "js", "--entry")
-	if code != 0 {
-		t.Fatalf("js build: %s%s", stdout, stderr)
-	}
-	module := httpSmokeArtifact(workspace, stdout)
-	cohorts := map[string][]string{"go": {native}, "bun": {"bun", module}, "node": {"node", module}}
-	for cohort, argv := range cohorts {
-		for _, direction := range []string{"decode", "encode", "held", "decode-latched", "encode-latched"} {
-			t.Run(cohort+"/"+direction, func(t *testing.T) {
-				t.Parallel()
-				if cohort != "go" {
-					if _, err := exec.LookPath(argv[0]); err != nil {
-						t.Fatalf("%s is required", argv[0])
-					}
+	argv := []string{httpSmokeArtifact(workspace, stdout)}
+	for _, direction := range []string{"decode", "encode", "held", "decode-latched", "encode-latched"} {
+		t.Run("go/"+direction, func(t *testing.T) {
+			t.Parallel()
+			address := testport.Reserve(t)
+			if base, latched := strings.CutSuffix(direction, "-latched"); latched {
+				codecFinalizerLatched(t, workspace, address, base, argv)
+				return
+			}
+			process := startCodecFinalizer(t, workspace, address, direction, argv...)
+			process.expect(t, "listening http://"+address)
+			codecFinalizerArrive(t, address)
+			if direction != "held" {
+				process.expect(t, direction+" interrupting")
+			}
+			process.expect(t, direction+" interrupted")
+			if direction == "held" {
+				process.expect(t, "rebind refused: IoError")
+				if line, ok := process.next(t); ok {
+					t.Fatalf("rebinding a held listener printed %q", line)
 				}
-				address := testport.Reserve(t)
-				if base, latched := strings.CutSuffix(direction, "-latched"); latched {
-					codecFinalizerLatched(t, workspace, address, base, argv)
-					return
+				<-process.done
+				if code := process.command.ProcessState.ExitCode(); code != 0 {
+					t.Fatalf("held control: exit %d %s", code, process.stderr.String())
 				}
-				process := startCodecFinalizer(t, workspace, address, direction, argv...)
-				process.expect(t, "listening http://"+address)
-				codecFinalizerArrive(t, address)
-				if direction != "held" {
-					process.expect(t, direction+" interrupting")
-				}
-				process.expect(t, direction+" interrupted")
-				if direction == "held" {
-					process.expect(t, "rebind refused: IoError")
-					if line, ok := process.next(t); ok {
-						t.Fatalf("rebinding a held listener printed %q", line)
-					}
-					<-process.done
-					if code := process.command.ProcessState.ExitCode(); code != 0 {
-						t.Fatalf("held control: exit %d %s", code, process.stderr.String())
-					}
-					return
-				}
-				process.expect(t, "listening http://"+address)
-				codecFinalizerArrive(t, address)
-			})
-		}
+				return
+			}
+			process.expect(t, "listening http://"+address)
+			codecFinalizerArrive(t, address)
+		})
 	}
 }

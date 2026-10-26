@@ -28,55 +28,51 @@ impl Prefix(prefix: string) for Labels {
 `
 
 func TestLexicalFactsResolveActualEnvironmentEntries(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		t.Run(target, func(t *testing.T) {
-			r := CompileFor(lexicalFixture, target)
-			if !r.Checked {
-				t.Fatalf("fixture: %+v", r.Diagnostics)
+	r := CompileFor(lexicalFixture, "go")
+	if !r.Checked {
+		t.Fatalf("fixture: %+v", r.Diagnostics)
+	}
+	if !r.lexical.complete {
+		t.Fatal("facts refused")
+	}
+	use := func(needle, name string) lexicalBinding {
+		t.Helper()
+		offset := strings.Index(lexicalFixture, needle) + strings.Index(needle, name)
+		for e, id := range r.lexical.uses {
+			if e.Span.Offset == offset {
+				return r.lexical.bindings[id]
 			}
-			if !r.lexical.complete {
-				t.Fatal("facts refused")
-			}
-			use := func(needle, name string) lexicalBinding {
-				t.Helper()
-				offset := strings.Index(lexicalFixture, needle) + strings.Index(needle, name)
-				for e, id := range r.lexical.uses {
-					if e.Span.Offset == offset {
-						return r.lexical.bindings[id]
-					}
-				}
-				t.Fatalf("no resolved use at %q %d", needle, offset)
-				return lexicalBinding{}
-			}
-			assert := func(got lexicalBinding, kind, declaration string, name string) {
-				t.Helper()
-				offset := strings.Index(lexicalFixture, declaration) + strings.Index(declaration, name)
-				if got.Kind != kind || got.Name != name || got.NameSpan.Offset != offset || got.NameSpan.Length != len(name) {
-					t.Fatalf("binding=%+v want %s at %d", got, kind, offset)
-				}
-				if got.Checked.node() == nil || r.projector.displayChecked(got.Checked) != "string" {
-					t.Fatalf("lost canonical checked type: %+v", got)
-				}
-			}
-			assert(use("= input", "input"), "parameter", "local(input:", "input")
-			assert(use("\n label\n", "label"), "let", "let label =", "label")
-			assert(use("=> label +", "label"), "pattern", "value: label", "label")
-			assert(use("rendered + label", "label"), "parameter", "describe(label:", "label")
-			assert(use("= prefix +", "prefix"), "configuration", "Prefix(prefix:", "prefix")
-			assert(use("prefix + item", "item"), "parameter", "\n effect fn read(item:", "item")
-			// The service operation and implementation method use distinct
-			// parameter declarations even when their spellings agree.
-			methodParam := use("prefix + item", "item")
-			if methodParam.NameSpan.Offset == strings.Index(lexicalFixture, "read(item:")+len("read(") {
-				t.Fatal("method resolved to service signature")
-			}
-			if use("=> label +", "label").ID == use("rendered + label", "label").ID {
-				t.Fatal("pattern shadowing erased actual declaration identity")
-			}
-			if use("\n label\n", "label").ID == use("= input", "input").ID {
-				t.Fatal("alias initializer identity leaked through let")
-			}
-		})
+		}
+		t.Fatalf("no resolved use at %q %d", needle, offset)
+		return lexicalBinding{}
+	}
+	assert := func(got lexicalBinding, kind, declaration string, name string) {
+		t.Helper()
+		offset := strings.Index(lexicalFixture, declaration) + strings.Index(declaration, name)
+		if got.Kind != kind || got.Name != name || got.NameSpan.Offset != offset || got.NameSpan.Length != len(name) {
+			t.Fatalf("binding=%+v want %s at %d", got, kind, offset)
+		}
+		if got.Checked.node() == nil || r.projector.displayChecked(got.Checked) != "string" {
+			t.Fatalf("lost canonical checked type: %+v", got)
+		}
+	}
+	assert(use("= input", "input"), "parameter", "local(input:", "input")
+	assert(use("\n label\n", "label"), "let", "let label =", "label")
+	assert(use("=> label +", "label"), "pattern", "value: label", "label")
+	assert(use("rendered + label", "label"), "parameter", "describe(label:", "label")
+	assert(use("= prefix +", "prefix"), "configuration", "Prefix(prefix:", "prefix")
+	assert(use("prefix + item", "item"), "parameter", "\n effect fn read(item:", "item")
+	// The service operation and implementation method use distinct
+	// parameter declarations even when their spellings agree.
+	methodParam := use("prefix + item", "item")
+	if methodParam.NameSpan.Offset == strings.Index(lexicalFixture, "read(item:")+len("read(") {
+		t.Fatal("method resolved to service signature")
+	}
+	if use("=> label +", "label").ID == use("rendered + label", "label").ID {
+		t.Fatal("pattern shadowing erased actual declaration identity")
+	}
+	if use("\n label\n", "label").ID == use("= input", "input").ID {
+		t.Fatal("alias initializer identity leaked through let")
 	}
 }
 

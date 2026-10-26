@@ -95,18 +95,9 @@ func TestNamedArgumentsBindByNameAndEvaluateInSourceOrderOnBothTargets(t *testin
 	if err := os.WriteFile(file, []byte(namedArgumentsSource), 0600); err != nil {
 		t.Fatal(err)
 	}
-	modules, err := filepath.Abs("../../node_modules")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(modules, filepath.Join(root, "node_modules")); err != nil {
-		t.Fatal(err)
-	}
-	for _, target := range []string{"go", "js"} {
-		stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", target)
-		if code != 0 || len(stderr) != 0 || string(stdout) != namedArgumentsOutput {
-			t.Fatalf("%s named arguments: code=%d stderr=%q\n%s\nwant\n%s", target, code, stderr, stdout, namedArgumentsOutput)
-		}
+	stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", "go")
+	if code != 0 || len(stderr) != 0 || string(stdout) != namedArgumentsOutput {
+		t.Fatalf("go named arguments: code=%d stderr=%q\n%s\nwant\n%s", code, stderr, stdout, namedArgumentsOutput)
 	}
 	// Formatting keeps each label with its value and the written order.
 	formatted, stderr, code := runTestCLIInput(t, binary, namedArgumentsSource, "fmt", "--stdin")
@@ -215,23 +206,14 @@ effect fn main() -> void {
 func TestNamedArgumentsUnderFailureCallbacksAndBundledGenerics(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := t.TempDir()
-	modules, err := filepath.Abs("../../node_modules")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(modules, filepath.Join(root, "node_modules")); err != nil {
-		t.Fatal(err)
-	}
 	for _, program := range namedArgumentPrograms {
 		file := filepath.Join(root, program.name)
 		if err := os.WriteFile(file, []byte(program.source), 0600); err != nil {
 			t.Fatal(err)
 		}
-		for _, target := range []string{"go", "js"} {
-			stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", target)
-			if code != 0 || len(stderr) != 0 || string(stdout) != program.output {
-				t.Fatalf("%s on %s: code=%d stderr=%q\n%s\nwant\n%s", program.name, target, code, stderr, stdout, program.output)
-			}
+		stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", "go")
+		if code != 0 || len(stderr) != 0 || string(stdout) != program.output {
+			t.Fatalf("%s on go: code=%d stderr=%q\n%s\nwant\n%s", program.name, code, stderr, stdout, program.output)
 		}
 	}
 }

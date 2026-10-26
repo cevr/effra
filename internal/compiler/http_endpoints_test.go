@@ -276,7 +276,7 @@ effect fn main() -> void {
 
 // Calling an endpoint directly answers a lone mapped failure with its
 // status, and propagates a compound cause of mapped failures complete and
-// in order on both targets; the endpoint's row declares both failures.
+// in order; the endpoint's row declares both failures.
 func TestEndpointDirectInvocationKeepsCompoundCauses(t *testing.T) {
 	r := Compile(endpointCauseProbe)
 	if !r.Checked {
@@ -317,17 +317,5 @@ func TestCauses(t *testing.T){
 	}
 	if output, err := runGoCommand(dir, "test", "."); err != nil {
 		t.Fatalf("Go endpoint causes: %v %s", err, output)
-	}
-	js := runJS(t, endpointCauseProbe, `
-const call = failures => Effect.runPromise(Effect.exit(Effect.provideService(__ef_function_work({ method: "POST", path: "/work", contentType: "", body: new Uint8Array(0) }), __ef_service_Work, { perform: () => Effect.failCause(failures.map(tag => Cause.fail({ _tag: tag })).reduce(Cause.combine)) })));
-const lone = await call(["Second"]);
-if (lone._tag !== "Success" || lone.value.response.status !== 410n) throw new Error("lone mapped failure " + JSON.stringify(lone));
-const compound = await call(["First", "Second"]);
-const tags = compound._tag === "Failure" ? compound.cause.reasons.map(reason => reason._tag + ":" + reason.error?._tag) : [];
-if (tags.join(",") !== "Fail:First,Fail:Second") throw new Error("compound cause " + tags);
-console.log("endpoint causes");
-`)
-	if js != "endpoint causes\n" {
-		t.Fatalf("JS endpoint causes: %s", js)
 	}
 }

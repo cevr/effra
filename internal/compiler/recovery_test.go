@@ -20,30 +20,7 @@ func TestRecoveryCallersRunOnGoAndJS(t *testing.T) {
 		t.Run(fixture.example, func(t *testing.T) {
 			source := readRecipeExample(t, fixture.example)
 			runGenericDataNative(t, source, fixture.output)
-			if output := runJSForTarget(t, "js", source, `await Effect.runPromise(__ef_function_main());`); output != fixture.output {
-				t.Fatalf("JS execution:\n%s", output)
-			}
 		})
-	}
-}
-
-// Recovering a stored recipe constructs a new recipe. Neither the work nor
-// the handler runs until that recipe runs, and each run executes both again.
-func TestRecoveryOfStoredRecipeRunsOncePerExecution(t *testing.T) {
-	source := readRecipeExample(t, "recovery-outcome.ef")
-	output := runJSForTarget(t, "js", source, `
-let calls = 0;
-const console = { log: message => Effect.sync(() => { calls++; }) };
-const job = { label: "bad", work: __ef_function_attempt("bad") };
-const settled = __ef_recover(job.work, "Rejected", payload => Effect.sync(() => __ef_function_rejected(payload)));
-if (calls !== 0) throw new Error("recovery executed its recipe");
-const first = await Effect.runPromise(Effect.provideService(settled, __ef_service_Console, console));
-const second = await Effect.runPromise(Effect.provideService(settled, __ef_service_Console, console));
-if (calls !== 2 || first.reason !== "bad refused" || second.reason !== "bad refused") throw new Error("runs shared or skipped work: " + calls);
-globalThis.console.log("counted");
-`)
-	if output != "counted\n" {
-		t.Fatal(output)
 	}
 }
 
@@ -248,36 +225,6 @@ effect fn main() -> void {
 `
 	expected := "recovering slow\ntimed out\n"
 	runGenericDataNative(t, source, expected)
-	if output := runJSForTarget(t, "js", source, `await Effect.runPromise(__ef_function_main());`); output != expected {
-		t.Fatalf("JS execution:\n%s", output)
-	}
-}
-
-// The JS recovery helper keeps Effra's solitary-failure boundary rather than
-// Effect.catchTag's first-failure selection: composite causes, defects and
-// interruption never reach the handler.
-func TestRecoveryJSKeepsCompositeCauses(t *testing.T) {
-	output := runJS(t, readRecipeExample(t, "recovery-outcome.ef"), `
-const failure = { _tag: "Rejected", reason: "payload" }, defect = { message: "cleanup defect" };
-let seen = [];
-const handler = payload => Effect.sync(() => { seen.push(payload); return "recovered"; });
-const matched = await Effect.runPromiseExit(__ef_recover(Effect.fail(failure), "Rejected", handler));
-if (!Exit.isSuccess(matched) || matched.value !== "recovered" || seen.length !== 1 || seen[0] !== failure) throw new Error("payload not delivered intact");
-const composite = await Effect.runPromiseExit(__ef_recover(Effect.failCause(Cause.combine(Cause.fail(failure), Cause.die(defect))), "Rejected", handler));
-if (!Exit.isFailure(composite) || composite.cause.reasons.length !== 2 || seen.length !== 1) throw new Error("composite cause recovered");
-const other = await Effect.runPromiseExit(__ef_recover(Effect.fail({ _tag: "Busy" }), "Rejected", handler));
-if (!Exit.isFailure(other) || other.cause.reasons[0].error._tag !== "Busy" || seen.length !== 1) throw new Error("unselected failure changed");
-const died = await Effect.runPromiseExit(__ef_recover(Effect.die(defect), "Rejected", handler));
-if (!Exit.isFailure(died) || died.cause.reasons[0].defect !== defect || seen.length !== 1) throw new Error("defect recovered");
-const interrupted = await Effect.runPromiseExit(__ef_recover(Effect.interrupt, "Rejected", handler));
-if (!Exit.isFailure(interrupted) || !Cause.hasInterruptsOnly(interrupted.cause) || seen.length !== 1) throw new Error("interruption recovered");
-const raised = await Effect.runPromiseExit(__ef_recover(Effect.fail(failure), "Rejected", () => Effect.fail({ _tag: "Lost" })));
-if (!Exit.isFailure(raised) || raised.cause.reasons[0].error._tag !== "Lost") throw new Error("handler failure lost");
-console.log("recovery cause controls");
-`)
-	if output != "recovery cause controls\n" {
-		t.Fatal(output)
-	}
 }
 
 func TestRecoveryFormattingRoundTrip(t *testing.T) {
@@ -296,24 +243,6 @@ func TestRecoveryFormattingRoundTrip(t *testing.T) {
 	if r := Compile(formatted.Text); !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
-}
-
-// A declared error name is also its payload type in TypeScript declarations.
-func TestRecoveryHandlerDeclarationsTypeCheck(t *testing.T) {
-	r := Compile(readRecipeExample(t, "recovery-outcome.ef"))
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkStrictTypeScript(t, declaration, `import type { Rejected, RejectedError, Outcome } from "./generated.mjs";
-import { rejected } from "./generated.mjs";
-declare const payload: RejectedError;
-const outcome: Outcome = rejected(payload);
-const same: Rejected = payload;
-// @ts-expect-error a handler receives only the declared payload
-rejected({ _tag: "Busy" });
-void outcome; void same;
-`)
 }
 
 // Handlers are ordinary callable values: named, stored in a record field or
@@ -347,9 +276,6 @@ effect fn main() -> void {
 }
 `
 	runGenericDataNative(t, source, "void handled\n")
-	if output := runJSForTarget(t, "js", source, `await Effect.runPromise(__ef_function_main());`); output != "void handled\n" {
-		t.Fatalf("JS execution:\n%s", output)
-	}
 }
 
 // A recovered recipe publishes either the original success or the handler's
@@ -448,39 +374,14 @@ effect fn main() -> void raises { IoError } {
 	runGenericDataNative(t, safe, "scoped file read complete\n\n")
 }
 
-// The raw error name is exported as the payload type alias, so a reserved
-// TypeScript word is refused for JS while a near-reserved spelling declares.
-func TestRecoveryPayloadAliasNamesAreValidTypeScript(t *testing.T) {
+// An error name that a host language reserves is an ordinary Effra name.
+func TestRecoveryPayloadNamesAdmitHostReservedWords(t *testing.T) {
 	for _, name := range []string{"class", "type", "from", "await"} {
 		source := "error " + name + " { reason: string }\neffect fn main() -> void { void }\n"
 		if r := CompileFor(source, "go"); !r.Checked {
 			t.Fatalf("Go target refused error %s: %+v", name, r.Diagnostics)
 		}
-		r := CompileFor(source, "js")
-		if r.Checked || !hasDiagnosticMessage(r, "JavaScript declaration name "+name+" is reserved by TypeScript for error payload type") {
-			t.Fatalf("reserved error alias %s: %+v", name, r.Diagnostics)
-		}
 	}
-	source := `error Class { reason: string }
-error String { reason: string }
-fn explain(failure: Class) -> string { failure.reason }
-fn describe(failure: String) -> string { failure.reason }
-effect fn main() -> void { void }
-`
-	r := CompileFor(source, "js")
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err, r.Diagnostics)
-	}
-	checkStrictTypeScript(t, declaration, `import type { Class, String } from "./generated.mjs";
-import { explain, describe } from "./generated.mjs";
-declare const klass: Class;
-declare const text: String;
-const reasons: string = explain(klass) + describe(text);
-// @ts-expect-error payload aliases stay nominal by tag
-explain(text);
-void reasons;
-`)
 }
 
 // A handler that never succeeds contributes rows but no successful value, so

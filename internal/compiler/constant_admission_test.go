@@ -13,43 +13,39 @@ const Enabled: bool = true
 const EnabledAlias: bool = Enabled
 const Minimum: i64 = -9223372036854775808
 const MinimumAlias: i64 = Minimum`
-	for _, target := range []string{"go", "js"} {
-		t.Run(target, func(t *testing.T) {
-			r := CompileFor(source, target)
-			if !r.Checked {
-				t.Fatalf("scalar constants rejected on %s: %+v", target, r.Diagnostics)
-			}
-			imported := r.Program.BundledConstantBindings["Defaults"]["defaultSuffix"]
-			if imported == nil || imported.Identity != constantIdentity("effra/constants", "defaultSuffix") || imported.Value == nil || imported.Value.Value != "!" {
-				t.Fatalf("compiler-distributed constant binding missing: %+v", r.Program.BundledConstantBindings)
-			}
-			values := map[string]string{}
-			for _, declaration := range r.Declarations {
-				if declaration.Kind == "constant" && declaration.Constant != nil {
-					values[declaration.Name] = declaration.Constant.Value
-				}
-			}
-			if values["AliasSuffix"] != "!" || values["EnabledAlias"] != "true" || values["MinimumAlias"] != "-9223372036854775808" {
-				t.Fatalf("direct aliases lost checked scalar values: %v", values)
-			}
-			foundSource := false
-			for _, importedSource := range r.Sources {
-				foundSource = foundSource || importedSource.Module == "effra/constants" && importedSource.Digest != ""
-			}
-			if !foundSource {
-				t.Fatalf("bundled constant source digest missing: %+v", r.Sources)
-			}
-			localOffset := strings.Index(source, "AliasSuffix")
-			localQuery, err := r.QueryType(TypeSelection{Offset: &localOffset})
-			if err != nil || localQuery.Selection.Target == nil || localQuery.Selection.Target.Kind != "constant" || localQuery.Selection.Target.Constant == nil || localQuery.Selection.Target.Constant.Value != "!" || localQuery.Selection.Declaration == nil || localQuery.Selection.Declaration.Kind != "constant" {
-				t.Fatalf("local constant declaration was not projected: selection=%+v err=%v", localQuery.Selection, err)
-			}
-			offset := strings.Index(source, "Defaults.defaultSuffix") + len("Defaults.")
-			query, err := r.QueryType(TypeSelection{Offset: &offset})
-			if err != nil || query.Selection.Target == nil || query.Selection.Target.Kind != "constant" || query.Selection.Target.Constant == nil || query.Selection.Target.Constant.Value != "!" {
-				t.Fatalf("imported constant reference was not projected: selection=%+v err=%v", query.Selection, err)
-			}
-		})
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("scalar constants rejected on go: %+v", r.Diagnostics)
+	}
+	imported := r.Program.BundledConstantBindings["Defaults"]["defaultSuffix"]
+	if imported == nil || imported.Identity != constantIdentity("effra/constants", "defaultSuffix") || imported.Value == nil || imported.Value.Value != "!" {
+		t.Fatalf("compiler-distributed constant binding missing: %+v", r.Program.BundledConstantBindings)
+	}
+	values := map[string]string{}
+	for _, declaration := range r.Declarations {
+		if declaration.Kind == "constant" && declaration.Constant != nil {
+			values[declaration.Name] = declaration.Constant.Value
+		}
+	}
+	if values["AliasSuffix"] != "!" || values["EnabledAlias"] != "true" || values["MinimumAlias"] != "-9223372036854775808" {
+		t.Fatalf("direct aliases lost checked scalar values: %v", values)
+	}
+	foundSource := false
+	for _, importedSource := range r.Sources {
+		foundSource = foundSource || importedSource.Module == "effra/constants" && importedSource.Digest != ""
+	}
+	if !foundSource {
+		t.Fatalf("bundled constant source digest missing: %+v", r.Sources)
+	}
+	localOffset := strings.Index(source, "AliasSuffix")
+	localQuery, err := r.QueryType(TypeSelection{Offset: &localOffset})
+	if err != nil || localQuery.Selection.Target == nil || localQuery.Selection.Target.Kind != "constant" || localQuery.Selection.Target.Constant == nil || localQuery.Selection.Target.Constant.Value != "!" || localQuery.Selection.Declaration == nil || localQuery.Selection.Declaration.Kind != "constant" {
+		t.Fatalf("local constant declaration was not projected: selection=%+v err=%v", localQuery.Selection, err)
+	}
+	offset := strings.Index(source, "Defaults.defaultSuffix") + len("Defaults.")
+	query, err := r.QueryType(TypeSelection{Offset: &offset})
+	if err != nil || query.Selection.Target == nil || query.Selection.Target.Kind != "constant" || query.Selection.Target.Constant == nil || query.Selection.Target.Constant.Value != "!" {
+		t.Fatalf("imported constant reference was not projected: selection=%+v err=%v", query.Selection, err)
 	}
 }
 
@@ -139,19 +135,15 @@ fn render(value: string = Suffix, limit: i64 = LimitAlias, enabled: bool = Enabl
 		{"Defaults.defaultSuffix", "defaultSuffix", `const defaultSuffix: string = "!"`},
 		{"fn render", "render", `fn render(value: string = "!", limit: i64 = -9223372036854775808, enabled: bool = true, tail: string = "!") -> string`},
 	}
-	for _, target := range []string{"go", "js"} {
-		t.Run(target, func(t *testing.T) {
-			r := CompileFor(source, target)
-			if !r.Checked {
-				t.Fatalf("constant presentation fixture rejected on %s: %+v", target, r.Diagnostics)
-			}
-			for _, probe := range probes {
-				offset := strings.Index(source, probe.context) + strings.Index(probe.context, probe.name)
-				response, err := r.QueryType(TypeSelection{Offset: &offset})
-				if err != nil || response.Selection.Presentation != probe.want {
-					t.Fatalf("%s at %q presented %q, want %q (err=%v)", probe.name, probe.context, response.Selection.Presentation, probe.want, err)
-				}
-			}
-		})
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("constant presentation fixture rejected on go: %+v", r.Diagnostics)
+	}
+	for _, probe := range probes {
+		offset := strings.Index(source, probe.context) + strings.Index(probe.context, probe.name)
+		response, err := r.QueryType(TypeSelection{Offset: &offset})
+		if err != nil || response.Selection.Presentation != probe.want {
+			t.Fatalf("%s at %q presented %q, want %q (err=%v)", probe.name, probe.context, response.Selection.Presentation, probe.want, err)
+		}
 	}
 }

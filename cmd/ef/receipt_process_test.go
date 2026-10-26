@@ -27,13 +27,11 @@ func TestBuildReceiptIsBuildOnlyAndRefusedBuildsWriteNone(t *testing.T) {
 	if err := os.WriteFile(broken, []byte("effect fn main() -> string {\n    missing()\n}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []string{"go", "js"} {
-		if _, _, code := runTestCLIDir(t, binary, root, "", "build", broken, "--target", target, "--receipt", receipt); code == 0 {
-			t.Fatalf("%s build of unchecked source succeeded", target)
-		}
-		if _, err := os.Stat(receipt); !os.IsNotExist(err) {
-			t.Fatalf("%s: refused build wrote a receipt: %v", target, err)
-		}
+	if _, _, code := runTestCLIDir(t, binary, root, "", "build", broken, "--target", "go", "--receipt", receipt); code == 0 {
+		t.Fatal("go build of unchecked source succeeded")
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatalf("go: refused build wrote a receipt: %v", err)
 	}
 }
 
@@ -194,17 +192,15 @@ func TestBuildReceiptProtectsTheSourceTheLoaderAdmitted(t *testing.T) {
 		t.Fatal(err)
 	}
 	spelled := "jump" + string(filepath.Separator) + ".." + string(filepath.Separator) + "main.ef"
-	for _, target := range []string{"go", "js"} {
-		_, stderr, code := runTestCLIDir(t, binary, root, "", "build", spelled, "--target", target, "--receipt", "main.ef")
-		if code == 0 || !strings.Contains(string(stderr), "receipt path") {
-			t.Fatalf("%s: receipt replacing the compiled source accepted: code=%d stderr=%q", target, code, stderr)
-		}
-		if data, err := os.ReadFile(filepath.Join(root, "main.ef")); err != nil || string(data) != compiled {
-			t.Fatalf("%s: compiled source changed: %v %q", target, err, data)
-		}
-		if _, err := os.Stat(filepath.Join(root, "dist")); !os.IsNotExist(err) {
-			t.Fatalf("%s: refused build wrote output: %v", target, err)
-		}
+	_, stderr, code := runTestCLIDir(t, binary, root, "", "build", spelled, "--target", "go", "--receipt", "main.ef")
+	if code == 0 || !strings.Contains(string(stderr), "receipt path") {
+		t.Fatalf("go: receipt replacing the compiled source accepted: code=%d stderr=%q", code, stderr)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "main.ef")); err != nil || string(data) != compiled {
+		t.Fatalf("go: compiled source changed: %v %q", err, data)
+	}
+	if _, err := os.Stat(filepath.Join(root, "dist")); !os.IsNotExist(err) {
+		t.Fatalf("go: refused build wrote output: %v", err)
 	}
 
 	// The file the link walk reaches is not the compiled source: a receipt
@@ -265,40 +261,6 @@ func TestBuildRefusesDirectoryOutputs(t *testing.T) {
 	for _, absent := range []string{"fresh", "receipt.json", filepath.Join("dist", "go")} {
 		if _, err := os.Stat(filepath.Join(root, absent)); !os.IsNotExist(err) {
 			t.Errorf("refused build wrote %s: %v", absent, err)
-		}
-	}
-}
-
-// The JavaScript receipt lists the imports emission declared: program text
-// that spells an import adds nothing and refuses nothing, and the HTTP
-// transport's host module is listed.
-func TestJSReceiptListsDeclaredImportsOnly(t *testing.T) {
-	binary := buildTestCLI(t)
-	root := t.TempDir()
-	programs := map[string]string{
-		"spelled.ef": "effect fn main() -> string {\n    \"import('node:http')\"\n}\n",
-		"partial.ef": "effect fn main() -> string {\n    \"import(\"\n}\n",
-		"http.ef":    httpApplicationSource,
-	}
-	for name, text := range programs {
-		source := filepath.Join(root, name)
-		if err := os.WriteFile(source, []byte(text), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		path := filepath.Join(root, name+".receipt.json")
-		if stdout, stderr, code := runTestCLIDir(t, binary, root, "", "build", source, "--target", "js", "--entry", "-o", filepath.Join(root, "out", name+".mjs"), "--receipt", path); code != 0 {
-			t.Fatalf("%s: build failed: code=%d stdout=%q stderr=%q", name, code, stdout, stderr)
-		}
-		specifiers := []string{}
-		for _, imported := range readReceipt(t, path).External {
-			specifiers = append(specifiers, imported.Specifier)
-		}
-		want := "effect"
-		if name == "http.ef" {
-			want = "effect node:dns/promises node:http node:net"
-		}
-		if got := strings.Join(specifiers, " "); got != want {
-			t.Errorf("%s: external modules %q, want %q", name, got, want)
 		}
 	}
 }

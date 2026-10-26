@@ -119,23 +119,6 @@ func TestCallableFactoryPreservesValueAndEvaluationLevels(t *testing.T) {
 			}
 		})
 	}
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkStrictTypeScript(t, declaration, `import {factory, pureFailure, pureService, pureEmpty, nestedFactory} from "./generated.mjs";
-import type {DirectoryRequirement,LoggerRequirement} from "./generated.mjs";
-import type {Effect} from "effect";
-type Callback=(x:string)=>Effect.Effect<string,{readonly _tag:"Broken"},DirectoryRequirement>;
-type Expected=Effect.Effect<Callback,{readonly _tag:"Missing"},LoggerRequirement>;
-const actual=factory(); const exact:Expected=actual;declare const expected:Expected;const reciprocal:typeof actual=expected;
-// @ts-expect-error Both semantic levels must be retained.
-const erased:Effect.Effect<(x:string)=>Effect.Effect<string,never,never>,never,never>=actual;
-const failure:Effect.Effect<(x:string)=>string,{readonly _tag:"Missing"},never>=pureFailure();
-const service:Effect.Effect<(x:string)=>string,never,LoggerRequirement>=pureService();
-const empty:Effect.Effect<(x:string)=>string,never,never>=pureEmpty();
-const nested:Effect.Effect<(x:string)=>(y:string)=>string,{readonly _tag:"Missing"},never>=nestedFactory();
-void exact;void reciprocal;void erased;void failure;void service;void empty;void nested;`)
 	generated, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
@@ -151,8 +134,5 @@ void exact;void reciprocal;void erased;void failure;void service;void empty;void
 	}
 	if output, err := runGoCommand(dir, "run", "."); err != nil || string(output) != "name:42\n" {
 		t.Fatalf("native returned callbacks: %v %s", err, output)
-	}
-	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != "name:42\n" {
-		t.Fatalf("JS returned callbacks: %s", output)
 	}
 }

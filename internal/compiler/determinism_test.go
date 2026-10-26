@@ -12,7 +12,7 @@ import (
 // revision and producer identity, the check response (bundled interface
 // digests included) and every emitted artifact.
 type compilationObservation struct {
-	facts, revision, producer, check, goSource, entry, library string
+	facts, revision, producer, check, goSource string
 }
 
 func observeCompilation(t *testing.T, source string) compilationObservation {
@@ -28,23 +28,21 @@ func observeCompilation(t *testing.T, source string) compilationObservation {
 	o := compilationObservation{facts: checkedFacts(r), revision: r.Revision, producer: r.ProducerIdentity, check: string(check)}
 	if r.Checked {
 		goSource, err := r.EmitGo()
-		o.goSource = artifact(goSource, "", err)
-		o.entry = artifact(r.Emit(true))
-		o.library = artifact(r.Emit(false))
+		o.goSource = artifact(goSource, err)
 	}
 	return o
 }
 
 // artifact renders an emission, or its refusal, as one comparable value.
-func artifact(code, declarations string, err error) string {
+func artifact(code string, err error) string {
 	if err != nil {
 		return "error: " + err.Error()
 	}
-	return code + "\x00" + declarations
+	return code
 }
 
 // Bundled template parameters used to receive arena identities in map order,
-// so repeated compiles of generic-users.ef lowered different Go and JS.
+// so repeated compiles of generic-users.ef lowered different Go.
 func TestRepeatedCompilationIsDeterministic(t *testing.T) {
 	files, err := filepath.Glob("../../examples/*.ef")
 	if err != nil || len(files) == 0 {
@@ -132,25 +130,23 @@ func resetBundledSummaryCache() {
 // either target.
 func TestMixedBundledSummaryAdmissionIsDeterministic(t *testing.T) {
 	t.Cleanup(resetBundledSummaryCache)
-	for _, target := range []string{"go", "js"} {
-		var first string
-		for i := 0; i < 40; i++ {
-			if i%2 == 0 {
-				resetBundledSummaryCache()
-			}
-			r := CompileFor(mixedBundledConsumer, target)
-			if !r.Checked {
-				t.Fatal(target, r.Diagnostics)
-			}
-			if len(r.Program.semantic.admittedSummaries) < 2 {
-				t.Fatalf("%s: fixture must admit two bundled summaries", target)
-			}
-			facts := checkedFacts(r)
-			if i == 0 {
-				first = facts
-			} else if facts != first {
-				t.Fatalf("%s: compile %d (%s summaries) allocated a different canonical arena", target, i+1, map[bool]string{true: "cold", false: "warm"}[i%2 == 0])
-			}
+	var first string
+	for i := 0; i < 40; i++ {
+		if i%2 == 0 {
+			resetBundledSummaryCache()
+		}
+		r := CompileFor(mixedBundledConsumer, "go")
+		if !r.Checked {
+			t.Fatal("go", r.Diagnostics)
+		}
+		if len(r.Program.semantic.admittedSummaries) < 2 {
+			t.Fatal("go: fixture must admit two bundled summaries")
+		}
+		facts := checkedFacts(r)
+		if i == 0 {
+			first = facts
+		} else if facts != first {
+			t.Fatalf("go: compile %d (%s summaries) allocated a different canonical arena", i+1, map[bool]string{true: "cold", false: "warm"}[i%2 == 0])
 		}
 	}
 }

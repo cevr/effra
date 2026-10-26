@@ -2,7 +2,7 @@
   "schema": "effra-http-wire-vectors/1",
   "program": "examples/http-endpoints.ef",
   "profile": "HTTP/1.1 buffered JSON endpoints, exact static paths, wrong method 404, application/json input media type (absent Content-Type reads as JSON), failure bodies tagged with the failure name, terminal failure-body encoding answers 500",
-  "targets": ["go", "js-bun", "js-node"],
+  "targets": ["go"],
   "limits": {"maxBodyBytes": 256, "readHeaderMillis": 1000, "readBodyMillis": 1000, "idleMillis": 1000, "maxActive": 8},
   "exchanges": [
     {"name": "endpoint.success-status-and-body", "request": {"method": "POST", "target": "/orders", "body": {"text": "{\"member\":\"m-1\",\"item\":\"tea\",\"quantity\":\"2\"}"}, "contentType": "application/json"}, "response": {"status": 201, "body": {"text": "{\"item\":\"tea\",\"total\":\"252\"}"}, "contentType": "application/json"}},

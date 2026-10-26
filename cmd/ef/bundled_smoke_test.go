@@ -353,81 +353,79 @@ effect fn main() -> string { run local(echo, "ok") }
 `, "local", "local(echo", "", ""},
 	}
 	for _, fixture := range fixtures {
-		for _, target := range []string{"go", "js"} {
-			t.Run(fixture.name+"/"+target, func(t *testing.T) {
-				t.Parallel()
-				directory := t.TempDir()
-				source := fixture.source
-				bundledSmokeWrite(t, directory, source)
-				index := strings.Index(source, fixture.anchor)
-				if dot := strings.Index(fixture.anchor, "."); dot >= 0 {
-					index += dot + 1
+		t.Run(fixture.name+"/go", func(t *testing.T) {
+			t.Parallel()
+			directory := t.TempDir()
+			source := fixture.source
+			bundledSmokeWrite(t, directory, source)
+			index := strings.Index(source, fixture.anchor)
+			if dot := strings.Index(fixture.anchor, "."); dot >= 0 {
+				index += dot + 1
+			}
+			// The query offset counts characters, as the Python smoke did.
+			offset := utf8.RuneCountInString(source[:index])
+			operations := []bundledSmokeOperation{
+				{"check", "project.check", map[string]any{}, nil},
+				{"inspect", "code.inspect", map[string]any{"symbol": fixture.symbol}, []string{fixture.symbol}},
+				{"query", "code.typeAt", map[string]any{"offset": offset}, []string{strconv.Itoa(offset)}},
+				{"graph", "project.graph", map[string]any{}, nil},
+			}
+			var expected []map[string]any
+			for _, operation := range operations {
+				expected = append(expected, bundledSmokeCLI(t, binary, directory, operation.command, "go", true, operation.cli...))
+			}
+			revision := expected[0]["revision"]
+			var calls []map[string]any
+			for _, operation := range operations {
+				arguments := map[string]any{"file": "main.ef", "target": "go", "expectedRevision": revision}
+				for key, value := range operation.arguments {
+					arguments[key] = value
 				}
-				// The query offset counts characters, as the Python smoke did.
-				offset := utf8.RuneCountInString(source[:index])
-				operations := []bundledSmokeOperation{
-					{"check", "project.check", map[string]any{}, nil},
-					{"inspect", "code.inspect", map[string]any{"symbol": fixture.symbol}, []string{fixture.symbol}},
-					{"query", "code.typeAt", map[string]any{"offset": offset}, []string{strconv.Itoa(offset)}},
-					{"graph", "project.graph", map[string]any{}, nil},
+				calls = append(calls, map[string]any{"name": operation.tool, "arguments": arguments})
+			}
+			calls = append(calls, map[string]any{"name": "project.check", "arguments": map[string]any{
+				"file": "main.ef", "target": "go", "expectedRevision": "stale"}})
+			replies := bundledSmokeMCP(t, binary, directory, "bundled-parity", calls...)
+			if len(replies) != len(calls)+1 {
+				t.Fatalf("replies = %v", replies)
+			}
+			for index, want := range expected {
+				response := replies[index+1]
+				result, ok := response["result"].(map[string]any)
+				if !ok || result["isError"] == true {
+					t.Fatalf("%s: %v", operations[index].tool, response)
 				}
-				var expected []map[string]any
-				for _, operation := range operations {
-					expected = append(expected, bundledSmokeCLI(t, binary, directory, operation.command, target, true, operation.cli...))
+				actual, _ := result["structuredContent"].(map[string]any)
+				bundledSmokeParity(t, actual, want, "go")
+				if !bundledSmokeTruthy(actual["producerIdentity"]) || !bundledSmokeTruthy(actual["sources"]) ||
+					!bundledSmokeTruthy(actual["bundledInterfaces"]) || !bundledSmokeTruthy(actual["bundledBindings"]) {
+					t.Fatalf("%s lacks producer, sources or bundled facts: %v", operations[index].tool, actual)
 				}
-				revision := expected[0]["revision"]
-				var calls []map[string]any
-				for _, operation := range operations {
-					arguments := map[string]any{"file": "main.ef", "target": target, "expectedRevision": revision}
-					for key, value := range operation.arguments {
-						arguments[key] = value
-					}
-					calls = append(calls, map[string]any{"name": operation.tool, "arguments": arguments})
+				if actual["revision"] != revision || actual["target"] != "go" || actual["typeProjectionComplete"] != true {
+					t.Fatalf("%s revision, target or projection: %v", operations[index].tool, actual)
 				}
-				calls = append(calls, map[string]any{"name": "project.check", "arguments": map[string]any{
-					"file": "main.ef", "target": target, "expectedRevision": "stale"}})
-				replies := bundledSmokeMCP(t, binary, directory, "bundled-parity", calls...)
-				if len(replies) != len(calls)+1 {
-					t.Fatalf("replies = %v", replies)
-				}
-				for index, want := range expected {
-					response := replies[index+1]
-					result, ok := response["result"].(map[string]any)
-					if !ok || result["isError"] == true {
-						t.Fatalf("%s: %v", operations[index].tool, response)
-					}
-					actual, _ := result["structuredContent"].(map[string]any)
-					bundledSmokeParity(t, actual, want, target)
-					if !bundledSmokeTruthy(actual["producerIdentity"]) || !bundledSmokeTruthy(actual["sources"]) ||
-						!bundledSmokeTruthy(actual["bundledInterfaces"]) || !bundledSmokeTruthy(actual["bundledBindings"]) {
-						t.Fatalf("%s lacks producer, sources or bundled facts: %v", operations[index].tool, actual)
-					}
-					if actual["revision"] != revision || actual["target"] != target || actual["typeProjectionComplete"] != true {
-						t.Fatalf("%s revision, target or projection: %v", operations[index].tool, actual)
-					}
-					bundledSmokeAssertProjection(t, actual, source)
-				}
-				if stale, _ := replies[5]["result"].(map[string]any); stale["isError"] != true {
-					t.Fatalf("stale revision admitted: %v", replies[5])
-				}
-				if fixture.failure == "" {
-					return
-				}
-				// The public caller's missing rows must fail identically on both surfaces.
-				signature := "-> string raises {" + fixture.failure + "} uses {" + fixture.service + "} { run " + fixture.anchor
-				for _, refusal := range []struct{ row, code string }{
-					{" raises {" + fixture.failure + "}", "EF107"},
-					{" uses {" + fixture.service + "}", "EF108"},
-				} {
-					bundledSmokeWrite(t, directory, strings.Replace(source, signature, strings.Replace(signature, refusal.row, "", 1), 1))
-					rejected := bundledSmokeCLI(t, binary, directory, "check", target, false)
-					bundledSmokeAssertCode(t, rejected, refusal.code)
-					replies := bundledSmokeMCP(t, binary, directory, "bundled-parity", map[string]any{
-						"name": "project.check", "arguments": map[string]any{"file": "main.ef", "target": target}})
-					bundledSmokeParity(t, diagnosticsSmokeStructured(t, replies[1]), rejected, target)
-				}
-			})
-		}
+				bundledSmokeAssertProjection(t, actual, source)
+			}
+			if stale, _ := replies[5]["result"].(map[string]any); stale["isError"] != true {
+				t.Fatalf("stale revision admitted: %v", replies[5])
+			}
+			if fixture.failure == "" {
+				return
+			}
+			// The public caller's missing rows must fail identically on both surfaces.
+			signature := "-> string raises {" + fixture.failure + "} uses {" + fixture.service + "} { run " + fixture.anchor
+			for _, refusal := range []struct{ row, code string }{
+				{" raises {" + fixture.failure + "}", "EF107"},
+				{" uses {" + fixture.service + "}", "EF108"},
+			} {
+				bundledSmokeWrite(t, directory, strings.Replace(source, signature, strings.Replace(signature, refusal.row, "", 1), 1))
+				rejected := bundledSmokeCLI(t, binary, directory, "check", "go", false)
+				bundledSmokeAssertCode(t, rejected, refusal.code)
+				replies := bundledSmokeMCP(t, binary, directory, "bundled-parity", map[string]any{
+					"name": "project.check", "arguments": map[string]any{"file": "main.ef", "target": "go"}})
+				bundledSmokeParity(t, diagnosticsSmokeStructured(t, replies[1]), rejected, "go")
+			}
+		})
 	}
 }
 
@@ -479,22 +477,20 @@ func TestBundledSmokeGenericDataRefusals(t *testing.T) {
 		refusals = append(refusals, refusal{row.name, strings.Replace(caller, header, strings.Replace(header, row.row, "", 1), 1), row.code})
 	}
 	for _, refusal := range refusals {
-		for _, target := range []string{"go", "js"} {
-			t.Run(refusal.name+"/"+target, func(t *testing.T) {
-				t.Parallel()
-				directory := t.TempDir()
-				bundledSmokeWrite(t, directory, refusal.source)
-				rejected := bundledSmokeCLI(t, binary, directory, "check", target, false)
-				if rejected["checked"] != false || !bundledSmokeTruthy(rejected["diagnostics"]) {
-					t.Fatalf("refusal was checked or silent: %v", rejected)
-				}
-				if refusal.code != "" {
-					bundledSmokeAssertCode(t, rejected, refusal.code)
-				}
-				replies := bundledSmokeMCP(t, binary, directory, "generic-data-refusals", map[string]any{
-					"name": "project.check", "arguments": map[string]any{"file": "main.ef", "target": target}})
-				bundledSmokeParity(t, diagnosticsSmokeStructured(t, replies[1]), rejected, target)
-			})
-		}
+		t.Run(refusal.name+"/go", func(t *testing.T) {
+			t.Parallel()
+			directory := t.TempDir()
+			bundledSmokeWrite(t, directory, refusal.source)
+			rejected := bundledSmokeCLI(t, binary, directory, "check", "go", false)
+			if rejected["checked"] != false || !bundledSmokeTruthy(rejected["diagnostics"]) {
+				t.Fatalf("refusal was checked or silent: %v", rejected)
+			}
+			if refusal.code != "" {
+				bundledSmokeAssertCode(t, rejected, refusal.code)
+			}
+			replies := bundledSmokeMCP(t, binary, directory, "generic-data-refusals", map[string]any{
+				"name": "project.check", "arguments": map[string]any{"file": "main.ef", "target": "go"}})
+			bundledSmokeParity(t, diagnosticsSmokeStructured(t, replies[1]), rejected, "go")
+		})
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -15,13 +14,12 @@ import (
 
 // The transformation vectors extend the structural policy vectors with
 // transform nodes. Each node names a target-neutral behavior that the Go
-// harness, the JavaScript harness and the pinned Effect comparator implement
-// independently; every expectation is an Effra outcome.
+// harness implements and the pinned Effect comparator implemented when its
+// frozen output was recorded; every expectation is an Effra outcome.
 type codecTransformDocument struct {
 	SchemaVersion int    `json:"schemaVersion"`
 	Profile       string `json:"profile"`
 	Comparator    struct {
-		Script string `json:"script"`
 		Output string `json:"output"`
 	} `json:"comparator"`
 	Behaviors  map[string]string          `json:"behaviors"`
@@ -63,94 +61,6 @@ func runCodecTransformVectorsGo(t *testing.T, document codecTransformDocument) m
 	return results
 }
 
-// codecTransformHarness drives the embedded JavaScript engine's resolve and
-// prepare generators synchronously with the same behaviors.
-const codecTransformHarness = `
-const document = JSON.parse(readFileSync(process.argv[2], "utf8"));
-class StepFailure { constructor(step, message) { this.step = step; this.message = message; } }
-const behaviors = {
-  email: {
-    decode: text => { if (text === "") throw new StepFailure("email", "empty"); return text.toLowerCase(); },
-    encode: text => { if (text === "blocked") throw new StepFailure("email", "blocked"); return text; },
-  },
-  status: {
-    decode: wire => wire._tag === "StatusWire.Suspended" ? "Suspended" : "Active",
-    encode: status => ({ _tag: "StatusWire." + status }),
-  },
-  box: { decode: box => box.value, encode: value => ({ value }) },
-};
-const stepsFor = (plan, direction) => {
-  const steps = [];
-  for (const node of plan.nodes) if (node.kind === "transform") steps[node.step] = behaviors[node.behavior][direction];
-  return steps;
-};
-const drive = (requests, steps) => {
-  let next = requests.next();
-  while (!next.done) next = requests.next(steps[next.value.step](next.value.value));
-  return next.value;
-};
-const domain = (plan, index, value) => {
-  const node = plan.nodes[index];
-  if (node.kind === "record") return Object.fromEntries(node.fields.map(field => [field.name, domain(plan, field.node, value[field.name])]));
-  return value;
-};
-const issue = (id, stage, result) => ({ id, ok: false, reason: stage + result.issue.reason, path: result.issue.path, offset: result.issue.offset });
-const stepped = (id, stage, run) => {
-  try { return run(); } catch (error) {
-    if (!(error instanceof StepFailure)) throw error;
-    return { id, ok: false, step: stage + error.step, message: error.message };
-  }
-};
-const encode = (id, stage, codec, plan, value) => stepped(id, stage, () => {
-  const result = codec.pending ? drive(codec.stream(value), stepsFor(plan, "encode")) : codec.encode(value);
-  return result.ok ? { id, ok: true, encoded: new TextDecoder("utf-8", { fatal: true }).decode(result.bytes) } : issue(id, stage, result);
-});
-const lines = [];
-for (const vector of document.vectors) {
-  const plan = document.plans[vector.plan];
-  const codec = __ef_codecCompile({ profile: document.profile, ...plan });
-  if (codec.steps !== stepsFor(plan, "decode").length) throw new Error(vector.id + ": step count");
-  if (vector.direction === "decode") {
-    const decoded = codec.decode(new TextEncoder().encode(vector.body));
-    if (!decoded.ok) { lines.push(issue(vector.id, "", decoded)); continue; }
-    const resolved = stepped(vector.id, "", () => ({ value: codec.pending ? drive(codec.resolve(decoded.value), stepsFor(plan, "decode")) : decoded.value }));
-    lines.push(resolved.step === undefined ? encode(vector.id, "re-encode ", codec, plan, resolved.value) : resolved);
-  } else {
-    lines.push(encode(vector.id, "", codec, plan, domain(plan, plan.root, vector.value)));
-  }
-}
-for (const planError of document.planErrors) {
-  try {
-    __ef_codecCompile({ profile: document.profile, ...planError.plan });
-    throw new Error(planError.id + ": JS accepted an invalid plan");
-  } catch (error) {
-    if (!error.message.startsWith("invalid codec plan: ")) throw error;
-    lines.push({ id: planError.id, ok: false, reason: error.message });
-  }
-}
-for (const line of lines) console.log(JSON.stringify(line));
-`
-
-func runCodecTransformVectorsJS(t *testing.T, bun, root string) map[string]codecOutcome {
-	t.Helper()
-	vectors, err := filepath.Abs(filepath.Join(root, codecTransformVectorsPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	results := map[string]codecOutcome{}
-	for _, line := range strings.Split(strings.TrimSpace(string(runCodecJS(t, bun, root, codecTransformHarness, vectors))), "\n") {
-		var result struct {
-			ID string `json:"id"`
-			codecOutcome
-		}
-		if err := json.Unmarshal([]byte(line), &result); err != nil {
-			t.Fatalf("JS outcome %q: %v", line, err)
-		}
-		results[result.ID] = result.codecOutcome
-	}
-	return results
-}
-
 // codecTransformComparison classifies an Effra outcome against the
 // comparator line. A step failure matches a Schema failure with the same
 // message; Effra returns the step's failure unchanged and so reports no
@@ -166,10 +76,9 @@ func codecTransformComparison(expect codecOutcome, effect codecEffectLine) strin
 }
 
 // TestCodecTransformVectorsAcrossGoJSAndEffect executes every transformation
-// vector on the native Go engine, the embedded JavaScript engine and pinned
-// Effect Schema, with the same obligations as the structural vectors: Go and
-// JS produce the Effra outcome, the live comparator reproduces the retained
-// bytes, and each recorded comparison is what that output implies.
+// vector on the native Go engine, with the same obligations as the structural
+// vectors: Go produces the Effra outcome, and each recorded comparison is
+// what the frozen pinned Effect Schema output implies.
 func TestCodecTransformVectorsAcrossGoJSAndEffect(t *testing.T) {
 	root := filepath.Join("..", "..")
 	data, err := os.ReadFile(filepath.Join(root, codecTransformVectorsPath))
@@ -184,10 +93,6 @@ func TestCodecTransformVectorsAcrossGoJSAndEffect(t *testing.T) {
 	}
 	if document.SchemaVersion != 1 || document.Profile != rt.CodecProfileJSON {
 		t.Fatalf("transformation vectors target schema %d profile %q", document.SchemaVersion, document.Profile)
-	}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("Bun is required for codec conformance vectors")
 	}
 	used := map[string]bool{}
 	for name, plan := range document.Plans {
@@ -216,7 +121,7 @@ func TestCodecTransformVectorsAcrossGoJSAndEffect(t *testing.T) {
 			t.Fatalf("vector %s names unknown plan %q", vector.ID, vector.Plan)
 		}
 		if vector.Targets != nil || vector.BodyHex != "" || (vector.Direction == "decode") != (vector.Body != nil) || (vector.Direction == "encode") != (vector.Value != nil) {
-			t.Fatalf("vector %s must run on both targets with a text body (decode) or value (encode)", vector.ID)
+			t.Fatalf("vector %s must run on Go with a text body (decode) or value (encode)", vector.ID)
 		}
 		switch vector.Comparison {
 		case "matched":
@@ -242,35 +147,22 @@ func TestCodecTransformVectorsAcrossGoJSAndEffect(t *testing.T) {
 	}
 
 	goResults := runCodecTransformVectorsGo(t, document)
-	jsResults := runCodecTransformVectorsJS(t, bun, root)
-	for target, results := range map[string]map[string]codecOutcome{"go": goResults, "js": jsResults} {
-		for _, vector := range document.Vectors {
-			if actual, ok := results[vector.ID]; !ok {
-				t.Errorf("%s: %s did not run", vector.ID, target)
-			} else if actual.String() != vector.Expect.String() {
-				t.Errorf("%s: %s produced %s, want %s", vector.ID, target, actual, vector.Expect)
-			}
+	for _, vector := range document.Vectors {
+		if actual, ok := goResults[vector.ID]; !ok {
+			t.Errorf("%s: go did not run", vector.ID)
+		} else if actual.String() != vector.Expect.String() {
+			t.Errorf("%s: go produced %s, want %s", vector.ID, actual, vector.Expect)
 		}
-		for _, planError := range document.PlanErrors {
-			if message := results[planError.ID].Reason; !strings.Contains(message, planError.Expect) {
-				t.Errorf("%s: %s plan error %q lacks %q", planError.ID, target, message, planError.Expect)
-			}
+	}
+	for _, planError := range document.PlanErrors {
+		if message := goResults[planError.ID].Reason; !strings.Contains(message, planError.Expect) {
+			t.Errorf("%s: go plan error %q lacks %q", planError.ID, message, planError.Expect)
 		}
 	}
 
-	command := exec.Command(bun, document.Comparator.Script)
-	command.Dir = root
-	command.Stderr = os.Stderr
-	live, err := command.Output()
-	if err != nil {
-		t.Fatalf("pinned Effect comparator: %v", err)
-	}
 	retained, err := os.ReadFile(filepath.Join(root, document.Comparator.Output))
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !bytes.Equal(live, retained) {
-		t.Fatalf("pinned Effect comparator output differs from %s; regenerate with `bun %s > %s` and review every changed line", document.Comparator.Output, document.Comparator.Script, document.Comparator.Output)
 	}
 	lines := strings.Split(strings.TrimSuffix(string(retained), "\n"), "\n")
 	if len(lines) != len(document.Vectors) {

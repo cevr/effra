@@ -8,9 +8,8 @@ import (
 )
 
 // heldCaptureCase is one consumer of a recipe that holds a managed handle.
-// Refused rows must be refused by the shared checker on both targets with the
-// named EF123; admitted rows must check on Go and carry only the Go-only File
-// diagnostics on JS. A non-empty native output also runs the Go program.
+// Refused rows must be refused by the checker with the named EF123; admitted
+// rows must check on Go. A non-empty native output also runs the Go program.
 type heldCaptureCase struct {
 	name     string
 	source   string
@@ -31,23 +30,17 @@ func requireHeldCaptureCases(t *testing.T, cases []heldCaptureCase) {
 	t.Helper()
 	for _, row := range cases {
 		t.Run(row.name, func(t *testing.T) {
-			for _, target := range []string{"go", "js"} {
-				r := CompileFor(row.source, target)
-				if row.refusal != "" {
-					found := false
-					for _, d := range r.Diagnostics {
-						found = found || (d.Code == "EF123" && strings.Contains(d.Message, row.refusal))
-					}
-					if r.Checked || !found {
-						t.Fatalf("%s: expected EF123 %q: %+v", target, row.refusal, r.Diagnostics)
-					}
-					continue
-				}
+			r := CompileFor(row.source, "go")
+			if row.refusal != "" {
+				found := false
 				for _, d := range r.Diagnostics {
-					if target == "go" || d.Code != "EF110" {
-						t.Fatalf("%s: expected admission: %+v", target, r.Diagnostics)
-					}
+					found = found || (d.Code == "EF123" && strings.Contains(d.Message, row.refusal))
 				}
+				if r.Checked || !found {
+					t.Fatalf("go: expected EF123 %q: %+v", row.refusal, r.Diagnostics)
+				}
+			} else if len(r.Diagnostics) != 0 {
+				t.Fatalf("go: expected admission: %+v", r.Diagnostics)
 			}
 			if row.expected != "" {
 				runGenericDataNative(t, row.source, row.expected)
@@ -305,11 +298,9 @@ func TestHeldCapturesReportAClosedArgumentOnce(t *testing.T) {
     }
 }
 `
-			for _, target := range []string{"go", "js"} {
-				r := CompileFor(source, target)
-				if count := diagnosticCount(r, "EF123"); count != 1 || !hasDiagnosticMessage(r, "value owned by a closing scope cannot be used") {
-					t.Fatalf("%s: want one argument refusal: %+v", target, r.Diagnostics)
-				}
+			r := CompileFor(source, "go")
+			if count := diagnosticCount(r, "EF123"); count != 1 || !hasDiagnosticMessage(r, "value owned by a closing scope cannot be used") {
+				t.Fatalf("go: want one argument refusal: %+v", r.Diagnostics)
 			}
 		})
 	}

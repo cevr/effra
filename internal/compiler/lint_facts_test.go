@@ -80,9 +80,8 @@ func TestLintFactsAreDeterministicAndVersioned(t *testing.T) {
 	if !slices.IsSortedFunc(snapshot.Providers, func(a, b lintsdk.Provider) int { return strings.Compare(a.Identity, b.Identity) }) {
 		t.Fatal("providers are unordered")
 	}
-	js := CompileFor(lintFactSource, "js").LintFacts()
-	if js.Semantic.Target != "js" || bytes.Equal(marshalFacts(t, js), a) {
-		t.Fatal("target is not part of the snapshot")
+	if snapshot.Semantic.Target != "go" {
+		t.Fatalf("target is not part of the snapshot: %+v", snapshot.Semantic)
 	}
 }
 

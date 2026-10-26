@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -112,15 +111,6 @@ func TestGeneratedSemantics(t *testing.T) {
 	output, err = exec.Command(binary).CombinedOutput()
 	if err != nil || string(output) != "Hi Ada\n" {
 		t.Fatalf("native executable: %v\n%s", err, output)
-	}
-	// The same source must have the same admitted contracts and results on the JS target.
-	js := CompileFor(goProbe, "js")
-	if !js.Checked || js.Revision != r.Revision || !reflect.DeepEqual(js.Symbols, r.Symbols) {
-		t.Fatal("target-specific frontend drift")
-	}
-	outputJS := runJS(t, goProbe, `console.log(await Effect.runPromise(__ef_function_main()));`)
-	if outputJS != string(output) {
-		t.Fatalf("Go/JS behavior differs: %q / %q", output, outputJS)
 	}
 }
 func TestGoBackendRefusesInvalidEntry(t *testing.T) {

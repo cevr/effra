@@ -26,13 +26,11 @@ const ownershipFixturePlaceholder = "{{fixture}}"
 type ownershipTruth struct {
 	Name string `json:"name"`
 	Go   string `json:"go"`
-	JS   string `json:"js,omitempty"`
 }
 
 type ownershipProbe struct {
 	Name string `json:"name"`
 	Go   string `json:"go"`
-	JS   string `json:"js,omitempty"`
 	// Witness names the probe whose execution witnesses this probe's truth.
 	// This probe's own source cannot be witnessed directly (it never runs the
 	// shape, or its failure races the program's exit); the witness probe is
@@ -179,16 +177,12 @@ func loadOwnershipMatrix(t *testing.T, fixture string, decide bool) ownershipMat
 	var jobs []ownershipDecision
 	for i, program := range programs {
 		truth := truthRows[i]
-		if truth.Name != program.Name || truth.Go != program.Oracle || (truth.JS != "") != program.JSRunnable {
-			t.Fatalf("generator and truth disagree at %d: %+v vs %s %s %v", i, truth, program.Name, program.Oracle, program.JSRunnable)
+		if truth.Name != program.Name || truth.Go != program.Oracle {
+			t.Fatalf("generator and truth disagree at %d: %+v vs %s %s", i, truth, program.Name, program.Oracle)
 		}
 		m.sources["matrix/"+program.Name] = program.Source
 		m.truths["matrix/"+program.Name+"/go"] = truth.Go
 		jobs = append(jobs, ownershipDecision{ownershipCase: ownershipCase{Set: "matrix", Name: program.Name, Target: "go"}})
-		if program.JSRunnable {
-			m.truths["matrix/"+program.Name+"/js"] = truth.JS
-			jobs = append(jobs, ownershipDecision{ownershipCase: ownershipCase{Set: "matrix", Name: program.Name, Target: "js"}})
-		}
 	}
 	probeSources := ownershipProbeSources(t, fixture)
 	if len(probeSources) != len(probes) {
@@ -203,12 +197,9 @@ func loadOwnershipMatrix(t *testing.T, fixture string, decide bool) ownershipMat
 		if probe.Witness != "" {
 			m.witnesses["probe/"+probe.Name] = "probe/" + probe.Witness
 		}
-		for target, truth := range map[string]string{"go": probe.Go, "js": probe.JS} {
-			if truth == "" {
-				continue
-			}
-			m.truths["probe/"+probe.Name+"/"+target] = truth
-			jobs = append(jobs, ownershipDecision{ownershipCase: ownershipCase{Set: "probe", Name: probe.Name, Target: target}})
+		if probe.Go != "" {
+			m.truths["probe/"+probe.Name+"/go"] = probe.Go
+			jobs = append(jobs, ownershipDecision{ownershipCase: ownershipCase{Set: "probe", Name: probe.Name, Target: "go"}})
 		}
 	}
 	if decide {
@@ -218,7 +209,7 @@ func loadOwnershipMatrix(t *testing.T, fixture string, decide bool) ownershipMat
 }
 
 // TestOwnershipMatrixMatchesTruth requires every verdict of the matrix and
-// of the hand probes to equal runtime truth, on Go and on JS.
+// of the hand probes to equal runtime truth on Go.
 func TestOwnershipMatrixMatchesTruth(t *testing.T) {
 	m := loadOwnershipMatrix(t, ownershipFixture(t), true)
 	counts := map[string]int{}
@@ -508,12 +499,12 @@ func TestOwnershipMatrixNativeTruth(t *testing.T) {
 func TestOwnershipMismatchDriftDetectsEveryDirection(t *testing.T) {
 	computed := map[string]ownershipMismatch{
 		"matrix/a [go]": {Recorded: "unsafe", Executed: ownershipUnwitnessed},
-		"matrix/b [js]": {Recorded: "safe", Executed: ownershipUnwitnessed},
+		"matrix/b [go]": {Recorded: "safe", Executed: ownershipUnwitnessed},
 	}
 	reviewed := func() map[string]ownershipMismatch {
 		return map[string]ownershipMismatch{
 			"matrix/a [go]": {Recorded: "unsafe", Executed: ownershipUnwitnessed, Reason: "reviewed"},
-			"matrix/b [js]": {Recorded: "safe", Executed: ownershipUnwitnessed, Reason: "reviewed"},
+			"matrix/b [go]": {Recorded: "safe", Executed: ownershipUnwitnessed, Reason: "reviewed"},
 			"matrix/c [go]": {Recorded: "unsafe", Executed: "safe", Reason: "another family"},
 		}
 	}
@@ -525,8 +516,8 @@ func TestOwnershipMismatchDriftDetectsEveryDirection(t *testing.T) {
 		mutate     func(map[string]ownershipMismatch)
 	}{
 		{"new", "new ownership mismatch matrix/a [go]", func(k map[string]ownershipMismatch) { delete(k, "matrix/a [go]") }},
-		{"changed", "changed ownership mismatch matrix/b [js]", func(k map[string]ownershipMismatch) {
-			k["matrix/b [js]"] = ownershipMismatch{Recorded: "unsafe", Executed: ownershipUnwitnessed}
+		{"changed", "changed ownership mismatch matrix/b [go]", func(k map[string]ownershipMismatch) {
+			k["matrix/b [go]"] = ownershipMismatch{Recorded: "unsafe", Executed: ownershipUnwitnessed}
 		}},
 		{"vanished", "vanished ownership mismatch matrix/d [go]", func(k map[string]ownershipMismatch) {
 			k["matrix/d [go]"] = ownershipMismatch{Recorded: "unsafe", Executed: ownershipUnwitnessed}
@@ -584,24 +575,19 @@ func TestOwnershipMatrixDump(t *testing.T) {
 		Set    string `json:"set"`
 		Name   string `json:"name"`
 		Go     string `json:"go"`
-		JS     string `json:"js,omitempty"`
 		Source string `json:"source"`
 		// Witness is the probe key whose execution witnesses this row.
 		Witness string `json:"witness,omitempty"`
 	}
 	var rows []row
 	for _, program := range ownershipMatrixPrograms(fixture) {
-		r := row{Set: "matrix", Name: program.Name, Go: program.Oracle, Source: program.Source}
-		if program.JSRunnable {
-			r.JS = program.Oracle
-		}
-		rows = append(rows, r)
+		rows = append(rows, row{Set: "matrix", Name: program.Name, Go: program.Oracle, Source: program.Source})
 	}
 	var probes []ownershipProbe
 	readOwnershipJSON(t, filepath.Join("testdata", "ownership_probes", "probes.json"), &probes)
 	sources := ownershipProbeSources(t, fixture)
 	for _, probe := range probes {
-		r := row{Set: "probe", Name: probe.Name, Go: probe.Go, JS: probe.JS, Source: sources[probe.Name]}
+		r := row{Set: "probe", Name: probe.Name, Go: probe.Go, Source: sources[probe.Name]}
 		if probe.Witness != "" {
 			r.Witness = "probe/" + probe.Witness
 		}
@@ -641,8 +627,8 @@ func TestOwnershipProbeWitnessesAreExecutable(t *testing.T) {
 			t.Errorf("%s names missing witness %s", probe.Name, probe.Witness)
 		case twin.Witness != "":
 			t.Errorf("%s names witness %s which is itself witnessed elsewhere", probe.Name, probe.Witness)
-		case twin.Go != probe.Go || twin.JS != probe.JS:
-			t.Errorf("%s records %s/%s, its witness %s records %s/%s", probe.Name, probe.Go, probe.JS, twin.Name, twin.Go, twin.JS)
+		case twin.Go != probe.Go:
+			t.Errorf("%s records %s, its witness %s records %s", probe.Name, probe.Go, twin.Name, twin.Go)
 		}
 	}
 	if witnessed != 2 {
@@ -669,13 +655,6 @@ func TestOwnershipDeclaredRowPolicyHasRaisingTwins(t *testing.T) {
 	}
 	if policy == 0 {
 		t.Fatal("no declared-row-policy rows")
-	}
-	for key := range m.truths {
-		if strings.HasPrefix(key, "matrix/") && strings.HasSuffix(key, "/js") {
-			if truth := m.truths[key]; truth == ownershipDeclaredRowPolicy {
-				t.Errorf("%s: a policy row is Go-only (its JS truth would be executed)", key)
-			}
-		}
 	}
 }
 

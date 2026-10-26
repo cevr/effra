@@ -110,91 +110,6 @@ func TestSigned64MultiplicativeOperatorsAgreeOnBothTargets(t *testing.T) {
 	} else if output := runGeneratedGo(t, r); output != "ok\n" {
 		t.Fatalf("native boundary case failed: %q", output)
 	}
-	var probe strings.Builder
-	probe.WriteString("const mismatches = [];\n")
-	for _, test := range cases {
-		call := test.call
-		for _, name := range []string{"multiply", "quotient", "remainder", "pageCount", "negativeStep", "halfNegated", "mixedPrecedence", "literalMinimumQuotient", "literalMinimumRemainder", "literalOverflowProduct"} {
-			call = strings.Replace(call, name+"(", "__ef_function_"+name+"(", 1)
-		}
-		call = jsBigIntArguments(call)
-		fmt.Fprintf(&probe, "if (%s !== %sn) mismatches.push(%q);\n", call, i64Source(test.expected), test.call)
-	}
-	probe.WriteString(`if (mismatches.length > 0) throw new Error(mismatches.join("; "));
-if ((await Effect.runPromise(__ef_function_main())) !== "ok") throw new Error("main caller mismatch");
-`)
-	if output := runJS(t, source, probe.String()); output != "" {
-		t.Fatalf("JavaScript boundary probe returned %q", output)
-	}
-}
-
-// jsBigIntArguments rewrites the integer arguments of a case call as bigint
-// literals for a direct JavaScript call.
-func jsBigIntArguments(call string) string {
-	open := strings.Index(call, "(")
-	if open < 0 || strings.HasSuffix(call, "()") {
-		return call
-	}
-	arguments := strings.Split(strings.TrimSuffix(call[open+1:], ")"), ", ")
-	for index, argument := range arguments {
-		arguments[index] = argument + "n"
-	}
-	return call[:open+1] + strings.Join(arguments, ", ") + ")"
-}
-
-func TestSigned64MultiplicativeDeclarationsAreStrictBigInt(t *testing.T) {
-	r := CompileFor(signed64MultiplicativeCallers, "js")
-	if !r.Checked {
-		t.Fatal(r.Diagnostics)
-	}
-	js, declarations, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, normalized := range []string{"BigInt.asIntN(64, (__ef_local_left * __ef_local_right))", "BigInt.asIntN(64, (__ef_local_dividend / __ef_local_divisor))"} {
-		if !strings.Contains(js, normalized) {
-			t.Fatalf("JavaScript omitted %s\n%s", normalized, js)
-		}
-	}
-	if strings.Contains(js, "BigInt.asIntN(64, (__ef_local_dividend % __ef_local_divisor))") {
-		t.Fatalf("remainder cannot leave the signed range and must not pay for normalization\n%s", js)
-	}
-	checkStrictTypeScript(t, declarations, `import { multiply, quotient, remainder } from "./generated.mjs";
-const product: bigint = multiply(3n, -4n);
-const whole: bigint = quotient(-7n, 2n);
-const rest: bigint = remainder(-7n, 2n);
-void product; void whole; void rest;
-// @ts-expect-error i64 multiplication must reject number
-multiply(3, 4);
-// @ts-expect-error i64 division must reject mixed number/bigint
-quotient(7n, 2);
-// @ts-expect-error i64 remainder returns bigint, not number
-const wrong: number = remainder(7n, 2n);
-void wrong;`)
-}
-
-func TestSigned64MultiplicativeNormalizationMutantsFailBehavior(t *testing.T) {
-	source := signed64MultiplicativeCallers + `effect fn main() -> void { void }`
-	r := CompileFor(source, "js")
-	if !r.Checked {
-		t.Fatal(r.Diagnostics)
-	}
-	js, _, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, mutant := range []struct{ normalized, raw, probe string }{
-		{"BigInt.asIntN(64, (__ef_local_left * __ef_local_right))", "(__ef_local_left * __ef_local_right)", `if (__ef_function_multiply(9223372036854775807n, 2n) === -2n) throw new Error("multiplication mutant still wrapped");`},
-		{"BigInt.asIntN(64, (__ef_local_dividend / __ef_local_divisor))", "(__ef_local_dividend / __ef_local_divisor)", `if (__ef_function_quotient(-9223372036854775808n, -1n) === -9223372036854775808n) throw new Error("division mutant still wrapped");`},
-	} {
-		changed := strings.Replace(js, mutant.normalized, mutant.raw, 1)
-		if changed == js {
-			t.Fatalf("mutant did not alter %s", mutant.normalized)
-		}
-		if output := runJSProbe(t, withProbeImports(changed), mutant.probe); output != "" {
-			t.Fatalf("mutant probe returned %q", output)
-		}
-	}
 }
 
 func TestSigned64MultiplicativePrecedenceAndFormatting(t *testing.T) {
@@ -242,7 +157,7 @@ func renderOperatorTree(e *Expr) string {
 // signed64TailSource is a defaulted self-tail loop over the multiplicative
 // operators: factor and modulus are omitted on every self call, `/` divides
 // by a literal and `%` by a parameter proven nonzero by its guard, and `*`
-// wraps on most iterations. A million iterations overflow a JS stack unless
+// wraps on most iterations. A million iterations stay bounded only when
 // the call is a loop.
 const signed64TailSource = `fn mix(n: i64, factor: i64 = 6364136223846793005, acc: i64 = 1, modulus: i64 = 1000003) -> i64 {
     if n == 0 {
@@ -266,30 +181,14 @@ func TestSigned64ArithmeticInDefaultedSelfTailLoop(t *testing.T) {
 		acc = acc*factor/7 + n%1000003
 	}
 	source := strings.Replace(signed64TailSource, "EXPECTED", i64Source(acc), 1)
-	r := CompileFor(source, "js")
+	r := CompileFor(source, "go")
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
 	if lowerTail(r.Find("mix").function(t, r)) == nil {
 		t.Fatal("defaulted self-tail call over signed arithmetic was not planned as a loop")
 	}
-	runOnEveryHost(t, source, "ok\n")
-	js, _, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	product := "BigInt.asIntN(64, (__ef_local_acc * __ef_local_factor))"
-	if strings.Count(js, "while (true)") != 1 || strings.Count(js, product) != 1 {
-		t.Fatalf("expected one loop with one wrapped product:\n%s", js)
-	}
-	assertion := fmt.Sprintf(`if (await Effect.runPromise(%s()) !== "ok") throw new Error("tail arithmetic result changed");`, r.Find("main").function(t, r).jsEmissionName())
-	if output, err := runJSHostModule(t, "node", js, assertion); err != nil {
-		t.Fatalf("tail arithmetic module failed: %v\n%s", err, output)
-	}
-	unwrapped := strings.Replace(js, product, "(__ef_local_acc * __ef_local_factor)", 1)
-	if output, err := runJSHostModule(t, "node", unwrapped, assertion); err == nil || !strings.Contains(output, "tail arithmetic result changed") {
-		t.Fatalf("unwrapped product mutant did not fail at the intended assertion: %v\n%.400s", err, output)
-	}
+	runGenericDataNative(t, source, "ok\n")
 	native, _, err := emitGoApplication(CompileFor(source, "go"), GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)

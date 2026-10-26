@@ -31,96 +31,85 @@ fn invoke(value:Action<fn(string)->string,string>)->string {
 effect fn main()->string {invoke(selected())}`
 
 func TestBundledGenericDataAdmissionAndExecution(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(bundledDataExecutable, target)
-		if !r.Checked || len(r.BundledInterfaces) != 1 || len(r.Program.BundledTemplates) != 2 {
-			t.Fatal(target, r.Diagnostics, r.BundledInterfaces)
-		}
-		dto := r.projector.admittedSummaries["effra/data"]
-		if len(dto.Templates) != 2 || dto.Templates[0].Kind != "enum" || len(dto.Templates[0].Variants) != 2 {
-			t.Fatal("ordinary closed enum transport absent", dto.Templates)
-		}
-		wire, err := json.Marshal(dto)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := decodeInterfaceSummary(wire, dto.ContentHash, dto.SourceInput); err != nil {
-			t.Fatal(err)
-		}
-		if target == "go" {
-			if _, err := r.EmitGo(); err != nil {
-				t.Fatal(err)
-			}
-		} else if _, _, err := r.Emit(true); err != nil {
-			t.Fatal(err)
-		}
+	r := CompileFor(bundledDataExecutable, "go")
+	if !r.Checked || len(r.BundledInterfaces) != 1 || len(r.Program.BundledTemplates) != 2 {
+		t.Fatal("go", r.Diagnostics, r.BundledInterfaces)
 	}
-	if output := runJSForTarget(t, "js", bundledDataExecutable, `if (await Effect.runPromise(__ef_function_main()) !== "Ada:missing") throw new Error("bundled data result"); console.log("ok");`); output != "ok\n" {
-		t.Fatal(output)
+	dto := r.projector.admittedSummaries["effra/data"]
+	if len(dto.Templates) != 2 || dto.Templates[0].Kind != "enum" || len(dto.Templates[0].Variants) != 2 {
+		t.Fatal("ordinary closed enum transport absent", dto.Templates)
+	}
+	wire, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeInterfaceSummary(wire, dto.ContentHash, dto.SourceInput); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.EmitGo(); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestGenericEnumPayloadTransportFreshArenaAndCorruption(t *testing.T) {
 	const source = genericCallableDataExecutable
-	for _, target := range []string{"go", "js"} {
-		first := CompileFor(source, target)
-		if !first.Checked {
-			t.Fatal(first.Diagnostics)
-		}
-		dto, err := exportInterfaceSummary(first.projector, currentModuleIdentity, "enum-payload-control", first.Program.Functions)
-		if err != nil {
+	first := CompileFor(source, "go")
+	if !first.Checked {
+		t.Fatal(first.Diagnostics)
+	}
+	dto, err := exportInterfaceSummary(first.projector, currentModuleIdentity, "enum-payload-control", first.Program.Functions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := CompileFor(source, "go")
+	if !fresh.Checked || first.projector.values == fresh.projector.values {
+		t.Fatal("fresh arena control", fresh.Diagnostics)
+	}
+	if err := fresh.projector.admitInterfaceSummary(dto, fresh.Program.Functions); err != nil {
+		t.Fatal("valid generic enum payload refused", err)
+	}
+	operation := fresh.Program.Functions[1].returnFields["Some"].fields["operation"]
+	if operation.callableEvidence.count != 1 || operation.callableEvidence.callees[0] != fresh.Program.Functions[0] || operation.callableEvidence.callees[0] == first.Program.Functions[0] {
+		t.Fatal("enum payload callee escaped receiving owner arena")
+	}
+	wire, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"missing payload", "wrong variant", "payload cycle"} {
+		var corrupt interfaceSummary
+		if err := json.Unmarshal(wire, &corrupt); err != nil {
 			t.Fatal(err)
 		}
-		fresh := CompileFor(source, target)
-		if !fresh.Checked || first.projector.values == fresh.projector.values {
-			t.Fatal("fresh arena control", fresh.Diagnostics)
-		}
-		if err := fresh.projector.admitInterfaceSummary(dto, fresh.Program.Functions); err != nil {
-			t.Fatal("valid generic enum payload refused", err)
-		}
-		operation := fresh.Program.Functions[1].returnFields["Some"].fields["operation"]
-		if operation.callableEvidence.count != 1 || operation.callableEvidence.callees[0] != fresh.Program.Functions[0] || operation.callableEvidence.callees[0] == first.Program.Functions[0] {
-			t.Fatal("enum payload callee escaped receiving owner arena")
-		}
-		wire, err := json.Marshal(dto)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, kind := range []string{"missing payload", "wrong variant", "payload cycle"} {
-			var corrupt interfaceSummary
-			if err := json.Unmarshal(wire, &corrupt); err != nil {
-				t.Fatal(err)
-			}
-			found := false
-			for i := range corrupt.Occurrences {
-				o := &corrupt.Occurrences[i]
-				for j := range o.Variants {
-					v := &o.Variants[j]
-					if len(v.Fields) == 0 {
-						continue
-					}
-					found = true
-					switch kind {
-					case "missing payload":
-						v.Fields = []summaryFieldOccurrence{}
-					case "wrong variant":
-						v.Name = "Foreign"
-					case "payload cycle":
-						v.Fields[0].Occurrence = o.Ref
-					}
-					break
+		found := false
+		for i := range corrupt.Occurrences {
+			o := &corrupt.Occurrences[i]
+			for j := range o.Variants {
+				v := &o.Variants[j]
+				if len(v.Fields) == 0 {
+					continue
 				}
-				if found {
-					break
+				found = true
+				switch kind {
+				case "missing payload":
+					v.Fields = []summaryFieldOccurrence{}
+				case "wrong variant":
+					v.Name = "Foreign"
+				case "payload cycle":
+					v.Fields[0].Occurrence = o.Ref
 				}
+				break
 			}
-			if !found {
-				t.Fatal("enum payload evidence absent")
+			if found {
+				break
 			}
-			receiver := CompileFor(source, target)
-			if err := receiver.projector.admitInterfaceSummary(corrupt, receiver.Program.Functions); err == nil {
-				t.Fatal("corrupt enum payload admitted", kind)
-			}
+		}
+		if !found {
+			t.Fatal("enum payload evidence absent")
+		}
+		receiver := CompileFor(source, "go")
+		if err := receiver.projector.admitInterfaceSummary(corrupt, receiver.Program.Functions); err == nil {
+			t.Fatal("corrupt enum payload admitted", kind)
 		}
 	}
 }
@@ -131,45 +120,43 @@ effect fn echo(value:string)->string{value}
 service Audit{effect fn ready()->string}
 fn pure()->Ops<effect fn(string)->string,string>{Ops{operation:echo}}
 effect fn make()->Ops<effect fn(string)->string,string> uses {Audit}{let value=run Audit.ready();Ops{operation:echo}}`
-	for _, target := range []string{"go", "js"} {
-		first := CompileFor(source, target)
-		if !first.Checked {
-			t.Fatalf("%s source control: %+v", target, first.Diagnostics)
+	first := CompileFor(source, "go")
+	if !first.Checked {
+		t.Fatalf("go source control: %+v", first.Diagnostics)
+	}
+	dto, err := exportInterfaceSummary(first.projector, currentModuleIdentity, first.Revision, first.Program.Functions)
+	if err != nil {
+		t.Fatalf("go export: %v", err)
+	}
+	fresh := CompileFor(source, "go")
+	if err := fresh.projector.admitInterfaceSummary(dto, fresh.Program.Functions); err != nil {
+		t.Fatalf("go unchanged summary control: %v", err)
+	}
+	seenRecipe, seenApplication := false, false
+	for i, occurrence := range dto.Occurrences {
+		id := first.projector.typePublicToID[occurrence.Contract]
+		node := first.projector.node(id)
+		if node == nil || len(occurrence.Fields) == 0 {
+			continue
 		}
-		dto, err := exportInterfaceSummary(first.projector, currentModuleIdentity, first.Revision, first.Program.Functions)
-		if err != nil {
-			t.Fatalf("%s export: %v", target, err)
+		switch node.Kind {
+		case "recipe":
+			seenRecipe = true
+		case "application":
+			seenApplication = true
+		default:
+			continue
 		}
-		fresh := CompileFor(source, target)
-		if err := fresh.projector.admitInterfaceSummary(dto, fresh.Program.Functions); err != nil {
-			t.Fatalf("%s unchanged summary control: %v", target, err)
+		corrupted := dto
+		corrupted.Occurrences = append([]summaryOccurrence{}, dto.Occurrences...)
+		corrupted.Occurrences[i].Fields = []summaryFieldOccurrence{}
+		receiver := CompileFor(source, "go")
+		if err := receiver.projector.admitInterfaceSummary(corrupted, receiver.Program.Functions); err == nil {
+			t.Fatalf("go accepted missing callable fields for %s occurrence", node.Kind)
 		}
-		seenRecipe, seenApplication := false, false
-		for i, occurrence := range dto.Occurrences {
-			id := first.projector.typePublicToID[occurrence.Contract]
-			node := first.projector.node(id)
-			if node == nil || len(occurrence.Fields) == 0 {
-				continue
-			}
-			switch node.Kind {
-			case "recipe":
-				seenRecipe = true
-			case "application":
-				seenApplication = true
-			default:
-				continue
-			}
-			corrupted := dto
-			corrupted.Occurrences = append([]summaryOccurrence{}, dto.Occurrences...)
-			corrupted.Occurrences[i].Fields = []summaryFieldOccurrence{}
-			receiver := CompileFor(source, target)
-			if err := receiver.projector.admitInterfaceSummary(corrupted, receiver.Program.Functions); err == nil {
-				t.Fatalf("%s accepted missing callable fields for %s occurrence", target, node.Kind)
-			}
-		}
-		if !seenRecipe || !seenApplication {
-			t.Fatalf("%s transport fixture did not retain both recipe and application occurrences: recipe=%t application=%t", target, seenRecipe, seenApplication)
-		}
+	}
+	if !seenRecipe || !seenApplication {
+		t.Fatalf("go transport fixture did not retain both recipe and application occurrences: recipe=%t application=%t", seenRecipe, seenApplication)
 	}
 }
 
@@ -201,25 +188,6 @@ func TestGenericDataExecutableTargets(t *testing.T) {
 		runGenericDataNative(t, source, "Ada:missing\n")
 	}
 	runGenericDataNative(t, genericCallableDataExecutable, "ok\n")
-	if output := runJSForTarget(t, "js", genericCallableDataExecutable, `if (await Effect.runPromise(__ef_function_main()) !== "ok") throw new Error("generic callable payload"); console.log("ok");`); output != "ok\n" {
-		t.Fatal(output)
-	}
-	if output := runJSForTarget(t, "js", genericDataExecutable, `if (await Effect.runPromise(__ef_function_main()) !== "Ada:missing") throw new Error("generic result"); console.log("ok");`); output != "ok\n" {
-		t.Fatal(output)
-	}
-	r := CompileFor(genericDataExecutable, "js")
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err, r.Diagnostics)
-	}
-	checkStrictTypeScript(t, declaration, `import type { User, Envelope, Presence } from "./generated.mjs";
-declare const value: Envelope<Presence<User>>;
-const item: Presence<User> = value.value;
-declare const wrong: Presence<string>;
-// @ts-expect-error nominal generic arguments are invariant
-const mismatch: Presence<User> = wrong;
-void item; void mismatch;
-`)
 }
 
 func runGenericDataNative(t *testing.T, source, expected string) {
@@ -248,19 +216,11 @@ func runGenericDataNative(t *testing.T, source, expected string) {
 }
 
 func TestGenericDataTargetAdmission(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(genericDataExecutable, target)
-		if !r.Checked {
-			t.Fatalf("%s generic target unavailable: %+v", target, r.Diagnostics)
-		}
-		if target == "go" {
-			if _, err := r.EmitGo(); err != nil {
-				t.Fatal(err)
-			}
-		} else {
-			if _, _, err := r.Emit(true); err != nil {
-				t.Fatal(err)
-			}
-		}
+	r := CompileFor(genericDataExecutable, "go")
+	if !r.Checked {
+		t.Fatalf("go generic target unavailable: %+v", r.Diagnostics)
+	}
+	if _, err := r.EmitGo(); err != nil {
+		t.Fatal(err)
 	}
 }

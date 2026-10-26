@@ -52,14 +52,12 @@ func TestOwnershipAllowsBorrowedOuterAlias(t *testing.T) {
 }
 
 func TestOwnershipMetadataIsPresentForBothTargets(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(ownershipBorrowedOuter, target)
-		if !r.Checked {
-			t.Fatalf("%s ownership metadata should check: %+v", target, r.Diagnostics)
-		}
-		if r.SchemaVersion < 3 {
-			t.Fatalf("%s result schema did not advance for ownership metadata: %d", target, r.SchemaVersion)
-		}
+	r := CompileFor(ownershipBorrowedOuter, "go")
+	if !r.Checked {
+		t.Fatalf("go ownership metadata should check: %+v", r.Diagnostics)
+	}
+	if r.SchemaVersion < 3 {
+		t.Fatalf("go result schema did not advance for ownership metadata: %d", r.SchemaVersion)
 	}
 }
 

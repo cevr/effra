@@ -59,25 +59,6 @@ func TestHTTPTransportPolicyIsVisibleInCheckedApplication(t *testing.T) {
 	if p := r.ProjectValues([]ValueType{info.Type}); !p.Complete {
 		t.Fatal(p.Error)
 	}
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Run("strict transport declaration", func(t *testing.T) {
-		checkStrictTypeScript(t, declaration, `import { Http, route } from "./generated.mjs";
-import type { UsersRequirement } from "./generated.mjs";
-import type { Context, Effect } from "effect";
-declare const operations: Context.Service.Shape<typeof Http>;
-declare const limits: Parameters<typeof operations.listen>[1];
-const pending=operations.listen("127.0.0.1:0",limits,route);
-type Expected=Effect.Effect<void,{readonly _tag:"IoError"},UsersRequirement>;
-const checked: Expected=pending;
-declare const expected: Expected;
-const reciprocal: typeof pending=expected;
-// @ts-expect-error Transport absorbs typed failures, never required services.
-const erased: Effect.Effect<void,{readonly _tag:"IoError"},never>=pending;
-void checked;void reciprocal;void erased;`)
-	})
 }
 
 func TestUnsupportedCallableFormsDiagnoseAtTheirSourceBoundary(t *testing.T) {
@@ -94,7 +75,7 @@ func TestUnsupportedCallableFormsDiagnoseAtTheirSourceBoundary(t *testing.T) {
 			if r.Checked || !found {
 				t.Fatalf("unsupported source admitted: %+v", r.Diagnostics)
 			}
-			if _, _, err := r.Emit(false); err == nil {
+			if _, err := r.EmitGo(); err == nil {
 				t.Fatal("unsupported syntax reached emission")
 			}
 		})
@@ -123,19 +104,6 @@ effect fn apply<E: raises>(a:effect fn(effect fn()->string raises {E})->string r
 	if r := Compile(prefix + `effect fn main()->void{let pending=apply(wider,failsB);void}`); !r.Checked {
 		t.Fatalf("wider input source control: %+v", r.Diagnostics)
 	}
-	r := Compile(prefix + `effect fn main()->void{void}`)
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkStrictTypeScript(t, declaration, `import {apply,onlyA,wider,failsB} from "./generated.mjs";
-type A={readonly _tag:"A"};type B={readonly _tag:"B"};
-// @ts-expect-error The nested callback must accept the common A|B row.
-apply(onlyA,failsB);
-// @ts-expect-error Explicit witnesses cannot bypass nested contravariance.
-apply<A,B>(onlyA,failsB);
-apply(wider,failsB);
-apply<A,B>(wider,failsB);`)
 }
 
 func TestNestedServiceRowsUseTheCommonInferredBinding(t *testing.T) {
@@ -153,19 +121,6 @@ effect fn apply<R: uses>(a:effect fn(effect fn()->string uses {R})->string uses 
 	if r := Compile(prefix + `effect fn main()->void{let pending=apply(wider,needsB);void}`); !r.Checked {
 		t.Fatalf("wider service input source control: %+v", r.Diagnostics)
 	}
-	r := Compile(prefix + `effect fn main()->void{void}`)
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkStrictTypeScript(t, declaration, `import {apply,onlyA,wider,needsB} from "./generated.mjs";
-import type {ARequirement,BRequirement} from "./generated.mjs";
-// @ts-expect-error Nested callback must accept both service rows.
-apply(onlyA,needsB);
-// @ts-expect-error Explicit service witnesses preserve contravariance.
-apply<ARequirement,BRequirement>(onlyA,needsB);
-apply(wider,needsB);
-apply<ARequirement,BRequirement>(wider,needsB);`)
 }
 
 func TestNestedCallableResultRowsRemainCovariant(t *testing.T) {
@@ -179,20 +134,6 @@ effect fn factory<E: raises>(make:effect fn()->(effect fn()->string raises {E}) 
 	if !r.Checked {
 		t.Fatalf("nested result covariance source control: %+v", r.Diagnostics)
 	}
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkStrictTypeScript(t, declaration, `import {factory,makeA,resultB} from "./generated.mjs";
-import type {Effect} from "effect";
-type A={readonly _tag:"A"};type B={readonly _tag:"B"};
-type Expected=Effect.Effect<()=>Effect.Effect<string,A|B,never>,A|B,never>;
-const pending=factory(makeA,resultB);
-const explicit=factory<A,B>(makeA,resultB);
-const checked:Expected=pending;const checkedExplicit:Expected=explicit;
-declare const expected:Expected;
-const reciprocal:typeof pending=expected;
-void checked;void checkedExplicit;void reciprocal;`)
 }
 
 func TestCallableSyntaxLimitsPreserveTheirExactBoundary(t *testing.T) {

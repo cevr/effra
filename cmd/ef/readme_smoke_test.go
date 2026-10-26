@@ -141,7 +141,7 @@ func TestReadmeSmoke(t *testing.T) {
 		}
 	})
 
-	// README: "All three versions are checked in and print the same thing." Run all three.
+	// README: the Effra showcase and its Go comparison print the same thing.
 	for _, program := range []struct {
 		name string
 		run  func(t *testing.T) string
@@ -149,16 +149,8 @@ func TestReadmeSmoke(t *testing.T) {
 		{"ef-run-go", func(t *testing.T) string {
 			return string(readmeSmokeEf(t, binary, workspace, "", true, "run", "examples/checkout.ef", "--target", "go"))
 		}},
-		{"ef-run-js", func(t *testing.T) string {
-			// Its own workspace keeps the two targets' dist/ outputs apart.
-			own, _ := readmeSmokeWorkspace(t)
-			return string(readmeSmokeEf(t, binary, own, "", true, "run", "examples/checkout.ef", "--target", "js"))
-		}},
 		{"go-run", func(t *testing.T) string {
 			return readmeSmokeTool(t, workspace, "go", "run", "./examples/compare/go")
-		}},
-		{"bun-run", func(t *testing.T) string {
-			return readmeSmokeTool(t, workspace, "bun", "run", "--no-install", "examples/compare/checkout.ts")
 		}},
 	} {
 		t.Run(program.name, func(t *testing.T) {
@@ -168,20 +160,6 @@ func TestReadmeSmoke(t *testing.T) {
 			}
 		})
 	}
-
-	// checkout.ts claims its Effect type is inferred; a strict typecheck keeps
-	// that claim honest. The repository has no TypeScript dependency; the gate
-	// environment supplies tsc on PATH.
-	t.Run("typescript-strict", func(t *testing.T) {
-		t.Parallel()
-		tsc, err := exec.LookPath("tsc")
-		if err != nil {
-			t.Skip("unchecked: no tsc on PATH")
-		}
-		readmeSmokeTool(t, workspace, tsc, "--noEmit", "--strict", "--exactOptionalPropertyTypes", "--module", "nodenext",
-			"--moduleResolution", "nodenext", "--target", "es2022", "--lib", "es2022,dom,esnext.disposable",
-			"examples/compare/checkout.ts")
-	})
 
 	t.Run("checkout-contract", func(t *testing.T) {
 		t.Parallel()

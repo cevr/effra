@@ -6,9 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -42,25 +40,12 @@ effect fn test_advance_admits_unstarted_fork() -> void raises {AssertionFailed} 
 	if err != nil || !strings.Contains(string(goOutput), `"passed":true`) {
 		t.Fatalf("generated Go explicit test providers: %v\n%s", err, goOutput)
 	}
-
-	jsSource, _, err := r.EmitJSTests()
-	if err != nil {
-		t.Fatal(err)
-	}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("Bun is required for generated scheduler tests")
-	}
-	jsOutput, err := runWithWatchdog(bun, writeGeneratedJS(t, "explicit-scheduler-", jsSource))
-	if err != nil || !strings.Contains(string(jsOutput), `"passed":true`) {
-		t.Fatalf("generated JS explicit test providers: %v\n%s", err, jsOutput)
-	}
 }
 
-// The scheduler examples run on both targets, and every discovered case must
-// pass on each, in source order.
+// The scheduler examples run on Go, and every discovered case must pass, in
+// source order.
 //
-// Scheduler.awaitRegistration has one meaning on both targets: it returns at
+// Scheduler.awaitRegistration returns at
 // quiescence, when no managed fiber is running or runnable. The interrupt
 // after a barrier must find the work already complete, so a barrier that
 // returned early fails the join, and a barrier waiting for a new registration
@@ -85,10 +70,6 @@ effect fn test_advance_admits_unstarted_fork() -> void raises {AssertionFailed} 
 // The cancellation cases are timing-dependent on Go; the receipts for #80
 // record their failure rates without the fix at high counts.
 func TestSchedulerExamplesAcrossTargets(t *testing.T) {
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("Bun is required for generated scheduler tests")
-	}
 	examples := []struct {
 		file     string
 		required []string
@@ -144,42 +125,30 @@ func TestSchedulerExamplesAcrossTargets(t *testing.T) {
 					t.Fatalf("examples/%s lost case %s (cases: %v)", example.file, name, names)
 				}
 			}
-			jsSource, _, err := r.EmitJSTests()
+			output, err := runWithWatchdog(buildGeneratedGo(t, r, GoGenerationTest))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("go suite: %v\n%s", err, output)
 			}
-			runs := map[string]func() ([]byte, error){
-				"go": func() ([]byte, error) { return runWithWatchdog(buildGeneratedGo(t, r, GoGenerationTest)) },
-				"js": func() ([]byte, error) {
-					return runWithWatchdog(bun, writeGeneratedJS(t, "scheduler-example-", jsSource))
-				},
+			lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+			var report struct {
+				Passed bool `json:"passed"`
+				Tests  []struct {
+					Name   string `json:"name"`
+					Passed bool   `json:"passed"`
+				} `json:"tests"`
 			}
-			for _, target := range []string{"go", "js"} {
-				output, err := runs[target]()
-				if err != nil {
-					t.Fatalf("%s suite: %v\n%s", target, err, output)
+			if err := json.Unmarshal([]byte(lines[len(lines)-1]), &report); err != nil {
+				t.Fatalf("go suite report: %v\n%s", err, output)
+			}
+			reported := []string{}
+			for _, test := range report.Tests {
+				if !test.Passed {
+					t.Errorf("go: %s failed\n%s", test.Name, output)
 				}
-				lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-				var report struct {
-					Passed bool `json:"passed"`
-					Tests  []struct {
-						Name   string `json:"name"`
-						Passed bool   `json:"passed"`
-					} `json:"tests"`
-				}
-				if err := json.Unmarshal([]byte(lines[len(lines)-1]), &report); err != nil {
-					t.Fatalf("%s suite report: %v\n%s", target, err, output)
-				}
-				reported := []string{}
-				for _, test := range report.Tests {
-					if !test.Passed {
-						t.Errorf("%s: %s failed\n%s", target, test.Name, output)
-					}
-					reported = append(reported, test.Name)
-				}
-				if !report.Passed || !slices.Equal(reported, names) {
-					t.Fatalf("%s suite: passed=%v reported %v, want %v\n%s", target, report.Passed, reported, names, output)
-				}
+				reported = append(reported, test.Name)
+			}
+			if !report.Passed || !slices.Equal(reported, names) {
+				t.Fatalf("go suite: passed=%v reported %v, want %v\n%s", report.Passed, reported, names, output)
 			}
 		})
 	}
@@ -198,29 +167,13 @@ func TestExplicitTestProvidersRejectLiveExecutionWithoutHarness(t *testing.T) {
 	if err == nil || !strings.Contains(string(goOutput), "test clock requires the ef test harness") {
 		t.Fatalf("Go TestClock escaped its harness: %v\n%s", err, goOutput)
 	}
-	jsOutput := runJS(t, source, `const exit=await Effect.runPromiseExit(__ef_function_main());if(exit._tag!=="Failure"||!exit.cause.reasons.some(reason=>reason._tag==="Die"&&String(reason.defect).includes("test clock requires the ef test harness")))throw new Error("JS TestClock escaped its harness "+JSON.stringify(exit));`)
-	if jsOutput != "" {
-		t.Fatalf("JS TestClock escaped its harness: %s", jsOutput)
-	}
 }
 
-// jsHarnessYieldBudget is the per-turn operation budget of the JS test
-// harness's Effect scheduler (prelude/test-harness.mjs shouldYield). A managed
-// fiber that exceeds it is preempted and requeued on the harness dispatcher.
-const jsHarnessYieldBudget = 2048
-
-// jsYieldBudget finds the harness's yield comparison independently of the
-// names around it.
-var jsYieldBudget = regexp.MustCompile(`\.currentOpCount>=(\d+)`)
-
 // A continuation is long when it outlives one scheduler turn, and one
-// adjustment must drain it before committing its target.
-//   - JS: the fiber crosses the harness yield budget and is requeued
-//     mid-continuation; adjustment must run the requeued work. Every run spends
-//     at least one fiber operation, so the budget is crossed under any lowering.
-//   - Go: a managed fiber keeps its turn while it runs; adjustment must wait out
-//     that active window rather than race it. With the wait removed, 4096
-//     signals still passed in about one run in three; 65536 failed all 60.
+// adjustment must drain it before committing its target. A managed fiber
+// keeps its turn while it runs; adjustment must wait out that active window
+// rather than race it. With the wait removed, 4096 signals still passed in
+// about one run in three; 65536 failed all 60.
 //
 // The signals are spread over small nested functions. As one straight-line
 // body, 1024 signals already took the Go build about a minute.
@@ -262,22 +215,6 @@ effect fn test_scheduler_drains_long_continuation() -> void raises {AssertionFai
 	if err != nil || !strings.Contains(string(goOutput), `"passed":true`) {
 		t.Fatalf("generated Go scheduler test: %v\n%s", err, goOutput)
 	}
-
-	jsSource, _, err := r.EmitJSTests()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if budgets := jsYieldBudget.FindAllStringSubmatch(jsSource, -1); len(budgets) != 1 || budgets[0][1] != strconv.Itoa(jsHarnessYieldBudget) {
-		t.Fatalf("generated JS tests no longer yield at %d operations (found %q); re-derive the continuation length", jsHarnessYieldBudget, budgets)
-	}
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("Bun is required for generated scheduler tests")
-	}
-	jsOutput, err := runWithWatchdog(bun, writeGeneratedJS(t, "causal-scheduler-", jsSource))
-	if err != nil || !strings.Contains(string(jsOutput), `"passed":true`) {
-		t.Fatalf("generated JS scheduler test: %v\n%s", err, jsOutput)
-	}
 }
 
 func TestSchedulerAuthorityIsProviderDrivenAcrossTargets(t *testing.T) {
@@ -308,10 +245,6 @@ effect fn main() -> string {
 			if err != nil || string(goOutput) != "timed out\n" {
 				t.Fatalf("generated Go custom scheduler: %v\n%s", err, goOutput)
 			}
-			jsOutput := runJS(t, variant, `if (await Effect.runPromise(__ef_function_main()) !== "timed out") throw new Error("custom scheduler was ignored");`)
-			if jsOutput != "" {
-				t.Fatalf("generated JS custom scheduler: %s", jsOutput)
-			}
 		})
 	}
 }
@@ -339,18 +272,12 @@ effect fn main() -> string {
 	if err == nil || !strings.Contains(string(goOutput), "invalid millisecond duration") || strings.Contains(string(goOutput), "timed out") {
 		t.Fatalf("generated Go scheduler defect was rewritten: %v\n%s", err, goOutput)
 	}
-	jsOutput := runJS(t, source, `const exit=await Effect.runPromiseExit(__ef_function_main());if(exit._tag!=="Failure"||!exit.cause.reasons.some(reason=>reason._tag==="Die")||exit.cause.reasons.some(reason=>reason._tag==="Fail"&&reason.error?._tag==="Timeout"))throw new Error("scheduler defect was rewritten "+JSON.stringify(exit));
-let timerStarted;const started=new Promise(resolve=>timerStarted=resolve);const cleanupDefect={sleep:()=>Effect.acquireUseRelease(Effect.sync(()=>timerStarted()),()=>Effect.never,()=>Effect.die(new Error("timer cleanup defect"))),advance:()=>Effect.die(new Error("unused")),awaitRegistration:()=>Effect.die(new Error("unused"))};const work=Effect.promise(()=>started.then(()=>"completed"));const workWinner=await Effect.runPromiseExit(Effect.provideService(__ef_timeout(work,500),__ef_service_Scheduler,cleanupDefect));if(workWinner._tag!=="Failure"||!workWinner.cause.reasons.some(reason=>reason._tag==="Die"&&String(reason.defect).includes("timer cleanup defect")))throw new Error("timer cleanup defect was discarded "+JSON.stringify(workWinner));`)
-	if jsOutput != "" {
-		t.Fatalf("generated JS scheduler defect: %s", jsOutput)
-	}
 }
 
 // generatedRunWatchdog bounds one execution of an already-built generated
-// program. A healthy program exits within milliseconds on Go and within about
-// a second on Bun, module loading included, even on a saturated host; a
-// deadlocked one never exits. The bound only separates the two, so no
-// compilation runs under it.
+// program. A healthy program exits within milliseconds, even on a saturated
+// host; a deadlocked one never exits. The bound only separates the two, so
+// no compilation runs under it.
 const generatedRunWatchdog = 15 * time.Second
 
 // buildGeneratedGo writes r's Go application into a fresh module and builds
@@ -384,18 +311,6 @@ func buildGoModule(t *testing.T, dir string) string {
 		t.Fatalf("generated Go did not build: %v\n%s", err, output)
 	}
 	return binary
-}
-
-// writeGeneratedJS places a generated test module where Bun resolves the
-// pinned effect package.
-func writeGeneratedJS(t *testing.T, prefix, source string) string {
-	t.Helper()
-	dir := jsModuleDir(t, prefix)
-	path := filepath.Join(dir, "scheduler.tests.mjs")
-	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
-		t.Fatal(err)
-	}
-	return path
 }
 
 func runWithWatchdog(command string, args ...string) ([]byte, error) {

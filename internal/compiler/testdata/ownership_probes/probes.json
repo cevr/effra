@@ -25,8 +25,7 @@
 },
 {
 "name": "rows-unjoined-boom",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "rv-closure-failure-outside",
@@ -80,13 +79,11 @@
 },
 {
 "name": "rv2-rows-exit-before-join",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "rv2-rows-exit-before-join-control",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "rv2-rows-fiber-out-of-scope",
@@ -94,18 +91,15 @@
 },
 {
 "name": "rv2-rows-forked-observer",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "rv2-rows-nested-scope-join",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "rv2-rows-timeout-join",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "scope-failure-catch-control",

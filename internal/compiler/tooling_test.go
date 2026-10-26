@@ -261,47 +261,45 @@ fn direct() -> string { target() }
 effect fn serviceCall() -> string uses {Logger} { run Logger.log("service") }
 effect fn builtinCall() -> void uses {Console} { run Console.log("builtin") }
 `
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(source, target)
-		if !r.Checked {
-			t.Fatalf("%s target: %+v", target, r.Diagnostics)
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("go target: %+v", r.Diagnostics)
+	}
+	graph, err := r.Graph()
+	if err != nil {
+		t.Fatalf("go target: %v", err)
+	}
+	checkedDirect := false
+	checkedService := false
+	checkedBuiltin := false
+	for _, edge := range graph.Edges {
+		if edge.Kind != "calls" {
+			continue
 		}
-		graph, err := r.Graph()
-		if err != nil {
-			t.Fatalf("%s target: %v", target, err)
+		if edge.From == "function:invoke" && (edge.To == "function:target" || edge.To == "function:alias") {
+			t.Fatalf("go target: shadowed callback fabricated callable edge: %+v", edge)
 		}
-		checkedDirect := false
-		checkedService := false
-		checkedBuiltin := false
-		for _, edge := range graph.Edges {
-			if edge.Kind != "calls" {
-				continue
-			}
-			if edge.From == "function:invoke" && (edge.To == "function:target" || edge.To == "function:alias") {
-				t.Fatalf("%s target: shadowed callback fabricated callable edge: %+v", target, edge)
-			}
-			if edge.From == "function:invokeRecord" && edge.To == "service:Logger" {
-				t.Fatalf("%s target: record callback fabricated service edge: %+v", target, edge)
-			}
-			if edge.From == "function:direct" && edge.To == "function:target" {
-				checkedDirect = true
-			}
-			if edge.To == "service:Logger" {
-				checkedService = true
-			}
-			if edge.To == "service:Console" {
-				checkedBuiltin = true
-			}
+		if edge.From == "function:invokeRecord" && edge.To == "service:Logger" {
+			t.Fatalf("go target: record callback fabricated service edge: %+v", edge)
 		}
-		if !checkedDirect {
-			t.Fatalf("%s target: checked direct function call edge missing", target)
+		if edge.From == "function:direct" && edge.To == "function:target" {
+			checkedDirect = true
 		}
-		if !checkedService {
-			t.Fatalf("%s target: checked service call edge missing", target)
+		if edge.To == "service:Logger" {
+			checkedService = true
 		}
-		if !checkedBuiltin {
-			t.Fatalf("%s target: checked builtin service call edge missing", target)
+		if edge.To == "service:Console" {
+			checkedBuiltin = true
 		}
+	}
+	if !checkedDirect {
+		t.Fatal("go target: checked direct function call edge missing")
+	}
+	if !checkedService {
+		t.Fatal("go target: checked service call edge missing")
+	}
+	if !checkedBuiltin {
+		t.Fatal("go target: checked builtin service call edge missing")
 	}
 }
 

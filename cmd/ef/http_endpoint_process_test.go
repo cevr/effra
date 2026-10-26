@@ -55,31 +55,29 @@ func TestEndpointTestsPassOnGoAndJS(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"test_order_is_created", "test_unknown_member_is_not_malformed_input", "test_handler_failure_answers_its_status", "test_unsupported_media_type", "test_stored_order_shares_the_witness"}
-	for _, target := range []string{"go", "js"} {
-		stdout, stderr, code := runTestCLIDir(t, binary, root, "", "test", example, "--target", target)
-		var report endpointTestReport
-		if err := json.Unmarshal(stdout, &report); err != nil || code != 0 || !report.Passed {
-			t.Fatalf("%s: code %d %v\nstdout=%s\nstderr=%s", target, code, err, stdout, stderr)
-		}
-		ran := []string{}
-		for _, test := range report.Tests {
-			ran = append(ran, test.Name)
-		}
-		if !slices.Equal(ran, want) {
-			t.Fatalf("%s ran %q, want %q", target, ran, want)
-		}
-		stdout, stderr, code = runTestCLIDir(t, binary, root, "", "test", terminal, "--target", target)
-		report = endpointTestReport{}
-		if err := json.Unmarshal(stdout, &report); err != nil || code == 0 || report.Passed {
-			t.Fatalf("%s terminal: code %d %v\nstdout=%s\nstderr=%s", target, code, err, stdout, stderr)
-		}
-		last := report.Tests[len(report.Tests)-1]
-		if last.Name != "test_failed_failure_body_keeps_both_causes" || last.Passed || len(last.Reasons) != 2 {
-			t.Fatalf("%s terminal report: %+v", target, last)
-		}
-		if first, second := last.Reasons[0], last.Reasons[1]; first.Kind != "failure" || first.Tag != "JsonEncodeFailure" || !strings.Contains(first.Message, "body-too-large") || second.Kind != "failure" || second.Tag != "Unpublishable" {
-			t.Fatalf("%s terminal reasons: %+v", target, last.Reasons)
-		}
+	stdout, stderr, code := runTestCLIDir(t, binary, root, "", "test", example, "--target", "go")
+	var report endpointTestReport
+	if err := json.Unmarshal(stdout, &report); err != nil || code != 0 || !report.Passed {
+		t.Fatalf("go: code %d %v\nstdout=%s\nstderr=%s", code, err, stdout, stderr)
+	}
+	ran := []string{}
+	for _, test := range report.Tests {
+		ran = append(ran, test.Name)
+	}
+	if !slices.Equal(ran, want) {
+		t.Fatalf("go ran %q, want %q", ran, want)
+	}
+	stdout, stderr, code = runTestCLIDir(t, binary, root, "", "test", terminal, "--target", "go")
+	report = endpointTestReport{}
+	if err := json.Unmarshal(stdout, &report); err != nil || code == 0 || report.Passed {
+		t.Fatalf("go terminal: code %d %v\nstdout=%s\nstderr=%s", code, err, stdout, stderr)
+	}
+	last := report.Tests[len(report.Tests)-1]
+	if last.Name != "test_failed_failure_body_keeps_both_causes" || last.Passed || len(last.Reasons) != 2 {
+		t.Fatalf("go terminal report: %+v", last)
+	}
+	if first, second := last.Reasons[0], last.Reasons[1]; first.Kind != "failure" || first.Tag != "JsonEncodeFailure" || !strings.Contains(first.Message, "body-too-large") || second.Kind != "failure" || second.Tag != "Unpublishable" {
+		t.Fatalf("go terminal reasons: %+v", last.Reasons)
 	}
 }
 
@@ -180,9 +178,8 @@ effect fn main() -> void {
 }
 `
 
-// A failure named __proto__ is an ordinary mapping key on both targets, like
-// the ordinary-name control: JS lowers mappings to a Map, never an object
-// literal whose __proto__ entry would set its prototype.
+// A failure named __proto__ is an ordinary mapping key, like the
+// ordinary-name control.
 func TestEndpointFailureNamesAreOrdinaryKeys(t *testing.T) {
 	binary := buildTestCLI(t)
 	root := t.TempDir()
@@ -190,11 +187,9 @@ func TestEndpointFailureNamesAreOrdinaryKeys(t *testing.T) {
 	if err := os.WriteFile(fixture, []byte(endpointNameFixture), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []string{"go", "js"} {
-		stdout, stderr, code := runTestCLIDir(t, binary, root, "", "test", fixture, "--target", target)
-		var report endpointTestReport
-		if err := json.Unmarshal(stdout, &report); err != nil || code != 0 || !report.Passed || len(report.Tests) != 2 {
-			t.Fatalf("%s: code %d %v\nstdout=%s\nstderr=%s", target, code, err, stdout, stderr)
-		}
+	stdout, stderr, code := runTestCLIDir(t, binary, root, "", "test", fixture, "--target", "go")
+	var report endpointTestReport
+	if err := json.Unmarshal(stdout, &report); err != nil || code != 0 || !report.Passed || len(report.Tests) != 2 {
+		t.Fatalf("go: code %d %v\nstdout=%s\nstderr=%s", code, err, stdout, stderr)
 	}
 }

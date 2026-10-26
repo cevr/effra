@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -107,28 +106,6 @@ effect fn main() -> string raises {A, B} {
 			goOutput, err := runWithWatchdog(buildGoModule(t, goDir))
 			if err != nil || string(goOutput) != "hello\n" {
 				t.Fatalf("generated Go fiber branch: %v\n%s", err, goOutput)
-			}
-
-			jsResult := CompileFor(source, "js")
-			if !jsResult.Checked {
-				t.Fatalf("JS fiber branch did not check: %+v", jsResult.Diagnostics)
-			}
-			jsSource, _, err := jsResult.Emit(true)
-			if err != nil {
-				t.Fatal(err)
-			}
-			bun, err := exec.LookPath("bun")
-			if err != nil {
-				t.Fatal("Bun is required for generated fiber tests")
-			}
-			jsDir := jsModuleDir(t, "fiber-shape-")
-			jsPath := filepath.Join(jsDir, "fiber.mjs")
-			if err := os.WriteFile(jsPath, []byte(jsSource), 0600); err != nil {
-				t.Fatal(err)
-			}
-			jsOutput, err := exec.Command(bun, jsPath).CombinedOutput()
-			if err != nil || string(jsOutput) != "hello\n" {
-				t.Fatalf("generated JS fiber branch: %v\n%s", err, jsOutput)
 			}
 		})
 	}

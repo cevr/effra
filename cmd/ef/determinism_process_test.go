@@ -13,8 +13,11 @@ import (
 func TestFreshProcessesPublishIdenticalGenericArtifacts(t *testing.T) {
 	binary := buildTestCLI(t)
 	for _, name := range []string{"generic-users", "generic-settings"} {
-		source := filepath.Join("..", "..", "examples", name+".ef")
-		var first [3][]byte
+		source, err := filepath.Abs(filepath.Join("..", "..", "examples", name+".ef"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var first [2][]byte
 		for i := 0; i < 8; i++ {
 			check, stderr, code := runTestCLI(t, binary, "check", source)
 			if code != 0 {
@@ -32,24 +35,23 @@ func TestFreshProcessesPublishIdenticalGenericArtifacts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			output := filepath.Join(t.TempDir(), name+".mjs")
-			if _, stderr, code := runTestCLI(t, binary, "build", source, "--target", "js", "--entry", "-o", output); code != 0 {
+			// A fresh working directory per process, so no build reuses an
+			// earlier generation.
+			workspace := t.TempDir()
+			output := filepath.Join(workspace, name)
+			if _, stderr, code := runTestCLIDir(t, binary, workspace, "", "build", source, "-o", output); code != 0 {
 				t.Fatalf("%s build exited %d: %s", name, code, stderr)
 			}
-			js, err := os.ReadFile(output)
+			executable, err := os.ReadFile(output)
 			if err != nil {
 				t.Fatal(err)
 			}
-			dts, err := os.ReadFile(output[:len(output)-len(".mjs")] + ".d.mts")
-			if err != nil {
-				t.Fatal(err)
-			}
-			observed := [3][]byte{normalized, js, dts}
+			observed := [2][]byte{normalized, executable}
 			if i == 0 {
 				first = observed
 				continue
 			}
-			for k, label := range []string{"check response", "entry JavaScript", "entry declarations"} {
+			for k, label := range []string{"check response", "native executable"} {
 				if !bytes.Equal(observed[k], first[k]) {
 					t.Fatalf("%s: process %d published a different %s", name, i+1, label)
 				}

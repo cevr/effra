@@ -33,14 +33,12 @@ effect fn main() -> void {
 `
 
 func TestOperationRowParametersCheckAcrossTargets(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(operationRowsRunnable, target)
-		if !r.Checked {
-			t.Fatalf("%s: operation row parameters refused: %+v", target, r.Diagnostics)
-		}
-		for _, d := range r.Diagnostics {
-			t.Fatalf("%s: unexpected diagnostic %+v", target, d)
-		}
+	r := CompileFor(operationRowsRunnable, "go")
+	if !r.Checked {
+		t.Fatalf("go: operation row parameters refused: %+v", r.Diagnostics)
+	}
+	for _, d := range r.Diagnostics {
+		t.Fatalf("go: unexpected diagnostic %+v", d)
 	}
 }
 
@@ -57,10 +55,8 @@ effect fn main() -> void {
     void
 }
 `
-	for _, target := range []string{"go", "js"} {
-		if r := CompileFor(source, target); !r.Checked {
-			t.Fatalf("%s: %+v", target, r.Diagnostics)
-		}
+	if r := CompileFor(source, "go"); !r.Checked {
+		t.Fatalf("go: %+v", r.Diagnostics)
 	}
 }
 
@@ -99,50 +95,6 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func TestOperationRowParametersDeclareGenericTypeScript(t *testing.T) {
-	r := CompileFor(operationRowsRunnable, "js")
-	if !r.Checked {
-		t.Fatal(r.Diagnostics)
-	}
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		`export type ServerProvider = { readonly "listen": <__ef_row_0_E extends { readonly _tag: string }, __ef_row_0_R>(arg_handler: (arg0: Req) => Effect.Effect<string, __ef_row_0_E, __ef_row_0_R>) => Effect.Effect<void, __ef_row_0_E, __ef_row_0_R>; };`,
-		// The impl keeps the operation's rows; only construction services are hidden.
-		`declare const __ef_provider_Fake: { readonly "listen": <__ef_row_0_A extends { readonly _tag: string }, __ef_row_0_B>(arg_handler: (arg0: Req) => Effect.Effect<string, __ef_row_0_A, __ef_row_0_B>) => Effect.Effect<void, __ef_row_0_A, __ef_row_0_B>; };`,
-	} {
-		if !strings.Contains(declaration, want) {
-			t.Fatalf("declaration lost the operation rows, want %s in:\n%s", want, declaration)
-		}
-	}
-	t.Run("strict TypeScript consumer", func(t *testing.T) {
-		checkStrictTypeScript(t, declaration, `import { Fake, Server } from "./generated.mjs";
-import type { Req } from "./generated.mjs";
-import type { Effect } from "effect";
-declare const provider: typeof Fake;
-declare const route: (r: Req) => Effect.Effect<string, { readonly _tag: "Boom" }, never>;
-const run: Effect.Effect<void, { readonly _tag: "Boom" }, never> = provider.listen(route);
-void run; void Server;`)
-	})
-	// A non-empty R must flow through the impl type. `keeps` rejects widening;
-	// the expected error rejects collapsing R to never.
-	t.Run("strict TypeScript consumer keeps a non-empty requirement", func(t *testing.T) {
-		checkStrictTypeScript(t, declaration, `import { Fake } from "./generated.mjs";
-import type { Req } from "./generated.mjs";
-import type { Effect } from "effect";
-interface Needs { readonly _needs: "needs" }
-declare const provider: typeof Fake;
-declare const route: (r: Req) => Effect.Effect<string, never, Needs>;
-const run = provider.listen(route);
-const keeps: Effect.Effect<void, never, Needs> = run;
-// @ts-expect-error R must not collapse to never
-const collapsed: Effect.Effect<void, never, never> = run;
-void keeps; void collapsed;`)
-	})
 }
 
 func TestOperationRowParametersFormatterRoundTrip(t *testing.T) {
@@ -338,11 +290,9 @@ effect fn main() -> void {
 `},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			for _, target := range []string{"go", "js"} {
-				r := CompileFor(test.source, target)
-				if r.Checked || !contains(diagnosticCodes(r), "EF108") {
-					t.Fatalf("%s: want EF108, got checked=%v %+v", target, r.Checked, r.Diagnostics)
-				}
+			r := CompileFor(test.source, "go")
+			if r.Checked || !contains(diagnosticCodes(r), "EF108") {
+				t.Fatalf("go: want EF108, got checked=%v %+v", r.Checked, r.Diagnostics)
 			}
 		})
 	}
@@ -368,10 +318,8 @@ effect fn main() -> void {
 		{"concrete capture sharing a binder's spelling", rowBodyPrelude + positiveCaptureBody},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			for _, target := range []string{"go", "js"} {
-				if r := CompileFor(test.source, target); !r.Checked {
-					t.Fatalf("%s: %+v", target, r.Diagnostics)
-				}
+			if r := CompileFor(test.source, "go"); !r.Checked {
+				t.Fatalf("go: %+v", r.Diagnostics)
 			}
 		})
 	}
@@ -491,19 +439,15 @@ effect fn main() -> void {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			for _, target := range []string{"go", "js"} {
-				t.Run(target, func(t *testing.T) {
-					r := CompileFor(test.source, target)
-					if test.want == "accept" {
-						if !r.Checked {
-							t.Fatalf("expected acceptance, got %+v", r.Diagnostics)
-						}
-						return
-					}
-					if r.Checked || !contains(diagnosticCodes(r), test.want) {
-						t.Fatalf("want %s, got checked=%v %+v", test.want, r.Checked, r.Diagnostics)
-					}
-				})
+			r := CompileFor(test.source, "go")
+			if test.want == "accept" {
+				if !r.Checked {
+					t.Fatalf("expected acceptance, got %+v", r.Diagnostics)
+				}
+				return
+			}
+			if r.Checked || !contains(diagnosticCodes(r), test.want) {
+				t.Fatalf("want %s, got checked=%v %+v", test.want, r.Checked, r.Diagnostics)
 			}
 		})
 	}

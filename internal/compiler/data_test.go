@@ -142,9 +142,6 @@ effect fn fromEmptyConstructor() -> string {
 	if !r.Checked {
 		t.Fatalf("control and match braces should parse: %+v", r.Diagnostics)
 	}
-	if _, _, err := r.Emit(false); err != nil {
-		t.Fatalf("JS lowering rejected disambiguated braces: %v", err)
-	}
 	if _, err := r.EmitGo(); err != nil {
 		t.Fatalf("Go lowering rejected disambiguated braces: %v", err)
 	}
@@ -153,10 +150,6 @@ effect fn fromEmptyConstructor() -> string {
 func TestClosedDataComputedKeysPreserveProtoFields(t *testing.T) {
 	source := `record Data { __proto__: string }
 effect fn main() -> string { let value = Data { __proto__: "safe" } value.__proto__ }`
-	output := runJS(t, source, `if (await Effect.runPromise(__ef_function_main()) !== "safe") throw new Error("computed __proto__ field was lost");`)
-	if output != "" {
-		t.Fatalf("unexpected output: %s", output)
-	}
 	r := Compile(source)
 	if _, err := r.EmitGo(); err != nil {
 		t.Fatalf("Go lowering rejected computed field: %v", err)
@@ -170,30 +163,10 @@ func TestClosedDataRecordTagFieldIsNotReserved(t *testing.T) {
 	}
 }
 
-func TestClosedDataRejectsJavaScriptDeclarationCollisions(t *testing.T) {
-	for _, source := range []string{
-		`service Foo { effect fn get() -> string } record FooRequirement { value: string } effect fn main() -> string { "x" }`,
-		`error Invalid { message: string } record InvalidError { value: string } effect fn main() -> string { "x" }`,
-		`record class { name: string } effect fn main() -> string { let r = class { name: "ok" } r.name }`,
-	} {
-		r := CompileFor(source, "js")
-		if r.Checked || !hasCode(r, "EF110") {
-			t.Fatalf("JavaScript declaration collision was admitted: %+v", r.Diagnostics)
-		}
-	}
-}
-
 func TestClosedDataLoweringIsAvailable(t *testing.T) {
 	r := Compile(closedDataSource)
 	if !r.Checked {
 		t.Fatalf("closed data should check: %+v", r.Diagnostics)
-	}
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatalf("JS lowering rejected closed data: %v", err)
-	}
-	if !strings.Contains(declaration, "__ef_brand_User") || !strings.Contains(declaration, `readonly _tag: "RunState.Running"`) || !strings.Contains(declaration, "message: string") {
-		t.Fatalf("JS declarations lost nominal payload metadata: %s", declaration)
 	}
 	if _, err := r.EmitGo(); err != nil {
 		t.Fatalf("Go lowering rejected closed data: %v", err)
@@ -237,10 +210,6 @@ func TestClosedDataRunsOnBothBackends(t *testing.T) {
 	r := Compile(closedDataSource)
 	if !r.Checked {
 		t.Fatalf("closed data should check: %+v", r.Diagnostics)
-	}
-	output := runJS(t, closedDataSource, `if (await Effect.runPromise(__ef_function_main()) !== "running 42") throw new Error("wrong JS result"); const failed = await Effect.runPromiseExit(__ef_function_failWithPayload()); const interpreted = await Effect.runPromiseExit(__ef_function_interpret({ _tag: "RunState.Running", runId: "branch" })); if (failed._tag !== "Failure" || failed.cause.reasons[0].error.message !== "bad" || interpreted.cause.reasons[0].error.message !== "branch") throw new Error("payload failure was lost"); console.log("closed-data: passed");`)
-	if !strings.Contains(output, "closed-data: passed") {
-		t.Fatal(output)
 	}
 	goSource, application, err := emitGoApplication(r, GoGenerationBuild)
 	if err != nil {
@@ -310,10 +279,6 @@ func TestClosedDataFieldAccessRequiresExecution(t *testing.T) {
 	lazy := Compile(`record R { name: string } effect fn get() -> R { R { name: "ok" } } effect fn main() -> string { get().name }`)
 	if lazy.Checked || !hasCode(lazy, "EF106") {
 		t.Fatalf("lazy record field access was admitted: %+v", lazy.Diagnostics)
-	}
-	ready := `record R { name: string } effect fn loadRecord() -> R { R { name: "ok" } } effect fn main() -> string { (run loadRecord()).name }`
-	if output := runJS(t, ready, `if (await Effect.runPromise(__ef_function_main()) !== "ok") throw new Error("executed record field access failed");`); output != "" {
-		t.Fatalf("unexpected output: %s", output)
 	}
 }
 
@@ -393,29 +358,6 @@ func TestClosedDataRejectsMixedConstructorArguments(t *testing.T) {
 	}
 }
 
-func TestClosedDataFailurePayloadPreservesProto(t *testing.T) {
-	source := `error Bad { __proto__: string } effect fn main() -> string raises {Bad} { fail Bad { __proto__: "safe" } }`
-	output := runJS(t, source, `const exit = await Effect.runPromiseExit(__ef_function_main()); const error = exit.cause.reasons[0].error; if (!Object.hasOwn(error, "__proto__") || error.__proto__ !== "safe") throw new Error("structured __proto__ payload was lost");`)
-	if output != "" {
-		t.Fatalf("unexpected output: %s", output)
-	}
-}
-
-func TestClosedDataEmptyEnumHasStrictConsumerDeclaration(t *testing.T) {
-	r := CompileFor(`enum Empty {} effect fn main() -> string { "ok" }`, "js")
-	if !r.Checked {
-		t.Fatalf("empty enums should have an honest uninhabited declaration: %+v", r.Diagnostics)
-	}
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(declaration, "export type Empty = never;") {
-		t.Fatalf("empty enum declaration is not uninhabited: %s", declaration)
-	}
-	checkStrictTypeScript(t, declaration, `import type { Empty } from "./generated.d.mts"; type Proof = Empty extends never ? true : false; const proof: Proof = true; void proof;`)
-}
-
 func TestClosedDataNestedTypeRefsAreCanonical(t *testing.T) {
 	source := `record R { a: string } effect fn get() -> R { R { a: "ok" } } effect fn main() -> string { let child = fork get() let r = run child.join() r.a }`
 	r := Compile(source)
@@ -440,10 +382,6 @@ func TestClosedDataMultiFieldControlConstructorShorthand(t *testing.T) {
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatalf("multi-field control constructor shorthand should parse and check: %+v", r.Diagnostics)
-	}
-	output := runJS(t, source, `if (await Effect.runPromise(__ef_function_main()) !== "ab") throw new Error("wrong shorthand result");`)
-	if output != "" {
-		t.Fatalf("unexpected JS output: %s", output)
 	}
 }
 
@@ -487,52 +425,6 @@ effect fn main() -> string {
 	}
 }
 
-func checkStrictTypeScript(t *testing.T, declaration, consumer string) {
-	t.Helper()
-	// The compiler runs in a scratch directory outside the repository, so the
-	// local TypeScript candidate must not be relative to the package.
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := jsModuleDir(t, "strict-ts-")
-	declarationPath := filepath.Join(dir, "generated.d.mts")
-	consumerPath := filepath.Join(dir, "consumer.mts")
-	if err := os.WriteFile(declarationPath, []byte(declaration), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(consumerPath, []byte(consumer), 0644); err != nil {
-		t.Fatal(err)
-	}
-	args := []string{"--noEmit", "--strict", "--module", "NodeNext", "--moduleResolution", "NodeNext", "--target", "ES2022", "--lib", "ES2022,DOM,ESNext.Disposable", consumerPath}
-	var command *exec.Cmd
-	if tsc, err := exec.LookPath("tsc"); err == nil {
-		command = exec.Command(tsc, args...)
-	} else {
-		candidates := []string{
-			filepath.Join(root, "node_modules", "typescript", "lib", "tsc.js"),
-			"/Users/cvr/Developer/personal/gent/node_modules/typescript/lib/tsc.js",
-		}
-		for _, candidate := range candidates {
-			if _, statErr := os.Stat(candidate); statErr == nil {
-				node, nodeErr := exec.LookPath("node")
-				if nodeErr != nil {
-					t.Skip("TypeScript compiler is available only as a Node script, but Node is unavailable")
-				}
-				command = exec.Command(node, append([]string{candidate}, args...)...)
-				break
-			}
-		}
-	}
-	if command == nil {
-		t.Skip("TypeScript compiler unavailable")
-	}
-	command.Dir = dir
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("strict TypeScript consumer rejected generated declarations: %v\n%s\n%s", err, output, declaration)
-	}
-}
-
 func TestDelimitedConstructorsInControlHeaders(t *testing.T) {
 	// Parentheses and call arguments delimit their contents, so a payload-free
 	// constructor needs no following body brace to be recognized there.
@@ -573,9 +465,6 @@ fn guarded(flag: bool, x: Bit, y: Bit) -> string {
 }
 effect fn main() -> string { pick() + ";" + single(1) + ";" + pair(2, 3) + ";" + guarded(true, Bit.Zero {}, Bit.One {}) }`
 	runGenericDataNative(t, source, "zero;x;x;flag\n")
-	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != "zero;x;x;flag\n" {
-		t.Fatalf("JS constructor subjects: %q", output)
-	}
 	first, err := FormatSource(source)
 	if err != nil {
 		t.Fatal(err)
@@ -622,10 +511,8 @@ enum Wrap { Item { inner: i64, other: Pair } }
 				result = `if a == 0 { "bad" } else { "ok" }`
 			}
 			function := fmt.Sprintf("fn %s(x: i64, y: i64) -> string {\n match %s, Bit.One {} {\n  %s, Bit.Zero | Bit.One => %s\n }\n}\n", name, subject, form.arm, result)
-			for _, target := range []string{"go", "js"} {
-				if r := CompileFor(declarations+function, target); !r.Checked {
-					t.Errorf("%s: %s refused: %+v", target, subject, r.Diagnostics)
-				}
+			if r := CompileFor(declarations+function, "go"); !r.Checked {
+				t.Errorf("go: %s refused: %+v", subject, r.Diagnostics)
 			}
 			source.WriteString(function)
 			if calls.Len() > 0 {
@@ -649,9 +536,6 @@ enum Wrap { Item { inner: i64, other: Pair } }
 	}
 	want := strings.Repeat("ok;", 2*len(forms)) + "flag\n"
 	runGenericDataNative(t, source.String(), want)
-	if output := runJS(t, source.String(), `console.log(await Effect.runPromise(__ef_function_main()));`); output != want {
-		t.Fatalf("JS constructor payload forms: %q", output)
-	}
 	first, err := FormatSource(source.String())
 	if err != nil {
 		t.Fatal(err)

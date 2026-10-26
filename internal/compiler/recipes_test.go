@@ -29,31 +29,7 @@ func TestRecipeConsumersExecuteLazilyAndIndependentlyOnGoAndJS(t *testing.T) {
 		t.Run(fixture.example, func(t *testing.T) {
 			source := readRecipeExample(t, fixture.example)
 			runGenericDataNative(t, source, fixture.output)
-			if output := runJSForTarget(t, "js", source, `await Effect.runPromise(__ef_function_main());`); output != fixture.output {
-				t.Fatalf("JS execution:\n%s", output)
-			}
 		})
-	}
-}
-
-func TestRecipeStoredInDataRunsOncePerExecution(t *testing.T) {
-	source := readRecipeExample(t, "recipes-queue.ef")
-	output := runJSForTarget(t, "js", source, `
-let calls = 0;
-const console = { log: message => Effect.sync(() => { calls++; }) };
-const recipe = __ef_function_delivery("a");
-const job = __ef_function_enqueue({ prepare: __ef_function_delivery }, "a");
-if (calls !== 0) throw new Error("construction executed a recipe");
-const first = await Effect.runPromise(Effect.provideService(job.task, __ef_service_Console, console));
-if (calls !== 1 || first !== "sent a") throw new Error("first run: " + calls);
-await Effect.runPromise(Effect.provideService(job.task, __ef_service_Console, console));
-await Effect.runPromise(Effect.provideService(recipe, __ef_service_Console, console));
-if (calls !== 3) throw new Error("runs shared or skipped work: " + calls);
-console.log === undefined;
-globalThis.console.log("counted");
-`)
-	if output != "counted\n" {
-		t.Fatal(output)
 	}
 }
 
@@ -94,26 +70,6 @@ func TestRecipeTypesShareCanonicalIdentityAndPreserveRows(t *testing.T) {
 	if info.Type.Contract.Kind != "recipe" || !slices.Equal(info.Type.Errors, []string{"Transient"}) || !slices.Equal(info.Type.Services, []string{"Console"}) {
 		t.Fatalf("record field erased recipe rows: %+v", info.Type)
 	}
-	_, declaration, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkStrictTypeScript(t, declaration, `import type { Job, Worker, ConsoleRequirement } from "./generated.mjs";
-import type { Effect } from "effect";
-type Expected = Effect.Effect<string, { readonly _tag: "Rejected" }, ConsoleRequirement>;
-declare const job: Job<string>;
-declare const worker: Worker;
-const prepared: Expected = worker.prepare("a");
-if (job._tag === "template:module:file:module:Job.Ready") {
-  const task: Expected = job.task;
-  // @ts-expect-error a stored recipe keeps its service row
-  const erased: Effect.Effect<string, { readonly _tag: "Rejected" }, never> = job.task;
-  // @ts-expect-error a stored recipe keeps its failure row
-  const absorbed: Effect.Effect<string, never, ConsoleRequirement> = job.task;
-  void task; void erased; void absorbed;
-}
-void prepared;
-`)
 }
 
 const recipeRowDeclarations = `import Data "effra/data"
@@ -311,9 +267,6 @@ effect fn main() -> void {
 	// A recipe is a lazy indirection, so a nominal record may refer to itself
 	// through one.
 	runGenericDataNative(t, stream, "a a+ a++\n")
-	if output := runJSForTarget(t, "js", stream, `await Effect.runPromise(__ef_function_main());`); output != "a a+ a++\n" {
-		t.Fatal(output)
-	}
 	for _, test := range []struct{ source, code, message string }{
 		{`record Bad { label: string; again: Bad }`, "EF119", "recursive data layout is unsupported"},
 		{`record Stream<T: type> { head: T; tail: Effect<Stream<T>> }`, "EF127", "recursive or excessive generic data layout"},
@@ -517,9 +470,6 @@ effect fn main() -> void {
 func TestRecipeBranchResultsRunOnlyWhenRunOnGoAndJS(t *testing.T) {
 	const expected = "selected\ntick if\ntick if\ntock match\nififmatch\n"
 	runGenericDataNative(t, branchRecipeSource, expected)
-	if output := runJSForTarget(t, "js", branchRecipeSource, `await Effect.runPromise(__ef_function_main());`); output != expected {
-		t.Fatalf("JS execution:\n%s", output)
-	}
 }
 
 func TestRecipeBranchResultsJoinRowsAndKeepDiscardRefusal(t *testing.T) {
@@ -641,9 +591,6 @@ func TestRecipeBranchEnumSuccessJoinsByLayout(t *testing.T) {
 	}
 	expected := "selected\nfailed ran\ndone ran\nfailed bad/done ok\n"
 	runGenericDataNative(t, branchVariantSource, expected)
-	if output := runJSForTarget(t, "js", branchVariantSource, `await Effect.runPromise(__ef_function_main());`); output != expected {
-		t.Fatalf("JS branch enum output = %q", output)
-	}
 }
 
 func TestRecipeBranchEnumMissingEvidenceStaysConservative(t *testing.T) {
@@ -797,24 +744,22 @@ record Box { value: string }
 service Users { effect fn get(id: string) -> Box raises {Missing} }
 fn later(box: Box) -> Effect<Box, {Missing}, {Users}> { Users.get(box.value) }
 `
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(source, target)
-		if !r.Checked {
-			t.Fatalf("%s fixture: %+v", target, r.Diagnostics)
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("go fixture: %+v", r.Diagnostics)
+	}
+	for _, want := range []struct{ name, kind string }{{"Box", "record"}, {"Missing", "error"}, {"Users", "service"}} {
+		offset := at(t, source, "-> Effect<Box, {Missing}, {Users}>", want.name)
+		query, err := r.QueryType(TypeSelection{Offset: &offset})
+		if err != nil {
+			t.Fatalf("go %s: %v", want.name, err)
 		}
-		for _, want := range []struct{ name, kind string }{{"Box", "record"}, {"Missing", "error"}, {"Users", "service"}} {
-			offset := at(t, source, "-> Effect<Box, {Missing}, {Users}>", want.name)
-			query, err := r.QueryType(TypeSelection{Offset: &offset})
-			if err != nil {
-				t.Fatalf("%s %s: %v", target, want.name, err)
-			}
-			if selected := query.Selection; selected.Kind != "reference" || selected.Target == nil || selected.Target.Kind != want.kind || selected.Target.Name != want.name {
-				t.Fatalf("%s %s: selection %+v target %+v", target, want.name, selected, selected.Target)
-			}
+		if selected := query.Selection; selected.Kind != "reference" || selected.Target == nil || selected.Target.Kind != want.kind || selected.Target.Name != want.name {
+			t.Fatalf("go %s: selection %+v target %+v", want.name, selected, selected.Target)
 		}
-		offset := at(t, source, "-> Effect<Box", "Effect")
-		if _, err := r.QueryType(TypeSelection{Offset: &offset}); !errors.Is(err, ErrNoSelection) {
-			t.Fatalf("%s: Effect selected a declaration: %v", target, err)
-		}
+	}
+	offset := at(t, source, "-> Effect<Box", "Effect")
+	if _, err := r.QueryType(TypeSelection{Offset: &offset}); !errors.Is(err, ErrNoSelection) {
+		t.Fatalf("go: Effect selected a declaration: %v", err)
 	}
 }

@@ -165,23 +165,21 @@ func TestHoverPresentsCheckedConstants(t *testing.T) {
 		{"= Enabled", "Enabled", "const Enabled: bool = true"},
 		{"value: string", "value", `parameter value: string = "!"`},
 	}
-	for _, target := range []string{"go", "js"} {
-		calls := []any{initialize(), initialized(), open(uri, source, 1)}
-		for i, p := range probes {
-			calls = append(calls, pointAt(uri, "textDocument/hover", fmt.Sprintf("hover-%d", i), source, at(t, source, p.context, p.name)))
-		}
-		var in, out bytes.Buffer
-		for _, v := range append(calls, shutdown(), call("exit", nil, nil)) {
-			in.Write(frame(t, v))
-		}
-		if err := Serve(target, nil, &in, &out); err != nil {
-			t.Fatal(err)
-		}
-		byID := responses(t, readMessages(t, &out))
-		for i, p := range probes {
-			if got := hoverText(t, byID[fmt.Sprintf("hover-%d", i)]); got != p.hover {
-				t.Fatalf("%s %q in %q: hover %q, want %q", target, p.name, p.context, got, p.hover)
-			}
+	calls := []any{initialize(), initialized(), open(uri, source, 1)}
+	for i, p := range probes {
+		calls = append(calls, pointAt(uri, "textDocument/hover", fmt.Sprintf("hover-%d", i), source, at(t, source, p.context, p.name)))
+	}
+	var in, out bytes.Buffer
+	for _, v := range append(calls, shutdown(), call("exit", nil, nil)) {
+		in.Write(frame(t, v))
+	}
+	if err := Serve("go", nil, &in, &out); err != nil {
+		t.Fatal(err)
+	}
+	byID := responses(t, readMessages(t, &out))
+	for i, p := range probes {
+		if got := hoverText(t, byID[fmt.Sprintf("hover-%d", i)]); got != p.hover {
+			t.Fatalf("go %q in %q: hover %q, want %q", p.name, p.context, got, p.hover)
 		}
 	}
 }
@@ -279,33 +277,31 @@ func TestNavigationAnswersSignatureOnlyParameters(t *testing.T) {
 		{"get(key", "key", "get(key", "parameter key: string"}, // body-checked control
 		{"{ key }", "key", "get(key", "parameter key: string"},
 	}
-	for _, target := range []string{"go", "js"} {
-		calls := []any{initialize(), initialized(), open(uri, source, 1)}
-		for i, p := range probes {
-			offset := at(t, source, p.context, p.name)
-			calls = append(calls, pointAt(uri, "textDocument/hover", fmt.Sprintf("hover-%d", i), source, offset),
-				pointAt(uri, "textDocument/definition", fmt.Sprintf("definition-%d", i), source, offset))
+	calls := []any{initialize(), initialized(), open(uri, source, 1)}
+	for i, p := range probes {
+		offset := at(t, source, p.context, p.name)
+		calls = append(calls, pointAt(uri, "textDocument/hover", fmt.Sprintf("hover-%d", i), source, offset),
+			pointAt(uri, "textDocument/definition", fmt.Sprintf("definition-%d", i), source, offset))
+	}
+	var in, out bytes.Buffer
+	for _, v := range append(calls, shutdown(), call("exit", nil, nil)) {
+		in.Write(frame(t, v))
+	}
+	if err := Serve("go", nil, &in, &out); err != nil {
+		t.Fatal(err)
+	}
+	byID := responses(t, readMessages(t, &out))
+	for i, p := range probes {
+		label := fmt.Sprintf("go %q in %q", p.name, p.context)
+		if got := hoverText(t, byID[fmt.Sprintf("hover-%d", i)]); got != p.hover {
+			t.Fatalf("%s: hover %q, want %q", label, got, p.hover)
 		}
-		var in, out bytes.Buffer
-		for _, v := range append(calls, shutdown(), call("exit", nil, nil)) {
-			in.Write(frame(t, v))
+		declared := at(t, source, p.declaration, p.name)
+		definition, ok := byID[fmt.Sprintf("definition-%d", i)]["result"].(map[string]any)
+		if !ok || definition["uri"] != uri {
+			t.Fatalf("%s: definition %v", label, byID[fmt.Sprintf("definition-%d", i)])
 		}
-		if err := Serve(target, nil, &in, &out); err != nil {
-			t.Fatal(err)
-		}
-		byID := responses(t, readMessages(t, &out))
-		for i, p := range probes {
-			label := fmt.Sprintf("%s %q in %q", target, p.name, p.context)
-			if got := hoverText(t, byID[fmt.Sprintf("hover-%d", i)]); got != p.hover {
-				t.Fatalf("%s: hover %q, want %q", label, got, p.hover)
-			}
-			declared := at(t, source, p.declaration, p.name)
-			definition, ok := byID[fmt.Sprintf("definition-%d", i)]["result"].(map[string]any)
-			if !ok || definition["uri"] != uri {
-				t.Fatalf("%s: definition %v", label, byID[fmt.Sprintf("definition-%d", i)])
-			}
-			sameRange(t, label, definition["range"], editorRange(source, declared, len(p.name)))
-		}
+		sameRange(t, label, definition["range"], editorRange(source, declared, len(p.name)))
 	}
 }
 
@@ -357,45 +353,43 @@ func TestNavigationResolvesTypeAnnotationsAndRowLabels(t *testing.T) {
 	}
 	option := at(t, source, "Data.Option<Box>", "Option")
 	primitive := at(t, source, "-> string raises", "string")
-	for _, target := range []string{"go", "js"} {
-		calls := []any{initialize(), initialized(), open(uri, source, 1)}
-		for i, p := range probes {
-			offset := at(t, source, p.context, p.name)
-			calls = append(calls, pointAt(uri, "textDocument/hover", fmt.Sprintf("hover-%d", i), source, offset+len(p.name)-1),
-				pointAt(uri, "textDocument/definition", fmt.Sprintf("definition-%d", i), source, offset))
+	calls := []any{initialize(), initialized(), open(uri, source, 1)}
+	for i, p := range probes {
+		offset := at(t, source, p.context, p.name)
+		calls = append(calls, pointAt(uri, "textDocument/hover", fmt.Sprintf("hover-%d", i), source, offset+len(p.name)-1),
+			pointAt(uri, "textDocument/definition", fmt.Sprintf("definition-%d", i), source, offset))
+	}
+	calls = append(calls, pointAt(uri, "textDocument/hover", "bundled-hover", source, option),
+		pointAt(uri, "textDocument/definition", "bundled-definition", source, option),
+		pointAt(uri, "textDocument/hover", "primitive", source, primitive),
+		shutdown(), call("exit", nil, nil))
+	var in, out bytes.Buffer
+	for _, v := range calls {
+		in.Write(frame(t, v))
+	}
+	if err := Serve("go", nil, &in, &out); err != nil {
+		t.Fatal(err)
+	}
+	byID := responses(t, readMessages(t, &out))
+	for i, p := range probes {
+		label := fmt.Sprintf("go %q in %q", p.name, p.context)
+		hover := byID[fmt.Sprintf("hover-%d", i)]
+		if got := hoverText(t, hover); got != p.hover {
+			t.Fatalf("%s: hover %q, want %q", label, got, p.hover)
 		}
-		calls = append(calls, pointAt(uri, "textDocument/hover", "bundled-hover", source, option),
-			pointAt(uri, "textDocument/definition", "bundled-definition", source, option),
-			pointAt(uri, "textDocument/hover", "primitive", source, primitive),
-			shutdown(), call("exit", nil, nil))
-		var in, out bytes.Buffer
-		for _, v := range calls {
-			in.Write(frame(t, v))
+		sameRange(t, label, hover["result"].(map[string]any)["range"], editorRange(source, at(t, source, p.context, p.name), len(p.name)))
+		definition, ok := byID[fmt.Sprintf("definition-%d", i)]["result"].(map[string]any)
+		if !ok || definition["uri"] != uri {
+			t.Fatalf("%s: definition %v", label, byID[fmt.Sprintf("definition-%d", i)])
 		}
-		if err := Serve(target, nil, &in, &out); err != nil {
-			t.Fatal(err)
-		}
-		byID := responses(t, readMessages(t, &out))
-		for i, p := range probes {
-			label := fmt.Sprintf("%s %q in %q", target, p.name, p.context)
-			hover := byID[fmt.Sprintf("hover-%d", i)]
-			if got := hoverText(t, hover); got != p.hover {
-				t.Fatalf("%s: hover %q, want %q", label, got, p.hover)
-			}
-			sameRange(t, label, hover["result"].(map[string]any)["range"], editorRange(source, at(t, source, p.context, p.name), len(p.name)))
-			definition, ok := byID[fmt.Sprintf("definition-%d", i)]["result"].(map[string]any)
-			if !ok || definition["uri"] != uri {
-				t.Fatalf("%s: definition %v", label, byID[fmt.Sprintf("definition-%d", i)])
-			}
-			sameRange(t, label, definition["range"], editorRange(source, at(t, source, p.declaration, p.name), len(p.name)))
-		}
-		if got := hoverText(t, byID["bundled-hover"]); got != "enum Option<T: type> { None, Some { value: T } }" {
-			t.Fatalf("%s bundled hover %q", target, got)
-		}
-		for _, id := range []string{"bundled-definition", "primitive"} {
-			if result, present := byID[id]["result"]; !present || result != nil {
-				t.Fatalf("%s %s: %v", target, id, byID[id])
-			}
+		sameRange(t, label, definition["range"], editorRange(source, at(t, source, p.declaration, p.name), len(p.name)))
+	}
+	if got := hoverText(t, byID["bundled-hover"]); got != "enum Option<T: type> { None, Some { value: T } }" {
+		t.Fatalf("go bundled hover %q", got)
+	}
+	for _, id := range []string{"bundled-definition", "primitive"} {
+		if result, present := byID[id]["result"]; !present || result != nil {
+			t.Fatalf("go %s: %v", id, byID[id])
 		}
 	}
 }

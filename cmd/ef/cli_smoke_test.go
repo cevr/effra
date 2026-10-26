@@ -15,8 +15,7 @@ import (
 )
 
 // Ported from scripts/smoke.py: the public binary and its stdio MCP server
-// over the authored examples, native and JavaScript execution, the emitted
-// library's service keys, the test runner, lint/query/graph tooling and a
+// over the authored examples, native execution, the test runner, lint/query/graph tooling and a
 // bounded deep TypeAt. Every case drives the package's test CLI in its own
 // workspace, because run, build and test write dist/ in the working directory.
 func TestCLISmoke(t *testing.T) {
@@ -53,22 +52,14 @@ func TestCLISmoke(t *testing.T) {
 		want string
 	}{
 		{"main-default", []string{"run", "examples/main.ef"}, "Hello, Ada\nUnknown user\n"},
-		{"main-js", []string{"run", "examples/main.ef", "--target", "js"}, "Hello, Ada\nUnknown user\n"},
 		{"pipe-go", []string{"run", "examples/pipe.ef", "--target", "go"}, "Hello, <ada!> / Hello, lin!\n"},
-		{"pipe-js", []string{"run", "examples/pipe.ef", "--target", "js"}, "Hello, <ada!> / Hello, lin!\n"},
 		{"data-go", []string{"run", "examples/data.ef", "--target", "go"}, "running 42\n"},
-		{"data-js", []string{"run", "examples/data.ef", "--target", "js"}, "running 42\n"},
 		{"imports-default", []string{"run", "examples/imports.ef"}, "ADA\npartial result retained\ntimed out\n"},
 		{"concurrency-go", []string{"run", "examples/concurrency.ef", "--target", "go"}, "child joined\ntimed out\nrecovered\n"},
-		{"concurrency-js", []string{"run", "examples/concurrency.ef", "--target", "js"}, "child joined\ntimed out\nrecovered\n"},
 		{"workflow-go", []string{"run", "examples/workflow.ef", "--target", "go"}, "queued: Welcome, Ada\naccess denied\n"},
-		{"workflow-js", []string{"run", "examples/workflow.ef", "--target", "js"}, "queued: Welcome, Ada\naccess denied\n"},
 		{"latest-task-go", []string{"run", "examples/latest-task.ef", "--target", "go"}, "result: new\n"},
-		{"latest-task-js", []string{"run", "examples/latest-task.ef", "--target", "js"}, "result: new\n"},
 		{"machine-search-go", []string{"run", "examples/machine-search.ef", "--target", "go"}, "enter loading ada; stay loading ada; enter ready ada; reject\n"},
-		{"machine-search-js", []string{"run", "examples/machine-search.ef", "--target", "js"}, "enter loading ada; stay loading ada; enter ready ada; reject\n"},
 		{"machine-breaker-go", []string{"run", "examples/machine-breaker.ef", "--target", "go"}, "enter half-open primary; enter open primary; done retired\n"},
-		{"machine-breaker-js", []string{"run", "examples/machine-breaker.ef", "--target", "js"}, "enter half-open primary; enter open primary; done retired\n"},
 	} {
 		t.Run("run/"+c.name, func(t *testing.T) {
 			t.Parallel()
@@ -166,24 +157,6 @@ func TestCLISmoke(t *testing.T) {
 		}
 	})
 
-	// The emitted library must expose service keys for external provision.
-	t.Run("js-library-service-keys", func(t *testing.T) {
-		t.Parallel()
-		workspace := cliSmokeExamples(t)
-		cliSmokeRun(t, binary, workspace, true, "build", "examples/main.ef", "--target", "js")
-		consumer := `import { Effect } from 'effect';
-import { greeting, Users, MemoryUsers } from './dist/main.mjs';
-console.log(await Effect.runPromise(Effect.provideService(greeting('42'), Users, MemoryUsers)));
-`
-		command := exec.Command("bun", "--eval", consumer)
-		command.Dir = workspace
-		var output, failure bytes.Buffer
-		command.Stdout, command.Stderr = &output, &failure
-		if err := command.Run(); err != nil || output.String() != "Hello, Ada\n" {
-			t.Fatalf("library consumer: %v stdout=%q stderr=%q", err, output.String(), failure.String())
-		}
-	})
-
 	t.Run("failing-program", func(t *testing.T) {
 		t.Parallel()
 		workspace := smokeWorkspace(t)
@@ -242,47 +215,45 @@ console.log(await Effect.runPromise(Effect.provideService(greeting('42'), Users,
 		cliSmokeEqual(t, cliSmokeAt(t, catalog, "liveRequired"), false)
 	})
 
-	for _, target := range []string{"go", "js"} {
-		t.Run("test-suite/"+target, func(t *testing.T) {
-			t.Parallel()
-			workspace := cliSmokeExamples(t)
-			suite := cliSmokeJSON(t, binary, workspace, true, "test", "examples/testing.ef", "--target", target)
-			tests, _ := cliSmokeAt(t, suite, "tests").([]any)
-			if cliSmokeAt(t, suite, "passed") != true || len(tests) != 3 || cliSmokeAt(t, suite, "watchdogExpired") != false {
-				t.Fatalf("suite = %s", mustJSON(t, suite))
-			}
-		})
+	t.Run("test-suite/go", func(t *testing.T) {
+		t.Parallel()
+		workspace := cliSmokeExamples(t)
+		suite := cliSmokeJSON(t, binary, workspace, true, "test", "examples/testing.ef", "--target", "go")
+		tests, _ := cliSmokeAt(t, suite, "tests").([]any)
+		if cliSmokeAt(t, suite, "passed") != true || len(tests) != 3 || cliSmokeAt(t, suite, "watchdogExpired") != false {
+			t.Fatalf("suite = %s", mustJSON(t, suite))
+		}
+	})
 
-		t.Run("failing-tests/"+target, func(t *testing.T) {
-			t.Parallel()
-			workspace := smokeWorkspace(t)
-			file := cliSmokeWrite(t, workspace, "cases.ef", `effect fn test_bad() -> void raises {AssertionFailed} uses {Assert} {run Assert.equalText("actual","expected")} effect fn test_after() -> void raises {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}`)
-			suite := cliSmokeJSON(t, binary, workspace, false, "test", file, "--target", target)
-			tests, _ := cliSmokeAt(t, suite, "tests").([]any)
-			if cliSmokeAt(t, suite, "passed") != false || len(tests) != 2 {
-				t.Fatalf("suite = %s", mustJSON(t, suite))
-			}
-			cliSmokeEqual(t, cliSmokeAt(t, tests, 0, "reasons", 0, "tag"), "AssertionFailed")
-			cliSmokeEqual(t, cliSmokeAt(t, tests, 1, "passed"), true)
-			if message, _ := cliSmokeAt(t, tests, 0, "reasons", 0, "message").(string); !strings.Contains(message, `expected "expected"; received "actual"`) {
-				t.Fatalf("assertion message = %q", message)
-			}
-		})
+	t.Run("failing-tests/go", func(t *testing.T) {
+		t.Parallel()
+		workspace := smokeWorkspace(t)
+		file := cliSmokeWrite(t, workspace, "cases.ef", `effect fn test_bad() -> void raises {AssertionFailed} uses {Assert} {run Assert.equalText("actual","expected")} effect fn test_after() -> void raises {AssertionFailed} uses {Assert} {run Assert.check(true,"ok")}`)
+		suite := cliSmokeJSON(t, binary, workspace, false, "test", file, "--target", "go")
+		tests, _ := cliSmokeAt(t, suite, "tests").([]any)
+		if cliSmokeAt(t, suite, "passed") != false || len(tests) != 2 {
+			t.Fatalf("suite = %s", mustJSON(t, suite))
+		}
+		cliSmokeEqual(t, cliSmokeAt(t, tests, 0, "reasons", 0, "tag"), "AssertionFailed")
+		cliSmokeEqual(t, cliSmokeAt(t, tests, 1, "passed"), true)
+		if message, _ := cliSmokeAt(t, tests, 0, "reasons", 0, "message").(string); !strings.Contains(message, `expected "expected"; received "actual"`) {
+			t.Fatalf("assertion message = %q", message)
+		}
+	})
 
-		// A real watchdog is separate from program time and must disclaim cleanup.
-		t.Run("watchdog/"+target, func(t *testing.T) {
-			t.Parallel()
-			workspace := smokeWorkspace(t)
-			file := cliSmokeWrite(t, workspace, "cases.ef", `effect fn test_slow() -> void {run Clock.sleep(10000).provide<Clock>(LiveClock)}`)
-			if _, stderr := cliSmokeRun(t, binary, workspace, false, "test", file, "--target", target); !strings.Contains(stderr, "--live") {
-				t.Fatalf("live clock without --live: stderr = %q", stderr)
-			}
-			suite := cliSmokeJSON(t, binary, workspace, false, "test", file, "--target", target, "--live", "--timeout-ms", "100")
-			if cliSmokeAt(t, suite, "watchdogExpired") != true || cliSmokeAt(t, suite, "cleanupCompleted") != false {
-				t.Fatalf("suite = %s", mustJSON(t, suite))
-			}
-		})
-	}
+	// A real watchdog is separate from program time and must disclaim cleanup.
+	t.Run("watchdog/go", func(t *testing.T) {
+		t.Parallel()
+		workspace := smokeWorkspace(t)
+		file := cliSmokeWrite(t, workspace, "cases.ef", `effect fn test_slow() -> void {run Clock.sleep(10000).provide<Clock>(LiveClock)}`)
+		if _, stderr := cliSmokeRun(t, binary, workspace, false, "test", file, "--target", "go"); !strings.Contains(stderr, "--live") {
+			t.Fatalf("live clock without --live: stderr = %q", stderr)
+		}
+		suite := cliSmokeJSON(t, binary, workspace, false, "test", file, "--target", "go", "--live", "--timeout-ms", "100")
+		if cliSmokeAt(t, suite, "watchdogExpired") != true || cliSmokeAt(t, suite, "cleanupCompleted") != false {
+			t.Fatalf("suite = %s", mustJSON(t, suite))
+		}
+	})
 
 	t.Run("lint-rules", func(t *testing.T) {
 		t.Parallel()

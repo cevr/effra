@@ -81,24 +81,4 @@ func TestLifecycle(t *testing.T){
 	if err != nil {
 		t.Fatalf("Go lifecycle: %v %s", err, output)
 	}
-	js := runJS(t, lifecycleProbe, `
-const Gate=__ef_service_Gate;
-const order=[];let announce;const ready=new Promise(resolve=>announce=resolve);
-const provider={step:name=>name==='ready' ? Effect.promise(()=>ready) : Effect.gen(function*(){
- yield* Effect.acquireRelease(Effect.void,()=>Effect.sync(()=>order.push(name)));
- if(name==='child'){announce();yield* Effect.never;}
-})};
-const owned=await Effect.runPromise(Effect.provideService(__ef_function_owned(),Gate,provider));
-if(owned!=='ok'||JSON.stringify(order)!=='["child","parent"]')throw new Error('cleanup order '+order);
-let announced;const signal=new Promise(resolve=>announced=resolve);
-const failed=await Effect.runPromise(Effect.exit(Effect.provideService(__ef_function_unobserved(),Gate,{step:name=>name==='announce'?Effect.sync(()=>announced()):Effect.promise(()=>signal)})));
-if(failed._tag!=='Failure'||failed.cause.reasons[0].error._tag!=='Bad')throw new Error('unobserved failure disappeared');
-const leaking={step:()=>Effect.gen(function*(){yield* Effect.acquireRelease(Effect.void,()=>Effect.die(new Error('cleanup defect')));yield* Effect.never;})};
-const timeout=await Effect.runPromise(Effect.exit(Effect.provideService(__ef_function_recovered(),Gate,leaking)));
-if(timeout._tag!=='Failure'||timeout.cause.reasons.length!==2||timeout.cause.reasons[0].error._tag!=='Timeout'||timeout.cause.reasons[1]._tag!=='Die')throw new Error('timeout/catch erased cleanup '+JSON.stringify(timeout));
-console.log('lifecycle conformance');
-`)
-	if js != "lifecycle conformance\n" {
-		t.Fatalf("JS lifecycle: %s", js)
-	}
 }

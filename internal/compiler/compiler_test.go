@@ -1,9 +1,6 @@
 package compiler
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -46,7 +43,7 @@ func TestGuardrails(t *testing.T) {
 			if r.Checked || !hasCode(r, tc.code) {
 				t.Fatalf("expected %s: %+v", tc.code, r.Diagnostics)
 			}
-			if _, _, err := r.Emit(false); err == nil {
+			if _, err := r.EmitGo(); err == nil {
 				t.Fatal("invalid source emitted")
 			}
 		})
@@ -78,16 +75,13 @@ func TestContractsAndEntry(t *testing.T) {
 	if edited.Revision == r.Revision {
 		t.Fatal("stale revision")
 	}
-	js, decl, err := r.Emit(false)
+	emitted, err := r.EmitGo()
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, _, _ := original.Emit(false)
-	if js != again {
+	again, _ := original.EmitGo()
+	if emitted != again {
 		t.Fatal("nondeterministic emission")
-	}
-	if !strings.Contains(decl, `Effect.Effect<string, { readonly _tag: "Broken" }, UsersRequirement>`) {
-		t.Fatal(decl)
 	}
 	missing := Compile(`effect fn main() -> void uses {Console} { run Console.log("x") }`)
 	if !missing.Checked || missing.Entry() == nil {
@@ -106,26 +100,18 @@ impl Memory for Users { effect fn get(id: string) -> string raises {Missing, Bro
 effect fn greeting(id: string) -> string raises {Missing, Broken} uses {Users} { run Users.get(id) }
 effect fn recovered(id: string) -> string raises {Broken} uses {Users} { run greeting(id).catch<Missing>("unknown") }
 effect fn main() -> string raises {Broken} { run recovered("42").provide<Users>(Memory) }`
-	for _, target := range []string{"go", "js"} {
-		t.Run(target, func(t *testing.T) {
-			r := CompileFor(source, target)
-			if !r.Checked {
-				t.Fatalf("raises source did not check: %+v", r.Diagnostics)
-			}
-			if symbol := r.Find("recovered"); symbol == nil || !slices.Equal(symbol.Contract.Errors, []string{"Broken"}) || !slices.Equal(symbol.Actual.Services, []string{"Users"}) {
-				t.Fatalf("raises rows changed: %+v", r.Find("recovered"))
-			}
-			if err := r.Entry(); err != nil {
-				t.Fatal(err)
-			}
-			if target == "go" {
-				if _, err := r.EmitGo(); err != nil {
-					t.Fatal(err)
-				}
-			} else if _, _, err := r.Emit(false); err != nil {
-				t.Fatal(err)
-			}
-		})
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("raises source did not check: %+v", r.Diagnostics)
+	}
+	if symbol := r.Find("recovered"); symbol == nil || !slices.Equal(symbol.Contract.Errors, []string{"Broken"}) || !slices.Equal(symbol.Actual.Services, []string{"Users"}) {
+		t.Fatalf("raises rows changed: %+v", r.Find("recovered"))
+	}
+	if err := r.Entry(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.EmitGo(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -146,117 +132,6 @@ func TestDeferredRows(t *testing.T) {
 	r := Compile(`effect fn main() -> void { let pending = Console.log("never executed"); void }`)
 	if !r.Checked || len(r.Find("main").Actual.Services) != 0 {
 		t.Fatalf("constructing a recipe must not require execution: %+v", r.Diagnostics)
-	}
-}
-func runJS(t *testing.T, source, assertions string) string {
-	return runJSForTarget(t, "js", source, assertions)
-}
-
-func runJSForTarget(t *testing.T, target, source, assertions string) string {
-	t.Helper()
-	r := CompileFor(source, target)
-	if !r.Checked {
-		t.Fatalf("%s target: %+v", target, r.Diagnostics)
-	}
-	js, _, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The probe runs the public library module. It must close over its own
-	// selected prelude, and every generated name an assertion calls must be
-	// rooted by the probe's source rather than injected by the test.
-	if defects := jsClosureDefects(js); len(defects) > 0 {
-		t.Fatalf("library module: %s\n%s", strings.Join(defects, "; "), js)
-	}
-	bound := map[string]bool{}
-	for _, match := range jsGeneratedBinding.FindAllStringSubmatch(js, -1) {
-		bound[match[1]] = true
-	}
-	for _, name := range jsGeneratedName.FindAllString(assertions, -1) {
-		if !bound[name] {
-			t.Fatalf("probe assertion calls %s, which its source does not root", name)
-		}
-	}
-	return runJSProbe(t, withProbeImports(js), assertions)
-}
-
-// withProbeImports widens a module's `effect` import to every name, since
-// probe assertions are test code that uses `effect` directly. The module's
-// own import closure is checked before the widening.
-func withProbeImports(js string) string {
-	return jsCompleteEffectImport + jsEffectImportLine.ReplaceAllString(js, "")
-}
-
-var jsCompleteEffectImport = "import { " + strings.Join(jsEffectImports, ", ") + " } from 'effect';\n"
-
-// withCompletePrelude replaces a module's selected prelude with every chunk
-// and `effect` import, in catalog order.
-func withCompletePrelude(js string) string {
-	body := jsEffectImportLine.ReplaceAllString(js, "")
-	prelude := jsCompleteEffectImport
-	for _, chunk := range jsPrelude {
-		body = strings.Replace(body, chunk.source, "", 1)
-		prelude += chunk.source
-	}
-	return prelude + body
-}
-
-func runJSProbe(t *testing.T, js, assertions string) string {
-	t.Helper()
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("Bun is required for backend conformance tests")
-	}
-	dir := jsModuleDir(t, "conformance-")
-	path := filepath.Join(dir, "probe.mjs")
-	if err = os.WriteFile(path, []byte(js+"\n"+assertions), 0644); err != nil {
-		t.Fatal(err)
-	}
-	output, err := exec.Command(bun, path).CombinedOutput()
-	if err != nil {
-		t.Fatalf("runtime: %v\n%s\n%s", err, output, js)
-	}
-	return string(output)
-}
-func TestBackendLazinessRecoveryAndFailure(t *testing.T) {
-	source := `error Missing error Broken
- service Users { effect fn get(id: string) -> string raises {Missing, Broken} }
- impl Memory for Users {
-  effect fn get(id: string) -> string raises {Missing, Broken} {
-   if id == "42" { "Ada" } else { if id == "broken" { fail Broken } else { fail Missing } }
-  }
- }
- effect fn greeting(id: string) -> string raises {Missing, Broken} uses {Users} { let user = run Users.get(id) "Hi " + user }
- effect fn recovered(id: string) -> string raises {Broken} { run greeting(id).provide<Users>(Memory).catch<Missing>("unknown") }
- effect fn nested() -> string { run recovered(run recovered("42").catch<Broken>("bad")).catch<Broken>("bad") }`
-	output := runJS(t, source, `
-let calls = 0;
-const pending = Effect.provideService(__ef_function_greeting("42"), __ef_service_Users, {
- get: id => Effect.sync(() => { calls++; return "Ada"; })
-});
-if (calls !== 0) throw new Error("eager construction");
-if (await Effect.runPromise(pending) !== "Hi Ada") throw new Error("wrong result");
-await Effect.runPromise(pending);
-if (calls !== 2) throw new Error("program not replayable");
-if (await Effect.runPromise(__ef_function_recovered("missing")) !== "unknown") throw new Error("recovery failed");
-if (await Effect.runPromise(__ef_function_recovered("42")) !== "Hi Ada") throw new Error("success changed");
-const other = await Effect.runPromiseExit(__ef_function_recovered("broken"));
-if (other._tag !== "Failure" || !other.cause.reasons.some(reason => reason._tag === "Fail" && reason.error._tag === "Broken")) throw new Error("unhandled typed failure disappeared");
-await Effect.runPromise(__ef_function_nested());
-console.log("conformance: passed");
-`)
-	if !strings.Contains(output, "conformance: passed") {
-		t.Fatal(output)
-	}
-}
-func TestExample(t *testing.T) {
-	source, err := os.ReadFile("../../examples/main.ef")
-	if err != nil {
-		t.Fatal(err)
-	}
-	output := runJS(t, string(source), `await Effect.runPromise(__ef_function_main());`)
-	if output != "Hello, Ada\nUnknown user\n" {
-		t.Fatal(output)
 	}
 }
 func BenchmarkCompile10KLines(b *testing.B) {
@@ -295,8 +170,8 @@ func FuzzCompiler(f *testing.F) {
 			t.Skip()
 		}
 		r := Compile(source)
-		if r.Checked {
-			if _, _, err := r.Emit(false); err != nil {
+		if r.Checked && r.Entry() == nil {
+			if _, err := r.EmitGo(); err != nil {
 				t.Fatal(err)
 			}
 		}

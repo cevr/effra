@@ -32,12 +32,10 @@ effect fn main() -> void {
 	if err := os.WriteFile(file, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []string{"go", "js"} {
-		for _, signal := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
-			stdout, stderr, code := runInterruptedEntry(t, binary, root, file, target, signal)
-			if stdout != "ready\n" || stderr != "interrupt\n" || code != 130 {
-				t.Errorf("%s %v: code=%d stdout=%q stderr=%q; want 130 and %q", target, signal, code, stdout, stderr, "interrupt\n")
-			}
+	for _, signal := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM} {
+		stdout, stderr, code := runInterruptedEntry(t, binary, root, file, "go", signal)
+		if stdout != "ready\n" || stderr != "interrupt\n" || code != 130 {
+			t.Errorf("go %v: code=%d stdout=%q stderr=%q; want 130 and %q", signal, code, stdout, stderr, "interrupt\n")
 		}
 	}
 }

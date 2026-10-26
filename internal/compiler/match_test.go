@@ -85,10 +85,6 @@ func TestMatchProductsRunOnBothBackends(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runGenericDataNative(t, tc.source, tc.output+"\n")
-			assertion := fmt.Sprintf(`console.log(await Effect.runPromise(__ef_function_main()));`)
-			if output := runJS(t, tc.source, assertion); output != tc.output+"\n" {
-				t.Fatalf("JS product match: %q", output)
-			}
 		})
 	}
 	r := Compile(orderedSubjectsSource)
@@ -101,9 +97,6 @@ func TestMatchProductsRunOnBothBackends(t *testing.T) {
 func TestMatchProductFailingArmOnBothBackends(t *testing.T) {
 	source := strings.Replace(orderedSubjectsSource, "run decide(false)", `run decide(true).catch<Blocked>("blocked")`, 1)
 	runGenericDataNative(t, source, "first\nsecond\nblocked\n")
-	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != "first\nsecond\nblocked\n" {
-		t.Fatalf("JS failing product arm: %q", output)
-	}
 }
 
 func TestMatchProductDiagnostics(t *testing.T) {
@@ -429,9 +422,6 @@ func TestMatchAlternativeBindersRequireIdenticalCallableRows(t *testing.T) {
 	}
 	source := alternativeCallableSource(" raises {Bad}", " raises {Bad}")
 	runGenericDataNative(t, source, "good;caught\n")
-	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != "good;caught\n" {
-		t.Fatalf("JS identical-row alternatives: %q", output)
-	}
 	if choose := Compile(source).Find("choose"); choose == nil || len(choose.Actual.Errors) != 1 || choose.Actual.Errors[0] != "Bad" {
 		t.Fatalf("joined callable binder lost its failure row: %+v", choose)
 	}

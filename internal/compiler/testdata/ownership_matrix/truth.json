@@ -5741,58 +5741,47 @@
 },
 {
 "name": "rw_join_child_discard",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "rw_join_observer_discard",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "rw_join_stage_discard",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "rw_join_outside_discard",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "rw_interrupt_child_discard",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "rw_interrupt_observer_discard",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "rw_interrupt_stage_discard",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "rw_interrupt_outside_discard",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "rw_none_child_discard",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "rw_none_stage_discard",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "rw_none_outside_discard",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "fr_run_inside_read",
@@ -5860,28 +5849,23 @@
 },
 {
 "name": "rw_exitjoin",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "rw_exitjoincontrol",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "rw_timeoutjoin",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "rw_forkedobserver",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "rw_nestedscope",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "ch_exitjoin",
@@ -6641,372 +6625,298 @@
 },
 {
 "name": "fj_pending_right",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "fj_pending_left",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "fj_pending_none",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "fj_pending_joined",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "fj_observe_left",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "fj_observe_right",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "fj_observe_both",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "nj_call_arg",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "nj_call_arg_deep",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "nj_effect_call_arg",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "nj_let_call_arg",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "nj_binary",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "nj_scope_arg",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "nj_match_all",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "nj_match_first",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "nj_match_second",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "nj_match_arg_all",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "nj_match_arg_first",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "nj_if_arg_all",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "nj_if_arg_first",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "nj_if_arg_second",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "nj_order_join_first",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "nj_order_fail_first",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "nj_order_fail_first_nested",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_body_child",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_body_child_bail",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_body_child_nested",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_child_only",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_body_only",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_fail_before_fork_taken",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_fail_before_fork_skipped",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_caught_inside",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_child_joined",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_other_child_joined",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_two_children",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_two_same_label",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_two_calls",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_one_call",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_child_and_call",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_selected_fiber",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_child_edge",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_child_edge_joined",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_interrupt_retained",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_join_retained",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_timeout_fires",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_x_s2_interrupt_latejoin",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_x_s3_scope_close_cancel",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_x_w1_cancel_retained",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_x_w2_unobserved_retained",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_x_b1_join_cancelled",
-"go": "interrupted",
-"js": "interrupted"
+"go": "interrupted"
 },
 {
 "name": "cc_x_u1_undeclared_interrupt",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_x_u2_undeclared_timeout",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_x_r1_deadline_race",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_alt_if",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_alt_if_else_taken",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_alt_match",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_alt_calls",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_alt_both_fail",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_alt_nested",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_alt_if_then_fork",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_alt_if_then_fail",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_alt_two_in_arm",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_alt_match_then_fork",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_alt_calls_then_call",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_alt_nested_then_fork",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_provision_two_children",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_provision_one_child",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_joins_in_order",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_joins_in_order_first_caught",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_alt_arm_joined_then_fork",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_b1_handler_child_alias",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_b1_handler_child_nested",
-"go": "row-unsafe",
-"js": "row-unsafe"
+"go": "row-unsafe"
 },
 {
 "name": "cc_b1_handler_child_only",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 },
 {
 "name": "cc_b1_source_child_only",
-"go": "safe",
-"js": "safe"
+"go": "safe"
 }
 ]

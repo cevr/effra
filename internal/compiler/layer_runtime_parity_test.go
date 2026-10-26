@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-// Each scenario drives the build seam that provision lowers to on both
-// targets: the emitted Go runtime package and the JavaScript layer runtime.
-// Both record one trace per scenario and compare it with the same expected
-// string, so a target-specific ordering or cause difference fails here.
+// Each scenario drives the build seam that provision lowers to in the
+// emitted Go runtime package. The probe records one trace per scenario and
+// compares it with the expected string, so an ordering or cause difference
+// fails here.
 // Scenario keys name the behavior; traces use release/cancel markers and the
 // complete Cause in order ("Fail:<tag>", "Die:<message>", "Interrupt").
 
@@ -49,23 +49,10 @@ func checkParity(t *testing.T,wanted string,got map[string]string){
 }
 `
 
-const layerParityJSHelpers = `
-const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
-const parityCause=exit=>Exit.isFailure(exit)?exit.cause.reasons.map(reason=>reason._tag==='Fail'?'Fail:'+reason.error._tag:reason._tag==='Die'?'Die:'+reason.defect.message:'Interrupt').join(','):'';
-const parityResource=(trace,name,failure)=>Effect.acquireRelease(Effect.void,()=>Effect.sync(()=>trace.push('release:'+name)).pipe(Effect.flatMap(()=>failure?Effect.die(new Error(failure)):Effect.void)));
-const parityNode=(id,dependencies,construct)=>({id,dependencies,construct});
-const parityPlan=(id,nodes)=>({id,init:()=>({}),nodes,expose:state=>state});
-const checkParity=(want,got)=>{
- const failures=Object.keys(want).filter(name=>got[name]!==want[name]).map(name=>name+':\n got  '+got[name]+'\n want '+want[name]);
- if(failures.length||Object.keys(got).length!==Object.keys(want).length)throw new Error(failures.join('\n')+' scenarios '+JSON.stringify(got));
- console.log('parity');
-};
-`
-
 // runLayerParity runs goProbe as TestLayerParityProbe inside the emitted Go
-// runtime package with the race detector, and jsProbe against the emitted
-// JavaScript module. Both receive want as WANT.
-func runLayerParity(t *testing.T, want map[string]string, goProbe, jsProbe string) {
+// runtime package with the race detector. The probe receives want as
+// parityWant.
+func runLayerParity(t *testing.T, want map[string]string, goProbe string) {
 	t.Helper()
 	encoded, err := json.Marshal(want)
 	if err != nil {
@@ -92,14 +79,10 @@ func runLayerParity(t *testing.T, want map[string]string, goProbe, jsProbe strin
 	if output, err := runGoCommand(directory, "test", "-race", "-count=1", "-run", "^TestLayerParityProbe$", "./runtime"); err != nil {
 		t.Errorf("Go layer runtime: %v\n%s", err, output)
 	}
-	output := runJS(t, layerApplicationSource, layerParityJSHelpers+"const WANT="+string(encoded)+";\n"+jsProbe)
-	if output != "parity\n" {
-		t.Errorf("JavaScript layer runtime:\n%s", output)
-	}
 }
 
 // Rollback, cancellation and cause composition. The canonical order case uses
-// identities whose UTF-8 byte order (Go) and UTF-16 unit order differ.
+// identities whose UTF-8 byte order and UTF-16 unit order differ.
 func TestLayerRollbackCancellationAndCauseCompositionAcrossTargets(t *testing.T) {
 	want := map[string]string{
 		// A sibling fails while one dependent succeeded, one is still
@@ -182,54 +165,6 @@ func TestLayerParityProbe(t *testing.T){
  }
  checkParity(t,parityWant,got)
 }
-`, `
-const got={};
-{
- const trace=[],leftDone=deferred(),rightReady=deferred();
- const plan=parityPlan('partial',[
-  parityNode('a/base',[],()=>parityResource(trace,'a','a cleanup')),
-  parityNode('b/left',['a/base'],()=>Effect.gen(function*(){yield* parityResource(trace,'b','b cleanup');leftDone.resolve();})),
-  parityNode('c/right',['a/base'],()=>Effect.gen(function*(){yield* parityResource(trace,'c');rightReady.resolve();yield* Effect.never;}).pipe(Effect.onInterrupt(()=>Effect.sync(()=>trace.push('cancelled:c'))))),
-  parityNode('d/fail',['a/base'],()=>Effect.gen(function*(){yield* Effect.promise(()=>Promise.all([leftDone.promise,rightReady.promise]));return yield* Effect.fail({_tag:'ConfigError'});})),
-  parityNode('e/top',['b/left','c/right'],()=>Effect.sync(()=>trace.push('construct:e'))),
- ]);
- const exit=await Effect.runPromiseExit(__ef_provideLayer(plan,()=>Effect.sync(()=>trace.push('program'))));
- trace.push('cause:'+parityCause(exit));got.partialFailureRollback=trace.join('|');
-}
-{
- const trace=[],ready=deferred(),acquiring=deferred(),cancelled=deferred(),finish=deferred();
- const plan=parityPlan('cancel',[
-  parityNode('a/base',[],()=>parityResource(trace,'a')),
-  parityNode('b/never',['a/base'],()=>Effect.gen(function*(){yield* parityResource(trace,'b');ready.resolve();yield* Effect.never;}).pipe(Effect.onInterrupt(()=>Effect.sync(()=>{trace.push('cancelled:b');cancelled.resolve();})))),
-  parityNode('c/late',['a/base'],()=>Effect.acquireRelease(Effect.promise(()=>{acquiring.resolve();return finish.promise;}),()=>Effect.sync(()=>trace.push('release:c')))),
-  parityNode('d/top',['b/never','c/late'],()=>Effect.sync(()=>trace.push('construct:d'))),
- ]);
- const fiber=Effect.runFork(__ef_provideLayer(plan,()=>Effect.sync(()=>trace.push('program'))));
- await ready.promise;await acquiring.promise;fiber.interruptUnsafe();await cancelled.promise;
- trace.push('finish');finish.resolve();
- const exit=await Effect.runPromise(Fiber.await(fiber));
- trace.push('cause:'+parityCause(exit));got.cancelDuringConcurrentAcquisition=trace.join('|');
-}
-{
- const trace=[];
- const plan=parityPlan('program',[
-  parityNode('a/base',[],()=>parityResource(trace,'a','a cleanup')),
-  parityNode('b/top',['a/base'],()=>parityResource(trace,'b','b cleanup')),
- ]);
- const exit=await Effect.runPromiseExit(__ef_provideLayer(plan,()=>Effect.gen(function*(){yield* parityResource(trace,'program','program cleanup');return yield* Effect.fail({_tag:'ProgramError'});})));
- trace.push('cause:'+parityCause(exit));got.programFailureWithCleanupDefects=trace.join('|');
-}
-{
- const trace=[],readyBMP=deferred(),readyAstral=deferred(),barrier=deferred();
- const node=(id,name,tag,ready)=>parityNode(id,[],()=>Effect.uninterruptible(Effect.gen(function*(){
-  yield* parityResource(trace,name);ready.resolve();yield* Effect.promise(()=>barrier.promise);return yield* Effect.fail({_tag:tag});
- })));
- const result=Effect.runPromiseExit(__ef_provideLayer(parityPlan('order',[node('x\u{10000}','astral','Astral',readyAstral),node('x\uFFFF','bmp','BMP',readyBMP)]),()=>Effect.sync(()=>trace.push('program'))));
- await readyBMP.promise;await readyAstral.promise;barrier.resolve();
- const exit=await result;
- trace.push('cause:'+parityCause(exit));got.canonicalCodePointOrder=trace.join('|');
-}
-checkParity(WANT,got);
 `)
 }
 
@@ -265,30 +200,11 @@ func TestLayerParityProbe(t *testing.T){
  got["retryThroughNewBuild"]=trace.String()
  checkParity(t,parityWant,got)
 }
-`, `
-const got={},trace=[];let attempts=0;
-const plan=parityPlan('retry',[
- parityNode('a/flaky',[],()=>Effect.gen(function*(){
-  const name='a#'+(++attempts);trace.push('construct:'+name);
-  yield* parityResource(trace,name);
-  if(attempts===1)return yield* Effect.fail({_tag:'ConfigError'});
- })),
- parityNode('b/consumer',['a/flaky'],()=>Effect.sync(()=>trace.push('construct:b'))),
-]);
-const borrowed='outer';
-const program=()=>Effect.sync(()=>trace.push('program:'+borrowed));
-await Effect.runPromise(__ef_scoped(Effect.gen(function*(){
- yield* parityResource(trace,'outer');
- const first=yield* Effect.exit(__ef_provideLayer(plan,program));trace.push('first:'+parityCause(first));
- const second=yield* Effect.exit(__ef_provideLayer(plan,program));trace.push(Exit.isFailure(second)?'second:'+parityCause(second):'second:ok');
-})));
-got.retryThroughNewBuild=trace.join('|');
-checkParity(WANT,got);
 `)
 }
 
 // The runtime seam validates node and dependency identities before init or
-// any constructor, with the same refusal on both targets. A cycle is a defect,
+// any constructor. A cycle is a defect,
 // never a build that waits forever.
 func TestLayerMalformedPlansDefectBeforeCallbacksAcrossTargets(t *testing.T) {
 	cases := map[string]string{
@@ -369,40 +285,5 @@ func TestLayerParityProbe(t *testing.T){
  }
  checkParity(t,parityWant,got)
 }
-`, `
-const got={};let callbacks=0;
-const construct=()=>Effect.sync(()=>{callbacks++;});
-const node=(id,...dependencies)=>({id,dependencies,construct});
-const many=Array.from({length:1001},(_,i)=>node('n'+i));
-const wide=Array.from({length:101},(_,i)=>node('w'+i));
-const fan=wide.map(n=>n.id);
-for(let i=0;i<100;i++)wide.push(node('f'+i,...fan));
-const plans={
- missingPlanIdentity:['',[node('a')]],
- tooManyNodes:['p',many],
- oversizedIdentity:['p',[node('x'.repeat(100001))]],
- oversizedUTF8:['p',[node('é'.repeat(50001))]],
- tooManyEdges:['p',wide],
- emptyNodeIdentity:['p',[node('')]],
- missingConstructor:['p',[{id:'a',dependencies:[]}]],
- unsupportedKind:['p',[{...node('k'),kind:'worker'}]],
- duplicateIdentity:['p',[node('a'),node('a')]],
- unknownDependency:['p',[node('a','missing')]],
- duplicateDependency:['p',[node('a'),node('b','a','a')]],
- dependencyCycle:['p',[node('a','b'),node('b','a'),node('c')]],
- startupKindAccepted:['p',[{...node('s'),kind:'startup'}]],
- utf8WithinMetadataOK:['p',[node('é'.repeat(49990))]],
- malformedPlanIdentity:['p\uD800',[node('a')]],
- loneLowSurrogateIdentity:['p',[node('x\uDC00'),node('x\u{10000}')]],
- loneHighSurrogateDependency:['p',[node('a'),node('b','x\uD800')]],
- astralIdentitiesAccepted:['p',[node('x\u{10000}'),node('x\uFFFF','x\u{10000}')]],
-};
-for(const [name,[id,nodes]] of Object.entries(plans)){
- callbacks=0;
- const exit=await Effect.runPromiseExit(__ef_provideLayer({id,nodes,init:()=>{callbacks++;return {};},expose:state=>state},()=>Effect.void));
- if(Exit.isSuccess(exit))callbacks=0;
- got[name]=(Exit.isFailure(exit)?parityCause(exit):'ok')+'|callbacks:'+callbacks;
-}
-checkParity(WANT,got);
 `)
 }

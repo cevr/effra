@@ -12,42 +12,37 @@ record Box<T: type> { value: T }
 enum Presence<T: type> { None; Some { value: Box<T> } }
 record Envelope<T: type> { label: string; presence: Presence<T> }
 effect fn main() -> void { void }`
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(source, target)
-		if !r.Checked {
-			t.Fatal("finite generic layout rejected", r.Diagnostics)
-		}
-		if _, err := r.EmitGo(); err != nil {
-			t.Fatal(err)
-		}
-		if _, _, err := r.Emit(true); err != nil {
-			t.Fatal(err)
-		}
-		c := r.projector
-		user := c.canonicalRef(typeRef("User"))
-		envelope := c.templateByName("Envelope")
-		id, err := c.templateApplication(envelope, []TypeID{user})
-		if err != nil {
-			t.Fatal(err)
-		}
-		fields, ok := c.applicationFields(id)
-		if !ok || len(fields) != 2 || c.node(fields[0].typeID).Name != "string" {
-			t.Fatal("mixed concrete/variable layout lost", fields)
-		}
-		variants, ok := c.applicationVariants(fields[1].typeID)
-		if !ok || len(variants) != 2 || len(variants[0].Fields) != 0 {
-			t.Fatal("closed alternatives lost", variants)
-		}
-		boxFields, ok := c.applicationFields(variants[1].Fields[0].typeID)
-		if !ok || len(boxFields) != 1 || boxFields[0].typeID != user {
-			t.Fatal("nested variant substitution lost nominal argument", boxFields)
-		}
-		if envelope.Identity == c.templateByName("Presence").Identity || envelope.Parameters[0].Identity == c.templateByName("Presence").Parameters[0].Identity {
-			t.Fatal("declaration parameter owners collapsed")
-		}
-		if _, err := c.templateApplication(envelope, nil); err == nil {
-			t.Fatal("missing complete arguments admitted")
-		}
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatal("finite generic layout rejected", r.Diagnostics)
+	}
+	if _, err := r.EmitGo(); err != nil {
+		t.Fatal(err)
+	}
+	c := r.projector
+	user := c.canonicalRef(typeRef("User"))
+	envelope := c.templateByName("Envelope")
+	id, err := c.templateApplication(envelope, []TypeID{user})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields, ok := c.applicationFields(id)
+	if !ok || len(fields) != 2 || c.node(fields[0].typeID).Name != "string" {
+		t.Fatal("mixed concrete/variable layout lost", fields)
+	}
+	variants, ok := c.applicationVariants(fields[1].typeID)
+	if !ok || len(variants) != 2 || len(variants[0].Fields) != 0 {
+		t.Fatal("closed alternatives lost", variants)
+	}
+	boxFields, ok := c.applicationFields(variants[1].Fields[0].typeID)
+	if !ok || len(boxFields) != 1 || boxFields[0].typeID != user {
+		t.Fatal("nested variant substitution lost nominal argument", boxFields)
+	}
+	if envelope.Identity == c.templateByName("Presence").Identity || envelope.Parameters[0].Identity == c.templateByName("Presence").Parameters[0].Identity {
+		t.Fatal("declaration parameter owners collapsed")
+	}
+	if _, err := c.templateApplication(envelope, nil); err == nil {
+		t.Fatal("missing complete arguments admitted")
 	}
 }
 

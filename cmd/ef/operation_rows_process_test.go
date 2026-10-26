@@ -94,17 +94,8 @@ func runOperationRows(t *testing.T, source, want string) {
 	if err := os.WriteFile(file, []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
-	modules, err := filepath.Abs("../../node_modules")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(modules, filepath.Join(root, "node_modules")); err != nil {
-		t.Fatal(err)
-	}
-	for _, target := range []string{"go", "js"} {
-		stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", target)
-		if code != 0 || string(stdout) != want || len(stderr) != 0 {
-			t.Fatalf("%s: operation callback did not run: code=%d stdout=%q stderr=%q", target, code, stdout, stderr)
-		}
+	stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", "go")
+	if code != 0 || string(stdout) != want || len(stderr) != 0 {
+		t.Fatalf("go: operation callback did not run: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 }

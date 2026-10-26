@@ -121,7 +121,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	cases := mapping["cases"].([]any)
-	fmt.Fprintf(stdout, "effect mapping: %d selected behaviors at %s; %d shared Go/JS evidence tests\n", len(cases), pinnedCommit[:12], len(tests))
+	fmt.Fprintf(stdout, "effect mapping: %d selected behaviors at %s; %d Go evidence tests\n", len(cases), pinnedCommit[:12], len(tests))
 	return 0
 }
 

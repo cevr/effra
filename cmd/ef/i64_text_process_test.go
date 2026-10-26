@@ -57,13 +57,6 @@ func TestI64TextConversionsMatchAcrossGoAndJS(t *testing.T) {
 	}
 	binary := buildTestCLI(t)
 	root := t.TempDir()
-	modules, err := filepath.Abs("../../node_modules")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(modules, filepath.Join(root, "node_modules")); err != nil {
-		t.Fatal(err)
-	}
 	var source strings.Builder
 	source.WriteString("import I64 \"effra/i64\"\n")
 	for index, vector := range i64TextVectors {
@@ -91,25 +84,19 @@ func TestI64TextConversionsMatchAcrossGoAndJS(t *testing.T) {
 		Passed  bool     `json:"passed"`
 		Reasons []reason `json:"reasons"`
 	}
-	reports := map[string]map[string]outcome{}
-	for _, target := range []string{"go", "js"} {
-		stdout, stderr, _ := runTestCLIDir(t, binary, root, "", "test", path, "--target", target)
-		var report struct {
-			Tests []outcome `json:"tests"`
-		}
-		if err := json.Unmarshal(stdout, &report); err != nil || len(report.Tests) != len(i64TextVectors)+5 {
-			t.Fatalf("%s report: %v (%d tests)\nstdout=%s\nstderr=%s", target, err, len(report.Tests), stdout, stderr)
-		}
-		reports[target] = map[string]outcome{}
-		for _, test := range report.Tests {
-			reports[target][test.Name] = test
-		}
+	stdout, stderr, _ := runTestCLIDir(t, binary, root, "", "test", path, "--target", "go")
+	var report struct {
+		Tests []outcome `json:"tests"`
 	}
-	if !reflect.DeepEqual(reports["go"], reports["js"]) {
-		t.Fatalf("Go and JS conversion outcomes differ:\n%+v\n%+v", reports["go"], reports["js"])
+	if err := json.Unmarshal(stdout, &report); err != nil || len(report.Tests) != len(i64TextVectors)+5 {
+		t.Fatalf("go report: %v (%d tests)\nstdout=%s\nstderr=%s", err, len(report.Tests), stdout, stderr)
+	}
+	outcomes := map[string]outcome{}
+	for _, test := range report.Tests {
+		outcomes[test.Name] = test
 	}
 	for index, vector := range i64TextVectors {
-		got := reports["go"][fmt.Sprintf("test_parse_%d", index)]
+		got := outcomes[fmt.Sprintf("test_parse_%d", index)]
 		if vector.failure == "" {
 			if !got.Passed {
 				t.Errorf("parse %.40q: want %s, got %+v", vector.text, vector.formatted, got)
@@ -121,7 +108,7 @@ func TestI64TextConversionsMatchAcrossGoAndJS(t *testing.T) {
 		}
 	}
 	for index := range 5 {
-		if got := reports["go"][fmt.Sprintf("test_format_%d", index)]; !got.Passed {
+		if got := outcomes[fmt.Sprintf("test_format_%d", index)]; !got.Passed {
 			t.Errorf("format case %d failed: %+v", index, got)
 		}
 	}

@@ -2,7 +2,7 @@
   "schema": "effra-http-wire-vectors/1",
   "program": "examples/http-transport.ef",
   "profile": "HTTP/1.1 buffered, exact static paths, wrong method 404, shared Content-Type value policy",
-  "targets": ["go", "js-bun", "js-node"],
+  "targets": ["go"],
   "limits": {"maxBodyBytes": 16, "readHeaderMillis": 1000, "readBodyMillis": 300, "idleMillis": 1000, "maxActive": 1},
   "exchanges": [
     {"name": "route.success", "request": {"method": "GET", "target": "/health"}, "response": {"status": 200, "body": {"text": "ok"}, "contentType": "text/plain; charset=utf-8"}},

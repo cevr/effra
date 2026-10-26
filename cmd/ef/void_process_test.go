@@ -77,19 +77,17 @@ func TestVoidContractsAcrossCLIAndMCPProcesses(t *testing.T) {
 	if err := os.WriteFile(file, []byte(publicVoidSource), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []string{"go", "js"} {
-		stdout, stderr, code := runTestCLI(t, binary, "check", file, "--target", target)
-		if code != 0 || len(stderr) != 0 {
-			t.Fatalf("%s CLI check rejected canonical void source: code=%d stderr=%q", target, code, stderr)
-		}
-		response := readProcessJSON(t, stdout)
-		assertVoidProjection(t, response)
-		if response["producerIdentity"] != compiler.SemanticProducerIdentity {
-			t.Fatalf("%s CLI check lost the versioned semantic producer: %v", target, response["producerIdentity"])
-		}
+	stdout, stderr, code := runTestCLI(t, binary, "check", file, "--target", "go")
+	if code != 0 || len(stderr) != 0 {
+		t.Fatalf("go CLI check rejected canonical void source: code=%d stderr=%q", code, stderr)
+	}
+	response := readProcessJSON(t, stdout)
+	assertVoidProjection(t, response)
+	if response["producerIdentity"] != compiler.SemanticProducerIdentity {
+		t.Fatalf("go CLI check lost the versioned semantic producer: %v", response["producerIdentity"])
 	}
 
-	stdout, stderr, code := runTestCLI(t, binary, "inspect", file, "pure")
+	stdout, stderr, code = runTestCLI(t, binary, "inspect", file, "pure")
 	if code != 0 || len(stderr) != 0 {
 		t.Fatalf("CLI inspection of pure void function failed: code=%d stderr=%q", code, stderr)
 	}
@@ -302,46 +300,24 @@ func TestVoidBackendsAndTestRunnerRemainSilentAndVersioned(t *testing.T) {
 	if err := os.WriteFile(file, []byte(publicVoidSource), 0600); err != nil {
 		t.Fatal(err)
 	}
-	modules, err := filepath.Abs("../../node_modules")
-	if err != nil {
-		t.Fatal(err)
+	stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", "go")
+	if code != 0 || len(stdout) != 0 || len(stderr) != 0 {
+		t.Fatalf("go void entry was not silent: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	if err := os.Symlink(modules, filepath.Join(root, "node_modules")); err != nil {
-		t.Fatal(err)
-	}
-	for _, target := range []string{"go", "js"} {
-		stdout, stderr, code := runTestCLIDir(t, binary, root, "", "run", file, "--target", target)
-		if code != 0 || len(stdout) != 0 || len(stderr) != 0 {
-			t.Fatalf("%s void entry was not silent: code=%d stdout=%q stderr=%q", target, code, stdout, stderr)
-		}
-		stdout, stderr, code = runTestCLIDir(t, binary, root, "", "test", file, "--target", target)
-		if code != 0 || len(stderr) != 0 {
-			t.Fatalf("%s void test runner failed: code=%d stdout=%q stderr=%q", target, code, stdout, stderr)
-		}
-		var report struct {
-			Passed bool `json:"passed"`
-			Tests  []struct {
-				Name   string `json:"name"`
-				Passed bool   `json:"passed"`
-			} `json:"tests"`
-			Target string `json:"target"`
-		}
-		if err := json.Unmarshal(stdout, &report); err != nil || !report.Passed || report.Target != target || len(report.Tests) != 1 || report.Tests[0].Name != "test_void" || !report.Tests[0].Passed {
-			t.Fatalf("%s void test report was not complete: err=%v report=%+v stdout=%q", target, err, report, stdout)
-		}
-	}
-
-	output := filepath.Join(root, "dist", "void.mjs")
-	stdout, stderr, code := runTestCLIDir(t, binary, root, "", "build", file, "--target", "js", "-o", output, "--entry")
+	stdout, stderr, code = runTestCLIDir(t, binary, root, "", "test", file, "--target", "go")
 	if code != 0 || len(stderr) != 0 {
-		t.Fatalf("JavaScript void library build failed: code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		t.Fatalf("go void test runner failed: code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
-	declaration, err := os.ReadFile(strings.TrimSuffix(output, ".mjs") + ".d.mts")
-	if err != nil {
-		t.Fatal(err)
+	var report struct {
+		Passed bool `json:"passed"`
+		Tests  []struct {
+			Name   string `json:"name"`
+			Passed bool   `json:"passed"`
+		} `json:"tests"`
+		Target string `json:"target"`
 	}
-	if !strings.Contains(string(declaration), "void") || !strings.Contains(string(declaration), "Effect.Effect<void") {
-		t.Fatalf("JavaScript declaration did not retain ordinary/effect void contracts:\n%s", declaration)
+	if err := json.Unmarshal(stdout, &report); err != nil || !report.Passed || report.Target != "go" || len(report.Tests) != 1 || report.Tests[0].Name != "test_void" || !report.Tests[0].Passed {
+		t.Fatalf("go void test report was not complete: err=%v report=%+v stdout=%q", err, report, stdout)
 	}
 
 	goFile := filepath.Join(root, "error-only.ef")

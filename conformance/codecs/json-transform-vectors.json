@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "profile": "effra/json-structural-1",
-  "comparator": {"script": "conformance/codecs/effect-transform-comparator.mjs", "output": "conformance/codecs/effect-transform-comparator.out.jsonl"},
+  "comparator": {"output": "conformance/codecs/effect-transform-comparator.out.jsonl"},
   "behaviors": {
     "email": "decode: a non-empty string, lower-cased, else fails \"empty\"; encode: the string, except \"blocked\" fails \"blocked\"",
     "status": "decode: the Active/Enabled/Suspended union to the string Active or Suspended (Enabled normalizes to Active); encode: the canonical variant",

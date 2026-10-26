@@ -5,28 +5,15 @@ import (
 	"testing"
 )
 
-// Decision review round 2: each fix is exercised on both targets. Accepted
-// programs run natively and on JavaScript with the same output; refusals carry
-// the same diagnostic for both targets.
+// Decision review round 2: accepted programs run natively with the expected
+// output; refusals carry the expected diagnostic.
 
-var decisionTargets = []string{"go", "js"}
-
-func runDecisionOnBothTargets(t *testing.T, source, want string) {
+func requireDecisionRefusal(t *testing.T, source, code, message string) {
 	t.Helper()
-	runGenericDataNative(t, source, want)
-	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != want {
-		t.Fatalf("JavaScript: want %q, got %q", want, output)
-	}
-}
-
-func requireDecisionRefusalOnBothTargets(t *testing.T, source, code, message string) {
-	t.Helper()
-	for _, target := range decisionTargets {
-		r := CompileFor(source, target)
-		d, ok := findDecisionDiagnostic(r, code)
-		if !ok || !strings.Contains(d.Message, message) {
-			t.Fatalf("%s: want %s %q, got %+v", target, code, message, r.Diagnostics)
-		}
+	r := CompileFor(source, "go")
+	d, ok := findDecisionDiagnostic(r, code)
+	if !ok || !strings.Contains(d.Message, message) {
+		t.Fatalf("go: want %s %q, got %+v", code, message, r.Diagnostics)
 	}
 }
 
@@ -63,7 +50,7 @@ fn step(state: S, event: E) -> decision<S, void> {
 `) + `effect fn main() -> string {
     label(step(S.Idle {}, E.Ping {}))
 }`
-	runDecisionOnBothTargets(t, source, "enter active\n")
+	runGenericDataNative(t, source, "enter active\n")
 
 	service := decisionPrelude + `service decision {
     effect fn get() -> i64
@@ -75,13 +62,11 @@ fn step(state: S, event: E) -> decision<S, void> {
     ignore
 }
 `
-	for _, target := range decisionTargets {
-		if r := CompileFor(service, target); len(r.Diagnostics) != 0 {
-			t.Fatalf("%s: service named decision: %+v", target, r.Diagnostics)
-		}
+	if r := CompileFor(service, "go"); len(r.Diagnostics) != 0 {
+		t.Fatalf("go: service named decision: %+v", r.Diagnostics)
 	}
 	for _, refused := range []string{"decision.enter(state)", "decision.enter { next: state }", "decision(state)"} {
-		requireDecisionRefusalOnBothTargets(t, decisionPrelude+"fn step(state: S, event: E) -> decision<S, void> { "+refused+" }\n", "EF143", "a decision is written with its forms")
+		requireDecisionRefusal(t, decisionPrelude+"fn step(state: S, event: E) -> decision<S, void> { "+refused+" }\n", "EF143", "a decision is written with its forms")
 	}
 }
 
@@ -101,7 +86,7 @@ fn step(state: S, event: E) -> decision<S, void> {
     ` + c.body + `
 }
 `
-			requireDecisionRefusalOnBothTargets(t, source, "EF143", "this statement discards its decision; a decision is a value, not an early exit")
+			requireDecisionRefusal(t, source, "EF143", "this statement discards its decision; a decision is a value, not an early exit")
 		})
 	}
 	source := decisionLabelSource(`fn guard(s: S) -> decision<S, void> {
@@ -115,7 +100,7 @@ fn step(state: S, event: E) -> decision<S, void> {
 `) + `effect fn main() -> string {
     label(step(S.Idle {}, E.Ping {}))
 }`
-	runDecisionOnBothTargets(t, source, "reject\n")
+	runGenericDataNative(t, source, "reject\n")
 }
 
 // M3: the decision words are explicit field labels, so a derived codec carries
@@ -150,14 +135,14 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
     let mark = Mark.Finished(done: named.done, enter: named.enter)
     wire + "|" + (if finished(step) { "done" } else { "open" }) + "|" + marked(mark) + named.title
 }`
-	runDecisionOnBothTargets(t, source, `{"title":"a","done":false,"enter":"2"}|done|open b`+"\n")
+	runGenericDataNative(t, source, `{"title":"a","done":false,"enter":"2"}|done|open b`+"\n")
 
 	for _, c := range []struct{ name, source, message string }{
 		{"constructor shorthand", "record Todo { done: bool }\nfn f(x: bool) -> Todo { Todo { done } }\n", "done is a decision word, so it cannot be shorthand for a local; write `done: value`"},
 		{"pattern shorthand", "enum Step { Finished { done: bool } }\nfn f(s: Step) -> bool {\n    match s {\n        Step.Finished { done } => true\n    }\n}\n", "done is a decision word, so it cannot be shorthand for a local; write `done: binder`"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			requireDecisionRefusalOnBothTargets(t, c.source, "EF002", c.message)
+			requireDecisionRefusal(t, c.source, "EF002", c.message)
 		})
 	}
 
@@ -213,7 +198,7 @@ fn outputIs(d: decision<S, i64>, want: i64) -> string {
     label(bare(idle, E.Ping {})) + ";" + label(bare(idle, E.Pong {})) + ";" + label(unit(idle, E.Ping {})) + ";" + outputIs(valued(idle, E.Ping {}), 1) + outputIs(literal(idle, E.Ping {}), 1) + outputIs(product(idle, E.Ping {}), 1) + outputIs(product(S.Active { n: 1 }, E.Pong {}), 2) + outputIs(nested(idle, E.Ping {}), 1) + outputIs(multiline(idle, E.Ping {}), 3)
 }`
 	const want = "done;stay idle;done;yyyyyy\n"
-	runDecisionOnBothTargets(t, source, want)
+	runGenericDataNative(t, source, want)
 
 	formatted, err := FormatSource(source)
 	if err != nil {
@@ -228,7 +213,7 @@ fn outputIs(d: decision<S, i64>, want: i64) -> string {
 			t.Fatalf("formatted program lacks %q:\n%s", kept, formatted.Text)
 		}
 	}
-	runDecisionOnBothTargets(t, formatted.Text, want)
+	runGenericDataNative(t, formatted.Text, want)
 
 	// Without a separator, the next arm's pattern is the operand and the arrow
 	// after it is refused with the repair.
@@ -236,7 +221,7 @@ fn outputIs(d: decision<S, i64>, want: i64) -> string {
     match event { E.Ping => done E.Pong => stay state }
 }
 `
-	requireDecisionRefusalOnBothTargets(t, refused, "EF002", "end a bare `done` with `,` or start the next arm on a new line")
+	requireDecisionRefusal(t, refused, "EF002", "end a bare `done` with `,` or start the next arm on a new line")
 }
 
 // Round 3 O1: the missing-separator repair also covers a next arm that is an
@@ -256,7 +241,7 @@ func TestDecisionMissingSeparatorRepairCoversOrAndProductArms(t *testing.T) {
     ` + tc.body + `
 }
 `
-			requireDecisionRefusalOnBothTargets(t, source, "EF002", "so the next arm lost its first pattern; end a bare `done` with `,` or start the next arm on a new line")
+			requireDecisionRefusal(t, source, "EF002", "so the next arm lost its first pattern; end a bare `done` with `,` or start the next arm on a new line")
 		})
 	}
 
@@ -270,15 +255,13 @@ func TestDecisionMissingSeparatorRepairCoversOrAndProductArms(t *testing.T) {
     ` + body + `
 }
 `
-		for _, target := range decisionTargets {
-			r := CompileFor(source, target)
-			if _, ok := findDecisionDiagnostic(r, "EF118"); !ok {
-				t.Fatalf("%s: want EF118 for %q, got %+v", target, body, r.Diagnostics)
-			}
-			for _, d := range r.Diagnostics {
-				if strings.Contains(d.Message, "lost its first pattern") {
-					t.Fatalf("%s: repair fired outside a same-line `done X,`: %+v", target, d)
-				}
+		r := CompileFor(source, "go")
+		if _, ok := findDecisionDiagnostic(r, "EF118"); !ok {
+			t.Fatalf("go: want EF118 for %q, got %+v", body, r.Diagnostics)
+		}
+		for _, d := range r.Diagnostics {
+			if strings.Contains(d.Message, "lost its first pattern") {
+				t.Fatalf("go: repair fired outside a same-line `done X,`: %+v", d)
 			}
 		}
 	}
@@ -325,10 +308,8 @@ fn count(d: decision<S, i64>) -> i64 {
 	if err != nil || formatted.Text != canonical {
 		t.Fatalf("canonical decision source changed: %v\n%s", err, formatted.Text)
 	}
-	for _, target := range decisionTargets {
-		if r := CompileFor(canonical, target); len(r.Diagnostics) != 0 {
-			t.Fatalf("%s: %+v", target, r.Diagnostics)
-		}
+	if r := CompileFor(canonical, "go"); len(r.Diagnostics) != 0 {
+		t.Fatalf("go: %+v", r.Diagnostics)
 	}
 }
 
@@ -339,10 +320,10 @@ func TestDecisionPrecedenceMistakeNamesTheRepair(t *testing.T) {
     done a + 2
 }
 `
-	requireDecisionRefusalOnBothTargets(t, source, "EF106", "`done` binds tighter than +, so write `done (a + b)`")
+	requireDecisionRefusal(t, source, "EF106", "`done` binds tighter than +, so write `done (a + b)`")
 }
 
-// o1: plans publish each transition under its source word on both targets.
+// o1: plans publish each transition under its source word.
 func TestDecisionPlanKindsAreSourceWordsOnBothTargets(t *testing.T) {
 	source := decisionPrelude + `fn step(state: S, event: E) -> decision<S, void> {
     match state, event {
@@ -354,17 +335,15 @@ func TestDecisionPlanKindsAreSourceWordsOnBothTargets(t *testing.T) {
 }
 machine M { initial S.Idle {}; step step }
 `
-	for _, target := range decisionTargets {
-		plan := CompileFor(source, target).FindMachine("M")
-		if plan == nil {
-			t.Fatalf("%s: no plan", target)
-		}
-		got := []string{}
-		for _, transition := range plan.Transitions {
-			got = append(got, transition.Decision)
-		}
-		if strings.Join(got, ",") != "enter,ignore,stay,done" {
-			t.Fatalf("%s: plan decisions = %v", target, got)
-		}
+	plan := CompileFor(source, "go").FindMachine("M")
+	if plan == nil {
+		t.Fatal("go: no plan")
+	}
+	got := []string{}
+	for _, transition := range plan.Transitions {
+		got = append(got, transition.Decision)
+	}
+	if strings.Join(got, ",") != "enter,ignore,stay,done" {
+		t.Fatalf("go: plan decisions = %v", got)
 	}
 }

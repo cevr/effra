@@ -35,91 +35,87 @@ impl SettingsLive for Settings {
 }
 fn ordinary(required: string = "x", budget: i64 = Zero, bound: string = LocalSuffix, maxActive: i64 = Zero, maxDepth: i64 = Zero, maxBodyBytes: i64 = Zero, enabled: bool = Disabled, empty: string = "") -> string { required }
 fn marked(required required: string) -> string { required }`
-	for _, target := range []string{"go", "js"} {
-		t.Run(target, func(t *testing.T) {
-			r := CompileFor(source, target)
-			if !r.Checked {
-				t.Fatalf("checked parameter facts rejected: %+v", r.Diagnostics)
+	r := CompileFor(source, "go")
+	if !r.Checked {
+		t.Fatalf("checked parameter facts rejected: %+v", r.Diagnostics)
+	}
+	if r.SchemaVersion != SemanticSchemaVersion || SemanticSchemaVersion != 9 || TypeQuerySchemaVersion != 4 || interfaceSummarySchema != 5 || SemanticProducerIdentity != "effra/checker-abi-10/bundled-interface-5" {
+		t.Fatalf("semantic contract epoch is stale: schema=%d query=%d interface=%d producer=%s", r.SchemaVersion, TypeQuerySchemaVersion, interfaceSummarySchema, SemanticProducerIdentity)
+	}
+	findSymbol := func(name string) *Symbol {
+		t.Helper()
+		for i := range r.Symbols {
+			if r.Symbols[i].Name == name {
+				return &r.Symbols[i]
 			}
-			if r.SchemaVersion != SemanticSchemaVersion || SemanticSchemaVersion != 9 || TypeQuerySchemaVersion != 4 || interfaceSummarySchema != 5 || SemanticProducerIdentity != "effra/checker-abi-10/bundled-interface-5" {
-				t.Fatalf("semantic contract epoch is stale: schema=%d query=%d interface=%d producer=%s", r.SchemaVersion, TypeQuerySchemaVersion, interfaceSummarySchema, SemanticProducerIdentity)
-			}
-			findSymbol := func(name string) *Symbol {
-				t.Helper()
-				for i := range r.Symbols {
-					if r.Symbols[i].Name == name {
-						return &r.Symbols[i]
-					}
-				}
-				return nil
-			}
-			ordinary := findSymbol("ordinary")
-			marked := findSymbol("marked")
-			if ordinary == nil || marked == nil || len(ordinary.Params) != 8 || len(marked.Params) != 1 {
-				t.Fatalf("public parameter symbols missing: %+v", r.Symbols)
-			}
-			if ordinary.Params[0].RequiredChoice || ordinary.Params[0].DefaultValue == nil || *ordinary.Params[0].DefaultValue != (ConstantValue{Kind: "string", Value: "x"}) {
-				t.Fatalf("ordinary parameter named required became a role: %+v", ordinary.Params[0])
-			}
-			for i := 1; i < len(ordinary.Params); i++ {
-				if ordinary.Params[i].DefaultValue == nil {
-					t.Fatalf("same-spelled ordinary parameter was refused: %+v", ordinary.Params[i])
-				}
-			}
-			if ordinary.Params[1].DefaultValue.Value != "0" || ordinary.Params[2].DefaultValue.Value != "!" || ordinary.Params[6].DefaultValue.Kind != "bool" || ordinary.Params[6].DefaultValue.Value != "false" || ordinary.Params[7].DefaultValue == nil || ordinary.Params[7].DefaultValue.Value != "" {
-				t.Fatalf("resolved scalar defaults lost zero, alias or false: %+v", ordinary.Params)
-			}
-			serviceDefault := r.Program.Services[0].Methods[0].Params[1].DefaultValue
-			implementationDefault := r.Program.Providers[0].Methods[0].Params[1].DefaultValue
-			if serviceDefault == nil || serviceDefault.Value != "!" || implementationDefault != nil {
-				t.Fatalf("service declaration is not the sole default owner: service=%+v implementation=%+v", serviceDefault, implementationDefault)
-			}
-			if !marked.Params[0].RequiredChoice || marked.Params[0].DefaultValue != nil {
-				t.Fatalf("required-choice fact was not published: %+v", marked.Params[0])
-			}
-			if ordinary.Contract.Callable == nil || len(ordinary.Contract.Callable.Parameters) != len(ordinary.Params) || ordinary.Contract.Callable.Parameters[0].DefaultValue == nil {
-				t.Fatalf("callable parameter projection is incomplete: %+v", ordinary.Contract.Callable)
-			}
-			if ordinary.Contract.Callable.Parameters[1].DefaultValue == nil || ordinary.Contract.Callable.Parameters[1].DefaultValue.Value != "0" {
-				t.Fatalf("zero default was lost from callable type: %+v", ordinary.Contract.Callable.Parameters)
-			}
-			response, err := r.QueryType(TypeSelection{Symbol: "ordinary"})
-			if err != nil || response.Selection.Symbol == nil || response.Selection.Target == nil || response.Selection.Target.Callable == nil || response.Response["querySchemaVersion"] != 4 {
-				t.Fatalf("query omitted checked callable facts: selection=%+v err=%v", response.Selection, err)
-			}
-			if response.Selection.Presentation != `fn ordinary(required: string = "x", budget: i64 = 0, bound: string = "!", maxActive: i64 = 0, maxDepth: i64 = 0, maxBodyBytes: i64 = 0, enabled: bool = false, empty: string = "") -> string` {
-				t.Fatalf("callable query presentation omitted checked parameter facts: %q", response.Selection.Presentation)
-			}
-			params := response.Selection.Target.Callable.Parameters
-			if params[0].DefaultValue == nil || params[0].DefaultValue.Value != "x" || params[0].RequiredChoice {
-				t.Fatalf("declaration query lost default facts: %+v", params[0])
-			}
-			parameterAt := strings.Index(source, "fn ordinary(") + len("fn ordinary(")
-			parameterQuery, err := r.QueryType(TypeSelection{Offset: &parameterAt})
-			if err != nil || parameterQuery.Selection.Target == nil || parameterQuery.Selection.Target.Parameter == nil || parameterQuery.Selection.Target.Parameter.DefaultValue == nil || parameterQuery.Selection.Target.Parameter.DefaultValue.Value != "x" {
-				t.Fatalf("selected parameter query lost its checked contract fact: %+v err=%v", parameterQuery.Selection, err)
-			}
-			if parameterQuery.Selection.Presentation != `parameter required: string = "x"` {
-				t.Fatalf("selected parameter presentation omitted its default: %q", parameterQuery.Selection.Presentation)
-			}
-			markedQuery, err := r.QueryType(TypeSelection{Symbol: "marked"})
-			if err != nil || markedQuery.Selection.Presentation != `fn marked(required required: string) -> string` {
-				t.Fatalf("required-choice role is absent from callable presentation: selection=%+v err=%v", markedQuery.Selection, err)
-			}
-			defaultAlias := "suffix: string = Defaults.defaultSuffix"
-			defaultAt := strings.Index(source, defaultAlias)
-			if defaultAt < 0 {
-				t.Fatal("service default alias fixture was not found")
-			}
-			at := defaultAt + len("suffix: string = Defaults.")
-			selected, err := r.QueryType(TypeSelection{Offset: &at})
-			if err != nil || selected.Selection.Target == nil || selected.Selection.Target.Kind != "constant" || selected.Selection.Target.Constant == nil || selected.Selection.Target.Constant.Value != "!" || selected.Selection.Target.Module != "effra/constants" || selected.Selection.Target.Source == "" || selected.Selection.Target.LocationAvailable {
-				t.Fatalf("default alias lost its checked lexical target: %+v err=%v", selected.Selection, err)
-			}
-			if len(r.Sources) < 2 || len(r.BundledBindings) == 0 {
-				t.Fatalf("distributed default constant was not loaded into the source revision: %+v", r.Sources)
-			}
-		})
+		}
+		return nil
+	}
+	ordinary := findSymbol("ordinary")
+	marked := findSymbol("marked")
+	if ordinary == nil || marked == nil || len(ordinary.Params) != 8 || len(marked.Params) != 1 {
+		t.Fatalf("public parameter symbols missing: %+v", r.Symbols)
+	}
+	if ordinary.Params[0].RequiredChoice || ordinary.Params[0].DefaultValue == nil || *ordinary.Params[0].DefaultValue != (ConstantValue{Kind: "string", Value: "x"}) {
+		t.Fatalf("ordinary parameter named required became a role: %+v", ordinary.Params[0])
+	}
+	for i := 1; i < len(ordinary.Params); i++ {
+		if ordinary.Params[i].DefaultValue == nil {
+			t.Fatalf("same-spelled ordinary parameter was refused: %+v", ordinary.Params[i])
+		}
+	}
+	if ordinary.Params[1].DefaultValue.Value != "0" || ordinary.Params[2].DefaultValue.Value != "!" || ordinary.Params[6].DefaultValue.Kind != "bool" || ordinary.Params[6].DefaultValue.Value != "false" || ordinary.Params[7].DefaultValue == nil || ordinary.Params[7].DefaultValue.Value != "" {
+		t.Fatalf("resolved scalar defaults lost zero, alias or false: %+v", ordinary.Params)
+	}
+	serviceDefault := r.Program.Services[0].Methods[0].Params[1].DefaultValue
+	implementationDefault := r.Program.Providers[0].Methods[0].Params[1].DefaultValue
+	if serviceDefault == nil || serviceDefault.Value != "!" || implementationDefault != nil {
+		t.Fatalf("service declaration is not the sole default owner: service=%+v implementation=%+v", serviceDefault, implementationDefault)
+	}
+	if !marked.Params[0].RequiredChoice || marked.Params[0].DefaultValue != nil {
+		t.Fatalf("required-choice fact was not published: %+v", marked.Params[0])
+	}
+	if ordinary.Contract.Callable == nil || len(ordinary.Contract.Callable.Parameters) != len(ordinary.Params) || ordinary.Contract.Callable.Parameters[0].DefaultValue == nil {
+		t.Fatalf("callable parameter projection is incomplete: %+v", ordinary.Contract.Callable)
+	}
+	if ordinary.Contract.Callable.Parameters[1].DefaultValue == nil || ordinary.Contract.Callable.Parameters[1].DefaultValue.Value != "0" {
+		t.Fatalf("zero default was lost from callable type: %+v", ordinary.Contract.Callable.Parameters)
+	}
+	response, err := r.QueryType(TypeSelection{Symbol: "ordinary"})
+	if err != nil || response.Selection.Symbol == nil || response.Selection.Target == nil || response.Selection.Target.Callable == nil || response.Response["querySchemaVersion"] != 4 {
+		t.Fatalf("query omitted checked callable facts: selection=%+v err=%v", response.Selection, err)
+	}
+	if response.Selection.Presentation != `fn ordinary(required: string = "x", budget: i64 = 0, bound: string = "!", maxActive: i64 = 0, maxDepth: i64 = 0, maxBodyBytes: i64 = 0, enabled: bool = false, empty: string = "") -> string` {
+		t.Fatalf("callable query presentation omitted checked parameter facts: %q", response.Selection.Presentation)
+	}
+	params := response.Selection.Target.Callable.Parameters
+	if params[0].DefaultValue == nil || params[0].DefaultValue.Value != "x" || params[0].RequiredChoice {
+		t.Fatalf("declaration query lost default facts: %+v", params[0])
+	}
+	parameterAt := strings.Index(source, "fn ordinary(") + len("fn ordinary(")
+	parameterQuery, err := r.QueryType(TypeSelection{Offset: &parameterAt})
+	if err != nil || parameterQuery.Selection.Target == nil || parameterQuery.Selection.Target.Parameter == nil || parameterQuery.Selection.Target.Parameter.DefaultValue == nil || parameterQuery.Selection.Target.Parameter.DefaultValue.Value != "x" {
+		t.Fatalf("selected parameter query lost its checked contract fact: %+v err=%v", parameterQuery.Selection, err)
+	}
+	if parameterQuery.Selection.Presentation != `parameter required: string = "x"` {
+		t.Fatalf("selected parameter presentation omitted its default: %q", parameterQuery.Selection.Presentation)
+	}
+	markedQuery, err := r.QueryType(TypeSelection{Symbol: "marked"})
+	if err != nil || markedQuery.Selection.Presentation != `fn marked(required required: string) -> string` {
+		t.Fatalf("required-choice role is absent from callable presentation: selection=%+v err=%v", markedQuery.Selection, err)
+	}
+	defaultAlias := "suffix: string = Defaults.defaultSuffix"
+	defaultAt := strings.Index(source, defaultAlias)
+	if defaultAt < 0 {
+		t.Fatal("service default alias fixture was not found")
+	}
+	at := defaultAt + len("suffix: string = Defaults.")
+	selected, err := r.QueryType(TypeSelection{Offset: &at})
+	if err != nil || selected.Selection.Target == nil || selected.Selection.Target.Kind != "constant" || selected.Selection.Target.Constant == nil || selected.Selection.Target.Constant.Value != "!" || selected.Selection.Target.Module != "effra/constants" || selected.Selection.Target.Source == "" || selected.Selection.Target.LocationAvailable {
+		t.Fatalf("default alias lost its checked lexical target: %+v err=%v", selected.Selection, err)
+	}
+	if len(r.Sources) < 2 || len(r.BundledBindings) == 0 {
+		t.Fatalf("distributed default constant was not loaded into the source revision: %+v", r.Sources)
 	}
 	for _, source := range []string{
 		`import Defaults "effra/constants" fn onlyDefault(value: string = Defaults.defaultSuffix) -> string { value }`,
@@ -258,29 +254,13 @@ func TestParameterDefaultsUseCheckedScalarOwnerAndStayFullArity(t *testing.T) {
 			}
 		})
 	}
-	r := CompileFor(`fn render(value: string = "") -> string { value }`, "js")
-	if !r.Checked {
-		t.Fatal(r.Diagnostics)
+	minimum := CompileFor(`fn minimum(value: i64 = -9223372036854775808) -> i64 { value }`, "go")
+	if !minimum.Checked {
+		t.Fatalf("direct negative minimum default was rejected for go: %+v", minimum.Diagnostics)
 	}
-	_, declarations, err := r.Emit(false)
-	if err != nil || !strings.Contains(declarations, `__ef_function_render: (arg_value: string) => string;`) {
-		t.Fatalf("default incorrectly made the runtime declaration optional: %v\n%s", err, declarations)
-	}
-	checkStrictTypeScript(t, declarations, `import { render } from "./generated.mjs";
-render("ok");
-// @ts-expect-error Defaults do not make the foreign JavaScript ABI optional.
-render();
-// @ts-expect-error The full required ABI does not accept undefined either.
-render(undefined);`)
-	for _, target := range []string{"go", "js"} {
-		minimum := CompileFor(`fn minimum(value: i64 = -9223372036854775808) -> i64 { value }`, target)
-		if !minimum.Checked {
-			t.Fatalf("direct negative minimum default was rejected for %s: %+v", target, minimum.Diagnostics)
-		}
-		positiveOverflow := CompileFor(`fn tooLarge(value: i64 = 9223372036854775808) -> i64 { value }`, target)
-		if positiveOverflow.Checked || !hasCode(positiveOverflow, "EF106") {
-			t.Fatalf("positive out-of-range default did not retain EF106 for %s: %+v", target, positiveOverflow.Diagnostics)
-		}
+	positiveOverflow := CompileFor(`fn tooLarge(value: i64 = 9223372036854775808) -> i64 { value }`, "go")
+	if positiveOverflow.Checked || !hasCode(positiveOverflow, "EF106") {
+		t.Fatalf("positive out-of-range default did not retain EF106 for go: %+v", positiveOverflow.Diagnostics)
 	}
 	// B2 binds the omitted argument to the declared constant; see
 	// parameter_default_calls_test.go for the call contract.

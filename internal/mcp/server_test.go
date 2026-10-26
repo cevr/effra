@@ -178,29 +178,27 @@ effect fn main() -> string { run Store.label().provide(App) }`
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []string{"go", "js"} {
-		result, err := call(root, nil, "code.inspect", arguments{File: "main.ef", Symbol: "App", Target: target})
-		if err != nil {
-			t.Fatalf("%s layer inspection failed: %v", target, err)
-		}
-		response, ok := result.(map[string]any)
-		if !ok {
-			t.Fatalf("%s returned unexpected layer response: %#v", target, result)
-		}
-		if response["file"] != "main.ef" {
-			t.Fatalf("%s layer response lost file metadata: %#v", target, response["file"])
-		}
-		usage, ok := response["typeProjectionUsage"].(compiler.ProjectionUsage)
-		if !ok {
-			t.Fatalf("%s layer response lost projection usage: %#v", target, response["typeProjectionUsage"])
-		}
-		encoded, err := json.Marshal(response)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if usage.ResponseBytes != len(encoded) {
-			t.Errorf("%s layer receipt omitted final file metadata: receipt=%d actual=%d", target, usage.ResponseBytes, len(encoded))
-		}
+	result, err := call(root, nil, "code.inspect", arguments{File: "main.ef", Symbol: "App", Target: "go"})
+	if err != nil {
+		t.Fatalf("go layer inspection failed: %v", err)
+	}
+	response, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("go returned unexpected layer response: %#v", result)
+	}
+	if response["file"] != "main.ef" {
+		t.Fatalf("go layer response lost file metadata: %#v", response["file"])
+	}
+	usage, ok := response["typeProjectionUsage"].(compiler.ProjectionUsage)
+	if !ok {
+		t.Fatalf("go layer response lost projection usage: %#v", response["typeProjectionUsage"])
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.ResponseBytes != len(encoded) {
+		t.Errorf("go layer receipt omitted final file metadata: receipt=%d actual=%d", usage.ResponseBytes, len(encoded))
 	}
 }
 
@@ -215,22 +213,20 @@ func TestMachineInspectionMatchesCompilerPlan(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "breaker.ef"), source, 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []string{"go", "js"} {
-		result, err := call(root, nil, "code.inspect", arguments{File: "breaker.ef", Symbol: "CircuitBreaker", Target: target})
-		if err != nil {
-			t.Fatalf("%s machine inspection failed: %v", target, err)
-		}
-		response := result.(map[string]any)
-		plan, ok := response["machine"].(*compiler.MachinePlan)
-		if !ok || response["file"] != "breaker.ef" {
-			t.Fatalf("%s machine response = %#v", target, response)
-		}
-		want := compiler.CompileFor(string(source), target).FindMachine("CircuitBreaker")
-		got, _ := json.Marshal(plan)
-		expected, _ := json.Marshal(want)
-		if string(got) != string(expected) {
-			t.Fatalf("%s MCP plan differs from the compiler plan", target)
-		}
+	result, err := call(root, nil, "code.inspect", arguments{File: "breaker.ef", Symbol: "CircuitBreaker", Target: "go"})
+	if err != nil {
+		t.Fatalf("go machine inspection failed: %v", err)
+	}
+	response := result.(map[string]any)
+	plan, ok := response["machine"].(*compiler.MachinePlan)
+	if !ok || response["file"] != "breaker.ef" {
+		t.Fatalf("go machine response = %#v", response)
+	}
+	want := compiler.CompileFor(string(source), "go").FindMachine("CircuitBreaker")
+	got, _ := json.Marshal(plan)
+	expected, _ := json.Marshal(want)
+	if string(got) != string(expected) {
+		t.Fatal("go MCP plan differs from the compiler plan")
 	}
 	if _, err := call(root, nil, "code.inspect", arguments{File: "breaker.ef", Symbol: "Breaker2"}); err == nil {
 		t.Fatal("unknown machine name inspected")
@@ -548,15 +544,13 @@ effect fn test_live_layer() -> void { void }`
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []string{"go", "js"} {
-		result, err := call(root, nil, "project.tests", arguments{File: "main.ef", Target: target})
-		if err != nil {
-			t.Fatalf("%s target: %v", target, err)
-		}
-		payload := result.(map[string]any)
-		if payload["liveRequired"] != true {
-			t.Fatalf("%s target did not report live layer selection: %#v", target, payload)
-		}
+	result, err := call(root, nil, "project.tests", arguments{File: "main.ef", Target: "go"})
+	if err != nil {
+		t.Fatalf("go target: %v", err)
+	}
+	payload := result.(map[string]any)
+	if payload["liveRequired"] != true {
+		t.Fatalf("go target did not report live layer selection: %#v", payload)
 	}
 }
 
@@ -873,14 +867,12 @@ func TestTargetInspection(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "main.ef"), []byte(source), 0644); err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []string{"go", "js"} {
-		result, err := call(root, nil, "code.inspect", arguments{File: "main.ef", Symbol: "main", Target: target})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result.(map[string]any)["target"] != target {
-			t.Fatal("wrong inspected target")
-		}
+	result, err := call(root, nil, "code.inspect", arguments{File: "main.ef", Symbol: "main", Target: "go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.(map[string]any)["target"] != "go" {
+		t.Fatal("wrong inspected target")
 	}
 }
 

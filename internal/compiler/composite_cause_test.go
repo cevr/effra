@@ -79,7 +79,7 @@ effect fn main() -> void {
 // 1 with whatever cause reaches it, composite or not (Go prints "Boom; Nope"
 // for two failing children), exactly as for one declared failure. A main
 // which declares the failures of its pending children is therefore admitted
-// (testdata/ownership_sweep/root_pending_declared.ef, executed on Go and JS),
+// (testdata/ownership_sweep/root_pending_declared.ef, executed on Go),
 // while the same program with main declaring nothing is refused as an
 // undeclared failure.
 func TestRootEdgeAdmitsDeclaredCompositeFailures(t *testing.T) {
@@ -87,13 +87,11 @@ func TestRootEdgeAdmitsDeclaredCompositeFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []string{"go", "js"} {
-		if r := CompileFor(string(source), target); !r.Checked || len(r.Diagnostics) != 0 {
-			t.Errorf("%s: want the declared root admitted, got checked=%v %+v", target, r.Checked, r.Diagnostics)
-		}
-		undeclared := strings.Replace(string(source), "effect fn main() -> void raises { Boom, Nope } {", "effect fn main() -> void {", 1)
-		if r := CompileFor(undeclared, target); r.Checked || len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "EF107" {
-			t.Errorf("%s: want an undeclared root refused with EF107, got checked=%v %+v", target, r.Checked, r.Diagnostics)
-		}
+	if r := CompileFor(string(source), "go"); !r.Checked || len(r.Diagnostics) != 0 {
+		t.Errorf("go: want the declared root admitted, got checked=%v %+v", r.Checked, r.Diagnostics)
+	}
+	undeclared := strings.Replace(string(source), "effect fn main() -> void raises { Boom, Nope } {", "effect fn main() -> void {", 1)
+	if r := CompileFor(undeclared, "go"); r.Checked || len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "EF107" {
+		t.Errorf("go: want an undeclared root refused with EF107, got checked=%v %+v", r.Checked, r.Diagnostics)
 	}
 }

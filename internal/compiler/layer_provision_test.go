@@ -43,23 +43,21 @@ func TestLayerSourceBudgetAdmitsOnlyNativeBoundedIdentityMetadata(t *testing.T) 
 				source.WriteString(`"ok"`)
 			}
 			source.WriteString("}")
-			for _, target := range []string{"go", "js"} {
-				r := CompileFor(source.String(), target)
-				if hasCode(r, "EF133") != control.refused || r.Checked == control.refused {
-					t.Fatal(target, r.Diagnostics)
+			r := CompileFor(source.String(), "go")
+			if hasCode(r, "EF133") != control.refused || r.Checked == control.refused {
+				t.Fatal("go", r.Diagnostics)
+			}
+			if !control.refused {
+				plan := r.FindLayer(name)
+				metadata := len(plan.ID)
+				for _, node := range plan.Nodes {
+					metadata += 1 + len(node.ID)
+					for _, dependency := range node.Dependencies {
+						metadata += 1 + len(dependency)
+					}
 				}
-				if !control.refused {
-					plan := r.FindLayer(name)
-					metadata := len(plan.ID)
-					for _, node := range plan.Nodes {
-						metadata += 1 + len(node.ID)
-						for _, dependency := range node.Dependencies {
-							metadata += 1 + len(dependency)
-						}
-					}
-					if metadata > maxLayerAssemblyMetadata {
-						t.Fatal("admitted emitted NodeSpec identity bytes exceed runtime bound", metadata)
-					}
+				if metadata > maxLayerAssemblyMetadata {
+					t.Fatal("admitted emitted NodeSpec identity bytes exceed runtime bound", metadata)
 				}
 			}
 		})
@@ -185,11 +183,9 @@ func TestLayerConfigurationQueriesAndProvisionGraph(t *testing.T) {
 			}
 		}
 	}
-	for _, target := range []string{"go", "js"} {
-		invalid := CompileFor(strings.Replace(source, "Store=Memory(Settings {label:\"config\"},Mode.Fixture())", "Store=Memory(settings:Settings {label:\"config\"},mode:Mode.Fixture())", 1), target)
-		if !hasCode(invalid, "EF135") {
-			t.Fatal(invalid.Diagnostics)
-		}
+	invalid := CompileFor(strings.Replace(source, "Store=Memory(Settings {label:\"config\"},Mode.Fixture())", "Store=Memory(settings:Settings {label:\"config\"},mode:Mode.Fixture())", 1), "go")
+	if !hasCode(invalid, "EF135") {
+		t.Fatal(invalid.Diagnostics)
 	}
 }
 

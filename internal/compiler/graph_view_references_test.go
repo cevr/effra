@@ -224,19 +224,17 @@ func graphReviewViews(t *testing.T) map[string]*GraphView {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, target := range []string{"go", "js"} {
-			r := CompileAt(string(raw), target, filepath.Dir(file))
-			if !r.Checked {
+		r := CompileAt(string(raw), "go", filepath.Dir(file))
+		if !r.Checked {
+			continue
+		}
+		for _, kind := range []string{"dependency", "layers", "application", "machine"} {
+			request, err := ParseGraphRequest(map[string]any{"kind": kind})
+			if err != nil {
 				continue
 			}
-			for _, kind := range []string{"dependency", "layers", "application", "machine"} {
-				request, err := ParseGraphRequest(map[string]any{"kind": kind})
-				if err != nil {
-					continue
-				}
-				if view, err := r.GraphView(request); err == nil {
-					views[fmt.Sprintf("%s/%s/%s", filepath.Base(file), target, kind)] = view
-				}
+			if view, err := r.GraphView(request); err == nil {
+				views[fmt.Sprintf("%s/go/%s", filepath.Base(file), kind)] = view
 			}
 		}
 	}

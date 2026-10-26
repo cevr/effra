@@ -179,18 +179,16 @@ effect fn main() -> string {
 // where Option[R1] is expected, so the refusal must come from Effra on both
 // targets before any Go is emitted.
 func TestCheckerRefusesMismatchedOptionPayload(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(optionMismatchSource, target)
-		if r.Checked {
-			t.Fatalf("%s: Some<R2> accepted where Option<R1> is expected", target)
-		}
-		found := false
-		for _, d := range r.Diagnostics {
-			found = found || (d.Code == "EF106" && strings.Contains(d.Message, "Data.Option<R1>"))
-		}
-		if !found {
-			t.Fatalf("%s: want EF106 naming Data.Option<R1>, got %v", target, r.Diagnostics)
-		}
+	r := CompileFor(optionMismatchSource, "go")
+	if r.Checked {
+		t.Fatal("go: Some<R2> accepted where Option<R1> is expected")
+	}
+	found := false
+	for _, d := range r.Diagnostics {
+		found = found || (d.Code == "EF106" && strings.Contains(d.Message, "Data.Option<R1>"))
+	}
+	if !found {
+		t.Fatalf("go: want EF106 naming Data.Option<R1>, got %v", r.Diagnostics)
 	}
 }
 

@@ -4,9 +4,6 @@ import (
 	goparser "go/parser"
 	gotoken "go/token"
 	"maps"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -138,104 +135,9 @@ func TestUnexecutedCodecsOmitTheCodecModule(t *testing.T) {
 	}
 }
 
-// A JS module exports every witness as public surface, so it carries the
-// engine exactly once when it derives any codec and never otherwise.
-func TestJSCodecEngineIsEmittedOnceWhenDerived(t *testing.T) {
-	engine := "const __ef_codecCompile = "
-	for _, tc := range []struct {
-		source string
-		count  int
-	}{
-		{codecUsingProgram, 1},
-		{codecIdleProgram, 1},
-		{"effect fn main() -> string {\n    \"ok\"\n}\n", 0},
-		{"import Json \"effra/json\"\neffect fn main() -> string {\n    \"ok\"\n}\n", 0},
-	} {
-		r := Compile(tc.source)
-		if !r.Checked {
-			t.Fatal(r.Diagnostics)
-		}
-		js, decl, err := r.Emit(false)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Count(js, engine) != tc.count || strings.Count(js, "const __ef_codecDecode = ") != tc.count {
-			t.Fatalf("engine emitted %d times, want %d", strings.Count(js, engine), tc.count)
-		}
-		if tc.count == 0 {
-			continue
-		}
-		if strings.Count(js, "__ef_codecCompile({") != 3 {
-			t.Fatalf("JS must compile one codec per shared plan")
-		}
-		if !strings.Contains(decl, `declare const __ef_codec_witness_userJson: { readonly decode: (arg_input: string) => Effect.Effect<User, { readonly _tag: "JsonDecodeFailure" }, never>; readonly encode: (arg_value: User) => Effect.Effect<string, { readonly _tag: "JsonEncodeFailure" }, never> };`+"\nexport { __ef_codec_witness_userJson as userJson };\n") {
-			t.Fatalf("witness declaration:\n%s", decl)
-		}
-		if strings.Contains(js, "as userJson.decode") || strings.Contains(decl, "as userJson.decode") {
-			t.Fatal("direction functions must be exported through their witness")
-		}
-	}
-}
-
-// A JS entry lowers only the codec plans its executed directions reach:
-// the engine and its adapters arrive through the codec lowering helper, and
-// one codec is compiled per retained plan. An idle entry loads no engine, and
-// an encode-only or decode-only entry never references the direction its plan
-// pruned. Each entry closes over its prelude and runs under Node.
-func TestJSEntryLowersOnlyItsExecutedCodecPlans(t *testing.T) {
-	for _, tc := range []struct {
-		name, main, output string
-		plans              []string
-		directions         []string
-	}{
-		{name: "idle", main: "effect fn main() -> string {\n    \"ok\"\n}\n", output: "ok\n"},
-		{name: "encode only", main: "effect fn main() -> string raises { JsonEncodeFailure } {\n    run eventJson.encode(Event.Closed {})\n}\n", output: `{"_tag":"Closed"}` + "\n", plans: []string{"Event"}, directions: []string{"eventJson_encode"}},
-		{name: "decode only", main: "effect fn main() -> string raises { JsonDecodeFailure } {\n    let user = run userJson.decode(\"{\\\"id\\\":\\\"7\\\",\\\"name\\\":\\\"Ada\\\"}\")\n    user.name\n}\n", output: "Ada\n", plans: []string{"User"}, directions: []string{"userJson_decode"}},
-		{name: "both", main: strings.TrimPrefix(codecUsingProgram, codecEmissionTypes), output: `{"id":"7","name":"Ada"}{"_tag":"Closed"}` + "\n", plans: []string{"User", "Event"}, directions: []string{"userJson_decode", "userJson_encode", "eventJson_encode"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := Compile(codecEmissionTypes + tc.main)
-			if !r.Checked {
-				t.Fatal(r.Diagnostics)
-			}
-			entry, declarations, err := r.Emit(true)
-			if err != nil {
-				t.Fatal(err)
-			}
-			checkJSModule(t, tc.name+" entry", entry, declarations)
-			engine := 0
-			if len(tc.plans) > 0 {
-				engine = 1
-			}
-			if strings.Count(entry, "const __ef_codecCompile = ") != engine || strings.Count(entry, "const __ef_codecDecode = ") != engine {
-				t.Fatalf("engine emitted %d times, want %d", strings.Count(entry, "const __ef_codecCompile = "), engine)
-			}
-			if got := strings.Count(entry, "= __ef_codecCompile({"); got != len(tc.plans) {
-				t.Fatalf("compiled %d codecs, want %d", got, len(tc.plans))
-			}
-			for _, root := range tc.plans {
-				if !strings.Contains(entry, "const "+jsCodecPlanName(codecPlanByRoot(t, r, root))+" = ") {
-					t.Fatalf("entry omits the executed %s plan", root)
-				}
-			}
-			for _, witness := range []string{"userJson", "userMirror", "eventJson", "archiveJson"} {
-				for _, direction := range []string{"decode", "encode"} {
-					name := witness + "_" + direction
-					if strings.Contains(entry, "__ef_codec_function_"+name) != slices.Contains(tc.directions, name) {
-						t.Fatalf("direction %s retained=%v, want %v", name, !slices.Contains(tc.directions, name), slices.Contains(tc.directions, name))
-					}
-				}
-			}
-			if output, err := runNode(t, writeJSModule(t, map[string]string{"entry.mjs": entry}), "entry.mjs"); err != nil || output != tc.output {
-				t.Fatalf("entry run: %v\n%s", err, output)
-			}
-		})
-	}
-}
-
 // The public decimal-string codec profile composes with checked signed64
 // arithmetic without passing through JSON numbers or changing record/enum
-// refusal behavior. Run the same generated source through both runtimes.
+// refusal behavior.
 func TestI64CodecDecimalStringsComposeWithArithmeticOnBothTargets(t *testing.T) {
 	const source = `import Json "effra/json"
 
@@ -283,15 +185,12 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
 	if output, err := runGoCommand(writeGoApplication(t, goResult, application), "run", "."); err != nil || string(output) != want {
 		t.Fatalf("Go codec/arithmetic result: %v\nwant %q\n got %q", err, want, output)
 	}
-	if output := runJS(t, source, `console.log(await Effect.runPromise(__ef_function_main()));`); output != want {
-		t.Fatalf("JavaScript codec/arithmetic result: want %q, got %q", want, output)
-	}
 }
 
-// Emission is a function of the checked program: repeated emission of both
-// targets is byte-identical.
+// Emission is a function of the checked program: repeated emission is
+// byte-identical.
 func TestCodecEmissionIsDeterministic(t *testing.T) {
-	emit := func() (string, string) {
+	emit := func() string {
 		r := Compile(codecUsingProgram)
 		if !r.Checked {
 			t.Fatal(r.Diagnostics)
@@ -300,44 +199,18 @@ func TestCodecEmissionIsDeterministic(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		js, _, err := r.Emit(false)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return goSource, js
+		return goSource
 	}
-	goFirst, jsFirst := emit()
+	first := emit()
 	for range 3 {
-		if goAgain, jsAgain := emit(); goAgain != goFirst || jsAgain != jsFirst {
+		if again := emit(); again != first {
 			t.Fatal("codec emission is not deterministic")
 		}
 	}
 }
 
-// The exported witness is a frozen object whose directions are ordinary
-// Effect functions with the direction's tagged failure, as a host consumer
-// importing the module sees it.
-func TestJSCodecWitnessExports(t *testing.T) {
-	output := runJSConsumer(t, codecIdleProgram, `import { Effect } from "effect";
-import { userJson, eventJson } from "./generated.mjs";
-if (!Object.isFrozen(userJson)) throw new Error("witness is not frozen");
-const user = await Effect.runPromise(userJson.decode('{"name":"Ada","id":"-1"}'));
-if (user.id !== -1n || user.name !== "Ada") throw new Error("decoded " + JSON.stringify(user, (_, v) => typeof v === "bigint" ? v.toString() : v));
-const encoded = await Effect.runPromise(eventJson.encode({ _tag: "Event.Created", user }));
-if (encoded !== '{"_tag":"Created","user":{"id":"-1","name":"Ada"}}') throw new Error("encoded " + encoded);
-const failure = await Effect.runPromise(Effect.flip(userJson.decode('{"id":"1"}')));
-if (failure._tag !== "JsonDecodeFailure" || failure.message !== 'codec decode: missing at ["name"]' || failure.issue.reason !== "missing") throw new Error("failure " + JSON.stringify(failure));
-const illFormed = await Effect.runPromise(Effect.flip(userJson.decode('"\ud800"')));
-if (illFormed.message !== "codec decode: invalid-unicode") throw new Error("ill-formed " + JSON.stringify(illFormed));
-`)
-	if output != "" {
-		t.Fatalf("unexpected JS output: %s", output)
-	}
-}
-
 // Direction functions are ordinary function values: bound to a local, passed
-// to a typed parameter and forwarded through a bundled callback function,
-// with the same result on both targets.
+// to a typed parameter and forwarded through a bundled callback function.
 func TestDerivedDirectionsAreOrdinaryFunctionValues(t *testing.T) {
 	source := `import Json "effra/json"
 import Fns "effra/functions"
@@ -356,9 +229,6 @@ effect fn main() -> string raises { JsonDecodeFailure } {
     direct + passed + forwarded
 }
 `
-	if output := runJS(t, source, `if (await Effect.runPromise(__ef_function_main()) !== "abc") throw new Error("wrong JS result");`); output != "" {
-		t.Fatalf("unexpected JS output: %s", output)
-	}
 	r := Compile(source)
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
@@ -372,40 +242,9 @@ effect fn main() -> string raises { JsonDecodeFailure } {
 	}
 }
 
-// runJSConsumer emits source as generated.mjs beside a host consumer module
-// and runs the consumer under Bun, so it sees only the module's exports.
-func runJSConsumer(t *testing.T, source, consumer string) string {
-	t.Helper()
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("Bun is required for backend conformance tests")
-	}
-	r := Compile(source)
-	if !r.Checked {
-		t.Fatal(r.Diagnostics)
-	}
-	module, _, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := jsModuleDir(t, "conformance-")
-	for file, text := range map[string]string{"generated.mjs": module, "consumer.mjs": consumer} {
-		if err := os.WriteFile(filepath.Join(dir, file), []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	output, err := exec.Command(bun, filepath.Join(dir, "consumer.mjs")).CombinedOutput()
-	if err != nil {
-		t.Fatalf("runtime: %v\n%s", err, output)
-	}
-	return string(output)
-}
-
-// A witness's JS binding is generated and its source name is only an export
-// alias, as for ordinary functions. A witness named after a host global, the
-// Effect import or a generated binding therefore checks, runs as it does on
-// Go, and is imported by host code under its source name.
-func TestJSCodecWitnessNamesDoNotShadowModuleBindings(t *testing.T) {
+// A witness named after a host global or a generated binding checks and
+// runs: its source name never shadows a generated binding.
+func TestCodecWitnessNamesDoNotShadowModuleBindings(t *testing.T) {
 	for _, name := range []string{"Object", "TextEncoder", "Effect", "__ef_codecText"} {
 		t.Run(name, func(t *testing.T) {
 			source := `import Json "effra/json"
@@ -426,25 +265,6 @@ effect fn main() -> string raises { JsonDecodeFailure, JsonEncodeFailure } {
 			}
 			if output, err := runGoCommand(writeGoApplication(t, r, application), "run", "."); err != nil || string(output) != "\"ok\"\n" {
 				t.Fatalf("Go result: %v\n%s", err, output)
-			}
-			output := runJSConsumer(t, source, `import { Effect } from "effect";
-import { `+name+` as witness, main } from "./generated.mjs";
-if (!Object.isFrozen(witness)) throw new Error("witness is not frozen");
-const decoded = await Effect.runPromise(witness.decode('"x"'));
-const encoded = await Effect.runPromise(witness.encode(decoded));
-const ran = await Effect.runPromise(main());
-console.log(decoded + " " + encoded + " " + ran);
-`)
-			if output != "x \"x\" \"ok\"\n" {
-				t.Fatalf("JS result: %s", output)
-			}
-			_, declaration, err := r.Emit(false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			binding := "__ef_codec_witness_" + name
-			if !strings.Contains(declaration, "declare const "+binding+": {") || !strings.Contains(declaration, "export { "+binding+" as "+name+" };") {
-				t.Fatalf("witness declaration must alias its generated binding:\n%s", declaration)
 			}
 		})
 	}

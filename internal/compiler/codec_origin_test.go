@@ -148,15 +148,13 @@ func TestDerivedCodecDirectionsRetainOriginalDeclarationOrigins(t *testing.T) {
 		{name: "settings encode", source: codecOriginSettingsSource, witness: "Effect", dir: "encode"},
 	}
 	for _, tc := range cases {
-		for _, target := range []string{"go", "js"} {
-			t.Run(tc.name+"/"+target, func(t *testing.T) {
-				r := CompileFor(tc.source, target)
-				if !r.Checked {
-					t.Fatalf("source was rejected: %+v", r.Diagnostics)
-				}
-				assertCodecDirectionOrigin(t, r, tc.source, tc.witness, tc.dir)
-			})
-		}
+		t.Run(tc.name+"/go", func(t *testing.T) {
+			r := CompileFor(tc.source, "go")
+			if !r.Checked {
+				t.Fatalf("source was rejected: %+v", r.Diagnostics)
+			}
+			assertCodecDirectionOrigin(t, r, tc.source, tc.witness, tc.dir)
+		})
 	}
 }
 

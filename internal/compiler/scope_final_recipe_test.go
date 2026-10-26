@@ -76,39 +76,34 @@ func TestScopeFinalRecipeReportsOneScopeDiagnosticWithRunEdit(t *testing.T) {
 	for _, test := range scopeTailCases {
 		source := scopeTailSource(test.before, test.tail, test.after)
 		start := strings.Index(source, test.before+test.tail) + len(test.before)
-		for _, target := range []string{"go", "js"} {
-			t.Run(test.name+"/"+target, func(t *testing.T) {
-				r := CompileFor(source, target)
-				if r.Checked || len(r.Diagnostics) != 1 {
-					t.Fatalf("want one scope diagnostic: %+v", r.Diagnostics)
+		t.Run(test.name+"/go", func(t *testing.T) {
+			r := CompileFor(source, "go")
+			if r.Checked || len(r.Diagnostics) != 1 {
+				t.Fatalf("want one scope diagnostic: %+v", r.Diagnostics)
+			}
+			diagnostic := r.Diagnostics[0]
+			if diagnostic.Code != "EF105" || diagnostic.Message != scopeTailMessage || diagnostic.Span != spanAt(source, start, len(test.tail)) {
+				t.Fatalf("scope diagnostic = %+v, want span %+v", diagnostic, spanAt(source, start, len(test.tail)))
+			}
+			if len(diagnostic.Suggestions) != 1 || diagnostic.Suggestions[0].Message != "Execute this recipe inside the scope" {
+				t.Fatalf("suggestion = %+v", diagnostic.Suggestions)
+			}
+			for _, edit := range diagnostic.Suggestions[0].Edits {
+				if edit.Span != spanAt(source, edit.Span.Offset, edit.Span.Length) {
+					t.Fatalf("edit position is not the source position: %+v", edit)
 				}
-				diagnostic := r.Diagnostics[0]
-				if diagnostic.Code != "EF105" || diagnostic.Message != scopeTailMessage || diagnostic.Span != spanAt(source, start, len(test.tail)) {
-					t.Fatalf("scope diagnostic = %+v, want span %+v", diagnostic, spanAt(source, start, len(test.tail)))
-				}
-				if len(diagnostic.Suggestions) != 1 || diagnostic.Suggestions[0].Message != "Execute this recipe inside the scope" {
-					t.Fatalf("suggestion = %+v", diagnostic.Suggestions)
-				}
-				for _, edit := range diagnostic.Suggestions[0].Edits {
-					if edit.Span != spanAt(source, edit.Span.Offset, edit.Span.Length) {
-						t.Fatalf("edit position is not the source position: %+v", edit)
-					}
-				}
-				fixed := applySuggestion(t, source, diagnostic.Suggestions[0])
-				if want := scopeTailSource(test.before, "run ("+test.tail+")", test.after); fixed != want {
-					t.Fatalf("edit did not wrap the complete tail once:\n%s", fixed)
-				}
-				if r := CompileFor(fixed, target); !r.Checked {
-					t.Fatalf("suggested edit does not check: %+v", r.Diagnostics)
-				}
-			})
-		}
+			}
+			fixed := applySuggestion(t, source, diagnostic.Suggestions[0])
+			if want := scopeTailSource(test.before, "run ("+test.tail+")", test.after); fixed != want {
+				t.Fatalf("edit did not wrap the complete tail once:\n%s", fixed)
+			}
+			if r := CompileFor(fixed, "go"); !r.Checked {
+				t.Fatalf("suggested edit does not check: %+v", r.Diagnostics)
+			}
+		})
 		t.Run(test.name+"/execution", func(t *testing.T) {
 			fixed := scopeTailSource(test.before, "run ("+test.tail+")", test.after)
 			runGenericDataNative(t, fixed, test.output)
-			if output := runJSForTarget(t, "js", fixed, `await Effect.runPromise(__ef_function_main());`); output != test.output {
-				t.Fatalf("JS output = %q", output)
-			}
 		})
 	}
 }
@@ -241,16 +236,14 @@ fn handle(failure: Boom) -> string { "handled" }
 }`, []string{"EF105", "EF106"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			for _, target := range []string{"go", "js"} {
-				r := CompileFor(prefix+test.body+"\n", target)
-				codes := []string{}
-				for _, diagnostic := range r.Diagnostics {
-					codes = append(codes, diagnostic.Code)
-				}
-				slices.Sort(codes)
-				if !slices.Equal(codes, test.want) || !hasDiagnosticMessage(r, scopeTailMessage) {
-					t.Fatalf("%s: want %v with the scope diagnostic: %+v", target, test.want, r.Diagnostics)
-				}
+			r := CompileFor(prefix+test.body+"\n", "go")
+			codes := []string{}
+			for _, diagnostic := range r.Diagnostics {
+				codes = append(codes, diagnostic.Code)
+			}
+			slices.Sort(codes)
+			if !slices.Equal(codes, test.want) || !hasDiagnosticMessage(r, scopeTailMessage) {
+				t.Fatalf("go: want %v with the scope diagnostic: %+v", test.want, r.Diagnostics)
 			}
 		})
 	}
@@ -282,16 +275,11 @@ effect fn main() -> void {
     run Console.log(first + " " + second + " " + run pure()).provide<Console>(Stdout)
 }
 `
-	for _, target := range []string{"go", "js"} {
-		if r := CompileFor(source, target); !r.Checked {
-			t.Fatalf("%s value-position controls refused: %+v", target, r.Diagnostics)
-		}
+	if r := CompileFor(source, "go"); !r.Checked {
+		t.Fatalf("go value-position controls refused: %+v", r.Diagnostics)
 	}
 	expected := "tock selected\ntick arm\nselected arm pure\n"
 	runGenericDataNative(t, source, expected)
-	if output := runJSForTarget(t, "js", source, `await Effect.runPromise(__ef_function_main());`); output != expected {
-		t.Fatalf("JS output = %q", output)
-	}
 }
 
 // The shared diagnostic projection carries the same suggestion with UTF-16

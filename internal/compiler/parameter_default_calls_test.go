@@ -80,7 +80,7 @@ func TestOmittedArgumentsCompileToTheExplicitConstantCall(t *testing.T) {
 			t.Fatalf("%s rejected the omitted-argument program: %v", key, artifact.Codes)
 		}
 	}
-	for _, key := range []string{"js/entry", "js/library", "js/library.d.mts", "go/build"} {
+	for _, key := range []string{"go/build"} {
 		if omittedOutput[key].Status != pipeEmitted {
 			t.Fatalf("%s was not emitted: %+v", key, omittedOutput[key])
 		}
@@ -94,7 +94,7 @@ func TestOmittedArgumentsCompileToTheExplicitConstantCall(t *testing.T) {
 		}
 		t.FailNow()
 	}
-	runOnEveryHost(t, omitted, defaultCallsOutput)
+	runGenericDataNative(t, omitted, defaultCallsOutput)
 
 	// The imported callee keeps its declaration identity and owns the
 	// default: the omitting call is an application of that identity to the
@@ -124,7 +124,7 @@ func TestOmittedArgumentsCompileToTheExplicitConstantCall(t *testing.T) {
 	trailing := explicitDefaultCallers
 	trailing[1] = `render("b", loud: true, suffix: "!", count: 7)`
 	trailingOutput := compilePipeOutput(t, defaultCallsSource("!", trailing), ".", nil)
-	if reflect.DeepEqual(omittedOutput, trailingOutput) || !strings.Contains(trailingOutput["js/library"].Text, "__ef_argument_") {
+	if reflect.DeepEqual(omittedOutput, trailingOutput) {
 		t.Fatal("equivalence did not distinguish constants in their slots from a trailing-label adapter")
 	}
 }
@@ -183,7 +183,7 @@ func TestOmittedArgumentsInstantiateNonEmptyRows(t *testing.T) {
 	if !reflect.DeepEqual(compilePipeOutput(t, omitted, ".", nil), compilePipeOutput(t, rowDefaultSource(`run through(lookup, "seed")`), ".", nil)) {
 		t.Fatal("omitted and explicit calls differ under non-empty raises and uses rows")
 	}
-	runOnEveryHost(t, omitted, "found seed\n")
+	runGenericDataNative(t, omitted, "found seed\n")
 	if reflect.DeepEqual(compilePipeOutput(t, omitted, ".", nil), compilePipeOutput(t, rowDefaultSource(`run through(lookup, "other")`), ".", nil)) {
 		t.Fatal("row differential did not observe a different explicit constant")
 	}
@@ -194,13 +194,10 @@ func TestOmittedArgumentsUseTheCalleesCurrentDefault(t *testing.T) {
 	// every omitting caller's emitted call and result, and nothing else.
 	before := compilePipeOutput(t, defaultCallsSource("!", omittedDefaultCallers), ".", nil)
 	after := compilePipeOutput(t, defaultCallsSource("?", omittedDefaultCallers), ".", nil)
-	if !strings.Contains(before["js/library"].Text, `__ef_function_render("b", "!", 7n, true)`) || !strings.Contains(after["js/library"].Text, `__ef_function_render("b", "?", 7n, true)`) {
-		t.Fatalf("omitted call did not lower the callee's current default:\n%s", after["js/library"].Text)
-	}
-	if strings.Contains(after["js/library"].Text, `"b", "!"`) || strings.Contains(after["go/build"].Text, `"!", int64(7)`) {
+	if strings.Contains(after["go/build"].Text, `"!", int64(7)`) {
 		t.Fatal("a stale default survived the callee's contract change")
 	}
-	runOnEveryHost(t, defaultCallsSource("?", omittedDefaultCallers), "a|b?|c?|d?|e!|Hi ada!|5|seed!\n")
+	runGenericDataNative(t, defaultCallsSource("?", omittedDefaultCallers), "a|b?|c?|d?|e!|Hi ada!|5|seed!\n")
 	explicitBefore := compilePipeOutput(t, defaultCallsSource("!", explicitDefaultCallers), ".", nil)
 	explicitAfter := compilePipeOutput(t, defaultCallsSource("?", explicitDefaultCallers), ".", nil)
 	// A default is call-site sugar: the callee's emitted body and ABI do not
@@ -227,18 +224,7 @@ effect fn main() -> string {
     failed + "|" + run ok()
 }
 `
-	runOnEveryHost(t, source, "second ran first|x-y\n")
-	r := CompileFor(source, "js")
-	js, _, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(js, "__ef_function_second()") != 1 || strings.Count(js, "__ef_function_first()") != 1 {
-		t.Fatalf("an authored argument was not emitted exactly once:\n%s", js)
-	}
-	if !strings.Contains(js, `((__ef_argument_0, __ef_argument_1, __ef_argument_2) => __ef_function_join(__ef_argument_2, __ef_argument_0, __ef_argument_1))("-", "y", "x")`) {
-		t.Fatalf("the reordered call did not keep authored order with the constant in its slot:\n%s", js)
-	}
+	runGenericDataNative(t, source, "second ran first|x-y\n")
 }
 
 func TestNegativeAndMinimumDefaultsAreDirectConstants(t *testing.T) {
@@ -248,14 +234,7 @@ effect fn main() -> string {
     if shift(10) == 7 { if floor() == shift(-9223372036854775805) { "ok" } else { "bad floor" } } else { "bad shift" }
 }
 `
-	runOnEveryHost(t, source, "ok\n")
-	js, _, err := CompileFor(source, "js").Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(js, "__ef_function_shift(10n, -3n)") || !strings.Contains(js, "__ef_function_floor(-9223372036854775808n)") {
-		t.Fatalf("negative defaults were not emitted as direct signed literals:\n%s", js)
-	}
+	runGenericDataNative(t, source, "ok\n")
 	native, _, err := emitGoApplication(CompileFor(source, "go"), GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)
@@ -283,41 +262,16 @@ fn applyOne(callback: fn(string) -> string) -> string { callback("x") }
 		{"function value is not eta-expanded", `fn caller() -> string { applyOne(render) }`, "argument must be"},
 	} {
 		t.Run(refusal.name, func(t *testing.T) {
-			for _, target := range []string{"go", "js"} {
-				r := CompileFor(declarations+refusal.body, target)
-				found := false
-				for _, d := range r.Diagnostics {
-					found = found || d.Code == "EF106" && strings.Contains(d.Message, refusal.message)
-				}
-				if r.Checked || !found {
-					t.Fatalf("%s: want EF106 %q, got %+v", target, refusal.message, r.Diagnostics)
-				}
+			r := CompileFor(declarations+refusal.body, "go")
+			found := false
+			for _, d := range r.Diagnostics {
+				found = found || d.Code == "EF106" && strings.Contains(d.Message, refusal.message)
+			}
+			if r.Checked || !found {
+				t.Fatalf("go: want EF106 %q, got %+v", refusal.message, r.Diagnostics)
 			}
 		})
 	}
-}
-
-func TestOmittedArgumentsKeepTheFullRequiredTypeScriptABI(t *testing.T) {
-	r := CompileFor(defaultCallsSource("!", omittedDefaultCallers), "js")
-	if !r.Checked {
-		t.Fatal(r.Diagnostics)
-	}
-	_, declarations, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(declarations, "__ef_function_render: (arg_value: string, arg_suffix: string, arg_count: bigint, arg_loud: boolean) => string;") {
-		t.Fatalf("callers that omit arguments changed the callee's declared ABI:\n%s", declarations)
-	}
-	checkStrictTypeScript(t, declarations, `import { render } from "./generated.mjs";
-const full: string = render("a", "!", 7n, false);
-// @ts-expect-error Call-site defaults are Effra sugar, not optional JavaScript parameters.
-render("a");
-// @ts-expect-error Omitting a trailing argument is not admitted either.
-render("a", "!", 7n);
-// @ts-expect-error undefined is not a default marker.
-render("a", undefined, 7n, false);
-void full;`)
 }
 
 const defaultedTailSource = `fn walk(n: i64, step: i64 = 1, acc: i64 = 0) -> i64 {
@@ -338,9 +292,9 @@ effect fn main() -> string {
 
 func TestDefaultedSelfTailCallsLoopAndResetOmittedSlots(t *testing.T) {
 	// The omitted step resets to its constant on every iteration: only the
-	// iteration after n == 5 adds 3. A million iterations also overflow a
-	// V8 stack unless both self calls, defaulted and labelled, are loops.
-	r := CompileFor(defaultedTailSource, "js")
+	// iteration after n == 5 adds 3. A million iterations also stay bounded
+	// only when both self calls, defaulted and labelled, are loops.
+	r := CompileFor(defaultedTailSource, "go")
 	if !r.Checked {
 		t.Fatal(r.Diagnostics)
 	}
@@ -348,28 +302,7 @@ func TestDefaultedSelfTailCallsLoopAndResetOmittedSlots(t *testing.T) {
 	if lowerTail(walk) == nil {
 		t.Fatal("defaulted, labelled self-tail call was not planned as a loop")
 	}
-	runOnEveryHost(t, defaultedTailSource, "ok\n")
-	js, _, err := r.Emit(false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(js, "while (true)") != 1 || strings.Count(js, "__ef_function_walk(") != 1+strings.Count(js, "__ef_function_walk(1000000n)") {
-		t.Fatalf("a defaulted self-tail call stayed recursive:\n%s", js)
-	}
-	reset := "const __ef_next_step = 1n;"
-	if strings.Count(js, reset) != 1 {
-		t.Fatalf("the omitted slot was not reassigned from its constant:\n%s", js)
-	}
-	// Causal control: keeping the previous iteration's value in the omitted
-	// slot changes the result.
-	sticky := strings.Replace(js, reset, "const __ef_next_step = __ef_arg_step;", 1)
-	assertion := fmt.Sprintf(`if (await Effect.runPromise(%s()) !== "ok") throw new Error("defaulted tail result changed");`, r.Find("main").function(t, r).jsEmissionName())
-	if output, err := runJSHostModule(t, "node", js, assertion); err != nil {
-		t.Fatalf("defaulted tail module failed: %v\n%s", err, output)
-	}
-	if output, err := runJSHostModule(t, "node", sticky, assertion); err == nil || !strings.Contains(output, "defaulted tail result changed") {
-		t.Fatalf("sticky omitted-slot mutant did not fail at the intended assertion: %v\n%s", err, output)
-	}
+	runGenericDataNative(t, defaultedTailSource, "ok\n")
 	native, _, err := emitGoApplication(CompileFor(defaultedTailSource, "go"), GoGenerationBuild)
 	if err != nil {
 		t.Fatal(err)

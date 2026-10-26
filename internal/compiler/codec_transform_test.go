@@ -114,51 +114,49 @@ func codecGoInstrument(t *testing.T, code, function, statement string) string {
 // run: decode never needs an encode service, and an encode-only caller
 // provides only encode services.
 func TestCodecTransformationRowsAreDirectionSpecific(t *testing.T) {
-	for _, target := range []string{"go", "js"} {
-		r := CompileFor(codecTransformSource, target)
-		if !r.Checked {
-			t.Fatalf("%s: %+v", target, r.Diagnostics)
-		}
-		email := codecInspectionNamed(t, r, "emailJson")
-		if email.Representation != "string" || !slices.Equal(email.Decode.Failures, []string{"JsonDecodeFailure"}) || len(email.Decode.Requirements) != 0 {
-			t.Fatalf("%s: a pure transformation adds no row: %+v", target, email)
-		}
-		member := codecInspectionNamed(t, r, "memberJson")
-		if member.Representation != "MemberWire" || !slices.Equal(member.With, []string{"emailJson"}) {
-			t.Fatalf("%s: member witness: %+v", target, member)
-		}
-		if !slices.Equal(member.Decode.Failures, []string{"JsonDecodeFailure", "Unknown"}) || !slices.Equal(member.Decode.Requirements, []string{"Lookup"}) {
-			t.Fatalf("%s: member decode rows: %+v", target, member.Decode)
-		}
-		if !slices.Equal(member.Encode.Failures, []string{"JsonEncodeFailure", "Refused"}) || !slices.Equal(member.Encode.Requirements, []string{"Journal"}) {
-			t.Fatalf("%s: member encode rows: %+v", target, member.Encode)
-		}
-		team := codecInspectionNamed(t, r, "teamJson")
-		if team.Representation != "" || !slices.Equal(team.With, []string{"emailJson", "memberJson"}) {
-			t.Fatalf("%s: team witness: %+v", target, team)
-		}
-		decode := r.Find("teamJson.decode").Contract.Callable
-		if !slices.Equal(decode.Failures, []string{"JsonDecodeFailure", "Unknown"}) || !slices.Equal(decode.Requirements, []string{"Lookup"}) {
-			t.Fatalf("%s: team decode contract: %+v", target, decode)
-		}
-		// Transformations are listed in the order of each one's first
-		// invocation by the direction, at that invocation's path, with its
-		// own rows: decoding resolves Member's email before Member itself,
-		// encoding projects Member before its email.
-		var steps []string
-		for _, step := range team.Decode.Transformations {
-			steps = append(steps, step.Witness+"@"+step.Path+":"+step.Domain+"<-"+step.Representation+":"+strings.Join(step.Requirements, ","))
-		}
-		if want := []string{"emailJson@Team.lead.email:Email<-string:", "memberJson@Team.lead:Member<-MemberWire:Lookup"}; !slices.Equal(steps, want) {
-			t.Fatalf("%s: decode transformations %q, want %q", target, steps, want)
-		}
-		steps = nil
-		for _, step := range team.Encode.Transformations {
-			steps = append(steps, step.Witness+"@"+step.Path+":"+strings.Join(step.Requirements, ","))
-		}
-		if want := []string{"memberJson@Team.lead:Journal", "emailJson@Team.lead.email:"}; !slices.Equal(steps, want) {
-			t.Fatalf("%s: encode transformations %q, want %q", target, steps, want)
-		}
+	r := CompileFor(codecTransformSource, "go")
+	if !r.Checked {
+		t.Fatalf("go: %+v", r.Diagnostics)
+	}
+	email := codecInspectionNamed(t, r, "emailJson")
+	if email.Representation != "string" || !slices.Equal(email.Decode.Failures, []string{"JsonDecodeFailure"}) || len(email.Decode.Requirements) != 0 {
+		t.Fatalf("go: a pure transformation adds no row: %+v", email)
+	}
+	member := codecInspectionNamed(t, r, "memberJson")
+	if member.Representation != "MemberWire" || !slices.Equal(member.With, []string{"emailJson"}) {
+		t.Fatalf("go: member witness: %+v", member)
+	}
+	if !slices.Equal(member.Decode.Failures, []string{"JsonDecodeFailure", "Unknown"}) || !slices.Equal(member.Decode.Requirements, []string{"Lookup"}) {
+		t.Fatalf("go: member decode rows: %+v", member.Decode)
+	}
+	if !slices.Equal(member.Encode.Failures, []string{"JsonEncodeFailure", "Refused"}) || !slices.Equal(member.Encode.Requirements, []string{"Journal"}) {
+		t.Fatalf("go: member encode rows: %+v", member.Encode)
+	}
+	team := codecInspectionNamed(t, r, "teamJson")
+	if team.Representation != "" || !slices.Equal(team.With, []string{"emailJson", "memberJson"}) {
+		t.Fatalf("go: team witness: %+v", team)
+	}
+	decode := r.Find("teamJson.decode").Contract.Callable
+	if !slices.Equal(decode.Failures, []string{"JsonDecodeFailure", "Unknown"}) || !slices.Equal(decode.Requirements, []string{"Lookup"}) {
+		t.Fatalf("go: team decode contract: %+v", decode)
+	}
+	// Transformations are listed in the order of each one's first
+	// invocation by the direction, at that invocation's path, with its
+	// own rows: decoding resolves Member's email before Member itself,
+	// encoding projects Member before its email.
+	var steps []string
+	for _, step := range team.Decode.Transformations {
+		steps = append(steps, step.Witness+"@"+step.Path+":"+step.Domain+"<-"+step.Representation+":"+strings.Join(step.Requirements, ","))
+	}
+	if want := []string{"emailJson@Team.lead.email:Email<-string:", "memberJson@Team.lead:Member<-MemberWire:Lookup"}; !slices.Equal(steps, want) {
+		t.Fatalf("go: decode transformations %q, want %q", steps, want)
+	}
+	steps = nil
+	for _, step := range team.Encode.Transformations {
+		steps = append(steps, step.Witness+"@"+step.Path+":"+strings.Join(step.Requirements, ","))
+	}
+	if want := []string{"memberJson@Team.lead:Journal", "emailJson@Team.lead.email:"}; !slices.Equal(steps, want) {
+		t.Fatalf("go: encode transformations %q, want %q", steps, want)
 	}
 }
 
@@ -457,7 +455,7 @@ derive nameJson = Json.codec<string>(maxBodyBytes: 64, maxDepth: 1, decode: name
 			if !found {
 				t.Fatalf("want %s %q: %+v", tc.code, tc.message, r.Diagnostics)
 			}
-			if _, _, err := r.Emit(false); err == nil {
+			if _, err := r.EmitGo(); err == nil {
 				t.Fatal("refused source emitted")
 			}
 		})

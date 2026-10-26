@@ -419,320 +419,316 @@ func TestTypeSmokeSelectedFactsAndCanonicalDefinitions(t *testing.T) {
 		{"row-label", typeSmokeOffset(t, "raises {E, Child}", len("raises {E, "))},
 	}
 	namedSymbols := []string{"Labels", "Prefix", "Labels.read"}
-	for _, target := range []string{"go", "js"} {
-		t.Run(target, func(t *testing.T) {
-			t.Parallel()
-			typeArgs := func(file string, selector ...string) []string {
-				return append([]string{"type", file, "--target", target}, selector...)
-			}
-			// Stage 1: every selection and refusal that needs no revision.
-			var commands [][]string
-			for _, selector := range selectors {
-				commands = append(commands, typeArgs(path, "--offset", strconv.Itoa(selector.offset)))
-			}
-			commands = append(commands,
-				typeArgs(path, "--symbol", "unrelated"),
-				typeArgs(path, "--symbol", "Notice"),
-				typeArgs(path, "--offset", strconv.Itoa(len(typeSmokeSource))),
-				typeArgs(invalid, "--symbol", "invalid"),
-				typeArgs(path, "--symbol", "Labels.missing"),
-			)
-			for _, name := range namedSymbols {
-				commands = append(commands, typeArgs(path, "--symbol", name))
-			}
-			runs := typeSmokeRunAll(binary, workspace, typeSmokeCLITimeout, commands)
-			views := map[string]map[string]any{}
-			for index, selector := range selectors {
-				views[selector.name] = typeSmokeSucceeded(t, runs[index])
-			}
-			unrelated := typeSmokeSucceeded(t, runs[len(selectors)])
-			nominal := typeSmokeSucceeded(t, runs[len(selectors)+1])
-			typeSmokeRefused(t, runs[len(selectors)+2])
-			typeSmokeRefused(t, runs[len(selectors)+3])
-			typeSmokeRefused(t, runs[len(selectors)+4])
-			named := map[string]map[string]any{}
-			for index, name := range namedSymbols {
-				named[name] = typeSmokeSucceeded(t, runs[len(selectors)+5+index])
-			}
+	t.Parallel()
+	typeArgs := func(file string, selector ...string) []string {
+		return append([]string{"type", file, "--target", "go"}, selector...)
+	}
+	// Stage 1: every selection and refusal that needs no revision.
+	var commands [][]string
+	for _, selector := range selectors {
+		commands = append(commands, typeArgs(path, "--offset", strconv.Itoa(selector.offset)))
+	}
+	commands = append(commands,
+		typeArgs(path, "--symbol", "unrelated"),
+		typeArgs(path, "--symbol", "Notice"),
+		typeArgs(path, "--offset", strconv.Itoa(len(typeSmokeSource))),
+		typeArgs(invalid, "--symbol", "invalid"),
+		typeArgs(path, "--symbol", "Labels.missing"),
+	)
+	for _, name := range namedSymbols {
+		commands = append(commands, typeArgs(path, "--symbol", name))
+	}
+	runs := typeSmokeRunAll(binary, workspace, typeSmokeCLITimeout, commands)
+	views := map[string]map[string]any{}
+	for index, selector := range selectors {
+		views[selector.name] = typeSmokeSucceeded(t, runs[index])
+	}
+	unrelated := typeSmokeSucceeded(t, runs[len(selectors)])
+	nominal := typeSmokeSucceeded(t, runs[len(selectors)+1])
+	typeSmokeRefused(t, runs[len(selectors)+2])
+	typeSmokeRefused(t, runs[len(selectors)+3])
+	typeSmokeRefused(t, runs[len(selectors)+4])
+	named := map[string]map[string]any{}
+	for index, name := range namedSymbols {
+		named[name] = typeSmokeSucceeded(t, runs[len(selectors)+5+index])
+	}
 
-			artifact := producerSnapshot(t, views["use"], target, defaultSnapshotSchema)
-			artifactScope := artifact["reuseScope"] == "artifact"
-			for _, selector := range selectors {
-				view := views[selector.name]
-				if !typeSmokeTruthy(view["checked"]) || !typeSmokeTruthy(view["typeProjectionComplete"]) || view["querySchemaVersion"] != float64(4) {
-					t.Fatalf("%s: unchecked or incomplete view: %v", selector.name, view)
-				}
-				if !typeSmokeTruthy(view["producerIdentity"]) || !typeSmokeTruthy(view["sources"]) || !typeSmokeTruthy(view["bundledInterfaces"]) {
-					t.Fatalf("%s: view lacks provenance: %v", selector.name, view)
-				}
-				if !typeSmokeTruthy(typeSmokeAt(t, view, "selection", "locationAvailable")) {
-					t.Fatalf("%s: selection location unavailable", selector.name)
-				}
-				current := producerSnapshot(t, view, target, defaultSnapshotSchema)
-				if artifactScope && !reflect.DeepEqual(current, artifact) {
-					t.Fatalf("%s: producer %v, want %v", selector.name, current, artifact)
-				}
-				typeSmokeAssertClosure(t, view, selector.name)
-			}
-			typeSmokeAssertSnapshotSchemaControls(t, views["use"], target)
+	artifact := producerSnapshot(t, views["use"], "go", defaultSnapshotSchema)
+	artifactScope := artifact["reuseScope"] == "artifact"
+	for _, selector := range selectors {
+		view := views[selector.name]
+		if !typeSmokeTruthy(view["checked"]) || !typeSmokeTruthy(view["typeProjectionComplete"]) || view["querySchemaVersion"] != float64(4) {
+			t.Fatalf("%s: unchecked or incomplete view: %v", selector.name, view)
+		}
+		if !typeSmokeTruthy(view["producerIdentity"]) || !typeSmokeTruthy(view["sources"]) || !typeSmokeTruthy(view["bundledInterfaces"]) {
+			t.Fatalf("%s: view lacks provenance: %v", selector.name, view)
+		}
+		if !typeSmokeTruthy(typeSmokeAt(t, view, "selection", "locationAvailable")) {
+			t.Fatalf("%s: selection location unavailable", selector.name)
+		}
+		current := producerSnapshot(t, view, "go", defaultSnapshotSchema)
+		if artifactScope && !reflect.DeepEqual(current, artifact) {
+			t.Fatalf("%s: producer %v, want %v", selector.name, current, artifact)
+		}
+		typeSmokeAssertClosure(t, view, selector.name)
+	}
+	typeSmokeAssertSnapshotSchemaControls(t, views["use"], "go")
 
-			binding := func(name string, path ...any) any {
-				return typeSmokeAt(t, views[name], append([]any{"selection", "binding"}, path...)...)
-			}
-			if binding("let", "id") != binding("use", "id") {
-				t.Fatalf("let and use bindings differ")
-			}
-			if binding("alias", "id") != binding("alias-use", "id") || binding("alias-use", "id") == binding("outer-use", "id") {
-				t.Fatalf("pattern alias does not shadow the outer label")
-			}
-			if binding("alias", "declarationSpan", "offset") != float64(selectors[2].offset) {
-				t.Fatalf("alias declaration offset = %v", binding("alias", "declarationSpan", "offset"))
-			}
-			if binding("config", "id") != binding("config-use", "id") {
-				t.Fatalf("configuration parameter and use bindings differ")
-			}
-			if binding("method-use", "kind") != "parameter" {
-				t.Fatalf("method-use binding kind = %v", binding("method-use", "kind"))
-			}
-			// Hover/definition facts: the selected token's declaration target
-			// and the one presentation rendered from this response's tables.
-			declared := func(name string, path ...any) any {
-				return typeSmokeAt(t, views[name], append([]any{"selection", "target"}, path...)...)
-			}
-			presentation := func(name string) any { return typeSmokeAt(t, views[name], "selection", "presentation") }
-			selectionKind := func(name string) any { return typeSmokeAt(t, views[name], "selection", "kind") }
-			sourceOffset := func(match string, skip int) float64 { return float64(typeSmokeOffset(t, match, skip)) }
-			for _, check := range []struct {
-				label     string
-				got, want any
-			}{
-				{"let target kind", declared("let", "kind"), "let"},
-				{"let presentation", presentation("let"), "let label: string"},
-				{"callee selection kind", selectionKind("callee"), "expression"},
-				{"callee target kind", declared("callee", "kind"), "function"},
-				{"callee location", declared("callee", "locationAvailable"), true},
-				{"callee offset", declared("callee", "span", "offset"), sourceOffset("fn task", len("fn "))},
-				{"callee presentation", presentation("callee"), "effect fn task() -> string raises {Child}"},
-				{"operation target kind", declared("operation", "kind"), "operation"},
-				{"operation owner", declared("operation", "owner"), "Labels"},
-				{"operation offset", declared("operation", "span", "offset"), sourceOffset("fn read", len("fn "))},
-				{"operation presentation", presentation("operation"), "effect fn Labels.read(item: string) -> string"},
-				{"service selection kind", selectionKind("service"), "reference"},
-				{"service offset", declared("service", "span", "offset"), sourceOffset("service Labels", len("service "))},
-				{"service presentation", presentation("service"), "service Labels"},
-				{"bundled kind", declared("bundled", "kind"), "function"},
-				{"bundled module", declared("bundled", "module"), "effra/functions"},
-				{"module-alias kind", declared("module-alias", "kind"), "module"},
-				{"module-alias location", declared("module-alias", "locationAvailable"), true},
-				{"module-alias offset", declared("module-alias", "span", "offset"), sourceOffset(`Fns "effra`, 0)},
-				{"module-alias presentation", presentation("module-alias"), `import Fns "effra/functions"`},
-				{"variant selection kind", selectionKind("variant"), "reference"},
-				{"variant kind", declared("variant", "kind"), "variant"},
-				{"variant owner", declared("variant", "owner"), "Notice"},
-				{"variant offset", declared("variant", "span", "offset"), sourceOffset("Named {", 0)},
-				{"variant presentation", presentation("variant"), "variant Notice.Named { value: string }"},
-				// Annotation and row-label tokens resolve through the checked
-				// type and row: a row parameter is the function's own, other
-				// labels are errors.
-				{"annotation selection kind", selectionKind("annotation"), "reference"},
-				{"annotation kind", declared("annotation", "kind"), "enum"},
-				{"annotation offset", declared("annotation", "span", "offset"), sourceOffset("Notice {", 0)},
-				{"row-parameter kind", declared("row-parameter", "kind"), "rowParameter"},
-				{"row-parameter owner", declared("row-parameter", "owner"), "guarded"},
-				{"row-parameter offset", declared("row-parameter", "span", "offset"), sourceOffset("guarded<E", len("guarded<"))},
-				{"row-parameter presentation", presentation("row-parameter"), "row parameter guarded.E: raises"},
-				{"row-label kind", declared("row-label", "kind"), "error"},
-				{"row-label presentation", presentation("row-label"), "error Child"},
-				{"Labels target kind", typeSmokeAt(t, named["Labels"], "selection", "target", "kind"), "service"},
-				{"Prefix target kind", typeSmokeAt(t, named["Prefix"], "selection", "target", "kind"), "provider"},
-				{"Labels.read target kind", typeSmokeAt(t, named["Labels.read"], "selection", "target", "kind"), "operation"},
-				{"Labels.read presentation", typeSmokeAt(t, named["Labels.read"], "selection", "presentation"), "effect fn Labels.read(item: string) -> string"},
-				{"unrelated selection kind", typeSmokeAt(t, unrelated, "selection", "kind"), "declaration"},
-				{"nominal selection kind", typeSmokeAt(t, nominal, "selection", "kind"), "declaration"},
-				{"nominal field type", typeSmokeAt(t, nominal, "selection", "declaration", "variants", 0, "fields", 0, "type"), "string"},
-			} {
-				if !reflect.DeepEqual(check.got, check.want) {
-					t.Fatalf("%s = %#v, want %#v", check.label, check.got, check.want)
-				}
-			}
-			if !reflect.DeepEqual(declared("use", "span"), binding("use", "declarationSpan")) {
-				t.Fatalf("use target span %v != binding declaration %v", declared("use", "span"), binding("use", "declarationSpan"))
-			}
-			if typeSmokeTruthy(declared("bundled", "locationAvailable")) {
-				t.Fatalf("bundled declaration claims a location")
-			}
-			if source, _ := declared("bundled", "source").(string); !strings.HasPrefix(source, "source:effra/functions") {
-				t.Fatalf("bundled source = %q", source)
-			}
+	binding := func(name string, path ...any) any {
+		return typeSmokeAt(t, views[name], append([]any{"selection", "binding"}, path...)...)
+	}
+	if binding("let", "id") != binding("use", "id") {
+		t.Fatalf("let and use bindings differ")
+	}
+	if binding("alias", "id") != binding("alias-use", "id") || binding("alias-use", "id") == binding("outer-use", "id") {
+		t.Fatalf("pattern alias does not shadow the outer label")
+	}
+	if binding("alias", "declarationSpan", "offset") != float64(selectors[2].offset) {
+		t.Fatalf("alias declaration offset = %v", binding("alias", "declarationSpan", "offset"))
+	}
+	if binding("config", "id") != binding("config-use", "id") {
+		t.Fatalf("configuration parameter and use bindings differ")
+	}
+	if binding("method-use", "kind") != "parameter" {
+		t.Fatalf("method-use binding kind = %v", binding("method-use", "kind"))
+	}
+	// Hover/definition facts: the selected token's declaration target
+	// and the one presentation rendered from this response's tables.
+	declared := func(name string, path ...any) any {
+		return typeSmokeAt(t, views[name], append([]any{"selection", "target"}, path...)...)
+	}
+	presentation := func(name string) any { return typeSmokeAt(t, views[name], "selection", "presentation") }
+	selectionKind := func(name string) any { return typeSmokeAt(t, views[name], "selection", "kind") }
+	sourceOffset := func(match string, skip int) float64 { return float64(typeSmokeOffset(t, match, skip)) }
+	for _, check := range []struct {
+		label     string
+		got, want any
+	}{
+		{"let target kind", declared("let", "kind"), "let"},
+		{"let presentation", presentation("let"), "let label: string"},
+		{"callee selection kind", selectionKind("callee"), "expression"},
+		{"callee target kind", declared("callee", "kind"), "function"},
+		{"callee location", declared("callee", "locationAvailable"), true},
+		{"callee offset", declared("callee", "span", "offset"), sourceOffset("fn task", len("fn "))},
+		{"callee presentation", presentation("callee"), "effect fn task() -> string raises {Child}"},
+		{"operation target kind", declared("operation", "kind"), "operation"},
+		{"operation owner", declared("operation", "owner"), "Labels"},
+		{"operation offset", declared("operation", "span", "offset"), sourceOffset("fn read", len("fn "))},
+		{"operation presentation", presentation("operation"), "effect fn Labels.read(item: string) -> string"},
+		{"service selection kind", selectionKind("service"), "reference"},
+		{"service offset", declared("service", "span", "offset"), sourceOffset("service Labels", len("service "))},
+		{"service presentation", presentation("service"), "service Labels"},
+		{"bundled kind", declared("bundled", "kind"), "function"},
+		{"bundled module", declared("bundled", "module"), "effra/functions"},
+		{"module-alias kind", declared("module-alias", "kind"), "module"},
+		{"module-alias location", declared("module-alias", "locationAvailable"), true},
+		{"module-alias offset", declared("module-alias", "span", "offset"), sourceOffset(`Fns "effra`, 0)},
+		{"module-alias presentation", presentation("module-alias"), `import Fns "effra/functions"`},
+		{"variant selection kind", selectionKind("variant"), "reference"},
+		{"variant kind", declared("variant", "kind"), "variant"},
+		{"variant owner", declared("variant", "owner"), "Notice"},
+		{"variant offset", declared("variant", "span", "offset"), sourceOffset("Named {", 0)},
+		{"variant presentation", presentation("variant"), "variant Notice.Named { value: string }"},
+		// Annotation and row-label tokens resolve through the checked
+		// type and row: a row parameter is the function's own, other
+		// labels are errors.
+		{"annotation selection kind", selectionKind("annotation"), "reference"},
+		{"annotation kind", declared("annotation", "kind"), "enum"},
+		{"annotation offset", declared("annotation", "span", "offset"), sourceOffset("Notice {", 0)},
+		{"row-parameter kind", declared("row-parameter", "kind"), "rowParameter"},
+		{"row-parameter owner", declared("row-parameter", "owner"), "guarded"},
+		{"row-parameter offset", declared("row-parameter", "span", "offset"), sourceOffset("guarded<E", len("guarded<"))},
+		{"row-parameter presentation", presentation("row-parameter"), "row parameter guarded.E: raises"},
+		{"row-label kind", declared("row-label", "kind"), "error"},
+		{"row-label presentation", presentation("row-label"), "error Child"},
+		{"Labels target kind", typeSmokeAt(t, named["Labels"], "selection", "target", "kind"), "service"},
+		{"Prefix target kind", typeSmokeAt(t, named["Prefix"], "selection", "target", "kind"), "provider"},
+		{"Labels.read target kind", typeSmokeAt(t, named["Labels.read"], "selection", "target", "kind"), "operation"},
+		{"Labels.read presentation", typeSmokeAt(t, named["Labels.read"], "selection", "presentation"), "effect fn Labels.read(item: string) -> string"},
+		{"unrelated selection kind", typeSmokeAt(t, unrelated, "selection", "kind"), "declaration"},
+		{"nominal selection kind", typeSmokeAt(t, nominal, "selection", "kind"), "declaration"},
+		{"nominal field type", typeSmokeAt(t, nominal, "selection", "declaration", "variants", 0, "fields", 0, "type"), "string"},
+	} {
+		if !reflect.DeepEqual(check.got, check.want) {
+			t.Fatalf("%s = %#v, want %#v", check.label, check.got, check.want)
+		}
+	}
+	if !reflect.DeepEqual(declared("use", "span"), binding("use", "declarationSpan")) {
+		t.Fatalf("use target span %v != binding declaration %v", declared("use", "span"), binding("use", "declarationSpan"))
+	}
+	if typeSmokeTruthy(declared("bundled", "locationAvailable")) {
+		t.Fatalf("bundled declaration claims a location")
+	}
+	if source, _ := declared("bundled", "source").(string); !strings.HasPrefix(source, "source:effra/functions") {
+		t.Fatalf("bundled source = %q", source)
+	}
 
-			typeID, _ := typeSmokeAt(t, views["use"], "selection", "expression", "type", "type", "ref").(string)
-			revision, _ := views["use"]["revision"].(string)
-			fiberID, _ := typeSmokeAt(t, views["fiber"], "selection", "expression", "type", "type", "ref").(string)
+	typeID, _ := typeSmokeAt(t, views["use"], "selection", "expression", "type", "type", "ref").(string)
+	revision, _ := views["use"]["revision"].(string)
+	fiberID, _ := typeSmokeAt(t, views["fiber"], "selection", "expression", "type", "type", "ref").(string)
 
-			// Stage 2: revision-bound canonical definitions and their refusals.
-			runs = typeSmokeRunAll(binary, workspace, typeSmokeCLITimeout, [][]string{
-				typeArgs(path, "--definition", typeID, "--revision", revision),
-				typeArgs(path, "--definition", fiberID, "--revision", revision),
-				typeArgs(path, "--definition", typeID),
-				typeArgs(path, "--definition", typeID, "--revision", "stale"),
-			})
-			definition := typeSmokeSucceeded(t, runs[0])
-			fiberDefinition := typeSmokeSucceeded(t, runs[1])
-			typeSmokeRefused(t, runs[2])
-			typeSmokeRefused(t, runs[3])
+	// Stage 2: revision-bound canonical definitions and their refusals.
+	runs = typeSmokeRunAll(binary, workspace, typeSmokeCLITimeout, [][]string{
+		typeArgs(path, "--definition", typeID, "--revision", revision),
+		typeArgs(path, "--definition", fiberID, "--revision", revision),
+		typeArgs(path, "--definition", typeID),
+		typeArgs(path, "--definition", typeID, "--revision", "stale"),
+	})
+	definition := typeSmokeSucceeded(t, runs[0])
+	fiberDefinition := typeSmokeSucceeded(t, runs[1])
+	typeSmokeRefused(t, runs[2])
+	typeSmokeRefused(t, runs[3])
 
-			definitionProducer := producerSnapshot(t, definition, target, defaultSnapshotSchema)
-			if artifactScope && !reflect.DeepEqual(definitionProducer, artifact) {
-				t.Fatalf("definition producer %v, want %v", definitionProducer, artifact)
-			}
-			if typeSmokeTruthy(typeSmokeAt(t, definition, "selection", "locationAvailable")) {
-				t.Fatalf("type definition claims a location")
-			}
-			typeSmokeAssertClosure(t, definition, "definition")
-			if kind := typeSmokeAt(t, views["fiber"], "selection", "expression", "type", "type", "kind"); kind != "fiber" {
-				t.Fatalf("selected fiber kind = %v", kind)
-			}
-			if !typeSmokeTruthy(typeSmokeAt(t, views["fiber"], "selection", "expression", "type", "failureRow")) {
-				t.Fatalf("selected fiber has an empty failure row")
-			}
-			typeSmokeAssertCausalWireRejections(t, views["fiber"], "selected Fiber")
-			emptySpan := map[string]any{"offset": float64(0), "length": float64(0), "line": float64(0), "column": float64(0)}
-			wantSelection := map[string]any{"kind": "typeDefinition", "locationAvailable": false,
-				"span": emptySpan, "extent": emptySpan, "definition": fiberID,
-				"presentation": "Fiber<string, {Child}>"}
-			if !reflect.DeepEqual(fiberDefinition["selection"], wantSelection) {
-				t.Fatalf("fiber definition selection = %v, want %v", fiberDefinition["selection"], wantSelection)
-			}
-			found := false
-			for _, entry := range typeSmokeList(t, fiberDefinition, "types") {
-				node, _ := entry.(map[string]any)
-				if node["id"] == fiberID && node["kind"] == "fiber" && typeSmokeTruthy(node["args"]) && typeSmokeTruthy(node["failureRow"]) {
-					found = true
-				}
-			}
-			if !found {
-				t.Fatalf("fiber definition lacks its fiber node: %v", fiberDefinition["types"])
-			}
-			typeSmokeAssertCausalWireRejections(t, fiberDefinition, "Fiber definition")
+	definitionProducer := producerSnapshot(t, definition, "go", defaultSnapshotSchema)
+	if artifactScope && !reflect.DeepEqual(definitionProducer, artifact) {
+		t.Fatalf("definition producer %v, want %v", definitionProducer, artifact)
+	}
+	if typeSmokeTruthy(typeSmokeAt(t, definition, "selection", "locationAvailable")) {
+		t.Fatalf("type definition claims a location")
+	}
+	typeSmokeAssertClosure(t, definition, "definition")
+	if kind := typeSmokeAt(t, views["fiber"], "selection", "expression", "type", "type", "kind"); kind != "fiber" {
+		t.Fatalf("selected fiber kind = %v", kind)
+	}
+	if !typeSmokeTruthy(typeSmokeAt(t, views["fiber"], "selection", "expression", "type", "failureRow")) {
+		t.Fatalf("selected fiber has an empty failure row")
+	}
+	typeSmokeAssertCausalWireRejections(t, views["fiber"], "selected Fiber")
+	emptySpan := map[string]any{"offset": float64(0), "length": float64(0), "line": float64(0), "column": float64(0)}
+	wantSelection := map[string]any{"kind": "typeDefinition", "locationAvailable": false,
+		"span": emptySpan, "extent": emptySpan, "definition": fiberID,
+		"presentation": "Fiber<string, {Child}>"}
+	if !reflect.DeepEqual(fiberDefinition["selection"], wantSelection) {
+		t.Fatalf("fiber definition selection = %v, want %v", fiberDefinition["selection"], wantSelection)
+	}
+	found := false
+	for _, entry := range typeSmokeList(t, fiberDefinition, "types") {
+		node, _ := entry.(map[string]any)
+		if node["id"] == fiberID && node["kind"] == "fiber" && typeSmokeTruthy(node["args"]) && typeSmokeTruthy(node["failureRow"]) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("fiber definition lacks its fiber node: %v", fiberDefinition["types"])
+	}
+	typeSmokeAssertCausalWireRejections(t, fiberDefinition, "Fiber definition")
 
-			// Stage 3: the same selections through one MCP process.
-			requests := []any{
-				map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{
-					"protocolVersion": "2025-11-25", "capabilities": map[string]any{},
-					"clientInfo": map[string]any{"name": "type-smoke", "version": "1"}}},
-				map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"},
-			}
-			guard := map[string]any{}
-			if artifactScope {
-				guard["expectedProducer"] = artifact["qualifier"]
-			}
-			file := filepath.Base(path)
-			for index, selector := range selectors {
-				requests = append(requests, typeSmokeTool(index+2, typeSmokeMerge(map[string]any{
-					"file": file, "target": target, "offset": selector.offset, "expectedRevision": revision}, guard)))
-			}
-			requests = append(requests,
-				typeSmokeTool(20, typeSmokeMerge(map[string]any{"file": file, "target": target, "symbol": "unrelated"}, guard)),
-				typeSmokeTool(21, typeSmokeMerge(map[string]any{"file": file, "target": target, "definition": typeID,
-					"expectedRevision": revision}, guard)),
-				typeSmokeTool(22, typeSmokeMerge(map[string]any{"file": file, "target": target, "offset": selectors[0].offset,
-					"expectedRevision": "stale"}, guard)),
-				typeSmokeTool(23, map[string]any{"file": filepath.Base(invalid), "target": target, "symbol": "invalid"}),
-				typeSmokeTool(24, map[string]any{"file": file, "target": target, "offset": selectors[0].offset, "symbol": "local"}),
-				typeSmokeTool(27, typeSmokeMerge(map[string]any{"file": file, "target": target, "definition": fiberID,
-					"expectedRevision": revision}, guard)),
-			)
-			for index, name := range namedSymbols {
-				requests = append(requests, typeSmokeTool(28+index, typeSmokeMerge(map[string]any{
-					"file": file, "target": target, "symbol": name}, guard)))
-			}
-			if artifactScope {
-				staleQualifier := "sha256:" + strings.Repeat("0", 64)
-				if staleQualifier == artifact["qualifier"] {
-					staleQualifier = "sha256:" + strings.Repeat("1", 64)
-				}
-				requests = append(requests,
-					typeSmokeTool(25, map[string]any{"file": file, "target": target, "symbol": "unrelated",
-						"expectedRevision": revision, "expectedProducer": staleQualifier}),
-					map[string]any{"jsonrpc": "2.0", "id": 26, "method": "ping"})
-			} else {
-				requests = append(requests, map[string]any{"jsonrpc": "2.0", "id": 25, "method": "ping"})
-			}
-			var input bytes.Buffer
-			for _, request := range requests {
-				input.Write(smokeDumps(t, request))
-				input.WriteByte('\n')
-			}
-			stdout, stderr, code := runSmokeCLI(t, typeSmokeMCPTimeout, binary, workspace, input.String(), "mcp", workspace)
-			if code != 0 {
-				t.Fatalf("mcp exit %d: %s", code, stderr)
-			}
-			replies := map[int]map[string]any{}
-			for _, line := range bytes.Split(bytes.TrimRight(stdout, "\n"), []byte("\n")) {
-				reply := smokeJSON(t, line)
-				identifier, _ := reply["id"].(float64)
-				replies[int(identifier)] = reply
-			}
-			reply := func(identifier int) map[string]any {
-				value, ok := replies[identifier]
-				if !ok {
-					t.Fatalf("no reply %d in %s", identifier, stdout)
-				}
-				return value
-			}
-			structured := func(identifier int) map[string]any {
-				result, ok := reply(identifier)["result"].(map[string]any)
-				if !ok {
-					t.Fatalf("reply %d has no result: %v", identifier, reply(identifier))
-				}
-				content, ok := result["structuredContent"].(map[string]any)
-				if !ok {
-					t.Fatalf("reply %d has no structured content: %v", identifier, result)
-				}
-				return content
-			}
-			var mcpFiber map[string]any
-			for index, selector := range selectors {
-				actual := structured(index + 2)
-				assertReportParity(t, actual, views[selector.name], parityOptions{target: target})
-				typeSmokeAssertClosure(t, actual, "MCP "+selector.name)
-				if selector.name == "fiber" {
-					mcpFiber = actual
-				}
-			}
-			assertReportParity(t, structured(20), unrelated, parityOptions{target: target})
-			assertReportParity(t, structured(21), definition, parityOptions{target: target})
-			for index, name := range namedSymbols {
-				assertReportParity(t, structured(28+index), named[name], parityOptions{target: target})
-			}
-			actualFiberDefinition := structured(27)
-			assertReportParity(t, actualFiberDefinition, fiberDefinition, parityOptions{target: target})
-			if mcpFiber == nil {
-				t.Fatal("MCP returned no selected Fiber")
-			}
-			typeSmokeAssertCausalWireRejections(t, mcpFiber, "MCP selected Fiber")
-			typeSmokeAssertCausalWireRejections(t, actualFiberDefinition, "MCP Fiber definition")
-			isError := func(identifier int) bool {
-				result, _ := reply(identifier)["result"].(map[string]any)
-				return typeSmokeTruthy(result["isError"])
-			}
-			if !isError(22) || !isError(23) {
-				t.Fatalf("stale revision or invalid source not refused: %v / %v", reply(22), reply(23))
-			}
-			if failure, _ := reply(24)["error"].(map[string]any); failure["code"] != float64(-32602) {
-				t.Fatalf("offset with symbol not refused as invalid params: %v", reply(24))
-			}
-			pingID := 25
-			if artifactScope {
-				text, _ := typeSmokeAt(t, reply(25), "result", "content", 0, "text").(string)
-				if !isError(25) || !strings.Contains(text, "stale producer") {
-					t.Fatalf("stale producer not refused: %v", reply(25))
-				}
-				pingID = 26
-			}
-			if result, ok := reply(pingID)["result"].(map[string]any); !ok || len(result) != 0 {
-				t.Fatalf("queued ping: %v", reply(pingID))
-			}
-		})
+	// Stage 3: the same selections through one MCP process.
+	requests := []any{
+		map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{
+			"protocolVersion": "2025-11-25", "capabilities": map[string]any{},
+			"clientInfo": map[string]any{"name": "type-smoke", "version": "1"}}},
+		map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"},
+	}
+	guard := map[string]any{}
+	if artifactScope {
+		guard["expectedProducer"] = artifact["qualifier"]
+	}
+	file := filepath.Base(path)
+	for index, selector := range selectors {
+		requests = append(requests, typeSmokeTool(index+2, typeSmokeMerge(map[string]any{
+			"file": file, "target": "go", "offset": selector.offset, "expectedRevision": revision}, guard)))
+	}
+	requests = append(requests,
+		typeSmokeTool(20, typeSmokeMerge(map[string]any{"file": file, "target": "go", "symbol": "unrelated"}, guard)),
+		typeSmokeTool(21, typeSmokeMerge(map[string]any{"file": file, "target": "go", "definition": typeID,
+			"expectedRevision": revision}, guard)),
+		typeSmokeTool(22, typeSmokeMerge(map[string]any{"file": file, "target": "go", "offset": selectors[0].offset,
+			"expectedRevision": "stale"}, guard)),
+		typeSmokeTool(23, map[string]any{"file": filepath.Base(invalid), "target": "go", "symbol": "invalid"}),
+		typeSmokeTool(24, map[string]any{"file": file, "target": "go", "offset": selectors[0].offset, "symbol": "local"}),
+		typeSmokeTool(27, typeSmokeMerge(map[string]any{"file": file, "target": "go", "definition": fiberID,
+			"expectedRevision": revision}, guard)),
+	)
+	for index, name := range namedSymbols {
+		requests = append(requests, typeSmokeTool(28+index, typeSmokeMerge(map[string]any{
+			"file": file, "target": "go", "symbol": name}, guard)))
+	}
+	if artifactScope {
+		staleQualifier := "sha256:" + strings.Repeat("0", 64)
+		if staleQualifier == artifact["qualifier"] {
+			staleQualifier = "sha256:" + strings.Repeat("1", 64)
+		}
+		requests = append(requests,
+			typeSmokeTool(25, map[string]any{"file": file, "target": "go", "symbol": "unrelated",
+				"expectedRevision": revision, "expectedProducer": staleQualifier}),
+			map[string]any{"jsonrpc": "2.0", "id": 26, "method": "ping"})
+	} else {
+		requests = append(requests, map[string]any{"jsonrpc": "2.0", "id": 25, "method": "ping"})
+	}
+	var input bytes.Buffer
+	for _, request := range requests {
+		input.Write(smokeDumps(t, request))
+		input.WriteByte('\n')
+	}
+	stdout, stderr, code := runSmokeCLI(t, typeSmokeMCPTimeout, binary, workspace, input.String(), "mcp", workspace)
+	if code != 0 {
+		t.Fatalf("mcp exit %d: %s", code, stderr)
+	}
+	replies := map[int]map[string]any{}
+	for _, line := range bytes.Split(bytes.TrimRight(stdout, "\n"), []byte("\n")) {
+		reply := smokeJSON(t, line)
+		identifier, _ := reply["id"].(float64)
+		replies[int(identifier)] = reply
+	}
+	reply := func(identifier int) map[string]any {
+		value, ok := replies[identifier]
+		if !ok {
+			t.Fatalf("no reply %d in %s", identifier, stdout)
+		}
+		return value
+	}
+	structured := func(identifier int) map[string]any {
+		result, ok := reply(identifier)["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("reply %d has no result: %v", identifier, reply(identifier))
+		}
+		content, ok := result["structuredContent"].(map[string]any)
+		if !ok {
+			t.Fatalf("reply %d has no structured content: %v", identifier, result)
+		}
+		return content
+	}
+	var mcpFiber map[string]any
+	for index, selector := range selectors {
+		actual := structured(index + 2)
+		assertReportParity(t, actual, views[selector.name], parityOptions{target: "go"})
+		typeSmokeAssertClosure(t, actual, "MCP "+selector.name)
+		if selector.name == "fiber" {
+			mcpFiber = actual
+		}
+	}
+	assertReportParity(t, structured(20), unrelated, parityOptions{target: "go"})
+	assertReportParity(t, structured(21), definition, parityOptions{target: "go"})
+	for index, name := range namedSymbols {
+		assertReportParity(t, structured(28+index), named[name], parityOptions{target: "go"})
+	}
+	actualFiberDefinition := structured(27)
+	assertReportParity(t, actualFiberDefinition, fiberDefinition, parityOptions{target: "go"})
+	if mcpFiber == nil {
+		t.Fatal("MCP returned no selected Fiber")
+	}
+	typeSmokeAssertCausalWireRejections(t, mcpFiber, "MCP selected Fiber")
+	typeSmokeAssertCausalWireRejections(t, actualFiberDefinition, "MCP Fiber definition")
+	isError := func(identifier int) bool {
+		result, _ := reply(identifier)["result"].(map[string]any)
+		return typeSmokeTruthy(result["isError"])
+	}
+	if !isError(22) || !isError(23) {
+		t.Fatalf("stale revision or invalid source not refused: %v / %v", reply(22), reply(23))
+	}
+	if failure, _ := reply(24)["error"].(map[string]any); failure["code"] != float64(-32602) {
+		t.Fatalf("offset with symbol not refused as invalid params: %v", reply(24))
+	}
+	pingID := 25
+	if artifactScope {
+		text, _ := typeSmokeAt(t, reply(25), "result", "content", 0, "text").(string)
+		if !isError(25) || !strings.Contains(text, "stale producer") {
+			t.Fatalf("stale producer not refused: %v", reply(25))
+		}
+		pingID = 26
+	}
+	if result, ok := reply(pingID)["result"].(map[string]any); !ok || len(result) != 0 {
+		t.Fatalf("queued ping: %v", reply(pingID))
 	}
 }
