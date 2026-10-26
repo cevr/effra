@@ -988,15 +988,29 @@ func physical(path string) (string, []string, error) {
 		path = working + separator + path
 	}
 	components := strings.FieldsFunc(path, func(r rune) bool { return r == filepath.Separator })
+	prefix := func(count int) string { return separator + strings.Join(components[:count], separator) }
+	// A concurrent writer in the same workspace, such as a second build
+	// creating the same output directory, can create a component between
+	// the walk that found it missing and the check below. A component that
+	// resolves when walked again was created meanwhile, so the walk starts
+	// over; one that still cannot be walked is the error. Restarts are
+	// bounded so a path that keeps changing is refused rather than chased.
+	const restarts = 8
+	attempt := 0
+scan:
 	for count := len(components); count >= 0; count-- {
-		resolved, err := filepath.EvalSymlinks(separator + strings.Join(components[:count], separator))
+		resolved, err := filepath.EvalSymlinks(prefix(count))
 		if err != nil {
 			continue
 		}
 		if count < len(components) {
 			next := filepath.Join(resolved, components[count])
 			if _, err := os.Lstat(next); !errors.Is(err, fs.ErrNotExist) {
-				return "", nil, fmt.Errorf("%s exists but cannot be resolved (a dangling link or a non-directory)", separator+strings.Join(components[:count+1], separator))
+				if _, err := filepath.EvalSymlinks(prefix(count + 1)); err == nil && attempt < restarts {
+					attempt++
+					goto scan
+				}
+				return "", nil, fmt.Errorf("%s exists but cannot be resolved (a dangling link or a non-directory)", prefix(count+1))
 			}
 		}
 		missing := components[count:]
