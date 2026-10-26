@@ -53,8 +53,8 @@ type Step struct {
 	Inputs *Inputs
 	// ToolEnv names executables the step's own cache cannot see, such as the
 	// JavaScript tools Go tests spawn. Their fingerprints, with the environment
-	// they and the Go programs a test runs read (testToolEnvironment,
-	// goRuntimeEnvironment), reach the step as one digest in
+	// they and the Go programs a test runs read (testenv.Names, which
+	// include goRuntimeEnvironment), reach the step as one digest in
 	// EFFRA_TOOL_VERSIONS; a test that reads it keys Go's test cache on it.
 	ToolEnv []string
 }
@@ -82,8 +82,7 @@ type Inputs struct {
 	// like Installed, but when this step's key is computed: Installed trees
 	// are digested once per run because nothing writes them.
 	Generated []string
-	// Trees names directories a step walks on disk itself, as the
-	// framework-port capture check walks its vendored tree, so every entry
+	// Trees names directories a step walks on disk itself, so every entry
 	// there is an input, files Git ignores included. Each is digested like
 	// Generated, when this step's key is computed, and a link out of it into
 	// the repository is followed. TreeExclude names repository paths under

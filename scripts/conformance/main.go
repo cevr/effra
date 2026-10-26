@@ -9,9 +9,9 @@
 // manifest from the submodule's immutable git objects. check validates the
 // selected behavior mapping against that verified corpus and, with --run,
 // executes its shared Go/JS evidence tests. foldkit verifies the committed
-// Foldkit snapshot and example/host matrix offline (--self-check), verifies
-// them against a read-only pinned Foldkit checkout (--check), or captures
-// them from one into an empty root (--capture).
+// Foldkit snapshot offline (--self-check), verifies it against a read-only
+// pinned Foldkit checkout (--check), or captures it from one into an empty
+// root (--capture).
 package main
 
 import (
@@ -31,7 +31,7 @@ commands:
   import [--root DIR] [--refresh]   verify or refresh the pinned Effect corpus manifest
   check [--mapping FILE] [--run]    validate conformance/effect-cases.json; --run executes its Go/JS evidence
   foldkit [SOURCE] (--capture | --check | --self-check) [--root DIR]
-                                    capture or verify the pinned Foldkit snapshot and corpus matrix
+                                    capture or verify the pinned Foldkit snapshot
 `
 
 func main() {
@@ -171,7 +171,7 @@ func runFoldkit(args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("conformance foldkit", flag.ContinueOnError)
 	captureMode := flags.Bool("capture", false, "capture the pinned source into this worktree")
 	checkMode := flags.Bool("check", false, "verify capture against the pinned source checkout")
-	selfCheckMode := flags.Bool("self-check", false, "verify committed snapshot and corpus matrix offline")
+	selfCheckMode := flags.Bool("self-check", false, "verify the committed snapshot offline")
 	rootFlag := flags.String("root", "", "Effra repository root (default: the enclosing Go module)")
 	flags.SetOutput(stderr)
 	flags.Usage = func() {
@@ -242,10 +242,7 @@ func runFoldkit(args []string, stdout, stderr io.Writer) int {
 			}
 			return nil
 		case *checkMode:
-			if err := checkFoldkitSource(source, snapshot, stdout); err != nil {
-				return err
-			}
-			return validateFoldkitCorpusManifest(pureJoin(root, foldkitCorpusRelative, "manifest.json"), snapshot, root)
+			return checkFoldkitSource(source, snapshot, stdout)
 		}
 		if len(positional) == 1 {
 			return errors.New("--self-check does not accept a source checkout")

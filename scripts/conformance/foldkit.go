@@ -7,9 +7,7 @@ package main
 // minus the vendored repos/ reference trees and generated or installed
 // directories. Effra owns its manifest: the selection rule, the Git identity
 // and sha256 of every file, and integrity digests pinned independently below.
-// conformance/framework-ports/manifest.json is the example/host coverage
-// matrix over that snapshot. Neither is a claim that Effra executes or passes
-// any Foldkit example.
+// It is not a claim that Effra executes or passes any Foldkit example.
 
 import (
 	"bytes"
@@ -40,7 +38,6 @@ const (
 	foldkitSourceURL               = "https://github.com/" + foldkitRepository + "/tree/" + foldkitCommit
 	foldkitDefaultSource           = "/home/exedev/.cache/repo/foldkit/foldkit"
 	foldkitSnapshotRelative        = "conformance/upstream/foldkit-d21db423"
-	foldkitCorpusRelative          = "conformance/framework-ports"
 	foldkitCanonicalEncoding       = "json-sorted-compact-utf8-v1"
 
 	// Set from the first verified capture. These constants make offline
@@ -97,52 +94,6 @@ var foldkitExampleIDs = []string{
 	"websocket-chat",
 }
 
-var foldkitHosts = []string{
-	"foldkit-reference",
-	"react-dom",
-	"solid-2-dom",
-	"solid-yield",
-	"effra-go",
-	"effra-effect-js",
-}
-
-var foldkitFocus = map[string]string{
-	"api-cache":              "Shared API cache and tabbed data reads",
-	"api-cache-query":        "Typed query cache with explicit data consumers",
-	"auth":                   "Session restoration, routing, and login",
-	"canvas-art":             "Canvas commands and generated drawing state",
-	"charting":               "Chart and data-visualization interactions",
-	"counter":                "Minimal model, messages, update, and view",
-	"counters":               "Multiple independent counter models",
-	"crash-view":             "Failure presentation at a view boundary",
-	"embedding":              "Embedding an application through host ports",
-	"form":                   "Field validation and asynchronous submission",
-	"generative-art":         "Procedural artwork and generated commands",
-	"interrupting-commands":  "Keyed cancellation of concurrent uploads",
-	"job-application":        "Calendar and job-application form flow",
-	"kanban":                 "Persisted board state and task movement",
-	"managed-resource-layer": "Layer acquisition through managed resource lifetime",
-	"map":                    "Map and geolocation host integration",
-	"personal-blog":          "Routed article pages and content loading",
-	"pixel-art":              "Pixel editing and persisted drawing state",
-	"query-sync":             "URL query state synchronized with model state",
-	"route-transitions":      "Route changes with explicit transition state",
-	"routing":                "Routed application state and navigation commands",
-	"shopping-cart":          "Cart state and derived checkout information",
-	"slow-warnings":          "Slow work observation and warning UI",
-	"snake":                  "Tick-driven interactive game state",
-	"ssg":                    "Static-site generation over route data",
-	"ssr":                    "Server rendering and initial application state",
-	"state-machine":          "Guarded checkout state machine",
-	"stopwatch":              "Time commands and subscriptions",
-	"todo":                   "Persisted task editing",
-	"ui-showcase":            "Reusable UI controls and routing",
-	"view-transitions":       "Browser view-transition lifecycle",
-	"weather":                "Typed HTTP requests and async result state",
-	"web-components":         "Custom-element definition and host boundary",
-	"websocket-chat":         "Socket resource and streaming messages",
-}
-
 var foldkitExcludedPrefixes = []string{"repos/"}
 
 var foldkitExcludedDirectoryNames = []string{
@@ -167,7 +118,6 @@ var foldkitTrackedModes = map[string]bool{"100644": true, "100755": true, "12000
 type foldkitPin struct {
 	commit, tree, sourceURL string
 	exampleIDs              []string
-	focus                   map[string]string
 }
 
 var pinnedFoldkit = foldkitPin{
@@ -175,7 +125,6 @@ var pinnedFoldkit = foldkitPin{
 	tree:       foldkitTree,
 	sourceURL:  foldkitSourceURL,
 	exampleIDs: foldkitExampleIDs,
-	focus:      foldkitFocus,
 }
 
 // foldkitEntry is one tracked blob of the pinned commit.
@@ -704,69 +653,6 @@ func writeFoldkitJSON(destination string, value any) error {
 	return os.WriteFile(destination, []byte(prettyJSON(value)+"\n"), 0o666)
 }
 
-func foldkitCorpusManifestFor(snapshot, repositoryRoot string, pin foldkitPin) (map[string]any, error) {
-	reference, ok := pureRelativeTo(snapshot, repositoryRoot)
-	if !ok {
-		return nil, fmt.Errorf("corpus snapshot is outside repository root: %s", purePath(snapshot))
-	}
-	if reference == "" || reference == "." {
-		return nil, errors.New("corpus snapshot path is empty")
-	}
-	focus := func(example string) (string, error) {
-		value, ok := pin.focus[example]
-		if !ok {
-			return "", errors.New(pyStringRepr(example))
-		}
-		return value, nil
-	}
-	coverage := []any{}
-	examples := []any{}
-	for _, example := range pin.exampleIDs {
-		exampleFocus, err := focus(example)
-		if err != nil {
-			return nil, err
-		}
-		evidence := reference + "/examples/" + example + "/package.json"
-		for _, host := range foldkitHosts {
-			status, rowEvidence := "pending", []any{}
-			note := "No executable port or Effra fixture is present in unit 1."
-			if host == "foldkit-reference" {
-				status, rowEvidence = "reference-only", []any{evidence}
-				note = "Pinned upstream source only; not Effra execution coverage."
-			}
-			coverage = append(coverage, map[string]any{
-				"example":  example,
-				"focus":    exampleFocus,
-				"host":     host,
-				"status":   status,
-				"evidence": rowEvidence,
-				"note":     note,
-			})
-		}
-		examples = append(examples, map[string]any{"id": example, "focus": exampleFocus})
-	}
-	return map[string]any{
-		"schemaVersion": number(1),
-		"status":        "unit-1-reference-capture; host-ports-pending",
-		"source": map[string]any{
-			"repository":             foldkitRepository,
-			"commit":                 pin.commit,
-			"tree":                   pin.tree,
-			"url":                    pin.sourceURL,
-			"foldkitVersion":         foldkitRelease,
-			"workspaceEffectVersion": foldkitWorkspaceEffect,
-		},
-		"snapshot": map[string]any{
-			"path":     reference,
-			"manifest": reference + "/manifest.json",
-			"status":   "reference-only-not-executed",
-		},
-		"hosts":    stringList(foldkitHosts),
-		"examples": examples,
-		"coverage": coverage,
-	}, nil
-}
-
 // pyIsFile is pathlib's Path.is_file: missing paths read as false, other
 // stat failures propagate.
 func pyIsFile(name string) (bool, error) {
@@ -787,138 +673,6 @@ func readFoldkitJSON(name string) (any, error) {
 		return nil, err
 	}
 	return decodeJSON(text)
-}
-
-func validateFoldkitCorpusManifest(manifestPath, snapshot, repositoryRoot string) error {
-	decoded, err := readFoldkitJSON(manifestPath)
-	if err != nil {
-		return fmt.Errorf("invalid framework corpus manifest: %v", err)
-	}
-	manifest, ok := decoded.(map[string]any)
-	if !ok {
-		return errors.New("invalid framework corpus manifest: root must be an object")
-	}
-	expected, err := foldkitCorpusManifestFor(snapshot, repositoryRoot, pinnedFoldkit)
-	if err != nil {
-		return err
-	}
-	for _, key := range []string{"schemaVersion", "status", "source", "snapshot", "hosts", "examples"} {
-		if !pyEqual(manifest[key], expected[key]) {
-			return fmt.Errorf("framework corpus manifest has an unexpected %s field", key)
-		}
-	}
-	rows, ok := manifest["coverage"].([]any)
-	if !ok {
-		return errors.New("framework corpus manifest coverage must be a list")
-	}
-	if len(rows) != len(foldkitExampleIDs)*len(foldkitHosts) {
-		return errors.New("framework corpus manifest has an incomplete example/host matrix")
-	}
-	expectedRows := expected["coverage"].([]any)
-	required := []string{"evidence", "example", "focus", "host", "note", "status"}
-	for index, value := range rows {
-		row, ok := value.(map[string]any)
-		if !ok {
-			return fmt.Errorf("framework corpus coverage row %d must be an object", index)
-		}
-		var missing, unexpected []string
-		for _, key := range required {
-			if _, present := row[key]; !present {
-				missing = append(missing, key)
-			}
-		}
-		for _, key := range sortedKeys(row) {
-			if !slices.Contains(required, key) {
-				unexpected = append(unexpected, key)
-			}
-		}
-		if len(missing) > 0 || len(unexpected) > 0 {
-			var detail []string
-			if len(missing) > 0 {
-				detail = append(detail, "missing "+strings.Join(missing, ", "))
-			}
-			if len(unexpected) > 0 {
-				detail = append(detail, "unexpected "+strings.Join(unexpected, ", "))
-			}
-			return fmt.Errorf("framework corpus coverage row %d has malformed fields (%s)", index, strings.Join(detail, "; "))
-		}
-		expectedRow := expectedRows[index].(map[string]any)
-		for _, key := range []string{"example", "focus", "host"} {
-			if !pyEqual(row[key], expectedRow[key]) {
-				return fmt.Errorf("framework corpus coverage row %d has unexpected %s: %s", index, key, pyRepr(row[key]))
-			}
-		}
-	}
-	// Every example and host now equals its expected string.
-	pairs := map[[2]string]bool{}
-	for _, value := range rows {
-		row := value.(map[string]any)
-		pairs[[2]string{row["example"].(string), row["host"].(string)}] = true
-	}
-	if len(pairs) != len(rows) {
-		return errors.New("framework corpus manifest contains duplicate example/host rows")
-	}
-	snapshotReference := expected["snapshot"].(map[string]any)["path"].(string)
-	for index, value := range rows {
-		row, expectedRow := value.(map[string]any), expectedRows[index].(map[string]any)
-		label := row["example"].(string) + ":" + row["host"].(string)
-		status := row["status"]
-		switch status.(type) {
-		case []any:
-			return errors.New("unhashable type: 'list'")
-		case map[string]any:
-			return errors.New("unhashable type: 'dict'")
-		}
-		statusText, _ := status.(string)
-		if statusText != "reference-only" && statusText != "pending" && statusText != "implemented-and-verified" {
-			return fmt.Errorf("invalid corpus coverage status at row %d (%s): %s", index, label, pyRepr(status))
-		}
-		evidenceList, ok := row["evidence"].([]any)
-		evidence := make([]string, 0, len(evidenceList))
-		for _, item := range evidenceList {
-			text, isText := item.(string)
-			ok = ok && isText
-			evidence = append(evidence, text)
-		}
-		if !ok {
-			return fmt.Errorf("invalid evidence list at row %d (%s)", index, label)
-		}
-		if note, isText := row["note"].(string); !isText || pyStrip(note) == "" {
-			return fmt.Errorf("missing coverage note at row %d (%s)", index, label)
-		}
-		switch {
-		case row["host"] == "foldkit-reference":
-			if statusText != "reference-only" || !pyEqual(evidenceList, expectedRow["evidence"]) {
-				return fmt.Errorf("Foldkit source row %d (%s) must remain reference-only with its source evidence", index, label)
-			}
-		case statusText == "pending" && len(evidence) > 0:
-			return fmt.Errorf("pending host row has evidence at row %d: %s", index, label)
-		case statusText == "reference-only" && len(evidence) == 0:
-			return fmt.Errorf("reference-only host row has no source evidence at row %d: %s", index, label)
-		case statusText == "implemented-and-verified" && len(evidence) == 0:
-			return fmt.Errorf("implemented host row has no verification evidence at row %d: %s", index, label)
-		case statusText == "implemented-and-verified":
-			for _, item := range evidence {
-				if item == snapshotReference || strings.HasPrefix(item, snapshotReference+"/") {
-					return fmt.Errorf("implemented host row has pinned upstream source-reference evidence at row %d: %s", index, label)
-				}
-			}
-			return fmt.Errorf("implemented host row is not accepted before an executable runner verifies an authored target at row %d: %s", index, label)
-		}
-		for _, item := range evidence {
-			if err := foldkitSafePath(item); err != nil {
-				return err
-			}
-			present, err := pyIsFile(pureJoin(repositoryRoot, item))
-			if err != nil {
-				return err
-			}
-			if !present {
-				return fmt.Errorf("missing corpus evidence file: %s", item)
-			}
-		}
-	}
-	return nil
 }
 
 // foldkitSnapshotFilePaths walks like os.walk(root, followlinks=False): it
@@ -1255,8 +1009,8 @@ func readFoldkitSource(source string, pin foldkitPin) (foldkitSource, error) {
 	return foldkitSource{entries, inventory, data, manifest}, nil
 }
 
-// captureFoldkit writes the snapshot and corpus matrix through a staged
-// directory, publishing both or neither. writeJSON is writeFoldkitJSON outside tests.
+// captureFoldkit writes the snapshot through a staged directory, publishing
+// all of it or none. writeJSON is writeFoldkitJSON outside tests.
 func captureFoldkit(source, repositoryRoot string, pin foldkitPin, writeJSON func(string, any) error, stdout io.Writer) error {
 	read, err := readFoldkitSource(source, pin)
 	if err != nil {
@@ -1265,16 +1019,10 @@ func captureFoldkit(source, repositoryRoot string, pin foldkitPin, writeJSON fun
 	entries, inventory, manifest := read.entries, read.inventory, read.manifest
 	output := pureJoin(repositoryRoot, foldkitSnapshotRelative)
 	parent := pureParent(output)
-	corpusPath := pureJoin(repositoryRoot, foldkitCorpusRelative, "manifest.json")
 	if exists, err := existsOrSymlink(output); err != nil {
 		return err
 	} else if exists {
 		return fmt.Errorf("refusing to replace existing snapshot: %s", output)
-	}
-	if exists, err := existsOrSymlink(corpusPath); err != nil {
-		return err
-	} else if exists {
-		return fmt.Errorf("refusing to replace existing corpus manifest: %s", corpusPath)
 	}
 	if err := os.MkdirAll(parent, 0o777); err != nil {
 		return err
@@ -1286,19 +1034,11 @@ func captureFoldkit(source, repositoryRoot string, pin foldkitPin, writeJSON fun
 	if stage, err = filepath.Abs(stage); err != nil {
 		return err
 	}
-	corpusStage := filepath.Join(filepath.Dir(stage), "."+filepath.Base(stage)+"-corpus-manifest.json")
-	publishedSnapshot, publishedCorpus, published := false, false, false
+	published := false
 	defer func() {
 		if !published {
-			if publishedCorpus {
-				os.Remove(corpusPath)
-			}
-			if publishedSnapshot {
-				os.RemoveAll(output)
-			}
 			os.RemoveAll(stage)
 		}
-		os.Remove(corpusStage)
 	}()
 	if err := foldkitWriteTree(stage, entries, read.data); err != nil {
 		return err
@@ -1309,24 +1049,9 @@ func captureFoldkit(source, repositoryRoot string, pin foldkitPin, writeJSON fun
 	if err := writeJSON(stage+"/manifest.json", manifest); err != nil {
 		return err
 	}
-	corpus, err := foldkitCorpusManifestFor(output, repositoryRoot, pin)
-	if err != nil {
-		return err
-	}
-	if err := writeJSON(corpusStage, corpus); err != nil {
-		return err
-	}
 	if err := os.Rename(stage, output); err != nil {
 		return err
 	}
-	publishedSnapshot = true
-	if err := os.MkdirAll(pureParent(corpusPath), 0o777); err != nil {
-		return err
-	}
-	if err := os.Rename(corpusStage, corpusPath); err != nil {
-		return err
-	}
-	publishedCorpus = true
 	published = true
 	integrity := manifest["integrity"].(map[string]any)
 	fmt.Fprintf(stdout, "captured %d files across %d examples at %s\n", len(entries), len(inventory), output)
@@ -1356,9 +1081,6 @@ func selfCheckFoldkit(repositoryRoot string, stdout io.Writer) error {
 	snapshot := pureJoin(repositoryRoot, foldkitSnapshotRelative)
 	manifest, err := validateFoldkitSnapshot(snapshot)
 	if err != nil {
-		return err
-	}
-	if err := validateFoldkitCorpusManifest(pureJoin(repositoryRoot, foldkitCorpusRelative, "manifest.json"), snapshot, repositoryRoot); err != nil {
 		return err
 	}
 	selection, integrity := object(manifest, "selection"), object(manifest, "integrity")

@@ -31,10 +31,6 @@ const testTimeout = "-timeout=15m"
 // whose binary and version Go's test cache already keys on.
 var testTools = []string{"node", "bun", "tsc", "git"}
 
-// testToolEnvironment are variables those tools read but Go tests do not, so
-// Go's test cache cannot see them; they join the tool digest.
-var testToolEnvironment = []string{"BUN_CONFIG_REGISTRY"}
-
 // goRuntimeEnvironment are variables every Go-built program reads at startup.
 // They change what a program prints without changing its bytes: GODEBUG=
 // inittrace=1 writes to standard error, GOTRACEBACK shapes a crash report. A
@@ -89,32 +85,6 @@ func declareSteps(root string, packages []string) ([]*Step, error) {
 	// packages.
 	foldkit := &Inputs{Paths: []string{"scripts/conformance/", "conformance/", "go.mod"}, Tools: []string{"go"}, Installed: []string{"conformance/upstream/foldkit-d21db423"}}
 	add(&Step{Name: "foldkit corpus self-check", Argv: []string{"go", "run", "./scripts/conformance", "foldkit", "--self-check"}, Inputs: foldkit})
-	// The counter-domain control's emission half runs the compiler this run
-	// builds. The rest of the reference check, including the control's
-	// verification half, reads only the leaf and the emitted bytes, so a
-	// compiler change that emits identical artifacts replays its pass. The
-	// verification runs the emitted native programs and asserts their exact
-	// output, so the Go fingerprint, which carries the Go runtime
-	// environment, is an input. The capture check walks the vendored tree on
-	// disk and asserts each file's owner executable bit, and TypeScript and
-	// Bun glob and resolve the leaf without Git, so the whole leaf is a tree
-	// input, files Git ignores included. Left out are the installed
-	// node_modules (keyed as Installed) and two directories the leaf runner
-	// empties before anything reads them, so nothing left there can reach
-	// the result: the vendor build output, and .generated, where the
-	// consumers resolve the domain. The runner keeps only the emitted
-	// artifacts (keyed as Generated) and the emission's record, which no
-	// check reads.
-	add(&Step{Name: "framework-port counter emission", Needs: []string{"build bin/ef"}, Argv: []string{"node", frameworkPorts + "scripts/check-counter-domain.mjs", "--compiler", "bin/ef", "--emit", counterArtifacts}})
-	add(&Step{Name: "framework-port references", Needs: []string{"framework-port counter emission"}, Argv: []string{"node", frameworkPorts + "scripts/check-references.mjs", "--counter-domain-artifacts", counterArtifacts}, Inputs: &Inputs{
-		Paths:       []string{frameworkPorts},
-		Tools:       []string{"node", "bun", "go", "git"},
-		Env:         testToolEnvironment,
-		Installed:   []string{frameworkPorts + "node_modules"},
-		Generated:   []string{counterArtifacts},
-		Trees:       []string{frameworkPorts},
-		TreeExclude: []string{frameworkPorts + "node_modules", frameworkPorts + ".generated", frameworkPorts + "vendor/solid-yield/dist"},
-	}})
 	add(&Step{Name: "effect conformance mapping", Argv: []string{"go", "run", "./scripts/conformance", "check"}, Inputs: conformance})
 
 	add(&Step{Name: "gofmt", Argv: append([]string{"sh", "-c", `unformatted=$(gofmt -l "$@"); if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi`, "gofmt"}, gofmtDirectories...)})
@@ -198,14 +168,6 @@ func wayfinderSnapshotInputs() *Inputs {
 		Env:     []string{"GOFLAGS", "GOEXPERIMENT"},
 	}
 }
-
-// frameworkPorts is the framework-port reference leaf: its own lockfile and
-// installed node_modules, which Git ignores.
-const frameworkPorts = "conformance/framework-ports/ports/"
-
-// counterArtifacts is where the counter-domain emission writes the bytes its
-// verification reads; Git ignores it.
-const counterArtifacts = frameworkPorts + ".generated/counter-domain-artifacts"
 
 func goPackages(root string) ([]string, error) {
 	command := exec.Command("go", "list", "./...")

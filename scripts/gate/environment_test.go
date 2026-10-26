@@ -12,7 +12,7 @@ import (
 )
 
 // GODEBUG=inittrace=1 leaves a Go program's bytes unchanged but adds lines to
-// its standard error, which the framework-port verification asserts exactly.
+// its standard error, which a test that asserts a program's output reads.
 // Every gate step that runs Go programs therefore keys on the Go runtime
 // environment: cached steps through their key, Go test steps through the tool
 // digest their tests read.
@@ -31,7 +31,7 @@ func TestGoRuntimeEnvironmentKeysEveryStepThatRunsGoPrograms(t *testing.T) {
 		g.tools = nil
 		observed := fingerprint{map[string]string{}, map[string]string{}}
 		for _, step := range steps {
-			if step.Inputs != nil && (step.Argv[0] == "go" || step.Name == "framework-port references") {
+			if step.Inputs != nil && step.Argv[0] == "go" {
 				declared := *step.Inputs
 				declared.Paths, declared.Exclude, declared.Submodule, declared.Installed, declared.Generated = []string{"src/"}, nil, "", nil, nil
 				key, err := g.key(&Step{Name: step.Name, Argv: step.Argv, Inputs: &declared})
@@ -51,8 +51,8 @@ func TestGoRuntimeEnvironmentKeysEveryStepThatRunsGoPrograms(t *testing.T) {
 		os.Unsetenv(name)
 	}
 	unset := observe()
-	if _, ok := unset.keys["framework-port references"]; !ok {
-		t.Fatal("no framework-port references step")
+	if _, ok := unset.keys["effect conformance mapping"]; !ok {
+		t.Fatal("no effect conformance mapping step")
 	}
 	if len(unset.keys) < 3 || len(unset.digests) < 2 {
 		t.Fatalf("too few Go-running steps observed: %d keyed, %d with a tool digest", len(unset.keys), len(unset.digests))
