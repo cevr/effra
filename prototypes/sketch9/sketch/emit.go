@@ -23,6 +23,7 @@ const GoMod = "module sketchgen\n\ngo 1.27\n"
 type frame struct {
 	result   string // sketch result type, "" for none
 	fallible bool
+	unit     bool // a closure whose Go result is (struct{}, error) though the source has no value
 }
 
 type emitter struct {
@@ -35,6 +36,7 @@ type emitter struct {
 	envVal  string // expression for the env struct: env_ or a with copy
 	envPtr  string
 	useTime bool
+	useFmt  bool
 }
 
 // Emit lowers a checked file to one Go file, main.go, in package main.
@@ -52,7 +54,10 @@ func Emit(c *Checked) (string, error) {
 	for _, fn := range c.File.Funcs {
 		e.function(fn)
 	}
-	imports := []string{`"fmt"`, `"sketchgen/rt"`}
+	imports := []string{`"sketchgen/rt"`}
+	if e.useFmt {
+		imports = append(imports, `"fmt"`)
+	}
 	if e.useTime {
 		imports = append(imports, `"time"`)
 	}
@@ -77,10 +82,15 @@ func (e *emitter) directive(p Pos) {
 	fmt.Fprintf(&e.b, "//line %s:%d\n", e.src, p.Line)
 }
 
+// temp names end in an underscore, which no source name may (S109), so they
+// cannot collide with or shadow a source binding.
 func (e *emitter) temp(prefix string) string {
 	e.tmp++
-	return fmt.Sprintf("%s_%d", prefix, e.tmp)
+	return fmt.Sprintf("%s%d_", prefix, e.tmp)
 }
+
+// isTemp reports whether v names a temporary, which Go requires to be read.
+func isTemp(v string) bool { return strings.HasSuffix(v, "_") }
 
 func (e *emitter) goType(t string) string {
 	switch t {
@@ -123,6 +133,7 @@ func (e *emitter) types() {
 			}
 			e.line("}")
 			if e.c.ErrorTypes[d.Name] {
+				e.useFmt = true
 				e.line("func (e %s) Error() string {", d.Name)
 				e.line("\ttype plain %s // no Error method, so Sprintf cannot recurse", d.Name)
 				e.line("\treturn fmt.Sprintf(\"%s%%+v\", plain(e))", d.Name)
@@ -135,7 +146,7 @@ func (e *emitter) types() {
 			}
 			e.line("}")
 		case kindUnion:
-			e.line("type %s interface{ is%s() }", d.Name, d.Name)
+			e.line("type %s interface{ is%s_() }", d.Name, d.Name)
 			for _, v := range d.Variants {
 				unions[v] = append(unions[v], d.Name)
 			}
@@ -149,7 +160,7 @@ func (e *emitter) types() {
 	sort.Strings(variants)
 	for _, v := range variants {
 		for _, u := range unions[v] {
-			e.line("func (%s) is%s() {}", v, u)
+			e.line("func (%s) is%s_() {}", v, u)
 		}
 	}
 	e.line("")
@@ -204,12 +215,21 @@ func (e *emitter) function(fn *FuncDecl) {
 	}
 	e.frames = []frame{{result: fn.Result, fallible: fn.Fallible}}
 	e.envVal, e.envPtr = "env_", "env_"
+	if fn.Recv != nil {
+		// Provider methods require no capabilities (S102), so the functions they
+		// call get an empty env.
+		e.envVal, e.envPtr = "env{}", "&env{}"
+	}
 	e.depth++
 	e.stmts(fn.Body.Stmts)
-	if fn.Result != "" && !goTerminates(fn.Body) {
+	switch {
+	case goTerminates(fn.Body):
+	case fn.Result != "":
 		// A type switch over a whole union ends the function in the sketch, but
 		// Go needs a default arm to see that.
 		e.line("panic(\"unreachable\")")
+	case fn.Fallible:
+		e.line("return nil")
 	}
 	e.depth--
 	e.line("}")
@@ -239,6 +259,8 @@ func (e *emitter) fail(err string) {
 	switch {
 	case !f.fallible:
 		e.line("panic(%s)", err)
+	case f.unit:
+		e.line("return struct{}{}, %s", err)
 	case f.result == "":
 		e.line("return %s", err)
 	default:
@@ -256,8 +278,10 @@ func (e *emitter) stmt(s Stmt) {
 	e.directive(s.stmtPos())
 	switch s := s.(type) {
 	case *DefineStmt:
+		// The checked type is spelled out, so an untyped Go constant cannot pick
+		// a different type than the checker did.
 		v, _ := e.expr(s.Value)
-		e.line("%s := %s", s.Name, v)
+		e.line("var %s %s = %s", s.Name, e.goType(e.c.Info[s.Value].typ), v)
 	case *ReturnStmt:
 		e.ret(s)
 	case *IfStmt:
@@ -282,7 +306,7 @@ func (e *emitter) stmt(s Stmt) {
 		}
 		e.line("}")
 	case *ExprStmt:
-		if v, _ := e.expr(s.X); strings.HasPrefix(v, "v_") {
+		if v, _ := e.expr(s.X); isTemp(v) {
 			e.line("_ = %s", v)
 		}
 	}
@@ -400,7 +424,7 @@ func (e *emitter) catch(x *CatchExpr) string {
 		switch {
 		case in.typ != "":
 			e.line("%s = %s", v, av)
-		case strings.HasPrefix(av, "v_"):
+		case isTemp(av):
 			e.line("_ = %s", av)
 		}
 		e.depth--
@@ -495,7 +519,11 @@ func (e *emitter) with(x *Call, in info) (val, err string) {
 	e.line("{")
 	e.depth++
 	cp := e.temp("envc")
-	e.line("%s := *%s", cp, e.envPtr)
+	if e.envPtr == "&env{}" {
+		e.line("%s := env{}", cp)
+	} else {
+		e.line("%s := *%s", cp, e.envPtr)
+	}
 	for _, en := range entries {
 		v, _ := e.expr(en.Value)
 		e.line("%s.%s = %s", cp, en.Cap, v)
@@ -511,7 +539,7 @@ func (e *emitter) with(x *Call, in info) (val, err string) {
 		e.line("%s = %s", val, v)
 	case err != "":
 		e.line("%s = %s", err, ev)
-	case strings.HasPrefix(v, "v_"):
+	case isTemp(v):
 		e.line("_ = %s", v)
 	}
 	e.depth--
@@ -561,11 +589,11 @@ func (e *emitter) after(x *Call, in info) (val, err string) {
 		e.line("_, %s := %s", err, call)
 	}
 	e.depth++
-	e.frames = append(e.frames, frame{result: in.typ, fallible: true})
+	e.frames = append(e.frames, frame{result: in.typ, fallible: true, unit: in.typ == ""})
 	res, rerr := e.blockLast(x.Block)
 	e.frames = e.frames[:len(e.frames)-1]
 	if last.typ == "" {
-		if strings.HasPrefix(res, "v_") {
+		if isTemp(res) {
 			e.line("_ = %s", res)
 		}
 		res = "struct{}{}"

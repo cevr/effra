@@ -53,8 +53,8 @@ func TestAfterParentStopInterrupts(t *testing.T) {
 		}
 		return 0, nil
 	})
-	if err != Interrupted && err != nil {
-		t.Fatalf("got %v", err)
+	if err != Interrupted {
+		t.Fatalf("got %v, want Interrupted", err)
 	}
 	if !parent.Child().Stopped() {
 		t.Fatal("a child of a stopped task must be stopped")

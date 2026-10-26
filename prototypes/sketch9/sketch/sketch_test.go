@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -40,6 +41,14 @@ func (OkNet) Send(msg string) error[Down] {
 }
 `
 
+// both fails with two errors, so a catch can handle one and pass the other on.
+const both = `
+func both(id string) (string, error[NotFound | Down]) uses Store, Net {
+	v := try Store.Get(id)
+	try Net.Send(v)
+	return v
+}`
+
 func codes(t *testing.T, src string) []string {
 	t.Helper()
 	f, err := Parse("demo.sketch", src)
@@ -65,25 +74,24 @@ func get(id string) (string, error[NotFound]) uses Store {
 	return v
 }
 func main() uses Console { Console.Println("x") }`, ""},
-		{"partial catch under try passes the rest on", `
-func both(id string) (string, error[Down]) uses Store, Net {
-	v := try Store.Get(id) catch {
+		{"partial catch under try passes the rest on", both + `
+func partial(id string) (string, error[Down]) uses Store, Net {
+	v := try both(id) catch {
 	case NotFound:
 		"none"
 	}
-	try Net.Send(v)
 	return v
 }
 func main() uses Console { Console.Println("x") }`, ""},
-		{"partial catch under try still needs the rest declared", `
-func both(id string) string uses Store, Net {
-	try Net.Send("x") catch {
+		{"partial catch under try still needs the rest declared", both + `
+func partial(id string) (string, error[NotFound]) uses Store, Net {
+	v := try both(id) catch {
 	case NotFound:
 		"none"
 	}
-	return "y"
+	return v
 }
-func main() uses Console { Console.Println("x") }`, "S101 S108"},
+func main() uses Console { Console.Println("x") }`, "S101"},
 		{"an unhandled fallible call", `
 func get(id string) string uses Store {
 	v := Store.Get(id)
@@ -177,6 +185,15 @@ func main() uses Console {
 	}
 }
 `
+	out := buildRun(t, src)
+	if got, want := out, "one\nmissing 2\n"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// buildRun checks, emits and runs src through go run, and returns its output.
+func buildRun(t *testing.T, src string) string {
+	t.Helper()
 	f, err := Parse("demo.sketch", src)
 	if err != nil {
 		t.Fatal(err)
@@ -199,13 +216,58 @@ func main() uses Console {
 			t.Fatal(err)
 		}
 	}
+	vet := exec.Command("go", "vet", ".")
+	vet.Dir = dir
+	if out, err := vet.CombinedOutput(); err != nil {
+		t.Fatalf("go vet: %v\n%s\n%s", err, out, code)
+	}
 	cmd := exec.Command("go", "run", ".")
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go run: %v\n%s\n%s", err, out, code)
 	}
-	if got, want := string(out), "one\nmissing 2\n"; got != want {
-		t.Fatalf("got %q, want %q", got, want)
+	return string(out)
+}
+
+// TestProbes runs the review witnesses in testdata/probes. The first line of
+// each says what it must do: "// want CODE" (rejected with that code) or
+// "// out: a|b" (builds, passes go vet, and prints those lines).
+func TestProbes(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go tool")
+	}
+	files, err := filepath.Glob("../testdata/probes/*.sketch")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no probes: %v", err)
+	}
+	for _, file := range files {
+		t.Run(filepath.Base(file), func(t *testing.T) {
+			t.Parallel()
+			raw, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			src := string(raw)
+			head, _, _ := strings.Cut(src, "\n")
+			switch {
+			case strings.HasPrefix(head, "// want "):
+				want := strings.TrimPrefix(head, "// want ")
+				got := codes(t, src)
+				if len(got) == 0 || !slices.Contains(got, want) {
+					t.Fatalf("got %v, want %s", got, want)
+				}
+			case strings.HasPrefix(head, "// out: "):
+				want := strings.ReplaceAll(strings.TrimPrefix(head, "// out: "), "|", "\n")
+				if want != "" {
+					want += "\n"
+				}
+				if got := buildRun(t, src); got != want {
+					t.Fatalf("got %q, want %q", got, want)
+				}
+			default:
+				t.Fatalf("first line must be // want CODE or // out: lines")
+			}
+		})
 	}
 }

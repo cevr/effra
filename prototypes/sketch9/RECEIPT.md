@@ -112,3 +112,31 @@ func report(env_ *env, t_ *rt.Task, id string) {
 2. **Interruption in infallible functions.** The spec writes `return zero, rt.Interrupted`. A function with no error row has nowhere to return it, so it calls `t.Check()`, which panics. The nearest task boundary recovers the panic: `rt.After`, or `rt.Recover` in `main`, which exits with code 130.
 3. **Rules beyond S101–S104.** The subset needs S105–S110 to reject programs Go would reject or that would lose a failure. Without them, the emitter would produce Go that does not compile.
 4. **Go version.** The worktree's `go.mod` now says `go 1.27`, as the spec does. An earlier draft said 1.26.
+
+# Round 2: review round 1 repairs
+
+Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-1-findings.md` (14 Major, 2 Minor, 1 Optional, no blocker).
+
+| Finding | Repair |
+| --- | --- |
+| M1 wire initializers drop rows | Inline `wire{}` providers are checked in the enclosing function before the block's discharge. A top-level `wire` must be closed and effect-free (S102 or S101 otherwise). |
+| M2 cancellation drops defects | `rt.After` re-panics with the drained child's defect on the deadline and stop paths too. |
+| M3 ancestor stop becomes success | `Stop` propagates down the task tree (children register with their parent). A stop during the body wins over the body's success. |
+| M4 provider methods calling helpers | Methods pass an empty `env` to the functions they call (they require no capability, S102). |
+| M5 no-value ABI | The timeout closure frame knows its Go result is `(struct{}, error)`. A fallible no-value function ends in `return nil`. |
+| M6 unused `fmt` | Imports are collected from what is emitted. |
+| M7 name collisions | Temporaries end in `_`, which no source name may. Function names are reserved like other names. A local that shadows a function makes the call S108. Fields named `Error` are reserved. |
+| M8 unhandled failures in fields | S105 at every value position: struct fields, `if` conditions, switch subjects. |
+| M9 provider parameter types | Parameter types are compared. Host capabilities take only host providers. |
+| M10 integer types | One integer type (`int64`). Bindings are emitted as `var x T = v`, with the checked type. |
+| M11 block shapes | `with` and `timeout.After` blocks must end with an expression, and `return` cannot leave them (S109). |
+| M12 nondefaultable fields | A keyed struct literal must set every union, capability, or union-holding struct field. |
+| M13 erased reads | An expression statement must be a call, `try` or `catch` (S110). |
+| M14 short-circuit operators | `&&` and `||` are rejected (S109). `==` is basic types only; `+` is string or int64. |
+| N1 prior art | Borgo's two `Result` paths, the XGo scope and ReScript's representations are corrected; Elixir `Task.shutdown` added. |
+| N2 tests | The partial-catch tests use a producer with two errors. The parent-stop test requires `Interrupted`. |
+| O1 provider specialization | Not done; a follow-up after correctness, needs a matched measurement. |
+
+All 29 reviewer witnesses are regression fixtures in `testdata/probes/` (first line `// want CODE` or `// out: lines`), run by `TestProbes`, which also runs `go vet` on every built program. The reviewer's three runtime probes are in `sketch/rt/review_probe_test.go`. `go test -race ./...` passes.
+
+Commands (round 2): `prototypes/sketch9/accept.sh` exit 0 (`accept-r2.log`); `bench.sh` exit 0 (`bench-r2.out`): cold 5458 ms, edits 300, 319 and 286 ms, emit 5–7 ms. The host was more loaded than in round 1, because another unit's gate was running. Lines: prototype Go without tests 2702, tests 401, total 3103.

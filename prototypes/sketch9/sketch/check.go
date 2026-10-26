@@ -69,7 +69,7 @@ func prelude() []*TypeDecl {
 
 var hostProvided = map[string]bool{"Console": true}
 
-var basicTypes = map[string]bool{"string": true, "int64": true, "int": true, "bool": true}
+var basicTypes = map[string]bool{"string": true, "int64": true, "bool": true}
 
 // Check checks a parsed file. It returns the checked program and every
 // diagnostic, sorted by position.
@@ -88,7 +88,17 @@ func Check(f *File) (*Checked, []Diagnostic) {
 		c.funcBody(fn)
 	}
 	for _, w := range f.Wires {
-		c.wireEntries(w.Entries)
+		// A top-level wire is built inline at every with that names it, so its
+		// providers must be closed and effect-free: they can neither require a
+		// capability nor fail.
+		fc := &fnCtx{escapes: []map[string]Pos{{}}, uses: map[string]Pos{}, scopes: []map[string]*local{{}}}
+		c.wireEntries(w.Entries, fc)
+		for _, u := range sortedKeys(fc.uses) {
+			c.errorf(fc.uses[u], codeMissingCap, "wire %s requires %s to build a provider; build it in an inline wire instead", w.Name, u)
+		}
+		for _, e := range sortedKeys(fc.escapes[0]) {
+			c.errorf(fc.escapes[0][e], codeUndeclaredError, "wire %s can fail with %s while building a provider; build it in an inline wire instead", w.Name, e)
+		}
 	}
 	sort.SliceStable(c.diags, func(i, j int) bool {
 		a, b := c.diags[i].Pos, c.diags[j].Pos
@@ -118,6 +128,9 @@ func (c *checker) declare() {
 	}
 	for _, fn := range f.Funcs {
 		if fn.Recv == nil {
+			if fn.Name != "main" {
+				c.checkLocalName(fn.Pos, fn.Name)
+			}
 			c.Funcs[fn.Name] = fn
 			continue
 		}
@@ -135,6 +148,13 @@ func (c *checker) declare() {
 		}
 	}
 	sort.Strings(c.Caps)
+	for _, d := range f.Types {
+		for _, fd := range d.Fields {
+			if fd.Name == "Error" || strings.HasSuffix(fd.Name, "_") {
+				c.errorf(fd.Pos, codeUnsupported, "field %s is reserved by the prototype's Go output", fd.Name)
+			}
+		}
+	}
 	// Every type named in an error row is an error type.
 	sigs := []*Sig{}
 	for _, fn := range f.Funcs {
@@ -203,6 +223,7 @@ type fnCtx struct {
 	provided []map[string]bool
 	scopes   []map[string]*local
 	unused   func(*local)
+	blocks   int // depth of with and timeout.After blocks
 }
 
 // local is a variable in scope. Parameters start used; Go rejects any other
@@ -344,7 +365,7 @@ func (c *checker) stmt(s Stmt, fc *fnCtx) {
 	case *ReturnStmt:
 		c.ret(s, fc)
 	case *IfStmt:
-		if v := c.expr(s.Cond, fc); v.typ != "bool" {
+		if v := c.value(s.Cond, fc); v.typ != "bool" {
 			c.errorf(s.Pos, codeType, "an if condition must be bool, not %s", v.typ)
 		}
 		c.scoped(s.Then, fc)
@@ -352,7 +373,7 @@ func (c *checker) stmt(s Stmt, fc *fnCtx) {
 			c.scoped(s.Else, fc)
 		}
 	case *TypeSwitchStmt:
-		v := c.expr(s.Subject, fc)
+		v := c.value(s.Subject, fc)
 		d := c.Types[v.typ]
 		if d == nil || d.Kind != kindUnion {
 			c.errorf(s.Pos, codeType, "a type switch needs a union value, not %s", v.typ)
@@ -384,6 +405,11 @@ func (c *checker) stmt(s Stmt, fc *fnCtx) {
 			c.errorf(s.Pos, codeUnused, "%s declared and not used", s.Bind)
 		}
 	case *ExprStmt:
+		switch s.X.(type) {
+		case *Call, *TryExpr, *CatchExpr:
+		default:
+			c.errorf(s.Pos, codeUnused, "this expression's value is not used")
+		}
 		if v := c.expr(s.X, fc); v.fallible {
 			c.errorf(s.Pos, codeUnhandled, "the failure of this call is not handled: use try, catch or return")
 		}
@@ -397,7 +423,7 @@ func (c *checker) scoped(b *Block, fc *fnCtx) {
 }
 
 func (c *checker) ret(s *ReturnStmt, fc *fnCtx) {
-	if len(fc.escapes) > 1 {
+	if fc.blocks > 0 {
 		c.errorf(s.Pos, codeUnsupported, "return is not allowed inside a block; a block yields its last expression")
 		return
 	}
@@ -427,9 +453,6 @@ func (c *checker) ret(s *ReturnStmt, fc *fnCtx) {
 
 func (c *checker) assignable(from, to string) bool {
 	if from == to {
-		return true
-	}
-	if from == "int64" && to == "int" || from == "int" && to == "int64" {
 		return true
 	}
 	if d := c.Types[to]; d != nil && d.Kind == kindUnion {
@@ -524,18 +547,26 @@ func (c *checker) expr1(e Expr, fc *fnCtx) info {
 			c.errorf(e.Pos, codeUnhandled, "the failure of an operand is not handled")
 		}
 		switch e.Op {
-		case "==", "!=", "<", "<=", ">", ">=":
-			if !c.assignable(r.typ, l.typ) && l.typ != "?" && r.typ != "?" {
+		case "==":
+			if l.typ != r.typ && l.typ != "?" && r.typ != "?" {
 				c.errorf(e.Pos, codeType, "cannot compare %s with %s", l.typ, r.typ)
 			}
+			if !basicTypes[l.typ] && l.typ != "?" {
+				c.errorf(e.Pos, codeUnsupported, "== on %s is outside this prototype", l.typ)
+			}
 			return info{typ: "bool"}
-		case "&&", "||":
-			return info{typ: "bool"}
+		case "+":
+			if l.typ != r.typ && l.typ != "?" && r.typ != "?" {
+				c.errorf(e.Pos, codeType, "mismatched operands %s and %s", l.typ, r.typ)
+			}
+			if l.typ != "string" && l.typ != "int64" && l.typ != "?" {
+				c.errorf(e.Pos, codeType, "+ needs string or int64, not %s", l.typ)
+			}
+			return info{typ: l.typ}
 		}
-		if l.typ != r.typ && l.typ != "?" && r.typ != "?" {
-			c.errorf(e.Pos, codeType, "mismatched operands %s and %s", l.typ, r.typ)
-		}
-		return info{typ: l.typ}
+		// Short-circuit operators would need control flow around hoisted calls.
+		c.errorf(e.Pos, codeUnsupported, "operator %s is outside this prototype", e.Op)
+		return info{typ: "?"}
 	case *CompositeLit:
 		return c.composite(e, fc)
 	case *Call:
@@ -581,7 +612,7 @@ func (c *checker) catch(e *CatchExpr, fc *fnCtx, try bool) info {
 		if v.fallible {
 			c.errorf(arm.Pos, codeUnhandled, "the failure of this arm is not handled")
 		}
-		if x.typ != "" && !c.assignable(v.typ, x.typ) {
+		if x.typ != "" && x.typ != "?" && v.typ != "?" && !c.assignable(v.typ, x.typ) {
 			c.errorf(arm.Pos, codeType, "this arm yields %s, but the caught expression yields %s", v.typ, x.typ)
 		}
 	}
@@ -599,6 +630,36 @@ func (c *checker) catch(e *CatchExpr, fc *fnCtx, try bool) info {
 	return info{typ: x.typ}
 }
 
+// value checks an expression whose value is consumed, so its failure must
+// already be handled.
+func (c *checker) value(e Expr, fc *fnCtx) info {
+	v := c.expr(e, fc)
+	if v.fallible {
+		c.errorf(e.exprPos(), codeUnhandled, "the failure of this call is not handled: use try, catch or return")
+	}
+	return v
+}
+
+// nondefaultable reports whether a type has no valid zero value: a union, a
+// capability, or a struct holding one.
+func (c *checker) nondefaultable(t string, seen map[string]bool) bool {
+	d := c.Types[t]
+	if d == nil || seen[t] {
+		return false
+	}
+	switch d.Kind {
+	case kindUnion, kindCapability:
+		return true
+	}
+	seen[t] = true
+	for _, f := range d.Fields {
+		if c.nondefaultable(f.Type, seen) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *checker) composite(e *CompositeLit, fc *fnCtx) info {
 	d := c.Types[e.Type]
 	if d == nil || d.Kind != kindStruct {
@@ -608,8 +669,20 @@ func (c *checker) composite(e *CompositeLit, fc *fnCtx) info {
 	if e.Positional && len(e.Elems) != len(d.Fields) {
 		c.errorf(e.Pos, codeType, "%s has %d fields, not %d", e.Type, len(d.Fields), len(e.Elems))
 	}
+	if !e.Positional {
+		// M12: a field with no valid zero value must be written.
+		given := map[string]bool{}
+		for _, el := range e.Elems {
+			given[el.Key] = true
+		}
+		for _, f := range d.Fields {
+			if !given[f.Name] && c.nondefaultable(f.Type, map[string]bool{}) {
+				c.errorf(e.Pos, codeType, "%s{} must set %s: a %s has no zero value", e.Type, f.Name, f.Type)
+			}
+		}
+	}
 	for i, el := range e.Elems {
-		v := c.expr(el.Value, fc)
+		v := c.value(el.Value, fc)
 		want := ""
 		if e.Positional {
 			if i < len(d.Fields) {
@@ -638,6 +711,10 @@ func (c *checker) call(e *Call, fc *fnCtx) info {
 	case *Ident:
 		if fun.Name == "with" {
 			return c.with(e, fc)
+		}
+		if _, local := fc.lookup(fun.Name); local {
+			c.errorf(fun.Pos, codeType, "%s is a variable here, not a function", fun.Name)
+			return info{typ: "?"}
 		}
 		fn := c.Funcs[fun.Name]
 		if fn == nil {
@@ -710,16 +787,20 @@ func (c *checker) args(e *Call, params []Param, fc *fnCtx) {
 
 // block checks an expression block and returns the info of its last expression.
 func (c *checker) block(b *Block, fc *fnCtx) info {
-	if b == nil || len(b.Stmts) == 0 {
-		return info{}
-	}
+	fc.blocks++
+	defer func() { fc.blocks-- }()
 	fc.push()
 	defer fc.pop()
+	if len(b.Stmts) == 0 {
+		c.errorf(b.Pos, codeUnsupported, "a block must end with an expression")
+		return info{typ: "?"}
+	}
 	c.stmts(b.Stmts[:len(b.Stmts)-1], fc)
 	last, ok := b.Stmts[len(b.Stmts)-1].(*ExprStmt)
 	if !ok {
 		c.stmt(b.Stmts[len(b.Stmts)-1], fc)
-		return info{}
+		c.errorf(b.Stmts[len(b.Stmts)-1].stmtPos(), codeUnsupported, "a block must end with an expression")
+		return info{typ: "?"}
 	}
 	return c.expr(last.X, fc)
 }
@@ -740,7 +821,9 @@ func (c *checker) with(e *Call, fc *fnCtx) info {
 		entries = decl.Entries
 	case *WireLit:
 		entries = w.Entries
-		c.wireEntries(entries)
+		// Inline providers are built here, before the block's discharge, so their
+		// requirements and failures belong to the enclosing function.
+		c.wireEntries(entries, fc)
 	default:
 		c.errorf(e.Pos, codeType, "with takes a wire")
 		return info{typ: "?"}
@@ -776,7 +859,7 @@ func (c *checker) timeoutAfter(e *Call, fc *fnCtx) info {
 	return v
 }
 
-func (c *checker) wireEntries(entries []WireEntry) {
+func (c *checker) wireEntries(entries []WireEntry, fc *fnCtx) {
 	for _, en := range entries {
 		capDecl := c.Types[en.Cap]
 		if capDecl == nil || capDecl.Kind != kindCapability {
@@ -788,8 +871,13 @@ func (c *checker) wireEntries(entries []WireEntry) {
 			c.errorf(en.Pos, codeUnsupported, "a wire entry must be a provider literal")
 			continue
 		}
-		c.composite(lit, &fnCtx{escapes: []map[string]Pos{{}}, uses: map[string]Pos{}, scopes: []map[string]*local{{}}})
-		if lit.Type == "LiveScheduler" && en.Cap == "Scheduler" {
+		c.Info[lit] = c.composite(lit, fc)
+		// M9: host capabilities take only their host providers.
+		switch {
+		case en.Cap == "Scheduler" && lit.Type == "LiveScheduler":
+			continue
+		case en.Cap == "Scheduler" || en.Cap == "Console" || lit.Type == "LiveScheduler":
+			c.errorf(en.Pos, codeBadProvider, "%s cannot provide %s in this prototype", lit.Type, en.Cap)
 			continue
 		}
 		methods := c.Methods[lit.Type]
@@ -799,7 +887,11 @@ func (c *checker) wireEntries(entries []WireEntry) {
 				c.errorf(en.Pos, codeBadProvider, "%s does not implement %s.%s", lit.Type, en.Cap, m.Name)
 				continue
 			}
-			if len(impl.Params) != len(m.Params) || impl.Result != m.Result || impl.Fallible != m.Fallible {
+			same := len(impl.Params) == len(m.Params) && impl.Result == m.Result && impl.Fallible == m.Fallible
+			for i := 0; same && i < len(m.Params); i++ {
+				same = impl.Params[i].Type == m.Params[i].Type
+			}
+			if !same {
 				c.errorf(en.Pos, codeBadProvider, "%s.%s does not match the signature of %s.%s", lit.Type, m.Name, en.Cap, m.Name)
 			}
 			declared := map[string]bool{}
