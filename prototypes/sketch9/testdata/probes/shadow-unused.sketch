@@ -1,0 +1,11 @@
+// out: outer
+package demo
+type Fault struct{}
+func unused() error[Fault] { return Fault{} }
+func main() uses Console {
+  x := "outer"
+  if "a" == "a" {
+    x := x
+    Console.Println(x)
+  }
+}
