@@ -447,14 +447,19 @@ func (p *parser) compositeLit(t token) Expr {
 	lit := &CompositeLit{Pos: t.pos, Type: t.text}
 	p.expect("{")
 	p.skipSemis()
+	keyed := false
 	for !p.is("}") {
 		if p.peek().kind == tIdent && p.toks[p.i+1].text == ":" {
 			key := p.next().text
 			p.next()
+			keyed = true
 			lit.Elems = append(lit.Elems, KeyValue{Key: key, Value: p.expr()})
 		} else {
 			lit.Positional = true
 			lit.Elems = append(lit.Elems, KeyValue{Value: p.expr()})
+		}
+		if keyed && lit.Positional {
+			p.fail(t.pos, "%s{} mixes keyed and positional fields", t.text)
 		}
 		if !p.is("}") {
 			p.expect(",")

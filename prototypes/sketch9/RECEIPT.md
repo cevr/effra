@@ -119,7 +119,7 @@ Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-1-findings.md` (14 
 
 | Finding | Repair |
 | --- | --- |
-| M1 wire initializers drop rows | Inline `wire{}` providers are checked in the enclosing function before the block's discharge. A top-level `wire` must be closed and effect-free (S102 or S101 otherwise). |
+| M1 wire initializers drop rows | Inline `wire{}` providers are checked in the enclosing function before the block's discharge. A top-level `wire` must be closed: no capability from the caller, no escaping failure (S102 or S101 otherwise). |
 | M2 cancellation drops defects | `rt.After` re-panics with the drained child's defect on the deadline and stop paths too. |
 | M3 ancestor stop becomes success | `Stop` propagates down the task tree (children register with their parent). A stop during the body wins over the body's success. |
 | M4 provider methods calling helpers | Methods pass an empty `env` to the functions they call (they require no capability, S102). |
@@ -140,3 +140,64 @@ Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-1-findings.md` (14 
 All 29 reviewer witnesses are regression fixtures in `testdata/probes/` (first line `// want CODE` or `// out: lines`), run by `TestProbes`, which also runs `go vet` on every built program. The reviewer's three runtime probes are in `sketch/rt/review_probe_test.go`. `go test -race ./...` passes.
 
 Commands (round 2): `prototypes/sketch9/accept.sh` exit 0 (`accept-r2.log`); `bench.sh` exit 0 (`bench-r2.out`): cold 5458 ms, edits 300, 319 and 286 ms, emit 5–7 ms. The host was more loaded than in round 1, because another unit's gate was running. Lines: prototype Go without tests 2702, tests 401, total 3103.
+
+# Round 3: review round 2 repairs
+
+Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-2-findings.md` (9 Major, 1 Minor, 1 Optional, no blocker).
+
+| Finding | Repair |
+| --- | --- |
+| M1 names and binding identity | Go's predeclared identifiers (`string`, `error`, `panic`, …) and `Error` are reserved for every source name, methods included. Generated marker methods end in `_`, which no source name may. A named wire is emitted as its own function (`wireW_`), so a caller's locals cannot capture its initializers (`named-wire-shadow` prints `local provider`). |
+| M2 empty wire | `with(wire{})` keeps the enclosing env; no copy. |
+| M3 recursive layouts | A struct that contains itself by value is S108; recursion behind a union is fine. |
+| M4 no-value values | An argument must have a value. A catch over a no-value expression must have no-value arms. |
+| M5 prelude host types | Union variants, error types and method receivers must be structs declared in the file. |
+| M6 duplicates | Duplicate struct fields, literal keys, catch alternatives, switch cases and union variants are S108. |
+| M7 integer constants | Literals must fit int64, and constant `+` is folded with an overflow check, as Go does. Non-constant arithmetic wraps, as in Go. |
+| M8 entry ABI | `main` takes no parameters and cannot be called. |
+| M9 wire cycles | A wire that reaches `with` of itself, directly or through called functions, is S109. |
+| N1 wording | "Closed" (no caller capability, no escaping failure) replaces "effect-free" in the docs and comments. |
+| O1 | Still deferred. |
+
+The 27 round-2 witnesses join `testdata/probes/` (56 in all), and the reviewer's task-tree stress test is `sketch/rt/task_tree_test.go`. `go test -race ./...` passes. `accept.sh` exit 0 (`accept-r3.log`). Lines: prototype Go without tests 2951, tests 487, total 3438.
+
+# Round 4: review round 3 repairs
+
+Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-3-findings.md` (5 Major, 1 Minor, 1 Optional, no blocker).
+
+| Finding | Repair |
+| --- | --- |
+| M1 generated scopes and name positions (third repeat) | Fixed by construction. Source names may not contain `__` (S109). Every generated name does: temporaries `v__1`, `env__`, `t__`, `Env__`, `e__`, `plain__`, `is__X`, `wire__W`, `envc__`, `main__`. Every source local, parameter and receiver is emitted as `name__l`, so it cannot shadow a type, a function or a generated name. `init` is reserved. Capability parameter names are checked. |
+| M2 numeric literals | Literals are decoded once. A leading zero is S108 (Go reads it as octal). A duration must fit int64 nanoseconds. Integer literals are emitted as `int64(n)`, so a variadic argument stays int64 on every GOARCH (`portable-integer` builds for GOARCH=386). |
+| M3 declaration namespaces | Duplicate functions, wires, methods and capability methods; a type and a function with one name; a field and a method with one name; repeated parameters and a parameter that repeats the receiver are all S108. |
+| M4 wire cycle through methods | A capability call in a wire initializer follows every provider method of that name. This over-approximates and is documented in the code. |
+| M5 capability method uses | A uses clause on a capability method is S109. |
+| N1 exponential layout walk | The walk keeps on-path and finished states, so each type is walked once. |
+| O1 | Still deferred. |
+
+The 23 round-3 witnesses join `testdata/probes/` (78 in all). The reviewer's walk and Go-universe tests are `sketch/review_walk_test.go`. `go test -race ./...` passes. `accept.sh` exit 0 (`accept-r4.log`). Lines: prototype Go without tests 3051, tests 592, total 3643.
+
+# Round 5: review round 4 repairs
+
+Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-4-findings.md` (5 Major, no blocker).
+
+| Finding | Repair |
+| --- | --- |
+| M1 fields and union markers | Field names follow the generated-name rule too: no `__`, no trailing `_`, not `Error`. Go's predeclared names stay allowed as fields. |
+| M2 a capability named `timeout` | The emitter lowers only the `timeout.After` calls the checker resolved (`Checked.Afters`). `timeout` is reserved as a source name. |
+| M3 a type named `duration` | `duration` is reserved as a source name, so it cannot alias the intrinsic type. |
+| M4 mixed keyed and positional fields | S001 at parse time. |
+| M5 invalid string escapes | String literals are decoded with Go's rules (`strconv.Unquote`); an invalid one is S108. |
+
+The 14 round-4 programs join `testdata/probes/` (92 in all). The reviewer's name-position matrix is `sketch/review_names_test.go`. `go test -race ./...` passes. `accept.sh` exit 0 (`accept-r5.log`). Lines: prototype Go without tests 3068, tests 662, total 3730.
+
+# Round 6: review round 5 repairs
+
+Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-5-findings.md` (2 Major, no blocker).
+
+| Finding | Repair |
+| --- | --- |
+| M1 duration argument drops a failure | The `timeout.After` duration goes through the value check (S105), like every other value position. |
+| M2 string bytes Go source cannot hold | A string's value is what Go's rules decode from its spelling, and the emitter re-quotes that value (`strconv.Quote`). A raw byte order mark, NUL or invalid UTF-8 in a literal now builds and prints the same bytes as its escaped spelling. |
+
+The 9 round-5 programs join `testdata/probes/` (101 in all); probe headers gain `// out-quoted: "..."` for output a header cannot spell. The reviewer's intrinsic-name tests are `sketch/review_intrinsics_test.go`. `go test -race ./...` passes. `accept.sh` exit 0 (`accept-r6.log`).

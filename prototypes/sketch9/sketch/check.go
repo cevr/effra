@@ -2,6 +2,7 @@ package sketch
 
 import (
 	"fmt"
+	"strconv"
 	"slices"
 	"sort"
 	"strings"
@@ -23,11 +24,22 @@ const (
 
 // reserved names would collide with names the emitter generates or with Go.
 var reserved = map[string]bool{
-	"env": true, "rt": true, "time": true, "fmt": true, "sketchMain": true, "nil": true,
+	"rt": true, "time": true, "fmt": true, "init": true, "Error": true,
+	// The prototype's intrinsic package and type names.
+	"timeout": true, "duration": true,
+	// Go's predeclared identifiers: a source binding would shadow them in the output.
+	"any": true, "append": true, "bool": true, "byte": true, "cap": true, "clear": true,
+	"close": true, "comparable": true, "complex": true, "complex64": true, "complex128": true,
+	"copy": true, "delete": true, "error": true, "false": true, "float32": true, "float64": true,
+	"imag": true, "int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+	"iota": true, "len": true, "make": true, "max": true, "min": true, "new": true, "nil": true,
+	"panic": true, "print": true, "println": true, "real": true, "recover": true, "rune": true,
+	"string": true, "true": true, "uint": true, "uint8": true, "uint16": true, "uint32": true,
+	"uint64": true, "uintptr": true,
 }
 
 func (c *checker) checkLocalName(pos Pos, name string) {
-	if reserved[name] || strings.HasSuffix(name, "_") {
+	if reserved[name] || strings.HasSuffix(name, "_") || strings.Contains(name, "__") {
 		c.errorf(pos, codeUnsupported, "%s is reserved by the prototype's Go output", name)
 	}
 }
@@ -39,6 +51,8 @@ type info struct {
 	typ      string   // "" when the expression has no value
 	fallible bool     // the expression can fail and its failure is not yet handled
 	errs     []string // its error row when fallible, sorted
+	konst    bool     // an int64 constant expression, whose value is cval
+	cval     int64
 }
 
 // Checked is the checker's output, read by the emitter.
@@ -50,6 +64,7 @@ type Checked struct {
 	Wires      map[string]*WireDecl
 	ErrorTypes map[string]bool
 	Info       map[Expr]info
+	Afters     map[*Call]bool // the timeout.After calls, as the checker resolved them
 	Caps       []string // every capability type, sorted: the emitted env fields
 }
 
@@ -82,15 +97,17 @@ func Check(f *File) (*Checked, []Diagnostic) {
 		Wires:      map[string]*WireDecl{},
 		ErrorTypes: map[string]bool{expiredType: true},
 		Info:       map[Expr]info{},
+		Afters:     map[*Call]bool{},
 	}}
 	c.declare()
 	for _, fn := range f.Funcs {
 		c.funcBody(fn)
 	}
 	for _, w := range f.Wires {
-		// A top-level wire is built inline at every with that names it, so its
-		// providers must be closed and effect-free: they can neither require a
-		// capability nor fail.
+		// A top-level wire is built by its own function at every with that names
+		// it, so its providers must be closed: they require no capability from the
+		// caller and let no failure escape. They may still use capabilities they
+		// provide to themselves and handle their own failures.
 		fc := &fnCtx{escapes: []map[string]Pos{{}}, uses: map[string]Pos{}, scopes: []map[string]*local{{}}}
 		c.wireEntries(w.Entries, fc)
 		for _, u := range sortedKeys(fc.uses) {
@@ -98,6 +115,9 @@ func Check(f *File) (*Checked, []Diagnostic) {
 		}
 		for _, e := range sortedKeys(fc.escapes[0]) {
 			c.errorf(fc.escapes[0][e], codeUndeclaredError, "wire %s can fail with %s while building a provider; build it in an inline wire instead", w.Name, e)
+		}
+		if c.wireReaches(w.Name, w.Name, map[string]bool{}) {
+			c.errorf(w.Pos, codeUnsupported, "wire %s needs itself to build its providers", w.Name)
 		}
 	}
 	sort.SliceStable(c.diags, func(i, j int) bool {
@@ -124,23 +144,47 @@ func (c *checker) declare() {
 		c.Types[d.Name] = d
 	}
 	for _, w := range f.Wires {
+		c.checkLocalName(w.Pos, w.Name)
+		if c.Wires[w.Name] != nil {
+			c.errorf(w.Pos, codeType, "wire %s is declared twice", w.Name)
+		}
 		c.Wires[w.Name] = w
 	}
 	for _, fn := range f.Funcs {
+		// Go puts types and functions in one package namespace.
 		if fn.Recv == nil {
 			if fn.Name != "main" {
 				c.checkLocalName(fn.Pos, fn.Name)
 			}
+			if c.Funcs[fn.Name] != nil || c.Types[fn.Name] != nil {
+				c.errorf(fn.Pos, codeType, "%s is declared twice", fn.Name)
+			}
 			c.Funcs[fn.Name] = fn
 			continue
 		}
+		c.checkLocalName(fn.Pos, fn.Name)
 		if c.Methods[fn.Recv.Type] == nil {
 			c.Methods[fn.Recv.Type] = map[string]*FuncDecl{}
 		}
+		if c.Methods[fn.Recv.Type][fn.Name] != nil {
+			c.errorf(fn.Pos, codeType, "%s.%s is declared twice", fn.Recv.Type, fn.Name)
+		}
+		if d := c.Types[fn.Recv.Type]; d != nil {
+			for _, fd := range d.Fields {
+				if fd.Name == fn.Name {
+					c.errorf(fn.Pos, codeType, "%s has both a field and a method named %s", d.Name, fn.Name)
+				}
+			}
+		}
 		c.Methods[fn.Recv.Type][fn.Name] = fn
 	}
-	if c.Funcs["main"] == nil {
+	for _, fn := range f.Funcs {
+		c.checkParams(&fn.Sig, fn.Recv)
+	}
+	if m := c.Funcs["main"]; m == nil {
 		c.errorf(Pos{1, 1}, codeUnsupported, "a program needs func main")
+	} else if len(m.Params) > 0 {
+		c.errorf(m.Pos, codeUnsupported, "main takes no parameters")
 	}
 	for name, d := range c.Types {
 		if d.Kind == kindCapability {
@@ -150,7 +194,9 @@ func (c *checker) declare() {
 	sort.Strings(c.Caps)
 	for _, d := range f.Types {
 		for _, fd := range d.Fields {
-			if fd.Name == "Error" || strings.HasSuffix(fd.Name, "_") {
+			// Fields keep their source names, so they follow the generated-name
+			// rule; Go's predeclared names are fine as fields.
+			if fd.Name == "Error" || strings.HasSuffix(fd.Name, "_") || strings.Contains(fd.Name, "__") {
 				c.errorf(fd.Pos, codeUnsupported, "field %s is reserved by the prototype's Go output", fd.Name)
 			}
 		}
@@ -162,13 +208,42 @@ func (c *checker) declare() {
 	}
 	for _, d := range f.Types {
 		sigs = append(sigs, d.Methods...)
+		methods := map[string]bool{}
+		for _, m := range d.Methods {
+			c.checkLocalName(m.Pos, m.Name)
+			if methods[m.Name] {
+				c.errorf(m.Pos, codeType, "%s.%s is declared twice", d.Name, m.Name)
+			}
+			methods[m.Name] = true
+			c.checkParams(m, nil)
+			// M5 (round 3): a provider method gets only the task, so a capability
+			// method cannot carry its own requirements.
+			if len(m.Uses) > 0 {
+				c.errorf(m.Pos, codeUnsupported, "a capability method with a uses clause is outside this prototype")
+			}
+		}
+		fields := map[string]bool{}
 		for _, fd := range d.Fields {
 			c.checkTypeName(fd.Pos, fd.Type)
-		}
-		for _, v := range d.Variants {
-			if vd := c.Types[v]; vd == nil || vd.Kind != kindStruct {
-				c.errorf(d.Pos, codeType, "union variant %s must be a struct type", v)
+			if fields[fd.Name] {
+				c.errorf(fd.Pos, codeType, "%s has two fields named %s", d.Name, fd.Name)
 			}
+			fields[fd.Name] = true
+		}
+		variants := map[string]bool{}
+		for _, v := range d.Variants {
+			// M5 (round 2): the emitter writes a marker method on each variant, so
+			// it must be a struct declared in this file.
+			if !c.local(v) || c.Types[v].Kind != kindStruct {
+				c.errorf(d.Pos, codeType, "union variant %s must be a struct type declared in this file", v)
+			}
+			if variants[v] {
+				c.errorf(d.Pos, codeType, "%s lists %s twice", d.Name, v)
+			}
+			variants[v] = true
+		}
+		if d.Kind == kindStruct && c.layoutCycle(d.Name, map[string]int{}) {
+			c.errorf(d.Pos, codeType, "%s contains itself by value; put the recursion behind a union", d.Name)
 		}
 	}
 	for _, s := range sigs {
@@ -193,6 +268,211 @@ func (c *checker) declare() {
 	}
 }
 
+// wireReaches reports whether building wire from reaches with(target),
+// directly or through the functions its initializers call.
+func (c *checker) wireReaches(from, target string, seen map[string]bool) bool {
+	w := c.Wires[from]
+	if w == nil {
+		return false
+	}
+	var exprs []Expr
+	for _, en := range w.Entries {
+		exprs = append(exprs, en.Value)
+	}
+	return c.reaches(exprs, nil, target, seen)
+}
+
+// reaches walks expressions and statements for a with(target), following
+// called functions and named wires once each.
+func (c *checker) reaches(exprs []Expr, stmts []Stmt, target string, seen map[string]bool) bool {
+	for _, s := range stmts {
+		switch s := s.(type) {
+		case *DefineStmt:
+			exprs = append(exprs, s.Value)
+		case *ReturnStmt:
+			if s.Value != nil {
+				exprs = append(exprs, s.Value)
+			}
+		case *ExprStmt:
+			exprs = append(exprs, s.X)
+		case *IfStmt:
+			exprs = append(exprs, s.Cond)
+			stmts := append([]Stmt{}, s.Then.Stmts...)
+			if s.Else != nil {
+				stmts = append(stmts, s.Else.Stmts...)
+			}
+			if c.reaches(nil, stmts, target, seen) {
+				return true
+			}
+		case *TypeSwitchStmt:
+			exprs = append(exprs, s.Subject)
+			for _, cs := range s.Cases {
+				if c.reaches(nil, cs.Body.Stmts, target, seen) {
+					return true
+				}
+			}
+		}
+	}
+	for _, e := range exprs {
+		switch e := e.(type) {
+		case *Selector:
+			if c.reaches([]Expr{e.X}, nil, target, seen) {
+				return true
+			}
+		case *Binary:
+			if c.reaches([]Expr{e.L, e.R}, nil, target, seen) {
+				return true
+			}
+		case *CompositeLit:
+			for _, el := range e.Elems {
+				if c.reaches([]Expr{el.Value}, nil, target, seen) {
+					return true
+				}
+			}
+		case *TryExpr:
+			if c.reaches([]Expr{e.X}, nil, target, seen) {
+				return true
+			}
+		case *CatchExpr:
+			sub := []Expr{e.X}
+			for _, a := range e.Arms {
+				sub = append(sub, a.Value)
+			}
+			if c.reaches(sub, nil, target, seen) {
+				return true
+			}
+		case *WireLit:
+			for _, en := range e.Entries {
+				if c.reaches([]Expr{en.Value}, nil, target, seen) {
+					return true
+				}
+			}
+		case *Call:
+			if id, ok := e.Fun.(*Ident); ok {
+				if id.Name == "with" && len(e.Args) == 1 {
+					if w, ok := e.Args[0].(*Ident); ok {
+						if w.Name == target {
+							return true
+						}
+						if !seen["wire "+w.Name] {
+							seen["wire "+w.Name] = true
+							if c.wireReaches(w.Name, target, seen) {
+								return true
+							}
+						}
+					}
+				} else if fn := c.Funcs[id.Name]; fn != nil && !seen[id.Name] {
+					seen[id.Name] = true
+					if c.reaches(nil, fn.Body.Stmts, target, seen) {
+						return true
+					}
+				}
+			}
+			// M4 (round 3): a capability call runs whichever provider is wired, so
+			// follow every method of that name. This over-approximates: it may
+			// reject a wire that only an unrelated provider would cycle through.
+			if sel, ok := e.Fun.(*Selector); ok {
+				if id, ok := sel.X.(*Ident); ok {
+					if d := c.Types[id.Name]; d != nil && d.Kind == kindCapability {
+						for typ, ms := range c.Methods {
+							key := "method " + typ + "." + sel.Sel
+							if m := ms[sel.Sel]; m != nil && !seen[key] {
+								seen[key] = true
+								if c.reaches(nil, m.Body.Stmts, target, seen) {
+									return true
+								}
+							}
+						}
+					}
+				}
+			}
+			sub := append([]Expr{}, e.Args...)
+			if c.reaches(sub, nil, target, seen) {
+				return true
+			}
+			if e.Block != nil && c.reaches(nil, e.Block.Stmts, target, seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// checkParams checks parameter and receiver names in one signature scope.
+func (c *checker) checkParams(s *Sig, recv *Param) {
+	names := map[string]bool{}
+	if recv != nil && recv.Name != "" {
+		names[recv.Name] = true
+	}
+	for _, p := range s.Params {
+		c.checkLocalName(p.Pos, p.Name)
+		if names[p.Name] {
+			c.errorf(p.Pos, codeType, "%s is declared twice in this signature", p.Name)
+		}
+		names[p.Name] = true
+	}
+}
+
+// intLiteral decodes a decimal int64 literal. A leading zero is rejected:
+// Go would read it as octal.
+func (c *checker) intLiteral(pos Pos, text string) (int64, bool) {
+	if len(text) > 1 && text[0] == '0' {
+		c.errorf(pos, codeType, "integer literal %s has a leading zero", text)
+		return 0, false
+	}
+	n, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		c.errorf(pos, codeType, "integer literal %s overflows int64", text)
+		return 0, false
+	}
+	return n, true
+}
+
+var durationUnits = map[string]int64{
+	"ns": 1, "us": 1e3, "ms": 1e6, "s": 1e9, "m": 60e9, "h": 3600e9,
+}
+
+// durationLiteral checks that a duration literal fits in int64 nanoseconds.
+func (c *checker) durationLiteral(pos Pos, text string) {
+	i := strings.IndexFunc(text, func(r rune) bool { return r < '0' || r > '9' })
+	n, ok := c.intLiteral(pos, text[:i])
+	if unit := durationUnits[text[i:]]; ok && n > (1<<63-1)/unit {
+		c.errorf(pos, codeType, "duration %s overflows int64 nanoseconds", text)
+	}
+}
+
+// local reports whether a type is declared in the source file, not the prelude.
+func (c *checker) local(t string) bool {
+	for _, d := range c.File.Types {
+		if d.Name == t {
+			return true
+		}
+	}
+	return false
+}
+
+// layoutCycle reports whether struct t reaches itself through by-value struct
+// fields. A union or capability field is an interface in Go, so it breaks the cycle.
+// state is 1 while t is on the walk's path and 2 once t is finished, so each
+// type is walked once.
+func (c *checker) layoutCycle(t string, state map[string]int) bool {
+	d := c.Types[t]
+	if d == nil || d.Kind != kindStruct || state[t] == 2 {
+		return false
+	}
+	if state[t] == 1 {
+		return true
+	}
+	state[t] = 1
+	for _, f := range d.Fields {
+		if c.layoutCycle(f.Type, state) {
+			return true
+		}
+	}
+	state[t] = 2
+	return false
+}
+
 func (c *checker) checkTypeName(pos Pos, t string) {
 	if !basicTypes[t] && c.Types[t] == nil {
 		c.errorf(pos, codeUnknownName, "unknown type %s", t)
@@ -207,8 +487,8 @@ func (c *checker) resolveError(q QName) string {
 		c.errorf(q.Pos, codeUnknownName, "unknown error type %s", q)
 		return ""
 	}
-	if d := c.Types[q.Name]; d == nil || d.Kind != kindStruct {
-		c.errorf(q.Pos, codeUnknownName, "unknown error type %s", q.Name)
+	if d := c.Types[q.Name]; d == nil || d.Kind != kindStruct || !c.local(q.Name) {
+		c.errorf(q.Pos, codeUnknownName, "unknown error type %s: an error must be a struct declared in this file", q.Name)
 		return ""
 	}
 	return q.Name
@@ -282,8 +562,8 @@ func (c *checker) funcBody(fn *FuncDecl) {
 	fc.unused = func(l *local) { c.errorf(l.pos, codeUnused, "%s declared and not used", l.name) }
 	fc.push()
 	if fn.Recv != nil {
-		if d := c.Types[fn.Recv.Type]; d == nil || d.Kind != kindStruct {
-			c.errorf(fn.Recv.Pos, codeType, "a method receiver must be a struct type")
+		if d := c.Types[fn.Recv.Type]; d == nil || d.Kind != kindStruct || !c.local(fn.Recv.Type) {
+			c.errorf(fn.Recv.Pos, codeType, "a method receiver must be a struct type declared in this file")
 		}
 		if fn.Recv.Name != "" {
 			c.checkLocalName(fn.Recv.Pos, fn.Recv.Name)
@@ -294,7 +574,6 @@ func (c *checker) funcBody(fn *FuncDecl) {
 		}
 	}
 	for _, p := range fn.Params {
-		c.checkLocalName(p.Pos, p.Name)
 		fc.bind(&local{pos: p.Pos, name: p.Name, typ: p.Type, used: true})
 	}
 	c.stmts(fn.Body.Stmts, fc)
@@ -382,12 +661,17 @@ func (c *checker) stmt(s Stmt, fc *fnCtx) {
 		// One binding shared by every case: Go rejects it only when no case reads it.
 		shared := &local{pos: s.Pos, name: s.Bind}
 		c.checkLocalName(s.Pos, s.Bind)
+		seen := map[string]bool{}
 		for _, cs := range s.Cases {
 			bind := v.typ
 			for _, q := range cs.Types {
 				if !slices.Contains(d.Variants, q.String()) {
 					c.errorf(q.Pos, codeType, "%s is not a variant of %s", q, v.typ)
 				}
+				if seen[q.String()] {
+					c.errorf(q.Pos, codeType, "case %s appears twice", q)
+				}
+				seen[q.String()] = true
 			}
 			if len(cs.Types) == 1 {
 				bind = cs.Types[0].String()
@@ -508,11 +792,20 @@ func (c *checker) expr1(e Expr, fc *fnCtx) info {
 	case *BasicLit:
 		switch e.Kind {
 		case tString:
+			// M5 (round 4): decode once with Go's rules, so the emitted spelling
+			// is one Go accepts.
+			if _, err := strconv.Unquote(e.Text); err != nil {
+				c.errorf(e.Pos, codeType, "invalid string literal %s", e.Text)
+			}
 			return info{typ: "string"}
 		case tDuration:
+			c.durationLiteral(e.Pos, e.Text)
 			return info{typ: "duration"}
 		}
-		return info{typ: "int64"}
+		// M7 (round 2): Go folds constant arithmetic at compile time and rejects
+		// overflow, so the checker does too.
+		n, ok := c.intLiteral(e.Pos, e.Text)
+		return info{typ: "int64", konst: ok, cval: n}
 	case *Ident:
 		if t, ok := fc.lookup(e.Name); ok {
 			return info{typ: t}
@@ -562,6 +855,14 @@ func (c *checker) expr1(e Expr, fc *fnCtx) info {
 			if l.typ != "string" && l.typ != "int64" && l.typ != "?" {
 				c.errorf(e.Pos, codeType, "+ needs string or int64, not %s", l.typ)
 			}
+			if l.konst && r.konst {
+				sum := l.cval + r.cval
+				if (l.cval > 0 && r.cval > 0 && sum < 0) || (l.cval < 0 && r.cval < 0 && sum >= 0) {
+					c.errorf(e.Pos, codeType, "constant %d + %d overflows int64", l.cval, r.cval)
+					return info{typ: l.typ}
+				}
+				return info{typ: l.typ, konst: true, cval: sum}
+			}
 			return info{typ: l.typ}
 		}
 		// Short-circuit operators would need control flow around hoisted calls.
@@ -606,11 +907,17 @@ func (c *checker) catch(e *CatchExpr, fc *fnCtx, try bool) info {
 			if !slices.Contains(x.errs, name) {
 				c.errorf(q.Pos, codeType, "%s is not in the caught row [%s]", name, strings.Join(x.errs, " | "))
 			}
+			if handled[name] {
+				c.errorf(q.Pos, codeType, "%s is caught twice", name)
+			}
 			handled[name] = true
 		}
 		v := c.expr(arm.Value, fc)
 		if v.fallible {
 			c.errorf(arm.Pos, codeUnhandled, "the failure of this arm is not handled")
+		}
+		if x.typ == "" && v.typ != "" && v.typ != "?" {
+			c.errorf(arm.Pos, codeType, "this arm yields %s, but the caught expression has no value", v.typ)
 		}
 		if x.typ != "" && x.typ != "?" && v.typ != "?" && !c.assignable(v.typ, x.typ) {
 			c.errorf(arm.Pos, codeType, "this arm yields %s, but the caught expression yields %s", v.typ, x.typ)
@@ -673,6 +980,9 @@ func (c *checker) composite(e *CompositeLit, fc *fnCtx) info {
 		// M12: a field with no valid zero value must be written.
 		given := map[string]bool{}
 		for _, el := range e.Elems {
+			if given[el.Key] {
+				c.errorf(e.Pos, codeType, "%s{} sets %s twice", e.Type, el.Key)
+			}
 			given[el.Key] = true
 		}
 		for _, f := range d.Fields {
@@ -716,6 +1026,10 @@ func (c *checker) call(e *Call, fc *fnCtx) info {
 			c.errorf(fun.Pos, codeType, "%s is a variable here, not a function", fun.Name)
 			return info{typ: "?"}
 		}
+		if fun.Name == "main" {
+			c.errorf(fun.Pos, codeUnsupported, "main is the program entry and cannot be called")
+			return info{typ: "?"}
+		}
 		fn := c.Funcs[fun.Name]
 		if fn == nil {
 			c.errorf(fun.Pos, codeUnknownName, "unknown function %s", fun.Name)
@@ -729,6 +1043,7 @@ func (c *checker) call(e *Call, fc *fnCtx) info {
 	case *Selector:
 		id, ok := fun.X.(*Ident)
 		if ok && id.Name == "timeout" && fun.Sel == "After" && slices.Contains(c.File.Imports, "timeout") {
+			c.Afters[e] = true
 			return c.timeoutAfter(e, fc)
 		}
 		if ok {
@@ -739,9 +1054,7 @@ func (c *checker) call(e *Call, fc *fnCtx) info {
 				fc.use(e.Pos, id.Name)
 				if id.Name == "Console" && fun.Sel == "Println" {
 					for _, a := range e.Args {
-						if v := c.expr(a, fc); v.fallible {
-							c.errorf(e.Pos, codeUnhandled, "the failure of an argument is not handled")
-						}
+						c.argument(a, fc)
 					}
 					return info{}
 				}
@@ -770,15 +1083,22 @@ func sigInfo(s *Sig) info {
 	return v
 }
 
+// argument checks a call argument: its failure must be handled and it must
+// have a value.
+func (c *checker) argument(a Expr, fc *fnCtx) info {
+	v := c.value(a, fc)
+	if v.typ == "" {
+		c.errorf(a.exprPos(), codeType, "this argument has no value")
+	}
+	return v
+}
+
 func (c *checker) args(e *Call, params []Param, fc *fnCtx) {
 	if len(e.Args) != len(params) {
 		c.errorf(e.Pos, codeType, "want %d arguments, got %d", len(params), len(e.Args))
 	}
 	for i, a := range e.Args {
-		v := c.expr(a, fc)
-		if v.fallible {
-			c.errorf(a.exprPos(), codeUnhandled, "the failure of an argument is not handled")
-		}
+		v := c.argument(a, fc)
 		if i < len(params) && !c.assignable(v.typ, params[i].Type) && v.typ != "?" {
 			c.errorf(a.exprPos(), codeType, "argument %d: cannot use %s as %s", i+1, v.typ, params[i].Type)
 		}
@@ -843,7 +1163,7 @@ func (c *checker) timeoutAfter(e *Call, fc *fnCtx) info {
 		c.errorf(e.Pos, codeType, "timeout.After takes a duration and a block")
 		return info{typ: "?"}
 	}
-	if d := c.expr(e.Args[0], fc); d.typ != "duration" {
+	if d := c.value(e.Args[0], fc); d.typ != "duration" {
 		c.errorf(e.Pos, codeType, "timeout.After needs a duration, not %s", d.typ)
 	}
 	fc.use(e.Pos, "Scheduler")
