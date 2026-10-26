@@ -39,7 +39,7 @@ go run ./cmd/sketchc build testdata/checkout.sketch -out /tmp/gen -o /tmp/checko
 
 - **No generics, loops, channels, `defer` or borrows,** and none of the sketch-9 runtime rules (I1/I2, G1–G4, STM, batching, actors). Go keywords outside the subset parse as S001.
 - **The subset narrowed after review round 1.** These would each have needed more lowering than a spike should carry:
-  - a top-level `wire` must be closed and effect-free; build a provider that calls or fails in an inline `wire{}`, where the enclosing function pays for it;
+  - a top-level `wire` must be closed: its providers require no capability from the caller and let no failure escape. A provider that needs the caller's capabilities, or can fail, goes in an inline `wire{}`, where the enclosing function pays for it. A wire that needs itself to build is rejected;
   - `&&` and `||` are rejected, because they need control flow around hoisted calls;
   - `==` works on basic types only, and there is one integer type, `int64`;
   - `with` and `timeout.After` blocks must end with an expression and cannot `return`;

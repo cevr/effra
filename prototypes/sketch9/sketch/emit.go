@@ -54,6 +54,9 @@ func Emit(c *Checked) (string, error) {
 	for _, fn := range c.File.Funcs {
 		e.function(fn)
 	}
+	for _, w := range c.File.Wires {
+		e.wire(w)
+	}
 	imports := []string{`"sketchgen/rt"`}
 	if e.useFmt {
 		imports = append(imports, `"fmt"`)
@@ -248,6 +251,27 @@ func goTerminates(b *Block) bool {
 		return s.Else != nil && goTerminates(s.Then) && goTerminates(s.Else)
 	}
 	return false
+}
+
+func wireFunc(name string) string { return "wire" + name + "_" }
+
+// wire emits a named wire as a function that sets its providers on an env. Its
+// initializers require no capability and cannot fail (S102, S101), so it runs
+// with an empty env in an infallible frame. A wire that names itself through a
+// with becomes ordinary recursion, not endless emission.
+func (e *emitter) wire(w *WireDecl) {
+	e.directive(w.Pos)
+	e.line("func %s(envc *env, t_ *rt.Task) {", wireFunc(w.Name))
+	e.frames = []frame{{}}
+	e.envVal, e.envPtr = "env{}", "&env{}"
+	e.depth++
+	for _, en := range w.Entries {
+		v, _ := e.expr(en.Value)
+		e.line("envc.%s = %s", en.Cap, v)
+	}
+	e.depth--
+	e.line("}")
+	e.line("")
 }
 
 func (e *emitter) top() frame { return e.frames[len(e.frames)-1] }
@@ -508,28 +532,37 @@ func (e *emitter) interruptCheck() {
 // with copies the env, sets the wire's fields and runs the block in a Go block
 // against the copy. No closure: the block is inlined.
 func (e *emitter) with(x *Call, in info) (val, err string) {
-	var entries []WireEntry
-	switch w := x.Args[0].(type) {
-	case *Ident:
-		entries = e.c.Wires[w.Name].Entries
-	case *WireLit:
-		entries = w.Entries
-	}
 	val, err = e.declareResult(in)
 	e.line("{")
 	e.depth++
-	cp := e.temp("envc")
-	if e.envPtr == "&env{}" {
-		e.line("%s := env{}", cp)
-	} else {
-		e.line("%s := *%s", cp, e.envPtr)
-	}
-	for _, en := range entries {
-		v, _ := e.expr(en.Value)
-		e.line("%s.%s = %s", cp, en.Cap, v)
-	}
 	savedVal, savedPtr := e.envVal, e.envPtr
-	e.envVal, e.envPtr = cp, "&"+cp
+	copyEnv := func() string {
+		cp := e.temp("envc")
+		if e.envPtr == "&env{}" {
+			e.line("%s := env{}", cp)
+		} else {
+			e.line("%s := *%s", cp, e.envPtr)
+		}
+		return cp
+	}
+	switch w := x.Args[0].(type) {
+	case *Ident:
+		// A named wire is built by its own Go function, so the caller's local
+		// names cannot capture its initializers.
+		cp := copyEnv()
+		e.line("%s(&%s, t_)", wireFunc(w.Name), cp)
+		e.envVal, e.envPtr = cp, "&"+cp
+	case *WireLit:
+		// An empty wire provides nothing; the block keeps the enclosing env.
+		if len(w.Entries) > 0 {
+			cp := copyEnv()
+			for _, en := range w.Entries {
+				v, _ := e.expr(en.Value)
+				e.line("%s.%s = %s", cp, en.Cap, v)
+			}
+			e.envVal, e.envPtr = cp, "&"+cp
+		}
+	}
 	v, ev := e.blockLast(x.Block)
 	e.envVal, e.envPtr = savedVal, savedPtr
 	switch {

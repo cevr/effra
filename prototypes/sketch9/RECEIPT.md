@@ -119,7 +119,7 @@ Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-1-findings.md` (14 
 
 | Finding | Repair |
 | --- | --- |
-| M1 wire initializers drop rows | Inline `wire{}` providers are checked in the enclosing function before the block's discharge. A top-level `wire` must be closed and effect-free (S102 or S101 otherwise). |
+| M1 wire initializers drop rows | Inline `wire{}` providers are checked in the enclosing function before the block's discharge. A top-level `wire` must be closed: no capability from the caller, no escaping failure (S102 or S101 otherwise). |
 | M2 cancellation drops defects | `rt.After` re-panics with the drained child's defect on the deadline and stop paths too. |
 | M3 ancestor stop becomes success | `Stop` propagates down the task tree (children register with their parent). A stop during the body wins over the body's success. |
 | M4 provider methods calling helpers | Methods pass an empty `env` to the functions they call (they require no capability, S102). |
@@ -140,3 +140,23 @@ Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-1-findings.md` (14 
 All 29 reviewer witnesses are regression fixtures in `testdata/probes/` (first line `// want CODE` or `// out: lines`), run by `TestProbes`, which also runs `go vet` on every built program. The reviewer's three runtime probes are in `sketch/rt/review_probe_test.go`. `go test -race ./...` passes.
 
 Commands (round 2): `prototypes/sketch9/accept.sh` exit 0 (`accept-r2.log`); `bench.sh` exit 0 (`bench-r2.out`): cold 5458 ms, edits 300, 319 and 286 ms, emit 5–7 ms. The host was more loaded than in round 1, because another unit's gate was running. Lines: prototype Go without tests 2702, tests 401, total 3103.
+
+# Round 3: review round 2 repairs
+
+Findings: `/home/exedev/.cache/baton/wf10/sketch-proto/round-2-findings.md` (9 Major, 1 Minor, 1 Optional, no blocker).
+
+| Finding | Repair |
+| --- | --- |
+| M1 names and binding identity | Go's predeclared identifiers (`string`, `error`, `panic`, …) and `Error` are reserved for every source name, methods included. Generated marker methods end in `_`, which no source name may. A named wire is emitted as its own function (`wireW_`), so a caller's locals cannot capture its initializers (`named-wire-shadow` prints `local provider`). |
+| M2 empty wire | `with(wire{})` keeps the enclosing env; no copy. |
+| M3 recursive layouts | A struct that contains itself by value is S108; recursion behind a union is fine. |
+| M4 no-value values | An argument must have a value. A catch over a no-value expression must have no-value arms. |
+| M5 prelude host types | Union variants, error types and method receivers must be structs declared in the file. |
+| M6 duplicates | Duplicate struct fields, literal keys, catch alternatives, switch cases and union variants are S108. |
+| M7 integer constants | Literals must fit int64, and constant `+` is folded with an overflow check, as Go does. Non-constant arithmetic wraps, as in Go. |
+| M8 entry ABI | `main` takes no parameters and cannot be called. |
+| M9 wire cycles | A wire that reaches `with` of itself, directly or through called functions, is S109. |
+| N1 wording | "Closed" (no caller capability, no escaping failure) replaces "effect-free" in the docs and comments. |
+| O1 | Still deferred. |
+
+The 27 round-2 witnesses join `testdata/probes/` (56 in all), and the reviewer's task-tree stress test is `sketch/rt/task_tree_test.go`. `go test -race ./...` passes. `accept.sh` exit 0 (`accept-r3.log`). Lines: prototype Go without tests 2951, tests 487, total 3438.
