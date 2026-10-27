@@ -94,7 +94,9 @@ type Resolution struct {
 // from dir upward. At each directory, an edition manifest decides. The walk
 // ends after the first directory that holds a go.mod (a manifest never
 // governs across a Go module boundary), or at the filesystem root. With no
-// manifest, the edition is Default with source "default". Resolve never
+// manifest, the edition is Default with source "default". An entry on the walk that
+// cannot be inspected (any error but not-exist) is never taken as missing:
+// the resolution is the EF146 refusal with source "admission". Resolve never
 // reads a source file and keeps no cache, so a manifest edit takes effect at
 // the next call. Surfaces do not call it: they admit a source with ResolveFile or
 // ResolveDocument, which walk the same rule from a physical path and

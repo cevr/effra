@@ -465,3 +465,116 @@ func TestResolveDocumentFollowsLinksIntoMissingPaths(t *testing.T) {
 		t.Fatalf("a link loop resolved %s", got.JSON())
 	}
 }
+
+// restrict sets mode on path for the rest of the test, and skips the test
+// when this host can still open it (for example as root), since then there
+// is no inspection failure to test.
+func restrict(t *testing.T, path string, mode os.FileMode, directory bool) {
+	t.Helper()
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(path, 0o755) })
+	if directory {
+		if opened, err := os.OpenRoot(path); err == nil {
+			opened.Close()
+			t.Skip("this host opens a search-only directory; no inspection failure to test")
+		}
+		return
+	}
+	if opened, err := os.Open(path); err == nil {
+		opened.Close()
+		t.Skip("this host opens an unreadable file; no inspection failure to test")
+	}
+}
+
+// linkedBoundaryWorkspace is R/effra.json selecting 2026 above a module
+// R/pkg whose go.mod is a link to R/private/inner.mod, and the source
+// R/pkg/main.ef. With the boundary, the edition is the default legacy one.
+func linkedBoundaryWorkspace(t *testing.T) (root, source, private string) {
+	t.Helper()
+	root = workspace(t)
+	write(t, filepath.Join(root, ManifestName), `{"edition":"2026"}`)
+	private = filepath.Join(root, "private")
+	write(t, filepath.Join(private, "inner.mod"), "module inner\n")
+	source = filepath.Join(root, "pkg", "main.ef")
+	write(t, source, "legacy bytes\n")
+	if err := os.Symlink(filepath.Join(private, "inner.mod"), filepath.Join(root, "pkg", "go.mod")); err != nil {
+		t.Fatal(err)
+	}
+	return root, source, private
+}
+
+// An inspection error is never evidence of absence. A go.mod or a manifest
+// on the walk that exists but cannot be inspected (permission, I/O, an
+// unreadable target directory) refuses the admission with EF146; the walk
+// never crosses a boundary it could not validate to choose an ancestor's
+// edition. A link that reaches nothing is absent, as before.
+func TestUninspectableEntriesAreNeverTakenAsMissing(t *testing.T) {
+	wantLegacy := func(t *testing.T, source string) {
+		t.Helper()
+		admitted, err := admitPath(t, source)
+		if err != nil {
+			t.Fatalf("admission refused: %v", err)
+		}
+		defer admitted.Close()
+		if admitted.Resolution.Edition != Legacy || admitted.Resolution.Source != SourceDefault {
+			t.Fatalf("bound %s, want the default legacy edition below the go.mod boundary", admitted.Resolution.JSON())
+		}
+	}
+	t.Run("linked go.mod in a readable directory (control)", func(t *testing.T) {
+		_, source, _ := linkedBoundaryWorkspace(t)
+		wantLegacy(t, source)
+	})
+	t.Run("linked go.mod that reaches nothing is absent (control)", func(t *testing.T) {
+		root, source, private := linkedBoundaryWorkspace(t)
+		if err := os.Remove(filepath.Join(private, "inner.mod")); err != nil {
+			t.Fatal(err)
+		}
+		admitted, err := admitPath(t, source)
+		if err != nil {
+			t.Fatalf("admission refused: %v", err)
+		}
+		defer admitted.Close()
+		if admitted.Resolution.Edition != E2026 || admitted.Resolution.Manifest != filepath.Join(root, ManifestName) {
+			t.Fatalf("bound %s, want the ancestor 2026 manifest across no boundary", admitted.Resolution.JSON())
+		}
+	})
+	t.Run("linked go.mod in a search-only directory", func(t *testing.T) {
+		_, source, private := linkedBoundaryWorkspace(t)
+		restrict(t, private, 0o111, true)
+		if info, err := os.Stat(filepath.Join(filepath.Dir(source), "go.mod")); err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("invalid control: the go.mod is not a regular file through Stat (%v)", err)
+		}
+		_, err := admitPath(t, source)
+		wantAdmissionRefusal(t, err)
+		if got := Resolve(filepath.Dir(source)); got.Diagnostic == nil || got.Diagnostic.Code != CodeAdmission || got.Source != SourceAdmission {
+			t.Fatalf("Resolve gave %s, want the %s refusal", got.JSON(), CodeAdmission)
+		}
+	})
+	t.Run("go.mod target directory made search-only after the walk", func(t *testing.T) {
+		_, source, private := linkedBoundaryWorkspace(t)
+		restrict(t, private, 0o111, true)
+		if err := os.Chmod(private, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		defer hookAt(StageWalked, func() {
+			if err := os.Chmod(private, 0o111); err != nil {
+				t.Fatal(err)
+			}
+		})()
+		_, err := admitPath(t, source)
+		wantAdmissionRefusal(t, err)
+	})
+	t.Run("unreadable manifest below a 2026 manifest", func(t *testing.T) {
+		root := workspace(t)
+		write(t, filepath.Join(root, ManifestName), `{"edition":"2026"}`)
+		source := filepath.Join(root, "pkg", "main.ef")
+		write(t, source, "legacy bytes\n")
+		manifest := filepath.Join(root, "pkg", ManifestName)
+		write(t, manifest, `{"edition":"legacy"}`)
+		restrict(t, manifest, 0o000, false)
+		_, err := admitPath(t, source)
+		wantAdmissionRefusal(t, err)
+	})
+}

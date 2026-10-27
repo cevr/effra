@@ -170,6 +170,9 @@ func admit(anchor *os.File, info os.FileInfo, spelled string, directory bool, ab
 	}
 	walked := walk(start)
 	defer walked.close()
+	if walked.unknown != nil {
+		return "", Resolution{}, walked.unknown
+	}
 	walked.absent = absent
 	runHook(StageWalked)
 	again, err := physicalPath(anchor, info, spelled)
@@ -219,6 +222,9 @@ type snapshot struct {
 	dirs       []dirRecord
 	resolution Resolution
 	absent     []string
+	// unknown is the first entry on the walk that could not be inspected;
+	// the walk stopped there and the admission refuses.
+	unknown *AdmissionError
 }
 
 // close releases the directory handles of the walk.
@@ -295,8 +301,13 @@ func walk(start string) snapshot {
 	}
 	var walked snapshot
 	for current := absolute; ; {
-		record, resolution, decided := inspect(current)
+		record, resolution, decided, unknown := inspect(current)
 		walked.dirs = append(walked.dirs, record)
+		if unknown != nil {
+			walked.unknown = unknown
+			walked.resolution = Resolution{Source: SourceAdmission, Diagnostic: &unknown.Diagnostic}
+			return walked
+		}
 		if decided {
 			walked.resolution = resolution
 			return walked
@@ -315,33 +326,46 @@ func walk(start string) snapshot {
 }
 
 // inspect records one directory and keeps it open in the record. decided is
-// true when its manifest decides the edition (or cannot be inspected).
-func inspect(dir string) (dirRecord, Resolution, bool) {
-	record := dirRecord{path: dir}
+// true when its manifest decides the edition. unknown is set when an entry
+// that could decide the edition cannot be inspected (any error but
+// not-exist): such an entry is never taken as missing.
+func inspect(dir string) (record dirRecord, resolution Resolution, decided bool, unknown *AdmissionError) {
+	record = dirRecord{path: dir}
 	manifestPath := filepath.Join(dir, ManifestName)
 	root, err := os.OpenRoot(dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		record.missing = true
-		return record, Resolution{}, false
+		return record, Resolution{}, false, nil
 	}
 	if err != nil {
-		return record, refuse(manifestPath, fmt.Sprintf("cannot be inspected: %v", err)), true
+		return record, Resolution{}, false, uninspectable("directory "+dir, err)
 	}
 	record.root = root
 	if record.info, err = root.Stat("."); err != nil {
-		return record, refuse(manifestPath, fmt.Sprintf("cannot be inspected: %v", err)), true
+		return record, Resolution{}, false, uninspectable("directory "+dir, err)
 	}
 	entry, err := root.Lstat(ManifestName)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 	case err != nil:
-		return record, refuse(manifestPath, fmt.Sprintf("cannot be inspected: %v", err)), true
+		return record, Resolution{}, false, uninspectable("manifest "+manifestPath, err)
 	default:
 		record.manifest = manifestRecord{present: true, entry: entry}
-		return record, readManifest(root, manifestPath, &record.manifest), true
+		resolution, unknown := readManifest(root, manifestPath, &record.manifest)
+		return record, resolution, true, unknown
 	}
 	record.goMod = inspectGoMod(root, dir)
-	return record, Resolution{}, false
+	if record.goMod.err != nil {
+		return record, Resolution{}, false, record.goMod.err
+	}
+	return record, Resolution{}, false, nil
+}
+
+// uninspectable is the EF146 refusal of an entry on the walk that cannot be
+// inspected: the error is not evidence that the entry is missing, so the
+// walk cannot know which directory decides the edition.
+func uninspectable(what string, err error) *AdmissionError {
+	return admissionError("cannot inspect %s: %v; an entry that cannot be inspected is not taken as missing, so the edition cannot be decided", what, err)
 }
 
 // goModRecord is one go.mod entry as a walk found it through its directory's
@@ -353,6 +377,10 @@ type goModRecord struct {
 	// targetDir the identity of that file's directory; both nil when the
 	// link reaches nothing.
 	target, targetDir os.FileInfo
+	// err is set when the entry or a link's target cannot be inspected
+	// (any error but not-exist). The record then says nothing about the
+	// boundary.
+	err *AdmissionError
 }
 
 // boundary reports whether the go.mod ends the walk: an entry that is not a
@@ -381,35 +409,50 @@ func (r goModRecord) same(again goModRecord) bool {
 // inspectGoMod records the go.mod of the directory held by root, at path
 // dir, through that handle: the entry by Lstat on root and, for a link, the
 // file it reaches by Lstat on a handle of the target's directory, as
-// readManifest does for a linked manifest.
+// readManifest does for a linked manifest. It has three outcomes: absent (no
+// entry, or a link that reaches nothing), present with its identity, or
+// unknown (err set) when any inspection fails for another reason.
 func inspectGoMod(root *os.Root, dir string) goModRecord {
 	var record goModRecord
+	path := filepath.Join(dir, "go.mod")
 	entry, err := root.Lstat("go.mod")
+	if errors.Is(err, fs.ErrNotExist) {
+		return record
+	}
 	if err != nil {
+		record.err = uninspectable("go.mod "+path, err)
 		return record
 	}
 	record.entry = entry
 	if entry.Mode()&fs.ModeSymlink == 0 {
 		return record
 	}
-	target, err := filepath.EvalSymlinks(filepath.Join(dir, "go.mod"))
+	target, err := filepath.EvalSymlinks(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		// A link that reaches nothing is no go.mod, as for cmd/go.
+		return record
+	}
 	if err == nil {
 		target, err = filepath.Abs(target)
 	}
 	if err != nil {
+		record.err = uninspectable("go.mod "+path, err)
 		return record
 	}
 	targetRoot, err := os.OpenRoot(filepath.Dir(target))
 	if err != nil {
+		record.err = uninspectable("the directory of go.mod "+path+" ("+target+")", err)
 		return record
 	}
 	defer targetRoot.Close()
 	targetDir, err := targetRoot.Stat(".")
 	if err != nil {
+		record.err = uninspectable("the directory of go.mod "+path+" ("+target+")", err)
 		return record
 	}
 	status, err := targetRoot.Lstat(filepath.Base(target))
 	if err != nil {
+		record.err = uninspectable("go.mod "+path+" ("+target+")", err)
 		return record
 	}
 	record.target, record.targetDir = status, targetDir
@@ -421,8 +464,11 @@ func inspectGoMod(root *os.Root, dir string) goModRecord {
 // bytes are read through a descriptor opened relative to the manifest's
 // directory: dir, or the directory of a link's physical target. A FIFO or a
 // device is refused before it is opened, so a resolution never blocks. The
-// record keeps what was found, the bytes included.
-func readManifest(dir *os.Root, path string, record *manifestRecord) Resolution {
+// record keeps what was found, the bytes included. A definite state (a link
+// to a missing file, not a regular file, too large, invalid) is the EF144
+// resolution; an inspection that fails for another reason (permission,
+// I/O, an unreadable target directory) is unknown, the EF146 refusal.
+func readManifest(dir *os.Root, path string, record *manifestRecord) (Resolution, *AdmissionError) {
 	holder, name := dir, ManifestName
 	if record.entry.Mode()&fs.ModeSymlink != 0 {
 		target, err := filepath.EvalSymlinks(path)
@@ -430,54 +476,54 @@ func readManifest(dir *os.Root, path string, record *manifestRecord) Resolution 
 			target, err = filepath.Abs(target)
 		}
 		if errors.Is(err, fs.ErrNotExist) {
-			return refuse(path, "is a link to a missing file")
+			return refuse(path, "is a link to a missing file"), nil
 		}
 		if err != nil {
-			return refuse(path, fmt.Sprintf("is unreadable: %v", err))
+			return Resolution{}, uninspectable("manifest "+path, err)
 		}
 		targetRoot, err := os.OpenRoot(filepath.Dir(target))
 		if err != nil {
-			return refuse(path, fmt.Sprintf("is unreadable: %v", err))
+			return Resolution{}, uninspectable("manifest "+path, err)
 		}
 		defer targetRoot.Close()
 		if record.targetDir, err = targetRoot.Stat("."); err != nil {
-			return refuse(path, fmt.Sprintf("is unreadable: %v", err))
+			return Resolution{}, uninspectable("manifest "+path, err)
 		}
 		record.target = target
 		holder, name = targetRoot, filepath.Base(target)
 	}
 	status, err := holder.Lstat(name)
 	if errors.Is(err, fs.ErrNotExist) {
-		return refuse(path, "is a link to a missing file")
+		return refuse(path, "is a link to a missing file"), nil
 	}
 	if err != nil {
-		return refuse(path, fmt.Sprintf("is unreadable: %v", err))
+		return Resolution{}, uninspectable("manifest "+path, err)
 	}
 	if !status.Mode().IsRegular() {
-		return refuse(path, "is not a regular file")
+		return refuse(path, "is not a regular file"), nil
 	}
 	file, err := holder.OpenFile(name, SourceOpenFlags, 0)
 	if err != nil {
-		return refuse(path, fmt.Sprintf("is unreadable: %v", err))
+		return Resolution{}, uninspectable("manifest "+path, err)
 	}
 	defer file.Close()
 	opened, err := file.Stat()
 	if err != nil {
-		return refuse(path, fmt.Sprintf("is unreadable: %v", err))
+		return Resolution{}, uninspectable("manifest "+path, err)
 	}
 	if !opened.Mode().IsRegular() {
-		return refuse(path, "is not a regular file")
+		return refuse(path, "is not a regular file"), nil
 	}
 	record.file = opened
 	data, err := io.ReadAll(io.LimitReader(file, MaxManifestBytes+1))
 	if err != nil {
-		return refuse(path, fmt.Sprintf("is unreadable: %v", err))
+		return Resolution{}, uninspectable("manifest "+path, err)
 	}
 	if len(data) > MaxManifestBytes {
-		return refuse(path, fmt.Sprintf("exceeds %d bytes", MaxManifestBytes))
+		return refuse(path, fmt.Sprintf("exceeds %d bytes", MaxManifestBytes)), nil
 	}
 	record.data = data
-	return manifestResolution(path, data)
+	return manifestResolution(path, data), nil
 }
 
 // changed checks every recorded fact again and names the first one that no
@@ -510,14 +556,13 @@ func (s snapshot) changed() string {
 				return "manifest " + manifestPath
 			}
 			again := manifestRecord{present: true, entry: entry}
-			readManifest(dir.root, manifestPath, &again)
-			if !dir.manifest.same(again) {
+			if _, unknown := readManifest(dir.root, manifestPath, &again); unknown != nil || !dir.manifest.same(again) {
 				return "manifest " + manifestPath
 			}
 			// A manifest decides; no go.mod at or above it was consulted.
 			continue
 		}
-		if !dir.goMod.same(inspectGoMod(dir.root, dir.path)) {
+		if again := inspectGoMod(dir.root, dir.path); again.err != nil || !dir.goMod.same(again) {
 			return "go.mod in " + dir.path
 		}
 	}

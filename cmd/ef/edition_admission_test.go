@@ -266,3 +266,73 @@ func TestCheckRefusesAManifestWhoseBytesChangeDuringAdmission(t *testing.T) {
 		}
 	}
 }
+
+// R/effra.json selects 2026. R/pkg/main.ef is legacy source, and R/pkg/go.mod
+// links to R/search-only/inner.mod. When the target directory is searchable
+// but not readable, the go.mod is a regular file through Stat, but admission
+// cannot inspect it through a directory handle. An inspection error is not
+// absence: ef check refuses with EF146 and never crosses the boundary to
+// the ancestor's 2026 edition. With a readable directory the source is
+// legacy (control), and a link that reaches nothing is no boundary, so the
+// ancestor's 2026 edition applies (control). Ported from the round 5 review
+// probe.
+func TestCheckRefusesAModuleBoundaryItCannotInspect(t *testing.T) {
+	for _, state := range []string{"search-only", "readable", "missing-target"} {
+		t.Run(state, func(t *testing.T) {
+			root := editionWorkspace(t)
+			editionWrite(t, filepath.Join(root, edition.ManifestName), `{"edition":"2026"}`)
+			private := filepath.Join(root, "search-only")
+			backing := filepath.Join(private, "inner.mod")
+			editionWrite(t, backing, "module inner\n")
+			source := filepath.Join(root, "pkg", "main.ef")
+			editionWrite(t, source, legacyCleanSource)
+			goMod := filepath.Join(root, "pkg", "go.mod")
+			if err := os.Symlink(backing, goMod); err != nil {
+				t.Fatal(err)
+			}
+			switch state {
+			case "search-only":
+				if err := os.Chmod(private, 0o111); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { os.Chmod(private, 0o755) })
+				if info, err := os.Stat(goMod); err != nil || !info.Mode().IsRegular() {
+					t.Fatalf("invalid control: go.mod is not a regular file through Stat (%v)", err)
+				}
+				if opened, err := os.OpenRoot(private); err == nil {
+					opened.Close()
+					t.Skip("this host opens a search-only directory; no inspection failure to test")
+				}
+			case "missing-target":
+				if err := os.Remove(backing); err != nil {
+					t.Fatal(err)
+				}
+			}
+			resolution := edition.ResolveDocument(source)
+			err := runCommand("check", source)
+			switch state {
+			case "search-only":
+				if resolution.Diagnostic == nil || resolution.Diagnostic.Code != edition.CodeAdmission {
+					t.Fatalf("edition %s; want the %s refusal, never the ancestor's 2026 edition", resolution.JSON(), edition.CodeAdmission)
+				}
+				if err == nil || !strings.HasPrefix(err.Error(), edition.CodeAdmission+": ") {
+					t.Fatalf("ef check: %v; want the %s refusal", err, edition.CodeAdmission)
+				}
+			case "readable":
+				if resolution.Diagnostic != nil || resolution.Edition != edition.Legacy {
+					t.Fatalf("edition %s; want legacy below the boundary", resolution.JSON())
+				}
+				if err != nil {
+					t.Fatalf("ef check of unchanged legacy source: %v", err)
+				}
+			case "missing-target":
+				if resolution.Diagnostic != nil || resolution.Edition != edition.E2026 {
+					t.Fatalf("edition %s; want the ancestor's 2026 edition across no boundary", resolution.JSON())
+				}
+				if err == nil {
+					t.Fatal("ef check accepted legacy source under the 2026 edition")
+				}
+			}
+		})
+	}
+}
