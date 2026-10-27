@@ -71,6 +71,9 @@ type checker struct {
 
 	cur      *fileInfo
 	instance map[string]*Named
+	kinds    declKinds // solved bracket kinds of the package's generic types
+	init     initDeps  // references of each package-level body (initialization order)
+	mono     monoState // the instantiation graph (instantiation cycles)
 
 	errorTypes map[*Named]syntax.Pos // origin error types named in an error row of this package
 	funcs      []*Func               // every package function and method, in source order
@@ -97,6 +100,9 @@ type pkgVar struct {
 	file     *fileInfo
 	done     bool // checked with diagnostics
 	checking bool // being checked: a self-reference stops here
+	// initCycle: the var is on a reported initialization cycle; its type
+	// is invalid, so no use of it cascades (D3).
+	initCycle bool
 }
 
 var nextID struct {

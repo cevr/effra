@@ -310,12 +310,17 @@ func (c *checker) assignStmt(s *syntax.AssignStmt) {
 			}
 			ids[i] = id
 		}
-		reuse := c.defineTargets(s, ids)
+		reuse, skip := c.defineTargets(s, ids)
 		var types []Type
 		switch {
 		case len(s.Rhs) == len(ids):
 			types = make([]Type, len(ids))
 			for i, r := range s.Rhs {
+				if skip[i] {
+					op := c.valueExpr(r, nil)
+					c.defaultOf(&op)
+					continue
+				}
 				if v := reuse[i]; v != nil {
 					op := c.valueExpr(r, v.Type)
 					if !isInvalid(v.Type) {
@@ -329,7 +334,7 @@ func (c *checker) assignStmt(s *syntax.AssignStmt) {
 		case len(s.Rhs) == 1:
 			types = c.multiValue(s.Rhs[0], len(ids))
 			for i, v := range reuse {
-				if v == nil || isInvalid(types[i]) || isInvalid(v.Type) {
+				if v == nil || skip[i] || isInvalid(types[i]) || isInvalid(v.Type) {
 					continue
 				}
 				if ok, why := c.assignable(types[i], v.Type); !ok {
@@ -340,18 +345,14 @@ func (c *checker) assignStmt(s *syntax.AssignStmt) {
 			c.errorf(s, CodeType, "%d names and %d values", len(ids), len(s.Rhs))
 			types = make([]Type, len(ids))
 		}
-		declared := map[string]bool{}
 		for i, id := range ids {
+			if skip[i] {
+				continue // repeated on the left: reported, binds nothing
+			}
 			if v := reuse[i]; v != nil {
 				// Reassigning an existing local does not read it.
 				c.recordUse(id, v)
 				continue
-			}
-			if declared[id.Name] {
-				continue // repeated on the left: reported
-			}
-			if id.Name != "_" {
-				declared[id.Name] = true
 			}
 			c.declareLocal(id, types[i])
 		}
@@ -416,17 +417,26 @@ func (c *checker) assignStmt(s *syntax.AssignStmt) {
 // defineTargets classifies the names on the left of :=, as Go does: a name
 // already declared as a local of this block is reassigned, not redeclared,
 // and at least one non-blank name must be new (S108). A name repeated on
-// the left is S108. It returns, per name, the local it reassigns or nil.
-func (c *checker) defineTargets(s *syntax.AssignStmt, ids []*syntax.Ident) []*Var {
+// the left is S108 once; its later occurrences bind and assign nothing, and
+// the no-new-name rule is not reported on top of it (D3; round-2 M9). It
+// returns, per name, the local it reassigns or nil, and whether to skip it.
+func (c *checker) defineTargets(s *syntax.AssignStmt, ids []*syntax.Ident) ([]*Var, []bool) {
 	reuse := make([]*Var, len(ids))
+	skip := make([]bool, len(ids))
 	seen := map[string]bool{}
-	fresh := false
+	fresh, repeated := false, false
+	repeatedName := map[string]bool{}
 	for i, id := range ids {
 		if id.Name == "_" {
 			continue
 		}
 		if seen[id.Name] {
-			c.errorf(id, CodeType, "%s is repeated on the left of :=", id.Name)
+			if !repeatedName[id.Name] {
+				c.errorf(id, CodeType, "%s is repeated on the left of :=", id.Name)
+			}
+			repeatedName[id.Name] = true
+			skip[i] = true
+			repeated = true
 			continue
 		}
 		seen[id.Name] = true
@@ -436,10 +446,10 @@ func (c *checker) defineTargets(s *syntax.AssignStmt, ids []*syntax.Ident) []*Va
 		}
 		fresh = true
 	}
-	if !fresh {
+	if !fresh && !repeated {
 		c.errorf(s, CodeType, "no new names on the left of :=; use = to assign")
 	}
-	return reuse
+	return reuse, skip
 }
 
 func isBlank(x syntax.Expr) bool {

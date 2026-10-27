@@ -23,19 +23,24 @@ func (c *checker) checkTypeDecls() {
 // or an instance of a generic struct): its size would be infinite. Slices,
 // maps, channels, interfaces and unions break the cycle, as in Go. The walk
 // follows instances with their type arguments substituted, so
-// `type U struct{ F Wrap[U] }` closes through Wrap's `Value T` (M7). One
-// diagnostic per cycle, at the declaration the cycle closes on.
+// `type U struct{ F Wrap[U] }` closes through Wrap's `Value T`. It has no
+// depth cutoff (round-2 M5): instantiation cycles are rejected first
+// (checkInstantiationCycles) and the walk skips their types, so the
+// instances it reaches are finitely many and each is visited once. One
+// diagnostic per cycle, at the cycle's first declaration in source order.
+//
+// Prior art: go/types validType walks the same instance graph with the
+// type path as its cycle witness.
 func (c *checker) checkRecursiveStructs() {
 	const (
 		white = iota
 		grey
 		black
 	)
-	// maxDepth bounds a walk through instances that grow without end,
-	// `type L[T] struct{ next L[[1]T] }`: such a type is infinite too.
-	const maxDepth = 256
 	colour := map[*Named]int{}
 	reported := map[*Named]bool{}
+	var stack []*Named
+	var cycles [][]*Named
 	var fields func(t Type, out *[]*Named)
 	fields = func(t Type, out *[]*Named) {
 		switch t := t.(type) {
@@ -45,6 +50,9 @@ func (c *checker) checkRecursiveStructs() {
 			}
 			if t.Orig == nil && t.Obj.Decl == nil {
 				return
+			}
+			if c.monoBad(t.origin().TParams) {
+				return // on an instantiation cycle: reported
 			}
 			if _, ok := t.underlying().(*Struct); ok {
 				*out = append(*out, t)
@@ -57,53 +65,81 @@ func (c *checker) checkRecursiveStructs() {
 			}
 		}
 	}
-	var visit func(n *Named, depth int) *Named
-	// visit returns the grey type a cycle found below n closes on, if any.
-	visit = func(n *Named, depth int) *Named {
-		if depth > maxDepth {
-			return n
-		}
-		colour[n] = grey
-		defer func() { colour[n] = black }()
-		s, ok := n.underlying().(*Struct)
-		if !ok {
-			return nil
-		}
-		var next []*Named
-		for _, f := range s.Fields {
-			fields(f.Type, &next)
-		}
-		for _, m := range next {
-			switch colour[m] {
-			case grey:
-				return m
-			case white:
-				if closes := visit(m, depth+1); closes != nil {
-					return closes
+	// visit walks iteratively, so a chain of thousands of types needs no
+	// deep recursion.
+	type frame struct {
+		n    *Named
+		next []*Named
+		i    int
+	}
+	visit := func(root *Named) {
+		var work []frame
+		push := func(n *Named) {
+			colour[n] = grey
+			stack = append(stack, n)
+			var next []*Named
+			if s, ok := n.underlying().(*Struct); ok {
+				for _, f := range s.Fields {
+					fields(f.Type, &next)
 				}
 			}
+			work = append(work, frame{n: n, next: next})
 		}
-		return nil
+		push(root)
+		for len(work) > 0 {
+			top := &work[len(work)-1]
+			if top.i == len(top.next) {
+				colour[top.n] = black
+				stack = stack[:len(stack)-1]
+				work = work[:len(work)-1]
+				continue
+			}
+			m := top.next[top.i]
+			top.i++
+			switch colour[m] {
+			case grey:
+				for k := len(stack) - 1; k >= 0; k-- {
+					if stack[k] == m {
+						cycles = append(cycles, append([]*Named(nil), stack[k:]...))
+						break
+					}
+				}
+			case white:
+				push(m)
+			}
+		}
 	}
 	for _, tn := range c.pkg.Types {
 		n, ok := tn.Type.(*Named)
-		if !ok || colour[n] != white {
+		if !ok || colour[n] != white || c.monoBad(n.TParams) {
 			continue
 		}
-		closes := visit(n, 0)
-		if closes == nil {
+		visit(n)
+	}
+	for _, cyc := range cycles {
+		var first *Named
+		dup := false
+		for _, m := range cyc {
+			o := m.origin()
+			if reported[o] {
+				dup = true
+			}
+			if o.Obj.Pkg != c.pkg || o.Obj.Decl == nil {
+				continue
+			}
+			if first == nil || o.Obj.file.index < first.Obj.file.index ||
+				o.Obj.file.index == first.Obj.file.index && o.Obj.Pos < first.Obj.Pos {
+				first = o
+			}
+		}
+		for _, m := range cyc {
+			reported[m.origin()] = true
+		}
+		if dup || first == nil {
 			continue
 		}
-		at := closes.origin()
-		if at.Obj.Pkg != c.pkg || at.Obj.Decl == nil {
-			at = n
-		}
-		if reported[at] {
-			continue
-		}
-		reported[at] = true
-		c.cur = at.Obj.file
-		c.errorf(at.Obj.Decl.Name, CodeType, "struct %s contains itself by value; its size would be infinite (types.md, Structs 4)", at.Obj.Name)
+		c.cur = first.Obj.file
+		c.errorf(first.Obj.Decl.Name, CodeType, "struct %s contains itself by value; its size would be infinite (types.md, Structs 4)", first.Obj.Name)
 	}
 }
 

@@ -22,10 +22,14 @@ func (c *checker) run(files []*syntax.File) *Package {
 	}
 	c.pkg.qualify = true
 	c.collect()
+	c.solveDeclKinds()
 	for _, tn := range c.pkg.Types {
 		c.cur = tn.file
 		c.resolveNamed(tn.Type.(*Named))
 	}
+	// Expanding type instantiations are rejected before any walk expands
+	// instances (round-2 M1, M5).
+	c.checkInstantiationCycles()
 	c.collectMethods()
 	for _, f := range c.funcs {
 		c.cur = f.file
@@ -278,7 +282,7 @@ func (c *checker) resolveNamed(n *Named) {
 	d := n.Obj.Decl
 	ctx := &typeCtx{params: map[string]*TypeParam{}, decl: true}
 	if d.TypeParams != nil {
-		kinds, conflicts := c.bracketKinds(d)
+		kinds, conflicts := c.bracketKinds(n.Obj)
 		for _, field := range d.TypeParams.List {
 			for _, name := range field.Names {
 				tp := &TypeParam{Name: name.Name, Pos: name.Pos(), id: newID()}
@@ -301,6 +305,8 @@ func (c *checker) resolveNamed(n *Named) {
 			}
 		}
 	}
+	restore := c.monoOwner(n.TParams)
+	defer restore()
 	switch spec := d.Spec.(type) {
 	case *syntax.StructType:
 		ctx.field = true
@@ -330,29 +336,22 @@ func (c *checker) resolveNamed(n *Named) {
 	n.state = 2
 }
 
-// bracketKinds finds the kind of each unconstrained bracket parameter of a
-// type declaration from its positions in the body: inside error[…] an error
-// row, after the capability-row keyword a capability row, elsewhere a type
-// (D6: Task[T, E] has a row-kinded E).
-func (c *checker) bracketKinds(d *syntax.TypeDecl) (map[string]Kind, map[string]bool) {
-	names := map[string]bool{}
-	for _, f := range d.TypeParams.List {
+// bracketKinds returns the solved kind of each unconstrained bracket
+// parameter of a type declaration and the parameters whose positions
+// disagree (solveDeclKinds).
+func (c *checker) bracketKinds(tn *TypeName) (map[string]Kind, map[string]bool) {
+	kinds := map[string]Kind{}
+	i := 0
+	ks := c.kinds.kinds[tn]
+	for _, f := range tn.Decl.TypeParams.List {
 		for _, n := range f.Names {
-			names[n.Name] = true
+			if i < len(ks) {
+				kinds[n.Name] = ks[i]
+			}
+			i++
 		}
 	}
-	kinds := map[string]Kind{}
-	conflicts := map[string]bool{}
-	typeWalker{slots: c.slotKinds, f: func(id *syntax.Ident, k Kind) {
-		if !names[id.Name] {
-			return
-		}
-		if prev, ok := kinds[id.Name]; ok && prev != k {
-			conflicts[id.Name] = true
-		}
-		kinds[id.Name] = k
-	}}.walk(d.Spec, KindType)
-	return kinds, conflicts
+	return kinds, c.kinds.conflicts[tn]
 }
 
 func isErrorName(x syntax.Expr) bool {
@@ -708,11 +707,13 @@ func (c *checker) instantiateExprs(n *Named, args []syntax.Expr, at syntax.Node,
 		}
 		targs[i] = t
 	}
+	c.recordInstantiation(n.Obj.Name, n.TParams, targs, at)
 	inst := c.instantiate(n, targs)
 	for i, tp := range n.TParams {
 		if tp.Kind == KindType && tp.Constraint != nil && n.state == 2 {
-			if why := c.satisfies(targs[i], tp.Constraint); why != "" {
-				c.errorf(args[i], CodeType, "%s does not satisfy %s: %s", targs[i], tp.Constraint, why)
+			cons := c.subst(tp.Constraint, paramMap(n.TParams, targs))
+			if why := c.satisfies(targs[i], cons); why != "" {
+				c.errorf(args[i], CodeType, "%s does not satisfy %s: %s", targs[i], cons, why)
 				return invalid
 			}
 		}
@@ -879,6 +880,9 @@ func walkTypePositions(x syntax.Node, k Kind, f func(*syntax.Ident, Kind)) {
 type typeWalker struct {
 	f     func(*syntax.Ident, Kind)
 	slots func(head syntax.Expr) []Kind
+	// index, when set, may take over an index expression (returning true)
+	// before the default walk.
+	index func(ix *syntax.IndexExpr) bool
 }
 
 func (w typeWalker) walk(x syntax.Node, k Kind) {
@@ -894,6 +898,9 @@ func (w typeWalker) walk(x syntax.Node, k Kind) {
 		w.walk(x.X, k)
 		w.walk(x.Y, k)
 	case *syntax.IndexExpr:
+		if w.index != nil && w.index(x) {
+			return
+		}
 		w.walk(x.X, KindType)
 		var kinds []Kind
 		if w.slots != nil {
@@ -956,9 +963,14 @@ func (w typeWalker) fields(l *syntax.FieldList) {
 // slotKinds returns the parameter kinds of the generic type a head names,
 // or nil when the head is not a generic type or is still resolving.
 func (c *checker) slotKinds(head syntax.Expr) []Kind {
-	_, n := c.namedHead(head)
+	tn, n := c.namedHead(head)
 	if n == nil {
 		return nil
+	}
+	if ks, ok := c.kinds.kinds[tn]; ok {
+		// A local declaration's kinds are solved before any resolves, so
+		// a recursive head has them too (round-2 M4).
+		return ks
 	}
 	if n.state == 0 {
 		c.resolveNamed(n)

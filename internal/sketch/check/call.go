@@ -443,6 +443,12 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 	if ea, ok := fun.obj.(*explicitArgs); ok {
 		explicit = ea.targs
 	}
+	if fun.fn != nil && c.monoBad(fun.fn.Sig.TParams) {
+		// On an instantiation cycle (reported): the call adds nothing,
+		// so row inference does not follow the cycle's growth.
+		c.silentArgs(x)
+		return bad(x)
+	}
 	args := argsOf(x)
 	if !c.arity(x, sig, args.n()) {
 		return bad(x)
@@ -535,6 +541,13 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 				return bad(x)
 			}
 		}
+	}
+	if fun.fn != nil {
+		targs := make([]Type, len(sig.TParams))
+		for i, tp := range sig.TParams {
+			targs[i] = in.m[tp]
+		}
+		c.recordInstantiation(fun.fn.Name, sig.TParams, targs, x)
 	}
 	inst := c.subst(sig, in.m).(*Signature)
 	inst.TParams = nil

@@ -126,10 +126,20 @@ type bodyNode struct {
 // cycle the rows are joined to a fixpoint (finite sets ordered by
 // inclusion), silently, then the component is checked once more with
 // diagnostics. An acyclic graph is linear: each body is checked once.
+//
+// The graph holds every reference that Go's initialization order counts
+// (go/types initorder.go): to a function, to a package var and, through a
+// selector, to a method. A selector is not resolved here, so it reaches
+// every method of that name: the graph over-approximates, which orders
+// more strictly and merges components but changes no fixpoint. With every
+// initialization dependency inside the graph, an initialization cycle lies
+// inside one component and is found before the component's reporting
+// pass, so its rows never reach a caller (round-2 M2).
 func (c *checker) checkBodies() {
 	var nodes []*bodyNode
 	byFunc := map[*Func]*bodyNode{}
 	byVar := map[*Var]*bodyNode{}
+	byMethod := map[string][]*bodyNode{}
 	for _, f := range c.funcs {
 		if f.Decl.Body == nil || f.Sig == nil {
 			continue
@@ -137,6 +147,9 @@ func (c *checker) checkBodies() {
 		n := &bodyNode{fn: f, index: -1}
 		nodes = append(nodes, n)
 		byFunc[f] = n
+		if f.Recv != nil {
+			byMethod[f.Name] = append(byMethod[f.Name], n)
+		}
 	}
 	for _, v := range c.vars {
 		n := &bodyNode{v: v, index: -1}
@@ -159,30 +172,28 @@ func (c *checker) checkBodies() {
 		}
 		seen := map[*bodyNode]bool{}
 		skip := map[*syntax.Ident]bool{}
+		edge := func(to *bodyNode) {
+			if to != nil && !seen[to] {
+				seen[to] = true
+				n.edges = append(n.edges, to)
+			}
+		}
 		syntax.Inspect(root, func(x syntax.Node) bool {
 			switch x := x.(type) {
 			case *syntax.SelectorExpr:
 				skip[x.Sel] = true
-			case *syntax.KeyValueExpr:
-				if id, ok := x.Key.(*syntax.Ident); ok {
-					skip[id] = true
+				for _, m := range byMethod[x.Sel.Name] {
+					edge(m)
 				}
 			case *syntax.Ident:
 				if skip[x] {
 					return true
 				}
-				var to *bodyNode
 				switch o := c.pkg.Scope.names[x.Name].(type) {
 				case *Func:
-					if o.inferErrors || o.inferUses {
-						to = byFunc[o]
-					}
+					edge(byFunc[o])
 				case *Var:
-					to = byVar[o]
-				}
-				if to != nil && !seen[to] {
-					seen[to] = true
-					n.edges = append(n.edges, to)
+					edge(byVar[o])
 				}
 			}
 			return true
@@ -191,6 +202,7 @@ func (c *checker) checkBodies() {
 	for _, scc := range tarjan(nodes) {
 		c.checkComponent(scc)
 	}
+	c.checkInitCycles()
 }
 
 func (c *checker) checkComponent(scc []*bodyNode) {
@@ -206,6 +218,35 @@ func (c *checker) checkComponent(scc []*bodyNode) {
 	for _, n := range scc {
 		if n.fn != nil && (n.fn.inferErrors || n.fn.inferUses) {
 			inferred = true
+		}
+	}
+	if cyclic {
+		// One silent pass records the component's instantiations and its
+		// references, so an expanding cycle (round-2 M1) and an
+		// initialization cycle (round-2 M2) are rejected before the rows
+		// iterate and before any diagnostic depends on them.
+		c.silent++
+		c.init.tentative = true
+		for _, n := range scc {
+			c.checkNode(n)
+		}
+		c.init.tentative = false
+		c.silent--
+		c.checkInstantiationCycles()
+		c.checkComponentInit(scc)
+		// The fixpoint starts from empty rows: the silent pass saw the
+		// vars of an initialization cycle as valid, and rows it inferred
+		// through them would otherwise hold themselves up (least fixpoint).
+		for _, n := range scc {
+			if n.fn == nil || n.fn.Sig == nil {
+				continue
+			}
+			if n.fn.inferErrors {
+				n.fn.Sig.Errors = newRow()
+			}
+			if n.fn.inferUses {
+				n.fn.Sig.Uses = newRow()
+			}
 		}
 	}
 	if cyclic && inferred {
@@ -263,8 +304,12 @@ func (c *checker) converge(scc []*bodyNode) {
 // checkNode checks one body and reports whether its inferred rows grew.
 func (c *checker) checkNode(n *bodyNode) bool {
 	if n.v != nil {
+		// A var's type carries its literal's inferred rows: when it
+		// changes, the bodies that call the var are checked again.
+		before := n.v.obj.Type
 		c.checkPkgVar(n.v)
-		return false
+		after := n.v.obj.Type
+		return before == nil || after == nil || !identical(before, after)
 	}
 	return c.checkFuncBody(n.fn)
 }
@@ -361,6 +406,8 @@ type branch struct {
 }
 
 func (c *checker) checkFuncBody(f *Func) bool {
+	defer c.beginDeps(f)()
+	defer c.monoOwner(f.Sig.TParams)()
 	saved := c.cur
 	c.cur = f.file
 	defer func() { c.cur = saved }()
@@ -519,6 +566,7 @@ func (c *checker) checkPkgVar(pv *pkgVar) {
 	}
 	pv.checking = true
 	defer func() { pv.checking = false }()
+	defer c.beginDeps(pv)()
 	// A silent check (a fixpoint round) does not count: the reporting
 	// pass checks the initializer again against converged rows.
 	if c.silent == 0 {
@@ -553,7 +601,10 @@ func (c *checker) checkPkgVar(pv *pkgVar) {
 		c.errorf(pv.spec, CodeType, "%d names and %d values", len(pv.spec.Names), len(pv.spec.Values))
 		pv.obj.Type = invalid
 	}
-	if pv.obj.Type == nil {
+	// A var on a reported initialization cycle stays invalid: its
+	// initializer is checked for its own errors, but no use of the var
+	// cascades (D3).
+	if pv.obj.Type == nil || pv.initCycle {
 		pv.obj.Type = invalid
 	}
 }

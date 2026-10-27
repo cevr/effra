@@ -122,14 +122,22 @@ func (c *checker) needValue(op *operand) {
 	op.mode, op.typ, op.errs = modeInvalid, invalid, nil
 }
 
+// paramMap maps each type parameter to its argument.
+func paramMap(tps []*TypeParam, targs []Type) map[*TypeParam]Type {
+	m := make(map[*TypeParam]Type, len(tps))
+	for i, tp := range tps {
+		if i < len(targs) && targs[i] != nil {
+			m[tp] = targs[i]
+		}
+	}
+	return m
+}
+
 // instantiateValue turns a fully instantiated generic function into a
 // function value: each type argument satisfies its constraint (S108), and
 // the value's type is the signature with the arguments substituted.
 func (c *checker) instantiateValue(op *operand, sig *Signature, targs []Type) bool {
-	m := map[*TypeParam]Type{}
-	for i, tp := range sig.TParams {
-		m[tp] = targs[i]
-	}
+	m := paramMap(sig.TParams, targs)
 	for i, tp := range sig.TParams {
 		if tp.Kind != KindType || tp.Constraint == nil {
 			continue
@@ -140,10 +148,23 @@ func (c *checker) instantiateValue(op *operand, sig *Signature, targs []Type) bo
 			return false
 		}
 	}
+	if op.fn != nil {
+		c.recordInstantiation(op.fn.Name, sig.TParams, targs, op.expr)
+	}
 	inst := c.subst(sig, m).(*Signature)
 	inst.TParams = nil
 	inst.NBracket = 0
 	op.mode, op.typ, op.obj = modeValue, inst, nil
+	// The expression and its parentheses record the instantiated type, not
+	// the generic one recorded while they were checked (D1; round-2 M8).
+	for x := op.expr; x != nil; {
+		c.record(x, *op)
+		p, ok := x.(*syntax.ParenExpr)
+		if !ok {
+			break
+		}
+		x = p.X
+	}
 	return true
 }
 
@@ -300,6 +321,9 @@ func (c *checker) ident(x *syntax.Ident) operand {
 		if o.group != nil {
 			o.group.used = true
 		}
+		if o.pkg {
+			c.recordDep(o)
+		}
 		if o.pkg && o.Type == nil {
 			c.ensurePkgVar(o)
 		}
@@ -315,6 +339,7 @@ func (c *checker) ident(x *syntax.Ident) operand {
 			return bad(x)
 		}
 		sig := c.funcSig(o)
+		c.recordDep(o)
 		if c.fn != nil && c.fn.reach != nil {
 			c.fn.reach.funcs = append(c.fn.reach.funcs, o)
 		}
@@ -467,7 +492,13 @@ func (c *checker) compositeLit(x *syntax.CompositeLit, hint Type) operand {
 			}
 			k := c.valueExpr(kv.Key, u.Key)
 			if c.assign(&k, u.Key, "map key") && k.mode == modeConst && k.val != nil {
-				key := k.val.Kind().String() + ":" + k.val.ExactString()
+				// Keys of an interface type compare by dynamic type and
+				// value: int(1) and int64(1) are distinct (round-2 M7).
+				dyn := u.Key
+				if asInterface(u.Key) != nil {
+					dyn = defaultType(k.typ)
+				}
+				key := typeKey(dyn) + "|" + k.val.Kind().String() + ":" + k.val.ExactString()
 				if seen[key] {
 					c.errorf(kv.Key, CodeType, "the key %s appears twice in this map literal", k.val.ExactString())
 				}
@@ -575,12 +606,16 @@ func (c *checker) literalType(x *syntax.CompositeLit, hint Type) Type {
 	// Inferred arguments meet the same constraints as written ones (D6; M5).
 	for i, tp := range n.TParams {
 		if tp.Kind == KindType && tp.Constraint != nil {
-			if why := c.satisfies(targs[i], tp.Constraint); why != "" {
-				c.errorf(x.Type, CodeType, "the inferred type argument %s of %s does not satisfy %s: %s (types.md, Generics 2)", targs[i], n.Obj.Name, tp.Constraint, why)
+			// A constraint may name other parameters, I[T]: it is checked
+			// with every argument substituted (round-2 M6).
+			cons := c.subst(tp.Constraint, paramMap(n.TParams, targs))
+			if why := c.satisfies(targs[i], cons); why != "" {
+				c.errorf(x.Type, CodeType, "the inferred type argument %s of %s does not satisfy %s: %s (types.md, Generics 2)", targs[i], n.Obj.Name, cons, why)
 				return nil
 			}
 		}
 	}
+	c.recordInstantiation(n.Obj.Name, n.TParams, targs, x)
 	return c.instantiate(n, targs)
 }
 
@@ -761,6 +796,9 @@ func (c *checker) selector(x *syntax.SelectorExpr) operand {
 	}
 	sig, fn := c.methodOf(t, x.Sel.Name)
 	if sig != nil {
+		if fn != nil {
+			c.recordDep(fn)
+		}
 		if c.fn != nil && c.fn.reach != nil {
 			if fn != nil {
 				c.fn.reach.funcs = append(c.fn.reach.funcs, fn)
@@ -873,18 +911,25 @@ func (c *checker) intIndex(x syntax.Expr) (int64, bool) {
 	if op.invalid() {
 		return 0, false
 	}
-	if !isInteger(op.typ) {
+	untypedConst := op.mode == modeConst && op.val != nil && isUntyped(op.typ)
+	switch {
+	case untypedConst && isNumeric(op.typ):
+		// An untyped constant becomes an int: it must be representable.
+		if !c.assign(&op, Typ[Int], "index") {
+			return 0, false
+		}
+	case !isInteger(op.typ):
 		c.errorf(x, CodeType, "an index must be an integer, not %s", op.typ)
 		return 0, false
 	}
 	if op.mode != modeConst || op.val == nil {
 		return 0, false
 	}
-	if !c.assign(&op, Typ[Int], "index") {
-		return 0, false
-	}
+	// A typed integer constant of any integer type indexes when its value
+	// is representable as an int (Go's rule; round-2 M10).
 	v, exact := constant.Int64Val(constant.ToInt(op.val))
 	if !exact {
+		c.errorf(x, CodeType, "the index %s overflows int", op.val.ExactString())
 		return 0, false
 	}
 	if v < 0 {

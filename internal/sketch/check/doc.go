@@ -11,11 +11,15 @@
 // implements it, minus what the spec removes (no nil, no const, no pointer
 // values outside parameters and receivers, no generic methods).
 //
-// Phases: collect the package's declarations; resolve type declarations
-// lazily with cycle colouring; resolve signatures; check bodies one strongly
+// Phases: collect the package's declarations; solve the kinds of the
+// generic type declarations together (kinds.go); resolve type declarations
+// lazily with cycle colouring; resolve signatures; reject instantiation
+// cycles on the instantiation graph (mono.go); check bodies one strongly
 // connected component of the reference graph at a time, so the inferred
-// rows of a callee are final before its callers (inside a component, a
-// worklist joins the rows to a fixpoint before any is published); then the
+// rows of a callee are final before its callers (inside a cyclic component,
+// a silent pass finds the component's instantiation and initialization
+// cycles, then a worklist joins the rows to a fixpoint from empty rows
+// before any is published; initorder.go); then the
 // rules that read inferred rows (machine declarations, named wires, wire
 // cycles), Error methods and unused imports. An invalid operand or type suppresses every diagnostic that
 // would follow from it: one mistake, one diagnostic.
@@ -36,7 +40,14 @@
 //     Parmatch usefulness algorithm (Maranget 2007) for totality over a case
 //     matrix, never the product of the subjects, with Parmatch's pruning:
 //     subsumed rows dropped, a wildcard row answering at once, equal
-//     submatrices answered once.
+//     submatrices answered once. The column to split is chosen by
+//     Maranget's necessity heuristic, the memo key ignores column order,
+//     and a fixed step budget bounds the proof, as rustc's
+//     pattern_complexity_limit and GHC's max-pmcheck-models do: over
+//     budget, the switch is refused (S103), never accepted unproven.
+//   - go/types initorder.go and its "instantiation cycle" check: package
+//     var initialization cycles and expanding generic instantiations are
+//     rejected on their dependency graphs, with no depth limit.
 //   - Koka and Effekt: effect rows inferred for unannotated functions and
 //     discharged by handlers; here a with block subtracts the capabilities
 //     its wire binds, and a catch subtracts the caught error types.
