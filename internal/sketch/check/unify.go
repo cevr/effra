@@ -178,6 +178,18 @@ func (in *inferer) nify(x, y Type, mode unifyMode, depth int) bool {
 		if !in.nify(b, y, mode, depth) {
 			return false
 		}
+		// Go refines a bidirectional channel binding to the directed
+		// channel of a later argument. Ergo infers a subset of Go (D6 as
+		// amended in round 7): it refuses the call, asking for the type
+		// arguments, rather than keep a binding Go would not.
+		if bc, ok := b.(*Chan); ok && mode&unifyExact == 0 {
+			if yc, ok := y.(*Chan); ok && bc.Dir == 0 && yc.Dir != 0 {
+				if in.refused == nil {
+					in.refused = px
+				}
+				return true
+			}
+		}
 		bi, yi := asInterface(b), asInterface(y)
 		_, bn := b.(*Named)
 		_, yn := y.(*Named)

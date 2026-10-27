@@ -2,6 +2,7 @@ package check
 
 import (
 	"go/constant"
+	"strings"
 
 	"ergo.local/prototype/internal/sketch/syntax"
 )
@@ -166,9 +167,15 @@ func (c *checker) callSig(x *syntax.CallExpr, sig *Signature, fun operand) opera
 		return bad(x)
 	}
 	spread := x.Ellipsis.IsValid()
+	refused := false
 	for i, a := range args.exprs {
 		pt := paramType(sig, i, spread)
-		c.argument(a, pt)
+		if !c.argument(a, pt, x) {
+			refused = true
+		}
+	}
+	if refused {
+		return bad(x)
 	}
 	if args.trailing != nil {
 		pt := paramType(sig, len(args.exprs), false)
@@ -185,8 +192,10 @@ func (c *checker) callSig(x *syntax.CallExpr, sig *Signature, fun operand) opera
 	return c.result(x, sig)
 }
 
-// argument checks one argument against its parameter type.
-func (c *checker) argument(a syntax.Expr, pt Type) {
+// argument checks one argument against its parameter type. It reports false
+// when the argument is a generic function value that the call refused
+// (argValue).
+func (c *checker) argument(a syntax.Expr, pt Type, call *syntax.CallExpr) bool {
 	if lit, ok := a.(*syntax.FuncLit); ok {
 		ps, _ := under0(pt).(*Signature)
 		op := c.funcLit(lit, ps, nil)
@@ -194,10 +203,38 @@ func (c *checker) argument(a syntax.Expr, pt Type) {
 		if !op.invalid() {
 			c.assign(&op, pt, "argument")
 		}
-		return
+		return true
 	}
-	op := c.valueExpr(a, pt)
-	c.assign(&op, pt, "argument")
+	op, ok := c.argValue(a, pt, call)
+	if ok {
+		c.assign(&op, pt, "argument")
+	}
+	return ok
+}
+
+// argValue checks an argument as a value. A generic function passed
+// without all its type arguments (Apply(Id, 1), Fix(Id), Pick[int]) is
+// outside the inferred subset (D6 as amended in round 7): the call is S108,
+// asking for the type arguments, with no other diagnostic (D3), and ok is
+// false. A function whose type parameters are implicit, which no bracket
+// can name, keeps its own diagnostic.
+func (c *checker) argValue(a syntax.Expr, hint Type, call *syntax.CallExpr) (operand, bool) {
+	op := c.expr(a, hint)
+	if op.mode == modeGeneric {
+		sig, _ := op.typ.(*Signature)
+		written := 0
+		if ea, ok := op.obj.(*explicitArgs); ok {
+			written = len(ea.targs)
+		}
+		if sig != nil && sig.NBracket == len(sig.TParams) && written < len(sig.TParams) {
+			c.cannotInfer(call, sig.TParams[written].Name, a, sig)
+			op.mode, op.typ, op.errs = modeInvalid, invalid, nil
+			return op, false
+		}
+	}
+	c.needValue(&op)
+	c.handled(&op)
+	return op, true
 }
 
 // result is the operand of a call: its value results, its failure row, and
@@ -247,6 +284,35 @@ func (c *checker) explicit(x *syntax.IndexExpr, fun operand) operand {
 	return operand{mode: modeGeneric, typ: sig, fn: fun.fn, val: nil, obj: &explicitArgs{targs: targs}}
 }
 
+// cannotInfer reports a type parameter the inferred subset does not reach
+// (D6 as amended in round 7): S108 at the call, naming the fix. It is the
+// only diagnostic of the call (D3).
+func (c *checker) cannotInfer(at syntax.Node, name string, fun syntax.Expr, sig *Signature) {
+	c.errorf(at, CodeType, "cannot infer %s; write the type arguments, e.g. %s (D6)", name, inferExample(fun, sig))
+}
+
+// inferExample writes the call with its type arguments, for the fix:
+// Fn[int](…), with one placeholder type per bracketed parameter.
+func inferExample(fun syntax.Expr, sig *Signature) string {
+	n := sig.NBracket
+	if n == 0 {
+		n = len(sig.TParams)
+	}
+	parts := make([]string, max(n, 1))
+	for i := range parts {
+		parts[i] = "int"
+	}
+	name := exprText(fun)
+	if ix, ok := fun.(*syntax.IndexExpr); ok {
+		name = exprText(ix.X)
+	}
+	return name + "[" + strings.Join(parts, ", ") + "](…)"
+}
+
+func isUntypedNumeric(b *Basic) bool {
+	return b.Kind == UntypedInt || b.Kind == UntypedRune || b.Kind == UntypedFloat
+}
+
 // explicitArgs carries written type arguments to the call.
 type explicitArgs struct{ targs []Type }
 
@@ -264,6 +330,9 @@ type inferer struct {
 	// joined marks the row parameters bound by unification, not written:
 	// a later argument widens them (see unifyRow).
 	joined map[*TypeParam]bool
+	// refused is a parameter whose binding Go would refine past what Ergo
+	// infers (D6 as amended in round 7): the call asks for type arguments.
+	refused *TypeParam
 }
 
 func (in *inferer) free(tp *TypeParam) bool { return in.set[tp] && in.m[tp] == nil }
@@ -409,8 +478,12 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 		if !in.hasFree(pt) {
 			hint = c.subst(pt, in.m)
 		}
-		op := c.valueExpr(args.exprs[i], hint)
+		op, ok := c.argValue(args.exprs[i], hint, x)
 		ops[i] = &op
+		if !ok {
+			failed = true // refused and reported at the call
+			continue
+		}
 		// Every type argument written: nothing is inferred, and each
 		// argument is only assigned (Go calls no inference then).
 		if op.invalid() || isUntyped(op.typ) || allExplicit || failed || !in.mentions(pt) {
@@ -431,13 +504,39 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 	if failed {
 		return bad(x)
 	}
+	// Untyped constants bind a parameter no typed argument bound: all the
+	// constants of one parameter combine to the widest numeric kind (int,
+	// rune, float), then default once, as go/types maxUntyped does, so
+	// Two(1, 'a') and Two('a', 1) both infer int32 (round-6 M2). Constants
+	// of different non-numeric kinds do not combine (S108).
+	widest := map[*TypeParam]*Basic{}
+	var order []*TypeParam
 	for i := 0; i < len(args.exprs); i++ {
 		if ops[i] == nil || ops[i].invalid() || !isUntyped(ops[i].typ) {
 			continue
 		}
-		if tp, ok := paramType(sig, i, spread).(*TypeParam); ok && in.free(tp) {
-			in.m[tp] = defaultType(ops[i].typ)
+		tp, ok := paramType(sig, i, spread).(*TypeParam)
+		if !ok || !in.free(tp) {
+			continue
 		}
+		b := ops[i].typ.(*Basic)
+		prev, seen := widest[tp]
+		switch {
+		case !seen:
+			widest[tp] = b
+			order = append(order, tp)
+		case prev.Kind == b.Kind:
+		case isUntypedNumeric(prev) && isUntypedNumeric(b):
+			if b.Kind > prev.Kind {
+				widest[tp] = b
+			}
+		default:
+			c.errorf(args.exprs[i], CodeType, "mismatched constants %s and %s for %s; write the type arguments, e.g. %s (D6; type inference)", prev, b, tp.Name, inferExample(x.Fun, sig))
+			return bad(x)
+		}
+	}
+	for _, tp := range order {
+		in.m[tp] = defaultType(widest[tp])
 	}
 	lits := make([]Type, n)
 	for i := 0; i < n; i++ {
@@ -471,7 +570,16 @@ func (c *checker) callGeneric(x *syntax.CallExpr, sig *Signature, explicit []Typ
 			in.m[tp] = &RowArg{Row: newRow()}
 			continue
 		}
-		c.errorf(x, CodeType, "cannot infer the type parameter %s of %s from the arguments; a type argument is never inferred from the expected result (D6)", tp.Name, exprText(x.Fun))
+		// Outside the inferred subset (D6 as amended in round 7): never
+		// from the expected result, nor through a method or core-type
+		// constraint; the fix is to write the type arguments.
+		c.cannotInfer(x, tp.Name, x.Fun, sig)
+		return bad(x)
+	}
+	if in.refused != nil {
+		// A binding Go would refine (a bidirectional channel to the
+		// directed one a later argument has): outside the subset.
+		c.cannotInfer(x, in.refused.Name, x.Fun, sig)
 		return bad(x)
 	}
 	for _, tp := range sig.TParams {

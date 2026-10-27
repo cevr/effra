@@ -318,6 +318,13 @@ func (g *diffGen) program() string {
 func goKey(t types.Type) string {
 	switch t := types.Unalias(t).(type) {
 	case *types.Basic:
+		// rune and byte are go/types' names for int32 and uint8.
+		switch t.Kind() {
+		case types.Int32:
+			return "int32"
+		case types.Uint8:
+			return "uint8"
+		}
 		return t.Name()
 	case *types.Named:
 		s := t.Obj().Name()
@@ -487,10 +494,26 @@ func diffOne(src string) []string { return diffCheck(src, true) }
 // cycle in both; otherwise any rejection agrees (the inference programs
 // fail by unification).
 func diffCheck(src string, cycleOnly bool) []string {
+	d, _ := diffCount(src, cycleOnly)
+	return d
+}
+
+// isRefusal reports whether d is the inferred subset's refusal (D6 as
+// amended in round 7): S108 "cannot infer T; write the type arguments".
+func isRefusal(d string) bool {
+	return strings.Contains(d, "S108") && strings.Contains(d, "cannot infer") && strings.Contains(d, "write the type arguments")
+}
+
+// diffCount is diffCheck that also reports a refusal: Go accepts and every
+// Ergo diagnostic is the inferred subset's refusal. The direction is the
+// contract (D6 as amended in round 7): Ergo accepting implies Go accepting
+// with the same types; Ergo rejecting what Go accepts is allowed only as
+// that refusal.
+func diffCount(src string, cycleOnly bool) ([]string, bool) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "p.go", src, 0)
 	if err != nil {
-		return []string{"go cannot parse the generated program: " + err.Error()}
+		return []string{"go cannot parse the generated program: " + err.Error()}, false
 	}
 	info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}}
 	var goErrs []string
@@ -501,11 +524,19 @@ func diffCheck(src string, cycleOnly bool) []string {
 	for _, d := range diags {
 		ds = append(ds, d.String())
 	}
-	if (len(goErrs) == 0) != (len(ds) == 0) {
-		return []string{fmt.Sprintf("verdicts differ: go %q, ergo %q", goErrs, ds)}
+	if len(goErrs) == 0 && len(ds) > 0 {
+		for _, d := range ds {
+			if !isRefusal(d) {
+				return []string{fmt.Sprintf("ergo rejects a program go accepts, not with the refusal: %q", ds)}, false
+			}
+		}
+		return nil, true
+	}
+	if len(goErrs) > 0 && len(ds) == 0 {
+		return []string{fmt.Sprintf("ergo accepts a program go rejects (unsound): go %q", goErrs)}, false
 	}
 	if len(goErrs) > 0 && !cycleOnly {
-		return nil
+		return nil, false
 	}
 	if len(goErrs) > 0 {
 		// Both reject: the generated programs fail only by instantiation
@@ -523,7 +554,7 @@ func diffCheck(src string, cycleOnly bool) []string {
 				out = append(out, "ergo rejects for another reason: "+d)
 			}
 		}
-		return out
+		return out, false
 	}
 	keys := newErgoKeys(pkg)
 	ergoTypes := map[span]string{}
@@ -564,7 +595,7 @@ func diffCheck(src string, cycleOnly bool) []string {
 		return true
 	})
 	sort.Strings(out)
-	return out
+	return out, false
 }
 
 // diffSeeds is the fixed seed set the unit test runs; FuzzDifferential
@@ -665,18 +696,34 @@ func inferProgram(rng *rand.Rand) string {
 		// (types.md, Borrows 1), so no explicit control writes one.
 		types = append(types, fmt.Sprintf("S%d", k))
 	}
-	values = append(values, "w W0", "j J0", "i I0[int]", "a interface{ M(int) int }", "e interface{ M(string) string }", "n int")
-	types = append(types, "W0", "J0", "I0[int]", "interface{ M(int) int }", "interface{ M(string) string }", "int")
+	values = append(values, "w W0", "j J0", "i I0[int]", "a interface{ M(int) int }", "e interface{ M(string) string }", "n int", "c chan int", "cs chan<- int", "cr <-chan int")
+	types = append(types, "W0", "J0", "I0[int]", "interface{ M(int) int }", "interface{ M(string) string }", "int", "chan int", "chan<- int", "int32")
 	b.WriteString("func FnA[T any](x interface{ M(T) T }) {}\n\n")
 	b.WriteString("func FnN[T any](x I0[T]) {}\n\n")
 	b.WriteString("func FnW[T any](x interface {\n\tM(T) T\n\tN()\n}) {}\n\n")
 	b.WriteString("func Two[T any](a T, b T) {}\n\n")
+	b.WriteString("func Id[U any](x U) U { return x }\n\n")
+	b.WriteString("func Apply[T any](f func(T) T, x T) {}\n\n")
+	b.WriteString("func Fix(f func(int) int) {}\n\n")
 	fmt.Fprintf(&b, "func Main(%s) {\n", strings.Join(values, ", "))
 	name := func(v string) string { return v[:strings.Index(v, " ")] }
 	for range 1 + rng.Intn(2) {
-		v := name(values[rng.Intn(len(values))])
-		w := name(values[rng.Intn(len(values))])
-		switch rng.Intn(5) {
+		// An argument is a value, or an untyped constant (combined
+		// across the arguments of one parameter, as go/types maxUntyped).
+		arg := func() string {
+			if rng.Intn(4) == 0 {
+				return []string{"1", "'a'", "\"s\""}[rng.Intn(3)]
+			}
+			return name(values[rng.Intn(len(values))])
+		}
+		v, w := arg(), arg()
+		switch rng.Intn(7) {
+		case 5:
+			// A generic function as an argument: outside the subset unless
+			// instantiated (Apply(Id, n) is refused, Apply(Id[int], n) is valid).
+			fmt.Fprintf(&b, "\tApply(%s, %s)\n", []string{"Id", "Id[int]", "Id[string]"}[rng.Intn(3)], v)
+		case 6:
+			fmt.Fprintf(&b, "\tFix(%s)\n", []string{"Id", "Id[int]"}[rng.Intn(2)])
 		case 0:
 			fmt.Fprintf(&b, "\tFnA(%s)\n", v)
 		case 1:
@@ -697,11 +744,15 @@ func inferProgram(rng *rand.Rand) string {
 // set: the verdicts agree with go/types, and on accepted programs every
 // value expression's type does. Both verdicts must occur.
 func TestDifferentialInference(t *testing.T) {
-	accepted, rejected := 0, 0
+	accepted, rejected, refused := 0, 0, 0
 	for seed := int64(0); seed < diffSeeds; seed++ {
 		src := inferProgram(rand.New(rand.NewSource(seed)))
-		if d := diffCheck(src, false); len(d) > 0 {
+		d, refusal := diffCount(src, false)
+		if len(d) > 0 {
 			t.Fatalf("seed %d:\n%s\n%s", seed, strings.Join(d, "\n"), src)
+		}
+		if refusal {
+			refused++
 		}
 		if _, diags := CheckSource(src); len(diags) == 0 {
 			accepted++
@@ -709,6 +760,10 @@ func TestDifferentialInference(t *testing.T) {
 			rejected++
 		}
 	}
+	// The refusals: programs go accepts that Ergo refuses with the
+	// subset's diagnostic (D6 as amended in round 7), counted for the
+	// round's request.
+	t.Logf("%d seeds: %d accepted, %d rejected, of which %d are refusals of go-valid programs", diffSeeds, accepted, rejected, refused)
 	if accepted < diffSeeds/10 || rejected < diffSeeds/10 {
 		t.Errorf("the seeds cover %d accepted and %d rejected programs; the generator misses a verdict", accepted, rejected)
 	}
