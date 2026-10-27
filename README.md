@@ -1,6 +1,8 @@
 # Ergo
 
-**A Go-shaped language that compiles to plain Go and checks the guarantees large Go programs keep only by convention.** The guarantees come from [Effect](https://effect.website), the TypeScript library: typed errors, tracked dependencies, safe resources, structured concurrency with interruption, every failure cause kept, built-in tracing and testable time. Ergo puts them in the language. The compiler checks them and then erases them, so a checked row adds no wrapper type and no run-time cost.
+**A Go-shaped language that compiles to plain Go. It is designed to check the guarantees that large Go programs keep only by convention.** The guarantees come from [Effect](https://effect.website), the TypeScript library: typed errors, tracked dependencies, safe resources, structured concurrency with interruption, every failure cause kept, built-in tracing and testable time. Ergo's design puts them in the language: the compiler checks them and then erases them, so a checked row adds no wrapper type and no run-time cost.
+
+Ergo is a design and a prototype. The program below is the designed language. It parses and formats today, and most of its checks are designed, not built:
 
 ```go
 import (
@@ -8,7 +10,7 @@ import (
 	"timeout"
 )
 
-// A function's signature lists every way it can fail and every service it needs.
+// A signature lists every expected failure and every service the caller must supply.
 func Charge(card Card, amount int64) (Receipt, error[Declined | Frozen | timeout.Expired]) needs Accounts, Payments, Scheduler {
 	return timeout.After(2s) { // the block runs as a child task; at 2s it is stopped and drained
 		lock := try Accounts.Lock(card) // a resource: released on every exit, the timeout included
@@ -39,7 +41,9 @@ func TestSlowGatewayTimesOut() needs testing.T {
 }
 ```
 
-Designed output; `ergo test` does not run 2026-edition files yet:
+**What runs today:** the parser and the formatter accept all of this code. The prototype checker checks error rows, `try`, total `catch`, `needs` rows, closed wires and `timeout.After`. The task runtime `runtime/rt` records traces. Resource and law checks, provider replacement, `testing.VirtualClock` and `ergo test` are designed, not built. See the [status table](#status).
+
+Designed output, because `ergo test` does not run 2026-edition files yet:
 
 ```console
 $ ergo test --trace
@@ -49,24 +53,22 @@ TestSlowGatewayTimesOut  ok  virtual 2s
       └ Payments.Charge  pay.ef:12:3   interrupted
 ```
 
-In about thirty lines, the compiler checks what Go leaves to convention. Every failure is in a type. Every dependency is declared. The lock cannot leak. The timeout stops its block and waits for its cleanup. The law covers every Payments provider. The test runs in virtual time. The trace needs no logging code. The emitted Go is plain `if err != nil`, ordinary interfaces and calls into a small task runtime.
-
-> **Status: design and prototype.** The parser and the formatter of the 2026 edition are in the main compiler. `ergo check`, `build` and `run` accept a prototype subset of it. The full checker and the Go lowering are in progress, and the standard library is designed. The code on this page is the designed language, and each section says what runs today. See the [status table](#status).
+In about thirty lines, the design checks what Go leaves to convention. Every expected failure is in a type. Every service the caller must supply is declared. The lock cannot leak. The timeout stops its block and waits for its cleanup. The law covers every Payments provider. The test is designed to run in virtual time, and its trace needs no logging code. The prototype already emits plain `if err != nil`, ordinary interfaces and calls into a small task runtime.
 
 ## The guarantees
 
-| Guarantee | What it means | In Go today | In Ergo |
-| --- | --- | --- | --- |
-| **Typed errors** | You can see every way a function fails, and the compiler knows which failures you handled. | `error` says only "something failed" | `error[NotFound \| Declined]`, exhaustive `catch` |
-| **Tracked dependencies** | You can see every service a function needs. A missing one is a compile error. | `context.Context` values, globals, constructor plumbing | `needs` rows, `wire … provides`, `with` |
-| **Resource safety** | Everything acquired is released once, on every exit: success, failure, panic or cancellation. | `defer`, if you remember it | release at scope end; moves and lends |
-| **Structured concurrency** | No task outlives its scope. A stop reaches every child. A stop cannot cut cleanup short. | goroutines can leak; `context` is cooperative | scoped tasks, interruption points, masked release |
-| **Every cause kept** | When several things fail, you get all of them, with defects kept apart from expected failures. | the first error wins; a panic crashes | one cause with every failure, defect and interruption |
-| **Built-in observability** | Every task and every service call can be traced, keyed to its source, with no code changes. | spans added by hand | trace events named by the compiler; off adds no allocations |
-| **Testable time and effects** | A test swaps any service, the clock included, with no mock framework. | interfaces and hand-written fakes | `replace` in a test wire; `testing.VirtualClock` |
-| **Laws** | You state what must always hold, and every implementation is checked against it. | comments and example tests | `func LawX`, found like `TestX` |
+| Guarantee | What it means | In Go today | In Ergo | Runs today |
+| --- | --- | --- | --- | --- |
+| **Typed errors** | You can see every expected failure of a function, and the compiler knows which failures you handled. | `error` says only "something failed" | `error[NotFound \| Declined]`, exhaustive `catch` | prototype checker |
+| **Tracked dependencies** | You can see every service the caller must supply. A missing one is a compile error. | `context.Context` values, globals, constructor plumbing | `needs` rows, `wire … provides`, `with` | prototype checker: `needs` rows, closed wires |
+| **Resource safety** | Everything acquired is released once, on every exit: success, failure, panic or cancellation. | `defer`, if you remember it | release at scope end; moves and lends | release rules in `runtime/rt`; checks designed ([#197](https://github.com/cevr/ergo/issues/197)) |
+| **Structured concurrency** | No task outlives its scope. A stop reaches every child. A stop cannot cut cleanup short. | goroutines can leak; `context` is cooperative | scoped tasks, interruption points, masked release | task tree, stops and masks in `runtime/rt` |
+| **Every cause kept** | When several things fail, you get all of them, with defects kept apart from expected failures. | needs explicit aggregation (`errors.Join`) and recovery code | one cause with every failure, defect and interruption | designed; `runtime/rt` keeps defects, not yet every child failure |
+| **Built-in observability** | Every task and every service call can be traced, keyed to its source, with no code changes. | spans added by hand | trace events named by the compiler; off adds no allocations | `runtime/rt` and the prototype ([#188](https://github.com/cevr/ergo/issues/188)) |
+| **Testable time and effects** | A test swaps any service, the clock included, with no mock framework. | interfaces and hand-written fakes | `replace` in a test wire; `testing.VirtualClock` | designed; `runtime/rt` has a virtual clock |
+| **Laws** | You state what must always hold, and every implementation is checked against it. | comments and example tests | `func LawX`, found like `TestX` | designed ([#162](https://github.com/cevr/ergo/issues/162)) |
 
-Ergo keeps Go's spelling, Go's runtime and garbage collector, and single static binaries built by `go build`. Effect delivers its guarantees as a runtime library of wrapper values. Ergo checks them in the compiler and emits ordinary Go, so a function is still a function and an error type still implements `error`.
+Ergo keeps Go's spelling, Go's runtime and garbage collector, and single static binaries built by `go build`. Effect delivers its guarantees as a runtime library of wrapper values. Ergo is designed to check them in the compiler and to emit ordinary Go, so a function is still a function and an error type still implements `error`.
 
 ---
 
@@ -118,8 +120,9 @@ func main() error[NotFound | Declined | DialFailed] needs Console {
 }
 ```
 
-- `needs` lists what a function requires. `provides` lists what a named wire exposes. Every other entry stays private to the wire's build.
+- `needs` lists the services the caller must supply. `provides` lists what a named wire exposes. Every other entry stays private to the wire's build.
 - `with` meets the needs of its block. A capability that nothing provides is a compile error that names it.
+- A service that a `with` inside the body supplies leaves the row: `main` calls `Checkout`, which needs `Orders` and `Payments`, yet `main`'s row lists only `Console`. The row is what remains for the caller, not every service the body touches. The footprint, every capability a body uses, is designed: the compiler will infer it and `ergo inspect` will show it ([rows](docs/spec/rows.md#footprints)).
 - A constructor's failures join the row of the `with` that builds it, so `main` lists `DialFailed`.
 - Prior art: Effect's `Layer<ROut, E, RIn>`, Roc's `provides` and `requires`, and Google Wire.
 
@@ -167,11 +170,11 @@ func Prices(ids []string) ([]Price, error[NotFound | timeout.Expired]) needs Cat
 ```
 
 - `tasks.Map` keeps input order and runs at most 8 calls at once. The first failure stops the rest.
-- A child task belongs to a scope. The scope waits for it, stops it on timeout and keeps every cause: the timeout, each child failure and each cleanup defect.
+- A child task belongs to a scope. The scope waits for it and stops it on timeout. By design, the scope's exit keeps every cause: the timeout, each child failure and each cleanup defect.
 - A stop is checked at interruption points, and cleanup runs uninterrupted.
 - `go f(x)` starts a task and gives a `Task[T, E]`. A `Task` is a resource, so its owner scope stops and drains it.
 
-*Today:* `runtime/rt` implements the task tree, stops, masks and `timeout.After`. The prototype checks `timeout.After`. `go`, `Task` and the `tasks` package are designed ([runtime](docs/spec/runtime.md#tasks)).
+*Today:* `runtime/rt` implements the task tree, stops, masks and `timeout.After`. The prototype checks `timeout.After`. The runtime keeps every defect, but not yet every typed failure: a completed child's failure that nobody waited for is dropped when its scope closes normally, and a child stopped by a deadline reports `timeout.Expired` in place of its own failure ([receipt](runtime/rt/RECEIPT.md)). `go`, `Task` and the `tasks` package are designed ([runtime](docs/spec/runtime.md#tasks)).
 
 ## Machines and actors, as ordinary code
 
@@ -240,7 +243,7 @@ func LawFindAfterPut(id string, v Order) bool needs Store {
 
 ## Observability by construction
 
-The checker knows every definition, every capability call and every row. So the compiler names every trace event, and the source needs no span calls. The [#188 spike](docs/research/traceability.md) put this into `runtime/rt` and the prototype compiler. This is real output of the prototype's trace query, recorded on 2026-10-27, for a run where a 100ms timeout stopped a 2s gateway call (trimmed; [full run](docs/previews/2026-10-27-traceability.md)):
+The checker knows every definition, every capability call and every row. So the compiler can name every trace event, and the source needs no span calls. The [#188 spike](docs/research/traceability.md) put this into `runtime/rt` and the prototype compiler. This is real output of the prototype's trace query, recorded on 2026-10-27. In that run, a 100ms timeout interrupted `Scheduler.Sleep(2s)`, before `Gateway.Authorize` ran (trimmed; [full run](docs/previews/2026-10-27-traceability.md)):
 
 ```text
 $ go run ./cmd/sketchc trace testdata/trace/timeout.sketch timeout.jsonl
@@ -286,7 +289,7 @@ $ ergo inspect checkout.ef Checkout
 
 - Each code has its rule, its spec section and, where one exists, a fixture ([diagnostics](docs/spec/diagnostics.md)).
 - One formatter, `ergo fmt`, gives one canonical layout, so agent edits make small, stable diffs.
-- Every effect is in the signature, so an agent can change a function without reading its whole call graph.
+- Every expected failure, and every service the caller must supply, is in the signature. An agent can call a function, or change its body, without reading its whole call graph.
 
 ## Go interop
 
