@@ -568,11 +568,11 @@ func diffCount(src string, cycleOnly bool) ([]string, bool) {
 		if !ok {
 			return true
 		}
-		switch x.(type) {
-		case *ast.Ident, *ast.IndexExpr, *ast.IndexListExpr, *ast.ParenExpr, *ast.SelectorExpr, *ast.CallExpr, *ast.CompositeLit:
-		default:
-			return true
-		}
+		// Every expression node go/types records: identifiers, index and
+		// selector expressions, parentheses, calls, composite and basic
+		// literals, unary and binary operations, function literals
+		// (round-7 M1: the final contextual types, sub-expressions
+		// included).
 		tv, ok := info.Types[x]
 		if !ok {
 			return true
@@ -712,12 +712,18 @@ func inferProgram(rng *rand.Rand) string {
 		// across the arguments of one parameter, as go/types maxUntyped).
 		arg := func() string {
 			if rng.Intn(4) == 0 {
-				return []string{"1", "'a'", "\"s\""}[rng.Intn(3)]
+				return inferConstants[rng.Intn(len(inferConstants))]
 			}
 			return name(values[rng.Intn(len(values))])
 		}
 		v, w := arg(), arg()
-		switch rng.Intn(7) {
+		switch rng.Intn(9) {
+		case 7:
+			// A result in context: Info records the converted type of the
+			// argument and its constant sub-expressions (round-7 M1).
+			fmt.Fprintf(&b, "\t_ = Id(%s)\n", v)
+		case 8:
+			fmt.Fprintf(&b, "\t_ = Id[%s](%s)\n", types[rng.Intn(len(types))], v)
 		case 5:
 			// A generic function as an argument: outside the subset unless
 			// instantiated (Apply(Id, n) is refused, Apply(Id[int], n) is valid).
@@ -738,6 +744,19 @@ func inferProgram(rng *rand.Rand) string {
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// inferConstants are the untyped constant arguments the inference generator
+// writes (round-7 M1): literals of each kind, parentheses, unary and binary
+// operations, comparisons and constant-producing builtin calls; and a few
+// typed operations with a constant operand, which takes the other side's
+// type.
+var inferConstants = []string{
+	"1", "'a'", "\"s\"", "true",
+	"(1)", "-1", "-'a'", "!true", "(('a'))",
+	"1 + 'a'", "2 * 3", "1 < 2", "1 << 3", "\"a\" + \"b\"",
+	"min(1, 'a')", "max(2, 3)", "len(\"ab\")", "-(1 + 2)",
+	"n + 1", "('a' * n)", "n < 1 + 2", "min(n, 1)", "!(n < 1)",
 }
 
 // TestDifferentialInference runs the inference generator over a fixed seed

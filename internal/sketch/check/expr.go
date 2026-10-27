@@ -54,6 +54,55 @@ func bad(x syntax.Expr) operand { return operand{mode: modeInvalid, typ: invalid
 func (c *checker) record(x syntax.Expr, op operand) {
 	if c.silent == 0 && op.typ != nil && op.mode != modeInvalid {
 		c.pkg.Info.Types[x] = op.typ
+		if isUntyped(op.typ) {
+			if c.untyped == nil {
+				c.untyped = map[syntax.Expr]bool{}
+			}
+			c.untyped[x] = op.mode == modeConst
+		} else if c.untyped != nil {
+			delete(c.untyped, x)
+		}
+	}
+}
+
+// updateExprType gives an untyped expression the type its context
+// converts it to, as go/types updateExprType does (round-7 M1; D1): Info
+// then records the final contextual type, not the untyped one. Parentheses
+// pass the type to their operand; a non-constant unary or binary operation
+// passes it to its operands (a shift to its left operand only, a
+// comparison to neither, since its result type does not depend on them).
+// A constant operation keeps its operands untyped, as in Go: they are
+// never materialized. An untyped target updates without finalizing.
+func (c *checker) updateExprType(x syntax.Expr, t Type) {
+	if c.silent != 0 || x == nil || t == nil || isInvalid(t) {
+		return
+	}
+	isConst, found := c.untyped[x]
+	if !found {
+		return
+	}
+	switch x := x.(type) {
+	case *syntax.ParenExpr:
+		c.updateExprType(x.X, t)
+	case *syntax.UnaryExpr:
+		if !isConst {
+			c.updateExprType(x.X, t)
+		}
+	case *syntax.BinaryExpr:
+		if !isConst {
+			switch x.Op {
+			case syntax.EQL, syntax.NEQ, syntax.LSS, syntax.LEQ, syntax.GTR, syntax.GEQ:
+			case syntax.SHL, syntax.SHR:
+				c.updateExprType(x.X, t)
+			default:
+				c.updateExprType(x.X, t)
+				c.updateExprType(x.Y, t)
+			}
+		}
+	}
+	c.pkg.Info.Types[x] = t
+	if !isUntyped(t) {
+		delete(c.untyped, x)
 	}
 }
 
@@ -1046,6 +1095,7 @@ func (c *checker) convertUntyped(op *operand, t Type, what string) bool {
 			if b, ok := op.typ.(*Basic); ok && !c.representable(op, b) {
 				return false
 			}
+			c.updateExprType(op.expr, op.typ)
 			return true
 		}
 		target = defaultType(op.typ)
@@ -1054,6 +1104,8 @@ func (c *checker) convertUntyped(op *operand, t Type, what string) bool {
 			op.mode = modeInvalid
 			return false
 		}
+		op.typ = target
+		c.updateExprType(op.expr, target)
 		return true
 	}
 	b, ok := under(target).(*Basic)
@@ -1085,6 +1137,7 @@ func (c *checker) convertUntyped(op *operand, t Type, what string) bool {
 		return false
 	}
 	op.typ = t
+	c.updateExprType(op.expr, t)
 	return true
 }
 
@@ -1110,6 +1163,7 @@ func (c *checker) defaultOf(op *operand) Type {
 		if !c.representable(op, t.(*Basic)) {
 			return invalid
 		}
+		c.updateExprType(op.expr, t)
 		return t
 	}
 	if tup, ok := op.typ.(*Tuple); ok {

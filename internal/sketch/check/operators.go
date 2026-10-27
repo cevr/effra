@@ -309,6 +309,10 @@ func (c *checker) matchTypes(x *syntax.BinaryExpr, l, r *operand) bool {
 		if numeric(lk) && numeric(rk) {
 			k := max(lk, rk)
 			l.typ, r.typ = Typ[k], Typ[k]
+			// Both operands now carry the larger kind, in Info too (go/types
+			// matchTypes; round-7 M1).
+			c.updateExprType(x.X, Typ[k])
+			c.updateExprType(x.Y, Typ[k])
 			return true
 		}
 		c.errorf(x, CodeType, "mismatched types %s and %s", l.typ, r.typ)
@@ -324,9 +328,11 @@ func (c *checker) matchTypes(x *syntax.BinaryExpr, l, r *operand) bool {
 	}
 	if isUntyped(l.typ) && isBoolean(l.typ) && isBoolean(r.typ) {
 		l.typ = r.typ
+		c.updateExprType(x.X, r.typ)
 	}
 	if isUntyped(r.typ) && isBoolean(r.typ) && isBoolean(l.typ) {
 		r.typ = l.typ
+		c.updateExprType(x.Y, l.typ)
 	}
 	if !identical(l.typ, r.typ) {
 		if isComparison(x.Op) && (x.Op == syntax.EQL || x.Op == syntax.NEQ) {
@@ -354,6 +360,11 @@ func (c *checker) untypedTo(op *operand, t Type, x *syntax.BinaryExpr) bool {
 	op.expr = x
 	ok := c.convertUntyped(op, t, "this operation")
 	op.expr = saved
+	if ok {
+		// The operand, not the operation, takes the type in Info
+		// (round-7 M1).
+		c.updateExprType(saved, op.typ)
+	}
 	return ok
 }
 
@@ -403,6 +414,9 @@ func (c *checker) shift(x *syntax.BinaryExpr, hint Type) operand {
 			if hint != nil && isInteger(hint) {
 				lt = hint
 			}
+			// The left operand of a non-constant shift takes the
+			// shift's type (go/types updateExprType; round-7 M1).
+			c.updateExprType(x.X, lt)
 		} else if constant.ToInt(l.val).Kind() != constant.Int {
 			c.errorf(x.X, CodeType, "cannot shift %s", l.val.ExactString())
 			return bad(x)

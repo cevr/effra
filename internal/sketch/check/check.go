@@ -71,8 +71,12 @@ type checker struct {
 
 	cur      *fileInfo
 	instance map[string]*Named
-	kinds    declKinds // solved bracket kinds of the package's generic types
-	init     initDeps  // references of each package-level body (initialization order)
+	// untyped holds the expressions Info records with an untyped type, and
+	// whether each was a constant, until a context converts them
+	// (updateExprType; go/types check.untyped).
+	untyped map[syntax.Expr]bool
+	kinds   declKinds // solved bracket kinds of the package's generic types
+	init    initDeps  // references of each package-level body (initialization order)
 	// totalitySteps records the solver steps of each type switch reported
 	// (not silent), in check order: the deterministic cost the tests bound.
 	totalitySteps []int

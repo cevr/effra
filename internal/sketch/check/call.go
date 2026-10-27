@@ -200,6 +200,7 @@ func (c *checker) argument(a syntax.Expr, pt Type, call *syntax.CallExpr) bool {
 		ps, _ := under0(pt).(*Signature)
 		op := c.funcLit(lit, ps, nil)
 		op.expr = lit
+		c.record(lit, op) // Info records the literal's type (D1)
 		if !op.invalid() {
 			c.assign(&op, pt, "argument")
 		}
@@ -1067,6 +1068,11 @@ func (c *checker) builtin(x *syntax.CallExpr, b *Builtin, hint Type) operand {
 		if !ordered(res.typ) {
 			c.errorf(x, CodeType, "%s expects ordered values, not %s", b.Name, res.typ)
 			return bad(x)
+		}
+		// Every argument carries the result's type in Info (go/types
+		// min/max; round-7 M1).
+		for _, a := range x.Args {
+			c.updateExprType(a, res.typ)
 		}
 		return res
 	}

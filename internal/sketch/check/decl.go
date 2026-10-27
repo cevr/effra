@@ -767,6 +767,9 @@ func (c *checker) constLen(x syntax.Expr) (int64, bool) {
 		c.errorf(x, CodeType, "invalid array length %s", lit.Value)
 		return 0, false
 	}
+	// The length is a constant expression: Info records it untyped, as
+	// go/types does (D1).
+	c.record(x, operand{mode: modeConst, typ: Typ[UntypedInt]})
 	return n, true
 }
 
