@@ -1,6 +1,6 @@
 # Grammar
 
-Status: the lexical rules and the productions marked "prototype" are **implemented in prototype** (`prototypes/sketch9/sketch/lex.go`, `parse.go`). Productions marked "designed" are **designed, not yet implemented**. A syntax error is S001 ([diagnostics](diagnostics.md)).
+Status: the parser `internal/sketch/syntax` ([#195](https://github.com/cevr/effra/issues/195), 2026-10-27) **implements every production of this file**, those marked "prototype" and those marked "designed", and the Go productions listed in [Parser](#parser). A syntax error is S001 ([diagnostics](diagnostics.md)). The marks now state what the checker accepts: the prototype checker (`internal/sketch/proto`, from `prototypes/sketch9`) checks the "prototype" forms, and the bridge in front of it refuses every other parsed form with S109 until the checker of [#196](https://github.com/cevr/effra/issues/196). "Designed" means designed and parsed, not yet checked.
 
 The grammar follows [the Go specification](https://go.dev/ref/spec) wherever this file is silent. A Go form that this file does not admit is an error, never a passthrough to the host (AGENTS.md).
 
@@ -8,7 +8,7 @@ The grammar follows [the Go specification](https://go.dev/ref/spec) wherever thi
 
 1. A source file is UTF-8 text. A byte sequence that is not valid UTF-8 is an error in identifier position. Inside a string literal, the literal's decoded bytes are its value (see [Literals](#literals)).
 2. White space is space (U+0020), tab, carriage return and newline. Newlines are significant for semicolon insertion.
-3. A comment starts with `//` and runs to the end of the line. Block comments `/* … */` are designed, as in Go; the prototype does not accept them.
+3. A comment starts with `//` and runs to the end of the line. A block comment `/* … */` does not nest, as in Go; an unterminated block comment is S001. A block comment that spans lines counts as a newline for semicolon insertion.
 4. **Semicolon insertion.** The lexer inserts a semicolon at a newline, and at the end of the file, when the line's last token is:
    - an identifier that is not a keyword, or the keyword `return`;
    - an integer, duration or string literal;
@@ -49,7 +49,8 @@ try       catch     uses      wire      machine
 - `goto` and `fallthrough` are removed: structured control flow and union switches replace them. `const` is removed because package-level `var` is immutable (see [Declarations](#declarations)). *Prior art:* Go's keyword set, minus the three forms Gleam, Rust and Swift also do without.
 - `try`, `catch`, `uses` and `wire` are constructs that the checker must know ([rows.md](rows.md)). `machine` declares a state machine ([runtime.md](runtime.md#machines-and-actors)). Constructs use keyword syntax; a dot form is always library (owner, 2026-10-12). `timeout.After` is therefore a library function, not a construct ([runtime.md](runtime.md#timeouts)).
 - **Contextual words.** `replace` (inside `wire`), `initial` and `step` (inside `machine`) are keywords only in those positions.
-- **Prototype status.** The prototype treats `package`, `import`, `type`, `struct`, `interface`, `func`, `return`, `if`, `else`, `switch`, `case`, `wire`, `uses`, `try` and `catch` as keywords. It reserves `break`, `chan`, `continue`, `default`, `defer`, `for`, `go`, `map`, `range`, `select` and `var`, so a program that uses them is S001. It also reserves `const`, `goto` and `fallthrough`, because its output is Go. It does not reserve `machine` (measured: `machine := "m"` checks).
+- **Parser status.** The parser of #195 treats all 27 words as keywords (`machine := 1` is S001) and refuses the removed words as names ([Parser](#parser) rule 4).
+- **Prototype status (historical).** The prototype `prototypes/sketch9` treats `package`, `import`, `type`, `struct`, `interface`, `func`, `return`, `if`, `else`, `switch`, `case`, `wire`, `uses`, `try` and `catch` as keywords. It reserves `break`, `chan`, `continue`, `default`, `defer`, `for`, `go`, `map`, `range`, `select` and `var`, so a program that uses them is S001. It also reserves `const`, `goto` and `fallthrough`, because its output is Go. It does not reserve `machine` (measured: `machine := "m"` checks).
 
 ## Reserved names
 
@@ -139,7 +140,7 @@ ExprStmt   = Expression .
 ```
 
 1. `x := e` declares a new local. Prototype: `=` reassignment does not exist. Designed: `:=` declares only new names and `=` reassigns, without Go's "at least one new variable" rule.
-2. `if` takes a block after `else`. `else if` is designed; the prototype rejects it (S001).
+2. `if` takes a block or another `if` after `else`. The bridge desugars `else if` to a nested `if` for the prototype checker.
 3. The prototype's type switch has one subject and a binding. Designed: `default`, `case _`, and the multi-subject form `switch a, b := x.(type), y.(type)` with tuple cases `case (A, B):` (README Gap 12).
 4. Designed statements: `var` declarations with definite initialisation, assignment, `for` and `for … range`, `go`, `defer` of any simple statement (including `defer done <- i`), channel send `ch <- v`, `select`, `break` and `continue`.
 5. A bare block, a `with` block and a trailing block (such as the block of `timeout.After`) yield their last expression. `return`, `break` and `continue` are errors inside them (S109 in the prototype, which applies the ban to `with` and `timeout.After` blocks). A `func` literal's `return` returns from the literal, as in Go. `catch` arms are not blocks, so a designed `return` in an arm leaves the enclosing function. *Prior art:* Kotlin inline lambdas allow non-local return; Go has none, and Effra follows Go.
@@ -167,3 +168,28 @@ WireLit     = "wire" WireBody .
 3. **Trailing blocks.** Designed: a trailing block is notation for a function-literal argument, over a restricted domain. A trailing block's body may not contain `return`, `break` or `continue`, because a block reads like a statement block and a local `return` would look like a return from the enclosing function. Within that domain, `f(a) { body }` is exactly `f(a, func() T { return body })`, where `T` and the literal's rows come from `f`'s final parameter type, and the block's last expression is the literal's result. To return early from the callback, write the explicit `func` literal; the two spellings are equivalent only for bodies without `return`. The notation adds no other checking: the call is checked as the desugared call, and the block is non-escaping unless the parameter type says otherwise ([types.md](types.md#function-values)). The prototype's S109 ban on `return` in a `timeout.After` block is its form of this rule. *Prior art:* Kotlin needs labelled returns (`return@forEach`) because a bare `return` in an inline lambda leaves the enclosing function, and Ruby's `return` in a block returns from the enclosing method; Effra avoids both readings by forbidding `return` in a block. `with(…) { … }` is the one construct that also takes a block; its block is part of the construct. Prototype: only `with(…)` and `timeout.After(…)` take a trailing block, and `timeout.After` is recognised by name (README Gap 31). *Prior art:* Swift trailing closures and Kotlin trailing lambdas are the same notation over closure arguments; Goose compile-time function values.
 4. **Wire literals** appear only as the argument of `with` (S108 otherwise).
 5. **`go` expressions.** Designed: `go f(x)` and `go { … }` start a task and yield a `Task` ([runtime.md](runtime.md#tasks)).
+
+## Parser
+
+Status: **implemented** in `internal/sketch/syntax` ([#195](https://github.com/cevr/effra/issues/195)). `syntax.Parse` returns one file's tree or the first S001, located by byte offset, line and byte column. It never returns a partial tree.
+
+1. **Go's productions where this file is silent.** Where this file is silent, or marks a production "prototype" (`Type`, `Statement`, `CompositeLit`, `Call`, `Unary`, imports), the parser implements [Go's production](https://go.dev/ref/spec) for that form, without `goto`, `fallthrough` and `const`. That covers: grouped, named, dot and `go` imports; package-level and local `var`, single and grouped; type-parameter lists with constraints and explicit instantiation (`Pair[K, V]`, [rows-and-constraints.md](../research/rows-and-constraints.md) §3); `for`, `for … range` and `for range n`; init statements in `if` and `switch`; `else if`; expression switches and `default`; labels with `break` and `continue`; assignment and the assignment operators; `++` and `--`; channel types, send and receive; `select`; `defer` of any simple statement; the unary operators, including `&` and `<-`; Go's full binary operator set and its five precedence levels; index and slice expressions; function literals; every composite-literal form (keys are expressions, inner types may be elided); variadic parameters; several results; `*T`; rune literals; block comments. A composite literal and a trailing block are not parsed in an `if`, `for` or `switch` header unless parenthesised, as in Go.
+2. **Effra forms from the prose of `docs/spec/`.** Error rows `error[…]`, including row variables; `uses` on declarations and on function types; `try`; `catch` and `catch e`, whose arms hold statements; single- and multi-subject type switches, with tuple cases and `_`; `machine[S, E] { initial …; step … }` with its contextual entry words; `wire` declarations and literals, with embedding, `replace` and qualified keys; a trailing block after any call; `go f(x)` and `go { … }`; bodiless declarations; `import go "path"` and `go.X` qualified names. An error row is admitted only in a result list.
+3. **Type declarations** keep this file's forms (struct, capability interface, union interface) plus `machine` and a type-parameter list. Every other Go type declaration (`type A = B`, `type A B`, `type A []T`) is S001.
+4. **Removed words.** `goto`, `fallthrough` and `const` are not keywords, so they scan as identifiers, but they are S001 wherever a name, a declaration or a statement starts. Generated Go reserves them, and a program that uses them is a Go program the language does not admit.
+5. **Type assertions.** `x.(type)` is admitted only as the subject of a type switch, and `x.(T)` is S001: a union switch replaces it.
+6. **Nesting limit.** Nesting of expressions, types, statements and blocks deeper than 1000 levels is S001, so a hostile input cannot exhaust the stack. *Prior art:* `go/parser` stops at a nesting depth of 100 000 with "exceeded max nesting depth"; the lower bound here keeps the formatter's recursion small.
+7. **Paren-less trailing block.** A trailing block needs the call's parentheses: `sync.Atomically() { … }`. `sync.Atomically { … }` is S001, because without name resolution it cannot be told apart from the composite literal `sync.Atomically{ f() }`. Go needs parentheses around a composite literal in an `if` header for the same reason.
+
+### Extensions beyond the written productions
+
+The corpus of `docs/spec/README.md` needs these forms. Each one is parsed; the column "checker" states what the bridge does until #196.
+
+| Form | Production | Checker |
+| --- | --- | --- |
+| `try` in operand position: `!try x`, `a + try x` | `Unary = … \| "try" Binary-rest`: `try` extends over the rest of the binary expression to its right, so it still binds looser than every binary operator (Expressions rule 1). *Prior art:* Swift needs parentheses here; Zig's `try` is a unary prefix. | Passed to the checker as `try` |
+| `wire Name uses A, B { … }` | `WireDecl = "wire" identifier [ UsesClause ] WireBody .` | S109; meaning open ([rows-and-constraints.md](../research/rows-and-constraints.md) §7 item 9), [Gaps](README.md#gaps) |
+| `uses (A, B)` in a function type inside a parameter or result list | `UsesClause = "uses" ( QualifiedName \| "(" QualifiedName { "," QualifiedName } ")" ) .` The parenthesised form is admitted only inside a list; there, an unparenthesised `uses` takes one name, because a comma would end the parameter. A declaration's own `uses` clause is unchanged. | S109 for function-typed parameters |
+| Grouped struct field names: `From, To int` | `FieldDecl = identifier { "," identifier } Type .` (Go's `IdentifierList Type`) | Passed to the checker, one field per name |
+| One provider for several capabilities: `Clock, Scheduler = testing.VirtualClock{}` | `WireEntry = QualifiedName { "," QualifiedName } "=" Expression .` (Go's `var a, b = …`). *Prior art:* Effect's `Layer.mergeAll` builds one layer for several services. | S109; meaning open, [Gaps](README.md#gaps) |
+| A type parameter without a constraint: `type Attempt[T] struct { … }` | `TypeParam = identifier { "," identifier } [ Constraint ] .` The constraint defaults to `any` ([rows-and-constraints.md](../research/rows-and-constraints.md) §3; owner rule "generics: Go simplicity, implicit kinds"). **Difference from Go**, which requires `[T any]`. | S109 (type parameters) |

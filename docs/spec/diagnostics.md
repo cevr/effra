@@ -1,6 +1,6 @@
 # Diagnostics
 
-Status: the codes below are **implemented in prototype** (`prototypes/sketch9/sketch/parse.go` and `check.go`). Each fixture's first line is `// want CODE`; `TestProbes` and `accept.sh` run them. The main compiler maps each rule to a code in its EF registry ([#79](https://github.com/cevr/effra/issues/79); README Gap 18).
+Status: S001 is **implemented** by the parser `internal/sketch/syntax` ([#195](https://github.com/cevr/effra/issues/195)); the other codes are **implemented in prototype** (the prototype checker, `internal/sketch/proto/check.go`, copied from `prototypes/sketch9/sketch/check.go`), and the bridge `internal/sketch/proto/convert.go` adds the S109 refusals of parsed forms the checker lacks. Each fixture's first line is `// want CODE`; `TestProbes` and `accept.sh` run them. The main compiler maps each rule to a code in its EF registry ([#79](https://github.com/cevr/effra/issues/79); README Gap 18).
 
 A diagnostic has a position, a code and a message: `file:line:col: CODE message`. A file with any diagnostic does not build. Fixture paths are relative to [`prototypes/sketch9/testdata`](../../prototypes/sketch9/testdata).
 
@@ -30,10 +30,17 @@ Each rule names a fixture where one exists.
 
 ### S001: syntax
 
+The parser `internal/sketch/syntax` ([#195](https://github.com/cevr/effra/issues/195)) reports S001 with a specific message ("expected X, found Y"), a byte offset and length, a line and a byte column. It reports the first error only. The 2026 formatter refuses a file with S001 on every surface, naming the code and position.
+
 - An identifier is tested on decoded code points; a code point that cannot start or continue it, or invalid UTF-8, is S001 (`probes/nonletter-name.sketch`).
 - A composite literal mixes keyed and positional elements (`probes/mixed-fields.sketch`).
-- A Go keyword outside the implemented subset, such as `for` (`sketch/sketch_test.go`, "a parse error").
-- An unterminated string, a newline inside an interpreted string, an unknown number suffix, an unexpected character, `else if`, or a declaration other than `type`, `func` and `wire`.
+- A removed Go keyword (`goto`, `fallthrough`, `const`) or a word that is not in the language (`enum`) where a name, declaration or statement starts; a keyword used as a name (`machine := 1`).
+- A Go form the grammar does not admit: a type alias or another defined type (`type A = B`, `type A B`, `type A []T`), a type assertion `x.(T)`, `x.(type)` outside a type switch subject, a local type declaration, an error row outside a result list, an embedded struct field, a `~` constraint, a method with type parameters, `default` in a `catch`, a trailing block without the call's parentheses (`sync.Atomically { … }`).
+- A malformed construct: a multi-subject type switch without bindings, a tuple case whose arity differs from the subjects, a tuple case in a single-subject switch, an unknown or duplicate machine entry, a machine without `step`, a union interface with a method, `uses (A, B)` on a declaration, a variadic parameter that is not last.
+- An unterminated string or block comment, a newline inside an interpreted string, an unknown number suffix (`5kg`), an unexpected character, an import after a declaration, a union with a trailing `|`.
+- Nesting deeper than 1000 levels ([grammar](grammar.md#parser) rule 6).
+
+The fixtures are `sketchtest.MalformedTable` and the `TestRefusedForms` cases in `internal/sketch/syntax`.
 
 ### S101: undeclared error
 
@@ -114,6 +121,7 @@ Each rule names a fixture where one exists.
 | A source name is reserved by the prototype's Go output: Go's predeclared names, `rt`, `time`, `fmt`, `init`, `Error`, `timeout`, `duration`, names with `__` or ending in `_` | `probes/predeclared-error.sketch`, `predeclared-local`, `predeclared-panic`, `function-reserved`, `init-name`, `timeout-capability`, `duration-type-name`, `wire-predeclared-name`, `capability-parameter-name` |
 | A field or method name collides with generated names (`Error`, marker methods) | `probes/marker-field.sketch`, `marker-method`, `error-method` |
 | A wire entry that is not a provider literal; an unsupported expression or call | the checker's messages |
+| A parsed form the prototype checker does not implement, refused by the bridge (`internal/sketch/proto/convert.go`) before the checker runs, with the message "X is outside the implemented subset": `var` declarations, type-parameter lists and instantiation, `machine` types, bodiless declarations, non-plain imports, unnamed or variadic parameters, several results, pointers, `=` and assignment operators, multi-value `:=`, `for`, `range`, `defer`, `select`, expression switches, labels, `break`, `continue`, send, `++`, `--`, bare blocks, `if` and `switch` init statements, multi-subject, unbound or `default` type switches, `case _`, rune literals, unary operators, index and slice expressions, function literals, `go`, a trailing block on a call other than `with` and `timeout.After`, elided or qualified composite-literal types, `catch e`, a `catch` arm that is not one expression, `wire X uses …`, an embedded wire, `replace`, a wire entry with several or qualified keys. A refused program never reaches the checker, so no part of it is dropped | `internal/sketch/proto/bridge_test.go`, `TestBridgeRefusesOutsideTheSubset` |
 
 The S109 rules are prototype limits, not language rules (README Gaps 4, 6, 7, 10, 16, 17, 26, 27, 29, 31). The main compiler replaces each with the designed rule or with mangled output.
 

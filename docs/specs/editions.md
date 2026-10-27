@@ -9,7 +9,7 @@ Two Effra languages live in one repository until [#205](https://github.com/cevr/
 | Id | Language | Front-end |
 | --- | --- | --- |
 | `legacy` | The earlier `.ef` language | `internal/compiler` |
-| `2026` | The Go-shaped language of `docs/spec/` v0 | `internal/sketchfront`, a thin adapter over the frozen prototype `prototypes/sketch9` until [#195](https://github.com/cevr/effra/issues/195) moves the parser into the main module |
+| `2026` | The Go-shaped language of `docs/spec/` v0 | `internal/sketchfront`: the parser `internal/sketch/syntax` and the formatter `internal/sketch/format` ([#195](https://github.com/cevr/effra/issues/195)), with the prototype checker and emitter behind the bridge `internal/sketch/proto` until [#196](https://github.com/cevr/effra/issues/196) |
 
 Ids are exact and case-sensitive: `"Legacy"`, `" 2026"` and `"sketch"` are not ids. The id `2026` names the language, not a compiler version, as Rust's edition years do, so it stays meaningful after #205 removes the other front-end.
 
@@ -70,12 +70,13 @@ A legacy file reaches `internal/compiler` exactly as before this change, and its
 
 | Surface | 2026 edition supports | EF145 on a 2026 file |
 | --- | --- | --- |
-| CLI | `edition`, `check`, `diagnostics`, `build` (no `--receipt`), `run` | `fmt FILE`, `lint FILE`, `lint test`, `lint receipt`, `test`, `graph`, `query`, `type`, `inspect`, `explain`, `build --receipt`, `diagnostics` with rule packs |
-| MCP | `project.edition`, `project.check`, `project.diagnostics` | `code.format` with `file`, `code.inspect`, `code.explain`, `code.type`, `code.typeAt`, `project.graph`, `project.lint`, `project.tests`, `project.diagnostics` with rule packs |
-| LSP | `effra/edition`, diagnostics on `didOpen` and `didChange` | `textDocument/formatting` returns a JSON-RPC error whose `data` is the EF145 diagnostic; `hover` and `definition` return a `null` result |
+| CLI | `edition`, `check`, `diagnostics`, `build` (no `--receipt`), `run`, `fmt FILE` | `lint FILE`, `lint test`, `lint receipt`, `test`, `graph`, `query`, `type`, `inspect`, `explain`, `build --receipt`, `diagnostics` with rule packs |
+| MCP | `project.edition`, `project.check`, `project.diagnostics`, `code.format` with `file` | `code.inspect`, `code.explain`, `code.type`, `code.typeAt`, `project.graph`, `project.lint`, `project.tests`, `project.diagnostics` with rule packs |
+| LSP | `effra/edition`, diagnostics on `didOpen` and `didChange`, `textDocument/formatting` | `hover` and `definition` return a `null` result |
 
 - **The tables are the routes.** The CLI admits a file command only from its `fileCommands` table, and MCP refuses a file tool missing from its `fileTools` table for every edition but `legacy`. A command or tool added later is therefore routed by edition too. The process tests enumerate the commands from that table and the tools from `tools/list`.
-- **2026 diagnostics.** The prototype's `S` codes, with UTF-8 byte spans and UTF-16 LSP ranges, through the shared diagnostic report. The prototype's column counts bytes; the adapter maps it to a byte offset, and the report projects it to UTF-16. Lint is unavailable (`lintAvailable: false`, with the EF145 reason).
+- **2026 formatting.** `effra-2026/formatter-1` ([formatting spec](formatting.md#2026-edition)), with the legacy limits, `EFMT_*` codes, write and stale-source rules. A request may mix editions; each file is formatted by its own edition's formatter, and its CLI file report names that formatter in `formatterVersion`. The LSP refuses formatting with EF145 when the manifest changed the document's edition since its last analysis, until the next change.
+- **2026 diagnostics.** The parser's `S001` and the prototype's other `S` codes, with UTF-8 byte spans and UTF-16 LSP ranges, through the shared diagnostic report. The prototype's column counts bytes; the adapter maps it to a byte offset, and the report projects it to UTF-16. Lint is unavailable (`lintAvailable: false`, with the EF145 reason).
 - **2026 check.** `checked`, `revision`, `target`, `edition` and the bounded diagnostics. There are no symbol, type or application tables before [#196](https://github.com/cevr/effra/issues/196).
 - **2026 build.** The prototype's direct-Go emitter writes a temporary Go module, `go build` links it with the flags of every native build, and the module is removed.
 - **EF144.** Every file command and tool reports EF144 alone, with no front-end diagnostic. `check` and `diagnostics` (and `project.check`, `project.diagnostics`, LSP publications) carry it in their usual report, without a location; LSP projects it to the document start. Every other operation reports `EF144: message` as its error. `build` writes nothing.
@@ -94,7 +95,7 @@ The earlier front-end retires in four phases, each keyed to a ticket rather than
 | 3 | [#205](https://github.com/cevr/effra/issues/205) | EF144 with the message "retired in #205" and a migration pointer | `2026` | None |
 
 - **Phase 0 (#194, this change).** Both editions build in one workspace. New Go-shaped code opts in with `{"edition": "2026"}`.
-- **Phase 1 (#195, #196, #197).** The 2026 edition gains the formatter, the checker and the linearity pass, and its EF145 rows shrink. #195 moves the parser into the main module, removes the `effra.local/sketch9` requirement from `go.mod` and repoints `internal/sketchfront`; no surface changes.
+- **Phase 1 (#195, #196, #197).** The 2026 edition gains the formatter, the checker and the linearity pass, and its EF145 rows shrink. #195 moves the parser into the main module, removes the `effra.local/sketch9` requirement from `go.mod`, repoints `internal/sketchfront` and adds 2026 formatting on the three surfaces.
 - **Phase 2 (#204).** Every example gets a `2026` manifest, and the gate runs them. The migration is by hand or with a tool, as [the migrate decision](../research/ef-migrate-decision.md) records. Legacy files get a deprecation warning.
 - **Phase 3 (#205).** The earlier front-end and its 172 compiler fixtures are removed. A `legacy` manifest becomes EF144, and a file without a manifest is `2026`. The registry history keeps the retired codes (#79).
 
