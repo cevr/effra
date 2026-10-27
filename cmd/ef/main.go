@@ -23,7 +23,6 @@ import (
 	"effra.local/prototype/internal/mcp"
 	"effra.local/prototype/internal/producer"
 	"effra.local/prototype/internal/receipt"
-	sourcefile "effra.local/prototype/internal/source"
 )
 
 func main() {
@@ -183,15 +182,27 @@ func locateSource(path string) (receipt.Location, error) {
 	return receipt.LocateSource(path)
 }
 
-// loadSource reads and checks the located source. Diagnostics name the
-// admitted path and module imports resolve beside it; the bytes come from
-// the file it reaches.
+// loadSource admits the located source and compiles it with the legacy
+// front-end. Commands admit once and route by edition first (command); this
+// path serves callers that load a known legacy source.
 func loadSource(source receipt.Location, target string) (*compiler.Result, compiler.SourceSnapshot, error) {
+	admitted, err := admitSource(source.Path())
+	if err != nil {
+		return nil, compiler.SourceSnapshot{}, err
+	}
+	defer admitted.Close()
+	return compileAdmitted(source, admitted, target)
+}
+
+// compileAdmitted reads the admitted open file and checks it. Diagnostics
+// name the admitted path and module imports resolve beside it; the bytes
+// come from the file the edition is bound to.
+func compileAdmitted(source receipt.Location, admitted *edition.Source, target string) (*compiler.Result, compiler.SourceSnapshot, error) {
 	uri, err := compiler.FileURI(source.Admitted())
 	if err != nil {
 		return nil, compiler.SourceSnapshot{}, err
 	}
-	text, err := sourcefile.ReadRegularFile(source.Path(), 0)
+	text, err := admitted.Read(0)
 	if err != nil {
 		return nil, compiler.SourceSnapshot{}, err
 	}
@@ -467,16 +478,18 @@ func command(args []string) error {
 	if err != nil {
 		return err
 	}
-	// The edition is resolved from the file loadSource reads (source.Path),
-	// before any front-end reads it. Only the legacy edition reaches it.
-	resolution, err := resolveSource(source.Path())
+	// The source is opened once and bound to its edition before any
+	// front-end reads it; every byte below comes from that open file. Only
+	// the legacy edition reaches the legacy front-end.
+	admitted, err := admitSource(source.Path())
 	if err != nil {
 		return err
 	}
-	if resolution.Diagnostic != nil || resolution.Edition != edition.Legacy {
-		return foreignCommand(args[0], source, opts, session, resolution)
+	defer admitted.Close()
+	if resolution := admitted.Resolution; resolution.Diagnostic != nil || resolution.Edition != edition.Legacy {
+		return foreignCommand(args[0], source, admitted, opts, session)
 	}
-	r, snapshot, err := loadSource(source, opts.target)
+	r, snapshot, err := compileAdmitted(source, admitted, opts.target)
 	if err != nil {
 		return err
 	}

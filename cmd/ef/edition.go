@@ -12,7 +12,6 @@ import (
 	"effra.local/prototype/internal/producer"
 	"effra.local/prototype/internal/receipt"
 	"effra.local/prototype/internal/sketchfront"
-	sourcefile "effra.local/prototype/internal/source"
 )
 
 // fileCommand is a CLI command that takes a source file. ticket is empty
@@ -53,12 +52,29 @@ func lookupFileCommand(name string) (fileCommand, bool) {
 	return fileCommands[index], true
 }
 
-// resolveSource resolves the edition of the file a command reads: path is
-// the exact path the command opens, so the edition and the bytes come from
-// one file.
-func resolveSource(path string) (edition.Resolution, error) {
-	file, err := edition.ResolveFile(path)
-	return file.Resolution, err
+// admitSource opens the source a command reads, once, and binds the open
+// file to its edition (edition.ResolveFile). path is the exact path the
+// command would open. The command reads, formats and digests the bytes from
+// the returned Source and closes it, so the edition always governs the bytes
+// it reads.
+func admitSource(path string) (*edition.Source, error) {
+	file, err := edition.OpenSource(path)
+	if err != nil {
+		return nil, err
+	}
+	return edition.ResolveFile(file, path)
+}
+
+// sourceEdition admits the source at path and returns its edition. lint
+// test and lint receipt use it to refuse a non-legacy source before any
+// pack runs; internal/lintpacks then reads the path itself.
+func sourceEdition(path string) (edition.Resolution, error) {
+	admitted, err := admitSource(path)
+	if err != nil {
+		return edition.Resolution{}, err
+	}
+	admitted.Close()
+	return admitted.Resolution, nil
 }
 
 // editionRefusal is the refusal of running command on a source of the
@@ -104,12 +120,14 @@ func editionCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	// The file is admitted, never read: the edition does not depend on its
-	// size or content.
-	resolution, err := resolveSource(source.Path())
+	// The file is opened and bound, never read: the edition does not depend
+	// on its size or content.
+	admitted, err := admitSource(source.Path())
 	if err != nil {
 		return err
 	}
+	admitted.Close()
+	resolution := admitted.Resolution
 	if _, err := os.Stdout.Write(append(resolution.JSON(), '\n')); err != nil {
 		return err
 	}
@@ -126,7 +144,8 @@ var lintUnavailable = edition.Unavailable("lint", edition.E2026, edition.TicketC
 // must not read: an edition refusal, or a command of the 2026 edition.
 // check and diagnostics report a refusal in their own output; every other
 // command reports it on stderr and exits 1.
-func foreignCommand(command string, source receipt.Location, opts options, session *lintpacks.Session, resolution edition.Resolution) error {
+func foreignCommand(command string, source receipt.Location, admitted *edition.Source, opts options, session *lintpacks.Session) error {
+	resolution := admitted.Resolution
 	refusal := editionRefusal(command, resolution)
 	if refusal == nil && command == "build" && opts.receipt != "" {
 		unavailable := edition.Unavailable("ef build --receipt", resolution.Edition, edition.TicketChecker)
@@ -143,7 +162,9 @@ func foreignCommand(command string, source receipt.Location, opts options, sessi
 	if err != nil {
 		return err
 	}
-	text, err := sourcefile.ReadRegularFile(source.Path(), 0)
+	// The bytes come from the admitted open file, the file the edition is
+	// bound to.
+	text, err := admitted.Read(0)
 	if err != nil {
 		return err
 	}

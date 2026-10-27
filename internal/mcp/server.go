@@ -696,9 +696,10 @@ func formatCode(root string, args arguments) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		defer admitted.Close()
 		// Only a legacy file reaches the legacy formatter. A source buffer has
 		// no directory and is legacy by default.
-		if refusal := editionRefusal("code.format", admitted.file.Resolution); refusal != nil {
+		if refusal := editionRefusal("code.format", admitted.source.Resolution); refusal != nil {
 			return nil, fmt.Errorf("%s", refusal.String())
 		}
 		source, fileURI, err := readFormatSource(admitted)
@@ -743,8 +744,8 @@ func formatCode(root string, args arguments) (any, error) {
 	return formatted, nil
 }
 
-func readFormatSource(admitted workspaceFile) ([]byte, string, error) {
-	source, err := sourcefile.ReadRegularFile(admitted.file.Path, maxFormatSourceBytes)
+func readFormatSource(admitted *workspaceFile) ([]byte, string, error) {
+	source, err := admitted.source.Read(maxFormatSourceBytes)
 	if errors.Is(err, sourcefile.ErrTooLarge) {
 		return nil, "", fmt.Errorf("format source exceeds %d MiB limit", maxFormatSourceBytes/(1024*1024))
 	}
@@ -758,51 +759,69 @@ func readFormatSource(admitted workspaceFile) ([]byte, string, error) {
 	return source, uri, nil
 }
 
-// workspaceFile is a source file admitted inside the workspace, not read.
+// workspaceFile is a source file admitted inside the workspace: open, bound
+// to its edition, and not read yet. The caller closes it.
 type workspaceFile struct {
 	// requested is the workspace path as named, cleaned under the canonical
 	// root; URIs name it.
 	requested string
-	// file is the path the file system opens for requested and its edition.
-	// Every read of the source uses file.Path.
-	file edition.File
+	// source is the open file and its edition. Every read of the source
+	// reads this open file, never a path.
+	source *edition.Source
 }
 
-// admitWorkspaceFile admits a workspace-relative .ef path without reading
-// it: the path must stay inside the workspace once its links are resolved,
-// and must name a regular file. Byte limits belong to the tools that read
-// the source, so project.edition admits a file of any size.
-func admitWorkspaceFile(root, relative string) (workspaceFile, error) {
+func (w *workspaceFile) Close() error { return w.source.Close() }
+
+// admitWorkspaceFile opens a workspace-relative .ef path through an os.Root
+// on the workspace, so a path or a link that leaves the workspace cannot be
+// opened at all, and binds the open file to its edition with the shared
+// edition.ResolveFile. It reads no source bytes: byte limits belong to the
+// tools that read the source, so project.edition admits a file of any size.
+func admitWorkspaceFile(root, relative string) (*workspaceFile, error) {
 	canonicalRoot, err := filepath.EvalSymlinks(root)
 	if err == nil {
 		canonicalRoot, err = filepath.Abs(canonicalRoot)
 	}
 	if err != nil {
-		return workspaceFile{}, err
+		return nil, err
 	}
 	if filepath.IsAbs(relative) || relative == "" || filepath.Ext(relative) != ".ef" {
-		return workspaceFile{}, fmt.Errorf("file must be a workspace-relative .ef path")
+		return nil, fmt.Errorf("file must be a workspace-relative .ef path")
 	}
+	// MCP names a file lexically, as the go command treats file arguments:
+	// `link/..` is cleaned before any link is followed.
 	requested := filepath.Clean(filepath.Join(canonicalRoot, relative))
-	resolved, err := filepath.EvalSymlinks(requested)
+	physical, err := filepath.EvalSymlinks(requested)
 	if err != nil {
-		return workspaceFile{}, err
+		return nil, err
 	}
-	rel, err := filepath.Rel(canonicalRoot, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return workspaceFile{}, fmt.Errorf("file escapes workspace")
+	inside, err := filepath.Rel(canonicalRoot, physical)
+	if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("file escapes workspace")
 	}
-	// Containment is checked first, so nothing outside the workspace is
-	// inspected. The file system path is resolved once more by the shared
-	// admission, which every surface uses, and checked again.
-	file, err := edition.ResolveFile(resolved)
+	// The file is opened through the root at its physical path. A component
+	// retargeted since that path was resolved cannot lead the open outside
+	// the workspace: the root refuses it.
+	workspace, err := os.OpenRoot(canonicalRoot)
 	if err != nil {
-		return workspaceFile{}, err
+		return nil, err
 	}
-	if file.Path != resolved {
-		return workspaceFile{}, fmt.Errorf("file changed during admission")
+	defer workspace.Close()
+	file, err := workspace.OpenFile(inside, edition.SourceOpenFlags, 0)
+	if err != nil {
+		return nil, err
 	}
-	return workspaceFile{requested: requested, file: file}, nil
+	source, err := edition.ResolveFile(file, requested)
+	if err != nil {
+		return nil, err
+	}
+	// The open file came through the root. Its bound path names the same
+	// file, and the manifest lookup starts there, so it must be inside too.
+	if rel, err := filepath.Rel(canonicalRoot, source.Path); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		source.Close()
+		return nil, fmt.Errorf("file escapes workspace")
+	}
+	return &workspaceFile{requested: requested, source: source}, nil
 }
 
 func call(root string, packs *lintpacks.Session, name string, args arguments) (any, error) {
@@ -822,7 +841,8 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 		if err != nil {
 			return nil, err
 		}
-		return json.RawMessage(admitted.file.Resolution.JSON()), nil
+		admitted.Close()
+		return json.RawMessage(admitted.source.Resolution.JSON()), nil
 	}
 	if name == "project.describe" {
 		return map[string]any{
@@ -860,7 +880,7 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 		}
 		snapshot = compiler.SourceSnapshot{URI: uri, Origin: "disk"}
 	}
-	source, file, err := readSource(root, args.File)
+	source, resolution, err := readSource(root, args.File)
 	if err != nil {
 		return nil, err
 	}
@@ -871,7 +891,7 @@ func call(root string, packs *lintpacks.Session, name string, args arguments) (a
 	// The edition comes from the file the source was read from, before any
 	// front-end analyses it. Only the legacy edition reaches CompileAt.
 	dir := filepath.Dir(filepath.Join(root, args.File))
-	if resolution := file.Resolution; resolution.Diagnostic != nil || resolution.Edition != edition.Legacy {
+	if resolution.Diagnostic != nil || resolution.Edition != edition.Legacy {
 		snapshot.Text = string(source)
 		return foreignCall(packs, name, args, target, snapshot, resolution)
 	}
@@ -1111,21 +1131,22 @@ func foreignCall(packs *lintpacks.Session, name string, args arguments, target s
 }
 
 // readSource admits a workspace file and reads it for analysis, within the
-// compiler's 2 MiB source bound. The bytes come from the admitted file's
-// Path, the file its edition was resolved from.
-func readSource(root, relative string) ([]byte, edition.File, error) {
+// compiler's 2 MiB source bound. The bytes come from the admitted open
+// file, the file its edition is bound to.
+func readSource(root, relative string) ([]byte, edition.Resolution, error) {
 	admitted, err := admitWorkspaceFile(root, relative)
 	if err != nil {
-		return nil, edition.File{}, err
+		return nil, edition.Resolution{}, err
 	}
-	source, err := sourcefile.ReadRegularFile(admitted.file.Path, 2*1024*1024)
+	defer admitted.Close()
+	source, err := admitted.source.Read(2 * 1024 * 1024)
 	if errors.Is(err, sourcefile.ErrTooLarge) {
-		return nil, edition.File{}, fmt.Errorf("source exceeds prototype 2 MiB limit")
+		return nil, edition.Resolution{}, fmt.Errorf("source exceeds prototype 2 MiB limit")
 	}
 	if err != nil {
-		return nil, edition.File{}, err
+		return nil, edition.Resolution{}, err
 	}
-	return source, admitted.file, nil
+	return source, admitted.source.Resolution, nil
 }
 
 func decodeArguments(name string, raw json.RawMessage) (arguments, error) {

@@ -60,7 +60,7 @@ func lintReceiptCommand(args []string) error {
 	}
 	// The source is admitted like every other CLI source before any run, at
 	// the path Session.Receipt reads: the source made absolute.
-	resolution, err := resolveSource(absolute)
+	resolution, err := sourceEdition(absolute)
 	if err != nil {
 		return err
 	}

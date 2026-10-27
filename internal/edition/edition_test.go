@@ -260,7 +260,7 @@ type generatedDir struct {
 func TestResolveProperty(t *testing.T) {
 	base := workspace(t)
 	const trees = 500
-	checked := 0
+	checked, documentsChecked := 0, 0
 	for seed := uint64(1); seed <= trees; seed++ {
 		random := rand.New(rand.NewPCG(seed, 0x194))
 		root := filepath.Join(base, fmt.Sprint(seed))
@@ -314,8 +314,40 @@ func TestResolveProperty(t *testing.T) {
 			}
 			checked++
 		}
+		// Unsaved documents spelled through links: a directory link with a
+		// missing suffix, and a dangling final link with a relative or an
+		// absolute target. Each resolves where its link leads.
+		for index := range 2 {
+			target := dirs[random.IntN(len(dirs))].rel
+			link := filepath.Join(root, fmt.Sprintf("L%d", index))
+			if err := os.Symlink(filepath.Join(root, target), link); err != nil {
+				t.Fatal(err)
+			}
+			spelled := link
+			for missing := range random.IntN(3) {
+				spelled = filepath.Join(spelled, fmt.Sprintf("m%d", missing))
+			}
+			documents := []string{filepath.Join(spelled, "unsaved.ef")}
+			dangling := filepath.Join(root, fmt.Sprintf("D%d.ef", index))
+			linkTarget := filepath.Join(root, target, "absent.ef")
+			if random.IntN(2) == 0 {
+				linkTarget = filepath.Join(target, "absent.ef")
+			}
+			if err := os.Symlink(linkTarget, dangling); err != nil {
+				t.Fatal(err)
+			}
+			documents = append(documents, dangling)
+			for _, document := range documents {
+				got := ResolveDocument(document)
+				want := oracle(root, target, byRel)
+				if got.Edition != want.Edition || got.Source != want.Source || got.Manifest != want.Manifest || (got.Diagnostic == nil) != (want.Diagnostic == nil) || got.Diagnostic != nil && got.Diagnostic.Code != CodeUnsupported {
+					t.Fatalf("seed %d: ResolveDocument(%s) = %s, oracle for %s %s", seed, document, got.JSON(), target, want.JSON())
+				}
+				documentsChecked++
+			}
+		}
 	}
-	t.Logf("%d trees, %d directories", trees, checked)
+	t.Logf("%d trees, %d directories, %d linked documents", trees, checked, documentsChecked)
 }
 
 // oracle scans rel's ancestors up to the tree root, nearest first, as a
@@ -370,62 +402,6 @@ func boolInt(b bool) int {
 
 // TestEditionDiagnosticsAreDocumented keeps the declared codes and the
 // edition table of docs/tooling.md in step, both ways.
-// ResolveFile walks a spelling as the file system does and resolves the
-// edition of the file that walk reaches; it admits only regular files and
-// never reads them.
-func TestResolveFileUsesTheFileTheSpellingReaches(t *testing.T) {
-	root := workspace(t)
-	write(t, filepath.Join(root, "go.mod"), "module m\n")
-	write(t, filepath.Join(root, "main.ef"), "")
-	write(t, filepath.Join(root, "new", ManifestName), `{"edition":"2026"}`)
-	target := filepath.Join(root, "new", "main.ef")
-	write(t, target, "")
-	mkdir(t, filepath.Join(root, "new", "deeper"))
-	if err := os.Symlink(filepath.Join(root, "new", "deeper"), filepath.Join(root, "alias")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, filepath.Join(root, "link.ef")); err != nil {
-		t.Fatal(err)
-	}
-	// `alias/..` applies to the link's target, so the spelling reaches
-	// new/main.ef; a lexical clean would name root/main.ef instead.
-	for _, spelling := range []string{root + "/alias/../main.ef", filepath.Join(root, "link.ef"), target} {
-		file, err := ResolveFile(spelling)
-		if err != nil {
-			t.Fatalf("%s: %v", spelling, err)
-		}
-		if file.Path != target || file.Resolution.Edition != E2026 || file.Resolution.Manifest != filepath.Join(root, "new", ManifestName) {
-			t.Fatalf("%s resolved to %s with %+v, want %s under 2026", spelling, file.Path, file.Resolution, target)
-		}
-	}
-	if file, err := ResolveFile(filepath.Join(root, "main.ef")); err != nil || file.Resolution.Edition != Legacy || file.Resolution.Source != SourceDefault {
-		t.Fatalf("root/main.ef: %+v, %v", file, err)
-	}
-	// Admission refuses what a source read would refuse, without reading.
-	if _, err := ResolveFile(filepath.Join(root, "missing.ef")); err == nil {
-		t.Fatal("a missing file was admitted")
-	}
-	if _, err := ResolveFile(filepath.Join(root, "new")); err == nil {
-		t.Fatal("a directory was admitted")
-	}
-	if err := makeFIFO(filepath.Join(root, "pipe.ef")); err == nil {
-		done := make(chan error, 1)
-		go func() { _, err := ResolveFile(filepath.Join(root, "pipe.ef")); done <- err }()
-		select {
-		case err := <-done:
-			if err == nil {
-				t.Fatal("a FIFO was admitted")
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("ResolveFile blocked on a FIFO: it opened the file")
-		}
-	}
-	// An editor document with no file yet resolves in its directory.
-	if got := ResolveDocument(filepath.Join(root, "alias", "unsaved.ef")); got.Edition != E2026 {
-		t.Fatalf("an unsaved document under the linked directory resolved %+v", got)
-	}
-}
-
 func TestEditionDiagnosticsAreDocumented(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "docs", "tooling.md"))
 	if err != nil {

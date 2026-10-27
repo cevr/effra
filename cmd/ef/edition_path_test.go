@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,11 +74,11 @@ func TestEditionFollowsTheFileALinkReaches(t *testing.T) {
 	if err := os.Symlink(filepath.Join(root, "new", "main.ef"), link); err != nil {
 		t.Fatal(err)
 	}
-	file, err := edition.ResolveFile(link)
+	resolution, err := sourceEdition(link)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := string(file.Resolution.JSON())
+	want := string(resolution.JSON())
 	if !strings.Contains(want, `"edition":"2026"`) {
 		t.Fatalf("the shared admission resolved %s through the link", want)
 	}
@@ -128,5 +129,54 @@ func TestEditionParityForALargeFile(t *testing.T) {
 	}
 	if after, err := os.ReadFile(file); err != nil || !bytes.Equal(after, []byte(large)) {
 		t.Fatal("the source changed")
+	}
+}
+
+// An unsaved LSP document spelled through a directory link, with or without
+// missing directories below it, or through a dangling file link, resolves
+// where the file would be created. A legacy-shaped buffer there is 2026
+// source: it publishes S001 and formatting is refused with EF145, as for
+// the physical spelling.
+func TestUnsavedDocumentsResolveThroughLinks(t *testing.T) {
+	binary := buildTestCLI(t)
+	root := editionWorkspace(t)
+	editionWrite(t, filepath.Join(root, "new", "effra.json"), `{"edition":"2026"}`)
+	if err := os.MkdirAll(filepath.Join(root, "new", "deeper"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "new", "deeper"), filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "new", "unsaved.ef"), filepath.Join(root, "link.ef")); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ name, logical, physical string }{
+		{"existing parent", filepath.Join(root, "alias", "unsaved.ef"), filepath.Join(root, "new", "deeper", "unsaved.ef")},
+		{"missing parent", filepath.Join(root, "alias", "missing", "unsaved.ef"), filepath.Join(root, "new", "deeper", "missing", "unsaved.ef")},
+		{"dangling link", filepath.Join(root, "link.ef"), filepath.Join(root, "new", "unsaved.ef")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			uri := editionURI(c.logical)
+			lsp := lspSession(t, binary, root, []map[string]any{
+				lspSmokeCall("effra/edition", map[string]any{"textDocument": map[string]any{"uri": uri}}, "logical"),
+				lspSmokeCall("effra/edition", map[string]any{"textDocument": map[string]any{"uri": editionURI(c.physical)}}, "physical"),
+				lspOpen(uri, legacyCleanSource),
+				lspSmokeCall("textDocument/formatting", map[string]any{"textDocument": map[string]any{"uri": uri}, "options": map[string]any{"tabSize": 4, "insertSpaces": true}}, "format"),
+			})
+			got, want := string(lspReply(t, lsp, "logical")["result"]), string(lspReply(t, lsp, "physical")["result"])
+			if got != want || !strings.Contains(got, `"edition":"2026"`) {
+				t.Fatalf("logical %s, physical %s; want both 2026", got, want)
+			}
+			if published := lspPublished(t, lsp, uri); len(published) == 0 || published[0]["code"] != "S001" {
+				t.Fatalf("the legacy-shaped 2026 buffer published %v, want S001", published)
+			}
+			var refusal struct {
+				Data edition.Diagnostic `json:"data"`
+			}
+			format := lspReply(t, lsp, "format")
+			if err := json.Unmarshal(format["error"], &refusal); err != nil || refusal.Data.Code != edition.CodeUnavailable {
+				t.Fatalf("formatting answered %s %s, want EF145", format["result"], format["error"])
+			}
+		})
 	}
 }

@@ -116,6 +116,7 @@ Every surface resolves a file's [edition](../GLOSSARY.md) before any front-end r
 | --- | --- | --- |
 | EF144 | The edition manifest that governs the file is unsupported or malformed: an unknown id, invalid JSON, an unknown or repeated field, trailing data, a missing `edition`, a non-object, a non-regular file or a file over 64 KiB. | the manifest path, the value or defect found, and the supported ids `"legacy"` and `"2026"` |
 | EF145 | The operation is not available for the file's edition yet. | the operation, the edition, and the ticket that adds it: [#195](https://github.com/cevr/effra/issues/195) formatting; [#196](https://github.com/cevr/effra/issues/196) types, inspection, explanation, queries, graphs and lint; [#204](https://github.com/cevr/effra/issues/204) tests |
+| EF146 | The source cannot be bound to an edition. Every surface opens a source once, and the edition comes from the physical path of that open file. EF146 means the path no longer named the opened file while it was admitted (it was retargeted or replaced after the open, or while the manifest was read), or, on the LSP, the document path exists but is not a regular file that can be opened. Nothing is read from a refused source. | the path as given and the physical path that no longer names the opened file, or the open error |
 
 ## Lint
 

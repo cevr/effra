@@ -25,11 +25,18 @@ The manifest is strict. Each of these is the EF144 refusal: an id that is not in
 
 ## Resolution
 
-`edition.ResolveFile(path)` in `internal/edition` admits a source file and decides its edition. It is the one path admission that every surface uses, before any front-end reads the file. It resolves `path` as the file system walks it, with every link resolved and each `..` applied to the directory a link reaches, never a lexically cleaned spelling. The file must be a regular file. ResolveFile returns that resolved path and the edition of its directory, and the surface reads the source bytes from that same path. So the edition always governs the bytes that are read, formatted or written, and the edition does not depend on the size or content of the file. Each surface passes the path it reads:
+Every surface admits a source file in the same way, before any front-end reads it. The admission binds an open file, not a path name:
 
-- **CLI.** The path the command opens. For `check`, `diagnostics`, `build`, `run` and the other loader commands, this is the admitted source path, which is made absolute as the go command makes its file arguments absolute. For `lint test` and `lint receipt`, it is the source made absolute. For `fmt FILE`, it is the spelling as given, because the formatter walks a link before a `..`.
-- **MCP.** `ROOT/file` with `ROOT` the canonical workspace root, after the workspace containment check. `project.edition` admits the file and does not read it. The 2 MiB source bound applies only to the tools that read the source.
-- **LSP.** The document URI's path (`edition.ResolveDocument`). A document with no file on disk, such as an unsaved buffer, resolves in its directory with links resolved.
+1. The surface opens the file once. It opens without blocking, so a FIFO cannot stall it.
+2. `edition.ResolveFile(file, path)` in `internal/edition` checks that the open file is a regular file. It then resolves `path` as the file system walks it: every link is resolved, and each `..` is applied to the directory that a link reaches. The resolved physical path must still name the open file (`os.SameFile`).
+3. The edition comes from the directory of that physical path. After the manifest is read, the path must still name the open file.
+4. The surface reads, formats and digests the source from the open file, never from a path. An in-place format writes a temporary file in the same directory and renames it over the physical path, after it checks again that the path names the file that was read.
+
+If the path stops naming the open file at any step, admission fails with EF146. A retarget can happen between the open and the manifest read, for example when a link is renamed over the source. A retargeted source is never read under another file's edition, and admission never falls back to another path. Admission reads no source bytes, so the edition does not depend on the size or the content of the file. Each surface passes the path it would open:
+
+- **CLI.** For `check`, `diagnostics`, `build`, `run` and the other loader commands, the path is the admitted source path, made absolute as the go command makes its file arguments absolute. For `lint test` and `lint receipt`, it is the source made absolute. For `fmt FILE`, it is the spelling as given, because the formatter walks a link before a `..`.
+- **MCP.** The path is `ROOT/file`, with `ROOT` the canonical workspace root. The file is opened through an `os.Root` on the workspace at its physical path, so a path or a link that leaves the workspace cannot be opened. `project.edition` opens and binds the file but does not read it. The 2 MiB source bound applies only to the tools that read the source.
+- **LSP.** The path is the document URI's path (`edition.ResolveDocument`). The LSP opens and binds a document that has a file on disk, but analyses the editor's text. A document with no file, such as an unsaved buffer, resolves at the path the file system would create (`edition.PhysicalPath`). Existing links in the spelling are followed, including a dangling final link, whose target is read relative to the link's directory. Missing directories and the file name are kept as spelled. Only a missing component leads to this path. Any other admission failure gives EF146 with source `admission`, for example a directory, a FIFO, a non-directory parent or a link loop.
 
 `edition.Resolve(dir)` decides the edition of the link-free directory `dir`. The rule:
 
@@ -46,7 +53,7 @@ Inputs without a path have no directory and resolve to the default `legacy`: `ef
 
 ## Canonical projection
 
-`ef edition FILE`, MCP `project.edition` and LSP `effra/edition` return the same bytes, produced once by `internal/edition`: compact JSON with the keys `edition`, `source`, `manifest`, and `diagnostic` on EF144 only. `manifest` is absolute and clean, in the link-resolved directory of the file.
+`ef edition FILE`, MCP `project.edition` and LSP `effra/edition` return the same bytes, produced once by `internal/edition`: compact JSON with the keys `edition`, `source`, `manifest`, and `diagnostic` on a refusal only: EF144 on every surface, and on the LSP also EF146 with source `admission`, for a document path that exists but cannot be admitted (the CLI and MCP report EF146 as the command or tool error). `manifest` is absolute and clean, in the link-resolved directory of the file.
 
 ```json
 {"edition":"legacy","source":"default","manifest":""}

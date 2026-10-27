@@ -67,7 +67,7 @@ func lintTestCommand(args []string) error {
 		if err != nil {
 			return err
 		}
-		resolution, err := resolveSource(absolute)
+		resolution, err := sourceEdition(absolute)
 		if err != nil {
 			return invalidInvocation(fmt.Errorf("%s: %w", fixture, err))
 		}
