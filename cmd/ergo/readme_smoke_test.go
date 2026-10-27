@@ -17,8 +17,12 @@ import (
 // (docs/spec), whose checker is in progress, so each claim is held to what
 // runs today:
 //
-//   - every go block, found as CommonMark finds fenced code blocks,
-//     parses and is canonical under the 2026 parser and formatter, with a
+//   - every fence has the one strict style (markdownlint MD046/MD048): a
+//     backtick fence at column 0, opened as ```<lang> with lowercase
+//     letters and closed by a bare ``` on its own line. Any other line
+//     that looks like a fence fails, and so does an unclosed fence, so the
+//     blocks read here are exactly the blocks CommonMark renders;
+//   - every go block parses and is canonical under the 2026 parser and formatter, with a
 //     package clause added, and uses no form the specification removed:
 //     `uses` (#217), `nil` (types.md) or a prefix catch (rows.md); nor a
 //     deferred Close, which the README never shows because resources
@@ -33,9 +37,11 @@ import (
 // drops a failure from a row fails here too.
 
 var (
-	// readmeSmokeFence is a CommonMark opening code fence: indentation, a
-	// run of three or more backticks or tildes, and the info string.
-	readmeSmokeFence = regexp.MustCompile("^([ \t]*)(`{3,}|~{3,})(.*)$")
+	// readmeSmokeFenceLike is any line CommonMark might read as a fence:
+	// optional white space, then three backticks or three tildes.
+	readmeSmokeFenceLike = regexp.MustCompile("^[ \t]*(```|~~~)")
+	// readmeSmokeOpener is the one admitted opening fence.
+	readmeSmokeOpener = regexp.MustCompile("^```([a-z]+)$")
 	// readmeSmokeDiagnostics is the console block that quotes the S102 line.
 	readmeSmokeDiagnostics = regexp.MustCompile("(?ms)^```console\n\\$ ergo diagnostics pay\\.ef\n(.*?)^```$")
 	// readmeSmokeShBlock is the shell block of "Working in this repo".
@@ -79,52 +85,47 @@ func main() needs Console {
 }
 `
 
-// readmeGoBlocks returns the body of every fenced code block whose info
-// string's first word is go, in any case, as CommonMark reads a fence: the
-// info string is trimmed and its first word is the language, whatever
-// follows it (`go `, `go title=x`). The closing fence uses the opening's
-// character, at least as many times, followed only by white space; an
-// unclosed block runs to the end of the document. Each content line loses
-// up to as many spaces as the opening fence's indentation. Any indentation
-// opens a fence, so
-// a fence nested in a list item is found too.
-func readmeGoBlocks(readme string) []string {
-	var blocks []string
-	lines := strings.Split(readme, "\n")
-	for i := 0; i < len(lines); i++ {
-		open := readmeSmokeFence.FindStringSubmatch(lines[i])
-		if open == nil || (open[2][0] == '`' && strings.Contains(open[3], "`")) {
+// readmeGoBlocks returns the body of every go block of a README in the
+// strict fence style, and a problem for each line that breaks the style.
+// Inside a block, a fence-like line other than the bare closer is a
+// problem too: CommonMark might close the block there or keep the line as
+// code, and the style removes that question.
+func readmeGoBlocks(readme string) ([]string, []string) {
+	var blocks, problems []string
+	var body []string
+	lang, open := "", false
+	for index, line := range strings.Split(readme, "\n") {
+		if !readmeSmokeFenceLike.MatchString(line) {
+			if open {
+				body = append(body, line)
+			}
 			continue
 		}
-		indent, fence := open[1], open[2]
-		words := strings.Fields(open[3])
-		var body []string
-		for i++; i < len(lines); i++ {
-			trimmed := strings.TrimLeft(lines[i], " \t")
-			run := len(trimmed) - len(strings.TrimLeft(trimmed, fence[:1]))
-			if run >= len(fence) && strings.TrimSpace(trimmed[run:]) == "" {
-				break
+		switch opener := readmeSmokeOpener.FindStringSubmatch(line); {
+		case !open && opener != nil:
+			lang, open, body = opener[1], true, nil
+		case open && line == "```":
+			if lang == "go" {
+				blocks = append(blocks, strings.Join(body, "\n")+"\n")
 			}
-			line := lines[i]
-			for k := 0; k < len(indent) && strings.HasPrefix(line, " "); k++ {
-				line = line[1:]
-			}
-			body = append(body, line)
-		}
-		if len(words) > 0 && strings.EqualFold(words[0], "go") {
-			blocks = append(blocks, strings.Join(body, "\n")+"\n")
+			open = false
+		default:
+			problems = append(problems, fmt.Sprintf("line %d: non-canonical fence %q: open with ```<lang> and close with a bare ```, both at column 0", index+1, line))
 		}
 	}
-	return blocks
+	if open {
+		problems = append(problems, fmt.Sprintf("unclosed fence ```%s at the end of the README", lang))
+	}
+	return blocks, problems
 }
 
-// readmeProblems reports every inadmissible go block of a README.
+// readmeProblems reports every fence that breaks the strict style and
+// every inadmissible go block of a README.
 func readmeProblems(readme string) []string {
-	blocks := readmeGoBlocks(readme)
+	blocks, problems := readmeGoBlocks(readme)
 	if len(blocks) < readmeSmokeMinBlocks {
-		return []string{fmt.Sprintf("README has %d go blocks, want at least %d", len(blocks), readmeSmokeMinBlocks)}
+		return append(problems, fmt.Sprintf("README has %d go blocks, want at least %d", len(blocks), readmeSmokeMinBlocks))
 	}
-	var problems []string
 	for index, block := range blocks {
 		if problem := readmeBlockProblem(block); problem != nil {
 			problems = append(problems, fmt.Sprintf("README go block %d: %v", index+1, problem))
@@ -202,9 +203,9 @@ func TestReadmeSmoke(t *testing.T) {
 		}
 	})
 
-	// Whole-document mutants of the real README: each fence variant that
-	// CommonMark reads as a go block is checked, so an edit cannot hide a
-	// removed form behind it.
+	// Whole-document mutants of the real README. A removed form in a block
+	// is refused by the block check; a fence outside the strict style is
+	// refused as a fence, before its content could hide anything.
 	t.Run("refuses-document-mutants", func(t *testing.T) {
 		t.Parallel()
 		const charge = "needs Accounts, Payments, Scheduler {"
@@ -216,19 +217,39 @@ func TestReadmeSmoke(t *testing.T) {
 		uses := func(doc string) string {
 			return strings.Replace(doc, charge, "uses Accounts, Payments, Scheduler {", 1)
 		}
+		const fence = "non-canonical fence"
 		for _, mutant := range []struct{ name, doc, want string }{
-			{"uses clause", uses(readme), "S001"},
-			{"fence `go ` with a trailing space, uses clause", uses(first("```go \n")), "S001"},
-			{"fence ` ```go` indented, uses clause", uses(first(" ```go\n")), "S001"},
-			{"fence `~~~go`, uses clause", uses(strings.Replace(first("~~~go\n"), "}\n```\n", "}\n~~~\n", 1)), "S001"},
-			{"fence `Go`, uses clause", uses(first("```Go\n")), "S001"},
-			{"fence `go title=pay.ef`, uses clause", uses(first("```go title=pay.ef\n")), "S001"},
-			{"deferred Close", strings.Replace(readme, lock, lock+"\t\tdefer lock.Close()\n", 1), "deferred Close"},
+			{"uses clause", uses(readme), "README go block 1: line 7, column 92: S001"},
+			{"deferred Close", strings.Replace(readme, lock, lock+"\t\tdefer lock.Close()\n", 1), "README go block 1: line 10: a resource releases itself"},
+			// The reviewer's round-2 cases (round-2-receipts).
+			{"indented tilde marker before a go block with uses", readme + "\n    ~~~text\n\n```go\nfunc bad() uses Console {\n\twork()\n}\n```\n", fence},
+			{"indented closer inside a go block, uses after it", readme + "\n```go\nfunc okay() {\n\twork()\n}\n    ```\nfunc bad() uses Console {\n\twork()\n}\n```\n", fence},
+			{"unclosed tilde go block at the end", readme + "\n~~~go\nfunc okay() {\n\twork()\n}\n", fence},
+			{"unclosed backtick go block at the end", readme + "\n```go\nfunc okay() {\n\twork()\n}\n", "unclosed fence ```go"},
+			// Opener and closer spellings outside the style.
+			{"opener `go ` with a trailing space", uses(first("```go \n")), fence},
+			{"opener indented by one space", uses(first(" ```go\n")), fence},
+			{"opener `~~~go`", uses(first("~~~go\n")), fence},
+			{"opener `Go`", uses(first("```Go\n")), fence},
+			{"opener `go title=pay.ef`", uses(first("```go title=pay.ef\n")), fence},
+			{"opener of four backticks", uses(first("````go\n")), fence},
+			{"bare opener with no language", readme + "\n```\nfunc bad() uses Console {}\n```\n", fence},
+			{"closer with trailing text", strings.Replace(readme, "\tT.Equal(r.ID, \"timed-out\")\n}\n```\n", "\tT.Equal(r.ID, \"timed-out\")\n}\n``` end\n", 1), fence},
+			{"closer of four backticks", strings.Replace(readme, "\tT.Equal(r.ID, \"timed-out\")\n}\n```\n", "\tT.Equal(r.ID, \"timed-out\")\n}\n````\n", 1), fence},
 		} {
 			problems := strings.Join(readmeProblems(mutant.doc), "\n")
-			if !strings.Contains(problems, "README go block 1: ") || !strings.Contains(problems, mutant.want) {
-				t.Errorf("%s: got %q, want a refusal of block 1 naming %q", mutant.name, problems, mutant.want)
+			if !strings.Contains(problems, mutant.want) {
+				t.Errorf("%s: got %q, want a refusal naming %q", mutant.name, problems, mutant.want)
 			}
+		}
+		// Controls: a canonical block appended at the end is read and passes.
+		control := readme + "\n```go\nfunc okay() {\n\twork()\n}\n```\n"
+		if problems := readmeProblems(control); len(problems) > 0 {
+			t.Errorf("canonical appended go block refused: %q", problems)
+		}
+		before, _ := readmeGoBlocks(readme)
+		if blocks, _ := readmeGoBlocks(control); len(blocks) != len(before)+1 {
+			t.Errorf("canonical appended go block not read: %d blocks", len(blocks))
 		}
 	})
 
