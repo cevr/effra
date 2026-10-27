@@ -64,14 +64,15 @@ func (o outcome[T, E]) result() (T, error) {
 	}
 }
 
-// release releases what the outcome owns: the value of an answer or the
-// failure of a failed answer. A refusal owns nothing.
-func (o outcome[T, E]) release() {
+// release releases what the outcome owns, by its kind: the value of an
+// answer or the failure payload of a failed answer, through drop. A refusal
+// owns nothing, so its zero value is never closed.
+func (o outcome[T, E]) release(t *rt.Task, err *error) {
 	switch o.kind {
 	case answered:
-		release(o.v)
+		drop(t, o.v, err)
 	case failed:
-		release(o.e)
+		drop(t, o.e, err)
 	}
 }
 
@@ -99,21 +100,33 @@ func newSlot[T any, E error](from *control) *slot[T, E] {
 }
 
 // answer delivers o, or releases it when the slot is answered or abandoned.
-func (s *slot[T, E]) answer(o outcome[T, E]) {
+// t is the answering task, which runs the release; with no error row here, a
+// release defect unwinds the answerer (drop with a nil err).
+func (s *slot[T, E]) answer(t *rt.Task, o outcome[T, E]) {
 	if s.state.CompareAndSwap(slotOpen, slotAnswered) {
 		s.ch <- o
 		return
 	}
-	o.release()
+	o.release(t, nil)
 }
 
-// abandon is the release of the receiving end: an answer that arrived first
-// is taken and released, and a later one will be released by answer.
-func (s *slot[T, E]) abandon() {
+// refuse answers the refusal, NoReply or Stopped, unless the slot is already
+// answered or abandoned. A refusal owns nothing, so a refusal that loses has
+// nothing to release and needs no task.
+func (s *slot[T, E]) refuse() {
+	if s.state.CompareAndSwap(slotOpen, slotAnswered) {
+		s.ch <- outcome[T, E]{kind: s.from.refusal()}
+	}
+}
+
+// abandon is the release of the receiving end, run by the receiving task t:
+// an answer that arrived first is taken and released by kind, its release
+// cause appended to *err, and a later one will be released by answer.
+func (s *slot[T, E]) abandon(t *rt.Task, err *error) {
 	if s.state.CompareAndSwap(slotOpen, slotAbandoned) {
 		return
 	}
-	(<-s.ch).release() // answered: the answer is buffered or about to be
+	(<-s.ch).release(t, err) // answered: the answer is buffered or about to be
 }
 
 // receive waits for the answer. It is an interruption point (I1): when t is
@@ -121,7 +134,10 @@ func (s *slot[T, E]) abandon() {
 // answer that raced it. Ownership of a taken answer passes only to a live
 // receiver: receive checks the stop before it waits and again after it takes
 // an answer, because a select with both arms ready may take the answer for a
-// task that is already stopped; such an answer is released here.
+// task that is already stopped; such an answer is released here. Every such
+// release goes through drop: masked, so it completes although t is stopped,
+// and a panic in it is an in-release defect, which comes before the
+// interruption in the exit.
 //
 // The answer can still be lost after receive returns it: when the stop
 // arrives between this check and the receiving task's boundary, rt.Run's
@@ -129,21 +145,34 @@ func (s *slot[T, E]) abandon() {
 // a runtime rule, not an actor one (research note, Gap A13).
 func (s *slot[T, E]) receive(t *rt.Task) (T, error) {
 	var zero T
+	var err error
 	if t.Stopped() {
-		s.abandon()
-		return zero, rt.Interrupted
+		s.abandon(t, &err)
+		return zero, interrupted(err)
 	}
 	select {
 	case o := <-s.ch:
 		if t.Stopped() {
-			o.release()
-			return zero, rt.Interrupted
+			o.release(t, &err)
+			return zero, interrupted(err)
 		}
 		return o.result()
 	case <-t.Done():
-		s.abandon()
-		return zero, rt.Interrupted
+		s.abandon(t, &err)
+		return zero, interrupted(err)
 	}
+}
+
+// interrupted is the exit of a stopped task after a release: the release
+// cause, then the interruption, the order rt.Scope.End gives (stop-wins last).
+func interrupted(err error) error {
+	if err == nil {
+		return rt.Interrupted
+	}
+	var c rt.Cause
+	c.Add(err)
+	c.AddInterruption()
+	return c.Err()
 }
 
 // Reply is a one-shot reply address carried in a message: actor.Reply[T, E]
@@ -153,25 +182,31 @@ func (s *slot[T, E]) receive(t *rt.Task) (T, error) {
 // first answer wins; the checker makes a second answer a use after consume
 // (R20), and the lowering releases it. A Reply is one pointer, so a message
 // variant holding only a Reply is pointer-shaped and boxes for free.
+//
+// Send and Fail take the answering task t: the lowering threads the current
+// task, which the source leaves implicit, because an answer that cannot be
+// delivered is released by the task that answers.
 type Reply[T any, E error] struct{ s *slot[T, E] }
 
-// Send answers the request with v.
-func (r Reply[T, E]) Send(v T) {
+// Send answers the request with v. When the request is already answered or
+// its asker has detached, v is released (drop).
+func (r Reply[T, E]) Send(t *rt.Task, v T) {
 	if r.s == nil {
-		release(v)
+		drop(t, v, nil)
 		return
 	}
-	r.s.answer(outcome[T, E]{v: snapshot(v)}) // a copy: the state keeps its own value
+	r.s.answer(t, outcome[T, E]{v: snapshot(v)}) // a copy: the state keeps its own value
 }
 
 // Fail answers the request with the typed failure e. e leaves the actor's
-// task, so it is a copy, as a value is.
-func (r Reply[T, E]) Fail(e E) {
+// task, so it is a copy, as a value is, and it is released as a value is
+// when nobody can receive it.
+func (r Reply[T, E]) Fail(t *rt.Task, e E) {
 	if r.s == nil {
-		release(e)
+		drop(t, e, nil)
 		return
 	}
-	r.s.answer(outcome[T, E]{e: snapshot(e), kind: failed})
+	r.s.answer(t, outcome[T, E]{e: snapshot(e), kind: failed})
 }
 
 // Close answers an unanswered request with NoReply, or Stopped when the actor
@@ -180,7 +215,7 @@ func (r Reply[T, E]) Close() {
 	if r.s == nil {
 		return
 	}
-	r.s.answer(outcome[T, E]{kind: r.s.from.refusal()})
+	r.s.refuse()
 }
 
 // control is the part of an actor that replies and senders share.
@@ -245,22 +280,25 @@ type Address[M any] struct{ c *cell[M] }
 // Actor.Stop closes admission before it interrupts, so it has no such window.
 func (a Address[M]) Send(t *rt.Task, m M) error {
 	if t.Stopped() {
-		release(m)
-		return rt.Interrupted
+		var err error
+		drop(t, m, &err)
+		return interrupted(err)
 	}
 	return a.admit(t, snapshot(m)) // a copy: the sender keeps its own value; a resource moves
 }
 
 // admit is Send without the copy, for a message the library built from
 // handles only (an agent call), where the compiler knows statically that
-// there is nothing to copy.
+// there is nothing to copy. A refused message is released by the sender
+// (drop), its release cause after the refusal.
 func (a Address[M]) admit(t *rt.Task, m M) error {
 	c := a.c
 	c.mu.RLock()
 	if c.refused() {
 		c.mu.RUnlock()
-		release(m)
-		return Stopped{}
+		var err error = Stopped{}
+		drop(t, m, &err)
+		return err
 	}
 	select {
 	case c.mailbox <- m:
@@ -278,7 +316,7 @@ func (a Address[M]) admit(t *rt.Task, m M) error {
 	}
 	c.mu.RUnlock()
 	if err != nil {
-		release(m)
+		drop(t, m, &err)
 	}
 	return err
 }
@@ -292,7 +330,7 @@ func (a Address[M]) admit(t *rt.Task, m M) error {
 func Ask[M, T any, E error](t *rt.Task, to Address[M], request func(Reply[T, E]) M) (T, error) {
 	s := newSlot[T, E](&to.c.control)
 	if err := to.Send(t, request(Reply[T, E]{s})); err != nil {
-		s.abandon()
+		s.abandon(t, &err) // the released message refused the slot: nothing to release
 		var zero T
 		return zero, err
 	}
@@ -332,17 +370,19 @@ type Actor[M any] struct {
 // are charged where Start is called. initial crosses into the actor's task,
 // so it is a copy (snapshot). capacity must be at least 1.
 func Start[S, M any](s *rt.Scope, span string, initial S, capacity int, handle Handler[S, M]) Actor[M] {
-	return start(s, span, initial, capacity, handle, false)
+	return start(s, span, snapshot(initial), capacity, handle, nil)
 }
 
-// start is Start. When lends is true the handler only borrows the state, as
-// an agent's handler does: the loop keeps owning it while the handler runs,
-// so a handler that unwinds or fails leaves the state to the loop's release.
-func start[S, M any](s *rt.Scope, span string, initial S, capacity int, handle Handler[S, M], lends bool) Actor[M] {
+// start is Start over a state already copied into the actor. When lent is
+// non-nil, the state is storage that the handler only borrows, as an agent's
+// *S is: the loop keeps owning it while the handler runs, so a handler that
+// unwinds or fails leaves it to the loop, and the loop releases the value
+// lent(s) holds, not the storage.
+func start[S, M any](s *rt.Scope, span string, initial S, capacity int, handle Handler[S, M], lent func(S) any) Actor[M] {
 	if capacity < 1 {
 		panic("actorlib: capacity must be at least 1")
 	}
-	l := &loop[S, M]{s: snapshot(initial), owned: true, lends: lends}
+	l := &loop[S, M]{s: initial, owned: true, lent: lent}
 	l.c.mailbox = make(chan M, capacity)
 	l.c.stopping = make(chan struct{})
 	h := rt.Go(s, span, func(t *rt.Task) (struct{}, error) {
@@ -379,9 +419,9 @@ func (a Actor[M]) Stop() error {
 type loop[S, M any] struct {
 	c       cell[M]
 	s       S
-	owned   bool // the loop owns s, except while a consuming handler holds it
-	lends   bool // the handler borrows s and never consumes it
-	held    M    // a message dequeued after the stop was requested
+	owned   bool        // the loop owns s, except while a consuming handler holds it
+	lent    func(S) any // non-nil: s is storage the handler borrows; the loop releases lent(s)
+	held    M           // a message dequeued after the stop was requested
 	holding bool
 }
 
@@ -404,7 +444,7 @@ func (l *loop[S, M]) serve(t *rt.Task, handle Handler[S, M]) error {
 				l.held, l.holding = m, true
 				return rt.Interrupted
 			}
-			l.owned = l.lends
+			l.owned = l.lent != nil
 			next, err := handle(t, l.s, m)
 			if err != nil {
 				if f, ok := rt.Failure(err); ok {
@@ -437,7 +477,7 @@ func (l *loop[S, M]) exit(t *rt.Task, err *error) {
 	p := recover()
 	l.c.ended.Store(true)
 	l.c.closeAdmission() // no message is admitted after this, so the queue is final
-	if !l.holding && len(l.c.mailbox) == 0 && !(l.owned && isResource(l.s)) {
+	if !l.holding && len(l.c.mailbox) == 0 && !l.ownsResource() {
 		if p != nil {
 			panic(p) // the task boundary records it (rt.Run)
 		}
@@ -446,18 +486,39 @@ func (l *loop[S, M]) exit(t *rt.Task, err *error) {
 	l.drain(t, p, err)
 }
 
-// drain releases what the loop owns in an owner scope, masked (I2), each as
-// its own release: every release runs even after an earlier one panicked
-// (R9), and rt records each release cause after the body's exit and the body
-// panic p, with its kind, its InRelease mark and its order.
+// ownsResource reports whether the loop owns a state with a release, judged
+// by the value the state holds: for lent storage, the value lent(s) returns.
+func (l *loop[S, M]) ownsResource() bool {
+	if !l.owned {
+		return false
+	}
+	if l.lent != nil {
+		return isResource(l.lent(l.s))
+	}
+	return isResource(l.s)
+}
+
+// releaseState releases the state the loop owns through drop.
+func (l *loop[S, M]) releaseState(t *rt.Task) {
+	if l.lent != nil {
+		drop(t, l.lent(l.s), nil)
+		return
+	}
+	drop(t, l.s, nil)
+}
+
+// drain releases what the loop owns in an owner scope, each as its own
+// release of that scope: every release runs even after an earlier one
+// panicked (R9), and rt records each release cause after the body's exit and
+// the body panic p, with its kind, its InRelease mark and its order. Each
+// release is a drop, which dispatches on the value it releases.
 //
 //go:noinline
 func (l *loop[S, M]) drain(t *rt.Task, p any, err *error) {
 	rs := rt.NewScope(t)
 	defer rs.End(err)
-	if l.owned && isResource(l.s) { // registered first, so released last
-		s := l.s
-		rs.Defer(func() { release(s) })
+	if l.ownsResource() { // registered first, so released last
+		rs.Defer(func() { l.releaseState(t) })
 	}
 	var queued []M
 	if l.holding {
@@ -474,7 +535,7 @@ func (l *loop[S, M]) drain(t *rt.Task, p any, err *error) {
 	}
 	for i := len(queued) - 1; i >= 0; i-- {
 		m := queued[i]
-		rs.Defer(func() { release(m) })
+		rs.Defer(func() { drop(t, m, nil) })
 	}
 	if p != nil {
 		panic(p) // rs.End recovers it first, then runs the releases
@@ -494,10 +555,43 @@ func isResource[V any](v V) bool {
 	return t.Implements(closer)
 }
 
-// release is the release of a value whose type is a type parameter: the
-// lowering of R5 for a value that may or may not be a resource (Gap A8).
-func release[V any](v V) {
-	if r, ok := any(v).(interface{ Close() }); ok {
+// drop is the package's one release path: every value the library releases
+// goes through it (the release-site table is in the research note, Q2). It is
+// the lowering of R5 for a value whose type is a type parameter, which may or
+// may not be a resource (Gap A8).
+//
+//   - It dispatches on the value v holds, not on the storage that holds it:
+//     a union or an interface releases its dynamic variant, and a caller that
+//     keeps v in storage (an agent's *S) passes the value, not the pointer.
+//   - It runs the release as one release of t, the current task: masked, so
+//     it runs to completion although t is stopped (I2, R9), inside an owner
+//     scope, so rt records a panic as an in-release defect with t's chain. It
+//     applies no stop-wins; the caller's exit does.
+//   - Callers pass only what they own, by kind: an outcome passes its value
+//     or its failure payload and never the zero value of a refusal, and a
+//     failed callback's zero result is never passed (research note, Gap A13).
+//
+// With a non-nil err the release cause is appended to *err, in rt's
+// canonical form. With a nil err, for a site with no error row, a release
+// cause unwinds the caller as rt.Scope.End(nil) does, and the next scope or
+// task boundary records it with its kinds.
+func drop[V any](t *rt.Task, v V, err *error) {
+	r, ok := any(v).(rt.Resource)
+	if !ok {
+		return
+	}
+	m := t.Mask()
+	defer m.Unmask()
+	rs := rt.NewScope(t)
+	defer rs.End(err) // runs first: the release and its cause, still masked
+	rs.Own(r)
+}
+
+// closeField is the generated release (R3) of one field of a value whose
+// Close is running: it runs inside that value's release, which a drop
+// already masks and records, so it adds no scope of its own.
+func closeField[V any](v V) {
+	if r, ok := any(v).(rt.Resource); ok {
 		r.Close()
 	}
 }

@@ -59,8 +59,14 @@ type stateQuery[S, E, O any] struct{ reply Reply[S, Never] }
 func (event[S, E, O]) machineMsg(S, E, O)      {}
 func (stateQuery[S, E, O]) machineMsg(S, E, O) {}
 
-// Close is the generated release of a struct with a resource field (R3).
-func (m event[S, E, O]) Close()      { m.reply.Close() }
+// Close is the generated release of a struct with resource fields (R3): it
+// releases every field that may be a resource, the event by its variant and
+// the reply, and runs the reply's release even when the event's panics. It
+// runs inside a drop (the drain's or a refused Send's).
+func (m event[S, E, O]) Close() {
+	defer m.reply.Close()
+	closeField(m.ev)
+}
 func (m stateQuery[S, E, O]) Close() { m.reply.Close() }
 
 // MachineActor is the owner handle of a machine-backed actor.
@@ -84,13 +90,14 @@ func StartMachine[S, E, O any](s *rt.Scope, span string, m Machine[S, E, O], cap
 	handle := func(t *rt.Task, st S, msg machineMsg[S, E, O]) (Next[S], error) {
 		switch msg := msg.(type) {
 		case event[S, E, O]:
-			// Released on every path where the reply is still owned; after
-			// Send or Fail the release answers nothing.
-			defer msg.Close()
+			// The step consumes the event, so the handler releases only the
+			// reply, on every path where it is still owned; after Send or
+			// Fail its release answers nothing.
+			defer msg.reply.Close()
 			d, err := m.Step(t, st, msg.ev)
 			if err != nil {
 				if f, ok := rt.Failure(err); ok && msg.reply.s != nil {
-					msg.reply.Fail(f)
+					msg.reply.Fail(t, f)
 					return Continue(st), nil
 				}
 				return Next[S]{}, err
@@ -105,14 +112,14 @@ func StartMachine[S, E, O any](s *rt.Scope, span string, m Machine[S, E, O], cap
 				end = true
 			}
 			if msg.reply.s != nil {
-				msg.reply.Send(d) // Reply.Send copies (snapshot)
+				msg.reply.Send(t, d) // Reply.Send copies (snapshot)
 			}
 			if end {
 				return End(st), nil
 			}
 			return Continue(st), nil
 		case stateQuery[S, E, O]:
-			msg.reply.Send(st) // a snapshot: Reply.Send copies
+			msg.reply.Send(t, st) // a snapshot: Reply.Send copies
 			return Continue(st), nil
 		}
 		panic("unreachable: machineMsg is sealed")

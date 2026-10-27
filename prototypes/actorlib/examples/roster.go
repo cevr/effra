@@ -53,27 +53,27 @@ func (m Members) Close() { m.Reply.Close() }
 // rosterHandler lowers the sketch's `serveRoom`. Its paths call library code
 // that can panic before the reply is consumed, so the lowering defers the
 // release of m; after Send or Fail the release answers nothing.
-func rosterHandler(_ *rt.Task, r Room, m RosterMsg) (actorlib.Next[Room], error) {
+func rosterHandler(t *rt.Task, r Room, m RosterMsg) (actorlib.Next[Room], error) {
 	defer m.Close()
 	switch m := m.(type) {
 	case Join:
 		if int64(len(r.names)) >= r.limit {
-			m.Reply.Fail(RoomFull{Limit: r.limit})
+			m.Reply.Fail(t, RoomFull{Limit: r.limit})
 			return actorlib.Continue(r), nil
 		}
 		r.names = append(r.names, m.Name)
-		m.Reply.Send(int64(len(r.names)))
+		m.Reply.Send(t, int64(len(r.names)))
 		return actorlib.Continue(r), nil
 	case Leave:
 		if i := slices.Index(r.names, m.Name); i >= 0 {
 			r.names = slices.Delete(r.names, i, i+1)
 		}
-		m.Reply.Send(int64(len(r.names)))
+		m.Reply.Send(t, int64(len(r.names)))
 		return actorlib.Continue(r), nil
 	case Members:
 		// Value semantics: Reply.Send copies, so the reply never shares the
 		// state's backing array (Q7).
-		m.Reply.Send(r.names)
+		m.Reply.Send(t, r.names)
 		return actorlib.Continue(r), nil
 	}
 	panic("unreachable: RosterMsg is sealed")

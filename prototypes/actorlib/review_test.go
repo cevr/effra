@@ -28,11 +28,11 @@ func TestDetachedResourceReplyIsReleased(t *testing.T) {
 	var closed atomic.Int32
 	within(t, func(task *rt.Task, s *rt.Scope) error {
 		holding, gate, answered := make(chan struct{}), make(chan struct{}), make(chan struct{})
-		a := Start(s, "resource-reply", 0, 4, func(_ *rt.Task, n int, m leaseRequest) (Next[int], error) {
+		a := Start(s, "resource-reply", 0, 4, func(ht *rt.Task, n int, m leaseRequest) (Next[int], error) {
 			defer m.Close()
 			close(holding)
 			<-gate
-			m.reply.Send(lease{&closed})
+			m.reply.Send(ht, lease{&closed})
 			close(answered)
 			return Continue(n), nil
 		})
@@ -58,14 +58,18 @@ func TestDetachedResourceReplyIsReleased(t *testing.T) {
 func TestAnsweredButUnreceivedReplyIsReleased(t *testing.T) {
 	var closed atomic.Int32
 	within(t, func(task *rt.Task, s *rt.Scope) error {
-		a := Start(s, "early-reply", 0, 4, func(_ *rt.Task, n int, m leaseRequest) (Next[int], error) {
+		a := Start(s, "early-reply", 0, 4, func(ht *rt.Task, n int, m leaseRequest) (Next[int], error) {
 			defer m.Close()
 			return Continue(n), nil
 		})
 		sl := newSlot[lease, Never](&a.addr.c.control)
-		Reply[lease, Never]{sl}.Send(lease{&closed})
-		sl.abandon()
-		Reply[lease, Never]{sl}.Send(lease{&closed}) // a second answer is released too
+		Reply[lease, Never]{sl}.Send(task, lease{&closed})
+		var err error
+		sl.abandon(task, &err)
+		if err != nil {
+			return err
+		}
+		Reply[lease, Never]{sl}.Send(task, lease{&closed}) // a second answer is released too
 		return a.Stop()
 	})
 	if got := closed.Load(); got != 2 {
@@ -79,7 +83,7 @@ func TestDetachedAgentResultIsReleased(t *testing.T) {
 		holding, gate := make(chan struct{}), make(chan struct{})
 		a := StartAgent(s, "resource-agent-result", 0, 4)
 		asker := rt.Go(s, "asker", func(ct *rt.Task) (lease, error) {
-			return Call(ct, a.Address(), func(_ *rt.Task, n *int) (lease, error) {
+			return Call(ct, a.Address(), func(ht *rt.Task, n *int) (lease, error) {
 				close(holding)
 				<-gate
 				return lease{&closed}, nil
@@ -140,7 +144,7 @@ func TestAgentChannelWaitObservesStop(t *testing.T) {
 func TestStopRefusesAdmissionBeforeHandlerFinishes(t *testing.T) {
 	within(t, func(task *rt.Task, s *rt.Scope) error {
 		holding, gate := make(chan struct{}), make(chan struct{})
-		a := Start(s, "stopping", 0, 4, func(_ *rt.Task, n int, m probe) (Next[int], error) {
+		a := Start(s, "stopping", 0, 4, func(ht *rt.Task, n int, m probe) (Next[int], error) {
 			defer m.Close()
 			close(holding)
 			<-gate
@@ -174,7 +178,7 @@ func TestMachineStateIsASnapshot(t *testing.T) {
 	within(t, func(task *rt.Task, s *rt.Scope) error {
 		m := Machine[[]int64, int64, struct{}]{
 			Initial: []int64{1},
-			Step: func(_ *rt.Task, _ []int64, _ int64) (Decision[[]int64, struct{}], error) {
+			Step: func(ht *rt.Task, _ []int64, _ int64) (Decision[[]int64, struct{}], error) {
 				return Ignore[[]int64, struct{}]{}, nil
 			},
 		}

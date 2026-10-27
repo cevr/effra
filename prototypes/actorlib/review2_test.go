@@ -21,7 +21,7 @@ func TestCanceledReadyReplyReleasesResource(t *testing.T) {
 		var closed atomic.Int32
 		task := rt.Root("already-canceled-ready-reply")
 		sl := newSlot[lease, Never](&control{task: task})
-		sl.answer(outcome[lease, Never]{v: lease{&closed}})
+		sl.answer(task, outcome[lease, Never]{v: lease{&closed}})
 		task.Interrupt()
 		_, err := rt.Run(task, func(ct *rt.Task) (lease, error) { return sl.receive(ct) })
 		if !errors.Is(err, rt.Interrupted) {
@@ -42,7 +42,7 @@ func TestAgentInitialValueIsCopied(t *testing.T) {
 		initial := []int64{1}
 		ag := StartAgent(s, "initial-copy", initial, 4)
 		initial[0] = 99
-		got, err := Call(task, ag.Address(), func(_ *rt.Task, st *[]int64) ([]int64, error) { return *st, nil })
+		got, err := Call(task, ag.Address(), func(ht *rt.Task, st *[]int64) ([]int64, error) { return *st, nil })
 		if err != nil {
 			return err
 		}
@@ -59,14 +59,14 @@ func TestQueuedReplyBearingMessageIsCopied(t *testing.T) {
 	within(t, func(task *rt.Task, s *rt.Scope) error {
 		holding, gate := make(chan struct{}), make(chan struct{})
 		first := true
-		a := Start(s, "queued-copy", 0, 4, func(_ *rt.Task, n int, m item) (Next[int], error) {
+		a := Start(s, "queued-copy", 0, 4, func(ht *rt.Task, n int, m item) (Next[int], error) {
 			defer m.Close()
 			if first {
 				first = false
 				close(holding)
 				<-gate
 			} else {
-				m.reply.Send(m.tags)
+				m.reply.Send(ht, m.tags)
 			}
 			return Continue(n), nil
 		})
@@ -105,9 +105,9 @@ func (m valuesFailureRequest) Close() { m.reply.Close() }
 // M2: a failure payload leaves the actor's task, so it is a copy.
 func TestFailurePayloadIsCopied(t *testing.T) {
 	within(t, func(task *rt.Task, s *rt.Scope) error {
-		a := Start(s, "failure-copy", []int64{1}, 4, func(_ *rt.Task, st []int64, m valuesFailureRequest) (Next[[]int64], error) {
+		a := Start(s, "failure-copy", []int64{1}, 4, func(ht *rt.Task, st []int64, m valuesFailureRequest) (Next[[]int64], error) {
 			defer m.Close()
-			m.reply.Fail(valuesFailure{st})
+			m.reply.Fail(ht, valuesFailure{st})
 			return Continue(st), nil
 		})
 		request := func(r Reply[struct{}, valuesFailure]) valuesFailureRequest { return valuesFailureRequest{r} }
@@ -126,7 +126,7 @@ func TestFailurePayloadIsCopied(t *testing.T) {
 func TestAgentFailurePayloadIsCopied(t *testing.T) {
 	within(t, func(task *rt.Task, s *rt.Scope) error {
 		ag := StartAgent(s, "agent-failure-copy", []int64{1}, 4)
-		fail := func(_ *rt.Task, st *[]int64) (int, error) { return 0, valuesFailure{*st} }
+		fail := func(ht *rt.Task, st *[]int64) (int, error) { return 0, valuesFailure{*st} }
 		_, err := Call(task, ag.Address(), fail)
 		err.(valuesFailure).values[0] = 99
 		_, err = Call(task, ag.Address(), fail)
@@ -143,7 +143,7 @@ func TestAgentStateReleasedOnCallbackDefect(t *testing.T) {
 	var closed atomic.Int32
 	within(t, func(task *rt.Task, s *rt.Scope) error {
 		ag := StartAgent(s, "state-on-defect", lease{&closed}, 4)
-		_, err := Call(task, ag.Address(), func(_ *rt.Task, st *lease) (int, error) { panic("callback defect") })
+		_, err := Call(task, ag.Address(), func(ht *rt.Task, st *lease) (int, error) { panic("callback defect") })
 		if !failureIs[NoReply](err) {
 			t.Errorf("Call: %v", err)
 		}

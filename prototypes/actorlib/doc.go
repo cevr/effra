@@ -27,11 +27,19 @@
 //
 // # Lowering conventions
 //
-// An Effra function with a task parameter takes *rt.Task first. An error row
+// An Effra function with a task parameter takes *rt.Task first, and the
+// lowering threads the current task where the source leaves it implicit
+// ([Reply.Send] and [Reply.Fail] take the answering task). An error row
 // lowers to Go's error; a lone typed failure is returned as itself. A resource
 // that Effra releases at scope end lowers to a Close call on every path where
-// it is still owned. A message struct with a [Reply] field gets the generated
-// Close of resources.md R3, which closes the reply. A value that crosses
+// it is still owned. A message struct with resource fields gets the generated
+// Close of resources.md R3, which releases each of them. Every value the
+// library itself releases (a refused message, an undeliverable answer or
+// failure, a queued message, the state) goes through one helper, drop: it
+// dispatches on the value held, not on its storage, releases an outcome by
+// kind, and runs the release masked in an rt owner scope of the current
+// task, so it completes under a stop and a panic in it is an in-release
+// defect. A value that crosses
 // from one task to another (an initial state, a message, a reply value or
 // failure, an agent result or failure, a handler failure, a state snapshot)
 // is copied by snapshot, the stand-in for the copy the compiler emits per

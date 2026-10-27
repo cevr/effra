@@ -67,7 +67,7 @@ func waitQueued[M any](t *testing.T, a Address[M], n int) {
 
 func TestDroppedReplyAnswersNoReply(t *testing.T) {
 	within(t, func(task *rt.Task, s *rt.Scope) error {
-		a := Start(s, "drop", 0, 4, func(_ *rt.Task, n int, m probe) (Next[int], error) {
+		a := Start(s, "drop", 0, 4, func(ht *rt.Task, n int, m probe) (Next[int], error) {
 			defer m.Close() // the release R5 inserts: the handler never answers
 			return Continue(n), nil
 		})
@@ -81,10 +81,10 @@ func TestDroppedReplyAnswersNoReply(t *testing.T) {
 
 func TestFirstAnswerWins(t *testing.T) {
 	within(t, func(task *rt.Task, s *rt.Scope) error {
-		a := Start(s, "twice", 0, 4, func(_ *rt.Task, n int, m probe) (Next[int], error) {
+		a := Start(s, "twice", 0, 4, func(ht *rt.Task, n int, m probe) (Next[int], error) {
 			defer m.Close()
-			m.reply.Send(1)
-			m.reply.Send(2) // a use after consume (R20) in checked source
+			m.reply.Send(ht, 1)
+			m.reply.Send(ht, 2) // a use after consume (R20) in checked source
 			return Continue(n), nil
 		})
 		for range 3 {
@@ -112,7 +112,7 @@ func gated(s *rt.Scope, capacity int, gate <-chan struct{}, holding chan<- struc
 				return Next[int]{}, rt.Interrupted
 			}
 		}
-		m.reply.Send(n)
+		m.reply.Send(t, n)
 		return Continue(n + 1), nil
 	})
 }
@@ -196,7 +196,7 @@ func TestEveryMessageReleasedOnceUnderConcurrentStop(t *testing.T) {
 	within(t, func(task *rt.Task, s *rt.Scope) error {
 		closed := make([]atomic.Int32, senders*each)
 		var handled, refused atomic.Int32
-		a := Start(s, "busy", 0, 4, func(_ *rt.Task, n int, m probe) (Next[int], error) {
+		a := Start(s, "busy", 0, 4, func(ht *rt.Task, n int, m probe) (Next[int], error) {
 			defer m.Close()
 			handled.Add(1)
 			return Continue(n + 1), nil
@@ -268,7 +268,7 @@ func (boom) Error() string { return "boom" }
 func TestHandlerDefectAnswersNoReplyThenStopped(t *testing.T) {
 	within(t, func(task *rt.Task, s *rt.Scope) error {
 		gate := make(chan struct{})
-		a := Start(s, "defect", 0, 4, func(_ *rt.Task, n int, m probe) (Next[int], error) {
+		a := Start(s, "defect", 0, 4, func(ht *rt.Task, n int, m probe) (Next[int], error) {
 			defer m.Close()
 			<-gate
 			panic("handler bug")
@@ -300,7 +300,7 @@ func TestHandlerDefectAnswersNoReplyThenStopped(t *testing.T) {
 
 func TestHandlerFailureEndsTheActor(t *testing.T) {
 	within(t, func(task *rt.Task, s *rt.Scope) error {
-		a := Start(s, "fail", 0, 4, func(_ *rt.Task, n int, m probe) (Next[int], error) {
+		a := Start(s, "fail", 0, 4, func(ht *rt.Task, n int, m probe) (Next[int], error) {
 			m.Close()
 			return Next[int]{}, boom{}
 		})
@@ -325,9 +325,9 @@ func TestOwnerScopeStopsTheActorAndReleasesItsState(t *testing.T) {
 	var addr Address[probe]
 	within(t, func(task *rt.Task, s *rt.Scope) error {
 		_, err := rt.Scoped(task, func(inner *rt.Scope) (struct{}, error) {
-			a := Start(inner, "scoped", state{&released}, 4, func(_ *rt.Task, st state, m probe) (Next[state], error) {
+			a := Start(inner, "scoped", state{&released}, 4, func(ht *rt.Task, st state, m probe) (Next[state], error) {
 				defer m.Close()
-				m.reply.Send(0)
+				m.reply.Send(ht, 0)
 				return Continue(st), nil
 			})
 			addr = a.Address()
@@ -350,9 +350,9 @@ func TestOwnerScopeStopsTheActorAndReleasesItsState(t *testing.T) {
 func TestEndReleasesStateAndRefusesLaterSends(t *testing.T) {
 	var released atomic.Int32
 	within(t, func(task *rt.Task, s *rt.Scope) error {
-		a := Start(s, "end", state{&released}, 4, func(_ *rt.Task, st state, m probe) (Next[state], error) {
+		a := Start(s, "end", state{&released}, 4, func(ht *rt.Task, st state, m probe) (Next[state], error) {
 			defer m.Close()
-			m.reply.Send(0)
+			m.reply.Send(ht, 0)
 			return End(st), nil
 		})
 		if _, err := Ask(task, a.Address(), func(r Reply[int, Never]) probe { return probe{reply: r} }); err != nil {
@@ -379,12 +379,12 @@ func TestAgentCallsAreOrderedAndQueuedCallsStop(t *testing.T) {
 		ag := StartAgent(s, "agent", 0, 8)
 		addr := ag.Address()
 		for i := range 100 {
-			v, err := Call(task, addr, func(_ *rt.Task, n *int) (int, error) { old := *n; *n++; return old, nil })
+			v, err := Call(task, addr, func(ht *rt.Task, n *int) (int, error) { old := *n; *n++; return old, nil })
 			if err != nil || v != i {
 				t.Fatalf("call %d: got %d, %v", i, v, err)
 			}
 		}
-		full := func(_ *rt.Task, n *int) (int, error) {
+		full := func(ht *rt.Task, n *int) (int, error) {
 			if *n >= 100 {
 				return 0, boom{} // fails before it changes the state
 			}
@@ -432,7 +432,7 @@ func TestAgentCallbackDefectIsADefect(t *testing.T) {
 		addr := ag.Address()
 		gate, holding := make(chan struct{}), make(chan struct{})
 		first := rt.Go(s, "first", func(ct *rt.Task) (int, error) {
-			return Call(ct, addr, func(_ *rt.Task, n *int) (int, error) {
+			return Call(ct, addr, func(ht *rt.Task, n *int) (int, error) {
 				close(holding)
 				<-gate
 				panic("callback bug")
@@ -471,10 +471,10 @@ func (m item) Close() { m.reply.Close() }
 // agent result the caller changes never reach the actor's state.
 func TestBoundaryCopiesMessagesAndReplies(t *testing.T) {
 	within(t, func(task *rt.Task, s *rt.Scope) error {
-		a := Start(s, "copies", []string(nil), 4, func(_ *rt.Task, st []string, m item) (Next[[]string], error) {
+		a := Start(s, "copies", []string(nil), 4, func(ht *rt.Task, st []string, m item) (Next[[]string], error) {
 			defer m.Close()
 			st = append(st, m.tags...)
-			m.reply.Send(st)
+			m.reply.Send(ht, st)
 			return Continue(st), nil
 		})
 		tags := []string{"a"}
@@ -496,7 +496,7 @@ func TestBoundaryCopiesMessagesAndReplies(t *testing.T) {
 		}
 
 		ag := StartAgent(s, "agent-copies", []string{"x"}, 4)
-		names := func(_ *rt.Task, st *[]string) ([]string, error) { return *st, nil }
+		names := func(ht *rt.Task, st *[]string) ([]string, error) { return *st, nil }
 		out, err := Call(task, ag.Address(), names)
 		if err != nil {
 			return err

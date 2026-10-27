@@ -34,12 +34,12 @@ func (m Get) Close() { m.Reply.Close() }
 // countHandler lowers the sketch's `count`. Neither path can panic or poll
 // between receipt and consumption, so no deferred release is emitted: Inc
 // owns nothing and Get consumes its reply.
-func countHandler(_ *rt.Task, n int64, m CounterMsg) (actorlib.Next[int64], error) {
+func countHandler(t *rt.Task, n int64, m CounterMsg) (actorlib.Next[int64], error) {
 	switch m := m.(type) {
 	case Inc:
 		return actorlib.Continue(n + m.By), nil
 	case Get:
-		m.Reply.Send(n)
+		m.Reply.Send(t, n)
 		return actorlib.Continue(n), nil
 	}
 	panic("unreachable: CounterMsg is sealed")

@@ -18,8 +18,6 @@ func (c call[S]) Close() { c.slot.refuse() }
 // converts to it without allocating.
 type refuser interface{ refuse() }
 
-func (s *slot[T, E]) refuse() { s.answer(outcome[T, E]{kind: s.from.refusal()}) }
-
 // Agent is the owner handle of an agent: an actor whose messages are calls
 // on its state (Elixir Agent). A protocol that is a set of methods on the
 // state is served with no message union and no projection.
@@ -31,7 +29,10 @@ type AgentAddress[S any] = Address[call[S]]
 // StartAgent runs an agent over a copy of initial with a mailbox of the given
 // capacity. The agent owns its state on every exit: each call only borrows
 // it, so a call that panics or ends the agent leaves the state to the agent's
-// release, which runs once after the queue is released.
+// release, which runs once after the queue is released. The state lives in
+// storage (*S) that calls borrow; the release dispatches on the S value the
+// storage holds, so an S that is a resource union or an interface with a
+// Close is released as its variant.
 func StartAgent[S any](s *rt.Scope, span string, initial S, capacity int) Agent[S] {
 	state := new(S)
 	*state = snapshot(initial)
@@ -41,8 +42,11 @@ func StartAgent[S any](s *rt.Scope, span string, initial S, capacity int) Agent[
 			return Next[*S]{}, err
 		}
 		return Continue(st), nil
-	}, true)
+	}, held[S])
 }
+
+// held is the value an agent's storage holds: what its release releases.
+func held[S any](p *S) any { return *p }
 
 // Call runs f on the agent's state, in mailbox order, and returns f's value or
 // its typed failure: actor.Call(a, func(r *S) (T, error[E])) in the sketch. f
@@ -64,6 +68,11 @@ func StartAgent[S any](s *rt.Scope, span string, initial S, capacity int) Agent[
 // and queued callers get Stopped. A panic in f ends the agent the same way.
 // The exit is rt.Interrupted when t is stopped while it waits; the caller
 // then detaches and a late result is released.
+//
+// Ownership of f's value passes to Call only with a successful exit. On any
+// other exit the value is the zero value of a failed function in Go's
+// convention, and Call does not close it; a resource f built before it
+// failed is f's to release (research note, Gap A13).
 func Call[S, T any](t *rt.Task, to AgentAddress[S], f func(t *rt.Task, s *S) (T, error)) (T, error) {
 	sl := newSlot[T, error](&to.c.control)
 	if t.Stopped() {
@@ -74,11 +83,11 @@ func Call[S, T any](t *rt.Task, to AgentAddress[S], f func(t *rt.Task, s *S) (T,
 		run: func(at *rt.Task, s *S) error {
 			v, err := f(at, s)
 			if err == nil {
-				sl.answer(outcome[T, error]{v: snapshot(v)})
+				sl.answer(at, outcome[T, error]{v: snapshot(v)})
 				return nil
 			}
 			if fe, ok := rt.Failure(err); ok {
-				sl.answer(outcome[T, error]{e: snapshot(fe), kind: failed})
+				sl.answer(at, outcome[T, error]{e: snapshot(fe), kind: failed})
 				return nil
 			}
 			return err // the agent's exit; the handler's Close answers the caller
@@ -86,7 +95,7 @@ func Call[S, T any](t *rt.Task, to AgentAddress[S], f func(t *rt.Task, s *S) (T,
 		slot: sl,
 	})
 	if err != nil {
-		sl.abandon()
+		sl.abandon(t, &err)
 		var zero T
 		return zero, err
 	}
