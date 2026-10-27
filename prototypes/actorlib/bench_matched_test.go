@@ -51,10 +51,36 @@ const (
 	mAbandoned
 )
 
+// mOutcome is one answer. Its kind decides what it owns, as the library's
+// outcome does: a success owns v, a failure (err set, not refused) owns err,
+// and a refusal owns nothing, so its zero v is never closed.
 type mOutcome[T any] struct {
 	v       T
 	err     error
 	refused bool
+}
+
+// release releases what o owns, by kind.
+func (o mOutcome[T]) release() {
+	switch {
+	case o.refused:
+	case o.err != nil:
+		releaseAny(o.err)
+	default:
+		releaseAny(o.v)
+	}
+}
+
+// releaseKeeping is release on the receiving side: a panic in it comes back
+// as an error, as the library's receiver gets an in-release defect.
+func (o mOutcome[T]) releaseKeeping() (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("release panic: %v", p)
+		}
+	}()
+	o.release()
+	return nil
 }
 
 // mSlot is the hand-written one-shot reply with the library's contract.
@@ -73,14 +99,16 @@ func (s *mSlot[T]) answer(o mOutcome[T]) {
 		s.ch <- o
 		return
 	}
-	releaseAny(o.v)
+	o.release() // on the answering goroutine: a panic ends the actor, as in the library
 }
 
-func (s *mSlot[T]) abandon() {
+// abandon releases an answer that arrived first and returns its release
+// panic; a later answer is released by answer.
+func (s *mSlot[T]) abandon() error {
 	if s.state.CompareAndSwap(mOpen, mAbandoned) {
-		return
+		return nil
 	}
-	releaseAny((<-s.ch).v)
+	return (<-s.ch).releaseKeeping()
 }
 
 // refuse is the completion of a dropped or discarded reply.
@@ -95,19 +123,16 @@ func (s *mSlot[T]) refuse() {
 func (s *mSlot[T]) receive(ctx context.Context) (T, error) {
 	var zero T
 	if err := ctx.Err(); err != nil {
-		s.abandon()
-		return zero, err
+		return zero, joinExit(s.abandon(), err)
 	}
 	select {
 	case o := <-s.ch:
 		if err := ctx.Err(); err != nil {
-			releaseAny(o.v)
-			return zero, err
+			return zero, joinExit(o.releaseKeeping(), err)
 		}
 		return o.v, o.err
 	case <-ctx.Done():
-		s.abandon()
-		return zero, ctx.Err()
+		return zero, joinExit(s.abandon(), ctx.Err())
 	}
 }
 
@@ -117,8 +142,31 @@ func releaseAny[T any](v T) {
 	}
 }
 
+// joinExit joins two exits in order, keeping a lone one as it is.
+func joinExit(a, b error) error {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	}
+	return errors.Join(a, b)
+}
+
 // mMsg is a message of the matched actor: it releases what it owns.
 type mMsg interface{ release() }
+
+// releaseMsg releases a message the sender still owns and returns its panic,
+// as the library's sender gets an in-release defect after its refusal.
+func releaseMsg[M mMsg](m M) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("release panic: %v", p)
+		}
+	}()
+	m.release()
+	return nil
+}
 
 // fenced is the matched actor's shell: a fenced mailbox, a stoppable
 // goroutine and a drain. handle owns each message it receives; a non-nil
@@ -196,14 +244,12 @@ func (a *fenced[M]) releaseRecovering(m M) {
 
 func (a *fenced[M]) send(ctx context.Context, m M) error {
 	if err := ctx.Err(); err != nil {
-		m.release()
-		return err
+		return joinExit(err, releaseMsg(m))
 	}
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
-		m.release()
-		return errStopped
+		return joinExit(errStopped, releaseMsg(m))
 	}
 	select {
 	case a.mailbox <- m:
@@ -221,9 +267,9 @@ func (a *fenced[M]) send(ctx context.Context, m M) error {
 	}
 	a.mu.RUnlock()
 	if err != nil {
-		m.release()
+		return joinExit(err, releaseMsg(m))
 	}
-	return err
+	return nil
 }
 
 // stop closes admission, cancels the actor and waits. It returns the exit
@@ -270,8 +316,7 @@ func startMatchedCounter(capacity int) *fenced[mCounterMsg] {
 func matchedCount(ctx context.Context, a *fenced[mCounterMsg]) (int64, error) {
 	r := newMSlot[int64](&a.closing)
 	if err := a.send(ctx, mGet{r}); err != nil {
-		r.abandon()
-		return 0, err
+		return 0, joinExit(err, r.abandon())
 	}
 	return r.receive(ctx)
 }
@@ -429,9 +474,8 @@ func matchedCall[T any](ctx context.Context, a *fenced[mCall], f func(ctx contex
 		return nil
 	}, reply: r})
 	if err != nil {
-		r.abandon()
 		var zero T
-		return zero, err
+		return zero, joinExit(err, r.abandon())
 	}
 	return r.receive(ctx)
 }

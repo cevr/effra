@@ -138,3 +138,80 @@ func TestMatchedCanceledReadyReplyIsReleased(t *testing.T) {
 		}
 	}
 }
+
+// Round-3 review probe (M3): a successful call transfers its resource to the
+// caller. The handler's automatic refusal then has no effect: a refusal owns
+// nothing, so its zero value is never closed.
+func TestR3MatchedResourceResultDoesNotPanicOnRefusal(t *testing.T) {
+	var closed atomic.Int32
+	a := startMatchedAgent(4)
+	v, err := matchedCall(context.Background(), a, func(_ context.Context, _ *int64) (mLease, error) {
+		return mLease{&closed}, nil
+	})
+	if err != nil {
+		t.Errorf("call: %v", err)
+	} else {
+		v.Close()
+	}
+	if err := a.stop(); err != nil {
+		t.Errorf("successful resource result ended matched agent: %v", err)
+	}
+	if got := closed.Load(); got != 1 {
+		t.Errorf("answer released %d times; want 1", got)
+	}
+}
+
+type r3OwnedFailure struct{ closed *atomic.Int32 }
+
+func (r3OwnedFailure) Error() string { return "owned failure" }
+func (e r3OwnedFailure) Close()      { e.closed.Add(1) }
+
+// Round-3 review probe (M3): failures are owned reply payloads too, so
+// cancellation releases the failure exactly as the library's failed outcome
+// does.
+func TestR3MatchedCanceledFailureIsReleased(t *testing.T) {
+	var closed atomic.Int32
+	var closing atomic.Bool
+	s := newMSlot[struct{}](&closing)
+	s.answer(mOutcome[struct{}]{err: r3OwnedFailure{&closed}})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _ = s.receive(ctx)
+	if got := closed.Load(); got != 1 {
+		t.Errorf("abandoned error payload released %d times; want 1", got)
+	}
+}
+
+// A late answer to a detached receiver is released by kind: a failure's
+// payload, not its zero value, and nothing for a refusal.
+func TestMatchedLateAnswersReleaseByKind(t *testing.T) {
+	var closing atomic.Bool
+	var closed atomic.Int32
+	s := newMSlot[mLease](&closing)
+	if err := s.abandon(); err != nil {
+		t.Fatal(err)
+	}
+	s.answer(mOutcome[mLease]{err: r3OwnedFailure{&closed}}) // releases the failure, not the zero mLease
+	s.refuse()                                               // releases nothing
+	if got := closed.Load(); got != 1 {
+		t.Errorf("late failure released %d times; want 1", got)
+	}
+}
+
+// A release panic on the receiving side comes back as an error after the
+// cancellation, as the library's in-release defect does.
+func TestMatchedReceiverReleasePanicIsKept(t *testing.T) {
+	var closing atomic.Bool
+	s := newMSlot[mPanickyLease](&closing)
+	s.answer(mOutcome[mPanickyLease]{v: mPanickyLease{}})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := s.receive(ctx)
+	if !errors.Is(err, context.Canceled) || err.Error() == context.Canceled.Error() {
+		t.Errorf("receive: %v; want the release panic and the cancellation", err)
+	}
+}
+
+type mPanickyLease struct{}
+
+func (mPanickyLease) Close() { panic("answer release") }
