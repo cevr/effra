@@ -84,7 +84,7 @@ Designed in [rows.md](../spec/rows.md#wire) rule 8; checked by #196.
 
 ## Tested candidate: the old spelling is a plain syntax error
 
-There is no compatibility path. The owner, 2026-10-27: "We don't need to give backwards compatible syntax parsing. This is still a prototype". `uses` is an ordinary identifier, so below it parses as `main`'s result type. `ergo check` and `ergo fmt` report the plain S001 "expected end of declaration, found "Console"" at 3:18. `ergo fmt` exits 2 and leaves the file unchanged. `TestUsesIsAnIdentifier` pins the plain error. *Prior art:* Gleam before 1.0 and Zig change syntax between releases without a migration path; deprecation windows (Elixir, Rust editions) suit released languages with users.
+There is no compatibility path. The owner, 2026-10-27: "We don't need to give backwards compatible syntax parsing. This is still a prototype". `uses` is an ordinary identifier, so below it parses as `main`'s result type. `ergo check` and `ergo fmt` report the plain S001 "expected end of declaration, found "Console"" at 3:18. `ergo fmt` exits 2 and leaves the file unchanged. `TestUsesIsAnIdentifier` pins the plain error. *Prior art:* languages before 1.0 drop syntax quickly: Zig changes syntax between releases, and Gleam v0.27 deprecated `try` for `use`, with `gleam fix` as the migration. Staged deprecations (Elixir, Rust editions) serve released languages with users; Ergo has none yet.
 
 ```text
 package checkout
