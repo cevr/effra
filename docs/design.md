@@ -2,6 +2,8 @@
 
 Research and proposal prepared 2026-10-05. This document describes the wider proposed language. The small runnable subset and its measurements are recorded in [prototype.md](prototype.md); syntax outside that subset remains illustrative.
 
+> **Specification, 2026-10-27.** The normative language is now the Go-shaped language in [`docs/spec/`](spec/README.md) (v0, [#193](https://github.com/cevr/effra/issues/193)). Sections below that it replaces carry a "Superseded by `docs/spec/`" note and stay as the record of the earlier design and of the `.ef` language that `internal/compiler` still implements until [#205](https://github.com/cevr/effra/issues/205). Owner quotes and owner rules are kept unchanged.
+
 The [application showcases](showcases.md) apply this direction to ADTs, state transitions, decoding, task replacement, streams, durable commands and infrastructure outputs. Their [source review](research/effect-native-showcases.md) separates proposed simplifications from application policies that must remain explicit.
 
 ## Recommendation
@@ -17,6 +19,8 @@ Servers are the intended systems scope; kernels, bare-metal execution, and hard 
 Deferred effects need explicit execution and checked failure/service rows. Host declarations should supply routine signatures automatically, while behavior and resource ownership remain explicit contracts. Scoped concurrency must be established by the runtime, rather than assumed from the target scheduler. Application data needs closed sums and exhaustive interpretation; external data still needs runtime decoding.
 
 ## Language design principles
+
+> **Partly superseded by `docs/spec/` (2026-10-27).** The owner rules in this section still govern. The notation members (JSX, pipe, `fn (u: User)` receiver methods, constant defaults) and the `law`/`contract` spelling describe the earlier `.ef` language. For the Go-shaped language, laws are in [docs/spec/types.md](spec/types.md#laws), and visibility (`pub` against Go's capitalisation) is open as [Gap 8](spec/README.md#gaps).
 
 These owner rules govern every language and library proposal. They were set on 2026-10-07, and the notation members and visibility/law decisions were added on 2026-10-08.
 
@@ -51,6 +55,8 @@ How to apply: a budget-taking API makes the budget a required argument, so omitt
 
 ## Surface language
 
+> **Superseded by [docs/spec/grammar.md](spec/grammar.md) and [docs/spec/rows.md](spec/rows.md) (2026-10-27).** The Go-shaped language spells a service as a capability interface, `raises` as `error[...]`, `run` as `try`, and provision as `with` and `wire`. The text below describes the earlier `.ef` surface.
+
 ```rust
 error NotFound { id: UserId }
 error DbError { message: string }
@@ -84,6 +90,8 @@ Ordinary `fn` functions cannot secretly execute I/O. They may construct Effects 
 Use familiar syntax for data: structs, enums, exhaustive `match`, generics, Option, Result, and local mutation. `run` handles Effect sequencing. A `?` operator for Result propagation is an unadmitted proposal: it is ergonomics rather than an invariant, so it must pass [construct admission](#language-design-principles) before it ships (Gleam has no such operator). Retry, timeout, tracing, provision, and parallel combinators transform Effect values rather than introducing special control-flow syntax for every feature.
 
 ## The type system is the main feature
+
+> **Superseded by [docs/spec/rows.md](spec/rows.md) (2026-10-27).** Its [composition laws](spec/rows.md#composition-laws) restate the table below for `try`, `catch`, `with` and `timeout.After`; [footprints](spec/rows.md#footprints) settle the purity boundary of the last paragraph.
 
 Track two normalized rows alongside the success type: failures and required service keys. A row is an unordered, duplicate-free set that may have an open tail parameter.
 
@@ -178,6 +186,8 @@ Runtime inspection initially stays observational. It connects to explicit manage
 
 ## Dependency construction and testing
 
+> **Superseded by [docs/spec/rows.md](spec/rows.md#wire) (2026-10-27)** for the surface: a `wire` binds capabilities to providers and constructors, and `with` discharges them. Test providers are ordinary wire entries ([docs/spec/stdlib.md](spec/stdlib.md#testing)). The construction principles below still hold.
+
 Keep the distinction between a service contract, its implementation, and a Layer that constructs an implementation. Conceptually, `Layer<Provided, BuildErrors, Required>` is a recipe for acquiring services, possibly failing, with a scope that owns cleanup.
 
 An application graph might be:
@@ -194,6 +204,8 @@ Implementations capture their acquired dependencies. A caller requiring Users sh
 In tests, supply UsersMemory, a recording Logger, and a controllable Clock through the same provision mechanism. The compiler checks the resulting requirements. Fake time controls Effra timers; it does not make Go goroutine scheduling or arbitrary foreign I/O deterministic.
 
 ## Concurrency and resources
+
+> **Superseded by [docs/spec/resources.md](spec/resources.md) and [docs/spec/runtime.md](spec/runtime.md) (2026-10-27).** Resources release automatically at the end of their owner scope, ownership moves and lends by checked rules, tasks are resources, and I1/I2 state the interruption points and masks. The runtime-guarded handles and "stronger region typing is separate work" below are replaced by those rules.
 
 Use **scopes as the lifetime boundary** for child tasks and acquired resources. Keep three concepts distinct: Scope owns lifetimes, cancellation requests that execution stop, and Fiber represents execution plus its completion result. Cancelling one child must not close its parent's scope or release resources its siblings still use.
 
@@ -222,9 +234,13 @@ Goroutines introduce parallel access to captured values. Adopt immutable shared 
 
 ## Provider-independent machine plans
 
+> **Surface superseded by [docs/spec/runtime.md](spec/runtime.md#machines-and-actors) (2026-10-27):** `type X machine[S, E] { initial …; step … }`. The provider-independent plan principle below still holds.
+
 A checked machine declaration should lower to a finite, provider-independent plan containing its nominal state/event/output identities, callable rows, transition facts and entry lifetime rules. The compiler checks and lowers that plan; an ordinary typed library, function or service provider owns execution, admission, scopes, cleanup and runtime observation. Provider selection stays outside parser/compiler dispatch, as with other ordinary service ownership. See [Runtime-independent machine plans and providers](specs/machine-provider-contract.md) and [checked state machines](specs/state-machines.md) for the finite boundary and evidence gates. This design does not claim an implemented provider or cross-provider execution.
 
 ## Failure is more than a Result
+
+> **Superseded by [docs/spec/runtime.md](spec/runtime.md#exit-causes) (2026-10-27)** for the Go-shaped language. The entry failure report below remains the current compiler's behaviour.
 
 The runtime result should distinguish `Success(A)` from failure causes containing typed failures E, defects, or interruption. Ordinary recovery handles E. An explicit supervision/sandbox operation may inspect the full cause. Preserve multiple concurrent failures and cleanup failures instead of silently keeping only the first. The one exception is an explicit cancellation: a cancellation-aborted owner discards the ordinary typed failures of children it had not observed, because the party that cancelled already holds a different declared outcome (see [runtime](runtime.md)); defects and cleanup failures are always preserved.
 
@@ -263,6 +279,8 @@ Prior art: Effect's `runMain` uses `defaultTeardown` (`Runtime.ts`), which exits
 - Printing nothing for interruption, as Effect does, was rejected because a reported interruption tells an operator or agent why the process stopped.
 
 ## Compiler and Go runtime
+
+> **Partly superseded by [docs/spec/runtime.md](spec/runtime.md#host-and-lowering-notes) (2026-10-27).** The Go-shaped language lowers by erasure: one Go function per function, direct calls, a hidden environment and task parameter, and no closure per step. The lazy-closure representation proposed below is the earlier emitter's, whose measured build cost motivated the change.
 
 Effect typing and an Effect runtime are different design layers. Error/service rows and nominal capability identities can be checked and erased; they do not intrinsically require GC, fibers, boxed instructions, or a scheduler. First-class lazy computations do require a concrete representation for captures and execution, whose allocation and dispatch costs depend on lowering. For server workloads, managed memory and the Go runtime are appropriate, but they remain visible operational constraints rather than hidden implications of a type signature.
 
@@ -318,6 +336,8 @@ These are desired budgets, not existing results. Compare cold builds, warm build
 
 ## Go interoperability is a semantic boundary
 
+> **Surface superseded by [docs/spec/grammar.md](spec/grammar.md#declarations) (2026-10-27):** `import go "path"` charges `go.Foreign`, and decision #9 maps Go imports automatically ([Gap 21](spec/README.md#gaps)). The boundary principles below still hold.
+
 A `(T,error)` or `(T,bool)` signature alone does not establish I/O behavior, nullability, callback retention, shared mutation or cancellation. Unsupported signatures need focused diagnostics; behavioral assertions remain separate from native declaration import.
 
 Generate package declarations and direct Go wrappers from Go's type information, then attach explicit binding metadata for:
@@ -355,6 +375,8 @@ The Go target should expose efficient server facilities: byte buffers, fixed-wid
 ### Shared post-check lowering
 
 The target-neutral IR above is grown only as its consumers need it. The first piece is a small pass that runs after checking, reads the checked tree, and returns annotations the Go emitter consumes (`internal/compiler/lower_tail.go`); it builds no intermediate tree. Its first consumer turns self tail calls into loops.
+
+This subsection describes the earlier `.ef` compiler. The Go-shaped language has Go's `for` loops ([docs/spec/grammar.md](spec/grammar.md#statements)), so the sentence below holds only for that compiler.
 
 Effra has no loop construct, so recursion is the only iteration. Goroutine stacks grow, but growth is not an unlimited-stack guarantee (see above), so a deep pure self recursion must run in constant stack. The loop is therefore part of the language contract rather than an optimization:
 
