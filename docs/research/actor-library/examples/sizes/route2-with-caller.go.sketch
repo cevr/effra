@@ -1,0 +1,38 @@
+// Label: Proposed, route 2, hypothetical. NOT adopted: route2-roster.go.sketch
+// plus the same exported caller as agent-inline.go.sketch, written only to
+// measure what syntax would save at the inline-call scope.
+package roster
+
+import "slices"
+
+type RoomFull struct{ Limit int64 }
+
+type Room actor {
+	limit int64
+	names []string
+
+	func Join(name string) (int64, error[RoomFull]) {
+		if len(names) >= limit {
+			return RoomFull{limit}
+		}
+		names = append(names, name)
+		return len(names)
+	}
+
+	func Leave(name string) int64 {
+		names = slices.DeleteFunc(names, func(n string) bool { return n == name })
+		return len(names)
+	}
+
+	func Members() []string { return names }
+}
+
+func StartRoom(limit int64) Room {
+	return spawn Room{limit: limit} cap 64
+}
+
+func Use(room Room, name string) ([]string, error[RoomFull | actor.Stopped]) {
+	try room.Join(name)
+	try room.Leave(name)
+	return room.Members()
+}

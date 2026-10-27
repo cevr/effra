@@ -24,6 +24,7 @@ This directory is the record. A rendered copy, such as a Sideshow post, is a vie
 | 2026-10-08 | [Explicit failure and service contracts](2026-10-08-effect-contracts.md) | Checked |
 | 2026-10-12 | [Laws, satisfactions and evidence](2026-10-12-laws.md) | Tested candidate, Proposed |
 | 2026-10-27 | [The Go-shaped language ("Effect for Go")](2026-10-27-go-sketch.md) | Checked (prototype), Proposed |
+| 2026-10-27 | [Actors as an ordinary library](2026-10-27-actor-library.md) | Proposed |
 | 2026-10-27 | [Why did this request time out? An agent reads a trace](2026-10-27-traceability.md) | Checked (prototype), Proposed |
 | 2026-10-27 | [`needs` and `provides`](2026-10-27-needs-provides.md) | Tested candidate, Proposed |
 | 2026-10-27 | [The language is Ergo](2026-10-27-ergo.md) | Tested candidate |

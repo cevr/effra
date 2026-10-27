@@ -2,6 +2,20 @@
 
 > **Go is the only target (2026-10-26).** The owner removed the JavaScript target ("we're removing the js interop id say"; [north star](../../NORTH_STAR.md#go-is-the-only-target-owner-2026-10-26)). Clauses below that name JavaScript, TypeScript declarations, Bun, Node or a pinned Effect runtime or ABI record the earlier two-target contract. They are not requirements or acceptance targets; Effect stays prior art for the guarantees.
 
+## Decision, 2026-10-27: actors are an ordinary library (#101)
+
+Owner, 2026-10-27, on [#101](https://github.com/cevr/ergo/issues/101): "Let's see if we can make actor a library mechanism." The spike in [actors as an ordinary library](../research/actor-library.md) found that route 1 holds for every part. The std `actor` package is ordinary library code over generics, unions, function types with rows, resources and tasks. There is no compiler projection of a protocol, no compiler-known `Actor` identity and no actor syntax. This replaces the bundled-identity plan below: the `Actor<P>` projection, `actor.client` methods and `actors.post` operation references are superseded.
+
+- A message that wants an answer carries a typed reply address, `actor.Reply[T, E]` (Gleam OTP `Subject`, Akka Typed `replyTo`). `actor.Ask(to, request)` takes `T` and `E` from the request function's parameter, so a wrong reply type is a compile error. The Go lowering proves it with negative compile cases.
+- `Reply[T, E]` is an ordinary resource. Answering consumes it; releasing it unanswered answers `NoReply`, or `Stopped` while the actor stops. "Every Ask is answered once, or the caller gets a cause" therefore follows from automatic release and use-after-consume, not from an actor rule. It needs the general resource rules A1 to A5 for #197 ([spec Gaps 35 to 47](../spec/README.md#gaps)). An answer nobody can receive is released once, by the general channel rule (A3).
+- The owner handle `actor.Actor[M, E]` is a resource because it holds the actor's task; `Stop` consumes it. The copyable `actor.Address[M]` has `Send` and `Ask` only. `Stop` closes admission before it interrupts, so after the stop is requested both fail with `Stopped`. Values that cross the actor boundary are copies (A11).
+- A machine-backed actor (`actor.StartMachine(m, capacity)`) and an agent (`actor.StartAgent`, `actor.Call`, Elixir `Agent`) are library code over `actor.Start`. An agent serves a protocol that is a set of methods with a `*S` receiver: `actor.Call(room, func(r *Room) (int64, error[RoomFull]) { return r.Join(name) })` lends the state for one call, with no message union and no reply address.
+- The cost is source length: an agent used inline takes 1.66x the tokens of a hypothetical actor syntax (1.54x with #214), a message-union handler actor 2.65x to 3.38x, and a machine 1.06x, on the measured examples. No guarantee needs syntax, so route 2 is not adopted.
+
+The normative rules are in [runtime.md, Machines and actors](../spec/runtime.md#machines-and-actors). The earlier contracts below for admission, cancellation, shutdown, message ownership and inspection stay as design input for [#13](https://github.com/cevr/ergo/issues/13) and [#10](https://github.com/cevr/ergo/issues/10) where they do not name the superseded projection.
+
+## Earlier plan, 2026-10-06
+
 Status: owner-directed design, 2026-10-06; not implemented language or library support. Actor execution is primarily a runtime/standard-library capability. Read [the source comparison](../research/actor-model-and-durability.md), [ordinary abstractions](language-abstractions.md), [owned library contracts](standard-library-capabilities.md), [Go boundaries](go-protocol-interop.md) and the [machine specialization](state-machines.md).
 
 An actor is an owned, addressable instance of behavior with typed messages/replies and explicit admission/concurrency policy. It need not be a state machine. Reuse ordinary `service`, `impl`, effect functions, `uses`, `raises` and scope ownership. An owned effect without a message interface remains a fiber. A machine adds checked transitions and state-entry lifetimes to one form of actor behavior.
@@ -10,7 +24,9 @@ Machine plans remain provider-independent. A runtime provider receives the check
 
 Supervision, durable addressing and persistence are separately selected capabilities for either behavior form. Local actor identity promises neither durable storage nor delivery after a process failure. No actor DSL is adopted. Under [construct admission](../design.md#language-design-principles), a new construct must demonstrate a guarantee the common type/row/ownership model cannot express, through two unrelated executable consumers and a missed negative diagnostic.
 
-## Protocol and behavior
+## Protocol and behavior (superseded 2026-10-27)
+
+Superseded by the decision above: the protocol is the message type, and nothing projects it. The text is kept as the record of the earlier plan.
 
 One nominal service declares an ordinary protocol. Each operation retains its arguments, reply type and expected failure row. An ordinary implementation/factory supplies behavior and explicit construction inputs/failures. The proposed `Actor<P>` names a nominal protocol identity: an ordinary service, or a [machine declaration](state-machines.md#construct-admission-gate) with a compiler-derived protocol. `Actor<Spooler>` projects service methods; `Actor<Session>` projects that machine's Event send/call and Output observation, without pretending its Event enum is a service. Both use the common canonical protocol owner. No caller-written tuple of message/error/service/owner parameters is required.
 
@@ -20,7 +36,9 @@ The finite initial profile is local sequential dispatch. Each message executes i
 
 Typed domain failure belongs to the originating request and, after successful invocation cleanup, ordinary handler actors continue. A handler defect or cleanup failure stops the actor with full Cause; queued callers receive Stopped with bounded terminal-cause data. Machine step/completion failures retain their separately specified terminal-on-failure policy. Inspection exposes these policies; `raises` alone does not choose supervision or rollback. Spawn charges construction failures, constructor-forked child failures and the behavior-terminal expected row, following the conservative fork rule. It does not charge ordinary per-request domain failures. An unobserved actor terminal Cause propagates at its owning scope's closure; observing it does not erase the conservatively charged row. Unobserved background child failures likewise follow observation at owner closure until an explicit monitor/supervisor capability is supplied; a successful spawn is not a health guarantee.
 
-## Proposed library surface
+## Earlier library surface (superseded 2026-10-27)
+
+Superseded by the decision above. The library surface is in [the research note](../research/actor-library.md#library-api). The budgets, admission and stop contracts in this section remain input for #13.
 
 Names and projections below are illustrative, not currently admitted compiler interfaces. Implement them through the common nominal service/type/row model. Unsupported protocol-associated projections or ownership relations diagnose; no unchecked payload casts, per-protocol analyzer or actor-specific compiler opcode may stand in for them.
 
@@ -30,7 +48,7 @@ Effectful library operations, including stop requests and exit observations, con
 | --- | --- |
 | `actors.spawn(factory, options)` | Run a checked behavior factory once in a new child owner; acquire/capture constructor and handler services, roll back failed construction, return owned `Actor<P>`. Charge construction, constructor-child and behavior-terminal failure rows, not ordinary per-request domain failures. Merely declaring behavior starts nothing. |
 | `actor.client.operation(args)` | Construct a deferred request/reply effect with that operation's domain failures plus admission failures. `run` remains the execution boundary. Heterogeneous methods preserve their distinct argument, reply and failure identities. |
-| `actors.post(actor, operationRef, args)` | Typed nonblocking admission only, admitted only for operations with an empty expected `raises` row. Its nominal operation reference preserves argument shape; no reply success is implied. Fallible operations use request/reply, optionally forked with the ordinary child-failure contract. A `void`-returning method still uses ordinary request/reply unless post is explicit. |
+| `actors.post(actor, operationRef, args)` | Superseded 2026-10-27 (no operation references; a message without a reply uses `Address.Send`). Typed nonblocking admission only, admitted only for operations with an empty expected `raises` row. Its nominal operation reference preserves argument shape; no reply success is implied. Fallible operations use request/reply, optionally forked with the ordinary child-failure contract. A `void`-returning method still uses ordinary request/reply unless post is explicit. |
 | `actor.requestStop()` | Nonblocking shutdown control outside mailbox capacity. Stop new admission, cancel active work and discard queued work. |
 | `actor.awaitExit()` | Observe completed shutdown through a P-independent bounded portable exit snapshot after all owned children/finalizers. Internal full terminal Cause remains intact. Concurrent observers share one exit; cancelling an observer never abandons cleanup. |
 | Deferred `actors.receive(factory, loop, options)` | An ordinary effect function with empty `raises` controls a restricted `Inbox<P>`. Before adoption, show useful loop state or timed/source selection that handler actors cannot express, through general cancellation-safe `handleNext`: interruptible before dequeue, then actor-owned dispatch, cleanup and reply once dequeued. Raw escaping reply tokens, split completion, multiple consumers, batching and selective receive remain unsupported until their general ownership/correlation contract exists. |
@@ -46,7 +64,7 @@ Machine projections retain the shared fixed size failures explicitly: send/call 
 
 Oversized replies/domain failures produce phase-qualified MessageTooLarge after cleanup and the ordinary actor continues; cleanup failure still stops it. If a caller explicitly cancels after admission, later success or domain failure is discarded and counted without retaining its payload or becoming an actor-terminal failure. Inspection distinguishes caller detachment from post; post never admits a fallible operation. Detached observation promises no rollback or automatic retry.
 
-Illustrative source, pending the general interfaces and library implementation:
+Illustrative source of the earlier plan (superseded 2026-10-27; the route-1 roster is [roster.go.sketch](../research/actor-library/examples/roster.go.sketch)):
 
 ```ef
 service Roster {
