@@ -1,6 +1,7 @@
 package check
 
 import (
+	"strconv"
 	"strings"
 
 	"effra.local/prototype/internal/sketch/syntax"
@@ -54,6 +55,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 		}
 	}
 	var matrix [][]int
+	solver := newMatrixSolver()
 	hasDefault := false
 	patternsOK := valid
 	for _, cl := range s.Clauses {
@@ -93,11 +95,11 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 			if !ok {
 				continue
 			}
-			if !useful(matrix, row, sizes) {
+			if !solver.caseUseful(matrix, row, sizes) {
 				c.errorf(item, CodeType, "this case is already covered by the cases before it (unreachable)")
 				continue
 			}
-			matrix = append(matrix, row)
+			matrix = addRow(matrix, row)
 			tuples = append(tuples, row)
 		}
 		inner := c.openScope()
@@ -141,7 +143,7 @@ func (c *checker) typeSwitch(s *syntax.TypeSwitchStmt, label string) {
 		c.totalSwitch[s] = true
 		return
 	}
-	if w, ok := missing(matrix, sizes); ok {
+	if w, ok := solver.missing(matrix, sizes); ok {
 		parts := make([]string, len(w))
 		for j, idx := range w {
 			parts[j] = unions[j].Variants[idx].String()
@@ -184,56 +186,138 @@ func (c *checker) caseVariant(e syntax.Expr, u *Union, subj Type) int {
 	return -2
 }
 
-// useful reports whether the pattern row q matches a value that no row of
-// the matrix matches (Maranget, "Warnings for pattern matching", 2007). A
-// pattern element is a variant index or -1 for _.
-func useful(rows [][]int, q []int, sizes []int) bool {
-	if len(q) == 0 {
-		return len(rows) == 0
-	}
-	if q[0] >= 0 {
-		return useful(specialize(rows, q[0]), q[1:], sizes[1:])
-	}
-	present := map[int]bool{}
-	for _, r := range rows {
-		if r[0] >= 0 {
-			present[r[0]] = true
+// matrixSolver decides usefulness and totality over one switch's case
+// matrix (Maranget, "Warnings for pattern matching", 2007). A pattern
+// element is a variant index or -1 for _.
+//
+// Plain Maranget recursion splits on every complete column and can take
+// time exponential in the number of subjects (round-1 review, M8: 21 binary
+// subjects took 4.9 s). The solver prunes as OCaml's Parmatch does: the case
+// matrix drops every row a later case subsumes; a submatrix holding a row of
+// wildcards answers at once; equal rows collapse; a run of fixed query
+// columns specializes without branching; and equal submatrices are answered
+// once, memoized by their rows.
+type matrixSolver struct {
+	usefulMemo  map[string]bool
+	missingMemo map[string]missingResult
+}
+
+type missingResult struct {
+	witness []int
+	ok      bool
+}
+
+func newMatrixSolver() *matrixSolver {
+	return &matrixSolver{usefulMemo: map[string]bool{}, missingMemo: map[string]missingResult{}}
+}
+
+// caseUseful reports whether a case row is useful against the cases before
+// it. Usefulness does not depend on the order of the columns, so the row's
+// fixed columns move to the front: they specialize the matrix without
+// branching, and what remains is a totality question over the wildcard
+// columns, which the totality memo shares across the cases.
+func (s *matrixSolver) caseUseful(rows [][]int, q []int, sizes []int) bool {
+	order := make([]int, 0, len(q))
+	for j, p := range q {
+		if p >= 0 {
+			order = append(order, j)
 		}
 	}
+	for j, p := range q {
+		if p < 0 {
+			order = append(order, j)
+		}
+	}
+	permute := func(r []int) []int {
+		out := make([]int, len(order))
+		for i, j := range order {
+			out[i] = r[j]
+		}
+		return out
+	}
+	prows := make([][]int, len(rows))
+	for i, r := range rows {
+		prows[i] = permute(r)
+	}
+	return s.useful(prows, permute(q), permute(sizes))
+}
+
+// useful reports whether the pattern row q matches a value that no row of
+// the matrix matches. A run of fixed columns specializes without branching;
+// once the rest of q is wildcards, q is useful exactly when the matrix is not
+// total, so the query shares the totality memo (as Parmatch reduces
+// exhaustiveness to the usefulness of a wildcard row).
+func (s *matrixSolver) useful(rows [][]int, q []int, sizes []int) bool {
+	for {
+		if len(rows) == 0 {
+			return true
+		}
+		if allWild(q) {
+			_, ok := s.missing(rows, sizes)
+			return ok
+		}
+		if q[0] < 0 {
+			break
+		}
+		rows, q, sizes = specialize(rows, q[0]), q[1:], sizes[1:]
+	}
+	rows, key := reduce(rows, q, sizes)
+	if allWild(rows[0]) {
+		return false
+	}
+	if v, ok := s.usefulMemo[key]; ok {
+		return v
+	}
+	v := s.useful0(rows, q, sizes)
+	s.usefulMemo[key] = v
+	return v
+}
+
+// useful0 splits a wildcard column of q over the column's constructors.
+func (s *matrixSolver) useful0(rows [][]int, q []int, sizes []int) bool {
+	present := presentCtors(rows)
 	if len(present) == sizes[0] {
 		for ctor := 0; ctor < sizes[0]; ctor++ {
-			if useful(specialize(rows, ctor), q[1:], sizes[1:]) {
+			if s.useful(specialize(rows, ctor), q[1:], sizes[1:]) {
 				return true
 			}
 		}
 		return false
 	}
-	return useful(defaults(rows), q[1:], sizes[1:])
+	return s.useful(defaults(rows), q[1:], sizes[1:])
 }
 
 // missing returns a value vector that no row matches, if one exists.
-func missing(rows [][]int, sizes []int) ([]int, bool) {
+func (s *matrixSolver) missing(rows [][]int, sizes []int) ([]int, bool) {
 	if len(sizes) == 0 {
 		if len(rows) == 0 {
 			return []int{}, true
 		}
 		return nil, false
 	}
-	present := map[int]bool{}
-	for _, r := range rows {
-		if r[0] >= 0 {
-			present[r[0]] = true
-		}
+	rows, key := reduce(rows, nil, sizes)
+	if len(rows) > 0 && allWild(rows[0]) {
+		return nil, false
 	}
+	if r, ok := s.missingMemo[key]; ok {
+		return r.witness, r.ok
+	}
+	w, ok := s.missing0(rows, sizes)
+	s.missingMemo[key] = missingResult{w, ok}
+	return w, ok
+}
+
+func (s *matrixSolver) missing0(rows [][]int, sizes []int) ([]int, bool) {
+	present := presentCtors(rows)
 	if len(present) == sizes[0] {
 		for ctor := 0; ctor < sizes[0]; ctor++ {
-			if w, ok := missing(specialize(rows, ctor), sizes[1:]); ok {
+			if w, ok := s.missing(specialize(rows, ctor), sizes[1:]); ok {
 				return append([]int{ctor}, w...), true
 			}
 		}
 		return nil, false
 	}
-	w, ok := missing(defaults(rows), sizes[1:])
+	w, ok := s.missing(defaults(rows), sizes[1:])
 	if !ok {
 		return nil, false
 	}
@@ -243,6 +327,99 @@ func missing(rows [][]int, sizes []int) ([]int, bool) {
 		}
 	}
 	return nil, false
+}
+
+func presentCtors(rows [][]int) map[int]bool {
+	present := map[int]bool{}
+	for _, r := range rows {
+		if r[0] >= 0 {
+			present[r[0]] = true
+		}
+	}
+	return present
+}
+
+func allWild(r []int) bool {
+	for _, p := range r {
+		if p >= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// subsumes reports whether every value row b matches also matches row a.
+func subsumes(a, b []int) bool {
+	for i := range a {
+		if a[i] >= 0 && a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// addRow appends a useful case row to the matrix and drops the earlier rows
+// it subsumes, so the case matrix never holds a subsumed row. Dropping one
+// changes neither usefulness nor totality: every value it matches, the
+// subsuming row matches too. The new row is useful, so no earlier row
+// subsumes it.
+func addRow(rows [][]int, row []int) [][]int {
+	out := rows[:0:0]
+	for _, r := range rows {
+		if !subsumes(row, r) {
+			out = append(out, r)
+		}
+	}
+	return append(out, row)
+}
+
+// reduce prepares a submatrix for a branch: a row of wildcards covers every
+// value and stands for the whole matrix; equal rows, which specialization
+// makes of rows that differed only in a consumed column, collapse to the
+// first. It returns the reduced rows with their memo key, built in the same
+// pass. The key states the whole subproblem (the column sizes, the query
+// and the rows), so a hit always answers the same question; rows keep their
+// order, so subproblems that order-preserving steps make equal meet with
+// equal keys.
+func reduce(rows [][]int, q []int, sizes []int) ([][]int, string) {
+	for _, r := range rows {
+		if allWild(r) {
+			rows = [][]int{r}
+			break
+		}
+	}
+	var b []byte
+	b = appendRow(b, sizes)
+	b = append(b, '|')
+	b = appendRow(b, q)
+	seen := make(map[string]bool, len(rows))
+	out := rows[:0:0]
+	var rk []byte
+	for _, r := range rows {
+		rk = appendRow(rk[:0], r)
+		if seen[string(rk)] {
+			continue
+		}
+		seen[string(rk)] = true
+		out = append(out, r)
+		b = append(b, '|')
+		b = append(b, rk...)
+	}
+	return out, string(b)
+}
+
+func appendRow(b []byte, r []int) []byte {
+	for i, p := range r {
+		if i > 0 {
+			b = append(b, ',')
+		}
+		if p < 0 {
+			b = append(b, '_')
+			continue
+		}
+		b = strconv.AppendInt(b, int64(p), 10)
+	}
+	return b
 }
 
 func specialize(rows [][]int, ctor int) [][]int {
