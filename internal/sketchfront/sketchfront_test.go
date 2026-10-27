@@ -2,6 +2,7 @@ package sketchfront
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,7 +77,7 @@ func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
 		})
 	}
 	t.Run("unrecognised error shape", func(t *testing.T) {
-		got := parseDiagnostic("x", lineStarts("x"), "something else: S001 broken")
+		got := syntaxDiagnostic(errors.New("something else: S001 broken"))
 		if got.Code != "S001" || got.Message != "something else: S001 broken" || got.Span != (compiler.Span{}) {
 			t.Fatalf("fallback %+v, want the whole text without a location", got)
 		}
@@ -98,6 +99,49 @@ func TestSketchCheckReportsPrototypeDiagnostics(t *testing.T) {
 			t.Fatal("a clean analysis is not checked")
 		}
 	})
+}
+
+// TestFormat: the 2026 formatter keeps the legacy result shape, reports a
+// syntax error as a located S001 failure, and honours the output limit.
+func TestFormat(t *testing.T) {
+	source := "package p\n\nfunc main()  uses Console {\nConsole.Println(\"a\")\n}\n"
+	want := "package p\n\nfunc main() uses Console {\n\tConsole.Println(\"a\")\n}\n"
+	result, err := Format(source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Text != want || !result.Changed || result.SchemaVersion != compiler.FormatterSchemaVersion ||
+		result.InputDigest != compiler.FormatDigest(source) || result.OutputDigest != compiler.FormatDigest(want) {
+		t.Fatalf("result %+v", result)
+	}
+	again, err := Format(want, 0)
+	if err != nil || again.Changed || again.Text != want {
+		t.Fatalf("formatted text changed again: %+v, %v", again, err)
+	}
+	if FormatterIdentity != "effra-2026/formatter-1" {
+		t.Fatalf("identity %q", FormatterIdentity)
+	}
+
+	_, err = Format("package p\n\nfunc main() {\n\tx := )\n}\n", 0)
+	var failure compiler.FormatFailure
+	if !errors.As(err, &failure) || len(failure.Diagnostics) != 1 || failure.Diagnostics[0].Code != "S001" {
+		t.Fatalf("syntax error gave %v", err)
+	}
+	if d := failure.Diagnostics[0]; d.Span.Line != 4 || d.Span.Column != 7 {
+		t.Fatalf("span %+v, want 4:7", d.Span)
+	}
+	if msg := FailureMessage(failure); !strings.HasPrefix(msg, "source cannot be formatted: S001 at 4:7: ") {
+		t.Fatalf("message %q", msg)
+	}
+
+	_, err = Format(source, 10)
+	var limit compiler.FormatLimitError
+	if !errors.As(err, &limit) || limit.Limit != 10 {
+		t.Fatalf("limit gave %v", err)
+	}
+	if _, err := Format(source, -1); err == nil {
+		t.Fatal("a negative limit was accepted")
+	}
 }
 
 func TestSketchBuildRunsProgram(t *testing.T) {
