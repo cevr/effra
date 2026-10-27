@@ -207,6 +207,20 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Exit accumulator** (designed): The runtime record that combines a body's outcome with release defects and interruption into one exit cause, so a release never hides a failure.
 
+**Definition ID** (designed): The stable name of one checked definition, derived by the checker from the declaration: `<package>.<Name>`, `<package>.<Type>.<Method>`, or `<enclosing ID>/<construct>#<n>` for a block such as a timeout. It is meaningful only with the source revision it was computed from. Runtime traces, defect chains and `ef inspect` share this ID space ([traceability](docs/research/traceability.md)).
+
+**Source revision** (designed): The SHA-256 digest of a source file, the revision that qualifies its definition IDs. A trace header carries it once, and a trace query refuses a trace whose revision differs from the file.
+
+**Trace event** (designed): One record of a run. It has an occurrence ID, a kind from the runtime-law vocabulary (#124) or the three additions `call`, `call-exit` and `interrupt`, a task and its parent, a definition ID and a source site, and it may carry an occurrence link. Its serialized form names failures and defects by type and never carries argument or result values.
+
+**Occurrence ID** (designed): The number the runtime gives a trace event when it raises it, unique within one traced task tree and taken from one counter, so an event that happens before another has the smaller ID. A capability call's occurrence ID joins its `call` and `call-exit` events.
+
+**Occurrence link** (designed): The occurrence ID that one trace event records for another, set by the runtime and never inferred by a reader: a `handler` links the failure, deadline or child exit it caught; a `call-exit` its call; an `observe` the child's `body-exit`; a `panic` the capability call it left. A `body-exit` has no single link: each reason of its exit carries its own origin, an occurrence link for that reason alone (a typed failure its failed call, deadline or child exit; a defect its `panic`; an interruption its `cancel-request`). An origin names the occurrence the reason came from, never an occurrence that merely carried an equal value; when the runtime cannot tell which of several equal failures a reason came from, it records none. A trace query states a cause only along these links, says "origin not recorded" for a reason without one, and labels anything else a candidate.
+
+**Point event** (designed): A trace event that emitted code raises at its own source site: a capability `call` and its `call-exit` with the outcome (ok, a failure, a defect or interrupted), an `interrupt` at an interruption point, a wire `construct` or a catch `handler`. The runtime raises the other kinds for a task, keyed by the task's definition ID.
+
+**Trace evidence** (designed): The answer of a trace query (`sketchc trace`, later `ef trace` and MCP `code.trace`): the `trace-evidence-1` envelope with the fields of the review evidence schema (#156), then the tasks, the capability calls with their spans, the resolved events and the cause trace. The query validates the trace before it answers and refuses a malformed one with the reason.
+
 ## Earlier `.ef` language
 
 These terms describe the `.ef` language that `internal/compiler` and `runtime/effra` implement today, with its `effect fn`, `run`, `raises` and `service` forms. The Go-shaped language replaces it; where a term has a counterpart above, the entry says so.

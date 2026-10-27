@@ -77,11 +77,17 @@ func (h *Handle[T]) Wait() (T, error) {
 		// Done closes only on a stop the owner can observe, so an owner that
 		// is still not stopped was woken by the task finishing.
 		if !owner.Stopped() {
+			if h.task.trace != nil {
+				h.task.childEvent(TraceObserve, owner, true)
+			}
 			return h.value, h.err
 		}
 	}
 	h.task.Interrupt()
 	<-h.done
+	if h.task.trace != nil {
+		h.task.traceForget()
+	}
 	// An interrupted join does not observe the task (law R4): keep only its
 	// defects, then the interruption.
 	var c Cause
@@ -100,9 +106,13 @@ func (h *Handle[T]) Stop() error {
 	if h.consumed {
 		return nil
 	}
+	owner := h.owner
 	h.consumed, h.owner = true, nil
 	h.task.Interrupt()
 	<-h.done
+	if h.task.trace != nil {
+		h.task.childEvent(TraceObserve, owner, false)
+	}
 	return defectsOf(h.err)
 }
 
