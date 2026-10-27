@@ -1,6 +1,7 @@
 package actorlib
 
 import (
+	"reflect"
 	"sync"
 	"sync/atomic"
 
@@ -247,7 +248,13 @@ func (a Address[M]) Send(t *rt.Task, m M) error {
 		release(m)
 		return rt.Interrupted
 	}
-	m = snapshot(m) // a copy: the sender keeps its own value; a resource moves
+	return a.admit(t, snapshot(m)) // a copy: the sender keeps its own value; a resource moves
+}
+
+// admit is Send without the copy, for a message the library built from
+// handles only (an agent call), where the compiler knows statically that
+// there is nothing to copy.
+func (a Address[M]) admit(t *rt.Task, m M) error {
 	c := a.c
 	c.mu.RLock()
 	if c.refused() {
@@ -371,7 +378,6 @@ func (a Actor[M]) Stop() error {
 // one allocation holds both.
 type loop[S, M any] struct {
 	c       cell[M]
-	t       *rt.Task
 	s       S
 	owned   bool // the loop owns s, except while a consuming handler holds it
 	lends   bool // the handler borrows s and never consumes it
@@ -379,15 +385,9 @@ type loop[S, M any] struct {
 	holding bool
 }
 
-// run is the actor's task body. Its exit goes through rt's canonical path, an
-// owner scope (rt.Scope.End): a recovered panic is classified by rt, so an
-// interruption or an exit carried through a nested scope keeps its kind and
-// order, and finish runs as a release of that scope, masked, on every exit.
+// run is the actor's task body. Every exit goes through exit.
 func (l *loop[S, M]) run(t *rt.Task, handle Handler[S, M]) (err error) {
-	l.t = t
-	sc := rt.NewScope(t)
-	defer sc.End(&err)
-	sc.Defer(l.finish)
+	defer l.exit(t, &err)
 	return l.serve(t, handle)
 }
 
@@ -422,17 +422,43 @@ func (l *loop[S, M]) serve(t *rt.Task, handle Handler[S, M]) error {
 	}
 }
 
-// finish is the loop's release: it runs once, masked (I2), after the body's
-// exit and any body panic are recorded. Admission closes; then the held
-// message, every queued message in admission order (a queued request is
-// answered Stopped) and last the state are released. Each release runs even
-// after an earlier one panicked (R9), in a nested owner scope whose exit rt
-// carries back into the loop's scope, so every release cause keeps its kind,
-// its InRelease mark and its order. A clean stop with nothing to release
-// builds no scope.
-func (l *loop[S, M]) finish() {
+// exit runs on every exit of the loop. It closes admission, then releases
+// the held message, every queued message in admission order (a queued
+// request is answered Stopped) and last the state.
+//
+// The library classifies no panic itself: rt does, on its canonical path. A
+// body panic with nothing to release is raised again for the task boundary
+// (rt.Run) to record; otherwise drain records it in an owner scope
+// (rt.Scope.End). So the rt.Interrupted sentinel and an exit carried out of a
+// nested scope keep their kind and order, and only other panic values become
+// defects. A clean exit with nothing to release returns the body's exit as it
+// is and builds no scope.
+func (l *loop[S, M]) exit(t *rt.Task, err *error) {
+	p := recover()
 	l.c.ended.Store(true)
-	l.c.closeAdmission()
+	l.c.closeAdmission() // no message is admitted after this, so the queue is final
+	if !l.holding && len(l.c.mailbox) == 0 && !(l.owned && isResource(l.s)) {
+		if p != nil {
+			panic(p) // the task boundary records it (rt.Run)
+		}
+		return
+	}
+	l.drain(t, p, err)
+}
+
+// drain releases what the loop owns in an owner scope, masked (I2), each as
+// its own release: every release runs even after an earlier one panicked
+// (R9), and rt records each release cause after the body's exit and the body
+// panic p, with its kind, its InRelease mark and its order.
+//
+//go:noinline
+func (l *loop[S, M]) drain(t *rt.Task, p any, err *error) {
+	rs := rt.NewScope(t)
+	defer rs.End(err)
+	if l.owned && isResource(l.s) { // registered first, so released last
+		s := l.s
+		rs.Defer(func() { release(s) })
+	}
 	var queued []M
 	if l.holding {
 		queued = append(queued, l.held)
@@ -446,25 +472,26 @@ func (l *loop[S, M]) finish() {
 		}
 		break
 	}
-	state := l.owned && isResource(l.s)
-	if len(queued) == 0 && !state {
-		return
-	}
-	rs := rt.NewScope(l.t)
-	if state { // registered first, so released last
-		rs.Defer(func() { release(l.s) })
-	}
 	for i := len(queued) - 1; i >= 0; i-- {
 		m := queued[i]
 		rs.Defer(func() { release(m) })
 	}
-	rs.End(nil) // panics with the releases' exit; the loop's scope records it
+	if p != nil {
+		panic(p) // rs.End recovers it first, then runs the releases
+	}
 }
 
-// isResource reports whether v has a release.
+var closer = reflect.TypeFor[interface{ Close() }]()
+
+// isResource reports whether v has a release. It does not box v unless V is
+// an interface type, whose dynamic value decides.
 func isResource[V any](v V) bool {
-	_, ok := any(v).(interface{ Close() })
-	return ok
+	t := reflect.TypeFor[V]()
+	if t.Kind() == reflect.Interface {
+		_, ok := any(v).(interface{ Close() })
+		return ok
+	}
+	return t.Implements(closer)
 }
 
 // release is the release of a value whose type is a type parameter: the

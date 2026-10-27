@@ -66,7 +66,11 @@ func StartAgent[S any](s *rt.Scope, span string, initial S, capacity int) Agent[
 // then detaches and a late result is released.
 func Call[S, T any](t *rt.Task, to AgentAddress[S], f func(t *rt.Task, s *S) (T, error)) (T, error) {
 	sl := newSlot[T, error](&to.c.control)
-	err := to.Send(t, call[S]{
+	if t.Stopped() {
+		var zero T
+		return zero, rt.Interrupted
+	}
+	err := to.admit(t, call[S]{ // a call holds only handles: nothing to copy
 		run: func(at *rt.Task, s *S) error {
 			v, err := f(at, s)
 			if err == nil {
