@@ -64,10 +64,10 @@ payment := try timeout.After(500ms) { Gateway.Authorize(order) }
 **Classification.** `timeout.After` is an ordinary library function in the `timeout` package, not a construct. Under the owner's rules, constructs get keywords, a dot form is library, and kernel primitives are functions (owner, 2026-10-12). Its kernel primitives are task start (`go`), `Task.Stop` and `Task.Wait`, and the `Scheduler` capability. Its designed signature, in the provisional generic spelling of [types.md](types.md#generics):
 
 ```go
-func After(d duration, body func() (T, error[E])) (T, error[E | Expired]) uses Scheduler, R
+func After(d duration, body func() (T, error[E]) uses R) (T, error[E | Expired]) uses Scheduler, R
 ```
 
-where `body` may itself require `R`. A trailing block is the `body` argument ([grammar.md](grammar.md#expressions)). *Prior art:* Effect's `Effect.timeout` is an ordinary combinator over fibers and the clock; Go's `context.WithTimeout` is a library function.
+The callback type carries `uses R`, so the requirements of the block appear in `After`'s own row. A trailing block is the `body` argument ([grammar.md](grammar.md#expressions)). *Prior art:* Effect's `Effect.timeout` is an ordinary combinator over fibers and the clock; Go's `context.WithTimeout` is a library function.
 
 1. `timeout.After(d) { block }` needs `import "timeout"`. It takes one `duration` (S108) and a block (S108). The duration is a value position, so a fallible duration is S105.
 2. It charges `Scheduler` and the block's requirements ([rows.md](rows.md#capability-rows)), because its signature says so.
@@ -75,7 +75,7 @@ where `body` may itself require `R`. A trailing block is the `body` argument ([g
 4. The block runs as a child task. If the deadline passes first, the child is stopped and drained, and the expression fails with `timeout.Expired`. The result comes only after the child has finished, so completed cleanup beats deadline punctuality (NORTH_STAR tiebreak).
 5. If the parent is stopped first, or while the block runs, the child is stopped and drained, and the expression's exit is an interruption.
 6. A defect in the child re-raises in the parent on every path.
-7. The block ends with an expression, and `return` cannot leave it (S109).
+7. The block ends with an expression, and it may not contain `return` ([grammar.md](grammar.md#expressions), trailing-block rule; S109 in the prototype). Write an explicit `func` literal to return early.
 8. **Lowering.** The block is the only Go func literal the prototype emits: the child task's body.
 
 *Prior art:* Effect `Effect.timeout`; Go `context.WithTimeout`, which cancels but does not wait for the work to stop; Elixir `Task.yield` followed by `Task.shutdown`.

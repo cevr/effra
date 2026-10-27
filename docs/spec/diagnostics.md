@@ -20,6 +20,7 @@ A diagnostic has a position, a code and a message: `file:line:col: CODE message`
 | S109 | The program must stay inside the implemented subset, and source names must not collide with the prototype's generated Go. | [grammar](grammar.md#reserved-names), README Gaps 6, 10, 16, 17 | `probes/with-return.sketch` |
 | S110 | A declared local must be read, and an expression statement must be a call, `try` or `catch`, as in Go. | [grammar: statements](grammar.md#statements) | `probes/unused-expression.sketch` |
 | S111 (designed) | A wire must not have two entries for one capability, except a `replace` of an embedded entry. | [rows: wire](rows.md#wire), README Gap 28 | none yet: the prototype accepts the program, and the later entry wins |
+| S112 (designed) | A map's key type must not be a resource in v0. | [resources: containers](resources.md#containers), README Gap 32 | none yet: the prototype has no maps; negative example `map[Key]string{openKey(): "v"}` in resources.md |
 
 Designed codes are not in the prototype. Other designed errors in `docs/spec/` (resources, visibility, capability values, channels of resources) get codes when [#196](https://github.com/cevr/effra/issues/196) and [#197](https://github.com/cevr/effra/issues/197) implement them.
 
@@ -96,6 +97,7 @@ Each rule names a fixture where one exists.
 | An argument has no value | `probes/void-argument.sketch` |
 | A no-value function returns a value, including `return try f()` | `probes/void-fallible-return-value.sketch`, `try-unit-return` |
 | A local shadows a function and is then called | `probes/shadowed-call.sketch` |
+| Prototype limit: a struct value assigned to an interface type, such as `return Mem{}` from `func NewStore() Store`; the designed rule is [interface assignability](types.md#interface-assignability) (README Gap 29) | the checker's type-mismatch message |
 | Others: `try` or `catch` on an infallible expression; a caught type not in the row; an arm value of the wrong type; `:=` with no value or a redeclared name; a non-`bool` condition; a type switch on a non-union; a case that is not a variant or is repeated; wrong return type; a field set twice or of the wrong type; a wrong argument count or type; an uncalled capability method; a wire literal outside `with`; wrong `with` or `timeout.After` arguments; mismatched `==` or `+` operands | `sketch/sketch_test.go` and the checker's messages |
 
 ### S109: outside the subset or reserved

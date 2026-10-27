@@ -51,15 +51,16 @@ A move transfers ownership. After a move, the source binding is unusable, and us
 
 ## Structured lend
 
-A task may use a resource that it does not own when the task is certain to be stopped and drained before the resource is released.
+A task may use a resource that it does not own when the task is certain to be stopped and drained before the borrow of that resource ends.
 
-1. **R27.** `go f(x)`, or a `go` block that captures `x`, **lends** `x` to the task, instead of moving it, when the resulting `Task` is owned by the same owner as `x` and is released before `x`:
-   - in a block, the `Task` is bound after `x` in the same owner scope, so reverse acquisition order (R5) stops and drains the task before `x` closes;
-   - in a struct, the `Task` is stored in a field declared after `x`'s field, so the generated `Close` (R3), which releases fields in reverse declaration order, stops and drains the task before it closes `x`.
+1. **R27. Borrow lifetime.** `go f(x)`, or a `go` block that captures `x`, **lends** `x` to the task, instead of moving it, when the resulting `Task` is guaranteed to be released (stopped and drained) before the borrow of `x` ends, on every exit:
+   - **`x` is owned by the current scope.** The borrow ends when `x` is released. The `Task` is bound after `x` in the same owner scope, so reverse acquisition order (R5) stops and drains the task first; or the `Task` is stored in a struct field declared after `x`'s field, so the generated `Close` (R3), which releases fields in reverse declaration order, stops and drains the task first.
+   - **`x` is lent to the current function** (a parameter, or a value the function borrows by R16, R30 or R35). The borrow ends when the function returns. Every `Task` owned by a scope local to the function satisfies this, because that scope releases the task at the latest when the function returns. Moving or returning such a `Task` out of the function is an error.
 
-   Otherwise the capture moves `x` (R12).
+   Otherwise the capture moves `x` when the function owns `x` (R12), and is an error when `x` is lent (R17).
 2. **R28.** While a task holds a structured lend of `x`, `x` must not be consumed, moved alone or converted. Consuming the task first (`t.Stop()`, `t.Wait()`) ends the lend. Moving `x` and the task together into one aggregate keeps the lend when the aggregate preserves their order (R27).
-3. **R29.** Inside one composite literal, a field value may be a `go` expression that lends a resource given to an earlier field of the same literal. The elements are evaluated in order, and the literal satisfies R27 when it completes.
+3. **Lossless wrapping.** Because a lent parameter supports the same structured lends as an owned local, moving code that starts and drains a task into a helper function never turns a valid program into an invalid one. This keeps the owner's composability rule ([glossary](../../GLOSSARY.md), "Composability checks"). *Prior art:* Swift task groups end every child before `withTaskGroup` returns, so children may use the caller's borrowed values; Rust's `std::thread::scope` lets scoped threads borrow from the enclosing function because they are joined before `scope` returns.
+4. **R29.** Inside one composite literal, a field value may be a `go` expression that lends a resource given to an earlier field of the same literal. The elements are evaluated in order, and the literal satisfies R27 when it completes.
 
 ```go
 type Postgres struct {
@@ -92,6 +93,20 @@ func early() {
 	p.Close()           // error: p is lent to t, which may still run (R28)
 	t.Stop()
 }
+
+func leak(p Pool) Task[struct{}] {
+	t := go poll(p) // p is lent to leak
+	return t        // error: the task would outlive the borrow of p (R27)
+}
+```
+
+A lent parameter, allowed:
+
+```go
+func useOnce(p Pool) {
+	t := go poll(p) // structured lend: t is owned by useOnce's scope, released before useOnce returns
+	t.Stop()
+}
 ```
 
 *Prior art:* Trio nurseries and Swift structured concurrency both guarantee that child tasks end before the scope that started them ends, which is what makes the lend safe; Effect's `forkScoped` ties a fiber to the scope that owns the resources it uses.
@@ -99,14 +114,14 @@ func early() {
 ## Lending
 
 1. **R16.** Passing a resource as an argument lends it. The caller keeps ownership, and the resource is usable again after the call.
-2. **R17.** A lent resource must not be stored, returned, sent or captured by an escaping closure or by `go` inside the callee, except under R27 for the callee's own tasks. Each of these is an error. A call that lends `r` while `r` is consumed in the same call is an error.
+2. **R17.** A lent resource must not be stored, returned, sent or captured by an escaping closure or by `go` inside the callee, except by a structured lend (R27, R31) to a task or owner that the callee releases before it returns. Each of these is an error. A call that lends `r` while `r` is consumed in the same call is an error.
 3. **R18.** Lending needs no lifetime annotations, because a lent value cannot escape the call. *Prior art:* Swift non-escaping borrowed parameters; Rust borrows, whose lifetimes Effra drops because a lend never escapes.
 4. A lend of a `Task` lets the callee read it but not `Wait` or `Stop` it.
 
 ## Closures
 
 1. **R30.** A non-escaping closure, including a trailing block, lends every resource it captures for the duration of the call it is passed to.
-2. **R31.** An escaping closure may capture a resource only under the structured-lend rule: the owner that keeps the closure must be released before the captured resource. In `set.Go(func() { actor.Pump(b, signals) })`, the Set keeps the literal, so `set` must be released before `b`: `set` is bound after `b` in the same owner scope.
+2. **R31.** An escaping closure may capture a resource only under the structured-lend rule: the owner that keeps the closure must be released before the borrow of the captured resource ends (R27), that is, before the resource is released when the scope owns it, or before the function returns when the resource is lent to it. In `set.Go(func() { actor.Pump(b, signals) })`, the Set keeps the literal, so `set` must be released before `b`: `set` is bound after `b` in the same owner scope.
 3. **R32.** While such a closure may still run, consuming the captured resource is an error. `b.Stop()` before `set` is consumed is an error.
 4. **R33.** Every other escaping capture of a resource is an error. *Prior art:* Swift does not let an escaping closure capture a `borrowing` parameter of non-copyable type; Rust requires `move` closures to own what they capture, or a lifetime that outlives them.
 
@@ -127,15 +142,20 @@ The 2026-10-26 sketch bound `set` before `b`; that order is an error under R31, 
 2. **R35.** Copying such a container moves it (R15). Indexing it, `xs[i]`, lends the element. Calling a consuming method through an index (`xs[i].Close()`, `running[j].Wait()`, `ts[k].Stop()`) is an error.
 3. **R36.** A standard-library removal moves the element out: `slices.Take(xs, i)` for a slice, and the map's delete-and-return (`m.Take(k)`). The element then has the caller's scope as owner.
 4. **R37.** Releasing a container releases its remaining elements: a slice or array in reverse index order, a map in unspecified order. Each release runs even when an earlier one had a defect (R9).
+5. **R40. Resource map keys.** A map whose key type is a resource is an error in v0 (S112, designed). Only map values may be resources. README Gap 32 records a later owned-key rule.
 
 ```go
 xs := []File{f}   // f moves into xs (R14)
 ys := xs          // xs moves into ys (R35)
 xs[0].Close()     // error: xs was moved, and Close through an index is a consume (R35)
 read(ys[0])       // allowed: ys[0] is lent to read
+
+func keys() map[Key]string {
+	return map[Key]string{openKey(): "v"} // error: Key is a resource, so it cannot be a map key (R40)
+}
 ```
 
-*Prior art:* Rust's `Vec<T>` forbids moving out by index and moves out through `Vec::remove` and `swap_remove`; Effra keeps that shape and chooses reverse order for release, to match its scope rule (R5).
+*Prior art:* Rust's `Vec<T>` forbids moving out by index and moves out through `Vec::remove` and `swap_remove`; Effra keeps that shape and chooses reverse order for release, to match its scope rule (R5). Rust's `HashMap<K, V>` owns and drops its keys as well as its values; Effra defers owned keys (R40) rather than add key extraction and replacement rules in v0.
 
 ## Channels
 

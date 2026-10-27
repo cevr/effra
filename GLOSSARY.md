@@ -17,7 +17,9 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Exported name** (designed; owner decision 2026-10-27): A package-level name, field or method whose first character is an upper-case letter. Only exported names are visible to other packages, as in Go. See [grammar](docs/spec/grammar.md#visibility).
 
-**Capability** (implemented in prototype): An interface with method signatures that names replaceable behaviour, such as `Orders` or `Clock`. Code reaches it only by calling its methods on the capability name, `Orders.Find(id)`, and every such call charges the capability to the caller's capability row. The capability is not a first-class value: it cannot be passed, returned or stored. The same interface in a type position is an ordinary interface type whose values are provider values; calling their methods charges no capability. See [types](docs/spec/types.md#capabilities) and [rows](docs/spec/rows.md#capability-rows).
+**Capability** (implemented in prototype): An interface with method signatures that names replaceable behaviour, such as `Orders` or `Clock`. Code reaches it only by calling its methods on the capability name, `Orders.Find(id)`, and every such call charges the capability to the caller's capability row. The capability is not a first-class value: it cannot be passed, returned or stored (designed; the prototype reports a bare capability name as unknown). See [types](docs/spec/types.md#capabilities) and [rows](docs/spec/rows.md#capability-rows).
+
+**Interface value** (designed; the prototype accepts interface types in signatures but rejects method calls on their values and assignments to them): A value of an interface type in a type position, such as a parameter `o Orders`. It holds a provider value. Calling its method runs that provider's method with the method's declared rows and charges no capability. A type is assignable to the interface by method-row compatibility ([types](docs/spec/types.md#interface-assignability)).
 
 **Provider** (implemented in prototype for literals): A value whose type implements a capability's methods, bound to that capability by a `wire`. A provider may fail less than its capability, never more.
 
@@ -75,7 +77,7 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Variant** (implemented in prototype): One struct type listed in a union. A variant value is assignable to every union that lists it.
 
-**Defaultable type**: A type with a valid zero value: a basic type, or a struct whose fields are all defaultable. Unions, capabilities, function types, tasks, resources and borrows are not defaultable.
+**Defaultable type**: A type with a valid zero value: a basic type, or a struct whose fields are all defaultable. Unions, capabilities, function types, tasks, resources and borrows are not defaultable. Outside its package, a struct with an unexported field is not defaultable either, so its only values there come from the package's exported functions.
 
 **Definite initialisation** (designed): The rule that a variable of a non-defaultable type has a value before it is used.
 
@@ -83,9 +85,9 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Totality**: The property of a type switch, a `catch` or a machine step that covers every alternative. A total form needs no default for its declared alternatives.
 
-**Block**: A braced statement list. As the body of `with`, `timeout.After` or a trailing block, it yields its last expression, and `return` cannot leave it.
+**Block**: A braced statement list. As the body of `with`, `timeout.After` or a trailing block, it yields its last expression, and `return`, `break` and `continue` are errors inside it.
 
-**Trailing block** (designed; the prototype has it only for `with` and, by name, `timeout.After`): A block written after a call's parentheses. It is notation for a function-literal final argument and adds no checking of its own. It cannot escape the call unless the parameter type says so. The block of `with` is part of that construct instead.
+**Trailing block** (designed; the prototype has it only for `with` and, by name, `timeout.After`): A block written after a call's parentheses. It is notation for a function-literal final argument whose body contains no `return`, `break` or `continue`; an early return needs an explicit `func` literal. It cannot escape the call unless the parameter type says so. The block of `with` is part of that construct instead.
 
 **Non-escaping parameter** (designed): A function-typed parameter that the callee may call, or hand to a task the call consumes, but may not store, return or send.
 
@@ -103,9 +105,9 @@ A status in parentheses applies to the term's support: *implemented in prototype
 
 **Move** (designed): A transfer of a resource's ownership: by `return`, into a provider field, into a `go` task outside a structured lend, by building a struct or container that holds it, or by assignment. A channel send of a resource is an error in v0. The source cannot be used after a move.
 
-**Lend** (designed): Passing a resource as an argument, capturing it in a non-escaping closure, or indexing it out of a container. The owner keeps ownership; the borrower may not store, return, send or capture it, so a lend needs no lifetime annotation.
+**Lend** (designed): Passing a resource as an argument, capturing it in a non-escaping closure, or indexing it out of a container. The owner keeps ownership; the borrower may not store, return, send or capture it, except by a structured lend to a task it releases before it returns, so a lend needs no lifetime annotation.
 
-**Structured lend** (designed): A lend of a resource to a task, or to an escaping closure an owner keeps, that is allowed because the task or owner is certain to be released before the resource: it is bound after the resource in the same scope, or stored in a later field of the same struct. See [resources](docs/spec/resources.md#structured-lend).
+**Structured lend** (designed): A lend of a resource to a task, or to an escaping closure an owner keeps, that is allowed because the task or owner is certain to be released before the borrow of the resource ends. For a resource the scope owns, the task is bound after the resource in the same scope, or stored in a later field of the same struct. For a resource lent to a function, any task owned by a scope local to that function qualifies, and moving or returning that task out of the function is an error. See [resources](docs/spec/resources.md#structured-lend).
 
 **Consume** (designed): Ending a resource early by calling `Close()`, or a task's `Wait()` or `Stop()`. Nothing runs for it at scope end, and a later use is an error.
 
@@ -255,7 +257,7 @@ These terms describe the `.ef` language that `internal/compiler` and `runtime/ef
 
 **Visibility** (admitted, not implemented): Whether another module may name a declaration. Declarations are private by default and exported with `pub`; the case of a name carries no meaning. Superseded 2026-10-27 by exported names (owner: "Yeah, let's go with your [recommendations]").
 
-**Construction authority** (admitted, not implemented): The right to construct values of a nominal type. A `pub readonly` type lets other modules read and match its values while only its owner module constructs them. In the Go-shaped language, an unexported field gives the same authority: only the owner package can build the value.
+**Construction authority** (admitted, not implemented): The right to construct values of a nominal type. A `pub readonly` type lets other modules read and match its values while only its owner module constructs them. In the Go-shaped language, an unexported field gives the same authority (designed): outside the owner package, the struct has no literal and no implicit zero value (`Quantity{}`, `var q Quantity`, `make([]Quantity, n)`, a zero-filled field, a missed map lookup), so only the owner package can build the value. See [types](docs/spec/types.md#zero-values-and-definite-initialisation).
 
 **JSX pragma** (admitted, not implemented): A user-defined selection of the factory, fragment and result types to which JSX notation desugars.
 

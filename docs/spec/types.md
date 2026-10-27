@@ -2,7 +2,7 @@
 
 Definitions of every term used here are in the [glossary](../../GLOSSARY.md). Each section carries its status.
 
-Types are nominal. Two named types are identical only when they are the same declaration. Assignability is identity, plus the variant-to-union rule in [Unions](#unions). *Prior art:* Go's named types; Gleam and ReScript custom types are nominal too.
+Types are nominal. Two named types are identical only when they are the same declaration. A value of type `T` is assignable to type `U` when `T` and `U` are identical, when `U` is a union that lists `T` ([Unions](#unions)), or when `U` is an interface type that `T` implements ([Interface assignability](#interface-assignability)). *Prior art:* Go's named types and implicit interface satisfaction; Gleam and ReScript custom types are nominal too.
 
 ## Basic types
 
@@ -18,11 +18,16 @@ Status: **implemented in prototype** for `string`, `int64` and `bool`; **partly 
 
 Status: **implemented in prototype** for struct literals; **designed** for the rest.
 
-1. A type is *defaultable* when it has a valid zero value: a basic type, or a struct whose fields are all defaultable. A union, a capability, a function type, a `Task`, a resource, a borrow, and a struct that contains any of them are not defaultable.
+1. A type is *defaultable* when it has a valid zero value: a basic type, or a struct whose fields are all defaultable. A union, a capability, a function type, a `Task`, a resource, a borrow, and a struct that contains any of them are not defaultable. Outside its package, a struct type with an unexported field is not defaultable either (rule 6).
 2. A keyed struct literal must set every field whose type is not defaultable (S108). A positional literal sets every field.
 3. Designed: a variable of a non-defaultable type must be initialised before use. `var p Payment` with no value is an error. *Prior art:* Swift and Kotlin definite initialisation; Go instead gives every type a zero value, which is how a nil interface reaches a type switch.
 4. Designed: operations that invent zero values need a defaultable element type: `make([]T, n)`, the comma-ok forms and a receive from a closed channel. For other element types the library offers `make([]T, 0, n)` with `append`, `m.Lookup(k)` returning `Option[V]`, and `ch.Receive()` returning `Option[T]`.
 5. There is no `nil`. *Prior art:* Gleam, ReScript and Rust have no null; Go's typed-nil interface and nil map are its most cited traps.
+6. **Construction authority (designed).** Outside the package that declares it, a struct type with an unexported field ([grammar.md](grammar.md#visibility)) is neither defaultable nor literal-constructible. Each of these is an error outside the package:
+   - a composite literal of the type, including the empty literal `Quantity{}`;
+   - an implicit zero value: `var q Quantity` with no value, `make([]Quantity, n)` with `n > 0`, a zero-filled field of type `Quantity` in an enclosing struct's literal or zero value, and the zero value of a map lookup that misses (use `m.Lookup(k)`, which returns `Option`).
+
+   Inside the declaring package all of these are allowed. Values from outside come only from the functions the package exports, so `ParseQuantity` is the only way to build a `Quantity` and its check cannot be bypassed. Exports stay by capitalisation. *Prior art:* Rust forbids constructing a struct with private fields outside its module and gives it no `Default` unless the module derives or implements one; Gleam's `opaque` types hide constructors; Go leaves this hole open: a two-package probe builds `Quantity{}` and `make([]Quantity, 1)` from another package and reads `units=0` for both (review round 2 receipt).
 
 ## Structs
 
@@ -94,6 +99,29 @@ Status: **partly implemented in prototype**: value-receiver methods are declared
 3. Prototype: a method may not carry a `uses` clause and may not call a capability (S109); a provider method calls functions with an empty `uses` row.
 4. Designed: a pointer receiver `*T` means the method mutates its receiver ([Borrows](#borrows)).
 5. Prototype: an error type may not declare `Error`, because the emitter generates it (fixture `error-method`, S109). Designed: the same rule. An error type's text comes from its fields.
+
+## Interface assignability
+
+Status: **designed, not yet implemented**. The prototype reports S108 for assigning a struct value to an interface type, a prototype limit (README Gap 29).
+
+```go
+type Store interface{ Get() string }
+type Mem struct{}
+
+func (Mem) Get() string { return "ok" }
+func NewStore() Store { return Mem{} } // Mem implements Store
+```
+
+1. A value of type `T` is assignable to an interface type `I` when `T`'s method set has every method of `I`, and for each such method:
+   - the parameter types and the result type are identical to `I`'s;
+   - the method is fallible exactly when `I`'s method is;
+   - its error row is a subset of `I`'s method's error row;
+   - its `uses` row is a subset of `I`'s method's `uses` row.
+
+   This is method-row compatibility: an implementation may fail less and require less, never more. It is the same check `wire` applies to a provider (S106; [rows.md](rows.md#wire)).
+2. A union type is not an interface in this sense; it is assignable only by the variant rule.
+3. Resources keep their rules: assigning a resource to an interface without `Close` is an error (R22), and assigning it to one with `Close` moves it (R23) ([resources.md](resources.md#conversions)).
+4. *Prior art:* Go satisfies interfaces implicitly by method set with identical signatures; Effect requires a service implementation's error and requirement types to fit the tag's; Java and Swift let an overriding method throw fewer checked errors, never more.
 
 ## Error types
 
