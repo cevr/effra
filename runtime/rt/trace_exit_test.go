@@ -18,6 +18,122 @@ func callExits(recs []rttrace.Record, call uint64) []rttrace.Record {
 	return out
 }
 
+// Every unwind boundary closes the calls it unwinds, with the outcome the
+// recovery gives the panic: body or release, crossed with defect or
+// interruption (round-2 M2, the reviewer's unwind probe). The exit keeps its
+// classification.
+func TestTraceUnwindClosesCalls(t *testing.T) {
+	for _, mode := range []string{"body-defect", "body-interrupted", "release-defect", "release-interrupted"} {
+		t.Run(mode, func(t *testing.T) {
+			defect := mode == "body-defect" || mode == "release-defect"
+			inRelease := mode == "release-defect" || mode == "release-interrupted"
+			rec := rttrace.New(32)
+			root := rt.TracedRoot("app.main", rec)
+			var call uint64
+			body := func(t0 *rt.Task) (struct{}, error) {
+				call = t0.TraceCall("app.Cap.Op", "app.sketch:4:1")
+				if defect {
+					panic("provider defect")
+				}
+				t0.Interrupt()
+				if inRelease {
+					panic(rt.Interrupted) // a release is masked: Check does not fire
+				}
+				t0.Check()
+				return struct{}{}, nil
+			}
+			_, err := rt.Run(root, func(t0 *rt.Task) (struct{}, error) {
+				if !inRelease {
+					return body(t0)
+				}
+				return rt.Scoped(t0, func(s *rt.Scope) (struct{}, error) {
+					s.Defer(func() { _, _ = body(t0) })
+					return struct{}{}, nil
+				})
+			})
+			recs := records(t, rec)
+			exits := callExits(recs, call)
+			if len(exits) != 1 {
+				t.Fatalf("%d call-exits of call %d; want 1: %+v", len(exits), call, recs)
+			}
+			ce := exits[0]
+			if defect && (ce.Defect == nil || ce.Cause != nil) {
+				t.Fatalf("call-exit %+v; want the defect", ce)
+			}
+			if !defect && (ce.Cause != rt.Interrupted || ce.Defect != nil) {
+				t.Fatalf("call-exit %+v; want interrupted", ce)
+			}
+			if defect {
+				if p, _ := find(recs, rt.TracePanic, root.ID()); p.Link != ce.ID || p.InRelease != inRelease {
+					t.Fatalf("panic %+v; want a link to call-exit %d, inRelease %v", p, ce.ID, inRelease)
+				}
+			}
+			c, isCause := err.(*rt.Cause)
+			switch {
+			case defect && (!isCause || len(c.Reasons) != 1 || c.Reasons[0].Kind != rt.KindDefect || c.Reasons[0].InRelease != inRelease):
+				t.Fatalf("exit %v; want one defect, inRelease %v", err, inRelease)
+			case !defect && err != rt.Interrupted:
+				t.Fatalf("exit %v; want interrupted", err)
+			}
+		})
+	}
+}
+
+// A release closes only the calls it opened: a defect in a release that runs
+// inside an outer capability call leaves the outer call to its own exit.
+func TestTraceReleaseUnwindKeepsOuterCall(t *testing.T) {
+	rec := rttrace.New(32)
+	root := rt.TracedRoot("app.main", rec)
+	var outer, inner uint64
+	_, _ = rt.Run(root, func(t0 *rt.Task) (struct{}, error) {
+		outer = t0.TraceCall("app.Outer.Op", "app.sketch:2:1")
+		_, err := rt.Scoped(t0, func(s *rt.Scope) (struct{}, error) {
+			s.Defer(func() {
+				inner = t0.TraceCall("app.Cap.Close", "app.sketch:3:1")
+				panic("cleanup defect")
+			})
+			return struct{}{}, nil
+		})
+		t0.TraceCallExit(outer, "app.Outer.Op", "app.sketch:2:1", err)
+		return struct{}{}, err
+	})
+	recs := records(t, rec)
+	if ex := callExits(recs, inner); len(ex) != 1 || ex[0].Defect == nil {
+		t.Fatalf("inner call-exits %+v; want one with the defect", ex)
+	}
+	ex := callExits(recs, outer)
+	if len(ex) != 1 || ex[0].Defect != nil {
+		t.Fatalf("outer call-exits %+v; want one, from the call's own exit", ex)
+	}
+	if _, ok := ex[0].Cause.(*rt.Cause); !ok {
+		t.Fatalf("outer call-exit cause %v; want the scope's defect exit", ex[0].Cause)
+	}
+}
+
+// A scope nested in a capability call recovers a defect of its body without
+// closing the call that holds it.
+func TestTraceScopeUnwindKeepsOuterCall(t *testing.T) {
+	rec := rttrace.New(32)
+	root := rt.TracedRoot("app.main", rec)
+	var outer, inner uint64
+	_, _ = rt.Run(root, func(t0 *rt.Task) (struct{}, error) {
+		outer = t0.TraceCall("app.Outer.Op", "app.sketch:2:1")
+		_, err := rt.Scoped(t0, func(s *rt.Scope) (struct{}, error) {
+			inner = t0.TraceCall("app.Cap.Op", "app.sketch:3:1")
+			panic("provider defect")
+		})
+		t0.TraceCallExit(outer, "app.Outer.Op", "app.sketch:2:1", err)
+		return struct{}{}, err
+	})
+	recs := records(t, rec)
+	if ex := callExits(recs, inner); len(ex) != 1 || ex[0].Defect == nil {
+		t.Fatalf("inner call-exits %+v; want one with the defect", ex)
+	}
+	if ex := callExits(recs, outer); len(ex) != 1 || ex[0].Defect != nil {
+		t.Fatalf("outer call-exits %+v; want one, from the call's own exit", ex)
+	}
+}
+
 // failedCall records an ok call, then a call that fails with missing, and
 // returns the failure and its call-exit.
 func failedCall(t0 *rt.Task, recs func() []rttrace.Record) (error, func() uint64) {

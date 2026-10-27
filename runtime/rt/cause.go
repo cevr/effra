@@ -66,7 +66,7 @@ func (c *Cause) AddFailure(err error) {
 }
 
 // AddDefect records a panic value raised in task t.
-func (c *Cause) AddDefect(t *Task, value any) { c.defect(t, value, false) }
+func (c *Cause) AddDefect(t *Task, value any) { c.defect(t, value, false, 0) }
 
 // AddInterruption records an interruption, once.
 func (c *Cause) AddInterruption() {
@@ -121,7 +121,15 @@ func (t transport) Error() string {
 // exit, or the Interrupted sentinel that Check panics with, carries an exit;
 // any other value is a defect. It never dereferences the payload, so a
 // recovery cannot itself panic and skip cleanup.
-func (c *Cause) recovered(t *Task, p any, inRelease bool) {
+//
+// On a traced tree it first closes the capability calls the panic unwound:
+// those opened since the recovering region began, when floor calls were open
+// (traceDepth; 0 at a task boundary).
+func (c *Cause) recovered(t *Task, p any, inRelease bool, floor int) {
+	var left uint64
+	if t.trace != nil {
+		left = t.traceUnwind(p, floor)
+	}
 	switch e := p.(type) {
 	case transport:
 		if e.err != nil {
@@ -134,17 +142,15 @@ func (c *Cause) recovered(t *Task, p any, inRelease bool) {
 			return
 		}
 	}
-	c.defect(t, p, inRelease)
+	c.defect(t, p, inRelease, left)
 }
 
-func (c *Cause) defect(t *Task, p any, inRelease bool) {
+// defect records p as a defect of t. left is the call-exit of the innermost
+// capability call the panic unwound, 0 for none.
+func (c *Cause) defect(t *Task, p any, inRelease bool, left uint64) {
 	chain := t.Chain()
 	c.Reasons = append(c.Reasons, Reason{Kind: KindDefect, Value: p, Chain: chain, InRelease: inRelease})
 	if t.trace != nil {
-		var left uint64
-		if !inRelease {
-			left = t.traceUnwind(p, 0)
-		}
 		t.traceDefect(p, inRelease, left, &chain[0])
 	}
 }

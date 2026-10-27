@@ -166,7 +166,10 @@ type taskLinks struct {
 	// the owner's observation.
 	exit    uint64
 	exitErr error
-	// calls are the capability calls open in the task, innermost last.
+	// calls are the capability calls open in the task, innermost last. A
+	// recovering region (a task boundary, a scope, a release, a timeout)
+	// notes how many were open when it began, and an unwind it recovers
+	// closes only the calls opened above that floor.
 	calls []openCall
 }
 
@@ -251,6 +254,14 @@ func (h *tracer) closeCall(id, call uint64) bool {
 		}
 	}
 	return false
+}
+
+// depth returns how many calls are open in task id.
+func (h *tracer) depth(id uint64) int {
+	h.mu.Lock()
+	n := len(h.tasks[id].calls)
+	h.mu.Unlock()
+	return n
 }
 
 // unwound removes and returns the open calls of task id above floor, the
@@ -442,6 +453,12 @@ func (t *Task) traceTask(k EventKind, cause error) {
 		t.trace.setCancel(t.id, id)
 	}
 }
+
+// traceDepth returns how many capability calls are open in t: the floor of a
+// recovering region that begins now.
+//
+//go:noinline
+func (t *Task) traceDepth() int { return t.trace.depth(t.id) }
 
 // traceExit raises the body-exit event of t with the origin of each reason
 // of its exit, and keeps the exit for the owner's observation.

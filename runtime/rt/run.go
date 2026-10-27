@@ -8,7 +8,7 @@ package rt
 // the release mask closes.
 func (t *Task) settle(c *Cause, p any) {
 	if p != nil {
-		c.recovered(t, p, false)
+		c.recovered(t, p, false, 0)
 	}
 	if t.Stopped() {
 		c.AddInterruption()

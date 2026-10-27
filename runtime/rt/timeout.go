@@ -36,10 +36,14 @@ func AfterSpan[T any](t *Task, s Scheduler, d time.Duration, span string, body f
 		timer  Timer
 		h      *Handle[T]
 		joined bool // the child's exit is in c
+		floor  int  // the calls open in t when After began, on a traced tree
 	)
+	if t.trace != nil {
+		floor = t.traceDepth()
+	}
 	defer func() {
 		if p := recover(); p != nil {
-			c.recovered(t, p, false)
+			c.recovered(t, p, false, floor)
 		}
 		m := t.Mask()
 		if h != nil && !joined {
@@ -97,9 +101,13 @@ func AfterSpan[T any](t *Task, s Scheduler, d time.Duration, span string, body f
 // stopTimer disarms a timer as a release: a panic in the provider's Stop is a
 // release defect.
 func stopTimer(t *Task, timer Timer, c *Cause) {
+	floor := 0 // the calls open when the stop began, on a traced tree
+	if t.trace != nil {
+		floor = t.traceDepth()
+	}
 	defer func() {
 		if p := recover(); p != nil {
-			c.recovered(t, p, true)
+			c.recovered(t, p, true, floor)
 		}
 	}()
 	timer.Stop()

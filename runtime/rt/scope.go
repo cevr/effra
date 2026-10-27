@@ -29,10 +29,19 @@ type Scope struct {
 	n      int
 	inline [inlineEntries]entry
 	more   []entry
+	// depth is how many capability calls were open in task when the scope
+	// began, on a traced tree: an unwind End recovers closes only the calls
+	// opened inside the scope.
+	depth int
 }
 
 // NewScope returns an empty scope owned by task t.
-func NewScope(t *Task) Scope { return Scope{task: t} }
+func NewScope(t *Task) Scope {
+	if t.trace != nil {
+		return Scope{task: t, depth: t.traceDepth()}
+	}
+	return Scope{task: t}
+}
 
 // Task is the task that owns s.
 func (s *Scope) Task() *Task { return s.task }
@@ -108,7 +117,7 @@ func (s *Scope) End(err *error) {
 		c.Add(*err)
 	}
 	if p != nil {
-		c.recovered(s.task, p, false)
+		c.recovered(s.task, p, false, s.depth)
 	}
 	s.release(&c)
 	s.task.settle(&c, nil)
@@ -129,9 +138,13 @@ func (s *Scope) release(c *Cause) {
 }
 
 func (s *Scope) runRelease(e entry, c *Cause) {
+	floor := 0 // the calls open when the release began, on a traced tree
+	if s.task.trace != nil {
+		floor = s.task.traceDepth()
+	}
 	defer func() {
 		if p := recover(); p != nil {
-			c.recovered(s.task, p, true)
+			c.recovered(s.task, p, true, floor)
 		}
 		if s.task.trace != nil {
 			s.task.traceTask(TraceRelease, nil)
